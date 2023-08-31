@@ -5,8 +5,11 @@ import torch
 from tqdm import tqdm
 from loguru import logger
 
+from src.inference.ensemble_main import ensemble_the_repeats
 from src.eval import evaluate_datasets_per_epoch
-from src.log_ML.logging_main import log_epoch_results, log_n_epochs_results
+from src.log_ML.log_ensemble import log_ensemble_results
+from src.log_ML.logging_main import log_epoch_results, log_n_epochs_results, \
+    log_crossvalidation_results, log_averaged_repeats
 from src.log_ML.model_saving import save_models_if_improved
 from src.utils.model_utils import import_segmentation_model
 from src.utils.train_utils import init_epoch_dict, collect_epoch_results, set_model_training_params, \
@@ -22,16 +25,22 @@ def training_script(experim_dataloaders: dict,
 
     # Cross-validation loop (if used), i.e. when train/val splits change for each execution
     os.makedirs(output_dir, exist_ok=True)
-    fold_results = {}
+    fold_results, ensembled_results = {}, {}
     for f, fold_name in enumerate(list(experim_dataloaders.keys())):
         logger.info('Training fold #{}/{}: {}'.format(f+1, len(experim_dataloaders.keys()), fold_name))
-        fold_results[fold_name] = \
+        fold_results[fold_name], ensembled_results[fold_name] = \
             train_model_for_single_fold(fold_dataloaders=experim_dataloaders[fold_name],
                                         config=config,
                                         training_config=training_config,
                                         model_config=model_config,
                                         machine_config=machine_config,
-                                        output_dir=os.path.join(output_dir, fold_name))
+                                        output_dir=os.path.join(output_dir, fold_name),
+                                        fold_name=fold_name)
+
+    log_crossvalidation_results(fold_results=fold_results,
+                                ensembled_results=ensembled_results,
+                                config=config,
+                                output_dir=output_dir)
 
     return fold_results
 
@@ -41,9 +50,10 @@ def train_model_for_single_fold(fold_dataloaders: dict,
                                 training_config: dict,
                                 model_config: dict,
                                 machine_config: dict,
-                                output_dir: str) -> dict:
+                                output_dir: str,
+                                fold_name: str) -> dict:
 
-    # Repeat n times the same data fold (i.e. you get n submodels for an ensemble)
+    # Repeat n times the same data fold (i.e. you get n submodels for an inference)
     os.makedirs(output_dir, exist_ok=True)
     repeat_results = {}
     for repeat_idx in range(training_config['NO_REPEATS']):
@@ -57,9 +67,22 @@ def train_model_for_single_fold(fold_dataloaders: dict,
                                machine_config=machine_config,
                                repeat_idx=repeat_idx,
                                device=machine_config['IN_USE']['device'],
-                               output_dir=os.path.join(output_dir, repeat_name))
+                               output_dir=os.path.join(output_dir, repeat_name),
+                               fold_name=fold_name)
 
-    return repeat_results
+    # Log repeat averages
+    log_averaged_repeats(repeat_results)
+
+    # Ensemble the repeats (submodels)
+    ensemble_results = ensemble_the_repeats(repeat_results=repeat_results,
+                                            dataloaders=fold_dataloaders,
+                                            config=config,
+                                            device=machine_config['IN_USE']['device'])
+
+    # Log inference
+    ensembled_results = log_ensemble_results(ensemble_results)
+
+    return repeat_results, ensembled_results
 
 
 def train_single_model(dataloaders: dict,
@@ -68,6 +91,7 @@ def train_single_model(dataloaders: dict,
                        model_config: dict,
                        machine_config: dict,
                        repeat_idx: int,
+                       fold_name: str,
                        device,
                        output_dir: str) -> dict:
 
@@ -89,7 +113,8 @@ def train_single_model(dataloaders: dict,
         train_n_epochs_script(model, dataloaders,
                               device, scaler,
                               loss_function, optimizer, lr_scheduler,
-                              training_config, config, output_dir=output_dir)
+                              training_config, config, output_dir=output_dir,
+                              repeat_idx=repeat_idx, fold_name=fold_name)
 
     # When training is done, you con for example log the repeat/experiment/n_epochs level results
     log_n_epochs_results(train_results, eval_results, best_dict, output_artifacts, config)
@@ -108,28 +133,30 @@ def train_n_epochs_script(model, dataloaders,
                           device, scaler,
                           loss_function, optimizer, lr_scheduler,
                           training_config: dict, config: dict,
-                          start_epoch: int = 0, output_dir: str = None):
+                          start_epoch: int = 0, output_dir: str = None,
+                          repeat_idx: int = None, fold_name: str = None):
 
     # FIXME: get this from config
     metric_dict = {'roi_size': (64, 64, 8), 'sw_batch_size': 4, 'predictor': model, 'overlap': 0.6}
 
     train_results = {}
     eval_results = {}
+    output_artifacts = {'output_dir': output_dir}
     best_dicts = None
-    tb_log_dir = os.path.join(output_dir, 'tensorboard')
-    os.makedirs(tb_log_dir, exist_ok=True)
 
     # https://github.com/Project-MONAI/tutorials/blob/2183d45f48c53924b291a16d72f8f0e0b29179f2/acceleration/distributed_training/brats_training_ddp.py#L285
     print(' ')
-    for epoch in tqdm(range(start_epoch, training_config['NUM_EPOCHS']), desc = 'Training the network'):
+    for epoch in tqdm(range(start_epoch, training_config['NUM_EPOCHS']),
+                      desc='Training the network, {}, repeat {}, epoch#'.format(fold_name, repeat_idx+1),
+                      position=0):
 
         eval_epoch_results = {}
 
         # Train
         train_epoch_results, eval_epoch_results['TRAIN'] = \
             train_1_epoch(model, device, epoch, loss_function, optimizer, lr_scheduler, scaler, training_config,
-                          train_loader = dataloaders['TRAIN'], metric_dict = metric_dict,
-                          dataset_dummy_key = 'MINIVESS')
+                          train_loader=dataloaders['TRAIN'], metric_dict=metric_dict,
+                          dataset_dummy_key='MINIVESS')
 
         # Validate (as in decide whether the model improved or not)
         split_name = 'VAL'
@@ -146,23 +173,18 @@ def train_n_epochs_script(model, dataloaders,
                                                             train_results, eval_results, epoch)
 
         # Log epoch-level result
-        log_epoch_results(train_epoch_results, eval_epoch_results, epoch, config, tb_log_dir)
+        output_artifacts = log_epoch_results(train_epoch_results, eval_epoch_results,
+                                             epoch, config, output_dir, output_artifacts)
 
         # Save model(s) if model has improved
-        model_dir = os.path.join(output_dir, 'models')
+        output_artifacts['model_dir'] = os.path.join(output_dir, 'models')
         best_dicts = save_models_if_improved(best_dicts, epoch,
                                              model, optimizer, lr_scheduler,
                                              train_epoch_results, train_results,
                                              eval_epoch_results, eval_results,
                                              validation_config=config['config']['VALIDATION'],
-                                             config=config, model_dir=model_dir)
-
-
-
-    output_artifacts = {
-                        'model_dir': model_dir,
-                        'tb_log_dir': tb_log_dir
-                       }
+                                             config=config,
+                                             model_dir=output_artifacts['model_dir'])
 
     return train_results, eval_results, best_dicts, output_artifacts
 
@@ -178,6 +200,7 @@ def train_1_epoch(model, device, epoch, loss_function, optimizer, lr_scheduler, 
     batch_szs = []
 
     epoch_start = time.time()
+    # tqdm(x, position=1, leave=False)  # this would be an inner loop inside the outer loop of epoch tqdm
     for batch_idx, batch_data in enumerate(train_loader):
         optimizer.zero_grad()
         loss = train_1_batch(model, device, batch_data, loss_function,
@@ -197,7 +220,7 @@ def train_1_epoch(model, device, epoch, loss_function, optimizer, lr_scheduler, 
     epoch_trn_res[dataset_dummy_key]['arrays']['batch_loss'] = np.array(batch_losses)
 
     # You could dump metadata here about the actual training process (that is not autocaptured bu WandB for example)
-    epoch_trn_res[dataset_dummy_key]['metadata_scalars']['lr'] = lr_scheduler.get_last_lr()
+    epoch_trn_res[dataset_dummy_key]['metadata_scalars']['lr'] = lr_scheduler.get_last_lr()[0]
     epoch_trn_res[dataset_dummy_key] = get_timings_per_epoch(metadata_dict=epoch_trn_res[dataset_dummy_key],
                                                              epoch_start=epoch_start,
                                                              no_batches=batch_idx+1,
