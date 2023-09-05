@@ -5,7 +5,7 @@ from platform import python_version, release, system, processor
 import re
 from loguru import logger
 
-from monai.config import print_config, print_system_info, print_gpu_info
+from monai.config import get_config_values, get_optional_config_values, get_system_info, get_gpu_info
 import numpy as np
 import psutil
 import torch
@@ -16,11 +16,32 @@ def get_run_metadata():
     metadata = get_library_versions()
     sysinfo = get_system_information()
     metadata = {**metadata, **sysinfo}
+    ids = get_commit_id()
+    metadata = {**metadata, **ids}
 
     return metadata
 
 
-def get_library_versions():
+def get_commit_id() -> dict:
+
+    def get_git_revision_hash() -> str:
+        return subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode('ascii').strip()
+
+    def get_git_revision_short_hash() -> str:
+        return subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
+
+    # Get the current git commit id
+    try:
+        git_hash_short = get_git_revision_short_hash()
+        git_hash = get_git_revision_hash()
+    except Exception as e:
+        warnings.warn('Failed to get the git hash, e = {}'.format(e))
+        git_hash_short, git_hash = np.nan, np.nan
+
+    return {'git_hash_short': git_hash_short, 'git_hash': git_hash}
+
+
+def get_library_versions() -> dict:
 
     metadata = {}
     try:
@@ -34,11 +55,7 @@ def get_library_versions():
         warnings.warn('Problem getting library versions, error = {}'.format(e))
 
     try:
-        logger.info('MONAI | config printouts:')
-        time.sleep(0.05)
-        print_config()
-        print_system_info()
-        print_gpu_info()
+        metadata['monai'] = get_monai_config()
     except Exception as e:
         warnings.warn('Problem with the MONAI printouts, error = {}'.format(e))
 
@@ -51,7 +68,35 @@ def get_library_versions():
     return metadata
 
 
-def get_system_information():
+def get_monai_config():
+
+    monai_dict = {}
+
+    monai_dict['MONAI_libs'] = get_optional_config_values()
+    monai_dict['libs'] = get_config_values()
+    monai_dict['system'] = get_system_info()
+    monai_dict['GPU'] = get_gpu_info()
+
+    logger.info('MONAI | LIBRARY VERSIONS:')
+    for k, v in monai_dict['libs'].items():
+        logger.info('  {}: {}'.format(k, v))
+
+    logger.info('MONAI | OPTIONAL LIBRARY VERSIONS:')
+    for k, v in monai_dict['MONAI_libs'].items():
+        logger.info('  {}: {}'.format(k, v))
+
+    logger.info('MONAI | SYSTEM:')
+    for k, v in monai_dict['system'].items():
+        logger.info('  {}: {}'.format(k, v))
+
+    logger.info('MONAI | GPU:')
+    for k, v in monai_dict['GPU'].items():
+        logger.info('  {}: {}'.format(k, v))
+
+    return monai_dict
+
+
+def get_system_information() -> dict:
 
     metadata = {}
     try:
