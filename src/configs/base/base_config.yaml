@@ -3,7 +3,7 @@
 defaults:
   - _self_
   # you must specify the base config you want to run
-  - config: ??? # check later Hydra part
+  - config: ??? # check later Hydra/OmegaConf part
 
 VERSION: 0.01alpha
 NAME: 'base_config'
@@ -38,6 +38,9 @@ config:
           # and reshuffle train/val?
           TXT_FILE:
             PLACEHOLDER: 0
+        # With no commit, we will just commit the downloaded dataset. Note! thet EBRAINS allow versioning too
+        # and we are not tracking that here (as in having dvc commit change when versioning changes
+        DVC_COMMIT: null
         # Dataset object, see e.g. "2. Cache intermediate outcomes into persistent storage"
         # https://github.com/Project-MONAI/tutorials/blob/main/acceleration/fast_model_training_guide.md
         DATASET:
@@ -129,8 +132,8 @@ config:
   # ----------------------------------------------------------------------------------- #
   TRAINING:
     AMP: True
-    NO_REPEATS: 5
-    NUM_EPOCHS: 10
+    NO_REPEATS: 2
+    NUM_EPOCHS: 2
     LR: 0.0001 # 1e-4 FIXME! Parse scientifc notations from .yaml correctly
     LOSS:
       NAME: 'DiceFocalLoss'
@@ -152,19 +155,46 @@ config:
     # and if you have Minivess and DatasetB on your VAL split, you would be saving and tracking 3 x 2 "best models"
     METRICS_TO_TRACK:
       - 'dice'
-      - 'dice_batch'
+      #- 'dice_batch'
     # maybe there is a better way, but when saving the models, we need to know if larger or smaller value
     # is considered better, so as many entries as above, DICE score better when higher, distances then would be
     # better as smaller, as would a loss be
     METRICS_TO_TRACK_OPERATORS:
       - 'max'
-      - 'max'
+      #- 'max'
     # Do not track change for these n epochs at all if your first epochs have noisy metrics
     NO_WARMUP_EPOCHS: 0
     # You could smooth the metric curve if again you get noisy / spurious metrics, and get those
-    # best metrics in practive only from the end of the training when optimization has converged
+    # best metrics in practice only from the end of the training when optimization has converged
     EMA_SMOOTH: False
     SAVE_FULL_MODEL: True
+
+  # ----------------------------------------------------------------------------------- #
+  # VALIDATION_BEST
+  # ----------------------------------------------------------------------------------- #
+  # If you want to compute some heavier metrics like Hausdorff, for each repeat, otherwise
+  # you just get the basic metrics like Dice logged. Most of the time you probably don't care for this
+  # and you can save some time by not computing this again. But if you want to compare like Hausdorff
+  # between the ensemble and the best repeat, enable this then
+  VALIDATION_BEST:
+    enable: False
+    # The "VALIDATION" above is done after each epoch, or after n epochs. This can get a bit
+    # expensive to done often if you for example want to compute Hausdorff distance.
+    # This "VALIDATION_BEST" controls the inference done for best model after each repeat,
+    # for ensemble of models, etc.
+    METRICS:
+      - 'dice'
+      - 'hausdorff'
+    METRICS_OPERATORS:
+      # which is better, higher (max) or lower (min) value for this metric (see above)
+      - 'max'
+      - 'min'
+
+  # ----------------------------------------------------------------------------------- #
+  # ENSEMBLE
+  # ----------------------------------------------------------------------------------- #
+  ENSEMBLE:
+    enable: True
 
   # ----------------------------------------------------------------------------------- #
   # DATASETS
@@ -205,3 +235,28 @@ config:
   SCHEDULERS:
     CosineAnnealingLR:
       PLACEHOLDER: 1
+
+  # ----------------------------------------------------------------------------------- #
+  # LOGGING
+  # ----------------------------------------------------------------------------------- #
+  LOGGING:
+    unique_hyperparam_name_with_hash: True
+    # Define a "main metric" to reduce the clutter on your logging columns, as in the number that you
+    # mainly want to see
+    MAIN_METRIC:
+      # What metric determines the model saving to disk (you could e.g. track best loss and best metric)
+      # Giving you 2 "best models" per training repeat
+      tracked_metric: 'dice'
+      # Metric that you think is the most informative ranking the runs
+      metric: 'dice'
+      # The evaluation performance on which dataset you are interested in the most
+      dataset: 'MINIVESS'
+    TENSORBOARD:
+      placeholder: 1
+    MLFLOW:
+      server_URI: 'https://dagshub.com/petteriTeikari/minivess_mlops.mlflow'
+      TRACKING:
+        enable: True
+    WANDB:
+      enable: True
+      s3: null

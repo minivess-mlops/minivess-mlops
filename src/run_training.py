@@ -1,6 +1,10 @@
 import argparse
 import os
+
 import sys
+src_path = os.path.dirname(os.path.abspath(__file__))
+project_path = os.path.split(src_path)[0]
+sys.path.insert(0, project_path) # so that src. is imported correctly also in VSCode by default
 
 from src.train import training_script
 from src.utils.config_utils import import_config, set_up_environment
@@ -15,16 +19,19 @@ warnings.filterwarnings('ignore', category=UserWarning, message='TypedStorage is
 # will be the only storage class. This should only matter to you if you are using storages directly.
 # To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
 
+# TOEXPLORE! MLflow uses pydantic and it throws: Field "model_server_url" has conflict with protected namespace "model_".
+#  Field "model_server_url" has conflict with protected namespace "model_".
+
 # Control logger level here, make it nicer later
 # https://github.com/Delgan/loguru/issues/138#issuecomment-1491571574
 from loguru import logger
-LOG_MIN_LEVEL = "INFO"
+LOG_MIN_LEVEL = "DEBUG"
 
 def my_filter(record):
     return record["level"].no >= logger.level(LOG_MIN_LEVEL).no
 logger.remove()
 logger.add(sys.stderr, filter=my_filter)
-LOG_MIN_LEVEL = "DEBUG"
+# LOG_MIN_LEVEL = "DEBUG"
 
 
 def parse_args_to_dict():
@@ -57,7 +64,7 @@ def parse_args_to_dict():
 if __name__ == '__main__':
 
     # TOADD! Actual hyperparameter config that defines the experiment to run
-    hyperparam_runs = {'hparam_tag'}
+    hyperparam_runs = {'hyperparam_example_name'}
     hparam_run_results = {}
     for hyperparam_idx, hyperparam_name in enumerate(hyperparam_runs):
 
@@ -85,7 +92,7 @@ if __name__ == '__main__':
                             training_config=config['config']['TRAINING'],
                             model_config=config['config']['MODEL'],
                             machine_config=config['config']['MACHINE'],
-                            output_dir=config['run']['output_artifacts_dir'])
+                            output_dir=config['run']['output_experiment_dir'])
 
         logger.info('Done training the hyperparameter config "{}"'.format(hyperparam_name))
 

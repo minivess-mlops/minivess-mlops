@@ -5,3 +5,6 @@
 /minivess_output/*
 /src/runs/*
 /src/wandb/*
+/mlruns/*
+*.pdf
+/data

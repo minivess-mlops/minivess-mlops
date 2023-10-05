@@ -1,6 +1,8 @@
 import os
 from datetime import datetime
 import glob
+
+import omegaconf
 from loguru import logger
 import wandb
 
@@ -12,7 +14,7 @@ def log_wandb_repeat_results(fold_results: dict,
                              config: dict,
                              log_models_with_repeat: bool = False):
 
-    logger.info('Logging repeat-wise results to WANDB')
+    logger.info('Logging repeat-wise results to WANDB (local_dir = {})'.format(output_dir))
     for f, fold_name in enumerate(fold_results):
         for r, repeat_name in enumerate(fold_results[fold_name]):
 
@@ -25,7 +27,7 @@ def log_wandb_repeat_results(fold_results: dict,
                                                group=config['run']['hyperparam_name'],
                                                job_type='repeat',
                                                param_conf=config['config'],
-                                               dir=os.path.join(output_dir),
+                                               dir=output_dir,
                                                tags=['tag1', 'tag2'])
             except Exception as e:
                 raise Exception('Problem with initializing Weights and Biases, e = {}'.format(e))
@@ -66,18 +68,29 @@ def wandb_init_wrapper(project: str = None,
                        notes: str = None,
                        tags = None) -> wandb.sdk.wandb_run.Run:
 
+    os.makedirs(dir, exist_ok=True)
+
+    # Remember that the config dictionary might be actually an OmegaConf object, and we need to
+    # convert it back to ordinary dictionary if you want to dump it as a parameter dictionary to WANDB
+    if isinstance(param_conf, omegaconf.dictconfig.DictConfig):
+        logger.info('Convert parameter dictionary from OmegaConf to Dict')
+        param_conf = dict(param_conf)
+
     # https://docs.wandb.ai/ref/python/init
     # logger.info('Initialize Weights and Biases logging, \n'
     #             'project = "{}"'.format(project))
-    wandb_run = wandb.init(project = project,
-                           job_type = job_type,
-                           group = group,
-                           name = name,
-                           dir = dir,
-                           notes = notes,
-                           tags = tags,
-                           config = param_conf,
-                           save_code=True)
+    try:
+        wandb_run = wandb.init(project = project,
+                               job_type = job_type,
+                               group = group,
+                               name = name,
+                               dir = dir,
+                               notes = notes,
+                               tags = tags,
+                               config = param_conf,
+                               save_code=True)
+    except Exception as e:
+        raise IOError('Problem initializing WANDB, e = {}'.format(e))
 
     return wandb_run
 
@@ -86,7 +99,7 @@ def log_ensemble_results(ensembled_results: dict,
                          output_dir: str,
                          config: dict):
 
-    logger.info('Logging emsemble-wise results to WANDB')
+    logger.info('Logging ensemble-wise results to WANDB')
     for f, fold_name in enumerate(ensembled_results):
 
         log_name = fold_name
