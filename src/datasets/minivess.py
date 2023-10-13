@@ -1,6 +1,8 @@
 import glob
 import os
 
+import dvc.api
+
 from monai.data import CacheDataset, Dataset
 from loguru import logger
 from tqdm import tqdm
@@ -8,7 +10,65 @@ import requests
 import zipfile
 import random
 
-from ml_tests.check_files import check_file_listing
+from ml_tests.dataset_tests import ml_test_dataset_for_allowed_types
+from ml_tests.file_tests import ml_test_filelisting_corruption
+from src.datasets.dvc_utils import get_dvc_files_of_repo
+
+
+def import_minivess_dataset(dataset_cfg: dict,
+                            data_dir: str,
+                            debug_mode: bool,
+                            config: dict,
+                            dataset_name: str,
+                            fetch_method: str,
+                            fetch_params: dict):
+
+    if fetch_method == 'DVC':
+        dataset_dir = fetch_dataset_with_dvc(fetch_params=fetch_params,
+                                             dataset_cfg=dataset_cfg,
+                                             dataset_name_lowercase=dataset_name.lower(),
+                                             repo_dir=config['run']['repo_dir'])
+
+    elif fetch_method == 'EBrains':
+        dataset_dir = import_filelisting_EBrains(dataset_cfg=dataset_cfg,
+                                                 data_dir=data_dir,
+                                                 fetch_params=fetch_params)
+
+    else:
+        raise NotImplementedError('Unknown dataset fetch method for Minivess = {}'.format(fetch_method))
+
+    filelisting, dataset_stats = get_minivess_filelisting(dataset_dir)
+    fold_split_file_dicts = define_minivess_splits(filelisting, data_splits_config=dataset_cfg['SPLITS'])
+
+    if debug_mode:
+        minivess_debug_splits(fold_split_file_dicts)
+
+    return filelisting, fold_split_file_dicts, dataset_stats
+
+
+def fetch_dataset_with_dvc(fetch_params: dict,
+                           dataset_cfg: dict,
+                           dataset_name_lowercase: str,
+                           repo_dir: str):
+
+    dataset_dir = get_dvc_files_of_repo(repo_dir=repo_dir,
+                                       dataset_name_lowercase=dataset_name_lowercase,
+                                       fetch_params=fetch_params,
+                                       dataset_cfg=dataset_cfg)
+
+    return dataset_dir
+
+
+def import_filelisting_EBrains(dataset_cfg: dict,
+                               data_dir: dict,
+                               fetch_params: dict):
+
+    logger.warning('Work on the EBrains method more if you want to use this,'
+                   'recommended to use DVC for now')
+    input_url = dataset_cfg['DATA_DOWNLOAD_URL']
+    dataset_dir = download_and_extract_minivess_dataset(input_url=input_url, data_dir=data_dir)
+
+    return dataset_dir
 
 
 def download_and_extract_minivess_dataset(input_url: str, data_dir: str,
@@ -118,7 +178,7 @@ def get_minivess_filelisting(dataset_dir: str,
 
     # Run test for data integrity, i.e. there are no corrupted files, and return the headers back too
     size_stats, info_of_files, problematic_files = \
-        check_file_listing(list_of_files=images, import_library='nibabel')
+        ml_test_filelisting_corruption(list_of_files=images, import_library='nibabel')
 
     filelisting = {'images': images,
                    'labels': labels,
@@ -133,13 +193,15 @@ def get_minivess_filelisting(dataset_dir: str,
     return filelisting, dataset_stats
 
 
-def define_minivess_splits(filelisting, data_splits_config: dict, include_metadata: bool = True):
+def define_minivess_splits(filelisting,
+                           data_splits_config: dict,
+                           include_metadata: bool = True):
 
     # Create data_dicts for MONAI, implement something else here if you don't want to use MONAI
     if include_metadata:
         logger.info('Include the metadata .json file to the input data dictionary for dataset creation')
         data_dicts = [
-            {'image': image_name, 'label': label_name, 'metadata': metadata_name}
+            {'image': image_name, 'label': label_name, 'metadata': {'filepath_json': metadata_name}}
             for image_name, label_name, metadata_name in zip(filelisting['images'], filelisting['labels'],
                                                              filelisting['metadata'])
         ]
@@ -193,26 +255,40 @@ def get_random_splits_for_minivess(data_dicts: list, data_split_cfg: dict):
     return files_dict
 
 
-def define_minivess_dataset(dataset_config: dict, split_file_dicts: dict, transforms: dict):
+def define_minivess_dataset(dataset_config: dict,
+                            split_file_dicts: dict,
+                            transforms: dict,
+                            debug_testing: bool):
 
-    datasets = {}
+    datasets, ml_test_dataset = {}, {}
     for i, split in enumerate(transforms.keys()):
-        datasets[split] = create_dataset_per_split(dataset_config=dataset_config,
-                                                   split=split,
-                                                   split_file_dict=split_file_dicts[split],
-                                                   transforms_per_split=transforms[split])
+        datasets[split], ml_test_dataset[split] = (
+            create_dataset_per_split(dataset_config=dataset_config,
+                                     split=split,
+                                     split_file_dict=split_file_dicts[split],
+                                     transforms_per_split=transforms[split],
+                                     debug_testing=debug_testing))
 
-    return datasets
+    return datasets, ml_test_dataset
 
 
-def create_dataset_per_split(dataset_config: dict, split: str, split_file_dict: dict, transforms_per_split: dict):
+def create_dataset_per_split(dataset_config: dict,
+                             split: str,
+                             split_file_dict: dict,
+                             transforms_per_split: dict,
+                             debug_testing: bool = False):
 
     n_files = len(split_file_dict)
     ds_config = dataset_config['DATASET']
     pytorch_dataset_type = ds_config['NAME']
 
-    if pytorch_dataset_type == 'MONAI_CACHEDATASET':
+    if debug_testing:
+        split_file_dict = debug_add_errors_to_dataset_dict(split_file_dict)
 
+    is_dataset_valid, samples_not_valid = (
+        ml_test_dataset_for_allowed_types(split_file_dict=split_file_dict))
+
+    if pytorch_dataset_type == 'MONAI_CACHEDATASET':
         ds = CacheDataset(data=split_file_dict,
                          transform=transforms_per_split,
                          cache_rate=ds_config[pytorch_dataset_type]['CACHE_RATE'],
@@ -229,4 +305,32 @@ def create_dataset_per_split(dataset_config: dict, split: str, split_file_dict: 
         raise NotImplementedError('Not implemented yet other dataset than Monai CacheDataset and Dataset, '
                                   'not = "{}"'.format(pytorch_dataset_type))
 
-    return ds
+    ml_test_dataset = {'is_dataset_valid': is_dataset_valid,
+                       'samples_not_valid': samples_not_valid}
+
+    return ds, ml_test_dataset
+
+
+def minivess_debug_splits(fold_split_file_dicts: dict):
+
+    logger.warning('DEBUG MODE ON! Taking subsets of the data to speed things up (e.g. on CPU debug/development)')
+    for fold in fold_split_file_dicts:
+        for split in fold_split_file_dicts[fold]:
+            if split == 'TEST':
+                fold_split_file_dicts[fold][split] = fold_split_file_dicts[fold][split][0:1]
+            if split == 'TRAIN':
+                fold_split_file_dicts[fold][split] = fold_split_file_dicts[fold][split][0:2]
+            if split == 'VAL':
+                fold_split_file_dicts[fold][split] = fold_split_file_dicts[fold][split][0:2]
+
+    return fold_split_file_dicts
+
+
+def debug_add_errors_to_dataset_dict(split_file_dict: dict):
+
+    logger.warning('WARNING You are intentionally adding errors to our dataset for testing the ML Tests pipeline')
+    # TypeError: default_collate: batch must contain tensors, numpy arrays, numbers, dicts or lists;
+    # found <class 'NoneType'>
+    split_file_dict[0]['metadata']['filepath_json'] = None
+
+    return split_file_dict

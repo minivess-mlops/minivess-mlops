@@ -22,11 +22,20 @@ config:
     DATA_SOURCE:
       # To think about here how to define multiple datasets,
       # TOADD, i.e. how to create multiple val, and test subdictionaries
-      DATASET_NAME:
+      DATASET_NAMES:
         - 'MINIVESS'
       MINIVESS:
-        DATA_INFO_URL: 'https://doi.org/10.25493/HPBE-YHK'
-        DATA_DOWNLOAD_URL: 'https://data.kg.ebrains.eu/zip?container=https://data-proxy.ebrains.eu/api/v1/buckets/d-bf268b89-1420-476b-b428-b85a913eb523'
+        FETCH_METHOD: 'DVC'
+        FETCH_METHODS:
+          DVC:
+            datapath_base: 'data'
+            version: 'placeholder'
+            repo_url: 'https://github.com/petteriTeikari/minivess_mlops'
+          EBrains:
+            # this was originally used for the data, but it is a bit cumbersome to use programmatically,
+            # wtih authentication (registration) requiring extra hoops for non-academics
+            DATA_INFO_URL: 'https://doi.org/10.25493/HPBE-YHK'
+            DATA_DOWNLOAD_URL: 'https://data.kg.ebrains.eu/zip?container=https://data-proxy.ebrains.eu/api/v1/buckets/d-bf268b89-1420-476b-b428-b85a913eb523'
         SPLITS:
           NAME: 'RANDOM'
           RANDOM:
@@ -38,9 +47,6 @@ config:
           # and reshuffle train/val?
           TXT_FILE:
             PLACEHOLDER: 0
-        # With no commit, we will just commit the downloaded dataset. Note! thet EBRAINS allow versioning too
-        # and we are not tracking that here (as in having dvc commit change when versioning changes
-        DVC_COMMIT: null
         # Dataset object, see e.g. "2. Cache intermediate outcomes into persistent storage"
         # https://github.com/Project-MONAI/tutorials/blob/main/acceleration/fast_model_training_guide.md
         DATASET:
@@ -70,7 +76,7 @@ config:
       THREAD_DATALOADER:
         PLACEHOLDER: 1
       TRAIN:
-        BATCH_SZ: 2
+        BATCH_SZ: 1
         NUM_WORKERS: 1
       VAL:
         BATCH_SZ: 2
@@ -89,25 +95,55 @@ config:
   # ----------------------------------------------------------------------------------- #
   # MODEL
   # ----------------------------------------------------------------------------------- #
+  # Every model is now defined as an ensemble of models, and if you want to do a single
+  # architecture with single repeat, it is just a special case on this ensemble
   MODEL:
-    # default model. User can define their own model and use that instead.
-    MODEL_NAME: 'SegResNet'
+    # Think of how to configure this in practice the most efficiently. The idea would be to have
+    # the freedom to define your submodel as you would wish, as you would a "normal single model"
+    # e.g. (https://arxiv.org/abs/2007.04206)
+    #         does different augmentation for each submodel
+    #      (https://proceedings.neurips.cc//paper/2020/file/b86e8d03fe992d1b0e19656875ee557c-Paper.pdf)
+    #         use different model architecture for each submodel
+    META_MODEL:
+      - 'Unet'
+      - 'SegResNet'
+    # These are your default setting for different architectures implemented to the pipeline
+    # You could separate this into a different config file like "architectures.yaml" or something
+    # https://github.com/ctpn/minivess/blob/main/minivess_2dunet.ipynbv (the original model in Jupyter demo)
+    Unet_2D:
+      spatial_dims: 2
+      in_channels: 1
+      out_channels: 1
+      channels:
+        - 4
+        - 8
+        - 16
+#      channels:
+#        - 16
+#        - 32
+#        - 64
+#        - 128
+#        - 256
+      strides:
+        - 2
+        - 2
+#        - 2
+#        - 2
+      num_res_units: 2
+    # https://docs.monai.io/en/stable/networks.html#unet
     Unet:
       spatial_dims: 3
       in_channels: 1
       out_channels: 1
       channels:
+        - 4
+        - 8
         - 16
-        - 32
-        - 64
-        - 128
-        - 256
       strides:
         - 2
         - 2
-        - 2
-        - 2
       num_res_units: 2
+    # https://docs.monai.io/en/stable/networks.html#segresnet
     SegResNet:
       spatial_dims: 3
       # Strictly speaking these depend on the dataset more than your model, so derive these from
@@ -123,28 +159,79 @@ config:
   TRANSFORMS:
     BASIC_AUG:
       param1: 'placeholder'
+    # For Test/Validation splits:
     NO_AUG:
       param1: 'placeholder'
-
 
   # ----------------------------------------------------------------------------------- #
   # TRAINING
   # ----------------------------------------------------------------------------------- #
   TRAINING:
-    AMP: True
-    NO_REPEATS: 2
-    NUM_EPOCHS: 2
-    LR: 0.0001 # 1e-4 FIXME! Parse scientifc notations from .yaml correctly
-    LOSS:
-      NAME: 'DiceFocalLoss'
-    OPTIMIZER:
-      NAME: 'Novograd'
-    SCHEDULER:
-      NAME: 'CosineAnnealingLR'
-    METRICS:
-      NAMES:
-        - 'DiceMetric'
-        - 'compute_hausdorff_distance'
+    # Have a look on the float16 vs bfloat16, and whether to for example include
+    # HuggingFace's accelerate here, or what is the easiest?
+    Unet_2D:
+      PRECISION: 'AMP'
+      NO_REPEATS: 1
+      NUM_EPOCHS: 2
+      LR: 0.0001 # 1e-4 FIXME! Parse scientifc notations from .yaml correctly
+      LOSS:
+        NAME: 'DiceLoss'
+        PARAMS:
+          sigmoid: True
+      OPTIMIZER:
+        NAME: 'Adam'
+      SCHEDULER:
+        NAME: null
+    Unet:
+      PRECISION: 'AMP'
+      NO_REPEATS: 1
+      NUM_EPOCHS: 2
+      LR: 0.0001 # 1e-4 FIXME! Parse scientifc notations from .yaml correctly
+      LOSS:
+        NAME: 'DiceFocalLoss'
+      OPTIMIZER:
+        NAME: 'Novograd'
+      SCHEDULER:
+        NAME: 'CosineAnnealingLR'
+      #      AUGMENTATION:
+      #        # Not sure how to implement the best, if you would like to use specific parameters,
+      #        # i.e. just specific for Minivess that would be different from standard "BASIC_AUG"
+      #        # e.g. different blur, rotation, spatial transformation strengths
+      #        TRAIN: 'BASIC_AUG'
+      #        VAL: 'NO_AUG'
+      #        TEST: 'NO_AUG'
+    SegResNet:
+      PRECISION: 'AMP'
+      NO_REPEATS: 1
+      NUM_EPOCHS: 2
+      LR: 0.0001 # 1e-4 FIXME! Parse scientifc notations from .yaml correctly
+      LOSS:
+        NAME: 'DiceFocalLoss'
+      OPTIMIZER:
+        NAME: 'Novograd'
+      SCHEDULER:
+        NAME: 'CosineAnnealingLR'
+      # NOTE! These go to the dataloader definition, so you would have to dataloader
+      #  per model architecture as well for this, TODO!
+      #  atm using the static augmentation definition by the dataset
+      #      AUGMENTATION:
+      #        # Not sure how to implement the best, if you would like to use specific parameters,
+      #        # i.e. just specific for Minivess that would be different from standard "BASIC_AUG"
+      #        # e.g. different blur, rotation, spatial transformation strengths
+      #        TRAIN: 'BASIC_AUG'
+      #        VAL: 'NO_AUG'
+      #        TEST: 'NO_AUG'
+
+
+  # ----------------------------------------------------------------------------------- #
+  # TRAINING (global)
+  # ----------------------------------------------------------------------------------- #
+  #  TRAINING_GLOBAL:
+  #    METRICS:
+  #      NAMES:
+  #        - 'DiceMetric'
+  #        - 'compute_hausdorff_distance'
+
 
   # ----------------------------------------------------------------------------------- #
   # VALIDATION
@@ -168,6 +255,14 @@ config:
     # best metrics in practice only from the end of the training when optimization has converged
     EMA_SMOOTH: False
     SAVE_FULL_MODEL: True
+    VALIDATION_PARAMS:
+      roi_size:
+        - 64
+        - 64
+        - 8
+      sw_batch_size: 4
+      overlap: 0.6
+
 
   # ----------------------------------------------------------------------------------- #
   # VALIDATION_BEST
@@ -195,6 +290,10 @@ config:
   # ----------------------------------------------------------------------------------- #
   ENSEMBLE:
     enable: True
+    PARAMS:
+      method: 'average'
+      # what is the cutoff for prediction of foreground
+      mask_threshold: 0.5
 
   # ----------------------------------------------------------------------------------- #
   # DATASETS
@@ -212,7 +311,7 @@ config:
   # ----------------------------------------------------------------------------------- #
   # LOSS FUNCTIONS
   # ----------------------------------------------------------------------------------- #
-  LOSS_FUNCTIONS:
+  LOSS:
     # https://github.com/Project-MONAI/tutorials/blob/main/acceleration/distributed_training/brats_training_ddp.py
     DiceFocalLoss:
       smooth_nr: 0.00001 # 1e-5 FIXME! Parse scientifc notations from .yaml correctly
@@ -225,16 +324,42 @@ config:
   # ----------------------------------------------------------------------------------- #
   # OPTIMIZERS
   # ----------------------------------------------------------------------------------- #
-  OPTIMIZERS:
+  OPTIMIZER:
     Novograd:
       PLACEHOLDER: 1
 
   # ----------------------------------------------------------------------------------- #
   # SCHEDULERS
   # ----------------------------------------------------------------------------------- #
-  SCHEDULERS:
+  SCHEDULER:
     CosineAnnealingLR:
       PLACEHOLDER: 1
+
+  # ----------------------------------------------------------------------------------- #
+  # TESTING
+  # ----------------------------------------------------------------------------------- #
+  TESTING:
+    DATA:
+      # Data on local disk, shared cache, S3 bucket, etc.
+      DUMMY:
+        enable: False
+    # Pytorch or MONAI dataset creation
+    DATASET:
+      # Add None to metadata
+      debug_testing: False
+    # For Pytorch/MONAI dataloaders
+    DATALOADER:
+      # Adds errors to data to test the dataloader error handling if you only have good data
+      debug_testing: False
+      DATA_VALIDITY:
+        enable: True
+    MODEL:
+      WEIGHTWATCHER:
+        enable: True
+        # These need to be supported by the weightwatcher library
+        analyze_cfg:
+          min_evals: 50,
+          max_evals: 500
 
   # ----------------------------------------------------------------------------------- #
   # LOGGING
@@ -254,9 +379,33 @@ config:
     TENSORBOARD:
       placeholder: 1
     MLFLOW:
+      # Could this be configured slightly different, using compositionality so that you don't have
+      # very environment-specific parameter among with more static parameters?
       server_URI: 'https://dagshub.com/petteriTeikari/minivess_mlops.mlflow'
       TRACKING:
         enable: True
+        DATASET:
+          # https://mlflow.org/docs/latest/python_api/mlflow.data.html
+          placeholder: 0
+      MODEL_REGISTRY:
+        placeholder: 1
+      # Params for testing that you can load models from model registry, and the metrics match
+      # those obtained during training
+      TEST_LOGGING:
+        split: 'TEST'
+        split_subset: 'MINIVESS'
+        # Test that the output (i.e. metrics) are the same between the ones obtained
+        # during the training, and the ones inferenced from MLflow registered models
+        # Note! that this can be problematic with the segmentation inference as the
+        #  inference in MONAI is not deterministic?
+        CHECK_LOCAL:
+          check_weights: True
+        CHECK_MLFLOW_MODELS:
+          check_weights: True
+          repeat_level_output: False
+          ensemble_level_output: True
+        CHECK_MLFLOW_MODEL_REGISTRY:
+          placeholder: null
     WANDB:
-      enable: True
+      enable: False
       s3: null

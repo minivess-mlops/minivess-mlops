@@ -2,30 +2,25 @@ import time
 import warnings
 from copy import deepcopy
 
+from loguru import logger
 import numpy as np
 import torch
 import torch.distributed as dist
 
 from monai.losses import DiceFocalLoss
 from monai.optimizers import Novograd
+from monai.utils import convert_to_tensor
 
 from src.utils.general_utils import check_if_key_in_dict
 
 
 def choose_loss_function(training_config: dict, loss_config: dict):
-    loss_name = training_config['LOSS']['NAME']
+    loss_name = list(loss_config.keys())[0]
     if check_if_key_in_dict(loss_config, loss_name):
         # FIXME parse names to match any MONAI loss
         loss_params = loss_config[loss_name]  # FIXME autouse these in the function call
         if loss_name == 'DiceFocalLoss':
-            loss_function = DiceFocalLoss(
-                smooth_nr=1e-5,
-                smooth_dr=1e-5,
-                squared_pred=True,
-                to_onehot_y=False,
-                sigmoid=True,
-                batch=True,
-            )
+            loss_function = DiceFocalLoss(**loss_params)
         else:
             raise NotImplementedError('Unsupported loss_name = "{}"'.format(loss_name))
     else:
@@ -35,7 +30,7 @@ def choose_loss_function(training_config: dict, loss_config: dict):
 
 
 def choose_optimizer(model, training_config: dict, optimizer_config: dict):
-    optimizer_name = training_config['OPTIMIZER']['NAME']
+    optimizer_name = list(optimizer_config.keys())[0]
     if check_if_key_in_dict(optimizer_config, optimizer_name):
         # FIXME parse names to match any MONAI/PyTorch optimizer
         optimizer_params = optimizer_config[optimizer_name]  # FIXME autouse these in the function call
@@ -50,7 +45,7 @@ def choose_optimizer(model, training_config: dict, optimizer_config: dict):
 
 
 def choose_lr_scheduler(optimizer, training_config: dict, scheduler_config: dict):
-    scheduler_name = training_config['SCHEDULER']['NAME']
+    scheduler_name = list(scheduler_config.keys())[0]
     if check_if_key_in_dict(scheduler_config, scheduler_name):
         # FIXME parse names to match any MONAI/Pytorch Scheduler
         scheduler_params = scheduler_config[scheduler_name]  # FIXME autouse these in the function call
@@ -67,16 +62,17 @@ def choose_lr_scheduler(optimizer, training_config: dict, scheduler_config: dict
 
 def set_model_training_params(model, device, scaler, training_config: dict, config: dict):
 
+    # TODO! You could makle one function to replace these all?
     loss_function = choose_loss_function(training_config=training_config,
-                                         loss_config=config['config']['LOSS_FUNCTIONS'])
+                                         loss_config=training_config['LOSS'])
 
     optimizer = choose_optimizer(model=model,
                                  training_config=training_config,
-                                 optimizer_config=config['config']['OPTIMIZERS'])
+                                 optimizer_config=training_config['OPTIMIZER'])
 
     lr_scheduler = choose_lr_scheduler(optimizer=optimizer,
                                        training_config=training_config,
-                                       scheduler_config=config['config']['SCHEDULERS'])
+                                       scheduler_config=training_config['SCHEDULER'])
 
     return loss_function, optimizer, lr_scheduler
 
@@ -118,7 +114,8 @@ def combine_epoch_and_experiment_dicts(epoch_results: dict, experiment_results: 
 
     if len(experiment_results) == 0:
         # i.e. the first epoch
-        experiment_results = epoch_results
+        experiment_results = deepcopy(epoch_results)
+        experiment_results = convert_scalars_to_arrays(experiment_results)
     else:
         for split_name in epoch_results.keys():
             for dataset_name in epoch_results[split_name].keys():
@@ -126,6 +123,27 @@ def combine_epoch_and_experiment_dicts(epoch_results: dict, experiment_results: 
                 experim_res = experiment_results[split_name][dataset_name]
                 experiment_results[split_name][dataset_name] = \
                     add_epoch_results_to_experiment_results(experim_res, epoch_res, split_name, dataset_name, epoch)
+
+    return experiment_results
+
+
+def convert_scalars_to_arrays(experiment_results: dict):
+
+    logger.debug('On first epoch, convert the scalars to arrays')
+    for split in experiment_results:
+        for dataset in experiment_results[split]:
+            for var_type in experiment_results[split][dataset]:
+                for scalar_key in experiment_results[split][dataset][var_type]:
+                    # print(split, dataset, var_type, scalar_key) # e.g. TRAIN MINIVESS scalars loss
+
+                    if isinstance(experiment_results[split][dataset][var_type][scalar_key], (float, int)):
+                        # on the 2nd epoch, we convert the float into a numpy array
+                        # so "scalars" will become an array if this is confusing, but "arrays" would contain variables
+                        # that would have multiple values at epoch level, e.g. like a 1D histogram you could collect to
+                        # experiment-level 2D array with 1D histogram per each epoch
+                        experiment_results[split][dataset][var_type][scalar_key] = (
+                            np.array(experiment_results[split][dataset][var_type][scalar_key])[np.newaxis])
+
 
     return experiment_results
 
@@ -158,13 +176,6 @@ def combine_epoch_and_experiment_scalars(epoch_scalars, experim_scalars):
 
     for scalar_key in epoch_scalars.keys():
         epoch_scalar_per_key = np.array(epoch_scalars[scalar_key]).copy()
-        if isinstance(experim_scalars[scalar_key], float):
-            # on the 2nd epoch, we convert the float into a numpy array
-            # so "scalars" will become an array if this is confusing, but "arrays" would contain variables
-            # that would have multiple values at epoch level, e.g. like a 1D histogram you could collect to
-            # experiment-level 2D array with 1D histogram per each epoch
-            experim_scalars[scalar_key] = np.array(experim_scalars[scalar_key])
-
         experim_scalars[scalar_key] = np.hstack([experim_scalars[scalar_key], epoch_scalar_per_key])
 
     return experim_scalars
@@ -190,3 +201,14 @@ def get_timings_per_epoch(metadata_dict: dict, epoch_start: float,
         (metadata_dict['metadata_scalars']['time_batch']/mean_batch_sz) * 1000
 
     return metadata_dict
+
+
+def get_first_batch_from_dataloaders_dict(experim_dataloaders: dict,
+                                          split: str = 'TRAIN',
+                                          return_batch_dict: bool = True):
+    first_fold = list(experim_dataloaders.keys())[0]
+    dataloader = experim_dataloaders[first_fold][split]
+    batch_dict = next(iter(dataloader))
+    # images, labels = batch_dict['image'], batch_dict['label']
+    # logger.info('MLflow | Get first batch of "{}" dataloader, batch sz = {}'.format(split, images.shape))
+    return batch_dict

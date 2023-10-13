@@ -7,7 +7,7 @@ from src.log_ML.log_epochs import log_epoch_for_tensorboard
 from src.log_ML.results_utils import average_repeat_results, reorder_crossvalidation_results, compute_crossval_stats, \
     reorder_ensemble_crossvalidation_results, compute_crossval_ensemble_stats, get_cv_sample_stats_from_ensemble, \
     get_best_repeat_result
-from src.log_ML.wandb_log import log_wandb_repeat_results, log_ensemble_results
+from src.log_ML.wandb_log import log_wandb_repeat_results, log_wandb_ensemble_results
 
 
 def log_epoch_results(train_epoch_results, eval_epoch_results,
@@ -53,7 +53,8 @@ def log_averaged_and_best_repeats(repeat_results: dict,
 
         # log best repeat metrics here to MLflow/WANDB
         log_best_reinference_metrics(best_repeat_metrics=best_repeat_metrics,
-                                     config=config)
+                                     config=config,
+                                     fold_name=fold_name)
     else:
         logger.info('Skip "VALIDATION_BEST", no re-computation of "heavier metrics", '
                     'just logging the ones obtained during training')
@@ -61,12 +62,14 @@ def log_averaged_and_best_repeats(repeat_results: dict,
         # Log the metric results of the best repeat out of n repeats
         log_best_repeats(best_repeat_dicts=best_repeat_dicts,
                          config=config,
-                         service='MLflow')
+                         service='MLflow',
+                         fold_name=fold_name)
 
 
 def log_best_repeats(best_repeat_dicts: dict, config: dict,
                      splits: tuple = ('VAL', 'TEST'),
-                     service: str = 'MLflow'):
+                     service: str = 'MLflow',
+                     fold_name: str = None):
 
     logger.info('Logging (MLflow) the metrics obtained from best repeat')
     for dataset_train in best_repeat_dicts:
@@ -76,17 +79,22 @@ def log_best_repeats(best_repeat_dicts: dict, config: dict,
                     for dataset_eval in best_repeat_dicts[dataset_train][tracked_metric][split]:
                         for metric in best_repeat_dicts[dataset_train][tracked_metric][split][dataset_eval]:
                             best_repeat = best_repeat_dicts[dataset_train][tracked_metric][split][dataset_eval][metric]
-                            metric_name = 'bestRepeat_{}_{}/{}/{}/{}'.format(metric, split, dataset_train,
-                                                                             tracked_metric, dataset_eval)
+                            metric_name = '{}/bestRepeat_{}_{}/{}/{}/{}'.format(fold_name, metric, split, dataset_train,
+                                                                                tracked_metric, dataset_eval)
                             metric_value = best_repeat['best_value']
                             logger.info('{} | "{}": {:.3f}'.format(service, metric_name, metric_value))
 
                             if service == 'MLflow':
-                                mlflow.log_metric(metric_name, metric_value)
+                                try:
+                                    mlflow.log_metric(metric_name, metric_value)
+                                except Exception as e:
+                                    raise IOError('Problem with the MLflow logging, e = {},\n'
+                                                  'Why one gets this "repo not associated with run" a bit stochastically '
+                                                  'and not every time?'.format(e))
                             else:
                                 raise NotImplementedError('Unknown Experiment Tracking service = "{}"'.format(service))
 
-                            metric_main = correct_key_for_main_result(metric_name=metric_name,
+                            metric_main = correct_key_for_main_result(metric_name=metric_name, fold_name=fold_name,
                                                                       tracked_metric=tracked_metric, metric=metric,
                                                                       dataset=dataset_eval, split=split,
                                                                       metric_cfg=config['config']['LOGGING'][
@@ -100,6 +108,7 @@ def log_best_repeats(best_repeat_dicts: dict, config: dict,
 
 def log_crossvalidation_results(fold_results: dict,
                                 ensembled_results: dict,
+                                experim_dataloaders: dict,
                                 config: dict,
                                 output_dir: str):
 
@@ -111,7 +120,7 @@ def log_crossvalidation_results(fold_results: dict,
     ensembled_results_reordered = reorder_ensemble_crossvalidation_results(ensembled_results)
     if ensembled_results_reordered is not None:
         cv_ensemble_results = compute_crossval_ensemble_stats(ensembled_results_reordered)
-        sample_cv_results = get_cv_sample_stats_from_ensemble(ensembled_results)
+        # sample_cv_results = get_cv_sample_stats_from_ensemble(ensembled_results)
 
     if config['config']['LOGGING']['WANDB']['enable']:
         log_wandb_repeat_results(fold_results=fold_results,
@@ -121,13 +130,16 @@ def log_crossvalidation_results(fold_results: dict,
         logger.info('Skipping repeat-level WANDB Logging!')
 
     if ensembled_results_reordered is not None:
-        log_ensemble_results(ensembled_results=ensembled_results,
-                             output_dir=config['run']['output_base_dir'],
-                             config=config)
+        if config['config']['LOGGING']['WANDB']['enable']:
+            log_wandb_ensemble_results(ensembled_results=ensembled_results,
+                                       output_dir=config['run']['output_base_dir'],
+                                       config=config)
 
         logged_model_paths = log_cv_results(cv_results=cv_results,
                                             cv_ensemble_results=cv_ensemble_results,
+                                            ensembled_results=ensembled_results,
                                             fold_results=fold_results,
+                                            experim_dataloaders=experim_dataloaders,
                                             config=config,
                                             output_dir=config['run']['output_base_dir'],
                                             cv_averaged_output_dir=config['run']['cross_validation_averaged'],
@@ -135,7 +147,7 @@ def log_crossvalidation_results(fold_results: dict,
     else:
         logged_model_paths = None
 
-    logger.info('Done with the WANDB Logging!')
+    # TODO! check if you even were running MLflow?
     mlflow.end_run()
     logger.info('Done with the MLflow Logging!')
 
@@ -146,7 +158,8 @@ def log_best_reinference_metrics(best_repeat_metrics: dict,
                                  config: dict,
                                  stat_key: str = 'split_metrics_stat',
                                  stat_value_to_log: str = 'mean',
-                                 service: str = 'MLflow'):
+                                 service: str = 'MLflow',
+                                 fold_name: str = None):
 
     for split in list(best_repeat_metrics.keys()):
         split_stats = best_repeat_metrics[split][stat_key]
@@ -156,8 +169,8 @@ def log_best_reinference_metrics(best_repeat_metrics: dict,
                     metrics = split_stats[dset1][tracked_metric][dset2]['metrics']
                     for metric in metrics:
                         stats_dict = metrics[metric]
-                        metric_name = 'bestRepeat_{}_{}/{}/{}/{}'.format(metric, split, dset1,
-                                                                         tracked_metric, dset2)
+                        metric_name = '{}/bestRepeat_{}_{}/{}/{}/{}'.format(fold_name, metric, split, dset1,
+                                                                            tracked_metric, dset2)
                         value = stats_dict[stat_value_to_log]
                         logger.info('{} | "{}": {:.3f}'.format(service, metric_name, value))
 
@@ -170,7 +183,7 @@ def log_best_reinference_metrics(best_repeat_metrics: dict,
                         else:
                             raise NotImplementedError('Unknown Experiment Tracking service = "{}"'.format(service))
 
-                        metric_main = correct_key_for_main_result(metric_name=metric_name,
+                        metric_main = correct_key_for_main_result(metric_name=metric_name, fold_name=fold_name,
                                                                   tracked_metric=tracked_metric, metric=metric,
                                                                   dataset=dset2, split=split,
                                                                   metric_cfg=config['config']['LOGGING']['MAIN_METRIC'])
@@ -180,13 +193,17 @@ def log_best_reinference_metrics(best_repeat_metrics: dict,
                                 mlflow.log_metric(metric_main, value)
                                 logger.info('{} (main) | "{}": {:.3f}'.format(service, metric_main, value))
 
-def correct_key_for_main_result(metric_name: str, tracked_metric: str, metric: str, split: str, dataset: str,
+def correct_key_for_main_result(metric_name: str, fold_name: str,
+                                tracked_metric: str, metric: str,
+                                split: str, dataset: str,
                                 metric_cfg: dict):
 
     if tracked_metric == metric_cfg['tracked_metric']  \
         and metric == metric_cfg['metric'] and dataset == metric_cfg['dataset']:
 
-        metric_type = metric_name.split('_')[0]
-        metric_name = metric_type + '_' + split
+        metric_type = metric_name.split('/')[1].split('_')[0]
+        metric_name = fold_name + '/' + metric_type + '_' + split
 
     return metric_name
+
+

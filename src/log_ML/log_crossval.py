@@ -7,18 +7,22 @@ from loguru import logger
 import numpy as np
 
 from src.log_ML.json_log import to_serializable
-from src.log_ML.wandb_log import wandb_log_crossval
+from src.log_ML.log_utils import get_used_services
+from src.log_ML.wandb_log import log_crossval_res
 
 
 def log_cv_results(cv_results: dict,
                    cv_ensemble_results: dict,
+                   ensembled_results: dict,
                    fold_results: dict,
+                   experim_dataloaders: dict,
                    config: dict,
                    output_dir: str,
                    cv_averaged_output_dir: str,
                    cv_ensembled_output_dir: str):
 
-    logger.info('Logging Cross-Validation-wise results to WANDB')
+    logger.info('Logging Cross-Validation-wise results')
+    logging_services = get_used_services(logging_cfg = config['config']['LOGGING'])
     os.makedirs(cv_averaged_output_dir, exist_ok=True)
     os.makedirs(cv_ensembled_output_dir, exist_ok=True)
 
@@ -28,13 +32,16 @@ def log_cv_results(cv_results: dict,
                               cv_averaged_output_dir=cv_averaged_output_dir,
                               cv_ensembled_output_dir=cv_ensembled_output_dir)
 
-    model_paths = wandb_log_crossval(cv_results=cv_results,
-                                     cv_ensemble_results=cv_ensemble_results,
-                                     fold_results=fold_results,
-                                     cv_averaged_output_dir=cv_averaged_output_dir,
-                                     cv_ensembled_output_dir=cv_ensembled_output_dir,
-                                     output_dir=output_dir,
-                                     config=config)
+    model_paths = log_crossval_res(cv_results=cv_results,
+                                   cv_ensemble_results=cv_ensemble_results,
+                                   ensembled_results=ensembled_results,
+                                   fold_results=fold_results,
+                                   experim_dataloaders=experim_dataloaders,
+                                   cv_averaged_output_dir=cv_averaged_output_dir,
+                                   cv_ensembled_output_dir=cv_ensembled_output_dir,
+                                   output_dir=output_dir,
+                                   logging_services=logging_services,
+                                   config=config)
 
     return model_paths
 

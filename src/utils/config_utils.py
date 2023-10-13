@@ -1,4 +1,5 @@
 import os
+import sys
 import warnings
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -37,6 +38,8 @@ def import_config(args, task_config_file: str, base_config_file: str = 'base_con
                                           config_dir = CONFIG_DIR,
                                           base_config = base_config)
 
+    config = config_manual_fixes(config)
+
     # Add the input arguments as an extra subdict to the config
     # config['config']['ARGS'] = args
     config['ARGS'] = args
@@ -58,7 +61,9 @@ def import_config(args, task_config_file: str, base_config_file: str = 'base_con
         'output_wandb_dir': os.path.join(config['ARGS']['output_dir'], 'WANDB'),
         'output_mlflow_dir': os.path.join(config['ARGS']['output_dir'], 'MLflow'),
         'config_hash': config_hash,
-        'start_time': start_time
+        'start_time': start_time,
+        'src_dir': os.getcwd(),
+        'repo_dir': os.path.join(os.getcwd(), '..'),
     }
 
     # Init variables for 'run'
@@ -69,7 +74,8 @@ def import_config(args, task_config_file: str, base_config_file: str = 'base_con
     # Get a predefined smaller subset to be logged as MLflow/WANDB columns/hyperparameters
     # to make the dashboards cleaner, or alternatively you can just dump the whole config['config']
     config['hyperparameters'] = define_hyperparam_run_params(config)
-    config['hyperparameters_flat'] = flatten_nested_dictionary(dict_in=config['hyperparameters'])
+    # TODO! Fix this with the updated nesting, with some nicer recursive function for undefined depth
+    config['hyperparameters_flat'] = None # flatten_nested_dictionary(dict_in=config['hyperparameters'])
 
     if config['config']['LOGGING']['unique_hyperparam_name_with_hash'] == 1:
         # i.e. whether you want a tiny change in dictionary content make this training to be grouped with
@@ -83,21 +89,45 @@ def import_config(args, task_config_file: str, base_config_file: str = 'base_con
 
     log_format = ("<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | <level>{level: <8}</level> | "
                   "<yellow>Line {line: >4} ({file}):</yellow> <b>{message}</b>")
+    log_file = 'log_{}.txt'.format(hyperparam_name)
+    config['run']['output_log_path'] = os.path.join(config['run']['output_experiment_dir'], log_file)
     try:
-        logger.add(os.path.join(config['run']['output_experiment_dir'], 'log_{}.txt'.format(hyperparam_name)),
+        logger.add(config['run']['output_log_path'] ,
                    level=log_level, format=log_format, colorize=False, backtrace=True, diagnose=True)
     except Exception as e:
         raise IOError('Problem initializing the log file to the artifacts output, have you created one? '
                       'do you have the permissions correct? See README.md for the "minivess_mlops_artifacts" creation'
                       'with symlink to /mnt \n error msg = {}'.format(e))
+    logger.info('Log (loguru) will be saved to disk to "{}"'.format(config['run']['output_log_path']))
 
-    logger.info('Log will be saved to disk to "{}"'.format(config['run']['output_experiment_dir']))
+    log_file = 'stdout_{}.txt'.format(hyperparam_name)
+    config['run']['stdout_log_path'] = os.path.join(config['run']['output_experiment_dir'], log_file)
+    logger.info('Stdout will be saved to disk to "{}"'.format(config['run']['stdout_log_path']))
+    sys.stdout = open(config['run']['stdout_log_path'], 'w')
+    sys.stderr = sys.stdout
 
     # Initialize ML logging (experiment tracking)
     config['run']['mlflow'], mlflow_dict =  init_mlflow_logging(config=config,
                                                                 mlflow_config=config['config']['LOGGING']['MLFLOW'],
                                                                 experiment_name = config['ARGS']['project_name'],
                                                                 run_name = config['run']['hyperparam_name'])
+
+    if args['debug_mode']:
+        set_config_for_debug_mode(config)
+
+    return config
+
+
+def config_manual_fixes(config: dict):
+    """
+    Quick'n'dirty fixes for YAML import
+    """
+    return config
+
+
+def set_config_for_debug_mode(config):
+    logger.warning('DEBUG MODE ON! Setting config, so that you train only for one epoch')
+    config['config']['TRAINING']['NUM_EPOCHS'] = 1
 
     return config
 
@@ -125,7 +155,7 @@ def update_base_with_task_config(task_config_file: str, config_dir: str, base_co
     config, no_of_updates = update_config_dictionary(d = base_config, u = task_config)
     logger.info('Updated the base config with a total of {} changed keys from the task config', no_of_updates)
 
-    # TOADD: Hydra
+    # TOADD: Hydra?
     # https://www.sscardapane.it/tutorials/hydra-tutorial/#first-steps-manipulating-a-yaml-file
     # https://medium.com/pytorch/hydra-a-fresh-look-at-configuration-for-machine-learning-projects-50583186b710
     # https://github.com/khuyentran1401/Machine-learning-pipeline
@@ -235,40 +265,41 @@ def define_hyperparam_run_params(config: dict) -> dict:
     logger.info('Hand-picking the keys/subdicts from "config" that are logged as hyperparameters for MLflow/WANDB')
 
     # What datasets were you used for training the model
-    hyperparams['datasets'] = cfg['DATA']['DATA_SOURCE']['DATASET_NAME']
+    hyperparams['datasets'] = cfg['DATA']['DATA_SOURCE']['DATASET_NAMES']
 
     # What model and architecture hyperparams you used
-    hyperparams['model'] = {}
-    # Well maybe you would not want all these to be logged either?
-    model_name = cfg['MODEL']['MODEL_NAME']
-    hyperparams['model'] = cfg['MODEL'][model_name]   # these are not all maybe wanted/needed
-    hyperparams['model']['name'] = model_name
+    hyperparams['models'] = {}
+    model_names = cfg['MODEL']['META_MODEL']
+    for model_name in model_names:
+        hyperparams['models'][model_name] = {}
+        hyperparams['models'][model_name]['architecture'] = cfg['MODEL'][model_name]
 
-    # Training params
-    training_tmp = deepcopy(cfg['TRAINING'])
-    training_tmp.pop('METRICS', 'training_tmp')
-    hyperparams['training'] = training_tmp
-
-    setting_name = 'LOSS'
-    hyperparams['training'][setting_name] = parse_settings_by_name(cfg=cfg, setting_name=setting_name,
-                                                                   settings_key='LOSS_FUNCTIONS')
-    setting_name = 'OPTIMIZER'
-    hyperparams['training'][setting_name] = parse_settings_by_name(cfg=cfg, setting_name=setting_name,
-                                                                   settings_key='OPTIMIZERS')
-    setting_name = 'SCHEDULER'
-    hyperparams['training'][setting_name] = parse_settings_by_name(cfg=cfg, setting_name=setting_name,
-                                                                   settings_key='SCHEDULERS')
+    hyperparams = parse_training_params(model_names, hyperparams, cfg)
 
     return hyperparams
 
 
-def parse_settings_by_name(cfg: dict, setting_name: str, settings_key: str) -> dict:
+def parse_training_params(model_names, hyperparams, cfg):
+
+    # Training params
+    training_tmp = deepcopy(cfg['TRAINING'])
+    setting_names = ['LOSS', 'OPTIMIZER', 'SCHEDULER']
+    for model_name in model_names:
+        hyperparams['models'][model_name]['training'] = training_tmp[model_name]
+        for setting_name in setting_names:
+            settings, param_name = parse_settings_by_name(cfg=cfg, setting_name=setting_name, settings_key=setting_name)
+            hyperparams['models'][model_name]['training'][setting_name] = {}
+            hyperparams['models'][model_name]['training'][setting_name][param_name] = settings
+
+    return hyperparams
+
+
+def parse_settings_by_name(cfg: dict, setting_name: str, settings_key: str):
     settings_tmp = cfg[settings_key]
     # remove one nesting level
-    name = list(settings_tmp.keys())[0]
-    settings = settings_tmp[name]  # similarly here, you would like to have manual LUT for "main params"
-    settings['name'] = name
-    return settings
+    param_name = list(settings_tmp.keys())[0]
+    settings = settings_tmp[param_name]
+    return settings, param_name
 
 
 def flatten_nested_dictionary(dict_in: dict, delim: str = '__') -> dict:

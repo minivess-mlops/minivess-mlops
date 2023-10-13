@@ -26,24 +26,25 @@ def add_sample_results_to_ensemble_results(inf_res: dict,
 
 
 def add_sample_metrics_to_split_results(sample_metrics: dict,
-                                        split_metrics_tmp: dict) -> dict:
+                                        dataloader_metrics_tmp: dict) -> dict:
 
     # for first sample in the dataloader
-    is_first_sample = len(split_metrics_tmp) == 0
+    is_first_sample = len(dataloader_metrics_tmp) == 0
 
     for var_type in sample_metrics:
-        if var_type not in split_metrics_tmp:
-            split_metrics_tmp[var_type] = {}
+        if var_type not in dataloader_metrics_tmp:
+            dataloader_metrics_tmp[var_type] = {}
         for var in sample_metrics[var_type]:
             sample_metric_expanded = np.expand_dims(sample_metrics[var_type][var], axis=0)
             if is_first_sample:
-                split_metrics_tmp[var_type][var] = sample_metric_expanded
+                dataloader_metrics_tmp[var_type][var] = sample_metric_expanded
             else:
-                split_metrics_tmp[var_type][var] = np.concatenate((split_metrics_tmp[var_type][var],
-                                                                   sample_metric_expanded),
-                                                                  axis=0)
+                dataloader_metrics_tmp[var_type][var] = (
+                    np.concatenate((dataloader_metrics_tmp[var_type][var],
+                                   sample_metric_expanded),
+                                    axis=0))
 
-    return split_metrics_tmp
+    return dataloader_metrics_tmp
 
 
 def get_metadata_for_sample_metrics(metadata: dict) -> dict:
@@ -52,11 +53,14 @@ def get_metadata_for_sample_metrics(metadata: dict) -> dict:
     # sample and have an idea which samples are hard to segment, if there are some outliers in the data,
     # label noise, etc.
     try:
-        dir_in, fname = os.path.split(metadata)
+        filepath = metadata['filepath_json'][0]
+        dir_in, fname = os.path.split(filepath)
+        # TODO! No necessarily need to create a new dict, think of ways to automatically to flatten
+        #  the metadata dict and add new entries here if you need some sparsing
         sample_name, f_ext = os.path.splitext(fname)
         sample_metadata = {
-            'metadata_filepath': np.expand_dims(np.array((metadata)), axis=0),
-            'sample_name': np.expand_dims(np.array((sample_name)), axis=0)
+            'filepath_json': filepath,
+            'sample_name': sample_name
         }
     except Exception as e:
         logger.warning('Problem getting the metadata? error = "{}",\n'
@@ -78,20 +82,20 @@ def merge_nested_dicts(a: dict, b: dict, path=[]):
     return a
 
 
-def compute_split_metric_stats(split_metrics_tmp: dict,
+def compute_split_metric_stats(dataloader_metrics: dict,
                                var_types_to_keep: tuple = ('metrics', 'timing')) -> dict:
 
-    split_stats = {}
+    dataloader_stats = {}
 
-    for var_type in split_metrics_tmp:
+    for var_type in dataloader_metrics:
         if var_type in var_types_to_keep:  ## hard to compute stats for metadata for example
-            split_stats[var_type] = {}
-            for var in split_metrics_tmp[var_type]:
-                split_stats[var_type][var] = {}
-                input_data = split_metrics_tmp[var_type][var]
-                split_stats[var_type][var] = compute_stats_of_array_in_dict(input_data)
+            dataloader_stats[var_type] = {}
+            for var in dataloader_metrics[var_type]:
+                dataloader_stats[var_type][var] = {}
+                input_data = dataloader_metrics[var_type][var]
+                dataloader_stats[var_type][var] = compute_stats_of_array_in_dict(input_data)
 
-    return split_stats
+    return dataloader_stats
 
 
 def compute_stats_of_array_in_dict(input_data: np.ndarray) -> dict:
@@ -102,3 +106,26 @@ def compute_stats_of_array_in_dict(input_data: np.ndarray) -> dict:
     stats_out['var'] = np.var(input_data)
 
     return stats_out
+
+
+def get_ensemble_name(dataset_validated: str,
+                      metric_to_track: str) -> str:
+    ensemble_name = '{}-{}'.format(metric_to_track, dataset_validated)
+    return ensemble_name
+
+
+def split_ensemble_name(ensemble_name):
+    dset, tracked_metric = ensemble_name.split('-')
+    return dset, tracked_metric
+
+
+def get_submodel_name(repeat_name: str, archi_name: str = None, fold_name: str = None) -> str:
+    if fold_name is None:
+        return '{}_{}'.format(archi_name, repeat_name)
+    else:
+        return '{}_{}_{}'.format(fold_name, archi_name, repeat_name)
+
+
+def get_architecture_from_submodel_name(submodel_name: str):
+    architecture_name = submodel_name.split('_')[0]
+    return architecture_name

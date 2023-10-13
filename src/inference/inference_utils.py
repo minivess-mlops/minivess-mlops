@@ -8,17 +8,18 @@ from monai.inferers import sliding_window_inference
 from monai.transforms import Activations, AsDiscrete
 from tqdm import tqdm
 
+from src.deprecated_functions.depr_funcs import inference_dataloader
 from src.inference.ensemble_utils import merge_nested_dicts, get_metadata_for_sample_metrics, \
     add_sample_metrics_to_split_results, compute_split_metric_stats
 from src.inference.metrics import get_sample_metrics_from_np_masks, get_sample_uq_metrics_from_ensemble_stats
 from src.log_ML.model_saving import import_model_from_path
 
 
-def inference_sample(batch_data,
-                     model,
+def inference_sample(input_data,
                      metric_dict: dict,
                      device: str,
-                     auto_mixedprec: bool = True):
+                     precision: str = 'AMP',
+                     input_from: str = 'dict'):
     """
     See e.g. https://docs.monai.io/en/stable/inferers.html
              https://github.com/davidiommi/Ensemble-Segmentation/blob/main/predict_single_image.py
@@ -30,11 +31,19 @@ def inference_sample(batch_data,
     :param auto_mixedprec:
     :return:
     """
-    if auto_mixedprec:  ## AMP
-        with torch.cuda.amp.autocast():
-            output = sliding_window_inference(inputs=batch_data["image"].to(device), **metric_dict)
+
+    if input_from == 'dict':
+        inputs = input_data["image"]
+    elif input_from == 'tensor':
+        inputs = input_data
     else:
-        output = sliding_window_inference(inputs=batch_data["image"].to(device), **metric_dict)
+        raise IOError('Unknown input_from = {}'.format(input_from))
+
+    if precision == 'AMP':  ## AMP
+        with torch.cuda.amp.autocast():
+            output = sliding_window_inference(inputs=inputs.to(device), **metric_dict)
+    else:
+        output = sliding_window_inference(inputs=inputs.to(device), **metric_dict)
 
     # logits -> probabilities
     activ = Activations(sigmoid=True)
@@ -115,37 +124,8 @@ def inference_best_repeat(dataloader: monai.data.dataloader.DataLoader,
     return {'split_metrics': split_metrics, 'split_metrics_stat': split_metrics_stat}
 
 
-def inference_dataloader(dataloader, model, device, split: str, config: dict):
-
-    metric_dict = {'roi_size': (64, 64, 8), 'sw_batch_size': 4, 'predictor': model, 'overlap': 0.6}
-    model.eval()
-
-    split_metrics = {}
-
-    with (torch.no_grad()):
-        for batch_idx, batch_data in enumerate(
-                tqdm(dataloader, desc='BEST REPEAT: Inference on dataloader samples, split "{}"'.format(split))):
-
-            sample_res = inference_sample(batch_data,
-                                          model=model,
-                                          metric_dict=metric_dict,
-                                          device=device,
-                                          auto_mixedprec=config['config']['TRAINING']['AMP'])
-
-            metrics = (get_inference_metrics(y_pred=sample_res['arrays']['binary_mask'],
-                                             config=config,
-                                             batch_data=batch_data))
-
-            split_metrics = add_sample_metrics_to_split_results(sample_metrics=deepcopy(metrics),
-                                                                split_metrics_tmp=split_metrics)
-
-    split_metrics_stat = compute_split_metric_stats(split_metrics_tmp=split_metrics)
-
-    return split_metrics, split_metrics_stat
-
-
 def get_inference_metrics(y_pred: np.ndarray,
-                          config: dict,
+                          eval_config: dict,
                           batch_data: dict,
                           ensemble_stat_results: dict = None) -> dict:
 
@@ -154,7 +134,7 @@ def get_inference_metrics(y_pred: np.ndarray,
         x = conv_metatensor_to_numpy(batch_data['image'])
         y = ground_truth = conv_metatensor_to_numpy(batch_data['label'])
         ensemble_metrics = get_sample_metrics_from_np_masks(x, y, y_pred,
-                                                            eval_config=config['config']['VALIDATION_BEST'])
+                                                            eval_config=eval_config)
 
         if ensemble_stat_results is not None:
             # if you have inferenced multiple repeats (or you have done MC Dropout or something)
@@ -162,7 +142,8 @@ def get_inference_metrics(y_pred: np.ndarray,
             ensemble_uq_metrics = get_sample_uq_metrics_from_ensemble_stats(ensemble_stat_results)
             ensemble_metrics = merge_nested_dicts(ensemble_metrics, ensemble_uq_metrics) # {**ensemble_metrics, **ensemble_uq_metrics}
 
-        ensemble_metrics['metadata'] = get_metadata_for_sample_metrics(metadata=batch_data['metadata'][0])
+        ensemble_metrics['metadata'] = (
+            get_metadata_for_sample_metrics(metadata=batch_data['metadata']))
 
     else:
         ensemble_metrics = None
