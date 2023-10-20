@@ -1,0 +1,12 @@
+NAME: 'test_dataload'
+# TODO! update the changed keys in the config
+config:
+  VERBOSE: True
+  TRAINING:
+    SKIP_TRAINING: True
+  DATA:
+    DATA_SOURCE:
+      MINIVESS:
+        DATASET:
+          MONAI_CACHEDATASET:
+            CACHE_RATE: 0.0

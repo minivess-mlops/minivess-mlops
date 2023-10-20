@@ -1,0 +1,46 @@
+# Based on the "build_env_image.yml" (that builds "petteriteikari/minivess-mlops-env:latest")
+name: Docker (Train)
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+
+jobs:
+
+  build_train:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: dockerhub login
+      # TODO!
+      #  WARNING! Using --password via the CLI is insecure. Use --password-stdin.
+      #  WARNING! Your password will be stored unencrypted in /home/runner/.docker/config.json.
+      env:
+        DOCKERHUB_USER: ${{secrets.DOCKERHUB_USERNAME}}
+        DOCKERHUB_PASSWORD: ${{secrets.DOCKERHUB_PASSWORD}}
+      run:
+        docker login -u $DOCKERHUB_USER -p $DOCKERHUB_PASSWORD
+    - name: Upgrade Docker Compose to 2.x # https://github.com/marketplace/actions/docker-compose-setup
+      uses: ndeloof/install-compose-action@v0.0.1
+      with:
+        version: v2.3.3 # defaults to 'latest'
+        legacy: true # will also install in PATH as `docker-compose`
+    - name: Check Docker Compose version
+      run: docker-compose --version
+    - name: Build the Docker image
+      run: docker compose -f deployment/docker-compose.yml build --no-cache
+    - name: Push the image to Dockerhub
+      run: docker push petteriteikari/minivess-mlops-train:latest
+    - name: Trigger next workflow (test data)
+      if: success()
+      uses: peter-evans/repository-dispatch@v1
+      with:
+        token: ${{ secrets.REPO_GHA_PAT }}
+        repository: ${{ github.repository }}
+        event-type: trigger-test-dataload
+        client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'

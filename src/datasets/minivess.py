@@ -1,8 +1,6 @@
 import glob
 import os
 
-import dvc.api
-
 from monai.data import CacheDataset, Dataset
 from loguru import logger
 from tqdm import tqdm
@@ -13,11 +11,12 @@ import random
 from ml_tests.dataset_tests import ml_test_dataset_for_allowed_types
 from ml_tests.file_tests import ml_test_filelisting_corruption
 from src.datasets.dvc_utils import get_dvc_files_of_repo
+from src.utils.general_utils import print_memory_stats_to_logger
 
 
 def import_minivess_dataset(dataset_cfg: dict,
                             data_dir: str,
-                            debug_mode: bool,
+                            run_mode: str,
                             config: dict,
                             dataset_name: str,
                             fetch_method: str,
@@ -40,8 +39,15 @@ def import_minivess_dataset(dataset_cfg: dict,
     filelisting, dataset_stats = get_minivess_filelisting(dataset_dir)
     fold_split_file_dicts = define_minivess_splits(filelisting, data_splits_config=dataset_cfg['SPLITS'])
 
-    if debug_mode:
-        minivess_debug_splits(fold_split_file_dicts)
+    if dataset_cfg['SUBSET']['NAME'] == 'ALL_SAMPLES':
+        logger.info('Using all the samples for training, validation and testing')
+    else:
+        subset_cfg_name = dataset_cfg['SUBSET']['NAME']
+        subset_cfg = dataset_cfg['SUBSET'][subset_cfg_name]
+        logger.info('Using only a subset of the samples, Config = {}'.format(dataset_cfg['SUBSET']['NAME']))
+        minivess_debug_splits(fold_split_file_dicts=fold_split_file_dicts,
+                              subset_cfg=subset_cfg,
+                              subset_cfg_name=subset_cfg_name)
 
     return filelisting, fold_split_file_dicts, dataset_stats
 
@@ -51,6 +57,8 @@ def fetch_dataset_with_dvc(fetch_params: dict,
                            dataset_name_lowercase: str,
                            repo_dir: str):
 
+    # TODO! This is now based on "dvc pull" by Github Actions or manual, but you could try
+    #  to get the Python programmatic API to work too (or have "dvc pull" from subprocess)
     dataset_dir = get_dvc_files_of_repo(repo_dir=repo_dir,
                                        dataset_name_lowercase=dataset_name_lowercase,
                                        fetch_params=fetch_params,
@@ -261,6 +269,7 @@ def define_minivess_dataset(dataset_config: dict,
                             debug_testing: bool):
 
     datasets, ml_test_dataset = {}, {}
+    print_memory_stats_to_logger()
     for i, split in enumerate(transforms.keys()):
         datasets[split], ml_test_dataset[split] = (
             create_dataset_per_split(dataset_config=dataset_config,
@@ -268,6 +277,11 @@ def define_minivess_dataset(dataset_config: dict,
                                      split_file_dict=split_file_dicts[split],
                                      transforms_per_split=transforms[split],
                                      debug_testing=debug_testing))
+
+        # Print the available memory after each dataset creation (you might run out of memory on your machine
+        # if you "cache too much" on a machine with not enough RAM)
+        print_memory_stats_to_logger()
+
 
     return datasets, ml_test_dataset
 
@@ -289,18 +303,28 @@ def create_dataset_per_split(dataset_config: dict,
         ml_test_dataset_for_allowed_types(split_file_dict=split_file_dict))
 
     if pytorch_dataset_type == 'MONAI_CACHEDATASET':
+        # TODO! for fancier RAM management, you could adaptively set the cache_rate here
+        #  based on the machine that you are running this on, add like a case with
+        #  "if ds_config[pytorch_dataset_type]['CACHE_RATE'] == 'max_avail'"
         ds = CacheDataset(data=split_file_dict,
                          transform=transforms_per_split,
                          cache_rate=ds_config[pytorch_dataset_type]['CACHE_RATE'],
                          num_workers=ds_config[pytorch_dataset_type]['NUM_WORKERS'])
         logger.info('Created MONAI CacheDataset, split = "{}" (n = {}, '
-                    'keys in dict = {})', split, n_files, list(split_file_dict[0].keys()))
+                    'keys in dict = {}, cache_rate = {}, num_workers = {})',
+                    split, n_files, list(split_file_dict[0].keys()),
+                    ds_config[pytorch_dataset_type]['CACHE_RATE'],
+                    ds_config[pytorch_dataset_type]['NUM_WORKERS'])
 
     elif pytorch_dataset_type == 'MONAI_DATASET':
-        ds = Dataset(data=split_file_dict)
-        logger.info('Created MONAI (uncached) Dataset, split = "{}" (n={}, '
-                    'keys in dict = {})', split, n_files, list(split_file_dict[0].keys))
-
+        logger.error('WARNING! You are using the vanilla MONAI Dataset, which does not work downstream from here')
+        raise NotImplementedError('Vanilla MONAI dataset not implemented, use CacheDataset instead with '
+                                  'cache_rate=0 if you have issues with RAM availability on your machine')
+        # ds = Dataset(data=split_file_dict)
+        # logger.info('Created MONAI (uncached) Dataset, split = "{}" (n={}, '
+        #             'keys in dict = {})', split, n_files, list(split_file_dict[0].keys()))
+        # logger.warning('Use the vanilla MONAI Dataset mostly for debugging/Github Actions '
+        #                'when you might easily run out of RAM')
     else:
         raise NotImplementedError('Not implemented yet other dataset than Monai CacheDataset and Dataset, '
                                   'not = "{}"'.format(pytorch_dataset_type))
@@ -311,17 +335,15 @@ def create_dataset_per_split(dataset_config: dict,
     return ds, ml_test_dataset
 
 
-def minivess_debug_splits(fold_split_file_dicts: dict):
+def minivess_debug_splits(fold_split_file_dicts: dict,
+                          subset_cfg: dict,
+                          subset_cfg_name: str):
 
-    logger.warning('DEBUG MODE ON! Taking subsets of the data to speed things up (e.g. on CPU debug/development)')
+    logger.warning('You are not using the full fileset now! (subset method = {})'.format(subset_cfg_name))
     for fold in fold_split_file_dicts:
         for split in fold_split_file_dicts[fold]:
-            if split == 'TEST':
-                fold_split_file_dicts[fold][split] = fold_split_file_dicts[fold][split][0:1]
-            if split == 'TRAIN':
-                fold_split_file_dicts[fold][split] = fold_split_file_dicts[fold][split][0:2]
-            if split == 'VAL':
-                fold_split_file_dicts[fold][split] = fold_split_file_dicts[fold][split][0:2]
+            logger.warning('First {} samples for split = {}'.format(subset_cfg[split], split))
+            fold_split_file_dicts[fold][split] = fold_split_file_dicts[fold][split][0:subset_cfg[split]]
 
     return fold_split_file_dicts
 

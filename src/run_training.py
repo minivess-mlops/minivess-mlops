@@ -3,12 +3,13 @@ import os
 
 import sys
 
-from src.utils.dataloder_utils import define_dataset_and_dataloader
+from src.utils.general_utils import print_dict_to_logger
 
 src_path = os.path.dirname(os.path.abspath(__file__))
 project_path = os.path.split(src_path)[0]
 sys.path.insert(0, project_path) # so that src. is imported correctly also in VSCode by default
 
+from src.utils.dataloder_utils import define_dataset_and_dataloader
 from src.train import training_script
 from src.utils.config_utils import import_config
 from src.utils.data_utils import import_datasets
@@ -36,37 +37,45 @@ logger.remove()
 logger.add(sys.stderr, filter=my_filter)
 # LOG_MIN_LEVEL = "DEBUG"
 
-# TODO! Set this flag based on the run_mode when you actually implement it for CI/CD
-SKIP_TRAINING = False
-
 
 def parse_args_to_dict():
     parser = argparse.ArgumentParser(description='Segmentation pipeline for Minivess dataset')
     parser.add_argument('-c', '--task_config-file', type=str, required=True,
                         default='task_config.yaml',
                         help="Name of your task-specific .yaml file, e.g. 'config_test'")
-    parser.add_argument('-dbg', '--debug_mode', action="store_const", const=True,
-                        help="Sets debug flag on. Quick way for example to train for less epochs or something else,"
-                             "when you are not actually training but mostly developing the code")
+    # TODO! base_config
+    parser.add_argument('-run', '--run_mode', type=str, required=False,
+                        default='train', choices=['train', 'debug',
+                                                  'test_data', 'test_dataload', 'test_train'],
+                        help="Use 'train' for the actual training, 'test_xxx' are meant for CI/CD tasks,"
+                             "and debug is for development with very tiny subsets of data")
     parser.add_argument('-data', '--data_dir', type=str, required=False,
-                        default='/mnt/minivess_mlops_artifacts/data',
+                        default='/mnt/minivess-dvc-cache',
                         help="Where the data is downloaded, or what dir needs to be mounted when you run this"
                              "on Docker")
     parser.add_argument('-output', '--output_dir', type=str, required=False,
-                        default='/mnt/minivess_mlops_artifacts/output',
+                        default='/mnt/minivess-artifacts',
                         help="Where the data is downloaded, or what dir needs to be mounted when you run this"
                              "on Docker")
+    parser.add_argument('-aws-skip', '--skip_realtime_aws_write',
+                        type=bool, required=False, default=True,
+                        help="With 'True', skip writing to AWS S3 bucket in realtime if you have issues with"
+                             "the mounting (mountpoint-s3, s3fs, etc.), "
+                             "and maybe aws sync at the end of the run is enough for you")
     parser.add_argument('-rank', '--local_rank', type=int, required=False, default=0,
                         help="node rank for distributed training")
+    # TODO! log_level
     parser.add_argument('-p', '--project_name', type=str, required=False,
                         default='MINIVESS_segmentation_TEST',
                         help="Name of the project in WANDB/MLOps. Keep the same name for all the segmentation"
                              "experiments so that you can compare how tweaks affect segmentation performance."
                              "Obviously create a new project if you have MINIVESS_v2 or some other dataset, when"
                              "you cannot meaningfully compare e.g. DICE score from dataset 1 to dataset 2")
-    # TODO! Add "run_mode" or something: ['train', 'test_dataload', 'test_train', 'debug]
-    #  to allow some CI/CD
-    return vars(parser.parse_args())
+    args_dict = vars(parser.parse_args())
+    logger.info('Parsed input arguments:')
+    print_dict_to_logger(args_dict, prefix='')
+
+    return args_dict
 
 
 if __name__ == '__main__':
@@ -88,24 +97,29 @@ if __name__ == '__main__':
         fold_split_file_dicts, config['config']['DATA'] = \
             import_datasets(data_config=config['config']['DATA'],
                             data_dir=args['data_dir'],
-                            debug_mode=args['debug_mode'],
+                            run_mode=args['run_mode'],
                             config=config)
 
         # Create and validate datasets and dataloaders
-        experim_datasets, experim_dataloaders = \
-            define_dataset_and_dataloader(config=config,
-                                          fold_split_file_dicts=fold_split_file_dicts)
+        if not config['config']['DATA']['DATALOADER']['SKIP_DATALOADER']:
+            experim_datasets, experim_dataloaders = \
+                define_dataset_and_dataloader(config=config,
+                                              fold_split_file_dicts=fold_split_file_dicts)
 
-        # Train for n folds, n repeats, n epochs (single model)
-        if SKIP_TRAINING:
-            logger.info('Skipping the training for now, hyperparam_name = {}'
-                        'e.g. when running CI/CD tasks for data checks'.format(hyperparam_name))
+            # Train for n folds, n repeats, n epochs (single model)
+            if config['config']['TRAINING']['SKIP_TRAINING']:
+                logger.info('Skipping the training for now, hyperparam_name = {}, '
+                            'e.g. when running CI/CD tasks for data checks'.format(hyperparam_name))
+            else:
+                hparam_run_results[hyperparam_name] = \
+                    training_script(hyperparam_name=hyperparam_name,
+                                    experim_dataloaders=experim_dataloaders,
+                                    config=config,
+                                    machine_config=config['config']['MACHINE'],
+                                    output_dir=config['run']['output_experiment_dir'])
+                logger.info('Done with the experiment!')
         else:
-            hparam_run_results[hyperparam_name] = \
-                training_script(hyperparam_name=hyperparam_name,
-                                experim_dataloaders=experim_dataloaders,
-                                config=config,
-                                machine_config=config['config']['MACHINE'],
-                                output_dir=config['run']['output_experiment_dir'])
+            logger.warning('Skip both dataloader creation and network training, '
+                           'run_mode = {} (not a warning for data CI/CD)'.format(args['run_mode']))
 
-    logger.info('Done with the experiment!')
+    logger.info('Done with the execution!')

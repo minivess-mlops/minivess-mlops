@@ -16,13 +16,16 @@ ENV DEPLOY_ENV $DEPLOY_IN
 ARG IMAGE_TYPE=dev
 ENV PROD_IMAGE $IMAGE_TYPE
 
-# Define environment
+# https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/docker-specialized.html
+ENV NVIDIA_VISIBLE_DEVICES all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
 # https://stackoverflow.com/a/63643361/18650369
-ENV USER dockeruser
-ENV HOME /home/$USER
-RUN useradd -m $USER && echo $USER:$USER | chpasswd && adduser $USER sudo
-RUN chown $USER:$USER $HOME
+# ENV USER dockeruser
+# ENV HOME /home/$USER
+ENV HOME /home
+# RUN useradd -m $USER && echo $USER:$USER | chpasswd && adduser $USER sudo
+# RUN chown $USER:$USER $HOME
 
 # "Layer of your basics"
 # i.e. what you need to install to this Ubuntu (without GPU)
@@ -31,9 +34,8 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update -y && \
     # https://github.com/phusion/baseimage-docker/issues/319#issuecomment-1107760238
     apt-get install -y --no-install-recommends apt-utils && \
-    apt install software-properties-common curl -y && \
+    apt install software-properties-common curl unzip groff wget -y && \
     apt-get install git-all -y && \
-    # apt remove --purge -y python3.10 && \
     # https://pythonspeed.com/articles/base-image-python-docker-images/
     add-apt-repository ppa:deadsnakes/ppa && \
     apt install -y python3-pip python3.8-dev python3.8-distutils python3.8-venv && \
@@ -41,14 +43,24 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     # https://github.com/pyenv/pyenv
     ln -sf /usr/bin/python3.8 /usr/bin/python3 && \
     ln -sf /usr/bin/python3.8 /usr/bin/python && \
+    # apt remove --purge -y python3.10 && \
     # python3 --version && \
-    apt install -y s3fs
+    # apt install -y s3fs # s3fs-fuse \
+    # Or if you prefer mountpoint-s3
+    wget https://s3.amazonaws.com/mountpoint-s3-release/latest/x86_64/mount-s3.deb && \
+    apt-get install -y ./mount-s3.deb && \
+    rm ./mount-s3.deb && \
+    mount-s3 --version
+
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip awscliv2.zip && \
+	./aws/install
 
 # not sure if really optimal "multi-staging"?
 FROM base as minivess-base
 
 # Switch to non-privileged user from superuser
-USER $USER
+# USER $USER
 
 # Install Poetry (or via pip: https://stackoverflow.com/a/54763270/18650369)
 RUN curl -sSL https://install.python-poetry.org | python3 - && \
@@ -81,11 +93,17 @@ RUN if [ "$PROD_IMAGE" = "dev" ] ; then \
     fi
 
 # Install the required packages finally
-ENV PATH="${PATH}:$HOME/.local/bin"
-RUN pip install --no-cache-dir --user -r $HOME/requirements.txt
+# ENV PATH="${PATH}:$HOME/.local/bin"
+RUN pip install --no-cache-dir -r $HOME/requirements.txt
+
+# TODO! Takes extra disk space probably and needs to be cleaned up!
+#    Attempting uninstall: cryptography
+# => => #     Found existing installation: cryptography 3.4.8
+# => => #     Not uninstalling cryptography at /usr/lib/python3/dist-packages, outside environment /usr
+# => => #     Can't uninstall 'cryptography'. No files were found to uninstall.
 
 # Not sure if this is very optimal for multi-stage builds? or if this naming hierarchy is needed?
-FROM minivess-base as minivess-mlops
+FROM minivess-base as minivess-base-gpu
 
 # TODO!
 # Install NVIDIA
@@ -112,11 +130,8 @@ FROM minivess-base as minivess-mlops
 #    fi
 
 # Placeholder type of layer before fixing the NVIDIA install
-RUN echo $DEPLOY_ENV
+RUN rm ./pyproject.toml ./poetry.lock # ./awsclic2.zip
 
-FROM minivess-mlops as minivess-mlops-env
+# TODO! Check if you can clean a bit the cache etc. to reduce the image size
 
-# TODO! you actually need two Docker files, or can you more easily push the intermediate images to Docker Hub
-# examine this, like the copying of all the code would come here (maybe you want to use the same env Docker),
-# and also have your "code Docker" private with proprietary code?
-# FROM minivess-mlops-env as minivess-mlops
+FROM minivess-base-gpu as minivess-mlops-env

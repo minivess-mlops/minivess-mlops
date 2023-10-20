@@ -1,6 +1,9 @@
 # MiniVess MLOps
 
-[![Docker Image (Environment) CI](https://github.com/petteriTeikari/minivess_mlops/actions/workflows/env_docker-image.yml/badge.svg)](https://github.com/petteriTeikari/minivess_mlops/actions/workflows/env_docker-image.yml)
+[![Docker (Env)](https://github.com/petteriTeikari/minivess_mlops/actions/workflows/build-env_image.yml/badge.svg)](https://github.com/petteriTeikari/minivess_mlops/actions/workflows/build-env_image.yml)
+[![Docker (Train)](https://github.com/petteriTeikari/minivess_mlops/actions/workflows/build_train_image.yml/badge.svg)](https://github.com/petteriTeikari/minivess_mlops/actions/workflows/build_train_image.yml)
+<br>[![Test (Dataload)](https://github.com/petteriTeikari/minivess_mlops/actions/workflows/test_dataload.yml/badge.svg)](https://github.com/petteriTeikari/minivess_mlops/actions/workflows/test_dataload.yml)
+
 
 (in-progress) MLOPS boilerplate code for more end-to-end reproducible pipeline for the dataset published in the article:
 
@@ -25,13 +28,47 @@ and usage instructions are provided when the code is more ready for "beta releas
 
 ### Data
 
-Create local dir `minivess_mlops_artifacts` e.g. to `~` (Home directory) and symlink that to 
-a mount point (so you have the same path for Docker and local devel):
+You need 2 folders set up: 1) for the DVC cache (with the input data), 2) for the output artifacts (models, figures, MLflow/WANDB temp files, etc.)
+
+Easier to have both local development and Docker work is to symlink your local folders to the following '/mnt':
 
 ```
-sudo ln -s ~/minivess_mlops_artifacts/ /mnt/minivess_mlops_artifacts
+sudo ln -s $HOME/minivess-dvc-cache /mnt/minivess-dvc-cache
+sudo ln -s $HOME/minivess-artifacts /mnt/minivess-artifacts
+sudo ln -s $HOME/minivess-artifacts_local /mnt/minivess-artifacts_local
 ```
 
+With the Docker, you would like the mapping to be like this (and DVC needs authentication 
+to `s3://minivessdataset` where the "human-readable" Minivess dataset is, and `DVC` must 
+be able to `pull`).
+
+The mapping could be done now as in `entrypoint.sh` 
+(explore the [best way to mount on startup](https://www.google.com/search?q=mount+s3+ubuntu+at+startup&oq=mount+s3+ubuntu+at+startup&gs_lcrp=EgZjaHJvbWUyBggAEEUYOTIHCAEQIRigATIKCAIQIRgWGB0YHjIKCAMQIRgWGB0YHtIBCDc2NTVqMGo3qAIAsAIA&sourceid=chrome&ie=UTF-8) 
+for local development? Or try to make as frictionless the approach so that both works locally and on cloud?):
+
+For the artifacts:
+
+```
+sudo mkdir /mnt/minivess-dvc-cache
+sudo mkdir /mnt/minivess-artifacts
+sudo chown $USER:$USER /mnt/minivess-artifacts /mnt/minivess-dvc-cache
+mount-s3 --region eu-north-1  --allow-delete --allow-other minivess-artifacts /mnt/minivess-artifacts
+```
+
+Do you actually want to have the shared cache to be mounted 
+`mount-s3 --region eu-north-1  --allow-delete --allow-other minivess-dvc-cache /mnt/minivess-dvc-cache`? 
+Seems slow actually:
+
+```
+sudo ln -s ~/minivess-dvc-cache /mnt/minivess-dvc-cache
+```
+
+And if you need to manually unmount:
+
+```
+sudo umount /mnt/minivess-dvc-cache
+sudo umount /mnt/minivess-artifacts
+```
 
 ### Training a segmentor
 
