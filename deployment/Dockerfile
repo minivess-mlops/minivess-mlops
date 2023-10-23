@@ -6,8 +6,6 @@ ENV USER minivessuser
 ENV HOME /home/$USER
 
 USER root
-RUN useradd -m $USER && echo $USER:$USER | chpasswd && adduser $USER sudo
-RUN chown $USER:$USER $HOME
 
 RUN export DEBIAN_FRONTEND=noninteractive && \
     ln -sf /usr/bin/python3.8 /usr/bin/python3 && \
@@ -20,7 +18,7 @@ ENV PYTHONPATH "${PYTHONPATH}:/app"
 
 RUN mkdir /mnt/minivess-artifacts /mnt/minivess-artifacts_local /mnt/minivess-dvc-cache
 RUN chown $USER:$USER /mnt/minivess-artifacts /mnt/minivess-artifacts_local /mnt/minivess-dvc-cache
-# VOLUME ["/mnt/minivess-dvc-cache", "/mnt/minivess-artifacts"]
+VOLUME ["/mnt/minivess-dvc-cache", "/mnt/minivess-artifacts", "/mnt/minivess-artifacts_local"]
 
 # Switch to non-privileged user from superuser
 USER $USER

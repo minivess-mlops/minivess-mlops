@@ -1,52 +1,52 @@
 import os
 import sys
-import warnings
+
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from pwd import getpwuid
 
 from typing import Dict, Any
 import hashlib
 import json
 
 import torch
-import yaml
 from loguru import logger
 import collections.abc
 import torch.distributed as dist
 
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, DictConfig
 from pydantic.v1.utils import deep_update
 
 from src.log_ML.json_log import to_serializable
 from src.log_ML.mlflow_log import init_mlflow_logging
 from src.utils.general_utils import print_dict_to_logger
 
-CONFIG_DIR = os.path.join(os.getcwd(), 'configs')
-if not os.path.exists(CONFIG_DIR):
-    raise IOError('Cannot find the directory for (task) .yaml config files from "{}"'.format(CONFIG_DIR))
-BASE_CONFIG_DIR = os.path.join(CONFIG_DIR, 'base')
+BASE_CONFIG_DIR = os.path.join(os.getcwd(), '..', 'configs')
 if not os.path.exists(BASE_CONFIG_DIR):
     raise IOError('Cannot find the directory for (base) .yaml config files from "{}"'.format(BASE_CONFIG_DIR))
 
+CONFIG_DIR = os.path.join(BASE_CONFIG_DIR, 'train_configs')
+if not os.path.exists(CONFIG_DIR):
+    raise IOError('Cannot find the directory for (task) .yaml config files from "{}"'.format(CONFIG_DIR))
 
 
+def import_config(args: dict,
+                  task_config_file: str,
+                  base_config_file: str = 'base_config.yaml',
+                  hyperparam_name: str = None,
+                  log_level: str = "INFO"):
 
-def import_config(args, task_config_file: str, base_config_file: str = 'base_config.yaml',
-                  hyperparam_name: str = None, log_level: str = "INFO"):
+    base_config = import_config_from_yaml(config_file=base_config_file,
+                                          config_dir=BASE_CONFIG_DIR,
+                                          config_type='base')
 
-    base_config = import_config_from_yaml(config_file = base_config_file,
-                                          config_dir = BASE_CONFIG_DIR,
-                                          config_type = 'base')
-
-    config = update_base_with_task_config(task_config_file = task_config_file,
-                                          config_dir = CONFIG_DIR,
-                                          base_config = base_config)
+    config = update_base_with_task_config(task_config_file=task_config_file,
+                                          config_dir=CONFIG_DIR,
+                                          base_config=base_config)
 
     if args['run_mode'] != 'train':
         config = update_config_for_non_train_mode(config,
-                                                  config_dir=os.path.join(CONFIG_DIR, 'mode_configs'),
+                                                  config_dir=os.path.join(BASE_CONFIG_DIR, 'runmode_configs'),
                                                   run_mode=args['run_mode'])
 
     config = config_manual_fixes(config)
@@ -62,7 +62,7 @@ def import_config(args, task_config_file: str, base_config_file: str = 'base_con
     config_hash = dict_hash(dictionary=config['config'])
     start_time = get_datetime_string()
 
-    if args['skip_realtime_aws_write']:
+    if not config['ARGS']['s3_mount']:
         logger.warning('Skipping realtime AWS S3 write, and writing run artifacts to a local non-mounted dir')
         config['ARGS']['output_dir'] += '_local'
 
@@ -97,10 +97,10 @@ def import_config(args, task_config_file: str, base_config_file: str = 'base_con
     # to make the dashboards cleaner, or alternatively you can just dump the whole config['config']
     config['hyperparameters'] = define_hyperparam_run_params(config)
     # TODO! Fix this with the updated nesting, with some nicer recursive function for undefined depth
-    config['hyperparameters_flat'] = None # flatten_nested_dictionary(dict_in=config['hyperparameters'])
+    config['hyperparameters_flat'] = None  # flatten_nested_dictionary(dict_in=config['hyperparameters'])
 
     logger.info('Save the derived hyperparameters to config["hyperparameters"]')
-    logger.info(config['hyperparameters']) # TODO add to print_the_dict_to_logger() nested dicts as well
+    logger.info(config['hyperparameters'])  # TODO add to print_the_dict_to_logger() nested dicts as well
 
     if config['config']['LOGGING']['unique_hyperparam_name_with_hash']:
         # i.e. whether you want a tiny change in dictionary content make this training to be grouped with
@@ -121,7 +121,7 @@ def import_config(args, task_config_file: str, base_config_file: str = 'base_con
     log_file = 'log_{}.txt'.format(hyperparam_name)
     config['run']['output_log_path'] = os.path.join(config['run']['output_experiment_dir'], log_file)
     try:
-        logger.add(config['run']['output_log_path'] ,
+        logger.add(config['run']['output_log_path'],
                    level=log_level, format=log_format, colorize=False, backtrace=True, diagnose=True)
     except Exception as e:
         logger.error('Problem initializing the log file to the artifacts output, permission issues?? e = {}'.format(e))
@@ -137,10 +137,10 @@ def import_config(args, task_config_file: str, base_config_file: str = 'base_con
     sys.stderr = sys.stdout
 
     # Initialize ML logging (experiment tracking)
-    config['run']['mlflow'], mlflow_dict =  init_mlflow_logging(config=config,
-                                                                mlflow_config=config['config']['LOGGING']['MLFLOW'],
-                                                                experiment_name = config['ARGS']['project_name'],
-                                                                run_name = config['run']['hyperparam_name'])
+    config['run']['mlflow'], mlflow_dict = init_mlflow_logging(config=config,
+                                                               mlflow_config=config['config']['LOGGING']['MLFLOW'],
+                                                               experiment_name=config['ARGS']['project_name'],
+                                                               run_name=config['run']['hyperparam_name'])
 
     return config
 
@@ -173,21 +173,21 @@ def update_config_for_non_train_mode(config: dict,
     return config
 
 
-def update_base_with_task_config(task_config_file: str, config_dir: str, base_config: dict):
+def update_base_with_task_config(task_config_file: str,
+                                 config_dir: str,
+                                 base_config: DictConfig) -> dict:
 
     # https://stackoverflow.com/questions/3232943/update-value-of-a-nested-dictionary-of-varying-depth
-    def update_config_dictionary(d: dict,
-                                 u: dict,
+    def update_config_dictionary(d: DictConfig,
+                                 u: DictConfig,
                                  input_is_omegaconf: bool = True,
-                                 method: str = 'pydantic'):
+                                 method: str = 'pydantic') -> DictConfig:
         if input_is_omegaconf:
             # TODO! examine OmegaConf.merge() and OmegaConf.update() for omegaConf native merge?
             d = OmegaConf.to_container(d, resolve=True)
             u = OmegaConf.to_container(u, resolve=True)
 
         if method == 'pydantic':
-            #print(d['config']['DATA']['DATALOADER']['SKIP_DATALOADER'])
-            #print(u['config']['DATA']['DATALOADER']['SKIP_DATALOADER'])
             d = deep_update(d, u)
         else:
             for k, v in u.items():
@@ -209,13 +209,13 @@ def update_base_with_task_config(task_config_file: str, config_dir: str, base_co
 
     # Task config now contains only subset of keys (of the base config), i.e. the parameters
     # that you change (no need to redefine all possible parameters)
-    task_config = import_config_from_yaml(config_file = task_config_file,
-                                          config_dir = config_dir,
-                                          config_type = 'task')
+    task_config = import_config_from_yaml(config_file=task_config_file,
+                                          config_dir=config_dir,
+                                          config_type='task')
 
     # update the base config now with the task config (i.e. the keys that have changed)
-    config = update_config_dictionary(d = base_config,
-                                      u = task_config)
+    config = update_config_dictionary(d=base_config,
+                                      u=task_config)
     # logger.info('Updated the base config with a total of {} changed keys from the task config', no_of_updates)
     # diff = diff_OmegaDicts(a=base_config, b=config) # TODO!
     # TODO! Need to check also whether you have a typo in dict, or some extra nesting, and the desired
@@ -232,7 +232,7 @@ def update_base_with_task_config(task_config_file: str, config_dir: str, base_co
 def import_config_from_yaml(config_file: str = 'base_config.yaml',
                             config_dir: str = CONFIG_DIR,
                             config_type: str = 'base',
-                            load_method: str = 'OmegaConf'):
+                            load_method: str = 'OmegaConf') -> DictConfig:
 
     config_path = os.path.join(config_dir, config_file)
     if os.path.exists(config_path):
@@ -288,7 +288,6 @@ def hash_config_dictionary(dict_in: dict):
     """
 
 
-
 def dict_hash(dictionary: Dict[str, Any]) -> str:
     """
     MD5 hash of a dictionary.
@@ -304,6 +303,7 @@ def dict_hash(dictionary: Dict[str, Any]) -> str:
         hash_out = dhash.hexdigest()
     except Exception as e:
         logger.warning('Problem getting the hash of the config dictionary, error = {}'.format(e))
+        hash_out = None
     return hash_out
 
 
@@ -407,6 +407,7 @@ def get_mounts_from_args(args: dict) -> list:
 def debug_mounts(mounts_list: list,
                  try_to_write: bool = True):
 
+    # mounts_list = ['/home/petteri/artifacts']
     for mount in mounts_list:
         logger.debug('MOUNT: {}'.format(mount))
         if not os.path.exists(mount):
@@ -452,12 +453,12 @@ def debug_mounts(mounts_list: list,
                 logger.error('Problem with file write to {}, e = {}'.format(path_out, e))
                 raise IOError('Problem with file write to {}, e = {}'.format(path_out, e))
 
-            try:
-                if os.path.exists(path_out):
+            if os.path.exists(path_out):
+                try:
                     os.remove(path_out)
                     logger.debug('File delete succesful!')
-                else:
-                    logger.debug('Weirdly you do not have any file to delete even though write went through OK?')
-            except Exception as e:
-                logger.error('Problem deleting file {}, e = {}'.format(path_out, e))
-                raise IOError('Problem deleting file {}, e = {}'.format(path_out, e))
+                except Exception as e:
+                    logger.error('Problem deleting file {}, e = {}'.format(path_out, e))
+                    raise IOError('Problem deleting file {}, e = {}'.format(path_out, e))
+            else:
+                logger.debug('Weirdly you do not have any file to delete even though write went through OK?')
