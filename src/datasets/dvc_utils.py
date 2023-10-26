@@ -3,14 +3,16 @@ import time
 import yaml
 from dvc.api import DVCFileSystem
 from loguru import logger
+from omegaconf import DictConfig
 
 from src.utils.general_utils import print_dict_to_logger
 
 
 def get_dvc_files_of_repo(repo_dir: str,
+                          repo_url: str,
                           dataset_name_lowercase: str,
                           fetch_params: dict,
-                          dataset_cfg: dict,
+                          dataset_cfg: DictConfig,
                           local_download_duplicate: bool = True,
                           use_local_repo: bool = True,
                           skip_already_downloaded: bool = True,
@@ -25,18 +27,18 @@ def get_dvc_files_of_repo(repo_dir: str,
             raise IOError('Cannot find the repo dir "{}"'.format(dvc_repo_path))
         fs = DVCFileSystem(repo_dir)
     else:
-        dvc_repo_path = fetch_params['repo_url']
-        fs = DVCFileSystem(dvc_repo_path, rev='main')
+        dvc_repo_path = repo_url
+        fs = DVCFileSystem(repo_url, rev='main')
 
     try:
         cache_dir = get_dvc_cache_dir(dvc_repo_path)
+        check_for_dvc_cache_existence(cache_dir)
     except Exception as e:
-        logger.warning('Problem getting the DVC cache dir from DVC path "{}", e = {}'.format(dvc_repo_path, e))
-        cache_dir = None
-    check_for_dvc_cache_existence(cache_dir)
+        logger.error('Problem getting the DVC cache dir from DVC path "{}", e = {}'.format(dvc_repo_path, e))
+        raise IOError('Problem getting the DVC cache dir from DVC path "{}", e = {}'.format(dvc_repo_path, e))
 
     try:
-        debug_dvc_files(dvc_repo_path=dvc_repo_path,
+        debug_dvc_files(dvc_repo_path=repo_url,
                         dataset=dataset_name_lowercase,
                         cache_dir=cache_dir)
     except Exception as e:
@@ -196,15 +198,28 @@ def get_dvc_cache_dir(dvc_repo_path: str):
                        format(dvc_path))
         cache_dir = None
 
+    if hasattr(__builtins__,'__IPYTHON__'):
+        try:
+            import google.colab
+            # NOTE! Hard-coded now in JUpyter notebook
+            cache_dir = 'volumes/minivess-dvc-cache'
+            logger.warning('Running in Colab, quick fix for DVC cache dir = {}'.format(cache_dir))
+        except:
+            IN_COLAB = False
+
     return cache_dir
 
 
 def check_for_dvc_cache_existence(cache_dir: str):
 
-    if not os.path.exists(cache_dir):
-        raise IOError('DVC cache dir does not exist in "{}"'.format(cache_dir))
-    else:
-        logger.info('DVC cache dir exists in "{}"'.format(cache_dir))
+    try:
+        if not os.path.exists(cache_dir):
+            raise IOError('DVC cache dir does not exist in "{}"'.format(cache_dir))
+        else:
+            logger.info('DVC cache dir exists in "{}"'.format(cache_dir))
+    except Exception as e:
+        logger.warning('Problem checking for cache dir ({}), e = {}'.format(cache_dir, e))
+        raise IOError('Problem checking for cache dir ({}), e = {}'.format(cache_dir, e))
 
 
 def get_dvc_config(dvc_path: str,

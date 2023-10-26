@@ -1,11 +1,9 @@
 # @package _global_
-NAME: 'test_train'
+NAME: 'train_demo'
 config:
   VERBOSE: True
   TRAINING:
-    # When you add some tests that check if your weights are changing, something is learned (e.g. Weightwatcher),
-    # you could want to train a bit longer. 1 epoch is enough for the basic bug hunting
-    NUM_EPOCHS: 1
+    SKIP_TRAINING: True
   DATA:
     DATA_SOURCE:
       MINIVESS:
@@ -13,7 +11,7 @@ config:
           MONAI_CACHEDATASET:
             CACHE_RATE: 0.0
         SUBSET:
-          NAME: 'DEBUG'
+          NAME: 'ALL_SAMPLES'
   LOGGING:
     MLFLOW:
       TRACKING:

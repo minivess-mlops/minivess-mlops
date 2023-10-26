@@ -2,6 +2,7 @@ import os
 
 import mlflow
 from loguru import logger
+from omegaconf import DictConfig
 
 
 def authenticate_mlflow(fname_creds: str = 'mlflow_credentials.ini'):
@@ -53,7 +54,8 @@ def init_mlflow_run(local_server_path: str,
     return experiment, active_run
 
 
-def init_mlflow_logging(config: dict,
+def init_mlflow_logging(config: DictConfig,
+                        exp_run: dict,
                         mlflow_config: dict,
                         experiment_name: str = "MINIVESS_segmentation",
                         run_name: str = "UNet3D"):
@@ -64,16 +66,20 @@ def init_mlflow_logging(config: dict,
 
     if mlflow_config['TRACKING']['enable']:
         logger.info('MLflow | Initializing MLflow Experiment tracking')
-        if mlflow_config['server_URI'] is not None:
-            env_vars_set = authenticate_mlflow()
-            if not env_vars_set:
-                tracking_uri = mlflow_local_mlflow_init(config)
+        try:
+            if config['config']['SERVICES']['MLFLOW']['server_URI'] is not None:
+                env_vars_set = authenticate_mlflow()
+                if not env_vars_set:
+                    tracking_uri = mlflow_local_mlflow_init(config, exp_run)
+                else:
+                    logger.info('Logging to a remote tracking MLflow Server ({})'.format(mlflow_config['server_URI']))
+                    tracking_uri = mlflow_config['server_URI']
+                    mlflow.set_tracking_uri(tracking_uri)
             else:
-                logger.info('Logging to a remote tracking MLflow Server ({})'.format(mlflow_config['server_URI']))
-                tracking_uri = mlflow_config['server_URI']
-                mlflow.set_tracking_uri(tracking_uri)
-        else:
-            tracking_uri = mlflow_local_mlflow_init(config)
+                tracking_uri = mlflow_local_mlflow_init(config, exp_run)
+        except Exception as e:
+            logger.error('Failed to initialize the MLflow logging! e = {}'.format(e))
+            raise IOError('Failed to initialize the MLflow logging! e = {}'.format(e))
 
         logger.info('MLflow | Logging to a local MLflow Server: "{}"'.format(tracking_uri))
         # TODO! Is there a way to have MLflow wait for longer periods, or go to offline state
@@ -94,12 +100,12 @@ def init_mlflow_logging(config: dict,
                           '   mlflow_config["server_URI"]  = null\n'
                           'error = {}'.format(e))
 
-        if config["hyperparameters_flat"] is not None:
-            logger.info('MLflow | Writing experiment hyperparameters (from config["hyperparameters_flat"])')
-            for hyperparam_key in config["hyperparameters_flat"]:
+        if exp_run["HYPERPARAMETERS_FLAT"] is not None:
+            logger.info('MLflow | Writing experiment hyperparameters (from exp_run["HYPERPARAMETERS_FLAT"])')
+            for hyperparam_key in exp_run["HYPERPARAMETERS_FLAT"]:
                 # https://dagshub.com/docs/troubleshooting/
-                mlflow.log_param(hyperparam_key, config["hyperparameters_flat"][hyperparam_key])
-                logger.debug(' {} = {}'.format(hyperparam_key, config["hyperparameters_flat"][hyperparam_key]))
+                mlflow.log_param(hyperparam_key, exp_run["HYPERPARAMETERS_FLAT"][hyperparam_key])
+                logger.debug(' {} = {}'.format(hyperparam_key, exp_run["HYPERPARAMETERS_FLAT"][hyperparam_key]))
         else:
             logger.info('MLflow | Writing dummy parameter')
             mlflow.log_param('dummy_key', 'dummy_value')
@@ -115,10 +121,11 @@ def init_mlflow_logging(config: dict,
     return mlflow_dict_omegaconf, mlflow_dict
 
 
-def mlflow_local_mlflow_init(config) -> str:
+def mlflow_local_mlflow_init(config, exp_run) -> str:
     # see e.g. https://github.com/dmatrix/google-colab/blob/master/mlflow_issue_3317.ipynb
-    tracking_uri = config['run']['output_mlflow_dir']
+    tracking_uri = exp_run['RUN']['output_mlflow_dir']
     os.makedirs(tracking_uri, exist_ok=True)
+    logger.debug('MLflow | Local MLflow Server initialized at "{}"'.format(tracking_uri))
     mlflow.set_tracking_uri(tracking_uri)
 
     return tracking_uri
@@ -128,7 +135,7 @@ def mlflow_log_dataset(mlflow_config: dict,
                        dataset_cfg: dict,
                        filelisting: dict,
                        fold_split_file_dicts: dict,
-                       config: dict):
+                       config: DictConfig):
     """
     https://mlflow.org/docs/latest/python_api/mlflow.data.html
     """

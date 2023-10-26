@@ -6,16 +6,19 @@ import requests
 import zipfile
 import random
 
-from ml_tests.dataset_tests import ml_test_dataset_for_allowed_types
-from ml_tests.file_tests import ml_test_filelisting_corruption
+from omegaconf import DictConfig
+
+from tests.data.dataset_tests import ml_test_dataset_for_allowed_types
+from tests.data.file_tests import ml_test_filelisting_corruption
 from src.datasets.dvc_utils import get_dvc_files_of_repo
 from src.utils.general_utils import print_memory_stats_to_logger
 
 
-def import_minivess_dataset(dataset_cfg: dict,
+def import_minivess_dataset(dataset_cfg: DictConfig,
                             data_dir: str,
                             run_mode: str,
-                            config: dict,
+                            config: DictConfig,
+                            exp_run: dict,
                             dataset_name: str,
                             fetch_method: str,
                             fetch_params: dict):
@@ -24,7 +27,8 @@ def import_minivess_dataset(dataset_cfg: dict,
         dataset_dir = fetch_dataset_with_dvc(fetch_params=fetch_params,
                                              dataset_cfg=dataset_cfg,
                                              dataset_name_lowercase=dataset_name.lower(),
-                                             repo_dir=config['run']['repo_dir'])
+                                             repo_url=config['config']['SERVICES']['DVC']['repo_url'],
+                                             repo_dir=exp_run['RUN']['repo_dir'])
 
     elif fetch_method == 'EBrains':
         dataset_dir = import_filelisting_ebrains(dataset_cfg=dataset_cfg,
@@ -37,27 +41,33 @@ def import_minivess_dataset(dataset_cfg: dict,
     filelisting, dataset_stats = get_minivess_filelisting(dataset_dir)
     fold_split_file_dicts = define_minivess_splits(filelisting, data_splits_config=dataset_cfg['SPLITS'])
 
-    if dataset_cfg['SUBSET']['NAME'] == 'ALL_SAMPLES':
-        logger.info('Using all the samples for training, validation and testing')
-    else:
-        subset_cfg_name = dataset_cfg['SUBSET']['NAME']
-        subset_cfg = dataset_cfg['SUBSET'][subset_cfg_name]
-        logger.info('Using only a subset of the samples, Config = {}'.format(dataset_cfg['SUBSET']['NAME']))
-        minivess_debug_splits(fold_split_file_dicts=fold_split_file_dicts,
-                              subset_cfg=subset_cfg,
-                              subset_cfg_name=subset_cfg_name)
+    try:
+        if dataset_cfg['SUBSET']['NAME'] == 'ALL_SAMPLES':
+            logger.info('Using all the samples for training, validation and testing')
+        else:
+            subset_cfg_name = dataset_cfg['SUBSET']['NAME']
+            subset_cfg = dataset_cfg['SUBSET'][subset_cfg_name]
+            logger.info('Using only a subset of the samples, Config = {}'.format(dataset_cfg['SUBSET']['NAME']))
+            minivess_debug_splits(fold_split_file_dicts=fold_split_file_dicts,
+                                  subset_cfg=subset_cfg,
+                                  subset_cfg_name=subset_cfg_name)
+    except Exception as e:
+        logger.error('Problem getting data subset, error = {}'.format(e))
+        raise IOError('Problem getting data subset, error = {}'.format(e))
 
     return filelisting, fold_split_file_dicts, dataset_stats
 
 
 def fetch_dataset_with_dvc(fetch_params: dict,
-                           dataset_cfg: dict,
+                           dataset_cfg: DictConfig,
                            dataset_name_lowercase: str,
+                           repo_url: str,
                            repo_dir: str):
 
     # TODO! This is now based on "dvc pull" by Github Actions or manual, but you could try
     #  to get the Python programmatic API to work too (or have "dvc pull" from subprocess)
     dataset_dir = get_dvc_files_of_repo(repo_dir=repo_dir,
+                                        repo_url=repo_url,
                                         dataset_name_lowercase=dataset_name_lowercase,
                                         fetch_params=fetch_params,
                                         dataset_cfg=dataset_cfg)
@@ -217,6 +227,7 @@ def define_minivess_splits(filelisting,
 
     split_method = data_splits_config['NAME']
     if split_method == 'RANDOM':
+        logger.info('Splitting the data randomly')
         files_dict = get_random_splits_for_minivess(data_dicts, data_split_cfg=data_splits_config[split_method])
         # FIXME! quick and dirty placeholder for allowing cross-validation if needed, or you could bootstrap
         #  an inference model with different data on each fold
