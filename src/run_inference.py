@@ -4,9 +4,11 @@ import sys
 from loguru import logger
 
 from src.datasets.inference_data import remove_unnecessary_nesting
-from src.inference.inference_utils import inference_per_batch
-from src.log_ML.mlflow_admin import get_mlflow_model_for_inference
+from src.inference.bentoml_utils import import_mlflow_model_to_bentoml, save_bentoml_model_to_model_store
+from src.log_ML.mlflow_admin import get_reg_mlflow_model
 from src.training.experiment import define_experiment_data
+from src.utils.config_utils import get_repo_dir
+from src.utils.data_utils import write_tensor_as_json
 from src.utils.general_utils import print_dict_to_logger
 
 src_path = os.path.dirname(os.path.abspath(__file__))
@@ -26,6 +28,12 @@ def parse_args_to_dict():
                         default='/home/petteri/test_volumes_inference',
                         help="Where the data is downloaded, or what dir needs to be mounted when you run this"
                              "on Docker")
+    parser.add_argument('-s3', '--s3_mount', action='store_true',
+                        default=None, required=False,
+                        help='None for local MLflow server, otherwise use Dagshub or some other remote uri')
+    parser.add_argument('-uri', '--mlflow_server_uri', type=str, required=False,
+                        default=None,
+                        help="with None using local MLflow, otherwise specify e.g. a Dagshub uri")
     parser.add_argument('-p', '--project_name', type=str, required=False,
                         default='minivess-test2',
                         help="Name of the project in WANDB/MLOps. Keep the same name for all the segmentation"
@@ -39,28 +47,52 @@ def parse_args_to_dict():
     return args_dict
 
 
-if __name__ == '__main__':
-
-    args = parse_args_to_dict()
+def get_model_from_mlflow_as_bentoml_model(model_name: str,
+                                           inference_cfg: str,
+                                           server_uri: str):
 
     # Get the model to be used for inference from MLflow Model Registry
-    cfg = get_mlflow_model_for_inference(project_name=args['project_name'],
-                                         inference_cfg=args['task_config_file'],
-                                         data_dir=args['data_dir'],
-                                         output_dir=args['output_dir'])
+    cfg, mlflow_model = get_reg_mlflow_model(model_name=model_name,
+                                             inference_cfg=inference_cfg,
+                                             server_uri=server_uri)
 
+    # Import the model to BentoML deployment
+    bento_model, pyfunc_model = import_mlflow_model_to_bentoml(mlflow_model)
+
+    # Save to BentoML Model Store?
+    save_bentoml_model_to_model_store(bento_model,
+                                      pyfunc_model,
+                                      mlflow_model,
+                                      cfg)
+
+    model_dict = {
+        'mlflow_model': mlflow_model,
+        'bento_model': bento_model,
+        'pyfunc_model': pyfunc_model
+    }
+
+    return cfg, model_dict
+
+
+if __name__ == '__main__':
+
+    # Get the cfg used for training and the MLflow as BentoML model
+    args = parse_args_to_dict()
+    cfg, model_dict = get_model_from_mlflow_as_bentoml_model(model_name=args['project_name'],
+                                                             inference_cfg=args['task_config_file'],
+                                                             server_uri=args['mlflow_server_uri'])
+
+    # Update the data_dir
+    cfg['hydra_cfg']['config']['DATA']['DATA_SOURCE']['FOLDER']['DATA_DIR'] = args['data_dir']
+
+    # TODO! Inference
     # Define the used data with the same function as in training
-    fold_split_file_dicts, experim_datasets, experim_dataloaders, cfg['run'] = define_experiment_data(cfg=cfg)
-    dataloader = remove_unnecessary_nesting(experim_dataloaders)
+    # fold_split_file_dicts, experim_datasets, experim_dataloaders, cfg['run'] = define_experiment_data(cfg=cfg)
+    # dataloader = remove_unnecessary_nesting(experim_dataloaders)
+    #
+    # for i, batch_data in enumerate(dataloader):
+    #     test_volume = batch_data['image'][0,:,0:16,0:16,0:8].unsqueeze(0)
+    #     write_tensor_as_json(tensor_in=test_volume,
+    #                          filename=batch_data['metadata']['filename'][0])
 
-    for i, batch_data in enumerate(dataloader):
-        filenames = batch_data['metadata']['filename']
-        logger.info('Inference on batch #{}/{} (no files = {}): {}'.
-                    format(i + 1, len(dataloader), len(filenames), filenames))
 
-        # https://mlflow.org/docs/latest/models.html#model-evaluation
-        inference_per_batch(image_tensor=batch_data['image'],
-                            filenames=filenames,
-                            batch_data=batch_data,
-                            model=cfg['mlflow_run']['loaded_ensemble'],
-                            cfg=cfg)
