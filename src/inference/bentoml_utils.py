@@ -16,29 +16,30 @@ def test_bento_model_inference(pyfunc_model: mlflow.pyfunc.PyFuncModel):
         raise IOError('Inference failed for BentoML model, e = {}'.format(e))
 
 
-def import_mlflow_model_to_bentoml(mlflow_model: dict,
-                                   model_name: str = 'mlflow_model'):
+def import_mlflow_model_to_bentoml(run: mlflow.entities.Run,
+                                   model_uri: str = 'models:/minivess-test2/1',
+                                   bento_model_name: str = 'minivess-segmentor'):
     """
     https://docs.bentoml.org/en/latest/integrations/mlflow.html#import-an-mlflow-model
+    https://docs.bentoml.org/en/latest/integrations/mlflow.html#attach-model-params-metrics-and-tags
+    https://docs.bentoml.org/en/latest/integrations/mlflow.html#loading-original-model-flavor
     """
-
-    # https://docs.bentoml.org/en/latest/integrations/mlflow.html#attach-model-params-metrics-and-tags
-    run = mlflow.get_run(mlflow_model['latest_version'].run_id)
-
-    # https://docs.bentoml.org/en/latest/integrations/mlflow.html#loading-original-model-flavor
     bento_model: bentoml._internal.models.model.Model = (
-        bentoml.mlflow.import_model(name=model_name,
-                                    model_uri=mlflow_model['model_uri'],
+        bentoml.mlflow.import_model(name=bento_model_name,
+                                    model_uri=model_uri,
                                     labels=run.data.tags,
                                     metadata={
                                         "metrics": run.data.metrics,
-                                         "params": run.data.params,
+                                        "params": run.data.params,
+                                        "tags": run.data.tags,
+                                        "run_id": run.info.run_id,
+                                        "run_name": run.info.run_name,
                                     }
                                     )
     )
 
     # https://docs.bentoml.org/en/latest/integrations/mlflow.html#loading-pyfunc-flavor
-    pyfunc_model: mlflow.pyfunc.PyFuncModel = bentoml.mlflow.load_model(model_name)
+    pyfunc_model: mlflow.pyfunc.PyFuncModel = bentoml.mlflow.load_model(bento_model_name)
     test_bento_model_inference(pyfunc_model)
 
     return bento_model, pyfunc_model
@@ -52,7 +53,7 @@ def save_bentoml_model_to_model_store(bento_model: bentoml._internal.models.mode
     # https://docs.bentoml.org/en/latest/concepts/model.html#save-a-trained-model
     logger.debug('Placeholder for model save')
 
-    # bentoml.pytorch.save_model(
+    # bentoml_log.pytorch.save_model(
     #     "demo_bentoml_model_minivess",  # Model name in the local Model Store
     #     bento_model,  # Model instance being saved
     #     labels={  # User-defined labels for managing models in BentoCloud or Yatai

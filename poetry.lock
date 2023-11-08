@@ -406,13 +406,13 @@ lxml = ["lxml"]
 
 [[package]]
 name = "bentoml"
-version = "1.1.7"
+version = "1.1.8"
 description = "BentoML: Build Production-Grade AI Applications"
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "bentoml-1.1.7-py3-none-any.whl", hash = "sha256:497124ef7c2e5943958a24ec960f14b8f24e7db96603cbb92fe9ca8ffd0f37ae"},
-    {file = "bentoml-1.1.7.tar.gz", hash = "sha256:afa6d9342f76cefcf20b4b75e9de83ab97a87d883b604d46794d1c9a4dd054c5"},
+    {file = "bentoml-1.1.8-py3-none-any.whl", hash = "sha256:01f983a215c4d71eabe0d333889439d5eb8f57aa139c768bcd29e46d9a4d85c6"},
+    {file = "bentoml-1.1.8.tar.gz", hash = "sha256:45120822241ecc1476f6b5e1526bba955e693570dacc449498e2f031dd1e487f"},
 ]
 
 [package.dependencies]
@@ -425,6 +425,7 @@ click-option-group = "*"
 cloudpickle = ">=2.0.0"
 deepmerge = "*"
 fs = "*"
+fs-s3fs = {version = "*", optional = true, markers = "extra == \"aws\""}
 httpx = "*"
 inflection = "*"
 jinja2 = ">=3.0.1"
@@ -1777,6 +1778,22 @@ six = ">=1.10,<2.0"
 
 [package.extras]
 scandir = ["scandir (>=1.5,<2.0)"]
+
+[[package]]
+name = "fs-s3fs"
+version = "1.1.1"
+description = "Amazon S3 filesystem for PyFilesystem2"
+optional = false
+python-versions = "*"
+files = [
+    {file = "fs-s3fs-1.1.1.tar.gz", hash = "sha256:b57f8c7664460ff7b451b4b44ca2ea9623a374d74e1284c2d5e6df499dc7976c"},
+    {file = "fs_s3fs-1.1.1-py2.py3-none-any.whl", hash = "sha256:9ba160eaa93390cc5992a857675666cb2fbb3721b872474dfdc659a715c39280"},
+]
+
+[package.dependencies]
+boto3 = ">=1.9,<2.0"
+fs = ">=2.4,<3.0"
+six = ">=1.10,<2.0"
 
 [[package]]
 name = "fsspec"
@@ -6741,4 +6758,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.8.18"
-content-hash = "058eb17f44abe569d17edad5788a780be79b8e1dd3eef397e4f9caa0d2b8852a"
+content-hash = "8dd9205c315c55b168ae54ca9d812598e90179539fb479da6dd9da0ffb3f2e6d"

@@ -1,12 +1,12 @@
 # https://docs.bentoml.org/en/latest/concepts/bento.html#build-a-bento
-service: "deployment/bentoml/service.py:svc"
+service: "deployment/bento/service.py:svc"
 description: "file: ./README.md"
 # https://docs.bentoml.org/en/latest/guides/containerization.html#custom-base-image
 #docker:
 #    base_image: "petteriteikari/minivess-mlops-env:latest"
 # https://docs.bentoml.org/en/latest/concepts/bento.html#docker-options
-docker:
-    python_version: "3.8.18"
+#docker:
+#    python_version: "3.8.18"
 # https://docs.bentoml.org/en/latest/concepts/bento.html#gpu-support
 #    cuda_version: "12.2.2"
 labels:
@@ -15,7 +15,7 @@ labels:
 include:
   # https://docs.bentoml.org/en/latest/concepts/bento.html#files-to-include
   - "**/*.py"
-  # - "./deployment/bentoml/service.py"
+  # - "./deployment/bentoml_log/service.py"
 exclude:
   - "data/"
 #conda:
@@ -23,4 +23,4 @@ exclude:
 python:
   requirements_txt: "./deployment/requirements.txt"
 models: # The model to be used for building the Bento.
-  - mlflow_model:latest
+  - minivess-segmentor:latest

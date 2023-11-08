@@ -9,19 +9,22 @@ from mlflow.entities import ViewType
 from mlflow.entities.model_registry import ModelVersion, RegisteredModel
 from mlflow.store.entities import PagedList
 from loguru import logger
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf, DictConfig
 
 from src.inference.ensemble_model import ModelEnsemble
 from src.log_ML.log_config import get_cfg_yaml_fname, get_run_params_yaml_fname, define_ensemble_submodels_dir_name
-from src.log_ML.mlflow_init import authenticate_mlflow, init_mlflow
-from src.log_ML.mlflow_models import load_model_from_registry, import_mlflow_model
+from src.log_ML.log_model_registry import register_model_from_run
+from src.log_ML.mlflow_log.mlflow_init import authenticate_mlflow, init_mlflow
+from src.log_ML.mlflow_log.mlflow_models import import_mlflow_model
 from src.utils.config_utils import get_repo_dir, get_config_dir, config_import_script
 from src.utils.dict_utils import cfg_key
 
 
 def mlflow_update_best_model(project_name: str,
+                             cfg: DictConfig,
                              stage: str = 'Staging',
-                             best_metric_name: str = 'Dice'):
+                             best_metric_name: str = 'Dice',
+                             manual_debug_run: bool = False):
 
     # Get best run from all the runs so far
     best_run = get_best_run(project_name,
@@ -33,11 +36,21 @@ def mlflow_update_best_model(project_name: str,
                                   best_run=best_run,
                                   best_metric_name=best_metric_name))
 
+    if manual_debug_run:
+        # when log_model was jamming, some run_id and associated model was wanted
+        # for model registration so that the BentoML part could be worked on
+        logger.warning('You have hard-coded a run_id for debugging purposes!')
+        manual_run_id = '5e28d9fb0dab44a2861585c800df3c59'
+        logger.warning('best_run from id = {}'.format(manual_run_id))
+        best_run = mlflow.get_run(run_id=manual_run_id)
+
     # Register the model from the best run from MLflow experiments,
     # if the best run is better than the best registered model
+    register_best_run_as_best_registered_model = True
     if register_best_run_as_best_registered_model:
         logger.info('Register the best run as the best registered model')
         register_model_from_run(run=best_run,
+                                cfg=cfg,
                                 stage=stage,
                                 project_name=project_name)
     else:
@@ -98,97 +111,6 @@ def get_best_metric_of_run(run_id: str,
     return best_value
 
 
-def register_model_from_run(run: mlflow.entities.Run,
-                            stage: str = 'Staging',
-                            project_name: str = 'segmentation-minivess'):
-
-    # https://mlflow.org/docs/1.8.0/model-registry.html#mlflow-model-registry
-    client = MlflowClient()
-
-    # https://mlflow.org/docs/latest/model-registry.html#adding-an-mlflow-model-to-the-model-registry
-    metamodel_name = get_log_model_history_dict_from_run(run=run)
-    #metamodel_name = run.info.run_name  ## TODO! depends on name_to_use
-
-    # Registered model names you don't necessarily want to be as cryptic as the model log name
-    # which comes from the hyperparameter sweep. In the end, you might want to have the best segmentor
-    # model (or in general you want these names to be a lot more human-readable)
-    reg_model_name = project_name
-
-    # https://mlflow.org/docs/latest/model-registry.html#adding-an-mlflow-model-to-the-model-registry
-    logger.info('Register best model with the name = {}'.format(reg_model_name))
-    model_uri = f"runs:/{run.info.run_id}/{metamodel_name}"
-    logger.info('model_uri = {}'.format(model_uri))
-    reg = mlflow.register_model(model_uri=model_uri,
-                                name=reg_model_name)
-
-    # Set model version tag
-    try:
-        client.set_model_version_tag(name=reg_model_name,
-                                     version=reg.version,
-                                     key="metamodel_name",
-                                     value=metamodel_name)
-    except Exception as e:
-        logger.error('Failed to set tags to registered model! e = {}'.format(e))
-        raise IOError('Failed to set tags to registered model! e = {}'.format(e))
-
-    # Set and delete aliases on models
-    client.set_registered_model_alias(name=reg_model_name,
-                                      alias="autoreregistered",
-                                      version=reg.version)
-
-    # Auto-stage
-    transition_model_stage(name=reg_model_name,
-                           version=reg.version,
-                           stage=stage)
-
-    # Auto-stage previous versions to None then
-    # TODO!
-
-    # Test that you can load the model
-    model_uri = f'models:/{reg_model_name}/{reg.version}'
-    # TODO! autogen the requirements.txt on local machine too
-    # mlflow.pyfunc.get_model_dependencies(model_uri)
-    logger.info('Testing that you can actually load the registered model from "{}"'.format(model_uri))
-    loaded_model = load_model_from_registry(model_uri=model_uri)
-
-    # TODO! You should try to serve the model here as well to test the load_pickle() works
-
-
-def transition_model_stage(name: str,
-                           version: str,
-                           stage: str = 'Staging'):
-    # https://mlflow.org/docs/1.8.0/model-registry.html#transitioning-an-mlflow-models-stage
-    logger.info('Transition model "{}" (v. {}) stage to {}'.format(name, version, stage))
-    client = MlflowClient()
-    client.transition_model_version_stage(
-        name=name,
-        version=version,
-        stage=stage
-    )
-
-
-def get_log_model_history_dict_from_run(run):
-
-    run_id = run.info.run_id
-    tags = run.data.tags
-    if 'mlflow.log-model.history' in tags:
-        log_model_histories_string: str = tags['mlflow.log-model.history']
-        log_model = json.loads(log_model_histories_string)
-
-        if len(log_model) == 1:
-            log_model_dict: dict = log_model[0]
-            metamodel_name = log_model_dict['metadata']['metamodel_name']
-        else:
-            raise NotImplementedError('Check why there are more entries or none?')
-
-    else:
-        logger.debug("No 'mlflow.log-model.history' in tags!")
-        metamodel_name = run.data.tags['metamodel_name']
-
-    logger.debug('metamodel_name = "{}" from run'.format(metamodel_name))
-    return metamodel_name
-
-
 def get_mlflow_ordering_direction(best_metric_name):
 
     if best_metric_name == 'Dice':
@@ -213,11 +135,15 @@ def get_best_run(project_name: str,
         logger.error('Failed to get the runs from experiment = {}! e = {}'.format(project_name, e))
         raise IOError('Failed to get the runs from experiment = {}! e = {}'.format(project_name, e))
 
-    if len(runs) > 0:
-        best_run = runs[0]
-        metric_name = metric_best.split(' ')[0]
-        logger.info('Best run from MLflow Tracking experiments, '
-                    '{} = {:.3f}'.format(metric_name, best_run.data.metrics[metric_name]))
+    if runs is not None:
+        if len(runs) > 0:
+            best_run = runs[0]
+            metric_name = metric_best.split(' ')[0]
+            logger.info('Best run from MLflow Tracking experiments, '
+                        '{} = {:.3f}'.format(metric_name, best_run.data.metrics[metric_name]))
+        else:
+            logger.warning('No runs returned!')
+            best_run = None
     else:
         logger.warning('No runs returned!')
         best_run = None
@@ -237,13 +163,17 @@ def get_runs_of_experiment(project_name: str,
     logger.info('Filtering string {}'.format(filter_string))
     logger.info('Returning only ACTIVE runs')
     # ADD info.status == 'FINISHED'
-    runs = MlflowClient().search_runs(
-        experiment_ids=get_current_id(project_name=project_name),
-        filter_string="",
-        run_view_type=ViewType.ACTIVE_ONLY,
-        max_results=max_results,
-        order_by=order_by,
-    )
+    try:
+        runs = MlflowClient().search_runs(
+            experiment_ids=get_current_id(project_name=project_name),
+            filter_string="",
+            run_view_type=ViewType.ACTIVE_ONLY,
+            max_results=max_results,
+            order_by=order_by,
+        )
+    except Exception as e:
+        logger.error('Failed to get the runs from experiment = {}! e = {}'.format(project_name, e))
+        runs = None
 
     return runs
 
@@ -281,7 +211,7 @@ def get_reg_mlflow_model(model_name: str,
     # Get the Conda env (created from the requirements.txt that the Docker autocreated from the Poetry env)
     mlflow_model['env_paths'] = get_env_from_mlflow_model_registry(artifact_uri=mlflow_model['artifact_uri'])
 
-    # Copy the conda.yaml to the deployment/bentoml folder
+    # Copy the conda.yaml to the deployment/bentoml_log folder
     copy_env_to_bentoml_dir(local_path=mlflow_model['env_paths']['local_conda_path'],
                             repo_dir=get_repo_dir())
 
@@ -295,7 +225,7 @@ def copy_env_to_bentoml_dir(local_path: str,
                             repo_dir: str):
     # You probably a bit something more automagic here, done with Github Actions,
     # but this will get devel/debugging started
-    bentoml_dir = os.path.join(get_repo_dir(), 'deployment', 'bentoml')
+    bentoml_dir = os.path.join(get_repo_dir(), 'deployment', 'bentoml_log')
     if not os.path.exists(bentoml_dir):
         logger.error('Could not find the BentoML deployment folder = "{}"'.format(bentoml_dir))
         raise IOError('Could not find the BentoML deployment folder = "{}"'.format(bentoml_dir))
@@ -324,10 +254,10 @@ def download_registered_model(rmodel: RegisteredModel,
                                                       cfg=cfg,
                                                       ensemble_name=ensemble_name))
 
-    elif model_download_method == 'mlflow.pyfunc.load_model':
+    elif model_download_method == 'mlflow_log.pyfunc.load_model':
         raise NotImplementedError('This does not seem to work correctly, do some devel debugging')
         # https://stackoverflow.com/a/76347084/6412152
-        # client = MlflowClient(mlflow.get_tracking_uri())
+        # client = MlflowClient(mlflow_log.get_tracking_uri())
         # download_uri = client.get_model_version_download_uri(latest_model_version.name, latest_model_version.version)
         # model_uri_version = f"models:/{latest_model_version.name}/{latest_model_version.version}"
         # model_uri_stage = f"models:/{latest_model_version.name}/{latest_model_version.current_stage}"
@@ -459,7 +389,10 @@ def import_cfg_from_mlflow(artifact_base_dir: str = None,
     return {'hydra_cfg': hydra_cfg, 'run': run_params}
 
 
-def update_mlflow_cfg(local_path: str, inference_cfg: str):
+def update_mlflow_cfg(local_path: str,
+                      inference_cfg: str,
+                      parent_dir_string: str = '../',
+                      parent_dir_string_defaults: str = '../'):
 
     config_dir = get_config_dir()
 
@@ -476,17 +409,30 @@ def update_mlflow_cfg(local_path: str, inference_cfg: str):
                       '"{}" to "{}", e = {}'.format(fname, os.path.join(config_dir, fname), e))
 
     # combine the base from MLflow run with the inference config
-    config = config_import_script(task_cfg_name=inference_cfg,
-                                  parent_dir_string='..',
-                                  parent_dir_string_defaults='..',
-                                  job_name='inference_folder',
-                                  base_cfg_name = fname_wo_ext)
+    try:
+        config = config_import_script(task_cfg_name=inference_cfg,
+                                      parent_dir_string=parent_dir_string,
+                                      parent_dir_string_defaults=parent_dir_string_defaults,
+                                      job_name='inference_folder',
+                                      base_cfg_name = fname_wo_ext)
+    except Exception as e:
+        try:
+            os.remove(os.path.join(config_dir, fname))
+        except Exception as e:
+            logger.warning('Failed to remove the temp file "{}", e = {}'.
+                           format(os.path.join(config_dir, fname), e))
+        logger.error('Failed to combine the MLflow config '
+                     '"{}" with the inference config "{}", e = {}'.format(fname, inference_cfg, e))
+        raise IOError('Failed to combine the MLflow config '
+                      '"{}" with the inference config "{}", e = {}'.format(fname, inference_cfg, e))
+
 
     # remove the temporary copy of the MLflow config
     try:
         os.remove(os.path.join(config_dir, fname))
     except Exception as e:
-        logger.warning('Failed to remove the temp file "{}", e = {}'.format(os.path.join(config_dir, fname), e))
+        logger.warning('Failed to remove the temp file "{}", e = {}'.
+                       format(os.path.join(config_dir, fname), e))
 
     return config
 
