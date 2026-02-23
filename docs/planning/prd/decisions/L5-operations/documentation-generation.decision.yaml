@@ -158,8 +158,24 @@ domain_applicability:
 
 rationale: >
   Automated cards (0.35) is the resolved choice, generating model cards
-  from MLflow metadata. Manual (0.30) is partially implemented for ADRs.
-  CI-generated (0.20) is the next step when CI/CD doc pipelines mature.
+  from MLflow metadata following the Model Cards framework (Mitchell et al.,
+  2019). Manual (0.30) is partially implemented for ADRs. CI-generated
+  (0.20) is the next step when CI/CD doc pipelines mature, supported by
+  evidence from Rosmarino et al. (2025) on MLOps-driven regulatory
+  documentation and Lähteenmäki et al. (2023) on the RegOps lifecycle.
+
+references:
+  - citation_key: rosmarino2025regdocs
+    relevance: "MLOps-driven automation of regulatory documentation for AI-based SaMD. Shows IEC 62304 artifact generation from CI/CD pipelines."
+    supports_options: ["automated_cards", "ci_generated"]
+
+  - citation_key: lahteenmaki2023regops
+    relevance: "RegOps lifecycle concept for continuous regulatory compliance. Documentation as CI/CD output."
+    supports_options: ["ci_generated"]
+
+  - citation_key: mitchell2019model
+    relevance: "Model Cards framework. Foundation for automated model card generation."
+    supports_options: ["automated_cards"]
 
 tags:
   - operations

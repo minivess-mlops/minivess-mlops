@@ -144,6 +144,31 @@ rationale: >
   aligned with the existing MONAI/LangChain stack. Domain applicability is
   lower than core ML decisions because agents are supplementary automation.
 
+references:
+  - citation_key: langchain2024langgraph
+    relevance: "LangGraph framework for stateful multi-actor agent applications with LLMs."
+    supports_options: ["langgraph"]
+
+  - citation_key: abdollahi2025agenticsurvey
+    relevance: "Comprehensive survey on agentic AI systems covering architectures, patterns, and deployment."
+    supports_options: ["langgraph", "crewai", "autogen", "custom"]
+
+  - citation_key: bluethgen2025agenticradiology
+    relevance: "Agentic systems in radiology. Demonstrates multi-agent patterns for clinical imaging workflows."
+    supports_options: ["langgraph", "crewai"]
+
+  - citation_key: tzanis2026agenticregulation
+    relevance: "Regulatory implications for agentic AI systems. Highlights need for auditable agent state."
+    supports_options: ["langgraph"]
+
+  - citation_key: jiang2026ibisagent
+    relevance: "IBISAgent reinforcing visual reasoning via interactive segmentation. Demonstrates agent-segmentation integration."
+    supports_options: ["langgraph", "custom"]
+
+  - citation_key: sheng2026dills
+    relevance: "DiLLS layered summary approach for diagnosing LLM multi-agent systems. Relevant for agent observability."
+    supports_options: ["langgraph"]
+
 tags:
   - agents
   - langgraph

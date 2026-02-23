@@ -200,6 +200,19 @@ rationale: >
   Domain applicability is lower than ML-focused decisions because LLM
   observability only applies to agent-driven pipeline components.
 
+references:
+  - citation_key: abdollahi2025agenticsurvey
+    relevance: "Comprehensive survey of agentic AI in software engineering. Covers observability patterns for LLM agents."
+    supports_options: ["langfuse", "braintrust"]
+
+  - citation_key: sheng2026dills
+    relevance: "DILLS LLM-as-judge for software engineering tasks. Relevant for agent evaluation pipelines."
+    supports_options: ["braintrust"]
+
+  - citation_key: bluethgen2025agenticradiology
+    relevance: "Agentic AI for radiology workflows. Demonstrates need for medical LLM observability."
+    supports_options: ["langfuse", "braintrust"]
+
 tags:
   - llm-observability
   - langfuse

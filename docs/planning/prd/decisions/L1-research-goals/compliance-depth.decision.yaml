@@ -3,7 +3,13 @@ title: "Compliance Depth"
 description: >
   How deeply to implement regulatory compliance (IEC 62304, FDA guidance).
   Lightweight audit is current implementation. Full compliance requires
-  significant infrastructure investment.
+  significant infrastructure investment. Rosmarino et al. (2025) demonstrate
+  MLOps-driven automation of regulatory documentation for AI-based SaMD.
+  Martina et al. (2024) validate DevOps-based approaches to IEC 62304
+  software medical device maintenance via CI/CD. Niemiec (2025) provides
+  EU AI Act compliance implications for medical AI classification.
+  Lähteenmäki et al. (2023) introduce the RegOps lifecycle concept for
+  continuous AI/ML regulatory compliance.
 
 decision_level: L1_research_goals
 status: active
@@ -30,7 +36,7 @@ options:
       SaMD-principled design without full compliance. Model cards,
       audit trails, reproducibility. Demonstrates awareness without
       regulatory overhead. Current implementation.
-    prior_probability: 0.50
+    prior_probability: 0.40
     status: resolved
     implementation_status: implemented
     complements:
@@ -42,38 +48,61 @@ options:
     description: >
       Research-only, no regulatory considerations. Fastest development
       but limits clinical applicability.
-    prior_probability: 0.35
+    prior_probability: 0.30
     status: viable
     implementation_status: not_started
+
+  - option_id: regops_automated
+    title: "RegOps Automated Compliance"
+    description: >
+      Automated compliance via CI/CD pipelines. Regulatory documentation
+      generated from MLOps artifacts. Combines DevOps practices with
+      IEC 62304 requirements (Martina et al., 2024). MLOps-driven
+      documentation generation (Rosmarino et al., 2025). EU AI Act
+      aware (Niemiec, 2025).
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "ci_cd_platform.github_actions"
+      - "documentation_generation.ci_generated"
+    constraints:
+      - "Requires MLOps pipeline maturity"
+      - "Regulatory expertise for template creation"
 
 archetype_weights:
   solo_researcher:
     probability_overrides:
       iec_62304_full: 0.05
-      lightweight_audit: 0.45
-      no_compliance: 0.50
+      lightweight_audit: 0.40
+      no_compliance: 0.45
+      regops_automated: 0.10
     rationale: "Researchers rarely need full compliance; lightweight shows awareness"
   lab_group:
     probability_overrides:
       iec_62304_full: 0.15
-      lightweight_audit: 0.55
-      no_compliance: 0.30
+      lightweight_audit: 0.45
+      no_compliance: 0.20
+      regops_automated: 0.20
     rationale: "Lab groups benefit from structured audit for multi-person work"
   clinical_deployment:
     probability_overrides:
-      iec_62304_full: 0.70
-      lightweight_audit: 0.25
+      iec_62304_full: 0.55
+      lightweight_audit: 0.15
       no_compliance: 0.05
+      regops_automated: 0.25
     rationale: "Clinical deployment demands full regulatory compliance"
 
 volatility:
-  classification: stable
+  classification: shifting
   last_assessed: 2026-02-23
-  next_review: 2026-08-23
+  next_review: 2026-05-23
   change_drivers:
     - "Clinical partnership requiring compliance"
     - "Regulatory landscape changes (EU AI Act)"
     - "FDA guidance updates"
+    - "Automated regulatory documentation advances"
+    - "EU AI Act implementation timeline"
 
 domain_applicability:
   vascular_segmentation: 1.0
@@ -82,16 +111,55 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  Lightweight audit (0.50) is the sweet spot for a learning/portfolio project.
+  Lightweight audit (0.40) is the sweet spot for a learning/portfolio project.
   It demonstrates regulatory awareness without the overhead of full compliance.
   The SaMD-principled approach is already implemented (model cards, audit trails).
+  Recent evidence supports automated compliance approaches: Rosmarino et al. (2025)
+  demonstrate MLOps-driven regulatory documentation generation for IEC 62304,
+  Martina et al. (2024) validate DevOps-based IEC 62304 maintenance via CI/CD,
+  and Lähteenmäki et al. (2023) introduce the RegOps lifecycle for continuous
+  regulatory compliance. The EU AI Act (Niemiec, 2025) adds urgency for
+  classification-aware compliance. The new regops_automated option (0.15)
+  represents an emerging middle path between lightweight audit and full IEC 62304.
 
 tags:
   - strategic
   - regulatory
   - resolved
 
-references: []
+references:
+  - citation_key: rosmarino2025regdocs
+    relevance: "MLOps-driven automation of regulatory documentation for AI-based SaMD. Shows automated IEC 62304 artifact generation."
+    supports_options:
+      - "regops_automated"
+      - "iec_62304_full"
+  - citation_key: martina2024iec62304devops
+    relevance: "DevOps-based approach to IEC 62304 software medical device maintenance. Validates CI/CD for regulatory compliance."
+    supports_options:
+      - "regops_automated"
+      - "iec_62304_full"
+  - citation_key: niemiec2025euaiact
+    relevance: "EU AI Act compliance implications for medical AI. Classification framework for risk levels."
+    supports_options:
+      - "iec_62304_full"
+      - "regops_automated"
+  - citation_key: lahteenmaki2023regops
+    relevance: "Introduces RegOps lifecycle concept for continuous AI/ML regulatory compliance."
+    supports_options:
+      - "regops_automated"
+  - citation_key: kwong2025consortai
+    relevance: "CONSORT-AI minimum reporting standards for clinical AI trials."
+    supports_options:
+      - "iec_62304_full"
+      - "lightweight_audit"
+  - citation_key: park2025miclearllm
+    relevance: "MI-CLEAR-LLM reporting standards for LLMs in clinical research."
+    supports_options:
+      - "lightweight_audit"
+  - citation_key: iec62304_2015
+    relevance: "IEC 62304 standard for medical device software lifecycle processes."
+    supports_options:
+      - "iec_62304_full"
 
 research_notes: >
   Internal: ADR-0005 (docs/adr/0005-tdd-mandatory.md) documents the TDD mandate

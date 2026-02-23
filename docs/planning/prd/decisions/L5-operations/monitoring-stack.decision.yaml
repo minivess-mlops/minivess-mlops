@@ -5,7 +5,14 @@ description: >
   plus Grafana is the open-source standard; Datadog provides managed
   monitoring; custom dashboards offer flexibility; none is acceptable
   for development-only. Covers system metrics, model performance, and
-  data quality monitoring.
+  data quality monitoring. Zhang et al. (2026) introduce PPRM for
+  label-agnostic risk monitoring with anytime-valid false alarm control,
+  enabling deployment-time monitoring without ground-truth labels.
+  Subasri et al. (2023) demonstrate clinical dataset shift monitoring
+  across hospital sites, highlighting the need for continuous drift
+  detection in healthcare ML. Krishnan et al. (2022) provide the CyclOps
+  toolkit for healthcare ML monitoring and auditing with standardized
+  evaluation pipelines.
 
 decision_level: L5_operations
 status: active
@@ -179,6 +186,8 @@ volatility:
     - "BentoML built-in metrics export"
     - "Grafana ML monitoring dashboards"
     - "Production deployment requirements"
+    - "PPRM label-free risk monitoring"
+    - "CyclOps healthcare auditing toolkit"
 
 domain_applicability:
   vascular_segmentation: 0.9
@@ -191,6 +200,49 @@ rationale: >
   Compose stack already includes both. Currently at config_only status.
   Custom dashboards (0.25) leveraging DuckDB and Evidently provide
   ML-specific monitoring. No monitoring (0.15) is the current effective state.
+  Recent evidence strengthens the case for active monitoring: Zhang et al.
+  (2026) show that PPRM enables label-free risk monitoring with statistical
+  guarantees, directly applicable to deployment scenarios where ground-truth
+  labels are delayed or unavailable. Subasri et al. (2023) demonstrate that
+  clinical dataset shifts across hospital sites degrade model performance,
+  motivating continuous drift detection. Krishnan et al. (2022) offer CyclOps
+  as a reusable healthcare ML auditing toolkit. Kim et al. (2025) outline
+  monitoring strategies for clinical AI, and Ackerman et al. (2021) provide
+  the Evidently framework for ML monitoring pipelines.
+
+references:
+  - citation_key: zhang2026pprm
+    relevance: "PPRM provides semi-supervised risk monitoring with anytime-valid false alarm guarantees."
+    supports_options:
+      - prometheus_grafana
+      - custom_dashboards
+  - citation_key: subasri2023driftclinical
+    relevance: "Demonstrates importance of monitoring for clinical data shifts across hospitals."
+    supports_options:
+      - prometheus_grafana
+      - custom_dashboards
+  - citation_key: krishnan2022cyclops
+    relevance: "CyclOps toolkit for healthcare ML monitoring and auditing."
+    supports_options:
+      - custom_dashboards
+  - citation_key: kim2025monitoring
+    relevance: "Monitoring strategies for clinical AI systems."
+    supports_options:
+      - prometheus_grafana
+      - custom_dashboards
+  - citation_key: chakraborty2025finrisk
+    relevance: "Financial risk metrics adapted for AI monitoring."
+    supports_options:
+      - custom_dashboards
+  - citation_key: nogare2025mlopsslr
+    relevance: "MLOps systematic review highlighting monitoring as key lifecycle stage."
+    supports_options:
+      - prometheus_grafana
+  - citation_key: ackerman2021evidently
+    relevance: "Evidently framework for ML monitoring."
+    supports_options:
+      - custom_dashboards
+      - prometheus_grafana
 
 tags:
   - operations

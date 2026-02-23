@@ -2,7 +2,14 @@ decision_id: uncertainty_quantification
 title: "Uncertainty Quantification"
 description: >
   Approach to quantifying prediction uncertainty. Critical for medical
-  imaging where false confidence can be dangerous.
+  imaging where false confidence can be dangerous. Shah-Mohammadi et al.
+  (2025) validate conformal prediction specifically for medical image
+  segmentation with distribution-free coverage guarantees. André et al.
+  (2026) provide large-scale evidence on confidence interval methodology
+  for medical imaging, recommending percentile bootstrap approaches that
+  complement conformal and calibration methods. Dhor et al. (2026) introduce
+  TUNE++, combining topology-aware loss with uncertainty quantification for
+  tubular structure segmentation, directly relevant to vascular analysis.
 
 decision_level: L2_architecture
 status: active
@@ -12,14 +19,14 @@ options:
   - option_id: temperature_scaling
     title: "Temperature Scaling"
     description: "Post-hoc calibration. Current implementation with ECE/MCE."
-    prior_probability: 0.30
+    prior_probability: 0.25
     status: resolved
     implementation_status: implemented
 
   - option_id: conformal_prediction
     title: "Conformal Prediction"
     description: "Distribution-free prediction sets with guaranteed coverage."
-    prior_probability: 0.25
+    prior_probability: 0.30
     status: viable
     implementation_status: not_started
     complements:
@@ -116,8 +123,12 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  Temperature scaling (0.30) is resolved. Conformal prediction (0.25) is
-  the most compelling next step for guaranteed coverage sets.
+  Temperature scaling (0.25) is resolved and remains the calibration baseline.
+  Conformal prediction (0.30) is now the leading candidate, boosted by
+  Shah-Mohammadi et al. (2025) validating conformal prediction for medical
+  image segmentation with formal coverage guarantees, and by Dhor et al.
+  (2026) demonstrating topology-aware UQ for tubular structures via TUNE++.
+  André et al. (2026) further support calibration-aware CI methodology.
 
 tags:
   - architecture
@@ -125,8 +136,44 @@ tags:
   - safety-critical
   - partially-resolved
 
-references: []
+references:
+  - citation_key: shahmohammadi2025conformal
+    relevance: "Validates conformal prediction specifically for medical image segmentation with coverage guarantees."
+    supports_options:
+      - conformal_prediction
+  - citation_key: bench2025mcdropout
+    relevance: "Demonstrates practical MC Dropout uncertainty quantification for image quality assessment."
+    supports_options:
+      - mc_dropout
+  - citation_key: andre2026ci
+    relevance: "Large-scale study on confidence intervals for medical imaging. Recommends percentile bootstrap."
+    supports_options:
+      - conformal_prediction
+      - temperature_scaling
+  - citation_key: dhor2026tunepp
+    relevance: "TUNE++ combines topology-aware loss with uncertainty quantification for tubular structure segmentation."
+    supports_options:
+      - conformal_prediction
+      - deep_ensembles
+  - citation_key: guo2017calibration
+    relevance: "Foundational work on neural network calibration. Introduced ECE metric."
+    supports_options:
+      - temperature_scaling
+  - citation_key: angelopoulos2023conformal
+    relevance: "Comprehensive introduction to conformal prediction with distribution-free guarantees."
+    supports_options:
+      - conformal_prediction
 
 research_notes: >
   Internal: ADR-0003 (docs/adr/0003-validation-onion.md) documents the
   validation onion architecture that includes calibration and uncertainty layers.
+  Shah-Mohammadi et al. (2025) provide direct validation of conformal prediction
+  for medical image segmentation, establishing coverage guarantees applicable to
+  our vascular segmentation use case. Bench et al. (2025) demonstrate practical
+  MC Dropout for image quality assessment. André et al. (2026) present a
+  large-scale study on CI methodology for medical imaging, recommending percentile
+  bootstrap — relevant to both conformal and calibration approaches. Dhor et al.
+  (2026) introduce TUNE++, combining topology-aware loss with UQ for tubular
+  structures, directly applicable to vessel segmentation. Guo et al. (2017)
+  remain the foundational reference for calibration and ECE. Angelopoulos et al.
+  (2023) provide the theoretical basis for distribution-free conformal prediction.

@@ -57,12 +57,51 @@ Use this skill when:
 - `templates/decision-node.yaml` — Template for new decision nodes
 - `templates/scenario.yaml` — Template for new scenarios
 
+## GitHub Project Integration
+
+PRD updates often generate implementation work. The project backlog lives in:
+- **Repository**: `minivess-mlops/minivess-mlops`
+- **Project**: `Minivess MLOps` (ID: `PVT_kwDOCPpnGc4AYSAM`, Number: 1)
+- **Priority field**: `PVTSSF_lADOCPpnGc4AYSAMzgPhgsk`
+  - High: `9ac26196` (P0 — must do next)
+  - Medium: `9d51ccf2` (P1 — should do soon)
+  - Low: `17b6c978` (P2 — nice to have)
+
+### Creating Issues from PRD Changes
+When a PRD update reveals new implementation work:
+1. Create a GitHub issue with PRD context (decision ID, option, bibliography key)
+2. Add to project: `gh project item-add 1 --owner minivess-mlops --url <issue_url>`
+3. Set priority based on evidence strength and implementation readiness
+4. Use labels: `enhancement`, `models`, `monitoring`, `training`, `metrics`,
+   `uncertainty`, `compliance`, `annotation`, `data-quality`, `validation`,
+   `observability`, `research`, `ci-cd`, `documentation`
+5. Priority labels: `P0-critical`, `P1-high`, `P2-medium`
+
+### Issue Body Template
+```markdown
+## Summary
+[What and why, with key evidence]
+
+## PRD Context
+- **Decision**: `decision_id` (level)
+- **Option**: `option_id` (prior: X.XX)
+- **Bibliography**: `citation_key`
+
+## Acceptance Criteria
+- [ ] [Specific, testable items]
+- [ ] Unit tests (TDD mandatory)
+
+## References
+- Author et al. (Year). "Title." DOI/arXiv
+```
+
 ## Workflow
 1. Run the operation's protocol
 2. Run `validate` protocol to check ALL invariants (including citation integrity)
 3. Update `_network.yaml` if nodes/edges changed
 4. Update `bibliography.yaml` if new references were cited
-5. Commit changes with descriptive message
+5. Create GitHub issues for implementation work revealed by the update
+6. Commit changes with descriptive message
 
 ## Reviewer Agent Checklist
 When reviewing PRD changes (manually or via CI), verify:
@@ -72,3 +111,4 @@ When reviewing PRD changes (manually or via CI), verify:
 - [ ] All `bibliography.yaml` entries have `doi` or `url`
 - [ ] The `bibliography.yaml` `topics` array includes all decision files that cite each entry
 - [ ] Sub-citations from ingested papers have been extracted and added
+- [ ] Implementation issues created for new options/significant evidence updates

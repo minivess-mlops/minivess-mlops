@@ -107,10 +107,11 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  MLflow tags (0.40) is the resolved choice, providing lightweight
-  governance via experiment metadata and SaMD-principled audit trails.
-  Full registry (0.30) is the upgrade path when compliance depth
-  increases or team scaling demands structured approval workflows.
+  MLflow tags (0.40) is the resolved choice (Zaharia et al., 2018),
+  providing lightweight governance via experiment metadata and
+  SaMD-principled audit trails aligned with IEC 62304 lifecycle
+  (IEC, 2015). Full registry (0.30) is the upgrade path when compliance
+  depth increases or team scaling demands structured approval workflows.
 
 tags:
   - operations

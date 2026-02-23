@@ -170,6 +170,27 @@ rationale: >
   with less native 3D support. Physics-based (0.15) is the most realistic
   but requires significant expertise.
 
+references:
+  - citation_key: perez2021torchio
+    relevance: "TorchIO library for 3D medical image augmentation."
+    supports_options: ["monai_plus_torchio"]
+
+  - citation_key: wittmann2024vesselfm
+    relevance: "vesselFM uses domain randomization and flow matching for synthetic vessel data generation."
+    supports_options: ["monai_plus_torchio", "custom_physics"]
+
+  - citation_key: terms2025synthicl
+    relevance: "SynthICL domain randomization for in-context learning medical segmentation."
+    supports_options: ["custom_physics"]
+
+  - citation_key: galvao2025vessshape
+    relevance: "VessShape synthetic vessel generation for few-shot segmentation pretraining."
+    supports_options: ["custom_physics"]
+
+  - citation_key: cardoso2022monai
+    relevance: "MONAI framework providing native transforms for medical imaging."
+    supports_options: ["monai_basic", "monai_plus_torchio"]
+
 tags:
   - preprocessing
   - augmentation

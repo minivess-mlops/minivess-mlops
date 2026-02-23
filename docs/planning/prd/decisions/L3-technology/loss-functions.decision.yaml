@@ -195,6 +195,24 @@ rationale: >
   domain this probability should be boosted. TopK (0.10) is a niche option
   for extreme imbalance.
 
+references:
+  - citation_key: milletari2016vnet
+    relevance: "Introduces Dice loss for volumetric segmentation, foundation for DiceCE compound loss."
+    supports_options: ["dice", "dice_ce"]
+
+  - citation_key: shit2021cldice
+    relevance: "clDice topology-preserving loss for tubular structures. Critical for vascular segmentation connectivity."
+    sections: ["Table 2", "Fig. 4"]
+    supports_options: ["cldice"]
+
+  - citation_key: dhor2026tunepp
+    relevance: "TUNE++ combines Betti number loss with uncertainty for topology-aware 3D segmentation. Novel loss function for vessels."
+    supports_options: ["cldice"]
+
+  - citation_key: shi2025comma
+    relevance: "COMMA uses DiceCE + clDice compound loss achieving SOTA vessel segmentation. Validates topology-preserving losses."
+    supports_options: ["dice_ce", "cldice"]
+
 tags:
   - training
   - loss-functions

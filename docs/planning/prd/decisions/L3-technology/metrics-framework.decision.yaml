@@ -139,6 +139,20 @@ rationale: >
   overlap. Custom (0.15) is needed for domain-specific topology metrics
   not yet in standard libraries.
 
+references:
+  - citation_key: maier2024metrics
+    relevance: "Metrics Reloaded framework recommending problem-specific metrics for medical image analysis."
+    sections: ["Table 5", "Section 4.3"]
+    supports_options: ["metricsreloaded"]
+
+  - citation_key: andre2026ci
+    relevance: "Large-scale study on confidence intervals for medical imaging metrics. Recommends percentile bootstrap for most segmentation tasks."
+    supports_options: ["torchmetrics", "metricsreloaded", "custom"]
+
+  - citation_key: shit2021cldice
+    relevance: "clDice topology-aware metric critical for vascular segmentation evaluation."
+    supports_options: ["custom", "metricsreloaded"]
+
 tags:
   - evaluation
   - metrics

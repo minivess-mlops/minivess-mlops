@@ -160,6 +160,19 @@ rationale: >
   upgrade path given the MONAI ecosystem alignment. This decision is
   shifting because multi-site collaborations could emerge.
 
+references:
+  - citation_key: cardoso2022monai
+    relevance: "MONAI framework including MONAI FL for federated learning in medical imaging."
+    supports_options: ["monai_fl"]
+
+  - citation_key: oh2025continuallearning
+    relevance: "Continual learning for efficient adaptation without forgetting. Complementary to FL for multi-site scenarios."
+    supports_options: ["monai_fl", "flower"]
+
+  - citation_key: subasri2023driftclinical
+    relevance: "Cross-hospital distribution shifts motivating federated approaches for data locality."
+    supports_options: ["monai_fl", "flower"]
+
 tags:
   - infrastructure
   - federated-learning

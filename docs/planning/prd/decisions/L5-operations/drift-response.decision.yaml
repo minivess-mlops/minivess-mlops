@@ -5,7 +5,13 @@ description: >
   retraining triggers a new training run; alert-human notifies developers
   for manual assessment; gradual rollback reverts to previous model
   versions. Critical for maintaining model reliability over time in
-  medical imaging where distribution shifts can be subtle.
+  medical imaging where distribution shifts can be subtle. Zhang et al.
+  (2026) introduce Prediction-Powered Risk Monitoring (PPRM) with formal
+  false alarm guarantees for semi-supervised drift detection. Subasri et al.
+  (2023) demonstrate unidirectional data shifts across hospitals and evaluate
+  transfer learning vs. continual learning remediation. Krishnan et al.
+  (2022) provide the CyclOps toolkit for healthcare ML auditing, drift
+  detection, and fairness evaluation.
 
 decision_level: L5_operations
 status: active
@@ -18,7 +24,7 @@ options:
       Automatically trigger retraining pipeline when drift exceeds
       thresholds. Requires robust data validation, evaluation gates,
       and model governance. Most mature but highest implementation cost.
-    prior_probability: 0.25
+    prior_probability: 0.30
     status: viable
     implementation_status: not_started
     constraints:
@@ -35,7 +41,7 @@ options:
       Notify developers/clinicians when drift is detected. Human reviews
       metrics and decides on response. Current partial implementation
       via Evidently reports and whylogs profiles.
-    prior_probability: 0.35
+    prior_probability: 0.30
     status: resolved
     implementation_status: partial
     complements:
@@ -160,6 +166,9 @@ volatility:
     - "whylogs profiling integration depth"
     - "Production deployment timeline"
     - "Regulatory requirements for model monitoring"
+    - "PPRM prediction-powered risk monitoring"
+    - "CyclOps healthcare ML auditing"
+    - "Clinical drift detection advances"
 
 domain_applicability:
   vascular_segmentation: 1.0
@@ -168,10 +177,88 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  Alert human (0.35) is the pragmatic resolved choice for a learning
-  project. Automated retrain (0.25) is the next step when the pipeline
-  matures. This decision is shifting because production deployment
-  would require more automated drift response.
+  Alert human and automated retrain are now equally weighted (0.30 each),
+  reflecting growing evidence for automated approaches. Zhang et al. (2026)
+  PPRM provides formal false alarm guarantees for semi-supervised drift
+  detection, making automated retraining more trustworthy. Subasri et al.
+  (2023) demonstrate that transfer learning effectively remediates
+  cross-hospital distribution shifts, while continual learning addresses
+  temporal drift. Krishnan et al. (2022) CyclOps offers a practical toolkit
+  for healthcare ML auditing and drift detection. The prior for automated
+  retrain is raised from 0.25 to 0.30, and alert human is reduced from 0.35
+  to 0.30, as PPRM's formal guarantees reduce the need for human-in-the-loop
+  drift assessment in well-characterized shift scenarios.
+
+research_notes: >
+  Zhang et al. (2026) PPRM introduces prediction-powered risk monitoring
+  with semi-supervised drift detection and formal false alarm guarantees
+  (Algorithm 1, Section 3), directly applicable to deployed segmentation
+  models. Subasri et al. (2023) provide clinical evidence of unidirectional
+  data shifts across hospitals, comparing transfer learning and continual
+  learning as remediation strategies. Krishnan et al. (2022) CyclOps offers
+  a comprehensive toolkit for healthcare ML auditing, drift detection, and
+  fairness evaluation. Kim et al. (2025) outline strategies for monitoring
+  clinical AI systems in production. Chakraborty et al. (2025) adapt
+  financial risk metrics for AI model performance monitoring. Moreo et al.
+  (2025) analyze interconnections between calibration, quantification, and
+  accuracy prediction under distribution shift. Ackerman et al. (2021)
+  present the Evidently framework for interactive ML monitoring and reporting.
+
+references:
+  - citation_key: zhang2026pprm
+    relevance: >
+      Prediction-Powered Risk Monitoring provides semi-supervised drift
+      detection with formal false alarm guarantees. Directly applicable
+      to deployed segmentation models.
+    sections:
+      - "Algorithm 1"
+      - "Section 3"
+    supports_options:
+      - automated_retrain
+      - alert_human
+
+  - citation_key: subasri2023driftclinical
+    relevance: >
+      Demonstrates unidirectional data shifts across hospitals. Transfer
+      learning for remediation, continual learning for temporal drift.
+    supports_options:
+      - automated_retrain
+      - alert_human
+
+  - citation_key: krishnan2022cyclops
+    relevance: >
+      CyclOps toolkit for healthcare ML auditing, drift detection, and
+      fairness evaluation.
+    supports_options:
+      - automated_retrain
+      - alert_human
+
+  - citation_key: kim2025monitoring
+    relevance: >
+      Strategies for monitoring clinical AI systems in production.
+    supports_options:
+      - alert_human
+      - automated_retrain
+
+  - citation_key: chakraborty2025finrisk
+    relevance: >
+      Financial risk metrics adapted for AI model performance monitoring.
+    supports_options:
+      - automated_retrain
+      - gradual_rollback
+
+  - citation_key: moreo2025calibquant
+    relevance: >
+      Interconnections between calibration, quantification, and accuracy
+      prediction under distribution shift.
+    supports_options:
+      - automated_retrain
+
+  - citation_key: ackerman2021evidently
+    relevance: >
+      Evidently framework for interactive ML monitoring and reporting.
+    supports_options:
+      - alert_human
 
 tags:
   - operations

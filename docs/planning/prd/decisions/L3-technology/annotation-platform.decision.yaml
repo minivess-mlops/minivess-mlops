@@ -135,6 +135,19 @@ rationale: >
   Label Studio is in docker-compose config. The choice depends heavily on
   MONAI alignment — MONAI-native projects should prefer MONAI Label.
 
+references:
+  - citation_key: terms2025vessqc
+    relevance: "VessQC napari plugin for uncertainty-guided 3D segmentation curation. Improved error recall 67% to 94%."
+    supports_options: ["monai_label", "hybrid"]
+
+  - citation_key: ma2025medsam2
+    relevance: "MedSAM2 with 3D Slicer integration for interactive 3D medical annotation. 85%+ annotation cost reduction."
+    supports_options: ["monai_label", "hybrid"]
+
+  - citation_key: cardoso2022monai
+    relevance: "MONAI ecosystem including MONAI Label for AI-assisted annotation."
+    supports_options: ["monai_label"]
+
 tags:
   - technology
   - annotation

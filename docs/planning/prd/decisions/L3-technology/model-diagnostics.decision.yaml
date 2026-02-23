@@ -131,6 +131,15 @@ rationale: >
   requiring test data, complementing metric-based evaluation. Torch pruning
   (0.25) is the natural next step for deployment optimization.
 
+references:
+  - citation_key: marciano2025nnqc
+    relevance: "nnQC diffusion-based quality control for medical image segmentations. Complementary diagnostic approach."
+    supports_options: ["weightwatcher", "custom"]
+
+  - citation_key: nogare2025mlopsslr
+    relevance: "MLOps systematic review identifying model diagnostics as key lifecycle stage."
+    supports_options: ["weightwatcher"]
+
 tags:
   - technology
   - models

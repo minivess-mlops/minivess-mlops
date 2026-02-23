@@ -159,6 +159,27 @@ rationale: >
   whylogs (0.20) is in dependencies but not yet wired. The validation onion
   pattern means these tools are complementary rather than competing.
 
+references:
+  - citation_key: breck2019data
+    relevance: "Foundational work on data validation for ML systems."
+    supports_options: ["pandera_ge"]
+
+  - citation_key: vantwist2026datacare
+    relevance: "DATA-CARE comprehensive data quality assessment tool for medical AI."
+    supports_options: ["pandera_ge", "deepchecks"]
+
+  - citation_key: krishnan2022cyclops
+    relevance: "CyclOps toolkit for clinical data processing, drift detection, and fairness evaluation."
+    supports_options: ["deepchecks", "pandera_ge"]
+
+  - citation_key: marciano2025nnqc
+    relevance: "nnQC diffusion-based quality control for medical image segmentations."
+    supports_options: ["deepchecks"]
+
+  - citation_key: subasri2023driftclinical
+    relevance: "Demonstrates clinical data shift patterns requiring robust validation."
+    supports_options: ["pandera_ge", "deepchecks"]
+
 tags:
   - technology
   - validation

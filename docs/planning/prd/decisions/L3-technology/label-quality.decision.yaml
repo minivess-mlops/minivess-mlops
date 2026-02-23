@@ -137,6 +137,19 @@ rationale: >
   platform choice — Label Studio integration enables Cleanlab's confidence
   learning loop.
 
+references:
+  - citation_key: terms2025vessqc
+    relevance: "VessQC uncertainty-guided 3D segmentation curation. Error detection recall improved from 67% to 94%."
+    supports_options: ["cleanlab", "custom_iaa"]
+
+  - citation_key: vantwist2026datacare
+    relevance: "DATA-CARE comprehensive data quality assessment tool for medical AI datasets."
+    supports_options: ["cleanlab", "custom_iaa"]
+
+  - citation_key: marciano2025nnqc
+    relevance: "nnQC diffusion-based quality control for medical image segmentations."
+    supports_options: ["cleanlab"]
+
 tags:
   - technology
   - annotation

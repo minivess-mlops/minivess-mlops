@@ -6,7 +6,14 @@ description: >
   with foundation model pre-training. The MONAI framework (Cardoso et al., 2022)
   provides native implementations of SegResNet (Myronenko, 2019) and SwinUNETR
   (Hatamizadeh et al., 2022). Vascular segmentation benefits from topology-aware
-  architectures that preserve clDice connectivity (Shit et al., 2021).
+  architectures that preserve clDice connectivity (Shit et al., 2021). Recent work
+  introduces vesselFM (Wittmann et al., 2024), the first 3D vessel-specific
+  foundation model achieving zero-shot Dice 74.66 on SMILE-UHURA, and COMMA Mamba
+  (Shi et al., 2025), a state-space model reaching Dice 86.36 on KiPA vessel
+  segmentation. AtlasSegFM (Zhang et al., 2025) reveals that VISTA3D drops from
+  88% to 27% on small structures, motivating vessel-specific alternatives.
+  Topology-aware uncertainty methods such as TUNE++ (Dhor et al., 2026) combine
+  Betti loss with uncertainty quantification for tubular structures.
 
 decision_level: L3_technology
 status: active
@@ -19,7 +26,7 @@ options:
       MONAI's SegResNet (Myronenko, 2019): encoder-decoder with residual blocks
       and variational autoencoder regularization. Lightweight, well-tested, fast
       convergence. Originally won BraTS 2018 challenge. Already implemented as baseline.
-    prior_probability: 0.25
+    prior_probability: 0.20
     status: resolved
     implementation_status: implemented
     complements:
@@ -32,7 +39,7 @@ options:
       Swin Transformer U-Net (Hatamizadeh et al., 2022) with shifted-window
       self-attention. Pre-trained on large-scale CT data. Better for capturing
       long-range dependencies in 3D volumes. Already implemented.
-    prior_probability: 0.20
+    prior_probability: 0.15
     status: resolved
     implementation_status: implemented
     complements:
@@ -44,8 +51,10 @@ options:
     description: >
       MONAI's VISTA-3D (He et al., 2024): versatile foundation model for
       interactive 3D segmentation supporting point prompts and class prompts.
-      Config stubs exist but no integration.
-    prior_probability: 0.25
+      Config stubs exist but no integration. Note: AtlasSegFM (Zhang et al., 2025)
+      shows performance drops from 88% to 27% on small structures, raising concerns
+      for fine vessel segmentation.
+    prior_probability: 0.15
     status: viable
     implementation_status: config_only
     complements:
@@ -75,13 +84,46 @@ options:
     description: >
       Segment Anything (Kirillov et al., 2023) variants adapted for 3D
       medical imaging (SAM3, MedSAM2). Interactive prompting model.
-      Highly experimental for vascular segmentation.
-    prior_probability: 0.15
+      Highly experimental for vascular segmentation. MedSAM2 (Ma et al., 2025)
+      achieves 85%+ annotation cost reduction but benchmarks (Ma et al., 2024)
+      confirm limitations on thin tubular structures.
+    prior_probability: 0.10
     status: experimental
     implementation_status: not_started
     constraints:
       - "Prompt-based paradigm differs from standard segmentation"
       - "Not optimized for thin tubular structures"
+
+  - option_id: vesselfm
+    title: "vesselFM"
+    description: >
+      vesselFM (Wittmann et al., 2024): first 3D vessel-specific foundation model.
+      Achieves zero-shot Dice 74.66 on SMILE-UHURA benchmark. Uses MONAI UNet
+      internally with large-scale pre-training on diverse vascular datasets
+      including MiniVess. Represents the most directly relevant foundation model
+      for this project's vessel segmentation focus.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "foundation_model_integration.lora_finetune"
+    constraints:
+      - "Requires large GPU (>24 GB)"
+      - "No official MONAI integration yet"
+
+  - option_id: comma_mamba
+    title: "COMMA Mamba"
+    description: >
+      COMMA Mamba (Shi et al., 2025): state-space model architecture for vessel
+      segmentation. Achieves Dice 86.36 and clDice 84.31 on KiPA dataset.
+      Leverages Mamba selective scan for efficient long-range dependency modeling
+      in tubular structures without quadratic attention cost.
+    prior_probability: 0.10
+    status: experimental
+    implementation_status: not_started
+    constraints:
+      - "Mamba SSM requires custom CUDA kernels"
+      - "Novel architecture, less community support"
 
 conditional_on:
   - parent_decision_id: model_strategy
@@ -89,122 +131,152 @@ conditional_on:
     conditional_table:
       - given_parent_option: single_architecture
         then_probabilities:
-          segresnet: 0.40
-          swinunetr: 0.25
-          vista3d: 0.15
+          segresnet: 0.35
+          swinunetr: 0.20
+          vista3d: 0.10
           nnunet: 0.15
           sam_variants: 0.05
+          vesselfm: 0.10
+          comma_mamba: 0.05
       - given_parent_option: multi_architecture
         then_probabilities:
-          segresnet: 0.25
-          swinunetr: 0.20
-          vista3d: 0.25
+          segresnet: 0.20
+          swinunetr: 0.15
+          vista3d: 0.15
           nnunet: 0.15
-          sam_variants: 0.15
+          sam_variants: 0.10
+          vesselfm: 0.15
+          comma_mamba: 0.10
       - given_parent_option: foundation_model_first
         then_probabilities:
-          segresnet: 0.10
-          swinunetr: 0.15
-          vista3d: 0.35
-          nnunet: 0.10
-          sam_variants: 0.30
+          segresnet: 0.05
+          swinunetr: 0.10
+          vista3d: 0.20
+          nnunet: 0.05
+          sam_variants: 0.20
+          vesselfm: 0.30
+          comma_mamba: 0.10
       - given_parent_option: automl_search
         then_probabilities:
-          segresnet: 0.25
-          swinunetr: 0.20
-          vista3d: 0.15
-          nnunet: 0.30
+          segresnet: 0.20
+          swinunetr: 0.15
+          vista3d: 0.10
+          nnunet: 0.25
           sam_variants: 0.10
+          vesselfm: 0.10
+          comma_mamba: 0.10
 
   - parent_decision_id: foundation_model_integration
     influence_strength: strong
     conditional_table:
       - given_parent_option: from_scratch
         then_probabilities:
-          segresnet: 0.35
-          swinunetr: 0.20
-          vista3d: 0.10
-          nnunet: 0.25
-          sam_variants: 0.10
+          segresnet: 0.25
+          swinunetr: 0.15
+          vista3d: 0.05
+          nnunet: 0.20
+          sam_variants: 0.05
+          vesselfm: 0.15
+          comma_mamba: 0.15
       - given_parent_option: lora_finetune
         then_probabilities:
-          segresnet: 0.10
-          swinunetr: 0.20
-          vista3d: 0.35
-          nnunet: 0.10
-          sam_variants: 0.25
+          segresnet: 0.05
+          swinunetr: 0.15
+          vista3d: 0.20
+          nnunet: 0.05
+          sam_variants: 0.15
+          vesselfm: 0.30
+          comma_mamba: 0.10
       - given_parent_option: full_finetune
         then_probabilities:
-          segresnet: 0.20
-          swinunetr: 0.25
-          vista3d: 0.25
-          nnunet: 0.15
-          sam_variants: 0.15
+          segresnet: 0.15
+          swinunetr: 0.20
+          vista3d: 0.15
+          nnunet: 0.10
+          sam_variants: 0.10
+          vesselfm: 0.20
+          comma_mamba: 0.10
       - given_parent_option: adapter_fusion
         then_probabilities:
-          segresnet: 0.10
-          swinunetr: 0.25
-          vista3d: 0.30
-          nnunet: 0.10
-          sam_variants: 0.25
+          segresnet: 0.05
+          swinunetr: 0.15
+          vista3d: 0.20
+          nnunet: 0.05
+          sam_variants: 0.15
+          vesselfm: 0.25
+          comma_mamba: 0.15
       - given_parent_option: prompt_tuning
         then_probabilities:
           segresnet: 0.05
-          swinunetr: 0.10
-          vista3d: 0.35
+          swinunetr: 0.05
+          vista3d: 0.25
           nnunet: 0.05
-          sam_variants: 0.45
+          sam_variants: 0.35
+          vesselfm: 0.15
+          comma_mamba: 0.10
 
   - parent_decision_id: monai_alignment
     influence_strength: strong
     conditional_table:
       - given_parent_option: monai_native
         then_probabilities:
-          segresnet: 0.30
-          swinunetr: 0.25
-          vista3d: 0.30
-          nnunet: 0.05
-          sam_variants: 0.10
-      - given_parent_option: monai_compatible
-        then_probabilities:
           segresnet: 0.25
           swinunetr: 0.20
-          vista3d: 0.25
-          nnunet: 0.15
-          sam_variants: 0.15
+          vista3d: 0.20
+          nnunet: 0.05
+          sam_variants: 0.05
+          vesselfm: 0.20
+          comma_mamba: 0.05
+      - given_parent_option: monai_compatible
+        then_probabilities:
+          segresnet: 0.20
+          swinunetr: 0.15
+          vista3d: 0.15
+          nnunet: 0.10
+          sam_variants: 0.10
+          vesselfm: 0.20
+          comma_mamba: 0.10
       - given_parent_option: framework_agnostic
         then_probabilities:
-          segresnet: 0.15
-          swinunetr: 0.15
-          vista3d: 0.10
-          nnunet: 0.35
-          sam_variants: 0.25
+          segresnet: 0.10
+          swinunetr: 0.10
+          vista3d: 0.05
+          nnunet: 0.30
+          sam_variants: 0.15
+          vesselfm: 0.10
+          comma_mamba: 0.20
 
 archetype_weights:
   solo_researcher:
     probability_overrides:
-      segresnet: 0.35
-      swinunetr: 0.25
-      vista3d: 0.15
-      nnunet: 0.15
-      sam_variants: 0.10
-    rationale: "Solo researchers start with lightweight models (SegResNet) and iterate"
-  lab_group:
-    probability_overrides:
-      segresnet: 0.20
+      segresnet: 0.30
       swinunetr: 0.20
-      vista3d: 0.25
-      nnunet: 0.20
-      sam_variants: 0.15
-    rationale: "Lab groups can run multiple architectures with shared HPC"
-  clinical_deployment:
+      vista3d: 0.10
+      nnunet: 0.10
+      sam_variants: 0.05
+      vesselfm: 0.15
+      comma_mamba: 0.10
+    rationale: "Solo researchers start with lightweight models (SegResNet) and iterate; vesselFM is attractive for vessel-specific zero-shot capability"
+  lab_group:
     probability_overrides:
       segresnet: 0.15
       swinunetr: 0.15
-      vista3d: 0.30
-      nnunet: 0.25
-      sam_variants: 0.15
-    rationale: "Clinical prefers validated foundation models and benchmark champions"
+      vista3d: 0.15
+      nnunet: 0.15
+      sam_variants: 0.10
+      vesselfm: 0.20
+      comma_mamba: 0.10
+    rationale: "Lab groups can run multiple architectures with shared HPC; vesselFM and COMMA Mamba expand the exploration space"
+  clinical_deployment:
+    probability_overrides:
+      segresnet: 0.10
+      swinunetr: 0.10
+      vista3d: 0.20
+      nnunet: 0.20
+      sam_variants: 0.10
+      vesselfm: 0.20
+      comma_mamba: 0.10
+    rationale: "Clinical prefers validated foundation models and benchmark champions; vesselFM offers vessel-specific pre-training for deployment"
 
 volatility:
   classification: shifting
@@ -215,6 +287,8 @@ volatility:
     - "nnU-Net v2.5 release"
     - "SAM3/MedSAM2 maturity for 3D medical segmentation"
     - "New topology-aware architectures"
+    - "vesselFM vessel-specific foundation model"
+    - "Mamba/SSM architectures for segmentation"
 
 domain_applicability:
   vascular_segmentation: 1.0
@@ -223,17 +297,26 @@ domain_applicability:
   general_medical: 0.90
 
 rationale: >
-  SegResNet (Myronenko, 2019) and VISTA-3D (He et al., 2024) share top prior
-  at 0.25. SegResNet is already implemented and proven as the BraTS 2018 winner;
-  VISTA-3D represents the highest-potential next step with foundation model
-  pre-training on large-scale CT datasets. SwinUNETR (Hatamizadeh et al., 2022)
-  at 0.20 is implemented and competitive with transformer-based long-range
-  dependencies. nnU-Net (Isensee et al., 2021) at 0.15 remains the gold standard
-  in medical image segmentation challenges (Nature Methods) but requires pipeline
-  refactoring to integrate with Hydra-zen. SAM variants (Kirillov et al., 2023)
-  at 0.15 are experimental for thin vascular structures. Domain note: vascular
+  SegResNet (Myronenko, 2019) leads at 0.20 as the implemented baseline and BraTS
+  2018 winner. VISTA-3D (He et al., 2024) drops to 0.15 following evidence from
+  AtlasSegFM (Zhang et al., 2025) that it degrades from 88% to 27% Dice on small
+  structures, a critical concern for fine vessel segmentation. SwinUNETR
+  (Hatamizadeh et al., 2022) at 0.15 is implemented and competitive with
+  transformer-based long-range dependencies. nnU-Net (Isensee et al., 2021) at 0.15
+  remains the gold standard in medical image segmentation challenges (Nature Methods)
+  but requires pipeline refactoring to integrate with Hydra-zen. SAM variants
+  (Kirillov et al., 2023) drop to 0.10 as benchmarks (Ma et al., 2024) confirm poor
+  performance on thin tubular structures, though MedSAM2 (Ma et al., 2025) shows
+  promise for annotation cost reduction. The new vesselFM (Wittmann et al., 2024)
+  enters at 0.15 as the first 3D vessel-specific foundation model with zero-shot
+  Dice 74.66 on SMILE-UHURA and direct relevance through MiniVess inclusion in its
+  training data. COMMA Mamba (Shi et al., 2025) enters at 0.10 as an experimental
+  state-space model achieving Dice 86.36 and clDice 84.31 on KiPA, representing the
+  emerging Mamba/SSM paradigm for efficient long-range modeling. Domain note: vascular
   segmentation benefits from clDice-aware architectures (Shit et al., 2021) that
-  preserve topological connectivity of tubular structures.
+  preserve topological connectivity of tubular structures. TUNE++ (Dhor et al., 2026)
+  demonstrates topology-aware uncertainty quantification combining Betti loss with UQ
+  for tubular structures.
 
 research_notes: >
   The MONAI framework (Cardoso et al., 2022) provides native implementations of
@@ -243,7 +326,19 @@ research_notes: >
   segmentation, which aligns with clDice (Shit et al., 2021) as a key evaluation
   criterion. nnU-Net v2 (Isensee et al., 2021) self-configures architecture and
   preprocessing but operates as a standalone pipeline, creating integration
-  challenges with Hydra-zen experiment management.
+  challenges with Hydra-zen experiment management. vesselFM (Wittmann et al., 2024)
+  is the first 3D vessel-specific foundation model, trained on diverse vascular
+  datasets including MiniVess, achieving zero-shot Dice 74.66 on SMILE-UHURA.
+  It uses MONAI UNet internally, which may facilitate integration. COMMA Mamba
+  (Shi et al., 2025) introduces state-space modeling for vessel segmentation with
+  Dice 86.36 and clDice 84.31 on KiPA, though it requires custom CUDA kernels.
+  AtlasSegFM (Zhang et al., 2025) provides critical evidence that VISTA3D drops
+  from 88% to 27% on small structures, motivating vessel-specific alternatives.
+  VessShape (Galvao et al., 2025) demonstrates few-shot vessel segmentation via
+  synthetic shape priors. VessQC (Terms et al., 2025) shows uncertainty-guided
+  curation improves error detection recall from 67% to 94%. TUNE++ (Dhor et al.,
+  2026) combines Betti loss with uncertainty quantification for topology-aware
+  segmentation of tubular structures.
 
 references:
   - citation_key: myronenko2019
@@ -281,6 +376,41 @@ references:
   - citation_key: maier2024metrics
     relevance: "Metrics Reloaded framework recommending topology-aware metrics for vascular segmentation"
     sections: ["Table 5", "Section 4.3"]
+
+  - citation_key: wittmann2024vesselfm
+    relevance: "First foundation model specifically for 3D blood vessel segmentation. Uses MONAI UNet. Zero-shot Dice 74.66 on SMILE-UHURA."
+    sections: ["Table 1", "Section 4"]
+    supports_options: ["vesselfm"]
+
+  - citation_key: shi2025comma
+    relevance: "COMMA Mamba network achieves SOTA on vessel segmentation. Dice 86.36, clDice 84.31 on KiPA dataset."
+    sections: ["Table 1", "Table 2"]
+    supports_options: ["comma_mamba"]
+
+  - citation_key: galvao2025vessshape
+    relevance: "VessShape demonstrates few-shot vessel segmentation via synthetic shape priors."
+    supports_options: ["segresnet", "vesselfm"]
+
+  - citation_key: terms2025vessqc
+    relevance: "VessQC uncertainty-guided curation improves error detection recall from 67% to 94%."
+    supports_options: ["segresnet", "swinunetr", "vesselfm"]
+
+  - citation_key: zhang2025atlassegfm
+    relevance: "AtlasSegFM shows VISTA3D drops from 88% to 27% on small structures. Atlas-based one-shot customization."
+    sections: ["Table 2"]
+    supports_options: ["vista3d", "vesselfm"]
+
+  - citation_key: ma2024sam2bench
+    relevance: "Comprehensive benchmark of SAM2 in medical images. Shows limitations on thin structures."
+    supports_options: ["sam_variants"]
+
+  - citation_key: ma2025medsam2
+    relevance: "MedSAM2 achieves 85%+ annotation cost reduction. DSC 86-88% on organs."
+    supports_options: ["sam_variants"]
+
+  - citation_key: dhor2026tunepp
+    relevance: "TUNE++ topology-aware uncertainty for tubular structures. Combines Betti loss with UQ."
+    supports_options: ["segresnet", "comma_mamba"]
 
 tags:
   - models

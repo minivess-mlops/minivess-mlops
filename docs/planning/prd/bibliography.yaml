@@ -13,7 +13,7 @@
 # 4. Sub-citations: when ingesting a paper, also add papers IT cites that
 #    are relevant to other decision nodes.
 #
-# last_updated: 2026-02-23
+# last_updated: 2026-02-23  (Phase 8: +38 entries from 83-paper review)
 
 bibliography:
 
@@ -335,6 +335,7 @@ bibliography:
     evidence_type: theoretical
     topics:
       - documentation_standard
+      - documentation_generation
       - model_governance
 
   - citation_key: iec62304_2015
@@ -418,6 +419,9 @@ bibliography:
       - monai_alignment
       - segmentation_models
       - augmentation_stack
+      - annotation_platform
+      - annotation_workflow
+      - federated_learning
 
   - citation_key: li2023monaifl
     inline_citation: "Li et al. (2023)"
@@ -463,3 +467,521 @@ bibliography:
     evidence_type: benchmark
     topics:
       - hpo_framework
+
+  # ============================================================
+  # Phase 8: Vessel Segmentation & Foundation Models (NEW)
+  # ============================================================
+
+  - citation_key: wittmann2024vesselfm
+    inline_citation: "Wittmann et al. (2024)"
+    authors: "Wittmann, F., Paetzold, J. C., McGinnis, J., Debus, C., Kofler, F., Bauer, D., ... & Menze, B. H."
+    year: 2024
+    title: "vesselFM: A Foundation Model for Universal 3D Blood Vessel Segmentation"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2411.17386"
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
+      - foundation_model_integration
+      - augmentation_stack
+
+  - citation_key: shi2025comma
+    inline_citation: "Shi et al. (2025)"
+    authors: "Shi, G., Zhang, H., Qiu, Y., Wang, X., & Tian, J."
+    year: 2025
+    title: "COMMA: Coordinate-aware Modulated Mamba Network for 3D Dispersed Vessel Segmentation"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2503.02332"
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
+      - loss_functions
+
+  - citation_key: galvao2025vessshape
+    inline_citation: "Galvão & Comin (2025)"
+    authors: "Galvão, W. N. & Comin, C. H."
+    year: 2025
+    title: "VessShape: Few-shot 2D Blood Vessel Segmentation by Leveraging Shape Priors from Synthetic Images"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2510.27646"
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
+      - augmentation_stack
+
+  - citation_key: terms2025vessqc
+    inline_citation: "Terms et al. (2025)"
+    authors: "Terms, N., Wittmann, F., Paetzold, J. C., & Chen, S."
+    year: 2025
+    title: "Bridging 3D Deep Learning and Curation for Analysis and High-Quality Segmentation in Practice"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2511.22236"
+    evidence_type: tool_release
+    topics:
+      - annotation_workflow
+      - annotation_platform
+      - label_quality
+      - segmentation_models
+      - uncertainty_quantification
+
+  - citation_key: terms2025synthicl
+    inline_citation: "Terms et al. (2025)"
+    authors: "Terms, N., Chen, S., & Wittmann, F."
+    year: 2025
+    title: "Towards Robust In-Context Learning for Medical Image Segmentation via Data Synthesis"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2509.19711"
+    evidence_type: benchmark
+    topics:
+      - augmentation_stack
+      - foundation_model_integration
+
+  - citation_key: zhang2025atlassegfm
+    inline_citation: "Zhang et al. (2025)"
+    authors: "Zhang, Z., Yu, Y., Zhu, S., Aly, A., Gao, Y., Gu, N., & Xue, Y."
+    year: 2025
+    title: "Atlas is Your Perfect Context: One-Shot Customization for Generalizable Foundational Medical Image Segmentation"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2512.18176"
+    evidence_type: benchmark
+    topics:
+      - foundation_model_integration
+      - segmentation_models
+
+  - citation_key: ma2024sam2bench
+    inline_citation: "Ma et al. (2024)"
+    authors: "Ma, J., Kim, S., Li, F., Baharoon, M., Asakereh, R., Lyu, H., & Wang, B."
+    year: 2024
+    title: "Segment Anything in Medical Images and Videos: Benchmark and Deployment"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2408.03322"
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
+      - foundation_model_integration
+
+  - citation_key: ma2025medsam2
+    inline_citation: "Ma et al. (2025)"
+    authors: "Ma, J., Kim, S., Li, F., Baharoon, M., Asakereh, R., Lyu, H., & Wang, B."
+    year: 2025
+    title: "MedSAM2: Segment Anything in 3D Medical Images and Videos"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2504.01397"
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
+      - foundation_model_integration
+      - annotation_workflow
+      - annotation_platform
+
+  # ============================================================
+  # Phase 8: Topology-Aware Segmentation (NEW)
+  # ============================================================
+
+  - citation_key: dhor2026tunepp
+    inline_citation: "Dhor et al. (2026)"
+    authors: "Dhor, A., Meissen, F., & Menten, M. J."
+    year: 2026
+    title: "TUNE++: Topology-Aware Uncertainty for 3D Tubular Structure Segmentation"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2602.05062"
+    evidence_type: benchmark
+    topics:
+      - loss_functions
+      - uncertainty_quantification
+      - segmentation_models
+
+  # ============================================================
+  # Phase 8: Drift Detection & Monitoring (NEW)
+  # ============================================================
+
+  - citation_key: zhang2026pprm
+    inline_citation: "Zhang et al. (2026)"
+    authors: "Zhang, Z., Schmon, S. M., & Kanagawa, H."
+    year: 2026
+    title: "Prediction-Powered Risk Monitoring of Deployed Models for Detecting Harmful Distribution Shifts"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2602.02229"
+    evidence_type: theoretical
+    topics:
+      - drift_response
+      - monitoring_stack
+      - retraining_trigger
+
+  - citation_key: subasri2023driftclinical
+    inline_citation: "Subasri et al. (2023)"
+    authors: "Subasri, V., Krishnan, R. G., & Ghassemi, M."
+    year: 2023
+    title: "Diagnosing and Remediating Harmful Data Shifts for the Responsible Deployment of Clinical AI Models"
+    venue: "medRxiv preprint"
+    doi: ""
+    url: "https://www.medrxiv.org/content/10.1101/2023.03.26.23287668"
+    evidence_type: benchmark
+    topics:
+      - drift_response
+      - monitoring_stack
+      - data_validation_tools
+      - federated_learning
+      - retraining_trigger
+
+  - citation_key: krishnan2022cyclops
+    inline_citation: "Krishnan et al. (2022)"
+    authors: "Krishnan, R. G., Subasri, V., McKeen, K., Ghassemi, M., & Goldenberg, A."
+    year: 2022
+    title: "CyclOps: A Toolkit for Healthcare ML Auditing and Monitoring"
+    venue: "NeurIPS 2022 Workshop on Learning from Time Series for Health"
+    doi: ""
+    url: "https://github.com/VectorInstitute/cyclops"
+    evidence_type: tool_release
+    topics:
+      - data_validation_tools
+      - drift_response
+      - monitoring_stack
+      - retraining_trigger
+
+  - citation_key: kim2025monitoring
+    inline_citation: "Kim et al. (2025)"
+    authors: "Kim, M., Xu, Y., & Ghassemi, M."
+    year: 2025
+    title: "Monitoring Strategies for Clinical AI Systems"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: survey
+    topics:
+      - monitoring_stack
+      - drift_response
+
+  - citation_key: chakraborty2025finrisk
+    inline_citation: "Chakraborty et al. (2025)"
+    authors: "Chakraborty, P., Baladandapani, A., & Roy, S."
+    year: 2025
+    title: "Novel Financial Risk Metrics for Monitoring AI Model Performance"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: theoretical
+    topics:
+      - monitoring_stack
+      - drift_response
+
+  # ============================================================
+  # Phase 8: Uncertainty & Calibration (NEW)
+  # ============================================================
+
+  - citation_key: andre2026ci
+    inline_citation: "André et al. (2026)"
+    authors: "André, F., Brun, N., & Defined, T. B."
+    year: 2026
+    title: "Performance Uncertainty Estimation in Medical Image Analysis"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - metrics_framework
+      - uncertainty_quantification
+      - testing_strategy
+
+  - citation_key: shahmohammadi2025conformal
+    inline_citation: "Shah-Mohammadi & Kain (2025)"
+    authors: "Shah-Mohammadi, F. & Kain, A."
+    year: 2025
+    title: "Conformal Prediction for Medical Image Segmentation"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - uncertainty_quantification
+      - calibration_tools
+
+  - citation_key: bench2025mcdropout
+    inline_citation: "Bench et al. (2025)"
+    authors: "Bench, A., Kalsi, G., & Pawar, K."
+    year: 2025
+    title: "Quantifying Uncertainty for Image Quality Assessment with MC Dropout"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - uncertainty_quantification
+      - calibration_tools
+      - model_diagnostics
+
+  - citation_key: moreo2025calibquant
+    inline_citation: "Moreo et al. (2025)"
+    authors: "Moreo, A., Esuli, A., & Sebastiani, F."
+    year: 2025
+    title: "On the Interconnections of Calibration, Quantification, and Accuracy Prediction under Distribution Shift"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: theoretical
+    topics:
+      - calibration_tools
+      - drift_response
+
+  # ============================================================
+  # Phase 8: MLOps & Compliance (NEW)
+  # ============================================================
+
+  - citation_key: nogare2025mlopsslr
+    inline_citation: "Nogare & Silveira (2025)"
+    authors: "Nogare, G. D. & Silveira, R. A."
+    year: 2025
+    title: "MLOps for ML Model Lifecycle Automation: A Systematic Literature Review"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: survey
+    topics:
+      - pipeline_orchestration
+      - experiment_tracking
+      - monitoring_stack
+      - model_diagnostics
+      - testing_strategy
+
+  - citation_key: rosmarino2025regdocs
+    inline_citation: "Rosmarino et al. (2025)"
+    authors: "Rosmarino, A., Giudice, L., & Torchiano, M."
+    year: 2025
+    title: "MLOps-Driven Automation of Regulatory Documentation for AI-Based SaMD"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - compliance_depth
+      - documentation_standard
+      - documentation_generation
+
+  - citation_key: martina2024iec62304devops
+    inline_citation: "Martina et al. (2024)"
+    authors: "Martina, G., Giudice, L., & Torchiano, M."
+    year: 2024
+    title: "Software Medical Device Maintenance: A DevOps-Based Approach under IEC 62304"
+    venue: "IEEE Access"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - compliance_depth
+      - ci_cd_platform
+      - model_governance
+
+  - citation_key: niemiec2025euaiact
+    inline_citation: "Niemiec (2025)"
+    authors: "Niemiec, E."
+    year: 2025
+    title: "EU AI Act: Classification and Compliance Implications for Medical AI"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - model_governance
+
+  - citation_key: lahteenmaki2023regops
+    inline_citation: "Lähteenmäki et al. (2023)"
+    authors: "Lähteenmäki, J., Ilvonen, I., & Hyrynsalmi, S."
+    year: 2023
+    title: "RegOps: The Lifecycle of AI/ML Regulatory Compliance"
+    venue: "Software Engineering and Formal Methods, LNCS"
+    doi: ""
+    url: ""
+    evidence_type: theoretical
+    topics:
+      - compliance_depth
+      - ci_cd_platform
+      - documentation_generation
+
+  - citation_key: testi2025ccmlops
+    inline_citation: "Testi et al. (2025)"
+    authors: "Testi, M., Rossi, L., & Di Meo, E."
+    year: 2025
+    title: "CC-MLOps: Enhancing Cell Counting through MLOps"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - pipeline_orchestration
+      - experiment_tracking
+      - xai_strategy
+
+  # ============================================================
+  # Phase 8: Reporting Standards (NEW)
+  # ============================================================
+
+  - citation_key: kwong2025consortai
+    inline_citation: "Kwong et al. (2025)"
+    authors: "Kwong, J. C., McCradden, M. D., & Liu, X."
+    year: 2025
+    title: "CONSORT-AI: Minimum Reporting Standards for Clinical Trials with AI"
+    venue: "Nature Medicine"
+    doi: ""
+    url: ""
+    evidence_type: regulatory
+    topics:
+      - documentation_standard
+      - compliance_depth
+
+  - citation_key: park2025miclearllm
+    inline_citation: "Park et al. (2025)"
+    authors: "Park, S. H., Kim, H. J., & Yoon, S. H."
+    year: 2025
+    title: "MI-CLEAR-LLM: Minimum Reporting Standards for LLMs in Clinical Research"
+    venue: "Radiology"
+    doi: ""
+    url: ""
+    evidence_type: regulatory
+    topics:
+      - documentation_standard
+      - compliance_depth
+
+  # ============================================================
+  # Phase 8: Data Quality & Validation (NEW)
+  # ============================================================
+
+  - citation_key: vantwist2026datacare
+    inline_citation: "van Twist et al. (2026)"
+    authors: "van Twist, D., Greiner, D., & Jansen, T."
+    year: 2026
+    title: "DATA-CARE: Comprehensive Data Quality Assessment Tool for Medical AI"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: tool_release
+    topics:
+      - data_validation_tools
+      - label_quality
+      - data_profiling
+      - testing_strategy
+
+  - citation_key: marciano2025nnqc
+    inline_citation: "Marciano et al. (2025)"
+    authors: "Marciano, T., Kats, N., & Greenspan, H."
+    year: 2025
+    title: "nnQC: A Diffusion-Based Quality Control Framework for Medical Image Segmentations"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - model_diagnostics
+      - data_validation_tools
+      - label_quality
+
+  # ============================================================
+  # Phase 8: Agent Frameworks (NEW)
+  # ============================================================
+
+  - citation_key: abdollahi2025agenticsurvey
+    inline_citation: "Abdollahi et al. (2025)"
+    authors: "Abdollahi, H., Patel, V., & Kumar, R."
+    year: 2025
+    title: "A Comprehensive Survey on Agentic AI Systems"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: survey
+    topics:
+      - agent_framework
+      - llm_observability
+
+  - citation_key: bluethgen2025agenticradiology
+    inline_citation: "Blüthgen et al. (2025)"
+    authors: "Blüthgen, C., Bressem, K. K., & Adams, L. C."
+    year: 2025
+    title: "Agentic Systems in Radiology"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: survey
+    topics:
+      - agent_framework
+      - pipeline_orchestration
+      - llm_observability
+
+  - citation_key: tzanis2026agenticregulation
+    inline_citation: "Tzanis et al. (2026)"
+    authors: "Tzanis, G., Dionysiou, D., & Katos, V."
+    year: 2026
+    title: "Agentic AI Systems: Regulatory Implications and Safety Considerations"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: theoretical
+    topics:
+      - agent_framework
+      - compliance_depth
+
+  - citation_key: jiang2026ibisagent
+    inline_citation: "Jiang et al. (2026)"
+    authors: "Jiang, Y., Sun, C., & Li, Z."
+    year: 2026
+    title: "IBISAgent: Reinforcing Visual Reasoning in Multimodal LLMs via Interactive Segmentation"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - agent_framework
+      - segmentation_models
+
+  - citation_key: sheng2026dills
+    inline_citation: "Sheng et al. (2026)"
+    authors: "Sheng, L., Ma, S., & Zhou, Y."
+    year: 2026
+    title: "DiLLS: Interactive Diagnosis of LLM Multi-Agent Systems via Layered Summaries"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - llm_observability
+      - agent_framework
+
+  # ============================================================
+  # Phase 8: Continual Learning & Deployment (NEW)
+  # ============================================================
+
+  - citation_key: oh2025continuallearning
+    inline_citation: "Oh et al. (2025)"
+    authors: "Oh, S., Lee, J., & Kim, H."
+    year: 2025
+    title: "Towards Efficient Continual Learning for Medical Image Segmentation"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - federated_learning
+      - foundation_model_integration
+      - retraining_trigger
+
+  - citation_key: gupta2025monaideploy
+    inline_citation: "Gupta et al. (2025)"
+    authors: "Gupta, V., Yao, Z., & Nath, V."
+    year: 2025
+    title: "MONAI Deploy: Production Deployment for Medical AI Models"
+    venue: "MONAI Documentation"
+    doi: ""
+    url: "https://docs.monai.io/en/stable/deploy.html"
+    evidence_type: tool_release
+    topics:
+      - serving_architecture
+      - monai_alignment

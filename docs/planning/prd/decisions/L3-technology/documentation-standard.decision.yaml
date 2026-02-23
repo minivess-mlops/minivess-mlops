@@ -158,6 +158,27 @@ rationale: >
   strongly coupled to compliance depth — lightweight audit pairs with lite
   cards, full IEC 62304 requires regulatory dossiers.
 
+references:
+  - citation_key: mitchell2019model
+    relevance: "Model Cards framework for model reporting. Foundation for documentation standard."
+    supports_options: ["model_cards_full", "model_cards_lite"]
+
+  - citation_key: kwong2025consortai
+    relevance: "CONSORT-AI minimum reporting standards for clinical AI trials."
+    supports_options: ["model_cards_full", "regulatory_dossier"]
+
+  - citation_key: park2025miclearllm
+    relevance: "MI-CLEAR-LLM reporting standards for LLMs in clinical research."
+    supports_options: ["model_cards_full"]
+
+  - citation_key: rosmarino2025regdocs
+    relevance: "Automated regulatory documentation generation from MLOps artifacts."
+    supports_options: ["regulatory_dossier", "model_cards_full"]
+
+  - citation_key: iec62304_2015
+    relevance: "IEC 62304 standard requiring formal documentation for medical device software."
+    supports_options: ["regulatory_dossier"]
+
 tags:
   - technology
   - documentation

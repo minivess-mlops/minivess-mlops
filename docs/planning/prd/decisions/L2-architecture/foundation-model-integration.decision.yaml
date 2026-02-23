@@ -130,6 +130,31 @@ rationale: >
   foundation model adaptation. Config stubs exist for VISTA-3D and SAM3
   in the ModelFamily enum but no integration yet.
 
+references:
+  - citation_key: hu2022lora
+    relevance: "LoRA parameter-efficient fine-tuning. Foundation for adapter-based FM integration."
+    supports_options: ["lora_finetune", "adapter_fusion"]
+
+  - citation_key: wittmann2024vesselfm
+    relevance: "vesselFM: first vessel-specific foundation model. Uses domain randomization + flow matching for pretraining."
+    supports_options: ["lora_finetune", "full_finetune"]
+
+  - citation_key: zhang2025atlassegfm
+    relevance: "AtlasSegFM atlas-guided one-shot FM customization. Shows limitations of zero-shot FMs on small structures."
+    supports_options: ["prompt_tuning", "lora_finetune"]
+
+  - citation_key: terms2025synthicl
+    relevance: "SynthICL domain randomization for in-context learning. Alternative to fine-tuning."
+    supports_options: ["prompt_tuning"]
+
+  - citation_key: ma2024sam2bench
+    relevance: "SAM2 benchmark for medical images. Shows varying performance across organ types."
+    supports_options: ["lora_finetune", "prompt_tuning"]
+
+  - citation_key: oh2025continuallearning
+    relevance: "Continual learning for efficient FM adaptation to new domains without forgetting."
+    supports_options: ["lora_finetune", "adapter_fusion"]
+
 tags:
   - architecture
   - foundation-models

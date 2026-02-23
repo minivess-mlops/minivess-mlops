@@ -155,8 +155,28 @@ domain_applicability:
 rationale: >
   Drift-based (0.30) and manual (0.25) are both reasonable starting points.
   Manual is currently implemented as the project is in development. Drift-based
-  is the next step when the monitoring stack and drift detection mature.
-  Data volume triggers (0.20) are natural for medical imaging batch workflows.
+  is the next step when the monitoring stack and drift detection mature, with
+  PPRM (Zhang et al., 2026) providing formal false alarm guarantees for
+  automated triggers. Subasri et al. (2023) demonstrate clinical drift
+  patterns motivating drift-based retraining. Data volume triggers (0.20)
+  are natural for medical imaging batch workflows.
+
+references:
+  - citation_key: zhang2026pprm
+    relevance: "PPRM prediction-powered risk monitoring with formal false alarm guarantees. Enables drift-based retraining triggers."
+    supports_options: ["drift_based"]
+
+  - citation_key: subasri2023driftclinical
+    relevance: "Clinical dataset shift patterns across hospitals. Transfer learning and continual learning remediation strategies."
+    supports_options: ["drift_based", "data_volume"]
+
+  - citation_key: oh2025continuallearning
+    relevance: "Continual learning for efficient adaptation to new domains without catastrophic forgetting."
+    supports_options: ["drift_based", "data_volume"]
+
+  - citation_key: krishnan2022cyclops
+    relevance: "CyclOps toolkit for healthcare ML auditing and drift detection."
+    supports_options: ["drift_based"]
 
 tags:
   - operations

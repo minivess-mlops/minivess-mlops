@@ -180,6 +180,27 @@ rationale: >
   heterogeneous segmentation tasks. MC calibration (0.20) is the classical
   Bayesian approach but has inference-time cost.
 
+references:
+  - citation_key: guo2017calibration
+    relevance: "Foundational work on neural network calibration. Introduced ECE/MCE metrics for measuring miscalibration."
+    supports_options: ["netcal", "local_temp_scaling"]
+
+  - citation_key: angelopoulos2023conformal
+    relevance: "Comprehensive introduction to conformal prediction with distribution-free coverage guarantees."
+    supports_options: ["mapie"]
+
+  - citation_key: shahmohammadi2025conformal
+    relevance: "Validates conformal prediction specifically for medical image segmentation with formal coverage guarantees."
+    supports_options: ["mapie"]
+
+  - citation_key: moreo2025calibquant
+    relevance: "Proves equivalence of calibration, quantification, and accuracy prediction under distribution shift. Impacts cross-domain calibration strategies."
+    supports_options: ["netcal", "mapie"]
+
+  - citation_key: bench2025mcdropout
+    relevance: "Demonstrates practical MC Dropout for uncertainty quantification in image quality assessment."
+    supports_options: ["mc_calibration"]
+
 tags:
   - calibration
   - uncertainty

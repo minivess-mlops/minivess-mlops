@@ -142,6 +142,19 @@ rationale: >
   under controlled transformations provides quality assurance without
   additional labels.
 
+references:
+  - citation_key: nogare2025mlopsslr
+    relevance: "MLOps systematic review identifying testing as critical lifecycle stage with property-based and metamorphic approaches."
+    supports_options: ["property_based", "metamorphic"]
+
+  - citation_key: andre2026ci
+    relevance: "Large-scale study on confidence intervals for medical imaging. Informs test validation methodology."
+    supports_options: ["property_based", "metamorphic"]
+
+  - citation_key: vantwist2026datacare
+    relevance: "DATA-CARE data quality assessment with validation components applicable to testing strategies."
+    supports_options: ["property_based"]
+
 tags:
   - technology
   - testing

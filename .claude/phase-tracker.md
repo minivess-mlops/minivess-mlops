@@ -6,7 +6,7 @@ These feed into slide decks:
 - `sci-llm-writer/manuscripts/vibe-coding-slides/archived/tier-2-intermediate-slides.md` (Modules 4-7)
 - `sci-llm-writer/manuscripts/vibe-coding-slides/archived/tier-3-advanced-slides-consolidated.md` (Modules 8-12)
 
-## Current Phase: ALL COMPLETE (Phases 0-6)
+## Current Phase: ALL COMPLETE (Phases 0-8)
 
 ### Phase 0 Tasks (COMPLETE)
 - [x] P0.1: Initialize project with `uv init`, set up pyproject.toml with all deps
@@ -100,3 +100,14 @@ These feed into slide decks:
 - [x] P7b.11: LLM context updated with citation rules (llm-context.md)
 - [x] P7b.12: Fixed 7 decision files with old-format file path references
 - [x] P7b.13: CLAUDE.md updated with citation rules section
+
+### Phase 8: PRD Research Integration & Backlog (COMPLETE)
+- [x] P8.1: Read and analyze 83 bibliography papers from sci-llm-writer/biblio/
+- [x] P8.2: Write PRD update plan (docs/planning/prd-update-plan.md — 560 lines)
+- [x] P8.3: Bibliography update (+38 entries, 29→67 total in bibliography.yaml)
+- [x] P8.4: HIGH priority decision files — segmentation_models (vesselFM + COMMA options), uncertainty_quantification, compliance_depth (regops_automated option), drift_response, monitoring_stack
+- [x] P8.5: MEDIUM priority decision files — calibration_tools, loss_functions, metrics_framework, agent_framework, documentation_standard, documentation_generation, augmentation_stack, data_validation_tools, annotation_platform, foundation_model_integration
+- [x] P8.6: LOW priority decision files — label_quality, model_diagnostics, annotation_workflow, retraining_trigger, llm_observability, testing_strategy, federated_learning
+- [x] P8.7: GitHub issues created (20 issues: 4 P0, 6 P1, 10 P2) on project board
+- [x] P8.8: PRD-update Skill updated with GitHub project integration
+- [x] P8.9: Planning/backlog Skill created (.claude/skills/planning-backlog/SKILL.md)
