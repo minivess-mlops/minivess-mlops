@@ -204,6 +204,7 @@ module = [
     "peft.*",
     "duckdb.*",
     "MetricsReloaded.*",
+    "scipy.*",
 ]
 ignore_missing_imports = true
 

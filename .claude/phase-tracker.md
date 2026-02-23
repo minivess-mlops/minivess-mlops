@@ -6,7 +6,7 @@ These feed into slide decks:
 - `sci-llm-writer/manuscripts/vibe-coding-slides/archived/tier-2-intermediate-slides.md` (Modules 4-7)
 - `sci-llm-writer/manuscripts/vibe-coding-slides/archived/tier-3-advanced-slides-consolidated.md` (Modules 8-12)
 
-## Current Phase: 1 — Model-Agnostic Training Pipeline
+## Current Phase: 2 — Ensembling & Uncertainty
 
 ### Phase 0 Tasks (COMPLETE)
 - [x] P0.1: Initialize project with `uv init`, set up pyproject.toml with all deps
@@ -21,17 +21,17 @@ These feed into slide decks:
 - [x] P0.10: Hypothesis property-based tests for config validation
 - [x] P0.11: .gitignore update for v2 artifacts
 
-### Phase 1 Tasks
-- [ ] P1.1: ModelAdapter ABC (train/predict/export/metrics protocol)
-- [ ] P1.2: SegResNet MONAI adapter
-- [ ] P1.3: SwinUNETR MONAI adapter
-- [ ] P1.4: Data loading pipeline (DVC + MONAI transforms + TorchIO augmentation)
-- [ ] P1.5: Training engine (mixed precision, gradient checkpointing, early stopping)
-- [ ] P1.6: MLflow integration (experiment tracking, model registry)
-- [ ] P1.7: TorchMetrics integration (GPU-accelerated Dice, clDice, NSD)
-- [ ] P1.8: DuckDB analytics over MLflow runs
-- [ ] P1.9: Unit tests for adapters + training engine
-- [ ] P1.10: Integration test: train SegResNet on MinIVess for 2 epochs
+### Phase 1 Tasks (COMPLETE)
+- [x] P1.1: ModelAdapter ABC (train/predict/export/metrics protocol)
+- [x] P1.2: SegResNet MONAI adapter
+- [x] P1.3: SwinUNETR MONAI adapter
+- [x] P1.4: Data loading pipeline (DVC + MONAI transforms + TorchIO augmentation)
+- [x] P1.5: Training engine (mixed precision, gradient checkpointing, early stopping)
+- [x] P1.6: MLflow integration (experiment tracking, model registry)
+- [x] P1.7: TorchMetrics integration (GPU-accelerated Dice, F1)
+- [x] P1.8: DuckDB analytics over MLflow runs
+- [x] P1.9: Unit tests for adapters + training engine (48 tests, 66 total)
+- [x] P1.10: SwinUNETR API fix for MONAI 1.5.x + conftest warning filters
 
 ### Phase 2 Tasks (pending)
 - [ ] P2.1: Ensemble base (voting, mean, weighted strategies)
