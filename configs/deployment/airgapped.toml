@@ -1,0 +1,7 @@
+[airgapped]
+# Air-gapped environment — zero external API calls
+debug = false
+langfuse_enabled = true  # Self-hosted, no external calls
+braintrust_enabled = false  # Requires cloud API
+agent_provider = "ollama:qwen2.5-coder:14b"
+agent_fallback_provider = "ollama:qwen2.5-coder:14b"

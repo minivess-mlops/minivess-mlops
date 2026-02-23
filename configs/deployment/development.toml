@@ -1,0 +1,6 @@
+[development]
+debug = true
+mlflow_tracking_uri = "http://localhost:5000"
+langfuse_enabled = true
+braintrust_enabled = false
+agent_provider = "ollama:qwen2.5-coder:14b"

@@ -10,3 +10,30 @@
 /.env
 /tools/mlflow/*
 /minivess_mlops.wiki/
+
+# Dynaconf secrets
+configs/deployment/.secrets.toml
+
+# uv
+.venv/
+uv.lock
+
+# Python
+__pycache__/
+*.pyo
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Docker
+.env
+
+# DVC
+/data/raw/
+/data/processed/
+
+# IDE
+.vscode/

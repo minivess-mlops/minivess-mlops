@@ -1,0 +1,38 @@
+[default]
+# MinIVess MLOps v2 — Dynaconf base settings
+# Environment-specific overrides in development.toml, staging.toml, etc.
+# Secrets in .secrets.toml (gitignored)
+
+project_name = "minivess-mlops-v2"
+debug = false
+
+# MLflow
+mlflow_tracking_uri = "http://localhost:5000"
+mlflow_artifact_root = "s3://mlflow-artifacts/"
+
+# MinIO (S3-compatible object store)
+minio_endpoint = "http://localhost:9000"
+minio_bucket = "mlflow-artifacts"
+
+# Langfuse
+langfuse_host = "http://localhost:3001"
+langfuse_enabled = true
+
+# Braintrust
+braintrust_enabled = true
+
+# Agent Provider
+agent_provider = "anthropic:claude-sonnet-4-6"
+agent_fallback_provider = "ollama:qwen2.5-coder:14b"
+
+# Serving
+serving_host = "0.0.0.0"
+serving_port = 3333
+
+# Observability
+otel_exporter_endpoint = "http://localhost:4317"
+prometheus_port = 9090
+
+# Data
+dvc_remote = "minio"
+data_dir = "data"

@@ -1,0 +1,5 @@
+[production]
+debug = false
+langfuse_enabled = true
+braintrust_enabled = true
+agent_provider = "anthropic:claude-sonnet-4-6"
