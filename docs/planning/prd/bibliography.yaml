@@ -576,8 +576,21 @@ bibliography:
     year: 2025
     title: "MedSAM2: Segment Anything in 3D Medical Images and Videos"
     venue: "arXiv preprint"
-    doi: ""
-    url: "https://arxiv.org/abs/2504.01397"
+    doi: "10.48550/arXiv.2504.03600"
+    url: "https://arxiv.org/abs/2504.03600"
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
+      - foundation_model_integration
+
+  - citation_key: liu2025medsam3
+    inline_citation: "Liu et al. (2025)"
+    authors: "Liu, A., Xue, R., Cao, X. R., Chen, Y., Wang, Y., Tao, D., & Yang, J."
+    year: 2025
+    title: "MedSAM3: Delving into Segment Anything with Medical Concepts"
+    venue: "arXiv preprint"
+    doi: "10.48550/arXiv.2511.19046"
+    url: "https://arxiv.org/abs/2511.19046"
     evidence_type: benchmark
     topics:
       - segmentation_models

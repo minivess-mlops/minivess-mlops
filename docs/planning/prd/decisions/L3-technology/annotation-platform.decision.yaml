@@ -140,8 +140,8 @@ references:
     relevance: "VessQC napari plugin for uncertainty-guided 3D segmentation curation. Improved error recall 67% to 94%."
     supports_options: ["monai_label", "hybrid"]
 
-  - citation_key: ma2025medsam2
-    relevance: "MedSAM2 with 3D Slicer integration for interactive 3D medical annotation. 85%+ annotation cost reduction."
+  - citation_key: liu2025medsam3
+    relevance: "MedSAM3 with SAM3-based medical concept-aware prompting for interactive 3D medical annotation."
     supports_options: ["monai_label", "hybrid"]
 
   - citation_key: cardoso2022monai

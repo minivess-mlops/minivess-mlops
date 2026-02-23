@@ -148,7 +148,11 @@ references:
     supports_options: ["prompt_tuning"]
 
   - citation_key: ma2024sam2bench
-    relevance: "SAM2 benchmark for medical images. Shows varying performance across organ types."
+    relevance: "SAM2 benchmark for medical images. Shows varying performance across organ types — motivates SAM3 adoption."
+    supports_options: ["lora_finetune", "prompt_tuning"]
+
+  - citation_key: liu2025medsam3
+    relevance: "MedSAM3 builds on SAM3 with medical concept-aware prompting, the target SAM variant for this project."
     supports_options: ["lora_finetune", "prompt_tuning"]
 
   - citation_key: oh2025continuallearning

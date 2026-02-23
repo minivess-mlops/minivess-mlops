@@ -80,13 +80,13 @@ options:
       - "Requires dataset conversion to nnU-Net format"
 
   - option_id: sam_variants
-    title: "SAM Variants (SAM3, MedSAM2)"
+    title: "SAM Variants (SAM3, MedSAM3)"
     description: >
       Segment Anything (Kirillov et al., 2023) variants adapted for 3D
-      medical imaging (SAM3, MedSAM2). Interactive prompting model.
-      Highly experimental for vascular segmentation. MedSAM2 (Ma et al., 2025)
-      achieves 85%+ annotation cost reduction but benchmarks (Ma et al., 2024)
-      confirm limitations on thin tubular structures.
+      medical imaging. MedSAM3 (Liu et al., 2025) builds on SAM3 with
+      medical concept-aware prompting. Highly experimental for vascular
+      segmentation. SAM2 benchmarks (Ma et al., 2024) confirm limitations
+      on thin tubular structures; SAM3 variants aim to address these.
     prior_probability: 0.10
     status: experimental
     implementation_status: not_started
@@ -285,7 +285,7 @@ volatility:
   change_drivers:
     - "VISTA-3D v2 and MONAI Bundle updates"
     - "nnU-Net v2.5 release"
-    - "SAM3/MedSAM2 maturity for 3D medical segmentation"
+    - "SAM3/MedSAM3 maturity for 3D medical segmentation"
     - "New topology-aware architectures"
     - "vesselFM vessel-specific foundation model"
     - "Mamba/SSM architectures for segmentation"
@@ -305,9 +305,9 @@ rationale: >
   transformer-based long-range dependencies. nnU-Net (Isensee et al., 2021) at 0.15
   remains the gold standard in medical image segmentation challenges (Nature Methods)
   but requires pipeline refactoring to integrate with Hydra-zen. SAM variants
-  (Kirillov et al., 2023) drop to 0.10 as benchmarks (Ma et al., 2024) confirm poor
-  performance on thin tubular structures, though MedSAM2 (Ma et al., 2025) shows
-  promise for annotation cost reduction. The new vesselFM (Wittmann et al., 2024)
+  (Kirillov et al., 2023) drop to 0.10 as SAM2 benchmarks (Ma et al., 2024) confirm poor
+  performance on thin tubular structures. MedSAM3 (Liu et al., 2025) builds on SAM3
+  with medical concept-aware prompting, potentially addressing these limitations. The new vesselFM (Wittmann et al., 2024)
   enters at 0.15 as the first 3D vessel-specific foundation model with zero-shot
   Dice 74.66 on SMILE-UHURA and direct relevance through MiniVess inclusion in its
   training data. COMMA Mamba (Shi et al., 2025) enters at 0.10 as an experimental
@@ -361,7 +361,7 @@ references:
     supports_options: ["nnunet"]
 
   - citation_key: kirillov2023sam
-    relevance: "Introduces Segment Anything foundation model; SAM variants (SAM3, MedSAM2) derive from this work"
+    relevance: "Introduces Segment Anything foundation model; SAM3 and MedSAM3 derive from this work"
     supports_options: ["sam_variants"]
 
   - citation_key: shit2021cldice
@@ -404,8 +404,8 @@ references:
     relevance: "Comprehensive benchmark of SAM2 in medical images. Shows limitations on thin structures."
     supports_options: ["sam_variants"]
 
-  - citation_key: ma2025medsam2
-    relevance: "MedSAM2 achieves 85%+ annotation cost reduction. DSC 86-88% on organs."
+  - citation_key: liu2025medsam3
+    relevance: "MedSAM3 builds on SAM3 with medical concept-aware prompting for 3D medical segmentation."
     supports_options: ["sam_variants"]
 
   - citation_key: dhor2026tunepp
