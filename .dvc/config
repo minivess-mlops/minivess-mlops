@@ -1,9 +1,10 @@
 [core]
-    remote = remote_readonly
-[cache]
-    dir = /mnt/minivess-dvc-cache
-    type = "reflink,symlink,hardlink,copy"
-    shared = group
+    remote = minio
+['remote "minio"']
+    url = s3://dvc-data
+    endpointurl = http://localhost:9000
+    access_key_id = minioadmin
+    secret_access_key = minioadmin
 ['remote "remote_storage"']
     url = s3://minivessdataset
 ['remote "remote_readonly"']
