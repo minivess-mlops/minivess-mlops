@@ -156,12 +156,25 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  whylogs (0.40) is the preferred profiling tool given its lightweight design,
-  privacy-preserving approach (no raw data storage), and natural complement
-  to the validation onion. It's in dependencies but not integrated. Would
-  provide continuous data profiling alongside Pandera (schema), GE (batch
-  quality), and Deepchecks (vision validation) to complete the validation
+  whylogs (0.40) is the preferred profiling tool, confirmed by Zhou et al. (2024)
+  as particularly suited for ML tasks due to its lightweight, privacy-preserving
+  design. Data validation best practices (Breck et al., 2019) establish the
+  profiling requirements that whylogs addresses. It's in dependencies but not
+  integrated. Would provide continuous data profiling alongside Pandera (schema),
+  GE (batch quality), and Deepchecks (vision validation) to complete the validation
   onion's profiling layer.
+
+references:
+  - citation_key: zhou2024dataquality
+    relevance: "Survey of data quality tools for ML evaluating whylogs, ydata-profiling, Great Expectations, and others"
+    supports_options:
+      - whylogs
+      - ydata_profiling
+  - citation_key: breck2019data
+    relevance: "Data validation framework for ML establishing profiling requirements"
+    supports_options:
+      - whylogs
+      - custom
 
 tags:
   - technology

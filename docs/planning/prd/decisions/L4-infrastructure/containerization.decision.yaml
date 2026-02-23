@@ -134,9 +134,21 @@ domain_applicability:
 
 rationale: >
   Docker Compose (0.45) is resolved as the local-first orchestration
-  approach. It runs MLflow, Label Studio, Langfuse, Prometheus/Grafana,
-  and Marquez. Kubernetes (0.25) is the natural upgrade path for
-  production deployments.
+  approach, following reproducible containerization best practices
+  (Nuest et al., 2020). It runs MLflow, Label Studio, Langfuse,
+  Prometheus/Grafana, and Marquez. Kubernetes (0.25) is the natural
+  upgrade path for production deployments (Kreuzberger et al., 2023).
+
+references:
+  - citation_key: nuest2020dockerfiles
+    relevance: "Best practices for Dockerfiles in reproducible data science"
+    supports_options:
+      - docker_compose
+  - citation_key: kreuzberger2023mlops
+    relevance: "MLOps architecture survey covering containerization as deployment infrastructure"
+    supports_options:
+      - docker_compose
+      - kubernetes
 
 tags:
   - infrastructure

@@ -159,9 +159,22 @@ domain_applicability:
 
 rationale: >
   Langfuse costs (0.35) is the leading option given the existing Langfuse
-  stack for LLM observability. Custom DuckDB (0.30) is partially
-  implemented for MLflow analytics. No cost tracking (0.20) is the
-  effective current state for local development.
+  stack for LLM observability. Cloud cost optimization strategies
+  (Deochake, 2023) and hybrid LLM routing (Ding et al., 2024) demonstrate
+  the value of cost-aware tooling. Custom DuckDB (0.30) is partially
+  implemented for MLflow analytics.
+
+references:
+  - citation_key: deochake2023cloud
+    relevance: "Survey of cloud cost optimization strategies reporting 50-90% savings potential"
+    supports_options:
+      - cloud_billing
+      - langfuse_costs
+  - citation_key: ding2024hybrid
+    relevance: "Hybrid LLM routing achieving 40% API cost reduction without quality degradation"
+    supports_options:
+      - langfuse_costs
+      - custom_duckdb
 
 tags:
   - operations

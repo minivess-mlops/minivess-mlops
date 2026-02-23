@@ -135,9 +135,23 @@ domain_applicability:
 
 rationale: >
   Local GPU (0.40) is the resolved choice for a solo learning project.
-  Cloud spot (0.25) is the natural next step when larger experiments are
-  needed. HPC SLURM (0.20) would apply if the project moves to an
-  academic setting. Kubernetes (0.15) is primarily for production.
+  GPU datacenter scheduling surveys (Ye et al., 2024) inform the cloud
+  and HPC alternatives. Cloud spot (0.25) is the natural next step when
+  larger experiments are needed, following MLOps infrastructure patterns
+  (Kreuzberger et al., 2023).
+
+references:
+  - citation_key: ye2024scheduling
+    relevance: "Survey of GPU datacenter scheduling for DL training and inference workloads"
+    supports_options:
+      - cloud_spot
+      - hpc_slurm
+      - kubernetes
+  - citation_key: kreuzberger2023mlops
+    relevance: "MLOps architecture covering compute infrastructure patterns"
+    supports_options:
+      - local_gpu
+      - cloud_spot
 
 tags:
   - infrastructure

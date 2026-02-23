@@ -85,15 +85,32 @@ domain_applicability:
 
 rationale: >
   MONAI-compatible (0.45) reflects the current implementation that uses
-  MONAI transforms and model zoo while freely integrating TorchIO,
-  TorchMetrics, BentoML, and other non-MONAI tools.
+  MONAI transforms and model zoo (Cardoso et al., 2022) while freely
+  integrating TorchIO, TorchMetrics, BentoML, and other non-MONAI tools.
+  The growing MONAI ecosystem — including MONAI Label (Diaz-Pinto et al., 2024)
+  and MONAI Generative (Pinaya et al., 2023) — increases the value of
+  deeper alignment.
 
 tags:
   - strategic
   - ecosystem
   - resolved
 
-references: []
+references:
+  - citation_key: cardoso2022monai
+    relevance: "Foundational MONAI framework paper defining the ecosystem this decision evaluates alignment with"
+    supports_options:
+      - monai_native
+      - monai_compatible
+  - citation_key: diazpinto2024monailabel
+    relevance: "MONAI Label extends the ecosystem with interactive annotation, deepening MONAI-native value proposition"
+    supports_options:
+      - monai_native
+  - citation_key: pinaya2023monaigenerative
+    relevance: "MONAI Generative extends framework with generative models, increasing ecosystem breadth"
+    supports_options:
+      - monai_native
+      - monai_compatible
 
 research_notes: >
   Internal: CLAUDE.md documents the project's MONAI-compatible tool stack

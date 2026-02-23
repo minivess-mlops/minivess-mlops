@@ -77,8 +77,30 @@ domain_applicability:
   general_medical: 0.8
 
 rationale: >
-  Gradient-based (0.35) is the most practical starting point. Captum and
-  SHAP are in dependencies but not yet integrated.
+  Gradient-based (0.35) is the most practical starting point, as supported
+  by reviews of interpretability methods for medical imaging (Salahuddin et al., 2022;
+  Patricio et al., 2024). Trustworthy AI frameworks (Holzinger et al., 2022)
+  emphasize XAI as a cross-cutting requirement. Captum and SHAP are in
+  dependencies but not yet integrated.
+
+references:
+  - citation_key: salahuddin2022transparency
+    relevance: "Comprehensive review of interpretability methods for medical image analysis, covering all XAI strategy options"
+    supports_options:
+      - gradient_based
+      - perturbation_based
+      - concept_based
+  - citation_key: holzinger2022information
+    relevance: "Survey on trustworthy medical AI emphasizing explainability as a cross-cutting requirement"
+    supports_options:
+      - gradient_based
+      - perturbation_based
+      - concept_based
+  - citation_key: patricio2024xai
+    relevance: "Survey of XAI methods in medical image classification with practical taxonomy"
+    supports_options:
+      - gradient_based
+      - perturbation_based
 
 tags:
   - architecture

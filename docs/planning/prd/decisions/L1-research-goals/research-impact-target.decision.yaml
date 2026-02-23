@@ -89,8 +89,23 @@ domain_applicability:
 
 rationale: >
   Conference papers have highest prior (0.35) as the most common first output
-  for ML research. Course material at 0.20 reflects that claude-code-patterns.md
+  for ML research. Standardized evaluation (Maier-Hein et al., 2024) and
+  explainability surveys (Patricio et al., 2024) represent key publication
+  targets. Course material at 0.20 reflects that claude-code-patterns.md
   already partially serves this role.
+
+references:
+  - citation_key: maier2024metrics
+    relevance: "Defines standardized evaluation methodology required for conference and journal publications in medical imaging"
+    supports_options:
+      - conference_paper
+      - journal_paper
+      - benchmark_contribution
+  - citation_key: patricio2024xai
+    relevance: "Survey of XAI methods in medical image classification, a common research output format"
+    supports_options:
+      - conference_paper
+      - journal_paper
 
 tags:
   - strategic

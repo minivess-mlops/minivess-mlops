@@ -80,9 +80,22 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  MIT is resolved (0.50 prior). The project already uses MIT license.
-  Proprietary has 0.25 prior reflecting that clinical deployment paths
-  often require it.
+  MIT is resolved (0.50 prior). The project already uses MIT license,
+  following the arguments for open-source software in ML research
+  (Sonnenburg et al., 2007) and free software in scholarship
+  (Fortunato & Galassi, 2021). Proprietary has 0.25 prior reflecting
+  that clinical deployment paths often require it.
+
+references:
+  - citation_key: sonnenburg2007opensource
+    relevance: "Seminal paper arguing for open-source software in ML research, foundational to permissive licensing choice"
+    supports_options:
+      - permissive_mit
+  - citation_key: fortunato2021foss
+    relevance: "Makes the case for FOSS in research and scholarship, supporting open licensing for academic projects"
+    supports_options:
+      - permissive_mit
+      - copyleft_gpl
 
 tags:
   - strategic

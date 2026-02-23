@@ -131,8 +131,22 @@ domain_applicability:
 
 rationale: >
   GitHub Actions only (0.35) is the pragmatic choice for a Docker Compose
-  local-first project. ArgoCD (0.30) becomes relevant when the project
-  migrates to Kubernetes. FluxCD (0.20) is a lighter K8s-native alternative.
+  local-first project, aligned with CD4ML deployment patterns (Sato et al., 2019).
+  ArgoCD (0.30) becomes relevant when the project migrates to Kubernetes,
+  following MLOps deployment architecture (Kreuzberger et al., 2023).
+
+references:
+  - citation_key: sato2019cd4ml
+    relevance: "CD4ML patterns covering declarative deployment from Git as GitOps foundation"
+    supports_options:
+      - github_actions_only
+      - argocd
+  - citation_key: kreuzberger2023mlops
+    relevance: "MLOps architecture including deployment automation and GitOps patterns"
+    supports_options:
+      - argocd
+      - fluxcd
+      - github_actions_only
 
 tags:
   - infrastructure

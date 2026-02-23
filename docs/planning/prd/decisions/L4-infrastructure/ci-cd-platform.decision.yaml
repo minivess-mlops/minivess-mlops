@@ -131,9 +131,28 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  GitHub Actions (0.50) is resolved. The project is GitHub-hosted with
-  existing workflows for linting, testing, and CML. GitLab CI (0.20)
+  GitHub Actions (0.50) is resolved, following continuous delivery for ML
+  patterns (Sato et al., 2019) and MLOps architecture principles
+  (Kreuzberger et al., 2023). The project is GitHub-hosted with existing
+  workflows for linting, testing, and CML (Ruf et al., 2021). GitLab CI (0.20)
   would be relevant if the project moved to an institutional GitLab.
+
+references:
+  - citation_key: sato2019cd4ml
+    relevance: "Defines continuous delivery patterns for ML systems including CI/CD pipeline design"
+    supports_options:
+      - github_actions
+      - gitlab_ci
+  - citation_key: kreuzberger2023mlops
+    relevance: "MLOps architecture survey covering CI/CD as an integral component"
+    supports_options:
+      - github_actions
+      - gitlab_ci
+      - buildkite
+  - citation_key: ruf2021demystifying
+    relevance: "Benchmarks open-source MLOps tools including CI/CD integration patterns"
+    supports_options:
+      - github_actions
 
 tags:
   - infrastructure

@@ -156,10 +156,26 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  ONNX (0.35) is resolved for BentoML serving with ONNX Runtime.
-  MONAI Bundle (0.30) is the natural complement when MONAI alignment
-  deepens. Both formats may coexist: MONAI Bundle for ecosystem
-  compatibility, ONNX for runtime performance.
+  ONNX (0.35) is resolved for BentoML serving with ONNX Runtime, supported
+  by interoperability studies (Jajal et al., 2024) and export format comparisons
+  (Parida et al., 2025) showing ONNX as the most portable option. MONAI Bundle
+  (0.30) defined by Cardoso et al. (2022) is the natural complement when MONAI
+  alignment deepens. Both formats may coexist.
+
+references:
+  - citation_key: jajal2024interoperability
+    relevance: "User survey and failure analysis of ONNX converters revealing 75% defect rate in node conversion"
+    supports_options:
+      - onnx
+  - citation_key: parida2025export
+    relevance: "Case study comparing ONNX, Pickle, TorchScript, and other export formats for ML integration"
+    supports_options:
+      - onnx
+      - torchscript
+  - citation_key: cardoso2022monai
+    relevance: "MONAI framework paper defining the MONAI Bundle format for model packaging"
+    supports_options:
+      - monai_bundle
 
 tags:
   - infrastructure

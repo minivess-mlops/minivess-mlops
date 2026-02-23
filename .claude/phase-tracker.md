@@ -6,7 +6,7 @@ These feed into slide decks:
 - `sci-llm-writer/manuscripts/vibe-coding-slides/archived/tier-2-intermediate-slides.md` (Modules 4-7)
 - `sci-llm-writer/manuscripts/vibe-coding-slides/archived/tier-3-advanced-slides-consolidated.md` (Modules 8-12)
 
-## Current Phase: ALL COMPLETE (Phases 0-8)
+## Current Phase: ALL COMPLETE (Phases 0-9)
 
 ### Phase 0 Tasks (COMPLETE)
 - [x] P0.1: Initialize project with `uv init`, set up pyproject.toml with all deps
@@ -111,3 +111,15 @@ These feed into slide decks:
 - [x] P8.7: GitHub issues created (20 issues: 4 P0, 6 P1, 10 P2) on project board
 - [x] P8.8: PRD-update Skill updated with GitHub project integration
 - [x] P8.9: Planning/backlog Skill created (.claude/skills/planning-backlog/SKILL.md)
+
+### Phase 9: PRD Citation Completeness & Backfill (COMPLETE)
+- [x] P9.1: Web research — Groups A+B (L1 research goals + L2 architecture, 22 papers found)
+- [x] P9.2: Web research — Groups C+D (L3 technology + L4 infrastructure, 14 papers found)
+- [x] P9.3: Web research — Group E + thin files (L5 operations + thin coverage, 11 papers found)
+- [x] P9.4: Bibliography expansion (+38 entries, 64→102 total in bibliography.yaml)
+- [x] P9.5: L1 decision files (6 files) — project-purpose, research-impact-target, open-source-model, portfolio-priority, monai-alignment, reproducibility-standard
+- [x] P9.6: L2 decision files (8 files) — model-strategy, data-management-strategy, ensemble-strategy, serving-architecture, config-management, pipeline-orchestration, xai-strategy, validation-depth
+- [x] P9.7: L3 decision files (7 files) — ensemble-methods, experiment-tracking, hpo-framework, lineage-tracking, xai-meta-evaluation, data-profiling, llm-provider
+- [x] P9.8: L4+L5 decision files (9 files) — ci-cd-platform, compute-target, containerization, gitops-strategy, iac-tooling, secrets-management, model-export-format, cost-tracking, model-governance
+- [x] P9.9: Cross-topic bibliography fixes (5 entries: kreuzberger2023mlops, sato2019cd4ml, maier2024metrics, langchain2024langgraph, cardoso2022monai)
+- [x] P9.10: Validation — all 3 core checks PASS (resolution, completeness, cross-topic), 37 pre-existing warnings from Phase 8

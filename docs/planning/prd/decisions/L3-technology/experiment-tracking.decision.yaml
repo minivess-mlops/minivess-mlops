@@ -157,11 +157,31 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  MLflow (0.45) is resolved as the primary platform. It is self-hosted,
-  open-source, and already integrated with DVC, Hydra-zen configs, and
-  DuckDB analytics. W&B (0.25) is the strongest alternative with superior
-  visualization but introduces cloud dependency. Neptune (0.15) and ClearML
-  (0.15) are viable alternatives with smaller communities in medical imaging.
+  MLflow (0.45) is resolved as the primary platform (Zaharia et al., 2018). It is
+  self-hosted, open-source, and already integrated with DVC, Hydra-zen configs,
+  and DuckDB analytics. MLOps surveys (Kreuzberger et al., 2023; Ruf et al., 2021)
+  confirm MLflow's position as the leading open-source experiment tracker. W&B (0.25)
+  is the strongest alternative with superior visualization but introduces cloud
+  dependency. Neptune (0.15) and ClearML (0.15) are viable alternatives with smaller
+  communities in medical imaging.
+
+references:
+  - citation_key: zaharia2018mlflow
+    relevance: "Foundational MLflow paper — the implemented experiment tracking platform"
+    supports_options:
+      - mlflow
+  - citation_key: kreuzberger2023mlops
+    relevance: "MLOps survey positioning experiment tracking as a core component"
+    supports_options:
+      - mlflow
+      - wandb
+      - neptune
+      - clearml
+  - citation_key: ruf2021demystifying
+    relevance: "Benchmarks 26 open-source MLOps tools including experiment trackers"
+    supports_options:
+      - mlflow
+      - wandb
 
 tags:
   - experiment-tracking

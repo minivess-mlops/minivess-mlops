@@ -163,11 +163,35 @@ domain_applicability:
 
 rationale: >
   Mean (0.25) and greedy soup (0.25) share top prior as both are already
-  implemented and proven. Mean ensemble gives output-space diversity;
-  greedy soup gives weight-space merging with zero inference cost. SWAG
-  (0.20) is the strongest candidate for calibrated Bayesian uncertainty.
-  TIES-DARE (0.15) represents cutting-edge weight merging for foundation
-  models. Learned ensemble (0.15) has highest ceiling but most risk.
+  implemented. Deep ensembles (Lakshminarayanan et al., 2017) provide the
+  prediction averaging foundation; greedy soup (Wortsman et al., 2022) gives
+  weight-space merging with zero inference cost. SWAG (0.20) is the strongest
+  candidate for calibrated Bayesian uncertainty (Maddox et al., 2019).
+  TIES-DARE (0.15) represents cutting-edge weight merging (Yadav et al., 2023).
+  Snapshot ensembles (Huang et al., 2017) offer efficient multi-model training.
+
+references:
+  - citation_key: wortsman2022soup
+    relevance: "Introduces model soups — greedy weight averaging for zero-overhead ensembles"
+    supports_options:
+      - greedy_soup
+  - citation_key: maddox2019swag
+    relevance: "SWAG baseline for Bayesian uncertainty via stochastic weight averaging"
+    supports_options:
+      - swag
+  - citation_key: lakshminarayanan2017deep
+    relevance: "Seminal deep ensembles paper establishing prediction averaging baseline"
+    supports_options:
+      - mean
+  - citation_key: yadav2023ties
+    relevance: "TIES-Merging for resolving interference when merging fine-tuned models"
+    supports_options:
+      - ties_dare
+  - citation_key: huang2017snapshot
+    relevance: "Snapshot ensembles — multiple models from a single training run via cyclic learning rates"
+    supports_options:
+      - mean
+      - greedy_soup
 
 tags:
   - ensemble

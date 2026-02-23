@@ -104,8 +104,28 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  LangGraph (0.35) is the primary choice for agent-based orchestration.
-  DVC pipelines (0.20) complement it for data pipeline stages.
+  LangGraph (0.35) is the primary choice for agent-based orchestration
+  (LangChain Team, 2024), reflecting MLOps pipeline patterns described
+  by Kreuzberger et al. (2023) and Recupito et al. (2024). DVC pipelines
+  (0.20) complement it for data pipeline stages.
+
+references:
+  - citation_key: langchain2024langgraph
+    relevance: "LangGraph framework for agent-based orchestration — the implemented solution"
+    supports_options:
+      - langgraph
+  - citation_key: kreuzberger2023mlops
+    relevance: "MLOps architecture survey defining pipeline orchestration as a central component"
+    supports_options:
+      - langgraph
+      - prefect
+      - dvc_pipelines
+  - citation_key: recupito2024mlops
+    relevance: "Multivocal review covering orchestration challenges and tool selection in MLOps"
+    supports_options:
+      - langgraph
+      - prefect
+      - dvc_pipelines
 
 tags:
   - architecture

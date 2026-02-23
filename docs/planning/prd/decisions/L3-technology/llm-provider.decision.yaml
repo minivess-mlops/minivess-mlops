@@ -195,12 +195,24 @@ domain_applicability:
 
 rationale: >
   Anthropic (0.35) has highest prior for frontier reasoning capability
-  needed by complex agent tasks. OpenAI (0.25) provides the broadest
-  ecosystem support. Ollama (0.25) enables the local-first data sovereignty
-  principle critical for medical data. LiteLLM hybrid (0.15) is already
-  implemented as the abstraction layer and may ultimately be the "real"
-  choice — enabling all three providers based on task requirements. Domain
-  applicability is lower because LLM providers only serve agent components.
+  needed by complex agent tasks. Hybrid LLM routing (Ding et al., 2024) supports
+  the LiteLLM abstraction approach for cost-quality optimization. LangGraph
+  (LangChain Team, 2024) enables provider-agnostic orchestration. Ollama (0.25)
+  enables the local-first data sovereignty principle critical for medical data.
+  LiteLLM hybrid (0.15) is already implemented as the abstraction layer enabling
+  all three providers based on task requirements.
+
+references:
+  - citation_key: ding2024hybrid
+    relevance: "Hybrid LLM routing between small/large models for cost-quality optimization"
+    supports_options:
+      - hybrid_litellm
+  - citation_key: langchain2024langgraph
+    relevance: "LangGraph framework enabling provider-agnostic agent orchestration"
+    supports_options:
+      - hybrid_litellm
+      - anthropic
+      - openai
 
 tags:
   - llm-provider

@@ -104,7 +104,33 @@ domain_applicability:
 
 rationale: >
   Model soups (0.30) and simple averaging (0.25) are already implemented.
-  Uncertainty-weighted (0.25) is the natural next step, requiring calibration.
+  Deep ensembles (Lakshminarayanan et al., 2017) provide the theoretical
+  foundation, while model soups (Wortsman et al., 2022) offer zero inference
+  overhead. Uncertainty-weighted (0.25) is the natural next step, supported
+  by uncertainty quantification surveys for medical imaging (Huang et al., 2024)
+  and the broader ensemble review (Ganaie et al., 2022).
+
+references:
+  - citation_key: ganaie2022ensemble
+    relevance: "Comprehensive review of ensemble deep learning methods covering all strategy options"
+    supports_options:
+      - simple_averaging
+      - model_soups
+      - uncertainty_weighted
+      - learned_stacking
+  - citation_key: wortsman2022soup
+    relevance: "Introduces model soups (weight averaging), the implemented ensemble strategy"
+    supports_options:
+      - model_soups
+  - citation_key: lakshminarayanan2017deep
+    relevance: "Seminal deep ensembles paper establishing the baseline for ensemble uncertainty estimation"
+    supports_options:
+      - simple_averaging
+      - uncertainty_weighted
+  - citation_key: huang2024uncertainty
+    relevance: "Survey of uncertainty quantification methods in medical imaging including ensemble approaches"
+    supports_options:
+      - uncertainty_weighted
 
 tags:
   - architecture

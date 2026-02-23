@@ -111,11 +111,28 @@ research_notes: >
 
 rationale: >
   Standard 5 layers (0.40) has highest prior. Current implementation
-  actually has ~8 layers, approaching the full onion.
+  actually has ~8 layers, approaching the full onion. Standardized
+  validation methodology (Maier-Hein et al., 2024) and awareness of
+  common metric limitations (Reinke et al., 2024) support comprehensive
+  validation depth.
+
+references:
+  - citation_key: maier2024metrics
+    relevance: "Metrics Reloaded — standardized validation methodology for image analysis"
+    supports_options:
+      - full_onion_12_layers
+      - standard_5_layers
+  - citation_key: reinke2024common
+    relevance: "Companion paper documenting common metric limitations, motivating deeper validation"
+    supports_options:
+      - full_onion_12_layers
+      - standard_5_layers
+  - citation_key: huang2024uncertainty
+    relevance: "Uncertainty quantification review supporting validation depth for medical imaging"
+    supports_options:
+      - full_onion_12_layers
 
 tags:
   - architecture
   - validation
   - partially-resolved
-
-references: []

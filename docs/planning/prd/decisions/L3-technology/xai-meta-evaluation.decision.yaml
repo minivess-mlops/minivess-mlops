@@ -107,12 +107,28 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  Quantus (0.40) is the preferred meta-evaluation framework given its
-  comprehensive metric library and standardized evaluation protocol.
-  However, this decision is blocked by the XAI strategy resolution —
-  Captum for 3D volumetric data needs to be integrated first before
-  meta-evaluation is meaningful. Current state is effectively "none"
-  since neither XAI nor meta-evaluation is active.
+  Quantus (0.40) is the preferred meta-evaluation framework (Hedstrom et al., 2023)
+  given its comprehensive metric library. Systematic reviews of XAI evaluation
+  (Nauta et al., 2023) and the OpenXAI benchmark (Agarwal et al., 2022) define
+  the quantitative evaluation standards this decision builds on. However, this
+  decision is blocked by the XAI strategy resolution — Captum for 3D volumetric
+  data needs to be integrated first before meta-evaluation is meaningful.
+
+references:
+  - citation_key: hedstrom2023quantus
+    relevance: "Quantus meta-evaluation toolkit — the preferred framework for XAI quality assessment"
+    supports_options:
+      - quantus
+  - citation_key: nauta2023anecdotal
+    relevance: "Systematic review of XAI evaluation methods defining Co-12 properties and quantitative evaluation taxonomy"
+    supports_options:
+      - quantus
+      - custom_metrics
+  - citation_key: agarwal2022openxai
+    relevance: "OpenXAI benchmark with 22 quantitative metrics for faithfulness, stability, and fairness"
+    supports_options:
+      - quantus
+      - custom_metrics
 
 tags:
   - technology

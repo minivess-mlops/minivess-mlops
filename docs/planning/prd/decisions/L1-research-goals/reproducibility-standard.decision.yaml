@@ -81,16 +81,37 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  DVC-versioned (0.50) is resolved. The project uses DVC for data versioning
-  and MLflow for experiment tracking, providing good reproducibility without
-  the performance overhead of full deterministic mode.
+  DVC-versioned (0.50) is resolved. The project uses DVC (Kuprieiev et al., 2023)
+  for data versioning and MLflow for experiment tracking, providing good
+  reproducibility aligned with the practical taxonomy of Tatman et al. (2018)
+  and the NeurIPS reproducibility recommendations (Pineau et al., 2021).
+  Full deterministic mode (Gundersen & Kjensmo, 2018) would add performance
+  overhead without proportional benefit for this project stage.
 
 tags:
   - strategic
   - reproducibility
   - resolved
 
-references: []
+references:
+  - citation_key: gundersen2018reproducibility
+    relevance: "Foundational survey on reproducibility in AI, defining the reproducibility levels this decision addresses"
+    supports_options:
+      - full_deterministic
+      - dvc_versioned
+  - citation_key: pineau2021reproducibility
+    relevance: "NeurIPS reproducibility program report with practical recommendations for ML research reproducibility"
+    supports_options:
+      - dvc_versioned
+      - full_deterministic
+  - citation_key: tatman2018taxonomy
+    relevance: "Practical taxonomy distinguishing reproducibility, replicability, and robustness levels"
+    supports_options:
+      - dvc_versioned
+  - citation_key: kuprieiev2023dvc
+    relevance: "DVC tool paper — the core technology enabling the DVC-versioned reproducibility approach"
+    supports_options:
+      - dvc_versioned
 
 research_notes: >
   Internal: dvc.yaml defines the project's DVC pipeline stages for data

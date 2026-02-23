@@ -107,11 +107,37 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  MLflow tags (0.40) is the resolved choice (Zaharia et al., 2018),
-  providing lightweight governance via experiment metadata and
-  SaMD-principled audit trails aligned with IEC 62304 lifecycle
-  (IEC, 2015). Full registry (0.30) is the upgrade path when compliance
-  depth increases or team scaling demands structured approval workflows.
+  MLflow tags (0.40) is the resolved choice (Zaharia et al., 2018; Chen et al., 2020),
+  providing lightweight governance via experiment metadata and SaMD-principled
+  audit trails aligned with IEC 62304 lifecycle (IEC, 2015). Model Cards
+  (Mitchell et al., 2019) provide structured documentation. AI governance
+  frameworks (Schneider et al., 2024) inform the full registry upgrade path
+  when compliance depth increases.
+
+references:
+  - citation_key: zaharia2018mlflow
+    relevance: "MLflow platform providing the model registry foundation for governance"
+    supports_options:
+      - mlflow_tags
+      - full_registry
+  - citation_key: chen2020mlflow
+    relevance: "MLflow Model Registry paper introducing collaborative model management and lifecycle stages"
+    supports_options:
+      - full_registry
+      - mlflow_tags
+  - citation_key: mitchell2019model
+    relevance: "Model Cards framework for structured model documentation and governance"
+    supports_options:
+      - full_registry
+      - mlflow_tags
+  - citation_key: schneider2024governance
+    relevance: "AI governance framework covering data, model, system, people, and organizational scopes"
+    supports_options:
+      - full_registry
+  - citation_key: iec62304_2015
+    relevance: "IEC 62304 medical device software lifecycle standard informing governance requirements"
+    supports_options:
+      - full_registry
 
 tags:
   - operations

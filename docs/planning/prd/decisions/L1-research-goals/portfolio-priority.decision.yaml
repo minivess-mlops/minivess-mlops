@@ -74,8 +74,21 @@ domain_applicability:
 
 rationale: >
   Breadth-first is resolved at 0.55. With 30+ tools across 38 modules,
-  the project has demonstrated breadth. Future work may shift toward
-  depth for specific tools.
+  the project has demonstrated breadth aligned with the comprehensive
+  MLOps architecture described by Kreuzberger et al. (2023) and the
+  full lifecycle mapping by Fang et al. (2023). Future work may shift
+  toward depth for specific tools.
+
+references:
+  - citation_key: fang2023mlops
+    relevance: "Maps the complete MLOps lifecycle activities, validating the breadth-first portfolio approach"
+    supports_options:
+      - breadth_over_depth
+  - citation_key: kreuzberger2023mlops
+    relevance: "Defines MLOps architecture covering 30+ components, aligning with the project's breadth-first integration"
+    supports_options:
+      - breadth_over_depth
+      - balanced
 
 tags:
   - strategic

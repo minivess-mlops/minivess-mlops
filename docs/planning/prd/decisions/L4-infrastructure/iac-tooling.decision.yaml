@@ -122,9 +122,22 @@ domain_applicability:
 
 rationale: >
   Pulumi Python (0.35) is the leading candidate when IaC becomes needed
-  because it uses the same language as the project. Currently no IaC is
-  implemented (0.20) since the project runs locally with Docker Compose.
-  Terraform (0.30) is the safe industry-standard alternative.
+  because it uses the same language as the project. Industry IaC adoption
+  studies (Guerriero et al., 2019) confirm Terraform's dominance but highlight
+  maintenance challenges. Currently no IaC is implemented (0.20) since the
+  project runs locally with Docker Compose (Kreuzberger et al., 2023).
+
+references:
+  - citation_key: guerriero2019iac
+    relevance: "Industry study on IaC adoption, challenges, and Terraform's dominance"
+    supports_options:
+      - terraform
+      - pulumi_python
+  - citation_key: kreuzberger2023mlops
+    relevance: "MLOps architecture covering infrastructure provisioning as part of the operational layer"
+    supports_options:
+      - pulumi_python
+      - terraform
 
 tags:
   - infrastructure

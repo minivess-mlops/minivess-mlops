@@ -13,7 +13,7 @@
 # 4. Sub-citations: when ingesting a paper, also add papers IT cites that
 #    are relevant to other decision nodes.
 #
-# last_updated: 2026-02-23  (Phase 8: +38 entries from 83-paper review)
+# last_updated: 2026-02-23  (Phase 9: +40 entries for citation completeness backfill)
 
 bibliography:
 
@@ -132,6 +132,7 @@ bibliography:
       - metrics_framework
       - validation_depth
       - segmentation_models
+      - research_impact_target
 
   # ============================================================
   # Foundation Models & Fine-tuning
@@ -303,6 +304,7 @@ bibliography:
     topics:
       - agent_framework
       - pipeline_orchestration
+      - llm_provider
 
   # ============================================================
   # Serving & Deployment
@@ -422,6 +424,7 @@ bibliography:
       - annotation_platform
       - annotation_workflow
       - federated_learning
+      - model_export_format
 
   - citation_key: li2023monaifl
     inline_citation: "Li et al. (2023)"
@@ -985,3 +988,547 @@ bibliography:
     topics:
       - serving_architecture
       - monai_alignment
+
+  # ============================================================
+  # Phase 9: MLOps Surveys & Architecture (NEW)
+  # ============================================================
+
+  - citation_key: kreuzberger2023mlops
+    inline_citation: "Kreuzberger et al. (2023)"
+    authors: "Kreuzberger, D., Kuhl, N., & Hirschl, S."
+    year: 2023
+    title: "Machine Learning Operations (MLOps): Overview, Definition, and Architecture"
+    venue: "IEEE Access, 11, 31866--31879"
+    doi: "10.1109/ACCESS.2023.3262138"
+    url: "https://arxiv.org/abs/2205.02302"
+    evidence_type: survey
+    topics:
+      - project_purpose
+      - portfolio_priority
+      - model_strategy
+      - pipeline_orchestration
+      - experiment_tracking
+      - ci_cd_platform
+      - compute_target
+      - containerization
+      - gitops_strategy
+      - iac_tooling
+      - secrets_management
+      - lineage_tracking
+      - config_management
+
+  - citation_key: recupito2024mlops
+    inline_citation: "Recupito et al. (2024)"
+    authors: "Recupito, G., Palomba, F., & Ferrucci, F."
+    year: 2024
+    title: "A Multivocal Review of MLOps Practices, Challenges and Open Issues"
+    venue: "ACM Computing Surveys"
+    doi: "10.1145/3747346"
+    url: "https://arxiv.org/abs/2406.09737"
+    evidence_type: survey
+    topics:
+      - pipeline_orchestration
+      - config_management
+      - serving_architecture
+      - experiment_tracking
+
+  - citation_key: ruf2021demystifying
+    inline_citation: "Ruf et al. (2021)"
+    authors: "Ruf, P., Madan, M., Reich, C., & Ould-Abdeslam, D."
+    year: 2021
+    title: "Demystifying MLOps and Presenting a Recipe for the Selection of Open-Source Tools"
+    venue: "Applied Sciences, 11(19), 8861"
+    doi: "10.3390/app11198861"
+    url: "https://www.mdpi.com/2076-3417/11/19/8861"
+    evidence_type: survey
+    topics:
+      - experiment_tracking
+      - ci_cd_platform
+
+  - citation_key: fang2023mlops
+    inline_citation: "Fang et al. (2023)"
+    authors: "Fang, Z., Yuan, Y., Zhang, J., Liu, Y., Mu, Y., Luan, Q., Xu, X., Wang, J., Wang, C., Zhang, S., & Chen, S."
+    year: 2023
+    title: "MLOps Spanning Whole Machine Learning Life Cycle: A Survey"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2304.07296"
+    evidence_type: survey
+    topics:
+      - portfolio_priority
+      - pipeline_orchestration
+      - project_purpose
+
+  # ============================================================
+  # Phase 9: Reproducibility & Open Source (NEW)
+  # ============================================================
+
+  - citation_key: gundersen2018reproducibility
+    inline_citation: "Gundersen & Kjensmo (2018)"
+    authors: "Gundersen, O. E. & Kjensmo, S."
+    year: 2018
+    title: "State of the Art: Reproducibility in Artificial Intelligence"
+    venue: "AAAI 2018, 1644--1651"
+    doi: "10.1609/aaai.v32i1.11503"
+    url: "https://ojs.aaai.org/index.php/AAAI/article/view/11503"
+    evidence_type: survey
+    topics:
+      - reproducibility_standard
+
+  - citation_key: pineau2021reproducibility
+    inline_citation: "Pineau et al. (2021)"
+    authors: "Pineau, J., Vincent-Lamarre, P., Sinha, K., Lariviere, V., Beygelzimer, A., d'Alche-Buc, F., Fox, E., & Larochelle, H."
+    year: 2021
+    title: "Improving Reproducibility in Machine Learning Research (A Report from the NeurIPS 2019 Reproducibility Program)"
+    venue: "JMLR, 22(164), 1--20"
+    doi: ""
+    url: "https://arxiv.org/abs/2003.12206"
+    evidence_type: experience
+    topics:
+      - reproducibility_standard
+
+  - citation_key: tatman2018taxonomy
+    inline_citation: "Tatman et al. (2018)"
+    authors: "Tatman, R., VanderPlas, J., & Dane, S."
+    year: 2018
+    title: "A Practical Taxonomy of Reproducibility for Machine Learning Research"
+    venue: "Reproducibility in ML Workshop at ICML 2018"
+    doi: ""
+    url: "https://openreview.net/forum?id=B1eYYK5QgX"
+    evidence_type: theoretical
+    topics:
+      - reproducibility_standard
+
+  - citation_key: sonnenburg2007opensource
+    inline_citation: "Sonnenburg et al. (2007)"
+    authors: "Sonnenburg, S., Braun, M. L., Ong, C. S., Bengio, S., Bottou, L., Holmes, G., LeCun, Y., Muller, K.-R., Pereira, F., Rasmussen, C. E., Ratsch, G., Scholkopf, B., Smola, A., Vincent, P., Weston, J., & Williamson, R."
+    year: 2007
+    title: "The Need for Open Source Software in Machine Learning"
+    venue: "JMLR, 8, 2443--2466"
+    doi: ""
+    url: "https://jmlr.csail.mit.edu/papers/v8/sonnenburg07a.html"
+    evidence_type: theoretical
+    topics:
+      - open_source_model
+
+  - citation_key: fortunato2021foss
+    inline_citation: "Fortunato & Galassi (2021)"
+    authors: "Fortunato, L. & Galassi, M."
+    year: 2021
+    title: "The Case for Free and Open Source Software in Research and Scholarship"
+    venue: "Philosophical Transactions of the Royal Society A, 379(2197), 20200079"
+    doi: "10.1098/rsta.2020.0079"
+    url: "https://royalsocietypublishing.org/doi/abs/10.1098/rsta.2020.0079"
+    evidence_type: theoretical
+    topics:
+      - open_source_model
+      - reproducibility_standard
+
+  # ============================================================
+  # Phase 9: MONAI Ecosystem Extensions (NEW)
+  # ============================================================
+
+  - citation_key: diazpinto2024monailabel
+    inline_citation: "Diaz-Pinto et al. (2024)"
+    authors: "Diaz-Pinto, A., Alle, S., Nath, V., Tang, Y., Ihsani, A., Asad, M., Perez-Garcia, F., Mehta, P., Li, W., Flores, M., Roth, H. R., Vercauteren, T., Xu, D., Dogra, P., Ourselin, S., Feng, A., & Cardoso, M. J."
+    year: 2024
+    title: "MONAI Label: A Framework for AI-Assisted Interactive Labeling of 3D Medical Images"
+    venue: "Medical Image Analysis, 95, 103207"
+    doi: "10.1016/j.media.2024.103207"
+    url: "https://arxiv.org/abs/2203.12362"
+    evidence_type: tool_release
+    topics:
+      - monai_alignment
+      - data_management_strategy
+      - annotation_platform
+
+  - citation_key: pinaya2023monaigenerative
+    inline_citation: "Pinaya et al. (2023)"
+    authors: "Pinaya, W. H. L., Graham, M. S., Kerfoot, E., Tudosiu, P.-D., Dafflon, J., Fernandez, V., Sanchez, P., Wolleb, J., da Costa, P. F., Patel, A., Chung, H., Zhao, C., Peng, W., Liu, Z., Mei, X., Lucena, O., Ye, J. C., Tsaftaris, S. A., Dogra, P., Feng, A., Modat, M., Nachev, P., Ourselin, S., & Cardoso, M. J."
+    year: 2023
+    title: "Generative AI for Medical Imaging: Extending the MONAI Framework"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2307.15208"
+    evidence_type: tool_release
+    topics:
+      - monai_alignment
+      - model_strategy
+
+  # ============================================================
+  # Phase 9: XAI & Explainability (NEW)
+  # ============================================================
+
+  - citation_key: salahuddin2022transparency
+    inline_citation: "Salahuddin et al. (2022)"
+    authors: "Salahuddin, Z., Woodruff, H. C., Chatterjee, A., & Lambin, P."
+    year: 2022
+    title: "Transparency of Deep Neural Networks for Medical Image Analysis: A Review of Interpretability Methods"
+    venue: "Computers in Biology and Medicine, 140, 105111"
+    doi: "10.1016/j.compbiomed.2021.105111"
+    url: "https://arxiv.org/abs/2111.02398"
+    evidence_type: survey
+    topics:
+      - xai_strategy
+
+  - citation_key: holzinger2022information
+    inline_citation: "Holzinger et al. (2022)"
+    authors: "Holzinger, A., Dehmer, M., Emmert-Streib, F., Cucchiara, R., Augenstein, I., Del Ser, J., Samek, W., Jurisica, I., & Diaz-Rodriguez, N."
+    year: 2022
+    title: "Information Fusion as an Integrative Cross-Cutting Enabler to Achieve Robust, Explainable, and Trustworthy Medical Artificial Intelligence"
+    venue: "Information Fusion, 79, 263--278"
+    doi: "10.1016/j.inffus.2021.10.007"
+    url: ""
+    evidence_type: survey
+    topics:
+      - xai_strategy
+      - validation_depth
+
+  - citation_key: patricio2024xai
+    inline_citation: "Patricio et al. (2024)"
+    authors: "Patricio, C., Neves, J. C., & Teixeira, L. F."
+    year: 2024
+    title: "Explainable Deep Learning Methods in Medical Image Classification: A Survey"
+    venue: "ACM Computing Surveys, 56(4), 85"
+    doi: "10.1145/3625287"
+    url: "https://arxiv.org/abs/2205.04766"
+    evidence_type: survey
+    topics:
+      - xai_strategy
+      - research_impact_target
+
+  - citation_key: nauta2023anecdotal
+    inline_citation: "Nauta et al. (2023)"
+    authors: "Nauta, M., Trienes, J., Pathak, S., Nguyen, E., Peters, M., Schmitt, Y., Schloetterer, J., van Keulen, M., & Seifert, C."
+    year: 2023
+    title: "From Anecdotal Evidence to Quantitative Evaluation Methods: A Systematic Review on Evaluating Explainable AI"
+    venue: "ACM Computing Surveys, 55(13s), 295"
+    doi: "10.1145/3583558"
+    url: "https://arxiv.org/abs/2201.08164"
+    evidence_type: survey
+    topics:
+      - xai_meta_evaluation
+
+  - citation_key: agarwal2022openxai
+    inline_citation: "Agarwal et al. (2022)"
+    authors: "Agarwal, C., Krishna, S., Saxena, E., Pawelczyk, M., Johnson, N., Puri, I., Zitnik, M., & Lakkaraju, H."
+    year: 2022
+    title: "OpenXAI: Towards a Transparent Evaluation of Model Explanations"
+    venue: "NeurIPS 2022, Datasets and Benchmarks Track"
+    doi: ""
+    url: "https://arxiv.org/abs/2206.11104"
+    evidence_type: benchmark
+    topics:
+      - xai_meta_evaluation
+
+  # ============================================================
+  # Phase 9: Ensembles & Uncertainty (NEW)
+  # ============================================================
+
+  - citation_key: ganaie2022ensemble
+    inline_citation: "Ganaie et al. (2022)"
+    authors: "Ganaie, M. A., Hu, M., Malik, A. K., Tanveer, M., & Suganthan, P. N."
+    year: 2022
+    title: "Ensemble Deep Learning: A Review"
+    venue: "Engineering Applications of Artificial Intelligence, 115, 105151"
+    doi: "10.1016/j.engappai.2022.105151"
+    url: "https://arxiv.org/abs/2104.02395"
+    evidence_type: survey
+    topics:
+      - ensemble_strategy
+      - ensemble_methods
+
+  - citation_key: lakshminarayanan2017deep
+    inline_citation: "Lakshminarayanan et al. (2017)"
+    authors: "Lakshminarayanan, B., Pritzel, A., & Blundell, C."
+    year: 2017
+    title: "Simple and Scalable Predictive Uncertainty Estimation using Deep Ensembles"
+    venue: "NeurIPS 2017, 6402--6413"
+    doi: ""
+    url: "https://arxiv.org/abs/1612.01474"
+    evidence_type: benchmark
+    topics:
+      - ensemble_methods
+      - ensemble_strategy
+
+  - citation_key: maddox2019swag
+    inline_citation: "Maddox et al. (2019)"
+    authors: "Maddox, W. J., Izmailov, P., Garipov, T., Vetrov, D. P., & Wilson, A. G."
+    year: 2019
+    title: "A Simple Baseline for Bayesian Uncertainty in Deep Learning"
+    venue: "NeurIPS 2019, 13153--13164"
+    doi: ""
+    url: "https://arxiv.org/abs/1902.02476"
+    evidence_type: benchmark
+    topics:
+      - ensemble_methods
+
+  - citation_key: huang2017snapshot
+    inline_citation: "Huang et al. (2017)"
+    authors: "Huang, G., Li, Y., Pleiss, G., Liu, Z., Hopcroft, J. E., & Weinberger, K. Q."
+    year: 2017
+    title: "Snapshot Ensembles: Train 1, Get M for Free"
+    venue: "ICLR 2017"
+    doi: ""
+    url: "https://arxiv.org/abs/1704.00109"
+    evidence_type: benchmark
+    topics:
+      - ensemble_methods
+
+  - citation_key: yadav2023ties
+    inline_citation: "Yadav et al. (2023)"
+    authors: "Yadav, P., Tam, D., Choshen, L., Raffel, C., & Bansal, M."
+    year: 2023
+    title: "TIES-Merging: Resolving Interference When Merging Models"
+    venue: "NeurIPS 2023"
+    doi: ""
+    url: "https://arxiv.org/abs/2306.01708"
+    evidence_type: benchmark
+    topics:
+      - ensemble_methods
+
+  - citation_key: huang2024uncertainty
+    inline_citation: "Huang et al. (2024)"
+    authors: "Huang, L., Ruan, S., Xing, Y., & Feng, M."
+    year: 2024
+    title: "A Review of Uncertainty Quantification in Medical Image Analysis: Probabilistic and Non-Probabilistic Methods"
+    venue: "Medical Image Analysis, 97, 103223"
+    doi: "10.1016/j.media.2024.103223"
+    url: "https://arxiv.org/abs/2310.06873"
+    evidence_type: survey
+    topics:
+      - ensemble_strategy
+      - validation_depth
+
+  # ============================================================
+  # Phase 9: Validation & Metrics (NEW)
+  # ============================================================
+
+  - citation_key: reinke2024common
+    inline_citation: "Reinke et al. (2024)"
+    authors: "Reinke, A., Tizabi, M. D., Baumgartner, M., Eisenmann, M., Heckmann-Notzel, D., Kavur, A. E., Radsch, T., Sudre, C. H., Acion, L., Antonelli, M., et al."
+    year: 2024
+    title: "Common Limitations of Image Processing Metrics: A Picture Story"
+    venue: "arXiv preprint (companion to Metrics Reloaded)"
+    doi: ""
+    url: "https://arxiv.org/abs/2104.05642"
+    evidence_type: survey
+    topics:
+      - validation_depth
+
+  # ============================================================
+  # Phase 9: Architecture & Strategy (NEW)
+  # ============================================================
+
+  - citation_key: qin2024automl
+    inline_citation: "Qin et al. (2024)"
+    authors: "Qin, J., et al."
+    year: 2024
+    title: "A Review of AutoML Optimization Techniques for Medical Image Applications"
+    venue: "Computerized Medical Imaging and Graphics, 118, 102443"
+    doi: "10.1016/j.compmedimag.2024.102443"
+    url: ""
+    evidence_type: survey
+    topics:
+      - model_strategy
+
+  - citation_key: roh2021datacollection
+    inline_citation: "Roh et al. (2021)"
+    authors: "Roh, Y., Heo, G., & Whang, S. E."
+    year: 2021
+    title: "A Survey on Data Collection for Machine Learning: A Big Data-AI Integration Perspective"
+    venue: "IEEE TKDE, 33(4), 1328--1347"
+    doi: "10.1109/TKDE.2019.2946162"
+    url: "https://arxiv.org/abs/1811.03402"
+    evidence_type: survey
+    topics:
+      - data_management_strategy
+
+  # ============================================================
+  # Phase 9: HPO & Optimization (NEW)
+  # ============================================================
+
+  - citation_key: bischl2023hpo
+    inline_citation: "Bischl et al. (2023)"
+    authors: "Bischl, B., Binder, M., Lang, M., Pielok, T., Richter, J., Coors, S., Thomas, J., Ullmann, T., Becker, M., Boulesteix, A.-L., Deng, D., & Lindauer, M."
+    year: 2023
+    title: "Hyperparameter Optimization: Foundations, Algorithms, Best Practices, and Open Challenges"
+    venue: "WIREs Data Mining and Knowledge Discovery, 13(2), e1484"
+    doi: "10.1002/widm.1484"
+    url: "https://arxiv.org/abs/2107.05847"
+    evidence_type: survey
+    topics:
+      - hpo_framework
+
+  # ============================================================
+  # Phase 9: Lineage & Provenance (NEW)
+  # ============================================================
+
+  - citation_key: schelter2017provenance
+    inline_citation: "Schelter et al. (2017)"
+    authors: "Schelter, S., Boese, J.-H., Kirschnick, J., Klein, T., & Seufert, S."
+    year: 2017
+    title: "Automatically Tracking Metadata and Provenance of Machine Learning Experiments"
+    venue: "MLSys Workshop at NeurIPS 2017"
+    doi: ""
+    url: "http://learningsys.org/nips17/assets/papers/paper_13.pdf"
+    evidence_type: tool_release
+    topics:
+      - lineage_tracking
+      - experiment_tracking
+
+  # ============================================================
+  # Phase 9: CI/CD & DevOps (NEW)
+  # ============================================================
+
+  - citation_key: sato2019cd4ml
+    inline_citation: "Sato et al. (2019)"
+    authors: "Sato, D., Wider, A., & Windheuser, C."
+    year: 2019
+    title: "Continuous Delivery for Machine Learning"
+    venue: "ThoughtWorks Technical Report"
+    doi: ""
+    url: "https://martinfowler.com/articles/cd4ml.html"
+    evidence_type: experience
+    topics:
+      - ci_cd_platform
+      - gitops_strategy
+      - secrets_management
+
+  # ============================================================
+  # Phase 9: Infrastructure (NEW)
+  # ============================================================
+
+  - citation_key: ye2024scheduling
+    inline_citation: "Ye et al. (2024)"
+    authors: "Ye, Z., Gao, W., Hu, Q., Sun, P., Wang, X., Luo, Y., Zhang, T., & Wen, Y."
+    year: 2024
+    title: "Deep Learning Workload Scheduling in GPU Datacenters: A Survey"
+    venue: "ACM Computing Surveys, 56(6), 146"
+    doi: "10.1145/3638757"
+    url: "https://dl.acm.org/doi/full/10.1145/3638757"
+    evidence_type: survey
+    topics:
+      - compute_target
+
+  - citation_key: nuest2020dockerfiles
+    inline_citation: "Nuest et al. (2020)"
+    authors: "Nuest, D., Sochat, V., Marwick, B., Eglen, S. J., Head, T., Hirst, T., & Evans, B. D."
+    year: 2020
+    title: "Ten Simple Rules for Writing Dockerfiles for Reproducible Data Science"
+    venue: "PLOS Computational Biology, 16(11), e1008316"
+    doi: "10.1371/journal.pcbi.1008316"
+    url: "https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1008316"
+    evidence_type: experience
+    topics:
+      - containerization
+
+  - citation_key: guerriero2019iac
+    inline_citation: "Guerriero et al. (2019)"
+    authors: "Guerriero, M., Garriga, M., Tamburri, D. A., & Palomba, F."
+    year: 2019
+    title: "Adoption, Support, and Challenges of Infrastructure-as-Code: Insights from Industry"
+    venue: "ICSME 2019, 580--589"
+    doi: "10.1109/ICSME.2019.00092"
+    url: "https://ieeexplore.ieee.org/document/8919181"
+    evidence_type: experience
+    topics:
+      - iac_tooling
+
+  # ============================================================
+  # Phase 9: Cost Tracking & Governance (NEW)
+  # ============================================================
+
+  - citation_key: deochake2023cloud
+    inline_citation: "Deochake (2023)"
+    authors: "Deochake, S."
+    year: 2023
+    title: "Cloud Cost Optimization: A Comprehensive Review of Strategies and Case Studies"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2307.12479"
+    evidence_type: survey
+    topics:
+      - cost_tracking
+
+  - citation_key: ding2024hybrid
+    inline_citation: "Ding et al. (2024)"
+    authors: "Ding, D., Mallick, A., Wang, C., Sim, R., Mukherjee, S., Ruhle, V., Lakshmanan, L. V. S., & Awadallah, A. H."
+    year: 2024
+    title: "Hybrid LLM: Cost-Efficient and Quality-Aware Query Routing"
+    venue: "ICLR 2024"
+    doi: ""
+    url: "https://arxiv.org/abs/2404.14618"
+    evidence_type: benchmark
+    topics:
+      - cost_tracking
+      - llm_provider
+
+  - citation_key: chen2020mlflow
+    inline_citation: "Chen et al. (2020)"
+    authors: "Chen, A., Chow, A., Davidson, A., DCunha, A., Ghodsi, A., Hong, S. A., Konwinski, A., Mewald, C., Murching, S., Nykodym, T., Ogilvie, P., Parkhe, M., Singh, A., Xie, F., Zaharia, M., Zang, R., Zheng, J., & Zumar, C."
+    year: 2020
+    title: "Developments in MLflow: A System to Accelerate the Machine Learning Lifecycle"
+    venue: "DEEM 2020 (Workshop at SIGMOD)"
+    doi: "10.1145/3399579.3399867"
+    url: "https://dl.acm.org/doi/10.1145/3399579.3399867"
+    evidence_type: tool_release
+    topics:
+      - model_governance
+      - experiment_tracking
+
+  - citation_key: schneider2024governance
+    inline_citation: "Schneider et al. (2024)"
+    authors: "Schneider, J., Kuss, P., Abraham, R., & Meske, C."
+    year: 2024
+    title: "Governance of Generative Artificial Intelligence for Companies"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2403.08802"
+    evidence_type: survey
+    topics:
+      - model_governance
+
+  # ============================================================
+  # Phase 9: Data Quality & Profiling (NEW)
+  # ============================================================
+
+  - citation_key: zhou2024dataquality
+    inline_citation: "Zhou et al. (2024)"
+    authors: "Zhou, Y., Tu, F., Sha, K., Ding, J., & Chen, H."
+    year: 2024
+    title: "A Survey on Data Quality Dimensions and Tools for Machine Learning"
+    venue: "IEEE AITest 2024"
+    doi: ""
+    url: "https://arxiv.org/abs/2406.19614"
+    evidence_type: survey
+    topics:
+      - data_profiling
+
+  # ============================================================
+  # Phase 9: Model Export & Interoperability (NEW)
+  # ============================================================
+
+  - citation_key: jajal2024interoperability
+    inline_citation: "Jajal et al. (2024)"
+    authors: "Jajal, P., Jiang, W., Tewari, A., Kocinare, E., Woo, J., Sarraf, A., Lu, Y.-H., Thiruvathukal, G. K., & Davis, J. C."
+    year: 2024
+    title: "Interoperability in Deep Learning: A User Survey and Failure Analysis of ONNX Model Converters"
+    venue: "ISSTA 2024"
+    doi: "10.1145/3650212.3680374"
+    url: "https://dl.acm.org/doi/10.1145/3650212.3680374"
+    evidence_type: benchmark
+    topics:
+      - model_export_format
+
+  - citation_key: parida2025export
+    inline_citation: "Parida et al. (2025)"
+    authors: "Parida, S. K., Gerostathopoulos, I., & Bogner, J."
+    year: 2025
+    title: "How Do Model Export Formats Impact the Development of ML-Enabled Systems? A Case Study on Model Integration"
+    venue: "CAIN 2025 (IEEE/ACM)"
+    doi: ""
+    url: "https://arxiv.org/abs/2502.00429"
+    evidence_type: experience
+    topics:
+      - model_export_format

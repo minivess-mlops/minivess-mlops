@@ -117,8 +117,26 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  BentoML (0.35) resolved. Current implementation uses BentoML with ONNX
-  Runtime backend. MONAI Deploy (0.25) is the clinical alternative.
+  BentoML (0.35) resolved. Current implementation uses BentoML
+  (Yang et al., 2022) with ONNX Runtime backend. MONAI Deploy (0.25)
+  is the clinical alternative (Gupta et al., 2025). MLOps serving
+  patterns (Recupito et al., 2024) inform the multi-option architecture.
+
+references:
+  - citation_key: yang2022bentoml
+    relevance: "BentoML serving framework paper — the implemented serving solution"
+    supports_options:
+      - bentoml_rest
+  - citation_key: gupta2025monaideploy
+    relevance: "MONAI Deploy documentation for clinical-grade serving alternative"
+    supports_options:
+      - monai_deploy
+  - citation_key: recupito2024mlops
+    relevance: "MLOps review covering serving architecture patterns and deployment practices"
+    supports_options:
+      - bentoml_rest
+      - torchserve
+      - triton
 
 tags:
   - architecture

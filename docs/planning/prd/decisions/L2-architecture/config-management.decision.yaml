@@ -74,15 +74,25 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  Hydra-zen + Dynaconf (0.45) resolved. ADR-0002 documents the dual-config
-  system rationale.
+  Hydra-zen + Dynaconf (0.45) resolved. The Hydra framework (Yadan, 2019)
+  provides experiment configuration management, a core MLOps component
+  (Kreuzberger et al., 2023). ADR-0002 documents the dual-config system rationale.
+
+references:
+  - citation_key: yadan2019hydra
+    relevance: "Hydra configuration framework paper — core technology in the implemented dual-config system"
+    supports_options:
+      - hydra_zen
+  - citation_key: kreuzberger2023mlops
+    relevance: "MLOps architecture survey covering configuration management as a core MLOps component"
+    supports_options:
+      - hydra_zen
+      - pure_pydantic
 
 tags:
   - architecture
   - configuration
   - resolved
-
-references: []
 
 research_notes: >
   Internal: ADR-0002 (docs/adr/0002-dual-config-system.md) documents the

@@ -125,10 +125,23 @@ domain_applicability:
 
 rationale: >
   OpenLineage + Marquez (0.40) is the preferred choice for standardized lineage
-  tracking. It's already in docker-compose config but not wired to the pipeline.
-  MLflow-only (0.30) provides partial lineage through experiment tracking.
-  The integration gap is the main blocker — requires OpenLineage emitters in
-  data loading, preprocessing, and training steps.
+  tracking, building on the automated provenance approach (Schelter et al., 2017)
+  and MLOps architecture best practices (Kreuzberger et al., 2023). It's already
+  in docker-compose config but not wired to the pipeline. MLflow-only (0.30) provides
+  partial lineage through experiment tracking. The integration gap is the main
+  blocker — requires OpenLineage emitters in data loading, preprocessing, and
+  training steps.
+
+references:
+  - citation_key: schelter2017provenance
+    relevance: "Seminal paper on automated ML metadata and provenance tracking"
+    supports_options:
+      - openlineage_marquez
+      - mlflow_only
+  - citation_key: kreuzberger2023mlops
+    relevance: "MLOps architecture survey covering lineage tracking as compliance-critical component"
+    supports_options:
+      - openlineage_marquez
 
 tags:
   - technology

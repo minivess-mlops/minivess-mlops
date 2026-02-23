@@ -143,8 +143,25 @@ domain_applicability:
 
 rationale: >
   Multi-architecture (0.45) resolved. The ModelAdapter ABC supports
-  pluggable architectures. Foundation-model-first (0.30) is the likely
-  next exploration as VISTA-3D matures.
+  pluggable architectures as recommended by MLOps architecture patterns
+  (Kreuzberger et al., 2023). Foundation-model-first (0.30) is the likely
+  next exploration as MONAI generative models mature (Pinaya et al., 2023).
+  AutoML search (Qin et al., 2024) is a viable alternative for medical imaging.
+
+references:
+  - citation_key: kreuzberger2023mlops
+    relevance: "MLOps architecture survey covering model management patterns for multi-architecture strategies"
+    supports_options:
+      - multi_architecture
+      - foundation_model_first
+  - citation_key: qin2024automl
+    relevance: "Review of AutoML techniques for medical imaging, supporting the AutoML search option"
+    supports_options:
+      - automl_search
+  - citation_key: pinaya2023monaigenerative
+    relevance: "Extends MONAI with generative models, supporting foundation-model-first strategy"
+    supports_options:
+      - foundation_model_first
 
 tags:
   - architecture

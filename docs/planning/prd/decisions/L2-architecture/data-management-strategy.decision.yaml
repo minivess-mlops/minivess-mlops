@@ -98,8 +98,23 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  Local DVC (0.40) resolved. The project uses DVC for data versioning
-  with local storage. Cloud DVC is the natural next step for collaboration.
+  Local DVC (0.40) resolved. The project uses DVC (Kuprieiev et al., 2023)
+  for data versioning with local storage, aligned with data management
+  best practices for ML (Roh et al., 2021). Cloud DVC is the natural next
+  step for collaboration.
+
+references:
+  - citation_key: kuprieiev2023dvc
+    relevance: "DVC tool paper — the core technology used for the local DVC data management strategy"
+    supports_options:
+      - local_dvc
+      - cloud_dvc
+  - citation_key: roh2021datacollection
+    relevance: "Survey on data collection and management for ML covering versioning, storage, and access patterns"
+    supports_options:
+      - local_dvc
+      - cloud_dvc
+      - lakehouse
 
 tags:
   - architecture

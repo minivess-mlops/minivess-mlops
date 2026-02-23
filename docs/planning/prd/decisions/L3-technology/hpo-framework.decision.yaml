@@ -131,11 +131,28 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  Optuna (0.45) is the leading choice given its presence in dependencies and
-  excellent MLflow integration. Manual HPO (0.15) is current practice via
-  Hydra-zen config sweeps. The gap between config_only and integrated is the
-  main blocker — requires Optuna study creation in the training pipeline and
-  objective function wrapping around the train loop.
+  Optuna (0.45) is the leading choice (Akiba et al., 2019) given its presence
+  in dependencies and excellent MLflow integration. The comprehensive HPO survey
+  by Bischl et al. (2023) validates Bayesian optimization as the preferred
+  approach. nnU-Net (Isensee et al., 2021) demonstrates the value of automated
+  HPO in medical segmentation. Manual HPO (0.15) is current practice via
+  Hydra-zen config sweeps.
+
+references:
+  - citation_key: akiba2019optuna
+    relevance: "Optuna framework paper — the leading HPO candidate with TPE and pruning"
+    supports_options:
+      - optuna
+  - citation_key: bischl2023hpo
+    relevance: "Comprehensive HPO survey covering Bayesian optimization, Hyperband, and practical recommendations"
+    supports_options:
+      - optuna
+      - ray_tune
+      - nevergrad
+  - citation_key: isensee2021nnu
+    relevance: "nnU-Net demonstrates automated HPO via dataset fingerprinting for medical segmentation"
+    supports_options:
+      - optuna
 
 tags:
   - technology
