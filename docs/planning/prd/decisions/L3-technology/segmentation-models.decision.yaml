@@ -4,42 +4,103 @@ description: >
   Which 3D segmentation architectures to implement behind the ModelAdapter ABC.
   Determines the model zoo breadth, GPU memory requirements, and compatibility
   with foundation model pre-training. The MONAI framework (Cardoso et al., 2022)
-  provides native implementations of SegResNet (Myronenko, 2019) and SwinUNETR
-  (Hatamizadeh et al., 2022). Vascular segmentation benefits from topology-aware
-  architectures that preserve clDice connectivity (Shit et al., 2021). Recent work
-  introduces vesselFM (Wittmann et al., 2024), the first 3D vessel-specific
-  foundation model achieving zero-shot Dice 74.66 on SMILE-UHURA, and COMMA Mamba
-  (Shi et al., 2025), a state-space model reaching Dice 86.36 on KiPA vessel
-  segmentation. AtlasSegFM (Zhang et al., 2025) reveals that VISTA3D drops from
-  88% to 27% on small structures, motivating vessel-specific alternatives.
-  Topology-aware uncertainty methods such as TUNE++ (Dhor et al., 2026) combine
-  Betti loss with uncertainty quantification for tubular structures.
+  provides native implementations of SegResNet (Myronenko, 2019), SwinUNETR
+  (Hatamizadeh et al., 2022), and DynUNet (Isensee et al., 2021). Phase 12
+  research (monai-segmentor-model-background-research.md) established that for
+  tubular vascular segmentation: (1) topology-aware loss functions (clDice) have
+  5-15× more impact than architecture choice, (2) CNN architectures outperform
+  transformers by 4-7 Dice points on challenging benchmarks (Isensee et al., 2024),
+  (3) DynUNet/nnU-Net variants dominate vascular segmentation challenges (SMILE-UHURA,
+  TopCoW, MSD Task08), and (4) vesselFM (Wittmann et al., 2025) — built on nnU-Net
+  backbone — validates the architecture family for vessels.
 
 decision_level: L3_technology
 status: active
 last_updated: 2026-02-23
 
 options:
+  - option_id: dynunet
+    title: "DynUNet (nnU-Net in MONAI)"
+    description: >
+      MONAI's DynUNet: reimplementation of nnU-Net (Isensee et al., 2021) self-configuring
+      architecture. Automatic kernel sizes, strides, and patch size derived from dataset
+      fingerprinting via nnU-Net v2 planning. Residual encoder blocks (res_block=True),
+      built-in deep supervision. Handles anisotropic spacing automatically. nnU-Net variants
+      dominate vascular segmentation challenges: SMILE-UHURA (Dice 0.838, Chatterjee et al.,
+      2024), TopCoW (Dice 93.55, +1.23 with Skeleton Recall Loss per Kirchhoff et al., 2024),
+      kidney vessels (Dice 0.9523), MSD hepatic vessels. "nnU-Net Revisited" (Isensee et al.,
+      2024) shows CNN architectures outperform SwinUNETR by 4-7 Dice points across 6 datasets.
+      vesselFM (Wittmann et al., 2025) uses nnU-Net backbone, validating the architecture for
+      vessels. Clean ONNX export. Configuration via nnU-Net v2 fingerprinting eliminates
+      most hyperparameter tuning.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "loss_functions.cldice"
+      - "loss_functions.dice_ce"
+      - "augmentation_stack.monai_plus_torchio"
+    constraints:
+      - "Requires nnU-Net v2 package for optimal configuration (fingerprinting)"
+      - "31.2M parameters at default filters=[32,64,128,256] — heavier than SegResNet"
+      - "Max 160^3 patches on 24GB GPU vs SegResNet's 192^3"
+      - "filters parameter controls width: default ~31M, half [16,32,64,128] ~8M, quarter [8,16,32,64] ~2M"
+    novelty_contribution: >
+      Width ablation study: DynUNet filters parameter divisible by 2 and 4 enables
+      systematic capacity-vs-performance analysis (3 widths × 2-3 losses = 6-9 configs).
+      No published work examines DynUNet width scaling for vascular segmentation.
+      Demonstrates reproducible MLOps pipeline for architecture search.
+
   - option_id: segresnet
     title: "SegResNet"
     description: >
       MONAI's SegResNet (Myronenko, 2019): encoder-decoder with residual blocks
-      and variational autoencoder regularization. Lightweight, well-tested, fast
-      convergence. Originally won BraTS 2018 challenge. Already implemented as baseline.
-    prior_probability: 0.20
+      and variational autoencoder regularization. Lightweight (4.7M params with
+      init_filters=32), fast training, largest patches on memory-constrained GPUs.
+      Already implemented as baseline. BraTS 2018 winner. MONAI Auto3DSeg default
+      backbone. SegResNetDS/DS2 variants provide deep supervision and multi-task
+      extensibility (DS2 is VISTA-3D's backbone). Clean ONNX export. Recommended
+      as fallback architecture and quick-win baseline for topology-aware loss testing.
+    prior_probability: 0.15
     status: resolved
     implementation_status: implemented
     complements:
       - "loss_functions.dice_ce"
+      - "loss_functions.cldice"
       - "augmentation_stack.monai_plus_torchio"
+
+  - option_id: vesselfm
+    title: "vesselFM"
+    description: >
+      vesselFM (Wittmann et al., 2025): first 3D vessel-specific foundation model.
+      Uses nnU-Net backbone. Trained on 17 vessel datasets + domain randomization +
+      flow matching generative model. Zero-shot Dice 74.66 on SMILE-UHURA (vs 48.32
+      for other FMs). Few-shot (5 volumes): Dice 78.77 (vs 61.17 for VISTA-3D).
+      Zero-shot exceeds other FMs' few-shot results. MiniVess included in training
+      data. Checkpoints on HuggingFace. DynUNet-compatible architecture enables
+      checkpoint loading. Critical for low-data regimes (<10 annotated volumes).
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "foundation_model_integration.lora_finetune"
+    constraints:
+      - "Requires large GPU (>24 GB for full model)"
+      - "No official MONAI integration yet"
 
   - option_id: swinunetr
     title: "SwinUNETR"
     description: >
       Swin Transformer U-Net (Hatamizadeh et al., 2022) with shifted-window
-      self-attention. Pre-trained on large-scale CT data. Better for capturing
-      long-range dependencies in 3D volumes. Already implemented.
-    prior_probability: 0.15
+      self-attention. Already implemented. However, "nnU-Net Revisited" (Isensee
+      et al., 2024) shows SwinUNETR underperforms CNN architectures by 4-7 Dice
+      points on organ segmentation benchmarks (BTCV, KiTS, AMOS, LiTS). Theoretical
+      analysis suggests worse performance on thin tubular structures due to coarse
+      tokenization and loss of sub-voxel detail. ONNX export problematic (MONAI
+      issue #5125). Heaviest memory (62.2M params, 96-128^3 patches on 24GB).
+      Deprioritized but retained as comparison baseline for ModelAdapter validation
+      and potential ensemble diversity.
+    prior_probability: 0.05
     status: resolved
     implementation_status: implemented
     complements:
@@ -53,8 +114,8 @@ options:
       interactive 3D segmentation supporting point prompts and class prompts.
       Config stubs exist but no integration. Note: AtlasSegFM (Zhang et al., 2025)
       shows performance drops from 88% to 27% on small structures, raising concerns
-      for fine vessel segmentation.
-    prior_probability: 0.15
+      for fine vessel segmentation. SegResNetDS2 backbone.
+    prior_probability: 0.05
     status: viable
     implementation_status: config_only
     complements:
@@ -63,61 +124,33 @@ options:
     constraints:
       - "Requires MONAI >=1.4"
       - "Significant GPU memory (>16 GB)"
+      - "Degrades from 88% to 27% Dice on small structures (Zhang et al., 2025)"
 
   - option_id: nnunet
-    title: "nnU-Net v2"
+    title: "nnU-Net v2 (External Pipeline)"
     description: >
-      Self-configuring segmentation framework (Isensee et al., 2021).
-      Automatically selects architecture, preprocessing, and training
-      hyperparameters based on dataset fingerprinting. Gold standard in
-      medical image segmentation challenges but requires external pipeline
-      integration.
-    prior_probability: 0.15
+      Full nnU-Net v2 pipeline (Isensee et al., 2021, 2024). Automatically selects
+      architecture, preprocessing, training hyperparameters, post-processing, and
+      ensembles via 5-fold cross-validation. Gold standard in challenges. However,
+      DynUNet in MONAI covers the core architecture; this option is the full external
+      pipeline. ResEnc L/XL variants add 2+ Dice points on large datasets. Conflicts
+      with Hydra-zen config management.
+    prior_probability: 0.05
     status: viable
     implementation_status: not_started
     constraints:
       - "Own training pipeline conflicts with Hydra-zen config"
       - "Requires dataset conversion to nnU-Net format"
-
-  - option_id: sam_variants
-    title: "SAM Variants (SAM3, MedSAM3)"
-    description: >
-      Segment Anything (Kirillov et al., 2023) variants adapted for 3D
-      medical imaging. MedSAM3 (Liu et al., 2025) builds on SAM3 with
-      medical concept-aware prompting. Highly experimental for vascular
-      segmentation. SAM2 benchmarks (Ma et al., 2024) confirm limitations
-      on thin tubular structures; SAM3 variants aim to address these.
-    prior_probability: 0.10
-    status: experimental
-    implementation_status: not_started
-    constraints:
-      - "Prompt-based paradigm differs from standard segmentation"
-      - "Not optimized for thin tubular structures"
-
-  - option_id: vesselfm
-    title: "vesselFM"
-    description: >
-      vesselFM (Wittmann et al., 2024): first 3D vessel-specific foundation model.
-      Achieves zero-shot Dice 74.66 on SMILE-UHURA benchmark. Uses MONAI UNet
-      internally with large-scale pre-training on diverse vascular datasets
-      including MiniVess. Represents the most directly relevant foundation model
-      for this project's vessel segmentation focus.
-    prior_probability: 0.15
-    status: viable
-    implementation_status: not_started
-    complements:
-      - "foundation_model_integration.lora_finetune"
-    constraints:
-      - "Requires large GPU (>24 GB)"
-      - "No official MONAI integration yet"
+      - "Redundant with DynUNet for architecture; adds pipeline automation"
 
   - option_id: comma_mamba
     title: "COMMA Mamba"
     description: >
       COMMA Mamba (Shi et al., 2025): state-space model architecture for vessel
       segmentation. Achieves Dice 86.36 and clDice 84.31 on KiPA dataset.
-      Leverages Mamba selective scan for efficient long-range dependency modeling
-      in tubular structures without quadratic attention cost.
+      Local CNN branch + global Mamba branch with coordinate-aware modulation.
+      249 GFLOPs vs 655 for SegMamba. Impressive but requires custom CUDA kernels,
+      not in MONAI.
     prior_probability: 0.10
     status: experimental
     implementation_status: not_started
@@ -125,158 +158,188 @@ options:
       - "Mamba SSM requires custom CUDA kernels"
       - "Novel architecture, less community support"
 
+  - option_id: sam_variants
+    title: "SAM Variants (SAM3, MedSAM3)"
+    description: >
+      Segment Anything (Kirillov et al., 2023) variants adapted for 3D
+      medical imaging. MedSAM3 (Liu et al., 2025) builds on SAM3 with
+      medical concept-aware prompting. SAM2 benchmarks (Ma et al., 2024) confirm
+      limitations on thin tubular structures. Prompt-based paradigm differs
+      fundamentally from standard segmentation.
+    prior_probability: 0.10
+    status: experimental
+    implementation_status: not_started
+    constraints:
+      - "Prompt-based paradigm differs from standard segmentation"
+      - "Not optimized for thin tubular structures"
+
 conditional_on:
   - parent_decision_id: model_strategy
     influence_strength: strong
     conditional_table:
       - given_parent_option: single_architecture
         then_probabilities:
-          segresnet: 0.35
-          swinunetr: 0.20
-          vista3d: 0.10
-          nnunet: 0.15
-          sam_variants: 0.05
-          vesselfm: 0.10
+          dynunet: 0.40
+          segresnet: 0.20
+          vesselfm: 0.15
+          swinunetr: 0.05
+          vista3d: 0.05
+          nnunet: 0.05
           comma_mamba: 0.05
+          sam_variants: 0.05
       - given_parent_option: multi_architecture
         then_probabilities:
-          segresnet: 0.20
-          swinunetr: 0.15
-          vista3d: 0.15
-          nnunet: 0.15
-          sam_variants: 0.10
+          dynunet: 0.25
+          segresnet: 0.15
           vesselfm: 0.15
+          swinunetr: 0.10
+          vista3d: 0.10
+          nnunet: 0.05
           comma_mamba: 0.10
+          sam_variants: 0.10
       - given_parent_option: foundation_model_first
         then_probabilities:
+          dynunet: 0.10
           segresnet: 0.05
-          swinunetr: 0.10
-          vista3d: 0.20
-          nnunet: 0.05
-          sam_variants: 0.20
           vesselfm: 0.30
+          swinunetr: 0.05
+          vista3d: 0.15
+          nnunet: 0.05
           comma_mamba: 0.10
+          sam_variants: 0.20
       - given_parent_option: automl_search
         then_probabilities:
-          segresnet: 0.20
-          swinunetr: 0.15
-          vista3d: 0.10
-          nnunet: 0.25
-          sam_variants: 0.10
+          dynunet: 0.30
+          segresnet: 0.15
           vesselfm: 0.10
+          swinunetr: 0.05
+          vista3d: 0.05
+          nnunet: 0.20
           comma_mamba: 0.10
+          sam_variants: 0.05
 
   - parent_decision_id: foundation_model_integration
     influence_strength: strong
     conditional_table:
       - given_parent_option: from_scratch
         then_probabilities:
-          segresnet: 0.25
-          swinunetr: 0.15
+          dynunet: 0.35
+          segresnet: 0.20
+          vesselfm: 0.10
+          swinunetr: 0.05
           vista3d: 0.05
-          nnunet: 0.20
+          nnunet: 0.10
+          comma_mamba: 0.10
           sam_variants: 0.05
-          vesselfm: 0.15
-          comma_mamba: 0.15
       - given_parent_option: lora_finetune
         then_probabilities:
+          dynunet: 0.15
           segresnet: 0.05
-          swinunetr: 0.15
-          vista3d: 0.20
-          nnunet: 0.05
-          sam_variants: 0.15
           vesselfm: 0.30
+          swinunetr: 0.05
+          vista3d: 0.15
+          nnunet: 0.05
           comma_mamba: 0.10
+          sam_variants: 0.15
       - given_parent_option: full_finetune
         then_probabilities:
-          segresnet: 0.15
-          swinunetr: 0.20
-          vista3d: 0.15
-          nnunet: 0.10
-          sam_variants: 0.10
-          vesselfm: 0.20
+          dynunet: 0.25
+          segresnet: 0.10
+          vesselfm: 0.25
+          swinunetr: 0.05
+          vista3d: 0.10
+          nnunet: 0.05
           comma_mamba: 0.10
+          sam_variants: 0.10
       - given_parent_option: adapter_fusion
         then_probabilities:
+          dynunet: 0.15
           segresnet: 0.05
-          swinunetr: 0.15
-          vista3d: 0.20
-          nnunet: 0.05
-          sam_variants: 0.15
           vesselfm: 0.25
+          swinunetr: 0.05
+          vista3d: 0.15
+          nnunet: 0.05
           comma_mamba: 0.15
+          sam_variants: 0.15
       - given_parent_option: prompt_tuning
         then_probabilities:
+          dynunet: 0.10
           segresnet: 0.05
-          swinunetr: 0.05
-          vista3d: 0.25
-          nnunet: 0.05
-          sam_variants: 0.35
           vesselfm: 0.15
-          comma_mamba: 0.10
+          swinunetr: 0.05
+          vista3d: 0.20
+          nnunet: 0.05
+          comma_mamba: 0.05
+          sam_variants: 0.35
 
   - parent_decision_id: monai_alignment
     influence_strength: strong
     conditional_table:
       - given_parent_option: monai_native
         then_probabilities:
-          segresnet: 0.25
-          swinunetr: 0.20
-          vista3d: 0.20
+          dynunet: 0.30
+          segresnet: 0.20
+          vesselfm: 0.15
+          swinunetr: 0.05
+          vista3d: 0.15
           nnunet: 0.05
-          sam_variants: 0.05
-          vesselfm: 0.20
           comma_mamba: 0.05
+          sam_variants: 0.05
       - given_parent_option: monai_compatible
         then_probabilities:
-          segresnet: 0.20
-          swinunetr: 0.15
-          vista3d: 0.15
-          nnunet: 0.10
-          sam_variants: 0.10
+          dynunet: 0.25
+          segresnet: 0.15
           vesselfm: 0.20
+          swinunetr: 0.05
+          vista3d: 0.10
+          nnunet: 0.05
           comma_mamba: 0.10
+          sam_variants: 0.10
       - given_parent_option: framework_agnostic
         then_probabilities:
+          dynunet: 0.15
           segresnet: 0.10
-          swinunetr: 0.10
-          vista3d: 0.05
-          nnunet: 0.30
-          sam_variants: 0.15
           vesselfm: 0.10
+          swinunetr: 0.05
+          vista3d: 0.05
+          nnunet: 0.25
           comma_mamba: 0.20
+          sam_variants: 0.10
 
 archetype_weights:
   solo_researcher:
     probability_overrides:
-      segresnet: 0.30
-      swinunetr: 0.20
-      vista3d: 0.10
-      nnunet: 0.10
-      sam_variants: 0.05
-      vesselfm: 0.15
-      comma_mamba: 0.10
-    rationale: "Solo researchers start with lightweight models (SegResNet) and iterate; vesselFM is attractive for vessel-specific zero-shot capability"
+      dynunet: 0.30
+      segresnet: 0.20
+      vesselfm: 0.20
+      swinunetr: 0.05
+      vista3d: 0.05
+      nnunet: 0.05
+      comma_mamba: 0.05
+      sam_variants: 0.10
+    rationale: "Solo researchers benefit from DynUNet's self-adapting config; vesselFM for low-data few-shot; SegResNet as lightweight fallback"
   lab_group:
     probability_overrides:
-      segresnet: 0.15
-      swinunetr: 0.15
-      vista3d: 0.15
-      nnunet: 0.15
-      sam_variants: 0.10
+      dynunet: 0.25
+      segresnet: 0.10
       vesselfm: 0.20
+      swinunetr: 0.05
+      vista3d: 0.10
+      nnunet: 0.10
       comma_mamba: 0.10
-    rationale: "Lab groups can run multiple architectures with shared HPC; vesselFM and COMMA Mamba expand the exploration space"
+      sam_variants: 0.10
+    rationale: "Lab groups can run multiple architectures with shared HPC; DynUNet primary, vesselFM for transfer, broader exploration"
   clinical_deployment:
     probability_overrides:
-      segresnet: 0.10
-      swinunetr: 0.10
-      vista3d: 0.20
-      nnunet: 0.20
-      sam_variants: 0.10
-      vesselfm: 0.20
+      dynunet: 0.30
+      segresnet: 0.05
+      vesselfm: 0.25
+      swinunetr: 0.05
+      vista3d: 0.10
+      nnunet: 0.10
       comma_mamba: 0.10
-    rationale: "Clinical prefers validated foundation models and benchmark champions; vesselFM offers vessel-specific pre-training for deployment"
+      sam_variants: 0.05
+    rationale: "Clinical prefers challenge-validated architectures (DynUNet/nnU-Net) and vessel-specific FMs (vesselFM) for deployment"
 
 volatility:
   classification: shifting
@@ -284,10 +347,10 @@ volatility:
   next_review: 2026-05-23
   change_drivers:
     - "VISTA-3D v2 and MONAI Bundle updates"
-    - "nnU-Net v2.5 release"
+    - "nnU-Net v2.5 release / ResEnc L/XL presets"
     - "SAM3/MedSAM3 maturity for 3D medical segmentation"
-    - "New topology-aware architectures"
-    - "vesselFM vessel-specific foundation model"
+    - "New topology-aware architectures (HarmonySeg, MedNeXt)"
+    - "vesselFM vessel-specific foundation model adoption"
     - "Mamba/SSM architectures for segmentation"
 
 domain_applicability:
@@ -297,108 +360,97 @@ domain_applicability:
   general_medical: 0.90
 
 rationale: >
-  SegResNet (Myronenko, 2019) leads at 0.20 as the implemented baseline and BraTS
-  2018 winner. VISTA-3D (He et al., 2024) drops to 0.15 following evidence from
-  AtlasSegFM (Zhang et al., 2025) that it degrades from 88% to 27% Dice on small
-  structures, a critical concern for fine vessel segmentation. SwinUNETR
-  (Hatamizadeh et al., 2022) at 0.15 is implemented and competitive with
-  transformer-based long-range dependencies. nnU-Net (Isensee et al., 2021) at 0.15
-  remains the gold standard in medical image segmentation challenges (Nature Methods)
-  but requires pipeline refactoring to integrate with Hydra-zen. SAM variants
-  (Kirillov et al., 2023) drop to 0.10 as SAM2 benchmarks (Ma et al., 2024) confirm poor
-  performance on thin tubular structures. MedSAM3 (Liu et al., 2025) builds on SAM3
-  with medical concept-aware prompting, potentially addressing these limitations. The new vesselFM (Wittmann et al., 2024)
-  enters at 0.15 as the first 3D vessel-specific foundation model with zero-shot
-  Dice 74.66 on SMILE-UHURA and direct relevance through MiniVess inclusion in its
-  training data. COMMA Mamba (Shi et al., 2025) enters at 0.10 as an experimental
-  state-space model achieving Dice 86.36 and clDice 84.31 on KiPA, representing the
-  emerging Mamba/SSM paradigm for efficient long-range modeling. Domain note: vascular
-  segmentation benefits from clDice-aware architectures (Shit et al., 2021) that
-  preserve topological connectivity of tubular structures. TUNE++ (Dhor et al., 2026)
-  demonstrates topology-aware uncertainty quantification combining Betti loss with UQ
-  for tubular structures.
+  Phase 12 research (monai-segmentor-model-background-research.md) established DynUNet
+  (Isensee et al., 2021) as the primary recommendation at 0.30 based on: (1) nnU-Net
+  variants dominate vascular challenges — SMILE-UHURA combined 0.804 (Chatterjee et al.,
+  2024), TopCoW binary 93.55 (Kirchhoff et al., 2024), kidney vessels Dice 0.9523; (2)
+  "nnU-Net Revisited" (Isensee et al., 2024) demonstrates 4-7 Dice point advantage over
+  SwinUNETR across 6 datasets; (3) self-adapting configuration via dataset fingerprinting
+  eliminates most hyperparameter tuning; (4) vesselFM (Wittmann et al., 2025) uses nnU-Net
+  backbone, validating the architecture family for vessels. vesselFM (0.20) enters as the
+  strongest vessel-specific foundation model with zero-shot Dice 74.66 and few-shot 78.77
+  on SMILE-UHURA. SegResNet (Myronenko, 2019) drops to 0.15 as lightweight implemented
+  fallback — still recommended for quick-win topology loss experiments before architecture
+  migration. SwinUNETR (Hatamizadeh et al., 2022) drops to 0.05 based on benchmark evidence
+  of CNN superiority and ONNX export issues, but retained for ensemble diversity. VISTA-3D
+  (He et al., 2024) drops to 0.05 following AtlasSegFM evidence (Zhang et al., 2025) of
+  degradation on small structures. Key insight: topology-aware loss (clDice, Shit et al.,
+  2021; Skeleton Recall, Kirchhoff et al., 2024) has 5-15× more impact than architecture
+  choice for vascular segmentation.
 
 research_notes: >
-  The MONAI framework (Cardoso et al., 2022) provides native implementations of
-  SegResNet, SwinUNETR, and VISTA-3D, making these three architectures the most
-  natural fit for the MinIVess pipeline. The Metrics Reloaded framework
-  (Maier-Hein et al., 2024) recommends topology-aware metrics for vascular
-  segmentation, which aligns with clDice (Shit et al., 2021) as a key evaluation
-  criterion. nnU-Net v2 (Isensee et al., 2021) self-configures architecture and
-  preprocessing but operates as a standalone pipeline, creating integration
-  challenges with Hydra-zen experiment management. vesselFM (Wittmann et al., 2024)
-  is the first 3D vessel-specific foundation model, trained on diverse vascular
-  datasets including MiniVess, achieving zero-shot Dice 74.66 on SMILE-UHURA.
-  It uses MONAI UNet internally, which may facilitate integration. COMMA Mamba
-  (Shi et al., 2025) introduces state-space modeling for vessel segmentation with
-  Dice 86.36 and clDice 84.31 on KiPA, though it requires custom CUDA kernels.
-  AtlasSegFM (Zhang et al., 2025) provides critical evidence that VISTA3D drops
-  from 88% to 27% on small structures, motivating vessel-specific alternatives.
-  VessShape (Galvao et al., 2025) demonstrates few-shot vessel segmentation via
-  synthetic shape priors. VessQC (Terms et al., 2025) shows uncertainty-guided
-  curation improves error detection recall from 67% to 94%. TUNE++ (Dhor et al.,
-  2026) combines Betti loss with uncertainty quantification for topology-aware
-  segmentation of tubular structures.
+  Phase 12 comprehensive model evaluation. The MONAI framework (Cardoso et al., 2022)
+  provides native DynUNet, SegResNet, SwinUNETR, and VISTA-3D. DynUNet replaces
+  SegResNet + SwinUNETR as primary architecture for tubular vascular segmentation based on
+  challenge dominance and self-adapting configuration. Recommended implementation roadmap:
+  (A) Quick win — add clDice loss to existing SegResNet for +5-15% clDice improvement,
+  (B) Implement DynUNet adapter with nnU-Net v2 fingerprinting, (C) Add SDF/centerline
+  auxiliary heads. Data volume decision gate: <10 volumes → vesselFM fine-tuning;
+  10-50 volumes → DynUNet + clDice; >50 volumes → DynUNet from scratch. MedNeXt (Roy
+  et al., 2023) outperforms both nnU-Net and SwinUNETR on several benchmarks but has less
+  adoption. Skeleton Recall Loss (Kirchhoff et al., 2024) is 90% cheaper than clDice
+  for multi-class scenarios. cbDice (Shi et al., 2024) extends clDice with radius-weighted
+  centerlines for diameter-aware topology. COMMA Mamba (Shi et al., 2025) achieves Dice
+  86.36, clDice 84.31 on KiPA but requires custom CUDA. Risks: MONAI DynUNet may lag
+  nnU-Net v2 features (ResEnc L/XL); clDice numerical instability on very thin structures.
+  See docs/planning/monai-segmentor-model-background-research.md for full analysis.
 
 references:
+  - citation_key: isensee2021nnu
+    relevance: "Introduces nnU-Net self-configuring framework; DynUNet in MONAI is its architecture. Gold standard in medical segmentation challenges."
+    sections: ["Table 1", "Section 2"]
+    supports_options: ["dynunet", "nnunet", "vesselfm"]
+
+  - citation_key: isensee2024revisited
+    relevance: "nnU-Net Revisited (MICCAI 2024): demonstrates 4-7 Dice point advantage of CNN architectures over SwinUNETR across 6 datasets. ResEnc L/XL variants."
+    sections: ["Table 1", "Section 3"]
+    supports_options: ["dynunet", "nnunet"]
+
   - citation_key: myronenko2019
     relevance: "Introduces SegResNet architecture (encoder-decoder with VAE regularization), winner of BraTS 2018 challenge"
     sections: ["Table 1", "Section 3"]
     supports_options: ["segresnet"]
 
   - citation_key: hatamizadeh2022swinunetr
-    relevance: "Introduces SwinUNETR architecture with shifted-window self-attention for 3D medical segmentation"
+    relevance: "Introduces SwinUNETR architecture. Deprioritized for vascular segmentation based on Isensee et al. (2024) benchmark gap."
     sections: ["Table 2", "Section 3.2"]
     supports_options: ["swinunetr"]
 
-  - citation_key: he2024vista3d
-    relevance: "Introduces VISTA-3D foundation model for versatile interactive 3D segmentation with point and class prompts"
-    supports_options: ["vista3d"]
-
-  - citation_key: isensee2021nnu
-    relevance: "Introduces nnU-Net self-configuring framework, gold standard in medical segmentation challenges"
-    sections: ["Table 1", "Section 2"]
-    supports_options: ["nnunet"]
-
-  - citation_key: kirillov2023sam
-    relevance: "Introduces Segment Anything foundation model; SAM3 and MedSAM3 derive from this work"
-    supports_options: ["sam_variants"]
+  - citation_key: wittmann2024vesselfm
+    relevance: "First vessel-specific 3D FM. nnU-Net backbone validates architecture. Zero-shot Dice 74.66, few-shot 78.77 on SMILE-UHURA."
+    sections: ["Table 1", "Section 4"]
+    supports_options: ["vesselfm", "dynunet"]
 
   - citation_key: shit2021cldice
-    relevance: "Introduces clDice topology-preserving metric critical for vascular segmentation evaluation"
+    relevance: "Introduces clDice topology-preserving loss. Phase 12 shows loss function has 5-15× more impact than architecture choice for vessels."
     sections: ["Table 2", "Fig. 4"]
-    supports_options: ["segresnet", "vista3d"]
+    supports_options: ["dynunet", "segresnet"]
 
-  - citation_key: cardoso2022monai
-    relevance: "MONAI framework providing native implementations of SegResNet, SwinUNETR, and VISTA-3D"
-    supports_options: ["segresnet", "swinunetr", "vista3d"]
-
-  - citation_key: maier2024metrics
-    relevance: "Metrics Reloaded framework recommending topology-aware metrics for vascular segmentation"
-    sections: ["Table 5", "Section 4.3"]
-
-  - citation_key: wittmann2024vesselfm
-    relevance: "First foundation model specifically for 3D blood vessel segmentation. Uses MONAI UNet. Zero-shot Dice 74.66 on SMILE-UHURA."
-    sections: ["Table 1", "Section 4"]
-    supports_options: ["vesselfm"]
+  - citation_key: kirchhoff2024skeletonrecall
+    relevance: "Skeleton Recall Loss (ECCV 2024): 90% cheaper than persistent homology, first multi-class thin structure loss. +1.23 Dice on TopCoW with nnU-Net."
+    supports_options: ["dynunet", "segresnet"]
 
   - citation_key: shi2025comma
-    relevance: "COMMA Mamba network achieves SOTA on vessel segmentation. Dice 86.36, clDice 84.31 on KiPA dataset."
+    relevance: "COMMA Mamba achieves SOTA on vessel segmentation. Dice 86.36, clDice 84.31 on KiPA. Local CNN + global Mamba branches."
     sections: ["Table 1", "Table 2"]
     supports_options: ["comma_mamba"]
 
-  - citation_key: galvao2025vessshape
-    relevance: "VessShape demonstrates few-shot vessel segmentation via synthetic shape priors."
-    supports_options: ["segresnet", "vesselfm"]
+  - citation_key: cardoso2022monai
+    relevance: "MONAI framework providing native DynUNet, SegResNet, SwinUNETR, and VISTA-3D implementations"
+    supports_options: ["dynunet", "segresnet", "swinunetr", "vista3d"]
 
-  - citation_key: terms2025vessqc
-    relevance: "VessQC uncertainty-guided curation improves error detection recall from 67% to 94%."
-    supports_options: ["segresnet", "swinunetr", "vesselfm"]
+  - citation_key: he2024vista3d
+    relevance: "Introduces VISTA-3D foundation model. SegResNetDS2 backbone."
+    supports_options: ["vista3d"]
 
   - citation_key: zhang2025atlassegfm
-    relevance: "AtlasSegFM shows VISTA3D drops from 88% to 27% on small structures. Atlas-based one-shot customization."
+    relevance: "AtlasSegFM shows VISTA3D drops from 88% to 27% on small structures. Motivates vessel-specific alternatives."
     sections: ["Table 2"]
     supports_options: ["vista3d", "vesselfm"]
+
+  - citation_key: kirillov2023sam
+    relevance: "Introduces Segment Anything; SAM3 and MedSAM3 derive from this work"
+    supports_options: ["sam_variants"]
 
   - citation_key: ma2024sam2bench
     relevance: "Comprehensive benchmark of SAM2 in medical images. Shows limitations on thin structures."
@@ -408,13 +460,25 @@ references:
     relevance: "MedSAM3 builds on SAM3 with medical concept-aware prompting for 3D medical segmentation."
     supports_options: ["sam_variants"]
 
+  - citation_key: maier2024metrics
+    relevance: "Metrics Reloaded framework recommending topology-aware metrics for vascular segmentation"
+    sections: ["Table 5", "Section 4.3"]
+
+  - citation_key: galvao2025vessshape
+    relevance: "VessShape demonstrates few-shot vessel segmentation via synthetic shape priors."
+    supports_options: ["segresnet", "vesselfm"]
+
+  - citation_key: terms2025vessqc
+    relevance: "VessQC uncertainty-guided curation improves error detection recall from 67% to 94%."
+    supports_options: ["segresnet", "dynunet", "vesselfm"]
+
   - citation_key: dhor2026tunepp
     relevance: "TUNE++ topology-aware uncertainty for tubular structures. Combines Betti loss with UQ."
-    supports_options: ["segresnet", "comma_mamba"]
+    supports_options: ["dynunet", "segresnet", "comma_mamba"]
 
 tags:
   - models
   - segmentation
   - monai
   - foundation-models
-  - resolved-partial
+  - phase-12-research

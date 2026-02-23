@@ -1928,3 +1928,55 @@ bibliography:
     topics:
       - compliance_depth
       - clinical_deployment_platform
+
+  # === Phase 12: Segmentation Model Research ===
+
+  - citation_key: isensee2024revisited
+    inline_citation: "Isensee et al. (2024)"
+    authors: "Isensee, F., Wald, T., Ulrich, C., Baumgartner, M., Roy, S., Maier-Hein, K., Jaeger, P. F."
+    year: 2024
+    title: "nnU-Net Revisited: A Call for Rigorous Validation in 3D Medical Image Segmentation"
+    venue: "MICCAI 2024"
+    doi: ""
+    url: "https://arxiv.org/abs/2404.09556"
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
+      - model_strategy
+
+  - citation_key: kirchhoff2024skeletonrecall
+    inline_citation: "Kirchhoff et al. (2024)"
+    authors: "Kirchhoff, Y., Shit, S., Menze, B., Isensee, F., Maier-Hein, K."
+    year: 2024
+    title: "Skeleton Recall Loss for Connectivity Conserving and Resource Efficient Segmentation of Thin Tubular Structures"
+    venue: "ECCV 2024"
+    doi: ""
+    url: "https://arxiv.org/abs/2404.03010"
+    evidence_type: method
+    topics:
+      - segmentation_models
+      - loss_functions
+
+  - citation_key: roy2023mednext
+    inline_citation: "Roy et al. (2023)"
+    authors: "Roy, S., Koehler, G., Ulrich, C., Baumgartner, M., Petersen, J., Isensee, F., Jaeger, P. F., Maier-Hein, K."
+    year: 2023
+    title: "MedNeXt: Transformer-driven Scaling of ConvNets for Medical Image Segmentation"
+    venue: "MICCAI 2023"
+    doi: ""
+    url: "https://arxiv.org/abs/2303.09975"
+    evidence_type: architecture
+    topics:
+      - segmentation_models
+
+  - citation_key: chatterjee2024smileuhura
+    inline_citation: "Chatterjee et al. (2024)"
+    authors: "Chatterjee, S., Mattern, H., Dhar, R., Sciarra, A., Speck, O., Nürnberger, A."
+    year: 2024
+    title: "SMILE-UHURA Challenge: Small Vessel Segmentation at 3T and 7T MRI"
+    venue: "arXiv:2411.09593"
+    doi: ""
+    url: "https://arxiv.org/abs/2411.09593"
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
