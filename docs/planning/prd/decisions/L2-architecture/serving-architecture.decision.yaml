@@ -17,7 +17,16 @@ options:
 
   - option_id: monai_deploy
     title: "MONAI Deploy"
-    description: "MONAI Deploy App SDK. Clinical-grade serving."
+    description: >
+      MONAI Deploy App SDK v3.0.0 (April 2025). Clinical-grade serving via
+      MAP (MONAI Application Package) format — OCI-compliant containers with
+      immutable manifests and semantic versioning. Built-in DICOM operators
+      for load/select/convert/inference/write. Informatics Gateway provides
+      DICOM SCP/SCU, HL7, FHIR integration. Workflow Manager with correlation
+      ID traceability. Deployed at Mayo Clinic and Siemens Digital Marketplace
+      (10,000+ institutions). Requires Holoscan SDK + NVIDIA dGPU. Facilitates
+      IEC 62304 Clause 8 via immutable packaging but is NOT regulatory-cleared.
+      MONAI Model Zoo models are SOUP per IEC 62304.
     prior_probability: 0.25
     status: viable
     implementation_status: not_started
@@ -129,6 +138,18 @@ references:
       - bentoml_rest
   - citation_key: gupta2025monaideploy
     relevance: "MONAI Deploy documentation for clinical-grade serving alternative"
+    supports_options:
+      - monai_deploy
+  - citation_key: monaideploy2025sdk3
+    relevance: "MONAI Deploy App SDK v3.0.0 — MAP format, operator DAG, Holoscan dependency"
+    supports_options:
+      - monai_deploy
+  - citation_key: mayo2024monai
+    relevance: "Mayo Clinic MONAI Deploy case study — clinical AI production deployment"
+    supports_options:
+      - monai_deploy
+  - citation_key: siemens2024monai
+    relevance: "Siemens Healthineers MONAI Deploy adoption at RSNA 2024 — 10,000+ institutions"
     supports_options:
       - monai_deploy
   - citation_key: recupito2024mlops

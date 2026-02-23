@@ -42,15 +42,20 @@ options:
     title: "Regulatory Dossier"
     description: >
       Formal documentation package for IEC 62304 compliance: design history
-      file, risk analysis, V&V protocols, clinical evaluation summary.
-      Heavyweight but required for SaMD certification.
+      file (per MDR Annex II), risk management file (ISO 14971:2019), V&V
+      protocols (IEC 62304 Clause 5.7), clinical evaluation summary. FDA
+      TPLC (2025) requires model description, data lineage, bias analysis.
+      EU AI Act Article 11 technical documentation. Implementation approaches:
+      Ketryx (automated, UL certified), Innolitics RDM (open-source, proven
+      510(k) submissions), OpenRegulatory templates (free, manual).
+      Heavyweight but required for SaMD market access.
     prior_probability: 0.15
     status: viable
     implementation_status: not_started
     constraints:
       - "Regulatory expertise required"
       - "Significant documentation overhead"
-      - "Templates needed for each document type"
+      - "Templates needed per Ketryx, Innolitics RDM, or OpenRegulatory"
 
   - option_id: readme_only
     title: "README Only"
@@ -178,6 +183,22 @@ references:
   - citation_key: iec62304_2015
     relevance: "IEC 62304 standard requiring formal documentation for medical device software."
     supports_options: ["regulatory_dossier"]
+
+  - citation_key: innolitics2024rdm
+    relevance: "Open-source regulatory documentation manager proven in 510(k) submissions. Git-native markdown+YAML."
+    supports_options: ["regulatory_dossier"]
+
+  - citation_key: openregulatory2024
+    relevance: "Free IEC 62304/ISO 13485/ISO 14971 templates. Zero-cost starting point."
+    supports_options: ["regulatory_dossier"]
+
+  - citation_key: ketryx2025
+    relevance: "UL Certified automated documentation. 90% documentation reduction. Free tier available."
+    supports_options: ["regulatory_dossier", "model_cards_full"]
+
+  - citation_key: fda2025tplc
+    relevance: "FDA TPLC draft guidance requiring model description, data lineage, bias analysis documentation."
+    supports_options: ["regulatory_dossier", "model_cards_full"]
 
 tags:
   - technology

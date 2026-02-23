@@ -1,15 +1,19 @@
 decision_id: compliance_depth
 title: "Compliance Depth"
 description: >
-  How deeply to implement regulatory compliance (IEC 62304, FDA guidance).
-  Lightweight audit is current implementation. Full compliance requires
-  significant infrastructure investment. Rosmarino et al. (2025) demonstrate
-  MLOps-driven automation of regulatory documentation for AI-based SaMD.
-  Martina et al. (2024) validate DevOps-based approaches to IEC 62304
-  software medical device maintenance via CI/CD. Niemiec (2025) provides
-  EU AI Act compliance implications for medical AI classification.
-  Lähteenmäki et al. (2023) introduce the RegOps lifecycle concept for
-  continuous AI/ML regulatory compliance.
+  How deeply to implement regulatory compliance (IEC 62304, FDA guidance,
+  EU AI Act, ISO 14971). Lightweight audit is current implementation. Full
+  compliance requires significant infrastructure investment. Phase 11 research
+  synthesizes: IEC 62304 Edition 2 (expected Sep 2026) will expand to all
+  health software with AI/ML provisions; FDA PCCP (Dec 2024) enables iterative
+  ML updates within pre-approved boundaries; 10 GMLP Principles (Oct 2021)
+  define good ML practice; EU AI Act (Aug 2027 for medical devices) adds
+  Articles 9-15 requirements; ISO 14971:2019 Clause 10 triples post-production
+  coverage; AAMI TIR 34971:2023 addresses ML-specific risks. Rosmarino et al.
+  (2025) demonstrate MLOps-driven regulatory documentation automation.
+  Martina et al. (2024) validate DevOps-based IEC 62304 maintenance.
+  Granlund et al. (2022) advocate "calm compliance." Stirbu et al. (2021)
+  propose "everything as code" for RegOps pipelines.
 
 decision_level: L1_research_goals
 status: active
@@ -19,16 +23,24 @@ options:
   - option_id: iec_62304_full
     title: "IEC 62304 Full Compliance"
     description: >
-      Complete Software as Medical Device lifecycle. Requires formal
-      risk analysis, design history file, verification & validation
-      protocols, change control. Significant overhead.
+      Complete Software as Medical Device lifecycle per IEC 62304 Clauses 5-9.
+      Safety class B/C requires: software development plan (5.1), requirements
+      analysis (5.2), architectural design (5.3), detailed design (5.4), unit
+      verification (5.5), integration testing (5.6), system testing (5.7),
+      release (5.8). ISO 14971:2019 risk management with three-tier control
+      hierarchy. ISO 13485:2016 QMS with Clause 4.1.6 tool validation.
+      FDA TPLC (2025) requires model description, data lineage, bias analysis.
+      EU AI Act Articles 9-15 for high-risk medical AI. Significant overhead
+      but required for market access (510(k)/CE).
     prior_probability: 0.15
     status: viable
     implementation_status: not_started
     constraints:
       - "Regulatory expertise required"
-      - "Formal V&V protocols"
-      - "Change control process"
+      - "Formal V&V protocols per IEC 62304 Clause 5"
+      - "Change control per IEC 62304 Clause 8"
+      - "Risk management per ISO 14971:2019"
+      - "Tool validation per ISO 13485 Clause 4.1.6"
 
   - option_id: lightweight_audit
     title: "Lightweight Audit Trail"
@@ -55,20 +67,28 @@ options:
   - option_id: regops_automated
     title: "RegOps Automated Compliance"
     description: >
-      Automated compliance via CI/CD pipelines. Regulatory documentation
-      generated from MLOps artifacts. Combines DevOps practices with
-      IEC 62304 requirements (Martina et al., 2024). MLOps-driven
-      documentation generation (Rosmarino et al., 2025). EU AI Act
-      aware (Niemiec, 2025).
+      Automated compliance via CI/CD pipelines following the RegOps lifecycle
+      (Lähteenmäki et al., 2023) and "calm compliance" philosophy (Granlund
+      et al., 2022). Regulatory documentation generated from MLOps artifacts
+      (Rosmarino et al., 2025). PCCP-ready infrastructure for predetermined
+      ML model change boundaries (FDA, 2024). GMLP-aligned model cards and
+      validation protocols. EU AI Act Articles 9-15 automated record-keeping
+      and transparency. Ketryx free tier enables zero-cost compliance overlay.
+      Innolitics RDM and OpenRegulatory templates provide open-source
+      foundations. IEC 62304 artifacts generated from Git + MLflow + DVC
+      metadata. Stirbu et al. (2021) "everything as code" approach.
     prior_probability: 0.15
     status: viable
     implementation_status: not_started
     complements:
       - "ci_cd_platform.github_actions"
       - "documentation_generation.ci_generated"
+      - "regulatory_documentation_tool.ketryx"
+      - "regulatory_documentation_tool.innolitics_rdm"
     constraints:
       - "Requires MLOps pipeline maturity"
       - "Regulatory expertise for template creation"
+      - "Tool validation per ISO 13485 Clause 4.1.6"
 
 archetype_weights:
   solo_researcher:
@@ -160,7 +180,56 @@ references:
     relevance: "IEC 62304 standard for medical device software lifecycle processes."
     supports_options:
       - "iec_62304_full"
+  - citation_key: iec62304_2026ed2
+    relevance: "IEC 62304 Edition 2 draft — expands to all health software, adds AI/ML provisions, 2 rigor levels."
+    supports_options:
+      - "iec_62304_full"
+      - "regops_automated"
+  - citation_key: fda2024pccp
+    relevance: "FDA PCCP final guidance (Dec 2024) — enables predetermined change control for ML model updates."
+    supports_options:
+      - "iec_62304_full"
+      - "regops_automated"
+  - citation_key: fda2021gmlp
+    relevance: "10 GMLP principles for medical ML development — multi-disciplinary, representative data, monitoring."
+    supports_options:
+      - "iec_62304_full"
+      - "regops_automated"
+      - "lightweight_audit"
+  - citation_key: euaiact2024
+    relevance: "EU AI Act Articles 9-15 for high-risk medical AI. Compliance required Aug 2027."
+    supports_options:
+      - "iec_62304_full"
+      - "regops_automated"
+  - citation_key: iso14971_2019
+    relevance: "ISO 14971:2019 risk management with AI/ML-specific extensions via TIR 34971."
+    supports_options:
+      - "iec_62304_full"
+  - citation_key: aami_tir34971_2023
+    relevance: "ML-specific risk management: dataset shifts, model drift, bias, adversarial inputs."
+    supports_options:
+      - "iec_62304_full"
+      - "regops_automated"
+  - citation_key: granlund2022calm
+    relevance: "Calm compliance — regulatory documentation as natural development byproduct."
+    supports_options:
+      - "regops_automated"
+      - "lightweight_audit"
+  - citation_key: stirbu2021regops
+    relevance: "RegOps DevOps pipeline for regulatory compliant medical device software."
+    supports_options:
+      - "regops_automated"
 
 research_notes: >
+  Phase 11 research significantly expanded regulatory landscape understanding.
+  Key findings: (1) IEC 62304 Ed.2 (Sep 2026) will expand scope to all health
+  software and add AI/ML-specific requirements; (2) FDA PCCP (Dec 2024) enables
+  iterative ML model updates within pre-approved boundaries; (3) EU AI Act
+  (Aug 2027 for medical devices) adds Articles 9-15 requirements including
+  human oversight and cybersecurity; (4) ISO 14971:2019 triples post-production
+  coverage; (5) AAMI TIR 34971:2023 provides ML-specific risk checklists;
+  (6) "Calm compliance" and "everything as code" are emerging paradigms for
+  reducing compliance overhead. New PRD nodes added: project_management_tool,
+  regulatory_documentation_tool, clinical_deployment_platform.
   Internal: ADR-0005 (docs/adr/0005-tdd-mandatory.md) documents the TDD mandate
   that underpins the compliance approach.

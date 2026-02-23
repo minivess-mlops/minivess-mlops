@@ -6,7 +6,7 @@ These feed into slide decks:
 - `sci-llm-writer/manuscripts/vibe-coding-slides/archived/tier-2-intermediate-slides.md` (Modules 4-7)
 - `sci-llm-writer/manuscripts/vibe-coding-slides/archived/tier-3-advanced-slides-consolidated.md` (Modules 8-12)
 
-## Current Phase: ALL COMPLETE (Phases 0-9)
+## Current Phase: ALL COMPLETE (Phases 0-11)
 
 ### Phase 0 Tasks (COMPLETE)
 - [x] P0.1: Initialize project with `uv init`, set up pyproject.toml with all deps
@@ -123,3 +123,28 @@ These feed into slide decks:
 - [x] P9.8: L4+L5 decision files (9 files) — ci-cd-platform, compute-target, containerization, gitops-strategy, iac-tooling, secrets-management, model-export-format, cost-tracking, model-governance
 - [x] P9.9: Cross-topic bibliography fixes (5 entries: kreuzberger2023mlops, sato2019cd4ml, maier2024metrics, langchain2024langgraph, cardoso2022monai)
 - [x] P9.10: Validation — all 3 core checks PASS (resolution, completeness, cross-topic), 37 pre-existing warnings from Phase 8
+
+### Phase 10: PRD Stack Coverage & Status Fixes (COMPLETE)
+- [x] P10.1: New decision file — L2-architecture/language-runtime.decision.yaml (Python vs Julia vs Rust vs C++)
+- [x] P10.2: New decision file — L3-technology/package-manager.decision.yaml (uv vs poetry vs pip-tools vs conda)
+- [x] P10.3: New decision file — L3-technology/linter-formatter.decision.yaml (ruff vs flake8+black vs pylint)
+- [x] P10.4: New decision file — L3-technology/type-checker.decision.yaml (mypy vs pyright vs pytype)
+- [x] P10.5: Fix validation-depth — standard_5_layers marked resolved with implementation_status: partial (~8 layers implemented)
+- [x] P10.6: _network.yaml — +4 nodes (52→56), +12 edges (85→97), version 1.1.0→1.2.0
+- [x] P10.7: bibliography.yaml — +5 entries (bezanson2017julia, astral2024uv, marsh2023ruff, lehtosalo2012mypy, python2024packaging)
+- [x] P10.8: Validation — all citation checks PASS
+
+### Phase 11: Clinical SaMD-Grade ML Ops Planning (COMPLETE)
+- [x] P11.1: Web research — 3 parallel agents (standards, PM tools, MONAI Deploy)
+- [x] P11.2: Comprehensive report (docs/planning/medical-mlops-standards.md — ~2000 lines)
+- [x] P11.3: Bibliography expansion (+22 entries, 107→129 total in bibliography.yaml)
+- [x] P11.4: New decision — L4-infrastructure/project-management-tool.decision.yaml (5 options, Ketryx scoring)
+- [x] P11.5: New decision — L3-technology/regulatory-documentation-tool.decision.yaml (4 options)
+- [x] P11.6: New decision — L2-architecture/clinical-deployment-platform.decision.yaml (4 options, MONAI Deploy)
+- [x] P11.7: Enriched — compliance-depth (expanded descriptions, +9 references, PCCP/GMLP/EU AI Act)
+- [x] P11.8: Enriched — serving-architecture (MONAI Deploy v3.0.0 details, +3 references)
+- [x] P11.9: Enriched — model-governance (PCCP-ready governance, +2 references, regops_automated conditional)
+- [x] P11.10: Enriched — documentation-standard (regulatory dossier details, +5 references)
+- [x] P11.11: Enriched — ci-cd-platform (IEC 62304 Clause 8, ISO 13485 4.1.6, +2 references)
+- [x] P11.12: _network.yaml — +3 nodes (56→59), +14 edges (97→111), version 1.2.0→1.3.0
+- [x] P11.13: Validation — citation checks PASS

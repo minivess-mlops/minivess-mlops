@@ -19,8 +19,8 @@ options:
     title: "Standard (5 Layers)"
     description: "Core validation: schema, data, model, inference, serving."
     prior_probability: 0.40
-    status: viable
-    implementation_status: not_started
+    status: resolved
+    implementation_status: partial
 
   - option_id: minimal_2_layers
     title: "Minimal (2 Layers)"

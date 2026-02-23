@@ -1,0 +1,163 @@
+decision_id: linter_formatter
+title: "Linter & Formatter"
+description: >
+  Python code linting and formatting tool. Enforces code style, catches
+  common errors, and maintains consistent formatting across the codebase.
+  Created post-hoc to document the ruff decision with pre-researched
+  alternatives for completeness.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: ruff
+    title: "Ruff"
+    description: >
+      Rust-based Python linter and formatter by Astral. Replaces flake8 +
+      isort + black + pyflakes + pycodestyle + pydocstyle in a single tool.
+      10-100x faster than traditional Python linters. Supports 800+ lint
+      rules. Current implementation (Marsh, 2023).
+    prior_probability: 0.55
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "package_manager.uv"
+      - "type_checker.mypy"
+      - "ci_cd_platform.github_actions"
+
+  - option_id: flake8_black
+    title: "Flake8 + Black"
+    description: >
+      Traditional Python linting (Flake8) and formatting (Black) combo.
+      Mature ecosystem with extensive plugin library. Widely understood
+      and documented.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "10-100x slower than ruff"
+      - "Requires multiple tools (flake8 + black + isort)"
+      - "Configuration split across multiple config files"
+
+  - option_id: pylint_autopep8
+    title: "Pylint + autopep8"
+    description: >
+      Strictest Python linting (Pylint) with autopep8 formatting. More
+      false positives but catches deeper issues. Slower execution.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Significantly slower than ruff or flake8"
+      - "Higher false positive rate requires more configuration"
+      - "autopep8 less opinionated than black/ruff formatter"
+
+conditional_on:
+  - parent_decision_id: language_runtime
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: python
+        then_probabilities:
+          ruff: 0.55
+          flake8_black: 0.25
+          pylint_autopep8: 0.20
+      - given_parent_option: julia
+        then_probabilities:
+          ruff: 0.10
+          flake8_black: 0.10
+          pylint_autopep8: 0.80
+      - given_parent_option: rust_pyo3
+        then_probabilities:
+          ruff: 0.55
+          flake8_black: 0.25
+          pylint_autopep8: 0.20
+      - given_parent_option: cpp_libtorch
+        then_probabilities:
+          ruff: 0.20
+          flake8_black: 0.20
+          pylint_autopep8: 0.60
+
+  - parent_decision_id: ci_cd_platform
+    influence_strength: weak
+    conditional_table:
+      - given_parent_option: github_actions
+        then_probabilities:
+          ruff: 0.60
+          flake8_black: 0.25
+          pylint_autopep8: 0.15
+      - given_parent_option: gitlab_ci
+        then_probabilities:
+          ruff: 0.55
+          flake8_black: 0.25
+          pylint_autopep8: 0.20
+      - given_parent_option: azure_devops
+        then_probabilities:
+          ruff: 0.50
+          flake8_black: 0.30
+          pylint_autopep8: 0.20
+      - given_parent_option: jenkins
+        then_probabilities:
+          ruff: 0.45
+          flake8_black: 0.30
+          pylint_autopep8: 0.25
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      ruff: 0.65
+      flake8_black: 0.20
+      pylint_autopep8: 0.15
+    rationale: "ruff speed enables fast iteration; single tool simplifies config"
+  lab_group:
+    probability_overrides:
+      ruff: 0.55
+      flake8_black: 0.25
+      pylint_autopep8: 0.20
+    rationale: "Lab groups may have flake8/black legacy; ruff migration straightforward"
+  clinical_deployment:
+    probability_overrides:
+      ruff: 0.50
+      flake8_black: 0.20
+      pylint_autopep8: 0.30
+    rationale: "Clinical may prefer pylint thoroughness for safety-critical code"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2027-02-23
+  change_drivers:
+    - "ruff rule coverage expansion"
+    - "Python language evolution (new syntax features)"
+    - "Black/flake8 maintenance status"
+
+domain_applicability:
+  vascular_segmentation: 0.50
+  cardiac_imaging: 0.50
+  neuroimaging: 0.50
+  general_medical: 0.50
+
+rationale: >
+  ruff (0.55) is resolved as the linter and formatter. Built in Rust by
+  Astral (Marsh, 2023), it replaces the entire flake8 + black + isort
+  toolchain with 10-100x better performance. The Python Packaging User Guide
+  (PyPA, 2024) increasingly references ruff as a standard tool. Domain
+  applicability is low because linting is fully domain-agnostic.
+
+references:
+  - citation_key: marsh2023ruff
+    relevance: "Ruff linter/formatter — the implemented solution replacing flake8+black+isort"
+    supports_options:
+      - ruff
+  - citation_key: python2024packaging
+    relevance: "Python Packaging User Guide — documents modern Python tooling standards"
+    supports_options:
+      - ruff
+      - flake8_black
+
+tags:
+  - technology
+  - linter
+  - formatter
+  - python-tooling
+  - resolved

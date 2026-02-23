@@ -1,0 +1,265 @@
+decision_id: clinical_deployment_platform
+title: "Clinical Deployment Platform"
+description: >
+  Architectural choice for deploying models in clinical DICOM/PACS
+  environments vs. general-purpose API serving. MONAI Deploy App SDK v3.0.0
+  provides MAP format (OCI containers) with built-in DICOM operators,
+  Informatics Gateway for PACS connectivity, and Workflow Manager for
+  clinical orchestration. BentoML (current implementation) provides
+  excellent general-purpose REST serving. A hybrid approach combines
+  BentoML for research and MONAI Deploy for clinical workflows.
+  Real-world deployments at Mayo Clinic and Siemens Healthineers validate
+  MONAI Deploy for production use.
+
+decision_level: L2_architecture
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: monai_deploy
+    title: "MONAI Deploy"
+    description: >
+      MONAI Deploy App SDK v3.0.0 with MAP (MONAI Application Package)
+      format. OCI-compliant containers with immutable manifests. Built-in
+      DICOM operators (load, select, convert, inference, write). Informatics
+      Gateway for DICOM SCP/SCU, HL7, FHIR. Workflow Manager with correlation
+      ID traceability. Deployed at Mayo Clinic and Siemens Healthineers
+      Digital Marketplace (10,000+ institutions). Requires Holoscan SDK +
+      NVIDIA dGPU. Facilitates IEC 62304 via immutable packaging, versioned
+      artifacts, and deterministic execution.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires NVIDIA dGPU (drivers 535+, CUDA 12.2+)"
+      - "Holoscan SDK dependency (NVIDIA ecosystem lock-in)"
+      - "MAP format is NVIDIA-specific (not open standard like ONNX)"
+
+  - option_id: bentoml_custom
+    title: "BentoML Custom"
+    description: >
+      Current implementation. BentoML REST API serving with ONNX Runtime
+      backend and Gradio demo. Good general-purpose serving with OCI
+      containerization, adaptive batching, and multi-framework support.
+      No built-in healthcare standards (DICOM, HL7, FHIR). Requires
+      custom integration for clinical workflows.
+    prior_probability: 0.25
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "serving_architecture.bentoml_rest"
+
+  - option_id: triton_direct
+    title: "NVIDIA Triton Direct"
+    description: >
+      NVIDIA Triton Inference Server for high-throughput inference.
+      Multi-framework (TensorRT, TF, PyTorch, ONNX, OpenVINO). REST/gRPC
+      APIs. No clinical workflow integration — model inference only.
+      MONAI Deploy can use Triton as backend, making them complementary.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "No clinical workflow integration"
+      - "No DICOM/HL7/FHIR support"
+      - "NVIDIA GPU requirement"
+
+  - option_id: hybrid_bentoml_monai
+    title: "Hybrid BentoML + MONAI Deploy"
+    description: >
+      BentoML for research/API serving (REST endpoints, Gradio demos,
+      general-purpose inference) combined with MONAI Deploy for clinical
+      DICOM workflows (PACS integration, clinical orchestration). Best of
+      both worlds: maintains current BentoML investment while adding
+      clinical deployment capability. Increases maintenance burden.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "serving_architecture.bentoml_rest"
+      - "serving_architecture.monai_deploy"
+
+conditional_on:
+  - parent_decision_id: compliance_depth
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: iec_62304_full
+        then_probabilities:
+          monai_deploy: 0.50
+          bentoml_custom: 0.05
+          triton_direct: 0.20
+          hybrid_bentoml_monai: 0.25
+      - given_parent_option: lightweight_audit
+        then_probabilities:
+          monai_deploy: 0.25
+          bentoml_custom: 0.40
+          triton_direct: 0.15
+          hybrid_bentoml_monai: 0.20
+      - given_parent_option: no_compliance
+        then_probabilities:
+          monai_deploy: 0.15
+          bentoml_custom: 0.45
+          triton_direct: 0.25
+          hybrid_bentoml_monai: 0.15
+      - given_parent_option: regops_automated
+        then_probabilities:
+          monai_deploy: 0.40
+          bentoml_custom: 0.10
+          triton_direct: 0.15
+          hybrid_bentoml_monai: 0.35
+
+  - parent_decision_id: monai_alignment
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: monai_native
+        then_probabilities:
+          monai_deploy: 0.45
+          bentoml_custom: 0.10
+          triton_direct: 0.15
+          hybrid_bentoml_monai: 0.30
+      - given_parent_option: monai_compatible
+        then_probabilities:
+          monai_deploy: 0.30
+          bentoml_custom: 0.20
+          triton_direct: 0.15
+          hybrid_bentoml_monai: 0.35
+      - given_parent_option: framework_agnostic
+        then_probabilities:
+          monai_deploy: 0.15
+          bentoml_custom: 0.40
+          triton_direct: 0.25
+          hybrid_bentoml_monai: 0.20
+
+  - parent_decision_id: serving_architecture
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: bentoml_rest
+        then_probabilities:
+          monai_deploy: 0.20
+          bentoml_custom: 0.35
+          triton_direct: 0.10
+          hybrid_bentoml_monai: 0.35
+      - given_parent_option: monai_deploy
+        then_probabilities:
+          monai_deploy: 0.55
+          bentoml_custom: 0.05
+          triton_direct: 0.15
+          hybrid_bentoml_monai: 0.25
+      - given_parent_option: torchserve
+        then_probabilities:
+          monai_deploy: 0.30
+          bentoml_custom: 0.25
+          triton_direct: 0.25
+          hybrid_bentoml_monai: 0.20
+      - given_parent_option: triton
+        then_probabilities:
+          monai_deploy: 0.25
+          bentoml_custom: 0.15
+          triton_direct: 0.40
+          hybrid_bentoml_monai: 0.20
+      - given_parent_option: onnx_only
+        then_probabilities:
+          monai_deploy: 0.20
+          bentoml_custom: 0.35
+          triton_direct: 0.25
+          hybrid_bentoml_monai: 0.20
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      monai_deploy: 0.20
+      bentoml_custom: 0.45
+      triton_direct: 0.15
+      hybrid_bentoml_monai: 0.20
+    rationale: "Solo researchers prefer BentoML simplicity; MONAI Deploy adds complexity"
+  lab_group:
+    probability_overrides:
+      monai_deploy: 0.30
+      bentoml_custom: 0.25
+      triton_direct: 0.15
+      hybrid_bentoml_monai: 0.30
+    rationale: "Lab groups may need clinical integration for hospital partnerships"
+  clinical_deployment:
+    probability_overrides:
+      monai_deploy: 0.45
+      bentoml_custom: 0.05
+      triton_direct: 0.20
+      hybrid_bentoml_monai: 0.30
+    rationale: "Clinical deployment requires DICOM-native clinical workflow integration"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-23
+  next_review: 2026-05-23
+  change_drivers:
+    - "MONAI Deploy SDK v4.0 and Holoscan SDK updates"
+    - "Clinical partnership requirements"
+    - "IEC 62304 Edition 2 deployment requirements"
+    - "NVIDIA ecosystem evolution"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  MONAI Deploy (0.35) leads for clinical market entry based on Mayo Clinic
+  (Mayo Clinic, 2024) and Siemens Healthineers (Siemens Healthineers, 2024)
+  production deployments, MAP format's immutable packaging for IEC 62304
+  (IEC, 2015), and native DICOM/HL7/FHIR integration. App SDK v3.0.0
+  (MONAI Deploy, 2025) provides operator-based DAG pipelines with Holoscan
+  runtime. BentoML (0.25) is the current resolved implementation (Yang et al.,
+  2022) for research serving — excellent DX but no healthcare standards.
+  Hybrid (0.20) preserves current BentoML investment while adding clinical
+  capability. FDA PCCP (FDA, 2024) supports predetermined change boundaries
+  via MAP versioning. The decision is strongly conditional on compliance_depth
+  (IEC 62304 full → MONAI Deploy 0.50) and monai_alignment (MONAI native →
+  MONAI Deploy 0.45).
+
+tags:
+  - architecture
+  - clinical
+  - deployment
+  - monai
+
+references:
+  - citation_key: monaideploy2025sdk3
+    relevance: "MONAI Deploy App SDK v3.0.0 architecture, MAP format, and operator-based pipelines."
+    supports_options:
+      - monai_deploy
+      - hybrid_bentoml_monai
+  - citation_key: gupta2025monaideploy
+    relevance: "MONAI Deploy documentation for clinical-grade serving."
+    supports_options:
+      - monai_deploy
+  - citation_key: mayo2024monai
+    relevance: "Mayo Clinic MONAI Deploy case study — clinical AI integration."
+    supports_options:
+      - monai_deploy
+  - citation_key: siemens2024monai
+    relevance: "Siemens Healthineers MONAI Deploy adoption — 10,000+ institution marketplace."
+    supports_options:
+      - monai_deploy
+  - citation_key: yang2022bentoml
+    relevance: "BentoML serving framework — current implementation for research serving."
+    supports_options:
+      - bentoml_custom
+      - hybrid_bentoml_monai
+  - citation_key: iec62304_2015
+    relevance: "IEC 62304 Clause 8 configuration management — MAP immutable packaging facilitates compliance."
+    supports_options:
+      - monai_deploy
+  - citation_key: fda2024pccp
+    relevance: "FDA PCCP guidance — MONAI Deploy supports predetermined change boundaries via MAP versioning."
+    supports_options:
+      - monai_deploy
+      - hybrid_bentoml_monai
+
+research_notes: >
+  Phase 11 research. MONAI Deploy is NOT regulatory-cleared — it facilitates
+  but does not solve compliance. Gaps: no automated IEC 62304 doc generation,
+  no DHF management, no CAPA tracking, no ISO 14971 integration, no SBOM
+  generation. MONAI Model Zoo models are SOUP per IEC 62304. Clara Holoscan
+  MGX provides pre-documented IEC 62304/60601 hardware reference design for
+  OEM embedding. mercure DICOM orchestrator supports MAPs as processing modules.

@@ -4,7 +4,12 @@ description: >
   Continuous integration and deployment platform. GitHub Actions is the
   default for GitHub-hosted projects; GitLab CI offers self-hosted
   alternative; Buildkite provides hybrid cloud/self-hosted; Jenkins is
-  legacy but ubiquitous in enterprises.
+  legacy but ubiquitous in enterprises. For SaMD compliance, the CI/CD
+  platform requires tool validation per ISO 13485 Clause 4.1.6 — every
+  tool used in the QMS (Git, CI runners, test frameworks, deployment
+  tools) needs risk-based validation with documented results. IEC 62304
+  Clause 8 (configuration management) mandates traceable control over
+  all software artifacts through the CI/CD pipeline.
 
 decision_level: L4_infrastructure
 status: active
@@ -16,13 +21,18 @@ options:
     description: >
       GitHub-native CI/CD with marketplace actions. Currently used for
       linting, testing, and CML integration. Free tier for public repos,
-      generous minutes for private. Excellent ecosystem.
+      generous minutes for private. Excellent ecosystem. SOC 1/SOC 2
+      Type 2 certified. Enterprise audit log streaming. For IEC 62304:
+      commit signing provides authorship verification (Clause 8),
+      branch protection enforces code review, Ketryx integrates for
+      automated compliance evidence generation.
     prior_probability: 0.50
     status: resolved
     implementation_status: implemented
     complements:
       - "documentation_generation.ci_generated"
       - "gitops_strategy.github_actions_only"
+      - "project_management_tool.github_projects_ketryx"
 
   - option_id: gitlab_ci
     title: "GitLab CI"
@@ -153,6 +163,18 @@ references:
     relevance: "Benchmarks open-source MLOps tools including CI/CD integration patterns"
     supports_options:
       - github_actions
+  - citation_key: martina2024iec62304devops
+    relevance: "Validated DevOps-based IEC 62304 maintenance via CI/CD pipelines"
+    supports_options:
+      - github_actions
+      - gitlab_ci
+  - citation_key: iso13485_2016
+    relevance: "Clause 4.1.6 tool validation — CI/CD tools in QMS scope need risk-based validation"
+    supports_options:
+      - github_actions
+      - gitlab_ci
+      - buildkite
+      - jenkins
 
 tags:
   - infrastructure

@@ -1,0 +1,184 @@
+decision_id: package_manager
+title: "Package Manager"
+description: >
+  Python package and environment management tool. Determines how dependencies
+  are installed, resolved, locked, and how virtual environments are managed.
+  Created post-hoc to document the uv decision with pre-researched alternatives
+  for completeness.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: uv
+    title: "uv"
+    description: >
+      Rust-based Python package manager by Astral. 10-100x faster than pip,
+      replaces pip + venv + pip-tools + pipx. Deterministic lockfiles
+      (uv.lock), built-in virtual environment management, Python version
+      management. Current implementation (Astral, 2024).
+    prior_probability: 0.85
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "linter_formatter.ruff"
+      - "language_runtime.python"
+      - "ci_cd_platform.github_actions"
+
+  - option_id: poetry
+    title: "Poetry"
+    description: >
+      Popular Python dependency manager with lockfile (poetry.lock), virtual
+      environment management, and build backend. Slower than uv but widely
+      adopted in the Python community.
+    prior_probability: 0.05
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "10-100x slower than uv for dependency resolution"
+      - "Own pyproject.toml format differs from PEP 621"
+
+  - option_id: pip_tools
+    title: "pip + pip-tools"
+    description: >
+      Traditional pip with pip-compile for lockfiles. Widely understood,
+      minimal abstraction. Requires separate venv management.
+    prior_probability: 0.05
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "No integrated virtual environment management"
+      - "Slower dependency resolution than uv"
+      - "Manual venv creation and activation"
+
+  - option_id: conda
+    title: "Conda / Mamba"
+    description: >
+      Package and environment manager supporting non-Python dependencies
+      (CUDA, system libraries). Heavy but handles complex native deps.
+      Mamba is a faster drop-in replacement.
+    prior_probability: 0.05
+    status: deferred
+    implementation_status: not_started
+    constraints:
+      - "Large environment sizes (GB-scale)"
+      - "Mixing conda and pip can cause dependency conflicts"
+      - "Slower environment creation than uv"
+      - "conda-forge packaging lag for new releases"
+
+conditional_on:
+  - parent_decision_id: language_runtime
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: python
+        then_probabilities:
+          uv: 0.85
+          poetry: 0.05
+          pip_tools: 0.05
+          conda: 0.05
+      - given_parent_option: julia
+        then_probabilities:
+          uv: 0.05
+          poetry: 0.05
+          pip_tools: 0.05
+          conda: 0.85
+      - given_parent_option: rust_pyo3
+        then_probabilities:
+          uv: 0.70
+          poetry: 0.05
+          pip_tools: 0.05
+          conda: 0.20
+      - given_parent_option: cpp_libtorch
+        then_probabilities:
+          uv: 0.30
+          poetry: 0.05
+          pip_tools: 0.05
+          conda: 0.60
+
+  - parent_decision_id: reproducibility_standard
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: full_deterministic
+        then_probabilities:
+          uv: 0.80
+          poetry: 0.10
+          pip_tools: 0.05
+          conda: 0.05
+      - given_parent_option: seed_controlled
+        then_probabilities:
+          uv: 0.75
+          poetry: 0.10
+          pip_tools: 0.10
+          conda: 0.05
+      - given_parent_option: git_only
+        then_probabilities:
+          uv: 0.60
+          poetry: 0.10
+          pip_tools: 0.20
+          conda: 0.10
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      uv: 0.85
+      poetry: 0.05
+      pip_tools: 0.05
+      conda: 0.05
+    rationale: "uv speed benefits solo developers the most — fast iteration cycles"
+  lab_group:
+    probability_overrides:
+      uv: 0.75
+      poetry: 0.10
+      pip_tools: 0.05
+      conda: 0.10
+    rationale: "Lab groups may have conda legacy; uv still preferred for new projects"
+  clinical_deployment:
+    probability_overrides:
+      uv: 0.80
+      poetry: 0.10
+      pip_tools: 0.05
+      conda: 0.05
+    rationale: "Deterministic lockfiles (uv/poetry) required for audit compliance"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2027-02-23
+  change_drivers:
+    - "uv feature development and ecosystem adoption"
+    - "Poetry v2 development"
+    - "PEP standards evolution"
+    - "New Rust-based Python tools"
+
+domain_applicability:
+  vascular_segmentation: 0.60
+  cardiac_imaging: 0.60
+  neuroimaging: 0.60
+  general_medical: 0.60
+
+rationale: >
+  uv (0.85) is resolved as the package manager. It provides 10-100x faster
+  installs than pip (Astral, 2024), deterministic lockfiles, and replaces
+  the entire pip + venv + pip-tools toolchain. The Python Packaging User
+  Guide (PyPA, 2024) documents the modern packaging standards that uv
+  implements. Domain applicability is moderate because package management
+  is infrastructure-level, not domain-specific.
+
+references:
+  - citation_key: astral2024uv
+    relevance: "uv package manager — the implemented solution, 10-100x faster than pip"
+    supports_options:
+      - uv
+  - citation_key: python2024packaging
+    relevance: "Python Packaging User Guide — standards that uv, poetry, and pip-tools implement"
+    supports_options:
+      - uv
+      - poetry
+      - pip_tools
+
+tags:
+  - technology
+  - package-manager
+  - python-tooling
+  - resolved

@@ -1,0 +1,192 @@
+decision_id: language_runtime
+title: "Language Runtime"
+description: >
+  Primary programming language and runtime for the MLOps platform. This is an
+  architectural decision because the language choice constrains all downstream
+  technology selections: package managers, linters, type checkers, model
+  frameworks, and serving infrastructure. Created post-hoc to document the
+  Python decision with pre-researched alternatives for completeness.
+
+decision_level: L2_architecture
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: python
+    title: "Python 3.12+"
+    description: >
+      CPython runtime with PyTorch, MONAI, TorchIO ecosystem. Largest ML
+      community, richest library ecosystem, de facto standard for deep learning
+      research and medical imaging. Current implementation language.
+    prior_probability: 0.60
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "segmentation_models.monai_segresnet"
+      - "segmentation_models.monai_swinunetr"
+      - "package_manager.uv"
+      - "linter_formatter.ruff"
+      - "type_checker.mypy"
+
+  - option_id: julia
+    title: "Julia"
+    description: >
+      High-performance scientific computing language with Flux.jl/Lux.jl for
+      ML. Excellent numerics and composability but small ML ecosystem compared
+      to Python. No MONAI equivalent exists (Bezanson et al., 2017).
+    prior_probability: 0.15
+    status: experimental
+    implementation_status: not_started
+    constraints:
+      - "No MONAI equivalent for medical imaging"
+      - "Small deep learning ecosystem vs. Python/PyTorch"
+      - "Limited serving infrastructure"
+      - "Small talent pool for hiring"
+
+  - option_id: rust_pyo3
+    title: "Rust + PyO3 Bindings"
+    description: >
+      Rust core with Python bindings via PyO3. Performance-critical serving
+      and data processing with Python-compatible API. Used by uv, ruff, and
+      other modern Python tooling.
+    prior_probability: 0.15
+    status: experimental
+    implementation_status: not_started
+    constraints:
+      - "High development effort for ML pipelines"
+      - "PyTorch/MONAI integration requires Python layer"
+      - "Complex build system (maturin + cargo + Python)"
+
+  - option_id: cpp_libtorch
+    title: "C++ LibTorch"
+    description: >
+      PyTorch C++ frontend (LibTorch) for production inference. Maximum
+      performance but loses Python ecosystem. Viable for inference-only
+      deployment.
+    prior_probability: 0.10
+    status: deferred
+    implementation_status: not_started
+    constraints:
+      - "Complex build system and dependency management"
+      - "No MONAI transforms in C++"
+      - "Training workflow still requires Python"
+      - "Maintenance burden for dual-language codebase"
+
+conditional_on:
+  - parent_decision_id: monai_alignment
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: monai_native
+        then_probabilities:
+          python: 0.90
+          julia: 0.03
+          rust_pyo3: 0.04
+          cpp_libtorch: 0.03
+      - given_parent_option: monai_compatible
+        then_probabilities:
+          python: 0.80
+          julia: 0.05
+          rust_pyo3: 0.10
+          cpp_libtorch: 0.05
+      - given_parent_option: framework_agnostic
+        then_probabilities:
+          python: 0.50
+          julia: 0.20
+          rust_pyo3: 0.15
+          cpp_libtorch: 0.15
+
+  - parent_decision_id: project_purpose
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: self_learning
+        then_probabilities:
+          python: 0.65
+          julia: 0.15
+          rust_pyo3: 0.10
+          cpp_libtorch: 0.10
+      - given_parent_option: portfolio
+        then_probabilities:
+          python: 0.60
+          julia: 0.15
+          rust_pyo3: 0.15
+          cpp_libtorch: 0.10
+      - given_parent_option: clinical_deployment
+        then_probabilities:
+          python: 0.55
+          julia: 0.05
+          rust_pyo3: 0.15
+          cpp_libtorch: 0.25
+      - given_parent_option: open_source_contribution
+        then_probabilities:
+          python: 0.70
+          julia: 0.10
+          rust_pyo3: 0.10
+          cpp_libtorch: 0.10
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      python: 0.70
+      julia: 0.15
+      rust_pyo3: 0.10
+      cpp_libtorch: 0.05
+    rationale: "Python has lowest barrier to entry and richest tutorial ecosystem"
+  lab_group:
+    probability_overrides:
+      python: 0.65
+      julia: 0.15
+      rust_pyo3: 0.10
+      cpp_libtorch: 0.10
+    rationale: "Python enables code sharing; Julia viable for numerics-heavy labs"
+  clinical_deployment:
+    probability_overrides:
+      python: 0.55
+      julia: 0.05
+      rust_pyo3: 0.15
+      cpp_libtorch: 0.25
+    rationale: "Clinical may need C++/Rust for certified production inference"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2027-02-23
+  change_drivers:
+    - "Julia ML ecosystem maturity (Flux.jl/Lux.jl)"
+    - "Rust ML frameworks (burn, candle) maturity"
+    - "Mojo language development for ML workloads"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Python (0.60) is resolved as the implementation language. The entire MONAI
+  ecosystem (Cardoso et al., 2022), PyTorch, TorchIO, and virtually all
+  medical imaging deep learning runs on Python. Julia (Bezanson et al., 2017)
+  offers compelling numerics but lacks the medical imaging ecosystem. Rust and
+  C++ are relevant for performance-critical inference serving but add
+  significant complexity for training workflows. The Python packaging
+  ecosystem has matured significantly with tools like uv, ruff, and mypy
+  making the developer experience competitive with compiled languages.
+
+references:
+  - citation_key: bezanson2017julia
+    relevance: "Julia language paper — the primary alternative for scientific computing ML"
+    supports_options:
+      - julia
+  - citation_key: cardoso2022monai
+    relevance: "MONAI framework requires Python runtime, strongest lock-in factor"
+    supports_options:
+      - python
+  - citation_key: python2024packaging
+    relevance: "Python Packaging User Guide — documents modern Python packaging ecosystem"
+    supports_options:
+      - python
+
+tags:
+  - architecture
+  - language
+  - runtime
+  - resolved

@@ -1,0 +1,236 @@
+decision_id: regulatory_documentation_tool
+title: "Regulatory Documentation Tool"
+description: >
+  Which tool or approach to use for generating and managing regulatory
+  documentation (IEC 62304 artifacts, ISO 13485 design history files,
+  ISO 14971 risk management files). Ranges from manual templates to
+  UL-certified automated platforms. Ketryx (2% of 2024 FDA AI/ML approvals)
+  provides automated compliance evidence generation. Innolitics RDM offers
+  open-source markdown+YAML approach proven in 510(k) submissions.
+  OpenRegulatory provides free IEC 62304/ISO 13485/ISO 14971 templates.
+  Choice strongly depends on compliance depth and project management tool.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: ketryx
+    title: "Ketryx"
+    description: >
+      UL Certified IEC 62304/ISO 13485/ISO 14971 compliance platform.
+      2% of 2024 FDA AI/ML approvals used Ketryx. 90% documentation
+      reduction. Integrates with GitHub and JIRA. Free tier for pre-market
+      teams (<$2M funding, 3 projects, 4 users). $39M Series B (2025).
+      Generates compliance evidence from existing development workflow —
+      embodying the "calm compliance" principle (Granlund et al., 2022).
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "project_management_tool.github_projects_ketryx"
+      - "project_management_tool.jira_ketryx"
+      - "ci_cd_platform.github_actions"
+
+  - option_id: innolitics_rdm
+    title: "Innolitics RDM"
+    description: >
+      Open-source regulatory documentation manager. Markdown+YAML based,
+      stored in Git alongside code. Proven in successful 510(k) submissions
+      and IEC 62304 audits. Git-native workflow. Generates PDFs from
+      templates. Zero cost. Follows Stirbu et al.'s (2021) "everything
+      as code" philosophy.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "project_management_tool.github_projects_ketryx"
+      - "documentation_standard.regulatory_dossier"
+
+  - option_id: openregulatory_templates
+    title: "OpenRegulatory Templates"
+    description: >
+      Free, GitHub-hosted IEC 62304, ISO 13485, and ISO 14971 templates.
+      Manual completion required but zero cost and well-maintained.
+      Good starting point for teams learning regulatory documentation.
+      Can be combined with CI/CD for semi-automated generation.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+
+  - option_id: manual_qms
+    title: "Traditional QMS Platform"
+    description: >
+      Dedicated QMS platforms (Qualio, Greenlight Guru, MasterControl).
+      Full-featured with built-in workflows, electronic signatures,
+      audit trails. Expensive ($500-2000+/month) and heavyweight.
+      Better suited for established medical device companies than
+      research teams.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "High cost ($500-2000+/month)"
+      - "Heavyweight for research phase"
+      - "Vendor lock-in for documentation"
+
+conditional_on:
+  - parent_decision_id: compliance_depth
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: iec_62304_full
+        then_probabilities:
+          ketryx: 0.40
+          innolitics_rdm: 0.15
+          openregulatory_templates: 0.15
+          manual_qms: 0.30
+      - given_parent_option: lightweight_audit
+        then_probabilities:
+          ketryx: 0.25
+          innolitics_rdm: 0.25
+          openregulatory_templates: 0.35
+          manual_qms: 0.15
+      - given_parent_option: no_compliance
+        then_probabilities:
+          ketryx: 0.10
+          innolitics_rdm: 0.20
+          openregulatory_templates: 0.40
+          manual_qms: 0.30
+      - given_parent_option: regops_automated
+        then_probabilities:
+          ketryx: 0.45
+          innolitics_rdm: 0.30
+          openregulatory_templates: 0.15
+          manual_qms: 0.10
+
+  - parent_decision_id: project_management_tool
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: github_projects_ketryx
+        then_probabilities:
+          ketryx: 0.50
+          innolitics_rdm: 0.25
+          openregulatory_templates: 0.15
+          manual_qms: 0.10
+      - given_parent_option: jira_ketryx
+        then_probabilities:
+          ketryx: 0.50
+          innolitics_rdm: 0.15
+          openregulatory_templates: 0.15
+          manual_qms: 0.20
+      - given_parent_option: gitlab_integrated
+        then_probabilities:
+          ketryx: 0.20
+          innolitics_rdm: 0.30
+          openregulatory_templates: 0.25
+          manual_qms: 0.25
+      - given_parent_option: azure_devops
+        then_probabilities:
+          ketryx: 0.20
+          innolitics_rdm: 0.20
+          openregulatory_templates: 0.25
+          manual_qms: 0.35
+      - given_parent_option: polarion_alm
+        then_probabilities:
+          ketryx: 0.10
+          innolitics_rdm: 0.10
+          openregulatory_templates: 0.10
+          manual_qms: 0.70
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      ketryx: 0.20
+      innolitics_rdm: 0.25
+      openregulatory_templates: 0.40
+      manual_qms: 0.15
+    rationale: "Solo researchers start with free templates; add tools as compliance needs grow"
+  lab_group:
+    probability_overrides:
+      ketryx: 0.30
+      innolitics_rdm: 0.30
+      openregulatory_templates: 0.25
+      manual_qms: 0.15
+    rationale: "Lab groups benefit from structured documentation for multi-person coordination"
+  clinical_deployment:
+    probability_overrides:
+      ketryx: 0.40
+      innolitics_rdm: 0.10
+      openregulatory_templates: 0.10
+      manual_qms: 0.40
+    rationale: "Clinical deployment needs certified tools accepted by regulatory bodies"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-23
+  next_review: 2026-05-23
+  change_drivers:
+    - "Ketryx feature releases and pricing changes"
+    - "IEC 62304 Edition 2 documentation requirements"
+    - "FDA TPLC finalization and documentation expectations"
+    - "EU AI Act Article 11 technical documentation requirements"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Ketryx (0.30) leads due to UL certification, proven FDA track record (2% of
+  2024 AI/ML approvals), 90% documentation reduction, and free tier for
+  pre-market teams. Innolitics RDM (0.25) and OpenRegulatory (0.25) provide
+  zero-cost alternatives aligned with the "everything as code" philosophy
+  (Stirbu et al., 2021). Traditional QMS platforms (0.20) are viable for
+  established teams but overkill for research phase. The choice is strongly
+  coupled to compliance depth — lightweight_audit pairs with free templates,
+  full IEC 62304 needs Ketryx or traditional QMS.
+
+tags:
+  - technology
+  - compliance
+  - documentation
+  - regulatory
+
+references:
+  - citation_key: ketryx2025
+    relevance: "UL Certified compliance platform. 2% of 2024 FDA AI/ML approvals. Free tier available."
+    supports_options:
+      - ketryx
+  - citation_key: innolitics2024rdm
+    relevance: "Open-source regulatory documentation manager proven in 510(k) submissions."
+    supports_options:
+      - innolitics_rdm
+  - citation_key: openregulatory2024
+    relevance: "Free IEC 62304/ISO 13485/ISO 14971 templates on GitHub."
+    supports_options:
+      - openregulatory_templates
+  - citation_key: granlund2022calm
+    relevance: "Calm compliance framework — regulatory documentation as natural development byproduct."
+    supports_options:
+      - ketryx
+      - innolitics_rdm
+  - citation_key: stirbu2021regops
+    relevance: "RegOps pipeline concept — compliance as code using Git-native tools."
+    supports_options:
+      - innolitics_rdm
+      - openregulatory_templates
+  - citation_key: rosmarino2025regdocs
+    relevance: "MLOps-driven automation of regulatory documentation for AI-based SaMD."
+    supports_options:
+      - ketryx
+      - innolitics_rdm
+  - citation_key: iec62304_2015
+    relevance: "IEC 62304 standard defining documentation requirements for medical device software."
+    supports_options:
+      - ketryx
+      - innolitics_rdm
+      - openregulatory_templates
+      - manual_qms
+
+research_notes: >
+  Phase 11 research. Ketryx free tier is key enabler for small teams —
+  pre-market companies with <$2M funding get 3 projects and 4 users free.
+  Innolitics RDM has been used in actual 510(k) submissions (verified via
+  GitHub repository and company website). OpenRegulatory templates are
+  well-maintained and used by startups in EU/US.

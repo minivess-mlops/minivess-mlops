@@ -13,7 +13,7 @@
 # 4. Sub-citations: when ingesting a paper, also add papers IT cites that
 #    are relevant to other decision nodes.
 #
-# last_updated: 2026-02-23  (Phase 9: +40 entries for citation completeness backfill)
+# last_updated: 2026-02-23  (Phase 11: +22 entries for clinical SaMD-grade ML Ops)
 
 bibliography:
 
@@ -321,6 +321,7 @@ bibliography:
     evidence_type: tool_release
     topics:
       - serving_architecture
+      - clinical_deployment_platform
 
   # ============================================================
   # Compliance & Governance
@@ -353,6 +354,8 @@ bibliography:
       - compliance_depth
       - documentation_standard
       - model_governance
+      - clinical_deployment_platform
+      - regulatory_documentation_tool
 
   # ============================================================
   # Reproducibility & Data Management
@@ -425,6 +428,7 @@ bibliography:
       - annotation_workflow
       - federated_learning
       - model_export_format
+      - language_runtime
 
   - citation_key: li2023monaifl
     inline_citation: "Li et al. (2023)"
@@ -782,6 +786,7 @@ bibliography:
       - compliance_depth
       - documentation_standard
       - documentation_generation
+      - regulatory_documentation_tool
 
   - citation_key: martina2024iec62304devops
     inline_citation: "Martina et al. (2024)"
@@ -796,6 +801,7 @@ bibliography:
       - compliance_depth
       - ci_cd_platform
       - model_governance
+      - project_management_tool
 
   - citation_key: niemiec2025euaiact
     inline_citation: "Niemiec (2025)"
@@ -823,6 +829,7 @@ bibliography:
       - compliance_depth
       - ci_cd_platform
       - documentation_generation
+      - project_management_tool
 
   - citation_key: testi2025ccmlops
     inline_citation: "Testi et al. (2025)"
@@ -1001,6 +1008,7 @@ bibliography:
     topics:
       - serving_architecture
       - monai_alignment
+      - clinical_deployment_platform
 
   # ============================================================
   # Phase 9: MLOps Surveys & Architecture (NEW)
@@ -1545,3 +1553,378 @@ bibliography:
     evidence_type: experience
     topics:
       - model_export_format
+
+  # ============================================================
+  # Phase 10: Stack Coverage — Language, Package Manager, Linting, Type Checking
+  # ============================================================
+
+  - citation_key: bezanson2017julia
+    inline_citation: "Bezanson et al. (2017)"
+    authors: "Bezanson, J., Edelman, A., Karpinski, S., & Shah, V. B."
+    year: 2017
+    title: "Julia: A Fresh Approach to Numerical Computing"
+    venue: "SIAM Review, 59(1), 65--98"
+    doi: "10.1137/141000671"
+    url: "https://arxiv.org/abs/1411.1607"
+    evidence_type: benchmark
+    topics:
+      - language_runtime
+
+  - citation_key: astral2024uv
+    inline_citation: "Astral (2024)"
+    authors: "Astral (Krekel, H., Marsh, C., & Contributors)"
+    year: 2024
+    title: "uv: An Extremely Fast Python Package and Project Manager"
+    venue: "Software Release"
+    doi: ""
+    url: "https://github.com/astral-sh/uv"
+    evidence_type: tool_release
+    topics:
+      - package_manager
+
+  - citation_key: marsh2023ruff
+    inline_citation: "Marsh (2023)"
+    authors: "Marsh, C."
+    year: 2023
+    title: "Ruff: An Extremely Fast Python Linter and Formatter"
+    venue: "Software Release"
+    doi: ""
+    url: "https://github.com/astral-sh/ruff"
+    evidence_type: tool_release
+    topics:
+      - linter_formatter
+
+  - citation_key: lehtosalo2012mypy
+    inline_citation: "Lehtosalo (2012)"
+    authors: "Lehtosalo, J."
+    year: 2012
+    title: "mypy: Optional Static Typing for Python"
+    venue: "Software Release"
+    doi: ""
+    url: "https://github.com/python/mypy"
+    evidence_type: tool_release
+    topics:
+      - type_checker
+
+  - citation_key: python2024packaging
+    inline_citation: "PyPA (2024)"
+    authors: "Python Packaging Authority"
+    year: 2024
+    title: "Python Packaging User Guide"
+    venue: "Online Documentation"
+    doi: ""
+    url: "https://packaging.python.org/"
+    evidence_type: experience
+    topics:
+      - package_manager
+      - linter_formatter
+      - type_checker
+      - language_runtime
+
+  # ============================================================
+  # Phase 11: Standards & Guidance — Clinical SaMD-Grade ML Ops
+  # ============================================================
+
+  - citation_key: iec62304_2026ed2
+    inline_citation: "IEC (2026, draft)"
+    authors: "International Electrotechnical Commission"
+    year: 2026
+    title: "IEC 62304 Edition 2 -- Medical Device Software and Health Software -- Software Life Cycle Processes (Draft)"
+    venue: "International Standard (expected September 2026)"
+    doi: ""
+    url: "https://lfhregulatory.co.uk/iec-62304-update-2026/"
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - clinical_deployment_platform
+      - regulatory_documentation_tool
+
+  - citation_key: iso13485_2016
+    inline_citation: "ISO (2016)"
+    authors: "International Organization for Standardization"
+    year: 2016
+    title: "ISO 13485:2016 -- Medical Devices -- Quality Management Systems -- Requirements for Regulatory Purposes"
+    venue: "International Standard"
+    doi: ""
+    url: "https://www.iso.org/standard/59752.html"
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - project_management_tool
+      - ci_cd_platform
+
+  - citation_key: iso14971_2019
+    inline_citation: "ISO (2019)"
+    authors: "International Organization for Standardization"
+    year: 2019
+    title: "ISO 14971:2019 -- Medical Devices -- Application of Risk Management to Medical Devices"
+    venue: "International Standard"
+    doi: ""
+    url: "https://www.iso.org/standard/72704.html"
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - model_governance
+      - clinical_deployment_platform
+
+  - citation_key: aami_tir34971_2023
+    inline_citation: "AAMI/BSI (2023)"
+    authors: "AAMI & BSI"
+    year: 2023
+    title: "AAMI/BSI TIR 34971:2023 -- Application of ISO 14971 to Machine Learning in Artificial Intelligence"
+    venue: "Technical Information Report"
+    doi: ""
+    url: "https://www.aami.org/standards/the-aami-store/product/aami-bsi-technical-information-report-34971"
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - model_governance
+      - clinical_deployment_platform
+
+  - citation_key: fda2024pccp
+    inline_citation: "FDA (2024)"
+    authors: "U.S. Food and Drug Administration"
+    year: 2024
+    title: "Marketing Submission Recommendations for a Predetermined Change Control Plan for AI/ML-Enabled Device Software Functions"
+    venue: "FDA Final Guidance (December 2024)"
+    doi: ""
+    url: "https://www.fda.gov/regulatory-information/search-fda-guidance-documents/marketing-submission-recommendations-predetermined-change-control-plan-artificial"
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - model_governance
+      - clinical_deployment_platform
+
+  - citation_key: fda2021gmlp
+    inline_citation: "FDA/Health Canada/MHRA (2021)"
+    authors: "U.S. FDA, Health Canada, & UK MHRA"
+    year: 2021
+    title: "Good Machine Learning Practice for Medical Device Development: Guiding Principles"
+    venue: "Joint Guidance (October 2021)"
+    doi: ""
+    url: "https://www.fda.gov/medical-devices/software-medical-device-samd/good-machine-learning-practice-medical-device-development-guiding-principles"
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - model_governance
+      - regulatory_documentation_tool
+
+  - citation_key: fda2025tplc
+    inline_citation: "FDA (2025)"
+    authors: "U.S. Food and Drug Administration"
+    year: 2025
+    title: "Artificial Intelligence-Enabled Device Software Functions: Lifecycle Management and Marketing Submission Recommendations (Draft)"
+    venue: "FDA Draft Guidance (January 2025)"
+    doi: ""
+    url: "https://www.fda.gov/regulatory-information/search-fda-guidance-documents/artificial-intelligence-enabled-device-software-functions"
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - model_governance
+      - clinical_deployment_platform
+      - documentation_standard
+
+  - citation_key: euaiact2024
+    inline_citation: "European Parliament (2024)"
+    authors: "European Parliament & Council of the European Union"
+    year: 2024
+    title: "Regulation (EU) 2024/1689 -- Laying Down Harmonised Rules on Artificial Intelligence (AI Act)"
+    venue: "Official Journal of the European Union"
+    doi: ""
+    url: "https://eur-lex.europa.eu/eli/reg/2024/1689"
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - model_governance
+      - regulatory_documentation_tool
+
+  - citation_key: mdcg2025_6
+    inline_citation: "MDCG (2025)"
+    authors: "Medical Device Coordination Group"
+    year: 2025
+    title: "MDCG 2025-6 -- FAQ on the Interplay Between the MDR/IVDR and the AI Act"
+    venue: "European Commission Guidance (June 2025)"
+    doi: ""
+    url: "https://health.ec.europa.eu/latest-updates/mdcg-2025-6-faq-interplay-between-medical-devices-regulation-vitro-diagnostic-medical-devices-2025-06-19_en"
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - regulatory_documentation_tool
+
+  - citation_key: iec82304_2016
+    inline_citation: "IEC (2016)"
+    authors: "International Electrotechnical Commission"
+    year: 2016
+    title: "IEC 82304-1:2016 -- Health Software -- Part 1: General Requirements for Product Safety"
+    venue: "International Standard"
+    doi: ""
+    url: "https://www.iso.org/standard/59543.html"
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - clinical_deployment_platform
+
+  - citation_key: iec81001_5_1
+    inline_citation: "IEC (2021)"
+    authors: "International Electrotechnical Commission"
+    year: 2021
+    title: "IEC 81001-5-1:2021 -- Health Software and Health IT Systems Safety, Effectiveness and Security -- Part 5-1: Security"
+    venue: "International Standard"
+    doi: ""
+    url: "https://www.iso.org/standard/76097.html"
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - secrets_management
+      - clinical_deployment_platform
+
+  # ============================================================
+  # Phase 11: Academic — Calm Compliance & RegOps
+  # ============================================================
+
+  - citation_key: granlund2022calm
+    inline_citation: "Granlund et al. (2022)"
+    authors: "Granlund, T., Stirbu, V., Mikkonen, T., & Zimmermann, T."
+    year: 2022
+    title: "Medical Software Needs Calm Compliance"
+    venue: "IEEE Software, 39(3), 25--32"
+    doi: "10.1109/MS.2022.3141875"
+    url: "https://ieeexplore.ieee.org/document/9662372"
+    evidence_type: theoretical
+    topics:
+      - compliance_depth
+      - project_management_tool
+      - regulatory_documentation_tool
+
+  - citation_key: stirbu2021traceability
+    inline_citation: "Stirbu & Mikkonen (2021)"
+    authors: "Stirbu, V. & Mikkonen, T."
+    year: 2021
+    title: "Introducing Traceability in GitHub for Medical Software Development"
+    venue: "PROFES 2021, LNCS"
+    doi: ""
+    url: "https://arxiv.org/abs/2110.13034"
+    evidence_type: experience
+    topics:
+      - project_management_tool
+      - compliance_depth
+      - regulatory_documentation_tool
+
+  - citation_key: stirbu2021regops
+    inline_citation: "Stirbu et al. (2021)"
+    authors: "Stirbu, V., Granlund, T., & Mikkonen, T."
+    year: 2021
+    title: "Towards RegOps: A DevOps Pipeline for Regulatory Compliant Medical Device Software"
+    venue: "Software Engineering and Formal Methods, LNCS, Springer"
+    doi: ""
+    url: "https://link.springer.com/chapter/10.1007/978-3-030-91452-3_20"
+    evidence_type: theoretical
+    topics:
+      - compliance_depth
+      - ci_cd_platform
+      - regulatory_documentation_tool
+      - project_management_tool
+
+  # ============================================================
+  # Phase 11: Tools & Platforms
+  # ============================================================
+
+  - citation_key: ketryx2025
+    inline_citation: "Ketryx (2025)"
+    authors: "Ketryx, Inc."
+    year: 2025
+    title: "Ketryx ALM Platform -- UL Certified IEC 62304/ISO 13485/ISO 14971 Compliance for Software Teams"
+    venue: "Software Platform (Series B, $39M)"
+    doi: ""
+    url: "https://www.ketryx.com/"
+    evidence_type: tool_release
+    topics:
+      - project_management_tool
+      - regulatory_documentation_tool
+      - compliance_depth
+      - documentation_standard
+
+  - citation_key: innolitics2024rdm
+    inline_citation: "Innolitics (2024)"
+    authors: "Innolitics, LLC"
+    year: 2024
+    title: "Regulatory Documentation Manager (RDM) -- Open-Source IEC 62304 Documentation Tool"
+    venue: "Software Release"
+    doi: ""
+    url: "https://github.com/innolitics/rdm"
+    evidence_type: tool_release
+    topics:
+      - regulatory_documentation_tool
+      - compliance_depth
+      - documentation_standard
+
+  - citation_key: openregulatory2024
+    inline_citation: "OpenRegulatory (2024)"
+    authors: "OpenRegulatory GmbH"
+    year: 2024
+    title: "OpenRegulatory -- Free IEC 62304, ISO 13485, and ISO 14971 Templates"
+    venue: "Software Release"
+    doi: ""
+    url: "https://github.com/openregulatory/templates"
+    evidence_type: tool_release
+    topics:
+      - regulatory_documentation_tool
+      - compliance_depth
+      - documentation_standard
+
+  - citation_key: monaideploy2025sdk3
+    inline_citation: "MONAI Deploy (2025)"
+    authors: "Project MONAI Contributors"
+    year: 2025
+    title: "MONAI Deploy App SDK v3.0.0 -- Production Deployment Framework for Medical AI"
+    venue: "Software Release (April 2025)"
+    doi: ""
+    url: "https://github.com/Project-MONAI/monai-deploy-app-sdk"
+    evidence_type: tool_release
+    topics:
+      - clinical_deployment_platform
+      - serving_architecture
+      - monai_alignment
+
+  # ============================================================
+  # Phase 11: Clinical Deployments
+  # ============================================================
+
+  - citation_key: mayo2024monai
+    inline_citation: "Mayo Clinic (2024)"
+    authors: "Mayo Clinic Center for Augmented Intelligence in Imaging"
+    year: 2024
+    title: "MONAI Deploy Case Study: Clinical AI Integration at Mayo Clinic"
+    venue: "MONAI Project Case Study"
+    doi: ""
+    url: "https://monai.io/mayo-case-study.html"
+    evidence_type: experience
+    topics:
+      - clinical_deployment_platform
+      - serving_architecture
+
+  - citation_key: siemens2024monai
+    inline_citation: "Siemens Healthineers (2024)"
+    authors: "Siemens Healthineers & NVIDIA"
+    year: 2024
+    title: "MONAI Deploy Integration with Siemens Digital Marketplace (RSNA 2024)"
+    venue: "RSNA 2024 / NVIDIA Blog"
+    doi: ""
+    url: "https://blogs.nvidia.com/blog/rsna-siemens-healthineers-monai-medical-imaging-ai/"
+    evidence_type: experience
+    topics:
+      - clinical_deployment_platform
+      - serving_architecture
+
+  - citation_key: imdrf2014samd
+    inline_citation: "IMDRF (2014)"
+    authors: "International Medical Device Regulators Forum"
+    year: 2014
+    title: "Software as a Medical Device: Possible Framework for Risk Categorization and Corresponding Considerations"
+    venue: "IMDRF/SaMD WG/N12FINAL:2014"
+    doi: ""
+    url: "https://www.imdrf.org/documents/software-medical-device-possible-framework-risk-categorization-and-corresponding-considerations"
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - clinical_deployment_platform

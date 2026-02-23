@@ -1,19 +1,25 @@
 network:
   name: "MinIVess MLOps v2 Probabilistic PRD Decision Network"
-  version: "1.1.0"
+  version: "1.3.0"
   last_updated: 2026-02-23
   description: >
-    Bayesian decision network with 52 nodes across 5 hierarchical levels.
+    Bayesian decision network with 59 nodes across 5 hierarchical levels.
     Adapted from the music-attribution-scaffold format for biomedical
     image segmentation MLOps. Captures open-ended decisions for a
     learning-first, portfolio-building, MONAI-compatible system.
 
+    v1.3.0: Phase 11 — added 3 clinical SaMD nodes (project_management_tool,
+            regulatory_documentation_tool, clinical_deployment_platform) and
+            14 edges. 59 nodes, 111 edges.
+    v1.2.0: Phase 10 — added 4 stack coverage nodes (language_runtime,
+            package_manager, linter_formatter, type_checker) and 12 edges.
+            56 nodes, 97 edges.
     v1.1.0: Fixed cycle (removed model_export_format→serving_architecture),
             removed duplicate edge, added 5 missing edges. 52 nodes, 85 edges.
     v1.0.0: Initial network — 52 nodes, ~80 edges.
 
 nodes:
-  # --- L1: Research Goals (7 nodes, root level) ---
+  # --- L1: Research Goals (7 nodes, root level) --- (7 L1 + 12 L2 + 24 L3 + 9 L4 + 7 L5 = 59)
   - id: project_purpose
     level: L1_research_goals
     file: L1-research-goals/project-purpose.decision.yaml
@@ -100,7 +106,17 @@ nodes:
     file: L2-architecture/validation-depth.decision.yaml
     title: "Validation Depth"
 
-  # --- L3: Technology Stack (20 nodes) ---
+  - id: language_runtime
+    level: L2_architecture
+    file: L2-architecture/language-runtime.decision.yaml
+    title: "Language Runtime"
+
+  - id: clinical_deployment_platform
+    level: L2_architecture
+    file: L2-architecture/clinical-deployment-platform.decision.yaml
+    title: "Clinical Deployment Platform"
+
+  # --- L3: Technology Stack (24 nodes) ---
   - id: segmentation_models
     level: L3_technology
     file: L3-technology/segmentation-models.decision.yaml
@@ -201,7 +217,27 @@ nodes:
     file: L3-technology/data-profiling.decision.yaml
     title: "Data Profiling"
 
-  # --- L4: Infrastructure (8 nodes) ---
+  - id: package_manager
+    level: L3_technology
+    file: L3-technology/package-manager.decision.yaml
+    title: "Package Manager"
+
+  - id: linter_formatter
+    level: L3_technology
+    file: L3-technology/linter-formatter.decision.yaml
+    title: "Linter & Formatter"
+
+  - id: type_checker
+    level: L3_technology
+    file: L3-technology/type-checker.decision.yaml
+    title: "Type Checker"
+
+  - id: regulatory_documentation_tool
+    level: L3_technology
+    file: L3-technology/regulatory-documentation-tool.decision.yaml
+    title: "Regulatory Documentation Tool"
+
+  # --- L4: Infrastructure (9 nodes) ---
   - id: compute_target
     level: L4_infrastructure
     file: L4-infrastructure/compute-target.decision.yaml
@@ -241,6 +277,11 @@ nodes:
     level: L4_infrastructure
     file: L4-infrastructure/secrets-management.decision.yaml
     title: "Secrets Management"
+
+  - id: project_management_tool
+    level: L4_infrastructure
+    file: L4-infrastructure/project-management-tool.decision.yaml
+    title: "Project Management Tool"
 
   # --- L5: Operations (7 nodes) ---
   - id: monitoring_stack
@@ -619,3 +660,147 @@ edges:
     to: uncertainty_quantification
     influence: moderate
     rationale: "Clinical compliance requires rigorous UQ"
+
+  # === Phase 10: Stack coverage edges (language, package, linter, type checker) ===
+
+  # L1 → L2
+  - from: monai_alignment
+    to: language_runtime
+    influence: strong
+    rationale: "MONAI locks language to Python — no Julia/Rust MONAI equivalent"
+
+  - from: project_purpose
+    to: language_runtime
+    influence: moderate
+    rationale: "Clinical may want compiled language for production inference"
+
+  # L2 → L3
+  - from: language_runtime
+    to: package_manager
+    influence: strong
+    rationale: "Python = uv/pip; Julia = Pkg; Rust = cargo — language determines toolchain"
+
+  - from: language_runtime
+    to: linter_formatter
+    influence: strong
+    rationale: "Python = ruff; Julia = JuliaFormatter; Rust = rustfmt — language-specific tools"
+
+  - from: language_runtime
+    to: type_checker
+    influence: strong
+    rationale: "Python = mypy/pyright; Julia/Rust have built-in type systems"
+
+  - from: language_runtime
+    to: segmentation_models
+    influence: strong
+    rationale: "Python locks to PyTorch/MONAI models; other languages have different frameworks"
+
+  # L1 → L3
+  - from: reproducibility_standard
+    to: package_manager
+    influence: moderate
+    rationale: "Full deterministic reproducibility requires lockfile support (uv/poetry)"
+
+  # L3 → L4
+  - from: linter_formatter
+    to: ci_cd_platform
+    influence: weak
+    rationale: "Linting runs as pre-commit hooks and CI checks"
+
+  - from: type_checker
+    to: ci_cd_platform
+    influence: weak
+    rationale: "Type checking runs as CI quality gate"
+
+  # L3 → L3 lateral
+  - from: testing_strategy
+    to: type_checker
+    influence: weak
+    rationale: "Property-based testing benefits from strict type annotations"
+
+  - from: package_manager
+    to: testing_strategy
+    influence: weak
+    rationale: "uv run pytest integration; package manager affects test execution"
+
+  - from: linter_formatter
+    to: type_checker
+    influence: weak
+    rationale: "ruff and mypy share pyproject.toml config; complementary code quality tools"
+
+  # === Phase 11: Clinical SaMD nodes and edges (3 nodes, 14 edges) ===
+
+  # L1 → new nodes
+  - from: compliance_depth
+    to: project_management_tool
+    influence: strong
+    rationale: "IEC 62304 full requires ALM with traceability; lightweight needs simpler tools"
+
+  - from: compliance_depth
+    to: regulatory_documentation_tool
+    influence: strong
+    rationale: "Compliance depth directly determines documentation tool requirements"
+
+  - from: compliance_depth
+    to: clinical_deployment_platform
+    influence: strong
+    rationale: "Full compliance drives MONAI Deploy for immutable packaging and traceability"
+
+  - from: monai_alignment
+    to: clinical_deployment_platform
+    influence: strong
+    rationale: "MONAI-native strongly favors MONAI Deploy MAP format for clinical deployment"
+
+  # L2 → L3/L4
+  - from: clinical_deployment_platform
+    to: model_export_format
+    influence: strong
+    rationale: "MONAI Deploy requires MONAI Bundle; BentoML needs ONNX; Triton is multi-format"
+
+  - from: clinical_deployment_platform
+    to: containerization
+    influence: moderate
+    rationale: "MAP format is OCI-compliant; clinical deployment shapes container strategy"
+
+  - from: serving_architecture
+    to: clinical_deployment_platform
+    influence: moderate
+    rationale: "Serving architecture choice informs clinical deployment platform selection"
+
+  # L3/L4 lateral
+  - from: regulatory_documentation_tool
+    to: documentation_standard
+    influence: strong
+    rationale: "Regulatory doc tool (Ketryx/RDM/templates) determines documentation output format"
+
+  - from: regulatory_documentation_tool
+    to: documentation_generation
+    influence: moderate
+    rationale: "Regulatory tool automates or templates documentation generation"
+
+  - from: project_management_tool
+    to: ci_cd_platform
+    influence: moderate
+    rationale: "GitHub PM pairs with GitHub Actions; GitLab PM pairs with GitLab CI"
+
+  - from: project_management_tool
+    to: regulatory_documentation_tool
+    influence: moderate
+    rationale: "PM tool determines which compliance overlay integrates (Ketryx for GitHub/JIRA)"
+
+  # L4 → L5
+  - from: project_management_tool
+    to: model_governance
+    influence: moderate
+    rationale: "PM tool with compliance overlay enables structured model lifecycle governance"
+
+  - from: regulatory_documentation_tool
+    to: model_governance
+    influence: moderate
+    rationale: "Regulatory documentation requirements shape governance workflows"
+
+  # Existing enrichment
+  - from: ci_cd_platform
+    to: regulatory_documentation_tool
+    influence: weak
+    rationale: "CI/CD can automate regulatory documentation generation"

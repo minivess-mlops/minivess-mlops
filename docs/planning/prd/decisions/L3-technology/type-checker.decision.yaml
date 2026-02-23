@@ -1,0 +1,159 @@
+decision_id: type_checker
+title: "Type Checker"
+description: >
+  Static type checking tool for Python. Catches type errors at development
+  time, improves code documentation, and enables IDE features. Created
+  post-hoc to document the mypy decision with pre-researched alternatives
+  for completeness.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: mypy
+    title: "mypy"
+    description: >
+      De facto standard Python type checker by Jukka Lehtosalo (Dropbox).
+      Broad library stub coverage (typeshed), strict mode, gradual typing
+      support. Most widely used and documented type checker
+      (Lehtosalo, 2012). Current implementation.
+    prior_probability: 0.50
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "linter_formatter.ruff"
+      - "testing_strategy.property_based"
+      - "ci_cd_platform.github_actions"
+
+  - option_id: pyright
+    title: "Pyright / Pylance"
+    description: >
+      Microsoft type checker powering Pylance (VS Code extension). Faster
+      than mypy, better type inference, stricter by default. Excellent VS
+      Code integration via Pylance.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Stricter default rules may require more type annotations"
+      - "Microsoft license (MIT for Pyright, proprietary for Pylance)"
+
+  - option_id: pytype
+    title: "pytype"
+    description: >
+      Google type checker that infers types automatically. More lenient
+      than mypy/pyright, good for adding types to legacy codebases
+      without manual annotations.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Slower than mypy and pyright"
+      - "Less strict — may miss real type errors"
+      - "Smaller community than mypy"
+
+conditional_on:
+  - parent_decision_id: language_runtime
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: python
+        then_probabilities:
+          mypy: 0.50
+          pyright: 0.30
+          pytype: 0.20
+      - given_parent_option: julia
+        then_probabilities:
+          mypy: 0.10
+          pyright: 0.10
+          pytype: 0.80
+      - given_parent_option: rust_pyo3
+        then_probabilities:
+          mypy: 0.50
+          pyright: 0.35
+          pytype: 0.15
+      - given_parent_option: cpp_libtorch
+        then_probabilities:
+          mypy: 0.30
+          pyright: 0.30
+          pytype: 0.40
+
+  - parent_decision_id: testing_strategy
+    influence_strength: weak
+    conditional_table:
+      - given_parent_option: property_based
+        then_probabilities:
+          mypy: 0.50
+          pyright: 0.35
+          pytype: 0.15
+      - given_parent_option: standard_pytest
+        then_probabilities:
+          mypy: 0.50
+          pyright: 0.30
+          pytype: 0.20
+      - given_parent_option: minimal
+        then_probabilities:
+          mypy: 0.40
+          pyright: 0.25
+          pytype: 0.35
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      mypy: 0.45
+      pyright: 0.35
+      pytype: 0.20
+    rationale: "mypy and pyright roughly tied for solo developers; mypy has more docs"
+  lab_group:
+    probability_overrides:
+      mypy: 0.50
+      pyright: 0.30
+      pytype: 0.20
+    rationale: "mypy is most established; lab groups benefit from broad community support"
+  clinical_deployment:
+    probability_overrides:
+      mypy: 0.55
+      pyright: 0.30
+      pytype: 0.15
+    rationale: "Clinical benefits from mypy strict mode for safety-critical type checking"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2027-02-23
+  change_drivers:
+    - "mypy release cadence and feature development"
+    - "Pyright/Pylance VS Code integration improvements"
+    - "Python typing PEP evolution (ParamSpec, TypeVarTuple)"
+    - "Potential convergence of type checking tools"
+
+domain_applicability:
+  vascular_segmentation: 0.50
+  cardiac_imaging: 0.50
+  neuroimaging: 0.50
+  general_medical: 0.50
+
+rationale: >
+  mypy (0.50) is resolved as the type checker. As the original Python type
+  checker (Lehtosalo, 2012), it has the broadest library stub coverage via
+  typeshed and the most community documentation. Pyright (0.30) offers
+  faster checking and better inference but is less established in the
+  scientific Python ecosystem. Domain applicability is low because type
+  checking is fully domain-agnostic.
+
+references:
+  - citation_key: lehtosalo2012mypy
+    relevance: "mypy type checker — the implemented solution, de facto Python type checking standard"
+    supports_options:
+      - mypy
+  - citation_key: python2024packaging
+    relevance: "Python Packaging User Guide — documents typing standards and tooling ecosystem"
+    supports_options:
+      - mypy
+      - pyright
+
+tags:
+  - technology
+  - type-checker
+  - python-tooling
+  - resolved

@@ -1,0 +1,265 @@
+decision_id: project_management_tool
+title: "Project Management Tool"
+description: >
+  Which project management and requirements tracking platform to use for
+  development workflow, and optionally for IEC 62304 traceability. Tool choice
+  affects developer experience, compliance readiness, and scalability from
+  research to clinical deployment. Granlund et al. (2022) advocate "calm
+  compliance" where regulatory documentation is a natural byproduct of
+  development. Stirbu & Mikkonen (2021) showed GitHub can support traceability
+  but lacks semantic relationship types. The AHMED project (Lähteenmäki et al.,
+  2023) validated Polarion for 80% traceability savings and GitLab+JIRA for
+  dual-tool patterns. Ketryx (UL certified, 2% of 2024 FDA AI/ML approvals)
+  provides a compliance overlay for GitHub/JIRA.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: github_projects_ketryx
+    title: "GitHub Projects V2 + Ketryx"
+    description: >
+      GitHub Projects V2 for day-to-day development with Ketryx overlay for
+      compliance evidence generation. Calm compliance approach (Granlund et al.,
+      2022): developers work in GitHub naturally, Ketryx generates IEC 62304
+      artifacts in background. Free tier available for pre-market teams (<$2M
+      funding, 3 projects, 4 users). Weighted score: 4.35 across 7 criteria.
+      Innolitics RDM (open-source) can supplement for 510(k) documentation.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "ci_cd_platform.github_actions"
+      - "regulatory_documentation_tool.ketryx"
+
+  - option_id: jira_ketryx
+    title: "JIRA + Ketryx"
+    description: >
+      JIRA + Confluence with Ketryx compliance overlay. Industry standard
+      (57.5% market share per 2024 Stack Overflow Survey). Validated by
+      Martina et al. (2024) for IEC 62304 Clause 6/9 maintenance workflows.
+      3000+ marketplace apps. Developer friction well-documented but
+      unmatched ecosystem. Ketryx bridges JIRA to IEC 62304/ISO 13485/14971.
+      Realistic cost: $200-500/month for 5-person regulated team.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Developer friction with JIRA workflows"
+      - "Plugin costs can exceed base JIRA at scale"
+
+  - option_id: gitlab_integrated
+    title: "GitLab Ultimate"
+    description: >
+      GitLab integrated ALM with dedicated IEC 62304 mapping page. Self-hosted
+      option for data sovereignty. AHMED project validated GitLab+JIRA dual-tool
+      pattern (Lähteenmäki et al., 2023). Requirements management evolving but
+      GitLab acknowledges it is "not yet complete." Premium ($29/user/month)
+      needed for compliance features.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requirements management incomplete per GitLab's own disclaimer"
+      - "Requires GitLab migration or mirror from GitHub"
+
+  - option_id: azure_devops
+    title: "Azure DevOps"
+    description: >
+      Microsoft-native ALM. Free for first 5 users — best value proposition.
+      Modern Requirements extension for IEC 62304 design controls. Good Azure
+      ML integration. Boards + Repos + Pipelines + Test Plans integrated.
+      Less ML ecosystem integration than GitHub.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Less popular for open-source ML community"
+      - "DVC integration weaker than GitHub/GitLab"
+
+  - option_id: polarion_alm
+    title: "Polarion ALM (Siemens)"
+    description: >
+      Purpose-built for regulated industries. AHMED project: 80% traceability
+      savings (Lähteenmäki et al., 2023). MedPack for IEC 62304/ISO 14971/
+      FDA 21 CFR Part 11. End-to-end traceability with semantic link types.
+      $3k-5k/year minimum. Accepted by notified bodies. Overkill for research
+      phase but strongest compliance story.
+    prior_probability: 0.10
+    status: deferred
+    implementation_status: not_started
+    constraints:
+      - "Prohibitive cost for small research teams"
+      - "Enterprise UX, not developer-friendly"
+      - "Vendor lock-in to Siemens ecosystem"
+
+conditional_on:
+  - parent_decision_id: compliance_depth
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: iec_62304_full
+        then_probabilities:
+          github_projects_ketryx: 0.20
+          jira_ketryx: 0.35
+          gitlab_integrated: 0.10
+          azure_devops: 0.05
+          polarion_alm: 0.30
+      - given_parent_option: lightweight_audit
+        then_probabilities:
+          github_projects_ketryx: 0.45
+          jira_ketryx: 0.15
+          gitlab_integrated: 0.20
+          azure_devops: 0.15
+          polarion_alm: 0.05
+      - given_parent_option: no_compliance
+        then_probabilities:
+          github_projects_ketryx: 0.40
+          jira_ketryx: 0.10
+          gitlab_integrated: 0.25
+          azure_devops: 0.15
+          polarion_alm: 0.10
+      - given_parent_option: regops_automated
+        then_probabilities:
+          github_projects_ketryx: 0.40
+          jira_ketryx: 0.25
+          gitlab_integrated: 0.15
+          azure_devops: 0.10
+          polarion_alm: 0.10
+
+  - parent_decision_id: ci_cd_platform
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: github_actions
+        then_probabilities:
+          github_projects_ketryx: 0.50
+          jira_ketryx: 0.15
+          gitlab_integrated: 0.10
+          azure_devops: 0.15
+          polarion_alm: 0.10
+      - given_parent_option: gitlab_ci
+        then_probabilities:
+          github_projects_ketryx: 0.10
+          jira_ketryx: 0.15
+          gitlab_integrated: 0.60
+          azure_devops: 0.05
+          polarion_alm: 0.10
+      - given_parent_option: buildkite
+        then_probabilities:
+          github_projects_ketryx: 0.35
+          jira_ketryx: 0.25
+          gitlab_integrated: 0.10
+          azure_devops: 0.20
+          polarion_alm: 0.10
+      - given_parent_option: jenkins
+        then_probabilities:
+          github_projects_ketryx: 0.20
+          jira_ketryx: 0.30
+          gitlab_integrated: 0.15
+          azure_devops: 0.20
+          polarion_alm: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      github_projects_ketryx: 0.50
+      jira_ketryx: 0.10
+      gitlab_integrated: 0.20
+      azure_devops: 0.15
+      polarion_alm: 0.05
+    rationale: "Solo researchers default to GitHub for simplicity and free tier"
+  lab_group:
+    probability_overrides:
+      github_projects_ketryx: 0.30
+      jira_ketryx: 0.25
+      gitlab_integrated: 0.25
+      azure_devops: 0.10
+      polarion_alm: 0.10
+    rationale: "Lab groups may use institutional GitLab or JIRA instances"
+  clinical_deployment:
+    probability_overrides:
+      github_projects_ketryx: 0.15
+      jira_ketryx: 0.30
+      gitlab_integrated: 0.10
+      azure_devops: 0.20
+      polarion_alm: 0.25
+    rationale: "Clinical deployment needs proven compliance tools accepted by auditors"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-23
+  next_review: 2026-05-23
+  change_drivers:
+    - "Ketryx feature releases and pricing changes"
+    - "GitHub Projects V2 compliance feature additions"
+    - "IEC 62304 Edition 2 tool requirements"
+    - "Team scaling beyond solo researcher"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  GitHub Projects V2 + Ketryx (0.35) leads based on weighted scoring (4.35/5)
+  across IEC 62304 compatibility, developer experience, cost, scalability,
+  ML ecosystem integration, audit readiness, and integration breadth. This
+  aligns with Granlund et al.'s (2022) "calm compliance" principle: compliance
+  as a natural byproduct of development. Stirbu & Mikkonen (2021) showed
+  GitHub supports traceability but needs semantic gap bridging — Ketryx fills
+  this gap commercially (UL certified, 2% of 2024 FDA AI/ML approvals). The
+  AHMED project (Lähteenmäki et al., 2023) validated Polarion for 80%
+  traceability savings. Martina et al. (2024) validated JIRA for IEC 62304
+  maintenance. The phased approach (GitHub free → Ketryx free → Ketryx paid)
+  minimizes upfront cost while maintaining regulatory readiness.
+
+tags:
+  - infrastructure
+  - compliance
+  - project-management
+
+references:
+  - citation_key: granlund2022calm
+    relevance: "Calm compliance framework — compliance as natural development byproduct. Directly informs tool selection criteria."
+    supports_options:
+      - github_projects_ketryx
+  - citation_key: stirbu2021traceability
+    relevance: "Demonstrated GitHub traceability for medical software. Identified semantic gap that Ketryx fills."
+    supports_options:
+      - github_projects_ketryx
+  - citation_key: stirbu2021regops
+    relevance: "RegOps DevOps pipeline concept. Compliance as code favoring Git-native platforms."
+    supports_options:
+      - github_projects_ketryx
+      - gitlab_integrated
+  - citation_key: lahteenmaki2023regops
+    relevance: "AHMED project validating Polarion (80% savings) and GitLab+JIRA dual-tool patterns."
+    supports_options:
+      - polarion_alm
+      - gitlab_integrated
+      - jira_ketryx
+  - citation_key: martina2024iec62304devops
+    relevance: "Validated JIRA+DevOps for IEC 62304 Clause 6/9 maintenance workflows."
+    supports_options:
+      - jira_ketryx
+  - citation_key: ketryx2025
+    relevance: "UL Certified compliance overlay. 2% of 2024 FDA AI/ML approvals. Free tier for pre-market."
+    supports_options:
+      - github_projects_ketryx
+      - jira_ketryx
+  - citation_key: iso13485_2016
+    relevance: "Clause 4.1.6 tool validation requirement applies to all PM tools used in QMS."
+    supports_options:
+      - github_projects_ketryx
+      - jira_ketryx
+      - polarion_alm
+
+research_notes: >
+  Phase 11 research. Scoring methodology: IEC 62304 compatibility (25%),
+  Developer experience (20%), Cost 1-5 person team (15%), Scalability
+  research-to-clinical (15%), ML/AI ecosystem integration (10%), Audit
+  readiness (10%), Integration breadth (5%). GitHub+Ketryx scored 4.35,
+  Azure DevOps 3.55, GitLab 3.50, JIRA+Ketryx 3.40, Polarion 3.30,
+  Linear 2.55. Linear excluded from options due to 90-day audit log and
+  no compliance plugins.
