@@ -1,0 +1,84 @@
+# Template: Scenario
+# Copy this file and fill in the values.
+
+scenario_id: CHANGE_ME  # snake_case, unique
+title: "CHANGE_ME"
+description: >
+  CHANGE_ME: What does this scenario represent?
+
+archetype: solo_researcher  # solo_researcher | lab_group | clinical_deployment
+domain: vascular_segmentation  # From domains/registry.yaml
+status: planned  # active | planned | deprecated
+
+resolved_decisions:
+  # L1 Research Goals
+  project_purpose: CHANGE_ME
+  research_impact_target: CHANGE_ME
+  open_source_model: CHANGE_ME
+  portfolio_priority: CHANGE_ME
+  compliance_depth: CHANGE_ME
+  monai_alignment: CHANGE_ME
+  reproducibility_standard: CHANGE_ME
+
+  # L2 Architecture
+  model_strategy: CHANGE_ME
+  foundation_model_integration: CHANGE_ME
+  data_management_strategy: CHANGE_ME
+  ensemble_strategy: CHANGE_ME
+  uncertainty_quantification: CHANGE_ME
+  serving_architecture: CHANGE_ME
+  config_management: CHANGE_ME
+  pipeline_orchestration: CHANGE_ME
+  xai_strategy: CHANGE_ME
+  validation_depth: CHANGE_ME
+
+  # L3 Technology
+  segmentation_models: CHANGE_ME
+  loss_functions: CHANGE_ME
+  augmentation_stack: CHANGE_ME
+  metrics_framework: CHANGE_ME
+  ensemble_methods: CHANGE_ME
+  calibration_tools: CHANGE_ME
+  experiment_tracking: CHANGE_ME
+  llm_observability: CHANGE_ME
+  agent_framework: CHANGE_ME
+  llm_provider: CHANGE_ME
+  data_validation_tools: CHANGE_ME
+  model_diagnostics: CHANGE_ME
+  hpo_framework: CHANGE_ME
+  lineage_tracking: CHANGE_ME
+  xai_meta_evaluation: CHANGE_ME
+  annotation_platform: CHANGE_ME
+  documentation_standard: CHANGE_ME
+  testing_strategy: CHANGE_ME
+  label_quality: CHANGE_ME
+  data_profiling: CHANGE_ME
+
+  # L4 Infrastructure
+  compute_target: CHANGE_ME
+  containerization: CHANGE_ME
+  ci_cd_platform: CHANGE_ME
+  iac_tooling: CHANGE_ME
+  gitops_strategy: CHANGE_ME
+  federated_learning: CHANGE_ME
+  model_export_format: CHANGE_ME
+  secrets_management: CHANGE_ME
+
+  # L5 Operations
+  monitoring_stack: CHANGE_ME
+  drift_response: CHANGE_ME
+  annotation_workflow: CHANGE_ME
+  model_governance: CHANGE_ME
+  retraining_trigger: CHANGE_ME
+  documentation_generation: CHANGE_ME
+  cost_tracking: CHANGE_ME
+
+joint_probability: 0.0  # Calculate from resolved option probabilities
+
+trade_offs:
+  gains:
+    - "CHANGE_ME"
+  sacrifices:
+    - "CHANGE_ME"
+
+references: []

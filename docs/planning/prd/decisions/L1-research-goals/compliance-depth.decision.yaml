@@ -1,0 +1,95 @@
+decision_id: compliance_depth
+title: "Compliance Depth"
+description: >
+  How deeply to implement regulatory compliance (IEC 62304, FDA guidance).
+  Lightweight audit is current implementation. Full compliance requires
+  significant infrastructure investment.
+
+decision_level: L1_research_goals
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: iec_62304_full
+    title: "IEC 62304 Full Compliance"
+    description: >
+      Complete Software as Medical Device lifecycle. Requires formal
+      risk analysis, design history file, verification & validation
+      protocols, change control. Significant overhead.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Regulatory expertise required"
+      - "Formal V&V protocols"
+      - "Change control process"
+
+  - option_id: lightweight_audit
+    title: "Lightweight Audit Trail"
+    description: >
+      SaMD-principled design without full compliance. Model cards,
+      audit trails, reproducibility. Demonstrates awareness without
+      regulatory overhead. Current implementation.
+    prior_probability: 0.50
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "documentation_standard.model_cards_lite"
+      - "model_governance.mlflow_tags"
+
+  - option_id: no_compliance
+    title: "No Compliance"
+    description: >
+      Research-only, no regulatory considerations. Fastest development
+      but limits clinical applicability.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: not_started
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      iec_62304_full: 0.05
+      lightweight_audit: 0.45
+      no_compliance: 0.50
+    rationale: "Researchers rarely need full compliance; lightweight shows awareness"
+  lab_group:
+    probability_overrides:
+      iec_62304_full: 0.15
+      lightweight_audit: 0.55
+      no_compliance: 0.30
+    rationale: "Lab groups benefit from structured audit for multi-person work"
+  clinical_deployment:
+    probability_overrides:
+      iec_62304_full: 0.70
+      lightweight_audit: 0.25
+      no_compliance: 0.05
+    rationale: "Clinical deployment demands full regulatory compliance"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Clinical partnership requiring compliance"
+    - "Regulatory landscape changes (EU AI Act)"
+    - "FDA guidance updates"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Lightweight audit (0.50) is the sweet spot for a learning/portfolio project.
+  It demonstrates regulatory awareness without the overhead of full compliance.
+  The SaMD-principled approach is already implemented (model cards, audit trails).
+
+tags:
+  - strategic
+  - regulatory
+  - resolved
+
+references:
+  - "../../../docs/adr/0005-tdd-mandatory.md"

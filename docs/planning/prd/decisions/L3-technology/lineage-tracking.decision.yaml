@@ -1,0 +1,137 @@
+decision_id: lineage_tracking
+title: "Lineage Tracking"
+description: >
+  How to track data and model lineage for reproducibility and compliance.
+  OpenLineage + Marquez provides a standardized lineage graph; MLflow-only
+  uses built-in lineage features; custom lineage builds project-specific
+  tracking. Critical for IEC 62304 traceability requirements.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: openlineage_marquez
+    title: "OpenLineage + Marquez"
+    description: >
+      OpenLineage standard for cross-platform lineage events, with Marquez
+      as the metadata backend and lineage graph visualization. Present in
+      docker-compose config but not wired to training or data pipelines.
+    prior_probability: 0.40
+    status: viable
+    implementation_status: config_only
+    complements:
+      - "data_management_strategy.lakehouse"
+      - "documentation_standard.regulatory_dossier"
+
+  - option_id: mlflow_only
+    title: "MLflow Lineage Only"
+    description: >
+      Use MLflow's built-in artifact tracking, dataset logging, and model
+      registry lineage. Simpler but less granular than OpenLineage. Partially
+      implemented via MLflow experiment tracking.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: partial
+    complements:
+      - "experiment_tracking.mlflow"
+
+  - option_id: custom
+    title: "Custom Lineage"
+    description: >
+      Hand-written lineage tracking via metadata files, DVC pipeline DAGs,
+      and git commit hashes. Flexible but not standardized.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+
+  - option_id: none
+    title: "No Explicit Lineage"
+    description: >
+      Rely on implicit lineage from DVC + git + MLflow without dedicated
+      lineage tooling. Acceptable for research but insufficient for
+      compliance.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+
+conditional_on:
+  - parent_decision_id: data_management_strategy
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: local_dvc
+        then_probabilities:
+          openlineage_marquez: 0.30
+          mlflow_only: 0.40
+          custom: 0.15
+          none: 0.15
+      - given_parent_option: cloud_dvc
+        then_probabilities:
+          openlineage_marquez: 0.35
+          mlflow_only: 0.35
+          custom: 0.15
+          none: 0.15
+      - given_parent_option: lakehouse
+        then_probabilities:
+          openlineage_marquez: 0.55
+          mlflow_only: 0.20
+          custom: 0.15
+          none: 0.10
+      - given_parent_option: streaming
+        then_probabilities:
+          openlineage_marquez: 0.50
+          mlflow_only: 0.20
+          custom: 0.20
+          none: 0.10
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      openlineage_marquez: 0.25
+      mlflow_only: 0.40
+      custom: 0.15
+      none: 0.20
+    rationale: "Solo researchers rely on MLflow's built-in lineage; OpenLineage is overhead"
+  lab_group:
+    probability_overrides:
+      openlineage_marquez: 0.40
+      mlflow_only: 0.35
+      custom: 0.15
+      none: 0.10
+    rationale: "Lab groups benefit from standardized lineage for shared data"
+  clinical_deployment:
+    probability_overrides:
+      openlineage_marquez: 0.55
+      mlflow_only: 0.25
+      custom: 0.15
+      none: 0.05
+    rationale: "Clinical deployment requires full lineage for IEC 62304 traceability"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "OpenLineage specification updates"
+    - "MLflow lineage feature improvements"
+    - "Regulatory audit requirements"
+    - "Data pipeline complexity growth"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  OpenLineage + Marquez (0.40) is the preferred choice for standardized lineage
+  tracking. It's already in docker-compose config but not wired to the pipeline.
+  MLflow-only (0.30) provides partial lineage through experiment tracking.
+  The integration gap is the main blocker — requires OpenLineage emitters in
+  data loading, preprocessing, and training steps.
+
+tags:
+  - technology
+  - lineage
+  - compliance
+  - not-integrated

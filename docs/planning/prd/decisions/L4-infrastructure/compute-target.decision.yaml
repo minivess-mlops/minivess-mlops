@@ -1,0 +1,145 @@
+decision_id: compute_target
+title: "Compute Target"
+description: >
+  Where training and inference workloads run. Local GPU is simplest for
+  development; cloud spot instances offer elastic scaling; HPC SLURM is
+  standard in academic labs; Kubernetes enables production orchestration.
+  Choice affects cost, iteration speed, and reproducibility.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: local_gpu
+    title: "Local GPU"
+    description: >
+      Single workstation with consumer or workstation GPU (e.g., RTX 4090,
+      A6000). Simplest setup, zero cloud cost. Currently implemented with
+      local NVIDIA GPU for training and inference.
+    prior_probability: 0.40
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "containerization.docker_compose"
+      - "secrets_management.dotenv"
+
+  - option_id: cloud_spot
+    title: "Cloud Spot Instances"
+    description: >
+      AWS Spot, GCP Preemptible, or Lambda Labs for elastic GPU access.
+      Cost-effective for burst training but requires checkpointing and
+      fault tolerance. Good for hyperparameter sweeps.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires robust checkpointing for preemption"
+      - "Cloud credentials and billing setup"
+      - "Network bandwidth for data transfer"
+
+  - option_id: hpc_slurm
+    title: "HPC SLURM Cluster"
+    description: >
+      University or institutional HPC with SLURM scheduler. Standard in
+      academic research. Free compute but queue wait times and limited
+      software flexibility.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "SLURM job scripts and queue management"
+      - "Module system compatibility"
+      - "Limited Docker support on many clusters"
+
+  - option_id: kubernetes
+    title: "Kubernetes GPU Cluster"
+    description: >
+      K8s with GPU node pools. Production-grade orchestration with
+      auto-scaling. Requires significant infrastructure expertise.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "K8s operational expertise required"
+      - "GPU device plugin configuration"
+      - "Higher baseline infrastructure cost"
+
+conditional_on:
+  - parent_decision_id: model_strategy
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: single_architecture
+        then_probabilities:
+          local_gpu: 0.50
+          cloud_spot: 0.20
+          hpc_slurm: 0.20
+          kubernetes: 0.10
+      - given_parent_option: multi_architecture
+        then_probabilities:
+          local_gpu: 0.40
+          cloud_spot: 0.25
+          hpc_slurm: 0.20
+          kubernetes: 0.15
+      - given_parent_option: foundation_model_first
+        then_probabilities:
+          local_gpu: 0.30
+          cloud_spot: 0.30
+          hpc_slurm: 0.20
+          kubernetes: 0.20
+      - given_parent_option: automl_search
+        then_probabilities:
+          local_gpu: 0.20
+          cloud_spot: 0.35
+          hpc_slurm: 0.25
+          kubernetes: 0.20
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      local_gpu: 0.60
+      cloud_spot: 0.20
+      hpc_slurm: 0.10
+      kubernetes: 0.10
+    rationale: "Solo researchers default to local GPU for simplicity and zero cost"
+  lab_group:
+    probability_overrides:
+      local_gpu: 0.20
+      cloud_spot: 0.15
+      hpc_slurm: 0.45
+      kubernetes: 0.20
+    rationale: "Academic labs typically have SLURM cluster access"
+  clinical_deployment:
+    probability_overrides:
+      local_gpu: 0.10
+      cloud_spot: 0.15
+      hpc_slurm: 0.35
+      kubernetes: 0.40
+    rationale: "Clinical deployment needs production Kubernetes or institutional HPC"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "GPU pricing changes (cloud vs local)"
+    - "Foundation model GPU memory requirements"
+    - "Institutional HPC availability"
+    - "Lambda Labs / RunPod pricing"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Local GPU (0.40) is the resolved choice for a solo learning project.
+  Cloud spot (0.25) is the natural next step when larger experiments are
+  needed. HPC SLURM (0.20) would apply if the project moves to an
+  academic setting. Kubernetes (0.15) is primarily for production.
+
+tags:
+  - infrastructure
+  - compute
+  - resolved

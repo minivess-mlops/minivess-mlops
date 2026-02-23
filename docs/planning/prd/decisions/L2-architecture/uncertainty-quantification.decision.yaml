@@ -1,0 +1,129 @@
+decision_id: uncertainty_quantification
+title: "Uncertainty Quantification"
+description: >
+  Approach to quantifying prediction uncertainty. Critical for medical
+  imaging where false confidence can be dangerous.
+
+decision_level: L2_architecture
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: temperature_scaling
+    title: "Temperature Scaling"
+    description: "Post-hoc calibration. Current implementation with ECE/MCE."
+    prior_probability: 0.30
+    status: resolved
+    implementation_status: implemented
+
+  - option_id: conformal_prediction
+    title: "Conformal Prediction"
+    description: "Distribution-free prediction sets with guaranteed coverage."
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "calibration_tools.mapie"
+
+  - option_id: mc_dropout
+    title: "MC Dropout"
+    description: "Monte Carlo dropout for approximate Bayesian inference."
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+
+  - option_id: deep_ensembles
+    title: "Deep Ensembles"
+    description: "Train multiple independent models. Gold standard but expensive."
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "N× training cost"
+
+  - option_id: evidential
+    title: "Evidential Deep Learning"
+    description: "Single-pass uncertainty via Dirichlet distribution."
+    prior_probability: 0.10
+    status: experimental
+    implementation_status: not_started
+
+conditional_on:
+  - parent_decision_id: compliance_depth
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: iec_62304_full
+        then_probabilities:
+          temperature_scaling: 0.15
+          conformal_prediction: 0.35
+          mc_dropout: 0.15
+          deep_ensembles: 0.25
+          evidential: 0.10
+      - given_parent_option: lightweight_audit
+        then_probabilities:
+          temperature_scaling: 0.30
+          conformal_prediction: 0.25
+          mc_dropout: 0.20
+          deep_ensembles: 0.15
+          evidential: 0.10
+      - given_parent_option: no_compliance
+        then_probabilities:
+          temperature_scaling: 0.40
+          conformal_prediction: 0.15
+          mc_dropout: 0.20
+          deep_ensembles: 0.10
+          evidential: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      temperature_scaling: 0.35
+      conformal_prediction: 0.25
+      mc_dropout: 0.20
+      deep_ensembles: 0.10
+      evidential: 0.10
+    rationale: "Temperature scaling is simplest; conformal is a great learning topic"
+  lab_group:
+    probability_overrides:
+      temperature_scaling: 0.20
+      conformal_prediction: 0.30
+      mc_dropout: 0.20
+      deep_ensembles: 0.20
+      evidential: 0.10
+    rationale: "Lab groups can afford ensemble approaches"
+  clinical_deployment:
+    probability_overrides:
+      temperature_scaling: 0.10
+      conformal_prediction: 0.35
+      mc_dropout: 0.15
+      deep_ensembles: 0.30
+      evidential: 0.10
+    rationale: "Clinical needs formal guarantees (conformal) or gold standard (ensembles)"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-23
+  next_review: 2026-05-23
+  change_drivers:
+    - "Conformal prediction for segmentation advances"
+    - "MAPIE 3D support"
+    - "Evidential methods maturity"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Temperature scaling (0.30) is resolved. Conformal prediction (0.25) is
+  the most compelling next step for guaranteed coverage sets.
+
+tags:
+  - architecture
+  - uncertainty
+  - safety-critical
+  - partially-resolved
+
+references:
+  - "../../adr/0003-validation-onion.md"

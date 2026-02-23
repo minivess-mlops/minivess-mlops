@@ -1,0 +1,152 @@
+decision_id: agent_framework
+title: "Agent Framework"
+description: >
+  Which agent orchestration framework to use for LLM-driven pipeline
+  automation. Agents manage multi-step workflows: hyperparameter
+  suggestions, experiment triage, report generation, and adaptive
+  retraining triggers. The framework determines how agent state,
+  tool calling, and human-in-the-loop patterns are implemented.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: langgraph
+    title: "LangGraph"
+    description: >
+      Graph-based agent orchestration from LangChain. Supports stateful
+      multi-step workflows, human-in-the-loop, and persistence.
+      Partially implemented with initial agent definitions. Referenced
+      as primary agent orchestrator in CLAUDE.md.
+    prior_probability: 0.40
+    status: resolved
+    implementation_status: partial
+    complements:
+      - "llm_observability.langfuse"
+      - "llm_observability.braintrust"
+      - "llm_provider.hybrid_litellm"
+
+  - option_id: crewai
+    title: "CrewAI"
+    description: >
+      Multi-agent framework with role-based agent definitions. Simpler
+      than LangGraph for predefined workflows. Good for team-of-agents
+      patterns but less flexible for custom graph topologies.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Less flexible than LangGraph for custom workflows"
+      - "Younger ecosystem, API stability concerns"
+
+  - option_id: autogen
+    title: "AutoGen"
+    description: >
+      Microsoft's multi-agent framework. Strong for conversational
+      multi-agent patterns and code generation tasks. Active development
+      with AutoGen Studio.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Heavier dependency footprint"
+      - "Microsoft ecosystem alignment may not fit MONAI stack"
+
+  - option_id: custom
+    title: "Custom Agent Framework"
+    description: >
+      Build lightweight agents directly on LLM provider APIs with custom
+      state management. Maximum control, minimum dependency, but
+      significant development effort for tool calling and persistence.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Tool calling, state management, and persistence from scratch"
+      - "No pre-built human-in-the-loop patterns"
+
+conditional_on:
+  - parent_decision_id: pipeline_orchestration
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: hydra_scripts
+        then_probabilities:
+          langgraph: 0.25
+          crewai: 0.15
+          autogen: 0.15
+          custom: 0.45
+      - given_parent_option: dvc_pipelines
+        then_probabilities:
+          langgraph: 0.30
+          crewai: 0.20
+          autogen: 0.15
+          custom: 0.35
+      - given_parent_option: langgraph_agents
+        then_probabilities:
+          langgraph: 0.55
+          crewai: 0.15
+          autogen: 0.10
+          custom: 0.20
+      - given_parent_option: airflow_orchestrated
+        then_probabilities:
+          langgraph: 0.30
+          crewai: 0.25
+          autogen: 0.20
+          custom: 0.25
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      langgraph: 0.35
+      crewai: 0.15
+      autogen: 0.10
+      custom: 0.40
+    rationale: "Solo researchers may prefer lightweight custom agents over framework overhead"
+  lab_group:
+    probability_overrides:
+      langgraph: 0.40
+      crewai: 0.25
+      autogen: 0.20
+      custom: 0.15
+    rationale: "Lab groups benefit from framework-level collaboration patterns"
+  clinical_deployment:
+    probability_overrides:
+      langgraph: 0.45
+      crewai: 0.20
+      autogen: 0.15
+      custom: 0.20
+    rationale: "Clinical needs auditable agent state (LangGraph persistence) for compliance"
+
+volatility:
+  classification: volatile
+  last_assessed: 2026-02-23
+  next_review: 2026-04-23
+  change_drivers:
+    - "LangGraph v0.3+ API evolution"
+    - "CrewAI v1.0 maturity"
+    - "AutoGen v0.4+ API stability"
+    - "New agent frameworks (DSPy, Claude Code SDK, etc.)"
+    - "Anthropic tool use and computer use improvements"
+
+domain_applicability:
+  vascular_segmentation: 0.75
+  cardiac_imaging: 0.75
+  neuroimaging: 0.70
+  general_medical: 0.80
+
+rationale: >
+  LangGraph (0.40) is resolved-partial as the primary agent framework, with
+  initial agent definitions for experiment triage and report generation.
+  Custom (0.25) has notable prior because lightweight domain-specific agents
+  may not need a full framework. CrewAI (0.20) is a simpler alternative for
+  predefined multi-agent workflows. AutoGen (0.15) is viable but less
+  aligned with the existing MONAI/LangChain stack. Domain applicability is
+  lower than core ML decisions because agents are supplementary automation.
+
+tags:
+  - agents
+  - langgraph
+  - orchestration
+  - llm
+  - resolved-partial

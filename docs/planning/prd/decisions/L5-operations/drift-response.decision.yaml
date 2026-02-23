@@ -1,0 +1,181 @@
+decision_id: drift_response
+title: "Drift Response"
+description: >
+  How the system responds to detected data or model drift. Automated
+  retraining triggers a new training run; alert-human notifies developers
+  for manual assessment; gradual rollback reverts to previous model
+  versions. Critical for maintaining model reliability over time in
+  medical imaging where distribution shifts can be subtle.
+
+decision_level: L5_operations
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: automated_retrain
+    title: "Automated Retrain"
+    description: >
+      Automatically trigger retraining pipeline when drift exceeds
+      thresholds. Requires robust data validation, evaluation gates,
+      and model governance. Most mature but highest implementation cost.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires validated retraining pipeline"
+      - "Evaluation gates to prevent deploying worse models"
+      - "Data quality checks before retraining"
+    complements:
+      - "retraining_trigger.drift_based"
+      - "model_governance.full_registry"
+
+  - option_id: alert_human
+    title: "Alert Human for Assessment"
+    description: >
+      Notify developers/clinicians when drift is detected. Human reviews
+      metrics and decides on response. Current partial implementation
+      via Evidently reports and whylogs profiles.
+    prior_probability: 0.35
+    status: resolved
+    implementation_status: partial
+    complements:
+      - "monitoring_stack.prometheus_grafana"
+      - "model_governance.mlflow_tags"
+
+  - option_id: gradual_rollback
+    title: "Gradual Rollback"
+    description: >
+      Automatically shift traffic to previous model version using
+      canary deployment or shadow scoring. Requires model versioning
+      and traffic management infrastructure.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires serving infrastructure for multi-model traffic"
+      - "Model versioning and registry"
+      - "Rollback criteria definition"
+
+  - option_id: none
+    title: "No Drift Response"
+    description: >
+      No automated drift response. Rely on periodic manual model
+      evaluation. Current effective state for development.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: uncertainty_quantification
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: temperature_scaling
+        then_probabilities:
+          automated_retrain: 0.20
+          alert_human: 0.40
+          gradual_rollback: 0.20
+          none: 0.20
+      - given_parent_option: conformal_prediction
+        then_probabilities:
+          automated_retrain: 0.30
+          alert_human: 0.35
+          gradual_rollback: 0.25
+          none: 0.10
+      - given_parent_option: mc_dropout
+        then_probabilities:
+          automated_retrain: 0.25
+          alert_human: 0.35
+          gradual_rollback: 0.20
+          none: 0.20
+      - given_parent_option: deep_ensembles
+        then_probabilities:
+          automated_retrain: 0.30
+          alert_human: 0.30
+          gradual_rollback: 0.25
+          none: 0.15
+      - given_parent_option: evidential
+        then_probabilities:
+          automated_retrain: 0.30
+          alert_human: 0.30
+          gradual_rollback: 0.20
+          none: 0.20
+
+  - parent_decision_id: data_validation_tools
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: pydantic_pandera
+        then_probabilities:
+          automated_retrain: 0.25
+          alert_human: 0.35
+          gradual_rollback: 0.20
+          none: 0.20
+      - given_parent_option: great_expectations
+        then_probabilities:
+          automated_retrain: 0.30
+          alert_human: 0.30
+          gradual_rollback: 0.20
+          none: 0.20
+      - given_parent_option: evidently
+        then_probabilities:
+          automated_retrain: 0.30
+          alert_human: 0.35
+          gradual_rollback: 0.20
+          none: 0.15
+      - given_parent_option: deepchecks
+        then_probabilities:
+          automated_retrain: 0.30
+          alert_human: 0.30
+          gradual_rollback: 0.25
+          none: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      automated_retrain: 0.15
+      alert_human: 0.45
+      gradual_rollback: 0.10
+      none: 0.30
+    rationale: "Solo researchers manually review drift; automated pipelines are overkill"
+  lab_group:
+    probability_overrides:
+      automated_retrain: 0.35
+      alert_human: 0.30
+      gradual_rollback: 0.20
+      none: 0.15
+    rationale: "Lab groups can invest in automated retraining pipelines"
+  clinical_deployment:
+    probability_overrides:
+      automated_retrain: 0.40
+      alert_human: 0.25
+      gradual_rollback: 0.25
+      none: 0.10
+    rationale: "Clinical systems need automated drift response for patient safety"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-23
+  next_review: 2026-05-23
+  change_drivers:
+    - "Evidently drift detection maturity"
+    - "whylogs profiling integration depth"
+    - "Production deployment timeline"
+    - "Regulatory requirements for model monitoring"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Alert human (0.35) is the pragmatic resolved choice for a learning
+  project. Automated retrain (0.25) is the next step when the pipeline
+  matures. This decision is shifting because production deployment
+  would require more automated drift response.
+
+tags:
+  - operations
+  - drift
+  - monitoring
+  - safety-critical
+  - partially-resolved

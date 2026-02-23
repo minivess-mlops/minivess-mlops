@@ -1,0 +1,83 @@
+decision_id: portfolio_priority
+title: "Portfolio Priority"
+description: >
+  Trade-off between breadth (many tools, shallow integration) and depth
+  (fewer tools, production-grade integration). Already resolved as
+  breadth-first with 30+ tools integrated.
+
+decision_level: L1_research_goals
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: breadth_over_depth
+    title: "Breadth Over Depth"
+    description: >
+      Maximize tool exposure. Integrate many tools even if some are
+      config-only or placeholder. Demonstrates awareness of ecosystem.
+      Current active choice: 30+ tools across 38 modules.
+    prior_probability: 0.55
+    status: resolved
+    implementation_status: implemented
+
+  - option_id: depth_over_breadth
+    title: "Depth Over Breadth"
+    description: >
+      Focus on fewer tools with production-grade integration. Each tool
+      fully tested, documented, and battle-tested. Better for clinical path.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+
+  - option_id: balanced
+    title: "Balanced"
+    description: >
+      Mix of breadth and depth. Core tools (MLflow, MONAI, BentoML) get
+      deep integration; supporting tools get config-only integration.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      breadth_over_depth: 0.60
+      depth_over_breadth: 0.15
+      balanced: 0.25
+    rationale: "Solo researchers maximize learning through breadth"
+  lab_group:
+    probability_overrides:
+      breadth_over_depth: 0.25
+      depth_over_breadth: 0.35
+      balanced: 0.40
+    rationale: "Lab groups need reliable tools for multi-person workflows"
+  clinical_deployment:
+    probability_overrides:
+      breadth_over_depth: 0.05
+      depth_over_breadth: 0.65
+      balanced: 0.30
+    rationale: "Clinical requires deep, validated integration"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Project maturity increases"
+    - "Specific tools need production hardening"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Breadth-first is resolved at 0.55. With 30+ tools across 38 modules,
+  the project has demonstrated breadth. Future work may shift toward
+  depth for specific tools.
+
+tags:
+  - strategic
+  - resolved
+  - root-node

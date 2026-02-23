@@ -1,0 +1,86 @@
+decision_id: config_management
+title: "Configuration Management"
+description: >
+  How to manage experiment and deployment configuration.
+
+decision_level: L2_architecture
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: hydra_zen
+    title: "Hydra-zen + Dynaconf"
+    description: "Hydra-zen for training, Dynaconf for deployment. Current implementation."
+    prior_probability: 0.45
+    status: resolved
+    implementation_status: implemented
+
+  - option_id: pure_pydantic
+    title: "Pure Pydantic"
+    description: "Pydantic models for all configuration."
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+
+  - option_id: dynaconf_only
+    title: "Dynaconf Only"
+    description: "Dynaconf for all configuration (training + deployment)."
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+
+  - option_id: yaml_raw
+    title: "Raw YAML"
+    description: "Plain YAML files without schema validation."
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      hydra_zen: 0.40
+      pure_pydantic: 0.30
+      dynaconf_only: 0.15
+      yaml_raw: 0.15
+    rationale: "Hydra-zen is a good learning investment for experiment management"
+  lab_group:
+    probability_overrides:
+      hydra_zen: 0.50
+      pure_pydantic: 0.20
+      dynaconf_only: 0.15
+      yaml_raw: 0.15
+    rationale: "Lab groups benefit from Hydra's experiment sweep support"
+  clinical_deployment:
+    probability_overrides:
+      hydra_zen: 0.35
+      pure_pydantic: 0.35
+      dynaconf_only: 0.20
+      yaml_raw: 0.10
+    rationale: "Clinical may prefer Pydantic for strict type safety"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2027-02-23
+  change_drivers:
+    - "Hydra-zen development"
+    - "Pydantic settings improvements"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Hydra-zen + Dynaconf (0.45) resolved. ADR-0002 documents the dual-config
+  system rationale.
+
+tags:
+  - architecture
+  - configuration
+  - resolved
+
+references:
+  - "../../adr/0002-dual-config-system.md"

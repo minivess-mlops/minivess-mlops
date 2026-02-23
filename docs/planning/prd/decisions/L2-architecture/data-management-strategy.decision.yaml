@@ -1,0 +1,107 @@
+decision_id: data_management_strategy
+title: "Data Management Strategy"
+description: >
+  How to manage training data versioning, storage, and access patterns.
+
+decision_level: L2_architecture
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: local_dvc
+    title: "Local DVC"
+    description: "DVC with local storage. Current implementation."
+    prior_probability: 0.40
+    status: resolved
+    implementation_status: implemented
+
+  - option_id: cloud_dvc
+    title: "Cloud DVC"
+    description: "DVC with S3/GCS remote storage for team sharing."
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+
+  - option_id: lakehouse
+    title: "Lakehouse (Delta/Iceberg)"
+    description: "Data lakehouse for large-scale versioned datasets."
+    prior_probability: 0.15
+    status: experimental
+    implementation_status: not_started
+
+  - option_id: streaming
+    title: "Streaming (WebDataset)"
+    description: "Stream data directly. Good for huge datasets."
+    prior_probability: 0.15
+    status: experimental
+    implementation_status: not_started
+
+conditional_on:
+  - parent_decision_id: reproducibility_standard
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: full_deterministic
+        then_probabilities:
+          local_dvc: 0.30
+          cloud_dvc: 0.40
+          lakehouse: 0.20
+          streaming: 0.10
+      - given_parent_option: dvc_versioned
+        then_probabilities:
+          local_dvc: 0.45
+          cloud_dvc: 0.35
+          lakehouse: 0.10
+          streaming: 0.10
+      - given_parent_option: git_only
+        then_probabilities:
+          local_dvc: 0.20
+          cloud_dvc: 0.10
+          lakehouse: 0.10
+          streaming: 0.60
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      local_dvc: 0.50
+      cloud_dvc: 0.25
+      lakehouse: 0.10
+      streaming: 0.15
+    rationale: "Local DVC is simplest for single-machine workflows"
+  lab_group:
+    probability_overrides:
+      local_dvc: 0.20
+      cloud_dvc: 0.45
+      lakehouse: 0.20
+      streaming: 0.15
+    rationale: "Lab groups need shared remote storage"
+  clinical_deployment:
+    probability_overrides:
+      local_dvc: 0.15
+      cloud_dvc: 0.30
+      lakehouse: 0.35
+      streaming: 0.20
+    rationale: "Clinical may need enterprise data management"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Dataset size growth"
+    - "Team collaboration needs"
+    - "Cloud storage costs"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Local DVC (0.40) resolved. The project uses DVC for data versioning
+  with local storage. Cloud DVC is the natural next step for collaboration.
+
+tags:
+  - architecture
+  - data
+  - resolved

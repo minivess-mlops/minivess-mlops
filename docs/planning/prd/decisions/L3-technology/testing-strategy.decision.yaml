@@ -1,0 +1,149 @@
+decision_id: testing_strategy
+title: "Testing Strategy"
+description: >
+  What testing methodologies to employ beyond standard unit/integration tests.
+  Property-based testing uses Hypothesis to generate test cases from properties;
+  metamorphic testing checks invariance under input transformations;
+  mutation testing measures test suite quality; standard-only uses pytest
+  without advanced techniques.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: property_based
+    title: "Property-Based Testing (Hypothesis)"
+    description: >
+      Use Hypothesis to generate test inputs from data strategies and verify
+      properties (e.g., segmentation masks are valid binary arrays, dice
+      scores are in [0,1], transforms preserve tensor shape). Implemented
+      alongside standard pytest.
+    prior_probability: 0.30
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "data_validation_tools.pandera_ge"
+      - "testing_strategy.standard_only"
+
+  - option_id: metamorphic
+    title: "Metamorphic Testing"
+    description: >
+      Test model behavior under controlled input transformations: flipping
+      a volume should flip the prediction; small noise should not change
+      the label; scaling should preserve relative scores. Particularly
+      valuable for medical imaging where ground truth is expensive.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires defining metamorphic relations per model"
+      - "Computationally expensive for 3D volumes"
+
+  - option_id: mutation
+    title: "Mutation Testing"
+    description: >
+      Use mutmut or cosmic-ray to inject faults and measure test suite
+      effectiveness. Ensures tests actually catch bugs rather than just
+      passing. Expensive to run but improves test quality assurance.
+    prior_probability: 0.15
+    status: experimental
+    implementation_status: not_started
+    constraints:
+      - "Very slow for ML codebases"
+      - "Requires significant compute"
+      - "Many ML mutations are semantically equivalent"
+
+  - option_id: standard_only
+    title: "Standard pytest Only"
+    description: >
+      Standard pytest with fixtures, parametrize, and marks. No advanced
+      testing techniques. Currently implemented as the baseline test suite.
+    prior_probability: 0.30
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "ci_cd_platform.github_actions"
+
+conditional_on:
+  - parent_decision_id: validation_depth
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: full_onion
+        then_probabilities:
+          property_based: 0.35
+          metamorphic: 0.30
+          mutation: 0.15
+          standard_only: 0.20
+      - given_parent_option: schema_plus_statistical
+        then_probabilities:
+          property_based: 0.35
+          metamorphic: 0.25
+          mutation: 0.10
+          standard_only: 0.30
+      - given_parent_option: schema_only
+        then_probabilities:
+          property_based: 0.25
+          metamorphic: 0.15
+          mutation: 0.10
+          standard_only: 0.50
+      - given_parent_option: none
+        then_probabilities:
+          property_based: 0.15
+          metamorphic: 0.10
+          mutation: 0.05
+          standard_only: 0.70
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      property_based: 0.30
+      metamorphic: 0.15
+      mutation: 0.05
+      standard_only: 0.50
+    rationale: "Solo researchers prioritize standard tests; property-based for learning"
+  lab_group:
+    probability_overrides:
+      property_based: 0.30
+      metamorphic: 0.30
+      mutation: 0.15
+      standard_only: 0.25
+    rationale: "Lab groups benefit from metamorphic testing for shared models"
+  clinical_deployment:
+    probability_overrides:
+      property_based: 0.30
+      metamorphic: 0.35
+      mutation: 0.20
+      standard_only: 0.15
+    rationale: "Clinical requires comprehensive testing including metamorphic relations"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "ML-specific testing frameworks maturation"
+    - "Metamorphic testing for medical imaging research"
+    - "Mutation testing performance improvements"
+    - "Regulatory testing requirements"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Property-based testing (0.30) and standard pytest (0.30) are both
+  resolved/implemented. Hypothesis generates test inputs from strategies
+  and verifies properties, complementing standard pytest fixtures.
+  Metamorphic testing (0.25) is the natural next step for medical imaging
+  where ground truth annotation is expensive — testing model invariances
+  under controlled transformations provides quality assurance without
+  additional labels.
+
+tags:
+  - technology
+  - testing
+  - quality-assurance
+  - resolved

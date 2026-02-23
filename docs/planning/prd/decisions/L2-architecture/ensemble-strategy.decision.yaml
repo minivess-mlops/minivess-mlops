@@ -1,0 +1,112 @@
+decision_id: ensemble_strategy
+title: "Ensemble Strategy"
+description: >
+  Architecture-level approach to combining multiple model predictions.
+
+decision_level: L2_architecture
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: simple_averaging
+    title: "Simple Averaging"
+    description: "Mean of predictions. Baseline ensemble."
+    prior_probability: 0.25
+    status: resolved
+    implementation_status: implemented
+
+  - option_id: model_soups
+    title: "Model Soups"
+    description: "Weight-space averaging (greedy soup). Already implemented."
+    prior_probability: 0.30
+    status: resolved
+    implementation_status: implemented
+
+  - option_id: uncertainty_weighted
+    title: "Uncertainty-Weighted"
+    description: "Weight predictions by calibrated uncertainty."
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+
+  - option_id: learned_stacking
+    title: "Learned Stacking"
+    description: "Train a meta-learner on model outputs."
+    prior_probability: 0.20
+    status: experimental
+    implementation_status: not_started
+
+conditional_on:
+  - parent_decision_id: model_strategy
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: single_architecture
+        then_probabilities:
+          simple_averaging: 0.50
+          model_soups: 0.30
+          uncertainty_weighted: 0.15
+          learned_stacking: 0.05
+      - given_parent_option: multi_architecture
+        then_probabilities:
+          simple_averaging: 0.20
+          model_soups: 0.25
+          uncertainty_weighted: 0.30
+          learned_stacking: 0.25
+      - given_parent_option: foundation_model_first
+        then_probabilities:
+          simple_averaging: 0.20
+          model_soups: 0.35
+          uncertainty_weighted: 0.25
+          learned_stacking: 0.20
+      - given_parent_option: automl_search
+        then_probabilities:
+          simple_averaging: 0.15
+          model_soups: 0.20
+          uncertainty_weighted: 0.25
+          learned_stacking: 0.40
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      simple_averaging: 0.30
+      model_soups: 0.35
+      uncertainty_weighted: 0.20
+      learned_stacking: 0.15
+    rationale: "Soups are accessible; uncertainty weighting is a good learning target"
+  lab_group:
+    probability_overrides:
+      simple_averaging: 0.20
+      model_soups: 0.25
+      uncertainty_weighted: 0.30
+      learned_stacking: 0.25
+    rationale: "Lab groups can explore more sophisticated methods"
+  clinical_deployment:
+    probability_overrides:
+      simple_averaging: 0.15
+      model_soups: 0.20
+      uncertainty_weighted: 0.40
+      learned_stacking: 0.25
+    rationale: "Clinical needs calibrated uncertainty for safety"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "New ensemble methods in literature"
+    - "TIES-DARE / DARE-TIES maturity"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Model soups (0.30) and simple averaging (0.25) are already implemented.
+  Uncertainty-weighted (0.25) is the natural next step, requiring calibration.
+
+tags:
+  - architecture
+  - ensemble
+  - partially-resolved

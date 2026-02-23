@@ -1,0 +1,76 @@
+# PRD Document Frontmatter Schema
+# For narrative markdown PRD documents (not decision nodes)
+
+$schema: "http://json-schema.org/draft-07/schema#"
+title: "MinIVess PRD Document Frontmatter"
+description: >
+  Schema for YAML frontmatter in narrative PRD markdown files.
+  Decision nodes use _schema.yaml instead.
+
+type: object
+required:
+  - id
+  - title
+  - status
+  - version
+
+properties:
+  id:
+    type: string
+    description: "Path-based ID, e.g. 'architecture/model-strategy'"
+
+  title:
+    type: string
+    maxLength: 100
+
+  status:
+    type: string
+    enum: [active, experimental, deprecated, rejected]
+
+  version:
+    type: string
+    pattern: "^\\d+\\.\\d+\\.\\d+$"
+    description: "Semantic version"
+
+  requires:
+    type: array
+    items:
+      type: string
+    description: "PRDs that MUST be loaded for context"
+
+  cross_refs:
+    type: array
+    items:
+      type: string
+    description: "Related PRDs (optional context)"
+
+  tags:
+    type: array
+    items:
+      type: string
+
+  priority:
+    type: string
+    enum: [high, medium, low]
+
+  decision_level:
+    type: string
+    enum:
+      - L1_research_goals
+      - L2_architecture
+      - L3_technology
+      - L4_infrastructure
+      - L5_operations
+
+  relevant_decisions:
+    type: array
+    items:
+      type: string
+    description: "Linked decision node IDs"
+
+  domain_applicability:
+    type: object
+    additionalProperties:
+      type: number
+      minimum: 0.0
+      maximum: 1.0

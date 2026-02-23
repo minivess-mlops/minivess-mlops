@@ -1,0 +1,60 @@
+domain_id: cardiac_imaging
+title: "Cardiac Imaging"
+status: planned
+last_updated: 2026-02-23
+
+description: >
+  Domain overlay for cardiac structure segmentation. Targets the
+  Medical Segmentation Decathlon (MSD) cardiac dataset. Key challenges:
+  motion artifacts, thin myocardial walls, multi-structure segmentation.
+
+dataset:
+  name: "MSD Cardiac"
+  modality: "Cardiac MRI (cine, late gadolinium enhancement)"
+  structures:
+    - name: "Left ventricle"
+      label_id: 1
+      difficulty: "Medium"
+    - name: "Right ventricle"
+      label_id: 2
+      difficulty: "Medium"
+    - name: "Myocardium"
+      label_id: 3
+      difficulty: "High — thin walls"
+  challenges:
+    - "Cardiac motion artifacts"
+    - "Thin myocardial walls"
+    - "Multi-class segmentation"
+    - "Varying image quality across scanners"
+
+metric_adjustments:
+  adjustments:
+    - metric: hausdorff_95
+      weight_boost: 0.10
+      rationale: "Surface accuracy critical for thin myocardial walls"
+    - metric: surface_dice
+      weight_boost: 0.05
+      rationale: "Surface overlap important for boundary delineation"
+
+loss_adjustments:
+  adjustments:
+    - loss: boundary_loss
+      viability_boost: 0.10
+      rationale: "Helps with thin myocardial wall segmentation"
+    - loss: deep_supervision
+      viability_boost: 0.05
+      rationale: "Multi-scale supervision for complex cardiac structures"
+
+prd_prior_adjustments:
+  adjustments:
+    - decision_id: loss_functions
+      option_id: focal
+      adjustment: "+0.05"
+      rationale: "Focal loss helps with class imbalance in multi-structure"
+
+vocabulary:
+  primary_structure: "cardiac structures"
+  imaging_modality: "cardiac MRI"
+  key_metric: "Hausdorff95"
+  primary_challenge: "motion artifacts and thin walls"
+  clinical_application: "cardiac function assessment"

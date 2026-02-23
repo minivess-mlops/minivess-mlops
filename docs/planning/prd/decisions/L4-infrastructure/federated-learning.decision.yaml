@@ -1,0 +1,167 @@
+decision_id: federated_learning
+title: "Federated Learning"
+description: >
+  Whether and how to support federated learning for multi-site training
+  without data sharing. Critical for medical imaging where patient data
+  cannot leave institutional boundaries. MONAI FL integrates with the
+  MONAI ecosystem; Flower is framework-agnostic; PySyft offers
+  privacy-preserving computation.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: monai_fl
+    title: "MONAI FL"
+    description: >
+      MONAI Federated Learning built on NVIDIA FLARE. Native integration
+      with MONAI Bundle format and MONAI ecosystem. Designed for medical
+      imaging federated training across hospital sites.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "monai_alignment.monai_native"
+      - "model_export_format.monai_bundle"
+      - "compute_target.kubernetes"
+
+  - option_id: flower
+    title: "Flower"
+    description: >
+      Framework-agnostic federated learning. Supports PyTorch, TensorFlow,
+      and custom frameworks. Active community and research adoption.
+      More flexible than MONAI FL but lacks medical imaging focus.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Manual MONAI integration required"
+      - "Medical imaging workflows need custom adapters"
+
+  - option_id: pysyft
+    title: "PySyft"
+    description: >
+      Privacy-preserving computation framework from OpenMined. Supports
+      federated learning, differential privacy, and secure multi-party
+      computation. Experimental for production workloads.
+    prior_probability: 0.15
+    status: experimental
+    implementation_status: not_started
+    constraints:
+      - "Experimental stability"
+      - "Performance overhead from privacy mechanisms"
+      - "Limited production deployments"
+
+  - option_id: centralized_only
+    title: "Centralized Only"
+    description: >
+      No federated learning. All training on centralized data.
+      Current implementation. Simplest approach when data sharing
+      is possible or when working with public datasets.
+    prior_probability: 0.25
+    status: resolved
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: monai_alignment
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: monai_native
+        then_probabilities:
+          monai_fl: 0.50
+          flower: 0.15
+          pysyft: 0.10
+          centralized_only: 0.25
+      - given_parent_option: monai_compatible
+        then_probabilities:
+          monai_fl: 0.35
+          flower: 0.25
+          pysyft: 0.15
+          centralized_only: 0.25
+      - given_parent_option: framework_agnostic
+        then_probabilities:
+          monai_fl: 0.10
+          flower: 0.40
+          pysyft: 0.20
+          centralized_only: 0.30
+
+  - parent_decision_id: compute_target
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: local_gpu
+        then_probabilities:
+          monai_fl: 0.15
+          flower: 0.15
+          pysyft: 0.10
+          centralized_only: 0.60
+      - given_parent_option: cloud_spot
+        then_probabilities:
+          monai_fl: 0.30
+          flower: 0.25
+          pysyft: 0.15
+          centralized_only: 0.30
+      - given_parent_option: hpc_slurm
+        then_probabilities:
+          monai_fl: 0.35
+          flower: 0.25
+          pysyft: 0.15
+          centralized_only: 0.25
+      - given_parent_option: kubernetes
+        then_probabilities:
+          monai_fl: 0.40
+          flower: 0.25
+          pysyft: 0.15
+          centralized_only: 0.20
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      monai_fl: 0.15
+      flower: 0.10
+      pysyft: 0.10
+      centralized_only: 0.65
+    rationale: "Solo researchers rarely need federated learning; centralized data suffices"
+  lab_group:
+    probability_overrides:
+      monai_fl: 0.40
+      flower: 0.20
+      pysyft: 0.10
+      centralized_only: 0.30
+    rationale: "Multi-site lab collaborations benefit from MONAI FL"
+  clinical_deployment:
+    probability_overrides:
+      monai_fl: 0.45
+      flower: 0.20
+      pysyft: 0.15
+      centralized_only: 0.20
+    rationale: "Clinical sites often cannot share data; FL is essential"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-23
+  next_review: 2026-05-23
+  change_drivers:
+    - "NVIDIA FLARE / MONAI FL releases"
+    - "Flower framework maturity"
+    - "Regulatory requirements for data locality"
+    - "Multi-site collaboration opportunities"
+    - "Differential privacy advances"
+
+domain_applicability:
+  vascular_segmentation: 0.8
+  cardiac_imaging: 0.9
+  neuroimaging: 0.9
+  general_medical: 1.0
+
+rationale: >
+  Centralized only (0.25) is the current resolved state for a single-site
+  project using public datasets. MONAI FL (0.35) is the most likely
+  upgrade path given the MONAI ecosystem alignment. This decision is
+  shifting because multi-site collaborations could emerge.
+
+tags:
+  - infrastructure
+  - federated-learning
+  - privacy
+  - multi-site

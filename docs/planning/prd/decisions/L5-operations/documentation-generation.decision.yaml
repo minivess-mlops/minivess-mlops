@@ -1,0 +1,168 @@
+decision_id: documentation_generation
+title: "Documentation Generation"
+description: >
+  How model cards, data sheets, and technical documentation are generated.
+  Automated cards generate from MLflow metadata and code; manual requires
+  hand-written documentation; CI-generated integrates with CI/CD pipelines;
+  none means no structured documentation. Compliance-relevant for
+  SaMD-principled audit trails.
+
+decision_level: L5_operations
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: automated_cards
+    title: "Automated Model Cards"
+    description: >
+      Model cards and data sheets auto-generated from MLflow metadata,
+      training configs, and evaluation results. Currently implemented
+      with model card generation from experiment runs. Ensures
+      documentation stays synchronized with actual model state.
+    prior_probability: 0.35
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "model_governance.mlflow_tags"
+      - "experiment_tracking.mlflow"
+      - "compliance_depth.lightweight_audit"
+
+  - option_id: manual
+    title: "Manual Documentation"
+    description: >
+      Hand-written model cards and technical documentation. Highest
+      quality and flexibility but high maintenance burden and risk
+      of documentation drift. Partial implementation for ADRs and
+      architecture docs.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: partial
+
+  - option_id: ci_generated
+    title: "CI-Generated Documentation"
+    description: >
+      Documentation generated as part of CI/CD pipeline. Sphinx/MkDocs
+      build on every PR. Includes auto-generated API docs, test coverage
+      reports, and model performance summaries.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "ci_cd_platform.github_actions"
+      - "ci_cd_platform.gitlab_ci"
+
+  - option_id: none
+    title: "No Documentation Generation"
+    description: >
+      No structured documentation generation. README and inline comments
+      only. Fastest development but poor for collaboration and compliance.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+
+conditional_on:
+  - parent_decision_id: documentation_standard
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: model_cards_lite
+        then_probabilities:
+          automated_cards: 0.45
+          manual: 0.25
+          ci_generated: 0.20
+          none: 0.10
+      - given_parent_option: model_cards_full
+        then_probabilities:
+          automated_cards: 0.35
+          manual: 0.35
+          ci_generated: 0.25
+          none: 0.05
+      - given_parent_option: datasheets_plus
+        then_probabilities:
+          automated_cards: 0.30
+          manual: 0.30
+          ci_generated: 0.30
+          none: 0.10
+      - given_parent_option: none
+        then_probabilities:
+          automated_cards: 0.15
+          manual: 0.15
+          ci_generated: 0.10
+          none: 0.60
+
+  - parent_decision_id: ci_cd_platform
+    influence_strength: weak
+    conditional_table:
+      - given_parent_option: github_actions
+        then_probabilities:
+          automated_cards: 0.35
+          manual: 0.25
+          ci_generated: 0.25
+          none: 0.15
+      - given_parent_option: gitlab_ci
+        then_probabilities:
+          automated_cards: 0.30
+          manual: 0.25
+          ci_generated: 0.30
+          none: 0.15
+      - given_parent_option: buildkite
+        then_probabilities:
+          automated_cards: 0.35
+          manual: 0.30
+          ci_generated: 0.20
+          none: 0.15
+      - given_parent_option: jenkins
+        then_probabilities:
+          automated_cards: 0.30
+          manual: 0.30
+          ci_generated: 0.25
+          none: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      automated_cards: 0.40
+      manual: 0.25
+      ci_generated: 0.15
+      none: 0.20
+    rationale: "Solo researchers benefit from automated cards to reduce documentation burden"
+  lab_group:
+    probability_overrides:
+      automated_cards: 0.30
+      manual: 0.20
+      ci_generated: 0.35
+      none: 0.15
+    rationale: "Lab groups benefit from CI-generated docs for shared project visibility"
+  clinical_deployment:
+    probability_overrides:
+      automated_cards: 0.40
+      manual: 0.30
+      ci_generated: 0.20
+      none: 0.10
+    rationale: "Clinical needs both automated and manual documentation for compliance"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Model card generation tooling improvements"
+    - "EU AI Act documentation requirements"
+    - "MkDocs or Sphinx integration depth"
+    - "CML auto-PR comment capabilities"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Automated cards (0.35) is the resolved choice, generating model cards
+  from MLflow metadata. Manual (0.30) is partially implemented for ADRs.
+  CI-generated (0.20) is the next step when CI/CD doc pipelines mature.
+
+tags:
+  - operations
+  - documentation
+  - compliance
+  - resolved

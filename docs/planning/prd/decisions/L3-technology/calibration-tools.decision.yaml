@@ -1,0 +1,187 @@
+decision_id: calibration_tools
+title: "Calibration Tools"
+description: >
+  Which calibration and uncertainty quantification tools to use for
+  post-hoc probability calibration. Proper calibration is critical for
+  clinical decision support where predicted probabilities must reflect
+  true likelihoods. Interacts strongly with the uncertainty quantification
+  architecture decision and the metrics framework for evaluation.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: netcal
+    title: "netcal"
+    description: >
+      Comprehensive calibration framework supporting temperature scaling,
+      Platt scaling, isotonic regression, beta calibration, and BBQ.
+      Includes calibration metrics (ECE, MCE, reliability diagrams).
+      Referenced in CLAUDE.md stack.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "metrics_framework.metricsreloaded"
+      - "ensemble_methods.swag"
+
+  - option_id: mapie
+    title: "MAPIE"
+    description: >
+      Model Agnostic Prediction Interval Estimator. Conformal prediction
+      framework for distribution-free uncertainty quantification. Provides
+      prediction sets with coverage guarantees. Referenced in CLAUDE.md.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "ensemble_methods.mean"
+    constraints:
+      - "Originally designed for tabular; 3D image adaptation needed"
+      - "Calibration dataset split required"
+
+  - option_id: local_temp_scaling
+    title: "Local Temperature Scaling"
+    description: >
+      Spatially-varying temperature scaling for segmentation. Learns
+      per-voxel or per-region temperature parameters to correct
+      calibration heterogeneity across anatomy. Partially implemented
+      as experimental feature.
+    prior_probability: 0.20
+    status: resolved
+    implementation_status: partial
+    constraints:
+      - "Custom implementation, no standard library"
+      - "Requires sufficient calibration data per region"
+
+  - option_id: mc_calibration
+    title: "Monte Carlo Calibration (MC-Dropout)"
+    description: >
+      Use Monte Carlo dropout at inference for approximate Bayesian
+      uncertainty. Multiple stochastic forward passes produce prediction
+      variance maps. Well-established in medical imaging literature.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "ensemble_methods.swag"
+    constraints:
+      - "Inference-time computational overhead (N forward passes)"
+      - "Dropout rate tuning affects calibration quality"
+
+conditional_on:
+  - parent_decision_id: uncertainty_quantification
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: none
+        then_probabilities:
+          netcal: 0.40
+          mapie: 0.20
+          local_temp_scaling: 0.25
+          mc_calibration: 0.15
+      - given_parent_option: mc_dropout
+        then_probabilities:
+          netcal: 0.20
+          mapie: 0.15
+          local_temp_scaling: 0.20
+          mc_calibration: 0.45
+      - given_parent_option: deep_ensemble
+        then_probabilities:
+          netcal: 0.30
+          mapie: 0.30
+          local_temp_scaling: 0.20
+          mc_calibration: 0.20
+      - given_parent_option: conformal_prediction
+        then_probabilities:
+          netcal: 0.15
+          mapie: 0.50
+          local_temp_scaling: 0.15
+          mc_calibration: 0.20
+      - given_parent_option: evidential
+        then_probabilities:
+          netcal: 0.35
+          mapie: 0.25
+          local_temp_scaling: 0.25
+          mc_calibration: 0.15
+
+  - parent_decision_id: metrics_framework
+    influence_strength: weak
+    conditional_table:
+      - given_parent_option: torchmetrics
+        then_probabilities:
+          netcal: 0.30
+          mapie: 0.30
+          local_temp_scaling: 0.20
+          mc_calibration: 0.20
+      - given_parent_option: metricsreloaded
+        then_probabilities:
+          netcal: 0.35
+          mapie: 0.25
+          local_temp_scaling: 0.20
+          mc_calibration: 0.20
+      - given_parent_option: monai_metrics
+        then_probabilities:
+          netcal: 0.25
+          mapie: 0.25
+          local_temp_scaling: 0.25
+          mc_calibration: 0.25
+      - given_parent_option: custom
+        then_probabilities:
+          netcal: 0.25
+          mapie: 0.30
+          local_temp_scaling: 0.25
+          mc_calibration: 0.20
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      netcal: 0.35
+      mapie: 0.25
+      local_temp_scaling: 0.15
+      mc_calibration: 0.25
+    rationale: "Solo researchers prefer off-the-shelf netcal or simple MC-Dropout"
+  lab_group:
+    probability_overrides:
+      netcal: 0.25
+      mapie: 0.30
+      local_temp_scaling: 0.20
+      mc_calibration: 0.25
+    rationale: "Lab groups can explore conformal prediction with MAPIE"
+  clinical_deployment:
+    probability_overrides:
+      netcal: 0.25
+      mapie: 0.35
+      local_temp_scaling: 0.25
+      mc_calibration: 0.15
+    rationale: "Clinical needs coverage guarantees (MAPIE conformal) and spatial calibration"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-23
+  next_review: 2026-05-23
+  change_drivers:
+    - "Conformal prediction for medical imaging papers"
+    - "MAPIE 3D/segmentation support"
+    - "netcal maintenance and updates"
+    - "New calibration methods in MONAI"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 0.95
+  neuroimaging: 0.90
+  general_medical: 0.85
+
+rationale: >
+  netcal (0.30) and MAPIE (0.30) share top prior reflecting two complementary
+  approaches: post-hoc recalibration vs. conformal prediction with coverage
+  guarantees. Both are in the CLAUDE.md technology stack. Local temperature
+  scaling (0.20) is partially implemented and important for spatially
+  heterogeneous segmentation tasks. MC calibration (0.20) is the classical
+  Bayesian approach but has inference-time cost.
+
+tags:
+  - calibration
+  - uncertainty
+  - conformal-prediction
+  - clinical-safety

@@ -1,0 +1,50 @@
+domain_id: general_medical
+title: "General Medical"
+status: planned
+last_updated: 2026-02-23
+
+description: >
+  Domain-agnostic overlay for any 3D medical image segmentation task.
+  Uses backbone defaults without domain-specific adjustments. Suitable
+  for quick experimentation with new datasets from the Medical
+  Segmentation Decathlon or similar challenges.
+
+dataset:
+  name: "Any MSD dataset"
+  modality: "Any (CT, MRI, PET)"
+  structures:
+    - name: "Target structures"
+      label_id: "varies"
+      difficulty: "varies"
+  challenges:
+    - "Unknown domain-specific characteristics"
+    - "Variable image quality"
+    - "Unknown class distribution"
+
+metric_adjustments:
+  description: "No adjustments — uses backbone defaults"
+  adjustments: []
+
+loss_adjustments:
+  description: "No adjustments — uses backbone defaults (DiceCE)"
+  adjustments: []
+
+augmentation_adjustments:
+  description: "No adjustments — uses backbone defaults"
+  additions: []
+
+prd_prior_adjustments:
+  description: "No adjustments — backbone priors are domain-agnostic"
+  adjustments: []
+
+vocabulary:
+  primary_structure: "target structures"
+  imaging_modality: "medical imaging"
+  key_metric: "Dice Score"
+  primary_challenge: "unknown domain characteristics"
+  clinical_application: "general medical image analysis"
+
+notes: >
+  This overlay serves as the default when no domain-specific information
+  is available. When starting a new dataset, begin here and create a
+  domain-specific overlay as you learn the data characteristics.

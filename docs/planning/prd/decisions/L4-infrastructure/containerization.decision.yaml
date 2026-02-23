@@ -1,0 +1,145 @@
+decision_id: containerization
+title: "Containerization"
+description: >
+  Container orchestration strategy for development and deployment.
+  Docker Compose is simplest for local multi-service stacks; Kubernetes
+  provides production orchestration; Podman offers rootless alternative;
+  none is viable for pure local development without services.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: docker_compose
+    title: "Docker Compose"
+    description: >
+      Multi-container orchestration via docker-compose.yaml. Currently used
+      for MLflow, Label Studio, Langfuse, Prometheus/Grafana, and Marquez.
+      Simple, well-documented, standard for local-first development.
+    prior_probability: 0.45
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "compute_target.local_gpu"
+      - "monitoring_stack.prometheus_grafana"
+      - "ci_cd_platform.github_actions"
+
+  - option_id: kubernetes
+    title: "Kubernetes"
+    description: >
+      Full K8s orchestration with Helm charts or Kustomize. Auto-scaling,
+      service mesh, rolling deployments. Required for production clinical
+      deployment but significant operational overhead.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "K8s cluster management expertise"
+      - "Helm chart development and maintenance"
+      - "Ingress and networking complexity"
+    complements:
+      - "gitops_strategy.argocd"
+      - "compute_target.kubernetes"
+
+  - option_id: podman
+    title: "Podman Rootless"
+    description: >
+      Rootless containers via Podman. Daemon-less, OCI-compliant,
+      better security model. Compatible with Docker Compose files
+      via podman-compose.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "GPU passthrough more complex"
+      - "Ecosystem tooling slightly behind Docker"
+
+  - option_id: none
+    title: "No Containers"
+    description: >
+      Run everything natively via uv virtual environments. Simplest
+      possible setup but lacks reproducibility and isolation.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+
+conditional_on:
+  - parent_decision_id: serving_architecture
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: bentoml_rest
+        then_probabilities:
+          docker_compose: 0.45
+          kubernetes: 0.30
+          podman: 0.15
+          none: 0.10
+      - given_parent_option: monai_deploy
+        then_probabilities:
+          docker_compose: 0.30
+          kubernetes: 0.40
+          podman: 0.10
+          none: 0.20
+      - given_parent_option: gradio_only
+        then_probabilities:
+          docker_compose: 0.50
+          kubernetes: 0.10
+          podman: 0.15
+          none: 0.25
+      - given_parent_option: triton
+        then_probabilities:
+          docker_compose: 0.30
+          kubernetes: 0.45
+          podman: 0.10
+          none: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      docker_compose: 0.55
+      kubernetes: 0.05
+      podman: 0.15
+      none: 0.25
+    rationale: "Solo researchers use Docker Compose for service stack or skip containers entirely"
+  lab_group:
+    probability_overrides:
+      docker_compose: 0.35
+      kubernetes: 0.35
+      podman: 0.15
+      none: 0.15
+    rationale: "Lab groups may run shared K8s or institutional Docker infrastructure"
+  clinical_deployment:
+    probability_overrides:
+      docker_compose: 0.15
+      kubernetes: 0.50
+      podman: 0.20
+      none: 0.15
+    rationale: "Clinical deployment needs Kubernetes for production orchestration and scaling"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Docker licensing changes"
+    - "Podman maturity for GPU workloads"
+    - "K8s operator patterns for ML"
+    - "BentoML container build improvements"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Docker Compose (0.45) is resolved as the local-first orchestration
+  approach. It runs MLflow, Label Studio, Langfuse, Prometheus/Grafana,
+  and Marquez. Kubernetes (0.25) is the natural upgrade path for
+  production deployments.
+
+tags:
+  - infrastructure
+  - containers
+  - devops
+  - resolved

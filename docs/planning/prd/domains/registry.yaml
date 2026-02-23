@@ -1,0 +1,46 @@
+# Domain Registry for MinIVess MLOps v2 PRD
+# Lists all available domain overlays
+
+registry:
+  name: "MinIVess Domain Registry"
+  version: "1.0.0"
+  last_updated: 2026-02-23
+  description: >
+    Catalog of domain overlays that modulate the probabilistic PRD.
+    Each domain adjusts prior probabilities, metrics, losses, and
+    augmentation strategies for its specific imaging context.
+
+domains:
+  - domain_id: vascular_segmentation
+    title: "Vascular Segmentation"
+    status: active
+    overlay_path: vascular-segmentation/overlay.yaml
+    description: "Cerebral vessel segmentation from 7T TOF-MRA (MinIVess dataset)"
+    primary_dataset: "MinIVess"
+    modality: "7T TOF-MRA"
+
+  - domain_id: cardiac_imaging
+    title: "Cardiac Imaging"
+    status: planned
+    overlay_path: cardiac-imaging/overlay.yaml
+    description: "Cardiac structure segmentation from MSD Cardiac dataset"
+    primary_dataset: "MSD Cardiac"
+    modality: "MRI (various sequences)"
+
+  - domain_id: neuroimaging
+    title: "Neuroimaging"
+    status: planned
+    overlay_path: neuroimaging/overlay.yaml
+    description: "Brain tumor and stroke lesion segmentation"
+    primary_dataset: "BraTS, ISLES"
+    modality: "Multi-modal MRI"
+
+  - domain_id: general_medical
+    title: "General Medical"
+    status: planned
+    overlay_path: general-medical/overlay.yaml
+    description: "Domain-agnostic defaults for any 3D medical segmentation"
+    primary_dataset: "Any MSD dataset"
+    modality: "Any"
+
+active_domain: vascular_segmentation

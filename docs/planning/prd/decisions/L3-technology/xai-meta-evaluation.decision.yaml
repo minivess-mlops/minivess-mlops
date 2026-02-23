@@ -1,0 +1,121 @@
+decision_id: xai_meta_evaluation
+title: "XAI Meta-Evaluation"
+description: >
+  How to evaluate the quality and faithfulness of explainability outputs.
+  Quantus provides standardized meta-evaluation metrics for XAI methods;
+  custom metrics allow domain-specific evaluation; none defers meta-evaluation
+  until XAI itself is integrated.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: quantus
+    title: "Quantus"
+    description: >
+      Standardized meta-evaluation library for XAI. Provides faithfulness,
+      robustness, complexity, localisation, and randomisation metrics.
+      Present in dependencies but not integrated since XAI (Captum) itself
+      is not yet wired to the pipeline.
+    prior_probability: 0.40
+    status: viable
+    implementation_status: config_only
+    complements:
+      - "xai_strategy.captum_3d"
+
+  - option_id: custom_metrics
+    title: "Custom Meta-Evaluation Metrics"
+    description: >
+      Hand-written evaluation metrics for XAI quality, such as
+      voxel-level attribution agreement with expert annotations,
+      saliency map stability across augmentations, and
+      region-of-interest specificity.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+
+  - option_id: none
+    title: "No Meta-Evaluation"
+    description: >
+      Use XAI outputs qualitatively without formal meta-evaluation.
+      Current state since neither XAI nor meta-evaluation is integrated.
+      Acceptable for initial exploration but insufficient for publication.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: xai_strategy
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: captum_3d
+        then_probabilities:
+          quantus: 0.50
+          custom_metrics: 0.30
+          none: 0.20
+      - given_parent_option: shap_tabular
+        then_probabilities:
+          quantus: 0.35
+          custom_metrics: 0.30
+          none: 0.35
+      - given_parent_option: grad_cam_only
+        then_probabilities:
+          quantus: 0.40
+          custom_metrics: 0.25
+          none: 0.35
+      - given_parent_option: none
+        then_probabilities:
+          quantus: 0.10
+          custom_metrics: 0.10
+          none: 0.80
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      quantus: 0.35
+      custom_metrics: 0.25
+      none: 0.40
+    rationale: "Solo researchers may skip meta-evaluation during initial exploration"
+  lab_group:
+    probability_overrides:
+      quantus: 0.45
+      custom_metrics: 0.35
+      none: 0.20
+    rationale: "Lab groups need rigorous XAI evaluation for publications"
+  clinical_deployment:
+    probability_overrides:
+      quantus: 0.50
+      custom_metrics: 0.35
+      none: 0.15
+    rationale: "Clinical deployment requires validated explainability for trust"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-23
+  next_review: 2026-05-23
+  change_drivers:
+    - "Quantus library updates and new metrics"
+    - "XAI strategy resolution (prerequisite)"
+    - "Regulatory XAI requirements (EU AI Act)"
+    - "New 3D-specific XAI evaluation methods"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Quantus (0.40) is the preferred meta-evaluation framework given its
+  comprehensive metric library and standardized evaluation protocol.
+  However, this decision is blocked by the XAI strategy resolution —
+  Captum for 3D volumetric data needs to be integrated first before
+  meta-evaluation is meaningful. Current state is effectively "none"
+  since neither XAI nor meta-evaluation is active.
+
+tags:
+  - technology
+  - explainability
+  - meta-evaluation
+  - blocked-by-xai

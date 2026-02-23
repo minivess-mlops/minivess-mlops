@@ -1,0 +1,86 @@
+decision_id: xai_strategy
+title: "Explainability Strategy"
+description: >
+  Approach to model explainability. Critical for medical imaging trust.
+
+decision_level: L2_architecture
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: gradient_based
+    title: "Gradient-Based (Captum)"
+    description: "GradCAM, Integrated Gradients, SmoothGrad via Captum."
+    prior_probability: 0.35
+    status: viable
+    implementation_status: config_only
+    complements:
+      - "xai_meta_evaluation.quantus"
+
+  - option_id: perturbation_based
+    title: "Perturbation-Based (SHAP)"
+    description: "SHAP, LIME, occlusion sensitivity."
+    prior_probability: 0.25
+    status: viable
+    implementation_status: config_only
+
+  - option_id: concept_based
+    title: "Concept-Based"
+    description: "TCAV, concept bottleneck models."
+    prior_probability: 0.20
+    status: experimental
+    implementation_status: not_started
+
+  - option_id: none
+    title: "No XAI"
+    description: "Skip explainability for now."
+    prior_probability: 0.20
+    status: viable
+    implementation_status: implemented
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      gradient_based: 0.35
+      perturbation_based: 0.25
+      concept_based: 0.15
+      none: 0.25
+    rationale: "Gradient-based is most accessible to learn"
+  lab_group:
+    probability_overrides:
+      gradient_based: 0.30
+      perturbation_based: 0.30
+      concept_based: 0.25
+      none: 0.15
+    rationale: "Lab groups need XAI for publications"
+  clinical_deployment:
+    probability_overrides:
+      gradient_based: 0.30
+      perturbation_based: 0.25
+      concept_based: 0.30
+      none: 0.15
+    rationale: "Clinical needs interpretable explanations for clinicians"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-23
+  next_review: 2026-05-23
+  change_drivers:
+    - "3D XAI methods maturity"
+    - "Captum 3D support"
+    - "EU AI Act XAI requirements"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 0.8
+
+rationale: >
+  Gradient-based (0.35) is the most practical starting point. Captum and
+  SHAP are in dependencies but not yet integrated.
+
+tags:
+  - architecture
+  - explainability
+  - not-started

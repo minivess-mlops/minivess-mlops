@@ -1,0 +1,119 @@
+decision_id: model_governance
+title: "Model Governance"
+description: >
+  How model lifecycle is tracked, approved, and governed. Full registry
+  provides structured promotion stages and approval workflows; MLflow
+  tags offer lightweight governance via experiment metadata; none means
+  ad-hoc model management. Compliance-critical for SaMD-principled design.
+
+decision_level: L5_operations
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: full_registry
+    title: "Full Model Registry"
+    description: >
+      Structured model registry with staging, production, and archived
+      lifecycle stages. Approval workflows, automated evaluation gates,
+      and audit trail. Requires MLflow Model Registry or dedicated
+      governance platform.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "compliance_depth.iec_62304_full"
+      - "documentation_generation.automated_cards"
+      - "drift_response.automated_retrain"
+
+  - option_id: mlflow_tags
+    title: "MLflow Tags Governance"
+    description: >
+      Lightweight governance using MLflow experiment tags, run metadata,
+      and model versioning. Current implementation with SaMD-principled
+      audit trails. Model cards generated from MLflow metadata.
+    prior_probability: 0.40
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "compliance_depth.lightweight_audit"
+      - "experiment_tracking.mlflow"
+      - "documentation_generation.automated_cards"
+
+  - option_id: none
+    title: "No Governance"
+    description: >
+      No structured model governance. Models managed via file system
+      and manual versioning. Acceptable for early-stage research
+      but not for production or compliance.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+
+conditional_on:
+  - parent_decision_id: compliance_depth
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: iec_62304_full
+        then_probabilities:
+          full_registry: 0.65
+          mlflow_tags: 0.30
+          none: 0.05
+      - given_parent_option: lightweight_audit
+        then_probabilities:
+          full_registry: 0.25
+          mlflow_tags: 0.50
+          none: 0.25
+      - given_parent_option: no_compliance
+        then_probabilities:
+          full_registry: 0.10
+          mlflow_tags: 0.30
+          none: 0.60
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      full_registry: 0.15
+      mlflow_tags: 0.50
+      none: 0.35
+    rationale: "Solo researchers use MLflow tags for lightweight tracking"
+  lab_group:
+    probability_overrides:
+      full_registry: 0.30
+      mlflow_tags: 0.40
+      none: 0.30
+    rationale: "Lab groups benefit from structured governance for collaboration"
+  clinical_deployment:
+    probability_overrides:
+      full_registry: 0.55
+      mlflow_tags: 0.35
+      none: 0.10
+    rationale: "Clinical deployment demands full model registry for regulatory compliance"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "MLflow Model Registry feature improvements"
+    - "Regulatory audit requirements"
+    - "Team scaling requiring approval workflows"
+    - "EU AI Act model governance requirements"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  MLflow tags (0.40) is the resolved choice, providing lightweight
+  governance via experiment metadata and SaMD-principled audit trails.
+  Full registry (0.30) is the upgrade path when compliance depth
+  increases or team scaling demands structured approval workflows.
+
+tags:
+  - operations
+  - governance
+  - compliance
+  - resolved

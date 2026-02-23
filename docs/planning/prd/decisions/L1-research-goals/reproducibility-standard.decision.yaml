@@ -1,0 +1,94 @@
+decision_id: reproducibility_standard
+title: "Reproducibility Standard"
+description: >
+  How strictly to enforce reproducibility. Full deterministic requires
+  fixed seeds, exact dependency pinning, and hardware-specific configs.
+  DVC-versioned tracks data and experiments. Git-only relies on code
+  versioning alone.
+
+decision_level: L1_research_goals
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: full_deterministic
+    title: "Full Deterministic"
+    description: >
+      Fixed seeds, CUBLAS_WORKSPACE_CONFIG, exact dependency pinning,
+      hardware-specific configs. Bit-for-bit reproducibility. High
+      overhead, may hurt performance.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Performance overhead from deterministic algorithms"
+      - "Hardware-specific configuration"
+
+  - option_id: dvc_versioned
+    title: "DVC Versioned"
+    description: >
+      Data and model versioning with DVC. Experiment tracking with MLflow.
+      Reproducibility through versioned artifacts, not bit-exact computation.
+      Current implementation.
+    prior_probability: 0.50
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "data_management_strategy.local_dvc"
+      - "experiment_tracking.mlflow"
+
+  - option_id: git_only
+    title: "Git Only"
+    description: >
+      Code versioning only. No data versioning, no experiment tracking
+      beyond git history. Minimal overhead but poor reproducibility.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      full_deterministic: 0.15
+      dvc_versioned: 0.50
+      git_only: 0.35
+    rationale: "Solo researchers need reproducibility without excessive overhead"
+  lab_group:
+    probability_overrides:
+      full_deterministic: 0.25
+      dvc_versioned: 0.55
+      git_only: 0.20
+    rationale: "Lab groups need shared experiment tracking and data versioning"
+  clinical_deployment:
+    probability_overrides:
+      full_deterministic: 0.40
+      dvc_versioned: 0.45
+      git_only: 0.15
+    rationale: "Clinical requires strong reproducibility for validation"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "PyTorch deterministic mode improvements"
+    - "DVC ecosystem evolution"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  DVC-versioned (0.50) is resolved. The project uses DVC for data versioning
+  and MLflow for experiment tracking, providing good reproducibility without
+  the performance overhead of full deterministic mode.
+
+tags:
+  - strategic
+  - reproducibility
+  - resolved
+
+references:
+  - "../../../dvc.yaml"

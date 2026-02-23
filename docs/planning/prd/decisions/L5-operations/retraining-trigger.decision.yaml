@@ -1,0 +1,165 @@
+decision_id: retraining_trigger
+title: "Retraining Trigger"
+description: >
+  What conditions trigger model retraining. Drift-based triggers retrain
+  when data or model drift is detected; scheduled triggers retrain on a
+  fixed cadence; data-volume triggers retrain when new data exceeds a
+  threshold; manual triggers retrain on human request. Affects model
+  freshness, compute costs, and operational complexity.
+
+decision_level: L5_operations
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: drift_based
+    title: "Drift-Based Trigger"
+    description: >
+      Trigger retraining when data or model drift exceeds defined
+      thresholds. Requires robust drift detection (Evidently, whylogs)
+      and automated pipeline orchestration. Most responsive but
+      needs careful threshold tuning.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "drift_response.automated_retrain"
+      - "monitoring_stack.prometheus_grafana"
+
+  - option_id: scheduled
+    title: "Scheduled Retraining"
+    description: >
+      Retrain on a fixed schedule (weekly, monthly, quarterly).
+      Simple to implement, predictable compute costs. May retrain
+      unnecessarily or miss urgent drift.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "May waste compute on unnecessary retraining"
+      - "May miss critical drift between schedules"
+
+  - option_id: data_volume
+    title: "Data Volume Trigger"
+    description: >
+      Trigger retraining when new annotated data exceeds a threshold
+      (e.g., 100 new annotated volumes). Natural for medical imaging
+      where data arrives in batches from clinical sites.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "annotation_workflow.monai_label_active"
+      - "annotation_workflow.hybrid"
+
+  - option_id: manual
+    title: "Manual Trigger"
+    description: >
+      Retraining initiated by human decision. Current implementation.
+      Developer evaluates model performance and triggers retraining
+      when needed. Simple but reactive.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: model_governance
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: full_registry
+        then_probabilities:
+          drift_based: 0.35
+          scheduled: 0.30
+          data_volume: 0.20
+          manual: 0.15
+      - given_parent_option: mlflow_tags
+        then_probabilities:
+          drift_based: 0.25
+          scheduled: 0.25
+          data_volume: 0.20
+          manual: 0.30
+      - given_parent_option: none
+        then_probabilities:
+          drift_based: 0.15
+          scheduled: 0.15
+          data_volume: 0.15
+          manual: 0.55
+
+  - parent_decision_id: drift_response
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: automated_retrain
+        then_probabilities:
+          drift_based: 0.50
+          scheduled: 0.20
+          data_volume: 0.20
+          manual: 0.10
+      - given_parent_option: alert_human
+        then_probabilities:
+          drift_based: 0.25
+          scheduled: 0.20
+          data_volume: 0.15
+          manual: 0.40
+      - given_parent_option: gradual_rollback
+        then_probabilities:
+          drift_based: 0.35
+          scheduled: 0.25
+          data_volume: 0.20
+          manual: 0.20
+      - given_parent_option: none
+        then_probabilities:
+          drift_based: 0.15
+          scheduled: 0.20
+          data_volume: 0.15
+          manual: 0.50
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      drift_based: 0.15
+      scheduled: 0.15
+      data_volume: 0.25
+      manual: 0.45
+    rationale: "Solo researchers retrain manually when they have new data or observe issues"
+  lab_group:
+    probability_overrides:
+      drift_based: 0.35
+      scheduled: 0.25
+      data_volume: 0.25
+      manual: 0.15
+    rationale: "Lab groups can implement drift-based triggers with shared infrastructure"
+  clinical_deployment:
+    probability_overrides:
+      drift_based: 0.40
+      scheduled: 0.25
+      data_volume: 0.20
+      manual: 0.15
+    rationale: "Clinical deployment needs automated drift-based triggers for patient safety"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Drift detection pipeline maturity"
+    - "New data acquisition rate"
+    - "Compute budget changes"
+    - "Regulatory requirements for model freshness"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 0.9
+  general_medical: 1.0
+
+rationale: >
+  Drift-based (0.30) and manual (0.25) are both reasonable starting points.
+  Manual is currently implemented as the project is in development. Drift-based
+  is the next step when the monitoring stack and drift detection mature.
+  Data volume triggers (0.20) are natural for medical imaging batch workflows.
+
+tags:
+  - operations
+  - retraining
+  - automation
+  - mlops

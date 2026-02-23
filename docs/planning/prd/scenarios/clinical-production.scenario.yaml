@@ -1,0 +1,91 @@
+scenario_id: clinical_production
+title: "Clinical Production"
+description: >
+  Full clinical deployment path with IEC 62304 compliance,
+  federated learning, production infrastructure, and comprehensive
+  governance. The most resource-intensive scenario.
+
+archetype: clinical_deployment
+domain: vascular_segmentation
+status: planned
+
+resolved_decisions:
+  # L1
+  project_purpose: clinical_deployment
+  research_impact_target: journal_paper
+  open_source_model: proprietary
+  portfolio_priority: depth_over_breadth
+  compliance_depth: iec_62304_full
+  monai_alignment: monai_native
+  reproducibility_standard: full_deterministic
+
+  # L2
+  model_strategy: foundation_model_first
+  foundation_model_integration: full_finetune
+  data_management_strategy: cloud_dvc
+  ensemble_strategy: uncertainty_weighted
+  uncertainty_quantification: conformal_prediction
+  serving_architecture: monai_deploy
+  config_management: hydra_zen
+  pipeline_orchestration: prefect
+  xai_strategy: concept_based
+  validation_depth: full_onion_12_layers
+
+  # L3
+  segmentation_models: vista3d
+  loss_functions: dice_ce
+  augmentation_stack: monai_basic
+  metrics_framework: monai_metrics
+  ensemble_methods: learned
+  calibration_tools: mapie
+  experiment_tracking: mlflow
+  llm_observability: langfuse
+  agent_framework: custom
+  llm_provider: anthropic
+  data_validation_tools: pandera_ge
+  model_diagnostics: weightwatcher
+  hpo_framework: optuna
+  lineage_tracking: openlineage_marquez
+  xai_meta_evaluation: quantus
+  annotation_platform: monai_label
+  documentation_standard: regulatory_dossier
+  testing_strategy: metamorphic
+  label_quality: cleanlab
+  data_profiling: whylogs
+
+  # L4
+  compute_target: kubernetes
+  containerization: kubernetes
+  ci_cd_platform: github_actions
+  iac_tooling: terraform
+  gitops_strategy: argocd
+  federated_learning: monai_fl
+  model_export_format: monai_bundle
+  secrets_management: vault
+
+  # L5
+  monitoring_stack: prometheus_grafana
+  drift_response: automated_retrain
+  annotation_workflow: hybrid
+  model_governance: full_registry
+  retraining_trigger: drift_based
+  documentation_generation: automated_cards
+  cost_tracking: langfuse_costs
+
+joint_probability: 0.00001
+
+trade_offs:
+  gains:
+    - "IEC 62304 full compliance — regulatory-ready"
+    - "Federated learning — multi-site clinical trials"
+    - "Full validation onion — 12 layers"
+    - "Kubernetes + ArgoCD — production infrastructure"
+    - "Conformal prediction — patient safety guarantees"
+    - "HashiCorp Vault — enterprise secrets"
+    - "Full model registry with approval workflows"
+  sacrifices:
+    - "Highest resource requirement"
+    - "Longest setup time"
+    - "Requires regulatory expertise"
+    - "Requires clinical partnerships"
+    - "Less learning flexibility"

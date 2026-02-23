@@ -69,3 +69,19 @@ These feed into slide decks:
 - [x] P6.2: Documentation + Architecture Decision Records (5 ADRs in docs/adr/)
 - [x] P6.3: README update with badges + quickstart
 - [x] P6.4: Final claude-code-patterns.md update for slides (patterns 7-12)
+
+### Phase 7: Hierarchical Probabilistic PRD (COMPLETE)
+- [x] P7.1: Planning document (docs/planning/hierarchical-prd-planning.md)
+- [x] P7.2: PRD directory structure (docs/planning/prd/)
+- [x] P7.3: Schema files (_schema.yaml, schema.yaml) + llm-context.md
+- [x] P7.4: DAG topology (_network.yaml — 52 nodes, ~80 edges)
+- [x] P7.5: L1 Research Goals decision nodes (7 files)
+- [x] P7.6: L2 Architecture decision nodes (10 files)
+- [x] P7.7: L3 Technology decision nodes (20 files)
+- [x] P7.8: L4 Infrastructure decision nodes (8 files)
+- [x] P7.9: L5 Operations decision nodes (7 files)
+- [x] P7.10: Archetype files (solo-researcher, lab-group, clinical-deployment)
+- [x] P7.11: Scenario files (learning-first-mvp, research-scaffold, clinical-production)
+- [x] P7.12: Domain overlays (registry, backbone-defaults, 4 domain overlays)
+- [x] P7.13: PRD-update skill (.claude/skills/prd-update/ — 6 protocols, 2 templates)
+- [x] P7.14: CLAUDE.md + phase-tracker.md updates

@@ -1,0 +1,152 @@
+decision_id: model_strategy
+title: "Model Strategy"
+description: >
+  How many and what kind of segmentation architectures to support.
+  Single-architecture is simpler; multi-architecture enables comparison;
+  foundation-model-first leverages pre-trained weights; AutoML searches
+  architecture space automatically.
+
+decision_level: L2_architecture
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: single_architecture
+    title: "Single Architecture"
+    description: "Focus on one model (e.g., nnU-Net). Simpler but less learning."
+    prior_probability: 0.10
+    status: viable
+    implementation_status: not_started
+
+  - option_id: multi_architecture
+    title: "Multi-Architecture"
+    description: >
+      Support multiple architectures via ModelAdapter ABC. Currently
+      SegResNet + SwinUNETR implemented, with VISTA-3D and SAM3 in config.
+    prior_probability: 0.45
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "ensemble_strategy.uncertainty_weighted"
+      - "segmentation_models.segresnet"
+      - "segmentation_models.swinunetr"
+
+  - option_id: foundation_model_first
+    title: "Foundation Model First"
+    description: >
+      Start with pre-trained foundation models (VISTA-3D, SAM3) and
+      fine-tune. Potentially better performance with less training data.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: config_only
+
+  - option_id: automl_search
+    title: "AutoML Search"
+    description: >
+      Use NAS or Optuna to search architecture space. Maximum automation
+      but requires significant compute.
+    prior_probability: 0.15
+    status: experimental
+    implementation_status: not_started
+    constraints:
+      - "Significant GPU hours required"
+      - "Optuna or Ray Tune integration needed"
+
+conditional_on:
+  - parent_decision_id: project_purpose
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: self_learning
+        then_probabilities:
+          single_architecture: 0.05
+          multi_architecture: 0.45
+          foundation_model_first: 0.30
+          automl_search: 0.20
+      - given_parent_option: portfolio
+        then_probabilities:
+          single_architecture: 0.05
+          multi_architecture: 0.50
+          foundation_model_first: 0.30
+          automl_search: 0.15
+      - given_parent_option: clinical_deployment
+        then_probabilities:
+          single_architecture: 0.20
+          multi_architecture: 0.30
+          foundation_model_first: 0.40
+          automl_search: 0.10
+      - given_parent_option: open_source_contribution
+        then_probabilities:
+          single_architecture: 0.15
+          multi_architecture: 0.40
+          foundation_model_first: 0.35
+          automl_search: 0.10
+
+  - parent_decision_id: portfolio_priority
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: breadth_over_depth
+        then_probabilities:
+          single_architecture: 0.05
+          multi_architecture: 0.55
+          foundation_model_first: 0.25
+          automl_search: 0.15
+      - given_parent_option: depth_over_breadth
+        then_probabilities:
+          single_architecture: 0.20
+          multi_architecture: 0.30
+          foundation_model_first: 0.40
+          automl_search: 0.10
+      - given_parent_option: balanced
+        then_probabilities:
+          single_architecture: 0.10
+          multi_architecture: 0.45
+          foundation_model_first: 0.30
+          automl_search: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      single_architecture: 0.10
+      multi_architecture: 0.45
+      foundation_model_first: 0.30
+      automl_search: 0.15
+    rationale: "Solo researchers explore multiple architectures for learning"
+  lab_group:
+    probability_overrides:
+      single_architecture: 0.15
+      multi_architecture: 0.35
+      foundation_model_first: 0.35
+      automl_search: 0.15
+    rationale: "Lab groups may standardize on foundation models"
+  clinical_deployment:
+    probability_overrides:
+      single_architecture: 0.15
+      multi_architecture: 0.25
+      foundation_model_first: 0.45
+      automl_search: 0.15
+    rationale: "Clinical prefers validated foundation models"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-23
+  next_review: 2026-05-23
+  change_drivers:
+    - "VISTA-3D and SAM3 maturity"
+    - "nnU-Net v2 release"
+    - "New foundation models for 3D medical imaging"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Multi-architecture (0.45) resolved. The ModelAdapter ABC supports
+  pluggable architectures. Foundation-model-first (0.30) is the likely
+  next exploration as VISTA-3D matures.
+
+tags:
+  - architecture
+  - models
+  - resolved

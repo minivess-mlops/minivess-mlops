@@ -1,0 +1,168 @@
+decision_id: model_export_format
+title: "Model Export Format"
+description: >
+  Format for exporting trained models for inference and deployment.
+  ONNX provides broad runtime compatibility; MONAI Bundle includes
+  metadata and transforms; TorchScript is PyTorch-native; Safetensors
+  is the modern weight serialization format. Affects serving latency,
+  portability, and metadata richness.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: onnx
+    title: "ONNX"
+    description: >
+      Open Neural Network Exchange format. Broad runtime support via
+      ONNX Runtime (CPU, GPU, TensorRT). Currently implemented for
+      BentoML serving. Good latency optimization via graph optimization.
+    prior_probability: 0.35
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "serving_architecture.bentoml_rest"
+      - "containerization.docker_compose"
+
+  - option_id: monai_bundle
+    title: "MONAI Bundle"
+    description: >
+      MONAI-native packaging format with model weights, transforms,
+      metadata, and inference pipeline in a single bundle. Required
+      for MONAI Deploy and MONAI FL. Rich metadata for compliance.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "monai_alignment.monai_native"
+      - "federated_learning.monai_fl"
+      - "model_governance.full_registry"
+
+  - option_id: torchscript
+    title: "TorchScript"
+    description: >
+      PyTorch JIT-compiled format. Native PyTorch inference without
+      Python dependency. Good for embedded and C++ deployment.
+      Being deprecated in favor of torch.compile / torch.export.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Deprecated in favor of torch.compile"
+      - "Dynamic control flow limitations"
+
+  - option_id: safetensors
+    title: "Safetensors"
+    description: >
+      Safe, fast weight serialization format from Hugging Face. Prevents
+      arbitrary code execution from pickle. Primarily for weight sharing
+      rather than full model export.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Weights only, not full model graph"
+      - "Requires separate inference code"
+
+conditional_on:
+  - parent_decision_id: serving_architecture
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: bentoml_rest
+        then_probabilities:
+          onnx: 0.50
+          monai_bundle: 0.15
+          torchscript: 0.20
+          safetensors: 0.15
+      - given_parent_option: monai_deploy
+        then_probabilities:
+          onnx: 0.15
+          monai_bundle: 0.55
+          torchscript: 0.15
+          safetensors: 0.15
+      - given_parent_option: gradio_only
+        then_probabilities:
+          onnx: 0.30
+          monai_bundle: 0.20
+          torchscript: 0.25
+          safetensors: 0.25
+      - given_parent_option: triton
+        then_probabilities:
+          onnx: 0.40
+          monai_bundle: 0.15
+          torchscript: 0.30
+          safetensors: 0.15
+
+  - parent_decision_id: monai_alignment
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: monai_native
+        then_probabilities:
+          onnx: 0.15
+          monai_bundle: 0.55
+          torchscript: 0.15
+          safetensors: 0.15
+      - given_parent_option: monai_compatible
+        then_probabilities:
+          onnx: 0.40
+          monai_bundle: 0.30
+          torchscript: 0.15
+          safetensors: 0.15
+      - given_parent_option: framework_agnostic
+        then_probabilities:
+          onnx: 0.40
+          monai_bundle: 0.10
+          torchscript: 0.25
+          safetensors: 0.25
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      onnx: 0.40
+      monai_bundle: 0.25
+      torchscript: 0.20
+      safetensors: 0.15
+    rationale: "ONNX is simplest for demo serving; MONAI Bundle for learning ecosystem"
+  lab_group:
+    probability_overrides:
+      onnx: 0.20
+      monai_bundle: 0.45
+      torchscript: 0.20
+      safetensors: 0.15
+    rationale: "Lab groups benefit from MONAI Bundle metadata richness for collaboration"
+  clinical_deployment:
+    probability_overrides:
+      onnx: 0.25
+      monai_bundle: 0.40
+      torchscript: 0.15
+      safetensors: 0.20
+    rationale: "Clinical deployment needs MONAI Bundle for MONAI Deploy or ONNX for Triton"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "torch.compile / torch.export maturity"
+    - "ONNX Runtime optimization improvements"
+    - "MONAI Bundle v2 format changes"
+    - "Safetensors adoption in medical imaging"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  ONNX (0.35) is resolved for BentoML serving with ONNX Runtime.
+  MONAI Bundle (0.30) is the natural complement when MONAI alignment
+  deepens. Both formats may coexist: MONAI Bundle for ecosystem
+  compatibility, ONNX for runtime performance.
+
+tags:
+  - infrastructure
+  - model-export
+  - serving
+  - resolved

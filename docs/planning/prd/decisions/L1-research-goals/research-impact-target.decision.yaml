@@ -1,0 +1,98 @@
+decision_id: research_impact_target
+title: "Research Impact Target"
+description: >
+  What form of research output does this project target? Conference papers
+  need reproducible experiments; journal papers need thorough methodology;
+  benchmark contributions need standardized evaluation; course material
+  needs pedagogical clarity.
+
+decision_level: L1_research_goals
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: conference_paper
+    title: "Conference Paper"
+    description: >
+      Target MICCAI, ISBI, or ML4H conferences. Needs reproducible
+      experiments, comparison tables, ablation studies.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: not_started
+
+  - option_id: journal_paper
+    title: "Journal Paper"
+    description: >
+      Target MedIA, TMI, or Nature Methods. Needs thorough methodology
+      documentation, statistical validation, multi-dataset evaluation.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+
+  - option_id: benchmark_contribution
+    title: "Benchmark Contribution"
+    description: >
+      Contribute to MSD, VESSEL12, or create new benchmark. Needs
+      standardized evaluation protocol, leaderboard integration.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+
+  - option_id: course_material
+    title: "Course Material"
+    description: >
+      Create educational content for MLOps in biomedical imaging.
+      claude-code-patterns.md already serves this role partially.
+    prior_probability: 0.20
+    status: resolved
+    implementation_status: partial
+    complements:
+      - "documentation_standard.model_cards_full"
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      conference_paper: 0.40
+      journal_paper: 0.20
+      benchmark_contribution: 0.15
+      course_material: 0.25
+    rationale: "PhD students target conferences first, teaching second"
+  lab_group:
+    probability_overrides:
+      conference_paper: 0.30
+      journal_paper: 0.35
+      benchmark_contribution: 0.25
+      course_material: 0.10
+    rationale: "Lab groups target journal publications and benchmarks"
+  clinical_deployment:
+    probability_overrides:
+      conference_paper: 0.20
+      journal_paper: 0.30
+      benchmark_contribution: 0.10
+      course_material: 0.40
+    rationale: "Clinical teams need training material and validation papers"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Conference deadline approaching"
+    - "Collaboration opportunity"
+    - "Dataset availability"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Conference papers have highest prior (0.35) as the most common first output
+  for ML research. Course material at 0.20 reflects that claude-code-patterns.md
+  already partially serves this role.
+
+tags:
+  - strategic
+  - research-output
+  - root-node

@@ -1,0 +1,212 @@
+decision_id: llm_provider
+title: "LLM Provider"
+description: >
+  Which LLM providers and models to use for agent-driven pipeline
+  components. Affects cost, latency, data privacy, and capability ceiling.
+  The local-first architecture principle favors providers that can run
+  on-premise or offer data processing agreements suitable for medical data.
+  LiteLLM provides a unified API layer for provider flexibility.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: anthropic
+    title: "Anthropic (Claude)"
+    description: >
+      Claude models via Anthropic API. Strong reasoning, tool use, and
+      code generation. Primary provider for complex agent tasks.
+      Requires API key and data processing agreement for medical data.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: partial
+    complements:
+      - "agent_framework.langgraph"
+      - "llm_observability.langfuse"
+
+  - option_id: openai
+    title: "OpenAI (GPT-4)"
+    description: >
+      GPT-4 and successors via OpenAI API. Broadest ecosystem support
+      and tool calling maturity. Well-supported by all agent frameworks.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: partial
+    complements:
+      - "agent_framework.langgraph"
+
+  - option_id: ollama_local
+    title: "Ollama (Local Open-Weight Models)"
+    description: >
+      Run open-weight models locally via Ollama. Zero data exfiltration
+      risk. Suitable for Llama, Mistral, Phi, and other open models.
+      Limited capability ceiling but maximum data sovereignty.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "open_source_model.permissive_mit"
+    constraints:
+      - "Lower capability ceiling than frontier models"
+      - "Requires local GPU resources for inference"
+      - "Model selection and updating overhead"
+
+  - option_id: hybrid_litellm
+    title: "Hybrid via LiteLLM"
+    description: >
+      Use LiteLLM as unified API proxy to route between providers based
+      on task complexity, cost, and latency requirements. Route simple
+      tasks to local models, complex reasoning to frontier APIs.
+      Already implemented as the provider abstraction layer.
+    prior_probability: 0.15
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "agent_framework.langgraph"
+      - "llm_observability.langfuse"
+      - "llm_observability.braintrust"
+
+conditional_on:
+  - parent_decision_id: pipeline_orchestration
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: hydra_scripts
+        then_probabilities:
+          anthropic: 0.30
+          openai: 0.25
+          ollama_local: 0.30
+          hybrid_litellm: 0.15
+      - given_parent_option: dvc_pipelines
+        then_probabilities:
+          anthropic: 0.30
+          openai: 0.25
+          ollama_local: 0.25
+          hybrid_litellm: 0.20
+      - given_parent_option: langgraph_agents
+        then_probabilities:
+          anthropic: 0.35
+          openai: 0.25
+          ollama_local: 0.20
+          hybrid_litellm: 0.20
+      - given_parent_option: airflow_orchestrated
+        then_probabilities:
+          anthropic: 0.30
+          openai: 0.30
+          ollama_local: 0.20
+          hybrid_litellm: 0.20
+
+  - parent_decision_id: agent_framework
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: langgraph
+        then_probabilities:
+          anthropic: 0.35
+          openai: 0.25
+          ollama_local: 0.20
+          hybrid_litellm: 0.20
+      - given_parent_option: crewai
+        then_probabilities:
+          anthropic: 0.30
+          openai: 0.30
+          ollama_local: 0.20
+          hybrid_litellm: 0.20
+      - given_parent_option: autogen
+        then_probabilities:
+          anthropic: 0.25
+          openai: 0.35
+          ollama_local: 0.20
+          hybrid_litellm: 0.20
+      - given_parent_option: custom
+        then_probabilities:
+          anthropic: 0.30
+          openai: 0.25
+          ollama_local: 0.30
+          hybrid_litellm: 0.15
+
+  - parent_decision_id: open_source_model
+    influence_strength: weak
+    conditional_table:
+      - given_parent_option: permissive_mit
+        then_probabilities:
+          anthropic: 0.30
+          openai: 0.25
+          ollama_local: 0.30
+          hybrid_litellm: 0.15
+      - given_parent_option: copyleft_gpl
+        then_probabilities:
+          anthropic: 0.20
+          openai: 0.15
+          ollama_local: 0.45
+          hybrid_litellm: 0.20
+      - given_parent_option: restricted_nc
+        then_probabilities:
+          anthropic: 0.30
+          openai: 0.25
+          ollama_local: 0.30
+          hybrid_litellm: 0.15
+      - given_parent_option: proprietary
+        then_probabilities:
+          anthropic: 0.40
+          openai: 0.35
+          ollama_local: 0.10
+          hybrid_litellm: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      anthropic: 0.30
+      openai: 0.25
+      ollama_local: 0.30
+      hybrid_litellm: 0.15
+    rationale: "Solo researchers balance cost (local) with capability (cloud APIs)"
+  lab_group:
+    probability_overrides:
+      anthropic: 0.30
+      openai: 0.30
+      ollama_local: 0.20
+      hybrid_litellm: 0.20
+    rationale: "Lab groups can afford API costs and benefit from hybrid routing"
+  clinical_deployment:
+    probability_overrides:
+      anthropic: 0.25
+      openai: 0.20
+      ollama_local: 0.35
+      hybrid_litellm: 0.20
+    rationale: "Clinical strongly prefers local inference for data sovereignty"
+
+volatility:
+  classification: volatile
+  last_assessed: 2026-02-23
+  next_review: 2026-04-23
+  change_drivers:
+    - "Frontier model capability improvements (Claude, GPT-5)"
+    - "Open-weight model capability catch-up (Llama 4, Mistral)"
+    - "LiteLLM provider support and routing features"
+    - "Medical data processing agreements from providers"
+    - "Local inference hardware improvements"
+    - "EU AI Act data processing requirements"
+
+domain_applicability:
+  vascular_segmentation: 0.75
+  cardiac_imaging: 0.75
+  neuroimaging: 0.70
+  general_medical: 0.80
+
+rationale: >
+  Anthropic (0.35) has highest prior for frontier reasoning capability
+  needed by complex agent tasks. OpenAI (0.25) provides the broadest
+  ecosystem support. Ollama (0.25) enables the local-first data sovereignty
+  principle critical for medical data. LiteLLM hybrid (0.15) is already
+  implemented as the abstraction layer and may ultimately be the "real"
+  choice — enabling all three providers based on task requirements. Domain
+  applicability is lower because LLM providers only serve agent components.
+
+tags:
+  - llm-provider
+  - anthropic
+  - openai
+  - ollama
+  - litellm
+  - data-sovereignty
+  - resolved-partial

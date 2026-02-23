@@ -1,0 +1,90 @@
+decision_id: open_source_model
+title: "Open Source Model"
+description: >
+  Licensing strategy for the project. Affects which dependencies can be used
+  and how the project can be shared. Already resolved as MIT.
+
+decision_level: L1_research_goals
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: permissive_mit
+    title: "Permissive (MIT)"
+    description: >
+      MIT license. Maximum reuse flexibility. Compatible with all
+      downstream uses including commercial.
+    prior_probability: 0.50
+    status: resolved
+    implementation_status: production
+
+  - option_id: copyleft_gpl
+    title: "Copyleft (GPL)"
+    description: >
+      GPL license. Ensures derivatives remain open. May limit
+      clinical/commercial adoption.
+    prior_probability: 0.10
+    status: rejected
+
+  - option_id: restricted_nc
+    title: "Restricted (Non-Commercial)"
+    description: >
+      CC-BY-NC or similar. Allows academic use, restricts commercial.
+      Common in medical imaging research.
+    prior_probability: 0.15
+    status: rejected
+
+  - option_id: proprietary
+    title: "Proprietary"
+    description: >
+      Closed source. Maximum control but limits community contribution
+      and academic impact.
+    prior_probability: 0.25
+    status: rejected
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      permissive_mit: 0.60
+      copyleft_gpl: 0.10
+      restricted_nc: 0.20
+      proprietary: 0.10
+    rationale: "Researchers favor permissive for maximum citation and reuse"
+  lab_group:
+    probability_overrides:
+      permissive_mit: 0.45
+      copyleft_gpl: 0.15
+      restricted_nc: 0.25
+      proprietary: 0.15
+    rationale: "Labs may prefer NC to protect unpublished work"
+  clinical_deployment:
+    probability_overrides:
+      permissive_mit: 0.30
+      copyleft_gpl: 0.05
+      restricted_nc: 0.15
+      proprietary: 0.50
+    rationale: "Clinical products often need proprietary licensing"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2027-02-23
+  change_drivers:
+    - "Commercialization opportunity"
+    - "Clinical partnership requirements"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  MIT is resolved (0.50 prior). The project already uses MIT license.
+  Proprietary has 0.25 prior reflecting that clinical deployment paths
+  often require it.
+
+tags:
+  - strategic
+  - licensing
+  - resolved

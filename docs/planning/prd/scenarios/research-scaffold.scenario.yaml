@@ -1,0 +1,88 @@
+scenario_id: research_scaffold
+title: "Research Scaffold"
+description: >
+  Lab group configuration optimized for multi-researcher workflows,
+  MONAI-native standardization, and reproducible experiments targeting
+  journal publications.
+
+archetype: lab_group
+domain: vascular_segmentation
+status: planned
+
+resolved_decisions:
+  # L1
+  project_purpose: open_source_contribution
+  research_impact_target: journal_paper
+  open_source_model: permissive_mit
+  portfolio_priority: balanced
+  compliance_depth: lightweight_audit
+  monai_alignment: monai_native
+  reproducibility_standard: dvc_versioned
+
+  # L2
+  model_strategy: foundation_model_first
+  foundation_model_integration: lora_finetune
+  data_management_strategy: cloud_dvc
+  ensemble_strategy: uncertainty_weighted
+  uncertainty_quantification: conformal_prediction
+  serving_architecture: monai_deploy
+  config_management: hydra_zen
+  pipeline_orchestration: dvc_pipelines
+  xai_strategy: gradient_based
+  validation_depth: standard_5_layers
+
+  # L3
+  segmentation_models: vista3d
+  loss_functions: dice_ce
+  augmentation_stack: monai_basic
+  metrics_framework: monai_metrics
+  ensemble_methods: swag
+  calibration_tools: mapie
+  experiment_tracking: mlflow
+  llm_observability: langfuse
+  agent_framework: custom
+  llm_provider: anthropic
+  data_validation_tools: pandera_ge
+  model_diagnostics: weightwatcher
+  hpo_framework: optuna
+  lineage_tracking: openlineage_marquez
+  xai_meta_evaluation: quantus
+  annotation_platform: monai_label
+  documentation_standard: model_cards_full
+  testing_strategy: property_based
+  label_quality: cleanlab
+  data_profiling: whylogs
+
+  # L4
+  compute_target: hpc_slurm
+  containerization: docker_compose
+  ci_cd_platform: github_actions
+  iac_tooling: none
+  gitops_strategy: github_actions_only
+  federated_learning: monai_fl
+  model_export_format: monai_bundle
+  secrets_management: dotenv
+
+  # L5
+  monitoring_stack: prometheus_grafana
+  drift_response: automated_retrain
+  annotation_workflow: monai_label_active
+  model_governance: mlflow_tags
+  retraining_trigger: drift_based
+  documentation_generation: ci_generated
+  cost_tracking: langfuse_costs
+
+joint_probability: 0.00005
+
+trade_offs:
+  gains:
+    - "MONAI-native — maximum ecosystem compatibility"
+    - "Foundation model first — VISTA-3D + LoRA"
+    - "Conformal prediction — formal UQ guarantees"
+    - "Full XAI pipeline — Captum + Quantus"
+    - "Federated learning — multi-site capability"
+    - "MONAI Bundle export — shareable models"
+  sacrifices:
+    - "Less tool diversity (MONAI-focused)"
+    - "HPC dependency"
+    - "Higher setup complexity"

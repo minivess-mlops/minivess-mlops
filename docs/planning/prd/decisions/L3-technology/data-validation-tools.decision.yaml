@@ -1,0 +1,166 @@
+decision_id: data_validation_tools
+title: "Data Validation Tools"
+description: >
+  Which tools to use for data validation in the validation onion. Pandera
+  handles DataFrame schema validation, Great Expectations handles batch-level
+  quality checks, Deepchecks handles vision-specific data validation, and
+  whylogs handles statistical profiling. Custom validation covers domain-specific
+  checks not supported by existing tools.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: pandera_ge
+    title: "Pandera + Great Expectations"
+    description: >
+      Pandera for DataFrame schema validation, Great Expectations for
+      batch-level quality checks. Both are implemented in the current
+      validation onion alongside Pydantic v2 for config schemas.
+    prior_probability: 0.40
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "testing_strategy.property_based"
+      - "data_profiling.whylogs"
+
+  - option_id: deepchecks
+    title: "Deepchecks Vision"
+    description: >
+      Vision-specific data and model validation. Checks for data leakage,
+      label drift, image property drift, model performance degradation.
+      Implemented as part of the validation onion.
+    prior_probability: 0.25
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "model_diagnostics.weightwatcher"
+
+  - option_id: whylogs
+    title: "whylogs Statistical Profiling"
+    description: >
+      Lightweight statistical profiling for data distributions. Can detect
+      drift without storing raw data. In dependencies but not wired to
+      validation pipeline.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: config_only
+
+  - option_id: custom
+    title: "Custom Validation"
+    description: >
+      Hand-written validation logic for domain-specific checks (e.g.,
+      voxel spacing ranges, ROI coverage thresholds, connected component
+      constraints).
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+
+conditional_on:
+  - parent_decision_id: data_management_strategy
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: local_dvc
+        then_probabilities:
+          pandera_ge: 0.45
+          deepchecks: 0.25
+          whylogs: 0.15
+          custom: 0.15
+      - given_parent_option: cloud_dvc
+        then_probabilities:
+          pandera_ge: 0.40
+          deepchecks: 0.25
+          whylogs: 0.20
+          custom: 0.15
+      - given_parent_option: lakehouse
+        then_probabilities:
+          pandera_ge: 0.30
+          deepchecks: 0.20
+          whylogs: 0.35
+          custom: 0.15
+      - given_parent_option: streaming
+        then_probabilities:
+          pandera_ge: 0.25
+          deepchecks: 0.20
+          whylogs: 0.35
+          custom: 0.20
+
+  - parent_decision_id: validation_depth
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: full_onion
+        then_probabilities:
+          pandera_ge: 0.35
+          deepchecks: 0.30
+          whylogs: 0.20
+          custom: 0.15
+      - given_parent_option: schema_plus_statistical
+        then_probabilities:
+          pandera_ge: 0.45
+          deepchecks: 0.20
+          whylogs: 0.25
+          custom: 0.10
+      - given_parent_option: schema_only
+        then_probabilities:
+          pandera_ge: 0.55
+          deepchecks: 0.15
+          whylogs: 0.15
+          custom: 0.15
+      - given_parent_option: none
+        then_probabilities:
+          pandera_ge: 0.20
+          deepchecks: 0.15
+          whylogs: 0.15
+          custom: 0.50
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      pandera_ge: 0.45
+      deepchecks: 0.25
+      whylogs: 0.15
+      custom: 0.15
+    rationale: "Solo researchers benefit from Pandera's lightweight schema validation"
+  lab_group:
+    probability_overrides:
+      pandera_ge: 0.35
+      deepchecks: 0.30
+      whylogs: 0.25
+      custom: 0.10
+    rationale: "Lab groups need comprehensive validation across shared datasets"
+  clinical_deployment:
+    probability_overrides:
+      pandera_ge: 0.30
+      deepchecks: 0.30
+      whylogs: 0.25
+      custom: 0.15
+    rationale: "Clinical deployment requires all layers of the validation onion"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "New validation frameworks (e.g., TFX Data Validation)"
+    - "MONAI-native validation tooling"
+    - "Regulatory validation requirements"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Pandera + GE (0.40) and Deepchecks (0.25) are both resolved/implemented
+  as complementary layers in the validation onion. Pandera handles DataFrame
+  schemas, GE handles batch quality, Deepchecks handles vision-specific checks.
+  whylogs (0.20) is in dependencies but not yet wired. The validation onion
+  pattern means these tools are complementary rather than competing.
+
+tags:
+  - technology
+  - validation
+  - data-quality
+  - resolved

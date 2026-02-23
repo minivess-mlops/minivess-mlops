@@ -1,0 +1,147 @@
+decision_id: metrics_framework
+title: "Metrics Framework"
+description: >
+  Which metrics computation framework to use for segmentation evaluation.
+  Affects reproducibility (standard metric implementations), reporting
+  depth (surface metrics, topology metrics), and integration with
+  experiment tracking. MetricsReloaded provides standardized metric
+  selection guidance from the biomedical imaging community.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: torchmetrics
+    title: "TorchMetrics"
+    description: >
+      PyTorch-native metrics library. Distributed-friendly, GPU-accelerated.
+      Supports Dice, IoU, precision, recall, and segmentation-specific
+      metrics. Already integrated as primary metrics engine.
+    prior_probability: 0.35
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "experiment_tracking.mlflow"
+      - "segmentation_models.segresnet"
+
+  - option_id: metricsreloaded
+    title: "MetricsReloaded"
+    description: >
+      Community-standard metric recommendation framework from Maier-Hein
+      et al. (2024). Provides problem-specific metric selection and
+      standardized implementations including surface distance, topology,
+      and boundary metrics. Implemented for evaluation reporting.
+    prior_probability: 0.30
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "loss_functions.cldice"
+      - "calibration_tools.netcal"
+
+  - option_id: monai_metrics
+    title: "MONAI Metrics"
+    description: >
+      MONAI's built-in segmentation metrics (DiceMetric, HausdorffDistance,
+      SurfaceDistanceMetric). Tight integration with MONAI data pipeline
+      but less comprehensive than MetricsReloaded.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: partial
+    complements:
+      - "monai_alignment.monai_native"
+
+  - option_id: custom
+    title: "Custom Metrics Pipeline"
+    description: >
+      Build bespoke metrics for domain-specific needs: clDice connectivity
+      score, branch-level F1, vessel-diameter-stratified Dice. Maximum
+      flexibility but maintenance burden.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Testing and validation overhead"
+      - "No community standard implementations"
+
+conditional_on:
+  - parent_decision_id: validation_depth
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: minimal
+        then_probabilities:
+          torchmetrics: 0.50
+          metricsreloaded: 0.15
+          monai_metrics: 0.25
+          custom: 0.10
+      - given_parent_option: standard
+        then_probabilities:
+          torchmetrics: 0.35
+          metricsreloaded: 0.30
+          monai_metrics: 0.20
+          custom: 0.15
+      - given_parent_option: deep_onion
+        then_probabilities:
+          torchmetrics: 0.25
+          metricsreloaded: 0.35
+          monai_metrics: 0.15
+          custom: 0.25
+      - given_parent_option: samd_compliant
+        then_probabilities:
+          torchmetrics: 0.20
+          metricsreloaded: 0.40
+          monai_metrics: 0.20
+          custom: 0.20
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      torchmetrics: 0.40
+      metricsreloaded: 0.30
+      monai_metrics: 0.20
+      custom: 0.10
+    rationale: "Solo researchers prefer simple TorchMetrics with MetricsReloaded for papers"
+  lab_group:
+    probability_overrides:
+      torchmetrics: 0.30
+      metricsreloaded: 0.35
+      monai_metrics: 0.20
+      custom: 0.15
+    rationale: "Lab groups value standardized MetricsReloaded for publication credibility"
+  clinical_deployment:
+    probability_overrides:
+      torchmetrics: 0.25
+      metricsreloaded: 0.35
+      monai_metrics: 0.15
+      custom: 0.25
+    rationale: "Clinical needs MetricsReloaded standards plus custom safety metrics"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "MetricsReloaded v2 release"
+    - "TorchMetrics segmentation module updates"
+    - "New topology-aware metrics publications"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 0.95
+  neuroimaging: 0.95
+  general_medical: 0.90
+
+rationale: >
+  TorchMetrics (0.35) is the primary compute engine, already integrated with
+  MLflow logging. MetricsReloaded (0.30) provides the community-standard
+  metric selection framework and is used for evaluation reports. Both are
+  implemented and complementary. MONAI metrics (0.20) provide partial
+  overlap. Custom (0.15) is needed for domain-specific topology metrics
+  not yet in standard libraries.
+
+tags:
+  - evaluation
+  - metrics
+  - validation
+  - metricsreloaded
+  - resolved-partial

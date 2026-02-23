@@ -1,0 +1,144 @@
+decision_id: hpo_framework
+title: "HPO Framework"
+description: >
+  Which hyperparameter optimization framework to use for systematic model
+  tuning. Optuna provides Bayesian optimization with pruning; Ray Tune
+  offers distributed HPO; Nevergrad provides gradient-free optimization;
+  manual tuning is the current baseline.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: optuna
+    title: "Optuna"
+    description: >
+      Bayesian optimization with tree-structured Parzen estimators. Supports
+      pruning of unpromising trials, visualization dashboard, and MLflow
+      integration. In pyproject.toml dependencies but not integrated into
+      training pipeline.
+    prior_probability: 0.45
+    status: viable
+    implementation_status: config_only
+    complements:
+      - "experiment_tracking.mlflow"
+      - "model_strategy.automl_search"
+
+  - option_id: ray_tune
+    title: "Ray Tune"
+    description: >
+      Distributed HPO with support for population-based training, ASHA
+      scheduler, and multi-GPU parallelism. Requires Ray cluster setup.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires Ray cluster infrastructure"
+      - "Additional dependency complexity"
+
+  - option_id: nevergrad
+    title: "Nevergrad"
+    description: >
+      Meta-library for gradient-free optimization. Supports evolutionary
+      strategies, CMA-ES, and differential evolution. Good for non-differentiable
+      objectives but less mature than Optuna for ML HPO.
+    prior_probability: 0.15
+    status: experimental
+    implementation_status: not_started
+    constraints:
+      - "Less ML-specific tooling than Optuna"
+      - "Fewer integrations with MLflow"
+
+  - option_id: manual
+    title: "Manual HPO"
+    description: >
+      Manual hyperparameter tuning via Hydra-zen config sweeps and human
+      judgment. Current approach. Simple but does not scale and misses
+      non-obvious parameter interactions.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: partial
+    complements:
+      - "config_management.hydra_zen"
+
+conditional_on:
+  - parent_decision_id: model_strategy
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: single_architecture
+        then_probabilities:
+          optuna: 0.40
+          ray_tune: 0.15
+          nevergrad: 0.10
+          manual: 0.35
+      - given_parent_option: multi_architecture
+        then_probabilities:
+          optuna: 0.45
+          ray_tune: 0.25
+          nevergrad: 0.15
+          manual: 0.15
+      - given_parent_option: foundation_model_first
+        then_probabilities:
+          optuna: 0.40
+          ray_tune: 0.20
+          nevergrad: 0.15
+          manual: 0.25
+      - given_parent_option: automl_search
+        then_probabilities:
+          optuna: 0.35
+          ray_tune: 0.40
+          nevergrad: 0.20
+          manual: 0.05
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      optuna: 0.45
+      ray_tune: 0.10
+      nevergrad: 0.15
+      manual: 0.30
+    rationale: "Solo researchers use Optuna locally; Ray Tune overkill without cluster"
+  lab_group:
+    probability_overrides:
+      optuna: 0.40
+      ray_tune: 0.35
+      nevergrad: 0.15
+      manual: 0.10
+    rationale: "Lab groups can leverage distributed Ray Tune on shared compute"
+  clinical_deployment:
+    probability_overrides:
+      optuna: 0.50
+      ray_tune: 0.30
+      nevergrad: 0.10
+      manual: 0.10
+    rationale: "Clinical needs systematic optimization with audit trails"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Optuna 4.x features"
+    - "Ray 3.x improvements"
+    - "LLM-guided HPO approaches"
+    - "Compute budget availability"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Optuna (0.45) is the leading choice given its presence in dependencies and
+  excellent MLflow integration. Manual HPO (0.15) is current practice via
+  Hydra-zen config sweeps. The gap between config_only and integrated is the
+  main blocker — requires Optuna study creation in the training pipeline and
+  objective function wrapping around the train loop.
+
+tags:
+  - technology
+  - optimization
+  - hyperparameters
+  - not-integrated

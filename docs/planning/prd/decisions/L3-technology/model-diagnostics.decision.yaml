@@ -1,0 +1,138 @@
+decision_id: model_diagnostics
+title: "Model Diagnostics"
+description: >
+  Tools for diagnosing model quality beyond standard metrics. WeightWatcher
+  provides spectral analysis of layer weight matrices to detect overtraining,
+  undertrained layers, and model quality without test data. Pruning and NAS
+  tools offer complementary structural analysis.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: weightwatcher
+    title: "WeightWatcher"
+    description: >
+      Spectral analysis of model weight matrices using random matrix theory.
+      Detects overtraining, layer quality, and model health without needing
+      test data. Implemented in the current codebase.
+    prior_probability: 0.35
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "data_validation_tools.deepchecks"
+      - "metrics_framework.torchmetrics"
+
+  - option_id: torch_pruning
+    title: "Torch Pruning"
+    description: >
+      Structural pruning analysis via torch-pruning. Can identify redundant
+      layers, compute pruning ratios, and optimize model architecture.
+      Useful for deployment optimization.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "May require re-training after pruning"
+      - "Architecture-specific pruning rules"
+
+  - option_id: nni
+    title: "NNI (Neural Network Intelligence)"
+    description: >
+      Microsoft NNI for model compression, pruning, and architecture search.
+      Comprehensive but heavyweight dependency. Overlaps with HPO framework.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Large dependency footprint"
+      - "Overlaps with Optuna for HPO"
+
+  - option_id: custom
+    title: "Custom Diagnostics"
+    description: >
+      Hand-written model diagnostics: gradient flow analysis, activation
+      statistics, dead neuron detection. Flexible but maintenance burden.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+
+conditional_on:
+  - parent_decision_id: model_strategy
+    influence_strength: weak
+    conditional_table:
+      - given_parent_option: single_architecture
+        then_probabilities:
+          weightwatcher: 0.40
+          torch_pruning: 0.20
+          nni: 0.15
+          custom: 0.25
+      - given_parent_option: multi_architecture
+        then_probabilities:
+          weightwatcher: 0.35
+          torch_pruning: 0.25
+          nni: 0.20
+          custom: 0.20
+      - given_parent_option: foundation_model_first
+        then_probabilities:
+          weightwatcher: 0.30
+          torch_pruning: 0.30
+          nni: 0.20
+          custom: 0.20
+      - given_parent_option: automl_search
+        then_probabilities:
+          weightwatcher: 0.25
+          torch_pruning: 0.20
+          nni: 0.35
+          custom: 0.20
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      weightwatcher: 0.40
+      torch_pruning: 0.20
+      nni: 0.15
+      custom: 0.25
+    rationale: "Solo researchers prefer lightweight tools; WeightWatcher needs no test data"
+  lab_group:
+    probability_overrides:
+      weightwatcher: 0.30
+      torch_pruning: 0.25
+      nni: 0.30
+      custom: 0.15
+    rationale: "Lab groups can invest in heavier tooling like NNI"
+  clinical_deployment:
+    probability_overrides:
+      weightwatcher: 0.35
+      torch_pruning: 0.30
+      nni: 0.20
+      custom: 0.15
+    rationale: "Clinical deployment benefits from pruning for edge deployment"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-23
+  next_review: 2026-05-23
+  change_drivers:
+    - "WeightWatcher library updates and new metrics"
+    - "PyTorch native pruning improvements"
+    - "New model compression techniques"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  WeightWatcher (0.35) is implemented for model quality diagnostics using
+  spectral analysis of weight matrices. It provides unique insights without
+  requiring test data, complementing metric-based evaluation. Torch pruning
+  (0.25) is the natural next step for deployment optimization.
+
+tags:
+  - technology
+  - models
+  - diagnostics
+  - resolved

@@ -1,0 +1,117 @@
+scenario_id: learning_first_mvp
+title: "Learning-First MVP"
+description: >
+  Current active implementation path. Solo researcher maximizing tool
+  exposure and portfolio demonstration. Breadth over depth, with 30+
+  tools integrated across 38 modules and 103+ tests.
+
+  This scenario represents what has been built in Phases 0-6.
+
+archetype: solo_researcher
+domain: vascular_segmentation
+status: active
+
+resolved_decisions:
+  # L1 Research Goals
+  project_purpose: self_learning
+  research_impact_target: course_material
+  open_source_model: permissive_mit
+  portfolio_priority: breadth_over_depth
+  compliance_depth: lightweight_audit
+  monai_alignment: monai_compatible
+  reproducibility_standard: dvc_versioned
+
+  # L2 Architecture
+  model_strategy: multi_architecture
+  foundation_model_integration: from_scratch  # Config stubs for FM exist
+  data_management_strategy: local_dvc
+  ensemble_strategy: model_soups
+  uncertainty_quantification: temperature_scaling
+  serving_architecture: bentoml_rest
+  config_management: hydra_zen
+  pipeline_orchestration: langgraph
+  xai_strategy: none  # Config only, not integrated
+  validation_depth: standard_5_layers  # ~8 layers actually
+
+  # L3 Technology
+  segmentation_models: segresnet  # + SwinUNETR
+  loss_functions: dice_ce
+  augmentation_stack: monai_plus_torchio
+  metrics_framework: torchmetrics  # + metricsreloaded
+  ensemble_methods: greedy_soup  # + mean
+  calibration_tools: local_temp_scaling
+  experiment_tracking: mlflow
+  llm_observability: langfuse  # + braintrust
+  agent_framework: langgraph
+  llm_provider: hybrid_litellm
+  data_validation_tools: pandera_ge  # + deepchecks
+  model_diagnostics: weightwatcher
+  hpo_framework: manual  # Optuna in deps
+  lineage_tracking: openlineage_marquez  # Config only
+  xai_meta_evaluation: none  # Quantus in deps
+  annotation_platform: label_studio  # Docker config
+  documentation_standard: model_cards_lite
+  testing_strategy: property_based  # + standard
+  label_quality: none  # Cleanlab in deps
+  data_profiling: none  # whylogs in deps
+
+  # L4 Infrastructure
+  compute_target: local_gpu
+  containerization: docker_compose
+  ci_cd_platform: github_actions
+  iac_tooling: none  # Pulumi in deps
+  gitops_strategy: github_actions_only
+  federated_learning: centralized_only
+  model_export_format: onnx
+  secrets_management: dotenv
+
+  # L5 Operations
+  monitoring_stack: none  # Prometheus/Grafana in docker
+  drift_response: alert_human  # KS + PSI detection
+  annotation_workflow: none  # Docker config exists
+  model_governance: mlflow_tags
+  retraining_trigger: manual
+  documentation_generation: automated_cards
+  cost_tracking: none  # Langfuse + DuckDB available
+
+joint_probability: 0.00018
+# Low absolute value is expected for 52-decision path.
+# Meaningful only for comparison between scenarios.
+
+trade_offs:
+  gains:
+    - "30+ tools integrated — maximum ecosystem exposure"
+    - "103+ tests — TDD discipline demonstrated"
+    - "38 modules — comprehensive architecture"
+    - "5 ADRs — documented decision rationale"
+    - "Model cards — SaMD-principled compliance"
+    - "Docker Compose — local observability stack"
+    - "BentoML + ONNX — demo-ready serving"
+  sacrifices:
+    - "Many tools are config-only, not fully integrated"
+    - "No production monitoring (Prometheus/Grafana not wired)"
+    - "No XAI integration (Captum/SHAP in deps only)"
+    - "No federated learning"
+    - "No HPO integration (Optuna in deps only)"
+    - "No annotation workflow (Label Studio in docker only)"
+    - "LangGraph agents are placeholder"
+
+next_steps:
+  high_priority:
+    - "Integrate XAI (Captum gradient-based)"
+    - "Integrate Optuna HPO"
+    - "Wire Prometheus/Grafana monitoring"
+    - "Foundation model fine-tuning (VISTA-3D + LoRA)"
+  medium_priority:
+    - "Integrate Cleanlab label quality"
+    - "Integrate whylogs data profiling"
+    - "Wire OpenLineage lineage tracking"
+    - "Conformal prediction UQ"
+  low_priority:
+    - "MONAI Bundle export"
+    - "Federated learning exploration"
+    - "IaC with Pulumi"
+
+references:
+  - "../../../.claude/phase-tracker.md"
+  - "../../modernize-minivess-mlops-plan.md"

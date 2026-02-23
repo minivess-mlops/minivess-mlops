@@ -1,0 +1,136 @@
+decision_id: foundation_model_integration
+title: "Foundation Model Integration"
+description: >
+  How to integrate pre-trained foundation models (VISTA-3D, SAM variants).
+  From-scratch ignores pre-training; LoRA is parameter-efficient;
+  full fine-tune updates all weights; adapter fusion combines adapters.
+
+decision_level: L2_architecture
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: from_scratch
+    title: "Train From Scratch"
+    description: "Ignore pre-trained weights. Baseline comparison."
+    prior_probability: 0.15
+    status: viable
+    implementation_status: implemented
+
+  - option_id: lora_finetune
+    title: "LoRA Fine-Tune"
+    description: >
+      Low-Rank Adaptation. Parameter-efficient, memory-friendly.
+      Good for limited GPU memory.
+    prior_probability: 0.35
+    status: recommended
+    implementation_status: not_started
+    complements:
+      - "segmentation_models.vista3d"
+
+  - option_id: full_finetune
+    title: "Full Fine-Tune"
+    description: "Update all parameters. Maximum flexibility but GPU-intensive."
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires significant GPU memory"
+
+  - option_id: adapter_fusion
+    title: "Adapter Fusion"
+    description: "Combine multiple task-specific adapters. Advanced technique."
+    prior_probability: 0.15
+    status: experimental
+    implementation_status: not_started
+
+  - option_id: prompt_tuning
+    title: "Prompt Tuning"
+    description: "Learn task-specific prompts for SAM-style models."
+    prior_probability: 0.15
+    status: experimental
+    implementation_status: not_started
+
+conditional_on:
+  - parent_decision_id: project_purpose
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: self_learning
+        then_probabilities:
+          from_scratch: 0.15
+          lora_finetune: 0.30
+          full_finetune: 0.20
+          adapter_fusion: 0.20
+          prompt_tuning: 0.15
+      - given_parent_option: portfolio
+        then_probabilities:
+          from_scratch: 0.10
+          lora_finetune: 0.35
+          full_finetune: 0.25
+          adapter_fusion: 0.15
+          prompt_tuning: 0.15
+      - given_parent_option: clinical_deployment
+        then_probabilities:
+          from_scratch: 0.10
+          lora_finetune: 0.30
+          full_finetune: 0.30
+          adapter_fusion: 0.15
+          prompt_tuning: 0.15
+      - given_parent_option: open_source_contribution
+        then_probabilities:
+          from_scratch: 0.20
+          lora_finetune: 0.35
+          full_finetune: 0.15
+          adapter_fusion: 0.15
+          prompt_tuning: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      from_scratch: 0.15
+      lora_finetune: 0.40
+      full_finetune: 0.15
+      adapter_fusion: 0.15
+      prompt_tuning: 0.15
+    rationale: "LoRA is most accessible for limited GPU resources"
+  lab_group:
+    probability_overrides:
+      from_scratch: 0.10
+      lora_finetune: 0.30
+      full_finetune: 0.30
+      adapter_fusion: 0.15
+      prompt_tuning: 0.15
+    rationale: "Lab groups with HPC can afford full fine-tuning"
+  clinical_deployment:
+    probability_overrides:
+      from_scratch: 0.05
+      lora_finetune: 0.30
+      full_finetune: 0.35
+      adapter_fusion: 0.20
+      prompt_tuning: 0.10
+    rationale: "Clinical prefers full fine-tune for maximum control"
+
+volatility:
+  classification: volatile
+  last_assessed: 2026-02-23
+  next_review: 2026-04-23
+  change_drivers:
+    - "New PEFT techniques"
+    - "MONAI support for LoRA/adapters"
+    - "Foundation model releases"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 0.9
+  neuroimaging: 1.0
+  general_medical: 0.8
+
+rationale: >
+  LoRA (0.35) has highest prior as the most practical entry point for
+  foundation model adaptation. Config stubs exist for VISTA-3D and SAM3
+  in the ModelFamily enum but no integration yet.
+
+tags:
+  - architecture
+  - foundation-models
+  - peft

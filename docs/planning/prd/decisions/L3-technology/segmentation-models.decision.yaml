@@ -1,0 +1,233 @@
+decision_id: segmentation_models
+title: "Segmentation Models"
+description: >
+  Which 3D segmentation architectures to implement behind the ModelAdapter ABC.
+  Determines the model zoo breadth, GPU memory requirements, and compatibility
+  with foundation model pre-training. Vascular segmentation benefits from
+  topology-aware architectures that preserve clDice connectivity.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: segresnet
+    title: "SegResNet"
+    description: >
+      MONAI's SegResNet: encoder-decoder with residual blocks. Lightweight,
+      well-tested, fast convergence. Already implemented as baseline.
+    prior_probability: 0.25
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "loss_functions.dice_ce"
+      - "augmentation_stack.monai_plus_torchio"
+
+  - option_id: swinunetr
+    title: "SwinUNETR"
+    description: >
+      Swin Transformer U-Net with shifted-window self-attention. Pre-trained
+      on large-scale CT data. Better for capturing long-range dependencies
+      in 3D volumes. Already implemented.
+    prior_probability: 0.20
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "foundation_model_integration.lora_finetune"
+      - "ensemble_methods.greedy_soup"
+
+  - option_id: vista3d
+    title: "VISTA-3D"
+    description: >
+      MONAI's foundation model for interactive 3D segmentation. Supports
+      point prompts and class prompts. Config stubs exist but no integration.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: config_only
+    complements:
+      - "foundation_model_integration.lora_finetune"
+      - "foundation_model_integration.prompt_tuning"
+    constraints:
+      - "Requires MONAI >=1.4"
+      - "Significant GPU memory (>16 GB)"
+
+  - option_id: nnunet
+    title: "nnU-Net v2"
+    description: >
+      Self-configuring segmentation framework. Automatically selects
+      architecture, preprocessing, and training hyperparameters based on
+      dataset fingerprinting. Gold standard in medical image segmentation
+      challenges but requires external pipeline integration.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Own training pipeline conflicts with Hydra-zen config"
+      - "Requires dataset conversion to nnU-Net format"
+
+  - option_id: sam_variants
+    title: "SAM Variants (SAM3, MedSAM2)"
+    description: >
+      Segment Anything variants adapted for 3D medical imaging. Interactive
+      prompting model. Highly experimental for vascular segmentation.
+    prior_probability: 0.15
+    status: experimental
+    implementation_status: not_started
+    constraints:
+      - "Prompt-based paradigm differs from standard segmentation"
+      - "Not optimized for thin tubular structures"
+
+conditional_on:
+  - parent_decision_id: model_strategy
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: single_architecture
+        then_probabilities:
+          segresnet: 0.40
+          swinunetr: 0.25
+          vista3d: 0.15
+          nnunet: 0.15
+          sam_variants: 0.05
+      - given_parent_option: multi_architecture
+        then_probabilities:
+          segresnet: 0.25
+          swinunetr: 0.20
+          vista3d: 0.25
+          nnunet: 0.15
+          sam_variants: 0.15
+      - given_parent_option: foundation_model_first
+        then_probabilities:
+          segresnet: 0.10
+          swinunetr: 0.15
+          vista3d: 0.35
+          nnunet: 0.10
+          sam_variants: 0.30
+      - given_parent_option: automl_search
+        then_probabilities:
+          segresnet: 0.25
+          swinunetr: 0.20
+          vista3d: 0.15
+          nnunet: 0.30
+          sam_variants: 0.10
+
+  - parent_decision_id: foundation_model_integration
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: from_scratch
+        then_probabilities:
+          segresnet: 0.35
+          swinunetr: 0.20
+          vista3d: 0.10
+          nnunet: 0.25
+          sam_variants: 0.10
+      - given_parent_option: lora_finetune
+        then_probabilities:
+          segresnet: 0.10
+          swinunetr: 0.20
+          vista3d: 0.35
+          nnunet: 0.10
+          sam_variants: 0.25
+      - given_parent_option: full_finetune
+        then_probabilities:
+          segresnet: 0.20
+          swinunetr: 0.25
+          vista3d: 0.25
+          nnunet: 0.15
+          sam_variants: 0.15
+      - given_parent_option: adapter_fusion
+        then_probabilities:
+          segresnet: 0.10
+          swinunetr: 0.25
+          vista3d: 0.30
+          nnunet: 0.10
+          sam_variants: 0.25
+      - given_parent_option: prompt_tuning
+        then_probabilities:
+          segresnet: 0.05
+          swinunetr: 0.10
+          vista3d: 0.35
+          nnunet: 0.05
+          sam_variants: 0.45
+
+  - parent_decision_id: monai_alignment
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: monai_native
+        then_probabilities:
+          segresnet: 0.30
+          swinunetr: 0.25
+          vista3d: 0.30
+          nnunet: 0.05
+          sam_variants: 0.10
+      - given_parent_option: monai_compatible
+        then_probabilities:
+          segresnet: 0.25
+          swinunetr: 0.20
+          vista3d: 0.25
+          nnunet: 0.15
+          sam_variants: 0.15
+      - given_parent_option: framework_agnostic
+        then_probabilities:
+          segresnet: 0.15
+          swinunetr: 0.15
+          vista3d: 0.10
+          nnunet: 0.35
+          sam_variants: 0.25
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      segresnet: 0.35
+      swinunetr: 0.25
+      vista3d: 0.15
+      nnunet: 0.15
+      sam_variants: 0.10
+    rationale: "Solo researchers start with lightweight models (SegResNet) and iterate"
+  lab_group:
+    probability_overrides:
+      segresnet: 0.20
+      swinunetr: 0.20
+      vista3d: 0.25
+      nnunet: 0.20
+      sam_variants: 0.15
+    rationale: "Lab groups can run multiple architectures with shared HPC"
+  clinical_deployment:
+    probability_overrides:
+      segresnet: 0.15
+      swinunetr: 0.15
+      vista3d: 0.30
+      nnunet: 0.25
+      sam_variants: 0.15
+    rationale: "Clinical prefers validated foundation models and benchmark champions"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-23
+  next_review: 2026-05-23
+  change_drivers:
+    - "VISTA-3D v2 and MONAI Bundle updates"
+    - "nnU-Net v2.5 release"
+    - "SAM3/MedSAM2 maturity for 3D medical segmentation"
+    - "New topology-aware architectures"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 0.95
+  neuroimaging: 0.95
+  general_medical: 0.90
+
+rationale: >
+  SegResNet (0.25) and VISTA-3D (0.25) share top prior. SegResNet is already
+  implemented and proven; VISTA-3D represents the highest-potential next step
+  with foundation model pre-training. SwinUNETR (0.20) is implemented and
+  competitive. nnU-Net (0.15) is the challenge benchmark standard but requires
+  pipeline refactoring. SAM variants (0.15) are experimental for thin
+  vascular structures. Domain note: vascular segmentation benefits +0.05 from
+  clDice-aware architectures that preserve topological connectivity.
+
+tags:
+  - models
+  - segmentation
+  - monai
+  - foundation-models
+  - resolved-partial

@@ -1,0 +1,77 @@
+archetype_id: lab_group
+title: "Lab Group"
+description: >
+  Research lab with 3-5 researchers sharing HPC infrastructure (SLURM).
+  MONAI-aligned, multi-experiment workflows, reproducibility-focused.
+  Targets journal publications and benchmark contributions.
+
+team_profile:
+  size: "3-5"
+  composition:
+    ml_engineers: "2-3"
+    domain_experts: "1-2"
+    devops: "0-1 (shared IT)"
+  technical_experience:
+    ml_engineering: intermediate_to_advanced
+    medical_imaging: advanced
+    infrastructure: intermediate
+    software_engineering: intermediate
+  budget_range:
+    monthly_compute: "$500-2000 (HPC allocation)"
+    annual_saas_tools: "$1000-5000"
+  compute_resources:
+    gpu: "Shared HPC — 4-8x A100 (80GB) via SLURM"
+    ram: "128-512GB per node"
+    storage: "Shared NFS/Lustre, 10-50TB"
+
+hard_constraints:
+  - "SLURM job scheduler compatibility"
+  - "Shared filesystem (NFS/Lustre)"
+  - "MONAI ecosystem alignment for collaboration"
+  - "Reproducibility across team members"
+  - "Institutional data governance policies"
+
+soft_preferences:
+  - "Prefer MONAI-native tools when available"
+  - "Prefer tools with multi-user support"
+  - "Prefer DVC for shared data versioning"
+  - "Value standardized experiment workflows"
+  - "Prefer containerized environments for consistency"
+
+decision_overrides:
+  project_purpose:
+    preferred: open_source_contribution
+    rationale: "Lab groups contribute to community benchmarks"
+  research_impact_target:
+    preferred: journal_paper
+    rationale: "Labs target high-impact journal publications"
+  monai_alignment:
+    preferred: monai_native
+    rationale: "Standardization across lab members"
+  reproducibility_standard:
+    preferred: dvc_versioned
+    rationale: "Shared DVC remotes for team collaboration"
+  model_strategy:
+    preferred: foundation_model_first
+    rationale: "Foundation models standardize baselines"
+  foundation_model_integration:
+    preferred: lora_finetune
+    rationale: "Efficient multi-experiment adaptation"
+  data_management_strategy:
+    preferred: cloud_dvc
+    rationale: "Cloud DVC remote for team sharing"
+  compute_target:
+    preferred: hpc_slurm
+    rationale: "Institutional HPC is primary resource"
+  model_export_format:
+    preferred: monai_bundle
+    rationale: "MONAI Bundle for ecosystem compatibility"
+  hpo_framework:
+    preferred: optuna
+    rationale: "Optuna with SLURM backend"
+  federated_learning:
+    preferred: monai_fl
+    rationale: "MONAI FL for multi-site studies"
+  testing_strategy:
+    preferred: property_based
+    rationale: "Consistent testing across team members"

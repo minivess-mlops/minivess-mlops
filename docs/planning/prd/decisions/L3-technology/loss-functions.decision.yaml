@@ -1,0 +1,203 @@
+decision_id: loss_functions
+title: "Loss Functions"
+description: >
+  Which loss functions to support for segmentation training. The choice
+  interacts strongly with model architecture and target anatomy. Vascular
+  segmentation specifically benefits from topology-preserving losses like
+  clDice that penalize broken connectivity in thin tubular structures.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: dice_ce
+    title: "Dice + Cross-Entropy (Combined)"
+    description: >
+      Standard compound loss combining Dice overlap with voxel-wise
+      cross-entropy. Robust default for medical segmentation. Already
+      the primary training loss.
+    prior_probability: 0.40
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "segmentation_models.segresnet"
+      - "segmentation_models.swinunetr"
+
+  - option_id: dice
+    title: "Dice Loss (Pure)"
+    description: >
+      Pure Dice loss without cross-entropy. Better for class-imbalanced
+      problems but less stable early in training. Implemented as
+      alternative config option.
+    prior_probability: 0.20
+    status: resolved
+    implementation_status: implemented
+
+  - option_id: focal
+    title: "Focal Loss"
+    description: >
+      Down-weights easy negatives, focuses on hard examples. Useful for
+      extreme class imbalance in small vessel segmentation. Implemented
+      via MONAI FocalLoss.
+    prior_probability: 0.15
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "segmentation_models.segresnet"
+
+  - option_id: topk
+    title: "Top-K Loss"
+    description: >
+      Only backpropagates through the hardest K% of voxels. Reduces
+      noise from easy background. Not yet implemented but config-ready.
+    prior_probability: 0.10
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "K% threshold needs dataset-specific tuning"
+
+  - option_id: cldice
+    title: "clDice (Centerline Dice)"
+    description: >
+      Topology-preserving loss that computes Dice on soft-skeletonized
+      predictions. Specifically designed for tubular structure
+      segmentation where connectivity matters more than volumetric overlap.
+      Critical for vascular imaging.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "segmentation_models.segresnet"
+      - "metrics_framework.metricsreloaded"
+    constraints:
+      - "Soft-skeletonization is computationally expensive"
+      - "Requires careful hyperparameter tuning (alpha/beta)"
+
+conditional_on:
+  - parent_decision_id: model_strategy
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: single_architecture
+        then_probabilities:
+          dice_ce: 0.45
+          dice: 0.20
+          focal: 0.15
+          topk: 0.10
+          cldice: 0.10
+      - given_parent_option: multi_architecture
+        then_probabilities:
+          dice_ce: 0.40
+          dice: 0.20
+          focal: 0.15
+          topk: 0.10
+          cldice: 0.15
+      - given_parent_option: foundation_model_first
+        then_probabilities:
+          dice_ce: 0.35
+          dice: 0.25
+          focal: 0.15
+          topk: 0.10
+          cldice: 0.15
+      - given_parent_option: automl_search
+        then_probabilities:
+          dice_ce: 0.30
+          dice: 0.15
+          focal: 0.20
+          topk: 0.15
+          cldice: 0.20
+
+  - parent_decision_id: segmentation_models
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: segresnet
+        then_probabilities:
+          dice_ce: 0.40
+          dice: 0.20
+          focal: 0.15
+          topk: 0.10
+          cldice: 0.15
+      - given_parent_option: swinunetr
+        then_probabilities:
+          dice_ce: 0.40
+          dice: 0.20
+          focal: 0.15
+          topk: 0.10
+          cldice: 0.15
+      - given_parent_option: vista3d
+        then_probabilities:
+          dice_ce: 0.35
+          dice: 0.25
+          focal: 0.20
+          topk: 0.05
+          cldice: 0.15
+      - given_parent_option: nnunet
+        then_probabilities:
+          dice_ce: 0.50
+          dice: 0.20
+          focal: 0.10
+          topk: 0.15
+          cldice: 0.05
+      - given_parent_option: sam_variants
+        then_probabilities:
+          dice_ce: 0.35
+          dice: 0.20
+          focal: 0.25
+          topk: 0.05
+          cldice: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      dice_ce: 0.45
+      dice: 0.20
+      focal: 0.15
+      topk: 0.05
+      cldice: 0.15
+    rationale: "Solo researchers start with Dice+CE default, explore clDice for vascular"
+  lab_group:
+    probability_overrides:
+      dice_ce: 0.35
+      dice: 0.15
+      focal: 0.15
+      topk: 0.15
+      cldice: 0.20
+    rationale: "Lab groups can run systematic loss function ablations"
+  clinical_deployment:
+    probability_overrides:
+      dice_ce: 0.40
+      dice: 0.20
+      focal: 0.10
+      topk: 0.10
+      cldice: 0.20
+    rationale: "Clinical values topology-preserving losses for safety-critical vessels"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "New topology-aware losses in MONAI"
+    - "clDice 3D GPU-optimized implementations"
+    - "Compound loss search via AutoML"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 0.90
+  neuroimaging: 0.85
+  general_medical: 0.80
+
+rationale: >
+  Dice+CE (0.40) is the robust default already implemented. Pure Dice (0.20)
+  and Focal (0.15) provide implemented alternatives for class-imbalance
+  scenarios. clDice (0.15) is critical for vascular segmentation where
+  topological connectivity matters more than volumetric overlap — in vascular
+  domain this probability should be boosted. TopK (0.10) is a niche option
+  for extreme imbalance.
+
+tags:
+  - training
+  - loss-functions
+  - topology
+  - vascular
+  - resolved-partial

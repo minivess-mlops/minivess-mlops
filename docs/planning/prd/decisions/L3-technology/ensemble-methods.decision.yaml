@@ -1,0 +1,176 @@
+decision_id: ensemble_methods
+title: "Ensemble Methods"
+description: >
+  Which model combination techniques to implement for improving prediction
+  quality and uncertainty estimation. Ranges from simple averaging to
+  advanced weight-space methods. The ensemble strategy (L2) determines
+  whether to invest in ensemble infrastructure at all; this node selects
+  the specific algorithms.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: mean
+    title: "Mean Ensemble (Prediction Averaging)"
+    description: >
+      Average softmax outputs across independently trained models.
+      Simplest approach, requires storing multiple model checkpoints.
+      Already implemented for SegResNet + SwinUNETR pairs.
+    prior_probability: 0.25
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "segmentation_models.segresnet"
+      - "segmentation_models.swinunetr"
+
+  - option_id: greedy_soup
+    title: "Greedy Model Soup"
+    description: >
+      Greedily average model weights (Wortsman et al., 2022). Zero inference
+      overhead — produces single model with ensemble-like performance.
+      Implemented for same-architecture checkpoints.
+    prior_probability: 0.25
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "experiment_tracking.mlflow"
+
+  - option_id: swag
+    title: "SWAG (Stochastic Weight Averaging Gaussian)"
+    description: >
+      Approximate Bayesian inference over weight space. Provides
+      calibrated uncertainty estimates from a single training run.
+      Moderate implementation complexity.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "calibration_tools.netcal"
+      - "calibration_tools.mc_calibration"
+    constraints:
+      - "Requires custom training loop modifications"
+      - "Memory overhead for covariance matrix"
+
+  - option_id: ties_dare
+    title: "TIES-DARE Merging"
+    description: >
+      Advanced weight merging with trimming, election, and disjoint
+      rescaling (Yadav et al., 2023; Yu et al., 2024). State-of-the-art
+      for merging fine-tuned foundation model variants.
+    prior_probability: 0.15
+    status: experimental
+    implementation_status: not_started
+    constraints:
+      - "Research-stage method, limited medical imaging validation"
+      - "Requires compatible model architectures"
+
+  - option_id: learned
+    title: "Learned Ensemble (Meta-Learner)"
+    description: >
+      Train a meta-model to combine base model outputs. Can learn
+      input-dependent weighting. Highest potential but most complex
+      and risks overfitting.
+    prior_probability: 0.15
+    status: experimental
+    implementation_status: not_started
+    constraints:
+      - "Requires validation split for meta-training"
+      - "Risk of overfitting with small datasets"
+
+conditional_on:
+  - parent_decision_id: ensemble_strategy
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: no_ensemble
+        then_probabilities:
+          mean: 0.10
+          greedy_soup: 0.40
+          swag: 0.30
+          ties_dare: 0.10
+          learned: 0.10
+      - given_parent_option: checkpoint_ensemble
+        then_probabilities:
+          mean: 0.30
+          greedy_soup: 0.35
+          swag: 0.15
+          ties_dare: 0.10
+          learned: 0.10
+      - given_parent_option: multi_architecture
+        then_probabilities:
+          mean: 0.35
+          greedy_soup: 0.15
+          swag: 0.15
+          ties_dare: 0.10
+          learned: 0.25
+      - given_parent_option: uncertainty_weighted
+        then_probabilities:
+          mean: 0.15
+          greedy_soup: 0.15
+          swag: 0.35
+          ties_dare: 0.15
+          learned: 0.20
+      - given_parent_option: conformal_prediction
+        then_probabilities:
+          mean: 0.20
+          greedy_soup: 0.20
+          swag: 0.30
+          ties_dare: 0.10
+          learned: 0.20
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      mean: 0.30
+      greedy_soup: 0.30
+      swag: 0.20
+      ties_dare: 0.10
+      learned: 0.10
+    rationale: "Solo researchers prefer simple methods; greedy soup is elegant and free"
+  lab_group:
+    probability_overrides:
+      mean: 0.20
+      greedy_soup: 0.25
+      swag: 0.25
+      ties_dare: 0.15
+      learned: 0.15
+    rationale: "Lab groups can explore advanced methods with shared compute"
+  clinical_deployment:
+    probability_overrides:
+      mean: 0.25
+      greedy_soup: 0.20
+      swag: 0.25
+      ties_dare: 0.10
+      learned: 0.20
+    rationale: "Clinical values calibrated uncertainty (SWAG) and proven methods (mean)"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-23
+  next_review: 2026-05-23
+  change_drivers:
+    - "Weight merging research (TIES, DARE, DELLA)"
+    - "Foundation model merging techniques"
+    - "Conformal prediction integration patterns"
+    - "MONAI ensemble utilities"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 0.95
+  neuroimaging: 0.95
+  general_medical: 0.90
+
+rationale: >
+  Mean (0.25) and greedy soup (0.25) share top prior as both are already
+  implemented and proven. Mean ensemble gives output-space diversity;
+  greedy soup gives weight-space merging with zero inference cost. SWAG
+  (0.20) is the strongest candidate for calibrated Bayesian uncertainty.
+  TIES-DARE (0.15) represents cutting-edge weight merging for foundation
+  models. Learned ensemble (0.15) has highest ceiling but most risk.
+
+tags:
+  - ensemble
+  - model-merging
+  - uncertainty
+  - resolved-partial

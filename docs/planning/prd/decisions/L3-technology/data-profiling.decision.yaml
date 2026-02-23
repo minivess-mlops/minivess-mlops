@@ -1,0 +1,170 @@
+decision_id: data_profiling
+title: "Data Profiling"
+description: >
+  How to profile and monitor data distributions over time. whylogs provides
+  lightweight statistical profiling without storing raw data; ydata-profiling
+  generates comprehensive HTML reports; custom profiling builds domain-specific
+  profiles; none defers profiling to validation tools.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: whylogs
+    title: "whylogs"
+    description: >
+      Lightweight data profiling that computes statistical summaries (mean,
+      variance, quantiles, histograms) without storing raw data. Supports
+      drift detection via profile comparison. Present in dependencies
+      but not integrated into the data pipeline.
+    prior_probability: 0.40
+    status: viable
+    implementation_status: config_only
+    complements:
+      - "data_validation_tools.whylogs"
+      - "monitoring_stack.prometheus_grafana"
+
+  - option_id: ydata_profiling
+    title: "ydata-profiling"
+    description: >
+      Generates comprehensive HTML profiling reports with correlations,
+      missing values, distributions, and interactions. Formerly
+      pandas-profiling. Heavier than whylogs but more informative for
+      exploratory analysis.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Heavy memory usage for large datasets"
+      - "HTML reports not suitable for programmatic drift detection"
+
+  - option_id: custom
+    title: "Custom Profiling"
+    description: >
+      Hand-written profiling for medical imaging specifics: voxel intensity
+      distributions, volume size statistics, spacing histograms, ROI
+      coverage maps, and class imbalance metrics.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+
+  - option_id: none
+    title: "No Dedicated Profiling"
+    description: >
+      Rely on validation tools (Pandera, Deepchecks) for implicit profiling.
+      Current state — no dedicated profiling pipeline exists. Data statistics
+      are computed ad-hoc during validation.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: data_management_strategy
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: local_dvc
+        then_probabilities:
+          whylogs: 0.40
+          ydata_profiling: 0.25
+          custom: 0.15
+          none: 0.20
+      - given_parent_option: cloud_dvc
+        then_probabilities:
+          whylogs: 0.45
+          ydata_profiling: 0.25
+          custom: 0.10
+          none: 0.20
+      - given_parent_option: lakehouse
+        then_probabilities:
+          whylogs: 0.50
+          ydata_profiling: 0.20
+          custom: 0.15
+          none: 0.15
+      - given_parent_option: streaming
+        then_probabilities:
+          whylogs: 0.55
+          ydata_profiling: 0.10
+          custom: 0.20
+          none: 0.15
+
+  - parent_decision_id: data_validation_tools
+    influence_strength: weak
+    conditional_table:
+      - given_parent_option: pandera_ge
+        then_probabilities:
+          whylogs: 0.40
+          ydata_profiling: 0.25
+          custom: 0.15
+          none: 0.20
+      - given_parent_option: deepchecks
+        then_probabilities:
+          whylogs: 0.35
+          ydata_profiling: 0.25
+          custom: 0.15
+          none: 0.25
+      - given_parent_option: whylogs
+        then_probabilities:
+          whylogs: 0.55
+          ydata_profiling: 0.20
+          custom: 0.10
+          none: 0.15
+      - given_parent_option: custom
+        then_probabilities:
+          whylogs: 0.30
+          ydata_profiling: 0.25
+          custom: 0.30
+          none: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      whylogs: 0.35
+      ydata_profiling: 0.30
+      custom: 0.10
+      none: 0.25
+    rationale: "Solo researchers like ydata-profiling's HTML reports for exploration"
+  lab_group:
+    probability_overrides:
+      whylogs: 0.45
+      ydata_profiling: 0.25
+      custom: 0.15
+      none: 0.15
+    rationale: "Lab groups need programmatic profiling for automated pipelines"
+  clinical_deployment:
+    probability_overrides:
+      whylogs: 0.50
+      ydata_profiling: 0.20
+      custom: 0.20
+      none: 0.10
+    rationale: "Clinical deployment needs continuous profiling for drift detection"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "whylogs feature updates"
+    - "Medical imaging-specific profiling tools"
+    - "Data drift detection requirements"
+    - "Integration with monitoring stack"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  whylogs (0.40) is the preferred profiling tool given its lightweight design,
+  privacy-preserving approach (no raw data storage), and natural complement
+  to the validation onion. It's in dependencies but not integrated. Would
+  provide continuous data profiling alongside Pandera (schema), GE (batch
+  quality), and Deepchecks (vision validation) to complete the validation
+  onion's profiling layer.
+
+tags:
+  - technology
+  - data-quality
+  - profiling
+  - not-integrated

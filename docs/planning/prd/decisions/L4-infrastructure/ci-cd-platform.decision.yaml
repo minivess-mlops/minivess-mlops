@@ -1,0 +1,142 @@
+decision_id: ci_cd_platform
+title: "CI/CD Platform"
+description: >
+  Continuous integration and deployment platform. GitHub Actions is the
+  default for GitHub-hosted projects; GitLab CI offers self-hosted
+  alternative; Buildkite provides hybrid cloud/self-hosted; Jenkins is
+  legacy but ubiquitous in enterprises.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: github_actions
+    title: "GitHub Actions"
+    description: >
+      GitHub-native CI/CD with marketplace actions. Currently used for
+      linting, testing, and CML integration. Free tier for public repos,
+      generous minutes for private. Excellent ecosystem.
+    prior_probability: 0.50
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "documentation_generation.ci_generated"
+      - "gitops_strategy.github_actions_only"
+
+  - option_id: gitlab_ci
+    title: "GitLab CI"
+    description: >
+      GitLab-native CI/CD with .gitlab-ci.yml. Self-hosted runners
+      available. Common in academic institutions with GitLab instances.
+      Good Docker and K8s integration.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires GitLab migration or mirror"
+      - "Different YAML syntax from GitHub Actions"
+
+  - option_id: buildkite
+    title: "Buildkite"
+    description: >
+      Hybrid CI/CD with self-hosted agents. Excellent for GPU workloads
+      with custom agent infrastructure. Pay per usage.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Self-hosted agent management"
+      - "Smaller ecosystem than GitHub Actions"
+
+  - option_id: jenkins
+    title: "Jenkins"
+    description: >
+      Self-hosted, highly customizable CI/CD. Ubiquitous in enterprise
+      and legacy environments. Plugin ecosystem but maintenance heavy.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Server maintenance overhead"
+      - "Plugin compatibility management"
+      - "Security patching responsibility"
+
+conditional_on:
+  - parent_decision_id: pipeline_orchestration
+    influence_strength: weak
+    conditional_table:
+      - given_parent_option: hydra_scripts
+        then_probabilities:
+          github_actions: 0.50
+          gitlab_ci: 0.20
+          buildkite: 0.15
+          jenkins: 0.15
+      - given_parent_option: dvc_pipelines
+        then_probabilities:
+          github_actions: 0.45
+          gitlab_ci: 0.25
+          buildkite: 0.15
+          jenkins: 0.15
+      - given_parent_option: langgraph_agents
+        then_probabilities:
+          github_actions: 0.55
+          gitlab_ci: 0.15
+          buildkite: 0.15
+          jenkins: 0.15
+      - given_parent_option: prefect
+        then_probabilities:
+          github_actions: 0.45
+          gitlab_ci: 0.20
+          buildkite: 0.20
+          jenkins: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      github_actions: 0.60
+      gitlab_ci: 0.15
+      buildkite: 0.10
+      jenkins: 0.15
+    rationale: "Solo researchers default to GitHub Actions for simplicity and free tier"
+  lab_group:
+    probability_overrides:
+      github_actions: 0.25
+      gitlab_ci: 0.40
+      buildkite: 0.15
+      jenkins: 0.20
+    rationale: "Academic labs often use institutional GitLab instances"
+  clinical_deployment:
+    probability_overrides:
+      github_actions: 0.35
+      gitlab_ci: 0.25
+      buildkite: 0.15
+      jenkins: 0.25
+    rationale: "Clinical may need self-hosted CI/CD for compliance; GitHub or Jenkins common"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "GitHub Actions pricing changes"
+    - "GPU runner availability improvements"
+    - "CML integration maturity"
+    - "Institutional platform mandates"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  GitHub Actions (0.50) is resolved. The project is GitHub-hosted with
+  existing workflows for linting, testing, and CML. GitLab CI (0.20)
+  would be relevant if the project moved to an institutional GitLab.
+
+tags:
+  - infrastructure
+  - ci-cd
+  - devops
+  - resolved

@@ -1,0 +1,621 @@
+network:
+  name: "MinIVess MLOps v2 Probabilistic PRD Decision Network"
+  version: "1.1.0"
+  last_updated: 2026-02-23
+  description: >
+    Bayesian decision network with 52 nodes across 5 hierarchical levels.
+    Adapted from the music-attribution-scaffold format for biomedical
+    image segmentation MLOps. Captures open-ended decisions for a
+    learning-first, portfolio-building, MONAI-compatible system.
+
+    v1.1.0: Fixed cycle (removed model_export_format→serving_architecture),
+            removed duplicate edge, added 5 missing edges. 52 nodes, 85 edges.
+    v1.0.0: Initial network — 52 nodes, ~80 edges.
+
+nodes:
+  # --- L1: Research Goals (7 nodes, root level) ---
+  - id: project_purpose
+    level: L1_research_goals
+    file: L1-research-goals/project-purpose.decision.yaml
+    title: "Project Purpose"
+
+  - id: research_impact_target
+    level: L1_research_goals
+    file: L1-research-goals/research-impact-target.decision.yaml
+    title: "Research Impact Target"
+
+  - id: open_source_model
+    level: L1_research_goals
+    file: L1-research-goals/open-source-model.decision.yaml
+    title: "Open Source Model"
+
+  - id: portfolio_priority
+    level: L1_research_goals
+    file: L1-research-goals/portfolio-priority.decision.yaml
+    title: "Portfolio Priority"
+
+  - id: compliance_depth
+    level: L1_research_goals
+    file: L1-research-goals/compliance-depth.decision.yaml
+    title: "Compliance Depth"
+
+  - id: monai_alignment
+    level: L1_research_goals
+    file: L1-research-goals/monai-alignment.decision.yaml
+    title: "MONAI Alignment"
+
+  - id: reproducibility_standard
+    level: L1_research_goals
+    file: L1-research-goals/reproducibility-standard.decision.yaml
+    title: "Reproducibility Standard"
+
+  # --- L2: Architecture (10 nodes) ---
+  - id: model_strategy
+    level: L2_architecture
+    file: L2-architecture/model-strategy.decision.yaml
+    title: "Model Strategy"
+
+  - id: foundation_model_integration
+    level: L2_architecture
+    file: L2-architecture/foundation-model-integration.decision.yaml
+    title: "Foundation Model Integration"
+
+  - id: data_management_strategy
+    level: L2_architecture
+    file: L2-architecture/data-management-strategy.decision.yaml
+    title: "Data Management Strategy"
+
+  - id: ensemble_strategy
+    level: L2_architecture
+    file: L2-architecture/ensemble-strategy.decision.yaml
+    title: "Ensemble Strategy"
+
+  - id: uncertainty_quantification
+    level: L2_architecture
+    file: L2-architecture/uncertainty-quantification.decision.yaml
+    title: "Uncertainty Quantification"
+
+  - id: serving_architecture
+    level: L2_architecture
+    file: L2-architecture/serving-architecture.decision.yaml
+    title: "Serving Architecture"
+
+  - id: config_management
+    level: L2_architecture
+    file: L2-architecture/config-management.decision.yaml
+    title: "Configuration Management"
+
+  - id: pipeline_orchestration
+    level: L2_architecture
+    file: L2-architecture/pipeline-orchestration.decision.yaml
+    title: "Pipeline Orchestration"
+
+  - id: xai_strategy
+    level: L2_architecture
+    file: L2-architecture/xai-strategy.decision.yaml
+    title: "Explainability Strategy"
+
+  - id: validation_depth
+    level: L2_architecture
+    file: L2-architecture/validation-depth.decision.yaml
+    title: "Validation Depth"
+
+  # --- L3: Technology Stack (20 nodes) ---
+  - id: segmentation_models
+    level: L3_technology
+    file: L3-technology/segmentation-models.decision.yaml
+    title: "Segmentation Models"
+
+  - id: loss_functions
+    level: L3_technology
+    file: L3-technology/loss-functions.decision.yaml
+    title: "Loss Functions"
+
+  - id: augmentation_stack
+    level: L3_technology
+    file: L3-technology/augmentation-stack.decision.yaml
+    title: "Augmentation Stack"
+
+  - id: metrics_framework
+    level: L3_technology
+    file: L3-technology/metrics-framework.decision.yaml
+    title: "Metrics Framework"
+
+  - id: ensemble_methods
+    level: L3_technology
+    file: L3-technology/ensemble-methods.decision.yaml
+    title: "Ensemble Methods"
+
+  - id: calibration_tools
+    level: L3_technology
+    file: L3-technology/calibration-tools.decision.yaml
+    title: "Calibration Tools"
+
+  - id: experiment_tracking
+    level: L3_technology
+    file: L3-technology/experiment-tracking.decision.yaml
+    title: "Experiment Tracking"
+
+  - id: llm_observability
+    level: L3_technology
+    file: L3-technology/llm-observability.decision.yaml
+    title: "LLM Observability"
+
+  - id: agent_framework
+    level: L3_technology
+    file: L3-technology/agent-framework.decision.yaml
+    title: "Agent Framework"
+
+  - id: llm_provider
+    level: L3_technology
+    file: L3-technology/llm-provider.decision.yaml
+    title: "LLM Provider"
+
+  - id: data_validation_tools
+    level: L3_technology
+    file: L3-technology/data-validation-tools.decision.yaml
+    title: "Data Validation Tools"
+
+  - id: model_diagnostics
+    level: L3_technology
+    file: L3-technology/model-diagnostics.decision.yaml
+    title: "Model Diagnostics"
+
+  - id: hpo_framework
+    level: L3_technology
+    file: L3-technology/hpo-framework.decision.yaml
+    title: "HPO Framework"
+
+  - id: lineage_tracking
+    level: L3_technology
+    file: L3-technology/lineage-tracking.decision.yaml
+    title: "Lineage Tracking"
+
+  - id: xai_meta_evaluation
+    level: L3_technology
+    file: L3-technology/xai-meta-evaluation.decision.yaml
+    title: "XAI Meta-Evaluation"
+
+  - id: annotation_platform
+    level: L3_technology
+    file: L3-technology/annotation-platform.decision.yaml
+    title: "Annotation Platform"
+
+  - id: documentation_standard
+    level: L3_technology
+    file: L3-technology/documentation-standard.decision.yaml
+    title: "Documentation Standard"
+
+  - id: testing_strategy
+    level: L3_technology
+    file: L3-technology/testing-strategy.decision.yaml
+    title: "Testing Strategy"
+
+  - id: label_quality
+    level: L3_technology
+    file: L3-technology/label-quality.decision.yaml
+    title: "Label Quality"
+
+  - id: data_profiling
+    level: L3_technology
+    file: L3-technology/data-profiling.decision.yaml
+    title: "Data Profiling"
+
+  # --- L4: Infrastructure (8 nodes) ---
+  - id: compute_target
+    level: L4_infrastructure
+    file: L4-infrastructure/compute-target.decision.yaml
+    title: "Compute Target"
+
+  - id: containerization
+    level: L4_infrastructure
+    file: L4-infrastructure/containerization.decision.yaml
+    title: "Containerization"
+
+  - id: ci_cd_platform
+    level: L4_infrastructure
+    file: L4-infrastructure/ci-cd-platform.decision.yaml
+    title: "CI/CD Platform"
+
+  - id: iac_tooling
+    level: L4_infrastructure
+    file: L4-infrastructure/iac-tooling.decision.yaml
+    title: "IaC Tooling"
+
+  - id: gitops_strategy
+    level: L4_infrastructure
+    file: L4-infrastructure/gitops-strategy.decision.yaml
+    title: "GitOps Strategy"
+
+  - id: federated_learning
+    level: L4_infrastructure
+    file: L4-infrastructure/federated-learning.decision.yaml
+    title: "Federated Learning"
+
+  - id: model_export_format
+    level: L4_infrastructure
+    file: L4-infrastructure/model-export-format.decision.yaml
+    title: "Model Export Format"
+
+  - id: secrets_management
+    level: L4_infrastructure
+    file: L4-infrastructure/secrets-management.decision.yaml
+    title: "Secrets Management"
+
+  # --- L5: Operations (7 nodes) ---
+  - id: monitoring_stack
+    level: L5_operations
+    file: L5-operations/monitoring-stack.decision.yaml
+    title: "Monitoring Stack"
+
+  - id: drift_response
+    level: L5_operations
+    file: L5-operations/drift-response.decision.yaml
+    title: "Drift Response"
+
+  - id: annotation_workflow
+    level: L5_operations
+    file: L5-operations/annotation-workflow.decision.yaml
+    title: "Annotation Workflow"
+
+  - id: model_governance
+    level: L5_operations
+    file: L5-operations/model-governance.decision.yaml
+    title: "Model Governance"
+
+  - id: retraining_trigger
+    level: L5_operations
+    file: L5-operations/retraining-trigger.decision.yaml
+    title: "Retraining Trigger"
+
+  - id: documentation_generation
+    level: L5_operations
+    file: L5-operations/documentation-generation.decision.yaml
+    title: "Documentation Generation"
+
+  - id: cost_tracking
+    level: L5_operations
+    file: L5-operations/cost-tracking.decision.yaml
+    title: "Cost Tracking"
+
+edges:
+  # === L1 → L2 edges (research goals shape architecture) ===
+  - from: project_purpose
+    to: model_strategy
+    influence: strong
+    rationale: "Self-learning favors breadth; clinical favors depth"
+
+  - from: project_purpose
+    to: foundation_model_integration
+    influence: moderate
+    rationale: "Learning-first explores more integration strategies"
+
+  - from: project_purpose
+    to: serving_architecture
+    influence: moderate
+    rationale: "Portfolio needs demo-ready serving; clinical needs production"
+
+  - from: project_purpose
+    to: pipeline_orchestration
+    influence: weak
+    rationale: "Self-learning explores agents; clinical needs robust pipelines"
+
+  - from: portfolio_priority
+    to: model_strategy
+    influence: moderate
+    rationale: "Breadth-first favors multi-architecture exploration"
+
+  - from: portfolio_priority
+    to: validation_depth
+    influence: moderate
+    rationale: "Breadth wants more validation layers for learning"
+
+  - from: compliance_depth
+    to: validation_depth
+    influence: strong
+    rationale: "IEC 62304 requires deep validation onion"
+
+  - from: compliance_depth
+    to: model_governance
+    influence: strong
+    rationale: "Full compliance requires full governance"
+
+  - from: compliance_depth
+    to: documentation_standard
+    influence: strong
+    rationale: "Compliance drives documentation requirements"
+
+  - from: monai_alignment
+    to: segmentation_models
+    influence: strong
+    rationale: "MONAI-native restricts to MONAI model zoo"
+
+  - from: monai_alignment
+    to: augmentation_stack
+    influence: moderate
+    rationale: "MONAI-native prefers MONAI transforms"
+
+  - from: monai_alignment
+    to: model_export_format
+    influence: strong
+    rationale: "MONAI-native strongly favors MONAI Bundle format"
+
+  - from: monai_alignment
+    to: federated_learning
+    influence: moderate
+    rationale: "MONAI-native pairs with MONAI FL"
+
+  - from: reproducibility_standard
+    to: data_management_strategy
+    influence: strong
+    rationale: "Full deterministic requires strict versioning"
+
+  - from: reproducibility_standard
+    to: experiment_tracking
+    influence: moderate
+    rationale: "Reproducibility standard affects tracking depth"
+
+  - from: research_impact_target
+    to: documentation_standard
+    influence: moderate
+    rationale: "Journal papers need thorough documentation"
+
+  - from: open_source_model
+    to: llm_provider
+    influence: weak
+    rationale: "Permissive licensing may prefer open-weight models"
+
+  # === L2 → L3 edges (architecture shapes technology) ===
+  - from: model_strategy
+    to: segmentation_models
+    influence: strong
+    rationale: "Multi-architecture means multiple model families"
+
+  - from: model_strategy
+    to: loss_functions
+    influence: moderate
+    rationale: "Foundation models may need different loss functions"
+
+  - from: model_strategy
+    to: hpo_framework
+    influence: moderate
+    rationale: "AutoML search strongly needs HPO; single-arch less so"
+
+  - from: foundation_model_integration
+    to: segmentation_models
+    influence: strong
+    rationale: "LoRA vs full finetune changes viable model set"
+
+  - from: data_management_strategy
+    to: data_validation_tools
+    influence: moderate
+    rationale: "DVC vs lakehouse affects validation approach"
+
+  - from: data_management_strategy
+    to: data_profiling
+    influence: moderate
+    rationale: "Data management strategy shapes profiling needs"
+
+  - from: data_management_strategy
+    to: lineage_tracking
+    influence: moderate
+    rationale: "Lakehouse has built-in lineage; DVC needs external"
+
+  - from: ensemble_strategy
+    to: ensemble_methods
+    influence: strong
+    rationale: "Architecture-level strategy directly determines tools"
+
+  - from: uncertainty_quantification
+    to: calibration_tools
+    influence: strong
+    rationale: "UQ method determines calibration approach"
+
+  - from: serving_architecture
+    to: model_export_format
+    influence: strong
+    rationale: "BentoML needs ONNX; MONAI Deploy needs Bundle"
+
+  - from: serving_architecture
+    to: containerization
+    influence: moderate
+    rationale: "Serving approach affects container strategy"
+
+  - from: config_management
+    to: experiment_tracking
+    influence: weak
+    rationale: "Config system affects how experiments are parameterized"
+
+  - from: pipeline_orchestration
+    to: agent_framework
+    influence: strong
+    rationale: "LangGraph IS the agent framework; others differ"
+
+  - from: pipeline_orchestration
+    to: llm_provider
+    influence: moderate
+    rationale: "Agent-heavy pipelines need LLM providers"
+
+  - from: pipeline_orchestration
+    to: llm_observability
+    influence: moderate
+    rationale: "Agent orchestration needs LLM observability"
+
+  - from: xai_strategy
+    to: xai_meta_evaluation
+    influence: strong
+    rationale: "XAI method determines meta-evaluation approach"
+
+  - from: validation_depth
+    to: testing_strategy
+    influence: strong
+    rationale: "Deep validation onion requires advanced testing"
+
+  - from: validation_depth
+    to: data_validation_tools
+    influence: moderate
+    rationale: "Validation depth shapes tool requirements"
+
+  # === L3 → L3 lateral edges ===
+  - from: segmentation_models
+    to: loss_functions
+    influence: moderate
+    rationale: "Some models pair better with specific losses"
+
+  - from: segmentation_models
+    to: augmentation_stack
+    influence: weak
+    rationale: "Transformer models may need different augmentation"
+
+  - from: experiment_tracking
+    to: llm_observability
+    influence: weak
+    rationale: "MLflow + Langfuse integration patterns"
+
+  - from: agent_framework
+    to: llm_observability
+    influence: moderate
+    rationale: "Agent framework determines observability needs"
+
+  - from: agent_framework
+    to: llm_provider
+    influence: moderate
+    rationale: "Framework may constrain provider choices"
+
+  - from: annotation_platform
+    to: label_quality
+    influence: moderate
+    rationale: "Platform determines quality assessment approach"
+
+  - from: data_validation_tools
+    to: data_profiling
+    influence: weak
+    rationale: "Validation tools may include profiling features"
+
+  - from: metrics_framework
+    to: calibration_tools
+    influence: weak
+    rationale: "Metrics framework provides calibration baselines"
+
+  # === L2/L3 → L4 edges (technology shapes infrastructure) ===
+  - from: model_strategy
+    to: compute_target
+    influence: moderate
+    rationale: "Foundation models need more GPU memory"
+
+  - from: pipeline_orchestration
+    to: ci_cd_platform
+    influence: weak
+    rationale: "DVC pipelines integrate with certain CI/CD"
+
+  - from: compliance_depth
+    to: secrets_management
+    influence: moderate
+    rationale: "Full compliance needs proper secrets management"
+
+  - from: compliance_depth
+    to: iac_tooling
+    influence: moderate
+    rationale: "Full compliance needs auditable infrastructure"
+
+  - from: containerization
+    to: gitops_strategy
+    influence: moderate
+    rationale: "Kubernetes enables GitOps; Docker Compose less so"
+
+  - from: compute_target
+    to: federated_learning
+    influence: moderate
+    rationale: "FL requires multi-node infrastructure"
+
+  # === L2/L3/L4 → L5 edges (everything shapes operations) ===
+  - from: experiment_tracking
+    to: monitoring_stack
+    influence: moderate
+    rationale: "MLflow metrics feed monitoring dashboards"
+
+  - from: llm_observability
+    to: cost_tracking
+    influence: moderate
+    rationale: "LLM observability provides cost data"
+
+  - from: uncertainty_quantification
+    to: drift_response
+    influence: strong
+    rationale: "UQ calibration drift triggers responses"
+
+  - from: data_validation_tools
+    to: drift_response
+    influence: moderate
+    rationale: "Data validation detects distribution drift"
+
+  - from: annotation_platform
+    to: annotation_workflow
+    influence: strong
+    rationale: "Platform determines workflow patterns"
+
+  - from: label_quality
+    to: annotation_workflow
+    influence: moderate
+    rationale: "Quality assessment shapes annotation loops"
+
+  - from: model_governance
+    to: retraining_trigger
+    influence: moderate
+    rationale: "Governance defines retraining policies"
+
+  - from: drift_response
+    to: retraining_trigger
+    influence: strong
+    rationale: "Drift detection directly triggers retraining"
+
+  - from: documentation_standard
+    to: documentation_generation
+    influence: strong
+    rationale: "Standard determines generation approach"
+
+  - from: containerization
+    to: monitoring_stack
+    influence: moderate
+    rationale: "Docker/K8s determines monitoring infrastructure"
+
+  - from: ci_cd_platform
+    to: documentation_generation
+    influence: weak
+    rationale: "CI can automate doc generation"
+
+  - from: serving_architecture
+    to: monitoring_stack
+    influence: moderate
+    rationale: "Serving stack determines monitoring endpoints"
+
+  - from: serving_architecture
+    to: cost_tracking
+    influence: weak
+    rationale: "Serving costs are major operational expense"
+
+  # === Additional edges (v1.1.0 — missing conditional_on references) ===
+  - from: monai_alignment
+    to: annotation_platform
+    influence: moderate
+    rationale: "MONAI-native prefers MONAI Label"
+
+  - from: model_strategy
+    to: ensemble_strategy
+    influence: moderate
+    rationale: "Multi-architecture enables ensemble strategies"
+
+  - from: validation_depth
+    to: metrics_framework
+    influence: moderate
+    rationale: "Validation depth drives metrics requirements"
+
+  - from: model_strategy
+    to: model_diagnostics
+    influence: moderate
+    rationale: "Model strategy affects diagnostic approaches"
+
+  - from: compliance_depth
+    to: uncertainty_quantification
+    influence: moderate
+    rationale: "Clinical compliance requires rigorous UQ"

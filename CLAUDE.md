@@ -141,9 +141,22 @@ minivess-mlops/
 - **SaMD-principled**: IEC 62304 lifecycle mapping, audit trails, test set lockout
 - **Dual config**: Hydra-zen for experiment sweeps, Dynaconf for deployment environments
 
+## PRD System
+
+The project uses a **hierarchical probabilistic PRD** (Bayesian decision network) to
+manage open-ended technology decisions. See:
+
+- [docs/planning/prd/README.md](docs/planning/prd/README.md) — PRD navigation and overview
+- [docs/planning/prd/llm-context.md](docs/planning/prd/llm-context.md) — AI assistant context
+- [docs/planning/hierarchical-prd-planning.md](docs/planning/hierarchical-prd-planning.md) — PRD format blueprint
+
+**PRD-Update Skill**: `.claude/skills/prd-update/SKILL.md` — Operations for maintaining
+the PRD (add decisions, update priors, ingest papers, validate).
+
 ## See Also
 
 - [docs/modernize-minivess-mlops-plan.md](docs/modernize-minivess-mlops-plan.md) — Full modernization plan
 - [docs/modernize-minivess-mlops-plan-prompt.md](docs/modernize-minivess-mlops-plan-prompt.md) — Original prompt and Q&A
 - [.claude/skills/self-learning-iterative-coder/SKILL.md](.claude/skills/self-learning-iterative-coder/SKILL.md) — TDD skill reference
+- [.claude/skills/prd-update/SKILL.md](.claude/skills/prd-update/SKILL.md) — PRD maintenance skill reference
 - [wiki/](wiki/) — Legacy wiki (cloned from GitHub)

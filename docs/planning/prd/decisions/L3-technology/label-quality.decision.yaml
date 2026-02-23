@@ -1,0 +1,144 @@
+decision_id: label_quality
+title: "Label Quality"
+description: >
+  How to assess and improve the quality of segmentation labels. Cleanlab
+  detects label errors using confident learning; custom inter-annotator
+  agreement (IAA) measures consistency between annotators; CrowdKit
+  aggregates multiple annotations; none accepts labels as-is.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: cleanlab
+    title: "Cleanlab"
+    description: >
+      Confident learning for detecting label errors in segmentation masks.
+      Identifies likely mislabeled samples using model predictions and
+      data-centric AI. Present in dependencies but not integrated into
+      the annotation or training pipeline.
+    prior_probability: 0.40
+    status: viable
+    implementation_status: config_only
+    complements:
+      - "annotation_platform.label_studio"
+      - "data_validation_tools.deepchecks"
+
+  - option_id: custom_iaa
+    title: "Custom Inter-Annotator Agreement"
+    description: >
+      Hand-written IAA metrics: Dice agreement between annotators, boundary
+      F1, volumetric overlap, and spatial distance metrics. Domain-specific
+      to medical image segmentation.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires multiple annotators per sample"
+      - "Domain-specific metric design"
+
+  - option_id: crowdkit
+    title: "CrowdKit"
+    description: >
+      Toloka CrowdKit for annotation aggregation. Implements Dawid-Skene,
+      GLAD, and other crowd annotation models. Designed for crowdsourcing
+      but applicable to expert multi-annotator workflows.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Designed for classification; adaptation needed for segmentation"
+      - "Requires multiple annotations per sample"
+
+  - option_id: none
+    title: "No Label Quality Assessment"
+    description: >
+      Accept annotations as-is without quality assessment. Current state
+      since annotation workflows are not yet active. Acceptable for small
+      datasets with expert annotators.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: annotation_platform
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: label_studio
+        then_probabilities:
+          cleanlab: 0.45
+          custom_iaa: 0.25
+          crowdkit: 0.15
+          none: 0.15
+      - given_parent_option: monai_label
+        then_probabilities:
+          cleanlab: 0.35
+          custom_iaa: 0.35
+          crowdkit: 0.10
+          none: 0.20
+      - given_parent_option: cvat
+        then_probabilities:
+          cleanlab: 0.40
+          custom_iaa: 0.25
+          crowdkit: 0.20
+          none: 0.15
+      - given_parent_option: hybrid
+        then_probabilities:
+          cleanlab: 0.40
+          custom_iaa: 0.30
+          crowdkit: 0.15
+          none: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      cleanlab: 0.35
+      custom_iaa: 0.20
+      crowdkit: 0.10
+      none: 0.35
+    rationale: "Solo researchers may skip IAA with single-annotator datasets"
+  lab_group:
+    probability_overrides:
+      cleanlab: 0.40
+      custom_iaa: 0.35
+      crowdkit: 0.15
+      none: 0.10
+    rationale: "Lab groups with multiple annotators need quality assessment"
+  clinical_deployment:
+    probability_overrides:
+      cleanlab: 0.40
+      custom_iaa: 0.35
+      crowdkit: 0.15
+      none: 0.10
+    rationale: "Clinical deployment requires validated label quality for safety"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Cleanlab updates for segmentation tasks"
+    - "Data-centric AI tooling evolution"
+    - "Multi-annotator dataset availability"
+    - "Annotation platform integration patterns"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Cleanlab (0.40) is the preferred tool for automated label quality assessment
+  using confident learning. It's in dependencies but not integrated since
+  annotation workflows are not yet active. Custom IAA (0.30) complements
+  Cleanlab for multi-annotator scenarios. The decision is coupled to annotation
+  platform choice — Label Studio integration enables Cleanlab's confidence
+  learning loop.
+
+tags:
+  - technology
+  - annotation
+  - data-quality
+  - not-integrated

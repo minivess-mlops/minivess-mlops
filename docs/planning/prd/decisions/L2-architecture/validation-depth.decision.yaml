@@ -1,0 +1,120 @@
+decision_id: validation_depth
+title: "Validation Depth"
+description: >
+  How many layers of validation to implement (the 'validation onion').
+
+decision_level: L2_architecture
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: full_onion_12_layers
+    title: "Full Onion (12 Layers)"
+    description: "All validation layers: schema, data, model, inference, serving, monitoring."
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+
+  - option_id: standard_5_layers
+    title: "Standard (5 Layers)"
+    description: "Core validation: schema, data, model, inference, serving."
+    prior_probability: 0.40
+    status: viable
+    implementation_status: not_started
+
+  - option_id: minimal_2_layers
+    title: "Minimal (2 Layers)"
+    description: "Schema validation + basic data checks."
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+
+conditional_on:
+  - parent_decision_id: compliance_depth
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: iec_62304_full
+        then_probabilities:
+          full_onion_12_layers: 0.60
+          standard_5_layers: 0.30
+          minimal_2_layers: 0.10
+      - given_parent_option: lightweight_audit
+        then_probabilities:
+          full_onion_12_layers: 0.25
+          standard_5_layers: 0.50
+          minimal_2_layers: 0.25
+      - given_parent_option: no_compliance
+        then_probabilities:
+          full_onion_12_layers: 0.10
+          standard_5_layers: 0.30
+          minimal_2_layers: 0.60
+
+  - parent_decision_id: portfolio_priority
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: breadth_over_depth
+        then_probabilities:
+          full_onion_12_layers: 0.35
+          standard_5_layers: 0.40
+          minimal_2_layers: 0.25
+      - given_parent_option: depth_over_breadth
+        then_probabilities:
+          full_onion_12_layers: 0.40
+          standard_5_layers: 0.40
+          minimal_2_layers: 0.20
+      - given_parent_option: balanced
+        then_probabilities:
+          full_onion_12_layers: 0.30
+          standard_5_layers: 0.45
+          minimal_2_layers: 0.25
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      full_onion_12_layers: 0.25
+      standard_5_layers: 0.45
+      minimal_2_layers: 0.30
+    rationale: "Solo researchers benefit from learning validation patterns"
+  lab_group:
+    probability_overrides:
+      full_onion_12_layers: 0.30
+      standard_5_layers: 0.50
+      minimal_2_layers: 0.20
+    rationale: "Lab groups need consistent validation across experiments"
+  clinical_deployment:
+    probability_overrides:
+      full_onion_12_layers: 0.55
+      standard_5_layers: 0.35
+      minimal_2_layers: 0.10
+    rationale: "Clinical requires comprehensive validation"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Validation tool maturity"
+    - "Compliance requirements"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+research_notes: >
+  Current implementation has ~8 validation layers (Pydantic, Pandera, GE,
+  Deepchecks, WeightWatcher, ECE/MCE, drift detection, model cards).
+  This is between standard and full onion.
+
+rationale: >
+  Standard 5 layers (0.40) has highest prior. Current implementation
+  actually has ~8 layers, approaching the full onion.
+
+tags:
+  - architecture
+  - validation
+  - partially-resolved
+
+references:
+  - "../../adr/0003-validation-onion.md"

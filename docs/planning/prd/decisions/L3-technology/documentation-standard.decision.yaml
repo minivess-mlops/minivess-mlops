@@ -1,0 +1,165 @@
+decision_id: documentation_standard
+title: "Documentation Standard"
+description: >
+  What level of documentation to maintain for models, experiments, and
+  the system. Full model cards follow the Mitchell et al. framework with
+  complete fairness and limitations sections; lite model cards capture
+  essential metadata; regulatory dossiers meet IEC 62304; README-only
+  uses minimal documentation.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: model_cards_full
+    title: "Full Model Cards"
+    description: >
+      Complete model cards following Mitchell et al. (2019) with intended
+      use, training data, evaluation metrics, ethical considerations,
+      limitations, and fairness analysis. Supports publication and compliance.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "compliance_depth.iec_62304_full"
+      - "research_impact_target.journal_paper"
+
+  - option_id: model_cards_lite
+    title: "Lite Model Cards"
+    description: >
+      Lightweight model cards generated via model_card.to_markdown() with
+      architecture, metrics, training config, and dataset summary. Currently
+      implemented and auto-generated during training.
+    prior_probability: 0.35
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "compliance_depth.lightweight_audit"
+      - "experiment_tracking.mlflow"
+
+  - option_id: regulatory_dossier
+    title: "Regulatory Dossier"
+    description: >
+      Formal documentation package for IEC 62304 compliance: design history
+      file, risk analysis, V&V protocols, clinical evaluation summary.
+      Heavyweight but required for SaMD certification.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Regulatory expertise required"
+      - "Significant documentation overhead"
+      - "Templates needed for each document type"
+
+  - option_id: readme_only
+    title: "README Only"
+    description: >
+      Minimal documentation in README files and code comments. Fastest
+      approach but insufficient for reproducibility or compliance.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+
+conditional_on:
+  - parent_decision_id: compliance_depth
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: iec_62304_full
+        then_probabilities:
+          model_cards_full: 0.30
+          model_cards_lite: 0.15
+          regulatory_dossier: 0.45
+          readme_only: 0.10
+      - given_parent_option: lightweight_audit
+        then_probabilities:
+          model_cards_full: 0.30
+          model_cards_lite: 0.45
+          regulatory_dossier: 0.10
+          readme_only: 0.15
+      - given_parent_option: no_compliance
+        then_probabilities:
+          model_cards_full: 0.15
+          model_cards_lite: 0.25
+          regulatory_dossier: 0.05
+          readme_only: 0.55
+
+  - parent_decision_id: research_impact_target
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: conference_paper
+        then_probabilities:
+          model_cards_full: 0.35
+          model_cards_lite: 0.35
+          regulatory_dossier: 0.10
+          readme_only: 0.20
+      - given_parent_option: journal_paper
+        then_probabilities:
+          model_cards_full: 0.45
+          model_cards_lite: 0.30
+          regulatory_dossier: 0.15
+          readme_only: 0.10
+      - given_parent_option: benchmark_contribution
+        then_probabilities:
+          model_cards_full: 0.40
+          model_cards_lite: 0.35
+          regulatory_dossier: 0.05
+          readme_only: 0.20
+      - given_parent_option: course_material
+        then_probabilities:
+          model_cards_full: 0.25
+          model_cards_lite: 0.40
+          regulatory_dossier: 0.05
+          readme_only: 0.30
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      model_cards_full: 0.20
+      model_cards_lite: 0.45
+      regulatory_dossier: 0.05
+      readme_only: 0.30
+    rationale: "Solo researchers use lite cards for portfolio; README for quick projects"
+  lab_group:
+    probability_overrides:
+      model_cards_full: 0.35
+      model_cards_lite: 0.35
+      regulatory_dossier: 0.15
+      readme_only: 0.15
+    rationale: "Lab groups need thorough documentation for shared understanding"
+  clinical_deployment:
+    probability_overrides:
+      model_cards_full: 0.30
+      model_cards_lite: 0.15
+      regulatory_dossier: 0.50
+      readme_only: 0.05
+    rationale: "Clinical deployment requires regulatory dossier for certification"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Regulatory requirements (EU AI Act, FDA)"
+    - "Conference/journal submission requirements"
+    - "LLM-assisted documentation generation"
+    - "Model card standard evolution"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Lite model cards (0.35) are resolved/implemented via model_card.to_markdown()
+  auto-generation during training. Full model cards (0.30) are the natural
+  upgrade for publication-ready documentation. The documentation standard is
+  strongly coupled to compliance depth — lightweight audit pairs with lite
+  cards, full IEC 62304 requires regulatory dossiers.
+
+tags:
+  - technology
+  - documentation
+  - compliance
+  - resolved

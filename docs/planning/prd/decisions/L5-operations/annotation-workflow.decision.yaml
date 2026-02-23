@@ -1,0 +1,171 @@
+decision_id: annotation_workflow
+title: "Annotation Workflow"
+description: >
+  How annotation tasks are organized, distributed, and quality-controlled.
+  MONAI Label active learning suggests annotations to experts; Label
+  Studio manual provides traditional annotation workflows; hybrid
+  combines both; none means annotations are pre-existing or external.
+  Critical for vascular segmentation where expert annotations are expensive.
+
+decision_level: L5_operations
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: monai_label_active
+    title: "MONAI Label Active Learning"
+    description: >
+      MONAI Label server provides AI-assisted annotation with active
+      learning sample selection. Model suggests segmentations, expert
+      corrects. Reduces annotation time significantly for 3D volumes.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "monai_alignment.monai_native"
+      - "annotation_platform.label_studio"
+      - "label_quality.cleanlab"
+
+  - option_id: label_studio_manual
+    title: "Label Studio Manual Workflow"
+    description: >
+      Traditional annotation via Label Studio with task distribution,
+      multi-annotator support, and review workflows. Config-only status
+      with Label Studio in Docker Compose stack.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: config_only
+    complements:
+      - "annotation_platform.label_studio"
+      - "containerization.docker_compose"
+
+  - option_id: hybrid
+    title: "Hybrid Active + Manual"
+    description: >
+      MONAI Label provides initial segmentation suggestions, expert
+      reviews in Label Studio. Active learning selects most informative
+      samples for annotation. Best of both approaches.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "annotation_platform.label_studio"
+      - "monai_alignment.monai_compatible"
+
+  - option_id: none
+    title: "No Annotation Workflow"
+    description: >
+      Use pre-existing annotations (e.g., from public datasets). No
+      internal annotation pipeline. Current state with public vascular
+      segmentation datasets.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: annotation_platform
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: label_studio
+        then_probabilities:
+          monai_label_active: 0.30
+          label_studio_manual: 0.35
+          hybrid: 0.25
+          none: 0.10
+      - given_parent_option: cvat
+        then_probabilities:
+          monai_label_active: 0.20
+          label_studio_manual: 0.35
+          hybrid: 0.20
+          none: 0.25
+      - given_parent_option: 3d_slicer
+        then_probabilities:
+          monai_label_active: 0.45
+          label_studio_manual: 0.15
+          hybrid: 0.25
+          none: 0.15
+      - given_parent_option: none
+        then_probabilities:
+          monai_label_active: 0.10
+          label_studio_manual: 0.10
+          hybrid: 0.05
+          none: 0.75
+
+  - parent_decision_id: label_quality
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: cleanlab
+        then_probabilities:
+          monai_label_active: 0.35
+          label_studio_manual: 0.25
+          hybrid: 0.25
+          none: 0.15
+      - given_parent_option: inter_annotator
+        then_probabilities:
+          monai_label_active: 0.25
+          label_studio_manual: 0.40
+          hybrid: 0.25
+          none: 0.10
+      - given_parent_option: consensus
+        then_probabilities:
+          monai_label_active: 0.30
+          label_studio_manual: 0.30
+          hybrid: 0.30
+          none: 0.10
+      - given_parent_option: none
+        then_probabilities:
+          monai_label_active: 0.20
+          label_studio_manual: 0.25
+          hybrid: 0.15
+          none: 0.40
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      monai_label_active: 0.25
+      label_studio_manual: 0.40
+      hybrid: 0.10
+      none: 0.25
+    rationale: "Solo researchers use Label Studio for simple workflows or rely on existing data"
+  lab_group:
+    probability_overrides:
+      monai_label_active: 0.40
+      label_studio_manual: 0.20
+      hybrid: 0.25
+      none: 0.15
+    rationale: "Lab groups leverage MONAI Label for efficient multi-annotator workflows"
+  clinical_deployment:
+    probability_overrides:
+      monai_label_active: 0.25
+      label_studio_manual: 0.15
+      hybrid: 0.40
+      none: 0.20
+    rationale: "Clinical requires hybrid with expert review for quality assurance"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-23
+  next_review: 2026-05-23
+  change_drivers:
+    - "MONAI Label maturity and 3D support"
+    - "Active learning sample selection improvements"
+    - "SAM-based auto-annotation capabilities"
+    - "New annotation datasets availability"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 0.9
+  neuroimaging: 0.9
+  general_medical: 0.8
+
+rationale: >
+  MONAI Label active (0.35) is the most compelling option for 3D medical
+  image annotation efficiency. Label Studio manual (0.30) is at config_only
+  status. The decision is shifting because MONAI Label and SAM-based
+  auto-annotation are rapidly maturing.
+
+tags:
+  - operations
+  - annotation
+  - active-learning
+  - data-quality

@@ -1,0 +1,126 @@
+decision_id: serving_architecture
+title: "Serving Architecture"
+description: >
+  How to serve trained models for inference.
+
+decision_level: L2_architecture
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: bentoml_rest
+    title: "BentoML REST"
+    description: "BentoML with ONNX Runtime. Current implementation."
+    prior_probability: 0.35
+    status: resolved
+    implementation_status: implemented
+
+  - option_id: monai_deploy
+    title: "MONAI Deploy"
+    description: "MONAI Deploy App SDK. Clinical-grade serving."
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+
+  - option_id: torchserve
+    title: "TorchServe"
+    description: "PyTorch native serving solution."
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+
+  - option_id: triton
+    title: "NVIDIA Triton"
+    description: "High-performance inference server."
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+
+  - option_id: onnx_only
+    title: "ONNX Only"
+    description: "ONNX Runtime without serving framework."
+    prior_probability: 0.10
+    status: viable
+    implementation_status: partial
+
+conditional_on:
+  - parent_decision_id: project_purpose
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: self_learning
+        then_probabilities:
+          bentoml_rest: 0.35
+          monai_deploy: 0.25
+          torchserve: 0.15
+          triton: 0.15
+          onnx_only: 0.10
+      - given_parent_option: portfolio
+        then_probabilities:
+          bentoml_rest: 0.40
+          monai_deploy: 0.20
+          torchserve: 0.15
+          triton: 0.15
+          onnx_only: 0.10
+      - given_parent_option: clinical_deployment
+        then_probabilities:
+          bentoml_rest: 0.15
+          monai_deploy: 0.40
+          torchserve: 0.10
+          triton: 0.25
+          onnx_only: 0.10
+      - given_parent_option: open_source_contribution
+        then_probabilities:
+          bentoml_rest: 0.20
+          monai_deploy: 0.35
+          torchserve: 0.20
+          triton: 0.10
+          onnx_only: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      bentoml_rest: 0.40
+      monai_deploy: 0.20
+      torchserve: 0.15
+      triton: 0.10
+      onnx_only: 0.15
+    rationale: "BentoML has best DX for solo developers"
+  lab_group:
+    probability_overrides:
+      bentoml_rest: 0.25
+      monai_deploy: 0.30
+      torchserve: 0.20
+      triton: 0.15
+      onnx_only: 0.10
+    rationale: "Lab groups may prefer MONAI ecosystem serving"
+  clinical_deployment:
+    probability_overrides:
+      bentoml_rest: 0.10
+      monai_deploy: 0.40
+      torchserve: 0.10
+      triton: 0.30
+      onnx_only: 0.10
+    rationale: "Clinical needs MONAI Deploy or Triton for compliance"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "MONAI Deploy SDK maturity"
+    - "BentoML feature development"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  BentoML (0.35) resolved. Current implementation uses BentoML with ONNX
+  Runtime backend. MONAI Deploy (0.25) is the clinical alternative.
+
+tags:
+  - architecture
+  - serving
+  - resolved

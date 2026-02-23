@@ -1,0 +1,132 @@
+decision_id: iac_tooling
+title: "IaC Tooling"
+description: >
+  Infrastructure-as-Code tooling for provisioning and managing
+  infrastructure reproducibly. Pulumi uses Python (matching project
+  language); Terraform is industry standard; CDK targets AWS-specific;
+  none is viable for manual/local-only setups.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: pulumi_python
+    title: "Pulumi (Python)"
+    description: >
+      IaC using Python, matching the project's primary language. Supports
+      AWS, GCP, Azure. Real programming language with loops, conditions,
+      and type checking. Listed in the deployment plan.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: config_only
+    complements:
+      - "compute_target.cloud_spot"
+      - "containerization.kubernetes"
+
+  - option_id: terraform
+    title: "Terraform (HCL)"
+    description: >
+      Industry-standard IaC with HCL syntax. Massive provider ecosystem,
+      well-documented, strong community. Requires learning HCL.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "HCL syntax separate from Python"
+      - "State management complexity"
+
+  - option_id: cdk
+    title: "AWS CDK"
+    description: >
+      AWS-specific IaC using Python or TypeScript. Deep AWS integration
+      but vendor lock-in. Best for AWS-only deployments.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "AWS vendor lock-in"
+      - "CloudFormation complexity underneath"
+
+  - option_id: none
+    title: "No IaC"
+    description: >
+      Manual infrastructure setup or Docker Compose only. Current state
+      for local development. Acceptable for learning projects but
+      not reproducible or auditable for production.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: compliance_depth
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: iec_62304_full
+        then_probabilities:
+          pulumi_python: 0.35
+          terraform: 0.40
+          cdk: 0.15
+          none: 0.10
+      - given_parent_option: lightweight_audit
+        then_probabilities:
+          pulumi_python: 0.35
+          terraform: 0.30
+          cdk: 0.15
+          none: 0.20
+      - given_parent_option: no_compliance
+        then_probabilities:
+          pulumi_python: 0.25
+          terraform: 0.20
+          cdk: 0.10
+          none: 0.45
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      pulumi_python: 0.20
+      terraform: 0.15
+      cdk: 0.15
+      none: 0.50
+    rationale: "Solo researchers rarely need IaC; local Docker Compose suffices"
+  lab_group:
+    probability_overrides:
+      pulumi_python: 0.30
+      terraform: 0.35
+      cdk: 0.10
+      none: 0.25
+    rationale: "Lab groups benefit from reproducible infrastructure for shared environments"
+  clinical_deployment:
+    probability_overrides:
+      pulumi_python: 0.30
+      terraform: 0.40
+      cdk: 0.15
+      none: 0.15
+    rationale: "Clinical deployment requires auditable, reproducible infrastructure"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Cloud deployment requirement emerging"
+    - "Pulumi vs Terraform ecosystem shifts"
+    - "OpenTofu adoption (Terraform fork)"
+    - "Compliance requirements demanding IaC"
+
+domain_applicability:
+  vascular_segmentation: 0.9
+  cardiac_imaging: 0.9
+  neuroimaging: 0.9
+  general_medical: 1.0
+
+rationale: >
+  Pulumi Python (0.35) is the leading candidate when IaC becomes needed
+  because it uses the same language as the project. Currently no IaC is
+  implemented (0.20) since the project runs locally with Docker Compose.
+  Terraform (0.30) is the safe industry-standard alternative.
+
+tags:
+  - infrastructure
+  - iac
+  - devops

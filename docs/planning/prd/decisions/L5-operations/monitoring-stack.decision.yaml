@@ -1,0 +1,198 @@
+decision_id: monitoring_stack
+title: "Monitoring Stack"
+description: >
+  Infrastructure and model monitoring for production systems. Prometheus
+  plus Grafana is the open-source standard; Datadog provides managed
+  monitoring; custom dashboards offer flexibility; none is acceptable
+  for development-only. Covers system metrics, model performance, and
+  data quality monitoring.
+
+decision_level: L5_operations
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: prometheus_grafana
+    title: "Prometheus + Grafana"
+    description: >
+      Open-source metrics collection (Prometheus) with visualization
+      (Grafana). Listed in the project stack for infrastructure metrics.
+      Docker Compose deployment. Supports custom exporters and alerting.
+    prior_probability: 0.40
+    status: viable
+    implementation_status: config_only
+    complements:
+      - "containerization.docker_compose"
+      - "drift_response.alert_human"
+      - "serving_architecture.bentoml_rest"
+
+  - option_id: datadog
+    title: "Datadog"
+    description: >
+      Managed observability platform with APM, logs, metrics, and ML
+      model monitoring. Rich integrations but SaaS cost and data
+      residency concerns for medical imaging.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "SaaS cost scales with host count"
+      - "Data residency concerns for medical data"
+      - "Vendor lock-in risk"
+
+  - option_id: custom_dashboards
+    title: "Custom Dashboards"
+    description: >
+      Custom monitoring via DuckDB queries, Evidently reports, and
+      MLflow metrics visualization. Flexible and integrated with
+      existing tools but requires development effort.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "experiment_tracking.mlflow"
+      - "data_profiling.whylogs"
+
+  - option_id: none
+    title: "No Monitoring"
+    description: >
+      No production monitoring. Development-only with manual checks.
+      Current effective state since Prometheus/Grafana are config-only.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: experiment_tracking
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: mlflow
+        then_probabilities:
+          prometheus_grafana: 0.40
+          datadog: 0.15
+          custom_dashboards: 0.30
+          none: 0.15
+      - given_parent_option: wandb
+        then_probabilities:
+          prometheus_grafana: 0.30
+          datadog: 0.25
+          custom_dashboards: 0.25
+          none: 0.20
+      - given_parent_option: neptune
+        then_probabilities:
+          prometheus_grafana: 0.35
+          datadog: 0.25
+          custom_dashboards: 0.25
+          none: 0.15
+      - given_parent_option: tensorboard
+        then_probabilities:
+          prometheus_grafana: 0.35
+          datadog: 0.15
+          custom_dashboards: 0.30
+          none: 0.20
+
+  - parent_decision_id: containerization
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: docker_compose
+        then_probabilities:
+          prometheus_grafana: 0.45
+          datadog: 0.15
+          custom_dashboards: 0.25
+          none: 0.15
+      - given_parent_option: kubernetes
+        then_probabilities:
+          prometheus_grafana: 0.50
+          datadog: 0.25
+          custom_dashboards: 0.15
+          none: 0.10
+      - given_parent_option: podman
+        then_probabilities:
+          prometheus_grafana: 0.40
+          datadog: 0.15
+          custom_dashboards: 0.25
+          none: 0.20
+      - given_parent_option: none
+        then_probabilities:
+          prometheus_grafana: 0.20
+          datadog: 0.10
+          custom_dashboards: 0.30
+          none: 0.40
+
+  - parent_decision_id: serving_architecture
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: bentoml_rest
+        then_probabilities:
+          prometheus_grafana: 0.45
+          datadog: 0.20
+          custom_dashboards: 0.20
+          none: 0.15
+      - given_parent_option: monai_deploy
+        then_probabilities:
+          prometheus_grafana: 0.40
+          datadog: 0.20
+          custom_dashboards: 0.25
+          none: 0.15
+      - given_parent_option: gradio_only
+        then_probabilities:
+          prometheus_grafana: 0.25
+          datadog: 0.15
+          custom_dashboards: 0.30
+          none: 0.30
+      - given_parent_option: triton
+        then_probabilities:
+          prometheus_grafana: 0.50
+          datadog: 0.25
+          custom_dashboards: 0.15
+          none: 0.10
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      prometheus_grafana: 0.25
+      datadog: 0.10
+      custom_dashboards: 0.30
+      none: 0.35
+    rationale: "Solo researchers rarely need full monitoring; custom dashboards suffice"
+  lab_group:
+    probability_overrides:
+      prometheus_grafana: 0.45
+      datadog: 0.15
+      custom_dashboards: 0.25
+      none: 0.15
+    rationale: "Lab groups benefit from shared Prometheus/Grafana infrastructure"
+  clinical_deployment:
+    probability_overrides:
+      prometheus_grafana: 0.45
+      datadog: 0.25
+      custom_dashboards: 0.20
+      none: 0.10
+    rationale: "Clinical deployment requires comprehensive monitoring for safety"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Evidently monitoring features"
+    - "BentoML built-in metrics export"
+    - "Grafana ML monitoring dashboards"
+    - "Production deployment requirements"
+
+domain_applicability:
+  vascular_segmentation: 0.9
+  cardiac_imaging: 1.0
+  neuroimaging: 0.9
+  general_medical: 1.0
+
+rationale: >
+  Prometheus + Grafana (0.40) is the natural choice given the Docker
+  Compose stack already includes both. Currently at config_only status.
+  Custom dashboards (0.25) leveraging DuckDB and Evidently provide
+  ML-specific monitoring. No monitoring (0.15) is the current effective state.
+
+tags:
+  - operations
+  - monitoring
+  - observability

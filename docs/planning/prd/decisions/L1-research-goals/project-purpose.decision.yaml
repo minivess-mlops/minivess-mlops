@@ -1,0 +1,117 @@
+decision_id: project_purpose
+title: "Project Purpose"
+description: >
+  Foundational decision: why does this project exist? Drives all downstream
+  architecture and technology choices. Self-learning maximizes tool exposure;
+  portfolio demonstrates production competence; clinical deployment targets
+  real-world use; open-source contribution builds community.
+
+decision_level: L1_research_goals
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: self_learning
+    title: "Self-Learning"
+    description: >
+      Primary goal is maximizing personal learning and tool exposure.
+      No fear of overengineering — every tool is a learning opportunity.
+      Accept that some integrations may be superficial.
+    prior_probability: 0.45
+    status: resolved
+    implementation_status: implemented
+    constraints:
+      - "Single developer capacity"
+      - "Time investment must have learning ROI"
+
+  - option_id: portfolio
+    title: "Portfolio Demonstration"
+    description: >
+      Build a showcase of production-grade patterns for biomedical ML.
+      Each integration must be well-documented and demonstrable.
+      Quality of documentation matters as much as code.
+    prior_probability: 0.30
+    status: resolved
+    implementation_status: implemented
+    constraints:
+      - "Must be publicly shareable"
+      - "Code quality must be demo-ready"
+
+  - option_id: clinical_deployment
+    title: "Clinical Deployment"
+    description: >
+      Target real-world hospital deployment. Requires IEC 62304 compliance,
+      federated learning, regulatory documentation. Significant infrastructure
+      and compliance overhead.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires clinical partnerships"
+      - "IEC 62304 full compliance"
+      - "Multi-site validation"
+
+  - option_id: open_source_contribution
+    title: "Open Source Contribution"
+    description: >
+      Build reusable components for the MONAI ecosystem. Focus on
+      generalizable tools, MONAI Bundles, community engagement.
+    prior_probability: 0.10
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Must follow MONAI contribution guidelines"
+      - "Community engagement overhead"
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      self_learning: 0.55
+      portfolio: 0.25
+      clinical_deployment: 0.05
+      open_source_contribution: 0.15
+    rationale: "PhD students prioritize learning, with portfolio as secondary goal"
+  lab_group:
+    probability_overrides:
+      self_learning: 0.20
+      portfolio: 0.25
+      clinical_deployment: 0.25
+      open_source_contribution: 0.30
+    rationale: "Lab groups balance research output with community contribution"
+  clinical_deployment:
+    probability_overrides:
+      self_learning: 0.05
+      portfolio: 0.10
+      clinical_deployment: 0.70
+      open_source_contribution: 0.15
+    rationale: "Hospital teams focus on deployment with regulatory compliance"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Career goals shift"
+    - "Clinical partnership opportunity"
+    - "MONAI community engagement"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Prior probabilities reflect the current project state: self-learning is
+  the dominant driver (0.45) with portfolio as strong secondary (0.30).
+  Clinical deployment and open-source are future possibilities that keep
+  the architecture flexible.
+
+tags:
+  - strategic
+  - foundational
+  - root-node
+
+references:
+  - "../../modernize-minivess-mlops-plan.md"
+  - "../../../CLAUDE.md"

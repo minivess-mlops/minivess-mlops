@@ -1,0 +1,142 @@
+decision_id: annotation_platform
+title: "Annotation Platform"
+description: >
+  Which platform to use for medical image annotation. Label Studio provides
+  general-purpose multi-annotator workflows; MONAI Label provides MONAI-native
+  AI-assisted annotation for 3D medical imaging; CVAT offers computer vision
+  annotation with active learning; hybrid combines multiple platforms.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: label_studio
+    title: "Label Studio"
+    description: >
+      Open-source data labeling platform with multi-annotator support,
+      configurable UIs, and ML backend integration. Present in docker-compose
+      config but not wired to the data pipeline. Supports DICOM viewing
+      via plugins.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: config_only
+    complements:
+      - "label_quality.cleanlab"
+      - "annotation_workflow.active_learning"
+
+  - option_id: monai_label
+    title: "MONAI Label"
+    description: >
+      MONAI-native AI-assisted annotation server. Provides interactive
+      3D segmentation with DeepEdit, auto-segmentation suggestions, and
+      active learning loops. Tight integration with MONAI ecosystem.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "monai_alignment.monai_native"
+      - "segmentation_models.segresnet"
+    constraints:
+      - "Requires MONAI Label server setup"
+      - "3D Slicer or OHIF viewer integration"
+
+  - option_id: cvat
+    title: "CVAT"
+    description: >
+      Intel's Computer Vision Annotation Tool. Strong 2D annotation with
+      emerging 3D support. Active learning integration via Nuclio serverless.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "3D medical imaging support is limited"
+      - "Additional infrastructure (Nuclio)"
+
+  - option_id: hybrid
+    title: "Hybrid Platform"
+    description: >
+      Combine Label Studio for workflow management with MONAI Label for
+      AI-assisted 3D annotation. Uses Label Studio as the annotation hub
+      with MONAI Label as an ML backend.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "annotation_platform.label_studio"
+      - "annotation_platform.monai_label"
+
+conditional_on:
+  - parent_decision_id: monai_alignment
+    influence_strength: weak
+    conditional_table:
+      - given_parent_option: monai_native
+        then_probabilities:
+          label_studio: 0.20
+          monai_label: 0.50
+          cvat: 0.10
+          hybrid: 0.20
+      - given_parent_option: monai_compatible
+        then_probabilities:
+          label_studio: 0.35
+          monai_label: 0.30
+          cvat: 0.15
+          hybrid: 0.20
+      - given_parent_option: framework_agnostic
+        then_probabilities:
+          label_studio: 0.45
+          monai_label: 0.15
+          cvat: 0.25
+          hybrid: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      label_studio: 0.40
+      monai_label: 0.35
+      cvat: 0.15
+      hybrid: 0.10
+    rationale: "Solo researchers need simple setup; Label Studio or MONAI Label alone"
+  lab_group:
+    probability_overrides:
+      label_studio: 0.30
+      monai_label: 0.30
+      cvat: 0.15
+      hybrid: 0.25
+    rationale: "Lab groups benefit from multi-annotator workflows and hybrid setups"
+  clinical_deployment:
+    probability_overrides:
+      label_studio: 0.25
+      monai_label: 0.35
+      cvat: 0.10
+      hybrid: 0.30
+    rationale: "Clinical needs AI-assisted annotation with MONAI integration"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-23
+  next_review: 2026-05-23
+  change_drivers:
+    - "MONAI Label updates and new interactive models"
+    - "Label Studio enterprise features"
+    - "3D annotation tool maturity"
+    - "Active learning integration patterns"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Label Studio (0.35) and MONAI Label (0.35) are equally weighted as both
+  serve complementary roles. Label Studio provides workflow management and
+  multi-annotator support; MONAI Label provides AI-assisted 3D annotation.
+  Label Studio is in docker-compose config. The choice depends heavily on
+  MONAI alignment — MONAI-native projects should prefer MONAI Label.
+
+tags:
+  - technology
+  - annotation
+  - data-labeling
+  - not-integrated

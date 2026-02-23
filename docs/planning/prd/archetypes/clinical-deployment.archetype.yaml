@@ -1,0 +1,85 @@
+archetype_id: clinical_deployment
+title: "Clinical Deployment"
+description: >
+  Hospital IT team + ML engineers deploying to clinical environments.
+  IEC 62304 compliance required. Production-grade infrastructure,
+  federated learning for multi-site, full model governance.
+
+team_profile:
+  size: "5-10"
+  composition:
+    ml_engineers: "2-4"
+    domain_experts: "1-2 (radiologists)"
+    devops: "1-2"
+    regulatory: "1"
+    clinical_validation: "1-2"
+  technical_experience:
+    ml_engineering: advanced
+    medical_imaging: advanced
+    infrastructure: advanced
+    software_engineering: advanced
+    regulatory: advanced
+  budget_range:
+    monthly_compute: "$2000-10000"
+    annual_saas_tools: "$10000-50000"
+  compute_resources:
+    gpu: "On-premise or private cloud — 8-16x A100/H100"
+    ram: "256GB-1TB per node"
+    storage: "Enterprise SAN/NAS, 50-200TB"
+
+hard_constraints:
+  - "IEC 62304 full compliance"
+  - "HIPAA/GDPR data protection"
+  - "Air-gapped or private cloud deployment"
+  - "Full audit trail for all model changes"
+  - "Validated deployment pipeline"
+  - "Clinical validation protocol"
+
+soft_preferences:
+  - "Prefer MONAI Deploy for clinical serving"
+  - "Prefer Kubernetes for production orchestration"
+  - "Prefer ArgoCD for GitOps deployment"
+  - "Prefer HashiCorp Vault for secrets"
+  - "Value automated retraining with governance"
+  - "Full model registry with approval workflows"
+
+decision_overrides:
+  project_purpose:
+    preferred: clinical_deployment
+    rationale: "Primary goal is patient-facing deployment"
+  compliance_depth:
+    preferred: iec_62304_full
+    rationale: "Regulatory requirement for clinical use"
+  monai_alignment:
+    preferred: monai_native
+    rationale: "MONAI Deploy is designed for clinical settings"
+  serving_architecture:
+    preferred: monai_deploy
+    rationale: "Clinical-grade serving with MONAI Deploy App SDK"
+  containerization:
+    preferred: kubernetes
+    rationale: "Production orchestration for clinical workloads"
+  gitops_strategy:
+    preferred: argocd
+    rationale: "GitOps for auditable deployments"
+  secrets_management:
+    preferred: vault
+    rationale: "Enterprise secrets management for clinical data"
+  federated_learning:
+    preferred: monai_fl
+    rationale: "Multi-site clinical studies"
+  model_governance:
+    preferred: full_registry
+    rationale: "Full approval workflows required"
+  retraining_trigger:
+    preferred: drift_based
+    rationale: "Automated with governance gates"
+  monitoring_stack:
+    preferred: prometheus_grafana
+    rationale: "Production monitoring for clinical SLAs"
+  validation_depth:
+    preferred: full_onion_12_layers
+    rationale: "Clinical requires comprehensive validation"
+  uncertainty_quantification:
+    preferred: conformal_prediction
+    rationale: "Formal coverage guarantees for patient safety"

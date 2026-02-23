@@ -1,0 +1,106 @@
+archetype_id: solo_researcher
+title: "Solo Researcher"
+description: >
+  PhD student or postdoc working independently. Single GPU (RTX 3090/4090),
+  learning-first mindset, paper deadline pressure. Prioritizes breadth of
+  tool exposure and personal skill development. The MinIVess project's
+  current active archetype.
+
+team_profile:
+  size: "1"
+  composition:
+    ml_engineers: "1"
+    domain_experts: "0 (self)"
+    devops: "0"
+  technical_experience:
+    ml_engineering: intermediate_to_advanced
+    medical_imaging: intermediate
+    infrastructure: beginner_to_intermediate
+    software_engineering: intermediate
+  budget_range:
+    monthly_compute: "$0-100"
+    annual_saas_tools: "$0-500"
+  compute_resources:
+    gpu: "1x RTX 3090/4090 (24GB VRAM)"
+    ram: "32-64GB"
+    storage: "1-2TB NVMe"
+
+hard_constraints:
+  - "Single GPU — models must fit in 24GB VRAM"
+  - "Local development — no cloud dependency for core workflow"
+  - "uv package manager exclusively"
+  - "TDD mandatory (self-learning-iterative-coder skill)"
+  - "Must pass pre-commit hooks"
+
+soft_preferences:
+  - "Prefer tools with good documentation and tutorials"
+  - "Prefer Python-native solutions over polyglot"
+  - "Prefer open-source with permissive licenses"
+  - "Prefer breadth over depth — every tool is a learning opportunity"
+  - "Prefer MONAI ecosystem when possible"
+  - "Value portfolio demonstrability"
+
+decision_overrides:
+  # L1 Research Goals
+  project_purpose:
+    preferred: self_learning
+    rationale: "Primary motivation is skill building and tool exposure"
+  portfolio_priority:
+    preferred: breadth_over_depth
+    rationale: "30+ tools demonstrates ecosystem awareness"
+  compliance_depth:
+    preferred: lightweight_audit
+    rationale: "Shows regulatory awareness without full overhead"
+  monai_alignment:
+    preferred: monai_compatible
+    rationale: "MONAI core with freedom to mix other tools"
+  reproducibility_standard:
+    preferred: dvc_versioned
+    rationale: "Good reproducibility without deterministic overhead"
+
+  # L2 Architecture
+  model_strategy:
+    preferred: multi_architecture
+    rationale: "ModelAdapter pattern enables comparing architectures"
+  uncertainty_quantification:
+    preferred: temperature_scaling
+    rationale: "Simplest entry point; conformal prediction next"
+  serving_architecture:
+    preferred: bentoml_rest
+    rationale: "Best developer experience for solo workflows"
+  config_management:
+    preferred: hydra_zen
+    rationale: "Type-safe experiment management"
+  pipeline_orchestration:
+    preferred: langgraph
+    rationale: "Learning agent orchestration patterns"
+
+  # L3 Technology
+  experiment_tracking:
+    preferred: mlflow
+    rationale: "Industry standard, good local mode"
+  llm_observability:
+    preferred: langfuse
+    rationale: "Self-hosted, open source"
+  testing_strategy:
+    preferred: property_based
+    rationale: "Hypothesis is excellent learning material"
+
+  # L4 Infrastructure
+  compute_target:
+    preferred: local_gpu
+    rationale: "Single GPU is the constraint"
+  containerization:
+    preferred: docker_compose
+    rationale: "Simple local orchestration"
+  ci_cd_platform:
+    preferred: github_actions
+    rationale: "Free for open source, well-documented"
+
+  # L5 Operations
+  monitoring_stack:
+    preferred: none
+    rationale: "Not needed for solo development"
+  model_governance:
+    preferred: mlflow_tags
+    rationale: "Lightweight governance through MLflow"

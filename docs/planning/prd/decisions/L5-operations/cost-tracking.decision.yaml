@@ -1,0 +1,170 @@
+decision_id: cost_tracking
+title: "Cost Tracking"
+description: >
+  How compute, LLM API, and infrastructure costs are tracked and analyzed.
+  Langfuse provides LLM cost tracking; custom DuckDB queries enable
+  cross-service cost analytics; cloud billing APIs provide infrastructure
+  costs; none means no cost visibility. Important for budget management
+  and demonstrating cost awareness in portfolio.
+
+decision_level: L5_operations
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: langfuse_costs
+    title: "Langfuse Cost Tracking"
+    description: >
+      Langfuse self-hosted instance tracks LLM token usage, latency,
+      and cost per trace. Integrates with LiteLLM for provider-agnostic
+      cost aggregation. Config-only status with Docker Compose deployment.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: config_only
+    complements:
+      - "llm_observability.langfuse"
+      - "containerization.docker_compose"
+
+  - option_id: custom_duckdb
+    title: "Custom DuckDB Analytics"
+    description: >
+      DuckDB in-process SQL analytics aggregating costs from MLflow runs,
+      Langfuse traces, and compute time logs. Partial implementation with
+      DuckDB for MLflow analytics. Flexible but requires custom queries.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: partial
+    complements:
+      - "experiment_tracking.mlflow"
+      - "monitoring_stack.custom_dashboards"
+
+  - option_id: cloud_billing
+    title: "Cloud Billing APIs"
+    description: >
+      AWS Cost Explorer, GCP Billing, or Azure Cost Management for
+      infrastructure costs. Relevant when cloud compute is used.
+      Provides granular per-service cost breakdowns.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires cloud deployment"
+      - "API integration for each provider"
+
+  - option_id: none
+    title: "No Cost Tracking"
+    description: >
+      No structured cost tracking. Current effective state for local-only
+      development where compute cost is sunk (local GPU). Acceptable
+      when budget is not a concern.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: llm_observability
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: langfuse
+        then_probabilities:
+          langfuse_costs: 0.50
+          custom_duckdb: 0.25
+          cloud_billing: 0.10
+          none: 0.15
+      - given_parent_option: braintrust
+        then_probabilities:
+          langfuse_costs: 0.20
+          custom_duckdb: 0.35
+          cloud_billing: 0.15
+          none: 0.30
+      - given_parent_option: phoenix
+        then_probabilities:
+          langfuse_costs: 0.20
+          custom_duckdb: 0.30
+          cloud_billing: 0.15
+          none: 0.35
+      - given_parent_option: none
+        then_probabilities:
+          langfuse_costs: 0.10
+          custom_duckdb: 0.25
+          cloud_billing: 0.15
+          none: 0.50
+
+  - parent_decision_id: serving_architecture
+    influence_strength: weak
+    conditional_table:
+      - given_parent_option: bentoml_rest
+        then_probabilities:
+          langfuse_costs: 0.35
+          custom_duckdb: 0.30
+          cloud_billing: 0.15
+          none: 0.20
+      - given_parent_option: monai_deploy
+        then_probabilities:
+          langfuse_costs: 0.30
+          custom_duckdb: 0.30
+          cloud_billing: 0.20
+          none: 0.20
+      - given_parent_option: gradio_only
+        then_probabilities:
+          langfuse_costs: 0.25
+          custom_duckdb: 0.25
+          cloud_billing: 0.10
+          none: 0.40
+      - given_parent_option: triton
+        then_probabilities:
+          langfuse_costs: 0.30
+          custom_duckdb: 0.25
+          cloud_billing: 0.25
+          none: 0.20
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      langfuse_costs: 0.25
+      custom_duckdb: 0.20
+      cloud_billing: 0.20
+      none: 0.35
+    rationale: "Solo researchers on local GPU have minimal cost tracking needs"
+  lab_group:
+    probability_overrides:
+      langfuse_costs: 0.35
+      custom_duckdb: 0.25
+      cloud_billing: 0.20
+      none: 0.20
+    rationale: "Lab groups need cost visibility for shared compute and grant budgets"
+  clinical_deployment:
+    probability_overrides:
+      langfuse_costs: 0.35
+      custom_duckdb: 0.25
+      cloud_billing: 0.25
+      none: 0.15
+    rationale: "Clinical deployment needs comprehensive cost tracking for sustainability"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Cloud deployment requiring cost visibility"
+    - "LLM API cost growth"
+    - "Langfuse cost dashboard improvements"
+    - "Grant budget accountability requirements"
+
+domain_applicability:
+  vascular_segmentation: 0.8
+  cardiac_imaging: 0.8
+  neuroimaging: 0.8
+  general_medical: 0.9
+
+rationale: >
+  Langfuse costs (0.35) is the leading option given the existing Langfuse
+  stack for LLM observability. Custom DuckDB (0.30) is partially
+  implemented for MLflow analytics. No cost tracking (0.20) is the
+  effective current state for local development.
+
+tags:
+  - operations
+  - cost
+  - observability
+  - llm

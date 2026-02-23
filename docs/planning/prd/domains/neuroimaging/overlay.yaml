@@ -1,0 +1,67 @@
+domain_id: neuroimaging
+title: "Neuroimaging"
+status: planned
+last_updated: 2026-02-23
+
+description: >
+  Domain overlay for brain tumor and stroke lesion segmentation.
+  Targets BraTS (brain tumor) and ISLES (ischemic stroke) datasets.
+  Multi-modal MRI with complex heterogeneous lesions.
+
+dataset:
+  name: "BraTS / ISLES"
+  modality: "Multi-modal MRI (T1, T1ce, T2, FLAIR)"
+  structures:
+    - name: "Enhancing tumor (ET)"
+      label_id: 1
+      difficulty: "High"
+    - name: "Tumor core (TC)"
+      label_id: 2
+      difficulty: "Medium"
+    - name: "Whole tumor (WT)"
+      label_id: 3
+      difficulty: "Medium"
+    - name: "Stroke lesion"
+      label_id: 1
+      difficulty: "High — heterogeneous"
+  challenges:
+    - "Multi-modal input fusion"
+    - "Hierarchical tumor sub-regions"
+    - "Heterogeneous lesion appearance"
+    - "Small enhancing regions"
+
+metric_adjustments:
+  adjustments:
+    - metric: surface_dice
+      weight_boost: 0.10
+      rationale: "Surface Dice important for tumor boundary delineation"
+    - metric: lesion_wise_f1
+      weight_boost: 0.05
+      rationale: "Lesion-level detection for clinical relevance"
+
+loss_adjustments:
+  adjustments:
+    - loss: deep_supervision
+      viability_boost: 0.10
+      rationale: "Multi-scale supervision for hierarchical structures"
+    - loss: region_based
+      viability_boost: 0.05
+      rationale: "Region-specific loss for WT/TC/ET hierarchy"
+
+prd_prior_adjustments:
+  adjustments:
+    - decision_id: segmentation_models
+      option_id: swinunetr
+      adjustment: "+0.10"
+      rationale: "SwinUNETR was designed for and excels at BraTS"
+    - decision_id: augmentation_stack
+      option_id: monai_basic
+      adjustment: "+0.05"
+      rationale: "MONAI transforms include BraTS-specific augmentations"
+
+vocabulary:
+  primary_structure: "brain tumors / stroke lesions"
+  imaging_modality: "multi-modal MRI"
+  key_metric: "Surface Dice"
+  primary_challenge: "multi-modal fusion and hierarchical segmentation"
+  clinical_application: "neuro-oncology / stroke assessment"

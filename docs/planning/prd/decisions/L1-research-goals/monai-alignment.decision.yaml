@@ -1,0 +1,97 @@
+decision_id: monai_alignment
+title: "MONAI Alignment"
+description: >
+  How tightly to align with the MONAI ecosystem. MONAI-native uses only
+  MONAI components; MONAI-compatible uses MONAI alongside other tools;
+  framework-agnostic avoids MONAI lock-in.
+
+decision_level: L1_research_goals
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: monai_native
+    title: "MONAI Native"
+    description: >
+      Use MONAI for everything: transforms, models, metrics, training loops,
+      Bundle format, MONAI Deploy, MONAI FL. Maximum ecosystem integration
+      but limits flexibility.
+    prior_probability: 0.40
+    status: viable
+    implementation_status: partial
+    constraints:
+      - "Must stay within MONAI model zoo"
+      - "MONAI version compatibility"
+    complements:
+      - "model_export_format.monai_bundle"
+      - "federated_learning.monai_fl"
+
+  - option_id: monai_compatible
+    title: "MONAI Compatible"
+    description: >
+      Use MONAI for core ML (transforms, models) but integrate other
+      tools freely (TorchIO, TorchMetrics, BentoML). Current implementation.
+    prior_probability: 0.45
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "augmentation_stack.monai_plus_torchio"
+      - "metrics_framework.torchmetrics"
+      - "serving_architecture.bentoml_rest"
+
+  - option_id: framework_agnostic
+    title: "Framework Agnostic"
+    description: >
+      Avoid MONAI dependency. Use pure PyTorch with custom code.
+      Maximum flexibility but loses MONAI ecosystem benefits.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      monai_native: 0.30
+      monai_compatible: 0.50
+      framework_agnostic: 0.20
+    rationale: "Solo researchers benefit from MONAI convenience without lock-in"
+  lab_group:
+    probability_overrides:
+      monai_native: 0.55
+      monai_compatible: 0.35
+      framework_agnostic: 0.10
+    rationale: "Lab groups benefit from standardized MONAI workflows"
+  clinical_deployment:
+    probability_overrides:
+      monai_native: 0.60
+      monai_compatible: 0.30
+      framework_agnostic: 0.10
+    rationale: "MONAI Deploy and FL are designed for clinical settings"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "MONAI 2.0 release"
+    - "MONAI Bundle ecosystem growth"
+    - "Alternative frameworks emerging"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  MONAI-compatible (0.45) reflects the current implementation that uses
+  MONAI transforms and model zoo while freely integrating TorchIO,
+  TorchMetrics, BentoML, and other non-MONAI tools.
+
+tags:
+  - strategic
+  - ecosystem
+  - resolved
+
+references:
+  - "../../../CLAUDE.md"

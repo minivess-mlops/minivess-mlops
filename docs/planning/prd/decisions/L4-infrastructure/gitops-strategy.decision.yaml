@@ -1,0 +1,141 @@
+decision_id: gitops_strategy
+title: "GitOps Strategy"
+description: >
+  How infrastructure and deployment state is managed declaratively from
+  Git. ArgoCD and FluxCD are Kubernetes-native; GitHub Actions can serve
+  as lightweight GitOps for Docker Compose; none means manual deployment.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: argocd
+    title: "ArgoCD"
+    description: >
+      Kubernetes-native GitOps with declarative application definitions.
+      Pull-based sync from Git repository to K8s cluster. Rich UI for
+      deployment visualization. Requires Kubernetes.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires Kubernetes cluster"
+      - "ArgoCD server deployment and maintenance"
+    complements:
+      - "containerization.kubernetes"
+      - "iac_tooling.terraform"
+
+  - option_id: fluxcd
+    title: "FluxCD"
+    description: >
+      Lightweight Kubernetes-native GitOps. CNCF graduated project.
+      More modular than ArgoCD but less visual. Good for smaller
+      clusters.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires Kubernetes cluster"
+      - "Less visual than ArgoCD"
+
+  - option_id: github_actions_only
+    title: "GitHub Actions as GitOps"
+    description: >
+      Use GitHub Actions workflows to deploy on push/merge. Push-based
+      model. Works with Docker Compose and any target. Current partial
+      implementation for CI/CD.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: partial
+    complements:
+      - "ci_cd_platform.github_actions"
+      - "containerization.docker_compose"
+
+  - option_id: none
+    title: "No GitOps"
+    description: >
+      Manual deployment via scripts or direct commands. Current state
+      for local development. Acceptable for single-developer projects.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: containerization
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: docker_compose
+        then_probabilities:
+          argocd: 0.10
+          fluxcd: 0.10
+          github_actions_only: 0.50
+          none: 0.30
+      - given_parent_option: kubernetes
+        then_probabilities:
+          argocd: 0.45
+          fluxcd: 0.30
+          github_actions_only: 0.15
+          none: 0.10
+      - given_parent_option: podman
+        then_probabilities:
+          argocd: 0.10
+          fluxcd: 0.10
+          github_actions_only: 0.45
+          none: 0.35
+      - given_parent_option: none
+        then_probabilities:
+          argocd: 0.05
+          fluxcd: 0.05
+          github_actions_only: 0.30
+          none: 0.60
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      argocd: 0.10
+      fluxcd: 0.05
+      github_actions_only: 0.50
+      none: 0.35
+    rationale: "Solo researchers use GitHub Actions for simple deployment or deploy manually"
+  lab_group:
+    probability_overrides:
+      argocd: 0.35
+      fluxcd: 0.20
+      github_actions_only: 0.30
+      none: 0.15
+    rationale: "Lab groups benefit from ArgoCD if they have shared K8s infrastructure"
+  clinical_deployment:
+    probability_overrides:
+      argocd: 0.45
+      fluxcd: 0.20
+      github_actions_only: 0.25
+      none: 0.10
+    rationale: "Clinical deployments need auditable, declarative deployment pipelines"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "Migration to Kubernetes"
+    - "ArgoCD vs FluxCD ecosystem evolution"
+    - "GitHub Actions deployment capabilities"
+    - "Multi-environment deployment needs"
+
+domain_applicability:
+  vascular_segmentation: 0.9
+  cardiac_imaging: 0.9
+  neuroimaging: 0.9
+  general_medical: 1.0
+
+rationale: >
+  GitHub Actions only (0.35) is the pragmatic choice for a Docker Compose
+  local-first project. ArgoCD (0.30) becomes relevant when the project
+  migrates to Kubernetes. FluxCD (0.20) is a lighter K8s-native alternative.
+
+tags:
+  - infrastructure
+  - gitops
+  - devops
+  - deployment

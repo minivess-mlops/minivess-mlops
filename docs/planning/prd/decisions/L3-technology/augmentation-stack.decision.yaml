@@ -1,0 +1,178 @@
+decision_id: augmentation_stack
+title: "Augmentation Stack"
+description: >
+  Which data augmentation libraries and strategies to use for 3D medical
+  image preprocessing and on-the-fly augmentation. The choice affects
+  training pipeline complexity, augmentation diversity, and MONAI ecosystem
+  alignment. Physics-based augmentations can simulate realistic imaging
+  artifacts but add significant complexity.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: monai_basic
+    title: "MONAI Transforms Only"
+    description: >
+      Use only MONAI's built-in transforms (RandAffine, RandGaussianNoise,
+      RandFlip, etc.). Clean integration with MONAI data pipeline but
+      limited augmentation variety.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: partial
+    complements:
+      - "monai_alignment.monai_native"
+
+  - option_id: monai_plus_torchio
+    title: "MONAI + TorchIO"
+    description: >
+      Combine MONAI transforms with TorchIO for advanced 3D augmentations
+      (elastic deformation, random ghosting, random spike, random bias
+      field). Current implementation. Best balance of diversity and
+      maintainability.
+    prior_probability: 0.40
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "monai_alignment.monai_compatible"
+      - "segmentation_models.segresnet"
+      - "segmentation_models.swinunetr"
+
+  - option_id: albumentations_3d
+    title: "Albumentations 3D"
+    description: >
+      Use albumentations with 3D extensions. Rich augmentation library
+      popular in Kaggle competitions. Less native 3D support than TorchIO
+      but broader community.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "3D support requires albumentations3d or custom wrappers"
+      - "Integration overhead with MONAI data pipeline"
+
+  - option_id: custom_physics
+    title: "Custom Physics-Based Augmentation"
+    description: >
+      Simulate realistic imaging artifacts: partial volume effects, motion
+      artifacts, B0 inhomogeneity, Gibbs ringing. Domain-specific but
+      computationally expensive and complex to implement.
+    prior_probability: 0.15
+    status: experimental
+    implementation_status: not_started
+    constraints:
+      - "Requires physics simulation expertise"
+      - "High computational overhead"
+      - "Validation of augmentation realism"
+
+conditional_on:
+  - parent_decision_id: monai_alignment
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: monai_native
+        then_probabilities:
+          monai_basic: 0.60
+          monai_plus_torchio: 0.20
+          albumentations_3d: 0.05
+          custom_physics: 0.15
+      - given_parent_option: monai_compatible
+        then_probabilities:
+          monai_basic: 0.20
+          monai_plus_torchio: 0.50
+          albumentations_3d: 0.15
+          custom_physics: 0.15
+      - given_parent_option: framework_agnostic
+        then_probabilities:
+          monai_basic: 0.10
+          monai_plus_torchio: 0.30
+          albumentations_3d: 0.35
+          custom_physics: 0.25
+
+  - parent_decision_id: segmentation_models
+    influence_strength: weak
+    conditional_table:
+      - given_parent_option: segresnet
+        then_probabilities:
+          monai_basic: 0.30
+          monai_plus_torchio: 0.40
+          albumentations_3d: 0.15
+          custom_physics: 0.15
+      - given_parent_option: swinunetr
+        then_probabilities:
+          monai_basic: 0.25
+          monai_plus_torchio: 0.40
+          albumentations_3d: 0.15
+          custom_physics: 0.20
+      - given_parent_option: vista3d
+        then_probabilities:
+          monai_basic: 0.35
+          monai_plus_torchio: 0.35
+          albumentations_3d: 0.10
+          custom_physics: 0.20
+      - given_parent_option: nnunet
+        then_probabilities:
+          monai_basic: 0.15
+          monai_plus_torchio: 0.30
+          albumentations_3d: 0.25
+          custom_physics: 0.30
+      - given_parent_option: sam_variants
+        then_probabilities:
+          monai_basic: 0.30
+          monai_plus_torchio: 0.35
+          albumentations_3d: 0.20
+          custom_physics: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      monai_basic: 0.35
+      monai_plus_torchio: 0.40
+      albumentations_3d: 0.15
+      custom_physics: 0.10
+    rationale: "Solo researchers want easy setup; MONAI+TorchIO provides good defaults"
+  lab_group:
+    probability_overrides:
+      monai_basic: 0.20
+      monai_plus_torchio: 0.35
+      albumentations_3d: 0.20
+      custom_physics: 0.25
+    rationale: "Lab groups can invest in physics-based augmentation development"
+  clinical_deployment:
+    probability_overrides:
+      monai_basic: 0.35
+      monai_plus_torchio: 0.35
+      albumentations_3d: 0.10
+      custom_physics: 0.20
+    rationale: "Clinical prefers validated MONAI-ecosystem augmentations"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "TorchIO v1.0 release"
+    - "MONAI transforms API changes"
+    - "Albumentations native 3D support"
+    - "Generative model augmentation (diffusion-based)"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 0.95
+  neuroimaging: 1.0
+  general_medical: 0.85
+
+rationale: >
+  MONAI+TorchIO (0.40) is resolved as the current stack, combining MONAI
+  spatial transforms with TorchIO's MRI-specific augmentations (ghosting,
+  spike, bias field). MONAI-only (0.30) is a simpler alternative for pure
+  MONAI alignment. Albumentations 3D (0.15) is an alternative ecosystem
+  with less native 3D support. Physics-based (0.15) is the most realistic
+  but requires significant expertise.
+
+tags:
+  - preprocessing
+  - augmentation
+  - monai
+  - torchio
+  - resolved

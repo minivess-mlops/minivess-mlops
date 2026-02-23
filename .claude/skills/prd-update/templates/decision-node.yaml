@@ -1,0 +1,79 @@
+# Template: Decision Node
+# Copy this file and fill in the values.
+# See docs/planning/prd/decisions/_schema.yaml for full specification.
+
+decision_id: CHANGE_ME  # snake_case, unique
+title: "CHANGE_ME"
+description: >
+  CHANGE_ME: Why does this decision matter?
+
+decision_level: L3_technology  # L1_research_goals | L2_architecture | L3_technology | L4_infrastructure | L5_operations
+status: active  # active | draft | deprecated | archived
+last_updated: 2026-02-23
+
+options:
+  - option_id: option_a
+    title: "Option A"
+    description: "CHANGE_ME"
+    prior_probability: 0.50  # All options must sum to 1.0
+    status: viable  # recommended | viable | experimental | deferred | rejected | resolved
+    implementation_status: not_started  # not_started | config_only | partial | implemented | production
+    # constraints: []
+    # complements: []
+
+  - option_id: option_b
+    title: "Option B"
+    description: "CHANGE_ME"
+    prior_probability: 0.50
+    status: viable
+    implementation_status: not_started
+
+# Uncomment and fill for non-root nodes:
+# conditional_on:
+#   - parent_decision_id: PARENT_ID
+#     influence_strength: moderate  # strong | moderate | weak
+#     conditional_table:
+#       - given_parent_option: parent_option_a
+#         then_probabilities:
+#           option_a: 0.60
+#           option_b: 0.40
+#       - given_parent_option: parent_option_b
+#         then_probabilities:
+#           option_a: 0.40
+#           option_b: 0.60
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      option_a: 0.50
+      option_b: 0.50
+    rationale: "CHANGE_ME"
+  lab_group:
+    probability_overrides:
+      option_a: 0.50
+      option_b: 0.50
+    rationale: "CHANGE_ME"
+  clinical_deployment:
+    probability_overrides:
+      option_a: 0.50
+      option_b: 0.50
+    rationale: "CHANGE_ME"
+
+volatility:
+  classification: stable  # stable | shifting | volatile
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "CHANGE_ME"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  CHANGE_ME: Why these prior probabilities?
+
+tags:
+  - CHANGE_ME

@@ -1,0 +1,208 @@
+decision_id: llm_observability
+title: "LLM Observability"
+description: >
+  Which LLM observability and evaluation tools to use for monitoring
+  agent-driven pipeline components. The MinIVess MLOps v2 stack includes
+  LangGraph agents for automated pipeline orchestration, requiring
+  production tracing, cost tracking, and offline evaluation. Distinct from
+  ML experiment tracking (MLflow) which covers model training metrics.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-23
+
+options:
+  - option_id: langfuse
+    title: "Langfuse (Self-Hosted)"
+    description: >
+      Open-source LLM observability platform. Self-hosted deployment for
+      data sovereignty. Provides trace visualization, cost tracking, prompt
+      management, and evaluation datasets. Already deployed in Docker
+      Compose stack.
+    prior_probability: 0.40
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "agent_framework.langgraph"
+      - "experiment_tracking.mlflow"
+      - "llm_provider.hybrid_litellm"
+
+  - option_id: braintrust
+    title: "Braintrust"
+    description: >
+      LLM evaluation platform with AutoEvals, CI/CD quality gates, and
+      dataset management. Hybrid deployment with local data plane.
+      Complementary to Langfuse for offline evaluation vs. production
+      tracing. Already integrated.
+    prior_probability: 0.30
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "agent_framework.langgraph"
+      - "llm_provider.hybrid_litellm"
+
+  - option_id: langsmith
+    title: "LangSmith"
+    description: >
+      LangChain's native observability platform. Deep LangGraph integration
+      but cloud-only. Vendor lock-in to LangChain ecosystem.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Cloud-only deployment (no self-hosted option)"
+      - "Vendor lock-in to LangChain/LangSmith ecosystem"
+      - "Data sovereignty concerns for medical data"
+
+  - option_id: custom
+    title: "Custom Observability"
+    description: >
+      Build bespoke LLM observability on OpenTelemetry + Grafana. Maximum
+      flexibility and data control but significant development effort.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Significant development and maintenance effort"
+      - "No pre-built evaluation frameworks"
+
+conditional_on:
+  - parent_decision_id: pipeline_orchestration
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: hydra_scripts
+        then_probabilities:
+          langfuse: 0.30
+          braintrust: 0.25
+          langsmith: 0.15
+          custom: 0.30
+      - given_parent_option: dvc_pipelines
+        then_probabilities:
+          langfuse: 0.35
+          braintrust: 0.30
+          langsmith: 0.10
+          custom: 0.25
+      - given_parent_option: langgraph_agents
+        then_probabilities:
+          langfuse: 0.40
+          braintrust: 0.30
+          langsmith: 0.20
+          custom: 0.10
+      - given_parent_option: airflow_orchestrated
+        then_probabilities:
+          langfuse: 0.35
+          braintrust: 0.25
+          langsmith: 0.15
+          custom: 0.25
+
+  - parent_decision_id: agent_framework
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: langgraph
+        then_probabilities:
+          langfuse: 0.40
+          braintrust: 0.30
+          langsmith: 0.20
+          custom: 0.10
+      - given_parent_option: crewai
+        then_probabilities:
+          langfuse: 0.35
+          braintrust: 0.30
+          langsmith: 0.15
+          custom: 0.20
+      - given_parent_option: autogen
+        then_probabilities:
+          langfuse: 0.35
+          braintrust: 0.25
+          langsmith: 0.10
+          custom: 0.30
+      - given_parent_option: custom
+        then_probabilities:
+          langfuse: 0.30
+          braintrust: 0.25
+          langsmith: 0.10
+          custom: 0.35
+
+  - parent_decision_id: experiment_tracking
+    influence_strength: weak
+    conditional_table:
+      - given_parent_option: mlflow
+        then_probabilities:
+          langfuse: 0.45
+          braintrust: 0.30
+          langsmith: 0.10
+          custom: 0.15
+      - given_parent_option: wandb
+        then_probabilities:
+          langfuse: 0.35
+          braintrust: 0.30
+          langsmith: 0.15
+          custom: 0.20
+      - given_parent_option: neptune
+        then_probabilities:
+          langfuse: 0.35
+          braintrust: 0.30
+          langsmith: 0.15
+          custom: 0.20
+      - given_parent_option: clearml
+        then_probabilities:
+          langfuse: 0.30
+          braintrust: 0.25
+          langsmith: 0.15
+          custom: 0.30
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      langfuse: 0.40
+      braintrust: 0.30
+      langsmith: 0.20
+      custom: 0.10
+    rationale: "Solo researchers need turnkey observability; Langfuse + Braintrust cover it"
+  lab_group:
+    probability_overrides:
+      langfuse: 0.35
+      braintrust: 0.30
+      langsmith: 0.20
+      custom: 0.15
+    rationale: "Lab groups may evaluate LangSmith for deeper LangGraph integration"
+  clinical_deployment:
+    probability_overrides:
+      langfuse: 0.45
+      braintrust: 0.30
+      langsmith: 0.05
+      custom: 0.20
+    rationale: "Clinical requires self-hosted tracing (Langfuse) for data sovereignty"
+
+volatility:
+  classification: volatile
+  last_assessed: 2026-02-23
+  next_review: 2026-04-23
+  change_drivers:
+    - "LLM observability market rapid evolution"
+    - "Langfuse v3 feature roadmap"
+    - "Braintrust pricing and feature changes"
+    - "OpenTelemetry LLM semantic conventions standardization"
+    - "New entrants (Phoenix, Helicone, etc.)"
+
+domain_applicability:
+  vascular_segmentation: 0.80
+  cardiac_imaging: 0.80
+  neuroimaging: 0.75
+  general_medical: 0.85
+
+rationale: >
+  Langfuse (0.40) is resolved as the production tracing platform, self-hosted
+  for medical data sovereignty. Braintrust (0.30) is resolved as the
+  complementary evaluation platform with AutoEvals and CI/CD quality gates.
+  Together they form a complete LLM observability stack. LangSmith (0.15)
+  would provide deeper LangGraph integration but requires cloud deployment.
+  Domain applicability is lower than ML-focused decisions because LLM
+  observability only applies to agent-driven pipeline components.
+
+tags:
+  - llm-observability
+  - langfuse
+  - braintrust
+  - agents
+  - resolved
