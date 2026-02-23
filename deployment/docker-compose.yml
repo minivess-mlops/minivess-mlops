@@ -1,20 +1,245 @@
-version: '3'
+# MinIVess MLOps v2 — Docker Compose with Profile-Based Resource Tiers
+#
+# Copy .env.example to .env and adjust values before starting:
+#   cp .env.example .env
+#
+# Usage:
+#   docker compose --profile dev up              → 4 services  (~4 GB RAM)
+#   docker compose --profile monitoring up       → 7 services  (~8 GB RAM)
+#   docker compose --profile full up             → 12 services (~16 GB RAM)
+#
+# NOTE: Evidently AI is a Python library integrated into the pipeline code,
+#       NOT a Docker service (no stable Docker image exists). Drift reports
+#       are exported to Grafana dashboards. See Section 16.1 C4.
+#
+# Legacy training container (v0.1-alpha) preserved in deployment/archived/
+
+x-common-labels: &common-labels
+  labels:
+    project: minivess-mlops
+    managed-by: docker-compose
+
 services:
-  train:
-    image: petteriteikari/minivess-mlops-train:latest
-    container_name: petteriteikari/minivess-mlops-train
-    build:
-      dockerfile: ./deployment/Dockerfile
-      context: ./..
+  # ===========================================================================
+  # Profile: dev — Core infrastructure (4 services, ~4 GB RAM)
+  # ===========================================================================
+
+  postgres:
+    image: postgres:16
+    container_name: minivess-postgres
+    profiles: ["dev", "monitoring", "full"]
     environment:
-      - AWS_PROFILE=default
-    volumes:
-      - ~/.aws:/home/minivessuser/.aws:ro
-      - ~/minivess-dvc-cache:/mnt/minivess-dvc-cache
-      - ~/minivess-artifacts:/mnt/minivess-artifacts
+      POSTGRES_USER: ${POSTGRES_USER:-minivess}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minivess_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-mlflow}
+      POSTGRES_MULTIPLE_DATABASES: mlflow,langfuse
     ports:
-      - "8088:8088"
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-minivess} -d ${POSTGRES_DB:-mlflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    <<: *common-labels
+
+  minio:
+    image: minio/minio:latest
+    container_name: minivess-minio
+    profiles: ["dev", "monitoring", "full"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minivess}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minivess_secret}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    <<: *common-labels
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.10.0
+    container_name: minivess-mlflow
+    profiles: ["dev", "monitoring", "full"]
+    command: >
+      mlflow server
+        --backend-store-uri postgresql://${POSTGRES_USER:-minivess}:${POSTGRES_PASSWORD:-minivess_secret}@postgres:5432/${POSTGRES_DB:-mlflow}
+        --default-artifact-root s3://mlflow-artifacts/
+        --host 0.0.0.0
+        --port 5000
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minivess}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minivess_secret}
+    ports:
+      - "${MLFLOW_PORT:-5000}:5000"
+    volumes:
+      - mlflow_artifacts:/mlflow/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    <<: *common-labels
+
+  bentoml:
+    image: ${BENTOML_IMAGE:-bentoml/bento-server:latest}
+    container_name: minivess-bentoml
+    profiles: ["dev", "monitoring", "full"]
+    ports:
+      - "${BENTOML_PORT:-3333}:3000"
+    environment:
+      BENTOML_HOME: /home/bentoml
+    restart: unless-stopped
+    <<: *common-labels
+
+  # ===========================================================================
+  # Profile: monitoring — Observability stack (+4 services, ~8 GB RAM total)
+  # ===========================================================================
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: minivess-prometheus
+    profiles: ["monitoring", "full"]
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    restart: unless-stopped
+    <<: *common-labels
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: minivess-grafana
+    profiles: ["monitoring", "full"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-clock-panel
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    <<: *common-labels
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    container_name: minivess-otel-collector
+    profiles: ["monitoring", "full"]
+    ports:
+      - "${OTEL_GRPC_PORT:-4317}:4317"
+      - "${OTEL_HTTP_PORT:-4318}:4318"
+    volumes:
+      - ./otel/otel-collector-config.yml:/etc/otelcol/config.yaml:ro
+    restart: unless-stopped
+    <<: *common-labels
+
+  # NOTE: Evidently is a Python library, not a Docker service.
+  # Drift monitoring is run within the pipeline code and reports are
+  # exported to Grafana. See modernization plan Section 16.1 C4.
+
+  # ===========================================================================
+  # Profile: full — Complete platform (+6 services, ~16 GB RAM total)
+  # ===========================================================================
+
+  langfuse:
+    image: langfuse/langfuse:latest
+    container_name: minivess-langfuse
+    profiles: ["full"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-minivess}:${POSTGRES_PASSWORD:-minivess_secret}@postgres:5432/langfuse
+      NEXTAUTH_URL: http://localhost:${LANGFUSE_PORT:-3001}
+      NEXTAUTH_SECRET: ${LANGFUSE_SECRET:-changeme-langfuse-secret}
+      SALT: ${LANGFUSE_SALT:-changeme-langfuse-salt}
+    ports:
+      - "${LANGFUSE_PORT:-3001}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    <<: *common-labels
+
+  monai-label:
+    image: projectmonai/monailabel:latest
+    container_name: minivess-monai-label
+    profiles: ["full"]
+    ports:
+      - "${MONAI_LABEL_PORT:-8000}:8000"
+    volumes:
+      - ./monai-label/apps:/workspace/apps
+    restart: unless-stopped
+    <<: *common-labels
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: minivess-ollama
+    profiles: ["full"]
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0
+    restart: unless-stopped
+    <<: *common-labels
+
+  label-studio:
+    image: heartexlabs/label-studio:latest
+    container_name: minivess-label-studio
+    profiles: ["full"]
+    environment:
+      LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED: "true"
+      LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT: /label-studio/files
+    ports:
+      - "${LABEL_STUDIO_PORT:-8080}:8080"
+    volumes:
+      - label_studio_data:/label-studio/data
+    restart: unless-stopped
+    <<: *common-labels
+
+  marquez:
+    image: marquezproject/marquez:latest
+    container_name: minivess-marquez
+    profiles: ["full"]
+    environment:
+      MARQUEZ_PORT: 5000
+      MARQUEZ_ADMIN_PORT: 5001
+    ports:
+      - "${MARQUEZ_PORT:-5001}:5001"
+      - "${MARQUEZ_API_PORT:-5002}:5000"
+    restart: unless-stopped
+    <<: *common-labels
+
 volumes:
-  aws:
-  minivess-dvc-cache:
-  minivess-artifacts:
+  postgres_data:
+    driver: local
+  minio_data:
+    driver: local
+  mlflow_artifacts:
+    driver: local
+  grafana_data:
+    driver: local
+  label_studio_data:
+    driver: local
+  ollama_data:
+    driver: local
