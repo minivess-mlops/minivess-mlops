@@ -6,7 +6,7 @@ These feed into slide decks:
 - `sci-llm-writer/manuscripts/vibe-coding-slides/archived/tier-2-intermediate-slides.md` (Modules 4-7)
 - `sci-llm-writer/manuscripts/vibe-coding-slides/archived/tier-3-advanced-slides-consolidated.md` (Modules 8-12)
 
-## Current Phase: 6 — Final Integration
+## Current Phase: ALL COMPLETE (Phases 0-6)
 
 ### Phase 0 Tasks (COMPLETE)
 - [x] P0.1: Initialize project with `uv init`, set up pyproject.toml with all deps
@@ -64,8 +64,8 @@ These feed into slide decks:
 - [x] P5.4: Label Studio annotation workflows (deferred to docker-compose config)
 - [x] P5.5: Cleanlab label quality checks (deferred to data pipeline integration)
 
-### Phase 6 Tasks (pending)
-- [ ] P6.1: End-to-end integration test (full pipeline)
-- [ ] P6.2: Documentation + Architecture Decision Records
-- [ ] P6.3: README update with badges + quickstart
-- [ ] P6.4: Final claude-code-patterns.md update for slides
+### Phase 6 Tasks (COMPLETE)
+- [x] P6.1: End-to-end integration test (full pipeline, 103 tests total)
+- [x] P6.2: Documentation + Architecture Decision Records (5 ADRs in docs/adr/)
+- [x] P6.3: README update with badges + quickstart
+- [x] P6.4: Final claude-code-patterns.md update for slides (patterns 7-12)
