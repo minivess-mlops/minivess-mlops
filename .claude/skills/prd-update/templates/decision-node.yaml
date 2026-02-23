@@ -1,11 +1,19 @@
 # Template: Decision Node
 # Copy this file and fill in the values.
 # See docs/planning/prd/decisions/_schema.yaml for full specification.
+# See .claude/skills/prd-update/protocols/citation-guide.md for citation format.
+#
+# ACADEMIC CITATION REQUIREMENTS:
+# - Every decision MUST have at least 1 reference in the references array
+# - Every citation_key MUST exist in docs/planning/prd/bibliography.yaml
+# - The rationale field MUST include author-year in-text citations
+# - Use "Surname et al. (Year)" format, never numeric references
 
 decision_id: CHANGE_ME  # snake_case, unique
 title: "CHANGE_ME"
 description: >
-  CHANGE_ME: Why does this decision matter?
+  CHANGE_ME: Why does this decision matter? Include author-year citation
+  for foundational work, e.g., "First proposed by Surname et al. (2024)..."
 
 decision_level: L3_technology  # L1_research_goals | L2_architecture | L3_technology | L4_infrastructure | L5_operations
 status: active  # active | draft | deprecated | archived
@@ -14,7 +22,9 @@ last_updated: 2026-02-23
 options:
   - option_id: option_a
     title: "Option A"
-    description: "CHANGE_ME"
+    description: >
+      CHANGE_ME — cite the introducing paper: "Introduced by Surname et al. (Year).
+      Achieves X performance on benchmark Y (Table N)."
     prior_probability: 0.50  # All options must sum to 1.0
     status: viable  # recommended | viable | experimental | deferred | rejected | resolved
     implementation_status: not_started  # not_started | config_only | partial | implemented | production
@@ -73,7 +83,20 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  CHANGE_ME: Why these prior probabilities?
+  CHANGE_ME: Justify prior probabilities with academic citations.
+  Example: "Option A receives 0.50 prior based on benchmark results
+  from Surname et al. (2024), who report X metric on Y dataset (Table N).
+  Option B at 0.50 follows Othername & Coauthor (2023) showing competitive
+  performance in Z setting."
+
+# ACADEMIC REFERENCES — MANDATORY
+# Every citation_key MUST exist in docs/planning/prd/bibliography.yaml.
+# References are append-only: NEVER remove existing references.
+references:
+  - citation_key: CHANGE_ME  # e.g., isensee2021nnu
+    relevance: "CHANGE_ME: Why this reference matters for this decision"
+    sections: []  # e.g., ["Table 2", "Section 3.1", "Fig. 5"]
+    supports_options: []  # e.g., ["option_a"]
 
 tags:
   - CHANGE_ME

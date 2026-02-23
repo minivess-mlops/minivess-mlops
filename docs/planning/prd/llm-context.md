@@ -90,6 +90,57 @@ When making technology decisions, consider:
 | Data versioning | DVC | 85% |
 | License | MIT | 100% |
 
+## Academic Citation Standards (NON-NEGOTIABLE)
+
+This is an **academic software project**. The PRD serves as the evidence base for a
+future **peer-reviewed article**. All citation standards are mandatory.
+
+### Rules
+
+1. **Author-year format ONLY** — Use "Surname et al. (Year)" for 3+ authors,
+   "Surname & Surname (Year)" for 2, "Surname (Year)" for 1. NEVER use numeric
+   references like [1] or [Smith2024].
+
+2. **Central bibliography** — All citations live in `bibliography.yaml`. Every
+   `citation_key` in a `.decision.yaml` MUST resolve to a bibliography entry.
+
+3. **No citation loss** — References are **append-only**. When updating a decision
+   file, NEVER remove existing references. If a reference becomes outdated, add a
+   note but keep the entry. The pre-commit hook will BLOCK commits that remove citations.
+
+4. **Sub-citations mandatory** — When ingesting a paper, also extract relevant papers
+   it cites and add them to `bibliography.yaml`. A single paper typically yields 3-10
+   relevant sub-citations.
+
+5. **In-text citations in rationale** — Every `rationale` field MUST contain at least
+   one author-year citation. Every claim about a technology's performance must cite
+   the source paper.
+
+6. **Structured references** — Each `.decision.yaml` reference entry includes:
+   - `citation_key` (links to bibliography.yaml)
+   - `relevance` (why this reference matters for this decision)
+   - `sections` (specific tables, figures, sections cited)
+   - `supports_options` (which option_ids this reference provides evidence for)
+
+### Guardrails
+
+- **Pre-commit hook**: `prd-citation-check` runs `scripts/validate_prd_citations.py`
+  on any PRD file change. Blocks commit if citations were removed or keys don't resolve.
+- **Validate protocol**: Check 7 (Citation Integrity) in the validate protocol covers
+  bibliography resolution, completeness, in-text format, and no-citation-loss.
+- **SKILL.md invariants**: Invariants #6 (citation integrity), #7 (no citation loss),
+  and #8 (author-year format) are enforced on every PRD operation.
+
+### Example
+
+In a `.decision.yaml` rationale field:
+```
+SegResNet (Myronenko, 2019) achieves competitive Dice scores as a lightweight
+encoder-decoder with VAE regularization. VISTA-3D (He et al., 2024) represents
+the next-generation foundation model approach, with LoRA fine-tuning
+(Hu et al., 2022) enabling parameter-efficient adaptation.
+```
+
 ## Critical Constraints
 
 1. **TDD mandatory** — Red→Green→Verify→Fix→Checkpoint→Converge
@@ -99,3 +150,4 @@ When making technology decisions, consider:
 5. **datetime.now(timezone.utc)** for all timestamps
 6. **uv** exclusively for package management
 7. **Pre-commit hooks** must pass before any commit
+8. **Academic citations** — Author-year format, no citation loss, sub-citations mandatory

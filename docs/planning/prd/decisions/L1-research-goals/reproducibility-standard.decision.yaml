@@ -90,5 +90,8 @@ tags:
   - reproducibility
   - resolved
 
-references:
-  - "../../../dvc.yaml"
+references: []
+
+research_notes: >
+  Internal: dvc.yaml defines the project's DVC pipeline stages for data
+  versioning and experiment reproducibility.

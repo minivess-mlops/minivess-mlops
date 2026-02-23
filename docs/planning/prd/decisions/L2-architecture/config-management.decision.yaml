@@ -82,5 +82,8 @@ tags:
   - configuration
   - resolved
 
-references:
-  - "../../adr/0002-dual-config-system.md"
+references: []
+
+research_notes: >
+  Internal: ADR-0002 (docs/adr/0002-dual-config-system.md) documents the
+  rationale for the Hydra-zen + Dynaconf dual-config system.

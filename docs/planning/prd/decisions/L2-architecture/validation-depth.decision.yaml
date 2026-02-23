@@ -106,6 +106,8 @@ research_notes: >
   Current implementation has ~8 validation layers (Pydantic, Pandera, GE,
   Deepchecks, WeightWatcher, ECE/MCE, drift detection, model cards).
   This is between standard and full onion.
+  Internal: ADR-0003 (docs/adr/0003-validation-onion.md) documents the
+  validation onion architecture and layer definitions.
 
 rationale: >
   Standard 5 layers (0.40) has highest prior. Current implementation
@@ -116,5 +118,4 @@ tags:
   - validation
   - partially-resolved
 
-references:
-  - "../../adr/0003-validation-onion.md"
+references: []

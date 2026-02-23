@@ -85,3 +85,18 @@ These feed into slide decks:
 - [x] P7.12: Domain overlays (registry, backbone-defaults, 4 domain overlays)
 - [x] P7.13: PRD-update skill (.claude/skills/prd-update/ — 6 protocols, 2 templates)
 - [x] P7.14: CLAUDE.md + phase-tracker.md updates
+
+### Phase 7b: Academic Citation Standards (COMPLETE)
+- [x] P7b.1: Central bibliography (docs/planning/prd/bibliography.yaml — 29 entries)
+- [x] P7b.2: Structured references schema (_schema.yaml — citation_key + relevance + sections + supports_options)
+- [x] P7b.3: Citation guide protocol (.claude/skills/prd-update/protocols/citation-guide.md)
+- [x] P7b.4: Updated ingest-paper protocol (sub-citation extraction, author-year format)
+- [x] P7b.5: Updated all 6 protocols for academic citation standards
+- [x] P7b.6: SKILL.md invariants #6-8 (citation integrity, no citation loss, author-year format)
+- [x] P7b.7: Templates updated with citation requirements and examples
+- [x] P7b.8: Exemplar: segmentation-models.decision.yaml with 8 academic references
+- [x] P7b.9: Citation validation script (scripts/validate_prd_citations.py)
+- [x] P7b.10: Pre-commit hook (prd-citation-check — blocks citation removals)
+- [x] P7b.11: LLM context updated with citation rules (llm-context.md)
+- [x] P7b.12: Fixed 7 decision files with old-format file path references
+- [x] P7b.13: CLAUDE.md updated with citation rules section

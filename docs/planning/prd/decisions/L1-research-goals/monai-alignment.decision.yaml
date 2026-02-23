@@ -93,5 +93,8 @@ tags:
   - ecosystem
   - resolved
 
-references:
-  - "../../../CLAUDE.md"
+references: []
+
+research_notes: >
+  Internal: CLAUDE.md documents the project's MONAI-compatible tool stack
+  (PyTorch + MONAI + TorchIO + TorchMetrics) and dual-config architecture.

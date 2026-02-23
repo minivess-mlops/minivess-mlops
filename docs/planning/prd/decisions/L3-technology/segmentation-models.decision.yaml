@@ -3,8 +3,10 @@ title: "Segmentation Models"
 description: >
   Which 3D segmentation architectures to implement behind the ModelAdapter ABC.
   Determines the model zoo breadth, GPU memory requirements, and compatibility
-  with foundation model pre-training. Vascular segmentation benefits from
-  topology-aware architectures that preserve clDice connectivity.
+  with foundation model pre-training. The MONAI framework (Cardoso et al., 2022)
+  provides native implementations of SegResNet (Myronenko, 2019) and SwinUNETR
+  (Hatamizadeh et al., 2022). Vascular segmentation benefits from topology-aware
+  architectures that preserve clDice connectivity (Shit et al., 2021).
 
 decision_level: L3_technology
 status: active
@@ -14,8 +16,9 @@ options:
   - option_id: segresnet
     title: "SegResNet"
     description: >
-      MONAI's SegResNet: encoder-decoder with residual blocks. Lightweight,
-      well-tested, fast convergence. Already implemented as baseline.
+      MONAI's SegResNet (Myronenko, 2019): encoder-decoder with residual blocks
+      and variational autoencoder regularization. Lightweight, well-tested, fast
+      convergence. Originally won BraTS 2018 challenge. Already implemented as baseline.
     prior_probability: 0.25
     status: resolved
     implementation_status: implemented
@@ -26,9 +29,9 @@ options:
   - option_id: swinunetr
     title: "SwinUNETR"
     description: >
-      Swin Transformer U-Net with shifted-window self-attention. Pre-trained
-      on large-scale CT data. Better for capturing long-range dependencies
-      in 3D volumes. Already implemented.
+      Swin Transformer U-Net (Hatamizadeh et al., 2022) with shifted-window
+      self-attention. Pre-trained on large-scale CT data. Better for capturing
+      long-range dependencies in 3D volumes. Already implemented.
     prior_probability: 0.20
     status: resolved
     implementation_status: implemented
@@ -39,8 +42,9 @@ options:
   - option_id: vista3d
     title: "VISTA-3D"
     description: >
-      MONAI's foundation model for interactive 3D segmentation. Supports
-      point prompts and class prompts. Config stubs exist but no integration.
+      MONAI's VISTA-3D (He et al., 2024): versatile foundation model for
+      interactive 3D segmentation supporting point prompts and class prompts.
+      Config stubs exist but no integration.
     prior_probability: 0.25
     status: viable
     implementation_status: config_only
@@ -54,10 +58,11 @@ options:
   - option_id: nnunet
     title: "nnU-Net v2"
     description: >
-      Self-configuring segmentation framework. Automatically selects
-      architecture, preprocessing, and training hyperparameters based on
-      dataset fingerprinting. Gold standard in medical image segmentation
-      challenges but requires external pipeline integration.
+      Self-configuring segmentation framework (Isensee et al., 2021).
+      Automatically selects architecture, preprocessing, and training
+      hyperparameters based on dataset fingerprinting. Gold standard in
+      medical image segmentation challenges but requires external pipeline
+      integration.
     prior_probability: 0.15
     status: viable
     implementation_status: not_started
@@ -68,8 +73,9 @@ options:
   - option_id: sam_variants
     title: "SAM Variants (SAM3, MedSAM2)"
     description: >
-      Segment Anything variants adapted for 3D medical imaging. Interactive
-      prompting model. Highly experimental for vascular segmentation.
+      Segment Anything (Kirillov et al., 2023) variants adapted for 3D
+      medical imaging (SAM3, MedSAM2). Interactive prompting model.
+      Highly experimental for vascular segmentation.
     prior_probability: 0.15
     status: experimental
     implementation_status: not_started
@@ -217,13 +223,64 @@ domain_applicability:
   general_medical: 0.90
 
 rationale: >
-  SegResNet (0.25) and VISTA-3D (0.25) share top prior. SegResNet is already
-  implemented and proven; VISTA-3D represents the highest-potential next step
-  with foundation model pre-training. SwinUNETR (0.20) is implemented and
-  competitive. nnU-Net (0.15) is the challenge benchmark standard but requires
-  pipeline refactoring. SAM variants (0.15) are experimental for thin
-  vascular structures. Domain note: vascular segmentation benefits +0.05 from
-  clDice-aware architectures that preserve topological connectivity.
+  SegResNet (Myronenko, 2019) and VISTA-3D (He et al., 2024) share top prior
+  at 0.25. SegResNet is already implemented and proven as the BraTS 2018 winner;
+  VISTA-3D represents the highest-potential next step with foundation model
+  pre-training on large-scale CT datasets. SwinUNETR (Hatamizadeh et al., 2022)
+  at 0.20 is implemented and competitive with transformer-based long-range
+  dependencies. nnU-Net (Isensee et al., 2021) at 0.15 remains the gold standard
+  in medical image segmentation challenges (Nature Methods) but requires pipeline
+  refactoring to integrate with Hydra-zen. SAM variants (Kirillov et al., 2023)
+  at 0.15 are experimental for thin vascular structures. Domain note: vascular
+  segmentation benefits from clDice-aware architectures (Shit et al., 2021) that
+  preserve topological connectivity of tubular structures.
+
+research_notes: >
+  The MONAI framework (Cardoso et al., 2022) provides native implementations of
+  SegResNet, SwinUNETR, and VISTA-3D, making these three architectures the most
+  natural fit for the MinIVess pipeline. The Metrics Reloaded framework
+  (Maier-Hein et al., 2024) recommends topology-aware metrics for vascular
+  segmentation, which aligns with clDice (Shit et al., 2021) as a key evaluation
+  criterion. nnU-Net v2 (Isensee et al., 2021) self-configures architecture and
+  preprocessing but operates as a standalone pipeline, creating integration
+  challenges with Hydra-zen experiment management.
+
+references:
+  - citation_key: myronenko2019
+    relevance: "Introduces SegResNet architecture (encoder-decoder with VAE regularization), winner of BraTS 2018 challenge"
+    sections: ["Table 1", "Section 3"]
+    supports_options: ["segresnet"]
+
+  - citation_key: hatamizadeh2022swinunetr
+    relevance: "Introduces SwinUNETR architecture with shifted-window self-attention for 3D medical segmentation"
+    sections: ["Table 2", "Section 3.2"]
+    supports_options: ["swinunetr"]
+
+  - citation_key: he2024vista3d
+    relevance: "Introduces VISTA-3D foundation model for versatile interactive 3D segmentation with point and class prompts"
+    supports_options: ["vista3d"]
+
+  - citation_key: isensee2021nnu
+    relevance: "Introduces nnU-Net self-configuring framework, gold standard in medical segmentation challenges"
+    sections: ["Table 1", "Section 2"]
+    supports_options: ["nnunet"]
+
+  - citation_key: kirillov2023sam
+    relevance: "Introduces Segment Anything foundation model; SAM variants (SAM3, MedSAM2) derive from this work"
+    supports_options: ["sam_variants"]
+
+  - citation_key: shit2021cldice
+    relevance: "Introduces clDice topology-preserving metric critical for vascular segmentation evaluation"
+    sections: ["Table 2", "Fig. 4"]
+    supports_options: ["segresnet", "vista3d"]
+
+  - citation_key: cardoso2022monai
+    relevance: "MONAI framework providing native implementations of SegResNet, SwinUNETR, and VISTA-3D"
+    supports_options: ["segresnet", "swinunetr", "vista3d"]
+
+  - citation_key: maier2024metrics
+    relevance: "Metrics Reloaded framework recommending topology-aware metrics for vascular segmentation"
+    sections: ["Table 5", "Section 4.3"]
 
 tags:
   - models

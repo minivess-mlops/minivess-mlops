@@ -190,8 +190,33 @@ properties:
 
   references:
     type: array
+    description: >
+      Academic references supporting this decision's rationale and options.
+      Each entry links to the central bibliography (bibliography.yaml) by citation_key
+      and documents per-decision relevance. See protocols/citation-guide.md for format.
     items:
-      type: string
+      type: object
+      required:
+        - citation_key
+        - relevance
+      properties:
+        citation_key:
+          type: string
+          pattern: "^[a-z][a-z0-9_]*$"
+          description: "Key matching an entry in bibliography.yaml (e.g., isensee2021nnu)"
+        relevance:
+          type: string
+          description: "Why this reference matters for this specific decision node"
+        sections:
+          type: array
+          items:
+            type: string
+          description: "Specific sections/tables/figures cited (e.g., 'Table 2', 'Section 3.1')"
+        supports_options:
+          type: array
+          items:
+            type: string
+          description: "option_ids this reference provides evidence for"
 
   tags:
     type: array

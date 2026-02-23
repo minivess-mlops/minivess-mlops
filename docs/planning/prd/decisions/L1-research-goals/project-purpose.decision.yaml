@@ -112,6 +112,9 @@ tags:
   - foundational
   - root-node
 
-references:
-  - "../../modernize-minivess-mlops-plan.md"
-  - "../../../CLAUDE.md"
+references: []
+
+research_notes: >
+  Internal: The modernization plan (docs/modernize-minivess-mlops-plan.md)
+  defines the project roadmap and purpose. CLAUDE.md documents the tech stack
+  and architectural principles.

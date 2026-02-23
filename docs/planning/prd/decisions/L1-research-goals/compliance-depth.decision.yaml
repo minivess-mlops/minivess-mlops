@@ -91,5 +91,8 @@ tags:
   - regulatory
   - resolved
 
-references:
-  - "../../../docs/adr/0005-tdd-mandatory.md"
+references: []
+
+research_notes: >
+  Internal: ADR-0005 (docs/adr/0005-tdd-mandatory.md) documents the TDD mandate
+  that underpins the compliance approach.

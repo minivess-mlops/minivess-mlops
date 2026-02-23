@@ -81,4 +81,8 @@ trade_offs:
   sacrifices:
     - "CHANGE_ME"
 
-references: []
+# Academic references supporting this scenario's design rationale.
+# Every citation_key MUST exist in docs/planning/prd/bibliography.yaml.
+references:
+  - citation_key: CHANGE_ME
+    relevance: "CHANGE_ME: Why this reference supports this scenario"

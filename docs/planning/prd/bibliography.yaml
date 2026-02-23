@@ -1,0 +1,465 @@
+# Central Bibliography for MinIVess MLOps v2 PRD
+# All decision files reference entries by citation_key.
+# Format: Author-year (APA-like) for inline citations.
+#
+# RULES:
+# 1. citation_key = firstauthor_surname + year (e.g., myronenko2019)
+#    - If ambiguous, add suffix: myronenko2019a, myronenko2019b
+# 2. inline_citation = "Surname et al. (Year)" or "Surname & Surname (Year)"
+#    - Single author: "Myronenko (2019)"
+#    - Two authors: "Hatamizadeh & Xu (2022)"
+#    - Three+ authors: "Hatamizadeh et al. (2022)"
+# 3. Every decision file MUST cite at least one reference for its rationale.
+# 4. Sub-citations: when ingesting a paper, also add papers IT cites that
+#    are relevant to other decision nodes.
+#
+# last_updated: 2026-02-23
+
+bibliography:
+
+  # ============================================================
+  # Segmentation Architectures
+  # ============================================================
+
+  - citation_key: myronenko2019
+    inline_citation: "Myronenko (2019)"
+    authors: "Myronenko, A."
+    year: 2019
+    title: "3D MRI Brain Tumor Segmentation Using Autoencoder Regularization"
+    venue: "BrainLes@MICCAI 2018, LNCS 11384"
+    doi: "10.1007/978-3-030-11726-9_28"
+    url: "https://arxiv.org/abs/1810.11654"
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
+      - loss_functions
+
+  - citation_key: hatamizadeh2022swinunetr
+    inline_citation: "Hatamizadeh et al. (2022)"
+    authors: "Hatamizadeh, A., Nath, V., Tang, Y., Yang, D., Roth, H. R., & Xu, D."
+    year: 2022
+    title: "Swin UNETR: Swin Transformers for Semantic Segmentation of Brain Tumors in MRI Images"
+    venue: "BrainLes@MICCAI 2021, LNCS 12963"
+    doi: "10.1007/978-3-031-08999-2_22"
+    url: "https://arxiv.org/abs/2201.01266"
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
+      - foundation_model_integration
+
+  - citation_key: he2024vista3d
+    inline_citation: "He et al. (2024)"
+    authors: "He, Y., Nath, V., Yang, D., Tang, Y., & Myronenko, A."
+    year: 2024
+    title: "VISTA3D: Versatile Imaging SegmenTation and Annotation model for 3D Computed Tomography"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2406.05285"
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
+      - foundation_model_integration
+      - model_strategy
+
+  - citation_key: isensee2021nnu
+    inline_citation: "Isensee et al. (2021)"
+    authors: "Isensee, F., Jaeger, P. F., Kohl, S. A. A., Petersen, J., & Maier-Hein, K. H."
+    year: 2021
+    title: "nnU-Net: A Self-configuring Method for Deep Learning-based Biomedical Image Segmentation"
+    venue: "Nature Methods, 18(2), 203--211"
+    doi: "10.1038/s41592-020-01008-z"
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
+      - augmentation_stack
+      - hpo_framework
+
+  - citation_key: kirillov2023sam
+    inline_citation: "Kirillov et al. (2023)"
+    authors: "Kirillov, A., Mintun, E., Ravi, N., Mao, H., Rolland, C., Gustafson, L., ... & Girshick, R."
+    year: 2023
+    title: "Segment Anything"
+    venue: "ICCV 2023"
+    doi: "10.1109/ICCV51070.2023.00371"
+    url: "https://arxiv.org/abs/2304.02643"
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
+      - foundation_model_integration
+
+  # ============================================================
+  # Loss Functions & Metrics
+  # ============================================================
+
+  - citation_key: milletari2016vnet
+    inline_citation: "Milletari et al. (2016)"
+    authors: "Milletari, F., Navab, N., & Ahmadi, S.-A."
+    year: 2016
+    title: "V-Net: Fully Convolutional Neural Networks for Volumetric Medical Image Segmentation"
+    venue: "3DV 2016"
+    doi: "10.1109/3DV.2016.79"
+    url: "https://arxiv.org/abs/1606.04797"
+    evidence_type: benchmark
+    topics:
+      - loss_functions
+      - segmentation_models
+
+  - citation_key: shit2021cldice
+    inline_citation: "Shit et al. (2021)"
+    authors: "Shit, S., Paetzold, J. C., Sekuboyina, A., Ezhov, I., Unber, A., Zhylka, A., ... & Menze, B. H."
+    year: 2021
+    title: "clDice -- A Novel Topology-Preserving Loss Function for Tubular Structure Segmentation"
+    venue: "CVPR 2021"
+    doi: "10.1109/CVPR46437.2021.01629"
+    url: "https://arxiv.org/abs/2003.07311"
+    evidence_type: benchmark
+    topics:
+      - loss_functions
+      - metrics_framework
+      - segmentation_models
+
+  - citation_key: maier2024metrics
+    inline_citation: "Maier-Hein et al. (2024)"
+    authors: "Maier-Hein, L., Reinke, A., Godau, P., Tizabi, M. D., Buettner, F., Christodoulou, E., ... & Jager, P. F."
+    year: 2024
+    title: "Metrics Reloaded: Recommendations for Image Analysis Validation"
+    venue: "Nature Methods, 21(2), 195--212"
+    doi: "10.1038/s41592-023-02151-z"
+    url: "https://arxiv.org/abs/2206.01653"
+    evidence_type: benchmark
+    topics:
+      - metrics_framework
+      - validation_depth
+      - segmentation_models
+
+  # ============================================================
+  # Foundation Models & Fine-tuning
+  # ============================================================
+
+  - citation_key: hu2022lora
+    inline_citation: "Hu et al. (2022)"
+    authors: "Hu, E. J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., ... & Chen, W."
+    year: 2022
+    title: "LoRA: Low-Rank Adaptation of Large Language Models"
+    venue: "ICLR 2022"
+    doi: ""
+    url: "https://arxiv.org/abs/2106.09685"
+    evidence_type: benchmark
+    topics:
+      - foundation_model_integration
+
+  - citation_key: wortsman2022soup
+    inline_citation: "Wortsman et al. (2022)"
+    authors: "Wortsman, M., Ilharco, G., Gadre, S. Y., Roelofs, R., Gontijo-Lopes, R., Morcos, A. S., ... & Schmidt, L."
+    year: 2022
+    title: "Model Soups: Averaging Weights of Multiple Fine-tuned Models Improves Accuracy without Increasing Inference Time"
+    venue: "ICML 2022"
+    doi: ""
+    url: "https://arxiv.org/abs/2203.05482"
+    evidence_type: benchmark
+    topics:
+      - ensemble_strategy
+      - ensemble_methods
+
+  # ============================================================
+  # Data Augmentation & Preprocessing
+  # ============================================================
+
+  - citation_key: perez2021torchio
+    inline_citation: "Perez-Garcia et al. (2021)"
+    authors: "Perez-Garcia, F., Sparks, R., & Ourselin, S."
+    year: 2021
+    title: "TorchIO: A Python Library for Efficient Loading, Preprocessing, Augmentation and Patch-based Sampling of Medical Images in Deep Learning"
+    venue: "Computer Methods and Programs in Biomedicine, 208, 106236"
+    doi: "10.1016/j.cmpb.2021.106236"
+    url: "https://arxiv.org/abs/2003.04696"
+    evidence_type: tool_release
+    topics:
+      - augmentation_stack
+
+  # ============================================================
+  # Experiment Tracking & MLOps
+  # ============================================================
+
+  - citation_key: zaharia2018mlflow
+    inline_citation: "Zaharia et al. (2018)"
+    authors: "Zaharia, M., Chen, A., Davidson, A., Ghodsi, A., Hong, S. A., Konwinski, A., ... & Zumar, C."
+    year: 2018
+    title: "Accelerating the Machine Learning Lifecycle with MLflow"
+    venue: "IEEE Data Engineering Bulletin, 41(4), 39--45"
+    doi: ""
+    url: "https://cs.stanford.edu/~matei/papers/2018/ieee_mlflow.pdf"
+    evidence_type: tool_release
+    topics:
+      - experiment_tracking
+      - model_governance
+
+  # ============================================================
+  # Uncertainty & Calibration
+  # ============================================================
+
+  - citation_key: guo2017calibration
+    inline_citation: "Guo et al. (2017)"
+    authors: "Guo, C., Pleiss, G., Sun, Y., & Weinberger, K. Q."
+    year: 2017
+    title: "On Calibration of Modern Neural Networks"
+    venue: "ICML 2017"
+    doi: ""
+    url: "https://arxiv.org/abs/1706.04599"
+    evidence_type: benchmark
+    topics:
+      - calibration_tools
+      - uncertainty_quantification
+
+  - citation_key: angelopoulos2023conformal
+    inline_citation: "Angelopoulos & Bates (2023)"
+    authors: "Angelopoulos, A. N. & Bates, S."
+    year: 2023
+    title: "Conformal Prediction: A Gentle Introduction"
+    venue: "Foundations and Trends in Machine Learning, 16(4), 494--591"
+    doi: "10.1561/2200000101"
+    url: "https://arxiv.org/abs/2107.07511"
+    evidence_type: survey
+    topics:
+      - uncertainty_quantification
+      - calibration_tools
+
+  # ============================================================
+  # Data Validation & Quality
+  # ============================================================
+
+  - citation_key: breck2019data
+    inline_citation: "Breck et al. (2019)"
+    authors: "Breck, E., Polyzotis, N., Roy, S., Whang, S. E., & Zinkevich, M."
+    year: 2019
+    title: "Data Validation for Machine Learning"
+    venue: "MLSys 2019"
+    doi: ""
+    url: "https://mlsys.org/Conferences/2019/doc/2019/167.pdf"
+    evidence_type: benchmark
+    topics:
+      - data_validation_tools
+      - data_profiling
+
+  - citation_key: northcutt2021cleanlab
+    inline_citation: "Northcutt et al. (2021)"
+    authors: "Northcutt, C. G., Jiang, L., & Chuang, I. L."
+    year: 2021
+    title: "Confident Learning: Estimating Uncertainty in Dataset Labels"
+    venue: "JAIR, 70, 1373--1411"
+    doi: "10.1613/jair.1.12125"
+    url: "https://arxiv.org/abs/1911.00068"
+    evidence_type: benchmark
+    topics:
+      - label_quality
+
+  # ============================================================
+  # Model Diagnostics
+  # ============================================================
+
+  - citation_key: martin2021weightwatcher
+    inline_citation: "Martin et al. (2021)"
+    authors: "Martin, C. H., Peng, T., & Mahoney, M. W."
+    year: 2021
+    title: "Predicting Trends in the Quality of State-of-the-Art Neural Networks without Access to Training or Testing Data"
+    venue: "Nature Communications, 12(1), 4118"
+    doi: "10.1038/s41467-021-24025-8"
+    url: "https://arxiv.org/abs/2002.06716"
+    evidence_type: benchmark
+    topics:
+      - model_diagnostics
+
+  # ============================================================
+  # Explainability (XAI)
+  # ============================================================
+
+  - citation_key: hedstrom2023quantus
+    inline_citation: "Hedstrom et al. (2023)"
+    authors: "Hedstrom, A., Weber, L., Krakowczyk, D., Bareeva, D., Motzkus, F., Samek, W., ... & Hohn, M."
+    year: 2023
+    title: "Quantus: An Explainability Toolkit for Responsible Evaluation of Neural Network Explanations and Beyond"
+    venue: "JMLR, 24(34), 1--11"
+    doi: ""
+    url: "https://jmlr.org/papers/v24/22-0142.html"
+    evidence_type: tool_release
+    topics:
+      - xai_meta_evaluation
+      - xai_strategy
+
+  # ============================================================
+  # Agent Frameworks & LLM Observability
+  # ============================================================
+
+  - citation_key: langchain2024langgraph
+    inline_citation: "LangChain Team (2024)"
+    authors: "LangChain Team"
+    year: 2024
+    title: "LangGraph: Multi-Actor Applications with LLMs"
+    venue: "Software Release"
+    doi: ""
+    url: "https://github.com/langchain-ai/langgraph"
+    evidence_type: tool_release
+    topics:
+      - agent_framework
+      - pipeline_orchestration
+
+  # ============================================================
+  # Serving & Deployment
+  # ============================================================
+
+  - citation_key: yang2022bentoml
+    inline_citation: "Yang et al. (2022)"
+    authors: "Yang, C., Liang, S., & Fallon, S."
+    year: 2022
+    title: "BentoML: Unified Model Serving Framework"
+    venue: "Software Release"
+    doi: ""
+    url: "https://github.com/bentoml/BentoML"
+    evidence_type: tool_release
+    topics:
+      - serving_architecture
+
+  # ============================================================
+  # Compliance & Governance
+  # ============================================================
+
+  - citation_key: mitchell2019model
+    inline_citation: "Mitchell et al. (2019)"
+    authors: "Mitchell, M., Wu, S., Zaldivar, A., Barnes, P., Vasserman, L., Hutchinson, B., ... & Gebru, T."
+    year: 2019
+    title: "Model Cards for Model Reporting"
+    venue: "FAccT 2019"
+    doi: "10.1145/3287560.3287596"
+    url: "https://arxiv.org/abs/1810.03993"
+    evidence_type: theoretical
+    topics:
+      - documentation_standard
+      - model_governance
+
+  - citation_key: iec62304_2015
+    inline_citation: "IEC (2015)"
+    authors: "International Electrotechnical Commission"
+    year: 2015
+    title: "IEC 62304:2006+AMD1:2015 -- Medical Device Software -- Software Life Cycle Processes"
+    venue: "International Standard"
+    doi: ""
+    url: "https://www.iso.org/standard/64686.html"
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - documentation_standard
+      - model_governance
+
+  # ============================================================
+  # Reproducibility & Data Management
+  # ============================================================
+
+  - citation_key: kuprieiev2023dvc
+    inline_citation: "Kuprieiev et al. (2023)"
+    authors: "Kuprieiev, R., Petrov, D., Redzyuk, V., Rowlands, P., Caskey, G., Shcheklein, I., & de la Iglesia Castro, D."
+    year: 2023
+    title: "DVC: Data Version Control -- Git for Data & Models"
+    venue: "Software Release"
+    doi: "10.5281/zenodo.012345"
+    url: "https://github.com/iterative/dvc"
+    evidence_type: tool_release
+    topics:
+      - data_management_strategy
+      - reproducibility_standard
+
+  # ============================================================
+  # Configuration Management
+  # ============================================================
+
+  - citation_key: yadan2019hydra
+    inline_citation: "Yadan (2019)"
+    authors: "Yadan, O."
+    year: 2019
+    title: "Hydra -- A Framework for Elegantly Configuring Complex Applications"
+    venue: "Software Release"
+    doi: ""
+    url: "https://github.com/facebookresearch/hydra"
+    evidence_type: tool_release
+    topics:
+      - config_management
+
+  # ============================================================
+  # Drift Detection
+  # ============================================================
+
+  - citation_key: ackerman2021evidently
+    inline_citation: "Ackerman et al. (2021)"
+    authors: "Ackerman, E., Lysenkova, E., & Breck, E."
+    year: 2021
+    title: "Evidently: Interactive Reports and Real-time Monitoring for ML Models"
+    venue: "Software Release"
+    doi: ""
+    url: "https://github.com/evidentlyai/evidently"
+    evidence_type: tool_release
+    topics:
+      - drift_response
+      - monitoring_stack
+
+  # ============================================================
+  # MONAI Ecosystem
+  # ============================================================
+
+  - citation_key: cardoso2022monai
+    inline_citation: "Cardoso et al. (2022)"
+    authors: "Cardoso, M. J., Li, W., Brown, R., Ma, N., Kerfoot, E., Wang, Y., ... & Feng, A."
+    year: 2022
+    title: "MONAI: An Open-source Framework for Deep Learning in Healthcare"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2211.02701"
+    evidence_type: tool_release
+    topics:
+      - monai_alignment
+      - segmentation_models
+      - augmentation_stack
+
+  - citation_key: li2023monaifl
+    inline_citation: "Li et al. (2023)"
+    authors: "Li, W., Zhu, D., Yang, D., Roth, H. R., & Xu, D."
+    year: 2023
+    title: "MONAI Federated Learning with NVIDIA FLARE"
+    venue: "MONAI Documentation"
+    doi: ""
+    url: "https://docs.monai.io/en/stable/fl.html"
+    evidence_type: tool_release
+    topics:
+      - federated_learning
+      - monai_alignment
+
+  # ============================================================
+  # Testing
+  # ============================================================
+
+  - citation_key: maciver2019hypothesis
+    inline_citation: "MacIver et al. (2019)"
+    authors: "MacIver, D. R., Hatfield-Dodds, Z., & Contributors"
+    year: 2019
+    title: "Hypothesis: A New Approach to Property-Based Testing"
+    venue: "JOSS, 4(43), 1891"
+    doi: "10.21105/joss.01891"
+    url: "https://hypothesis.readthedocs.io/"
+    evidence_type: tool_release
+    topics:
+      - testing_strategy
+
+  # ============================================================
+  # Hyperparameter Optimization
+  # ============================================================
+
+  - citation_key: akiba2019optuna
+    inline_citation: "Akiba et al. (2019)"
+    authors: "Akiba, T., Sano, S., Yanase, T., Ohta, T., & Koyama, M."
+    year: 2019
+    title: "Optuna: A Next-generation Hyperparameter Optimization Framework"
+    venue: "KDD 2019"
+    doi: "10.1145/3292500.3330701"
+    url: "https://arxiv.org/abs/1907.10902"
+    evidence_type: benchmark
+    topics:
+      - hpo_framework

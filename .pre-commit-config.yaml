@@ -25,6 +25,16 @@ repos:
       - id: detect-private-key
       - id: check-merge-conflict
 
+  - repo: local
+    hooks:
+      - id: prd-citation-check
+        name: PRD Citation Integrity
+        entry: uv run python scripts/validate_prd_citations.py --check-loss
+        language: system
+        files: '(docs/planning/prd/|\.decision\.yaml|bibliography\.yaml)'
+        pass_filenames: false
+        always_run: false
+
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.22.1
     hooks:

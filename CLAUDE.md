@@ -144,14 +144,23 @@ minivess-mlops/
 ## PRD System
 
 The project uses a **hierarchical probabilistic PRD** (Bayesian decision network) to
-manage open-ended technology decisions. See:
+manage open-ended technology decisions. This is an **academic software project** —
+the PRD serves as the evidence base for a future peer-reviewed article.
 
 - [docs/planning/prd/README.md](docs/planning/prd/README.md) — PRD navigation and overview
 - [docs/planning/prd/llm-context.md](docs/planning/prd/llm-context.md) — AI assistant context
+- [docs/planning/prd/bibliography.yaml](docs/planning/prd/bibliography.yaml) — Central bibliography (ALL cited works)
 - [docs/planning/hierarchical-prd-planning.md](docs/planning/hierarchical-prd-planning.md) — PRD format blueprint
 
 **PRD-Update Skill**: `.claude/skills/prd-update/SKILL.md` — Operations for maintaining
 the PRD (add decisions, update priors, ingest papers, validate).
+
+### Citation Rules (NON-NEGOTIABLE)
+1. **Author-year format only** — "Surname et al. (Year)", never numeric [1]
+2. **Central bibliography** — All citations in `bibliography.yaml`, decision files reference by `citation_key`
+3. **No citation loss** — References are append-only. Pre-commit hook blocks citation removal.
+4. **Sub-citations mandatory** — When ingesting a paper, also extract its relevant references
+5. **Validation** — `uv run python scripts/validate_prd_citations.py` checks all citation invariants
 
 ## See Also
 

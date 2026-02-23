@@ -125,5 +125,8 @@ tags:
   - safety-critical
   - partially-resolved
 
-references:
-  - "../../adr/0003-validation-onion.md"
+references: []
+
+research_notes: >
+  Internal: ADR-0003 (docs/adr/0003-validation-onion.md) documents the
+  validation onion architecture that includes calibration and uncertainty layers.
