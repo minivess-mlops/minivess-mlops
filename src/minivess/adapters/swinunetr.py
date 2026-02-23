@@ -17,16 +17,15 @@ class SwinUNETRAdapter(ModelAdapter):
     def __init__(
         self,
         config: ModelConfig,
-        img_size: tuple[int, int, int] = (128, 128, 32),
+        feature_size: int = 48,
     ) -> None:
         super().__init__()
         self.config = config
-        self._img_size = img_size
+        self._feature_size = feature_size
         self.net = MonaiSwinUNETR(
-            img_size=img_size,
             in_channels=config.in_channels,
             out_channels=config.out_channels,
-            feature_size=48,
+            feature_size=feature_size,
             depths=(2, 2, 2, 2),
             num_heads=(3, 6, 12, 24),
             norm_name="instance",
@@ -48,8 +47,7 @@ class SwinUNETRAdapter(ModelAdapter):
             "name": self.config.name,
             "in_channels": self.config.in_channels,
             "out_channels": self.config.out_channels,
-            "img_size": self._img_size,
-            "feature_size": 48,
+            "feature_size": self._feature_size,
             "depths": (2, 2, 2, 2),
             "num_heads": (3, 6, 12, 24),
             "trainable_params": self.trainable_parameters(),

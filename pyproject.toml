@@ -106,7 +106,8 @@ serving = [
     "gradio>=5.12",
 ]
 ci = [
-    "cml>=0.20",
+    # cml>=0.20 — disabled: PyPI 'cml' is a different package than iterative CML;
+    # iterative CML is installed via npm, not pip.
 ]
 
 [project.urls]
@@ -118,6 +119,9 @@ Issues = "https://github.com/petteriTeworworx/minivess-mlops/issues"
 # ---------------------------------------------------------------------------
 # Build — src layout
 # ---------------------------------------------------------------------------
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/minivess"]
 
@@ -229,6 +233,11 @@ filterwarnings = [
     "error",
     "ignore::DeprecationWarning:pkg_resources.*",
     "ignore::UserWarning:torch.*",
+    "ignore::DeprecationWarning:pyparsing.*",
+    "ignore::UserWarning:torchmetrics.*",
+    "ignore::SyntaxWarning:MetricsReloaded.*",
+    "ignore::FutureWarning",
+    "ignore:.*deprecated.*:DeprecationWarning",
 ]
 
 # ---------------------------------------------------------------------------
@@ -247,4 +256,17 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "if __name__ == .__main__.:",
     "@overload",
+]
+
+# ---------------------------------------------------------------------------
+# uv — workaround for MetricsReloaded missing pkg_resources build dep
+# (pkg_resources removed from setuptools >=82 on Python 3.14)
+# ---------------------------------------------------------------------------
+[tool.uv]
+build-constraint-dependencies = [
+    "setuptools<82",
+]
+# weightwatcher pins pandas==2.1.4 which fails to build from source on Python 3.13+
+override-dependencies = [
+    "pandas>=2.2",
 ]
