@@ -33,6 +33,12 @@ serving_port = 3333
 otel_exporter_endpoint = "http://localhost:4317"
 prometheus_port = 9090
 
+# Drift Detection
+drift_detection_threshold = 0.05
+drift_embedding_threshold = 0.05
+drift_alert_enabled = true
+drift_report_dir = "reports/drift"
+
 # Data
 dvc_remote = "minio"
 data_dir = "data"
