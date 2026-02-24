@@ -16,6 +16,12 @@ from minivess.compliance.fairness import (
     evaluate_subgroup_fairness,
     generate_audit_report,
 )
+from minivess.compliance.iec62304 import (
+    LifecycleStage,
+    PCCPTemplate,
+    SoftwareSafetyClass,
+    TraceabilityMatrix,
+)
 from minivess.compliance.model_card import ModelCard
 from minivess.compliance.regops import (
     CIContext,
@@ -41,12 +47,16 @@ __all__ = [
     "EUAIActChecklist",
     "EUAIActRiskLevel",
     "FairnessReport",
+    "LifecycleStage",
     "MiClearLLMChecklist",
     "ModelCard",
+    "PCCPTemplate",
     "RegOpsPipeline",
     "RegulatoryDocGenerator",
     "SaMDRiskClass",
+    "SoftwareSafetyClass",
     "SubgroupMetrics",
+    "TraceabilityMatrix",
     "classify_risk_level",
     "compute_disparity",
     "evaluate_subgroup_fairness",
