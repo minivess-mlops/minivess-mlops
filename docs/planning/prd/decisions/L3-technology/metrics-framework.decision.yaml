@@ -9,7 +9,7 @@ description: >
 
 decision_level: L3_technology
 status: active
-last_updated: 2026-02-23
+last_updated: 2026-02-24
 
 options:
   - option_id: torchmetrics
@@ -138,6 +138,18 @@ rationale: >
   implemented and complementary. MONAI metrics (0.20) provide partial
   overlap. Custom (0.15) is needed for domain-specific topology metrics
   not yet in standard libraries.
+
+research_notes: >
+  Phase 14 monitoring research finding: Topology-aware metrics (clDice and
+  Betti number errors) serve a dual purpose for vascular segmentation:
+  (1) Training loss — clDice as a connectivity-preserving loss function
+  during model training (Shit et al., 2021). (2) Production monitoring
+  signal — degradation in topological accuracy (increased Betti errors,
+  decreased clDice) at inference time indicates model or data quality
+  issues that should trigger drift response. This dual-use means the same
+  metric computation can be shared between training and monitoring,
+  reducing implementation effort. Custom metrics pipeline (0.15) becomes
+  more important when topology monitoring is required in production.
 
 references:
   - citation_key: maier2024metrics

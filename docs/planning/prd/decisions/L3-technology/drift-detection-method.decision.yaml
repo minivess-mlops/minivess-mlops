@@ -1,0 +1,289 @@
+decision_id: drift_detection_method
+title: "Drift Detection Method"
+description: >
+  Statistical method for detecting data and model drift in production.
+  This is the HOW of drift detection — the specific algorithm and tooling
+  choice, complementing monitoring_stack (infrastructure) and drift_response
+  (what to do when drift is found). Key tradeoff is between statistical
+  rigor (MMD on embeddings), interpretability (feature-level KS/PSI),
+  sequential validity (anytime-valid tests), and operational simplicity
+  (tiered approach). Prinster et al. (2025) introduce WATCH for anytime-
+  valid sequential drift testing. Singh et al. (2025) address subgroup-
+  level shift detection. Hodge et al. (2025) survey OOD detection methods
+  for safety assurance. Lotfi et al. (2024) contribute normalizing flow
+  approaches for post-hoc OOD detection.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-24
+
+options:
+  - option_id: alibi_detect_mmd
+    title: "Alibi-Detect Kernel MMD"
+    description: >
+      Maximum Mean Discrepancy test on learned embeddings using Alibi-Detect
+      v0.12+. Provides strong statistical test for distribution shift in
+      high-dimensional spaces. Operates on model embeddings rather than
+      raw features, capturing semantic drift. Best for batch-level detection.
+    prior_probability: 0.40
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "monitoring_stack.prometheus_grafana"
+      - "data_validation_tools.deepchecks"
+
+  - option_id: evidently_statistical
+    title: "Evidently Statistical Tests"
+    description: >
+      Feature-level KS test, PSI, and Wasserstein distance via Evidently
+      v0.5+. Provides interpretable per-feature drift scores with dashboard
+      integration. Best for explainable drift reports. Complementary to
+      Alibi-Detect for different granularity levels.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "monitoring_stack.custom_dashboards"
+      - "data_validation_tools.whylogs"
+
+  - option_id: watch_sequential
+    title: "WATCH Sequential Testing"
+    description: >
+      Anytime-valid sequential testing using weighted conformal test
+      martingales (Prinster et al., 2025). Provides valid p-values at
+      any stopping time, ideal for continuous monitoring without fixed
+      test windows. Experimental but theoretically principled.
+    prior_probability: 0.20
+    status: experimental
+    implementation_status: not_started
+    constraints:
+      - "Requires implementation from paper — no production library yet"
+      - "Needs calibration set for conformal scores"
+
+  - option_id: composite_tiered
+    title: "Composite Tiered Detection"
+    description: >
+      Multi-tier approach: metadata checks (Pandera) → feature-level
+      statistical tests (whylogs/Evidently) → embedding OOD detection
+      (Mahalanobis distance) → batch MMD (Alibi-Detect). Each tier
+      is progressively more expensive but catches different drift types.
+      Operationally complex but most comprehensive.
+    prior_probability: 0.15
+    status: experimental
+    implementation_status: not_started
+    constraints:
+      - "Requires implementing and maintaining all four tiers"
+      - "Threshold tuning across tiers"
+
+conditional_on:
+  - parent_decision_id: uncertainty_quantification
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: temperature_scaling
+        then_probabilities:
+          alibi_detect_mmd: 0.35
+          evidently_statistical: 0.35
+          watch_sequential: 0.15
+          composite_tiered: 0.15
+      - given_parent_option: conformal_prediction
+        then_probabilities:
+          alibi_detect_mmd: 0.35
+          evidently_statistical: 0.20
+          watch_sequential: 0.30
+          composite_tiered: 0.15
+      - given_parent_option: mc_dropout
+        then_probabilities:
+          alibi_detect_mmd: 0.45
+          evidently_statistical: 0.25
+          watch_sequential: 0.15
+          composite_tiered: 0.15
+      - given_parent_option: deep_ensembles
+        then_probabilities:
+          alibi_detect_mmd: 0.45
+          evidently_statistical: 0.20
+          watch_sequential: 0.15
+          composite_tiered: 0.20
+      - given_parent_option: evidential
+        then_probabilities:
+          alibi_detect_mmd: 0.40
+          evidently_statistical: 0.30
+          watch_sequential: 0.15
+          composite_tiered: 0.15
+
+  - parent_decision_id: data_validation_tools
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: pandera_ge
+        then_probabilities:
+          alibi_detect_mmd: 0.35
+          evidently_statistical: 0.25
+          watch_sequential: 0.20
+          composite_tiered: 0.20
+      - given_parent_option: deepchecks
+        then_probabilities:
+          alibi_detect_mmd: 0.40
+          evidently_statistical: 0.25
+          watch_sequential: 0.20
+          composite_tiered: 0.15
+      - given_parent_option: whylogs
+        then_probabilities:
+          alibi_detect_mmd: 0.30
+          evidently_statistical: 0.35
+          watch_sequential: 0.15
+          composite_tiered: 0.20
+      - given_parent_option: custom
+        then_probabilities:
+          alibi_detect_mmd: 0.40
+          evidently_statistical: 0.20
+          watch_sequential: 0.20
+          composite_tiered: 0.20
+
+  - parent_decision_id: data_profiling
+    influence_strength: weak
+    conditional_table:
+      - given_parent_option: whylogs
+        then_probabilities:
+          alibi_detect_mmd: 0.35
+          evidently_statistical: 0.30
+          watch_sequential: 0.20
+          composite_tiered: 0.15
+      - given_parent_option: ydata_profiling
+        then_probabilities:
+          alibi_detect_mmd: 0.40
+          evidently_statistical: 0.25
+          watch_sequential: 0.20
+          composite_tiered: 0.15
+      - given_parent_option: custom
+        then_probabilities:
+          alibi_detect_mmd: 0.40
+          evidently_statistical: 0.25
+          watch_sequential: 0.20
+          composite_tiered: 0.15
+      - given_parent_option: none
+        then_probabilities:
+          alibi_detect_mmd: 0.45
+          evidently_statistical: 0.25
+          watch_sequential: 0.15
+          composite_tiered: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      alibi_detect_mmd: 0.35
+      evidently_statistical: 0.35
+      watch_sequential: 0.15
+      composite_tiered: 0.15
+    rationale: "Solo researchers prefer interpretable Evidently reports or straightforward MMD tests"
+  lab_group:
+    probability_overrides:
+      alibi_detect_mmd: 0.40
+      evidently_statistical: 0.25
+      watch_sequential: 0.20
+      composite_tiered: 0.15
+    rationale: "Lab groups can implement embedding-based MMD with shared infrastructure"
+  clinical_deployment:
+    probability_overrides:
+      alibi_detect_mmd: 0.35
+      evidently_statistical: 0.20
+      watch_sequential: 0.20
+      composite_tiered: 0.25
+    rationale: "Clinical deployment benefits from comprehensive tiered detection for safety"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-24
+  next_review: 2026-05-24
+  change_drivers:
+    - "Alibi-Detect embedding drift maturity"
+    - "WATCH library availability"
+    - "Evidently v0.5+ drift detection features"
+    - "Production deployment timeline"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 0.95
+  general_medical: 1.0
+
+rationale: >
+  Alibi-Detect kernel MMD (0.40) is the leading candidate for statistical
+  rigor on learned embeddings, detecting semantic drift that feature-level
+  tests miss. Evidently statistical tests (0.25) provide interpretable
+  feature-level drift scores complementary to MMD. WATCH sequential testing
+  (0.20) offers anytime-valid p-values for continuous monitoring but lacks
+  a production library. Composite tiered (0.15) is the most comprehensive
+  but operationally complex. The two leading tools (Alibi-Detect and
+  Evidently) are complementary: Alibi-Detect for statistical rigor on
+  embeddings, Evidently for dashboards and per-feature interpretability.
+
+references:
+  - citation_key: prinster2025watch
+    relevance: >
+      WATCH introduces weighted anytime-valid conformal test martingales for
+      sequential distribution shift detection with valid p-values at any
+      stopping time.
+    supports_options:
+      - watch_sequential
+      - composite_tiered
+
+  - citation_key: singh2025shift
+    relevance: >
+      SHIFT addresses subgroup-level distribution shift detection, relevant
+      for fairness-aware drift monitoring across patient subgroups.
+    supports_options:
+      - evidently_statistical
+      - composite_tiered
+
+  - citation_key: hodge2025ood
+    relevance: >
+      Comprehensive survey of OOD detection methods for safety assurance,
+      covering embedding-based, density-based, and ensemble approaches.
+    supports_options:
+      - alibi_detect_mmd
+      - composite_tiered
+
+  - citation_key: lotfi2024ood
+    relevance: >
+      Post-hoc OOD detection using normalizing flows, applicable to
+      embedding-level drift detection.
+    supports_options:
+      - alibi_detect_mmd
+
+  - citation_key: ackerman2021evidently
+    relevance: >
+      Evidently framework for interactive ML monitoring and drift reporting.
+    supports_options:
+      - evidently_statistical
+
+  - citation_key: zhang2026pprm
+    relevance: >
+      PPRM prediction-powered risk monitoring with formal false alarm
+      guarantees for semi-supervised drift detection.
+    supports_options:
+      - alibi_detect_mmd
+      - watch_sequential
+
+  - citation_key: subasri2023driftclinical
+    relevance: >
+      Clinical evidence of distribution shifts across hospitals motivating
+      robust drift detection methods.
+    supports_options:
+      - alibi_detect_mmd
+      - evidently_statistical
+
+research_notes: >
+  Phase 14 monitoring research findings: Alibi-Detect and Evidently are
+  complementary, not competing — Alibi-Detect for statistical rigor on
+  embeddings, Evidently for dashboards and feature-level interpretability.
+  WATCH (Prinster et al., 2025) provides theoretically grounded sequential
+  testing but needs custom implementation. The composite tiered approach
+  (metadata → statistical → embedding → batch MMD) provides defense-in-depth
+  but requires maintaining four detection tiers. For the MinIVess scale
+  (~20 volumes), MMD on model embeddings is likely the most practical
+  starting point.
+
+tags:
+  - technology
+  - drift-detection
+  - monitoring
+  - safety-critical

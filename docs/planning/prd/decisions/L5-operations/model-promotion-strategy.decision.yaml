@@ -1,0 +1,239 @@
+decision_id: model_promotion_strategy
+title: "Model Promotion Strategy"
+description: >
+  How trained models are promoted from candidate to production. This
+  captures the promotion mechanism — challenger-champion vs canary vs
+  offline-eval-swap vs manual — complementing model_governance (how
+  models are tracked/registered) and drift_response (what triggers
+  action). The challenger-champion pattern with shadow scoring and
+  locked test set validation is the recommended approach for safety-
+  critical medical imaging. Full retraining is preferred over continual
+  learning for datasets under ~50 volumes (Beytur et al., 2025).
+
+decision_level: L5_operations
+status: active
+last_updated: 2026-02-24
+
+options:
+  - option_id: challenger_champion
+    title: "Challenger-Champion"
+    description: >
+      Shadow scoring: new model runs alongside production model on
+      incoming data. Performance compared on locked test set before
+      promotion. Requires model versioning, shadow inference pipeline,
+      and locked evaluation dataset. Recommended for safety-critical
+      medical imaging deployments.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "model_governance.full_registry"
+      - "drift_response.automated_retrain"
+    constraints:
+      - "Requires locked test set for fair comparison"
+      - "Shadow inference doubles compute during evaluation"
+
+  - option_id: offline_eval_swap
+    title: "Offline Evaluation Swap"
+    description: >
+      Evaluate candidate model on held-out test set offline, then
+      directly swap production model if performance exceeds threshold.
+      Simpler than challenger-champion but lacks runtime comparison.
+      Current partial implementation via MLflow model comparison.
+    prior_probability: 0.30
+    status: partial
+    implementation_status: partial
+    complements:
+      - "model_governance.mlflow_tags"
+      - "experiment_tracking.mlflow"
+
+  - option_id: canary_deployment
+    title: "Canary Deployment"
+    description: >
+      Route a percentage of inference traffic to the candidate model
+      and compare performance metrics. Gradually increase traffic if
+      metrics are satisfactory. Requires traffic management infrastructure
+      and real-time metric comparison.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires serving infrastructure for traffic splitting"
+      - "Real-time metric comparison pipeline"
+      - "Rollback mechanism if canary underperforms"
+    complements:
+      - "serving_architecture.bentoml_rest"
+      - "monitoring_stack.prometheus_grafana"
+
+  - option_id: manual_promotion
+    title: "Manual Promotion"
+    description: >
+      Human reviews model performance and manually decides on promotion.
+      Current implementation — developer evaluates metrics and updates
+      model registry. Simple but reactive and doesn't scale.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: model_governance
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: full_registry
+        then_probabilities:
+          challenger_champion: 0.40
+          offline_eval_swap: 0.30
+          canary_deployment: 0.20
+          manual_promotion: 0.10
+      - given_parent_option: mlflow_tags
+        then_probabilities:
+          challenger_champion: 0.25
+          offline_eval_swap: 0.35
+          canary_deployment: 0.15
+          manual_promotion: 0.25
+      - given_parent_option: none
+        then_probabilities:
+          challenger_champion: 0.10
+          offline_eval_swap: 0.15
+          canary_deployment: 0.10
+          manual_promotion: 0.65
+
+  - parent_decision_id: drift_response
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: automated_retrain
+        then_probabilities:
+          challenger_champion: 0.45
+          offline_eval_swap: 0.25
+          canary_deployment: 0.20
+          manual_promotion: 0.10
+      - given_parent_option: alert_human
+        then_probabilities:
+          challenger_champion: 0.30
+          offline_eval_swap: 0.30
+          canary_deployment: 0.15
+          manual_promotion: 0.25
+      - given_parent_option: gradual_rollback
+        then_probabilities:
+          challenger_champion: 0.35
+          offline_eval_swap: 0.20
+          canary_deployment: 0.30
+          manual_promotion: 0.15
+      - given_parent_option: none
+        then_probabilities:
+          challenger_champion: 0.15
+          offline_eval_swap: 0.25
+          canary_deployment: 0.10
+          manual_promotion: 0.50
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      challenger_champion: 0.15
+      offline_eval_swap: 0.30
+      canary_deployment: 0.10
+      manual_promotion: 0.45
+    rationale: "Solo researchers promote manually; offline eval swap is the simplest automated approach"
+  lab_group:
+    probability_overrides:
+      challenger_champion: 0.35
+      offline_eval_swap: 0.30
+      canary_deployment: 0.20
+      manual_promotion: 0.15
+    rationale: "Lab groups can implement challenger-champion with shared infrastructure"
+  clinical_deployment:
+    probability_overrides:
+      challenger_champion: 0.45
+      offline_eval_swap: 0.25
+      canary_deployment: 0.20
+      manual_promotion: 0.10
+    rationale: "Clinical deployment requires challenger-champion for patient safety validation"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-24
+  next_review: 2026-05-24
+  change_drivers:
+    - "Model registry maturity (MLflow model stages)"
+    - "Serving infrastructure for shadow scoring"
+    - "Regulatory requirements for model validation before deployment"
+    - "Dataset growth beyond ~50 volumes (enables continual learning)"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 0.95
+  general_medical: 1.0
+
+rationale: >
+  Challenger-champion (0.35) is the leading candidate for safety-critical
+  medical imaging: shadow scoring against a locked test set provides the
+  strongest validation guarantee before promotion. Offline eval swap (0.30)
+  is partially implemented via MLflow model comparison and is the natural
+  stepping stone. Canary deployment (0.20) adds runtime validation but
+  requires traffic management infrastructure. Manual promotion (0.15) is
+  the current implementation. Phase 14 monitoring research key finding:
+  full retraining is preferred over continual learning for datasets under
+  ~50 volumes (Beytur et al., 2025), which means the promotion pipeline
+  handles complete model replacements rather than incremental updates.
+
+references:
+  - citation_key: cook2026mayo
+    relevance: >
+      Mayo Clinic lessons from monitoring 17 radiology AI algorithms,
+      including practical guidance on model promotion workflows.
+    supports_options:
+      - challenger_champion
+      - offline_eval_swap
+
+  - citation_key: beytur2025retraining
+    relevance: >
+      Full retraining preferred over continual learning for <50 volumes,
+      informing promotion pipeline design (complete replacement, not
+      incremental update).
+    supports_options:
+      - challenger_champion
+      - offline_eval_swap
+
+  - citation_key: keyes2024monitoring
+    relevance: >
+      Three principles for monitoring deployed AI, including performance
+      monitoring that informs promotion decisions.
+    supports_options:
+      - challenger_champion
+
+  - citation_key: microsoft2024mlops
+    relevance: >
+      MLOps maturity model covering model promotion and deployment stages.
+    supports_options:
+      - challenger_champion
+      - canary_deployment
+
+  - citation_key: chen2020mlflow
+    relevance: >
+      MLflow model registry supports model stages (staging → production)
+      for structured promotion workflows.
+    supports_options:
+      - offline_eval_swap
+      - challenger_champion
+
+tags:
+  - operations
+  - model-lifecycle
+  - deployment
+  - safety-critical
+
+research_notes: >
+  Phase 14 monitoring research integration: The challenger-champion
+  pattern emerged as the recommended promotion mechanism from the
+  monitoring research. Key design decisions: (1) Locked test set must
+  be truly held out from all training and used only for promotion
+  comparisons. (2) Shadow scoring runs new model in parallel without
+  affecting production predictions. (3) Promotion criteria should
+  include both aggregate metrics (Dice, HD95) and topology metrics
+  (clDice, Betti errors) for vascular segmentation. (4) Full
+  retraining is preferred over continual learning for <50 volumes
+  (Beytur et al., 2025), so the promotion pipeline handles complete
+  model replacements. Cook et al. (2026) report that at Mayo Clinic,
+  structured promotion workflows were essential for maintaining quality
+  across 17 deployed radiology AI algorithms.

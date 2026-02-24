@@ -9,7 +9,7 @@ description: >
 
 decision_level: L3_technology
 status: active
-last_updated: 2026-02-23
+last_updated: 2026-02-24
 
 options:
   - option_id: pandera_ge
@@ -158,6 +158,22 @@ rationale: >
   schemas, GE handles batch quality, Deepchecks handles vision-specific checks.
   whylogs (0.20) is in dependencies but not yet wired. The validation onion
   pattern means these tools are complementary rather than competing.
+
+research_notes: >
+  Phase 14 monitoring research integration: The 4-tier data quality gate
+  pattern maps directly to our existing tool stack:
+  Tier 1 — Metadata validation (Pandera): schema checks, voxel spacing
+  ranges, file format conformance. Fast, catches obvious issues.
+  Tier 2 — Statistical profiling (whylogs): distribution summary statistics,
+  histogram comparisons, feature drift scores. Lightweight, no raw data storage.
+  Tier 3 — Embedding OOD detection (Mahalanobis distance on model
+  embeddings): catches semantic drift that feature-level tests miss. Requires
+  trained model and reference embedding set.
+  Tier 4 — Batch MMD (Alibi-Detect): full kernel MMD test on batches of
+  embeddings for formal distribution shift detection. Most expensive but
+  most rigorous. Each tier is progressively more expensive but catches
+  different drift types. For MinIVess scale (~20 volumes), tiers 1-2 are
+  always-on, tier 3 is per-inference, tier 4 is periodic batch evaluation.
 
 references:
   - citation_key: breck2019data

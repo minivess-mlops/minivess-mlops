@@ -16,7 +16,7 @@ description: >
 
 decision_level: L5_operations
 status: active
-last_updated: 2026-02-23
+last_updated: 2026-02-24
 
 options:
   - option_id: prometheus_grafana
@@ -188,6 +188,8 @@ volatility:
     - "Production deployment requirements"
     - "PPRM label-free risk monitoring"
     - "CyclOps healthcare auditing toolkit"
+    - "Alibi-Detect embedding drift detection"
+    - "Topology-aware monitoring metrics (clDice, Betti errors)"
 
 domain_applicability:
   vascular_segmentation: 0.9
@@ -208,7 +210,16 @@ rationale: >
   motivating continuous drift detection. Krishnan et al. (2022) offer CyclOps
   as a reusable healthcare ML auditing toolkit. Kim et al. (2025) outline
   monitoring strategies for clinical AI, and Ackerman et al. (2021) provide
-  the Evidently framework for ML monitoring pipelines.
+  the Evidently framework for ML monitoring pipelines. Phase 14 additions:
+  Alibi-Detect and Evidently are complementary for monitoring — Alibi-Detect
+  provides statistical rigor for embedding-level drift detection (kernel MMD),
+  while Evidently provides dashboards and feature-level interpretability.
+  Topology-aware metrics (clDice and Betti number errors) serve as production
+  monitoring signals for vascular segmentation — degradation in topological
+  accuracy indicates model or data quality issues. Cook et al. (2026) provide
+  practical lessons from monitoring 17 radiology AI algorithms at Mayo Clinic.
+  Microsoft (2024) MLOps maturity model provides a framework for assessing
+  monitoring sophistication levels.
 
 references:
   - citation_key: zhang2026pprm
@@ -243,6 +254,30 @@ references:
     supports_options:
       - custom_dashboards
       - prometheus_grafana
+
+  - citation_key: prinster2025watch
+    relevance: "WATCH anytime-valid sequential testing for continuous monitoring without fixed test windows."
+    supports_options:
+      - prometheus_grafana
+      - custom_dashboards
+
+  - citation_key: hodge2025ood
+    relevance: "OOD detection survey for safety assurance, covering embedding-based monitoring approaches."
+    supports_options:
+      - custom_dashboards
+      - prometheus_grafana
+
+  - citation_key: cook2026mayo
+    relevance: "Practical lessons from monitoring 17 radiology AI algorithms at Mayo Clinic."
+    supports_options:
+      - prometheus_grafana
+      - custom_dashboards
+
+  - citation_key: microsoft2024mlops
+    relevance: "MLOps maturity model providing framework for assessing monitoring sophistication."
+    supports_options:
+      - prometheus_grafana
+      - datadog
 
 tags:
   - operations

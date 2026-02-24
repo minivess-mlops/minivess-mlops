@@ -9,7 +9,7 @@ description: >
 
 decision_level: L5_operations
 status: active
-last_updated: 2026-02-23
+last_updated: 2026-02-24
 
 options:
   - option_id: drift_based
@@ -161,6 +161,17 @@ rationale: >
   patterns motivating drift-based retraining. Data volume triggers (0.20)
   are natural for medical imaging batch workflows.
 
+research_notes: >
+  Phase 14 monitoring research finding: Full retraining is preferred over
+  continual learning for datasets under ~50 volumes (Beytur et al., 2025).
+  EWC (Elastic Weight Consolidation) Fisher information estimates are
+  unreliable with ~20 samples — the Fisher matrix is poorly conditioned and
+  produces noisy importance weights. For MinIVess scale (~20 volumes), full
+  retraining from scratch is both more reliable and computationally feasible
+  (~15 min per training run). Continual learning approaches (EWC, SI,
+  PackNet) become viable only when dataset exceeds ~50 volumes and
+  retraining cost becomes prohibitive.
+
 references:
   - citation_key: zhang2026pprm
     relevance: "PPRM prediction-powered risk monitoring with formal false alarm guarantees. Enables drift-based retraining triggers."
@@ -177,6 +188,10 @@ references:
   - citation_key: krishnan2022cyclops
     relevance: "CyclOps toolkit for healthcare ML auditing and drift detection."
     supports_options: ["drift_based"]
+
+  - citation_key: beytur2025retraining
+    relevance: "Optimal resource allocation for retraining. Full retraining preferred over continual learning for <50 volumes."
+    supports_options: ["drift_based", "data_volume", "manual"]
 
 tags:
   - operations

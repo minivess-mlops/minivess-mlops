@@ -15,7 +15,7 @@ description: >
 
 decision_level: L5_operations
 status: active
-last_updated: 2026-02-23
+last_updated: 2026-02-24
 
 options:
   - option_id: automated_retrain
@@ -100,9 +100,10 @@ conditional_on:
           gradual_rollback: 0.25
           none: 0.15
       - given_parent_option: evidential
+        # EDL deprecated (Phase 14) — minimal weight, redistributed to other rows
         then_probabilities:
-          automated_retrain: 0.30
-          alert_human: 0.30
+          automated_retrain: 0.25
+          alert_human: 0.35
           gradual_rollback: 0.20
           none: 0.20
 
@@ -169,6 +170,9 @@ volatility:
     - "PPRM prediction-powered risk monitoring"
     - "CyclOps healthcare ML auditing"
     - "Clinical drift detection advances"
+    - "Keyes et al. (2024) three principles for monitoring"
+    - "Cook et al. (2026) Mayo Clinic 17-algorithm lessons"
+    - "Challenger-champion model promotion pattern"
 
 domain_applicability:
   vascular_segmentation: 1.0
@@ -203,6 +207,18 @@ research_notes: >
   (2025) analyze interconnections between calibration, quantification, and
   accuracy prediction under distribution shift. Ackerman et al. (2021)
   present the Evidently framework for interactive ML monitoring and reporting.
+  Phase 14 additions: Keyes et al. (2024) propose three principles for
+  monitoring deployed AI: integrity, performance, and impact monitoring.
+  Cook et al. (2026) report lessons from monitoring 17 radiology AI
+  algorithms at Mayo Clinic, providing practical operational guidance.
+  Challenger-champion pattern is the recommended model promotion approach:
+  shadow scoring against locked test set before promotion. Full retraining
+  is preferred over continual learning for datasets under ~50 volumes
+  (EWC Fisher information is unreliable with ~20 samples). Flühmann et al.
+  (2025) enable label-free confusion matrix estimation under distribution
+  shift. Kiyasseh et al. (2024) provide a framework for evaluating clinical
+  AI after deployment. Owens et al. (2025) highlight the responsibility
+  vacuum in AI governance for healthcare.
 
 references:
   - citation_key: zhang2026pprm
@@ -257,6 +273,45 @@ references:
   - citation_key: ackerman2021evidently
     relevance: >
       Evidently framework for interactive ML monitoring and reporting.
+    supports_options:
+      - alert_human
+
+  - citation_key: keyes2024monitoring
+    relevance: >
+      Three principles for monitoring deployed AI: integrity (data quality),
+      performance (model accuracy), and impact (downstream outcomes).
+    supports_options:
+      - automated_retrain
+      - alert_human
+
+  - citation_key: cook2026mayo
+    relevance: >
+      Lessons from monitoring 17 radiology AI algorithms at Mayo Clinic.
+      Practical operational guidance for clinical deployment monitoring.
+    supports_options:
+      - automated_retrain
+      - alert_human
+      - gradual_rollback
+
+  - citation_key: fluhmann2025labelfree
+    relevance: >
+      Label-free confusion matrix estimation under distribution shift,
+      enabling drift response without ground-truth labels.
+    supports_options:
+      - automated_retrain
+
+  - citation_key: kiyasseh2024sudo
+    relevance: >
+      Framework for evaluating clinical AI after deployment, supporting
+      structured post-deployment monitoring.
+    supports_options:
+      - alert_human
+      - automated_retrain
+
+  - citation_key: owens2025vacuum
+    relevance: >
+      Responsibility vacuum in AI governance highlights need for clear
+      drift response ownership and accountability.
     supports_options:
       - alert_human
 

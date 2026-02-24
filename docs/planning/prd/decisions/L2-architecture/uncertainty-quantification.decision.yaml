@@ -10,10 +10,18 @@ description: >
   complement conformal and calibration methods. Dhor et al. (2026) introduce
   TUNE++, combining topology-aware loss with uncertainty quantification for
   tubular structure segmentation, directly relevant to vascular analysis.
+  Shen et al. (2024) provide definitive evidence against Evidential Deep
+  Learning (EDL), showing its epistemic uncertainty estimates are unreliable
+  ("mirage" phenomenon). Gal & Ghahramani (2016) establish MC Dropout as
+  approximate Bayesian inference; for DynUNet, dropout_dim=3 provides minimum
+  viable UQ. Lakshminarayanan et al. (2017) demonstrate that 3-model deep
+  ensembles provide gold-standard UQ at manageable cost (~15 min for 20
+  volumes). Mossina & Friedrich (2025) introduce ConSeMa for conformal
+  prediction with mask-level guarantees in segmentation.
 
 decision_level: L2_architecture
 status: active
-last_updated: 2026-02-23
+last_updated: 2026-02-24
 
 options:
   - option_id: temperature_scaling
@@ -25,8 +33,11 @@ options:
 
   - option_id: conformal_prediction
     title: "Conformal Prediction"
-    description: "Distribution-free prediction sets with guaranteed coverage."
-    prior_probability: 0.30
+    description: >
+      Distribution-free prediction sets with guaranteed coverage. ConSeMa
+      (Mossina & Friedrich, 2025) extends conformal prediction to
+      mask-level guarantees for image segmentation.
+    prior_probability: 0.32
     status: viable
     implementation_status: not_started
     complements:
@@ -34,25 +45,33 @@ options:
 
   - option_id: mc_dropout
     title: "MC Dropout"
-    description: "Monte Carlo dropout for approximate Bayesian inference."
-    prior_probability: 0.20
+    description: >
+      Monte Carlo dropout for approximate Bayesian inference (Gal &
+      Ghahramani, 2016). Minimum viable UQ for DynUNet with dropout_dim=3.
+      Low implementation cost — requires only enabling dropout at inference.
+    prior_probability: 0.23
     status: viable
     implementation_status: not_started
 
   - option_id: deep_ensembles
     title: "Deep Ensembles"
-    description: "Train multiple independent models. Gold standard but expensive."
-    prior_probability: 0.15
+    description: >
+      Train multiple independent models (Lakshminarayanan et al., 2017).
+      Gold standard for UQ. A 3-model ensemble on ~20 volumes trains in
+      approximately 15 minutes — not expensive for this dataset scale.
+    prior_probability: 0.18
     status: viable
     implementation_status: not_started
-    constraints:
-      - "N× training cost"
 
   - option_id: evidential
-    title: "Evidential Deep Learning"
-    description: "Single-pass uncertainty via Dirichlet distribution."
-    prior_probability: 0.10
-    status: experimental
+    title: "Evidential Deep Learning (Deprecated)"
+    description: >
+      Single-pass uncertainty via Dirichlet distribution. DEPRECATED:
+      Shen et al. (2024) NeurIPS "mirage" paper shows EDL epistemic
+      uncertainty estimates are unreliable. Not recommended for safety-
+      critical medical imaging applications.
+    prior_probability: 0.02
+    status: deprecated
     implementation_status: not_started
 
 conditional_on:
@@ -62,59 +81,60 @@ conditional_on:
       - given_parent_option: iec_62304_full
         then_probabilities:
           temperature_scaling: 0.15
-          conformal_prediction: 0.35
-          mc_dropout: 0.15
-          deep_ensembles: 0.25
-          evidential: 0.10
+          conformal_prediction: 0.38
+          mc_dropout: 0.17
+          deep_ensembles: 0.28
+          evidential: 0.02
       - given_parent_option: lightweight_audit
         then_probabilities:
-          temperature_scaling: 0.30
-          conformal_prediction: 0.25
-          mc_dropout: 0.20
-          deep_ensembles: 0.15
-          evidential: 0.10
+          temperature_scaling: 0.28
+          conformal_prediction: 0.28
+          mc_dropout: 0.22
+          deep_ensembles: 0.18
+          evidential: 0.04
       - given_parent_option: no_compliance
         then_probabilities:
-          temperature_scaling: 0.40
-          conformal_prediction: 0.15
-          mc_dropout: 0.20
-          deep_ensembles: 0.10
-          evidential: 0.15
+          temperature_scaling: 0.38
+          conformal_prediction: 0.18
+          mc_dropout: 0.23
+          deep_ensembles: 0.13
+          evidential: 0.08
 
 archetype_weights:
   solo_researcher:
     probability_overrides:
-      temperature_scaling: 0.35
-      conformal_prediction: 0.25
-      mc_dropout: 0.20
-      deep_ensembles: 0.10
-      evidential: 0.10
-    rationale: "Temperature scaling is simplest; conformal is a great learning topic"
+      temperature_scaling: 0.33
+      conformal_prediction: 0.28
+      mc_dropout: 0.22
+      deep_ensembles: 0.13
+      evidential: 0.04
+    rationale: "Temperature scaling is simplest; conformal is a great learning topic; EDL deprecated"
   lab_group:
     probability_overrides:
-      temperature_scaling: 0.20
-      conformal_prediction: 0.30
-      mc_dropout: 0.20
-      deep_ensembles: 0.20
-      evidential: 0.10
-    rationale: "Lab groups can afford ensemble approaches"
+      temperature_scaling: 0.18
+      conformal_prediction: 0.32
+      mc_dropout: 0.22
+      deep_ensembles: 0.24
+      evidential: 0.04
+    rationale: "Lab groups can afford ensemble approaches; EDL deprecated"
   clinical_deployment:
     probability_overrides:
       temperature_scaling: 0.10
-      conformal_prediction: 0.35
-      mc_dropout: 0.15
-      deep_ensembles: 0.30
-      evidential: 0.10
-    rationale: "Clinical needs formal guarantees (conformal) or gold standard (ensembles)"
+      conformal_prediction: 0.37
+      mc_dropout: 0.17
+      deep_ensembles: 0.34
+      evidential: 0.02
+    rationale: "Clinical needs formal guarantees (conformal) or gold standard (ensembles); EDL deprecated"
 
 volatility:
   classification: shifting
-  last_assessed: 2026-02-23
-  next_review: 2026-05-23
+  last_assessed: 2026-02-24
+  next_review: 2026-05-24
   change_drivers:
+    - "EDL reliability concerns (NeurIPS 2024)"
     - "Conformal prediction for segmentation advances"
+    - "ConSeMa mask-level conformal guarantees"
     - "MAPIE 3D support"
-    - "Evidential methods maturity"
 
 domain_applicability:
   vascular_segmentation: 1.0
@@ -124,11 +144,16 @@ domain_applicability:
 
 rationale: >
   Temperature scaling (0.25) is resolved and remains the calibration baseline.
-  Conformal prediction (0.30) is now the leading candidate, boosted by
-  Shah-Mohammadi et al. (2025) validating conformal prediction for medical
-  image segmentation with formal coverage guarantees, and by Dhor et al.
-  (2026) demonstrating topology-aware UQ for tubular structures via TUNE++.
-  André et al. (2026) further support calibration-aware CI methodology.
+  Conformal prediction (0.32) is the leading candidate, boosted by
+  Shah-Mohammadi et al. (2025) and ConSeMa (Mossina & Friedrich, 2025) for
+  mask-level segmentation guarantees. MC Dropout (0.23) is the minimum viable
+  UQ approach for DynUNet with dropout_dim=3 (Gal & Ghahramani, 2016).
+  Deep Ensembles (0.18) provide gold-standard UQ; a 3-model ensemble on ~20
+  volumes is cheap (~15 min), removing the "expensive" concern
+  (Lakshminarayanan et al., 2017). EDL (0.02) is effectively deprecated
+  after the Shen et al. (2024) NeurIPS "mirage" paper demonstrated that
+  EDL epistemic uncertainty estimates are unreliable. The 0.08 freed from
+  EDL is redistributed: +0.02 conformal, +0.03 MC Dropout, +0.03 ensembles.
 
 tags:
   - architecture
@@ -137,6 +162,33 @@ tags:
   - partially-resolved
 
 references:
+  - citation_key: shen2024edlmirage
+    relevance: >
+      Definitive evidence against EDL: epistemic uncertainty estimates are
+      unreliable ("mirage" phenomenon). Motivates deprecation of evidential option.
+    supports_options:
+      - temperature_scaling
+      - conformal_prediction
+      - mc_dropout
+      - deep_ensembles
+  - citation_key: mossina2025consema
+    relevance: >
+      ConSeMa extends conformal prediction to mask-level guarantees for
+      image segmentation, directly applicable to vascular segmentation.
+    supports_options:
+      - conformal_prediction
+  - citation_key: gal2016mcdropout
+    relevance: >
+      Foundational work establishing dropout as approximate Bayesian inference.
+      For DynUNet, dropout_dim=3 provides minimum viable UQ.
+    supports_options:
+      - mc_dropout
+  - citation_key: lakshminarayanan2017ensembles
+    relevance: >
+      Establishes deep ensembles as gold standard for predictive uncertainty.
+      3-model ensembles provide excellent UQ at manageable cost for small datasets.
+    supports_options:
+      - deep_ensembles
   - citation_key: shahmohammadi2025conformal
     relevance: "Validates conformal prediction specifically for medical image segmentation with coverage guarantees."
     supports_options:
@@ -167,13 +219,12 @@ references:
 research_notes: >
   Internal: ADR-0003 (docs/adr/0003-validation-onion.md) documents the
   validation onion architecture that includes calibration and uncertainty layers.
-  Shah-Mohammadi et al. (2025) provide direct validation of conformal prediction
-  for medical image segmentation, establishing coverage guarantees applicable to
-  our vascular segmentation use case. Bench et al. (2025) demonstrate practical
-  MC Dropout for image quality assessment. André et al. (2026) present a
-  large-scale study on CI methodology for medical imaging, recommending percentile
-  bootstrap — relevant to both conformal and calibration approaches. Dhor et al.
-  (2026) introduce TUNE++, combining topology-aware loss with UQ for tubular
-  structures, directly applicable to vessel segmentation. Guo et al. (2017)
-  remain the foundational reference for calibration and ECE. Angelopoulos et al.
-  (2023) provide the theoretical basis for distribution-free conformal prediction.
+  CRITICAL CHANGE (Phase 14): EDL deprecated based on Shen et al. (2024) NeurIPS
+  "mirage" paper showing EDL epistemic uncertainty is unreliable. Prior reduced
+  from 0.10 to 0.02. Freed probability redistributed to MC Dropout (+0.03),
+  Deep Ensembles (+0.03), and Conformal (+0.02). MC Dropout with dropout_dim=3
+  is the minimum viable UQ for DynUNet (Gal & Ghahramani, 2016). Deep Ensembles
+  with 3 models are gold standard and cheap at ~20 volumes (~15 min training).
+  ConSeMa (Mossina & Friedrich, 2025) provides mask-level conformal guarantees
+  for segmentation. All conditional tables and archetype weights updated to
+  reflect EDL deprecation — evidential rows now carry minimal weight.
