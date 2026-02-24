@@ -35,36 +35,28 @@ dependencies = [
     "peft>=0.14",
     "torchio>=0.20",
     "torchmetrics>=1.6",
-
     # Config & Validation
     "hydra-zen>=0.13",
     "dynaconf>=3.2",
     "pydantic>=2.10",
-
     # Experiment Tracking
     "mlflow>=3.10",
     "dvc[s3,gs]>=3.66",
     "optuna>=4.7",
     "duckdb>=1.2",
-
     # Evaluation
     "MetricsReloaded @ git+https://github.com/Project-MONAI/MetricsReloaded@monai-support",
     "mapie>=1.0",
-
     # Serving
     "bentoml>=1.4",
-
     # Observability
     "opentelemetry-api>=1.29",
     "opentelemetry-sdk>=1.29",
     "evidently>=0.7",
-
     # Agent Orchestration
     "langgraph>=0.4",
-
     # Code Quality
     "ruff>=0.9",
-
     # Retained from v0.1
     "weightwatcher>=0.7",
 ]
@@ -103,6 +95,7 @@ agents = [
 serving = [
     "bentoml>=1.4",
     "onnxruntime>=1.20",
+    "onnxscript>=0.6.2",
     "gradio>=5.12",
 ]
 ci = [
@@ -238,7 +231,8 @@ filterwarnings = [
     "ignore::UserWarning:torchmetrics.*",
     "ignore::SyntaxWarning:MetricsReloaded.*",
     "ignore::FutureWarning",
-    "ignore:.*deprecated.*:DeprecationWarning",
+    "ignore::DeprecationWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
 ]
 
 # ---------------------------------------------------------------------------

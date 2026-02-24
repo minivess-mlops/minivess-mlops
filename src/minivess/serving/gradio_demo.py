@@ -5,14 +5,57 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
-
-if TYPE_CHECKING:
-    from numpy.typing import NDArray
+from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
+
+
+def load_nifti_volume(file_path: str) -> NDArray[np.float32]:
+    """Load a NIfTI file and return as float32 numpy array.
+
+    Parameters
+    ----------
+    file_path:
+        Path to a .nii or .nii.gz file.
+
+    Returns
+    -------
+    3D numpy array (D, H, W) as float32.
+    """
+    import nibabel as nib
+
+    nii = nib.load(file_path)
+    data = np.asarray(nii.dataobj, dtype=np.float32)
+    return data
+
+
+def extract_slice(
+    volume: NDArray[np.float32],
+    axis: int = 2,
+    index: int = 0,
+) -> NDArray[np.float32]:
+    """Extract a 2D slice from a 3D volume.
+
+    Parameters
+    ----------
+    volume:
+        3D array of shape (D, H, W).
+    axis:
+        Axis to slice along (0=sagittal, 1=coronal, 2=axial).
+    index:
+        Slice index (clamped to valid range).
+
+    Returns
+    -------
+    2D slice as float32.
+    """
+    # Clamp index to valid range
+    max_idx = volume.shape[axis] - 1
+    index = max(0, min(index, max_idx))
+    return np.take(volume, index, axis=axis).astype(np.float32)
 
 
 def create_demo(

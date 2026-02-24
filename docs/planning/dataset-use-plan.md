@@ -2,7 +2,7 @@
 
 **Issue**: #35 — Wire real MiniVess NIfTI data into v2 training pipeline
 **Date**: 2026-02-24
-**Status**: Draft → Review → Approved → Implementation
+**Status**: ~~Draft → Review → Approved → Implementation~~ → **Complete** (2026-02-24)
 
 ---
 
