@@ -12,6 +12,15 @@ from minivess.pipeline.ci import (
     bootstrap_ci,
     compute_metrics_with_ci,
 )
+from minivess.pipeline.federated import (
+    DPConfig,
+    FederatedAveraging,
+    FLClientConfig,
+    FLRoundResult,
+    FLServerConfig,
+    FLSimulator,
+    FLStrategy,
+)
 from minivess.pipeline.hpo import (
     SearchSpace,
     build_trial_config,
@@ -31,8 +40,15 @@ from minivess.pipeline.trainer import EpochResult, SegmentationTrainer
 
 __all__ = [
     "ConfidenceInterval",
+    "DPConfig",
     "DYNUNET_WIDTH_PRESETS",
     "EpochResult",
+    "FLClientConfig",
+    "FLRoundResult",
+    "FLServerConfig",
+    "FLSimulator",
+    "FLStrategy",
+    "FederatedAveraging",
     "MetricResult",
     "QCFlag",
     "QCResult",
