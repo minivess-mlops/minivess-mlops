@@ -16,6 +16,14 @@ from minivess.ensemble.calibration_shift import (
 )
 from minivess.ensemble.conformal import ConformalPredictor, ConformalResult
 from minivess.ensemble.deep_ensembles import DeepEnsemblePredictor
+from minivess.ensemble.generative_uq import (
+    GenerativeUQConfig,
+    GenerativeUQEvaluator,
+    GenerativeUQMethod,
+    MultiRaterData,
+    generalized_energy_distance,
+    q_dice,
+)
 from minivess.ensemble.mapie_conformal import (
     ConformalMetrics,
     MapieConformalSegmentation,
@@ -32,9 +40,13 @@ __all__ = [
     "ConformalPredictor",
     "ConformalResult",
     "DeepEnsemblePredictor",
-    "MapieConformalSegmentation",
     "EnsemblePredictor",
+    "GenerativeUQConfig",
+    "GenerativeUQEvaluator",
+    "GenerativeUQMethod",
     "MCDropoutPredictor",
+    "MapieConformalSegmentation",
+    "MultiRaterData",
     "ShiftType",
     "ShiftedCalibrationResult",
     "UncertaintyOutput",
@@ -44,6 +56,8 @@ __all__ = [
     "compute_coverage_metrics",
     "evaluate_calibration_transfer",
     "expected_calibration_error",
+    "generalized_energy_distance",
     "greedy_soup",
+    "q_dice",
     "temperature_scale",
 ]
