@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from minivess.agents.comparison import (
+    ComparisonState,
+    build_comparison_graph,
+)
 from minivess.agents.evaluation import (
     EvalResult,
     EvalSuite,
@@ -9,17 +13,27 @@ from minivess.agents.evaluation import (
     build_segmentation_eval_suite,
 )
 from minivess.agents.graph import (
-    AgentState,
-    build_evaluation_graph,
+    TrainingState,
     build_training_graph,
+)
+from minivess.agents.llm import (
+    call_llm,
+    call_llm_structured,
+)
+from minivess.agents.tracing import (
+    traced_graph_run,
 )
 
 __all__ = [
-    "AgentState",
+    "ComparisonState",
     "EvalResult",
     "EvalSuite",
+    "TrainingState",
     "build_agent_eval_suite",
-    "build_evaluation_graph",
+    "build_comparison_graph",
     "build_segmentation_eval_suite",
     "build_training_graph",
+    "call_llm",
+    "call_llm_structured",
+    "traced_graph_run",
 ]

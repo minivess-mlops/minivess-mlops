@@ -88,27 +88,19 @@ class TestModelCard:
 
 
 class TestAgentGraph:
-    def test_training_graph_structure(self) -> None:
+    def test_training_graph_compiles(self) -> None:
         from minivess.agents.graph import build_training_graph
 
         graph = build_training_graph()
-        assert graph["graph_name"] == "training_pipeline"
-        assert len(graph["nodes"]) == 5
-        assert graph["entry_point"] == "prepare_data"
+        assert hasattr(graph, "invoke")
 
-    def test_evaluation_graph_structure(self) -> None:
-        from minivess.agents.graph import build_evaluation_graph
+    def test_training_state_has_expected_keys(self) -> None:
+        from minivess.agents.graph import TrainingState
 
-        graph = build_evaluation_graph()
-        assert graph["graph_name"] == "evaluation_pipeline"
-        assert len(graph["nodes"]) == 5
-
-    def test_agent_state_defaults(self) -> None:
-        from minivess.agents.graph import AgentState
-
-        state = AgentState()
-        assert state.status == "pending"
-        assert state.messages == []
+        annotations = TrainingState.__annotations__
+        assert "model_name" in annotations
+        assert "status" in annotations
+        assert "results" in annotations
 
 
 class TestEvalSuite:
