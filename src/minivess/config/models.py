@@ -1,22 +1,23 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
 
-class ModelFamily(str, Enum):
+class ModelFamily(StrEnum):
     """Supported model families."""
     MONAI_SEGRESNET = "segresnet"
     MONAI_SWINUNETR = "swinunetr"
     MONAI_VISTA3D = "vista3d"
+    COMMA_MAMBA = "comma_mamba"
     SAM3_LORA = "sam3_lora"
     CUSTOM = "custom"
 
 
-class EnsembleStrategy(str, Enum):
+class EnsembleStrategy(StrEnum):
     """Ensemble combination strategies."""
     MEAN = "mean"
     MAJORITY_VOTE = "majority_vote"
