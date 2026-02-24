@@ -1,0 +1,170 @@
+decision_id: clinical_data_format
+title: "Clinical Data Format"
+description: >
+  How to represent and interchange clinical data associated with vascular
+  imaging studies. FHIR provides healthcare interoperability; MEDS provides
+  ML-ready event streams; MEDS-OWL adds semantic web capabilities. The choice
+  determines how segmentation outputs link to patient records and how
+  cross-institutional cohort queries are executed.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-24
+
+options:
+  - option_id: fhir_meds_owl
+    title: "FHIR + MEDS-OWL (Full Stack)"
+    description: >
+      Combined stack: FHIR R4 for clinical interoperability (ImagingStudy,
+      Observation, DiagnosticReport) + MEDS-OWL for ML-ready event streams
+      with OWL/RDF/SPARQL querying. Enables semantic cohort discovery and
+      federated queries. Demonstrated on neurovasc data (Marfoglia et al.,
+      2026). Highest capability but highest complexity.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "copilot_backend.graph_rag"
+    constraints:
+      - "Requires FHIR server (HAPI FHIR) + RDF triplestore (GraphDB)"
+      - "OWL ontology maintenance overhead"
+      - "No vascular-imaging-specific FHIR profiles published"
+
+  - option_id: fhir_only
+    title: "FHIR R4 Only"
+    description: >
+      Standard FHIR R4 conversion using ImagingStudy, Observation, and
+      Condition resources. Matchbox FML engine for mapping. Simpler than
+      full MEDS-OWL stack. Proven in production at Erlangen (150,000+
+      studies/year) and Bologna (Carbonaro et al., 2025).
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "FHIR ImagingStudy lacks vascular acquisition parameters"
+      - "No native ML-ready event format; requires extraction step"
+
+  - option_id: meds_only
+    title: "MEDS Tabular Format Only"
+    description: >
+      Minimal 4-column schema (subject_id, time, code, numeric_value) from
+      the Medical Event Data Standard. Direct ML consumption via MEDS-Tab
+      (XGBoost) or MEDS-Torch (deep learning). No semantic web overhead.
+      MIMIC-IV reference implementation available.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "No healthcare interoperability standard compliance"
+      - "Limited to structured events; no imaging metadata integration"
+
+  - option_id: custom_csv
+    title: "Custom CSV/Parquet"
+    description: >
+      Ad-hoc tabular representation of clinical covariates alongside
+      imaging data. Maximum simplicity but zero interoperability. Current
+      state for most academic medical imaging projects.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: clinical_contract_schema
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: pydantic_tripod
+        then_probabilities:
+          fhir_meds_owl: 0.40
+          fhir_only: 0.30
+          meds_only: 0.15
+          custom_csv: 0.15
+      - given_parent_option: json_schema
+        then_probabilities:
+          fhir_meds_owl: 0.35
+          fhir_only: 0.30
+          meds_only: 0.20
+          custom_csv: 0.15
+      - given_parent_option: yaml_manual
+        then_probabilities:
+          fhir_meds_owl: 0.25
+          fhir_only: 0.25
+          meds_only: 0.20
+          custom_csv: 0.30
+      - given_parent_option: none
+        then_probabilities:
+          fhir_meds_owl: 0.15
+          fhir_only: 0.20
+          meds_only: 0.20
+          custom_csv: 0.45
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      fhir_meds_owl: 0.15
+      fhir_only: 0.20
+      meds_only: 0.25
+      custom_csv: 0.40
+    rationale: "Solo researchers use simple tabular formats; FHIR overhead unjustified"
+  lab_group:
+    probability_overrides:
+      fhir_meds_owl: 0.35
+      fhir_only: 0.30
+      meds_only: 0.20
+      custom_csv: 0.15
+    rationale: "Lab groups with multi-site data benefit from interoperability standards"
+  clinical_deployment:
+    probability_overrides:
+      fhir_meds_owl: 0.45
+      fhir_only: 0.30
+      meds_only: 0.15
+      custom_csv: 0.10
+    rationale: "Clinical deployment requires FHIR compliance for EHR integration"
+
+volatility:
+  classification: moderate
+  last_assessed: 2026-02-24
+  next_review: 2026-08-24
+  change_drivers:
+    - "FHIR v6.0.0 ballot — bodyStructure extensions for imaging"
+    - "MEDS ecosystem maturity (MEDS-Tab, MEDS-Torch)"
+    - "Vascular-specific FHIR profiles"
+    - "MEDS-OWL adoption beyond neurovasc demo"
+
+domain_applicability:
+  vascular_segmentation: 0.95
+  cardiac_imaging: 0.90
+  neuroimaging: 0.85
+  general_medical: 0.90
+
+rationale: >
+  FHIR+MEDS-OWL (0.35) provides the most capable stack for linking
+  segmentation outputs to clinical records, with a neurovasc demo directly
+  relevant to vascular imaging. FHIR-only (0.30) is proven in production
+  but lacks ML-ready event streams. MEDS-only (0.20) is ML-optimised but
+  not interoperable with clinical systems. Custom CSV (0.15) is the current
+  state. The Marfoglia group's vertical stack (Carbonaro 2025, Marfoglia
+  2025, 2026a, 2026b) demonstrates feasibility of the full pipeline.
+
+references:
+  - citation_key: carbonaro2025fhir
+    relevance: "FHIR ETL for 36,335 oncology patients with 100% entity mapping. Blueprint for imaging-clinical linkage."
+    supports_options: ["fhir_meds_owl", "fhir_only"]
+
+  - citation_key: marfoglia2025fhir
+    relevance: "FHIR R4 pipeline for vascular-adjacent rehabilitation data. 98.7% field coverage, 50x Bundle speedup (cited)."
+    supports_options: ["fhir_meds_owl", "fhir_only"]
+
+  - citation_key: marfoglia2026medsowl
+    relevance: "MEDS-OWL semantic extension. Neurovasc demo: 10,000 patients to 1.3M triples."
+    supports_options: ["fhir_meds_owl", "meds_only"]
+
+  - citation_key: marfoglia2026connected
+    relevance: "CONNECTED patient digital twin framework with MIMO ontology and Manifest protocol."
+    supports_options: ["fhir_meds_owl"]
+
+tags:
+  - data-engineering
+  - interoperability
+  - fhir
+  - clinical-data
+  - not-started

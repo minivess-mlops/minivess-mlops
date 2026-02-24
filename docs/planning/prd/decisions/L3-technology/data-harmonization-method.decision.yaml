@@ -1,0 +1,156 @@
+decision_id: data_harmonization_method
+title: "Data Harmonization Method"
+description: >
+  How to handle scanner/site batch effects in multi-institutional vascular
+  imaging data. ComBat-family methods correct feature-level statistics;
+  CycleGAN variants perform image-level harmonization; physics-informed
+  approaches model acquisition physics. No dedicated vascular MRI
+  harmonization methods currently exist — this is an identified gap.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-24
+
+options:
+  - option_id: combat_family
+    title: "ComBat-family Statistical Harmonization"
+    description: >
+      Feature-level statistical harmonization (ComBat, ComBat-GAM, ComBatLS,
+      CovBat, RELIEF). Corrects batch effects in extracted radiomic features
+      or derived measurements. Well-validated for brain MRI; untested on
+      vascular MRA features (flow-dependent signals).
+    prior_probability: 0.35
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "data_validation_tools.deepchecks"
+    constraints:
+      - "Requires feature extraction before harmonization"
+      - "Untested on vascular MRA-specific signal physics"
+      - "Assumes linear batch effects; may miss non-linear scanner interactions"
+
+  - option_id: cyclegan_variants
+    title: "CycleGAN/Diffusion Image-Level Harmonization"
+    description: >
+      Image-level harmonization using generative models (CycleGAN, IGUANe,
+      StarGAN, latent diffusion). Operates directly on images before
+      segmentation. Unpaired variants eliminate need for traveling-phantom
+      data. Higher computational cost than statistical methods.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Computational cost: GPU-intensive at training and inference"
+      - "Risk of hallucinating structures during image transformation"
+      - "No vascular-specific models published"
+
+  - option_id: physics_informed
+    title: "Physics-Informed Harmonization"
+    description: >
+      Methods incorporating MRI physics models (PhyCHarm, normalizing flows
+      like BlindHarmony). Account for acquisition parameters (echo time, flip
+      angle, contrast timing) as explicit variables. Potentially superior for
+      vascular MRA where flow-dependent signal has no brain analogue.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires acquisition parameter metadata (DICOM fields)"
+      - "Limited published implementations for vascular modalities"
+      - "Research-stage maturity"
+
+  - option_id: none
+    title: "No Harmonization"
+    description: >
+      Accept scanner/site variation as-is. Rely on data augmentation and
+      robust model architectures to handle distribution differences.
+      Acceptable for single-site studies or when site effects are minimal.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: data_versioning
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: dvc_only
+        then_probabilities:
+          combat_family: 0.35
+          cyclegan_variants: 0.25
+          physics_informed: 0.20
+          none: 0.20
+      - given_parent_option: dvc_lakeFS
+        then_probabilities:
+          combat_family: 0.40
+          cyclegan_variants: 0.25
+          physics_informed: 0.20
+          none: 0.15
+      - given_parent_option: git_lfs
+        then_probabilities:
+          combat_family: 0.30
+          cyclegan_variants: 0.20
+          physics_informed: 0.15
+          none: 0.35
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      combat_family: 0.30
+      cyclegan_variants: 0.15
+      physics_informed: 0.15
+      none: 0.40
+    rationale: "Solo researchers with single-site data often skip harmonization"
+  lab_group:
+    probability_overrides:
+      combat_family: 0.40
+      cyclegan_variants: 0.25
+      physics_informed: 0.20
+      none: 0.15
+    rationale: "Lab groups with multi-site collaborations need harmonization"
+  clinical_deployment:
+    probability_overrides:
+      combat_family: 0.35
+      cyclegan_variants: 0.25
+      physics_informed: 0.25
+      none: 0.15
+    rationale: "Clinical deployment across hospitals requires validated harmonization"
+
+volatility:
+  classification: volatile
+  last_assessed: 2026-02-24
+  next_review: 2026-05-24
+  change_drivers:
+    - "Publication of vascular-specific harmonization methods"
+    - "Traveling-phantom datasets for vascular MRA"
+    - "Latent diffusion harmonization maturity"
+    - "FHIR acquisition parameter standardization"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 0.95
+  neuroimaging: 0.90
+  general_medical: 0.85
+
+rationale: >
+  ComBat-family (0.35) is the most mature approach with extensive brain MRI
+  validation but untested on vascular MRA. The 2025 MRI harmonization survey
+  (arXiv:2507.16962v2) explicitly identifies the absence of vascular-specific
+  methods as a gap. CycleGAN variants (0.25) offer image-level correction but
+  risk hallucination. Physics-informed (0.20) is theoretically best-suited for
+  flow-dependent vascular signals but lacks implementations. No harmonization
+  (0.20) is the current state and acceptable for single-site studies.
+
+references:
+  - citation_key: cheng2024harmonization
+    relevance: "General primer establishing three-dimension model (syntax, structure, semantics) for harmonization tradeoffs."
+    supports_options: ["combat_family", "cyclegan_variants", "physics_informed"]
+
+  - citation_key: ciupek2025fl
+    relevance: "FL review identifying data heterogeneity as primary challenge; harmonization reduces non-IID effects."
+    supports_options: ["combat_family", "cyclegan_variants"]
+
+tags:
+  - data-engineering
+  - harmonization
+  - multi-site
+  - not-started

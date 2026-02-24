@@ -1,0 +1,176 @@
+decision_id: data_storage_architecture
+title: "Data Storage Architecture"
+description: >
+  Overall data storage architecture for the vascular imaging MLOps platform.
+  Lakehouse (Delta Lake/Iceberg medallion) provides FAIR-compliant unified
+  storage; data lake provides flexible unstructured storage; feature store
+  adds ML-specific point-in-time-correct feature management; file-based
+  is the current ad-hoc state.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-02-24
+
+options:
+  - option_id: lakehouse_medallion
+    title: "Lakehouse Medallion Architecture"
+    description: >
+      Three-tier medallion (Bronze/Silver/Gold) using Delta Lake or Apache
+      Iceberg. Bronze: raw DICOM + FHIR ingestion. Silver: harmonised images
+      + MEDS-format EHR. Gold: feature stores for training. Provides schema
+      enforcement, time-travel versioning, and unified structured/unstructured
+      storage. Wins on FAIR compliance per JMIR 2025 comparison.
+    prior_probability: 0.40
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "data_versioning.dvc_lakeFS"
+    constraints:
+      - "High technical complexity for initial setup"
+      - "Requires understanding of medallion architecture patterns"
+      - "May be over-engineered for single-site, small-dataset scenarios"
+
+  - option_id: data_lake
+    title: "Data Lake (Unstructured)"
+    description: >
+      Flexible object/file storage without schema enforcement. S3-compatible
+      (MinIO for local). Good for heterogeneous imaging data but lacks
+      the governance and versioning of lakehouse approaches.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "No schema enforcement — data swamp risk"
+      - "Separate governance layer needed"
+
+  - option_id: feature_store
+    title: "Feature Store (ML-Specific)"
+    description: >
+      Dedicated ML feature store (Feast, Tecton) for point-in-time-correct
+      feature serving. Critical for temporal clinical data where training
+      on future-leaked features causes overfit. Does not handle raw
+      imaging data; pairs with data lake or lakehouse.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Complementary layer, not standalone storage"
+      - "Feast deployment adds infrastructure complexity"
+
+  - option_id: file_based
+    title: "File-Based (Ad-Hoc)"
+    description: >
+      Direct file system storage with DVC versioning. Current state.
+      Simple but lacks governance, schema enforcement, and FAIR compliance.
+      Acceptable for development; insufficient for multi-site production.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: containerization
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: docker_compose
+        then_probabilities:
+          lakehouse_medallion: 0.40
+          data_lake: 0.25
+          feature_store: 0.20
+          file_based: 0.15
+      - given_parent_option: kubernetes
+        then_probabilities:
+          lakehouse_medallion: 0.45
+          data_lake: 0.25
+          feature_store: 0.20
+          file_based: 0.10
+      - given_parent_option: none
+        then_probabilities:
+          lakehouse_medallion: 0.20
+          data_lake: 0.20
+          feature_store: 0.15
+          file_based: 0.45
+
+  - parent_decision_id: data_versioning
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: dvc_only
+        then_probabilities:
+          lakehouse_medallion: 0.35
+          data_lake: 0.25
+          feature_store: 0.20
+          file_based: 0.20
+      - given_parent_option: dvc_lakeFS
+        then_probabilities:
+          lakehouse_medallion: 0.50
+          data_lake: 0.20
+          feature_store: 0.20
+          file_based: 0.10
+      - given_parent_option: git_lfs
+        then_probabilities:
+          lakehouse_medallion: 0.25
+          data_lake: 0.25
+          feature_store: 0.15
+          file_based: 0.35
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      lakehouse_medallion: 0.20
+      data_lake: 0.20
+      feature_store: 0.15
+      file_based: 0.45
+    rationale: "Solo researchers use file-based storage; lakehouse is over-engineered"
+  lab_group:
+    probability_overrides:
+      lakehouse_medallion: 0.40
+      data_lake: 0.25
+      feature_store: 0.20
+      file_based: 0.15
+    rationale: "Lab groups benefit from structured storage and governance"
+  clinical_deployment:
+    probability_overrides:
+      lakehouse_medallion: 0.50
+      data_lake: 0.20
+      feature_store: 0.20
+      file_based: 0.10
+    rationale: "Clinical deployment requires FAIR-compliant auditable storage"
+
+volatility:
+  classification: moderate
+  last_assessed: 2026-02-24
+  next_review: 2026-08-24
+  change_drivers:
+    - "Apache Iceberg adoption in healthcare"
+    - "DVC-lakeFS integration maturity"
+    - "Feast healthcare feature store patterns"
+    - "FHIR-native storage solutions"
+
+domain_applicability:
+  vascular_segmentation: 0.90
+  cardiac_imaging: 0.85
+  neuroimaging: 0.85
+  general_medical: 0.90
+
+rationale: >
+  Lakehouse medallion (0.40) provides the best FAIR compliance and unified
+  storage architecture per the JMIR 2025 comparative evaluation. The three-tier
+  pattern (Bronze/Silver/Gold) maps naturally to the vascular imaging pipeline:
+  raw DICOM ingestion → harmonised images + clinical data → training features.
+  File-based (0.15) is the current state. Feature store (0.20) is a
+  complementary layer that pairs with either lakehouse or data lake.
+
+references:
+  - citation_key: jmir2025lakehouse
+    relevance: "Head-to-head comparison finding lakehouse wins on FAIR compliance for multimodal biomedical data."
+    supports_options: ["lakehouse_medallion"]
+
+  - citation_key: zhou2025datallm
+    relevance: "DATA x LLM survey covering data storage, distribution, and serving patterns for ML pipelines."
+    supports_options: ["lakehouse_medallion", "data_lake", "feature_store"]
+
+tags:
+  - data-engineering
+  - infrastructure
+  - storage
+  - fair
+  - not-started
