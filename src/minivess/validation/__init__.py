@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+from minivess.validation.data_care import (
+    DataQualityReport,
+    DimensionScore,
+    QualityDimension,
+    assess_metrics_quality,
+    assess_nifti_quality,
+    quality_gate,
+)
 from minivess.validation.deepchecks_vision import (
     ValidationReport,
     build_data_integrity_suite,
@@ -48,14 +56,19 @@ from minivess.validation.vessqc import (
 __all__ = [
     "AnnotationQualitySchema",
     "CurationFlag",
+    "DataQualityReport",
+    "DimensionScore",
     "CurationReport",
     "DatasetProfileView",
     "DriftReport",
     "GateResult",
     "NiftiMetadataSchema",
+    "QualityDimension",
     "ProfileDriftReport",
     "TrainingMetricsSchema",
     "ValidationReport",
+    "assess_metrics_quality",
+    "assess_nifti_quality",
     "build_data_integrity_suite",
     "build_nifti_metadata_suite",
     "build_train_test_suite",
@@ -66,6 +79,7 @@ __all__ = [
     "flag_uncertain_regions",
     "evaluate_report",
     "profile_dataframe",
+    "quality_gate",
     "rank_samples_by_uncertainty",
     "run_expectation_suite",
     "validate_metrics_batch",
