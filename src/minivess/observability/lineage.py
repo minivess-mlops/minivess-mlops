@@ -71,9 +71,9 @@ class LineageEmitter:
 
     def _now_iso(self) -> str:
         """Return current UTC time in ISO format."""
-        import datetime
+        from datetime import UTC, datetime
 
-        return datetime.datetime.now(datetime.UTC).isoformat()
+        return datetime.now(UTC).isoformat()
 
     def _build_datasets(
         self,

@@ -364,4 +364,62 @@ data_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 ---
 
-*Last updated: 2026-02-23 — Phase 6 Task P6.4 (patterns 7-12 from Phases 1-5)*
+## Pattern 13: Multi-Agent Parallel Code Review (Module 8)
+
+**Context:** After completing all 51 GitHub issues (662 tests), the codebase needed a deep quality review before moving to production hardening. A single-pass review would be too shallow; sequential reviews would be too slow.
+
+**What we did:** Launched 6 specialist reviewer agents in parallel, each with a different focus:
+
+```
+Agent 1: Dead code analysis        → orphaned modules, unreachable code, stub classes
+Agent 2: Duplicate code patterns   → shared utilities, StrEnum proliferation, markdown boilerplate
+Agent 3: Test coverage gaps        → untested methods, missing error paths, property-based tests
+Agent 4: Decoupling analysis       → cross-package imports, hardcoded values, DI opportunities
+Agent 5: Reproducibility issues    → seeds, datetime handling, encoding, path handling
+Agent 6: API consistency           → naming conventions, return types, docstring styles, exceptions
+```
+
+**Architecture diagram:**
+```
+Orchestrating Agent (main context)
+    │
+    ├── launches 6 agents in parallel (each in background)
+    │   ├── Agent 1: dead code      ──→ reads 40+ src files
+    │   ├── Agent 2: duplicates     ──→ reads 35+ src files
+    │   ├── Agent 3: coverage       ──→ reads 50+ src + test files
+    │   ├── Agent 4: decoupling     ──→ reads 30+ src files
+    │   ├── Agent 5: reproducibility──→ reads 25+ src files
+    │   └── Agent 6: API consistency──→ reads 40+ src files
+    │
+    ├── waits for all 6 to complete (~2-3 minutes)
+    │
+    ├── reads each agent's findings (summaries, not raw files)
+    │
+    └── synthesizes into unified report with prioritized remediation plan
+```
+
+**Key insight:** Each agent gets its own 200K context window. Agent 3 (test coverage) read 50+ source AND test files — that's ~150K tokens of code. The orchestrating agent only receives the ~5K summary from each agent. Without this delegation, a single agent couldn't hold the entire codebase + analysis in context.
+
+**Results from actual run:**
+- 6 agents consumed ~334K total tokens across their independent analyses
+- Identified 42 actionable issues (4 critical, 12 high, 14 medium, 9 low)
+- Produced a unified remediation plan with 18 TDD-ready work items across 4 phases
+- The entire review (launch → synthesis → report) completed in one conversation turn
+
+**What the review found (real results):**
+| Agent | Key Finding |
+|-------|-------------|
+| Dead code | Sam3Adapter is entirely dead (constructor always raises) |
+| Duplicates | 13 files share identical `to_markdown()` patterns (~400 LOC extractable) |
+| Coverage | Zero error-path tests across the entire codebase |
+| Decoupling | Ensemble module imports concrete ModelAdapter (should use Protocol) |
+| Reproducibility | No centralized seed propagation; MONAI transforms unseeded |
+| API consistency | 10+ methods return `dict[str, Any]` where typed dataclasses should be used |
+
+**Anti-pattern avoided:** Running one massive "review everything" agent. Such an agent would exhaust its context window reading files before finishing analysis. The specialist pattern ensures each agent can deeply analyze its domain.
+
+**Anti-pattern avoided:** Sequential reviews (Agent 1 finishes, then Agent 2 starts). All 6 agents run simultaneously — the wall-clock time is `max(agent_times)` not `sum(agent_times)`.
+
+---
+
+*Last updated: 2026-02-25 — Pattern 13 from multi-agent code review (662 tests baseline)*

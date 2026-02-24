@@ -9,7 +9,7 @@ Generates document templates from AuditTrail data:
 
 from __future__ import annotations
 
-import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -63,7 +63,7 @@ class RegulatoryDocGenerator:
 
     def _header(self, title: str) -> str:
         """Generate standard document header."""
-        now = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d")
+        now = datetime.now(UTC).strftime("%Y-%m-%d")
         return (
             f"# {title}\n\n"
             f"**Product:** {self.product_name}\n"

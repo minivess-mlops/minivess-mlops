@@ -7,7 +7,7 @@ import torch
 from torch import Tensor
 
 if TYPE_CHECKING:
-    from minivess.adapters.base import ModelAdapter, SegmentationOutput  # noqa: F401
+    from minivess.adapters.base import ModelAdapter
     from minivess.config.models import EnsembleConfig
 
 logger = logging.getLogger(__name__)

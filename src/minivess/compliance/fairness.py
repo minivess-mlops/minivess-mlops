@@ -10,8 +10,8 @@ ML Auditing and Monitoring." NeurIPS 2022 Workshop.
 
 from __future__ import annotations
 
-import datetime
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -181,7 +181,7 @@ def generate_audit_report(
     -------
     Markdown string with fairness audit findings.
     """
-    now = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d")
+    now = datetime.now(UTC).strftime("%Y-%m-%d")
     status = "PASS" if report.passed else "FAIL"
 
     lines = [
