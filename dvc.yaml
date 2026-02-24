@@ -1,11 +1,19 @@
 stages:
+  download:
+    cmd: uv run python scripts/download_minivess.py
+    deps:
+      - scripts/download_minivess.py
+    outs:
+      - data/raw/minivess/
+    frozen: true  # Don't re-download on every dvc repro
+
   preprocess:
     cmd: uv run python -m minivess.data.preprocess
     deps:
       - src/minivess/data/preprocess.py
-      - data/raw/
+      - data/raw/minivess/
     outs:
-      - data/processed/
+      - data/processed/minivess/
     params:
       - configs/deployment/settings.toml:
           - default.data_dir
@@ -14,7 +22,7 @@ stages:
     cmd: uv run python -m minivess.validation.run
     deps:
       - src/minivess/validation/
-      - data/processed/
+      - data/processed/minivess/
     metrics:
       - data/validation_report.json:
           cache: false
