@@ -279,6 +279,24 @@ references:
       - prometheus_grafana
       - datadog
 
+  - citation_key: leest2025monitoring
+    relevance: "77% of ML teams report no dedicated monitoring or only custom-built. Motivates active monitoring investment."
+    supports_options:
+      - prometheus_grafana
+      - custom_dashboards
+
+  - citation_key: protschky2025monitoring
+    relevance: "17 monitoring practices on a 5-phase quality management cycle (define, measure, assess, act, control)."
+    supports_options:
+      - prometheus_grafana
+      - custom_dashboards
+
+  - citation_key: biswas2026agentops
+    relevance: "AgentOps CHANGE framework — agentic systems require fundamentally different monitoring (emergent behaviour, tool-use governance)."
+    supports_options:
+      - prometheus_grafana
+      - custom_dashboards
+
 tags:
   - operations
   - monitoring

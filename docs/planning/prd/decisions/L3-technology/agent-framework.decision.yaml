@@ -9,7 +9,7 @@ description: >
 
 decision_level: L3_technology
 status: active
-last_updated: 2026-02-23
+last_updated: 2026-02-24
 
 options:
   - option_id: langgraph
@@ -19,7 +19,7 @@ options:
       multi-step workflows, human-in-the-loop, and persistence.
       Partially implemented with initial agent definitions. Referenced
       as primary agent orchestrator in CLAUDE.md.
-    prior_probability: 0.40
+    prior_probability: 0.45
     status: resolved
     implementation_status: partial
     complements:
@@ -59,7 +59,7 @@ options:
       Build lightweight agents directly on LLM provider APIs with custom
       state management. Maximum control, minimum dependency, but
       significant development effort for tool calling and persistence.
-    prior_probability: 0.25
+    prior_probability: 0.20
     status: viable
     implementation_status: not_started
     constraints:
@@ -136,14 +136,18 @@ domain_applicability:
   general_medical: 0.80
 
 rationale: >
-  LangGraph (0.40) is resolved-partial as the primary agent framework, with
-  initial agent definitions for experiment triage and report generation.
-  Custom (0.25) has notable prior because lightweight domain-specific agents
-  may not need a full framework. CrewAI (0.20) is a simpler alternative for
+  LangGraph (0.45, up from 0.40) is resolved-partial as the primary agent
+  framework, strengthened by Phase 18 research showing alignment with the
+  co-evolving agent pattern (TissueLab) and L2→L3 autonomy transition
+  (Luo et al., 2026). L0-L5 data agent taxonomy maps current minivess at
+  L2 (tool-assisted, human-orchestrated); target is L3 (autonomous pipeline
+  orchestration). Custom (0.20, down from 0.25) has reduced prior as
+  framework-level features (state persistence, HITL patterns) become more
+  critical for L3 transition. CrewAI (0.20) is a simpler alternative for
   predefined multi-agent workflows. AutoGen (0.15) is viable but less
   aligned with the existing MONAI/LangChain stack. Phase 16 identified
-  acquisition control and clinical contract verification as core agent use
-  cases, increasing vascular_segmentation applicability from 0.75 to 0.90.
+  acquisition control and clinical contract verification; Phase 18 adds
+  co-evolving segmentation agent and UQ-gated autonomy as core use cases.
 
 references:
   - citation_key: langchain2024langgraph
@@ -168,6 +172,26 @@ references:
 
   - citation_key: sheng2026dills
     relevance: "DiLLS layered summary approach for diagnosing LLM multi-agent systems. Relevant for agent observability."
+    supports_options: ["langgraph"]
+
+  - citation_key: luo2026dataagents
+    relevance: "L0-L5 data agent autonomy taxonomy (SIGMOD 2026). Maps minivess at L2, target L3. LangGraph aligns with L3 graph-based orchestration."
+    supports_options: ["langgraph"]
+
+  - citation_key: zhu2025dataagents
+    relevance: "Companion survey of data agents. Bottlenecks to L3: limited pipeline orchestration, incomplete lifecycle coverage."
+    supports_options: ["langgraph", "custom"]
+
+  - citation_key: tissuelab2025
+    relevance: "TissueLab co-evolving agent: LLM orchestrator + local tool factories + active learning. Closest architecture to vascular MLOps agent."
+    supports_options: ["langgraph"]
+
+  - citation_key: rahman2025dsagents
+    relevance: "Lifecycle-aligned agent taxonomy. >90% of surveyed agents lack trust/safety mechanisms — highlights governance need."
+    supports_options: ["langgraph", "crewai", "autogen", "custom"]
+
+  - citation_key: medbayes2025
+    relevance: "MedBayes-Lite Bayesian UQ for agent confidence gating. UQ levels determine agent autonomy (auto vs. human-in-loop)."
     supports_options: ["langgraph"]
 
 tags:

@@ -271,6 +271,15 @@ references:
       - alibi_detect_mmd
       - evidently_statistical
 
+  - citation_key: leest2025causal
+    relevance: >
+      ML System Maps: causal diagrams with three-view attribution (AQ1-AQ3)
+      and six patterns (AP1.1-AP3.2) for systematic distribution shift
+      root-cause analysis. Directly applicable to vascular imaging drift.
+    supports_options:
+      - composite_tiered
+      - alibi_detect_mmd
+
 research_notes: >
   Phase 14 monitoring research findings: Alibi-Detect and Evidently are
   complementary, not competing — Alibi-Detect for statistical rigor on

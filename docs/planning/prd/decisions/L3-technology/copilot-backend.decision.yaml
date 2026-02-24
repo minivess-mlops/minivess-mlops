@@ -131,9 +131,13 @@ domain_applicability:
 rationale: >
   Graph RAG (0.35) is recommended for topology-aware vascular queries, inspired
   by MedRAG (Xiong et al., 2024; ACL Findings), Medical Graph RAG (Wu et al., 2024),
-  and PathChat copilot paradigm (Lu et al., 2024; Nature 634). Vector RAG (0.30) is
-  a simpler starting point. Direct LLM with tool calling (0.20) is the most flexible
-  but least efficient. No copilot exists for 3D vascular morphometry — this is an
+  and PathChat copilot paradigm (Lu et al., 2024; Nature 634). Phase 18 research
+  strengthens graph_rag evidence: Medical Graph RAG (ACL 2025) achieves SOTA on
+  evidence grounding; MedRAG (WWW 2025) shows 71% improvement in clinical QA via
+  SPOKE biomedical knowledge engine. Khan et al. (2025, SIGMOD Record) identify
+  GraphRAG and AgenticRAG as emerging paradigms. Vector RAG (0.30) is a simpler
+  starting point. Direct LLM with tool calling (0.20) is the most flexible but
+  least efficient. No copilot exists for 3D vascular morphometry — this is an
   unoccupied niche. Domain applicability is highest for vascular (core use case)
   and neuroimaging (vessel analysis relevant), lower for other domains.
 
@@ -153,6 +157,10 @@ references:
   - citation_key: chen2025pathrag
     relevance: "PathRAG: graph pruning for efficient retrieval-augmented generation."
     supports_options: ["graph_rag"]
+
+  - citation_key: khan2025rag
+    relevance: "SIGMOD Record panel on RAG for data management. Identifies GraphRAG, KG-RAG, AgenticRAG as emerging variants. Vector index scalability challenges at >1B vectors."
+    supports_options: ["graph_rag", "vector_rag"]
 
 tags:
   - technology

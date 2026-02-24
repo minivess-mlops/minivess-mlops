@@ -220,6 +220,28 @@ references:
     supports_options:
       - "regops_automated"
 
+  - citation_key: mdcg2025_6
+    relevance: "MDCG 2025-6 joint guidance on AI Act and medical devices. Single documentation set for high-risk MDAI."
+    supports_options:
+      - "iec_62304_full"
+      - "regops_automated"
+
+  - citation_key: fda2025tplc
+    relevance: "FDA TPLC draft guidance (Jan 2025) for AI-enabled device lifecycle management."
+    supports_options:
+      - "iec_62304_full"
+      - "regops_automated"
+
+  - citation_key: batista2025complops
+    relevance: "ComplOps framework for continuous compliance-as-code in CI/CD pipelines."
+    supports_options:
+      - "regops_automated"
+
+  - citation_key: lacasa2025certification
+    relevance: "10-step aerospace certification pipeline transferable to medical device AI validation."
+    supports_options:
+      - "iec_62304_full"
+
 research_notes: >
   Phase 11 research significantly expanded regulatory landscape understanding.
   Key findings: (1) IEC 62304 Ed.2 (Sep 2026) will expand scope to all health

@@ -177,6 +177,14 @@ references:
     relevance: "Model Cards framework. Foundation for automated model card generation."
     supports_options: ["automated_cards"]
 
+  - citation_key: lucaj2025techops
+    relevance: "TechOps three-template hierarchy (data, model, application) aligned with EU AI Act Annex IV. Immutable version-controlled artifacts."
+    supports_options: ["automated_cards", "ci_generated"]
+
+  - citation_key: ojewale2026audittrails
+    relevance: "LLM audit trail Capture layer instruments documentation generation with hash-chained governance records."
+    supports_options: ["automated_cards", "ci_generated"]
+
 tags:
   - operations
   - documentation

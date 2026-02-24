@@ -315,6 +315,32 @@ references:
     supports_options:
       - alert_human
 
+  - citation_key: leest2025causal
+    relevance: >
+      Causal System Maps provide structured methodology for drift root-cause
+      analysis: AQ1 (route), AQ2 (localise), AQ3 (externalise). Enables
+      targeted drift response rather than blanket retraining.
+    supports_options:
+      - alert_human
+      - automated_retrain
+
+  - citation_key: babic2025postmarket
+    relevance: >
+      Only ~5% of cleared AI medical devices have reported adverse events,
+      suggesting systematic underreporting. Motivates proactive drift response
+      over passive incident reporting.
+    supports_options:
+      - automated_retrain
+      - alert_human
+
+  - citation_key: esr2025pms
+    relevance: >
+      ESR consensus: PMS for AI should be continuous and proactive based on
+      systematic real-world performance data, not passive incident reporting.
+    supports_options:
+      - automated_retrain
+      - alert_human
+
 tags:
   - operations
   - drift

@@ -196,6 +196,10 @@ references:
     relevance: "Demonstrates clinical data shift patterns requiring robust validation."
     supports_options: ["pandera_ge", "deepchecks"]
 
+  - citation_key: seyferth2024metric
+    relevance: "METRIC 15-dimension framework for medical training dataset assessment. Maps to regulatory approval requirements (EU AI Act, FDA SaMD)."
+    supports_options: ["pandera_ge", "deepchecks"]
+
 tags:
   - technology
   - validation

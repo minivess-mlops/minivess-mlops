@@ -1,0 +1,179 @@
+decision_id: audit_trail_architecture
+title: "Audit Trail Architecture"
+description: >
+  Technical infrastructure for regulatory audit trails. Captures lifecycle
+  events, governance decisions, and model provenance in tamper-evident logs.
+  Critical for FDA 21 CFR Part 11 (electronic records/signatures), EU AI Act
+  Article 12 (automatic logging for high-risk AI), and IEC 62304 configuration
+  management. De la Torre (2026) identifies OLIF — audit trail fabrication by
+  LLM agents under operational pressure — as a systematic integrity threat
+  requiring Zero-Trust verification with Delta-I metric (medical threshold 0.30).
+  Ojewale et al. (2026) propose a three-layer architecture (Capture/Store/Use)
+  with hash-chained tamper-evident storage and governance decisions as first-class
+  objects.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-24
+
+options:
+  - option_id: hash_chained_logging
+    title: "Hash-Chained Audit Logging"
+    description: >
+      Three-layer Capture/Store/Use architecture (Ojewale et al., 2026).
+      Capture: emitter-based technical events + governance checkpoints via
+      Hugging Face TrainerCallback and FastAPI middleware. Store: append-only,
+      hash-chained JSONL with inter-organisational traceability via signed
+      pointers. Use: auditor-facing querying, integrity verification, evidence
+      packaging. Open-source implementation: llm-audit-trail Python library.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "experiment_tracking.mlflow"
+      - "regulatory_compliance_approach.complops_automated"
+
+  - option_id: mlflow_lineage
+    title: "MLflow + OpenLineage Metadata"
+    description: >
+      Lightweight audit trail using MLflow experiment metadata, run tags,
+      and OpenLineage (Marquez) for data lineage. Current partial implementation.
+      Provides basic provenance but lacks tamper-evidence and governance
+      decision recording.
+    prior_probability: 0.40
+    status: resolved
+    implementation_status: partial
+    complements:
+      - "experiment_tracking.mlflow"
+      - "lineage_tracking.openlineage"
+      - "model_governance.mlflow_tags"
+
+  - option_id: zero_trust_verified
+    title: "Zero-Trust Verified Logging"
+    description: >
+      De la Torre (2026) RAL/FCV architecture with Regulatory Awareness Layer,
+      Factual Consistency Vault, W3C PROV provenance, and Merkle-tree tamper
+      evidence. Delta-I integrity metric with domain-specific thresholds
+      (Medical = 0.30, most conservative). Addresses OLIF vulnerability in
+      LLM agents. Maps to EU AI Act Articles 9, 11, 12, 13, 14, 15, 86.
+    prior_probability: 0.25
+    status: experimental
+    implementation_status: not_started
+    constraints:
+      - "Requires custom implementation — no production library yet"
+      - "Delta-I metric needs calibration for vascular imaging domain"
+      - "Merkle-tree infrastructure adds deployment complexity"
+
+conditional_on:
+  - parent_decision_id: regulatory_compliance_approach
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: complops_automated
+        then_probabilities:
+          hash_chained_logging: 0.40
+          mlflow_lineage: 0.25
+          zero_trust_verified: 0.35
+      - given_parent_option: manual_audit
+        then_probabilities:
+          hash_chained_logging: 0.20
+          mlflow_lineage: 0.55
+          zero_trust_verified: 0.25
+      - given_parent_option: hybrid_llm_assisted
+        then_probabilities:
+          hash_chained_logging: 0.35
+          mlflow_lineage: 0.30
+          zero_trust_verified: 0.35
+
+  - parent_decision_id: experiment_tracking
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: mlflow
+        then_probabilities:
+          hash_chained_logging: 0.30
+          mlflow_lineage: 0.45
+          zero_trust_verified: 0.25
+      - given_parent_option: wandb
+        then_probabilities:
+          hash_chained_logging: 0.40
+          mlflow_lineage: 0.30
+          zero_trust_verified: 0.30
+      - given_parent_option: tensorboard
+        then_probabilities:
+          hash_chained_logging: 0.40
+          mlflow_lineage: 0.30
+          zero_trust_verified: 0.30
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      hash_chained_logging: 0.20
+      mlflow_lineage: 0.55
+      zero_trust_verified: 0.25
+    rationale: "Solo researchers use MLflow lineage as lightweight audit trail"
+  lab_group:
+    probability_overrides:
+      hash_chained_logging: 0.35
+      mlflow_lineage: 0.40
+      zero_trust_verified: 0.25
+    rationale: "Lab groups benefit from hash-chained logging for shared accountability"
+  clinical_deployment:
+    probability_overrides:
+      hash_chained_logging: 0.35
+      mlflow_lineage: 0.25
+      zero_trust_verified: 0.40
+    rationale: "Clinical deployment needs Zero-Trust verification for regulatory compliance"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-24
+  next_review: 2026-05-24
+  change_drivers:
+    - "EU AI Act Article 12 implementation requirements"
+    - "FDA 21 CFR Part 11 electronic records enforcement"
+    - "OLIF detection and mitigation tooling maturity"
+    - "llm-audit-trail library adoption"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  MLflow lineage (0.40) is the resolved lightweight option, leveraging existing
+  MLflow + OpenLineage infrastructure. Hash-chained logging (0.35) provides
+  stronger tamper-evidence following Ojewale et al. (2026) three-layer
+  architecture. Zero-Trust verified (0.25) is the most rigorous option
+  addressing OLIF vulnerability (de la Torre, 2026) but requires custom
+  implementation. The medical domain Delta-I threshold of 0.30 is the most
+  conservative, reflecting the high stakes of audit trail integrity in
+  healthcare AI.
+
+references:
+  - citation_key: delatorre2026olif
+    relevance: >
+      OLIF formalisation and Zero-Trust RAL/FCV architecture with Delta-I
+      metric (medical threshold 0.30) and Merkle-tree tamper evidence.
+    supports_options:
+      - zero_trust_verified
+
+  - citation_key: ojewale2026audittrails
+    relevance: >
+      Three-layer Capture/Store/Use architecture with hash-chained logging,
+      governance decisions as first-class objects, and open-source library.
+    supports_options:
+      - hash_chained_logging
+
+  - citation_key: batista2025complops
+    relevance: >
+      ComplOps evidence and traceability layer auto-generating signed
+      audit artifacts linked to commits and pipeline runs.
+    supports_options:
+      - hash_chained_logging
+      - zero_trust_verified
+
+tags:
+  - technology
+  - audit-trail
+  - compliance
+  - safety-critical

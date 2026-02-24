@@ -157,6 +157,35 @@ references:
     supports_options:
       - full_registry
 
+  - citation_key: matthew2025versioning
+    relevance: "ML-specific semantic versioning (major=architecture, minor=retraining, patch=hyperparameters) for governance."
+    supports_options:
+      - full_registry
+      - mlflow_tags
+
+  - citation_key: seuru2026ode
+    relevance: "ODE protocol (Overview, Data, Execution) for standardised ML documentation — complements model governance."
+    supports_options:
+      - full_registry
+      - mlflow_tags
+
+  - citation_key: prause2026canvas
+    relevance: "ML Canvas: strategy > tooling for project success. Organisational support→strategy→process→ecosystem."
+    supports_options:
+      - full_registry
+      - mlflow_tags
+
+  - citation_key: fda2025tplc
+    relevance: "FDA TPLC draft guidance requires model description, data lineage, bias analysis — shapes governance requirements."
+    supports_options:
+      - full_registry
+
+  - citation_key: kokina2025auditing
+    relevance: "Big 4 audit firms disable dynamic learning during engagements — maps to locked vs. adaptive algorithm governance."
+    supports_options:
+      - full_registry
+      - mlflow_tags
+
 tags:
   - operations
   - governance

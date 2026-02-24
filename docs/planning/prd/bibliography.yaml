@@ -13,7 +13,7 @@
 # 4. Sub-citations: when ingesting a paper, also add papers IT cites that
 #    are relevant to other decision nodes.
 #
-# last_updated: 2026-02-24  (Phase 16: +15 entries for agentic RAG/IaC angle plan)
+# last_updated: 2026-02-24  (Phase 20: +15 entries for Regulatory Ops)
 
 bibliography:
 
@@ -2505,3 +2505,739 @@ bibliography:
     topics:
       - clinical_contract_schema
       - model_governance
+
+  # ============================================================
+  # Data Engineering / Quality / ETL / Interoperability (Phase 17)
+  # ============================================================
+
+  - citation_key: carbonaro2025fhir
+    inline_citation: "Carbonaro et al. (2025)"
+    authors: "Carbonaro, A., Iovine, L., Piciocchi, A., Baldazzi, G., Pellegrino, P., Marfoglia, A., & Gorrini, A."
+    year: 2025
+    title: "An ontology-based data engineering pipeline for FHIR-compliant oncological clinical data"
+    venue: "Computers in Biology and Medicine 197, 111051"
+    doi: "10.1016/j.compbiomed.2025.111051"
+    url: ""
+    evidence_type: method
+    topics:
+      - clinical_data_format
+      - data_storage_architecture
+
+  - citation_key: marfoglia2025fhir
+    inline_citation: "Marfoglia et al. (2025)"
+    authors: "Marfoglia, A., D'Errico, F., Mellone, S., & Carbonaro, A."
+    year: 2025
+    title: "Towards FHIR-based clinical data interoperability: an ontological mapping approach"
+    venue: "Computers in Biology and Medicine 187, 109745"
+    doi: "10.1016/j.compbiomed.2025.109745"
+    url: ""
+    evidence_type: method
+    topics:
+      - clinical_data_format
+
+  - citation_key: marfoglia2026medsowl
+    inline_citation: "Marfoglia et al. (2026)"
+    authors: "Marfoglia, A., Jhee, J. H., & Coulet, A."
+    year: 2026
+    title: "MEDS-OWL: A Semantic Web Extension of the Medical Event Data Standard for ML-Ready Clinical Data"
+    venue: "arXiv:2601.04164v2"
+    doi: ""
+    url: "https://arxiv.org/abs/2601.04164"
+    evidence_type: method
+    topics:
+      - clinical_data_format
+      - copilot_backend
+
+  - citation_key: marfoglia2026connected
+    inline_citation: "Marfoglia et al. (2026)"
+    authors: "Marfoglia, A., D'Errico, F., Mellone, S., & Carbonaro, A."
+    year: 2026
+    title: "Knowledge graph-based patient digital twins: The CONNECTED framework"
+    venue: "Future Generation Computer Systems 180, 108380"
+    doi: "10.1016/j.future.2026.108380"
+    url: ""
+    evidence_type: method
+    topics:
+      - clinical_data_format
+      - data_storage_architecture
+
+  - citation_key: windhager2023imc
+    inline_citation: "Windhager et al. (2023)"
+    authors: "Windhager, J., Bodenmiller, B., & Eling, N."
+    year: 2023
+    title: "An end-to-end workflow for multiplexed image processing and analysis"
+    venue: "Nature Protocols 18(11), 3565-3613"
+    doi: "10.1038/s41596-023-00881-0"
+    url: ""
+    evidence_type: method
+    topics:
+      - data_storage_architecture
+      - label_quality
+
+  - citation_key: madler2025scportrait
+    inline_citation: "Madler et al. (2025)"
+    authors: "Madler, S. C., Schmacke, N. A., et al."
+    year: 2025
+    title: "scPortrait: A scalable toolkit for processing, analyzing, and modeling single-cell imaging data"
+    venue: "bioRxiv 2025.09.22.677590"
+    doi: "10.1101/2025.09.22.677590"
+    url: ""
+    evidence_type: tool_release
+    topics:
+      - data_storage_architecture
+
+  - citation_key: dawod2025spacemap
+    inline_citation: "Dawod et al. (2025)"
+    authors: "Dawod, A., Bhatt, D., Chen, J., et al."
+    year: 2025
+    title: "SPACEMAP: Resolving cell phenotyping discordance in multiplex tissue imaging"
+    venue: "bioRxiv 2025.11.27.690631"
+    doi: "10.1101/2025.11.27.690631"
+    url: ""
+    evidence_type: method
+    topics:
+      - label_quality
+      - data_harmonization_method
+
+  - citation_key: cheng2024harmonization
+    inline_citation: "Cheng et al. (2024)"
+    authors: "Cheng, C., et al."
+    year: 2024
+    title: "A General Primer for Data Harmonization"
+    venue: "Scientific Data 11, 152"
+    doi: "10.1038/s41597-024-02956-3"
+    url: ""
+    evidence_type: review
+    topics:
+      - data_harmonization_method
+
+  - citation_key: zhou2025datallm
+    inline_citation: "Zhou et al. (2025)"
+    authors: "Zhou, X., et al."
+    year: 2025
+    title: "Data x LLM: From Principles to Practices"
+    venue: "arXiv:2505.18458v3"
+    doi: ""
+    url: "https://arxiv.org/abs/2505.18458"
+    evidence_type: review
+    topics:
+      - clinical_data_format
+      - data_storage_architecture
+      - copilot_backend
+
+  - citation_key: lin2025lead
+    inline_citation: "Lin et al. (2025)"
+    authors: "Lin, J., Zheng, Y., Zhang, X., Huang, Q., Hu, J., & Zhao, X."
+    year: 2025
+    title: "LEAD: LEArning to Iteratively Select Data for LLM Instruction Tuning"
+    venue: "Proceedings of the VLDB Endowment, Vol. 14"
+    doi: ""
+    url: "https://arxiv.org/abs/2505.07437"
+    evidence_type: method
+    topics:
+      - data_storage_architecture
+
+  - citation_key: ciupek2025fl
+    inline_citation: "Ciupek et al. (2025)"
+    authors: "Ciupek, M., Malawski, M., & Pieciak, T."
+    year: 2025
+    title: "Federated Learning: A new frontier in the exploration of multi-institutional medical imaging data"
+    venue: "arXiv:2503.20107v2"
+    doi: ""
+    url: "https://arxiv.org/abs/2503.20107"
+    evidence_type: review
+    topics:
+      - federated_learning
+      - data_harmonization_method
+
+  - citation_key: wasi2025messyclinic
+    inline_citation: "Wasi & Ridoy (2025)"
+    authors: "Wasi, M. A., & Ridoy, M. A. R."
+    year: 2025
+    title: "Building Clinical AI: Challenges in Multimodal Corpora Construction, Bias Mitigation, and Responsible Deployment"
+    venue: "NeurIPS 2025 Workshop"
+    doi: ""
+    url: ""
+    evidence_type: position_paper
+    topics:
+      - clinical_data_format
+      - data_harmonization_method
+
+  - citation_key: seyferth2024metric
+    inline_citation: "Seyferth et al. (2024)"
+    authors: "Seyferth, S., et al."
+    year: 2024
+    title: "The METRIC-Framework for Assessing Data Quality for Trustworthy AI in Medicine"
+    venue: "npj Digital Medicine"
+    doi: "10.1038/s41746-024-01196-4"
+    url: ""
+    evidence_type: framework
+    topics:
+      - data_validation_tools
+      - label_quality
+
+  - citation_key: erlangen2025fhirimaging
+    inline_citation: "Univ. Hosp. Erlangen (2025)"
+    authors: "University Hospital Erlangen group"
+    year: 2025
+    title: "Large-Scale Integration of DICOM Metadata into HL7-FHIR for Medical Research"
+    venue: "Applied Clinical Informatics"
+    doi: ""
+    url: "https://pmc.ncbi.nlm.nih.gov/articles/PMC12133321/"
+    evidence_type: method
+    topics:
+      - clinical_data_format
+
+  - citation_key: jmir2025lakehouse
+    inline_citation: "JMIR (2025)"
+    authors: "JMIR"
+    year: 2025
+    title: "Enhancing Clinical Data Infrastructure for AI Research: Comparative Evaluation of Data Management Architectures"
+    venue: "JMIR Medical Informatics"
+    doi: ""
+    url: "https://pmc.ncbi.nlm.nih.gov/articles/PMC12357119/"
+    evidence_type: comparison
+    topics:
+      - data_storage_architecture
+
+  # ============================================================
+  # Data Science Practices with Agents (Phase 18)
+  # ============================================================
+
+  - citation_key: luo2026dataagents
+    inline_citation: "Luo et al. (2026)"
+    authors: "Luo, Y., et al."
+    year: 2026
+    title: "Data Agents: Levels, State of the Art, and Open Problems"
+    venue: "SIGMOD 2026 Tutorial"
+    doi: ""
+    url: "https://arxiv.org/abs/2602.04261"
+    evidence_type: survey
+    topics:
+      - agent_framework
+      - pipeline_orchestration
+
+  - citation_key: zhu2025dataagents
+    inline_citation: "Zhu et al. (2025)"
+    authors: "Zhu, Y., et al."
+    year: 2025
+    title: "A Survey of Data Agents: Emerging Paradigm or Overstated Hype?"
+    venue: "arXiv:2510.23587"
+    doi: ""
+    url: "https://arxiv.org/abs/2510.23587"
+    evidence_type: survey
+    topics:
+      - agent_framework
+      - pipeline_orchestration
+
+  - citation_key: rahman2025dsagents
+    inline_citation: "Rahman et al. (2025)"
+    authors: "Rahman, M., et al."
+    year: 2025
+    title: "LLM-Based Data Science Agents: A Survey"
+    venue: "arXiv:2510.04023 (submitted to POMACS)"
+    doi: ""
+    url: "https://arxiv.org/abs/2510.04023"
+    evidence_type: survey
+    topics:
+      - agent_framework
+      - label_quality
+
+  - citation_key: nie2026dsgym
+    inline_citation: "Nie et al. (2026)"
+    authors: "Nie, F., et al."
+    year: 2026
+    title: "DSGym: A Holistic Framework for Evaluating and Training Data Science Agents"
+    venue: "arXiv:2601.16344 (Stanford/Together AI)"
+    doi: ""
+    url: "https://arxiv.org/abs/2601.16344"
+    evidence_type: benchmark
+    topics:
+      - agent_framework
+
+  - citation_key: zhou2026llmclean
+    inline_citation: "Zhou et al. (2026)"
+    authors: "Zhou, W., et al."
+    year: 2026
+    title: "Can LLMs Clean Up Your Mess? Survey of Application-Ready Data Preparation with LLMs"
+    venue: "arXiv:2601.17058"
+    doi: ""
+    url: "https://arxiv.org/abs/2601.17058"
+    evidence_type: survey
+    topics:
+      - agent_framework
+      - data_validation_tools
+
+  - citation_key: khan2025rag
+    inline_citation: "Khan et al. (2025)"
+    authors: "Khan, A., et al."
+    year: 2025
+    title: "RAG: What is There for Data Management Researchers?"
+    venue: "SIGMOD Record 54(4), 33-42"
+    doi: ""
+    url: ""
+    evidence_type: survey
+    topics:
+      - copilot_backend
+
+  - citation_key: york2025harmonia
+    inline_citation: "York et al. (2025)"
+    authors: "York, A., et al."
+    year: 2025
+    title: "Interactive Data Harmonization with LLM Agents"
+    venue: "arXiv:2502.07132 (NYU)"
+    doi: ""
+    url: "https://arxiv.org/abs/2502.07132"
+    evidence_type: method
+    topics:
+      - data_harmonization_method
+      - agent_framework
+
+  - citation_key: chakraborty2026bayesian
+    inline_citation: "Chakraborty (2026)"
+    authors: "Chakraborty, R."
+    year: 2026
+    title: "Progressive Bayesian Confidence Architectures for Cold-Start Health Analytics"
+    venue: "arXiv:2601.03299"
+    doi: ""
+    url: "https://arxiv.org/abs/2601.03299"
+    evidence_type: method
+    topics:
+      - uncertainty_quantification
+
+  - citation_key: falcao2025interop
+    inline_citation: "Falcao et al. (2025)"
+    authors: "Falcao, R., et al."
+    year: 2025
+    title: "Evaluating LLM-based interoperability"
+    venue: "ICSE 2026 (accepted). arXiv:2510.23893"
+    doi: ""
+    url: "https://arxiv.org/abs/2510.23893"
+    evidence_type: benchmark
+    topics:
+      - clinical_data_format
+      - agent_framework
+
+  - citation_key: hoseini2025e2eml
+    inline_citation: "Hoseini et al. (2025)"
+    authors: "Hoseini, S., et al."
+    year: 2025
+    title: "End-to-End ML with LLMs and Semantic Data Management"
+    venue: "DEEM@SIGMOD 2025"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - clinical_data_format
+      - data_storage_architecture
+
+  - citation_key: tissuelab2025
+    inline_citation: "TissueLab (2025)"
+    authors: "TissueLab Team"
+    year: 2025
+    title: "TissueLab: A Co-Evolving Agentic AI System for Medical Imaging"
+    venue: "arXiv:2509.20279"
+    doi: ""
+    url: "https://arxiv.org/abs/2509.20279"
+    evidence_type: method
+    topics:
+      - agent_framework
+      - annotation_workflow
+
+  - citation_key: medbayes2025
+    inline_citation: "MedBayes-Lite (2025)"
+    authors: "MedBayes Team"
+    year: 2025
+    title: "MedBayes-Lite: Bayesian Uncertainty Quantification for Safe Clinical Decision Support"
+    venue: "arXiv:2511.16625"
+    doi: ""
+    url: "https://arxiv.org/abs/2511.16625"
+    evidence_type: method
+    topics:
+      - uncertainty_quantification
+      - agent_framework
+
+  # MLOps Practices (Phase 19)
+
+  - citation_key: angelo2025pipeline
+    inline_citation: "Angelo et al. (2025)"
+    authors: "Angelo, D. E. L., et al."
+    year: 2025
+    title: "Making a Pipeline Production-Ready: Challenges and Lessons Learned in the Healthcare Domain"
+    venue: "arXiv:2506.06946v3"
+    doi: ""
+    url: "https://arxiv.org/abs/2506.06946"
+    evidence_type: experience_report
+    topics:
+      - serving_architecture
+      - containerization
+
+  - citation_key: cordeiro2025hexagonal
+    inline_citation: "Cordeiro et al. (2025)"
+    authors: "Cordeiro, R., et al."
+    year: 2025
+    title: "Reusability in MLOps: Leveraging Ports and Adapters to Build a Microservices Architecture for the Maritime Domain"
+    venue: "arXiv:2512.08657v1"
+    doi: ""
+    url: "https://arxiv.org/abs/2512.08657"
+    evidence_type: method
+    topics:
+      - serving_architecture
+
+  - citation_key: wu2020ddeep3m
+    inline_citation: "Wu et al. (2020)"
+    authors: "Wu, X., et al."
+    year: 2020
+    title: "DDeep3M: Docker-powered deep learning for biomedical image segmentation"
+    venue: "Journal of Neuroscience Methods 342"
+    doi: ""
+    url: ""
+    evidence_type: method
+    topics:
+      - containerization
+      - serving_architecture
+
+  - citation_key: leest2025monitoring
+    inline_citation: "Leest et al. (2025a)"
+    authors: "Leest, J., et al."
+    year: 2025
+    title: "Monitoring and Observability of Machine Learning Systems: Current Practices and Gaps"
+    venue: "arXiv:2510.24142v1"
+    doi: ""
+    url: "https://arxiv.org/abs/2510.24142"
+    evidence_type: empirical
+    topics:
+      - monitoring_stack
+
+  - citation_key: leest2025causal
+    inline_citation: "Leest et al. (2025b)"
+    authors: "Leest, J., et al."
+    year: 2025
+    title: "Tracing Distribution Shifts with Causal System Maps"
+    venue: "arXiv:2510.23528v1"
+    doi: ""
+    url: "https://arxiv.org/abs/2510.23528"
+    evidence_type: method
+    topics:
+      - drift_detection_method
+      - drift_response
+
+  - citation_key: protschky2025monitoring
+    inline_citation: "Protschky et al. (2025)"
+    authors: "Protschky, D., et al."
+    year: 2025
+    title: "What Gets Measured Gets Improved: Monitoring ML in Production"
+    venue: "IEEE Access 13, 18693-18714"
+    doi: ""
+    url: ""
+    evidence_type: empirical
+    topics:
+      - monitoring_stack
+
+  - citation_key: bade2026mlops
+    inline_citation: "Bade (2026)"
+    authors: "Bade, S."
+    year: 2026
+    title: "From Experimentation To Enterprise Reality: Why MLOps Is The Backbone Of Production AI"
+    venue: "J. International Crisis and Risk Communication Research 9(1)"
+    doi: ""
+    url: ""
+    evidence_type: review
+    topics:
+      - model_promotion_strategy
+
+  - citation_key: panawala2025devops
+    inline_citation: "Panawala (2025)"
+    authors: "Panawala, J."
+    year: 2025
+    title: "From DevOps to MLOps: A Case Study on Adapting Continuous Software Engineering for ML Operationalization"
+    venue: "MSc Thesis, Blekinge Institute of Technology"
+    doi: ""
+    url: ""
+    evidence_type: case_study
+    topics:
+      - ci_cd_platform
+      - pipeline_orchestration
+
+  - citation_key: prause2026canvas
+    inline_citation: "Prause (2026)"
+    authors: "Prause, M."
+    year: 2026
+    title: "The Machine Learning Canvas: Empirical Findings on Why Strategy Matters More Than AI Code Generation"
+    venue: "IEEE format preprint"
+    doi: ""
+    url: ""
+    evidence_type: empirical
+    topics:
+      - model_governance
+
+  - citation_key: matthew2025versioning
+    inline_citation: "Matthew (2025)"
+    authors: "Matthew, B."
+    year: 2025
+    title: "Model Versioning and Reproducibility Challenges in Large-Scale ML Projects"
+    venue: "2025"
+    doi: ""
+    url: ""
+    evidence_type: review
+    topics:
+      - model_governance
+      - data_management_strategy
+
+  - citation_key: wozniak2025slr
+    inline_citation: "Wozniak et al. (2025)"
+    authors: "Wozniak, A. P., et al."
+    year: 2025
+    title: "MLOps Components, Tools, Process, and Metrics: A Systematic Literature Review"
+    venue: "IEEE Access 13"
+    doi: ""
+    url: ""
+    evidence_type: slr
+    topics:
+      - monitoring_stack
+      - experiment_tracking
+
+  - citation_key: zampetti2026msr
+    inline_citation: "Zampetti et al. (2026)"
+    authors: "Zampetti, F., et al."
+    year: 2026
+    title: "How are MLOps Frameworks Used in Open Source Projects?"
+    venue: "MSR 2026"
+    doi: ""
+    url: ""
+    evidence_type: empirical
+    topics:
+      - experiment_tracking
+
+  - citation_key: biswas2026agentops
+    inline_citation: "Biswas et al. (2026)"
+    authors: "Biswas, S., et al."
+    year: 2026
+    title: "Architecting AgentOps Needs CHANGE"
+    venue: "arXiv:2601.06456v1"
+    doi: ""
+    url: "https://arxiv.org/abs/2601.06456"
+    evidence_type: method
+    topics:
+      - agent_framework
+      - monitoring_stack
+
+  - citation_key: seuru2026ode
+    inline_citation: "Seuru et al. (2026)"
+    authors: "Seuru, S., et al."
+    year: 2026
+    title: "The ODE (Overview, Data, and Execution) protocol for a standardised use of machine learning"
+    venue: "Environmental Modelling & Software 198"
+    doi: ""
+    url: ""
+    evidence_type: method
+    topics:
+      - documentation_standard
+      - model_governance
+
+  - citation_key: zhang2026secmlops
+    inline_citation: "Zhang et al. (2026)"
+    authors: "Zhang, X., et al."
+    year: 2026
+    title: "SecMLOps: A Comprehensive Framework for Integrating Security Throughout the Machine Learning Operations Lifecycle"
+    venue: "Empirical Software Engineering 31, 74. arXiv:2601.10848v1"
+    doi: ""
+    url: "https://arxiv.org/abs/2601.10848"
+    evidence_type: framework
+    topics:
+      - secrets_management
+
+  # ============================================================
+  # Regulatory Ops (Phase 20)
+  # ============================================================
+
+  - citation_key: batista2025complops
+    inline_citation: "Batista et al. (2025)"
+    authors: "Batista, R., Ferreira, A., Goldman, A."
+    year: 2025
+    title: "ComplOps: A Framework for Continuous Compliance Management in Software Development"
+    venue: "HAL Preprint hal-05160944"
+    doi: ""
+    url: ""
+    evidence_type: framework
+    topics:
+      - regulatory_compliance_approach
+      - compliance_depth
+
+  - citation_key: chassidim2025shiftleft
+    inline_citation: "Chassidim et al. (2025)"
+    authors: "Chassidim, H., Ben-Shushan, I., Almog, D., Mark, S."
+    year: 2025
+    title: "Shift Left Ethics: Generating Code Is Easy, Generating Responsibility Is Challenging"
+    venue: "Preprint, Shamoon College of Engineering"
+    doi: ""
+    url: ""
+    evidence_type: empirical
+    topics:
+      - compliance_depth
+
+  - citation_key: delatorre2026olif
+    inline_citation: "de la Torre (2026)"
+    authors: "de la Torre Lorente, J. L."
+    year: 2026
+    title: "Audit-Trail Fabrication in Tool-Using LLM Agents: Operator-Induced Longitudinal Integrity Failure (OLIF)"
+    venue: "Preprint, Zenodo"
+    doi: "10.5281/zenodo.18463378"
+    url: ""
+    evidence_type: method
+    topics:
+      - audit_trail_architecture
+      - agent_framework
+
+  - citation_key: ojewale2026audittrails
+    inline_citation: "Ojewale et al. (2026)"
+    authors: "Ojewale, V., Suresh, H., Venkatasubramanian, S."
+    year: 2026
+    title: "Audit Trails for Accountability in Large Language Models"
+    venue: "arXiv:2601.20727v1"
+    doi: ""
+    url: "https://arxiv.org/abs/2601.20727"
+    evidence_type: method
+    topics:
+      - audit_trail_architecture
+      - experiment_tracking
+
+  - citation_key: kokina2025auditing
+    inline_citation: "Kokina et al. (2025)"
+    authors: "Kokina, J., Blanchette, S., Davenport, T. H., Pachamanova, D."
+    year: 2025
+    title: "Challenges and Opportunities for Artificial Intelligence in Auditing: Evidence from the Field"
+    venue: "Int. J. Accounting Information Systems 56, 100734"
+    doi: "10.1016/j.accinf.2025.100734"
+    url: ""
+    evidence_type: empirical
+    topics:
+      - model_governance
+      - regulatory_compliance_approach
+
+  - citation_key: lacasa2025certification
+    inline_citation: "Lacasa et al. (2025)"
+    authors: "Lacasa, L., Pardo, A., Arbelo, P., et al."
+    year: 2025
+    title: "Towards Certification: A Complete Statistical Validation Pipeline for Supervised Learning in Industry"
+    venue: "Expert Systems with Applications 277, 127169"
+    doi: "10.1016/j.eswa.2025.127169"
+    url: ""
+    evidence_type: method
+    topics:
+      - uncertainty_quantification
+      - validation_depth
+
+  - citation_key: marino2025airegbench
+    inline_citation: "Marino et al. (2025)"
+    authors: "Marino, B., Hunter, R., Schnabl, C., et al."
+    year: 2025
+    title: "AIReg-Bench: Benchmarking Language Models That Assess AI Regulation Compliance"
+    venue: "arXiv:2510.01474v3"
+    doi: ""
+    url: "https://arxiv.org/abs/2510.01474"
+    evidence_type: benchmark
+    topics:
+      - regulatory_compliance_approach
+
+  - citation_key: marino2026cairc
+    inline_citation: "Marino & Lane (2026)"
+    authors: "Marino, B., Lane, N. D."
+    year: 2026
+    title: "Computational Compliance for AI Regulation: Blueprint for a New Research Domain"
+    venue: "arXiv:2601.04474v1"
+    doi: ""
+    url: "https://arxiv.org/abs/2601.04474"
+    evidence_type: framework
+    topics:
+      - regulatory_compliance_approach
+
+  - citation_key: lucaj2025techops
+    inline_citation: "Lucaj et al. (2025)"
+    authors: "Lucaj, L., Loosley, A., Jonsson, H., Gasser, U., van der Smagt, P."
+    year: 2025
+    title: "TechOps: Technical Documentation Templates for the AI Act"
+    venue: "AIES 2025 (AAAI/ACM), pp. 1647-1660"
+    doi: ""
+    url: "https://github.com/aloosley/techops"
+    evidence_type: method
+    topics:
+      - documentation_generation
+      - regulatory_compliance_approach
+
+  - citation_key: babic2025postmarket
+    inline_citation: "Babic et al. (2025)"
+    authors: "Babic, B., et al."
+    year: 2025
+    title: "Postmarket Surveillance of AI/ML Medical Devices"
+    venue: "npj Digital Medicine 8, 328"
+    doi: ""
+    url: "https://github.com/melificient/medAI"
+    evidence_type: empirical
+    topics:
+      - drift_response
+      - monitoring_stack
+
+  - citation_key: mdcg2025_6
+    inline_citation: "MDCG (2025)"
+    authors: "Medical Device Coordination Group"
+    year: 2025
+    title: "MDCG 2025-6: Guidance on AI Act and Medical Devices"
+    venue: "MDCG Guidance Document"
+    doi: ""
+    url: ""
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - regulatory_compliance_approach
+
+  - citation_key: iec62304_ed2_2026
+    inline_citation: "IEC (2026)"
+    authors: "International Electrotechnical Commission"
+    year: 2026
+    title: "IEC 62304 Edition 2: Medical Device Software — Software Life Cycle Processes"
+    venue: "IEC Standard (expected September 2026)"
+    doi: ""
+    url: ""
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+
+  - citation_key: fda2025tplc
+    inline_citation: "FDA (2025)"
+    authors: "U.S. Food and Drug Administration"
+    year: 2025
+    title: "Artificial Intelligence-Enabled Device Software Functions: Lifecycle Management and Marketing Submission Recommendations"
+    venue: "FDA Draft Guidance, January 2025"
+    doi: ""
+    url: ""
+    evidence_type: regulatory
+    topics:
+      - compliance_depth
+      - model_governance
+
+  - citation_key: esr2025pms
+    inline_citation: "ESR (2025)"
+    authors: "European Society of Radiology"
+    year: 2025
+    title: "Consensus Recommendations on AI Post-Market Surveillance"
+    venue: "ESR Consensus Statement, December 2025"
+    doi: ""
+    url: ""
+    evidence_type: consensus
+    topics:
+      - drift_response
+      - monitoring_stack
+
+  - citation_key: ketryx2025platform
+    inline_citation: "Ketryx (2025)"
+    authors: "Ketryx"
+    year: 2025
+    title: "Ketryx: Regulatory Compliance and ALM for Life Sciences"
+    venue: "Commercial platform"
+    doi: ""
+    url: ""
+    evidence_type: tool
+    topics:
+      - regulatory_compliance_approach
+      - regulatory_documentation_tool

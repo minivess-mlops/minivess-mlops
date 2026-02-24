@@ -1,0 +1,222 @@
+decision_id: regulatory_compliance_approach
+title: "Regulatory Compliance Approach"
+description: >
+  How regulatory compliance is managed operationally. ComplOps-style automated
+  compliance embeds Compliance-as-Code (CaC) into CI/CD pipelines (Batista et al.,
+  2025). Manual audit relies on periodic human review with spreadsheet/document
+  tracking. Hybrid LLM-assisted uses frontier LLMs for compliance assessment
+  (AIReg-Bench validated: kappa up to 0.863; Marino et al., 2025) with human
+  oversight. The CAIRC Inspector/Mechanic closed-loop pattern (Marino & Lane,
+  2026) provides a framework for continuous automated compliance. Compliance
+  costs estimated at EUR 7,500-400,000 per system motivate automation.
+
+decision_level: L5_operations
+status: active
+last_updated: 2026-02-24
+
+options:
+  - option_id: complops_automated
+    title: "ComplOps Automated Compliance"
+    description: >
+      Compliance-as-Code (CaC) engine interpreting requirements into executable
+      policies via Rego/YAML, integrated into CI/CD and MLOps pipelines
+      (Batista et al., 2025). Auto-generates signed audit artifacts linked to
+      commits/pipeline runs. CAIRC Inspector/Mechanic closed-loop for continuous
+      compliance monitoring (Marino & Lane, 2026). Requires significant upfront
+      investment in policy codification.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "compliance_depth.regops_automated"
+      - "audit_trail_architecture.hash_chained_logging"
+      - "ci_cd_platform.github_actions"
+    constraints:
+      - "Requires regulatory expertise to codify compliance rules"
+      - "CaC engine maintenance as regulations evolve"
+
+  - option_id: manual_audit
+    title: "Manual Compliance Audit"
+    description: >
+      Periodic manual compliance review with spreadsheet/document tracking.
+      Current effective state. Kokina et al. (2025) document this as the
+      dominant approach even in Big 4 audit firms. Firms disable dynamic
+      learning during audits, reflecting the tension between continuous
+      improvement and certifiability.
+    prior_probability: 0.40
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "compliance_depth.lightweight_audit"
+      - "model_governance.mlflow_tags"
+
+  - option_id: hybrid_llm_assisted
+    title: "Hybrid LLM-Assisted Compliance"
+    description: >
+      Frontier LLMs screen technical documentation against regulatory
+      requirements (EU AI Act Articles 9, 10, 12, 14, 15), with human
+      expert review of flagged issues. AIReg-Bench (Marino et al., 2025)
+      validates that Gemini 2.5 Pro achieves kappa = 0.863 on EU AI Act
+      compliance assessment. TechOps templates (Lucaj et al., 2025) provide
+      structured input format. Delta-I integrity metric (de la Torre, 2026)
+      with medical threshold 0.30 guards against LLM audit trail fabrication.
+    prior_probability: 0.35
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "audit_trail_architecture.zero_trust_verified"
+      - "compliance_depth.regops_automated"
+    constraints:
+      - "LLM sycophancy bias (o3 mini exceeded human scores in 54.2% of cases)"
+      - "Legal subjectivity limits full automation (Krippendorff alpha = 0.651)"
+      - "OLIF risk requires Delta-I monitoring"
+
+conditional_on:
+  - parent_decision_id: compliance_depth
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: iec_62304_full
+        then_probabilities:
+          complops_automated: 0.35
+          manual_audit: 0.25
+          hybrid_llm_assisted: 0.40
+      - given_parent_option: lightweight_audit
+        then_probabilities:
+          complops_automated: 0.15
+          manual_audit: 0.50
+          hybrid_llm_assisted: 0.35
+      - given_parent_option: no_compliance
+        then_probabilities:
+          complops_automated: 0.05
+          manual_audit: 0.70
+          hybrid_llm_assisted: 0.25
+      - given_parent_option: regops_automated
+        then_probabilities:
+          complops_automated: 0.45
+          manual_audit: 0.15
+          hybrid_llm_assisted: 0.40
+
+  - parent_decision_id: documentation_generation
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: automated_cards
+        then_probabilities:
+          complops_automated: 0.30
+          manual_audit: 0.30
+          hybrid_llm_assisted: 0.40
+      - given_parent_option: manual
+        then_probabilities:
+          complops_automated: 0.15
+          manual_audit: 0.55
+          hybrid_llm_assisted: 0.30
+      - given_parent_option: ci_generated
+        then_probabilities:
+          complops_automated: 0.35
+          manual_audit: 0.25
+          hybrid_llm_assisted: 0.40
+      - given_parent_option: none
+        then_probabilities:
+          complops_automated: 0.10
+          manual_audit: 0.65
+          hybrid_llm_assisted: 0.25
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      complops_automated: 0.10
+      manual_audit: 0.55
+      hybrid_llm_assisted: 0.35
+    rationale: "Solo researchers rely on manual review; LLM-assisted lowers barrier"
+  lab_group:
+    probability_overrides:
+      complops_automated: 0.25
+      manual_audit: 0.35
+      hybrid_llm_assisted: 0.40
+    rationale: "Lab groups can invest in hybrid approach for shared compliance workflows"
+  clinical_deployment:
+    probability_overrides:
+      complops_automated: 0.35
+      manual_audit: 0.20
+      hybrid_llm_assisted: 0.45
+    rationale: "Clinical deployment demands automated compliance with human oversight"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-02-24
+  next_review: 2026-05-24
+  change_drivers:
+    - "EU AI Act August 2026 high-risk deadline"
+    - "IEC 62304 Edition 2 (September 2026)"
+    - "FDA QMSR transition (February 2026)"
+    - "AIReg-Bench and CAIRC tooling maturity"
+    - "Ketryx and compliance platform evolution"
+    - "LLM compliance assessment accuracy improvements"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 1.0
+  neuroimaging: 1.0
+  general_medical: 1.0
+
+rationale: >
+  Manual audit (0.40) is the current resolved state reflecting lightweight
+  compliance implementation. Hybrid LLM-assisted (0.35) is the strongest
+  emerging option, validated by AIReg-Bench (Marino et al., 2025) showing
+  frontier LLMs achieve kappa up to 0.863 on EU AI Act compliance. ComplOps
+  automated (0.25) requires more infrastructure investment but provides the
+  most robust continuous compliance. The convergence of EU AI Act (Aug 2026),
+  IEC 62304 Ed.2 (Sep 2026), and FDA QMSR (Feb 2026) creates urgency for
+  moving beyond manual compliance. Compliance costs of EUR 7,500-400,000
+  per system (Haataja & Bryson, 2021; Koh et al., 2024, as cited in Marino
+  et al.) make automation economically compelling.
+
+references:
+  - citation_key: batista2025complops
+    relevance: >
+      ComplOps framework: CaC engine, CI/CD integration, evidence traceability.
+      Six challenges of manual compliance motivating automation.
+    supports_options:
+      - complops_automated
+
+  - citation_key: marino2025airegbench
+    relevance: >
+      AIReg-Bench benchmark: Gemini 2.5 Pro achieves kappa = 0.863 on
+      EU AI Act compliance. Validates LLM-assisted compliance assessment.
+    supports_options:
+      - hybrid_llm_assisted
+
+  - citation_key: marino2026cairc
+    relevance: >
+      CAIRC Inspector/Mechanic closed-loop for continuous automated compliance.
+      Compliance costs up to EUR 400,000 motivating automation.
+    supports_options:
+      - complops_automated
+      - hybrid_llm_assisted
+
+  - citation_key: kokina2025auditing
+    relevance: >
+      Big 4 audit firms: trust/transparency as key barrier; firms disable
+      dynamic learning during engagements; audit around vs. audit through.
+    supports_options:
+      - manual_audit
+
+  - citation_key: lucaj2025techops
+    relevance: >
+      TechOps three-template hierarchy provides structured input for
+      LLM-assisted compliance assessment.
+    supports_options:
+      - hybrid_llm_assisted
+      - complops_automated
+
+  - citation_key: delatorre2026olif
+    relevance: >
+      OLIF vulnerability requires Delta-I monitoring (medical threshold 0.30)
+      for any LLM-assisted compliance workflow.
+    supports_options:
+      - hybrid_llm_assisted
+
+tags:
+  - operations
+  - regulatory
+  - compliance
+  - safety-critical

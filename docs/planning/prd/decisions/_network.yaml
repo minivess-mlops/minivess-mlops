@@ -1,13 +1,49 @@
 network:
   name: "MinIVess MLOps v2 Probabilistic PRD Decision Network"
-  version: "1.6.0"
+  version: "2.0.0"
   last_updated: 2026-02-24
   description: >
-    Bayesian decision network with 65 nodes across 5 hierarchical levels.
+    Bayesian decision network with 70 nodes across 5 hierarchical levels.
     Adapted from the music-attribution-scaffold format for biomedical
     image segmentation MLOps. Captures open-ended decisions for a
     learning-first, portfolio-building, MONAI-compatible system.
 
+    v2.0.0: Phase 20 — Regulatory operations. Added 2 new nodes
+            (regulatory_compliance_approach, audit_trail_architecture)
+            and 5 new edges. Updated 4 existing nodes (compliance_depth,
+            documentation_generation, model_governance, drift_response).
+            15 new bibliography entries. Key findings: LLMs achieve
+            kappa=0.863 on EU AI Act compliance (AIReg-Bench, Marino 2025),
+            OLIF audit-trail fabrication in LLM agents (de la Torre 2026),
+            10-step certification pipeline from aerospace (Lacasa 2025),
+            ComplOps shift-left compliance-as-code (Batista 2025),
+            three-layer audit trail architecture (Ojewale 2026).
+            70 nodes, 130 explicit edges (+conditional_on in decision files).
+    v1.9.0: Phase 19 — MLOps practices. Updated 5 existing nodes
+            (monitoring_stack, drift_detection_method, drift_response,
+            model_governance, serving_architecture) and added 4 new edges.
+            15 new bibliography entries. Key findings: 77% monitoring gap
+            (Leest 2025a), Causal System Maps for drift attribution (Leest
+            2025b), 17-practice monitoring checklist (Protschky 2025),
+            SecMLOps PTPGC framework (Zhang 2026), hexagonal architecture
+            for segmentation microservices (Cordeiro 2025), ML Canvas
+            strategy > tooling (Prause 2026).
+            68 nodes, 125 explicit edges (+conditional_on in decision files).
+    v1.8.0: Phase 18 — data science practices with agents. Updated 3 existing
+            nodes (agent_framework, copilot_backend, uncertainty_quantification)
+            and added 3 new edges. 12 new bibliography entries. Key framework:
+            L0-L5 data agent autonomy taxonomy (Luo et al., 2026; Zhu et al., 2025)
+            maps minivess at L2 (tool-assisted), target L3 (autonomous orchestration).
+            TissueLab co-evolving agent pattern, MedBayes-Lite Bayesian UQ, and
+            Medical Graph RAG for protocol knowledge provide actionable angles.
+            68 nodes, 121 explicit edges (+conditional_on in decision files).
+    v1.7.0: Phase 17 — data engineering quality/ETL/interoperability. Added 3
+            nodes (data_harmonization_method, clinical_data_format,
+            data_storage_architecture) and 8 explicit edges. 15 new bibliography
+            entries. Novel finding: no dedicated vascular MRI harmonization
+            methods exist (gap in arXiv:2507.16962v2 survey). FHIR-to-KG
+            vertical stack (Marfoglia group) provides clinical data backbone.
+            68 nodes, 118 explicit edges (+conditional_on in decision files).
     v1.6.0: Phase 16 — agentic RAG/IaC angle plan integration. Added 4 nodes
             (acquisition_agent, telemetry_backend, clinical_contract_schema,
             copilot_backend) and 10 explicit edges. 15 new bibliography entries.
@@ -255,6 +291,11 @@ nodes:
     file: L3-technology/drift-detection-method.decision.yaml
     title: "Drift Detection Method"
 
+  - id: audit_trail_architecture
+    level: L3_technology
+    file: L3-technology/audit-trail-architecture.decision.yaml
+    title: "Audit Trail Architecture"
+
   - id: acquisition_agent
     level: L3_technology
     file: L3-technology/acquisition-agent.decision.yaml
@@ -270,7 +311,17 @@ nodes:
     file: L3-technology/copilot-backend.decision.yaml
     title: "Vasculometric Copilot Backend"
 
-  # --- L4: Infrastructure (10 nodes) ---
+  - id: data_harmonization_method
+    level: L3_technology
+    file: L3-technology/data-harmonization-method.decision.yaml
+    title: "Data Harmonization Method"
+
+  - id: clinical_data_format
+    level: L3_technology
+    file: L3-technology/clinical-data-format.decision.yaml
+    title: "Clinical Data Format"
+
+  # --- L4: Infrastructure (11 nodes) ---
   - id: compute_target
     level: L4_infrastructure
     file: L4-infrastructure/compute-target.decision.yaml
@@ -315,6 +366,11 @@ nodes:
     level: L4_infrastructure
     file: L4-infrastructure/telemetry-backend.decision.yaml
     title: "Microscopy Telemetry Backend"
+
+  - id: data_storage_architecture
+    level: L4_infrastructure
+    file: L4-infrastructure/data-storage-architecture.decision.yaml
+    title: "Data Storage Architecture"
 
   - id: project_management_tool
     level: L4_infrastructure
@@ -361,6 +417,11 @@ nodes:
     level: L5_operations
     file: L5-operations/model-promotion-strategy.decision.yaml
     title: "Model Promotion Strategy"
+
+  - id: regulatory_compliance_approach
+    level: L5_operations
+    file: L5-operations/regulatory-compliance-approach.decision.yaml
+    title: "Regulatory Compliance Approach"
 
 edges:
   # === L1 → L2 edges (research goals shape architecture) ===
@@ -936,3 +997,107 @@ edges:
     to: llm_provider
     influence: moderate
     rationale: "Vasculometric copilot requires LLM for natural-language morphometry queries"
+
+  # === Phase 17 edges: Data Engineering ===
+  - from: data_harmonization_method
+    to: segmentation_models
+    influence: strong
+    rationale: "Harmonization quality directly affects segmentation Dice across sites; survey gap for vascular MRA"
+
+  - from: data_harmonization_method
+    to: data_versioning
+    influence: moderate
+    rationale: "Harmonised datasets must be versioned alongside raw data for reproducibility"
+
+  - from: clinical_data_format
+    to: annotation_platform
+    influence: moderate
+    rationale: "FHIR-compliant clinical data can enrich annotation context in Label Studio"
+
+  - from: clinical_data_format
+    to: clinical_contract_schema
+    influence: strong
+    rationale: "Machine-readable contracts reference FHIR resources for compliance verification"
+
+  - from: data_storage_architecture
+    to: containerization
+    influence: strong
+    rationale: "Lakehouse services (Delta Lake, HAPI FHIR, GraphDB) run in Docker Compose"
+
+  - from: data_storage_architecture
+    to: data_versioning
+    influence: strong
+    rationale: "DVC/lakeFS manages change-data-capture across medallion tiers"
+
+  - from: data_storage_architecture
+    to: experiment_tracking
+    influence: moderate
+    rationale: "Gold-tier feature store feeds MLflow experiment tracking with versioned feature sets"
+
+  - from: label_quality
+    to: data_harmonization_method
+    influence: moderate
+    rationale: "Label quality assessment informs whether harmonization artifacts affect annotations"
+
+  # === Phase 18 edges: Data Science Agents ===
+  - from: agent_framework
+    to: data_harmonization_method
+    influence: moderate
+    rationale: "Agent orchestrates harmonization pipeline selection (Harmonia ReAct-loop pattern, York et al. 2025)"
+
+  - from: agent_framework
+    to: clinical_data_format
+    influence: moderate
+    rationale: "Agent manages FHIR-to-MEDS-OWL transformations; LLM code generation for data interoperability (Falcao et al. 2025)"
+
+  - from: uncertainty_quantification
+    to: agent_framework
+    influence: strong
+    rationale: "UQ confidence levels gate agent autonomy: high-confidence = auto-approve, low = human-in-loop (MedBayes-Lite, Chakraborty 2026)"
+
+  # === Phase 19 edges: MLOps Practices ===
+  - from: monitoring_stack
+    to: drift_detection_method
+    influence: strong
+    rationale: "Monitoring provides input signals for drift detection methods (Leest 2025a: 77% monitoring gap; Protschky 2025: 17-practice cycle)"
+
+  - from: secrets_management
+    to: model_governance
+    influence: moderate
+    rationale: "Security posture (SecMLOps PTPGC, Zhang 2026) constrains governance workflows for clinical deployment"
+
+  - from: serving_architecture
+    to: drift_response
+    influence: moderate
+    rationale: "Serving architecture determines how drift responses are executed — canary rollback, model swap (Cordeiro 2025 hexagonal pattern)"
+
+  - from: model_governance
+    to: documentation_generation
+    influence: moderate
+    rationale: "ML semantic versioning (Matthew 2025) + ODE protocol (Seuru 2026) drive automated documentation generation"
+
+  # === Phase 20 edges: Regulatory Ops ===
+  - from: regulatory_compliance_approach
+    to: documentation_generation
+    influence: strong
+    rationale: "Compliance method determines documentation requirements and automation level (TechOps templates, Lucaj 2025)"
+
+  - from: regulatory_compliance_approach
+    to: model_governance
+    influence: strong
+    rationale: "Compliance approach shapes governance workflows — PCCP approval gates, locked vs. adaptive algorithms (Kokina 2025)"
+
+  - from: audit_trail_architecture
+    to: regulatory_compliance_approach
+    influence: strong
+    rationale: "Audit trail infrastructure enables compliance automation — hash-chained logging, Delta-I verification (Ojewale 2026, de la Torre 2026)"
+
+  - from: compliance_depth
+    to: regulatory_compliance_approach
+    influence: strong
+    rationale: "IEC 62304 class/level determines compliance approach complexity (IEC 62304 Ed.2, MDCG 2025-6)"
+
+  - from: audit_trail_architecture
+    to: experiment_tracking
+    influence: moderate
+    rationale: "Audit trail Capture layer instruments experiment tracking infrastructure (Ojewale 2026 TrainerCallback, FastAPI middleware)"

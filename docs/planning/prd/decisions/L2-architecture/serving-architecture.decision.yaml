@@ -159,6 +159,17 @@ references:
       - torchserve
       - triton
 
+  - citation_key: cordeiro2025hexagonal
+    relevance: "Hexagonal Architecture (Ports and Adapters) for ML microservices — swappable data, model, and serving adapters."
+    supports_options:
+      - bentoml_rest
+      - monai_deploy
+
+  - citation_key: wu2020ddeep3m
+    relevance: "DDeep3M: Docker containerised biomedical segmentation (Dice >0.96). Early precedent for containerised serving."
+    supports_options:
+      - bentoml_rest
+
 tags:
   - architecture
   - serving

@@ -150,6 +150,14 @@ references:
     relevance: "nnQC diffusion-based quality control for medical image segmentations."
     supports_options: ["cleanlab"]
 
+  - citation_key: dawod2025spacemap
+    relevance: "SPACEMAP consensus-ML achieves 88% accuracy on independent validation vs 69-81% for single methods. Multi-method consensus as label quality strategy."
+    supports_options: ["custom_iaa"]
+
+  - citation_key: seyferth2024metric
+    relevance: "METRIC 15-dimension framework for data quality assessment. Provides structured audit checklist for training datasets."
+    supports_options: ["cleanlab", "custom_iaa"]
+
 tags:
   - technology
   - annotation

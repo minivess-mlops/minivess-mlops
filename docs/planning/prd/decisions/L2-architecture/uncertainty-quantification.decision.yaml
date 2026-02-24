@@ -216,6 +216,18 @@ references:
     supports_options:
       - conformal_prediction
 
+  - citation_key: medbayes2025
+    relevance: "MedBayes-Lite plug-in Bayesian enhancement for clinical LLMs. 32-48% overconfidence reduction on MedQA/PubMedQA/MIMIC-III. Prevents up to 41% of diagnostic errors. <3% parameter overhead."
+    supports_options:
+      - mc_dropout
+      - deep_ensembles
+
+  - citation_key: chakraborty2026bayesian
+    relevance: "Progressive Bayesian confidence architectures: tiered uncertainty (clues 70%, patterns 85%, confirmed 95% CI). 83% reduction in time-to-first-insight. FDR below 6%."
+    supports_options:
+      - conformal_prediction
+      - mc_dropout
+
 research_notes: >
   Internal: ADR-0003 (docs/adr/0003-validation-onion.md) documents the
   validation onion architecture that includes calibration and uncertainty layers.
