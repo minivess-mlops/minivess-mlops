@@ -21,6 +21,12 @@ from minivess.pipeline.hpo import (
 )
 from minivess.pipeline.loss_functions import build_loss_function
 from minivess.pipeline.metrics import MetricResult, SegmentationMetrics
+from minivess.pipeline.segmentation_qc import (
+    QCFlag,
+    QCResult,
+    SegmentationQC,
+    evaluate_segmentation_quality,
+)
 from minivess.pipeline.trainer import EpochResult, SegmentationTrainer
 
 __all__ = [
@@ -28,8 +34,11 @@ __all__ = [
     "DYNUNET_WIDTH_PRESETS",
     "EpochResult",
     "MetricResult",
+    "QCFlag",
+    "QCResult",
     "SearchSpace",
     "SegmentationMetrics",
+    "SegmentationQC",
     "SegmentationTrainer",
     "bca_bootstrap_ci",
     "bootstrap_ci",
@@ -38,6 +47,7 @@ __all__ = [
     "build_trial_config",
     "compute_metrics_with_ci",
     "create_study",
+    "evaluate_segmentation_quality",
     "make_objective",
     "run_hpo",
 ]
