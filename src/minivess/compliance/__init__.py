@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 from minivess.compliance.audit import AuditEntry, AuditTrail
+from minivess.compliance.complops import (
+    ComplianceCheckResult,
+    RegulatoryTemplate,
+    assess_compliance_gaps,
+    generate_510k_summary,
+    generate_eu_mdr_technical_file,
+)
 from minivess.compliance.eu_ai_act import (
     EUAIActChecklist,
     EUAIActRiskLevel,
@@ -43,6 +50,7 @@ __all__ = [
     "AuditEntry",
     "AuditTrail",
     "CIContext",
+    "ComplianceCheckResult",
     "ConsortAIChecklist",
     "EUAIActChecklist",
     "EUAIActRiskLevel",
@@ -53,16 +61,20 @@ __all__ = [
     "PCCPTemplate",
     "RegOpsPipeline",
     "RegulatoryDocGenerator",
+    "RegulatoryTemplate",
     "SaMDRiskClass",
     "SoftwareSafetyClass",
     "SubgroupMetrics",
     "TraceabilityMatrix",
+    "assess_compliance_gaps",
     "classify_risk_level",
     "compute_disparity",
     "evaluate_subgroup_fairness",
+    "generate_510k_summary",
     "generate_audit_report",
     "generate_ci_audit_entry",
     "generate_compliance_report",
     "generate_consort_ai_report",
+    "generate_eu_mdr_technical_file",
     "generate_miclear_llm_report",
 ]
