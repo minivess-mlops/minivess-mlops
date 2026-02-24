@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from minivess.data.augmentation import build_intensity_augmentation
 from minivess.data.loader import (
     create_train_loader,
     create_val_loader,
@@ -18,3 +17,12 @@ __all__ = [
     "create_val_loader",
     "discover_nifti_pairs",
 ]
+
+
+def build_intensity_augmentation():  # type: ignore[no-untyped-def]
+    """Lazy import to avoid TorchIO segfault during pytest collection."""
+    from minivess.data.augmentation import (
+        build_intensity_augmentation as _build,
+    )
+
+    return _build()

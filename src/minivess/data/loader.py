@@ -17,26 +17,39 @@ _DEFAULT_BATCH_SIZE: int = 2
 def discover_nifti_pairs(data_dir: Path) -> list[dict[str, str]]:
     """Discover image/label NIfTI pairs from a directory.
 
-    Expects structure:
-        data_dir/
-            images/ or imagesTr/   -> *.nii.gz
-            labels/ or labelsTr/   -> *.nii.gz (matching filenames)
+    Supports two layouts:
+
+    1. **Medical Decathlon** (imagesTr/labelsTr):
+        data_dir/imagesTr/*.nii.gz + data_dir/labelsTr/*.nii.gz
+        Labels have matching filenames.
+
+    2. **EBRAINS MiniVess** (raw/seg):
+        data_dir/raw/mvXX.nii.gz + data_dir/seg/mvXX_y.nii.gz
+        Labels have ``_y`` suffix before the extension.
     """
-    # Try standard naming conventions
+    # Layout 1: Medical Decathlon convention
     for img_dir_name in ("imagesTr", "images", "imagesTs"):
         img_dir = data_dir / img_dir_name
         if img_dir.exists():
-            break
-    else:
-        msg = f"No image directory found in {data_dir}"
-        raise FileNotFoundError(msg)
+            lbl_dir_name = img_dir_name.replace("images", "labels")
+            lbl_dir = data_dir / lbl_dir_name
+            if lbl_dir.exists():
+                return _discover_matching_names(img_dir, lbl_dir)
 
-    lbl_dir_name = img_dir_name.replace("images", "labels")
-    lbl_dir = data_dir / lbl_dir_name
-    if not lbl_dir.exists():
-        msg = f"Label directory {lbl_dir} not found"
-        raise FileNotFoundError(msg)
+    # Layout 2: EBRAINS raw/seg convention (labels have _y suffix)
+    raw_dir = data_dir / "raw"
+    seg_dir = data_dir / "seg"
+    if raw_dir.exists() and seg_dir.exists():
+        return _discover_suffix_labels(raw_dir, seg_dir, label_suffix="_y")
 
+    msg = f"No image directory found in {data_dir}. Expected imagesTr/ or raw/"
+    raise FileNotFoundError(msg)
+
+
+def _discover_matching_names(
+    img_dir: Path, lbl_dir: Path
+) -> list[dict[str, str]]:
+    """Discover pairs where image and label share the same filename."""
     pairs = []
     for img_path in sorted(img_dir.glob("*.nii.gz")):
         lbl_path = lbl_dir / img_path.name
@@ -44,7 +57,28 @@ def discover_nifti_pairs(data_dir: Path) -> list[dict[str, str]]:
             pairs.append({"image": str(img_path), "label": str(lbl_path)})
 
     if not pairs:
-        msg = f"No matching NIfTI pairs found in {data_dir}"
+        msg = f"No matching NIfTI pairs found in {img_dir} + {lbl_dir}"
+        raise FileNotFoundError(msg)
+
+    return pairs
+
+
+def _discover_suffix_labels(
+    img_dir: Path,
+    lbl_dir: Path,
+    label_suffix: str = "_y",
+) -> list[dict[str, str]]:
+    """Discover pairs where labels have a suffix (e.g. mv01 → mv01_y)."""
+    pairs = []
+    for img_path in sorted(img_dir.glob("*.nii.gz")):
+        stem = img_path.name.replace(".nii.gz", "")
+        lbl_name = f"{stem}{label_suffix}.nii.gz"
+        lbl_path = lbl_dir / lbl_name
+        if lbl_path.exists():
+            pairs.append({"image": str(img_path), "label": str(lbl_path)})
+
+    if not pairs:
+        msg = f"No matching NIfTI pairs found in {img_dir} + {lbl_dir}"
         raise FileNotFoundError(msg)
 
     return pairs
