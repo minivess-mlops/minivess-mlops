@@ -7,6 +7,13 @@ from minivess.ensemble.calibration import (
     expected_calibration_error,
     temperature_scale,
 )
+from minivess.ensemble.calibration_shift import (
+    CalibrationShiftAnalyzer,
+    ShiftedCalibrationResult,
+    ShiftType,
+    apply_synthetic_shift,
+    evaluate_calibration_transfer,
+)
 from minivess.ensemble.conformal import ConformalPredictor, ConformalResult
 from minivess.ensemble.deep_ensembles import DeepEnsemblePredictor
 from minivess.ensemble.mapie_conformal import (
@@ -20,6 +27,7 @@ from minivess.ensemble.weightwatcher import WeightWatcherReport, analyze_model
 
 __all__ = [
     "CalibrationResult",
+    "CalibrationShiftAnalyzer",
     "ConformalMetrics",
     "ConformalPredictor",
     "ConformalResult",
@@ -27,10 +35,14 @@ __all__ = [
     "MapieConformalSegmentation",
     "EnsemblePredictor",
     "MCDropoutPredictor",
+    "ShiftType",
+    "ShiftedCalibrationResult",
     "UncertaintyOutput",
     "WeightWatcherReport",
     "analyze_model",
+    "apply_synthetic_shift",
     "compute_coverage_metrics",
+    "evaluate_calibration_transfer",
     "expected_calibration_error",
     "greedy_soup",
     "temperature_scale",
