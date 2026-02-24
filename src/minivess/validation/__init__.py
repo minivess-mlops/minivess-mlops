@@ -37,9 +37,18 @@ from minivess.validation.schemas import (
     NiftiMetadataSchema,
     TrainingMetricsSchema,
 )
+from minivess.validation.vessqc import (
+    CurationFlag,
+    CurationReport,
+    compute_error_detection_metrics,
+    flag_uncertain_regions,
+    rank_samples_by_uncertainty,
+)
 
 __all__ = [
     "AnnotationQualitySchema",
+    "CurationFlag",
+    "CurationReport",
     "DatasetProfileView",
     "DriftReport",
     "GateResult",
@@ -52,9 +61,12 @@ __all__ = [
     "build_train_test_suite",
     "build_training_metrics_suite",
     "compare_profiles",
+    "compute_error_detection_metrics",
     "detect_prediction_drift",
+    "flag_uncertain_regions",
     "evaluate_report",
     "profile_dataframe",
+    "rank_samples_by_uncertainty",
     "run_expectation_suite",
     "validate_metrics_batch",
     "validate_nifti_batch",
