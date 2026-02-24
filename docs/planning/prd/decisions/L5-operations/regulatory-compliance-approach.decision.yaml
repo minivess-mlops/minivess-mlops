@@ -215,6 +215,38 @@ references:
     supports_options:
       - hybrid_llm_assisted
 
+  - citation_key: granlund2021regulatory
+    relevance: >
+      Real-world case study: Oravizio's journey from ML experiment to
+      deployed certified medical product. Rare regulatory-compliant MLOps
+      reference architecture.
+    supports_options:
+      - complops_automated
+      - manual_audit
+
+  - citation_key: knoblauch2023continuous
+    relevance: >
+      Risk-based continuous auditing-based certification for ML — shift from
+      one-time to continuous compliance certification.
+    supports_options:
+      - complops_automated
+      - hybrid_llm_assisted
+
+  - citation_key: mallardi2025responsible
+    relevance: >
+      Responsible AI for medical device certification — maps onto IEC 62304,
+      SaMD lifecycle, and continuous monitoring requirements.
+    supports_options:
+      - complops_automated
+      - hybrid_llm_assisted
+
+  - citation_key: testi2026fetalmlops
+    relevance: >
+      FetalMLOps: medical imaging MLOps in regulated context — direct
+      architectural precedent for MinIVess compliance approach.
+    supports_options:
+      - complops_automated
+
 tags:
   - operations
   - regulatory

@@ -228,6 +228,12 @@ references:
       - conformal_prediction
       - mc_dropout
 
+  - citation_key: kushibar2022layerensembles
+    relevance: "Layer Ensembles: single-pass UQ for segmentation — alternative to MC Dropout with lower inference cost."
+    supports_options:
+      - deep_ensembles
+      - mc_dropout
+
 research_notes: >
   Internal: ADR-0003 (docs/adr/0003-validation-onion.md) documents the
   validation onion architecture that includes calibration and uncertainty layers.

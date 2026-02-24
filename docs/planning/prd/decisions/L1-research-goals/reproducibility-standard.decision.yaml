@@ -113,6 +113,21 @@ references:
     supports_options:
       - dvc_versioned
 
+  - citation_key: kapoor2022leakage
+    relevance: "Landmark paper on data leakage as #1 reproducibility threat in ML-based science (329 papers analysed)"
+    supports_options:
+      - full_deterministic
+      - dvc_versioned
+
+  - citation_key: colliot2023reproducibility
+    relevance: "Medical imaging-specific reproducibility challenges — more targeted than general AI surveys"
+    supports_options:
+      - full_deterministic
+      - dvc_versioned
+
 research_notes: >
   Internal: dvc.yaml defines the project's DVC pipeline stages for data
-  versioning and experiment reproducibility.
+  versioning and experiment reproducibility. Kapoor & Narayanan (2022)
+  identify data leakage as the #1 reproducibility threat — motivates
+  strict data/model versioning. Colliot et al. (2023) provide medical
+  imaging-specific reproducibility guidance.

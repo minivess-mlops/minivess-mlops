@@ -5,13 +5,13 @@ description: >
 
 decision_level: L2_architecture
 status: active
-last_updated: 2026-02-23
+last_updated: 2026-02-24
 
 options:
   - option_id: local_dvc
     title: "Local DVC"
     description: "DVC with local storage. Current implementation."
-    prior_probability: 0.40
+    prior_probability: 0.35
     status: resolved
     implementation_status: implemented
 
@@ -32,9 +32,33 @@ options:
   - option_id: streaming
     title: "Streaming (WebDataset)"
     description: "Stream data directly. Good for huge datasets."
-    prior_probability: 0.15
+    prior_probability: 0.10
     status: experimental
     implementation_status: not_started
+
+  - option_id: datalad
+    title: "DataLad (Git-Annex)"
+    description: >
+      Git + git-annex based data versioning (Halchenko et al., 2021). Superior
+      provenance capture via `datalad run` (machine-readable audit trails with
+      command, inputs, outputs, exit code). Container integration via
+      datalad-container extension (Docker/Singularity). Strong neuroscience
+      ecosystem (OpenNeuro, DANDI, CONP). Broader storage backends than DVC
+      (Dropbox, OSF, GIN, RIA stores). However, lacks DVC's built-in ML
+      pipeline management (stages, deps/outs, `dvc repro`) and ML-specific
+      features (metrics, model comparison). Steeper learning curve (git-annex
+      knowledge required). FAIRly big framework (Wagner et al., 2022) validates
+      DataLad for large-scale reproducible processing.
+    prior_probability: 0.10
+    status: experimental
+    implementation_status: not_started
+    complements:
+      - "reproducibility_standard.full_deterministic"
+      - "compliance_depth.iec_62304_full"
+    constraints:
+      - "Migration cost from existing DVC implementation (~320 lines dvc_utils.py)"
+      - "No native ML pipeline management — requires external orchestration"
+      - "Steeper learning curve (git-annex knowledge required)"
 
 conditional_on:
   - parent_decision_id: reproducibility_standard
@@ -42,54 +66,63 @@ conditional_on:
     conditional_table:
       - given_parent_option: full_deterministic
         then_probabilities:
-          local_dvc: 0.30
-          cloud_dvc: 0.40
-          lakehouse: 0.20
+          local_dvc: 0.25
+          cloud_dvc: 0.35
+          lakehouse: 0.15
           streaming: 0.10
+          datalad: 0.15
       - given_parent_option: dvc_versioned
         then_probabilities:
-          local_dvc: 0.45
-          cloud_dvc: 0.35
+          local_dvc: 0.40
+          cloud_dvc: 0.30
           lakehouse: 0.10
           streaming: 0.10
+          datalad: 0.10
       - given_parent_option: git_only
         then_probabilities:
           local_dvc: 0.20
           cloud_dvc: 0.10
           lakehouse: 0.10
-          streaming: 0.60
+          streaming: 0.55
+          datalad: 0.05
 
 archetype_weights:
   solo_researcher:
     probability_overrides:
-      local_dvc: 0.50
-      cloud_dvc: 0.25
+      local_dvc: 0.45
+      cloud_dvc: 0.20
       lakehouse: 0.10
-      streaming: 0.15
-    rationale: "Local DVC is simplest for single-machine workflows"
+      streaming: 0.10
+      datalad: 0.15
+    rationale: "Local DVC is simplest; DataLad viable for neuroscience researchers with BIDS familiarity"
   lab_group:
     probability_overrides:
-      local_dvc: 0.20
-      cloud_dvc: 0.45
+      local_dvc: 0.15
+      cloud_dvc: 0.40
       lakehouse: 0.20
-      streaming: 0.15
-    rationale: "Lab groups need shared remote storage"
+      streaming: 0.10
+      datalad: 0.15
+    rationale: "Lab groups need shared remote storage; DataLad for multi-site neuroscience collaboration"
   clinical_deployment:
     probability_overrides:
-      local_dvc: 0.15
-      cloud_dvc: 0.30
+      local_dvc: 0.10
+      cloud_dvc: 0.25
       lakehouse: 0.35
-      streaming: 0.20
-    rationale: "Clinical may need enterprise data management"
+      streaming: 0.15
+      datalad: 0.15
+    rationale: "Clinical needs enterprise data management; DataLad provenance strong for audit trails"
 
 volatility:
   classification: stable
-  last_assessed: 2026-02-23
-  next_review: 2026-08-23
+  last_assessed: 2026-02-24
+  next_review: 2026-08-24
   change_drivers:
     - "Dataset size growth"
     - "Team collaboration needs"
     - "Cloud storage costs"
+    - "DVC acquisition by lakeFS (Nov 2025) — long-term roadmap"
+    - "DataLad neuroscience ecosystem maturation"
+    - "Regulatory audit trail requirements (IEC 62304, FDA TPLC)"
 
 domain_applicability:
   vascular_segmentation: 1.0
@@ -98,10 +131,19 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  Local DVC (0.40) resolved. The project uses DVC (Kuprieiev et al., 2023)
+  Local DVC (0.35) resolved. The project uses DVC (Kuprieiev et al., 2023)
   for data versioning with local storage, aligned with data management
-  best practices for ML (Roh et al., 2021). Cloud DVC is the natural next
-  step for collaboration.
+  best practices for ML (Roh et al., 2021). Cloud DVC (0.30) is the natural
+  next step for collaboration. DataLad (0.10, experimental) added as a
+  considered alternative following gap analysis: superior provenance capture
+  via `datalad run` (Halchenko et al., 2021) and strong neuroscience ecosystem
+  (OpenNeuro: Markiewicz et al., 2021), but DVC's built-in ML pipeline
+  management and lower migration cost make DVC the resolved choice. The
+  FAIRly big framework (Wagner et al., 2022) validates DataLad for large-scale
+  reproducible processing. DVC was acquired by lakeFS in Nov 2025 (remains
+  Apache 2.0 open source). Barrak et al. (2021) provide empirical evidence
+  on DVC co-evolution patterns. The MiniVess dataset itself (Poon et al., 2023)
+  is the foundational data asset managed by this decision.
 
 references:
   - citation_key: kuprieiev2023dvc
@@ -115,6 +157,29 @@ references:
       - local_dvc
       - cloud_dvc
       - lakehouse
+  - citation_key: halchenko2021datalad
+    relevance: "DataLad JOSS paper: Git+git-annex for distributed data management with `datalad run` provenance capture"
+    supports_options:
+      - datalad
+  - citation_key: wagner2022fairlybig
+    relevance: "FAIRly big framework validates DataLad for large-scale reproducible processing with containers"
+    supports_options:
+      - datalad
+  - citation_key: markiewicz2021openneuro
+    relevance: "OpenNeuro resource uses DataLad — demonstrates neuroscience ecosystem alignment"
+    supports_options:
+      - datalad
+  - citation_key: barrak2021dvcevolution
+    relevance: "Empirical study of DVC project co-evolution — evidence on how DVC is used in practice"
+    supports_options:
+      - local_dvc
+      - cloud_dvc
+  - citation_key: poon2023minivess
+    relevance: "The MiniVess dataset paper — foundational data asset managed by this decision"
+    supports_options:
+      - local_dvc
+      - cloud_dvc
+      - datalad
 
 tags:
   - architecture

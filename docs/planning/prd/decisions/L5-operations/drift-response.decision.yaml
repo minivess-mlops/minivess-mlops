@@ -341,6 +341,38 @@ references:
       - automated_retrain
       - alert_human
 
+  - citation_key: feng2022chexstray
+    relevance: >
+      CheXstray/MMC+ multi-modal drift detection validated during COVID-19
+      distribution shift — demonstrates real-world drift response triggers.
+    supports_options:
+      - automated_retrain
+      - alert_human
+
+  - citation_key: rabanser2024drift
+    relevance: >
+      Nature Communications: input data monitoring essential for drift response
+      — model performance alone insufficient as trigger.
+    supports_options:
+      - automated_retrain
+      - alert_human
+
+  - citation_key: roschewitz2026datasetshift
+    relevance: >
+      Automatic dataset shift identification enabling safe deployment and
+      timely drift response in medical imaging AI.
+    supports_options:
+      - automated_retrain
+      - gradual_rollback
+
+  - citation_key: medmlops2025
+    relevance: >
+      MedMLOps four-pillar framework including continuous monitoring/validation/
+      retraining — closest published comparator to MinIVess drift response design.
+    supports_options:
+      - automated_retrain
+      - alert_human
+
 tags:
   - operations
   - drift

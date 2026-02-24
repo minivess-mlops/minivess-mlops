@@ -186,6 +186,17 @@ references:
       - full_registry
       - mlflow_tags
 
+  - citation_key: liang2024modelcards
+    relevance: "Empirical analysis of 32K model cards — evidence on documentation practices beyond Mitchell 2019 proposal."
+    supports_options:
+      - full_registry
+      - mlflow_tags
+
+  - citation_key: granlund2021regulatory
+    relevance: "Regulatory-compliant MLOps case study with governance workflows for certified medical product lifecycle."
+    supports_options:
+      - full_registry
+
 tags:
   - operations
   - governance

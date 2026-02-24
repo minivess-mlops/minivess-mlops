@@ -280,6 +280,47 @@ references:
       - composite_tiered
       - alibi_detect_mmd
 
+  - citation_key: feng2022chexstray
+    relevance: >
+      CheXstray/MMC+: real-time multi-modal drift detection combining DICOM
+      metadata, VAE image representations, and model output probabilities.
+      Validated at MGH during COVID-19 distribution shift.
+    supports_options:
+      - composite_tiered
+      - alibi_detect_mmd
+
+  - citation_key: rabanser2024drift
+    relevance: >
+      Nature Communications empirical study: monitoring model performance is
+      NOT a good proxy for detecting data drift. Input data monitoring essential.
+    supports_options:
+      - evidently_statistical
+      - composite_tiered
+
+  - citation_key: zamzmi2024spc
+    relevance: >
+      SPC-based OOD detection for radiology — alternative framing to hypothesis
+      testing for drift monitoring.
+    supports_options:
+      - evidently_statistical
+      - composite_tiered
+
+  - citation_key: roschewitz2026datasetshift
+    relevance: >
+      Automatic dataset shift identification for safe deployment of medical
+      imaging AI.
+    supports_options:
+      - alibi_detect_mmd
+      - composite_tiered
+
+  - citation_key: lewis2022augur
+    relevance: >
+      Augur: practical drift detection for production ML systems — realistic
+      evaluation methodology.
+    supports_options:
+      - evidently_statistical
+      - alibi_detect_mmd
+
 research_notes: >
   Phase 14 monitoring research findings: Alibi-Detect and Evidently are
   complementary, not competing — Alibi-Detect for statistical rigor on

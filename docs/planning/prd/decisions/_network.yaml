@@ -1,6 +1,6 @@
 network:
   name: "MinIVess MLOps v2 Probabilistic PRD Decision Network"
-  version: "2.0.0"
+  version: "2.1.0"
   last_updated: 2026-02-24
   description: >
     Bayesian decision network with 70 nodes across 5 hierarchical levels.
@@ -8,6 +8,22 @@ network:
     image segmentation MLOps. Captures open-ended decisions for a
     learning-first, portfolio-building, MONAI-compatible system.
 
+    v2.1.0: Verification gap analysis — RDF (636 entries), BIB (934 entries),
+            DataLad investigation, end-to-end systems fishing expedition.
+            20 new bibliography entries. Added DataLad option to
+            data_management_strategy (prior 0.10, experimental). Added 1 new
+            edge (compliance_depth → data_management_strategy). Updated 8
+            decision nodes with new references: data_management_strategy (+7),
+            drift_detection_method (+6), drift_response (+5),
+            regulatory_compliance_approach (+4), monitoring_stack (+3),
+            model_governance (+2), reproducibility_standard (+2),
+            uncertainty_quantification (+1). Key findings: MiniVess dataset
+            paper (Poon 2023) was missing from bibliography; MedMLOps
+            (European Radiology) closest published comparator; CheXstray/MMC+
+            validates multi-modal drift detection; Kapoor 2022 data leakage
+            as #1 reproducibility threat; DataLad superior provenance but
+            DVC better ML pipeline fit.
+            70 nodes, 131 explicit edges (+conditional_on in decision files).
     v2.0.0: Phase 20 — Regulatory operations. Added 2 new nodes
             (regulatory_compliance_approach, audit_trail_architecture)
             and 5 new edges. Updated 4 existing nodes (compliance_depth,
@@ -1101,3 +1117,9 @@ edges:
     to: experiment_tracking
     influence: moderate
     rationale: "Audit trail Capture layer instruments experiment tracking infrastructure (Ojewale 2026 TrainerCallback, FastAPI middleware)"
+
+  # === Verification gap analysis edge ===
+  - from: compliance_depth
+    to: data_management_strategy
+    influence: moderate
+    rationale: "IEC 62304 audit trail requirements favour data versioning with provenance capture — DataLad datalad-run vs DVC (Halchenko 2021, Wagner 2022)"

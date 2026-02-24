@@ -13,7 +13,7 @@
 # 4. Sub-citations: when ingesting a paper, also add papers IT cites that
 #    are relevant to other decision nodes.
 #
-# last_updated: 2026-02-24  (Phase 20: +15 entries for Regulatory Ops)
+# last_updated: 2026-02-24  (Verification: +20 entries from RDF/BIB/fishing gap analysis)
 
 bibliography:
 
@@ -3241,3 +3241,280 @@ bibliography:
     topics:
       - regulatory_compliance_approach
       - regulatory_documentation_tool
+
+  # ============================================================
+  # Verification Gap Analysis (RDF + BIB + Fishing + DataLad)
+  # ============================================================
+
+  - citation_key: poon2023minivess
+    inline_citation: "Poon et al. (2023)"
+    authors: "Poon, C., Teikari, P., Bhatt, A., et al."
+    year: 2023
+    title: "A dataset of rodent cerebrovasculature from in vivo multiphoton fluorescence microscopy imaging"
+    venue: "Scientific Data 10, 141"
+    doi: "10.1038/s41597-023-02048-4"
+    url: "https://www.nature.com/articles/s41597-023-02048-4"
+    evidence_type: dataset
+    topics:
+      - data_management_strategy
+      - project_purpose
+
+  - citation_key: halchenko2021datalad
+    inline_citation: "Halchenko et al. (2021)"
+    authors: "Halchenko, Y. O., Meyer, K., Poldrack, B., et al."
+    year: 2021
+    title: "DataLad: distributed system for joint management of code, data, and their relationship"
+    venue: "Journal of Open Source Software 6(63), 3262"
+    doi: "10.21105/joss.03262"
+    url: "https://joss.theoj.org/papers/10.21105/joss.03262"
+    evidence_type: tool_release
+    topics:
+      - data_management_strategy
+      - reproducibility_standard
+
+  - citation_key: wagner2022fairlybig
+    inline_citation: "Wagner et al. (2022)"
+    authors: "Wagner, A. S., Waite, L. K., Wierzba, M., et al."
+    year: 2022
+    title: "FAIRly big: A framework for computationally reproducible processing of large-scale data"
+    venue: "Scientific Data 9, 80"
+    doi: "10.1038/s41597-022-01163-2"
+    url: "https://www.nature.com/articles/s41597-022-01163-2"
+    evidence_type: method
+    topics:
+      - data_management_strategy
+      - reproducibility_standard
+      - containerization
+
+  - citation_key: granlund2021regulatory
+    inline_citation: "Granlund et al. (2021)"
+    authors: "Granlund, T., Stirbu, V., Mikkonen, T."
+    year: 2021
+    title: "Towards Regulatory-Compliant MLOps: Oravizio's Journey from a Machine Learning Experiment to a Deployed Certified Medical Product"
+    venue: "SN Computer Science 2, 342"
+    doi: "10.1007/s42979-021-00726-1"
+    url: ""
+    evidence_type: case_study
+    topics:
+      - regulatory_compliance_approach
+      - model_governance
+      - ci_cd_platform
+
+  - citation_key: kapoor2022leakage
+    inline_citation: "Kapoor & Narayanan (2022)"
+    authors: "Kapoor, S., Narayanan, A."
+    year: 2022
+    title: "Leakage and the Reproducibility Crisis in ML-based Science"
+    venue: "Patterns 4(9), Cell Press"
+    doi: "10.1016/j.patter.2023.100804"
+    url: ""
+    evidence_type: empirical
+    topics:
+      - reproducibility_standard
+      - data_validation_tools
+      - validation_depth
+
+  - citation_key: feng2022chexstray
+    inline_citation: "Feng et al. (2022)"
+    authors: "Feng, L., Drukker, K., Giger, M. L., et al."
+    year: 2022
+    title: "CheXstray: Real-time Multi-Modal Data Concordance for Drift Detection in Medical Imaging AI"
+    venue: "MICCAI Workshop 2022; extended in Zack et al. (2024) as MMC+"
+    doi: ""
+    url: "https://github.com/microsoft/MedImaging-ModelDriftMonitoring"
+    evidence_type: method
+    topics:
+      - drift_detection_method
+      - drift_response
+      - monitoring_stack
+
+  - citation_key: rabanser2024drift
+    inline_citation: "Rabanser et al. (2024)"
+    authors: "Rabanser, S., Shafat, I., et al."
+    year: 2024
+    title: "Data Drift Detection in Medical Imaging: Empirical Experiments"
+    venue: "Nature Communications"
+    doi: ""
+    url: ""
+    evidence_type: empirical
+    topics:
+      - drift_detection_method
+      - drift_response
+      - data_profiling
+
+  - citation_key: medmlops2025
+    inline_citation: "MedMLOps (2025)"
+    authors: "Defined et al."
+    year: 2025
+    title: "Medical machine learning operations: a framework to facilitate clinical AI development and deployment in radiology"
+    venue: "European Radiology"
+    doi: ""
+    url: ""
+    evidence_type: framework
+    topics:
+      - monitoring_stack
+      - drift_response
+      - retraining_trigger
+      - model_governance
+      - serving_architecture
+
+  - citation_key: zamzmi2024spc
+    inline_citation: "Zamzmi et al. (2024)"
+    authors: "Zamzmi, G., et al."
+    year: 2024
+    title: "Out-of-Distribution Detection and Radiological Data Monitoring Using Statistical Process Control"
+    venue: "Journal of Imaging Informatics in Medicine"
+    doi: ""
+    url: ""
+    evidence_type: method
+    topics:
+      - drift_detection_method
+      - monitoring_stack
+
+  - citation_key: roschewitz2026datasetshift
+    inline_citation: "Roschewitz et al. (2026)"
+    authors: "Roschewitz, M., et al."
+    year: 2026
+    title: "Automatic Dataset Shift Identification to Support Safe Deployment of Medical Imaging AI"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: method
+    topics:
+      - drift_detection_method
+      - drift_response
+      - serving_architecture
+
+  - citation_key: testi2026fetalmlops
+    inline_citation: "Testi et al. (2026)"
+    authors: "Testi, M., et al."
+    year: 2026
+    title: "FetalMLOps: operationalizing machine learning models for standard fetal ultrasound plane classification"
+    venue: "Medical & Biological Engineering & Computing"
+    doi: ""
+    url: ""
+    evidence_type: case_study
+    topics:
+      - pipeline_orchestration
+      - regulatory_compliance_approach
+      - serving_architecture
+
+  - citation_key: huang2025mlxops4medic
+    inline_citation: "Huang & Liu (2025)"
+    authors: "Huang, Y., Liu, Z."
+    year: 2025
+    title: "MLXOps4Medic: A Service Framework for Machine Learning and Explainability Operations in Medical Imaging AI Development"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: framework
+    topics:
+      - monitoring_stack
+      - xai_strategy
+      - lineage_tracking
+      - pipeline_orchestration
+
+  - citation_key: liang2024modelcards
+    inline_citation: "Liang et al. (2024)"
+    authors: "Liang, W., et al."
+    year: 2024
+    title: "What's documented in AI? Systematic Analysis of 32K AI Model Cards"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: empirical
+    topics:
+      - model_governance
+      - documentation_standard
+
+  - citation_key: knoblauch2023continuous
+    inline_citation: "Knoblauch et al. (2023)"
+    authors: "Knoblauch, D., et al."
+    year: 2023
+    title: "Towards a Risk-Based Continuous Auditing-Based Certification for Machine Learning"
+    venue: "The Review of Socionetwork Strategies"
+    doi: ""
+    url: ""
+    evidence_type: theoretical
+    topics:
+      - regulatory_compliance_approach
+      - audit_trail_architecture
+
+  - citation_key: mallardi2025responsible
+    inline_citation: "Mallardi et al. (2025)"
+    authors: "Mallardi, G., et al."
+    year: 2025
+    title: "Towards Ensuring Responsible AI for Medical Device Certification"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: method
+    topics:
+      - regulatory_compliance_approach
+      - compliance_depth
+      - monitoring_stack
+
+  - citation_key: colliot2023reproducibility
+    inline_citation: "Colliot et al. (2023)"
+    authors: "Colliot, O., et al."
+    year: 2023
+    title: "Reproducibility in Machine Learning for Medical Imaging"
+    venue: "Springer"
+    doi: ""
+    url: ""
+    evidence_type: book_chapter
+    topics:
+      - reproducibility_standard
+      - experiment_tracking
+
+  - citation_key: kushibar2022layerensembles
+    inline_citation: "Kushibar et al. (2022)"
+    authors: "Kushibar, K., et al."
+    year: 2022
+    title: "Layer Ensembles: A Single-Pass Uncertainty Estimation in Deep Learning for Segmentation"
+    venue: "MICCAI 2022"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - uncertainty_quantification
+      - ensemble_methods
+
+  - citation_key: lewis2022augur
+    inline_citation: "Lewis et al. (2022)"
+    authors: "Lewis, A., et al."
+    year: 2022
+    title: "Augur: a step towards realistic drift detection in production ML systems"
+    venue: "NeurIPS Workshop 2022"
+    doi: ""
+    url: ""
+    evidence_type: method
+    topics:
+      - drift_detection_method
+      - monitoring_stack
+
+  - citation_key: barrak2021dvcevolution
+    inline_citation: "Barrak et al. (2021)"
+    authors: "Barrak, A., et al."
+    year: 2021
+    title: "On the Co-evolution of ML Pipelines and Source Code — Empirical Study of DVC Projects"
+    venue: "SANER 2021"
+    doi: ""
+    url: ""
+    evidence_type: empirical
+    topics:
+      - data_management_strategy
+      - gitops_strategy
+
+  - citation_key: markiewicz2021openneuro
+    inline_citation: "Markiewicz et al. (2021)"
+    authors: "Markiewicz, C. J., et al."
+    year: 2021
+    title: "The OpenNeuro resource for sharing of neuroscience data"
+    venue: "eLife 10, e71774"
+    doi: "10.7554/eLife.71774"
+    url: ""
+    evidence_type: tool_release
+    topics:
+      - data_management_strategy
+      - reproducibility_standard

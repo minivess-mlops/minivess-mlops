@@ -297,6 +297,23 @@ references:
       - prometheus_grafana
       - custom_dashboards
 
+  - citation_key: huang2025mlxops4medic
+    relevance: "MLXOps4Medic: medical imaging MLOps+XAI monitoring service framework. Directly overlaps with MinIVess observability stack."
+    supports_options:
+      - prometheus_grafana
+      - custom_dashboards
+
+  - citation_key: medmlops2025
+    relevance: "MedMLOps four-pillar framework (European Radiology): continuous monitoring/validation/retraining as pillar 2. Closest published comparator."
+    supports_options:
+      - prometheus_grafana
+      - custom_dashboards
+
+  - citation_key: feng2022chexstray
+    relevance: "CheXstray/MMC+ multi-modal drift monitoring validated during COVID-19 — practical monitoring architecture reference."
+    supports_options:
+      - custom_dashboards
+
 tags:
   - operations
   - monitoring
