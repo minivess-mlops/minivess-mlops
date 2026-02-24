@@ -23,6 +23,7 @@ class GateResult:
     passed: bool
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    statistics: dict[str, int] = field(default_factory=dict)
 
 
 def validate_nifti_metadata(df: pd.DataFrame) -> GateResult:

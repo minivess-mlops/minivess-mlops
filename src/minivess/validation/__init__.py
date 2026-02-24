@@ -21,6 +21,11 @@ from minivess.validation.gates import (
     validate_nifti_metadata,
     validate_training_metrics,
 )
+from minivess.validation.ge_runner import (
+    run_expectation_suite,
+    validate_metrics_batch,
+    validate_nifti_batch,
+)
 from minivess.validation.profiling import (
     DatasetProfileView,
     ProfileDriftReport,
@@ -50,6 +55,9 @@ __all__ = [
     "detect_prediction_drift",
     "evaluate_report",
     "profile_dataframe",
+    "run_expectation_suite",
+    "validate_metrics_batch",
+    "validate_nifti_batch",
     "validate_nifti_metadata",
     "validate_training_metrics",
 ]
