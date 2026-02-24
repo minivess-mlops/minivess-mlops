@@ -235,7 +235,7 @@ references:
     relevance: "MedSAM2: 455K training volumes, video propagation for 3D. No Slicer plugin yet."
     supports_options: ["slicer_nninteractive"]
 
-  - citation_key: terms2025vessqc
+  - citation_key: puttmann2025vessqc
     relevance: "VessQC napari plugin for uncertainty-guided 3D segmentation curation. Improved error recall 67% to 94%."
     supports_options: ["napari_nninteractive", "hybrid"]
 

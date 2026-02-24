@@ -468,7 +468,7 @@ references:
     relevance: "VessShape demonstrates few-shot vessel segmentation via synthetic shape priors."
     supports_options: ["segresnet", "vesselfm"]
 
-  - citation_key: terms2025vessqc
+  - citation_key: puttmann2025vessqc
     relevance: "VessQC uncertainty-guided curation improves error detection recall from 67% to 94%."
     supports_options: ["segresnet", "dynunet", "vesselfm"]
 

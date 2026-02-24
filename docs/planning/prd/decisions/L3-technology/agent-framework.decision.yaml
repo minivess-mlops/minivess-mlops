@@ -130,9 +130,9 @@ volatility:
     - "Anthropic tool use and computer use improvements"
 
 domain_applicability:
-  vascular_segmentation: 0.75
+  vascular_segmentation: 0.90
   cardiac_imaging: 0.75
-  neuroimaging: 0.70
+  neuroimaging: 0.80
   general_medical: 0.80
 
 rationale: >
@@ -141,8 +141,9 @@ rationale: >
   Custom (0.25) has notable prior because lightweight domain-specific agents
   may not need a full framework. CrewAI (0.20) is a simpler alternative for
   predefined multi-agent workflows. AutoGen (0.15) is viable but less
-  aligned with the existing MONAI/LangChain stack. Domain applicability is
-  lower than core ML decisions because agents are supplementary automation.
+  aligned with the existing MONAI/LangChain stack. Phase 16 identified
+  acquisition control and clinical contract verification as core agent use
+  cases, increasing vascular_segmentation applicability from 0.75 to 0.90.
 
 references:
   - citation_key: langchain2024langgraph

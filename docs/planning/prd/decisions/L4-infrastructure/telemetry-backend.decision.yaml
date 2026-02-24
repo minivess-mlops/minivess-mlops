@@ -1,0 +1,145 @@
+decision_id: telemetry_backend
+title: "Microscopy Telemetry Backend"
+description: >
+  Which time-series infrastructure to use for microscopy instrument telemetry.
+  Phase 16 research identified this as an unoccupied niche: no published work
+  uses a purpose-built time-series database for microscopy event streams. Smart
+  microscopy generates continuous telemetry (laser power, stage position, detector
+  gain, image quality metrics, segmentation uncertainty) that needs SQL-queryable
+  storage for anomaly detection, drift monitoring, and correlation analysis.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-02-24
+
+options:
+  - option_id: timescaledb
+    title: "TimescaleDB"
+    description: >
+      PostgreSQL extension with hypertable partitioning, continuous aggregates,
+      and columnar compression. SQL-native, integrates with existing PostgreSQL
+      infrastructure. Continuous aggregates enable real-time 1-minute quality
+      summaries. Grafana integration for dashboarding.
+    prior_probability: 0.45
+    status: recommended
+    implementation_status: not_started
+    complements:
+      - "monitoring_stack.prometheus_grafana"
+      - "acquisition_agent.conformal_bandit"
+
+  - option_id: duckdb_local
+    title: "DuckDB Local"
+    description: >
+      In-process analytical database. Already used for MLflow analytics.
+      Excellent for batch analysis of telemetry exports. No server process.
+      Limitations: no continuous aggregates, not designed for streaming ingestion.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "experiment_tracking.mlflow"
+
+  - option_id: prometheus_only
+    title: "Prometheus Only"
+    description: >
+      Use existing Prometheus time-series for instrument metrics. Already
+      in Docker Compose stack. Limitations: 15-second default scrape interval,
+      no SQL queries, limited correlation analysis, not designed for
+      scientific telemetry with metadata.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: partial
+    complements:
+      - "monitoring_stack.prometheus_grafana"
+
+  - option_id: none
+    title: "No Telemetry Backend"
+    description: >
+      No dedicated microscopy telemetry storage. Ad-hoc CSV/JSON logs.
+      Current state for most microscopy labs.
+    prior_probability: 0.10
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: containerization
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: docker_compose
+        then_probabilities:
+          timescaledb: 0.50
+          duckdb_local: 0.25
+          prometheus_only: 0.15
+          none: 0.10
+      - given_parent_option: kubernetes
+        then_probabilities:
+          timescaledb: 0.50
+          duckdb_local: 0.15
+          prometheus_only: 0.25
+          none: 0.10
+      - given_parent_option: local_only
+        then_probabilities:
+          timescaledb: 0.25
+          duckdb_local: 0.45
+          prometheus_only: 0.10
+          none: 0.20
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      timescaledb: 0.25
+      duckdb_local: 0.40
+      prometheus_only: 0.15
+      none: 0.20
+    rationale: "Solo researchers prefer minimal infrastructure; DuckDB is zero-config"
+  lab_group:
+    probability_overrides:
+      timescaledb: 0.50
+      duckdb_local: 0.20
+      prometheus_only: 0.15
+      none: 0.15
+    rationale: "Lab groups benefit from shared TimescaleDB with multi-user access"
+  clinical_deployment:
+    probability_overrides:
+      timescaledb: 0.55
+      duckdb_local: 0.15
+      prometheus_only: 0.20
+      none: 0.10
+    rationale: "Clinical needs auditable time-series with SQL access for compliance reporting"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-24
+  next_review: 2026-08-24
+  change_drivers:
+    - "TimescaleDB Docker Compose maturity"
+    - "DuckDB streaming support"
+    - "Smart microscopy telemetry standardisation"
+
+domain_applicability:
+  vascular_segmentation: 0.9
+  cardiac_imaging: 0.4
+  neuroimaging: 0.7
+  general_medical: 0.3
+
+rationale: >
+  TimescaleDB (0.45) is recommended because it extends PostgreSQL (familiar,
+  SQL-native) with hypertable partitioning and continuous aggregates suited
+  for microscopy telemetry. Hinderling et al. (2025) SMWG roadmap identifies
+  interoperability and telemetry standardisation as critical gaps. DuckDB
+  (0.30) is the lightweight alternative already in the stack. Prometheus
+  (0.15) is viable for basic metrics but lacks SQL and scientific metadata.
+  This is an unoccupied niche: no published work uses time-series DBs for
+  microscopy telemetry in the biomedical imaging literature.
+
+references:
+  - citation_key: hinderling2025smartmicroscopy
+    relevance: "SMWG roadmap identifies telemetry interoperability as critical gap."
+    supports_options: ["timescaledb", "duckdb_local"]
+
+tags:
+  - infrastructure
+  - telemetry
+  - time-series
+  - smart-microscopy
+  - phase-16-research

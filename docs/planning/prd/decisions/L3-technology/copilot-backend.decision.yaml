@@ -1,0 +1,162 @@
+decision_id: copilot_backend
+title: "Vasculometric Copilot Backend"
+description: >
+  Which retrieval-augmented generation approach to use for the vasculometric
+  copilot — an interactive system for multi-turn queries about 3D vascular
+  morphometry. Phase 16 research identified this as a medium-high novelty
+  angle: no copilot exists for 3D vascular morphometry queries. Combines
+  the PathChat copilot paradigm (Lu et al., 2024; Nature) with graph-based
+  retrieval over a vascular feature graph.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-24
+
+options:
+  - option_id: graph_rag
+    title: "Graph RAG over Vascular Feature Graph"
+    description: >
+      Build a directed graph where nodes = vessel segments, edges = connectivity,
+      attributes = morphometric features (diameter, tortuosity, branching angles).
+      Graph RAG retriever traverses this graph to answer topology-aware queries.
+      Most powerful for queries involving vessel connectivity and spatial relationships.
+    prior_probability: 0.35
+    status: recommended
+    implementation_status: not_started
+    complements:
+      - "llm_provider.hybrid_litellm"
+      - "agent_framework.langgraph"
+
+  - option_id: vector_rag
+    title: "Vector RAG with Embeddings"
+    description: >
+      Embed vessel segment descriptions and morphometric summaries as vectors.
+      Standard similarity search for retrieval. Simpler than graph RAG but
+      cannot answer topology-aware queries. Good starting point.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "llm_provider.hybrid_litellm"
+
+  - option_id: direct_llm
+    title: "Direct LLM with Tool Calling"
+    description: >
+      LLM directly calls morphometry computation tools (diameter, tortuosity,
+      etc.) via function calling. No pre-built retrieval index. Flexible but
+      each query requires fresh computation. Suitable for exploratory analysis.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "llm_provider.hybrid_litellm"
+      - "agent_framework.langgraph"
+
+  - option_id: none
+    title: "No Copilot"
+    description: >
+      Manual scripting for morphometry queries. Current default.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: llm_provider
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: hybrid_litellm
+        then_probabilities:
+          graph_rag: 0.40
+          vector_rag: 0.30
+          direct_llm: 0.20
+          none: 0.10
+      - given_parent_option: anthropic_direct
+        then_probabilities:
+          graph_rag: 0.35
+          vector_rag: 0.30
+          direct_llm: 0.25
+          none: 0.10
+      - given_parent_option: openai_direct
+        then_probabilities:
+          graph_rag: 0.35
+          vector_rag: 0.30
+          direct_llm: 0.25
+          none: 0.10
+      - given_parent_option: local_only
+        then_probabilities:
+          graph_rag: 0.25
+          vector_rag: 0.30
+          direct_llm: 0.15
+          none: 0.30
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      graph_rag: 0.25
+      vector_rag: 0.30
+      direct_llm: 0.25
+      none: 0.20
+    rationale: "Solo researchers benefit from copilot but may prefer simpler vector RAG"
+  lab_group:
+    probability_overrides:
+      graph_rag: 0.40
+      vector_rag: 0.25
+      direct_llm: 0.20
+      none: 0.15
+    rationale: "Lab groups can justify graph RAG setup cost for shared morphometry queries"
+  clinical_deployment:
+    probability_overrides:
+      graph_rag: 0.35
+      vector_rag: 0.30
+      direct_llm: 0.20
+      none: 0.15
+    rationale: "Clinical needs reproducible, traceable morphometry queries"
+
+volatility:
+  classification: volatile
+  last_assessed: 2026-02-24
+  next_review: 2026-05-24
+  change_drivers:
+    - "Graph RAG framework maturity (LangGraph, LlamaIndex)"
+    - "LLM context window growth (reduces retrieval need)"
+    - "Medical knowledge graph standards"
+    - "VesselVio and vascular feature extraction tools"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 0.5
+  neuroimaging: 0.7
+  general_medical: 0.3
+
+rationale: >
+  Graph RAG (0.35) is recommended for topology-aware vascular queries, inspired
+  by MedRAG (Xiong et al., 2024; ACL Findings), Medical Graph RAG (Wu et al., 2024),
+  and PathChat copilot paradigm (Lu et al., 2024; Nature 634). Vector RAG (0.30) is
+  a simpler starting point. Direct LLM with tool calling (0.20) is the most flexible
+  but least efficient. No copilot exists for 3D vascular morphometry — this is an
+  unoccupied niche. Domain applicability is highest for vascular (core use case)
+  and neuroimaging (vessel analysis relevant), lower for other domains.
+
+references:
+  - citation_key: lu2024pathchat
+    relevance: "PathChat: multimodal copilot paradigm for computational pathology (Nature 634)."
+    supports_options: ["graph_rag", "vector_rag", "direct_llm"]
+
+  - citation_key: xiong2024medrag
+    relevance: "MedRAG: medical knowledge graph retrieval (ACL 2024 Findings)."
+    supports_options: ["graph_rag"]
+
+  - citation_key: wu2024medicalgraphrag
+    relevance: "Medical Graph RAG: knowledge graph-enhanced LLM for healthcare QA."
+    supports_options: ["graph_rag"]
+
+  - citation_key: chen2025pathrag
+    relevance: "PathRAG: graph pruning for efficient retrieval-augmented generation."
+    supports_options: ["graph_rag"]
+
+tags:
+  - technology
+  - copilot
+  - rag
+  - knowledge-graph
+  - phase-16-research

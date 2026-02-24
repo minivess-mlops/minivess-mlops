@@ -1,0 +1,210 @@
+decision_id: acquisition_agent
+title: "Acquisition Agent Backend"
+description: >
+  How adaptive microscopy acquisition decisions are made. Phase 16 agentic
+  RAG/IaC research (agentic-rag-iac-angle-plan.md) established that combining
+  conformal prediction-calibrated uncertainty from segmentation models with
+  closed-loop microscopy control is a genuinely novel synthesis. The agent
+  uses voxel-level uncertainty to prioritise re-scanning of high-uncertainty
+  regions (thin vessels, branch points), balancing information gain against
+  photodamage budget. Core mechanism is a feedback loop, not an LLM.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-24
+
+options:
+  - option_id: conformal_bandit
+    title: "Conformal Prediction + Restless Bandit"
+    description: >
+      Conformal prediction (MAPIE/ConSeMa) produces calibrated uncertainty sets;
+      restless multi-armed bandit with Whittle index policy (Anguera Peris et al.,
+      2025) schedules re-scanning across spatial locations. Principled, mathematically
+      grounded, balances exploration-exploitation with photodamage constraints.
+    prior_probability: 0.40
+    status: recommended
+    implementation_status: not_started
+    complements:
+      - "uncertainty_quantification.conformal_prediction"
+      - "telemetry_backend.timescaledb"
+
+  - option_id: uncertainty_threshold
+    title: "Simple Uncertainty Threshold"
+    description: >
+      Re-scan regions where mean uncertainty exceeds a fixed threshold.
+      No scheduling optimisation. Simpler but wastes photon budget on
+      regions that may not benefit from re-scanning.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "uncertainty_quantification.mc_dropout"
+      - "uncertainty_quantification.conformal_prediction"
+
+  - option_id: fixed_schedule
+    title: "Fixed Acquisition Schedule"
+    description: >
+      Uniform scanning across all regions. No adaptive feedback. Baseline
+      comparison for evaluating adaptive approaches. Current default
+      in most microscopy workflows.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: implemented
+
+  - option_id: none
+    title: "No Acquisition Agent"
+    description: >
+      Use pre-acquired data only. No closed-loop acquisition. Appropriate
+      when hardware access is unavailable or dataset is fixed.
+    prior_probability: 0.10
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: uncertainty_quantification
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: conformal_prediction
+        then_probabilities:
+          conformal_bandit: 0.55
+          uncertainty_threshold: 0.25
+          fixed_schedule: 0.10
+          none: 0.10
+      - given_parent_option: mc_dropout
+        then_probabilities:
+          conformal_bandit: 0.25
+          uncertainty_threshold: 0.40
+          fixed_schedule: 0.20
+          none: 0.15
+      - given_parent_option: deep_ensembles
+        then_probabilities:
+          conformal_bandit: 0.35
+          uncertainty_threshold: 0.35
+          fixed_schedule: 0.15
+          none: 0.15
+      - given_parent_option: temperature_scaling
+        then_probabilities:
+          conformal_bandit: 0.15
+          uncertainty_threshold: 0.30
+          fixed_schedule: 0.30
+          none: 0.25
+      - given_parent_option: evidential
+        then_probabilities:
+          conformal_bandit: 0.10
+          uncertainty_threshold: 0.20
+          fixed_schedule: 0.30
+          none: 0.40
+
+  - parent_decision_id: agent_framework
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: langgraph
+        then_probabilities:
+          conformal_bandit: 0.50
+          uncertainty_threshold: 0.25
+          fixed_schedule: 0.15
+          none: 0.10
+      - given_parent_option: crewai
+        then_probabilities:
+          conformal_bandit: 0.35
+          uncertainty_threshold: 0.30
+          fixed_schedule: 0.20
+          none: 0.15
+      - given_parent_option: autogen
+        then_probabilities:
+          conformal_bandit: 0.30
+          uncertainty_threshold: 0.30
+          fixed_schedule: 0.20
+          none: 0.20
+      - given_parent_option: custom
+        then_probabilities:
+          conformal_bandit: 0.40
+          uncertainty_threshold: 0.30
+          fixed_schedule: 0.15
+          none: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      conformal_bandit: 0.25
+      uncertainty_threshold: 0.30
+      fixed_schedule: 0.25
+      none: 0.20
+    rationale: "Solo researchers may lack microscope hardware; uncertainty threshold is simpler"
+  lab_group:
+    probability_overrides:
+      conformal_bandit: 0.45
+      uncertainty_threshold: 0.25
+      fixed_schedule: 0.15
+      none: 0.15
+    rationale: "Lab groups with hardware access benefit most from principled adaptive acquisition"
+  clinical_deployment:
+    probability_overrides:
+      conformal_bandit: 0.40
+      uncertainty_threshold: 0.30
+      fixed_schedule: 0.20
+      none: 0.10
+    rationale: "Clinical needs reproducible acquisition protocols with formal uncertainty guarantees"
+
+volatility:
+  classification: volatile
+  last_assessed: 2026-02-24
+  next_review: 2026-05-24
+  change_drivers:
+    - "PyCLM and Pycro-Manager integration maturity"
+    - "Conformal prediction computational cost for real-time"
+    - "Smart microscopy interoperability standards (SMWG)"
+    - "Hardware availability and simulation environments"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 0.3
+  neuroimaging: 0.7
+  general_medical: 0.4
+
+rationale: >
+  Phase 16 identified uncertainty-driven adaptive acquisition as the highest-novelty
+  angle (Nikola T. Markov synthesis of conformal prediction × smart microscopy ×
+  vascular MLOps). The conformal_bandit option (0.40) combines calibrated uncertainty
+  from ConSeMa/MAPIE with Whittle index scheduling (Anguera Peris et al., 2025;
+  37% cumulative regret reduction, 93% more biologically relevant events). Ye et al.
+  (2023/2025) demonstrated 16x light dose reduction with uncertainty-driven acquisition.
+  PyCLM (Oatman et al., 2025) and Pycro-Manager (Pinkard et al., 2021) provide
+  hardware abstraction layers. Domain applicability is high for vascular and neuro
+  (where multiphoton imaging is standard), lower for cardiac and general medical.
+
+references:
+  - citation_key: ye2023uncertainty
+    relevance: "Uncertainty-driven adaptive acquisition: 16x light dose reduction in fluorescence microscopy."
+    supports_options: ["conformal_bandit", "uncertainty_threshold"]
+
+  - citation_key: ye2025qutcc
+    relevance: "QUTCC conformal calibration for tighter asymmetric uncertainty bounds."
+    supports_options: ["conformal_bandit"]
+
+  - citation_key: oatman2025pyclm
+    relevance: "PyCLM: programming-free closed-loop microscopy with TOML configuration."
+    supports_options: ["conformal_bandit", "uncertainty_threshold"]
+
+  - citation_key: angueraperis2025bandits
+    relevance: "Restless bandits for microscopy scheduling: 37% regret reduction, 93% more relevant events."
+    supports_options: ["conformal_bandit"]
+
+  - citation_key: hinderling2025smartmicroscopy
+    relevance: "Smart microscopy interoperability roadmap: event/outcome/quality/information-driven paradigms."
+    supports_options: ["conformal_bandit", "uncertainty_threshold"]
+
+  - citation_key: pinkard2021pycromanager
+    relevance: "Pycro-Manager: open-source microscope control (Nature Methods 2021)."
+    supports_options: ["conformal_bandit", "uncertainty_threshold"]
+
+  - citation_key: mossina2025consema
+    relevance: "ConSeMa conformalized segmentation margins for calibrated uncertainty."
+    supports_options: ["conformal_bandit"]
+
+tags:
+  - technology
+  - acquisition
+  - uncertainty
+  - smart-microscopy
+  - phase-16-research

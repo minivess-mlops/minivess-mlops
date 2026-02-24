@@ -1,13 +1,18 @@
 network:
   name: "MinIVess MLOps v2 Probabilistic PRD Decision Network"
-  version: "1.5.0"
+  version: "1.6.0"
   last_updated: 2026-02-24
   description: >
-    Bayesian decision network with 61 nodes across 5 hierarchical levels.
+    Bayesian decision network with 65 nodes across 5 hierarchical levels.
     Adapted from the music-attribution-scaffold format for biomedical
     image segmentation MLOps. Captures open-ended decisions for a
     learning-first, portfolio-building, MONAI-compatible system.
 
+    v1.6.0: Phase 16 — agentic RAG/IaC angle plan integration. Added 4 nodes
+            (acquisition_agent, telemetry_backend, clinical_contract_schema,
+            copilot_backend) and 10 explicit edges. 15 new bibliography entries.
+            Novel synthesis: conformal prediction × smart microscopy × vascular
+            MLOps. 65 nodes, 110 explicit edges (+conditional_on in decision files).
     v1.5.0: Phase 15 — interactive segmentation research integration. Updated
             annotation_platform (added slicer_nninteractive, napari_nninteractive
             options; nnInteractive CVPR 2025 1st place) and annotation_workflow
@@ -250,7 +255,22 @@ nodes:
     file: L3-technology/drift-detection-method.decision.yaml
     title: "Drift Detection Method"
 
-  # --- L4: Infrastructure (9 nodes) ---
+  - id: acquisition_agent
+    level: L3_technology
+    file: L3-technology/acquisition-agent.decision.yaml
+    title: "Acquisition Agent Backend"
+
+  - id: clinical_contract_schema
+    level: L3_technology
+    file: L3-technology/clinical-contract-schema.decision.yaml
+    title: "Clinical Contract Schema"
+
+  - id: copilot_backend
+    level: L3_technology
+    file: L3-technology/copilot-backend.decision.yaml
+    title: "Vasculometric Copilot Backend"
+
+  # --- L4: Infrastructure (10 nodes) ---
   - id: compute_target
     level: L4_infrastructure
     file: L4-infrastructure/compute-target.decision.yaml
@@ -290,6 +310,11 @@ nodes:
     level: L4_infrastructure
     file: L4-infrastructure/secrets-management.decision.yaml
     title: "Secrets Management"
+
+  - id: telemetry_backend
+    level: L4_infrastructure
+    file: L4-infrastructure/telemetry-backend.decision.yaml
+    title: "Microscopy Telemetry Backend"
 
   - id: project_management_tool
     level: L4_infrastructure
@@ -859,3 +884,55 @@ edges:
     to: model_promotion_strategy
     influence: moderate
     rationale: "Drift response determines whether promotion is automated or human-triggered"
+
+  # === Phase 16: Agentic RAG/IaC nodes and edges (4 nodes, 10 edges) ===
+
+  - from: uncertainty_quantification
+    to: acquisition_agent
+    influence: strong
+    rationale: "UQ method (conformal, MC Dropout, ensembles) determines acquisition agent calibration approach"
+
+  - from: acquisition_agent
+    to: annotation_workflow
+    influence: moderate
+    rationale: "Adaptively acquired data feeds into annotation/proofreading pipeline"
+
+  - from: agent_framework
+    to: acquisition_agent
+    influence: strong
+    rationale: "LangGraph orchestrates the acquisition feedback loop state machine"
+
+  - from: clinical_contract_schema
+    to: model_promotion_strategy
+    influence: strong
+    rationale: "Machine-readable contracts gate model promotion with pre-completion verification"
+
+  - from: clinical_contract_schema
+    to: model_governance
+    influence: strong
+    rationale: "Contracts encode TRIPOD+AI governance requirements as typed constraints"
+
+  - from: compliance_depth
+    to: clinical_contract_schema
+    influence: strong
+    rationale: "IEC 62304 full requires formal contracts; lightweight allows YAML checklists"
+
+  - from: telemetry_backend
+    to: monitoring_stack
+    influence: moderate
+    rationale: "Microscopy telemetry feeds monitoring dashboards alongside ML metrics"
+
+  - from: telemetry_backend
+    to: drift_detection_method
+    influence: moderate
+    rationale: "Instrument drift (laser power, temperature) detected from telemetry time-series"
+
+  - from: data_validation_tools
+    to: label_quality
+    influence: moderate
+    rationale: "Data validation tools (Cleanlab, Pandera) inform label quality assessment and triage"
+
+  - from: copilot_backend
+    to: llm_provider
+    influence: moderate
+    rationale: "Vasculometric copilot requires LLM for natural-language morphometry queries"

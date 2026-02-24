@@ -13,7 +13,7 @@
 # 4. Sub-citations: when ingesting a paper, also add papers IT cites that
 #    are relevant to other decision nodes.
 #
-# last_updated: 2026-02-24  (Phase 15: +12 entries for interactive segmentation research)
+# last_updated: 2026-02-24  (Phase 16: +15 entries for agentic RAG/IaC angle plan)
 
 bibliography:
 
@@ -520,9 +520,9 @@ bibliography:
       - segmentation_models
       - augmentation_stack
 
-  - citation_key: terms2025vessqc
-    inline_citation: "Terms et al. (2025)"
-    authors: "Terms, N., Wittmann, F., Paetzold, J. C., & Chen, S."
+  - citation_key: puttmann2025vessqc
+    inline_citation: "Puttmann et al. (2025)"
+    authors: "Puttmann, S., et al."
     year: 2025
     title: "Bridging 3D Deep Learning and Curation for Analysis and High-Quality Segmentation in Practice"
     venue: "arXiv preprint"
@@ -2327,3 +2327,181 @@ bibliography:
     evidence_type: tool_release
     topics:
       - annotation_platform
+
+  # ============================================================
+  # Agentic RAG / IaC / Smart Microscopy (Phase 16)
+  # ============================================================
+
+  - citation_key: ye2023uncertainty
+    inline_citation: "Ye et al. (2023)"
+    authors: "Ye, Z., et al."
+    year: 2023
+    title: "Uncertainty-Driven Adaptive Acquisition for Microscopy"
+    venue: "arXiv:2310.16102; Optics Express 33(6), 2025"
+    doi: ""
+    url: "https://arxiv.org/abs/2310.16102"
+    evidence_type: method
+    topics:
+      - acquisition_agent
+      - uncertainty_quantification
+
+  - citation_key: ye2025qutcc
+    inline_citation: "Ye et al. (2025)"
+    authors: "Ye, Z., et al."
+    year: 2025
+    title: "QUTCC: Quantile Uncertainty Training with Conformal Calibration"
+    venue: "Preprint"
+    doi: ""
+    url: ""
+    evidence_type: method
+    topics:
+      - acquisition_agent
+      - calibration_tools
+      - uncertainty_quantification
+
+  - citation_key: oatman2025pyclm
+    inline_citation: "Oatman et al. (2025)"
+    authors: "Oatman, S., et al."
+    year: 2025
+    title: "PyCLM: Programming-Free Closed-Loop Microscopy"
+    venue: "Princeton"
+    doi: ""
+    url: ""
+    evidence_type: tool_release
+    topics:
+      - acquisition_agent
+
+  - citation_key: angueraperis2025bandits
+    inline_citation: "Anguera Peris et al. (2025)"
+    authors: "Anguera Peris, M., et al."
+    year: 2025
+    title: "Restless Multi-Armed Bandits for Microscopy Scheduling"
+    venue: "arXiv:2512.14930"
+    doi: ""
+    url: "https://arxiv.org/abs/2512.14930"
+    evidence_type: method
+    topics:
+      - acquisition_agent
+
+  - citation_key: hinderling2025smartmicroscopy
+    inline_citation: "Hinderling et al. (2025)"
+    authors: "Hinderling, L., et al."
+    year: 2025
+    title: "Smart Microscopy: Current Implementations and a Roadmap for Interoperability"
+    venue: "bioRxiv, August 2025"
+    doi: ""
+    url: ""
+    evidence_type: survey
+    topics:
+      - acquisition_agent
+      - telemetry_backend
+
+  - citation_key: lu2024pathchat
+    inline_citation: "Lu et al. (2024)"
+    authors: "Lu, M. Y., et al."
+    year: 2024
+    title: "A Multimodal Generative AI Copilot for Human Pathology"
+    venue: "Nature 634, 466-473"
+    doi: "10.1038/s41586-024-07618-3"
+    url: ""
+    evidence_type: method
+    topics:
+      - copilot_backend
+
+  - citation_key: xiong2024medrag
+    inline_citation: "Xiong et al. (2024)"
+    authors: "Xiong, G., et al."
+    year: 2024
+    title: "MedRAG: Benchmarking Retrieval-Augmented Generation for Medicine"
+    venue: "ACL 2024 Findings"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - copilot_backend
+
+  - citation_key: wu2024medicalgraphrag
+    inline_citation: "Wu et al. (2024)"
+    authors: "Wu, P., et al."
+    year: 2024
+    title: "Medical Graph RAG: Knowledge Graph-Enhanced LLM for Healthcare QA"
+    venue: "Preprint"
+    doi: ""
+    url: ""
+    evidence_type: method
+    topics:
+      - copilot_backend
+
+  - citation_key: chen2025pathrag
+    inline_citation: "Chen et al. (2025)"
+    authors: "Chen, B., et al."
+    year: 2025
+    title: "PathRAG: Pruning Graph-Based Retrieval Augmented Generation with Relational Paths"
+    venue: "arXiv:2502.14902"
+    doi: ""
+    url: "https://arxiv.org/abs/2502.14902"
+    evidence_type: method
+    topics:
+      - copilot_backend
+
+  - citation_key: mandal2025aila
+    inline_citation: "Mandal et al. (2025)"
+    authors: "Mandal, I., et al."
+    year: 2025
+    title: "Evaluating Large Language Model Agents for Automation of Atomic Force Microscopy"
+    venue: "Nature Communications 16, 9104"
+    doi: "10.1038/s41467-025-64475-0"
+    url: ""
+    evidence_type: method
+    topics:
+      - agent_framework
+      - acquisition_agent
+
+  - citation_key: steegen2016multiverse
+    inline_citation: "Steegen et al. (2016)"
+    authors: "Steegen, S., Tuerlinckx, F., Gelman, A., & Vanpaemel, W."
+    year: 2016
+    title: "Increasing Transparency Through a Multiverse Analysis"
+    venue: "Perspectives on Psychological Science 11(5), 702-712"
+    doi: "10.1177/1745691616658637"
+    url: ""
+    evidence_type: method
+    topics:
+      - clinical_contract_schema
+
+  - citation_key: northcutt2021confidentlearning
+    inline_citation: "Northcutt et al. (2021)"
+    authors: "Northcutt, C. G., Jiang, L., & Chuang, I. L."
+    year: 2021
+    title: "Confident Learning: Estimating Uncertainty in Dataset Labels"
+    venue: "JAIR 70, 1373-1411"
+    doi: "10.1613/jair.1.12125"
+    url: ""
+    evidence_type: method
+    topics:
+      - label_quality
+
+  - citation_key: pinkard2021pycromanager
+    inline_citation: "Pinkard et al. (2021)"
+    authors: "Pinkard, H., et al."
+    year: 2021
+    title: "Pycro-Manager: Open-Source Software for Customized and Reproducible Microscope Control"
+    venue: "Nature Methods 18, 226-228"
+    doi: "10.1038/s41592-021-01087-6"
+    url: ""
+    evidence_type: tool_release
+    topics:
+      - acquisition_agent
+
+  - citation_key: collins2024tripodai
+    inline_citation: "Collins et al. (2024)"
+    authors: "Collins, G. S., et al."
+    year: 2024
+    title: "TRIPOD+AI Statement: Updated Reporting Guidelines for Clinical Prediction Models"
+    venue: "BMJ 385, e078378"
+    doi: "10.1136/bmj-2023-078378"
+    url: ""
+    evidence_type: guideline
+    topics:
+      - clinical_contract_schema
+      - model_governance

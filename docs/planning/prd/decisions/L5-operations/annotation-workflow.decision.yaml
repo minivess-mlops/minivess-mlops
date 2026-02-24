@@ -223,7 +223,7 @@ research_notes: >
   The proofreading paradigm (auto-segment → human correct → retrain) is validated by
   multiple papers. Proposed workflow: (1) Auto-segment with DynUNet/vesselFM, (2) Triage
   by quality score, (3) Proofread in Slicer with nnInteractive, (4) Retrain with corrected
-  masks. VessQC (Terms et al., 2025) complements by flagging likely errors before human
+  masks. VessQC (Puttmann et al., 2025) complements by flagging likely errors before human
   review (recall 67%→94%). Agentic annotation (MedSAM-Agent, Liu et al., 2026) is an
   emerging direction but not yet practical. All interactive methods degrade on small
   structures (~27% Dice on organs-at-risk per AtlasSegFM evaluation), reinforcing need
@@ -254,7 +254,7 @@ references:
     relevance: "PRISM (MICCAI 2024): corrective refinement from prior mask. Directly models proofreading."
     supports_options: ["slicer_proofread"]
 
-  - citation_key: terms2025vessqc
+  - citation_key: puttmann2025vessqc
     relevance: "VessQC: uncertainty-guided curation improves error detection recall from 67% to 94%."
     supports_options: ["slicer_proofread", "hybrid"]
 

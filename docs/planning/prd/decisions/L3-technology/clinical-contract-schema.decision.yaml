@@ -1,0 +1,146 @@
+decision_id: clinical_contract_schema
+title: "Clinical Contract Schema"
+description: >
+  How clinical evaluation requirements (TRIPOD+AI, CLAIM, STARD-AI) are encoded
+  as machine-readable constraints for pipeline state verification. Phase 16
+  research identified this as a high-novelty angle: no published system encodes
+  clinical reporting checklists as typed pipeline constraints with pre-completion
+  verification. The verifier is deterministic (not LLM-based), checking typed
+  constraints against accumulated pipeline evidence before model promotion.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-24
+
+options:
+  - option_id: pydantic_tripod
+    title: "Pydantic v2 TRIPOD+AI Contracts"
+    description: >
+      Clinical evaluation requirements encoded as Pydantic v2 models with
+      typed fields for metrics, thresholds, subgroup definitions, and
+      reporting requirements. Integrates with existing data validation stack.
+      Pre-completion verifier checks all constraints before model promotion.
+    prior_probability: 0.45
+    status: recommended
+    implementation_status: not_started
+    complements:
+      - "data_validation_tools.pydantic"
+      - "model_promotion_strategy.challenger_champion"
+
+  - option_id: json_schema
+    title: "JSON Schema Contracts"
+    description: >
+      Clinical requirements as JSON Schema documents. More portable than
+      Pydantic but less expressive for complex validation logic. Can be
+      shared across teams and tools without Python dependency.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+
+  - option_id: yaml_manual
+    title: "YAML Manual Checklists"
+    description: >
+      Human-readable YAML checklists without automated verification.
+      Current approach in most medical imaging projects. Relies on
+      manual review for compliance.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+
+  - option_id: none
+    title: "No Clinical Contracts"
+    description: >
+      No machine-readable clinical evaluation requirements. Manual
+      review only. Current default.
+    prior_probability: 0.10
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: compliance_depth
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: iec_62304_full
+        then_probabilities:
+          pydantic_tripod: 0.55
+          json_schema: 0.25
+          yaml_manual: 0.15
+          none: 0.05
+      - given_parent_option: lightweight_audit
+        then_probabilities:
+          pydantic_tripod: 0.35
+          json_schema: 0.25
+          yaml_manual: 0.25
+          none: 0.15
+      - given_parent_option: no_compliance
+        then_probabilities:
+          pydantic_tripod: 0.15
+          json_schema: 0.15
+          yaml_manual: 0.25
+          none: 0.45
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      pydantic_tripod: 0.30
+      json_schema: 0.20
+      yaml_manual: 0.30
+      none: 0.20
+    rationale: "Solo researchers may prefer simpler YAML checklists for learning"
+  lab_group:
+    probability_overrides:
+      pydantic_tripod: 0.45
+      json_schema: 0.25
+      yaml_manual: 0.20
+      none: 0.10
+    rationale: "Lab groups benefit from automated contract verification across members"
+  clinical_deployment:
+    probability_overrides:
+      pydantic_tripod: 0.55
+      json_schema: 0.25
+      yaml_manual: 0.15
+      none: 0.05
+    rationale: "Clinical deployment requires formal, machine-checkable compliance gates"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-24
+  next_review: 2026-08-24
+  change_drivers:
+    - "TRIPOD+AI adoption and tooling ecosystem"
+    - "Pydantic v2 advanced validation features"
+    - "EU AI Act implementation requirements"
+
+domain_applicability:
+  vascular_segmentation: 0.9
+  cardiac_imaging: 0.9
+  neuroimaging: 0.9
+  general_medical: 1.0
+
+rationale: >
+  Phase 16 identified machine-readable clinical contracts as a high-novelty
+  direction (TRIPOD+AI as typed constraints × pre-completion verification ×
+  pipeline state graphs). Pydantic v2 (0.45) is recommended because it
+  integrates with the existing data validation stack (Pydantic already used
+  for schema validation) and provides rich validation logic. Collins et al.
+  (2024) define TRIPOD+AI requirements; encoding these as Pydantic models
+  enables deterministic verification before model promotion. JSON Schema
+  (0.25) is the portable alternative. The key insight: the verifier is
+  deterministic, not LLM-based — it checks typed constraints against typed
+  evidence.
+
+references:
+  - citation_key: collins2024tripodai
+    relevance: "TRIPOD+AI reporting guidelines that define the contract requirements."
+    supports_options: ["pydantic_tripod", "json_schema", "yaml_manual"]
+
+  - citation_key: tzanis2026agenticregulation
+    relevance: "Regulatory implications of agentic AI systems; highlights need for auditable compliance."
+    supports_options: ["pydantic_tripod", "json_schema"]
+
+tags:
+  - technology
+  - clinical-evaluation
+  - compliance
+  - contracts
+  - phase-16-research
