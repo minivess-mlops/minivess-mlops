@@ -12,6 +12,7 @@ class ModelFamily(StrEnum):
     MONAI_SEGRESNET = "segresnet"
     MONAI_SWINUNETR = "swinunetr"
     MONAI_VISTA3D = "vista3d"
+    MONAI_DYNUNET = "dynunet"
     COMMA_MAMBA = "comma_mamba"
     SAM3_LORA = "sam3_lora"
     CUSTOM = "custom"
