@@ -2,55 +2,77 @@ decision_id: annotation_workflow
 title: "Annotation Workflow"
 description: >
   How annotation tasks are organized, distributed, and quality-controlled.
-  MONAI Label active learning suggests annotations to experts; Label
-  Studio manual provides traditional annotation workflows; hybrid
-  combines both; none means annotations are pre-existing or external.
+  Phase 15 interactive segmentation research (interactive-segmentation-report.md)
+  established that the proofreading paradigm (auto-segment → interactive correction
+  → retrain) is superior to from-scratch annotation. K-Prism (Guo et al., 2025)
+  showed >30% reduction in clicks when starting from an existing mask. OAIMS
+  (Xu et al., 2025) showed online adaptation recovers 25.5pp on OOD data.
   Critical for vascular segmentation where expert annotations are expensive.
 
 decision_level: L5_operations
 status: active
-last_updated: 2026-02-23
+last_updated: 2026-02-24
 
 options:
+  - option_id: slicer_proofread
+    title: "Slicer Proofreading Workflow"
+    description: >
+      Auto-segment with DynUNet/vesselFM → triage by quality score (uncertainty,
+      connected components) → proofread in 3D Slicer with SlicerNNInteractive
+      (all prompt types: points, scribbles, lasso, prior mask) → export corrected
+      masks → optionally retrain. Designed for the proofread-don't-reannotate
+      paradigm validated by K-Prism (>30% NoC90 reduction with prior mask).
+      Client-server architecture: annotation workstation does not need GPU.
+    prior_probability: 0.45
+    status: recommended
+    implementation_status: not_started
+    complements:
+      - "annotation_platform.slicer_nninteractive"
+      - "segmentation_models.dynunet"
+      - "label_quality.cleanlab"
+
   - option_id: monai_label_active
     title: "MONAI Label Active Learning"
     description: >
       MONAI Label server provides AI-assisted annotation with active
       learning sample selection. Model suggests segmentations, expert
       corrects. Reduces annotation time significantly for 3D volumes.
-    prior_probability: 0.35
+      Best option when iterative dataset improvement with automatic
+      retraining is the primary goal.
+    prior_probability: 0.20
     status: viable
     implementation_status: not_started
     complements:
       - "monai_alignment.monai_native"
-      - "annotation_platform.label_studio"
+      - "annotation_platform.monai_label"
       - "label_quality.cleanlab"
+
+  - option_id: hybrid
+    title: "Hybrid Proofread + Active Learning"
+    description: >
+      Combine Slicer proofreading (Phase 3) with MONAI Label active learning
+      (Phase 4). Slicer handles interactive correction; MONAI Label handles
+      sample selection and model retraining. Best of both approaches.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "annotation_platform.slicer_nninteractive"
+      - "annotation_platform.monai_label"
 
   - option_id: label_studio_manual
     title: "Label Studio Manual Workflow"
     description: >
       Traditional annotation via Label Studio with task distribution,
       multi-annotator support, and review workflows. Config-only status
-      with Label Studio in Docker Compose stack.
-    prior_probability: 0.30
+      with Label Studio in Docker Compose stack. Primarily 2D; limited
+      3D interactive support.
+    prior_probability: 0.10
     status: viable
     implementation_status: config_only
     complements:
       - "annotation_platform.label_studio"
       - "containerization.docker_compose"
-
-  - option_id: hybrid
-    title: "Hybrid Active + Manual"
-    description: >
-      MONAI Label provides initial segmentation suggestions, expert
-      reviews in Label Studio. Active learning selects most informative
-      samples for annotation. Best of both approaches.
-    prior_probability: 0.20
-    status: viable
-    implementation_status: not_started
-    complements:
-      - "annotation_platform.label_studio"
-      - "monai_alignment.monai_compatible"
 
   - option_id: none
     title: "No Annotation Workflow"
@@ -58,7 +80,7 @@ options:
       Use pre-existing annotations (e.g., from public datasets). No
       internal annotation pipeline. Current state with public vascular
       segmentation datasets.
-    prior_probability: 0.15
+    prior_probability: 0.10
     status: viable
     implementation_status: implemented
 
@@ -66,91 +88,117 @@ conditional_on:
   - parent_decision_id: annotation_platform
     influence_strength: strong
     conditional_table:
+      - given_parent_option: slicer_nninteractive
+        then_probabilities:
+          slicer_proofread: 0.55
+          monai_label_active: 0.10
+          hybrid: 0.25
+          label_studio_manual: 0.05
+          none: 0.05
+      - given_parent_option: monai_label
+        then_probabilities:
+          slicer_proofread: 0.15
+          monai_label_active: 0.45
+          hybrid: 0.25
+          label_studio_manual: 0.05
+          none: 0.10
       - given_parent_option: label_studio
         then_probabilities:
-          monai_label_active: 0.30
-          label_studio_manual: 0.35
-          hybrid: 0.25
+          slicer_proofread: 0.15
+          monai_label_active: 0.15
+          hybrid: 0.15
+          label_studio_manual: 0.40
+          none: 0.15
+      - given_parent_option: napari_nninteractive
+        then_probabilities:
+          slicer_proofread: 0.40
+          monai_label_active: 0.10
+          hybrid: 0.20
+          label_studio_manual: 0.10
+          none: 0.20
+      - given_parent_option: hybrid
+        then_probabilities:
+          slicer_proofread: 0.30
+          monai_label_active: 0.20
+          hybrid: 0.30
+          label_studio_manual: 0.10
           none: 0.10
       - given_parent_option: cvat
         then_probabilities:
+          slicer_proofread: 0.15
           monai_label_active: 0.20
-          label_studio_manual: 0.35
-          hybrid: 0.20
-          none: 0.25
-      - given_parent_option: 3d_slicer
-        then_probabilities:
-          monai_label_active: 0.45
-          label_studio_manual: 0.15
-          hybrid: 0.25
-          none: 0.15
-      - given_parent_option: none
-        then_probabilities:
-          monai_label_active: 0.10
-          label_studio_manual: 0.10
-          hybrid: 0.05
-          none: 0.75
+          hybrid: 0.15
+          label_studio_manual: 0.30
+          none: 0.20
 
   - parent_decision_id: label_quality
     influence_strength: moderate
     conditional_table:
       - given_parent_option: cleanlab
         then_probabilities:
-          monai_label_active: 0.35
-          label_studio_manual: 0.25
-          hybrid: 0.25
-          none: 0.15
+          slicer_proofread: 0.40
+          monai_label_active: 0.25
+          hybrid: 0.20
+          label_studio_manual: 0.05
+          none: 0.10
       - given_parent_option: inter_annotator
         then_probabilities:
-          monai_label_active: 0.25
-          label_studio_manual: 0.40
-          hybrid: 0.25
+          slicer_proofread: 0.30
+          monai_label_active: 0.20
+          hybrid: 0.15
+          label_studio_manual: 0.25
           none: 0.10
       - given_parent_option: consensus
         then_probabilities:
-          monai_label_active: 0.30
-          label_studio_manual: 0.30
-          hybrid: 0.30
+          slicer_proofread: 0.35
+          monai_label_active: 0.20
+          hybrid: 0.25
+          label_studio_manual: 0.10
           none: 0.10
       - given_parent_option: none
         then_probabilities:
-          monai_label_active: 0.20
-          label_studio_manual: 0.25
-          hybrid: 0.15
-          none: 0.40
+          slicer_proofread: 0.25
+          monai_label_active: 0.15
+          hybrid: 0.10
+          label_studio_manual: 0.15
+          none: 0.35
 
 archetype_weights:
   solo_researcher:
     probability_overrides:
-      monai_label_active: 0.25
-      label_studio_manual: 0.40
+      slicer_proofread: 0.45
+      monai_label_active: 0.15
       hybrid: 0.10
-      none: 0.25
-    rationale: "Solo researchers use Label Studio for simple workflows or rely on existing data"
+      label_studio_manual: 0.10
+      none: 0.20
+    rationale: "Solo researchers use Slicer proofreading for efficient correction or rely on existing data"
   lab_group:
     probability_overrides:
-      monai_label_active: 0.40
-      label_studio_manual: 0.20
+      slicer_proofread: 0.40
+      monai_label_active: 0.20
       hybrid: 0.25
-      none: 0.15
-    rationale: "Lab groups leverage MONAI Label for efficient multi-annotator workflows"
+      label_studio_manual: 0.05
+      none: 0.10
+    rationale: "Lab groups leverage Slicer proofreading with MONAI Label active learning for iterative improvement"
   clinical_deployment:
     probability_overrides:
-      monai_label_active: 0.25
-      label_studio_manual: 0.15
-      hybrid: 0.40
-      none: 0.20
-    rationale: "Clinical requires hybrid with expert review for quality assurance"
+      slicer_proofread: 0.35
+      monai_label_active: 0.15
+      hybrid: 0.35
+      label_studio_manual: 0.05
+      none: 0.10
+    rationale: "Clinical requires hybrid proofreading with active learning for quality assurance"
 
 volatility:
   classification: shifting
-  last_assessed: 2026-02-23
-  next_review: 2026-05-23
+  last_assessed: 2026-02-24
+  next_review: 2026-05-24
   change_drivers:
-    - "MONAI Label maturity and 3D support"
+    - "nnInteractive and SlicerNNInteractive updates"
     - "Active learning sample selection improvements"
     - "SAM-based auto-annotation capabilities"
-    - "New annotation datasets availability"
+    - "Agentic annotation (MedSAM-Agent) maturity"
+    - "Online adaptation (OAIMS) integration with Slicer"
 
 domain_applicability:
   vascular_segmentation: 1.0
@@ -159,18 +207,59 @@ domain_applicability:
   general_medical: 0.8
 
 rationale: >
-  MONAI Label active (0.35) is the most compelling option for 3D medical
-  image annotation efficiency. Label Studio manual (0.30) is at config_only
-  status. The decision is shifting because MONAI Label and SAM-based
-  auto-annotation are rapidly maturing.
+  Phase 15 interactive segmentation research established the slicer_proofread
+  workflow (0.45) as the primary recommendation. Key evidence: (1) K-Prism
+  (Guo et al., 2025) showed >30% NoC90 reduction when starting from existing
+  mask — proofread-don't-reannotate is quantitatively superior; (2) nnInteractive
+  (Isensee et al., 2025) CVPR 2025 1st place with prior mask input for refinement;
+  (3) OAIMS (Xu et al., 2025) online adaptation recovers 25.5pp on OOD data at
+  10 clicks — addresses distribution shift in cross-site annotation; (4) Client-server
+  architecture (de Vente et al., 2025) decouples GPU from workstation. MONAI Label
+  active learning (0.20) retained for iterative dataset improvement. Hybrid (0.15)
+  combines proofreading with active learning sample selection.
+
+research_notes: >
+  Phase 15 interactive segmentation research report: docs/planning/interactive-segmentation-report.md.
+  The proofreading paradigm (auto-segment → human correct → retrain) is validated by
+  multiple papers. Proposed workflow: (1) Auto-segment with DynUNet/vesselFM, (2) Triage
+  by quality score, (3) Proofread in Slicer with nnInteractive, (4) Retrain with corrected
+  masks. VessQC (Terms et al., 2025) complements by flagging likely errors before human
+  review (recall 67%→94%). Agentic annotation (MedSAM-Agent, Liu et al., 2026) is an
+  emerging direction but not yet practical. All interactive methods degrade on small
+  structures (~27% Dice on organs-at-risk per AtlasSegFM evaluation), reinforcing need
+  for topology-aware losses alongside interactive tools.
 
 references:
-  - citation_key: terms2025vessqc
-    relevance: "VessQC napari plugin for uncertainty-guided 3D segmentation curation. Improved error recall 67% to 94%."
-    supports_options: ["monai_label_active", "hybrid"]
+  - citation_key: isensee2025nninteractive
+    relevance: "nnInteractive CVPR 2025 1st place. Prior mask input enables proofreading workflow."
+    supports_options: ["slicer_proofread", "hybrid"]
 
-  - citation_key: liu2025medsam3
-    relevance: "MedSAM3 with SAM3-based medical concept-aware prompting for interactive 3D annotation."
+  - citation_key: devente2025slicernninteractive
+    relevance: "SlicerNNInteractive client-server architecture for GPU-free annotation workstations."
+    supports_options: ["slicer_proofread"]
+
+  - citation_key: guo2025kprism
+    relevance: "K-Prism: >30% NoC90 reduction with prior mask. Validates proofread-don't-reannotate paradigm."
+    supports_options: ["slicer_proofread", "hybrid"]
+
+  - citation_key: xu2025oaims
+    relevance: "OAIMS: +25.5pp on OOD brain MRI (10 clicks). Online adaptation addresses distribution shift."
+    supports_options: ["slicer_proofread"]
+
+  - citation_key: liu2026medsamagent
+    relevance: "MedSAM-Agent: agentic RL-trained prompting strategy. Future direction for automated proofreading."
+    supports_options: ["slicer_proofread"]
+
+  - citation_key: li2024prism
+    relevance: "PRISM (MICCAI 2024): corrective refinement from prior mask. Directly models proofreading."
+    supports_options: ["slicer_proofread"]
+
+  - citation_key: terms2025vessqc
+    relevance: "VessQC: uncertainty-guided curation improves error detection recall from 67% to 94%."
+    supports_options: ["slicer_proofread", "hybrid"]
+
+  - citation_key: diazpinto2024monailabel
+    relevance: "MONAI Label for active learning annotation workflows."
     supports_options: ["monai_label_active", "hybrid"]
 
   - citation_key: cardoso2022monai
@@ -182,3 +271,5 @@ tags:
   - annotation
   - active-learning
   - data-quality
+  - proofreading
+  - phase-15-research

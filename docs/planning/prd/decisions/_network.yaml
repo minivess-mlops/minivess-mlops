@@ -1,13 +1,21 @@
 network:
   name: "MinIVess MLOps v2 Probabilistic PRD Decision Network"
-  version: "1.3.0"
-  last_updated: 2026-02-23
+  version: "1.5.0"
+  last_updated: 2026-02-24
   description: >
-    Bayesian decision network with 59 nodes across 5 hierarchical levels.
+    Bayesian decision network with 61 nodes across 5 hierarchical levels.
     Adapted from the music-attribution-scaffold format for biomedical
     image segmentation MLOps. Captures open-ended decisions for a
     learning-first, portfolio-building, MONAI-compatible system.
 
+    v1.5.0: Phase 15 — interactive segmentation research integration. Updated
+            annotation_platform (added slicer_nninteractive, napari_nninteractive
+            options; nnInteractive CVPR 2025 1st place) and annotation_workflow
+            (added slicer_proofread option; proofreading paradigm validated).
+            12 new bibliography entries. 61 nodes, 118 edges.
+    v1.4.0: Phase 14 — integrated monitoring research. Added 2 nodes
+            (drift_detection_method, model_promotion_strategy) and 7 edges.
+            Deprecated EDL in uncertainty_quantification. 61 nodes, 118 edges.
     v1.3.0: Phase 11 — added 3 clinical SaMD nodes (project_management_tool,
             regulatory_documentation_tool, clinical_deployment_platform) and
             14 edges. 59 nodes, 111 edges.
@@ -19,7 +27,7 @@ network:
     v1.0.0: Initial network — 52 nodes, ~80 edges.
 
 nodes:
-  # --- L1: Research Goals (7 nodes, root level) --- (7 L1 + 12 L2 + 24 L3 + 9 L4 + 7 L5 = 59)
+  # --- L1: Research Goals (7 nodes, root level) --- (7 L1 + 12 L2 + 25 L3 + 9 L4 + 8 L5 = 61)
   - id: project_purpose
     level: L1_research_goals
     file: L1-research-goals/project-purpose.decision.yaml
@@ -237,6 +245,11 @@ nodes:
     file: L3-technology/regulatory-documentation-tool.decision.yaml
     title: "Regulatory Documentation Tool"
 
+  - id: drift_detection_method
+    level: L3_technology
+    file: L3-technology/drift-detection-method.decision.yaml
+    title: "Drift Detection Method"
+
   # --- L4: Infrastructure (9 nodes) ---
   - id: compute_target
     level: L4_infrastructure
@@ -318,6 +331,11 @@ nodes:
     level: L5_operations
     file: L5-operations/cost-tracking.decision.yaml
     title: "Cost Tracking"
+
+  - id: model_promotion_strategy
+    level: L5_operations
+    file: L5-operations/model-promotion-strategy.decision.yaml
+    title: "Model Promotion Strategy"
 
 edges:
   # === L1 → L2 edges (research goals shape architecture) ===
@@ -804,3 +822,40 @@ edges:
     to: regulatory_documentation_tool
     influence: weak
     rationale: "CI/CD can automate regulatory documentation generation"
+
+  # === Phase 14: Monitoring research integration (2 nodes, 7 edges) ===
+
+  - from: uncertainty_quantification
+    to: drift_detection_method
+    influence: strong
+    rationale: "UQ method determines drift detection approach — conformal enables sequential testing, ensembles enable embedding MMD"
+
+  - from: data_validation_tools
+    to: drift_detection_method
+    influence: moderate
+    rationale: "Validation tools determine available drift detection tiers (Pandera metadata, whylogs statistical, Deepchecks vision)"
+
+  - from: data_profiling
+    to: drift_detection_method
+    influence: weak
+    rationale: "Profiling tools (whylogs, ydata) provide baseline statistics for statistical drift tests"
+
+  - from: drift_detection_method
+    to: drift_response
+    influence: strong
+    rationale: "Detection method determines drift signal quality and response triggers"
+
+  - from: drift_detection_method
+    to: retraining_trigger
+    influence: moderate
+    rationale: "Detection sensitivity and specificity affect retraining trigger thresholds"
+
+  - from: model_governance
+    to: model_promotion_strategy
+    influence: strong
+    rationale: "Model registry maturity determines viable promotion mechanisms (challenger-champion requires full registry)"
+
+  - from: drift_response
+    to: model_promotion_strategy
+    influence: moderate
+    rationale: "Drift response determines whether promotion is automated or human-triggered"

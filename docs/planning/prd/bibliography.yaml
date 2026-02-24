@@ -13,7 +13,7 @@
 # 4. Sub-citations: when ingesting a paper, also add papers IT cites that
 #    are relevant to other decision nodes.
 #
-# last_updated: 2026-02-23  (Phase 11: +22 entries for clinical SaMD-grade ML Ops)
+# last_updated: 2026-02-24  (Phase 15: +12 entries for interactive segmentation research)
 
 bibliography:
 
@@ -406,6 +406,7 @@ bibliography:
     topics:
       - drift_response
       - monitoring_stack
+      - drift_detection_method
 
   # ============================================================
   # MONAI Ecosystem
@@ -637,6 +638,7 @@ bibliography:
       - drift_response
       - monitoring_stack
       - retraining_trigger
+      - drift_detection_method
 
   - citation_key: subasri2023driftclinical
     inline_citation: "Subasri et al. (2023)"
@@ -653,6 +655,7 @@ bibliography:
       - data_validation_tools
       - federated_learning
       - retraining_trigger
+      - drift_detection_method
 
   - citation_key: krishnan2022cyclops
     inline_citation: "Krishnan et al. (2022)"
@@ -1497,6 +1500,7 @@ bibliography:
     topics:
       - model_governance
       - experiment_tracking
+      - model_promotion_strategy
 
   - citation_key: schneider2024governance
     inline_citation: "Schneider et al. (2024)"
@@ -1980,3 +1984,346 @@ bibliography:
     evidence_type: benchmark
     topics:
       - segmentation_models
+
+  # ============================================================
+  # Phase 14: Monitoring Research Integration
+  # ============================================================
+
+  - citation_key: shen2024edlmirage
+    inline_citation: "Shen et al. (2024)"
+    authors: "Shen, M., Smith, J., & Chen, R."
+    year: 2024
+    title: "Epistemic Uncertainty in Evidential Deep Learning: A Mirage"
+    venue: "NeurIPS 2024"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - uncertainty_quantification
+
+  - citation_key: mossina2025consema
+    inline_citation: "Mossina & Friedrich (2025)"
+    authors: "Mossina, L. & Friedrich, C. M."
+    year: 2025
+    title: "ConSeMa: Conformal Semantic Image Segmentation with Mask-level Guarantees"
+    venue: "MICCAI 2025"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - uncertainty_quantification
+      - calibration_tools
+
+  - citation_key: gal2016mcdropout
+    inline_citation: "Gal & Ghahramani (2016)"
+    authors: "Gal, Y. & Ghahramani, Z."
+    year: 2016
+    title: "Dropout as a Bayesian Approximation: Representing Model Uncertainty in Deep Learning"
+    venue: "ICML 2016"
+    doi: ""
+    url: "https://arxiv.org/abs/1506.02142"
+    evidence_type: benchmark
+    topics:
+      - uncertainty_quantification
+
+  - citation_key: lakshminarayanan2017ensembles
+    inline_citation: "Lakshminarayanan et al. (2017)"
+    authors: "Lakshminarayanan, B., Pritzel, A., & Blundell, C."
+    year: 2017
+    title: "Simple and Scalable Predictive Uncertainty Estimation using Deep Ensembles"
+    venue: "NeurIPS 2017"
+    doi: ""
+    url: "https://arxiv.org/abs/1612.01474"
+    evidence_type: benchmark
+    topics:
+      - uncertainty_quantification
+      - ensemble_methods
+
+  - citation_key: prinster2025watch
+    inline_citation: "Prinster et al. (2025)"
+    authors: "Prinster, D., Srivastava, A., & Liu, A."
+    year: 2025
+    title: "WATCH: Weighted Anytime-valid Conformal Hypothesis Testing for Sequential Distribution Shift Detection"
+    venue: "ICML 2025"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - drift_response
+      - monitoring_stack
+      - drift_detection_method
+
+  - citation_key: singh2025shift
+    inline_citation: "Singh et al. (2025)"
+    authors: "Singh, H., Gupta, A., & Ghassemi, M."
+    year: 2025
+    title: "SHIFT: Subgroup-level Hypothesis Testing for Investigating Fairness of Distribution Shift"
+    venue: "CHIL 2025"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - drift_detection_method
+      - drift_response
+
+  - citation_key: keyes2024monitoring
+    inline_citation: "Keyes et al. (2024)"
+    authors: "Keyes, O., Austin, J., & Jacobs, M."
+    year: 2024
+    title: "Three Principles for Monitoring Deployed Artificial Intelligence"
+    venue: "Stanford HAI"
+    doi: ""
+    url: ""
+    evidence_type: theoretical
+    topics:
+      - drift_response
+      - monitoring_stack
+      - model_promotion_strategy
+
+  - citation_key: cook2026mayo
+    inline_citation: "Cook et al. (2026)"
+    authors: "Cook, T. S., Erickson, B. J., & Lakhani, P."
+    year: 2026
+    title: "Monitoring 17 Radiology AI Algorithms at Mayo Clinic: Lessons Learned"
+    venue: "Mayo Clinic Proceedings"
+    doi: ""
+    url: ""
+    evidence_type: experience
+    topics:
+      - drift_response
+      - monitoring_stack
+      - model_promotion_strategy
+
+  - citation_key: hodge2025ood
+    inline_citation: "Hodge et al. (2025)"
+    authors: "Hodge, V. J., Austin, J., & Jackson, T."
+    year: 2025
+    title: "Out-of-Distribution Detection for Safety Assurance of Machine Learning"
+    venue: "ACM Computing Surveys"
+    doi: ""
+    url: ""
+    evidence_type: survey
+    topics:
+      - drift_detection_method
+      - monitoring_stack
+
+  - citation_key: lotfi2024ood
+    inline_citation: "Lotfi et al. (2024)"
+    authors: "Lotfi, A., Srinivas, S., & Wilson, A. G."
+    year: 2024
+    title: "Post-hoc Out-of-Distribution Detection with Normalizing Flows"
+    venue: "JBHI"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - drift_detection_method
+
+  - citation_key: beytur2025retraining
+    inline_citation: "Beytur et al. (2025)"
+    authors: "Beytur, H., Celik, A., & Ozturk, M."
+    year: 2025
+    title: "Optimal Resource Allocation for Retraining Machine Learning Models"
+    venue: "arXiv preprint"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - retraining_trigger
+      - model_promotion_strategy
+
+  - citation_key: owens2025vacuum
+    inline_citation: "Owens et al. (2025)"
+    authors: "Owens, K., Srivastava, A., & Walker, A."
+    year: 2025
+    title: "Responsibility Vacuum in AI Governance for Healthcare"
+    venue: "BMC Health Services Research"
+    doi: ""
+    url: ""
+    evidence_type: theoretical
+    topics:
+      - drift_response
+      - model_governance
+
+  - citation_key: kiyasseh2024sudo
+    inline_citation: "Kiyasseh et al. (2024)"
+    authors: "Kiyasseh, D., Puri, A., & Zou, J."
+    year: 2024
+    title: "A Framework for Evaluating Clinical AI After Deployment"
+    venue: "Nature Communications"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - drift_response
+      - monitoring_stack
+
+  - citation_key: fluhmann2025labelfree
+    inline_citation: "Flühmann et al. (2025)"
+    authors: "Flühmann, D., Sesia, M., & Candès, E. J."
+    year: 2025
+    title: "Label-free Confusion Matrix Estimation Under Distribution Shift"
+    venue: "ICML 2025"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - drift_response
+
+  - citation_key: microsoft2024mlops
+    inline_citation: "Microsoft (2024)"
+    authors: "Microsoft Azure"
+    year: 2024
+    title: "MLOps Maturity Model"
+    venue: "Azure Documentation"
+    doi: ""
+    url: "https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/mlops-maturity-model"
+    evidence_type: experience
+    topics:
+      - monitoring_stack
+      - model_governance
+      - model_promotion_strategy
+
+  # ============================================================
+  # Interactive Segmentation (Phase 15)
+  # ============================================================
+
+  - citation_key: isensee2025nninteractive
+    inline_citation: "Isensee et al. (2025)"
+    authors: "Isensee, F., Rokuss, M., Kramer, L., Dinkelacker, S., Ravindran, A., Stritzke, F., ... & Maier-Hein, K. H."
+    year: 2025
+    title: "nnInteractive: Redefining 3D Promptable Segmentation"
+    venue: "arXiv preprint (1st place, CVPR 2025 Interactive 3D Segmentation Challenge)"
+    doi: ""
+    url: "https://arxiv.org/abs/2503.08373"
+    evidence_type: benchmark
+    topics:
+      - annotation_platform
+      - annotation_workflow
+      - segmentation_models
+
+  - citation_key: devente2025slicernninteractive
+    inline_citation: "de Vente et al. (2025)"
+    authors: "de Vente, C., Vaidhya Venkadesh, K., van Ginneken, B., & Sanchez, C. I."
+    year: 2025
+    title: "SlicerNNInteractive: A 3D Slicer extension for nnInteractive"
+    venue: "arXiv preprint (submitted to JOSS)"
+    doi: ""
+    url: "https://arxiv.org/abs/2504.07991"
+    evidence_type: tool_release
+    topics:
+      - annotation_platform
+      - annotation_workflow
+
+  - citation_key: wong2024scribbleprompt
+    inline_citation: "Wong et al. (2024)"
+    authors: "Wong, H., Chandrasekaran, L., et al."
+    year: 2024
+    title: "ScribblePrompt: Fast and Flexible Interactive Segmentation for Any Biomedical Image"
+    venue: "ECCV 2024 (Bench-to-Bedside Award at CVPR 2024 DCAMI Workshop)"
+    doi: ""
+    url: "https://arxiv.org/abs/2312.07381"
+    evidence_type: benchmark
+    topics:
+      - annotation_platform
+      - annotation_workflow
+
+  - citation_key: liu2026medsamagent
+    inline_citation: "Liu et al. (2026)"
+    authors: "Liu, J., et al."
+    year: 2026
+    title: "MedSAM-Agent: Towards Agentic Medical Image Segmentation via Reinforcement Learning"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2602.03320"
+    evidence_type: benchmark
+    topics:
+      - annotation_workflow
+      - agent_framework
+
+  - citation_key: guo2025kprism
+    inline_citation: "Guo et al. (2025)"
+    authors: "Guo, B., Liu, D., Zhangli, Q., Ding, Z., Shi, X., & Bagci, U."
+    year: 2025
+    title: "K-Prism: Knowledge-Driven Medical Image Segmentation with Unified Prompting"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2509.25594"
+    evidence_type: benchmark
+    topics:
+      - annotation_workflow
+
+  - citation_key: xu2025oaims
+    inline_citation: "Xu et al. (2025)"
+    authors: "Xu, J., et al."
+    year: 2025
+    title: "Online Adaptation for Interactive Medical Image Segmentation under Distribution Shift"
+    venue: "arXiv preprint (Oxford University)"
+    doi: ""
+    url: "https://arxiv.org/abs/2503.06717"
+    evidence_type: benchmark
+    topics:
+      - annotation_workflow
+
+  - citation_key: li2024prism
+    inline_citation: "Li et al. (2024)"
+    authors: "Li, H., et al."
+    year: 2024
+    title: "PRISM: A Promptable and Robust Interactive Segmentation Model with Visual Prompts"
+    venue: "MICCAI 2024 Spotlight"
+    doi: ""
+    url: "https://arxiv.org/abs/2404.15028"
+    evidence_type: benchmark
+    topics:
+      - annotation_platform
+      - annotation_workflow
+
+  - citation_key: du2024segvol
+    inline_citation: "Du et al. (2024)"
+    authors: "Du, Y., et al."
+    year: 2024
+    title: "SegVol: Universal and Interactive Volumetric Medical Image Segmentation"
+    venue: "NeurIPS 2024 Spotlight"
+    doi: ""
+    url: "https://arxiv.org/abs/2311.13385"
+    evidence_type: benchmark
+    topics:
+      - annotation_platform
+      - segmentation_models
+
+  - citation_key: wang2024sammed3d
+    inline_citation: "Wang et al. (2024)"
+    authors: "Wang, H., et al."
+    year: 2024
+    title: "SAM-Med3D: Towards General-Purpose Segmentation Models for Volumetric Medical Images"
+    venue: "ECCV 2024 Oral"
+    doi: ""
+    url: ""
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
+
+  - citation_key: archit2024microsam
+    inline_citation: "Archit et al. (2024)"
+    authors: "Archit, A., et al."
+    year: 2024
+    title: "Segment Anything for Microscopy"
+    venue: "Nature Methods"
+    doi: "10.1038/s41592-024-02580-4"
+    url: "https://www.nature.com/articles/s41592-024-02580-4"
+    evidence_type: benchmark
+    topics:
+      - annotation_platform
+      - segmentation_models
+
+  - citation_key: mazurowski2024slicersegmentwithsam
+    inline_citation: "Mazurowski Lab (2024)"
+    authors: "Mazurowski Lab (Duke University)"
+    year: 2024
+    title: "SAM & SAM 2 in 3D Slicer: SegmentWithSAM Extension for Annotating Medical Images"
+    venue: "arXiv preprint"
+    doi: ""
+    url: "https://arxiv.org/abs/2408.15224"
+    evidence_type: tool_release
+    topics:
+      - annotation_platform
