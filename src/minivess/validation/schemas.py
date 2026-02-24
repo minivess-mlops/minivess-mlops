@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pandera as pa
-from pandera.typing import Series
-
-if TYPE_CHECKING:
-    pass
+from pandera.typing import (
+    Series,  # noqa: TC002 — runtime requirement for Pandera DataFrameModel
+)
 
 
 class NiftiMetadataSchema(pa.DataFrameModel):
