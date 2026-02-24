@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from minivess.observability.analytics import RunAnalytics
 from minivess.observability.lineage import LineageEmitter
+from minivess.observability.pprm import PPRMDetector, RiskEstimate
 from minivess.observability.telemetry import TelemetryProvider
 from minivess.observability.tracking import ExperimentTracker
 
-__all__ = ["ExperimentTracker", "LineageEmitter", "RunAnalytics", "TelemetryProvider"]
+__all__ = [
+    "ExperimentTracker",
+    "LineageEmitter",
+    "PPRMDetector",
+    "RiskEstimate",
+    "RunAnalytics",
+    "TelemetryProvider",
+]
