@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -18,7 +19,32 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TRACKING_URI = "http://localhost:5000"
+_DEFAULT_TRACKING_URI = "mlruns"
+
+
+def resolve_tracking_uri(*, tracking_uri: str | None = None) -> str:
+    """Resolve MLflow tracking URI from multiple sources.
+
+    Priority order:
+    1. Explicit ``tracking_uri`` parameter (highest)
+    2. ``MLFLOW_TRACKING_URI`` environment variable
+    3. Default: ``"mlruns"`` (local file backend, no server needed)
+
+    Parameters
+    ----------
+    tracking_uri:
+        Explicit URI to use. If provided, returned as-is.
+
+    Returns
+    -------
+    Resolved tracking URI string.
+    """
+    if tracking_uri is not None:
+        return tracking_uri
+    env_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if env_uri:
+        return env_uri
+    return _DEFAULT_TRACKING_URI
 
 
 class ExperimentTracker:
@@ -28,11 +54,12 @@ class ExperimentTracker:
         self,
         config: ExperimentConfig,
         *,
-        tracking_uri: str = _DEFAULT_TRACKING_URI,
+        tracking_uri: str | None = None,
     ) -> None:
         self.config = config
-        mlflow.set_tracking_uri(tracking_uri)
-        self.client = MlflowClient(tracking_uri=tracking_uri)
+        resolved_uri = resolve_tracking_uri(tracking_uri=tracking_uri)
+        mlflow.set_tracking_uri(resolved_uri)
+        self.client = MlflowClient(tracking_uri=resolved_uri)
         self._run_id: str | None = None
 
     @contextmanager

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
     from minivess.adapters.base import ModelAdapter
     from minivess.config.models import TrainingConfig
+    from minivess.observability.tracking import ExperimentTracker
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +43,13 @@ class SegmentationTrainer:
         *,
         loss_name: str = "dice_ce",
         device: str | torch.device = "cpu",
+        tracker: ExperimentTracker | None = None,
     ) -> None:
         self.model = model
         self.config = config
         self.device = torch.device(device)
         self.model.to(self.device)
+        self.tracker = tracker
 
         self.criterion = build_loss_function(loss_name)
         self.optimizer = self._build_optimizer()
@@ -209,14 +212,26 @@ class SegmentationTrainer:
             history["val_loss"].append(val_result.loss)
             final_epoch = epoch + 1
 
+            current_lr = self.optimizer.param_groups[0]["lr"]
             logger.info(
                 "Epoch %d/%d — train_loss: %.4f, val_loss: %.4f, lr: %.2e",
                 epoch + 1,
                 self.config.max_epochs,
                 train_result.loss,
                 val_result.loss,
-                self.optimizer.param_groups[0]["lr"],
+                current_lr,
             )
+
+            # Log to MLflow if tracker is present
+            if self.tracker is not None:
+                self.tracker.log_epoch_metrics(
+                    {
+                        "train_loss": train_result.loss,
+                        "val_loss": val_result.loss,
+                        "learning_rate": current_lr,
+                    },
+                    step=epoch + 1,
+                )
 
             # Early stopping + best checkpoint
             if val_result.loss < self._best_val_loss:
@@ -226,6 +241,10 @@ class SegmentationTrainer:
                     best_path = checkpoint_dir / "best_model.pth"
                     self.model.save_checkpoint(best_path)
                     logger.info("Saved best checkpoint to %s", best_path)
+                    if self.tracker is not None:
+                        self.tracker.log_artifact(
+                            best_path, artifact_path="checkpoints"
+                        )
             else:
                 self._patience_counter += 1
                 if self._patience_counter >= self.config.early_stopping_patience:

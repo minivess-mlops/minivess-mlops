@@ -7,16 +7,17 @@ import duckdb
 import pandas as pd
 from mlflow.tracking import MlflowClient
 
-logger = logging.getLogger(__name__)
+from minivess.observability.tracking import resolve_tracking_uri
 
-_DEFAULT_TRACKING_URI = "http://localhost:5000"
+logger = logging.getLogger(__name__)
 
 
 class RunAnalytics:
     """In-process SQL analytics over MLflow experiment runs using DuckDB."""
 
-    def __init__(self, *, tracking_uri: str = _DEFAULT_TRACKING_URI) -> None:
-        self.client = MlflowClient(tracking_uri=tracking_uri)
+    def __init__(self, *, tracking_uri: str | None = None) -> None:
+        resolved_uri = resolve_tracking_uri(tracking_uri=tracking_uri)
+        self.client = MlflowClient(tracking_uri=resolved_uri)
         self.conn = duckdb.connect(":memory:")
 
     def load_experiment_runs(self, experiment_name: str) -> pd.DataFrame:
@@ -110,8 +111,10 @@ class RunAnalytics:
     ) -> pd.DataFrame:
         """Select top-N models by a given metric."""
         self.register_dataframe("runs", runs_df)
+        # Include param_fold only if it exists in the DataFrame
+        fold_col = ', param_fold' if "param_fold" in runs_df.columns else ""
         sql = f"""
-            SELECT run_id, run_name, param_fold, "{metric}"
+            SELECT run_id, run_name{fold_col}, "{metric}"
             FROM runs
             WHERE "{metric}" IS NOT NULL
             ORDER BY "{metric}" DESC
