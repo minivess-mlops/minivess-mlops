@@ -8,6 +8,7 @@ from minivess.adapters.dynunet import DynUNetAdapter
 from minivess.adapters.lora import LoraModelAdapter
 from minivess.adapters.segresnet import SegResNetAdapter
 from minivess.adapters.swinunetr import SwinUNETRAdapter
+from minivess.adapters.vesselfm import VesselFMAdapter
 from minivess.adapters.vista3d import Vista3dAdapter
 
 __all__ = [
@@ -18,5 +19,6 @@ __all__ = [
     "SegmentationOutput",
     "SegResNetAdapter",
     "SwinUNETRAdapter",
+    "VesselFMAdapter",
     "Vista3dAdapter",
 ]

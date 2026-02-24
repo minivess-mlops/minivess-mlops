@@ -13,6 +13,7 @@ class ModelFamily(StrEnum):
     MONAI_SWINUNETR = "swinunetr"
     MONAI_VISTA3D = "vista3d"
     MONAI_DYNUNET = "dynunet"
+    VESSEL_FM = "vesselfm"
     COMMA_MAMBA = "comma_mamba"
     SAM3_LORA = "sam3_lora"
     CUSTOM = "custom"
