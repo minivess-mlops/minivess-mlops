@@ -17,6 +17,11 @@ from minivess.compliance.fairness import (
     generate_audit_report,
 )
 from minivess.compliance.model_card import ModelCard
+from minivess.compliance.regops import (
+    CIContext,
+    RegOpsPipeline,
+    generate_ci_audit_entry,
+)
 from minivess.compliance.regulatory_docs import (
     RegulatoryDocGenerator,
     SaMDRiskClass,
@@ -31,12 +36,14 @@ from minivess.compliance.reporting_templates import (
 __all__ = [
     "AuditEntry",
     "AuditTrail",
+    "CIContext",
     "ConsortAIChecklist",
     "EUAIActChecklist",
     "EUAIActRiskLevel",
     "FairnessReport",
     "MiClearLLMChecklist",
     "ModelCard",
+    "RegOpsPipeline",
     "RegulatoryDocGenerator",
     "SaMDRiskClass",
     "SubgroupMetrics",
@@ -44,6 +51,7 @@ __all__ = [
     "compute_disparity",
     "evaluate_subgroup_fairness",
     "generate_audit_report",
+    "generate_ci_audit_entry",
     "generate_compliance_report",
     "generate_consort_ai_report",
     "generate_miclear_llm_report",
