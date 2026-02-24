@@ -15,11 +15,19 @@ from minivess.compliance.regulatory_docs import (
     RegulatoryDocGenerator,
     SaMDRiskClass,
 )
+from minivess.compliance.reporting_templates import (
+    ConsortAIChecklist,
+    MiClearLLMChecklist,
+    generate_consort_ai_report,
+    generate_miclear_llm_report,
+)
 
 __all__ = [
     "AuditEntry",
     "AuditTrail",
+    "ConsortAIChecklist",
     "FairnessReport",
+    "MiClearLLMChecklist",
     "ModelCard",
     "RegulatoryDocGenerator",
     "SaMDRiskClass",
@@ -27,4 +35,6 @@ __all__ = [
     "compute_disparity",
     "evaluate_subgroup_fairness",
     "generate_audit_report",
+    "generate_consort_ai_report",
+    "generate_miclear_llm_report",
 ]
