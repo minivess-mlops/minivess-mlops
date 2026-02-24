@@ -18,6 +18,13 @@ from minivess.adapters.base import ModelAdapter, SegmentationOutput
 from minivess.adapters.comma import CommaAdapter
 from minivess.adapters.dynunet import DynUNetAdapter
 from minivess.adapters.lora import LoraModelAdapter
+from minivess.adapters.medsam3 import (
+    AnnotationPrompt,
+    MedicalConcept,
+    MedSAM3Config,
+    MedSAM3Predictor,
+    PromptType,
+)
 from minivess.adapters.segresnet import SegResNetAdapter
 from minivess.adapters.swinunetr import SwinUNETRAdapter
 from minivess.adapters.vesselfm import VesselFMAdapter
@@ -26,6 +33,7 @@ from minivess.adapters.vista3d import Vista3dAdapter
 __all__ = [
     "AdaptationMethod",
     "AdaptationResult",
+    "AnnotationPrompt",
     "AtlasConfig",
     "AtlasRegistrationMethod",
     "AtlasRegistrationResult",
@@ -33,7 +41,11 @@ __all__ = [
     "DynUNetAdapter",
     "FeasibilityReport",
     "LoraModelAdapter",
+    "MedSAM3Config",
+    "MedSAM3Predictor",
+    "MedicalConcept",
     "ModelAdapter",
+    "PromptType",
     "SegmentationOutput",
     "SegResNetAdapter",
     "SwinUNETRAdapter",

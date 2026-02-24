@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from minivess.data.annotation_session import AnnotationSession
 from minivess.data.domain_randomization import (
     DomainRandomizationConfig,
     DomainRandomizationPipeline,
@@ -16,6 +17,7 @@ from minivess.data.loader import (
 from minivess.data.transforms import build_train_transforms, build_val_transforms
 
 __all__ = [
+    "AnnotationSession",
     "DomainRandomizationConfig",
     "DomainRandomizationPipeline",
     "RandomizationParam",
