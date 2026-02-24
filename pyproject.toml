@@ -59,6 +59,7 @@ dependencies = [
     "ruff>=0.9",
     # Retained from v0.1
     "weightwatcher>=0.7",
+    "openlineage-python>=1.26",
 ]
 
 [project.optional-dependencies]
