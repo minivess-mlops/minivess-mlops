@@ -183,7 +183,9 @@ def _build_configs(
     if args.debug:
         apply_debug_overrides(training_config, data_config)
 
-    # Parse checkpoint config from optional YAML/CLI override
+    # Parse checkpoint config from YAML/CLI override.
+    # Multi-metric tracking is the ONLY mode — "single metric" is just a YAML
+    # with one entry in tracked_metrics. There is no separate single-metric path.
     if hasattr(args, "checkpoint_config") and args.checkpoint_config:
         ckpt_cfg = args.checkpoint_config  # dict from YAML
         tracked = [
@@ -202,6 +204,12 @@ def _build_configs(
                 save_last=ckpt_cfg.get("save_last", True),
                 save_history=ckpt_cfg.get("save_history", True),
             )
+    else:
+        logger.warning(
+            "No checkpoint config provided (--checkpoint-config or via experiment YAML). "
+            "Using default single val_loss tracker. For multi-metric checkpointing, "
+            "use run_experiment.py with a YAML config that includes a checkpoint section."
+        )
 
     return data_config, model_config, training_config
 
