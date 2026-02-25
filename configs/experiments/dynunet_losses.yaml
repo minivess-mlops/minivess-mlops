@@ -1,0 +1,15 @@
+experiment_name: dynunet_loss_variation
+model: dynunet
+losses:
+  - dice_ce
+  - cbdice
+  - dice_ce_cldice
+  - warp
+compute: auto
+data_dir: data/raw
+num_folds: 3
+max_epochs: 100
+seed: 42
+debug: false
+memory_limit_gb: 24
+monitor_interval: 10
