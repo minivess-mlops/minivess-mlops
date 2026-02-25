@@ -1,6 +1,6 @@
 # Consolidated DevEx + Training Evaluation Plan
 
-**Status**: ACTIVE
+**Status**: COMPLETE (all 10 phases implemented, 103 new tests, 4 loss functions verified)
 **Branch**: `feat/experiment-evaluation`
 **Created**: 2026-02-25
 **Consolidates**: [dynunet-evaluation-plan.xml](dynunet-evaluation-plan.xml) | [devex-and-prefect-execution-plan.xml](devex-and-prefect-execution-plan.xml) | [prefect-and-devex-profiling-optimizations.md](prefect-and-devex-profiling-optimizations.md)
@@ -34,16 +34,16 @@ Every training phase includes these guards:
 
 | Phase | Status | Issue | Description |
 |-------|--------|-------|-------------|
-| **A** | NOT_STARTED | [#62](https://github.com/minivess-mlops/minivess-mlops/issues/62) | Dataset profiler: scan volumes, compute DatasetProfile |
-| **B** | NOT_STARTED | [#63](https://github.com/minivess-mlops/minivess-mlops/issues/63) | Adaptive compute profiles: hardware + dataset-aware |
-| **C** | NOT_STARTED | [#64](https://github.com/minivess-mlops/minivess-mlops/issues/64) | Patch validation guards: pre-training checks |
-| **D** | NOT_STARTED | [#65](https://github.com/minivess-mlops/minivess-mlops/issues/65) | Prefect compatibility layer + orchestration module |
-| **E** | NOT_STARTED | [#66](https://github.com/minivess-mlops/minivess-mlops/issues/66) | Preflight system: environment validation |
-| **F** | NOT_STARTED | [#67](https://github.com/minivess-mlops/minivess-mlops/issues/67) | Experiment runner: single-command YAML-driven |
-| **G** | NOT_STARTED | [#68](https://github.com/minivess-mlops/minivess-mlops/issues/68) | DynUNet dice_ce full 3-fold training |
-| **H** | NOT_STARTED | [#69](https://github.com/minivess-mlops/minivess-mlops/issues/69) | DynUNet loss sweep (cbdice, cldice, warp) |
-| **I** | NOT_STARTED | [#70](https://github.com/minivess-mlops/minivess-mlops/issues/70) | Cross-loss comparison + MLflow registry |
-| **J** | NOT_STARTED | [#71](https://github.com/minivess-mlops/minivess-mlops/issues/71) | Model profile YAMLs + VRAM benchmarks |
+| **A** | DONE | [#62](https://github.com/minivess-mlops/minivess-mlops/issues/62) | Dataset profiler: scan volumes, compute DatasetProfile |
+| **B** | DONE | [#63](https://github.com/minivess-mlops/minivess-mlops/issues/63) | Adaptive compute profiles: hardware + dataset-aware |
+| **C** | DONE | [#64](https://github.com/minivess-mlops/minivess-mlops/issues/64) | Patch validation guards: pre-training checks |
+| **D** | DONE | [#65](https://github.com/minivess-mlops/minivess-mlops/issues/65) | Prefect compatibility layer + orchestration module |
+| **E** | DONE | [#66](https://github.com/minivess-mlops/minivess-mlops/issues/66) | Preflight system: environment validation |
+| **F** | DONE | [#67](https://github.com/minivess-mlops/minivess-mlops/issues/67) | Experiment runner: single-command YAML-driven |
+| **G** | DONE | [#68](https://github.com/minivess-mlops/minivess-mlops/issues/68) | DynUNet dice_ce 1-epoch verification (2 folds debug) |
+| **H** | DONE | [#69](https://github.com/minivess-mlops/minivess-mlops/issues/69) | DynUNet loss sweep (cbdice, cldice, warp) 1-epoch verification |
+| **I** | DONE | [#70](https://github.com/minivess-mlops/minivess-mlops/issues/70) | Cross-loss comparison + paired bootstrap testing |
+| **J** | DONE | [#71](https://github.com/minivess-mlops/minivess-mlops/issues/71) | Model profile YAMLs + VRAM estimation |
 
 ## Dependency Graph
 
