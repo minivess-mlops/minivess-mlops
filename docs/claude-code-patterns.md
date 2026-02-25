@@ -572,4 +572,99 @@ from minivess.data.drift_synthetic import DriftType
 
 ---
 
-*Last updated: 2026-02-25 — Pattern 17 from 2nd-pass review (813 tests, up from 662)*
+## Pattern 18: Sequential Sprint Subagents for Autonomous Overnight Execution (Module 8)
+
+**Context:** After creating 8 GitHub issues (#52–#59) organized into 3 dependency-ordered sprints (R6 remediation), the user asked: "Are you able to run these all three sprints autonomously overnight?" The challenge: each sprint touches 20–40 files and generates 40–76 new tests — far too much for a single context window.
+
+**What we did:** Ran 3 sequential foreground subagents, each handling one sprint with a fresh 200K context window:
+
+```
+Orchestrating Agent (lightweight — stays under 30K tokens)
+    │
+    ├── Sprint 1 Agent (foreground, fresh context)
+    │   ├── Issue #55: Reproducibility Phase 2
+    │   ├── Issue #53: Loss & quality gate tests
+    │   └── Issue #54: Config & data tests
+    │   Result: 868 → 944 tests (+76), 3 commits
+    │
+    ├── Sprint 2 Agent (foreground, fresh context)
+    │   ├── Issue #52: Adapter DRY Phase 2
+    │   ├── Issue #57: Validation gate refactoring
+    │   └── Issue #56: Dependency injection
+    │   Result: 944 → 984 tests (+40), 3 commits
+    │
+    └── Sprint 3 Agent (foreground, fresh context)
+        ├── Issue #58: Configuration architecture
+        └── Issue #59: Code hygiene
+        Result: 984 → 1002 tests (+18), 2 commits
+
+Total: 868 → 1002 tests (+134), 8 commits, 8 issues closed
+```
+
+**Why sequential, not parallel:** Sprints have dependency chains — Sprint 2 refactors adapters that Sprint 1 may have modified, Sprint 3 adds config architecture that Sprint 2's DI changes must integrate with. Parallel execution would cause merge conflicts and semantic inconsistencies.
+
+**Why subagents, not a single long session:** Each sprint reads 20–40 source files + writes 6–19 new test files + modifies 3–10 implementation files. A single agent processing all 3 sprints would exhaust its context window mid-Sprint 2. Fresh subagents start each sprint with full capacity.
+
+**The orchestrator's role is minimal:**
+1. Construct a detailed prompt for Sprint N (issue list, file paths, TDD rules, commit conventions)
+2. Launch foreground subagent and wait for completion
+3. Read the result summary (~2K tokens)
+4. Construct prompt for Sprint N+1 incorporating Sprint N's results
+5. Repeat
+
+**Key design choices:**
+
+| Choice | Why |
+|--------|-----|
+| **Foreground** (not background) | Orchestrator must wait for Sprint N to finish before starting N+1 |
+| **Detailed prompts** | Each agent gets all context upfront — file paths, issue descriptions, TDD workflow, test count baseline |
+| **Commit messages with `Closes #XX`** | Each agent commits its own work, auto-closing GitHub issues |
+| **Test count in prompt** | Each agent knows the baseline ("868 tests passing") so it can verify no regressions |
+| **`subagent_type="general-purpose"`** | Agents need Read + Write + Edit + Bash + Grep + Glob — the full toolkit |
+
+**Real prompt structure (abbreviated):**
+```
+You are executing Sprint 1 of the R6 remediation plan.
+
+BASELINE: 868 tests passing.
+WORKFLOW: RED → GREEN → VERIFY → COMMIT (TDD mandatory)
+
+== Issue #55: Reproducibility Phase 2 ==
+Files: pyproject.toml, data/domain_randomization.py, adapters/vesselfm.py, ...
+Tasks:
+- R5.21: Add upper bounds to dependency versions
+- R5.22: Domain randomization seed fallback
+- R5.23: VesselFM weight checksums
+...
+
+== Issue #53: Test Coverage — Loss & Quality Gates ==
+Files: pipeline/loss_functions.py, ensemble/weightwatcher.py, ...
+...
+
+COMMIT FORMAT: One commit per issue, message = "fix(scope): description\n\nCloses #XX"
+VERIFY: uv run pytest tests/ -x -q && uv run ruff check src/ tests/
+```
+
+**Anti-pattern avoided:** Launching all 3 sprints as background agents simultaneously. This would cause:
+- File conflicts (Sprint 2 editing files Sprint 1 is still modifying)
+- Stale baselines (Sprint 2 wouldn't see Sprint 1's new tests)
+- Broken dependency chains
+
+**Anti-pattern avoided:** Using the orchestrator to do the actual coding. The orchestrator should be a thin dispatcher — it reads results and constructs prompts, never touching source files directly. This keeps its context window lean for the full 3-sprint lifecycle.
+
+**Cost profile (real session):**
+- Orchestrator: ~30K tokens total context (prompts + summaries only)
+- Sprint 1 agent: ~180K tokens (read 40+ files, wrote 76 tests)
+- Sprint 2 agent: ~160K tokens (read 35+ files, wrote 40 tests, refactored 10+ files)
+- Sprint 3 agent: ~120K tokens (read 25+ files, wrote 18 tests)
+- Total wall-clock: ~25 minutes for all 3 sprints
+
+**When to use this pattern:**
+- Multi-issue remediation plans with dependency ordering
+- Large refactoring campaigns (>3 issues, >50 test additions)
+- Overnight/unattended execution where context exhaustion would halt progress
+- Any workload where a single agent would exceed its context window
+
+---
+
+*Last updated: 2026-02-25 — Pattern 18 from R6 remediation (1002 tests, up from 868)*
