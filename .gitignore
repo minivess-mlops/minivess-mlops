@@ -10,6 +10,7 @@
 /.env
 /tools/mlflow/*
 /minivess_mlops.wiki/
+/wiki/
 
 # Dynaconf secrets
 configs/deployment/.secrets.toml
