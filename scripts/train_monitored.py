@@ -58,10 +58,12 @@ from minivess.config.debug import (
     apply_debug_overrides,
 )
 from minivess.config.models import (
+    CheckpointConfig,
     DataConfig,
     ExperimentConfig,
     ModelConfig,
     ModelFamily,
+    TrackedMetricConfig,
     TrainingConfig,
 )
 from minivess.data.loader import build_train_loader, build_val_loader
@@ -180,6 +182,26 @@ def _build_configs(
 
     if args.debug:
         apply_debug_overrides(training_config, data_config)
+
+    # Parse checkpoint config from optional YAML/CLI override
+    if hasattr(args, "checkpoint_config") and args.checkpoint_config:
+        ckpt_cfg = args.checkpoint_config  # dict from YAML
+        tracked = [
+            TrackedMetricConfig(**m)
+            for m in ckpt_cfg.get("tracked_metrics", [])
+        ]
+        if tracked:
+            training_config.checkpoint = CheckpointConfig(
+                tracked_metrics=tracked,
+                early_stopping_strategy=ckpt_cfg.get(
+                    "early_stopping_strategy", "all"
+                ),
+                primary_metric=ckpt_cfg.get("primary_metric", "val_loss"),
+                min_delta=ckpt_cfg.get("min_delta", 1e-4),
+                min_epochs=ckpt_cfg.get("min_epochs", 0),
+                save_last=ckpt_cfg.get("save_last", True),
+                save_history=ckpt_cfg.get("save_history", True),
+            )
 
     return data_config, model_config, training_config
 
@@ -427,7 +449,10 @@ def run_fold_safe(
     _cleanup_memory(f"post-train-fold{fold_id}")
 
     # === Phase 2: Post-training evaluation with MetricsReloaded ===
-    best_checkpoint = checkpoint_dir / "best_model.pth"
+    # Use primary metric checkpoint (e.g. best_val_loss.pth)
+    primary_metric = training_config.checkpoint.primary_metric
+    safe_name = primary_metric.replace("/", "_")
+    best_checkpoint = checkpoint_dir / f"best_{safe_name}.pth"
     if best_checkpoint.exists():
         logger.info("Loading best checkpoint for evaluation: %s", best_checkpoint)
         model.load_checkpoint(best_checkpoint)

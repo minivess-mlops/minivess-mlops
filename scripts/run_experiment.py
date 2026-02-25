@@ -332,19 +332,29 @@ def main(argv: list[str] | None = None) -> None:
         if config.get("debug", False):
             train_argv.append("--debug")
 
-        # Import and run the existing train script
-        train_script = PROJECT_ROOT / "scripts" / "train.py"
+        # Import and run the memory-safe monitored training script
+        train_script = PROJECT_ROOT / "scripts" / "train_monitored.py"
+        if not train_script.exists():
+            # Fallback to train.py for backwards compatibility
+            train_script = PROJECT_ROOT / "scripts" / "train.py"
         if train_script.exists():
             import importlib.util
 
-            spec = importlib.util.spec_from_file_location("train", train_script)
+            module_name = train_script.stem
+            spec = importlib.util.spec_from_file_location(module_name, train_script)
             if spec is not None and spec.loader is not None:
                 train_mod = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(train_mod)  # type: ignore[union-attr]
                 parsed = train_mod.parse_args(train_argv)
+                # Pass checkpoint config from experiment YAML to train_monitored
+                if "checkpoint" in config:
+                    parsed.checkpoint_config = config["checkpoint"]
                 train_mod.run_monitored_experiment(parsed)
         else:
-            logger.warning("train.py not found at %s, skipping execution", train_script)
+            logger.warning(
+                "train_monitored.py not found at %s, skipping execution",
+                train_script,
+            )
 
 
 if __name__ == "__main__":

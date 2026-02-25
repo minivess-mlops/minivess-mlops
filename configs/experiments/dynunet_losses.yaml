@@ -13,3 +13,20 @@ seed: 42
 debug: false
 memory_limit_gb: 24
 monitor_interval: 10
+checkpoint:
+  tracked_metrics:
+    - name: val_loss
+      direction: minimize
+      patience: 15
+    - name: val_dice
+      direction: maximize
+      patience: 20
+    - name: val_f1_foreground
+      direction: maximize
+      patience: 20
+  early_stopping_strategy: all
+  primary_metric: val_loss
+  min_delta: 1.0e-4
+  min_epochs: 10
+  save_last: true
+  save_history: true

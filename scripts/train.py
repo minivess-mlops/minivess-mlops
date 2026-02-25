@@ -419,7 +419,10 @@ def run_fold(
     )
 
     # === Phase 2: Post-training evaluation with MetricsReloaded ===
-    best_checkpoint = checkpoint_dir / "best_model.pth"
+    # Use primary metric checkpoint (e.g. best_val_loss.pth)
+    primary_metric = training_config.checkpoint.primary_metric
+    safe_name = primary_metric.replace("/", "_")
+    best_checkpoint = checkpoint_dir / f"best_{safe_name}.pth"
     if best_checkpoint.exists():
         logger.info("Loading best checkpoint for evaluation: %s", best_checkpoint)
         model.load_checkpoint(best_checkpoint)
