@@ -1,6 +1,6 @@
 # Multi-Validation Metric Tracking Plan
 
-**Status**: ACTIVE
+**Status**: PHASES 1-3 COMPLETE (implementation done), PHASES 4-5 PENDING (training + analysis)
 **Branch**: `feat/experiment-evaluation`
 **Created**: 2026-02-25
 **Depends on**: Phases A-J of [consolidated plan](consolidated-devex-training-evaluation-plan.md) (COMPLETE)
@@ -330,7 +330,7 @@ if self.should_stop(strategy=config.early_stopping_strategy):
 
 ## Implementation Plan
 
-### Phase 1: MultiMetricTracker (core logic)
+### Phase 1: MultiMetricTracker (core logic) — DONE (#73)
 
 **Files**:
 - `src/minivess/pipeline/multi_metric_tracker.py` — NEW
@@ -360,7 +360,7 @@ test_maximize_direction_correct()
 test_minimize_direction_correct()
 ```
 
-### Phase 2: Integrate into SegmentationTrainer
+### Phase 2: Integrate into SegmentationTrainer — DONE (#74)
 
 **Files** (modify existing):
 - `src/minivess/pipeline/trainer.py` — refactor `fit()` to use MultiMetricTracker
@@ -377,7 +377,7 @@ test_minimize_direction_correct()
 **Backward compatibility**: If no `checkpoint` config is provided, default to single
 `val_loss` tracking (current behavior).
 
-### Phase 3: Experiment YAML + Hydra Integration
+### Phase 3: Experiment YAML + Hydra Integration — DONE (#75)
 
 **Files**:
 - `configs/experiments/dynunet_losses.yaml` — update with checkpoint config
