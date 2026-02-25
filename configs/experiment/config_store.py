@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from hydra_zen import builds, make_config, store
 
+from minivess.config.compute_profiles import _PROFILES, ComputeProfile
 from minivess.config.models import (
     DataConfig,
     EnsembleConfig,
     EnsembleStrategy,
-    ExperimentConfig,
     ModelConfig,
     ModelFamily,
     TrainingConfig,
@@ -127,3 +127,20 @@ ensemble_store = store(group="experiment/ensemble")
 ensemble_store(MeanEnsembleConf, name="mean")
 ensemble_store(GreedySoupConf, name="greedy_soup")
 ensemble_store(ConformalConf, name="conformal")
+
+# --- Compute profile configs ---
+ComputeProfileConf = builds(ComputeProfile, populate_full_signature=True)
+compute_store = store(group="experiment/compute")
+for _profile_name, _profile in _PROFILES.items():
+    compute_store(
+        builds(
+            ComputeProfile,
+            name=_profile.name,
+            batch_size=_profile.batch_size,
+            patch_size=_profile.patch_size,
+            num_workers=_profile.num_workers,
+            mixed_precision=_profile.mixed_precision,
+            gradient_accumulation_steps=_profile.gradient_accumulation_steps,
+        ),
+        name=_profile_name,
+    )

@@ -262,7 +262,8 @@ def build_loss_function(
     loss_name:
         Loss function identifier. One of ``"dice_ce"``, ``"dice"``,
         ``"focal"``, ``"cldice"``, ``"dice_ce_cldice"``, ``"cb_dice"``,
-        ``"betti"``, ``"full_topo"``.
+        ``"betti"``, ``"full_topo"``, ``"cbdice"``, ``"centerline_ce"``,
+        ``"warp"``, ``"topo"``.
     num_classes:
         Number of segmentation classes (including background).
     softmax:
@@ -311,5 +312,24 @@ def build_loss_function(
             softmax=softmax,
             to_onehot_y=to_onehot_y,
         )
+    # --- Vendored losses ---
+    if loss_name == "cbdice":
+        from minivess.pipeline.vendored_losses.cbdice import CenterlineBoundaryDiceLoss
+
+        return CenterlineBoundaryDiceLoss(softmax=softmax)
+    if loss_name == "centerline_ce":
+        from minivess.pipeline.vendored_losses.centerline_ce import (
+            CenterlineCrossEntropyLoss,
+        )
+
+        return CenterlineCrossEntropyLoss()
+    if loss_name == "warp":
+        from minivess.pipeline.vendored_losses.coletra import WarpLoss
+
+        return WarpLoss(softmax=softmax)
+    if loss_name == "topo":
+        from minivess.pipeline.vendored_losses.coletra import TopoLoss
+
+        return TopoLoss(softmax=softmax)
     msg = f"Unknown loss function: {loss_name}"
     raise ValueError(msg)

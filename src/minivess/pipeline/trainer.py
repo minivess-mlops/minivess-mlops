@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from minivess.adapters.base import ModelAdapter
     from minivess.config.models import TrainingConfig
     from minivess.observability.tracking import ExperimentTracker
+    from minivess.pipeline.metrics import SegmentationMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,9 @@ class SegmentationTrainer:
         Device to train on.
     tracker:
         Optional experiment tracker (e.g., MLflow).
+    metrics:
+        Optional segmentation metrics tracker. If provided, metrics are
+        computed each epoch and included in ``EpochResult.metrics``.
     criterion:
         Optional pre-built loss function. If provided, ``loss_name`` is ignored.
     optimizer:
@@ -68,6 +72,7 @@ class SegmentationTrainer:
         loss_name: str = "dice_ce",
         device: str | torch.device = "cpu",
         tracker: ExperimentTracker | None = None,
+        metrics: SegmentationMetrics | None = None,
         criterion: nn.Module | None = None,
         optimizer: torch.optim.Optimizer | None = None,
         scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
@@ -77,6 +82,7 @@ class SegmentationTrainer:
         self.device = torch.device(device)
         self.model.to(self.device)
         self.tracker = tracker
+        self.metrics = metrics
 
         self.criterion = criterion if criterion is not None else build_loss_function(loss_name)
         self.optimizer = optimizer if optimizer is not None else self._build_optimizer()
@@ -164,8 +170,16 @@ class SegmentationTrainer:
             running_loss += loss.item()
             num_batches += 1
 
+            if self.metrics is not None:
+                with torch.no_grad():
+                    self.metrics.update(output.logits, labels)
+
         avg_loss = running_loss / max(num_batches, 1)
-        return EpochResult(loss=avg_loss)
+        epoch_metrics: dict[str, float] = {}
+        if self.metrics is not None:
+            epoch_metrics = self.metrics.compute().to_dict()
+            self.metrics.reset()
+        return EpochResult(loss=avg_loss, metrics=epoch_metrics)
 
     @torch.no_grad()
     def validate_epoch(self, loader: Any) -> EpochResult:
@@ -200,8 +214,15 @@ class SegmentationTrainer:
             running_loss += loss.item()
             num_batches += 1
 
+            if self.metrics is not None:
+                self.metrics.update(output.logits, labels)
+
         avg_loss = running_loss / max(num_batches, 1)
-        return EpochResult(loss=avg_loss)
+        epoch_metrics: dict[str, float] = {}
+        if self.metrics is not None:
+            epoch_metrics = self.metrics.compute().to_dict()
+            self.metrics.reset()
+        return EpochResult(loss=avg_loss, metrics=epoch_metrics)
 
     def fit(
         self,
@@ -251,14 +272,16 @@ class SegmentationTrainer:
 
             # Log to MLflow if tracker is present
             if self.tracker is not None:
-                self.tracker.log_epoch_metrics(
-                    {
-                        "train_loss": train_result.loss,
-                        "val_loss": val_result.loss,
-                        "learning_rate": current_lr,
-                    },
-                    step=epoch + 1,
-                )
+                epoch_log: dict[str, float] = {
+                    "train_loss": train_result.loss,
+                    "val_loss": val_result.loss,
+                    "learning_rate": current_lr,
+                }
+                for k, v in train_result.metrics.items():
+                    epoch_log[f"train_{k}"] = v
+                for k, v in val_result.metrics.items():
+                    epoch_log[f"val_{k}"] = v
+                self.tracker.log_epoch_metrics(epoch_log, step=epoch + 1)
 
             # Early stopping + best checkpoint
             if val_result.loss < self._best_val_loss:
