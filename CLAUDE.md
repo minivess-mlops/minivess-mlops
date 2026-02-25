@@ -2,6 +2,37 @@
 
 Model-agnostic biomedical segmentation MLOps platform. Clean rewrite from v0.1-alpha.
 
+## Design Goal #1: EXCELLENT DevEx for PhD Researchers
+
+> **MLOps as a scaffold that frees PhD researchers from infrastructure wrangling.**
+> Everything automatic by default, everything tweakable by choice.
+
+This is the **first and most important design goal** of the entire repository. Every
+feature, every configuration, every automation should be evaluated against this principle.
+
+### Core Principles
+1. **Zero-config start** — `just experiment` works out of the box on any machine
+2. **Adaptive defaults** — Hardware auto-detection selects batch size, patch size, cache rate
+3. **Scientific decisions stay with the researcher** — No default resampling, no implicit
+   upsampling. The platform provides knobs, the researcher turns them.
+4. **Model-agnostic profiles** — Same `--compute auto` works for DynUNet, SAMv3, SegResNet;
+   each model maps hardware budgets differently via `configs/model_profiles/*.yaml`
+5. **Dataset-agnostic patches** — Patch sizes constrained by dataset's smallest volume,
+   not hardcoded. Pre-training validation ensures patches fit all volumes.
+6. **Transparent automation** — Every automatic decision is logged and overridable via YAML
+7. **Portfolio-grade code** — Every component demonstrates production ML engineering
+8. **Division of labor via Prefect** — Prefect flows are **required** (not optional),
+   separating concerns into 4 persona-based flows (data engineering, model training,
+   model analysis, deployment) even for solo researchers. Each flow is independently
+   testable, resumable, cacheable, and uses MLflow as the inter-flow contract.
+
+### Multi-Environment Compute
+Everything must work identically on:
+- Local workstation (single GPU, limited RAM)
+- Intranet / on-prem servers (multi-GPU, team access)
+- Ephemeral cloud instances (Docker, mounted drives)
+- CI runners (CPU-only, automated)
+
 ## Quick Reference
 
 | Aspect | Details |
@@ -24,6 +55,7 @@ Model-agnostic biomedical segmentation MLOps platform. Clean rewrite from v0.1-a
 | **Calibration** | MAPIE + netcal + Local Temperature Scaling |
 | **Data Profiling** | whylogs |
 | **LLM Observability** | Langfuse (self-hosted) + Braintrust (eval) + LiteLLM (provider flexibility) |
+| **Workflow Orchestration** | Prefect 3.x (required, 4 persona-based flows: data, train, analyze, deploy) |
 | **Agent Orchestration** | LangGraph |
 | **CI/CD** | GitHub Actions + CML (ML-specific PR comments) |
 | **Lineage** | OpenLineage (Marquez) |
@@ -83,7 +115,8 @@ minivess-mlops/
 │   ├── adapters/              # ModelAdapter implementations (MONAI, SAMv3, etc.)
 │   ├── pipeline/              # Training, inference, evaluation pipelines
 │   ├── ensemble/              # Ensembling strategies (soup, voting, conformal)
-│   ├── data/                  # Data loading, DVC integration
+│   ├── data/                  # Data loading, profiling, DVC integration
+│   ├── orchestration/         # Prefect flows + _prefect_compat.py
 │   ├── serving/               # BentoML service definitions
 │   ├── agents/                # LangGraph agent definitions
 │   ├── observability/         # Langfuse + Braintrust integration
@@ -118,6 +151,7 @@ minivess-mlops/
 
 | Tool | Role | Deployment |
 |------|------|-----------|
+| **Prefect 3.x** | Workflow orchestration (4 flows: data, train, evaluate, deploy) | Optional — local or Docker Compose |
 | **Langfuse** | Production LLM tracing, cost tracking | Self-hosted (Docker Compose) |
 | **Braintrust** | Offline evaluation, CI/CD quality gates, AutoEvals | Hybrid deployment (data plane local) |
 | **LangGraph** | Agent orchestration, multi-step workflows | Library (in-process) |

@@ -1,101 +1,152 @@
 decision_id: pipeline_orchestration
 title: "Pipeline Orchestration"
 description: >
-  How to orchestrate ML pipeline stages (training, evaluation, deployment).
+  How to orchestrate ML pipeline stages (data engineering, training, evaluation,
+  deployment). Updated 2026-02-25: Prefect 3.x chosen as the primary workflow
+  orchestration layer with a 4-persona flow architecture. LangGraph retained for
+  agent-based reasoning (complementary role, not competing). Evidence from
+  foundation-PLR production implementation and multi-environment deployment analysis.
 
 decision_level: L2_architecture
 status: active
-last_updated: 2026-02-23
+last_updated: 2026-02-25
 
 options:
-  - option_id: langgraph
-    title: "LangGraph"
-    description: "Agent-based orchestration with LLM reasoning. Placeholder implemented."
-    prior_probability: 0.35
+  - option_id: prefect
+    title: "Prefect 3.x"
+    description: >
+      Python-native workflow orchestration with 4 persona-based flows:
+      (1) Data Engineering, (2) Model Training, (3) Model Analysis & Ensembling,
+      (4) Deployment & Serving. MLflow as inter-flow contract. Proven in
+      foundation-PLR with _prefect_compat.py graceful degradation, task caching,
+      and Docker/K8s work pools. Prefect 3.x open-sourced events and automations.
+      Required dependency (not optional).
+    prior_probability: 0.45
     status: resolved
     implementation_status: partial
+    constraints:
+      - "No official prefect-mlflow or prefect-dvc integration packages exist"
+      - "Docker work pools lack native --gpus flag; needs custom template"
+      - "Task-level GPU specification not supported; use work pool templates"
+    complements:
+      - serving_architecture.bentoml_rest
+      - data_versioning.dvc
 
-  - option_id: prefect
-    title: "Prefect"
-    description: "Python-native workflow orchestration."
-    prior_probability: 0.20
-    status: viable
-    implementation_status: not_started
-
-  - option_id: custom_scripts
-    title: "Custom Scripts"
-    description: "Shell scripts and Makefiles. Simple but brittle."
+  - option_id: langgraph
+    title: "LangGraph"
+    description: >
+      Agent-based orchestration with LLM reasoning. Complementary to Prefect:
+      LangGraph handles agent workflows (interactive debugging, code review),
+      Prefect handles deterministic ML pipeline workflows. Not competing.
     prior_probability: 0.25
-    status: viable
+    status: resolved
     implementation_status: partial
+    complements:
+      - pipeline_orchestration.prefect
 
   - option_id: dvc_pipelines
     title: "DVC Pipelines"
-    description: "DVC pipeline stages for reproducible workflows."
+    description: >
+      DVC pipeline stages for data lineage and reproducibility. Complementary
+      to Prefect: DVC handles data versioning and lineage, Prefect handles
+      workflow orchestration. DVC push events can trigger Prefect flows.
     prior_probability: 0.20
+    status: viable
+    implementation_status: partial
+    complements:
+      - pipeline_orchestration.prefect
+
+  - option_id: custom_scripts
+    title: "Custom Scripts"
+    description: >
+      Shell scripts and justfile recipes. Retained as the L0 maturity level
+      (before Prefect server is set up). train_monitored.py and
+      run_experiment.py are the script-level foundation that Prefect wraps.
+    prior_probability: 0.10
     status: viable
     implementation_status: partial
 
 conditional_on:
   - parent_decision_id: project_purpose
-    influence_strength: weak
+    influence_strength: moderate
     conditional_table:
       - given_parent_option: self_learning
         then_probabilities:
-          langgraph: 0.40
-          prefect: 0.20
-          custom_scripts: 0.20
+          prefect: 0.40
+          langgraph: 0.30
           dvc_pipelines: 0.20
+          custom_scripts: 0.10
       - given_parent_option: portfolio
         then_probabilities:
-          langgraph: 0.35
-          prefect: 0.25
-          custom_scripts: 0.15
-          dvc_pipelines: 0.25
+          prefect: 0.45
+          langgraph: 0.25
+          dvc_pipelines: 0.20
+          custom_scripts: 0.10
       - given_parent_option: clinical_deployment
         then_probabilities:
-          langgraph: 0.20
-          prefect: 0.30
-          custom_scripts: 0.10
-          dvc_pipelines: 0.40
+          prefect: 0.45
+          langgraph: 0.15
+          dvc_pipelines: 0.35
+          custom_scripts: 0.05
       - given_parent_option: open_source_contribution
         then_probabilities:
-          langgraph: 0.25
-          prefect: 0.20
-          custom_scripts: 0.25
+          prefect: 0.40
+          langgraph: 0.20
           dvc_pipelines: 0.30
+          custom_scripts: 0.10
 
 archetype_weights:
   solo_researcher:
     probability_overrides:
-      langgraph: 0.35
-      prefect: 0.15
-      custom_scripts: 0.30
+      prefect: 0.40
+      langgraph: 0.25
       dvc_pipelines: 0.20
-    rationale: "LangGraph for learning; custom scripts for quick iteration"
+      custom_scripts: 0.15
+    rationale: >
+      Solo researchers benefit from Prefect's division of labor even working
+      alone: each flow is independently testable, resumable, and cacheable.
+      Forces structured thinking about the ML lifecycle. LangGraph for
+      agent-based tasks (complementary).
   lab_group:
     probability_overrides:
-      langgraph: 0.20
-      prefect: 0.30
-      custom_scripts: 0.15
-      dvc_pipelines: 0.35
-    rationale: "Lab groups need reproducible pipelines (DVC/Prefect)"
+      prefect: 0.45
+      langgraph: 0.15
+      dvc_pipelines: 0.30
+      custom_scripts: 0.10
+    rationale: >
+      Lab groups assign different people to different flows (data engineer
+      owns Flow 1, data scientist owns Flow 2, ML engineer owns Flow 3).
+      MLflow as contract enables async collaboration.
   clinical_deployment:
     probability_overrides:
-      langgraph: 0.15
-      prefect: 0.35
-      custom_scripts: 0.10
+      prefect: 0.45
+      langgraph: 0.10
       dvc_pipelines: 0.40
-    rationale: "Clinical needs robust, auditable pipeline orchestration"
+      custom_scripts: 0.05
+    rationale: >
+      Clinical needs robust, auditable pipeline orchestration. Prefect
+      provides run history, event logs, and transaction support for
+      IEC 62304 traceability. DVC provides data lineage for audit trails.
 
 volatility:
   classification: shifting
-  last_assessed: 2026-02-23
-  next_review: 2026-05-23
+  last_assessed: 2026-02-25
+  next_review: 2026-05-25
   change_drivers:
-    - "LangGraph maturity"
-    - "Prefect 3.0 features"
-    - "DVC pipeline improvements"
+    - "Prefect 3.x adoption maturity and Docker GPU work pool improvements"
+    - "lakeFS acquisition of iterative.ai (DVC parent) — monitor DVC future"
+    - "LangGraph + Prefect integration patterns emerging"
+
+research_notes: >
+  2026-02-25: Comprehensive analysis of Prefect 3.x capabilities and
+  foundation-PLR production implementation. Key findings:
+  (1) _prefect_compat.py pattern enables graceful degradation.
+  (2) No official prefect-mlflow/prefect-dvc packages exist; use direct API.
+  (3) Cross-flow artifact passing via Prefect Variables + MLflow run_ids.
+  (4) Task caching (cache_policy=INPUTS) avoids re-running expensive profiling.
+  (5) Prefect 3.x open-sourced events/automations (previously Cloud-only).
+  (6) Docker work pools need custom template for --gpus flag.
+  (7) Four-persona flow architecture maps to MLOps maturity levels.
 
 domain_applicability:
   vascular_segmentation: 1.0
@@ -104,30 +155,33 @@ domain_applicability:
   general_medical: 1.0
 
 rationale: >
-  LangGraph (0.35) is the primary choice for agent-based orchestration
-  (LangChain Team, 2024), reflecting MLOps pipeline patterns described
-  by Kreuzberger et al. (2023) and Recupito et al. (2024). DVC pipelines
-  (0.20) complement it for data pipeline stages.
+  Prefect 3.x (0.45) is the primary workflow orchestration choice,
+  validated by production implementation in foundation-PLR (Teikari, 2025).
+  The 4-persona flow architecture (data engineering, training, analysis,
+  deployment) maps to MLOps maturity models described by Kreuzberger et al.
+  (2023) and Recupito et al. (2024). LangGraph (0.25) is complementary
+  for agent-based reasoning tasks (LangChain Team, 2024). DVC pipelines
+  (0.20) complement for data versioning and lineage. Custom scripts (0.10)
+  retained as L0 maturity foundation.
 
 references:
-  - citation_key: langchain2024langgraph
-    relevance: "LangGraph framework for agent-based orchestration — the implemented solution"
-    supports_options:
-      - langgraph
   - citation_key: kreuzberger2023mlops
-    relevance: "MLOps architecture survey defining pipeline orchestration as a central component"
+    relevance: "MLOps architecture survey defining pipeline orchestration as a central component. The 4-flow architecture maps to their continuous training/monitoring/deployment triad."
     supports_options:
-      - langgraph
       - prefect
       - dvc_pipelines
   - citation_key: recupito2024mlops
-    relevance: "Multivocal review covering orchestration challenges and tool selection in MLOps"
+    relevance: "Multivocal review covering orchestration challenges and tool selection in MLOps. Supports Python-native orchestration for academic settings."
     supports_options:
-      - langgraph
       - prefect
       - dvc_pipelines
+  - citation_key: langchain2024langgraph
+    relevance: "LangGraph framework for agent-based orchestration — complementary to Prefect for LLM-reasoning tasks."
+    supports_options:
+      - langgraph
 
 tags:
   - architecture
   - orchestration
-  - partially-resolved
+  - prefect
+  - resolved
