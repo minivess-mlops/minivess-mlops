@@ -289,6 +289,47 @@ Issues are organized into GitHub issues to be addressed with the same self-learn
 
 ---
 
+## Execution Results
+
+### Phase R1 — Completed (commit `4f515d4`)
+- **Tests:** 662 → 686 (+24)
+- Dead Sam3Adapter confirmed already non-exported; removed unused imports
+- Fixed datetime inconsistency in 3 files (`compliance/fairness.py`, `compliance/regulatory_docs.py`, `observability/lineage.py`)
+- Created `utils/markdown.py` with shared report utilities
+- Added package re-export validation tests
+
+### Phase R2 — Completed (commits `ba93016`, `8cca140`)
+- **Tests:** 686 → 772 (+86)
+- R2.1: 12 adapter error-path tests (checkpoint, forward, config)
+- R2.2: 19 trainer epoch + loss function tests
+- R2.3: 10 ensemble gap tests (greedy_soup, WeightWatcher, EnsemblePredictor)
+- R2.4: 19 observability edge-case tests (registry, PPRM, lineage, analytics)
+- R2.5: 16 serving error-path tests (ONNX, DICOM, clinical deploy, Gradio)
+- R2.6: 10 property-based tests via Hypothesis (CI bounds, temperature scaling, Dice score)
+- **Bug found:** PPRM single-sample variance (ddof=1 with n=1) — fixed
+
+### Phase R3 — Completed (commit `92b8396`)
+- **Tests:** 772 → 793 (+21)
+- R3.1: Centralized seed management (`utils/seed.py`)
+- R3.2: Protocol types (`utils/protocols.py`) — Predictor, Checkpointable, MetricComputer
+- R3.3: Custom exception hierarchy (`exceptions.py`) — MinivessError + 5 domain subclasses
+
+### Phase R4 — Pending (optional polish)
+- R4.1–R4.3 deferred for future iteration
+
+### Actual Impact vs. Estimate
+
+| Metric | Before | Estimated | Actual (R1–R3) |
+|--------|--------|-----------|----------------|
+| Tests | 662 | ~832 | **793** |
+| Dead code files | 1 | 0 | 0 |
+| Custom exceptions | 0 | 5+ | **5** |
+| Protocol abstractions | 0 | 3+ | **3** |
+| Seed reproducibility | Per-function | Centralized | **Centralized** |
+| Bugs found | — | — | **1 (PPRM)** |
+
+---
+
 ## Appendix: Agent Methodology
 
 Each reviewer agent received:

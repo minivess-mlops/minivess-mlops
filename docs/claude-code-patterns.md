@@ -422,4 +422,46 @@ Orchestrating Agent (main context)
 
 ---
 
-*Last updated: 2026-02-25 — Pattern 13 from multi-agent code review (662 tests baseline)*
+## Pattern 14: Property-Based Testing with Hypothesis (Module 6)
+
+**Context:** Traditional example-based tests verify specific inputs/outputs. Property-based testing uses Hypothesis to generate hundreds of random inputs and verify *invariants* that must hold for ALL valid inputs — catching edge cases humans wouldn't think to test.
+
+**Technique:** Use `@given` decorators with `hypothesis.strategies` to generate random inputs. Define mathematical properties rather than specific test cases.
+
+**Real example from this project:**
+
+```python
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+class TestBootstrapCIProperties:
+    @given(
+        data=arrays(dtype=np.float64, shape=st.integers(5, 50),
+                    elements=st.floats(0.0, 1.0)),
+    )
+    @settings(max_examples=20, deadline=5000)
+    def test_ci_bounds_ordering(self, data):
+        """bootstrap_ci should ALWAYS produce lower <= point <= upper."""
+        ci = bootstrap_ci(data, n_resamples=200, seed=42)
+        assert ci.lower <= ci.point_estimate <= ci.upper
+```
+
+**Properties tested in MinIVess (10 tests):**
+
+| Property | Module | Invariant |
+|----------|--------|-----------|
+| CI ordering | `pipeline/ci.py` | lower ≤ point ≤ upper for ANY sample |
+| CI width monotonicity | `pipeline/ci.py` | Higher confidence → wider interval |
+| Temperature scaling | `ensemble/calibration.py` | Output sums to 1.0 for ANY temperature |
+| Probability range | `ensemble/calibration.py` | All outputs in [0, 1] |
+| Risk non-negativity | `observability/pprm.py` | |pred - label| ≥ 0 for ANY input |
+| Risk shape | `observability/pprm.py` | Output shape = input shape |
+| Dice range | `pipeline/metrics.py` | 0 ≤ Dice ≤ 1 for ANY prediction |
+
+**Bug found by property-based thinking:** The PPRM detector's `monitor()` method used `np.var(ddof=1)` on a single sample, causing a RuntimeWarning (degrees of freedom ≤ 0). This edge case was never caught by example-based tests but emerged from thinking about what inputs are *possible*.
+
+**Lesson:** Property-based tests are most valuable for mathematical/statistical code where invariants are known but edge cases are hard to enumerate manually.
+
+---
+
+*Last updated: 2026-02-25 — Pattern 14 from property-based testing (793 tests, up from 662)*
