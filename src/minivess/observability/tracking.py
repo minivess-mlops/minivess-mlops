@@ -144,6 +144,67 @@ class ExperimentTracker:
         logger.info("Test set hash recorded: %s", hash_value[:16])
         return hash_value
 
+    def log_git_hash(self) -> str | None:
+        """Log current git commit hash as tag and artifact."""
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            git_hash = result.stdout.strip()
+            mlflow.set_tag("git_commit", git_hash)
+            logger.info("Logged git hash: %s", git_hash[:8])
+            return git_hash
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            logger.warning("Could not determine git hash")
+            return None
+
+    def log_frozen_deps(self) -> None:
+        """Log frozen dependencies (uv pip freeze) as artifact."""
+        import subprocess
+        import tempfile
+
+        try:
+            result = subprocess.run(
+                ["uv", "pip", "freeze"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", prefix="frozen_deps_", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(result.stdout)
+                f.flush()
+                mlflow.log_artifact(f.name, artifact_path="environment")
+            logger.info("Logged frozen dependencies")
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            logger.warning("Could not freeze dependencies (uv not available)")
+
+    def log_hydra_config(self, config_dict: dict, *, filename: str = "resolved_config.yaml") -> None:
+        """Log resolved Hydra config as YAML artifact."""
+        import tempfile
+
+        import yaml
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", prefix="config_", delete=False, encoding="utf-8"
+        ) as f:
+            yaml.dump(config_dict, f, default_flow_style=False, sort_keys=True)
+            f.flush()
+            mlflow.log_artifact(f.name, artifact_path="config")
+        logger.info("Logged Hydra config as %s", filename)
+
+    def log_split_file(self, split_path: Path) -> None:
+        """Log split JSON file as artifact."""
+        if split_path.exists():
+            mlflow.log_artifact(str(split_path), artifact_path="splits")
+            logger.info("Logged split file: %s", split_path.name)
+
     def register_model(
         self,
         model_name: str,

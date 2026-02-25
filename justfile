@@ -53,9 +53,17 @@ up:
 down:
     docker compose -f deployment/docker-compose.yml down
 
-# Train a model (placeholder)
+# Train a model (full experiment)
 train *ARGS:
-    uv run python -m minivess.pipeline.train {{ARGS}}
+    uv run python scripts/train.py {{ARGS}}
+
+# Quick debug training (1 epoch, CPU, small data)
+train-debug *ARGS:
+    uv run python scripts/train.py --compute cpu --loss dice_ce --debug {{ARGS}}
+
+# Full 3-loss sweep
+train-sweep *ARGS:
+    uv run python scripts/train.py --compute gpu_low --loss dice_ce,dice_ce_cldice,cbdice {{ARGS}}
 
 # Run serving (placeholder)
 serve:
