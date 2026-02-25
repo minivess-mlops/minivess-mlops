@@ -60,6 +60,7 @@ dependencies = [
     # Retained from v0.1
     "weightwatcher>=0.7,<1.0",
     "openlineage-python>=1.26,<2.0",
+    "nibabel>=5.3.3",
 ]
 
 [project.optional-dependencies]
