@@ -268,3 +268,8 @@ build-constraint-dependencies = [
 override-dependencies = [
     "pandas>=2.2",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]

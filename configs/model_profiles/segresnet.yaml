@@ -1,0 +1,14 @@
+name: segresnet
+divisor: 8
+model_overhead_mb: 200
+bytes_per_voxel_amp: 6
+bytes_per_voxel_fp32: 12
+max_batch_size:
+  cpu: 1
+  gpu_low: 2
+  gpu_high: 6
+  gpu_extreme: 12
+default_patch_xy: 96
+notes: >
+  SegResNet with 4 stages. More memory efficient than DynUNet
+  due to residual connections instead of skip connections.

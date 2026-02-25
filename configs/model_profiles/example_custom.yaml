@@ -1,0 +1,16 @@
+# Template for custom model profiles.
+# Copy this file and adjust values for your model.
+name: example_custom
+divisor: 8
+model_overhead_mb: 250
+bytes_per_voxel_amp: 8
+bytes_per_voxel_fp32: 16
+max_batch_size:
+  cpu: 1
+  gpu_low: 2
+  gpu_high: 4
+  gpu_extreme: 8
+default_patch_xy: 96
+notes: >
+  Example custom model profile. Researchers: copy this template
+  and fill in empirically measured values for your model.
