@@ -36,7 +36,7 @@ class DataConfig(BaseModel):
     data_dir: Path = Field(default=Path("data/raw"), description="Root data directory")
     processed_dir: Path = Field(default=Path("data/processed"))
     patch_size: tuple[int, int, int] = Field(default=(128, 128, 32), description="3D patch dimensions (D, H, W)")
-    voxel_spacing: tuple[float, float, float] = Field(default=(1.0, 1.0, 1.0), description="Target voxel spacing in mm")
+    voxel_spacing: tuple[float, float, float] = Field(default=(0.0, 0.0, 0.0), description="Target voxel spacing ((0,0,0) = native, no resampling)")
     intensity_range: tuple[float, float] = Field(default=(0.0, 1.0), description="Normalized intensity range")
     image_key: str = Field(default="image", description="Dictionary key for image volumes")
     label_key: str = Field(default="label", description="Dictionary key for label volumes")
