@@ -164,8 +164,9 @@ class TestGetConfig:
 
         model = SegResNetAdapter(_segresnet_config())
         cfg = model.get_config()
+        d = cfg.to_dict()
         required_keys = {"family", "name", "in_channels", "out_channels", "trainable_params"}
-        assert required_keys.issubset(cfg.keys())
+        assert required_keys.issubset(d.keys())
 
     def test_swinunetr_config_has_required_keys(self) -> None:
         """SwinUNETR get_config should include transformer-specific fields."""
@@ -179,9 +180,10 @@ class TestGetConfig:
         )
         model = SwinUNETRAdapter(config)
         cfg = model.get_config()
-        assert "feature_size" in cfg
-        assert "depths" in cfg
-        assert "num_heads" in cfg
+        d = cfg.to_dict()
+        assert "feature_size" in d
+        assert "depths" in d
+        assert "num_heads" in d
 
     def test_trainable_params_positive(self) -> None:
         """All adapters should report positive trainable parameter counts."""
@@ -189,4 +191,4 @@ class TestGetConfig:
 
         model = SegResNetAdapter(_segresnet_config())
         assert model.trainable_parameters() > 0
-        assert model.get_config()["trainable_params"] > 0
+        assert model.get_config().trainable_params > 0

@@ -18,7 +18,7 @@ from huggingface_hub import hf_hub_download
 from monai.networks.nets import DynUNet
 from torch import Tensor
 
-from minivess.adapters.base import ModelAdapter, SegmentationOutput
+from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -120,16 +120,18 @@ class VesselFMAdapter(ModelAdapter):
             metadata={"architecture": "vesselfm"},
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "family": self.config.family.value,
-            "name": self.config.name,
-            "architecture": "vesselfm",
-            "in_channels": self.config.in_channels,
-            "out_channels": self.config.out_channels,
-            "filters": VESSELFM_FILTERS,
-            "trainable_params": self.trainable_parameters(),
-        }
+    def get_config(self) -> AdapterConfigInfo:
+        return AdapterConfigInfo(
+            family=self.config.family.value,
+            name=self.config.name,
+            in_channels=self.config.in_channels,
+            out_channels=self.config.out_channels,
+            trainable_params=self.trainable_parameters(),
+            extras={
+                "architecture": "vesselfm",
+                "filters": VESSELFM_FILTERS,
+            },
+        )
 
     def load_checkpoint(self, path: Path) -> None:
         state_dict = torch.load(path, map_location="cpu", weights_only=True)

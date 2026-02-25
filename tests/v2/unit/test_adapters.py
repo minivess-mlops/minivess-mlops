@@ -95,11 +95,11 @@ class TestSegResNetAdapter:
 
     def test_get_config(self, adapter: SegResNetAdapter) -> None:
         cfg = adapter.get_config()
-        assert cfg["family"] == "segresnet"
-        assert cfg["in_channels"] == 1
-        assert cfg["out_channels"] == 2
-        assert "trainable_params" in cfg
-        assert cfg["init_filters"] == 32
+        assert cfg.family == "segresnet"
+        assert cfg.in_channels == 1
+        assert cfg.out_channels == 2
+        assert cfg.trainable_params is not None
+        assert cfg.extras["init_filters"] == 32
 
     def test_trainable_parameters(self, adapter: SegResNetAdapter) -> None:
         count = adapter.trainable_parameters()
@@ -185,8 +185,8 @@ class TestSwinUNETRAdapter:
 
     def test_get_config(self, adapter: SwinUNETRAdapter) -> None:
         cfg = adapter.get_config()
-        assert cfg["family"] == "swinunetr"
-        assert cfg["feature_size"] == 24
+        assert cfg.family == "swinunetr"
+        assert cfg.extras["feature_size"] == 24
 
     def test_trainable_parameters(self, adapter: SwinUNETRAdapter) -> None:
         count = adapter.trainable_parameters()

@@ -82,8 +82,8 @@ class TestVista3dAdapter:
         )
         model = Vista3dAdapter(config)
         cfg = model.get_config()
-        assert cfg["family"] == "vista3d"
-        assert cfg["in_channels"] == 1
+        assert cfg.family == "vista3d"
+        assert cfg.in_channels == 1
 
     def test_vista3d_trainable_params(self) -> None:
         from minivess.adapters.vista3d import Vista3dAdapter
@@ -189,8 +189,8 @@ class TestLoraAdapter:
         base_model = SegResNetAdapter(base_config)
         lora_model = LoraModelAdapter(base_model, lora_rank=8, lora_alpha=16.0)
         cfg = lora_model.get_config()
-        assert cfg["lora_rank"] == 8
-        assert cfg["lora_alpha"] == 16.0
+        assert cfg.extras["lora_rank"] == 8
+        assert cfg.extras["lora_alpha"] == 16.0
 
     def test_lora_save_load_adapter(self, tmp_path: object) -> None:
         """LoRA adapter weights should be saveable and loadable."""

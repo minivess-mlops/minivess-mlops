@@ -14,7 +14,7 @@ import torch
 from monai.networks.nets import DynUNet as MonaiDynUNet
 from torch import Tensor
 
-from minivess.adapters.base import ModelAdapter, SegmentationOutput
+from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -102,16 +102,18 @@ class DynUNetAdapter(ModelAdapter):
             metadata={"architecture": "dynunet"},
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "family": self.config.family.value,
-            "name": self.config.name,
-            "in_channels": self.config.in_channels,
-            "out_channels": self.config.out_channels,
-            "filters": self.filters,
-            "deep_supervision": self._deep_supervision,
-            "trainable_params": self.trainable_parameters(),
-        }
+    def get_config(self) -> AdapterConfigInfo:
+        return AdapterConfigInfo(
+            family=self.config.family.value,
+            name=self.config.name,
+            in_channels=self.config.in_channels,
+            out_channels=self.config.out_channels,
+            trainable_params=self.trainable_parameters(),
+            extras={
+                "filters": self.filters,
+                "deep_supervision": self._deep_supervision,
+            },
+        )
 
     def load_checkpoint(self, path: Path) -> None:
         state_dict = torch.load(path, map_location="cpu", weights_only=True)

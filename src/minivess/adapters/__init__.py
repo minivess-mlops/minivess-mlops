@@ -14,7 +14,7 @@ from minivess.adapters.atlas import (
     AtlasRegistrationResult,
     register_atlas,
 )
-from minivess.adapters.base import ModelAdapter, SegmentationOutput
+from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 from minivess.adapters.comma import CommaAdapter
 from minivess.adapters.dynunet import DynUNetAdapter
 from minivess.adapters.lora import LoraModelAdapter
@@ -44,6 +44,7 @@ __all__ = [
     "MedSAM3Config",
     "MedSAM3Predictor",
     "MedicalConcept",
+    "AdapterConfigInfo",
     "ModelAdapter",
     "PromptType",
     "SegmentationOutput",

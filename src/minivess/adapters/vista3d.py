@@ -14,7 +14,7 @@ import torch
 from monai.networks.nets import SegResNetDS2
 from torch import Tensor
 
-from minivess.adapters.base import ModelAdapter, SegmentationOutput
+from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -59,16 +59,18 @@ class Vista3dAdapter(ModelAdapter):
             metadata={"architecture": "vista3d"},
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "family": self.config.family.value,
-            "name": self.config.name,
-            "in_channels": self.config.in_channels,
-            "out_channels": self.config.out_channels,
-            "init_filters": 32,
-            "blocks_down": (1, 2, 2, 4),
-            "trainable_params": self.trainable_parameters(),
-        }
+    def get_config(self) -> AdapterConfigInfo:
+        return AdapterConfigInfo(
+            family=self.config.family.value,
+            name=self.config.name,
+            in_channels=self.config.in_channels,
+            out_channels=self.config.out_channels,
+            trainable_params=self.trainable_parameters(),
+            extras={
+                "init_filters": 32,
+                "blocks_down": (1, 2, 2, 4),
+            },
+        )
 
     def load_checkpoint(self, path: Path) -> None:
         state_dict = torch.load(path, map_location="cpu", weights_only=True)

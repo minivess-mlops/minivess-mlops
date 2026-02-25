@@ -62,9 +62,9 @@ class TestDynUNetAdapter:
     def test_get_config(self, adapter: ModelAdapter) -> None:
         """Config should contain architecture details."""
         cfg = adapter.get_config()
-        assert cfg["family"] == "dynunet"
-        assert cfg["filters"] == [8, 16, 32, 64]
-        assert "trainable_params" in cfg
+        assert cfg.family == "dynunet"
+        assert cfg.extras["filters"] == [8, 16, 32, 64]
+        assert cfg.trainable_params is not None
 
     def test_trainable_parameters(self, adapter: ModelAdapter) -> None:
         """Should report positive trainable parameter count."""

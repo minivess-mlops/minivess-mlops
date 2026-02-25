@@ -168,11 +168,11 @@ class TestCommaConfig:
     def test_get_config(self, adapter: ModelAdapter) -> None:
         """Config dict should contain architecture details."""
         cfg = adapter.get_config()
-        assert cfg["family"] == "comma_mamba"
-        assert cfg["in_channels"] == 1
-        assert cfg["out_channels"] == 2
-        assert "trainable_params" in cfg
-        assert "d_state" in cfg
+        assert cfg.family == "comma_mamba"
+        assert cfg.in_channels == 1
+        assert cfg.out_channels == 2
+        assert cfg.trainable_params is not None
+        assert "d_state" in cfg.extras
 
     def test_trainable_parameters(self, adapter: ModelAdapter) -> None:
         """Should report positive trainable parameter count."""

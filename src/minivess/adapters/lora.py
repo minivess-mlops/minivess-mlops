@@ -14,7 +14,7 @@ import torch
 from peft import LoraConfig, get_peft_model
 from torch import Tensor
 
-from minivess.adapters.base import ModelAdapter, SegmentationOutput
+from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -117,9 +117,9 @@ class LoraModelAdapter(ModelAdapter):
             metadata={"architecture": "lora_adapted"},
         )
 
-    def get_config(self) -> dict[str, Any]:
+    def get_config(self) -> AdapterConfigInfo:
         base_config = self._base_model.get_config()
-        base_config.update({
+        base_config.extras.update({
             "lora_rank": self._lora_rank,
             "lora_alpha": self._lora_alpha,
             "lora_dropout": self._lora_dropout,

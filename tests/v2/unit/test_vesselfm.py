@@ -60,9 +60,9 @@ class TestVesselFMAdapter:
     def test_get_config(self, adapter: ModelAdapter) -> None:
         """Config should identify vesselFM architecture."""
         cfg = adapter.get_config()
-        assert cfg["family"] == "vesselfm"
-        assert cfg["architecture"] == "vesselfm"
-        assert "trainable_params" in cfg
+        assert cfg.family == "vesselfm"
+        assert cfg.extras["architecture"] == "vesselfm"
+        assert cfg.trainable_params is not None
 
     def test_trainable_parameters(self, adapter: ModelAdapter) -> None:
         """Should report positive trainable parameter count."""

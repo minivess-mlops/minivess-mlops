@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from minivess.adapters.base import ModelAdapter, SegmentationOutput
+from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -50,12 +50,12 @@ class Sam3Adapter(ModelAdapter):
         msg = "SAM3 forward not implemented"
         raise NotImplementedError(msg)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "family": self.config.family.value,
-            "name": self.config.name,
-            "lora_rank": self.config.lora_rank,
-        }
+    def get_config(self) -> AdapterConfigInfo:
+        return AdapterConfigInfo(
+            family=self.config.family.value,
+            name=self.config.name,
+            extras={"lora_rank": self.config.lora_rank},
+        )
 
     def load_checkpoint(self, path: Path) -> None:
         pass

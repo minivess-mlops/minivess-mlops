@@ -38,6 +38,8 @@ class DataConfig(BaseModel):
     patch_size: tuple[int, int, int] = Field(default=(128, 128, 32), description="3D patch dimensions (D, H, W)")
     voxel_spacing: tuple[float, float, float] = Field(default=(1.0, 1.0, 1.0), description="Target voxel spacing in mm")
     intensity_range: tuple[float, float] = Field(default=(0.0, 1.0), description="Normalized intensity range")
+    image_key: str = Field(default="image", description="Dictionary key for image volumes")
+    label_key: str = Field(default="label", description="Dictionary key for label volumes")
     num_workers: int = Field(default=4, ge=0)
     pin_memory: bool = True
     prefetch_factor: int = Field(default=2, ge=1)

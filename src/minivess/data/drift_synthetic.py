@@ -7,13 +7,13 @@ severity parameter (0.0 = no drift, 1.0 = extreme).
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 import torch
 import torch.nn.functional as F  # noqa: N812
 
 
-class DriftType(str, Enum):
+class DriftType(StrEnum):
     """Supported drift types for synthetic generation."""
 
     INTENSITY_SHIFT = "intensity_shift"

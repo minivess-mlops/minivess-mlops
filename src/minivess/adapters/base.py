@@ -17,6 +17,36 @@ class SegmentationOutput:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class AdapterConfigInfo:
+    """Typed configuration snapshot returned by ModelAdapter.get_config().
+
+    Common fields are typed attributes; adapter-specific fields go in ``extras``.
+    """
+
+    family: str
+    name: str
+    in_channels: int | None = None
+    out_channels: int | None = None
+    trainable_params: int | None = None
+    extras: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Flatten to a serializable dict (common fields + extras merged)."""
+        d: dict[str, Any] = {
+            "family": self.family,
+            "name": self.name,
+        }
+        if self.in_channels is not None:
+            d["in_channels"] = self.in_channels
+        if self.out_channels is not None:
+            d["out_channels"] = self.out_channels
+        if self.trainable_params is not None:
+            d["trainable_params"] = self.trainable_params
+        d.update(self.extras)
+        return d
+
+
 class ModelAdapter(ABC, nn.Module):
     """Abstract base class for pluggable segmentation model adapters.
 
@@ -38,8 +68,8 @@ class ModelAdapter(ABC, nn.Module):
         ...
 
     @abstractmethod
-    def get_config(self) -> dict[str, Any]:
-        """Return model configuration as a serializable dict."""
+    def get_config(self) -> AdapterConfigInfo:
+        """Return model configuration as a typed dataclass."""
         ...
 
     @abstractmethod

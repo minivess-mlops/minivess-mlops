@@ -60,11 +60,11 @@ class TestOnnxErrorPaths:
             engine = OnnxSegmentationInference(onnx_path)
 
         meta = engine.get_metadata()
-        assert "inputs" in meta
-        assert "outputs" in meta
-        assert len(meta["inputs"]) >= 1
-        assert "name" in meta["inputs"][0]
-        assert "shape" in meta["inputs"][0]
+        assert meta.inputs is not None
+        assert meta.outputs is not None
+        assert len(meta.inputs) >= 1
+        assert meta.inputs[0].name is not None
+        assert meta.inputs[0].shape is not None
 
 
 # ---------------------------------------------------------------------------

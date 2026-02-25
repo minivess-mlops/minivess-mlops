@@ -88,9 +88,9 @@ class TestOnnxExportRoundtrip:
         volume = np.random.randn(1, 1, 16, 16, 8).astype(np.float32)
         result = engine.predict(volume)
 
-        assert "segmentation" in result
-        assert "probabilities" in result
-        assert "shape" in result
+        assert result.segmentation is not None
+        assert result.probabilities is not None
+        assert result.shape is not None
 
     def test_onnx_output_shape_matches_pytorch(self, tmp_path: Path) -> None:
         """ONNX output shape should match PyTorch model output."""
@@ -117,8 +117,8 @@ class TestOnnxExportRoundtrip:
         # ONNX output
         engine = OnnxSegmentationInference(onnx_path)
         onnx_result = engine.predict(example.numpy())
-        onnx_seg_shape = onnx_result["segmentation"].shape  # (1, 16, 16, 8)
-        onnx_prob_shape = onnx_result["probabilities"].shape  # (1, 2, 16, 16, 8)
+        onnx_seg_shape = onnx_result.segmentation.shape  # (1, 16, 16, 8)
+        onnx_prob_shape = onnx_result.probabilities.shape  # (1, 2, 16, 16, 8)
 
         assert onnx_prob_shape == tuple(pt_shape), (
             f"ONNX probs shape {onnx_prob_shape} != PyTorch {tuple(pt_shape)}"
@@ -142,9 +142,9 @@ class TestOnnxExportRoundtrip:
 
         engine = OnnxSegmentationInference(onnx_path)
         meta = engine.get_metadata()
-        assert "inputs" in meta
-        assert "outputs" in meta
-        assert len(meta["inputs"]) > 0
+        assert meta.inputs is not None
+        assert meta.outputs is not None
+        assert len(meta.inputs) > 0
 
 
 class TestBentoServiceStructure:
@@ -329,8 +329,8 @@ class TestOnnxServingIntegration:
         result = engine.predict(volume)
 
         # Validate output
-        seg = result["segmentation"]
-        probs = result["probabilities"]
+        seg = result.segmentation
+        probs = result.probabilities
         assert seg.shape == (1, 16, 16, 8)
         assert probs.shape == (1, 2, 16, 16, 8)
         assert seg.min() >= 0

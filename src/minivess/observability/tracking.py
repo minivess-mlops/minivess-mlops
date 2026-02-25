@@ -122,7 +122,7 @@ class ExperimentTracker:
 
     def log_model_info(self, model: ModelAdapter) -> None:
         """Log model configuration and parameter count."""
-        model_config = model.get_config()
+        model_config = model.get_config().to_dict()
         mlflow.log_params({f"model_{k}": str(v) for k, v in model_config.items()})
         mlflow.log_metric("trainable_parameters", model.trainable_parameters())
 

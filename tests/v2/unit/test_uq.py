@@ -9,7 +9,7 @@ import pytest
 import torch
 from torch import Tensor
 
-from minivess.adapters.base import ModelAdapter, SegmentationOutput
+from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 from minivess.config.models import ModelConfig, ModelFamily
 
 # ---------------------------------------------------------------------------
@@ -37,8 +37,8 @@ class _MockAdapter(ModelAdapter):
             metadata={"architecture": "mock"},
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {"name": "mock"}
+    def get_config(self) -> AdapterConfigInfo:
+        return AdapterConfigInfo(family="mock", name="mock")
 
     def load_checkpoint(self, path: object) -> None:
         pass

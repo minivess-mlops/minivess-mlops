@@ -7,7 +7,7 @@ import torch
 from monai.networks.nets import SwinUNETR as MonaiSwinUNETR
 from torch import Tensor
 
-from minivess.adapters.base import ModelAdapter, SegmentationOutput
+from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 from minivess.config.models import ModelConfig
 
 
@@ -41,17 +41,19 @@ class SwinUNETRAdapter(ModelAdapter):
             metadata={"architecture": "swinunetr"},
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "family": self.config.family.value,
-            "name": self.config.name,
-            "in_channels": self.config.in_channels,
-            "out_channels": self.config.out_channels,
-            "feature_size": self._feature_size,
-            "depths": (2, 2, 2, 2),
-            "num_heads": (3, 6, 12, 24),
-            "trainable_params": self.trainable_parameters(),
-        }
+    def get_config(self) -> AdapterConfigInfo:
+        return AdapterConfigInfo(
+            family=self.config.family.value,
+            name=self.config.name,
+            in_channels=self.config.in_channels,
+            out_channels=self.config.out_channels,
+            trainable_params=self.trainable_parameters(),
+            extras={
+                "feature_size": self._feature_size,
+                "depths": (2, 2, 2, 2),
+                "num_heads": (3, 6, 12, 24),
+            },
+        )
 
     def load_checkpoint(self, path: Path) -> None:
         state_dict = torch.load(path, map_location="cpu", weights_only=True)
