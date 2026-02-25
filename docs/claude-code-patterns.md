@@ -464,4 +464,112 @@ class TestBootstrapCIProperties:
 
 ---
 
-*Last updated: 2026-02-25 — Pattern 14 from property-based testing (793 tests, up from 662)*
+---
+
+## Pattern 15: Typed Returns as API Contracts (Module 9)
+
+**Context:** The 1st-pass code review identified 10+ methods returning `dict[str, Any]` — a common anti-pattern in Python ML code where structured data flows through untyped dictionaries.
+
+**What we did (R4.1):** Replaced all `dict[str, Any]` return types with dataclasses:
+
+```python
+# BEFORE — caller has no idea what keys exist
+def get_config(self) -> dict[str, Any]:
+    return {"family": "segresnet", "name": "SegResNet", "init_filters": 32, ...}
+
+# AFTER — IDE autocomplete, type checking, clear API
+@dataclass
+class AdapterConfigInfo:
+    family: str
+    name: str
+    in_channels: int | None = None
+    out_channels: int | None = None
+    trainable_params: int | None = None
+    extras: dict[str, Any] = field(default_factory=dict)  # adapter-specific fields
+
+    def to_dict(self) -> dict[str, Any]:
+        """Flatten to serializable dict for MLflow logging."""
+        d = {"family": self.family, "name": self.name}
+        if self.in_channels is not None:
+            d["in_channels"] = self.in_channels
+        d.update(self.extras)
+        return d
+```
+
+**Key design choice:** The `extras: dict[str, Any]` field handles adapter-specific data (e.g., `init_filters` for SegResNet, `lora_rank` for SAM3) without requiring a different dataclass per adapter. Common fields are typed; rare fields are in extras.
+
+**Cascading test fixes:** Changing return types broke 24 test assertions that used dict access (`cfg["family"]`). Each was mechanically updated to attribute access (`cfg.family`) or extras access (`cfg.extras["init_filters"]`). The LoRA adapter needed special handling — it extends the base config rather than creating its own:
+
+```python
+# LoRA adapter: extends base model's config
+def get_config(self) -> AdapterConfigInfo:
+    base_config = self._base_model.get_config()
+    base_config.extras.update({
+        "lora_rank": self._lora_rank,
+        "lora_alpha": self._lora_alpha,
+    })
+    return base_config
+```
+
+**Lesson:** Typed returns make refactoring safe — the type checker catches every call site that needs updating. With `dict[str, Any]`, bugs hide until runtime.
+
+---
+
+## Pattern 16: Iterative Multi-Pass Code Review (Module 8)
+
+**Context:** After completing the 1st-pass review remediation (R1-R4, 662 → 813 tests), we ran a 2nd-pass review to find remaining issues. This demonstrates the **diminishing returns** curve of code review.
+
+**What we did:**
+1. **1st pass** (662 tests): 6 agents found 42 issues (4 critical, 12 high). Rating: 7.5/10.
+2. **Remediation R1-R4**: Fixed all 42 issues, added 151 tests.
+3. **2nd pass** (813 tests): Same 6 agents found 31 issues (0 critical, 10 high). Rating: 8.5/10.
+
+**Diminishing returns curve:**
+```
+Pass 1: 42 issues (4 critical)  → remediation adds 151 tests
+Pass 2: 31 issues (0 critical)  → planned remediation adds ~91 tests
+Pass 3: (projected) ~15 issues  → diminishing value
+```
+
+**Key insight:** The 2nd pass found **different types of issues** than the 1st:
+- 1st pass: Dead code, missing seed management, untyped returns (structural problems)
+- 2nd pass: Adapter boilerplate duplication, test coverage gaps, CUDA determinism (polish problems)
+
+**When to stop:** When critical issues = 0 and the remaining issues are LOW/MEDIUM severity maintenance tasks. The cost of running another review pass (~$5 in API calls, ~5 min wall-clock) is low, but the implementation effort per issue found increases.
+
+**Real comparison table from the review:**
+
+| Metric | 1st Pass | 2nd Pass | Improvement |
+|--------|----------|----------|-------------|
+| Critical issues | 4 | 0 | -100% |
+| High issues | 12 | 10 | -17% |
+| Test count | 662 | 813 | +23% |
+| Rating | 7.5/10 | 8.5/10 | +13% |
+
+---
+
+## Pattern 17: StrEnum Discovery Module (Module 9)
+
+**Context:** The codebase defined 20 StrEnums across 16 different files. Developers couldn't discover which enums existed without grepping the entire codebase.
+
+**What we did (R4.2):** Created `utils/enums.py` as a centralized discovery/re-export module:
+
+```python
+# utils/enums.py — One-stop import for all project enums
+from minivess.adapters.adaptation_comparison import AdaptationMethod
+from minivess.compliance.iec62304 import SoftwareSafetyClass
+from minivess.config.models import EnsembleStrategy, ModelFamily
+from minivess.data.drift_synthetic import DriftType
+# ... 16 more imports
+
+# Enums stay defined in their domain modules (single source of truth)
+# This module just re-exports for discoverability
+```
+
+**Design principle:** Enums are *defined* where they conceptually belong (DriftType in data/drift_synthetic, ModelFamily in config/models). The registry module is read-only — it imports and re-exports, never defines.
+
+**Also fixed:** `DriftType(str, Enum)` → `DriftType(StrEnum)` — one enum was using the old Python 3.10 pattern instead of the 3.11+ StrEnum.
+
+---
+
+*Last updated: 2026-02-25 — Pattern 17 from 2nd-pass review (813 tests, up from 662)*
