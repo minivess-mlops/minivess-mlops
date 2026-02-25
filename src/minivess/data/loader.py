@@ -12,6 +12,8 @@ from minivess.data.transforms import build_train_transforms, build_val_transform
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from monai.transforms import Compose
+
     from minivess.config.models import DataConfig
 
 _DEFAULT_BATCH_SIZE: int = 2
@@ -105,6 +107,7 @@ def build_train_loader(
     *,
     batch_size: int = _DEFAULT_BATCH_SIZE,
     cache_rate: float = 0.5,
+    transforms: Compose | None = None,
 ) -> DataLoader:
     """Create training DataLoader with MONAI CacheDataset.
 
@@ -119,8 +122,12 @@ def build_train_loader(
         ``TrainingConfig.batch_size`` by the caller.
     cache_rate:
         Fraction of data to cache in memory (0.0-1.0).
+    transforms:
+        Optional pre-built MONAI transform pipeline. If provided,
+        overrides the default training transforms built from config.
     """
-    transforms = build_train_transforms(config)
+    if transforms is None:
+        transforms = build_train_transforms(config)
     dataset = CacheDataset(
         data=data_dicts,
         transform=transforms,
@@ -143,6 +150,7 @@ def build_val_loader(
     config: DataConfig,
     *,
     cache_rate: float = 1.0,
+    transforms: Compose | None = None,
 ) -> DataLoader:
     """Create validation DataLoader with full caching.
 
@@ -154,8 +162,12 @@ def build_val_loader(
         Data configuration with transform parameters.
     cache_rate:
         Fraction of data to cache in memory (0.0-1.0).
+    transforms:
+        Optional pre-built MONAI transform pipeline. If provided,
+        overrides the default validation transforms built from config.
     """
-    transforms = build_val_transforms(config)
+    if transforms is None:
+        transforms = build_val_transforms(config)
     dataset = CacheDataset(
         data=data_dicts,
         transform=transforms,

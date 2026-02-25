@@ -14,6 +14,8 @@ from minivess.pipeline.loss_functions import build_loss_function
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from torch import nn
+
     from minivess.adapters.base import ModelAdapter
     from minivess.config.models import TrainingConfig
     from minivess.observability.tracking import ExperimentTracker
@@ -34,6 +36,28 @@ class SegmentationTrainer:
 
     Supports mixed precision, gradient clipping, early stopping,
     and warmup + cosine annealing schedule.
+
+    Parameters
+    ----------
+    model:
+        ModelAdapter to train.
+    config:
+        Training configuration.
+    loss_name:
+        Name of the loss function to build (ignored if ``criterion`` is provided).
+    device:
+        Device to train on.
+    tracker:
+        Optional experiment tracker (e.g., MLflow).
+    criterion:
+        Optional pre-built loss function. If provided, ``loss_name`` is ignored.
+    optimizer:
+        Optional pre-built optimizer. If provided, the internal optimizer
+        builder is skipped.
+    scheduler:
+        Optional pre-built LR scheduler. If provided, the internal scheduler
+        builder is skipped. Note: if you inject a scheduler, you should also
+        inject its corresponding optimizer.
     """
 
     def __init__(
@@ -44,6 +68,9 @@ class SegmentationTrainer:
         loss_name: str = "dice_ce",
         device: str | torch.device = "cpu",
         tracker: ExperimentTracker | None = None,
+        criterion: nn.Module | None = None,
+        optimizer: torch.optim.Optimizer | None = None,
+        scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
     ) -> None:
         self.model = model
         self.config = config
@@ -51,9 +78,9 @@ class SegmentationTrainer:
         self.model.to(self.device)
         self.tracker = tracker
 
-        self.criterion = build_loss_function(loss_name)
-        self.optimizer = self._build_optimizer()
-        self.scheduler = self._build_scheduler()
+        self.criterion = criterion if criterion is not None else build_loss_function(loss_name)
+        self.optimizer = optimizer if optimizer is not None else self._build_optimizer()
+        self.scheduler = scheduler if scheduler is not None else self._build_scheduler()
         self.scaler = GradScaler(enabled=config.mixed_precision)
 
         self._best_val_loss = float("inf")
