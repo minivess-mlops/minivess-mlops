@@ -57,10 +57,18 @@ class MapieConformalSegmentation:
     ----------
     alpha:
         Significance level (e.g., 0.1 for 90% coverage).
+    random_state:
+        Random state for the internal LogisticRegression estimator.
+        Defaults to 42 for backward compatibility.
     """
 
-    def __init__(self, alpha: float = 0.1) -> None:
+    def __init__(
+        self,
+        alpha: float = 0.1,
+        random_state: int = 42,
+    ) -> None:
         self.alpha = alpha
+        self.random_state = random_state
         self._mapie_clf: SplitConformalClassifier | None = None
         self._n_classes: int | None = None
 
@@ -86,13 +94,15 @@ class MapieConformalSegmentation:
         n_volumes, n_classes = cal_probs.shape[:2]
         self._n_classes = n_classes
 
-        # Flatten: (N, C, D, H, W) → (N*D*H*W, C)
+        # Flatten: (N, C, D, H, W) -> (N*D*H*W, C)
         probs_flat = cal_probs.transpose(0, 2, 3, 4, 1).reshape(-1, n_classes)
         labels_flat = cal_labels.reshape(-1)
 
         # Train a simple LogisticRegression on the probs as features
         # This gives MAPIE a fitted estimator to wrap
-        base_clf = LogisticRegression(max_iter=200, random_state=42)
+        base_clf = LogisticRegression(
+            max_iter=200, random_state=self.random_state,
+        )
         base_clf.fit(probs_flat, labels_flat)
 
         # Create MAPIE wrapper and conformalize
@@ -132,7 +142,7 @@ class MapieConformalSegmentation:
         n_volumes, n_classes = test_probs.shape[:2]
         spatial = test_probs.shape[2:]
 
-        # Flatten: (B, C, D, H, W) → (B*D*H*W, C)
+        # Flatten: (B, C, D, H, W) -> (B*D*H*W, C)
         probs_flat = test_probs.transpose(0, 2, 3, 4, 1).reshape(-1, n_classes)
 
         # MAPIE predict_set returns (point_preds, pred_sets)
@@ -140,7 +150,7 @@ class MapieConformalSegmentation:
         _, pred_sets_raw = self._mapie_clf.predict_set(probs_flat)
         pred_sets_2d = pred_sets_raw[:, :, 0]  # (N, C) boolean
 
-        # Reshape back: (B*D*H*W, C) → (B, D, H, W, C) → (B, C, D, H, W)
+        # Reshape back: (B*D*H*W, C) -> (B, D, H, W, C) -> (B, C, D, H, W)
         pred_sets_5d = pred_sets_2d.reshape(n_volumes, *spatial, n_classes)
         pred_sets_5d = pred_sets_5d.transpose(0, 4, 1, 2, 3)
 

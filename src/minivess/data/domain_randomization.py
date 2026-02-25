@@ -13,6 +13,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 import numpy as np
+import torch
 from scipy.ndimage import gaussian_filter
 
 if TYPE_CHECKING:
@@ -44,7 +45,8 @@ class DomainRandomizationConfig:
     blur_sigma_range:
         Min/max sigma for Gaussian blur.
     seed:
-        Random seed for reproducibility.
+        Random seed for reproducibility. When ``None``, falls back to
+        ``torch.initial_seed()`` for deterministic behavior.
     """
 
     intensity_range: tuple[float, float] = (0.7, 1.3)
@@ -52,6 +54,23 @@ class DomainRandomizationConfig:
     contrast_range: tuple[float, float] = (0.5, 2.0)
     blur_sigma_range: tuple[float, float] = (0.0, 1.0)
     seed: int | None = None
+
+
+def _resolve_seed(seed: int | None) -> int:
+    """Resolve seed, falling back to torch.initial_seed() when None.
+
+    Parameters
+    ----------
+    seed:
+        Explicit seed or None.
+
+    Returns
+    -------
+    Resolved integer seed.
+    """
+    if seed is not None:
+        return seed
+    return int(torch.initial_seed() % (2**31))
 
 
 class SyntheticVesselGenerator:
@@ -160,6 +179,9 @@ class DomainRandomizationPipeline:
     Applies intensity scaling, contrast adjustment, noise injection,
     and Gaussian blur in sequence to create domain-randomized samples.
 
+    When ``config.seed`` is None, falls back to ``torch.initial_seed()``
+    so that determinism is preserved when a global torch seed is set.
+
     Parameters
     ----------
     config:
@@ -168,8 +190,9 @@ class DomainRandomizationPipeline:
 
     def __init__(self, config: DomainRandomizationConfig) -> None:
         self.config = config
-        self._generator = SyntheticVesselGenerator(seed=config.seed)
-        self._rng = np.random.default_rng(config.seed)
+        self.resolved_seed: int = _resolve_seed(config.seed)
+        self._generator = SyntheticVesselGenerator(seed=self.resolved_seed)
+        self._rng = np.random.default_rng(self.resolved_seed)
 
     def apply(
         self, volume: NDArray, mask: NDArray,
@@ -229,10 +252,10 @@ class DomainRandomizationPipeline:
         for i in range(n):
             # Use different sub-seed per sample
             self._generator = SyntheticVesselGenerator(
-                seed=(self.config.seed or 0) + i + 1,
+                seed=self.resolved_seed + i + 1,
             )
             self._rng = np.random.default_rng(
-                (self.config.seed or 0) + i + 1,
+                self.resolved_seed + i + 1,
             )
             aug_vol, aug_mask = self.apply(volume, mask)
             batch.append((aug_vol, aug_mask))
@@ -254,7 +277,7 @@ class DomainRandomizationPipeline:
             f"| Contrast (gamma) | {self.config.contrast_range} |",
             f"| Noise std | {self.config.noise_std_range} |",
             f"| Blur sigma | {self.config.blur_sigma_range} |",
-            f"| Seed | {self.config.seed} |",
+            f"| Seed | {self.config.seed} (resolved: {self.resolved_seed}) |",
             "",
             "## Pipeline Steps",
             "",

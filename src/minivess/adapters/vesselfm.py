@@ -10,6 +10,7 @@ Universal 3D Blood Vessel Segmentation." CVPR 2025. arxiv:2411.17386
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +31,30 @@ logger = logging.getLogger(__name__)
 VESSELFM_FILTERS: list[int] = [32, 64, 128, 256, 320, 320]
 VESSELFM_HF_REPO = "bwittmann/vesselFM"
 VESSELFM_HF_FILENAME = "vesselFM_base.pt"
+
+# SHA256 checksum for the official vesselFM_base.pt weights (v1.0).
+# Obtained from: sha256sum vesselFM_base.pt
+VESSELFM_WEIGHT_SHA256 = (
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+)
+
+
+def verify_checksum(data: bytes, expected_sha256: str) -> bool:
+    """Verify SHA256 checksum of binary data.
+
+    Parameters
+    ----------
+    data:
+        Raw bytes to hash (e.g., file content).
+    expected_sha256:
+        Expected lowercase hex SHA256 digest (64 chars).
+
+    Returns
+    -------
+    True if the computed hash matches the expected hash.
+    """
+    computed = hashlib.sha256(data).hexdigest()
+    return computed == expected_sha256
 
 
 class VesselFMAdapter(ModelAdapter):
