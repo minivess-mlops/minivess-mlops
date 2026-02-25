@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -11,6 +12,14 @@ from torch.optim import SGD, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
 from minivess.pipeline.loss_functions import build_loss_function
+from minivess.pipeline.multi_metric_tracker import (
+    MetricCheckpoint,
+    MetricDirection,
+    MetricHistory,
+    MetricTracker,
+    MultiMetricTracker,
+    save_metric_checkpoint,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -31,6 +40,43 @@ class EpochResult:
 
     loss: float
     metrics: dict[str, float] = field(default_factory=dict)
+
+
+def _build_multi_tracker(config: TrainingConfig) -> MultiMetricTracker:
+    """Build a :class:`MultiMetricTracker` from :class:`TrainingConfig`.
+
+    Parameters
+    ----------
+    config:
+        Training configuration containing ``checkpoint`` sub-config.
+
+    Returns
+    -------
+    MultiMetricTracker
+        Ready-to-use tracker built from ``config.checkpoint``.
+    """
+    ckpt_cfg = config.checkpoint
+    trackers: list[MetricTracker] = []
+    for m in ckpt_cfg.tracked_metrics:
+        direction = (
+            MetricDirection.MINIMIZE
+            if m.direction == "minimize"
+            else MetricDirection.MAXIMIZE
+        )
+        trackers.append(
+            MetricTracker(
+                name=m.name,
+                direction=direction,
+                patience=m.patience,
+                min_delta=ckpt_cfg.min_delta,
+            )
+        )
+    return MultiMetricTracker(
+        trackers=trackers,
+        primary_metric=ckpt_cfg.primary_metric,
+        early_stopping_strategy=ckpt_cfg.early_stopping_strategy,
+        min_epochs=ckpt_cfg.min_epochs,
+    )
 
 
 class SegmentationTrainer:
@@ -87,13 +133,15 @@ class SegmentationTrainer:
         self.metrics = metrics
         self.val_roi_size = val_roi_size
 
-        self.criterion = criterion if criterion is not None else build_loss_function(loss_name)
+        self.criterion = (
+            criterion if criterion is not None else build_loss_function(loss_name)
+        )
         self.optimizer = optimizer if optimizer is not None else self._build_optimizer()
         self.scheduler = scheduler if scheduler is not None else self._build_scheduler()
         self.scaler = GradScaler(enabled=config.mixed_precision)
 
-        self._best_val_loss = float("inf")
-        self._patience_counter = 0
+        self._multi_tracker: MultiMetricTracker = _build_multi_tracker(config)
+        self._metric_history: MetricHistory = MetricHistory()
 
     def _build_optimizer(self) -> torch.optim.Optimizer:
         """Build the optimizer from training config."""
@@ -249,7 +297,10 @@ class SegmentationTrainer:
         *,
         checkpoint_dir: Path | None = None,
     ) -> dict[str, Any]:
-        """Full training loop with early stopping.
+        """Full training loop with multi-metric early stopping.
+
+        Uses :class:`MultiMetricTracker` built from ``config.checkpoint`` to
+        determine when improvement has occurred and when to early-stop.
 
         Parameters
         ----------
@@ -258,25 +309,40 @@ class SegmentationTrainer:
         val_loader:
             Validation DataLoader.
         checkpoint_dir:
-            Directory for saving best model checkpoints. If ``None``,
-            no checkpoints are saved.
+            Directory for saving checkpoints. If ``None``, no checkpoints
+            are saved (metric history will still be tracked in-memory).
 
         Returns
         -------
         dict[str, Any]
-            Summary with ``best_val_loss``, ``final_epoch``, and ``history``.
+            Summary with ``best_val_loss`` (backward compat), ``final_epoch``,
+            ``history``, and ``best_metrics``.
         """
         history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
         final_epoch = 0
+        ckpt_cfg = self.config.checkpoint
+        epoch_start_time = time.perf_counter()
 
         for epoch in range(self.config.max_epochs):
+            t0 = time.perf_counter()
             train_result = self.train_epoch(train_loader)
             val_result = self.validate_epoch(val_loader)
             self.scheduler.step()
+            epoch_wall_time = time.perf_counter() - t0
 
             history["train_loss"].append(train_result.loss)
             history["val_loss"].append(val_result.loss)
             final_epoch = epoch + 1
+
+            # Build full metric dict for this epoch
+            all_metrics: dict[str, float] = {
+                "train_loss": train_result.loss,
+                "val_loss": val_result.loss,
+            }
+            for k, v in train_result.metrics.items():
+                all_metrics[f"train_{k}"] = v
+            for k, v in val_result.metrics.items():
+                all_metrics[f"val_{k}"] = v
 
             current_lr = self.optimizer.param_groups[0]["lr"]
             logger.info(
@@ -288,7 +354,7 @@ class SegmentationTrainer:
                 current_lr,
             )
 
-            # Log to MLflow if tracker is present
+            # Log to MLflow / experiment tracker if present
             if self.tracker is not None:
                 epoch_log: dict[str, float] = {
                     "train_loss": train_result.loss,
@@ -301,30 +367,111 @@ class SegmentationTrainer:
                     epoch_log[f"val_{k}"] = v
                 self.tracker.log_epoch_metrics(epoch_log, step=epoch + 1)
 
-            # Early stopping + best checkpoint
-            if val_result.loss < self._best_val_loss:
-                self._best_val_loss = val_result.loss
-                self._patience_counter = 0
-                if checkpoint_dir is not None:
-                    best_path = checkpoint_dir / "best_model.pth"
-                    self.model.save_checkpoint(best_path)
-                    logger.info("Saved best checkpoint to %s", best_path)
+            # Update multi-metric tracker and save per-metric best checkpoints
+            improved_metrics = self._multi_tracker.update(all_metrics, epoch)
+            cumulative_wall_time = time.perf_counter() - epoch_start_time
+
+            if checkpoint_dir is not None and improved_metrics:
+                checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                for metric_name in improved_metrics:
+                    tracker_obj = next(
+                        t for t in self._multi_tracker.trackers if t.name == metric_name
+                    )
+                    ckpt_meta = MetricCheckpoint(
+                        epoch=epoch,
+                        metrics=all_metrics,
+                        metric_name=metric_name,
+                        metric_value=all_metrics.get(metric_name, float("nan")),
+                        metric_direction=tracker_obj.direction.value,
+                        train_loss=train_result.loss,
+                        val_loss=val_result.loss,
+                        wall_time_sec=cumulative_wall_time,
+                        config_snapshot=self.config.model_dump(mode="json"),
+                    )
+                    safe_name = metric_name.replace("/", "_")
+                    best_path = checkpoint_dir / f"best_{safe_name}.pth"
+                    save_metric_checkpoint(
+                        path=best_path,
+                        model_state_dict=self.model.state_dict(),
+                        optimizer_state_dict=self.optimizer.state_dict(),
+                        scheduler_state_dict=self.scheduler.state_dict(),
+                        checkpoint=ckpt_meta,
+                    )
+                    logger.info(
+                        "Saved best checkpoint for '%s' to %s", metric_name, best_path
+                    )
                     if self.tracker is not None:
                         self.tracker.log_artifact(
                             best_path, artifact_path="checkpoints"
                         )
-            else:
-                self._patience_counter += 1
-                if self._patience_counter >= self.config.early_stopping_patience:
-                    logger.info(
-                        "Early stopping at epoch %d (patience=%d)",
-                        epoch + 1,
-                        self.config.early_stopping_patience,
-                    )
-                    break
+
+            # Save last.pth if configured
+            if checkpoint_dir is not None and ckpt_cfg.save_last:
+                checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                last_ckpt_meta = MetricCheckpoint(
+                    epoch=epoch,
+                    metrics=all_metrics,
+                    metric_name="last",
+                    metric_value=val_result.loss,
+                    metric_direction="minimize",
+                    train_loss=train_result.loss,
+                    val_loss=val_result.loss,
+                    wall_time_sec=cumulative_wall_time,
+                    config_snapshot=self.config.model_dump(mode="json"),
+                )
+                last_path = checkpoint_dir / "last.pth"
+                save_metric_checkpoint(
+                    path=last_path,
+                    model_state_dict=self.model.state_dict(),
+                    optimizer_state_dict=self.optimizer.state_dict(),
+                    scheduler_state_dict=self.scheduler.state_dict(),
+                    checkpoint=last_ckpt_meta,
+                )
+
+            # Record epoch in history
+            self._metric_history.record_epoch(
+                epoch=epoch,
+                metrics=all_metrics,
+                wall_time_sec=epoch_wall_time,
+                checkpoints_saved=improved_metrics,
+            )
+
+            # Save metric_history.json if configured
+            if checkpoint_dir is not None and ckpt_cfg.save_history:
+                checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                self._metric_history.save_json(checkpoint_dir / "metric_history.json")
+
+            # Early stopping decision via MultiMetricTracker
+            if self._multi_tracker.should_stop(epoch):
+                logger.info(
+                    "Early stopping at epoch %d (strategy=%s)",
+                    epoch + 1,
+                    ckpt_cfg.early_stopping_strategy,
+                )
+                break
+
+        # Backward-compatible best_val_loss: use primary tracker's best value
+        # when primary metric is val_loss, otherwise fall back to best val_loss tracker
+        primary_tracker = self._multi_tracker.get_primary_tracker()
+        if primary_tracker.name == "val_loss":
+            best_val_loss = primary_tracker.best_value
+        else:
+            # Try to find a val_loss tracker
+            val_loss_trackers = [
+                t for t in self._multi_tracker.trackers if t.name == "val_loss"
+            ]
+            best_val_loss = (
+                val_loss_trackers[0].best_value
+                if val_loss_trackers
+                else primary_tracker.best_value
+            )
 
         return {
-            "best_val_loss": self._best_val_loss,
+            "best_val_loss": best_val_loss,
             "final_epoch": final_epoch,
             "history": history,
+            "best_metrics": {
+                tracker.name: tracker.best_value
+                for tracker in self._multi_tracker.trackers
+            },
         }
