@@ -76,6 +76,49 @@ class ModelAdapter(ABC, nn.Module):
         """Return model configuration as a typed dataclass."""
         ...
 
+    def _build_output(self, logits: Tensor, architecture: str) -> SegmentationOutput:
+        """Build a standardized SegmentationOutput from raw logits.
+
+        Applies softmax along dim=1 and wraps the result with metadata.
+        Subclasses with standard forward logic can call this instead of
+        manually constructing SegmentationOutput.
+
+        Args:
+            logits: Raw model output tensor (B, C, D, H, W).
+            architecture: Architecture name for metadata.
+
+        Returns:
+            SegmentationOutput with softmax predictions and raw logits.
+        """
+        prediction = torch.softmax(logits, dim=1)
+        return SegmentationOutput(
+            prediction=prediction,
+            logits=logits,
+            metadata={"architecture": architecture},
+        )
+
+    def _build_config(self, **extras: Any) -> AdapterConfigInfo:
+        """Build an AdapterConfigInfo from self.config and extras.
+
+        Auto-populates family, name, in_channels, out_channels, and
+        trainable_params from ``self.config`` and ``self.trainable_parameters()``.
+        Any keyword arguments are placed in the ``extras`` dict.
+
+        Args:
+            **extras: Adapter-specific configuration fields.
+
+        Returns:
+            AdapterConfigInfo with common fields auto-populated.
+        """
+        return AdapterConfigInfo(
+            family=self.config.family.value,
+            name=self.config.name,
+            in_channels=self.config.in_channels,
+            out_channels=self.config.out_channels,
+            trainable_params=self.trainable_parameters(),
+            extras=dict(extras),
+        )
+
     def load_checkpoint(self, path: Path) -> None:
         """Load model weights from a checkpoint file.
 

@@ -10,13 +10,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import torch
 from monai.networks.nets import DynUNet as MonaiDynUNet
-from torch import Tensor
 
 from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 
 if TYPE_CHECKING:
+    from torch import Tensor
 
     from minivess.config.models import ModelConfig
 
@@ -51,10 +50,10 @@ class DynUNetAdapter(ModelAdapter):
 
         n_levels = len(self.filters)
 
-        # Kernel sizes: 3×3×3 at each level
+        # Kernel sizes: 3x3x3 at each level
         kernel_size = [[3, 3, 3]] * n_levels
 
-        # Strides: first is identity, rest are 2×2×2 downsampling
+        # Strides: first is identity, rest are 2x2x2 downsampling
         strides = [[1, 1, 1]] + [[2, 2, 2]] * (n_levels - 1)
 
         # Upsample kernels match downsampling strides (skip first)
@@ -93,25 +92,12 @@ class DynUNetAdapter(ModelAdapter):
         else:
             logits = output
 
-        prediction = torch.softmax(logits, dim=1)
-
-        return SegmentationOutput(
-            prediction=prediction,
-            logits=logits,
-            metadata={"architecture": "dynunet"},
-        )
+        return self._build_output(logits, "dynunet")
 
     def get_config(self) -> AdapterConfigInfo:
-        return AdapterConfigInfo(
-            family=self.config.family.value,
-            name=self.config.name,
-            in_channels=self.config.in_channels,
-            out_channels=self.config.out_channels,
-            trainable_params=self.trainable_parameters(),
-            extras={
-                "filters": self.filters,
-                "deep_supervision": self._deep_supervision,
-            },
+        return self._build_config(
+            filters=self.filters,
+            deep_supervision=self._deep_supervision,
         )
 
     # load_checkpoint, save_checkpoint, trainable_parameters, export_onnx

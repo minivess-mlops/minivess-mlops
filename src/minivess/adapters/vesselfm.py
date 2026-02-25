@@ -130,31 +130,21 @@ class VesselFMAdapter(ModelAdapter):
         Returns
         -------
         SegmentationOutput with 2-class softmax predictions.
+
+        Note: Uses custom logic (binary-to-2-class conversion) rather
+        than the standard _build_output helper.
         """
         # vesselFM outputs (B, 1, D, H, W) binary logits
         binary_logits = self.net(images)
 
         # Convert to 2-class: [background, foreground]
         logits = torch.cat([-binary_logits, binary_logits], dim=1)
-        prediction = torch.softmax(logits, dim=1)
-
-        return SegmentationOutput(
-            prediction=prediction,
-            logits=logits,
-            metadata={"architecture": "vesselfm"},
-        )
+        return self._build_output(logits, "vesselfm")
 
     def get_config(self) -> AdapterConfigInfo:
-        return AdapterConfigInfo(
-            family=self.config.family.value,
-            name=self.config.name,
-            in_channels=self.config.in_channels,
-            out_channels=self.config.out_channels,
-            trainable_params=self.trainable_parameters(),
-            extras={
-                "architecture": "vesselfm",
-                "filters": VESSELFM_FILTERS,
-            },
+        return self._build_config(
+            architecture="vesselfm",
+            filters=VESSELFM_FILTERS,
         )
 
     # load_checkpoint, save_checkpoint, trainable_parameters, export_onnx

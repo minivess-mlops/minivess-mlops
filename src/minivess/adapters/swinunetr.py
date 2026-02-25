@@ -1,14 +1,18 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 from monai.networks.nets import SwinUNETR as MonaiSwinUNETR
-from torch import Tensor
 
 from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
-from minivess.config.models import ModelConfig
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from torch import Tensor
+
+    from minivess.config.models import ModelConfig
 
 
 class SwinUNETRAdapter(ModelAdapter):
@@ -34,25 +38,13 @@ class SwinUNETRAdapter(ModelAdapter):
 
     def forward(self, images: Tensor, **kwargs: Any) -> SegmentationOutput:
         logits = self.net(images)
-        prediction = torch.softmax(logits, dim=1)
-        return SegmentationOutput(
-            prediction=prediction,
-            logits=logits,
-            metadata={"architecture": "swinunetr"},
-        )
+        return self._build_output(logits, "swinunetr")
 
     def get_config(self) -> AdapterConfigInfo:
-        return AdapterConfigInfo(
-            family=self.config.family.value,
-            name=self.config.name,
-            in_channels=self.config.in_channels,
-            out_channels=self.config.out_channels,
-            trainable_params=self.trainable_parameters(),
-            extras={
-                "feature_size": self._feature_size,
-                "depths": (2, 2, 2, 2),
-                "num_heads": (3, 6, 12, 24),
-            },
+        return self._build_config(
+            feature_size=self._feature_size,
+            depths=(2, 2, 2, 2),
+            num_heads=(3, 6, 12, 24),
         )
 
     # load_checkpoint, save_checkpoint, trainable_parameters inherited from base.

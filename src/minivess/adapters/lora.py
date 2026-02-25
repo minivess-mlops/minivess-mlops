@@ -102,7 +102,11 @@ class LoraModelAdapter(ModelAdapter):
         return targets
 
     def forward(self, images: Tensor, **kwargs: Any) -> SegmentationOutput:
-        """Run forward pass through LoRA-adapted model."""
+        """Run forward pass through LoRA-adapted model.
+
+        Note: Uses custom logic (PEFT model wrapping) rather than the
+        standard _build_output helper for the non-PEFT fallback path.
+        """
         if self._peft_model is not None:
             output = self._peft_model(images)
             logits = output[0] if isinstance(output, (list, tuple)) else output
@@ -110,12 +114,7 @@ class LoraModelAdapter(ModelAdapter):
             result = self._base_model(images, **kwargs)
             return result
 
-        prediction = torch.softmax(logits, dim=1)
-        return SegmentationOutput(
-            prediction=prediction,
-            logits=logits,
-            metadata={"architecture": "lora_adapted"},
-        )
+        return self._build_output(logits, "lora_adapted")
 
     def get_config(self) -> AdapterConfigInfo:
         base_config = self._base_model.get_config()

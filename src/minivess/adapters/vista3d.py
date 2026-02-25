@@ -9,13 +9,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import torch
 from monai.networks.nets import SegResNetDS2
-from torch import Tensor
 
 from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 
 if TYPE_CHECKING:
+    from torch import Tensor
 
     from minivess.config.models import ModelConfig
 
@@ -50,24 +49,12 @@ class Vista3dAdapter(ModelAdapter):
         output = self.net(images)
         # SegResNetDS2 with dsdepth=1 returns a list of [main_output]
         logits = output[0] if isinstance(output, (list, tuple)) else output
-        prediction = torch.softmax(logits, dim=1)
-        return SegmentationOutput(
-            prediction=prediction,
-            logits=logits,
-            metadata={"architecture": "vista3d"},
-        )
+        return self._build_output(logits, "vista3d")
 
     def get_config(self) -> AdapterConfigInfo:
-        return AdapterConfigInfo(
-            family=self.config.family.value,
-            name=self.config.name,
-            in_channels=self.config.in_channels,
-            out_channels=self.config.out_channels,
-            trainable_params=self.trainable_parameters(),
-            extras={
-                "init_filters": 32,
-                "blocks_down": (1, 2, 2, 4),
-            },
+        return self._build_config(
+            init_filters=32,
+            blocks_down=(1, 2, 2, 4),
         )
 
     # load_checkpoint, save_checkpoint, trainable_parameters, export_onnx

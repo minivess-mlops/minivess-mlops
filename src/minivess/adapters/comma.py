@@ -159,19 +159,19 @@ class CoordinateEmbedding(nn.Module):
 class _CommaEncoderBlock(nn.Module):
     """COMMA encoder block: Conv3d + CoordinateEmbedding + MambaBlock."""
 
-    def __init__(self, in_ch: int, out_ch: int, d_state: int) -> None:
+    def __init__(self, in_channels: int, out_channels: int, d_state: int) -> None:
         super().__init__()
         self.conv = nn.Sequential(
-            nn.Conv3d(in_ch, out_ch, kernel_size=3, padding=1, bias=False),
-            nn.InstanceNorm3d(out_ch),
+            nn.Conv3d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.InstanceNorm3d(out_channels),
             nn.SiLU(),
-            nn.Conv3d(out_ch, out_ch, kernel_size=3, padding=1, bias=False),
-            nn.InstanceNorm3d(out_ch),
+            nn.Conv3d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.InstanceNorm3d(out_channels),
             nn.SiLU(),
         )
-        self.coord_embed = CoordinateEmbedding(out_ch)
-        self.mamba = MambaBlock(d_model=out_ch, d_state=d_state)
-        self.downsample = nn.Conv3d(out_ch, out_ch, kernel_size=2, stride=2)
+        self.coord_embed = CoordinateEmbedding(out_channels)
+        self.mamba = MambaBlock(d_model=out_channels, d_state=d_state)
+        self.downsample = nn.Conv3d(out_channels, out_channels, kernel_size=2, stride=2)
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Return (downsampled, skip_connection)."""
@@ -192,17 +192,17 @@ class _CommaEncoderBlock(nn.Module):
 class _CommaDecoderBlock(nn.Module):
     """COMMA decoder block: Upsample + skip + Conv3d."""
 
-    def __init__(self, in_ch: int, skip_ch: int, out_ch: int) -> None:
+    def __init__(self, in_channels: int, skip_channels: int, out_channels: int) -> None:
         super().__init__()
         self.upsample = nn.ConvTranspose3d(
-            in_ch, in_ch, kernel_size=2, stride=2,
+            in_channels, in_channels, kernel_size=2, stride=2,
         )
         self.conv = nn.Sequential(
-            nn.Conv3d(in_ch + skip_ch, out_ch, kernel_size=3, padding=1, bias=False),
-            nn.InstanceNorm3d(out_ch),
+            nn.Conv3d(in_channels + skip_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.InstanceNorm3d(out_channels),
             nn.SiLU(),
-            nn.Conv3d(out_ch, out_ch, kernel_size=3, padding=1, bias=False),
-            nn.InstanceNorm3d(out_ch),
+            nn.Conv3d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.InstanceNorm3d(out_channels),
             nn.SiLU(),
         )
 
@@ -286,25 +286,12 @@ class CommaAdapter(ModelAdapter):
         x = self.dec1(x, skip1)
 
         logits = self.head(x)
-        prediction = torch.softmax(logits, dim=1)
-
-        return SegmentationOutput(
-            prediction=prediction,
-            logits=logits,
-            metadata={"architecture": "comma_mamba"},
-        )
+        return self._build_output(logits, "comma_mamba")
 
     def get_config(self) -> AdapterConfigInfo:
-        return AdapterConfigInfo(
-            family=self.config.family.value,
-            name=self.config.name,
-            in_channels=self.config.in_channels,
-            out_channels=self.config.out_channels,
-            trainable_params=self.trainable_parameters(),
-            extras={
-                "init_filters": self.init_filters,
-                "d_state": self.d_state,
-            },
+        return self._build_config(
+            init_filters=self.init_filters,
+            d_state=self.d_state,
         )
 
     def load_checkpoint(self, path: Path) -> None:
