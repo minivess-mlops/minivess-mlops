@@ -30,6 +30,18 @@ from minivess.pipeline.hpo import (
 )
 from minivess.pipeline.loss_functions import build_loss_function
 from minivess.pipeline.metrics import MetricResult, SegmentationMetrics
+from minivess.pipeline.preflight import (
+    CheckStatus,
+    PreflightCheck,
+    PreflightResult,
+    check_data_exists,
+    check_disk_space,
+    check_gpu,
+    check_ram,
+    check_swap,
+    detect_environment,
+    run_preflight,
+)
 from minivess.pipeline.segmentation_qc import (
     QCFlag,
     QCResult,
@@ -56,14 +68,24 @@ __all__ = [
     "SegmentationMetrics",
     "SegmentationQC",
     "SegmentationTrainer",
+    "CheckStatus",
+    "PreflightCheck",
+    "PreflightResult",
     "bca_bootstrap_ci",
     "bootstrap_ci",
     "build_ablation_grid",
     "build_loss_function",
     "build_trial_config",
-    "compute_metrics_with_ci",
     "build_study",
-    "evaluate_segmentation_quality",
     "build_objective",
+    "check_data_exists",
+    "check_disk_space",
+    "check_gpu",
+    "check_ram",
+    "check_swap",
+    "compute_metrics_with_ci",
+    "detect_environment",
+    "evaluate_segmentation_quality",
     "run_hpo",
+    "run_preflight",
 ]
