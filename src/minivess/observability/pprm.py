@@ -161,7 +161,7 @@ class PPRMDetector:
             deployment_predictions - self._cal_pred_mean
         )
         proxy_mean = float(np.mean(proxy_risk))
-        proxy_var = float(np.var(proxy_risk, ddof=1))
+        proxy_var = float(np.var(proxy_risk, ddof=1)) if n_deploy > 1 else 0.0
 
         # Prediction-powered risk estimate
         risk = proxy_mean + self._rectifier
