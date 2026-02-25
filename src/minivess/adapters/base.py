@@ -62,12 +62,16 @@ class ModelAdapter(ABC, nn.Module):
     def forward(self, images: Tensor, **kwargs: Any) -> SegmentationOutput:
         """Run inference on a batch of 3D volumes.
 
-        Args:
-            images: Input tensor of shape (B, C, D, H, W).
-            **kwargs: Model-specific parameters (e.g., prompts for SAMv3).
+        Parameters
+        ----------
+        images:
+            Input tensor of shape (B, C, D, H, W).
+        **kwargs:
+            Model-specific parameters (e.g., prompts for SAMv3).
 
-        Returns:
-            SegmentationOutput with predictions and raw logits.
+        Returns
+        -------
+        SegmentationOutput with predictions and raw logits.
         """
         ...
 
@@ -83,12 +87,16 @@ class ModelAdapter(ABC, nn.Module):
         Subclasses with standard forward logic can call this instead of
         manually constructing SegmentationOutput.
 
-        Args:
-            logits: Raw model output tensor (B, C, D, H, W).
-            architecture: Architecture name for metadata.
+        Parameters
+        ----------
+        logits:
+            Raw model output tensor (B, C, D, H, W).
+        architecture:
+            Architecture name for metadata.
 
-        Returns:
-            SegmentationOutput with softmax predictions and raw logits.
+        Returns
+        -------
+        SegmentationOutput with softmax predictions and raw logits.
         """
         prediction = torch.softmax(logits, dim=1)
         return SegmentationOutput(
@@ -104,11 +112,14 @@ class ModelAdapter(ABC, nn.Module):
         trainable_params from ``self.config`` and ``self.trainable_parameters()``.
         Any keyword arguments are placed in the ``extras`` dict.
 
-        Args:
-            **extras: Adapter-specific configuration fields.
+        Parameters
+        ----------
+        **extras:
+            Adapter-specific configuration fields.
 
-        Returns:
-            AdapterConfigInfo with common fields auto-populated.
+        Returns
+        -------
+        AdapterConfigInfo with common fields auto-populated.
         """
         return AdapterConfigInfo(
             family=self.config.family.value,

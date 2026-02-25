@@ -7,6 +7,11 @@ requiring custom CUDA kernels.
 
 Reference: Shi et al. (2025). "COMMA: Coordinate Mamba Architecture for
 Vessel Segmentation." arxiv:2503.02332
+
+R5.18 assessment (333 lines): This module contains tightly coupled components
+(MambaBlock, CoordinateEmbedding, encoder/decoder blocks, CommaAdapter) that
+form a single architecture. Splitting would fragment a cohesive neural network
+definition — no action required.
 """
 
 from __future__ import annotations

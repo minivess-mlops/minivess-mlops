@@ -65,12 +65,16 @@ def build_demo(
 ) -> Any:
     """Create and return a Gradio demo interface.
 
-    Args:
-        model_path: Path to ONNX model. If None, uses a dummy predictor.
-        share: Whether to create a public Gradio link.
+    Parameters
+    ----------
+    model_path:
+        Path to ONNX model. If None, uses a dummy predictor.
+    share:
+        Whether to create a public Gradio link.
 
-    Returns:
-        Gradio Blocks interface.
+    Returns
+    -------
+    Gradio Blocks interface.
     """
     import gradio as gr
 

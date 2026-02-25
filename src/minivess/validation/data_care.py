@@ -6,6 +6,10 @@ consistency, uniqueness, timeliness, and representativeness.
 
 Reference: van Twist et al. (2026). "DATA-CARE: Comprehensive Data Quality
 Assessment Tool for Medical AI."
+
+R5.18 assessment (333 lines): Six private scoring functions + two public
+assessment entrypoints + one gate converter. All operate on the same
+DataQualityReport/DimensionScore model — logically cohesive. No split needed.
 """
 
 from __future__ import annotations

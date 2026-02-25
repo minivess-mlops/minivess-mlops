@@ -85,14 +85,18 @@ def greedy_soup(
     Based on Wortsman et al., "Model soups: averaging weights of multiple
     fine-tuned models improves accuracy without increasing inference time."
 
-    Args:
-        models: List of fine-tuned model adapters (sorted by val metric).
-        val_metric_fn: Callable(model, val_loader) -> float metric
-            (higher is better).
-        val_loader: Validation data loader.
+    Parameters
+    ----------
+    models:
+        List of fine-tuned model adapters (sorted by val metric).
+    val_metric_fn:
+        Callable(model, val_loader) -> float metric (higher is better).
+    val_loader:
+        Validation data loader.
 
-    Returns:
-        State dict of the best greedy soup.
+    Returns
+    -------
+    State dict of the best greedy soup.
     """
     if not models:
         msg = "Need at least one model for greedy soup"

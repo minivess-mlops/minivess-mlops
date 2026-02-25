@@ -83,6 +83,7 @@ class ExperimentTracker:
         }
         if tags:
             merged_tags.update(tags)
+        merged_tags = dict(sorted(merged_tags.items()))
 
         with mlflow.start_run(run_name=effective_name, tags=merged_tags) as run:
             self._run_id = run.info.run_id
@@ -117,13 +118,17 @@ class ExperimentTracker:
         prefix: str = "",
     ) -> None:
         """Log metrics for a training/validation epoch."""
-        prefixed = {f"{prefix}{k}" if prefix else k: v for k, v in metrics.items()}
+        prefixed = dict(sorted(
+            {f"{prefix}{k}" if prefix else k: v for k, v in metrics.items()}.items()
+        ))
         mlflow.log_metrics(prefixed, step=step)
 
     def log_model_info(self, model: ModelAdapter) -> None:
         """Log model configuration and parameter count."""
         model_config = model.get_config().to_dict()
-        mlflow.log_params({f"model_{k}": str(v) for k, v in model_config.items()})
+        mlflow.log_params(dict(sorted(
+            {f"model_{k}": str(v) for k, v in model_config.items()}.items()
+        )))
         mlflow.log_metric("trainable_parameters", model.trainable_parameters())
 
     def log_artifact(self, local_path: Path, *, artifact_path: str = "") -> None:

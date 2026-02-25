@@ -35,11 +35,14 @@ class SegmentationService:
     def predict(self, volume: NDArray[np.float32]) -> dict[str, Any]:
         """Run segmentation on a 3D volume.
 
-        Args:
-            volume: Input volume, shape (D, H, W) or (C, D, H, W).
+        Parameters
+        ----------
+        volume:
+            Input volume, shape (D, H, W) or (C, D, H, W).
 
-        Returns:
-            Dict with 'segmentation' (integer labels) and 'probabilities'.
+        Returns
+        -------
+        Dict with 'segmentation' (integer labels) and 'probabilities'.
         """
         import torch
 
