@@ -23,9 +23,9 @@ from minivess.pipeline.federated import (
 )
 from minivess.pipeline.hpo import (
     SearchSpace,
+    build_objective,
+    build_study,
     build_trial_config,
-    create_study,
-    make_objective,
     run_hpo,
 )
 from minivess.pipeline.loss_functions import build_loss_function
@@ -62,8 +62,8 @@ __all__ = [
     "build_loss_function",
     "build_trial_config",
     "compute_metrics_with_ci",
-    "create_study",
+    "build_study",
     "evaluate_segmentation_quality",
-    "make_objective",
+    "build_objective",
     "run_hpo",
 ]

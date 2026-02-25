@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import torch
 from torch import Tensor, nn
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @dataclass
@@ -72,22 +76,57 @@ class ModelAdapter(ABC, nn.Module):
         """Return model configuration as a typed dataclass."""
         ...
 
-    @abstractmethod
     def load_checkpoint(self, path: Path) -> None:
-        """Load model weights from a checkpoint file."""
-        ...
+        """Load model weights from a checkpoint file.
 
-    @abstractmethod
+        Default implementation loads into ``self.net``. Override for adapters
+        that manage weights differently (e.g., LoRA, CommaAdapter).
+        """
+        state_dict = torch.load(path, map_location="cpu", weights_only=True)
+        self.net.load_state_dict(state_dict)
+
     def save_checkpoint(self, path: Path) -> None:
-        """Save model weights to a checkpoint file."""
-        ...
+        """Save model weights to a checkpoint file.
 
-    @abstractmethod
+        Default implementation saves ``self.net`` state dict.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(self.net.state_dict(), path)
+
     def trainable_parameters(self) -> int:
-        """Return the count of trainable parameters."""
-        ...
+        """Return the count of trainable parameters.
 
-    @abstractmethod
+        Default implementation counts ``self.net`` parameters with
+        ``requires_grad=True``.
+        """
+        return sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+
     def export_onnx(self, path: Path, example_input: Tensor) -> None:
-        """Export the model to ONNX format."""
-        ...
+        """Export the model to ONNX format.
+
+        Uses the dynamo-based exporter (PyTorch 2.5+) with fallback
+        to the legacy TorchScript exporter for compatibility.
+        Override for adapters that need special export logic.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.net.eval()
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            try:
+                onnx_program = torch.onnx.export(
+                    self.net,
+                    example_input,
+                    dynamo=True,
+                )
+                onnx_program.save(str(path))
+            except Exception:
+                torch.onnx.export(
+                    self.net,
+                    example_input,
+                    str(path),
+                    input_names=["images"],
+                    output_names=["logits"],
+                    opset_version=17,
+                    dynamo=False,
+                )

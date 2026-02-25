@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import random
 from typing import TYPE_CHECKING
 
+import numpy as np
+import torch
 from monai.data import CacheDataset, DataLoader, list_data_collate
 
 from minivess.data.transforms import build_train_transforms, build_val_transforms
@@ -12,6 +15,18 @@ if TYPE_CHECKING:
     from minivess.config.models import DataConfig
 
 _DEFAULT_BATCH_SIZE: int = 2
+
+
+def _worker_init_fn(worker_id: int) -> None:
+    """Seed DataLoader worker processes for reproducibility.
+
+    Each worker gets a deterministic seed derived from the PyTorch
+    initial seed plus the worker ID, ensuring different-but-reproducible
+    random streams per worker.
+    """
+    worker_seed = torch.initial_seed() % 2**32
+    random.seed(worker_seed + worker_id)
+    np.random.seed(worker_seed + worker_id)  # noqa: NPY002
 
 
 def discover_nifti_pairs(data_dir: Path) -> list[dict[str, str]]:
@@ -84,7 +99,7 @@ def _discover_suffix_labels(
     return pairs
 
 
-def create_train_loader(
+def build_train_loader(
     data_dicts: list[dict[str, str]],
     config: DataConfig,
     *,
@@ -119,10 +134,11 @@ def create_train_loader(
         num_workers=config.num_workers,
         pin_memory=config.pin_memory,
         collate_fn=list_data_collate,
+        worker_init_fn=_worker_init_fn,
     )
 
 
-def create_val_loader(
+def build_val_loader(
     data_dicts: list[dict[str, str]],
     config: DataConfig,
     *,

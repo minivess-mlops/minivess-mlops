@@ -15,6 +15,15 @@ Example::
 
 from __future__ import annotations
 
+__all__ = [
+    "CheckpointError",
+    "ConfigError",
+    "DataValidationError",
+    "MinivessError",
+    "PipelineError",
+    "ServingError",
+]
+
 
 class MinivessError(Exception):
     """Base exception for all MinIVess domain errors."""

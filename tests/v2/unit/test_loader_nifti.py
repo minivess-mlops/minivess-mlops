@@ -64,9 +64,8 @@ class TestDiscoverNiftiPairs:
     """Test discover_nifti_pairs() with real NIfTI files on disk."""
 
     def test_discover_nifti_pairs_synthetic(self, tmp_path: Path) -> None:
-        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
-
         from minivess.data.loader import discover_nifti_pairs
+        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
 
         data_dir = create_synthetic_nifti_dataset(tmp_path, n_volumes=3)
         pairs = discover_nifti_pairs(data_dir)
@@ -80,11 +79,10 @@ class TestDiscoverNiftiPairs:
 
     def test_discover_ebrains_layout(self, tmp_path: Path) -> None:
         """EBRAINS uses raw/ + seg/ with _y suffix labels."""
+        from minivess.data.loader import discover_nifti_pairs
         from tests.v2.fixtures.synthetic_nifti import (
             create_synthetic_nifti_dataset_ebrains,
         )
-
-        from minivess.data.loader import discover_nifti_pairs
 
         data_dir = create_synthetic_nifti_dataset_ebrains(tmp_path, n_volumes=3)
         pairs = discover_nifti_pairs(data_dir)
@@ -93,11 +91,10 @@ class TestDiscoverNiftiPairs:
 
     def test_discover_suffix_stripping(self, tmp_path: Path) -> None:
         """Labels with _y suffix should match images without suffix."""
+        from minivess.data.loader import discover_nifti_pairs
         from tests.v2.fixtures.synthetic_nifti import (
             create_synthetic_nifti_dataset_ebrains,
         )
-
-        from minivess.data.loader import discover_nifti_pairs
 
         data_dir = create_synthetic_nifti_dataset_ebrains(tmp_path, n_volumes=2)
         pairs = discover_nifti_pairs(data_dir)
@@ -110,9 +107,8 @@ class TestDiscoverNiftiPairs:
 
     def test_discover_backward_compatible(self, tmp_path: Path) -> None:
         """imagesTr/ + labelsTr/ layout still works."""
-        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
-
         from minivess.data.loader import discover_nifti_pairs
+        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
 
         data_dir = create_synthetic_nifti_dataset(tmp_path, n_volumes=2)
         pairs = discover_nifti_pairs(data_dir)
@@ -129,11 +125,10 @@ class TestDiscoverNiftiPairs:
 class TestMonaiLoaderWithNifti:
     """Test MONAI CacheDataset + DataLoader with NIfTI files."""
 
-    def test_create_train_loader_from_nifti_files(self, tmp_path: Path) -> None:
-        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
-
+    def test_build_train_loader_from_nifti_files(self, tmp_path: Path) -> None:
         from minivess.config.models import DataConfig
-        from minivess.data.loader import create_train_loader, discover_nifti_pairs
+        from minivess.data.loader import build_train_loader, discover_nifti_pairs
+        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
 
         data_dir = create_synthetic_nifti_dataset(
             tmp_path, n_volumes=2, spatial_size=(32, 32, 16)
@@ -148,7 +143,7 @@ class TestMonaiLoaderWithNifti:
             num_workers=0,
         )
 
-        loader = create_train_loader(pairs, config, batch_size=1, cache_rate=1.0)
+        loader = build_train_loader(pairs, config, batch_size=1, cache_rate=1.0)
         batch = next(iter(loader))
 
         assert "image" in batch
@@ -156,11 +151,10 @@ class TestMonaiLoaderWithNifti:
         # After RandCropByPosNegLabeld with num_samples=4, batch dim grows
         assert batch["image"].ndim == 5  # (B, C, D, H, W)
 
-    def test_create_val_loader_from_nifti_files(self, tmp_path: Path) -> None:
-        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
-
+    def test_build_val_loader_from_nifti_files(self, tmp_path: Path) -> None:
         from minivess.config.models import DataConfig
-        from minivess.data.loader import create_val_loader, discover_nifti_pairs
+        from minivess.data.loader import build_val_loader, discover_nifti_pairs
+        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
 
         data_dir = create_synthetic_nifti_dataset(
             tmp_path, n_volumes=2, spatial_size=(32, 32, 16)
@@ -175,7 +169,7 @@ class TestMonaiLoaderWithNifti:
             num_workers=0,
         )
 
-        loader = create_val_loader(pairs, config, cache_rate=1.0)
+        loader = build_val_loader(pairs, config, cache_rate=1.0)
         batch = next(iter(loader))
 
         assert "image" in batch

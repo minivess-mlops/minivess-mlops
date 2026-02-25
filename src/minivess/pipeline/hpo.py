@@ -55,7 +55,7 @@ class SearchSpace:
     gradient_clip_high: float = 2.0
 
 
-def create_study(
+def build_study(
     study_name: str = "hpo_study",
     *,
     storage: str | None = None,
@@ -145,7 +145,7 @@ def build_trial_config(
     return TrainingConfig(**base_fields)
 
 
-def make_objective(
+def build_objective(
     train_fn: Callable[[TrainingConfig], dict[str, Any]],
     search_space: SearchSpace,
     base_config: TrainingConfig | None = None,
@@ -202,7 +202,7 @@ def run_hpo(
     -------
     dict with ``best_params``, ``best_value``, and ``study``.
     """
-    study = create_study(study_name=study_name, storage=storage)
+    study = build_study(study_name=study_name, storage=storage)
 
     study.optimize(objective_fn, n_trials=n_trials)
 

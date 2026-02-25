@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import torch
@@ -50,46 +49,5 @@ class SegResNetAdapter(ModelAdapter):
             },
         )
 
-    def load_checkpoint(self, path: Path) -> None:
-        state_dict = torch.load(path, map_location="cpu", weights_only=True)
-        self.net.load_state_dict(state_dict)
-
-    def save_checkpoint(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(self.net.state_dict(), path)
-
-    def trainable_parameters(self) -> int:
-        return sum(p.numel() for p in self.net.parameters() if p.requires_grad)
-
-    def export_onnx(self, path: Path, example_input: Tensor) -> None:
-        """Export model to ONNX format.
-
-        Uses the new dynamo-based exporter (PyTorch 2.5+) with fallback
-        to the legacy TorchScript exporter for compatibility.
-        """
-        import warnings
-
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.net.eval()
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            try:
-                # Try dynamo exporter first (PyTorch 2.5+)
-                onnx_program = torch.onnx.export(
-                    self.net,
-                    example_input,
-                    dynamo=True,
-                )
-                onnx_program.save(str(path))
-            except Exception:
-                # Fallback: legacy TorchScript exporter
-                torch.onnx.export(
-                    self.net,
-                    example_input,
-                    str(path),
-                    input_names=["images"],
-                    output_names=["logits"],
-                    opset_version=17,
-                    dynamo=False,
-                )
+    # load_checkpoint, save_checkpoint, trainable_parameters, export_onnx
+    # inherited from ModelAdapter base class (uses self.net)

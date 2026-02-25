@@ -206,24 +206,24 @@ class TestGradioDemo:
         pytest.importorskip("gradio")
         from minivess.serving import gradio_demo
 
-        assert hasattr(gradio_demo, "create_demo")
+        assert hasattr(gradio_demo, "build_demo")
         assert hasattr(gradio_demo, "main")
 
-    def test_create_demo_returns_blocks(self) -> None:
+    def test_build_demo_returns_blocks(self) -> None:
         gr = pytest.importorskip("gradio")
-        from minivess.serving.gradio_demo import create_demo
+        from minivess.serving.gradio_demo import build_demo
 
-        demo = create_demo(model_path=None)
+        demo = build_demo(model_path=None)
         assert isinstance(demo, gr.Blocks)
 
-    def test_create_demo_accepts_model_path(self) -> None:
-        """create_demo should accept a model_path keyword argument."""
+    def test_build_demo_accepts_model_path(self) -> None:
+        """build_demo should accept a model_path keyword argument."""
         pytest.importorskip("gradio")
         import inspect
 
-        from minivess.serving.gradio_demo import create_demo
+        from minivess.serving.gradio_demo import build_demo
 
-        sig = inspect.signature(create_demo)
+        sig = inspect.signature(build_demo)
         params = list(sig.parameters.keys())
         assert "model_path" in params
 
@@ -236,9 +236,9 @@ class TestGradioDemo:
     def test_predict_slice_dummy_mode(self) -> None:
         """Dummy mode should produce a thresholded mask."""
         pytest.importorskip("gradio")
-        from minivess.serving.gradio_demo import create_demo
+        from minivess.serving.gradio_demo import build_demo
 
-        demo = create_demo(model_path=None)
+        demo = build_demo(model_path=None)
         # Access the predict function via Gradio's API
         # The function is the first registered fn
         predict_fn = demo.fns[0].fn
@@ -254,9 +254,9 @@ class TestGradioDemo:
     def test_predict_slice_none_input(self) -> None:
         """None input should return None mask."""
         pytest.importorskip("gradio")
-        from minivess.serving.gradio_demo import create_demo
+        from minivess.serving.gradio_demo import build_demo
 
-        demo = create_demo(model_path=None)
+        demo = build_demo(model_path=None)
         predict_fn = demo.fns[0].fn
 
         mask, info = predict_fn(None)
@@ -269,10 +269,10 @@ class TestGradioNiftiHandling:
 
     def test_load_nifti_volume(self, tmp_path: Path) -> None:
         """Should load a NIfTI file and return numpy array."""
-        from minivess.serving.gradio_demo import load_nifti_volume
-
         # Create a synthetic NIfTI file
         import nibabel as nib
+
+        from minivess.serving.gradio_demo import load_nifti_volume
 
         data = np.random.rand(32, 32, 16).astype(np.float32)
         nii = nib.Nifti1Image(data, affine=np.eye(4))

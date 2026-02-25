@@ -58,7 +58,7 @@ def extract_slice(
     return np.take(volume, index, axis=axis).astype(np.float32)
 
 
-def create_demo(
+def build_demo(
     model_path: Path | None = None,
     *,
     share: bool = False,
@@ -140,7 +140,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=7860, help="Server port")
     args = parser.parse_args()
 
-    demo = create_demo(model_path=args.model, share=args.share)
+    demo = build_demo(model_path=args.model, share=args.share)
     demo.launch(server_port=args.port, share=args.share)
 
 

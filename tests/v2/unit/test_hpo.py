@@ -53,42 +53,42 @@ class TestSearchSpace:
 
 
 # ---------------------------------------------------------------------------
-# T2: create_study factory
+# T2: build_study factory
 # ---------------------------------------------------------------------------
 
 
-class TestCreateStudy:
+class TestBuildStudy:
     """Test Optuna study factory."""
 
-    def test_create_study_returns_study(self) -> None:
-        """create_study should return an optuna.Study."""
-        from minivess.pipeline.hpo import create_study
+    def test_build_study_returns_study(self) -> None:
+        """build_study should return an optuna.Study."""
+        from minivess.pipeline.hpo import build_study
 
-        study = create_study(study_name="test_study")
+        study = build_study(study_name="test_study")
         assert isinstance(study, optuna.Study)
 
-    def test_create_study_direction_minimize(self) -> None:
+    def test_build_study_direction_minimize(self) -> None:
         """Default direction should be minimize (we minimize val_loss)."""
-        from minivess.pipeline.hpo import create_study
+        from minivess.pipeline.hpo import build_study
 
-        study = create_study(study_name="test_minimize")
+        study = build_study(study_name="test_minimize")
         assert study.direction == optuna.study.StudyDirection.MINIMIZE
 
-    def test_create_study_with_pruner(self) -> None:
+    def test_build_study_with_pruner(self) -> None:
         """Study should have a MedianPruner by default."""
-        from minivess.pipeline.hpo import create_study
+        from minivess.pipeline.hpo import build_study
 
-        study = create_study(study_name="test_pruner")
+        study = build_study(study_name="test_pruner")
         assert isinstance(study.pruner, optuna.pruners.MedianPruner)
 
-    def test_create_study_custom_storage(self, tmp_path: object) -> None:
-        """create_study should accept a storage URL."""
+    def test_build_study_custom_storage(self, tmp_path: object) -> None:
+        """build_study should accept a storage URL."""
         from pathlib import Path
 
-        from minivess.pipeline.hpo import create_study
+        from minivess.pipeline.hpo import build_study
 
         db_path = Path(str(tmp_path)) / "test_hpo.db"
-        study = create_study(
+        study = build_study(
             study_name="test_storage",
             storage=f"sqlite:///{db_path}",
         )
@@ -228,30 +228,30 @@ class TestRunHPO:
 
 
 # ---------------------------------------------------------------------------
-# T5: make_objective factory
+# T5: build_objective factory
 # ---------------------------------------------------------------------------
 
 
-class TestMakeObjective:
+class TestBuildObjective:
     """Test objective function factory for SegmentationTrainer integration."""
 
-    def test_make_objective_returns_callable(self) -> None:
-        """make_objective should return a callable."""
-        from minivess.pipeline.hpo import SearchSpace, make_objective
+    def test_build_objective_returns_callable(self) -> None:
+        """build_objective should return a callable."""
+        from minivess.pipeline.hpo import SearchSpace, build_objective
 
         mock_train_fn = MagicMock(return_value={"best_val_loss": 0.5})
-        objective = make_objective(
+        objective = build_objective(
             train_fn=mock_train_fn,
             search_space=SearchSpace(),
         )
         assert callable(objective)
 
-    def test_make_objective_calls_train_fn(self) -> None:
+    def test_build_objective_calls_train_fn(self) -> None:
         """The objective function should call train_fn with a TrainingConfig."""
-        from minivess.pipeline.hpo import SearchSpace, make_objective
+        from minivess.pipeline.hpo import SearchSpace, build_objective
 
         mock_train_fn = MagicMock(return_value={"best_val_loss": 0.42})
-        objective = make_objective(
+        objective = build_objective(
             train_fn=mock_train_fn,
             search_space=SearchSpace(),
         )
@@ -263,9 +263,9 @@ class TestMakeObjective:
         mock_train_fn.assert_called_once()
         assert val == pytest.approx(0.42)
 
-    def test_make_objective_passes_config(self) -> None:
+    def test_build_objective_passes_config(self) -> None:
         """The objective should pass a valid TrainingConfig to train_fn."""
-        from minivess.pipeline.hpo import SearchSpace, make_objective
+        from minivess.pipeline.hpo import SearchSpace, build_objective
 
         received_configs: list[TrainingConfig] = []
 
@@ -273,7 +273,7 @@ class TestMakeObjective:
             received_configs.append(config)
             return {"best_val_loss": 0.5}
 
-        objective = make_objective(
+        objective = build_objective(
             train_fn=capture_train_fn,
             search_space=SearchSpace(),
         )

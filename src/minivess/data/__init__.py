@@ -10,8 +10,8 @@ from minivess.data.domain_randomization import (
     SyntheticVesselGenerator,
 )
 from minivess.data.loader import (
-    create_train_loader,
-    create_val_loader,
+    build_train_loader,
+    build_val_loader,
     discover_nifti_pairs,
 )
 from minivess.data.transforms import build_train_transforms, build_val_transforms
@@ -25,8 +25,8 @@ __all__ = [
     "build_intensity_augmentation",
     "build_train_transforms",
     "build_val_transforms",
-    "create_train_loader",
-    "create_val_loader",
+    "build_train_loader",
+    "build_val_loader",
     "discover_nifti_pairs",
 ]
 

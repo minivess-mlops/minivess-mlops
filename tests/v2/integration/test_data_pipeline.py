@@ -17,11 +17,10 @@ class TestNiftiToTrainingStep:
 
     def test_nifti_to_training_step(self, tmp_path: Path) -> None:
         """Full pipeline: create NIfTI, discover, load, run one training step."""
-        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
-
         from minivess.adapters.segresnet import SegResNetAdapter
         from minivess.config.models import DataConfig, ModelConfig, ModelFamily
-        from minivess.data.loader import create_train_loader, discover_nifti_pairs
+        from minivess.data.loader import build_train_loader, discover_nifti_pairs
+        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
 
         # Create synthetic NIfTI dataset
         data_dir = create_synthetic_nifti_dataset(
@@ -40,7 +39,7 @@ class TestNiftiToTrainingStep:
             voxel_spacing=(1.0, 1.0, 1.0),
             num_workers=0,
         )
-        loader = create_train_loader(pairs, config, batch_size=1, cache_rate=1.0)
+        loader = build_train_loader(pairs, config, batch_size=1, cache_rate=1.0)
 
         # Get a batch
         batch = next(iter(loader))
@@ -77,11 +76,10 @@ class TestNiftiToTrainingStep:
 
     def test_nifti_to_validation_metrics(self, tmp_path: Path) -> None:
         """Validation path: load → predict → compute dice-like metric."""
-        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
-
         from minivess.adapters.segresnet import SegResNetAdapter
         from minivess.config.models import DataConfig, ModelConfig, ModelFamily
-        from minivess.data.loader import create_val_loader, discover_nifti_pairs
+        from minivess.data.loader import build_val_loader, discover_nifti_pairs
+        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
 
         data_dir = create_synthetic_nifti_dataset(
             tmp_path, n_volumes=1, spatial_size=(32, 32, 16)
@@ -95,7 +93,7 @@ class TestNiftiToTrainingStep:
             voxel_spacing=(1.0, 1.0, 1.0),
             num_workers=0,
         )
-        loader = create_val_loader(pairs, config, cache_rate=1.0)
+        loader = build_val_loader(pairs, config, cache_rate=1.0)
         batch = next(iter(loader))
 
         model_config = ModelConfig(
@@ -122,12 +120,11 @@ class TestEbrainsLayoutPipeline:
     """EBRAINS raw/seg layout → discover → load pipeline."""
 
     def test_ebrains_layout_to_loader(self, tmp_path: Path) -> None:
+        from minivess.config.models import DataConfig
+        from minivess.data.loader import build_val_loader, discover_nifti_pairs
         from tests.v2.fixtures.synthetic_nifti import (
             create_synthetic_nifti_dataset_ebrains,
         )
-
-        from minivess.config.models import DataConfig
-        from minivess.data.loader import create_val_loader, discover_nifti_pairs
 
         data_dir = create_synthetic_nifti_dataset_ebrains(
             tmp_path, n_volumes=2, spatial_size=(32, 32, 16)
@@ -142,7 +139,7 @@ class TestEbrainsLayoutPipeline:
             voxel_spacing=(1.0, 1.0, 1.0),
             num_workers=0,
         )
-        loader = create_val_loader(pairs, config, cache_rate=1.0)
+        loader = build_val_loader(pairs, config, cache_rate=1.0)
         batch = next(iter(loader))
 
         assert batch["image"].ndim == 5

@@ -55,16 +55,8 @@ class SwinUNETRAdapter(ModelAdapter):
             },
         )
 
-    def load_checkpoint(self, path: Path) -> None:
-        state_dict = torch.load(path, map_location="cpu", weights_only=True)
-        self.net.load_state_dict(state_dict)
-
-    def save_checkpoint(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(self.net.state_dict(), path)
-
-    def trainable_parameters(self) -> int:
-        return sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+    # load_checkpoint, save_checkpoint, trainable_parameters inherited from base.
+    # Custom export_onnx with dynamic_axes for SwinUNETR.
 
     def export_onnx(self, path: Path, example_input: Tensor) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
