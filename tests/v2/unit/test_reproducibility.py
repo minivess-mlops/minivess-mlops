@@ -72,20 +72,19 @@ class TestDataLoaderWorkerSeeding:
         _worker_init_fn(0)
         _worker_init_fn(3)
 
-    def test_train_loader_uses_worker_init_fn(self) -> None:
-        """build_train_loader should pass worker_init_fn to DataLoader."""
+    def test_train_loader_uses_thread_dataloader(self) -> None:
+        """build_train_loader should use MONAI ThreadDataLoader."""
         from minivess.data import loader
 
         with patch.object(loader, "CacheDataset"), \
-             patch.object(loader, "DataLoader") as mock_dl, \
+             patch.object(loader, "ThreadDataLoader") as mock_dl, \
              patch.object(loader, "build_train_transforms"):
             from minivess.config.models import DataConfig
 
             config = DataConfig(dataset_name="test", num_workers=2)
             loader.build_train_loader([{"image": "a", "label": "b"}], config)
 
-            # DataLoader should be called with worker_init_fn kwarg
+            # ThreadDataLoader should be called with num_workers=0
+            # (avoids thread-safety issues with RandCropByPosNegLabeld)
             dl_kwargs = mock_dl.call_args
-            assert "worker_init_fn" in dl_kwargs.kwargs or \
-                   (len(dl_kwargs.args) > 5) or \
-                   any("worker_init_fn" in str(k) for k in dl_kwargs.kwargs)
+            assert dl_kwargs.kwargs.get("num_workers", None) == 0

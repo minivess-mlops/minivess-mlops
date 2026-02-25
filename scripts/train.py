@@ -392,7 +392,8 @@ def run_fold(
         device=device,
     )
 
-    # Build trainer
+    # Build trainer — use sliding window inference for validation
+    # because full 512x512xZ volumes don't fit in 8 GB VRAM
     trainer = SegmentationTrainer(
         model,
         training_config,
@@ -400,6 +401,7 @@ def run_fold(
         tracker=tracker,
         metrics=metrics,
         criterion=criterion,
+        val_roi_size=data_config.patch_size,
     )
 
     # Create checkpoint directory

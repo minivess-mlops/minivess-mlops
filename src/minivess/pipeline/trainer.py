@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import torch
+from monai.inferers import sliding_window_inference
 from torch.amp import GradScaler, autocast
 from torch.optim import SGD, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
@@ -76,6 +77,7 @@ class SegmentationTrainer:
         criterion: nn.Module | None = None,
         optimizer: torch.optim.Optimizer | None = None,
         scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
+        val_roi_size: tuple[int, int, int] | None = None,
     ) -> None:
         self.model = model
         self.config = config
@@ -83,6 +85,7 @@ class SegmentationTrainer:
         self.model.to(self.device)
         self.tracker = tracker
         self.metrics = metrics
+        self.val_roi_size = val_roi_size
 
         self.criterion = criterion if criterion is not None else build_loss_function(loss_name)
         self.optimizer = optimizer if optimizer is not None else self._build_optimizer()
@@ -208,14 +211,29 @@ class SegmentationTrainer:
                 device_type=self.device.type,
                 enabled=self.config.mixed_precision,
             ):
-                output = self.model(images)
-                loss = self.criterion(output.logits, labels)
+                # Use sliding window inference when val_roi_size is set,
+                # needed because full 512x512xZ volumes exceed GPU memory.
+                if self.val_roi_size is not None:
+                    def _model_fn(x):
+                        return self.model(x).logits
+
+                    logits = sliding_window_inference(
+                        images,
+                        roi_size=self.val_roi_size,
+                        sw_batch_size=4,
+                        predictor=_model_fn,
+                        overlap=0.25,
+                    )
+                else:
+                    output = self.model(images)
+                    logits = output.logits
+                loss = self.criterion(logits, labels)
 
             running_loss += loss.item()
             num_batches += 1
 
             if self.metrics is not None:
-                self.metrics.update(output.logits, labels)
+                self.metrics.update(logits, labels)
 
         avg_loss = running_loss / max(num_batches, 1)
         epoch_metrics: dict[str, float] = {}
