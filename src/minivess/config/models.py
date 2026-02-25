@@ -64,6 +64,10 @@ class ModelConfig(BaseModel):
     lora_alpha: float = Field(default=32.0)
     lora_dropout: float = Field(default=0.1, ge=0.0, le=1.0)
 
+    # Architecture-specific overrides (e.g., init_filters, depths, num_heads).
+    # Keys depend on the model family; unknown keys are silently ignored.
+    architecture_params: dict[str, Any] = Field(default_factory=dict)
+
 
 class TrainingConfig(BaseModel):
     """Configuration for training loop."""

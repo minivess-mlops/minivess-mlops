@@ -17,9 +17,9 @@ if TYPE_CHECKING:
     from minivess.adapters.base import ModelAdapter
     from minivess.config.models import ExperimentConfig
 
-logger = logging.getLogger(__name__)
+from minivess.config.defaults import DEFAULT_TRACKING_URI as _DEFAULT_TRACKING_URI
 
-_DEFAULT_TRACKING_URI = "mlruns"
+logger = logging.getLogger(__name__)
 
 
 def resolve_tracking_uri(*, tracking_uri: str | None = None) -> str:

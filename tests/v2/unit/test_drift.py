@@ -7,7 +7,6 @@ shifts, so downstream monitoring (Evidently/Alibi-Detect) can catch them.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 import torch
 from scipy import stats
 

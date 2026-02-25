@@ -29,6 +29,8 @@ class DynUNetAdapter(ModelAdapter):
         ModelConfig with MONAI_DYNUNET family.
     filters:
         Channel widths per encoder level (e.g., [32, 64, 128, 256]).
+        Falls back to ``config.architecture_params["filters"]``, then
+        to the default ``[32, 64, 128, 256]``.
     deep_supervision:
         Enable intermediate supervision heads.
     res_block:
@@ -45,7 +47,10 @@ class DynUNetAdapter(ModelAdapter):
     ) -> None:
         super().__init__()
         self.config = config
-        self.filters = filters or [32, 64, 128, 256]
+        arch = config.architecture_params
+
+        # Constructor arg takes priority, then architecture_params, then default
+        self.filters = filters or arch.get("filters", [32, 64, 128, 256])
         self._deep_supervision = deep_supervision
 
         n_levels = len(self.filters)

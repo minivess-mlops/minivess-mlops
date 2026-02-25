@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 
 class TestReorganiseEbrainsData:
     """Test reorganising EBRAINS layout (raw/seg/json) into loader layout."""

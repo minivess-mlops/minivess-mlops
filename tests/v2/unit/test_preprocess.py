@@ -13,16 +13,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 
 class TestPreprocessCreatesOutput:
     """Preprocessing should create the processed directory structure."""
 
     def test_preprocess_creates_output_dir(self, tmp_path: Path) -> None:
-        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
-
         from minivess.data.preprocess import preprocess_dataset
+        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
 
         raw_dir = create_synthetic_nifti_dataset(
             tmp_path / "raw", n_volumes=2, spatial_size=(32, 32, 16)
@@ -36,9 +33,8 @@ class TestPreprocessCreatesOutput:
         assert (out_dir / "labelsTr").exists()
 
     def test_preprocess_copies_all_volumes(self, tmp_path: Path) -> None:
-        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
-
         from minivess.data.preprocess import preprocess_dataset
+        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
 
         n = 3
         raw_dir = create_synthetic_nifti_dataset(
@@ -54,9 +50,8 @@ class TestPreprocessCreatesOutput:
         assert len(labels) == n
 
     def test_preprocess_matching_filenames(self, tmp_path: Path) -> None:
-        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
-
         from minivess.data.preprocess import preprocess_dataset
+        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
 
         raw_dir = create_synthetic_nifti_dataset(
             tmp_path / "raw", n_volumes=2, spatial_size=(32, 32, 16)
@@ -74,9 +69,8 @@ class TestPreprocessReport:
     """Preprocessing should generate a validation report."""
 
     def test_report_generated(self, tmp_path: Path) -> None:
-        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
-
         from minivess.data.preprocess import preprocess_dataset
+        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
 
         raw_dir = create_synthetic_nifti_dataset(
             tmp_path / "raw", n_volumes=2, spatial_size=(32, 32, 16)
@@ -91,9 +85,8 @@ class TestPreprocessReport:
         assert "summary" in report
 
     def test_report_has_per_volume_stats(self, tmp_path: Path) -> None:
-        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
-
         from minivess.data.preprocess import preprocess_dataset
+        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
 
         raw_dir = create_synthetic_nifti_dataset(
             tmp_path / "raw", n_volumes=2, spatial_size=(32, 32, 16)
@@ -111,9 +104,8 @@ class TestPreprocessReport:
         assert "intensity_range" in vol
 
     def test_report_summary_fields(self, tmp_path: Path) -> None:
-        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
-
         from minivess.data.preprocess import preprocess_dataset
+        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
 
         raw_dir = create_synthetic_nifti_dataset(
             tmp_path / "raw", n_volumes=2, spatial_size=(32, 32, 16)
@@ -133,9 +125,8 @@ class TestPreprocessIdempotent:
     """Running preprocess twice should produce the same result."""
 
     def test_preprocess_idempotent(self, tmp_path: Path) -> None:
-        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
-
         from minivess.data.preprocess import preprocess_dataset
+        from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
 
         raw_dir = create_synthetic_nifti_dataset(
             tmp_path / "raw", n_volumes=2, spatial_size=(32, 32, 16)
@@ -154,11 +145,10 @@ class TestPreprocessEbrainsLayout:
     """Preprocessing should also work with raw/seg EBRAINS layout."""
 
     def test_preprocess_ebrains_layout(self, tmp_path: Path) -> None:
+        from minivess.data.preprocess import preprocess_dataset
         from tests.v2.fixtures.synthetic_nifti import (
             create_synthetic_nifti_dataset_ebrains,
         )
-
-        from minivess.data.preprocess import preprocess_dataset
 
         raw_dir = create_synthetic_nifti_dataset_ebrains(
             tmp_path / "raw", n_volumes=2, spatial_size=(32, 32, 16)

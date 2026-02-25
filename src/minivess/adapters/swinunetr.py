@@ -21,17 +21,23 @@ class SwinUNETRAdapter(ModelAdapter):
     def __init__(
         self,
         config: ModelConfig,
-        feature_size: int = 48,
+        feature_size: int | None = None,
     ) -> None:
         super().__init__()
         self.config = config
-        self._feature_size = feature_size
+        arch = config.architecture_params
+
+        # Constructor arg takes priority, then architecture_params, then default
+        self._feature_size = feature_size or arch.get("feature_size", 48)
+        self._depths = arch.get("depths", (2, 2, 2, 2))
+        self._num_heads = arch.get("num_heads", (3, 6, 12, 24))
+
         self.net = MonaiSwinUNETR(
             in_channels=config.in_channels,
             out_channels=config.out_channels,
-            feature_size=feature_size,
-            depths=(2, 2, 2, 2),
-            num_heads=(3, 6, 12, 24),
+            feature_size=self._feature_size,
+            depths=self._depths,
+            num_heads=self._num_heads,
             norm_name="instance",
             spatial_dims=3,
         )
@@ -43,8 +49,8 @@ class SwinUNETRAdapter(ModelAdapter):
     def get_config(self) -> AdapterConfigInfo:
         return self._build_config(
             feature_size=self._feature_size,
-            depths=(2, 2, 2, 2),
-            num_heads=(3, 6, 12, 24),
+            depths=self._depths,
+            num_heads=self._num_heads,
         )
 
     # load_checkpoint, save_checkpoint, trainable_parameters inherited from base.

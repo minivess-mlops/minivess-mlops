@@ -9,9 +9,9 @@ import bentoml
 import numpy as np  # noqa: TCH002 - BentoML inspects annotations at runtime
 from numpy.typing import NDArray  # noqa: TCH002
 
-logger = logging.getLogger(__name__)
+from minivess.config.defaults import BENTO_MODEL_TAG
 
-BENTO_MODEL_TAG = "minivess-segmentor"
+logger = logging.getLogger(__name__)
 
 
 @bentoml.service(

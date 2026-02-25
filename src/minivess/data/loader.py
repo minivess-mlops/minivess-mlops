@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from monai.data import CacheDataset, DataLoader, list_data_collate
 
+from minivess.config.defaults import DEFAULT_BATCH_SIZE as _DEFAULT_BATCH_SIZE
 from minivess.data.transforms import build_train_transforms, build_val_transforms
 
 if TYPE_CHECKING:
@@ -15,8 +16,6 @@ if TYPE_CHECKING:
     from monai.transforms import Compose
 
     from minivess.config.models import DataConfig
-
-_DEFAULT_BATCH_SIZE: int = 2
 
 
 def _worker_init_fn(worker_id: int) -> None:

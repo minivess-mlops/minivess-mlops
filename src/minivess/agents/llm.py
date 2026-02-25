@@ -6,9 +6,9 @@ import json
 import logging
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from minivess.config.defaults import DEFAULT_LLM_MODEL as DEFAULT_MODEL
 
-DEFAULT_MODEL = "anthropic:claude-sonnet-4-6"
+logger = logging.getLogger(__name__)
 
 
 def call_llm(
