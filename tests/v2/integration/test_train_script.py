@@ -83,7 +83,7 @@ class TestTrainScript:
 
         results = run_experiment(args)
 
-        for _loss_name, fold_results in results.items():
+        for _loss_name, fold_results in results["training"].items():
             for fold_result in fold_results:
                 assert fold_result["best_val_loss"] == fold_result["best_val_loss"]  # not NaN
                 assert fold_result["best_val_loss"] < float("inf")

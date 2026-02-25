@@ -230,6 +230,7 @@ filterwarnings = [
     "ignore::UserWarning:torch.*",
     "ignore::DeprecationWarning:pyparsing.*",
     "ignore::UserWarning:torchmetrics.*",
+    "ignore::UserWarning:monai.*",
     "ignore::SyntaxWarning:MetricsReloaded.*",
     "ignore::FutureWarning",
     "ignore::DeprecationWarning",

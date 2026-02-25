@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
     from minivess.adapters.base import ModelAdapter
     from minivess.config.models import ExperimentConfig
+    from minivess.pipeline.evaluation import FoldResult
 
 from minivess.config.defaults import DEFAULT_TRACKING_URI as _DEFAULT_TRACKING_URI
 
@@ -204,6 +205,40 @@ class ExperimentTracker:
         if split_path.exists():
             mlflow.log_artifact(str(split_path), artifact_path="splits")
             logger.info("Logged split file: %s", split_path.name)
+
+    def log_evaluation_results(
+        self,
+        fold_result: FoldResult,
+        *,
+        fold_id: int,
+        loss_name: str,
+    ) -> None:
+        """Log MetricsReloaded evaluation results as MLflow metrics.
+
+        Flattens per-metric CIs into ``eval_fold{fold_id}_{metric}``
+        keys for easy comparison across folds and losses.
+
+        Parameters
+        ----------
+        fold_result:
+            Evaluation results with aggregated CIs.
+        fold_id:
+            Fold index (0-based).
+        loss_name:
+            Loss function name (for logging context).
+        """
+        flat_metrics: dict[str, float] = {}
+        for metric_name, ci in fold_result.aggregated.items():
+            prefix = f"eval_fold{fold_id}_{metric_name}"
+            flat_metrics.update(ci.to_dict(prefix))
+
+        mlflow.log_metrics(dict(sorted(flat_metrics.items())))
+        logger.info(
+            "Logged evaluation results for fold %d, loss=%s: %d metrics",
+            fold_id,
+            loss_name,
+            len(flat_metrics),
+        )
 
     def register_model(
         self,
