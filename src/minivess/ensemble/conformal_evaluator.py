@@ -211,25 +211,19 @@ class ConformalEvaluator:
             cal_stacked = np.stack(
                 [np.stack([1 - p, p], axis=0) for p in cal_probs], axis=0
             )
-            cal_lab = np.stack(
-                [lab.astype(np.int64) for lab in cal_labels], axis=0
-            )
+            cal_lab = np.stack([lab.astype(np.int64) for lab in cal_labels], axis=0)
             predictor.calibrate(cal_stacked, cal_lab)
 
             # Evaluate on test
             test_stacked = np.stack(
                 [np.stack([1 - p, p], axis=0) for p in test_probs], axis=0
             )
-            test_lab = np.stack(
-                [lab.astype(np.int64) for lab in test_labels], axis=0
-            )
+            test_lab = np.stack([lab.astype(np.int64) for lab in test_labels], axis=0)
             result = predictor.predict(test_stacked)
 
             # Compute coverage
             labels_idx = test_lab[:, np.newaxis, ...]
-            covered = np.take_along_axis(
-                result.prediction_sets, labels_idx, axis=1
-            )
+            covered = np.take_along_axis(result.prediction_sets, labels_idx, axis=1)
             coverage = float(covered.mean())
 
             return {
@@ -266,9 +260,7 @@ class ConformalEvaluator:
             # Aggregate: mean over test volumes
             aggregated: dict[str, float] = {}
             for key in all_metrics[0]:
-                aggregated[key] = float(
-                    np.mean([m[key] for m in all_metrics])
-                )
+                aggregated[key] = float(np.mean([m[key] for m in all_metrics]))
             aggregated["dilation_radius"] = float(predictor.dilation_radius)
             aggregated["erosion_radius"] = float(predictor.erosion_radius)
 
@@ -299,9 +291,7 @@ class ConformalEvaluator:
 
             aggregated: dict[str, float] = {}
             for key in all_metrics[0]:
-                aggregated[key] = float(
-                    np.mean([m[key] for m in all_metrics])
-                )
+                aggregated[key] = float(np.mean([m[key] for m in all_metrics]))
             aggregated["calibrated_threshold"] = predictor.calibrated_threshold
 
             return aggregated
@@ -318,9 +308,7 @@ class ConformalEvaluator:
     ) -> dict[str, float]:
         """Run risk-controlling prediction sets."""
         try:
-            predictor = RiskControllingPredictor(
-                alpha=self.alpha, risk_fn=fnr_risk
-            )
+            predictor = RiskControllingPredictor(alpha=self.alpha, risk_fn=fnr_risk)
             predictor.calibrate(cal_probs, cal_labels)
 
             fnrs: list[float] = []

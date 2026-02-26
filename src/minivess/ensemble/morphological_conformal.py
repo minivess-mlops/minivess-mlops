@@ -193,13 +193,9 @@ class MorphologicalConformalPredictor:
         level = min(math.ceil((n + 1) * (1 - self.alpha)) / n, 1.0)
 
         # For dilation: take the quantile of the lambdas
-        self._dilation_radius = int(
-            np.quantile(dilation_lambdas, min(level, 1.0))
-        )
+        self._dilation_radius = int(np.quantile(dilation_lambdas, min(level, 1.0)))
         # For erosion: take the quantile of the mus
-        self._erosion_radius = int(
-            np.quantile(erosion_mus, min(level, 1.0))
-        )
+        self._erosion_radius = int(np.quantile(erosion_mus, min(level, 1.0)))
 
         # Cap at max_radius
         self._dilation_radius = min(self._dilation_radius, self.max_radius)
@@ -299,9 +295,7 @@ def compute_morphological_metrics(
     # Inner precision: fraction of inner contour voxels that are in GT
     inner_sum = float(result.inner_contour.sum())
     if inner_sum > 0:
-        inner_precision = float(
-            (result.inner_contour & gt_bool).sum()
-        ) / inner_sum
+        inner_precision = float((result.inner_contour & gt_bool).sum()) / inner_sum
     else:
         inner_precision = 1.0
 

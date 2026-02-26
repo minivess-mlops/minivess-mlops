@@ -69,9 +69,7 @@ class TestConformalPredictorVectorized:
         """Calibration on 10 volumes (32,32,16) should complete in < 1 second."""
         from minivess.ensemble.conformal import ConformalPredictor
 
-        probs, labels = _make_synthetic_probs(
-            n_volumes=10, spatial=(32, 32, 16)
-        )
+        probs, labels = _make_synthetic_probs(n_volumes=10, spatial=(32, 32, 16))
         predictor = ConformalPredictor(alpha=0.1)
 
         start = time.monotonic()

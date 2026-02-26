@@ -153,7 +153,10 @@ class ConformalConfig(BaseModel):
     """Configuration for conformal prediction methods."""
 
     alpha: float = Field(
-        default=0.1, gt=0, lt=1, description="Significance level (e.g., 0.1 for 90% coverage)"
+        default=0.1,
+        gt=0,
+        lt=1,
+        description="Significance level (e.g., 0.1 for 90% coverage)",
     )
     methods: list[str] = Field(
         default_factory=lambda: ["voxel", "morphological", "distance"],

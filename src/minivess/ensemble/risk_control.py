@@ -218,8 +218,7 @@ class RiskControllingPredictor:
         self._optimal_threshold = best_threshold
 
         logger.info(
-            "Risk-controlling CP calibrated: threshold=%.4f, alpha=%.2f, "
-            "n_volumes=%d",
+            "Risk-controlling CP calibrated: threshold=%.4f, alpha=%.2f, n_volumes=%d",
             self._optimal_threshold,
             self.alpha,
             n,

@@ -147,9 +147,7 @@ class TestConformalEvaluator:
         probs = np.zeros((16, 16, 16), dtype=np.float32)
         probs[pred.astype(bool)] = 0.8
 
-        evaluator = ConformalEvaluator(
-            alpha=0.2, methods=["morphological"]
-        )
+        evaluator = ConformalEvaluator(alpha=0.2, methods=["morphological"])
         result = evaluator.evaluate(
             predictions=[pred] * 6,
             softmax_probs=[probs] * 6,
