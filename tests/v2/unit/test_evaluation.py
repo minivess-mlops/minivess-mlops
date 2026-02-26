@@ -6,15 +6,19 @@ import numpy as np
 import pytest
 
 # MetricsReloaded has unescaped LaTeX in docstrings that causes SyntaxError
-# on CPython 3.12.x+ (newer patch releases). Guard the import.
+# on CPython 3.12.12+ (invalid escape sequences). The import is lazy inside
+# EvaluationRunner.evaluate_volume, so we must probe the offending module
+# directly to detect the breakage at collection time.
 try:
-    from minivess.pipeline.evaluation import EvaluationRunner, FoldResult
+    import MetricsReloaded.metrics.pairwise_measures  # noqa: F401
 except SyntaxError:
     pytest.skip(
         "MetricsReloaded SyntaxError (invalid escape sequences on Python "
         f"{sys.version_info.major}.{sys.version_info.minor})",
         allow_module_level=True,
     )
+
+from minivess.pipeline.evaluation import EvaluationRunner, FoldResult
 
 
 def _make_binary_volume(shape: tuple[int, ...] = (8, 8, 8)) -> np.ndarray:
