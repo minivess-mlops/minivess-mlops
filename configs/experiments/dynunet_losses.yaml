@@ -5,8 +5,8 @@ losses:
   - cbdice
   - dice_ce_cldice
   - warp
-compute: auto
-data_dir: data/raw
+compute: gpu_low
+data_dir: data/raw/minivess
 num_folds: 3
 max_epochs: 100
 seed: 42
@@ -17,13 +17,13 @@ checkpoint:
   tracked_metrics:
     - name: val_loss
       direction: minimize
-      patience: 15
+      patience: 30
     - name: val_dice
       direction: maximize
-      patience: 20
+      patience: 30
     - name: val_f1_foreground
       direction: maximize
-      patience: 20
+      patience: 30
   early_stopping_strategy: all
   primary_metric: val_loss
   min_delta: 1.0e-4
