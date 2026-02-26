@@ -81,8 +81,8 @@ def build_demo(
     import gradio as gr
 
     def predict_slice(
-        volume_slice: NDArray[np.float32] | None,
-    ) -> tuple[NDArray[np.float32] | None, str]:
+        volume_slice: np.ndarray | None,
+    ) -> tuple[np.ndarray | None, str]:
         """Process a single 2D slice (for demo purposes)."""
         if volume_slice is None:
             return None, "No input provided"

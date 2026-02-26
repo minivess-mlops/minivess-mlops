@@ -133,9 +133,26 @@ class TestEnvironmentDetection:
 
     @patch("pathlib.Path.exists", return_value=True)
     def test_docker_detected(self, mock_exists):
-        """/.dockerenv existence triggers Docker detection."""
-        env = detect_environment()
-        assert env == "docker"
+        """/.dockerenv existence triggers Docker detection.
+
+        Must also clear CI/GITHUB_ACTIONS env vars, because on GitHub Actions
+        runners these are set by default and take priority over /.dockerenv
+        in detect_environment()'s check order.
+        """
+        import os
+
+        # Remove CI-related keys entirely so the CI check doesn't short-circuit.
+        # os.environ.pop returns the old value (or None), and we restore in finally.
+        removed: dict[str, str] = {}
+        for key in ("CI", "GITHUB_ACTIONS"):
+            val = os.environ.pop(key, None)
+            if val is not None:
+                removed[key] = val
+        try:
+            env = detect_environment()
+            assert env == "docker"
+        finally:
+            os.environ.update(removed)
 
 
 class TestRunPreflight:

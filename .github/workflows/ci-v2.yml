@@ -21,7 +21,7 @@ jobs:
           version: "latest"
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
       - name: Install dependencies
         run: uv sync --extra dev
       - name: Ruff check
@@ -40,7 +40,7 @@ jobs:
           version: "latest"
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
       - name: Install dependencies
         run: uv sync --extra dev
       - name: Mypy
@@ -49,9 +49,6 @@ jobs:
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -59,11 +56,10 @@ jobs:
           version: "latest"
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.13"
       - name: Install dependencies
         run: uv sync --extra dev --extra eval --extra quality --extra agents --extra serving
       - name: Run unit tests
         run: uv run pytest tests/v2/unit/ -x -q --tb=short
       - name: Run with coverage
-        if: matrix.python-version == '3.12'
         run: uv run pytest tests/v2/unit/ --cov=src/minivess --cov-report=term-missing

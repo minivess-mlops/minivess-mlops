@@ -12,7 +12,7 @@ version = "2.0.0-alpha"
 description = "Model-agnostic biomedical segmentation MLOps platform"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.12"
+requires-python = "==3.13.*"
 authors = [
     { name = "petteriteikari", email = "petteri.teikari@gmail.com" },
 ]
@@ -275,12 +275,6 @@ build-constraint-dependencies = [
 # weightwatcher pins pandas==2.1.4 which fails to build from source on Python 3.13+
 override-dependencies = [
     "pandas>=2.2",
-]
-# NumPy 2.x ABI constraint: matplotlib 3.7.x wheels were compiled against NumPy 1.x
-# and crash at import time when NumPy 2.x is installed. On Python 3.13+ numpy 2.x
-# is required (no 1.x wheels exist), so this constraint only applies to <3.13.
-constraint-dependencies = [
-    "numpy<2.0; python_version < '3.13'",
 ]
 
 [dependency-groups]

@@ -333,7 +333,9 @@ class SegmentationTrainer:
         """
         try:
             from minivess.pipeline.evaluation import EvaluationRunner
-        except ImportError:
+        except (ImportError, SyntaxError):
+            # SyntaxError: MetricsReloaded has unescaped LaTeX `\d` in
+            # docstrings that triggers SyntaxError on Python 3.12.12+.
             logger.warning("MetricsReloaded not available, skipping extended metrics")
             return {}
 
