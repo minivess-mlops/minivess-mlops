@@ -60,9 +60,7 @@ def _make_model_config_dict() -> dict:
     return {"family": "test", "out_channels": 2}
 
 
-def _make_ensemble_manifest(
-    tmp_path: Path, member_paths: list[Path]
-) -> Path:
+def _make_ensemble_manifest(tmp_path: Path, member_paths: list[Path]) -> Path:
     """Save an ensemble manifest JSON."""
     manifest_path = tmp_path / "ensemble_manifest.json"
     manifest_path.write_text(
@@ -327,9 +325,7 @@ class TestExperimentTrackerLogPyfunc:
         ckpt_path = _make_checkpoint(tmp_path)
         config_dict = _make_model_config_dict()
 
-        with patch(
-            "minivess.observability.tracking.log_single_model"
-        ) as mock_log:
+        with patch("minivess.observability.tracking.log_single_model") as mock_log:
             mock_log.return_value = MagicMock()
             tracker.log_pyfunc_model(ckpt_path, config_dict)
 

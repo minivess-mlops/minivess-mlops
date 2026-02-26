@@ -71,7 +71,9 @@ class TestBaseCheckpointDefaults:
         adapter2.load_checkpoint(ckpt)
 
         # Weights should match
-        for p1, p2 in zip(adapter1.net.parameters(), adapter2.net.parameters(), strict=True):
+        for p1, p2 in zip(
+            adapter1.net.parameters(), adapter2.net.parameters(), strict=True
+        ):
             assert torch.allclose(p1, p2)
 
     def test_trainable_parameters_positive(self) -> None:
@@ -144,28 +146,36 @@ class TestAdaptersInheritDefaults:
         from minivess.adapters.swinunetr import SwinUNETRAdapter
 
         for method in ("save_checkpoint", "load_checkpoint", "trainable_parameters"):
-            assert method not in SwinUNETRAdapter.__dict__, f"{method} should be inherited"
+            assert method not in SwinUNETRAdapter.__dict__, (
+                f"{method} should be inherited"
+            )
 
     def test_dynunet_uses_base_methods(self) -> None:
         """DynUNetAdapter should NOT define checkpoint/trainable methods."""
         from minivess.adapters.dynunet import DynUNetAdapter
 
         for method in ("save_checkpoint", "load_checkpoint", "trainable_parameters"):
-            assert method not in DynUNetAdapter.__dict__, f"{method} should be inherited"
+            assert method not in DynUNetAdapter.__dict__, (
+                f"{method} should be inherited"
+            )
 
     def test_vista3d_uses_base_methods(self) -> None:
         """Vista3dAdapter should NOT define checkpoint/trainable methods."""
         from minivess.adapters.vista3d import Vista3dAdapter
 
         for method in ("save_checkpoint", "load_checkpoint", "trainable_parameters"):
-            assert method not in Vista3dAdapter.__dict__, f"{method} should be inherited"
+            assert method not in Vista3dAdapter.__dict__, (
+                f"{method} should be inherited"
+            )
 
     def test_vesselfm_uses_base_methods(self) -> None:
         """VesselFMAdapter should NOT define checkpoint/trainable methods."""
         from minivess.adapters.vesselfm import VesselFMAdapter
 
         for method in ("save_checkpoint", "load_checkpoint", "trainable_parameters"):
-            assert method not in VesselFMAdapter.__dict__, f"{method} should be inherited"
+            assert method not in VesselFMAdapter.__dict__, (
+                f"{method} should be inherited"
+            )
 
 
 # ---------------------------------------------------------------------------

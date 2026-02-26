@@ -29,7 +29,11 @@ def build_training_metrics_suite() -> dict[str, Any]:
             },
             {
                 "expectation_type": "expect_column_values_to_be_between",
-                "kwargs": {"column": "train_loss", "min_value": 0.0, "max_value": 100.0},
+                "kwargs": {
+                    "column": "train_loss",
+                    "min_value": 0.0,
+                    "max_value": 100.0,
+                },
             },
             {
                 "expectation_type": "expect_column_values_to_be_between",
@@ -38,11 +42,17 @@ def build_training_metrics_suite() -> dict[str, Any]:
             {
                 "expectation_type": "expect_column_values_to_be_increasing",
                 "kwargs": {"column": "epoch"},
-                "meta": {"notes": "Epochs should be monotonically increasing within a fold"},
+                "meta": {
+                    "notes": "Epochs should be monotonically increasing within a fold"
+                },
             },
             {
                 "expectation_type": "expect_column_values_to_be_between",
-                "kwargs": {"column": "learning_rate", "min_value": 1e-10, "max_value": 1.0},
+                "kwargs": {
+                    "column": "learning_rate",
+                    "min_value": 1e-10,
+                    "max_value": 1.0,
+                },
             },
             {
                 "expectation_type": "expect_column_pair_values_a_to_be_greater_than_b",
@@ -76,15 +86,27 @@ def build_nifti_metadata_suite() -> dict[str, Any]:
             },
             {
                 "expectation_type": "expect_column_values_to_be_between",
-                "kwargs": {"column": "voxel_spacing_x", "min_value": 0.01, "max_value": 10.0},
+                "kwargs": {
+                    "column": "voxel_spacing_x",
+                    "min_value": 0.01,
+                    "max_value": 10.0,
+                },
             },
             {
                 "expectation_type": "expect_column_values_to_be_between",
-                "kwargs": {"column": "voxel_spacing_y", "min_value": 0.01, "max_value": 10.0},
+                "kwargs": {
+                    "column": "voxel_spacing_y",
+                    "min_value": 0.01,
+                    "max_value": 10.0,
+                },
             },
             {
                 "expectation_type": "expect_column_values_to_be_between",
-                "kwargs": {"column": "voxel_spacing_z", "min_value": 0.01, "max_value": 50.0},
+                "kwargs": {
+                    "column": "voxel_spacing_z",
+                    "min_value": 0.01,
+                    "max_value": 50.0,
+                },
             },
             {
                 "expectation_type": "expect_column_values_to_be_true",

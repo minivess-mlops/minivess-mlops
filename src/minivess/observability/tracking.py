@@ -120,17 +120,21 @@ class ExperimentTracker:
         prefix: str = "",
     ) -> None:
         """Log metrics for a training/validation epoch."""
-        prefixed = dict(sorted(
-            {f"{prefix}{k}" if prefix else k: v for k, v in metrics.items()}.items()
-        ))
+        prefixed = dict(
+            sorted(
+                {f"{prefix}{k}" if prefix else k: v for k, v in metrics.items()}.items()
+            )
+        )
         mlflow.log_metrics(prefixed, step=step)
 
     def log_model_info(self, model: ModelAdapter) -> None:
         """Log model configuration and parameter count."""
         model_config = model.get_config().to_dict()
-        mlflow.log_params(dict(sorted(
-            {f"model_{k}": str(v) for k, v in model_config.items()}.items()
-        )))
+        mlflow.log_params(
+            dict(
+                sorted({f"model_{k}": str(v) for k, v in model_config.items()}.items())
+            )
+        )
         mlflow.log_metric("trainable_parameters", model.trainable_parameters())
 
     def log_artifact(self, local_path: Path, *, artifact_path: str = "") -> None:
@@ -178,7 +182,11 @@ class ExperimentTracker:
                 check=True,
             )
             with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".txt", prefix="frozen_deps_", delete=False, encoding="utf-8"
+                mode="w",
+                suffix=".txt",
+                prefix="frozen_deps_",
+                delete=False,
+                encoding="utf-8",
             ) as f:
                 f.write(result.stdout)
                 f.flush()
@@ -187,7 +195,9 @@ class ExperimentTracker:
         except (subprocess.CalledProcessError, FileNotFoundError):
             logger.warning("Could not freeze dependencies (uv not available)")
 
-    def log_hydra_config(self, config_dict: dict, *, filename: str = "resolved_config.yaml") -> None:
+    def log_hydra_config(
+        self, config_dict: dict, *, filename: str = "resolved_config.yaml"
+    ) -> None:
         """Log resolved Hydra config as YAML artifact."""
         import tempfile
 

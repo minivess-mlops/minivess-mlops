@@ -158,7 +158,9 @@ def evaluate_segmentation_quality(
     border_touching = qc.check_border_touching(mask)
 
     if num_components > max_components:
-        reasons.append(f"Fragmented: {num_components} components (max {max_components})")
+        reasons.append(
+            f"Fragmented: {num_components} components (max {max_components})"
+        )
     if volume_ratio > max_volume_ratio:
         reasons.append(f"Volume ratio {volume_ratio:.3f} exceeds {max_volume_ratio}")
     if confidence < min_confidence:

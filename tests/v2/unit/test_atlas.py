@@ -99,12 +99,8 @@ class TestRegisterAtlas:
         """Affine registration should return a warped atlas."""
         from minivess.adapters.atlas import register_atlas
 
-        atlas = np.random.default_rng(42).normal(0, 1, (16, 16, 16)).astype(
-            np.float32
-        )
-        target = np.random.default_rng(99).normal(0, 1, (16, 16, 16)).astype(
-            np.float32
-        )
+        atlas = np.random.default_rng(42).normal(0, 1, (16, 16, 16)).astype(np.float32)
+        target = np.random.default_rng(99).normal(0, 1, (16, 16, 16)).astype(np.float32)
         result = register_atlas(atlas, target, method="affine")
         assert result.warped_atlas.shape == target.shape
         assert result.method == "affine"

@@ -14,6 +14,7 @@ from minivess.config.models import ModelConfig, ModelFamily
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def segresnet_config() -> ModelConfig:
     return ModelConfig(
@@ -48,6 +49,7 @@ def dynunet_config() -> ModelConfig:
 # Test: ModelConfig has architecture_params field
 # ---------------------------------------------------------------------------
 
+
 class TestModelConfigArchitectureParams:
     """ModelConfig.architecture_params is available and defaults to empty."""
 
@@ -71,6 +73,7 @@ class TestModelConfigArchitectureParams:
 # ---------------------------------------------------------------------------
 # Test: SegResNet adapter respects architecture_params
 # ---------------------------------------------------------------------------
+
 
 class TestSegResNetConfigurable:
     """SegResNetAdapter uses architecture_params for overrides, defaults otherwise."""
@@ -119,6 +122,7 @@ class TestSegResNetConfigurable:
 # Test: SwinUNETR adapter respects architecture_params
 # ---------------------------------------------------------------------------
 
+
 class TestSwinUNETRConfigurable:
     """SwinUNETRAdapter uses architecture_params for overrides."""
 
@@ -165,6 +169,7 @@ class TestSwinUNETRConfigurable:
 # ---------------------------------------------------------------------------
 # Test: DynUNet adapter respects architecture_params
 # ---------------------------------------------------------------------------
+
 
 class TestDynUNetConfigurable:
     """DynUNetAdapter uses architecture_params for filter override."""

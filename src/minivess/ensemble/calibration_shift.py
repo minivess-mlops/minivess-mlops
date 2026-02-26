@@ -111,10 +111,14 @@ def evaluate_calibration_transfer(
         Binary correctness on target domain.
     """
     source_ece, _ = expected_calibration_error(
-        source_confidences, source_accuracies, n_bins=n_bins,
+        source_confidences,
+        source_accuracies,
+        n_bins=n_bins,
     )
     target_ece, _ = expected_calibration_error(
-        target_confidences, target_accuracies, n_bins=n_bins,
+        target_confidences,
+        target_accuracies,
+        n_bins=n_bins,
     )
     return ShiftedCalibrationResult(
         source_domain=source_domain,
@@ -196,28 +200,33 @@ class CalibrationShiftAnalyzer:
             return "\n".join(sections)
 
         # Per-domain ECE
-        sections.extend([
-            "## Per-Domain Calibration",
-            "",
-            "| Domain | ECE |",
-            "|--------|-----|",
-        ])
+        sections.extend(
+            [
+                "## Per-Domain Calibration",
+                "",
+                "| Domain | ECE |",
+                "|--------|-----|",
+            ]
+        )
         for name in sorted(self.domains):
             d = self.domains[name]
             ece, _ = expected_calibration_error(
-                d["confidences"], d["accuracies"],
+                d["confidences"],
+                d["accuracies"],
             )
             sections.append(f"| {name} | {ece:.4f} |")
 
         # Pairwise transfer
         results = self.analyze_transfer()
-        sections.extend([
-            "",
-            "## Pairwise Transfer Degradation",
-            "",
-            "| Source | Target | Source ECE | Target ECE | Degradation |",
-            "|--------|--------|-----------|-----------|-------------|",
-        ])
+        sections.extend(
+            [
+                "",
+                "## Pairwise Transfer Degradation",
+                "",
+                "| Source | Target | Source ECE | Target ECE | Degradation |",
+                "|--------|--------|-----------|-----------|-------------|",
+            ]
+        )
         for r in results:
             sections.append(
                 f"| {r.source_domain} | {r.target_domain} "

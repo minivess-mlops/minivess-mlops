@@ -116,12 +116,18 @@ class TestWeightWatcherReport:
         from minivess.ensemble.weightwatcher import WeightWatcherReport
 
         passing = WeightWatcherReport(
-            alpha_weighted=3.0, log_norm=1.0, num_layers=5,
-            details={}, passed_gate=True,
+            alpha_weighted=3.0,
+            log_norm=1.0,
+            num_layers=5,
+            details={},
+            passed_gate=True,
         )
         failing = WeightWatcherReport(
-            alpha_weighted=6.0, log_norm=2.0, num_layers=5,
-            details={}, passed_gate=False,
+            alpha_weighted=6.0,
+            log_norm=2.0,
+            num_layers=5,
+            details={},
+            passed_gate=False,
         )
         assert passing.passed_gate is True
         assert failing.passed_gate is False

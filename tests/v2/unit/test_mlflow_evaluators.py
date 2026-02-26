@@ -278,7 +278,9 @@ class TestRunMlflowEvaluation:
     """Tests for the top-level mlflow.evaluate() wrapper."""
 
     @patch("minivess.serving.mlflow_evaluators.mlflow")
-    def test_calls_mlflow_evaluate(self, mock_mlflow: MagicMock, tmp_path: Path) -> None:
+    def test_calls_mlflow_evaluate(
+        self, mock_mlflow: MagicMock, tmp_path: Path
+    ) -> None:
         """run_mlflow_evaluation calls mlflow.evaluate."""
         from minivess.serving.mlflow_evaluators import run_mlflow_evaluation
 
@@ -290,7 +292,9 @@ class TestRunMlflowEvaluation:
         mock_mlflow.evaluate.assert_called_once()
 
     @patch("minivess.serving.mlflow_evaluators.mlflow")
-    def test_passes_custom_metrics(self, mock_mlflow: MagicMock, tmp_path: Path) -> None:
+    def test_passes_custom_metrics(
+        self, mock_mlflow: MagicMock, tmp_path: Path
+    ) -> None:
         """run_mlflow_evaluation passes extra_metrics with our custom metrics."""
         from minivess.serving.mlflow_evaluators import run_mlflow_evaluation
 

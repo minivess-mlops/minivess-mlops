@@ -93,9 +93,7 @@ class TestExperimentTrackerEvaluation:
         )
 
         # Verify that log_evaluation_results is callable with the right signature
-        tracker.log_evaluation_results(
-            fold_result, fold_id=0, loss_name="dice_ce"
-        )
+        tracker.log_evaluation_results(fold_result, fold_id=0, loss_name="dice_ce")
         tracker.log_evaluation_results.assert_called_once()
 
 

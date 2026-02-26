@@ -140,10 +140,14 @@ class AgentDiagnostics:
         """
         total_interactions = sum(len(v) for v in self.sessions.values())
         total_latency = sum(
-            i.latency_ms for interactions in self.sessions.values() for i in interactions
+            i.latency_ms
+            for interactions in self.sessions.values()
+            for i in interactions
         )
         total_tokens = sum(
-            i.token_count for interactions in self.sessions.values() for i in interactions
+            i.token_count
+            for interactions in self.sessions.values()
+            for i in interactions
         )
         n_sessions = len(self.sessions)
         return {
@@ -151,7 +155,9 @@ class AgentDiagnostics:
             "total_interactions": total_interactions,
             "total_latency_ms": total_latency,
             "total_tokens": total_tokens,
-            "avg_latency_per_session": total_latency / n_sessions if n_sessions else 0.0,
+            "avg_latency_per_session": total_latency / n_sessions
+            if n_sessions
+            else 0.0,
         }
 
     def to_markdown(self) -> str:
@@ -171,30 +177,34 @@ class AgentDiagnostics:
 
         # Aggregate summary
         agg = self.summarize_aggregate()
-        sections.extend([
-            "## Aggregate Summary",
-            "",
-            f"- **Total Sessions:** {agg['total_sessions']}",
-            f"- **Total Interactions:** {agg['total_interactions']}",
-            f"- **Total Latency:** {agg['total_latency_ms']:.1f} ms",
-            f"- **Total Tokens:** {agg['total_tokens']}",
-            f"- **Avg Latency/Session:** {agg['avg_latency_per_session']:.1f} ms",
-            "",
-        ])
+        sections.extend(
+            [
+                "## Aggregate Summary",
+                "",
+                f"- **Total Sessions:** {agg['total_sessions']}",
+                f"- **Total Interactions:** {agg['total_interactions']}",
+                f"- **Total Latency:** {agg['total_latency_ms']:.1f} ms",
+                f"- **Total Tokens:** {agg['total_tokens']}",
+                f"- **Avg Latency/Session:** {agg['avg_latency_per_session']:.1f} ms",
+                "",
+            ]
+        )
 
         # Per-session details
         for session_id in sorted(self.sessions):
             summary = self.summarize_session(session_id)
-            sections.extend([
-                f"## Session: {session_id}",
-                "",
-                f"- **Steps:** {summary.total_steps}",
-                f"- **Total Latency:** {summary.total_latency_ms:.1f} ms",
-                f"- **Total Tokens:** {summary.total_tokens}",
-                "",
-                "| Step | Node | Latency (ms) | Tokens |",
-                "|------|------|-------------|--------|",
-            ])
+            sections.extend(
+                [
+                    f"## Session: {session_id}",
+                    "",
+                    f"- **Steps:** {summary.total_steps}",
+                    f"- **Total Latency:** {summary.total_latency_ms:.1f} ms",
+                    f"- **Total Tokens:** {summary.total_tokens}",
+                    "",
+                    "| Step | Node | Latency (ms) | Tokens |",
+                    "|------|------|-------------|--------|",
+                ]
+            )
             for idx, interaction in enumerate(summary.interactions, 1):
                 sections.append(
                     f"| {idx} | {interaction.node_name} "

@@ -41,7 +41,9 @@ def prepare_data_node(state: TrainingState) -> dict[str, Any]:
 
 def train_node(state: TrainingState) -> dict[str, Any]:
     """Run training loop (placeholder — real training wired externally)."""
-    logger.info("Training model=%s on dataset=%s", state["model_name"], state["dataset"])
+    logger.info(
+        "Training model=%s on dataset=%s", state["model_name"], state["dataset"]
+    )
     results = {**state["results"], "train_loss": 0.3, "val_loss": 0.4}
     return {
         "messages": [*state["messages"], f"Training complete: {state['model_name']}"],

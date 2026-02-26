@@ -60,12 +60,14 @@ class ValidationResult:
     warnings: list[str] = field(default_factory=list)
 
 
-_REQUIRED_DICOM_TAGS = frozenset({
-    "PatientID",
-    "StudyInstanceUID",
-    "SeriesInstanceUID",
-    "Modality",
-})
+_REQUIRED_DICOM_TAGS = frozenset(
+    {
+        "PatientID",
+        "StudyInstanceUID",
+        "SeriesInstanceUID",
+        "Modality",
+    }
+)
 
 
 class DICOMHandler:
@@ -76,7 +78,8 @@ class DICOMHandler:
     """
 
     def validate_dicom_metadata(
-        self, metadata: dict[str, Any],
+        self,
+        metadata: dict[str, Any],
     ) -> ValidationResult:
         """Validate that required DICOM tags are present.
 
@@ -85,10 +88,7 @@ class DICOMHandler:
         metadata:
             Dictionary of DICOM tag names to values.
         """
-        missing = [
-            tag for tag in sorted(_REQUIRED_DICOM_TAGS)
-            if tag not in metadata
-        ]
+        missing = [tag for tag in sorted(_REQUIRED_DICOM_TAGS) if tag not in metadata]
         return ValidationResult(
             is_valid=len(missing) == 0,
             missing_tags=missing,
@@ -244,9 +244,7 @@ class ClinicalDeploymentPipeline:
             self.config.deployment_target == "clinical"
             and self.config.dicom.ae_title == "MINIVESS_SEG"
         ):
-            warnings.append(
-                "Using default AE title for clinical deployment"
-            )
+            warnings.append("Using default AE title for clinical deployment")
 
         return ValidationResult(
             is_valid=len(missing) == 0,
@@ -288,9 +286,7 @@ class ClinicalDeploymentPipeline:
         ]
 
         if validation.missing_tags:
-            sections.append(
-                f"- **Missing:** {', '.join(validation.missing_tags)}"
-            )
+            sections.append(f"- **Missing:** {', '.join(validation.missing_tags)}")
         if validation.warnings:
             for w in validation.warnings:
                 sections.append(f"- **Warning:** {w}")

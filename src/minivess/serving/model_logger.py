@@ -149,18 +149,14 @@ def log_ensemble_model(
     """
     # Create ensemble manifest JSON
     manifest = create_ensemble_manifest(ensemble_spec)
-    manifest_path = Path(
-        tempfile.mktemp(suffix=".json", prefix="ensemble_manifest_")
-    )
+    manifest_path = Path(tempfile.mktemp(suffix=".json", prefix="ensemble_manifest_"))
     manifest_path.write_text(
         json.dumps(manifest, indent=2),
         encoding="utf-8",
     )
 
     # Write model config JSON
-    config_json_path = Path(
-        tempfile.mktemp(suffix=".json", prefix="model_config_")
-    )
+    config_json_path = Path(tempfile.mktemp(suffix=".json", prefix="model_config_"))
     config_json_path.write_text(
         json.dumps(model_config_dict, indent=2),
         encoding="utf-8",

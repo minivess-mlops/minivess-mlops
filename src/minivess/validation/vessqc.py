@@ -213,9 +213,7 @@ def rank_samples_by_uncertainty(
         sample_ids = [f"sample_{i}" for i in range(n_samples)]
 
     # Mean uncertainty per sample (over all spatial dims)
-    mean_per_sample = [
-        float(uncertainty_maps[i].mean()) for i in range(n_samples)
-    ]
+    mean_per_sample = [float(uncertainty_maps[i].mean()) for i in range(n_samples)]
 
     # Sort descending by uncertainty
     ranked = sorted(

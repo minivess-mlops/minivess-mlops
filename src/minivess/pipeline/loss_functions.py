@@ -122,16 +122,24 @@ class ClassBalancedDiceLoss(nn.Module):
             labels_onehot[:, c] = (labels_squeeze == c).float()
 
         # Compute inverse-frequency weights per class
-        class_counts = labels_onehot.sum(dim=tuple(range(2, labels_onehot.ndim)))  # (B, C)
+        class_counts = labels_onehot.sum(
+            dim=tuple(range(2, labels_onehot.ndim))
+        )  # (B, C)
         total_voxels = class_counts.sum(dim=1, keepdim=True)  # (B, 1)
-        weights = total_voxels / (class_counts * self.num_classes + self.smooth)  # (B, C)
+        weights = total_voxels / (
+            class_counts * self.num_classes + self.smooth
+        )  # (B, C)
         weights = weights / weights.sum(dim=1, keepdim=True)  # Normalize
 
         # Per-class Dice
         spatial_dims = tuple(range(2, logits.ndim))
         intersection = (probs * labels_onehot).sum(dim=spatial_dims)  # (B, C)
-        union = probs.sum(dim=spatial_dims) + labels_onehot.sum(dim=spatial_dims)  # (B, C)
-        dice_per_class = (2.0 * intersection + self.smooth) / (union + self.smooth)  # (B, C)
+        union = probs.sum(dim=spatial_dims) + labels_onehot.sum(
+            dim=spatial_dims
+        )  # (B, C)
+        dice_per_class = (2.0 * intersection + self.smooth) / (
+            union + self.smooth
+        )  # (B, C)
 
         # Weighted average
         weighted_dice = (weights * dice_per_class).sum(dim=1)  # (B,)
@@ -183,9 +191,7 @@ class BettiLoss(nn.Module):
         grad_h = torch.diff(fg_prob, dim=3)
         grad_w = torch.diff(fg_prob, dim=4)
 
-        pred_frag = (
-            grad_d.abs().mean() + grad_h.abs().mean() + grad_w.abs().mean()
-        )
+        pred_frag = grad_d.abs().mean() + grad_h.abs().mean() + grad_w.abs().mean()
 
         # Same for ground truth
         grad_d_gt = torch.diff(fg_label, dim=2)

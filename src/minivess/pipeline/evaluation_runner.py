@@ -282,9 +282,7 @@ class UnifiedEvaluationRunner:
                         flat_metrics[f"{prefix}compound_masd_cldice"] = compound
 
             # Filter out NaN values (MLflow rejects them)
-            safe_metrics = {
-                k: v for k, v in flat_metrics.items() if not math.isnan(v)
-            }
+            safe_metrics = {k: v for k, v in flat_metrics.items() if not math.isnan(v)}
             if safe_metrics:
                 mlflow.log_metrics(safe_metrics)
 
@@ -348,8 +346,7 @@ class UnifiedEvaluationRunner:
                         cells.append("N/A")
                     else:
                         cells.append(
-                            f"{ci.point_estimate:.4f} "
-                            f"[{ci.lower:.4f}, {ci.upper:.4f}]"
+                            f"{ci.point_estimate:.4f} [{ci.lower:.4f}, {ci.upper:.4f}]"
                         )
                 lines.append("| " + " | ".join(cells) + " |")
 

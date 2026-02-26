@@ -98,7 +98,10 @@ def _affine_register(atlas: NDArray, target: NDArray) -> NDArray:
 
 
 def _deformable_register(
-    atlas: NDArray, target: NDArray, *, seed: int | None = None,
+    atlas: NDArray,
+    target: NDArray,
+    *,
+    seed: int | None = None,
 ) -> tuple[NDArray, NDArray]:
     """Simple deformable registration prototype.
 

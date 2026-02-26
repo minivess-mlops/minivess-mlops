@@ -47,7 +47,9 @@ class TestDvcYamlValid:
 
         preprocess = config["stages"]["preprocess"]
         deps = preprocess.get("deps", [])
-        assert any("preprocess.py" in d for d in deps), "preprocess should depend on preprocess.py"
+        assert any("preprocess.py" in d for d in deps), (
+            "preprocess should depend on preprocess.py"
+        )
 
     def test_preprocess_module_exists(self) -> None:
         """The preprocess module referenced in dvc.yaml should exist."""

@@ -50,7 +50,9 @@ class TestOnnxErrorPaths:
 
         config = ModelConfig(
             family=ModelFamily.MONAI_SEGRESNET,
-            name="test_meta", in_channels=1, out_channels=2,
+            name="test_meta",
+            in_channels=1,
+            out_channels=2,
         )
         model = SegResNetAdapter(config)
         with tempfile.NamedTemporaryFile(suffix=".onnx", delete=False) as f:
@@ -89,10 +91,12 @@ class TestDICOMEdgeCases:
         from minivess.serving.clinical_deploy import DICOMHandler
 
         handler = DICOMHandler()
-        result = handler.validate_dicom_metadata({
-            "PatientID": "P001",
-            "Modality": "MR",
-        })
+        result = handler.validate_dicom_metadata(
+            {
+                "PatientID": "P001",
+                "Modality": "MR",
+            }
+        )
         assert result.is_valid is False
         assert "StudyInstanceUID" in result.missing_tags
         assert "SeriesInstanceUID" in result.missing_tags
@@ -104,7 +108,8 @@ class TestDICOMEdgeCases:
 
         handler = DICOMHandler()
         sr = handler.create_dicom_sr(
-            "1.2.3.4", "1.2.3.5",
+            "1.2.3.4",
+            "1.2.3.5",
             findings={"vessel_count": 42, "dice": 0.87},
         )
         assert sr["study_uid"] == "1.2.3.4"
@@ -152,7 +157,8 @@ class TestClinicalPipelineEdgeCases:
         )
 
         config = ClinicalDeployConfig(
-            model_name="test", model_path="/some/path",
+            model_name="test",
+            model_path="/some/path",
         )
         pipeline = ClinicalDeploymentPipeline(config)
         result = pipeline.validate()
@@ -167,7 +173,8 @@ class TestClinicalPipelineEdgeCases:
         )
 
         config = ClinicalDeployConfig(
-            model_name="test", model_path="/path",
+            model_name="test",
+            model_path="/path",
             deployment_target="clinical",
         )
         pipeline = ClinicalDeploymentPipeline(config)
@@ -183,7 +190,8 @@ class TestClinicalPipelineEdgeCases:
         )
 
         config = ClinicalDeployConfig(
-            model_name="segresnet", model_path="/model.onnx",
+            model_name="segresnet",
+            model_path="/model.onnx",
             version="1.2.0",
         )
         pipeline = ClinicalDeploymentPipeline(config)

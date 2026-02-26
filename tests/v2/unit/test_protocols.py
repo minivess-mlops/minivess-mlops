@@ -20,10 +20,14 @@ class TestPredictorProtocol:
         from minivess.config.models import ModelConfig, ModelFamily
         from minivess.utils.protocols import Predictor
 
-        model = SegResNetAdapter(ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
-            name="test", in_channels=1, out_channels=2,
-        ))
+        model = SegResNetAdapter(
+            ModelConfig(
+                family=ModelFamily.MONAI_SEGRESNET,
+                name="test",
+                in_channels=1,
+                out_channels=2,
+            )
+        )
         assert isinstance(model, Predictor)
 
     def test_swinunetr_is_predictor(self) -> None:
@@ -32,10 +36,14 @@ class TestPredictorProtocol:
         from minivess.config.models import ModelConfig, ModelFamily
         from minivess.utils.protocols import Predictor
 
-        model = SwinUNETRAdapter(ModelConfig(
-            family=ModelFamily.MONAI_SWINUNETR,
-            name="test", in_channels=1, out_channels=2,
-        ))
+        model = SwinUNETRAdapter(
+            ModelConfig(
+                family=ModelFamily.MONAI_SWINUNETR,
+                name="test",
+                in_channels=1,
+                out_channels=2,
+            )
+        )
         assert isinstance(model, Predictor)
 
 
@@ -53,10 +61,14 @@ class TestCheckpointableProtocol:
         from minivess.config.models import ModelConfig, ModelFamily
         from minivess.utils.protocols import Checkpointable
 
-        model = SegResNetAdapter(ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
-            name="test", in_channels=1, out_channels=2,
-        ))
+        model = SegResNetAdapter(
+            ModelConfig(
+                family=ModelFamily.MONAI_SEGRESNET,
+                name="test",
+                in_channels=1,
+                out_channels=2,
+            )
+        )
         assert isinstance(model, Checkpointable)
 
     def test_checkpointable_has_save_load(self) -> None:

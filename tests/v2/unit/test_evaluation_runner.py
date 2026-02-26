@@ -56,7 +56,9 @@ class _MockEnsembleModel(nn.Module):
 class _FakeLoader:
     """Minimal iterable that yields image/label dicts."""
 
-    def __init__(self, n_volumes: int = 3, spatial: tuple[int, ...] = (16, 16, 8)) -> None:
+    def __init__(
+        self, n_volumes: int = 3, spatial: tuple[int, ...] = (16, 16, 8)
+    ) -> None:
         self._n = n_volumes
         self._spatial = spatial
 
@@ -91,7 +93,9 @@ def _make_fake_fold_result(n_volumes: int = 3) -> FoldResult:
     return FoldResult(per_volume_metrics=per_vol, aggregated=aggregated)
 
 
-def _build_runner() -> tuple[UnifiedEvaluationRunner, EvaluationConfig, SlidingWindowInferenceRunner]:
+def _build_runner() -> tuple[
+    UnifiedEvaluationRunner, EvaluationConfig, SlidingWindowInferenceRunner
+]:
     """Construct a runner with mocked heavy dependencies."""
     config = EvaluationConfig()
     inference_runner = SlidingWindowInferenceRunner(
@@ -163,9 +167,7 @@ class TestEvaluateSingleSubset:
 
         # Mock the expensive MetricsReloaded call
         fake_fold = _make_fake_fold_result(n_volumes=2)
-        with patch.object(
-            runner, "_run_evaluation", return_value=fake_fold
-        ):
+        with patch.object(runner, "_run_evaluation", return_value=fake_fold):
             result = runner.evaluate_single_subset(
                 model,
                 loader,
@@ -184,9 +186,7 @@ class TestEvaluateSingleSubset:
         loader = _FakeLoader(n_volumes=2, spatial=(16, 16, 8))
 
         fake_fold = _make_fake_fold_result(n_volumes=2)
-        with patch.object(
-            runner, "_run_evaluation", return_value=fake_fold
-        ):
+        with patch.object(runner, "_run_evaluation", return_value=fake_fold):
             result = runner.evaluate_single_subset(
                 model,
                 loader,
@@ -203,9 +203,7 @@ class TestEvaluateSingleSubset:
         loader = _FakeLoader(n_volumes=2, spatial=(16, 16, 8))
 
         fake_fold = _make_fake_fold_result(n_volumes=2)
-        with patch.object(
-            runner, "_run_evaluation", return_value=fake_fold
-        ):
+        with patch.object(runner, "_run_evaluation", return_value=fake_fold):
             result = runner.evaluate_single_subset(
                 model,
                 loader,
@@ -232,9 +230,7 @@ class TestEvaluateModel:
         }
 
         fake_fold = _make_fake_fold_result(n_volumes=2)
-        with patch.object(
-            runner, "_run_evaluation", return_value=fake_fold
-        ):
+        with patch.object(runner, "_run_evaluation", return_value=fake_fold):
             results = runner.evaluate_model(
                 model,
                 loaders,
@@ -261,9 +257,7 @@ class TestEvaluateModel:
         }
 
         fake_fold = _make_fake_fold_result(n_volumes=2)
-        with patch.object(
-            runner, "_run_evaluation", return_value=fake_fold
-        ):
+        with patch.object(runner, "_run_evaluation", return_value=fake_fold):
             results = runner.evaluate_model(
                 model,
                 loaders,
@@ -384,12 +378,8 @@ class TestSameInterfaceSingleAndEnsemble:
 
         fake_fold = _make_fake_fold_result(n_volumes=2)
 
-        with patch.object(
-            runner, "_run_evaluation", return_value=fake_fold
-        ):
-            single_results = runner.evaluate_model(
-                single, loaders, model_name="single"
-            )
+        with patch.object(runner, "_run_evaluation", return_value=fake_fold):
+            single_results = runner.evaluate_model(single, loaders, model_name="single")
             ensemble_results = runner.evaluate_model(
                 ensemble, loaders, model_name="ensemble"
             )

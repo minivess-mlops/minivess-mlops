@@ -22,7 +22,6 @@ from torch import Tensor
 from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 
 if TYPE_CHECKING:
-
     from minivess.config.models import ModelConfig
 
 logger = logging.getLogger(__name__)

@@ -179,9 +179,7 @@ class TestBuildEnsembles:
         assert callable(build_ensembles)
 
     @patch("minivess.orchestration.flows.analysis_flow.EnsembleBuilder")
-    def test_returns_dict_of_ensemble_specs(
-        self, mock_builder_cls: MagicMock
-    ) -> None:
+    def test_returns_dict_of_ensemble_specs(self, mock_builder_cls: MagicMock) -> None:
         """build_ensembles returns a dict mapping names to EnsembleSpec."""
         from minivess.orchestration.flows.analysis_flow import build_ensembles
 
@@ -212,12 +210,8 @@ class TestEvaluateAllModels:
 
         assert callable(evaluate_all_models)
 
-    @patch(
-        "minivess.orchestration.flows.analysis_flow._evaluate_single_model_on_all"
-    )
-    def test_returns_nested_results_dict(
-        self, mock_eval: MagicMock
-    ) -> None:
+    @patch("minivess.orchestration.flows.analysis_flow._evaluate_single_model_on_all")
+    def test_returns_nested_results_dict(self, mock_eval: MagicMock) -> None:
         """evaluate_all_models returns {model: {dataset: {subset: result}}}."""
         from minivess.orchestration.flows.analysis_flow import (
             evaluate_all_models,
@@ -235,9 +229,7 @@ class TestEvaluateAllModels:
         dataloaders = _make_mock_dataloaders()
         config = _make_eval_config()
 
-        result = evaluate_all_models(
-            single_models, ensembles, dataloaders, config
-        )
+        result = evaluate_all_models(single_models, ensembles, dataloaders, config)
         assert isinstance(result, dict)
         assert "model_a" in result
         assert "minivess" in result["model_a"]
@@ -291,9 +283,7 @@ class TestRegisterChampionTask:
             ("dice_ce_fold0", 0.82),
             ("dice_ce_cldice_fold0", 0.78),
         ]
-        mock_promoter.generate_promotion_report.return_value = (
-            "# Promotion Report\n..."
-        )
+        mock_promoter.generate_promotion_report.return_value = "# Promotion Report\n..."
         mock_promoter_cls.return_value = mock_promoter
 
         all_results = _make_all_results()
@@ -383,7 +373,13 @@ class TestRunAnalysisFlow:
         result = run_analysis_flow(config, model_config, dataloaders)
 
         assert isinstance(result, dict)
-        expected_keys = {"results", "comparison", "promotion", "report", "mlflow_evaluation"}
+        expected_keys = {
+            "results",
+            "comparison",
+            "promotion",
+            "report",
+            "mlflow_evaluation",
+        }
         assert set(result.keys()) == expected_keys
 
     def test_flow_works_without_prefect(self) -> None:
@@ -433,9 +429,7 @@ class TestAnalysisFlowWithMockData:
     @patch("minivess.orchestration.flows.analysis_flow.ModelPromoter")
     @patch("minivess.orchestration.flows.analysis_flow.EnsembleBuilder")
     @patch("minivess.orchestration.flows.analysis_flow._discover_runs")
-    @patch(
-        "minivess.orchestration.flows.analysis_flow._evaluate_single_model_on_all"
-    )
+    @patch("minivess.orchestration.flows.analysis_flow._evaluate_single_model_on_all")
     def test_full_flow_with_mocks(
         self,
         mock_eval_single: MagicMock,
@@ -472,9 +466,7 @@ class TestAnalysisFlowWithMockData:
         mock_promoter.rank_models.return_value = [
             ("dice_ce_fold0", 0.82),
         ]
-        mock_promoter.generate_promotion_report.return_value = (
-            "# Promotion Report"
-        )
+        mock_promoter.generate_promotion_report.return_value = "# Promotion Report"
         mock_promoter_cls.return_value = mock_promoter
 
         config = _make_eval_config()
@@ -528,9 +520,7 @@ class TestLogModelsToMlflow:
         config = _make_eval_config()
         model_config: dict[str, Any] = {"family": "test"}
 
-        result = log_models_to_mlflow(
-            runs, ensembles, config, model_config
-        )
+        result = log_models_to_mlflow(runs, ensembles, config, model_config)
 
         assert isinstance(result, dict)
         # Should have entries for single models + ensembles
@@ -556,9 +546,7 @@ class TestLogModelsToMlflow:
         config = _make_eval_config()
         model_config: dict[str, Any] = {"family": "test"}
 
-        result = log_models_to_mlflow(
-            runs, ensembles, config, model_config
-        )
+        result = log_models_to_mlflow(runs, ensembles, config, model_config)
 
         # Result should be a dict of model names to URIs
         assert isinstance(result, dict)

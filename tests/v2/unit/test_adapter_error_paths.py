@@ -97,9 +97,7 @@ class TestCheckpointErrors:
         model2 = SegResNetAdapter(_segresnet_config())
         model2.load_checkpoint(ckpt)
 
-        for p1, p2 in zip(
-            model.parameters(), model2.parameters(), strict=True
-        ):
+        for p1, p2 in zip(model.parameters(), model2.parameters(), strict=True):
             assert torch.equal(p1, p2)
 
 
@@ -165,7 +163,13 @@ class TestGetConfig:
         model = SegResNetAdapter(_segresnet_config())
         cfg = model.get_config()
         d = cfg.to_dict()
-        required_keys = {"family", "name", "in_channels", "out_channels", "trainable_params"}
+        required_keys = {
+            "family",
+            "name",
+            "in_channels",
+            "out_channels",
+            "trainable_params",
+        }
         assert required_keys.issubset(d.keys())
 
     def test_swinunetr_config_has_required_keys(self) -> None:

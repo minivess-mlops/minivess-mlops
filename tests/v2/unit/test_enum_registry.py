@@ -43,12 +43,26 @@ class TestEnumRegistry:
 
         # All should be StrEnum subclasses
         all_enums = [
-            AdaptationMethod, AtlasRegistrationMethod, DeploymentTarget,
-            DriftType, EnsembleStrategy, EUAIActRiskLevel, FLStrategy,
-            GenerativeUQMethod, LifecycleStage, MedicalConcept,
-            ModelFamily, ModelStage, PromptType, QCFlag,
-            QualityDimension, RandomizationParam, RegulatoryTemplate,
-            SaMDRiskClass, ShiftType, SoftwareSafetyClass,
+            AdaptationMethod,
+            AtlasRegistrationMethod,
+            DeploymentTarget,
+            DriftType,
+            EnsembleStrategy,
+            EUAIActRiskLevel,
+            FLStrategy,
+            GenerativeUQMethod,
+            LifecycleStage,
+            MedicalConcept,
+            ModelFamily,
+            ModelStage,
+            PromptType,
+            QCFlag,
+            QualityDimension,
+            RandomizationParam,
+            RegulatoryTemplate,
+            SaMDRiskClass,
+            ShiftType,
+            SoftwareSafetyClass,
         ]
         for enum_cls in all_enums:
             assert issubclass(enum_cls, StrEnum), f"{enum_cls.__name__} is not StrEnum"
@@ -58,7 +72,8 @@ class TestEnumRegistry:
         from minivess.utils import enums
 
         enum_classes = [
-            v for v in vars(enums).values()
+            v
+            for v in vars(enums).values()
             if isinstance(v, type) and issubclass(v, StrEnum) and v is not StrEnum
         ]
         assert len(enum_classes) >= 20

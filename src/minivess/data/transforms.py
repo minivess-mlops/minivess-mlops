@@ -55,22 +55,24 @@ def build_train_transforms(config: DataConfig) -> Compose:
     if spacing is not None:
         transforms.append(spacing)
 
-    transforms.extend([
-        NormalizeIntensityd(keys=ik, nonzero=True),
-        SpatialPadd(keys=keys, spatial_size=config.patch_size),
-        RandRotate90d(keys=keys, prob=0.3, spatial_axes=(0, 1)),
-        RandFlipd(keys=keys, prob=0.3, spatial_axis=0),
-        RandFlipd(keys=keys, prob=0.3, spatial_axis=1),
-        RandFlipd(keys=keys, prob=0.3, spatial_axis=2),
-        RandCropByPosNegLabeld(
-            keys=keys,
-            label_key=lk,
-            spatial_size=config.patch_size,
-            pos=1,
-            neg=1,
-            num_samples=4,
-        ),
-    ])
+    transforms.extend(
+        [
+            NormalizeIntensityd(keys=ik, nonzero=True),
+            SpatialPadd(keys=keys, spatial_size=config.patch_size),
+            RandRotate90d(keys=keys, prob=0.3, spatial_axes=(0, 1)),
+            RandFlipd(keys=keys, prob=0.3, spatial_axis=0),
+            RandFlipd(keys=keys, prob=0.3, spatial_axis=1),
+            RandFlipd(keys=keys, prob=0.3, spatial_axis=2),
+            RandCropByPosNegLabeld(
+                keys=keys,
+                label_key=lk,
+                spatial_size=config.patch_size,
+                pos=1,
+                neg=1,
+                num_samples=4,
+            ),
+        ]
+    )
 
     return Compose(transforms)
 
@@ -89,11 +91,13 @@ def build_val_transforms(config: DataConfig) -> Compose:
     if spacing is not None:
         transforms.append(spacing)
 
-    transforms.extend([
-        NormalizeIntensityd(keys=ik, nonzero=True),
-        # DynUNet with 4 levels has 3 stages of 2x downsampling → divisor = 2^3 = 8.
-        # Full-volume validation requires all spatial dims divisible by 8.
-        DivisiblePadd(keys=keys, k=8),
-    ])
+    transforms.extend(
+        [
+            NormalizeIntensityd(keys=ik, nonzero=True),
+            # DynUNet with 4 levels has 3 stages of 2x downsampling → divisor = 2^3 = 8.
+            # Full-volume validation requires all spatial dims divisible by 8.
+            DivisiblePadd(keys=keys, k=8),
+        ]
+    )
 
     return Compose(transforms)

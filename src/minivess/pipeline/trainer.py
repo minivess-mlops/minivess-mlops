@@ -273,6 +273,7 @@ class SegmentationTrainer:
                 # Use sliding window inference when val_roi_size is set,
                 # needed because full 512x512xZ volumes exceed GPU memory.
                 if self.val_roi_size is not None:
+
                     def _model_fn(x):
                         return self.model(x).logits
 
@@ -297,7 +298,11 @@ class SegmentationTrainer:
             if compute_extended:
                 # Move to CPU and convert to binary predictions
                 pred_probs = torch.softmax(logits, dim=1)
-                pred_binary = pred_probs[:, 1:].argmax(dim=1) if logits.shape[1] > 2 else (pred_probs[:, 1] > 0.5).long()
+                pred_binary = (
+                    pred_probs[:, 1:].argmax(dim=1)
+                    if logits.shape[1] > 2
+                    else (pred_probs[:, 1] > 0.5).long()
+                )
                 for b in range(images.shape[0]):
                     pred_np = pred_binary[b].cpu().numpy().astype(np.uint8)
                     label_np = labels[b, 0].cpu().numpy().astype(np.uint8)
@@ -349,7 +354,9 @@ class SegmentationTrainer:
                 per_vol_masd.append(float("nan"))
                 per_vol_dsc.append(float("nan"))
 
-        mean_cldice = float(np.nanmean(per_vol_cldice)) if per_vol_cldice else float("nan")
+        mean_cldice = (
+            float(np.nanmean(per_vol_cldice)) if per_vol_cldice else float("nan")
+        )
         mean_masd = float(np.nanmean(per_vol_masd)) if per_vol_masd else float("nan")
 
         compound = compute_compound_masd_cldice(masd=mean_masd, cldice=mean_cldice)
@@ -407,8 +414,7 @@ class SegmentationTrainer:
             train_result = self.train_epoch(train_loader)
             # Compute extended metrics every N epochs + first + last
             compute_ext_this_epoch = needs_extended and (
-                epoch % extended_frequency == 0
-                or epoch == self.config.max_epochs - 1
+                epoch % extended_frequency == 0 or epoch == self.config.max_epochs - 1
             )
             val_result = self.validate_epoch(
                 val_loader, compute_extended=compute_ext_this_epoch

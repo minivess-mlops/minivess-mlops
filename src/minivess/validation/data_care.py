@@ -145,9 +145,7 @@ def _score_range_correctness(
         out_of_range = int(((values < low) | (values > high)).sum())
         if out_of_range > 0:
             violations += out_of_range
-            issues.append(
-                f"{out_of_range}/{n} values in {col} outside [{low}, {high}]"
-            )
+            issues.append(f"{out_of_range}/{n} values in {col} outside [{low}, {high}]")
 
     score = 1.0 - violations / max(total, 1) if total > 0 else 1.0
     return DimensionScore(QualityDimension.CORRECTNESS, score, 1.0, issues)
@@ -198,20 +196,30 @@ def assess_nifti_quality(
     DataQualityReport with per-dimension scores.
     """
     metadata_cols = [
-        "file_path", "shape_x", "shape_y", "shape_z",
-        "voxel_spacing_x", "voxel_spacing_y", "voxel_spacing_z",
-        "intensity_min", "intensity_max", "has_valid_affine",
+        "file_path",
+        "shape_x",
+        "shape_y",
+        "shape_z",
+        "voxel_spacing_x",
+        "voxel_spacing_y",
+        "voxel_spacing_z",
+        "intensity_min",
+        "intensity_max",
+        "has_valid_affine",
     ]
 
     scores = [
         _score_completeness(df, metadata_cols),
-        _score_range_correctness(df, {
-            "voxel_spacing_x": (0.01, 10.0),
-            "voxel_spacing_y": (0.01, 10.0),
-            "voxel_spacing_z": (0.01, 50.0),
-            "intensity_min": (-10000.0, 10000.0),
-            "intensity_max": (-10000.0, 10000.0),
-        }),
+        _score_range_correctness(
+            df,
+            {
+                "voxel_spacing_x": (0.01, 10.0),
+                "voxel_spacing_y": (0.01, 10.0),
+                "voxel_spacing_z": (0.01, 50.0),
+                "intensity_min": (-10000.0, 10000.0),
+                "intensity_max": (-10000.0, 10000.0),
+            },
+        ),
         _score_consistency(df, ["has_valid_affine"]),
         _score_uniqueness(df, "file_path"),
         # Timeliness and representativeness default to 1.0 (require external info)
@@ -247,18 +255,25 @@ def assess_metrics_quality(
     DataQualityReport with per-dimension scores.
     """
     metric_cols = [
-        "run_id", "epoch", "train_loss", "val_loss",
-        "val_dice", "learning_rate",
+        "run_id",
+        "epoch",
+        "train_loss",
+        "val_loss",
+        "val_dice",
+        "learning_rate",
     ]
 
     scores = [
         _score_completeness(df, metric_cols),
-        _score_range_correctness(df, {
-            "val_dice": (0.0, 1.0),
-            "train_loss": (0.0, float("inf")),
-            "val_loss": (0.0, float("inf")),
-            "learning_rate": (0.0, 1.0),
-        }),
+        _score_range_correctness(
+            df,
+            {
+                "val_dice": (0.0, 1.0),
+                "train_loss": (0.0, float("inf")),
+                "val_loss": (0.0, float("inf")),
+                "learning_rate": (0.0, 1.0),
+            },
+        ),
         # Consistency: epochs should be monotonically increasing per run
         _score_epoch_consistency(df),
         # Uniqueness: not applicable for metrics (multiple epochs per run)

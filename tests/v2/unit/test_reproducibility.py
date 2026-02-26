@@ -76,9 +76,11 @@ class TestDataLoaderWorkerSeeding:
         """build_train_loader should use MONAI ThreadDataLoader."""
         from minivess.data import loader
 
-        with patch.object(loader, "CacheDataset"), \
-             patch.object(loader, "ThreadDataLoader") as mock_dl, \
-             patch.object(loader, "build_train_transforms"):
+        with (
+            patch.object(loader, "CacheDataset"),
+            patch.object(loader, "ThreadDataLoader") as mock_dl,
+            patch.object(loader, "build_train_transforms"),
+        ):
             from minivess.config.models import DataConfig
 
             config = DataConfig(dataset_name="test", num_workers=2)

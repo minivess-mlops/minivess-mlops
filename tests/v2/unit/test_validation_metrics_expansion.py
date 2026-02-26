@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math
-
 import pytest
 
 from minivess.pipeline.validation_metrics import (
@@ -54,7 +52,9 @@ class TestCompoundMasdCldice:
         """Verify the formula: 0.5 * normalize_masd(masd) + 0.5 * cldice."""
         masd, cldice = 10.0, 0.8
         expected = 0.5 * normalize_masd(masd) + 0.5 * cldice
-        assert compute_compound_masd_cldice(masd=masd, cldice=cldice) == pytest.approx(expected)
+        assert compute_compound_masd_cldice(masd=masd, cldice=cldice) == pytest.approx(
+            expected
+        )
 
     def test_custom_weights(self):
         """Custom weights change the compound value."""
@@ -77,4 +77,6 @@ class TestCompoundMasdCldice:
         for masd in [0.0, 5.0, 25.0, 50.0, 100.0]:
             for cldice in [0.0, 0.5, 1.0]:
                 val = compute_compound_masd_cldice(masd=masd, cldice=cldice)
-                assert 0.0 <= val <= 1.0, f"Out of range: masd={masd}, cldice={cldice} → {val}"
+                assert 0.0 <= val <= 1.0, (
+                    f"Out of range: masd={masd}, cldice={cldice} → {val}"
+                )

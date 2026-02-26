@@ -61,7 +61,9 @@ class CenterlineCrossEntropyLoss(nn.Module):
         ce_loss = F.cross_entropy(logits, labels_squeeze)
 
         # Centerline-weighted cross-entropy
-        cl_weight_map = self._compute_centerline_weights(labels_squeeze, logits.shape[1])
+        cl_weight_map = self._compute_centerline_weights(
+            labels_squeeze, logits.shape[1]
+        )
 
         # Per-voxel CE
         log_probs = F.log_softmax(logits, dim=1)

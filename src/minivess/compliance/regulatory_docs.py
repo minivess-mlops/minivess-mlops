@@ -138,10 +138,16 @@ class RegulatoryDocGenerator:
         )
 
         lines.append("\n## Mitigation Strategies\n")
-        lines.append("1. **Uncertainty Quantification**: MC Dropout + conformal prediction sets")
+        lines.append(
+            "1. **Uncertainty Quantification**: MC Dropout + conformal prediction sets"
+        )
         lines.append("2. **Data Validation**: Great Expectations batch quality gates")
-        lines.append("3. **Drift Detection**: Statistical drift monitoring (KS test, PSI)")
-        lines.append("4. **Audit Trail**: Full lifecycle traceability (IEC 62304 Clause 8)")
+        lines.append(
+            "3. **Drift Detection**: Statistical drift monitoring (KS test, PSI)"
+        )
+        lines.append(
+            "4. **Audit Trail**: Full lifecycle traceability (IEC 62304 Clause 8)"
+        )
 
         return "\n".join(lines)
 
@@ -163,21 +169,16 @@ class RegulatoryDocGenerator:
         lines.append("## 2. Functional Requirements\n")
         lines.append("| Req ID | Description | Priority | Verification |")
         lines.append("|--------|-------------|----------|--------------|")
-        lines.append(
-            "| FR-001 | Accept NIfTI input volumes "
-            "| Must | Unit test |"
-        )
+        lines.append("| FR-001 | Accept NIfTI input volumes | Must | Unit test |")
         lines.append(
             "| FR-002 | Produce segmentation masks with class probabilities "
             "| Must | Integration test |"
         )
         lines.append(
-            "| FR-003 | Report uncertainty estimates per voxel "
-            "| Should | Unit test |"
+            "| FR-003 | Report uncertainty estimates per voxel | Should | Unit test |"
         )
         lines.append(
-            "| FR-004 | Log all processing to audit trail "
-            "| Must | Unit test |"
+            "| FR-004 | Log all processing to audit trail | Must | Unit test |"
         )
 
         lines.append("\n## 3. Non-Functional Requirements\n")
@@ -205,8 +206,7 @@ class RegulatoryDocGenerator:
         lines = [self._header("Validation Summary")]
 
         test_events = [
-            e for e in self.audit_trail.entries
-            if e.event_type == "TEST_EVALUATION"
+            e for e in self.audit_trail.entries if e.event_type == "TEST_EVALUATION"
         ]
 
         if not test_events:

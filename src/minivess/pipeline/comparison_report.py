@@ -142,7 +142,9 @@ def _aggregate_subset_metrics(
     aggregated: dict[str, float] = {}
     for metric_name in metric_sums:
         count = metric_counts[metric_name]
-        aggregated[metric_name] = metric_sums[metric_name] / count if count > 0 else float("nan")
+        aggregated[metric_name] = (
+            metric_sums[metric_name] / count if count > 0 else float("nan")
+        )
 
     return aggregated, per_volume
 

@@ -81,14 +81,18 @@ class CenterlineBoundaryDiceLoss(nn.Module):
         # Uses average pooling as a soft distance proxy
         cl_weight = self._soft_distance_weight(labels_onehot, kernel_size=5)
         cl_intersection = (probs * labels_onehot * cl_weight).sum(dim=spatial_dims)
-        cl_union = (probs * cl_weight).sum(dim=spatial_dims) + (labels_onehot * cl_weight).sum(dim=spatial_dims)
+        cl_union = (probs * cl_weight).sum(dim=spatial_dims) + (
+            labels_onehot * cl_weight
+        ).sum(dim=spatial_dims)
         cl_dice = (2.0 * cl_intersection + self.smooth) / (cl_union + self.smooth)
         cl_loss = 1.0 - cl_dice.mean()
 
         # Boundary weighting: approximate boundary via gradient magnitude
         bd_weight = self._boundary_weight(labels_onehot)
         bd_intersection = (probs * labels_onehot * bd_weight).sum(dim=spatial_dims)
-        bd_union = (probs * bd_weight).sum(dim=spatial_dims) + (labels_onehot * bd_weight).sum(dim=spatial_dims)
+        bd_union = (probs * bd_weight).sum(dim=spatial_dims) + (
+            labels_onehot * bd_weight
+        ).sum(dim=spatial_dims)
         bd_dice = (2.0 * bd_intersection + self.smooth) / (bd_union + self.smooth)
         bd_loss = 1.0 - bd_dice.mean()
 

@@ -115,18 +115,20 @@ class TestAssessNiftiQuality:
 
     def _make_clean_df(self) -> pd.DataFrame:
         """Create a clean NIfTI metadata DataFrame."""
-        return pd.DataFrame({
-            "file_path": ["/data/vol001.nii.gz", "/data/vol002.nii.gz"],
-            "shape_x": [128, 128],
-            "shape_y": [128, 128],
-            "shape_z": [32, 32],
-            "voxel_spacing_x": [0.5, 0.5],
-            "voxel_spacing_y": [0.5, 0.5],
-            "voxel_spacing_z": [1.0, 1.0],
-            "intensity_min": [0.0, 0.0],
-            "intensity_max": [1.0, 1.0],
-            "has_valid_affine": [True, True],
-        })
+        return pd.DataFrame(
+            {
+                "file_path": ["/data/vol001.nii.gz", "/data/vol002.nii.gz"],
+                "shape_x": [128, 128],
+                "shape_y": [128, 128],
+                "shape_z": [32, 32],
+                "voxel_spacing_x": [0.5, 0.5],
+                "voxel_spacing_y": [0.5, 0.5],
+                "voxel_spacing_z": [1.0, 1.0],
+                "intensity_min": [0.0, 0.0],
+                "intensity_max": [1.0, 1.0],
+                "has_valid_affine": [True, True],
+            }
+        )
 
     def test_clean_data_passes(self) -> None:
         """Clean NIfTI metadata should get high overall score."""
@@ -146,7 +148,8 @@ class TestAssessNiftiQuality:
 
         report = assess_nifti_quality(df)
         completeness = next(
-            s for s in report.dimension_scores
+            s
+            for s in report.dimension_scores
             if s.dimension == QualityDimension.COMPLETENESS
         )
         assert completeness.score < 1.0
@@ -160,7 +163,8 @@ class TestAssessNiftiQuality:
 
         report = assess_nifti_quality(df)
         uniqueness = next(
-            s for s in report.dimension_scores
+            s
+            for s in report.dimension_scores
             if s.dimension == QualityDimension.UNIQUENESS
         )
         assert uniqueness.score < 1.0
@@ -174,7 +178,8 @@ class TestAssessNiftiQuality:
 
         report = assess_nifti_quality(df)
         correctness = next(
-            s for s in report.dimension_scores
+            s
+            for s in report.dimension_scores
             if s.dimension == QualityDimension.CORRECTNESS
         )
         assert correctness.score < 1.0
@@ -190,14 +195,16 @@ class TestAssessMetricsQuality:
 
     def _make_clean_metrics_df(self) -> pd.DataFrame:
         """Create a clean training metrics DataFrame."""
-        return pd.DataFrame({
-            "run_id": ["run_001", "run_001", "run_001"],
-            "epoch": [1, 2, 3],
-            "train_loss": [0.5, 0.4, 0.3],
-            "val_loss": [0.6, 0.5, 0.4],
-            "val_dice": [0.7, 0.75, 0.8],
-            "learning_rate": [1e-4, 1e-4, 1e-4],
-        })
+        return pd.DataFrame(
+            {
+                "run_id": ["run_001", "run_001", "run_001"],
+                "epoch": [1, 2, 3],
+                "train_loss": [0.5, 0.4, 0.3],
+                "val_loss": [0.6, 0.5, 0.4],
+                "val_dice": [0.7, 0.75, 0.8],
+                "learning_rate": [1e-4, 1e-4, 1e-4],
+            }
+        )
 
     def test_clean_metrics_pass(self) -> None:
         """Clean training metrics should get high score."""
@@ -220,7 +227,8 @@ class TestAssessMetricsQuality:
 
         report = assess_metrics_quality(df)
         correctness = next(
-            s for s in report.dimension_scores
+            s
+            for s in report.dimension_scores
             if s.dimension == QualityDimension.CORRECTNESS
         )
         assert correctness.score < 1.0
@@ -237,7 +245,8 @@ class TestAssessMetricsQuality:
 
         report = assess_metrics_quality(df)
         correctness = next(
-            s for s in report.dimension_scores
+            s
+            for s in report.dimension_scores
             if s.dimension == QualityDimension.CORRECTNESS
         )
         assert correctness.score < 1.0

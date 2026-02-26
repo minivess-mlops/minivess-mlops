@@ -171,7 +171,10 @@ class TestPipelineRun:
         from minivess.observability.lineage import LineageEmitter
 
         emitter = LineageEmitter()
-        with pytest.raises(ValueError, match="test error"), emitter.pipeline_run("failing_pipeline"):
+        with (
+            pytest.raises(ValueError, match="test error"),
+            emitter.pipeline_run("failing_pipeline"),
+        ):
             msg = "test error"
             raise ValueError(msg)
 
@@ -185,7 +188,9 @@ class TestPipelineRun:
         with emitter.pipeline_run("consistent_run") as run_id:
             emitter.emit_start("substep", parent_run_id=run_id)
 
-        run_ids = {e.run.runId for e in emitter.events if e.job.name == "consistent_run"}
+        run_ids = {
+            e.run.runId for e in emitter.events if e.job.name == "consistent_run"
+        }
         assert len(run_ids) == 1
 
 

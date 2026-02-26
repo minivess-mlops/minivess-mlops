@@ -44,7 +44,10 @@ class EvaluationRunner:
     # Primary metrics (always computed)
     PRIMARY_METRICS = ("centreline_dsc", "dsc", "measured_masd")
     # Expensive metrics (optional, for test-time only)
-    EXPENSIVE_METRICS = ("measured_hausdorff_distance_perc", "normalised_surface_distance")
+    EXPENSIVE_METRICS = (
+        "measured_hausdorff_distance_perc",
+        "normalised_surface_distance",
+    )
 
     def __init__(
         self,

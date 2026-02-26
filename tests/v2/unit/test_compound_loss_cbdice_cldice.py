@@ -53,8 +53,12 @@ class TestCbDiceClDiceLoss:
         from minivess.pipeline.loss_functions import CbDiceClDiceLoss
 
         logits, labels = random_logits_labels
-        loss_equal = CbDiceClDiceLoss(lambda_cbdice=0.5, lambda_cldice=0.5)(logits, labels)
-        loss_skewed = CbDiceClDiceLoss(lambda_cbdice=0.9, lambda_cldice=0.1)(logits, labels)
+        loss_equal = CbDiceClDiceLoss(lambda_cbdice=0.5, lambda_cldice=0.5)(
+            logits, labels
+        )
+        loss_skewed = CbDiceClDiceLoss(lambda_cbdice=0.9, lambda_cldice=0.1)(
+            logits, labels
+        )
         # Different weights should produce different loss values
         assert not torch.isclose(loss_equal, loss_skewed, atol=1e-6), (
             "Different weights produced same loss"

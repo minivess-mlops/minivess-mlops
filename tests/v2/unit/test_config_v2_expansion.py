@@ -26,7 +26,10 @@ class TestConfigV2Expansion:
 
     def test_primary_metric_is_compound(self, experiment_config):
         """Primary metric must be val_compound_masd_cldice."""
-        assert experiment_config["checkpoint"]["primary_metric"] == "val_compound_masd_cldice"
+        assert (
+            experiment_config["checkpoint"]["primary_metric"]
+            == "val_compound_masd_cldice"
+        )
 
     def test_cbdice_cldice_in_loss_list(self, experiment_config):
         """cbdice_cldice must be in the loss list."""
@@ -46,8 +49,12 @@ class TestConfigV2Expansion:
         """Verify exact set of tracked metric names."""
         names = {m["name"] for m in experiment_config["checkpoint"]["tracked_metrics"]}
         expected = {
-            "val_loss", "val_dice", "val_f1_foreground",
-            "val_cldice", "val_masd", "val_compound_masd_cldice",
+            "val_loss",
+            "val_dice",
+            "val_f1_foreground",
+            "val_cldice",
+            "val_masd",
+            "val_compound_masd_cldice",
         }
         assert names == expected
 

@@ -79,16 +79,25 @@ class TestSessionSummary:
 
         interactions = [
             AgentInteraction(
-                node_name="plan", input_summary="i", output_summary="o",
-                latency_ms=100.0, token_count=50,
+                node_name="plan",
+                input_summary="i",
+                output_summary="o",
+                latency_ms=100.0,
+                token_count=50,
             ),
             AgentInteraction(
-                node_name="execute", input_summary="i", output_summary="o",
-                latency_ms=200.0, token_count=150,
+                node_name="execute",
+                input_summary="i",
+                output_summary="o",
+                latency_ms=200.0,
+                token_count=150,
             ),
             AgentInteraction(
-                node_name="evaluate", input_summary="i", output_summary="o",
-                latency_ms=300.0, token_count=100,
+                node_name="evaluate",
+                input_summary="i",
+                output_summary="o",
+                latency_ms=300.0,
+                token_count=100,
             ),
         ]
         summary = SessionSummary(session_id="sess-002", interactions=interactions)
@@ -125,9 +134,15 @@ class TestAgentDiagnostics:
         from minivess.observability.agent_diagnostics import AgentDiagnostics
 
         diag = AgentDiagnostics()
-        diag.record_interaction(session_id="s1", node_name="a", input_summary="", output_summary="")
-        diag.record_interaction(session_id="s2", node_name="b", input_summary="", output_summary="")
-        diag.record_interaction(session_id="s1", node_name="c", input_summary="", output_summary="")
+        diag.record_interaction(
+            session_id="s1", node_name="a", input_summary="", output_summary=""
+        )
+        diag.record_interaction(
+            session_id="s2", node_name="b", input_summary="", output_summary=""
+        )
+        diag.record_interaction(
+            session_id="s1", node_name="c", input_summary="", output_summary=""
+        )
         assert len(diag.sessions) == 2
         assert len(diag.sessions["s1"]) == 2
         assert len(diag.sessions["s2"]) == 1
@@ -138,14 +153,20 @@ class TestAgentDiagnostics:
 
         diag = AgentDiagnostics()
         diag.record_interaction(
-            session_id="s1", node_name="plan",
-            input_summary="i", output_summary="o",
-            latency_ms=100.0, token_count=50,
+            session_id="s1",
+            node_name="plan",
+            input_summary="i",
+            output_summary="o",
+            latency_ms=100.0,
+            token_count=50,
         )
         diag.record_interaction(
-            session_id="s1", node_name="execute",
-            input_summary="i", output_summary="o",
-            latency_ms=200.0, token_count=100,
+            session_id="s1",
+            node_name="execute",
+            input_summary="i",
+            output_summary="o",
+            latency_ms=200.0,
+            token_count=100,
         )
         summary = diag.summarize_session("s1")
         assert summary.total_steps == 2
@@ -157,9 +178,27 @@ class TestAgentDiagnostics:
         from minivess.observability.agent_diagnostics import AgentDiagnostics
 
         diag = AgentDiagnostics()
-        diag.record_interaction(session_id="s1", node_name="a", input_summary="", output_summary="", latency_ms=100.0)
-        diag.record_interaction(session_id="s1", node_name="b", input_summary="", output_summary="", latency_ms=200.0)
-        diag.record_interaction(session_id="s2", node_name="c", input_summary="", output_summary="", latency_ms=300.0)
+        diag.record_interaction(
+            session_id="s1",
+            node_name="a",
+            input_summary="",
+            output_summary="",
+            latency_ms=100.0,
+        )
+        diag.record_interaction(
+            session_id="s1",
+            node_name="b",
+            input_summary="",
+            output_summary="",
+            latency_ms=200.0,
+        )
+        diag.record_interaction(
+            session_id="s2",
+            node_name="c",
+            input_summary="",
+            output_summary="",
+            latency_ms=300.0,
+        )
 
         agg = diag.summarize_aggregate()
         assert agg["total_sessions"] == 2
@@ -172,9 +211,12 @@ class TestAgentDiagnostics:
 
         diag = AgentDiagnostics()
         diag.record_interaction(
-            session_id="s1", node_name="plan",
-            input_summary="Start planning", output_summary="Plan ready",
-            latency_ms=150.0, token_count=80,
+            session_id="s1",
+            node_name="plan",
+            input_summary="Start planning",
+            output_summary="Plan ready",
+            latency_ms=150.0,
+            token_count=80,
         )
         md = diag.to_markdown()
         assert "Agent Diagnostics" in md

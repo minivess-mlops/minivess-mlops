@@ -244,12 +244,14 @@ class GenerativeUQEvaluator:
             sections.append("")
             return "\n".join(sections)
 
-        sections.extend([
-            "## Per-Volume Metrics",
-            "",
-            "| Volume | Samples | Raters | GED | Q-Dice |",
-            "|--------|---------|--------|-----|--------|",
-        ])
+        sections.extend(
+            [
+                "## Per-Volume Metrics",
+                "",
+                "| Volume | Samples | Raters | GED | Q-Dice |",
+                "|--------|---------|--------|-----|--------|",
+            ]
+        )
 
         for vid in sorted(self.volumes):
             data = self.volumes[vid]

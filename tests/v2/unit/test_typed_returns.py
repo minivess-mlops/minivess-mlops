@@ -82,10 +82,14 @@ class TestAdaptersReturnConfigInfo:
         from minivess.adapters.segresnet import SegResNetAdapter
         from minivess.config.models import ModelConfig, ModelFamily
 
-        model = SegResNetAdapter(ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
-            name="test", in_channels=1, out_channels=2,
-        ))
+        model = SegResNetAdapter(
+            ModelConfig(
+                family=ModelFamily.MONAI_SEGRESNET,
+                name="test",
+                in_channels=1,
+                out_channels=2,
+            )
+        )
         cfg = model.get_config()
         assert isinstance(cfg, AdapterConfigInfo)
         assert cfg.family == ModelFamily.MONAI_SEGRESNET.value
@@ -99,10 +103,14 @@ class TestAdaptersReturnConfigInfo:
         from minivess.adapters.swinunetr import SwinUNETRAdapter
         from minivess.config.models import ModelConfig, ModelFamily
 
-        model = SwinUNETRAdapter(ModelConfig(
-            family=ModelFamily.MONAI_SWINUNETR,
-            name="test", in_channels=1, out_channels=2,
-        ))
+        model = SwinUNETRAdapter(
+            ModelConfig(
+                family=ModelFamily.MONAI_SWINUNETR,
+                name="test",
+                in_channels=1,
+                out_channels=2,
+            )
+        )
         cfg = model.get_config()
         assert isinstance(cfg, AdapterConfigInfo)
         assert cfg.extras["feature_size"] == 48
@@ -114,10 +122,14 @@ class TestAdaptersReturnConfigInfo:
         from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.config.models import ModelConfig, ModelFamily
 
-        model = DynUNetAdapter(ModelConfig(
-            family=ModelFamily.MONAI_DYNUNET,
-            name="test", in_channels=1, out_channels=2,
-        ))
+        model = DynUNetAdapter(
+            ModelConfig(
+                family=ModelFamily.MONAI_DYNUNET,
+                name="test",
+                in_channels=1,
+                out_channels=2,
+            )
+        )
         cfg = model.get_config()
         assert isinstance(cfg, AdapterConfigInfo)
         assert cfg.extras["filters"] == [32, 64, 128, 256]
@@ -128,10 +140,14 @@ class TestAdaptersReturnConfigInfo:
         from minivess.adapters.comma import CommaAdapter
         from minivess.config.models import ModelConfig, ModelFamily
 
-        model = CommaAdapter(ModelConfig(
-            family=ModelFamily.COMMA_MAMBA,
-            name="test", in_channels=1, out_channels=2,
-        ))
+        model = CommaAdapter(
+            ModelConfig(
+                family=ModelFamily.COMMA_MAMBA,
+                name="test",
+                in_channels=1,
+                out_channels=2,
+            )
+        )
         cfg = model.get_config()
         assert isinstance(cfg, AdapterConfigInfo)
         assert cfg.extras["d_state"] == 16
@@ -143,10 +159,14 @@ class TestAdaptersReturnConfigInfo:
         from minivess.adapters.segresnet import SegResNetAdapter
         from minivess.config.models import ModelConfig, ModelFamily
 
-        base = SegResNetAdapter(ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
-            name="test", in_channels=1, out_channels=2,
-        ))
+        base = SegResNetAdapter(
+            ModelConfig(
+                family=ModelFamily.MONAI_SEGRESNET,
+                name="test",
+                in_channels=1,
+                out_channels=2,
+            )
+        )
         lora = LoraModelAdapter(base, lora_rank=8)
         cfg = lora.get_config()
         assert isinstance(cfg, AdapterConfigInfo)
@@ -193,8 +213,12 @@ class TestOnnxModelMetadata:
         from minivess.serving.onnx_inference import OnnxModelMetadata, OnnxTensorSpec
 
         meta = OnnxModelMetadata(
-            inputs=[OnnxTensorSpec(name="images", shape=[1, 1, 64, 64, 64], type="float")],
-            outputs=[OnnxTensorSpec(name="logits", shape=[1, 2, 64, 64, 64], type="float")],
+            inputs=[
+                OnnxTensorSpec(name="images", shape=[1, 1, 64, 64, 64], type="float")
+            ],
+            outputs=[
+                OnnxTensorSpec(name="logits", shape=[1, 2, 64, 64, 64], type="float")
+            ],
         )
         assert len(meta.inputs) == 1
         assert meta.inputs[0].name == "images"

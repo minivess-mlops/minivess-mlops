@@ -118,12 +118,14 @@ class LoraModelAdapter(ModelAdapter):
 
     def get_config(self) -> AdapterConfigInfo:
         base_config = self._base_model.get_config()
-        base_config.extras.update({
-            "lora_rank": self._lora_rank,
-            "lora_alpha": self._lora_alpha,
-            "lora_dropout": self._lora_dropout,
-            "lora_applied": self._peft_model is not None,
-        })
+        base_config.extras.update(
+            {
+                "lora_rank": self._lora_rank,
+                "lora_alpha": self._lora_alpha,
+                "lora_dropout": self._lora_dropout,
+                "lora_applied": self._peft_model is not None,
+            }
+        )
         return base_config
 
     def load_checkpoint(self, path: Path) -> None:
@@ -138,9 +140,7 @@ class LoraModelAdapter(ModelAdapter):
         if self._peft_model is not None:
             # Save only LoRA adapter weights
             lora_state = {
-                k: v
-                for k, v in self._peft_model.named_parameters()
-                if "lora_" in k
+                k: v for k, v in self._peft_model.named_parameters() if "lora_" in k
             }
             torch.save(lora_state, path)
         else:
@@ -149,9 +149,7 @@ class LoraModelAdapter(ModelAdapter):
     def trainable_parameters(self) -> int:
         if self._peft_model is not None:
             return sum(
-                p.numel()
-                for p in self._peft_model.parameters()
-                if p.requires_grad
+                p.numel() for p in self._peft_model.parameters() if p.requires_grad
             )
         return self._base_model.trainable_parameters()
 

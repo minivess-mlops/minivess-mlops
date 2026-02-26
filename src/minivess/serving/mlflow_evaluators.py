@@ -98,9 +98,7 @@ def build_evaluation_dataframe(
     common_names = sorted(set(pred_files.keys()) & set(label_files.keys()))
 
     if not common_names:
-        return pd.DataFrame(
-            columns=["prediction_path", "label_path", "volume_name"]
-        )
+        return pd.DataFrame(columns=["prediction_path", "label_path", "volume_name"])
 
     rows = []
     for name in common_names:

@@ -88,15 +88,11 @@ def preprocess_dataset(
 
     report_path = out_dir / "validation_report.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    logger.info(
-        "Preprocessing complete: %d volumes → %s", len(pairs), out_dir
-    )
+    logger.info("Preprocessing complete: %d volumes → %s", len(pairs), out_dir)
     return report_path
 
 
-def _collect_volume_stats(
-    img_path: Path, lbl_path: Path, filename: str
-) -> dict:
+def _collect_volume_stats(img_path: Path, lbl_path: Path, filename: str) -> dict:
     """Collect per-volume statistics for the validation report."""
     img_nii = nib.load(img_path)
     img_data = np.asarray(img_nii.dataobj)

@@ -19,7 +19,9 @@ class TestIntensityDrift:
 
         rng = np.random.default_rng(42)
         original = torch.tensor(rng.random((1, 32, 32, 8), dtype=np.float32))
-        drifted = apply_drift(original, DriftType.INTENSITY_SHIFT, severity=0.5, seed=42)
+        drifted = apply_drift(
+            original, DriftType.INTENSITY_SHIFT, severity=0.5, seed=42
+        )
 
         # KS test should detect the shift
         _, p_value = stats.ks_2samp(
@@ -34,9 +36,7 @@ class TestIntensityDrift:
         original = torch.tensor(rng.random((1, 32, 32, 8), dtype=np.float32))
         same = apply_drift(original, DriftType.INTENSITY_SHIFT, severity=0.0, seed=42)
 
-        _, p_value = stats.ks_2samp(
-            original.numpy().flatten(), same.numpy().flatten()
-        )
+        _, p_value = stats.ks_2samp(original.numpy().flatten(), same.numpy().flatten())
         assert p_value > 0.05, f"False drift detection: p={p_value:.4f}"
 
 
@@ -69,19 +69,31 @@ class TestResolutionDrift:
         )
 
         # High-frequency energy should decrease after blur
-        orig_laplacian = torch.nn.functional.conv3d(
-            original.unsqueeze(0),
-            _laplacian_kernel(),
-            padding=1,
-        ).abs().mean().item()
+        orig_laplacian = (
+            torch.nn.functional.conv3d(
+                original.unsqueeze(0),
+                _laplacian_kernel(),
+                padding=1,
+            )
+            .abs()
+            .mean()
+            .item()
+        )
 
-        blur_laplacian = torch.nn.functional.conv3d(
-            blurred.unsqueeze(0),
-            _laplacian_kernel(),
-            padding=1,
-        ).abs().mean().item()
+        blur_laplacian = (
+            torch.nn.functional.conv3d(
+                blurred.unsqueeze(0),
+                _laplacian_kernel(),
+                padding=1,
+            )
+            .abs()
+            .mean()
+            .item()
+        )
 
-        assert blur_laplacian < orig_laplacian, "Blur should reduce high-frequency energy"
+        assert blur_laplacian < orig_laplacian, (
+            "Blur should reduce high-frequency energy"
+        )
 
 
 class TestTopologyDrift:
@@ -123,7 +135,7 @@ class TestGradualDrift:
         for i in range(1, len(deviations)):
             assert deviations[i] >= deviations[i - 1] - 1e-7, (
                 f"Deviation should increase with severity: "
-                f"{deviations[i]:.6f} < {deviations[i-1]:.6f}"
+                f"{deviations[i]:.6f} < {deviations[i - 1]:.6f}"
             )
 
 

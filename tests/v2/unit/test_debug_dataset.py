@@ -102,7 +102,9 @@ class TestCreateDebugDataset:
         first_file = sorted((dir_a / "raw").glob("*.nii.gz"))[0]
         data_a = nib.load(str(first_file)).get_fdata()
         data_c = nib.load(str(dir_c / "raw" / first_file.name)).get_fdata()
-        assert not np.array_equal(data_a, data_c), "Different seeds should produce different data"
+        assert not np.array_equal(data_a, data_c), (
+            "Different seeds should produce different data"
+        )
 
     def test_debug_dataset_directory_structure(self, tmp_path: Path) -> None:
         """Creates raw/ and seg/ directories in the output path."""

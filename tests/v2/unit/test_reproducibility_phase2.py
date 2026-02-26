@@ -138,17 +138,13 @@ class TestConfigurableMAPIESeed:
         probs = raw / raw.sum(axis=1, keepdims=True)
         labels = probs.argmax(axis=1).astype(np.int64)
 
-        with patch(
-            "minivess.ensemble.mapie_conformal.LogisticRegression"
-        ) as mock_lr:
+        with patch("minivess.ensemble.mapie_conformal.LogisticRegression") as mock_lr:
             mock_clf = MagicMock()
             mock_lr.return_value = mock_clf
             mock_clf.classes_ = np.arange(n_classes)
 
             # We need to mock the SplitConformalClassifier too
-            with patch(
-                "minivess.ensemble.mapie_conformal.SplitConformalClassifier"
-            ):
+            with patch("minivess.ensemble.mapie_conformal.SplitConformalClassifier"):
                 predictor.calibrate(probs, labels)
 
             mock_lr.assert_called_once_with(max_iter=200, random_state=77)

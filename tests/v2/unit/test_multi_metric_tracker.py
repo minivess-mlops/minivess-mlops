@@ -372,8 +372,8 @@ def test_checkpoint_save_load_round_trip(tmp_path: Path) -> None:
 
     assert checkpoint_path.exists()
 
-    loaded_model, loaded_opt, loaded_sched, loaded_ckpt, loaded_scaler = load_metric_checkpoint(
-        checkpoint_path
+    loaded_model, loaded_opt, loaded_sched, loaded_ckpt, loaded_scaler = (
+        load_metric_checkpoint(checkpoint_path)
     )
 
     # Model state round-trip

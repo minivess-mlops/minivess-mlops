@@ -61,6 +61,7 @@ dependencies = [
     "weightwatcher>=0.7,<1.0",
     "openlineage-python>=1.26,<2.0",
     "nibabel>=5.3.3",
+    "onnx>=1.20.1",
 ]
 
 [project.optional-dependencies]
@@ -153,6 +154,9 @@ docstring-code-format = true
 # ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.12"
+mypy_path = "src"
+explicit_package_bases = true
+namespace_packages = true
 strict = true
 warn_return_any = true
 warn_unused_configs = true
@@ -201,6 +205,8 @@ module = [
     "MetricsReloaded.*",
     "scipy.*",
     "nibabel.*",
+    "prefect.*",
+    "pandas.*",
 ]
 ignore_missing_imports = true
 
@@ -269,6 +275,12 @@ build-constraint-dependencies = [
 # weightwatcher pins pandas==2.1.4 which fails to build from source on Python 3.13+
 override-dependencies = [
     "pandas>=2.2",
+]
+# NumPy 2.x ABI constraint: matplotlib 3.7.x wheels were compiled against NumPy 1.x
+# and crash at import time when NumPy 2.x is installed. On Python 3.13+ numpy 2.x
+# is required (no 1.x wheels exist), so this constraint only applies to <3.13.
+constraint-dependencies = [
+    "numpy<2.0; python_version < '3.13'",
 ]
 
 [dependency-groups]

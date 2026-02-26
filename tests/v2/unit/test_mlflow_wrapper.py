@@ -49,7 +49,10 @@ def _save_single_checkpoint(tmp_path: Path, *, fg_prob: float = 0.8) -> Path:
             "model_state_dict": net.state_dict(),
             "optimizer_state_dict": {},
             "scheduler_state_dict": {},
-            "checkpoint_metadata": {"epoch": 50, "metric_name": "val_compound_masd_cldice"},
+            "checkpoint_metadata": {
+                "epoch": 50,
+                "metric_name": "val_compound_masd_cldice",
+            },
         },
         ckpt_path,
     )
@@ -248,7 +251,9 @@ class TestMiniVessEnsembleModel:
         # Create 3 member checkpoints
         member_paths = []
         for i in range(3):
-            p = _save_single_checkpoint(tmp_path / f"member_{i}", fg_prob=0.7 + i * 0.05)
+            p = _save_single_checkpoint(
+                tmp_path / f"member_{i}", fg_prob=0.7 + i * 0.05
+            )
             member_paths.append(p)
 
         config_path = _save_model_config(tmp_path)
@@ -272,7 +277,9 @@ class TestMiniVessEnsembleModel:
 
         member_paths = []
         for i in range(3):
-            p = _save_single_checkpoint(tmp_path / f"member_{i}", fg_prob=0.7 + i * 0.05)
+            p = _save_single_checkpoint(
+                tmp_path / f"member_{i}", fg_prob=0.7 + i * 0.05
+            )
             member_paths.append(p)
 
         config_path = _save_model_config(tmp_path)
@@ -332,7 +339,9 @@ class TestMiniVessEnsembleModel:
 
         member_paths = []
         for i in range(3):
-            p = _save_single_checkpoint(tmp_path / f"member_{i}", fg_prob=0.5 + i * 0.15)
+            p = _save_single_checkpoint(
+                tmp_path / f"member_{i}", fg_prob=0.5 + i * 0.15
+            )
             member_paths.append(p)
 
         config_path = _save_model_config(tmp_path)

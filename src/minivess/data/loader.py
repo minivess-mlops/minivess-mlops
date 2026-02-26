@@ -62,9 +62,7 @@ def discover_nifti_pairs(data_dir: Path) -> list[dict[str, str]]:
     raise FileNotFoundError(msg)
 
 
-def _discover_matching_names(
-    img_dir: Path, lbl_dir: Path
-) -> list[dict[str, str]]:
+def _discover_matching_names(img_dir: Path, lbl_dir: Path) -> list[dict[str, str]]:
     """Discover pairs where image and label share the same filename."""
     pairs = []
     for img_path in sorted(img_dir.glob("*.nii.gz")):

@@ -330,7 +330,9 @@ class TestPerLossSingleBest:
         # Each key should match the expected naming pattern exactly
         for loss in LOSS_TYPES:
             expected_key = f"per_loss_single_best_{loss}"
-            assert expected_key in result, f"Expected key {expected_key!r} in {list(result)}"
+            assert expected_key in result, (
+                f"Expected key {expected_key!r} in {list(result)}"
+            )
 
     def test_member_count_equals_num_folds(
         self,
@@ -703,8 +705,10 @@ class TestMissingCheckpoints:
         # and logged a warning
         spec = next(iter(result.values()))
         assert len(spec.members) == 0
-        assert any("missing" in record.message.lower() or "not found" in record.message.lower()
-                    for record in caplog.records)
+        assert any(
+            "missing" in record.message.lower() or "not found" in record.message.lower()
+            for record in caplog.records
+        )
 
     def test_partial_missing_keeps_valid_members(
         self,

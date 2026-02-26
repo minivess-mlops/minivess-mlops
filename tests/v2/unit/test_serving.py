@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from pathlib import Path
 import pytest
 import torch
 
@@ -57,8 +60,10 @@ class TestOnnxExportRoundtrip:
         from minivess.config.models import ModelConfig, ModelFamily
 
         config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET, name="onnx-test",
-            in_channels=1, out_channels=2,
+            family=ModelFamily.MONAI_SEGRESNET,
+            name="onnx-test",
+            in_channels=1,
+            out_channels=2,
         )
         adapter = SegResNetAdapter(config)
         onnx_path = tmp_path / "model.onnx"
@@ -76,8 +81,10 @@ class TestOnnxExportRoundtrip:
         from minivess.serving.onnx_inference import OnnxSegmentationInference
 
         config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET, name="roundtrip",
-            in_channels=1, out_channels=2,
+            family=ModelFamily.MONAI_SEGRESNET,
+            name="roundtrip",
+            in_channels=1,
+            out_channels=2,
         )
         adapter = SegResNetAdapter(config)
         onnx_path = tmp_path / "model.onnx"
@@ -100,8 +107,10 @@ class TestOnnxExportRoundtrip:
         from minivess.serving.onnx_inference import OnnxSegmentationInference
 
         config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET, name="shape-check",
-            in_channels=1, out_channels=2,
+            family=ModelFamily.MONAI_SEGRESNET,
+            name="shape-check",
+            in_channels=1,
+            out_channels=2,
         )
         adapter = SegResNetAdapter(config)
         onnx_path = tmp_path / "model.onnx"
@@ -133,8 +142,10 @@ class TestOnnxExportRoundtrip:
         from minivess.serving.onnx_inference import OnnxSegmentationInference
 
         config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET, name="meta",
-            in_channels=1, out_channels=2,
+            family=ModelFamily.MONAI_SEGRESNET,
+            name="meta",
+            in_channels=1,
+            out_channels=2,
         )
         adapter = SegResNetAdapter(config)
         onnx_path = tmp_path / "model.onnx"
@@ -316,8 +327,10 @@ class TestOnnxServingIntegration:
 
         # Create and export model
         config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET, name="e2e-test",
-            in_channels=1, out_channels=2,
+            family=ModelFamily.MONAI_SEGRESNET,
+            name="e2e-test",
+            in_channels=1,
+            out_channels=2,
         )
         adapter = SegResNetAdapter(config)
         onnx_path = tmp_path / "model.onnx"

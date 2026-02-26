@@ -49,7 +49,9 @@ def apply_debug_overrides(
 
     training_config.max_epochs = _DEBUG_OVERRIDES["max_epochs"]
     training_config.warmup_epochs = _DEBUG_OVERRIDES["warmup_epochs"]
-    training_config.early_stopping_patience = _DEBUG_OVERRIDES["early_stopping_patience"]
+    training_config.early_stopping_patience = _DEBUG_OVERRIDES[
+        "early_stopping_patience"
+    ]
     training_config.num_folds = _DEBUG_OVERRIDES["num_folds"]
 
     if data_config is not None:

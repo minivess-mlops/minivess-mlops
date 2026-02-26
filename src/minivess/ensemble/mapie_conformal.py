@@ -101,7 +101,8 @@ class MapieConformalSegmentation:
         # Train a simple LogisticRegression on the probs as features
         # This gives MAPIE a fitted estimator to wrap
         base_clf = LogisticRegression(
-            max_iter=200, random_state=self.random_state,
+            max_iter=200,
+            random_state=self.random_state,
         )
         base_clf.fit(probs_flat, labels_flat)
 

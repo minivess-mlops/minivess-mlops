@@ -3,7 +3,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from minivess.pipeline.prediction_store import load_volume_prediction, save_volume_prediction
+from minivess.pipeline.prediction_store import (
+    load_volume_prediction,
+    save_volume_prediction,
+)
 
 
 @pytest.fixture()
@@ -87,7 +90,9 @@ class TestPredictionStore:
         loaded_hard, _ = load_volume_prediction(path)
         np.testing.assert_array_equal(loaded_hard, hard_pred)
 
-    def test_roundtrip_soft_pred_approximate(self, tmp_prediction_dir, sample_predictions):
+    def test_roundtrip_soft_pred_approximate(
+        self, tmp_prediction_dir, sample_predictions
+    ):
         """Soft predictions match approximately (float16 truncation)."""
         hard_pred, soft_pred = sample_predictions
         path = save_volume_prediction(

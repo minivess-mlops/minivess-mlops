@@ -17,7 +17,9 @@ from minivess.data.splits import (
 
 def _make_data_dicts(n: int) -> list[dict[str, str]]:
     """Create n synthetic data dicts for testing."""
-    return [{"image": f"/img/{i}.nii.gz", "label": f"/lbl/{i}.nii.gz"} for i in range(n)]
+    return [
+        {"image": f"/img/{i}.nii.gz", "label": f"/lbl/{i}.nii.gz"} for i in range(n)
+    ]
 
 
 class TestGenerateKfoldSplits:
@@ -36,9 +38,7 @@ class TestGenerateKfoldSplits:
         s1 = generate_kfold_splits(data, num_folds=3, seed=42)
         s2 = generate_kfold_splits(data, num_folds=3, seed=99)
         # At least one fold must differ
-        any_different = any(
-            f1.val != f2.val for f1, f2 in zip(s1, s2, strict=True)
-        )
+        any_different = any(f1.val != f2.val for f1, f2 in zip(s1, s2, strict=True))
         assert any_different
 
     def test_no_overlap_between_train_and_val(self) -> None:
@@ -54,7 +54,9 @@ class TestGenerateKfoldSplits:
         splits = generate_kfold_splits(data, num_folds=3, seed=42)
         all_images = {d["image"] for d in data}
         for fold in splits:
-            fold_images = {d["image"] for d in fold.train} | {d["image"] for d in fold.val}
+            fold_images = {d["image"] for d in fold.train} | {
+                d["image"] for d in fold.val
+            }
             assert fold_images == all_images
 
     def test_correct_number_of_folds(self) -> None:

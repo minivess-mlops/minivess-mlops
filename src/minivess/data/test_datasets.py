@@ -169,9 +169,7 @@ def build_hierarchical_dataloaders(
         data_dir = Path(entry.data_dir)
 
         all_pairs = discover_nifti_pairs(data_dir)
-        logger.info(
-            "Dataset '%s': discovered %d NIfTI pairs", ds_name, len(all_pairs)
-        )
+        logger.info("Dataset '%s': discovered %d NIfTI pairs", ds_name, len(all_pairs))
 
         ds_loaders: dict[str, Any] = {}
 
@@ -184,9 +182,7 @@ def build_hierarchical_dataloaders(
         for subset in entry.subsets:
             if subset.volume_indices:
                 subset_pairs = [
-                    all_pairs[i]
-                    for i in subset.volume_indices
-                    if i < len(all_pairs)
+                    all_pairs[i] for i in subset.volume_indices if i < len(all_pairs)
                 ]
             else:
                 # If no indices specified, use all pairs (metadata filtering
@@ -197,9 +193,7 @@ def build_hierarchical_dataloaders(
                 ds_loaders[subset.name] = _build_loader_from_dicts(
                     subset_pairs, data_config, cache_rate=cache_rate
                 )
-                logger.info(
-                    "  Subset '%s': %d volumes", subset.name, len(subset_pairs)
-                )
+                logger.info("  Subset '%s': %d volumes", subset.name, len(subset_pairs))
 
         result[ds_name] = ds_loaders
 

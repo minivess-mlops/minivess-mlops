@@ -163,7 +163,9 @@ class MiniVessSegModel(mlflow.pyfunc.PythonModel):  # type: ignore[name-defined,
             if inner_net is not None:
                 inner_net.load_state_dict(state_dict)
             else:
-                logger.warning("State dict keys do not match; using initialized weights")
+                logger.warning(
+                    "State dict keys do not match; using initialized weights"
+                )
 
         self._net.eval()
         logger.info("Loaded single model from %s", ckpt_path)

@@ -120,9 +120,7 @@ class TestComparisonGraph:
         assert "runs_data" in result
 
     @patch("minivess.agents.llm.call_llm")
-    def test_comparison_summarise_mocked_llm(
-        self, mock_llm: MagicMock
-    ) -> None:
+    def test_comparison_summarise_mocked_llm(self, mock_llm: MagicMock) -> None:
         """Summarise node should call LLM and return summary."""
         from minivess.agents.comparison import summarise_node
 
@@ -172,9 +170,7 @@ class TestLLMWrapper:
         assert call_args.kwargs["model"] == "anthropic:claude-sonnet-4-6"
 
     @patch("litellm.completion")
-    def test_call_llm_structured_returns_dict(
-        self, mock_completion: MagicMock
-    ) -> None:
+    def test_call_llm_structured_returns_dict(self, mock_completion: MagicMock) -> None:
         import json
 
         from minivess.agents.llm import call_llm_structured
@@ -218,9 +214,7 @@ class TestTracedGraphRun:
 
         mock_graph = MagicMock()
         mock_graph.invoke.return_value = {"status": "completed", "messages": []}
-        result = traced_graph_run(
-            mock_graph, {"status": "pending"}, trace_name="test"
-        )
+        result = traced_graph_run(mock_graph, {"status": "pending"}, trace_name="test")
         assert result["status"] == "completed"
 
     def test_traced_run_calls_graph_invoke(self) -> None:
@@ -242,9 +236,7 @@ class TestTracedGraphRun:
         mock_get_client.return_value = mock_client
         mock_graph = MagicMock()
         mock_graph.invoke.return_value = {"status": "done"}
-        traced_graph_run(
-            mock_graph, {"status": "pending"}, trace_name="traced_test"
-        )
+        traced_graph_run(mock_graph, {"status": "pending"}, trace_name="traced_test")
         mock_client.trace.assert_called_once()
 
 

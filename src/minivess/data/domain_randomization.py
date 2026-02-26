@@ -101,9 +101,9 @@ class SyntheticVesselGenerator:
 
         for _ in range(n_tubes):
             # Random starting point (inside volume)
-            pos = np.array([
-                self._rng.integers(2, s - 2) for s in shape
-            ], dtype=np.float32)
+            pos = np.array(
+                [self._rng.integers(2, s - 2) for s in shape], dtype=np.float32
+            )
 
             n_steps = self._rng.integers(10, max(shape) * 2)
             for _step in range(n_steps):
@@ -114,8 +114,7 @@ class SyntheticVesselGenerator:
 
                 # Clamp to volume bounds
                 idx = tuple(
-                    int(np.clip(p, 0, s - 1))
-                    for p, s in zip(pos, shape, strict=True)
+                    int(np.clip(p, 0, s - 1)) for p, s in zip(pos, shape, strict=True)
                 )
                 mask[idx] = 1.0
 
@@ -195,7 +194,9 @@ class DomainRandomizationPipeline:
         self._rng = np.random.default_rng(self.resolved_seed)
 
     def apply(
-        self, volume: NDArray, mask: NDArray,
+        self,
+        volume: NDArray,
+        mask: NDArray,
     ) -> tuple[NDArray, NDArray]:
         """Apply domain randomization to a volume.
 
@@ -212,12 +213,14 @@ class DomainRandomizationPipeline:
 
         # Intensity scaling
         result = self._generator.randomize_intensity(
-            result, self.config.intensity_range,
+            result,
+            self.config.intensity_range,
         )
 
         # Contrast adjustment
         result = self._generator.randomize_contrast(
-            result, self.config.contrast_range,
+            result,
+            self.config.contrast_range,
         )
 
         # Noise injection

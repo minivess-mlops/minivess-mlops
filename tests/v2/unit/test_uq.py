@@ -363,7 +363,9 @@ class TestConformalPrediction:
         result_high = p_high.predict(test_scores)
 
         avg_set_low = result_low.prediction_sets.sum() / result_low.prediction_sets.size
-        avg_set_high = result_high.prediction_sets.sum() / result_high.prediction_sets.size
+        avg_set_high = (
+            result_high.prediction_sets.sum() / result_high.prediction_sets.size
+        )
         assert avg_set_low >= avg_set_high
 
     def test_conformal_result_fields(self) -> None:

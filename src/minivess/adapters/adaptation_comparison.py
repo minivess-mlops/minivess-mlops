@@ -110,12 +110,14 @@ class FeasibilityReport:
 
         ranked = compare_adaptation_methods(self.results)
 
-        sections.extend([
-            "## Adaptation Method Comparison",
-            "",
-            "| Rank | Method | Dice | Trainable Params | Efficiency | Time (s) |",
-            "|------|--------|------|-----------------|------------|----------|",
-        ])
+        sections.extend(
+            [
+                "## Adaptation Method Comparison",
+                "",
+                "| Rank | Method | Dice | Trainable Params | Efficiency | Time (s) |",
+                "|------|--------|------|-----------------|------------|----------|",
+            ]
+        )
 
         for i, r in enumerate(ranked, 1):
             eff = f"{r.parameter_efficiency:.4f}" if r.total_params > 0 else "N/A"
@@ -127,28 +129,31 @@ class FeasibilityReport:
 
         # Recommendation
         best = ranked[0]
-        sections.extend([
-            "",
-            "## Recommendation",
-            "",
-            f"**Best method:** {best.method} (Dice = {best.dice_score:.4f})",
-            "",
-        ])
+        sections.extend(
+            [
+                "",
+                "## Recommendation",
+                "",
+                f"**Best method:** {best.method} (Dice = {best.dice_score:.4f})",
+                "",
+            ]
+        )
 
         # Atlas-specific note
         atlas_results = [r for r in ranked if r.method == "atlas_oneshot"]
         if atlas_results:
             ar = atlas_results[0]
-            sections.extend([
-                "## Atlas One-Shot Assessment",
-                "",
-                f"- Dice: {ar.dice_score:.4f}",
-                f"- Trainable parameters: {ar.trainable_params:,} "
-                f"(zero additional training required)",
-                f"- Training time: {ar.training_time_s:.1f}s "
-                "(registration only)",
-                "",
-            ])
+            sections.extend(
+                [
+                    "## Atlas One-Shot Assessment",
+                    "",
+                    f"- Dice: {ar.dice_score:.4f}",
+                    f"- Trainable parameters: {ar.trainable_params:,} "
+                    f"(zero additional training required)",
+                    f"- Training time: {ar.training_time_s:.1f}s (registration only)",
+                    "",
+                ]
+            )
 
             # Viability assessment
             if ar.dice_score >= 0.75:

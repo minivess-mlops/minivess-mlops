@@ -12,6 +12,7 @@ import torch
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_logits_labels(
     batch: int = 1,
     classes: int = 2,
@@ -66,8 +67,12 @@ class TestVesselCompoundLossForward:
         from minivess.pipeline.loss_functions import VesselCompoundLoss
 
         logits, labels = _make_logits_labels()
-        loss_equal = VesselCompoundLoss(lambda_dice_ce=0.5, lambda_cldice=0.5)(logits, labels)
-        loss_dice_heavy = VesselCompoundLoss(lambda_dice_ce=0.9, lambda_cldice=0.1)(logits, labels)
+        loss_equal = VesselCompoundLoss(lambda_dice_ce=0.5, lambda_cldice=0.5)(
+            logits, labels
+        )
+        loss_dice_heavy = VesselCompoundLoss(lambda_dice_ce=0.9, lambda_cldice=0.1)(
+            logits, labels
+        )
         # Different weights should give different loss (almost certainly)
         assert not torch.allclose(loss_equal, loss_dice_heavy)
 

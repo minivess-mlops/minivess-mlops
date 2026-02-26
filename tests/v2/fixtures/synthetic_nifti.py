@@ -7,9 +7,12 @@ Creates small 3D volumes with realistic-ish properties:
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import nibabel as nib
+
+if TYPE_CHECKING:
+    from pathlib import Path
 import numpy as np
 
 
@@ -58,9 +61,7 @@ def create_synthetic_nifti_dataset(
         nib.save(img_nii, img_dir / name)
 
         # Label: sparse binary mask (~5-15% foreground)
-        lbl_data = (rng.random(spatial_size) < rng.uniform(0.05, 0.15)).astype(
-            np.uint8
-        )
+        lbl_data = (rng.random(spatial_size) < rng.uniform(0.05, 0.15)).astype(np.uint8)
         lbl_nii = nib.Nifti1Image(lbl_data, affine)
         nib.save(lbl_nii, lbl_dir / name)
 
@@ -115,9 +116,7 @@ def create_synthetic_nifti_dataset_ebrains(
         img_nii = nib.Nifti1Image(img_data, affine)
         nib.save(img_nii, raw_dir / img_name)
 
-        lbl_data = (rng.random(spatial_size) < rng.uniform(0.05, 0.15)).astype(
-            np.uint8
-        )
+        lbl_data = (rng.random(spatial_size) < rng.uniform(0.05, 0.15)).astype(np.uint8)
         lbl_nii = nib.Nifti1Image(lbl_data, affine)
         nib.save(lbl_nii, seg_dir / lbl_name)
 

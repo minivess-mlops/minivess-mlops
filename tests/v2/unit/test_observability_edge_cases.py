@@ -141,11 +141,15 @@ class TestPPRMEdgeCases:
         rng = np.random.default_rng(42)
 
         # First calibration
-        detector.calibrate(rng.random((30,)), rng.random((30,)), risk_fn=compute_prediction_risk)
+        detector.calibrate(
+            rng.random((30,)), rng.random((30,)), risk_fn=compute_prediction_risk
+        )
         rect1 = detector._rectifier
 
         # Second calibration with different data
-        detector.calibrate(rng.random((50,)), rng.random((50,)), risk_fn=compute_prediction_risk)
+        detector.calibrate(
+            rng.random((50,)), rng.random((50,)), risk_fn=compute_prediction_risk
+        )
         rect2 = detector._rectifier
 
         assert rect1 != rect2
@@ -157,7 +161,9 @@ class TestPPRMEdgeCases:
 
         detector = PPRMDetector(threshold=0.20, alpha=0.05)
         rng = np.random.default_rng(42)
-        detector.calibrate(rng.random((100,)), rng.random((100,)), risk_fn=compute_prediction_risk)
+        detector.calibrate(
+            rng.random((100,)), rng.random((100,)), risk_fn=compute_prediction_risk
+        )
 
         result = detector.monitor(rng.random((200,)))
         assert result.ci_lower <= result.risk <= result.ci_upper
@@ -167,14 +173,24 @@ class TestPPRMEdgeCases:
         from minivess.observability.pprm import RiskEstimate
 
         est = RiskEstimate(
-            risk=0.15, ci_lower=0.12, ci_upper=0.18,
-            alarm=False, threshold=0.20,
-            n_calibration=50, n_deployment=200,
+            risk=0.15,
+            ci_lower=0.12,
+            ci_upper=0.18,
+            alarm=False,
+            threshold=0.20,
+            n_calibration=50,
+            n_deployment=200,
         )
         d = est.to_dict()
-        expected = {"pprm_risk", "pprm_ci_lower", "pprm_ci_upper",
-                    "pprm_alarm", "pprm_threshold", "pprm_n_calibration",
-                    "pprm_n_deployment"}
+        expected = {
+            "pprm_risk",
+            "pprm_ci_lower",
+            "pprm_ci_upper",
+            "pprm_alarm",
+            "pprm_threshold",
+            "pprm_n_calibration",
+            "pprm_n_deployment",
+        }
         assert set(d.keys()) == expected
 
 
@@ -243,8 +259,13 @@ class TestRunAnalyticsDuckDB:
 
         from minivess.observability.analytics import RunAnalytics
 
-        with patch("minivess.observability.analytics.resolve_tracking_uri", return_value="file:///tmp/mlruns"), \
-             patch("minivess.observability.analytics.MlflowClient"):
+        with (
+            patch(
+                "minivess.observability.analytics.resolve_tracking_uri",
+                return_value="file:///tmp/mlruns",
+            ),
+            patch("minivess.observability.analytics.MlflowClient"),
+        ):
             analytics = RunAnalytics()
 
         df = pd.DataFrame({"run_id": ["a", "b"], "param_fold": ["0", "1"]})
@@ -258,14 +279,21 @@ class TestRunAnalyticsDuckDB:
 
         from minivess.observability.analytics import RunAnalytics
 
-        with patch("minivess.observability.analytics.resolve_tracking_uri", return_value="file:///tmp/mlruns"), \
-             patch("minivess.observability.analytics.MlflowClient"):
+        with (
+            patch(
+                "minivess.observability.analytics.resolve_tracking_uri",
+                return_value="file:///tmp/mlruns",
+            ),
+            patch("minivess.observability.analytics.MlflowClient"),
+        ):
             analytics = RunAnalytics()
 
-        df = pd.DataFrame({
-            "run_id": ["r1", "r2", "r3"],
-            "metric_val_dice": [0.85, 0.90, 0.78],
-        })
+        df = pd.DataFrame(
+            {
+                "run_id": ["r1", "r2", "r3"],
+                "metric_val_dice": [0.85, 0.90, 0.78],
+            }
+        )
         analytics.register_dataframe("runs", df)
         result = analytics.query("SELECT run_id FROM runs WHERE metric_val_dice > 0.80")
         assert len(result) == 2
@@ -277,15 +305,22 @@ class TestRunAnalyticsDuckDB:
 
         from minivess.observability.analytics import RunAnalytics
 
-        with patch("minivess.observability.analytics.resolve_tracking_uri", return_value="file:///tmp/mlruns"), \
-             patch("minivess.observability.analytics.MlflowClient"):
+        with (
+            patch(
+                "minivess.observability.analytics.resolve_tracking_uri",
+                return_value="file:///tmp/mlruns",
+            ),
+            patch("minivess.observability.analytics.MlflowClient"),
+        ):
             analytics = RunAnalytics()
 
-        df = pd.DataFrame({
-            "run_id": ["r1", "r2", "r3"],
-            "run_name": ["a", "b", "c"],
-            "metric_val_dice": [0.85, 0.90, 0.78],
-        })
+        df = pd.DataFrame(
+            {
+                "run_id": ["r1", "r2", "r3"],
+                "run_name": ["a", "b", "c"],
+                "metric_val_dice": [0.85, 0.90, 0.78],
+            }
+        )
         result = analytics.top_models(df, metric="metric_val_dice", n=2)
         assert len(result) == 2
         assert result.iloc[0]["metric_val_dice"] == 0.90

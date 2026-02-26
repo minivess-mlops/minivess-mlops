@@ -37,8 +37,11 @@ class TestConfidenceIntervalProperties:
         upper = lower + width
         point = (lower + upper) / 2
         ci = ConfidenceInterval(
-            point_estimate=point, lower=lower, upper=upper,
-            confidence_level=0.95, method="test",
+            point_estimate=point,
+            lower=lower,
+            upper=upper,
+            confidence_level=0.95,
+            method="test",
         )
         assert ci.width >= 0.0
 
@@ -54,8 +57,11 @@ class TestConfidenceIntervalProperties:
         if lower > upper:
             with pytest.raises(ValueError, match="lower"):
                 ConfidenceInterval(
-                    point_estimate=0.5, lower=lower, upper=upper,
-                    confidence_level=0.95, method="test",
+                    point_estimate=0.5,
+                    lower=lower,
+                    upper=upper,
+                    confidence_level=0.95,
+                    method="test",
                 )
 
 

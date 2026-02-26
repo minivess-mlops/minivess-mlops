@@ -150,16 +150,16 @@ class PPRMDetector:
         RiskEstimate with risk, CI, and alarm status.
         """
         if not self.is_calibrated:
-            msg = "Detector must be calibrated before monitoring. Call calibrate() first."
+            msg = (
+                "Detector must be calibrated before monitoring. Call calibrate() first."
+            )
             raise RuntimeError(msg)
 
         deployment_predictions = np.asarray(deployment_predictions)
         n_deploy = len(deployment_predictions)
 
         # Proxy risk on deployment data (deviation from calibration mean)
-        proxy_risk = np.abs(
-            deployment_predictions - self._cal_pred_mean
-        )
+        proxy_risk = np.abs(deployment_predictions - self._cal_pred_mean)
         proxy_mean = float(np.mean(proxy_risk))
         proxy_var = float(np.var(proxy_risk, ddof=1)) if n_deploy > 1 else 0.0
 
@@ -167,9 +167,7 @@ class PPRMDetector:
         risk = proxy_mean + self._rectifier
 
         # Combined standard error (calibration + deployment)
-        se = np.sqrt(
-            self._rectifier_var / self._n_cal + proxy_var / n_deploy
-        )
+        se = np.sqrt(self._rectifier_var / self._n_cal + proxy_var / n_deploy)
 
         # Confidence interval via CLT
         z = sp_stats.norm.ppf(1.0 - self.alpha / 2)

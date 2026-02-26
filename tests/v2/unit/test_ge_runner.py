@@ -119,13 +119,15 @@ class TestValidateNiftiBatch:
         """Valid NIfTI metadata should pass the nifti_metadata_suite."""
         from minivess.validation.ge_runner import validate_nifti_batch
 
-        df = pd.DataFrame({
-            "file_path": ["/data/vol1.nii.gz", "/data/vol2.nii.gz"],
-            "voxel_spacing_x": [1.0, 0.5],
-            "voxel_spacing_y": [1.0, 0.5],
-            "voxel_spacing_z": [1.0, 2.0],
-            "has_valid_affine": [True, True],
-        })
+        df = pd.DataFrame(
+            {
+                "file_path": ["/data/vol1.nii.gz", "/data/vol2.nii.gz"],
+                "voxel_spacing_x": [1.0, 0.5],
+                "voxel_spacing_y": [1.0, 0.5],
+                "voxel_spacing_z": [1.0, 2.0],
+                "has_valid_affine": [True, True],
+            }
+        )
         result = validate_nifti_batch(df)
         assert result.passed is True
 
@@ -133,13 +135,15 @@ class TestValidateNiftiBatch:
         """NIfTI metadata with out-of-range voxel spacing should fail."""
         from minivess.validation.ge_runner import validate_nifti_batch
 
-        df = pd.DataFrame({
-            "file_path": ["/data/vol1.nii.gz"],
-            "voxel_spacing_x": [999.0],  # Way out of range
-            "voxel_spacing_y": [1.0],
-            "voxel_spacing_z": [1.0],
-            "has_valid_affine": [True],
-        })
+        df = pd.DataFrame(
+            {
+                "file_path": ["/data/vol1.nii.gz"],
+                "voxel_spacing_x": [999.0],  # Way out of range
+                "voxel_spacing_y": [1.0],
+                "voxel_spacing_z": [1.0],
+                "has_valid_affine": [True],
+            }
+        )
         result = validate_nifti_batch(df)
         assert result.passed is False
 
@@ -147,13 +151,15 @@ class TestValidateNiftiBatch:
         """Duplicate file paths should fail uniqueness expectation."""
         from minivess.validation.ge_runner import validate_nifti_batch
 
-        df = pd.DataFrame({
-            "file_path": ["/data/same.nii.gz", "/data/same.nii.gz"],
-            "voxel_spacing_x": [1.0, 1.0],
-            "voxel_spacing_y": [1.0, 1.0],
-            "voxel_spacing_z": [1.0, 1.0],
-            "has_valid_affine": [True, True],
-        })
+        df = pd.DataFrame(
+            {
+                "file_path": ["/data/same.nii.gz", "/data/same.nii.gz"],
+                "voxel_spacing_x": [1.0, 1.0],
+                "voxel_spacing_y": [1.0, 1.0],
+                "voxel_spacing_z": [1.0, 1.0],
+                "has_valid_affine": [True, True],
+            }
+        )
         result = validate_nifti_batch(df)
         assert result.passed is False
 
@@ -161,13 +167,15 @@ class TestValidateNiftiBatch:
         """Empty DataFrame should fail row count expectation."""
         from minivess.validation.ge_runner import validate_nifti_batch
 
-        df = pd.DataFrame({
-            "file_path": pd.Series([], dtype=str),
-            "voxel_spacing_x": pd.Series([], dtype=float),
-            "voxel_spacing_y": pd.Series([], dtype=float),
-            "voxel_spacing_z": pd.Series([], dtype=float),
-            "has_valid_affine": pd.Series([], dtype=bool),
-        })
+        df = pd.DataFrame(
+            {
+                "file_path": pd.Series([], dtype=str),
+                "voxel_spacing_x": pd.Series([], dtype=float),
+                "voxel_spacing_y": pd.Series([], dtype=float),
+                "voxel_spacing_z": pd.Series([], dtype=float),
+                "has_valid_affine": pd.Series([], dtype=bool),
+            }
+        )
         result = validate_nifti_batch(df)
         assert result.passed is False
 
@@ -184,16 +192,18 @@ class TestValidateMetricsBatch:
         """Valid training metrics should pass."""
         from minivess.validation.ge_runner import validate_metrics_batch
 
-        df = pd.DataFrame({
-            "run_id": ["run_001", "run_001"],
-            "epoch": [1, 2],
-            "fold": [0, 0],
-            "val_dice": [0.5, 0.7],
-            "val_cldice": [0.4, 0.6],
-            "train_loss": [1.0, 0.5],
-            "val_loss": [1.2, 0.8],
-            "learning_rate": [1e-4, 1e-4],
-        })
+        df = pd.DataFrame(
+            {
+                "run_id": ["run_001", "run_001"],
+                "epoch": [1, 2],
+                "fold": [0, 0],
+                "val_dice": [0.5, 0.7],
+                "val_cldice": [0.4, 0.6],
+                "train_loss": [1.0, 0.5],
+                "val_loss": [1.2, 0.8],
+                "learning_rate": [1e-4, 1e-4],
+            }
+        )
         result = validate_metrics_batch(df)
         assert result.passed is True
 
@@ -201,16 +211,18 @@ class TestValidateMetricsBatch:
         """Dice values > 1.0 should fail."""
         from minivess.validation.ge_runner import validate_metrics_batch
 
-        df = pd.DataFrame({
-            "run_id": ["run_001"],
-            "epoch": [1],
-            "fold": [0],
-            "val_dice": [1.5],  # Out of range
-            "val_cldice": [0.5],
-            "train_loss": [1.0],
-            "val_loss": [1.0],
-            "learning_rate": [1e-4],
-        })
+        df = pd.DataFrame(
+            {
+                "run_id": ["run_001"],
+                "epoch": [1],
+                "fold": [0],
+                "val_dice": [1.5],  # Out of range
+                "val_cldice": [0.5],
+                "train_loss": [1.0],
+                "val_loss": [1.0],
+                "learning_rate": [1e-4],
+            }
+        )
         result = validate_metrics_batch(df)
         assert result.passed is False
 
@@ -218,15 +230,17 @@ class TestValidateMetricsBatch:
         """Null run_id should fail not-null expectation."""
         from minivess.validation.ge_runner import validate_metrics_batch
 
-        df = pd.DataFrame({
-            "run_id": [None],
-            "epoch": [1],
-            "fold": [0],
-            "val_dice": [0.5],
-            "val_cldice": [0.5],
-            "train_loss": [1.0],
-            "val_loss": [1.0],
-            "learning_rate": [1e-4],
-        })
+        df = pd.DataFrame(
+            {
+                "run_id": [None],
+                "epoch": [1],
+                "fold": [0],
+                "val_dice": [0.5],
+                "val_cldice": [0.5],
+                "train_loss": [1.0],
+                "val_loss": [1.0],
+                "learning_rate": [1e-4],
+            }
+        )
         result = validate_metrics_batch(df)
         assert result.passed is False

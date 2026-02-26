@@ -272,7 +272,13 @@ def save_metric_checkpoint(
 
 def load_metric_checkpoint(
     path: Path,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], MetricCheckpoint, dict[str, Any] | None]:
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+    MetricCheckpoint,
+    dict[str, Any] | None,
+]:
     """Load a checkpoint saved by :func:`save_metric_checkpoint`.
 
     Parameters

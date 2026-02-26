@@ -132,9 +132,7 @@ def _discover_runs(
     List of run info dicts, each with keys:
     ``run_id``, ``loss_type``, ``fold_id``, ``artifact_dir``, ``metrics``.
     """
-    builder = EnsembleBuilder(
-        eval_config, model_config, tracking_uri=tracking_uri
-    )
+    builder = EnsembleBuilder(eval_config, model_config, tracking_uri=tracking_uri)
     return builder.discover_training_runs()
 
 
@@ -530,9 +528,7 @@ def evaluate_all_models(
     # Evaluate single models
     for model_name, model in single_models.items():
         log.info("Evaluating single model: %s", model_name)
-        model_output = (
-            output_dir / "single" / model_name if output_dir else None
-        )
+        model_output = output_dir / "single" / model_name if output_dir else None
         results = _evaluate_single_model_on_all(
             model,
             dataloaders_dict,
@@ -554,9 +550,7 @@ def evaluate_all_models(
             len(spec.members),
         )
         # Wrap all member nets into a single nn.Module that averages outputs
-        ensemble_model = _EnsembleInferenceWrapper(
-            [m.net for m in spec.members]
-        )
+        ensemble_model = _EnsembleInferenceWrapper([m.net for m in spec.members])
         ens_output = output_dir / "ensemble" / ens_name if output_dir else None
         results = _evaluate_single_model_on_all(
             ensemble_model,
@@ -596,9 +590,7 @@ def evaluate_with_mlflow(
     mlflow_results: dict[str, dict[str, float]] = {}
 
     for model_name, ds_dict in all_results.items():
-        metrics = _run_mlflow_eval_safe(
-            ds_dict, eval_config, model_name=model_name
-        )
+        metrics = _run_mlflow_eval_safe(ds_dict, eval_config, model_name=model_name)
         if metrics:
             mlflow_results[model_name] = metrics
             log.info(
@@ -648,9 +640,7 @@ def generate_comparison(
         for _ds_name, subset_dict in ds_dict.items():
             for _subset_name, eval_result in subset_dict.items():
                 for metric_name, ci in eval_result.fold_result.aggregated.items():
-                    metric_values.setdefault(metric_name, []).append(
-                        ci.point_estimate
-                    )
+                    metric_values.setdefault(metric_name, []).append(ci.point_estimate)
                     all_metric_names.add(metric_name)
 
         # Build MetricSummary for each metric
@@ -847,12 +837,9 @@ def generate_report(
                 for m_name in sorted(agg.keys()):
                     ci = agg[m_name]
                     if not math.isnan(ci.point_estimate):
-                        metric_strs.append(
-                            f"{m_name}={ci.point_estimate:.4f}"
-                        )
+                        metric_strs.append(f"{m_name}={ci.point_estimate:.4f}")
                 lines.append(
-                    f"- **{ds_name}/{subset_name}**: "
-                    + ", ".join(metric_strs)
+                    f"- **{ds_name}/{subset_name}**: " + ", ".join(metric_strs)
                 )
         lines.append("")
 
@@ -868,11 +855,7 @@ def generate_report(
     lines.append("## Champion Model")
     lines.append("")
     if champion_name:
-        score_str = (
-            f"{champion_score:.4f}"
-            if not math.isnan(champion_score)
-            else "N/A"
-        )
+        score_str = f"{champion_score:.4f}" if not math.isnan(champion_score) else "N/A"
         lines.append(f"**Champion:** {champion_name} (score: {score_str})")
     else:
         lines.append("*No champion selected.*")
@@ -939,9 +922,7 @@ def run_analysis_flow(
     log.info("Starting analysis flow...")
 
     # Step 1: Load training artifacts
-    runs = load_training_artifacts(
-        eval_config, model_config, tracking_uri=tracking_uri
-    )
+    runs = load_training_artifacts(eval_config, model_config, tracking_uri=tracking_uri)
 
     # Step 2: Build ensembles
     ensembles = build_ensembles(runs, eval_config, model_config)
@@ -979,7 +960,9 @@ def run_analysis_flow(
     # Step 9: Generate report
     report = generate_report(all_results, comparison_md, promotion_info)
 
-    log.info("Analysis flow complete. Champion: %s", promotion_info.get("champion_name"))
+    log.info(
+        "Analysis flow complete. Champion: %s", promotion_info.get("champion_name")
+    )
 
     return {
         "results": all_results,

@@ -116,9 +116,7 @@ class TestBuildHierarchicalDataloaders:
         )
 
         registry = DatasetRegistry()
-        registry.register(
-            DatasetEntry(name="debug", data_dir=str(debug_dataset_dir))
-        )
+        registry.register(DatasetEntry(name="debug", data_dir=str(debug_dataset_dir)))
 
         config = DataConfig(
             dataset_name="test",
@@ -144,9 +142,7 @@ class TestBuildHierarchicalDataloaders:
         )
 
         registry = DatasetRegistry()
-        registry.register(
-            DatasetEntry(name="debug", data_dir=str(debug_dataset_dir))
-        )
+        registry.register(DatasetEntry(name="debug", data_dir=str(debug_dataset_dir)))
 
         config = DataConfig(
             dataset_name="test",
