@@ -179,21 +179,13 @@ def compute_coverage_metrics(
     -------
     ConformalMetrics with coverage and mean_set_size.
     """
-    n_volumes = labels.shape[0]
-    spatial = labels.shape[1:]
-
-    # Check if true class is in prediction set for each voxel
-    covered = 0
-    total = 0
-    for i in range(n_volumes):
-        for d in range(spatial[0]):
-            for h in range(spatial[1]):
-                for w in range(spatial[2]):
-                    true_class = labels[i, d, h, w]
-                    if prediction_sets[i, true_class, d, h, w]:
-                        covered += 1
-                    total += 1
-
+    # Vectorized coverage: check if true class is in prediction set per voxel.
+    # labels: (B, D, H, W) -> (B, 1, D, H, W) for gather along class axis.
+    labels_idx = labels[:, np.newaxis, ...]  # (B, 1, D, H, W)
+    true_class_in_set = np.take_along_axis(prediction_sets, labels_idx, axis=1)
+    # true_class_in_set: (B, 1, D, H, W) boolean
+    total = true_class_in_set.size
+    covered = int(true_class_in_set.sum())
     coverage = covered / max(total, 1)
     mean_set_size = float(prediction_sets.sum(axis=1).mean())
 

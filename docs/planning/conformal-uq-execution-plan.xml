@@ -1,0 +1,471 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Conformal UQ for 3D Segmentation — Execution Plan
+  Issue: #94 (Conformal prediction sets for segmentation uncertainty)
+  Branch: feat/conformal-uq
+  Report: docs/planning/conformal-uq-segmentation-report.md
+  Date: 2026-02-27
+-->
+<plan>
+  <metadata>
+    <title>Conformal UQ for 3D Segmentation</title>
+    <issue>94</issue>
+    <branch>feat/conformal-uq</branch>
+    <phases>5</phases>
+    <total_tasks>17</total_tasks>
+    <estimated_tests>75</estimated_tests>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- Phase 0: Vectorize Existing Code (Performance Fix)                  -->
+  <!-- ================================================================== -->
+  <phase id="0" title="Vectorize Existing Code">
+    <description>
+      Replace O(N^3) nested Python loops in conformal.py and mapie_conformal.py
+      with vectorized numpy operations. ~100x speedup, no API changes.
+    </description>
+
+    <task id="0.1" title="Vectorize ConformalPredictor.calibrate()">
+      <description>
+        Replace the 4-nested-loop nonconformity score computation in
+        conformal.py:calibrate() (lines 74-81) with vectorized numpy indexing.
+        Use np.take_along_axis to gather true-class probabilities.
+      </description>
+      <files>
+        <modify>src/minivess/ensemble/conformal.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_conformal_vectorized.py</test_file>
+        <tests>
+          <test>test_calibrate_matches_loop_version — synthetic data, compare quantile from loop vs vectorized</test>
+          <test>test_calibrate_large_volume — 10 volumes (32,32,16) completes in less than 1 second</test>
+          <test>test_predict_unchanged — ensure predict() output identical before/after vectorization</test>
+          <test>test_quantile_finite_sample_correction — verify ceil((n+1)(1-a)/n) formula preserved</test>
+        </tests>
+      </tdd_spec>
+    </task>
+
+    <task id="0.2" title="Vectorize compute_coverage_metrics()">
+      <description>
+        Replace the 4-nested-loop coverage computation in
+        mapie_conformal.py:compute_coverage_metrics() (lines 186-198) with
+        vectorized numpy. Use np.take_along_axis to check if true class is
+        in prediction set, then compute mean.
+      </description>
+      <files>
+        <modify>src/minivess/ensemble/mapie_conformal.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_conformal_vectorized.py</test_file>
+        <tests>
+          <test>test_coverage_matches_loop_version — synthetic data, compare coverage from loop vs vectorized</test>
+          <test>test_coverage_large_volume — 10 volumes (32,32,16) completes in less than 1 second</test>
+          <test>test_mean_set_size_unchanged — ensure mean_set_size computation identical</test>
+          <test>test_perfect_coverage — all-true prediction sets give coverage 1.0</test>
+          <test>test_zero_coverage — empty prediction sets give coverage 0.0</test>
+        </tests>
+      </tdd_spec>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- Phase 1: Morphological Conformal Prediction (ConSeMa-Inspired)      -->
+  <!-- ================================================================== -->
+  <phase id="1" title="Morphological Conformal Prediction">
+    <description>
+      Implement inner/outer contour prediction sets via morphological
+      dilation and erosion. Calibrate dilation/erosion radius on holdout
+      volumes. This is the primary academic contribution: spatially
+      meaningful prediction bands for vessel segmentation.
+
+      Based on: Mossina and Friedrich (2025), "ConSeMa: Conformal Semantic
+      Image Segmentation with Mask-level Guarantees," MICCAI 2025.
+    </description>
+
+    <task id="1.1" title="MorphologicalConformalResult dataclass">
+      <description>
+        Create a dataclass extending ConformalResult with:
+        - inner_contour: NDArray[np.bool_] — high-confidence vessel core (eroded)
+        - outer_contour: NDArray[np.bool_] — maximum vessel extent (dilated)
+        - band_width: float — mean prediction band width in voxels
+        - dilation_radius: int — calibrated dilation radius
+        - erosion_radius: int — calibrated erosion radius
+      </description>
+      <files>
+        <create>src/minivess/ensemble/morphological_conformal.py</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_morphological_conformal.py</test_file>
+        <tests>
+          <test>test_result_has_inner_outer_contours — fields exist, correct types</test>
+          <test>test_result_band_width_nonnegative — band_width >= 0.0</test>
+          <test>test_inner_subset_of_outer — inner_contour subset of outer_contour</test>
+          <test>test_inner_subset_of_prediction — inner_contour subset of original prediction</test>
+        </tests>
+      </tdd_spec>
+    </task>
+
+    <task id="1.2" title="Morphological calibration: dilation radius">
+      <description>
+        Implement calibration that finds the minimal dilation radius lambda
+        such that dilate(pred, lambda) covers ground truth for each
+        calibration volume. Then take the (1-alpha) quantile over lambdas.
+
+        Algorithm:
+        1. For each calibration pair (pred_i, gt_i):
+           a. For lambda = 0, 1, 2, ..., max_lambda:
+              if binary_dilation(pred_i, iterations=lambda) covers gt_i: break
+           b. Record lambda_i
+        2. Calibrated radius = quantile(lambdas, ceil((n+1)(1-a)/n))
+
+        Use scipy.ndimage.binary_dilation with ball structuring element
+        (generate_binary_structure(rank=3, connectivity=1)).
+      </description>
+      <files>
+        <modify>src/minivess/ensemble/morphological_conformal.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_morphological_conformal.py</test_file>
+        <tests>
+          <test>test_calibrate_perfect_prediction — lambda=0 when pred==gt</test>
+          <test>test_calibrate_shifted_prediction — lambda>0 for shifted mask</test>
+          <test>test_calibrate_empty_prediction — handles empty prediction gracefully</test>
+          <test>test_calibrate_stores_radius — is_calibrated True, dilation_radius set</test>
+          <test>test_max_lambda_cap — stops at max_lambda even if coverage not reached</test>
+        </tests>
+      </tdd_spec>
+    </task>
+
+    <task id="1.3" title="Morphological calibration: erosion radius">
+      <description>
+        Implement erosion calibration: find minimal erosion radius mu such
+        that erode(pred, mu) is contained within ground truth. This gives
+        the "high-confidence" inner core of the vessel.
+
+        Algorithm mirrors dilation but with binary_erosion and containment check.
+      </description>
+      <files>
+        <modify>src/minivess/ensemble/morphological_conformal.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_morphological_conformal.py</test_file>
+        <tests>
+          <test>test_erosion_perfect_prediction — mu=0 when pred==gt</test>
+          <test>test_erosion_oversized_prediction — mu>0 when pred larger than gt</test>
+          <test>test_erosion_empty_after_erosion — handles thin structures gracefully</test>
+          <test>test_erosion_stores_radius — erosion_radius attribute set</test>
+        </tests>
+      </tdd_spec>
+    </task>
+
+    <task id="1.4" title="Morphological predict() with inner/outer bands">
+      <description>
+        Implement predict() method that:
+        1. Dilates prediction by calibrated dilation_radius -> outer_contour
+        2. Erodes prediction by calibrated erosion_radius -> inner_contour
+        3. Computes band = outer_contour XOR inner_contour (uncertain zone)
+        4. Computes band_width = mean(distance_transform_edt(outer) at band voxels)
+        5. Returns MorphologicalConformalResult
+      </description>
+      <files>
+        <modify>src/minivess/ensemble/morphological_conformal.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_morphological_conformal.py</test_file>
+        <tests>
+          <test>test_predict_output_shape — outer/inner same shape as input</test>
+          <test>test_predict_outer_covers_prediction — prediction subset of outer</test>
+          <test>test_predict_inner_subset_prediction — inner subset of prediction</test>
+          <test>test_predict_band_between_inner_outer — band = outer AND NOT inner</test>
+          <test>test_predict_before_calibrate_raises — RuntimeError</test>
+          <test>test_predict_binary_input — works with binary masks (not softmax)</test>
+        </tests>
+      </tdd_spec>
+    </task>
+
+    <task id="1.5" title="Morphological CP metrics">
+      <description>
+        Implement compute_morphological_metrics() that returns:
+        - outer_coverage: fraction of GT voxels inside outer contour
+        - inner_precision: fraction of inner contour voxels in GT
+        - mean_band_width: average width of prediction band in voxels
+        - band_volume_ratio: band volume / prediction volume
+      </description>
+      <files>
+        <modify>src/minivess/ensemble/morphological_conformal.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_morphological_conformal.py</test_file>
+        <tests>
+          <test>test_metrics_perfect_prediction — coverage 1.0, band width 0</test>
+          <test>test_metrics_returns_all_fields — all 4 metric fields present</test>
+          <test>test_metrics_to_dict — compatible with MLflow logging</test>
+        </tests>
+      </tdd_spec>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- Phase 2: Distance-Transform Conformal Prediction (CLS-Inspired)     -->
+  <!-- ================================================================== -->
+  <phase id="2" title="Distance-Transform Conformal Prediction">
+    <description>
+      Implement FNR-controlling conformal prediction using signed distance
+      transforms. Calibrates a boundary distance threshold that guarantees
+      the false negative rate is below alpha.
+
+      Based on: Tan et al. (2025), "Conformal Label Smoothing for 3D
+      Medical Image Segmentation."
+    </description>
+
+    <task id="2.1" title="DistanceTransformConformalPredictor class">
+      <description>
+        Create class with:
+        - calibrate(predictions, labels, alpha): for each calibration volume,
+          compute the maximum distance from any GT-positive voxel to the
+          nearest predicted-positive voxel (asymmetric Hausdorff-like score).
+          This is the nonconformity score per volume.
+          Calibrated threshold = quantile of scores.
+        - predict(prediction): dilate prediction by calibrated distance
+          threshold using distance_transform_edt.
+        - Provides FNR control: P(GT voxel not in prediction set) <= alpha.
+
+        Use scipy.ndimage.distance_transform_edt for 3D distance computation.
+      </description>
+      <files>
+        <create>src/minivess/ensemble/distance_conformal.py</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_distance_conformal.py</test_file>
+        <tests>
+          <test>test_calibrate_perfect_prediction — threshold ~0 when pred==gt</test>
+          <test>test_calibrate_shifted_prediction — threshold > 0 for shifted mask</test>
+          <test>test_predict_covers_gt — dilated prediction covers GT (on calibration data)</test>
+          <test>test_predict_before_calibrate_raises — RuntimeError</test>
+          <test>test_threshold_stored — calibrated_threshold attribute accessible</test>
+          <test>test_higher_alpha_smaller_dilation — alpha=0.5 gives smaller threshold than alpha=0.1</test>
+        </tests>
+      </tdd_spec>
+    </task>
+
+    <task id="2.2" title="FNR and FPR metrics for distance-transform CP">
+      <description>
+        Implement compute_fnr_fpr_metrics() for distance-transform CP:
+        - fnr: false negative rate (GT voxels not in prediction set / total GT voxels)
+        - fpr: false positive rate (prediction set voxels not in GT / total non-GT voxels)
+        - boundary_distance: calibrated threshold in voxels
+        - volume_inflation: prediction set volume / original prediction volume
+      </description>
+      <files>
+        <modify>src/minivess/ensemble/distance_conformal.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_distance_conformal.py</test_file>
+        <tests>
+          <test>test_fnr_below_alpha — FNR less than or equal to alpha on calibration data</test>
+          <test>test_fnr_zero_perfect — FNR 0.0 when prediction perfectly covers GT</test>
+          <test>test_fpr_increases_with_dilation — larger threshold gives higher FPR</test>
+          <test>test_metrics_to_dict — compatible with MLflow logging</test>
+        </tests>
+      </tdd_spec>
+    </task>
+
+    <task id="2.3" title="Signed distance transform utilities">
+      <description>
+        Implement helper functions for signed distance transforms:
+        - signed_distance_transform(mask): positive inside, negative outside
+        - boundary_distance(mask_a, mask_b): per-voxel distance from A boundary
+          to nearest B boundary
+        - asymmetric_hausdorff_percentile(gt, pred, percentile=95): robust
+          asymmetric Hausdorff distance for nonconformity scoring
+
+        These are reusable utilities for both distance-transform CP and
+        morphological CP metrics.
+      </description>
+      <files>
+        <create>src/minivess/ensemble/distance_utils.py</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_distance_conformal.py</test_file>
+        <tests>
+          <test>test_sdt_positive_inside — positive values inside mask</test>
+          <test>test_sdt_negative_outside — negative values outside mask</test>
+          <test>test_sdt_zero_at_boundary — zero at mask boundary</test>
+          <test>test_boundary_distance_zero_identical — distance 0 for identical masks</test>
+          <test>test_boundary_distance_symmetric — d(A,B) == d(B,A) for identical shapes</test>
+          <test>test_hausdorff_p95_robust — ignores outlier boundary points</test>
+        </tests>
+      </tdd_spec>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- Phase 3: Risk-Controlling Prediction Sets (RCPS)                    -->
+  <!-- ================================================================== -->
+  <phase id="3" title="Risk-Controlling Prediction Sets">
+    <description>
+      Implement the Learn Then Test (LTT) framework for controlling
+      arbitrary risk functions (Dice loss, FNR, segmentation loss).
+
+      Based on: Angelopoulos et al. (2022), "Learn Then Test: Calibrating
+      Predictive Algorithms to Achieve Risk Control."
+    </description>
+
+    <task id="3.1" title="RiskControllingPredictor class">
+      <description>
+        Implement generic risk-controlling prediction sets:
+        - Parameterize prediction set by threshold lambda (e.g., softmax
+          probability threshold for inclusion)
+        - For each candidate lambda, estimate risk R(lambda) on calibration data
+        - Find smallest lambda such that R(lambda) &lt;= alpha using
+          Bonferroni or fixed-sequence testing
+        - Risk functions: dice_loss (1-Dice), fnr, volume_error
+
+        This generalizes both voxel-level and distance-transform CP.
+      </description>
+      <files>
+        <create>src/minivess/ensemble/risk_control.py</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_risk_control.py</test_file>
+        <tests>
+          <test>test_dice_loss_risk_controlled — Dice loss below alpha on cal data</test>
+          <test>test_fnr_risk_controlled — FNR below alpha on cal data</test>
+          <test>test_monotonic_lambda — larger lambda gives larger prediction sets</test>
+          <test>test_calibrate_stores_lambda — optimal lambda stored</test>
+          <test>test_predict_before_calibrate_raises — RuntimeError</test>
+          <test>test_custom_risk_function — accepts user-defined risk callable</test>
+        </tests>
+      </tdd_spec>
+    </task>
+
+    <task id="3.2" title="Risk function library">
+      <description>
+        Implement a small library of risk functions for segmentation:
+        - dice_loss_risk(pred_set, gt): 1 - Dice between prediction set and GT
+        - fnr_risk(pred_set, gt): false negative rate
+        - fpr_risk(pred_set, gt): false positive rate
+        - volume_error_risk(pred_set, gt): |volume(pred_set) - volume(gt)| / volume(gt)
+
+        Each function takes a binary prediction set and binary GT mask,
+        returns a float in [0, 1].
+      </description>
+      <files>
+        <modify>src/minivess/ensemble/risk_control.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_risk_control.py</test_file>
+        <tests>
+          <test>test_dice_loss_perfect — 0.0 for identical masks</test>
+          <test>test_dice_loss_empty — 1.0 for empty prediction</test>
+          <test>test_fnr_perfect — 0.0 for perfect prediction</test>
+          <test>test_fnr_empty — 1.0 for empty prediction (all negatives)</test>
+          <test>test_fpr_perfect — 0.0 for perfect prediction</test>
+          <test>test_volume_error_perfect — 0.0 for same-volume masks</test>
+        </tests>
+      </tdd_spec>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- Phase 4: Evaluation Pipeline Integration                            -->
+  <!-- ================================================================== -->
+  <phase id="4" title="Evaluation Pipeline Integration">
+    <description>
+      Integrate all conformal prediction methods into the evaluation
+      pipeline. Add MLflow logging, comparison between CP methods,
+      and visualization utilities.
+    </description>
+
+    <task id="4.1" title="ConformalEvaluator class">
+      <description>
+        Create a ConformalEvaluator that runs all CP methods on evaluation data:
+        - Takes calibration split (indices or fraction)
+        - Runs: voxel-level CP, morphological CP, distance-transform CP, RCPS
+        - Returns unified ConformalEvaluationResult with all metrics
+        - Handles calibration/test split internally
+
+        This is the main entry point for conformal UQ in the evaluation flow.
+      </description>
+      <files>
+        <create>src/minivess/ensemble/conformal_evaluator.py</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_conformal_evaluator.py</test_file>
+        <tests>
+          <test>test_evaluator_runs_all_methods — all 4 methods produce results</test>
+          <test>test_evaluator_calibration_split — correct cal/test split</test>
+          <test>test_evaluator_result_has_all_metrics — coverage, FNR, band_width, etc.</test>
+          <test>test_evaluator_to_dict — flat dict for MLflow logging</test>
+          <test>test_evaluator_to_markdown — generates comparison table</test>
+          <test>test_evaluator_single_method — can run only one CP method</test>
+        </tests>
+      </tdd_spec>
+    </task>
+
+    <task id="4.2" title="MLflow logging integration">
+      <description>
+        Add conformal metrics to UnifiedEvaluationRunner:
+        - After standard evaluation, run ConformalEvaluator if conformal_alpha is set
+        - Log conformal metrics under eval_{dataset}_{subset}_conformal_{method}_ prefix
+        - Log prediction band visualizations as MLflow artifacts (middle slice PNG)
+      </description>
+      <files>
+        <modify>src/minivess/pipeline/evaluation_runner.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_conformal_evaluator.py</test_file>
+        <tests>
+          <test>test_unified_runner_logs_conformal — conformal metrics in MLflow</test>
+          <test>test_unified_runner_skips_without_alpha — no conformal if alpha not set</test>
+          <test>test_metric_names_prefixed — correct MLflow metric naming</test>
+        </tests>
+      </tdd_spec>
+    </task>
+
+    <task id="4.3" title="Export to ensemble __init__.py">
+      <description>
+        Add all new classes to ensemble/__init__.py exports:
+        - MorphologicalConformalPredictor
+        - MorphologicalConformalResult
+        - DistanceTransformConformalPredictor
+        - RiskControllingPredictor
+        - ConformalEvaluator
+        Update __all__ list.
+      </description>
+      <files>
+        <modify>src/minivess/ensemble/__init__.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_conformal_evaluator.py</test_file>
+        <tests>
+          <test>test_imports_from_ensemble — all new classes importable from ensemble</test>
+        </tests>
+      </tdd_spec>
+    </task>
+
+    <task id="4.4" title="Config: ConformalConfig in models.py">
+      <description>
+        Add ConformalConfig to config/models.py:
+        - alpha: float (default 0.1)
+        - methods: list[str] (default ["voxel", "morphological", "distance"])
+        - max_dilation_radius: int (default 20)
+        - calibration_fraction: float (default 0.3)
+        - risk_functions: list[str] (default ["dice_loss", "fnr"])
+
+        Update EnsembleConfig to include conformal: ConformalConfig.
+      </description>
+      <files>
+        <modify>src/minivess/config/models.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_conformal_evaluator.py</test_file>
+        <tests>
+          <test>test_conformal_config_defaults — default values correct</test>
+          <test>test_conformal_config_validation — alpha must be in (0,1)</test>
+          <test>test_ensemble_config_has_conformal — ConformalConfig accessible</test>
+        </tests>
+      </tdd_spec>
+    </task>
+  </phase>
+</plan>
