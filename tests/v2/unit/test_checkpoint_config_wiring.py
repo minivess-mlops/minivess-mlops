@@ -32,7 +32,7 @@ def test_experiment_yaml_has_checkpoint_section() -> None:
 
 
 def test_experiment_yaml_checkpoint_primary_metric() -> None:
-    """Primary metric in YAML is val_loss."""
+    """Primary metric in YAML is val_compound_masd_cldice."""
     yaml_path = (
         Path(__file__).resolve().parents[3]
         / "configs"
@@ -41,7 +41,7 @@ def test_experiment_yaml_checkpoint_primary_metric() -> None:
     )
     with open(yaml_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
-    assert config["checkpoint"]["primary_metric"] == "val_loss"
+    assert config["checkpoint"]["primary_metric"] == "val_compound_masd_cldice"
 
 
 def test_experiment_yaml_checkpoint_min_epochs() -> None:

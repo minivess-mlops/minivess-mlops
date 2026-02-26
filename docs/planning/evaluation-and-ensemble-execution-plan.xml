@@ -1,0 +1,1510 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Executable Implementation Plan: Evaluation and Ensemble System (Prefect Flow 3: Analysis)
+  Created: 2026-02-26
+  Branch: feat/experiment-evaluation
+  Background research: docs/planning/prefect-flow-evaluation-and-ensemble-planning.md
+  Predecessor plan: docs/planning/loss-metric-improvement-implementation.xml (Phases 0-3 DONE)
+  Downstream audit: docs/planning/multi-metric-downstream-double-check.md
+
+  This file contains ONLY actionable implementation steps.
+  No background research; see the .md plans for rationale.
+
+  DESIGN PRINCIPLE: MLflow is the inter-flow contract.
+    * Flow 2 (Training):    Writes checkpoints, metrics, predictions to "minivess_training"
+    * Flow 3 (Analysis):    Reads from "minivess_training", writes to "minivess_evaluation"
+    * Flow 4 (Deployment):  Reads registered models, deploys via BentoML + MONAI Deploy
+
+  MLFLOW EXPERIMENT ORGANIZATION (3 experiments):
+    1. minivess_data_io     = Flow 1: Data engineering artifacts
+    2. minivess_training    = Flow 2: One run per (loss, fold) = 12 runs currently
+    3. minivess_evaluation  = Flow 3: One run per (model_or_ensemble, dataset, subset)
+
+  UNCERTAINTY DECOMPOSITION (Lakshminarayanan et al., 2017):
+    * Total:     H[p_bar]       = -sum(p_bar * log(p_bar))
+    * Aleatoric: E_m[H[p_m]]   = (1/M) sum_m(-sum(p_m * log(p_m)))
+    * Epistemic: MI             = total - aleatoric
+    All maps are per-voxel, shape (B, 1, D, H, W).
+
+  CURRENT TRAINING STATE:
+    4 losses (dice_ce, cbdice, dice_ce_cldice, cbdice_cldice)
+    x 3 folds x 100 epochs
+    6 tracked metrics per run (val_loss, val_dice, val_f1_foreground,
+                               val_cldice, val_masd, val_compound_masd_cldice)
+    = 12 training runs producing 6 best_*.pth each = 72 checkpoints total
+-->
+<implementation-plan>
+  <metadata>
+    <title>Evaluation and Ensemble System: Executable Plan (Prefect Flow 3: Analysis)</title>
+    <created>2026-02-26</created>
+    <branch>feat/experiment-evaluation</branch>
+    <depends-on>Loss and Metric Improvement Phases 0-3 (DONE)</depends-on>
+    <depends-on>Training v2 completion (4 losses x 3 folds x 100 epochs, in progress)</depends-on>
+    <estimated-dev-time>~20 hours implementation + tests</estimated-dev-time>
+    <estimated-test-count>~95 tests across all phases</estimated-test-count>
+    <total-phases>9</total-phases>
+    <key-references>
+      <ref>Lakshminarayanan et al. (2017): Deep Ensembles uncertainty decomposition</ref>
+      <ref>Wortsman et al. (2022): Model Soups (greedy soup already in strategies.py)</ref>
+      <ref>Andre et al. (2026): Bootstrap CI recommendations</ref>
+      <ref>Mossina and Friedrich (2025): MAPIE/ConSeMa conformal prediction</ref>
+    </key-references>
+  </metadata>
+
+  <!-- ================================================================= -->
+  <!--  DEPENDENCY GRAPH                                                  -->
+  <!--  Phase 1 (pyfunc wrapper)    => Phase 5 (ensemble builder)         -->
+  <!--  Phase 2 (uncertainty)       => Phase 5 (ensemble builder)         -->
+  <!--  Phase 3 (eval config)       => Phase 5 (ensemble builder)         -->
+  <!--  Phase 4 (test dataloaders)  => Phase 6 (evaluation runner)        -->
+  <!--  Phase 5 (ensemble builder)  => Phase 6 (evaluation runner)        -->
+  <!--  Phase 6 (evaluation runner) => Phase 7 (model registration)       -->
+  <!--  Phase 6 (evaluation runner) => Phase 8 (analysis flow)            -->
+  <!--  Phase 7 (model registration)=> Phase 8 (analysis flow)            -->
+  <!--  Phase 8 (analysis flow)     => Phase 9 (cross-loss enhancement)   -->
+  <!--                                                                     -->
+  <!--  Phases 1, 2, 3, 4 are INDEPENDENT and can be developed in parallel -->
+  <!-- ================================================================= -->
+
+  <!-- ================================================================= -->
+  <!-- PHASE 1: MLflow pyfunc Wrapper (GitHub Issue #76)                  -->
+  <!-- Two wrappers: single model + ensemble model                       -->
+  <!-- Both implement predict() returning probabilities                  -->
+  <!-- Both implement predict_with_uncertainty() for UQ-aware serving    -->
+  <!-- ================================================================= -->
+  <phase id="1" name="MLflow pyfunc Wrapper" tests="~12" priority="CRITICAL">
+    <github-issues>
+      <issue>#76: MLflow pyfunc serving wrapper for single and ensemble models</issue>
+    </github-issues>
+    <dependencies>none (independent)</dependencies>
+    <description>
+      Create two MLflow pyfunc wrappers:
+      1. MiniVessSegModel: wraps a single checkpoint (ModelAdapter)
+      2. MiniVessEnsembleModel: wraps an ensemble of checkpoints
+
+      Both use ModelSignature: (-1, 1, -1, -1, -1) float32 => (-1, 2, -1, -1, -1) float32
+      Both support predict() (probabilities) and predict_with_uncertainty() (UncertaintyOutput).
+
+      The single-model wrapper extends the Phase 0 MiniVessServingModel with:
+      - Proper load_context() that handles both checkpoint formats
+      - predict_with_uncertainty() using MC Dropout
+      - context.artifacts includes model_config.yaml, checkpoint.pth, data_config.yaml
+
+      The ensemble wrapper:
+      - load_context() loads N member checkpoints from context.artifacts
+      - predict() returns mean softmax across members
+      - predict_with_uncertainty() returns UncertaintyOutput with total/aleatoric/epistemic
+      - context.artifacts includes member manifest (JSON with run_ids, checkpoint paths)
+    </description>
+
+    <inputs>
+      <input>Existing: src/minivess/adapters/base.py (ModelAdapter, SegmentationOutput)</input>
+      <input>Existing: src/minivess/pipeline/inference.py (SlidingWindowInferenceRunner)</input>
+      <input>Existing: src/minivess/ensemble/mc_dropout.py (UncertaintyOutput, MCDropoutPredictor)</input>
+      <input>Existing: src/minivess/ensemble/deep_ensembles.py (DeepEnsemblePredictor)</input>
+    </inputs>
+
+    <outputs>
+      <output>src/minivess/serving/mlflow_wrapper.py (new or extended)</output>
+      <output>tests/v2/unit/test_mlflow_wrapper.py (new)</output>
+    </outputs>
+
+    <step id="1.1" type="test-first">
+      <file>tests/v2/unit/test_mlflow_wrapper.py</file>
+      <action>Write failing tests for both pyfunc wrappers</action>
+      <tests>
+        <test>test_single_model_signature_input_shape: inputs (-1, 1, -1, -1, -1) float32</test>
+        <test>test_single_model_signature_output_shape: outputs (-1, 2, -1, -1, -1) float32</test>
+        <test>test_single_model_load_context_creates_model: loads checkpoint and rebuilds adapter</test>
+        <test>test_single_model_predict_returns_probabilities: softmax output in [0,1]</test>
+        <test>test_single_model_predict_dtype_float32: output dtype is float32 numpy</test>
+        <test>test_single_model_predict_with_uncertainty_returns_output: returns UncertaintyOutput</test>
+        <test>test_ensemble_model_load_context_loads_members: loads N member checkpoints</test>
+        <test>test_ensemble_model_predict_returns_mean: mean of member softmax outputs</test>
+        <test>test_ensemble_model_predict_with_uncertainty_total: total = entropy of mean</test>
+        <test>test_ensemble_model_predict_with_uncertainty_aleatoric: aleatoric = mean of entropies</test>
+        <test>test_ensemble_model_predict_with_uncertainty_epistemic: epistemic = total - aleatoric</test>
+        <test>test_ensemble_model_member_manifest_schema: manifest JSON has required fields</test>
+      </tests>
+    </step>
+
+    <step id="1.2" type="implement">
+      <file>src/minivess/serving/mlflow_wrapper.py</file>
+      <action>Implement MiniVessSegModel and MiniVessEnsembleModel pyfunc wrappers</action>
+      <pattern>
+        import mlflow
+        from mlflow.models.signature import ModelSignature
+        from mlflow.types.schema import Schema, TensorSpec
+
+        def get_segmentation_signature() -> ModelSignature:
+            """ModelSignature for 3D segmentation: (B,1,D,H,W) => (B,2,D,H,W)."""
+            input_schema = Schema([TensorSpec(np.dtype("float32"), (-1, 1, -1, -1, -1))])
+            output_schema = Schema([TensorSpec(np.dtype("float32"), (-1, 2, -1, -1, -1))])
+            return ModelSignature(inputs=input_schema, outputs=output_schema)
+
+        class MiniVessSegModel(mlflow.pyfunc.PythonModel):
+            """Wraps a single model checkpoint for MLflow serving."""
+
+            def load_context(self, context):
+                # Load model_config.yaml => rebuild adapter
+                # Load checkpoint.pth => adapter.load_checkpoint()
+                # Build SlidingWindowInferenceRunner
+                ...
+
+            def predict(self, context, model_input, params=None) -> np.ndarray:
+                # model_input: np.ndarray (B, 1, D, H, W)
+                # Returns: np.ndarray (B, 2, D, H, W) float32 probabilities
+                ...
+
+            def predict_with_uncertainty(self, images: np.ndarray) -> UncertaintyOutput:
+                # Uses MCDropoutPredictor for single-model UQ
+                ...
+
+        class MiniVessEnsembleModel(mlflow.pyfunc.PythonModel):
+            """Wraps an ensemble of model checkpoints for MLflow serving."""
+
+            def load_context(self, context):
+                # Load member_manifest.json => list of (run_id, checkpoint_path, config)
+                # Rebuild each member adapter
+                ...
+
+            def predict(self, context, model_input, params=None) -> np.ndarray:
+                # Run each member, return mean softmax
+                ...
+
+            def predict_with_uncertainty(self, images: np.ndarray) -> UncertaintyOutput:
+                # Deep Ensemble uncertainty: total, aleatoric, epistemic
+                ...
+      </pattern>
+    </step>
+
+    <step id="1.3" type="verify">
+      <command>uv run pytest tests/v2/unit/test_mlflow_wrapper.py -x -q</command>
+      <command>uv run ruff check src/minivess/serving/mlflow_wrapper.py</command>
+      <command>uv run mypy src/minivess/serving/mlflow_wrapper.py</command>
+    </step>
+
+    <step id="1.4" type="checkpoint">
+      <commit-msg>feat(serving): MLflow pyfunc wrappers for single model and ensemble serving</commit-msg>
+    </step>
+  </phase>
+
+  <!-- ================================================================= -->
+  <!-- PHASE 2: Deep Ensemble Uncertainty Decomposition (GitHub #82)      -->
+  <!-- Extend DeepEnsemblePredictor with Lakshminarayanan et al. (2017)  -->
+  <!-- Total = H[p_bar], Aleatoric = E[H[p_m]], Epistemic = MI          -->
+  <!-- ================================================================= -->
+  <phase id="2" name="Deep Ensemble Uncertainty Decomposition" tests="~10" priority="HIGH">
+    <github-issues>
+      <issue>#82: Deep Ensemble uncertainty decomposition (total/aleatoric/epistemic)</issue>
+    </github-issues>
+    <dependencies>none (independent)</dependencies>
+    <description>
+      Extend DeepEnsemblePredictor in deep_ensembles.py to compute the full
+      Lakshminarayanan et al. (2017) uncertainty decomposition:
+
+      Current state: DeepEnsemblePredictor only computes variance across members.
+      Target state: Compute all three uncertainty maps plus decomposition metadata.
+
+      Total predictive uncertainty = entropy of mean softmax:
+        H[p_bar] = -sum(p_bar * log(p_bar)) where p_bar = (1/M) sum_m p_m
+
+      Aleatoric uncertainty = mean of individual entropies:
+        E_m[H[p_m]] = (1/M) sum_m(-sum(p_m * log(p_m)))
+
+      Epistemic uncertainty = mutual information:
+        MI = H[p_bar] - E_m[H[p_m]] = total - aleatoric
+
+      All maps shape: (B, 1, D, H, W) float32.
+    </description>
+
+    <inputs>
+      <input>Existing: src/minivess/ensemble/deep_ensembles.py (DeepEnsemblePredictor)</input>
+      <input>Existing: src/minivess/ensemble/mc_dropout.py (UncertaintyOutput)</input>
+    </inputs>
+
+    <outputs>
+      <output>src/minivess/ensemble/deep_ensembles.py (modified)</output>
+      <output>tests/v2/unit/test_deep_ensemble_uncertainty.py (new)</output>
+    </outputs>
+
+    <step id="2.1" type="test-first">
+      <file>tests/v2/unit/test_deep_ensemble_uncertainty.py</file>
+      <action>Write failing tests for uncertainty decomposition</action>
+      <tests>
+        <test>test_predict_with_uncertainty_returns_output: returns UncertaintyOutput</test>
+        <test>test_total_uncertainty_is_entropy_of_mean: H[p_bar] formula</test>
+        <test>test_aleatoric_is_mean_of_entropies: E[H[p_m]] formula</test>
+        <test>test_epistemic_equals_total_minus_aleatoric: MI = total - aleatoric</test>
+        <test>test_uncertainty_maps_shape: all (B, 1, D, H, W)</test>
+        <test>test_uncertainty_maps_nonnegative: all >= 0</test>
+        <test>test_epistemic_nonnegative: MI >= 0 always (Gibbs inequality)</test>
+        <test>test_metadata_contains_decomposition: keys total_map, aleatoric_map, epistemic_map</test>
+        <test>test_single_member_epistemic_zero: with 1 model, epistemic should be ~0</test>
+        <test>test_backward_compat_predict: existing predict() still works with variance</test>
+      </tests>
+    </step>
+
+    <step id="2.2" type="implement">
+      <file>src/minivess/ensemble/deep_ensembles.py</file>
+      <action>Add predict_with_uncertainty() method to DeepEnsemblePredictor</action>
+      <pattern>
+        @torch.no_grad()
+        def predict_with_uncertainty(self, images: Tensor) -> UncertaintyOutput:
+            """Deep ensemble prediction with full uncertainty decomposition.
+
+            Returns UncertaintyOutput where:
+            - prediction: mean softmax (B, C, D, H, W)
+            - uncertainty_map: total uncertainty (B, 1, D, H, W)
+            - metadata["total_map"]: entropy of mean softmax
+            - metadata["aleatoric_map"]: mean of individual entropies
+            - metadata["epistemic_map"]: mutual information (total - aleatoric)
+            """
+            predictions = []
+            for model in self.models:
+                model.eval()
+                output = model(images)
+                predictions.append(output.prediction)
+
+            stacked = torch.stack(predictions, dim=0)  # (M, B, C, D, H, W)
+            mean_pred = stacked.mean(dim=0)  # (B, C, D, H, W)
+
+            eps = 1e-8
+            # Total: H[p_bar]
+            total = -(mean_pred * torch.log(mean_pred + eps)).sum(dim=1, keepdim=True)
+
+            # Aleatoric: E_m[H[p_m]]
+            per_member_entropy = -(stacked * torch.log(stacked + eps)).sum(dim=2, keepdim=True)
+            aleatoric = per_member_entropy.mean(dim=0)  # (B, 1, D, H, W)
+
+            # Epistemic: MI = total - aleatoric
+            epistemic = torch.clamp(total - aleatoric, min=0.0)
+
+            return UncertaintyOutput(
+                prediction=mean_pred,
+                uncertainty_map=total,
+                method="deep_ensemble",
+                metadata={
+                    "n_members": len(self.models),
+                    "total_map": total,
+                    "aleatoric_map": aleatoric,
+                    "epistemic_map": epistemic,
+                },
+            )
+      </pattern>
+    </step>
+
+    <step id="2.3" type="verify">
+      <command>uv run pytest tests/v2/unit/test_deep_ensemble_uncertainty.py -x -q</command>
+      <command>uv run ruff check src/minivess/ensemble/deep_ensembles.py</command>
+      <command>uv run mypy src/minivess/ensemble/deep_ensembles.py</command>
+    </step>
+
+    <step id="2.4" type="checkpoint">
+      <commit-msg>feat(ensemble): Deep Ensemble uncertainty decomposition (total/aleatoric/epistemic)</commit-msg>
+    </step>
+  </phase>
+
+  <!-- ================================================================= -->
+  <!-- PHASE 3: Evaluation Config and Best Model Selection               -->
+  <!-- Pydantic config model for the evaluation flow                     -->
+  <!-- Primary metric configurable, default = val_compound_masd_cldice   -->
+  <!-- ================================================================= -->
+  <phase id="3" name="Evaluation Config and Best Model Selection" tests="~10" priority="HIGH">
+    <github-issues>
+      <issue>#77: Evaluation configuration and best-model selection logic</issue>
+    </github-issues>
+    <dependencies>none (independent)</dependencies>
+    <description>
+      Create a Pydantic v2 configuration model for the evaluation flow and
+      a corresponding YAML config. The config determines:
+
+      1. Which training experiment to read from (default: minivess_training)
+      2. Which metric is "primary" for best-model selection (default: val_compound_masd_cldice)
+      3. Whether primary metric is maximized or minimized
+      4. Which ensemble strategies to build and evaluate
+      5. Bootstrap CI parameters (n_resamples, confidence_level, seed)
+      6. Test dataset registry configuration
+      7. Output experiment name (default: minivess_evaluation)
+
+      The primary_metric field determines which best_*.pth checkpoint is loaded
+      per fold when building ensembles with "single_best" strategies.
+    </description>
+
+    <inputs>
+      <input>Existing: src/minivess/config/models.py (EnsembleConfig, CheckpointConfig)</input>
+      <input>Existing: configs/experiments/dynunet_losses.yaml (reference for checkpoint.primary_metric)</input>
+    </inputs>
+
+    <outputs>
+      <output>src/minivess/config/evaluation_config.py (new)</output>
+      <output>configs/evaluation/default.yaml (new)</output>
+      <output>tests/v2/unit/test_evaluation_config.py (new)</output>
+    </outputs>
+
+    <step id="3.1" type="test-first">
+      <file>tests/v2/unit/test_evaluation_config.py</file>
+      <action>Write failing tests for evaluation config model</action>
+      <tests>
+        <test>test_default_primary_metric: val_compound_masd_cldice</test>
+        <test>test_default_primary_metric_direction: maximize</test>
+        <test>test_default_training_experiment: minivess_training</test>
+        <test>test_default_evaluation_experiment: minivess_evaluation</test>
+        <test>test_default_ensemble_strategies: all four strategies included</test>
+        <test>test_ensemble_strategy_enum_values: per_loss_single_best, all_loss_single_best, per_loss_all_best, all_loss_all_best</test>
+        <test>test_load_from_yaml: round-trip from configs/evaluation/default.yaml</test>
+        <test>test_primary_metric_selects_checkpoint: maps to best_{metric}.pth filename</test>
+        <test>test_invalid_direction_rejected: only "maximize" or "minimize"</test>
+        <test>test_ci_parameters_defaults: n_resamples=10000, confidence_level=0.95</test>
+      </tests>
+    </step>
+
+    <step id="3.2" type="implement">
+      <file>src/minivess/config/evaluation_config.py</file>
+      <action>Create EvaluationConfig pydantic model</action>
+      <pattern>
+        from enum import StrEnum
+        from pydantic import BaseModel, Field
+
+        class EvalEnsembleStrategy(StrEnum):
+            """Four ensemble strategies for evaluation."""
+            PER_LOSS_SINGLE_BEST = "per_loss_single_best"
+            ALL_LOSS_SINGLE_BEST = "all_loss_single_best"
+            PER_LOSS_ALL_BEST = "per_loss_all_best"
+            ALL_LOSS_ALL_BEST = "all_loss_all_best"
+
+        class BootstrapConfig(BaseModel):
+            n_resamples: int = 10_000
+            confidence_level: float = 0.95
+            seed: int = 42
+
+        class EvaluationConfig(BaseModel):
+            """Configuration for Prefect Flow 3: Analysis."""
+            training_experiment: str = "minivess_training"
+            evaluation_experiment: str = "minivess_evaluation"
+            primary_metric: str = "val_compound_masd_cldice"
+            primary_metric_direction: str = "maximize"
+            ensemble_strategies: list[EvalEnsembleStrategy] = Field(
+                default_factory=lambda: list(EvalEnsembleStrategy)
+            )
+            ensemble_aggregation: str = "mean"
+            bootstrap: BootstrapConfig = Field(default_factory=BootstrapConfig)
+            include_expensive_metrics: bool = True
+            device: str = "auto"
+
+            def checkpoint_filename(self) -> str:
+                """Map primary_metric to checkpoint filename."""
+                return f"best_{self.primary_metric}.pth"
+      </pattern>
+    </step>
+
+    <step id="3.3" type="implement">
+      <file>configs/evaluation/default.yaml</file>
+      <action>Create default evaluation YAML configuration</action>
+      <pattern>
+        # Evaluation Flow Configuration (Prefect Flow 3: Analysis)
+        # Controls model selection, ensemble building, and evaluation parameters.
+        training_experiment: minivess_training
+        evaluation_experiment: minivess_evaluation
+        primary_metric: val_compound_masd_cldice
+        primary_metric_direction: maximize
+        ensemble_strategies:
+          - per_loss_single_best
+          - all_loss_single_best
+          - per_loss_all_best
+          - all_loss_all_best
+        ensemble_aggregation: mean
+        bootstrap:
+          n_resamples: 10000
+          confidence_level: 0.95
+          seed: 42
+        include_expensive_metrics: true
+        device: auto
+      </pattern>
+    </step>
+
+    <step id="3.4" type="verify">
+      <command>uv run pytest tests/v2/unit/test_evaluation_config.py -x -q</command>
+      <command>uv run ruff check src/minivess/config/evaluation_config.py</command>
+      <command>uv run mypy src/minivess/config/evaluation_config.py</command>
+    </step>
+
+    <step id="3.5" type="checkpoint">
+      <commit-msg>feat(config): Evaluation config with primary metric selection and ensemble strategies</commit-msg>
+    </step>
+  </phase>
+
+  <!-- ================================================================= -->
+  <!-- PHASE 4: Hierarchical Test DataLoader                             -->
+  <!-- Nested dict: dataset_name => subset_name => DataLoader            -->
+  <!-- Debug dataset: n=4 random volumes from minivess                   -->
+  <!-- Validation dataloaders: per-fold from training splits             -->
+  <!-- ================================================================= -->
+  <phase id="4" name="Hierarchical Test DataLoader" tests="~12" priority="HIGH">
+    <github-issues>
+      <issue>#83: Hierarchical test DataLoader dict for multi-dataset evaluation</issue>
+    </github-issues>
+    <dependencies>none (independent)</dependencies>
+    <description>
+      Create a hierarchical DataLoader system that supports:
+
+      1. Multiple test datasets (minivess_debug, ucl_2pm, harvard_3pm, ...)
+      2. Per-dataset subsets (e.g., thin_vessels, thick_vessels, mixed, all)
+      3. Validation dataloaders from training folds (minivess_fold0, fold1, fold2)
+
+      Structure:
+        dataloaders_dict = {
+          "minivess_debug": {
+            "all": DataLoader(...)  # 4 random volumes from minivess
+          },
+          "ucl_2pm": {
+            "all": DataLoader(...)  # placeholder
+          },
+          "harvard_3pm": {
+            "thin_vessels": DataLoader(...),
+            "thick_vessels": DataLoader(...),
+            "mixed": DataLoader(...),
+            "all": DataLoader(...)
+          }
+        }
+
+        val_dataloaders_dict = {
+          "minivess_fold0": {"all": DataLoader(...)},
+          "minivess_fold1": {"all": DataLoader(...)},
+          "minivess_fold2": {"all": DataLoader(...)},
+        }
+
+      DatasetRegistry is a Pydantic model that maps dataset names to:
+      - data directory path
+      - subset classification function (optional)
+      - transform config
+
+      Debug dataset: create_debug_dataset() selects n=4 random volumes from
+      minivess using a fixed seed for reproducibility, with no overlap guarantee
+      against training folds (explicitly a debug/dev tool, not a proper test set).
+    </description>
+
+    <inputs>
+      <input>Existing: src/minivess/data/loader.py (discover_nifti_pairs, build_val_loader)</input>
+      <input>Existing: src/minivess/data/transforms.py (build_val_transforms)</input>
+      <input>Existing: src/minivess/config/models.py (DataConfig)</input>
+    </inputs>
+
+    <outputs>
+      <output>src/minivess/data/test_datasets.py (new)</output>
+      <output>src/minivess/data/debug_dataset.py (new)</output>
+      <output>tests/v2/unit/test_test_datasets.py (new)</output>
+      <output>tests/v2/unit/test_debug_dataset.py (new)</output>
+    </outputs>
+
+    <step id="4.1" type="test-first">
+      <file>tests/v2/unit/test_test_datasets.py</file>
+      <action>Write failing tests for hierarchical DataLoader dict</action>
+      <tests>
+        <test>test_dataloaders_dict_is_nested_dict: two-level nesting</test>
+        <test>test_each_dataset_has_all_subset: every dataset has an "all" key</test>
+        <test>test_each_leaf_is_dataloader: leaf values are DataLoader instances</test>
+        <test>test_dataset_registry_schema: Pydantic model validates correctly</test>
+        <test>test_register_custom_dataset: add dataset at runtime</test>
+        <test>test_val_dataloaders_per_fold: creates per-fold val dataloaders</test>
+      </tests>
+    </step>
+
+    <step id="4.2" type="test-first">
+      <file>tests/v2/unit/test_debug_dataset.py</file>
+      <action>Write failing tests for debug dataset creation</action>
+      <tests>
+        <test>test_debug_dataset_length: exactly 4 volumes</test>
+        <test>test_debug_dataset_reproducible: same seed gives same volumes</test>
+        <test>test_debug_dataset_returns_dict: returns list[dict[str, str]] pairs</test>
+        <test>test_debug_dataset_requires_data_dir: raises if dir not found</test>
+        <test>test_build_debug_dataloader: returns working DataLoader</test>
+        <test>test_debug_subset_name_is_all: only "all" subset available</test>
+      </tests>
+    </step>
+
+    <step id="4.3" type="implement">
+      <file>src/minivess/data/test_datasets.py</file>
+      <action>Create DatasetRegistry and HierarchicalDataLoaderDict</action>
+      <pattern>
+        from pydantic import BaseModel
+
+        class DatasetEntry(BaseModel):
+            """Registry entry for a test dataset."""
+            name: str
+            data_dir: Path
+            subsets: dict[str, list[str]] = Field(default_factory=lambda: {"all": []})
+            # Empty list means "use all volumes in data_dir"
+            # Non-empty list means specific volume IDs for that subset
+
+        class DatasetRegistry(BaseModel):
+            """Registry of available test datasets."""
+            datasets: dict[str, DatasetEntry] = Field(default_factory=dict)
+
+            def register(self, entry: DatasetEntry) -> None: ...
+            def get(self, name: str) -> DatasetEntry: ...
+
+        # Type alias for the hierarchical structure
+        HierarchicalDataLoaderDict = dict[str, dict[str, DataLoader]]
+
+        def build_test_dataloaders(
+            registry: DatasetRegistry,
+            config: DataConfig,
+        ) -> HierarchicalDataLoaderDict:
+            """Build nested DataLoader dict from registry."""
+            ...
+
+        def build_val_dataloaders_from_splits(
+            split_dir: Path,
+            config: DataConfig,
+            num_folds: int,
+        ) -> HierarchicalDataLoaderDict:
+            """Build per-fold validation DataLoaders from training split files."""
+            ...
+      </pattern>
+    </step>
+
+    <step id="4.4" type="implement">
+      <file>src/minivess/data/debug_dataset.py</file>
+      <action>Create debug dataset selection utility</action>
+      <pattern>
+        import random
+
+        def create_debug_dataset(
+            data_dir: Path,
+            n_volumes: int = 4,
+            seed: int = 42,
+        ) -> list[dict[str, str]]:
+            """Select n random volumes from a dataset for debug/dev use.
+
+            NOT a proper test set; volumes may overlap with training folds.
+            Use only for debugging evaluation mechanics.
+            """
+            all_pairs = discover_nifti_pairs(data_dir)
+            rng = random.Random(seed)
+            selected = rng.sample(all_pairs, min(n_volumes, len(all_pairs)))
+            return selected
+      </pattern>
+    </step>
+
+    <step id="4.5" type="verify">
+      <command>uv run pytest tests/v2/unit/test_test_datasets.py tests/v2/unit/test_debug_dataset.py -x -q</command>
+      <command>uv run ruff check src/minivess/data/test_datasets.py src/minivess/data/debug_dataset.py</command>
+      <command>uv run mypy src/minivess/data/test_datasets.py src/minivess/data/debug_dataset.py</command>
+    </step>
+
+    <step id="4.6" type="checkpoint">
+      <commit-msg>feat(data): Hierarchical test DataLoader dict and debug dataset for multi-dataset evaluation</commit-msg>
+    </step>
+  </phase>
+
+  <!-- ================================================================= -->
+  <!-- PHASE 5: Ensemble Builder from MLflow Runs                        -->
+  <!-- Query MLflow training runs, load checkpoints, build ensembles     -->
+  <!-- Four strategies: per_loss_single_best, all_loss_single_best,      -->
+  <!--                  per_loss_all_best, all_loss_all_best              -->
+  <!-- ================================================================= -->
+  <phase id="5" name="Ensemble Builder from MLflow Runs" tests="~14" priority="CRITICAL">
+    <github-issues>
+      <issue>#84: Ensemble builder with 4 strategies from MLflow training runs</issue>
+    </github-issues>
+    <dependencies>
+      <dependency>Phase 1 (pyfunc wrapper: for MiniVessEnsembleModel)</dependency>
+      <dependency>Phase 2 (uncertainty: for predict_with_uncertainty)</dependency>
+      <dependency>Phase 3 (eval config: for primary_metric, ensemble_strategies)</dependency>
+    </dependencies>
+    <description>
+      Create EnsembleBuilder that queries the MLflow training experiment,
+      selects runs by tags (loss_type, fold_id), downloads checkpoints,
+      and constructs ensembles according to 4 strategies:
+
+      1. per_loss_single_best:
+         For each loss, ensemble all folds using only the primary_metric checkpoint.
+         Example: 3 folds of dice_ce, each using best_val_compound_masd_cldice.pth
+         Result: 4 ensembles (one per loss), each with 3 members.
+
+      2. all_loss_single_best:
+         Ensemble ALL folds across ALL losses using primary_metric checkpoint.
+         Example: 12 models (4 losses x 3 folds), primary_metric checkpoint only.
+         Result: 1 mega-ensemble with 12 members.
+
+      3. per_loss_all_best:
+         For each loss, ensemble all folds using ALL 6 best-metric checkpoints.
+         Example: 3 folds x 6 metrics = 18 members per loss.
+         Result: 4 ensembles, each with 18 members.
+
+      4. all_loss_all_best:
+         Full Deep Ensemble: all folds x all losses x all metrics.
+         Example: 12 runs x 6 metrics = 72 members.
+         Result: 1 brute-force ensemble with 72 members.
+
+      EnsembleBuilder outputs:
+      - A list of EnsemblePlan dataclasses describing each ensemble
+      - Each plan contains member run_ids, checkpoint paths, metadata
+      - An instantiate() method that loads weights into DeepEnsemblePredictor
+    </description>
+
+    <inputs>
+      <input>Existing: src/minivess/ensemble/deep_ensembles.py (DeepEnsemblePredictor)</input>
+      <input>Existing: src/minivess/ensemble/strategies.py (EnsemblePredictor)</input>
+      <input>Existing: src/minivess/observability/tracking.py (ExperimentTracker, MlflowClient)</input>
+      <input>New: src/minivess/config/evaluation_config.py (EvaluationConfig, EvalEnsembleStrategy)</input>
+    </inputs>
+
+    <outputs>
+      <output>src/minivess/ensemble/builder.py (new)</output>
+      <output>tests/v2/unit/test_ensemble_builder.py (new)</output>
+    </outputs>
+
+    <step id="5.1" type="test-first">
+      <file>tests/v2/unit/test_ensemble_builder.py</file>
+      <action>Write failing tests for EnsembleBuilder</action>
+      <tests>
+        <test>test_query_training_runs_returns_run_infos: finds 12 runs from minivess_training</test>
+        <test>test_group_runs_by_loss: groups by loss_type tag into 4 groups</test>
+        <test>test_group_runs_by_fold: groups by fold_id tag into 3 groups per loss</test>
+        <test>test_per_loss_single_best_plan: 4 ensembles, 3 members each</test>
+        <test>test_all_loss_single_best_plan: 1 ensemble, 12 members</test>
+        <test>test_per_loss_all_best_plan: 4 ensembles, 18 members each</test>
+        <test>test_all_loss_all_best_plan: 1 ensemble, 72 members</test>
+        <test>test_ensemble_plan_contains_run_ids: lineage tracking</test>
+        <test>test_ensemble_plan_contains_checkpoint_paths: paths to .pth files</test>
+        <test>test_build_all_strategies: builds plans for all 4 strategies</test>
+        <test>test_instantiate_loads_models: creates DeepEnsemblePredictor with correct member count</test>
+        <test>test_member_manifest_serializable: manifest can be JSON-serialized</test>
+        <test>test_handles_missing_checkpoints_gracefully: logs warning, skips member</test>
+        <test>test_checkpoint_filename_from_metric: maps metric name to best_*.pth path</test>
+      </tests>
+    </step>
+
+    <step id="5.2" type="implement">
+      <file>src/minivess/ensemble/builder.py</file>
+      <action>Create EnsembleBuilder with 4 strategies</action>
+      <pattern>
+        @dataclass
+        class EnsembleMember:
+            """One member of an ensemble."""
+            run_id: str
+            loss_type: str
+            fold_id: int
+            checkpoint_metric: str
+            checkpoint_path: Path
+            training_experiment: str
+
+        @dataclass
+        class EnsemblePlan:
+            """Plan for building one ensemble."""
+            strategy: EvalEnsembleStrategy
+            name: str  # e.g., "per_loss_single_best_dice_ce"
+            members: list[EnsembleMember]
+
+            @property
+            def training_run_ids(self) -> list[str]:
+                return [m.run_id for m in self.members]
+
+            def to_manifest_dict(self) -> dict: ...
+
+        class EnsembleBuilder:
+            """Build ensemble plans from MLflow training runs."""
+
+            def __init__(
+                self,
+                eval_config: EvaluationConfig,
+                tracking_uri: str | None = None,
+            ) -> None:
+                self.config = eval_config
+                self.client = MlflowClient(tracking_uri=resolve_tracking_uri(...))
+
+            def query_training_runs(self) -> list[RunInfo]: ...
+
+            def build_plans(self) -> list[EnsemblePlan]:
+                """Build ensemble plans for all configured strategies."""
+                plans = []
+                for strategy in self.config.ensemble_strategies:
+                    plans.extend(self._build_strategy(strategy))
+                return plans
+
+            def _build_per_loss_single_best(self) -> list[EnsemblePlan]: ...
+            def _build_all_loss_single_best(self) -> list[EnsemblePlan]: ...
+            def _build_per_loss_all_best(self) -> list[EnsemblePlan]: ...
+            def _build_all_loss_all_best(self) -> list[EnsemblePlan]: ...
+
+            def instantiate(self, plan: EnsemblePlan) -> DeepEnsemblePredictor:
+                """Load checkpoint weights and create a DeepEnsemblePredictor."""
+                ...
+      </pattern>
+    </step>
+
+    <step id="5.3" type="verify">
+      <command>uv run pytest tests/v2/unit/test_ensemble_builder.py -x -q</command>
+      <command>uv run ruff check src/minivess/ensemble/builder.py</command>
+      <command>uv run mypy src/minivess/ensemble/builder.py</command>
+    </step>
+
+    <step id="5.4" type="checkpoint">
+      <commit-msg>feat(ensemble): EnsembleBuilder with 4 strategies from MLflow training runs</commit-msg>
+    </step>
+  </phase>
+
+  <!-- ================================================================= -->
+  <!-- PHASE 6: Evaluation Runner Integration                            -->
+  <!-- Unified evaluation for single models + ensembles                  -->
+  <!-- Logs to minivess_evaluation MLflow experiment                     -->
+  <!-- One MLflow run per (model_or_ensemble, dataset, subset)           -->
+  <!-- ================================================================= -->
+  <phase id="6" name="Evaluation Runner Integration" tests="~14" priority="CRITICAL">
+    <github-issues>
+      <issue>#85: Unified evaluation runner for single models and ensembles</issue>
+      <issue>#79: Cross-loss comparison with bootstrap tests</issue>
+    </github-issues>
+    <dependencies>
+      <dependency>Phase 4 (hierarchical test DataLoaders)</dependency>
+      <dependency>Phase 5 (ensemble builder: provides EnsemblePlan + instantiate)</dependency>
+    </dependencies>
+    <description>
+      Create a unified EvaluationOrchestrator that:
+
+      1. Takes a list of "things to evaluate" (single checkpoint OR ensemble plan)
+      2. For each thing, iterates over the hierarchical DataLoader dict
+      3. For each (thing, dataset, subset): creates one MLflow run in minivess_evaluation
+      4. Runs inference (sliding window for single model, ensemble predict for ensemble)
+      5. Computes MetricsReloaded metrics with bootstrap CIs
+      6. Computes compound metric (val_compound_masd_cldice)
+      7. Logs metrics, tags, and artifacts to MLflow
+      8. Optionally saves per-volume predictions and uncertainty maps
+
+      MLflow run structure in minivess_evaluation:
+        run_name: "{model_type}_{strategy}_{dataset}_{subset}"
+        tags:
+          model_type: "single" | "ensemble"
+          ensemble_strategy: strategy name (or "none" for single)
+          dataset_name: "minivess_debug" | "ucl_2pm" | ...
+          dataset_subset: "all" | "thin_vessels" | ...
+          training_run_ids: comma-separated run IDs
+          training_experiment: "minivess_training"
+          primary_metric: "val_compound_masd_cldice"
+          loss_type: for single models
+          fold_id: for single models
+          checkpoint_metric: for single models
+        metrics:
+          eval_dsc, eval_dsc_ci_lower, eval_dsc_ci_upper
+          eval_centreline_dsc, eval_centreline_dsc_ci_lower, ...
+          eval_measured_masd, ...
+          eval_compound_masd_cldice (primary sort column)
+          eval_measured_hausdorff_distance_perc, ... (if include_expensive)
+          eval_normalised_surface_distance, ... (if include_expensive)
+        artifacts:
+          predictions/{volume_name}.npz (per-volume predictions)
+          uncertainty/{volume_name}_total.npz (if ensemble)
+          uncertainty/{volume_name}_aleatoric.npz (if ensemble)
+          uncertainty/{volume_name}_epistemic.npz (if ensemble)
+          comparison.md (human-readable comparison table)
+    </description>
+
+    <inputs>
+      <input>Existing: src/minivess/pipeline/evaluation.py (EvaluationRunner, FoldResult)</input>
+      <input>Existing: src/minivess/pipeline/inference.py (SlidingWindowInferenceRunner)</input>
+      <input>Existing: src/minivess/pipeline/comparison.py (ComparisonTable, format_comparison_markdown)</input>
+      <input>Existing: src/minivess/pipeline/prediction_store.py (save_volume_prediction, load_volume_prediction)</input>
+      <input>Existing: src/minivess/pipeline/validation_metrics.py (compute_compound_masd_cldice)</input>
+      <input>Existing: src/minivess/observability/tracking.py (ExperimentTracker)</input>
+      <input>New: src/minivess/config/evaluation_config.py (EvaluationConfig)</input>
+      <input>New: src/minivess/ensemble/builder.py (EnsemblePlan, EnsembleBuilder)</input>
+      <input>New: src/minivess/data/test_datasets.py (HierarchicalDataLoaderDict)</input>
+    </inputs>
+
+    <outputs>
+      <output>src/minivess/pipeline/evaluation_runner.py (new)</output>
+      <output>tests/v2/unit/test_evaluation_runner_integration.py (new)</output>
+    </outputs>
+
+    <step id="6.1" type="test-first">
+      <file>tests/v2/unit/test_evaluation_runner_integration.py</file>
+      <action>Write failing tests for unified evaluation runner</action>
+      <tests>
+        <test>test_evaluate_single_model_creates_mlflow_run: creates run in minivess_evaluation</test>
+        <test>test_evaluate_single_model_logs_metrics: logs MetricsReloaded with CIs</test>
+        <test>test_evaluate_single_model_logs_compound_metric: val_compound_masd_cldice present</test>
+        <test>test_evaluate_single_model_tags: model_type=single, training_run_id, loss_type</test>
+        <test>test_evaluate_ensemble_creates_mlflow_run: creates run in minivess_evaluation</test>
+        <test>test_evaluate_ensemble_logs_metrics: same metrics as single model</test>
+        <test>test_evaluate_ensemble_tags: model_type=ensemble, ensemble_strategy, training_run_ids</test>
+        <test>test_evaluate_ensemble_saves_uncertainty_maps: total, aleatoric, epistemic .npz</test>
+        <test>test_evaluate_all_iterates_datasets: creates runs for each dataset</test>
+        <test>test_evaluate_all_iterates_subsets: creates runs for each subset</test>
+        <test>test_evaluate_all_creates_correct_run_count: n_things x n_datasets x n_subsets</test>
+        <test>test_per_volume_predictions_saved: .npz files in predictions/ artifact folder</test>
+        <test>test_comparison_markdown_saved: comparison.md artifact present</test>
+        <test>test_evaluation_results_sortable_by_compound: default sort by eval_compound_masd_cldice</test>
+      </tests>
+    </step>
+
+    <step id="6.2" type="implement">
+      <file>src/minivess/pipeline/evaluation_runner.py</file>
+      <action>Create EvaluationOrchestrator for unified single/ensemble evaluation</action>
+      <pattern>
+        @dataclass
+        class EvalTarget:
+            """Something to evaluate: single model or ensemble."""
+            name: str
+            model_type: str  # "single" | "ensemble"
+            # For single models:
+            run_id: str | None = None
+            checkpoint_path: Path | None = None
+            loss_type: str | None = None
+            fold_id: int | None = None
+            checkpoint_metric: str | None = None
+            # For ensembles:
+            ensemble_plan: EnsemblePlan | None = None
+
+        @dataclass
+        class EvalResult:
+            """Result from evaluating one target on one dataset/subset."""
+            target_name: str
+            dataset_name: str
+            subset_name: str
+            fold_result: FoldResult
+            compound_metric: float
+            mlflow_run_id: str
+
+        class EvaluationOrchestrator:
+            """Unified evaluation for single models and ensembles."""
+
+            def __init__(
+                self,
+                eval_config: EvaluationConfig,
+                inference_runner: SlidingWindowInferenceRunner,
+                tracking_uri: str | None = None,
+            ) -> None: ...
+
+            def evaluate_target(
+                self,
+                target: EvalTarget,
+                dataloader: DataLoader,
+                *,
+                dataset_name: str,
+                subset_name: str,
+            ) -> EvalResult:
+                """Evaluate one target on one dataset/subset. Creates one MLflow run."""
+                ...
+
+            def evaluate_all(
+                self,
+                targets: list[EvalTarget],
+                dataloaders: HierarchicalDataLoaderDict,
+            ) -> list[EvalResult]:
+                """Evaluate all targets on all datasets/subsets."""
+                results = []
+                for target in targets:
+                    for ds_name, subsets in dataloaders.items():
+                        for subset_name, loader in subsets.items():
+                            result = self.evaluate_target(
+                                target, loader,
+                                dataset_name=ds_name, subset_name=subset_name,
+                            )
+                            results.append(result)
+                return results
+      </pattern>
+    </step>
+
+    <step id="6.3" type="verify">
+      <command>uv run pytest tests/v2/unit/test_evaluation_runner_integration.py -x -q</command>
+      <command>uv run ruff check src/minivess/pipeline/evaluation_runner.py</command>
+      <command>uv run mypy src/minivess/pipeline/evaluation_runner.py</command>
+    </step>
+
+    <step id="6.4" type="checkpoint">
+      <commit-msg>feat(pipeline): Unified evaluation runner for single models and ensembles with MLflow logging</commit-msg>
+    </step>
+  </phase>
+
+  <!-- ================================================================= -->
+  <!-- PHASE 7: Model Registration and Tagging (GitHub Issue #78)        -->
+  <!-- Champion/challenger workflow with environment aliases              -->
+  <!-- Per-loss best aliases, ensemble-specific tags                     -->
+  <!-- ================================================================= -->
+  <phase id="7" name="Model Registration and Tagging" tests="~10" priority="HIGH">
+    <github-issues>
+      <issue>#78: Model registration with champion/challenger aliases and tags</issue>
+    </github-issues>
+    <dependencies>
+      <dependency>Phase 6 (evaluation runner: provides EvalResult with metrics)</dependency>
+    </dependencies>
+    <description>
+      After evaluation, register the best models in MLflow Model Registry:
+
+      1. Log models using mlflow.pyfunc.log_model() with ModelSignature
+         (using the wrappers from Phase 1)
+      2. Assign champion/challenger aliases:
+         "champion" = overall best by primary_metric
+         "challenger" = new model being evaluated against champion
+      3. Per-environment aliases:
+         "staging-champion" = for staging deployment
+         "prod-champion" = for production deployment
+      4. Per-loss best aliases:
+         "best-dice-ce", "best-cbdice", "best-dice-ce-cldice", "best-cbdice-cldice"
+      5. Filtering tags on registered model versions:
+         loss_type, fold_id, ensemble_strategy, checkpoint_metric
+         eval_compound_masd_cldice (for sorting)
+         model_type (single/ensemble)
+
+      Uses existing ModelRegistry + PromotionCriteria from model_registry.py
+      and ExperimentTracker.register_model() from tracking.py.
+
+      Promotion workflow:
+        DEVELOPMENT => STAGING: Meets min_thresholds (e.g., dice >= 0.5)
+        STAGING => PRODUCTION: Human approval + meets prod thresholds
+    </description>
+
+    <inputs>
+      <input>Existing: src/minivess/observability/tracking.py (ExperimentTracker.register_model)</input>
+      <input>Existing: src/minivess/observability/model_registry.py (ModelRegistry, PromotionCriteria)</input>
+      <input>New: src/minivess/serving/mlflow_wrapper.py (get_segmentation_signature)</input>
+      <input>New: src/minivess/pipeline/evaluation_runner.py (EvalResult)</input>
+    </inputs>
+
+    <outputs>
+      <output>src/minivess/observability/tracking.py (modified: enhanced registration)</output>
+      <output>src/minivess/pipeline/model_promoter.py (new)</output>
+      <output>tests/v2/unit/test_model_registration.py (new)</output>
+    </outputs>
+
+    <step id="7.1" type="test-first">
+      <file>tests/v2/unit/test_model_registration.py</file>
+      <action>Write failing tests for model registration workflow</action>
+      <tests>
+        <test>test_log_pyfunc_model_with_signature: mlflow.pyfunc.log_model() called with correct signature</test>
+        <test>test_champion_alias_assigned: best model gets "champion" alias</test>
+        <test>test_challenger_alias_assigned: new model gets "challenger"</test>
+        <test>test_environment_aliases: staging-champion, prod-champion available</test>
+        <test>test_per_loss_best_aliases: best-dice-ce, best-cbdice, etc.</test>
+        <test>test_registration_tags: loss_type, fold_id, ensemble_strategy, checkpoint_metric</test>
+        <test>test_promotion_criteria_check: min_thresholds respected</test>
+        <test>test_select_best_from_eval_results: picks best by compound metric</test>
+        <test>test_find_champion_returns_none_when_empty: no registered models yet</test>
+        <test>test_promotion_rejects_below_threshold: dice less than 0.5 rejected</test>
+      </tests>
+    </step>
+
+    <step id="7.2" type="implement">
+      <file>src/minivess/pipeline/model_promoter.py</file>
+      <action>Create ModelPromoter for champion/challenger workflow</action>
+      <pattern>
+        class ModelPromoter:
+            """Select and register the best model from evaluation results."""
+
+            def __init__(
+                self,
+                eval_config: EvaluationConfig,
+                tracking_uri: str | None = None,
+            ) -> None:
+                self.config = eval_config
+                self.client = MlflowClient(tracking_uri=resolve_tracking_uri(...))
+
+            def select_best(self, results: list[EvalResult]) -> EvalResult:
+                """Select the best result by primary_metric."""
+                ...
+
+            def register_best(
+                self,
+                result: EvalResult,
+                *,
+                model_name: str = "minivess-segmentor",
+                alias: str = "champion",
+            ) -> str:
+                """Register the best model with an alias. Returns version string."""
+                ...
+
+            def register_per_loss_best(
+                self,
+                results: list[EvalResult],
+            ) -> dict[str, str]:
+                """Register per-loss best models with per-loss aliases."""
+                ...
+
+            def promote_to_staging(
+                self,
+                model_name: str,
+                version: str,
+                criteria: PromotionCriteria,
+            ) -> PromotionResult:
+                """Attempt to promote a model version to staging."""
+                ...
+      </pattern>
+    </step>
+
+    <step id="7.3" type="implement">
+      <file>src/minivess/observability/tracking.py</file>
+      <action>Add log_pyfunc_model() method for pyfunc-based registration</action>
+      <changes>
+        Add method log_pyfunc_model() that:
+        - Calls mlflow.pyfunc.log_model() with MiniVessSegModel or MiniVessEnsembleModel
+        - Passes get_segmentation_signature() as signature
+        - Includes artifacts dict (checkpoint, config, etc.)
+        - Returns the logged model URI for downstream registration
+
+        Also add log_evaluation_run_tags() for evaluation-specific tags:
+        - model_type, ensemble_strategy, dataset_name, dataset_subset
+        - training_run_ids, training_experiment
+      </changes>
+    </step>
+
+    <step id="7.4" type="verify">
+      <command>uv run pytest tests/v2/unit/test_model_registration.py -x -q</command>
+      <command>uv run ruff check src/minivess/pipeline/model_promoter.py src/minivess/observability/tracking.py</command>
+      <command>uv run mypy src/minivess/pipeline/model_promoter.py src/minivess/observability/tracking.py</command>
+    </step>
+
+    <step id="7.5" type="checkpoint">
+      <commit-msg>feat(registry): Model registration with champion/challenger aliases and environment promotion</commit-msg>
+    </step>
+  </phase>
+
+  <!-- ================================================================= -->
+  <!-- PHASE 8: Analysis Prefect Flow (GitHub Issues #79, #80)           -->
+  <!-- Prefect Flow 3: Analysis                                          -->
+  <!-- Uses _prefect_compat.py for graceful degradation without server   -->
+  <!-- ================================================================= -->
+  <phase id="8" name="Analysis Prefect Flow" tests="~10" priority="CRITICAL">
+    <github-issues>
+      <issue>#79: Prefect Flow 3 analysis pipeline with ensemble evaluation</issue>
+      <issue>#80: Cross-loss comparison with ensemble results</issue>
+    </github-issues>
+    <dependencies>
+      <dependency>Phase 6 (evaluation runner)</dependency>
+      <dependency>Phase 7 (model registration)</dependency>
+    </dependencies>
+    <description>
+      Create the Analysis Prefect Flow (Flow 3 of the 4-persona system).
+      Uses _prefect_compat.py decorators so it works with or without Prefect server.
+
+      Flow structure:
+        @flow(name="analysis-pipeline")
+        def analysis_flow(eval_config: EvaluationConfig):
+            # Task 1: Query training runs from MLflow
+            training_runs = load_training_runs(eval_config)
+
+            # Task 2: Build ensemble plans
+            ensemble_plans = build_ensemble_plans(eval_config, training_runs)
+
+            # Task 3: Build evaluation targets (single models + ensembles)
+            targets = build_eval_targets(training_runs, ensemble_plans, eval_config)
+
+            # Task 4: Build test dataloaders
+            dataloaders = build_test_dataloaders(eval_config)
+
+            # Task 5: Run evaluation on all targets x datasets x subsets
+            eval_results = run_evaluation(targets, dataloaders, eval_config)
+
+            # Task 6: Cross-loss comparison with bootstrap tests
+            comparison = compare_losses(eval_results)
+
+            # Task 7: Register best model(s)
+            register_best(eval_results, eval_config)
+
+            return eval_results
+
+      Each task is decorated with @task for:
+      - Retry logic (network failures when downloading checkpoints)
+      - Caching (avoid re-running expensive evaluations)
+      - Logging via get_run_logger()
+      - Observability in Prefect UI
+    </description>
+
+    <inputs>
+      <input>Existing: src/minivess/orchestration/_prefect_compat.py (flow, task, get_run_logger)</input>
+      <input>New: src/minivess/pipeline/evaluation_runner.py (EvaluationOrchestrator)</input>
+      <input>New: src/minivess/ensemble/builder.py (EnsembleBuilder)</input>
+      <input>New: src/minivess/pipeline/model_promoter.py (ModelPromoter)</input>
+      <input>New: src/minivess/config/evaluation_config.py (EvaluationConfig)</input>
+      <input>New: src/minivess/data/test_datasets.py (build_test_dataloaders)</input>
+    </inputs>
+
+    <outputs>
+      <output>src/minivess/orchestration/flows/analysis_flow.py (new)</output>
+      <output>src/minivess/orchestration/flows/__init__.py (new)</output>
+      <output>tests/v2/unit/test_analysis_flow.py (new)</output>
+    </outputs>
+
+    <step id="8.1" type="test-first">
+      <file>tests/v2/unit/test_analysis_flow.py</file>
+      <action>Write failing tests for the analysis Prefect flow</action>
+      <tests>
+        <test>test_analysis_flow_callable: flow function exists and is callable</test>
+        <test>test_load_training_runs_returns_run_infos: task returns list of RunInfo</test>
+        <test>test_build_ensemble_plans_returns_plans: task returns list of EnsemblePlan</test>
+        <test>test_build_eval_targets_returns_targets: task returns list of EvalTarget</test>
+        <test>test_run_evaluation_returns_results: task returns list of EvalResult</test>
+        <test>test_compare_losses_returns_comparison: task returns ComparisonTable</test>
+        <test>test_register_best_registers_champion: champion alias set on best model</test>
+        <test>test_flow_works_without_prefect: PREFECT_DISABLED=1 mode works</test>
+        <test>test_flow_tasks_are_decorated: all functions have @task decorator</test>
+        <test>test_flow_end_to_end_mock: full flow with mocked MLflow and models</test>
+      </tests>
+    </step>
+
+    <step id="8.2" type="implement">
+      <file>src/minivess/orchestration/flows/__init__.py</file>
+      <action>Create flows package init</action>
+    </step>
+
+    <step id="8.3" type="implement">
+      <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+      <action>Create Analysis Prefect Flow with task decomposition</action>
+      <pattern>
+        from minivess.orchestration._prefect_compat import flow, task, get_run_logger
+
+        @task(name="load-training-runs", retries=2, retry_delay_seconds=10)
+        def load_training_runs(eval_config: EvaluationConfig) -> list[RunInfo]:
+            """Query MLflow training experiment for completed runs."""
+            logger = get_run_logger()
+            logger.info("Loading training runs from %s", eval_config.training_experiment)
+            ...
+
+        @task(name="build-ensemble-plans")
+        def build_ensemble_plans(
+            eval_config: EvaluationConfig,
+            training_runs: list[RunInfo],
+        ) -> list[EnsemblePlan]:
+            """Build ensemble plans for all configured strategies."""
+            ...
+
+        @task(name="build-eval-targets")
+        def build_eval_targets(
+            training_runs: list[RunInfo],
+            ensemble_plans: list[EnsemblePlan],
+            eval_config: EvaluationConfig,
+        ) -> list[EvalTarget]:
+            """Create evaluation targets for single models and ensembles."""
+            ...
+
+        @task(name="build-test-dataloaders")
+        def build_test_dataloaders_task(
+            eval_config: EvaluationConfig,
+        ) -> HierarchicalDataLoaderDict:
+            """Build hierarchical test DataLoader dict."""
+            ...
+
+        @task(name="run-evaluation", retries=1)
+        def run_evaluation(
+            targets: list[EvalTarget],
+            dataloaders: HierarchicalDataLoaderDict,
+            eval_config: EvaluationConfig,
+        ) -> list[EvalResult]:
+            """Run evaluation on all targets x datasets x subsets."""
+            ...
+
+        @task(name="compare-losses")
+        def compare_losses(eval_results: list[EvalResult]) -> ComparisonTable:
+            """Build cross-loss comparison table with bootstrap tests."""
+            ...
+
+        @task(name="register-best")
+        def register_best(
+            eval_results: list[EvalResult],
+            eval_config: EvaluationConfig,
+        ) -> None:
+            """Register best model(s) in MLflow Model Registry."""
+            ...
+
+        @flow(name="analysis-pipeline", log_prints=True)
+        def analysis_flow(eval_config: EvaluationConfig) -> list[EvalResult]:
+            """Prefect Flow 3: Analysis and Evaluation Pipeline."""
+            training_runs = load_training_runs(eval_config)
+            ensemble_plans = build_ensemble_plans(eval_config, training_runs)
+            targets = build_eval_targets(training_runs, ensemble_plans, eval_config)
+            dataloaders = build_test_dataloaders_task(eval_config)
+            eval_results = run_evaluation(targets, dataloaders, eval_config)
+            compare_losses(eval_results)
+            register_best(eval_results, eval_config)
+            return eval_results
+      </pattern>
+    </step>
+
+    <step id="8.4" type="verify">
+      <command>uv run pytest tests/v2/unit/test_analysis_flow.py -x -q</command>
+      <command>uv run ruff check src/minivess/orchestration/flows/</command>
+      <command>uv run mypy src/minivess/orchestration/flows/</command>
+    </step>
+
+    <step id="8.5" type="checkpoint">
+      <commit-msg>feat(orchestration): Analysis Prefect Flow (Flow 3) with ensemble evaluation and model registration</commit-msg>
+    </step>
+  </phase>
+
+  <!-- ================================================================= -->
+  <!-- PHASE 9: Cross-loss Comparison Enhancement (GitHub Issues #79, #86)-->
+  <!-- Extend comparison.py with ensemble results and per-dataset tables -->
+  <!-- ================================================================= -->
+  <phase id="9" name="Cross-loss Comparison Enhancement" tests="~8" priority="MEDIUM">
+    <github-issues>
+      <issue>#86: Enhanced cross-loss comparison with ensemble results and per-dataset breakdown</issue>
+    </github-issues>
+    <dependencies>
+      <dependency>Phase 8 (analysis flow: provides full EvalResult set)</dependency>
+    </dependencies>
+    <description>
+      Extend the comparison system to:
+
+      1. Include ensemble results alongside single-model results
+      2. Generate per-dataset comparison tables (one table per dataset)
+      3. Add statistical tests between ensemble strategies
+      4. Produce a comprehensive markdown report with:
+         - Overall leaderboard (sorted by compound metric)
+         - Per-dataset breakdown tables
+         - Single model vs ensemble comparison
+         - Bootstrap p-values for top-2 model comparison
+         - Uncertainty quality comparison (ensemble-only)
+
+      The comparison report is saved as an MLflow artifact and can be
+      rendered in the Prefect UI or as a PR comment via CML.
+    </description>
+
+    <inputs>
+      <input>Existing: src/minivess/pipeline/comparison.py (ComparisonTable, paired_bootstrap_test, format_comparison_markdown)</input>
+      <input>New: src/minivess/pipeline/evaluation_runner.py (EvalResult)</input>
+    </inputs>
+
+    <outputs>
+      <output>src/minivess/pipeline/comparison.py (modified: enhanced)</output>
+      <output>src/minivess/pipeline/comparison_report.py (new)</output>
+      <output>tests/v2/unit/test_cross_loss_comparison_enhanced.py (new)</output>
+    </outputs>
+
+    <step id="9.1" type="test-first">
+      <file>tests/v2/unit/test_cross_loss_comparison_enhanced.py</file>
+      <action>Write failing tests for enhanced comparison</action>
+      <tests>
+        <test>test_leaderboard_sorted_by_compound: overall leaderboard sorted correctly</test>
+        <test>test_per_dataset_tables_generated: one table per dataset name</test>
+        <test>test_single_vs_ensemble_comparison: separate sections for single and ensemble</test>
+        <test>test_bootstrap_pvalue_for_top2: p-value computed for rank 1 vs rank 2</test>
+        <test>test_ensemble_strategy_comparison: table comparing 4 strategies</test>
+        <test>test_markdown_report_sections: has Overview, Leaderboard, Per-Dataset, Statistical Tests</test>
+        <test>test_report_is_valid_markdown: renders without errors</test>
+        <test>test_empty_results_handled: graceful output with no results</test>
+      </tests>
+    </step>
+
+    <step id="9.2" type="implement">
+      <file>src/minivess/pipeline/comparison_report.py</file>
+      <action>Create comprehensive comparison report generator</action>
+      <pattern>
+        @dataclass
+        class LeaderboardEntry:
+            """One entry in the overall leaderboard."""
+            rank: int
+            name: str
+            model_type: str
+            dataset_name: str
+            subset_name: str
+            compound_metric: float
+            metrics: dict[str, float]
+            training_run_ids: list[str]
+
+        class ComparisonReportBuilder:
+            """Build comprehensive comparison markdown report."""
+
+            def __init__(self, eval_results: list[EvalResult]) -> None:
+                self.results = eval_results
+
+            def build_leaderboard(self) -> list[LeaderboardEntry]: ...
+
+            def build_per_dataset_tables(self) -> dict[str, ComparisonTable]: ...
+
+            def build_strategy_comparison(self) -> ComparisonTable: ...
+
+            def compute_statistical_tests(self) -> dict[str, float]: ...
+
+            def to_markdown(self) -> str:
+                """Generate full comparison report as markdown."""
+                sections = []
+                sections.append(self._format_overview())
+                sections.append(self._format_leaderboard())
+                sections.append(self._format_per_dataset())
+                sections.append(self._format_strategy_comparison())
+                sections.append(self._format_statistical_tests())
+                return "\n\n".join(sections)
+      </pattern>
+    </step>
+
+    <step id="9.3" type="verify">
+      <command>uv run pytest tests/v2/unit/test_cross_loss_comparison_enhanced.py -x -q</command>
+      <command>uv run ruff check src/minivess/pipeline/comparison_report.py</command>
+      <command>uv run mypy src/minivess/pipeline/comparison_report.py</command>
+    </step>
+
+    <step id="9.4" type="checkpoint">
+      <commit-msg>feat(comparison): Enhanced cross-loss comparison with ensemble results and per-dataset breakdown</commit-msg>
+    </step>
+  </phase>
+
+  <!-- ================================================================= -->
+  <!-- DEFERRED: Conformal Prediction (NOT in this plan)                 -->
+  <!-- Open GitHub issue, reference existing conformal.py +              -->
+  <!-- mapie_conformal.py                                                -->
+  <!-- ================================================================= -->
+  <deferred-work>
+    <item id="D1" name="Conformal Prediction Integration">
+      <github-issue>Create new issue: Conformal prediction integration with evaluation flow</github-issue>
+      <description>
+        Integrate ConformalPredictor (conformal.py) and MapieConformalSegmentation
+        (mapie_conformal.py) into the evaluation flow. This requires:
+        1. Calibration set selection (held-out from training validation sets)
+        2. Post-hoc conformal calibration on softmax outputs
+        3. Coverage guarantee reporting in evaluation runs
+        4. Per-voxel prediction set size as additional uncertainty metric
+
+        NOT implemented now because:
+        - Requires careful calibration set management (not part of current splits)
+        - Conformal prediction is complementary to deep ensemble UQ, not a prerequisite
+        - The current conformal.py and mapie_conformal.py are functional but not
+          integrated into the evaluation flow pipeline
+      </description>
+      <existing-code>
+        <file>src/minivess/ensemble/conformal.py</file>
+        <file>src/minivess/ensemble/mapie_conformal.py</file>
+        <file>tests/v2/unit/test_mapie_conformal.py</file>
+      </existing-code>
+    </item>
+  </deferred-work>
+
+  <!-- ================================================================= -->
+  <!-- SUMMARY: File Manifest                                            -->
+  <!-- ================================================================= -->
+  <file-manifest>
+    <section name="New source files">
+      <file phase="1">src/minivess/serving/mlflow_wrapper.py</file>
+      <file phase="3">src/minivess/config/evaluation_config.py</file>
+      <file phase="3">configs/evaluation/default.yaml</file>
+      <file phase="4">src/minivess/data/test_datasets.py</file>
+      <file phase="4">src/minivess/data/debug_dataset.py</file>
+      <file phase="5">src/minivess/ensemble/builder.py</file>
+      <file phase="6">src/minivess/pipeline/evaluation_runner.py</file>
+      <file phase="7">src/minivess/pipeline/model_promoter.py</file>
+      <file phase="8">src/minivess/orchestration/flows/__init__.py</file>
+      <file phase="8">src/minivess/orchestration/flows/analysis_flow.py</file>
+      <file phase="9">src/minivess/pipeline/comparison_report.py</file>
+    </section>
+
+    <section name="Modified source files">
+      <file phase="2">src/minivess/ensemble/deep_ensembles.py</file>
+      <file phase="7">src/minivess/observability/tracking.py</file>
+      <file phase="9">src/minivess/pipeline/comparison.py</file>
+    </section>
+
+    <section name="New test files">
+      <file phase="1" tests="~12">tests/v2/unit/test_mlflow_wrapper.py</file>
+      <file phase="2" tests="~10">tests/v2/unit/test_deep_ensemble_uncertainty.py</file>
+      <file phase="3" tests="~10">tests/v2/unit/test_evaluation_config.py</file>
+      <file phase="4" tests="~6">tests/v2/unit/test_test_datasets.py</file>
+      <file phase="4" tests="~6">tests/v2/unit/test_debug_dataset.py</file>
+      <file phase="5" tests="~14">tests/v2/unit/test_ensemble_builder.py</file>
+      <file phase="6" tests="~14">tests/v2/unit/test_evaluation_runner_integration.py</file>
+      <file phase="7" tests="~10">tests/v2/unit/test_model_registration.py</file>
+      <file phase="8" tests="~10">tests/v2/unit/test_analysis_flow.py</file>
+      <file phase="9" tests="~8">tests/v2/unit/test_cross_loss_comparison_enhanced.py</file>
+    </section>
+  </file-manifest>
+
+  <!-- ================================================================= -->
+  <!-- SUMMARY: GitHub Issues Closed per Phase                           -->
+  <!-- ================================================================= -->
+  <github-issue-mapping>
+    <phase id="1" closes="#76">MLflow pyfunc serving wrapper for single and ensemble models</phase>
+    <phase id="2" closes="#82">Deep Ensemble uncertainty decomposition (total/aleatoric/epistemic)</phase>
+    <phase id="3" closes="#77">Evaluation configuration and best-model selection logic</phase>
+    <phase id="4" closes="#83">Hierarchical test DataLoader dict for multi-dataset evaluation</phase>
+    <phase id="5" closes="#84">Ensemble builder with 4 strategies from MLflow training runs</phase>
+    <phase id="6" closes="#85">Unified evaluation runner for single models and ensembles</phase>
+    <phase id="7" closes="#78">Model registration with champion/challenger aliases and tags</phase>
+    <phase id="8" closes="#79, #80">Prefect Flow 3 analysis pipeline with ensemble evaluation</phase>
+    <phase id="9" closes="#86">Enhanced cross-loss comparison with ensemble results</phase>
+    <deferred>New issue: Conformal prediction integration with evaluation flow</deferred>
+  </github-issue-mapping>
+
+  <!-- ================================================================= -->
+  <!-- SUMMARY: Test Count per Phase                                     -->
+  <!-- ================================================================= -->
+  <test-summary>
+    <phase id="1" count="~12">MLflow pyfunc wrappers (single + ensemble)</phase>
+    <phase id="2" count="~10">Uncertainty decomposition (total/aleatoric/epistemic)</phase>
+    <phase id="3" count="~10">Evaluation config and best-model selection</phase>
+    <phase id="4" count="~12">Hierarchical test DataLoaders and debug dataset</phase>
+    <phase id="5" count="~14">Ensemble builder with 4 strategies</phase>
+    <phase id="6" count="~14">Evaluation runner integration</phase>
+    <phase id="7" count="~10">Model registration and tagging</phase>
+    <phase id="8" count="~10">Analysis Prefect Flow</phase>
+    <phase id="9" count="~8">Cross-loss comparison enhancement</phase>
+    <total>~100 new tests</total>
+  </test-summary>
+
+  <!-- ================================================================= -->
+  <!-- CRITICAL IMPLEMENTATION NOTES                                     -->
+  <!-- ================================================================= -->
+  <notes>
+    <note priority="CRITICAL">
+      ALL phase implementations MUST follow the TDD workflow from
+      .claude/skills/self-learning-iterative-coder/SKILL.md:
+      RED => GREEN => VERIFY => FIX => CHECKPOINT => CONVERGE
+    </note>
+
+    <note priority="CRITICAL">
+      Phases 1-4 are INDEPENDENT and CAN be developed in parallel.
+      Phase 5 depends on 1, 2, 3. Phase 6 depends on 4, 5.
+      Phase 7 depends on 6. Phase 8 depends on 6, 7. Phase 9 depends on 8.
+    </note>
+
+    <note priority="HIGH">
+      The MiniVessEnsembleModel pyfunc wrapper (Phase 1) must be able to
+      handle variable numbers of ensemble members (3 to 72) without OOM.
+      For the all_loss_all_best strategy (72 members), consider:
+      - Sequential inference (one member at a time)
+      - Accumulating mean on-the-fly instead of stacking all 72 predictions
+      - Logging peak GPU memory usage per evaluation run
+    </note>
+
+    <note priority="HIGH">
+      MLflow experiment isolation is KEY to keeping the UI manageable:
+      - minivess_training: ~12 runs (4 losses x 3 folds)
+      - minivess_evaluation: potentially ~hundreds of runs
+        (12 single + 10 ensembles) x (n_datasets x n_subsets)
+      The evaluation experiment MUST use descriptive run names and tags
+      to enable filtering and sorting in the MLflow UI.
+    </note>
+
+    <note priority="HIGH">
+      The compound metric val_compound_masd_cldice = 0.5*(1-norm_masd) + 0.5*clDice
+      must be computed identically in training (validation_metrics.py) and
+      evaluation (evaluation_runner.py). Use the SAME function from
+      validation_metrics.py to avoid drift between training and evaluation metrics.
+    </note>
+
+    <note priority="MEDIUM">
+      The debug dataset (Phase 4) is explicitly NOT a proper test set.
+      It exists solely for debugging evaluation mechanics while waiting
+      for external test datasets (ucl_2pm, harvard_3pm). The debug dataset
+      may overlap with training folds. A clear WARNING must be logged
+      when using the debug dataset for evaluation.
+    </note>
+
+    <note priority="MEDIUM">
+      For the per_loss_all_best strategy (Phase 5), each fold contributes
+      6 checkpoints (one per tracked metric). The checkpoint filename pattern is:
+      best_{metric_name}.pth where metric_name is from:
+      val_loss, val_dice, val_f1_foreground, val_cldice, val_masd, val_compound_masd_cldice
+    </note>
+
+    <note priority="MEDIUM">
+      Conformal prediction (deferred) should be opened as a separate GitHub
+      issue referencing the existing conformal.py and mapie_conformal.py code.
+      It is complementary to, not a replacement for, deep ensemble UQ.
+    </note>
+
+    <note priority="LOW">
+      The greedy_soup() function in strategies.py is currently NOT used by
+      any ensemble strategy. It could be added as a 5th strategy in a future
+      iteration (requires val_metric_fn evaluation during soup construction).
+    </note>
+  </notes>
+</implementation-plan>

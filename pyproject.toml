@@ -200,6 +200,7 @@ module = [
     "duckdb.*",
     "MetricsReloaded.*",
     "scipy.*",
+    "nibabel.*",
 ]
 ignore_missing_imports = true
 
@@ -232,6 +233,7 @@ filterwarnings = [
     "ignore::DeprecationWarning:pyparsing.*",
     "ignore::UserWarning:torchmetrics.*",
     "ignore::UserWarning:monai.*",
+    "ignore::UserWarning:mlflow.*",
     "ignore::SyntaxWarning:MetricsReloaded.*",
     "ignore::FutureWarning",
     "ignore::DeprecationWarning",
