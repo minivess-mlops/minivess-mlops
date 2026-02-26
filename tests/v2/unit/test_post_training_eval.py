@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+import sys
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+
+# This module calls evaluate_fold_and_log which uses MetricsReloaded internally.
+# MetricsReloaded has invalid escape sequences that cause SyntaxError on Python 3.12+.
+try:
+    import MetricsReloaded.metrics.pairwise_measures  # noqa: F401
+except SyntaxError:
+    pytest.skip(
+        "MetricsReloaded SyntaxError (invalid escape sequences on Python "
+        f"{sys.version_info.major}.{sys.version_info.minor})",
+        allow_module_level=True,
+    )
 
 from minivess.pipeline.evaluation import FoldResult
 
