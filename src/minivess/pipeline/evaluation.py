@@ -44,7 +44,10 @@ class EvaluationRunner:
     # Primary metrics (always computed)
     PRIMARY_METRICS = ("centreline_dsc", "dsc", "measured_masd")
     # Expensive metrics (optional, for test-time only)
-    EXPENSIVE_METRICS = ("measured_hausdorff_distance_perc", "normalised_surface_distance")
+    EXPENSIVE_METRICS = (
+        "measured_hausdorff_distance_perc",
+        "normalised_surface_distance",
+    )
 
     def __init__(
         self,
@@ -76,10 +79,12 @@ class EvaluationRunner:
         """
         from MetricsReloaded.metrics.pairwise_measures import BinaryPairwiseMeasures
 
-        pred_flat = pred_np.flatten().astype(int)
-        label_flat = label_np.flatten().astype(int)
+        # Pass unflattened arrays to preserve spatial structure
+        # (required for skeleton-based metrics like centreline_dsc)
+        pred_int = pred_np.astype(int)
+        label_int = label_np.astype(int)
 
-        bpm = BinaryPairwiseMeasures(pred_flat, label_flat)
+        bpm = BinaryPairwiseMeasures(pred_int, label_int)
 
         results: dict[str, float] = {}
         for name in self.metric_names:

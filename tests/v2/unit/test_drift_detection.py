@@ -49,8 +49,15 @@ class TestExtractVolumeFeatures:
         features = extract_volume_features(volume)
 
         expected_keys = {
-            "mean", "std", "min", "max", "p5", "p95",
-            "snr", "contrast", "entropy",
+            "mean",
+            "std",
+            "min",
+            "max",
+            "p5",
+            "p95",
+            "snr",
+            "contrast",
+            "entropy",
         }
         assert expected_keys.issubset(set(features.keys()))
 
@@ -320,12 +327,8 @@ class TestDriftDetectionIntegration:
             for i, v in enumerate(clean)
         ]
 
-        ref_features = extract_batch_features(
-            [v.numpy().squeeze() for v in clean]
-        )
-        cur_features = extract_batch_features(
-            [v.numpy().squeeze() for v in drifted]
-        )
+        ref_features = extract_batch_features([v.numpy().squeeze() for v in clean])
+        cur_features = extract_batch_features([v.numpy().squeeze() for v in drifted])
 
         detector = FeatureDriftDetector(ref_features)
         result = detector.detect(cur_features)
@@ -348,12 +351,8 @@ class TestDriftDetectionIntegration:
             for i, v in enumerate(clean)
         ]
 
-        ref_features = extract_batch_features(
-            [v.numpy().squeeze() for v in clean]
-        )
-        cur_features = extract_batch_features(
-            [v.numpy().squeeze() for v in noisy]
-        )
+        ref_features = extract_batch_features([v.numpy().squeeze() for v in clean])
+        cur_features = extract_batch_features([v.numpy().squeeze() for v in noisy])
 
         detector = FeatureDriftDetector(ref_features)
         result = detector.detect(cur_features)

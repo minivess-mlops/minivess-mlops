@@ -206,7 +206,10 @@ class ModelRegistry:
             self._log_event("PROMOTE", model_name, version, target_stage)
         else:
             self._log_event(
-                "REJECT", model_name, version, target_stage,
+                "REJECT",
+                model_name,
+                version,
+                target_stage,
                 reason=result.reason,
             )
 
@@ -236,14 +239,16 @@ class ModelRegistry:
         reason: str = "",
     ) -> None:
         """Record a registry event for audit trail."""
-        self._history.append({
-            "timestamp": datetime.now(UTC).isoformat(),
-            "action": action,
-            "model_name": model_name,
-            "version": version,
-            "stage": stage.value,
-            "reason": reason,
-        })
+        self._history.append(
+            {
+                "timestamp": datetime.now(UTC).isoformat(),
+                "action": action,
+                "model_name": model_name,
+                "version": version,
+                "stage": stage.value,
+                "reason": reason,
+            }
+        )
 
     def to_markdown(self) -> str:
         """Generate a model registry report."""
@@ -262,16 +267,16 @@ class ModelRegistry:
 
         for model_name in sorted(self._versions):
             versions = self._versions[model_name]
-            sections.extend([
-                f"## {model_name}",
-                "",
-                "| Version | Stage | Metrics |",
-                "|---------|-------|---------|",
-            ])
+            sections.extend(
+                [
+                    f"## {model_name}",
+                    "",
+                    "| Version | Stage | Metrics |",
+                    "|---------|-------|---------|",
+                ]
+            )
             for ver in sorted(versions.values(), key=lambda v: v.version):
-                metrics_str = ", ".join(
-                    f"{k}={v:.4f}" for k, v in ver.metrics.items()
-                )
+                metrics_str = ", ".join(f"{k}={v:.4f}" for k, v in ver.metrics.items())
                 sections.append(
                     f"| {ver.version} | {ver.stage.value} | {metrics_str} |"
                 )
@@ -279,12 +284,14 @@ class ModelRegistry:
 
         # History
         if self._history:
-            sections.extend([
-                "## Promotion History",
-                "",
-                "| Timestamp | Action | Model | Version | Stage |",
-                "|-----------|--------|-------|---------|-------|",
-            ])
+            sections.extend(
+                [
+                    "## Promotion History",
+                    "",
+                    "| Timestamp | Action | Model | Version | Stage |",
+                    "|-----------|--------|-------|---------|-------|",
+                ]
+            )
             for event in self._history:
                 sections.append(
                     f"| {event['timestamp'][:19]} | {event['action']} "

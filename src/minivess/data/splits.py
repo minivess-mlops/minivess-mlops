@@ -97,10 +97,7 @@ def save_splits(splits: list[FoldSplit], path: Path) -> None:
     path:
         Output JSON file path.
     """
-    data = [
-        {"train": fold.train, "val": fold.val}
-        for fold in splits
-    ]
+    data = [{"train": fold.train, "val": fold.val} for fold in splits]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     logger.info("Saved %d-fold splits to %s", len(splits), path)

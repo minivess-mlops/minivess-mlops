@@ -7,7 +7,10 @@ file reorganisation and integrity checks.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestReorganiseEbrainsData:
@@ -125,7 +128,7 @@ class TestExtractFromZip:
                 img = nib.Nifti1Image(
                     np.random.rand(8, 8, 4).astype(np.float32), affine
                 )
-                img_bytes = nib.save(img, str(tmp_path / f"tmp_img_{i}.nii.gz"))
+                nib.save(img, str(tmp_path / f"tmp_img_{i}.nii.gz"))
                 zf.write(tmp_path / f"tmp_img_{i}.nii.gz", f"raw/mv{i:02d}.nii.gz")
 
                 # Segmentation
@@ -133,9 +136,7 @@ class TestExtractFromZip:
                     np.random.randint(0, 2, (8, 8, 4), dtype=np.uint8), affine
                 )
                 nib.save(lbl, str(tmp_path / f"tmp_lbl_{i}.nii.gz"))
-                zf.write(
-                    tmp_path / f"tmp_lbl_{i}.nii.gz", f"seg/mv{i:02d}_y.nii.gz"
-                )
+                zf.write(tmp_path / f"tmp_lbl_{i}.nii.gz", f"seg/mv{i:02d}_y.nii.gz")
 
         from scripts.download_minivess import extract_and_reorganise
 

@@ -1,0 +1,23 @@
+# Evaluation Configuration (Prefect Flow 3: Analysis)
+# This config defines how models are selected, ensembled, and evaluated.
+#
+# The primary metric determines the "single best" model for each fold/loss.
+# All ensemble strategies are built from checkpoints ranked by this metric.
+
+primary_metric: val_compound_masd_cldice
+primary_metric_direction: maximize
+
+mlflow_evaluation_experiment: minivess_evaluation
+mlflow_training_experiment: minivess_training
+
+include_expensive_metrics: true
+bootstrap_n_resamples: 10000
+confidence_level: 0.95
+
+ensemble_strategies:
+  - per_loss_single_best
+  - all_loss_single_best
+  - per_loss_all_best
+  - all_loss_all_best
+
+model_registry_name: MiniVess-Segmentor

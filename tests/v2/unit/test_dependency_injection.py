@@ -228,9 +228,11 @@ class TestLoaderTransformInjection:
         from minivess.config.models import DataConfig
         from minivess.data.loader import build_train_loader
 
-        custom_transforms = Compose([
-            Identityd(keys=["image", "label"]),
-        ])
+        custom_transforms = Compose(
+            [
+                Identityd(keys=["image", "label"]),
+            ]
+        )
 
         config = DataConfig(dataset_name="test", num_workers=0)
         data_dicts = [{"image": "dummy.nii.gz", "label": "dummy_y.nii.gz"}]
@@ -240,14 +242,18 @@ class TestLoaderTransformInjection:
             mock_ds.return_value = []  # Empty dataset
             with contextlib.suppress(Exception):
                 build_train_loader(
-                    data_dicts, config, transforms=custom_transforms,
+                    data_dicts,
+                    config,
+                    transforms=custom_transforms,
                 )
 
             # Verify CacheDataset was called with our custom transforms
             if mock_ds.called:
                 call_kwargs = mock_ds.call_args
-                assert call_kwargs[1].get("transform") is custom_transforms or \
-                       call_kwargs.kwargs.get("transform") is custom_transforms
+                assert (
+                    call_kwargs[1].get("transform") is custom_transforms
+                    or call_kwargs.kwargs.get("transform") is custom_transforms
+                )
 
     def test_injected_val_transform_used(self, tmp_path: Any) -> None:
         """When transforms is provided, build_val_loader should use it."""
@@ -258,9 +264,11 @@ class TestLoaderTransformInjection:
         from minivess.config.models import DataConfig
         from minivess.data.loader import build_val_loader
 
-        custom_transforms = Compose([
-            Identityd(keys=["image", "label"]),
-        ])
+        custom_transforms = Compose(
+            [
+                Identityd(keys=["image", "label"]),
+            ]
+        )
 
         config = DataConfig(dataset_name="test", num_workers=0)
         data_dicts = [{"image": "dummy.nii.gz", "label": "dummy_y.nii.gz"}]
@@ -269,10 +277,14 @@ class TestLoaderTransformInjection:
             mock_ds.return_value = []
             with contextlib.suppress(Exception):
                 build_val_loader(
-                    data_dicts, config, transforms=custom_transforms,
+                    data_dicts,
+                    config,
+                    transforms=custom_transforms,
                 )
 
             if mock_ds.called:
                 call_kwargs = mock_ds.call_args
-                assert call_kwargs[1].get("transform") is custom_transforms or \
-                       call_kwargs.kwargs.get("transform") is custom_transforms
+                assert (
+                    call_kwargs[1].get("transform") is custom_transforms
+                    or call_kwargs.kwargs.get("transform") is custom_transforms
+                )

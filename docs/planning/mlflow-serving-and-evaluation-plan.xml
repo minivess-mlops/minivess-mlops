@@ -1,0 +1,410 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MLflow Serving & Evaluation Integration Plan
+  Issues: #81 (mlflow.evaluate integration) + #84 (MLflow local serving)
+  Branch: feat/experiment-evaluation
+  Created: 2026-02-26
+
+  CONTEXT SUMMARY:
+  ================
+  The Analysis Prefect Flow (Flow 3) has 9 critical gaps:
+  1. No mlflow.pyfunc.log_model() anywhere — models never stored as pyfunc artifacts
+  2. register_model() references non-existent runs:/{id}/model — runtime error
+  3. Analysis flow uses only FIRST ensemble member — not actual ensemble inference
+  4. single_models is always {} — no individual fold evaluation
+  5. DeepEnsemblePredictor is unused — duplicated logic in pyfunc wrapper
+  6. No ensemble manifest serialization — MiniVessEnsembleModel expects JSON that nothing creates
+  7. log_results_to_mlflow() never called — evaluation metrics not persisted
+  8. No mlflow.evaluate() integration — no custom evaluators
+  9. Inference returns argmax only — probabilities discarded
+
+  ARCHITECTURE DECISION:
+  ======================
+  MLflow pyfunc is the model contract boundary. We use:
+  - mlflow.pyfunc.log_model() to persist models with signatures + artifacts
+  - mlflow.pyfunc.load_model() to validate model loading (signatures, metadata)
+  - Existing SlidingWindowInferenceRunner (MONAI) for actual 3D inference
+  - mlflow.evaluate() with path-based custom metrics for MetricsReloaded evaluation
+  - DeepEnsemblePredictor for proper ensemble inference in the analysis flow
+
+  Rationale: Sliding-window inference requires MONAI-specific config (overlap, patch
+  size, sw_batch_size) that can't be shoehorned into pyfunc's predict(). The pyfunc
+  wrappers handle the serialization/registry contract; PyTorch handles inference.
+-->
+<execution-plan>
+  <metadata>
+    <title>MLflow Serving and Evaluation Integration</title>
+    <issues>
+      <issue id="81" priority="P2-medium">MLflow model evaluation integration (mlflow.evaluate)</issue>
+      <issue id="84" priority="P1-high">MLflow local serving for Analysis Prefect Flow</issue>
+    </issues>
+    <branch>feat/experiment-evaluation</branch>
+    <total-phases>4</total-phases>
+    <estimated-new-tests>55-65</estimated-new-tests>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Model Artifact Logger                                      -->
+  <!-- Closes: Part of #84 (MLflow local serving)                          -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Model Artifact Logger">
+    <description>
+      Create mlflow.pyfunc.log_model() wrappers that persist single models and
+      ensembles as pyfunc artifacts with correct signatures, checksums, and
+      ensemble manifests. This is the MISSING LINK: pyfunc wrappers exist but
+      nothing actually LOGS them to MLflow.
+    </description>
+
+    <files>
+      <file action="create" path="src/minivess/serving/model_logger.py">
+        <content-spec>
+          Functions:
+          - log_single_model(run_id, checkpoint_path, model_config_dict, *,
+              artifact_path="model", tracking_uri=None) -> ModelInfo
+              Calls mlflow.pyfunc.log_model() with MiniVessSegModel, artifacts dict,
+              and get_model_signature(). Saves model_config as temp JSON.
+              Returns mlflow.models.model.ModelInfo.
+
+          - log_ensemble_model(ensemble_spec, model_config_dict, *,
+              artifact_path="ensemble_model", tracking_uri=None) -> ModelInfo
+              Creates ensemble manifest JSON from EnsembleSpec, calls
+              mlflow.pyfunc.log_model() with MiniVessEnsembleModel.
+
+          - create_ensemble_manifest(ensemble_spec) -> dict
+              Converts EnsembleSpec to JSON-serializable dict with:
+              {"name": str, "strategy": str, "n_members": int,
+               "members": [{"checkpoint_path": str, "run_id": str,
+                            "loss_type": str, "fold_id": int,
+                            "metric_name": str}, ...]}
+
+          Dependencies: mlflow_wrapper.py (MiniVessSegModel, MiniVessEnsembleModel,
+                        get_model_signature), ensemble/builder.py (EnsembleSpec)
+        </content-spec>
+      </file>
+      <file action="create" path="tests/v2/unit/test_model_logger.py">
+        <test-count>12-14</test-count>
+        <test-spec>
+          TestLogSingleModel:
+          - test_log_single_model_calls_log_model (mock mlflow.pyfunc.log_model)
+          - test_log_single_model_passes_signature
+          - test_log_single_model_passes_artifacts
+          - test_log_single_model_creates_config_json
+          - test_log_single_model_uses_correct_python_model_class
+
+          TestLogEnsembleModel:
+          - test_log_ensemble_model_calls_log_model
+          - test_log_ensemble_model_creates_manifest
+          - test_log_ensemble_model_passes_signature
+          - test_log_ensemble_model_manifest_has_all_members
+
+          TestCreateEnsembleManifest:
+          - test_manifest_from_spec_basic
+          - test_manifest_member_fields
+          - test_manifest_member_count
+          - test_manifest_json_serializable
+          - test_manifest_empty_members
+        </test-spec>
+      </file>
+    </files>
+
+    <verify>
+      uv run pytest tests/v2/unit/test_model_logger.py -x -q
+      uv run ruff check src/minivess/serving/model_logger.py tests/v2/unit/test_model_logger.py
+      uv run mypy src/minivess/serving/model_logger.py
+    </verify>
+
+    <checkpoint>
+      git add + commit "feat: Add MLflow model artifact logger (#84)"
+    </checkpoint>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: MLflow Custom Evaluators                                   -->
+  <!-- Closes: #81 (MLflow model evaluation integration)                   -->
+  <!-- ================================================================== -->
+  <phase id="2" name="MLflow Custom Evaluators">
+    <description>
+      Create custom mlflow.evaluate() evaluators for MetricsReloaded segmentation
+      metrics. Uses PATH-BASED INDIRECTION: predictions and labels are saved as
+      .npz files (already done by prediction_store.py), and evaluators load them
+      by path from a pd.DataFrame. This avoids shoehorning 3D volumes into MLflow's
+      tabular evaluation framework.
+
+      Design: mlflow.evaluate(data=df, predictions="prediction_path",
+              targets="label_path", model_type=None, extra_metrics=[...])
+    </description>
+
+    <files>
+      <file action="create" path="src/minivess/serving/mlflow_evaluators.py">
+        <content-spec>
+          Custom metrics (via mlflow.metrics.make_metric):
+          - dice_metric: Loads .npz volumes, computes Dice/DSC per volume
+          - cldice_metric: Computes centreline DSC (skeleton-based)
+          - masd_metric: Computes mean average symmetric distance
+          - compound_metric: compound_masd_cldice = 0.5*(1-norm_masd) + 0.5*cldice
+
+          Each eval_fn signature:
+            def eval_fn(predictions: pd.Series, targets: pd.Series,
+                       metrics: dict, **kwargs) -> MetricValue
+            - predictions/targets are pd.Series of file paths to .npz files
+            - Returns MetricValue with per-volume scores + aggregate_results dict
+
+          Helper functions:
+          - build_evaluation_dataframe(predictions_dir, labels_dir) -> pd.DataFrame
+              Builds DataFrame with prediction_path/label_path/volume_name columns
+              by matching .npz files from both directories.
+
+          - run_mlflow_evaluation(predictions_dir, labels_dir, *,
+              include_expensive=True, run_id=None) -> mlflow.models.EvaluationResult
+              Wraps mlflow.evaluate() with our custom metrics.
+              If run_id is given, logs to that run; otherwise creates new run.
+
+          - _load_npz_prediction(path: str) -> np.ndarray
+              Loads hard_pred from .npz file (matches prediction_store format).
+
+          - _load_npz_label(path: str) -> np.ndarray
+              Loads label array from .npz file.
+
+          Note: cldice and masd are "expensive" (skeleton computation ~4 min on 24
+          volumes). Guard with include_expensive flag.
+
+          Dependencies: mlflow.metrics.make_metric, prediction_store.py formats,
+                        validation_metrics.py (compute_compound_masd_cldice,
+                        normalize_masd)
+        </content-spec>
+      </file>
+      <file action="create" path="tests/v2/unit/test_mlflow_evaluators.py">
+        <test-count>14-16</test-count>
+        <test-spec>
+          TestBuildEvaluationDataframe:
+          - test_builds_dataframe_from_dirs
+          - test_dataframe_columns
+          - test_dataframe_matches_files
+          - test_empty_dir_returns_empty_df
+
+          TestDiceMetric:
+          - test_dice_metric_creation
+          - test_dice_eval_fn_perfect_overlap
+          - test_dice_eval_fn_no_overlap
+          - test_dice_eval_fn_partial_overlap
+          - test_dice_returns_metric_value_with_scores
+
+          TestCompoundMetric:
+          - test_compound_metric_creation
+          - test_compound_eval_fn_returns_aggregate
+
+          TestRunMlflowEvaluation:
+          - test_run_evaluation_calls_mlflow_evaluate (mock mlflow.evaluate)
+          - test_run_evaluation_passes_custom_metrics
+          - test_run_evaluation_returns_result
+
+          TestLoadHelpers:
+          - test_load_npz_prediction
+          - test_load_npz_label
+        </test-spec>
+      </file>
+    </files>
+
+    <verify>
+      uv run pytest tests/v2/unit/test_mlflow_evaluators.py -x -q
+      uv run ruff check src/minivess/serving/mlflow_evaluators.py tests/v2/unit/test_mlflow_evaluators.py
+      uv run mypy src/minivess/serving/mlflow_evaluators.py
+    </verify>
+
+    <checkpoint>
+      git add + commit "feat: Add MLflow custom evaluators for segmentation metrics (#81)"
+    </checkpoint>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: Analysis Flow Integration                                  -->
+  <!-- Closes: #81, #84                                                    -->
+  <!-- ================================================================== -->
+  <phase id="3" name="Analysis Flow Integration">
+    <description>
+      Wire model logging, proper ensemble inference, MLflow evaluation, and result
+      persistence into the Analysis Prefect Flow. Fixes ALL 9 gaps:
+
+      1. Add log_models_to_mlflow task — logs single + ensemble models as pyfunc
+      2. Fix register_champion_task — actually calls register_champion() now
+      3. Fix evaluate_all_models — uses DeepEnsemblePredictor for ensemble inference
+      4. Extract single-fold models from runs — no longer empty dict
+      5. Wire DeepEnsemblePredictor — replaces first-member-only hack
+      6. Create ensemble manifests — from EnsembleSpec via model_logger
+      7. Call log_results_to_mlflow — evaluation metrics persisted to MLflow
+      8. Add mlflow_evaluate task — uses custom evaluators from Phase 2
+      9. Update inference to preserve soft probabilities where needed
+    </description>
+
+    <files>
+      <file action="modify" path="src/minivess/orchestration/flows/analysis_flow.py">
+        <change-spec>
+          NEW IMPORTS:
+          - from minivess.serving.model_logger import log_single_model, log_ensemble_model
+          - from minivess.ensemble.deep_ensembles import DeepEnsemblePredictor
+
+          NEW TASK: log_models_to_mlflow(runs, ensembles, eval_config, model_config, *, tracking_uri)
+          - For each run: log_single_model(run["run_id"], checkpoint_path, model_config)
+          - For each ensemble: log_ensemble_model(ensemble_spec, model_config)
+          - Returns dict of model_name -> model_uri for downstream loading
+
+          NEW TASK: evaluate_with_mlflow(all_results, eval_config, *, tracking_uri)
+          - For each model's predictions_dir, calls run_mlflow_evaluation()
+          - Logs results to minivess_evaluation experiment
+          - Returns dict of model_name -> EvaluationResult
+
+          MODIFIED: evaluate_all_models
+          - Extract single-fold models from EnsembleBuilder's loaded members
+            (members already have .net loaded — reuse them)
+          - Replace first-member hack with DeepEnsemblePredictor:
+            predictor = DeepEnsemblePredictor([m.net for m in spec.members])
+            → But DeepEnsemblePredictor returns UncertaintyOutput, need an adapter
+            → Create _EnsembleInferenceWrapper(nn.Module) that wraps DeepEnsemblePredictor
+              and returns SegmentationOutput from forward()
+          - Call log_results_to_mlflow() after each model evaluation
+
+          MODIFIED: register_champion_task
+          - When model_uris dict is available, actually call register_champion()
+          - Still gracefully skip if no MLflow server (try/except)
+
+          MODIFIED: run_analysis_flow
+          - Add log_models_to_mlflow step after build_ensembles
+          - Add evaluate_with_mlflow step after evaluate_all_models
+          - Extract single models from ensemble members (not empty dict)
+          - Wire model_uris into register_champion_task
+        </change-spec>
+      </file>
+      <file action="modify" path="tests/v2/unit/test_analysis_flow.py">
+        <test-count>10-12 new tests</test-count>
+        <test-spec>
+          TestLogModelsToMlflow:
+          - test_logs_single_models (mock model_logger)
+          - test_logs_ensemble_models (mock model_logger)
+          - test_returns_model_uris
+
+          TestEvaluateWithMlflow:
+          - test_calls_run_mlflow_evaluation (mock mlflow_evaluators)
+          - test_returns_evaluation_results
+
+          TestEnsembleInferenceWrapper:
+          - test_wrapper_returns_segmentation_output
+          - test_wrapper_uses_all_members
+          - test_wrapper_eval_mode
+
+          TestUpdatedEvaluateAllModels:
+          - test_extracts_single_models_from_members
+          - test_ensemble_uses_all_members_not_first_only
+
+          TestUpdatedRegisterChampion:
+          - test_register_champion_called_with_model_uris
+          - test_register_champion_skipped_gracefully_without_mlflow
+        </test-spec>
+      </file>
+    </files>
+
+    <verify>
+      uv run pytest tests/v2/unit/test_analysis_flow.py -x -q
+      uv run ruff check src/minivess/orchestration/flows/analysis_flow.py
+      uv run mypy src/minivess/orchestration/flows/analysis_flow.py
+    </verify>
+
+    <checkpoint>
+      git add + commit "feat: Wire MLflow serving and evaluation into Analysis Flow (#81, #84)"
+    </checkpoint>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: ExperimentTracker + Round-Trip Verification                -->
+  <!-- Closes: #81, #84                                                    -->
+  <!-- ================================================================== -->
+  <phase id="4" name="ExperimentTracker Integration and Verification">
+    <description>
+      Add log_pyfunc_model() method to ExperimentTracker (for training-time logging),
+      update register_model() to verify model artifact exists, and add round-trip
+      tests that verify log → load → predict works end-to-end with local file backend.
+    </description>
+
+    <files>
+      <file action="modify" path="src/minivess/observability/tracking.py">
+        <change-spec>
+          NEW METHOD: log_pyfunc_model(checkpoint_path, model_config_dict, *,
+              artifact_path="model") -> str
+          - Delegates to model_logger.log_single_model() using self._run_id
+          - Returns the model URI (runs:/{run_id}/model)
+          - Must be called within start_run() context
+
+          MODIFIED: register_model()
+          - Add a check/warning if the model artifact doesn't exist
+          - Log a helpful error message suggesting log_pyfunc_model() first
+        </change-spec>
+      </file>
+      <file action="create" path="tests/v2/unit/test_mlflow_roundtrip.py">
+        <test-count>8-10</test-count>
+        <test-spec>
+          TestPyfuncRoundTrip:
+          - test_log_and_load_single_model (local file backend, no server)
+          - test_loaded_model_predict_shape
+          - test_loaded_model_predict_probabilities
+          - test_signature_validated_on_load
+
+          TestEnsemblePyfuncRoundTrip:
+          - test_log_and_load_ensemble_model
+          - test_ensemble_predict_mean_probabilities
+          - test_ensemble_member_count
+
+          TestExperimentTrackerLogPyfunc:
+          - test_log_pyfunc_model_within_run (mock mlflow)
+          - test_log_pyfunc_model_outside_run_raises
+          - test_register_model_warns_without_artifact
+        </test-spec>
+      </file>
+    </files>
+
+    <verify>
+      uv run pytest tests/v2/unit/test_mlflow_roundtrip.py -x -q
+      uv run pytest tests/v2/unit/ -x -q  # Full regression
+      uv run ruff check src/ tests/
+      uv run mypy src/
+    </verify>
+
+    <checkpoint>
+      git add + commit "feat: ExperimentTracker pyfunc logging + round-trip tests (#81, #84)"
+      Close issues #81 and #84
+      git push
+    </checkpoint>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- DEPENDENCY GRAPH                                                    -->
+  <!-- ================================================================== -->
+  <dependencies>
+    <dep from="2" to="1">Phase 2 evaluators are independent of Phase 1 logger</dep>
+    <dep from="3" to="1">Phase 3 flow integration needs model_logger from Phase 1</dep>
+    <dep from="3" to="2">Phase 3 flow integration needs evaluators from Phase 2</dep>
+    <dep from="4" to="1">Phase 4 ExperimentTracker delegates to model_logger</dep>
+    <dep from="4" to="3">Phase 4 round-trip tests verify the full pipeline</dep>
+
+    <!-- Phases 1 and 2 can run in parallel -->
+    <parallel>1, 2</parallel>
+    <!-- Phase 3 requires both 1 and 2 -->
+    <!-- Phase 4 requires 3 -->
+  </dependencies>
+
+  <!-- ================================================================== -->
+  <!-- EXISTING FILES REFERENCE                                            -->
+  <!-- ================================================================== -->
+  <existing-files>
+    <file path="src/minivess/serving/mlflow_wrapper.py" role="pyfunc models (MiniVessSegModel, MiniVessEnsembleModel, get_model_signature)" />
+    <file path="src/minivess/pipeline/evaluation_runner.py" role="UnifiedEvaluationRunner with log_results_to_mlflow (never called)" />
+    <file path="src/minivess/orchestration/flows/analysis_flow.py" role="Analysis Prefect Flow with 9 gaps to fix" />
+    <file path="src/minivess/observability/tracking.py" role="ExperimentTracker with register_model (broken: no model artifact)" />
+    <file path="src/minivess/ensemble/builder.py" role="EnsembleBuilder with EnsembleSpec, EnsembleMember" />
+    <file path="src/minivess/ensemble/deep_ensembles.py" role="DeepEnsemblePredictor (unused in flow)" />
+    <file path="src/minivess/pipeline/inference.py" role="SlidingWindowInferenceRunner (returns argmax)" />
+    <file path="src/minivess/pipeline/prediction_store.py" role="save_volume_prediction (saves .npz)" />
+    <file path="src/minivess/pipeline/validation_metrics.py" role="compute_compound_masd_cldice, normalize_masd" />
+    <file path="src/minivess/pipeline/model_promoter.py" role="ModelPromoter with register_champion (needs pyfunc artifact)" />
+    <file path="src/minivess/config/evaluation_config.py" role="EvaluationConfig, MetricDirection, EnsembleStrategyName" />
+    <file path="src/minivess/adapters/base.py" role="SegmentationOutput dataclass" />
+  </existing-files>
+</execution-plan>

@@ -107,7 +107,8 @@ class FederatedAveraging:
     """
 
     def compute_client_weights(
-        self, data_sizes: list[int],
+        self,
+        data_sizes: list[int],
     ) -> list[float]:
         """Compute proportional weights for each client.
 
@@ -215,7 +216,7 @@ class FLSimulator:
         for client in self.clients:
             # Simulate local training (loss decreases with rounds)
             base_loss = self._rng.uniform(0.3, 0.8)
-            decay = 0.95 ** round_num
+            decay = 0.95**round_num
             loss = base_loss * decay
             dice = 1.0 - loss * self._rng.uniform(0.8, 1.2)
 
@@ -255,34 +256,34 @@ class FLSimulator:
         ]
 
         # Client overview
-        sections.extend([
-            "## Clients",
-            "",
-            "| Client | Data Size | Local Epochs |",
-            "|--------|-----------|-------------|",
-        ])
+        sections.extend(
+            [
+                "## Clients",
+                "",
+                "| Client | Data Size | Local Epochs |",
+                "|--------|-----------|-------------|",
+            ]
+        )
         for c in self.clients:
-            sections.append(
-                f"| {c.client_id} | {c.data_size} | {c.local_epochs} |"
-            )
+            sections.append(f"| {c.client_id} | {c.data_size} | {c.local_epochs} |")
 
         # Round results
         if self.round_results:
-            sections.extend([
-                "",
-                "## Round Results",
-                "",
-                "| Round | Aggregated Loss | Client Losses |",
-                "|-------|----------------|---------------|",
-            ])
+            sections.extend(
+                [
+                    "",
+                    "## Round Results",
+                    "",
+                    "| Round | Aggregated Loss | Client Losses |",
+                    "|-------|----------------|---------------|",
+                ]
+            )
             for r in self.round_results:
                 client_losses = ", ".join(
-                    f"{cid}: {m['loss']:.4f}"
-                    for cid, m in r.client_metrics.items()
+                    f"{cid}: {m['loss']:.4f}" for cid, m in r.client_metrics.items()
                 )
                 sections.append(
-                    f"| {r.round_num} | {r.aggregated_loss:.4f} "
-                    f"| {client_losses} |"
+                    f"| {r.round_num} | {r.aggregated_loss:.4f} | {client_losses} |"
                 )
 
         sections.append("")

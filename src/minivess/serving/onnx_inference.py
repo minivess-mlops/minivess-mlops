@@ -98,11 +98,9 @@ class OnnxSegmentationInference:
         outputs = self.session.get_outputs()
         return OnnxModelMetadata(
             inputs=[
-                OnnxTensorSpec(name=i.name, shape=i.shape, type=i.type)
-                for i in inputs
+                OnnxTensorSpec(name=i.name, shape=i.shape, type=i.type) for i in inputs
             ],
             outputs=[
-                OnnxTensorSpec(name=o.name, shape=o.shape, type=o.type)
-                for o in outputs
+                OnnxTensorSpec(name=o.name, shape=o.shape, type=o.type) for o in outputs
             ],
         )

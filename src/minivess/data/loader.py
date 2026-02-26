@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
-from monai.data import CacheDataset, DataLoader, list_data_collate
+from monai.data import CacheDataset, ThreadDataLoader, list_data_collate
 
 from minivess.config.defaults import DEFAULT_BATCH_SIZE as _DEFAULT_BATCH_SIZE
 from minivess.data.transforms import build_train_transforms, build_val_transforms
@@ -62,9 +62,7 @@ def discover_nifti_pairs(data_dir: Path) -> list[dict[str, str]]:
     raise FileNotFoundError(msg)
 
 
-def _discover_matching_names(
-    img_dir: Path, lbl_dir: Path
-) -> list[dict[str, str]]:
+def _discover_matching_names(img_dir: Path, lbl_dir: Path) -> list[dict[str, str]]:
     """Discover pairs where image and label share the same filename."""
     pairs = []
     for img_path in sorted(img_dir.glob("*.nii.gz")):
@@ -105,10 +103,15 @@ def build_train_loader(
     config: DataConfig,
     *,
     batch_size: int = _DEFAULT_BATCH_SIZE,
-    cache_rate: float = 0.5,
+    cache_rate: float = 1.0,
     transforms: Compose | None = None,
-) -> DataLoader:
-    """Create training DataLoader with MONAI CacheDataset.
+) -> ThreadDataLoader:
+    """Create training ThreadDataLoader with MONAI CacheDataset.
+
+    Uses ``runtime_cache=True`` for progressive caching (no init spike)
+    and ``ThreadDataLoader`` instead of multiprocessing DataLoader to
+    avoid forked-process memory duplication. With full caching, only
+    lightweight random augmentations run at batch time.
 
     Parameters
     ----------
@@ -120,7 +123,8 @@ def build_train_loader(
         Training batch size (default 2). Typically sourced from
         ``TrainingConfig.batch_size`` by the caller.
     cache_rate:
-        Fraction of data to cache in memory (0.0-1.0).
+        Fraction of data to cache in memory (0.0-1.0). Default 1.0
+        is safe at native resolution (~4.5 GB for 70 MiniVess volumes).
     transforms:
         Optional pre-built MONAI transform pipeline. If provided,
         overrides the default training transforms built from config.
@@ -132,15 +136,17 @@ def build_train_loader(
         transform=transforms,
         cache_rate=cache_rate,
         num_workers=config.num_workers,
+        runtime_cache=True,
     )
-    return DataLoader(
+    # ThreadDataLoader avoids multiprocessing fork overhead.
+    # num_workers=0 (main thread) since cached data access is fast
+    # and RandCropByPosNegLabeld has known thread-safety issues (MONAI #8080).
+    return ThreadDataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=config.num_workers,
-        pin_memory=config.pin_memory,
+        num_workers=0,
         collate_fn=list_data_collate,
-        worker_init_fn=_worker_init_fn,
     )
 
 
@@ -150,8 +156,8 @@ def build_val_loader(
     *,
     cache_rate: float = 1.0,
     transforms: Compose | None = None,
-) -> DataLoader:
-    """Create validation DataLoader with full caching.
+) -> ThreadDataLoader:
+    """Create validation ThreadDataLoader with full caching.
 
     Parameters
     ----------
@@ -172,11 +178,11 @@ def build_val_loader(
         transform=transforms,
         cache_rate=cache_rate,
         num_workers=config.num_workers,
+        runtime_cache=True,
     )
-    return DataLoader(
+    return ThreadDataLoader(
         dataset,
         batch_size=1,
         shuffle=False,
-        num_workers=config.num_workers,
-        pin_memory=config.pin_memory,
+        num_workers=0,
     )

@@ -30,7 +30,9 @@ def _make_fake_model(num_classes: int = 2) -> MagicMock:
     return model
 
 
-def _make_loader(num_batches: int = 2, batch_size: int = 1) -> list[dict[str, torch.Tensor]]:
+def _make_loader(
+    num_batches: int = 2, batch_size: int = 1
+) -> list[dict[str, torch.Tensor]]:
     """Create a fake data loader (list of batch dicts)."""
     return [
         {

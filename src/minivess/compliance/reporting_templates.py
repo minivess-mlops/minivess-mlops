@@ -58,81 +58,99 @@ class ConsortAIChecklist:
         ]
 
         if self.input_data_description:
-            sections.extend([
-                "",
-                "## 3. Input Data Description",
-                "",
-                f"{self.input_data_description}",
-            ])
+            sections.extend(
+                [
+                    "",
+                    "## 3. Input Data Description",
+                    "",
+                    f"{self.input_data_description}",
+                ]
+            )
 
         if self.output_description:
-            sections.extend([
-                "",
-                "## 4. Output Description",
-                "",
-                f"{self.output_description}",
-            ])
+            sections.extend(
+                [
+                    "",
+                    "## 4. Output Description",
+                    "",
+                    f"{self.output_description}",
+                ]
+            )
 
         if self.preprocessing_steps:
-            sections.extend([
-                "",
-                "## 5. Preprocessing",
-                "",
-                f"{self.preprocessing_steps}",
-            ])
+            sections.extend(
+                [
+                    "",
+                    "## 5. Preprocessing",
+                    "",
+                    f"{self.preprocessing_steps}",
+                ]
+            )
 
         if self.evaluation_protocol:
-            sections.extend([
-                "",
-                "## 6. Evaluation Protocol",
-                "",
-                f"{self.evaluation_protocol}",
-            ])
+            sections.extend(
+                [
+                    "",
+                    "## 6. Evaluation Protocol",
+                    "",
+                    f"{self.evaluation_protocol}",
+                ]
+            )
 
         if self.performance_metrics:
             metrics_lines = "\n".join(
                 f"| {k} | {v:.4f} |" for k, v in self.performance_metrics.items()
             )
-            sections.extend([
-                "",
-                "## 7. Performance Metrics",
-                "",
-                "| Metric | Value |",
-                "|--------|-------|",
-                metrics_lines,
-            ])
+            sections.extend(
+                [
+                    "",
+                    "## 7. Performance Metrics",
+                    "",
+                    "| Metric | Value |",
+                    "|--------|-------|",
+                    metrics_lines,
+                ]
+            )
 
         if self.confidence_intervals:
-            sections.extend([
-                "",
-                "## 8. Confidence Intervals",
-                "",
-                f"{self.confidence_intervals}",
-            ])
+            sections.extend(
+                [
+                    "",
+                    "## 8. Confidence Intervals",
+                    "",
+                    f"{self.confidence_intervals}",
+                ]
+            )
 
         if self.failure_analysis:
-            sections.extend([
-                "",
-                "## 9. Failure Analysis",
-                "",
-                f"{self.failure_analysis}",
-            ])
+            sections.extend(
+                [
+                    "",
+                    "## 9. Failure Analysis",
+                    "",
+                    f"{self.failure_analysis}",
+                ]
+            )
 
         if self.limitations:
-            sections.extend([
-                "",
-                "## 10. Limitations",
-                "",
-                f"{self.limitations}",
-            ])
+            sections.extend(
+                [
+                    "",
+                    "## 10. Limitations",
+                    "",
+                    f"{self.limitations}",
+                ]
+            )
 
         if self.intended_use:
-            sections.extend([
-                "",
-                "## 11. Intended Use",
-                "",
-                f"{self.intended_use}",
-            ])
+            sections.extend(
+                [
+                    "",
+                    "## 11. Intended Use",
+                    "",
+                    f"{self.intended_use}",
+                ]
+            )
 
         sections.append("")
         return "\n".join(sections)
@@ -187,40 +205,48 @@ class MiClearLLMChecklist:
         if self.temperature is not None:
             sections.append(f"**Temperature:** {self.temperature}")
 
-        sections.extend([
-            "",
-            "## 3. Prompt Strategy",
-            "",
-            f"{self.prompt_strategy}",
-            "",
-            "## 4. Output Validation",
-            "",
-            f"{self.output_validation}",
-        ])
+        sections.extend(
+            [
+                "",
+                "## 3. Prompt Strategy",
+                "",
+                f"{self.prompt_strategy}",
+                "",
+                "## 4. Output Validation",
+                "",
+                f"{self.output_validation}",
+            ]
+        )
 
         if self.hallucination_mitigation:
-            sections.extend([
-                "",
-                "## 5. Hallucination Mitigation",
-                "",
-                f"{self.hallucination_mitigation}",
-            ])
+            sections.extend(
+                [
+                    "",
+                    "## 5. Hallucination Mitigation",
+                    "",
+                    f"{self.hallucination_mitigation}",
+                ]
+            )
 
         if self.human_oversight:
-            sections.extend([
-                "",
-                "## 6. Human Oversight",
-                "",
-                f"{self.human_oversight}",
-            ])
+            sections.extend(
+                [
+                    "",
+                    "## 6. Human Oversight",
+                    "",
+                    f"{self.human_oversight}",
+                ]
+            )
 
         if self.cost_reporting:
-            sections.extend([
-                "",
-                "## 7. Cost Reporting",
-                "",
-                f"{self.cost_reporting}",
-            ])
+            sections.extend(
+                [
+                    "",
+                    "## 7. Cost Reporting",
+                    "",
+                    f"{self.cost_reporting}",
+                ]
+            )
 
         sections.append("")
         return "\n".join(sections)

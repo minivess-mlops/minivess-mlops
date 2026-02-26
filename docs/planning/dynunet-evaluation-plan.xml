@@ -1,0 +1,361 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DynUNet Loss Variation Experiment — Evaluation & Training Plan
+  Created: 2026-02-25
+  Purpose: Crash-resistant execution plan with cold-resume checkpointing
+
+  ROOT CAUSE OF CRASHES (DIAGNOSED):
+    Linux OOM killer (Out Of Memory) killed python3 process.
+    - Process PID 461914 consumed 73 GB virtual / 43 GB resident RAM
+    - System: 64 GB RAM + 17 GB swap (14 GB swap already used)
+    - Kernel log: "Out of memory: Killed process 461914 (python3)"
+    - gnome-terminal-server.service failed with 'oom-kill' → terminal crashed
+    - Timestamp: Feb 25 14:12:10 (kernel timestamp 3172151.97)
+
+  MEMORY ANALYSIS:
+    - Raw NIfTI data: 140 files, 940 MB compressed, ~6.4 GB uncompressed float32
+    - MONAI CacheDataset expands data via transforms (resampling, padding, augmentation)
+    - 4 DataLoader workers (gpu_low profile) each fork the process
+    - Multiple CacheDatasets created per fold (train + val + eval) without explicit cleanup
+    - Between folds, Python GC doesn't free MONAI cached data promptly
+    - Sliding window inference creates additional large tensor copies
+
+  FIX: Use scripts/train_monitored.py wrapper with:
+    - Reduced cache_rate (0.2 train, 0.5 val instead of 0.5/1.0)
+    - Explicit gc.collect() + torch.cuda.empty_cache() between folds
+    - Reduced num_workers (2 instead of 4)
+    - Real-time memory monitoring with configurable OOM-avoidance threshold
+    - Per-phase checkpointing for cold-resume after crashes
+-->
+
+<experiment-plan version="2.0" created="2026-02-25T14:20:00+02:00">
+
+  <!-- ============================================================
+       ORIGINAL USER PROMPT (VERBATIM)
+       ============================================================ -->
+  <original-prompt><![CDATA[
+My Ubuntu terminal keeps crashing (crashed twice now with no idea why) when trying to to actually evaluate our recently closed PR and training the dynamic U-Net, can you do some constant monitoring/logging to produce a log of the session and inspect and why is this happening? I wanted to evaluate if the previous PR actually works then in practice, and I get the small dynunet trained with the different loss functions as the mlflow experiment with the all the git, DVC, hydra, etc versions properly saved with the mlflow deploy for post-training evaluation and ensembling, etc. without yet testing/implementing "the proper deployment" with BentoML, Argo, etc. Save this prompt as verbatim to /home/petteri/Dropbox/github-personal/minivess-mlops/docs/planning/dynunet-evaluation-plan.xml with progress tracking and crash-resistant cold-resume option so that we can continue where we were left at if we crash again
+  ]]></original-prompt>
+
+  <!-- ============================================================
+       CRASH FORENSICS
+       ============================================================ -->
+  <crash-forensics>
+    <crash id="1" timestamp="unknown" evidence="user-reported">
+      <description>Terminal crashed during training/evaluation attempt #1</description>
+      <no-logs-preserved>true</no-logs-preserved>
+    </crash>
+    <crash id="2" timestamp="2026-02-25T14:12:10+02:00" evidence="kernel-oom-log">
+      <description>Linux OOM killer terminated python3 training process</description>
+      <kernel-log><![CDATA[
+oom-kill:constraint=CONSTRAINT_NONE,nodemask=(null),cpuset=ddclient.service,
+  mems_allowed=0,global_oom,
+  task_memcg=/user.slice/user-1000.slice/user@1000.service/app.slice/
+    app-org.gnome.Terminal.slice/gnome-terminal-server.service,
+  task=python3,pid=461914,uid=1000
+
+Out of memory: Killed process 461914 (python3)
+  total-vm:76629656kB, anon-rss:45341192kB, file-rss:69376kB,
+  shmem-rss:14336kB, UID:1000 pgtables:92944kB oom_score_adj:0
+
+gnome-terminal-server.service: Failed with result 'oom-kill'.
+      ]]></kernel-log>
+      <analysis>
+        <total-vm-gb>73.1</total-vm-gb>
+        <resident-ram-gb>43.2</resident-ram-gb>
+        <system-ram-gb>64</system-ram-gb>
+        <swap-total-gb>17</swap-total-gb>
+        <swap-used-gb>14</swap-used-gb>
+        <root-cause>MONAI CacheDataset memory accumulation across folds + DataLoader worker forking</root-cause>
+      </analysis>
+    </crash>
+  </crash-forensics>
+
+  <!-- ============================================================
+       SYSTEM INVENTORY
+       ============================================================ -->
+  <system>
+    <hardware>
+      <cpu>AMD (see /proc/cpuinfo)</cpu>
+      <ram-gb>64</ram-gb>
+      <swap-gb>17</swap-gb>
+      <gpu>NVIDIA GeForce RTX 2070 SUPER (8 GB VRAM)</gpu>
+      <disk-free-gb>1100</disk-free-gb>
+    </hardware>
+    <software>
+      <os>Ubuntu 22.04+ (kernel 6.8.0-90-generic)</os>
+      <python>3.12+</python>
+      <package-manager>uv</package-manager>
+      <ml-framework>PyTorch + MONAI</ml-framework>
+    </software>
+    <data>
+      <dataset>MiniVess (EBRAINS)</dataset>
+      <num-volumes>70 image/label pairs</num-volumes>
+      <compressed-size-mb>940</compressed-size-mb>
+      <uncompressed-float32-gb>6.4</uncompressed-float32-gb>
+      <sample-shape>(512, 512, 22)</sample-shape>
+    </data>
+  </system>
+
+  <!-- ============================================================
+       EXISTING MLFLOW STATE (pre-crash inventory)
+       ============================================================ -->
+  <mlflow-state experiment-name="dynunet_loss_variation" experiment-id="290351758230017819">
+    <run id="0e098efe1ab844e5a3bc4174973fa228" status="RUNNING" name="dice_ce_20260225_114305">
+      <note>CRASHED — status=1 (RUNNING), no metrics logged, needs cleanup</note>
+    </run>
+    <run id="a1ad1b31fb8d49b4837a2f345a078c83" status="FINISHED" name="dice_ce_20260225_121042">
+      <note>Most recent completed. Has eval for fold0+fold1 (2 debug folds). Likely debug run.</note>
+      <metrics>eval_fold0_*, eval_fold1_*, train_*, val_*</metrics>
+    </run>
+    <run id="c92446e858f94353806e7b0890fe838f" status="FINISHED" name="dice_ce_20260225_120903">
+      <metrics>eval_fold0_*, eval_fold1_*, train_*, val_*</metrics>
+    </run>
+    <summary>
+      10 total runs (all dice_ce only):
+        - 9 FINISHED (status=3), 1 CRASHED/RUNNING (status=1)
+        - 5 runs have evaluation metrics (fold0+fold1)
+        - 4 runs have only training metrics
+        - NO other loss functions attempted yet (cbdice, cldice, warp, topo not run)
+    </summary>
+  </mlflow-state>
+
+  <!-- ============================================================
+       EXECUTION PHASES WITH CHECKPOINTING
+       ============================================================ -->
+  <phases>
+
+    <!-- PHASE 0: Infrastructure setup -->
+    <phase id="0" name="infrastructure-setup" status="COMPLETED">
+      <description>
+        Diagnose crash root cause, create monitoring wrapper, create this plan document.
+      </description>
+      <tasks>
+        <task id="0.1" status="COMPLETED">Analyze kernel logs for OOM evidence</task>
+        <task id="0.2" status="COMPLETED">Inventory existing MLflow runs</task>
+        <task id="0.3" status="COMPLETED">Calculate memory requirements for data caching</task>
+        <task id="0.4" status="COMPLETED">Create this plan document (dynunet-evaluation-plan.xml)</task>
+        <task id="0.5" status="COMPLETED">Create monitored training wrapper (scripts/train_monitored.py)</task>
+        <task id="0.6" status="COMPLETED">Create system monitor (scripts/system_monitor.py)</task>
+        <task id="0.7" status="COMPLETED">Root cause: Spacingd(1mm) upsamples mv02 from 60MB to 7.9GB</task>
+        <task id="0.8" status="COMPLETED">Fix: Disable Spacingd, train at native resolution</task>
+        <task id="0.9" status="COMPLETED">Fix: SpatialPadd + DivisiblePadd for variable Z-slices</task>
+        <task id="0.10" status="COMPLETED">Fix: Sliding window inference for validation (GPU OOM)</task>
+        <task id="0.11" status="COMPLETED">MONAI optimization research → monai-performance-optimization-plan.md</task>
+        <task id="0.12" status="COMPLETED">Phase 2a: CacheDataset(runtime_cache=True, cache_rate=1.0)</task>
+        <task id="0.13" status="COMPLETED">Phase 2c: ThreadDataLoader(num_workers=0) replaces forking DataLoader</task>
+      </tasks>
+      <validation>
+        Debug smoke test PASSED:
+        - Peak RAM: 19.1 GB (was 43+ GB before fixes)
+        - Peak GPU: 3.5 GB (was OOM at 8 GB before)
+        - Process RSS: stable 2.1–2.9 GB across both folds
+        - Both folds: train + eval + MetricsReloaded with bootstrap CIs
+        - MLflow: metrics logged successfully
+      </validation>
+      <checkpoint-file>N/A (this document is the checkpoint)</checkpoint-file>
+    </phase>
+
+    <!-- PHASE 1: Debug smoke test (verify pipeline works with memory fixes) -->
+    <phase id="1" name="debug-smoke-test" status="COMPLETED">
+      <description>
+        Run a quick debug-mode test with memory monitoring to verify the OOM fix works.
+        This validates the entire pipeline end-to-end with minimal resources.
+      </description>
+      <command><![CDATA[
+uv run python scripts/train_monitored.py \
+  --compute gpu_low --loss dice_ce --debug \
+  --experiment-name dynunet_debug_smoke \
+  --log-dir logs/debug_smoke_$(date +%Y%m%d_%H%M%S)
+      ]]></command>
+      <expected-duration>3-5 minutes</expected-duration>
+      <success-criteria>
+        - Pipeline completes without OOM
+        - Peak memory stays under 30 GB
+        - MLflow run created with eval metrics for 2 folds
+        - Monitor log shows stable memory trajectory
+      </success-criteria>
+      <checkpoint-file>logs/debug_smoke_*/checkpoint.json</checkpoint-file>
+    </phase>
+
+    <!-- PHASE 2: Single loss full training (dice_ce baseline) -->
+    <phase id="2" name="dice-ce-full-training" status="NOT_STARTED">
+      <description>
+        Full 3-fold training with dice_ce loss on gpu_low profile.
+        This establishes the baseline before sweeping other losses.
+        Uses reduced cache_rate and explicit memory cleanup between folds.
+      </description>
+      <command><![CDATA[
+uv run python scripts/train_monitored.py \
+  --compute gpu_low --loss dice_ce \
+  --experiment-name dynunet_loss_variation \
+  --log-dir logs/dice_ce_full_$(date +%Y%m%d_%H%M%S) \
+  --memory-limit-gb 50
+      ]]></command>
+      <expected-duration>25-60 minutes</expected-duration>
+      <success-criteria>
+        - All 3 folds complete training + evaluation
+        - MLflow run with eval_fold0_*, eval_fold1_*, eval_fold2_* metrics
+        - Centreline DSC, DSC, MASD with bootstrap CIs for each fold
+        - Peak memory stays under 50 GB
+      </success-criteria>
+      <checkpoint-file>logs/dice_ce_full_*/checkpoint.json</checkpoint-file>
+    </phase>
+
+    <!-- PHASE 3: Loss function sweep (remaining losses) -->
+    <phase id="3" name="loss-sweep" status="NOT_STARTED">
+      <description>
+        Run remaining loss functions one at a time (NOT comma-separated sweep)
+        to avoid memory accumulation. Each loss is a separate process invocation.
+      </description>
+      <sub-phases>
+        <sub-phase id="3a" loss="cbdice" status="NOT_STARTED">
+          <command><![CDATA[
+uv run python scripts/train_monitored.py \
+  --compute gpu_low --loss cbdice \
+  --experiment-name dynunet_loss_variation \
+  --log-dir logs/cbdice_full_$(date +%Y%m%d_%H%M%S) \
+  --memory-limit-gb 50
+          ]]></command>
+        </sub-phase>
+        <sub-phase id="3b" loss="dice_ce_cldice" status="NOT_STARTED">
+          <command><![CDATA[
+uv run python scripts/train_monitored.py \
+  --compute gpu_low --loss dice_ce_cldice \
+  --experiment-name dynunet_loss_variation \
+  --log-dir logs/cldice_full_$(date +%Y%m%d_%H%M%S) \
+  --memory-limit-gb 50
+          ]]></command>
+        </sub-phase>
+        <sub-phase id="3c" loss="warp" status="NOT_STARTED">
+          <command><![CDATA[
+uv run python scripts/train_monitored.py \
+  --compute gpu_low --loss warp \
+  --experiment-name dynunet_loss_variation \
+  --log-dir logs/warp_full_$(date +%Y%m%d_%H%M%S) \
+  --memory-limit-gb 50
+          ]]></command>
+        </sub-phase>
+      </sub-phases>
+      <expected-duration>75-180 minutes total (25-60 per loss)</expected-duration>
+      <success-criteria>
+        - Each loss function completes 3-fold training + evaluation
+        - All results logged to same MLflow experiment for comparison
+      </success-criteria>
+    </phase>
+
+    <!-- PHASE 4: Cross-loss comparison and analysis -->
+    <phase id="4" name="cross-loss-comparison" status="NOT_STARTED">
+      <description>
+        Compare all loss functions using MLflow metrics.
+        Generate comparison tables and decide best loss for deployment.
+      </description>
+      <tasks>
+        <task id="4.1" status="NOT_STARTED">Query MLflow for all completed runs</task>
+        <task id="4.2" status="NOT_STARTED">Build comparison table: loss x metric x fold</task>
+        <task id="4.3" status="NOT_STARTED">Statistical significance testing (paired bootstrap)</task>
+        <task id="4.4" status="NOT_STARTED">Select best loss function for deployment candidate</task>
+      </tasks>
+    </phase>
+
+    <!-- PHASE 5: MLflow model registry -->
+    <phase id="5" name="model-registry" status="NOT_STARTED">
+      <description>
+        Register best model(s) in MLflow model registry with proper metadata
+        (git hash, DVC version, Hydra config, test set hash).
+        This is the "mlflow deploy" step for post-training evaluation and ensembling.
+        NOT the BentoML/Argo deployment.
+      </description>
+      <tasks>
+        <task id="5.1" status="NOT_STARTED">Register best-loss model in MLflow registry</task>
+        <task id="5.2" status="NOT_STARTED">Tag with git commit, DVC hash, config snapshot</task>
+        <task id="5.3" status="NOT_STARTED">Log frozen dependencies as artifact</task>
+        <task id="5.4" status="NOT_STARTED">Transition to "Staging" stage in registry</task>
+      </tasks>
+    </phase>
+
+    <!-- PHASE 6: Ensembling exploration (optional, post-training) -->
+    <phase id="6" name="ensemble-exploration" status="NOT_STARTED">
+      <description>
+        Explore ensemble strategies using trained models from different losses.
+        This is evaluation/research, not production deployment.
+      </description>
+      <tasks>
+        <task id="6.1" status="NOT_STARTED">Simple majority voting across loss functions</task>
+        <task id="6.2" status="NOT_STARTED">Model soup (weight averaging) if architectures match</task>
+        <task id="6.3" status="NOT_STARTED">Compare ensemble vs best single model</task>
+      </tasks>
+    </phase>
+  </phases>
+
+  <!-- ============================================================
+       COLD-RESUME PROTOCOL
+       ============================================================
+       If the session crashes again, follow this protocol:
+  -->
+  <cold-resume-protocol>
+    <step order="1">
+      Read this file: docs/planning/dynunet-evaluation-plan.xml
+    </step>
+    <step order="2">
+      Check phase statuses above — find the last COMPLETED phase
+    </step>
+    <step order="3">
+      Check the checkpoint file for the crashed phase:
+        ls -la logs/*/checkpoint.json
+      The checkpoint records which fold/loss was in progress
+    </step>
+    <step order="4">
+      Check MLflow for completed runs:
+        ls mlruns/290351758230017819/*/meta.yaml
+      Cross-reference run names with phases above
+    </step>
+    <step order="5">
+      Check system health before resuming:
+        free -h
+        nvidia-smi
+        grep -i oom /var/log/syslog | tail -5
+    </step>
+    <step order="6">
+      Resume from the next NOT_STARTED or IN_PROGRESS phase.
+      The train_monitored.py wrapper handles per-fold resume via checkpoint.json
+    </step>
+    <step order="7">
+      Update this XML file with new phase statuses after each phase completes
+    </step>
+  </cold-resume-protocol>
+
+  <!-- ============================================================
+       MEMORY BUDGET
+       ============================================================ -->
+  <memory-budget>
+    <item name="OS + desktop + background apps" gb="15"/>
+    <item name="Full NIfTI cache (70 vols, native res, runtime_cache)" gb="4.5"/>
+    <item name="DynUNet model + optimizer + gradients" gb="0.5"/>
+    <item name="GPU: model + activations (AMP)" gb="3.5" note="VRAM, not RAM"/>
+    <item name="Python interpreter + MONAI + libs" gb="2"/>
+    <item name="ThreadDataLoader overhead (no fork)" gb="0"/>
+    <total-budget-gb>22</total-budget-gb>
+    <system-ram-gb>64</system-ram-gb>
+    <headroom-gb>42</headroom-gb>
+    <note>
+      VALIDATED: Peak RAM 19.1 GB, process RSS 2.1-2.9 GB across both folds.
+      With ThreadDataLoader (no fork) + native resolution (no Spacingd) + runtime_cache,
+      memory usage is dominated by OS/background apps, not training.
+      42 GB headroom means the full 3-fold × 4-loss sweep is safe.
+    </note>
+  </memory-budget>
+
+  <!-- ============================================================
+       OUT OF SCOPE (explicitly excluded)
+       ============================================================ -->
+  <out-of-scope>
+    <item>BentoML serving deployment</item>
+    <item>Argo Workflows orchestration</item>
+    <item>Docker Compose production deployment</item>
+    <item>DVC data versioning pipeline</item>
+    <item>CI/CD integration with CML</item>
+    <item>Any "proper deployment" infrastructure</item>
+  </out-of-scope>
+
+</experiment-plan>

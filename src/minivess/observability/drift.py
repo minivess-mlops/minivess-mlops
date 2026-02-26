@@ -279,9 +279,7 @@ class EmbeddingDriftDetector:
 
         # Median heuristic for bandwidth
         combined = np.vstack([x, y])
-        dists = np.linalg.norm(
-            combined[:, None] - combined[None, :], axis=-1
-        )
+        dists = np.linalg.norm(combined[:, None] - combined[None, :], axis=-1)
         median_dist = float(np.median(dists[dists > 0]))
         gamma = 1.0 / (2.0 * max(median_dist, 1e-10) ** 2)
 

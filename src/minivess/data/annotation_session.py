@@ -115,18 +115,19 @@ class AnnotationSession:
             sections.append("")
             return "\n".join(sections)
 
-        sections.extend([
-            "## Interaction Log",
-            "",
-            "| # | Prompt | Mask Voxels | Timestamp |",
-            "|---|--------|-------------|-----------|",
-        ])
+        sections.extend(
+            [
+                "## Interaction Log",
+                "",
+                "| # | Prompt | Mask Voxels | Timestamp |",
+                "|---|--------|-------------|-----------|",
+            ]
+        )
 
         for i, rec in enumerate(self.interactions, 1):
             voxels = int(rec.predicted_mask.sum())
             sections.append(
-                f"| {i} | {rec.prompt_description} "
-                f"| {voxels:,} | {rec.timestamp} |"
+                f"| {i} | {rec.prompt_description} | {voxels:,} | {rec.timestamp} |"
             )
 
         sections.append("")

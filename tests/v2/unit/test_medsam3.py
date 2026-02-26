@@ -154,9 +154,7 @@ class TestMedSAM3Predictor:
         )
 
         predictor = MedSAM3Predictor(MedSAM3Config())
-        predictor.add_prompt(
-            AnnotationPrompt(prompt_type="concept", concept="vessel")
-        )
+        predictor.add_prompt(AnnotationPrompt(prompt_type="concept", concept="vessel"))
         record = predictor.to_annotation_record()
         assert "prompts" in record
         assert record["model"] == "medsam3_base"

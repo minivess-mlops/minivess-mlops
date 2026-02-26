@@ -133,11 +133,30 @@ class ModelAdapter(ABC, nn.Module):
     def load_checkpoint(self, path: Path) -> None:
         """Load model weights from a checkpoint file.
 
-        Default implementation loads into ``self.net``. Override for adapters
-        that manage weights differently (e.g., LoRA, CommaAdapter).
+        Handles both checkpoint formats:
+
+        * **New format** (from :func:`~minivess.pipeline.multi_metric_tracker.save_metric_checkpoint`):
+          A dict with keys ``"model_state_dict"``, ``"optimizer_state_dict"``,
+          ``"scheduler_state_dict"``, and ``"checkpoint_metadata"``.  The
+          ``"model_state_dict"`` value is the full adapter state dict (i.e.
+          keys are prefixed with ``"net."`` because the trainer calls
+          ``model.state_dict()``).
+        * **Legacy format**: A bare ``state_dict`` where keys map directly to
+          ``self.net`` parameters (no ``"net."`` prefix).
+
+        Default implementation loads into ``self.net`` (legacy) or into
+        ``self`` (new format). Override for adapters that manage weights
+        differently (e.g., LoRA, CommaAdapter).
         """
-        state_dict = torch.load(path, map_location="cpu", weights_only=True)
-        self.net.load_state_dict(state_dict)
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+        if isinstance(payload, dict) and "model_state_dict" in payload:
+            # New format: state_dict was produced by model.state_dict()
+            # (full adapter), so load into self (the nn.Module adapter).
+            state_dict = payload["model_state_dict"]
+            self.load_state_dict(state_dict)
+        else:
+            # Legacy format: bare net state dict, load into self.net
+            self.net.load_state_dict(payload)
 
     def save_checkpoint(self, path: Path) -> None:
         """Save model weights to a checkpoint file.

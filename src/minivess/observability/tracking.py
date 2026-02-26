@@ -16,8 +16,10 @@ if TYPE_CHECKING:
 
     from minivess.adapters.base import ModelAdapter
     from minivess.config.models import ExperimentConfig
+    from minivess.pipeline.evaluation import FoldResult
 
 from minivess.config.defaults import DEFAULT_TRACKING_URI as _DEFAULT_TRACKING_URI
+from minivess.serving.model_logger import log_single_model
 
 logger = logging.getLogger(__name__)
 
@@ -118,17 +120,21 @@ class ExperimentTracker:
         prefix: str = "",
     ) -> None:
         """Log metrics for a training/validation epoch."""
-        prefixed = dict(sorted(
-            {f"{prefix}{k}" if prefix else k: v for k, v in metrics.items()}.items()
-        ))
+        prefixed = dict(
+            sorted(
+                {f"{prefix}{k}" if prefix else k: v for k, v in metrics.items()}.items()
+            )
+        )
         mlflow.log_metrics(prefixed, step=step)
 
     def log_model_info(self, model: ModelAdapter) -> None:
         """Log model configuration and parameter count."""
         model_config = model.get_config().to_dict()
-        mlflow.log_params(dict(sorted(
-            {f"model_{k}": str(v) for k, v in model_config.items()}.items()
-        )))
+        mlflow.log_params(
+            dict(
+                sorted({f"model_{k}": str(v) for k, v in model_config.items()}.items())
+            )
+        )
         mlflow.log_metric("trainable_parameters", model.trainable_parameters())
 
     def log_artifact(self, local_path: Path, *, artifact_path: str = "") -> None:
@@ -176,7 +182,11 @@ class ExperimentTracker:
                 check=True,
             )
             with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".txt", prefix="frozen_deps_", delete=False, encoding="utf-8"
+                mode="w",
+                suffix=".txt",
+                prefix="frozen_deps_",
+                delete=False,
+                encoding="utf-8",
             ) as f:
                 f.write(result.stdout)
                 f.flush()
@@ -185,7 +195,9 @@ class ExperimentTracker:
         except (subprocess.CalledProcessError, FileNotFoundError):
             logger.warning("Could not freeze dependencies (uv not available)")
 
-    def log_hydra_config(self, config_dict: dict, *, filename: str = "resolved_config.yaml") -> None:
+    def log_hydra_config(
+        self, config_dict: dict, *, filename: str = "resolved_config.yaml"
+    ) -> None:
         """Log resolved Hydra config as YAML artifact."""
         import tempfile
 
@@ -205,21 +217,134 @@ class ExperimentTracker:
             mlflow.log_artifact(str(split_path), artifact_path="splits")
             logger.info("Logged split file: %s", split_path.name)
 
+    def log_evaluation_results(
+        self,
+        fold_result: FoldResult,
+        *,
+        fold_id: int,
+        loss_name: str,
+    ) -> None:
+        """Log MetricsReloaded evaluation results as MLflow metrics.
+
+        Flattens per-metric CIs into ``eval_fold{fold_id}_{metric}``
+        keys for easy comparison across folds and losses.
+
+        Parameters
+        ----------
+        fold_result:
+            Evaluation results with aggregated CIs.
+        fold_id:
+            Fold index (0-based).
+        loss_name:
+            Loss function name (for logging context).
+        """
+        flat_metrics: dict[str, float] = {}
+        for metric_name, ci in fold_result.aggregated.items():
+            prefix = f"eval_fold{fold_id}_{metric_name}"
+            flat_metrics.update(ci.to_dict(prefix))
+
+        mlflow.log_metrics(dict(sorted(flat_metrics.items())))
+        logger.info(
+            "Logged evaluation results for fold %d, loss=%s: %d metrics",
+            fold_id,
+            loss_name,
+            len(flat_metrics),
+        )
+
+    def log_pyfunc_model(
+        self,
+        checkpoint_path: Path,
+        model_config_dict: dict,
+        *,
+        artifact_path: str = "model",
+    ) -> str:
+        """Log a segmentation model as MLflow pyfunc artifact.
+
+        Delegates to :func:`model_logger.log_single_model`.
+        Must be called within a :meth:`start_run` context.
+
+        Parameters
+        ----------
+        checkpoint_path:
+            Path to the ``.pth`` checkpoint file.
+        model_config_dict:
+            Model architecture configuration dict.
+        artifact_path:
+            MLflow artifact path for the logged model.
+
+        Returns
+        -------
+        Model URI string (``runs:/{run_id}/{artifact_path}``).
+
+        Raises
+        ------
+        RuntimeError
+            If called outside of a run context.
+        """
+        if self._run_id is None:
+            msg = "Cannot log pyfunc model outside of a run context"
+            raise RuntimeError(msg)
+
+        log_single_model(
+            checkpoint_path=checkpoint_path,
+            model_config_dict=model_config_dict,
+            artifact_path=artifact_path,
+        )
+        model_uri = f"runs:/{self._run_id}/{artifact_path}"
+        logger.info("Logged pyfunc model: %s", model_uri)
+        return model_uri
+
     def register_model(
         self,
         model_name: str,
         *,
-        stage: str = "Staging",
+        alias: str = "challenger",
     ) -> None:
-        """Register the current run's model in MLflow Model Registry."""
+        """Register the current run's model in MLflow Model Registry.
+
+        Uses aliases (not deprecated stages) per MLflow 2.9+.
+
+        Parameters
+        ----------
+        model_name:
+            Name for the registered model.
+        alias:
+            Alias to assign (e.g. ``"champion"``, ``"challenger"``).
+        """
         if self._run_id is None:
             msg = "Cannot register model outside of a run context"
             raise RuntimeError(msg)
         model_uri = f"runs:/{self._run_id}/model"
         mv = mlflow.register_model(model_uri, model_name)
+        self.client.set_registered_model_alias(model_name, alias, mv.version)
         logger.info(
-            "Registered model %s version %s -> %s",
+            "Registered model %s version %s with alias '%s'",
             model_name,
             mv.version,
-            stage,
+            alias,
         )
+
+    def log_post_training_tags(
+        self,
+        best_metrics: dict[str, float],
+        *,
+        fold_id: int | None = None,
+        loss_type: str | None = None,
+    ) -> None:
+        """Set post-training tags for downstream selection.
+
+        Parameters
+        ----------
+        best_metrics:
+            Mapping of metric name to best value (e.g. ``{"val_dice": 0.843}``).
+        fold_id:
+            Fold index (0-based).
+        loss_type:
+            Loss function name.
+        """
+        for name, value in best_metrics.items():
+            mlflow.set_tag(f"best_{name}", f"{value:.6f}")
+        if fold_id is not None:
+            mlflow.set_tag("fold_id", str(fold_id))
+        if loss_type is not None:
+            mlflow.set_tag("loss_type", loss_type)

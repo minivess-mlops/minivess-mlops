@@ -47,8 +47,12 @@ training_config_st = st.builds(
     TrainingConfig,
     max_epochs=st.integers(min_value=1, max_value=1000),
     batch_size=st.integers(min_value=1, max_value=64),
-    learning_rate=st.floats(min_value=1e-8, max_value=1.0, allow_nan=False, allow_infinity=False),
-    weight_decay=st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False),
+    learning_rate=st.floats(
+        min_value=1e-8, max_value=1.0, allow_nan=False, allow_infinity=False
+    ),
+    weight_decay=st.floats(
+        min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False
+    ),
     optimizer=st.sampled_from(["adam", "adamw", "sgd", "lamb"]),
     seed=st.integers(min_value=0, max_value=2**31),
     num_folds=st.integers(min_value=1, max_value=10),
@@ -59,6 +63,7 @@ training_config_st = st.builds(
 
 
 # --- Default construction tests ---
+
 
 class TestDefaultConstruction:
     """All config models should construct with minimal required args."""
@@ -103,6 +108,7 @@ class TestDefaultConstruction:
 
 # --- Validation tests ---
 
+
 class TestValidation:
     """Invalid values should be rejected."""
 
@@ -140,6 +146,7 @@ class TestValidation:
 
 
 # --- Property-based tests ---
+
 
 class TestPropertyBased:
     """Hypothesis-driven property-based tests."""
@@ -181,10 +188,14 @@ class TestPropertyBased:
         assert ModelConfig.model_validate(model_cfg.model_dump()).family == family
 
         ensemble_cfg = EnsembleConfig(strategy=strategy)
-        assert EnsembleConfig.model_validate(ensemble_cfg.model_dump()).strategy == strategy
+        assert (
+            EnsembleConfig.model_validate(ensemble_cfg.model_dump()).strategy
+            == strategy
+        )
 
 
 # --- JSON serialization ---
+
 
 class TestJsonSerialization:
     """Config models should serialize to/from JSON."""

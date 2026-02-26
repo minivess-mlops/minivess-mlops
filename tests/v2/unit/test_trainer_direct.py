@@ -81,9 +81,7 @@ class TestTrainEpoch:
 
         model = SegResNetAdapter(_make_config())
         loader = _fake_loader(n_batches=4)
-        trainer = SegmentationTrainer(
-            model, _make_training_config(learning_rate=0.01)
-        )
+        trainer = SegmentationTrainer(model, _make_training_config(learning_rate=0.01))
         loss1 = trainer.train_epoch(loader).loss
         # Train several more epochs on same data
         for _ in range(10):

@@ -36,10 +36,12 @@ def build_ablation_grid(
     for width_name in widths:
         filters = DYNUNET_WIDTH_PRESETS[width_name]
         for loss_name in losses:
-            grid.append({
-                "width_name": width_name,
-                "filters": filters,
-                "loss_name": loss_name,
-                "experiment_name": f"dynunet-{width_name}-{loss_name}",
-            })
+            grid.append(
+                {
+                    "width_name": width_name,
+                    "filters": filters,
+                    "loss_name": loss_name,
+                    "experiment_name": f"dynunet-{width_name}-{loss_name}",
+                }
+            )
     return grid

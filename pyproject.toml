@@ -12,7 +12,7 @@ version = "2.0.0-alpha"
 description = "Model-agnostic biomedical segmentation MLOps platform"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.12"
+requires-python = "==3.13.*"
 authors = [
     { name = "petteriteikari", email = "petteri.teikari@gmail.com" },
 ]
@@ -60,6 +60,8 @@ dependencies = [
     # Retained from v0.1
     "weightwatcher>=0.7,<1.0",
     "openlineage-python>=1.26,<2.0",
+    "nibabel>=5.3.3",
+    "onnx>=1.20.1",
 ]
 
 [project.optional-dependencies]
@@ -152,6 +154,9 @@ docstring-code-format = true
 # ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.12"
+mypy_path = "src"
+explicit_package_bases = true
+namespace_packages = true
 strict = true
 warn_return_any = true
 warn_unused_configs = true
@@ -199,6 +204,9 @@ module = [
     "duckdb.*",
     "MetricsReloaded.*",
     "scipy.*",
+    "nibabel.*",
+    "prefect.*",
+    "pandas.*",
 ]
 ignore_missing_imports = true
 
@@ -230,6 +238,8 @@ filterwarnings = [
     "ignore::UserWarning:torch.*",
     "ignore::DeprecationWarning:pyparsing.*",
     "ignore::UserWarning:torchmetrics.*",
+    "ignore::UserWarning:monai.*",
+    "ignore::UserWarning:mlflow.*",
     "ignore::SyntaxWarning:MetricsReloaded.*",
     "ignore::FutureWarning",
     "ignore::DeprecationWarning",
@@ -265,4 +275,9 @@ build-constraint-dependencies = [
 # weightwatcher pins pandas==2.1.4 which fails to build from source on Python 3.13+
 override-dependencies = [
     "pandas>=2.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
 ]

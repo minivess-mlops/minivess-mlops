@@ -112,7 +112,7 @@ class RunAnalytics:
         """Select top-N models by a given metric."""
         self.register_dataframe("runs", runs_df)
         # Include param_fold only if it exists in the DataFrame
-        fold_col = ', param_fold' if "param_fold" in runs_df.columns else ""
+        fold_col = ", param_fold" if "param_fold" in runs_df.columns else ""
         sql = f"""
             SELECT run_id, run_name{fold_col}, "{metric}"
             FROM runs

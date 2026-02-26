@@ -46,17 +46,27 @@ class TestTrainScript:
         splits_file = tmp_path / "splits.json"
 
         patch = "x".join(str(x) for x in _TEST_PATCH_SIZE)
-        main([
-            "--compute", "cpu",
-            "--loss", "dice_ce",
-            "--debug",
-            "--data-dir", str(data_dir),
-            "--splits-file", str(splits_file),
-            "--num-folds", "2",
-            "--seed", "42",
-            "--experiment-name", "test_smoke",
-            "--patch-size", patch,
-        ])
+        main(
+            [
+                "--compute",
+                "cpu",
+                "--loss",
+                "dice_ce",
+                "--debug",
+                "--data-dir",
+                str(data_dir),
+                "--splits-file",
+                str(splits_file),
+                "--num-folds",
+                "2",
+                "--seed",
+                "42",
+                "--experiment-name",
+                "test_smoke",
+                "--patch-size",
+                patch,
+            ]
+        )
 
         # Verify splits file was created
         assert splits_file.exists()
@@ -71,32 +81,47 @@ class TestTrainScript:
         _create_synthetic_nifti_dataset(data_dir, n_volumes=6)
 
         patch = "x".join(str(x) for x in _TEST_PATCH_SIZE)
-        args = parse_args([
-            "--compute", "cpu",
-            "--loss", "dice_ce",
-            "--debug",
-            "--data-dir", str(data_dir),
-            "--splits-file", str(tmp_path / "splits.json"),
-            "--num-folds", "2",
-            "--patch-size", patch,
-        ])
+        args = parse_args(
+            [
+                "--compute",
+                "cpu",
+                "--loss",
+                "dice_ce",
+                "--debug",
+                "--data-dir",
+                str(data_dir),
+                "--splits-file",
+                str(tmp_path / "splits.json"),
+                "--num-folds",
+                "2",
+                "--patch-size",
+                patch,
+            ]
+        )
 
         results = run_experiment(args)
 
-        for _loss_name, fold_results in results.items():
+        for _loss_name, fold_results in results["training"].items():
             for fold_result in fold_results:
-                assert fold_result["best_val_loss"] == fold_result["best_val_loss"]  # not NaN
+                assert (
+                    fold_result["best_val_loss"] == fold_result["best_val_loss"]
+                )  # not NaN
                 assert fold_result["best_val_loss"] < float("inf")
 
     def test_compute_profile_applied(self, tmp_path: Path) -> None:
         """Verify that the compute profile is applied to configs."""
         from scripts.train import _build_configs, parse_args
 
-        args = parse_args([
-            "--compute", "gpu_low",
-            "--loss", "dice_ce",
-            "--data-dir", str(tmp_path),
-        ])
+        args = parse_args(
+            [
+                "--compute",
+                "gpu_low",
+                "--loss",
+                "dice_ce",
+                "--data-dir",
+                str(tmp_path),
+            ]
+        )
 
         data_config, _, training_config = _build_configs(args)
         assert data_config.patch_size == (96, 96, 24)
@@ -123,13 +148,20 @@ class TestTrainScript:
         splits_file = tmp_path / "splits.json"
         save_splits(splits, splits_file)
 
-        args = parse_args([
-            "--compute", "cpu",
-            "--loss", "dice_ce",
-            "--data-dir", str(tmp_path),
-            "--splits-file", str(splits_file),
-            "--num-folds", "2",
-        ])
+        args = parse_args(
+            [
+                "--compute",
+                "cpu",
+                "--loss",
+                "dice_ce",
+                "--data-dir",
+                str(tmp_path),
+                "--splits-file",
+                str(splits_file),
+                "--num-folds",
+                "2",
+            ]
+        )
 
         _, _, training_config = _build_configs(args)
         loaded = _load_or_generate_splits(args, None, training_config)

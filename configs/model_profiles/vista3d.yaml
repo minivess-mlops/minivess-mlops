@@ -1,0 +1,14 @@
+name: vista3d
+divisor: 16
+model_overhead_mb: 800
+bytes_per_voxel_amp: 12
+bytes_per_voxel_fp32: 24
+max_batch_size:
+  cpu: 1
+  gpu_low: 1
+  gpu_high: 2
+  gpu_extreme: 4
+default_patch_xy: 128
+notes: >
+  MONAI VISTA-3D foundation model. Large memory footprint due to
+  vision transformer backbone. Requires 16x spatial divisibility.

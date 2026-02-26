@@ -98,8 +98,11 @@ def test_full_pipeline_e2e(
     for loss_val in summary["history"]["train_loss"]:
         assert loss_val > 0.0
         assert np.isfinite(loss_val)
-    # Best checkpoint should have been saved
-    assert (checkpoint_dir / "best_model.pth").exists()
+    # Best checkpoint should have been saved for the primary metric (val_loss)
+    # The refactored trainer saves best_<metric_name>.pth (not best_model.pth)
+    primary_metric = training_config.checkpoint.primary_metric
+    safe_name = primary_metric.replace("/", "_")
+    assert (checkpoint_dir / f"best_{safe_name}.pth").exists()
 
     # ------------------------------------------------------------------
     # Step 4: Compute metrics using SegmentationMetrics

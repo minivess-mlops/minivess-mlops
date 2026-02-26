@@ -203,11 +203,14 @@ class TestRankSamples:
         """Samples should be ranked from highest to lowest uncertainty."""
         from minivess.validation.vessqc import rank_samples_by_uncertainty
 
-        uncertainty = np.array([
-            [[[0.1, 0.1], [0.1, 0.1]]],  # sample 0: low
-            [[[0.9, 0.9], [0.9, 0.9]]],  # sample 1: high
-            [[[0.5, 0.5], [0.5, 0.5]]],  # sample 2: medium
-        ], dtype=np.float32).reshape(3, 1, 2, 2, 1)
+        uncertainty = np.array(
+            [
+                [[[0.1, 0.1], [0.1, 0.1]]],  # sample 0: low
+                [[[0.9, 0.9], [0.9, 0.9]]],  # sample 1: high
+                [[[0.5, 0.5], [0.5, 0.5]]],  # sample 2: medium
+            ],
+            dtype=np.float32,
+        ).reshape(3, 1, 2, 2, 1)
 
         ranked = rank_samples_by_uncertainty(
             uncertainty,
@@ -221,9 +224,15 @@ class TestRankSamples:
         """top_k should limit the number of returned samples."""
         from minivess.validation.vessqc import rank_samples_by_uncertainty
 
-        uncertainty = np.random.default_rng(42).uniform(
-            0.0, 1.0, (5, 1, 4, 4, 2),
-        ).astype(np.float32)
+        uncertainty = (
+            np.random.default_rng(42)
+            .uniform(
+                0.0,
+                1.0,
+                (5, 1, 4, 4, 2),
+            )
+            .astype(np.float32)
+        )
 
         ranked = rank_samples_by_uncertainty(
             uncertainty,

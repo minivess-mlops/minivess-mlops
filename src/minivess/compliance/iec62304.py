@@ -118,10 +118,12 @@ class TraceabilityMatrix:
             sections.append("")
             return "\n".join(sections)
 
-        sections.extend([
-            "| Req ID | Description | Implementation | Test |",
-            "|--------|-------------|----------------|------|",
-        ])
+        sections.extend(
+            [
+                "| Req ID | Description | Implementation | Test |",
+                "|--------|-------------|----------------|------|",
+            ]
+        )
 
         for entry in self.entries:
             test_cell = entry.test_ref if entry.test_ref else "*GAP*"
@@ -132,22 +134,26 @@ class TraceabilityMatrix:
 
         # Coverage summary
         report = self.coverage_report()
-        sections.extend([
-            "",
-            "## Coverage Summary",
-            "",
-            f"- **Total Requirements:** {report['total']}",
-            f"- **Tested:** {report['tested']}",
-            f"- **Untested:** {report['untested']}",
-            f"- **Coverage:** {report['coverage']:.0%}",
-        ])
+        sections.extend(
+            [
+                "",
+                "## Coverage Summary",
+                "",
+                f"- **Total Requirements:** {report['total']}",
+                f"- **Tested:** {report['tested']}",
+                f"- **Untested:** {report['untested']}",
+                f"- **Coverage:** {report['coverage']:.0%}",
+            ]
+        )
 
         if report["gaps"]:
-            sections.extend([
-                "",
-                "## Gaps",
-                "",
-            ])
+            sections.extend(
+                [
+                    "",
+                    "## Gaps",
+                    "",
+                ]
+            )
             for gap_id in report["gaps"]:
                 sections.append(f"- {gap_id}")
 
@@ -202,17 +208,19 @@ class PCCPTemplate:
         else:
             sections.append("No permitted changes defined.")
 
-        sections.extend([
-            "",
-            "## Verification Protocol",
-            "",
-            "All permitted changes must satisfy:",
-            "",
-            "1. Automated regression test suite passes (>= 95% coverage)",
-            "2. Performance metrics remain within predefined acceptance criteria",
-            "3. Audit trail documents the change with full traceability",
-            "4. Risk analysis updated if change affects safety classification",
-            "",
-        ])
+        sections.extend(
+            [
+                "",
+                "## Verification Protocol",
+                "",
+                "All permitted changes must satisfy:",
+                "",
+                "1. Automated regression test suite passes (>= 95% coverage)",
+                "2. Performance metrics remain within predefined acceptance criteria",
+                "3. Audit trail documents the change with full traceability",
+                "4. Risk analysis updated if change affects safety classification",
+                "",
+            ]
+        )
 
         return "\n".join(sections)

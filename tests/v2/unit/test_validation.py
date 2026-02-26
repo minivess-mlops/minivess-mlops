@@ -94,9 +94,7 @@ class TestNiftiMetadataSchema:
         with pytest.raises(Exception):  # noqa: B017
             NiftiMetadataSchema.validate(bad)
 
-    def test_intensity_range_invalid(
-        self, valid_nifti_metadata: pd.DataFrame
-    ) -> None:
+    def test_intensity_range_invalid(self, valid_nifti_metadata: pd.DataFrame) -> None:
         from minivess.validation.schemas import NiftiMetadataSchema
 
         bad = valid_nifti_metadata.copy()
@@ -142,9 +140,7 @@ class TestTrainingMetricsSchema:
 class TestAnnotationQualitySchema:
     """Test annotation quality Pandera schema validation."""
 
-    def test_valid_data_passes(
-        self, valid_annotation_quality: pd.DataFrame
-    ) -> None:
+    def test_valid_data_passes(self, valid_annotation_quality: pd.DataFrame) -> None:
         from minivess.validation.schemas import AnnotationQualitySchema
 
         validated = AnnotationQualitySchema.validate(valid_annotation_quality)
@@ -360,8 +356,12 @@ class TestWhylogsProfiler:
         from minivess.validation.profiling import compare_profiles, profile_dataframe
 
         rng = np.random.default_rng(42)
-        df1 = pd.DataFrame({"x": rng.standard_normal(100), "y": rng.standard_normal(100)})
-        df2 = pd.DataFrame({"x": rng.standard_normal(100), "y": rng.standard_normal(100)})
+        df1 = pd.DataFrame(
+            {"x": rng.standard_normal(100), "y": rng.standard_normal(100)}
+        )
+        df2 = pd.DataFrame(
+            {"x": rng.standard_normal(100), "y": rng.standard_normal(100)}
+        )
         ref = profile_dataframe(df1)
         cur = profile_dataframe(df2)
         report = compare_profiles(ref, cur)
@@ -372,8 +372,12 @@ class TestWhylogsProfiler:
         from minivess.validation.profiling import compare_profiles, profile_dataframe
 
         rng = np.random.default_rng(42)
-        df1 = pd.DataFrame({"x": rng.standard_normal(200), "y": rng.standard_normal(200)})
-        df2 = pd.DataFrame({"x": rng.standard_normal(200) + 10.0, "y": rng.standard_normal(200)})
+        df1 = pd.DataFrame(
+            {"x": rng.standard_normal(200), "y": rng.standard_normal(200)}
+        )
+        df2 = pd.DataFrame(
+            {"x": rng.standard_normal(200) + 10.0, "y": rng.standard_normal(200)}
+        )
         ref = profile_dataframe(df1)
         cur = profile_dataframe(df2)
         report = compare_profiles(ref, cur)
@@ -426,9 +430,7 @@ class TestValidationGates:
         result = validate_training_metrics(bad)
         assert result.passed is False
 
-    def test_gate_result_has_fields(
-        self, valid_nifti_metadata: pd.DataFrame
-    ) -> None:
+    def test_gate_result_has_fields(self, valid_nifti_metadata: pd.DataFrame) -> None:
         from minivess.validation.gates import validate_nifti_metadata
 
         result = validate_nifti_metadata(valid_nifti_metadata)

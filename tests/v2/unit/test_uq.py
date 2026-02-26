@@ -214,14 +214,16 @@ class TestDeepEnsembles:
         assert torch.all(result.uncertainty_map >= 0)
 
     def test_ensemble_uq_single_model(self) -> None:
-        """Single model ensemble should have zero uncertainty."""
+        """Single model ensemble should have zero epistemic uncertainty."""
         from minivess.ensemble.deep_ensembles import DeepEnsemblePredictor
 
         models = [_MockAdapter(out_channels=2)]
         predictor = DeepEnsemblePredictor(models)
         x = torch.randn(1, 1, 8, 8, 4)
         result = predictor.predict(x)
-        assert result.uncertainty_map.max() < 0.01
+        # Epistemic (model disagreement) should be ~0 for a single model
+        epistemic = result.metadata["epistemic_uncertainty"]
+        assert epistemic.max() < 1e-6
 
     def test_ensemble_uq_metadata(self) -> None:
         from minivess.ensemble.deep_ensembles import DeepEnsemblePredictor
@@ -361,7 +363,9 @@ class TestConformalPrediction:
         result_high = p_high.predict(test_scores)
 
         avg_set_low = result_low.prediction_sets.sum() / result_low.prediction_sets.size
-        avg_set_high = result_high.prediction_sets.sum() / result_high.prediction_sets.size
+        avg_set_high = (
+            result_high.prediction_sets.sum() / result_high.prediction_sets.size
+        )
         assert avg_set_low >= avg_set_high
 
     def test_conformal_result_fields(self) -> None:

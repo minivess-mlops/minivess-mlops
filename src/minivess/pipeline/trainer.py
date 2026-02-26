@@ -1,15 +1,27 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import torch
+from monai.inferers import sliding_window_inference
 from torch.amp import GradScaler, autocast
 from torch.optim import SGD, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
 from minivess.pipeline.loss_functions import build_loss_function
+from minivess.pipeline.multi_metric_tracker import (
+    MetricCheckpoint,
+    MetricDirection,
+    MetricHistory,
+    MetricTracker,
+    MultiMetricTracker,
+    save_metric_checkpoint,
+)
+from minivess.pipeline.validation_metrics import compute_compound_masd_cldice
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,6 +42,43 @@ class EpochResult:
 
     loss: float
     metrics: dict[str, float] = field(default_factory=dict)
+
+
+def _build_multi_tracker(config: TrainingConfig) -> MultiMetricTracker:
+    """Build a :class:`MultiMetricTracker` from :class:`TrainingConfig`.
+
+    Parameters
+    ----------
+    config:
+        Training configuration containing ``checkpoint`` sub-config.
+
+    Returns
+    -------
+    MultiMetricTracker
+        Ready-to-use tracker built from ``config.checkpoint``.
+    """
+    ckpt_cfg = config.checkpoint
+    trackers: list[MetricTracker] = []
+    for m in ckpt_cfg.tracked_metrics:
+        direction = (
+            MetricDirection.MINIMIZE
+            if m.direction == "minimize"
+            else MetricDirection.MAXIMIZE
+        )
+        trackers.append(
+            MetricTracker(
+                name=m.name,
+                direction=direction,
+                patience=m.patience,
+                min_delta=ckpt_cfg.min_delta,
+            )
+        )
+    return MultiMetricTracker(
+        trackers=trackers,
+        primary_metric=ckpt_cfg.primary_metric,
+        early_stopping_strategy=ckpt_cfg.early_stopping_strategy,
+        min_epochs=ckpt_cfg.min_epochs,
+    )
 
 
 class SegmentationTrainer:
@@ -76,6 +125,7 @@ class SegmentationTrainer:
         criterion: nn.Module | None = None,
         optimizer: torch.optim.Optimizer | None = None,
         scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
+        val_roi_size: tuple[int, int, int] | None = None,
     ) -> None:
         self.model = model
         self.config = config
@@ -83,14 +133,17 @@ class SegmentationTrainer:
         self.model.to(self.device)
         self.tracker = tracker
         self.metrics = metrics
+        self.val_roi_size = val_roi_size
 
-        self.criterion = criterion if criterion is not None else build_loss_function(loss_name)
+        self.criterion = (
+            criterion if criterion is not None else build_loss_function(loss_name)
+        )
         self.optimizer = optimizer if optimizer is not None else self._build_optimizer()
         self.scheduler = scheduler if scheduler is not None else self._build_scheduler()
         self.scaler = GradScaler(enabled=config.mixed_precision)
 
-        self._best_val_loss = float("inf")
-        self._patience_counter = 0
+        self._multi_tracker: MultiMetricTracker = _build_multi_tracker(config)
+        self._metric_history: MetricHistory = MetricHistory()
 
     def _build_optimizer(self) -> torch.optim.Optimizer:
         """Build the optimizer from training config."""
@@ -182,7 +235,9 @@ class SegmentationTrainer:
         return EpochResult(loss=avg_loss, metrics=epoch_metrics)
 
     @torch.no_grad()
-    def validate_epoch(self, loader: Any) -> EpochResult:
+    def validate_epoch(
+        self, loader: Any, *, compute_extended: bool = False
+    ) -> EpochResult:
         """Run one validation epoch.
 
         Parameters
@@ -190,6 +245,9 @@ class SegmentationTrainer:
         loader:
             Validation DataLoader yielding batches with ``"image"`` and
             ``"label"`` keys.
+        compute_extended:
+            If True, compute MetricsReloaded metrics (clDice, MASD, compound)
+            on CPU after sliding window inference. Adds ~30% overhead.
 
         Returns
         -------
@@ -200,6 +258,10 @@ class SegmentationTrainer:
         running_loss = 0.0
         num_batches = 0
 
+        # Collect full-volume predictions for MetricsReloaded (CPU numpy)
+        collected_preds: list[np.ndarray] = []
+        collected_labels: list[np.ndarray] = []
+
         for batch in loader:
             images = batch["image"].to(self.device)
             labels = batch["label"].to(self.device)
@@ -208,21 +270,104 @@ class SegmentationTrainer:
                 device_type=self.device.type,
                 enabled=self.config.mixed_precision,
             ):
-                output = self.model(images)
-                loss = self.criterion(output.logits, labels)
+                # Use sliding window inference when val_roi_size is set,
+                # needed because full 512x512xZ volumes exceed GPU memory.
+                if self.val_roi_size is not None:
+
+                    def _model_fn(x):
+                        return self.model(x).logits
+
+                    logits = sliding_window_inference(
+                        images,
+                        roi_size=self.val_roi_size,
+                        sw_batch_size=4,
+                        predictor=_model_fn,
+                        overlap=0.25,
+                    )
+                else:
+                    output = self.model(images)
+                    logits = output.logits
+                loss = self.criterion(logits, labels)
 
             running_loss += loss.item()
             num_batches += 1
 
             if self.metrics is not None:
-                self.metrics.update(output.logits, labels)
+                self.metrics.update(logits, labels)
+
+            if compute_extended:
+                # Move to CPU and convert to binary predictions
+                pred_probs = torch.softmax(logits, dim=1)
+                pred_binary = (
+                    pred_probs[:, 1:].argmax(dim=1)
+                    if logits.shape[1] > 2
+                    else (pred_probs[:, 1] > 0.5).long()
+                )
+                for b in range(images.shape[0]):
+                    pred_np = pred_binary[b].cpu().numpy().astype(np.uint8)
+                    label_np = labels[b, 0].cpu().numpy().astype(np.uint8)
+                    collected_preds.append(pred_np)
+                    collected_labels.append(label_np)
 
         avg_loss = running_loss / max(num_batches, 1)
         epoch_metrics: dict[str, float] = {}
         if self.metrics is not None:
             epoch_metrics = self.metrics.compute().to_dict()
             self.metrics.reset()
+
+        # Compute MetricsReloaded extended metrics on CPU
+        if compute_extended and collected_preds:
+            extended = self._compute_extended_metrics(collected_preds, collected_labels)
+            epoch_metrics.update(extended)
+
         return EpochResult(loss=avg_loss, metrics=epoch_metrics)
+
+    def _compute_extended_metrics(
+        self,
+        predictions: list[np.ndarray],
+        labels: list[np.ndarray],
+    ) -> dict[str, float]:
+        """Compute MetricsReloaded metrics (clDice, MASD) + compound.
+
+        Returns metric keys WITHOUT the 'val_' prefix (added by fit()).
+        """
+        try:
+            from minivess.pipeline.evaluation import EvaluationRunner
+        except (ImportError, SyntaxError):
+            # SyntaxError: MetricsReloaded has unescaped LaTeX `\d` in
+            # docstrings that triggers SyntaxError on Python 3.12.12+.
+            logger.warning("MetricsReloaded not available, skipping extended metrics")
+            return {}
+
+        runner = EvaluationRunner(include_expensive=False)
+        per_vol_cldice: list[float] = []
+        per_vol_masd: list[float] = []
+        per_vol_dsc: list[float] = []
+
+        for pred, label in zip(predictions, labels, strict=True):
+            try:
+                vol_metrics = runner.evaluate_volume(pred, label)
+                per_vol_cldice.append(vol_metrics.get("centreline_dsc", float("nan")))
+                per_vol_masd.append(vol_metrics.get("measured_masd", float("nan")))
+                per_vol_dsc.append(vol_metrics.get("dsc", float("nan")))
+            except Exception:
+                logger.exception("MetricsReloaded evaluation failed for a volume")
+                per_vol_cldice.append(float("nan"))
+                per_vol_masd.append(float("nan"))
+                per_vol_dsc.append(float("nan"))
+
+        mean_cldice = (
+            float(np.nanmean(per_vol_cldice)) if per_vol_cldice else float("nan")
+        )
+        mean_masd = float(np.nanmean(per_vol_masd)) if per_vol_masd else float("nan")
+
+        compound = compute_compound_masd_cldice(masd=mean_masd, cldice=mean_cldice)
+
+        return {
+            "cldice": mean_cldice,
+            "masd": mean_masd,
+            "compound_masd_cldice": compound,
+        }
 
     def fit(
         self,
@@ -231,7 +376,10 @@ class SegmentationTrainer:
         *,
         checkpoint_dir: Path | None = None,
     ) -> dict[str, Any]:
-        """Full training loop with early stopping.
+        """Full training loop with multi-metric early stopping.
+
+        Uses :class:`MultiMetricTracker` built from ``config.checkpoint`` to
+        determine when improvement has occurred and when to early-stop.
 
         Parameters
         ----------
@@ -240,25 +388,55 @@ class SegmentationTrainer:
         val_loader:
             Validation DataLoader.
         checkpoint_dir:
-            Directory for saving best model checkpoints. If ``None``,
-            no checkpoints are saved.
+            Directory for saving checkpoints. If ``None``, no checkpoints
+            are saved (metric history will still be tracked in-memory).
 
         Returns
         -------
         dict[str, Any]
-            Summary with ``best_val_loss``, ``final_epoch``, and ``history``.
+            Summary with ``best_val_loss`` (backward compat), ``final_epoch``,
+            ``history``, and ``best_metrics``.
         """
         history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
         final_epoch = 0
+        ckpt_cfg = self.config.checkpoint
+        epoch_start_time = time.perf_counter()
+
+        # Determine if extended metrics (MetricsReloaded) are needed
+        # by checking if any tracked metric requires them
+        _extended_metric_names = {"val_cldice", "val_masd", "val_compound_masd_cldice"}
+        _tracked_names = {m.name for m in ckpt_cfg.tracked_metrics}
+        needs_extended = bool(_tracked_names & _extended_metric_names)
+        # MetricsReloaded (skeleton + surface distance) is expensive on full volumes.
+        # Compute every N epochs to keep overhead manageable (~2x instead of 14x).
+        extended_frequency = 5
 
         for epoch in range(self.config.max_epochs):
+            t0 = time.perf_counter()
             train_result = self.train_epoch(train_loader)
-            val_result = self.validate_epoch(val_loader)
+            # Compute extended metrics every N epochs + first + last
+            compute_ext_this_epoch = needs_extended and (
+                epoch % extended_frequency == 0 or epoch == self.config.max_epochs - 1
+            )
+            val_result = self.validate_epoch(
+                val_loader, compute_extended=compute_ext_this_epoch
+            )
             self.scheduler.step()
+            epoch_wall_time = time.perf_counter() - t0
 
             history["train_loss"].append(train_result.loss)
             history["val_loss"].append(val_result.loss)
             final_epoch = epoch + 1
+
+            # Build full metric dict for this epoch
+            all_metrics: dict[str, float] = {
+                "train_loss": train_result.loss,
+                "val_loss": val_result.loss,
+            }
+            for k, v in train_result.metrics.items():
+                all_metrics[f"train_{k}"] = v
+            for k, v in val_result.metrics.items():
+                all_metrics[f"val_{k}"] = v
 
             current_lr = self.optimizer.param_groups[0]["lr"]
             logger.info(
@@ -270,7 +448,7 @@ class SegmentationTrainer:
                 current_lr,
             )
 
-            # Log to MLflow if tracker is present
+            # Log to MLflow / experiment tracker if present
             if self.tracker is not None:
                 epoch_log: dict[str, float] = {
                     "train_loss": train_result.loss,
@@ -283,30 +461,122 @@ class SegmentationTrainer:
                     epoch_log[f"val_{k}"] = v
                 self.tracker.log_epoch_metrics(epoch_log, step=epoch + 1)
 
-            # Early stopping + best checkpoint
-            if val_result.loss < self._best_val_loss:
-                self._best_val_loss = val_result.loss
-                self._patience_counter = 0
-                if checkpoint_dir is not None:
-                    best_path = checkpoint_dir / "best_model.pth"
-                    self.model.save_checkpoint(best_path)
-                    logger.info("Saved best checkpoint to %s", best_path)
+            # Update multi-metric tracker and save per-metric best checkpoints
+            improved_metrics = self._multi_tracker.update(all_metrics, epoch)
+            cumulative_wall_time = time.perf_counter() - epoch_start_time
+
+            if checkpoint_dir is not None and improved_metrics:
+                checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                for metric_name in improved_metrics:
+                    tracker_obj = next(
+                        t for t in self._multi_tracker.trackers if t.name == metric_name
+                    )
+                    ckpt_meta = MetricCheckpoint(
+                        epoch=epoch,
+                        metrics=all_metrics,
+                        metric_name=metric_name,
+                        metric_value=all_metrics.get(metric_name, float("nan")),
+                        metric_direction=tracker_obj.direction.value,
+                        train_loss=train_result.loss,
+                        val_loss=val_result.loss,
+                        wall_time_sec=cumulative_wall_time,
+                        config_snapshot=self.config.model_dump(mode="json"),
+                    )
+                    safe_name = metric_name.replace("/", "_")
+                    best_path = checkpoint_dir / f"best_{safe_name}.pth"
+                    save_metric_checkpoint(
+                        path=best_path,
+                        model_state_dict=self.model.state_dict(),
+                        optimizer_state_dict=self.optimizer.state_dict(),
+                        scheduler_state_dict=self.scheduler.state_dict(),
+                        checkpoint=ckpt_meta,
+                        scaler_state_dict=self.scaler.state_dict(),
+                    )
+                    logger.info(
+                        "Saved best checkpoint for '%s' to %s", metric_name, best_path
+                    )
                     if self.tracker is not None:
                         self.tracker.log_artifact(
                             best_path, artifact_path="checkpoints"
                         )
-            else:
-                self._patience_counter += 1
-                if self._patience_counter >= self.config.early_stopping_patience:
-                    logger.info(
-                        "Early stopping at epoch %d (patience=%d)",
-                        epoch + 1,
-                        self.config.early_stopping_patience,
-                    )
-                    break
+
+            # Save last.pth if configured
+            if checkpoint_dir is not None and ckpt_cfg.save_last:
+                checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                last_ckpt_meta = MetricCheckpoint(
+                    epoch=epoch,
+                    metrics=all_metrics,
+                    metric_name="last",
+                    metric_value=val_result.loss,
+                    metric_direction="minimize",
+                    train_loss=train_result.loss,
+                    val_loss=val_result.loss,
+                    wall_time_sec=cumulative_wall_time,
+                    config_snapshot=self.config.model_dump(mode="json"),
+                )
+                last_path = checkpoint_dir / "last.pth"
+                save_metric_checkpoint(
+                    path=last_path,
+                    model_state_dict=self.model.state_dict(),
+                    optimizer_state_dict=self.optimizer.state_dict(),
+                    scheduler_state_dict=self.scheduler.state_dict(),
+                    checkpoint=last_ckpt_meta,
+                    scaler_state_dict=self.scaler.state_dict(),
+                )
+
+            # Record epoch in history
+            self._metric_history.record_epoch(
+                epoch=epoch,
+                metrics=all_metrics,
+                wall_time_sec=epoch_wall_time,
+                checkpoints_saved=improved_metrics,
+            )
+
+            # Save metric_history.json if configured
+            if checkpoint_dir is not None and ckpt_cfg.save_history:
+                checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                self._metric_history.save_json(checkpoint_dir / "metric_history.json")
+
+            # Early stopping decision via MultiMetricTracker
+            if self._multi_tracker.should_stop(epoch):
+                logger.info(
+                    "Early stopping at epoch %d (strategy=%s)",
+                    epoch + 1,
+                    ckpt_cfg.early_stopping_strategy,
+                )
+                break
+
+        # Upload last.pth and metric_history.json to MLflow
+        if self.tracker is not None and checkpoint_dir is not None:
+            last_path = checkpoint_dir / "last.pth"
+            if last_path.exists():
+                self.tracker.log_artifact(last_path, artifact_path="checkpoints")
+            history_path = checkpoint_dir / "metric_history.json"
+            if history_path.exists():
+                self.tracker.log_artifact(history_path, artifact_path="history")
+
+        # Backward-compatible best_val_loss: use primary tracker's best value
+        # when primary metric is val_loss, otherwise fall back to best val_loss tracker
+        primary_tracker = self._multi_tracker.get_primary_tracker()
+        if primary_tracker.name == "val_loss":
+            best_val_loss = primary_tracker.best_value
+        else:
+            # Try to find a val_loss tracker
+            val_loss_trackers = [
+                t for t in self._multi_tracker.trackers if t.name == "val_loss"
+            ]
+            best_val_loss = (
+                val_loss_trackers[0].best_value
+                if val_loss_trackers
+                else primary_tracker.best_value
+            )
 
         return {
-            "best_val_loss": self._best_val_loss,
+            "best_val_loss": best_val_loss,
             "final_epoch": final_epoch,
             "history": history,
+            "best_metrics": {
+                tracker.name: tracker.best_value
+                for tracker in self._multi_tracker.trackers
+            },
         }

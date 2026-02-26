@@ -44,7 +44,9 @@ class TestSyntheticShift:
 
         rng = np.random.default_rng(42)
         data = rng.normal(0.5, 0.1, size=(1000,))
-        shifted = apply_synthetic_shift(data, shift_type="noise", magnitude=0.3, seed=42)
+        shifted = apply_synthetic_shift(
+            data, shift_type="noise", magnitude=0.3, seed=42
+        )
         assert np.std(shifted) > np.std(data)
 
     def test_zero_magnitude_no_change(self) -> None:

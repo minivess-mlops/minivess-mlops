@@ -151,6 +151,7 @@ class TestAdaptersUseBuildHelpers:
             out_channels=2,
         )
         from minivess.adapters.segresnet import SegResNetAdapter
+
         return SegResNetAdapter(config)
 
     @pytest.fixture
@@ -162,9 +163,12 @@ class TestAdaptersUseBuildHelpers:
             out_channels=2,
         )
         from minivess.adapters.swinunetr import SwinUNETRAdapter
+
         return SwinUNETRAdapter(config, feature_size=24)
 
-    def test_segresnet_forward_still_works(self, segresnet_adapter: ModelAdapter) -> None:
+    def test_segresnet_forward_still_works(
+        self, segresnet_adapter: ModelAdapter
+    ) -> None:
         """SegResNetAdapter should still produce correct output after refactor."""
         x = torch.randn(1, 1, 32, 32, 16)
         output = segresnet_adapter(x)
@@ -174,7 +178,9 @@ class TestAdaptersUseBuildHelpers:
         sums = output.prediction.sum(dim=1)
         assert torch.allclose(sums, torch.ones_like(sums), atol=1e-5)
 
-    def test_segresnet_get_config_still_works(self, segresnet_adapter: ModelAdapter) -> None:
+    def test_segresnet_get_config_still_works(
+        self, segresnet_adapter: ModelAdapter
+    ) -> None:
         """SegResNetAdapter.get_config should still produce correct output."""
         cfg = segresnet_adapter.get_config()
         assert cfg.family == "segresnet"
@@ -183,7 +189,9 @@ class TestAdaptersUseBuildHelpers:
         assert cfg.trainable_params is not None
         assert cfg.extras["init_filters"] == 32
 
-    def test_swinunetr_forward_still_works(self, swinunetr_adapter: ModelAdapter) -> None:
+    def test_swinunetr_forward_still_works(
+        self, swinunetr_adapter: ModelAdapter
+    ) -> None:
         """SwinUNETRAdapter should still produce correct output after refactor."""
         x = torch.randn(1, 1, 64, 64, 32)
         output = swinunetr_adapter(x)
@@ -191,7 +199,9 @@ class TestAdaptersUseBuildHelpers:
         assert output.prediction.shape == (1, 2, 64, 64, 32)
         assert output.metadata["architecture"] == "swinunetr"
 
-    def test_swinunetr_get_config_still_works(self, swinunetr_adapter: ModelAdapter) -> None:
+    def test_swinunetr_get_config_still_works(
+        self, swinunetr_adapter: ModelAdapter
+    ) -> None:
         """SwinUNETRAdapter.get_config should still produce correct output."""
         cfg = swinunetr_adapter.get_config()
         assert cfg.family == "swinunetr"
@@ -211,6 +221,7 @@ class TestCommaParameterStandardization:
         import inspect
 
         from minivess.adapters.comma import _CommaEncoderBlock
+
         sig = inspect.signature(_CommaEncoderBlock.__init__)
         params = list(sig.parameters.keys())
         assert "in_channels" in params, f"Expected 'in_channels', got {params}"
@@ -221,6 +232,7 @@ class TestCommaParameterStandardization:
         import inspect
 
         from minivess.adapters.comma import _CommaDecoderBlock
+
         sig = inspect.signature(_CommaDecoderBlock.__init__)
         params = list(sig.parameters.keys())
         assert "in_channels" in params, f"Expected 'in_channels', got {params}"
@@ -230,6 +242,7 @@ class TestCommaParameterStandardization:
     def test_encoder_block_functional(self) -> None:
         """_CommaEncoderBlock should still work with standardized names."""
         from minivess.adapters.comma import _CommaEncoderBlock
+
         block = _CommaEncoderBlock(in_channels=1, out_channels=16, d_state=8)
         x = torch.randn(1, 1, 8, 8, 8)
         down, skip = block(x)
@@ -239,6 +252,7 @@ class TestCommaParameterStandardization:
     def test_decoder_block_functional(self) -> None:
         """_CommaDecoderBlock should still work with standardized names."""
         from minivess.adapters.comma import _CommaDecoderBlock
+
         block = _CommaDecoderBlock(in_channels=32, skip_channels=16, out_channels=16)
         x = torch.randn(1, 32, 4, 4, 4)
         skip = torch.randn(1, 16, 8, 8, 8)
@@ -248,6 +262,7 @@ class TestCommaParameterStandardization:
     def test_comma_adapter_still_functional(self) -> None:
         """CommaAdapter should still work end-to-end after renaming."""
         from minivess.adapters.comma import CommaAdapter
+
         config = ModelConfig(
             family=ModelFamily.COMMA_MAMBA,
             name="test-comma",

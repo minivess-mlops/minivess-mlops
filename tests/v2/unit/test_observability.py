@@ -25,6 +25,7 @@ from minivess.pipeline.trainer import SegmentationTrainer
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def experiment_config() -> ExperimentConfig:
     """Minimal ExperimentConfig for tracking tests."""
@@ -431,7 +432,8 @@ class TestTrainerMLflowIntegration:
         # Verify the actual checkpoint file exists inside
         sub_artifacts = client.list_artifacts(run_id, path="checkpoints")
         sub_names = [a.path for a in sub_artifacts]
-        assert any("best_model" in name for name in sub_names)
+        # The refactored trainer saves best_<metric_name>.pth (e.g. best_val_loss.pth)
+        assert any("best_" in name for name in sub_names)
 
 
 # ---------------------------------------------------------------------------
@@ -483,16 +485,12 @@ class TestRunAnalytics:
                 tracking_uri=local_tracking_uri,
             )
             with tracker.start_run(run_name=f"run-{i}"):
-                tracker.log_epoch_metrics(
-                    {"val_dice": 0.8 + i * 0.05}, step=1
-                )
+                tracker.log_epoch_metrics({"val_dice": 0.8 + i * 0.05}, step=1)
 
         analytics = RunAnalytics(tracking_uri=local_tracking_uri)
         df = analytics.load_experiment_runs("test-experiment")
         analytics.register_dataframe("runs", df)
-        result = analytics.query(
-            "SELECT COUNT(*) AS n FROM runs"
-        )
+        result = analytics.query("SELECT COUNT(*) AS n FROM runs")
         assert result.iloc[0]["n"] == 2
         analytics.close()
 
@@ -511,9 +509,7 @@ class TestRunAnalytics:
                 tracking_uri=local_tracking_uri,
             )
             with tracker.start_run(run_name=f"run-{i}"):
-                tracker.log_epoch_metrics(
-                    {"val_dice": 0.7 + i * 0.1}, step=1
-                )
+                tracker.log_epoch_metrics({"val_dice": 0.7 + i * 0.1}, step=1)
 
         analytics = RunAnalytics(tracking_uri=local_tracking_uri)
         df = analytics.load_experiment_runs("test-experiment")
@@ -571,9 +567,7 @@ class TestTrainTrackAnalyzeRoundtrip:
 
         # SQL query
         analytics.register_dataframe("runs", df)
-        result = analytics.query(
-            "SELECT metric_train_loss, metric_val_loss FROM runs"
-        )
+        result = analytics.query("SELECT metric_train_loss, metric_val_loss FROM runs")
         assert len(result) == 1
         assert result.iloc[0]["metric_train_loss"] > 0
         analytics.close()

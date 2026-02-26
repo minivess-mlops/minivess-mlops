@@ -120,9 +120,7 @@ class TestDomainRandomizationPipeline:
         config = DomainRandomizationConfig(seed=42)
         pipeline = DomainRandomizationPipeline(config)
 
-        vol = np.random.default_rng(42).normal(0.5, 0.1, (16, 16, 8)).astype(
-            np.float32
-        )
+        vol = np.random.default_rng(42).normal(0.5, 0.1, (16, 16, 8)).astype(np.float32)
         mask = np.zeros((16, 16, 8), dtype=np.uint8)
         mask[4:12, 4:12, 2:6] = 1
 

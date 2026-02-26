@@ -40,6 +40,12 @@ build/
 # Dataset downloads (large ZIPs, not version-controlled)
 /dataset_local/
 
+# Training logs (ephemeral, snapshots archived to docs/snapshots/)
+/logs/
+
+# Debug run snapshots (binary archives)
+docs/snapshots/*.zip
+
 # Hypothesis test database
 .hypothesis/
 

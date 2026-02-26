@@ -1,0 +1,628 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Executable Implementation Plan: Loss & Metric Improvement v2
+  Created: 2026-02-26 (revised with downstream double-check insights)
+  Branch: feat/experiment-evaluation
+  Background research: docs/planning/compound-loss-implementation-plan.md
+  Downstream audit: docs/planning/multi-metric-downstream-double-check.md
+
+  This file contains ONLY actionable implementation steps.
+  No background research — see the .md plans for rationale.
+
+  DESIGN PRINCIPLE: Save EVERYTHING now so we NEVER need to re-train.
+  Downstream consumers (Analysis Flow, Deployment Flow, ensembles, MONAI Deploy,
+  BentoML, MLflow model registry) all read from MLflow artifacts.
+
+  Serving architecture:
+    Flow 3 (Analysis):   MLflow local serving (mlflow.pyfunc.load_model)
+    Flow 4 (Deployment): BentoML (bentoml.mlflow.get) + MONAI Deploy (MAP)
+    MLflow is the inter-flow contract between independent Prefect flows.
+-->
+<implementation-plan>
+  <metadata>
+    <title>Loss and Metric Improvement — Executable Plan v2</title>
+    <created>2026-02-26</created>
+    <revised>2026-02-26 (downstream double-check)</revised>
+    <branch>feat/experiment-evaluation</branch>
+    <depends-on>Multi-metric tracking (Phases 1-3, DONE)</depends-on>
+    <estimated-gpu-time>~15 hours (RTX 2070 Super 8GB, ~45s/epoch with MetricsReloaded)</estimated-gpu-time>
+    <estimated-dev-time>~5 hours implementation + tests</estimated-dev-time>
+    <total-storage>~6.2 GB MLflow artifacts</total-storage>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- PHASE 0: MLflow Artifact Completeness (PRE-REQUISITE)   -->
+  <!-- Must complete BEFORE any training to ensure downstream  -->
+  <!-- consumers have everything they need.                    -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="0" name="MLflow Artifact Completeness" tests="~14" priority="CRITICAL">
+    <description>
+      Fix all gaps identified in multi-metric-downstream-double-check.md.
+      After this phase, every training run will produce ALL artifacts needed
+      by Analysis Flow (MLflow serving), Deployment Flow (BentoML + MONAI Deploy),
+      ensemble construction, and MLflow model registry.
+
+      KEY GAPS FIXED:
+      1. Add mlflow.pyfunc.log_model() with serving wrapper + ModelSignature
+      2. Upload last.pth and metric_history.json to MLflow
+      3. Save validation predictions as compressed .npz
+      4. Add GradScaler state_dict to checkpoints
+      5. Update register_model() to use aliases (not deprecated stages)
+      6. Add post-training tags for downstream selection
+    </description>
+
+    <!-- 0A: MLflow Serving Wrapper (pyfunc) -->
+    <step id="0A.1" type="test-first">
+      <file>tests/v2/unit/test_mlflow_serving_wrapper.py</file>
+      <action>Write failing tests for the serving wrapper</action>
+      <tests>
+        <test>test_serving_model_signature_matches_spec — inputs (-1,1,-1,-1,-1) float32, outputs (-1,2,-1,-1,-1) float32</test>
+        <test>test_serving_model_load_context — loads checkpoint + rebuilds model</test>
+        <test>test_serving_model_predict_shape — predict() returns correct shape</test>
+        <test>test_serving_model_predict_dtype — returns float32 probabilities</test>
+        <test>test_input_example_shape — small (1,1,8,16,16) numpy array</test>
+        <test>test_log_model_creates_mlmodel_file — MLmodel YAML exists after log_model()</test>
+      </tests>
+    </step>
+
+    <step id="0A.2" type="implement">
+      <file>src/minivess/serving/mlflow_wrapper.py</file>
+      <action>Create MiniVessServingModel(mlflow.pyfunc.PythonModel)</action>
+      <pattern>
+        class MiniVessServingModel(mlflow.pyfunc.PythonModel):
+            def load_context(self, context):
+                - Load model config from context.artifacts["model_config"]
+                - Rebuild DynUNetAdapter from config
+                - Load checkpoint from context.artifacts["checkpoint"]
+                - Build SlidingWindowInferenceRunner with roi_size from config
+                - Detect device (CUDA if available, else CPU)
+
+            def predict(self, context, model_input, params=None):
+                - Convert numpy input to torch tensor
+                - Run sliding_window_inference via SlidingWindowInferenceRunner
+                - Return softmax probabilities as numpy float32
+
+        Also define:
+        - get_model_signature() -> ModelSignature (tensor specs)
+        - get_input_example() -> np.ndarray (1, 1, 8, 16, 16)
+        - log_serving_model(tracker, checkpoint_path, config_path) -> None
+            Calls mlflow.pyfunc.log_model() with all required artifacts
+      </pattern>
+    </step>
+
+    <!-- 0B: Upload all artifacts to MLflow -->
+    <step id="0B.1" type="implement">
+      <file>src/minivess/pipeline/trainer.py</file>
+      <action>Upload last.pth and metric_history.json to MLflow</action>
+      <changes>
+        After fit() loop ends, before returning:
+        - Upload last.pth via tracker.log_artifact(last_path, artifact_path="checkpoints")
+        - Upload metric_history.json via tracker.log_artifact(history_path, artifact_path="history")
+      </changes>
+    </step>
+
+    <!-- 0C: Save validation predictions -->
+    <step id="0C.1" type="test-first">
+      <file>tests/v2/unit/test_prediction_saving.py</file>
+      <tests>
+        <test>test_save_predictions_creates_npz — file exists and loadable</test>
+        <test>test_save_predictions_hard_pred_dtype — uint8</test>
+        <test>test_save_predictions_soft_pred_dtype — float16</test>
+        <test>test_save_predictions_compressed_size — smaller than uncompressed</test>
+        <test>test_load_predictions_roundtrip — save then load matches</test>
+      </tests>
+    </step>
+
+    <step id="0C.2" type="implement">
+      <file>src/minivess/pipeline/prediction_store.py</file>
+      <action>Create prediction saving/loading utilities</action>
+      <functions>
+        <function name="save_fold_predictions">
+          Save compressed .npz per volume:
+          - hard_pred: uint8 (D, H, W) binary mask
+          - soft_pred: float16 (D, H, W) foreground probability
+          - metadata: volume_name, fold_id, loss_name, epoch
+          Upload directory to MLflow as artifact.
+        </function>
+        <function name="load_fold_predictions">
+          Load all .npz from a fold's prediction directory.
+          Returns list of (hard_pred, soft_pred, metadata) tuples.
+        </function>
+      </functions>
+    </step>
+
+    <!-- 0D: Add GradScaler state to checkpoints -->
+    <step id="0D.1" type="implement">
+      <file>src/minivess/pipeline/multi_metric_tracker.py</file>
+      <action>Add optional scaler_state_dict to save_metric_checkpoint()</action>
+      <changes>
+        Add optional parameter: scaler_state_dict: dict[str, Any] | None = None
+        If provided, include "scaler_state_dict" key in payload dict.
+        Update load_metric_checkpoint() to return it as well (or None if absent).
+        MUST remain backward-compatible with existing checkpoints (key may be absent).
+      </changes>
+    </step>
+
+    <step id="0D.2" type="implement">
+      <file>src/minivess/pipeline/trainer.py</file>
+      <action>Pass scaler.state_dict() to save_metric_checkpoint()</action>
+      <changes>
+        In fit(), when calling save_metric_checkpoint(), add:
+          scaler_state_dict=self.scaler.state_dict()
+      </changes>
+    </step>
+
+    <!-- 0E: Update model registry to use aliases -->
+    <step id="0E.1" type="implement">
+      <file>src/minivess/observability/tracking.py</file>
+      <action>Update register_model() to use aliases instead of deprecated stages</action>
+      <changes>
+        Change register_model() signature:
+          def register_model(self, model_name: str, *, alias: str = "challenger") -> None:
+        Implementation:
+          model_uri = f"runs:/{self._run_id}/model"
+          mv = mlflow.register_model(model_uri, model_name)
+          self.client.set_registered_model_alias(model_name, alias, mv.version)
+        Remove old stage parameter.
+      </changes>
+    </step>
+
+    <!-- 0F: Add post-training tags -->
+    <step id="0F.1" type="implement">
+      <file>src/minivess/observability/tracking.py</file>
+      <action>Add method to set post-training selection tags</action>
+      <changes>
+        def log_post_training_tags(self, best_metrics: dict[str, float], **kwargs) -> None:
+          For each metric, set tag: mlflow.set_tag(f"best_{name}", f"{value:.6f}")
+          Also set: fold_id, loss_type, checkpoint_metric tags
+      </changes>
+    </step>
+
+    <step id="0F.2" type="verify">
+      <command>uv run pytest tests/v2/ -x -q</command>
+      <command>uv run ruff check src/ tests/</command>
+      <command>uv run mypy src/</command>
+    </step>
+
+    <step id="0F.3" type="checkpoint">
+      <commit-msg>feat(observability): MLflow serving wrapper, prediction store, and artifact completeness</commit-msg>
+    </step>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- PHASE 1: New Compound Loss (replace warp)              -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="1" name="Compound Loss: cbdice_cldice" tests="~10">
+    <description>
+      Add CbDiceClDiceLoss = 0.5*cbDice + 0.5*dice_ce_cldice.
+      Register as "cbdice_cldice" in build_loss_function() factory.
+      Follow MONAI lambda-weighted compound pattern (no generic wrapper).
+    </description>
+
+    <step id="1.1" type="test-first">
+      <file>tests/v2/unit/test_compound_loss_cbdice_cldice.py</file>
+      <action>Write failing tests</action>
+      <tests>
+        <test>test_cbdice_cldice_forward_shape — output is scalar tensor</test>
+        <test>test_cbdice_cldice_gradient_flow — logits.grad is not None</test>
+        <test>test_cbdice_cldice_no_nan — no NaN on random input</test>
+        <test>test_cbdice_cldice_perfect_prediction — loss near zero</test>
+        <test>test_cbdice_cldice_custom_weights — lambda_cbdice=0.7, lambda_cldice=0.3</test>
+        <test>test_cbdice_cldice_default_weights — both 0.5</test>
+        <test>test_cbdice_cldice_3d_input — works with (B, C, D, H, W)</test>
+        <test>test_build_loss_factory_cbdice_cldice — factory returns correct class</test>
+      </tests>
+    </step>
+
+    <step id="1.2" type="implement">
+      <file>src/minivess/pipeline/loss_functions.py</file>
+      <action>Add CbDiceClDiceLoss class</action>
+      <pattern>
+        Follow VesselCompoundLoss pattern:
+        - __init__: create cbdice and dice_ce_cldice sub-losses with lambda weights
+        - forward: compute both losses, return weighted sum
+        - cbdice comes from vendored_losses.cbdice.CenterlineBoundaryDiceLoss
+        - dice_ce_cldice comes from VesselCompoundLoss (already in file)
+      </pattern>
+    </step>
+
+    <step id="1.3" type="implement">
+      <file>src/minivess/pipeline/loss_functions.py</file>
+      <action>Register in build_loss_function() factory</action>
+      <code-hint>
+        if loss_name == "cbdice_cldice":
+            return CbDiceClDiceLoss(softmax=softmax, to_onehot_y=to_onehot_y)
+      </code-hint>
+    </step>
+
+    <step id="1.4" type="verify">
+      <command>uv run pytest tests/v2/unit/test_compound_loss_cbdice_cldice.py -x -q</command>
+      <command>uv run ruff check src/minivess/pipeline/loss_functions.py</command>
+      <command>uv run mypy src/minivess/pipeline/loss_functions.py</command>
+    </step>
+
+    <step id="1.5" type="checkpoint">
+      <commit-msg>feat(pipeline): Add CbDiceClDiceLoss compound loss (replaces warp)</commit-msg>
+    </step>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- PHASE 2: Expanded Validation Metrics                    -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="2" name="Validation Metric Expansion" tests="~12">
+    <description>
+      Compute MetricsReloaded metrics (clDice, MASD) during validation
+      and create compound "bestness criteria" for multi-metric tracking.
+
+      Key: The trainer currently computes val_loss, val_dice, val_f1_foreground
+      via TorchMetrics (fast, GPU). We need to ADD MetricsReloaded metrics
+      (clDice, MASD) during validation using sliding window inference + CPU eval.
+
+      Compound metric: val_compound_masd_cldice = 0.5*(1 - norm_masd) + 0.5*cldice
+      where norm_masd = clamp(masd / max_masd, 0, 1) with max_masd = 50.0 (voxels)
+
+      IMPORTANT: MetricsReloaded requires full-volume predictions (not patches).
+      The existing SlidingWindowInferenceRunner handles this. Validation already
+      uses sliding_window_inference in trainer.py (val_roi_size).
+
+      RECOMMENDATION: Compute every epoch (~30% slowdown, 35s → 45s per epoch).
+      Total training time increases from ~12h to ~15h. Acceptable.
+    </description>
+
+    <step id="2.1" type="test-first">
+      <file>tests/v2/unit/test_validation_metrics_expansion.py</file>
+      <tests>
+        <test>test_normalize_masd_zero — perfect segmentation gives 1.0</test>
+        <test>test_normalize_masd_max — MASD >= max_masd gives 0.0</test>
+        <test>test_normalize_masd_midrange — linear interpolation</test>
+        <test>test_compound_masd_cldice_formula — matches 0.5*(1-norm_masd)+0.5*cldice</test>
+        <test>test_compound_masd_cldice_perfect — returns 1.0 for perfect match</test>
+        <test>test_compound_masd_cldice_worst — returns 0.0 for worst case</test>
+        <test>test_compute_validation_metrics_includes_cldice — clDice in output</test>
+        <test>test_compute_validation_metrics_includes_masd — MASD in output</test>
+        <test>test_compute_validation_metrics_includes_compound — compound in output</test>
+        <test>test_bestness_criteria_all_present — all tracked criteria computed</test>
+      </tests>
+    </step>
+
+    <step id="2.2" type="implement">
+      <file>src/minivess/pipeline/validation_metrics.py</file>
+      <action>Create validation metric computation module</action>
+      <functions>
+        <function name="normalize_masd">
+          Normalize MASD from [0, inf) to [0, 1] (inverted: 0=worst, 1=best).
+          Formula: clamp(1 - masd / max_masd, 0, 1)
+          Default max_masd: 50.0 voxels (configurable).
+        </function>
+        <function name="compute_compound_masd_cldice">
+          Formula: 0.5 * normalize_masd(masd) + 0.5 * cldice
+          Returns: float in [0, 1]
+        </function>
+        <function name="compute_bestness_metrics">
+          Input: per-volume predictions + labels (from SlidingWindowInferenceRunner)
+          Uses EvaluationRunner with include_expensive=False
+          Returns dict with all bestness criteria values:
+            val_cldice (centreline_dsc), val_masd (measured_masd),
+            val_compound_masd_cldice
+          These are ADDED to the existing TorchMetrics values (val_dice, val_f1_foreground).
+        </function>
+      </functions>
+    </step>
+
+    <step id="2.3" type="implement">
+      <file>src/minivess/pipeline/trainer.py</file>
+      <action>Wire MetricsReloaded validation into training loop</action>
+      <changes>
+        In validate_epoch() or fit() after validate_epoch():
+        1. Collect full-volume predictions via sliding window (already happening)
+        2. Run EvaluationRunner on CPU to compute clDice + MASD
+        3. Compute compound metric val_compound_masd_cldice
+        4. Merge into all_metrics dict for multi-metric tracker
+
+        Also after fit() ends:
+        5. Save validation predictions via prediction_store.save_fold_predictions()
+        6. Upload to MLflow via tracker.log_artifact()
+        7. Call log_serving_model() to create servable MLflow model
+        8. Log post-training tags
+      </changes>
+    </step>
+
+    <step id="2.4" type="verify">
+      <command>uv run pytest tests/v2/unit/test_validation_metrics_expansion.py -x -q</command>
+      <command>uv run pytest tests/v2/ -x -q</command>
+      <command>uv run ruff check src/ tests/</command>
+    </step>
+
+    <step id="2.5" type="checkpoint">
+      <commit-msg>feat(pipeline): Add MetricsReloaded validation metrics and compound bestness criteria</commit-msg>
+    </step>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- PHASE 3: YAML Config + Multi-Metric Tracker Update     -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="3" name="Config and Tracker Wiring" tests="~6">
+    <description>
+      Update experiment YAML config with expanded tracked metrics.
+      Update multi-metric tracker to handle all bestness criteria.
+      Replace warp with cbdice_cldice in loss list.
+    </description>
+
+    <step id="3.1" type="implement">
+      <file>configs/experiments/dynunet_losses.yaml</file>
+      <action>Update experiment config v2</action>
+      <yaml-content>
+        experiment_name: dynunet_loss_variation_v2
+        model: dynunet
+        losses:
+          - dice_ce
+          - cbdice
+          - dice_ce_cldice
+          - cbdice_cldice
+        compute: gpu_low
+        data_dir: data/raw/minivess
+        num_folds: 3
+        max_epochs: 100
+        seed: 42
+        debug: false
+        memory_limit_gb: 24
+        monitor_interval: 10
+        checkpoint:
+          tracked_metrics:
+            - name: val_loss
+              direction: minimize
+              patience: 30
+            - name: val_dice
+              direction: maximize
+              patience: 30
+            - name: val_cldice
+              direction: maximize
+              patience: 30
+            - name: val_masd
+              direction: minimize
+              patience: 30
+            - name: val_compound_masd_cldice
+              direction: maximize
+              patience: 30
+          early_stopping_strategy: all
+          primary_metric: val_compound_masd_cldice
+          min_delta: 1.0e-4
+          min_epochs: 10
+          save_last: true
+          save_history: true
+      </yaml-content>
+    </step>
+
+    <step id="3.2" type="test-first">
+      <file>tests/v2/unit/test_config_v2_expansion.py</file>
+      <tests>
+        <test>test_yaml_loads_5_tracked_metrics</test>
+        <test>test_primary_metric_is_compound</test>
+        <test>test_cbdice_cldice_in_loss_list</test>
+        <test>test_warp_not_in_loss_list</test>
+        <test>test_build_loss_for_all_configured_losses</test>
+        <test>test_multi_tracker_builds_from_config</test>
+      </tests>
+    </step>
+
+    <step id="3.3" type="verify">
+      <command>uv run pytest tests/v2/ -x -q</command>
+      <command>uv run ruff check src/ tests/</command>
+      <command>uv run mypy src/</command>
+    </step>
+
+    <step id="3.4" type="checkpoint">
+      <commit-msg>feat(config): Update experiment config v2 with compound metrics and cbdice_cldice loss</commit-msg>
+    </step>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- PHASE 4: Training Run v2                                -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="4" name="Training Run v2">
+    <description>
+      Run 4 losses x 3 folds x 100 epochs via run_experiment.py.
+      Verify ALL artifacts saved for ALL downstream consumers.
+      Expected wall time: ~15 hours on RTX 2070 Super (45s/epoch with MetricsReloaded).
+    </description>
+
+    <step id="4.1" type="pre-check">
+      <action>Verify 1-epoch smoke test with FULL artifact pipeline</action>
+      <command>
+        uv run python scripts/run_experiment.py
+          --config configs/experiments/dynunet_losses.yaml
+          --max-epochs 1
+          --losses dice_ce
+          --folds 0
+      </command>
+      <verify>
+        CHECKPOINTS (per fold):
+        - best_val_loss.pth exists in MLflow artifacts/checkpoints/
+        - best_val_dice.pth exists in MLflow artifacts/checkpoints/
+        - best_val_cldice.pth exists in MLflow artifacts/checkpoints/
+        - best_val_masd.pth exists in MLflow artifacts/checkpoints/
+        - best_val_compound_masd_cldice.pth exists in MLflow artifacts/checkpoints/
+        - last.pth exists in MLflow artifacts/checkpoints/
+        - All checkpoints contain scaler_state_dict key
+
+        HISTORY:
+        - metric_history.json in MLflow artifacts/history/
+        - val_cldice and val_masd values present in history
+        - val_compound_masd_cldice computed and present
+
+        PREDICTIONS:
+        - predictions/fold_0/*.npz files in MLflow artifacts/
+        - Each .npz has hard_pred (uint8) and soft_pred (float16)
+
+        SERVING MODEL:
+        - MLmodel file exists under model/ artifact path
+        - ModelSignature matches (-1,1,-1,-1,-1) -> (-1,2,-1,-1,-1)
+        - Model loadable via mlflow.pyfunc.load_model()
+
+        METRICS:
+        - val_cldice logged to MLflow per epoch
+        - val_masd logged to MLflow per epoch
+        - val_compound_masd_cldice logged to MLflow per epoch
+        - No NaN in any metric
+
+        TAGS:
+        - loss_type, fold_id, model_family, git_commit set
+        - best_val_* tags set after training
+      </verify>
+    </step>
+
+    <step id="4.2" type="execute">
+      <action>Launch full training run</action>
+      <command>
+        uv run python scripts/run_experiment.py
+          --config configs/experiments/dynunet_losses.yaml
+      </command>
+      <monitoring>
+        Run system_monitor.py in parallel.
+        Check first fold completion for each loss.
+        Expected: ~45 sec/epoch with MetricsReloaded validation.
+        Total: 4 losses x 3 folds x 100 epochs x 45s = ~15 hours.
+      </monitoring>
+    </step>
+
+    <step id="4.3" type="post-check">
+      <action>Verify ALL downstream artifacts exist</action>
+      <verify>
+        For each of 12 runs (4 losses x 3 folds):
+
+        CHECKPOINTS (7 per fold = 84 total):
+        - best_val_loss.pth
+        - best_val_dice.pth
+        - best_val_cldice.pth
+        - best_val_masd.pth
+        - best_val_compound_masd_cldice.pth
+        - last.pth
+        + metric_history.json
+
+        PREDICTIONS (12 sets x ~23 volumes = ~276 .npz files):
+        - Each with hard_pred + soft_pred
+
+        SERVING MODELS (12 MLflow models, one per run):
+        - Each loadable via mlflow.pyfunc.load_model()
+        - Each has ModelSignature
+
+        MLFLOW METRICS (per epoch, per run):
+        - train_loss, val_loss, train_dice, val_dice
+        - train_f1_foreground, val_f1_foreground
+        - val_cldice, val_masd, val_compound_masd_cldice
+        - learning_rate
+
+        TOTAL STORAGE: ~6.2 GB in mlruns/
+      </verify>
+    </step>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- SUMMARY: Files Modified                                 -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <files-modified>
+    <new>
+      <file>src/minivess/serving/mlflow_wrapper.py — MiniVessServingModel pyfunc + log_serving_model()</file>
+      <file>src/minivess/pipeline/validation_metrics.py — normalize_masd(), compound metric, bestness criteria</file>
+      <file>src/minivess/pipeline/prediction_store.py — save/load compressed predictions</file>
+      <file>tests/v2/unit/test_mlflow_serving_wrapper.py</file>
+      <file>tests/v2/unit/test_prediction_saving.py</file>
+      <file>tests/v2/unit/test_compound_loss_cbdice_cldice.py</file>
+      <file>tests/v2/unit/test_validation_metrics_expansion.py</file>
+      <file>tests/v2/unit/test_config_v2_expansion.py</file>
+    </new>
+    <modified>
+      <file>src/minivess/pipeline/loss_functions.py — add CbDiceClDiceLoss + factory entry</file>
+      <file>src/minivess/pipeline/trainer.py — MetricsReloaded in validation, prediction saving, log_model()</file>
+      <file>src/minivess/pipeline/multi_metric_tracker.py — optional scaler_state_dict in checkpoint</file>
+      <file>src/minivess/observability/tracking.py — register_model() aliases, post-training tags</file>
+      <file>configs/experiments/dynunet_losses.yaml — 5 tracked metrics, cbdice_cldice replaces warp</file>
+    </modified>
+  </files-modified>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- DOWNSTREAM CONSUMERS — What they need from training     -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <downstream-consumers>
+    <consumer name="Flow 3: Analysis (MLflow local serving)">
+      <needs>
+        - All best_*.pth checkpoints (for loading any model variant)
+        - Validation predictions .npz (for computing new metrics without re-inference)
+        - metric_history.json (for training curve analysis)
+        - MLflow pyfunc model (for mlflow.pyfunc.load_model())
+        - MLflow metrics (for cross-run comparison in UI)
+        - Post-training tags (for selecting best run per loss, best overall)
+      </needs>
+      <api>mlflow.pyfunc.load_model("runs:/{run_id}/model")</api>
+    </consumer>
+
+    <consumer name="Flow 4: Deployment — BentoML">
+      <needs>
+        - Registered model in MLflow registry with alias
+        - ModelSignature (input/output tensor specs)
+        - MLflow pyfunc model (consumed by bentoml.mlflow.get())
+      </needs>
+      <api>bentoml.mlflow.get("minivess-segmentor@champion")</api>
+      <existing-code>deployment/bento/service.py</existing-code>
+    </consumer>
+
+    <consumer name="Flow 4: Deployment — MONAI Deploy">
+      <needs>
+        - Model weights (.pth checkpoint)
+        - Model config (architecture params for rebuilding)
+        - Inference config (roi_size, overlap, sw_batch_size)
+        - Input example (for ONNX export inside MAP)
+        - pip_requirements (for environment reproduction)
+      </needs>
+      <api>monai.deploy.core.Application (reads from MLflow artifacts)</api>
+    </consumer>
+
+    <consumer name="MLflow Model Evaluation">
+      <needs>
+        - MLflow pyfunc model (for mlflow.evaluate())
+        - Validation predictions .npz (alternative: evaluate from saved preds)
+        - Evaluation metrics with CIs (already logged)
+      </needs>
+      <api>mlflow.evaluate(model_uri, data=eval_dataset)</api>
+    </consumer>
+
+    <consumer name="Ensemble Construction">
+      <needs>
+        - Multiple best_*.pth checkpoints (cross-fold, cross-loss)
+        - Soft predictions .npz (for prediction averaging without re-inference)
+        - Per-checkpoint metadata (epoch, metric values)
+        - MLflow tags (for selecting ensemble candidates)
+      </needs>
+      <api>Load checkpoints → combine predictions → evaluate ensemble</api>
+    </consumer>
+
+    <consumer name="MLflow Model Registry">
+      <needs>
+        - MLflow pyfunc model logged via log_model() (for registration URI)
+        - Post-training tags (for selection criteria)
+        - ModelSignature (for schema validation)
+      </needs>
+      <api>
+        mlflow.register_model("runs:/{run_id}/model", "MiniVess-Segmentor")
+        client.set_registered_model_alias("MiniVess-Segmentor", "champion", version)
+      </api>
+    </consumer>
+  </downstream-consumers>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- FUTURE (not this round, but artifacts must support)     -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <future-work>
+    <item priority="next-pr">MLflow model registration + champion/challenger workflow (Analysis Flow)</item>
+    <item priority="next-pr">Cross-loss comparison report with paired bootstrap tests (Analysis Flow)</item>
+    <item priority="next-pr">Ensemble construction from multi-metric checkpoints (Analysis Flow)</item>
+    <item priority="next-pr">mlflow.evaluate() integration for standardized evaluation (Analysis Flow)</item>
+    <item priority="later">BentoML serving from registered model (Deployment Flow)</item>
+    <item priority="later">MONAI Deploy MAP packaging (Deployment Flow)</item>
+    <item priority="later">ONNX export via input_example (Deployment Flow)</item>
+    <item priority="later">Boundary Loss (Kervadec 2019) with pre-computed EDT</item>
+    <item priority="later">Generalized Surface Loss (Celaya 2023) — bounded MASD proxy</item>
+    <item priority="later">SkelRecall (Kirchhoff ECCV 2024) — +2% VRAM, +8% time</item>
+    <item priority="later">Compound loss lambda sweep (Optuna or grid)</item>
+  </future-work>
+</implementation-plan>

@@ -1,0 +1,516 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<execution-plan>
+  <metadata>
+    <title>DevEx Automation + Prefect Orchestration: Executable Plan</title>
+    <created>2026-02-25</created>
+    <synthesizes>
+      <source>docs/planning/dev-ex-automation-plan.md</source>
+      <source>docs/planning/prefect-and-devex-profiling-optimizations.md</source>
+      <source>docs/planning/monai-performance-optimization-plan.md</source>
+      <source>docs/planning/dynunet-evaluation-plan.xml</source>
+    </synthesizes>
+    <design-goal>EXCELLENT DevEx — MLOps scaffold that frees PhD researchers from infrastructure wrangling</design-goal>
+    <target-script>scripts/train_monitored.py (and future scripts/run_experiment.py)</target-script>
+  </metadata>
+
+  <user-prompt-verbatim><![CDATA[
+I mean the grand vision of this whole repo should be EXCELLENT DevEx and that the MLOps part should come here as a scaffold for PhD researchers freeing their time from infrastructure wrangling and making their lives easier. These should be indicated in the CLAUDE.md files all oever. This is the 1st design goal of this whole repo! Everything should be as automatic as possible WITH THE OPTION obviously for the researchers to tweak this as much as they want! But the idea of compute-profiles and performance benchmarking is quite flexible. So you can have multiple options defined by ourselves, and show how researchers can define them? E.g. you could have "--CPU" profile that adaptively checks the amount of RAM, the size of swap and modifies the dynunet training parameters accordingly? And then we need to map the "--CPU" later for the SAMv3 model as different models have very different memory needs! And same goes for example for the cache ratio that needs to be adaptive as the researchers obviously can have their own datasets that are a lot larger than this minivess, with more voxels, etc. Similarly the profiles should determine the patch sizes for training constrained by the GPU available. We cannot use 512 x 512 x 512 patches obviously with many hw platforms :D And if the smalles volume is 256 x 256 x 9 voxels, we cannot use 64 x 64 x 16 patches as the 16 is more than the smallest z-dimension of the available dataset. So you should have a test that verifies the dataset coming to the dataloader! And I don't want to resample the dataset by default! The data should be loaded as it is and the patch (subset) ensures that the data has same shapes inside the dataloader batch! There can be again be some .yaml configuration keys that allow the user to use whatever cancy latent diffusion upsampling / super-resolution model if the anisotropic resolution is vert different across the volumes, but we should not make those decision in behalf of the researchers. It is a scientific question itself, whether one should upsample, and with what method, etc. So let's keep this simple and start with finding patches that you can take across our minivess dataset, implement some data quality / data engingeering pipelines for this! Also think how to bring Prefect flows to this whole architecture as this data quality task could be run periodically as new data is coming (As versioned via DVC) which could always trigger the Prefect flow to be run that does this so that is "ready in Mlflow" as "data-experiment" (or how do you think of storing artifacts so that they are accessible from different Prefect flows?). So let's expand this /home/petteri/Dropbox/github-personal/minivess-mlops/docs/planning/devex-automation-plan.md with a new plan /home/petteri/Dropbox/github-personal/minivess-mlops/docs/planning/prefect-and-devex-profiling-optimizations.md with reviewer agents optimizing this report for factual correctness and multi-hypothesis open-ended decision matrix! And then let's synthesize these two .md plans into an executable .xml plan evaluating this training script
+
+save my prompt verbatim as well
+
+Have a look at my Prefect use in /home/petteri/Dropbox/github-personal/foundation-PLR/foundation_PLR and improve on it, and remember the self-learning and portfoli item mandate. So let's make the prefect use even more production-grade and running on local machine, intranet / on-prem server and on cloud
+  ]]></user-prompt-verbatim>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 0: CLAUDE.md + Design Principles (BLOCKS EVERYTHING)         -->
+  <!-- ================================================================== -->
+  <phase id="0" name="Design Principles in CLAUDE.md" status="NOT_STARTED" priority="CRITICAL">
+    <description>
+      Establish Design Goal #1 (EXCELLENT DevEx) in CLAUDE.md so all future development
+      follows the principle: automatic by default, tweakable by choice.
+    </description>
+    <tasks>
+      <task id="0.1" name="Update root CLAUDE.md">
+        <action>Add "Design Goal #1: EXCELLENT DevEx" section before Critical Rules</action>
+        <action>Add principle: "Scientific decisions stay with the researcher"</action>
+        <action>Add principle: "No default resampling — native resolution always"</action>
+        <action>Add principle: "Adaptive compute profiles — auto-detect hardware"</action>
+        <action>Document Prefect as orchestration layer (optional dependency)</action>
+      </task>
+      <task id="0.2" name="Add Prefect to tool table">
+        <action>Add Prefect 3.x to Observability Stack table with role "Workflow orchestration"</action>
+        <action>Note: optional dependency, graceful degradation via _prefect_compat.py</action>
+      </task>
+    </tasks>
+    <exit-criteria>CLAUDE.md clearly states DevEx as #1 design goal</exit-criteria>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Dataset Profiler (TDD: RED → GREEN → VERIFY)              -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Dataset Profiler" status="NOT_STARTED" priority="HIGH">
+    <description>
+      Scan all volumes before training to compute DatasetProfile.
+      This enables adaptive patch sizes and cache rates.
+      Uses MONAI DataAnalyzer for comprehensive stats.
+    </description>
+    <tdd-cycle>
+      <red>
+        <test-file>tests/v2/unit/test_data_profiler.py</test-file>
+        <tests>
+          <test name="test_scan_single_volume">VolumeStats has correct shape, spacing, intensity</test>
+          <test name="test_scan_dataset_computes_min_max_shape">min_shape reflects smallest volume</test>
+          <test name="test_anisotropy_detected">is_anisotropic=True when spacing varies >2x</test>
+          <test name="test_safe_patch_sizes_computed">Patches fit all volumes for each model family</test>
+          <test name="test_warnings_for_outlier_volumes">Outlier spacing flagged in warnings list</test>
+          <test name="test_total_size_gb_computed">Correct uncompressed size estimate</test>
+        </tests>
+      </red>
+      <green>
+        <file>src/minivess/data/profiler.py</file>
+        <classes>VolumeStats, DatasetProfile</classes>
+        <functions>scan_volume, scan_dataset, compute_safe_patch_sizes</functions>
+      </green>
+      <verify>uv run pytest tests/v2/unit/test_data_profiler.py -x -q &amp;&amp; uv run ruff check src/minivess/data/profiler.py &amp;&amp; uv run mypy src/minivess/data/profiler.py</verify>
+    </tdd-cycle>
+    <exit-criteria>DatasetProfile correctly computed for MiniVess (70 volumes, min_z=5)</exit-criteria>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: Adaptive Compute Profiles (TDD)                           -->
+  <!-- ================================================================== -->
+  <phase id="2" name="Adaptive Compute Profiles" status="NOT_STARTED" priority="HIGH" depends="1">
+    <description>
+      Replace static profiles with adaptive computation:
+      hardware detection → dataset constraints → model-specific mapping → safe parameters.
+    </description>
+    <tdd-cycle>
+      <red>
+        <test-file>tests/v2/unit/test_adaptive_profiles.py</test-file>
+        <tests>
+          <test name="test_detect_hardware_returns_budget">HardwareBudget populated with real values</test>
+          <test name="test_auto_profile_no_gpu_returns_cpu">No GPU → cpu tier</test>
+          <test name="test_auto_profile_8gb_gpu_returns_gpu_low">8GB VRAM → gpu_low tier</test>
+          <test name="test_patch_constrained_by_min_volume">patch_z &lt;= dataset min_z</test>
+          <test name="test_patch_divisible_by_model_factor">All dims divisible by model divisor</test>
+          <test name="test_cache_rate_adaptive_to_ram">cache_rate &lt;= available_ram * 0.6 / dataset_size</test>
+          <test name="test_model_profile_yaml_loaded">dynunet.yaml parsed correctly</test>
+          <test name="test_researcher_custom_profile_yaml">Custom model profile YAML works</test>
+          <test name="test_vram_estimate_prevents_oom">Patch reduced when VRAM budget exceeded</test>
+        </tests>
+      </red>
+      <green>
+        <file>src/minivess/config/adaptive_profiles.py</file>
+        <classes>HardwareBudget</classes>
+        <functions>detect_hardware, compute_safe_patch_size, compute_safe_cache_rate, compute_adaptive_profile</functions>
+        <file>configs/model_profiles/dynunet.yaml</file>
+        <file>configs/model_profiles/segresnet.yaml</file>
+      </green>
+      <verify>uv run pytest tests/v2/unit/test_adaptive_profiles.py -x -q &amp;&amp; uv run ruff check src/minivess/config/ &amp;&amp; uv run mypy src/minivess/config/</verify>
+    </tdd-cycle>
+    <exit-criteria>
+      "just experiment --compute auto" auto-detects hardware and produces safe parameters.
+      Existing static profiles still work as manual overrides.
+    </exit-criteria>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: Patch Validation Tests (TDD)                              -->
+  <!-- ================================================================== -->
+  <phase id="3" name="Patch Validation Guards" status="NOT_STARTED" priority="HIGH" depends="1">
+    <description>
+      Pre-training validation that configured patches are compatible with the dataset.
+      These tests run BEFORE any training starts — fail fast, not mid-epoch.
+    </description>
+    <tdd-cycle>
+      <red>
+        <test-file>tests/v2/unit/test_patch_validation.py</test-file>
+        <tests>
+          <test name="test_patch_fits_all_volumes">patch_size &lt;= min_shape per dim (after SpatialPadd)</test>
+          <test name="test_patch_divisible_by_model">All dims % divisor == 0</test>
+          <test name="test_no_default_resampling">voxel_spacing == (0,0,0) by default</test>
+          <test name="test_cache_rate_fits_ram">cached_size &lt; 70% of available RAM</test>
+          <test name="test_batch_size_fits_gpu">estimated VRAM &lt; 80% of GPU VRAM</test>
+          <test name="test_spatial_padd_logged_as_warning">SpatialPadd on small volumes produces log warning</test>
+        </tests>
+      </red>
+      <green>
+        <file>src/minivess/data/validation.py</file>
+        <functions>validate_patch_dataset_compatibility, validate_memory_budget</functions>
+        <notes>
+          These run as part of the preflight system (Phase 5) and also as standalone tests.
+          The validation functions are pure (no side effects) and take DatasetProfile + configs as input.
+        </notes>
+      </green>
+      <verify>uv run pytest tests/v2/unit/test_patch_validation.py -x -q</verify>
+    </tdd-cycle>
+    <exit-criteria>Training refuses to start with incompatible patch/dataset combinations</exit-criteria>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: Prefect Integration (REQUIRED, TDD)                       -->
+  <!-- ================================================================== -->
+  <phase id="4" name="Prefect Integration (Required)" status="NOT_STARTED" priority="HIGH">
+    <description>
+      Prefect 3.x is a REQUIRED dependency (not optional). The _prefect_compat.py
+      pattern from foundation-PLR is adopted for graceful degradation in CI/testing
+      environments (PREFECT_DISABLED=1), but production runs MUST use Prefect.
+      Four persona-based flows: Data Engineering, Training, Analysis, Deployment.
+    </description>
+    <tdd-cycle>
+      <red>
+        <test-file>tests/v2/unit/test_prefect_compat.py</test-file>
+        <tests>
+          <test name="test_noop_task_preserves_function">@task returns original function when disabled</test>
+          <test name="test_noop_flow_preserves_function">@flow returns original function when disabled</test>
+          <test name="test_prefect_disabled_env_var">PREFECT_DISABLED=1 disables decorators</test>
+          <test name="test_get_run_logger_falls_back">Returns stdlib logger when Prefect unavailable</test>
+          <test name="test_decorated_function_callable">Functions decorated with compat layer are callable</test>
+        </tests>
+      </red>
+      <green>
+        <file>src/minivess/orchestration/__init__.py</file>
+        <file>src/minivess/orchestration/_prefect_compat.py</file>
+      </green>
+      <verify>PREFECT_DISABLED=1 uv run pytest tests/v2/unit/test_prefect_compat.py -x -q</verify>
+    </tdd-cycle>
+    <exit-criteria>Compat layer works identically to foundation-PLR's proven implementation</exit-criteria>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 5: Preflight System (TDD)                                    -->
+  <!-- ================================================================== -->
+  <phase id="5" name="Preflight System" status="NOT_STARTED" priority="HIGH" depends="1,2,3">
+    <description>
+      Unified pre-training checks: hardware, dataset, services, environment.
+      Runs before every experiment. Replaces manual checks.
+    </description>
+    <tdd-cycle>
+      <red>
+        <test-file>tests/v2/unit/test_preflight.py</test-file>
+        <tests>
+          <test name="test_preflight_returns_all_checks">All check categories present in result</test>
+          <test name="test_gpu_detection">Correctly identifies GPU or lack thereof</test>
+          <test name="test_disk_space_check">Warns when &lt; 20 GB free</test>
+          <test name="test_swap_health_check">Warns when &gt; 5 GB swap used</test>
+          <test name="test_environment_detection">Detects local vs docker vs cloud vs ci</test>
+          <test name="test_fail_fast_on_critical">Raises if required check fails (e.g., no data)</test>
+          <test name="test_warn_on_non_critical">Warns but continues for non-critical (e.g., stale swap)</test>
+        </tests>
+      </red>
+      <green>
+        <file>scripts/preflight.py</file>
+        <classes>PreflightResult, CheckResult</classes>
+        <functions>run_preflight, check_gpu, check_ram, check_disk, check_swap, check_data, detect_environment</functions>
+      </green>
+      <verify>uv run pytest tests/v2/unit/test_preflight.py -x -q</verify>
+    </tdd-cycle>
+    <exit-criteria>Preflight catches 95% of issues before training starts</exit-criteria>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 6: Flow 1 — Data Engineering (TDD)                          -->
+  <!-- ================================================================== -->
+  <phase id="6" name="Flow 1: Data Engineering" status="NOT_STARTED" priority="HIGH" depends="1,4">
+    <description>
+      Prefect Flow 1 (Data Engineer persona): Ingest raw data from any source,
+      validate quality, profile dataset, flag outliers, version via DVC,
+      log "data-profile" to MLflow as the inter-flow contract.
+      Cached via cache_policy=INPUTS — re-runs only when data changes.
+    </description>
+    <tdd-cycle>
+      <red>
+        <test-file>tests/v2/integration/test_data_engineering_flow.py</test-file>
+        <tests>
+          <test name="test_flow_produces_dataset_profile">Flow returns DatasetProfile</test>
+          <test name="test_flow_logs_to_mlflow">MLflow run created with profile artifact</test>
+          <test name="test_flow_caches_on_same_data">Second run with same data skips profiling</test>
+          <test name="test_flow_validates_nifti_headers">Bad headers flagged in warnings</test>
+          <test name="test_flow_flags_spacing_outliers">Outlier voxel spacings detected</test>
+          <test name="test_flow_works_with_prefect_disabled">PREFECT_DISABLED=1 still produces profile</test>
+        </tests>
+      </red>
+      <green>
+        <file>src/minivess/orchestration/flows/data_engineering.py</file>
+        <notes>
+          Tasks: ingest_raw_data, validate_nifti_headers, run_monai_data_analyzer,
+          compute_dataset_profile, flag_outliers, log_profile_to_mlflow.
+          Data source abstraction: S3, local filesystem, collaborator upload — not hardcoded.
+          Human-in-the-loop: generates QC report for Slicer/Label Studio review.
+          Contract OUT: MLflow "data-profile" experiment with DatasetProfile YAML artifact.
+        </notes>
+      </green>
+    </tdd-cycle>
+    <exit-criteria>DatasetProfile available in MLflow, outliers flagged, DVC versioned</exit-criteria>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 6b: Flow 3 — Model Analysis & Ensembling (TDD)              -->
+  <!-- ================================================================== -->
+  <phase id="6b" name="Flow 3: Model Analysis" status="NOT_STARTED" priority="MEDIUM" depends="7">
+    <description>
+      Prefect Flow 3 (ML Engineer persona): Analyze trained models,
+      run WeightWatcher/Deepchecks/Captum, perform ensembling experiments,
+      calibration analysis, generate DuckDB analytics. Reads from MLflow
+      (Flow 2 output), writes analysis artifacts back to MLflow.
+    </description>
+    <tasks>
+      <task id="6b.1">WeightWatcher spectral analysis of trained models</task>
+      <task id="6b.2">Deepchecks Vision model validation</task>
+      <task id="6b.3">Calibration analysis (MAPIE, netcal)</task>
+      <task id="6b.4">Ensembling: model soup, majority voting, conformal prediction</task>
+      <task id="6b.5">XAI: Captum attribution maps</task>
+      <task id="6b.6">DuckDB analytics from MLflow runs</task>
+      <task id="6b.7">Summary report with best config and ablation tables</task>
+    </tasks>
+    <exit-criteria>Analysis artifacts in MLflow, best model promoted in registry</exit-criteria>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 6c: Flow 4 — Deployment & Serving (TDD)                     -->
+  <!-- ================================================================== -->
+  <phase id="6c" name="Flow 4: Deployment" status="NOT_STARTED" priority="LOW" depends="6b">
+    <description>
+      Prefect Flow 4 (Platform Engineer persona): Export best model to ONNX,
+      build BentoML service, deploy to target environment. Designed for growth
+      from local Docker to Kubernetes to public internet serving.
+    </description>
+    <deployment-maturity-ladder>
+      <level id="L0" name="Local Docker">BentoML container on workstation</level>
+      <level id="L1" name="Intranet">Docker Compose on lab server with FastAPI frontend</level>
+      <level id="L2" name="Cloud Single">Kubernetes with GPU node pool</level>
+      <level id="L3" name="Cloud Elastic">Nomad/K8s with auto-scaling + Cloudflare CDN</level>
+      <level id="L4" name="Cost-Optimized">SkyPilot Skyserve on spot instances</level>
+    </deployment-maturity-ladder>
+    <tasks>
+      <task id="6c.1">ONNX export from MLflow Model Registry</task>
+      <task id="6c.2">BentoML Bento archive build</task>
+      <task id="6c.3">Docker image for serving</task>
+      <task id="6c.4">Smoke test: send test volume, verify prediction</task>
+      <task id="6c.5">Prometheus metrics endpoint for monitoring</task>
+      <task id="6c.6">(Future) Cloudflare CDN + auto-balancer</task>
+      <task id="6c.7">(Future) SkyPilot Skyserve spot instance optimization</task>
+    </tasks>
+    <exit-criteria>Model servable via REST API on at least local Docker</exit-criteria>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 7: Experiment Runner (TDD)                                   -->
+  <!-- ================================================================== -->
+  <phase id="7" name="Experiment Runner" status="NOT_STARTED" priority="HIGH" depends="2,3,5">
+    <description>
+      Single entry point: reads YAML experiment config, runs preflight,
+      adapts compute profile, delegates to training pipeline.
+      The "just experiment --config X.yaml" command.
+    </description>
+    <tdd-cycle>
+      <red>
+        <test-file>tests/v2/unit/test_experiment_runner.py</test-file>
+        <tests>
+          <test name="test_parse_experiment_yaml">Config parsed with all required fields</test>
+          <test name="test_dry_run_no_training">--dry-run validates without starting training</test>
+          <test name="test_auto_profile_used_when_specified">profile: auto triggers adaptive detection</test>
+          <test name="test_explicit_profile_overrides_auto">profile: gpu_low bypasses auto-detect</test>
+          <test name="test_resume_finds_checkpoint">--resume loads existing checkpoint</test>
+          <test name="test_debug_overrides_applied">--debug reduces epochs/folds</test>
+        </tests>
+      </red>
+      <green>
+        <file>scripts/run_experiment.py</file>
+        <file>configs/experiments/dynunet_losses.yaml</file>
+        <notes>
+          Orchestrates: preflight → profile → docker services → train_monitored.py → report.
+          This is the single function call the user wants.
+        </notes>
+      </green>
+    </tdd-cycle>
+    <exit-criteria>"just experiment --config X.yaml" works end-to-end on local machine</exit-criteria>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 8: Model Profile YAMLs                                       -->
+  <!-- ================================================================== -->
+  <phase id="8" name="Model Profile YAMLs" status="NOT_STARTED" priority="MEDIUM" depends="2">
+    <description>
+      Create model-specific memory profiles so adaptive compute works for each architecture.
+      Researchers add their own models by creating a YAML file.
+    </description>
+    <tasks>
+      <task id="8.1" name="Create DynUNet profile">
+        <file>configs/model_profiles/dynunet.yaml</file>
+        <content>divisibility_factor, vram_per_voxel_bytes, vram_base_mb, max_patch constraints</content>
+      </task>
+      <task id="8.2" name="Create SegResNet profile">
+        <file>configs/model_profiles/segresnet.yaml</file>
+      </task>
+      <task id="8.3" name="Create SAMv3/VISTA-3D profile">
+        <file>configs/model_profiles/vista3d.yaml</file>
+        <notes>Much heavier than DynUNet — ViT backbone needs more VRAM</notes>
+      </task>
+      <task id="8.4" name="Create example custom profile">
+        <file>configs/model_profiles/example_custom.yaml</file>
+        <notes>Documented template showing researchers how to add their own model</notes>
+      </task>
+      <task id="8.5" name="VRAM benchmarking">
+        <description>Empirically measure vram_per_voxel for each model on RTX 2070 Super</description>
+        <notes>Run training with varying patch sizes, record peak VRAM. Needed for accurate estimates.</notes>
+      </task>
+    </tasks>
+    <exit-criteria>All 3 model profiles have empirically validated VRAM estimates</exit-criteria>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 9: Docker Training Image (uv-based)                          -->
+  <!-- ================================================================== -->
+  <phase id="9" name="Docker Training Image" status="NOT_STARTED" priority="MEDIUM" depends="7">
+    <description>
+      Self-contained training image using uv (not pip/poetry).
+      Works on ephemeral cloud instances with mounted data drives.
+    </description>
+    <tasks>
+      <task id="9.1" name="Create Dockerfile.train">
+        <file>deployment/Dockerfile.train</file>
+        <notes>
+          CUDA 12.2 base, uv for deps, copies src/scripts/configs.
+          ENTRYPOINT: scripts/run_experiment.py
+          PREFECT_DISABLED=1 by default (no server needed in container).
+        </notes>
+      </task>
+      <task id="9.2" name="Add healthcheck">
+        <action>Python import check + nvidia-smi check</action>
+      </task>
+      <task id="9.3" name="Add to justfile">
+        <action>build-train, experiment-docker recipes</action>
+      </task>
+      <task id="9.4" name="Test on clean Docker environment">
+        <action>Verify zero-config experience on fresh container</action>
+      </task>
+    </tasks>
+    <exit-criteria>docker run --gpus all minivess-train:latest --config X.yaml works</exit-criteria>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 10: Prefect Server Docker Compose Profile                    -->
+  <!-- ================================================================== -->
+  <phase id="10" name="Prefect Server Profile" status="NOT_STARTED" priority="LOW" depends="4,6">
+    <description>
+      Docker Compose profile for self-hosted Prefect server.
+      For team/server deployments where UI and scheduling are needed.
+    </description>
+    <tasks>
+      <task id="10.1" name="Add prefect profile to docker-compose.yml">
+        <services>prefect-server, prefect-worker</services>
+        <notes>
+          Reuses existing postgres service.
+          Worker uses minivess-train image.
+          Accessible at http://server:4200.
+        </notes>
+      </task>
+      <task id="10.2" name="Add justfile recipes">
+        <recipes>prefect-up, prefect-down, prefect-health, experiment-deployed</recipes>
+      </task>
+      <task id="10.3" name="Document three deployment targets">
+        <targets>Local (no server), Docker Compose (self-hosted), Prefect Cloud (managed)</targets>
+      </task>
+    </tasks>
+    <exit-criteria>just prefect-up starts server; team can view experiments at localhost:4200</exit-criteria>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 11: DVC → Prefect Trigger                                    -->
+  <!-- ================================================================== -->
+  <phase id="11" name="DVC Change Trigger" status="NOT_STARTED" priority="LOW" depends="6,10">
+    <description>
+      When new data is pushed via DVC, automatically trigger the data profiling flow.
+      Profile results are "ready in MLflow" for subsequent training flows.
+    </description>
+    <decision-matrix>
+      <option name="Git webhook" environments="cloud" complexity="medium" latency="low">
+        GitHub webhook on .dvc file changes → Prefect webhook trigger → automation
+      </option>
+      <option name="CI trigger" environments="cloud,intranet" complexity="medium" latency="medium">
+        CI step after dvc push → emit Prefect event → automation
+      </option>
+      <option name="Polling" environments="all" complexity="low" latency="high">
+        Scheduled Prefect flow checks dvc diff hourly
+      </option>
+    </decision-matrix>
+    <recommendation>Start with polling (simplest). Upgrade to CI trigger for production.</recommendation>
+    <exit-criteria>DVC push automatically produces updated DatasetProfile in MLflow</exit-criteria>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 12: Run DynUNet Training Experiments                         -->
+  <!-- ================================================================== -->
+  <phase id="12" name="DynUNet Loss Variation Experiments" status="NOT_STARTED" priority="HIGH" depends="7">
+    <description>
+      Actually run the experiments from dynunet-evaluation-plan.xml using the new
+      experiment runner. This validates that the entire DevEx stack works end-to-end.
+    </description>
+    <experiments>
+      <experiment name="dynunet_losses" config="configs/experiments/dynunet_losses.yaml">
+        <losses>dice_ce, cbdice, dice_ce_cldice, warp</losses>
+        <folds>3</folds>
+        <epochs>50</epochs>
+        <evaluation>MetricsReloaded with 1000 bootstrap resamples</evaluation>
+        <expected-output>Cross-loss comparison table in MLflow</expected-output>
+      </experiment>
+    </experiments>
+    <exit-criteria>
+      All 4 losses × 3 folds = 12 training runs complete.
+      Cross-loss comparison shows which loss function is best for MiniVess vessels.
+      Results logged to MLflow with git SHA, DVC hash, and full config.
+    </exit-criteria>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- DEPENDENCY GRAPH                                                   -->
+  <!-- ================================================================== -->
+  <dependency-graph><![CDATA[
+    Phase 0 (CLAUDE.md)  ─────────────────────────────────────── parallel with all
+    Phase 1 (Profiler)   ──┬──→ Phase 2 (Adaptive Profiles) ──┐
+                           ├──→ Phase 3 (Patch Validation)  ──┤
+                           └──→ Phase 6 (Data Prof. Flow)     │
+    Phase 4 (Compat)     ──────→ Phase 6 (Data Prof. Flow)    │
+    Phase 2 + 3 + 5      ─────→ Phase 7 (Experiment Runner) ──→ Phase 12 (Run Experiments)
+    Phase 7              ──────→ Phase 9 (Docker Image)
+    Phase 4 + 6          ──────→ Phase 10 (Prefect Server)
+    Phase 6 + 10         ──────→ Phase 11 (DVC Trigger)
+    Phase 2              ──────→ Phase 8 (Model Profiles)
+
+    CRITICAL PATH: Phase 1 → Phase 2 → Phase 7 → Phase 12
+  ]]></dependency-graph>
+
+  <!-- ================================================================== -->
+  <!-- EVALUATION CRITERIA FOR train_monitored.py                         -->
+  <!-- ================================================================== -->
+  <training-script-evaluation>
+    <current-strengths>
+      <strength>CheckpointManager with JSON-based crash recovery</strength>
+      <strength>SystemMonitor with process RSS-based abort (not system-wide RAM)</strength>
+      <strength>Memory cleanup between folds (gc.collect + cuda.empty_cache)</strength>
+      <strength>Swap usage detection and warning</strength>
+      <strength>Sliding window inference for low-VRAM validation</strength>
+      <strength>MetricsReloaded post-training evaluation with bootstrap CIs</strength>
+    </current-strengths>
+
+    <gaps-to-address>
+      <gap id="G1" phase="2">Static patch sizes — not constrained by dataset min dimensions</gap>
+      <gap id="G2" phase="2">Static cache rate — not adaptive to available RAM</gap>
+      <gap id="G3" phase="5">No automated preflight — manual checks required</gap>
+      <gap id="G4" phase="3">No pre-training dataset validation — patch/volume mismatch caught at runtime</gap>
+      <gap id="G5" phase="7">No experiment YAML config — all params via CLI flags</gap>
+      <gap id="G6" phase="2">No model-specific VRAM estimation — may OOM on large patches</gap>
+      <gap id="G7" phase="4">No Prefect integration — no flow-level orchestration or caching</gap>
+      <gap id="G8" phase="9">Not containerized — can't run on ephemeral cloud instances</gap>
+    </gaps-to-address>
+
+    <migration-strategy>
+      <step>train_monitored.py remains the execution engine (proven, crash-resistant)</step>
+      <step>run_experiment.py wraps it with preflight + adaptive profiles + YAML config</step>
+      <step>Prefect flows wrap run_experiment.py for orchestration + caching + scheduling</step>
+      <step>Docker image packages everything for cloud deployment</step>
+      <step>Existing CLI flags become overrides for YAML config values</step>
+    </migration-strategy>
+  </training-script-evaluation>
+</execution-plan>

@@ -24,6 +24,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from minivess.adapters.dynunet import DynUNetAdapter
@@ -47,6 +48,8 @@ from minivess.data.splits import (
     save_splits,
 )
 from minivess.observability.tracking import ExperimentTracker
+from minivess.pipeline.evaluation import EvaluationRunner, FoldResult
+from minivess.pipeline.inference import SlidingWindowInferenceRunner
 from minivess.pipeline.loss_functions import build_loss_function
 from minivess.pipeline.metrics import SegmentationMetrics
 from minivess.pipeline.trainer import SegmentationTrainer
@@ -192,6 +195,124 @@ def _load_or_generate_splits(
     return splits
 
 
+def evaluate_fold_and_log(
+    *,
+    predictions: list[np.ndarray],
+    labels: list[np.ndarray],
+    tracker: ExperimentTracker | None = None,
+    fold_id: int,
+    loss_name: str,
+    include_expensive: bool = False,
+    n_resamples: int = 1000,
+    seed: int = 42,
+) -> FoldResult:
+    """Run MetricsReloaded evaluation on fold predictions and log to MLflow.
+
+    Parameters
+    ----------
+    predictions:
+        List of binary prediction arrays (D, H, W).
+    labels:
+        List of binary ground truth arrays (D, H, W).
+    tracker:
+        Optional MLflow tracker (metrics logged if provided).
+    fold_id:
+        Fold index (0-based).
+    loss_name:
+        Loss function name (for logging context).
+    include_expensive:
+        If True, compute HD95 and NSD (slower).
+    n_resamples:
+        Bootstrap resamples for CI computation.
+    seed:
+        Random seed for bootstrap.
+
+    Returns
+    -------
+    FoldResult
+        Per-volume metrics and aggregated CIs.
+    """
+    runner = EvaluationRunner(include_expensive=include_expensive)
+    fold_result = runner.evaluate_fold(
+        predictions,
+        labels,
+        n_resamples=n_resamples,
+        seed=seed,
+    )
+
+    # Log summary
+    for metric_name, ci in fold_result.aggregated.items():
+        logger.info(
+            "  Fold %d %s: %.4f [%.4f, %.4f]",
+            fold_id,
+            metric_name,
+            ci.point_estimate,
+            ci.lower,
+            ci.upper,
+        )
+
+    # Log to MLflow tracker if available
+    if tracker is not None:
+        tracker.log_evaluation_results(
+            fold_result, fold_id=fold_id, loss_name=loss_name
+        )
+
+    return fold_result
+
+
+def build_comparison_summary(
+    eval_results: dict[str, list[FoldResult]],
+) -> dict[str, dict[str, dict[str, float]]]:
+    """Build a cross-loss comparison summary from per-fold evaluation results.
+
+    Averages per-fold point estimates and CI bounds across folds
+    for each loss function.
+
+    Parameters
+    ----------
+    eval_results:
+        Dict mapping loss_name to list of FoldResult (one per fold).
+
+    Returns
+    -------
+    dict
+        Nested dict: ``{loss_name: {metric_name: {mean, ci_lower, ci_upper}}}``.
+    """
+    summary: dict[str, dict[str, dict[str, float]]] = {}
+
+    for loss_name, fold_results in eval_results.items():
+        loss_summary: dict[str, dict[str, float]] = {}
+
+        # Collect all metric names from the first fold
+        if not fold_results:
+            continue
+        metric_names = list(fold_results[0].aggregated.keys())
+
+        for metric_name in metric_names:
+            point_estimates = []
+            lowers = []
+            uppers = []
+
+            for fr in fold_results:
+                if metric_name in fr.aggregated:
+                    ci = fr.aggregated[metric_name]
+                    point_estimates.append(ci.point_estimate)
+                    lowers.append(ci.lower)
+                    uppers.append(ci.upper)
+
+            if point_estimates:
+                loss_summary[metric_name] = {
+                    "mean": float(np.mean(point_estimates)),
+                    "ci_lower": float(np.mean(lowers)),
+                    "ci_upper": float(np.mean(uppers)),
+                    "std": float(np.std(point_estimates)),
+                }
+
+        summary[loss_name] = loss_summary
+
+    return summary
+
+
 def run_fold(
     fold_id: int,
     fold_split,
@@ -204,6 +325,9 @@ def run_fold(
     debug: bool = False,
 ) -> dict:
     """Train and evaluate a single fold.
+
+    Trains the model, then loads the best checkpoint and runs sliding
+    window inference + MetricsReloaded evaluation on the validation set.
 
     Parameters
     ----------
@@ -227,7 +351,8 @@ def run_fold(
     Returns
     -------
     dict
-        Training summary with best_val_loss, final_epoch, metrics.
+        Training summary with best_val_loss, final_epoch, metrics,
+        and evaluation FoldResult.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(
@@ -267,7 +392,8 @@ def run_fold(
         device=device,
     )
 
-    # Build trainer
+    # Build trainer — use sliding window inference for validation
+    # because full 512x512xZ volumes don't fit in 8 GB VRAM
     trainer = SegmentationTrainer(
         model,
         training_config,
@@ -275,21 +401,66 @@ def run_fold(
         tracker=tracker,
         metrics=metrics,
         criterion=criterion,
+        val_roi_size=data_config.patch_size,
     )
 
     # Create checkpoint directory
     checkpoint_dir = Path(tempfile.mkdtemp()) / f"fold_{fold_id}"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    # Train
+    # === Phase 1: Train ===
     result = trainer.fit(train_loader, val_loader, checkpoint_dir=checkpoint_dir)
 
     logger.info(
-        "Fold %d complete: best_val_loss=%.4f, epochs=%d",
+        "Fold %d training complete: best_val_loss=%.4f, epochs=%d",
         fold_id,
         result["best_val_loss"],
         result["final_epoch"],
     )
+
+    # === Phase 2: Post-training evaluation with MetricsReloaded ===
+    # Use primary metric checkpoint (e.g. best_val_loss.pth)
+    primary_metric = training_config.checkpoint.primary_metric
+    safe_name = primary_metric.replace("/", "_")
+    best_checkpoint = checkpoint_dir / f"best_{safe_name}.pth"
+    if best_checkpoint.exists():
+        logger.info("Loading best checkpoint for evaluation: %s", best_checkpoint)
+        model.load_checkpoint(best_checkpoint)
+
+        # Build inference runner
+        inference_runner = SlidingWindowInferenceRunner(
+            roi_size=data_config.patch_size,
+            num_classes=model_config.out_channels,
+            overlap=0.25 if not debug else 0.0,
+        )
+
+        # Rebuild val_loader for full-volume inference (batch_size=1, no crop)
+        eval_loader = build_val_loader(
+            val_dicts,
+            data_config,
+            cache_rate=1.0 if not debug else DEBUG_CACHE_RATE,
+        )
+
+        # Run inference
+        logger.info("Running sliding window inference on %d validation volumes", len(val_dicts))
+        predictions, labels = inference_runner.infer_dataset(
+            model, eval_loader, device=device
+        )
+
+        # Run MetricsReloaded evaluation
+        logger.info("Running MetricsReloaded evaluation for fold %d", fold_id)
+        eval_result = evaluate_fold_and_log(
+            predictions=predictions,
+            labels=labels,
+            tracker=tracker,
+            fold_id=fold_id,
+            loss_name=loss_name,
+            n_resamples=100 if debug else 1000,
+            seed=42,
+        )
+        result["evaluation"] = eval_result
+    else:
+        logger.warning("No best checkpoint found, skipping evaluation")
 
     return result
 
@@ -300,7 +471,9 @@ def run_experiment(args: argparse.Namespace) -> dict:
     Returns
     -------
     dict
-        Results keyed by loss_name containing per-fold results.
+        Results with ``training`` (per-fold dicts) and ``evaluation``
+        (per-fold FoldResults) keyed by loss_name, plus a
+        ``comparison`` summary.
     """
     data_config, model_config, training_config = _build_configs(args)
     loss_names = [name.strip() for name in args.loss.split(",")]
@@ -326,10 +499,12 @@ def run_experiment(args: argparse.Namespace) -> dict:
     tracker = ExperimentTracker(experiment_config)
 
     all_results: dict[str, list[dict]] = {}
+    all_eval_results: dict[str, list[FoldResult]] = {}
 
     for loss_name in loss_names:
         logger.info("--- Loss function: %s ---", loss_name)
         fold_results: list[dict] = []
+        fold_eval_results: list[FoldResult] = []
 
         run_name = f"{loss_name}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
         with tracker.start_run(
@@ -349,9 +524,21 @@ def run_experiment(args: argparse.Namespace) -> dict:
                 )
                 fold_results.append(fold_result)
 
-        all_results[loss_name] = fold_results
+                # Collect evaluation result if present
+                if "evaluation" in fold_result:
+                    fold_eval_results.append(fold_result["evaluation"])
 
-    return all_results
+        all_results[loss_name] = fold_results
+        all_eval_results[loss_name] = fold_eval_results
+
+    # Build cross-loss comparison summary
+    comparison = build_comparison_summary(all_eval_results)
+
+    return {
+        "training": all_results,
+        "evaluation": all_eval_results,
+        "comparison": comparison,
+    }
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -364,8 +551,8 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     results = run_experiment(args)
 
-    # Summary
-    for loss_name, fold_results in results.items():
+    # Training summary
+    for loss_name, fold_results in results["training"].items():
         best_losses = [r["best_val_loss"] for r in fold_results]
         mean_loss = sum(best_losses) / len(best_losses)
         logger.info(
@@ -374,6 +561,22 @@ def main(argv: list[str] | None = None) -> None:
             mean_loss,
             len(fold_results),
         )
+
+    # Evaluation comparison summary
+    comparison = results.get("comparison", {})
+    if comparison:
+        logger.info("=== Cross-Loss Comparison ===")
+        for loss_name, metrics in comparison.items():
+            for metric_name, stats in metrics.items():
+                logger.info(
+                    "  %s / %s: mean=%.4f [%.4f, %.4f] std=%.4f",
+                    loss_name,
+                    metric_name,
+                    stats["mean"],
+                    stats["ci_lower"],
+                    stats["ci_upper"],
+                    stats["std"],
+                )
 
 
 if __name__ == "__main__":

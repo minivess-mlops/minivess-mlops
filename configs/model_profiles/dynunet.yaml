@@ -1,0 +1,17 @@
+name: dynunet
+divisor: 8
+model_overhead_mb: 700
+bytes_per_voxel_amp: 8
+bytes_per_voxel_fp32: 16
+max_batch_size:
+  cpu: 1
+  gpu_low: 2
+  gpu_high: 4
+  gpu_extreme: 8
+default_patch_xy: 96
+notes: >
+  DynUNet with 4 encoder levels, stride 2 at each level.
+  Divisor = 2^3 = 8. model_overhead_mb includes FP16 parameters (~100 MB),
+  FP32 master weights for AMP (~200 MB), and Adam optimizer states (~400 MB).
+  Empirically measured on RTX 2070 Super (8 GB): batch=2, patch=96x96x24
+  -> ~3.5 GB peak VRAM with AMP (including activations and framework overhead).

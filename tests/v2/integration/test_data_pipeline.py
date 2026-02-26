@@ -7,9 +7,12 @@ and the training loop.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import torch
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestNiftiToTrainingStep:
@@ -69,8 +72,7 @@ class TestNiftiToTrainingStep:
 
         # Verify gradients exist
         has_grad = any(
-            p.grad is not None and p.grad.abs().sum() > 0
-            for p in model.parameters()
+            p.grad is not None and p.grad.abs().sum() > 0 for p in model.parameters()
         )
         assert has_grad, "Gradients should flow through the model"
 

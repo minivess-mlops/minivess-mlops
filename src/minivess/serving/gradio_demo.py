@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +81,8 @@ def build_demo(
     import gradio as gr
 
     def predict_slice(
-        volume_slice: NDArray[np.float32] | None,
-    ) -> tuple[NDArray[np.float32] | None, str]:
+        volume_slice: np.ndarray | None,
+    ) -> tuple[np.ndarray | None, str]:
         """Process a single 2D slice (for demo purposes)."""
         if volume_slice is None:
             return None, "No input provided"

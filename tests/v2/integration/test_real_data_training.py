@@ -27,14 +27,21 @@ class TestRealDataTraining:
         """1-epoch DynUNet training on real data with DiceCE loss."""
         from scripts.train import parse_args, run_experiment
 
-        args = parse_args([
-            "--compute", "cpu",
-            "--loss", "dice_ce",
-            "--debug",
-            "--data-dir", str(_DATA_DIR),
-            "--num-folds", "2",
-            "--max-epochs", "1",
-        ])
+        args = parse_args(
+            [
+                "--compute",
+                "cpu",
+                "--loss",
+                "dice_ce",
+                "--debug",
+                "--data-dir",
+                str(_DATA_DIR),
+                "--num-folds",
+                "2",
+                "--max-epochs",
+                "1",
+            ]
+        )
 
         results = run_experiment(args)
 

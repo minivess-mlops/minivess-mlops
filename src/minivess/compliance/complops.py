@@ -101,12 +101,14 @@ def generate_510k_summary(
         sections.extend(["", "## 5. Biocompatibility", "", biocompatibility])
 
     if software_description:
-        sections.extend([
-            "",
-            "## 6. Software Description (IEC 62304)",
-            "",
-            software_description,
-        ])
+        sections.extend(
+            [
+                "",
+                "## 6. Software Description (IEC 62304)",
+                "",
+                software_description,
+            ]
+        )
 
     sections.append("")
     return "\n".join(sections)
@@ -156,36 +158,44 @@ def generate_eu_mdr_technical_file(
     ]
 
     if clinical_evaluation:
-        sections.extend([
-            "",
-            "### 3. Clinical Evaluation (Annex XIV)",
-            "",
-            clinical_evaluation,
-        ])
+        sections.extend(
+            [
+                "",
+                "### 3. Clinical Evaluation (Annex XIV)",
+                "",
+                clinical_evaluation,
+            ]
+        )
 
     if risk_management:
-        sections.extend([
-            "",
-            "### 4. Risk Management (ISO 14971)",
-            "",
-            risk_management,
-        ])
+        sections.extend(
+            [
+                "",
+                "### 4. Risk Management (ISO 14971)",
+                "",
+                risk_management,
+            ]
+        )
 
     if design_verification:
-        sections.extend([
-            "",
-            "### 5. Design Verification and Validation",
-            "",
-            design_verification,
-        ])
+        sections.extend(
+            [
+                "",
+                "### 5. Design Verification and Validation",
+                "",
+                design_verification,
+            ]
+        )
 
-    sections.extend([
-        "",
-        "## Annex III — Post-Market Surveillance",
-        "",
-        "Post-market surveillance plan per Article 83–86.",
-        "",
-    ])
+    sections.extend(
+        [
+            "",
+            "## Annex III — Post-Market Surveillance",
+            "",
+            "Post-market surveillance plan per Article 83–86.",
+            "",
+        ]
+    )
 
     return "\n".join(sections)
 

@@ -1,0 +1,860 @@
+[
+  {
+    "train": [
+      {
+        "image": "data/raw/minivess/imagesTr/mv01.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv01.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv03.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv03.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv04.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv04.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv06.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv06.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv07.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv07.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv08.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv08.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv09.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv09.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv10.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv10.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv12.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv12.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv13.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv13.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv17.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv17.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv18.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv18.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv19.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv19.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv21.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv21.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv22.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv22.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv23.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv23.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv24.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv24.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv25.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv25.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv28.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv28.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv29.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv29.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv30.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv30.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv33.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv33.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv34.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv34.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv35.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv35.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv36.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv36.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv37.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv37.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv39.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv39.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv41.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv41.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv42.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv42.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv44.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv44.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv47.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv47.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv48.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv48.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv49.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv49.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv51.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv51.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv52.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv52.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv53.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv53.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv56.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv56.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv57.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv57.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv59.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv59.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv60.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv60.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv63.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv63.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv64.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv64.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv65.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv65.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv66.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv66.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv67.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv67.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv68.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv68.nii.gz"
+      }
+    ],
+    "val": [
+      {
+        "image": "data/raw/minivess/imagesTr/mv02.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv02.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv05.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv05.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv11.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv11.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv14.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv14.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv15.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv15.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv16.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv16.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv20.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv20.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv26.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv26.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv27.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv27.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv31.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv31.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv32.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv32.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv38.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv38.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv40.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv40.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv43.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv43.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv45.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv45.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv46.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv46.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv50.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv50.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv54.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv54.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv55.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv55.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv58.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv58.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv61.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv61.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv62.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv62.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv69.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv69.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv70.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv70.nii.gz"
+      }
+    ]
+  },
+  {
+    "train": [
+      {
+        "image": "data/raw/minivess/imagesTr/mv02.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv02.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv04.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv04.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv05.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv05.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv07.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv07.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv09.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv09.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv10.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv10.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv11.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv11.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv12.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv12.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv14.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv14.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv15.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv15.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv16.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv16.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv17.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv17.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv20.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv20.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv23.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv23.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv25.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv25.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv26.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv26.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv27.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv27.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv28.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv28.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv29.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv29.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv31.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv31.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv32.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv32.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv33.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv33.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv34.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv34.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv35.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv35.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv38.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv38.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv40.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv40.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv41.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv41.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv42.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv42.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv43.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv43.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv44.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv44.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv45.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv45.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv46.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv46.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv50.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv50.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv52.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv52.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv54.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv54.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv55.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv55.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv56.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv56.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv57.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv57.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv58.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv58.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv59.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv59.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv61.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv61.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv62.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv62.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv63.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv63.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv65.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv65.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv68.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv68.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv69.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv69.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv70.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv70.nii.gz"
+      }
+    ],
+    "val": [
+      {
+        "image": "data/raw/minivess/imagesTr/mv01.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv01.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv03.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv03.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv06.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv06.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv08.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv08.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv13.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv13.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv18.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv18.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv19.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv19.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv21.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv21.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv22.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv22.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv24.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv24.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv30.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv30.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv36.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv36.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv37.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv37.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv39.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv39.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv47.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv47.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv48.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv48.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv49.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv49.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv51.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv51.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv53.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv53.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv60.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv60.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv64.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv64.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv66.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv66.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv67.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv67.nii.gz"
+      }
+    ]
+  },
+  {
+    "train": [
+      {
+        "image": "data/raw/minivess/imagesTr/mv01.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv01.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv02.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv02.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv03.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv03.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv05.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv05.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv06.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv06.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv08.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv08.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv11.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv11.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv13.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv13.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv14.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv14.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv15.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv15.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv16.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv16.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv18.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv18.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv19.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv19.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv20.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv20.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv21.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv21.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv22.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv22.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv24.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv24.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv26.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv26.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv27.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv27.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv30.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv30.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv31.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv31.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv32.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv32.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv36.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv36.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv37.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv37.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv38.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv38.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv39.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv39.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv40.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv40.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv43.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv43.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv45.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv45.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv46.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv46.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv47.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv47.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv48.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv48.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv49.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv49.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv50.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv50.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv51.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv51.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv53.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv53.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv54.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv54.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv55.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv55.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv58.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv58.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv60.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv60.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv61.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv61.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv62.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv62.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv64.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv64.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv66.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv66.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv67.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv67.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv69.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv69.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv70.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv70.nii.gz"
+      }
+    ],
+    "val": [
+      {
+        "image": "data/raw/minivess/imagesTr/mv04.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv04.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv07.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv07.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv09.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv09.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv10.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv10.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv12.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv12.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv17.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv17.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv23.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv23.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv25.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv25.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv28.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv28.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv29.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv29.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv33.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv33.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv34.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv34.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv35.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv35.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv41.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv41.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv42.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv42.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv44.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv44.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv52.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv52.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv56.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv56.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv57.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv57.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv59.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv59.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv63.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv63.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv65.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv65.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv68.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv68.nii.gz"
+      }
+    ]
+  }
+]

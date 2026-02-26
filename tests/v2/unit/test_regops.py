@@ -41,13 +41,17 @@ class TestCIContext:
         from minivess.compliance.regops import CIContext
 
         # Monkeypatch is a pytest fixture
-        monkeypatch.setattr(os, "environ", {  # type: ignore[attr-defined]
-            "GITHUB_SHA": "deadbeef1234",
-            "GITHUB_ACTOR": "petteri",
-            "GITHUB_REF": "refs/tags/v1.0.0",
-            "GITHUB_RUN_ID": "99999",
-            "GITHUB_REPOSITORY": "minivess-mlops/minivess-mlops",
-        })
+        monkeypatch.setattr(
+            os,
+            "environ",
+            {  # type: ignore[attr-defined]
+                "GITHUB_SHA": "deadbeef1234",
+                "GITHUB_ACTOR": "petteri",
+                "GITHUB_REF": "refs/tags/v1.0.0",
+                "GITHUB_RUN_ID": "99999",
+                "GITHUB_REPOSITORY": "minivess-mlops/minivess-mlops",
+            },
+        )
         ctx = CIContext.from_env()
         assert ctx.commit_sha == "deadbeef1234"
         assert ctx.actor == "petteri"

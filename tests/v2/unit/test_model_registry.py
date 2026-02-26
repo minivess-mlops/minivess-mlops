@@ -135,7 +135,8 @@ class TestModelRegistry:
         criteria = PromotionCriteria(min_thresholds={"dice": 0.80})
 
         result = registry.promote(
-            "dynunet-full", "1.0.0",
+            "dynunet-full",
+            "1.0.0",
             target_stage=ModelStage.STAGING,
             criteria=criteria,
         )
@@ -156,7 +157,8 @@ class TestModelRegistry:
         criteria = PromotionCriteria(min_thresholds={"dice": 0.80})
 
         result = registry.promote(
-            "dynunet-full", "1.0.0",
+            "dynunet-full",
+            "1.0.0",
             target_stage=ModelStage.STAGING,
             criteria=criteria,
         )

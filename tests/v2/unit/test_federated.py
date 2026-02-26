@@ -116,9 +116,7 @@ class TestFederatedAveraging:
         ]
         data_sizes = [100, 100]  # Equal weight
         result = fa.aggregate_weights(client_weights, data_sizes)
-        np.testing.assert_array_almost_equal(
-            result["layer1"], [2.0, 3.0, 4.0]
-        )
+        np.testing.assert_array_almost_equal(result["layer1"], [2.0, 3.0, 4.0])
 
     def test_aggregate_weighted_unequal(self) -> None:
         """Aggregation with unequal sizes should weight proportionally."""

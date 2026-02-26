@@ -91,9 +91,7 @@ def compute_disparity(
     Max-min disparity (0.0 if metric not found in any subgroup).
     """
     values = [
-        sm.metrics[metric_name]
-        for sm in subgroup_metrics
-        if metric_name in sm.metrics
+        sm.metrics[metric_name] for sm in subgroup_metrics if metric_name in sm.metrics
     ]
     if len(values) < 2:
         return 0.0
@@ -195,19 +193,15 @@ def generate_audit_report(
     # Subgroup performance table
     lines.append("## Subgroup Performance\n")
     if report.subgroup_metrics:
-        metric_names = sorted(
-            {k for sm in report.subgroup_metrics for k in sm.metrics}
-        )
+        metric_names = sorted({k for sm in report.subgroup_metrics for k in sm.metrics})
         header = "| Subgroup | Size | " + " | ".join(metric_names) + " |"
-        separator = "|----------|------|" + "|".join(
-            "------" for _ in metric_names
-        ) + "|"
+        separator = (
+            "|----------|------|" + "|".join("------" for _ in metric_names) + "|"
+        )
         lines.append(header)
         lines.append(separator)
         for sm in report.subgroup_metrics:
-            values = " | ".join(
-                f"{sm.metrics.get(m, 0.0):.4f}" for m in metric_names
-            )
+            values = " | ".join(f"{sm.metrics.get(m, 0.0):.4f}" for m in metric_names)
             lines.append(f"| {sm.subgroup_name} | {sm.subgroup_size} | {values} |")
 
     # Disparity analysis

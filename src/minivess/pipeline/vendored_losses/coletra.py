@@ -152,8 +152,11 @@ class TopoLoss(nn.Module):
         grad_w = torch.diff(volume, dim=4)
 
         # Gradient magnitude per axis, concatenated
-        return torch.cat([
-            grad_d.abs().mean(dim=(2, 3, 4), keepdim=True),
-            grad_h.abs().mean(dim=(2, 3, 4), keepdim=True),
-            grad_w.abs().mean(dim=(2, 3, 4), keepdim=True),
-        ], dim=2)
+        return torch.cat(
+            [
+                grad_d.abs().mean(dim=(2, 3, 4), keepdim=True),
+                grad_h.abs().mean(dim=(2, 3, 4), keepdim=True),
+                grad_w.abs().mean(dim=(2, 3, 4), keepdim=True),
+            ],
+            dim=2,
+        )

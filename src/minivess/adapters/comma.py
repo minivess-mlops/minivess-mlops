@@ -200,10 +200,19 @@ class _CommaDecoderBlock(nn.Module):
     def __init__(self, in_channels: int, skip_channels: int, out_channels: int) -> None:
         super().__init__()
         self.upsample = nn.ConvTranspose3d(
-            in_channels, in_channels, kernel_size=2, stride=2,
+            in_channels,
+            in_channels,
+            kernel_size=2,
+            stride=2,
         )
         self.conv = nn.Sequential(
-            nn.Conv3d(in_channels + skip_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.Conv3d(
+                in_channels + skip_channels,
+                out_channels,
+                kernel_size=3,
+                padding=1,
+                bias=False,
+            ),
             nn.InstanceNorm3d(out_channels),
             nn.SiLU(),
             nn.Conv3d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),

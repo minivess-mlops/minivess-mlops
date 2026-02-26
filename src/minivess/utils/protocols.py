@@ -7,6 +7,7 @@ Usage::
 
     from minivess.utils.protocols import Predictor
 
+
     def evaluate(model: Predictor, data: Tensor) -> float:
         output = model(data)
         return output.prediction.mean().item()
