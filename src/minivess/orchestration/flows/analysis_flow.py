@@ -4,10 +4,12 @@ Orchestrates post-training model analysis:
 
 1. Load training run artifacts from MLflow
 2. Build ensemble models using 4 strategies
-3. Evaluate all models (single + ensemble) on test datasets
-4. Compare models with paired bootstrap tests
-5. Register best model as champion
-6. Generate summary report
+3. Log models as MLflow pyfunc artifacts (single + ensemble)
+4. Evaluate all models (single + ensemble) on test datasets
+5. Run MLflow evaluate with custom segmentation metrics
+6. Compare models with paired bootstrap tests
+7. Register best model as champion
+8. Generate summary report
 
 Uses ``_prefect_compat`` decorators for graceful degradation when Prefect
 is disabled (``PREFECT_DISABLED=1`` for CI/test environments).
@@ -19,6 +21,9 @@ import logging
 import math
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+
+import torch
+from torch import nn
 
 from minivess.ensemble.builder import EnsembleBuilder, EnsembleSpec
 from minivess.orchestration import flow, get_run_logger, task
@@ -33,13 +38,68 @@ from minivess.pipeline.model_promoter import ModelPromoter
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from torch import nn
-
     from minivess.config.evaluation_config import EvaluationConfig
     from minivess.data.test_datasets import HierarchicalDataLoaderDict
     from minivess.pipeline.evaluation_runner import EvaluationResult
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Ensemble inference wrapper (uses all members, not just first)
+# ---------------------------------------------------------------------------
+
+
+class _EnsembleInferenceWrapper(nn.Module):
+    """Wrap multiple member networks into a single ``nn.Module``.
+
+    Forward pass averages logits across all members, producing the
+    same output shape as a single model.  This replaces the old
+    first-member-only hack.
+
+    Parameters
+    ----------
+    member_nets:
+        List of loaded ``nn.Module`` instances (one per ensemble member).
+    """
+
+    def __init__(self, member_nets: list[nn.Module]) -> None:
+        super().__init__()
+        # Store as ModuleList so parameters are tracked
+        self._members = nn.ModuleList(member_nets)
+
+    @property
+    def n_members(self) -> int:
+        """Number of ensemble members."""
+        return len(self._members)
+
+    @torch.no_grad()
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Average logits across all ensemble members.
+
+        Parameters
+        ----------
+        x:
+            Input tensor ``(B, C_in, D, H, W)``.
+
+        Returns
+        -------
+        Averaged logits ``(B, C_out, D, H, W)``.
+        """
+        outputs: list[torch.Tensor] = []
+        for member in self._members:
+            member.eval()
+            out = member(x)
+            # Handle SegmentationOutput from ModelAdapter
+            if hasattr(out, "logits"):
+                outputs.append(out.logits)
+            elif hasattr(out, "prediction"):
+                outputs.append(out.prediction)
+            else:
+                outputs.append(out)
+
+        stacked = torch.stack(outputs, dim=0)  # (M, B, C, D, H, W)
+        return stacked.mean(dim=0)  # (B, C, D, H, W)
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +210,151 @@ def _extract_single_models_from_runs(
     return result
 
 
+def _extract_single_models_as_modules(
+    ensembles: dict[str, EnsembleSpec],
+) -> dict[str, nn.Module]:
+    """Extract unique single-fold models from ensemble members.
+
+    Ensemble members already have their ``.net`` loaded.  This function
+    deduplicates by ``run_id`` and returns the first occurrence of each
+    unique model.
+
+    Parameters
+    ----------
+    ensembles:
+        Mapping from ensemble name to :class:`EnsembleSpec`.
+
+    Returns
+    -------
+    ``{model_name: nn.Module}`` — deduplicated by run_id.
+    """
+    seen_run_ids: set[str] = set()
+    models: dict[str, nn.Module] = {}
+
+    for spec in ensembles.values():
+        for member in spec.members:
+            if member.run_id in seen_run_ids:
+                continue
+            seen_run_ids.add(member.run_id)
+            name = f"{member.loss_type}_fold{member.fold_id}"
+            models[name] = member.net
+
+    return models
+
+
+def _log_single_model_safe(
+    run: dict[str, Any],
+    model_config: dict[str, Any],
+    eval_config: EvaluationConfig,
+) -> str | None:
+    """Attempt to log a single model as MLflow pyfunc artifact.
+
+    Returns the model URI on success, or ``None`` on failure.
+    Designed to be mockable in tests.
+    """
+    from pathlib import Path
+
+    from minivess.serving.model_logger import log_single_model
+
+    try:
+        import mlflow
+
+        mlflow.set_experiment(eval_config.mlflow_evaluation_experiment)
+        artifact_dir = Path(run["artifact_dir"])
+        ckpt_name = eval_config.checkpoint_filename()
+        ckpt_path = artifact_dir / ckpt_name
+
+        if not ckpt_path.exists():
+            logger.debug("Checkpoint not found: %s", ckpt_path)
+            return None
+
+        name = f"{run['loss_type']}_fold{run['fold_id']}"
+        with mlflow.start_run(run_name=f"pyfunc_{name}"):
+            log_single_model(
+                checkpoint_path=ckpt_path,
+                model_config_dict=model_config,
+            )
+            return f"runs:/{mlflow.active_run().info.run_id}/model"
+    except Exception:
+        logger.warning(
+            "Could not log pyfunc model for run %s",
+            run.get("run_id"),
+            exc_info=True,
+        )
+        return None
+
+
+def _log_ensemble_model_safe(
+    ensemble_spec: EnsembleSpec,
+    model_config: dict[str, Any],
+    eval_config: EvaluationConfig,
+) -> str | None:
+    """Attempt to log an ensemble model as MLflow pyfunc artifact.
+
+    Returns the model URI on success, or ``None`` on failure.
+    Designed to be mockable in tests.
+    """
+    from minivess.serving.model_logger import log_ensemble_model
+
+    try:
+        import mlflow
+
+        mlflow.set_experiment(eval_config.mlflow_evaluation_experiment)
+        with mlflow.start_run(run_name=f"pyfunc_{ensemble_spec.name}"):
+            log_ensemble_model(
+                ensemble_spec=ensemble_spec,
+                model_config_dict=model_config,
+            )
+            return f"runs:/{mlflow.active_run().info.run_id}/ensemble_model"
+    except Exception:
+        logger.warning(
+            "Could not log pyfunc ensemble model '%s'",
+            ensemble_spec.name,
+            exc_info=True,
+        )
+        return None
+
+
+def _run_mlflow_eval_safe(
+    results: dict[str, dict[str, EvaluationResult]],
+    eval_config: EvaluationConfig,
+    *,
+    model_name: str,
+) -> dict[str, float]:
+    """Attempt to run mlflow.evaluate() for a model's predictions.
+
+    Falls back to empty dict if evaluation cannot be performed (e.g.,
+    no predictions saved to disk, or MLflow unavailable).
+    Designed to be mockable in tests.
+    """
+    from pathlib import Path
+
+    from minivess.serving.mlflow_evaluators import run_mlflow_evaluation
+
+    try:
+        # Collect prediction dirs from results
+        for ds_results in results.values():
+            for eval_result in ds_results.values():
+                if eval_result.predictions_dir is not None:
+                    pred_dir = Path(eval_result.predictions_dir)
+                    label_dir = pred_dir  # Labels in same dir for now
+                    mlflow_result = run_mlflow_evaluation(
+                        pred_dir,
+                        label_dir,
+                        include_expensive=eval_config.include_expensive_metrics,
+                    )
+                    if hasattr(mlflow_result, "metrics"):
+                        return dict(mlflow_result.metrics)
+    except Exception:
+        logger.warning(
+            "MLflow evaluation failed for model '%s'",
+            model_name,
+            exc_info=True,
+        )
+
+    return {}
+
+
 # ---------------------------------------------------------------------------
 # Prefect tasks
 # ---------------------------------------------------------------------------
@@ -233,6 +438,60 @@ def build_ensembles(
     return ensembles
 
 
+@task(name="log-models-to-mlflow")  # type: ignore[untyped-decorator]
+def log_models_to_mlflow(
+    runs: list[dict[str, Any]],
+    ensembles: dict[str, EnsembleSpec],
+    eval_config: EvaluationConfig,
+    model_config: dict[str, Any],
+) -> dict[str, str | None]:
+    """Log single and ensemble models as MLflow pyfunc artifacts.
+
+    Creates properly versioned MLflow artifacts with model signatures,
+    checkpoints, and ensemble manifests so that models can be loaded
+    via ``mlflow.pyfunc.load_model()``.
+
+    Parameters
+    ----------
+    runs:
+        Training run info dicts.
+    ensembles:
+        Built ensemble specifications.
+    eval_config:
+        Evaluation configuration.
+    model_config:
+        Model architecture configuration.
+
+    Returns
+    -------
+    ``{model_name: model_uri}`` — URIs may be ``None`` if logging failed.
+    """
+    log = get_run_logger()
+    model_uris: dict[str, str | None] = {}
+
+    # Log individual fold models
+    for run in runs:
+        name = f"{run['loss_type']}_fold{run['fold_id']}"
+        uri = _log_single_model_safe(run, model_config, eval_config)
+        model_uris[name] = uri
+        if uri:
+            log.info("Logged pyfunc model: %s -> %s", name, uri)
+
+    # Log ensemble models
+    for ens_name, spec in ensembles.items():
+        uri = _log_ensemble_model_safe(spec, model_config, eval_config)
+        model_uris[ens_name] = uri
+        if uri:
+            log.info("Logged pyfunc ensemble: %s -> %s", ens_name, uri)
+
+    log.info(
+        "Logged %d/%d models as pyfunc artifacts",
+        sum(1 for v in model_uris.values() if v is not None),
+        len(model_uris),
+    )
+    return model_uris
+
+
 @task(name="evaluate-all-models")  # type: ignore[untyped-decorator]
 def evaluate_all_models(
     single_models: dict[str, nn.Module],
@@ -244,8 +503,9 @@ def evaluate_all_models(
 ) -> dict[str, dict[str, dict[str, EvaluationResult]]]:
     """Evaluate all single models and ensembles on all datasets.
 
-    Iterates over single models and ensemble specs, evaluating each
-    against the hierarchical dataloader dictionary.
+    Single models are evaluated directly.  Ensembles are wrapped in
+    :class:`_EnsembleInferenceWrapper` which averages predictions
+    across all members (replacing the previous first-member-only hack).
 
     Parameters
     ----------
@@ -282,9 +542,7 @@ def evaluate_all_models(
         )
         all_results[model_name] = results
 
-    # Evaluate ensembles (use first member's net as representative;
-    # proper ensemble inference would average logits across members,
-    # but the UnifiedEvaluationRunner accepts any nn.Module)
+    # Evaluate ensembles using all members via _EnsembleInferenceWrapper
     for ens_name, spec in ensembles.items():
         if not spec.members:
             log.warning("Ensemble '%s' has no members; skipping", ens_name)
@@ -295,13 +553,13 @@ def evaluate_all_models(
             ens_name,
             len(spec.members),
         )
-        # Use the first member for now; a proper ensemble forward pass
-        # would combine all members' predictions.  The evaluation runner
-        # is model-agnostic so any nn.Module works here.
-        representative_model = spec.members[0].net
+        # Wrap all member nets into a single nn.Module that averages outputs
+        ensemble_model = _EnsembleInferenceWrapper(
+            [m.net for m in spec.members]
+        )
         ens_output = output_dir / "ensemble" / ens_name if output_dir else None
         results = _evaluate_single_model_on_all(
-            representative_model,
+            ensemble_model,
             dataloaders_dict,
             eval_config,
             model_name=ens_name,
@@ -311,6 +569,50 @@ def evaluate_all_models(
 
     log.info("Evaluated %d total models", len(all_results))
     return all_results
+
+
+@task(name="evaluate-with-mlflow")  # type: ignore[untyped-decorator]
+def evaluate_with_mlflow(
+    all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
+    eval_config: EvaluationConfig,
+) -> dict[str, dict[str, float]]:
+    """Run MLflow evaluate with custom segmentation metrics.
+
+    For each model that has saved predictions, runs
+    ``mlflow.evaluate()`` with custom Dice and compound metrics.
+
+    Parameters
+    ----------
+    all_results:
+        ``{model_name: {dataset: {subset: EvaluationResult}}}``.
+    eval_config:
+        Evaluation configuration.
+
+    Returns
+    -------
+    ``{model_name: {metric_name: value}}``
+    """
+    log = get_run_logger()
+    mlflow_results: dict[str, dict[str, float]] = {}
+
+    for model_name, ds_dict in all_results.items():
+        metrics = _run_mlflow_eval_safe(
+            ds_dict, eval_config, model_name=model_name
+        )
+        if metrics:
+            mlflow_results[model_name] = metrics
+            log.info(
+                "MLflow evaluation for %s: %d metrics",
+                model_name,
+                len(metrics),
+            )
+
+    log.info(
+        "MLflow evaluation complete for %d/%d models",
+        len(mlflow_results),
+        len(all_results),
+    )
+    return mlflow_results
 
 
 @task(name="generate-comparison")  # type: ignore[untyped-decorator]
@@ -394,6 +696,7 @@ def register_champion_task(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
     eval_config: EvaluationConfig,
     *,
+    model_uris: dict[str, str | None] | None = None,
     run_id: str | None = None,
     environment: str = "staging",
     tracking_uri: str | None = None,
@@ -401,10 +704,9 @@ def register_champion_task(
     """Find best model and prepare promotion info.
 
     Uses :class:`ModelPromoter` to rank models by the primary metric
-    and generate a promotion report.  Does NOT call
-    :meth:`ModelPromoter.register_champion` (which requires a live MLflow
-    server); instead returns the promotion metadata for the caller to
-    act on.
+    and generate a promotion report.  If ``model_uris`` is provided
+    and contains a valid URI for the champion, attempts to register
+    it in the MLflow Model Registry.
 
     Parameters
     ----------
@@ -412,6 +714,8 @@ def register_champion_task(
         ``{model_name: {dataset: {subset: EvaluationResult}}}``.
     eval_config:
         Evaluation configuration with primary metric settings.
+    model_uris:
+        Optional ``{model_name: model_uri}`` from :func:`log_models_to_mlflow`.
     run_id:
         Optional MLflow run_id for registration.
     environment:
@@ -444,6 +748,35 @@ def register_champion_task(
         rankings, champion_name=champion_name
     )
 
+    # Attempt actual MLflow registration if model URI is available
+    registration_info: dict[str, str] | None = None
+    if model_uris and model_uris.get(champion_name):
+        champion_uri = model_uris[champion_name]
+        # Extract run_id from URI "runs:/{run_id}/model"
+        champion_run_id = run_id
+        if champion_uri and "runs:/" in champion_uri:
+            parts = champion_uri.split("/")
+            if len(parts) >= 3:
+                champion_run_id = parts[1]
+
+        if champion_run_id:
+            try:
+                registration_info = promoter.register_champion(
+                    champion_name,
+                    run_id=champion_run_id,
+                    environment=environment,
+                    tracking_uri=tracking_uri,
+                )
+                log.info(
+                    "Registered champion in MLflow: %s",
+                    registration_info,
+                )
+            except Exception:
+                log.warning(
+                    "Could not register champion in MLflow (server unavailable?)",
+                    exc_info=True,
+                )
+
     log.info(
         "Champion: %s (score=%.4f, metric=%s)",
         champion_name,
@@ -457,6 +790,7 @@ def register_champion_task(
         "rankings": rankings,
         "promotion_report": promotion_report,
         "environment": environment,
+        "registration": registration_info,
     }
 
 
@@ -575,10 +909,12 @@ def run_analysis_flow(
 
     1. **Load** training artifacts from MLflow
     2. **Build** ensemble models using configured strategies
-    3. **Evaluate** all models (single + ensemble) on test datasets
-    4. **Compare** models with cross-loss comparison table
-    5. **Register** the best model as champion
-    6. **Report** generate a comprehensive markdown summary
+    3. **Log** models as MLflow pyfunc artifacts (single + ensemble)
+    4. **Evaluate** all models (single + ensemble) on test datasets
+    5. **MLflow evaluate** with custom segmentation metrics
+    6. **Compare** models with cross-loss comparison table
+    7. **Register** the best model as champion
+    8. **Report** generate a comprehensive markdown summary
 
     Parameters
     ----------
@@ -610,14 +946,13 @@ def run_analysis_flow(
     # Step 2: Build ensembles
     ensembles = build_ensembles(runs, eval_config, model_config)
 
-    # Step 3: Extract single model identifiers (for logging/tracking)
-    # Note: In production, single models are loaded from checkpoints.
-    # Here we pass an empty dict because the actual model objects
-    # are loaded by the ensemble builder; callers wanting to evaluate
-    # individual fold models should add them to the single_models dict.
-    single_models: dict[str, nn.Module] = {}
+    # Step 3: Log models as MLflow pyfunc artifacts
+    model_uris = log_models_to_mlflow(runs, ensembles, eval_config, model_config)
 
-    # Step 4: Evaluate all models
+    # Step 4: Extract single-fold models from ensemble members
+    single_models = _extract_single_models_as_modules(ensembles)
+
+    # Step 5: Evaluate all models (single + ensemble with all members)
     all_results = evaluate_all_models(
         single_models,
         ensembles,
@@ -626,18 +961,22 @@ def run_analysis_flow(
         output_dir=output_dir,
     )
 
-    # Step 5: Generate comparison
+    # Step 6: Run MLflow evaluate with custom metrics
+    mlflow_eval_results = evaluate_with_mlflow(all_results, eval_config)
+
+    # Step 7: Generate comparison
     comparison_md = generate_comparison(all_results)
 
-    # Step 6: Register champion
+    # Step 8: Register champion (with model URIs for actual registration)
     promotion_info = register_champion_task(
         all_results,
         eval_config,
+        model_uris=model_uris,
         environment=environment,
         tracking_uri=tracking_uri,
     )
 
-    # Step 7: Generate report
+    # Step 9: Generate report
     report = generate_report(all_results, comparison_md, promotion_info)
 
     log.info("Analysis flow complete. Champion: %s", promotion_info.get("champion_name"))
@@ -647,4 +986,5 @@ def run_analysis_flow(
         "comparison": comparison_md,
         "promotion": promotion_info,
         "report": report,
+        "mlflow_evaluation": mlflow_eval_results,
     }

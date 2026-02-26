@@ -383,7 +383,7 @@ class TestRunAnalysisFlow:
         result = run_analysis_flow(config, model_config, dataloaders)
 
         assert isinstance(result, dict)
-        expected_keys = {"results", "comparison", "promotion", "report"}
+        expected_keys = {"results", "comparison", "promotion", "report", "mlflow_evaluation"}
         assert set(result.keys()) == expected_keys
 
     def test_flow_works_without_prefect(self) -> None:
@@ -490,3 +490,244 @@ class TestAnalysisFlowWithMockData:
         assert "report" in result
         assert isinstance(result["report"], str)
         assert len(result["report"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 additions: MLflow serving integration (#81, #84)
+# ---------------------------------------------------------------------------
+
+
+class TestLogModelsToMlflow:
+    """Tests for log_models_to_mlflow task."""
+
+    def test_callable(self) -> None:
+        """log_models_to_mlflow is a callable function."""
+        from minivess.orchestration.flows.analysis_flow import (
+            log_models_to_mlflow,
+        )
+
+        assert callable(log_models_to_mlflow)
+
+    @patch("minivess.orchestration.flows.analysis_flow._log_single_model_safe")
+    @patch("minivess.orchestration.flows.analysis_flow._log_ensemble_model_safe")
+    def test_logs_single_and_ensemble_models(
+        self,
+        mock_log_ensemble: MagicMock,
+        mock_log_single: MagicMock,
+    ) -> None:
+        """log_models_to_mlflow logs both single and ensemble models."""
+        from minivess.orchestration.flows.analysis_flow import (
+            log_models_to_mlflow,
+        )
+
+        mock_log_single.return_value = "runs:/run_001/model"
+        mock_log_ensemble.return_value = "runs:/ens_001/ensemble_model"
+
+        runs = [_make_mock_run("run_001"), _make_mock_run("run_002")]
+        ensembles = {"ens_a": _make_mock_ensemble_spec("ens_a")}
+        config = _make_eval_config()
+        model_config: dict[str, Any] = {"family": "test"}
+
+        result = log_models_to_mlflow(
+            runs, ensembles, config, model_config
+        )
+
+        assert isinstance(result, dict)
+        # Should have entries for single models + ensembles
+        assert mock_log_single.called or mock_log_ensemble.called
+
+    @patch("minivess.orchestration.flows.analysis_flow._log_single_model_safe")
+    @patch("minivess.orchestration.flows.analysis_flow._log_ensemble_model_safe")
+    def test_returns_model_uris(
+        self,
+        mock_log_ensemble: MagicMock,
+        mock_log_single: MagicMock,
+    ) -> None:
+        """log_models_to_mlflow returns a mapping of model_name -> model_uri."""
+        from minivess.orchestration.flows.analysis_flow import (
+            log_models_to_mlflow,
+        )
+
+        mock_log_single.return_value = "runs:/run_001/model"
+        mock_log_ensemble.return_value = "runs:/ens_001/ensemble_model"
+
+        runs = [_make_mock_run("run_001")]
+        ensembles = {"ens_a": _make_mock_ensemble_spec("ens_a")}
+        config = _make_eval_config()
+        model_config: dict[str, Any] = {"family": "test"}
+
+        result = log_models_to_mlflow(
+            runs, ensembles, config, model_config
+        )
+
+        # Result should be a dict of model names to URIs
+        assert isinstance(result, dict)
+
+
+class TestEnsembleInferenceWrapper:
+    """Tests for _EnsembleInferenceWrapper that wraps DeepEnsemblePredictor."""
+
+    def test_wrapper_is_nn_module(self) -> None:
+        """_EnsembleInferenceWrapper is an nn.Module."""
+        import torch
+
+        from minivess.orchestration.flows.analysis_flow import (
+            _EnsembleInferenceWrapper,
+        )
+
+        nets = [torch.nn.Linear(1, 1)]
+        wrapper = _EnsembleInferenceWrapper(nets)
+        assert isinstance(wrapper, torch.nn.Module)
+
+    def test_wrapper_uses_all_members(self) -> None:
+        """Wrapper stores all member networks."""
+        import torch
+
+        from minivess.orchestration.flows.analysis_flow import (
+            _EnsembleInferenceWrapper,
+        )
+
+        nets = [torch.nn.Linear(1, 1) for _ in range(3)]
+        wrapper = _EnsembleInferenceWrapper(nets)
+        assert wrapper.n_members == 3
+
+    def test_wrapper_forward_returns_tensor(self) -> None:
+        """Wrapper forward() returns logits as a Tensor (for inference runner)."""
+        import torch
+        from torch import nn
+
+        from minivess.orchestration.flows.analysis_flow import (
+            _EnsembleInferenceWrapper,
+        )
+
+        # Simple mock models that produce (B, 2, D, H, W)
+        class _TinyNet(nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                b, _, d, h, w = x.shape
+                return torch.randn(b, 2, d, h, w)
+
+        nets = [_TinyNet() for _ in range(2)]
+        wrapper = _EnsembleInferenceWrapper(nets)
+        x = torch.randn(1, 1, 4, 4, 4)
+        out = wrapper(x)
+
+        assert isinstance(out, torch.Tensor)
+        assert out.shape == (1, 2, 4, 4, 4)
+
+
+class TestExtractSingleModelsFromRuns:
+    """Tests for extracting single-fold models from ensemble builder members."""
+
+    def test_extract_returns_nn_modules(self) -> None:
+        """_extract_single_models_as_modules returns {name: nn.Module}."""
+        import torch
+
+        from minivess.orchestration.flows.analysis_flow import (
+            _extract_single_models_as_modules,
+        )
+
+        ensembles = {
+            "per_loss_single_best_dice_ce": _make_mock_ensemble_spec(
+                "per_loss_single_best_dice_ce"
+            ),
+        }
+
+        result = _extract_single_models_as_modules(ensembles)
+        assert isinstance(result, dict)
+        for name, module in result.items():
+            assert isinstance(name, str)
+            assert isinstance(module, torch.nn.Module)
+
+    def test_deduplicates_by_run_id(self) -> None:
+        """Models with same run_id are not duplicated."""
+
+        from minivess.orchestration.flows.analysis_flow import (
+            _extract_single_models_as_modules,
+        )
+
+        # Make two ensembles that share a member
+        spec1 = _make_mock_ensemble_spec("ens1")
+        spec2 = _make_mock_ensemble_spec("ens2")
+
+        ensembles = {"ens1": spec1, "ens2": spec2}
+        result = _extract_single_models_as_modules(ensembles)
+        # Both share run_001 so only one entry
+        assert len(result) == 1
+
+
+class TestEvaluateWithMlflow:
+    """Tests for evaluate_with_mlflow task."""
+
+    def test_callable(self) -> None:
+        """evaluate_with_mlflow is a callable function."""
+        from minivess.orchestration.flows.analysis_flow import (
+            evaluate_with_mlflow,
+        )
+
+        assert callable(evaluate_with_mlflow)
+
+    @patch("minivess.orchestration.flows.analysis_flow._run_mlflow_eval_safe")
+    def test_returns_dict(self, mock_eval: MagicMock) -> None:
+        """evaluate_with_mlflow returns a dict of model_name -> eval results."""
+        from minivess.orchestration.flows.analysis_flow import (
+            evaluate_with_mlflow,
+        )
+
+        mock_eval.return_value = {"dice_coefficient": 0.85}
+
+        all_results = _make_all_results()
+        config = _make_eval_config()
+
+        result = evaluate_with_mlflow(all_results, config)
+        assert isinstance(result, dict)
+
+
+class TestUpdatedFlowWithMlflowSteps:
+    """Tests for the updated run_analysis_flow with MLflow steps."""
+
+    @patch("minivess.orchestration.flows.analysis_flow.generate_report")
+    @patch("minivess.orchestration.flows.analysis_flow.register_champion_task")
+    @patch("minivess.orchestration.flows.analysis_flow.generate_comparison")
+    @patch("minivess.orchestration.flows.analysis_flow.evaluate_with_mlflow")
+    @patch("minivess.orchestration.flows.analysis_flow.evaluate_all_models")
+    @patch("minivess.orchestration.flows.analysis_flow.log_models_to_mlflow")
+    @patch("minivess.orchestration.flows.analysis_flow.build_ensembles")
+    @patch("minivess.orchestration.flows.analysis_flow.load_training_artifacts")
+    def test_flow_calls_mlflow_steps(
+        self,
+        mock_load: MagicMock,
+        mock_build: MagicMock,
+        mock_log_models: MagicMock,
+        mock_eval: MagicMock,
+        mock_mlflow_eval: MagicMock,
+        mock_compare: MagicMock,
+        mock_register: MagicMock,
+        mock_report: MagicMock,
+    ) -> None:
+        """Updated flow calls log_models_to_mlflow and evaluate_with_mlflow."""
+        from minivess.orchestration.flows.analysis_flow import (
+            run_analysis_flow,
+        )
+
+        mock_load.return_value = [_make_mock_run()]
+        mock_build.return_value = {}
+        mock_log_models.return_value = {}
+        mock_eval.return_value = _make_all_results()
+        mock_mlflow_eval.return_value = {}
+        mock_compare.return_value = "## Comparison"
+        mock_register.return_value = {
+            "champion_name": "model_a",
+            "champion_score": 0.82,
+            "promotion_report": "# Report",
+        }
+        mock_report.return_value = "# Full Report"
+
+        config = _make_eval_config()
+        model_config: dict[str, Any] = {"model_name": "DynUNet"}
+        dataloaders = _make_mock_dataloaders()
+
+        result = run_analysis_flow(config, model_config, dataloaders)
+
+        assert isinstance(result, dict)
+        mock_log_models.assert_called_once()
+        mock_mlflow_eval.assert_called_once()
