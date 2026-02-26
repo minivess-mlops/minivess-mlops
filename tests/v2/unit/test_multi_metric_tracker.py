@@ -372,7 +372,7 @@ def test_checkpoint_save_load_round_trip(tmp_path: Path) -> None:
 
     assert checkpoint_path.exists()
 
-    loaded_model, loaded_opt, loaded_sched, loaded_ckpt = load_metric_checkpoint(
+    loaded_model, loaded_opt, loaded_sched, loaded_ckpt, loaded_scaler = load_metric_checkpoint(
         checkpoint_path
     )
 
@@ -382,6 +382,9 @@ def test_checkpoint_save_load_round_trip(tmp_path: Path) -> None:
     # Optimizer / scheduler state
     assert loaded_opt == optimizer_state
     assert loaded_sched == scheduler_state
+
+    # No scaler saved in this test (not passed)
+    assert loaded_scaler is None
 
     # MetricCheckpoint fields
     assert loaded_ckpt.epoch == 5
@@ -420,7 +423,7 @@ def test_checkpoint_contains_all_metrics(tmp_path: Path) -> None:
         checkpoint=checkpoint,
     )
 
-    _, _, _, loaded_ckpt = load_metric_checkpoint(checkpoint_path)
+    _, _, _, loaded_ckpt, _ = load_metric_checkpoint(checkpoint_path)
 
     # All 4 metrics must be present
     assert set(loaded_ckpt.metrics.keys()) == {"val_loss", "dsc", "hd95", "nsd"}

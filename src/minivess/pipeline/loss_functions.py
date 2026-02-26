@@ -248,6 +248,52 @@ class TopologyCompoundLoss(nn.Module):
         )
 
 
+class CbDiceClDiceLoss(nn.Module):
+    """Compound loss combining cbDice + dice_ce_cldice for vessel segmentation.
+
+    cbDice captures boundary-aware centerline topology (diameter-sensitive),
+    while dice_ce_cldice captures skeleton-following topology via soft clDice.
+    Together they provide complementary topology supervision.
+
+    Parameters
+    ----------
+    lambda_cbdice:
+        Weight for the cbDice component.
+    lambda_cldice:
+        Weight for the dice_ce_cldice (VesselCompoundLoss) component.
+    softmax:
+        Apply softmax to logits (passed to sub-losses).
+    to_onehot_y:
+        Convert labels to one-hot (passed to VesselCompoundLoss).
+    """
+
+    def __init__(
+        self,
+        lambda_cbdice: float = 0.5,
+        lambda_cldice: float = 0.5,
+        *,
+        softmax: bool = True,
+        to_onehot_y: bool = True,
+    ) -> None:
+        super().__init__()
+        self.lambda_cbdice = lambda_cbdice
+        self.lambda_cldice = lambda_cldice
+
+        from minivess.pipeline.vendored_losses.cbdice import CenterlineBoundaryDiceLoss
+
+        self.cbdice = CenterlineBoundaryDiceLoss(softmax=softmax)
+        self.dice_ce_cldice = VesselCompoundLoss(
+            softmax=softmax,
+            to_onehot_y=to_onehot_y,
+        )
+
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        """Compute compound cbDice + dice_ce_cldice loss."""
+        cbdice_loss = self.cbdice(logits, labels)
+        cldice_loss = self.dice_ce_cldice(logits, labels)
+        return self.lambda_cbdice * cbdice_loss + self.lambda_cldice * cldice_loss
+
+
 def build_loss_function(
     loss_name: str = "dice_ce",
     *,
@@ -262,8 +308,8 @@ def build_loss_function(
     loss_name:
         Loss function identifier. One of ``"dice_ce"``, ``"dice"``,
         ``"focal"``, ``"cldice"``, ``"dice_ce_cldice"``, ``"cb_dice"``,
-        ``"betti"``, ``"full_topo"``, ``"cbdice"``, ``"centerline_ce"``,
-        ``"warp"``, ``"topo"``.
+        ``"betti"``, ``"full_topo"``, ``"cbdice_cldice"``, ``"cbdice"``,
+        ``"centerline_ce"``, ``"warp"``, ``"topo"``.
     num_classes:
         Number of segmentation classes (including background).
     softmax:
@@ -312,6 +358,8 @@ def build_loss_function(
             softmax=softmax,
             to_onehot_y=to_onehot_y,
         )
+    if loss_name == "cbdice_cldice":
+        return CbDiceClDiceLoss(softmax=softmax, to_onehot_y=to_onehot_y)
     # --- Vendored losses ---
     if loss_name == "cbdice":
         from minivess.pipeline.vendored_losses.cbdice import CenterlineBoundaryDiceLoss

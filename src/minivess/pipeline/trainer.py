@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import torch
 from monai.inferers import sliding_window_inference
 from torch.amp import GradScaler, autocast
@@ -20,6 +21,7 @@ from minivess.pipeline.multi_metric_tracker import (
     MultiMetricTracker,
     save_metric_checkpoint,
 )
+from minivess.pipeline.validation_metrics import compute_compound_masd_cldice
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -233,7 +235,9 @@ class SegmentationTrainer:
         return EpochResult(loss=avg_loss, metrics=epoch_metrics)
 
     @torch.no_grad()
-    def validate_epoch(self, loader: Any) -> EpochResult:
+    def validate_epoch(
+        self, loader: Any, *, compute_extended: bool = False
+    ) -> EpochResult:
         """Run one validation epoch.
 
         Parameters
@@ -241,6 +245,9 @@ class SegmentationTrainer:
         loader:
             Validation DataLoader yielding batches with ``"image"`` and
             ``"label"`` keys.
+        compute_extended:
+            If True, compute MetricsReloaded metrics (clDice, MASD, compound)
+            on CPU after sliding window inference. Adds ~30% overhead.
 
         Returns
         -------
@@ -250,6 +257,10 @@ class SegmentationTrainer:
         self.model.eval()
         running_loss = 0.0
         num_batches = 0
+
+        # Collect full-volume predictions for MetricsReloaded (CPU numpy)
+        collected_preds: list[np.ndarray] = []
+        collected_labels: list[np.ndarray] = []
 
         for batch in loader:
             images = batch["image"].to(self.device)
@@ -283,12 +294,71 @@ class SegmentationTrainer:
             if self.metrics is not None:
                 self.metrics.update(logits, labels)
 
+            if compute_extended:
+                # Move to CPU and convert to binary predictions
+                pred_probs = torch.softmax(logits, dim=1)
+                pred_binary = pred_probs[:, 1:].argmax(dim=1) if logits.shape[1] > 2 else (pred_probs[:, 1] > 0.5).long()
+                for b in range(images.shape[0]):
+                    pred_np = pred_binary[b].cpu().numpy().astype(np.uint8)
+                    label_np = labels[b, 0].cpu().numpy().astype(np.uint8)
+                    collected_preds.append(pred_np)
+                    collected_labels.append(label_np)
+
         avg_loss = running_loss / max(num_batches, 1)
         epoch_metrics: dict[str, float] = {}
         if self.metrics is not None:
             epoch_metrics = self.metrics.compute().to_dict()
             self.metrics.reset()
+
+        # Compute MetricsReloaded extended metrics on CPU
+        if compute_extended and collected_preds:
+            extended = self._compute_extended_metrics(collected_preds, collected_labels)
+            epoch_metrics.update(extended)
+
         return EpochResult(loss=avg_loss, metrics=epoch_metrics)
+
+    def _compute_extended_metrics(
+        self,
+        predictions: list[np.ndarray],
+        labels: list[np.ndarray],
+    ) -> dict[str, float]:
+        """Compute MetricsReloaded metrics (clDice, MASD) + compound.
+
+        Returns metric keys WITHOUT the 'val_' prefix (added by fit()).
+        """
+        try:
+            from minivess.pipeline.evaluation import EvaluationRunner
+        except ImportError:
+            logger.warning("MetricsReloaded not available, skipping extended metrics")
+            return {}
+
+        runner = EvaluationRunner(include_expensive=False)
+        per_vol_cldice: list[float] = []
+        per_vol_masd: list[float] = []
+        per_vol_dsc: list[float] = []
+
+        for pred, label in zip(predictions, labels, strict=True):
+            try:
+                vol_metrics = runner.evaluate_volume(pred, label)
+                per_vol_cldice.append(vol_metrics.get("centreline_dsc", float("nan")))
+                per_vol_masd.append(vol_metrics.get("measured_masd", float("nan")))
+                per_vol_dsc.append(vol_metrics.get("dsc", float("nan")))
+            except Exception:
+                logger.exception("MetricsReloaded evaluation failed for a volume")
+                per_vol_cldice.append(float("nan"))
+                per_vol_masd.append(float("nan"))
+                per_vol_dsc.append(float("nan"))
+
+        mean_cldice = float(np.nanmean(per_vol_cldice)) if per_vol_cldice else float("nan")
+        mean_masd = float(np.nanmean(per_vol_masd)) if per_vol_masd else float("nan")
+
+        compound = compute_compound_masd_cldice(masd=mean_masd, cldice=mean_cldice)
+
+        return {
+            "cldice": mean_cldice,
+            "masd": mean_masd,
+            "compound_masd_cldice": compound,
+        }
 
     def fit(
         self,
@@ -323,10 +393,18 @@ class SegmentationTrainer:
         ckpt_cfg = self.config.checkpoint
         epoch_start_time = time.perf_counter()
 
+        # Determine if extended metrics (MetricsReloaded) are needed
+        # by checking if any tracked metric requires them
+        _extended_metric_names = {"val_cldice", "val_masd", "val_compound_masd_cldice"}
+        _tracked_names = {m.name for m in ckpt_cfg.tracked_metrics}
+        needs_extended = bool(_tracked_names & _extended_metric_names)
+
         for epoch in range(self.config.max_epochs):
             t0 = time.perf_counter()
             train_result = self.train_epoch(train_loader)
-            val_result = self.validate_epoch(val_loader)
+            val_result = self.validate_epoch(
+                val_loader, compute_extended=needs_extended
+            )
             self.scheduler.step()
             epoch_wall_time = time.perf_counter() - t0
 
@@ -396,6 +474,7 @@ class SegmentationTrainer:
                         optimizer_state_dict=self.optimizer.state_dict(),
                         scheduler_state_dict=self.scheduler.state_dict(),
                         checkpoint=ckpt_meta,
+                        scaler_state_dict=self.scaler.state_dict(),
                     )
                     logger.info(
                         "Saved best checkpoint for '%s' to %s", metric_name, best_path
@@ -426,6 +505,7 @@ class SegmentationTrainer:
                     optimizer_state_dict=self.optimizer.state_dict(),
                     scheduler_state_dict=self.scheduler.state_dict(),
                     checkpoint=last_ckpt_meta,
+                    scaler_state_dict=self.scaler.state_dict(),
                 )
 
             # Record epoch in history
@@ -449,6 +529,15 @@ class SegmentationTrainer:
                     ckpt_cfg.early_stopping_strategy,
                 )
                 break
+
+        # Upload last.pth and metric_history.json to MLflow
+        if self.tracker is not None and checkpoint_dir is not None:
+            last_path = checkpoint_dir / "last.pth"
+            if last_path.exists():
+                self.tracker.log_artifact(last_path, artifact_path="checkpoints")
+            history_path = checkpoint_dir / "metric_history.json"
+            if history_path.exists():
+                self.tracker.log_artifact(history_path, artifact_path="history")
 
         # Backward-compatible best_val_loss: use primary tracker's best value
         # when primary metric is val_loss, otherwise fall back to best val_loss tracker

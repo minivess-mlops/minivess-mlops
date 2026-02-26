@@ -1,10 +1,10 @@
-experiment_name: dynunet_loss_variation
+experiment_name: dynunet_loss_variation_v2
 model: dynunet
 losses:
   - dice_ce
   - cbdice
   - dice_ce_cldice
-  - warp
+  - cbdice_cldice
 compute: gpu_low
 data_dir: data/raw/minivess
 num_folds: 3
@@ -24,8 +24,17 @@ checkpoint:
     - name: val_f1_foreground
       direction: maximize
       patience: 30
+    - name: val_cldice
+      direction: maximize
+      patience: 30
+    - name: val_masd
+      direction: minimize
+      patience: 30
+    - name: val_compound_masd_cldice
+      direction: maximize
+      patience: 30
   early_stopping_strategy: all
-  primary_metric: val_loss
+  primary_metric: val_compound_masd_cldice
   min_delta: 1.0e-4
   min_epochs: 10
   save_last: true

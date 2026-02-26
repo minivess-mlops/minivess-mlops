@@ -244,17 +244,53 @@ class ExperimentTracker:
         self,
         model_name: str,
         *,
-        stage: str = "Staging",
+        alias: str = "challenger",
     ) -> None:
-        """Register the current run's model in MLflow Model Registry."""
+        """Register the current run's model in MLflow Model Registry.
+
+        Uses aliases (not deprecated stages) per MLflow 2.9+.
+
+        Parameters
+        ----------
+        model_name:
+            Name for the registered model.
+        alias:
+            Alias to assign (e.g. ``"champion"``, ``"challenger"``).
+        """
         if self._run_id is None:
             msg = "Cannot register model outside of a run context"
             raise RuntimeError(msg)
         model_uri = f"runs:/{self._run_id}/model"
         mv = mlflow.register_model(model_uri, model_name)
+        self.client.set_registered_model_alias(model_name, alias, mv.version)
         logger.info(
-            "Registered model %s version %s -> %s",
+            "Registered model %s version %s with alias '%s'",
             model_name,
             mv.version,
-            stage,
+            alias,
         )
+
+    def log_post_training_tags(
+        self,
+        best_metrics: dict[str, float],
+        *,
+        fold_id: int | None = None,
+        loss_type: str | None = None,
+    ) -> None:
+        """Set post-training tags for downstream selection.
+
+        Parameters
+        ----------
+        best_metrics:
+            Mapping of metric name to best value (e.g. ``{"val_dice": 0.843}``).
+        fold_id:
+            Fold index (0-based).
+        loss_type:
+            Loss function name.
+        """
+        for name, value in best_metrics.items():
+            mlflow.set_tag(f"best_{name}", f"{value:.6f}")
+        if fold_id is not None:
+            mlflow.set_tag("fold_id", str(fold_id))
+        if loss_type is not None:
+            mlflow.set_tag("loss_type", loss_type)

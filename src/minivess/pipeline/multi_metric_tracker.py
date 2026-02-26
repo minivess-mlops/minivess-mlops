@@ -224,6 +224,8 @@ def save_metric_checkpoint(
     optimizer_state_dict: dict[str, Any],
     scheduler_state_dict: dict[str, Any],
     checkpoint: MetricCheckpoint,
+    *,
+    scaler_state_dict: dict[str, Any] | None = None,
 ) -> None:
     """Persist a self-contained checkpoint to disk.
 
@@ -244,6 +246,8 @@ def save_metric_checkpoint(
         State dict returned by ``scheduler.state_dict()``.
     checkpoint:
         Metadata snapshot to embed in the checkpoint.
+    scaler_state_dict:
+        Optional GradScaler state for resuming mixed-precision training.
     """
     payload: dict[str, Any] = {
         "model_state_dict": model_state_dict,
@@ -261,12 +265,14 @@ def save_metric_checkpoint(
             "config_snapshot": checkpoint.config_snapshot,
         },
     }
+    if scaler_state_dict is not None:
+        payload["scaler_state_dict"] = scaler_state_dict
     torch.save(payload, path)
 
 
 def load_metric_checkpoint(
     path: Path,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], MetricCheckpoint]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], MetricCheckpoint, dict[str, Any] | None]:
     """Load a checkpoint saved by :func:`save_metric_checkpoint`.
 
     Parameters
@@ -278,7 +284,7 @@ def load_metric_checkpoint(
     -------
     tuple
         ``(model_state_dict, optimizer_state_dict, scheduler_state_dict,
-        MetricCheckpoint)``
+        MetricCheckpoint, scaler_state_dict_or_None)``
     """
     payload: dict[str, Any] = torch.load(path, weights_only=True)
     meta: dict[str, Any] = payload["checkpoint_metadata"]
@@ -298,6 +304,7 @@ def load_metric_checkpoint(
         payload["optimizer_state_dict"],
         payload["scheduler_state_dict"],
         ckpt,
+        payload.get("scaler_state_dict"),
     )
 
 
