@@ -398,12 +398,20 @@ class SegmentationTrainer:
         _extended_metric_names = {"val_cldice", "val_masd", "val_compound_masd_cldice"}
         _tracked_names = {m.name for m in ckpt_cfg.tracked_metrics}
         needs_extended = bool(_tracked_names & _extended_metric_names)
+        # MetricsReloaded (skeleton + surface distance) is expensive on full volumes.
+        # Compute every N epochs to keep overhead manageable (~2x instead of 14x).
+        extended_frequency = 5
 
         for epoch in range(self.config.max_epochs):
             t0 = time.perf_counter()
             train_result = self.train_epoch(train_loader)
+            # Compute extended metrics every N epochs + first + last
+            compute_ext_this_epoch = needs_extended and (
+                epoch % extended_frequency == 0
+                or epoch == self.config.max_epochs - 1
+            )
             val_result = self.validate_epoch(
-                val_loader, compute_extended=needs_extended
+                val_loader, compute_extended=compute_ext_this_epoch
             )
             self.scheduler.step()
             epoch_wall_time = time.perf_counter() - t0
