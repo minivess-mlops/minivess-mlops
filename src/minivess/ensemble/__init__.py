@@ -30,6 +30,10 @@ from minivess.ensemble.mapie_conformal import (
     compute_coverage_metrics,
 )
 from minivess.ensemble.mc_dropout import MCDropoutPredictor, UncertaintyOutput
+from minivess.ensemble.morphological_conformal import (
+    MorphologicalConformalPredictor,
+    MorphologicalConformalResult,
+)
 from minivess.ensemble.strategies import EnsemblePredictor, greedy_soup
 from minivess.ensemble.weightwatcher import WeightWatcherReport, analyze_model
 
@@ -46,6 +50,8 @@ __all__ = [
     "GenerativeUQMethod",
     "MCDropoutPredictor",
     "MapieConformalSegmentation",
+    "MorphologicalConformalPredictor",
+    "MorphologicalConformalResult",
     "MultiRaterData",
     "ShiftType",
     "ShiftedCalibrationResult",

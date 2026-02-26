@@ -149,6 +149,28 @@ class ServingConfig(BaseModel):
     onnx_opset: int = Field(default=17, ge=11)
 
 
+class ConformalConfig(BaseModel):
+    """Configuration for conformal prediction methods."""
+
+    alpha: float = Field(
+        default=0.1, gt=0, lt=1, description="Significance level (e.g., 0.1 for 90% coverage)"
+    )
+    methods: list[str] = Field(
+        default_factory=lambda: ["voxel", "morphological", "distance"],
+        description="CP methods to run",
+    )
+    max_dilation_radius: int = Field(
+        default=20, ge=1, description="Max morphological dilation radius"
+    )
+    calibration_fraction: float = Field(
+        default=0.3, gt=0, lt=1, description="Fraction of data for calibration"
+    )
+    risk_functions: list[str] = Field(
+        default_factory=lambda: ["dice_loss", "fnr"],
+        description="Risk functions for RCPS",
+    )
+
+
 class EnsembleConfig(BaseModel):
     """Configuration for model ensembling."""
 
@@ -158,6 +180,7 @@ class EnsembleConfig(BaseModel):
     conformal_alpha: float = Field(
         default=0.1, gt=0, lt=1, description="Conformal prediction significance level"
     )
+    conformal: ConformalConfig = Field(default_factory=ConformalConfig)
     weightwatcher_alpha_threshold: float = Field(
         default=5.0, gt=0, description="Reject models with alpha above this"
     )
