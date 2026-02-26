@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from minivess.pipeline.evaluation import FoldResult
 
 from minivess.config.defaults import DEFAULT_TRACKING_URI as _DEFAULT_TRACKING_URI
+from minivess.serving.model_logger import log_single_model
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +240,49 @@ class ExperimentTracker:
             loss_name,
             len(flat_metrics),
         )
+
+    def log_pyfunc_model(
+        self,
+        checkpoint_path: Path,
+        model_config_dict: dict,
+        *,
+        artifact_path: str = "model",
+    ) -> str:
+        """Log a segmentation model as MLflow pyfunc artifact.
+
+        Delegates to :func:`model_logger.log_single_model`.
+        Must be called within a :meth:`start_run` context.
+
+        Parameters
+        ----------
+        checkpoint_path:
+            Path to the ``.pth`` checkpoint file.
+        model_config_dict:
+            Model architecture configuration dict.
+        artifact_path:
+            MLflow artifact path for the logged model.
+
+        Returns
+        -------
+        Model URI string (``runs:/{run_id}/{artifact_path}``).
+
+        Raises
+        ------
+        RuntimeError
+            If called outside of a run context.
+        """
+        if self._run_id is None:
+            msg = "Cannot log pyfunc model outside of a run context"
+            raise RuntimeError(msg)
+
+        log_single_model(
+            checkpoint_path=checkpoint_path,
+            model_config_dict=model_config_dict,
+            artifact_path=artifact_path,
+        )
+        model_uri = f"runs:/{self._run_id}/{artifact_path}"
+        logger.info("Logged pyfunc model: %s", model_uri)
+        return model_uri
 
     def register_model(
         self,
