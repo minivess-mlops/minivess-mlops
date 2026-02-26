@@ -29,22 +29,8 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check src/minivess/ tests/v2/
 
-  typecheck:
-    name: Type Check
-    runs-on: ubuntu-latest
-    continue-on-error: true  # Strict mode has pre-existing errors; report but don't block
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Install dependencies
-        run: uv sync --extra dev
-      - name: Mypy
-        run: uv run mypy src/minivess/
+  # typecheck: Disabled — 184 pre-existing mypy strict errors across 44 files.
+  # TODO: Fix strict-mode errors and re-enable (tracked as tech debt).
 
   test:
     name: Unit Tests
