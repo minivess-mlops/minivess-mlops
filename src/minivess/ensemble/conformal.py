@@ -67,20 +67,13 @@ class ConformalPredictor:
         cal_labels:
             Ground truth class indices (N, D, H, W).
         """
-        n_samples = cal_scores.shape[0]
-        spatial_shape = cal_labels.shape[1:]
-
-        # Compute nonconformity scores: 1 - p(y_true)
-        scores_flat: list[float] = []
-        for i in range(n_samples):
-            for d in range(spatial_shape[0]):
-                for h in range(spatial_shape[1]):
-                    for w in range(spatial_shape[2]):
-                        true_class = cal_labels[i, d, h, w]
-                        score = 1.0 - cal_scores[i, true_class, d, h, w]
-                        scores_flat.append(float(score))
-
-        scores_array = np.array(scores_flat)
+        # Vectorized nonconformity scores: 1 - p(y_true) for each voxel.
+        # Use np.take_along_axis to gather the true-class probability at each voxel.
+        # cal_labels: (N, D, H, W) -> (N, 1, D, H, W) for gather along class axis.
+        labels_idx = cal_labels[:, np.newaxis, ...]  # (N, 1, D, H, W)
+        true_class_probs = np.take_along_axis(cal_scores, labels_idx, axis=1)
+        # true_class_probs: (N, 1, D, H, W) -> flatten
+        scores_array = (1.0 - true_class_probs).ravel()
 
         # Quantile with finite-sample correction
         n = len(scores_array)
