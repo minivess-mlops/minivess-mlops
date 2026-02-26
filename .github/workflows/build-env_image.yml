@@ -7,15 +7,9 @@
 name: Docker (Env)
 
 on:
-  # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#example-including-paths
-  push:
-    paths:
-      # Only need to build the image when Poetry environment or the Dockerfile itself has changed
-      # atm as no code is executed there, but the Docker is only used as a Pycharm Interpreter
-      - 'poetry.lock'
-      - 'pyproject.toml'
-      - 'deployment/Dockerfile_env'
-      - 'deployment/Dockerfile_Jupyter'
+  # Legacy v0 workflow — disabled (no DockerHub secrets configured).
+  # Keep workflow_dispatch for manual runs if secrets are added later.
+  workflow_dispatch:
 
 jobs:
 
