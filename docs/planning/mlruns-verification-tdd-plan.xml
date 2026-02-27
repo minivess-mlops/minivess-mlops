@@ -1,0 +1,413 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan version="1.0" name="mlruns-verification-and-analysis-flow">
+  <metadata>
+    <created>2026-02-27</created>
+    <branch>feat/mlruns-evaluate-verification</branch>
+    <description>
+      TDD implementation plan for MLflow data integrity verification,
+      analysis flow integration tests, and post-hoc artifact enhancement.
+      Addresses 6 critical gaps identified in mlruns-evaluate-verifications.md.
+    </description>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- PHASE A: MLflow Data Integrity                                      -->
+  <!-- ================================================================== -->
+
+  <task id="A1" status="NOT_STARTED">
+    <name>Fix discover_training_runs() tag and structure mismatch</name>
+    <description>
+      CRITICAL BUG: EnsembleBuilder.discover_training_runs() queries for
+      'loss_type' and 'fold_id' tags, but real runs use 'loss_function' tag
+      and have NO fold_id tag (1 run per loss, all 3 folds in one run).
+
+      Fix: Update discover_training_runs() to query 'loss_function' tag,
+      extract fold count from 'num_folds' tag, and synthesize per-fold
+      virtual run entries from per-loss runs. Also add a
+      discover_training_runs_raw() for raw access.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_discover_uses_loss_function_tag_not_loss_type
+        test_discover_handles_missing_fold_id_gracefully
+        test_discover_returns_run_info_with_loss_function_key
+        test_discover_synthesizes_fold_entries_from_per_loss_run
+        test_discover_filters_finished_runs_only
+        test_discover_filters_production_runs_by_eval_metrics
+        test_discover_raw_returns_one_entry_per_loss
+      </tests>
+      <file>tests/v2/unit/test_ensemble_builder.py</file>
+      <impl_files>
+        src/minivess/ensemble/builder.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <task id="A2" status="NOT_STARTED">
+    <name>MLflow artifact integrity verification tests</name>
+    <description>
+      Write tests that verify the 4 production runs in dynunet_loss_variation_v2
+      have complete artifacts. These are integration tests that read the real
+      mlruns/ directory. Test file: tests/v2/integration/test_mlruns_integrity.py
+
+      Key verifications:
+      - 4 FINISHED runs with loss_function tag
+      - 45+ metrics per production run
+      - 7 checkpoints per run (6 best_* + last.pth)
+      - Required params (batch_size, max_epochs, etc.)
+      - metric_history.json exists and is valid
+      - Eval metrics for all 3 folds (eval_fold{0,1,2}_dsc etc.)
+      - Bootstrap CIs for all eval metrics
+    </description>
+    <tdd_spec>
+      <tests>
+        test_v2_experiment_exists
+        test_exactly_4_production_runs
+        test_each_run_has_loss_function_tag
+        test_production_losses_are_expected_set
+        test_each_run_has_45_plus_metrics
+        test_each_run_has_7_checkpoints
+        test_each_run_has_required_params
+        test_each_run_has_metric_history_json
+        test_each_run_has_eval_fold_metrics
+        test_each_run_has_bootstrap_cis
+        test_checkpoint_sizes_are_consistent
+        test_no_nan_in_eval_metrics
+      </tests>
+      <file>tests/v2/integration/test_mlruns_integrity.py</file>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <task id="A3" status="NOT_STARTED">
+    <name>Checkpoint loadability verification</name>
+    <description>
+      Integration tests that load real checkpoints from mlruns/ and verify
+      they can be used for inference.
+
+      - Load each of 28 production checkpoints (7 per run x 4 runs)
+      - Verify state_dict keys (model_state_dict, optimizer_state_dict, etc.)
+      - Build DynUNet and load_state_dict successfully
+      - Forward pass produces valid output shape (1, 2, D, H, W)
+      - Output is not all-zeros or all-same-value
+      - best_* checkpoints differ from each other
+    </description>
+    <tdd_spec>
+      <tests>
+        test_all_checkpoints_loadable
+        test_checkpoint_has_expected_keys
+        test_model_forward_pass_valid_shape
+        test_model_output_not_trivial
+        test_best_checkpoints_differ_from_last
+        test_all_runs_same_architecture_size
+      </tests>
+      <file>tests/v2/integration/test_checkpoint_loadability.py</file>
+    </tdd_spec>
+    <dependencies>A2</dependencies>
+  </task>
+
+  <task id="A4" status="NOT_STARTED">
+    <name>metric_history.json validation</name>
+    <description>
+      Validate metric_history.json files from each production run.
+
+      - Valid JSON with expected structure
+      - Contains entries for 3 folds
+      - Each fold has 100 epochs of data
+      - Metric values match MLflow logged metrics at key epochs
+      - No NaN/Inf values in metric history
+    </description>
+    <tdd_spec>
+      <tests>
+        test_metric_history_is_valid_json
+        test_metric_history_has_3_folds
+        test_metric_history_has_100_epochs_per_fold
+        test_metric_history_no_nan_or_inf
+        test_metric_history_final_epoch_matches_mlflow
+      </tests>
+      <file>tests/v2/integration/test_mlruns_integrity.py</file>
+    </tdd_spec>
+    <dependencies>A2</dependencies>
+  </task>
+
+  <task id="A5" status="NOT_STARTED">
+    <name>Post-hoc tag and param enhancement script</name>
+    <description>
+      Script to add missing tags/params to existing production runs:
+      - Add loss_type tag (alias for loss_function, for backward compat)
+      - Add software versions (python, pytorch, monai, cuda)
+      - Add hardware spec (gpu model, vram, ram)
+      - Add git commit hash
+      - Mark orphan/aborted runs as FAILED or delete
+
+      Also add a utility: identify_production_runs() that distinguishes
+      real runs from test debris by checking eval metrics exist.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_identify_production_runs_returns_4
+        test_identify_production_runs_excludes_aborted
+        test_enhance_run_adds_software_versions
+        test_enhance_run_adds_hardware_spec
+        test_enhance_run_adds_loss_type_alias
+      </tests>
+      <file>tests/v2/unit/test_mlruns_enhancement.py</file>
+      <impl_files>
+        src/minivess/pipeline/mlruns_enhancement.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies>A2</dependencies>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- PHASE B: Post-Hoc Artifact Enhancement                             -->
+  <!-- ================================================================== -->
+
+  <task id="B1" status="NOT_STARTED">
+    <name>Post-hoc pyfunc model registration</name>
+    <description>
+      Register existing checkpoints as MLflow pyfunc models so they can
+      be loaded via mlflow.pyfunc.load_model().
+
+      Uses existing MiniVessSegModel wrapper and log_single_model().
+      Creates a script that iterates production runs, loads best checkpoints,
+      and registers them in the MLflow model registry.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_register_single_checkpoint_as_pyfunc
+        test_registered_model_loadable
+        test_registered_model_produces_valid_output
+        test_register_all_production_checkpoints
+        test_registry_populated_after_registration
+      </tests>
+      <file>tests/v2/integration/test_pyfunc_registration.py</file>
+      <impl_files>
+        scripts/register_models.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies>A1 A3</dependencies>
+  </task>
+
+  <task id="B2" status="NOT_STARTED">
+    <name>Ensemble builder adaptation for per-loss runs</name>
+    <description>
+      The EnsembleBuilder assumes 1 MLflow run per fold, but reality has
+      1 run per loss (4 runs, not 12). Adapt the builder:
+
+      1. discover_training_runs() returns 4 raw per-loss run entries
+      2. New expand_runs_to_per_fold() method synthesizes 12 virtual entries
+         by creating one entry per fold per loss, all pointing to the same
+         run's artifact directory
+      3. Checkpoint selection per-fold: use the best checkpoint per metric
+         (all folds used the same checkpoint for now; future: per-fold checkpoints)
+      4. Maintain backward compat with existing unit tests (mock data format)
+    </description>
+    <tdd_spec>
+      <tests>
+        test_expand_runs_creates_3_entries_per_loss
+        test_expanded_runs_share_artifact_dir
+        test_expanded_runs_have_fold_id
+        test_ensemble_builder_works_with_expanded_runs
+        test_per_loss_single_best_with_real_structure
+        test_all_strategies_work_with_expanded_runs
+      </tests>
+      <file>tests/v2/unit/test_ensemble_builder.py</file>
+      <impl_files>
+        src/minivess/ensemble/builder.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies>A1</dependencies>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- PHASE C: Analysis Flow Integration Tests (PRIMARY FOCUS)           -->
+  <!-- ================================================================== -->
+
+  <task id="C1" status="NOT_STARTED">
+    <name>Analysis flow discover_training_runs integration test</name>
+    <description>
+      Integration test against real mlruns/ directory.
+      Verify that the patched discover_training_runs() finds exactly 4
+      production runs and returns correct metadata.
+
+      Uses PREFECT_DISABLED=1 for CI compatibility.
+      Tests both raw discovery and expanded-to-folds discovery.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_discover_finds_4_production_runs
+        test_discover_returns_correct_loss_names
+        test_discover_expanded_returns_12_entries
+        test_discover_expanded_covers_all_folds
+        test_load_training_artifacts_task_works
+      </tests>
+      <file>tests/v2/integration/test_analysis_flow_integration.py</file>
+    </tdd_spec>
+    <dependencies>A1 A5</dependencies>
+  </task>
+
+  <task id="C2" status="NOT_STARTED">
+    <name>Ensemble build integration tests with real checkpoints</name>
+    <description>
+      Build all 4 ensemble strategies using real production checkpoints.
+      Verify member counts, model loading, and forward pass.
+
+      Note: Uses real checkpoints (~67MB each) so these are slow tests.
+      Mark with @pytest.mark.slow and @pytest.mark.integration.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_build_per_loss_single_best_with_real_data
+        test_build_all_loss_single_best_with_real_data
+        test_build_per_loss_all_best_with_real_data
+        test_build_all_loss_all_best_with_real_data
+        test_ensemble_members_produce_valid_output
+        test_ensemble_wrapper_averages_correctly
+      </tests>
+      <file>tests/v2/integration/test_analysis_flow_integration.py</file>
+    </tdd_spec>
+    <dependencies>B2 C1</dependencies>
+  </task>
+
+  <task id="C3" status="NOT_STARTED">
+    <name>Cross-loss statistical comparison tests</name>
+    <description>
+      Test cross-loss comparison with real evaluation metrics.
+      Verify paired bootstrap tests, Holm-Bonferroni correction,
+      and comparison table generation.
+
+      Add Holm-Bonferroni multiple comparison correction to comparison.py.
+      Add effect size computation (Cohen's d or rank-biserial).
+    </description>
+    <tdd_spec>
+      <tests>
+        test_holm_bonferroni_correction
+        test_holm_bonferroni_with_6_pvalues
+        test_effect_size_cohens_d
+        test_effect_size_rank_biserial
+        test_full_comparison_matrix_4_losses
+        test_comparison_table_with_real_metrics
+      </tests>
+      <file>tests/v2/unit/test_cross_loss_comparison.py</file>
+      <impl_files>
+        src/minivess/pipeline/comparison.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies>A2</dependencies>
+  </task>
+
+  <task id="C4" status="NOT_STARTED">
+    <name>Analysis flow Prefect tasks comprehensive test coverage</name>
+    <description>
+      Comprehensive test coverage for each Prefect task in analysis_flow.py:
+      - load_training_artifacts with real mlruns
+      - build_ensembles with adapted builder
+      - log_models_to_mlflow (mocked MLflow server)
+      - evaluate_all_models (mocked inference)
+      - evaluate_with_mlflow (mocked)
+      - generate_comparison with real metrics
+      - register_champion_task with mocked registry
+      - generate_report with real data
+      - Full flow E2E with mocked inference but real MLflow data
+
+      Focus on testing the Prefect task wiring and data flow between tasks.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_load_artifacts_returns_expected_structure
+        test_build_ensembles_returns_all_strategies
+        test_log_models_handles_missing_checkpoints
+        test_evaluate_all_models_processes_singles_and_ensembles
+        test_generate_comparison_produces_valid_markdown
+        test_register_champion_selects_best_model
+        test_generate_report_includes_all_sections
+        test_full_flow_e2e_with_mocked_inference
+        test_flow_graceful_on_empty_runs
+        test_flow_works_without_prefect
+      </tests>
+      <file>tests/v2/integration/test_analysis_flow_integration.py</file>
+    </tdd_spec>
+    <dependencies>C1 C2</dependencies>
+  </task>
+
+  <task id="C5" status="NOT_STARTED">
+    <name>Champion model registration and MLflow analysis experiment</name>
+    <description>
+      Test champion model registration in MLflow model registry.
+      Test creation of analysis experiment entries:
+      - 12 per-fold per-loss entries
+      - 4 per-loss CV mean entries
+      - Ensemble strategy entries
+      - Champion model entry
+
+      Add create_analysis_experiment() function to analysis_flow.py.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_create_analysis_experiment_entries
+        test_per_fold_entries_have_correct_tags
+        test_cv_mean_entries_computed_correctly
+        test_champion_entry_has_highest_score
+        test_analysis_experiment_queryable_by_loss
+      </tests>
+      <file>tests/v2/unit/test_analysis_flow.py</file>
+      <impl_files>
+        src/minivess/orchestration/flows/analysis_flow.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies>C3 C4</dependencies>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- PHASE D: Academic Reporting Infrastructure                          -->
+  <!-- ================================================================== -->
+
+  <task id="D1" status="NOT_STARTED">
+    <name>DuckDB MLflow extraction pipeline</name>
+    <description>
+      Extract MLflow run data into DuckDB for fast SQL analytics.
+      Creates tables: runs, metrics, params, artifacts, eval_results.
+      Follows foundation-PLR pattern.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_extract_runs_to_duckdb
+        test_duckdb_query_metrics_by_loss
+        test_duckdb_query_cross_fold_means
+        test_duckdb_query_best_per_metric
+      </tests>
+      <file>tests/v2/unit/test_duckdb_extraction.py</file>
+      <impl_files>
+        src/minivess/pipeline/duckdb_extraction.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies>A2</dependencies>
+  </task>
+
+  <task id="D2" status="NOT_STARTED">
+    <name>Metric registry and plot configuration</name>
+    <description>
+      YAML-driven metric registry: metric names, display names, units,
+      direction (minimize/maximize), bounds.
+      Plot configuration: consistent colors per loss, style settings.
+      JSON sidecar generation for every figure (data provenance).
+    </description>
+    <tdd_spec>
+      <tests>
+        test_metric_registry_loads_from_yaml
+        test_metric_display_name
+        test_metric_direction
+        test_plot_config_loss_colors
+        test_json_sidecar_generation
+      </tests>
+      <file>tests/v2/unit/test_metric_registry.py</file>
+      <impl_files>
+        src/minivess/pipeline/metric_registry.py
+        configs/metric_registry.yaml
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+</plan>

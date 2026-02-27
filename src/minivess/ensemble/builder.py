@@ -129,10 +129,16 @@ class EnsembleBuilder:
     # MLflow discovery (integration; not tested in unit tests)
     # ------------------------------------------------------------------
 
-    def discover_training_runs(self) -> list[dict[str, Any]]:
-        """Query MLflow for completed training runs with tags.
+    def discover_training_runs(
+        self, *, expand_folds: bool = True
+    ) -> list[dict[str, Any]]:
+        """Query MLflow for completed training runs.
 
-        Returns a list of run info dicts with the shape::
+        Returns a list of run info dicts.  When *expand_folds* is ``True``
+        (default), per-loss runs are expanded into per-fold virtual entries
+        so that downstream ensemble strategies see one entry per fold.
+
+        Each entry has the shape::
 
             {
                 "run_id": str,
@@ -140,9 +146,37 @@ class EnsembleBuilder:
                 "fold_id": int,
                 "artifact_dir": str,
                 "metrics": {"val_dice": 0.81, ...},
+                "num_folds": int,
             }
 
         Requires a running MLflow tracking server.
+
+        Parameters
+        ----------
+        expand_folds:
+            If ``True``, synthesize per-fold entries from per-loss runs.
+            If ``False``, return raw per-loss entries (1 per loss).
+        """
+        raw_runs = self.discover_training_runs_raw()
+
+        if not expand_folds:
+            return raw_runs
+
+        return expand_runs_to_per_fold(raw_runs)
+
+    def discover_training_runs_raw(self) -> list[dict[str, Any]]:
+        """Query MLflow for completed production training runs (raw).
+
+        Returns one entry per loss function (not per fold).  Production
+        runs are identified by having ``eval_fold2_dsc`` metric (only
+        fully-completed runs have fold 2 evaluation data).
+
+        The ``loss_type`` field is read from the ``loss_function`` tag
+        (the name used by ``train_monitored.py``).
+
+        Returns
+        -------
+        List of run info dicts, one per loss function.
         """
         import mlflow
         from mlflow.tracking import MlflowClient
@@ -172,27 +206,41 @@ class EnsembleBuilder:
         run_infos: list[dict[str, Any]] = []
         for run in runs_data:
             tags = run.data.tags
-            loss_type = tags.get("loss_type")
-            fold_id_str = tags.get("fold_id")
-            if loss_type is None or fold_id_str is None:
+            metrics = dict(run.data.metrics)
+
+            # Use loss_function tag (set by train_monitored.py)
+            loss_type = tags.get("loss_function") or tags.get("loss_type")
+            if loss_type is None:
                 logger.debug(
-                    "Skipping run %s: missing loss_type or fold_id tags",
+                    "Skipping run %s: missing loss_function tag",
                     run.info.run_id,
                 )
                 continue
 
+            # Filter production runs: must have fold 2 eval metrics
+            if "eval_fold2_dsc" not in metrics:
+                logger.debug(
+                    "Skipping run %s (%s): no eval_fold2_dsc (incomplete run)",
+                    run.info.run_id,
+                    loss_type,
+                )
+                continue
+
+            num_folds = int(tags.get("num_folds", "3"))
             artifact_uri = run.info.artifact_uri
+
             run_infos.append(
                 {
                     "run_id": run.info.run_id,
                     "loss_type": loss_type,
-                    "fold_id": int(fold_id_str),
+                    "fold_id": 0,  # Placeholder; expand_runs_to_per_fold fixes this
                     "artifact_dir": artifact_uri,
-                    "metrics": dict(run.data.metrics),
+                    "metrics": metrics,
+                    "num_folds": num_folds,
                 }
             )
 
-        logger.info("Discovered %d completed training runs", len(run_infos))
+        logger.info("Discovered %d production training runs", len(run_infos))
         return run_infos
 
     # ------------------------------------------------------------------
@@ -518,6 +566,44 @@ class EnsembleBuilder:
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
+
+def expand_runs_to_per_fold(
+    raw_runs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Expand per-loss runs into per-fold virtual entries.
+
+    The ``dynunet_loss_variation_v2`` experiment stores 1 MLflow run per
+    loss function (all folds in one run).  Downstream ensemble strategies
+    expect 1 entry per fold.  This function synthesizes virtual fold
+    entries by:
+
+    1. Reading ``num_folds`` from each raw run (default 3).
+    2. Creating ``num_folds`` copies of the run info, each with a
+       distinct ``fold_id``.
+    3. All copies share the same ``artifact_dir`` and ``run_id`` (the
+       checkpoints are per-loss, not per-fold).
+
+    Parameters
+    ----------
+    raw_runs:
+        Per-loss run info dicts from :meth:`discover_training_runs_raw`.
+
+    Returns
+    -------
+    Expanded list with one entry per fold per loss.
+    """
+    expanded: list[dict[str, Any]] = []
+    for run in raw_runs:
+        num_folds = run.get("num_folds", 3)
+        for fold_id in range(num_folds):
+            expanded.append(
+                {
+                    **run,
+                    "fold_id": fold_id,
+                }
+            )
+    return expanded
 
 
 def _group_runs_by_loss(

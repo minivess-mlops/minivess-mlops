@@ -12,9 +12,14 @@ from minivess.pipeline.ci import ConfidenceInterval
 from minivess.pipeline.comparison import (
     ComparisonTable,
     LossResult,
+    PairwiseComparison,
     build_comparison_table,
+    cohens_d,
+    compute_all_pairwise_comparisons,
     find_best_loss,
     format_comparison_markdown,
+    format_significance_matrix_markdown,
+    holm_bonferroni_correction,
     paired_bootstrap_test,
 )
 from minivess.pipeline.evaluation import FoldResult
@@ -234,3 +239,247 @@ class TestFormatMarkdown:
         table = build_comparison_table(eval_results)
         md = format_comparison_markdown(table)
         assert "dsc" in md
+
+
+class TestHolmBonferroni:
+    def test_single_pvalue_not_significant(self) -> None:
+        """Single p-value above alpha is not significant."""
+        result = holm_bonferroni_correction([0.10], alpha=0.05)
+        assert len(result) == 1
+        adj_p, is_sig = result[0]
+        assert not is_sig
+        assert adj_p == pytest.approx(0.10, abs=1e-9)
+
+    def test_single_pvalue_significant(self) -> None:
+        """Single p-value below alpha is significant."""
+        result = holm_bonferroni_correction([0.02], alpha=0.05)
+        assert len(result) == 1
+        adj_p, is_sig = result[0]
+        assert is_sig
+        assert adj_p == pytest.approx(0.02, abs=1e-9)
+
+    def test_multiple_pvalues_ordered(self) -> None:
+        """With three tests, smallest p-value significant, largest not."""
+        # 3 tests: alpha thresholds are 0.05/3, 0.05/2, 0.05/1
+        p_values = [0.001, 0.03, 0.20]
+        result = holm_bonferroni_correction(p_values, alpha=0.05)
+        assert len(result) == 3
+        # The p_values list is returned in the original order
+        # p=0.001 should be significant (smallest, well below 0.05/3 ≈ 0.0167)
+        # p=0.03 should be significant (0.03 < 0.05/2 = 0.025)? No: 0.03 > 0.025, not sig
+        # Actually: sorted: [0.001, 0.03, 0.20]
+        # i=0: compare 0.001 with 0.05/3=0.0167 -> reject
+        # i=1: compare 0.03 with 0.05/2=0.025 -> fail (0.03 > 0.025), stop
+        # i=2: not rejected (stopped)
+        # p=0.001 -> significant
+        adj_p_001, is_sig_001 = result[p_values.index(0.001)]
+        adj_p_020, is_sig_020 = result[p_values.index(0.20)]
+        assert is_sig_001
+        assert not is_sig_020
+
+    def test_all_significant(self) -> None:
+        """All very small p-values are all significant after correction."""
+        p_values = [0.001, 0.002, 0.003]
+        result = holm_bonferroni_correction(p_values, alpha=0.05)
+        assert all(is_sig for _, is_sig in result)
+
+    def test_none_significant(self) -> None:
+        """Large p-values are all non-significant after correction."""
+        p_values = [0.3, 0.5, 0.8]
+        result = holm_bonferroni_correction(p_values, alpha=0.05)
+        assert not any(is_sig for _, is_sig in result)
+
+    def test_adjusted_pvalues_clamped_to_one(self) -> None:
+        """Adjusted p-values never exceed 1.0."""
+        p_values = [0.9, 0.95, 0.99]
+        result = holm_bonferroni_correction(p_values, alpha=0.05)
+        for adj_p, _ in result:
+            assert adj_p <= 1.0
+
+
+class TestCohensD:
+    def test_identical_scores_zero_d(self) -> None:
+        """Identical arrays produce Cohen's d of 0."""
+        scores = np.array([0.80, 0.82, 0.85, 0.78, 0.83])
+        d = cohens_d(scores, scores)
+        assert d == pytest.approx(0.0, abs=1e-9)
+
+    def test_large_difference_large_d(self) -> None:
+        """Clearly separated distributions produce large |d|."""
+        scores_a = np.array([0.90, 0.91, 0.89, 0.92, 0.88])
+        scores_b = np.array([0.10, 0.11, 0.09, 0.12, 0.08])
+        d = cohens_d(scores_a, scores_b)
+        assert abs(d) > 5.0
+
+    def test_small_difference_small_d(self) -> None:
+        """Slightly different distributions produce small |d|."""
+        rng = np.random.default_rng(0)
+        scores_a = rng.normal(0.80, 0.05, 100)
+        scores_b = rng.normal(0.81, 0.05, 100)
+        d = cohens_d(scores_a, scores_b)
+        assert abs(d) < 1.0
+
+    def test_zero_variance_returns_zero(self) -> None:
+        """Constant arrays (zero variance) return d=0.0 without error."""
+        scores_a = np.array([0.5, 0.5, 0.5])
+        scores_b = np.array([0.5, 0.5, 0.5])
+        d = cohens_d(scores_a, scores_b)
+        assert d == pytest.approx(0.0, abs=1e-9)
+
+    def test_sign_reflects_direction(self) -> None:
+        """d > 0 when mean_a > mean_b, d < 0 when mean_a < mean_b."""
+        a = np.array([0.9, 0.85, 0.88])
+        b = np.array([0.7, 0.72, 0.68])
+        assert cohens_d(a, b) > 0
+        assert cohens_d(b, a) < 0
+
+
+class TestPairwiseComparison:
+    def test_dataclass_fields(self) -> None:
+        """PairwiseComparison has required fields."""
+        pc = PairwiseComparison(
+            loss_a="dice_ce",
+            loss_b="cbdice",
+            metric="dsc",
+            p_value=0.03,
+            adjusted_p_value=0.06,
+            is_significant=False,
+            effect_size=1.2,
+            direction="A > B",
+        )
+        assert pc.loss_a == "dice_ce"
+        assert pc.loss_b == "cbdice"
+        assert pc.metric == "dsc"
+        assert pc.p_value == pytest.approx(0.03)
+        assert pc.adjusted_p_value == pytest.approx(0.06)
+        assert not pc.is_significant
+        assert pc.effect_size == pytest.approx(1.2)
+        assert pc.direction == "A > B"
+
+    def test_compute_all_pairwise_4_losses_gives_6_pairs(self) -> None:
+        """C(4, 2) = 6 pairwise comparisons for 4 losses."""
+        eval_results: dict[str, list[FoldResult]] = {
+            "loss_a": [
+                _make_fold_result(0.80, 0.75, 1.5),
+                _make_fold_result(0.82, 0.77, 1.4),
+                _make_fold_result(0.81, 0.76, 1.6),
+            ],
+            "loss_b": [
+                _make_fold_result(0.85, 0.80, 1.2),
+                _make_fold_result(0.83, 0.78, 1.3),
+                _make_fold_result(0.84, 0.79, 1.1),
+            ],
+            "loss_c": [
+                _make_fold_result(0.78, 0.73, 1.8),
+                _make_fold_result(0.79, 0.74, 1.7),
+                _make_fold_result(0.77, 0.72, 1.9),
+            ],
+            "loss_d": [
+                _make_fold_result(0.88, 0.83, 1.0),
+                _make_fold_result(0.87, 0.82, 1.1),
+                _make_fold_result(0.89, 0.84, 0.9),
+            ],
+        }
+        table = build_comparison_table(eval_results)
+        comparisons = compute_all_pairwise_comparisons(table, metric="dsc")
+        assert len(comparisons) == 6
+
+    def test_adjusted_pvalues_present(self) -> None:
+        """All PairwiseComparison objects have a non-negative adjusted_p_value."""
+        eval_results: dict[str, list[FoldResult]] = {
+            "loss_a": [
+                _make_fold_result(0.80, 0.75, 1.5),
+                _make_fold_result(0.82, 0.77, 1.4),
+            ],
+            "loss_b": [
+                _make_fold_result(0.85, 0.80, 1.2),
+                _make_fold_result(0.83, 0.78, 1.3),
+            ],
+        }
+        table = build_comparison_table(eval_results)
+        comparisons = compute_all_pairwise_comparisons(table, metric="dsc")
+        for cmp in comparisons:
+            assert 0.0 <= cmp.adjusted_p_value <= 1.0
+
+    def test_effect_sizes_present(self) -> None:
+        """All PairwiseComparison objects have a finite effect_size."""
+        eval_results: dict[str, list[FoldResult]] = {
+            "loss_a": [
+                _make_fold_result(0.80, 0.75, 1.5),
+                _make_fold_result(0.82, 0.77, 1.4),
+            ],
+            "loss_b": [
+                _make_fold_result(0.85, 0.80, 1.2),
+                _make_fold_result(0.83, 0.78, 1.3),
+            ],
+        }
+        table = build_comparison_table(eval_results)
+        comparisons = compute_all_pairwise_comparisons(table, metric="dsc")
+        for cmp in comparisons:
+            assert np.isfinite(cmp.effect_size)
+
+    def test_direction_field_populated(self) -> None:
+        """direction field is one of the three valid strings."""
+        eval_results: dict[str, list[FoldResult]] = {
+            "loss_a": [
+                _make_fold_result(0.80, 0.75, 1.5),
+                _make_fold_result(0.82, 0.77, 1.4),
+            ],
+            "loss_b": [
+                _make_fold_result(0.85, 0.80, 1.2),
+                _make_fold_result(0.83, 0.78, 1.3),
+            ],
+        }
+        table = build_comparison_table(eval_results)
+        comparisons = compute_all_pairwise_comparisons(table, metric="dsc")
+        valid_directions = {"A > B", "A < B", "A \u2248 B"}
+        for cmp in comparisons:
+            assert cmp.direction in valid_directions
+
+
+class TestSignificanceMatrixMarkdown:
+    def _make_table_with_two_losses(self) -> ComparisonTable:
+        eval_results: dict[str, list[FoldResult]] = {
+            "loss_a": [
+                _make_fold_result(0.80, 0.75, 1.5),
+                _make_fold_result(0.82, 0.77, 1.4),
+                _make_fold_result(0.81, 0.76, 1.6),
+            ],
+            "loss_b": [
+                _make_fold_result(0.85, 0.80, 1.2),
+                _make_fold_result(0.83, 0.78, 1.3),
+                _make_fold_result(0.84, 0.79, 1.1),
+            ],
+        }
+        return build_comparison_table(eval_results)
+
+    def test_format_produces_table(self) -> None:
+        """format_significance_matrix_markdown returns a string with pipe chars."""
+        table = self._make_table_with_two_losses()
+        comparisons = compute_all_pairwise_comparisons(table, metric="dsc")
+        md = format_significance_matrix_markdown(comparisons)
+        assert isinstance(md, str)
+        assert "|" in md
+
+    def test_stars_for_significant_pairs(self) -> None:
+        """Significant pairs show a star (*) marker in the output."""
+        # Construct very different scores so comparison will be significant
+        eval_results: dict[str, list[FoldResult]] = {
+            "loss_low": [
+                _make_fold_result(0.10, 0.09, 5.0),
+                _make_fold_result(0.11, 0.10, 4.8),
+                _make_fold_result(0.09, 0.08, 5.2),
+            ],
+            "loss_high": [
+                _make_fold_result(0.95, 0.90, 0.1),
+                _make_fold_result(0.94, 0.89, 0.2),
+                _make_fold_result(0.96, 0.91, 0.15),
+            ],
+        }
+        table = build_comparison_table(eval_results)
+        comparisons = compute_all_pairwise_comparisons(
+            table, metric="dsc", n_resamples=500, seed=42
+        )
+        md = format_significance_matrix_markdown(comparisons)
+        # At least one comparison should be significant and marked with *
+        assert "*" in md

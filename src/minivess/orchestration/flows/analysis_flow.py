@@ -25,7 +25,11 @@ from typing import TYPE_CHECKING, Any
 import torch
 from torch import nn
 
-from minivess.ensemble.builder import EnsembleBuilder, EnsembleSpec
+from minivess.ensemble.builder import (
+    EnsembleBuilder,
+    EnsembleSpec,
+    expand_runs_to_per_fold,
+)
 from minivess.orchestration import flow, get_run_logger, task
 from minivess.pipeline.comparison import (
     ComparisonTable,

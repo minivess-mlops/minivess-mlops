@@ -340,3 +340,300 @@ def format_comparison_markdown(table: ComparisonTable) -> str:
         rows.append("| " + " | ".join(cells) + " |")
 
     return "\n".join(rows)
+
+
+def holm_bonferroni_correction(
+    p_values: list[float],
+    alpha: float = 0.05,
+) -> list[tuple[float, bool]]:
+    """Apply Holm-Bonferroni step-down multiple comparison correction.
+
+    The procedure sorts p-values ascending, then for each position *i*
+    (0-indexed) checks whether ``p_i <= alpha / (m - i)`` where *m* is
+    the total number of tests.  Rejection stops at the first non-rejected
+    hypothesis; all subsequent hypotheses are also not rejected.
+
+    The adjusted p-value for position *i* is::
+
+        adj_p_i = max(p_j * (m - j) for j in (0.0).i)
+
+    clamped to 1.0.
+
+    Parameters
+    ----------
+    p_values:
+        Raw p-values, one per test.  Order is arbitrary.
+    alpha:
+        Family-wise error rate threshold (default 0.05).
+
+    Returns
+    -------
+    list[tuple[float, bool]]
+        Parallel list to *p_values*.  Each element is
+        ``(adjusted_p_value, is_significant)`` in the **original** input
+        order.
+    """
+    m = len(p_values)
+    if m == 0:
+        return []
+
+    # Sort by p-value ascending, keeping track of original indices
+    order = sorted(range(m), key=lambda i: p_values[i])
+    sorted_ps = [p_values[i] for i in order]
+
+    # Step-down: find the first position where we fail to reject
+    rejected = [False] * m
+    stopped = False
+    for rank, _orig_idx in enumerate(order):
+        if stopped:
+            rejected[rank] = False
+        elif sorted_ps[rank] <= alpha / (m - rank):
+            rejected[rank] = True
+        else:
+            stopped = True
+            rejected[rank] = False
+
+    # Compute adjusted p-values in sorted order using running max
+    adjusted_sorted: list[float] = [0.0] * m
+    running_max = 0.0
+    for rank in range(m):
+        raw_adj = sorted_ps[rank] * (m - rank)
+        running_max = max(running_max, raw_adj)
+        adjusted_sorted[rank] = min(running_max, 1.0)
+
+    # Map back to original order
+    result: list[tuple[float, bool]] = [(0.0, False)] * m
+    for rank, orig_idx in enumerate(order):
+        result[orig_idx] = (adjusted_sorted[rank], rejected[rank])
+
+    return result
+
+
+def cohens_d(
+    scores_a: NDArray[np.floating],
+    scores_b: NDArray[np.floating],
+) -> float:
+    """Compute paired Cohen's d effect size using pooled standard deviation.
+
+    .. math::
+
+        d = \\frac{\\bar{a} - \\bar{b}}{s_{\\text{pooled}}}
+
+    where :math:`s_{\\text{pooled}} = \\sqrt{(\\text{var}(a) + \\text{var}(b)) / 2}`.
+
+    Parameters
+    ----------
+    scores_a:
+        Per-sample scores for method A (1-D array).
+    scores_b:
+        Per-sample scores for method B (1-D array).
+
+    Returns
+    -------
+    float
+        Cohen's d.  Returns 0.0 when pooled standard deviation is zero.
+    """
+    a = np.asarray(scores_a, dtype=float)
+    b = np.asarray(scores_b, dtype=float)
+
+    mean_diff = float(np.mean(a) - np.mean(b))
+    s_pooled = float(np.sqrt((np.var(a, ddof=1) + np.var(b, ddof=1)) / 2.0))
+
+    if s_pooled == 0.0:
+        return 0.0
+
+    return mean_diff / s_pooled
+
+
+@dataclass
+class PairwiseComparison:
+    """Result of a single pairwise comparison between two loss functions.
+
+    Parameters
+    ----------
+    loss_a:
+        Name of the first loss function.
+    loss_b:
+        Name of the second loss function.
+    metric:
+        Metric used for comparison.
+    p_value:
+        Raw two-sided p-value from paired bootstrap test.
+    adjusted_p_value:
+        Holm-Bonferroni-adjusted p-value.
+    is_significant:
+        Whether the comparison is statistically significant after correction.
+    effect_size:
+        Cohen's d effect size (positive means A > B).
+    direction:
+        Human-readable direction: ``"A > B"``, ``"A < B"``, or ``"A \u2248 B"``.
+    """
+
+    loss_a: str
+    loss_b: str
+    metric: str
+    p_value: float
+    adjusted_p_value: float
+    is_significant: bool
+    effect_size: float
+    direction: str
+
+
+def compute_all_pairwise_comparisons(
+    table: ComparisonTable,
+    metric: str,
+    *,
+    n_resamples: int = 10_000,
+    seed: int = 42,
+    alpha: float = 0.05,
+    effect_threshold: float = 0.2,
+) -> list[PairwiseComparison]:
+    """Compute all C(n, 2) pairwise comparisons for *metric* across losses.
+
+    Steps
+    -----
+    1. Extract per-fold scores for each loss function.
+    2. Run :func:`paired_bootstrap_test` for every pair.
+    3. Apply :func:`holm_bonferroni_correction` to all raw p-values.
+    4. Compute :func:`cohens_d` for every pair.
+    5. Assign direction string.
+
+    Parameters
+    ----------
+    table:
+        Cross-loss comparison table.
+    metric:
+        Metric name to compare on.
+    n_resamples:
+        Bootstrap resamples per test.
+    seed:
+        Random seed (incremented per pair for independence).
+    alpha:
+        Family-wise error rate for Holm-Bonferroni correction.
+    effect_threshold:
+        |d| below this value → ``"A \u2248 B"`` direction.
+
+    Returns
+    -------
+    list[PairwiseComparison]
+        One entry per unique pair, sorted by p-value ascending.
+    """
+    losses = table.losses
+    n = len(losses)
+
+    # Extract per-fold score arrays
+    score_arrays: dict[str, NDArray[np.floating]] = {}
+    for lr in losses:
+        summary = lr.metrics.get(metric)
+        if summary is not None:
+            score_arrays[lr.loss_name] = np.array(summary.per_fold, dtype=float)
+
+    # Build ordered list of pairs
+    pairs: list[tuple[str, str]] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            name_a = losses[i].loss_name
+            name_b = losses[j].loss_name
+            if name_a in score_arrays and name_b in score_arrays:
+                pairs.append((name_a, name_b))
+
+    if not pairs:
+        return []
+
+    # Run bootstrap tests
+    raw_p_values: list[float] = []
+    for pair_idx, (name_a, name_b) in enumerate(pairs):
+        p = paired_bootstrap_test(
+            score_arrays[name_a],
+            score_arrays[name_b],
+            n_resamples=n_resamples,
+            seed=seed + pair_idx,
+        )
+        raw_p_values.append(p)
+
+    # Apply Holm-Bonferroni correction
+    corrected = holm_bonferroni_correction(raw_p_values, alpha=alpha)
+
+    # Assemble results
+    results: list[PairwiseComparison] = []
+    for pair_idx, (name_a, name_b) in enumerate(pairs):
+        adj_p, is_sig = corrected[pair_idx]
+        d = cohens_d(score_arrays[name_a], score_arrays[name_b])
+
+        if abs(d) < effect_threshold:
+            direction = "A \u2248 B"
+        elif d > 0:
+            direction = "A > B"
+        else:
+            direction = "A < B"
+
+        results.append(
+            PairwiseComparison(
+                loss_a=name_a,
+                loss_b=name_b,
+                metric=metric,
+                p_value=raw_p_values[pair_idx],
+                adjusted_p_value=adj_p,
+                is_significant=is_sig,
+                effect_size=d,
+                direction=direction,
+            )
+        )
+
+    results.sort(key=lambda c: c.p_value)
+    return results
+
+
+def format_significance_matrix_markdown(
+    comparisons: list[PairwiseComparison],
+) -> str:
+    """Format pairwise comparisons as a significance matrix in Markdown.
+
+    Each cell shows ``p_adj`` and a ``*`` marker when significant.
+
+    Parameters
+    ----------
+    comparisons:
+        List returned by :func:`compute_all_pairwise_comparisons`.
+
+    Returns
+    -------
+    str
+        Markdown table with one row/column per loss function.
+        Significant pairs are marked with ``*``.
+    """
+    if not comparisons:
+        return "*No pairwise comparisons to display.*"
+
+    # Collect ordered unique loss names (preserve insertion order from pairs)
+    seen: dict[str, None] = {}
+    for cmp in comparisons:
+        seen[cmp.loss_a] = None
+        seen[cmp.loss_b] = None
+    loss_names = list(seen.keys())
+
+    # Build lookup: (a, b) -> PairwiseComparison (symmetric)
+    lookup: dict[tuple[str, str], PairwiseComparison] = {}
+    for cmp in comparisons:
+        lookup[(cmp.loss_a, cmp.loss_b)] = cmp
+        lookup[(cmp.loss_b, cmp.loss_a)] = cmp
+
+    header = "| | " + " | ".join(loss_names) + " |"
+    separator = "| --- | " + " | ".join(["---"] * len(loss_names)) + " |"
+
+    rows: list[str] = [header, separator]
+    for row_name in loss_names:
+        cells: list[str] = [row_name]
+        for col_name in loss_names:
+            if row_name == col_name:
+                cells.append("—")
+            else:
+                maybe_cmp: PairwiseComparison | None = lookup.get((row_name, col_name))
+                if maybe_cmp is None:
+                    cells.append("N/A")
+                else:
+                    star = " *" if maybe_cmp.is_significant else ""
+                    cells.append(f"p={maybe_cmp.adjusted_p_value:.3f}{star}")
+        rows.append("| " + " | ".join(cells) + " |")
+
+    return "\n".join(rows)
