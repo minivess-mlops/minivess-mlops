@@ -32,6 +32,7 @@ from minivess.ensemble.builder import (
     EnsembleSpec,
 )
 from minivess.orchestration import flow, get_run_logger, task
+from minivess.pipeline.champion_tagger import tag_champions
 from minivess.pipeline.comparison import (
     ComparisonTable,
     LossResult,
@@ -791,6 +792,93 @@ def register_champion_task(
     }
 
 
+@task(name="tag-champion-models")  # type: ignore[misc]
+def tag_champion_models(
+    analysis_entries: list[dict[str, Any]],
+    runs: list[dict[str, Any]],
+    ensembles: dict[str, EnsembleSpec],
+    eval_config: EvaluationConfig,
+    *,
+    mlruns_dir: Path | None = None,
+    experiment_id: str | None = None,
+) -> dict[str, Any]:
+    """Tag champion models on the MLflow training runs filesystem.
+
+    Writes ``champion_*`` tags directly to the ``mlruns/`` filesystem
+    so that champion models can be identified via pandas/polars filtering.
+
+    Parameters
+    ----------
+    analysis_entries:
+        Flat list of analysis entry dicts from
+        :func:`create_analysis_experiment`.
+    runs:
+        Training run info dicts from :func:`load_training_artifacts`.
+    ensembles:
+        Ensemble specs from :func:`build_ensembles`.
+    eval_config:
+        Evaluation configuration with primary metric settings.
+    mlruns_dir:
+        Root mlruns directory. Auto-detected from repo root if ``None``.
+    experiment_id:
+        MLflow experiment ID. Auto-detected if ``None``.
+
+    Returns
+    -------
+    Dict with ``champion_selection`` and ``tags_written`` count.
+    """
+    from pathlib import Path
+
+    from minivess.config.evaluation_config import MetricDirection
+
+    log = get_run_logger()
+
+    # Auto-detect mlruns_dir from repo root
+    if mlruns_dir is None:
+        mlruns_dir = Path(__file__).resolve().parents[3] / "mlruns"
+
+    # Auto-detect experiment_id from the training experiment
+    if experiment_id is None and mlruns_dir.is_dir():
+        # Find experiment directory by name
+        for exp_dir in mlruns_dir.iterdir():
+            if not exp_dir.is_dir():
+                continue
+            meta = exp_dir / "meta.yaml"
+            if meta.is_file():
+                content = meta.read_text(encoding="utf-8")
+                if eval_config.mlflow_training_experiment in content:
+                    experiment_id = exp_dir.name
+                    break
+
+    if experiment_id is None:
+        log.warning("Could not determine experiment_id; skipping champion tagging")
+        return {"champion_selection": None, "tags_written": 0}
+
+    maximize = eval_config.primary_metric_direction == MetricDirection.MAXIMIZE
+
+    selection = tag_champions(
+        mlruns_dir,
+        experiment_id,
+        analysis_entries,
+        runs=runs,
+        ensembles=ensembles,
+        primary_metric=eval_config.primary_metric,
+        maximize=maximize,
+    )
+
+    log.info(
+        "Champion tagging complete: single_fold=%s, cv_mean=%s, ensemble=%s",
+        selection.best_single_fold is not None,
+        selection.best_cv_mean is not None,
+        selection.best_ensemble is not None,
+    )
+
+    return {
+        "champion_selection": selection,
+        "tags_written": 1,  # Simplified count
+    }
+
+
 @task(name="generate-report")  # type: ignore[misc]
 def generate_report(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
@@ -1209,7 +1297,16 @@ def run_analysis_flow(
         tracking_uri=tracking_uri,
     )
 
-    # Step 9: Generate report
+    # Step 9: Tag champion models on training runs filesystem
+    analysis_entries = create_analysis_experiment(all_results, eval_config)
+    champion_info = tag_champion_models(
+        analysis_entries,
+        runs,
+        ensembles,
+        eval_config,
+    )
+
+    # Step 10: Generate report
     report = generate_report(all_results, comparison_md, promotion_info)
 
     log.info(
@@ -1222,4 +1319,5 @@ def run_analysis_flow(
         "promotion": promotion_info,
         "report": report,
         "mlflow_evaluation": mlflow_eval_results,
+        "champion_tags": champion_info,
     }

@@ -379,6 +379,7 @@ class TestRunAnalysisFlow:
             "promotion",
             "report",
             "mlflow_evaluation",
+            "champion_tags",
         }
         assert set(result.keys()) == expected_keys
 
