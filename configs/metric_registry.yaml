@@ -1,0 +1,127 @@
+# Metric Registry for MinIVess MLOps
+# ---------------------------------------------------------------------------
+# Defines all tracked metrics with display names, optimization directions,
+# value bounds, and MLflow key templates.
+#
+# Fields per entry
+# ----------------
+# name         : Internal snake_case identifier (referenced throughout code).
+# display_name : Human-readable label for plots and reports.
+# mlflow_name  : MLflow metric name template; use {fold_id} for per-fold
+#                eval metrics (e.g. "eval_fold{fold_id}_dsc").
+# direction    : "maximize" or "minimize" — which direction is better.
+# unit         : Unit string for axis labels ("mm", "%", or "" for unitless).
+# bounds       : [lower, upper] valid range used for sanity checks.
+# description  : Brief plain-text description of the metric.
+# ---------------------------------------------------------------------------
+
+metrics:
+
+  # --------------------------------------------------------------------------
+  # Voxel-overlap metrics (per-fold evaluation)
+  # --------------------------------------------------------------------------
+
+  - name: dsc
+    display_name: "Dice Score (DSC)"
+    mlflow_name: "eval_fold{fold_id}_dsc"
+    direction: maximize
+    unit: ""
+    bounds: [0.0, 1.0]
+    description: >
+      Voxel-level overlap between predicted and ground-truth segmentation
+      masks.  Higher is better; 1.0 = perfect overlap.
+
+  - name: centreline_dsc
+    display_name: "Centreline DSC (clDice)"
+    mlflow_name: "eval_fold{fold_id}_centreline_dsc"
+    direction: maximize
+    unit: ""
+    bounds: [0.0, 1.0]
+    description: >
+      Skeleton-based topology preservation metric.  Measures overlap of
+      vessel centrelines rather than voxel masks.  Preferred metric for
+      tubular structure segmentation.
+
+  # --------------------------------------------------------------------------
+  # Surface distance metrics (per-fold evaluation)
+  # --------------------------------------------------------------------------
+
+  - name: measured_masd
+    display_name: "Mean Avg. Surface Distance (MASD)"
+    mlflow_name: "eval_fold{fold_id}_measured_masd"
+    direction: minimize
+    unit: "voxels"
+    bounds: [0.0, 50.0]
+    description: >
+      Average symmetric surface distance between predicted and ground-truth
+      boundaries, measured in voxels.  Lower is better; 0.0 = perfect
+      boundary alignment.
+
+  # --------------------------------------------------------------------------
+  # Compound / primary metric (per-epoch validation)
+  # --------------------------------------------------------------------------
+
+  - name: val_compound_masd_cldice
+    display_name: "Compound MASD+clDice"
+    mlflow_name: "val_compound_masd_cldice"
+    direction: maximize
+    unit: ""
+    bounds: [0.0, 1.0]
+    description: >
+      Primary training metric: 0.5 * (1 - normalised_MASD) + 0.5 * clDice.
+      Combines surface accuracy and topology preservation into a single
+      score that is logged every validation epoch.
+
+  # --------------------------------------------------------------------------
+  # Per-epoch validation metrics
+  # --------------------------------------------------------------------------
+
+  - name: val_loss
+    display_name: "Validation Loss"
+    mlflow_name: "val_loss"
+    direction: minimize
+    unit: ""
+    bounds: [0.0, 10.0]
+    description: >
+      Total validation loss value computed at each validation epoch using
+      the same loss function as training.
+
+  - name: val_dice
+    display_name: "Validation Dice"
+    mlflow_name: "val_dice"
+    direction: maximize
+    unit: ""
+    bounds: [0.0, 1.0]
+    description: >
+      Dice score computed on the validation split at each validation epoch.
+      Tracked alongside the compound primary metric.
+
+  - name: val_cldice
+    display_name: "Validation clDice"
+    mlflow_name: "val_cldice"
+    direction: maximize
+    unit: ""
+    bounds: [0.0, 1.0]
+    description: >
+      Centreline Dice score on the validation split, logged every five epochs
+      (skeleton computation is ~4 min for 24 full volumes).
+
+  - name: val_masd
+    display_name: "Validation MASD"
+    mlflow_name: "val_masd"
+    direction: minimize
+    unit: "voxels"
+    bounds: [0.0, 50.0]
+    description: >
+      Mean Average Surface Distance on the validation split, logged every
+      five epochs alongside clDice.
+
+  - name: val_f1_foreground
+    display_name: "Validation F1 (foreground)"
+    mlflow_name: "val_f1_foreground"
+    direction: maximize
+    unit: ""
+    bounds: [0.0, 1.0]
+    description: >
+      F1 score computed on the foreground (vessel) class of the validation
+      split, logged every validation epoch.

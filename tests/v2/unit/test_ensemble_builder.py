@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import fields
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import torch
@@ -26,6 +26,7 @@ from minivess.ensemble.builder import (
     EnsembleBuilder,
     EnsembleMember,
     EnsembleSpec,
+    expand_runs_to_per_fold,
 )
 
 # ---------------------------------------------------------------------------
@@ -793,3 +794,128 @@ class TestMemberMetadata:
         spec = next(iter(result.values()))
         fold_ids = sorted(m.fold_id for m in spec.members)
         assert fold_ids == [0, 1]
+
+
+# ---------------------------------------------------------------------------
+# Tests: expand_runs_to_per_fold
+# ---------------------------------------------------------------------------
+
+
+def _make_raw_per_loss_runs() -> list[dict[str, Any]]:
+    """Create raw per-loss run infos (1 entry per loss, no fold_id)."""
+    return [
+        {
+            "run_id": f"run_{loss}",
+            "loss_type": loss,
+            "fold_id": 0,
+            "artifact_dir": f"/tmp/mlruns/{loss}",
+            "metrics": {"val_dice": 0.8, "eval_fold2_dsc": 0.79},
+            "num_folds": 3,
+        }
+        for loss in LOSS_TYPES
+    ]
+
+
+class TestExpandRunsToPerFold:
+    """Tests for expand_runs_to_per_fold() which synthesizes per-fold entries."""
+
+    def test_expand_creates_3_entries_per_loss(self) -> None:
+        """Each per-loss run should produce 3 per-fold entries."""
+        raw = _make_raw_per_loss_runs()
+        expanded = expand_runs_to_per_fold(raw)
+        assert len(expanded) == len(LOSS_TYPES) * NUM_FOLDS
+
+    def test_expanded_runs_share_artifact_dir(self) -> None:
+        """All fold entries for the same loss share the artifact directory."""
+        raw = _make_raw_per_loss_runs()
+        expanded = expand_runs_to_per_fold(raw)
+        by_loss: dict[str, set[str]] = {}
+        for entry in expanded:
+            by_loss.setdefault(entry["loss_type"], set()).add(entry["artifact_dir"])
+        for loss, dirs in by_loss.items():
+            assert len(dirs) == 1, f"Expected 1 artifact_dir for {loss}, got {dirs}"
+
+    def test_expanded_runs_have_distinct_fold_ids(self) -> None:
+        """Each loss should have fold_ids 0, 1, 2."""
+        raw = _make_raw_per_loss_runs()
+        expanded = expand_runs_to_per_fold(raw)
+        by_loss: dict[str, list[int]] = {}
+        for entry in expanded:
+            by_loss.setdefault(entry["loss_type"], []).append(entry["fold_id"])
+        for loss, folds in by_loss.items():
+            assert sorted(folds) == [0, 1, 2], f"Bad fold_ids for {loss}: {folds}"
+
+    def test_expanded_runs_share_run_id(self) -> None:
+        """All fold entries for the same loss share the original run_id."""
+        raw = _make_raw_per_loss_runs()
+        expanded = expand_runs_to_per_fold(raw)
+        by_loss: dict[str, set[str]] = {}
+        for entry in expanded:
+            by_loss.setdefault(entry["loss_type"], set()).add(entry["run_id"])
+        for loss, run_ids in by_loss.items():
+            assert len(run_ids) == 1, f"Expected 1 run_id for {loss}, got {run_ids}"
+
+    def test_expanded_runs_preserve_metrics(self) -> None:
+        """Expanded entries should carry the original metrics dict."""
+        raw = _make_raw_per_loss_runs()
+        expanded = expand_runs_to_per_fold(raw)
+        for entry in expanded:
+            assert "val_dice" in entry["metrics"]
+            assert entry["metrics"]["val_dice"] == 0.8
+
+    def test_empty_input_returns_empty(self) -> None:
+        """No runs in, no runs out."""
+        assert expand_runs_to_per_fold([]) == []
+
+    def test_custom_num_folds(self) -> None:
+        """Runs with num_folds=5 produce 5 entries each."""
+        raw = [
+            {
+                "run_id": "run_test",
+                "loss_type": "dice_ce",
+                "fold_id": 0,
+                "artifact_dir": "/tmp/test",
+                "metrics": {},
+                "num_folds": 5,
+            }
+        ]
+        expanded = expand_runs_to_per_fold(raw)
+        assert len(expanded) == 5
+        assert sorted(e["fold_id"] for e in expanded) == [0, 1, 2, 3, 4]
+
+    def test_ensemble_builder_works_with_expanded_runs(
+        self,
+        eval_config: EvaluationConfig,
+        model_config_dict: dict,
+        tmp_path: Path,
+    ) -> None:
+        """EnsembleBuilder strategies work correctly with expanded runs."""
+        primary = eval_config.primary_metric
+        # Create one artifact dir per loss with checkpoints
+        raw_runs: list[dict[str, Any]] = []
+        for loss in LOSS_TYPES:
+            loss_dir = tmp_path / loss
+            loss_dir.mkdir(parents=True)
+            _create_checkpoint_new_format(loss_dir / f"best_{primary}.pth")
+            raw_runs.append(
+                {
+                    "run_id": f"run_{loss}",
+                    "loss_type": loss,
+                    "fold_id": 0,
+                    "artifact_dir": str(loss_dir),
+                    "metrics": {"val_dice": 0.8},
+                    "num_folds": 3,
+                }
+            )
+
+        expanded = expand_runs_to_per_fold(raw_runs)
+        builder = EnsembleBuilder(
+            eval_config=eval_config,
+            model_config=model_config_dict,
+        )
+        result = builder.build_per_loss_single_best(expanded)
+        assert len(result) == len(LOSS_TYPES)
+        for spec in result.values():
+            # Each loss has 3 fold entries all pointing to same dir
+            # so 3 members loaded from the same checkpoint
+            assert len(spec.members) == 3
