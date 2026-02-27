@@ -60,6 +60,15 @@ _DDL_TRAINING_METRICS = """
     )
 """
 
+_DDL_CHAMPION_TAGS = """
+    CREATE TABLE IF NOT EXISTS champion_tags (
+        run_id VARCHAR,
+        tag_key VARCHAR,
+        tag_value VARCHAR,
+        PRIMARY KEY (run_id, tag_key)
+    )
+"""
+
 # Suffixes that indicate a CI variant of an eval metric (not a point estimate)
 _CI_SUFFIXES = ("_ci_level", "_ci_lower", "_ci_upper")
 
@@ -76,13 +85,14 @@ def extract_runs_to_duckdb(
 ) -> Any:
     """Extract MLflow runs into a DuckDB database.
 
-    Creates four tables:
+    Creates five tables:
 
     - **runs**: run_id, loss_function, model_family, num_folds, start_time
     - **params**: run_id, param_name, param_value
     - **eval_metrics**: run_id, fold_id, metric_name, point_estimate,
       ci_lower, ci_upper, ci_level
     - **training_metrics**: run_id, metric_name, last_value
+    - **champion_tags**: run_id, tag_key, tag_value
 
     Only *production* runs (those with all three evaluation folds complete)
     are extracted.  See
@@ -122,6 +132,7 @@ def extract_runs_to_duckdb(
     db.execute(_DDL_PARAMS)
     db.execute(_DDL_EVAL_METRICS)
     db.execute(_DDL_TRAINING_METRICS)
+    db.execute(_DDL_CHAMPION_TAGS)
 
     production_runs = get_production_runs(mlruns_dir, experiment_id)
     logger.info(
@@ -189,6 +200,14 @@ def extract_runs_to_duckdb(
                         metric_name,
                         run_id,
                     )
+
+        # --- champion tag rows ---
+        for tag_key, tag_value in tags.items():
+            if tag_key.startswith("champion_"):
+                db.execute(
+                    "INSERT OR REPLACE INTO champion_tags VALUES (?, ?, ?)",
+                    [run_id, tag_key, tag_value],
+                )
 
     return db
 
@@ -271,6 +290,36 @@ def query_best_per_metric(db: Any) -> list[tuple[Any, ...]]:
         FROM ranked
         WHERE rank = 1
         ORDER BY metric_name
+    """).fetchall()
+    return result
+
+
+def query_champion_runs(db: Any) -> list[tuple[Any, ...]]:
+    """Query runs that have at least one champion tag.
+
+    Returns rows of ``(run_id, loss_function, tag_key, tag_value)``,
+    joined with the ``runs`` table for loss function context.
+
+    Parameters
+    ----------
+    db:
+        Open DuckDB connection returned by :func:`extract_runs_to_duckdb`.
+
+    Returns
+    -------
+    list[tuple]
+        List of ``(run_id, loss_function, tag_key, tag_value)`` tuples,
+        ordered by run_id then tag_key.
+    """
+    result: list[tuple[Any, ...]] = db.execute("""
+        SELECT
+            ct.run_id,
+            r.loss_function,
+            ct.tag_key,
+            ct.tag_value
+        FROM champion_tags ct
+        JOIN runs r ON ct.run_id = r.run_id
+        ORDER BY ct.run_id, ct.tag_key
     """).fetchall()
     return result
 

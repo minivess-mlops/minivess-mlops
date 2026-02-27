@@ -24,6 +24,7 @@ from minivess.pipeline.duckdb_extraction import (
     _parse_and_insert_eval_metric,
     extract_runs_to_duckdb,
     query_best_per_metric,
+    query_champion_runs,
     query_cross_loss_means,
 )
 
@@ -597,6 +598,71 @@ class TestParseAndInsertEvalMetric:
         assert row[0] == 1
         assert row[1] == "dsc"
         assert row[2] == pytest.approx(0.85)
+
+
+# ---------------------------------------------------------------------------
+# Tests: champion_tags table
+# ---------------------------------------------------------------------------
+
+
+class TestChampionTagsTable:
+    """Tests for the champion_tags table extraction."""
+
+    def test_champion_tags_table_exists(self, mock_db: Any) -> None:
+        result = mock_db.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_name = 'champion_tags'"
+        ).fetchone()
+        assert result is not None
+
+    def test_no_champion_tags_when_none_set(self, mock_db: Any) -> None:
+        """Without champion tags, the table is empty."""
+        count = mock_db.execute("SELECT COUNT(*) FROM champion_tags").fetchone()[0]
+        assert count == 0
+
+    def test_champion_tags_extracted(self, tmp_path: Path) -> None:
+        """Champion tags are extracted into the champion_tags table."""
+        mlruns_dir, exp_id = _make_mock_mlruns(tmp_path, n_runs=1)
+        # Add champion tags to the run
+        run_dir = mlruns_dir / exp_id / "run_00"
+        _make_tag(run_dir, "champion_best_single_fold", "true")
+        _make_tag(run_dir, "champion_metric_name", "dsc")
+        _make_tag(run_dir, "champion_metric_value", "0.85")
+
+        db = extract_runs_to_duckdb(mlruns_dir, exp_id)
+        count = db.execute("SELECT COUNT(*) FROM champion_tags").fetchone()[0]
+        assert count == 3
+
+    def test_non_champion_tags_excluded(self, tmp_path: Path) -> None:
+        """Only tags starting with 'champion_' end up in champion_tags."""
+        mlruns_dir, exp_id = _make_mock_mlruns(tmp_path, n_runs=1)
+        run_dir = mlruns_dir / exp_id / "run_00"
+        _make_tag(run_dir, "champion_best_cv_mean", "true")
+
+        db = extract_runs_to_duckdb(mlruns_dir, exp_id)
+        # Should have 1 champion tag, no non-champion tags
+        rows = db.execute(
+            "SELECT tag_key FROM champion_tags WHERE tag_key NOT LIKE 'champion_%'"
+        ).fetchall()
+        assert len(rows) == 0
+
+    def test_query_champion_runs_returns_results(self, tmp_path: Path) -> None:
+        """query_champion_runs returns (run_id, loss_function, tag_key, tag_value)."""
+        mlruns_dir, exp_id = _make_mock_mlruns(tmp_path, n_runs=2)
+        run_dir = mlruns_dir / exp_id / "run_00"
+        _make_tag(run_dir, "champion_best_single_fold", "true")
+        _make_tag(run_dir, "champion_metric_value", "0.85")
+
+        db = extract_runs_to_duckdb(mlruns_dir, exp_id)
+        results = query_champion_runs(db)
+        assert len(results) == 2
+        # Each row: (run_id, loss_function, tag_key, tag_value)
+        assert all(len(r) == 4 for r in results)
+
+    def test_query_champion_runs_empty_when_no_tags(self, mock_db: Any) -> None:
+        """query_champion_runs returns empty list when no champion tags exist."""
+        results = query_champion_runs(mock_db)
+        assert len(results) == 0
 
 
 # ---------------------------------------------------------------------------
