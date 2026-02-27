@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 import math
+import re
+from collections import defaultdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -28,7 +30,6 @@ from torch import nn
 from minivess.ensemble.builder import (
     EnsembleBuilder,
     EnsembleSpec,
-    expand_runs_to_per_fold,
 )
 from minivess.orchestration import flow, get_run_logger, task
 from minivess.pipeline.comparison import (
@@ -54,7 +55,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class _EnsembleInferenceWrapper(nn.Module):
+class _EnsembleInferenceWrapper(nn.Module):  # type: ignore[misc]
     """Wrap multiple member networks into a single ``nn.Module``.
 
     Forward pass averages logits across all members, producing the
@@ -77,7 +78,7 @@ class _EnsembleInferenceWrapper(nn.Module):
         """Number of ensemble members."""
         return len(self._members)
 
-    @torch.no_grad()
+    @torch.no_grad()  # type: ignore[misc]
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Average logits across all ensemble members.
 
@@ -137,7 +138,8 @@ def _discover_runs(
     ``run_id``, ``loss_type``, ``fold_id``, ``artifact_dir``, ``metrics``.
     """
     builder = EnsembleBuilder(eval_config, model_config, tracking_uri=tracking_uri)
-    return builder.discover_training_runs()
+    result: list[dict[str, Any]] = builder.discover_training_runs()
+    return result
 
 
 def _evaluate_single_model_on_all(
@@ -179,12 +181,13 @@ def _evaluate_single_model_on_all(
         overlap=0.25,
     )
     runner = UnifiedEvaluationRunner(eval_config, inference_runner)
-    return runner.evaluate_model(
+    eval_result: dict[str, dict[str, Any]] = runner.evaluate_model(
         model,
         dataloaders_dict,
         model_name=model_name,
         output_dir=output_dir,
     )
+    return eval_result
 
 
 def _extract_single_models_from_runs(
@@ -362,7 +365,7 @@ def _run_mlflow_eval_safe(
 # ---------------------------------------------------------------------------
 
 
-@task(name="load-training-artifacts")  # type: ignore[untyped-decorator]
+@task(name="load-training-artifacts")  # type: ignore[misc]
 def load_training_artifacts(
     eval_config: EvaluationConfig,
     model_config: dict[str, Any],
@@ -399,7 +402,7 @@ def load_training_artifacts(
     return runs
 
 
-@task(name="build-ensembles")  # type: ignore[untyped-decorator]
+@task(name="build-ensembles")  # type: ignore[misc]
 def build_ensembles(
     runs: list[dict[str, Any]],
     eval_config: EvaluationConfig,
@@ -430,7 +433,7 @@ def build_ensembles(
     )
 
     builder = EnsembleBuilder(eval_config, model_config)
-    ensembles = builder.build_all(runs)
+    ensembles: dict[str, Any] = builder.build_all(runs)
 
     log.info(
         "Built %d ensembles: %s",
@@ -440,7 +443,7 @@ def build_ensembles(
     return ensembles
 
 
-@task(name="log-models-to-mlflow")  # type: ignore[untyped-decorator]
+@task(name="log-models-to-mlflow")  # type: ignore[misc]
 def log_models_to_mlflow(
     runs: list[dict[str, Any]],
     ensembles: dict[str, EnsembleSpec],
@@ -494,7 +497,7 @@ def log_models_to_mlflow(
     return model_uris
 
 
-@task(name="evaluate-all-models")  # type: ignore[untyped-decorator]
+@task(name="evaluate-all-models")  # type: ignore[misc]
 def evaluate_all_models(
     single_models: dict[str, nn.Module],
     ensembles: dict[str, EnsembleSpec],
@@ -569,7 +572,7 @@ def evaluate_all_models(
     return all_results
 
 
-@task(name="evaluate-with-mlflow")  # type: ignore[untyped-decorator]
+@task(name="evaluate-with-mlflow")  # type: ignore[misc]
 def evaluate_with_mlflow(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
     eval_config: EvaluationConfig,
@@ -611,7 +614,7 @@ def evaluate_with_mlflow(
     return mlflow_results
 
 
-@task(name="generate-comparison")  # type: ignore[untyped-decorator]
+@task(name="generate-comparison")  # type: ignore[misc]
 def generate_comparison(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
 ) -> str:
@@ -675,7 +678,7 @@ def generate_comparison(
         losses=loss_results,
         metric_names=sorted(all_metric_names),
     )
-    markdown = format_comparison_markdown(table)
+    markdown: str = format_comparison_markdown(table)
 
     log.info(
         "Generated comparison for %d models across %d metrics",
@@ -685,7 +688,7 @@ def generate_comparison(
     return markdown
 
 
-@task(name="register-champion")  # type: ignore[untyped-decorator]
+@task(name="register-champion")  # type: ignore[misc]
 def register_champion_task(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
     eval_config: EvaluationConfig,
@@ -788,7 +791,7 @@ def register_champion_task(
     }
 
 
-@task(name="generate-report")  # type: ignore[untyped-decorator]
+@task(name="generate-report")  # type: ignore[misc]
 def generate_report(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
     comparison_md: str,
@@ -876,11 +879,256 @@ def generate_report(
 
 
 # ---------------------------------------------------------------------------
+# Analysis experiment entry builder
+# ---------------------------------------------------------------------------
+
+# Model name convention: "{loss_type}_fold{fold_id}" for single-fold models.
+_FOLD_RE = re.compile(r"^(.+)_fold(\d+)$")
+
+
+def _parse_model_name(model_name: str) -> tuple[str | None, int | None]:
+    """Parse a model name into ``(loss_function, fold_id)``.
+
+    Returns ``(None, None)`` for ensemble / non-standard names.
+
+    Parameters
+    ----------
+    model_name:
+        E.g. ``"dice_ce_fold0"`` or ``"per_loss_single_best"``.
+
+    Returns
+    -------
+    Tuple of ``(loss_function, fold_id)`` or ``(None, None)``.
+    """
+    m = _FOLD_RE.match(model_name)
+    if m:
+        return m.group(1), int(m.group(2))
+    return None, None
+
+
+def _extract_primary_metric_value(
+    eval_result: EvaluationResult,
+    primary_metric: str,
+) -> float:
+    """Extract the primary metric's point estimate from an EvaluationResult.
+
+    Falls back to ``float('nan')`` if the metric is not present.
+
+    Parameters
+    ----------
+    eval_result:
+        Result for one dataset/subset combination.
+    primary_metric:
+        Name of the primary metric (e.g. ``"dsc"``).
+
+    Returns
+    -------
+    The point estimate as a float.
+    """
+    ci = eval_result.fold_result.aggregated.get(primary_metric)
+    if ci is not None:
+        value: float = ci.point_estimate
+        return value
+    return float("nan")
+
+
+def _flatten_metrics(
+    eval_result: EvaluationResult,
+) -> dict[str, float]:
+    """Flatten a single EvaluationResult's aggregated CIs to ``{name: value}``.
+
+    Parameters
+    ----------
+    eval_result:
+        Result for one dataset/subset combination.
+
+    Returns
+    -------
+    Flat dict of metric names to point estimates.
+    """
+    return {
+        name: ci.point_estimate
+        for name, ci in eval_result.fold_result.aggregated.items()
+    }
+
+
+def _first_eval_result(
+    ds_dict: dict[str, dict[str, EvaluationResult]],
+) -> EvaluationResult | None:
+    """Return the first EvaluationResult from a nested dataset dict.
+
+    Parameters
+    ----------
+    ds_dict:
+        ``{dataset: {subset: EvaluationResult}}``.
+
+    Returns
+    -------
+    The first ``EvaluationResult``, or ``None`` if empty.
+    """
+    for subset_dict in ds_dict.values():
+        for eval_result in subset_dict.values():
+            return eval_result
+    return None
+
+
+def create_analysis_experiment(
+    all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
+    eval_config: EvaluationConfig,
+) -> list[dict[str, Any]]:
+    """Create structured entries for an MLflow analysis experiment.
+
+    Produces a flat list of dicts, each representing one "row" in the
+    analysis experiment.  Entry types:
+
+    * ``"per_fold"``  -- one per loss-function/fold combination
+    * ``"cv_mean"``   -- one per loss-function (mean across folds)
+    * ``"ensemble"``  -- one per ensemble strategy
+    * ``"champion"``  -- single best model across all entries
+
+    Parameters
+    ----------
+    all_results:
+        ``{model_name: {dataset: {subset: EvaluationResult}}}``.
+        Model names follow the convention ``"{loss}_fold{id}"`` for
+        single-fold checkpoints; any other name is treated as an
+        ensemble.
+    eval_config:
+        :class:`EvaluationConfig` with ``primary_metric`` and
+        ``primary_metric_direction``.
+
+    Returns
+    -------
+    List of entry dicts, each with keys:
+    ``entry_type``, ``model_name``, ``loss_function``, ``fold_id``,
+    ``metrics``, ``primary_metric_value``.
+    """
+    from minivess.config.evaluation_config import MetricDirection
+
+    entries: list[dict[str, Any]] = []
+    primary = eval_config.primary_metric
+
+    # ---- 1. Per-fold entries (single-fold checkpoints) --------------------
+    # Group by loss_function for CV-mean computation
+    loss_fold_metrics: dict[str, list[dict[str, float]]] = defaultdict(list)
+    loss_fold_primary: dict[str, list[float]] = defaultdict(list)
+
+    for model_name, ds_dict in all_results.items():
+        loss_fn, fold_id = _parse_model_name(model_name)
+        if loss_fn is None:
+            # Not a per-fold model; will handle below as ensemble
+            continue
+
+        first = _first_eval_result(ds_dict)
+        if first is None:
+            continue
+
+        metrics = _flatten_metrics(first)
+        primary_val = _extract_primary_metric_value(first, primary)
+
+        entries.append(
+            {
+                "entry_type": "per_fold",
+                "model_name": model_name,
+                "loss_function": loss_fn,
+                "fold_id": fold_id,
+                "metrics": metrics,
+                "primary_metric_value": primary_val,
+            }
+        )
+
+        loss_fold_metrics[loss_fn].append(metrics)
+        loss_fold_primary[loss_fn].append(primary_val)
+
+    # ---- 2. CV-mean entries (one per loss function) -----------------------
+    for loss_fn, fold_metrics_list in sorted(loss_fold_metrics.items()):
+        if not fold_metrics_list:
+            continue
+
+        # Average each metric across folds
+        all_metric_names = {k for m in fold_metrics_list for k in m}
+        mean_metrics: dict[str, float] = {}
+        for metric_name in sorted(all_metric_names):
+            values = [m[metric_name] for m in fold_metrics_list if metric_name in m]
+            if values:
+                mean_metrics[metric_name] = sum(values) / len(values)
+
+        primary_vals = loss_fold_primary[loss_fn]
+        cv_primary = (
+            sum(primary_vals) / len(primary_vals) if primary_vals else float("nan")
+        )
+
+        entries.append(
+            {
+                "entry_type": "cv_mean",
+                "model_name": f"{loss_fn}_cv_mean",
+                "loss_function": loss_fn,
+                "fold_id": None,
+                "metrics": mean_metrics,
+                "primary_metric_value": cv_primary,
+            }
+        )
+
+    # ---- 3. Ensemble entries (non-fold model names) -----------------------
+    for model_name, ds_dict in all_results.items():
+        loss_fn, fold_id = _parse_model_name(model_name)
+        if loss_fn is not None:
+            # Already handled as per-fold
+            continue
+
+        first = _first_eval_result(ds_dict)
+        if first is None:
+            continue
+
+        metrics = _flatten_metrics(first)
+        primary_val = _extract_primary_metric_value(first, primary)
+
+        entries.append(
+            {
+                "entry_type": "ensemble",
+                "model_name": model_name,
+                "loss_function": None,
+                "fold_id": None,
+                "metrics": metrics,
+                "primary_metric_value": primary_val,
+            }
+        )
+
+    # ---- 4. Champion entry (best overall by primary metric) ---------------
+    maximize = eval_config.primary_metric_direction == MetricDirection.MAXIMIZE
+
+    best_entry: dict[str, Any] | None = None
+    best_score = float("-inf") if maximize else float("inf")
+
+    for entry in entries:
+        val = entry["primary_metric_value"]
+        if math.isnan(val):
+            continue
+        if (maximize and val > best_score) or (not maximize and val < best_score):
+            best_score = val
+            best_entry = entry
+
+    if best_entry is not None:
+        entries.append(
+            {
+                "entry_type": "champion",
+                "model_name": best_entry["model_name"],
+                "loss_function": best_entry["loss_function"],
+                "fold_id": best_entry["fold_id"],
+                "metrics": dict(best_entry["metrics"]),
+                "primary_metric_value": best_score,
+            }
+        )
+
+    return entries
+
+
+# ---------------------------------------------------------------------------
 # Main flow
 # ---------------------------------------------------------------------------
 
 
-@flow(name="analysis-flow")  # type: ignore[untyped-decorator]
+@flow(name="analysis-flow")  # type: ignore[misc]
 def run_analysis_flow(
     eval_config: EvaluationConfig,
     model_config: dict[str, Any],

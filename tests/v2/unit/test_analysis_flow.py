@@ -589,7 +589,7 @@ class TestEnsembleInferenceWrapper:
         )
 
         # Simple mock models that produce (B, 2, D, H, W)
-        class _TinyNet(nn.Module):
+        class _TinyNet(nn.Module):  # type: ignore[misc]
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 b, _, d, h, w = x.shape
                 return torch.randn(b, 2, d, h, w)
@@ -719,3 +719,375 @@ class TestUpdatedFlowWithMlflowSteps:
         assert isinstance(result, dict)
         mock_log_models.assert_called_once()
         mock_mlflow_eval.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# C5: create_analysis_experiment tests
+# ---------------------------------------------------------------------------
+
+LOSS_NAMES = ("dice_ce", "dice_ce_cldice", "cbdice_cldice", "tversky")
+NUM_FOLDS = 3
+ENSEMBLE_STRATEGIES = ("per_loss_single_best", "all_loss_all_best")
+
+
+def _make_full_eval_results() -> dict[str, dict[str, dict[str, EvaluationResult]]]:
+    """Build synthetic evaluation results: 4 losses x 3 folds + 2 ensembles.
+
+    Dice values are deterministic so we can verify CV means exactly:
+    - dice_ce:          fold0=0.80, fold1=0.82, fold2=0.84 -> mean=0.8200
+    - dice_ce_cldice:   fold0=0.75, fold1=0.77, fold2=0.79 -> mean=0.7700
+    - cbdice_cldice:    fold0=0.78, fold1=0.80, fold2=0.82 -> mean=0.8000
+    - tversky:          fold0=0.70, fold1=0.72, fold2=0.74 -> mean=0.7200
+
+    Ensemble strategies have flat dice values:
+    - per_loss_single_best: dice=0.85
+    - all_loss_all_best:    dice=0.88  <-- highest overall
+    """
+    results: dict[str, dict[str, dict[str, EvaluationResult]]] = {}
+
+    base_dice = {
+        "dice_ce": 0.80,
+        "dice_ce_cldice": 0.75,
+        "cbdice_cldice": 0.78,
+        "tversky": 0.70,
+    }
+
+    for loss in LOSS_NAMES:
+        for fold in range(NUM_FOLDS):
+            name = f"{loss}_fold{fold}"
+            dice_val = base_dice[loss] + fold * 0.02
+            results[name] = {
+                "minivess": {
+                    "all": _make_eval_result(name, dice=dice_val),
+                },
+            }
+
+    # Ensemble entries
+    results["per_loss_single_best"] = {
+        "minivess": {
+            "all": _make_eval_result("per_loss_single_best", dice=0.85),
+        },
+    }
+    results["all_loss_all_best"] = {
+        "minivess": {
+            "all": _make_eval_result("all_loss_all_best", dice=0.88),
+        },
+    }
+
+    return results
+
+
+def _make_full_eval_config() -> EvaluationConfig:
+    """Config that uses 'dsc' as primary metric (maximize)."""
+    return EvaluationConfig(
+        primary_metric="dsc",
+        primary_metric_direction=MetricDirection.MAXIMIZE,
+        ensemble_strategies=[EnsembleStrategyName.PER_LOSS_SINGLE_BEST],
+        bootstrap_n_resamples=100,
+    )
+
+
+class TestCreateAnalysisExperimentEntries:
+    """Test create_analysis_experiment returns the expected entry structure."""
+
+    def test_returns_list_of_dicts(self) -> None:
+        """create_analysis_experiment returns a list of dicts."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+
+        entries = create_analysis_experiment(all_results, config)
+        assert isinstance(entries, list)
+        assert all(isinstance(e, dict) for e in entries)
+
+    def test_entry_count(self) -> None:
+        """Should return 12 per-fold + 4 cv_mean + 2 ensemble + 1 champion = 19."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+
+        entries = create_analysis_experiment(all_results, config)
+
+        per_fold = [e for e in entries if e["entry_type"] == "per_fold"]
+        cv_mean = [e for e in entries if e["entry_type"] == "cv_mean"]
+        ensemble = [e for e in entries if e["entry_type"] == "ensemble"]
+        champion = [e for e in entries if e["entry_type"] == "champion"]
+
+        assert len(per_fold) == 12, f"Expected 12 per-fold entries, got {len(per_fold)}"
+        assert len(cv_mean) == 4, f"Expected 4 cv_mean entries, got {len(cv_mean)}"
+        assert len(ensemble) == 2, f"Expected 2 ensemble entries, got {len(ensemble)}"
+        assert len(champion) == 1, f"Expected 1 champion entry, got {len(champion)}"
+        assert len(entries) == 19
+
+    def test_entry_has_required_keys(self) -> None:
+        """Each entry must have entry_type, model_name, metrics, primary_metric_value."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+
+        entries = create_analysis_experiment(all_results, config)
+
+        required_keys = {
+            "entry_type",
+            "model_name",
+            "loss_function",
+            "fold_id",
+            "metrics",
+            "primary_metric_value",
+        }
+        for entry in entries:
+            missing = required_keys - set(entry.keys())
+            assert not missing, (
+                f"Entry {entry.get('model_name')} missing keys: {missing}"
+            )
+
+
+class TestPerFoldEntriesHaveCorrectTags:
+    """Each per-fold entry has loss_function, fold_id, and entry_type='per_fold'."""
+
+    def test_per_fold_entry_type(self) -> None:
+        """All per-fold entries have entry_type == 'per_fold'."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+        entries = create_analysis_experiment(all_results, config)
+
+        per_fold = [e for e in entries if e["entry_type"] == "per_fold"]
+        assert all(e["entry_type"] == "per_fold" for e in per_fold)
+
+    def test_per_fold_has_loss_function(self) -> None:
+        """Each per-fold entry has a non-empty loss_function tag."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+        entries = create_analysis_experiment(all_results, config)
+
+        per_fold = [e for e in entries if e["entry_type"] == "per_fold"]
+        for entry in per_fold:
+            assert isinstance(entry["loss_function"], str)
+            assert len(entry["loss_function"]) > 0
+            assert entry["loss_function"] in LOSS_NAMES
+
+    def test_per_fold_has_valid_fold_id(self) -> None:
+        """Each per-fold entry has an integer fold_id in [0, NUM_FOLDS)."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+        entries = create_analysis_experiment(all_results, config)
+
+        per_fold = [e for e in entries if e["entry_type"] == "per_fold"]
+        for entry in per_fold:
+            assert isinstance(entry["fold_id"], int)
+            assert 0 <= entry["fold_id"] < NUM_FOLDS
+
+    def test_per_fold_has_metrics_dict(self) -> None:
+        """Each per-fold entry has a dict of metric_name -> float."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+        entries = create_analysis_experiment(all_results, config)
+
+        per_fold = [e for e in entries if e["entry_type"] == "per_fold"]
+        for entry in per_fold:
+            assert isinstance(entry["metrics"], dict)
+            assert len(entry["metrics"]) > 0
+            for metric_name, value in entry["metrics"].items():
+                assert isinstance(metric_name, str)
+                assert isinstance(value, float)
+
+
+class TestCvMeanEntriesComputedCorrectly:
+    """CV mean entries average the fold scores correctly."""
+
+    def test_cv_mean_dice_ce(self) -> None:
+        """dice_ce CV mean = (0.80 + 0.82 + 0.84) / 3 = 0.82."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+        entries = create_analysis_experiment(all_results, config)
+
+        cv_mean = [e for e in entries if e["entry_type"] == "cv_mean"]
+        dice_ce_mean = [e for e in cv_mean if e["loss_function"] == "dice_ce"]
+        assert len(dice_ce_mean) == 1
+        # dsc metric should be the average across the 3 folds
+        dsc_val = dice_ce_mean[0]["metrics"]["dsc"]
+        assert abs(dsc_val - 0.82) < 1e-6, f"Expected 0.82, got {dsc_val}"
+
+    def test_cv_mean_tversky(self) -> None:
+        """tversky CV mean = (0.70 + 0.72 + 0.74) / 3 = 0.72."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+        entries = create_analysis_experiment(all_results, config)
+
+        cv_mean = [e for e in entries if e["entry_type"] == "cv_mean"]
+        tversky_mean = [e for e in cv_mean if e["loss_function"] == "tversky"]
+        assert len(tversky_mean) == 1
+        dsc_val = tversky_mean[0]["metrics"]["dsc"]
+        assert abs(dsc_val - 0.72) < 1e-6, f"Expected 0.72, got {dsc_val}"
+
+    def test_cv_mean_entry_type_and_fold_id(self) -> None:
+        """CV mean entries have entry_type='cv_mean' and fold_id=None."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+        entries = create_analysis_experiment(all_results, config)
+
+        cv_mean = [e for e in entries if e["entry_type"] == "cv_mean"]
+        assert len(cv_mean) == 4
+        for entry in cv_mean:
+            assert entry["entry_type"] == "cv_mean"
+            assert entry["fold_id"] is None
+
+    def test_cv_mean_primary_metric_value_matches_metrics(self) -> None:
+        """primary_metric_value matches the corresponding metric in metrics dict."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+        entries = create_analysis_experiment(all_results, config)
+
+        cv_mean = [e for e in entries if e["entry_type"] == "cv_mean"]
+        for entry in cv_mean:
+            # primary_metric is "dsc"
+            assert abs(entry["primary_metric_value"] - entry["metrics"]["dsc"]) < 1e-9
+
+
+class TestChampionEntryHasHighestScore:
+    """Champion entry's primary_metric equals the max across all entries."""
+
+    def test_champion_is_highest(self) -> None:
+        """Champion's primary_metric_value is the max of all entries."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+        entries = create_analysis_experiment(all_results, config)
+
+        champion = [e for e in entries if e["entry_type"] == "champion"]
+        assert len(champion) == 1
+        champion_score = champion[0]["primary_metric_value"]
+
+        # all_loss_all_best has dice=0.88, which is the highest
+        assert abs(champion_score - 0.88) < 1e-6
+
+    def test_champion_model_name(self) -> None:
+        """Champion model is all_loss_all_best (highest dice=0.88)."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+        entries = create_analysis_experiment(all_results, config)
+
+        champion = [e for e in entries if e["entry_type"] == "champion"]
+        assert champion[0]["model_name"] == "all_loss_all_best"
+
+    def test_champion_with_minimize_direction(self) -> None:
+        """When direction=minimize, champion has the lowest primary_metric."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = EvaluationConfig(
+            primary_metric="measured_masd",
+            primary_metric_direction=MetricDirection.MINIMIZE,
+            ensemble_strategies=[EnsembleStrategyName.PER_LOSS_SINGLE_BEST],
+            bootstrap_n_resamples=100,
+        )
+        entries = create_analysis_experiment(all_results, config)
+
+        champion = [e for e in entries if e["entry_type"] == "champion"]
+        assert len(champion) == 1
+
+        # All models have measured_masd=1.5 (from _make_fold_result),
+        # so champion should still exist and have a valid score
+        all_primary = [
+            e["primary_metric_value"] for e in entries if e["entry_type"] != "champion"
+        ]
+        champion_val = champion[0]["primary_metric_value"]
+        assert champion_val <= min(v for v in all_primary if v == v)  # NaN-safe
+
+
+class TestAnalysisExperimentQueryableByLoss:
+    """Can filter entries by loss_function."""
+
+    def test_filter_by_dice_ce(self) -> None:
+        """Filtering by loss_function='dice_ce' returns per-fold + cv_mean entries."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+        entries = create_analysis_experiment(all_results, config)
+
+        dice_ce_entries = [e for e in entries if e["loss_function"] == "dice_ce"]
+        # 3 per-fold + 1 cv_mean = 4
+        assert len(dice_ce_entries) == 4
+
+    def test_filter_returns_correct_entry_types(self) -> None:
+        """Filtered entries contain both per_fold and cv_mean types."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+        entries = create_analysis_experiment(all_results, config)
+
+        for loss in LOSS_NAMES:
+            loss_entries = [e for e in entries if e["loss_function"] == loss]
+            types = {e["entry_type"] for e in loss_entries}
+            assert "per_fold" in types, f"{loss} missing per_fold entries"
+            assert "cv_mean" in types, f"{loss} missing cv_mean entry"
+
+    def test_ensemble_entries_have_loss_function_none(self) -> None:
+        """Ensemble entries have loss_function=None (they span multiple losses)."""
+        from minivess.orchestration.flows.analysis_flow import (
+            create_analysis_experiment,
+        )
+
+        all_results = _make_full_eval_results()
+        config = _make_full_eval_config()
+        entries = create_analysis_experiment(all_results, config)
+
+        ensemble_entries = [e for e in entries if e["entry_type"] == "ensemble"]
+        for entry in ensemble_entries:
+            assert entry["loss_function"] is None
