@@ -87,6 +87,18 @@ Every feature, bugfix, or refactor MUST use the self-learning-iterative-coder sk
 
 **Skill reference**: `.claude/skills/self-learning-iterative-coder/SKILL.md`
 
+## Default Loss Function
+
+The default single-model loss is **`cbdice_cldice`** (CbDiceClDiceLoss). This was
+determined by the `dynunet_loss_variation_v2` experiment (2026-02-27) which showed:
+- `cbdice_cldice` achieves **0.906 clDice** (best topology) with only −5.3% DSC penalty
+- `dice_ce` has higher DSC (0.824) but significantly worse topology preservation (0.832 clDice)
+- Full results: `docs/results/dynunet_loss_variation_v2_report.md`
+
+When training a single model (not an ablation sweep), always use `cbdice_cldice` unless
+the researcher explicitly requests a different loss. For multi-loss experiments, use the
+experiment config YAML which specifies the full loss list.
+
 ## Quick Commands
 
 ```bash

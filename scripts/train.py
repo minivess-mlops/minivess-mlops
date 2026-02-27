@@ -74,7 +74,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--loss",
         type=str,
-        default="dice_ce",
+        default="cbdice_cldice",
         help="Loss function name(s), comma-separated for sweep (e.g. dice_ce,cbdice)",
     )
     parser.add_argument(
@@ -355,9 +355,7 @@ def run_fold(
         and evaluation FoldResult.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(
-        "=== Fold %d: loss=%s, device=%s ===", fold_id, loss_name, device
-    )
+    logger.info("=== Fold %d: loss=%s, device=%s ===", fold_id, loss_name, device)
 
     # Optionally limit data for debug
     train_dicts = fold_split.train
@@ -442,7 +440,9 @@ def run_fold(
         )
 
         # Run inference
-        logger.info("Running sliding window inference on %d validation volumes", len(val_dicts))
+        logger.info(
+            "Running sliding window inference on %d validation volumes", len(val_dicts)
+        )
         predictions, labels = inference_runner.infer_dataset(
             model, eval_loader, device=device
         )

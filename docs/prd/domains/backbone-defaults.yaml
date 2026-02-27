@@ -35,10 +35,15 @@ metrics:
 
 # Default loss function preferences
 loss_defaults:
-  primary: dice_ce
+  primary: cbdice_cldice
   alternatives:
-    - dice
-    - focal
+    - dice_ce
+    - dice_ce_cldice
+    - cbdice
+  rationale: >
+    cbdice_cldice selected as default based on dynunet_loss_variation_v2 experiment
+    (2026-02-27): best topology-accuracy tradeoff (0.906 clDice, 0.772 DSC, 1.74 MASD).
+    See docs/results/dynunet_loss_variation_v2_report.md.
 
 # Default augmentation pipeline
 augmentation_defaults:

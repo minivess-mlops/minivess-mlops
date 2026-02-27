@@ -35,7 +35,7 @@ resolved_decisions:
 
   # L3 Technology
   segmentation_models: segresnet  # + SwinUNETR
-  loss_functions: dice_ce
+  loss_functions: cbdice_cldice
   augmentation_stack: monai_plus_torchio
   metrics_framework: torchmetrics  # + metricsreloaded
   ensemble_methods: greedy_soup  # + mean

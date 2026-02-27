@@ -310,7 +310,7 @@ def main(argv: list[str] | None = None) -> None:
     logger.info("Resolved compute profile: %s", profile["name"])
 
     # Delegate to train.py for each loss
-    losses: list[str] = config.get("losses", ["dice_ce"])
+    losses: list[str] = config.get("losses", ["cbdice_cldice"])
     for loss in losses:
         logger.info("Launching training run: loss=%s", loss)
         train_argv = [
