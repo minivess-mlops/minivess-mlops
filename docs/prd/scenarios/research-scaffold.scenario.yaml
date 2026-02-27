@@ -33,7 +33,7 @@ resolved_decisions:
 
   # L3
   segmentation_models: vista3d
-  loss_functions: dice_ce
+  loss_functions: cbdice_cldice
   augmentation_stack: monai_basic
   metrics_framework: monai_metrics
   ensemble_methods: swag

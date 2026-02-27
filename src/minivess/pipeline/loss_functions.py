@@ -301,7 +301,7 @@ class CbDiceClDiceLoss(nn.Module):
 
 
 def build_loss_function(
-    loss_name: str = "dice_ce",
+    loss_name: str = "cbdice_cldice",
     *,
     num_classes: int = 2,
     softmax: bool = True,

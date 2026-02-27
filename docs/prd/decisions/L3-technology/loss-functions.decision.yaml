@@ -5,19 +5,39 @@ description: >
   interacts strongly with model architecture and target anatomy. Vascular
   segmentation specifically benefits from topology-preserving losses like
   clDice that penalize broken connectivity in thin tubular structures.
+  The dynunet_loss_variation_v2 experiment (2026-02-27) resolved the default
+  to cbdice_cldice based on best topology-accuracy tradeoff across 4 losses
+  x 3 folds x 100 epochs. See docs/results/dynunet_loss_variation_v2_report.md.
 
 decision_level: L3_technology
 status: active
-last_updated: 2026-02-23
+last_updated: 2026-02-27
 
 options:
+  - option_id: cbdice_cldice
+    title: "CbDice + clDice Compound (Default)"
+    description: >
+      50% CenterlineBoundaryDice + 50% VesselCompoundLoss (DiceCE+clDice).
+      Best topology-accuracy tradeoff from dynunet_loss_variation_v2:
+      0.906 clDice, 0.772 DSC, 1.74 MASD. Combines diameter-aware
+      boundary supervision (cbDice, Shi et al. 2024) with skeleton-preserving
+      topology (clDice, Shit et al. 2021). Default for single-model training.
+    prior_probability: 0.40
+    status: resolved
+    implementation_status: implemented
+    evidence:
+      - experiment: dynunet_loss_variation_v2
+        date: 2026-02-27
+        report: docs/results/dynunet_loss_variation_v2_report.md
+
   - option_id: dice_ce
     title: "Dice + Cross-Entropy (Combined)"
     description: >
       Standard compound loss combining Dice overlap with voxel-wise
-      cross-entropy. Robust default for medical segmentation. Already
-      the primary training loss.
-    prior_probability: 0.40
+      cross-entropy. Robust baseline for medical segmentation. Best DSC
+      (0.824) and MASD (1.68) but weaker topology preservation (0.832 clDice).
+      Use for non-vascular segmentation or as ablation baseline.
+    prior_probability: 0.25
     status: resolved
     implementation_status: implemented
     complements:
@@ -63,10 +83,11 @@ options:
       Topology-preserving loss that computes Dice on soft-skeletonized
       predictions. Specifically designed for tubular structure
       segmentation where connectivity matters more than volumetric overlap.
-      Critical for vascular imaging.
-    prior_probability: 0.15
-    status: viable
-    implementation_status: not_started
+      Implemented standalone and as component of compound losses.
+      Not recommended standalone (empty prediction collapse risk).
+    prior_probability: 0.10
+    status: resolved
+    implementation_status: implemented
     complements:
       - "segmentation_models.segresnet"
       - "metrics_framework.metricsreloaded"
@@ -188,12 +209,14 @@ domain_applicability:
   general_medical: 0.80
 
 rationale: >
-  Dice+CE (0.40) is the robust default already implemented. Pure Dice (0.20)
-  and Focal (0.15) provide implemented alternatives for class-imbalance
-  scenarios. clDice (0.15) is critical for vascular segmentation where
-  topological connectivity matters more than volumetric overlap — in vascular
-  domain this probability should be boosted. TopK (0.10) is a niche option
-  for extreme imbalance.
+  cbdice_cldice (0.40) is the new default based on dynunet_loss_variation_v2
+  experiment (2026-02-27, 4 losses x 3 folds x 100 epochs). It achieved the
+  best topology-accuracy tradeoff: 0.906 clDice with only -5.3% DSC penalty
+  vs dice_ce baseline. dice_ce (0.25) remains the robust baseline for
+  non-vascular or overlap-focused tasks. Pure Dice (0.20) and Focal (0.15)
+  provide alternatives for class-imbalance scenarios. Standalone clDice (0.10)
+  is implemented but not recommended alone due to empty-prediction collapse risk.
+  TopK (0.10) is a niche option for extreme imbalance.
 
 references:
   - citation_key: milletari2016vnet

@@ -43,7 +43,6 @@ import traceback
 from datetime import UTC, datetime
 from pathlib import Path
 
-import numpy as np
 import torch
 
 # Add project root to path for imports
@@ -78,6 +77,7 @@ from minivess.pipeline.inference import SlidingWindowInferenceRunner
 from minivess.pipeline.loss_functions import build_loss_function
 from minivess.pipeline.metrics import SegmentationMetrics
 from minivess.pipeline.trainer import SegmentationTrainer
+
 # Import system_monitor from same directory (works when run as script)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from system_monitor import MonitorConfig, SystemMonitor
@@ -103,7 +103,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     # Training args (same as train.py)
     parser.add_argument("--compute", type=str, default="cpu")
-    parser.add_argument("--loss", type=str, default="dice_ce")
+    parser.add_argument("--loss", type=str, default="cbdice_cldice")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--splits-file", type=Path, default=DEFAULT_SPLIT_PATH)
@@ -189,15 +189,12 @@ def _build_configs(
     if hasattr(args, "checkpoint_config") and args.checkpoint_config:
         ckpt_cfg = args.checkpoint_config  # dict from YAML
         tracked = [
-            TrackedMetricConfig(**m)
-            for m in ckpt_cfg.get("tracked_metrics", [])
+            TrackedMetricConfig(**m) for m in ckpt_cfg.get("tracked_metrics", [])
         ]
         if tracked:
             training_config.checkpoint = CheckpointConfig(
                 tracked_metrics=tracked,
-                early_stopping_strategy=ckpt_cfg.get(
-                    "early_stopping_strategy", "all"
-                ),
+                early_stopping_strategy=ckpt_cfg.get("early_stopping_strategy", "all"),
                 primary_metric=ckpt_cfg.get("primary_metric", "val_loss"),
                 min_delta=ckpt_cfg.get("min_delta", 1e-4),
                 min_epochs=ckpt_cfg.get("min_epochs", 0),
@@ -285,7 +282,7 @@ class CheckpointManager:
             "current_loss": "cbdice",
             "mlflow_run_ids": {"dice_ce": "abc123"},
             "fold_results": {"dice_ce": [...]},
-            "last_update": "2026-02-25T14:30:00+00:00"
+            "last_update": "2026-02-25T14:30:00+00:00",
         }
     """
 
@@ -376,9 +373,7 @@ def run_fold_safe(
     and explicit memory cleanup.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(
-        "=== Fold %d: loss=%s, device=%s ===", fold_id, loss_name, device
-    )
+    logger.info("=== Fold %d: loss=%s, device=%s ===", fold_id, loss_name, device)
 
     # Optionally limit data for debug
     train_dicts = fold_split.train
@@ -547,9 +542,7 @@ def run_monitored_experiment(args: argparse.Namespace) -> dict:
     args.log_dir.mkdir(parents=True, exist_ok=True)
 
     # Setup file logging (in addition to console)
-    file_handler = logging.FileHandler(
-        args.log_dir / "training.log", encoding="utf-8"
-    )
+    file_handler = logging.FileHandler(args.log_dir / "training.log", encoding="utf-8")
     file_handler.setFormatter(
         logging.Formatter("%(asctime)s %(name)s %(levelname)s: %(message)s")
     )
@@ -569,7 +562,9 @@ def run_monitored_experiment(args: argparse.Namespace) -> dict:
                 parts = line.split()
                 if len(parts) >= 2:
                     meminfo[parts[0].rstrip(":")] = int(parts[1])
-        swap_used_gb = (meminfo.get("SwapTotal", 0) - meminfo.get("SwapFree", 0)) / (1024 * 1024)
+        swap_used_gb = (meminfo.get("SwapTotal", 0) - meminfo.get("SwapFree", 0)) / (
+            1024 * 1024
+        )
         ram_available_gb = meminfo.get("MemAvailable", 0) / (1024 * 1024)
         if swap_used_gb > 5.0:
             logger.warning(
@@ -710,9 +705,7 @@ def _run_experiment_inner(
         ):
             for fold_id, fold_split in enumerate(splits):
                 # Skip completed folds on resume
-                if args.resume and checkpoint_mgr.is_fold_complete(
-                    loss_name, fold_id
-                ):
+                if args.resume and checkpoint_mgr.is_fold_complete(loss_name, fold_id):
                     logger.info(
                         "SKIP (already complete): loss=%s fold=%d",
                         loss_name,
