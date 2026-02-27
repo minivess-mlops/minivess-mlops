@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import fields
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import torch
