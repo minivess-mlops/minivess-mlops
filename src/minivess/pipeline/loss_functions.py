@@ -391,5 +391,9 @@ def build_loss_function(
         )
 
         return SkeletonRecallLoss(softmax=softmax)
+    if loss_name == "cape":
+        from minivess.pipeline.vendored_losses.cape import CAPELoss
+
+        return CAPELoss()
     msg = f"Unknown loss function: {loss_name}"
     raise ValueError(msg)
