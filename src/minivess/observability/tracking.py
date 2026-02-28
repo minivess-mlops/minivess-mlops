@@ -91,7 +91,11 @@ class ExperimentTracker:
             merged_tags.update(tags)
         merged_tags = dict(sorted(merged_tags.items()))
 
-        with mlflow.start_run(run_name=effective_name, tags=merged_tags) as run:
+        with mlflow.start_run(
+            run_name=effective_name,
+            tags=merged_tags,
+            log_system_metrics=True,
+        ) as run:
             self._run_id = run.info.run_id
             try:
                 self._log_config()

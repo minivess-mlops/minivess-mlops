@@ -442,6 +442,27 @@ class TestExperimentTrackerLocalBackend:
         with tracker.start_run():
             tracker.log_model_info(model)
 
+    def test_system_metrics_logging_enabled(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """start_run should enable MLflow native system metrics (CPU/GPU/mem)."""
+        from unittest.mock import patch as mock_patch
+
+        from minivess.observability.tracking import ExperimentTracker
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with mock_patch(
+            "mlflow.start_run", wraps=__import__("mlflow").start_run
+        ) as mock_sr:
+            with tracker.start_run():
+                pass
+            # Verify log_system_metrics=True was passed
+            mock_sr.assert_called_once()
+            call_kwargs = mock_sr.call_args[1]
+            assert call_kwargs.get("log_system_metrics") is True
+
     def test_log_dataset_profile_logs_params(
         self,
         experiment_config: ExperimentConfig,
