@@ -11,7 +11,7 @@ from monai.losses.cldice import SoftclDiceLoss
 from torch import nn
 
 
-class VesselCompoundLoss(nn.Module):
+class VesselCompoundLoss(nn.Module):  # type: ignore[misc]
     """Compound loss combining DiceCE + SoftclDice for vessel segmentation.
 
     Parameters
@@ -80,7 +80,7 @@ def _labels_to_onehot(
     return probs, labels_onehot
 
 
-class ClassBalancedDiceLoss(nn.Module):
+class ClassBalancedDiceLoss(nn.Module):  # type: ignore[misc]
     """Class-balanced Dice loss with inverse-frequency weighting.
 
     Computes per-class weights from label frequencies in each batch,
@@ -146,7 +146,7 @@ class ClassBalancedDiceLoss(nn.Module):
         return 1.0 - weighted_dice.mean()
 
 
-class BettiLoss(nn.Module):
+class BettiLoss(nn.Module):  # type: ignore[misc]
     """Differentiable Betti-0 (connected component) topology loss.
 
     Approximates Betti-0 differences using soft thresholding and
@@ -206,7 +206,7 @@ class BettiLoss(nn.Module):
         return self.lambda_betti * (pred_frag - gt_frag).abs()
 
 
-class TopologyCompoundLoss(nn.Module):
+class TopologyCompoundLoss(nn.Module):  # type: ignore[misc]
     """Full topology-aware compound loss: DiceCE + clDice + Betti.
 
     Parameters
@@ -254,7 +254,7 @@ class TopologyCompoundLoss(nn.Module):
         )
 
 
-class CbDiceClDiceLoss(nn.Module):
+class CbDiceClDiceLoss(nn.Module):  # type: ignore[misc]
     """Compound loss combining cbDice + dice_ce_cldice for vessel segmentation.
 
     cbDice captures boundary-aware centerline topology (diameter-sensitive),
@@ -385,5 +385,11 @@ def build_loss_function(
         from minivess.pipeline.vendored_losses.coletra import TopoLoss
 
         return TopoLoss(softmax=softmax)
+    if loss_name == "skeleton_recall":
+        from minivess.pipeline.vendored_losses.skeleton_recall import (
+            SkeletonRecallLoss,
+        )
+
+        return SkeletonRecallLoss(softmax=softmax)
     msg = f"Unknown loss function: {loss_name}"
     raise ValueError(msg)
