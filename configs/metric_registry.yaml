@@ -189,3 +189,40 @@ metrics:
     description: >
       Improved compound metric replacing MASD+clDice: 0.5 * NSD + 0.5 * clDice.
       Both components are in [0, 1] with consistent scale, avoiding range collapse.
+
+  # --------------------------------------------------------------------------
+  # Graph-based metrics (from vessel graph extraction — Issue #124)
+  # --------------------------------------------------------------------------
+
+  - name: apls
+    display_name: "Average Path Length Similarity (APLS)"
+    mlflow_name: "eval_fold{fold_id}_apls"
+    direction: maximize
+    unit: ""
+    bounds: [0.0, 1.0]
+    description: >
+      Graph-based connectivity metric comparing shortest-path lengths between
+      matched endpoint pairs in predicted and ground truth vessel graphs.
+      Uses Hungarian matching on endpoints + spatial penalty for distant matches.
+
+  - name: skeleton_recall_metric
+    display_name: "Skeleton Recall"
+    mlflow_name: "eval_fold{fold_id}_skeleton_recall"
+    direction: maximize
+    unit: ""
+    bounds: [0.0, 1.0]
+    description: >
+      Fraction of ground truth skeleton voxels covered by the prediction mask
+      within a distance tolerance. Measures how well the prediction preserves
+      the true centreline structure.
+
+  - name: bdr
+    display_name: "Branch Detection Rate (BDR)"
+    mlflow_name: "eval_fold{fold_id}_bdr"
+    direction: maximize
+    unit: ""
+    bounds: [0.0, 1.0]
+    description: >
+      Fraction of ground truth vessel branches that are matched by predicted
+      branches, based on endpoint proximity and length similarity thresholds.
+      Uses Hungarian matching on branch pairs.
