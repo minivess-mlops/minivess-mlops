@@ -449,5 +449,9 @@ def build_loss_function(
         from minivess.pipeline.vendored_losses.cape import CAPELoss
 
         return CAPELoss()
+    if loss_name == "betti_matching":
+        from minivess.pipeline.vendored_losses.betti_matching import BettiMatchingLoss
+
+        return BettiMatchingLoss(softmax=softmax)
     msg = f"Unknown loss function: {loss_name}"
     raise ValueError(msg)

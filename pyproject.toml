@@ -62,6 +62,7 @@ dependencies = [
     "openlineage-python>=1.26,<2.0",
     "nibabel>=5.3.3",
     "onnx>=1.20.1",
+    "gudhi>=3.11.0",
 ]
 
 [project.optional-dependencies]
