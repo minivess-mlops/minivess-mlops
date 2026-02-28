@@ -171,6 +171,114 @@ def _is_better(new: float, current: float, maximize: bool) -> bool:
     return new < current
 
 
+def rank_then_aggregate(
+    entries: list[dict[str, Any]],
+    *,
+    maximize_metrics: list[str],
+    minimize_metrics: list[str],
+    topology_metric: str = "cldice",
+    overlap_metric: str = "dsc",
+) -> dict[str, str]:
+    """Select champions via rank-then-aggregate across multiple metrics.
+
+    For each metric, models are ranked (1 = best). NaN values get worst rank.
+    The balanced champion has the lowest mean rank across all metrics.
+    Topology champion is the best on `topology_metric`.
+    Overlap champion is the best on `overlap_metric`.
+
+    Parameters
+    ----------
+    entries:
+        List of dicts with 'model_id' and metric values as keys.
+    maximize_metrics:
+        Metrics where higher is better.
+    minimize_metrics:
+        Metrics where lower is better.
+    topology_metric:
+        Metric for topology champion (default: 'cldice').
+    overlap_metric:
+        Metric for overlap champion (default: 'dsc').
+
+    Returns
+    -------
+    Dict with keys 'balanced', 'topology', 'overlap', each mapping to
+    the winning model_id.
+    """
+    if not entries:
+        return {"balanced": "", "topology": "", "overlap": ""}
+
+    n = len(entries)
+    all_metrics = [*maximize_metrics, *minimize_metrics]
+    model_ids = [e["model_id"] for e in entries]
+
+    # Compute ranks per metric
+    ranks: dict[str, list[float]] = {}
+    for metric in all_metrics:
+        values = []
+        for e in entries:
+            val = e.get(metric, float("nan"))
+            values.append(val)
+
+        # Determine sort direction
+        reverse = metric in maximize_metrics  # maximize → descending sort
+
+        # Sort indices, NaN always last
+        indexed = list(enumerate(values))
+        indexed.sort(
+            key=lambda iv: (
+                math.isnan(iv[1]),
+                -iv[1] if reverse else iv[1],
+            )
+        )
+
+        # Assign ranks (1-based)
+        metric_ranks = [0.0] * n
+        for rank_pos, (orig_idx, _val) in enumerate(indexed):
+            metric_ranks[orig_idx] = float(rank_pos + 1)
+        ranks[metric] = metric_ranks
+
+    # Compute mean rank per model
+    mean_ranks = []
+    for i in range(n):
+        total = sum(ranks[m][i] for m in all_metrics)
+        mean_ranks.append(total / len(all_metrics))
+
+    # Balanced champion: lowest mean rank (first in input order for ties)
+    best_balanced_idx = min(range(n), key=lambda i: mean_ranks[i])
+
+    # Topology champion: best on topology_metric
+    best_topo_idx = _best_by_metric(
+        entries, topology_metric, topology_metric in maximize_metrics
+    )
+
+    # Overlap champion: best on overlap_metric
+    best_overlap_idx = _best_by_metric(
+        entries, overlap_metric, overlap_metric in maximize_metrics
+    )
+
+    return {
+        "balanced": model_ids[best_balanced_idx],
+        "topology": model_ids[best_topo_idx],
+        "overlap": model_ids[best_overlap_idx],
+    }
+
+
+def _best_by_metric(entries: list[dict[str, Any]], metric: str, maximize: bool) -> int:
+    """Find the index of the entry with the best value for a single metric."""
+    best_idx = 0
+    best_val = float("-inf") if maximize else float("inf")
+
+    for i, e in enumerate(entries):
+        val = e.get(metric, float("nan"))
+        if math.isnan(val):
+            continue
+        if maximize and val > best_val or not maximize and val < best_val:
+            best_val = val
+            best_idx = i
+
+    return best_idx
+
+
 # ---------------------------------------------------------------------------
 # Filesystem operations
 # ---------------------------------------------------------------------------
