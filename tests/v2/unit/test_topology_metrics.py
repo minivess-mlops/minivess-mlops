@@ -443,3 +443,108 @@ class TestComputeJunctionF1:
         empty = np.zeros((16, 16, 16), dtype=np.uint8)
         result = compute_junction_f1(empty, empty, tolerance=3)
         assert result["f1"] == pytest.approx(1.0, abs=0.01)
+
+
+# ---------------------------------------------------------------------------
+# APLS (Average Path Length Similarity) — Issue #124
+# ---------------------------------------------------------------------------
+
+
+class TestAPLS:
+    """Tests for APLS (Average Path Length Similarity) metric."""
+
+    def test_apls_perfect_match_returns_one(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_apls
+
+        mask = _make_y_bifurcation((32, 32, 32))
+        result = compute_apls(mask, mask)
+        assert result == pytest.approx(1.0, abs=0.05)
+
+    def test_apls_no_match_returns_zero(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_apls
+
+        pred = _make_tube((32, 32, 32), (4, 4, 4), (28, 4, 4), radius=2)
+        gt = _make_tube((32, 32, 32), (4, 28, 28), (28, 28, 28), radius=2)
+        result = compute_apls(pred, gt)
+        assert result == pytest.approx(0.0, abs=0.1)
+
+    def test_apls_partial_match_intermediate(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_apls
+
+        gt = _make_y_bifurcation((32, 32, 32))
+        # Prediction has only the trunk (partial match)
+        pred = _make_tube((32, 32, 32), (0, 16, 16), (16, 16, 16), radius=2)
+        result = compute_apls(pred, gt)
+        # Should be between 0 and 1
+        assert 0.0 <= result <= 1.0
+
+    def test_apls_empty_masks(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_apls
+
+        empty = np.zeros((16, 16, 16), dtype=np.uint8)
+        result = compute_apls(empty, empty)
+        assert result == pytest.approx(1.0, abs=0.01)
+
+
+# ---------------------------------------------------------------------------
+# Skeleton Recall Metric — Issue #124
+# ---------------------------------------------------------------------------
+
+
+class TestSkeletonRecallMetric:
+    """Tests for skeleton recall evaluation metric."""
+
+    def test_skeleton_recall_metric_perfect_returns_one(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_skeleton_recall
+
+        mask = _make_tube((32, 32, 32), (4, 16, 16), (28, 16, 16), radius=3)
+        result = compute_skeleton_recall(mask, mask)
+        assert result == pytest.approx(1.0, abs=0.01)
+
+    def test_skeleton_recall_metric_empty_returns_one(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_skeleton_recall
+
+        empty = np.zeros((16, 16, 16), dtype=np.uint8)
+        result = compute_skeleton_recall(empty, empty)
+        assert result == pytest.approx(1.0, abs=0.01)
+
+    def test_skeleton_recall_metric_partial(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_skeleton_recall
+
+        gt = _make_tube((32, 32, 32), (4, 16, 16), (28, 16, 16), radius=3)
+        # Prediction covers only half the tube
+        pred = _make_tube((32, 32, 32), (4, 16, 16), (16, 16, 16), radius=3)
+        result = compute_skeleton_recall(pred, gt)
+        assert 0.0 < result < 1.0
+
+
+# ---------------------------------------------------------------------------
+# Branch Detection Rate (BDR) — Issue #124
+# ---------------------------------------------------------------------------
+
+
+class TestBranchDetectionRate:
+    """Tests for Branch Detection Rate metric."""
+
+    def test_bdr_perfect_match_returns_one(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_bdr
+
+        mask = _make_y_bifurcation((32, 32, 32))
+        result = compute_bdr(mask, mask)
+        assert result == pytest.approx(1.0, abs=0.05)
+
+    def test_bdr_missing_branches_below_one(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_bdr
+
+        gt = _make_y_bifurcation((32, 32, 32))
+        # Prediction has only the trunk
+        pred = _make_tube((32, 32, 32), (0, 16, 16), (16, 16, 16), radius=2)
+        result = compute_bdr(pred, gt)
+        assert result < 1.0
+
+    def test_bdr_empty_masks(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_bdr
+
+        empty = np.zeros((16, 16, 16), dtype=np.uint8)
+        result = compute_bdr(empty, empty)
+        assert result == pytest.approx(1.0, abs=0.01)

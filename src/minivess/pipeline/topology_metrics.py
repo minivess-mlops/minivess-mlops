@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 
+import networkx as nx
 import numpy as np
 import torch
 from monai.metrics import HausdorffDistanceMetric, SurfaceDiceMetric
@@ -356,6 +357,318 @@ def compute_junction_f1(
     )
 
     return {"precision": precision, "recall": recall, "f1": f1}
+
+
+# ---------------------------------------------------------------------------
+# APLS (Average Path Length Similarity) — Issue #124
+# ---------------------------------------------------------------------------
+
+
+def compute_apls(
+    pred_mask: np.ndarray,
+    gt_mask: np.ndarray,
+) -> float:
+    """Compute Average Path Length Similarity between pred and GT vessel graphs.
+
+    Extracts vessel graphs from both masks, matches endpoint nodes,
+    and compares shortest path lengths between matched node pairs.
+
+    Uses networkx.shortest_path_length for path computation and
+    scipy.optimize.linear_sum_assignment for node matching.
+
+    Parameters
+    ----------
+    pred_mask:
+        Binary 3D prediction mask.
+    gt_mask:
+        Binary 3D ground truth mask.
+
+    Returns
+    -------
+    APLS score in [0, 1]. 1.0 = perfect path length agreement.
+    """
+    from minivess.pipeline.vessel_graph import extract_vessel_graph
+
+    pred_bin = (pred_mask > 0).astype(np.uint8)
+    gt_bin = (gt_mask > 0).astype(np.uint8)
+
+    # Handle empty masks
+    if pred_bin.sum() == 0 and gt_bin.sum() == 0:
+        return 1.0
+    if pred_bin.sum() == 0 or gt_bin.sum() == 0:
+        return 0.0
+
+    # Extract vessel graphs
+    pred_graph = extract_vessel_graph(pred_bin, min_branch_length=0)
+    gt_graph = extract_vessel_graph(gt_bin, min_branch_length=0)
+
+    if pred_graph.number_of_nodes() < 2 or gt_graph.number_of_nodes() < 2:
+        # Need at least 2 nodes for path comparison
+        if pred_graph.number_of_nodes() == gt_graph.number_of_nodes():
+            return 1.0
+        return 0.0
+
+    # Get endpoint nodes
+    gt_endpoints = [
+        n for n, d in gt_graph.nodes(data=True) if d.get("node_type") == "endpoint"
+    ]
+    pred_endpoints = [
+        n for n, d in pred_graph.nodes(data=True) if d.get("node_type") == "endpoint"
+    ]
+
+    if len(gt_endpoints) < 2 or len(pred_endpoints) < 2:
+        return 0.0
+
+    # Match endpoints by spatial proximity (Hungarian algorithm)
+    gt_coords = np.array(
+        [
+            [gt_graph.nodes[n]["z"], gt_graph.nodes[n]["y"], gt_graph.nodes[n]["x"]]
+            for n in gt_endpoints
+        ]
+    )
+    pred_coords = np.array(
+        [
+            [
+                pred_graph.nodes[n]["z"],
+                pred_graph.nodes[n]["y"],
+                pred_graph.nodes[n]["x"],
+            ]
+            for n in pred_endpoints
+        ]
+    )
+
+    # Cost matrix: Euclidean distance between endpoints
+    from scipy.spatial.distance import cdist
+
+    cost_matrix = cdist(gt_coords, pred_coords, metric="euclidean")
+    gt_idx, pred_idx = linear_sum_assignment(cost_matrix)
+
+    # Penalize poor endpoint matches (far apart = not the same structure)
+    max_match_dist = max(pred_mask.shape) * 0.3  # 30% of volume diagonal
+    match_penalties = []
+    for gi, pi in zip(gt_idx, pred_idx, strict=True):
+        dist = cost_matrix[gi, pi]
+        if dist > max_match_dist:
+            match_penalties.append(0.0)
+        else:
+            match_penalties.append(1.0 - dist / max_match_dist)
+
+    if not match_penalties or np.mean(match_penalties) < 0.1:
+        return 0.0
+
+    # Compute path length similarity for matched endpoint pairs
+    similarities = []
+    matched_gt = [gt_endpoints[i] for i in gt_idx]
+    matched_pred = [pred_endpoints[i] for i in pred_idx]
+
+    # For each pair of matched endpoints, compare shortest paths
+    for i in range(len(matched_gt)):
+        for j in range(i + 1, len(matched_gt)):
+            gt_src, gt_dst = matched_gt[i], matched_gt[j]
+            pred_src, pred_dst = matched_pred[i], matched_pred[j]
+
+            try:
+                gt_path_len = nx.shortest_path_length(
+                    gt_graph, gt_src, gt_dst, weight="length"
+                )
+            except nx.NetworkXNoPath:
+                continue
+
+            try:
+                pred_path_len = nx.shortest_path_length(
+                    pred_graph, pred_src, pred_dst, weight="length"
+                )
+            except nx.NetworkXNoPath:
+                similarities.append(0.0)
+                continue
+
+            if gt_path_len == 0 and pred_path_len == 0:
+                similarities.append(1.0)
+            elif gt_path_len == 0:
+                similarities.append(0.0)
+            else:
+                ratio = min(pred_path_len, gt_path_len) / max(
+                    pred_path_len, gt_path_len
+                )
+                similarities.append(ratio)
+
+    if not similarities:
+        return 0.0
+
+    return float(np.mean(similarities))
+
+
+# ---------------------------------------------------------------------------
+# Skeleton Recall Metric — Issue #124
+# ---------------------------------------------------------------------------
+
+
+def compute_skeleton_recall(
+    pred_mask: np.ndarray,
+    gt_mask: np.ndarray,
+    *,
+    tolerance: int = 2,
+) -> float:
+    """Compute skeleton recall: fraction of GT skeleton covered by prediction.
+
+    Extracts true morphological skeleton of GT via skimage.morphology.skeletonize,
+    then measures what fraction of GT skeleton voxels are within `tolerance`
+    voxels of the prediction foreground.
+
+    Parameters
+    ----------
+    pred_mask:
+        Binary 3D prediction mask.
+    gt_mask:
+        Binary 3D ground truth mask.
+    tolerance:
+        Distance tolerance in voxels. A GT skeleton voxel is "covered"
+        if it's within this distance of any prediction foreground voxel.
+
+    Returns
+    -------
+    Recall in [0, 1]. 1.0 = all GT skeleton voxels covered.
+    """
+    from skimage.morphology import skeletonize
+
+    pred_bin = (pred_mask > 0).astype(np.uint8)
+    gt_bin = (gt_mask > 0).astype(np.uint8)
+
+    if gt_bin.sum() == 0:
+        return 1.0
+
+    # Compute true GT skeleton via skimage
+    gt_skeleton = skeletonize(gt_bin).astype(np.uint8)
+
+    if gt_skeleton.sum() == 0:
+        # Thin structure: fall back to the mask itself
+        gt_skeleton = gt_bin
+
+    n_gt_skel = int(gt_skeleton.sum())
+
+    if pred_bin.sum() == 0:
+        return 0.0
+
+    # Compute distance transform of prediction foreground
+    pred_dt = ndimage.distance_transform_edt(1 - pred_bin)
+
+    # Count GT skeleton voxels within tolerance of prediction
+    gt_skel_coords = np.argwhere(gt_skeleton > 0)
+    covered = 0
+    for coord in gt_skel_coords:
+        if pred_dt[coord[0], coord[1], coord[2]] <= tolerance:
+            covered += 1
+
+    return float(covered) / n_gt_skel
+
+
+# ---------------------------------------------------------------------------
+# Branch Detection Rate (BDR) — Issue #124
+# ---------------------------------------------------------------------------
+
+
+def compute_bdr(
+    pred_mask: np.ndarray,
+    gt_mask: np.ndarray,
+    *,
+    length_tolerance: float = 0.5,
+    endpoint_tolerance: float = 5.0,
+) -> float:
+    """Compute Branch Detection Rate: fraction of GT branches matched in prediction.
+
+    Extracts vessel graphs from both masks via skan, then matches branches
+    (edges) based on endpoint proximity using Hungarian algorithm.
+
+    A GT branch is "detected" if a matching prediction branch exists with:
+    - Both endpoints within `endpoint_tolerance` voxels
+    - Similar length (within `length_tolerance` relative difference)
+
+    Parameters
+    ----------
+    pred_mask:
+        Binary 3D prediction mask.
+    gt_mask:
+        Binary 3D ground truth mask.
+    length_tolerance:
+        Maximum relative length difference for branch matching.
+    endpoint_tolerance:
+        Maximum Euclidean distance for endpoint matching.
+
+    Returns
+    -------
+    BDR in [0, 1]. 1.0 = all GT branches detected.
+    """
+    from minivess.pipeline.vessel_graph import extract_vessel_graph
+
+    pred_bin = (pred_mask > 0).astype(np.uint8)
+    gt_bin = (gt_mask > 0).astype(np.uint8)
+
+    if gt_bin.sum() == 0 and pred_bin.sum() == 0:
+        return 1.0
+    if gt_bin.sum() == 0:
+        return 1.0
+    if pred_bin.sum() == 0:
+        return 0.0
+
+    gt_graph = extract_vessel_graph(gt_bin, min_branch_length=0)
+    pred_graph = extract_vessel_graph(pred_bin, min_branch_length=0)
+
+    gt_edges = list(gt_graph.edges(data=True))
+    pred_edges = list(pred_graph.edges(data=True))
+
+    if len(gt_edges) == 0:
+        return 1.0
+    if len(pred_edges) == 0:
+        return 0.0
+
+    # Match branches by endpoint proximity
+    n_gt = len(gt_edges)
+    n_pred = len(pred_edges)
+
+    def _edge_endpoints(
+        graph: nx.Graph, src: int, dst: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        s = np.array(
+            [graph.nodes[src]["z"], graph.nodes[src]["y"], graph.nodes[src]["x"]],
+            dtype=float,
+        )
+        d = np.array(
+            [graph.nodes[dst]["z"], graph.nodes[dst]["y"], graph.nodes[dst]["x"]],
+            dtype=float,
+        )
+        return s, d
+
+    # Build cost matrix
+    cost = np.full((n_gt, n_pred), 1e6)
+    for i, (gs, gd, gdata) in enumerate(gt_edges):
+        gs_coord, gd_coord = _edge_endpoints(gt_graph, gs, gd)
+        for j, (ps, pd, pdata) in enumerate(pred_edges):
+            ps_coord, pd_coord = _edge_endpoints(pred_graph, ps, pd)
+
+            # Try both orientations
+            dist_fwd = np.linalg.norm(gs_coord - ps_coord) + np.linalg.norm(
+                gd_coord - pd_coord
+            )
+            dist_rev = np.linalg.norm(gs_coord - pd_coord) + np.linalg.norm(
+                gd_coord - ps_coord
+            )
+            min_dist = min(float(dist_fwd), float(dist_rev))
+
+            if min_dist <= 2 * endpoint_tolerance:
+                # Check length similarity
+                gl = gdata.get("length", 1.0)
+                pl = pdata.get("length", 1.0)
+                len_ratio = abs(gl - pl) / gl if gl > 0 else 0.0
+
+                if len_ratio <= length_tolerance:
+                    cost[i, j] = min_dist
+
+    gt_idx, pred_idx = linear_sum_assignment(cost)
+    detected = sum(
+        1 for gi, pi in zip(gt_idx, pred_idx, strict=True) if cost[gi, pi] < 1e5
+    )
+
+    return float(detected) / n_gt
 
 
 # ---------------------------------------------------------------------------
