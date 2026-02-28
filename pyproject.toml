@@ -63,6 +63,7 @@ dependencies = [
     "nibabel>=5.3.3",
     "onnx>=1.20.1",
     "gudhi>=3.11.0",
+    "skan>=0.13.1",
 ]
 
 [project.optional-dependencies]
