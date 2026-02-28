@@ -64,11 +64,18 @@ Everything must work identically on:
 
 1. **uv ONLY** — Never use pip, conda, poetry, or requirements.txt. Use `uv add`, `uv sync`, `uv run`.
 2. **TDD MANDATORY** — All implementation MUST follow the self-learning-iterative-coder skill (`.claude/skills/self-learning-iterative-coder/SKILL.md`). Write failing tests FIRST, then implement. No exceptions.
-3. **Pre-commit Required** — All changes must pass pre-commit hooks before commit.
-4. **Encoding** — Always specify `encoding='utf-8'` for file operations.
-5. **Paths** — Always use `pathlib.Path()`, never string concatenation.
-6. **Timezone** — Always use `datetime.now(timezone.utc)`, never `datetime.now()`.
-7. **`from __future__ import annotations`** — At the top of every Python file.
+3. **Library-First (Non-Negotiable)** — Before implementing ANY algorithm, loss function,
+   metric, or data processing step, ALWAYS search for existing implementations in established
+   libraries (PyTorch, MONAI, scipy, skimage, networkx, gudhi, etc.) or peer-reviewed
+   reference repos. Only write custom code when no suitable library exists. For hybrid cases
+   (e.g., loss functions), use library code for non-differentiable parts (GT processing)
+   and custom code only for the differentiable prediction path. Rationale: library code has
+   more eyes, fewer bugs, and better performance than anything we write from scratch.
+4. **Pre-commit Required** — All changes must pass pre-commit hooks before commit.
+5. **Encoding** — Always specify `encoding='utf-8'` for file operations.
+6. **Paths** — Always use `pathlib.Path()`, never string concatenation.
+7. **Timezone** — Always use `datetime.now(timezone.utc)`, never `datetime.now()`.
+8. **`from __future__ import annotations`** — At the top of every Python file.
 
 ## TDD Workflow (Non-Negotiable)
 
