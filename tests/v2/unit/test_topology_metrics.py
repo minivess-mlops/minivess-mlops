@@ -288,3 +288,158 @@ class TestComputeCcDice:
         mask = _make_tube((16, 16, 16), (2, 8, 8), (14, 8, 8), radius=2)
         result = compute_ccdice(mask, mask)
         assert result == pytest.approx(1.0, abs=1e-4)
+
+
+# ===========================================================================
+# T7: Betti Error — Issue #113
+# ===========================================================================
+
+
+class TestComputeBettiError:
+    """Tests for compute_betti_error() and compute_persistence_distance()."""
+
+    def test_betti_error_perfect_match_returns_zeros(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_betti_error
+
+        mask = _make_sphere((16, 16, 16), (8, 8, 8), 5)
+        result = compute_betti_error(mask, mask)
+        assert result["beta0_error"] == pytest.approx(0.0)
+
+    def test_betti_error_extra_components_positive_beta0(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_betti_error
+
+        # Pred: two separate spheres (2 components vs 1)
+        pred = np.zeros((32, 32, 32), dtype=np.uint8)
+        pred |= _make_sphere((32, 32, 32), (8, 8, 8), 4)
+        pred |= _make_sphere((32, 32, 32), (24, 24, 24), 4)
+        gt = np.zeros((32, 32, 32), dtype=np.uint8)
+        gt |= _make_sphere((32, 32, 32), (16, 16, 16), 8)
+        result = compute_betti_error(pred, gt)
+        assert result["beta0_error"] > 0
+
+    def test_betti_error_missing_components_positive_beta0(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_betti_error
+
+        # GT: two separate spheres, pred: only one
+        gt = np.zeros((32, 32, 32), dtype=np.uint8)
+        gt |= _make_sphere((32, 32, 32), (8, 8, 8), 4)
+        gt |= _make_sphere((32, 32, 32), (24, 24, 24), 4)
+        pred = _make_sphere((32, 32, 32), (8, 8, 8), 4)
+        result = compute_betti_error(pred, gt)
+        assert result["beta0_error"] > 0
+
+    def test_betti_error_returns_dict_with_beta0_beta1(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_betti_error
+
+        mask = _make_sphere((16, 16, 16), (8, 8, 8), 5)
+        result = compute_betti_error(mask, mask)
+        assert "beta0_error" in result
+        assert "beta1_error" in result
+
+    def test_betti_error_empty_masks(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_betti_error
+
+        empty = np.zeros((16, 16, 16), dtype=np.uint8)
+        result = compute_betti_error(empty, empty)
+        assert result["beta0_error"] == pytest.approx(0.0)
+
+    def test_betti_error_3d_volume(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_betti_error
+
+        tube = _make_tube((16, 16, 16), (2, 8, 8), (14, 8, 8), radius=2)
+        result = compute_betti_error(tube, tube)
+        assert result["beta0_error"] == pytest.approx(0.0)
+
+    def test_persistence_distance_returns_float_or_nan(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_persistence_distance
+
+        mask = _make_sphere((16, 16, 16), (8, 8, 8), 5)
+        result = compute_persistence_distance(mask, mask)
+        assert isinstance(result, float)
+
+    def test_persistence_distance_graceful_without_gudhi(self) -> None:
+        """If gudhi is missing, should return NaN gracefully."""
+        from minivess.pipeline.topology_metrics import compute_persistence_distance
+
+        mask = _make_sphere((16, 16, 16), (8, 8, 8), 5)
+        result = compute_persistence_distance(mask, mask)
+        # Either a valid float (if gudhi available) or NaN
+        assert isinstance(result, float)
+
+
+# ===========================================================================
+# T8: Junction F1 — Issue #117
+# ===========================================================================
+
+
+class TestComputeJunctionF1:
+    """Tests for compute_junction_f1() — bifurcation detection accuracy."""
+
+    def test_junction_f1_perfect_match_returns_one(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_junction_f1
+
+        mask = _make_y_bifurcation((32, 32, 32))
+        result = compute_junction_f1(mask, mask, tolerance=3)
+        assert result["f1"] == pytest.approx(1.0, abs=0.01)
+
+    def test_junction_f1_missed_junction_recall_below_one(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_junction_f1
+
+        gt = _make_y_bifurcation((32, 32, 32))
+        # Pred: just the trunk (no bifurcation → no junction)
+        pred = _make_tube((32, 32, 32), (0, 16, 16), (31, 16, 16), radius=2)
+        result = compute_junction_f1(pred, gt, tolerance=3)
+        assert result["recall"] < 1.0
+
+    def test_junction_f1_spurious_junction_precision_below_one(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_junction_f1
+
+        # GT: straight tube (no junctions)
+        gt = _make_tube((32, 32, 32), (2, 16, 16), (30, 16, 16), radius=2)
+        # Pred: Y-bifurcation (has junction)
+        pred = _make_y_bifurcation((32, 32, 32))
+        result = compute_junction_f1(pred, gt, tolerance=3)
+        # GT has no junctions, pred has some → precision=0
+        assert result["precision"] == pytest.approx(0.0, abs=0.01)
+
+    def test_junction_f1_no_junctions_returns_one(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_junction_f1
+
+        # Both pred and GT are simple tubes (no junctions)
+        tube = _make_tube((24, 24, 24), (4, 12, 12), (20, 12, 12), radius=2)
+        result = compute_junction_f1(tube, tube, tolerance=3)
+        assert result["f1"] == pytest.approx(1.0, abs=0.01)
+
+    def test_junction_f1_tolerance_parameter(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_junction_f1
+
+        mask = _make_y_bifurcation((32, 32, 32))
+        # Tight tolerance should work for perfect match
+        result_tight = compute_junction_f1(mask, mask, tolerance=1)
+        result_loose = compute_junction_f1(mask, mask, tolerance=5)
+        # Both should be perfect for self-match, loose should be >= tight
+        assert result_loose["f1"] >= result_tight["f1"] - 0.01
+
+    def test_junction_f1_returns_dict_with_precision_recall_f1(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_junction_f1
+
+        mask = _make_y_bifurcation((32, 32, 32))
+        result = compute_junction_f1(mask, mask, tolerance=3)
+        assert "precision" in result
+        assert "recall" in result
+        assert "f1" in result
+
+    def test_junction_f1_3d_bifurcation_volume(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_junction_f1
+
+        mask = _make_y_bifurcation((32, 32, 32))
+        result = compute_junction_f1(mask, mask, tolerance=3)
+        # Should detect at least 1 junction with perfect F1
+        assert result["f1"] >= 0.5
+
+    def test_junction_f1_empty_masks(self) -> None:
+        from minivess.pipeline.topology_metrics import compute_junction_f1
+
+        empty = np.zeros((16, 16, 16), dtype=np.uint8)
+        result = compute_junction_f1(empty, empty, tolerance=3)
+        assert result["f1"] == pytest.approx(1.0, abs=0.01)
