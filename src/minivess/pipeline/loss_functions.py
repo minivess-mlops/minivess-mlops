@@ -300,6 +300,58 @@ class CbDiceClDiceLoss(nn.Module):  # type: ignore[misc]
         return self.lambda_cbdice * cbdice_loss + self.lambda_cldice * cldice_loss
 
 
+class GraphTopologyLoss(nn.Module):  # type: ignore[misc]
+    """Compound graph topology loss: cbdice_cldice + skeleton_recall + CAPE.
+
+    Combines voxel overlap preservation (cbdice_cldice) with topology-aware
+    losses (skeleton recall for missed centrelines, CAPE for broken paths).
+
+    Parameters
+    ----------
+    w_cbdice_cldice:
+        Weight for the cbDice+clDice component.
+    w_skeleton_recall:
+        Weight for the skeleton recall component.
+    w_cape:
+        Weight for the CAPE path enforcement component.
+    """
+
+    def __init__(
+        self,
+        w_cbdice_cldice: float = 0.5,
+        w_skeleton_recall: float = 0.3,
+        w_cape: float = 0.2,
+        *,
+        softmax: bool = True,
+        to_onehot_y: bool = True,
+    ) -> None:
+        super().__init__()
+        self.w_cbdice_cldice = w_cbdice_cldice
+        self.w_skeleton_recall = w_skeleton_recall
+        self.w_cape = w_cape
+
+        self.cbdice_cldice = CbDiceClDiceLoss(softmax=softmax, to_onehot_y=to_onehot_y)
+
+        from minivess.pipeline.vendored_losses.skeleton_recall import SkeletonRecallLoss
+
+        self.skeleton_recall = SkeletonRecallLoss(softmax=softmax)
+
+        from minivess.pipeline.vendored_losses.cape import CAPELoss
+
+        self.cape = CAPELoss()
+
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        """Compute compound graph topology loss."""
+        loss = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
+        if self.w_cbdice_cldice > 0:
+            loss = loss + self.w_cbdice_cldice * self.cbdice_cldice(logits, labels)
+        if self.w_skeleton_recall > 0:
+            loss = loss + self.w_skeleton_recall * self.skeleton_recall(logits, labels)
+        if self.w_cape > 0:
+            loss = loss + self.w_cape * self.cape(logits, labels)
+        return loss
+
+
 def build_loss_function(
     loss_name: str = "cbdice_cldice",
     *,
@@ -366,6 +418,8 @@ def build_loss_function(
         )
     if loss_name == "cbdice_cldice":
         return CbDiceClDiceLoss(softmax=softmax, to_onehot_y=to_onehot_y)
+    if loss_name == "graph_topology":
+        return GraphTopologyLoss(softmax=softmax, to_onehot_y=to_onehot_y)
     # --- Vendored losses ---
     if loss_name == "cbdice":
         from minivess.pipeline.vendored_losses.cbdice import CenterlineBoundaryDiceLoss
