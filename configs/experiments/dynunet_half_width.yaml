@@ -1,0 +1,43 @@
+experiment_name: dynunet_half_width_v1
+model: dynunet
+losses:
+  - dice_ce
+  - cbdice
+  - dice_ce_cldice
+  - cbdice_cldice
+architecture_params:
+  filters: [16, 32, 64, 128]
+compute: gpu_low
+data_dir: data/raw/minivess
+num_folds: 3
+max_epochs: 100
+seed: 42
+debug: false
+memory_limit_gb: 24
+monitor_interval: 10
+checkpoint:
+  tracked_metrics:
+    - name: val_loss
+      direction: minimize
+      patience: 30
+    - name: val_dice
+      direction: maximize
+      patience: 30
+    - name: val_f1_foreground
+      direction: maximize
+      patience: 30
+    - name: val_cldice
+      direction: maximize
+      patience: 30
+    - name: val_masd
+      direction: minimize
+      patience: 30
+    - name: val_compound_masd_cldice
+      direction: maximize
+      patience: 30
+  early_stopping_strategy: all
+  primary_metric: val_compound_masd_cldice
+  min_delta: 1.0e-4
+  min_epochs: 10
+  save_last: true
+  save_history: true

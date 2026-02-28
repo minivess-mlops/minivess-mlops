@@ -45,6 +45,38 @@ class DatasetProfile:
     volume_stats: list[VolumeStats]
     outlier_volumes: list[str] = field(default_factory=list)
 
+    def to_mlflow_params(self) -> dict[str, str]:
+        """Return flat dict of dataset params for ``mlflow.log_params()``.
+
+        All keys are prefixed with ``data_``.
+        """
+        return {
+            "data_n_volumes": str(self.num_volumes),
+            "data_total_size_gb": f"{self.total_size_bytes / (1024**3):.2f}",
+            "data_min_shape": str(self.min_shape),
+            "data_max_shape": str(self.max_shape),
+            "data_median_shape": str(self.median_shape),
+            "data_min_spacing": str(self.min_spacing),
+            "data_max_spacing": str(self.max_spacing),
+            "data_median_spacing": str(self.median_spacing),
+            "data_n_outlier_volumes": str(len(self.outlier_volumes)),
+        }
+
+    def to_json_dict(self) -> dict[str, object]:
+        """Return JSON-serializable dict for artifact logging."""
+        return {
+            "num_volumes": self.num_volumes,
+            "min_shape": list(self.min_shape),
+            "max_shape": list(self.max_shape),
+            "median_shape": list(self.median_shape),
+            "min_spacing": list(self.min_spacing),
+            "max_spacing": list(self.max_spacing),
+            "median_spacing": list(self.median_spacing),
+            "total_size_bytes": self.total_size_bytes,
+            "total_size_gb": round(self.total_size_bytes / (1024**3), 2),
+            "outlier_volumes": self.outlier_volumes,
+        }
+
 
 def scan_volume(path: Path) -> VolumeStats:
     """Read a NIfTI file and compute per-volume statistics.
@@ -67,7 +99,7 @@ def scan_volume(path: Path) -> VolumeStats:
     shape: tuple[int, ...] = tuple(int(s) for s in data.shape)
 
     # Voxel spacings from the affine diagonal (absolute values, first 3 dims)
-    zooms = img.header.get_zooms()  # type: ignore[attr-defined]
+    zooms = img.header.get_zooms()
     spacing: tuple[float, ...] = tuple(float(abs(z)) for z in zooms[:3])
 
     # Intensity statistics over the raw float32 array

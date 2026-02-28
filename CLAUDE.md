@@ -187,6 +187,64 @@ minivess-mlops/
 - **SaMD-principled**: IEC 62304 lifecycle mapping, audit trails, test set lockout
 - **Dual config**: Hydra-zen for experiment sweeps, Dynaconf for deployment environments
 
+## MLflow Tracking Architecture
+
+### Backend
+- **Local filesystem** backend: `mlruns/` directory (no server required)
+- Tracking URI: `mlruns` (resolved to absolute path in code)
+- Each run stores params, metrics, tags, artifacts as plain files
+- Run lifecycle: FINISHED (success), FAILED (exception), KILLED (abort)
+
+### Experiments
+| Experiment | Purpose | Created By |
+|-----------|---------|-----------|
+| `dynunet_loss_variation_v2` | Training: 4 losses x 3 folds x 100 epochs | `train_monitored.py` |
+| `dynunet_half_width_v1` | Training: width ablation (filters/2) | `train_monitored.py` |
+| `minivess_evaluation` | Evaluation runs (ensembles + analysis) | `analysis_flow.py` |
+
+### Param Prefixes (standardized naming)
+| Prefix | Category | Example |
+|--------|----------|---------|
+| (none) | Training hyperparams | `learning_rate`, `batch_size`, `training_time_seconds` |
+| `arch_` | Model architecture | `arch_filters`, `arch_deep_supervision` |
+| `sys_` | System/environment | `sys_python_version`, `sys_gpu_model` |
+| `data_` | Dataset metadata | `data_n_volumes`, `data_train_volume_ids` |
+| `loss_` | Loss function config | `loss_name`, `loss_weights` |
+| `eval_` | Evaluation config | `eval_bootstrap_n`, `eval_ci_level` |
+| `upstream_` | Cross-flow links | `upstream_training_run_id` |
+
+NOTE: We use `sys_` (underscore) not `sys/` (slash) to avoid metric naming conflicts.
+
+### Automatic Logging
+`ExperimentTracker.start_run()` automatically logs:
+- All `TrainingConfig` fields (17 params including weight_decay, warmup_epochs)
+- Architecture params from `ModelConfig.architecture_params` (arch_ prefix)
+- System info: Python, PyTorch, MONAI, CUDA, cuDNN, OS, GPU, RAM (sys_ prefix)
+- Git commit hash, branch, dirty state
+- MLflow system metrics (GPU/CPU/memory/disk, 12 metrics at 10s intervals)
+- On failure: sets run status to FAILED with error_type tag
+
+### Autolog Decision
+`mlflow.pytorch.autolog()` is **NOT used**. It only provides full functionality with
+PyTorch Lightning. This project uses vanilla PyTorch + MONAI training loops.
+All logging is explicit via `ExperimentTracker`.
+
+### Key Files
+| File | Purpose |
+|------|---------|
+| `src/minivess/observability/tracking.py` | ExperimentTracker class |
+| `src/minivess/observability/system_info.py` | System info collection |
+| `src/minivess/observability/analytics.py` | DuckDB analytics over runs |
+| `src/minivess/pipeline/mlruns_enhancement.py` | Post-hoc tag enhancement |
+| `src/minivess/pipeline/champion_tagger.py` | Champion model tagging |
+| `src/minivess/pipeline/duckdb_extraction.py` | DuckDB extraction from mlruns |
+| `scripts/backfill_mlflow_metadata.py` | Retroactive run update tool |
+
+### Retroactive Updates
+Existing runs can be updated via `mlflow.start_run(run_id=existing_id)`.
+**Safety rules**: never overwrite existing params (throws), preserve run status,
+add `sys_backfill_note` for provenance. See `scripts/backfill_mlflow_metadata.py`.
+
 ## PRD System
 
 The project uses a **hierarchical probabilistic PRD** (Bayesian decision network) to

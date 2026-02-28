@@ -19,6 +19,7 @@ from unittest.mock import patch
 import pytest
 
 from minivess.pipeline.mlruns_enhancement import (
+    backfill_architecture_params,
     enhance_all_production_runs,
     enhance_run_tags,
     get_git_commit,
@@ -44,6 +45,7 @@ def _make_run(
     fold2_metric: bool = True,
     loss_function: str | None = "dice_ce",
     extra_tags: dict[str, str] | None = None,
+    extra_params: dict[str, str] | None = None,
 ) -> Path:
     """Create a mock run directory with the expected MLflow layout.
 
@@ -82,6 +84,12 @@ def _make_run(
     if extra_tags:
         for key, value in extra_tags.items():
             (tags_dir / key).write_text(value, encoding="utf-8")
+
+    if extra_params:
+        params_dir = run_dir / "params"
+        params_dir.mkdir(parents=True, exist_ok=True)
+        for key, value in extra_params.items():
+            (params_dir / key).write_text(value, encoding="utf-8")
 
     return run_dir
 
@@ -554,3 +562,81 @@ class TestEnhanceAllProductionRuns:
         assert run_added["python_version"] == "3.12.0"
         assert run_added["total_ram_gb"] == "16.0"
         assert run_added["git_commit"] == "d" * 40
+
+
+# ---------------------------------------------------------------------------
+# Tests: backfill_architecture_params
+# ---------------------------------------------------------------------------
+
+
+class TestBackfillArchitectureParams:
+    """Tests for retroactive architecture param backfilling."""
+
+    def test_backfill_adds_arch_filters_with_default(self, tmp_path: Path) -> None:
+        """Runs missing arch_filters get backfilled with default [32,64,128,256]."""
+        mlruns_dir = _mlruns(tmp_path)
+        run_dir = _make_run(mlruns_dir, _EXPERIMENT_ID, "run_00")
+        # Ensure params dir exists (real runs always have it)
+        (run_dir / "params").mkdir(parents=True, exist_ok=True)
+
+        results = backfill_architecture_params(mlruns_dir, _EXPERIMENT_ID)
+
+        assert "run_00" in results
+        assert "arch_filters" in results["run_00"]
+        param_file = run_dir / "params" / "arch_filters"
+        assert param_file.exists()
+        assert param_file.read_text(encoding="utf-8") == "[32, 64, 128, 256]"
+
+    def test_backfill_skips_runs_with_existing_arch_filters(
+        self, tmp_path: Path
+    ) -> None:
+        """Runs that already have arch_filters are not modified."""
+        mlruns_dir = _mlruns(tmp_path)
+        _make_run(
+            mlruns_dir,
+            _EXPERIMENT_ID,
+            "run_00",
+            extra_params={"arch_filters": "[16, 32, 64, 128]"},
+        )
+
+        results = backfill_architecture_params(mlruns_dir, _EXPERIMENT_ID)
+
+        assert results == {}
+        # Original value preserved
+        param_file = mlruns_dir / _EXPERIMENT_ID / "run_00" / "params" / "arch_filters"
+        assert param_file.read_text(encoding="utf-8") == "[16, 32, 64, 128]"
+
+    def test_backfill_custom_default_filters(self, tmp_path: Path) -> None:
+        """Explicit default_filters are used when no checkpoint is present."""
+        mlruns_dir = _mlruns(tmp_path)
+        run_dir = _make_run(mlruns_dir, _EXPERIMENT_ID, "run_00")
+        (run_dir / "params").mkdir(parents=True, exist_ok=True)
+
+        backfill_architecture_params(
+            mlruns_dir,
+            _EXPERIMENT_ID,
+            default_filters=[16, 32, 64, 128],
+        )
+
+        param_file = run_dir / "params" / "arch_filters"
+        assert param_file.read_text(encoding="utf-8") == "[16, 32, 64, 128]"
+
+    def test_backfill_nonexistent_experiment(self, tmp_path: Path) -> None:
+        """Returns empty dict for nonexistent experiment."""
+        mlruns_dir = _mlruns(tmp_path)
+
+        results = backfill_architecture_params(mlruns_dir, "nonexistent")
+
+        assert results == {}
+
+    def test_backfill_idempotent(self, tmp_path: Path) -> None:
+        """Second call adds nothing when first call already backfilled."""
+        mlruns_dir = _mlruns(tmp_path)
+        run_dir = _make_run(mlruns_dir, _EXPERIMENT_ID, "run_00")
+        (run_dir / "params").mkdir(parents=True, exist_ok=True)
+
+        first = backfill_architecture_params(mlruns_dir, _EXPERIMENT_ID)
+        second = backfill_architecture_params(mlruns_dir, _EXPERIMENT_ID)
+
+        assert len(first) == 1
+        assert second == {}

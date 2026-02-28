@@ -349,6 +349,9 @@ def main(argv: list[str] | None = None) -> None:
                 # Pass checkpoint config from experiment YAML to train_monitored
                 if "checkpoint" in config:
                     parsed.checkpoint_config = config["checkpoint"]
+                # Pass architecture_params from experiment YAML
+                if "architecture_params" in config:
+                    parsed.architecture_params = config["architecture_params"]
                 train_mod.run_monitored_experiment(parsed)
         else:
             logger.warning(

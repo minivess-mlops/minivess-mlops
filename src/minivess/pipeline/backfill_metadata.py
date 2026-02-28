@@ -1,0 +1,157 @@
+"""Retroactive MLflow metadata backfill.
+
+Safely adds new params to existing MLflow runs without overwriting
+existing values or changing run status.
+
+Safety rules:
+- Skip params that already exist with a different value
+- Preserve original run status (FINISHED/FAILED/KILLED)
+- Skip RUNNING runs (likely crashed mid-training)
+- Add sys_backfill_note for provenance
+- Use absolute path for tracking URI
+
+Pattern reference: foundation-PLR ``src/log_helpers/mlflow_utils.py``
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+
+import mlflow
+from mlflow.tracking import MlflowClient
+
+logger = logging.getLogger(__name__)
+
+
+def backfill_run(
+    run_id: str,
+    *,
+    new_params: dict[str, str],
+    tracking_uri: str,
+) -> dict[str, int | str]:
+    """Add new params to an existing MLflow run.
+
+    Parameters
+    ----------
+    run_id:
+        MLflow run ID to update.
+    new_params:
+        Dict of param name -> value to add.
+    tracking_uri:
+        MLflow tracking URI (should be absolute path).
+
+    Returns
+    -------
+    Dict with keys: added, skipped, skipped_reason (if applicable).
+    """
+    mlflow.set_tracking_uri(tracking_uri)
+    client = MlflowClient(tracking_uri=tracking_uri)
+
+    # Check run status
+    run = client.get_run(run_id)
+    original_status = run.info.status
+
+    if original_status == "RUNNING":
+        logger.warning("Skipping RUNNING run %s (likely crashed)", run_id)
+        return {"added": 0, "skipped": 0, "skipped_reason": "RUNNING"}
+
+    # Determine which params are new vs existing
+    existing_params = run.data.params
+    params_to_add: dict[str, str] = {}
+    skipped = 0
+
+    for key, value in new_params.items():
+        if key in existing_params:
+            if existing_params[key] == str(value):
+                # Same value — idempotent, skip silently
+                skipped += 1
+            else:
+                # Different value — skip with warning
+                logger.warning(
+                    "Skipping param %s: existing=%s, new=%s",
+                    key,
+                    existing_params[key],
+                    value,
+                )
+                skipped += 1
+        else:
+            params_to_add[key] = str(value)
+
+    # Add backfill note
+    if "sys_backfill_note" not in existing_params:
+        params_to_add["sys_backfill_note"] = (
+            f"Backfilled {datetime.now(UTC).strftime('%Y-%m-%d')}, same machine"
+        )
+
+    if not params_to_add:
+        return {"added": 0, "skipped": skipped}
+
+    # Write new params
+    with mlflow.start_run(run_id=run_id):
+        mlflow.log_params(params_to_add)
+
+    # Restore original status if not FINISHED (start_run silently sets FINISHED)
+    if original_status != "FINISHED":
+        client.set_terminated(run_id, status=original_status)
+
+    logger.info(
+        "Backfilled run %s: added=%d, skipped=%d",
+        run_id[:8],
+        len(params_to_add),
+        skipped,
+    )
+    return {"added": len(params_to_add), "skipped": skipped}
+
+
+def backfill_experiment(
+    *,
+    experiment_name: str,
+    new_params: dict[str, str],
+    tracking_uri: str,
+) -> dict[str, int]:
+    """Backfill all runs in an experiment.
+
+    Parameters
+    ----------
+    experiment_name:
+        MLflow experiment name.
+    new_params:
+        Dict of param name -> value to add to each run.
+    tracking_uri:
+        MLflow tracking URI.
+
+    Returns
+    -------
+    Dict with keys: total, updated, skipped.
+    """
+    mlflow.set_tracking_uri(tracking_uri)
+    client = MlflowClient(tracking_uri=tracking_uri)
+
+    experiment = client.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        logger.warning("Experiment %s not found", experiment_name)
+        return {"total": 0, "updated": 0, "skipped": 0}
+
+    runs = client.search_runs(
+        experiment_ids=[experiment.experiment_id],
+    )
+
+    total = len(runs)
+    updated = 0
+    skipped = 0
+
+    for run in runs:
+        result = backfill_run(
+            run.info.run_id,
+            new_params=new_params,
+            tracking_uri=tracking_uri,
+        )
+        if result.get("skipped_reason") == "RUNNING":
+            skipped += 1
+        elif int(result["added"]) > 0:
+            updated += 1
+        else:
+            skipped += 1
+
+    return {"total": total, "updated": updated, "skipped": skipped}

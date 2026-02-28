@@ -234,6 +234,112 @@ def enhance_run_tags(
     return added
 
 
+def backfill_architecture_params(
+    mlruns_dir: Path,
+    experiment_id: str,
+    default_filters: list[int] | None = None,
+) -> dict[str, dict[str, str]]:
+    """Backfill architecture params on runs that are missing them.
+
+    Scans all run directories in the experiment. For each run, checks if
+    ``params/arch_filters`` exists. If not, infers the architecture from
+    checkpoint weight shapes (first conv layer output channels) or falls
+    back to the provided default.
+
+    Args:
+        mlruns_dir: Root mlruns directory.
+        experiment_id: MLflow experiment ID string.
+        default_filters: Fallback filter list when checkpoint is absent.
+            Defaults to ``[32, 64, 128, 256]`` (DynUNet standard).
+
+    Returns:
+        Mapping of ``{run_id: {param_name: param_value}}`` for newly
+        written params. Runs where nothing was added are omitted.
+    """
+    if default_filters is None:
+        default_filters = [32, 64, 128, 256]
+
+    experiment_dir = mlruns_dir / experiment_id
+    if not experiment_dir.is_dir():
+        return {}
+
+    results: dict[str, dict[str, str]] = {}
+
+    for run_dir in sorted(experiment_dir.iterdir()):
+        if not run_dir.is_dir() or run_dir.name == "meta.yaml":
+            continue
+
+        params_dir = run_dir / "params"
+        if not params_dir.is_dir():
+            continue
+
+        # Skip runs that already have arch_filters
+        if (params_dir / "arch_filters").exists():
+            continue
+
+        # Try to infer from checkpoint
+        filters = _infer_filters_from_checkpoint(run_dir, default_filters)
+        filters_str = str(filters)
+
+        # Write arch_filters param
+        (params_dir / "arch_filters").write_text(filters_str, encoding="utf-8")
+        added = {"arch_filters": filters_str}
+        results[run_dir.name] = added
+        logger.info("Backfilled arch_filters=%s on run %s", filters_str, run_dir.name)
+
+    return results
+
+
+def _infer_filters_from_checkpoint(
+    run_dir: Path,
+    default: list[int],
+) -> list[int]:
+    """Infer filter widths from checkpoint weight shapes.
+
+    Looks for ``artifacts/checkpoints/last.pth`` and reads the first
+    convolution layer output channel count per encoder level.
+
+    Returns the default list if the checkpoint does not exist or cannot
+    be loaded.
+    """
+    ckpt_path = run_dir / "artifacts" / "checkpoints" / "last.pth"
+    if not ckpt_path.exists():
+        return default
+
+    try:
+        import torch
+
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+        if not isinstance(ckpt, dict) or "model_state_dict" not in ckpt:
+            return default
+
+        sd = ckpt["model_state_dict"]
+        filters: list[int] = []
+
+        # input_block filter
+        key = "net.input_block.conv1.conv.weight"
+        if key in sd:
+            filters.append(sd[key].shape[0])
+
+        # downsample filters
+        for i in range(10):  # up to 10 levels
+            key = f"net.downsamples.{i}.conv1.conv.weight"
+            if key in sd:
+                filters.append(sd[key].shape[0])
+            else:
+                break
+
+        # bottleneck filter
+        key = "net.bottleneck.conv1.conv.weight"
+        if key in sd:
+            filters.append(sd[key].shape[0])
+
+        return filters if filters else default
+    except Exception:
+        logger.warning("Could not infer filters from %s, using default", ckpt_path)
+        return default
+
+
 def enhance_all_production_runs(
     mlruns_dir: Path,
     experiment_id: str,
