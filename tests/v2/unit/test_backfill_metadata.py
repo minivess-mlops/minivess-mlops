@@ -180,3 +180,124 @@ class TestBackfillExperiment:
         )
         assert results["total"] == 2
         assert results["updated"] == 2
+
+
+class TestBackfillFoldTags:
+    """Test backfill_fold_tags that adds per-fold volume membership."""
+
+    def test_writes_fold_tags(self, isolated_mlflow: str, tmp_path: Path) -> None:
+        """Backfill should write fold_N_train/val tags to each run."""
+        import json
+
+        from minivess.data.splits import FoldSplit
+        from minivess.pipeline.backfill_metadata import backfill_fold_tags
+
+        run_id = _create_test_run(isolated_mlflow, params={"loss_name": "dice_ce"})
+
+        splits = [
+            FoldSplit(
+                train=[
+                    {"image": "data/raw/minivess/imagesTr/mv01.nii.gz", "label": "x"},
+                    {"image": "data/raw/minivess/imagesTr/mv03.nii.gz", "label": "x"},
+                ],
+                val=[
+                    {"image": "data/raw/minivess/imagesTr/mv02.nii.gz", "label": "x"},
+                ],
+            ),
+        ]
+        splits_file = tmp_path / "splits.json"
+        splits_file.write_text(
+            json.dumps([{"train": s.train, "val": s.val} for s in splits]),
+            encoding="utf-8",
+        )
+
+        result = backfill_fold_tags(
+            experiment_name="test-backfill",
+            splits=splits,
+            splits_file=splits_file,
+            tracking_uri=isolated_mlflow,
+        )
+
+        assert result["updated"] == 1
+        client = MlflowClient(tracking_uri=isolated_mlflow)
+        run = client.get_run(run_id)
+        assert run.data.tags["fold_0_train"] == "mv01,mv03"
+        assert run.data.tags["fold_0_val"] == "mv02"
+
+    def test_writes_split_mode_param(
+        self, isolated_mlflow: str, tmp_path: Path
+    ) -> None:
+        """Backfill should write split_mode=file param."""
+        import json
+
+        from minivess.data.splits import FoldSplit
+        from minivess.pipeline.backfill_metadata import backfill_fold_tags
+
+        run_id = _create_test_run(isolated_mlflow)
+        splits = [FoldSplit(train=[], val=[])]
+        splits_file = tmp_path / "s.json"
+        splits_file.write_text(json.dumps([{"train": [], "val": []}]), encoding="utf-8")
+
+        backfill_fold_tags(
+            experiment_name="test-backfill",
+            splits=splits,
+            splits_file=splits_file,
+            tracking_uri=isolated_mlflow,
+        )
+
+        client = MlflowClient(tracking_uri=isolated_mlflow)
+        run = client.get_run(run_id)
+        assert run.data.params["split_mode"] == "file"
+
+    def test_idempotent_skips_tagged_runs(
+        self, isolated_mlflow: str, tmp_path: Path
+    ) -> None:
+        """Second backfill should skip runs that already have fold tags."""
+        import json
+
+        from minivess.data.splits import FoldSplit
+        from minivess.pipeline.backfill_metadata import backfill_fold_tags
+
+        _create_test_run(isolated_mlflow)
+        splits = [FoldSplit(train=[], val=[])]
+        splits_file = tmp_path / "s.json"
+        splits_file.write_text(json.dumps([{"train": [], "val": []}]), encoding="utf-8")
+
+        # First backfill
+        r1 = backfill_fold_tags(
+            experiment_name="test-backfill",
+            splits=splits,
+            splits_file=splits_file,
+            tracking_uri=isolated_mlflow,
+        )
+        assert r1["updated"] == 1
+
+        # Second backfill should skip
+        r2 = backfill_fold_tags(
+            experiment_name="test-backfill",
+            splits=splits,
+            splits_file=splits_file,
+            tracking_uri=isolated_mlflow,
+        )
+        assert r2["skipped"] == 1
+        assert r2["updated"] == 0
+
+    def test_skips_running_runs(self, isolated_mlflow: str, tmp_path: Path) -> None:
+        """RUNNING runs should be skipped."""
+        import json
+
+        from minivess.data.splits import FoldSplit
+        from minivess.pipeline.backfill_metadata import backfill_fold_tags
+
+        _create_test_run(isolated_mlflow, status="RUNNING")
+        splits = [FoldSplit(train=[], val=[])]
+        splits_file = tmp_path / "s.json"
+        splits_file.write_text(json.dumps([{"train": [], "val": []}]), encoding="utf-8")
+
+        result = backfill_fold_tags(
+            experiment_name="test-backfill",
+            splits=splits,
+            splits_file=splits_file,
+            tracking_uri=isolated_mlflow,
+        )
+        assert result["skipped"] == 1

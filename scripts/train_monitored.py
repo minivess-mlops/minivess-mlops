@@ -218,11 +218,33 @@ def _load_or_generate_splits(
     data_config: DataConfig,
     training_config: TrainingConfig,
 ) -> list:
-    """Load splits from file or generate from data directory."""
-    num_folds = training_config.num_folds
+    """Load splits from file or generate from data directory.
 
+    When ``split_mode`` is ``"file"`` (default), always loads from the
+    canonical splits JSON file for reproducibility. When ``"random"``,
+    generates fresh splits from the seed (useful for ablation studies).
+    """
+    num_folds = training_config.num_folds
+    split_mode = getattr(args, "split_mode", "file")
+
+    # In "random" mode, always regenerate from seed
+    if split_mode == "random":
+        logger.info(
+            "split_mode=random: Generating fresh %d-fold splits (seed=%d)",
+            num_folds,
+            training_config.seed,
+        )
+        splits = generate_kfold_splits_from_dir(
+            data_config.data_dir,
+            num_folds=num_folds,
+            seed=training_config.seed,
+        )
+        save_splits(splits, args.splits_file)
+        return splits
+
+    # Default: "file" mode — load from canonical splits file
     if args.splits_file.exists():
-        logger.info("Loading splits from %s", args.splits_file)
+        logger.info("Loading splits from %s (split_mode=file)", args.splits_file)
         splits = load_splits(args.splits_file)
         if len(splits) < num_folds:
             logger.warning(
@@ -732,9 +754,18 @@ def _run_experiment_inner(
                 _extra_params["data_dataset_name"] = data_config.dataset_name
             _mlflow.log_params(_extra_params)
 
-            # Log split file as artifact
-            if hasattr(args, "splits_file") and args.splits_file:
-                tracker.log_split_file(Path(args.splits_file))
+            # Log fold splits (artifact + per-fold tags + split_mode)
+            _split_mode = getattr(args, "split_mode", "file")
+            _splits_path = (
+                Path(args.splits_file)
+                if hasattr(args, "splits_file") and args.splits_file
+                else None
+            )
+            tracker.log_fold_splits(
+                splits,
+                splits_file=_splits_path,
+                split_mode=_split_mode,
+            )
 
             _model_info_logged = False
             for fold_id, fold_split in enumerate(splits):

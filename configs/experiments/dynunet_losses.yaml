@@ -10,6 +10,8 @@ data_dir: data/raw/minivess
 num_folds: 3
 max_epochs: 100
 seed: 42
+split_mode: file  # "file" = load from splits_file (default), "random" = generate fresh
+splits_file: configs/splits/3fold_seed42.json
 debug: false
 memory_limit_gb: 24
 monitor_interval: 10

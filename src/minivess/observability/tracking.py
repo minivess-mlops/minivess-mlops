@@ -18,12 +18,38 @@ if TYPE_CHECKING:
     from minivess.adapters.base import ModelAdapter
     from minivess.config.models import ExperimentConfig
     from minivess.data.profiler import DatasetProfile
+    from minivess.data.splits import FoldSplit
     from minivess.pipeline.evaluation import FoldResult
 
 from minivess.config.defaults import DEFAULT_TRACKING_URI as _DEFAULT_TRACKING_URI
 from minivess.serving.model_logger import log_single_model
 
 logger = logging.getLogger(__name__)
+
+
+def extract_volume_ids(data_dicts: list[dict[str, str]]) -> list[str]:
+    """Extract sorted volume IDs (e.g. 'mv01') from data dicts.
+
+    Parameters
+    ----------
+    data_dicts:
+        List of ``{"image": path, "label": path}`` dictionaries.
+
+    Returns
+    -------
+    Sorted list of volume ID stems (filename without extension).
+    """
+    ids: list[str] = []
+    for d in data_dicts:
+        image_path = Path(d["image"])
+        # Strip .nii.gz (or .nii) to get the volume ID
+        stem = image_path.name
+        for suffix in (".nii.gz", ".nii"):
+            if stem.endswith(suffix):
+                stem = stem[: -len(suffix)]
+                break
+        ids.append(stem)
+    return sorted(ids)
 
 
 def resolve_tracking_uri(*, tracking_uri: str | None = None) -> str:
@@ -449,6 +475,48 @@ class ExperimentTracker:
         if split_path.exists():
             mlflow.log_artifact(str(split_path), artifact_path="splits")
             logger.info("Logged split file: %s", split_path.name)
+
+    def log_fold_splits(
+        self,
+        splits: list[FoldSplit],
+        *,
+        splits_file: Path | None = None,
+        split_mode: str = "file",
+    ) -> None:
+        """Log fold split membership to MLflow for full reproducibility.
+
+        Logs:
+        - The splits JSON file as an artifact (if ``splits_file`` provided)
+        - Per-fold tags: ``fold_0_train=mv01,mv03,...``, ``fold_0_val=mv02,...``
+        - ``split_mode`` as a param (``"file"`` or ``"random"``)
+        - ``splits_file`` path as a tag (if provided)
+
+        Parameters
+        ----------
+        splits:
+            List of FoldSplit objects with train/val data dicts.
+        splits_file:
+            Path to the canonical splits JSON file. Logged as artifact.
+        split_mode:
+            How splits were determined: ``"file"`` (hardcoded) or ``"random"``.
+        """
+        # Log split mode as param
+        mlflow.log_param("split_mode", split_mode)
+
+        # Log splits file as artifact and tag
+        if splits_file is not None:
+            mlflow.set_tag("splits_file", str(splits_file))
+            if splits_file.exists():
+                mlflow.log_artifact(str(splits_file), artifact_path="splits")
+
+        # Log per-fold volume IDs as tags
+        for fold_id, fold in enumerate(splits):
+            train_ids = extract_volume_ids(fold.train)
+            val_ids = extract_volume_ids(fold.val)
+            mlflow.set_tag(f"fold_{fold_id}_train", ",".join(train_ids))
+            mlflow.set_tag(f"fold_{fold_id}_val", ",".join(val_ids))
+
+        logger.info("Logged fold splits: %d folds, mode=%s", len(splits), split_mode)
 
     def log_evaluation_results(
         self,

@@ -687,6 +687,213 @@ class TestExperimentTrackerLocalBackend:
         leaked = after - before
         assert not leaked, f"Temp files leaked: {leaked}"
 
+    # -----------------------------------------------------------------------
+    # Fold split logging tests
+    # -----------------------------------------------------------------------
+
+    def test_log_fold_splits_logs_artifact(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+        tmp_path: Path,
+    ) -> None:
+        """log_fold_splits should log the splits JSON as an MLflow artifact."""
+        import json
+
+        from mlflow.tracking import MlflowClient
+
+        from minivess.data.splits import FoldSplit
+        from minivess.observability.tracking import ExperimentTracker
+
+        # Create a splits file
+        splits = [
+            FoldSplit(
+                train=[
+                    {"image": "data/raw/mv01.nii.gz", "label": "data/raw/mv01.nii.gz"}
+                ],
+                val=[
+                    {"image": "data/raw/mv02.nii.gz", "label": "data/raw/mv02.nii.gz"}
+                ],
+            ),
+        ]
+        splits_file = tmp_path / "test_splits.json"
+        splits_file.write_text(
+            json.dumps([{"train": s.train, "val": s.val} for s in splits]),
+            encoding="utf-8",
+        )
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_fold_splits(splits, splits_file=splits_file)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        artifacts = client.list_artifacts(run_id, path="splits")
+        artifact_names = [a.path for a in artifacts]
+        assert any("splits" in name for name in artifact_names)
+
+    def test_log_fold_splits_logs_per_fold_tags(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """log_fold_splits should log per-fold train/val volume IDs as tags."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.data.splits import FoldSplit
+        from minivess.observability.tracking import ExperimentTracker
+
+        splits = [
+            FoldSplit(
+                train=[
+                    {"image": "data/raw/minivess/imagesTr/mv01.nii.gz", "label": "x"},
+                    {"image": "data/raw/minivess/imagesTr/mv03.nii.gz", "label": "x"},
+                ],
+                val=[
+                    {"image": "data/raw/minivess/imagesTr/mv02.nii.gz", "label": "x"},
+                ],
+            ),
+            FoldSplit(
+                train=[
+                    {"image": "data/raw/minivess/imagesTr/mv02.nii.gz", "label": "x"},
+                ],
+                val=[
+                    {"image": "data/raw/minivess/imagesTr/mv01.nii.gz", "label": "x"},
+                    {"image": "data/raw/minivess/imagesTr/mv03.nii.gz", "label": "x"},
+                ],
+            ),
+        ]
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_fold_splits(splits)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert run.data.tags["fold_0_train"] == "mv01,mv03"
+        assert run.data.tags["fold_0_val"] == "mv02"
+        assert run.data.tags["fold_1_train"] == "mv02"
+        assert run.data.tags["fold_1_val"] == "mv01,mv03"
+
+    def test_log_fold_splits_logs_split_mode_param(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """log_fold_splits should log split_mode as a param."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.data.splits import FoldSplit
+        from minivess.observability.tracking import ExperimentTracker
+
+        splits = [
+            FoldSplit(train=[], val=[]),
+        ]
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_fold_splits(splits, split_mode="file")
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert run.data.params["split_mode"] == "file"
+
+    def test_log_fold_splits_logs_splits_file_tag(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+        tmp_path: Path,
+    ) -> None:
+        """log_fold_splits should log the splits file path as a tag."""
+        import json
+
+        from mlflow.tracking import MlflowClient
+
+        from minivess.data.splits import FoldSplit
+        from minivess.observability.tracking import ExperimentTracker
+
+        splits = [FoldSplit(train=[], val=[])]
+        splits_file = tmp_path / "3fold_seed42.json"
+        splits_file.write_text(json.dumps([{"train": [], "val": []}]), encoding="utf-8")
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_fold_splits(splits, splits_file=splits_file)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert run.data.tags["splits_file"] == str(splits_file)
+
+    def test_log_fold_splits_without_file_still_logs_tags(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """log_fold_splits without splits_file should still log per-fold tags."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.data.splits import FoldSplit
+        from minivess.observability.tracking import ExperimentTracker
+
+        splits = [
+            FoldSplit(
+                train=[
+                    {"image": "data/raw/minivess/imagesTr/mv05.nii.gz", "label": "x"},
+                ],
+                val=[
+                    {"image": "data/raw/minivess/imagesTr/mv10.nii.gz", "label": "x"},
+                ],
+            ),
+        ]
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_fold_splits(splits)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert run.data.tags["fold_0_train"] == "mv05"
+        assert run.data.tags["fold_0_val"] == "mv10"
+
+
+class TestExtractVolumeIds:
+    """Tests for extract_volume_ids helper."""
+
+    def test_extracts_volume_id_from_full_path(self) -> None:
+        from minivess.observability.tracking import extract_volume_ids
+
+        paths = [
+            {"image": "data/raw/minivess/imagesTr/mv01.nii.gz", "label": "x"},
+            {"image": "data/raw/minivess/imagesTr/mv02.nii.gz", "label": "x"},
+        ]
+        result = extract_volume_ids(paths)
+        assert result == ["mv01", "mv02"]
+
+    def test_extracts_from_various_path_formats(self) -> None:
+        from minivess.observability.tracking import extract_volume_ids
+
+        paths = [
+            {"image": "/absolute/path/to/mv42.nii.gz", "label": "x"},
+            {"image": "relative/mv99.nii.gz", "label": "x"},
+        ]
+        result = extract_volume_ids(paths)
+        assert result == ["mv42", "mv99"]
+
+    def test_empty_list_returns_empty(self) -> None:
+        from minivess.observability.tracking import extract_volume_ids
+
+        assert extract_volume_ids([]) == []
+
+    def test_sorted_output(self) -> None:
+        from minivess.observability.tracking import extract_volume_ids
+
+        paths = [
+            {"image": "data/mv10.nii.gz", "label": "x"},
+            {"image": "data/mv02.nii.gz", "label": "x"},
+            {"image": "data/mv05.nii.gz", "label": "x"},
+        ]
+        result = extract_volume_ids(paths)
+        assert result == ["mv02", "mv05", "mv10"]
+
 
 # ---------------------------------------------------------------------------
 # T2: Trainer + Tracker integration
