@@ -38,6 +38,19 @@ GNN architecture modules, advanced topology losses, and topological UQ.
 | 21 | #132 | GraphSeg deformable priors |
 | 22 | #133 | TopoSegNet critical points |
 
+### Cross-Cutting Issues (from metrics reporting reconciliation)
+
+| # | GitHub # | Title |
+|---|----------|-------|
+| 23 | #134 | NSD (Surface Dice) evaluation metric |
+| 24 | #135 | HD95 evaluation metric |
+| 25 | #136 | Rank-then-aggregate champion selection |
+
+These were identified during cross-validation of `docs/planning/metrics-reporting-doc.md`
+against this plan. NSD and HD95 are main-paper metrics that were missing from the graph
+plan; rank-then-aggregate fixes the broken compound metric champion selection. Issue #125
+was updated to incorporate all three.
+
 ## Issue Inventory
 
 ### P0 — Critical Foundation (7 issues)
