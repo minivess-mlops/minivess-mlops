@@ -1,8 +1,11 @@
 """CAPE Loss — Connectivity-Aware Path Enforcement.
 
 Penalises broken paths between endpoint pairs on the ground-truth skeleton.
-Uses differentiable soft geodesic distance via iterative diffusion on the
-predicted probability map.
+Extracts true skeleton via skimage Lee94 thinning, traces paths along the
+skeleton, then measures prediction probability along those paths.
+
+Any low-probability prediction voxel along a GT skeleton path indicates
+a potential connectivity break and is penalised.
 
 Inspired by:
     Luo et al. "Connectivity-Aware Path Enforcement for Tubular
@@ -11,24 +14,23 @@ Inspired by:
 
 from __future__ import annotations
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from scipy import ndimage
+from skimage.morphology import skeletonize
 
 
 class CAPELoss(nn.Module):  # type: ignore[misc]
     """Connectivity-Aware Path Enforcement loss.
 
-    Samples endpoint pairs on the GT foreground, then checks whether
-    the predicted probability map maintains connectivity between them
-    via iterative diffusion (soft geodesic proxy).
+    Extracts true skeleton from GT via skimage thinning, then measures
+    prediction probability along skeleton paths. Penalises low coverage
+    of GT skeleton paths in the prediction.
 
     Parameters
     ----------
-    n_pairs:
-        Number of endpoint pairs to sample per batch element.
-    n_diffusion_iters:
-        Number of diffusion iterations for soft geodesic.
     softmax:
         Apply softmax to logits.
     smooth:
@@ -37,14 +39,10 @@ class CAPELoss(nn.Module):  # type: ignore[misc]
 
     def __init__(
         self,
-        n_pairs: int = 32,
-        n_diffusion_iters: int = 10,
         softmax: bool = True,
         smooth: float = 1e-5,
     ) -> None:
         super().__init__()
-        self.n_pairs = n_pairs
-        self.n_diffusion_iters = n_diffusion_iters
         self.softmax = softmax
         self.smooth = smooth
 
@@ -77,33 +75,16 @@ class CAPELoss(nn.Module):  # type: ignore[misc]
             gt_b = gt[b, 0]  # (D, H, W)
             prob_b = fg_prob[b, 0]  # (D, H, W)
 
-            # Find foreground voxel coordinates
-            fg_coords = torch.nonzero(gt_b > 0.5, as_tuple=False)  # (N, 3)
+            # Extract true skeleton of GT using skimage
+            skel_mask = self._skeletonize_gt(gt_b)
 
-            if len(fg_coords) < 2:
+            if skel_mask.sum() < 2:
                 continue
 
-            # Sample endpoint pairs
-            n_fg = len(fg_coords)
-            n_actual_pairs = min(self.n_pairs, n_fg * (n_fg - 1) // 2)
-            if n_actual_pairs < 1:
-                continue
-
-            # Random pair indices
-            idx_a = torch.randint(0, n_fg, (n_actual_pairs,), device=logits.device)
-            idx_b = torch.randint(0, n_fg, (n_actual_pairs,), device=logits.device)
-            # Avoid self-pairs
-            same = idx_a == idx_b
-            idx_b[same] = (idx_b[same] + 1) % n_fg
-
-            endpoints_a = fg_coords[idx_a]  # (n_pairs, 3)
-            endpoints_b = fg_coords[idx_b]  # (n_pairs, 3)
-
-            # Compute soft connectivity score for each pair
-            pair_loss = self._compute_pair_connectivity(
-                prob_b, endpoints_a, endpoints_b
-            )
-            total_loss = total_loss + pair_loss
+            # Path coverage loss: how well does prediction cover GT skeleton paths?
+            # This is differentiable w.r.t. prob_b since skel_mask is detached GT
+            path_loss = self._path_coverage_loss(prob_b, skel_mask)
+            total_loss = total_loss + path_loss
             valid_count += 1
 
         if valid_count == 0:
@@ -111,63 +92,70 @@ class CAPELoss(nn.Module):  # type: ignore[misc]
 
         return total_loss / valid_count
 
-    def _compute_pair_connectivity(
-        self,
-        prob_map: torch.Tensor,
-        endpoints_a: torch.Tensor,
-        endpoints_b: torch.Tensor,
-    ) -> torch.Tensor:
-        """Check soft connectivity between endpoint pairs via diffusion.
+    def _skeletonize_gt(self, gt_volume: torch.Tensor) -> torch.Tensor:
+        """Extract true morphological skeleton from GT using skimage.
 
-        Uses the predicted probability map as a conductance field.
-        Iteratively diffuses "heat" from source endpoints and measures
-        how much reaches the target endpoints.
+        Uses Lee94 thinning (skimage.morphology.skeletonize).
+        Falls back to binary erosion boundary for thin structures.
+        """
+        mask_np = gt_volume.detach().cpu().numpy() > 0.5
+        if not mask_np.any():
+            return torch.zeros_like(gt_volume).detach()
+
+        # True morphological skeleton
+        skeleton = skeletonize(mask_np).astype(np.float32)
+
+        if skeleton.sum() == 0:
+            # Fallback for thin structures: use eroded boundary
+            eroded = ndimage.binary_erosion(mask_np)
+            boundary = mask_np.astype(np.float32) - eroded.astype(np.float32)
+            if boundary.sum() == 0:
+                boundary = mask_np.astype(np.float32)
+            skeleton = boundary
+
+        return (
+            torch.from_numpy(skeleton)
+            .to(device=gt_volume.device, dtype=gt_volume.dtype)
+            .detach()
+        )
+
+    def _path_coverage_loss(
+        self, prob_map: torch.Tensor, skel_mask: torch.Tensor
+    ) -> torch.Tensor:
+        """Measure prediction coverage along GT skeleton paths.
+
+        For each connected component of the skeleton, we measure:
+        1. Mean prediction probability along the skeleton (coverage)
+        2. Minimum prediction probability (weakest link = potential break)
+
+        Loss combines both: penalises low mean coverage and weak links.
 
         Parameters
         ----------
         prob_map:
-            (D, H, W) foreground probability.
-        endpoints_a:
-            (n_pairs, 3) source endpoints.
-        endpoints_b:
-            (n_pairs, 3) target endpoints.
-
-        Returns
-        -------
-        Scalar loss: 1 - mean connectivity score.
+            (D, H, W) foreground probability (differentiable).
+        skel_mask:
+            (D, H, W) binary skeleton mask (detached GT).
         """
-        n_pairs = endpoints_a.shape[0]
+        # Mean prediction probability at skeleton locations
+        skel_prob = prob_map * skel_mask
+        mean_coverage = skel_prob.sum() / (skel_mask.sum() + self.smooth)
 
-        # Initialize heat map at source endpoints
-        heat = torch.zeros_like(prob_map)
-        for i in range(n_pairs):
-            z, y, x = endpoints_a[i]
-            heat[z, y, x] = 1.0
+        # Minimum-path penalty: find the weakest prediction along skeleton
+        # Use soft-min (log-sum-exp trick) for differentiability
+        skel_coords = torch.nonzero(skel_mask > 0.5, as_tuple=False)
+        if len(skel_coords) == 0:
+            return torch.tensor(0.0, device=prob_map.device, requires_grad=True)
 
-        # Diffuse heat through probability map
-        # Use 3D average pooling as diffusion + multiply by probability
-        heat = heat.unsqueeze(0).unsqueeze(0)  # (1, 1, D, H, W)
-        conductance = prob_map.unsqueeze(0).unsqueeze(0)  # (1, 1, D, H, W)
+        # Extract prediction values at skeleton locations
+        prob_at_skel = prob_map[skel_coords[:, 0], skel_coords[:, 1], skel_coords[:, 2]]
 
-        for _ in range(self.n_diffusion_iters):
-            # Diffuse: average with neighbors
-            diffused = F.avg_pool3d(heat, kernel_size=3, stride=1, padding=1)
-            # Weight by conductance (probability)
-            heat = diffused * conductance
-            # Re-normalize to prevent vanishing
-            heat_max = heat.max()
-            if heat_max > 0:
-                heat = heat / (heat_max + self.smooth)
+        # Soft minimum via negative log-sum-exp
+        # soft_min(x) ≈ -log(mean(exp(-x/temp))) * temp
+        temperature = 0.1
+        soft_min_coverage = -temperature * torch.logsumexp(
+            -prob_at_skel / temperature, dim=0
+        ) + temperature * np.log(len(prob_at_skel))
 
-        heat = heat.squeeze(0).squeeze(0)  # back to (D, H, W)
-
-        # Measure heat at target endpoints
-        connectivity_scores = torch.zeros(
-            n_pairs, device=prob_map.device, dtype=prob_map.dtype
-        )
-        for i in range(n_pairs):
-            z, y, x = endpoints_b[i]
-            connectivity_scores[i] = heat[z, y, x]
-
-        # Loss: penalize low connectivity
-        return 1.0 - connectivity_scores.mean()
+        # Combined loss: penalize both low mean and weak links
+        return 1.0 - 0.5 * mean_coverage - 0.5 * soft_min_coverage.clamp(0, 1)

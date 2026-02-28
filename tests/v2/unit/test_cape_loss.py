@@ -25,10 +25,18 @@ def _make_logits_labels(
 def _make_connected_tube_labels(
     spatial: tuple[int, int, int] = (16, 16, 8),
 ) -> torch.Tensor:
-    """Create labels with a connected tube structure."""
+    """Create labels with a connected cylindrical tube structure.
+
+    Uses cylindrical geometry (not rectangular block) so that
+    skimage.morphology.skeletonize (Lee94) produces a valid skeleton.
+    """
     labels = torch.zeros(1, 1, *spatial)
-    # Tube along z-axis through center
-    labels[:, :, 2:14, 6:10, 3:5] = 1.0
+    # Cylinder along z-axis, radius ~2 centered at (y=8, x=4)
+    for z in range(2, 14):
+        for y in range(5, 11):
+            for x in range(2, 6):
+                if (y - 8) ** 2 + (x - 4) ** 2 <= 4:
+                    labels[0, 0, z, y, x] = 1.0
     return labels
 
 
@@ -100,13 +108,13 @@ class TestCAPELoss:
         # Severed prediction should give higher loss
         assert loss_severed.item() > loss_connected.item()
 
-    def test_cape_loss_configurable_n_pairs(self) -> None:
+    def test_cape_loss_softmax_configurable(self) -> None:
         from minivess.pipeline.vendored_losses.cape import CAPELoss
 
         logits, labels = _make_logits_labels()
-        # Should accept different n_pairs without error
-        for n_pairs in [8, 32, 64]:
-            loss_fn = CAPELoss(n_pairs=n_pairs)
+        # Should work with both softmax modes
+        for softmax in [True, False]:
+            loss_fn = CAPELoss(softmax=softmax)
             loss = loss_fn(logits, labels)
             assert torch.isfinite(loss)
 
