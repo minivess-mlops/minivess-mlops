@@ -226,3 +226,18 @@ metrics:
       Fraction of ground truth vessel branches that are matched by predicted
       branches, based on endpoint proximity and length similarity thresholds.
       Uses Hungarian matching on branch pairs.
+
+  # --------------------------------------------------------------------------
+  # Murray's law compliance (P2 — Issue #131, EXPERIMENTAL)
+  # --------------------------------------------------------------------------
+
+  - name: murray_compliance
+    display_name: "Murray's Law Compliance"
+    mlflow_name: "eval_fold{fold_id}_murray_compliance"
+    direction: maximize
+    unit: ""
+    bounds: [0.0, 1.0]
+    description: >
+      EXPERIMENTAL: Measures how well vessel bifurcations follow Murray's cubic
+      branching law (r_parent^3 = sum r_daughter_i^3). Uses centreline graph
+      radii estimated from distance transform. Score 1.0 = perfect compliance.

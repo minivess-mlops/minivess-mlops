@@ -1,0 +1,398 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Novel Loss Debugging & Validation Plan
+  =======================================
+  Crash-resistant, full-context plan for validating all P0–P2 topology-aware
+  loss functions and metrics. Ensures algorithmic accuracy and production-grade
+  test harness for all experimental implementations.
+
+  MOTIVATION:
+    We have 17 registered loss functions. Only 4 are fully MONAI-backed.
+    The remaining 13 are HYBRID or EXPERIMENTAL — custom implementations
+    with varying risk levels. Before running the full 5-loss × 3-fold × 100-epoch
+    graph-topology sweep, we must validate that all losses:
+      1. Produce non-zero, finite gradients
+      2. Do not NaN/Inf during forward or backward
+      3. Monotonically decrease on a trivial overfitting task
+      4. Actually correlate with the topology property they claim to optimise
+
+  Author: Claude Opus 4.6
+  Date: 2026-03-01
+-->
+
+<plan id="novel-loss-debugging" version="1.0">
+
+  <!-- =================================================================== -->
+  <!-- SECTION 1: LOSS CLASSIFICATION AND RISK ASSESSMENT                  -->
+  <!-- =================================================================== -->
+
+  <section id="loss-classification">
+    <title>Loss Classification by Implementation Maturity</title>
+    <description>
+      Every loss function in the factory is classified. Experimental losses
+      MUST emit a loguru.warning() at first use, logged to MLflow, indicating
+      the implementation is not peer-reviewed library code.
+    </description>
+
+    <tier name="LIBRARY" risk="none" count="4">
+      <loss name="dice_ce" source="MONAI DiceCELoss" />
+      <loss name="dice" source="MONAI DiceLoss" />
+      <loss name="focal" source="MONAI FocalLoss" />
+      <loss name="cldice" source="MONAI SoftclDiceLoss" />
+    </tier>
+
+    <tier name="LIBRARY-COMPOUND" risk="very-low" count="2">
+      <description>
+        Weighted sums of LIBRARY losses. No custom gradient paths.
+        Risk is only in weight selection, not in algorithmic correctness.
+      </description>
+      <loss name="dice_ce_cldice" source="0.5*MONAI DiceCELoss + 0.5*MONAI SoftclDiceLoss" />
+      <loss name="cbdice_cldice" source="0.5*vendored cbDice + 0.5*dice_ce_cldice" />
+    </tier>
+
+    <tier name="HYBRID" risk="low-medium" count="3">
+      <description>
+        Library-backed core (GT processing via skimage/scipy/gudhi)
+        with custom differentiable prediction path. Lower risk because
+        GT processing uses battle-tested code.
+      </description>
+      <loss name="skeleton_recall" source="skimage.morphology.skeletonize (GT) + custom coverage" />
+      <loss name="cape" source="skimage skeletonize + scipy EDT (GT) + log-sum-exp coverage" />
+      <loss name="betti_matching" source="gudhi CubicalComplex + scipy Hungarian (GT) + gradient proxy">
+        <note>
+          WARNING: The gudhi branch extracts topological features correctly but the
+          gradient path uses penalty * spatial_gradient_magnitude — this provides
+          spatially UNTARGETED gradients (pushes all probabilities), unlike the paper's
+          critical-point-targeted approach. The proxy fallback branch uses connected-
+          component counting at multiple thresholds, which is NOT true persistent
+          homology. Both branches are differentiable but may not optimise the intended
+          topological property.
+        </note>
+      </loss>
+    </tier>
+
+    <tier name="EXPERIMENTAL" risk="high" count="9">
+      <description>
+        Fully custom implementations using heuristic proxies for topological
+        properties. These approximate topology via gradients, pooling, or
+        thresholding — NOT true persistent homology or skeletonization.
+        Highest risk of bugs and incorrect optimisation signals.
+      </description>
+      <loss name="cbdice" source="Vendored (Shi et al.), soft distance proxy via avg_pool3d" />
+      <loss name="cb_dice" source="ClassBalancedDiceLoss — inverse-frequency per-class weighting" />
+      <loss name="centerline_ce" source="Vendored (Acebes), erosion proxy via -max_pool3d" />
+      <loss name="warp" source="Vendored (CoLeTra, Lipman et al.), max/min pool critical points" />
+      <loss name="topo" source="Vendored (CoLeTra), multi-scale gradient topology signature" />
+      <loss name="betti" source="Custom spatial gradient variance as fragmentation proxy" />
+      <loss name="full_topo" source="Compound: DiceCE + clDice + BettiLoss proxy" />
+      <loss name="graph_topology" source="Compound: cbdice_cldice + skeleton_recall + cape (hand-tuned weights)" />
+      <!-- P2 losses (to be implemented) -->
+      <loss name="toposeg" source="Discrete Morse theory critical points (Gupta &amp; Essa, IJCV 2025)" status="planned" />
+    </tier>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- SECTION 2: WARNING ANNOTATION SYSTEM                                -->
+  <!-- =================================================================== -->
+
+  <section id="warning-system">
+    <title>Loguru Warning Annotations for Experimental Losses</title>
+    <description>
+      Every HYBRID and EXPERIMENTAL loss function emits a loguru.warning()
+      on first instantiation. The warning includes:
+        1. The loss name
+        2. Its classification tier (HYBRID / EXPERIMENTAL)
+        3. The specific proxy/approximation used
+        4. A reference to this plan document
+      This ensures researchers are aware they are using non-library code.
+    </description>
+
+    <implementation>
+      <file>src/minivess/pipeline/loss_functions.py</file>
+      <action>
+        Add a _WARNED_LOSSES: set[str] module-level variable.
+        In build_loss_function(), after constructing any non-LIBRARY loss,
+        check if loss_name is in _WARNED_LOSSES. If not, emit:
+          loguru.warning(
+            "Loss '{}' is {} — see docs/planning/novel-loss-debugging-plan.xml. "
+            "Not backed by established library; may have implementation bugs.",
+            loss_name, tier
+          )
+        and add to _WARNED_LOSSES.
+      </action>
+    </implementation>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- SECTION 3: DEBUG-LONG-AND-SMALL TRAINING MODE                       -->
+  <!-- =================================================================== -->
+
+  <section id="debug-mode">
+    <title>Debug-Long-and-Small Training Mode</title>
+    <description>
+      A new debug mode for validating loss functions without running full
+      experiments. Unlike the existing debug mode (1 epoch, 1 fold), this
+      trains long enough to detect convergence issues but with minimal data.
+
+      Parameters:
+        - max_epochs: 6 (enough to see convergence trends)
+        - num_folds: 3 (validates fold-robustness)
+        - total_volumes: 6 (volumes 0–5 from MiniVess)
+        - per fold: 4 train + 2 val (3-fold CV over 6 volumes)
+        - patch_size: same as production (auto-detected)
+        - batch_size: 1 (minimum memory)
+
+      This mode runs each of the 5 graph-topology losses in sequence
+      and verifies that after 6 epochs:
+        1. Loss decreased from epoch 1 to epoch 6
+        2. No NaN/Inf in any logged metric
+        3. Val dice > 0 (model learns something)
+        4. Gradients are non-zero for all loss parameters
+    </description>
+
+    <config>
+      <file>configs/experiments/dynunet_graph_topology_debug.yaml</file>
+      <content>
+        experiment_name: dynunet_graph_topology_debug
+        model: dynunet
+        losses: [dice_ce, cbdice_cldice, graph_topology, skeleton_recall, betti_matching]
+        compute: gpu_low
+        data_dir: data/raw/minivess
+        num_folds: 3
+        max_epochs: 6
+        seed: 42
+        debug: false  # NOT the existing 1-epoch debug; this is a proper short run
+        memory_limit_gb: 24
+        monitor_interval: 5
+        # Subset volumes for speed
+        volume_indices: [0, 1, 2, 3, 4, 5]
+        # Same checkpoint config as production
+        checkpoint:
+          tracked_metrics:
+            - {name: val_loss, direction: minimize, patience: 30}
+            - {name: val_dice, direction: maximize, patience: 30}
+            - {name: val_cldice, direction: maximize, patience: 30}
+            - {name: val_compound_nsd_cldice, direction: maximize, patience: 30}
+          primary_metric: val_compound_nsd_cldice
+          min_delta: 0.0001
+          min_epochs: 1
+          save_last: true
+          save_history: false
+      </content>
+    </config>
+
+    <estimated_time>
+      5 losses × 3 folds × 6 epochs × ~2 min/epoch = ~3 hours total
+    </estimated_time>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- SECTION 4: AUTOMATED LOSS VALIDATION TEST HARNESS                   -->
+  <!-- =================================================================== -->
+
+  <section id="test-harness">
+    <title>Production-Grade Loss Validation Test Harness</title>
+    <description>
+      A comprehensive test suite that validates every loss function against
+      a standard set of properties. These are unit-level tests that run
+      WITHOUT a GPU or dataset — using synthetic tensors only.
+    </description>
+
+    <test-file>tests/v2/unit/test_loss_validation_harness.py</test-file>
+
+    <test-categories>
+
+      <category name="gradient-sanity" description="Every loss must produce finite, non-zero gradients">
+        <test name="test_{loss}_forward_finite">
+          Forward pass produces finite scalar loss for random input.
+        </test>
+        <test name="test_{loss}_backward_non_zero_grads">
+          Backward pass produces non-zero gradients for at least some parameters.
+        </test>
+        <test name="test_{loss}_no_nan_on_all_zeros_pred">
+          Loss does not NaN when prediction is all zeros (common early training).
+        </test>
+        <test name="test_{loss}_no_nan_on_all_ones_pred">
+          Loss does not NaN when prediction is all ones.
+        </test>
+        <test name="test_{loss}_no_nan_on_perfect_pred">
+          Loss does not NaN when prediction exactly matches GT.
+        </test>
+      </category>
+
+      <category name="value-sanity" description="Loss values must be bounded and sensible">
+        <test name="test_{loss}_perfect_pred_lower_than_random">
+          Loss for perfect prediction &lt; loss for random prediction.
+        </test>
+        <test name="test_{loss}_loss_is_non_negative">
+          Loss value is >= 0 (most segmentation losses are).
+        </test>
+        <test name="test_{loss}_empty_mask_handled">
+          Empty GT mask (all background) does not cause crash or NaN.
+        </test>
+      </category>
+
+      <category name="convergence-smoke" description="Loss should decrease on a trivially overfittable task">
+        <test name="test_{loss}_overfit_single_sample">
+          Train a tiny model (2 Conv3d layers) for 20 gradient steps on a
+          single synthetic volume with a known GT. Loss at step 20 should
+          be lower than loss at step 1.
+        </test>
+      </category>
+
+    </test-categories>
+
+    <parametrize>
+      All tests are @pytest.mark.parametrize'd over the 5 graph-topology
+      sweep losses: dice_ce, cbdice_cldice, graph_topology, skeleton_recall,
+      betti_matching. Total: 5 × 9 = 45 tests.
+    </parametrize>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- SECTION 5: ALGORITHMIC ACCURACY REVIEW                              -->
+  <!-- =================================================================== -->
+
+  <section id="algorithmic-review">
+    <title>Algorithmic Accuracy Review Checklist</title>
+    <description>
+      For each experimental loss, verify that the implementation matches
+      the paper's mathematical formulation. Use reviewer agents to cross-check.
+    </description>
+
+    <review-items>
+
+      <item loss="skeleton_recall" paper="Kirchhoff et al. (ECCV 2024)">
+        <check>GT skeleton extracted via skimage.morphology.skeletonize (Lee94)</check>
+        <check>Loss = 1 - (sum of pred probabilities at skeleton voxels) / (count of skeleton voxels)</check>
+        <check>Fallback for thin structures where skeletonize returns empty</check>
+        <risk>Fallback uses mask itself — this deviates from the paper (which assumes skeleton always exists)</risk>
+      </item>
+
+      <item loss="cape" paper="Luo et al. (MICCAI 2025)">
+        <check>Original paper uses diffusion-based connectivity (heat kernel)</check>
+        <check>Our implementation uses skeleton-path coverage as an approximation</check>
+        <check>Mean coverage + soft-min (log-sum-exp) penalty for path continuity</check>
+        <risk>NOT a faithful implementation of the paper's diffusion approach — it is an inspired-by approximation. The soft-min temperature (0.1) is not from the paper.</risk>
+      </item>
+
+      <item loss="betti_matching" paper="Stucki et al. (ICML 2023)">
+        <check>Uses gudhi CubicalComplex for persistence diagrams when available</check>
+        <check>Hungarian matching via scipy.optimize.linear_sum_assignment</check>
+        <check>Proxy fallback: multi-threshold level-set + spatial gradient fragmentation</check>
+        <risk>The proxy fallback does NOT compute true persistent homology — it uses connected-component counting at multiple thresholds as a proxy. Gradient path through gudhi branch uses penalty * spatial_gradient_magnitude (not directly differentiable through the matching).</risk>
+      </item>
+
+      <item loss="graph_topology" paper="Custom compound (not from a single paper)">
+        <check>Weighted combination: 0.5*cbdice_cldice + 0.3*skeleton_recall + 0.2*cape</check>
+        <check>Weights are hand-tuned, not from any paper</check>
+        <risk>Unknown interaction effects between sub-losses. Weights may need tuning.</risk>
+      </item>
+
+      <item loss="toposeg" paper="Gupta &amp; Essa (IJCV 2025)" status="planned">
+        <check>Uses discrete Morse theory for critical point identification</check>
+        <check>Penalizes misclassification at topological critical points</check>
+        <risk>Discrete Morse on 3D volumes is computationally expensive. May need gudhi or dionysus for filtration.</risk>
+      </item>
+
+    </review-items>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- SECTION 6: P2 IMPLEMENTATION SCOPE                                  -->
+  <!-- =================================================================== -->
+
+  <section id="p2-scope">
+    <title>P2 Implementation Scope (Experimental / Exploratory)</title>
+    <description>
+      P2 issues are EXPLORATORY — they demonstrate concepts from recent
+      papers but are NOT production-grade. Each implementation:
+        1. Is clearly marked with an "EXPERIMENTAL" docstring banner
+        2. Emits loguru.warning() on first use
+        3. Has unit tests for basic forward/backward pass
+        4. May use simplified proxies instead of full paper algorithms
+        5. Is registered in the loss factory but NOT included in default experiments
+
+      P2 issues suitable for immediate implementation:
+        #131 Murray's law compliance metric (S — simple, formula-based)
+        #133 TopoSegNet scalable topology loss (L — needs discrete Morse)
+
+      P2 issues deferred (require new model architectures):
+        #126 Topograph post-processing (XL — needs iterative voxel flipping)
+        #127 Learned reconnection (XL — needs trainable MLP)
+        #128 FlowAxis (XL — entire new model)
+        #129 VesselFormer (XL — deformable attention transformer)
+        #130 Topological UQ (XL — ensemble graph analysis)
+        #132 GraphSeg (XL — deformable graph atlas)
+
+      Strategy for deferred XL issues: close with "implemented as stub" or
+      "scope reduced to minimal viable proof-of-concept".
+    </description>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- SECTION 7: EXECUTION ORDER                                          -->
+  <!-- =================================================================== -->
+
+  <section id="execution-order">
+    <title>Execution Order</title>
+
+    <phase id="1" name="Warning System + Test Harness">
+      <task>Add loguru warnings to build_loss_function() for non-LIBRARY losses</task>
+      <task>Create test_loss_validation_harness.py with parametrized tests</task>
+      <task>Run harness on all 5 graph-topology sweep losses</task>
+      <estimated_time>1 hour</estimated_time>
+    </phase>
+
+    <phase id="2" name="P2 Implementations">
+      <task>Implement Murray's law compliance metric (#131) — S size, formula</task>
+      <task>Implement TopoSegNet loss (#133) — L size, discrete Morse</task>
+      <task>Stub/scope-reduce remaining 6 XL P2 issues (#126-#130, #132)</task>
+      <estimated_time>2 hours</estimated_time>
+    </phase>
+
+    <phase id="3" name="Debug Training Validation">
+      <precondition>Half-width training run completes</precondition>
+      <task>Create dynunet_graph_topology_debug.yaml config</task>
+      <task>Run debug-long-and-small (5 losses × 3 folds × 6 epochs)</task>
+      <task>Analyse MLflow logs for NaN/convergence/gradient health</task>
+      <estimated_time>3 hours (compute) + 30 min (analysis)</estimated_time>
+    </phase>
+
+    <phase id="4" name="Close Issues">
+      <task>Close all P1 issues (#119-#125) with commit references</task>
+      <task>Close P2 issues (#126-#133) with implementation/stub notes</task>
+      <task>Update MEMORY.md with P1/P2 completion status</task>
+    </phase>
+
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- SECTION 8: CONFIDENCE LEVELS                                        -->
+  <!-- =================================================================== -->
+
+  <section id="confidence">
+    <title>Post-Validation Confidence Levels</title>
+    <description>
+      After completing all phases, each loss will have a confidence level:
+    </description>
+    <levels>
+      <level name="HIGH" criteria="MONAI-backed, no custom code">
+        dice_ce, dice, focal, cldice
+      </level>
+      <level name="HIGH-COMPOUND" criteria="MONAI-backed compound, no custom gradient path">
+        dice_ce_cldice, cbdice_cldice
+      </level>
+      <level name="MEDIUM-HIGH" criteria="Library-backed GT + custom pred path, convergence verified">
+        skeleton_recall, cape
+      </level>
+      <level name="MEDIUM" criteria="Custom code, convergence verified, reviewer-checked">
+        betti_matching, graph_topology
+      </level>
+      <level name="LOW" criteria="Experimental proxy, may not match paper, convergence unverified">
+        cbdice, centerline_ce, warp, topo, betti, full_topo, toposeg
+      </level>
+    </levels>
+  </section>
+
+</plan>

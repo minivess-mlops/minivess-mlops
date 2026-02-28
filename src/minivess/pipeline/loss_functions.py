@@ -5,10 +5,55 @@
 
 from __future__ import annotations
 
+import logging
+
 import torch
 from monai.losses import DiceCELoss, DiceLoss, FocalLoss
 from monai.losses.cldice import SoftclDiceLoss
 from torch import nn
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Loss classification for warning system
+# See docs/planning/novel-loss-debugging-plan.xml for full classification.
+# ---------------------------------------------------------------------------
+
+_LIBRARY_LOSSES: frozenset[str] = frozenset(
+    {
+        "dice_ce",
+        "dice",
+        "focal",
+        "cldice",
+    }
+)
+
+_LIBRARY_COMPOUND_LOSSES: frozenset[str] = frozenset(
+    {
+        "dice_ce_cldice",
+        "cbdice_cldice",
+    }
+)
+
+_HYBRID_LOSSES: dict[str, str] = {
+    "skeleton_recall": "skimage skeletonize (GT) + custom coverage (Kirchhoff ECCV 2024)",
+    "cape": "skimage skeletonize + scipy EDT (GT) + log-sum-exp approximation (inspired by Luo MICCAI 2025)",
+    "betti_matching": "gudhi CubicalComplex (GT) + gradient proxy — NOT directly differentiable through matching (Stucki ICML 2023)",
+}
+
+_EXPERIMENTAL_LOSSES: dict[str, str] = {
+    "cb_dice": "ClassBalancedDiceLoss — inverse-frequency weighting, custom implementation",
+    "cbdice": "Vendored (Shi et al.) — soft distance proxy via avg_pool3d, NOT true centreline distance",
+    "centerline_ce": "Vendored (Acebes) — erosion proxy via -max_pool3d, NOT true skeleton",
+    "warp": "Vendored (CoLeTra) — max/min pool critical points, heuristic topology proxy",
+    "topo": "Vendored (CoLeTra) — multi-scale gradient topology signature, heuristic proxy",
+    "betti": "Custom spatial gradient variance as fragmentation proxy — NOT true Betti numbers",
+    "full_topo": "Compound: DiceCE + clDice + BettiLoss proxy — BettiLoss is experimental",
+    "graph_topology": "Compound: cbdice_cldice + skeleton_recall + cape — hand-tuned weights, interaction effects unknown",
+    "toposeg": "Discrete Morse critical points (Gupta & Essa IJCV 2025) — simplified proxy, NOT full discrete Morse",
+}
+
+_WARNED_LOSSES: set[str] = set()
 
 
 class VesselCompoundLoss(nn.Module):  # type: ignore[misc]
@@ -380,78 +425,129 @@ def build_loss_function(
     nn.Module
         Configured loss function ready for ``loss(logits, labels)`` calls.
     """
+    loss_fn: nn.Module | None = None
+
+    # --- LIBRARY losses (MONAI-backed, no warning) ---
     if loss_name == "dice_ce":
-        return DiceCELoss(
+        loss_fn = DiceCELoss(
             softmax=softmax,
             to_onehot_y=to_onehot_y,
             lambda_ce=0.5,
             lambda_dice=0.5,
         )
-    if loss_name == "dice":
-        return DiceLoss(
+    elif loss_name == "dice":
+        loss_fn = DiceLoss(
             softmax=softmax,
             to_onehot_y=to_onehot_y,
         )
-    if loss_name == "focal":
-        return FocalLoss(
+    elif loss_name == "focal":
+        loss_fn = FocalLoss(
             gamma=2.0,
             to_onehot_y=to_onehot_y,
         )
-    if loss_name == "cldice":
-        return SoftclDiceLoss(smooth=1e-5, iter_=3)
-    if loss_name == "dice_ce_cldice":
-        return VesselCompoundLoss(
+    elif loss_name == "cldice":
+        loss_fn = SoftclDiceLoss(smooth=1e-5, iter_=3)
+    # --- LIBRARY-COMPOUND losses ---
+    elif loss_name == "dice_ce_cldice":
+        loss_fn = VesselCompoundLoss(
             softmax=softmax,
             to_onehot_y=to_onehot_y,
         )
-    if loss_name == "cb_dice":
-        return ClassBalancedDiceLoss(
+    elif loss_name == "cbdice_cldice":
+        loss_fn = CbDiceClDiceLoss(softmax=softmax, to_onehot_y=to_onehot_y)
+    # --- EXPERIMENTAL losses (custom implementations) ---
+    elif loss_name == "cb_dice":
+        loss_fn = ClassBalancedDiceLoss(
             num_classes=num_classes,
             softmax=softmax,
         )
-    if loss_name == "betti":
-        return BettiLoss()
-    if loss_name == "full_topo":
-        return TopologyCompoundLoss(
+    elif loss_name == "betti":
+        loss_fn = BettiLoss()
+    elif loss_name == "full_topo":
+        loss_fn = TopologyCompoundLoss(
             softmax=softmax,
             to_onehot_y=to_onehot_y,
         )
-    if loss_name == "cbdice_cldice":
-        return CbDiceClDiceLoss(softmax=softmax, to_onehot_y=to_onehot_y)
-    if loss_name == "graph_topology":
-        return GraphTopologyLoss(softmax=softmax, to_onehot_y=to_onehot_y)
+    elif loss_name == "graph_topology":
+        loss_fn = GraphTopologyLoss(softmax=softmax, to_onehot_y=to_onehot_y)
     # --- Vendored losses ---
-    if loss_name == "cbdice":
+    elif loss_name == "cbdice":
         from minivess.pipeline.vendored_losses.cbdice import CenterlineBoundaryDiceLoss
 
-        return CenterlineBoundaryDiceLoss(softmax=softmax)
-    if loss_name == "centerline_ce":
+        loss_fn = CenterlineBoundaryDiceLoss(softmax=softmax)
+    elif loss_name == "centerline_ce":
         from minivess.pipeline.vendored_losses.centerline_ce import (
             CenterlineCrossEntropyLoss,
         )
 
-        return CenterlineCrossEntropyLoss()
-    if loss_name == "warp":
+        loss_fn = CenterlineCrossEntropyLoss()
+    elif loss_name == "warp":
         from minivess.pipeline.vendored_losses.coletra import WarpLoss
 
-        return WarpLoss(softmax=softmax)
-    if loss_name == "topo":
+        loss_fn = WarpLoss(softmax=softmax)
+    elif loss_name == "topo":
         from minivess.pipeline.vendored_losses.coletra import TopoLoss
 
-        return TopoLoss(softmax=softmax)
-    if loss_name == "skeleton_recall":
+        loss_fn = TopoLoss(softmax=softmax)
+    # --- HYBRID losses (library GT + custom pred path) ---
+    elif loss_name == "skeleton_recall":
         from minivess.pipeline.vendored_losses.skeleton_recall import (
             SkeletonRecallLoss,
         )
 
-        return SkeletonRecallLoss(softmax=softmax)
-    if loss_name == "cape":
+        loss_fn = SkeletonRecallLoss(softmax=softmax)
+    elif loss_name == "cape":
         from minivess.pipeline.vendored_losses.cape import CAPELoss
 
-        return CAPELoss()
-    if loss_name == "betti_matching":
+        loss_fn = CAPELoss()
+    elif loss_name == "betti_matching":
         from minivess.pipeline.vendored_losses.betti_matching import BettiMatchingLoss
 
-        return BettiMatchingLoss(softmax=softmax)
-    msg = f"Unknown loss function: {loss_name}"
-    raise ValueError(msg)
+        loss_fn = BettiMatchingLoss(softmax=softmax)
+    # --- P2 EXPERIMENTAL losses ---
+    elif loss_name == "toposeg":
+        from minivess.pipeline.vendored_losses.toposeg import TopoSegLoss
+
+        loss_fn = TopoSegLoss(softmax=softmax)
+
+    if loss_fn is None:
+        msg = f"Unknown loss function: {loss_name}"
+        raise ValueError(msg)
+
+    # Emit one-time warning for non-LIBRARY losses
+    if loss_name not in _LIBRARY_LOSSES:
+        _emit_loss_warning(loss_name)
+
+    return loss_fn
+
+
+def _emit_loss_warning(loss_name: str) -> None:
+    """Emit a one-time warning for non-LIBRARY loss functions.
+
+    Warns researchers that the loss is not fully backed by an established
+    library and may contain implementation bugs or simplified proxies.
+    """
+    if loss_name in _WARNED_LOSSES:
+        return
+    _WARNED_LOSSES.add(loss_name)
+
+    if loss_name in _HYBRID_LOSSES:
+        tier = "HYBRID"
+        detail = _HYBRID_LOSSES[loss_name]
+    elif loss_name in _EXPERIMENTAL_LOSSES:
+        tier = "EXPERIMENTAL"
+        detail = _EXPERIMENTAL_LOSSES[loss_name]
+    elif loss_name in _LIBRARY_COMPOUND_LOSSES:
+        tier = "LIBRARY-COMPOUND"
+        detail = "Weighted sum of library losses"
+    else:
+        return  # LIBRARY losses — no warning needed
+
+    logger.warning(
+        "Loss '%s' is %s — %s. "
+        "Not fully backed by established library; may have implementation bugs. "
+        "See docs/planning/novel-loss-debugging-plan.xml for risk assessment.",
+        loss_name,
+        tier,
+        detail,
+    )

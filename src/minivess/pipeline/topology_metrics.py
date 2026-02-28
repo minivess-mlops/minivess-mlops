@@ -672,6 +672,117 @@ def compute_bdr(
 
 
 # ---------------------------------------------------------------------------
+# Murray's Law Compliance — Issue #131
+# ---------------------------------------------------------------------------
+
+
+def compute_murray_compliance(
+    mask: np.ndarray,
+) -> dict[str, float]:
+    """Compute Murray's law compliance at vessel bifurcations.
+
+    EXPERIMENTAL: Uses centreline graph extraction to find bifurcation nodes,
+    then measures how well vessel radii follow Murray's cubic branching law:
+        r_parent^3 = sum(r_daughter_i^3)
+
+    Murray's law predicts optimal vascular branching for minimizing the
+    metabolic cost of blood transport (Murray, 1926).
+
+    Args:
+        mask: Binary 3D mask (D, H, W).
+
+    Returns:
+        Dict with:
+          'mean_ratio': Mean Murray ratio across bifurcations (1.0 = perfect).
+          'mean_deviation': Mean absolute deviation from ideal ratio of 1.0.
+          'compliance_score': Normalized score in [0, 1] (1.0 = perfect Murray's law).
+          'n_bifurcations': Number of bifurcations analysed.
+    """
+    from minivess.pipeline.centreline_extraction import extract_centreline
+
+    logger.warning(
+        "Murray's law compliance is EXPERIMENTAL — uses centreline graph radii "
+        "which are estimated from distance transform, not true vessel diameters. "
+        "See docs/planning/novel-loss-debugging-plan.xml."
+    )
+
+    mask_bin = (mask > 0).astype(np.uint8)
+    if mask_bin.sum() == 0:
+        return {
+            "mean_ratio": float("nan"),
+            "mean_deviation": float("nan"),
+            "compliance_score": 0.0,
+            "n_bifurcations": 0,
+        }
+
+    graph = extract_centreline(mask_bin)
+
+    # Find junction nodes (bifurcations) and their connected edges
+    junction_indices = {
+        i for i, n in enumerate(graph.nodes) if n.node_type == "junction"
+    }
+
+    if not junction_indices:
+        return {
+            "mean_ratio": float("nan"),
+            "mean_deviation": float("nan"),
+            "compliance_score": 0.0,
+            "n_bifurcations": 0,
+        }
+
+    # Build adjacency: node_idx → list of (neighbor_idx, edge)
+    adjacency: dict[int, list[tuple[int, float]]] = {}
+    for edge in graph.edges:
+        adjacency.setdefault(edge.source_idx, []).append(
+            (edge.target_idx, edge.mean_radius)
+        )
+        adjacency.setdefault(edge.target_idx, []).append(
+            (edge.source_idx, edge.mean_radius)
+        )
+
+    ratios = []
+    for jidx in junction_indices:
+        neighbors = adjacency.get(jidx, [])
+        if len(neighbors) < 3:
+            # Not a true bifurcation (need parent + 2 daughters)
+            continue
+
+        # Sort neighbors by radius (largest = parent, rest = daughters)
+        neighbor_radii = sorted([r for _, r in neighbors], reverse=True)
+        parent_r = neighbor_radii[0]
+        daughter_radii = neighbor_radii[1:]
+
+        if parent_r <= 0:
+            continue
+
+        parent_cubed = parent_r**3
+        daughters_cubed_sum = sum(r**3 for r in daughter_radii)
+
+        if daughters_cubed_sum > 0:
+            ratio = parent_cubed / daughters_cubed_sum
+            ratios.append(ratio)
+
+    if not ratios:
+        return {
+            "mean_ratio": float("nan"),
+            "mean_deviation": float("nan"),
+            "compliance_score": 0.0,
+            "n_bifurcations": 0,
+        }
+
+    mean_ratio = float(np.mean(ratios))
+    mean_deviation = float(np.mean([abs(r - 1.0) for r in ratios]))
+    compliance_score = float(1.0 / (1.0 + mean_deviation))
+
+    return {
+        "mean_ratio": mean_ratio,
+        "mean_deviation": mean_deviation,
+        "compliance_score": compliance_score,
+        "n_bifurcations": len(ratios),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
