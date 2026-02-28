@@ -125,3 +125,67 @@ metrics:
     description: >
       F1 score computed on the foreground (vessel) class of the validation
       split, logged every validation epoch.
+
+  # --------------------------------------------------------------------------
+  # Topology metrics (computed every N epochs — expensive)
+  # --------------------------------------------------------------------------
+
+  - name: nsd
+    display_name: "Normalized Surface Dice (NSD)"
+    mlflow_name: "eval_fold{fold_id}_nsd"
+    direction: maximize
+    unit: ""
+    bounds: [0.0, 1.0]
+    description: >
+      Fraction of predicted boundary within tolerance tau of the ground truth
+      boundary. Default tau = 1.0 voxels (~2 * median_voxel_spacing for MiniVess).
+
+  - name: hd95
+    display_name: "Hausdorff Distance 95th percentile"
+    mlflow_name: "eval_fold{fold_id}_hd95"
+    direction: minimize
+    unit: "voxels"
+    bounds: [0.0, 100.0]
+    description: >
+      95th percentile of symmetric Hausdorff distance. Robust to single-voxel
+      outliers while capturing worst-case boundary error.
+
+  - name: ccdice
+    display_name: "Connected-Component Dice (ccDice)"
+    mlflow_name: "eval_fold{fold_id}_ccdice"
+    direction: maximize
+    unit: ""
+    bounds: [0.0, 1.0]
+    description: >
+      Fragmentation-aware Dice that decomposes masks into connected components,
+      matches via Hungarian algorithm, then averages per-component Dice.
+
+  - name: betti_error_beta0
+    display_name: "Betti-0 Error (component count)"
+    mlflow_name: "eval_fold{fold_id}_betti_error_beta0"
+    direction: minimize
+    unit: ""
+    bounds: [0.0, 100.0]
+    description: >
+      Absolute difference in connected component counts between predicted
+      and ground truth masks. |cc_count(pred) - cc_count(gt)|.
+
+  - name: junction_f1
+    display_name: "Junction F1 Score"
+    mlflow_name: "eval_fold{fold_id}_junction_f1"
+    direction: maximize
+    unit: ""
+    bounds: [0.0, 1.0]
+    description: >
+      Bifurcation detection accuracy measured by matching junctions from
+      predicted and ground truth centreline graphs within distance tolerance.
+
+  - name: val_compound_nsd_cldice
+    display_name: "Compound NSD+clDice"
+    mlflow_name: "val_compound_nsd_cldice"
+    direction: maximize
+    unit: ""
+    bounds: [0.0, 1.0]
+    description: >
+      Improved compound metric replacing MASD+clDice: 0.5 * NSD + 0.5 * clDice.
+      Both components are in [0, 1] with consistent scale, avoiding range collapse.
