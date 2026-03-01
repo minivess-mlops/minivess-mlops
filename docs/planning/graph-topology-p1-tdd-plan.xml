@@ -1,0 +1,236 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan version="1.0" name="graph-topology-p1-implementation">
+  <metadata>
+    <created>2026-02-28</created>
+    <branch>feat/graph-constrained-models</branch>
+    <description>
+      TDD implementation plan for 7 P1 graph-topology issues (#119-#125).
+      Implementation order: compound loss (quick win) → Betti matching →
+      vessel graph pipeline → graph metrics → TFFM wrapper → centreline head →
+      experiment config. Dependencies: gudhi (not installed, NaN fallback),
+      torch_geometric (not installed, linear fallback), networkx (available).
+    </description>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Quick Wins (depend only on P0, Size M)                    -->
+  <!-- ================================================================== -->
+
+  <task id="T1" status="NOT_STARTED">
+    <name>Compound graph topology loss (#123)</name>
+    <description>
+      New GraphTopologyLoss class combining existing losses:
+      loss = w1*cbdice_cldice + w2*skeleton_recall + w3*cape.
+      Default weights: 0.5, 0.3, 0.2. Configurable via constructor.
+      Register as 'graph_topology' in build_loss_function().
+    </description>
+    <tdd_spec>
+      <tests>
+        test_graph_topology_loss_differentiable
+        test_graph_topology_loss_gradient_nonzero
+        test_graph_topology_loss_all_terms_contribute
+        test_graph_topology_loss_weights_configurable
+        test_graph_topology_loss_registered_in_factory
+        test_graph_topology_loss_vram_small_patch
+        test_graph_topology_loss_nan_safe
+        test_graph_topology_loss_batch_dimension
+      </tests>
+      <file>tests/v2/unit/test_graph_topology_loss.py</file>
+      <impl_files>
+        src/minivess/pipeline/loss_functions.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: Topology Losses (optional deps, Size L)                   -->
+  <!-- ================================================================== -->
+
+  <task id="T2" status="NOT_STARTED">
+    <name>Betti matching loss (#122)</name>
+    <description>
+      Differentiable topology matching loss via persistence diagrams.
+      Match persistence pairs between pred and GT using Hungarian algorithm.
+      Requires gudhi (optional). Graceful fallback: returns 0.0 + warning.
+      Register as 'betti_matching' in build_loss_function().
+    </description>
+    <tdd_spec>
+      <tests>
+        test_betti_matching_loss_differentiable
+        test_betti_matching_loss_gradient_nonzero
+        test_betti_matching_loss_topology_diff_penalized
+        test_betti_matching_loss_perfect_match_low_loss
+        test_betti_matching_loss_gudhi_missing_graceful
+        test_betti_matching_loss_registered_in_factory
+        test_betti_matching_loss_vram_small_patch
+        test_betti_matching_loss_nan_safe
+        test_betti_matching_loss_batch_dimension
+      </tests>
+      <file>tests/v2/unit/test_betti_matching_loss.py</file>
+      <impl_files>
+        src/minivess/pipeline/vendored_losses/betti_matching.py
+        src/minivess/pipeline/loss_functions.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: Graph Pipeline (critical path, Size XL)                   -->
+  <!-- ================================================================== -->
+
+  <task id="T3" status="NOT_STARTED">
+    <name>Vessel graph extraction pipeline (#121)</name>
+    <description>
+      Full pipeline: binary mask → skeletonize → graph extraction → pruning
+      → radius estimation → NetworkX graph. Builds on CentrelineGraph from P0.
+      Multi-format export: GraphML, SWC. Public API: extract_vessel_graph().
+    </description>
+    <tdd_spec>
+      <tests>
+        test_extract_vessel_graph_returns_networkx_graph
+        test_vessel_graph_node_attributes
+        test_vessel_graph_edge_attributes
+        test_vessel_graph_pruning_removes_short_branches
+        test_vessel_graph_pruning_preserves_long_branches
+        test_vessel_graph_radius_from_distance_transform
+        test_vessel_graph_empty_mask
+        test_vessel_graph_single_tube
+        test_vessel_graph_y_bifurcation
+        test_export_graphml_valid_xml
+        test_export_swc_valid_format
+        test_export_roundtrip_graphml
+      </tests>
+      <file>tests/v2/unit/test_vessel_graph.py</file>
+      <impl_files>
+        src/minivess/pipeline/vessel_graph.py
+        src/minivess/pipeline/graph_export.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies>P0 T4 (centreline_extraction)</dependencies>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: Graph Metrics (depends on Phase 3, Size L)                -->
+  <!-- ================================================================== -->
+
+  <task id="T4" status="NOT_STARTED">
+    <name>Graph-based evaluation metrics (#124)</name>
+    <description>
+      Add APLS, skeleton recall metric (per-voxel), and branch detection rate.
+      Extend topology_metrics.py. APLS: shortest-path comparison between matched
+      graph nodes. BDR: fraction of GT branches matched in pred graph.
+      Skeleton recall metric: fraction of GT skeleton covered by pred.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_apls_perfect_match_returns_one
+        test_apls_no_match_returns_zero
+        test_apls_partial_match_intermediate
+        test_apls_empty_masks
+        test_skeleton_recall_metric_perfect_returns_one
+        test_skeleton_recall_metric_empty_returns_zero
+        test_skeleton_recall_metric_partial
+        test_bdr_perfect_match_returns_one
+        test_bdr_missing_branches_below_one
+        test_bdr_empty_masks
+      </tests>
+      <file>tests/v2/unit/test_graph_metrics.py</file>
+      <impl_files>
+        src/minivess/pipeline/topology_metrics.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies>T3</dependencies>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 5: Architecture Modules (adapter pattern, Size L)            -->
+  <!-- ================================================================== -->
+
+  <task id="T5" status="NOT_STARTED">
+    <name>TFFM wrapper adapter (#119)</name>
+    <description>
+      Topology Feature Fusion Module wrapper. Composition pattern:
+      TFFMWrapper(DynUNetAdapter(config)). Applies feature fusion on
+      encoder outputs. torch_geometric optional → linear fallback.
+      Stores attention weights in SegmentationOutput.metadata.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_tffm_wrapper_forward_shape
+        test_tffm_wrapper_backward_succeeds
+        test_tffm_wrapper_without_torch_geometric
+        test_tffm_wrapper_metadata_has_fusion_flag
+        test_tffm_wrapper_get_config
+        test_tffm_wrapper_trainable_params_increases
+        test_tffm_wrapper_vram_small_patch
+        test_tffm_wrapper_checkpoint_save_load
+      </tests>
+      <file>tests/v2/unit/test_tffm_wrapper.py</file>
+      <impl_files>
+        src/minivess/adapters/tffm_wrapper.py
+        src/minivess/adapters/graph_modules.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <task id="T6" status="NOT_STARTED">
+    <name>Centreline prediction head (#120)</name>
+    <description>
+      Multi-task adapter: segmentation + centreline distance map.
+      Wraps existing adapter, adds 1x1x1 conv head for centreline.
+      Centreline map stored in SegmentationOutput.metadata['centreline_map'].
+      Configurable weights (seg_weight, centreline_weight).
+    </description>
+    <tdd_spec>
+      <tests>
+        test_centreline_head_forward_shape
+        test_centreline_head_produces_both_outputs
+        test_centreline_head_metadata_has_centreline_map
+        test_centreline_head_backward_succeeds
+        test_centreline_head_weights_configurable
+        test_centreline_head_disabled_mode
+        test_centreline_head_get_config
+        test_centreline_head_vram_small_patch
+      </tests>
+      <file>tests/v2/unit/test_centreline_head.py</file>
+      <impl_files>
+        src/minivess/adapters/centreline_head.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies>P0 T4 (centreline_extraction)</dependencies>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 6: Integration Config (depends on all above)                 -->
+  <!-- ================================================================== -->
+
+  <task id="T7" status="NOT_STARTED">
+    <name>Topology experiment sweep config (#125)</name>
+    <description>
+      Create dynunet_graph_topology.yaml experiment config.
+      5 losses × 3 folds × 100 epochs. Add graph metrics to registry.
+      Register APLS, skeleton_recall_metric, bdr in metric_registry.yaml.
+      Update dynunet_topology.yaml with rank-then-aggregate champion selection.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_graph_topology_experiment_config_loadable
+        test_graph_topology_config_has_five_losses
+        test_graph_topology_config_has_graph_metrics
+        test_apls_registered_in_metric_registry
+        test_skeleton_recall_metric_registered
+        test_bdr_registered_in_metric_registry
+      </tests>
+      <file>tests/v2/unit/test_topology_integration.py</file>
+      <impl_files>
+        configs/experiments/dynunet_graph_topology.yaml
+        configs/metric_registry.yaml
+      </impl_files>
+    </tdd_spec>
+    <dependencies>T1 T2 T3 T4 T5 T6</dependencies>
+  </task>
+
+</plan>
