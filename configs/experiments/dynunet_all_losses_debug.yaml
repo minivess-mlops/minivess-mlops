@@ -1,0 +1,65 @@
+# All 18 Losses Debug Validation Config
+# ---------------------------------------------------------------------------
+# Pre-PR mechanical stability validation for ALL loss functions.
+# Purpose: verify no RuntimeError, NaN, or OOM across all 18 losses.
+#
+# Losses ordered by tier (LIBRARY first → EXPERIMENTAL last) to maximize
+# data preservation if failures occur — per-loss error isolation continues
+# to next loss on failure.
+#
+# This is NOT a performance evaluation — that comes with the 100-epoch sweep.
+#
+# Estimated runtime: 18 losses × 3 folds × 6 epochs × ~2 min/epoch ≈ 6-9 hours
+#
+# See docs/planning/debug-training-all-losses-plan.md for context.
+# ---------------------------------------------------------------------------
+
+experiment_name: dynunet_all_losses_debug
+model: dynunet
+losses:
+  # LIBRARY (4) — canary baseline
+  - dice_ce          # CANARY: if this fails, abort (infra problem)
+  - dice
+  - focal
+  - cldice
+  # LIBRARY-COMPOUND (2)
+  - dice_ce_cldice
+  - cbdice_cldice
+  # HYBRID (3) — skimage dependency
+  - skeleton_recall
+  - cape
+  - betti_matching
+  # EXPERIMENTAL (9) — highest risk
+  - cb_dice
+  - cbdice
+  - centerline_ce
+  - warp
+  - topo
+  - betti
+  - full_topo
+  - graph_topology
+  - toposeg
+compute: gpu_low
+data_dir: data/raw/minivess
+num_folds: 3
+max_epochs: 6
+seed: 42
+debug: false
+memory_limit_gb: 24
+monitor_interval: 5
+
+# Subset volumes for speed
+volume_indices: [0, 1, 2, 3, 4, 5]
+
+# ---------------------------------------------------------------------------
+# Checkpoint (relaxed for debug — no early stopping)
+# ---------------------------------------------------------------------------
+checkpoint:
+  tracked_metrics:
+    - {name: val_loss, direction: minimize, patience: 30}
+    - {name: val_dice, direction: maximize, patience: 30}
+  primary_metric: val_loss
+  min_delta: 0.0001
+  min_epochs: 1
+  save_last: true
+  save_history: false

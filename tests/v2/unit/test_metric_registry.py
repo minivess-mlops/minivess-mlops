@@ -70,24 +70,24 @@ def _write_yaml(tmp_path: Path, entries: list[dict[str, Any]]) -> Path:
     return yaml_path
 
 
-@pytest.fixture()  # type: ignore[misc]
+@pytest.fixture()
 def single_metric_yaml(tmp_path: Path) -> Path:
     """YAML file with a single maximize metric."""
     return _write_yaml(tmp_path, [_MINIMAL_ENTRY])
 
 
-@pytest.fixture()  # type: ignore[misc]
+@pytest.fixture()
 def multi_metric_yaml(tmp_path: Path) -> Path:
     """YAML file with three metrics (maximize, minimize, minimize)."""
     return _write_yaml(tmp_path, [_MINIMAL_ENTRY, _MASD_ENTRY, _VAL_LOSS_ENTRY])
 
 
-@pytest.fixture()  # type: ignore[misc]
+@pytest.fixture()
 def single_registry(single_metric_yaml: Path) -> MetricRegistry:
     return load_metric_registry(single_metric_yaml)
 
 
-@pytest.fixture()  # type: ignore[misc]
+@pytest.fixture()
 def multi_registry(multi_metric_yaml: Path) -> MetricRegistry:
     return load_metric_registry(multi_metric_yaml)
 
@@ -130,7 +130,7 @@ class TestMetricDefinition:
             description="Overlap",
         )
         with pytest.raises((AttributeError, TypeError)):
-            defn.name = "new_name"  # type: ignore[misc]
+            defn.name = "new_name"
 
     def test_bounds_is_tuple(self) -> None:
         defn = MetricDefinition(

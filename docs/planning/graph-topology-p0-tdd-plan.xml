@@ -1,0 +1,315 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan version="1.0" name="graph-topology-p0-implementation">
+  <metadata>
+    <created>2026-02-28</created>
+    <branch>feat/graph-constrained-models</branch>
+    <description>
+      TDD implementation plan for all 10 P0 graph-topology issues (#112-#118, #134-#136).
+      Implementation order: MONAI built-ins first (NSD, HD95), then foundational metrics
+      (ccDice, centreline extraction), then losses (skeleton recall, CAPE), then dependent
+      metrics (Betti error, Junction F1), then integration (config, rank-aggregate).
+    </description>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: MONAI Built-in Metrics (no dependencies, Size S)           -->
+  <!-- ================================================================== -->
+
+  <task id="T1" status="NOT_STARTED">
+    <name>NSD (Surface Dice) evaluation metric (#134)</name>
+    <description>
+      Implement NSD wrapper using monai.metrics.SurfaceDiceMetric.
+      Add compute_nsd() function to topology_metrics.py (new module).
+      Register in configs/metric_registry.yaml.
+      Tau parameter: configurable, default 1.0 (2 * median_voxel_spacing for MiniVess).
+    </description>
+    <tdd_spec>
+      <tests>
+        test_nsd_perfect_match_returns_one
+        test_nsd_empty_prediction_returns_zero
+        test_nsd_empty_ground_truth_returns_zero
+        test_nsd_bounded_zero_one
+        test_nsd_offset_sphere_known_value
+        test_nsd_tau_parameter_affects_result
+        test_nsd_3d_tube_structure
+        test_nsd_returns_float
+      </tests>
+      <file>tests/v2/unit/test_topology_metrics.py</file>
+      <impl_files>
+        src/minivess/pipeline/topology_metrics.py
+        configs/metric_registry.yaml
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <task id="T2" status="NOT_STARTED">
+    <name>HD95 evaluation metric (#135)</name>
+    <description>
+      Implement HD95 wrapper using monai.metrics.HausdorffDistanceMetric(percentile=95).
+      Add compute_hd95() function to topology_metrics.py.
+      Register in configs/metric_registry.yaml.
+      Direction: minimize (lower is better).
+    </description>
+    <tdd_spec>
+      <tests>
+        test_hd95_perfect_match_returns_zero
+        test_hd95_empty_prediction_returns_inf_or_nan
+        test_hd95_concentric_spheres_known_distance
+        test_hd95_offset_volumes_bounded
+        test_hd95_direction_is_minimize
+        test_hd95_returns_float
+        test_hd95_3d_tube_structure
+      </tests>
+      <file>tests/v2/unit/test_topology_metrics.py</file>
+      <impl_files>
+        src/minivess/pipeline/topology_metrics.py
+        configs/metric_registry.yaml
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: Foundational Infrastructure (no dependencies, Size S-M)    -->
+  <!-- ================================================================== -->
+
+  <task id="T3" status="NOT_STARTED">
+    <name>ccDice evaluation metric (#112)</name>
+    <description>
+      Implement connected-component Dice (ccDice) using scipy.ndimage.label.
+      Decompose pred/GT into connected components, match via IoU (Hungarian),
+      compute per-component Dice, average over matched pairs.
+      Add compute_ccdice() to topology_metrics.py.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_ccdice_perfect_match_returns_one
+        test_ccdice_empty_prediction_returns_zero
+        test_ccdice_empty_ground_truth_returns_zero
+        test_ccdice_single_connected_component_equals_dice
+        test_ccdice_fragmented_prediction_lower_than_dice
+        test_ccdice_multiple_components_matched_correctly
+        test_ccdice_bounded_zero_one
+        test_ccdice_3d_volume
+      </tests>
+      <file>tests/v2/unit/test_topology_metrics.py</file>
+      <impl_files>
+        src/minivess/pipeline/topology_metrics.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <task id="T4" status="NOT_STARTED">
+    <name>Centreline extraction utility (#116)</name>
+    <description>
+      Implement centreline extraction from binary 3D masks.
+      Pipeline: skimage.morphology.skeletonize (Lee94) → skeleton-to-graph
+      via 26-connectivity tracing → CentrelineGraph dataclass.
+      CentrelineGraph has: nodes (xyz, radius, type), edges (length, mean_radius).
+      Node types: junction (degree >= 3), endpoint (degree = 1), intermediate.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_extract_centreline_returns_dataclass
+        test_simple_tube_has_two_endpoints_no_junctions
+        test_y_bifurcation_has_three_endpoints_one_junction
+        test_edge_lengths_match_synthetic_tube
+        test_node_radii_from_distance_transform
+        test_empty_mask_returns_empty_graph
+        test_single_voxel_mask
+        test_skeleton_is_subset_of_mask
+      </tests>
+      <file>tests/v2/unit/test_centreline_extraction.py</file>
+      <impl_files>
+        src/minivess/pipeline/centreline_extraction.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: Topology Losses (no dependencies, Size M-L)               -->
+  <!-- ================================================================== -->
+
+  <task id="T5" status="NOT_STARTED">
+    <name>Skeleton recall loss (#114)</name>
+    <description>
+      Implement skeleton recall loss (Kirchhoff et al., ECCV 2024).
+      Differentiable via soft skeletonization of ground truth.
+      Loss = 1 - (soft_skeleton * prediction).sum() / soft_skeleton.sum().
+      Register in build_loss_function() factory as 'skeleton_recall'.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_skeleton_recall_loss_differentiable
+        test_skeleton_recall_loss_gradient_nonzero
+        test_skeleton_recall_loss_perfect_prediction_near_zero
+        test_skeleton_recall_loss_missed_skeleton_high_loss
+        test_skeleton_recall_loss_registered_in_factory
+        test_skeleton_recall_loss_vram_small_patch
+        test_skeleton_recall_loss_nan_safe
+        test_skeleton_recall_loss_batch_dimension
+      </tests>
+      <file>tests/v2/unit/test_skeleton_recall_loss.py</file>
+      <impl_files>
+        src/minivess/pipeline/vendored_losses/skeleton_recall.py
+        src/minivess/pipeline/loss_functions.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <task id="T6" status="NOT_STARTED">
+    <name>CAPE loss (#115)</name>
+    <description>
+      Implement CAPE loss (Connectivity-Aware Path Enforcement, Luo et al. 2025).
+      Sample endpoint pairs on GT skeleton, check connectivity in prediction
+      via differentiable soft geodesic distance (heat kernel approximation).
+      Configurable n_pairs (default 64). Register as 'cape' in factory.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_cape_loss_differentiable
+        test_cape_loss_gradient_nonzero
+        test_cape_loss_connected_prediction_low_loss
+        test_cape_loss_severed_prediction_high_loss
+        test_cape_loss_configurable_n_pairs
+        test_cape_loss_registered_in_factory
+        test_cape_loss_vram_small_patch
+        test_cape_loss_nan_safe
+        test_cape_loss_batch_dimension
+      </tests>
+      <file>tests/v2/unit/test_cape_loss.py</file>
+      <impl_files>
+        src/minivess/pipeline/vendored_losses/cape.py
+        src/minivess/pipeline/loss_functions.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: Dependent Metrics (require Phase 2)                        -->
+  <!-- ================================================================== -->
+
+  <task id="T7" status="NOT_STARTED">
+    <name>Betti number error metrics (#113)</name>
+    <description>
+      Implement Betti error: beta_0 (connected components) via scipy.ndimage.label,
+      beta_1 (loops) via optional gudhi. Persistence diagram distance (Wasserstein-1)
+      via gudhi if available, NaN fallback otherwise.
+      Add compute_betti_error() and compute_persistence_distance() to topology_metrics.py.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_betti_error_perfect_match_returns_zeros
+        test_betti_error_extra_components_positive_beta0
+        test_betti_error_missing_components_positive_beta0
+        test_betti_error_returns_dict_with_beta0_beta1
+        test_betti_error_empty_masks
+        test_betti_error_3d_volume
+        test_persistence_distance_returns_float_or_nan
+        test_persistence_distance_graceful_without_gudhi
+      </tests>
+      <file>tests/v2/unit/test_topology_metrics.py</file>
+      <impl_files>
+        src/minivess/pipeline/topology_metrics.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies>T3</dependencies>
+  </task>
+
+  <task id="T8" status="NOT_STARTED">
+    <name>Junction F1 score (#117)</name>
+    <description>
+      Implement Junction F1: extract junctions (degree >= 3 nodes) from pred and GT
+      CentrelineGraphs, match within distance tolerance (default 3 voxels) via
+      scipy.optimize.linear_sum_assignment, compute P/R/F1.
+      Add compute_junction_f1() to topology_metrics.py.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_junction_f1_perfect_match_returns_one
+        test_junction_f1_missed_junction_recall_below_one
+        test_junction_f1_spurious_junction_precision_below_one
+        test_junction_f1_no_junctions_returns_one
+        test_junction_f1_tolerance_parameter
+        test_junction_f1_returns_dict_with_precision_recall_f1
+        test_junction_f1_3d_bifurcation_volume
+        test_junction_f1_empty_masks
+      </tests>
+      <file>tests/v2/unit/test_topology_metrics.py</file>
+      <impl_files>
+        src/minivess/pipeline/topology_metrics.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies>T4</dependencies>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 5: Integration and Champion Selection                         -->
+  <!-- ================================================================== -->
+
+  <task id="T9" status="NOT_STARTED">
+    <name>Rank-then-aggregate champion selection (#136)</name>
+    <description>
+      Add rank_then_aggregate() to comparison.py or champion_tagger.py.
+      Three champion categories: balanced (rank-aggregate of DSC+clDice+ASSD),
+      topology (best clDice), overlap (best DSC).
+      Update tag_champions() to use rank-based selection.
+      Backward-compatible: old compound metric still logged.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_rank_aggregate_single_winner
+        test_rank_aggregate_tie_breaking
+        test_rank_aggregate_correct_ranking_order
+        test_rank_aggregate_three_champion_categories
+        test_rank_aggregate_topology_champion_is_best_cldice
+        test_rank_aggregate_overlap_champion_is_best_dsc
+        test_rank_aggregate_balanced_uses_mean_rank
+        test_rank_aggregate_handles_nan_metrics
+      </tests>
+      <file>tests/v2/unit/test_champion_tagger.py</file>
+      <impl_files>
+        src/minivess/pipeline/champion_tagger.py
+        src/minivess/pipeline/comparison.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <task id="T10" status="NOT_STARTED">
+    <name>Topology-aware metric integration and config (#118)</name>
+    <description>
+      Wire all P0 topology metrics (NSD, HD95, ccDice, Betti error, Junction F1)
+      into the training/evaluation loop. Register new metrics in metric_registry.yaml.
+      Create configs/experiments/dynunet_topology.yaml experiment config.
+      Add topology metrics to extended-epoch callback (every 5 epochs).
+      Add val_compound_nsd_cldice to validation_metrics.py.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_topology_experiment_config_loadable
+        test_topology_metrics_registered_in_registry
+        test_compound_nsd_cldice_bounded_zero_one
+        test_compound_nsd_cldice_perfect_scores_returns_one
+        test_compound_nsd_cldice_nan_safe
+        test_nsd_registered_in_metric_registry
+        test_hd95_registered_in_metric_registry
+        test_ccdice_registered_in_metric_registry
+        test_betti_error_registered_in_metric_registry
+      </tests>
+      <file>tests/v2/unit/test_topology_integration.py</file>
+      <impl_files>
+        src/minivess/pipeline/validation_metrics.py
+        configs/metric_registry.yaml
+        configs/experiments/dynunet_topology.yaml
+      </impl_files>
+    </tdd_spec>
+    <dependencies>T1 T2 T3 T7 T8</dependencies>
+  </task>
+
+</plan>

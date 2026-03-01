@@ -210,6 +210,13 @@ class SegmentationTrainer:
                 output = self.model(images)
                 loss = self.criterion(output.logits, labels)
 
+            if not torch.isfinite(loss):
+                msg = (
+                    f"Non-finite loss detected: {loss.item()}. "
+                    "This prevents gradient poisoning from corrupting optimizer state."
+                )
+                raise ValueError(msg)
+
             self.scaler.scale(loss).backward()
             if self.config.gradient_clip_val > 0:
                 self.scaler.unscale_(self.optimizer)
@@ -234,7 +241,7 @@ class SegmentationTrainer:
             self.metrics.reset()
         return EpochResult(loss=avg_loss, metrics=epoch_metrics)
 
-    @torch.no_grad()
+    @torch.no_grad()  # type: ignore[misc]
     def validate_epoch(
         self, loader: Any, *, compute_extended: bool = False
     ) -> EpochResult:
@@ -274,7 +281,7 @@ class SegmentationTrainer:
                 # needed because full 512x512xZ volumes exceed GPU memory.
                 if self.val_roi_size is not None:
 
-                    def _model_fn(x):
+                    def _model_fn(x: torch.Tensor) -> torch.Tensor:
                         return self.model(x).logits
 
                     logits = sliding_window_inference(

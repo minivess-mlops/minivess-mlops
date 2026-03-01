@@ -35,7 +35,7 @@ REQUIRED_FIELDS: list[str] = ["experiment_name", "model", "losses"]
 # so that unittest.mock.patch("run_experiment.detect_hardware") works correctly.
 # These modules may not exist; graceful degradation is handled at call sites.
 try:
-    from minivess.config.adaptive_profiles import (  # type: ignore[import]
+    from minivess.config.adaptive_profiles import (
         compute_adaptive_profile,
         detect_hardware,
     )
@@ -44,7 +44,7 @@ try:
 except (ImportError, ModuleNotFoundError):
     _HAS_ADAPTIVE_PROFILES = False
 
-    def detect_hardware() -> Any:  # type: ignore[misc]
+    def detect_hardware() -> Any:
         """Stub: adaptive_profiles module not available."""
         raise ImportError(
             "minivess.config.adaptive_profiles is not installed. "
@@ -53,7 +53,7 @@ except (ImportError, ModuleNotFoundError):
 
     def compute_adaptive_profile(
         budget: Any, dataset_profile: Any, model_name: str = "dynunet"
-    ) -> Any:  # type: ignore[misc]
+    ) -> Any:
         """Stub: adaptive_profiles module not available."""
         raise ImportError(
             "minivess.config.adaptive_profiles is not installed. "
@@ -192,7 +192,7 @@ def run_dry_run(config: dict[str, Any]) -> dict[str, Any]:
 
     # Attempt preflight checks if the module is available
     try:
-        from minivess.pipeline.preflight import run_preflight  # type: ignore[import]
+        from minivess.pipeline.preflight import run_preflight
 
         preflight = run_preflight(data_dir=data_dir)
         results["preflight"] = {
@@ -295,7 +295,7 @@ def main(argv: list[str] | None = None) -> None:
     # Attempt to load dataset profile for adaptive compute
     dataset_profile = None
     try:
-        from minivess.data.profiler import scan_dataset  # type: ignore[import]
+        from minivess.data.profiler import scan_dataset
 
         dataset_profile = scan_dataset(data_dir)
         logger.info("Dataset profile loaded for adaptive compute")
@@ -309,8 +309,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     logger.info("Resolved compute profile: %s", profile["name"])
 
-    # Delegate to train.py for each loss
+    # Delegate to train.py for each loss — with per-loss error isolation
     losses: list[str] = config.get("losses", ["cbdice_cldice"])
+    failed_losses: dict[str, str] = {}
+    completed_losses: list[str] = []
+
     for loss in losses:
         logger.info("Launching training run: loss=%s", loss)
         # Resolve splits file path (relative to project root)
@@ -345,34 +348,50 @@ def main(argv: list[str] | None = None) -> None:
         if config.get("debug", False):
             train_argv.append("--debug")
 
-        # Import and run the memory-safe monitored training script
-        train_script = PROJECT_ROOT / "scripts" / "train_monitored.py"
-        if not train_script.exists():
-            # Fallback to train.py for backwards compatibility
-            train_script = PROJECT_ROOT / "scripts" / "train.py"
-        if train_script.exists():
-            import importlib.util
+        try:
+            # Import and run the memory-safe monitored training script
+            train_script = PROJECT_ROOT / "scripts" / "train_monitored.py"
+            if not train_script.exists():
+                # Fallback to train.py for backwards compatibility
+                train_script = PROJECT_ROOT / "scripts" / "train.py"
+            if train_script.exists():
+                import importlib.util
 
-            module_name = train_script.stem
-            spec = importlib.util.spec_from_file_location(module_name, train_script)
-            if spec is not None and spec.loader is not None:
-                train_mod = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(train_mod)  # type: ignore[union-attr]
-                parsed = train_mod.parse_args(train_argv)
-                # Pass checkpoint config from experiment YAML to train_monitored
-                if "checkpoint" in config:
-                    parsed.checkpoint_config = config["checkpoint"]
-                # Pass architecture_params from experiment YAML
-                if "architecture_params" in config:
-                    parsed.architecture_params = config["architecture_params"]
-                # Pass split_mode from experiment YAML
-                parsed.split_mode = config.get("split_mode", "file")
-                train_mod.run_monitored_experiment(parsed)
-        else:
-            logger.warning(
-                "train_monitored.py not found at %s, skipping execution",
-                train_script,
+                module_name = train_script.stem
+                spec = importlib.util.spec_from_file_location(module_name, train_script)
+                if spec is not None and spec.loader is not None:
+                    train_mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(train_mod)  # type: ignore[union-attr]
+                    parsed = train_mod.parse_args(train_argv)
+                    # Pass checkpoint config from experiment YAML to train_monitored
+                    if "checkpoint" in config:
+                        parsed.checkpoint_config = config["checkpoint"]
+                    # Pass architecture_params from experiment YAML
+                    if "architecture_params" in config:
+                        parsed.architecture_params = config["architecture_params"]
+                    # Pass split_mode from experiment YAML
+                    parsed.split_mode = config.get("split_mode", "file")
+                    train_mod.run_monitored_experiment(parsed)
+            else:
+                logger.warning(
+                    "train_monitored.py not found at %s, skipping execution",
+                    train_script,
+                )
+            completed_losses.append(loss)
+        except Exception:
+            logger.exception(
+                "Training FAILED for loss=%s — continuing to next loss", loss
             )
+            failed_losses[loss] = str(loss)
+
+    # Summary
+    logger.info(
+        "Experiment complete: %d/%d losses succeeded",
+        len(completed_losses),
+        len(losses),
+    )
+    if failed_losses:
+        logger.warning("Failed losses: %s", list(failed_losses.keys()))
 
 
 if __name__ == "__main__":

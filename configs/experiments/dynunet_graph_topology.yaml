@@ -1,0 +1,105 @@
+# Graph-Topology Experiment Sweep (P1 — Issue #125)
+# ---------------------------------------------------------------------------
+# Compares 5 loss functions across classical overlap + topology + graph metrics.
+# Uses rank-then-aggregate champion selection (Metrics Reloaded / TopCoW).
+#
+# Losses:
+#   1. dice_ce          — baseline (best DSC, weak topology)
+#   2. cbdice_cldice    — current default (best clDice, slight DSC penalty)
+#   3. graph_topology   — compound: cbdice_cldice + skeleton_recall + cape
+#   4. skeleton_recall  — skeleton coverage loss
+#   5. betti_matching   — persistence-diagram matching via gudhi
+#
+# Estimated runtime: 5 losses × 3 folds × 100 epochs ≈ 25 hours
+# VRAM budget: < 8 GB per run (verified on dynunet_loss_variation_v2)
+# ---------------------------------------------------------------------------
+
+experiment_name: dynunet_graph_topology_v1
+model: dynunet
+losses:
+  - dice_ce
+  - cbdice_cldice
+  - graph_topology
+  - skeleton_recall
+  - betti_matching
+compute: gpu_low
+data_dir: data/raw/minivess
+num_folds: 3
+max_epochs: 100
+seed: 42
+debug: false
+memory_limit_gb: 24
+monitor_interval: 10
+
+# ---------------------------------------------------------------------------
+# Checkpoint and early stopping
+# ---------------------------------------------------------------------------
+checkpoint:
+  tracked_metrics:
+    - name: val_loss
+      direction: minimize
+      patience: 30
+    - name: val_dice
+      direction: maximize
+      patience: 30
+    - name: val_f1_foreground
+      direction: maximize
+      patience: 30
+    - name: val_cldice
+      direction: maximize
+      patience: 30
+    - name: val_masd
+      direction: minimize
+      patience: 30
+    - name: val_compound_nsd_cldice
+      direction: maximize
+      patience: 30
+  early_stopping_strategy: all
+  primary_metric: val_compound_nsd_cldice
+  min_delta: 1.0e-4
+  min_epochs: 10
+  save_last: true
+  save_history: true
+
+# ---------------------------------------------------------------------------
+# Topology metrics (expensive — computed every N epochs)
+# ---------------------------------------------------------------------------
+topology_metrics:
+  compute_every_n_epochs: 5
+  metrics:
+    # Surface / distance metrics
+    - nsd
+    - hd95
+    # Topology-aware metrics
+    - ccdice
+    - betti_error_beta0
+    - junction_f1
+    # Graph-based metrics (from vessel graph extraction)
+    - apls
+    - skeleton_recall_metric
+    - bdr
+
+# ---------------------------------------------------------------------------
+# Champion selection — rank-then-aggregate (Metrics Reloaded, TopCoW)
+# ---------------------------------------------------------------------------
+champion_selection:
+  strategy: rank_then_aggregate
+  categories:
+    - name: champion_topology
+      description: "Best topology preservation"
+      rank_metrics: [val_cldice, ccdice, junction_f1]
+    - name: champion_overlap
+      description: "Best voxel overlap"
+      rank_metrics: [val_dice, nsd]
+    - name: champion_balanced
+      description: "Best overall (rank-aggregate)"
+      rank_metrics: [val_dice, val_cldice, val_masd]
+
+# ---------------------------------------------------------------------------
+# Statistical testing
+# ---------------------------------------------------------------------------
+statistical_testing:
+  bootstrap_n: 10000
+  ci_level: 0.95
+  correction: holm_bonferroni
+  effect_size: cohens_d

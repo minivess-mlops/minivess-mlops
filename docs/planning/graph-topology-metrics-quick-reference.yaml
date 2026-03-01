@@ -1,0 +1,257 @@
+# Graph-Based Topology Metrics - Quick Reference
+# For MinIVess MLOps v2 Issue #124 (Graph-based evaluation metrics)
+# Last updated: 2026-02-28
+
+metrics:
+  apls:
+    name: "Average Path Length Similarity"
+    short_name: APLS
+    purpose: "Compares shortest paths between matched graph nodes in pred vs GT"
+    origin: "SpaceNet 3 Road Detection Challenge (2016)"
+    on_pypi: true
+    pypi_package: "apls"
+    github: "https://github.com/CosmiQ/apls"
+    license: "Apache-2.0"
+    support_3d: false
+    support_2d: true
+    key_functions:
+      - "apls.single_path_metric(G_pred, G_gt)"
+      - "apls.path_sim_metric(G_pred, G_gt)"
+      - "apls.compute_metric(G_pred, G_gt)"
+    input_format: "NetworkX graphs, GeoJSON, CSV, pickled graphs"
+    use_for_minivess: "❌ NO - Designed for 2D road networks only"
+    recommendation: "Skip; use clDice instead for 3D vessels"
+    notes:
+      - "2D-only, geospatial-focused"
+      - "Production-ready but not suitable for 3D vessel segmentation"
+
+  skeleton_recall:
+    name: "Skeleton Recall Loss"
+    short_name: "SkeletonRecall"
+    purpose: "Soft recall loss against precomputed tubed skeleton of GT; topology-aware training"
+    paper: "https://arxiv.org/abs/2404.03010"
+    venue: "ECCV 2024"
+    on_pypi: false
+    github: "https://github.com/MIC-DKFZ/Skeleton-Recall"
+    license: "Apache-2.0"
+    support_3d: true
+    support_2d: true
+    metric_or_loss: "LOSS FUNCTION"
+    integration: "nnUNetv2 trainer"
+    key_functions:
+      - "nnUNetTrainerSkeletonRecall (custom trainer)"
+      - "tubed_skeletonize_transform() (dataloader)"
+      - "SkeletonRecallLoss.forward() (loss)"
+    formula: "L = w_dice·L_dice + w_ce·L_ce + w_skel·L_skeleton_recall"
+    overhead_reduction: "90%+ vs hard skeletonization"
+    use_for_minivess: "⚠️  CONDITIONAL - Only if nnUNet is adopted"
+    recommendation: "Use for training if switching to nnUNetv2; otherwise skip"
+    notes:
+      - "Loss function, not evaluation metric"
+      - "Requires nnUNetv2 framework"
+      - "Excellent topology preservation during training"
+
+  cldice_standalone:
+    name: "Centerline Dice (Standalone)"
+    short_name: "clDice"
+    purpose: "Topology-preserving similarity measure using morphological skeletons"
+    formula: "clDice = 2·(skelGT ∩ skelPred) / (skelGT + skelPred)"
+    guarantees: "Homotopy equivalence preservation for binary 2D/3D"
+    paper: "https://openaccess.thecvf.com/content/CVPR2021/papers/Shit_clDice_-_A_Novel_Topology-Preserving_Loss_Function_for_Tubular_Structure_CVPR_2021_paper.pdf"
+    venue: "CVPR 2021"
+    on_pypi: false
+    github: "https://github.com/jocpae/clDice"
+    license: "MIT"
+    support_3d: true
+    support_2d: true
+    implementations:
+      - "PyTorch 2D/3D"
+      - "TensorFlow/Keras 2D/3D"
+    key_functions:
+      - "clDice(pred, target) [hard metric]"
+      - "soft_cldice_loss(pred, target) [differentiable]"
+    skeleton_type: "Hard (scikit-image) or Soft (iterative min/max)"
+    perf_skeleton_compute: "4-5 min per volume (full dataset)"
+    use_for_minivess: "✓ YES - Primary topology metric (evaluation)"
+    recommendation: "Use for post-hoc evaluation; prefer MONAI for training"
+    notes:
+      - "No PyPI; clone GitHub and import directly"
+      - "Production-ready, peer-reviewed"
+      - "Excellent for 3D vessel topology"
+
+  cldice_monai:
+    name: "Centerline Dice (MONAI)"
+    short_name: "MONAI clDice"
+    purpose: "MONAI's native topology-preserving loss and metric"
+    on_pypi: true
+    pypi_package: "monai"
+    github: "https://github.com/Project-MONAI/MONAI"
+    license: "Apache-2.0"
+    support_3d: true
+    support_2d: true
+    min_version: "1.3.0"
+    key_functions:
+      - "monai.losses.SoftclDiceLoss(iter_=3, smooth=1.0)"
+      - "monai.losses.SoftDiceclDiceLoss(alpha=0.5)"
+    params:
+      iter_: "Number of iterations for soft skeleton (default: 3)"
+      alpha: "Weight for clDice in combined loss (default: 0.5)"
+      smooth: "Smoothing factor (default: 1.0)"
+    metric_type: "Both loss function and metric"
+    use_for_minivess: "✓ YES - RECOMMENDED for training"
+    recommendation: "Primary choice for topology-aware training"
+    notes:
+      - "Official MONAI implementation"
+      - "Fully documented and maintained"
+      - "Already in project environment"
+      - "Can be used as both loss and metric"
+
+  topology_metrics:
+    name: "Topology Precision & Recall"
+    short_name: "TP/TR metrics"
+    purpose: "Skeleton-intersection based metrics forming basis of clDice"
+    formulas:
+      precision: "TP = (skelGT ∩ skelPred) / skelPred"
+      recall: "R = (skelGT ∩ skelPred) / skelGT"
+      cldice: "clDice = 2·TP·R / (TP + R)"
+    on_pypi: true
+    pypi_package: "monai"
+    implementation: "Computed internally by SoftclDiceLoss"
+    support_3d: true
+    support_2d: true
+    use_for_minivess: "✓ YES - Part of clDice evaluation"
+    recommendation: "Use as components of clDice metric"
+    notes:
+      - "Not separate metrics; derived from clDice"
+      - "Directly interpretable for topology assessment"
+
+  skeleton_metrics:
+    name: "Skeleton-Based Metrics (Allen Institute)"
+    short_name: "segmentation-skeleton-metrics"
+    purpose: "Graph-based topology evaluation using skeleton node/edge analysis"
+    on_pypi: true
+    pypi_package: "segmentation-skeleton-metrics"
+    version_latest: "5.6.21"
+    github: "https://github.com/AllenNeuralDynamics/segmentation-skeleton-metrics"
+    license: "MIT"
+    support_3d: true
+    support_2d: true
+    input_format: "SWC files (neuron morphology) + 3D segmentation volume"
+    primary_use: "Neuron/axon segmentation evaluation"
+    key_metrics_computed:
+      - "# Splits (connected components - 1)"
+      - "# Merges (graphs with merge errors)"
+      - "% Split/Omit/Merged Edges"
+      - "Edge Accuracy"
+      - "Expected Run Length (ERL)"
+      - "Normalized ERL"
+      - "Split/Merge Rates"
+    key_functions:
+      - "SkeletonMetric(groundtruth_pointer, segmentation, output_dir)"
+      - "SkeletonMetric.run()"
+    use_for_minivess: "⚠️  CONDITIONAL - Requires SWC conversion"
+    recommendation: "Skip unless detailed neuron-like topology needed"
+    notes:
+      - "Designed for neurons, not vessels"
+      - "Requires SWC file format conversion"
+      - "Only evaluates at skeleton node locations"
+      - "True graph-based evaluation (not just voxel overlap)"
+
+  branch_detection_rate:
+    name: "Branch Detection Rate"
+    short_name: "BDR"
+    purpose: "Fraction of GT branches matched in prediction graph"
+    formula: "BDR = # correctly_detected_branches / # total_gt_branches"
+    on_pypi: false
+    github_references:
+      - "DeepVesselNet: https://arxiv.org/pdf/1803.09340"
+      - "Automatic Bifurcation Detection: https://www.sciencedirect.com/science/article/pii/S0010482523001129"
+    license: "Varies (bespoke implementations)"
+    support_3d: true
+    support_2d: true
+    implementation_required: "CUSTOM"
+    algorithm_steps:
+      1. "Skeletonize prediction and GT segmentations"
+      2. "Extract bifurcations via 26-neighborhood counting"
+      3. "Build NetworkX directed graphs"
+      4. "Match bifurcations (Hungarian algorithm or graph kernels)"
+      5. "Compute fraction of matched branches"
+    dependencies:
+      - "skimage.morphology.skeletonize_3d()"
+      - "networkx (graph construction)"
+      - "scipy.optimize.linear_sum_assignment() (matching)"
+    use_for_minivess: "✓ OPTIONAL - Medium priority for #124"
+    recommendation: "Implement custom evaluator if graph matching is priority"
+    effort_estimate: "~4 hours (red-green-refactor)"
+    notes:
+      - "No standalone package exists"
+      - "All implementations bespoke"
+      - "Good complement to clDice for comprehensive evaluation"
+      - "Bifurcation detection via neighbor count in skeleton"
+
+implementation_status:
+  already_in_minivess:
+    - "clDice (hard metric)"
+    - "Soft clDice Loss (training)"
+    - "Compound loss (cbdice_cldice)"
+    - "Topology precision/recall"
+    - "Normalized MASD"
+
+  recommended_to_add:
+    - "Custom graph topology evaluator (BDR + graph matching)"
+    - "MLflow logging for graph metrics"
+    - "Markdown report generation for topology analysis"
+
+  skip:
+    - "APLS (2D-only)"
+    - "Skeleton Recall (nnUNet-specific; skip unless framework changes)"
+
+decision_matrix:
+  - metric: "clDice"
+    best_for: "General topology evaluation (3D vessels)"
+    recommended: "YES (primary choice)"
+    where_used: "Evaluation flow (#91-#93)"
+    implementation: "MONAI SoftclDiceLoss"
+
+  - metric: "Branch Detection Rate"
+    best_for: "Bifurcation matching and connectivity structure"
+    recommended: "Optional (medium priority)"
+    where_used: "Graph topology evaluator (custom)"
+    implementation: "Custom NetworkX + graph matching"
+
+  - metric: "Topology Precision/Recall"
+    best_for: "Fine-grained topology assessment"
+    recommended: "YES (part of clDice)"
+    where_used: "Embedded in clDice computation"
+    implementation: "MONAI SoftclDiceLoss"
+
+  - metric: "APLS"
+    best_for: "2D road networks (not vessels)"
+    recommended: "NO"
+    where_used: "Not applicable"
+    implementation: "Skip"
+
+  - metric: "Skeleton Recall Loss"
+    best_for: "Topology-aware training with nnUNet"
+    recommended: "Conditional (if nnUNet adopted)"
+    where_used: "Training pipeline (optional)"
+    implementation: "Custom nnUNetv2 trainer"
+
+references:
+  papers:
+    cldice_2021: "https://openaccess.thecvf.com/content/CVPR2021/papers/Shit_clDice_-_A_Novel_Topology-Preserving_Loss_Function_for_Tubular_Structure_CVPR_2021_paper.pdf"
+    skeleton_recall_2024: "https://arxiv.org/abs/2404.03010"
+    deepvesselnet_2020: "https://arxiv.org/pdf/1803.09340"
+    spacenet_apls: "https://arxiv.org/abs/1807.01232"
+    vessel_bifurcation: "https://www.sciencedirect.com/science/article/pii/S0010482523001129"
+
+  github:
+    cldice: "https://github.com/jocpae/clDice"
+    apls: "https://github.com/CosmiQ/apls"
+    skeleton_recall: "https://github.com/MIC-DKFZ/Skeleton-Recall"
+    skeleton_metrics: "https://github.com/AllenNeuralDynamics/segmentation-skeleton-metrics"
+    pyvesto: "https://github.com/chcomin/pyvesto (unmaintained)"
+
+document_version: "1.0"
+last_updated: "2026-02-28"
+applicable_to: "MinIVess MLOps v2, Issue #124"

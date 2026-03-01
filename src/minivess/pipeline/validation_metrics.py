@@ -56,3 +56,39 @@ def compute_compound_masd_cldice(
     norm = normalize_masd(masd, max_masd=max_masd)
     result = w_masd * norm + w_cldice * cldice
     return max(0.0, min(1.0, result))
+
+
+def compute_compound_nsd_cldice(
+    *,
+    nsd: float,
+    cldice: float,
+    w_nsd: float = 0.5,
+    w_cldice: float = 0.5,
+) -> float:
+    """Compute compound metric: w_nsd * NSD + w_cldice * clDice.
+
+    Both NSD and clDice are in [0, 1] with consistent scale, avoiding
+    the range-collapse issue of the MASD+clDice compound metric.
+
+    Parameters
+    ----------
+    nsd:
+        Normalized Surface Dice in [0, 1] (higher is better).
+    cldice:
+        Centre Line Dice coefficient in [0, 1] (higher is better).
+    w_nsd:
+        Weight for the NSD component.
+    w_cldice:
+        Weight for the clDice component.
+
+    Returns
+    -------
+    float
+        Compound score in [0, 1]. Higher is better.
+    """
+    if math.isnan(nsd):
+        nsd = 0.0
+    if math.isnan(cldice):
+        cldice = 0.0
+    result = w_nsd * nsd + w_cldice * cldice
+    return max(0.0, min(1.0, result))

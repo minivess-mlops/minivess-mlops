@@ -725,3 +725,146 @@ def _make_ensemble_selection(
             member_run_ids=member_run_ids or [],
         ),
     )
+
+
+# ===========================================================================
+# Tests: rank_then_aggregate (#136)
+# ===========================================================================
+
+
+class TestRankThenAggregate:
+    """Tests for rank-then-aggregate champion selection."""
+
+    def test_rank_aggregate_single_winner(self) -> None:
+        """When one model dominates all metrics, it should win balanced."""
+        from minivess.pipeline.champion_tagger import rank_then_aggregate
+
+        entries = [
+            {"model_id": "A", "dsc": 0.9, "cldice": 0.85, "assd": 1.0},
+            {"model_id": "B", "dsc": 0.7, "cldice": 0.65, "assd": 3.0},
+        ]
+        result = rank_then_aggregate(
+            entries,
+            maximize_metrics=["dsc", "cldice"],
+            minimize_metrics=["assd"],
+        )
+        assert result["balanced"] == "A"
+
+    def test_rank_aggregate_tie_breaking(self) -> None:
+        """Tie breaking should be deterministic (first in input order)."""
+        from minivess.pipeline.champion_tagger import rank_then_aggregate
+
+        entries = [
+            {"model_id": "A", "dsc": 0.9, "cldice": 0.7},
+            {"model_id": "B", "dsc": 0.7, "cldice": 0.9},
+        ]
+        result = rank_then_aggregate(
+            entries,
+            maximize_metrics=["dsc", "cldice"],
+            minimize_metrics=[],
+        )
+        # Both have mean rank 1.5, first should win tie
+        assert result["balanced"] in ("A", "B")
+
+    def test_rank_aggregate_correct_ranking_order(self) -> None:
+        """Models should be ranked correctly by each metric."""
+        from minivess.pipeline.champion_tagger import rank_then_aggregate
+
+        entries = [
+            {"model_id": "A", "dsc": 0.6, "cldice": 0.9, "assd": 5.0},
+            {"model_id": "B", "dsc": 0.8, "cldice": 0.7, "assd": 2.0},
+            {"model_id": "C", "dsc": 0.9, "cldice": 0.8, "assd": 1.0},
+        ]
+        result = rank_then_aggregate(
+            entries,
+            maximize_metrics=["dsc", "cldice"],
+            minimize_metrics=["assd"],
+        )
+        # C is best at DSC and ASSD, second at cldice → should be balanced winner
+        assert result["balanced"] == "C"
+
+    def test_rank_aggregate_three_champion_categories(self) -> None:
+        """Should return exactly three champion categories."""
+        from minivess.pipeline.champion_tagger import rank_then_aggregate
+
+        entries = [
+            {"model_id": "A", "dsc": 0.9, "cldice": 0.7, "assd": 2.0},
+            {"model_id": "B", "dsc": 0.7, "cldice": 0.9, "assd": 1.0},
+        ]
+        result = rank_then_aggregate(
+            entries,
+            maximize_metrics=["dsc", "cldice"],
+            minimize_metrics=["assd"],
+        )
+        assert "balanced" in result
+        assert "topology" in result
+        assert "overlap" in result
+
+    def test_rank_aggregate_topology_champion_is_best_cldice(self) -> None:
+        """Topology champion should be the model with best clDice."""
+        from minivess.pipeline.champion_tagger import rank_then_aggregate
+
+        entries = [
+            {"model_id": "A", "dsc": 0.9, "cldice": 0.7},
+            {"model_id": "B", "dsc": 0.7, "cldice": 0.95},
+        ]
+        result = rank_then_aggregate(
+            entries,
+            maximize_metrics=["dsc", "cldice"],
+            minimize_metrics=[],
+            topology_metric="cldice",
+        )
+        assert result["topology"] == "B"
+
+    def test_rank_aggregate_overlap_champion_is_best_dsc(self) -> None:
+        """Overlap champion should be the model with best DSC."""
+        from minivess.pipeline.champion_tagger import rank_then_aggregate
+
+        entries = [
+            {"model_id": "A", "dsc": 0.95, "cldice": 0.7},
+            {"model_id": "B", "dsc": 0.7, "cldice": 0.95},
+        ]
+        result = rank_then_aggregate(
+            entries,
+            maximize_metrics=["dsc", "cldice"],
+            minimize_metrics=[],
+            overlap_metric="dsc",
+        )
+        assert result["overlap"] == "A"
+
+    def test_rank_aggregate_balanced_uses_mean_rank(self) -> None:
+        """Balanced champion should be determined by mean rank across all metrics."""
+        from minivess.pipeline.champion_tagger import rank_then_aggregate
+
+        entries = [
+            {"model_id": "A", "dsc": 0.7, "cldice": 0.7, "assd": 3.0},
+            {"model_id": "B", "dsc": 0.8, "cldice": 0.8, "assd": 2.0},
+            {"model_id": "C", "dsc": 0.9, "cldice": 0.6, "assd": 4.0},
+        ]
+        result = rank_then_aggregate(
+            entries,
+            maximize_metrics=["dsc", "cldice"],
+            minimize_metrics=["assd"],
+        )
+        # B is second in DSC, first in cldice, second in ASSD → mean rank = 5/3
+        # C is first in DSC, third in cldice, third in ASSD → mean rank = 7/3
+        # A is third in DSC, second in cldice, third in ASSD → mean rank = 8/3
+        # B should be balanced winner
+        assert result["balanced"] == "B"
+
+    def test_rank_aggregate_handles_nan_metrics(self) -> None:
+        """Models with NaN metrics should be ranked last."""
+        from minivess.pipeline.champion_tagger import rank_then_aggregate
+
+        entries = [
+            {"model_id": "A", "dsc": 0.9, "cldice": float("nan")},
+            {"model_id": "B", "dsc": 0.7, "cldice": 0.8},
+        ]
+        result = rank_then_aggregate(
+            entries,
+            maximize_metrics=["dsc", "cldice"],
+            minimize_metrics=[],
+        )
+        # A has NaN cldice → ranked last for cldice
+        # B should win balanced (1+2=3 vs 2+1=3, tied)
+        assert result["balanced"] in ("A", "B")

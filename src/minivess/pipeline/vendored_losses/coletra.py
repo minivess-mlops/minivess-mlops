@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from torch import nn
 
 
-class WarpLoss(nn.Module):
+class WarpLoss(nn.Module):  # type: ignore[misc]
     """Warping-based topology loss from CoLeTra.
 
     Computes a differentiable topology-aware penalty by comparing
@@ -80,7 +80,7 @@ class WarpLoss(nn.Module):
         return local_max - local_min
 
 
-class TopoLoss(nn.Module):
+class TopoLoss(nn.Module):  # type: ignore[misc]
     """Topology-preserving loss from CoLeTra.
 
     Penalises topological differences between prediction and ground truth
@@ -125,8 +125,14 @@ class TopoLoss(nn.Module):
 
         # Multi-scale topology comparison
         loss = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
+        spatial_dims = fg_prob.shape[2:]
+        n_scales = 0
         for scale in [1, 2, 4]:
             if scale > 1:
+                # Guard: skip scales that would produce dims < 2 after pooling
+                # (torch.diff needs at least 2 elements per axis)
+                if any(d // scale < 2 for d in spatial_dims):
+                    continue
                 pred_scaled = F.avg_pool3d(fg_prob, kernel_size=scale)
                 gt_scaled = F.avg_pool3d(fg_label, kernel_size=scale)
             else:
@@ -137,8 +143,9 @@ class TopoLoss(nn.Module):
             pred_topo = self._topology_signature(pred_scaled)
             gt_topo = self._topology_signature(gt_scaled)
             loss = loss + F.l1_loss(pred_topo, gt_topo)
+            n_scales += 1
 
-        return self.lambda_topo * loss / 3.0
+        return self.lambda_topo * loss / max(n_scales, 1)
 
     @staticmethod
     def _topology_signature(volume: torch.Tensor) -> torch.Tensor:

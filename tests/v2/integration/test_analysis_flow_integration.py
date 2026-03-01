@@ -83,7 +83,7 @@ SKIP_IF_NO_MLRUNS = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="module")  # type: ignore[misc]
+@pytest.fixture(scope="module")
 def eval_config() -> EvaluationConfig:
     """EvaluationConfig pointing at the real dynunet_loss_variation_v2 experiment."""
     return EvaluationConfig(
@@ -95,7 +95,7 @@ def eval_config() -> EvaluationConfig:
     )
 
 
-@pytest.fixture(scope="module")  # type: ignore[misc]
+@pytest.fixture(scope="module")
 def all_strategies_eval_config() -> EvaluationConfig:
     """EvaluationConfig with all 4 ensemble strategies enabled."""
     return EvaluationConfig(
@@ -107,7 +107,7 @@ def all_strategies_eval_config() -> EvaluationConfig:
     )
 
 
-@pytest.fixture(scope="module")  # type: ignore[misc]
+@pytest.fixture(scope="module")
 def production_run_ids() -> list[str]:
     """Production run IDs from the real mlruns/ directory."""
     if _MLRUNS_MISSING:
@@ -116,7 +116,7 @@ def production_run_ids() -> list[str]:
     return result
 
 
-@pytest.fixture(scope="module")  # type: ignore[misc]
+@pytest.fixture(scope="module")
 def raw_runs(eval_config: EvaluationConfig) -> list[dict[str, Any]]:
     """Raw per-loss runs from EnsembleBuilder.discover_training_runs_raw()."""
     if _MLRUNS_MISSING:
@@ -126,14 +126,14 @@ def raw_runs(eval_config: EvaluationConfig) -> list[dict[str, Any]]:
     return result
 
 
-@pytest.fixture(scope="module")  # type: ignore[misc]
+@pytest.fixture(scope="module")
 def expanded_runs(raw_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Per-fold runs (12 total = 4 losses × 3 folds)."""
     result: list[dict[str, Any]] = expand_runs_to_per_fold(raw_runs)
     return result
 
 
-@pytest.fixture(scope="module")  # type: ignore[misc]
+@pytest.fixture(scope="module")
 def expanded_runs_with_checkpoints(
     expanded_runs: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:

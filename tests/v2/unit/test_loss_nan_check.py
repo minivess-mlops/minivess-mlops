@@ -7,7 +7,7 @@ from minivess.pipeline.loss_functions import build_loss_function
 
 
 @pytest.fixture()
-def synthetic_3d_data():
+def synthetic_3d_data() -> tuple[torch.Tensor, torch.Tensor]:
     """Synthetic 3D segmentation data: logits + labels."""
     torch.manual_seed(42)
     logits = torch.randn(1, 2, 8, 16, 16, requires_grad=True)
@@ -19,7 +19,7 @@ def synthetic_3d_data():
 
 
 @pytest.fixture()
-def synthetic_3d_data_empty_labels():
+def synthetic_3d_data_empty_labels() -> tuple[torch.Tensor, torch.Tensor]:
     """Synthetic 3D data with empty (all-background) labels."""
     torch.manual_seed(42)
     logits = torch.randn(1, 2, 8, 16, 16, requires_grad=True)
@@ -27,7 +27,30 @@ def synthetic_3d_data_empty_labels():
     return logits, labels
 
 
-EXPERIMENT_LOSSES = ["dice_ce", "cbdice", "dice_ce_cldice", "cbdice_cldice"]
+EXPERIMENT_LOSSES = [
+    # LIBRARY (4)
+    "dice_ce",
+    "dice",
+    "focal",
+    "cldice",
+    # LIBRARY-COMPOUND (2)
+    "dice_ce_cldice",
+    "cbdice_cldice",
+    # HYBRID (3)
+    "skeleton_recall",
+    "cape",
+    "betti_matching",
+    # EXPERIMENTAL (9)
+    "cb_dice",
+    "cbdice",
+    "centerline_ce",
+    "warp",
+    "topo",
+    "betti",
+    "full_topo",
+    "graph_topology",
+    "toposeg",
+]
 
 
 class TestAllLossesNoNaN:
@@ -38,7 +61,9 @@ class TestAllLossesNoNaN:
     """
 
     @pytest.mark.parametrize("loss_name", EXPERIMENT_LOSSES)
-    def test_loss_not_nan(self, loss_name, synthetic_3d_data):
+    def test_loss_not_nan(
+        self, loss_name: str, synthetic_3d_data: tuple[torch.Tensor, torch.Tensor]
+    ) -> None:
         """Loss must not be NaN on synthetic data with foreground."""
         logits, labels = synthetic_3d_data
         loss_fn = build_loss_function(loss_name)
@@ -47,7 +72,9 @@ class TestAllLossesNoNaN:
         assert not torch.isinf(loss), f"{loss_name} produced Inf loss"
 
     @pytest.mark.parametrize("loss_name", EXPERIMENT_LOSSES)
-    def test_gradient_not_nan(self, loss_name, synthetic_3d_data):
+    def test_gradient_not_nan(
+        self, loss_name: str, synthetic_3d_data: tuple[torch.Tensor, torch.Tensor]
+    ) -> None:
         """Gradients must not be NaN."""
         logits, labels = synthetic_3d_data
         loss_fn = build_loss_function(loss_name)
@@ -57,7 +84,11 @@ class TestAllLossesNoNaN:
         assert not torch.any(torch.isnan(logits.grad)), f"{loss_name}: NaN in gradient"
 
     @pytest.mark.parametrize("loss_name", EXPERIMENT_LOSSES)
-    def test_loss_not_nan_empty_labels(self, loss_name, synthetic_3d_data_empty_labels):
+    def test_loss_not_nan_empty_labels(
+        self,
+        loss_name: str,
+        synthetic_3d_data_empty_labels: tuple[torch.Tensor, torch.Tensor],
+    ) -> None:
         """Loss must handle empty labels (all background) without NaN."""
         logits, labels = synthetic_3d_data_empty_labels
         loss_fn = build_loss_function(loss_name)
@@ -65,7 +96,7 @@ class TestAllLossesNoNaN:
         assert not torch.isnan(loss), f"{loss_name} produced NaN on empty labels"
 
     @pytest.mark.parametrize("loss_name", EXPERIMENT_LOSSES)
-    def test_multi_step_no_nan(self, loss_name):
+    def test_multi_step_no_nan(self, loss_name: str) -> None:
         """Simulate 5 training steps — loss must stay finite throughout."""
         torch.manual_seed(42)
         logits = torch.randn(1, 2, 8, 16, 16, requires_grad=True)
