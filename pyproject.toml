@@ -213,6 +213,14 @@ module = [
 ]
 ignore_missing_imports = true
 
+# Test files: relax untyped-decorator strictness.
+# @pytest.mark.parametrize and @torch.no_grad() are dynamically typed
+# decorators that mypy can't resolve. Requiring type: ignore on every
+# parametrize call would be noisy and non-idiomatic for pytest.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_decorators = false
+
 # ---------------------------------------------------------------------------
 # Pytest
 # ---------------------------------------------------------------------------

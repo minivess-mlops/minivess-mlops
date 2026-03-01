@@ -34,8 +34,15 @@ SWEEP_LOSSES = [
 ]
 
 # Spatial size must be large enough for skeleton operations
-SPATIAL = (8, 8, 8)
+SPATIAL = (8, 16, 16)
 B, C = 1, 2
+
+# Multi-patch-size parametrization for production edge cases
+SPATIAL_SIZES = [
+    (8, 16, 16),  # Default
+    (5, 16, 16),  # MiniVess minimum Z dimension (critical edge case)
+    (16, 16, 16),  # Comfortable positive control
+]
 
 
 def _random_logits() -> torch.Tensor:
@@ -93,7 +100,7 @@ def _tube_labels() -> torch.Tensor:
 class TestGradientSanity:
     """Every loss must produce finite, non-zero gradients."""
 
-    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)  # type: ignore[misc]
+    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)
     def test_forward_finite(self, loss_name: str) -> None:
         """Forward pass produces finite scalar loss for random input."""
         loss_fn = build_loss_function(loss_name)
@@ -103,7 +110,7 @@ class TestGradientSanity:
         assert loss.dim() == 0, f"Loss should be scalar, got shape {loss.shape}"
         assert torch.isfinite(loss), f"Loss is not finite: {loss.item()}"
 
-    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)  # type: ignore[misc]
+    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)
     def test_backward_non_zero_grads(self, loss_name: str) -> None:
         """Backward pass produces non-zero gradients."""
         loss_fn = build_loss_function(loss_name)
@@ -114,7 +121,7 @@ class TestGradientSanity:
         assert logits.grad is not None, "No gradient computed"
         assert logits.grad.abs().sum() > 0, "All gradients are zero"
 
-    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)  # type: ignore[misc]
+    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)
     def test_no_nan_on_all_zeros_pred(self, loss_name: str) -> None:
         """Loss does not NaN when prediction is all zeros."""
         loss_fn = build_loss_function(loss_name)
@@ -123,7 +130,7 @@ class TestGradientSanity:
         loss = loss_fn(logits, labels)
         assert not torch.isnan(loss), f"NaN loss on all-zeros pred: {loss.item()}"
 
-    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)  # type: ignore[misc]
+    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)
     def test_no_nan_on_all_ones_pred(self, loss_name: str) -> None:
         """Loss does not NaN when prediction is all ones."""
         loss_fn = build_loss_function(loss_name)
@@ -132,7 +139,7 @@ class TestGradientSanity:
         loss = loss_fn(logits, labels)
         assert not torch.isnan(loss), f"NaN loss on all-ones pred: {loss.item()}"
 
-    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)  # type: ignore[misc]
+    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)
     def test_no_nan_on_perfect_pred(self, loss_name: str) -> None:
         """Loss does not NaN when prediction exactly matches GT."""
         loss_fn = build_loss_function(loss_name)
@@ -150,7 +157,7 @@ class TestGradientSanity:
 class TestValueSanity:
     """Loss values must be bounded and sensible."""
 
-    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)  # type: ignore[misc]
+    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)
     def test_perfect_pred_lower_than_random(self, loss_name: str) -> None:
         """Loss for perfect prediction < loss for random prediction."""
         loss_fn = build_loss_function(loss_name)
@@ -172,7 +179,7 @@ class TestValueSanity:
             f"Perfect loss ({perfect_loss:.4f}) >= avg random loss ({avg_random_loss:.4f})"
         )
 
-    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)  # type: ignore[misc]
+    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)
     def test_loss_is_non_negative(self, loss_name: str) -> None:
         """Loss value is >= 0."""
         loss_fn = build_loss_function(loss_name)
@@ -181,7 +188,7 @@ class TestValueSanity:
         loss = loss_fn(logits, labels).item()
         assert loss >= -1e-6, f"Loss is negative: {loss}"
 
-    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)  # type: ignore[misc]
+    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)
     def test_empty_mask_handled(self, loss_name: str) -> None:
         """Empty GT mask (all background) does not cause crash or NaN."""
         loss_fn = build_loss_function(loss_name)
@@ -200,7 +207,7 @@ class TestValueSanity:
 class TestConvergenceSmoke:
     """Loss should decrease on a trivially overfittable task."""
 
-    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)  # type: ignore[misc]
+    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)
     def test_overfit_single_sample(self, loss_name: str) -> None:
         """Train a tiny model for 20 steps; loss at step 20 < loss at step 1."""
 
@@ -279,3 +286,42 @@ class TestWarningSystem:
         assert not any(
             "EXPERIMENTAL" in r.message or "HYBRID" in r.message for r in caplog.records
         )
+
+
+# ---------------------------------------------------------------------------
+# Category 5: Multi-Patch-Size Validation
+# ---------------------------------------------------------------------------
+
+
+class TestMultiPatchSizeFinite:
+    """Verify all sweep losses produce finite values across patch sizes.
+
+    Tests three spatial sizes based on production reality:
+    - (8, 16, 16): current default
+    - (5, 16, 16): MiniVess minimum Z dimension (critical edge case)
+    - (16, 16, 16): comfortable positive control
+    """
+
+    @pytest.mark.parametrize("loss_name", SWEEP_LOSSES)
+    @pytest.mark.parametrize(
+        "spatial",
+        SPATIAL_SIZES,
+        ids=["8x16x16", "5x16x16", "16x16x16"],
+    )
+    def test_finite_across_patch_sizes(
+        self, loss_name: str, spatial: tuple[int, int, int]
+    ) -> None:
+        """Loss must be finite across all production patch sizes."""
+        torch.manual_seed(42)
+        logits = torch.randn(B, C, *spatial, requires_grad=True)
+        labels = torch.zeros(B, 1, *spatial)
+        d, h, w = spatial
+        labels[:, :, d // 4 : d // 2, h // 4 : h // 2, w // 4 : w // 2] = 1.0
+
+        loss_fn = build_loss_function(loss_name)
+        loss = loss_fn(logits, labels)
+        assert torch.isfinite(loss), (
+            f"{loss_name} not finite at spatial={spatial}: {loss.item()}"
+        )
+        loss.backward()
+        assert logits.grad is not None, f"{loss_name}: no grad at spatial={spatial}"

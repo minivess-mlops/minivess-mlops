@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture  # type: ignore[misc]
+@pytest.fixture
 def dynunet_config() -> ModelConfig:
     """Small DynUNet config for testing (tiny filters for speed)."""
     return ModelConfig(
@@ -44,21 +44,21 @@ def dynunet_config() -> ModelConfig:
     )
 
 
-@pytest.fixture  # type: ignore[misc]
+@pytest.fixture
 def base_adapter(dynunet_config: ModelConfig) -> ModelAdapter:
     from minivess.adapters.dynunet import DynUNetAdapter
 
     return DynUNetAdapter(dynunet_config, filters=[8, 16, 32])
 
 
-@pytest.fixture  # type: ignore[misc]
+@pytest.fixture
 def tffm_wrapper(base_adapter: ModelAdapter) -> ModelAdapter:
     from minivess.adapters.tffm_wrapper import TFFMWrapper
 
     return TFFMWrapper(base_adapter, grid_size=4, hidden_dim=8, n_heads=2)
 
 
-@pytest.fixture  # type: ignore[misc]
+@pytest.fixture
 def small_input() -> torch.Tensor:
     """Small 3D volume for testing: (B=1, C=1, D=16, H=16, W=8)."""
     return torch.randn(1, 1, 16, 16, 8)

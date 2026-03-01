@@ -136,14 +136,14 @@ def _make_mock_mlruns(tmp_path: Path, n_runs: int = 4) -> tuple[Path, str]:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()  # type: ignore[misc]
+@pytest.fixture()
 def mock_db(tmp_path: Path) -> Any:
     """Return a populated in-memory DuckDB from a mock mlruns tree."""
     mlruns_dir, exp_id = _make_mock_mlruns(tmp_path)
     return extract_runs_to_duckdb(mlruns_dir, exp_id)
 
 
-@pytest.fixture()  # type: ignore[misc]
+@pytest.fixture()
 def mock_db_two_runs(tmp_path: Path) -> Any:
     """Return DB with two runs having different loss functions."""
     mlruns_dir, exp_id = _make_mock_mlruns(tmp_path, n_runs=2)

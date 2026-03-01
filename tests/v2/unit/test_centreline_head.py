@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture  # type: ignore[misc]
+@pytest.fixture
 def dynunet_config() -> ModelConfig:
     """Small DynUNet config for testing."""
     return ModelConfig(
@@ -40,21 +40,21 @@ def dynunet_config() -> ModelConfig:
     )
 
 
-@pytest.fixture  # type: ignore[misc]
+@pytest.fixture
 def base_adapter(dynunet_config: ModelConfig) -> ModelAdapter:
     from minivess.adapters.dynunet import DynUNetAdapter
 
     return DynUNetAdapter(dynunet_config, filters=[8, 16, 32])
 
 
-@pytest.fixture  # type: ignore[misc]
+@pytest.fixture
 def centreline_adapter(base_adapter: ModelAdapter) -> ModelAdapter:
     from minivess.adapters.centreline_head import CentrelineHeadAdapter
 
     return CentrelineHeadAdapter(base_adapter)
 
 
-@pytest.fixture  # type: ignore[misc]
+@pytest.fixture
 def small_input() -> torch.Tensor:
     """Small 3D volume: (B=1, C=1, D=16, H=16, W=8)."""
     return torch.randn(1, 1, 16, 16, 8)
