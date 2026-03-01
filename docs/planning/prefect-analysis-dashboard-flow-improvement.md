@@ -17,7 +17,7 @@
 3. [Phase 2: External Test Dataset Acquisition](#3-phase-2-external-test-dataset-acquisition)
 4. [Phase 3: Paper-Quality Visualization System](#4-phase-3-paper-quality-visualization-system)
 5. [Phase 4: Interactive Dashboard (Observable Framework)](#5-phase-4-interactive-dashboard-observable-framework)
-6. [Phase 5: Dashboard Prefect Tasks](#6-phase-5-dashboard-prefect-tasks-within-analysis-flow)
+6. [Phase 5: Dashboard & Reporting Flow](#6-phase-5-dashboard--reporting-flow-best-effort)
 7. [Visualization Catalogue](#7-visualization-catalogue)
 8. [File Manifest](#8-file-manifest)
 9. [TDD Execution Order](#9-tdd-execution-order)
@@ -35,43 +35,48 @@
 | External test dataset (DeepVess + tUbeNet 2PM, multiphoton only) | 2 | HIGH |
 | Paper-quality Seaborn figures for LaTeX | 3 | HIGH |
 | Interactive DuckDB-WASM dashboard on GitHub Pages | 4 | MEDIUM |
-| Prefect Dashboard Flow triggered after Analysis Flow | 5 | HIGH |
+| Dashboard & Reporting Flow (best-effort, 5th Prefect flow) | 5 | HIGH |
 
 ### Architecture Overview
 
-The existing analysis flow has **9 @task-decorated functions** (10 steps). New
-tasks extend the analysis flow rather than creating a separate flow, preserving
-the 4-persona architecture (data → train → analyze → deploy) mandated by CLAUDE.md.
+The project uses **5 persona-based Prefect flows** (updated from 4). The first 4
+are **core** (always run, failure blocks the pipeline); the 5th is **best-effort**
+(runs when resources allow, failure does not block).
 
 ```
-Training Flow (Prefect)
+Flow 1: Data Engineering (core)
+Flow 2: Model Training (core)
     → MLflow runs (mlruns/{experiment_id}/{run_id}/)
     → Checkpoints (.pt), metrics, params, tags
 
-Analysis Flow (Prefect) — ENHANCED
+Flow 3: Analysis (core) — ENHANCED
     ├── Task 1-9: Existing (load, build, log, extract-modules, evaluate,
     │             mlflow-evaluate, compare, register-champion, tag-champion, report)
     ├── Task 10: Reproducibility verification (NEW)
-    ├── Task 11: External test evaluation (NEW)
-    ├── Task 12: Paper figure generation (NEW — Seaborn)
-    ├── Task 13: Parquet export for dashboard (NEW)
-    ├── Task 14: Evidently drift reports (NEW)
-    └── Task 15: Supplementary tables (NEW — CSV/LaTeX)
+    └── Task 11: External test evaluation (NEW)
+
+Flow 4: Deployment (core)
+
+Flow 5: Dashboard & Reporting (best-effort) — NEW
+    ├── Task 1: Extract DuckDB + export Parquet
+    ├── Task 2: Generate paper-quality figures (Seaborn)
+    ├── Task 3: Generate Evidently drift reports
+    └── Task 4: Generate supplementary tables (CSV/LaTeX)
 ```
 
-**Design decision:** Dashboard artifact generation is integrated as additional
-tasks within the Analysis Flow (Flow 3), not as a separate 5th flow. This:
-- Preserves the 4-persona architecture (CLAUDE.md: "4 persona-based flows")
-- Keeps dashboard tasks close to the data they visualize
-- Avoids duplicate DuckDB extraction (analysis already has it)
+**Design decision:** Dashboard is a **separate 5th flow**, not part of analysis:
+- Clear separation of concerns: analysis produces science, dashboard produces artifacts
+- **Best-effort semantics**: dashboard failure never blocks training/analysis pipeline
+- Independent retry/scheduling: can re-run dashboard without re-running analysis
+- Reads from MLflow/DuckDB (same inter-flow contract as other flows)
 - Uses `_prefect_compat.py` for graceful degradation when `PREFECT_DISABLED=1`
 
 ### MLflow as Contract Architecture
 
 All flows communicate via MLflow artifacts. The dashboard reads DuckDB/Parquet
 exports derived from MLflow, never accessing training state directly. This
-ensures the 4-persona flow separation (data → train → analyze → deploy) remains
-clean.
+ensures the 5-persona flow separation (data → train → analyze → deploy + dashboard)
+remains clean.
 
 ---
 
@@ -503,26 +508,38 @@ jobs:
 
 ---
 
-## 6. Phase 5: Dashboard Prefect Tasks (Within Analysis Flow)
+## 6. Phase 5: Dashboard & Reporting Flow (Best-Effort)
 
 ### Design
 
-Dashboard artifact generation is implemented as **additional @task-decorated
-functions** appended to the existing analysis flow, not as a separate flow.
-This preserves the 4-persona architecture (data → train → analyze → deploy).
+The Dashboard Flow is the **5th persona-based Prefect flow**. It is
+**best-effort**: failure does not block the core pipeline (data → train →
+analyze → deploy). It reads from MLflow/DuckDB (same inter-flow contract).
 
-All dashboard tasks are wired into `run_analysis_flow()` after the existing
-`generate-report` task (Task 9). They use `_prefect_compat.py` for graceful
-degradation when `PREFECT_DISABLED=1`.
+```python
+# src/minivess/orchestration/flows/dashboard_flow.py
 
-### New Prefect Tasks (added to analysis_flow.py)
+@flow(name="minivess-dashboard", log_prints=True)
+def run_dashboard_flow(
+    mlruns_dir: Path,
+    experiment_ids: list[str],
+    output_dir: Path,
+    *,
+    generate_figures: bool = True,
+    generate_evidently: bool = True,
+    export_parquet: bool = True,
+) -> dict[str, Any]:
+    """Generate dashboard artifacts from completed analysis (best-effort)."""
+```
+
+### Tasks
 
 | # | Task Name | Input | Output |
 |---|-----------|-------|--------|
-| 10 | `export-dashboard-parquet` | DuckDB database | Parquet files |
-| 11 | `generate-paper-figures` | DuckDB database | PNG/SVG/EPS figures |
-| 12 | `generate-evidently-reports` | mlruns_dir, eval results | HTML drift reports |
-| 13 | `generate-supplementary-tables` | DuckDB database | CSV/LaTeX tables |
+| 1 | `extract-duckdb-and-parquet` | mlruns_dir, experiment_ids | DuckDB + Parquet files |
+| 2 | `generate-paper-figures` | DuckDB database | PNG/SVG/EPS figures |
+| 3 | `generate-evidently-reports` | mlruns_dir, eval results | HTML drift reports |
+| 4 | `generate-supplementary-tables` | DuckDB database | CSV/LaTeX tables |
 
 ### Implementation Module
 
@@ -548,25 +565,41 @@ def generate_supplementary_tables(
     """Generate CSV and LaTeX supplementary tables."""
 ```
 
-### Wiring into Analysis Flow
+### Triggering Strategy
+
+**Local / CI mode** (via `_prefect_compat.py`): Direct invocation at the end
+of the analysis flow. Dashboard failure is caught and logged but does not fail
+the analysis flow:
 
 ```python
 # In analysis_flow.py, after generate-report task:
-parquet_result = export_dashboard_parquet_task(db=duckdb_conn, output_dir=output_dir)
-figures_result = generate_paper_figures_task(db=duckdb_conn, output_dir=output_dir)
-evidently_result = generate_evidently_reports_task(mlruns_dir=mlruns_dir, ...)
-tables_result = generate_supplementary_tables_task(db=duckdb_conn, output_dir=output_dir)
+try:
+    from minivess.orchestration.flows.dashboard_flow import run_dashboard_flow
+    dashboard_result = run_dashboard_flow(
+        mlruns_dir=mlruns_dir,
+        experiment_ids=[experiment_id],
+        output_dir=output_dir / "dashboard",
+    )
+except Exception:
+    logger.warning("Dashboard flow failed (best-effort), continuing")
+    dashboard_result = None
 ```
 
-### Production Upgrade Path
-
-When Prefect server is deployed, these tasks can optionally be extracted into a
-sub-flow for independent retry/monitoring, still under the analysis persona:
+**Production mode** (Prefect server deployed): Upgrade to
+`DeploymentEventTrigger` for fully event-driven decoupling:
 
 ```python
-@flow(name="analysis-dashboard-subflow")
-def run_dashboard_subflow(...) -> dict:
-    """Sub-flow for dashboard artifact generation (analysis persona)."""
+from prefect.events import DeploymentEventTrigger
+
+dashboard_deployment = dashboard_flow.to_deployment(
+    name="dashboard_deployment",
+    triggers=[
+        DeploymentEventTrigger(
+            expect={"prefect.flow-run.Completed"},
+            match_related={"prefect.resource.name": "analysis_deployment"},
+        )
+    ],
+)
 ```
 
 ---
@@ -715,7 +748,7 @@ def run_dashboard_subflow(...) -> dict:
 src/minivess/
 ├── pipeline/
 │   ├── reproducibility_check.py      # Phase 1: reproducibility verification
-│   ├── dashboard_tasks.py            # Phase 5: dashboard artifact generation
+│   ├── dashboard_tasks.py            # Phase 5: dashboard task implementations
 │   └── viz/                          # Phase 3: visualization system
 │       ├── __init__.py
 │       ├── plot_config.py            # Centralized styling (Paul Tol palette)
@@ -732,6 +765,8 @@ src/minivess/
 │       └── generate_all_figures.py   # Master generation script
 ├── data/
 │   └── external_datasets.py          # Phase 2: external dataset management
+├── orchestration/flows/
+│   └── dashboard_flow.py             # Phase 5: Dashboard & Reporting Flow
 
 configs/
 └── external_datasets.yaml            # Phase 2: dataset download configs
@@ -766,7 +801,7 @@ tests/v2/unit/
 ### Modified Files
 
 ```
-src/minivess/orchestration/flows/analysis_flow.py  # New tasks 10-15
+src/minivess/orchestration/flows/analysis_flow.py  # New tasks 10-11, dashboard trigger
 src/minivess/pipeline/duckdb_extraction.py          # Parquet export
 pyproject.toml                                      # New dependencies
 ```
@@ -833,28 +868,30 @@ Each module follows a RED → GREEN → FIX → VERIFY → CONVERGE inner loop.
 | 3.13 | GREEN: Implement `generate_all_figures.py` (master script) | — | 3.12 |
 | 3.14 | FIX + VERIFY + CHECKPOINT: full regression + commit | — | 3.13 |
 
-### Phase 4: Observable Framework Dashboard (5 tasks)
+### Phase 4: Observable Framework Dashboard (7 tasks)
 
 | # | Task | Test Count | Depends On |
 |---|------|------------|------------|
-| 4.1 | Set up `observable/` project skeleton | — | 3.8 |
-| 4.2 | Implement Parquet export in `duckdb_extraction.py` | ~3 tests | 4.1 |
-| 4.3 | Create dashboard pages (5 pages) | — | 4.2 |
-| 4.4 | Create GitHub Actions workflow | — | 4.3 |
-| 4.5 | CHECKPOINT: commit | — | 4.4 |
+| 4.1 | Set up `observable/` project skeleton | — | 3.14 |
+| 4.2 | RED: Write Parquet export tests | ~3 tests | 4.1 |
+| 4.3 | GREEN: Implement Parquet export in `duckdb_extraction.py` | — | 4.2 |
+| 4.4 | Create dashboard pages (5 pages) | — | 4.3 |
+| 4.5 | Create GitHub Actions workflow | — | 4.4 |
+| 4.6 | FIX + VERIFY: lint + regression | — | 4.5 |
+| 4.7 | CONVERGE + CHECKPOINT: all green → commit | — | 4.6 |
 
-### Phase 5: Dashboard Prefect Tasks (6 tasks)
+### Phase 5: Dashboard & Reporting Flow (6 tasks)
 
 | # | Task | Test Count | Depends On |
 |---|------|------------|------------|
 | 5.1 | RED: Write `test_dashboard_tasks.py` | ~10 tests | — |
-| 5.2 | GREEN: Implement `dashboard_tasks.py` | — | 5.1 |
+| 5.2 | GREEN: Implement `dashboard_tasks.py` + `dashboard_flow.py` | — | 5.1 |
 | 5.3 | FIX: Targeted fixes for any failures | — | 5.2 |
-| 5.4 | Wire tasks into analysis_flow.py | — | 5.3 |
+| 5.4 | Wire best-effort trigger into analysis_flow.py | — | 5.3 |
 | 5.5 | VERIFY: lint + typecheck + full regression | — | 5.4 |
 | 5.6 | CONVERGE + CHECKPOINT: all green → commit | — | 5.5 |
 
-**Total: 38 tasks, ~75 new tests**
+**Total: 40 tasks, ~75 new tests**
 
 ---
 
@@ -898,21 +935,24 @@ VesselExpress (Classes 18-20). If comparing against VesselFM as a baseline:
 - **Our approach:** We do NOT compare against VesselFM. We use external datasets
   purely for our own model's generalization assessment.
 
-## Appendix C: Prefect Dashboard Tasks (Within Analysis Flow)
+## Appendix C: Prefect 5-Flow Architecture
 
-Dashboard artifact generation is implemented as **additional @task functions
-within the Analysis Flow** (Flow 3: Analyze). This preserves the 4-persona
-architecture (data → train → analyze → deploy) mandated by CLAUDE.md.
+The project uses **5 persona-based Prefect flows**. Flows 1-4 are **core**
+(failure blocks the pipeline). Flow 5 is **best-effort** (failure is caught and
+logged, never blocks the pipeline).
 
-All dashboard tasks are Prefect @task-decorated and run as part of the analysis
-flow. The `_prefect_compat.py` shim ensures they run as plain Python when
-`PREFECT_DISABLED=1`.
+| Flow | Persona | Priority | Failure Semantics |
+|------|---------|----------|-------------------|
+| 1. Data Engineering | Data Engineer | Core | Blocks pipeline |
+| 2. Model Training | ML Engineer | Core | Blocks pipeline |
+| 3. Model Analysis | Research Scientist | Core | Blocks pipeline |
+| 4. Deployment | DevOps / SRE | Core | Blocks pipeline |
+| 5. Dashboard & Reporting | Visualization / Reporting | Best-effort | Logged, never blocks |
 
 | Mode | Approach | Server Required |
 |------|----------|----------------|
-| Local / CI | Tasks run inline in analysis flow (via `_prefect_compat.py`) | No |
-| Production | Tasks run within analysis flow on Prefect server | Yes |
+| Local / CI | Analysis flow calls dashboard flow with try/except (via `_prefect_compat.py`) | No |
+| Production | `DeploymentEventTrigger` — fully event-driven, independent scheduling | Yes |
 
-**Future upgrade path:** If dashboard generation becomes resource-heavy or
-needs independent retry, these tasks can be extracted into a sub-flow under the
-analysis persona — still part of the 4-flow architecture, not a 5th flow.
+The `_prefect_compat.py` shim ensures all flows run as plain Python when
+`PREFECT_DISABLED=1`.
