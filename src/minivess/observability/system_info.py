@@ -12,12 +12,8 @@ from __future__ import annotations
 import logging
 import platform
 import subprocess
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
-# Default location of the DVC tracking file for the MiniVess dataset
-_DVC_FILE_PATH = Path(__file__).resolve().parents[3] / "data" / "minivess.dvc"
 
 
 def get_system_params() -> dict[str, str]:
@@ -228,11 +224,11 @@ def get_git_info() -> dict[str, str]:
 
 
 def get_dvc_info() -> dict[str, str]:
-    """Collect DVC version and dataset data hash.
+    """Collect DVC version only.
 
-    Reads the DVC tracking file (``data/minivess.dvc``) to extract the
-    content-addressed hash and file count.  Returns ``"unknown"`` for
-    data fields when the file is absent.
+    DVC data hash and nfiles are *identifiers*, not hyperparameters, and
+    belong in MLflow tags (logged via ``log_dvc_provenance()``), not in
+    ``mlflow.log_params()``.  See issue #108.
     """
     info: dict[str, str] = {}
 
@@ -243,22 +239,6 @@ def get_dvc_info() -> dict[str, str]:
         info["sys_dvc_version"] = dvc.__version__
     except (ImportError, AttributeError):
         info["sys_dvc_version"] = "not_installed"
-
-    # Parse .dvc file for md5 hash and nfiles
-    info["sys_dvc_data_hash"] = "unknown"
-    info["sys_dvc_data_nfiles"] = "unknown"
-
-    try:
-        if _DVC_FILE_PATH.exists():
-            text = _DVC_FILE_PATH.read_text(encoding="utf-8")
-            for line in text.splitlines():
-                stripped = line.strip()
-                if stripped.startswith("- md5:"):
-                    info["sys_dvc_data_hash"] = stripped.split(":", 1)[1].strip()
-                elif stripped.startswith("nfiles:"):
-                    info["sys_dvc_data_nfiles"] = stripped.split(":", 1)[1].strip()
-    except (OSError, PermissionError):
-        logger.warning("Could not read DVC file: %s", _DVC_FILE_PATH)
 
     return info
 
