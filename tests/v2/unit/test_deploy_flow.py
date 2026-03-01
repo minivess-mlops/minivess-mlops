@@ -976,10 +976,9 @@ class TestSddDecisionNodes:
 
     @pytest.fixture()
     def decisions_dir(self) -> Path:
-        return Path(
-            "/home/petteri/Dropbox/github-personal/minivess-mlops"
-            "/docs/prd/decisions/L4-deployment"
-        )
+        # Discover project root from this test file's location
+        repo_root = Path(__file__).resolve().parents[3]
+        return repo_root / "docs" / "prd" / "decisions" / "L4-deployment"
 
     EXPECTED_DECISIONS = [
         "serving-framework.decision.yaml",
