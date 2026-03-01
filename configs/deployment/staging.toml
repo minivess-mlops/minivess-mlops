@@ -1,5 +1,7 @@
 [staging]
 debug = false
+mlflow_tracking_uri = "http://localhost:5000"
 langfuse_enabled = true
 braintrust_enabled = true
 agent_provider = "anthropic:claude-sonnet-4-6"
+test_markers = "unit and integration and not slow"

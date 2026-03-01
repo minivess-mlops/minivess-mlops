@@ -508,6 +508,50 @@ def detect_environment() -> str:
     return "local"
 
 
+def check_mlflow_health() -> PreflightCheck:
+    """Check MLflow tracking backend health.
+
+    Uses the health module to validate the MLflow backend is reachable.
+    Returns WARNING (not CRITICAL) if the server is unreachable, since
+    training can proceed with local filesystem fallback.
+
+    Returns
+    -------
+    PreflightCheck
+    """
+    try:
+        from minivess.observability.health import (
+            check_mlflow_health as _health_check,
+        )
+
+        result = _health_check()
+        if result.healthy:
+            return PreflightCheck(
+                name="mlflow_health",
+                status=CheckStatus.PASS,
+                message=result.message,
+                details={
+                    "backend_type": result.backend_type,
+                    "uri": result.uri,
+                },
+            )
+        return PreflightCheck(
+            name="mlflow_health",
+            status=CheckStatus.WARNING,
+            message=result.message,
+            details={
+                "backend_type": result.backend_type,
+                "uri": result.uri,
+            },
+        )
+    except Exception as exc:
+        return PreflightCheck(
+            name="mlflow_health",
+            status=CheckStatus.WARNING,
+            message=f"MLflow health check failed: {exc}",
+        )
+
+
 def run_preflight(
     data_dir: Path,
     *,
@@ -545,6 +589,7 @@ def run_preflight(
         check_disk_space(path=disk_check_path, min_gb=min_disk_gb),
         check_swap(warn_gb=warn_swap_gb),
         check_data_exists(data_dir),
+        check_mlflow_health(),
     ]
 
     return PreflightResult(checks=checks, environment=environment)
