@@ -31,11 +31,12 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 # pyyaml is an existing dependency via hydra-zen/omegaconf
 import yaml
 
-PRD_ROOT = Path(__file__).resolve().parent.parent / "docs" / "planning" / "prd"
+PRD_ROOT = Path(__file__).resolve().parent.parent / "docs" / "prd"
 DECISIONS_DIR = PRD_ROOT / "decisions"
 BIBLIOGRAPHY_PATH = PRD_ROOT / "bibliography.yaml"
 
@@ -50,12 +51,15 @@ AUTHOR_YEAR_PATTERN = re.compile(
 )
 
 
-def load_yaml(path: Path) -> dict | list | None:
-    """Load a YAML file, returning None if it doesn't exist."""
+def load_yaml(path: Path) -> dict[str, Any] | None:
+    """Load a YAML file, returning None if it doesn't exist or isn't a dict."""
     if not path.exists():
         return None
     with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        data = yaml.safe_load(f)
+    if isinstance(data, dict):
+        return data
+    return None
 
 
 def find_decision_files() -> list[Path]:
@@ -67,7 +71,7 @@ def find_decision_files() -> list[Path]:
     return files
 
 
-def load_bibliography() -> dict[str, dict]:
+def load_bibliography() -> dict[str, dict[str, Any]]:
     """Load bibliography.yaml and return a dict keyed by citation_key."""
     data = load_yaml(BIBLIOGRAPHY_PATH)
     if not data or "bibliography" not in data:
@@ -75,7 +79,7 @@ def load_bibliography() -> dict[str, dict]:
     return {entry["citation_key"]: entry for entry in data["bibliography"]}
 
 
-def extract_citation_keys(decision: dict) -> list[str]:
+def extract_citation_keys(decision: dict[str, Any]) -> list[str]:
     """Extract all citation_keys from a decision file's references array."""
     refs = decision.get("references", [])
     if not refs or not isinstance(refs, list):
@@ -136,7 +140,7 @@ def check_in_text_citations(decision_files: list[Path]) -> list[str]:
     return warnings
 
 
-def check_bibliography_quality(bib_entries: dict[str, dict]) -> list[str]:
+def check_bibliography_quality(bib_entries: dict[str, dict[str, Any]]) -> list[str]:
     """Check that bibliography entries have required fields."""
     issues = []
     for key, entry in bib_entries.items():
@@ -152,7 +156,7 @@ def check_bibliography_quality(bib_entries: dict[str, dict]) -> list[str]:
 
 
 def check_cross_topic_consistency(
-    decision_files: list[Path], bib_entries: dict[str, dict]
+    decision_files: list[Path], bib_entries: dict[str, dict[str, Any]]
 ) -> list[str]:
     """Check that bibliography topics match actual decision file usage."""
     # Build actual usage map: citation_key -> set of decision_ids that cite it
@@ -285,7 +289,9 @@ def main() -> int:
 
     # Determine exit code
     if all_errors:
-        print(f"\nOVERALL: FAIL ({len(all_errors)} errors, {len(all_warnings)} warnings)")
+        print(
+            f"\nOVERALL: FAIL ({len(all_errors)} errors, {len(all_warnings)} warnings)"
+        )
         return 1
     elif all_warnings and strict:
         print(f"\nOVERALL: FAIL (strict mode, {len(all_warnings)} warnings)")

@@ -1,0 +1,46 @@
+# Template: Scenario
+# A scenario is a fully resolved set of decisions — one option chosen per node.
+# Copy this file and fill in the values.
+
+scenario_id: CHANGE_ME  # snake_case, unique
+title: "CHANGE_ME"
+description: >
+  CHANGE_ME: What does this scenario represent? What combination of
+  decisions does it encode?
+
+archetype: CHANGE_ME  # Must match an archetype_id from archetypes/
+domain: CHANGE_ME  # Must match a domain_id from domains/
+status: planned  # active | planned | deprecated
+
+# Resolve one option_id per decision_id in the network.
+# Every decision in _network.yaml should appear here.
+resolved_decisions:
+  # L1 Research Goals
+  CHANGE_ME_l1_decision_1: CHANGE_ME
+  CHANGE_ME_l1_decision_2: CHANGE_ME
+
+  # L2 Architecture
+  CHANGE_ME_l2_decision_1: CHANGE_ME
+
+  # L3 Technology
+  CHANGE_ME_l3_decision_1: CHANGE_ME
+
+  # L4 Infrastructure
+  CHANGE_ME_l4_decision_1: CHANGE_ME
+
+  # L5 Operations
+  CHANGE_ME_l5_decision_1: CHANGE_ME
+
+joint_probability: 0.0  # Calculate from resolved option probabilities
+
+trade_offs:
+  gains:
+    - "CHANGE_ME"
+  sacrifices:
+    - "CHANGE_ME"
+
+# Academic references supporting this scenario's design rationale.
+# Every citation_key MUST exist in bibliography.yaml.
+references:
+  - citation_key: CHANGE_ME
+    relevance: "CHANGE_ME: Why this reference supports this scenario"

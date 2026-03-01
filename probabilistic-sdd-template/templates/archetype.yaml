@@ -1,0 +1,49 @@
+# Template: Archetype
+# An archetype represents a team persona that modulates decision probabilities.
+# Copy this file and fill in the values.
+
+archetype_id: CHANGE_ME  # snake_case, unique
+title: "CHANGE_ME"
+description: >
+  CHANGE_ME: Describe this team persona. What is their background,
+  budget, hardware, and priorities?
+
+team_profile:
+  size: "CHANGE_ME"
+  composition:
+    ml_engineers: "CHANGE_ME"
+    domain_experts: "CHANGE_ME"
+    devops: "CHANGE_ME"
+  technical_experience:
+    ml_engineering: CHANGE_ME  # beginner | intermediate | advanced
+    domain_knowledge: CHANGE_ME
+    infrastructure: CHANGE_ME
+    software_engineering: CHANGE_ME
+  budget_range:
+    monthly_compute: "CHANGE_ME"
+    annual_saas_tools: "CHANGE_ME"
+  compute_resources:
+    gpu: "CHANGE_ME"
+    ram: "CHANGE_ME"
+    storage: "CHANGE_ME"
+
+hard_constraints:
+  - "CHANGE_ME — non-negotiable constraint 1"
+  - "CHANGE_ME — non-negotiable constraint 2"
+
+soft_preferences:
+  - "CHANGE_ME — preference 1"
+  - "CHANGE_ME — preference 2"
+
+# Per-decision probability overrides for this archetype.
+# Keys are decision_ids from the network. Each entry has:
+#   preferred: option_id
+#   rationale: why this archetype prefers this option
+decision_overrides:
+  # L1 Research Goals
+  CHANGE_ME_decision_id:
+    preferred: CHANGE_ME
+    rationale: "CHANGE_ME"
+
+  # L2 Architecture
+  # ...add overrides for each relevant decision

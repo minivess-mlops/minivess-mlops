@@ -1,0 +1,88 @@
+# Template: Domain Overlay
+# A domain overlay adjusts backbone defaults for a specific application domain.
+# Copy this file and fill in the values.
+
+domain_id: CHANGE_ME  # snake_case, unique
+title: "CHANGE_ME"
+status: active  # active | planned | deprecated
+last_updated: "CHANGE_ME"
+
+description: >
+  CHANGE_ME: Describe the application domain. What are its unique
+  characteristics, challenges, and requirements?
+
+# --- Dataset Information ---
+
+dataset:
+  name: "CHANGE_ME"
+  modality: "CHANGE_ME"
+  resolution: "CHANGE_ME"
+  structures:
+    - name: "CHANGE_ME"
+      label_id: 1
+      volume_fraction: "CHANGE_ME"
+      difficulty: "CHANGE_ME"
+  challenges:
+    - "CHANGE_ME — domain-specific challenge 1"
+    - "CHANGE_ME — domain-specific challenge 2"
+
+# --- Metric Adjustments ---
+
+metric_adjustments:
+  description: >
+    CHANGE_ME: Explain why certain metrics need domain-specific weighting.
+  adjustments:
+    - metric: CHANGE_ME
+      weight_boost: 0.0
+      rationale: "CHANGE_ME"
+  additional_metrics:
+    - metric: CHANGE_ME
+      description: "CHANGE_ME"
+      package: "CHANGE_ME"
+
+# --- Loss Function Adjustments ---
+
+loss_adjustments:
+  description: >
+    CHANGE_ME: Explain which losses are particularly relevant for this domain.
+  adjustments:
+    - loss: CHANGE_ME
+      viability_boost: 0.0
+      rationale: "CHANGE_ME"
+
+# --- Augmentation Adjustments ---
+
+augmentation_adjustments:
+  description: >
+    CHANGE_ME: Explain domain-specific augmentation considerations.
+  additions:
+    - augmentation: CHANGE_ME
+      description: "CHANGE_ME"
+  cautions:
+    - augmentation: CHANGE_ME
+      warning: "CHANGE_ME"
+
+# --- PRD Prior Adjustments ---
+
+prd_prior_adjustments:
+  description: >
+    CHANGE_ME: Domain-specific probability shifts for PRD decisions.
+  adjustments:
+    - decision_id: CHANGE_ME
+      option_id: CHANGE_ME
+      adjustment: "+0.00"
+      rationale: "CHANGE_ME"
+
+# --- Vocabulary ---
+
+vocabulary:
+  primary_structure: "CHANGE_ME"
+  imaging_modality: "CHANGE_ME"
+  key_metric: "CHANGE_ME"
+  primary_challenge: "CHANGE_ME"
+  clinical_application: "CHANGE_ME"
+
+# --- References ---
+
+references:
+  - "CHANGE_ME — key reference for this domain"

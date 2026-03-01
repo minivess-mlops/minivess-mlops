@@ -1,0 +1,10 @@
+# False positives: citation_key fields in YAML bibliography/decision files
+# These are academic citation identifiers, not API keys.
+probabilistic-sdd-template/examples/minivess/decisions/L1-research-goals/project-purpose.decision.yaml:generic-api-key:118
+probabilistic-sdd-template/examples/minivess/decisions/L1-research-goals/project-purpose.decision.yaml:generic-api-key:123
+probabilistic-sdd-template/examples/minivess/bibliography.yaml:generic-api-key:5
+probabilistic-sdd-template/examples/minivess/bibliography.yaml:generic-api-key:17
+probabilistic-sdd-template/examples/minivess/bibliography.yaml:generic-api-key:29
+probabilistic-sdd-template/examples/minivess/bibliography.yaml:generic-api-key:53
+probabilistic-sdd-template/examples/minivess/decisions/L3-technology/loss-functions.decision.yaml:generic-api-key:222
+probabilistic-sdd-template/examples/minivess/decisions/L3-technology/loss-functions.decision.yaml:generic-api-key:231

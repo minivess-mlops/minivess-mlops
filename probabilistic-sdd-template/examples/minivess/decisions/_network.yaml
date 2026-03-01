@@ -1,0 +1,27 @@
+# MinIVess MLOps v2 — Example SDD Network (curated subset)
+# This is a subset of the full 70-node network to demonstrate the SDD structure.
+
+network:
+  name: "MinIVess MLOps v2 (Example Subset)"
+  version: "1.0.0"
+  last_updated: "2026-03-01"
+  description: >
+    Curated subset of the MinIVess probabilistic SDD showing one L1
+    and one L3 decision with a conditional dependency.
+
+  nodes:
+    - id: project_purpose
+      level: L1
+      file: "L1-research-goals/project-purpose.decision.yaml"
+      title: "Project Purpose"
+
+    - id: loss_functions
+      level: L3
+      file: "L3-technology/loss-functions.decision.yaml"
+      title: "Loss Functions"
+
+  edges:
+    - from: project_purpose
+      to: loss_functions
+      influence: weak
+      rationale: "Project purpose (learning vs clinical) influences loss complexity tolerance"

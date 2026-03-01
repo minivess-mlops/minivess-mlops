@@ -1,0 +1,73 @@
+# MinIVess MLOps v2 — Example Bibliography (curated subset)
+# Full version has 900+ entries. This subset demonstrates the format.
+
+bibliography:
+  - citation_key: kreuzberger2023mlops
+    inline_citation: "Kreuzberger et al. (2023)"
+    authors: "Kreuzberger, D., Kuehl, N., & Hirschl, S."
+    year: 2023
+    title: "Machine Learning Operations (MLOps): Overview, Definition, and Architecture"
+    venue: "IEEE Access, 11, 31866-31879"
+    doi: "10.1109/ACCESS.2023.3262138"
+    url: "https://ieeexplore.ieee.org/document/10081336"
+    evidence_type: survey
+    topics:
+      - project_purpose
+
+  - citation_key: fang2023mlops
+    inline_citation: "Fang et al. (2023)"
+    authors: "Fang, A., Li, C., & Wang, Z."
+    year: 2023
+    title: "MLOps: A Systematic Mapping Study"
+    venue: "Information and Software Technology, 157, 107158"
+    doi: "10.1016/j.infsof.2022.107158"
+    url: "https://doi.org/10.1016/j.infsof.2022.107158"
+    evidence_type: survey
+    topics:
+      - project_purpose
+
+  - citation_key: milletari2016vnet
+    inline_citation: "Milletari et al. (2016)"
+    authors: "Milletari, F., Navab, N., & Ahmadi, S.-A."
+    year: 2016
+    title: "V-Net: Fully Convolutional Neural Networks for Volumetric Medical Image Segmentation"
+    venue: "3DV 2016"
+    doi: "10.1109/3DV.2016.79"
+    url: "https://arxiv.org/abs/1606.04797"
+    evidence_type: benchmark
+    topics:
+      - loss_functions
+
+  - citation_key: shit2021cldice
+    inline_citation: "Shit et al. (2021)"
+    authors: "Shit, S., Paetzold, J. C., Sekuboyina, A., Ezhov, I., Unber, A., Zhylka, A., Pluim, J. P. W., Bauer, U., & Menze, B. H."
+    year: 2021
+    title: "clDice -- A Novel Topology-Preserving Loss Function for Tubular Structure Segmentation"
+    venue: "CVPR 2021"
+    doi: "10.1109/CVPR46437.2021.01629"
+    url: "https://arxiv.org/abs/2003.07311"
+    evidence_type: benchmark
+    topics:
+      - loss_functions
+
+  - citation_key: dhor2026tunepp
+    inline_citation: "Dhor et al. (2026)"
+    authors: "Dhor, A., et al."
+    year: 2026
+    title: "TUNE++: Topology-Aware Uncertainty for 3D Segmentation"
+    venue: "MICCAI 2026"
+    url: "https://arxiv.org/abs/example"
+    evidence_type: benchmark
+    topics:
+      - loss_functions
+
+  - citation_key: shi2025comma
+    inline_citation: "Shi et al. (2025)"
+    authors: "Shi, L., et al."
+    year: 2025
+    title: "COMMA: Compound Loss for Medical Image Segmentation"
+    venue: "Medical Image Analysis"
+    url: "https://doi.org/example"
+    evidence_type: benchmark
+    topics:
+      - loss_functions
