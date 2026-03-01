@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from torch import nn
 
 
-class CenterlineBoundaryDiceLoss(nn.Module):
+class CenterlineBoundaryDiceLoss(nn.Module):  # type: ignore[misc]
     """Centerline-boundary Dice loss combining standard Dice with
     distance-weighted components for centerline and boundary fidelity.
 
@@ -108,12 +108,23 @@ class CenterlineBoundaryDiceLoss(nn.Module):
     ) -> torch.Tensor:
         """Approximate distance-to-boundary weight using average pooling."""
         b, c = labels_onehot.shape[:2]
-        flat = labels_onehot.reshape(b * c, 1, *labels_onehot.shape[2:])
-        pad = kernel_size // 2
-        avg = F.avg_pool3d(flat, kernel_size=kernel_size, stride=1, padding=pad)
+        spatial_dims = labels_onehot.shape[2:]
+        min_dim = min(spatial_dims)
+
+        # Guard: adapt kernel size to spatial dims
+        effective_ks = min(kernel_size, min_dim)
+        # Ensure odd kernel size
+        effective_ks = effective_ks - (1 - effective_ks % 2)
+        if effective_ks < 3:
+            # Spatial dims too small for meaningful distance weighting
+            return torch.ones_like(labels_onehot)
+
+        flat = labels_onehot.reshape(b * c, 1, *spatial_dims)
+        pad = effective_ks // 2
+        avg = F.avg_pool3d(flat, kernel_size=effective_ks, stride=1, padding=pad)
         # Centerline-like: high weight where label is present but far from boundary
         weight = avg * flat  # values near 1 at center, near 0 at edges
-        return weight.reshape(b, c, *labels_onehot.shape[2:])
+        return weight.reshape(b, c, *spatial_dims)
 
     @staticmethod
     def _boundary_weight(labels_onehot: torch.Tensor) -> torch.Tensor:
