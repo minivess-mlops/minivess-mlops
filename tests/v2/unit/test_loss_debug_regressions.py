@@ -172,3 +172,50 @@ class TestBettiMatchingScale:
             f"betti_matching loss too large ({loss.item():.1f}), "
             "should be normalized to comparable scale as other losses"
         )
+
+
+class TestBettiMatchingLargeVolume:
+    """Bug #6: betti_matching gudhi path OOMs on real-sized volumes due to
+    uncapped persistence features creating huge distance matrices.
+
+    At 512x512x110, gudhi generates ~680K pred features and ~64K GT features,
+    requiring a 323 GiB distance matrix for Hungarian matching.
+    """
+
+    def test_betti_matching_moderate_volume_no_oom(self) -> None:
+        """betti_matching must handle volumes with many persistence features.
+
+        Uses 32x64x64 — large enough to generate thousands of features
+        from random logits, which would OOM without feature capping.
+        """
+        torch.manual_seed(42)
+        logits = torch.randn(1, 2, 32, 64, 64, requires_grad=True)
+        labels = torch.zeros(1, 1, 32, 64, 64)
+        labels[:, :, 8:24, 16:48, 16:48] = 1.0
+
+        loss_fn = build_loss_function("betti_matching")
+        loss = loss_fn(logits, labels)
+        assert torch.isfinite(loss), f"betti_matching not finite: {loss.item()}"
+        loss.backward()
+        assert logits.grad is not None, "No gradient from betti_matching"
+
+    def test_betti_matching_persistence_features_capped(self) -> None:
+        """Persistence diagram should be filtered/capped to prevent OOM."""
+        pytest.importorskip("gudhi")
+        import numpy as np
+
+        from minivess.pipeline.vendored_losses.betti_matching import BettiMatchingLoss
+
+        # Random volume generates many noise features
+        rng = np.random.default_rng(42)
+        mask = rng.random((32, 64, 64))
+
+        import gudhi
+
+        loss_instance = BettiMatchingLoss()
+        pairs = loss_instance._persistence_diagram(mask, gudhi)
+        # Must be capped to reasonable number (e.g., <= 1000)
+        assert len(pairs) <= 1000, (
+            f"Persistence diagram has {len(pairs)} features — "
+            "must be capped to prevent OOM in distance matrix"
+        )

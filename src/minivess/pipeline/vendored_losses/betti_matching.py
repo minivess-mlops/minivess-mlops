@@ -195,11 +195,20 @@ class BettiMatchingLoss(nn.Module):  # type: ignore[misc]
 
         return self.lambda_topo * total_loss / batch_size
 
+    # Maximum number of persistence features to keep for matching.
+    # Prevents OOM from enormous distance matrices on large volumes.
+    _MAX_PERSISTENCE_FEATURES = 500
+
     @staticmethod
     def _persistence_diagram(
         mask: object, gudhi_module: object
     ) -> list[tuple[float, float]]:
-        """Compute persistence diagram for a binary mask."""
+        """Compute persistence diagram for a binary mask.
+
+        Filters to the most significant features (by persistence lifetime)
+        and caps at ``_MAX_PERSISTENCE_FEATURES`` to prevent OOM in the
+        distance matrix used for Hungarian matching.
+        """
         import gudhi
         import numpy as np
 
@@ -212,7 +221,22 @@ class BettiMatchingLoss(nn.Module):  # type: ignore[misc]
         cc.persistence()
         pairs = cc.persistence_intervals_in_dimension(0)
         finite_pairs = pairs[np.isfinite(pairs).all(axis=1)]
-        return [(float(b), float(d)) for b, d in finite_pairs]
+
+        if len(finite_pairs) == 0:
+            return []
+
+        # Filter by significance: keep features with persistence > median
+        lifetimes = finite_pairs[:, 1] - finite_pairs[:, 0]
+        threshold = float(np.median(lifetimes))
+        significant = finite_pairs[lifetimes > threshold]
+
+        # Cap to maximum number of features (sort by lifetime descending)
+        max_feat = BettiMatchingLoss._MAX_PERSISTENCE_FEATURES
+        if len(significant) > max_feat:
+            top_idx = np.argsort(-(significant[:, 1] - significant[:, 0]))[:max_feat]
+            significant = significant[top_idx]
+
+        return [(float(b), float(d)) for b, d in significant]
 
     @staticmethod
     def _spatial_gradient_magnitude(volume: torch.Tensor) -> torch.Tensor:
