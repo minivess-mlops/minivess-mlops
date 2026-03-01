@@ -125,6 +125,23 @@ def _labels_to_onehot(
     return probs, labels_onehot
 
 
+class _WrappedSoftclDiceLoss(nn.Module):  # type: ignore[misc]
+    """Wrapper that applies softmax + one-hot preprocessing before SoftclDiceLoss.
+
+    Compound losses (VesselCompoundLoss, CbDiceClDiceLoss) handle this via
+    _labels_to_onehot(). The standalone cldice path needs the same treatment.
+    """
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__()
+        self.cldice = SoftclDiceLoss(**kwargs)
+
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        """Apply softmax + one-hot, then delegate to SoftclDiceLoss."""
+        probs, labels_onehot = _labels_to_onehot(logits, labels)
+        return self.cldice(probs, labels_onehot)
+
+
 class ClassBalancedDiceLoss(nn.Module):  # type: ignore[misc]
     """Class-balanced Dice loss with inverse-frequency weighting.
 
@@ -446,7 +463,7 @@ def build_loss_function(
             to_onehot_y=to_onehot_y,
         )
     elif loss_name == "cldice":
-        loss_fn = SoftclDiceLoss(smooth=1e-5, iter_=3)
+        loss_fn = _WrappedSoftclDiceLoss(smooth=1e-5, iter_=3)
     # --- LIBRARY-COMPOUND losses ---
     elif loss_name == "dice_ce_cldice":
         loss_fn = VesselCompoundLoss(
