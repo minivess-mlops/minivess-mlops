@@ -5,13 +5,9 @@ RED phase: all tests written before implementation exists.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _gpu_available() -> bool:
@@ -244,13 +240,25 @@ class TestGetGitInfo:
 class TestGetDvcInfo:
     """Tests for get_dvc_info()."""
 
-    def test_returns_dict_with_expected_keys(self) -> None:
+    def test_returns_only_version_key(self) -> None:
+        """get_dvc_info() should return ONLY sys_dvc_version.
+
+        DVC data hash and nfiles are identifiers, not hyperparameters.
+        They belong in MLflow tags (via log_dvc_provenance), not params.
+        Regression test for #108.
+        """
         from minivess.observability.system_info import get_dvc_info
 
         result = get_dvc_info()
         assert "sys_dvc_version" in result
-        assert "sys_dvc_data_hash" in result
-        assert "sys_dvc_data_nfiles" in result
+        assert "sys_dvc_data_hash" not in result, (
+            "sys_dvc_data_hash should not be in get_dvc_info() — "
+            "it's an identifier, not a hyperparameter (#108)"
+        )
+        assert "sys_dvc_data_nfiles" not in result, (
+            "sys_dvc_data_nfiles should not be in get_dvc_info() — "
+            "it's an identifier, not a hyperparameter (#108)"
+        )
 
     def test_all_values_are_strings(self) -> None:
         from minivess.observability.system_info import get_dvc_info
@@ -266,16 +274,17 @@ class TestGetDvcInfo:
         result = get_dvc_info()
         assert result["sys_dvc_version"] != "not_installed"
 
-    def test_graceful_when_no_dvc_file(self, tmp_path: Path) -> None:
-        """When .dvc file doesn't exist, returns 'unknown' for data hash."""
-        from minivess.observability.system_info import get_dvc_info
+    def test_get_all_system_info_excludes_dvc_hash(self) -> None:
+        """get_all_system_info() must not contain DVC hash/nfiles.
 
-        with patch(
-            "minivess.observability.system_info._DVC_FILE_PATH",
-            tmp_path / "nonexistent.dvc",
-        ):
-            result = get_dvc_info()
-        assert result["sys_dvc_data_hash"] == "unknown"
+        Regression test for #108: these are identifiers logged as MLflow
+        tags via log_dvc_provenance(), not as params.
+        """
+        from minivess.observability.system_info import get_all_system_info
+
+        result = get_all_system_info()
+        assert "sys_dvc_data_hash" not in result
+        assert "sys_dvc_data_nfiles" not in result
 
 
 class TestGetAllSystemInfo:
