@@ -144,6 +144,7 @@ class BettiMatchingLoss(nn.Module):  # type: ignore[misc]
         from scipy.optimize import linear_sum_assignment
 
         batch_size = fg_prob.shape[0]
+        spatial_volume = float(fg_prob[0, 0].numel())
         total_loss = torch.tensor(0.0, device=fg_prob.device, dtype=fg_prob.dtype)
 
         for b in range(batch_size):
@@ -160,7 +161,7 @@ class BettiMatchingLoss(nn.Module):  # type: ignore[misc]
             # Matching penalty based on unmatched features
             n_pred_feat = len(pred_diag)
             n_gt_feat = len(gt_diag)
-            penalty = abs(n_pred_feat - n_gt_feat)
+            penalty = float(abs(n_pred_feat - n_gt_feat))
 
             # If both have features, compute matching distance
             if n_pred_feat > 0 and n_gt_feat > 0:
@@ -173,17 +174,24 @@ class BettiMatchingLoss(nn.Module):  # type: ignore[misc]
                         dist_matrix[i, j] = abs(gb - pb) + abs(gd - pd)
 
                 gt_idx, pred_idx = linear_sum_assignment(dist_matrix)
-                matching_cost = sum(
-                    dist_matrix[gi, pi] for gi, pi in zip(gt_idx, pred_idx, strict=True)
+                matching_cost = float(
+                    sum(
+                        dist_matrix[gi, pi]
+                        for gi, pi in zip(gt_idx, pred_idx, strict=True)
+                    )
                 )
                 penalty += matching_cost
+
+            # Normalize penalty by spatial volume to keep scale comparable
+            # to other losses (output in ~[0, 5] range instead of ~[0, 100])
+            normalized_penalty = penalty / (spatial_volume**0.5)
 
             # Use differentiable proxy for gradient flow
             pred_b = fg_prob[b, 0]
             gt_b = gt[b, 0]
             grad_proxy = self._spatial_gradient_magnitude(pred_b - gt_b)
 
-            total_loss = total_loss + float(penalty) * grad_proxy + grad_proxy
+            total_loss = total_loss + normalized_penalty * grad_proxy + grad_proxy
 
         return self.lambda_topo * total_loss / batch_size
 
