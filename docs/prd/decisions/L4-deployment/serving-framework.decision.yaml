@@ -1,0 +1,98 @@
+decision_id: serving_framework
+title: "Serving Framework"
+description: >
+  Choice of model serving framework for inference endpoints. BentoML provides
+  native HTTP/gRPC, OpenAPI, health checks, CORS, micro-batching, and GPU
+  scheduling. FastAPI requires custom implementation of these features.
+  TorchServe is PyTorch-native but heavier for single-model serving.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-03-01
+
+options:
+  - option_id: bentoml
+    title: "BentoML"
+    description: >
+      Full-featured ML serving framework with native ONNX support, adaptive
+      batching, health checks, and OpenAPI generation. Acquired by Modular
+      (2025), remains Apache 2.0. Implemented in the current codebase.
+    prior_probability: 0.75
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "model_export_format.onnx"
+      - "containerization.docker_compose"
+
+  - option_id: fastapi
+    title: "FastAPI"
+    description: >
+      General-purpose web framework requiring custom implementation of batching,
+      health checks, model loading, and GPU scheduling. Lighter weight but
+      significantly more development effort for ML-specific features.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires custom batching implementation"
+      - "No native model versioning"
+
+  - option_id: torchserve
+    title: "TorchServe"
+    description: >
+      PyTorch-native serving framework with model archiver and management API.
+      Heavyweight Java-based process, more suited for multi-model deployments.
+    prior_probability: 0.10
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Java runtime dependency"
+      - "Heavier resource footprint"
+
+conditional_on:
+  - parent_decision_id: model_export_format
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: onnx
+        then_probabilities:
+          bentoml: 0.80
+          fastapi: 0.15
+          torchserve: 0.05
+      - given_parent_option: torchscript
+        then_probabilities:
+          bentoml: 0.40
+          fastapi: 0.20
+          torchserve: 0.40
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      bentoml: 0.80
+      fastapi: 0.15
+      torchserve: 0.05
+    rationale: "BentoML minimizes boilerplate for solo deployment"
+  clinical_deployment:
+    probability_overrides:
+      bentoml: 0.60
+      fastapi: 0.15
+      torchserve: 0.25
+    rationale: "Clinical may prefer TorchServe for enterprise features"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-03-01
+  next_review: 2026-09-01
+  change_drivers:
+    - "BentoML/Modular roadmap evolution"
+    - "ONNX Runtime serving improvements"
+
+references:
+  - citation_key: yang2022bentoml
+    relevance: "BentoML unified ML model serving framework paper"
+    supports_options:
+      - bentoml
+
+tags:
+  - deployment
+  - serving
+  - resolved

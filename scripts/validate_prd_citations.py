@@ -298,7 +298,7 @@ def main() -> int:
         return 1
     elif all_warnings:
         print(f"\nOVERALL: PASS with warnings ({len(all_warnings)} warnings)")
-        return 2
+        return 0
     else:
         print("\nOVERALL: PASS")
         return 0

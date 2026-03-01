@@ -8,3 +8,5 @@ probabilistic-sdd-template/examples/minivess/bibliography.yaml:generic-api-key:2
 probabilistic-sdd-template/examples/minivess/bibliography.yaml:generic-api-key:53
 probabilistic-sdd-template/examples/minivess/decisions/L3-technology/loss-functions.decision.yaml:generic-api-key:222
 probabilistic-sdd-template/examples/minivess/decisions/L3-technology/loss-functions.decision.yaml:generic-api-key:231
+docs/prd/decisions/L4-deployment/model-promotion.decision.yaml:generic-api-key:90
+docs/prd/bibliography.yaml:generic-api-key:3576

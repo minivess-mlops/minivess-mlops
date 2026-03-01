@@ -1,0 +1,98 @@
+decision_id: container_strategy
+title: "Container Orchestration Strategy"
+description: >
+  Container orchestration for deployed inference services. Docker Compose
+  covers single-machine and small-team use cases. Kubernetes enables
+  auto-scaling and multi-node. Nomad is a lightweight alternative.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-03-01
+
+options:
+  - option_id: docker_compose
+    title: "Docker Compose"
+    description: >
+      Single-machine container orchestration with health checks, volume
+      mounts, and service dependencies. Sufficient for research and
+      small-team deployments. Currently implemented in docker-compose.yaml.
+    prior_probability: 0.60
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "serving_framework.bentoml"
+      - "containerization.docker_compose"
+
+  - option_id: kubernetes
+    title: "Kubernetes"
+    description: >
+      Production-grade orchestration with auto-scaling, rolling updates,
+      service mesh, and multi-node scheduling. Over-engineered for
+      solo-researcher use but necessary for clinical production.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Operational complexity"
+      - "Requires cluster infrastructure"
+
+  - option_id: nomad
+    title: "HashiCorp Nomad"
+    description: >
+      Lightweight orchestration alternative with simpler operations
+      than Kubernetes. Good for small teams needing more than Compose
+      but less than full K8s.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Smaller ecosystem than K8s"
+      - "Fewer ML-specific integrations"
+
+conditional_on:
+  - parent_decision_id: compute_target
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: local_workstation
+        then_probabilities:
+          docker_compose: 0.85
+          kubernetes: 0.05
+          nomad: 0.10
+      - given_parent_option: cloud_ephemeral
+        then_probabilities:
+          docker_compose: 0.30
+          kubernetes: 0.50
+          nomad: 0.20
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      docker_compose: 0.80
+      kubernetes: 0.10
+      nomad: 0.10
+    rationale: "Compose has zero operational overhead for solo use"
+  clinical_deployment:
+    probability_overrides:
+      docker_compose: 0.25
+      kubernetes: 0.60
+      nomad: 0.15
+    rationale: "Clinical production needs K8s reliability guarantees"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-03-01
+  next_review: 2026-09-01
+  change_drivers:
+    - "Docker Compose Swarm mode improvements"
+    - "K8s serverless inference (KServe, Seldon)"
+
+references:
+  - citation_key: kubernetes2015
+    relevance: "Container orchestration for production ML serving"
+    supports_options:
+      - kubernetes
+
+tags:
+  - deployment
+  - infrastructure
+  - resolved

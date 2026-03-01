@@ -3518,3 +3518,70 @@ bibliography:
     topics:
       - data_management_strategy
       - reproducibility_standard
+
+  # ============================================================
+  # Deployment & Serving (added 2026-03-01 for L4-deployment decisions)
+  # ============================================================
+
+  - citation_key: yang2022bentoml
+    inline_citation: "Yang et al. (2022)"
+    authors: "Yang, C., et al."
+    year: 2022
+    title: "BentoML: Unified Model Serving Framework"
+    venue: "GitHub / BentoML Documentation"
+    doi: ""
+    url: "https://github.com/bentoml/BentoML"
+    evidence_type: tool_release
+    topics:
+      - serving_framework
+
+  - citation_key: onnxruntime2019
+    inline_citation: "Microsoft (2019)"
+    authors: "Microsoft"
+    year: 2019
+    title: "ONNX Runtime: Cross-Platform, High Performance ML Inferencing and Training Accelerator"
+    venue: "GitHub / Microsoft"
+    doi: ""
+    url: "https://github.com/microsoft/onnxruntime"
+    evidence_type: tool_release
+    topics:
+      - deploy_model_format
+      - model_export_format
+
+  - citation_key: kubernetes2015
+    inline_citation: "Burns et al. (2016)"
+    authors: "Burns, B., Grant, B., Oppenheimer, D., Brewer, E., Wilkes, J."
+    year: 2016
+    title: "Borg, Omega, and Kubernetes"
+    venue: "ACM Queue 14(1), pp. 70-93"
+    doi: "10.1145/2898442.2898444"
+    url: ""
+    evidence_type: empirical_study
+    topics:
+      - container_strategy
+
+  - citation_key: prefect2022
+    inline_citation: "Prefect Technologies (2022)"
+    authors: "Prefect Technologies"
+    year: 2022
+    title: "Prefect: The Modern Dataflow Automation Platform"
+    venue: "GitHub / Prefect"
+    doi: ""
+    url: "https://github.com/PrefectHQ/prefect"
+    evidence_type: tool_release
+    topics:
+      - orchestration_deploy
+      - pipeline_orchestration
+
+  - citation_key: sculley2015hidden
+    inline_citation: "Sculley et al. (2015)"
+    authors: "Sculley, D., Holt, G., Golovin, D., et al."
+    year: 2015
+    title: "Hidden Technical Debt in Machine Learning Systems"
+    venue: "NeurIPS 2015"
+    doi: ""
+    url: "https://papers.nips.cc/paper/5656-hidden-technical-debt-in-machine-learning-systems"
+    evidence_type: empirical_study
+    topics:
+      - deploy_model_promotion
+      - model_governance

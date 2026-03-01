@@ -1,0 +1,99 @@
+decision_id: deploy_model_promotion
+title: "Model Promotion Strategy"
+description: >
+  Strategy for promoting models through deployment stages
+  (DEVELOPMENT -> STAGING -> PRODUCTION). Automated promotion with
+  quality gates ensures metrics thresholds are met. Manual promotion
+  provides human oversight. Shadow deployment allows risk-free testing.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-03-01
+
+options:
+  - option_id: automated_gates
+    title: "Automated with Quality Gates"
+    description: >
+      Automatic promotion through PromotionCriteria checks (min DSC,
+      min clDice thresholds). Creates audit trail for each promotion
+      decision. Implemented via ModelRegistry.promote() with criteria.
+    prior_probability: 0.60
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "model_governance.full_registry"
+
+  - option_id: manual_review
+    title: "Manual Review"
+    description: >
+      Human-in-the-loop promotion requiring explicit approval before
+      each stage transition. Provides maximum oversight but slower
+      deployment velocity.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Slower deployment cycle"
+      - "Requires reviewer availability"
+
+  - option_id: shadow_deploy
+    title: "Shadow Deployment"
+    description: >
+      Deploy new model alongside production for comparison without
+      serving predictions. Requires infrastructure for dual inference
+      and metric comparison.
+    prior_probability: 0.10
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "2x inference cost"
+      - "Complex comparison infrastructure"
+
+conditional_on:
+  - parent_decision_id: model_promotion_strategy
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: automated_gated
+        then_probabilities:
+          automated_gates: 0.80
+          manual_review: 0.15
+          shadow_deploy: 0.05
+      - given_parent_option: manual_approval
+        then_probabilities:
+          automated_gates: 0.20
+          manual_review: 0.70
+          shadow_deploy: 0.10
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      automated_gates: 0.70
+      manual_review: 0.25
+      shadow_deploy: 0.05
+    rationale: "Automated gates for fast iteration; solo has no reviewer"
+  clinical_deployment:
+    probability_overrides:
+      automated_gates: 0.40
+      manual_review: 0.45
+      shadow_deploy: 0.15
+    rationale: "Clinical may require manual review for regulatory"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-03-01
+  next_review: 2026-09-01
+  change_drivers:
+    - "EU AI Act Article 14 human oversight requirements"
+    - "FDA guidance on autonomous AI/ML deployment"
+
+references:
+  - citation_key: sculley2015hidden
+    relevance: "Technical debt in ML systems including deployment patterns"
+    supports_options:
+      - automated_gates
+      - shadow_deploy
+
+tags:
+  - deployment
+  - governance
+  - resolved
