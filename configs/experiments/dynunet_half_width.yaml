@@ -1,10 +1,12 @@
-experiment_name: dynunet_loss_variation_v2
+experiment_name: dynunet_half_width_v1
 model: dynunet
 losses:
   - dice_ce
   - cbdice
   - dice_ce_cldice
   - cbdice_cldice
+architecture_params:
+  filters: [16, 32, 64, 128]
 compute: gpu_low
 data_dir: data/raw/minivess
 num_folds: 3

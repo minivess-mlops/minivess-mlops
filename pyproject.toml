@@ -64,6 +64,8 @@ dependencies = [
     "onnx>=1.20.1",
     "gudhi>=3.11.0",
     "skan>=0.13.1",
+    "psutil>=7.2.2",
+    "nvidia-ml-py>=13.590.48",
 ]
 
 [project.optional-dependencies]
@@ -145,6 +147,9 @@ ignore = [
     "E501",  # line-too-long (formatter handles this)
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["E402"]  # sys.path manipulation requires imports after path setup
+
 [tool.ruff.lint.isort]
 known-first-party = ["minivess"]
 
@@ -219,7 +224,17 @@ ignore_missing_imports = true
 # parametrize call would be noisy and non-idiomatic for pytest.
 [[tool.mypy.overrides]]
 module = ["tests.*"]
+disallow_untyped_defs = false
 disallow_untyped_decorators = false
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = ["scripts.*", "train_monitored", "run_experiment"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+warn_return_any = false
+warn_unused_ignores = false
+disable_error_code = ["type-arg"]
 
 # ---------------------------------------------------------------------------
 # Pytest
@@ -291,4 +306,5 @@ override-dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.4.2",
+    "types-psutil>=7.2.2.20260130",
 ]

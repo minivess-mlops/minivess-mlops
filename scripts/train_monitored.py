@@ -148,11 +148,13 @@ def _build_configs(
 ) -> tuple[DataConfig, ModelConfig, TrainingConfig]:
     """Build configuration objects with memory-safe overrides."""
     data_config = DataConfig(dataset_name="minivess", data_dir=args.data_dir)
+    arch_params = getattr(args, "architecture_params", None) or {}
     model_config = ModelConfig(
         family=ModelFamily.MONAI_DYNUNET,
         name="dynunet",
         in_channels=1,
         out_channels=2,
+        architecture_params=arch_params,
     )
     training_config = TrainingConfig(
         seed=args.seed,
@@ -216,11 +218,33 @@ def _load_or_generate_splits(
     data_config: DataConfig,
     training_config: TrainingConfig,
 ) -> list:
-    """Load splits from file or generate from data directory."""
-    num_folds = training_config.num_folds
+    """Load splits from file or generate from data directory.
 
+    When ``split_mode`` is ``"file"`` (default), always loads from the
+    canonical splits JSON file for reproducibility. When ``"random"``,
+    generates fresh splits from the seed (useful for ablation studies).
+    """
+    num_folds = training_config.num_folds
+    split_mode = getattr(args, "split_mode", "file")
+
+    # In "random" mode, always regenerate from seed
+    if split_mode == "random":
+        logger.info(
+            "split_mode=random: Generating fresh %d-fold splits (seed=%d)",
+            num_folds,
+            training_config.seed,
+        )
+        splits = generate_kfold_splits_from_dir(
+            data_config.data_dir,
+            num_folds=num_folds,
+            seed=training_config.seed,
+        )
+        save_splits(splits, args.splits_file)
+        return splits
+
+    # Default: "file" mode — load from canonical splits file
     if args.splits_file.exists():
-        logger.info("Loading splits from %s", args.splits_file)
+        logger.info("Loading splits from %s (split_mode=file)", args.splits_file)
         splits = load_splits(args.splits_file)
         if len(splits) < num_folds:
             logger.warning(
@@ -366,6 +390,7 @@ def run_fold_safe(
     training_config: TrainingConfig,
     tracker: ExperimentTracker | None = None,
     debug: bool = False,
+    log_model_info: bool = False,
 ) -> dict:
     """Train and evaluate a single fold with memory-safe cache rates.
 
@@ -408,6 +433,13 @@ def run_fold_safe(
 
     # Build model
     model = DynUNetAdapter(model_config)
+
+    # Log model info on first fold (architecture details + trainable params)
+    if log_model_info and tracker is not None:
+        try:
+            tracker.log_model_info(model)
+        except Exception:
+            logger.warning("Failed to log model info", exc_info=True)
 
     # Build loss
     criterion = build_loss_function(loss_name)
@@ -699,10 +731,43 @@ def _run_experiment_inner(
         fold_eval_results: list[FoldResult] = []
 
         run_name = f"{loss_name}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
+        import time as _time_mod
+
+        _run_start = _time_mod.monotonic()
         with tracker.start_run(
             run_name=run_name,
             tags={"loss_function": loss_name, "num_folds": str(len(splits))},
         ):
+            # Log loss as param (not just tag) + fold info + device + split file
+            import mlflow as _mlflow
+
+            _device_str = "cuda" if torch.cuda.is_available() else "cpu"
+            _extra_params: dict[str, str] = {
+                "loss_name": loss_name,
+                "fold_ids": ",".join(str(i) for i in range(len(splits))),
+                "device": _device_str,
+            }
+            # Volume counts from first split (all folds have same total)
+            if splits:
+                _extra_params["data_n_train_volumes"] = str(len(splits[0].train))
+                _extra_params["data_n_val_volumes"] = str(len(splits[0].val))
+                _extra_params["data_dataset_name"] = data_config.dataset_name
+            _mlflow.log_params(_extra_params)
+
+            # Log fold splits (artifact + per-fold tags + split_mode)
+            _split_mode = getattr(args, "split_mode", "file")
+            _splits_path = (
+                Path(args.splits_file)
+                if hasattr(args, "splits_file") and args.splits_file
+                else None
+            )
+            tracker.log_fold_splits(
+                splits,
+                splits_file=_splits_path,
+                split_mode=_split_mode,
+            )
+
+            _model_info_logged = False
             for fold_id, fold_split in enumerate(splits):
                 # Skip completed folds on resume
                 if args.resume and checkpoint_mgr.is_fold_complete(loss_name, fold_id):
@@ -728,7 +793,9 @@ def _run_experiment_inner(
                     training_config=training_config,
                     tracker=tracker,
                     debug=args.debug,
+                    log_model_info=(not _model_info_logged),
                 )
+                _model_info_logged = True
                 fold_results.append(fold_result)
 
                 if "evaluation" in fold_result:
@@ -738,6 +805,10 @@ def _run_experiment_inner(
 
                 # MEMORY FIX: Force cleanup between folds
                 _cleanup_memory(f"between-folds-{loss_name}")
+
+            # Log training time
+            _training_time = _time_mod.monotonic() - _run_start
+            _mlflow.log_param("training_time_seconds", str(round(_training_time, 1)))
 
         all_results[loss_name] = fold_results
         all_eval_results[loss_name] = fold_eval_results

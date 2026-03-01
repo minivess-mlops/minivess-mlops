@@ -274,6 +274,626 @@ class TestExperimentTrackerLocalBackend:
         assert run.data.params["learning_rate"] == "0.001"
         assert run.data.params["max_epochs"] == "2"
 
+    def test_log_config_includes_architecture_params(
+        self,
+        local_tracking_uri: str,
+    ) -> None:
+        """_log_config must log architecture_params when present."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.observability.tracking import ExperimentTracker
+
+        config_with_arch = ExperimentConfig(
+            experiment_name="test-arch-params",
+            data=DataConfig(dataset_name="minivess"),
+            model=ModelConfig(
+                family=ModelFamily.MONAI_DYNUNET,
+                name="dynunet",
+                in_channels=1,
+                out_channels=2,
+                architecture_params={"filters": [16, 32, 64, 128]},
+            ),
+            training=TrainingConfig(max_epochs=1, batch_size=1),
+        )
+        tracker = ExperimentTracker(config_with_arch, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            pass
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        # Architecture params must be logged with "arch_" prefix
+        assert "arch_filters" in run.data.params
+        assert run.data.params["arch_filters"] == "[16, 32, 64, 128]"
+
+    def test_log_config_empty_architecture_params_omitted(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """When architecture_params is empty, no arch_ params should be logged."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.observability.tracking import ExperimentTracker
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            pass
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        arch_params = {
+            k: v for k, v in run.data.params.items() if k.startswith("arch_")
+        }
+        assert arch_params == {}
+
+    def test_log_config_includes_all_training_fields(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """_log_config must log ALL TrainingConfig fields, not a subset."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.observability.tracking import ExperimentTracker
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            pass
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        # These fields were missing in v1
+        assert "weight_decay" in run.data.params
+        assert "warmup_epochs" in run.data.params
+        assert "gradient_clip_val" in run.data.params
+        assert "gradient_checkpointing" in run.data.params
+        assert "early_stopping_patience" in run.data.params
+
+    def test_run_failure_sets_failed_status(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """When an exception occurs, run status should be FAILED."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.observability.tracking import ExperimentTracker
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with (
+            pytest.raises(ValueError, match="deliberate"),
+            tracker.start_run() as run_id,
+        ):
+            msg = "deliberate test failure"
+            raise ValueError(msg)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert run.info.status == "FAILED"
+
+    def test_run_failure_logs_error_tag(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """On failure, error_type tag should be set."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.observability.tracking import ExperimentTracker
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with pytest.raises(RuntimeError), tracker.start_run() as run_id:
+            msg = "test crash"
+            raise RuntimeError(msg)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert run.data.tags.get("error_type") == "RuntimeError"
+
+    def test_system_info_auto_logged(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """start_run should auto-log system info params."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.observability.tracking import ExperimentTracker
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            pass
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert "sys_python_version" in run.data.params
+        assert "sys_torch_version" in run.data.params
+        assert "sys_git_commit" in run.data.params
+
+    def test_git_hash_auto_logged_as_tag(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """start_run should auto-log git hash as tag."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.observability.tracking import ExperimentTracker
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            pass
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert "git_commit" in run.data.tags
+
+    def test_log_model_info_no_param_collision(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """Calling log_model_info after start_run must not raise on duplicate keys."""
+        from minivess.observability.tracking import ExperimentTracker
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        model = SegResNetAdapter(experiment_config.model)
+        # This must not raise MlflowException about changing param values
+        with tracker.start_run():
+            tracker.log_model_info(model)
+
+    def test_system_metrics_logging_enabled(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """start_run should enable MLflow native system metrics (CPU/GPU/mem)."""
+        from unittest.mock import patch as mock_patch
+
+        from minivess.observability.tracking import ExperimentTracker
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with mock_patch(
+            "mlflow.start_run", wraps=__import__("mlflow").start_run
+        ) as mock_sr:
+            with tracker.start_run():
+                pass
+            # Verify log_system_metrics=True was passed
+            mock_sr.assert_called_once()
+            call_kwargs = mock_sr.call_args[1]
+            assert call_kwargs.get("log_system_metrics") is True
+
+    def test_log_dataset_profile_logs_params(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """log_dataset_profile should log data_ params to MLflow."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.data.profiler import DatasetProfile
+        from minivess.observability.tracking import ExperimentTracker
+
+        profile = DatasetProfile(
+            num_volumes=3,
+            min_shape=(512, 512, 5),
+            max_shape=(512, 512, 110),
+            median_shape=(512, 512, 30),
+            min_spacing=(0.31, 0.31, 0.31),
+            max_spacing=(4.97, 4.97, 4.97),
+            median_spacing=(0.62, 0.62, 0.62),
+            total_size_bytes=4_500_000_000,
+            volume_stats=[],
+        )
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_dataset_profile(profile)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert run.data.params["data_n_volumes"] == "3"
+        assert run.data.params["data_total_size_gb"] == "4.19"
+        assert "data_min_shape" in run.data.params
+        assert "data_max_shape" in run.data.params
+        assert "data_median_spacing" in run.data.params
+
+    def test_log_dataset_profile_artifact(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """log_dataset_profile should log a JSON artifact."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.data.profiler import DatasetProfile
+        from minivess.observability.tracking import ExperimentTracker
+
+        profile = DatasetProfile(
+            num_volumes=2,
+            min_shape=(64, 64, 8),
+            max_shape=(128, 128, 16),
+            median_shape=(96, 96, 12),
+            min_spacing=(1.0, 1.0, 1.0),
+            max_spacing=(2.0, 2.0, 2.0),
+            median_spacing=(1.5, 1.5, 1.5),
+            total_size_bytes=1_000_000,
+            volume_stats=[],
+        )
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_dataset_profile(profile)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        artifacts = client.list_artifacts(run_id, path="dataset")
+        artifact_names = [a.path for a in artifacts]
+        assert any("dataset_profile" in name for name in artifact_names)
+
+    def test_log_dynaconf_config_logs_artifact(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+        tmp_path: Path,
+    ) -> None:
+        """log_dynaconf_config should log settings as artifact."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.observability.tracking import ExperimentTracker
+
+        # Create a dummy settings file
+        settings_path = tmp_path / "settings.toml"
+        settings_path.write_text(
+            '[default]\nproject_name = "test"\ndata_dir = "data"\n',
+            encoding="utf-8",
+        )
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_dynaconf_config(settings_path)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        artifacts = client.list_artifacts(run_id, path="config")
+        artifact_names = [a.path for a in artifacts]
+        assert any("settings" in name for name in artifact_names)
+
+    def test_log_dynaconf_config_logs_params(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+        tmp_path: Path,
+    ) -> None:
+        """log_dynaconf_config should log key settings as params."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.observability.tracking import ExperimentTracker
+
+        settings_path = tmp_path / "settings.toml"
+        settings_path.write_text(
+            '[default]\nproject_name = "test-project"\ndata_dir = "data"\ndvc_remote = "minio"\n',
+            encoding="utf-8",
+        )
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_dynaconf_config(settings_path)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert run.data.params["cfg_project_name"] == "test-project"
+        assert run.data.params["cfg_dvc_remote"] == "minio"
+
+    def test_log_dvc_provenance_tags(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+        tmp_path: Path,
+    ) -> None:
+        """log_dvc_provenance should log DVC data hash as tags."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.observability.tracking import ExperimentTracker
+
+        # Set up fake project root with .dvc file
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        dvc_file = data_dir / "minivess.dvc"
+        dvc_file.write_text(
+            "outs:\n- md5: abc123def456.dir\n  size: 1000\n  nfiles: 42\n"
+            "  hash: md5\n  path: minivess\n",
+            encoding="utf-8",
+        )
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_dvc_provenance(project_root=tmp_path)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert run.data.tags["dvc_data_hash"] == "abc123def456.dir"
+        assert run.data.tags["dvc_data_nfiles"] == "42"
+        assert run.data.tags["dvc_data_path"] == "data/minivess"
+
+    def test_log_dvc_provenance_artifacts(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+        tmp_path: Path,
+    ) -> None:
+        """log_dvc_provenance should log dvc.yaml as artifact."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.observability.tracking import ExperimentTracker
+
+        # Create dvc.yaml in project root
+        dvc_yaml = tmp_path / "dvc.yaml"
+        dvc_yaml.write_text(
+            "stages:\n  download:\n    cmd: echo hello\n",
+            encoding="utf-8",
+        )
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_dvc_provenance(project_root=tmp_path)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        artifacts = client.list_artifacts(run_id, path="config")
+        artifact_names = [a.path for a in artifacts]
+        assert any("dvc.yaml" in name for name in artifact_names)
+
+    def test_log_dvc_provenance_remote_url(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+        tmp_path: Path,
+    ) -> None:
+        """log_dvc_provenance should log DVC remote URL as tag."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.observability.tracking import ExperimentTracker
+
+        # Create .dvc/config
+        dvc_dir = tmp_path / ".dvc"
+        dvc_dir.mkdir()
+        dvc_config = dvc_dir / "config"
+        dvc_config.write_text(
+            "[core]\n    remote = minio\n['remote \"minio\"']\n"
+            "    url = s3://dvc-data\n",
+            encoding="utf-8",
+        )
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_dvc_provenance(project_root=tmp_path)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert run.data.tags["dvc_remote_url"] == "s3://dvc-data"
+
+    def test_frozen_deps_temp_file_cleanup(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """log_frozen_deps should not leak temp files."""
+        import glob
+        import tempfile
+
+        from minivess.observability.tracking import ExperimentTracker
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        before = set(glob.glob(f"{tempfile.gettempdir()}/frozen_deps_*"))
+        with tracker.start_run():
+            tracker.log_frozen_deps()
+        after = set(glob.glob(f"{tempfile.gettempdir()}/frozen_deps_*"))
+        leaked = after - before
+        assert not leaked, f"Temp files leaked: {leaked}"
+
+    # -----------------------------------------------------------------------
+    # Fold split logging tests
+    # -----------------------------------------------------------------------
+
+    def test_log_fold_splits_logs_artifact(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+        tmp_path: Path,
+    ) -> None:
+        """log_fold_splits should log the splits JSON as an MLflow artifact."""
+        import json
+
+        from mlflow.tracking import MlflowClient
+
+        from minivess.data.splits import FoldSplit
+        from minivess.observability.tracking import ExperimentTracker
+
+        # Create a splits file
+        splits = [
+            FoldSplit(
+                train=[
+                    {"image": "data/raw/mv01.nii.gz", "label": "data/raw/mv01.nii.gz"}
+                ],
+                val=[
+                    {"image": "data/raw/mv02.nii.gz", "label": "data/raw/mv02.nii.gz"}
+                ],
+            ),
+        ]
+        splits_file = tmp_path / "test_splits.json"
+        splits_file.write_text(
+            json.dumps([{"train": s.train, "val": s.val} for s in splits]),
+            encoding="utf-8",
+        )
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_fold_splits(splits, splits_file=splits_file)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        artifacts = client.list_artifacts(run_id, path="splits")
+        artifact_names = [a.path for a in artifacts]
+        assert any("splits" in name for name in artifact_names)
+
+    def test_log_fold_splits_logs_per_fold_tags(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """log_fold_splits should log per-fold train/val volume IDs as tags."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.data.splits import FoldSplit
+        from minivess.observability.tracking import ExperimentTracker
+
+        splits = [
+            FoldSplit(
+                train=[
+                    {"image": "data/raw/minivess/imagesTr/mv01.nii.gz", "label": "x"},
+                    {"image": "data/raw/minivess/imagesTr/mv03.nii.gz", "label": "x"},
+                ],
+                val=[
+                    {"image": "data/raw/minivess/imagesTr/mv02.nii.gz", "label": "x"},
+                ],
+            ),
+            FoldSplit(
+                train=[
+                    {"image": "data/raw/minivess/imagesTr/mv02.nii.gz", "label": "x"},
+                ],
+                val=[
+                    {"image": "data/raw/minivess/imagesTr/mv01.nii.gz", "label": "x"},
+                    {"image": "data/raw/minivess/imagesTr/mv03.nii.gz", "label": "x"},
+                ],
+            ),
+        ]
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_fold_splits(splits)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert run.data.tags["fold_0_train"] == "mv01,mv03"
+        assert run.data.tags["fold_0_val"] == "mv02"
+        assert run.data.tags["fold_1_train"] == "mv02"
+        assert run.data.tags["fold_1_val"] == "mv01,mv03"
+
+    def test_log_fold_splits_logs_split_mode_param(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """log_fold_splits should log split_mode as a param."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.data.splits import FoldSplit
+        from minivess.observability.tracking import ExperimentTracker
+
+        splits = [
+            FoldSplit(train=[], val=[]),
+        ]
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_fold_splits(splits, split_mode="file")
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert run.data.params["split_mode"] == "file"
+
+    def test_log_fold_splits_logs_splits_file_tag(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+        tmp_path: Path,
+    ) -> None:
+        """log_fold_splits should log the splits file path as a tag."""
+        import json
+
+        from mlflow.tracking import MlflowClient
+
+        from minivess.data.splits import FoldSplit
+        from minivess.observability.tracking import ExperimentTracker
+
+        splits = [FoldSplit(train=[], val=[])]
+        splits_file = tmp_path / "3fold_seed42.json"
+        splits_file.write_text(json.dumps([{"train": [], "val": []}]), encoding="utf-8")
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_fold_splits(splits, splits_file=splits_file)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert run.data.tags["splits_file"] == str(splits_file)
+
+    def test_log_fold_splits_without_file_still_logs_tags(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+    ) -> None:
+        """log_fold_splits without splits_file should still log per-fold tags."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.data.splits import FoldSplit
+        from minivess.observability.tracking import ExperimentTracker
+
+        splits = [
+            FoldSplit(
+                train=[
+                    {"image": "data/raw/minivess/imagesTr/mv05.nii.gz", "label": "x"},
+                ],
+                val=[
+                    {"image": "data/raw/minivess/imagesTr/mv10.nii.gz", "label": "x"},
+                ],
+            ),
+        ]
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_fold_splits(splits)
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert run.data.tags["fold_0_train"] == "mv05"
+        assert run.data.tags["fold_0_val"] == "mv10"
+
+
+class TestExtractVolumeIds:
+    """Tests for extract_volume_ids helper."""
+
+    def test_extracts_volume_id_from_full_path(self) -> None:
+        from minivess.observability.tracking import extract_volume_ids
+
+        paths = [
+            {"image": "data/raw/minivess/imagesTr/mv01.nii.gz", "label": "x"},
+            {"image": "data/raw/minivess/imagesTr/mv02.nii.gz", "label": "x"},
+        ]
+        result = extract_volume_ids(paths)
+        assert result == ["mv01", "mv02"]
+
+    def test_extracts_from_various_path_formats(self) -> None:
+        from minivess.observability.tracking import extract_volume_ids
+
+        paths = [
+            {"image": "/absolute/path/to/mv42.nii.gz", "label": "x"},
+            {"image": "relative/mv99.nii.gz", "label": "x"},
+        ]
+        result = extract_volume_ids(paths)
+        assert result == ["mv42", "mv99"]
+
+    def test_empty_list_returns_empty(self) -> None:
+        from minivess.observability.tracking import extract_volume_ids
+
+        assert extract_volume_ids([]) == []
+
+    def test_sorted_output(self) -> None:
+        from minivess.observability.tracking import extract_volume_ids
+
+        paths = [
+            {"image": "data/mv10.nii.gz", "label": "x"},
+            {"image": "data/mv02.nii.gz", "label": "x"},
+            {"image": "data/mv05.nii.gz", "label": "x"},
+        ]
+        result = extract_volume_ids(paths)
+        assert result == ["mv02", "mv05", "mv10"]
+
 
 # ---------------------------------------------------------------------------
 # T2: Trainer + Tracker integration

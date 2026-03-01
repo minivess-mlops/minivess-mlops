@@ -231,6 +231,87 @@ class TestComputeSelection:
         assert "name" in result
 
 
+class TestArchitectureParamsPassthrough:
+    """Test that architecture_params from YAML are passed through the pipeline."""
+
+    def test_architecture_params_in_yaml_parsed(self, tmp_path: Path) -> None:
+        """YAML with architecture_params should be parsed correctly."""
+        config = {
+            "experiment_name": "arch_test",
+            "model": "dynunet",
+            "losses": ["dice_ce"],
+            "architecture_params": {"filters": [16, 32, 64, 128]},
+        }
+        yaml_path = tmp_path / "arch.yaml"
+        with open(yaml_path, "w", encoding="utf-8") as f:
+            yaml.dump(config, f)
+
+        from run_experiment import load_experiment_config
+
+        result = load_experiment_config(yaml_path)
+        assert result["architecture_params"] == {"filters": [16, 32, 64, 128]}
+
+    def test_architecture_params_passed_to_train_monitored(
+        self, tmp_path: Path
+    ) -> None:
+        """run_experiment should pass architecture_params to train_monitored."""
+        from run_experiment import load_experiment_config
+
+        config = {
+            "experiment_name": "arch_passthrough",
+            "model": "dynunet",
+            "losses": ["dice_ce"],
+            "compute": "cpu",
+            "data_dir": str(tmp_path),
+            "architecture_params": {"filters": [16, 32, 64, 128]},
+        }
+        yaml_path = tmp_path / "arch_pass.yaml"
+        with open(yaml_path, "w", encoding="utf-8") as f:
+            yaml.dump(config, f)
+
+        result = load_experiment_config(yaml_path)
+        assert "architecture_params" in result
+
+    def test_build_configs_uses_architecture_params(self) -> None:
+        """_build_configs should populate ModelConfig.architecture_params."""
+        import argparse
+
+        from train_monitored import _build_configs
+
+        args = argparse.Namespace(
+            compute="cpu",
+            loss="dice_ce",
+            debug=False,
+            data_dir=Path("data/raw"),
+            num_folds=3,
+            seed=42,
+            max_epochs=1,
+            patch_size=None,
+            architecture_params={"filters": [16, 32, 64, 128]},
+        )
+        _data_config, model_config, _training_config = _build_configs(args)
+        assert model_config.architecture_params == {"filters": [16, 32, 64, 128]}
+
+    def test_build_configs_default_empty_architecture_params(self) -> None:
+        """_build_configs without architecture_params uses empty dict."""
+        import argparse
+
+        from train_monitored import _build_configs
+
+        args = argparse.Namespace(
+            compute="cpu",
+            loss="dice_ce",
+            debug=False,
+            data_dir=Path("data/raw"),
+            num_folds=3,
+            seed=42,
+            max_epochs=1,
+            patch_size=None,
+        )
+        _data_config, model_config, _training_config = _build_configs(args)
+        assert model_config.architecture_params == {}
+
+
 class TestDebugOverrides:
     def test_debug_overrides_applied(self, tmp_path: Path) -> None:
         """Debug mode reduces epochs and data."""

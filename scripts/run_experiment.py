@@ -316,6 +316,17 @@ def main(argv: list[str] | None = None) -> None:
 
     for loss in losses:
         logger.info("Launching training run: loss=%s", loss)
+        # Resolve splits file path (relative to project root)
+        splits_file = config.get("splits_file")
+        if splits_file:
+            splits_path = PROJECT_ROOT / splits_file
+        else:
+            _seed = config.get("seed", 42)
+            _nfolds = config.get("num_folds", 3)
+            splits_path = (
+                PROJECT_ROOT / "configs" / "splits" / f"{_nfolds}fold_seed{_seed}.json"
+            )
+
         train_argv = [
             "--compute",
             profile["name"] if compute != "auto" else "cpu",
@@ -329,6 +340,8 @@ def main(argv: list[str] | None = None) -> None:
             str(config.get("seed", 42)),
             "--experiment-name",
             config.get("experiment_name", "experiment"),
+            "--splits-file",
+            str(splits_path),
         ]
         if config.get("max_epochs") is not None:
             train_argv += ["--max-epochs", str(config["max_epochs"])]
@@ -348,11 +361,16 @@ def main(argv: list[str] | None = None) -> None:
                 spec = importlib.util.spec_from_file_location(module_name, train_script)
                 if spec is not None and spec.loader is not None:
                     train_mod = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(train_mod)
+                    spec.loader.exec_module(train_mod)  # type: ignore[union-attr]
                     parsed = train_mod.parse_args(train_argv)
                     # Pass checkpoint config from experiment YAML to train_monitored
                     if "checkpoint" in config:
                         parsed.checkpoint_config = config["checkpoint"]
+                    # Pass architecture_params from experiment YAML
+                    if "architecture_params" in config:
+                        parsed.architecture_params = config["architecture_params"]
+                    # Pass split_mode from experiment YAML
+                    parsed.split_mode = config.get("split_mode", "file")
                     train_mod.run_monitored_experiment(parsed)
             else:
                 logger.warning(
