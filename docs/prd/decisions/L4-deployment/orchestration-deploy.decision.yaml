@@ -1,0 +1,96 @@
+decision_id: orchestration_deploy
+title: "Deployment Orchestration"
+description: >
+  Orchestration tool for the deployment pipeline (champion discovery,
+  ONNX export, BentoML import, artifact generation, promotion).
+  Prefect 3.x is the standard across all 5 flows. Argo Workflows
+  and manual scripting are alternatives.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-03-01
+
+options:
+  - option_id: prefect
+    title: "Prefect 3.x"
+    description: >
+      Python-native workflow orchestration with task dependencies,
+      retries, caching, and observability. Standard for all 5 MinIVess
+      flows. Uses _prefect_compat.py for graceful CI degradation.
+    prior_probability: 0.65
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "pipeline_orchestration.prefect"
+
+  - option_id: argo
+    title: "Argo Workflows"
+    description: >
+      Kubernetes-native workflow engine for deployment pipelines.
+      Better suited for multi-cluster deployments but requires K8s.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Requires Kubernetes cluster"
+      - "YAML-based workflow definition"
+
+  - option_id: manual
+    title: "Manual / Scripted"
+    description: >
+      Shell scripts or Makefile-based deployment without workflow
+      orchestration. Simpler but no retry, caching, or observability.
+    prior_probability: 0.10
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "No automatic retries"
+      - "No task-level observability"
+
+conditional_on:
+  - parent_decision_id: pipeline_orchestration
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: prefect
+        then_probabilities:
+          prefect: 0.85
+          argo: 0.10
+          manual: 0.05
+      - given_parent_option: dagster
+        then_probabilities:
+          prefect: 0.30
+          argo: 0.40
+          manual: 0.30
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      prefect: 0.70
+      argo: 0.10
+      manual: 0.20
+    rationale: "Prefect consistency across all flows; manual as fallback"
+  clinical_deployment:
+    probability_overrides:
+      prefect: 0.50
+      argo: 0.40
+      manual: 0.10
+    rationale: "Clinical may need Argo for K8s-native deployment"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-03-01
+  next_review: 2026-09-01
+  change_drivers:
+    - "Prefect 3.x deployment features"
+    - "Argo Workflows ML extensions"
+
+references:
+  - citation_key: prefect2022
+    relevance: "Prefect workflow orchestration for ML pipelines"
+    supports_options:
+      - prefect
+
+tags:
+  - deployment
+  - orchestration
+  - resolved

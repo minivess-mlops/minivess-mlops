@@ -1,0 +1,127 @@
+domain_id: vascular_segmentation
+title: "Vascular Segmentation"
+status: active
+last_updated: 2026-02-23
+
+description: >
+  Domain overlay for cerebral vessel segmentation from 7T TOF-MRA images.
+  The MinIVess dataset contains high-resolution 3D angiographic images of
+  cerebral vasculature. Key challenges: fine vessel structures, class
+  imbalance (vessels are <5% of volume), topology preservation.
+
+# --- Dataset Information ---
+
+dataset:
+  name: "MinIVess"
+  modality: "7T Time-of-Flight Magnetic Resonance Angiography (TOF-MRA)"
+  resolution: "High-resolution isotropic"
+  structures:
+    - name: "Cerebral vessels"
+      label_id: 1
+      volume_fraction: "<5%"
+      difficulty: "High — fine structures, branching topology"
+  challenges:
+    - "Extreme class imbalance (vessels < 5% volume)"
+    - "Fine tubular structures easily lost"
+    - "Topology preservation (connectivity) critical"
+    - "Partial volume effects at vessel boundaries"
+    - "Anisotropic intensity profiles"
+
+# --- Metric Adjustments ---
+
+metric_adjustments:
+  description: >
+    Vascular segmentation requires topology-aware metrics. Standard Dice
+    is insufficient — clDice captures vessel connectivity.
+  adjustments:
+    - metric: cldice
+      weight_boost: 0.15
+      rationale: "Topology-aware metric for tubular structures"
+    - metric: hausdorff_95
+      weight_boost: 0.05
+      rationale: "Surface accuracy important for vessel boundaries"
+    - metric: betti_error
+      weight_boost: 0.10
+      rationale: "Topological correctness (connected components, loops)"
+  additional_metrics:
+    - metric: cldice
+      description: "centerline Dice — measures topology preservation"
+      package: "monai or custom"
+    - metric: betti_error
+      description: "Betti number error — topological features"
+      package: "custom (gudhi or giotto-tda)"
+
+# --- Loss Function Adjustments ---
+
+loss_adjustments:
+  description: >
+    Standard DiceCE is the baseline. clDice loss directly optimizes
+    topology preservation. Boundary losses help with fine structures.
+  adjustments:
+    - loss: cldice_loss
+      viability_boost: 0.15
+      rationale: "Directly optimizes topology metric"
+    - loss: boundary_loss
+      viability_boost: 0.05
+      rationale: "Helps with fine vessel boundary delineation"
+    - loss: topological_loss
+      viability_boost: 0.10
+      rationale: "Persistent homology-based topology preservation"
+
+# --- Augmentation Adjustments ---
+
+augmentation_adjustments:
+  description: >
+    Vascular structures need careful augmentation to preserve connectivity.
+  additions:
+    - augmentation: vessel_specific_elastic
+      description: "Topology-preserving elastic deformation"
+    - augmentation: intensity_vessel_enhancement
+      description: "Simulate varying vessel contrast"
+  cautions:
+    - augmentation: aggressive_elastic
+      warning: "May break vessel connectivity"
+    - augmentation: aggressive_crop
+      warning: "May remove entire vessel trees"
+
+# --- PRD Prior Adjustments ---
+
+prd_prior_adjustments:
+  description: >
+    Domain-specific probability shifts for vascular segmentation.
+  adjustments:
+    - decision_id: loss_functions
+      option_id: cldice
+      adjustment: "+0.10"
+      rationale: "clDice loss is specifically designed for tubular structures"
+
+    - decision_id: metrics_framework
+      option_id: custom
+      adjustment: "+0.05"
+      rationale: "Custom metrics needed for topology evaluation (Betti errors)"
+
+    - decision_id: segmentation_models
+      option_id: nnunet
+      adjustment: "+0.05"
+      rationale: "nnU-Net self-configuring is well-suited for vessel data"
+
+    - decision_id: augmentation_stack
+      option_id: custom_physics
+      adjustment: "+0.05"
+      rationale: "Physics-based augmentation for vessel intensity profiles"
+
+# --- Vocabulary ---
+
+vocabulary:
+  primary_structure: "cerebral vessels"
+  imaging_modality: "7T TOF-MRA"
+  key_metric: "clDice (centerline Dice)"
+  primary_challenge: "topology preservation"
+  clinical_application: "neurovascular assessment"
+
+# --- References ---
+
+references:
+  - "MinIVess dataset paper"
+  - "clDice: A Novel Topology-Preserving Loss Function (Shit et al., 2021)"
+  - "MONAI vessel segmentation tutorials"

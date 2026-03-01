@@ -31,7 +31,8 @@ repos:
         name: PRD Citation Integrity
         entry: uv run python scripts/validate_prd_citations.py --check-loss
         language: system
-        files: '(docs/planning/prd/|\.decision\.yaml|bibliography\.yaml)'
+        files: '(docs/prd/|\.decision\.yaml|bibliography\.yaml)'
+        exclude: '^probabilistic-sdd-template/'
         pass_filenames: false
         always_run: false
 

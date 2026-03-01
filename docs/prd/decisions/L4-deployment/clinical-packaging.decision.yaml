@@ -1,0 +1,97 @@
+decision_id: clinical_packaging
+title: "Clinical Packaging Format"
+description: >
+  Packaging format for clinical and regulatory environments. MONAI Deploy
+  MAP provides standardized Docker-based packaging with metadata for
+  medical device compliance. Custom packaging offers flexibility but
+  lacks standardized tooling.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-03-01
+
+options:
+  - option_id: monai_deploy_map
+    title: "MONAI Deploy MAP"
+    description: >
+      MONAI Application Package format with standardized manifest,
+      operator pipeline, and Docker packaging. Integrates with MONAI
+      ecosystem and clinical workflow engines. Implemented as optional
+      feature via monai_deploy_enabled flag.
+    prior_probability: 0.55
+    status: viable
+    implementation_status: implemented
+    complements:
+      - "monai_alignment.monai_native"
+      - "model_export_format.monai_bundle"
+
+  - option_id: custom_docker
+    title: "Custom Docker Packaging"
+    description: >
+      Custom Dockerfile and deployment scripts without MAP standardization.
+      More flexibility but less interoperability with clinical systems.
+      Currently implemented via BentoML containerize.
+    prior_probability: 0.30
+    status: viable
+    implementation_status: implemented
+    constraints:
+      - "No standardized clinical metadata"
+      - "Manual compliance documentation"
+
+  - option_id: none
+    title: "No Clinical Packaging"
+    description: >
+      Research-only deployment without clinical packaging. Appropriate
+      for academic use but not for regulatory submissions.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: implemented
+
+conditional_on:
+  - parent_decision_id: compliance_depth
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: iec_62304_full
+        then_probabilities:
+          monai_deploy_map: 0.70
+          custom_docker: 0.25
+          none: 0.05
+      - given_parent_option: best_practice
+        then_probabilities:
+          monai_deploy_map: 0.30
+          custom_docker: 0.40
+          none: 0.30
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      monai_deploy_map: 0.30
+      custom_docker: 0.40
+      none: 0.30
+    rationale: "Research use rarely needs clinical packaging"
+  clinical_deployment:
+    probability_overrides:
+      monai_deploy_map: 0.75
+      custom_docker: 0.20
+      none: 0.05
+    rationale: "Clinical requires standardized packaging for regulatory"
+
+volatility:
+  classification: evolving
+  last_assessed: 2026-03-01
+  next_review: 2026-06-01
+  change_drivers:
+    - "MONAI Deploy SDK maturity"
+    - "EU AI Act implementation timeline"
+    - "FDA guidance on AI/ML SaMD packaging"
+
+references:
+  - citation_key: cardoso2022monai
+    relevance: "MONAI framework including MONAI Deploy for clinical packaging"
+    supports_options:
+      - monai_deploy_map
+
+tags:
+  - deployment
+  - clinical
+  - regulatory

@@ -1,0 +1,80 @@
+# Backbone Defaults — Domain-Agnostic Configuration
+# Applied before any domain overlay.
+# Customize these defaults for your project, then use domain overlays
+# to adjust for specific application areas.
+
+backbone:
+  name: "CHANGE_ME Backbone Defaults"
+  version: "1.0.0"
+  last_updated: "CHANGE_ME"
+  description: >
+    Domain-agnostic default configuration. All domains inherit these
+    settings and may override specific values via their overlay files.
+
+# Default metric weights (before domain adjustment)
+metrics:
+  primary:
+    - metric: dice_score
+      weight: 0.40
+      description: "Volumetric overlap"
+    - metric: hausdorff_95
+      weight: 0.25
+      description: "Surface distance (95th percentile)"
+    - metric: surface_dice
+      weight: 0.20
+      description: "Surface overlap at tolerance"
+    - metric: average_precision
+      weight: 0.15
+      description: "Precision-recall curve area"
+
+  calibration:
+    - metric: expected_calibration_error
+      weight: 0.50
+    - metric: maximum_calibration_error
+      weight: 0.30
+    - metric: brier_score
+      weight: 0.20
+
+# Default loss function preferences
+loss_defaults:
+  primary: dice_ce
+  alternatives:
+    - focal
+    - dice
+  rationale: >
+    dice_ce is a widely used default combining Dice loss with cross-entropy.
+    Replace with your project's empirically validated default loss.
+
+# Default augmentation pipeline
+augmentation_defaults:
+  spatial:
+    - random_affine
+    - random_elastic
+    - random_flip
+  intensity:
+    - random_bias_field
+    - random_noise
+    - random_gamma
+
+# Default training hyperparameters
+training_defaults:
+  optimizer: AdamW
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+  scheduler: CosineAnnealingLR
+  epochs: 300
+  batch_size: 2
+  patch_size: [96, 96, 96]
+
+# Default data splits
+data_splits:
+  train: 0.70
+  validation: 0.15
+  test: 0.15
+  cross_validation_folds: 5
+
+# Default model card template
+model_card:
+  intended_use: "CHANGE_ME — describe intended use"
+  limitations: "CHANGE_ME — describe known limitations"
+  ethical_considerations: "CHANGE_ME — describe ethical considerations"

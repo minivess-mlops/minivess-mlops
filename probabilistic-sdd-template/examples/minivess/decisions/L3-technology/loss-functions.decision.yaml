@@ -1,0 +1,244 @@
+decision_id: loss_functions
+title: "Loss Functions"
+description: >
+  Which loss functions to support for segmentation training. The choice
+  interacts strongly with model architecture and target anatomy. Vascular
+  segmentation specifically benefits from topology-preserving losses like
+  clDice that penalize broken connectivity in thin tubular structures.
+  The dynunet_loss_variation_v2 experiment (2026-02-27) resolved the default
+  to cbdice_cldice based on best topology-accuracy tradeoff across 4 losses
+  x 3 folds x 100 epochs. See docs/results/dynunet_loss_variation_v2_report.md.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-02-27
+
+options:
+  - option_id: cbdice_cldice
+    title: "CbDice + clDice Compound (Default)"
+    description: >
+      50% CenterlineBoundaryDice + 50% VesselCompoundLoss (DiceCE+clDice).
+      Best topology-accuracy tradeoff from dynunet_loss_variation_v2:
+      0.906 clDice, 0.772 DSC, 1.74 MASD. Combines diameter-aware
+      boundary supervision (cbDice, Shi et al. 2024) with skeleton-preserving
+      topology (clDice, Shit et al. 2021). Default for single-model training.
+    prior_probability: 0.35
+    status: resolved
+    implementation_status: implemented
+    evidence:
+      - experiment: dynunet_loss_variation_v2
+        date: 2026-02-27
+        report: docs/results/dynunet_loss_variation_v2_report.md
+
+  - option_id: dice_ce
+    title: "Dice + Cross-Entropy (Combined)"
+    description: >
+      Standard compound loss combining Dice overlap with voxel-wise
+      cross-entropy. Robust baseline for medical segmentation. Best DSC
+      (0.824) and MASD (1.68) but weaker topology preservation (0.832 clDice).
+      Use for non-vascular segmentation or as ablation baseline.
+    prior_probability: 0.20
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "segmentation_models.segresnet"
+      - "segmentation_models.swinunetr"
+
+  - option_id: dice
+    title: "Dice Loss (Pure)"
+    description: >
+      Pure Dice loss without cross-entropy. Better for class-imbalanced
+      problems but less stable early in training. Implemented as
+      alternative config option.
+    prior_probability: 0.15
+    status: resolved
+    implementation_status: implemented
+
+  - option_id: focal
+    title: "Focal Loss"
+    description: >
+      Down-weights easy negatives, focuses on hard examples. Useful for
+      extreme class imbalance in small vessel segmentation. Implemented
+      via MONAI FocalLoss.
+    prior_probability: 0.12
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "segmentation_models.segresnet"
+
+  - option_id: topk
+    title: "Top-K Loss"
+    description: >
+      Only backpropagates through the hardest K% of voxels. Reduces
+      noise from easy background. Not yet implemented but config-ready.
+    prior_probability: 0.10
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "K% threshold needs dataset-specific tuning"
+
+  - option_id: cldice
+    title: "clDice (Centerline Dice)"
+    description: >
+      Topology-preserving loss that computes Dice on soft-skeletonized
+      predictions. Specifically designed for tubular structure
+      segmentation where connectivity matters more than volumetric overlap.
+      Implemented standalone and as component of compound losses.
+      Not recommended standalone (empty prediction collapse risk).
+    prior_probability: 0.08
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "segmentation_models.segresnet"
+      - "metrics_framework.metricsreloaded"
+    constraints:
+      - "Soft-skeletonization is computationally expensive"
+      - "Requires careful hyperparameter tuning (alpha/beta)"
+
+conditional_on:
+  - parent_decision_id: model_strategy
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: single_architecture
+        then_probabilities:
+          dice_ce: 0.45
+          dice: 0.20
+          focal: 0.15
+          topk: 0.10
+          cldice: 0.10
+      - given_parent_option: multi_architecture
+        then_probabilities:
+          dice_ce: 0.40
+          dice: 0.20
+          focal: 0.15
+          topk: 0.10
+          cldice: 0.15
+      - given_parent_option: foundation_model_first
+        then_probabilities:
+          dice_ce: 0.35
+          dice: 0.25
+          focal: 0.15
+          topk: 0.10
+          cldice: 0.15
+      - given_parent_option: automl_search
+        then_probabilities:
+          dice_ce: 0.30
+          dice: 0.15
+          focal: 0.20
+          topk: 0.15
+          cldice: 0.20
+
+  - parent_decision_id: segmentation_models
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: segresnet
+        then_probabilities:
+          dice_ce: 0.40
+          dice: 0.20
+          focal: 0.15
+          topk: 0.10
+          cldice: 0.15
+      - given_parent_option: swinunetr
+        then_probabilities:
+          dice_ce: 0.40
+          dice: 0.20
+          focal: 0.15
+          topk: 0.10
+          cldice: 0.15
+      - given_parent_option: vista3d
+        then_probabilities:
+          dice_ce: 0.35
+          dice: 0.25
+          focal: 0.20
+          topk: 0.05
+          cldice: 0.15
+      - given_parent_option: nnunet
+        then_probabilities:
+          dice_ce: 0.50
+          dice: 0.20
+          focal: 0.10
+          topk: 0.15
+          cldice: 0.05
+      - given_parent_option: sam_variants
+        then_probabilities:
+          dice_ce: 0.35
+          dice: 0.20
+          focal: 0.25
+          topk: 0.05
+          cldice: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      dice_ce: 0.45
+      dice: 0.20
+      focal: 0.15
+      topk: 0.05
+      cldice: 0.15
+    rationale: "Solo researchers start with Dice+CE default, explore clDice for vascular"
+  lab_group:
+    probability_overrides:
+      dice_ce: 0.35
+      dice: 0.15
+      focal: 0.15
+      topk: 0.15
+      cldice: 0.20
+    rationale: "Lab groups can run systematic loss function ablations"
+  clinical_deployment:
+    probability_overrides:
+      dice_ce: 0.40
+      dice: 0.20
+      focal: 0.10
+      topk: 0.10
+      cldice: 0.20
+    rationale: "Clinical values topology-preserving losses for safety-critical vessels"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-02-23
+  next_review: 2026-08-23
+  change_drivers:
+    - "New topology-aware losses in MONAI"
+    - "clDice 3D GPU-optimized implementations"
+    - "Compound loss search via AutoML"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 0.90
+  neuroimaging: 0.85
+  general_medical: 0.80
+
+rationale: >
+  cbdice_cldice (0.40) is the new default based on dynunet_loss_variation_v2
+  experiment (2026-02-27, 4 losses x 3 folds x 100 epochs). It achieved the
+  best topology-accuracy tradeoff: 0.906 clDice with only -5.3% DSC penalty
+  vs dice_ce baseline. dice_ce (0.25) remains the robust baseline for
+  non-vascular or overlap-focused tasks. Pure Dice (0.20) and Focal (0.15)
+  provide alternatives for class-imbalance scenarios. Standalone clDice (0.10)
+  is implemented but not recommended alone due to empty-prediction collapse risk.
+  TopK (0.10) is a niche option for extreme imbalance.
+
+references:
+  - citation_key: milletari2016vnet
+    relevance: "Introduces Dice loss for volumetric segmentation, foundation for DiceCE compound loss."
+    supports_options: ["dice", "dice_ce"]
+
+  - citation_key: shit2021cldice
+    relevance: "clDice topology-preserving loss for tubular structures. Critical for vascular segmentation connectivity."
+    sections: ["Table 2", "Fig. 4"]
+    supports_options: ["cldice"]
+
+  - citation_key: dhor2026tunepp
+    relevance: "TUNE++ combines Betti number loss with uncertainty for topology-aware 3D segmentation. Novel loss function for vessels."
+    supports_options: ["cldice"]
+
+  - citation_key: shi2025comma
+    relevance: "COMMA uses DiceCE + clDice compound loss achieving SOTA vessel segmentation. Validates topology-preserving losses."
+    supports_options: ["dice_ce", "cldice"]
+
+tags:
+  - training
+  - loss-functions
+  - topology
+  - vascular
+  - resolved-partial

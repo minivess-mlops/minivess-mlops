@@ -22,9 +22,15 @@ feature, every configuration, every automation should be evaluated against this 
 6. **Transparent automation** — Every automatic decision is logged and overridable via YAML
 7. **Portfolio-grade code** — Every component demonstrates production ML engineering
 8. **Division of labor via Prefect** — Prefect flows are **required** (not optional),
-   separating concerns into 4 persona-based flows (data engineering, model training,
-   model analysis, deployment) even for solo researchers. Each flow is independently
-   testable, resumable, cacheable, and uses MLflow as the inter-flow contract.
+   separating concerns into 5 persona-based flows even for solo researchers. Each flow
+   is independently testable, resumable, cacheable, and uses MLflow as the inter-flow
+   contract. The first 4 flows are **core** (always run); the 5th is **best-effort**
+   (runs when resources allow, failure does not block the pipeline):
+   - Flow 1: Data Engineering (core)
+   - Flow 2: Model Training (core)
+   - Flow 3: Model Analysis (core)
+   - Flow 4: Deployment (core)
+   - Flow 5: Dashboard & Reporting (best-effort — paper figures, Parquet export, drift reports)
 
 ### Multi-Environment Compute
 Everything must work identically on:
@@ -55,7 +61,7 @@ Everything must work identically on:
 | **Calibration** | MAPIE + netcal + Local Temperature Scaling |
 | **Data Profiling** | whylogs |
 | **LLM Observability** | Langfuse (self-hosted) + Braintrust (eval) + LiteLLM (provider flexibility) |
-| **Workflow Orchestration** | Prefect 3.x (required, 4 persona-based flows: data, train, analyze, deploy) |
+| **Workflow Orchestration** | Prefect 3.x (required, 5 persona-based flows: data, train, analyze, deploy, dashboard) |
 | **Agent Orchestration** | LangGraph |
 | **CI/CD** | GitHub Actions + CML (ML-specific PR comments) |
 | **Lineage** | OpenLineage (Marquez) |
@@ -170,7 +176,7 @@ minivess-mlops/
 
 | Tool | Role | Deployment |
 |------|------|-----------|
-| **Prefect 3.x** | Workflow orchestration (4 flows: data, train, evaluate, deploy) | Optional — local or Docker Compose |
+| **Prefect 3.x** | Workflow orchestration (5 flows: data, train, analyze, deploy + dashboard best-effort) | Optional — local or Docker Compose |
 | **Langfuse** | Production LLM tracing, cost tracking | Self-hosted (Docker Compose) |
 | **Braintrust** | Offline evaluation, CI/CD quality gates, AutoEvals | Hybrid deployment (data plane local) |
 | **LangGraph** | Agent orchestration, multi-step workflows | Library (in-process) |

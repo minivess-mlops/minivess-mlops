@@ -1,0 +1,54 @@
+# Network Template: Bayesian Decision Network DAG
+# Copy this file to your SDD's decisions/_network.yaml and populate with your nodes.
+#
+# The network defines the DAG topology: which decisions exist and how they
+# influence each other. Decision content lives in individual .decision.yaml files.
+
+network:
+  name: "CHANGE_ME Project — Probabilistic SDD Decision Network"
+  version: "1.0.0"
+  last_updated: "CHANGE_ME"
+  description: >
+    Bayesian decision network for CHANGE_ME project.
+    Captures open-ended technology and architecture decisions as a
+    probabilistic DAG with conditional dependencies and archetype modulations.
+
+  # Decision hierarchy levels — add nodes under each level
+  levels:
+    - level_id: L1
+      title: "Research Goals"
+      description: >
+        Strategic project direction. Why does this project exist?
+        What impact does it target? What constraints are non-negotiable?
+
+    - level_id: L2
+      title: "Architecture"
+      description: >
+        Architectural patterns and high-level approaches. How will the
+        system be structured? What design patterns apply?
+
+    - level_id: L3
+      title: "Technology"
+      description: >
+        Specific tools, libraries, and frameworks. Which concrete
+        implementations fulfill the architectural decisions?
+
+    - level_id: L4
+      title: "Infrastructure"
+      description: >
+        Compute, containers, CI/CD, deployment targets. Where and how
+        does the system run?
+
+    - level_id: L5
+      title: "Operations"
+      description: >
+        Monitoring, governance, retraining, maintenance workflows.
+        How is the system kept healthy in production?
+
+  # Populate with your decision nodes
+  # Format: {id: decision_id, level: L1-L5, file: relative/path.decision.yaml, title: "Human Title"}
+  nodes: []
+
+  # Populate with edges representing conditional dependencies
+  # Format: {from: parent_id, to: child_id, influence: strong|moderate|weak, rationale: "why"}
+  edges: []

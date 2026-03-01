@@ -1,0 +1,96 @@
+decision_id: deploy_model_format
+title: "Deployment Model Format"
+description: >
+  Format for deployed inference models. ONNX provides hardware-agnostic
+  inference via ONNX Runtime with graph optimization. TorchScript offers
+  PyTorch-native deployment. Raw PyTorch requires full framework at serving
+  time. Distinct from export format decision — this covers the serving artifact.
+
+decision_level: L4_infrastructure
+status: active
+last_updated: 2026-03-01
+
+options:
+  - option_id: onnx_runtime
+    title: "ONNX Runtime"
+    description: >
+      ONNX model with ONNX Runtime inference. Smaller Docker images (no PyTorch),
+      hardware-agnostic (CPU/GPU/TensorRT), graph-level optimization. Currently
+      implemented via OnnxSegmentationInference class.
+    prior_probability: 0.70
+    status: resolved
+    implementation_status: implemented
+    complements:
+      - "serving_framework.bentoml"
+      - "model_export_format.onnx"
+
+  - option_id: torchscript
+    title: "TorchScript"
+    description: >
+      PyTorch JIT-compiled model for deployment. Eliminates Python dependency
+      for C++ serving but being deprecated in favor of torch.export.
+    prior_probability: 0.20
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Deprecated in favor of torch.compile"
+
+  - option_id: pytorch_native
+    title: "Native PyTorch"
+    description: >
+      Direct PyTorch model serving. Simplest path but requires full PyTorch
+      at serving time, resulting in larger Docker images.
+    prior_probability: 0.10
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Large Docker image (~2GB+)"
+      - "No graph optimization"
+
+conditional_on:
+  - parent_decision_id: serving_framework
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: bentoml
+        then_probabilities:
+          onnx_runtime: 0.75
+          torchscript: 0.15
+          pytorch_native: 0.10
+      - given_parent_option: torchserve
+        then_probabilities:
+          onnx_runtime: 0.30
+          torchscript: 0.40
+          pytorch_native: 0.30
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      onnx_runtime: 0.65
+      torchscript: 0.15
+      pytorch_native: 0.20
+    rationale: "ONNX gives smallest images; PyTorch native for quick iteration"
+  clinical_deployment:
+    probability_overrides:
+      onnx_runtime: 0.80
+      torchscript: 0.15
+      pytorch_native: 0.05
+    rationale: "Clinical needs lightweight, validated inference engine"
+
+volatility:
+  classification: stable
+  last_assessed: 2026-03-01
+  next_review: 2026-09-01
+  change_drivers:
+    - "torch.export / AOTInductor maturity"
+    - "ONNX Runtime optimization improvements"
+
+references:
+  - citation_key: onnxruntime2019
+    relevance: "ONNX Runtime inference engine for cross-platform deployment"
+    supports_options:
+      - onnx_runtime
+
+tags:
+  - deployment
+  - model-format
+  - resolved

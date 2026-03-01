@@ -1,0 +1,224 @@
+# Decision Node Schema for Probabilistic SDD (Software Design Document)
+# All .decision.yaml files must conform to this schema.
+#
+# Bayesian Decision Network Node
+# Each node represents a technology/architecture decision with:
+#   - Prior probabilities (unconditional beliefs)
+#   - Conditional probability tables (influence from parent decisions)
+#   - Archetype-specific probability overrides
+#   - Implementation status tracking
+
+$schema: "http://json-schema.org/draft-07/schema#"
+title: "Probabilistic SDD Decision Node"
+description: >
+  Schema for probabilistic decision nodes in a hierarchical SDD.
+  Each node encodes a Bayesian decision with prior probabilities,
+  conditional dependencies, and archetype modulations.
+
+type: object
+required:
+  - decision_id
+  - title
+  - description
+  - decision_level
+  - status
+  - options
+  - volatility
+  - domain_applicability
+
+properties:
+  decision_id:
+    type: string
+    pattern: "^[a-z][a-z0-9_]*$"
+    description: "Unique snake_case identifier matching filename stem"
+
+  title:
+    type: string
+    maxLength: 120
+    description: "Human-readable decision title"
+
+  description:
+    type: string
+    description: "Why this decision matters, what it affects"
+
+  decision_level:
+    type: string
+    enum:
+      - L1_research_goals
+      - L2_architecture
+      - L3_technology
+      - L4_infrastructure
+      - L5_operations
+    description: "Hierarchical level in the decision network"
+
+  status:
+    type: string
+    enum: [active, draft, deprecated, archived]
+    description: "Lifecycle status of this decision node"
+
+  last_updated:
+    type: string
+    format: date
+
+  options:
+    type: array
+    minItems: 2
+    items:
+      type: object
+      required:
+        - option_id
+        - title
+        - description
+        - prior_probability
+        - status
+      properties:
+        option_id:
+          type: string
+          pattern: "^[a-z][a-z0-9_]*$"
+        title:
+          type: string
+        description:
+          type: string
+        prior_probability:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+        status:
+          type: string
+          enum: [recommended, viable, experimental, deferred, rejected, resolved]
+          description: "'resolved' means already implemented in codebase"
+        implementation_status:
+          type: string
+          enum: [not_started, config_only, partial, implemented, production]
+          description: "Current implementation state in the codebase"
+        constraints:
+          type: array
+          items:
+            type: string
+        complements:
+          type: array
+          items:
+            type: string
+            description: "decision_id.option_id pairs that work well together"
+
+  conditional_on:
+    type: array
+    items:
+      type: object
+      required:
+        - parent_decision_id
+        - influence_strength
+        - conditional_table
+      properties:
+        parent_decision_id:
+          type: string
+        influence_strength:
+          type: string
+          enum: [strong, moderate, weak]
+        conditional_table:
+          type: array
+          items:
+            type: object
+            required:
+              - given_parent_option
+              - then_probabilities
+            properties:
+              given_parent_option:
+                type: string
+              then_probabilities:
+                type: object
+                additionalProperties:
+                  type: number
+                  minimum: 0.0
+                  maximum: 1.0
+                description: "Must sum to 1.0"
+
+  archetype_weights:
+    type: object
+    additionalProperties:
+      type: object
+      required:
+        - probability_overrides
+        - rationale
+      properties:
+        probability_overrides:
+          type: object
+          additionalProperties:
+            type: number
+            minimum: 0.0
+            maximum: 1.0
+          description: "Must sum to 1.0"
+        rationale:
+          type: string
+
+  volatility:
+    type: object
+    required:
+      - classification
+      - last_assessed
+      - next_review
+      - change_drivers
+    properties:
+      classification:
+        type: string
+        enum: [stable, shifting, volatile]
+      last_assessed:
+        type: string
+        format: date
+      next_review:
+        type: string
+        format: date
+      change_drivers:
+        type: array
+        items:
+          type: string
+
+  domain_applicability:
+    type: object
+    additionalProperties:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+
+  rationale:
+    type: string
+    description: "Justification for prior probabilities"
+
+  research_notes:
+    type: string
+    description: "Domain-specific research context"
+
+  references:
+    type: array
+    description: >
+      Academic references supporting this decision's rationale and options.
+      Each entry links to the central bibliography (bibliography.yaml) by citation_key
+      and documents per-decision relevance. See protocols/citation-guide.md for format.
+    items:
+      type: object
+      required:
+        - citation_key
+        - relevance
+      properties:
+        citation_key:
+          type: string
+          pattern: "^[a-z][a-z0-9_]*$"
+          description: "Key matching an entry in bibliography.yaml (e.g., isensee2021nnu)"
+        relevance:
+          type: string
+          description: "Why this reference matters for this specific decision node"
+        sections:
+          type: array
+          items:
+            type: string
+          description: "Specific sections/tables/figures cited (e.g., 'Table 2', 'Section 3.1')"
+        supports_options:
+          type: array
+          items:
+            type: string
+          description: "option_ids this reference provides evidence for"
+
+  tags:
+    type: array
+    items:
+      type: string
