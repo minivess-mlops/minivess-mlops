@@ -96,8 +96,8 @@ class TopoSegLoss(nn.Module):  # type: ignore[misc]
 
         # Penalize prediction errors at critical points
         if critical_mask.sum() == 0:
-            # No critical points found — return small constant
-            return torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
+            # No critical points found — return zero preserving gradient chain
+            return (logits * 0.0).sum()
 
         # BCE loss weighted by critical point mask
         eps = 1e-7
