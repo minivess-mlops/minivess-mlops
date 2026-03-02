@@ -26,9 +26,6 @@ class TestBuildAdapter:
         cfg = adapter.get_config()
         assert cfg.family == "dynunet"
 
-    @pytest.mark.skip(
-        reason="SAM3 adapter not yet implemented — pending SAM3 backbone (T1)"
-    )
     def test_build_sam3_vanilla(self) -> None:
         from minivess.adapters.model_builder import build_adapter
 
@@ -38,13 +35,10 @@ class TestBuildAdapter:
             in_channels=1,
             out_channels=2,
         )
-        adapter = build_adapter(config)
+        adapter = build_adapter(config, use_stub=True)
         cfg = adapter.get_config()
         assert cfg.family == "sam3_vanilla"
 
-    @pytest.mark.skip(
-        reason="SAM3 adapter not yet implemented — pending SAM3 backbone (T1)"
-    )
     def test_build_sam3_topolora(self) -> None:
         from minivess.adapters.model_builder import build_adapter
 
@@ -53,15 +47,12 @@ class TestBuildAdapter:
             name="topolora-test",
             in_channels=1,
             out_channels=2,
-            lora_rank=4,
+            lora_rank=2,
         )
-        adapter = build_adapter(config)
+        adapter = build_adapter(config, use_stub=True)
         cfg = adapter.get_config()
         assert cfg.family == "sam3_topolora"
 
-    @pytest.mark.skip(
-        reason="SAM3 adapter not yet implemented — pending SAM3 backbone (T1)"
-    )
     def test_build_sam3_hybrid(self) -> None:
         from minivess.adapters.model_builder import build_adapter
 
@@ -70,8 +61,9 @@ class TestBuildAdapter:
             name="hybrid-test",
             in_channels=1,
             out_channels=2,
+            architecture_params={"filters": [16, 32, 64]},
         )
-        adapter = build_adapter(config)
+        adapter = build_adapter(config, use_stub=True)
         cfg = adapter.get_config()
         assert cfg.family == "sam3_hybrid"
 

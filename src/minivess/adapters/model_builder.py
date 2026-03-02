@@ -10,7 +10,7 @@ SAM3 variant is actually requested.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from minivess.adapters.base import ModelAdapter
@@ -19,17 +19,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def build_adapter(config: ModelConfig) -> ModelAdapter:
+def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     """Build a ModelAdapter from a ModelConfig.
 
     Dispatches on ``config.family`` to the correct adapter class.
-    Uses lazy imports so that SAM2 dependencies are not required
+    Uses lazy imports so that SAM3 dependencies are not required
     when only using MONAI models.
 
     Parameters
     ----------
     config:
         Model configuration specifying family and architecture params.
+    **kwargs:
+        Extra keyword arguments forwarded to the adapter constructor
+        (e.g., ``use_stub=True`` for SAM3 adapters in tests).
 
     Returns
     -------
@@ -77,17 +80,17 @@ def build_adapter(config: ModelConfig) -> ModelAdapter:
     if family == ModelFamily.SAM3_VANILLA:
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 
-        return Sam3VanillaAdapter(config)
+        return Sam3VanillaAdapter(config, **kwargs)
 
     if family == ModelFamily.SAM3_TOPOLORA:
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
-        return Sam3TopoLoraAdapter(config)
+        return Sam3TopoLoraAdapter(config, **kwargs)
 
     if family == ModelFamily.SAM3_HYBRID:
         from minivess.adapters.sam3_hybrid import Sam3HybridAdapter
 
-        return Sam3HybridAdapter(config)
+        return Sam3HybridAdapter(config, **kwargs)
 
     msg = (
         f"Unsupported model family '{family}'. "

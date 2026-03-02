@@ -1,12 +1,11 @@
 """SAM3 adapter stub — DEPRECATED, use sam3_vanilla/sam3_topolora/sam3_hybrid.
 
-MedSAM3 (Liu et al., 2025) is a medical image variant of the Segment
-Anything Model with concept-aware prompting. This adapter is a
-deprecated placeholder. Use the concrete SAM3 variant adapters instead:
+This adapter is a deprecated placeholder from the initial SAM3 exploration.
+Use the concrete SAM3 variant adapters instead:
 
-- ``Sam3VanillaAdapter`` — frozen SAM2 encoder + trainable decoder
-- ``Sam3TopoLoraAdapter`` — SAM2 + LoRA + topology-aware loss
-- ``Sam3HybridAdapter`` — SAM2 features + DynUNet 3D decoder
+- ``Sam3VanillaAdapter`` — frozen SAM3 ViT-32L encoder + trainable decoder
+- ``Sam3TopoLoraAdapter`` — SAM3 + LoRA on FFN + topology-aware loss
+- ``Sam3HybridAdapter`` — SAM3 features + DynUNet 3D decoder + gated fusion
 
 .. deprecated:: 2.0.0
     Use :class:`~minivess.adapters.sam3_vanilla.Sam3VanillaAdapter` instead.
@@ -26,7 +25,7 @@ if TYPE_CHECKING:
     from minivess.config.models import ModelConfig
 
 
-class Sam3Adapter(ModelAdapter):
+class Sam3Adapter(ModelAdapter):  # type: ignore[misc]
     """SAM3/MedSAM3 adapter (DEPRECATED).
 
     .. deprecated:: 2.0.0

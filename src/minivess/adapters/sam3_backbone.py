@@ -155,6 +155,7 @@ class Sam3Backbone(nn.Module):  # type: ignore[misc]
         self._config = config
         self._embed_dim = SAM3_EMBED_DIM
         self._fpn_dim = SAM3_FPN_DIM
+        self._frozen = freeze
 
         self.encoder: nn.Module
         self.fpn_neck: nn.Module
@@ -278,9 +279,12 @@ class Sam3Backbone(nn.Module):  # type: ignore[misc]
         Feature tensor of shape (B, 1024, H_feat, W_feat).
         """
         x = self._preprocess(x)
-        with torch.no_grad():
-            result: Tensor = self.encoder(x)
-            return result
+        if self._frozen:
+            with torch.no_grad():
+                result: Tensor = self.encoder(x)
+                return result
+        result = self.encoder(x)
+        return result
 
     def extract_fpn_features(self, x: Tensor) -> Tensor:
         """Extract FPN neck features (256-dim).
@@ -295,9 +299,12 @@ class Sam3Backbone(nn.Module):  # type: ignore[misc]
         Feature tensor of shape (B, 256, H_feat, W_feat).
         """
         vit_features = self.extract_features(x)
-        with torch.no_grad():
-            result: Tensor = self.fpn_neck(vit_features)
-            return result
+        if self._frozen:
+            with torch.no_grad():
+                result: Tensor = self.fpn_neck(vit_features)
+                return result
+        result = self.fpn_neck(vit_features)
+        return result
 
     def get_volume_embeddings(self, volume: Tensor) -> Tensor:
         """Extract features for all Z-slices of a 3D volume.
