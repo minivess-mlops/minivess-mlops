@@ -15,3 +15,4 @@ docs/prd/decisions/L2-architecture/data-management-strategy.decision.yaml:generi
 docs/prd/bibliography.yaml:generic-api-key:3593
 docs/prd/bibliography.yaml:generic-api-key:3621
 docs/prd/decisions/L3-technology/data-ingestion-queue.decision.yaml:generic-api-key:255
+docs/prd/decisions/L3-technology/sam3-integration.decision.yaml:generic-api-key:49

@@ -1,0 +1,33 @@
+experiment_name: sam3_all_debug
+model: sam3_vanilla
+model_family: sam3_vanilla
+losses:
+  - dice_ce
+compute: cpu
+data_dir: data/raw/minivess
+num_folds: 2
+max_epochs: 1
+seed: 42
+split_mode: file
+splits_file: configs/splits/3fold_seed42.json
+debug: true
+memory_limit_gb: 24
+monitor_interval: 30
+architecture_params:
+  sam2_variant: hiera_tiny
+  pretrained: false
+checkpoint:
+  tracked_metrics:
+    - name: val_loss
+      direction: minimize
+      patience: 5
+  early_stopping_strategy: all
+  primary_metric: val_loss
+  min_delta: 1.0e-4
+  min_epochs: 0
+  save_last: true
+  save_history: false
+notes: >
+  Debug smoke test for SAM3 variants.
+  All 3 variants, 1 epoch, 2 folds.
+  Use --debug flag to limit data volumes.

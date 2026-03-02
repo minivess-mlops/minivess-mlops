@@ -139,6 +139,7 @@ packages = ["src/minivess"]
 target-version = "py312"
 line-length = 88
 src = ["src", "tests"]
+exclude = ["_archive"]
 
 [tool.ruff.lint]
 select = [
@@ -253,6 +254,11 @@ disallow_incomplete_defs = false
 warn_return_any = false
 warn_unused_ignores = false
 disable_error_code = ["type-arg"]
+
+# Archive: SAM2 reference code (archived, not part of active codebase)
+[[tool.mypy.overrides]]
+module = ["_archive.*"]
+ignore_errors = true
 
 # ---------------------------------------------------------------------------
 # Pytest

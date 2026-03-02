@@ -26,11 +26,6 @@ from minivess.adapters.medsam3 import (
     PromptType,
 )
 from minivess.adapters.model_builder import build_adapter
-from minivess.adapters.sam2_backbone import Sam2Backbone
-from minivess.adapters.sam2_decoder import Sam2MaskDecoder
-from minivess.adapters.sam3_hybrid import Sam3HybridAdapter
-from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
-from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 from minivess.adapters.segresnet import SegResNetAdapter
 from minivess.adapters.swinunetr import SwinUNETRAdapter
 from minivess.adapters.vesselfm import VesselFMAdapter
@@ -53,11 +48,6 @@ __all__ = [
     "MedicalConcept",
     "ModelAdapter",
     "PromptType",
-    "Sam2Backbone",
-    "Sam2MaskDecoder",
-    "Sam3HybridAdapter",
-    "Sam3TopoLoraAdapter",
-    "Sam3VanillaAdapter",
     "SegResNetAdapter",
     "SegmentationOutput",
     "SwinUNETRAdapter",

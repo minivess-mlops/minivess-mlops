@@ -1,0 +1,105 @@
+decision_id: sam3_integration
+title: "SAM3 Variant Integration Strategy"
+description: >
+  How to integrate SAM2 (Segment Anything Model 2) into the MinIVess
+  segmentation pipeline. SAM2 is a 2D foundation model that must be
+  adapted for 3D microvessel segmentation. The decision covers backbone
+  selection, adaptation strategy (frozen/LoRA/hybrid), and loss function
+  pairing. This is an MLOps demonstration, not SOTA development — we
+  quantify SAM2's limitations against the DynUNet baseline.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-03-02
+
+options:
+  - option_id: sam3_vanilla
+    title: "Frozen SAM2 + Trainable Decoder (V1)"
+    description: >
+      Freeze the SAM2 Hiera-Tiny encoder and train only a lightweight
+      mask decoder. Slice-by-slice 2D inference with null prompts.
+      Establishes the SAM2 baseline — expected to underperform DynUNet
+      significantly due to domain gap and 2D-to-3D mismatch.
+    prior_probability: 0.20
+    status: implemented
+    implementation_status: implemented
+    implementation_files:
+      - "src/minivess/adapters/sam3_vanilla.py"
+    evidence:
+      - citation_key: ravi2024sam2
+        relevance: "SAM2 architecture and Hiera backbone"
+    complements:
+      - "segmentation_models.dynunet"
+      - "loss_functions.dice_ce"
+
+  - option_id: sam3_topolora
+    title: "SAM2 + LoRA + Topology Loss (V2)"
+    description: >
+      Apply PEFT LoRA to SAM2 Hiera encoder attention layers (q, v
+      projections, r=16, alpha=32) and pair with cbdice_cldice topology
+      loss. Based on TopoLoRA-SAM which showed +15% clDice with LoRA +
+      clDice loss on vessel segmentation. Controlled experiment: ONLY
+      difference from V1 is LoRA + loss function.
+    prior_probability: 0.40
+    status: implemented
+    implementation_status: implemented
+    implementation_files:
+      - "src/minivess/adapters/sam3_topolora.py"
+    evidence:
+      - citation_key: xiang2025topolorasam
+        relevance: "LoRA + topology loss for SAM vessel segmentation"
+      - citation_key: hu2022lora
+        relevance: "LoRA parameter-efficient fine-tuning"
+    complements:
+      - "loss_functions.cbdice_cldice"
+
+  - option_id: sam3_hybrid
+    title: "SAM2 Features + DynUNet 3D Decoder (V3)"
+    description: >
+      Use frozen SAM2 as a feature extractor, project 2D features to 3D
+      via axial convolution, and fuse with DynUNet at output level using
+      gated concatenation (gate_alpha init=0.0 = pure DynUNet at start).
+      Based on nnSAM and DB-SAM patterns. Most complex variant, highest
+      VRAM (~7.5 GB).
+    prior_probability: 0.30
+    status: implemented
+    implementation_status: implemented
+    implementation_files:
+      - "src/minivess/adapters/sam3_hybrid.py"
+    evidence:
+      - citation_key: li2025nnsam
+        relevance: "nnSAM plug-and-play SAM integration pattern"
+    complements:
+      - "segmentation_models.dynunet"
+      - "loss_functions.cbdice_cldice"
+
+  - option_id: sam3_2_5d
+    title: "2.5D SAM2 (3 Adjacent Slices as RGB)"
+    description: >
+      Feed 3 adjacent Z-slices as pseudo-RGB input to SAM2, providing
+      inter-slice context without architectural changes. Stretch goal
+      for V1/V2 variants.
+    prior_probability: 0.10
+    status: viable
+    implementation_status: planned
+    evidence:
+      - citation_key: ravi2024sam2
+        relevance: "SAM2 accepts 3-channel input natively"
+
+go_no_go_gates:
+  - gate_id: G1
+    condition: "Vanilla SAM3 DSC >= 0.10"
+    action_if_fail: "Abandon SAM for segmentation entirely"
+  - gate_id: G2
+    condition: "TopoLoRA clDice improvement over vanilla >= 2%"
+    action_if_fail: "Topology loss does not transfer to SAM LoRA"
+  - gate_id: G3
+    condition: "Hybrid DSC > TopoLoRA DSC"
+    action_if_fail: "SAM features provide no complementary value"
+
+evidence_summary: >
+  SAM2 is the dominant vision foundation model (Ravi et al. 2024) but was
+  trained on natural images, not 3D medical data. TopoLoRA-SAM (Xiang et al.
+  2025) showed +15% clDice with LoRA + topology loss on 2D vessels. nnSAM
+  (Li et al. 2025) demonstrated effective SAM-DynUNet fusion. Our three
+  variants systematically test these approaches on 3D microvasculature.

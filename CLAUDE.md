@@ -107,6 +107,43 @@ Everything must work identically on:
 6. **Paths** — Always use `pathlib.Path()`, never string concatenation.
 7. **Timezone** — Always use `datetime.now(timezone.utc)`, never `datetime.now()`.
 8. **`from __future__ import annotations`** — At the top of every Python file.
+9. **Verify Models Beyond Knowledge Cutoff (Non-Negotiable)** — When a model, library,
+   or API is near or beyond the training knowledge cutoff, ALWAYS perform a web search
+   to verify it exists, get the correct version/API, and confirm the package name BEFORE
+   writing any code. If the user provides URLs (arXiv, GitHub, docs), ALWAYS fetch them
+   first. **SAMv3 = Meta's Segment Anything Model 3** (github.com/facebookresearch/sam3,
+   Nov 2025), NOT SAM2. See `.claude/metalearning/2026-03-02-sam3-implementation-fuckup.md`.
+10. **Plans Are Not Infallible** — When a plan says "ModelX" but CLAUDE.md says "ModelY",
+    or the plan contradicts the user's original prompt, STOP and clarify with the user
+    before implementing. Cross-reference plans with CLAUDE.md, literature reports, and
+    user history. The plan is a derivative; the user's instructions are the source of truth.
+11. **Never Confabulate (Non-Negotiable)** — Never construct post-hoc rationalizations
+    for naming inconsistencies, knowledge gaps, or ambiguities. If something doesn't add
+    up, say "I'm not sure, let me check" and use web search or ask the user. Confident-
+    sounding fabrication is the most dangerous failure mode — it wastes hours of work
+    and erodes trust. Admitting ignorance costs 5 seconds; confabulation costs hours.
+12. **Read Context Before Implementing** — Before implementing any plan, read the
+    literature report / research doc that produced the plan. The plan is a derivative;
+    the source document has the ground truth. When resuming work from a previous session,
+    read the original user prompts / literature reports, not just the generated plan.
+13. **Persist All Learnings (Non-Negotiable)** — Terminal output is ephemeral. Every
+    corrective insight, self-reflection, or failure analysis MUST be saved to durable
+    locations: metalearning docs (`.claude/metalearning/`), CLAUDE.md, and/or memory
+    files. If it's not written to a file, it's not learned. Never print self-reflection
+    to terminal without also persisting it.
+14. **Write Requested Artifacts to Disk** — When the user explicitly asks for a file
+    to be saved at a specific path (e.g., "save the XML plan to `docs/planning/foo.xml`"),
+    ALWAYS write it to disk using the Write tool. Never leave requested artifacts only
+    in conversation context or plan files. If unsure whether a file was requested, re-read
+    the user's original prompt.
+
+## What AI Must NEVER Do (Extended)
+
+- Confabulate explanations for knowledge gaps instead of web-searching
+- Follow a plan that contradicts CLAUDE.md or the user's explicit instructions
+- Implement models beyond knowledge cutoff without web-searching first
+- Print self-reflection or corrective insights only to terminal without persisting to files
+- Ignore user-provided URLs (arXiv, GitHub) — always fetch them for context
 
 ## TDD Workflow (Non-Negotiable)
 
