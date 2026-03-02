@@ -1,0 +1,37 @@
+{
+  "generated_at": "2026-03-02T03:32:10.212589+00:00",
+  "data": {
+    "n_volumes": 70,
+    "n_external_datasets": 0,
+    "quality_gate_passed": true,
+    "drift_summary": {},
+    "external_datasets": {}
+  },
+  "config": {
+    "environment": "local",
+    "dynaconf_params": {
+      "debug": true,
+      "project_name": "minivess-mlops-v2"
+    },
+    "experiment_config": "dynunet_loss_variation_v2",
+    "model_profile_name": "dynunet"
+  },
+  "model": {
+    "architecture_name": "MONAI DynUNet (128 filters)",
+    "param_count": 5604866,
+    "onnx_exported": true,
+    "champion_category": "balanced",
+    "loss_name": "cbdice_cldice"
+  },
+  "pipeline": {
+    "flow_results": {
+      "data_flow": "PASSED",
+      "analysis_flow": "PASSED",
+      "deploy_flow": "PASSED",
+      "dashboard_flow": "RUNNING"
+    },
+    "last_data_version": "v1.0",
+    "last_training_run_id": "",
+    "trigger_source": "test/quasi-e2e-debugging"
+  }
+}

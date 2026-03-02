@@ -51,3 +51,5 @@ docs/snapshots/*.zip
 
 # IDE
 .vscode/
+outputs/**/*.onnx
+outputs/**/*.duckdb

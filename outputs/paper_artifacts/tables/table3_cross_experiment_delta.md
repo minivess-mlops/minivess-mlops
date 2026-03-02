@@ -1,0 +1,14 @@
+| Loss | Metric | Full-width | Half-width | Delta | Winner |
+| --- | --- | --- | --- | --- | --- |
+| cbdice | dsc | 0.7666 | 0.7355 | +0.0311 | Full |
+| cbdice | centreline_dsc | 0.7992 | 0.7686 | +0.0306 | Full |
+| cbdice | measured_masd | 2.1249 | 2.5434 | -0.4185 | Full |
+| cbdice_cldice | dsc | 0.7716 | 0.6788 | +0.0928 | Full |
+| cbdice_cldice | centreline_dsc | 0.9060 | 0.8877 | +0.0182 | Full |
+| cbdice_cldice | measured_masd | 1.7374 | 2.3301 | -0.5927 | Full |
+| dice_ce | dsc | 0.8242 | 0.8055 | +0.0187 | Full |
+| dice_ce | centreline_dsc | 0.8317 | 0.7743 | +0.0574 | Full |
+| dice_ce | measured_masd | 1.6768 | 2.1579 | -0.4811 | Full |
+| dice_ce_cldice | dsc | 0.7362 | 0.6361 | +0.1001 | Full |
+| dice_ce_cldice | centreline_dsc | 0.9046 | 0.8950 | +0.0096 | Full |
+| dice_ce_cldice | measured_masd | 1.9600 | 2.4330 | -0.4730 | Full |
