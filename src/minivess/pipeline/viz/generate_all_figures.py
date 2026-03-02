@@ -70,33 +70,43 @@ def _demo_comparison_table() -> ComparisonTable:
 # ---------------------------------------------------------------------------
 
 
-def _gen_loss_comparison() -> plt.Figure:
+def _gen_loss_comparison(
+    table: ComparisonTable | None = None,
+) -> plt.Figure:
     from minivess.pipeline.viz.loss_comparison import plot_loss_comparison
 
-    return plot_loss_comparison(_demo_comparison_table())
+    return plot_loss_comparison(table or _demo_comparison_table())
 
 
-def _gen_fold_heatmap() -> plt.Figure:
+def _gen_fold_heatmap(
+    table: ComparisonTable | None = None,
+) -> plt.Figure:
     from minivess.pipeline.viz.fold_heatmap import plot_fold_heatmap
 
-    return plot_fold_heatmap(_demo_comparison_table())
+    return plot_fold_heatmap(table or _demo_comparison_table())
 
 
-def _gen_metric_correlation() -> plt.Figure:
+def _gen_metric_correlation(
+    table: ComparisonTable | None = None,
+) -> plt.Figure:
     from minivess.pipeline.viz.metric_correlation import plot_metric_correlation
 
-    return plot_metric_correlation(_demo_comparison_table())
+    return plot_metric_correlation(table or _demo_comparison_table())
 
 
-def _gen_sensitivity_heatmap() -> plt.Figure:
+def _gen_sensitivity_heatmap(
+    table: ComparisonTable | None = None,
+) -> plt.Figure:
     from minivess.pipeline.viz.factorial_analysis import plot_sensitivity_heatmap
 
-    return plot_sensitivity_heatmap(_demo_comparison_table())
+    return plot_sensitivity_heatmap(table or _demo_comparison_table())
 
 
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
+
+_GeneratorFn = Any  # Callable[[ComparisonTable | None], Figure]
 
 FIGURE_REGISTRY: list[dict[str, Any]] = [
     {
@@ -130,6 +140,8 @@ def list_figures() -> list[str]:
 def generate_figure(
     name: str,
     output_dir: Path | None = None,
+    comparison_table: ComparisonTable | None = None,
+    formats: list[str] | None = None,
 ) -> Path | None:
     """Generate a single figure by name.
 
@@ -139,6 +151,10 @@ def generate_figure(
         Registered figure name.
     output_dir:
         Output directory. Defaults to cwd.
+    comparison_table:
+        Real ComparisonTable data. Falls back to demo data if None.
+    formats:
+        Export formats (e.g. ``["png", "svg"]``). Defaults to ``["png"]``.
 
     Returns
     -------
@@ -147,8 +163,13 @@ def generate_figure(
     for entry in FIGURE_REGISTRY:
         if entry["name"] == name:
             try:
-                fig = entry["generator"]()
-                result_path: Path | None = save_figure(fig, name, output_dir=output_dir)
+                fig = entry["generator"](table=comparison_table)
+                result_path: Path | None = save_figure(
+                    fig,
+                    name,
+                    output_dir=output_dir,
+                    formats=formats,
+                )
                 plt.close(fig)
                 return result_path
             except Exception:
@@ -161,6 +182,8 @@ def generate_figure(
 
 def generate_all_figures(
     output_dir: Path | None = None,
+    comparison_table: ComparisonTable | None = None,
+    formats: list[str] | None = None,
 ) -> dict[str, list[str]]:
     """Generate all registered figures.
 
@@ -168,6 +191,10 @@ def generate_all_figures(
     ----------
     output_dir:
         Output directory for all figures.
+    comparison_table:
+        Real ComparisonTable data. Falls back to demo data if None.
+    formats:
+        Export formats (e.g. ``["png", "svg"]``). Defaults to ``["png"]``.
 
     Returns
     -------
@@ -179,8 +206,8 @@ def generate_all_figures(
     for entry in FIGURE_REGISTRY:
         name = entry["name"]
         try:
-            fig = entry["generator"]()
-            save_figure(fig, name, output_dir=output_dir)
+            fig = entry["generator"](table=comparison_table)
+            save_figure(fig, name, output_dir=output_dir, formats=formats)
             plt.close(fig)
             succeeded.append(name)
             logger.info("Generated: %s", name)
