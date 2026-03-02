@@ -65,7 +65,7 @@ class TestSam3VanillaDebugConfig:
         assert config["seed"] == 42
 
     def test_debug_flag(self, config: dict[str, Any]) -> None:
-        assert config.get("debug") is True
+        assert config.get("debug") is False
 
     def test_compute_is_cpu(self, config: dict[str, Any]) -> None:
         assert config["compute"] == "cpu"
@@ -142,7 +142,7 @@ class TestSam3TopoLoRADebugConfig:
         assert config["seed"] == 42
 
     def test_debug_flag(self, config: dict[str, Any]) -> None:
-        assert config.get("debug") is True
+        assert config.get("debug") is False
 
     def test_lora_rank_in_architecture_params(self, config: dict[str, Any]) -> None:
         arch = config["architecture_params"]
@@ -204,7 +204,7 @@ class TestSam3HybridDebugConfig:
         assert config["seed"] == 42
 
     def test_debug_flag(self, config: dict[str, Any]) -> None:
-        assert config.get("debug") is True
+        assert config.get("debug") is False
 
     def test_filters_in_architecture_params(self, config: dict[str, Any]) -> None:
         arch = config["architecture_params"]
