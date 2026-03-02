@@ -680,6 +680,66 @@ class ExperimentTracker:
             alias,
         )
 
+    def log_per_volume_metrics(
+        self,
+        fold_result: FoldResult,
+        *,
+        fold_id: int,
+        loss_name: str,
+    ) -> None:
+        """Save per-volume metrics as MLflow JSON artifact.
+
+        Creates a JSON file at ``per_volume_metrics/fold{id}_{loss}.json``
+        containing per-volume metric values with volume IDs.
+
+        Parameters
+        ----------
+        fold_result:
+            Evaluation results with volume_ids and per_volume_metrics.
+        fold_id:
+            Fold index (0-based).
+        loss_name:
+            Loss function name.
+        """
+        if not fold_result.volume_ids:
+            logger.warning("No volume_ids in FoldResult, skipping per-volume artifact")
+            return
+
+        import tempfile
+
+        tmp_path: str | None = None
+        try:
+            filename = f"fold{fold_id}_{loss_name}.json"
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".json",
+                prefix=f"per_vol_{filename}_",
+                delete=False,
+                encoding="utf-8",
+            ) as f:
+                import json
+
+                json.dump(fold_result.to_per_volume_json(), f, indent=2)
+                tmp_path = f.name
+
+            # Rename temp file to desired filename for clean artifact name
+            final_path = Path(tmp_path).parent / filename
+            Path(tmp_path).rename(final_path)
+            tmp_path = str(final_path)
+
+            mlflow.log_artifact(tmp_path, artifact_path="per_volume_metrics")
+            logger.info(
+                "Logged per-volume metrics for fold %d, loss=%s (%d volumes)",
+                fold_id,
+                loss_name,
+                len(fold_result.volume_ids),
+            )
+        except Exception:
+            logger.warning("Failed to log per-volume metrics", exc_info=True)
+        finally:
+            if tmp_path is not None:
+                Path(tmp_path).unlink(missing_ok=True)
+
     def log_post_training_tags(
         self,
         best_metrics: dict[str, float],
