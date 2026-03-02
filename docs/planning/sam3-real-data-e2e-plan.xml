@@ -1,0 +1,504 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SAM3 Segmentation: Real-Data E2E Pipeline Plan (v2 — reviewer-optimized)
+  Branch: test/sam3-segmentation-with-real-data
+  Created: 2026-03-02
+
+  Dual mandate:
+    1. Debug training (3 variants x 3 folds x 6 epochs) to verify SAM3 training works
+    2. Improve training scripts to support model-agnostic adapter dispatch
+       (replace hardcoded DynUNetAdapter with build_adapter() factory)
+
+  Crash-resistant: Each task checkpoints on commit. Cold-resume reads tdd-state.json.
+  Progress: GitHub issues track completion; trigger chain JSON tracks runtime.
+
+  KEY GAP IDENTIFIED:
+    build_adapter() in model_builder.py supports SAM3 but is NEVER called.
+    train_monitored.py hardcodes DynUNetAdapter at line 513.
+    run_experiment.py reads model_family from YAML but never passes it to train_monitored.py.
+    This plan fixes the gap and makes the training pipeline truly model-agnostic.
+
+  SAM3 VARIANT SUMMARY:
+    V1 (Sam3VanillaAdapter): Frozen SAM3 ViT-32L + trainable decoder, dice_ce
+    V2 (Sam3TopoLoraAdapter): SAM3 + LoRA on FFN + cbdice_cldice
+    V3 (Sam3HybridAdapter): SAM3 features + DynUNet 3D + gated fusion, cbdice_cldice
+
+  All adapters accept 3D input (B,C,D,H,W), handle slice-by-slice internally.
+  pretrained=false (random weights) — this is an MLOps pipeline demo, not SOTA.
+
+  Reviewer feedback incorporated (v2):
+    - CRITICAL-01: SAM3 adapters missing self.net → add save/load/export overrides (T4a)
+    - CRITICAL-02: deploy_onnx_export.py hardcoded for DynUNet → make model-agnostic (T11)
+    - CRITICAL-03: _build_configs() hardcodes name="dynunet" → set from model_family (T1)
+    - CRITICAL-04: LoRA params in architecture_params not extracted → fix in T1
+    - TDD-CRITICAL-03: Mock build_adapter insufficient → use static analysis test (T1/T5)
+    - TDD-CRITICAL-04: train_argv untestable → refactor into helper first (T2)
+    - WARN-02: Sliding window x slice loop performance → add sw_batch_size=1 for SAM3 (T4)
+    - WARN-03: Gate evaluation informational-only for pretrained=false (T9)
+    - WARN-05: Merge T6 into T16 (reduce overhead)
+    - WARN-08: sw_batch_size override for SAM3 Hybrid validation (T4)
+-->
+<plan version="2.0" name="sam3-real-data-e2e">
+
+  <metadata>
+    <branch>test/sam3-segmentation-with-real-data</branch>
+    <base_branch>main</base_branch>
+    <dataset>minivess (70 volumes, 512x512x5-110, 3-fold CV)</dataset>
+    <models>3 SAM3 variants (vanilla, topolora, hybrid)</models>
+    <debug_epochs>6</debug_epochs>
+    <debug_folds>3</debug_folds>
+    <state_file>state/tdd-state.json</state_file>
+    <estimated_gpu_time>60-120 minutes (9 runs: 3 variants x 3 folds x 6 epochs)</estimated_gpu_time>
+    <go_no_go_gates>
+      <gate id="G1">After V1: DSC >= 0.10 (otherwise abandon SAM for segmentation)</gate>
+      <gate id="G2">After V2: clDice improvement >= 2% over V1</gate>
+      <gate id="G3">After V3: V3 DSC > V2 DSC</gate>
+      <note>Gates are INFORMATIONAL-ONLY with pretrained=false (random init). Formal gate
+        evaluation requires pretrained=true weights from a separate infrastructure PR.</note>
+    </go_no_go_gates>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 0: Model-Agnostic Training Infrastructure                    -->
+  <!-- ================================================================== -->
+  <phase id="P0" name="model-agnostic-training" description="Wire build_adapter() into the training pipeline, making it model-agnostic">
+
+    <task id="T1" title="Add --model-family to train_monitored.py and use build_adapter()">
+      <description>
+        CRITICAL: train_monitored.py line 513 hardcodes `base_model = DynUNetAdapter(model_config)`.
+        This must become `base_model = build_adapter(model_config)` to support SAM3 and all future models.
+
+        Changes:
+        1. Add `--model-family` CLI arg to parse_args() (default="dynunet")
+        2. In _build_configs(): read model_family from args, set BOTH ModelConfig.family
+           AND ModelConfig.name from the model_family value (CRITICAL-03 fix)
+        3. In _build_configs(): extract lora_rank/lora_alpha from architecture_params
+           and pass to ModelConfig constructor (CRITICAL-04 fix)
+        4. In run_fold_safe(): replace `DynUNetAdapter(model_config)` with `build_adapter(model_config)`
+        5. Remove `from minivess.adapters.dynunet import DynUNetAdapter` import (dead after change)
+        6. Import build_adapter from model_builder instead
+
+        This is the SINGLE most impactful change — makes the entire training pipeline model-agnostic.
+      </description>
+      <files>
+        <file action="modify">scripts/train_monitored.py</file>
+        <file action="create">tests/v2/unit/test_model_agnostic_training.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test parse_args(["--model-family", "sam3_vanilla", ...]) sets args.model_family
+          (2) Test _build_configs() with model_family="sam3_vanilla" creates ModelConfig(family=SAM3_VANILLA, name="sam3_vanilla")
+          (3) Test _build_configs() with model_family="dynunet" creates ModelConfig(family=MONAI_DYNUNET, name="dynunet") (default)
+          (4) Test _build_configs() with model_family="sam3_topolora" extracts lora_rank from architecture_params
+          (5) Test _build_configs() with model_family="sam3_vanilla" does NOT create family=MONAI_DYNUNET (negative test)
+          (6) Test source code: "DynUNetAdapter(" does NOT appear in run_fold_safe (static analysis)
+        </red>
+        <green>
+          Add --model-family arg. Use ModelFamily(args.model_family) in _build_configs().
+          Set name=args.model_family. Extract lora_rank/lora_alpha from arch_params.
+          Replace DynUNetAdapter(model_config) with build_adapter(model_config) in run_fold_safe().
+        </green>
+        <verify>pytest + ruff + mypy; verify DynUNet still works (regression)</verify>
+        <checkpoint>git commit + update tdd-state.json</checkpoint>
+        <convergence>all 3 gates green; DynUNet training still works</convergence>
+      </tdd>
+      <acceptance>
+        DynUNet training still works (regression test).
+        `--model-family sam3_vanilla` creates correct ModelConfig with name="sam3_vanilla".
+        No hardcoded DynUNetAdapter in run_fold_safe().
+        LoRA params extracted from architecture_params to ModelConfig fields.
+      </acceptance>
+    </task>
+
+    <task id="T2" title="Propagate model_family from YAML through run_experiment.py">
+      <description>
+        run_experiment.py reads config.get("model_family", "dynunet") on line 399 for the
+        compute profile, but NEVER passes it to train_monitored.py in either mode.
+
+        Changes for BOTH modes:
+        1. Refactor train_argv construction into shared helper _build_train_argv()
+           (TDD-CRITICAL-04 fix: makes argv testable without monkey-patching)
+        2. _build_train_argv(): include "--model-family" from config
+        3. _run_losses_mode() and _run_single_condition() both use _build_train_argv()
+        4. Validate: model_family value must be a valid ModelFamily enum member
+      </description>
+      <files>
+        <file action="modify">scripts/run_experiment.py</file>
+        <file action="create">tests/v2/unit/test_model_family_propagation.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test _build_train_argv() returns list containing "--model-family" "sam3_vanilla"
+          (2) Test _build_train_argv() returns "--model-family" "dynunet" when key absent
+          (3) Test _build_train_argv() includes all standard flags (--compute, --loss, etc.)
+          (4) Test _run_losses_mode uses _build_train_argv (import + call check)
+          (5) Test invalid model_family raises ValueError
+        </red>
+        <green>
+          Extract _build_train_argv(). Add model_family to it.
+          Wire both modes to use the shared helper.
+        </green>
+        <verify>pytest + ruff + dry-run with sam3_vanilla_baseline.yaml</verify>
+        <checkpoint>git commit</checkpoint>
+        <convergence>all 3 gates green</convergence>
+      </tdd>
+      <depends_on>T1</depends_on>
+      <acceptance>
+        _build_train_argv() is a testable, shared helper.
+        Both modes propagate model_family.
+        `--dry-run` with SAM3 config shows model_family in logs.
+      </acceptance>
+    </task>
+
+    <task id="T3" title="Create SAM3 debug experiment configs and runner script">
+      <description>
+        3 separate configs (different model_family + loss per variant):
+        - sam3_vanilla_debug.yaml: model_family=sam3_vanilla, loss=dice_ce, 3 folds, 6 epochs
+        - sam3_topolora_debug.yaml: model_family=sam3_topolora, loss=cbdice_cldice, 3 folds, 6 epochs
+        - sam3_hybrid_debug.yaml: model_family=sam3_hybrid, loss=cbdice_cldice, 3 folds, 6 epochs
+
+        Runner script: run_sam3_debug_experiment.py — executes all 3 sequentially,
+        crash-resume, per-variant error isolation. Supports --dry-run.
+      </description>
+      <files>
+        <file action="create">configs/experiments/sam3_vanilla_debug.yaml</file>
+        <file action="create">configs/experiments/sam3_topolora_debug.yaml</file>
+        <file action="create">configs/experiments/sam3_hybrid_debug.yaml</file>
+        <file action="create">scripts/run_sam3_debug_experiment.py</file>
+        <file action="create">tests/v2/unit/test_sam3_debug_configs.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test each config loads without error
+          (2) Test vanilla: model_family=sam3_vanilla, loss=dice_ce
+          (3) Test topolora: model_family=sam3_topolora, lora_rank=16 in architecture_params
+          (4) Test hybrid: model_family=sam3_hybrid, filters=[32,64,128,256]
+          (5) Test all configs: num_folds=3, max_epochs=6
+          (6) Test runner --dry-run validates all 3 configs without training
+        </red>
+        <green>Create configs + runner script</green>
+        <verify>pytest + ruff</verify>
+        <checkpoint>git commit</checkpoint>
+        <convergence>all 3 gates green</convergence>
+      </tdd>
+      <acceptance>All 3 configs valid; runner --dry-run works</acceptance>
+    </task>
+
+    <task id="T4" title="Fix SAM3 adapter missing methods + training concerns">
+      <description>
+        CRITICAL-01 from review: SAM3 adapters have no self.net, so base class
+        save_checkpoint(), load_checkpoint(), export_onnx() all crash with AttributeError.
+
+        Changes:
+        1. Add save_checkpoint()/load_checkpoint() overrides to all 3 SAM3 adapters
+           (save only trainable params: decoder for vanilla, LoRA+decoder for topolora,
+            DynUNet+fusion for hybrid)
+        2. Add export_onnx() overrides (slice-by-slice models need special handling)
+        3. Add trainable_parameters() override to hybrid if missing (WARN-07)
+        4. SAM3-aware sw_batch_size: override to 1 for validation (WARN-02/08)
+        5. Guard: if model_family is SAM3 and condition is not None, log warning (WARN-04)
+      </description>
+      <files>
+        <file action="modify">src/minivess/adapters/sam3_vanilla.py</file>
+        <file action="modify">src/minivess/adapters/sam3_topolora.py</file>
+        <file action="modify">src/minivess/adapters/sam3_hybrid.py</file>
+        <file action="modify">scripts/train_monitored.py (sw_batch_size override)</file>
+        <file action="create">tests/v2/unit/test_sam3_adapter_methods.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test Sam3VanillaAdapter.save_checkpoint(tmp_path) does not raise
+          (2) Test Sam3VanillaAdapter.load_checkpoint(tmp_path) restores decoder state
+          (3) Test Sam3TopoLoraAdapter.save_checkpoint saves LoRA + decoder weights
+          (4) Test Sam3TopoLoraAdapter.load_checkpoint restores LoRA + decoder
+          (5) Test Sam3HybridAdapter.trainable_parameters() returns positive int
+          (6) Test Sam3HybridAdapter.save_checkpoint/load_checkpoint roundtrip
+          (7) Test export_onnx() produces valid file for each variant (use_stub=True)
+          (8) Test forward output identical before/after checkpoint roundtrip
+        </red>
+        <green>
+          Implement method overrides. Use self.state_dict() for save (captures all
+          trainable params). Override export_onnx with 2D export + metadata for
+          serving to handle slice loop.
+        </green>
+        <verify>pytest + ruff + mypy</verify>
+        <checkpoint>git commit</checkpoint>
+        <convergence>all 3 gates green</convergence>
+      </tdd>
+      <depends_on>T1</depends_on>
+      <acceptance>
+        All 3 SAM3 adapters have working save/load/export/trainable_parameters.
+        Checkpoint roundtrip produces identical forward output.
+        sw_batch_size=1 for SAM3 during validation.
+      </acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Code Quality + Dead Code Cleanup                          -->
+  <!-- ================================================================== -->
+  <phase id="P1" name="code-cleanup" description="Production-grade code quality: dead code removal, decoupling, DRY">
+
+    <task id="T5" title="Remove dead code, consolidate patterns, verify decoupling">
+      <description>
+        Combined cleanup + decoupling verification (merged T5+T6 per WARN-05):
+        1. Dead imports: DynUNetAdapter no longer imported in train_monitored.py
+        2. DRY: _build_train_argv() shared helper (done in T2)
+        3. sam3_all_debug.yaml: remove or update (superseded by per-variant configs)
+        4. __init__.py: verify SAM3 exports resolve correctly
+        5. Prefect flow decoupling: verify no cross-flow adapter imports
+           - data_flow: zero adapter imports
+           - analysis_flow: zero adapter imports
+           - dashboard_flow: zero adapter imports
+           - deploy_flow: minimal adapter imports (ONNX export only)
+        6. condition_builder + SAM3: verify no invalid combinations
+      </description>
+      <files>
+        <file action="audit">scripts/train_monitored.py</file>
+        <file action="audit">scripts/run_experiment.py</file>
+        <file action="audit">src/minivess/adapters/__init__.py</file>
+        <file action="audit">src/minivess/orchestration/*.py</file>
+        <file action="create">tests/v2/unit/test_code_quality_sam3.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test train_monitored.py source has no "DynUNetAdapter(" (static analysis)
+          (2) Test all SAM3 adapter imports in __init__.py resolve
+          (3) Test data_flow.py has zero imports from minivess.adapters
+          (4) Test analysis_flow.py has zero imports from minivess.adapters
+          (5) Test dashboard_flow.py has zero imports from minivess.adapters
+        </red>
+        <green>Remove dead code, fix coupling violations if any</green>
+        <verify>pytest + ruff + mypy</verify>
+        <checkpoint>git commit</checkpoint>
+        <convergence>all 3 gates green</convergence>
+      </tdd>
+      <depends_on>T1, T2</depends_on>
+      <acceptance>No dead imports; flow decoupling preserved; clean exports</acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: Debug Training Execution                                  -->
+  <!-- ================================================================== -->
+  <phase id="P2" name="debug-training" description="Run actual GPU training with all 3 SAM3 variants">
+
+    <task id="T6" title="Smoke test: all 3 SAM3 variants for 1 epoch" type="runtime">
+      <description>
+        Verify all 3 SAM3 variants train for 1 epoch without error.
+        Catches OOM, NaN, import errors, adapter issues.
+
+        Also measure validation time per volume — if >5 min, reduce sw_overlap.
+
+        If Hybrid OOMs: reduce patch_size or confirm batch_size=1 + AMP.
+        If any variant crashes: investigate and fix before T7.
+      </description>
+      <depends_on>T1, T2, T3, T4</depends_on>
+      <acceptance>
+        All 3 variants complete 1 epoch x 1 fold without OOM or NaN.
+        Peak GPU memory logged. Training loss finite. Validation completes in reasonable time.
+      </acceptance>
+    </task>
+
+    <task id="T7" title="Execute full debug training (3 variants x 3 folds x 6 epochs)" type="runtime">
+      <description>
+        Run complete debug training. Sequential, crash-resistant.
+        Minimum acceptable: 2/3 variants complete.
+
+        Go/no-go gates (INFORMATIONAL-ONLY with random init):
+        G1: DSC >= 0.10, G2: clDice +2%, G3: V3 > V2
+      </description>
+      <depends_on>T6</depends_on>
+      <acceptance>
+        2-3 variants x 3 folds completed. 6-9 MLflow runs FINISHED.
+        Loss decreases across epochs. No NaN. Peak GPU under 8GB.
+      </acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: Analysis + Champion Selection                             -->
+  <!-- ================================================================== -->
+  <phase id="P3" name="analysis" description="Evaluate SAM3 results, tag champions, evaluate gates">
+
+    <task id="T8" title="Run analysis flow on SAM3 experiment results">
+      <description>
+        Analysis script: comparison table (variants x 8 metrics), gate evaluation
+        (informational), champion tagging, comparison figures.
+        Gate evaluation function tested with synthetic metrics (CI-compatible).
+      </description>
+      <files>
+        <file action="create">scripts/analyze_sam3_experiment.py</file>
+        <file action="create">tests/v2/integration/test_analysis_sam3.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test gate_evaluation() with synthetic metrics returns correct pass/fail
+          (2) Test comparison table builder with mock MLflow data
+          (3) Test output files generated: sam3_comparison.md, .tex
+          (4) Test champion tagging logic (mock MLflow)
+        </red>
+        <green>Create analysis script + gate evaluation function</green>
+        <verify>pytest + run with real mlruns</verify>
+        <checkpoint>git commit</checkpoint>
+        <convergence>all 3 gates green</convergence>
+      </tdd>
+      <depends_on>T7</depends_on>
+      <acceptance>Comparison artifacts generated. Gates evaluated (informational).</acceptance>
+    </task>
+
+    <task id="T9" title="MLflow model logging and serving verification">
+      <description>
+        Log SAM3 champion as MLflow pyfunc. Verify load + predict roundtrip.
+        model_family metadata preserved. 3D input → 3D output.
+      </description>
+      <files>
+        <file action="create">tests/v2/integration/test_mlflow_serving_sam3.py</file>
+      </files>
+      <depends_on>T8</depends_on>
+      <acceptance>MLflow pyfunc loads, predicts, preserves metadata.</acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: Deploy + Serving                                          -->
+  <!-- ================================================================== -->
+  <phase id="P4" name="deploy-serving" description="ONNX export, BentoML, MONAI Deploy">
+
+    <task id="T10" title="Make deploy pipeline model-agnostic + SAM3 ONNX export">
+      <description>
+        CRITICAL-02: deploy_onnx_export.py _load_model_from_checkpoint() is hardcoded
+        for DynUNet. Must use build_adapter() + model.load_checkpoint() with model_family
+        stored in MLflow params.
+
+        Also: SAM3 export_onnx() overrides from T4 are now available.
+        LoRA merge before export (R6): merge weights before tracing.
+      </description>
+      <files>
+        <file action="modify">src/minivess/pipeline/deploy_onnx_export.py</file>
+        <file action="create">tests/v2/integration/test_onnx_export_sam3.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test model-agnostic checkpoint loading with model_family param
+          (2) Test ONNX export valid file for SAM3 (use_stub)
+          (3) Test onnxruntime inference on exported model
+          (4) Test model_family retrieved from MLflow run params
+        </red>
+        <green>Refactor deploy pipeline. Use build_adapter + model_family from params.</green>
+        <verify>pytest + onnxruntime validation</verify>
+        <checkpoint>git commit</checkpoint>
+        <convergence>all 3 gates green</convergence>
+      </tdd>
+      <depends_on>T4, T8</depends_on>
+      <acceptance>Deploy pipeline model-agnostic. SAM3 ONNX exported + validated.</acceptance>
+    </task>
+
+    <task id="T11" title="BentoML model import and service test">
+      <description>BentoML import + service test for SAM3 ONNX model.</description>
+      <files>
+        <file action="create">tests/v2/integration/test_bentoml_serving_sam3.py</file>
+      </files>
+      <depends_on>T10</depends_on>
+      <acceptance>BentoML model imported. Service inference valid. bentofile.yaml generated.</acceptance>
+    </task>
+
+    <task id="T12" title="MONAI Deploy MAP operator test (optional)" type="optional">
+      <description>Verify MAP operator with SAM3. Duck-typed, no SDK needed.</description>
+      <depends_on>T10</depends_on>
+      <acceptance>MAP operator compute() runs on test input.</acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 5: Pipeline Integration + Paper Artifacts                    -->
+  <!-- ================================================================== -->
+  <phase id="P5" name="pipeline-integration" description="Trigger chain + paper artifacts">
+
+    <task id="T13" title="Run trigger chain with SAM3 experiment data">
+      <description>
+        Execute pipeline: data → (train skipped) → analyze → deploy → dashboard.
+        Update trigger chain to accept configurable experiment_id.
+      </description>
+      <depends_on>T7, T8, T10</depends_on>
+      <acceptance>trigger_chain_results.json shows success for all non-skipped flows.</acceptance>
+    </task>
+
+    <task id="T14" title="Generate paper-ready SAM3 comparison artifacts">
+      <description>
+        Comparison tables (LaTeX + MD), training curves, bar charts,
+        gate summary, DynUNet baseline comparison.
+      </description>
+      <depends_on>T13</depends_on>
+      <acceptance>Paper artifacts in outputs/paper_artifacts/. LaTeX compiles.</acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 6: Self-Review + PR                                          -->
+  <!-- ================================================================== -->
+  <phase id="P6" name="self-review" description="Code review, fixes, PR creation">
+
+    <task id="T15" title="Self-review + PR creation">
+      <description>
+        Code quality review: dead code, DRY, error handling, MLflow naming,
+        type safety, pre-commit. Fix any issues with regression tests.
+        Then create PR with full results.
+      </description>
+      <depends_on>T9, T11, T12, T14</depends_on>
+      <acceptance>All tests pass. Pre-commit clean. PR created with results.</acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- DEPENDENCIES                                                       -->
+  <!-- ================================================================== -->
+  <dependencies>
+    <dep from="T1" to="T2"/>
+    <dep from="T1" to="T4"/>
+    <dep from="T1" to="T5"/>
+    <dep from="T2" to="T5"/>
+    <dep from="T1" to="T6"/>
+    <dep from="T2" to="T6"/>
+    <dep from="T3" to="T6"/>
+    <dep from="T4" to="T6"/>
+    <dep from="T6" to="T7"/>
+    <dep from="T7" to="T8"/>
+    <dep from="T8" to="T9"/>
+    <dep from="T4" to="T10"/>
+    <dep from="T8" to="T10"/>
+    <dep from="T10" to="T11"/>
+    <dep from="T10" to="T12"/>
+    <dep from="T7" to="T13"/>
+    <dep from="T8" to="T13"/>
+    <dep from="T10" to="T13"/>
+    <dep from="T13" to="T14"/>
+    <dep from="T9" to="T15"/>
+    <dep from="T11" to="T15"/>
+    <dep from="T12" to="T15"/>
+    <dep from="T14" to="T15"/>
+  </dependencies>
+
+  <critical_path>
+    T1 → T2 → T6 (smoke) → T7 (full training)
+    T7 → T8 (analysis) → T10 (ONNX) → T11 (BentoML)
+    T13 → T14 → T15 (PR)
+  </critical_path>
+
+  <risks>
+    <risk id="R1" severity="high" mitigation="batch_size=1, AMP, reduce patch_size">GPU OOM with SAM3 Hybrid</risk>
+    <risk id="R2" severity="medium" mitigation="Informational-only gates; document random init">Poor results with pretrained=false</risk>
+    <risk id="R3" severity="medium" mitigation="Export 2D model, caller-side slice loop">ONNX export fails for slice-by-slice</risk>
+    <risk id="R4" severity="low" mitigation="Skip T12">MONAI Deploy SDK not installed</risk>
+    <risk id="R5" severity="low" mitigation="CheckpointManager resume">Training crash mid-run</risk>
+    <risk id="R6" severity="medium" mitigation="Merge LoRA weights before ONNX trace">LoRA layers not ONNX-compatible</risk>
+  </risks>
+
+</plan>
