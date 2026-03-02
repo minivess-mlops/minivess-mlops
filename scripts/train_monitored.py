@@ -50,7 +50,7 @@ import torch
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from minivess.adapters.dynunet import DynUNetAdapter
+from minivess.adapters.model_builder import build_adapter
 from minivess.config.compute_profiles import apply_profile, get_compute_profile
 from minivess.config.debug import (
     DEBUG_CACHE_RATE,
@@ -105,6 +105,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     # Training args (same as train.py)
     parser.add_argument("--compute", type=str, default="cpu")
+    parser.add_argument(
+        "--model-family",
+        type=str,
+        default="dynunet",
+        help="Model family name (e.g. dynunet, sam3_vanilla, sam3_topolora, sam3_hybrid)",
+    )
     parser.add_argument("--loss", type=str, default="cbdice_cldice")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
@@ -151,11 +157,24 @@ def _build_configs(
     """Build configuration objects with memory-safe overrides."""
     data_config = DataConfig(dataset_name="minivess", data_dir=args.data_dir)
     arch_params = getattr(args, "architecture_params", None) or {}
+
+    # Model-agnostic: use --model-family to dispatch to correct adapter
+    model_family_str = getattr(args, "model_family", "dynunet")
+    model_family = ModelFamily(model_family_str)
+
+    # Extract LoRA params from architecture_params if present (SAM3 TopoLoRA)
+    lora_rank = arch_params.pop("lora_rank", 16)
+    lora_alpha = arch_params.pop("lora_alpha", 32.0)
+    lora_dropout = arch_params.pop("lora_dropout", 0.1)
+
     model_config = ModelConfig(
-        family=ModelFamily.MONAI_DYNUNET,
-        name="dynunet",
+        family=model_family,
+        name=model_family_str,
         in_channels=1,
         out_channels=2,
+        lora_rank=lora_rank,
+        lora_alpha=lora_alpha,
+        lora_dropout=lora_dropout,
         architecture_params=arch_params,
     )
     training_config = TrainingConfig(
@@ -509,8 +528,8 @@ def run_fold_safe(
         else None,
     )
 
-    # Build model
-    base_model = DynUNetAdapter(model_config)
+    # Build model — model-agnostic via build_adapter() factory
+    base_model = build_adapter(model_config)
 
     if condition and condition.get("wrappers"):
         from minivess.pipeline.condition_builder import build_condition_model
