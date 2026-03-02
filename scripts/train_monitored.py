@@ -42,6 +42,7 @@ import tempfile
 import traceback
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import torch
 
@@ -71,6 +72,7 @@ from minivess.data.splits import (
     load_splits,
     save_splits,
 )
+from minivess.data.transforms import build_train_transforms, build_val_transforms
 from minivess.observability.tracking import ExperimentTracker
 from minivess.pipeline.evaluation import EvaluationRunner, FoldResult
 from minivess.pipeline.inference import SlidingWindowInferenceRunner
@@ -180,7 +182,7 @@ def _build_configs(
     if args.patch_size is not None:
         parts = [int(x) for x in args.patch_size.split("x")]
         if len(parts) == 3:
-            data_config.patch_size = tuple(parts)
+            data_config.patch_size = (parts[0], parts[1], parts[2])
 
     if args.debug:
         apply_debug_overrides(training_config, data_config)
@@ -391,14 +393,33 @@ def run_fold_safe(
     tracker: ExperimentTracker | None = None,
     debug: bool = False,
     log_model_info: bool = False,
+    condition: dict[str, Any] | None = None,
+    precomputed_dir: Path | None = None,
 ) -> dict:
     """Train and evaluate a single fold with memory-safe cache rates.
 
     Identical to train.py's run_fold but with reduced cache_rate values
-    and explicit memory cleanup.
+    and explicit memory cleanup. Supports optional condition-based model
+    wrapping and multi-task auxiliary target loading.
+
+    Parameters
+    ----------
+    condition:
+        Optional condition config dict with 'wrappers' and 'd2c_enabled' keys.
+        When provided, the model and loss are built via condition_builder
+        and auxiliary targets are loaded into the data pipeline.
+    precomputed_dir:
+        Directory containing precomputed auxiliary NIfTI files.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info("=== Fold %d: loss=%s, device=%s ===", fold_id, loss_name, device)
+    cond_name = condition["name"] if condition else "none"
+    logger.info(
+        "=== Fold %d: loss=%s, condition=%s, device=%s ===",
+        fold_id,
+        loss_name,
+        cond_name,
+        device,
+    )
 
     # Optionally limit data for debug
     train_dicts = fold_split.train
@@ -419,20 +440,84 @@ def run_fold_safe(
         len(val_dicts),
     )
 
+    # Resolve auxiliary target configs for multi-task conditions
+    aux_configs = None
+    if condition:
+        for wrapper in condition.get("wrappers", []):
+            if wrapper.get("type") == "multitask":
+                # Build AuxTargetConfig objects for the data pipeline
+                from minivess.data.multitask_targets import AuxTargetConfig
+                from minivess.pipeline.sdf_generation import compute_sdf_from_mask
+
+                _AUX_COMPUTE_FNS: dict[str, Any] = {
+                    "sdf": compute_sdf_from_mask,
+                }
+                try:
+                    from minivess.adapters.centreline_head import (
+                        compute_centreline_distance_map,
+                    )
+
+                    _AUX_COMPUTE_FNS["centerline_dist"] = (
+                        compute_centreline_distance_map
+                    )
+                except ImportError:
+                    pass
+
+                aux_configs = []
+                for head in wrapper.get("auxiliary_heads", []):
+                    gt_key = head.get("gt_key", head["name"])
+                    compute_fn = _AUX_COMPUTE_FNS.get(gt_key)
+                    if compute_fn is not None:
+                        aux_configs.append(
+                            AuxTargetConfig(
+                                name=gt_key,
+                                suffix=gt_key,
+                                compute_fn=compute_fn,
+                            )
+                        )
+                break
+
+        # Apply D2C config from condition
+        if condition.get("d2c_enabled", False):
+            data_config = data_config.model_copy()
+            data_config.d2c_enabled = True
+            data_config.d2c_probability = condition.get("d2c_probability", 0.3)
+
     train_loader = build_train_loader(
         train_dicts,
         data_config,
         batch_size=training_config.batch_size,
         cache_rate=train_cache,
+        transforms=build_train_transforms(
+            data_config,
+            aux_configs=aux_configs,
+            precomputed_dir=precomputed_dir,
+        )
+        if aux_configs
+        else None,
     )
     val_loader = build_val_loader(
         val_dicts,
         data_config,
         cache_rate=val_cache,
+        transforms=build_val_transforms(
+            data_config,
+            aux_configs=aux_configs,
+            precomputed_dir=precomputed_dir,
+        )
+        if aux_configs
+        else None,
     )
 
     # Build model
-    model = DynUNetAdapter(model_config)
+    base_model = DynUNetAdapter(model_config)
+
+    if condition and condition.get("wrappers"):
+        from minivess.pipeline.condition_builder import build_condition_model
+
+        model = build_condition_model(base_model, condition)
+    else:
+        model = base_model
 
     # Log model info on first fold (architecture details + trainable params)
     if log_model_info and tracker is not None:
@@ -442,7 +527,12 @@ def run_fold_safe(
             logger.warning("Failed to log model info", exc_info=True)
 
     # Build loss
-    criterion = build_loss_function(loss_name)
+    if condition and condition.get("wrappers"):
+        from minivess.pipeline.condition_builder import build_condition_loss
+
+        criterion = build_condition_loss(loss_name, condition)
+    else:
+        criterion = build_loss_function(loss_name)
 
     # Build metrics
     metrics = SegmentationMetrics(
@@ -794,6 +884,8 @@ def _run_experiment_inner(
                     tracker=tracker,
                     debug=args.debug,
                     log_model_info=(not _model_info_logged),
+                    condition=getattr(args, "condition", None),
+                    precomputed_dir=getattr(args, "precomputed_dir", None),
                 )
                 _model_info_logged = True
                 fold_results.append(fold_result)

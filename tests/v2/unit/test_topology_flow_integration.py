@@ -21,7 +21,7 @@ class TestAnalysisFlowTopology:
 
     def test_analysis_flow_extracts_per_head_metrics(self) -> None:
         """SDF/CL metrics extracted from MLflow run data."""
-        from minivess.orchestration.analysis_flow import extract_per_head_metrics
+        from minivess.orchestration.topology_helpers import extract_per_head_metrics
 
         run_data = {
             "metrics": {
@@ -42,7 +42,7 @@ class TestAnalysisFlowTopology:
 
     def test_analysis_flow_topology_comparison(self) -> None:
         """Comparison table includes topology metrics."""
-        from minivess.orchestration.analysis_flow import build_topology_comparison
+        from minivess.orchestration.topology_helpers import build_topology_comparison
 
         results = _make_condition_results()
         comparison = build_topology_comparison(results, metric_names=["dice", "cldice"])
@@ -57,7 +57,7 @@ class TestDashboardFlowTopology:
 
     def test_dashboard_flow_multitask_curves(self) -> None:
         """Training curve data for 3 loss components."""
-        from minivess.orchestration.dashboard_flow import (
+        from minivess.orchestration.topology_helpers import (
             extract_multitask_training_curves,
         )
 
@@ -74,7 +74,7 @@ class TestDashboardFlowTopology:
 
     def test_dashboard_flow_graceful_no_multitask(self) -> None:
         """No crash when no multitask runs exist."""
-        from minivess.orchestration.dashboard_flow import (
+        from minivess.orchestration.topology_helpers import (
             build_topology_comparison_data,
         )
 

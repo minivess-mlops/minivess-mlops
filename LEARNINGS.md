@@ -21,3 +21,8 @@ Accumulated discoveries from TDD iterations. Persists across sessions.
 
 - **Discovery**: Multiprocessing DataLoader with num_workers>0 causes fork memory duplication. With 70 cached volumes, each worker duplicates the cache.
 - **Resolution**: Use MONAI ThreadDataLoader with num_workers=0 (main thread). CacheDataset with runtime_cache=True provides progressive caching without init spike.
+
+## 2026-03-02 — MONAI Deploy SDK silently missing (#254)
+- **Discovery**: `monai-deploy-app-sdk` was never added to `pyproject.toml`. The code at `monai_deploy_app.py` uses duck-typed Protocol stubs that pass without the real SDK. Tests pass silently because they test the stubs, not the real SDK.
+- **Root Cause**: Someone implemented the duck-typing fallback as a convenience, then the actual SDK dependency was never installed. No warning is logged when the fallback activates.
+- **Resolution**: Issue #254 opened. Fix: add as optional dependency, log warning on fallback, mark tests with `pytest.mark.skipif` with clear message. Pattern to avoid: never silently bypass a missing dependency — always warn.

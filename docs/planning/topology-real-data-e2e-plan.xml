@@ -1,0 +1,675 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Topology-Aware Segmentation: Real-Data E2E Pipeline Plan (v2 — reviewer-optimized)
+  Branch: test/topology-aware-segmentation-with-real-data
+  Created: 2026-03-02
+
+  Dual mandate:
+    1. Debug training (3 folds x 6 epochs) to verify all 6 topology approaches work
+    2. Improve training scripts to support conditions-based experiment configs
+
+  Crash-resistant: Each task checkpoints on commit. Cold-resume reads tdd-state.json.
+  Progress: GitHub issues track completion; trigger chain JSON tracks runtime.
+
+  Reviewer feedback incorporated:
+    - Added condition-to-model factory (CRITICAL-01/02 from architecture review)
+    - Fixed REQUIRED_FIELDS handling (CRITICAL-03)
+    - Deferred Prefect training flow to separate PR (WARN-08: premature for debug E2E)
+    - Added TDD blocks to all code tasks (TDD violations in T12-T15)
+    - Fixed .npy vs .nii.gz format (T5 acceptance criteria)
+    - T18 skips training, uses existing mlruns (WARN-07: avoid redundant GPU time)
+    - Merged MLflow serving verification into T13 (WARN-06: reduce scope)
+-->
+<plan version="2.1" name="topology-real-data-e2e">
+
+  <metadata>
+    <branch>test/topology-aware-segmentation-with-real-data</branch>
+    <base_branch>main</base_branch>
+    <dataset>minivess (70 volumes, 512x512x5-110, 3-fold CV)</dataset>
+    <model>DynUNet (128 filters, cbdice_cldice loss)</model>
+    <debug_epochs>6</debug_epochs>
+    <debug_folds>3</debug_folds>
+    <conditions>6 (baseline, d2c_only, multitask, multitask_d2c, tffm, full_pipeline)</conditions>
+    <state_file>state/tdd-state.json</state_file>
+    <estimated_gpu_time>90-180 minutes (18 runs x 5-10 min each)</estimated_gpu_time>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 0: Code Cleanup + Dead Code Removal                          -->
+  <!-- ================================================================== -->
+  <phase id="P0" name="code-cleanup" description="Remove dead code, resolve duplicates, ensure clean baseline">
+
+    <task id="T1" title="Consolidate duplicate orchestration stubs">
+      <description>
+        Root-level orchestration/*.py stubs (analysis_flow.py, dashboard_flow.py)
+        duplicate concepts from orchestration/flows/*.py (the real Prefect flows).
+        The stubs have useful helpers (extract_per_head_metrics, build_topology_comparison,
+        extract_multitask_training_curves, build_topology_comparison_data).
+        Move these into the real flows or a shared module, then delete the stubs.
+      </description>
+      <files>
+        <file action="audit">src/minivess/orchestration/analysis_flow.py (1.6 KB stub)</file>
+        <file action="audit">src/minivess/orchestration/dashboard_flow.py (2.0 KB stub)</file>
+        <file action="audit">src/minivess/orchestration/flows/analysis_flow.py (46 KB real)</file>
+        <file action="audit">src/minivess/orchestration/flows/dashboard_flow.py (11 KB real)</file>
+        <file action="create">tests/v2/unit/test_orchestration_helpers.py</file>
+      </files>
+      <tdd>
+        <red>
+          Test imports: extract_per_head_metrics, build_topology_comparison,
+          extract_multitask_training_curves, build_topology_comparison_data
+          are importable from their new canonical location.
+          Test that orchestration/analysis_flow.py and orchestration/dashboard_flow.py
+          no longer exist (FileNotFoundError in import).
+        </red>
+        <green>Move helpers to shared module or real flows, delete stubs</green>
+        <verify>pytest + ruff + grep for broken imports across all test files</verify>
+        <checkpoint>git commit + update tdd-state.json</checkpoint>
+        <convergence>3 gates green, no dead stub files</convergence>
+      </tdd>
+      <acceptance>No duplicate flow files; all imports resolve; 3007+ tests pass</acceptance>
+    </task>
+
+    <task id="T2" title="Audit and test precompute.py">
+      <description>
+        src/minivess/orchestration/precompute.py provides precompute_auxiliary_targets()
+        using AuxTargetConfig. Verify it works with synthetic data. The module saves
+        .nii.gz format (NIfTI), not .npy — all downstream code must expect NIfTI.
+      </description>
+      <files>
+        <file action="audit">src/minivess/orchestration/precompute.py</file>
+        <file action="audit">src/minivess/data/multitask_targets.py</file>
+        <file action="create">tests/v2/unit/test_precompute.py</file>
+      </files>
+      <tdd>
+        <red>
+          Test precompute_auxiliary_targets() with synthetic 32x32x32 binary mask:
+          (1) SDF output has correct shape, negative inside / positive outside
+          (2) Centreline distance output has correct shape, zero on skeleton
+          (3) Idempotency: skip if output files already exist
+          (4) force=True recomputes even if cached
+        </red>
+        <green>Fix any broken imports, ensure NIfTI save/load works</green>
+        <verify>pytest tests/v2/unit/test_precompute.py</verify>
+        <checkpoint>git commit + update tdd-state.json</checkpoint>
+        <convergence>all 3 gates green</convergence>
+      </tdd>
+      <acceptance>precompute.py tested; SDF + centreline distance verified on synthetic data</acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Conditions-Based Experiment Runner                        -->
+  <!-- ================================================================== -->
+  <phase id="P1" name="conditions-runner" description="Extend training to support conditions with wrappers">
+
+    <task id="T3" title="Extend run_experiment.py for conditions-based configs">
+      <description>
+        Current run_experiment.py iterates `losses` list and delegates to train_monitored.py
+        via importlib CLI. The topology config uses `conditions` with `wrappers`.
+
+        Changes needed:
+        1. Relax REQUIRED_FIELDS: accept either `losses` OR `conditions` (not both required)
+        2. Detect conditions key in YAML → dispatch to _run_conditions_experiment()
+        3. _run_conditions_experiment() imports and calls run_fold_safe() directly
+           (NOT via importlib CLI — this is cleaner than adding 10+ CLI args)
+        4. Per-condition CheckpointManager tracking
+        5. D2C config propagation to DataConfig
+      </description>
+      <files>
+        <file action="modify">scripts/run_experiment.py</file>
+        <file action="create">tests/v2/unit/test_conditions_runner.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test conditions YAML with no `losses` key passes load_experiment_config()
+          (2) Test _detect_experiment_mode() returns "conditions" for topology YAML
+          (3) Test _detect_experiment_mode() returns "losses" for legacy YAML
+          (4) Test CheckpointManager.is_condition_complete() tracks per-condition state
+          (5) Test d2c_enabled flag is extracted from condition config
+        </red>
+        <green>
+          Add _detect_experiment_mode(), _run_conditions_experiment().
+          Relax REQUIRED_FIELDS to require `experiment_name` and one of `losses`/`conditions`.
+          Import run_fold_safe() as library function (not CLI delegation).
+        </green>
+        <verify>pytest + ruff + dry-run with topology YAML</verify>
+        <checkpoint>git commit + update tdd-state.json</checkpoint>
+        <convergence>all 3 gates green; dry-run validates 6 conditions</convergence>
+      </tdd>
+      <acceptance>
+        `uv run python scripts/run_experiment.py --config configs/experiments/dynunet_topology_all_approaches.yaml --dry-run`
+        validates all 6 conditions without error.
+      </acceptance>
+    </task>
+
+    <task id="T4" title="Build condition-to-model-and-loss factory">
+      <description>
+        CRITICAL GLUE CODE: The conditions YAML specifies wrappers (tffm, multitask)
+        and D2C config per condition. Need a factory function that takes:
+          - base_model (DynUNetAdapter instance)
+          - condition_config (dict with wrappers, d2c_enabled, etc.)
+          - loss_name (string, e.g. "cbdice_cldice")
+        And returns:
+          - model (possibly wrapped with TFFMWrapper and/or MultiTaskAdapter)
+          - criterion (possibly MultiTaskLoss wrapping base criterion + aux head losses)
+
+        Uses existing apply_wrappers() from model_builder.py.
+        Constructs AuxHeadConfig + AuxHeadLossConfig from YAML auxiliary_heads dicts.
+      </description>
+      <files>
+        <file action="create">src/minivess/pipeline/condition_builder.py</file>
+        <file action="create">tests/v2/unit/test_condition_builder.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test build_condition_model() with baseline (no wrappers) returns same model
+          (2) Test build_condition_model() with tffm wrapper returns TFFMWrapper
+          (3) Test build_condition_model() with multitask wrapper returns MultiTaskAdapter
+          (4) Test build_condition_model() with both wrappers returns nested wrapped model
+          (5) Test build_condition_loss() with baseline returns standard criterion
+          (6) Test build_condition_loss() with multitask returns MultiTaskLoss
+          (7) Test AuxHeadConfig constructed from YAML dict has correct fields
+        </red>
+        <green>
+          Implement build_condition_model(base_model, condition_config) -> nn.Module
+          Implement build_condition_loss(loss_name, condition_config) -> nn.Module
+          Use apply_wrappers() for model wrapping.
+          Construct AuxHeadConfig/AuxHeadLossConfig from YAML auxiliary_heads dicts.
+        </green>
+        <verify>pytest + ruff + mypy on new module</verify>
+        <checkpoint>git commit + update tdd-state.json</checkpoint>
+        <convergence>all 3 gates green</convergence>
+      </tdd>
+      <acceptance>
+        Factory correctly builds all 6 condition variants (baseline, d2c_only,
+        multitask, multitask_d2c, tffm, full_pipeline).
+      </acceptance>
+    </task>
+
+    <task id="T5" title="Create debug experiment config for topology">
+      <description>
+        Create a debug variant of dynunet_topology_all_approaches.yaml with
+        6 epochs and 3 folds. Named dynunet_topology_all_approaches_debug.yaml
+        to avoid collision with existing dynunet_graph_topology_debug.yaml.
+      </description>
+      <files>
+        <file action="create">configs/experiments/dynunet_topology_all_approaches_debug.yaml</file>
+        <file action="create">tests/v2/unit/test_topology_debug_config.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test debug config loads without error
+          (2) Test has 6 conditions (baseline, d2c_only, multitask, multitask_d2c, tffm, full_pipeline)
+          (3) Test has 6 epochs (not 100)
+          (4) Test has 3 folds
+          (5) Test loss is cbdice_cldice
+          (modeled after test_topology_experiment_config.py)
+        </red>
+        <green>Create YAML with all 6 conditions, epochs=6, folds=3</green>
+        <verify>pytest tests/v2/unit/test_topology_debug_config.py</verify>
+        <checkpoint>git commit</checkpoint>
+        <convergence>all 3 gates green</convergence>
+      </tdd>
+      <acceptance>Config loads cleanly; all 6 conditions present with 6-epoch count</acceptance>
+    </task>
+
+    <task id="T6" title="Precompute SDF and centreline distance maps">
+      <description>
+        Multi-task conditions require SDF and centreline distance GT volumes.
+        Build a precompute script that generates these from binary masks and
+        caches them to data/processed/ as NIfTI (.nii.gz) files.
+        Uses existing precompute_auxiliary_targets() from precompute.py.
+        Uses scipy.ndimage.distance_transform_edt + skimage.morphology.skeletonize_3d
+        (Library-First: same functions already used in centreline_extraction.py).
+      </description>
+      <files>
+        <file action="modify">src/minivess/orchestration/precompute.py</file>
+        <file action="create">scripts/precompute_targets.py</file>
+        <file action="create">tests/v2/unit/test_precompute_targets.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test SDF from binary mask: negative inside, positive outside, shape preserved
+          (2) Test centreline distance: zero on skeleton, increases away, shape preserved
+          (3) Test cached file existence check: skip if .nii.gz exists
+          (4) Test CLI script parses --data-dir, --output-dir, --targets args
+        </red>
+        <green>
+          Implement script wrapping precompute_auxiliary_targets().
+          Add CLI interface with argparse.
+        </green>
+        <verify>pytest + run on 1 real volume as smoke test</verify>
+        <checkpoint>git commit + update tdd-state.json</checkpoint>
+        <convergence>all 3 gates green</convergence>
+      </tdd>
+      <depends_on>T2</depends_on>
+      <acceptance>
+        `uv run python scripts/precompute_targets.py --data-dir data/raw/minivess --output-dir data/processed --targets sdf,centerline_dist`
+        generates .nii.gz files. Smoke test: 1 volume produces correct shapes.
+      </acceptance>
+    </task>
+
+    <task id="T7" title="Wire precomputed targets into data pipeline">
+      <description>
+        When a condition uses multitask wrappers, the DataLoader must load
+        precomputed SDF/centerline targets alongside image+label.
+
+        Propagation path:
+          condition YAML -> run_experiment.py -> DataConfig(extra_target_keys=...)
+          -> build_train_transforms() inserts LoadAuxiliaryTargetsd
+          -> RandCropByPosNegLabeld includes aux keys in `keys` list
+          -> batch dict has {image, label, sdf, centerline_dist}
+
+        LoadAuxiliaryTargetsd already exists in src/minivess/data/multitask_targets.py.
+      </description>
+      <files>
+        <file action="audit">src/minivess/data/multitask_targets.py</file>
+        <file action="modify">src/minivess/data/transforms.py</file>
+        <file action="modify">scripts/train_monitored.py</file>
+        <file action="create">tests/v2/unit/test_data_extra_targets.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test DataLoader yields batch with keys: image, label, sdf, centerline_dist
+              when extra_target_keys=["sdf", "centerline_dist"]
+          (2) Test DataLoader yields batch with only image, label when no extra targets
+          (3) Test spatial crops are consistent across all keys (same patch location)
+        </red>
+        <green>
+          Add extra_target_keys to DataConfig or transform builder.
+          Insert LoadAuxiliaryTargetsd into transform chain.
+          Ensure RandCropByPosNegLabeld keys list includes aux keys.
+        </green>
+        <verify>pytest + load 1 real volume with targets as integration check</verify>
+        <checkpoint>git commit + update tdd-state.json</checkpoint>
+        <convergence>all 3 gates green</convergence>
+      </tdd>
+      <depends_on>T6</depends_on>
+      <acceptance>
+        DataLoader yields batch dict with image, label, sdf, centerline_dist keys.
+        All tensors have consistent spatial dimensions within each batch.
+      </acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: Debug Training Execution                                  -->
+  <!-- ================================================================== -->
+  <phase id="P2" name="debug-training" description="Run actual GPU training with all 6 conditions">
+
+    <task id="T8" title="Run precompute on real MiniVess data" type="runtime">
+      <description>
+        Execute precompute_targets.py to generate SDF and centreline distance
+        maps for all 70 MiniVess volumes. Cache in data/processed/.
+        Verify: load one random file and check shape matches source label.
+      </description>
+      <depends_on>T6, T7</depends_on>
+      <acceptance>
+        70 x 2 = 140 .nii.gz files in data/processed/.
+        Verification: random file has correct shape matching source label.
+      </acceptance>
+    </task>
+
+    <task id="T9" title="Smoke test: all 6 conditions for 1 epoch" type="runtime">
+      <description>
+        Before committing to 18 full runs, verify all 6 conditions train
+        for 1 epoch without error. This catches OOM, NaN, and wrapper issues
+        quickly (~20 minutes total).
+        If any condition fails OOM, reduce patch size or skip that condition.
+      </description>
+      <depends_on>T3, T4, T5, T8</depends_on>
+      <acceptance>
+        All 6 conditions complete 1 epoch x 1 fold without OOM or NaN.
+        Peak GPU memory logged per condition.
+        If TFFM or full_pipeline OOM: document in LEARNINGS.md, reduce patch size.
+      </acceptance>
+    </task>
+
+    <task id="T10" title="Execute full debug training (6 conditions x 3 folds x 6 epochs)" type="runtime">
+      <description>
+        Run the complete debug training using the conditions-based experiment runner.
+        Uses dynunet_topology_all_approaches_debug.yaml (6 epochs, 3 folds).
+        CheckpointManager enables crash-resistant resume.
+        Minimum acceptable: 4/6 conditions complete (if TFFM/full_pipeline OOM).
+      </description>
+      <depends_on>T9</depends_on>
+      <acceptance>
+        At least 4/6 conditions x 3 folds completed.
+        MLflow experiment has 12-18 runs with FINISHED status.
+        Training loss decreases across 6 epochs for all completed conditions.
+        Peak GPU memory under 8 GB.
+        No NaN losses.
+      </acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: Analysis + Champion Selection                             -->
+  <!-- ================================================================== -->
+  <phase id="P3" name="analysis" description="Generate topology comparison tables and champion models">
+
+    <task id="T11" title="Run analysis flow on topology experiment results">
+      <description>
+        Execute analysis to:
+        - Extract per-fold metrics from training runs
+        - Compute topology comparison table (conditions x 8 metrics)
+        - Run paired bootstrap tests (P1, P3, P4 predictions)
+        - Tag champion models (balanced, topology, overlap)
+        - Generate comparison figures (PNG + SVG) and tables (MD + LaTeX)
+      </description>
+      <files>
+        <file action="create">scripts/analyze_topology_experiment.py</file>
+        <file action="create">tests/v2/integration/test_analysis_topology.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test comparison table has rows for each completed condition
+          (2) Test champion tags written to MLflow (mock)
+          (3) Test output files exist: topology_comparison.md, topology_comparison.tex
+          (4) Test P1/P3/P4 predictions computed
+        </red>
+        <green>
+          Create analysis script that reads mlruns, builds TopologyComparisonEvaluator,
+          exports tables and figures.
+        </green>
+        <verify>pytest + run with real mlruns data</verify>
+        <checkpoint>git commit + update tdd-state.json</checkpoint>
+        <convergence>all 3 gates green</convergence>
+      </tdd>
+      <depends_on>T10</depends_on>
+      <acceptance>
+        outputs/analysis/topology_comparison.md exists with all completed conditions.
+        outputs/analysis/topology_comparison.tex exists.
+        Champion models tagged in MLflow.
+        P1/P3/P4 prediction results logged.
+      </acceptance>
+    </task>
+
+    <task id="T12" title="MLflow model logging and serving verification">
+      <description>
+        Log topology champion as MLflow pyfunc with:
+        - Correct model signature (3D volume input/output)
+        - Wrapper config preserved in model metadata
+        - Loadable via mlflow.pyfunc.load_model() and predict() works
+
+        Also verify MLflow serving: load_model + predict on test patch.
+      </description>
+      <files>
+        <file action="audit">src/minivess/serving/model_logger.py</file>
+        <file action="audit">src/minivess/serving/mlflow_wrapper.py</file>
+        <file action="create">tests/v2/integration/test_mlflow_serving_topology.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test mlflow.pyfunc.load_model(model_uri) returns a model
+          (2) Test model.predict(input_patch) returns array with shape (1, 2, H, W, D)
+          (3) Test output values in [0, 1] range (softmax probabilities)
+          (4) Test wrapper config preserved in model metadata
+        </red>
+        <green>Implement model logging with correct signature and metadata</green>
+        <verify>pytest integration test</verify>
+        <checkpoint>git commit</checkpoint>
+        <convergence>all 3 gates green</convergence>
+      </tdd>
+      <depends_on>T11</depends_on>
+      <acceptance>
+        MLflow pyfunc model loads and predicts correctly.
+        Output is valid segmentation probabilities with correct shape.
+      </acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: Deploy Flow + Serving Verification                        -->
+  <!-- ================================================================== -->
+  <phase id="P4" name="deploy-serving" description="Export champion to ONNX, verify BentoML serving">
+
+    <task id="T13" title="ONNX export from topology champion">
+      <description>
+        Export topology champion to ONNX. Handle wrapped models:
+        - MultiTaskAdapter: export segmentation head only (strip aux heads)
+        - TFFMWrapper: export if graph ops are ONNX-compatible, else strip
+        - Fallback: export base model only (Risk R3 mitigation)
+      </description>
+      <files>
+        <file action="audit">src/minivess/pipeline/deploy_onnx_export.py</file>
+        <file action="create">tests/v2/integration/test_onnx_export_topology.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test ONNX export produces valid file (onnx.load + onnx.checker.check_model)
+          (2) Test input shape (1, 1, 128, 128, 32), output shape (1, 2, 128, 128, 32)
+          (3) Test file size under 100 MB
+          (4) Test onnxruntime.InferenceSession runs inference on exported model
+          (5) Test MultiTaskAdapter export strips auxiliary heads
+        </red>
+        <green>Implement export handling for wrapped models</green>
+        <verify>pytest + onnxruntime validation</verify>
+        <checkpoint>git commit</checkpoint>
+        <convergence>all 3 gates green</convergence>
+      </tdd>
+      <depends_on>T11</depends_on>
+      <acceptance>
+        ONNX model exported, validated with onnxruntime.
+        Input shape: (1, 1, 128, 128, 32). Output: (1, 2, 128, 128, 32).
+        File size under 100 MB.
+      </acceptance>
+    </task>
+
+    <task id="T14" title="BentoML model import and service test">
+      <description>
+        Import ONNX model into BentoML model store.
+        Verify BentoML service loads and runs inference.
+        Generate bentofile.yaml for deployment.
+      </description>
+      <files>
+        <file action="audit">src/minivess/serving/bento_model_import.py</file>
+        <file action="audit">src/minivess/serving/bento_service.py</file>
+        <file action="create">tests/v2/integration/test_bentoml_serving_topology.py</file>
+      </files>
+      <tdd>
+        <red>
+          (1) Test BentoML import succeeds (model in bentoml.models.list())
+          (2) Test service inference returns valid segmentation output
+          (3) Test bentofile.yaml generated with correct dependencies
+        </red>
+        <green>Orchestrate ONNX-to-BentoML pipeline</green>
+        <verify>pytest integration test</verify>
+        <checkpoint>git commit</checkpoint>
+        <convergence>all 3 gates green</convergence>
+      </tdd>
+      <depends_on>T13</depends_on>
+      <acceptance>
+        BentoML model imported. Service inference returns valid segmentation.
+        bentofile.yaml generated.
+      </acceptance>
+    </task>
+
+    <task id="T15" title="MONAI Deploy MAP operator test (optional)" type="optional">
+      <description>
+        Verify MONAI Deploy MAP operator works with topology champion.
+        Duck-typed operators work without SDK installed.
+        Test operator compute() method with synthetic DataPath.
+      </description>
+      <files>
+        <file action="audit">src/minivess/serving/monai_deploy_app.py</file>
+      </files>
+      <depends_on>T13</depends_on>
+      <acceptance>MAP operator compute() runs without error on test input</acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 5: Pipeline Integration + Paper Artifacts                    -->
+  <!-- ================================================================== -->
+  <phase id="P5" name="pipeline-integration" description="Full pipeline + paper artifacts">
+
+    <task id="T16" title="Run trigger chain: data → (train skipped) → analyze → deploy → dashboard">
+      <description>
+        Execute run_full_pipeline.py using existing mlruns from T10
+        (training skipped to avoid redundant GPU time).
+        Verify remaining 4 flows complete: data, analyze, deploy, dashboard.
+        The training flow is deferred to a separate PR (per WARN-08).
+      </description>
+      <depends_on>T10, T11, T13</depends_on>
+      <acceptance>
+        trigger_chain_results.json shows data/analyze/deploy/dashboard as "success".
+        Training "skipped" (by design).
+        Dashboard report generated with topology comparison section.
+      </acceptance>
+    </task>
+
+    <task id="T17" title="Generate paper-ready topology comparison artifacts">
+      <description>
+        Produce from real training data:
+        - Topology comparison table (LaTeX + Markdown)
+        - Per-condition bar charts
+        - P1/P3/P4 prediction summary
+        - Bootstrap confidence intervals
+      </description>
+      <depends_on>T16</depends_on>
+      <acceptance>
+        outputs/paper_artifacts/ contains topology comparison artifacts.
+        LaTeX table compiles without error.
+        All completed conditions represented in figures.
+      </acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 6: Self-Review + PR                                          -->
+  <!-- ================================================================== -->
+  <phase id="P6" name="self-review" description="Code review, glitch fixing, PR creation">
+
+    <task id="T18" title="Self-review for code quality">
+      <description>
+        Automated code review checking for:
+        - Dead code / unused imports
+        - Duplicate logic between scripts and flows
+        - Missing error handling in GPU training paths
+        - Consistent MLflow param naming
+        - Type safety in condition/wrapper dispatch
+        Any fixes must follow RED-GREEN-VERIFY: write regression test first.
+      </description>
+      <depends_on>T14, T12, T15, T17</depends_on>
+      <acceptance>All identified glitches fixed; tests still pass</acceptance>
+    </task>
+
+    <task id="T19" title="Create PR with full results">
+      <description>
+        Create PR with:
+        - Summary of all conditions' training results
+        - Topology comparison table in PR description
+        - Serving verification status (MLflow, BentoML, MONAI Deploy)
+        - Link to trigger chain results JSON
+      </description>
+      <depends_on>T18</depends_on>
+      <acceptance>PR created with comprehensive description</acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- DEPENDENCY GRAPH                                                   -->
+  <!-- ================================================================== -->
+  <dependencies>
+    <!-- Phase 0: independent cleanup -->
+    <!-- T1, T2 can run in parallel -->
+
+    <!-- Phase 1: conditions runner -->
+    <dep from="T2" to="T6"/>   <!-- precompute audit before script creation -->
+    <dep from="T6" to="T7"/>   <!-- precompute script before data pipeline wiring -->
+
+    <!-- Phase 2: training execution -->
+    <dep from="T3" to="T9"/>   <!-- conditions runner before smoke test -->
+    <dep from="T4" to="T9"/>   <!-- condition factory before smoke test -->
+    <dep from="T5" to="T9"/>   <!-- debug config before smoke test -->
+    <dep from="T7" to="T8"/>   <!-- data pipeline wiring before precompute execution -->
+    <dep from="T8" to="T9"/>   <!-- precompute data before smoke test -->
+    <dep from="T9" to="T10"/>  <!-- smoke test before full debug training -->
+
+    <!-- Phase 3: analysis -->
+    <dep from="T10" to="T11"/> <!-- training complete before analysis -->
+    <dep from="T11" to="T12"/> <!-- analysis before model logging -->
+
+    <!-- Phase 4: deploy -->
+    <dep from="T11" to="T13"/> <!-- analysis/champion before ONNX export -->
+    <dep from="T13" to="T14"/> <!-- ONNX before BentoML -->
+    <dep from="T13" to="T15"/> <!-- ONNX before MONAI Deploy -->
+
+    <!-- Phase 5: integration -->
+    <dep from="T10" to="T16"/> <!-- training data before trigger chain -->
+    <dep from="T11" to="T16"/> <!-- analysis before trigger chain -->
+    <dep from="T13" to="T16"/> <!-- deploy before trigger chain -->
+    <dep from="T16" to="T17"/> <!-- trigger chain before paper artifacts -->
+
+    <!-- Phase 6: review + PR -->
+    <dep from="T12" to="T18"/> <!-- MLflow serving before review -->
+    <dep from="T14" to="T18"/> <!-- BentoML before review -->
+    <dep from="T15" to="T18"/> <!-- MONAI Deploy before review -->
+    <dep from="T17" to="T18"/> <!-- paper artifacts before review -->
+    <dep from="T18" to="T19"/> <!-- review before PR -->
+  </dependencies>
+
+  <!-- ================================================================== -->
+  <!-- CRITICAL PATH                                                      -->
+  <!-- ================================================================== -->
+  <critical_path>
+    T2 → T6 → T7 → T8 (precompute ready)
+    T3, T4, T5 (parallel: conditions infra)
+    T8 + T3 + T4 + T5 → T9 → T10 (training done)
+    T10 → T11 → T13 → T14 (deploy verified)
+    T16 → T17 → T18 → T19 (PR)
+  </critical_path>
+
+  <!-- ================================================================== -->
+  <!-- PARALLELISM OPPORTUNITIES                                          -->
+  <!-- ================================================================== -->
+  <parallel_groups>
+    <group name="phase0">T1, T2 can run in parallel</group>
+    <group name="phase1-infra">T3, T4, T5 can run in parallel (independent code tasks)</group>
+    <group name="phase4-serving">T14, T15 can run in parallel after T13</group>
+    <group name="phase3-4">T12 and T13 can run in parallel after T11</group>
+  </parallel_groups>
+
+  <!-- ================================================================== -->
+  <!-- DEFERRED TO SEPARATE PR                                            -->
+  <!-- ================================================================== -->
+  <deferred>
+    <item reason="WARN-08: premature for debug E2E">
+      Prefect training flow (Flow 2) — wrap training in @flow decorator
+      and register in trigger chain. Requires significant engineering for
+      config passing through the chain's simple callable interface.
+      Better done after conditions-based training proves stable.
+    </item>
+  </deferred>
+
+  <!-- ================================================================== -->
+  <!-- RISK MITIGATION                                                    -->
+  <!-- ================================================================== -->
+  <risks>
+    <risk id="R1" severity="high" mitigation="Reduce patch size or skip condition. Document in LEARNINGS.md">
+      GPU OOM with TFFM or full_pipeline conditions.
+      Smoke test (T9) catches this early. Min acceptable: 4/6 conditions.
+    </risk>
+    <risk id="R2" severity="medium" mitigation="Run for subset of volumes">
+      Precompute targets slow for 70 volumes.
+      Each volume is small (512x512x5-110), should be fast (~1 min/volume).
+    </risk>
+    <risk id="R3" severity="medium" mitigation="Export base model only (strip wrappers)">
+      ONNX export fails for wrapped models (TFFMWrapper graph ops).
+      Fallback: strip wrappers and export base DynUNet only.
+    </risk>
+    <risk id="R4" severity="low" mitigation="Skip T15">
+      MONAI Deploy SDK not installed. Duck-typed operators work without SDK.
+    </risk>
+  </risks>
+
+</plan>

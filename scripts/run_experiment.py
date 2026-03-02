@@ -28,8 +28,15 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 logger = logging.getLogger(__name__)
 
-# Required fields that must be present in the experiment YAML
-REQUIRED_FIELDS: list[str] = ["experiment_name", "model", "losses"]
+# Required fields — 'experiment_name' always required.
+# Legacy configs use 'model' + 'losses'; topology configs use 'conditions'.
+_ALWAYS_REQUIRED: list[str] = ["experiment_name"]
+# At least one of these groups must be present:
+_LOSSES_FIELDS: list[str] = ["model", "losses"]
+_CONDITIONS_FIELDS: list[str] = ["conditions"]
+
+# Kept for backward compatibility — referenced by tests that import it
+REQUIRED_FIELDS: list[str] = _ALWAYS_REQUIRED
 
 # Attempt to import optional adaptive profile dependencies at module level
 # so that unittest.mock.patch("run_experiment.detect_hardware") works correctly.
@@ -44,14 +51,14 @@ try:
 except (ImportError, ModuleNotFoundError):
     _HAS_ADAPTIVE_PROFILES = False
 
-    def detect_hardware() -> Any:
+    def detect_hardware() -> Any:  # type: ignore[misc]
         """Stub: adaptive_profiles module not available."""
         raise ImportError(
             "minivess.config.adaptive_profiles is not installed. "
             "Cannot run hardware detection."
         )
 
-    def compute_adaptive_profile(
+    def compute_adaptive_profile(  # type: ignore[misc]
         budget: Any, dataset_profile: Any, model_name: str = "dynunet"
     ) -> Any:
         """Stub: adaptive_profiles module not available."""
@@ -82,13 +89,61 @@ def load_experiment_config(yaml_path: Path) -> dict[str, Any]:
     with open(yaml_path, encoding="utf-8") as f:
         config: dict[str, Any] = yaml.safe_load(f)
 
-    for field in REQUIRED_FIELDS:
+    # Always-required fields
+    for field in _ALWAYS_REQUIRED:
         if field not in config:
             raise ValueError(
                 f"Missing required field '{field}' in experiment config: {yaml_path}"
             )
 
+    # Must have either losses-based fields OR conditions-based fields
+    has_losses = all(f in config for f in _LOSSES_FIELDS)
+    has_conditions = all(f in config for f in _CONDITIONS_FIELDS)
+    if not has_losses and not has_conditions:
+        raise ValueError(
+            f"Experiment config must have either {_LOSSES_FIELDS} (losses mode) "
+            f"or {_CONDITIONS_FIELDS} (conditions mode): {yaml_path}"
+        )
+
     return config
+
+
+def detect_experiment_mode(config: dict[str, Any]) -> str:
+    """Detect experiment mode from config keys.
+
+    Returns
+    -------
+    ``"conditions"`` if the config has a ``conditions`` key,
+    ``"losses"`` otherwise (legacy mode).
+    """
+    if "conditions" in config:
+        return "conditions"
+    return "losses"
+
+
+def extract_extra_target_keys(condition: dict[str, Any]) -> list[str]:
+    """Extract auxiliary GT target keys from a condition's wrappers.
+
+    For multitask wrappers, returns the ``gt_key`` for each auxiliary head.
+    These keys are needed by the data pipeline to load precomputed targets.
+
+    Parameters
+    ----------
+    condition:
+        Condition config dict with optional ``wrappers`` key.
+
+    Returns
+    -------
+    List of target key names (e.g., ``["sdf", "centerline_dist"]``).
+    """
+    keys: list[str] = []
+    for wrapper in condition.get("wrappers", []):
+        if wrapper.get("type") == "multitask":
+            for head in wrapper.get("auxiliary_heads", []):
+                gt_key = head.get("gt_key", head.get("name", ""))
+                if gt_key:
+                    keys.append(gt_key)
+    return keys
 
 
 def resolve_compute_profile(
@@ -227,6 +282,149 @@ def run_dry_run(config: dict[str, Any]) -> dict[str, Any]:
     return results
 
 
+def _run_single_condition(
+    condition: dict[str, Any],
+    config: dict[str, Any],
+    profile: dict[str, Any],
+) -> dict[str, Any]:
+    """Run training for a single condition across all folds.
+
+    Parameters
+    ----------
+    condition:
+        Condition config dict with 'name', 'wrappers', 'd2c_enabled' keys.
+    config:
+        Full experiment config dict.
+    profile:
+        Resolved compute profile dict.
+
+    Returns
+    -------
+    dict with 'status' key ('completed' or 'failed') and optional 'error'.
+    """
+    import importlib.util
+
+    cond_name = condition["name"]
+    loss_name = config.get("loss", "cbdice_cldice")
+    data_dir = Path(config.get("data_dir", "data/raw"))
+
+    logger.info("Launching condition: %s (loss=%s)", cond_name, loss_name)
+
+    compute = config.get("compute", "cpu")
+    splits_file = config.get("splits_file")
+    if splits_file:
+        splits_path = PROJECT_ROOT / splits_file
+    else:
+        _seed = config.get("seed", 42)
+        _nfolds = config.get("num_folds", 3)
+        splits_path = (
+            PROJECT_ROOT / "configs" / "splits" / f"{_nfolds}fold_seed{_seed}.json"
+        )
+
+    train_argv = [
+        "--compute",
+        profile["name"] if compute != "auto" else "cpu",
+        "--loss",
+        loss_name,
+        "--data-dir",
+        str(data_dir),
+        "--num-folds",
+        str(config.get("num_folds", 3)),
+        "--seed",
+        str(config.get("seed", 42)),
+        "--experiment-name",
+        f"{config.get('experiment_name', 'experiment')}_{cond_name}",
+        "--splits-file",
+        str(splits_path),
+    ]
+    if config.get("max_epochs") is not None:
+        train_argv += ["--max-epochs", str(config["max_epochs"])]
+    if config.get("debug", False):
+        train_argv.append("--debug")
+
+    try:
+        train_script = PROJECT_ROOT / "scripts" / "train_monitored.py"
+        if not train_script.exists():
+            train_script = PROJECT_ROOT / "scripts" / "train.py"
+        if train_script.exists():
+            module_name = train_script.stem
+            spec = importlib.util.spec_from_file_location(module_name, train_script)
+            if spec is not None and spec.loader is not None:
+                train_mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(train_mod)  # type: ignore[union-attr]
+                parsed = train_mod.parse_args(train_argv)
+                if "checkpoint" in config:
+                    parsed.checkpoint_config = config["checkpoint"]
+                if "architecture_params" in config:
+                    parsed.architecture_params = config["architecture_params"]
+                parsed.split_mode = config.get("split_mode", "file")
+                # Pass condition config for model/loss wrapping
+                parsed.condition = condition
+                # Pass precomputed dir for auxiliary targets
+                precomp_dir = Path(config.get("data_dir", "data/raw")) / "precomputed"
+                parsed.precomputed_dir = precomp_dir if precomp_dir.exists() else None
+                train_mod.run_monitored_experiment(parsed)
+        return {"status": "completed"}
+    except Exception as exc:
+        logger.exception("Condition %s FAILED", cond_name)
+        return {"status": "failed", "error": str(exc)}
+
+
+def run_conditions_mode(config: dict[str, Any]) -> dict[str, Any]:
+    """Execute conditions-based experiment (iterate over conditions).
+
+    Parameters
+    ----------
+    config:
+        Experiment config with 'conditions' key.
+
+    Returns
+    -------
+    dict with 'completed' and 'failed' counts plus per-condition results.
+    """
+    conditions: list[dict[str, Any]] = config.get("conditions", [])
+    compute = config.get("compute", "cpu")
+
+    # Resolve compute profile
+    dataset_profile = None
+    try:
+        from minivess.data.profiler import scan_dataset
+
+        data_dir = Path(config.get("data_dir", "data/raw"))
+        dataset_profile = scan_dataset(data_dir)
+    except (ImportError, ModuleNotFoundError, Exception):
+        pass
+
+    profile = resolve_compute_profile(
+        compute, config.get("model_family", "dynunet"), dataset_profile
+    )
+    logger.info("Resolved compute profile: %s", profile["name"])
+
+    completed = 0
+    failed = 0
+    results: dict[str, Any] = {}
+
+    for condition in conditions:
+        cond_name = condition["name"]
+        result = _run_single_condition(condition, config, profile)
+        results[cond_name] = result
+        if result["status"] == "completed":
+            completed += 1
+        else:
+            failed += 1
+            logger.warning(
+                "Condition %s failed: %s", cond_name, result.get("error", "")
+            )
+
+    logger.info(
+        "Conditions experiment complete: %d/%d succeeded",
+        completed,
+        len(conditions),
+    )
+
+    return {"completed": completed, "failed": failed, "results": results}
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -288,7 +486,20 @@ def main(argv: list[str] | None = None) -> None:
         logger.info("Dry run results: %s", results)
         return
 
-    # Resolve compute profile
+    # Dispatch based on experiment mode
+    mode = detect_experiment_mode(config)
+    logger.info("Experiment mode: %s", mode)
+
+    if mode == "conditions":
+        run_conditions_mode(config)
+        return
+
+    # Legacy losses mode
+    _run_losses_mode(config)
+
+
+def _run_losses_mode(config: dict[str, Any]) -> None:
+    """Run legacy losses-based experiment (iterate over loss functions)."""
     data_dir = Path(config.get("data_dir", "data/raw"))
     compute = config.get("compute", "cpu")
 

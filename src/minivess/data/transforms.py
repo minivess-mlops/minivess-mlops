@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from monai.transforms import (
     Compose,
@@ -16,7 +16,10 @@ from monai.transforms import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from minivess.config.models import DataConfig
+    from minivess.data.multitask_targets import AuxTargetConfig
 
 
 def _build_spacing_transform(
@@ -41,12 +44,28 @@ def _build_spacing_transform(
     )
 
 
-def build_train_transforms(config: DataConfig) -> Compose:
-    """Build MONAI training transform chain with spatial augmentation."""
+def build_train_transforms(
+    config: DataConfig,
+    aux_configs: list[AuxTargetConfig] | None = None,
+    precomputed_dir: Path | None = None,
+) -> Compose:
+    """Build MONAI training transform chain with spatial augmentation.
+
+    Parameters
+    ----------
+    config:
+        Data configuration with transform parameters.
+    aux_configs:
+        Optional list of auxiliary target configs for multi-task training.
+        When provided, ``LoadAuxiliaryTargetsd`` is injected after loading
+        and the auxiliary keys are included in all spatial transforms.
+    precomputed_dir:
+        Directory containing precomputed auxiliary NIfTI files.
+    """
     ik, lk = config.image_key, config.label_key
     keys = [ik, lk]
 
-    transforms = [
+    transforms: list[Any] = [
         LoadImaged(keys=keys),
         EnsureChannelFirstd(keys=keys),
     ]
@@ -55,14 +74,34 @@ def build_train_transforms(config: DataConfig) -> Compose:
     if spacing is not None:
         transforms.append(spacing)
 
+    transforms.append(NormalizeIntensityd(keys=ik, nonzero=True))
+
+    # Inject auxiliary target loading after image/label are loaded + normalized
+    aux_keys: list[str] = []
+    if aux_configs:
+        from minivess.data.multitask_targets import LoadAuxiliaryTargetsd
+
+        transforms.append(
+            LoadAuxiliaryTargetsd(
+                label_key=lk,
+                aux_configs=aux_configs,
+                precomputed_dir=precomputed_dir,
+            )
+        )
+        aux_keys = [c.name for c in aux_configs]
+        # Aux targets are raw (D,H,W) arrays — add channel dim for MONAI compat
+        transforms.append(EnsureChannelFirstd(keys=aux_keys, channel_dim="no_channel"))
+
+    # All spatial keys: image + label + any auxiliary targets
+    spatial_keys = keys + aux_keys
+
     transforms.extend(
         [
-            NormalizeIntensityd(keys=ik, nonzero=True),
-            SpatialPadd(keys=keys, spatial_size=config.patch_size),
-            RandRotate90d(keys=keys, prob=0.3, spatial_axes=(0, 1)),
-            RandFlipd(keys=keys, prob=0.3, spatial_axis=0),
-            RandFlipd(keys=keys, prob=0.3, spatial_axis=1),
-            RandFlipd(keys=keys, prob=0.3, spatial_axis=2),
+            SpatialPadd(keys=spatial_keys, spatial_size=config.patch_size),
+            RandRotate90d(keys=spatial_keys, prob=0.3, spatial_axes=(0, 1)),
+            RandFlipd(keys=spatial_keys, prob=0.3, spatial_axis=0),
+            RandFlipd(keys=spatial_keys, prob=0.3, spatial_axis=1),
+            RandFlipd(keys=spatial_keys, prob=0.3, spatial_axis=2),
         ]
     )
 
@@ -84,7 +123,7 @@ def build_train_transforms(config: DataConfig) -> Compose:
 
     transforms.append(
         RandCropByPosNegLabeld(
-            keys=keys,
+            keys=spatial_keys,
             label_key=lk,
             spatial_size=config.patch_size,
             pos=1,
@@ -96,12 +135,26 @@ def build_train_transforms(config: DataConfig) -> Compose:
     return Compose(transforms)
 
 
-def build_val_transforms(config: DataConfig) -> Compose:
-    """Build MONAI validation transform chain (no augmentation)."""
+def build_val_transforms(
+    config: DataConfig,
+    aux_configs: list[AuxTargetConfig] | None = None,
+    precomputed_dir: Path | None = None,
+) -> Compose:
+    """Build MONAI validation transform chain (no augmentation).
+
+    Parameters
+    ----------
+    config:
+        Data configuration with transform parameters.
+    aux_configs:
+        Optional list of auxiliary target configs for multi-task validation.
+    precomputed_dir:
+        Directory containing precomputed auxiliary NIfTI files.
+    """
     ik, lk = config.image_key, config.label_key
     keys = [ik, lk]
 
-    transforms = [
+    transforms: list[Any] = [
         LoadImaged(keys=keys),
         EnsureChannelFirstd(keys=keys),
     ]
@@ -110,13 +163,30 @@ def build_val_transforms(config: DataConfig) -> Compose:
     if spacing is not None:
         transforms.append(spacing)
 
-    transforms.extend(
-        [
-            NormalizeIntensityd(keys=ik, nonzero=True),
-            # DynUNet with 4 levels has 3 stages of 2x downsampling → divisor = 2^3 = 8.
-            # Full-volume validation requires all spatial dims divisible by 8.
-            DivisiblePadd(keys=keys, k=8),
-        ]
+    transforms.append(NormalizeIntensityd(keys=ik, nonzero=True))
+
+    # Inject auxiliary target loading after image/label are loaded
+    aux_keys: list[str] = []
+    if aux_configs:
+        from minivess.data.multitask_targets import LoadAuxiliaryTargetsd
+
+        transforms.append(
+            LoadAuxiliaryTargetsd(
+                label_key=lk,
+                aux_configs=aux_configs,
+                precomputed_dir=precomputed_dir,
+            )
+        )
+        aux_keys = [c.name for c in aux_configs]
+        # Aux targets are raw (D,H,W) arrays — add channel dim for MONAI compat
+        transforms.append(EnsureChannelFirstd(keys=aux_keys, channel_dim="no_channel"))
+
+    spatial_keys = keys + aux_keys
+
+    transforms.append(
+        # DynUNet with 4 levels has 3 stages of 2x downsampling → divisor = 2^3 = 8.
+        # Full-volume validation requires all spatial dims divisible by 8.
+        DivisiblePadd(keys=spatial_keys, k=8),
     )
 
     return Compose(transforms)
