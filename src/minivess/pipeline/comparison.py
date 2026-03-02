@@ -342,6 +342,84 @@ def format_comparison_markdown(table: ComparisonTable) -> str:
     return "\n".join(rows)
 
 
+def format_comparison_latex(table: ComparisonTable) -> str:
+    r"""Format a :class:`ComparisonTable` as a LaTeX booktabs table.
+
+    Produces a ``tabular`` environment with:
+    - ``\toprule``, ``\midrule``, ``\bottomrule`` (booktabs)
+    - Best value per metric column in ``\textbf{}``
+    - Escaped underscores in loss names
+    - NaN values shown as ``N/A``
+
+    Parameters
+    ----------
+    table:
+        Cross-loss comparison table.
+
+    Returns
+    -------
+    str
+        LaTeX-formatted table string.
+    """
+    if not table.losses:
+        return "% No results to display."
+
+    metrics = table.metric_names
+
+    # Find best value per metric (highest mean)
+    best_per_metric: dict[str, float] = {}
+    for metric_name in metrics:
+        best_val = float("-inf")
+        for lr in table.losses:
+            summary = lr.metrics.get(metric_name)
+            if (
+                summary is not None
+                and not np.isnan(summary.mean)
+                and summary.mean > best_val
+            ):
+                best_val = summary.mean
+        best_per_metric[metric_name] = best_val
+
+    # Build table
+    col_spec = "l" + "c" * len(metrics)
+    lines: list[str] = [
+        rf"\begin{{tabular}}{{{col_spec}}}",
+        r"\toprule",
+    ]
+
+    # Header row
+    escaped_metrics = [m.replace("_", r"\_") for m in metrics]
+    header = "Loss & " + " & ".join(escaped_metrics) + r" \\"
+    lines.append(header)
+    lines.append(r"\midrule")
+
+    # Data rows
+    for lr in table.losses:
+        escaped_name = lr.loss_name.replace("_", r"\_")
+        cells: list[str] = [escaped_name]
+        for metric_name in metrics:
+            summary = lr.metrics.get(metric_name)
+            if summary is None or np.isnan(summary.mean):
+                cells.append("N/A")
+            else:
+                formatted = f"{summary.mean:.4f} $\\pm$ {summary.std:.4f}"
+                if (
+                    best_per_metric.get(metric_name, float("-inf")) != float("-inf")
+                    and abs(summary.mean - best_per_metric[metric_name]) < 1e-10
+                ):
+                    # Bold just the mean, keep ± std normal
+                    formatted = (
+                        rf"\textbf{{{summary.mean:.4f}}} $\pm$ {summary.std:.4f}"
+                    )
+                cells.append(formatted)
+        lines.append(" & ".join(cells) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+
+    return "\n".join(lines)
+
+
 def holm_bonferroni_correction(
     p_values: list[float],
     alpha: float = 0.05,
