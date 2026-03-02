@@ -51,5 +51,9 @@ docs/snapshots/*.zip
 
 # IDE
 .vscode/
-outputs/**/*.onnx
+
+# Model artifacts — belong in MLflow/BentoML registries, not git
+*.onnx
+
+# DuckDB databases — regenerable from mlruns via scripts/export_duckdb_parquet.py
 outputs/**/*.duckdb
