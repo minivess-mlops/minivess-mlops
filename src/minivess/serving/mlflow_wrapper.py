@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class _SimpleNet(nn.Module):
+class _SimpleNet(nn.Module):  # type: ignore[misc]
     """Minimal feedforward network matching _MockNet's architecture.
 
     This is used to load checkpoints that were saved from simple test
@@ -59,26 +59,30 @@ class _SimpleNet(nn.Module):
 def _build_net_from_config(config: dict[str, Any]) -> nn.Module:
     """Build a network from a model config dict.
 
-    Tries the full ModelAdapter first; falls back to _SimpleNet
-    for test/debug checkpoints.
+    Model-agnostic: dispatches via ``build_adapter()`` for any known
+    model family. Falls back to ``_SimpleNet`` for unknown families
+    or test/debug checkpoints.
     """
     family = config.get("family", "")
 
-    if family == "dynunet":
+    if family:
         try:
-            from minivess.adapters.dynunet import DynUNetAdapter
+            from minivess.adapters.model_builder import build_adapter
             from minivess.config.models import ModelConfig, ModelFamily
 
             model_config = ModelConfig(
-                family=ModelFamily.MONAI_DYNUNET,
-                name=config.get("name", "dynunet-default"),
+                family=ModelFamily(family),
+                name=config.get("name", family),
                 in_channels=config.get("in_channels", 1),
                 out_channels=config.get("out_channels", 2),
                 architecture_params=config.get("architecture_params", {}),
             )
-            return DynUNetAdapter(model_config)
+            return build_adapter(model_config)
         except Exception:
-            logger.debug("Could not build DynUNetAdapter, falling back to _SimpleNet")
+            logger.debug(
+                "Could not build adapter for family=%s, falling back to _SimpleNet",
+                family,
+            )
 
     # Fallback for test/debug checkpoints
     return _SimpleNet(out_channels=config.get("out_channels", 2))
