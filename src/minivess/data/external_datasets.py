@@ -268,15 +268,21 @@ def discover_external_test_pairs(
         logger.warning("Data directory does not exist: %s", data_dir)
         return []
 
+    # Support both standard (images/labels) and Medical Decathlon (imagesTr/labelsTr)
     images_dir = data_dir / "images"
     labels_dir = data_dir / "labels"
 
     if not images_dir.is_dir():
-        logger.warning("No images/ subdirectory in %s", data_dir)
+        # Fall back to Medical Decathlon convention
+        images_dir = data_dir / "imagesTr"
+        labels_dir = data_dir / "labelsTr"
+
+    if not images_dir.is_dir():
+        logger.warning("No images/ or imagesTr/ subdirectory in %s", data_dir)
         return []
 
     if not labels_dir.is_dir():
-        logger.warning("No labels/ subdirectory in %s", data_dir)
+        logger.warning("No labels/ or labelsTr/ subdirectory in %s", data_dir)
         return []
 
     # Collect all image files
