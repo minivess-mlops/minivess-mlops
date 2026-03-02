@@ -158,3 +158,28 @@ class TestExtractExtraTargetKeys:
         keys = extract_extra_target_keys(condition)
         assert "sdf" in keys
         assert "centerline_dist" in keys
+
+
+class TestDebugConfigFile:
+    """Test the actual debug YAML config file loads correctly."""
+
+    def test_debug_config_loads(self) -> None:
+        """dynunet_topology_all_approaches_debug.yaml loads as conditions mode."""
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, "scripts")
+        from run_experiment import detect_experiment_mode, load_experiment_config
+
+        config_path = Path(
+            "configs/experiments/dynunet_topology_all_approaches_debug.yaml"
+        )
+        if not config_path.exists():
+            import pytest
+
+            pytest.skip("Debug config not found")
+
+        config = load_experiment_config(config_path)
+        assert detect_experiment_mode(config) == "conditions"
+        assert len(config["conditions"]) == 6
+        assert config["max_epochs"] == 6
