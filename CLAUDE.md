@@ -32,6 +32,31 @@ feature, every configuration, every automation should be evaluated against this 
    - Flow 4: Deployment (core)
    - Flow 5: Dashboard & Reporting (best-effort — paper figures, Parquet export, drift reports)
 
+### Reproducibility via Real-Data E2E Pipeline (Verified 2026-03-02)
+
+The quasi-E2E pipeline has been verified end-to-end with **real data** — not mocks.
+All 5 flows produce real artifacts from real MiniVess experiments (70 volumes, 4 losses,
+3 folds, 100 epochs). The `PipelineTriggerChain` (in `src/minivess/orchestration/trigger.py`)
+runs: data → train(skip) → analyze → deploy → dashboard, producing 35+ verified artifacts.
+
+**Key scripts** (all in `scripts/`):
+- `run_full_pipeline.py` — Full trigger chain, all flows in sequence
+- `verify_all_artifacts.py` — 73 validation checks (JSON, PNG, Parquet, DuckDB, ONNX)
+- `assemble_paper_artifacts.py` — 25 paper-ready figures/tables/data with LaTeX commands
+- `tag_champions.py` — Champion tagging from real MLflow experiments
+- `generate_real_figures.py` — Figures from real ComparisonTable data
+- `export_duckdb_parquet.py` — DuckDB + Parquet from real mlruns
+
+**Artifact locations** (committed in `outputs/`):
+- `outputs/analysis/` — Figures (PNG+SVG), comparison tables (MD+TEX)
+- `outputs/paper_artifacts/` — Paper-ready assembled artifacts
+- `outputs/duckdb/parquet/` — Parquet exports (DuckDB files gitignored — regenerable)
+- `outputs/pipeline/trigger_chain_results.json` — Chain status proof
+
+**Gitignored artifacts** (belong in registries, not git):
+- `*.onnx` — ONNX models belong in MLflow model registry / BentoML store
+- `outputs/**/*.duckdb` — Regenerable via `scripts/export_duckdb_parquet.py`
+
 ### Multi-Environment Compute
 Everything must work identically on:
 - Local workstation (single GPU, limited RAM)
