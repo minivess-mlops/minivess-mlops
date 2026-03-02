@@ -63,15 +63,34 @@ def build_train_transforms(config: DataConfig) -> Compose:
             RandFlipd(keys=keys, prob=0.3, spatial_axis=0),
             RandFlipd(keys=keys, prob=0.3, spatial_axis=1),
             RandFlipd(keys=keys, prob=0.3, spatial_axis=2),
-            RandCropByPosNegLabeld(
-                keys=keys,
-                label_key=lk,
-                spatial_size=config.patch_size,
-                pos=1,
-                neg=1,
-                num_samples=4,
-            ),
         ]
+    )
+
+    # D2C augmentation: operates on full volumes before random cropping
+    if config.d2c_enabled:
+        from minivess.data.disconnect_augmentation import DisconnectToConnectd
+
+        transforms.append(
+            DisconnectToConnectd(
+                keys=[ik],
+                label_key=lk,
+                prob=config.d2c_probability,
+                mode=config.d2c_mode,
+                max_segment_length=config.d2c_max_segment_length,
+                max_junctions=config.d2c_max_junctions,
+                dilation_radius=config.d2c_dilation_radius,
+            )
+        )
+
+    transforms.append(
+        RandCropByPosNegLabeld(
+            keys=keys,
+            label_key=lk,
+            spatial_size=config.patch_size,
+            pos=1,
+            neg=1,
+            num_samples=4,
+        ),
     )
 
     return Compose(transforms)
