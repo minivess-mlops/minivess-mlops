@@ -103,6 +103,9 @@ agents = [
     "braintrust>=0.0.180,<1.0",
     "litellm>=1.56,<2.0",
 ]
+sam = [
+    "sam2>=1.0,<2.0",
+]
 serving = [
     "bentoml>=1.4,<2.0",
     "onnxruntime>=1.20,<2.0",
@@ -216,6 +219,7 @@ module = [
     "MetricsReloaded.*",
     "scipy.*",
     "nibabel.*",
+    "sam2.*",
     "prefect.*",
     "pandas.*",
     "yaml.*",
