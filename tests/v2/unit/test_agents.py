@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # T1: Training graph
 # ---------------------------------------------------------------------------
@@ -145,6 +147,14 @@ class TestComparisonGraph:
 # ---------------------------------------------------------------------------
 
 
+_litellm_missing = False
+try:
+    import litellm  # noqa: F401
+except ImportError:
+    _litellm_missing = True
+
+
+@pytest.mark.skipif(_litellm_missing, reason="litellm not installed")
 class TestLLMWrapper:
     """Test LiteLLM provider abstraction."""
 
