@@ -156,6 +156,7 @@ class Sam3Backbone(nn.Module):  # type: ignore[misc]
         self._embed_dim = SAM3_EMBED_DIM
         self._fpn_dim = SAM3_FPN_DIM
         self._frozen = freeze
+        self._use_stub = use_stub
 
         self.encoder: nn.Module
         self.fpn_neck: nn.Module
@@ -247,13 +248,16 @@ class Sam3Backbone(nn.Module):  # type: ignore[misc]
         """Preprocess input for SAM3.
 
         Handles grayscale→3ch expansion, resize to 1008, and normalization.
+        Stub mode skips the expensive 1008x1008 resize to save VRAM.
         """
         # Grayscale → 3-channel
         if x.shape[1] == 1:
             x = x.expand(-1, 3, -1, -1)
 
-        # Resize to SAM3 input size
-        if x.shape[2] != SAM3_INPUT_SIZE or x.shape[3] != SAM3_INPUT_SIZE:
+        # Resize to SAM3 input size (skip for stub — saves VRAM)
+        if not self._use_stub and (
+            x.shape[2] != SAM3_INPUT_SIZE or x.shape[3] != SAM3_INPUT_SIZE
+        ):
             x = F.interpolate(
                 x,
                 size=(SAM3_INPUT_SIZE, SAM3_INPUT_SIZE),
