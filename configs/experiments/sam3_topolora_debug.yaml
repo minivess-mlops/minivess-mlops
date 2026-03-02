@@ -8,7 +8,7 @@ data_dir: data/raw/minivess
 num_folds: 3
 max_epochs: 6
 seed: 42
-debug: true
+debug: false
 split_mode: file
 splits_file: configs/splits/3fold_seed42.json
 memory_limit_gb: 24
