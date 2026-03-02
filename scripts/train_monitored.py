@@ -569,6 +569,11 @@ def run_fold_safe(
 
     # Build trainer — use sliding window inference for validation
     # because full 512x512xZ volumes don't fit in 8 GB VRAM
+    # SAM3 models need sw_batch_size=1 to avoid OOM during sliding window
+    # (each patch does slice-by-slice 1008x1008 processing)
+    _is_sam3 = model_config.family.value.startswith("sam3_")
+    _sw_bs = 1 if _is_sam3 else 4
+
     trainer = SegmentationTrainer(
         model,
         training_config,
@@ -577,6 +582,7 @@ def run_fold_safe(
         metrics=metrics,
         criterion=criterion,
         val_roi_size=data_config.patch_size,
+        sw_batch_size=_sw_bs,
     )
 
     # Create checkpoint directory
@@ -614,6 +620,7 @@ def run_fold_safe(
             roi_size=data_config.patch_size,
             num_classes=model_config.out_channels,
             overlap=0.25 if not debug else 0.0,
+            sw_batch_size=_sw_bs,
         )
 
         # MEMORY FIX: Rebuild val_loader with reduced cache for inference

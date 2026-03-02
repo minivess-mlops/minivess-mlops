@@ -126,6 +126,7 @@ class SegmentationTrainer:
         optimizer: torch.optim.Optimizer | None = None,
         scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
         val_roi_size: tuple[int, int, int] | None = None,
+        sw_batch_size: int = 4,
     ) -> None:
         self.model = model
         self.config = config
@@ -134,6 +135,7 @@ class SegmentationTrainer:
         self.tracker = tracker
         self.metrics = metrics
         self.val_roi_size = val_roi_size
+        self.sw_batch_size = sw_batch_size
 
         self.criterion = (
             criterion if criterion is not None else build_loss_function(loss_name)
@@ -313,7 +315,7 @@ class SegmentationTrainer:
                     logits = sliding_window_inference(
                         images,
                         roi_size=self.val_roi_size,
-                        sw_batch_size=4,
+                        sw_batch_size=self.sw_batch_size,
                         predictor=_model_fn,
                         overlap=0.25,
                     )
