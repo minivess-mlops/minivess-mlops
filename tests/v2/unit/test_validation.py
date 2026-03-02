@@ -6,6 +6,18 @@ import numpy as np
 import pandas as pd
 import pytest
 
+_pandera_missing = False
+try:
+    import pandera  # noqa: F401
+except ImportError:
+    _pandera_missing = True
+
+_whylogs_missing = False
+try:
+    import whylogs  # noqa: F401
+except ImportError:
+    _whylogs_missing = True
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -69,6 +81,7 @@ def valid_annotation_quality() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(_pandera_missing, reason="pandera not installed")
 class TestNiftiMetadataSchema:
     """Test NIfTI metadata Pandera schema validation."""
 
@@ -111,6 +124,7 @@ class TestNiftiMetadataSchema:
             NiftiMetadataSchema.validate(bad)
 
 
+@pytest.mark.skipif(_pandera_missing, reason="pandera not installed")
 class TestTrainingMetricsSchema:
     """Test training metrics Pandera schema validation."""
 
@@ -137,6 +151,7 @@ class TestTrainingMetricsSchema:
             TrainingMetricsSchema.validate(bad)
 
 
+@pytest.mark.skipif(_pandera_missing, reason="pandera not installed")
 class TestAnnotationQualitySchema:
     """Test annotation quality Pandera schema validation."""
 
@@ -330,6 +345,7 @@ class TestDeepchecksConfig:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(_whylogs_missing, reason="whylogs not installed")
 class TestWhylogsProfiler:
     """Test whylogs profiling integration."""
 
@@ -389,6 +405,7 @@ class TestWhylogsProfiler:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(_pandera_missing, reason="pandera not installed")
 class TestValidationGates:
     """Test fail-fast validation gate functions."""
 

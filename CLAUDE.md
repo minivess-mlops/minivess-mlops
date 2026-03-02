@@ -21,7 +21,16 @@ feature, every configuration, every automation should be evaluated against this 
    not hardcoded. Pre-training validation ensures patches fit all volumes.
 6. **Transparent automation** — Every automatic decision is logged and overridable via YAML
 7. **Portfolio-grade code** — Every component demonstrates production ML engineering
-8. **Division of labor via Prefect** — Prefect flows are **required** (not optional),
+8. **Task-agnostic multi-task architecture** — Multi-task learning (auxiliary heads,
+   multi-task losses, per-head metrics) is a GENERIC framework configured via YAML,
+   NOT hardcoded to any specific set of tasks. The platform supports arbitrary
+   auxiliary heads (regression, classification, segmentation) via config. Specific
+   tasks (SDF edge detection, centerline extraction, artery/vein classification,
+   junction detection, disease classification, survival analysis, etc.) are
+   instantiations of the framework, not architectural decisions. **NEVER hardcode
+   task-specific logic** into the multi-task infrastructure — all task semantics
+   come from config files.
+9. **Division of labor via Prefect** — Prefect flows are **required** (not optional),
    separating concerns into 5 persona-based flows even for solo researchers. Each flow
    is independently testable, resumable, cacheable, and uses MLflow as the inter-flow
    contract. The first 4 flows are **core** (always run); the 5th is **best-effort**
@@ -31,6 +40,31 @@ feature, every configuration, every automation should be evaluated against this 
    - Flow 3: Model Analysis (core)
    - Flow 4: Deployment (core)
    - Flow 5: Dashboard & Reporting (best-effort — paper figures, Parquet export, drift reports)
+
+### Reproducibility via Real-Data E2E Pipeline (Verified 2026-03-02)
+
+The quasi-E2E pipeline has been verified end-to-end with **real data** — not mocks.
+All 5 flows produce real artifacts from real MiniVess experiments (70 volumes, 4 losses,
+3 folds, 100 epochs). The `PipelineTriggerChain` (in `src/minivess/orchestration/trigger.py`)
+runs: data → train(skip) → analyze → deploy → dashboard, producing 35+ verified artifacts.
+
+**Key scripts** (all in `scripts/`):
+- `run_full_pipeline.py` — Full trigger chain, all flows in sequence
+- `verify_all_artifacts.py` — 73 validation checks (JSON, PNG, Parquet, DuckDB, ONNX)
+- `assemble_paper_artifacts.py` — 25 paper-ready figures/tables/data with LaTeX commands
+- `tag_champions.py` — Champion tagging from real MLflow experiments
+- `generate_real_figures.py` — Figures from real ComparisonTable data
+- `export_duckdb_parquet.py` — DuckDB + Parquet from real mlruns
+
+**Artifact locations** (committed in `outputs/`):
+- `outputs/analysis/` — Figures (PNG+SVG), comparison tables (MD+TEX)
+- `outputs/paper_artifacts/` — Paper-ready assembled artifacts
+- `outputs/duckdb/parquet/` — Parquet exports (DuckDB files gitignored — regenerable)
+- `outputs/pipeline/trigger_chain_results.json` — Chain status proof
+
+**Gitignored artifacts** (belong in registries, not git):
+- `*.onnx` — ONNX models belong in MLflow model registry / BentoML store
+- `outputs/**/*.duckdb` — Regenerable via `scripts/export_duckdb_parquet.py`
 
 ### Multi-Environment Compute
 Everything must work identically on:
@@ -82,6 +116,51 @@ Everything must work identically on:
 6. **Paths** — Always use `pathlib.Path()`, never string concatenation.
 7. **Timezone** — Always use `datetime.now(timezone.utc)`, never `datetime.now()`.
 8. **`from __future__ import annotations`** — At the top of every Python file.
+9. **Task-Agnostic Architecture (Non-Negotiable)** — This is an MLOps platform, NOT a
+   single-use-case repo. NEVER hardcode specific task assumptions (e.g., "SDF + centerline")
+   into infrastructure code. Multi-task adapters, losses, metrics, and data pipelines must
+   be GENERIC and config-driven. Specific tasks are YAML config instantiations, not code.
+   If you find yourself writing `if task_name == "sdf":` in infrastructure code, you are
+   doing it wrong. Use registries, config-driven dispatch, and duck typing instead.
+10. **Verify Models Beyond Knowledge Cutoff (Non-Negotiable)** — When a model, library,
+   or API is near or beyond the training knowledge cutoff, ALWAYS perform a web search
+   to verify it exists, get the correct version/API, and confirm the package name BEFORE
+   writing any code. If the user provides URLs (arXiv, GitHub, docs), ALWAYS fetch them
+   first. **SAMv3 = Meta's Segment Anything Model 3** (github.com/facebookresearch/sam3,
+   Nov 2025), NOT SAM2. See `.claude/metalearning/2026-03-02-sam3-implementation-fuckup.md`.
+11. **Plans Are Not Infallible** — When a plan says "ModelX" but CLAUDE.md says "ModelY",
+    or the plan contradicts the user's original prompt, STOP and clarify with the user
+    before implementing. Cross-reference plans with CLAUDE.md, literature reports, and
+    user history. The plan is a derivative; the user's instructions are the source of truth.
+12. **Never Confabulate (Non-Negotiable)** — Never construct post-hoc rationalizations
+    for naming inconsistencies, knowledge gaps, or ambiguities. If something doesn't add
+    up, say "I'm not sure, let me check" and use web search or ask the user. Confident-
+    sounding fabrication is the most dangerous failure mode — it wastes hours of work
+    and erodes trust. Admitting ignorance costs 5 seconds; confabulation costs hours.
+13. **Read Context Before Implementing** — Before implementing any plan, read the
+    literature report / research doc that produced the plan. The plan is a derivative;
+    the source document has the ground truth. When resuming work from a previous session,
+    read the original user prompts / literature reports, not just the generated plan.
+14. **Persist All Learnings (Non-Negotiable)** — Terminal output is ephemeral. Every
+    corrective insight, self-reflection, or failure analysis MUST be saved to durable
+    locations: metalearning docs (`.claude/metalearning/`), CLAUDE.md, and/or memory
+    files. If it's not written to a file, it's not learned. Never print self-reflection
+    to terminal without also persisting it.
+15. **Write Requested Artifacts to Disk** — When the user explicitly asks for a file
+    to be saved at a specific path (e.g., "save the XML plan to `docs/planning/foo.xml`"),
+    ALWAYS write it to disk using the Write tool. Never leave requested artifacts only
+    in conversation context or plan files. If unsure whether a file was requested, re-read
+    the user's original prompt.
+
+## What AI Must NEVER Do (Extended)
+
+- Confabulate explanations for knowledge gaps instead of web-searching
+- Follow a plan that contradicts CLAUDE.md or the user's explicit instructions
+- Implement models beyond knowledge cutoff without web-searching first
+- Print self-reflection or corrective insights only to terminal without persisting to files
+- Ignore user-provided URLs (arXiv, GitHub) — always fetch them for context
+- Hardcode specific task names (SDF, centerline, etc.) into multi-task infrastructure —
+  use config-driven registries. This is an MLOps platform for ALL segmentation research.
 
 ## TDD Workflow (Non-Negotiable)
 
@@ -171,6 +250,8 @@ minivess-mlops/
 - Commit secrets, credentials, or API keys
 - Modify files marked with `# AIDEV-IMMUTABLE`
 - Push untested changes
+- Hardcode specific task names (SDF, centerline, etc.) into multi-task infrastructure —
+  use config-driven registries. This is an MLOps platform for ALL segmentation research.
 
 ## Observability Stack
 

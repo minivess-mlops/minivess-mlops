@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("great_expectations", reason="great_expectations not installed")
+
 import pandas as pd
 
 # ---------------------------------------------------------------------------

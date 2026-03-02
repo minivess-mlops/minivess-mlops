@@ -1,0 +1,1360 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Topology-Aware 3D Segmentation: Executable Implementation Plan (v2)
+  Branch: feat/advanced-topological-segmentation
+  Literature Report: docs/planning/topology-aware-segmentation-literature-research-report.md
+  Date: 2026-03-02
+  Revision: v2 — Post reviewer iteration (3 parallel reviewers: crash-resistance,
+    technical feasibility, scope/prioritization). Fixes 5 CRITICAL + 11 MAJOR issues.
+-->
+<plan version="2.0" name="topology-aware-3d-segmentation">
+
+  <!-- ================================================================== -->
+  <!-- USER PROMPT (VERBATIM)                                              -->
+  <!-- ================================================================== -->
+  <user_prompt><![CDATA[
+After completion of the literature research report, we need to create /home/petteri/Dropbox/github-personal/minivess-mlops/docs/planning/topology-aware-segmentation-executable-plan.xml for actually implementing then the advanced topology aware option (or 2-3 options if you think so) for this project. We need to implement this with the self-learning TDD coder Skill then. Remember to create the Issues for each of the task that we are addressing that we are then closing when successfully executing the tasks! Is this clear? Let's optimize the XML plan with reviewer agents for crash-resistant plan execution with the full context and progress tracking.  And check the parallel branch feat/sam3-variants which is implementing all the SAMv3 variants already so in this branch we DO NOT implement any SAMv3 variant as they are being implemented as we speak on another Claude Code session running now! And yes, we need to use only models that handle the topology in 3D and connectedness as very easily thinks are not connected on 2D slices whereas they are in 3D. Implementing any 2D methods do not make any sense. We can use this research report obviously as a base for discussion then in the peer-review submission's discussion section as in what other models are possible if "lifted to 3D". Save my prompt verbatim to this .xml plan first and then continue! And this report and the XML plan should not be committed to feat/sam3-variants as that is the SAMv3 parallel branch to this branch!
+
+
+--- Additional user directives (provided during plan creation) ---
+
+"See also .claude/metalearning/ to avoid repeating any previous failures"
+
+"And we can indeed modify the Prefect Data Flow also that it precomputes SDF or UDF for the volumes if certain methods require it, lack of precomputed SDF/UDF currently in our repo is not a reason to skip an implementation to the Prefect Modelling Flow! Remember this, and update the plan with this notion"
+
+"And include in the plan any other blockers across the whole e2e pipeline for all the available Prefect Flows if needed? like what is that missing ONNX export task?"
+
+"And we definitely should be supporting multi-task losses so the overly simplistic criterion(logits, labels) must be then upgraded"
+
+"it is not unrealistic at all for vascular segmentation to have three tasks: 1) segmentation, 2) edge detection, 3) centerline extraction"
+
+"well you could have a regression task with the SDF to the edges or the centerline (as these could both be provided easily as ground truths extracted from binary mask)"
+
+"And then you could have even more tasks such as classifying arteries from vein, detection vessel junctions (graph nodes), right? So you could have a ton of different tasks and architecture should support whatever ideas people might have in this space without us being very opinionated what those specific tasks might be. We are building a MLOps architecture that should accommodate all imaginable segmentation ideas that people have? E.g. someone might have a downstream tasks as well? multi-task learning with segmentation and disease classification from the vessel segmentation? Segmentation informing survival analysis? Segmentation used in some precision medicine framework! No opinionated architecture decisions, aim for highest flexibility. the segmentation/edge detection/centerline extraction was JUST AN EXAMPLE! Is this clear?"
+  ]]></user_prompt>
+
+  <!-- ================================================================== -->
+  <!-- REVIEWER FIXES APPLIED (v2)                                         -->
+  <!-- ================================================================== -->
+  <reviewer_fixes>
+    <fix id="C1" severity="CRITICAL" source="crash-resistance-reviewer + user-override">
+      MultiTaskLoss signature (dict, dict) was incompatible with trainer's
+      criterion(logits, labels) contract. REVIEWER suggested workaround with
+      adapter attribute caching. USER OVERRIDE: "we definitely should be
+      supporting multi-task losses so the overly simplistic criterion(logits,
+      labels) must be then upgraded." FIX: Upgrade trainer to pass full
+      SegmentationOutput + batch dict to criterion when multi-task is enabled.
+      This is a proper architectural upgrade, not a workaround.
+    </fix>
+    <fix id="C2" severity="CRITICAL" source="technical-feasibility-reviewer">
+      Multi-task target nested dict broke batch["label"] and default collation.
+      FIX: Use separate MONAI dictionary keys ("sdf", "centerline_dist") as
+      top-level entries. Extend spatial transform keys= lists to include them.
+    </fix>
+    <fix id="C3" severity="CRITICAL" source="crash-resistance-reviewer">
+      src/minivess/config/training.py does not exist. FIX: Changed to
+      src/minivess/config/models.py (where TrainingConfig/DataConfig live).
+    </fix>
+    <fix id="C4" severity="CRITICAL" source="crash-resistance-reviewer">
+      T9 and T13 both modified models.py ModelFamily enum in parallel.
+      FIX: Added T13 dependency on T9 to serialize enum modifications.
+    </fix>
+    <fix id="C5" severity="CRITICAL" source="crash-resistance-reviewer">
+      Execution order had 5 groups but dependency graph requires 7.
+      FIX: Corrected to 7 sequential groups.
+    </fix>
+    <fix id="M1" severity="MAJOR" source="technical-feasibility-reviewer + user-direction">
+      SDF/centerline GT was computed AFTER spatial augmentations. FIX: Now
+      precomputed in Prefect Data Engineering Flow (Flow 1) and saved as
+      additional NIfTI files alongside volumes. Loaded as separate MONAI
+      dict keys. User directed: "we can modify the Prefect Data Flow to
+      precompute SDF/UDF for volumes if certain methods require it."
+    </fix>
+    <fix id="M2" severity="MAJOR" source="technical-feasibility-reviewer">
+      MultiTaskAdapter duplicated CentrelineHeadAdapter. FIX: MultiTaskAdapter
+      now extends CentrelineHeadAdapter, adding only the SDF head.
+    </fix>
+    <fix id="M3" severity="MAJOR" source="technical-feasibility-reviewer">
+      ModelFamily enum explosion from composition. FIX: Use config-driven
+      composition via architecture_params.wrappers list. Only one new enum
+      value (MULTITASK_DYNUNET) needed; TFFM applied via wrapper config.
+    </fix>
+    <fix id="M4" severity="MAJOR" source="scope-reviewer">
+      D2C on post-crop patches may never find junctions. FIX: Apply D2C on
+      full volumes BEFORE cropping. Added junction frequency diagnostic test.
+      Pre-cache skeletons to avoid recomputing every epoch.
+    </fix>
+    <fix id="M5" severity="MAJOR" source="scope-reviewer">
+      T9 was too large (3 files, 8 tests). FIX: Split into T9a (trainer data
+      contract), T9b (per-head metrics), T9c (model family registration).
+    </fix>
+    <fix id="M6" severity="MAJOR" source="crash-resistance-reviewer">
+      Missing NaN/overflow tests for SDF head and large-volume test for D2C.
+      FIX: Added test_sdf_head_large_input_no_overflow and
+      test_d2c_full_volume_performance tests.
+    </fix>
+    <fix id="M7" severity="MAJOR" source="crash-resistance-reviewer">
+      No ONNX export handling for multi-task model. FIX: Added explicit
+      mask-only ONNX export documentation to T8 and a test.
+    </fix>
+    <fix id="M8" severity="MAJOR" source="technical-feasibility-reviewer">
+      D2C should reuse extract_centreline() for junction detection. FIX: T3
+      now explicitly reuses centreline_extraction.py's CentrelineGraph.
+    </fix>
+    <fix id="M9" severity="MAJOR" source="crash-resistance-reviewer">
+      D2C + multi-task target transform ordering unspecified. FIX: Explicit
+      transform chain: Load -> D2C(full vol) -> Crop -> Spatial -> Normalize ->
+      MultiTaskTarget -> ToTensor.
+    </fix>
+  </reviewer_fixes>
+
+  <!-- ================================================================== -->
+  <!-- METADATA                                                            -->
+  <!-- ================================================================== -->
+  <metadata>
+    <title>Topology-Aware 3D Segmentation: Implementation Plan</title>
+    <branch>feat/advanced-topological-segmentation</branch>
+    <literature_report>docs/planning/topology-aware-segmentation-literature-research-report.md</literature_report>
+    <phases>6</phases>
+    <total_tasks>22</total_tasks>
+    <estimated_tests>153</estimated_tests>
+    <created>2026-03-02</created>
+    <baseline>DynUNet + cbdice_cldice = 0.906 clDice / 0.824 DSC (70 volumes, 3 folds, 100 epochs)</baseline>
+    <vram_budget>8 GB (RTX 2070 Super) — combined pipeline estimated ~5900 MB with AMP, batch_size=2</vram_budget>
+    <parallel_branch_exclusion>feat/sam3-variants — ALL SAMv3 variants (vanilla, topolora, hybrid) are implemented there. This branch implements ZERO SAM-based models.</parallel_branch_exclusion>
+    <constraint_3d_only>ALL methods must operate natively in 3D. No slice-by-slice 2D processing. Topology and connectedness are 3D properties — structures appear disconnected in 2D slices when they are connected in 3D. This is a non-negotiable requirement.</constraint_3d_only>
+
+    <description>
+      Implements 3 complementary topology-aware approaches that are all natively 3D:
+
+      **Approach A: Disconnect-to-Connect 3D Data Augmentation** (Phase 1)
+      Low-risk, model-agnostic topology-preserving augmentation. Trains the network
+      to reconnect artificially severed vessel segments. Applied on FULL volumes
+      BEFORE cropping to ensure junctions are present. Zero inference cost.
+      Expected: +1pp clDice (Prediction P3 from literature report).
+
+      **Approach B: Generic Multi-Task Framework + DynUNet Instantiation** (Phase 2)
+      Core publishable contribution. A **GENERIC multi-task framework** that
+      supports any number of auxiliary prediction heads alongside segmentation.
+      The architecture is NOT opinionated about what tasks are — researchers
+      define auxiliary heads via config, not code changes.
+
+      **Architecture principle** (user directive: "aim for highest flexibility,
+      no opinionated architecture decisions"):
+      The multi-task system is a REGISTRY of named auxiliary heads:
+        auxiliary_heads:
+          - name: "sdf"
+            type: regression    # regression | classification | segmentation
+            channels: 1
+            loss: smooth_l1
+            weight: 0.25
+            gt_key: "sdf"       # MONAI dict key for ground truth
+          - name: "centerline_dist"
+            type: regression
+            channels: 1
+            loss: smooth_l1
+            weight: 0.25
+            gt_key: "centerline_dist"
+
+      Future researchers could add without code changes:
+        - Artery vs vein classification (type: classification, channels: 3)
+        - Junction detection (type: segmentation, channels: 1)
+        - Disease classification (type: classification, channels: N)
+        - Downstream survival analysis proxy (type: regression, channels: 1)
+        - Any task with a GT key in the MONAI data dict
+
+      **This plan instantiates the framework with two example heads**
+      (SDF edge detection + centerline extraction) as the concrete
+      experimental validation. The framework itself is task-agnostic.
+      Expected: +3pp clDice (Prediction P1 from literature report).
+
+      **Approach C: TFFMBlock3D Validation and Integration** (Phase 3)
+      Tests the existing (untested) TFFMBlock3D and TFFMWrapper code with
+      DynUNet. Graph attention in 3D feature space for cross-region topology
+      reasoning. Already implemented in graph_modules.py and tffm_wrapper.py.
+      Applied via config-driven wrapper composition (not separate ModelFamily).
+      Expected: &lt;0.5pp clDice (Prediction P4 — testing a negative hypothesis).
+
+      All three are independent after Phase 0 and can be combined. The combined
+      model (A+B+C) represents the full topology-aware 3D pipeline.
+
+      **Key architectural decisions (from reviewer feedback + user direction):**
+      - Three prediction tasks for vascular segmentation (user directive):
+        segmentation (mask), edge detection (SDF), centerline extraction
+      - Trainer criterion interface UPGRADED: multi-task criterion receives
+        full SegmentationOutput + batch dict, standard criterion unchanged
+        (user directive: "criterion(logits, labels) must be upgraded")
+      - Multi-task targets stored as separate MONAI dict keys ("sdf",
+        "centerline_dist"), NOT nested dicts — compatible with all spatial transforms
+      - SDF/centerline GT PRECOMPUTED in Prefect Data Flow (Flow 1) and saved
+        as NIfTI files (user directive: "modify the Prefect Data Flow to
+        precompute SDF/UDF for volumes")
+      - D2C augmentation applied on full volumes BEFORE cropping (pre-crop D2C)
+      - TFFM applied via architecture_params.wrappers config, not separate ModelFamily
+      - MultiTaskAdapter extends CentrelineHeadAdapter (code reuse, not duplication)
+      - ONNX multi-task export handled in Deploy Flow (Flow 4) — mask head as
+        primary, aux heads optional (configurable)
+
+      **Cross-flow Prefect integration (user directive):**
+      - Flow 1 (Data): Precompute SDF + centerline distance maps for all volumes
+      - Flow 2 (Train): Multi-task training with upgraded criterion interface
+      - Flow 3 (Analysis): Per-head metrics + topology comparison evaluator
+      - Flow 4 (Deploy): ONNX export supporting multi-output models
+      - Flow 5 (Dashboard): Multi-task training curves + topology comparison plots
+
+      **Excluded from this branch (handled elsewhere):**
+      - All SAMv3 variants (feat/sam3-variants branch)
+      - vesselFM benchmark (future work — VRAM uncertain, but low-cost zero-shot
+        run noted as future work in discussion section)
+      - DeformCL / FlowAxis (future work — high complexity)
+      - Any 2D or slice-by-slice methods
+
+      **Auxiliary GT derived from binary mask (user insight):**
+      Many useful auxiliary tasks (SDF, centerline distance, junction maps,
+      etc.) can be derived from the binary segmentation mask. The generic
+      precomputation framework (T18 + T2) supports registering ANY function
+      that takes a binary mask and produces a GT volume.
+
+      **Transform chain order (CRITICAL — from reviewer fix M9):**
+      Load -> D2C(full volume) -> LoadAuxiliaryTargetsd (generic aux GT) ->
+      Crop -> Spatial(flip/rotate) -> Normalize -> ToTensor
+
+      All transforms operate on MONAI dict keys: ["image", "label"] + any
+      configured auxiliary keys. D2C modifies only "image" (not other keys).
+    </description>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- EXISTING INFRASTRUCTURE (already implemented, not re-implemented)   -->
+  <!-- ================================================================== -->
+  <existing_infrastructure>
+    <component name="CentrelineHeadAdapter" file="src/minivess/adapters/centreline_head.py">
+      Multi-task adapter wrapping any ModelAdapter. Adds centreline distance
+      regression head via forward hook on decoder features. Already has
+      compute_centreline_distance_map() utility and _find_last_decoder_layer().
+      MultiTaskAdapter (T8) will EXTEND this class, not duplicate it.
+    </component>
+    <component name="TFFMBlock3D" file="src/minivess/adapters/graph_modules.py">
+      Topology Feature Fusion Module: channel compression, spatial pooling to
+      G^3 grid, kNN graph via cosine similarity, 2-layer GAT, gated residual.
+      Dense attention (no torch_geometric). Implemented but UNTESTED.
+    </component>
+    <component name="TFFMWrapper" file="src/minivess/adapters/tffm_wrapper.py">
+      Composition adapter applying TFFMBlock3D at DynUNet bottleneck via hook.
+      Implemented but UNTESTED.
+    </component>
+    <component name="centreline_extraction" file="src/minivess/pipeline/centreline_extraction.py">
+      CentrelineGraph dataclass with nodes/edges/junctions. Uses skimage
+      skeletonize (Lee94). Already tested. D2C augmentation (T3) will REUSE
+      this module's extract_centreline() and junction_coords property.
+    </component>
+    <component name="_get_output_channels" file="src/minivess/adapters/centreline_head.py AND tffm_wrapper.py">
+      Duplicated helper function. T8 should factor this into adapters/utils.py
+      to eliminate the duplication (reviewer fix M2).
+    </component>
+    <component name="18 loss functions" file="src/minivess/pipeline/loss_functions.py">
+      Factory with warning system. MultiTaskLoss (T7) will NOT be registered
+      in build_loss_function() — it has an upgraded signature:
+      forward(output: SegmentationOutput, batch: dict) instead of
+      forward(logits, labels). Constructed by model builder for multitask
+      models. Trainer upgraded (T9a) to detect and call appropriately.
+    </component>
+    <component name="topology_metrics" file="src/minivess/pipeline/topology_metrics.py">
+      NSD, HD95, ccDice, Betti error, Junction F1, APLS, skeleton recall,
+      BDR, Murray's law. Already tested.
+    </component>
+  </existing_infrastructure>
+
+  <!-- ================================================================== -->
+  <!-- FALSIFIABLE PREDICTIONS (from literature report Section 4.4)        -->
+  <!-- ================================================================== -->
+  <predictions>
+    <prediction id="P1" approach="B" gate="go_if_true">
+      Multi-task SDF + centerline prediction will improve clDice by >3pp
+      over cbdice_cldice alone on MiniVess. NOTE (reviewer): At 0.906 baseline,
+      3pp requires reaching 0.936 — this is aggressive near saturation.
+      Secondary gate: >1.5pp with p&lt;0.05 on paired bootstrap.
+    </prediction>
+    <prediction id="P3" approach="A" gate="go_if_true">
+      Disconnect-to-Connect augmentation will improve clDice by >1pp with
+      zero additional inference cost. NOTE (reviewer): D2C must be applied
+      pre-crop on full volumes to ensure junctions are present. Junction
+      frequency diagnostic (T3 test) validates this assumption.
+    </prediction>
+    <prediction id="P4" approach="C" gate="informational">
+      TFFMBlock3D will provide &lt;0.5pp clDice improvement on MiniVess because
+      kNN graphs in feature space do not correspond to anatomical connectivity
+      at the microvascular scale. NOTE (reviewer): Isotropic grid (8x8x8) on
+      anisotropic data (Z=5-110 vs XY=512) may contribute to negative result.
+    </prediction>
+    <prediction id="P5" approach="all" gate="informational">
+      Topology-aware loss functions are approaching a solved problem. Remaining
+      gains from loss-only modifications are &lt;2pp clDice. Gains from
+      representation changes (SDF+centerline) dwarf loss-only gains.
+      NOTE: Not directly tested by this experiment (loss held constant),
+      but indirectly supported if P1 >> P4.
+    </prediction>
+  </predictions>
+
+  <!-- ================================================================== -->
+  <!-- Phase 0: Foundation — SDF Ground Truth + Multi-Task Data Pipeline   -->
+  <!-- Required by Phase 2 (Multi-Task DynUNet).                          -->
+  <!-- ================================================================== -->
+  <phase id="0" title="Foundation: SDF Ground Truth and Multi-Task Data Pipeline">
+    <description>
+      Creates the signed distance field (SDF) ground truth generation utility
+      and the multi-task data pipeline that adds "sdf" and "centerline_dist"
+      as separate MONAI dictionary keys. SDF computed via
+      scipy.ndimage.distance_transform_edt (library-first, per CLAUDE.md Rule #3).
+      Centerline distance already exists via compute_centreline_distance_map().
+
+      Sign convention: negative inside vessel, positive outside (Wu et al.,
+      SDF-TopoNet, arXiv:2503.14523).
+
+      CRITICAL (reviewer fix M1 + user direction): SDF and centerline_dist are
+      PRECOMPUTED by Prefect Data Flow (Flow 1) and saved as NIfTI files.
+      Loaded as separate MONAI dict keys so spatial transforms apply to all.
+      Fallback: compute on-the-fly if precomputed files not found.
+    </description>
+
+    <task id="T1" status="NOT_STARTED">
+      <name>SDF ground truth generation utility</name>
+      <description>
+        Implement compute_sdf_from_mask(mask: np.ndarray) -> np.ndarray that
+        computes the signed distance field from a binary 3D mask. Uses
+        scipy.ndimage.distance_transform_edt (library code) for both the
+        foreground and background distance transforms, then combines with
+        sign convention: negative inside vessel, positive outside.
+
+        Also implement normalize_sdf(sdf: np.ndarray, max_dist: float = 10.0)
+        that clips SDF to [-max_dist, max_dist] and normalizes to [-1, 1].
+
+        Place in src/minivess/pipeline/sdf_generation.py alongside existing
+        centreline/topology utilities. Uses ONLY scipy (library-first).
+      </description>
+      <files>
+        <create>src/minivess/pipeline/sdf_generation.py</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_sdf_generation.py</test_file>
+        <tests>
+          <test>test_sdf_empty_mask_returns_positive — all-zero mask gives all-positive distances</test>
+          <test>test_sdf_full_mask_returns_negative — all-one mask gives all-negative distances</test>
+          <test>test_sdf_sign_convention — negative inside vessel, positive outside</test>
+          <test>test_sdf_zero_at_boundary — SDF crosses zero at vessel boundary voxels</test>
+          <test>test_sdf_3d_sphere — spherical mask gives radially symmetric SDF</test>
+          <test>test_sdf_dtype_float32 — output is float32</test>
+          <test>test_normalize_sdf_range — output clipped to [-1, 1]</test>
+          <test>test_normalize_sdf_preserves_sign — sign preserved after normalization</test>
+          <test>test_sdf_matches_scipy_edt — verify SDF magnitude matches scipy EDT output</test>
+        </tests>
+      </tdd_spec>
+      <dependencies/>
+    </task>
+
+    <task id="T2" status="NOT_STARTED">
+      <name>Generic multi-task target loading framework</name>
+      <description>
+        GENERIC multi-task target loading framework — NOT hardcoded to SDF
+        or centerline. Supports ANY auxiliary GT that can be loaded as a
+        NIfTI file alongside the primary label.
+
+        Implement LoadAuxiliaryTargetsd — a MONAI MapTransform that:
+        - Takes a list of auxiliary target configs (name, file_suffix, compute_fn)
+        - For each config, loads {volume_id}_{suffix}.nii.gz as a new MONAI
+          dict key (e.g., "sdf", "centerline_dist", "artery_mask", etc.)
+        - Falls back to on-the-fly computation via compute_fn if precomputed
+          file not found (for dev/debug without running Flow 1 first)
+        - Automatically adds new keys to spatial transform keys= lists
+
+        The compute_fn registry maps suffix -> computation function:
+        - "sdf" -> compute_sdf_from_mask (T1)
+        - "centerline_dist" -> compute_centreline_distance_map (existing)
+        - Future: "artery_mask" -> some_fn, "junction_mask" -> some_fn, etc.
+
+        CRITICAL (reviewer fix C2): These are top-level MONAI dict keys,
+        NOT nested dicts. All subsequent spatial transforms must include
+        auxiliary keys in their keys= parameter.
+
+        Place in src/minivess/data/multitask_targets.py.
+      </description>
+      <files>
+        <create>src/minivess/data/multitask_targets.py</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_multitask_targets.py</test_file>
+        <tests>
+          <test>test_generic_loader_adds_configured_keys — all configured aux keys present</test>
+          <test>test_generic_loader_label_unchanged — original "label" key preserved</test>
+          <test>test_generic_loader_shape_matches_label — aux targets match label spatial dims</test>
+          <test>test_generic_loader_empty_mask_no_crash — graceful handling of empty masks</test>
+          <test>test_generic_loader_3d_volume — works with realistic 3D volumes (32,64,64)</test>
+          <test>test_generic_loader_fallback_compute — on-the-fly compute when precomputed missing</test>
+          <test>test_generic_loader_precomputed_preferred — loads NIfTI when available</test>
+          <test>test_generic_loader_arbitrary_key_name — works with any key name string</test>
+          <test>test_spatial_augmentation_applies_to_all_keys — RandFlipd transforms aux keys too</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T1</dependencies>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- Phase 1: Disconnect-to-Connect 3D Data Augmentation                 -->
+  <!-- Approach A — model-agnostic, zero inference cost.                   -->
+  <!-- Reference: Valverde et al. (2025), arXiv.                           -->
+  <!-- ================================================================== -->
+  <phase id="1" title="Disconnect-to-Connect 3D Data Augmentation">
+    <description>
+      Implements topology-preserving data augmentation in 3D. During training,
+      randomly identifies vessel junction points via skeleton extraction, removes
+      short connecting segments from the INPUT image, and keeps the GROUND TRUTH
+      intact. Forces the network to predict full connectivity from partial evidence.
+
+      CRITICAL (reviewer fix M4): D2C MUST be applied on FULL VOLUMES before
+      random cropping. Junctions in MiniVess capillaries may be spaced farther
+      apart than patch sizes, so post-crop D2C would rarely fire. Pre-crop D2C
+      ensures junctions are available. Skeleton is pre-cached per volume to
+      avoid recomputing every epoch.
+
+      CRITICAL (reviewer fix M8): Reuses extract_centreline() from
+      centreline_extraction.py for junction detection (CentrelineGraph.junction_coords).
+      Does NOT reimplement skeleton + 26-connectivity analysis.
+    </description>
+
+    <task id="T3" status="NOT_STARTED">
+      <name>3D vessel disconnection transform (pre-crop)</name>
+      <description>
+        Implement DisconnectToConnectd — a MONAI MapTransform that:
+        1. Takes data dict with "image" and "label" keys (full volume)
+        2. With probability p (default 0.3), applies disconnection:
+           a. Extract CentrelineGraph from label via centreline_extraction.py's
+              extract_centreline() function (REUSE, not reimplement — fix M8)
+           b. Get junction_coords from CentrelineGraph (3D 26-connectivity)
+           c. If junctions found, randomly select 1-3 junctions
+           d. For each junction, trace shortest incident branch (up to
+              max_segment_length=15 voxels along skeleton path)
+           e. Create disconnection mask: dilate branch voxels by radius 2
+              via scipy.ndimage.binary_dilation (3D structuring element)
+           f. Corrupt "image" at disconnection mask locations (set to 0 or
+              add noise, configurable via mode parameter)
+           g. Leave "label" (and "sdf", "centerline_dist" if present) UNCHANGED
+        3. If no junctions found (simple tubule), skip silently
+
+        Place in src/minivess/data/disconnect_augmentation.py.
+
+        CRITICAL: Operates on FULL 3D volumes before cropping. Uses
+        extract_centreline() from centreline_extraction.py.
+
+        Optional: Pre-cache skeleton per volume (cache_dir parameter).
+      </description>
+      <files>
+        <create>src/minivess/data/disconnect_augmentation.py</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_disconnect_augmentation.py</test_file>
+        <tests>
+          <test>test_d2c_no_op_when_probability_zero — image unchanged when p=0</test>
+          <test>test_d2c_always_applies_when_probability_one — image modified when p=1</test>
+          <test>test_d2c_label_never_modified — GT mask identical before and after</test>
+          <test>test_d2c_sdf_never_modified — SDF key (if present) unchanged</test>
+          <test>test_d2c_input_modified_at_junction — input zeroed near junction</test>
+          <test>test_d2c_empty_mask_no_crash — graceful skip on empty mask</test>
+          <test>test_d2c_no_junctions_no_crash — graceful skip on straight tube</test>
+          <test>test_d2c_3d_volume — works with 3D volume (32,64,64)</test>
+          <test>test_d2c_uses_centreline_extraction — calls extract_centreline()</test>
+          <test>test_d2c_max_segment_length_respected — disconnection within limit</test>
+          <test>test_d2c_synthetic_y_junction — Y-shaped tube junction found and disconnected</test>
+          <test>test_d2c_reproducible_with_seed — same seed gives same disconnection</test>
+          <test>test_d2c_full_volume_performance — 128x128x64 completes within 10 seconds</test>
+          <test>test_d2c_junction_frequency_on_realistic_mask — verify junctions exist in full volumes</test>
+        </tests>
+      </tdd_spec>
+      <dependencies/>
+    </task>
+
+    <task id="T4" status="NOT_STARTED">
+      <name>D2C integration with MONAI data pipeline (pre-crop position)</name>
+      <description>
+        Integrate DisconnectToConnectd into the existing MONAI data pipeline.
+        Insert it AFTER loading and BEFORE random cropping:
+
+        Transform chain (reviewer fix M9):
+        Load -> D2C(full volume) -> AddMultiTaskTargetsd -> RandCrop -> Spatial -> Normalize
+
+        D2C operates on full volumes where junctions are guaranteed to exist.
+        After D2C corrupts the input, the multi-task target transform computes
+        SDF/centerline from the INTACT label (not the corrupted input).
+
+        Add disconnect_augmentation config to DataConfig in config/models.py:
+        - d2c_enabled: bool (default True for training, False for val/test)
+        - d2c_probability: float (default 0.3)
+        - d2c_mode: str ("zero" or "noise")
+        - d2c_max_segment_length: int (default 15)
+
+        CRITICAL (reviewer fix C3): Config is in config/models.py (where
+        DataConfig lives), NOT config/training.py (which does not exist).
+      </description>
+      <files>
+        <modify>src/minivess/data/transforms.py</modify>
+        <modify>src/minivess/config/models.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_disconnect_augmentation.py</test_file>
+        <tests>
+          <test>test_d2c_in_training_pipeline — transform present in training transforms</test>
+          <test>test_d2c_not_in_validation_pipeline — transform absent from val transforms</test>
+          <test>test_d2c_before_random_crop — D2C positioned before RandCropByPosNegLabeld</test>
+          <test>test_d2c_config_default_enabled — default config enables D2C for training</test>
+          <test>test_d2c_config_disabled — disabled config skips D2C</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T3</dependencies>
+    </task>
+
+    <task id="T5" status="NOT_STARTED">
+      <name>D2C ablation experiment config</name>
+      <description>
+        Create YAML experiment config for ablation: DynUNet + cbdice_cldice
+        trained WITH vs WITHOUT Disconnect-to-Connect augmentation.
+
+        Config: 2 conditions x 3 folds x 100 epochs each.
+        - Condition 1: cbdice_cldice baseline (D2C disabled)
+        - Condition 2: cbdice_cldice + D2C (p=0.3, mode="zero", pre-crop)
+
+        Metrics: DSC, clDice, HD95, NSD, ccDice, BE_0, BE_1, Junction F1.
+        This directly tests Prediction P3.
+      </description>
+      <files>
+        <create>configs/experiments/dynunet_d2c_ablation.yaml</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_disconnect_augmentation.py</test_file>
+        <tests>
+          <test>test_d2c_ablation_config_loads — YAML config loads without error</test>
+          <test>test_d2c_ablation_config_has_two_conditions — baseline and D2C conditions</test>
+          <test>test_d2c_ablation_config_valid_loss — uses cbdice_cldice loss</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T4</dependencies>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- Phase 2: Multi-Task DynUNet — Mask + SDF + Centerline (Core)        -->
+  <!-- Approach B — publishable contribution.                              -->
+  <!-- References: Wu et al. (2025) SDF-TopoNet, literature report H1.     -->
+  <!-- ================================================================== -->
+  <phase id="2" title="Generic Multi-Task Framework + DynUNet Instantiation">
+    <description>
+      **CRITICAL DESIGN PRINCIPLE** (CLAUDE.md Core Principle #8, Rule #9):
+      This phase builds a GENERIC, config-driven multi-task learning framework
+      that supports ANY number of auxiliary prediction heads. The framework is
+      completely task-agnostic — it knows about head TYPES (regression,
+      classification, segmentation) but NOT about specific TASKS (SDF,
+      centerline, artery/vein, disease, etc.). Tasks are YAML config.
+
+      **Generic infrastructure (task-agnostic):**
+      - MultiTaskAdapter: config-driven auxiliary head registry
+      - MultiTaskLoss: generic loss composer reading head configs
+      - Trainer upgrade: isinstance-based criterion dispatch
+      - Per-head metric logging: generic "{head_name}/mae", "{head_name}/rmse"
+
+      **Experimental instantiation (config, not code):**
+      Two auxiliary heads for this experiment, both derived from binary mask GT:
+      - SDF regression: edge/boundary detection (scipy.ndimage.distance_transform_edt)
+      - Centerline distance regression: topology/medial axis (skeletonize + EDT)
+
+      Future researchers can add heads via YAML without code changes:
+      artery/vein classification, junction detection, disease classification,
+      survival proxies, precision medicine features, etc.
+
+      Loss (reviewer fix C1 + user override): Trainer criterion interface is
+      PROPERLY UPGRADED. MultiTaskLoss receives full SegmentationOutput +
+      batch dict. Standard models still use criterion(logits, labels).
+
+      L_total = w_seg * L_seg(output.logits, batch["label"])
+              + sum(w_i * L_i(output.metadata[name_i], batch[gt_key_i]) for each aux head)
+
+      Experimental config weights: w_seg=0.5, w_sdf=0.25, w_cl=0.25.
+    </description>
+
+    <task id="T6" status="NOT_STARTED">
+      <name>SDF regression head module</name>
+      <description>
+        Implement SDFHead — a lightweight nn.Module that takes decoder features
+        [B, C, D, H, W] and produces SDF predictions [B, 1, D, H, W].
+
+        Architecture: Conv3d(C, C//4, 1) -> InstanceNorm3d -> GELU -> Conv3d(C//4, 1, 1).
+        No activation on final layer (SDF can be any real value).
+
+        Place in src/minivess/adapters/sdf_head.py.
+      </description>
+      <files>
+        <create>src/minivess/adapters/sdf_head.py</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_sdf_head.py</test_file>
+        <tests>
+          <test>test_sdf_head_output_shape — [B, 1, D, H, W] output from [B, C, D, H, W] input</test>
+          <test>test_sdf_head_unbounded_output — output can be negative and positive</test>
+          <test>test_sdf_head_gradient_flows — backward pass produces gradients</test>
+          <test>test_sdf_head_channel_reduction — intermediate channels = in_channels // 4</test>
+          <test>test_sdf_head_param_count_small — fewer than 10K params for C=32</test>
+          <test>test_sdf_head_different_spatial_sizes — works with various (D, H, W)</test>
+          <test>test_sdf_head_large_input_no_overflow — large feature values do not cause inf/nan</test>
+        </tests>
+      </tdd_spec>
+      <dependencies/>
+    </task>
+
+    <task id="T7" status="NOT_STARTED">
+      <name>Generic multi-task loss composer with upgraded criterion interface</name>
+      <description>
+        Implement MultiTaskLoss as nn.Module with UPGRADED forward signature
+        (user override of reviewer fix C1):
+
+        forward(output: SegmentationOutput, batch: dict) -> Tensor
+
+        **CRITICAL DESIGN PRINCIPLE** (user directive: "no opinionated
+        architecture decisions, aim for highest flexibility"):
+        MultiTaskLoss is a GENERIC multi-task loss composer that works with
+        ANY number of auxiliary heads defined in config. It is NOT hardcoded
+        to "segmentation + SDF + centerline" — those are just the first
+        instantiation. Future researchers can add artery/vein classification,
+        junction detection, disease classification, survival proxies, etc.
+        without modifying MultiTaskLoss code.
+
+        Architecture:
+        - __init__(seg_criterion, aux_head_configs: list[AuxHeadLossConfig])
+        - AuxHeadLossConfig = dataclass(name, loss_type, weight, gt_key,
+          mask_to_foreground: bool)
+        - forward(output, batch):
+          L_total = w_seg * seg_criterion(output.logits, batch["label"])
+          for head in aux_head_configs:
+            pred = output.metadata[head.name]
+            gt = batch[head.gt_key]
+            loss_fn = _build_aux_loss(head.loss_type)  # smooth_l1, mse, bce, ce
+            if head.mask_to_foreground:
+              mask = (batch["label"] > 0).float()
+              L_aux = loss_fn(pred * mask, gt * mask)
+            else:
+              L_aux = loss_fn(pred, gt)
+            L_total += head.weight * L_aux
+
+        Supported aux loss types: smooth_l1, mse, bce, cross_entropy.
+        Stores per-component losses as dict: {"loss/seg": ..., "loss/{name}": ...}
+
+        MultiTaskLoss is NOT registered in build_loss_function() factory
+        (different signature). Constructed by model builder from config.
+
+        Place in src/minivess/pipeline/multitask_loss.py.
+      </description>
+      <files>
+        <create>src/minivess/pipeline/multitask_loss.py</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_multitask_loss.py</test_file>
+        <tests>
+          <test>test_multitask_loss_returns_scalar — output is scalar tensor</test>
+          <test>test_multitask_loss_upgraded_signature — forward(output, batch) works</test>
+          <test>test_multitask_loss_generic_two_heads — works with 2 arbitrary aux heads</test>
+          <test>test_multitask_loss_generic_single_head — works with 1 aux head</test>
+          <test>test_multitask_loss_generic_zero_heads — seg-only mode (no aux heads)</test>
+          <test>test_multitask_loss_gradient_flows — all heads receive gradients</test>
+          <test>test_multitask_loss_weights_respected — changing weights changes loss</test>
+          <test>test_multitask_loss_masked_regression — regression loss zero outside vessel</test>
+          <test>test_multitask_loss_unmasked_classification — classification without fg mask</test>
+          <test>test_multitask_loss_perfect_pred_zero_aux — zero aux loss for perfect pred</test>
+          <test>test_multitask_loss_empty_foreground_no_nan — no NaN when foreground empty</test>
+          <test>test_multitask_loss_per_component_dict — stores loss/{name} for each head</test>
+          <test>test_multitask_loss_four_aux_losses — works with 4 different aux loss types</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T1</dependencies>
+    </task>
+
+    <task id="T8" status="NOT_STARTED">
+      <name>Generic MultiTaskAdapter with config-driven auxiliary heads</name>
+      <description>
+        Implement MultiTaskAdapter that EXTENDS CentrelineHeadAdapter
+        (reviewer fix M2) but generalizes it to support ANY number of
+        config-driven auxiliary heads.
+
+        **CRITICAL DESIGN PRINCIPLE** (user directive: "no opinionated
+        architecture decisions"): The adapter supports an arbitrary list of
+        auxiliary head configs. Segmentation + SDF + centerline is just the
+        first instantiation. Researchers can add heads without code changes.
+
+        auxiliary_heads config (list of AuxHeadConfig):
+          - name: str          # "sdf", "centerline_dist", "artery_class", etc.
+          - type: str          # "regression" | "classification" | "segmentation"
+          - out_channels: int  # 1 for regression, N for classification
+          - activation: str    # "none" | "relu" | "sigmoid" | "softmax"
+
+        Each head is a lightweight nn.Sequential (Conv3d -> Norm -> Act -> Conv3d)
+        attached to the same captured decoder features via forward hook.
+
+        Key additions over CentrelineHeadAdapter:
+        - Generic head registry: dict[str, nn.Sequential] built from config
+        - SDFHead (from T6) reused as a concrete head type
+        - forward() returns SegmentationOutput with metadata containing
+          "{head_name}" tensors for each aux head alongside "logits"
+        - No workaround attributes needed: the upgraded criterion (T7)
+          reads predictions from SegmentationOutput metadata and GT from
+          batch dict directly
+        - ONNX export: mask-only by default (reviewer fix M7 — aux heads
+          are training scaffolds), configurable per head
+        - Fully config-driven: adding a new head type requires ZERO code
+          changes to MultiTaskAdapter
+
+        Example output (with SDF + centerline config):
+        - output.logits [B, 2, D, H, W] — segmentation
+        - output.metadata["sdf"] [B, 1, D, H, W] — edge detection
+        - output.metadata["centerline_dist"] [B, 1, D, H, W] — centerline
+
+        Also factor out _get_output_channels() from centreline_head.py and
+        tffm_wrapper.py into adapters/utils.py (reviewer fix M2 dedup).
+
+        Place in src/minivess/adapters/multitask_adapter.py.
+      </description>
+      <files>
+        <create>src/minivess/adapters/multitask_adapter.py</create>
+        <create>src/minivess/adapters/utils.py</create>
+        <modify>src/minivess/adapters/centreline_head.py</modify>
+        <modify>src/minivess/adapters/tffm_wrapper.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_multitask_adapter.py</test_file>
+        <tests>
+          <test>test_multitask_adapter_inherits_centreline — isinstance(adapter, CentrelineHeadAdapter)</test>
+          <test>test_multitask_adapter_generic_two_heads — works with 2 config-driven aux heads</test>
+          <test>test_multitask_adapter_generic_single_head — works with 1 aux head</test>
+          <test>test_multitask_adapter_generic_four_heads — works with 4 aux heads (stress)</test>
+          <test>test_multitask_adapter_regression_head_shape — [B, 1, D, H, W] for regression</test>
+          <test>test_multitask_adapter_classification_head_shape — [B, N, D, H, W] for classification</test>
+          <test>test_multitask_adapter_gradient_flows_to_all_heads — all heads get gradients</test>
+          <test>test_multitask_adapter_wraps_dynunet — works with DynUNet base model</test>
+          <test>test_multitask_adapter_checkpoint_roundtrip — save/load preserves all heads</test>
+          <test>test_multitask_adapter_onnx_export_mask_only — default ONNX has single output</test>
+          <test>test_multitask_adapter_config_driven_no_code_change — new head from config only</test>
+          <test>test_get_output_channels_in_utils — factored utility function works</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T6</dependencies>
+    </task>
+
+    <task id="T9a" status="NOT_STARTED">
+      <name>Trainer criterion interface upgrade for generic multi-task</name>
+      <description>
+        UPGRADE the trainer's criterion calling convention to support the
+        generic multi-task loss framework (user directive: "criterion(logits,
+        labels) must be upgraded").
+
+        Current trainer (line 211): self.criterion(output.logits, labels)
+        Upgraded trainer: two code paths based on isinstance check:
+
+        if isinstance(self.criterion, MultiTaskLoss):
+            loss = self.criterion(output, batch)  # full output + batch dict
+        else:
+            loss = self.criterion(output.logits, labels)  # standard path
+
+        This is GENERIC — the trainer does NOT know what auxiliary heads
+        exist. It just passes the full output and batch dict to MultiTaskLoss,
+        which handles the rest via its config-driven head registry.
+
+        - Standard single-task losses are COMPLETELY UNCHANGED — the
+          isinstance check ensures backward compatibility
+        - Both train_epoch() (line 211) and validate_epoch() (line 297)
+          are updated
+        - The batch dict is already available in both methods — no new
+          data plumbing needed
+        - NO task-specific code in the trainer (no "if sdf", no "if centerline")
+      </description>
+      <files>
+        <modify>src/minivess/pipeline/trainer.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_multitask_training.py</test_file>
+        <tests>
+          <test>test_trainer_multitask_criterion_receives_output — MultiTaskLoss gets SegmentationOutput</test>
+          <test>test_trainer_multitask_criterion_receives_batch — MultiTaskLoss gets full batch dict</test>
+          <test>test_trainer_standard_criterion_unchanged — non-multitask uses (logits, labels)</test>
+          <test>test_multitask_training_step — one step with MultiTaskAdapter + MultiTaskLoss completes</test>
+          <test>test_multitask_backward_updates_all_heads — all three task heads updated after step</test>
+          <test>test_trainer_standard_model_no_regression — standard model ignores sdf/cl keys</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T2 T7 T8</dependencies>
+    </task>
+
+    <task id="T9b" status="NOT_STARTED">
+      <name>Generic per-head metrics and MLflow logging</name>
+      <description>
+        Add GENERIC per-head validation metrics and MLflow logging that works
+        with ANY auxiliary heads defined in config. NO task-specific code.
+
+        For each auxiliary head in the MultiTaskAdapter's head registry:
+        - Regression heads: log "{head_name}/mae", "{head_name}/rmse"
+        - Classification heads: log "{head_name}/accuracy", "{head_name}/f1"
+        - Segmentation heads: log "{head_name}/dice"
+        - Per-component loss: "loss/{head_name}"
+
+        Primary segmentation metrics (DSC, clDice, HD95, NSD) unchanged.
+
+        The metric type is determined by the head's config type field
+        (regression/classification/segmentation), NOT by the head's name.
+
+        Log to MLflow via ExperimentTracker. Uses existing tracking infrastructure.
+      </description>
+      <files>
+        <modify>src/minivess/pipeline/trainer.py</modify>
+        <modify>src/minivess/observability/tracking.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_multitask_training.py</test_file>
+        <tests>
+          <test>test_generic_regression_head_metrics — MAE and RMSE computed for any regression head</test>
+          <test>test_generic_classification_head_metrics — accuracy and F1 for classification heads</test>
+          <test>test_generic_per_head_loss_logged — loss/{head_name} logged for each aux head</test>
+          <test>test_generic_metrics_with_two_heads — metrics computed for 2 arbitrary heads</test>
+          <test>test_generic_metrics_with_zero_heads — no extra metrics when no aux heads</test>
+          <test>test_primary_seg_metrics_unchanged — DSC/clDice/HD95/NSD unaffected by aux heads</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T9a</dependencies>
+    </task>
+
+    <task id="T9c" status="NOT_STARTED">
+      <name>ModelFamily registration and generic wrapper config</name>
+      <description>
+        Add ModelFamily.MULTITASK_DYNUNET to config/models.py enum.
+        TFFM is NOT a separate ModelFamily — it is applied via config-driven
+        wrapper composition (reviewer fix M3).
+
+        The wrapper config is GENERIC — no task-specific fields:
+
+        architecture_params:
+          wrappers:
+            - type: tffm
+              grid_size: 8
+              hidden_dim: 32
+            - type: multitask
+              auxiliary_heads:   # GENERIC list, not hardcoded tasks
+                - name: sdf
+                  type: regression
+                  out_channels: 1
+                  loss: smooth_l1
+                  weight: 0.25
+                  gt_key: sdf
+                - name: centerline_dist
+                  type: regression
+                  out_channels: 1
+                  loss: smooth_l1
+                  weight: 0.25
+                  gt_key: centerline_dist
+
+        The model builder applies wrappers sequentially.
+        Register builder logic for MULTITASK_DYNUNET.
+        Researchers add new auxiliary tasks via config YAML only.
+      </description>
+      <files>
+        <modify>src/minivess/config/models.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_multitask_training.py</test_file>
+        <tests>
+          <test>test_multitask_model_family_registered — MULTITASK_DYNUNET in ModelFamily</test>
+          <test>test_wrapper_config_applies_tffm — wrappers list with type=tffm wraps model</test>
+          <test>test_wrapper_config_applies_multitask — wrappers list with type=multitask wraps model</test>
+          <test>test_multitask_dynunet_within_vram_budget — batch=1, AMP, &lt;8GB peak</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T9b</dependencies>
+    </task>
+
+    <task id="T10" status="NOT_STARTED">
+      <name>Multi-task experiment config + baseline comparison</name>
+      <description>
+        Create YAML experiment config for multi-task DynUNet ablation:
+        - Condition 1: DynUNet + cbdice_cldice (existing baseline, retrained)
+        - Condition 2: DynUNet + multitask (mask + SDF + centerline)
+        - Condition 3: DynUNet + multitask + D2C augmentation (full Phase 1+2)
+
+        Config: 3 conditions x 3 folds x 100 epochs each.
+        Tests Predictions P1 and P3 together.
+
+        Multi-task target generation: enabled for conditions 2 and 3.
+        D2C augmentation: enabled for condition 3 only.
+        Compute profile: gpu_low (8 GB VRAM budget).
+        Early stopping: patience 20 on val_compound_nsd_cldice.
+      </description>
+      <files>
+        <create>configs/experiments/dynunet_multitask_ablation.yaml</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_multitask_training.py</test_file>
+        <tests>
+          <test>test_multitask_config_loads — YAML config loads without error</test>
+          <test>test_multitask_config_three_conditions — baseline, multitask, multitask+D2C</test>
+          <test>test_multitask_config_valid_loss_names — loss names recognized</test>
+          <test>test_multitask_config_gpu_low_compute — respects 8GB VRAM budget</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T5 T9c</dependencies>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- Phase 3: TFFMBlock3D Validation and Integration                     -->
+  <!-- Approach C — tests existing (untested) code.                        -->
+  <!-- Reference: Ahmed et al. (2026), WACV 2026.                         -->
+  <!-- ================================================================== -->
+  <phase id="3" title="TFFMBlock3D Validation and Integration">
+    <description>
+      TFFMBlock3D and TFFMWrapper are already implemented but have ZERO test
+      coverage. This phase adds comprehensive tests and validates integration
+      with DynUNet. TFFM is applied via config-driven wrapper composition
+      (reviewer fix M3), NOT a separate ModelFamily.
+
+      Note on anisotropic data: TFFMBlock3D uses isotropic grid (8x8x8)
+      which may be suboptimal for MiniVess (Z=5-110 vs XY=512). This is
+      documented as a known limitation, not a bug.
+    </description>
+
+    <task id="T11" status="NOT_STARTED">
+      <name>TFFMBlock3D + GraphAttentionLayer comprehensive unit tests</name>
+      <description>
+        Write comprehensive tests for the existing (untested) TFFMBlock3D and
+        GraphAttentionLayer modules. These tests verify EXISTING code.
+      </description>
+      <files>
+        <create>tests/v2/unit/test_graph_modules_comprehensive.py</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_graph_modules_comprehensive.py</test_file>
+        <tests>
+          <test>test_gat_forward_shape — [B, N, F_out] output shape correct</test>
+          <test>test_gat_multihead_consistent — n_heads=4 gives same shape as n_heads=1</test>
+          <test>test_gat_attention_masked_by_adjacency — zero adj entries produce zero attention</test>
+          <test>test_gat_fully_connected_graph — dense adj gives valid attention</test>
+          <test>test_gat_gradient_flows — backward through GAT produces gradients</test>
+          <test>test_tffm_output_same_shape_as_input — [B, C, D, H, W] in/out</test>
+          <test>test_tffm_gated_residual_near_identity — gate initialized near zero</test>
+          <test>test_tffm_knn_adjacency_symmetric — adjacency matrix is symmetric</test>
+          <test>test_tffm_knn_adjacency_k_neighbors — each node has k neighbors</test>
+          <test>test_tffm_gradient_flows — backward through TFFM block</test>
+          <test>test_tffm_different_grid_sizes — grid_size=4, 8, 16 all work</test>
+          <test>test_tffm_small_spatial_dim — input smaller than grid_size handled</test>
+          <test>test_tffm_param_count — verify expected parameter count</test>
+        </tests>
+      </tdd_spec>
+      <dependencies/>
+    </task>
+
+    <task id="T12" status="NOT_STARTED">
+      <name>TFFMWrapper + DynUNet integration tests</name>
+      <description>
+        Write integration tests for TFFMWrapper wrapping a DynUNetAdapter.
+        Verify forward hook, gradient flow, checkpoint save/load, and
+        VRAM overhead (&lt;500 MB above DynUNet baseline).
+      </description>
+      <files>
+        <create>tests/v2/integration/test_tffm_integration.py</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/integration/test_tffm_integration.py</test_file>
+        <tests>
+          <test>test_tffm_wraps_dynunet_forward — forward pass completes</test>
+          <test>test_tffm_dynunet_output_shape — output shape matches standard DynUNet</test>
+          <test>test_tffm_gradient_to_base_model — DynUNet params receive gradients</test>
+          <test>test_tffm_gradient_to_tffm_block — TFFM params receive gradients</test>
+          <test>test_tffm_metadata_applied — output metadata["tffm_applied"] is True</test>
+          <test>test_tffm_checkpoint_roundtrip — save/load preserves both components</test>
+          <test>test_tffm_training_step — one training step with loss backward</test>
+          <test>test_tffm_config_info — get_config includes tffm params</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T11</dependencies>
+    </task>
+
+    <task id="T13" status="NOT_STARTED">
+      <name>TFFM experiment config (via wrapper composition)</name>
+      <description>
+        Create YAML experiment config for TFFMBlock3D evaluation:
+        - Condition 1: DynUNet + cbdice_cldice (baseline, retrained)
+        - Condition 2: DynUNet + TFFMWrapper + cbdice_cldice (TFFM-enhanced)
+
+        Config: 2 conditions x 3 folds x 100 epochs each.
+        Tests Prediction P4.
+
+        TFFM applied via architecture_params.wrappers config (reviewer fix M3):
+          architecture_params:
+            wrappers:
+              - type: tffm
+                grid_size: 8
+                hidden_dim: 32
+                n_heads: 4
+                k_neighbors: 8
+      </description>
+      <files>
+        <create>configs/experiments/dynunet_tffm_ablation.yaml</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_tffm_config.py</test_file>
+        <tests>
+          <test>test_tffm_config_loads — YAML config loads without error</test>
+          <test>test_tffm_config_two_conditions — baseline and TFFM conditions</test>
+          <test>test_tffm_config_wrapper_params — grid_size, hidden_dim correct</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T12 T9c</dependencies>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- Phase 4: Combined Experiment and Cross-Approach Evaluation           -->
+  <!-- ================================================================== -->
+  <phase id="4" title="Combined Experiment and Cross-Approach Evaluation">
+    <description>
+      Creates the combined experiment (all approaches head-to-head) and the
+      evaluation infrastructure. Produces evidence for the paper's results
+      section and validates/refutes predictions P1, P3, P4.
+    </description>
+
+    <task id="T14" status="NOT_STARTED">
+      <name>Combined all-approaches experiment config</name>
+      <description>
+        Master YAML with ALL conditions:
+        1. Baseline: DynUNet + cbdice_cldice
+        2. D2C only: DynUNet + cbdice_cldice + D2C
+        3. Multi-task: DynUNet + multitask (mask + SDF + centerline)
+        4. Multi-task + D2C: DynUNet + multitask + D2C
+        5. TFFM: DynUNet + TFFM wrapper + cbdice_cldice
+        6. Full pipeline: DynUNet + TFFM + multitask + D2C
+
+        Config: 6 conditions x 3 folds x 100 epochs = 18 runs.
+        Estimated compute: 18 x ~40 min = ~12 hours (budget 2-3x for debugging).
+
+        All 8 metrics per run + per-head regression metrics for multitask.
+      </description>
+      <files>
+        <create>configs/experiments/dynunet_topology_all_approaches.yaml</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_topology_experiment_config.py</test_file>
+        <tests>
+          <test>test_combined_config_loads — YAML config loads without error</test>
+          <test>test_combined_config_six_conditions — all 6 conditions present</test>
+          <test>test_combined_config_valid_losses — all loss names recognized</test>
+          <test>test_combined_config_3_folds — each condition has 3 folds</test>
+          <test>test_combined_config_no_sam_references — zero SAM model families</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T5 T10 T13</dependencies>
+    </task>
+
+    <task id="T15" status="NOT_STARTED">
+      <name>Cross-approach topology comparison evaluator</name>
+      <description>
+        Create TopologyComparisonEvaluator that:
+        1. Loads results from all 6 conditions across 3 folds
+        2. Computes mean +/- std for all 8 metrics
+        3. Runs paired bootstrap testing between conditions
+        4. Generates comparison table (conditions x metrics)
+        5. Evaluates predictions P1, P3, P4 as pass/fail
+        6. Exports to Markdown + LaTeX (paper-ready)
+
+        Place in src/minivess/pipeline/topology_comparison.py.
+      </description>
+      <files>
+        <create>src/minivess/pipeline/topology_comparison.py</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_topology_comparison.py</test_file>
+        <tests>
+          <test>test_evaluator_loads_mock_results — loads synthetic results dict</test>
+          <test>test_evaluator_computes_mean_std — correct aggregation across folds</test>
+          <test>test_evaluator_paired_bootstrap — p-values computed for pairs</test>
+          <test>test_evaluator_prediction_p1 — P1 pass if clDice diff > 3pp (or secondary gate)</test>
+          <test>test_evaluator_prediction_p3 — P3 pass if clDice diff > 1pp</test>
+          <test>test_evaluator_prediction_p4 — P4 reports diff (informational)</test>
+          <test>test_evaluator_exports_markdown — valid Markdown table</test>
+          <test>test_evaluator_exports_latex — valid LaTeX table</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T14</dependencies>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- Phase 5: Integration Tests + Documentation                          -->
+  <!-- ================================================================== -->
+  <phase id="5" title="Integration Tests and Documentation">
+
+    <task id="T16" status="NOT_STARTED">
+      <name>End-to-end integration tests for all 3 approaches</name>
+      <description>
+        Short training loops (2 epochs, 1 fold) for each approach + combined:
+        1. D2C augmentation with DynUNet
+        2. Multi-task DynUNet (mask + SDF + centerline)
+        3. TFFMWrapper DynUNet
+        4. Combined: TFFM + multi-task + D2C
+
+        Each verifies: forward/backward completes, loss finite, checkpoint
+        roundtrip, expected metrics logged, VRAM within budget.
+      </description>
+      <files>
+        <create>tests/v2/integration/test_topology_approaches_e2e.py</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/integration/test_topology_approaches_e2e.py</test_file>
+        <tests>
+          <test>test_e2e_d2c_augmentation — 2 epochs with D2C, loss finite</test>
+          <test>test_e2e_multitask_dynunet — 2 epochs, all heads produce output</test>
+          <test>test_e2e_tffm_dynunet — 2 epochs, tffm_applied in metadata</test>
+          <test>test_e2e_combined_pipeline — 2 epochs with all three</test>
+          <test>test_e2e_checkpoint_roundtrip — save/load for combined pipeline</test>
+          <test>test_e2e_vram_under_budget — peak VRAM &lt; 8192 MB with AMP (if GPU)</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T5 T10 T13</dependencies>
+    </task>
+
+    <task id="T17" status="NOT_STARTED">
+      <name>Paper discussion section notes</name>
+      <description>
+        Create docs/planning/topology-approaches-discussion-notes.md with:
+        1. Implemented approaches and rationale (3 chosen, 3D-only constraint)
+        2. Deferred approaches and why (vesselFM, DeformCL, ViG3D-UNet, etc.)
+        3. 3D-only constraint rationale (2D slice disconnection argument)
+        4. SAM3 parallel branch note
+        5. "Lifted to 3D" feasibility table for 2D-only literature methods
+        6. Remaining literature gaps
+
+        References the literature report for all citations.
+      </description>
+      <files>
+        <create>docs/planning/topology-approaches-discussion-notes.md</create>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_topology_experiment_config.py</test_file>
+        <tests>
+          <test>test_discussion_notes_exists — file exists and has content</test>
+          <test>test_discussion_notes_has_sections — implemented, deferred, 3D rationale sections</test>
+          <test>test_discussion_notes_no_sam_implementation — no SAM implementation details</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T15</dependencies>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- Phase 6: Cross-Flow Prefect Integration                             -->
+  <!-- User directive: "include any other blockers across the whole e2e    -->
+  <!-- pipeline for all the available Prefect Flows"                       -->
+  <!-- ================================================================== -->
+  <phase id="6" title="Cross-Flow Prefect Integration">
+    <description>
+      Integrates multi-task topology-aware segmentation into all 5 Prefect flows.
+      User directive: lack of precomputed SDF/UDF is NOT a reason to skip
+      implementation — modify the Prefect Data Flow to precompute them.
+    </description>
+
+    <task id="T18" status="NOT_STARTED">
+      <name>Flow 1 (Data) — Generic auxiliary GT precomputation</name>
+      <description>
+        Extend data_flow.py with a GENERIC auxiliary GT precomputation step.
+        NOT hardcoded to SDF or centerline — supports any registered compute
+        function.
+
+        Implemented as a Prefect task: @task precompute_auxiliary_targets(
+          volume_paths, output_dir, target_configs: list[AuxTargetConfig])
+
+        AuxTargetConfig = dataclass(name, suffix, compute_fn)
+        - Default configs: sdf (compute_sdf_from_mask), centerline_dist
+          (compute_centreline_distance_map)
+        - Researchers add new configs via YAML, register compute_fn in registry
+
+        For each volume and each target config:
+        1. compute_fn(label) → save as {volume_id}_{suffix}.nii.gz
+        2. Store alongside existing volume/label pairs
+
+        Behavior:
+        - Runs after volume validation, before data profiling
+        - Idempotent: skips if precomputed files already exist (unless --force)
+        - Progress logging: "Precomputing {name} for volume {i}/{n}"
+        - New targets can be added without modifying data_flow.py code
+      </description>
+      <files>
+        <modify>src/minivess/orchestration/data_flow.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_flow1_multitask_precompute.py</test_file>
+        <tests>
+          <test>test_precompute_creates_configured_files — NIfTI files created per config</test>
+          <test>test_precompute_generic_two_targets — works with 2 different target configs</test>
+          <test>test_precompute_idempotent — second run skips existing files</test>
+          <test>test_precompute_force_recomputes — --force flag regenerates files</test>
+          <test>test_precompute_shape_matches_label — aux target spatial dims match label</test>
+          <test>test_precompute_custom_compute_fn — works with arbitrary compute function</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T1</dependencies>
+    </task>
+
+    <task id="T19" status="NOT_STARTED">
+      <name>Flow 4 (Deploy) — Multi-task ONNX export support</name>
+      <description>
+        Extend deploy_onnx_export.py to handle multi-task models.
+
+        Current ONNX export: single output (mask logits).
+        Upgraded ONNX export for multi-task models:
+        - Primary output: mask logits (for deployment — always present)
+        - Optional outputs: SDF prediction, centerline prediction
+          (configurable via DeployConfig.export_aux_heads: bool = False)
+
+        When export_aux_heads=False (default): strip aux heads before export,
+        export mask-only model. This is the standard deployment path.
+        When export_aux_heads=True: export all three outputs for research/
+        analysis use cases.
+
+        Extend _load_model_from_checkpoint() to detect MultiTaskAdapter and
+        handle its checkpoint format.
+      </description>
+      <files>
+        <modify>src/minivess/pipeline/deploy_onnx_export.py</modify>
+        <modify>src/minivess/config/deploy_config.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_multitask_onnx_export.py</test_file>
+        <tests>
+          <test>test_multitask_onnx_mask_only — default export has single output</test>
+          <test>test_multitask_onnx_all_heads — export_aux_heads=True gives 3 outputs</test>
+          <test>test_multitask_onnx_validates — ONNX Runtime inference succeeds</test>
+          <test>test_standard_model_export_unchanged — non-multitask ONNX export untouched</test>
+          <test>test_deploy_config_export_aux_heads — new config field defaults to False</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T8</dependencies>
+    </task>
+
+    <task id="T20" status="NOT_STARTED">
+      <name>Flow 3 (Analysis) + Flow 5 (Dashboard) — topology metrics integration</name>
+      <description>
+        Extend analysis_flow.py and dashboard_flow.py to include topology-
+        specific metrics and multi-task training curves:
+
+        Flow 3 (Analysis) extensions:
+        - Per-head validation metrics (SDF MAE/RMSE, centerline MAE/RMSE)
+          extracted from MLflow runs with multi-task models
+        - Topology comparison table in ComparisonTable format
+        - Paired bootstrap tests for topology metrics (clDice, BE_0, BE_1)
+
+        Flow 5 (Dashboard) extensions:
+        - Multi-task training curves: seg loss, SDF loss, centerline loss
+          over epochs (3 separate lines per run)
+        - Topology comparison bar chart: conditions vs metrics
+        - Per-head convergence plots
+
+        These are best-effort (Flow 5 failure does not block pipeline).
+      </description>
+      <files>
+        <modify>src/minivess/orchestration/analysis_flow.py</modify>
+        <modify>src/minivess/orchestration/dashboard_flow.py</modify>
+      </files>
+      <tdd_spec>
+        <test_file>tests/v2/unit/test_topology_flow_integration.py</test_file>
+        <tests>
+          <test>test_analysis_flow_extracts_per_head_metrics — SDF/CL metrics from MLflow</test>
+          <test>test_analysis_flow_topology_comparison — comparison table includes topology metrics</test>
+          <test>test_dashboard_flow_multitask_curves — training curve data for 3 loss components</test>
+          <test>test_dashboard_flow_graceful_no_multitask — no crash when no multitask runs exist</test>
+        </tests>
+      </tdd_spec>
+      <dependencies>T9b T15</dependencies>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- EXECUTION ORDER AND PARALLELISM (CORRECTED — reviewer fix C5)       -->
+  <!-- ================================================================== -->
+  <execution_order>
+    <description>
+      Task dependency graph — 8 sequential groups (23 total tasks):
+
+      Group 1 (independent starts, 4 parallel tasks):
+        T1 (SDF GT), T3 (D2C transform), T6 (SDF head), T11 (TFFM tests)
+
+      Group 2 (7 parallel tasks, each depends on one Group 1 task):
+        T2 (depends T1), T4 (depends T3), T7 (depends T1),
+        T8 (depends T6), T12 (depends T11),
+        T18 (depends T1 — Flow 1 precompute),
+        T19 (depends T8 — Flow 4 ONNX)
+
+      Group 3 (2 tasks):
+        T5 (depends T4), T9a (depends T2+T7+T8)
+
+      Group 4 (1 task):
+        T9b (depends T9a)
+
+      Group 5 (3 tasks):
+        T9c (depends T9b)
+        T10 (depends T5+T9c)
+        T13 (depends T12+T9c — serialized with T9c to avoid models.py conflict, fix C4)
+
+      Group 6 (3 parallel tasks):
+        T14 (depends T5+T10+T13), T16 (depends T5+T10+T13)
+
+      Group 7 (3 tasks):
+        T15 (depends T14) -> T17 (depends T15)
+        T20 (depends T9b+T15 — Flow 3/5 integration)
+
+      Group 8 (documentation — depends on T15):
+        T17 (depends T15)
+
+      Critical path (longest chain):
+        T1 -> T2 -> T9a -> T9b -> T9c -> T10 -> T14 -> T15 -> T17
+        (9 serial steps)
+
+      Cross-flow tasks (T18, T19, T20) are on shorter paths and do not
+      extend the critical path.
+    </description>
+  </execution_order>
+
+  <!-- ================================================================== -->
+  <!-- CRASH RESISTANCE                                                    -->
+  <!-- ================================================================== -->
+  <crash_resistance>
+    <description>
+      Each task is self-contained with its own test file and explicit dependencies.
+      The TDD skill's state file (state/tdd-state.json) tracks per-task status.
+
+      **Rollback strategy (reviewer fix):**
+      - Each task commits before the next task starts (TDD checkpoint protocol)
+      - If interrupted mid-task, `git stash` preserves partial work
+      - Tasks that modify shared files (trainer.py, models.py) use additive
+        patterns (isinstance/hasattr guards) so partial changes do not break
+        the existing code path
+
+      **Serialization constraints:**
+      - T9c and T13 both modify models.py — T13 depends on T9c (fix C4)
+      - T9a/T9b/T9c are sequential (split from original T9, fix M5)
+
+      **Go/no-go gates from predictions:**
+      - P3 failure (D2C &lt;1pp): proceed anyway (zero cost, still useful augmentation)
+      - P4 failure (TFFM &lt;0.5pp): expected negative result, publishable
+      - P1 failure (multi-task &lt;3pp): check secondary gate (>1.5pp with p&lt;0.05);
+        if secondary fails, investigate SDF/centerline GT quality before concluding
+
+      **VRAM safety:** Combined pipeline estimated ~5900 MB with AMP, batch_size=2.
+      Pre-training validation guards (existing) prevent OOM.
+
+      **Cross-flow tasks (T18-T20):** These are non-critical-path tasks.
+      T18 (Flow 1 precompute) can fail and T2's fallback (on-the-fly compute)
+      handles it gracefully. T19 (Flow 4 ONNX) and T20 (Flow 3/5 metrics)
+      are additive and do not break existing flow execution.
+    </description>
+  </crash_resistance>
+
+</plan>
