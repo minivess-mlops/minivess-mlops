@@ -47,7 +47,7 @@ def compute_per_head_metrics(
             )
             continue
 
-        gt_key = getattr(config, "gt_key", config.name)
+        gt_key = config.gt_key
         gt = batch.get(gt_key)
         if gt is None:
             logger.warning(

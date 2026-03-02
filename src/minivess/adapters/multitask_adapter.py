@@ -34,11 +34,17 @@ class AuxHeadConfig:
         name: Head name (key in SegmentationOutput.metadata).
         head_type: One of "regression", "classification", "segmentation".
         out_channels: Number of output channels for this head.
+        gt_key: Key in batch dict for this head's ground truth. Defaults to name.
     """
 
     name: str
     head_type: str
     out_channels: int
+    gt_key: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.gt_key:
+            self.gt_key = self.name
 
 
 def _build_head(head_type: str, in_channels: int, out_channels: int) -> nn.Module:
@@ -59,24 +65,19 @@ def _build_head(head_type: str, in_channels: int, out_channels: int) -> nn.Modul
     """
     mid_channels = max(in_channels // 4, 1)
 
-    if head_type == "regression":
-        # No final activation — unbounded output for regression
-        return nn.Sequential(
-            nn.Conv3d(in_channels, mid_channels, kernel_size=1, bias=False),
-            nn.InstanceNorm3d(mid_channels),
-            nn.GELU(),
-            nn.Conv3d(mid_channels, out_channels, kernel_size=1),
-        )
-    if head_type in ("classification", "segmentation"):
-        # No final activation — logits for classification/segmentation
-        return nn.Sequential(
-            nn.Conv3d(in_channels, mid_channels, kernel_size=1, bias=False),
-            nn.InstanceNorm3d(mid_channels),
-            nn.GELU(),
-            nn.Conv3d(mid_channels, out_channels, kernel_size=1),
-        )
-    msg = f"Unknown head type: {head_type}. Supported: regression, classification, segmentation"
-    raise ValueError(msg)
+    if head_type not in ("regression", "classification", "segmentation"):
+        msg = f"Unknown head type: {head_type}. Supported: regression, classification, segmentation"
+        raise ValueError(msg)
+
+    # All head types share the same architecture (1x1 conv → norm → GELU → 1x1 conv).
+    # No final activation: regression outputs are unbounded, classification/segmentation
+    # outputs are raw logits (activation applied downstream by the loss function).
+    return nn.Sequential(
+        nn.Conv3d(in_channels, mid_channels, kernel_size=1, bias=False),
+        nn.InstanceNorm3d(mid_channels),
+        nn.GELU(),
+        nn.Conv3d(mid_channels, out_channels, kernel_size=1),
+    )
 
 
 class MultiTaskAdapter(nn.Module):  # type: ignore[misc]

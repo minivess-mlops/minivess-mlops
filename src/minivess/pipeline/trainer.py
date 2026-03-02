@@ -318,7 +318,12 @@ class SegmentationTrainer:
                         overlap=0.25,
                     )
                     # Sliding window: standard loss only (no multi-task aux)
-                    loss = self.criterion(logits, labels)
+                    from minivess.pipeline.multitask_loss import MultiTaskLoss
+
+                    if isinstance(self.criterion, MultiTaskLoss):
+                        loss = self.criterion.seg_criterion(logits, labels)
+                    else:
+                        loss = self.criterion(logits, labels)
                 else:
                     output = self.model(images)
                     logits = output.logits
