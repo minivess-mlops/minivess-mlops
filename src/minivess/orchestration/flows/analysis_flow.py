@@ -37,6 +37,7 @@ from minivess.pipeline.comparison import (
     ComparisonTable,
     LossResult,
     MetricSummary,
+    format_comparison_latex,
     format_comparison_markdown,
 )
 from minivess.pipeline.model_promoter import ModelPromoter
@@ -79,7 +80,7 @@ class _EnsembleInferenceWrapper(nn.Module):  # type: ignore[misc]
         """Number of ensemble members."""
         return len(self._members)
 
-    @torch.no_grad()  # type: ignore[misc]
+    @torch.no_grad()
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Average logits across all ensemble members.
 
@@ -366,7 +367,7 @@ def _run_mlflow_eval_safe(
 # ---------------------------------------------------------------------------
 
 
-@task(name="load-training-artifacts")  # type: ignore[misc]
+@task(name="load-training-artifacts")
 def load_training_artifacts(
     eval_config: EvaluationConfig,
     model_config: dict[str, Any],
@@ -403,7 +404,7 @@ def load_training_artifacts(
     return runs
 
 
-@task(name="build-ensembles")  # type: ignore[misc]
+@task(name="build-ensembles")
 def build_ensembles(
     runs: list[dict[str, Any]],
     eval_config: EvaluationConfig,
@@ -444,7 +445,7 @@ def build_ensembles(
     return ensembles
 
 
-@task(name="log-models-to-mlflow")  # type: ignore[misc]
+@task(name="log-models-to-mlflow")
 def log_models_to_mlflow(
     runs: list[dict[str, Any]],
     ensembles: dict[str, EnsembleSpec],
@@ -498,7 +499,7 @@ def log_models_to_mlflow(
     return model_uris
 
 
-@task(name="evaluate-all-models")  # type: ignore[misc]
+@task(name="evaluate-all-models")
 def evaluate_all_models(
     single_models: dict[str, nn.Module],
     ensembles: dict[str, EnsembleSpec],
@@ -573,7 +574,7 @@ def evaluate_all_models(
     return all_results
 
 
-@task(name="evaluate-with-mlflow")  # type: ignore[misc]
+@task(name="evaluate-with-mlflow")
 def evaluate_with_mlflow(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
     eval_config: EvaluationConfig,
@@ -615,7 +616,7 @@ def evaluate_with_mlflow(
     return mlflow_results
 
 
-@task(name="generate-comparison")  # type: ignore[misc]
+@task(name="generate-comparison")
 def generate_comparison(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
 ) -> str:
@@ -689,7 +690,7 @@ def generate_comparison(
     return markdown
 
 
-@task(name="register-champion")  # type: ignore[misc]
+@task(name="register-champion")
 def register_champion_task(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
     eval_config: EvaluationConfig,
@@ -792,7 +793,7 @@ def register_champion_task(
     }
 
 
-@task(name="tag-champion-models")  # type: ignore[misc]
+@task(name="tag-champion-models")
 def tag_champion_models(
     analysis_entries: list[dict[str, Any]],
     runs: list[dict[str, Any]],
@@ -879,7 +880,7 @@ def tag_champion_models(
     }
 
 
-@task(name="generate-report")  # type: ignore[misc]
+@task(name="generate-report")
 def generate_report(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
     comparison_md: str,
@@ -1212,11 +1213,136 @@ def create_analysis_experiment(
 
 
 # ---------------------------------------------------------------------------
+# Artifact export helpers
+# ---------------------------------------------------------------------------
+
+
+def _build_comparison_table_from_results(
+    all_results: dict[str, dict[str, dict[str, Any]]],
+) -> ComparisonTable | None:
+    """Build a ComparisonTable from evaluation results for figure generation.
+
+    Attempts to extract per-fold metric values from EvaluationResult objects.
+    Returns None if insufficient data.
+    """
+    from minivess.pipeline.ci import ConfidenceInterval
+
+    losses: list[LossResult] = []
+    all_metric_names: set[str] = set()
+
+    for model_name, datasets in all_results.items():
+        fold_metrics: dict[str, list[float]] = defaultdict(list)
+        n_folds = 0
+
+        for _dataset_name, subsets in datasets.items():
+            for _subset_name, eval_result in subsets.items():
+                n_folds += 1
+                if hasattr(eval_result, "metrics") and eval_result.metrics:
+                    for metric_name, value in eval_result.metrics.items():
+                        if isinstance(value, ConfidenceInterval):
+                            fold_metrics[metric_name].append(
+                                value.point_estimate,
+                            )
+                        elif isinstance(value, int | float):
+                            fold_metrics[metric_name].append(float(value))
+
+        if not fold_metrics:
+            continue
+
+        metrics: dict[str, MetricSummary] = {}
+        for metric_name, values in fold_metrics.items():
+            import numpy as np
+
+            arr = np.array(values)
+            mean_val = float(arr.mean())
+            std_val = float(arr.std()) if len(arr) > 1 else 0.0
+            metrics[metric_name] = MetricSummary(
+                mean=mean_val,
+                std=std_val,
+                ci_lower=mean_val - 1.96 * std_val,
+                ci_upper=mean_val + 1.96 * std_val,
+                per_fold=values,
+            )
+            all_metric_names.add(metric_name)
+
+        losses.append(
+            LossResult(
+                loss_name=model_name,
+                num_folds=n_folds,
+                metrics=metrics,
+            ),
+        )
+
+    if not losses:
+        return None
+
+    return ComparisonTable(
+        losses=losses,
+        metric_names=sorted(all_metric_names),
+    )
+
+
+def _export_analysis_artifacts(
+    comparison_md: str,
+    all_results: dict[str, dict[str, dict[str, Any]]],
+    output_dir: Path | None,
+) -> dict[str, str]:
+    """Export comparison tables (markdown + LaTeX) and figures to disk.
+
+    Returns dict mapping artifact type to file path.
+    """
+    from pathlib import Path as _Path
+
+    from minivess.pipeline.viz.generate_all_figures import generate_all_figures
+
+    base_dir = output_dir or _Path("outputs/analysis")
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    artifact_paths: dict[str, str] = {}
+
+    # Save markdown comparison table
+    md_path = base_dir / "comparison_table.md"
+    md_path.write_text(comparison_md, encoding="utf-8")
+    artifact_paths["comparison_md"] = str(md_path)
+    logger.info("Saved comparison markdown: %s", md_path)
+
+    # Build ComparisonTable from results and export LaTeX
+    table = _build_comparison_table_from_results(all_results)
+    if table is not None:
+        latex = format_comparison_latex(table)
+        tex_path = base_dir / "comparison_table.tex"
+        tex_path.write_text(latex, encoding="utf-8")
+        artifact_paths["comparison_latex"] = str(tex_path)
+        logger.info("Saved LaTeX table: %s", tex_path)
+
+        # Generate all figures with real data
+        figures_dir = base_dir / "figures"
+        figures_dir.mkdir(parents=True, exist_ok=True)
+        fig_summary = generate_all_figures(
+            output_dir=figures_dir,
+            comparison_table=table,
+            formats=["png", "svg"],
+        )
+        artifact_paths["figures_dir"] = str(figures_dir)
+        artifact_paths["figures_succeeded"] = ",".join(fig_summary["succeeded"])
+        artifact_paths["figures_failed"] = ",".join(fig_summary["failed"])
+        logger.info(
+            "Generated %d figures (%d failed)",
+            len(fig_summary["succeeded"]),
+            len(fig_summary["failed"]),
+        )
+    else:
+        logger.warning("No comparison table built — skipping LaTeX and figures")
+
+    return artifact_paths
+
+
+# ---------------------------------------------------------------------------
 # Main flow
 # ---------------------------------------------------------------------------
 
 
-@flow(name="analysis-flow")  # type: ignore[misc]
+@flow(name="analysis-flow")
 def run_analysis_flow(
     eval_config: EvaluationConfig,
     model_config: dict[str, Any],
@@ -1309,6 +1435,13 @@ def run_analysis_flow(
     # Step 10: Generate report
     report = generate_report(all_results, comparison_md, promotion_info)
 
+    # Step 11: Export comparison tables and figures to disk
+    artifact_paths = _export_analysis_artifacts(
+        comparison_md,
+        all_results,
+        output_dir,
+    )
+
     log.info(
         "Analysis flow complete. Champion: %s", promotion_info.get("champion_name")
     )
@@ -1320,4 +1453,5 @@ def run_analysis_flow(
         "report": report,
         "mlflow_evaluation": mlflow_eval_results,
         "champion_tags": champion_info,
+        "artifact_paths": artifact_paths,
     }

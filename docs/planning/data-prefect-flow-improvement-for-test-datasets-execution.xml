@@ -1,0 +1,798 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Executable Plan: Real-Data Prefect Flow Verification & Paper Artifact Generation
+  Branch: test/quasi-e2e-debugging (from main at 6e163cb)
+  Created: 2026-03-02
+  Purpose: Push REAL data through ALL Prefect flows, generate paper-ready artifacts,
+           and verify generalization on test datasets. The quasi-E2E tests (#191) only
+           used mocks — this plan runs everything with actual trained models and data.
+
+  KEY FINDING: Zero PNGs, zero LaTeX tables, zero Parquet files, zero ONNX exports
+  exist in the repo. No champion tags written. No per-volume metrics persisted.
+  All figures use _demo synthetic data. The viz module is completely disconnected
+  from real experiments. This plan fixes ALL of that.
+
+  REAL EXPERIMENTS AVAILABLE:
+  ═══════════════════════════
+  1. dynunet_loss_variation_v2 (843896622863223169): 4 losses × 3 folds × 100 epochs
+     Losses: dice_ce, cbdice, dice_ce_cldice, cbdice_cldice
+     Checkpoints: 28 (.pth), 7 per run × 4 runs
+     Run IDs: af4adc15 (dice_ce), 3a9f3615 (cbdice), 4b2451ac (dice_ce_cldice), 01d904c6 (cbdice_cldice)
+
+  2. dynunet_half_width_v1 (859817033030295110): 4 losses × 3 folds × 100 epochs (filters/2)
+
+  3. dynunet_all_losses_debug (684514625199150164): 18 losses × 3 folds × 6 epochs
+
+  4. minivess_evaluation (309410943942924473): 37 evaluation runs
+
+  DATASET: 70 MiniVess volumes in data/raw/minivess/ (940 MB)
+  SPLITS: configs/splits/3fold_seed42.json (3-fold, seed=42)
+  EXTERNAL DATASETS: Registry defined (deepvess, tubenet_2pm, vesselnn) — NOT downloaded
+-->
+
+<execution-plan name="real-data-flow-verification" version="1.0">
+
+  <metadata>
+    <branch>test/quasi-e2e-debugging</branch>
+    <base-commit>6e163cb</base-commit>
+    <total-phases>8</total-phases>
+    <estimated-tasks>28</estimated-tasks>
+    <critical-path>P0 → P1 → P2 → P3 → P5 → P7</critical-path>
+    <parallel-paths>P4 can run after P1; P6 after P3</parallel-paths>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 0: AUDIT & FIX PREREQUISITES                                    -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="P0" name="Audit and Fix Prerequisites">
+    <description>
+      Verify all prerequisites: mlruns intact, checkpoints loadable, data splits valid,
+      viz module importable, and fix any blockers before running real data.
+    </description>
+
+    <task id="P0-T1" name="Verify MLflow runs are intact and checkpoints loadable">
+      <description>
+        Write a diagnostic script (scripts/diagnose_mlruns.py) that:
+        1. Lists all experiments with run counts
+        2. For each run in dynunet_loss_variation_v2: verify checkpoint files exist,
+           load state_dict headers (torch.load with weights_only=True), print param counts
+        3. Verify metric files are non-empty (eval_fold*_dsc, eval_fold*_centreline_dsc)
+        4. Check for champion tags (expect: NONE currently exist)
+        5. Print summary: "N runs, M checkpoints, K metrics, champion_tags: {yes/no}"
+      </description>
+      <test>Run script, all checkpoints load, all metrics present</test>
+      <files>
+        <new>scripts/diagnose_mlruns.py</new>
+      </files>
+    </task>
+
+    <task id="P0-T2" name="Verify data splits match real volumes">
+      <description>
+        Load configs/splits/3fold_seed42.json, verify every volume_id listed maps to
+        a real .nii.gz file in data/raw/minivess/imagesTr/ and labelsTr/. Print:
+        - Total volumes discovered: N (expect 70)
+        - Volumes in splits: M (expect 70)
+        - Missing from disk: list (expect empty)
+        - Orphaned on disk: list (expect empty)
+        Add this check to scripts/diagnose_mlruns.py.
+      </description>
+      <test>All 70 volumes present, zero missing, zero orphaned</test>
+    </task>
+
+    <task id="P0-T3" name="Fix viz module to accept real ComparisonTable data">
+      <description>
+        The viz module (generate_all_figures.py) ONLY uses _demo_comparison_table().
+        Modify generate_figure() and generate_all_figures() to accept an optional
+        `comparison_table: ComparisonTable | None` parameter. When provided, use it
+        instead of demo data. When None, fall back to demo data for testing.
+
+        Also modify each _gen_* function to accept optional ComparisonTable.
+        This is the bridge between real MLflow data and figure generation.
+      </description>
+      <test>
+        uv run pytest tests/v2/unit/test_generate_all_figures.py -x -q
+        (add test: generate_figure("loss_comparison", comparison_table=real_table) produces .png)
+      </test>
+      <files>
+        <modify>src/minivess/pipeline/viz/generate_all_figures.py</modify>
+        <modify>tests/v2/unit/test_generate_all_figures.py</modify>
+      </files>
+    </task>
+
+    <task id="P0-T4" name="Wire format_comparison_latex into analysis flow">
+      <description>
+        The format_comparison_latex() function exists in comparison.py but is never
+        called by analysis_flow.py. Add a step in run_analysis_flow() after the
+        comparison generation step that:
+        1. Calls format_comparison_latex(table) to get LaTeX string
+        2. Saves it to {output_dir}/comparison_table.tex
+        3. Also calls format_comparison_markdown(table) and saves to
+           {output_dir}/comparison_table.md
+        4. Returns both paths in the flow result dict
+      </description>
+      <test>
+        uv run pytest tests/v2/unit/test_analysis_flow.py -x -q
+        (add test: mock analysis flow produces .tex and .md files)
+      </test>
+      <files>
+        <modify>src/minivess/orchestration/flows/analysis_flow.py</modify>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 1: CHAMPION TAGGING WITH REAL DATA                              -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="P1" name="Champion Tagging on Real Experiments" depends="P0">
+    <description>
+      Run champion_tagger.py on the real dynunet_loss_variation_v2 experiment to
+      tag the 3 champion categories (balanced, topology, overlap). This is a
+      PREREQUISITE for deploy flow and analysis flow to work with real data.
+
+      Currently: ZERO champion tags exist in mlruns/.
+    </description>
+
+    <task id="P1-T1" name="Run rank-then-aggregate champion selection on dynunet_loss_variation_v2">
+      <description>
+        Create scripts/tag_champions.py that:
+        1. Loads all 4 runs from dynunet_loss_variation_v2 (experiment_id=843896622863223169)
+        2. Extracts eval metrics (eval_fold*_dsc, eval_fold*_centreline_dsc, eval_fold*_measured_masd)
+        3. Runs rank_then_aggregate() to select champions:
+           - balanced: rank-aggregate across DSC + clDice
+           - topology: best clDice (expected: cbdice_cldice at 0.906)
+           - overlap: best DSC (expected: dice_ce at 0.824)
+        4. Calls write_champion_tags_filesystem() to persist tags
+        5. Prints champion assignments with metrics
+      </description>
+      <test>
+        Run script, then verify:
+        - find mlruns/843896622863223169 -name "champion_*" → 3+ tag files
+        - Each tag file contains a valid run_id
+      </test>
+      <files>
+        <new>scripts/tag_champions.py</new>
+      </files>
+    </task>
+
+    <task id="P1-T2" name="Run champion tagging on dynunet_half_width_v1">
+      <description>
+        Extend scripts/tag_champions.py to also tag the half-width experiment
+        (experiment_id=859817033030295110). This validates cross-architecture
+        champion selection. Use same 3 categories.
+      </description>
+      <test>Champion tags written for both experiments</test>
+    </task>
+
+    <task id="P1-T3" name="Verify champion discovery finds tagged runs">
+      <description>
+        After tagging, verify that deploy_champion_discovery.discover_champions()
+        correctly finds all 3 categories. Write a short test or script call:
+        ```python
+        from minivess.pipeline.deploy_champion_discovery import discover_champions
+        champions = discover_champions(mlruns_dir, experiment_id="843896622863223169")
+        assert len(champions) == 3  # balanced, topology, overlap
+        ```
+      </description>
+      <test>discover_champions returns 3 ChampionModel objects</test>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 2: RUN DATA FLOW ON REAL DATASET                                -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="P2" name="Run Data Flow (Flow 1) on Real MiniVess Dataset" depends="P0">
+    <description>
+      Execute Flow 1 with real data. Verify pair discovery, validation, quality gate,
+      and K-fold splits match what training used. Persist artifacts to outputs/.
+    </description>
+
+    <task id="P2-T1" name="Run data flow end-to-end on MiniVess 70 volumes">
+      <description>
+        Create scripts/run_data_flow_real.py that:
+        1. Calls run_data_flow(data_dir=Path("data/raw/minivess"), n_folds=3, seed=42)
+        2. Asserts: result.quality_passed is True
+        3. Asserts: len(result.pairs) == 70
+        4. Asserts: len(result.splits) == 3
+        5. Saves splits to outputs/data_flow/splits.json
+        6. Saves provenance to outputs/data_flow/provenance.json
+        7. Saves validation report to outputs/data_flow/validation_report.json
+        8. Compares generated splits with configs/splits/3fold_seed42.json — should match
+        9. Logs provenance to MLflow (data_n_volumes, data_hash, etc.)
+      </description>
+      <test>
+        Script runs successfully, outputs/ contains 3 JSON files,
+        splits match configs/splits/3fold_seed42.json exactly
+      </test>
+      <files>
+        <new>scripts/run_data_flow_real.py</new>
+      </files>
+      <artifacts>
+        <artifact>outputs/data_flow/splits.json</artifact>
+        <artifact>outputs/data_flow/provenance.json</artifact>
+        <artifact>outputs/data_flow/validation_report.json</artifact>
+      </artifacts>
+    </task>
+
+    <task id="P2-T2" name="Profile dataset and save DatasetProfile">
+      <description>
+        Extend scripts/run_data_flow_real.py to also run scan_dataset() from profiler.py:
+        1. Compute VolumeStats for all 70 volumes
+        2. Build DatasetProfile with shapes, spacings, outliers
+        3. Save to outputs/data_flow/dataset_profile.json
+        4. Print summary: min_shape, max_shape, outlier volumes, total size
+        5. Verify mv02 is flagged as outlier (4.97 μm spacing)
+      </description>
+      <test>Dataset profile saved, mv02 flagged as outlier</test>
+      <artifacts>
+        <artifact>outputs/data_flow/dataset_profile.json</artifact>
+      </artifacts>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 3: RUN ANALYSIS FLOW ON REAL EXPERIMENTS                        -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="P3" name="Run Analysis Flow (Flow 3) on Real Trained Models" depends="P1">
+    <description>
+      This is the CORE phase. Run the analysis flow on dynunet_loss_variation_v2
+      (4 losses × 3 folds × 100 epochs) with real checkpoint loading, real inference
+      on validation volumes, real metric computation, and real artifact generation.
+
+      OUTPUTS: per-volume metrics JSON, comparison tables (MD + LaTeX), paper figures,
+      champion rankings, ensemble evaluation, Parquet export.
+
+      RESOURCE REQUIREMENTS: GPU inference on 70 volumes × 4 models × 3 folds.
+      Estimated: 30-60 minutes with RTX 2070 Super.
+    </description>
+
+    <task id="P3-T1" name="Create master analysis runner script">
+      <description>
+        Create scripts/run_analysis_flow_real.py that:
+        1. Sets output_dir = Path("outputs/analysis")
+        2. Configures AnalysisFlowConfig with:
+           - experiment_name = "dynunet_loss_variation_v2"
+           - mlruns_dir = Path("mlruns")
+           - data_dir = Path("data/raw/minivess")
+           - splits_path = Path("configs/splits/3fold_seed42.json")
+           - output_dir = outputs/analysis/dynunet_loss_variation_v2/
+           - metrics = ["dsc", "centreline_dsc", "measured_masd", "hd95", "nsd", "cldice"]
+           - bootstrap_n = 1000 (for CIs)
+        3. Calls run_analysis_flow() — this triggers ALL 9 tasks:
+           load artifacts → build ensembles → evaluate → compare → tag → report
+        4. Saves ALL outputs to disk (not just returns them)
+        5. Error handling: catch and report per-task failures without aborting entire flow
+
+        Key difference from mock tests: this loads REAL checkpoints (~65MB each),
+        runs REAL GPU inference on REAL NIfTI volumes, computes REAL metrics.
+      </description>
+      <test>Script starts, loads checkpoints, begins inference</test>
+      <files>
+        <new>scripts/run_analysis_flow_real.py</new>
+      </files>
+    </task>
+
+    <task id="P3-T2" name="Per-volume metric persistence to MLflow and JSON">
+      <description>
+        After evaluation, for each model × fold:
+        1. Call FoldResult.save_per_volume_json() to save per-volume metrics
+           to outputs/analysis/per_volume_metrics/{loss}_{fold}.json
+        2. Call ExperimentTracker.log_per_volume_metrics() to persist as MLflow artifact
+        3. Verify roundtrip: load JSON, check volume IDs match, check metric values
+
+        Expected output: 4 losses × 3 folds = 12 JSON files, each containing
+        ~23-24 volumes with dsc, centreline_dsc, measured_masd per volume.
+      </description>
+      <test>12 per-volume JSON files in outputs/analysis/per_volume_metrics/</test>
+      <artifacts>
+        <artifact>outputs/analysis/per_volume_metrics/*.json (12 files)</artifact>
+        <artifact>mlruns artifacts: per_volume_metrics/fold*_*.json</artifact>
+      </artifacts>
+    </task>
+
+    <task id="P3-T3" name="Generate comparison table (Markdown + LaTeX)">
+      <description>
+        After all models evaluated:
+        1. Call build_comparison_table(eval_results) with REAL evaluation data
+        2. Call format_comparison_markdown(table) → save to outputs/analysis/comparison_table.md
+        3. Call format_comparison_latex(table) → save to outputs/analysis/comparison_table.tex
+        4. Call compute_all_pairwise_comparisons() → paired bootstrap significance tests
+        5. Call format_significance_matrix_markdown() → save to outputs/analysis/significance_matrix.md
+        6. Verify: LaTeX has \toprule, bold best values, all 4 loss names present
+        7. Verify: Markdown is human-readable in terminal
+
+        This produces the ACTUAL paper table — not mock data.
+      </description>
+      <test>
+        comparison_table.tex, comparison_table.md, significance_matrix.md all exist
+        and contain real metric values (DSC ~0.78-0.82, clDice ~0.83-0.91)
+      </test>
+      <artifacts>
+        <artifact>outputs/analysis/comparison_table.tex</artifact>
+        <artifact>outputs/analysis/comparison_table.md</artifact>
+        <artifact>outputs/analysis/significance_matrix.md</artifact>
+      </artifacts>
+    </task>
+
+    <task id="P3-T4" name="Generate paper-quality figures from real data">
+      <description>
+        After comparison table is built:
+        1. Call generate_all_figures(output_dir, comparison_table=real_table)
+           where real_table is built from actual eval results
+        2. Generate 4 core figures:
+           - loss_comparison.png: bar chart of DSC/clDice per loss (real values)
+           - fold_heatmap.png: per-fold metric matrix (real values)
+           - metric_correlation.png: DSC vs clDice scatter (real values)
+           - sensitivity_heatmap.png: factorial analysis (real values)
+        3. Also generate training curve plots from metric_history.json:
+           - training_curves.png: train/val loss over 100 epochs per loss
+        4. Export in multiple formats: PNG (300 DPI) + SVG (vector for paper)
+        5. Save alongside JSON reproducibility data
+
+        Each figure must contain REAL experiment numbers, not demo data.
+      </description>
+      <test>
+        4+ PNG files in outputs/analysis/figures/, non-zero size,
+        visual inspection shows real metric ranges
+      </test>
+      <artifacts>
+        <artifact>outputs/analysis/figures/loss_comparison.{png,svg}</artifact>
+        <artifact>outputs/analysis/figures/fold_heatmap.{png,svg}</artifact>
+        <artifact>outputs/analysis/figures/metric_correlation.{png,svg}</artifact>
+        <artifact>outputs/analysis/figures/sensitivity_heatmap.{png,svg}</artifact>
+        <artifact>outputs/analysis/figures/training_curves.{png,svg}</artifact>
+      </artifacts>
+    </task>
+
+    <task id="P3-T5" name="DuckDB extraction and Parquet export">
+      <description>
+        After analysis is complete:
+        1. Call extract_runs_to_duckdb(mlruns_dir, experiment_id, db_path="outputs/analysis/mlruns.duckdb")
+        2. Export 3 Parquet files:
+           - outputs/analysis/parquet/eval_metrics.parquet
+             (fold_id, loss_name, metric_name, point_estimate, ci_lower, ci_upper)
+           - outputs/analysis/parquet/training_metrics.parquet
+             (run_id, loss_name, epoch, metric_name, value)
+           - outputs/analysis/parquet/champion_summary.parquet
+             (category, run_id, loss_name, primary_metric, value)
+        3. Verify DuckDB queries return expected data:
+           - query_cross_loss_means() returns 4 rows (one per loss)
+           - query_best_per_metric() returns results for each metric
+           - query_champion_runs() returns 3 rows (one per category)
+
+        This creates the data lake for downstream BI/paper analytics.
+      </description>
+      <test>
+        3 .parquet files in outputs/analysis/parquet/, loadable with pandas,
+        correct row counts, DuckDB file is ~1-5 MB
+      </test>
+      <files>
+        <new>scripts/export_parquet.py</new>
+      </files>
+      <artifacts>
+        <artifact>outputs/analysis/mlruns.duckdb</artifact>
+        <artifact>outputs/analysis/parquet/eval_metrics.parquet</artifact>
+        <artifact>outputs/analysis/parquet/training_metrics.parquet</artifact>
+        <artifact>outputs/analysis/parquet/champion_summary.parquet</artifact>
+      </artifacts>
+    </task>
+
+    <task id="P3-T6" name="Generate final analysis report (Markdown)">
+      <description>
+        Combine all artifacts into a comprehensive analysis report:
+        1. The flow's generate_report() task produces markdown
+        2. Save to outputs/analysis/analysis_report.md
+        3. Should contain: experiment summary, per-loss results, comparison table,
+           champion selections, ensemble performance, promotion recommendations
+        4. Copy to docs/results/dynunet_loss_variation_v2_analysis_flow_report.md
+           (alongside the existing hand-written report)
+      </description>
+      <test>
+        analysis_report.md exists, contains all 4 loss names, contains champion info,
+        >100 lines
+      </test>
+      <artifacts>
+        <artifact>outputs/analysis/analysis_report.md</artifact>
+        <artifact>docs/results/dynunet_loss_variation_v2_analysis_flow_report.md</artifact>
+      </artifacts>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 4: REPEAT ANALYSIS FOR HALF-WIDTH AND DEBUG EXPERIMENTS         -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="P4" name="Analysis on Half-Width and Debug Experiments" depends="P1">
+    <description>
+      Run the same analysis pipeline on dynunet_half_width_v1 and
+      dynunet_all_losses_debug to generate multi-experiment comparison.
+    </description>
+
+    <task id="P4-T1" name="Run analysis on dynunet_half_width_v1">
+      <description>
+        Same as P3-T1 through P3-T6 but for experiment_id=859817033030295110.
+        Output to: outputs/analysis/dynunet_half_width_v1/
+        This gives us width ablation comparison data.
+      </description>
+      <test>All artifacts generated for half-width experiment</test>
+      <artifacts>
+        <artifact>outputs/analysis/dynunet_half_width_v1/comparison_table.tex</artifact>
+        <artifact>outputs/analysis/dynunet_half_width_v1/comparison_table.md</artifact>
+        <artifact>outputs/analysis/dynunet_half_width_v1/figures/*.png</artifact>
+      </artifacts>
+    </task>
+
+    <task id="P4-T2" name="Generate cross-experiment comparison table">
+      <description>
+        Create a cross-experiment comparison that includes:
+        1. Full-width DynUNet (4 losses, 100 epochs)
+        2. Half-width DynUNet (4 losses, 100 epochs)
+        Combine into single ComparisonTable with loss names prefixed by width.
+        Save: outputs/analysis/cross_experiment_comparison.tex
+        Save: outputs/analysis/cross_experiment_comparison.md
+        This shows the impact of model capacity on each loss function.
+      </description>
+      <test>Cross-experiment table contains 8 rows (4 losses × 2 widths)</test>
+      <artifacts>
+        <artifact>outputs/analysis/cross_experiment_comparison.tex</artifact>
+        <artifact>outputs/analysis/cross_experiment_comparison.md</artifact>
+      </artifacts>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 5: DEPLOY FLOW WITH REAL CHAMPIONS                              -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="P5" name="Run Deploy Flow (Flow 4) with Real Champions" depends="P3">
+    <description>
+      Export champions to ONNX, import to BentoML, generate deployment artifacts.
+      This produces the FIRST EVER ONNX models from real training.
+    </description>
+
+    <task id="P5-T1" name="Run deploy flow end-to-end with real champions">
+      <description>
+        Create scripts/run_deploy_flow_real.py that:
+        1. Configures DeployConfig:
+           - mlruns_dir = Path("mlruns")
+           - output_dir = Path("outputs/deploy")
+           - onnx_opset = 17
+           - experiment_id = "843896622863223169"
+        2. Calls deploy_flow(config, experiment_id)
+        3. Expects 3 champions (balanced, topology, overlap) from Phase 1 tags
+        4. Exports 3 ONNX models to outputs/deploy/onnx/
+        5. Generates bentofile.yaml + docker-compose.yaml + DEPLOY_README.md
+        6. Verifies ONNX models load with onnx.load() (checker)
+        7. If onnxruntime available: runs test inference to verify output shapes
+
+        NOTE: BentoML import may fail if bentoml[onnx] not installed.
+        Script should handle this gracefully and report which steps succeeded.
+      </description>
+      <test>
+        3 ONNX files in outputs/deploy/onnx/, bentofile.yaml generated,
+        docker-compose.yaml contains 3 services
+      </test>
+      <files>
+        <new>scripts/run_deploy_flow_real.py</new>
+      </files>
+      <artifacts>
+        <artifact>outputs/deploy/onnx/minivess_balanced_*.onnx</artifact>
+        <artifact>outputs/deploy/onnx/minivess_topology_*.onnx</artifact>
+        <artifact>outputs/deploy/onnx/minivess_overlap_*.onnx</artifact>
+        <artifact>outputs/deploy/artifacts/bentofile.yaml</artifact>
+        <artifact>outputs/deploy/artifacts/docker-compose.yaml</artifact>
+        <artifact>outputs/deploy/artifacts/DEPLOY_README.md</artifact>
+      </artifacts>
+    </task>
+
+    <task id="P5-T2" name="Verify ONNX vs PyTorch parity">
+      <description>
+        For each champion ONNX model:
+        1. Load PyTorch checkpoint
+        2. Load ONNX model
+        3. Run inference on 1 validation volume (same input)
+        4. Compare outputs: np.allclose(pytorch_output, onnx_output, atol=1e-3)
+        5. Report max absolute difference per champion
+        6. Call verify_onnx_vs_pytorch() from deploy_verification.py
+
+        This validates the ONNX export didn't introduce numerical drift.
+      </description>
+      <test>All 3 champions pass ONNX parity check (max diff &lt; 1e-3)</test>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 6: DASHBOARD FLOW WITH REAL INPUTS                              -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="P6" name="Run Dashboard Flow (Flow 5) with Real Data" depends="P3">
+    <description>
+      Generate the Everything Dashboard with actual data from all upstream flows.
+    </description>
+
+    <task id="P6-T1" name="Run dashboard flow with real upstream results">
+      <description>
+        Create scripts/run_dashboard_flow_real.py that:
+        1. Collects results from Phases 2-5:
+           - Data section: 70 volumes, quality passed, 3 external registered
+           - Config section: dynaconf env, experiment config name, model profile
+           - Model section: DynUNet architecture, param count from checkpoint,
+             loss=cbdice_cldice, onnx_exported=True, champion=balanced
+           - Pipeline section: flow results from each phase, trigger="manual"
+        2. Calls run_dashboard_flow(sections, output_dir="outputs/dashboard")
+        3. Verifies: everything_dashboard_report.md has all 4 sections
+        4. Verifies: everything_dashboard_metadata.json is valid JSON
+
+        This produces a comprehensive one-page summary of the entire pipeline.
+      </description>
+      <test>
+        Report and metadata files exist in outputs/dashboard/,
+        report &gt; 50 lines, JSON valid, all sections populated
+      </test>
+      <files>
+        <new>scripts/run_dashboard_flow_real.py</new>
+      </files>
+      <artifacts>
+        <artifact>outputs/dashboard/everything_dashboard_report.md</artifact>
+        <artifact>outputs/dashboard/everything_dashboard_metadata.json</artifact>
+      </artifacts>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 7: FULL PIPELINE TRIGGER CHAIN                                  -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="P7" name="End-to-End Pipeline Trigger Chain" depends="P5,P6">
+    <description>
+      Wire all 5 flows through PipelineTriggerChain and run the full sequence.
+      This is the ultimate verification: data → (training skipped, use existing) →
+      analyze → deploy → dashboard. All with real data and real artifacts.
+    </description>
+
+    <task id="P7-T1" name="Wire trigger chain with all real flows">
+      <description>
+        Create scripts/run_full_pipeline.py that:
+        1. Creates PipelineTriggerChain()
+        2. Registers all flows:
+           - "data": run_data_flow (real MiniVess)
+           - "train": SKIP (use existing dynunet_loss_variation_v2 runs)
+           - "analyze": run_analysis_flow (real evaluation)
+           - "deploy": deploy_flow (real ONNX export)
+           - "dashboard": run_dashboard_flow (real aggregation)
+        3. Calls chain.run_chain(trigger_source="test/quasi-e2e-debugging",
+                                  skip_flows=["train"])
+        4. Reports per-flow status, duration, errors
+        5. Saves chain result to outputs/pipeline/trigger_chain_results.json
+
+        This validates the full pipeline orchestration contract.
+      </description>
+      <test>
+        All 4 flows complete successfully (train skipped),
+        trigger chain results show status=COMPLETED for each
+      </test>
+      <files>
+        <new>scripts/run_full_pipeline.py</new>
+      </files>
+      <artifacts>
+        <artifact>outputs/pipeline/trigger_chain_results.json</artifact>
+      </artifacts>
+    </task>
+
+    <task id="P7-T2" name="Verify all artifacts exist and are valid">
+      <description>
+        Final verification script (scripts/verify_all_artifacts.py) that:
+        1. Checks ALL expected artifacts from ALL phases exist on disk
+        2. Validates file sizes are non-trivial (&gt;100 bytes for JSON/MD/TEX)
+        3. Validates PNG files are loadable (Pillow or matplotlib)
+        4. Validates Parquet files are loadable (pandas.read_parquet)
+        5. Validates ONNX files are loadable (onnx.load + onnx.checker)
+        6. Validates DuckDB file has expected tables
+        7. Prints comprehensive artifact inventory:
+
+        ARTIFACT INVENTORY
+        ══════════════════
+        Data Flow:      3 JSON files (splits, provenance, profile)
+        Analysis Flow:  12 per-volume JSONs, 3 tables (MD+TEX+SIG), 5 figures, 3 Parquet, 1 DuckDB, 1 report
+        Deploy Flow:    3 ONNX models, 3 deployment configs
+        Dashboard Flow: 1 report, 1 metadata JSON
+        Pipeline:       1 trigger chain result
+        ──────────────
+        TOTAL:          35+ artifacts
+      </description>
+      <test>All artifacts present and valid, zero missing, zero corrupt</test>
+      <files>
+        <new>scripts/verify_all_artifacts.py</new>
+      </files>
+    </task>
+
+    <task id="P7-T3" name="Create paper artifact summary for academic submission">
+      <description>
+        Create outputs/paper_artifacts/README.md that:
+        1. Lists all figures with captions for paper:
+           - Figure 1: Loss comparison (DSC, clDice, MASD across 4 losses)
+           - Figure 2: Per-fold heatmap (3 folds × 4 losses × 3 metrics)
+           - Figure 3: Metric correlation (DSC vs clDice scatter)
+           - Figure 4: Training curves (100 epochs, 4 losses)
+        2. Lists all tables:
+           - Table 1: Main comparison table (comparison_table.tex)
+           - Table 2: Statistical significance (significance_matrix.md)
+           - Table 3: Cross-experiment comparison (full vs half width)
+        3. Lists all supplementary data:
+           - Per-volume metrics (12 JSON files)
+           - DuckDB analytics database
+           - Parquet exports
+        4. Includes LaTeX \input{} commands for tables
+        5. Copies all paper-ready artifacts to outputs/paper_artifacts/
+
+        This is the "here's everything you need to write the paper" directory.
+      </description>
+      <test>
+        outputs/paper_artifacts/ contains all figures (PNG+SVG), all tables (TEX),
+        README.md with LaTeX inclusion commands
+      </test>
+      <artifacts>
+        <artifact>outputs/paper_artifacts/README.md</artifact>
+        <artifact>outputs/paper_artifacts/figures/*.{png,svg}</artifact>
+        <artifact>outputs/paper_artifacts/tables/*.tex</artifact>
+      </artifacts>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- VERIFICATION COMMANDS                                                  -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <verification>
+    <per-phase>
+      <command>uv run pytest tests/v2/ -x -q --ignore=tests/v2/unit/test_config_models.py --ignore=tests/v2/unit/test_ensemble.py --ignore=tests/v2/unit/test_plot_config.py --ignore=tests/v2/unit/test_property_based.py --ignore=tests/v2/unit/test_validation_gate_refactor.py --ignore=tests/v2/unit/test_agents.py --ignore=tests/v2/integration/test_deploy_flow_integration.py</command>
+      <command>uv run ruff check src/ tests/ scripts/</command>
+      <command>uv run mypy src/minivess/</command>
+    </per-phase>
+    <final>
+      <command>uv run python scripts/verify_all_artifacts.py</command>
+      <command>find outputs/ -type f | wc -l</command>
+      <command>du -sh outputs/</command>
+    </final>
+  </verification>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- DEPENDENCY GRAPH                                                       -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <dependency-graph>
+    <!--
+    P0 (Audit + Fix Prerequisites)
+      ├─→ P1 (Champion Tagging)  ──→ P3 (Analysis Flow on Real Data) ──→ P5 (Deploy Flow)
+      │                              │                                     │
+      │                              └─→ P4 (Half-Width + Debug)          │
+      │                              │                                     │
+      │                              └─→ P6 (Dashboard Flow)              │
+      │                                                                    │
+      └─→ P2 (Data Flow on Real Data)                                     │
+                                                                           │
+                                                              P7 (Full Pipeline)
+                                                              └─→ depends P5 + P6
+
+    CRITICAL PATH: P0 → P1 → P3 → P5 → P7
+    PARALLEL: P2 can run alongside P1; P4 alongside P3; P6 alongside P5
+    -->
+  </dependency-graph>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- OUTPUT DIRECTORY STRUCTURE                                             -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <output-structure>
+    <!--
+    outputs/
+    ├── data_flow/
+    │   ├── splits.json
+    │   ├── provenance.json
+    │   ├── validation_report.json
+    │   └── dataset_profile.json
+    ├── analysis/
+    │   ├── dynunet_loss_variation_v2/
+    │   │   ├── per_volume_metrics/
+    │   │   │   ├── dice_ce_fold0.json
+    │   │   │   ├── dice_ce_fold1.json
+    │   │   │   ├── dice_ce_fold2.json
+    │   │   │   ├── cbdice_fold0.json
+    │   │   │   └── ... (12 files total)
+    │   │   ├── comparison_table.tex
+    │   │   ├── comparison_table.md
+    │   │   ├── significance_matrix.md
+    │   │   ├── figures/
+    │   │   │   ├── loss_comparison.{png,svg,json}
+    │   │   │   ├── fold_heatmap.{png,svg,json}
+    │   │   │   ├── metric_correlation.{png,svg,json}
+    │   │   │   ├── sensitivity_heatmap.{png,svg,json}
+    │   │   │   └── training_curves.{png,svg,json}
+    │   │   └── analysis_report.md
+    │   ├── dynunet_half_width_v1/
+    │   │   └── (same structure)
+    │   ├── cross_experiment_comparison.tex
+    │   ├── cross_experiment_comparison.md
+    │   ├── parquet/
+    │   │   ├── eval_metrics.parquet
+    │   │   ├── training_metrics.parquet
+    │   │   └── champion_summary.parquet
+    │   └── mlruns.duckdb
+    ├── deploy/
+    │   ├── onnx/
+    │   │   ├── minivess_balanced_*.onnx
+    │   │   ├── minivess_topology_*.onnx
+    │   │   └── minivess_overlap_*.onnx
+    │   └── artifacts/
+    │       ├── bentofile.yaml
+    │       ├── docker-compose.yaml
+    │       └── DEPLOY_README.md
+    ├── dashboard/
+    │   ├── everything_dashboard_report.md
+    │   └── everything_dashboard_metadata.json
+    ├── pipeline/
+    │   └── trigger_chain_results.json
+    └── paper_artifacts/
+        ├── README.md
+        ├── figures/
+        └── tables/
+    -->
+  </output-structure>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- KNOWN RISKS & MITIGATIONS                                              -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <risks>
+    <risk id="R1" severity="HIGH">
+      <description>GPU OOM during inference on all 70 volumes</description>
+      <mitigation>Use sliding window inference with small roi_size=(32,32,32).
+        Process one volume at a time. torch.no_grad() context. Clear CUDA cache
+        between volumes.</mitigation>
+    </risk>
+    <risk id="R2" severity="MEDIUM">
+      <description>onnxruntime not installed → ONNX validation fails</description>
+      <mitigation>Check import onnxruntime at script start. If missing, skip
+        runtime validation but still verify onnx.load() structural check passes.
+        Report clearly which validations were skipped.</mitigation>
+    </risk>
+    <risk id="R3" severity="MEDIUM">
+      <description>Analysis flow takes too long (>2 hours for all models)</description>
+      <mitigation>Support --quick flag that evaluates only fold 0 instead of all 3.
+        Support --loss flag to run single loss function only. Progress bar with
+        tqdm for volume-level progress.</mitigation>
+    </risk>
+    <risk id="R4" severity="LOW">
+      <description>Existing mlruns metric files have different schema than expected</description>
+      <mitigation>Diagnose script (P0-T1) catches schema mismatches early.
+        All metric access goes through MLflow API, not raw file parsing.</mitigation>
+    </risk>
+    <risk id="R5" severity="MEDIUM">
+      <description>State dict key prefix mismatch when loading checkpoints</description>
+      <mitigation>Use _strip_state_dict_prefix() from deploy_onnx_export.py.
+        Try multiple prefix patterns: "module.", "model.", "conv."</mitigation>
+    </risk>
+  </risks>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- CRASH RECOVERY                                                         -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <crash-recovery>
+    <principle>Each script is idempotent — re-running overwrites previous outputs.
+      Scripts check for existing outputs and skip completed steps when --resume flag
+      is passed. Phase dependencies are tracked via marker files in outputs/.done/</principle>
+    <marker-files>
+      <!--
+      outputs/.done/P0-T1.done  (created when P0-T1 completes)
+      outputs/.done/P1-T1.done
+      ...
+      Each marker contains: timestamp, git commit, script name, exit code
+      -->
+    </marker-files>
+  </crash-recovery>
+
+</execution-plan>
