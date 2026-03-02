@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
+import math
 from dataclasses import dataclass, field
+from pathlib import Path  # noqa: TC003 — used at runtime in save/load methods
+from typing import Any
 
 import numpy as np
 
@@ -20,10 +24,129 @@ class FoldResult:
         Dict mapping metric names to per-volume value arrays.
     aggregated:
         Dict mapping metric names to ConfidenceInterval objects.
+    volume_ids:
+        Ordered list of volume identifiers matching per-volume arrays.
     """
 
     per_volume_metrics: dict[str, list[float]] = field(default_factory=dict)
     aggregated: dict[str, ConfidenceInterval] = field(default_factory=dict)
+    volume_ids: list[str] = field(default_factory=list)
+
+    def to_per_volume_json(self) -> list[dict[str, Any]]:
+        """Convert per-volume metrics to a list of dicts for JSON serialization.
+
+        Returns
+        -------
+        List of ``{"volume_id": str, metric_1: float|None, ...}`` dicts.
+        NaN values are converted to None for JSON compatibility.
+        """
+        records: list[dict[str, Any]] = []
+        n_volumes = len(self.volume_ids)
+        for i in range(n_volumes):
+            entry: dict[str, Any] = {"volume_id": self.volume_ids[i]}
+            for metric_name, values in self.per_volume_metrics.items():
+                if i < len(values):
+                    val = values[i]
+                    entry[metric_name] = None if math.isnan(val) else val
+                else:
+                    entry[metric_name] = None
+            records.append(entry)
+        return records
+
+    def save_per_volume_json(self, path: Path) -> Path:
+        """Save per-volume metrics as JSON file.
+
+        Parameters
+        ----------
+        path:
+            Output file path.
+
+        Returns
+        -------
+        The written path.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        records = self.to_per_volume_json()
+        path.write_text(
+            json.dumps(records, indent=2),
+            encoding="utf-8",
+        )
+        logger.info("Saved per-volume metrics to %s (%d volumes)", path, len(records))
+        return path
+
+    @staticmethod
+    def load_per_volume_json(path: Path) -> list[dict[str, Any]]:
+        """Load per-volume metrics from JSON file.
+
+        Parameters
+        ----------
+        path:
+            Path to JSON file.
+
+        Returns
+        -------
+        List of per-volume metric dicts.
+        """
+        result: list[dict[str, Any]] = json.loads(path.read_text(encoding="utf-8"))
+        return result
+
+    def best_volume(
+        self, metric: str, *, higher_is_better: bool = True
+    ) -> tuple[str, float]:
+        """Find the best-performing volume for a metric.
+
+        Parameters
+        ----------
+        metric:
+            Metric name.
+        higher_is_better:
+            If True, highest value is best.
+
+        Returns
+        -------
+        Tuple of (volume_id, metric_value).
+
+        Raises
+        ------
+        KeyError
+            If the metric is not found.
+        """
+        if metric not in self.per_volume_metrics:
+            msg = f"Metric '{metric}' not found in per_volume_metrics"
+            raise KeyError(msg)
+        values = self.per_volume_metrics[metric]
+        best_idx: int | None = None
+        best_val = float("-inf") if higher_is_better else float("inf")
+        for i, v in enumerate(values):
+            if math.isnan(v):
+                continue
+            if (higher_is_better and v > best_val) or (
+                not higher_is_better and v < best_val
+            ):
+                best_idx = i
+                best_val = v
+        if best_idx is None:
+            msg = f"All values are NaN for metric '{metric}'"
+            raise ValueError(msg)
+        return self.volume_ids[best_idx], best_val
+
+    def worst_volume(
+        self, metric: str, *, higher_is_better: bool = True
+    ) -> tuple[str, float]:
+        """Find the worst-performing volume for a metric.
+
+        Parameters
+        ----------
+        metric:
+            Metric name.
+        higher_is_better:
+            If True, lowest value is worst.
+
+        Returns
+        -------
+        Tuple of (volume_id, metric_value).
+        """
+        return self.best_volume(metric, higher_is_better=not higher_is_better)
 
 
 class EvaluationRunner:
