@@ -160,25 +160,54 @@ def _read_metrics(run_dir: Path) -> dict[str, float]:
 
 
 def _find_checkpoint(run_dir: Path) -> Path | None:
-    """Find the best checkpoint in the run's artifacts directory."""
+    """Find the best checkpoint in the run's artifacts directory.
+
+    Searches both ``artifacts/`` and ``artifacts/checkpoints/`` for
+    ``.pt`` and ``.pth`` files matching common patterns.
+    """
     artifacts_dir = run_dir / "artifacts"
     if not artifacts_dir.is_dir():
         return None
 
-    # Look for common checkpoint patterns
-    for pattern in ("best_checkpoint.pt", "best_*.pt", "checkpoint_*.pt", "model.pt"):
-        if "*" in pattern:
-            matches = list(artifacts_dir.glob(pattern))
-            if matches:
-                return matches[0]
-        else:
-            path = artifacts_dir / pattern
-            if path.is_file():
-                return path
+    # Search locations: artifacts/ and artifacts/checkpoints/
+    search_dirs = [artifacts_dir]
+    ckpt_dir = artifacts_dir / "checkpoints"
+    if ckpt_dir.is_dir():
+        search_dirs.append(ckpt_dir)
 
-    # Fall back to any .pt file
-    pt_files = list(artifacts_dir.glob("*.pt"))
-    return pt_files[0] if pt_files else None
+    # Prioritized checkpoint patterns (both .pt and .pth extensions)
+    patterns = [
+        "best_checkpoint.pt",
+        "best_checkpoint.pth",
+        "best_val_dice.pth",
+        "best_val_loss.pth",
+        "best_*.pt",
+        "best_*.pth",
+        "checkpoint_*.pt",
+        "checkpoint_*.pth",
+        "model.pt",
+        "model.pth",
+    ]
+
+    for search_dir in search_dirs:
+        for pattern in patterns:
+            if "*" in pattern:
+                matches = sorted(search_dir.glob(pattern))
+                if matches:
+                    return matches[0]
+            else:
+                path = search_dir / pattern
+                if path.is_file():
+                    return path
+
+    # Fall back to any .pt/.pth file in any search dir
+    for search_dir in search_dirs:
+        for ext in ("*.pt", "*.pth"):
+            files = sorted(search_dir.glob(ext))
+            if files:
+                return files[0]
+
+    return None
 
 
 def _read_model_config(run_dir: Path) -> dict[str, Any] | None:

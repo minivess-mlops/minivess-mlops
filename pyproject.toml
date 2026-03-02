@@ -69,6 +69,7 @@ dependencies = [
     # grpcio 1.78.1 was yanked (gcloud outage). Exclude it explicitly.
     "grpcio>=1.78.0,!=1.78.1",
     "seaborn>=0.13.2",
+    "onnxruntime>=1.24.2",
 ]
 
 [project.optional-dependencies]
