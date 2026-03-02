@@ -47,13 +47,21 @@ class TestSamResizing:
         resized = resize_for_sam(image_2d, target_size=1024)
         assert resized.shape == (1, 1, 1024, 1024)
 
+    def test_resize_for_sam3_1008(self) -> None:
+        """SAM3 uses 1008x1008 input (patch_size=14 → 72×72 features)."""
+        from minivess.adapters.slice_inference import resize_for_sam
+
+        image_2d = torch.randn(1, 1, 512, 512)
+        resized = resize_for_sam(image_2d, target_size=1008)
+        assert resized.shape == (1, 1, 1008, 1008)
+
 
 # ---------------------------------------------------------------------------
 # Test: slice_by_slice_forward
 # ---------------------------------------------------------------------------
 
 
-class _DummyModel2D(nn.Module):
+class _DummyModel2D(nn.Module):  # type: ignore[misc]
     """Minimal 2D model that outputs (B, 2, H, W)."""
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -77,7 +85,7 @@ class TestSliceBySliceForward:
 
         call_count = {"n": 0}
 
-        class _CountingModel(nn.Module):
+        class _CountingModel(nn.Module):  # type: ignore[misc]
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 call_count["n"] += 1
                 b, c, h, w = x.shape
@@ -91,7 +99,7 @@ class TestSliceBySliceForward:
     def test_gradient_flows_through_slices(self) -> None:
         from minivess.adapters.slice_inference import slice_by_slice_forward
 
-        class _LearnableModel(nn.Module):
+        class _LearnableModel(nn.Module):  # type: ignore[misc]
             def __init__(self) -> None:
                 super().__init__()
                 self.weight = nn.Parameter(torch.ones(1))

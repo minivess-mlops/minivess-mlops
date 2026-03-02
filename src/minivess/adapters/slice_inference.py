@@ -1,8 +1,10 @@
 """Slice-by-slice inference utility for 2D models on 3D volumes.
 
-Provides helpers to iterate Z-slices through a 2D model (e.g., SAM2)
+Provides helpers to iterate Z-slices through a 2D model (e.g., SAM3)
 and reassemble the output into a 3D volume. Includes SAM-compatible
-resizing (1024x1024) and inverse transform.
+resizing and inverse transform.
+
+SAM3 uses 1008x1008 input (patch_size=14 → 72×72 feature maps).
 """
 
 from __future__ import annotations
