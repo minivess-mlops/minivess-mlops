@@ -20,6 +20,7 @@ class ModelFamily(StrEnum):
     SAM3_VANILLA = "sam3_vanilla"
     SAM3_TOPOLORA = "sam3_topolora"
     SAM3_HYBRID = "sam3_hybrid"
+    MULTITASK_DYNUNET = "multitask_dynunet"
     CUSTOM = "custom"
 
 
@@ -60,6 +61,28 @@ class DataConfig(BaseModel):
     num_workers: int = Field(default=4, ge=0)
     pin_memory: bool = True
     prefetch_factor: int = Field(default=2, ge=1)
+
+    # Disconnect-to-Connect augmentation (pre-crop topology augmentation)
+    d2c_enabled: bool = Field(
+        default=False,
+        description="Enable DisconnectToConnect augmentation for training",
+    )
+    d2c_probability: float = Field(
+        default=0.3, ge=0.0, le=1.0, description="D2C application probability"
+    )
+    d2c_mode: str = Field(
+        default="zero",
+        description="D2C disconnection mode: 'zero' or 'noise'",
+    )
+    d2c_max_segment_length: int = Field(
+        default=15, ge=1, description="Max voxels to trace from junction"
+    )
+    d2c_max_junctions: int = Field(
+        default=3, ge=1, description="Max junctions to disconnect per call"
+    )
+    d2c_dilation_radius: int = Field(
+        default=2, ge=0, description="Dilation radius for disconnection mask"
+    )
 
     @field_validator("data_dir", "processed_dir")
     @classmethod

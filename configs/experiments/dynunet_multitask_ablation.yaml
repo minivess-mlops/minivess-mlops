@@ -1,0 +1,67 @@
+# Multi-task DynUNet ablation experiment config (T10 — #237)
+# 3 conditions x 3 folds x 100 epochs
+# Tests Predictions P1 and P3
+
+experiment_name: dynunet_multitask_ablation_v1
+model_family: multitask_dynunet
+loss: cbdice_cldice
+compute_profile: gpu_low  # 8 GB VRAM budget
+
+folds: 3
+epochs: 100
+early_stopping:
+  patience: 20
+  metric: val_compound_nsd_cldice
+
+conditions:
+  - name: baseline
+    description: "Standard DynUNet + cbdice_cldice (retrained baseline)"
+    wrappers: []
+    d2c_enabled: false
+
+  - name: multitask
+    description: "DynUNet + multi-task (mask + SDF + centerline distance)"
+    wrappers:
+      - type: multitask
+        auxiliary_heads:
+          - name: sdf
+            type: regression
+            out_channels: 1
+            loss: smooth_l1
+            weight: 0.25
+            gt_key: sdf
+          - name: centerline_dist
+            type: regression
+            out_channels: 1
+            loss: smooth_l1
+            weight: 0.25
+            gt_key: centerline_dist
+    d2c_enabled: false
+
+  - name: multitask_d2c
+    description: "DynUNet + multi-task + D2C augmentation (full Phase 1+2)"
+    wrappers:
+      - type: multitask
+        auxiliary_heads:
+          - name: sdf
+            type: regression
+            out_channels: 1
+            loss: smooth_l1
+            weight: 0.25
+            gt_key: sdf
+          - name: centerline_dist
+            type: regression
+            out_channels: 1
+            loss: smooth_l1
+            weight: 0.25
+            gt_key: centerline_dist
+    d2c_enabled: true
+    d2c_probability: 0.3
+
+precompute_targets:
+  - name: sdf
+    suffix: sdf
+    compute_fn: compute_sdf_from_mask
+  - name: centerline_dist
+    suffix: centerline_dist
+    compute_fn: compute_centreline_distance_map

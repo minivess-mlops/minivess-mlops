@@ -25,7 +25,7 @@ class ChampionCategory(StrEnum):
     OVERLAP = "overlap"
 
 
-class DeployConfig(BaseModel):  # type: ignore[misc]
+class DeployConfig(BaseModel):
     """Configuration for the deploy flow (Flow 4).
 
     Parameters
@@ -72,4 +72,8 @@ class DeployConfig(BaseModel):  # type: ignore[misc]
     monai_deploy_enabled: bool = Field(
         default=False,
         description="Whether to generate MONAI Deploy MAP packaging",
+    )
+    export_aux_heads: bool = Field(
+        default=False,
+        description="Include auxiliary heads in ONNX export (default: mask-only)",
     )

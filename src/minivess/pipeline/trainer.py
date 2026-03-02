@@ -180,6 +180,23 @@ class SegmentationTrainer:
             milestones=[self.config.warmup_epochs],
         )
 
+    def _compute_loss(
+        self,
+        output: Any,
+        batch: dict[str, Any],
+        labels: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute loss via isinstance dispatch.
+
+        If criterion is MultiTaskLoss: call with (output, batch).
+        Otherwise (standard criterion): call with (logits, labels).
+        """
+        from minivess.pipeline.multitask_loss import MultiTaskLoss
+
+        if isinstance(self.criterion, MultiTaskLoss):
+            return self.criterion(output, batch)
+        return self.criterion(output.logits, labels)
+
     def train_epoch(self, loader: Any) -> EpochResult:
         """Run one training epoch with mixed precision.
 
@@ -199,8 +216,13 @@ class SegmentationTrainer:
         num_batches = 0
 
         for batch in loader:
-            images = batch["image"].to(self.device)
-            labels = batch["label"].to(self.device)
+            # Move all tensor values to device (supports multi-task GT keys)
+            batch = {
+                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                for k, v in batch.items()
+            }
+            images = batch["image"]
+            labels = batch["label"]
 
             self.optimizer.zero_grad()
             with autocast(
@@ -208,7 +230,7 @@ class SegmentationTrainer:
                 enabled=self.config.mixed_precision,
             ):
                 output = self.model(images)
-                loss = self.criterion(output.logits, labels)
+                loss = self._compute_loss(output, batch, labels)
 
             if not torch.isfinite(loss):
                 msg = (
@@ -270,8 +292,12 @@ class SegmentationTrainer:
         collected_labels: list[np.ndarray] = []
 
         for batch in loader:
-            images = batch["image"].to(self.device)
-            labels = batch["label"].to(self.device)
+            batch = {
+                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                for k, v in batch.items()
+            }
+            images = batch["image"]
+            labels = batch["label"]
 
             with autocast(
                 device_type=self.device.type,
@@ -291,10 +317,17 @@ class SegmentationTrainer:
                         predictor=_model_fn,
                         overlap=0.25,
                     )
+                    # Sliding window: standard loss only (no multi-task aux)
+                    from minivess.pipeline.multitask_loss import MultiTaskLoss
+
+                    if isinstance(self.criterion, MultiTaskLoss):
+                        loss = self.criterion.seg_criterion(logits, labels)
+                    else:
+                        loss = self.criterion(logits, labels)
                 else:
                     output = self.model(images)
                     logits = output.logits
-                loss = self.criterion(logits, labels)
+                    loss = self._compute_loss(output, batch, labels)
 
             running_loss += loss.item()
             num_batches += 1
