@@ -126,9 +126,9 @@ class TestDataToDashboardIntegration:
     """End-to-end: data flow → everything dashboard."""
 
     def test_data_flow_feeds_dashboard(self, tmp_path: Path) -> None:
-        """DataFlowResult feeds into run_everything_dashboard_flow."""
+        """DataFlowResult feeds into dashboard flow."""
         from minivess.orchestration.flows.dashboard_flow import (
-            run_everything_dashboard_flow,
+            run_dashboard_flow,
         )
         from minivess.orchestration.flows.data_flow import run_data_flow
 
@@ -145,7 +145,7 @@ class TestDataToDashboardIntegration:
 
         # Feed into everything dashboard
         output_dir = tmp_path / "dashboard"
-        result = run_everything_dashboard_flow(
+        result = run_dashboard_flow(
             output_dir=output_dir,
             n_volumes=len(data_result.pairs),
             quality_gate_passed=data_result.quality_passed,
@@ -171,10 +171,10 @@ class TestDataToDashboardIntegration:
     def test_dashboard_report_has_all_sections(self, tmp_path: Path) -> None:
         """Generated report markdown has all 4 H2 sections."""
         from minivess.orchestration.flows.dashboard_flow import (
-            run_everything_dashboard_flow,
+            run_dashboard_flow,
         )
 
-        result = run_everything_dashboard_flow(
+        result = run_dashboard_flow(
             output_dir=tmp_path,
             n_volumes=10,
             quality_gate_passed=True,
@@ -210,10 +210,10 @@ class TestDataToDashboardIntegration:
     def test_dashboard_metadata_schema(self, tmp_path: Path) -> None:
         """Generated JSON metadata has all expected keys."""
         from minivess.orchestration.flows.dashboard_flow import (
-            run_everything_dashboard_flow,
+            run_dashboard_flow,
         )
 
-        result = run_everything_dashboard_flow(
+        result = run_dashboard_flow(
             output_dir=tmp_path,
             n_volumes=10,
             quality_gate_passed=True,

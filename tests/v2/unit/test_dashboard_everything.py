@@ -108,11 +108,11 @@ class TestCollectPipelineSectionTask:
 
 
 class TestGenerateEverythingReport:
-    """generate_everything_report includes all sections in markdown."""
+    """generate_report produces markdown with all sections."""
 
     def test_report_has_data_section(self, tmp_path: Path) -> None:
         from minivess.orchestration.flows.dashboard_flow import (
-            generate_everything_report,
+            generate_report,
         )
         from minivess.orchestration.flows.dashboard_sections import (
             ConfigDashboardSection,
@@ -152,9 +152,7 @@ class TestGenerateEverythingReport:
             generated_at=datetime.now(UTC).isoformat(),
         )
 
-        report_path = generate_everything_report(
-            dashboard=dashboard, output_dir=tmp_path
-        )
+        report_path = generate_report(dashboard=dashboard, output_dir=tmp_path)
         content = report_path.read_text(encoding="utf-8")
         assert "## Data" in content
         assert "## Configuration" in content
@@ -163,13 +161,13 @@ class TestGenerateEverythingReport:
 
 
 class TestExportEverythingMetadata:
-    """export_everything_metadata includes all section keys in JSON."""
+    """export_metadata produces JSON with all section keys."""
 
     def test_metadata_has_all_keys(self, tmp_path: Path) -> None:
         import json
 
         from minivess.orchestration.flows.dashboard_flow import (
-            export_everything_metadata,
+            export_metadata,
         )
         from minivess.orchestration.flows.dashboard_sections import (
             ConfigDashboardSection,
@@ -209,7 +207,7 @@ class TestExportEverythingMetadata:
             generated_at=datetime.now(UTC).isoformat(),
         )
 
-        json_path = export_everything_metadata(dashboard=dashboard, output_dir=tmp_path)
+        json_path = export_metadata(dashboard=dashboard, output_dir=tmp_path)
         data = json.loads(json_path.read_text(encoding="utf-8"))
         assert "data" in data
         assert "config" in data
@@ -219,19 +217,19 @@ class TestExportEverythingMetadata:
 
 
 # ---------------------------------------------------------------------------
-# Task 4.3: Updated run_everything_dashboard_flow
+# Task 4.3: Updated run_dashboard_flow
 # ---------------------------------------------------------------------------
 
 
 class TestRunEverythingDashboardFlow:
-    """run_everything_dashboard_flow with all sections."""
+    """run_dashboard_flow collects all sections."""
 
     def test_everything_flow_returns_dict(self, tmp_path: Path) -> None:
         from minivess.orchestration.flows.dashboard_flow import (
-            run_everything_dashboard_flow,
+            run_dashboard_flow,
         )
 
-        result = run_everything_dashboard_flow(
+        result = run_dashboard_flow(
             output_dir=tmp_path,
             n_volumes=10,
             quality_gate_passed=True,
@@ -256,10 +254,10 @@ class TestRunEverythingDashboardFlow:
 
     def test_everything_flow_creates_report(self, tmp_path: Path) -> None:
         from minivess.orchestration.flows.dashboard_flow import (
-            run_everything_dashboard_flow,
+            run_dashboard_flow,
         )
 
-        result = run_everything_dashboard_flow(
+        result = run_dashboard_flow(
             output_dir=tmp_path,
             n_volumes=10,
             quality_gate_passed=True,
@@ -282,13 +280,3 @@ class TestRunEverythingDashboardFlow:
         assert report_path.exists()
         content = report_path.read_text(encoding="utf-8")
         assert "## Data" in content
-
-    def test_backwards_compat_original_flow_still_works(self, tmp_path: Path) -> None:
-        """Original run_dashboard_flow still works (imports don't break)."""
-        from minivess.orchestration.flows.dashboard_flow import (
-            run_dashboard_flow,
-        )
-
-        # Just verify it's importable — it requires comparison_table
-        # which we don't mock here, so we just check it exists
-        assert callable(run_dashboard_flow)
