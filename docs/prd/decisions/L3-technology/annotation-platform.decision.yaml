@@ -11,7 +11,7 @@ description: >
 
 decision_level: L3_technology
 status: active
-last_updated: 2026-02-24
+last_updated: 2026-03-02
 
 options:
   - option_id: slicer_nninteractive
@@ -24,9 +24,10 @@ options:
       CVPR 2025 Interactive 3D Segmentation Challenge. Prior mask channel enables
       proofreading workflow (feed existing segmentation, correct iteratively).
       Server via Docker Hub or pip; client via GitHub (not yet in Extensions Manager).
+      Phase test-dataset: P2 annotation stub planned with Prefect webhook relay.
     prior_probability: 0.40
     status: recommended
-    implementation_status: not_started
+    implementation_status: partial
     complements:
       - "annotation_workflow.slicer_proofread"
       - "segmentation_models.dynunet"

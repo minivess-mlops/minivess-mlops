@@ -10,10 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from pathlib import Path  # noqa: TC003 — used at runtime in function bodies
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +66,7 @@ class ExternalDatasetConfig:
     n_volumes: int
     license: str
     cite_ref: str
+    license_verified: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -87,8 +85,9 @@ EXTERNAL_DATASETS: dict[str, ExternalDatasetConfig] = {
         species="mouse",
         resolution_um=(1.0, 1.0, 1.7),
         n_volumes=1,
-        license="TBD",
+        license="eCommons-educational",
         cite_ref="haft_javaherian_2019_deepvess",
+        license_verified=False,
     ),
     "tubenet_2pm": ExternalDatasetConfig(
         name="tubenet_2pm",
@@ -102,10 +101,74 @@ EXTERNAL_DATASETS: dict[str, ExternalDatasetConfig] = {
         species="mouse",
         resolution_um=(0.20, 0.46, 5.20),
         n_volumes=1,
-        license="TBD",
+        license="CC-BY-4.0",
         cite_ref="holroyd_2025_tubenet",
+        license_verified=True,
+    ),
+    "vesselnn": ExternalDatasetConfig(
+        name="vesselnn",
+        source_url="https://github.com/petteriTeikari/vesselNN",
+        modality="two-photon microscopy",
+        organ="brain",
+        species="mouse",
+        resolution_um=(0.50, 0.50, 1.0),
+        n_volumes=12,
+        license="MIT",
+        cite_ref="teikari_2016_vesselnn",
+        license_verified=True,
     ),
 }
+
+
+# ---------------------------------------------------------------------------
+# DVC tracking configuration
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DatasetDVCConfig:
+    """DVC tracking configuration for an external dataset.
+
+    Attributes
+    ----------
+    name:
+        Dataset identifier (matches :data:`EXTERNAL_DATASETS` keys).
+    dvc_path:
+        Relative path to the ``.dvc`` tracking file.
+    git_tag_format:
+        Git tag format string with ``{version}`` placeholder.
+    version:
+        Current tracked version (``"0.0.0"`` if not yet tracked).
+    """
+
+    name: str
+    dvc_path: str
+    git_tag_format: str
+    version: str = "0.0.0"
+
+
+DVC_CONFIGS: dict[str, DatasetDVCConfig] = {
+    "deepvess": DatasetDVCConfig(
+        name="deepvess",
+        dvc_path="data/external/deepvess.dvc",
+        git_tag_format="data/deepvess/v{version}",
+    ),
+    "tubenet_2pm": DatasetDVCConfig(
+        name="tubenet_2pm",
+        dvc_path="data/external/tubenet_2pm.dvc",
+        git_tag_format="data/tubenet_2pm/v{version}",
+    ),
+    "vesselnn": DatasetDVCConfig(
+        name="vesselnn",
+        dvc_path="data/external/vesselnn.dvc",
+        git_tag_format="data/vesselnn/v{version}",
+    ),
+}
+
+
+def get_dvc_tracked_datasets() -> list[str]:
+    """Return list of dataset names that have DVC tracking configured."""
+    return sorted(DVC_CONFIGS.keys())
 
 
 # ---------------------------------------------------------------------------
@@ -243,3 +306,47 @@ def discover_external_test_pairs(
 
     logger.info("Discovered %d image/label pairs for %s", len(pairs), dataset_name)
     return pairs
+
+
+# ---------------------------------------------------------------------------
+# Download helper
+# ---------------------------------------------------------------------------
+
+
+def download_external_dataset(
+    dataset_name: str,
+    target_dir: Path,
+) -> Path:
+    """Prepare directory structure for an external dataset.
+
+    Creates the ``images/`` and ``labels/`` subdirectories. Actual data
+    download must be done manually — this function logs the source URL.
+
+    Parameters
+    ----------
+    dataset_name:
+        Name of the dataset (must be in :data:`EXTERNAL_DATASETS`).
+    target_dir:
+        Root directory for the downloaded dataset.
+
+    Returns
+    -------
+    Path to the created target directory.
+
+    Raises
+    ------
+    KeyError
+        If ``dataset_name`` is not in the registry.
+    """
+    config = EXTERNAL_DATASETS[dataset_name]  # raises KeyError if missing
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "images").mkdir(exist_ok=True)
+    (target_dir / "labels").mkdir(exist_ok=True)
+
+    logger.warning(
+        "Manual download required for '%s'. Source: %s",
+        dataset_name,
+        config.source_url,
+    )
+    return target_dir

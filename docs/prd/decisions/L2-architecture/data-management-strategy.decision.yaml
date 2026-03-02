@@ -5,12 +5,17 @@ description: >
 
 decision_level: L2_architecture
 status: active
-last_updated: 2026-02-24
+last_updated: 2026-03-02
 
 options:
   - option_id: local_dvc
     title: "Local DVC"
-    description: "DVC with local storage. Current implementation."
+    description: >
+      DVC with local storage. Current implementation. Phase test-dataset
+      extends with per-dataset .dvc files for external datasets (DeepVess,
+      tUbeNet): data/external/deepvess.dvc, data/external/tubenet.dvc.
+      Each dataset gets its own DVC tracking file so researchers can pull
+      selectively. Git tag per DVC version for cross-system lineage.
     prior_probability: 0.35
     status: resolved
     implementation_status: implemented
@@ -180,6 +185,24 @@ references:
       - local_dvc
       - cloud_dvc
       - datalad
+
+  - citation_key: holroyd2025tubenet
+    relevance: "tUbeNet dataset (CC-BY 4.0) — external test dataset managed via per-dataset .dvc files"
+    supports_options:
+      - local_dvc
+      - cloud_dvc
+
+  - citation_key: haftjavaherian2019deepvess
+    relevance: "DeepVess dataset — external test dataset for cross-dataset generalization validation"
+    supports_options:
+      - local_dvc
+      - cloud_dvc
+
+  - citation_key: teikari2016vesselnn
+    relevance: "vesselNN dataset (MIT) — additional two-photon vascular segmentation test data"
+    supports_options:
+      - local_dvc
+      - cloud_dvc
 
 tags:
   - architecture

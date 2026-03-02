@@ -13,7 +13,7 @@
 # 4. Sub-citations: when ingesting a paper, also add papers IT cites that
 #    are relevant to other decision nodes.
 #
-# last_updated: 2026-02-24  (Verification: +20 entries from RDF/BIB/fishing gap analysis)
+# last_updated: 2026-03-02  (Test-dataset: +3 entries — holroyd2025tubenet, haftjavaherian2019deepvess, teikari2016vesselnn)
 
 bibliography:
 
@@ -3585,3 +3585,48 @@ bibliography:
     topics:
       - deploy_model_promotion
       - model_governance
+
+  # ============================================================
+  # Test Dataset Sources (Phase: test-dataset)
+  # ============================================================
+
+  - citation_key: holroyd2025tubenet
+    inline_citation: "Holroyd et al. (2025)"
+    authors: "Holroyd, N. A., Sherwood, V., Sherwood, D., Phillips, T. J., & Walker-Samuel, S."
+    year: 2025
+    title: "tUbeNet: a generalizable deep learning tool for 3D vessel segmentation"
+    venue: "Biology Methods and Protocols, 10(1), bpaf087"
+    doi: "10.1093/biomethods/bpaf087"
+    url: "https://academic.oup.com/biomethods/article/10/1/bpaf087/8079024"
+    evidence_type: benchmark
+    topics:
+      - data_management_strategy
+      - segmentation_models
+      - data_ingestion_queue
+
+  - citation_key: haftjavaherian2019deepvess
+    inline_citation: "Haft-Javaherian et al. (2019)"
+    authors: "Haft-Javaherian, M., Fang, L., Mber, V., Flores, M., Bhatt, S., & Bhatt, D. L."
+    year: 2019
+    title: "Deep convolutional neural networks for segmenting 3D in vivo multiphoton images of vasculature in brain tissue"
+    venue: "PLoS ONE, 14(3), e0213539"
+    doi: "10.1371/journal.pone.0213539"
+    url: "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0213539"
+    evidence_type: benchmark
+    topics:
+      - data_management_strategy
+      - segmentation_models
+      - data_ingestion_queue
+
+  - citation_key: teikari2016vesselnn
+    inline_citation: "Teikari et al. (2016)"
+    authors: "Teikari, P., Santos, M., Poon, C., & Hynynen, K."
+    year: 2016
+    title: "Deep Learning Convolutional Networks for Multiphoton Microscopy Vasculature Segmentation"
+    venue: "arXiv preprint arXiv:1606.02382"
+    doi: ""
+    url: "https://arxiv.org/abs/1606.02382"
+    evidence_type: benchmark
+    topics:
+      - data_management_strategy
+      - segmentation_models

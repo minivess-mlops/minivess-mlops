@@ -10,3 +10,8 @@ probabilistic-sdd-template/examples/minivess/decisions/L3-technology/loss-functi
 probabilistic-sdd-template/examples/minivess/decisions/L3-technology/loss-functions.decision.yaml:generic-api-key:231
 docs/prd/decisions/L4-deployment/model-promotion.decision.yaml:generic-api-key:90
 docs/prd/bibliography.yaml:generic-api-key:3576
+docs/prd/decisions/L2-architecture/data-management-strategy.decision.yaml:generic-api-key:189
+docs/prd/decisions/L2-architecture/data-management-strategy.decision.yaml:generic-api-key:201
+docs/prd/bibliography.yaml:generic-api-key:3593
+docs/prd/bibliography.yaml:generic-api-key:3621
+docs/prd/decisions/L3-technology/data-ingestion-queue.decision.yaml:generic-api-key:255

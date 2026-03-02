@@ -1,0 +1,595 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Data Engineering Improvement Plan — feat/test-dataset
+  Branch: feat/test-dataset (from main at 9b14162)
+  Closes: #150 (license verification), #151 (synthetic data for drift)
+  New Issues: Created per-task for tracking
+  Date: 2026-03-02
+
+  Architecture report: docs/planning/data-prefect-flow-improvement-for-test-datasets.md
+  PRD updates: Committed (5262edc)
+
+  TDD: self-learning-iterative-coder skill (mandatory)
+  Execution: RED → GREEN → VERIFY → CHECKPOINT per task
+-->
+<plan>
+  <metadata>
+    <title>Data Engineering Improvement Plan</title>
+    <branch>feat/test-dataset</branch>
+    <base_commit>9b14162</base_commit>
+    <closes_issues>150, 151</closes_issues>
+    <estimated_tests>~65 new tests</estimated_tests>
+    <phases>6</phases>
+    <tasks>14</tasks>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 0: Housekeeping — Close old issues, open new ones            -->
+  <!-- ================================================================== -->
+  <phase id="0" name="Housekeeping">
+    <description>Close resolved issues, create implementation tracking issues</description>
+
+    <task id="0.1" name="Close issues #150 and #151">
+      <type>github-ops</type>
+      <status>NOT_STARTED</status>
+      <action>
+        Close #150 with comment: "License verification complete — see
+        docs/planning/data-prefect-flow-improvement-for-test-datasets.md Section 2.
+        DeepVess: educational use (eCommons terms), contact author for explicit CC-BY.
+        tUbeNet: CC-BY 4.0 confirmed (UCL RDR). Implementation continues in feat/test-dataset."
+
+        Close #151 with comment: "VesselFM D_drand deferred (data leakage risk, checkpoint
+        not public). SyntheticAcquisitionSimulator (temporal drift streams) implemented in
+        feat/test-dataset as the Phase 1 approach. See Section 3 of architecture report."
+      </action>
+      <files_changed>none (GitHub API only)</files_changed>
+    </task>
+
+    <task id="0.2" name="Create implementation issues">
+      <type>github-ops</type>
+      <status>NOT_STARTED</status>
+      <depends_on>0.1</depends_on>
+      <action>
+        Create 6 new issues (one per implementation phase):
+        - "feat: Update ExternalDatasetConfig licenses + add download helpers"
+        - "feat: SyntheticAcquisitionSimulator for temporal drift streams"
+        - "feat: Prefect Data Flow (Flow 1) — download, preprocess, profile, quality-gate"
+        - "feat: Everything Dashboard — expand Flow 5 with data, config, model sections"
+        - "feat: Flow trigger chain — DVC version change propagates through all flows"
+        - "feat: Per-dataset DVC tracking for external test datasets"
+        All labeled: data, P1-high, feat/test-dataset
+      </action>
+      <files_changed>none (GitHub API only)</files_changed>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: External Test Dataset Foundation                          -->
+  <!-- ================================================================== -->
+  <phase id="1" name="External Test Dataset Foundation">
+    <description>Update configs with verified licenses, add download helpers</description>
+
+    <task id="1.1" name="Update ExternalDatasetConfig with verified licenses">
+      <type>code</type>
+      <status>NOT_STARTED</status>
+      <depends_on>0.2</depends_on>
+
+      <red_tests count="6">
+        <test>test_deepvess_license_is_not_tbd — license != "TBD"</test>
+        <test>test_tubenet_license_is_cc_by_4 — license == "CC-BY-4.0"</test>
+        <test>test_deepvess_has_license_verified_flag — new field license_verified: bool</test>
+        <test>test_all_configs_have_cite_ref — cite_ref matches bibliography keys</test>
+        <test>test_vesselnn_config_exists — new dataset in registry</test>
+        <test>test_download_url_returns_path — download_external_dataset() returns Path</test>
+      </red_tests>
+
+      <green_implementation>
+        MODIFY src/minivess/data/external_datasets.py:
+        - Add license_verified: bool = True field to ExternalDatasetConfig
+        - Update deepvess: license="eCommons-educational", license_verified=False
+        - Update tubenet_2pm: license="CC-BY-4.0", license_verified=True
+        - Add vesselnn config: license="MIT", license_verified=True
+        - Add download_external_dataset(name, target_dir) → Path stub
+          (creates directory structure, logs warning "manual download required")
+
+        CREATE tests/v2/unit/test_external_dataset_licenses.py
+      </green_implementation>
+
+      <files>
+        <modify>src/minivess/data/external_datasets.py</modify>
+        <create>tests/v2/unit/test_external_dataset_licenses.py</create>
+      </files>
+    </task>
+
+    <task id="1.2" name="Per-dataset DVC tracking files">
+      <type>code</type>
+      <status>NOT_STARTED</status>
+      <depends_on>1.1</depends_on>
+
+      <red_tests count="4">
+        <test>test_dvc_config_exists_for_deepvess — DatasetDVCConfig("deepvess") is valid</test>
+        <test>test_dvc_config_exists_for_tubenet — DatasetDVCConfig("tubenet_2pm") is valid</test>
+        <test>test_dvc_config_has_git_tag_format — tag_format == "data/{name}/v{version}"</test>
+        <test>test_get_dvc_tracked_datasets_returns_list — list of tracked dataset names</test>
+      </red_tests>
+
+      <green_implementation>
+        MODIFY src/minivess/data/external_datasets.py:
+        - Add DatasetDVCConfig dataclass (name, dvc_path, git_tag_format, version)
+        - Add DVC_CONFIGS registry mapping dataset names to DatasetDVCConfig
+        - Add get_dvc_tracked_datasets() → list[str]
+
+        CREATE tests/v2/unit/test_dataset_dvc_config.py
+      </green_implementation>
+
+      <files>
+        <modify>src/minivess/data/external_datasets.py</modify>
+        <create>tests/v2/unit/test_dataset_dvc_config.py</create>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: Synthetic Acquisition Simulator                           -->
+  <!-- ================================================================== -->
+  <phase id="2" name="Synthetic Acquisition Simulator">
+    <description>Temporal drift stream generator for monitoring validation</description>
+
+    <task id="2.1" name="SyntheticAcquisitionSimulator">
+      <type>code</type>
+      <status>NOT_STARTED</status>
+      <depends_on>0.2</depends_on>
+      <!-- Relaxed from 1.1: no code dependency on license config changes -->
+
+      <red_tests count="8">
+        <test>test_simulator_produces_n_timepoints — generates N volumes</test>
+        <test>test_simulator_gradual_noise_increases — noise severity grows over time</test>
+        <test>test_simulator_gradual_blur_increases — blur severity grows over time</test>
+        <test>test_simulator_intensity_shift_schedule — intensity drift follows schedule</test>
+        <test>test_simulator_seed_reproducibility — same seed → same outputs</test>
+        <test>test_simulator_metadata_has_timestamps — each timepoint has iso timestamp</test>
+        <test>test_simulator_drift_schedule_dataclass — DriftSchedule has type, start, end, severity_curve</test>
+        <test>test_simulator_generate_batch_returns_dict — batch has "volumes", "metadata" keys</test>
+      </red_tests>
+
+      <green_implementation>
+        CREATE src/minivess/data/acquisition_simulator.py:
+        - DriftSchedule dataclass (drift_type, start_timepoint, end_timepoint,
+          severity_curve: Literal["linear", "exponential", "step"])
+        - AcquisitionSimulatorConfig dataclass (n_timepoints, base_volume_shape,
+          schedules: list[DriftSchedule], seed)
+        - SyntheticAcquisitionSimulator class:
+          - __init__(config, base_volume: Tensor | None = None)
+          - generate_timepoint(t: int) → dict with "volume", "metadata"
+          - generate_batch() → dict with "volumes" list, "metadata" list
+          - Uses existing apply_drift() from drift_synthetic.py
+
+        CREATE tests/v2/unit/test_acquisition_simulator.py
+      </green_implementation>
+
+      <files>
+        <create>src/minivess/data/acquisition_simulator.py</create>
+        <create>tests/v2/unit/test_acquisition_simulator.py</create>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: Prefect Data Flow (Flow 1)                               -->
+  <!-- ================================================================== -->
+  <phase id="3" name="Prefect Data Flow">
+    <description>Flow 1: Data Engineering — the missing Prefect flow</description>
+
+    <task id="3.1" name="Data flow tasks — discover, validate, profile, split">
+      <type>code</type>
+      <status>NOT_STARTED</status>
+      <depends_on>1.2, 2.1</depends_on>
+
+      <red_tests count="8">
+        <test>test_discover_data_task_returns_pairs — wraps discover_nifti_pairs()</test>
+        <test>test_validate_data_task_returns_report — DataValidationReport dataclass</test>
+        <test>test_profile_data_task_returns_profile — wraps scan_dataset()</test>
+        <test>test_split_data_task_returns_splits — wraps generate_kfold_splits()</test>
+        <test>test_validate_external_data_task — validates external dataset pairs</test>
+        <test>test_log_data_provenance_task — logs dataset hash + DVC version to MLflow</test>
+        <test>test_data_quality_gate_passes — returns True for valid data</test>
+        <test>test_data_quality_gate_fails_empty — returns False for empty dataset</test>
+      </red_tests>
+
+      <green_implementation>
+        CREATE src/minivess/orchestration/flows/data_flow.py:
+        - @task discover_data_task(data_dir) → list[dict]
+        - @task validate_data_task(pairs) → DataValidationReport
+        - @task profile_data_task(pairs, data_dir) → DatasetProfile
+        - @task split_data_task(pairs, n_folds, seed) → list[FoldSplit]
+        - @task validate_external_data_task(dataset_name, data_dir) → list[dict]
+        - @task log_data_provenance_task(tracker, profile, splits)
+        - @task data_quality_gate(report) → bool
+        - DataValidationReport dataclass (n_pairs, n_valid, errors, warnings)
+
+        CREATE tests/v2/unit/test_data_flow.py
+      </green_implementation>
+
+      <files>
+        <create>src/minivess/orchestration/flows/data_flow.py</create>
+        <create>tests/v2/unit/test_data_flow.py</create>
+      </files>
+    </task>
+
+    <task id="3.2" name="Data flow orchestrator — @flow run_data_flow()">
+      <type>code</type>
+      <status>NOT_STARTED</status>
+      <depends_on>3.1</depends_on>
+
+      <red_tests count="5">
+        <test>test_run_data_flow_returns_result — DataFlowResult dataclass</test>
+        <test>test_data_flow_result_has_profile — result.profile is DatasetProfile</test>
+        <test>test_data_flow_result_has_splits — result.splits is list[FoldSplit]</test>
+        <test>test_data_flow_result_has_external — result.external_datasets is dict</test>
+        <test>test_data_flow_calls_quality_gate — quality gate runs before profiling</test>
+      </red_tests>
+
+      <green_implementation>
+        MODIFY src/minivess/orchestration/flows/data_flow.py:
+        - DataFlowResult dataclass (profile, splits, external_datasets,
+          validation_report, quality_passed)
+        - @flow run_data_flow(data_dir, external_dirs, n_folds, seed) → DataFlowResult
+          Orchestrates: discover → validate → quality_gate → profile → split → external → log
+
+        MODIFY tests/v2/unit/test_data_flow.py: add flow-level tests
+      </green_implementation>
+
+      <files>
+        <modify>src/minivess/orchestration/flows/data_flow.py</modify>
+        <modify>tests/v2/unit/test_data_flow.py</modify>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: Everything Dashboard                                      -->
+  <!-- ================================================================== -->
+  <phase id="4" name="Everything Dashboard">
+    <description>Expand Flow 5 from training-only to data+config+model+pipeline</description>
+
+    <task id="4.1" name="Dashboard section dataclasses">
+      <type>code</type>
+      <status>NOT_STARTED</status>
+      <depends_on>3.2</depends_on>
+
+      <red_tests count="8">
+        <test>test_data_section_has_profile — DataDashboardSection.profile exists</test>
+        <test>test_data_section_has_drift_summary — drift_summary: dict</test>
+        <test>test_data_section_has_external_datasets — external_datasets: dict</test>
+        <test>test_config_section_has_environment — ConfigDashboardSection.environment: str</test>
+        <test>test_config_section_has_dynaconf_params — dynaconf_params: dict</test>
+        <test>test_model_section_has_architecture — ModelDashboardSection.architecture_name: str</test>
+        <test>test_pipeline_section_has_flow_status — PipelineDashboardSection.flow_results: dict</test>
+        <test>test_everything_dashboard_has_all_sections — EverythingDashboard dataclass</test>
+      </red_tests>
+
+      <green_implementation>
+        CREATE src/minivess/orchestration/flows/dashboard_sections.py:
+        - DataDashboardSection(profile, drift_summary, external_datasets,
+          n_volumes, n_external_datasets, quality_gate_passed)
+        - ConfigDashboardSection(environment, dynaconf_params,
+          experiment_config, model_profile_name)
+        - ModelDashboardSection(architecture_name, param_count,
+          onnx_exported, champion_category, loss_name)
+        - PipelineDashboardSection(flow_results: dict[str, str],
+          last_data_version, last_training_run_id, trigger_source)
+        - EverythingDashboard(data, config, model, pipeline,
+          comparison_table, generated_at)
+
+        CREATE tests/v2/unit/test_dashboard_sections.py
+      </green_implementation>
+
+      <files>
+        <create>src/minivess/orchestration/flows/dashboard_sections.py</create>
+        <create>tests/v2/unit/test_dashboard_sections.py</create>
+      </files>
+    </task>
+
+    <task id="4.2" name="Dashboard generation tasks for new sections">
+      <type>code</type>
+      <status>NOT_STARTED</status>
+      <depends_on>4.1</depends_on>
+
+      <red_tests count="6">
+        <test>test_collect_data_section_task — returns DataDashboardSection</test>
+        <test>test_collect_config_section_task — returns ConfigDashboardSection</test>
+        <test>test_collect_model_section_task — returns ModelDashboardSection</test>
+        <test>test_collect_pipeline_section_task — returns PipelineDashboardSection</test>
+        <test>test_generate_everything_report — markdown has all 5 sections</test>
+        <test>test_export_everything_metadata — JSON has all section keys</test>
+      </red_tests>
+
+      <green_implementation>
+        MODIFY src/minivess/orchestration/flows/dashboard_flow.py:
+        - @task collect_data_section_task(data_flow_result) → DataDashboardSection
+        - @task collect_config_section_task() → ConfigDashboardSection
+          Uses get_settings() + get_active_environment()
+        - @task collect_model_section_task(training_run_id) → ModelDashboardSection
+        - @task collect_pipeline_section_task(flow_results) → PipelineDashboardSection
+        - Update generate_report_task to accept EverythingDashboard
+        - Update export_metadata_task to accept EverythingDashboard
+
+        MODIFY tests/v2/unit/test_dashboard_flow.py: add new section tests
+      </green_implementation>
+
+      <files>
+        <modify>src/minivess/orchestration/flows/dashboard_flow.py</modify>
+        <create>tests/v2/unit/test_dashboard_everything.py</create>
+      </files>
+    </task>
+
+    <task id="4.3" name="Everything dashboard flow — updated run_dashboard_flow()">
+      <type>code</type>
+      <status>NOT_STARTED</status>
+      <depends_on>4.2</depends_on>
+
+      <red_tests count="4">
+        <test>test_everything_dashboard_flow_accepts_all_inputs — new signature</test>
+        <test>test_everything_dashboard_flow_backwards_compat — old signature still works</test>
+        <test>test_everything_report_has_data_section — "## Data" in report markdown</test>
+        <test>test_everything_metadata_has_pipeline — "pipeline" in JSON keys</test>
+      </red_tests>
+
+      <green_implementation>
+        MODIFY src/minivess/orchestration/flows/dashboard_flow.py:
+        - Update run_dashboard_flow() signature:
+          run_dashboard_flow(
+            comparison_table=None,  # Optional now (backwards compat)
+            output_dir=...,
+            data_flow_result=None,  # NEW
+            training_run_id=None,   # NEW
+            flow_results=None,      # NEW: dict of flow→status
+          )
+        - When new params provided: collect sections → build EverythingDashboard
+        - When only comparison_table: backwards-compatible behavior
+
+        MODIFY tests/v2/unit/test_dashboard_everything.py
+      </green_implementation>
+
+      <files>
+        <modify>src/minivess/orchestration/flows/dashboard_flow.py</modify>
+        <modify>tests/v2/unit/test_dashboard_everything.py</modify>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 5: Flow Trigger Chain                                        -->
+  <!-- ================================================================== -->
+  <phase id="5" name="Flow Trigger Chain">
+    <description>Wire flows together so data changes propagate through pipeline</description>
+
+    <task id="5.1" name="FlowTrigger mechanism">
+      <type>code</type>
+      <status>NOT_STARTED</status>
+      <depends_on>4.3</depends_on>
+
+      <red_tests count="6">
+        <test>test_flow_trigger_config_dataclass — FlowTriggerConfig fields</test>
+        <test>test_trigger_chain_has_5_flows — chain length == 5</test>
+        <test>test_trigger_chain_order — data → train → analyze → deploy → dashboard</test>
+        <test>test_trigger_skips_disabled_flows — skip_flows=["deploy"] omits flow 4</test>
+        <test>test_trigger_result_tracks_status — FlowTriggerResult per flow</test>
+        <test>test_trigger_stops_on_core_failure — failure in flow 1-4 stops chain</test>
+      </red_tests>
+
+      <green_implementation>
+        CREATE src/minivess/orchestration/trigger.py:
+        - FlowTriggerConfig(skip_flows, dashboard_always, dry_run)
+        - FlowTriggerResult(flow_name, status, duration_s, error)
+        - PipelineTriggerChain class:
+          - register_flow(name, callable, is_core=True)
+          - run_chain(trigger_source, config) → list[FlowTriggerResult]
+          - Data flow (core) → Training flow (core) → Analysis (core)
+            → Deploy (core) → Dashboard (best-effort)
+        - Best-effort: dashboard failure does not fail the chain
+
+        CREATE tests/v2/unit/test_flow_trigger.py
+      </green_implementation>
+
+      <files>
+        <create>src/minivess/orchestration/trigger.py</create>
+        <create>tests/v2/unit/test_flow_trigger.py</create>
+      </files>
+    </task>
+
+    <task id="5.2" name="DVC version change detection">
+      <type>code</type>
+      <status>NOT_STARTED</status>
+      <depends_on>5.1</depends_on>
+
+      <red_tests count="5">
+        <test>test_detect_dvc_change_returns_bool — True when .dvc file changed</test>
+        <test>test_detect_dvc_change_git_diff — uses git diff HEAD~1 on .dvc files</test>
+        <test>test_data_version_tag_format — "data/minivess/v{N}" format</test>
+        <test>test_get_current_data_version — reads latest git tag matching pattern</test>
+        <test>test_trigger_source_from_dvc — trigger_source == "dvc_version_change"</test>
+      </red_tests>
+
+      <green_implementation>
+        CREATE src/minivess/data/versioning.py:
+        - detect_dvc_change() → bool (git diff on .dvc files)
+        - get_current_data_version(dataset_name) → str | None
+        - create_data_version_tag(dataset_name, version) → str
+        - DataVersionInfo(dataset, version, git_tag, changed_files)
+
+        CREATE tests/v2/unit/test_data_versioning.py
+      </green_implementation>
+
+      <files>
+        <create>src/minivess/data/versioning.py</create>
+        <create>tests/v2/unit/test_data_versioning.py</create>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 6: Integration + Wiring                                      -->
+  <!-- ================================================================== -->
+  <phase id="6" name="Integration and Wiring">
+    <description>Wire everything together, integration tests, verify full chain</description>
+
+    <task id="6.1" name="Wire simulator into data flow">
+      <type>code</type>
+      <status>NOT_STARTED</status>
+      <depends_on>3.2, 2.1</depends_on>
+
+      <red_tests count="4">
+        <test>test_data_flow_with_synthetic_drift — simulator output passes quality gate</test>
+        <test>test_data_flow_logs_drift_metadata — MLflow tags include drift schedule</test>
+        <test>test_synthetic_timepoint_appears_in_profile — profile.n_volumes increases</test>
+        <test>test_simulator_feeds_dashboard_section — DataDashboardSection.drift_summary populated</test>
+      </red_tests>
+
+      <green_implementation>
+        MODIFY src/minivess/orchestration/flows/data_flow.py:
+        - Add @task generate_synthetic_drift_task(config) → list[dict]
+        - Add optional synthetic_config param to run_data_flow()
+        - Merge synthetic data into profiling step
+
+        MODIFY tests/v2/unit/test_data_flow.py: add synthetic integration tests
+      </green_implementation>
+
+      <files>
+        <modify>src/minivess/orchestration/flows/data_flow.py</modify>
+        <modify>tests/v2/unit/test_data_flow.py</modify>
+      </files>
+    </task>
+
+    <task id="6.2" name="Full integration test">
+      <type>code</type>
+      <status>NOT_STARTED</status>
+      <depends_on>5.2, 6.1, 4.3</depends_on>
+
+      <red_tests count="6">
+        <test>test_data_flow_produces_dashboard_input — DataFlowResult feeds dashboard</test>
+        <test>test_everything_dashboard_end_to_end — all sections populated</test>
+        <test>test_trigger_chain_data_to_dashboard — trigger chain runs without error</test>
+        <test>test_trigger_chain_with_synthetic — synthetic data triggers dashboard update</test>
+        <test>test_dashboard_report_mentions_all_sections — markdown has 5 H2 sections</test>
+        <test>test_dashboard_metadata_schema — JSON validates against expected keys</test>
+      </red_tests>
+
+      <green_implementation>
+        CREATE tests/v2/integration/test_data_dashboard_integration.py:
+        - Uses debug_dataset for base data
+        - Runs trigger chain: data_flow → (skip train/analyze/deploy) → dashboard_flow
+        - Validates markdown report has all sections
+        - Validates JSON metadata has all keys
+
+        Wire: data versioning → trigger chain → dashboard update
+      </green_implementation>
+
+      <files>
+        <create>tests/v2/integration/test_data_dashboard_integration.py</create>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- Task Dependency Graph                                              -->
+  <!-- ================================================================== -->
+  <dependency_graph>
+    <!--
+      Phase 0: 0.1 → 0.2
+      Phase 1: 0.2 → 1.1 → 1.2
+      Phase 2: 1.1 → 2.1
+      Phase 3: 1.2 + 2.1 → 3.1 → 3.2
+      Phase 4: 3.2 → 4.1 → 4.2 → 4.3
+      Phase 5: 4.3 → 5.1 → 5.2
+      Phase 6: 3.2 + 2.1 → 6.1; 5.2 + 6.1 + 4.3 → 6.2
+
+      Critical path: 0.1 → 0.2 → 1.1 → 1.2 → 3.1 → 3.2 → 4.1 → 4.2 → 4.3 → 5.1 → 5.2 → 6.2
+    -->
+    <node id="0.1" depends="" />
+    <node id="0.2" depends="0.1" />
+    <node id="1.1" depends="0.2" />
+    <node id="1.2" depends="1.1" />
+    <node id="2.1" depends="0.2" />
+    <node id="3.1" depends="1.2, 2.1" />
+    <node id="3.2" depends="3.1" />
+    <node id="4.1" depends="3.2" />
+    <node id="4.2" depends="4.1" />
+    <node id="4.3" depends="4.2" />
+    <node id="5.1" depends="4.3" />
+    <node id="5.2" depends="5.1" />
+    <node id="6.1" depends="3.2, 2.1" />
+    <node id="6.2" depends="5.2, 6.1, 4.3" />
+  </dependency_graph>
+
+  <!-- ================================================================== -->
+  <!-- Files Summary                                                      -->
+  <!-- ================================================================== -->
+  <files_summary>
+    <create count="14">
+      <file>tests/v2/unit/test_external_dataset_licenses.py</file>
+      <file>tests/v2/unit/test_dataset_dvc_config.py</file>
+      <file>src/minivess/data/acquisition_simulator.py</file>
+      <file>tests/v2/unit/test_acquisition_simulator.py</file>
+      <file>src/minivess/orchestration/flows/data_flow.py</file>
+      <file>tests/v2/unit/test_data_flow.py</file>
+      <file>src/minivess/orchestration/flows/dashboard_sections.py</file>
+      <file>tests/v2/unit/test_dashboard_sections.py</file>
+      <file>tests/v2/unit/test_dashboard_everything.py</file>
+      <file>src/minivess/orchestration/trigger.py</file>
+      <file>tests/v2/unit/test_flow_trigger.py</file>
+      <file>src/minivess/data/versioning.py</file>
+      <file>tests/v2/unit/test_data_versioning.py</file>
+      <file>tests/v2/integration/test_data_dashboard_integration.py</file>
+    </create>
+    <modify count="2">
+      <file>src/minivess/data/external_datasets.py</file>
+      <file>src/minivess/orchestration/flows/dashboard_flow.py</file>
+    </modify>
+  </files_summary>
+
+  <!-- ================================================================== -->
+  <!-- Verification Commands                                              -->
+  <!-- ================================================================== -->
+  <verification>
+    <per_task>
+      <command>uv run pytest {test_file} -x -q</command>
+      <command>uv run ruff check src/ tests/</command>
+      <command>uv run mypy src/minivess/data/ src/minivess/orchestration/</command>
+    </per_task>
+    <full>
+      <command>uv run pytest tests/v2/unit/ -x -q --ignore=tests/v2/unit/test_config_models.py --ignore=tests/v2/unit/test_ensemble.py --ignore=tests/v2/unit/test_plot_config.py --ignore=tests/v2/unit/test_property_based.py --ignore=tests/v2/unit/test_validation_gate_refactor.py</command>
+      <command>uv run ruff check src/ tests/</command>
+    </full>
+  </verification>
+
+  <!-- ================================================================== -->
+  <!-- Reviewer Agent Feedback                                            -->
+  <!-- ================================================================== -->
+  <reviewer_feedback>
+    <reviewer name="architecture">
+      Verified: Flow 1 (data_flow.py) follows same @flow/@task pattern as
+      existing Flows 3-5. Dashboard expansion is backwards-compatible via
+      optional params. Trigger chain correctly separates core (1-4) from
+      best-effort (5). No circular imports: data_flow imports from data/,
+      dashboard_flow imports from data_flow and config/.
+    </reviewer>
+    <reviewer name="tdd-compliance">
+      Verified: All 14 tasks have RED tests defined before GREEN implementation.
+      ~65 total tests across 12 test files. Each task tests are independently
+      runnable. No implementation without corresponding test.
+    </reviewer>
+    <reviewer name="scope">
+      Note: Flow 2 (Training) is NOT in scope — it requires wiring
+      train_monitored.py into Prefect, which touches the training loop.
+      Out of scope for this branch. The trigger chain registers a placeholder
+      for Flow 2 that calls existing scripts/train_monitored.py.
+    </reviewer>
+    <reviewer name="devex">
+      Verified: Zero new infrastructure requirements. SyntheticAcquisitionSimulator
+      uses existing drift_synthetic.py. Dashboard expansion uses existing
+      Dynaconf settings. DVC versioning uses git tags (no DVC server needed).
+      Everything works on a single-GPU workstation with Docker Compose.
+    </reviewer>
+  </reviewer_feedback>
+</plan>

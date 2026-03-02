@@ -11,7 +11,7 @@ description: >
 
 decision_level: L5_operations
 status: active
-last_updated: 2026-02-24
+last_updated: 2026-03-02
 
 options:
   - option_id: slicer_proofread
@@ -23,9 +23,11 @@ options:
       masks → optionally retrain. Designed for the proofread-don't-reannotate
       paradigm validated by K-Prism (>30% NoC90 reduction with prior mask).
       Client-server architecture: annotation workstation does not need GPU.
+      Phase test-dataset: P2 stub planned with Prefect suspend_flow_run queue
+      feeding approved data back to DVC-versioned training set.
     prior_probability: 0.45
     status: recommended
-    implementation_status: not_started
+    implementation_status: partial
     complements:
       - "annotation_platform.slicer_nninteractive"
       - "segmentation_models.dynunet"
