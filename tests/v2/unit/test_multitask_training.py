@@ -375,3 +375,41 @@ class TestModelFamilyRegistration:
         # Aux heads should add < 50% parameter overhead
         overhead = (total_params - base_params) / base_params
         assert overhead < 0.5, f"Parameter overhead {overhead:.1%} exceeds 50%"
+
+
+class TestMultitaskExperimentConfig:
+    """Tests for multi-task experiment config (T10 — #237)."""
+
+    def _load_config(self) -> dict[str, object]:
+        from pathlib import Path
+
+        import yaml
+
+        config_path = Path("configs/experiments/dynunet_multitask_ablation.yaml")
+        with config_path.open(encoding="utf-8") as f:
+            return yaml.safe_load(f)
+
+    def test_multitask_config_loads(self) -> None:
+        """YAML config loads without error."""
+        config = self._load_config()
+        assert config["experiment_name"] == "dynunet_multitask_ablation_v1"
+
+    def test_multitask_config_three_conditions(self) -> None:
+        """Baseline, multitask, and multitask+D2C conditions present."""
+        config = self._load_config()
+        conditions: list[dict[str, object]] = config["conditions"]  # type: ignore[assignment]
+        assert len(conditions) == 3
+        names = [c["name"] for c in conditions]
+        assert "baseline" in names
+        assert "multitask" in names
+        assert "multitask_d2c" in names
+
+    def test_multitask_config_valid_loss_names(self) -> None:
+        """Loss names recognized."""
+        config = self._load_config()
+        assert config["loss"] == "cbdice_cldice"
+
+    def test_multitask_config_gpu_low_compute(self) -> None:
+        """Respects 8GB VRAM budget."""
+        config = self._load_config()
+        assert config["compute_profile"] == "gpu_low"

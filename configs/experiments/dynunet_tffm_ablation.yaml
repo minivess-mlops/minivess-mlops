@@ -1,0 +1,28 @@
+# TFFM DynUNet ablation experiment config (T13 — #240)
+# 2 conditions x 3 folds x 100 epochs
+# Tests Prediction P4
+
+experiment_name: dynunet_tffm_ablation_v1
+model_family: dynunet
+loss: cbdice_cldice
+compute_profile: gpu_low  # 8 GB VRAM budget
+
+folds: 3
+epochs: 100
+early_stopping:
+  patience: 20
+  metric: val_compound_nsd_cldice
+
+conditions:
+  - name: baseline
+    description: "Standard DynUNet + cbdice_cldice (retrained baseline)"
+    wrappers: []
+
+  - name: tffm
+    description: "DynUNet + TFFMWrapper + cbdice_cldice (TFFM-enhanced)"
+    wrappers:
+      - type: tffm
+        grid_size: 8
+        hidden_dim: 32
+        n_heads: 4
+        k_neighbors: 8
