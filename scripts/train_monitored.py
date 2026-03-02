@@ -414,6 +414,7 @@ def run_fold_safe(
     log_model_info: bool = False,
     condition: dict[str, Any] | None = None,
     precomputed_dir: Path | None = None,
+    compute: str = "auto",
 ) -> dict:
     """Train and evaluate a single fold with memory-safe cache rates.
 
@@ -429,8 +430,15 @@ def run_fold_safe(
         and auxiliary targets are loaded into the data pipeline.
     precomputed_dir:
         Directory containing precomputed auxiliary NIfTI files.
+    compute:
+        Device selection: "cpu", "cuda", or "auto" (default: auto-detect).
     """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if compute == "cpu":
+        device = "cpu"
+    elif compute == "cuda":
+        device = "cuda"
+    else:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     cond_name = condition["name"] if condition else "none"
     logger.info(
         "=== Fold %d: loss=%s, condition=%s, device=%s ===",
@@ -905,6 +913,7 @@ def _run_experiment_inner(
                     log_model_info=(not _model_info_logged),
                     condition=getattr(args, "condition", None),
                     precomputed_dir=getattr(args, "precomputed_dir", None),
+                    compute=getattr(args, "compute", "auto"),
                 )
                 _model_info_logged = True
                 fold_results.append(fold_result)
