@@ -431,14 +431,10 @@ def run_fold_safe(
     precomputed_dir:
         Directory containing precomputed auxiliary NIfTI files.
     compute:
-        Device selection: "cpu", "cuda", or "auto" (default: auto-detect).
+        Compute profile name (determines resource budget, not device).
+        Device is always auto-detected (CUDA if available, else CPU).
     """
-    if compute == "cpu":
-        device = "cpu"
-    elif compute == "cuda":
-        device = "cuda"
-    else:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     cond_name = condition["name"] if condition else "none"
     logger.info(
         "=== Fold %d: loss=%s, condition=%s, device=%s ===",
