@@ -221,6 +221,8 @@ module = [
     "scipy.*",
     "nibabel.*",
     "sam2.*",
+    "sam3.*",
+    "transformers.*",
     "prefect.*",
     "pandas.*",
     "yaml.*",
