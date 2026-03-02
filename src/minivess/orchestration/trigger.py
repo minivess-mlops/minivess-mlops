@@ -16,6 +16,57 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def on_dvc_version_change(
+    dataset_name: str, old_version: str, new_version: str
+) -> None:
+    """Stub trigger for DVC dataset version changes.
+
+    Logs the version transition. In production, this would enqueue
+    a dashboard refresh via the PipelineTriggerChain.
+
+    Parameters
+    ----------
+    dataset_name:
+        Name of the DVC-tracked dataset.
+    old_version:
+        Previous data version hash or tag.
+    new_version:
+        New data version hash or tag.
+    """
+    logger.info(
+        "DVC trigger: '%s' %s -> %s. Dashboard update pending.",
+        dataset_name,
+        old_version,
+        new_version,
+    )
+
+
+def on_analysis_completion(
+    experiment_name: str, champion_name: str, n_models: int
+) -> None:
+    """Stub trigger for analysis flow completion.
+
+    Logs the analysis result. In production, this would enqueue
+    a dashboard refresh and optional deploy promotion.
+
+    Parameters
+    ----------
+    experiment_name:
+        Name of the completed experiment.
+    champion_name:
+        Name/category of the champion model.
+    n_models:
+        Number of models evaluated.
+    """
+    logger.info(
+        "Analysis trigger: '%s' complete. Champion: %s (%d models). "
+        "Dashboard update pending.",
+        experiment_name,
+        champion_name,
+        n_models,
+    )
+
+
 def _noop(**kwargs: Any) -> None:  # noqa: ARG001
     """Default no-op callable for unregistered flows."""
 
