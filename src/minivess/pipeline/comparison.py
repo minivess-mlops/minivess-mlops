@@ -662,6 +662,114 @@ def compute_all_pairwise_comparisons(
     return results
 
 
+def cross_model_comparison(
+    model_results: dict[str, dict[str, MetricSummary]],
+) -> ComparisonTable:
+    """Build a ComparisonTable from pre-computed per-model metric summaries.
+
+    Unlike :func:`build_comparison_table` which takes raw FoldResults keyed by
+    loss function, this function accepts already-summarised metrics keyed by
+    model identifier (e.g., ``"dynunet_cbdice_cldice"``, ``"sam3_vanilla"``).
+
+    Parameters
+    ----------
+    model_results:
+        Mapping from model identifier to ``{metric_name: MetricSummary}``.
+
+    Returns
+    -------
+    ComparisonTable
+        Table with one :class:`LossResult` per model (``loss_name`` field
+        is reused to hold the model identifier).
+    """
+    if not model_results:
+        return ComparisonTable(losses=[], metric_names=[])
+
+    all_metric_names: set[str] = set()
+    for metrics in model_results.values():
+        all_metric_names.update(metrics.keys())
+
+    sorted_metrics = sorted(all_metric_names)
+
+    loss_results: list[LossResult] = []
+    for model_name, metrics in model_results.items():
+        padded: dict[str, MetricSummary] = {}
+        for mn in sorted_metrics:
+            padded[mn] = metrics.get(
+                mn,
+                MetricSummary(
+                    mean=float("nan"),
+                    std=float("nan"),
+                    ci_lower=float("nan"),
+                    ci_upper=float("nan"),
+                    per_fold=[],
+                ),
+            )
+        loss_results.append(
+            LossResult(
+                loss_name=model_name,
+                num_folds=0,
+                metrics=padded,
+            )
+        )
+
+    return ComparisonTable(losses=loss_results, metric_names=sorted_metrics)
+
+
+def find_best_model(
+    table: ComparisonTable,
+    metric: str,
+    *,
+    higher_is_better: bool = True,
+) -> str:
+    """Find the best model by a given metric (alias for cross-model usage).
+
+    Parameters
+    ----------
+    table:
+        Cross-model comparison table.
+    metric:
+        Metric name to rank by.
+    higher_is_better:
+        If ``True``, higher metric value is better.
+
+    Returns
+    -------
+    str
+        Name of the best model.
+
+    Raises
+    ------
+    ValueError
+        If ``table.losses`` is empty or ``metric`` not found.
+    """
+    if not table.losses:
+        msg = "ComparisonTable has no models to compare"
+        raise ValueError(msg)
+
+    return find_best_loss(table, metric, higher_is_better=higher_is_better)
+
+
+def format_cross_model_markdown(table: ComparisonTable) -> str:
+    """Format a cross-model ComparisonTable as markdown.
+
+    Delegates to :func:`format_comparison_markdown` with a header swap
+    (``Model`` instead of ``Loss``).
+
+    Parameters
+    ----------
+    table:
+        Cross-model comparison table.
+
+    Returns
+    -------
+    str
+        Markdown-formatted table.
+    """
+    md = format_comparison_markdown(table)
+    return md.replace("| Loss |", "| Model |")
+
+
 def format_significance_matrix_markdown(
     comparisons: list[PairwiseComparison],
 ) -> str:

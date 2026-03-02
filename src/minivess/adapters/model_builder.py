@@ -1,17 +1,105 @@
-"""Generic wrapper composition for model building.
+"""Model builder factory and wrapper composition.
 
-Applies config-driven wrappers (TFFM, multi-task, etc.) to a base model
-sequentially. Researchers add new wrapper types via config YAML only.
+Provides:
+- ``build_adapter(config)`` — dispatches ModelConfig to concrete adapters.
+- ``apply_wrappers(model, wrappers)`` — applies config-driven wrappers (TFFM, multi-task).
+
+Lazy imports ensure that SAM3 dependencies are only loaded when a
+SAM3 variant is actually requested.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch.nn as nn  # noqa: TC002 — used at runtime in function signature
 
+if TYPE_CHECKING:
+    from minivess.adapters.base import ModelAdapter
+    from minivess.config.models import ModelConfig
+
 logger = logging.getLogger(__name__)
+
+
+def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
+    """Build a ModelAdapter from a ModelConfig.
+
+    Dispatches on ``config.family`` to the correct adapter class.
+    Uses lazy imports so that SAM3 dependencies are not required
+    when only using MONAI models.
+
+    Parameters
+    ----------
+    config:
+        Model configuration specifying family and architecture params.
+    **kwargs:
+        Extra keyword arguments forwarded to the adapter constructor
+        (e.g., ``use_stub=True`` for SAM3 adapters in tests).
+
+    Returns
+    -------
+    Concrete ModelAdapter instance.
+
+    Raises
+    ------
+    ValueError
+        If the model family is not supported.
+    """
+    from minivess.config.models import ModelFamily
+
+    family = config.family
+
+    if family == ModelFamily.MONAI_DYNUNET:
+        from minivess.adapters.dynunet import DynUNetAdapter
+
+        return DynUNetAdapter(config)
+
+    if family == ModelFamily.MONAI_SEGRESNET:
+        from minivess.adapters.segresnet import SegResNetAdapter
+
+        return SegResNetAdapter(config)
+
+    if family == ModelFamily.MONAI_SWINUNETR:
+        from minivess.adapters.swinunetr import SwinUNETRAdapter
+
+        return SwinUNETRAdapter(config)
+
+    if family == ModelFamily.MONAI_VISTA3D:
+        from minivess.adapters.vista3d import Vista3dAdapter
+
+        return Vista3dAdapter(config)
+
+    if family == ModelFamily.VESSEL_FM:
+        from minivess.adapters.vesselfm import VesselFMAdapter
+
+        return VesselFMAdapter(config)
+
+    if family == ModelFamily.COMMA_MAMBA:
+        from minivess.adapters.comma import CommaAdapter
+
+        return CommaAdapter(config)
+
+    if family == ModelFamily.SAM3_VANILLA:
+        from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
+
+        return Sam3VanillaAdapter(config, **kwargs)
+
+    if family == ModelFamily.SAM3_TOPOLORA:
+        from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
+
+        return Sam3TopoLoraAdapter(config, **kwargs)
+
+    if family == ModelFamily.SAM3_HYBRID:
+        from minivess.adapters.sam3_hybrid import Sam3HybridAdapter
+
+        return Sam3HybridAdapter(config, **kwargs)
+
+    msg = (
+        f"Unsupported model family '{family}'. "
+        f"Available: {[f.value for f in ModelFamily]}"
+    )
+    raise ValueError(msg)
 
 
 def apply_wrappers(

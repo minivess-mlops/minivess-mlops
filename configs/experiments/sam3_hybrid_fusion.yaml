@@ -1,0 +1,47 @@
+experiment_name: sam3_hybrid_fusion
+model: sam3_hybrid
+model_family: sam3_hybrid
+losses:
+  - cbdice_cldice
+compute: gpu_low
+data_dir: data/raw/minivess
+num_folds: 3
+max_epochs: 50
+seed: 42
+split_mode: file
+splits_file: configs/splits/3fold_seed42.json
+debug: false
+memory_limit_gb: 24
+monitor_interval: 10
+architecture_params:
+  backbone: vit_32l
+  input_size: 1008
+  embed_dim: 1024
+  fpn_dim: 256
+  pretrained: false
+  filters: [32, 64, 128, 256]
+  fusion_gate_init: 0.0
+checkpoint:
+  tracked_metrics:
+    - name: val_loss
+      direction: minimize
+      patience: 15
+    - name: val_dice
+      direction: maximize
+      patience: 15
+    - name: val_cldice
+      direction: maximize
+      patience: 15
+  early_stopping_strategy: all
+  primary_metric: val_loss
+  min_delta: 1.0e-4
+  min_epochs: 10
+  save_last: true
+  save_history: true
+notes: >
+  SAM3 V3: Hybrid — frozen SAM3 ViT-32L features + DynUNet 3D + GatedFeatureFusion.
+  SAM features fused at DynUNet output via gated residual (alpha init=0).
+  cbdice_cldice loss for topology awareness.
+  Expected: best SAM variant, but likely below standalone DynUNet.
+  VRAM: ~7.5 GB (batch_size=1, AMP mandatory).
+  Go/No-Go Gate G3: V3 DSC > V2 DSC.

@@ -1,8 +1,14 @@
-"""SAM3 adapter stub — exploratory, requires segment-anything package.
+"""SAM3 adapter stub — DEPRECATED, use sam3_vanilla/sam3_topolora/sam3_hybrid.
 
-MedSAM3 (Liu et al., 2025) is a medical image variant of the Segment
-Anything Model with concept-aware prompting. This adapter is a
-placeholder that requires the external `segment-anything` package.
+This adapter is a deprecated placeholder from the initial SAM3 exploration.
+Use the concrete SAM3 variant adapters instead:
+
+- ``Sam3VanillaAdapter`` — frozen SAM3 ViT-32L encoder + trainable decoder
+- ``Sam3TopoLoraAdapter`` — SAM3 + LoRA on FFN + topology-aware loss
+- ``Sam3HybridAdapter`` — SAM3 features + DynUNet 3D decoder + gated fusion
+
+.. deprecated:: 2.0.0
+    Use :class:`~minivess.adapters.sam3_vanilla.Sam3VanillaAdapter` instead.
 """
 
 from __future__ import annotations
@@ -19,10 +25,12 @@ if TYPE_CHECKING:
     from minivess.config.models import ModelConfig
 
 
-class Sam3Adapter(ModelAdapter):
-    """SAM3/MedSAM3 adapter (exploratory).
+class Sam3Adapter(ModelAdapter):  # type: ignore[misc]
+    """SAM3/MedSAM3 adapter (DEPRECATED).
 
-    Raises ImportError if `segment-anything` is not installed.
+    .. deprecated:: 2.0.0
+        Use :class:`Sam3VanillaAdapter`, :class:`Sam3TopoLoraAdapter`,
+        or :class:`Sam3HybridAdapter` instead.
 
     Parameters
     ----------
@@ -34,16 +42,19 @@ class Sam3Adapter(ModelAdapter):
         super().__init__()
         self.config = config
 
-        try:
-            import segment_anything  # noqa: F401
-        except ImportError:
-            msg = (
-                "SAM3 adapter requires the 'segment-anything' package. "
-                "Install with: pip install segment-anything"
-            )
-            raise ImportError(msg) from None
+        import warnings
 
-        msg = "SAM3 adapter is exploratory — full implementation pending"
+        warnings.warn(
+            "Sam3Adapter is deprecated. Use Sam3VanillaAdapter, "
+            "Sam3TopoLoraAdapter, or Sam3HybridAdapter instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+        msg = (
+            "Sam3Adapter is deprecated — use Sam3VanillaAdapter, "
+            "Sam3TopoLoraAdapter, or Sam3HybridAdapter instead."
+        )
         raise RuntimeError(msg)
 
     def forward(self, images: Tensor, **kwargs: Any) -> SegmentationOutput:

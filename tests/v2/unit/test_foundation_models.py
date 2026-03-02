@@ -239,7 +239,7 @@ class TestSam3Adapter:
     """Test SAM3 adapter stub."""
 
     def test_sam3_not_available_message(self) -> None:
-        """SAM3 should raise clear error about missing dependency."""
+        """Deprecated Sam3Adapter raises RuntimeError directing to new adapters."""
         from minivess.adapters.sam3 import Sam3Adapter
 
         config = ModelConfig(
@@ -248,7 +248,7 @@ class TestSam3Adapter:
             in_channels=1,
             out_channels=2,
         )
-        with pytest.raises((ImportError, RuntimeError), match="segment.anything|SAM"):
+        with pytest.raises((ImportError, RuntimeError), match="deprecated|Sam3"):
             Sam3Adapter(config)
 
     def test_sam3_config_exists_in_enum(self) -> None:

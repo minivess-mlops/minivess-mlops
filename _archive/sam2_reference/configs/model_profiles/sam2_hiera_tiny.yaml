@@ -1,0 +1,16 @@
+name: sam2_hiera_tiny
+divisor: 16
+model_overhead_mb: 500
+bytes_per_voxel_amp: 10
+bytes_per_voxel_fp32: 20
+max_batch_size:
+  cpu: 1
+  gpu_low: 1
+  gpu_high: 2
+  gpu_extreme: 4
+default_patch_xy: 96
+notes: >
+  SAM2 Hiera-Tiny (38.9M params) with slice-by-slice 2D inference.
+  Frozen encoder (~1.5 GB) + trainable decoder (~0.5 GB).
+  Slice-by-slice processing means effective batch_size=1 per Z-slice.
+  For vanilla and TopoLoRA variants. VRAM ~3.0-3.5 GB with AMP.

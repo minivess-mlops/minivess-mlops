@@ -1,0 +1,16 @@
+name: sam2_hybrid
+divisor: 16
+model_overhead_mb: 1200
+bytes_per_voxel_amp: 14
+bytes_per_voxel_fp32: 28
+max_batch_size:
+  cpu: 1
+  gpu_low: 1
+  gpu_high: 2
+  gpu_extreme: 4
+default_patch_xy: 96
+notes: >
+  SAM2 Hiera-Tiny (frozen) + DynUNet encoder/decoder + GatedFeatureFusion.
+  Combined VRAM ~7.5 GB: Hiera (~1.5 GB) + DynUNet (~5.5 GB) + fusion (~0.5 GB).
+  Requires batch_size=1 and AMP on 8 GB GPUs.
+  Fusion at bottleneck only (not multi-scale) to fit VRAM.

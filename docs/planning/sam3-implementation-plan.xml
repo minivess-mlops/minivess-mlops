@@ -1,0 +1,742 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan version="1.0" name="sam3-implementation">
+  <metadata>
+    <created>2026-03-02</created>
+    <branch>feat/sam3-variants</branch>
+    <literature_report>docs/planning/sam3-literature-research-report.md</literature_report>
+    <description>
+      TDD implementation plan for SAM3 (Meta Segment Anything Model 3, arXiv:2511.16719)
+      integration into the MinIVess segmentation pipeline.
+
+      SAM3 is a fundamentally different architecture from SAM2:
+      - Dual: DETR detector + SAM2 tracker sharing a Perception Encoder (ViT-32L, 848M total)
+      - Concept-driven segmentation via text/exemplar prompts (not spatial-only)
+      - Input: 1008x1008, Feature dims: 1024 (ViT) → 256 (FPN neck)
+      - Single variant (848M), ~16GB+ VRAM for inference
+
+      Three variants demonstrate SAM3 on MiniVess microvasculature:
+      V1 (Vanilla): Shows how badly vanilla SAM3 works (expected DSC 0.05-0.20)
+      V2 (TopoLoRA): Topology-aware LoRA adaptation (expected DSC 0.30-0.50)
+      V3 (Hybrid): SAM3 features + DynUNet fusion (expected DSC 0.50-0.70)
+
+      DynUNet baseline: 0.824 DSC / 0.906 clDice (cbdice_cldice loss).
+
+      This is an MLOps platform demonstration. We pick low-hanging fruits from the
+      literature and quantify SAM3's limitations. Scientific quality is paramount,
+      but we demonstrate existing approaches, not develop SOTA.
+
+      NOTE: Existing SAM2-based code on feat/sam3-variants (commits cf3acf9, 1829789)
+      was implemented by mistake. It provides reusable patterns (slice inference,
+      gated fusion, factory dispatch) but uses the WRONG backbone. This plan
+      replaces that code with correct SAM3 integration.
+
+      Key references:
+      - Ravi et al. (2025). "SAM 3." arXiv:2511.16719
+      - Xiang et al. (2025). "TopoLoRA-SAM." arXiv:2601.02273
+      - SAM3-Adapter (2025). arXiv:2511.19425
+      - Li et al. (2025). "nnSAM." Medical Physics.
+      - VesSAM: Kang et al. (2025). arXiv:2502.18185
+    </description>
+  </metadata>
+
+  <architecture>
+    <sam3_model>
+      <params>848M (total), ~648M (ViT-32L perception encoder)</params>
+      <input_size>1008x1008</input_size>
+      <feature_dims>1024 (ViT backbone) → 256 (FPN neck via Sam3DualViTDetNeck)</feature_dims>
+      <fpn_scales>4.0, 2.0, 1.0, 0.5</fpn_scales>
+      <patch_size>14 (produces 72x72 feature maps)</patch_size>
+      <transformer_blocks>32 layers, 16 attention heads, 1024 embed_dim</transformer_blocks>
+      <positional_encoding>RoPE (Rotary Position Embedding)</positional_encoding>
+      <package>sam3 (git clone https://github.com/facebookresearch/sam3)</package>
+      <hf_model>facebook/sam3 (gated, requires HF auth)</hf_model>
+      <api>build_sam3_image_model(), Sam3Processor, Sam3Model.from_pretrained()</api>
+    </sam3_model>
+
+    <vram_strategy>
+      <!-- SAM3 (848M) needs ~16GB+ for full inference. MiniVess target is 8GB RTX 2070 Super. -->
+      <!-- Strategy: AMP (FP16) + gradient checkpointing + sequential slice processing + batch_size=1 -->
+      <!-- Alternative: offline feature caching to disk (~200MB/volume x 70 = 14GB SSD) -->
+      <!-- For training with LoRA: 16-24GB recommended (RTX 3090/4090), or feature caching on 8GB -->
+      <v1_vanilla_vram>~8-12GB (inference only, AMP, per-slice)</v1_vanilla_vram>
+      <v2_topolora_vram>~16-24GB (LoRA training), or 8GB with feature caching</v2_topolora_vram>
+      <v3_hybrid_vram>~8GB (cached SAM3 features + DynUNet), or 24GB+ (live)</v3_hybrid_vram>
+    </vram_strategy>
+
+    <lora_config>
+      <!-- TopoLoRA-SAM validated: r=16, α=32, on FFN layers (mlp.lin1, mlp.lin2) -->
+      <rank>16</rank>
+      <alpha>32</alpha>
+      <target_modules>mlp.lin1, mlp.lin2 (in all 32 ViT transformer blocks)</target_modules>
+      <spatial_adapter>3x3 depthwise → ReLU → 1x1 pointwise, residual connection (66K params)</spatial_adapter>
+      <dropout>0.1</dropout>
+    </lora_config>
+
+    <three_variants>
+      <v1 name="Sam3VanillaAdapter">
+        <purpose>Demonstrate how badly vanilla SAM3 works on 3D microvasculature</purpose>
+        <architecture>Frozen SAM3 PE + trainable mask decoder, slice-by-slice</architecture>
+        <prompting>Concept text: "microvasculature" OR null embeddings for automatic mode</prompting>
+        <loss>dice_ce (standard, no topology supervision)</loss>
+        <expected_dsc>0.05-0.20</expected_dsc>
+        <expected_cldice>0.03-0.15</expected_cldice>
+        <trainable_params>~2-4M (decoder only)</trainable_params>
+      </v1>
+
+      <v2 name="Sam3TopoLoraAdapter">
+        <purpose>Test if topology loss + LoRA improves SAM3 for vessels</purpose>
+        <architecture>SAM3 PE + LoRA (r=16) on FFN layers + spatial adapter + trainable decoder</architecture>
+        <prompting>Null embeddings (automatic) OR concept text</prompting>
+        <loss>cbdice_cldice (topology-aware, matching DynUNet champion)</loss>
+        <expected_dsc>0.30-0.50</expected_dsc>
+        <expected_cldice>0.20-0.40</expected_cldice>
+        <trainable_params>~2.4M (LoRA) + ~66K (spatial adapter) + ~2-4M (decoder)</trainable_params>
+        <evidence>TopoLoRA-SAM: +15% clDice with LoRA + clDice on retinal vessels</evidence>
+        <controlled_experiment>V1→V2: ONLY difference is LoRA + loss + spatial adapter</controlled_experiment>
+      </v2>
+
+      <v3 name="Sam3HybridAdapter">
+        <purpose>Test if SAM3 features complement DynUNet 3D decoder</purpose>
+        <architecture>
+          Frozen SAM3 PE (feature extractor, offline or live) +
+          DynUNet encoder/decoder (trainable) +
+          GatedCrossAttentionFusion (Q=F_3d, K/V=F_sam, gate_alpha init=0.0) +
+          AxialProjection (1D Conv3d along Z for inter-slice context)
+        </architecture>
+        <loss>cbdice_cldice</loss>
+        <expected_dsc>0.50-0.70 (still below DynUNet standalone 0.824)</expected_dsc>
+        <expected_cldice>0.40-0.65</expected_cldice>
+        <trainable_params>~3.5M (DynUNet) + fusion layers</trainable_params>
+        <evidence>nnSAM: +3.5% DSC with dual-encoder fusion</evidence>
+        <safety>gate_alpha=0.0 means pure DynUNet at start; SAM features learned importance</safety>
+        <detach>f_sam.detach() blocks gradient flow to frozen SAM3 encoder</detach>
+      </v3>
+    </three_variants>
+
+    <go_no_go_gates>
+      <g1 condition="Vanilla SAM3 DSC >= 0.05" action_if_fail="SAM3 completely useless; document and proceed with V2/V3"/>
+      <g2 condition="TopoLoRA clDice improvement over vanilla >= 2%" action_if_fail="Topology loss does not transfer to SAM3 LoRA"/>
+      <g3 condition="Hybrid DSC > TopoLoRA DSC" action_if_fail="SAM3 features provide no complementary value to DynUNet"/>
+    </go_no_go_gates>
+  </architecture>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 0: SAM3 Infrastructure (P0-critical)                          -->
+  <!-- Backbone wrapper, feature extraction, slice inference, config       -->
+  <!-- ================================================================== -->
+
+  <task id="T1" status="NOT_STARTED" issue="SAM3-01" priority="P0">
+    <name>SAM3 backbone wrapper and weight management</name>
+    <description>
+      Create Sam3Backbone that wraps SAM3's Perception Encoder (ViT-32L).
+      - Load via build_sam3_image_model() or Sam3Model.from_pretrained("facebook/sam3")
+      - Extract perception encoder features (1024-dim from ViT, 256-dim from FPN neck)
+      - Handle HuggingFace authentication flow for gated model access
+      - Provide _StubSam3Encoder for testing without SAM3 package installed
+      - Feature caching: save/load extracted features to disk for 8GB VRAM workflow
+      - Input preprocessing: resize to 1008x1008, normalize mean=0.5/std=0.5
+
+      Key difference from SAM2: SAM3 uses ViT-32L (not Hiera), 1008x1008 (not 1024),
+      and has concept-driven prompting. The perception encoder is shared between
+      DETR detector and SAM2-based tracker.
+
+      Package: sam3 (from git clone, not pip). Optional [sam3] extras dependency.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_sam3_variants_dict_has_single_entry
+        test_sam3_checkpoint_url_defined
+        test_sam3_backbone_creates_with_stub
+        test_sam3_backbone_frozen_by_default
+        test_sam3_feature_shape_matches_spec_1024
+        test_sam3_fpn_feature_shape_256
+        test_sam3_input_size_is_1008
+        test_sam3_feature_cache_save_load_roundtrip
+        test_sam3_stub_encoder_grayscale_to_3ch
+        test_sam3_stub_encoder_resize_to_1008
+        test_sam3_hf_auth_prompt_when_no_token
+        test_sam3_backbone_out_channels_property
+      </tests>
+      <file>tests/v2/unit/test_sam3_backbone.py</file>
+      <impl_files>
+        src/minivess/adapters/sam3_backbone.py
+        pyproject.toml (add sam3 optional dependency)
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <task id="T2" status="NOT_STARTED" issue="SAM3-02" priority="P0">
+    <name>Slice-by-slice inference for SAM3</name>
+    <description>
+      Update the existing slice_inference.py utility for SAM3's requirements:
+      - resize_for_sam3(): bilinear interpolation to 1008x1008 (NOT 1024)
+      - unresize_from_sam3(): restore to original spatial dimensions
+      - slice_by_slice_forward(): iterate Z-slices through 2D SAM3 model
+      - Grayscale→3-channel replication (SAM3 expects RGB)
+      - Normalization: mean=0.5, std=0.5 (SAM3 standard)
+
+      This mostly reuses the existing slice_inference.py patterns but adjusts
+      for SAM3's specific input requirements (1008 not 1024, different normalization).
+    </description>
+    <tdd_spec>
+      <tests>
+        test_resize_for_sam3_produces_1008x1008
+        test_unresize_restores_original_dims
+        test_slice_by_slice_forward_output_shape
+        test_slice_by_slice_handles_odd_z_dims
+        test_grayscale_to_3ch_expansion
+        test_sam3_normalization_mean_std
+        test_resize_unresize_roundtrip_preserves_content
+        test_slice_by_slice_with_cached_features
+      </tests>
+      <file>tests/v2/unit/test_sam3_slice_inference.py</file>
+      <impl_files>
+        src/minivess/adapters/sam3_slice_inference.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <task id="T3" status="NOT_STARTED" issue="SAM3-03" priority="P0">
+    <name>SAM3 mask decoder wrapper</name>
+    <description>
+      Create Sam3MaskDecoder that wraps SAM3's mask decoder head.
+      - Accept 256-dim FPN features (or 1024-dim ViT features with projection)
+      - Support null prompt mode for fully automatic segmentation
+      - Support concept text prompt mode ("microvasculature")
+      - binary_to_2class(): torch.cat([-logits, logits], dim=1)
+      - Trainable: only ~2-4M params in decoder
+
+      SAM3's decoder is the mask prediction head from SAM2's tracker component.
+      We use it in prompt-free mode (null embeddings) for automatic segmentation,
+      or with concept text prompt for concept-driven segmentation.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_sam3_decoder_output_shape_matches_input
+        test_sam3_decoder_gradient_flows
+        test_sam3_binary_to_2class_shape
+        test_sam3_binary_to_2class_symmetry
+        test_sam3_decoder_null_prompt_mode
+        test_sam3_decoder_concept_prompt_mode
+      </tests>
+      <file>tests/v2/unit/test_sam3_decoder.py</file>
+      <impl_files>
+        src/minivess/adapters/sam3_decoder.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies>
+      <dep>T1</dep>
+    </dependencies>
+  </task>
+
+  <task id="T4" status="NOT_STARTED" issue="SAM3-04" priority="P0">
+    <name>ModelFamily enum and config extensions for SAM3</name>
+    <description>
+      Update ModelConfig to support SAM3 variants:
+      - Keep existing SAM3_VANILLA, SAM3_TOPOLORA, SAM3_HYBRID enum values
+        (already added for SAM2 code, but now they reference SAM3)
+      - Add SAM3-specific config fields:
+        - sam3_model_id: str = "facebook/sam3" (HuggingFace model ID)
+        - concept_prompt: str | None = None (text prompt for concept-driven mode)
+        - feature_cache_dir: Path | None = None (for offline feature caching)
+        - use_spatial_adapter: bool = True
+      - Update model_profiles: sam3.yaml with SAM3 VRAM estimates
+
+      The existing ModelFamily enum values from the SAM2 code are reused,
+      but their implementations now point to SAM3 backbone.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_sam3_family_enum_values_exist
+        test_model_config_sam3_defaults
+        test_model_config_concept_prompt_field
+        test_model_config_feature_cache_dir_field
+        test_sam3_model_profile_yaml_loads
+        test_sam3_model_profile_vram_estimate
+      </tests>
+      <file>tests/v2/unit/test_sam3_config.py</file>
+      <impl_files>
+        src/minivess/config/models.py
+        configs/model_profiles/sam3.yaml
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <task id="T5" status="NOT_STARTED" issue="SAM3-05" priority="P0">
+    <name>SAM3 feature caching infrastructure</name>
+    <description>
+      Implement offline feature extraction and caching for 8GB VRAM workflow:
+      - extract_and_cache_sam3_features(volumes, cache_dir): extract PE features
+        per-slice for all volumes, save as .pt files
+      - load_cached_features(volume_id, slice_idx, cache_dir): load from disk
+      - Sam3CachedFeatureDataset: PyTorch Dataset wrapping cached features
+      - Disk budget: ~200MB per volume × 70 volumes = ~14GB SSD
+
+      This allows training on 8GB GPU by extracting SAM3 features offline
+      (on a larger GPU or CPU with patience) and loading them during training.
+      Essential for V3 hybrid which needs SAM3 features + DynUNet simultaneously.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_extract_features_creates_cache_dir
+        test_extract_features_saves_pt_files
+        test_load_cached_features_returns_tensor
+        test_load_cached_features_correct_shape
+        test_cached_dataset_len_matches_volumes
+        test_cached_dataset_getitem_returns_tuple
+        test_cache_roundtrip_preserves_values
+      </tests>
+      <file>tests/v2/unit/test_sam3_feature_cache.py</file>
+      <impl_files>
+        src/minivess/adapters/sam3_feature_cache.py
+      </impl_files>
+    </tdd_spec>
+    <dependencies>
+      <dep>T1</dep>
+    </dependencies>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Variant Adapters (P1-high)                                 -->
+  <!-- Three SAM3 adapters + model builder update + experiment configs     -->
+  <!-- ================================================================== -->
+
+  <task id="T6" status="NOT_STARTED" issue="SAM3-06" priority="P1">
+    <name>Sam3VanillaAdapter — vanilla SAM3 baseline</name>
+    <description>
+      Frozen SAM3 Perception Encoder + trainable mask decoder.
+      Slice-by-slice 2D inference with concept prompt ("microvasculature")
+      or null embeddings for fully automatic mode.
+
+      Purpose: Establish the SAM3 baseline. Expected to underperform DynUNet
+      significantly (DSC 0.05-0.20) due to domain gap and 2D-to-3D mismatch.
+      This is the intended scientific finding.
+
+      Forward pass:
+      1. For each Z-slice: resize to 1008x1008, replicate 1ch→3ch, normalize
+      2. Extract frozen PE features (1024-dim)
+      3. Project through trainable decoder with null/concept prompt
+      4. binary_to_2class → stack slices → SegmentationOutput
+
+      Loss: dice_ce (standard, no topology supervision)
+      Checkpoint: save decoder weights only (not frozen encoder)
+    </description>
+    <tdd_spec>
+      <tests>
+        test_sam3_vanilla_creates_with_config
+        test_sam3_vanilla_encoder_frozen
+        test_sam3_vanilla_decoder_trainable
+        test_sam3_vanilla_forward_output_shape
+        test_sam3_vanilla_forward_predictions_sum_to_one
+        test_sam3_vanilla_forward_metadata_has_architecture
+        test_sam3_vanilla_get_config_returns_info
+        test_sam3_vanilla_trainable_parameters_count
+        test_sam3_vanilla_save_load_checkpoint_roundtrip
+        test_sam3_vanilla_concept_prompt_mode
+      </tests>
+      <file>tests/v2/unit/test_sam3_vanilla_v3.py</file>
+      <impl_files>
+        src/minivess/adapters/sam3_vanilla.py (REPLACE existing SAM2 version)
+      </impl_files>
+    </tdd_spec>
+    <dependencies>
+      <dep>T1</dep>
+      <dep>T2</dep>
+      <dep>T3</dep>
+      <dep>T4</dep>
+    </dependencies>
+  </task>
+
+  <task id="T7" status="NOT_STARTED" issue="SAM3-07" priority="P1">
+    <name>Sam3TopoLoraAdapter — topology-aware LoRA adaptation</name>
+    <description>
+      SAM3 Perception Encoder + PEFT LoRA (r=16) on FFN layers + spatial adapter
+      + trainable mask decoder. Loss: cbdice_cldice.
+
+      Based on TopoLoRA-SAM (arXiv:2601.02273) adapted for SAM3:
+      - LoRA targets: mlp.lin1, mlp.lin2 in all 32 ViT transformer blocks
+        (SAM3 uses ViT FFN, not Hiera attention like SAM2)
+      - Spatial adapter: 3x3 depthwise → ReLU → 1x1 pointwise (66K params)
+      - LoRA config: r=16, alpha=32, dropout=0.1
+      - Training: AdamW (lr=1e-4), cosine decay, 50 epochs
+
+      Controlled experiment: V1→V2 ONLY changes are LoRA + loss + spatial adapter.
+      Expected: +10-20% clDice over V1.
+
+      _find_sam3_ffn_modules(): find nn.Linear in ViT FFN blocks for LoRA targets
+      (different from SAM2 where targets were Hiera attention q_proj/v_proj)
+    </description>
+    <tdd_spec>
+      <tests>
+        test_sam3_topolora_creates_with_config
+        test_sam3_topolora_lora_applied_to_ffn
+        test_sam3_topolora_lora_params_require_grad
+        test_sam3_topolora_base_params_frozen
+        test_sam3_topolora_spatial_adapter_present
+        test_sam3_topolora_forward_output_shape
+        test_sam3_topolora_forward_predictions_sum_to_one
+        test_sam3_topolora_trainable_parameters_count
+        test_sam3_topolora_save_load_checkpoint_roundtrip
+        test_sam3_topolora_checkpoint_has_lora_and_decoder_keys
+        test_sam3_topolora_get_config_includes_lora_rank
+        test_sam3_topolora_spatial_adapter_residual_connection
+      </tests>
+      <file>tests/v2/unit/test_sam3_topolora_v3.py</file>
+      <impl_files>
+        src/minivess/adapters/sam3_topolora.py (REPLACE existing SAM2 version)
+      </impl_files>
+    </tdd_spec>
+    <dependencies>
+      <dep>T1</dep>
+      <dep>T2</dep>
+      <dep>T3</dep>
+      <dep>T4</dep>
+    </dependencies>
+  </task>
+
+  <task id="T8" status="NOT_STARTED" issue="SAM3-08" priority="P1">
+    <name>Sam3HybridAdapter — SAM3 features + DynUNet fusion</name>
+    <description>
+      Frozen SAM3 PE (feature extractor) + DynUNet encoder/decoder (trainable)
+      + GatedCrossAttentionFusion + AxialProjection.
+
+      Architecture (from literature report Section 8.4):
+        Input → DynUNet Encoder (3D, trainable) → F_3d
+        Input → SAM3 PE (2D, frozen) → per-slice features → AxialProjection → F_sam
+        GatedCrossAttentionFusion(Q=F_3d, K/V=F_sam, gate_alpha init=0.0)
+        → DynUNet Decoder → cbdice_cldice loss
+
+      GatedCrossAttentionFusion:
+        - Q from DynUNet (primary), K/V from SAM3 (auxiliary)
+        - gate_alpha initialized to 0.0 (pure DynUNet at start)
+        - f_sam.detach() blocks gradient flow to frozen SAM3 encoder
+        - If SAM3 features unhelpful, gate learns to suppress them
+        - Architecture CANNOT perform worse than standalone DynUNet
+
+      AxialProjection:
+        - 1D Conv3d along Z axis for inter-slice context
+        - Converts 2D SAM3 per-slice features into pseudo-3D volume
+
+      Supports two modes:
+        1. Live: SAM3 runs per-slice during training (requires 16-24GB VRAM)
+        2. Cached: Load pre-extracted SAM3 features from disk (8GB VRAM)
+
+      Based on nnSAM (Li et al. 2025): dual-encoder fusion pattern.
+      Loss: cbdice_cldice
+    </description>
+    <tdd_spec>
+      <tests>
+        test_gated_cross_attention_output_shape
+        test_gated_cross_attention_gate_starts_at_zero
+        test_gated_cross_attention_gradient_flows_to_3d
+        test_gated_cross_attention_no_gradient_to_sam_features
+        test_axial_projection_output_shape
+        test_axial_projection_handles_variable_z
+        test_sam3_hybrid_creates_with_config
+        test_sam3_hybrid_forward_output_shape
+        test_sam3_hybrid_forward_predictions_sum_to_one
+        test_sam3_hybrid_trainable_parameters_excludes_sam3
+        test_sam3_hybrid_save_load_checkpoint_roundtrip
+        test_sam3_hybrid_cached_feature_mode
+        test_sam3_hybrid_get_config_returns_info
+        test_sam3_hybrid_dynunet_component_trainable
+      </tests>
+      <file>tests/v2/unit/test_sam3_hybrid_v3.py</file>
+      <impl_files>
+        src/minivess/adapters/sam3_hybrid.py (REPLACE existing SAM2 version)
+      </impl_files>
+    </tdd_spec>
+    <dependencies>
+      <dep>T1</dep>
+      <dep>T2</dep>
+      <dep>T4</dep>
+      <dep>T5</dep>
+    </dependencies>
+  </task>
+
+  <task id="T9" status="NOT_STARTED" issue="SAM3-09" priority="P1">
+    <name>Experiment config YAMLs for SAM3</name>
+    <description>
+      Update experiment configs for SAM3 (not SAM2):
+      - sam3_vanilla_baseline.yaml: dice_ce, 3 folds, 50 epochs
+      - sam3_topolora_topology.yaml: cbdice_cldice, LoRA r=16, alpha=32
+      - sam3_hybrid_fusion.yaml: cbdice_cldice, DynUNet filters, feature caching
+      - sam3_all_debug.yaml: all 3, 1 epoch, 2 folds (smoke test)
+
+      Key changes from SAM2 configs:
+      - sam3_variant: removed (SAM3 has single model, no "hiera_tiny")
+      - sam3_model_id: "facebook/sam3"
+      - input_size: 1008 (not 1024)
+      - concept_prompt: "microvasculature" (for V1/V2)
+      - feature_cache_dir: "data/cache/sam3_features" (for V3)
+      - lora_targets: "mlp.lin1,mlp.lin2" (not "q_proj,v_proj")
+    </description>
+    <tdd_spec>
+      <tests>
+        test_sam3_vanilla_config_loads
+        test_sam3_topolora_config_loads
+        test_sam3_hybrid_config_loads
+        test_sam3_debug_config_loads
+      </tests>
+      <file>tests/v2/unit/test_sam3_configs.py</file>
+      <impl_files>
+        configs/experiments/sam3_vanilla_baseline.yaml (UPDATE)
+        configs/experiments/sam3_topolora_topology.yaml (UPDATE)
+        configs/experiments/sam3_hybrid_fusion.yaml (UPDATE)
+        configs/experiments/sam3_all_debug.yaml (UPDATE)
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <task id="T10" status="NOT_STARTED" issue="SAM3-10" priority="P1">
+    <name>Model builder factory update for SAM3</name>
+    <description>
+      Update build_adapter() in model_builder.py to dispatch SAM3 families
+      to the new SAM3-based adapters (not SAM2-based ones).
+
+      The factory already handles SAM3_VANILLA, SAM3_TOPOLORA, SAM3_HYBRID
+      families — just update the lazy imports to point to the new SAM3
+      implementations.
+
+      Also update __init__.py exports.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_build_sam3_vanilla_adapter
+        test_build_sam3_topolora_adapter
+        test_build_sam3_hybrid_adapter
+        test_build_adapter_lazy_import_sam3
+        test_build_adapter_unknown_family_raises
+        test_build_adapter_all_families_dispatch
+      </tests>
+      <file>tests/v2/unit/test_sam3_model_builder.py</file>
+      <impl_files>
+        src/minivess/adapters/model_builder.py (UPDATE)
+        src/minivess/adapters/__init__.py (UPDATE)
+      </impl_files>
+    </tdd_spec>
+    <dependencies>
+      <dep>T6</dep>
+      <dep>T7</dep>
+      <dep>T8</dep>
+    </dependencies>
+  </task>
+
+  <task id="T11" status="NOT_STARTED" issue="SAM3-11" priority="P1">
+    <name>Integration smoke test — SAM3 training loop</name>
+    <description>
+      Integration tests verifying each SAM3 adapter can:
+      1. Execute one training step (forward + backward)
+      2. Have gradients flow to trainable parameters
+      3. Work with AMP (mixed precision)
+
+      Uses stub encoder for CI (no real SAM3 weights needed).
+    </description>
+    <tdd_spec>
+      <tests>
+        test_sam3_vanilla_training_step
+        test_sam3_vanilla_amp_compatible
+        test_sam3_topolora_training_step
+        test_sam3_topolora_amp_compatible
+        test_sam3_hybrid_training_step
+        test_sam3_hybrid_amp_compatible
+      </tests>
+      <file>tests/v2/integration/test_sam3_training_integration_v3.py</file>
+      <impl_files/>
+    </tdd_spec>
+    <dependencies>
+      <dep>T6</dep>
+      <dep>T7</dep>
+      <dep>T8</dep>
+    </dependencies>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: Comparison and Analysis (P2-medium)                        -->
+  <!-- Evaluation, gates, reports, documentation                          -->
+  <!-- ================================================================== -->
+
+  <task id="T12" status="NOT_STARTED" issue="SAM3-12" priority="P2">
+    <name>Cross-model comparison infrastructure</name>
+    <description>
+      Add cross_model_comparison() to comparison.py for comparing across
+      model families (DynUNet vs SAM3 variants).
+      Already partially implemented in current Phase 2 code — verify and
+      add tests for SAM3-specific comparison scenarios.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_cross_model_comparison_builds_table
+        test_cross_model_comparison_empty_input
+        test_find_best_model_by_dsc
+        test_format_cross_model_markdown
+      </tests>
+      <file>tests/v2/unit/test_cross_model_comparison.py</file>
+      <impl_files>
+        src/minivess/pipeline/comparison.py (already updated)
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <task id="T13" status="NOT_STARTED" issue="SAM3-13" priority="P2">
+    <name>SAM3 vs DynUNet evaluation runner</name>
+    <description>
+      Script: scripts/evaluate_sam3_comparison.py
+      Full 8-metric suite: DSC, HD95, ASSD, NSD, clDice, BE_0, BE_1, Junction F1.
+      Loads trained models from MLflow, evaluates on test set.
+      Already partially implemented — update for SAM3 model references.
+    </description>
+    <tdd_spec>
+      <tests/>
+      <file>scripts/evaluate_sam3_comparison.py (already created)</file>
+      <impl_files/>
+    </tdd_spec>
+    <dependencies>
+      <dep>T11</dep>
+    </dependencies>
+  </task>
+
+  <task id="T14" status="NOT_STARTED" issue="SAM3-14" priority="P2">
+    <name>SAM3 comparison report and figures</name>
+    <description>
+      Script: scripts/generate_sam3_report.py
+      Output: docs/results/sam3_comparison_report.md
+      Already partially implemented — update for SAM3.
+    </description>
+    <tdd_spec>
+      <tests/>
+      <file>scripts/generate_sam3_report.py (already created)</file>
+      <impl_files>
+        docs/results/sam3_comparison_report.md
+      </impl_files>
+    </tdd_spec>
+    <dependencies>
+      <dep>T13</dep>
+    </dependencies>
+  </task>
+
+  <task id="T15" status="NOT_STARTED" issue="SAM3-15" priority="P2">
+    <name>Champion selection integration with SAM3</name>
+    <description>
+      Verify champion_tagger.py works model-agnostically with SAM3 runs.
+      Already tested — confirm tests pass with SAM3 model identifiers.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_select_champions_cross_model
+        test_rank_then_aggregate_cross_model
+        test_champion_tags_model_agnostic
+      </tests>
+      <file>tests/v2/unit/test_champion_model_agnostic.py (already created)</file>
+      <impl_files/>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <task id="T16" status="NOT_STARTED" issue="SAM3-16" priority="P2">
+    <name>PRD decision node for SAM3</name>
+    <description>
+      Create docs/prd/decisions/L3-technology/sam3-integration.decision.yaml
+      with correct SAM3 references (not SAM2).
+      Add bibliography entries for SAM3 papers.
+      Already partially created — update references from SAM2 to SAM3.
+    </description>
+    <tdd_spec>
+      <tests/>
+      <file/>
+      <impl_files>
+        docs/prd/decisions/L3-technology/sam3-integration.decision.yaml (UPDATE)
+        docs/prd/bibliography.yaml (ADD SAM3 citations)
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <task id="T17" status="NOT_STARTED" issue="SAM3-17" priority="P2">
+    <name>Go/No-Go gate evaluation script</name>
+    <description>
+      Script: scripts/sam3_gate_evaluation.py
+      Module: src/minivess/pipeline/sam3_gates.py
+      Automates G1/G2/G3 gate checks from trained SAM3 models.
+      Already implemented — verify correctness.
+    </description>
+    <tdd_spec>
+      <tests>
+        test_g1_baseline_viability
+        test_g2_topology_improvement
+        test_g3_hybrid_value
+        test_evaluate_all_gates
+      </tests>
+      <file>tests/v2/unit/test_sam3_gate_evaluation.py (already created)</file>
+      <impl_files>
+        src/minivess/pipeline/sam3_gates.py (already created)
+        scripts/sam3_gate_evaluation.py (already created)
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <task id="T18" status="NOT_STARTED" issue="SAM3-18" priority="P2">
+    <name>Architecture Decision Record for SAM3</name>
+    <description>
+      Create docs/adr/0006-sam3-variant-architecture.md with CORRECT SAM3
+      architecture details (not SAM2).
+      Already partially created — must update ALL references from SAM2 to SAM3:
+      - Backbone: ViT-32L (not Hiera)
+      - Input: 1008x1008 (not 1024)
+      - Params: 848M (not 38.9M)
+      - LoRA targets: FFN mlp.lin1/mlp.lin2 (not attention q_proj/v_proj)
+      - Package: sam3 from github (not sam2 from pip)
+    </description>
+    <tdd_spec>
+      <tests/>
+      <file/>
+      <impl_files>
+        docs/adr/0006-sam3-variant-architecture.md (UPDATE)
+      </impl_files>
+    </tdd_spec>
+    <dependencies/>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- DEPENDENCY GRAPH                                                    -->
+  <!-- ================================================================== -->
+  <!--
+    P0: T1 (backbone) → T3 (decoder) ─────────────────────┐
+        T2 (slice inference) ──────────────────────────────┤
+        T4 (config) ───────────────────────────────────────┤
+        T5 (feature cache) ────────────────────────────────┤
+                                                           ↓
+    P1: T6 (vanilla) ──┐
+        T7 (topolora) ──┼── T11 (integration test)
+        T8 (hybrid) ────┘         │
+        T9 (configs)              │
+        T10 (builder) ────────────┘
+                                  │
+    P2: T12 (comparison) → T13 (eval) → T14 (report)
+        T15, T16, T17, T18 (parallel)
+
+    Critical path: T1 → T3 → T6 → T11 → training → T13
+  -->
+
+  <!-- ================================================================== -->
+  <!-- VERIFICATION COMMANDS                                               -->
+  <!-- ================================================================== -->
+  <!--
+    Per-phase:
+    uv run pytest tests/v2/unit/test_sam3_backbone.py tests/v2/unit/test_sam3_slice_inference.py tests/v2/unit/test_sam3_decoder.py -x -q
+    uv run pytest tests/v2/unit/test_sam3_vanilla_v3.py tests/v2/unit/test_sam3_topolora_v3.py tests/v2/unit/test_sam3_hybrid_v3.py -x -q
+    uv run pytest tests/v2/integration/test_sam3_training_integration_v3.py -x -q
+
+    Full:
+    uv run pytest tests/v2/ -x -q
+    uv run ruff check src/ tests/
+    uv run mypy src/minivess/
+  -->
+
+</plan>

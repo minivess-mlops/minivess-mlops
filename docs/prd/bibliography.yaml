@@ -588,6 +588,19 @@ bibliography:
       - segmentation_models
       - foundation_model_integration
 
+  - citation_key: ravi2025sam3
+    inline_citation: "Ravi et al. (2025)"
+    authors: "Ravi, N., Gabeur, V., Hu, Y., Hu, R., Ryali, C., Ma, T., Khedr, H., Rädle, R., Rolber, C., Gustafson, L., Mintun, E., Pan, J., Alwala, K. V., Carion, N., Wu, C., Girshick, R., Dollár, P., & Feichtenhofer, C."
+    year: 2025
+    title: "SAM 3: Segment Anything in Images and Videos"
+    venue: "arXiv preprint"
+    doi: "10.48550/arXiv.2511.16719"
+    url: "https://arxiv.org/abs/2511.16719"
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
+      - foundation_model_integration
+
   - citation_key: liu2025medsam3
     inline_citation: "Liu et al. (2025)"
     authors: "Liu, A., Xue, R., Cao, X. R., Chen, Y., Wang, Y., Tao, D., & Yang, J."
