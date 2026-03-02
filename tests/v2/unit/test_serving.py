@@ -11,6 +11,14 @@ if TYPE_CHECKING:
 import pytest
 import torch
 
+_gradio_functional = False
+try:
+    import gradio as _gr
+
+    _gradio_functional = hasattr(_gr, "Blocks")
+except ImportError:
+    pass
+
 
 class TestOnnxInferenceMetadata:
     """Test ONNX inference module structure."""
@@ -210,6 +218,9 @@ class TestBentoServiceStructure:
         assert "volume" in params
 
 
+@pytest.mark.skipif(
+    not _gradio_functional, reason="gradio not installed or non-functional"
+)
 class TestGradioDemo:
     """Test Gradio demo module."""
 

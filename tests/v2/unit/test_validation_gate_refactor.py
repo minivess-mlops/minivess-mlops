@@ -9,6 +9,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+pytest.importorskip("pandera", reason="pandera not installed")
+
 from minivess.validation.gates import GateResult
 
 # =========================================================================
