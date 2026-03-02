@@ -28,8 +28,15 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 logger = logging.getLogger(__name__)
 
-# Required fields that must be present in the experiment YAML
-REQUIRED_FIELDS: list[str] = ["experiment_name", "model", "losses"]
+# Required fields — 'experiment_name' always required.
+# Legacy configs use 'model' + 'losses'; topology configs use 'conditions'.
+_ALWAYS_REQUIRED: list[str] = ["experiment_name"]
+# At least one of these groups must be present:
+_LOSSES_FIELDS: list[str] = ["model", "losses"]
+_CONDITIONS_FIELDS: list[str] = ["conditions"]
+
+# Kept for backward compatibility — referenced by tests that import it
+REQUIRED_FIELDS: list[str] = _ALWAYS_REQUIRED
 
 # Attempt to import optional adaptive profile dependencies at module level
 # so that unittest.mock.patch("run_experiment.detect_hardware") works correctly.
@@ -44,14 +51,14 @@ try:
 except (ImportError, ModuleNotFoundError):
     _HAS_ADAPTIVE_PROFILES = False
 
-    def detect_hardware() -> Any:
+    def detect_hardware() -> Any:  # type: ignore[misc]
         """Stub: adaptive_profiles module not available."""
         raise ImportError(
             "minivess.config.adaptive_profiles is not installed. "
             "Cannot run hardware detection."
         )
 
-    def compute_adaptive_profile(
+    def compute_adaptive_profile(  # type: ignore[misc]
         budget: Any, dataset_profile: Any, model_name: str = "dynunet"
     ) -> Any:
         """Stub: adaptive_profiles module not available."""
@@ -82,13 +89,61 @@ def load_experiment_config(yaml_path: Path) -> dict[str, Any]:
     with open(yaml_path, encoding="utf-8") as f:
         config: dict[str, Any] = yaml.safe_load(f)
 
-    for field in REQUIRED_FIELDS:
+    # Always-required fields
+    for field in _ALWAYS_REQUIRED:
         if field not in config:
             raise ValueError(
                 f"Missing required field '{field}' in experiment config: {yaml_path}"
             )
 
+    # Must have either losses-based fields OR conditions-based fields
+    has_losses = all(f in config for f in _LOSSES_FIELDS)
+    has_conditions = all(f in config for f in _CONDITIONS_FIELDS)
+    if not has_losses and not has_conditions:
+        raise ValueError(
+            f"Experiment config must have either {_LOSSES_FIELDS} (losses mode) "
+            f"or {_CONDITIONS_FIELDS} (conditions mode): {yaml_path}"
+        )
+
     return config
+
+
+def detect_experiment_mode(config: dict[str, Any]) -> str:
+    """Detect experiment mode from config keys.
+
+    Returns
+    -------
+    ``"conditions"`` if the config has a ``conditions`` key,
+    ``"losses"`` otherwise (legacy mode).
+    """
+    if "conditions" in config:
+        return "conditions"
+    return "losses"
+
+
+def extract_extra_target_keys(condition: dict[str, Any]) -> list[str]:
+    """Extract auxiliary GT target keys from a condition's wrappers.
+
+    For multitask wrappers, returns the ``gt_key`` for each auxiliary head.
+    These keys are needed by the data pipeline to load precomputed targets.
+
+    Parameters
+    ----------
+    condition:
+        Condition config dict with optional ``wrappers`` key.
+
+    Returns
+    -------
+    List of target key names (e.g., ``["sdf", "centerline_dist"]``).
+    """
+    keys: list[str] = []
+    for wrapper in condition.get("wrappers", []):
+        if wrapper.get("type") == "multitask":
+            for head in wrapper.get("auxiliary_heads", []):
+                gt_key = head.get("gt_key", head.get("name", ""))
+                if gt_key:
+                    keys.append(gt_key)
+    return keys
 
 
 def resolve_compute_profile(
