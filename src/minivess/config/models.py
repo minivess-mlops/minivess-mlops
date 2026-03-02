@@ -17,6 +17,7 @@ class ModelFamily(StrEnum):
     VESSEL_FM = "vesselfm"
     COMMA_MAMBA = "comma_mamba"
     SAM3_LORA = "sam3_lora"
+    MULTITASK_DYNUNET = "multitask_dynunet"
     CUSTOM = "custom"
 
 

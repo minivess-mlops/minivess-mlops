@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import torch
 
-from minivess.adapters.base import SegmentationOutput
+from minivess.adapters.base import AdapterConfigInfo, SegmentationOutput
 from minivess.adapters.multitask_adapter import AuxHeadConfig, MultiTaskAdapter
+from minivess.config.models import ModelFamily
 from minivess.pipeline.multitask_loss import AuxHeadLossConfig, MultiTaskLoss
 from minivess.pipeline.multitask_metrics import compute_per_head_metrics
 
@@ -36,6 +37,10 @@ class _StubModel(torch.nn.Module):  # type: ignore[misc]
             logits=logits,
             metadata={},
         )
+
+    @property
+    def config(self) -> AdapterConfigInfo:
+        return AdapterConfigInfo(family="dynunet", name="stub_model")
 
 
 def _make_batch(
@@ -309,3 +314,64 @@ class TestPerHeadMetrics:
             assert not key.startswith("val_"), (
                 f"Primary metric {key} should not be in per-head metrics"
             )
+
+
+class TestModelFamilyRegistration:
+    """Tests for ModelFamily registration and wrapper config (T9c — #236)."""
+
+    def test_multitask_model_family_registered(self) -> None:
+        """MULTITASK_DYNUNET in ModelFamily."""
+        assert hasattr(ModelFamily, "MULTITASK_DYNUNET")
+        assert ModelFamily.MULTITASK_DYNUNET.value == "multitask_dynunet"
+
+    def test_wrapper_config_applies_tffm(self) -> None:
+        """Wrappers list with type=tffm wraps model."""
+        from minivess.adapters.model_builder import apply_wrappers
+
+        base = _StubModel()
+        wrappers = [
+            {
+                "type": "tffm",
+                "grid_size": 4,
+                "hidden_dim": 16,
+                "n_heads": 2,
+                "k_neighbors": 4,
+            }
+        ]
+        wrapped = apply_wrappers(base, wrappers)
+        # Should be a TFFMWrapper
+        from minivess.adapters.tffm_wrapper import TFFMWrapper
+
+        assert isinstance(wrapped, TFFMWrapper)
+
+    def test_wrapper_config_applies_multitask(self) -> None:
+        """Wrappers list with type=multitask wraps model."""
+        from minivess.adapters.model_builder import apply_wrappers
+
+        base = _StubModel()
+        wrappers = [
+            {
+                "type": "multitask",
+                "auxiliary_heads": [
+                    {"name": "sdf", "type": "regression", "out_channels": 1},
+                ],
+            }
+        ]
+        wrapped = apply_wrappers(base, wrappers)
+        assert isinstance(wrapped, MultiTaskAdapter)
+
+    def test_multitask_dynunet_within_vram_budget(self) -> None:
+        """Multi-task model parameter count is reasonable (<50% overhead)."""
+        base = _StubModel()
+        base_params = sum(p.numel() for p in base.parameters())
+
+        aux_configs = [
+            AuxHeadConfig(name="sdf", head_type="regression", out_channels=1),
+            AuxHeadConfig(name="cl_dist", head_type="regression", out_channels=1),
+        ]
+        adapted = MultiTaskAdapter(base_model=base, aux_head_configs=aux_configs)
+        total_params = sum(p.numel() for p in adapted.parameters())
+
+        # Aux heads should add < 50% parameter overhead
+        overhead = (total_params - base_params) / base_params
+        assert overhead < 0.5, f"Parameter overhead {overhead:.1%} exceeds 50%"
