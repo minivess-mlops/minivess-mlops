@@ -52,18 +52,26 @@ def extract_volume_ids(data_dicts: list[dict[str, str]]) -> list[str]:
     return sorted(ids)
 
 
-def resolve_tracking_uri(*, tracking_uri: str | None = None) -> str:
+def resolve_tracking_uri(
+    *,
+    tracking_uri: str | None = None,
+    use_dynaconf: bool = True,
+) -> str:
     """Resolve MLflow tracking URI from multiple sources.
 
     Priority order:
     1. Explicit ``tracking_uri`` parameter (highest)
     2. ``MLFLOW_TRACKING_URI`` environment variable
-    3. Default: ``"mlruns"`` (local file backend, no server needed)
+    3. Dynaconf settings (``configs/deployment/settings.toml``)
+    4. Default: ``"mlruns"`` (local file backend, safety net only)
 
     Parameters
     ----------
     tracking_uri:
         Explicit URI to use. If provided, returned as-is.
+    use_dynaconf:
+        Whether to consult Dynaconf settings. Set ``False`` to skip
+        the Dynaconf tier (useful for testing).
 
     Returns
     -------
@@ -74,6 +82,15 @@ def resolve_tracking_uri(*, tracking_uri: str | None = None) -> str:
     env_uri = os.environ.get("MLFLOW_TRACKING_URI")
     if env_uri:
         return env_uri
+    if use_dynaconf:
+        try:
+            from minivess.config.settings import get_settings
+
+            dynaconf_uri = getattr(get_settings(), "MLFLOW_TRACKING_URI", None)
+            if dynaconf_uri:
+                return str(dynaconf_uri)
+        except Exception:
+            logger.debug("Dynaconf unavailable, falling back to default")
     return str(_DEFAULT_TRACKING_URI)
 
 
@@ -359,22 +376,61 @@ class ExperimentTracker:
             if tmp_path is not None:
                 Path(tmp_path).unlink(missing_ok=True)
 
-    def log_dynaconf_config(self, settings_path: Path) -> None:
-        """Log Dynaconf settings.toml as artifact and extract key params.
+    def log_dynaconf_config(self, settings_path: Path | None = None) -> None:
+        """Log Dynaconf settings as params, tags, and artifact.
+
+        Uses the live Dynaconf singleton to read the active environment's
+        settings. Optionally logs the raw TOML file as artifact when
+        ``settings_path`` is provided.
 
         Parameters
         ----------
         settings_path:
-            Path to the Dynaconf ``settings.toml`` file.
+            Optional path to the Dynaconf ``settings.toml`` file.
+            Logged as artifact under ``config/`` when present.
         """
-        if not settings_path.exists():
-            logger.warning("Dynaconf settings not found: %s", settings_path)
-            return
+        # Log raw TOML file as artifact (backwards compat)
+        if settings_path is not None and settings_path.exists():
+            mlflow.log_artifact(str(settings_path), artifact_path="config")
 
-        # Log file as artifact
-        mlflow.log_artifact(str(settings_path), artifact_path="config")
+        # Log live settings from Dynaconf singleton
+        try:
+            from minivess.config.settings import get_settings
 
-        # Parse TOML and extract key params with cfg_ prefix
+            settings = get_settings()
+
+            # Log active environment as tag
+            current_env = getattr(settings, "current_env", "default")
+            mlflow.set_tag("cfg_environment", str(current_env).lower())
+
+            # Extract selected keys as params
+            cfg_keys = [
+                "project_name",
+                "data_dir",
+                "dvc_remote",
+                "mlflow_tracking_uri",
+            ]
+            cfg_params: dict[str, str] = {}
+            for key in cfg_keys:
+                value = getattr(settings, key.upper(), None)
+                if value is not None:
+                    cfg_params[f"cfg_{key}"] = str(value)
+
+            if cfg_params:
+                mlflow.log_params(cfg_params)
+            logger.info(
+                "Logged Dynaconf config (env=%s)",
+                current_env,
+            )
+        except Exception:
+            logger.warning("Failed to log Dynaconf config", exc_info=True)
+
+            # Fallback: parse TOML directly if Dynaconf unavailable
+            if settings_path is not None and settings_path.exists():
+                self._log_dynaconf_from_toml(settings_path)
+
+    def _log_dynaconf_from_toml(self, settings_path: Path) -> None:
+        """Fallback: parse raw TOML when Dynaconf is unavailable."""
         try:
             import tomllib
         except ImportError:
@@ -385,7 +441,6 @@ class ExperimentTracker:
             config = tomllib.loads(text)
             default = config.get("default", {})
 
-            # Extract selected keys as params
             cfg_keys = [
                 "project_name",
                 "data_dir",
@@ -399,7 +454,7 @@ class ExperimentTracker:
 
             if cfg_params:
                 mlflow.log_params(cfg_params)
-            logger.info("Logged Dynaconf config from %s", settings_path.name)
+            logger.info("Logged Dynaconf config from %s (fallback)", settings_path.name)
         except Exception:
             logger.warning("Failed to parse Dynaconf config", exc_info=True)
 

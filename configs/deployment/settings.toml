@@ -42,3 +42,6 @@ drift_report_dir = "reports/drift"
 # Data
 dvc_remote = "minio"
 data_dir = "data"
+
+# Testing
+test_markers = "unit"

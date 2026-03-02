@@ -75,14 +75,14 @@ def synthetic_loader() -> list[dict[str, torch.Tensor]]:
 class TestResolveTrackingUri:
     """Test tracking URI resolution priority: env → config → default."""
 
-    def test_default_is_mlruns(self) -> None:
-        """Without env var or explicit param, default should be 'mlruns'."""
+    def test_default_is_mlruns_without_dynaconf(self) -> None:
+        """With use_dynaconf=False and no env var, default should be 'mlruns'."""
         from minivess.observability.tracking import resolve_tracking_uri
 
         # Clear env var if set
         env_backup = os.environ.pop("MLFLOW_TRACKING_URI", None)
         try:
-            uri = resolve_tracking_uri()
+            uri = resolve_tracking_uri(use_dynaconf=False)
             assert uri == "mlruns"
         finally:
             if env_backup is not None:
@@ -109,6 +109,73 @@ class TestResolveTrackingUri:
 
         uri = resolve_tracking_uri(tracking_uri="http://custom:5000")
         assert uri == "http://custom:5000"
+
+    def test_dynaconf_tier_returns_server_uri(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With Dynaconf active and no env var, should return server URI."""
+        from minivess.config.settings import clear_settings_cache
+        from minivess.observability.tracking import resolve_tracking_uri
+
+        monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+        monkeypatch.delenv("ENV_FOR_DYNACONF", raising=False)
+        clear_settings_cache()
+        uri = resolve_tracking_uri()
+        assert uri == "http://localhost:5000"
+
+    def test_env_var_overrides_dynaconf(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """MLFLOW_TRACKING_URI env var should still override Dynaconf."""
+        from minivess.config.settings import clear_settings_cache
+        from minivess.observability.tracking import resolve_tracking_uri
+
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://custom-server:9999")
+        monkeypatch.delenv("ENV_FOR_DYNACONF", raising=False)
+        clear_settings_cache()
+        uri = resolve_tracking_uri()
+        assert uri == "http://custom-server:9999"
+
+    def test_explicit_param_overrides_dynaconf(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Explicit param should still win over Dynaconf."""
+        from minivess.config.settings import clear_settings_cache
+        from minivess.observability.tracking import resolve_tracking_uri
+
+        monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+        clear_settings_cache()
+        uri = resolve_tracking_uri(tracking_uri="http://explicit:1234")
+        assert uri == "http://explicit:1234"
+
+    def test_use_dynaconf_false_skips_dynaconf(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """use_dynaconf=False should skip Dynaconf tier and fall to default."""
+        from minivess.observability.tracking import resolve_tracking_uri
+
+        monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+        uri = resolve_tracking_uri(use_dynaconf=False)
+        assert uri == "mlruns"
+
+    def test_dynaconf_import_failure_graceful(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If Dynaconf import fails, should gracefully fall to default."""
+        import sys
+
+        from minivess.observability.tracking import resolve_tracking_uri
+
+        monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+        # Temporarily hide the settings module
+        original = sys.modules.get("minivess.config.settings")
+        sys.modules["minivess.config.settings"] = None  # type: ignore[assignment]
+        try:
+            uri = resolve_tracking_uri()
+            assert uri == "mlruns"
+        finally:
+            if original is not None:
+                sys.modules["minivess.config.settings"] = original
+            else:
+                sys.modules.pop("minivess.config.settings", None)
 
 
 class TestExperimentTrackerLocalBackend:
@@ -559,27 +626,116 @@ class TestExperimentTrackerLocalBackend:
         self,
         experiment_config: ExperimentConfig,
         local_tracking_uri: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """log_dynaconf_config should log key settings as params from live Dynaconf."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.config.settings import clear_settings_cache
+        from minivess.observability.tracking import ExperimentTracker
+
+        monkeypatch.delenv("ENV_FOR_DYNACONF", raising=False)
+        clear_settings_cache()
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_dynaconf_config()
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert run.data.params["cfg_project_name"] == "minivess-mlops-v2"
+        assert run.data.params["cfg_dvc_remote"] == "minio"
+
+    def test_log_dynaconf_config_logs_environment_tag(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """log_dynaconf_config should log cfg_environment tag."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.config.settings import clear_settings_cache
+        from minivess.observability.tracking import ExperimentTracker
+
+        monkeypatch.delenv("ENV_FOR_DYNACONF", raising=False)
+        clear_settings_cache()
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_dynaconf_config()
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert "cfg_environment" in run.data.tags
+
+    def test_log_dynaconf_config_logs_live_params(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """log_dynaconf_config should log cfg_mlflow_tracking_uri and cfg_project_name."""
+        from mlflow.tracking import MlflowClient
+
+        from minivess.config.settings import clear_settings_cache
+        from minivess.observability.tracking import ExperimentTracker
+
+        monkeypatch.delenv("ENV_FOR_DYNACONF", raising=False)
+        clear_settings_cache()
+
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run() as run_id:
+            tracker.log_dynaconf_config()
+
+        client = MlflowClient(tracking_uri=local_tracking_uri)
+        run = client.get_run(run_id)
+        assert "cfg_mlflow_tracking_uri" in run.data.params
+        assert "cfg_project_name" in run.data.params
+
+    def test_log_dynaconf_config_backwards_compat_path(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
         tmp_path: Path,
     ) -> None:
-        """log_dynaconf_config should log key settings as params."""
+        """log_dynaconf_config with settings_path still works (backwards compat)."""
+        from minivess.observability.tracking import ExperimentTracker
+
+        settings_path = tmp_path / "settings.toml"
+        settings_path.write_text(
+            '[default]\nproject_name = "test-compat"\n',
+            encoding="utf-8",
+        )
+        tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
+        with tracker.start_run():
+            # Should not raise with optional path arg
+            tracker.log_dynaconf_config(settings_path)
+
+    def test_log_dynaconf_config_still_logs_artifact(
+        self,
+        experiment_config: ExperimentConfig,
+        local_tracking_uri: str,
+        tmp_path: Path,
+    ) -> None:
+        """log_dynaconf_config should still log TOML file as artifact."""
         from mlflow.tracking import MlflowClient
 
         from minivess.observability.tracking import ExperimentTracker
 
         settings_path = tmp_path / "settings.toml"
         settings_path.write_text(
-            '[default]\nproject_name = "test-project"\ndata_dir = "data"\ndvc_remote = "minio"\n',
+            '[default]\nproject_name = "test"\n',
             encoding="utf-8",
         )
-
         tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
         with tracker.start_run() as run_id:
             tracker.log_dynaconf_config(settings_path)
 
         client = MlflowClient(tracking_uri=local_tracking_uri)
-        run = client.get_run(run_id)
-        assert run.data.params["cfg_project_name"] == "test-project"
-        assert run.data.params["cfg_dvc_remote"] == "minio"
+        artifacts = client.list_artifacts(run_id, path="config")
+        artifact_names = [a.path for a in artifacts]
+        assert any("settings" in name for name in artifact_names)
 
     def test_log_dvc_provenance_tags(
         self,

@@ -269,6 +269,7 @@ markers = [
     "e2e: End-to-end pipeline tests",
     "slow: Tests that take >30s",
     "gpu: Tests requiring CUDA GPU",
+    "requires_mlflow_server: Tests requiring a running MLflow server (auto-skipped if unhealthy)",
 ]
 filterwarnings = [
     "error",
