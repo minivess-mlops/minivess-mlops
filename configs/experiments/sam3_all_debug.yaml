@@ -1,6 +1,6 @@
 experiment_name: sam3_all_debug
-model: sam3_vanilla
 model_family: sam3_vanilla
+model: sam3_vanilla
 losses:
   - dice_ce
 compute: cpu
@@ -30,6 +30,9 @@ checkpoint:
   save_last: true
   save_history: false
 notes: >
-  Debug smoke test for SAM3 variants.
-  All 3 variants, 1 epoch, 2 folds.
-  Use --debug flag to limit data volumes.
+  LEGACY: Minimal smoke test config (vanilla only, 1 epoch, 2 folds).
+  For per-variant debug training, use the dedicated configs instead:
+    - sam3_vanilla_debug.yaml (3 folds x 6 epochs)
+    - sam3_topolora_debug.yaml (3 folds x 6 epochs)
+    - sam3_hybrid_debug.yaml (3 folds x 6 epochs)
+  Or run all 3 via: python scripts/run_sam3_debug_experiment.py
