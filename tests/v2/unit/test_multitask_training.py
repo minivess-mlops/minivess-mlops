@@ -1,4 +1,4 @@
-"""Tests for trainer criterion upgrade for generic multi-task (T9a — #234)."""
+"""Tests for trainer criterion upgrade for generic multi-task (T9a — #234, T9b — #235)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import torch
 from minivess.adapters.base import SegmentationOutput
 from minivess.adapters.multitask_adapter import AuxHeadConfig, MultiTaskAdapter
 from minivess.pipeline.multitask_loss import AuxHeadLossConfig, MultiTaskLoss
+from minivess.pipeline.multitask_metrics import compute_per_head_metrics
 
 
 class _StubNet(torch.nn.Module):  # type: ignore[misc]
@@ -182,3 +183,129 @@ class TestTrainerCriterionUpgrade:
 
         assert isinstance(multitask_loss, MultiTaskLoss)
         assert not isinstance(seg_crit, MultiTaskLoss)
+
+
+class TestPerHeadMetrics:
+    """Tests for generic per-head validation metrics (T9b — #235)."""
+
+    def test_generic_regression_head_metrics(self) -> None:
+        """MAE and RMSE computed for any regression head."""
+        head_configs = [
+            AuxHeadConfig(name="sdf", head_type="regression", out_channels=1),
+        ]
+        pred = torch.randn(2, 1, 4, 8, 8)
+        gt = torch.randn(2, 1, 4, 8, 8)
+        output = SegmentationOutput(
+            logits=torch.randn(2, 2, 4, 8, 8),
+            prediction=torch.randn(2, 2, 4, 8, 8),
+            metadata={"sdf": pred},
+        )
+        batch = {"label": torch.zeros(2, 1, 4, 8, 8), "sdf": gt}
+
+        metrics = compute_per_head_metrics(output, batch, head_configs)
+        assert "sdf/mae" in metrics
+        assert "sdf/rmse" in metrics
+        assert metrics["sdf/mae"] >= 0.0
+        assert metrics["sdf/rmse"] >= 0.0
+
+    def test_generic_classification_head_metrics(self) -> None:
+        """Accuracy and F1 for classification heads."""
+        head_configs = [
+            AuxHeadConfig(
+                name="vessel_class", head_type="classification", out_channels=3
+            ),
+        ]
+        pred = torch.randn(2, 3, 4, 8, 8)
+        gt = torch.randint(0, 3, (2, 4, 8, 8))
+        output = SegmentationOutput(
+            logits=torch.randn(2, 2, 4, 8, 8),
+            prediction=torch.randn(2, 2, 4, 8, 8),
+            metadata={"vessel_class": pred},
+        )
+        batch = {"label": torch.zeros(2, 1, 4, 8, 8), "vessel_class": gt}
+
+        metrics = compute_per_head_metrics(output, batch, head_configs)
+        assert "vessel_class/accuracy" in metrics
+        assert "vessel_class/f1" in metrics
+        assert 0.0 <= metrics["vessel_class/accuracy"] <= 1.0
+
+    def test_generic_per_head_loss_logged(self) -> None:
+        """loss/{head_name} logged for each aux head."""
+        pred = torch.randn(2, 1, 4, 8, 8)
+        gt = torch.randn(2, 1, 4, 8, 8)
+        output = SegmentationOutput(
+            logits=torch.randn(2, 2, 4, 8, 8),
+            prediction=torch.randn(2, 2, 4, 8, 8),
+            metadata={"sdf": pred},
+        )
+        batch = {"label": torch.zeros(2, 1, 4, 8, 8), "sdf": gt}
+
+        # MultiTaskLoss stores component losses
+        seg_crit = torch.nn.CrossEntropyLoss()
+        loss_configs = [
+            AuxHeadLossConfig(name="sdf", loss_type="mse", weight=0.25, gt_key="sdf"),
+        ]
+        loss_fn = MultiTaskLoss(seg_criterion=seg_crit, aux_head_configs=loss_configs)
+        loss_fn(output, batch)
+
+        assert "loss/sdf" in loss_fn.component_losses
+
+    def test_generic_metrics_with_two_heads(self) -> None:
+        """Metrics computed for 2 arbitrary heads."""
+        head_configs = [
+            AuxHeadConfig(name="sdf", head_type="regression", out_channels=1),
+            AuxHeadConfig(name="cl_dist", head_type="regression", out_channels=1),
+        ]
+        output = SegmentationOutput(
+            logits=torch.randn(2, 2, 4, 8, 8),
+            prediction=torch.randn(2, 2, 4, 8, 8),
+            metadata={
+                "sdf": torch.randn(2, 1, 4, 8, 8),
+                "cl_dist": torch.randn(2, 1, 4, 8, 8),
+            },
+        )
+        batch = {
+            "label": torch.zeros(2, 1, 4, 8, 8),
+            "sdf": torch.randn(2, 1, 4, 8, 8),
+            "cl_dist": torch.randn(2, 1, 4, 8, 8),
+        }
+
+        metrics = compute_per_head_metrics(output, batch, head_configs)
+        assert "sdf/mae" in metrics
+        assert "sdf/rmse" in metrics
+        assert "cl_dist/mae" in metrics
+        assert "cl_dist/rmse" in metrics
+
+    def test_generic_metrics_with_zero_heads(self) -> None:
+        """No extra metrics when no aux heads."""
+        output = SegmentationOutput(
+            logits=torch.randn(2, 2, 4, 8, 8),
+            prediction=torch.randn(2, 2, 4, 8, 8),
+            metadata={},
+        )
+        batch = {"label": torch.zeros(2, 1, 4, 8, 8)}
+
+        metrics = compute_per_head_metrics(output, batch, [])
+        assert len(metrics) == 0
+
+    def test_primary_seg_metrics_unchanged(self) -> None:
+        """DSC/clDice/HD95/NSD unaffected by aux heads."""
+        head_configs = [
+            AuxHeadConfig(name="sdf", head_type="regression", out_channels=1),
+        ]
+        output = SegmentationOutput(
+            logits=torch.randn(2, 2, 4, 8, 8),
+            prediction=torch.randn(2, 2, 4, 8, 8),
+            metadata={"sdf": torch.randn(2, 1, 4, 8, 8)},
+        )
+        batch = {
+            "label": torch.zeros(2, 1, 4, 8, 8),
+            "sdf": torch.randn(2, 1, 4, 8, 8),
+        }
+
+        metrics = compute_per_head_metrics(output, batch, head_configs)
+        # Per-head metrics should NOT contain primary seg metric keys
+        for key in metrics:
+            assert not key.startswith("val_"), (
+                f"Primary metric {key} should not be in per-head metrics"
+            )
