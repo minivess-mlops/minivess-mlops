@@ -72,30 +72,26 @@ class _StubSam3Encoder(nn.Module):  # type: ignore[misc]
         )
 
     def forward(self, x: Tensor) -> Tensor:
-        """Extract stub features.
+        """Extract stub features at native input resolution.
 
         Parameters
         ----------
         x:
             Input tensor. Accepts (B, 1, H, W) or (B, 3, H, W).
-            Non-1008 inputs are resized.
+            Operates at native resolution (no 1008x1008 upscale) to save VRAM.
+            Feature spatial size = H // patch_size × W // patch_size.
 
         Returns
         -------
-        Feature tensor of shape (B, embed_dim, H_feat, W_feat).
+        Feature tensor of shape (B, embed_dim, H // 14, W // 14).
         """
         # Grayscale → 3-channel
         if x.shape[1] == 1:
             x = x.expand(-1, 3, -1, -1)
 
-        # Resize to SAM3 input size if needed
-        if x.shape[2] != SAM3_INPUT_SIZE or x.shape[3] != SAM3_INPUT_SIZE:
-            x = F.interpolate(
-                x,
-                size=(SAM3_INPUT_SIZE, SAM3_INPUT_SIZE),
-                mode="bilinear",
-                align_corners=False,
-            )
+        # NOTE: No resize to 1008x1008 — stub operates at native resolution.
+        # Real SAM3 encoder expects 1008x1008 (handled by _preprocess),
+        # but the stub should be lightweight for testing/CI.
 
         # Project to feature space via patch embedding
         result: Tensor = self.proj(x)
