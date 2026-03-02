@@ -124,3 +124,31 @@ class TestSam3TopoLoraAdapter:
         topolora = Sam3TopoLoraAdapter(config=sam3_lora_config, use_stub=True)
 
         assert topolora.trainable_parameters() > vanilla.trainable_parameters()
+
+    def test_lora_applied_with_real_rank_16(self) -> None:
+        """LoRA must apply to >=1 layer even with rank=16 (training default).
+
+        This catches the bug where stub Conv2d(3→1024) has in_channels=3 < rank=16,
+        so the LoRA size check skips it and no LoRA layers are created.
+        """
+        from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
+
+        config = ModelConfig(
+            family=ModelFamily.SAM3_TOPOLORA,
+            name="sam3-topolora-rank16",
+            in_channels=1,
+            out_channels=2,
+            lora_rank=16,
+            lora_alpha=32.0,
+            lora_dropout=0.1,
+        )
+        adapter = Sam3TopoLoraAdapter(config=config, use_stub=True)
+        lora_params = [
+            name
+            for name, p in adapter.named_parameters()
+            if "lora" in name.lower() and p.requires_grad
+        ]
+        assert len(lora_params) > 0, (
+            "LoRA must be applied to at least 1 layer with rank=16, "
+            "but found 0 LoRA params. Stub encoder needs Linear layers."
+        )

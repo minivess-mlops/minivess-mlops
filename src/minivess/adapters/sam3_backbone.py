@@ -55,11 +55,38 @@ SAM3_FEATURE_MAP_SIZE: int = SAM3_INPUT_SIZE // SAM3_PATCH_SIZE  # 72
 # ---------------------------------------------------------------------------
 # Stub encoder for testing without SAM3 package
 # ---------------------------------------------------------------------------
+class _StubMLP(nn.Module):  # type: ignore[misc]
+    """Stub MLP mimicking a transformer block FFN.
+
+    Real SAM3 has transformer blocks with ``mlp.lin1`` and ``mlp.lin2``
+    (nn.Linear layers). This stub provides the same structure so LoRA
+    can target these layers during testing.
+    """
+
+    def __init__(self, embed_dim: int) -> None:
+        super().__init__()
+        self.lin1 = nn.Linear(embed_dim, embed_dim)
+        self.lin2 = nn.Linear(embed_dim, embed_dim)
+
+    def forward(self, x: Tensor) -> Tensor:
+        """MLP forward: lin1 → GELU → lin2 (residual)."""
+        # x: (B, C, H, W) → permute to (B, H, W, C) for Linear
+        x_perm = x.permute(0, 2, 3, 1)
+        h = torch.nn.functional.gelu(self.lin1(x_perm))
+        out = self.lin2(h)
+        result: Tensor = (x_perm + out).permute(0, 3, 1, 2)
+        return result
+
+
 class _StubSam3Encoder(nn.Module):  # type: ignore[misc]
     """Lightweight stub mimicking SAM3 ViT-32L output shape.
 
     Used for testing and CI where the real SAM3 package is not installed.
     Produces random features with the correct output dimensions.
+
+    Includes a single ``_StubMLP`` block with ``mlp.lin1``/``mlp.lin2``
+    so that LoRA adapters can target Linear layers (matching the real SAM3
+    transformer block structure).
     """
 
     def __init__(self, embed_dim: int = SAM3_EMBED_DIM) -> None:
@@ -70,6 +97,8 @@ class _StubSam3Encoder(nn.Module):  # type: ignore[misc]
         self.proj = nn.Conv2d(
             3, embed_dim, kernel_size=SAM3_PATCH_SIZE, stride=SAM3_PATCH_SIZE
         )
+        # Stub MLP block — provides Linear layers for LoRA targeting
+        self.mlp = _StubMLP(embed_dim)
 
     def forward(self, x: Tensor) -> Tensor:
         """Extract stub features at native input resolution.
@@ -94,7 +123,9 @@ class _StubSam3Encoder(nn.Module):  # type: ignore[misc]
         # but the stub should be lightweight for testing/CI.
 
         # Project to feature space via patch embedding
-        result: Tensor = self.proj(x)
+        features = self.proj(x)
+        # Apply stub MLP (provides Linear targets for LoRA)
+        result: Tensor = self.mlp(features)
         return result
 
 
