@@ -1,0 +1,265 @@
+decision_id: data_ingestion_queue
+title: "Data Ingestion Queue for Human-in-the-Loop Review"
+description: >
+  How to implement the human-in-the-loop review queue for data ingestion:
+  newly acquired or generated data must pass quality gating before entering
+  the DVC-versioned training dataset. The queue pattern determines how the
+  system pauses for human review, communicates with external annotation tools,
+  and resumes processing. Prefect 3.x suspend_flow_run provides a native
+  mechanism that eliminates external message queue infrastructure. For simple
+  approve/reject decisions, the Prefect UI suffices. For complex 3D annotation
+  review, webhooks bridge to 3D Slicer or napari.
+
+decision_level: L3_technology
+status: active
+last_updated: 2026-03-02
+
+options:
+  - option_id: prefect_suspend
+    title: "Prefect suspend_flow_run + RunInput"
+    description: >
+      Use Prefect 3.x native suspend_flow_run() to pause the data ingestion
+      flow when human review is needed. RunInput (Pydantic models) provides
+      structured review forms (approve/reject/flag). The flow tears down
+      infrastructure while waiting, resuming when the reviewer submits via
+      Prefect UI or API. Zero additional infrastructure. Best for simple
+      quality gating decisions (volume QC, annotation approval).
+    prior_probability: 0.50
+    status: recommended
+    implementation_status: not_started
+    complements:
+      - "pipeline_orchestration.prefect"
+      - "data_management_strategy.local_dvc"
+
+  - option_id: prefect_events_webhooks
+    title: "Prefect Events + Webhook Relay"
+    description: >
+      Use Prefect events and webhooks to bridge between the data pipeline
+      and external annotation tools (3D Slicer, napari). The flow emits
+      a Prefect event when data is ready for review; a webhook endpoint
+      relays the event to the annotation tool. The tool sends back results
+      via webhook, triggering flow resumption. Works for complex 3D
+      annotation workflows where the reviewer uses specialized tools.
+    prior_probability: 0.25
+    status: viable
+    implementation_status: not_started
+    complements:
+      - "annotation_platform.slicer_nninteractive"
+      - "annotation_workflow.slicer_proofread"
+
+  - option_id: external_mq
+    title: "External Message Queue (RabbitMQ/Redis Streams)"
+    description: >
+      Dedicated message queue (RabbitMQ, Redis Streams, or Kafka) for
+      decoupling data ingestion from annotation review. Supports multiple
+      concurrent reviewers, backpressure, and dead-letter queues. Maximum
+      flexibility but adds infrastructure complexity. Only justified for
+      high-throughput multi-annotator scenarios.
+    prior_probability: 0.10
+    status: viable
+    implementation_status: not_started
+    constraints:
+      - "Adds +1 service to Docker Compose stack"
+      - "Requires queue monitoring and dead-letter handling"
+      - "Overkill for solo researcher or small lab"
+
+  - option_id: label_studio_queue
+    title: "Label Studio Built-in Task Queue"
+    description: >
+      Use Label Studio's native task queue for multi-annotator review.
+      Label Studio is already in the Docker Compose stack (config_only).
+      Provides web UI for task distribution, inter-annotator agreement,
+      and review workflows. Primarily 2D; limited 3D interactive support.
+    prior_probability: 0.15
+    status: viable
+    implementation_status: config_only
+    complements:
+      - "annotation_platform.label_studio"
+      - "annotation_workflow.label_studio_manual"
+
+conditional_on:
+  - parent_decision_id: pipeline_orchestration
+    influence_strength: strong
+    conditional_table:
+      - given_parent_option: prefect
+        then_probabilities:
+          prefect_suspend: 0.55
+          prefect_events_webhooks: 0.25
+          external_mq: 0.05
+          label_studio_queue: 0.15
+      - given_parent_option: dagster
+        then_probabilities:
+          prefect_suspend: 0.10
+          prefect_events_webhooks: 0.10
+          external_mq: 0.40
+          label_studio_queue: 0.40
+      - given_parent_option: airflow
+        then_probabilities:
+          prefect_suspend: 0.05
+          prefect_events_webhooks: 0.10
+          external_mq: 0.45
+          label_studio_queue: 0.40
+      - given_parent_option: langgraph_only
+        then_probabilities:
+          prefect_suspend: 0.10
+          prefect_events_webhooks: 0.20
+          external_mq: 0.30
+          label_studio_queue: 0.40
+
+  - parent_decision_id: annotation_platform
+    influence_strength: moderate
+    conditional_table:
+      - given_parent_option: slicer_nninteractive
+        then_probabilities:
+          prefect_suspend: 0.35
+          prefect_events_webhooks: 0.40
+          external_mq: 0.10
+          label_studio_queue: 0.15
+      - given_parent_option: monai_label
+        then_probabilities:
+          prefect_suspend: 0.40
+          prefect_events_webhooks: 0.30
+          external_mq: 0.10
+          label_studio_queue: 0.20
+      - given_parent_option: label_studio
+        then_probabilities:
+          prefect_suspend: 0.25
+          prefect_events_webhooks: 0.15
+          external_mq: 0.10
+          label_studio_queue: 0.50
+      - given_parent_option: napari_nninteractive
+        then_probabilities:
+          prefect_suspend: 0.35
+          prefect_events_webhooks: 0.35
+          external_mq: 0.10
+          label_studio_queue: 0.20
+      - given_parent_option: hybrid
+        then_probabilities:
+          prefect_suspend: 0.30
+          prefect_events_webhooks: 0.30
+          external_mq: 0.15
+          label_studio_queue: 0.25
+      - given_parent_option: cvat
+        then_probabilities:
+          prefect_suspend: 0.25
+          prefect_events_webhooks: 0.20
+          external_mq: 0.20
+          label_studio_queue: 0.35
+
+  - parent_decision_id: data_management_strategy
+    influence_strength: weak
+    conditional_table:
+      - given_parent_option: local_dvc
+        then_probabilities:
+          prefect_suspend: 0.55
+          prefect_events_webhooks: 0.25
+          external_mq: 0.05
+          label_studio_queue: 0.15
+      - given_parent_option: cloud_dvc
+        then_probabilities:
+          prefect_suspend: 0.45
+          prefect_events_webhooks: 0.25
+          external_mq: 0.15
+          label_studio_queue: 0.15
+      - given_parent_option: lakehouse
+        then_probabilities:
+          prefect_suspend: 0.30
+          prefect_events_webhooks: 0.25
+          external_mq: 0.25
+          label_studio_queue: 0.20
+      - given_parent_option: streaming
+        then_probabilities:
+          prefect_suspend: 0.20
+          prefect_events_webhooks: 0.25
+          external_mq: 0.35
+          label_studio_queue: 0.20
+      - given_parent_option: datalad
+        then_probabilities:
+          prefect_suspend: 0.50
+          prefect_events_webhooks: 0.25
+          external_mq: 0.10
+          label_studio_queue: 0.15
+
+archetype_weights:
+  solo_researcher:
+    probability_overrides:
+      prefect_suspend: 0.60
+      prefect_events_webhooks: 0.20
+      external_mq: 0.05
+      label_studio_queue: 0.15
+    rationale: "Solo researchers need zero-infra queue; Prefect suspend is simplest"
+  lab_group:
+    probability_overrides:
+      prefect_suspend: 0.40
+      prefect_events_webhooks: 0.25
+      external_mq: 0.10
+      label_studio_queue: 0.25
+    rationale: "Lab groups benefit from multi-annotator Label Studio or Prefect webhooks for 3D review"
+  clinical_deployment:
+    probability_overrides:
+      prefect_suspend: 0.30
+      prefect_events_webhooks: 0.25
+      external_mq: 0.20
+      label_studio_queue: 0.25
+    rationale: "Clinical needs audit trail and multi-reviewer; external MQ viable for high-throughput"
+
+volatility:
+  classification: shifting
+  last_assessed: 2026-03-02
+  next_review: 2026-06-02
+  change_drivers:
+    - "Prefect 3.x suspend_flow_run API evolution"
+    - "3D Slicer webhook integration maturity"
+    - "Label Studio 3D volume annotation improvements"
+    - "LangGraph human-in-the-loop patterns"
+
+domain_applicability:
+  vascular_segmentation: 1.0
+  cardiac_imaging: 0.9
+  neuroimaging: 0.9
+  general_medical: 0.8
+
+rationale: >
+  Prefect 3.x native suspend_flow_run (0.50) is the primary recommendation
+  based on the Design Goal #1 (EXCELLENT DevEx for PhD researchers): zero
+  additional infrastructure, native human-in-the-loop support, and the flow
+  tears down infrastructure while waiting (Prefect Technologies, 2022). The
+  RunInput mechanism provides structured Pydantic review forms. For complex
+  3D annotation (vascular proofreading), Prefect events + webhooks (0.25)
+  bridge to 3D Slicer with SlicerNNInteractive (de Vente et al., 2025).
+  External MQ (0.10) is only justified for high-throughput multi-annotator
+  scenarios. Label Studio queue (0.15) leverages existing Docker Compose
+  config but has limited 3D support.
+
+research_notes: >
+  Architecture analysis in docs/planning/data-prefect-flow-improvement-for-test-datasets.md
+  (Section 5) evaluated 5 proofreading queue architectures. Key insight: Prefect
+  suspend_flow_run is unique among orchestrators in providing native flow suspension
+  with infrastructure teardown. Dagster and Airflow lack equivalent mechanisms,
+  making external MQ the default for those platforms. The store-and-forward pattern
+  (offline annotation → webhook on reconnection) addresses air-gapped environments.
+
+references:
+  - citation_key: prefect2022
+    relevance: "Prefect 3.x provides native suspend_flow_run and RunInput for human-in-the-loop patterns."
+    supports_options: ["prefect_suspend", "prefect_events_webhooks"]
+
+  - citation_key: devente2025slicernninteractive
+    relevance: "SlicerNNInteractive client-server architecture enables webhook-driven annotation review."
+    supports_options: ["prefect_events_webhooks"]
+
+  - citation_key: isensee2025nninteractive
+    relevance: "nnInteractive prior mask input enables the proofreading paradigm that the queue serves."
+    supports_options: ["prefect_events_webhooks"]
+
+  - citation_key: guo2025kprism
+    relevance: "K-Prism validates proofreading workflow; queue feeds corrected data back to training."
+    supports_options: ["prefect_suspend", "prefect_events_webhooks"]
+
+tags:
+  - technology
+  - data-pipeline
+  - human-in-the-loop
+  - orchestration
+  - annotation
+  - phase-test-dataset

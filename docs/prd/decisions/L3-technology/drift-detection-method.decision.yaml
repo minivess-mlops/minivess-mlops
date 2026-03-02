@@ -15,7 +15,7 @@ description: >
 
 decision_level: L3_technology
 status: active
-last_updated: 2026-02-24
+last_updated: 2026-03-02
 
 options:
   - option_id: alibi_detect_mmd
@@ -331,6 +331,13 @@ research_notes: >
   but requires maintaining four detection tiers. For the MinIVess scale
   (~20 volumes), MMD on model embeddings is likely the most practical
   starting point.
+
+  Phase test-dataset: SyntheticAcquisitionSimulator planned to generate
+  controlled distribution shifts for drift detection validation. The simulator
+  produces temporal streams with gradual degradation (noise, blur, intensity,
+  resolution) to test all drift detection tiers. External datasets (DeepVess,
+  tUbeNet) provide real-world cross-site distribution shift for validation.
+  See docs/planning/data-prefect-flow-improvement-for-test-datasets.md Section 3.
 
 tags:
   - technology

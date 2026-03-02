@@ -1,13 +1,21 @@
 network:
   name: "MinIVess MLOps v2 Probabilistic PRD Decision Network"
-  version: "2.1.0"
-  last_updated: 2026-02-24
+  version: "2.2.0"
+  last_updated: 2026-03-02
   description: >
-    Bayesian decision network with 70 nodes across 5 hierarchical levels.
+    Bayesian decision network with 71 nodes across 5 hierarchical levels.
     Adapted from the music-attribution-scaffold format for biomedical
     image segmentation MLOps. Captures open-ended decisions for a
     learning-first, portfolio-building, MONAI-compatible system.
 
+    v2.2.0: Test dataset integration. Added 1 new node (data_ingestion_queue)
+            and 5 new edges. Updated 3 existing nodes (annotation_platform,
+            annotation_workflow, data_management_strategy) with implementation
+            status changes. 3 new bibliography entries (holroyd2025tubenet,
+            haftjavaherian2019deepvess, teikari2016vesselnn). Key decision:
+            Prefect suspend_flow_run recommended for human-in-the-loop data
+            quality review (zero additional infrastructure, native Prefect 3.x).
+            71 nodes, 136 explicit edges (+conditional_on in decision files).
     v2.1.0: Verification gap analysis — RDF (636 entries), BIB (934 entries),
             DataLad investigation, end-to-end systems fishing expedition.
             20 new bibliography entries. Added DataLad option to
@@ -326,6 +334,11 @@ nodes:
     level: L3_technology
     file: L3-technology/copilot-backend.decision.yaml
     title: "Vasculometric Copilot Backend"
+
+  - id: data_ingestion_queue
+    level: L3_technology
+    file: L3-technology/data-ingestion-queue.decision.yaml
+    title: "Data Ingestion Queue for Human-in-the-Loop Review"
 
   - id: data_harmonization_method
     level: L3_technology
@@ -1123,3 +1136,29 @@ edges:
     to: data_management_strategy
     influence: moderate
     rationale: "IEC 62304 audit trail requirements favour data versioning with provenance capture — DataLad datalad-run vs DVC (Halchenko 2021, Wagner 2022)"
+
+  # === Phase test-dataset edges: Data Ingestion Queue ===
+  - from: pipeline_orchestration
+    to: data_ingestion_queue
+    influence: strong
+    rationale: "Prefect 3.x suspend_flow_run is the foundation for native human-in-the-loop queue"
+
+  - from: annotation_platform
+    to: data_ingestion_queue
+    influence: moderate
+    rationale: "Annotation tool determines whether queue needs webhook relay (Slicer) or built-in task queue (Label Studio)"
+
+  - from: data_management_strategy
+    to: data_ingestion_queue
+    influence: weak
+    rationale: "DVC versioning target shapes queue output format (approved data → DVC commit)"
+
+  - from: data_ingestion_queue
+    to: annotation_workflow
+    influence: moderate
+    rationale: "Ingestion queue feeds the annotation/proofreading workflow with triaged volumes"
+
+  - from: data_ingestion_queue
+    to: drift_detection_method
+    influence: weak
+    rationale: "Synthetic acquisition data from queue validates drift detection methods"
