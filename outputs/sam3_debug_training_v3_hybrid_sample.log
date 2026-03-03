@@ -1,0 +1,191 @@
+2026-03-03 14:41:11,607 INFO __main__: SAM3 debug runner: 1 variant(s) to run (dry_run=False)
+2026-03-03 14:41:11,607 INFO __main__: Running variant 'sam3_hybrid_debug': SAM3 V3: Hybrid DynUNet+SAM3 + cbdice_cldice (dry_run=False)
+2026-03-03 14:41:11,701 INFO run_experiment: Loaded experiment config: sam3_hybrid_debug
+2026-03-03 14:41:11,702 INFO run_experiment: Experiment mode: losses
+2026-03-03 14:41:25,310 INFO run_experiment: Dataset profile loaded for adaptive compute
+2026-03-03 14:41:25,311 INFO run_experiment: Resolved compute profile: cpu
+2026-03-03 14:41:25,311 INFO run_experiment: Launching training run: loss=cbdice_cldice
+2026-03-03 14:41:26,040 INFO train_monitored: ======================================================================
+2026-03-03 14:41:26,040 INFO train_monitored: MONITORED TRAINING SESSION
+2026-03-03 14:41:26,040 INFO train_monitored:   Log dir: /home/petteri/Dropbox/github-personal/minivess-mlops/logs/train_20260303_124126
+2026-03-03 14:41:26,040 INFO train_monitored:   Resume: False
+2026-03-03 14:41:26,040 INFO train_monitored: ======================================================================
+2026-03-03 14:41:26,040 WARNING train_monitored: HIGH SWAP USAGE: 13.4 GB in swap. This likely remains from previous OOM crashes. Consider clearing swap before training: sudo swapoff -a && sudo swapon -a (will move ~13.4 GB back to RAM, need 13.4 GB available, have 43.0 GB).
+2026-03-03 14:41:26,041 INFO train_monitored: Pre-training memory: 43.0 GB RAM available, 13.4 GB swap used
+2026-03-03 14:41:26,067 INFO system_monitor: System monitor started (interval=10.0s, log=/home/petteri/Dropbox/github-personal/minivess-mlops/logs/train_20260303_124126/monitor/system_metrics.csv)
+2026-03-03 14:41:26,068 INFO train_monitored: Memory safety: num_workers capped at 2 (profile wanted 2)
+2026-03-03 14:41:26,068 INFO train_monitored: Experiment: losses=['cbdice_cldice'], folds=3, epochs=6, debug=False
+2026-03-03 14:41:26,068 INFO train_monitored: Loading splits from /home/petteri/Dropbox/github-personal/minivess-mlops/configs/splits/3fold_seed42.json (split_mode=file)
+2026-03-03 14:41:26,141 INFO train_monitored: --- Loss function: cbdice_cldice ---
+2026/03/03 14:41:26 INFO mlflow.system_metrics.system_metrics_monitor: Started monitoring system metrics.
+2026-03-03 14:41:26,263 INFO minivess.observability.tracking: Logged git hash: 49371d7a
+2026-03-03 14:41:26,310 INFO minivess.observability.tracking: Logged fold splits: 3 folds, mode=file
+2026-03-03 14:41:26,310 INFO train_monitored: === Fold 0: loss=cbdice_cldice, condition=none, device=cuda ===
+2026-03-03 14:41:26,311 INFO train_monitored: Cache rates: train=1.00 (46 vols), val=1.00 (24 vols)
+2026-03-03 14:41:26,315 INFO minivess.adapters.model_builder: SAM3 pretrained=false: using stub encoder (random weights)
+2026-03-03 14:41:26,331 INFO minivess.adapters.sam3_backbone: SAM3 encoder frozen (2702336 params)
+2026-03-03 14:41:26,380 INFO minivess.adapters.sam3_hybrid: Sam3HybridAdapter: 5838533 trainable / 8803269 total params
+2026-03-03 14:41:26,393 WARNING minivess.pipeline.loss_functions: Loss 'cbdice_cldice' is LIBRARY-COMPOUND — Weighted sum of library losses. Not fully backed by established library; may have implementation bugs. See docs/planning/novel-loss-debugging-plan.xml for risk assessment.
+2026-03-03 14:43:16,359 INFO system_monitor: [MONITOR] RAM: 26.0/62.7 GB (42%) | Swap: 13.4/16.0 GB | GPU: 6391/8192 MB | Process RSS: 7.2 GB
+2026-03-03 14:45:16,629 INFO system_monitor: [MONITOR] RAM: 26.4/62.7 GB (42%) | Swap: 13.4/16.0 GB | GPU: 3910/8192 MB | Process RSS: 7.9 GB
+2026-03-03 14:47:16,909 INFO system_monitor: [MONITOR] RAM: 27.2/62.7 GB (44%) | Swap: 13.4/16.0 GB | GPU: 4218/8192 MB | Process RSS: 8.9 GB
+2026-03-03 14:48:04,472 INFO minivess.pipeline.trainer: Epoch 1/6 — train_loss: 0.6245, val_loss: 0.6404, lr: 2.08e-05
+2026-03-03 14:48:04,563 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmpklnpjq9g/fold_0/best_val_loss.pth
+2026-03-03 14:49:17,179 INFO system_monitor: [MONITOR] RAM: 27.0/62.7 GB (43%) | Swap: 13.4/16.0 GB | GPU: 4226/8192 MB | Process RSS: 8.9 GB
+2026-03-03 14:51:17,447 INFO system_monitor: [MONITOR] RAM: 27.1/62.7 GB (43%) | Swap: 13.4/16.0 GB | GPU: 4577/8192 MB | Process RSS: 8.7 GB
+2026-03-03 14:53:17,721 INFO system_monitor: [MONITOR] RAM: 27.5/62.7 GB (44%) | Swap: 13.4/16.0 GB | GPU: 4571/8192 MB | Process RSS: 8.7 GB
+2026-03-03 14:54:25,451 INFO minivess.pipeline.trainer: Epoch 2/6 — train_loss: 0.5494, val_loss: 0.5614, lr: 4.06e-05
+2026-03-03 14:54:25,578 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmpklnpjq9g/fold_0/best_val_loss.pth
+2026-03-03 14:55:17,990 INFO system_monitor: [MONITOR] RAM: 27.3/62.7 GB (44%) | Swap: 13.4/16.0 GB | GPU: 4568/8192 MB | Process RSS: 8.9 GB
+2026-03-03 14:57:18,263 INFO system_monitor: [MONITOR] RAM: 27.4/62.7 GB (44%) | Swap: 13.4/16.0 GB | GPU: 4550/8192 MB | Process RSS: 8.7 GB
+2026-03-03 14:59:18,537 INFO system_monitor: [MONITOR] RAM: 26.9/62.7 GB (43%) | Swap: 13.4/16.0 GB | GPU: 4549/8192 MB | Process RSS: 8.6 GB
+2026-03-03 15:00:48,079 INFO minivess.pipeline.trainer: Epoch 3/6 — train_loss: 0.4984, val_loss: 0.5029, lr: 6.04e-05
+2026-03-03 15:00:48,208 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmpklnpjq9g/fold_0/best_val_loss.pth
+2026-03-03 15:01:18,811 INFO system_monitor: [MONITOR] RAM: 27.3/62.7 GB (44%) | Swap: 13.4/16.0 GB | GPU: 4550/8192 MB | Process RSS: 8.9 GB
+2026-03-03 15:03:19,084 INFO system_monitor: [MONITOR] RAM: 27.1/62.7 GB (43%) | Swap: 13.4/16.0 GB | GPU: 4546/8192 MB | Process RSS: 8.8 GB
+2026-03-03 15:05:19,352 INFO system_monitor: [MONITOR] RAM: 27.2/62.7 GB (43%) | Swap: 13.4/16.0 GB | GPU: 4757/8192 MB | Process RSS: 8.7 GB
+2026-03-03 15:07:09,829 INFO minivess.pipeline.trainer: Epoch 4/6 — train_loss: 0.4022, val_loss: 0.4437, lr: 8.02e-05
+2026-03-03 15:07:09,961 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmpklnpjq9g/fold_0/best_val_loss.pth
+2026-03-03 15:07:19,630 INFO system_monitor: [MONITOR] RAM: 27.4/62.7 GB (44%) | Swap: 13.4/16.0 GB | GPU: 4594/8192 MB | Process RSS: 8.5 GB
+2026-03-03 15:09:19,907 INFO system_monitor: [MONITOR] RAM: 26.9/62.7 GB (43%) | Swap: 13.4/16.0 GB | GPU: 4591/8192 MB | Process RSS: 8.9 GB
+2026-03-03 15:11:20,184 INFO system_monitor: [MONITOR] RAM: 26.8/62.7 GB (43%) | Swap: 13.4/16.0 GB | GPU: 4591/8192 MB | Process RSS: 8.8 GB
+2026-03-03 15:13:20,460 INFO system_monitor: [MONITOR] RAM: 27.4/62.7 GB (44%) | Swap: 13.4/16.0 GB | GPU: 4619/8192 MB | Process RSS: 8.6 GB
+2026-03-03 15:13:31,090 INFO minivess.pipeline.trainer: Epoch 5/6 — train_loss: 0.3722, val_loss: 0.4071, lr: 1.00e-04
+2026-03-03 15:13:31,218 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmpklnpjq9g/fold_0/best_val_loss.pth
+2026-03-03 15:15:20,734 INFO system_monitor: [MONITOR] RAM: 27.6/62.7 GB (44%) | Swap: 13.2/16.0 GB | GPU: 4636/8192 MB | Process RSS: 8.7 GB
+2026-03-03 15:17:21,010 INFO system_monitor: [MONITOR] RAM: 27.5/62.7 GB (44%) | Swap: 13.2/16.0 GB | GPU: 4608/8192 MB | Process RSS: 8.7 GB
+2026-03-03 15:19:21,289 INFO system_monitor: [MONITOR] RAM: 27.6/62.7 GB (44%) | Swap: 13.2/16.0 GB | GPU: 4584/8192 MB | Process RSS: 8.8 GB
+2026-03-03 15:20:01,218 INFO minivess.pipeline.trainer: Epoch 6/6 — train_loss: 0.3464, val_loss: 0.3706, lr: 0.00e+00
+2026-03-03 15:20:01,348 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmpklnpjq9g/fold_0/best_val_loss.pth
+2026-03-03 15:20:02,176 INFO train_monitored: Fold 0 training complete: best_val_loss=0.3706, epochs=6
+2026-03-03 15:20:03,091 INFO train_monitored: [MEMORY CLEANUP post-train-fold0] Process RSS after gc: 5.3 GB
+2026-03-03 15:20:03,091 INFO train_monitored: Loading best checkpoint for evaluation: /tmp/tmpklnpjq9g/fold_0/best_val_loss.pth
+2026-03-03 15:20:03,132 INFO train_monitored: Running sliding window inference on 24 validation volumes
+2026-03-03 15:21:21,568 INFO system_monitor: [MONITOR] RAM: 26.1/62.7 GB (42%) | Swap: 13.2/16.0 GB | GPU: 1565/8192 MB | Process RSS: 7.1 GB
+2026-03-03 15:23:21,848 INFO system_monitor: [MONITOR] RAM: 28.5/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 1913/8192 MB | Process RSS: 8.9 GB
+2026-03-03 15:25:22,123 INFO system_monitor: [MONITOR] RAM: 30.1/62.7 GB (48%) | Swap: 13.2/16.0 GB | GPU: 1919/8192 MB | Process RSS: 11.0 GB
+2026-03-03 15:26:27,637 INFO train_monitored: [MEMORY CLEANUP post-infer-fold0] Process RSS after gc: 9.6 GB
+2026-03-03 15:26:27,637 INFO train_monitored: Running MetricsReloaded evaluation for fold 0
+2026-03-03 15:27:22,431 INFO system_monitor: [MONITOR] RAM: 31.6/62.7 GB (50%) | Swap: 13.2/16.0 GB | GPU: 1170/8192 MB | Process RSS: 12.1 GB
+2026-03-03 15:29:22,838 INFO system_monitor: [MONITOR] RAM: 31.8/62.7 GB (51%) | Swap: 13.2/16.0 GB | GPU: 1172/8192 MB | Process RSS: 12.0 GB
+2026-03-03 15:29:48,052 INFO train_monitored:   Fold 0 centreline_dsc: 0.6850 [0.6196, 0.7412]
+2026-03-03 15:29:48,052 INFO train_monitored:   Fold 0 dsc: 0.5137 [0.4655, 0.5553]
+2026-03-03 15:29:48,052 INFO train_monitored:   Fold 0 measured_masd: 5.2777 [3.6328, 7.4928]
+2026-03-03 15:29:48,058 INFO minivess.observability.tracking: Logged evaluation results for fold 0, loss=cbdice_cldice: 12 metrics
+2026-03-03 15:29:49,528 INFO train_monitored: [MEMORY CLEANUP end-fold0] Process RSS after gc: 5.8 GB
+2026-03-03 15:29:50,462 INFO train_monitored: [MEMORY CLEANUP between-folds-cbdice_cldice] Process RSS after gc: 3.8 GB
+2026-03-03 15:29:50,462 INFO train_monitored: === Fold 1: loss=cbdice_cldice, condition=none, device=cuda ===
+2026-03-03 15:29:50,463 INFO train_monitored: Cache rates: train=1.00 (47 vols), val=1.00 (23 vols)
+2026-03-03 15:29:50,467 INFO minivess.adapters.model_builder: SAM3 pretrained=false: using stub encoder (random weights)
+2026-03-03 15:29:50,476 INFO minivess.adapters.sam3_backbone: SAM3 encoder frozen (2702336 params)
+2026-03-03 15:29:50,515 INFO minivess.adapters.sam3_hybrid: Sam3HybridAdapter: 5838533 trainable / 8803269 total params
+2026-03-03 15:31:23,150 INFO system_monitor: [MONITOR] RAM: 27.3/62.7 GB (44%) | Swap: 13.2/16.0 GB | GPU: 4564/8192 MB | Process RSS: 8.3 GB
+2026-03-03 15:33:23,427 INFO system_monitor: [MONITOR] RAM: 28.7/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 4579/8192 MB | Process RSS: 9.0 GB
+2026-03-03 15:35:23,700 INFO system_monitor: [MONITOR] RAM: 28.3/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 7688/8192 MB | Process RSS: 9.2 GB
+2026-03-03 15:35:31,366 INFO minivess.pipeline.trainer: Epoch 1/6 — train_loss: 0.6144, val_loss: 0.6315, lr: 2.08e-05
+2026-03-03 15:35:31,459 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmp2uki0ero/fold_1/best_val_loss.pth
+2026-03-03 15:37:23,981 INFO system_monitor: [MONITOR] RAM: 28.5/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 7668/8192 MB | Process RSS: 9.5 GB
+2026-03-03 15:39:24,261 INFO system_monitor: [MONITOR] RAM: 27.3/62.7 GB (44%) | Swap: 13.2/16.0 GB | GPU: 7631/8192 MB | Process RSS: 8.3 GB
+2026-03-03 15:40:40,709 INFO minivess.pipeline.trainer: Epoch 2/6 — train_loss: 0.5533, val_loss: 0.5466, lr: 4.06e-05
+2026-03-03 15:40:40,862 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmp2uki0ero/fold_1/best_val_loss.pth
+2026-03-03 15:41:24,537 INFO system_monitor: [MONITOR] RAM: 27.7/62.7 GB (44%) | Swap: 13.2/16.0 GB | GPU: 7631/8192 MB | Process RSS: 8.8 GB
+2026-03-03 15:43:24,812 INFO system_monitor: [MONITOR] RAM: 28.3/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 7649/8192 MB | Process RSS: 8.8 GB
+2026-03-03 15:45:25,106 INFO system_monitor: [MONITOR] RAM: 27.7/62.7 GB (44%) | Swap: 13.2/16.0 GB | GPU: 7682/8192 MB | Process RSS: 8.7 GB
+2026-03-03 15:45:50,195 INFO minivess.pipeline.trainer: Epoch 3/6 — train_loss: 0.4951, val_loss: 0.4840, lr: 6.04e-05
+2026-03-03 15:45:50,322 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmp2uki0ero/fold_1/best_val_loss.pth
+2026-03-03 15:47:25,392 INFO system_monitor: [MONITOR] RAM: 27.8/62.7 GB (44%) | Swap: 13.2/16.0 GB | GPU: 7671/8192 MB | Process RSS: 8.7 GB
+2026-03-03 15:49:25,676 INFO system_monitor: [MONITOR] RAM: 28.1/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 7669/8192 MB | Process RSS: 8.6 GB
+2026-03-03 15:51:12,713 INFO minivess.pipeline.trainer: Epoch 4/6 — train_loss: 0.4070, val_loss: 0.4250, lr: 8.02e-05
+2026-03-03 15:51:12,844 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmp2uki0ero/fold_1/best_val_loss.pth
+2026-03-03 15:51:25,970 INFO system_monitor: [MONITOR] RAM: 28.7/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 7661/8192 MB | Process RSS: 8.7 GB
+2026-03-03 15:53:26,249 INFO system_monitor: [MONITOR] RAM: 28.9/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 7663/8192 MB | Process RSS: 8.8 GB
+2026-03-03 15:55:26,529 INFO system_monitor: [MONITOR] RAM: 28.5/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 7669/8192 MB | Process RSS: 8.7 GB
+2026-03-03 15:56:39,440 INFO minivess.pipeline.trainer: Epoch 5/6 — train_loss: 0.3798, val_loss: 0.3808, lr: 1.00e-04
+2026-03-03 15:56:39,573 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmp2uki0ero/fold_1/best_val_loss.pth
+2026-03-03 15:57:26,808 INFO system_monitor: [MONITOR] RAM: 28.2/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 7651/8192 MB | Process RSS: 8.8 GB
+2026-03-03 15:59:27,085 INFO system_monitor: [MONITOR] RAM: 28.7/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 7683/8192 MB | Process RSS: 8.8 GB
+2026-03-03 16:01:27,364 INFO system_monitor: [MONITOR] RAM: 28.2/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 7638/8192 MB | Process RSS: 8.7 GB
+2026-03-03 16:02:04,571 INFO minivess.pipeline.trainer: Epoch 6/6 — train_loss: 0.3337, val_loss: 0.3465, lr: 0.00e+00
+2026-03-03 16:02:04,700 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmp2uki0ero/fold_1/best_val_loss.pth
+2026-03-03 16:02:05,585 INFO train_monitored: Fold 1 training complete: best_val_loss=0.3465, epochs=6
+2026-03-03 16:02:06,631 INFO train_monitored: [MEMORY CLEANUP post-train-fold1] Process RSS after gc: 4.8 GB
+2026-03-03 16:02:06,631 INFO train_monitored: Loading best checkpoint for evaluation: /tmp/tmp2uki0ero/fold_1/best_val_loss.pth
+2026-03-03 16:02:06,679 INFO train_monitored: Running sliding window inference on 23 validation volumes
+2026-03-03 16:03:27,646 INFO system_monitor: [MONITOR] RAM: 26.0/62.7 GB (42%) | Swap: 13.2/16.0 GB | GPU: 1344/8192 MB | Process RSS: 6.1 GB
+2026-03-03 16:05:27,928 INFO system_monitor: [MONITOR] RAM: 27.0/62.7 GB (43%) | Swap: 13.2/16.0 GB | GPU: 1765/8192 MB | Process RSS: 7.6 GB
+2026-03-03 16:07:25,405 INFO train_monitored: [MEMORY CLEANUP post-infer-fold1] Process RSS after gc: 7.7 GB
+2026-03-03 16:07:25,405 INFO train_monitored: Running MetricsReloaded evaluation for fold 1
+2026-03-03 16:07:28,205 INFO system_monitor: [MONITOR] RAM: 27.2/62.7 GB (43%) | Swap: 13.2/16.0 GB | GPU: 866/8192 MB | Process RSS: 7.9 GB
+2026-03-03 16:09:28,605 INFO system_monitor: [MONITOR] RAM: 28.6/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 863/8192 MB | Process RSS: 9.0 GB
+2026-03-03 16:09:50,131 INFO train_monitored:   Fold 1 centreline_dsc: 0.7059 [0.6252, 0.7747]
+2026-03-03 16:09:50,131 INFO train_monitored:   Fold 1 dsc: 0.5699 [0.4991, 0.6341]
+2026-03-03 16:09:50,131 INFO train_monitored:   Fold 1 measured_masd: 4.0879 [2.6511, 5.9655]
+2026-03-03 16:09:50,137 INFO minivess.observability.tracking: Logged evaluation results for fold 1, loss=cbdice_cldice: 12 metrics
+2026-03-03 16:09:51,184 INFO train_monitored: [MEMORY CLEANUP end-fold1] Process RSS after gc: 5.0 GB
+2026-03-03 16:09:51,985 INFO train_monitored: [MEMORY CLEANUP between-folds-cbdice_cldice] Process RSS after gc: 3.1 GB
+2026-03-03 16:09:51,986 INFO train_monitored: === Fold 2: loss=cbdice_cldice, condition=none, device=cuda ===
+2026-03-03 16:09:51,986 INFO train_monitored: Cache rates: train=1.00 (47 vols), val=1.00 (23 vols)
+2026-03-03 16:09:51,989 INFO minivess.adapters.model_builder: SAM3 pretrained=false: using stub encoder (random weights)
+2026-03-03 16:09:51,997 INFO minivess.adapters.sam3_backbone: SAM3 encoder frozen (2702336 params)
+2026-03-03 16:09:52,035 INFO minivess.adapters.sam3_hybrid: Sam3HybridAdapter: 5838533 trainable / 8803269 total params
+2026-03-03 16:11:28,910 INFO system_monitor: [MONITOR] RAM: 26.7/62.7 GB (43%) | Swap: 13.2/16.0 GB | GPU: 6369/8192 MB | Process RSS: 7.3 GB
+2026-03-03 16:13:29,190 INFO system_monitor: [MONITOR] RAM: 28.3/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 3810/8192 MB | Process RSS: 8.3 GB
+2026-03-03 16:15:29,468 INFO system_monitor: [MONITOR] RAM: 28.1/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 6481/8192 MB | Process RSS: 8.7 GB
+2026-03-03 16:17:29,749 INFO system_monitor: [MONITOR] RAM: 28.4/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 6473/8192 MB | Process RSS: 9.1 GB
+2026-03-03 16:17:44,634 INFO minivess.pipeline.trainer: Epoch 1/6 — train_loss: 0.6104, val_loss: 0.6379, lr: 2.08e-05
+2026-03-03 16:17:44,727 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmp4d33l2vy/fold_2/best_val_loss.pth
+2026-03-03 16:19:30,025 INFO system_monitor: [MONITOR] RAM: 28.5/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 6475/8192 MB | Process RSS: 9.0 GB
+2026-03-03 16:21:30,300 INFO system_monitor: [MONITOR] RAM: 28.8/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 6458/8192 MB | Process RSS: 9.4 GB
+2026-03-03 16:23:30,578 INFO system_monitor: [MONITOR] RAM: 29.2/62.7 GB (47%) | Swap: 13.2/16.0 GB | GPU: 6475/8192 MB | Process RSS: 8.8 GB
+2026-03-03 16:25:15,402 INFO minivess.pipeline.trainer: Epoch 2/6 — train_loss: 0.5487, val_loss: 0.5587, lr: 4.06e-05
+2026-03-03 16:25:15,539 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmp4d33l2vy/fold_2/best_val_loss.pth
+2026-03-03 16:25:30,864 INFO system_monitor: [MONITOR] RAM: 29.2/62.7 GB (47%) | Swap: 13.2/16.0 GB | GPU: 6510/8192 MB | Process RSS: 9.3 GB
+2026-03-03 16:27:31,145 INFO system_monitor: [MONITOR] RAM: 28.9/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 6496/8192 MB | Process RSS: 9.2 GB
+2026-03-03 16:29:31,424 INFO system_monitor: [MONITOR] RAM: 28.9/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 6486/8192 MB | Process RSS: 9.4 GB
+2026-03-03 16:31:31,705 INFO system_monitor: [MONITOR] RAM: 28.4/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 6490/8192 MB | Process RSS: 8.8 GB
+2026-03-03 16:33:10,632 INFO minivess.pipeline.trainer: Epoch 3/6 — train_loss: 0.4896, val_loss: 0.5034, lr: 6.04e-05
+2026-03-03 16:33:10,772 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmp4d33l2vy/fold_2/best_val_loss.pth
+2026-03-03 16:33:31,984 INFO system_monitor: [MONITOR] RAM: 29.5/62.7 GB (47%) | Swap: 13.2/16.0 GB | GPU: 6483/8192 MB | Process RSS: 9.3 GB
+2026-03-03 16:35:32,263 INFO system_monitor: [MONITOR] RAM: 28.1/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 6462/8192 MB | Process RSS: 8.5 GB
+2026-03-03 16:37:32,545 INFO system_monitor: [MONITOR] RAM: 28.3/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 6449/8192 MB | Process RSS: 8.7 GB
+2026-03-03 16:39:32,824 INFO system_monitor: [MONITOR] RAM: 29.1/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 6455/8192 MB | Process RSS: 8.4 GB
+2026-03-03 16:40:57,544 INFO minivess.pipeline.trainer: Epoch 4/6 — train_loss: 0.4245, val_loss: 0.4419, lr: 8.02e-05
+2026-03-03 16:40:57,709 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmp4d33l2vy/fold_2/best_val_loss.pth
+2026-03-03 16:41:33,100 INFO system_monitor: [MONITOR] RAM: 28.6/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 6471/8192 MB | Process RSS: 8.9 GB
+2026-03-03 16:43:33,378 INFO system_monitor: [MONITOR] RAM: 28.5/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 6475/8192 MB | Process RSS: 8.8 GB
+2026-03-03 16:45:33,658 INFO system_monitor: [MONITOR] RAM: 28.4/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 6475/8192 MB | Process RSS: 8.8 GB
+2026-03-03 16:47:33,935 INFO system_monitor: [MONITOR] RAM: 28.4/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 6478/8192 MB | Process RSS: 8.8 GB
+2026-03-03 16:48:35,037 INFO minivess.pipeline.trainer: Epoch 5/6 — train_loss: 0.3645, val_loss: 0.3972, lr: 1.00e-04
+2026-03-03 16:48:35,172 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmp4d33l2vy/fold_2/best_val_loss.pth
+2026-03-03 16:49:34,230 INFO system_monitor: [MONITOR] RAM: 28.5/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 6480/8192 MB | Process RSS: 8.7 GB
+2026-03-03 16:51:34,510 INFO system_monitor: [MONITOR] RAM: 28.3/62.7 GB (45%) | Swap: 13.2/16.0 GB | GPU: 6479/8192 MB | Process RSS: 8.8 GB
+2026-03-03 16:53:34,790 INFO system_monitor: [MONITOR] RAM: 28.7/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 6528/8192 MB | Process RSS: 8.8 GB
+2026-03-03 16:55:35,069 INFO system_monitor: [MONITOR] RAM: 28.5/62.7 GB (46%) | Swap: 13.2/16.0 GB | GPU: 6559/8192 MB | Process RSS: 8.7 GB
+2026-03-03 16:56:05,238 INFO minivess.pipeline.trainer: Epoch 6/6 — train_loss: 0.3324, val_loss: 0.3616, lr: 0.00e+00
+2026-03-03 16:56:05,380 INFO minivess.pipeline.trainer: Saved best checkpoint for 'val_loss' to /tmp/tmp4d33l2vy/fold_2/best_val_loss.pth
+2026-03-03 16:56:06,238 INFO train_monitored: Fold 2 training complete: best_val_loss=0.3616, epochs=6
+2026-03-03 16:56:07,075 INFO train_monitored: [MEMORY CLEANUP post-train-fold2] Process RSS after gc: 6.0 GB
+2026-03-03 16:56:07,075 INFO train_monitored: Loading best checkpoint for evaluation: /tmp/tmp4d33l2vy/fold_2/best_val_loss.pth
+2026-03-03 16:56:07,129 INFO train_monitored: Running sliding window inference on 23 validation volumes
+2026-03-03 16:57:35,353 INFO system_monitor: [MONITOR] RAM: 27.7/62.7 GB (44%) | Swap: 13.2/16.0 GB | GPU: 1795/8192 MB | Process RSS: 7.7 GB
+2026-03-03 16:59:35,632 INFO system_monitor: [MONITOR] RAM: 30.0/62.7 GB (48%) | Swap: 13.2/16.0 GB | GPU: 1803/8192 MB | Process RSS: 10.2 GB
+2026-03-03 17:01:35,912 INFO system_monitor: [MONITOR] RAM: 31.3/62.7 GB (50%) | Swap: 13.2/16.0 GB | GPU: 2240/8192 MB | Process RSS: 11.6 GB
+2026-03-03 17:03:29,020 INFO train_monitored: [MEMORY CLEANUP post-infer-fold2] Process RSS after gc: 10.9 GB
+2026-03-03 17:03:29,020 INFO train_monitored: Running MetricsReloaded evaluation for fold 2
+2026-03-03 17:03:36,188 INFO system_monitor: [MONITOR] RAM: 31.7/62.7 GB (50%) | Swap: 13.2/16.0 GB | GPU: 1010/8192 MB | Process RSS: 11.4 GB
+2026-03-03 17:05:36,597 INFO system_monitor: [MONITOR] RAM: 37.5/62.7 GB (60%) | Swap: 13.3/16.0 GB | GPU: 1013/8192 MB | Process RSS: 17.6 GB
+2026-03-03 17:07:14,041 INFO train_monitored:   Fold 2 centreline_dsc: 0.6858 [0.6323, 0.7312]
+2026-03-03 17:07:14,041 INFO train_monitored:   Fold 2 dsc: 0.5239 [0.4755, 0.5665]
+2026-03-03 17:07:14,041 INFO train_monitored:   Fold 2 measured_masd: 3.6415 [2.6501, 4.6970]
+2026-03-03 17:07:14,047 INFO minivess.observability.tracking: Logged evaluation results for fold 2, loss=cbdice_cldice: 12 metrics
+2026-03-03 17:07:15,549 INFO train_monitored: [MEMORY CLEANUP end-fold2] Process RSS after gc: 6.4 GB
+2026-03-03 17:07:16,556 INFO train_monitored: [MEMORY CLEANUP between-folds-cbdice_cldice] Process RSS after gc: 3.3 GB
+2026/03/03 17:07:16 INFO mlflow.system_metrics.system_metrics_monitor: Stopping system metrics monitoring...
+2026/03/03 17:07:16 INFO mlflow.system_metrics.system_metrics_monitor: Successfully terminated system metrics monitoring!
+2026-03-03 17:07:17,164 INFO train_monitored: [MEMORY CLEANUP between-losses-after-cbdice_cldice] Process RSS after gc: 3.2 GB
+2026-03-03 17:07:17,193 INFO system_monitor: System monitor stopped: 874 snapshots, peak_ram=37.5 GB, peak_gpu=7740 MB
+2026-03-03 17:07:17,193 INFO train_monitored: Monitor summary: {
+2026-03-03 17:07:17,194 INFO run_experiment: Experiment complete: 1/1 losses succeeded
+2026-03-03 17:07:17,194 INFO __main__: Variant 'sam3_hybrid_debug': COMPLETED
+2026-03-03 17:07:17,194 INFO __main__: SAM3 debug run summary: 1/1 succeeded
+2026-03-03 17:07:17,194 INFO __main__: Completed: ['sam3_hybrid_debug']

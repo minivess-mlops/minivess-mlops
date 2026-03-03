@@ -1,0 +1,112 @@
+2026-03-03 00:36:54,023 INFO __main__: SAM3 debug runner: 3 variant(s) to run (dry_run=False)
+2026-03-03 00:36:54,024 INFO __main__: Running variant 'sam3_vanilla_debug': SAM3 V1: Vanilla ViT-32L + dice_ce (dry_run=False)
+2026-03-03 00:36:54,125 INFO run_experiment: Loaded experiment config: sam3_vanilla_debug
+2026-03-03 00:36:54,125 INFO run_experiment: Experiment mode: losses
+2026-03-03 00:37:09,225 INFO run_experiment: Dataset profile loaded for adaptive compute
+2026-03-03 00:37:09,226 INFO run_experiment: Resolved compute profile: cpu
+2026-03-03 00:37:09,227 INFO run_experiment: Launching training run: loss=dice_ce
+2026-03-03 00:37:10,047 INFO train_monitored: ======================================================================
+2026-03-03 00:37:10,047 INFO train_monitored: MONITORED TRAINING SESSION
+2026-03-03 00:37:10,047 INFO train_monitored:   Log dir: /home/petteri/Dropbox/github-personal/minivess-mlops/logs/train_20260302_223710
+2026-03-03 00:37:10,047 INFO train_monitored:   Resume: False
+2026-03-03 00:37:10,047 INFO train_monitored: ======================================================================
+2026-03-03 00:37:10,047 WARNING train_monitored: HIGH SWAP USAGE: 13.5 GB in swap. This likely remains from previous OOM crashes. Consider clearing swap before training: sudo swapoff -a && sudo swapon -a (will move ~13.5 GB back to RAM, need 13.5 GB available, have 38.2 GB).
+2026-03-03 00:37:10,047 INFO train_monitored: Pre-training memory: 38.2 GB RAM available, 13.5 GB swap used
+2026-03-03 00:37:10,071 INFO system_monitor: System monitor started (interval=10.0s, log=/home/petteri/Dropbox/github-personal/minivess-mlops/logs/train_20260302_223710/monitor/system_metrics.csv)
+2026-03-03 00:37:10,071 INFO minivess.config.debug: Debug mode: applying overrides for fast smoke testing
+2026-03-03 00:37:10,071 INFO minivess.config.debug: Debug overrides applied: max_epochs=1, num_folds=2, num_workers=0
+2026-03-03 00:37:10,072 INFO train_monitored: Experiment: losses=['dice_ce'], folds=2, epochs=1, debug=True
+2026-03-03 00:37:10,072 INFO train_monitored: Loading splits from /home/petteri/Dropbox/github-personal/minivess-mlops/configs/splits/3fold_seed42.json (split_mode=file)
+2026-03-03 00:37:10,144 INFO train_monitored: --- Loss function: dice_ce ---
+2026/03/03 00:37:10 INFO mlflow.system_metrics.system_metrics_monitor: Started monitoring system metrics.
+2026-03-03 00:37:10,281 INFO minivess.observability.tracking: Logged git hash: ab80fe5e
+2026-03-03 00:37:10,332 INFO minivess.observability.tracking: Logged fold splits: 2 folds, mode=file
+2026-03-03 00:37:10,332 INFO train_monitored: === Fold 0: loss=dice_ce, condition=none, device=cuda ===
+2026-03-03 00:37:10,332 INFO train_monitored: Cache rates: train=0.00 (10 vols), val=0.00 (3 vols)
+2026-03-03 00:37:10,338 INFO minivess.adapters.model_builder: SAM3 pretrained=false: using stub encoder (random weights)
+2026-03-03 00:37:10,344 INFO minivess.adapters.sam3_backbone: SAM3 encoder frozen (603136 params)
+2026-03-03 00:37:10,346 INFO minivess.adapters.sam3_vanilla: Sam3VanillaAdapter: encoder=865536 params (frozen), decoder=166017 params (trainable)
+2026/03/03 00:37:21 INFO mlflow.system_metrics.system_metrics_monitor: Stopping system metrics monitoring...
+2026/03/03 00:37:21 INFO mlflow.system_metrics.system_metrics_monitor: Successfully terminated system metrics monitoring!
+2026-03-03 00:37:21,349 ERROR train_monitored: TRAINING FAILED WITH EXCEPTION
+2026-03-03 00:37:21,353 INFO system_monitor: System monitor stopped: 2 snapshots, peak_ram=26.3 GB, peak_gpu=7706 MB
+2026-03-03 00:37:21,353 INFO train_monitored: Monitor summary: {
+2026-03-03 00:37:21,353 ERROR run_experiment: Training FAILED for loss=dice_ce — continuing to next loss
+2026-03-03 00:37:21,366 INFO run_experiment: Experiment complete: 0/1 losses succeeded
+2026-03-03 00:37:21,366 WARNING run_experiment: Failed losses: ['dice_ce']
+2026-03-03 00:37:21,366 INFO __main__: Variant 'sam3_vanilla_debug': COMPLETED
+2026-03-03 00:37:21,366 INFO __main__: Running variant 'sam3_topolora_debug': SAM3 V2: TopoLoRA (r=16) + cbdice_cldice (dry_run=False)
+2026-03-03 00:37:21,368 INFO run_experiment: Loaded experiment config: sam3_topolora_debug
+2026-03-03 00:37:21,368 INFO run_experiment: Experiment mode: losses
+2026-03-03 00:37:30,726 INFO run_experiment: Dataset profile loaded for adaptive compute
+2026-03-03 00:37:30,726 INFO run_experiment: Resolved compute profile: cpu
+2026-03-03 00:37:30,726 INFO run_experiment: Launching training run: loss=cbdice_cldice
+2026-03-03 00:37:30,728 INFO train_monitored: ======================================================================
+2026-03-03 00:37:30,728 INFO train_monitored: MONITORED TRAINING SESSION
+2026-03-03 00:37:30,728 INFO train_monitored:   Log dir: /home/petteri/Dropbox/github-personal/minivess-mlops/logs/train_20260302_223730
+2026-03-03 00:37:30,728 INFO train_monitored:   Resume: False
+2026-03-03 00:37:30,728 INFO train_monitored: ======================================================================
+2026-03-03 00:37:30,728 WARNING train_monitored: HIGH SWAP USAGE: 13.5 GB in swap. This likely remains from previous OOM crashes. Consider clearing swap before training: sudo swapoff -a && sudo swapon -a (will move ~13.5 GB back to RAM, need 13.5 GB available, have 37.4 GB).
+2026-03-03 00:37:30,728 INFO train_monitored: Pre-training memory: 37.4 GB RAM available, 13.5 GB swap used
+2026-03-03 00:37:30,752 INFO system_monitor: System monitor started (interval=10.0s, log=/home/petteri/Dropbox/github-personal/minivess-mlops/logs/train_20260302_223730/monitor/system_metrics.csv)
+2026-03-03 00:37:30,752 INFO minivess.config.debug: Debug mode: applying overrides for fast smoke testing
+2026-03-03 00:37:30,752 INFO minivess.config.debug: Debug overrides applied: max_epochs=1, num_folds=2, num_workers=0
+2026-03-03 00:37:30,752 INFO train_monitored: Experiment: losses=['cbdice_cldice'], folds=2, epochs=1, debug=True
+2026-03-03 00:37:30,752 INFO train_monitored: Loading splits from /home/petteri/Dropbox/github-personal/minivess-mlops/configs/splits/3fold_seed42.json (split_mode=file)
+2026-03-03 00:37:30,753 INFO train_monitored: --- Loss function: cbdice_cldice ---
+2026/03/03 00:37:30 INFO mlflow.system_metrics.system_metrics_monitor: Started monitoring system metrics.
+2026-03-03 00:37:30,810 INFO minivess.observability.tracking: Logged git hash: ab80fe5e
+2026-03-03 00:37:30,852 INFO minivess.observability.tracking: Logged fold splits: 2 folds, mode=file
+2026-03-03 00:37:30,853 INFO train_monitored: === Fold 0: loss=cbdice_cldice, condition=none, device=cuda ===
+2026-03-03 00:37:30,853 INFO train_monitored: Cache rates: train=0.00 (10 vols), val=0.00 (3 vols)
+2026-03-03 00:37:30,857 INFO minivess.adapters.model_builder: SAM3 pretrained=false: using stub encoder (random weights)
+2026-03-03 00:37:30,860 INFO minivess.adapters.sam3_topolora: LoRA applied to 0 layers: []
+2026-03-03 00:37:30,861 INFO minivess.adapters.sam3_topolora: Sam3TopoLoraAdapter: 769153 trainable / 1031553 total params (74.6%)
+2026-03-03 00:37:30,878 WARNING minivess.pipeline.loss_functions: Loss 'cbdice_cldice' is LIBRARY-COMPOUND — Weighted sum of library losses. Not fully backed by established library; may have implementation bugs. See docs/planning/novel-loss-debugging-plan.xml for risk assessment.
+2026/03/03 00:37:33 INFO mlflow.system_metrics.system_metrics_monitor: Stopping system metrics monitoring...
+2026/03/03 00:37:33 INFO mlflow.system_metrics.system_metrics_monitor: Successfully terminated system metrics monitoring!
+2026-03-03 00:37:33,226 ERROR train_monitored: TRAINING FAILED WITH EXCEPTION
+2026-03-03 00:37:33,231 INFO system_monitor: System monitor stopped: 1 snapshots, peak_ram=25.3 GB, peak_gpu=7713 MB
+2026-03-03 00:37:33,231 INFO train_monitored: Monitor summary: {
+2026-03-03 00:37:33,231 ERROR run_experiment: Training FAILED for loss=cbdice_cldice — continuing to next loss
+2026-03-03 00:37:33,235 INFO run_experiment: Experiment complete: 0/1 losses succeeded
+2026-03-03 00:37:33,235 WARNING run_experiment: Failed losses: ['cbdice_cldice']
+2026-03-03 00:37:33,236 INFO __main__: Variant 'sam3_topolora_debug': COMPLETED
+2026-03-03 00:37:33,236 INFO __main__: Running variant 'sam3_hybrid_debug': SAM3 V3: Hybrid DynUNet+SAM3 + cbdice_cldice (dry_run=False)
+2026-03-03 00:37:33,238 INFO run_experiment: Loaded experiment config: sam3_hybrid_debug
+2026-03-03 00:37:33,238 INFO run_experiment: Experiment mode: losses
+2026-03-03 00:37:42,640 INFO run_experiment: Dataset profile loaded for adaptive compute
+2026-03-03 00:37:42,640 INFO run_experiment: Resolved compute profile: cpu
+2026-03-03 00:37:42,640 INFO run_experiment: Launching training run: loss=cbdice_cldice
+2026-03-03 00:37:42,641 INFO train_monitored: ======================================================================
+2026-03-03 00:37:42,641 INFO train_monitored: MONITORED TRAINING SESSION
+2026-03-03 00:37:42,642 INFO train_monitored:   Log dir: /home/petteri/Dropbox/github-personal/minivess-mlops/logs/train_20260302_223742
+2026-03-03 00:37:42,642 INFO train_monitored:   Resume: False
+2026-03-03 00:37:42,642 INFO train_monitored: ======================================================================
+2026-03-03 00:37:42,642 WARNING train_monitored: HIGH SWAP USAGE: 13.5 GB in swap. This likely remains from previous OOM crashes. Consider clearing swap before training: sudo swapoff -a && sudo swapon -a (will move ~13.5 GB back to RAM, need 13.5 GB available, have 37.5 GB).
+2026-03-03 00:37:42,642 INFO train_monitored: Pre-training memory: 37.5 GB RAM available, 13.5 GB swap used
+2026-03-03 00:37:42,666 INFO system_monitor: System monitor started (interval=10.0s, log=/home/petteri/Dropbox/github-personal/minivess-mlops/logs/train_20260302_223742/monitor/system_metrics.csv)
+2026-03-03 00:37:42,666 INFO minivess.config.debug: Debug mode: applying overrides for fast smoke testing
+2026-03-03 00:37:42,666 INFO minivess.config.debug: Debug overrides applied: max_epochs=1, num_folds=2, num_workers=0
+2026-03-03 00:37:42,666 INFO train_monitored: Experiment: losses=['cbdice_cldice'], folds=2, epochs=1, debug=True
+2026-03-03 00:37:42,666 INFO train_monitored: Loading splits from /home/petteri/Dropbox/github-personal/minivess-mlops/configs/splits/3fold_seed42.json (split_mode=file)
+2026-03-03 00:37:42,667 INFO train_monitored: --- Loss function: cbdice_cldice ---
+2026/03/03 00:37:42 INFO mlflow.system_metrics.system_metrics_monitor: Started monitoring system metrics.
+2026-03-03 00:37:42,733 INFO minivess.observability.tracking: Logged git hash: ab80fe5e
+2026-03-03 00:37:42,778 INFO minivess.observability.tracking: Logged fold splits: 2 folds, mode=file
+2026-03-03 00:37:42,778 INFO train_monitored: === Fold 0: loss=cbdice_cldice, condition=none, device=cuda ===
+2026-03-03 00:37:42,778 INFO train_monitored: Cache rates: train=0.00 (10 vols), val=0.00 (3 vols)
+2026-03-03 00:37:42,782 INFO minivess.adapters.model_builder: SAM3 pretrained=false: using stub encoder (random weights)
+2026-03-03 00:37:42,785 INFO minivess.adapters.sam3_backbone: SAM3 encoder frozen (603136 params)
+2026-03-03 00:37:42,823 INFO minivess.adapters.sam3_hybrid: Sam3HybridAdapter: 5838533 trainable / 6704069 total params
+2026/03/03 00:37:45 INFO mlflow.system_metrics.system_metrics_monitor: Stopping system metrics monitoring...
+2026/03/03 00:37:45 INFO mlflow.system_metrics.system_metrics_monitor: Successfully terminated system metrics monitoring!
+2026-03-03 00:37:45,552 ERROR train_monitored: TRAINING FAILED WITH EXCEPTION
+2026-03-03 00:37:45,559 INFO system_monitor: System monitor stopped: 1 snapshots, peak_ram=25.2 GB, peak_gpu=7719 MB
+2026-03-03 00:37:45,559 INFO train_monitored: Monitor summary: {
+2026-03-03 00:37:45,559 ERROR run_experiment: Training FAILED for loss=cbdice_cldice — continuing to next loss
+2026-03-03 00:37:45,562 INFO run_experiment: Experiment complete: 0/1 losses succeeded
+2026-03-03 00:37:45,562 WARNING run_experiment: Failed losses: ['cbdice_cldice']
+2026-03-03 00:37:45,562 INFO __main__: Variant 'sam3_hybrid_debug': COMPLETED
+2026-03-03 00:37:45,562 INFO __main__: SAM3 debug run summary: 3/3 succeeded
+2026-03-03 00:37:45,562 INFO __main__: Completed: ['sam3_vanilla_debug', 'sam3_topolora_debug', 'sam3_hybrid_debug']
