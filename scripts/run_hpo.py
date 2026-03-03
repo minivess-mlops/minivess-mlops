@@ -2,8 +2,8 @@
 
 Usage::
 
-    uv run python scripts/run_hpo.py --config configs/experiments/hpo_dynunet_example.yaml
-    uv run python scripts/run_hpo.py --config configs/experiments/hpo_dynunet_example.yaml --dry-run
+    uv run python scripts/run_hpo.py --config configs/hpo/dynunet_example.yaml
+    uv run python scripts/run_hpo.py --config configs/hpo/dynunet_example.yaml --dry-run
 
 """
 

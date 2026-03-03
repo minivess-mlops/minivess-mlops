@@ -24,7 +24,7 @@ file_mounts:
 
 envs:
   MLFLOW_TRACKING_URI: http://mlflow:5000
-  HPO_CONFIG: configs/experiments/hpo_dynunet_example.yaml
+  HPO_CONFIG: configs/hpo/dynunet_example.yaml
   N_TRIALS: 20
   STUDY_NAME: minivess_hpo
 

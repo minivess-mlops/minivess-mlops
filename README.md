@@ -233,7 +233,7 @@ uv run pytest tests/v2/ -x -q
 uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/ && uv run mypy src/
 
 # Run a debug training experiment (DynUNet, 1 epoch, 2 folds)
-uv run python scripts/run_experiment.py --config configs/experiments/dynunet_e2e_debug.yaml
+uv run python scripts/run_experiment.py --experiment dynunet_e2e_debug
 
 # Run the full reproducibility pipeline (all 5 flows)
 uv run python scripts/run_full_pipeline.py

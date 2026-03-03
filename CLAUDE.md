@@ -110,7 +110,7 @@ Each of the 6 Prefect flows runs in its own Docker container:
 ### Optuna + ASHA Hyperparameter Optimization
 - `src/minivess/optimization/hpo_engine.py` — HPOEngine with TPE/CmaES + HyperbandPruner
 - `src/minivess/optimization/search_space.py` — YAML-driven search space
-- `configs/experiments/hpo_dynunet_example.yaml` — reference HPO config
+- `configs/hpo/dynunet_example.yaml` — reference HPO config
 - `scripts/run_hpo.py` — CLI entry point
 
 ## Quick Reference

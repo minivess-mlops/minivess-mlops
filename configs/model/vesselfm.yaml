@@ -1,0 +1,13 @@
+# VesselFM foundation model config group entry.
+# Wittmann et al. "vesselFM" CVPR 2025 (arXiv:2411.17386).
+# DynUNet [32, 64, 128, 256, 320, 320], ~30M params.
+# Weights: HuggingFace bwittmann/vesselFM (Open RAIL++-M license).
+# WARNING: VesselFM was pre-trained on MiniVess (1 of 17 datasets).
+
+model: vesselfm
+model_family: vesselfm
+architecture_params:
+  pretrained: true
+  normalization: percentile
+  percentile_lower: 1.0
+  percentile_upper: 99.0

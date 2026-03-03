@@ -20,30 +20,19 @@ import yaml
 
 
 class TestTopologyExperimentConfig:
-    """Tests for dynunet_topology.yaml experiment config."""
+    """Tests for dynunet_topology experiment config (Hydra composition)."""
 
     def test_topology_experiment_config_loadable(self) -> None:
-        config_path = (
-            Path(__file__).parents[3]
-            / "configs"
-            / "experiments"
-            / "dynunet_topology.yaml"
-        )
-        assert config_path.exists(), f"Config not found: {config_path}"
-        with config_path.open(encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        from minivess.config.compose import compose_experiment_config
+
+        config = compose_experiment_config(experiment_name="dynunet_topology")
         assert "experiment_name" in config
         assert "losses" in config
 
     def test_topology_config_has_topology_losses(self) -> None:
-        config_path = (
-            Path(__file__).parents[3]
-            / "configs"
-            / "experiments"
-            / "dynunet_topology.yaml"
-        )
-        with config_path.open(encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        from minivess.config.compose import compose_experiment_config
+
+        config = compose_experiment_config(experiment_name="dynunet_topology")
         losses = config["losses"]
         # Should include topology-aware losses
         assert (
@@ -123,22 +112,23 @@ CONFIGS_DIR = Path(__file__).resolve().parents[3] / "configs"
 
 
 class TestGraphTopologyExperimentConfig:
-    """Tests for dynunet_graph_topology.yaml config."""
+    """Tests for dynunet_graph_topology experiment config (Hydra composition)."""
+
+    @staticmethod
+    def _load() -> dict[str, Any]:
+        from minivess.config.compose import compose_experiment_config
+
+        return compose_experiment_config(experiment_name="dynunet_graph_topology")
 
     def test_graph_topology_experiment_config_loadable(self) -> None:
-        config_path = CONFIGS_DIR / "experiments" / "dynunet_graph_topology.yaml"
-        assert config_path.exists(), f"Config not found: {config_path}"
-        with config_path.open(encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        config = self._load()
         assert isinstance(config, dict)
         assert "experiment_name" in config
-        assert "model" in config
+        assert "model" in config or config.get("model") is not None
         assert "losses" in config
 
     def test_graph_topology_config_has_five_losses(self) -> None:
-        config_path = CONFIGS_DIR / "experiments" / "dynunet_graph_topology.yaml"
-        with config_path.open(encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        config = self._load()
         losses = config["losses"]
         assert len(losses) == 5
         expected = {
@@ -151,9 +141,7 @@ class TestGraphTopologyExperimentConfig:
         assert set(losses) == expected
 
     def test_graph_topology_config_has_graph_metrics(self) -> None:
-        config_path = CONFIGS_DIR / "experiments" / "dynunet_graph_topology.yaml"
-        with config_path.open(encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        config = self._load()
         topo_metrics = config["topology_metrics"]["metrics"]
         assert "apls" in topo_metrics
         assert "skeleton_recall_metric" in topo_metrics
@@ -162,9 +150,7 @@ class TestGraphTopologyExperimentConfig:
         assert "junction_f1" in topo_metrics
 
     def test_graph_topology_config_has_champion_selection(self) -> None:
-        config_path = CONFIGS_DIR / "experiments" / "dynunet_graph_topology.yaml"
-        with config_path.open(encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        config = self._load()
         champion = config["champion_selection"]
         assert champion["strategy"] == "rank_then_aggregate"
         categories = champion["categories"]
@@ -174,9 +160,7 @@ class TestGraphTopologyExperimentConfig:
         assert "champion_balanced" in category_names
 
     def test_graph_topology_config_primary_metric(self) -> None:
-        config_path = CONFIGS_DIR / "experiments" / "dynunet_graph_topology.yaml"
-        with config_path.open(encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        config = self._load()
         primary = config["checkpoint"]["primary_metric"]
         assert primary == "val_compound_nsd_cldice"
 
@@ -184,9 +168,7 @@ class TestGraphTopologyExperimentConfig:
         """Every loss in the config must be registered in the factory."""
         from minivess.pipeline.loss_functions import build_loss_function
 
-        config_path = CONFIGS_DIR / "experiments" / "dynunet_graph_topology.yaml"
-        with config_path.open(encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        config = self._load()
         for loss_name in config["losses"]:
             loss_fn = build_loss_function(loss_name)
             assert loss_fn is not None, f"Loss '{loss_name}' not registered"
@@ -216,9 +198,9 @@ class TestGraphMetricRegistryCompleteness:
 
     def test_all_topology_config_metrics_registered(self) -> None:
         """Every metric in the topology config must exist in the registry."""
-        config_path = CONFIGS_DIR / "experiments" / "dynunet_graph_topology.yaml"
-        with config_path.open(encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        from minivess.config.compose import compose_experiment_config
+
+        config = compose_experiment_config(experiment_name="dynunet_graph_topology")
         topo_metrics = config["topology_metrics"]["metrics"]
         registry_names = self._metric_names()
         for metric_name in topo_metrics:

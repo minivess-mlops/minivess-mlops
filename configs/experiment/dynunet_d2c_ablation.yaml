@@ -1,0 +1,34 @@
+# @package _global_
+experiment_name: dynunet_d2c_ablation_v1
+model: dynunet
+loss: cbdice_cldice
+checkpoint:
+  primary_metric: val_compound_nsd_cldice
+  tracked_metrics:
+    - name: val_loss
+      direction: minimize
+      patience: 30
+    - name: val_dice
+      direction: maximize
+      patience: 30
+    - name: val_cldice
+      direction: maximize
+      patience: 30
+    - name: val_compound_nsd_cldice
+      direction: maximize
+      patience: 20
+  early_stopping_strategy: all
+  min_delta: 1.0e-4
+  min_epochs: 10
+  save_last: true
+  save_history: true
+conditions:
+  - name: baseline
+    d2c_enabled: false
+  - name: d2c_augmented
+    d2c_enabled: true
+    d2c_probability: 0.3
+    d2c_mode: zero
+    d2c_max_segment_length: 15
+    d2c_max_junctions: 3
+    d2c_dilation_radius: 2

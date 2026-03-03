@@ -3,13 +3,13 @@
 
 Usage::
 
-    # From experiment config
+    # From experiment name (Hydra composition)
     uv run python scripts/precompute_targets.py \\
-        --config configs/experiments/dynunet_topology_all_approaches_debug.yaml
+        --experiment dynunet_topology_all_approaches_debug
 
     # Force recompute
     uv run python scripts/precompute_targets.py \\
-        --config configs/experiments/dynunet_topology_all_approaches_debug.yaml --force
+        --experiment dynunet_topology_all_approaches_debug --force
 """
 
 from __future__ import annotations
@@ -19,8 +19,6 @@ import logging
 import sys
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
@@ -119,10 +117,10 @@ def main(argv: list[str] | None = None) -> None:
         description="Precompute auxiliary GT targets for topology experiments",
     )
     parser.add_argument(
-        "--config",
-        type=Path,
+        "--experiment",
+        type=str,
         required=True,
-        help="Path to experiment YAML config file",
+        help="Experiment name for Hydra composition (e.g., 'dynunet_topology_all_approaches_debug')",
     )
     parser.add_argument(
         "--force",
@@ -137,9 +135,10 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    # Load experiment config
-    with open(args.config, encoding="utf-8") as f:
-        config: dict[str, Any] = yaml.safe_load(f)
+    # Load experiment config via Hydra composition
+    from minivess.config.compose import compose_experiment_config
+
+    config: dict[str, Any] = compose_experiment_config(experiment_name=args.experiment)
 
     # Resolve paths
     data_dir = Path(config.get("data_dir", "data/raw/minivess"))

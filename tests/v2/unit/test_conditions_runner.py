@@ -161,25 +161,20 @@ class TestExtractExtraTargetKeys:
 
 
 class TestDebugConfigFile:
-    """Test the actual debug YAML config file loads correctly."""
+    """Test the actual debug YAML config file loads correctly via Hydra compose."""
 
     def test_debug_config_loads(self) -> None:
-        """dynunet_topology_all_approaches_debug.yaml loads as conditions mode."""
+        """dynunet_topology_all_approaches_debug loads as conditions mode via compose."""
         import sys
-        from pathlib import Path
 
         sys.path.insert(0, "scripts")
-        from run_experiment import detect_experiment_mode, load_experiment_config
+        from run_experiment import detect_experiment_mode
 
-        config_path = Path(
-            "configs/experiments/dynunet_topology_all_approaches_debug.yaml"
+        from minivess.config.compose import compose_experiment_config
+
+        config = compose_experiment_config(
+            experiment_name="dynunet_topology_all_approaches_debug"
         )
-        if not config_path.exists():
-            import pytest
-
-            pytest.skip("Debug config not found")
-
-        config = load_experiment_config(config_path)
         assert detect_experiment_mode(config) == "conditions"
         assert len(config["conditions"]) == 6
         assert config["max_epochs"] == 6

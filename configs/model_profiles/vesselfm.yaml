@@ -1,0 +1,18 @@
+name: vesselfm
+divisor: 32
+model_overhead_mb: 800
+bytes_per_voxel_amp: 10
+bytes_per_voxel_fp32: 20
+max_batch_size:
+  cpu: 1
+  gpu_low: 1
+  gpu_high: 2
+  gpu_extreme: 4
+default_patch_xy: 96
+notes: >
+  vesselFM foundation model (Wittmann et al., CVPR 2025).
+  DynUNet with filters [32, 64, 128, 256, 320, 320], ~30M params.
+  5 stride-2 encoder levels -> divisor = 2^5 = 32.
+  Pre-trained on 17 3D vessel datasets including MiniVess.
+  Requires percentile normalization (1st-99th) instead of z-score.
+  Estimated ~6GB VRAM for inference, ~10GB for fine-tuning (batch=1).

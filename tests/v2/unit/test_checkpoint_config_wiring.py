@@ -11,19 +11,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
-
 
 def test_experiment_yaml_has_checkpoint_section() -> None:
-    """dynunet_losses.yaml includes checkpoint config."""
-    yaml_path = (
-        Path(__file__).resolve().parents[3]
-        / "configs"
-        / "experiments"
-        / "dynunet_losses.yaml"
-    )
-    with open(yaml_path, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    """dynunet_losses composed config includes checkpoint config."""
+    from minivess.config.compose import compose_experiment_config
+
+    config = compose_experiment_config(experiment_name="dynunet_losses")
     assert "checkpoint" in config
     assert "tracked_metrics" in config["checkpoint"]
     assert (
@@ -32,50 +25,37 @@ def test_experiment_yaml_has_checkpoint_section() -> None:
 
 
 def test_experiment_yaml_checkpoint_primary_metric() -> None:
-    """Primary metric in YAML is val_compound_masd_cldice."""
-    yaml_path = (
-        Path(__file__).resolve().parents[3]
-        / "configs"
-        / "experiments"
-        / "dynunet_losses.yaml"
-    )
-    with open(yaml_path, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
-    assert config["checkpoint"]["primary_metric"] == "val_compound_masd_cldice"
+    """Primary metric is val_compound_nsd_cldice (updated from masd-based compound)."""
+    from minivess.config.compose import compose_experiment_config
+
+    config = compose_experiment_config(experiment_name="dynunet_losses")
+    assert config["checkpoint"]["primary_metric"] == "val_compound_nsd_cldice"
 
 
 def test_experiment_yaml_checkpoint_min_epochs() -> None:
     """min_epochs is set to prevent premature stopping."""
-    yaml_path = (
-        Path(__file__).resolve().parents[3]
-        / "configs"
-        / "experiments"
-        / "dynunet_losses.yaml"
-    )
-    with open(yaml_path, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    from minivess.config.compose import compose_experiment_config
+
+    config = compose_experiment_config(experiment_name="dynunet_losses")
     assert config["checkpoint"]["min_epochs"] >= 10
 
 
 def test_experiment_yaml_checkpoint_has_early_stopping_strategy() -> None:
     """Checkpoint section includes early_stopping_strategy."""
-    yaml_path = (
-        Path(__file__).resolve().parents[3]
-        / "configs"
-        / "experiments"
-        / "dynunet_losses.yaml"
-    )
-    with open(yaml_path, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    from minivess.config.compose import compose_experiment_config
+
+    config = compose_experiment_config(experiment_name="dynunet_losses")
     assert "early_stopping_strategy" in config["checkpoint"]
     assert config["checkpoint"]["early_stopping_strategy"] in {"all", "any", "primary"}
 
 
 def test_checkpoint_config_from_yaml_dict() -> None:
     """CheckpointConfig can be built from a YAML-parsed dict."""
+    from typing import Any
+
     from minivess.config.models import CheckpointConfig, TrackedMetricConfig
 
-    raw = {
+    raw: dict[str, Any] = {
         "tracked_metrics": [
             {"name": "val_loss", "direction": "minimize", "patience": 15},
             {"name": "val_dice", "direction": "maximize", "patience": 20},
@@ -178,7 +158,11 @@ def test_load_checkpoint_handles_new_format(tmp_path: Path) -> None:
     """ModelAdapter.load_checkpoint handles the new dict-format checkpoint."""
     import torch
 
-    from minivess.adapters.base import ModelAdapter, SegmentationOutput
+    from minivess.adapters.base import (
+        AdapterConfigInfo,
+        ModelAdapter,
+        SegmentationOutput,
+    )
     from minivess.config.models import ModelConfig, ModelFamily
 
     # Create a concrete minimal adapter for testing
@@ -200,7 +184,7 @@ def test_load_checkpoint_handles_new_format(tmp_path: Path) -> None:
             out = self.net(images)
             return self._build_output(out, "test")
 
-        def get_config(self) -> object:
+        def get_config(self) -> AdapterConfigInfo:
             return self._build_config()
 
     model = _MinimalAdapter()
@@ -231,7 +215,11 @@ def test_load_checkpoint_handles_legacy_format(tmp_path: Path) -> None:
     """ModelAdapter.load_checkpoint handles the old bare-state-dict format."""
     import torch
 
-    from minivess.adapters.base import ModelAdapter, SegmentationOutput
+    from minivess.adapters.base import (
+        AdapterConfigInfo,
+        ModelAdapter,
+        SegmentationOutput,
+    )
     from minivess.config.models import ModelConfig, ModelFamily
 
     class _MinimalAdapter(ModelAdapter):
@@ -251,7 +239,7 @@ def test_load_checkpoint_handles_legacy_format(tmp_path: Path) -> None:
             out = self.net(images)
             return self._build_output(out, "test")
 
-        def get_config(self) -> object:
+        def get_config(self) -> AdapterConfigInfo:
             return self._build_config()
 
     model = _MinimalAdapter()

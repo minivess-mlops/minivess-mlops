@@ -1,0 +1,38 @@
+# @package _global_
+experiment_name: dynunet_graph_topology_v1
+model: dynunet
+model_family: dynunet
+losses:
+  - dice_ce
+  - cbdice_cldice
+  - graph_topology
+  - skeleton_recall
+  - betti_matching
+topology_metrics:
+  compute_every_n_epochs: 5
+  metrics:
+    - nsd
+    - hd95
+    - ccdice
+    - betti_error_beta0
+    - junction_f1
+    - apls
+    - skeleton_recall_metric
+    - bdr
+champion_selection:
+  strategy: rank_then_aggregate
+  categories:
+    - name: champion_topology
+      description: "Best topology preservation"
+      rank_metrics: [val_cldice, ccdice, junction_f1]
+    - name: champion_overlap
+      description: "Best voxel overlap"
+      rank_metrics: [val_dice, nsd]
+    - name: champion_balanced
+      description: "Best overall (rank-aggregate)"
+      rank_metrics: [val_dice, val_cldice, val_masd]
+statistical_testing:
+  bootstrap_n: 10000
+  ci_level: 0.95
+  correction: holm_bonferroni
+  effect_size: cohens_d

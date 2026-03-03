@@ -1,17 +1,12 @@
+# @package _global_
+defaults:
+  - override /checkpoint: lightweight
+
 experiment_name: dynunet_e2e_debug
 model: dynunet
 losses:
   - cbdice_cldice
-compute: gpu_low
-data_dir: data/raw/minivess
-num_folds: 3
 max_epochs: 10
-seed: 42
-split_mode: file
-splits_file: configs/splits/3fold_seed42.json
-debug: false
-memory_limit_gb: 24
-monitor_interval: 10
 checkpoint:
   tracked_metrics:
     - name: val_loss

@@ -1,0 +1,43 @@
+# @package _global_
+experiment_name: dynunet_graph_topology_debug
+model: dynunet
+model_family: dynunet
+losses:
+  - dice_ce
+  - cbdice_cldice
+  - graph_topology
+  - skeleton_recall
+  - betti_matching
+max_epochs: 6
+monitor_interval: 5
+volume_indices: [0, 1, 2, 3, 4, 5]
+checkpoint:
+  tracked_metrics:
+    - name: val_loss
+      direction: minimize
+      patience: 30
+    - name: val_dice
+      direction: maximize
+      patience: 30
+    - name: val_cldice
+      direction: maximize
+      patience: 30
+    - name: val_compound_nsd_cldice
+      direction: maximize
+      patience: 30
+  primary_metric: val_compound_nsd_cldice
+  min_delta: 0.0001
+  min_epochs: 1
+  save_last: true
+  save_history: false
+topology_metrics:
+  compute_every_n_epochs: 3
+  metrics:
+    - nsd
+    - hd95
+    - ccdice
+    - betti_error_beta0
+    - junction_f1
+    - apls
+    - skeleton_recall_metric
+    - bdr
