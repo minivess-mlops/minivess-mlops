@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
-
-import yaml
 
 
 def _load_config() -> dict[str, Any]:
-    config_path = Path("configs/experiments/dynunet_tffm_ablation.yaml")
-    with config_path.open(encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    from minivess.config.compose import compose_experiment_config
+
+    return compose_experiment_config(experiment_name="dynunet_tffm_ablation")
 
 
 class TestTFFMConfig:

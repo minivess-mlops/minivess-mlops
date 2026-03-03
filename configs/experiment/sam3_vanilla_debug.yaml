@@ -1,0 +1,22 @@
+# @package _global_
+defaults:
+  - override /model: sam3_vanilla
+  - override /checkpoint: lightweight
+
+experiment_name: sam3_vanilla_debug
+model: sam3_vanilla
+model_family: sam3_vanilla
+losses:
+  - dice_ce
+compute: cpu
+debug: false
+max_epochs: 6
+architecture_params:
+  backbone: vit_32l
+  input_size: 1008
+  embed_dim: 1024
+  pretrained: false
+notes: >
+  SAM3 V1 debug: Vanilla SAM3 ViT-32L, dice_ce, 3 folds x 6 epochs.
+  Short validation run to verify SAM3 backbone + decoder pipeline integrity.
+  Go/No-Go Gate G1: DSC >= 0.10 or abandon SAM.

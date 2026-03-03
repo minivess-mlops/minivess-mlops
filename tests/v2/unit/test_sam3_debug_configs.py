@@ -16,34 +16,29 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-CONFIGS_DIR = PROJECT_ROOT / "configs" / "experiments"
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
-
-VANILLA_CONFIG = CONFIGS_DIR / "sam3_vanilla_debug.yaml"
-TOPOLORA_CONFIG = CONFIGS_DIR / "sam3_topolora_debug.yaml"
-HYBRID_CONFIG = CONFIGS_DIR / "sam3_hybrid_debug.yaml"
 RUNNER_SCRIPT = SCRIPTS_DIR / "run_sam3_debug_experiment.py"
 
 
-def _load_yaml(path: Path) -> dict[str, Any]:
-    """Helper: load YAML config from path."""
-    assert path.exists(), f"Config not found: {path}"
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+def _load_config(experiment_name: str) -> dict[str, Any]:
+    """Helper: load experiment config via Hydra compose."""
+    from minivess.config.compose import compose_experiment_config
+
+    return compose_experiment_config(experiment_name=experiment_name)
 
 
 class TestSam3VanillaDebugConfig:
-    """Validate sam3_vanilla_debug.yaml structure and values."""
+    """Validate sam3_vanilla_debug config structure and values."""
 
     @pytest.fixture()
     def config(self) -> dict[str, Any]:
-        return _load_yaml(VANILLA_CONFIG)
+        return _load_config("sam3_vanilla_debug")
 
     def test_loads_without_error(self) -> None:
-        """Config loads from YAML without error."""
-        cfg = _load_yaml(VANILLA_CONFIG)
+        """Config loads via Hydra compose without error."""
+        cfg = _load_config("sam3_vanilla_debug")
         assert isinstance(cfg, dict)
 
     def test_experiment_name(self, config: dict[str, Any]) -> None:
@@ -112,15 +107,15 @@ class TestSam3VanillaDebugConfig:
 
 
 class TestSam3TopoLoRADebugConfig:
-    """Validate sam3_topolora_debug.yaml structure and values."""
+    """Validate sam3_topolora_debug config structure and values."""
 
     @pytest.fixture()
     def config(self) -> dict[str, Any]:
-        return _load_yaml(TOPOLORA_CONFIG)
+        return _load_config("sam3_topolora_debug")
 
     def test_loads_without_error(self) -> None:
-        """Config loads from YAML without error."""
-        cfg = _load_yaml(TOPOLORA_CONFIG)
+        """Config loads via Hydra compose without error."""
+        cfg = _load_config("sam3_topolora_debug")
         assert isinstance(cfg, dict)
 
     def test_experiment_name(self, config: dict[str, Any]) -> None:
@@ -174,15 +169,15 @@ class TestSam3TopoLoRADebugConfig:
 
 
 class TestSam3HybridDebugConfig:
-    """Validate sam3_hybrid_debug.yaml structure and values."""
+    """Validate sam3_hybrid_debug config structure and values."""
 
     @pytest.fixture()
     def config(self) -> dict[str, Any]:
-        return _load_yaml(HYBRID_CONFIG)
+        return _load_config("sam3_hybrid_debug")
 
     def test_loads_without_error(self) -> None:
-        """Config loads from YAML without error."""
-        cfg = _load_yaml(HYBRID_CONFIG)
+        """Config loads via Hydra compose without error."""
+        cfg = _load_config("sam3_hybrid_debug")
         assert isinstance(cfg, dict)
 
     def test_experiment_name(self, config: dict[str, Any]) -> None:

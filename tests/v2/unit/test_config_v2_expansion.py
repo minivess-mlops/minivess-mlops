@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
-import yaml
 
 from minivess.pipeline.loss_functions import build_loss_function
 
 
 @pytest.fixture()
 def experiment_config():
-    """Load the v2 experiment config."""
-    config_path = Path("configs/experiments/dynunet_losses.yaml")
-    with config_path.open(encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    """Load the dynunet_losses experiment config via Hydra compose."""
+    from minivess.config.compose import compose_experiment_config
+
+    return compose_experiment_config(experiment_name="dynunet_losses")
 
 
 class TestConfigV2Expansion:
@@ -25,10 +22,10 @@ class TestConfigV2Expansion:
         assert len(metrics) == 6
 
     def test_primary_metric_is_compound(self, experiment_config):
-        """Primary metric must be val_compound_masd_cldice."""
+        """Primary metric must be val_compound_nsd_cldice (updated from masd-based compound)."""
         assert (
             experiment_config["checkpoint"]["primary_metric"]
-            == "val_compound_masd_cldice"
+            == "val_compound_nsd_cldice"
         )
 
     def test_cbdice_cldice_in_loss_list(self, experiment_config):
@@ -54,7 +51,7 @@ class TestConfigV2Expansion:
             "val_f1_foreground",
             "val_cldice",
             "val_masd",
-            "val_compound_masd_cldice",
+            "val_compound_nsd_cldice",
         }
         assert names == expected
 

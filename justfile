@@ -85,6 +85,30 @@ build-flows:
 serve:
     uv run bentoml serve src/minivess/serving/service.py
 
+# ---------------------------------------------------------------------------
+# Experiments (Hydra composition)
+# ---------------------------------------------------------------------------
+
+# Run experiment by name (Hydra composition)
+experiment NAME:
+    uv run python scripts/run_experiment.py --experiment {{NAME}}
+
+# Dry run experiment (validate only)
+experiment-dry NAME:
+    uv run python scripts/run_experiment.py --experiment {{NAME}} --dry-run
+
+# VesselFM zero-shot evaluation
+vesselfm-zeroshot:
+    uv run python scripts/run_experiment.py --experiment vesselfm_zeroshot
+
+# VesselFM fine-tuning
+vesselfm-finetune:
+    uv run python scripts/run_experiment.py --experiment vesselfm_finetune
+
+# DynUNet loss variation (Hydra)
+dynunet-losses:
+    uv run python scripts/run_experiment.py --experiment dynunet_losses
+
 # Clean build artifacts
 clean:
     find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

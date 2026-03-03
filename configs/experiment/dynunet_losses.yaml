@@ -1,0 +1,10 @@
+# @package _global_
+# Delta-only: overrides base.yaml defaults
+
+experiment_name: dynunet_loss_variation_v2
+model: dynunet
+losses:
+  - dice_ce
+  - cbdice
+  - dice_ce_cldice
+  - cbdice_cldice

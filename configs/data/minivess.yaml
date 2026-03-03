@@ -1,0 +1,7 @@
+# MiniVess dataset defaults.
+# 70 volumes, XY=512x512, Z=5-110 slices, ~4.5 GB at native resolution.
+
+data_dir: data/raw/minivess
+split_mode: file
+splits_file: configs/splits/3fold_seed42.json
+num_folds: 3

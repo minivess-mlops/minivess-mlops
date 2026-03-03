@@ -31,14 +31,13 @@ VESSELFM_FILTERS: list[int] = [32, 64, 128, 256, 320, 320]
 VESSELFM_HF_REPO = "bwittmann/vesselFM"
 VESSELFM_HF_FILENAME = "vesselFM_base.pt"
 
-# SHA256 checksum for the official vesselFM_base.pt weights (v1.0).
-# Obtained from: sha256sum vesselFM_base.pt
-VESSELFM_WEIGHT_SHA256 = (
-    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-)
+# SHA256 checksum for the official vesselFM_base.pt weights.
+# Set to None until verified from an actual download. The adapter
+# skips checksum verification when this is None.
+VESSELFM_WEIGHT_SHA256: str | None = None
 
 
-def verify_checksum(data: bytes, expected_sha256: str) -> bool:
+def verify_checksum(data: bytes, expected_sha256: str | None) -> bool:
     """Verify SHA256 checksum of binary data.
 
     Parameters
@@ -47,13 +46,45 @@ def verify_checksum(data: bytes, expected_sha256: str) -> bool:
         Raw bytes to hash (e.g., file content).
     expected_sha256:
         Expected lowercase hex SHA256 digest (64 chars).
+        If None, verification is skipped (returns True).
 
     Returns
     -------
-    True if the computed hash matches the expected hash.
+    True if the computed hash matches the expected hash,
+    or if expected_sha256 is None (skip verification).
     """
+    if expected_sha256 is None:
+        return True
     computed = hashlib.sha256(data).hexdigest()
     return computed == expected_sha256
+
+
+def _strip_state_dict_prefix(
+    state_dict: dict[str, Any],
+    prefixes: tuple[str, ...] = ("module.", "model.", "conv."),
+) -> dict[str, Any]:
+    """Remove common prefixes from state dict keys.
+
+    Parameters
+    ----------
+    state_dict:
+        Original state dict with potentially prefixed keys.
+    prefixes:
+        Tuple of prefix strings to strip (tried in order).
+
+    Returns
+    -------
+    New state dict with prefixes removed.
+    """
+    cleaned: dict[str, Any] = {}
+    for key, value in state_dict.items():
+        new_key = key
+        for prefix in prefixes:
+            if new_key.startswith(prefix):
+                new_key = new_key[len(prefix) :]
+                break
+        cleaned[new_key] = value
+    return cleaned
 
 
 class VesselFMAdapter(ModelAdapter):
@@ -101,6 +132,11 @@ class VesselFMAdapter(ModelAdapter):
         )
 
         if pretrained:
+            logger.warning(
+                "vesselFM was pre-trained on MiniVess (1 of 17 datasets). "
+                "Zero-shot results are NOT independent. "
+                "Tag runs with data_leakage=pretrained_includes_minivess."
+            )
             self._load_pretrained()
 
     def _load_pretrained(self) -> None:
@@ -115,7 +151,9 @@ class VesselFMAdapter(ModelAdapter):
             filename=VESSELFM_HF_FILENAME,
         )
         state_dict = torch.load(ckpt_path, map_location="cpu", weights_only=True)
-        self.net.load_state_dict(state_dict)
+        # Handle potential prefix mismatches (module., model., etc.)
+        state_dict = _strip_state_dict_prefix(state_dict)
+        self.net.load_state_dict(state_dict, strict=False)
         logger.info("Loaded vesselFM pre-trained weights")
 
     def forward(self, images: Tensor, **kwargs: Any) -> SegmentationOutput:

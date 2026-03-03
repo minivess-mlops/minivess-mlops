@@ -1,0 +1,20 @@
+# Lightweight checkpoint config — fewer metrics, lower patience.
+# Used for debug runs, SAM3 experiments, and zero-shot evaluation.
+
+checkpoint:
+  tracked_metrics:
+    - name: val_loss
+      direction: minimize
+      patience: 15
+    - name: val_dice
+      direction: maximize
+      patience: 15
+    - name: val_cldice
+      direction: maximize
+      patience: 15
+  early_stopping_strategy: all
+  primary_metric: val_loss
+  min_delta: 1.0e-4
+  min_epochs: 5
+  save_last: true
+  save_history: true

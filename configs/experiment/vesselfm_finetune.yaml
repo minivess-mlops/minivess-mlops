@@ -1,0 +1,21 @@
+# @package _global_
+defaults:
+  - override /model: vesselfm
+  - override /checkpoint: standard
+
+experiment_name: vesselfm_finetune_v1
+model: vesselfm
+model_family: vesselfm
+max_epochs: 50
+losses:
+  - cbdice_cldice
+architecture_params:
+  pretrained: true
+  normalization: percentile
+  percentile_lower: 1.0
+  percentile_upper: 99.0
+tags:
+  data_leakage: pretrained_includes_minivess
+notes: >
+  VesselFM fine-tuning with cbdice_cldice loss.
+  Pre-trained weights from HuggingFace bwittmann/vesselFM.

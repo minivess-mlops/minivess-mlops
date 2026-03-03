@@ -15,19 +15,18 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-CONFIG_PATH = PROJECT_ROOT / "configs" / "experiments" / "dynunet_e2e_debug.yaml"
 
 
 class TestDebugExperimentConfig:
-    """Validate dynunet_e2e_debug.yaml structure and values."""
+    """Validate dynunet_e2e_debug composed config structure and values."""
 
     @pytest.fixture()
     def config(self) -> dict[str, Any]:
-        assert CONFIG_PATH.exists(), f"Config not found: {CONFIG_PATH}"
-        return yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+        from minivess.config.compose import compose_experiment_config
+
+        return compose_experiment_config(experiment_name="dynunet_e2e_debug")
 
     def test_experiment_name_has_debug_suffix(self, config: dict[str, Any]) -> None:
         assert config["experiment_name"].endswith("_debug")

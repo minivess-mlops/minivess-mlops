@@ -103,13 +103,13 @@ class TestHPOConfig:
     """Test HPO experiment config."""
 
     def test_hpo_config_yaml_exists(self) -> None:
-        path = PROJECT_ROOT / "configs" / "experiments" / "hpo_dynunet_example.yaml"
+        path = PROJECT_ROOT / "configs" / "hpo" / "dynunet_example.yaml"
         assert path.exists()
 
     def test_hpo_config_valid(self) -> None:
         import yaml
 
-        path = PROJECT_ROOT / "configs" / "experiments" / "hpo_dynunet_example.yaml"
+        path = PROJECT_ROOT / "configs" / "hpo" / "dynunet_example.yaml"
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         assert "search_space" in data

@@ -132,7 +132,7 @@ def main() -> int:
             "Run training first:\n"
             "```bash\n"
             "uv run python scripts/run_experiment.py "
-            "--config configs/experiments/sam3_all_debug.yaml\n"
+            "--experiment sam3_vanilla_debug\n"
             "```"
         )
 

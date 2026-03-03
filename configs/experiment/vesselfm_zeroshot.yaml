@@ -1,0 +1,22 @@
+# @package _global_
+defaults:
+  - override /model: vesselfm
+  - override /checkpoint: lightweight
+
+experiment_name: vesselfm_zeroshot_eval
+model: vesselfm
+model_family: vesselfm
+max_epochs: 0
+losses:
+  - dice_ce
+architecture_params:
+  pretrained: true
+  normalization: percentile
+  percentile_lower: 1.0
+  percentile_upper: 99.0
+tags:
+  data_leakage: pretrained_includes_minivess
+  evaluation_mode: zero_shot
+notes: >
+  VesselFM zero-shot evaluation on MiniVess.
+  WARNING: VesselFM was pre-trained on MiniVess — not truly zero-shot.

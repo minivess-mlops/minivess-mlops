@@ -100,7 +100,7 @@ def main() -> int:
         logger.warning(
             "MLflow directory %s not found. "
             "Train models first with: uv run python scripts/run_experiment.py "
-            "--config configs/experiments/sam3_all_debug.yaml",
+            "--experiment sam3_vanilla_debug",
             args.mlruns_dir,
         )
         # Write placeholder status file

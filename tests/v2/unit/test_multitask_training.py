@@ -381,13 +381,9 @@ class TestMultitaskExperimentConfig:
     """Tests for multi-task experiment config (T10 — #237)."""
 
     def _load_config(self) -> dict[str, object]:
-        from pathlib import Path
+        from minivess.config.compose import compose_experiment_config
 
-        import yaml
-
-        config_path = Path("configs/experiments/dynunet_multitask_ablation.yaml")
-        with config_path.open(encoding="utf-8") as f:
-            return yaml.safe_load(f)
+        return compose_experiment_config(experiment_name="dynunet_multitask_ablation")
 
     def test_multitask_config_loads(self) -> None:
         """YAML config loads without error."""
@@ -412,4 +408,4 @@ class TestMultitaskExperimentConfig:
     def test_multitask_config_gpu_low_compute(self) -> None:
         """Respects 8GB VRAM budget."""
         config = self._load_config()
-        assert config["compute_profile"] == "gpu_low"
+        assert config.get("compute", config.get("compute_profile")) == "gpu_low"

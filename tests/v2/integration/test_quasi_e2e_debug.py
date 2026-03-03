@@ -20,7 +20,6 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-import yaml
 
 from minivess.config.experiment_naming import (
     is_debug_experiment,
@@ -45,21 +44,24 @@ from minivess.pipeline.evaluation import FoldResult
 from minivess.serving.api_models import SegmentationResponse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DEBUG_CONFIG_PATH = PROJECT_ROOT / "configs" / "experiments" / "dynunet_e2e_debug.yaml"
 
 
 class TestDebugConfigIntegration:
     """Verify debug config is well-formed and naming is enforced."""
 
     def test_debug_config_name_validation(self) -> None:
-        config = yaml.safe_load(DEBUG_CONFIG_PATH.read_text(encoding="utf-8"))
+        from minivess.config.compose import compose_experiment_config
+
+        config = compose_experiment_config(experiment_name="dynunet_e2e_debug")
         name = config["experiment_name"]
         epochs = config["max_epochs"]
         assert is_debug_experiment(name)
         assert validate_debug_experiment_name(name, max_epochs=epochs) == name
 
     def test_debug_config_rejects_bad_name(self) -> None:
-        config = yaml.safe_load(DEBUG_CONFIG_PATH.read_text(encoding="utf-8"))
+        from minivess.config.compose import compose_experiment_config
+
+        config = compose_experiment_config(experiment_name="dynunet_e2e_debug")
         epochs = config["max_epochs"]
         with pytest.raises(ValueError, match="_debug"):
             validate_debug_experiment_name("bad_experiment", max_epochs=epochs)

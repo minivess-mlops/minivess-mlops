@@ -4,7 +4,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ModelFamily(StrEnum):
@@ -62,6 +62,24 @@ class DataConfig(BaseModel):
     pin_memory: bool = True
     prefetch_factor: int = Field(default=2, ge=1)
 
+    # Normalization method — 'zscore' (default) or 'percentile' (for VesselFM etc.)
+    normalization: str = Field(
+        default="zscore",
+        description="Normalization method: 'zscore' or 'percentile'",
+    )
+    percentile_lower: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=100.0,
+        description="Lower percentile for percentile normalization",
+    )
+    percentile_upper: float = Field(
+        default=99.0,
+        ge=0.0,
+        le=100.0,
+        description="Upper percentile for percentile normalization",
+    )
+
     # Disconnect-to-Connect augmentation (pre-crop topology augmentation)
     d2c_enabled: bool = Field(
         default=False,
@@ -88,6 +106,25 @@ class DataConfig(BaseModel):
     @classmethod
     def validate_path(cls, v: Path) -> Path:
         return Path(v)
+
+    @field_validator("normalization")
+    @classmethod
+    def validate_normalization(cls, v: str) -> str:
+        allowed = {"zscore", "percentile"}
+        if v not in allowed:
+            msg = f"normalization must be one of {allowed}, got '{v}'"
+            raise ValueError(msg)
+        return v
+
+    @model_validator(mode="after")
+    def validate_percentile_order(self) -> DataConfig:
+        if self.percentile_lower >= self.percentile_upper:
+            msg = (
+                f"percentile_lower ({self.percentile_lower}) must be less than "
+                f"percentile_upper ({self.percentile_upper})"
+            )
+            raise ValueError(msg)
+        return self
 
 
 class ModelConfig(BaseModel):

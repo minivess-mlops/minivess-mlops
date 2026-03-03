@@ -1,0 +1,11 @@
+# SAM3 Hybrid Fusion model config group entry.
+model: sam3_hybrid
+model_family: sam3_hybrid
+architecture_params:
+  backbone: vit_32l
+  input_size: 1008
+  embed_dim: 1024
+  pretrained: false
+  lora_rank: 16
+  lora_alpha: 32.0
+  gated_fusion: true

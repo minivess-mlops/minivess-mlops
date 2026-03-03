@@ -1,0 +1,19 @@
+# @package _global_
+defaults:
+  - override /model: sam3_vanilla
+  - override /checkpoint: lightweight
+
+experiment_name: sam3_vanilla_baseline
+model: sam3_vanilla
+model_family: sam3_vanilla
+losses:
+  - dice_ce
+max_epochs: 50
+architecture_params:
+  backbone: vit_32l
+  input_size: 1008
+  embed_dim: 1024
+  pretrained: false
+notes: >
+  SAM3 V1: Vanilla SAM3 ViT-32L (frozen encoder + trainable decoder).
+  Slice-by-slice 2D inference with dice_ce loss.

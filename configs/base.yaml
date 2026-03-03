@@ -1,0 +1,23 @@
+# Hydra composition root — defaults list for MinIVess MLOps v2.
+#
+# This is the entry point for Hydra Compose API. Config groups are
+# resolved from the defaults list below. Experiments override via
+# configs/experiment/<name>.yaml using `@package _global_`.
+#
+# Usage:
+#   compose_experiment_config(experiment_name="dynunet_losses")
+#   → merges base.yaml + data/minivess.yaml + training/default.yaml
+#     + checkpoint/standard.yaml + experiment/dynunet_losses.yaml
+
+defaults:
+  - data: minivess
+  - model: dynunet
+  - training: default
+  - checkpoint: standard
+  - _self_
+
+# Overridable at experiment level
+experiment_name: unnamed
+losses:
+  - dice_ce
+debug: false

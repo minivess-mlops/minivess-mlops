@@ -1,16 +1,16 @@
 #!/usr/bin/env python
-"""Single-command YAML-driven experiment runner.
+"""Single-command Hydra-composed experiment runner.
 
 Usage::
 
-    # Run experiment from YAML config
-    uv run python scripts/run_experiment.py --config configs/experiments/dynunet_losses.yaml
+    # Run experiment via Hydra composition
+    uv run python scripts/run_experiment.py --experiment dynunet_losses
 
     # Dry run (validate only, no training)
-    uv run python scripts/run_experiment.py --config configs/experiments/dynunet_losses.yaml --dry-run
+    uv run python scripts/run_experiment.py --experiment dynunet_losses --dry-run
 
     # Debug mode override
-    uv run python scripts/run_experiment.py --config configs/experiments/dynunet_losses.yaml --debug
+    uv run python scripts/run_experiment.py --experiment dynunet_losses --debug
 """
 
 from __future__ import annotations
@@ -116,6 +116,16 @@ def load_experiment_config(yaml_path: Path) -> dict[str, Any]:
         )
 
     return config
+
+
+def is_zero_shot(config: dict[str, Any]) -> bool:
+    """Check if the experiment config requests zero-shot evaluation.
+
+    Returns
+    -------
+    True if ``max_epochs`` is explicitly set to 0.
+    """
+    return config.get("max_epochs", -1) == 0
 
 
 def detect_experiment_mode(config: dict[str, Any]) -> str:
@@ -498,15 +508,15 @@ def run_conditions_mode(config: dict[str, Any]) -> dict[str, Any]:
 def _build_arg_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
-        description="YAML-driven experiment runner for MinIVess MLOps",
+        description="Hydra-composed experiment runner for MinIVess MLOps",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument(
-        "--config",
-        type=Path,
+        "--experiment",
+        type=str,
         required=True,
-        help="Path to experiment YAML config file",
+        help="Experiment name for Hydra composition (e.g., 'dynunet_losses')",
     )
     parser.add_argument(
         "--dry-run",
@@ -541,8 +551,10 @@ def main(argv: list[str] | None = None) -> None:
     parser = _build_arg_parser()
     args = parser.parse_args(argv)
 
-    # Load and validate config
-    config = load_experiment_config(args.config)
+    # Load config via Hydra composition
+    from minivess.config.compose import compose_experiment_config
+
+    config = compose_experiment_config(experiment_name=args.experiment)
     logger.info("Loaded experiment config: %s", config.get("experiment_name"))
 
     # Apply CLI overrides
@@ -569,7 +581,19 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def _run_losses_mode(config: dict[str, Any]) -> None:
-    """Run legacy losses-based experiment (iterate over loss functions)."""
+    """Run legacy losses-based experiment (iterate over loss functions).
+
+    If ``max_epochs=0`` (zero-shot mode), training is skipped and only
+    evaluation runs. This is model-agnostic — any pretrained model can
+    use ``max_epochs=0`` for zero-shot evaluation.
+    """
+    if is_zero_shot(config):
+        logger.info(
+            "Zero-shot mode (max_epochs=0): skipping training, "
+            "evaluation-only mode. Use analysis flow for metrics."
+        )
+        return
+
     data_dir = Path(config.get("data_dir", "data/raw"))
     compute = config.get("compute", "cpu")
 

@@ -1,0 +1,10 @@
+# SAM3 TopoLoRA model config group entry.
+model: sam3_topolora
+model_family: sam3_topolora
+architecture_params:
+  backbone: vit_32l
+  input_size: 1008
+  embed_dim: 1024
+  pretrained: false
+  lora_rank: 16
+  lora_alpha: 32.0

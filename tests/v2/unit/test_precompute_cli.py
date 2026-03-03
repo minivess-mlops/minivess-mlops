@@ -84,15 +84,13 @@ class TestMainEntrypoint:
     """Test that the CLI main() function drives precomputation."""
 
     def test_main_calls_precompute(self, tmp_path: Path) -> None:
-        """main() loads config, discovers volumes, calls precompute."""
+        """main() loads config via compose, discovers volumes, calls precompute."""
         import sys
 
         sys.path.insert(0, "scripts")
-        # Create a minimal config pointing to tmp_path
-        import yaml
         from precompute_targets import main
 
-        config = {
+        mock_config: dict[str, Any] = {
             "experiment_name": "test",
             "conditions": [],
             "data_dir": str(tmp_path),
@@ -100,13 +98,17 @@ class TestMainEntrypoint:
                 {"name": "sdf", "suffix": "sdf", "compute_fn": "compute_sdf_from_mask"},
             ],
         }
-        config_path = tmp_path / "config.yaml"
-        config_path.write_text(yaml.dump(config), encoding="utf-8")
 
         # No labelsTr/ → no volumes → precompute should be called with empty list
-        with patch(
-            "precompute_targets.precompute_auxiliary_targets"
-        ) as mock_precompute:
+        with (
+            patch(
+                "minivess.config.compose.compose_experiment_config",
+                return_value=mock_config,
+            ),
+            patch(
+                "precompute_targets.precompute_auxiliary_targets",
+            ) as mock_precompute,
+        ):
             mock_precompute.return_value = {"computed": 0, "skipped": 0}
-            main(["--config", str(config_path)])
+            main(["--experiment", "test_experiment"])
             mock_precompute.assert_called_once()

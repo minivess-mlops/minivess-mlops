@@ -1,0 +1,43 @@
+# @package _global_
+# Pre-PR validation: ALL 18 loss functions (6 epochs, subset volumes)
+experiment_name: dynunet_all_losses_debug
+model: dynunet
+losses:
+  # LIBRARY (4)
+  - dice_ce
+  - dice
+  - focal
+  - cldice
+  # LIBRARY-COMPOUND (2)
+  - dice_ce_cldice
+  - cbdice_cldice
+  # HYBRID (3)
+  - skeleton_recall
+  - cape
+  - betti_matching
+  # EXPERIMENTAL (9)
+  - cb_dice
+  - cbdice
+  - centerline_ce
+  - warp
+  - topo
+  - betti
+  - full_topo
+  - graph_topology
+  - toposeg
+max_epochs: 6
+monitor_interval: 5
+volume_indices: [0, 1, 2, 3, 4, 5]
+checkpoint:
+  tracked_metrics:
+    - name: val_loss
+      direction: minimize
+      patience: 30
+    - name: val_dice
+      direction: maximize
+      patience: 30
+  primary_metric: val_loss
+  min_delta: 0.0001
+  min_epochs: 1
+  save_last: true
+  save_history: false

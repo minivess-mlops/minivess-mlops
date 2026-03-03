@@ -1,0 +1,36 @@
+# @package _global_
+experiment_name: dynunet_tffm_ablation_v1
+model: dynunet
+loss: cbdice_cldice
+checkpoint:
+  primary_metric: val_compound_nsd_cldice
+  tracked_metrics:
+    - name: val_loss
+      direction: minimize
+      patience: 20
+    - name: val_dice
+      direction: maximize
+      patience: 20
+    - name: val_cldice
+      direction: maximize
+      patience: 20
+    - name: val_compound_nsd_cldice
+      direction: maximize
+      patience: 20
+  early_stopping_strategy: all
+  min_delta: 1.0e-4
+  min_epochs: 10
+  save_last: true
+  save_history: true
+conditions:
+  - name: baseline
+    description: "Standard DynUNet + cbdice_cldice"
+    wrappers: []
+  - name: tffm
+    description: "DynUNet + TFFMWrapper + cbdice_cldice"
+    wrappers:
+      - type: tffm
+        grid_size: 8
+        hidden_dim: 32
+        n_heads: 4
+        k_neighbors: 8

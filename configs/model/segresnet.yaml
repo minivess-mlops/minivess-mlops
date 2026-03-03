@@ -1,0 +1,2 @@
+# SegResNet model config group entry.
+model: segresnet

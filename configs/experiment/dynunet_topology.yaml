@@ -1,0 +1,18 @@
+# @package _global_
+# Delta-only: overrides base.yaml defaults
+
+experiment_name: dynunet_topology_v1
+model: dynunet
+losses:
+  - cbdice_cldice
+  - skeleton_recall
+  - cape
+  - dice_ce
+topology_metrics:
+  compute_every_n_epochs: 5
+  metrics:
+    - nsd
+    - hd95
+    - ccdice
+    - betti_error_beta0
+    - junction_f1

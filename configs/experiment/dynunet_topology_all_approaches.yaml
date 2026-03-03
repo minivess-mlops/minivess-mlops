@@ -1,19 +1,28 @@
-# Combined topology-aware segmentation experiment config (T14 — #241)
-# 6 conditions x 3 folds x 100 epochs = 18 runs
-# Tests Predictions P1, P3, P4 head-to-head
-
+# @package _global_
 experiment_name: dynunet_topology_all_approaches_v1
-model_family: dynunet
+model: dynunet
 loss: cbdice_cldice
-compute_profile: gpu_low  # 8 GB VRAM budget
-
 folds: 3
-epochs: 100
-early_stopping:
-  patience: 20
-  metric: val_compound_nsd_cldice
-
-# All 8 metrics per run: DSC, HD95, ASSD, NSD, clDice, BE_0, BE_1, Junction F1
+checkpoint:
+  primary_metric: val_compound_nsd_cldice
+  tracked_metrics:
+    - name: val_loss
+      direction: minimize
+      patience: 20
+    - name: val_dice
+      direction: maximize
+      patience: 20
+    - name: val_cldice
+      direction: maximize
+      patience: 20
+    - name: val_compound_nsd_cldice
+      direction: maximize
+      patience: 20
+  early_stopping_strategy: all
+  min_delta: 1.0e-4
+  min_epochs: 10
+  save_last: true
+  save_history: true
 metrics:
   - dice
   - hd95
@@ -23,22 +32,16 @@ metrics:
   - betti_error_0
   - betti_error_1
   - junction_f1
-
 conditions:
-  # Condition 1: Baseline
   - name: baseline
-    description: "DynUNet + cbdice_cldice (retrained baseline)"
+    description: "DynUNet + cbdice_cldice (baseline)"
     wrappers: []
     d2c_enabled: false
-
-  # Condition 2: D2C only (tests P1 augmentation effect)
   - name: d2c_only
     description: "DynUNet + cbdice_cldice + D2C augmentation"
     wrappers: []
     d2c_enabled: true
     d2c_probability: 0.3
-
-  # Condition 3: Multi-task (tests P3 multi-task effect)
   - name: multitask
     description: "DynUNet + multi-task (mask + SDF + centerline)"
     wrappers:
@@ -57,8 +60,6 @@ conditions:
             weight: 0.25
             gt_key: centerline_dist
     d2c_enabled: false
-
-  # Condition 4: Multi-task + D2C (tests P1+P3 combined)
   - name: multitask_d2c
     description: "DynUNet + multi-task + D2C augmentation"
     wrappers:
@@ -78,8 +79,6 @@ conditions:
             gt_key: centerline_dist
     d2c_enabled: true
     d2c_probability: 0.3
-
-  # Condition 5: TFFM only (tests P4 graph attention effect)
   - name: tffm
     description: "DynUNet + TFFM wrapper + cbdice_cldice"
     wrappers:
@@ -89,8 +88,6 @@ conditions:
         n_heads: 4
         k_neighbors: 8
     d2c_enabled: false
-
-  # Condition 6: Full pipeline (all three approaches combined)
   - name: full_pipeline
     description: "DynUNet + TFFM + multi-task + D2C (all approaches)"
     wrappers:
@@ -115,7 +112,6 @@ conditions:
             gt_key: centerline_dist
     d2c_enabled: true
     d2c_probability: 0.3
-
 precompute_targets:
   - name: sdf
     suffix: sdf

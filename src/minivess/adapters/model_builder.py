@@ -106,7 +106,8 @@ def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     if family == ModelFamily.VESSEL_FM:
         from minivess.adapters.vesselfm import VesselFMAdapter
 
-        return VesselFMAdapter(config)
+        pretrained = config.architecture_params.get("pretrained", False)
+        return VesselFMAdapter(config, pretrained=pretrained)
 
     if family == ModelFamily.COMMA_MAMBA:
         from minivess.adapters.comma import CommaAdapter

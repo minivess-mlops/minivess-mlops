@@ -1,0 +1,8 @@
+# SAM3 Vanilla model config group entry.
+model: sam3_vanilla
+model_family: sam3_vanilla
+architecture_params:
+  backbone: vit_32l
+  input_size: 1008
+  embed_dim: 1024
+  pretrained: false

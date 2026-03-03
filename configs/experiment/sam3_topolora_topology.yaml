@@ -1,0 +1,24 @@
+# @package _global_
+defaults:
+  - override /model: sam3_topolora
+  - override /checkpoint: lightweight
+
+experiment_name: sam3_topolora_topology
+model: sam3_topolora
+model_family: sam3_topolora
+losses:
+  - cbdice_cldice
+max_epochs: 50
+architecture_params:
+  backbone: vit_32l
+  input_size: 1008
+  embed_dim: 1024
+  pretrained: false
+  lora_rank: 16
+  lora_alpha: 32.0
+  lora_dropout: 0.1
+  lora_targets:
+    - mlp.lin1
+    - mlp.lin2
+notes: >
+  SAM3 V2: TopoLoRA — SAM3 ViT-32L + LoRA (r=16, alpha=32) + cbdice_cldice loss.

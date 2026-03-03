@@ -1,31 +1,10 @@
-# Debug topology-aware segmentation config — 6 conditions x 3 folds x 6 epochs
-# Quick validation that the full pipeline runs end-to-end with real data.
-# Production config: dynunet_topology_all_approaches.yaml (100 epochs)
-
+# @package _global_
 experiment_name: dynunet_topology_all_approaches_debug
-model_family: dynunet
+model: dynunet
 loss: cbdice_cldice
 compute: cpu
-data_dir: data/raw/minivess
-num_folds: 3
-max_epochs: 6
-seed: 42
 debug: true
-split_mode: file
-splits_file: configs/splits/3fold_seed42.json
-memory_limit_gb: 24
-monitor_interval: 10
-
-metrics:
-  - dice
-  - hd95
-  - assd
-  - nsd
-  - cldice
-  - betti_error_0
-  - betti_error_1
-  - junction_f1
-
+max_epochs: 6
 checkpoint:
   tracked_metrics:
     - name: val_loss
@@ -43,22 +22,25 @@ checkpoint:
   min_epochs: 2
   save_last: true
   save_history: false
-
+metrics:
+  - dice
+  - hd95
+  - assd
+  - nsd
+  - cldice
+  - betti_error_0
+  - betti_error_1
+  - junction_f1
 conditions:
-  # Condition 1: Baseline (no wrappers)
   - name: baseline
     description: "DynUNet + cbdice_cldice baseline"
     wrappers: []
     d2c_enabled: false
-
-  # Condition 2: D2C augmentation only
   - name: d2c_only
     description: "DynUNet + D2C augmentation"
     wrappers: []
     d2c_enabled: true
     d2c_probability: 0.3
-
-  # Condition 3: Multi-task heads (SDF + centreline)
   - name: multitask
     description: "DynUNet + multi-task (SDF + centerline)"
     wrappers:
@@ -77,8 +59,6 @@ conditions:
             weight: 0.25
             gt_key: centerline_dist
     d2c_enabled: false
-
-  # Condition 4: Multi-task + D2C
   - name: multitask_d2c
     description: "DynUNet + multi-task + D2C"
     wrappers:
@@ -98,8 +78,6 @@ conditions:
             gt_key: centerline_dist
     d2c_enabled: true
     d2c_probability: 0.3
-
-  # Condition 5: TFFM graph attention (reduced params for debug)
   - name: tffm
     description: "DynUNet + TFFM wrapper"
     wrappers:
@@ -109,8 +87,6 @@ conditions:
         n_heads: 2
         k_neighbors: 4
     d2c_enabled: false
-
-  # Condition 6: Full pipeline (TFFM + multi-task + D2C)
   - name: full_pipeline
     description: "DynUNet + TFFM + multi-task + D2C (all combined)"
     wrappers:
@@ -135,7 +111,6 @@ conditions:
             gt_key: centerline_dist
     d2c_enabled: true
     d2c_probability: 0.3
-
 precompute_targets:
   - name: sdf
     suffix: sdf
