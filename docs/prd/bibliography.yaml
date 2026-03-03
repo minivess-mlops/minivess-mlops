@@ -13,7 +13,7 @@
 # 4. Sub-citations: when ingesting a paper, also add papers IT cites that
 #    are relevant to other decision nodes.
 #
-# last_updated: 2026-03-02  (Test-dataset: +3 entries — holroyd2025tubenet, haftjavaherian2019deepvess, teikari2016vesselnn)
+# last_updated: 2026-03-04  (Advanced segmentation double-check: +17 entries from 44+ paper review)
 
 bibliography:
 
@@ -3643,3 +3643,214 @@ bibliography:
     topics:
       - data_management_strategy
       - segmentation_models
+
+  # ============================================================
+  # Advanced Segmentation Double-Check (2026-03-04)
+  # ============================================================
+
+  - citation_key: borges2025sdc
+    inline_citation: "Borges et al. (2025)"
+    authors: "Borges, B. L. C., Pacheco, B. M., & Silva, D."
+    year: 2025
+    title: "Soft Dice Confidence: A Near-Optimal Confidence Estimator for Selective Prediction in Semantic Segmentation"
+    venue: "arXiv preprint arXiv:2402.10665v4"
+    doi: ""
+    url: "https://arxiv.org/abs/2402.10665"
+    evidence_type: method
+    topics:
+      - uncertainty_quantification
+      - deployment_strategy
+
+  - citation_key: mossina2024conformal_seg
+    inline_citation: "Mossina et al. (2024)"
+    authors: "Mossina, L., Dalmau, O., & Andeol, L."
+    year: 2024
+    title: "Conformal Semantic Image Segmentation: Post-hoc Quantification of Predictive Uncertainty"
+    venue: "CVPR 2024 Workshop"
+    doi: ""
+    url: "https://github.com/deel-ai-papers/conformal-segmentation"
+    evidence_type: method
+    topics:
+      - uncertainty_quantification
+      - conformal_prediction
+
+  - citation_key: volpi2023reliability
+    inline_citation: "Volpi et al. (2023)"
+    authors: "Volpi, R., Torr, P. H. S., Rogez, G., & de Jorge, P."
+    year: 2023
+    title: "Reliability in Semantic Segmentation: Are We on the Right Track?"
+    venue: "CVPR 2023"
+    doi: ""
+    url: "https://github.com/naver/relis"
+    evidence_type: benchmark
+    topics:
+      - uncertainty_quantification
+      - calibration
+
+  - citation_key: yang2025medsamix
+    inline_citation: "Yang et al. (2025)"
+    authors: "Yang, Y., Su, G., Hu, J., Sammarco, F., Geiping, J., & Wolfers, T."
+    year: 2025
+    title: "MedSAMix: A Training-Free Model Merging Approach for Medical Image Segmentation"
+    venue: "arXiv preprint arXiv:2508.11032"
+    doi: ""
+    url: "https://arxiv.org/abs/2508.11032"
+    evidence_type: method
+    topics:
+      - ensemble_strategy
+      - foundation_model_integration
+
+  - citation_key: wang2025mamba_analysis
+    inline_citation: "Wang et al. (2025)"
+    authors: "Wang, C., Xie, Y., Chen, Q., Zhou, Y., & Wu, Q."
+    year: 2025
+    title: "A Comprehensive Analysis of Mamba for 3D Volumetric Medical Image Segmentation"
+    venue: "arXiv preprint arXiv:2503.19308"
+    doi: ""
+    url: "https://arxiv.org/abs/2503.19308"
+    evidence_type: benchmark
+    topics:
+      - segmentation_models
+      - foundation_model_integration
+
+  - citation_key: lu2025spw_loss
+    inline_citation: "Lu (2025)"
+    authors: "Lu, R."
+    year: 2025
+    title: "Steerable Pyramid Weighted Loss: Multi-Scale Adaptive Weighting for Semantic Segmentation"
+    venue: "arXiv preprint arXiv:2503.06604"
+    doi: ""
+    url: "https://arxiv.org/abs/2503.06604"
+    evidence_type: method
+    topics:
+      - loss_functions
+      - segmentation_models
+
+  - citation_key: li2026dacal
+    inline_citation: "Li et al. (2026)"
+    authors: "Li, W., Sun, R., Li, Z., Chen, Y., & Zhang, T."
+    year: 2026
+    title: "DA-Cal: Towards Cross-Domain Calibration in Semantic Segmentation"
+    venue: "arXiv preprint arXiv:2602.08060"
+    doi: ""
+    url: "https://arxiv.org/abs/2602.08060"
+    evidence_type: method
+    topics:
+      - calibration
+      - uncertainty_quantification
+
+  - citation_key: vakalopoulou2026cact
+    inline_citation: "Vakalopoulou et al. (2026)"
+    authors: "Marani, B.-E., Silva-Rodriguez, J., Ben Ayed, I., Vakalopoulou, M., Christodoulidis, S., & Dolz, J."
+    year: 2026
+    title: "Class Adaptive Conformal Training"
+    venue: "arXiv preprint arXiv:2601.09522"
+    doi: ""
+    url: "https://arxiv.org/abs/2601.09522"
+    evidence_type: method
+    topics:
+      - conformal_prediction
+      - uncertainty_quantification
+
+  - citation_key: specktor_fadida2025segqc
+    inline_citation: "Specktor-Fadida et al. (2025)"
+    authors: "Specktor-Fadida, B., Ben-Sira, L., Ben-Bashat, D., & Joskowicz, L."
+    year: 2025
+    title: "SegQC: A segmentation network-based framework for multi-metric segmentation quality control"
+    venue: "Medical Image Analysis, Vol. 103"
+    doi: ""
+    url: ""
+    evidence_type: method
+    topics:
+      - deployment_strategy
+      - uncertainty_quantification
+
+  - citation_key: zuluaga2026trustworthy
+    inline_citation: "Zuluaga et al. (2026)"
+    authors: "Zuluaga, M. A., Isgum, I., & Bach Cuadra, M."
+    year: 2026
+    title: "Trustworthy AI in medical image analysis: A unified perspective built on robustness and layers of trust"
+    venue: "Current Opinion in Biomedical Engineering, Vol. 37"
+    doi: ""
+    url: ""
+    evidence_type: survey
+    topics:
+      - uncertainty_quantification
+      - deployment_strategy
+      - calibration
+
+  - citation_key: ribeiro2025flow_ssn
+    inline_citation: "Ribeiro et al. (2025)"
+    authors: "Ribeiro, F. D. S., Todd, O., Jones, C., Kori, A., Mehta, R., & Glocker, B."
+    year: 2025
+    title: "Flow Stochastic Segmentation Networks"
+    venue: "arXiv preprint arXiv:2507.18838"
+    doi: ""
+    url: "https://github.com/biomedia-mira/flow-ssn"
+    evidence_type: method
+    topics:
+      - uncertainty_quantification
+      - segmentation_models
+
+  - citation_key: koleilat2026medclipseg
+    inline_citation: "Koleilat et al. (2026)"
+    authors: "Koleilat, T., Barile, B., Asgariandehkordi, H., Manzari, O. N., Xiao, Y., & Rivaz, H."
+    year: 2026
+    title: "MedCLIPSeg: Probabilistic Vision-Language Adaptation for Data-Efficient and Generalizable Medical Image Segmentation"
+    venue: "arXiv preprint arXiv:2602.04023"
+    doi: ""
+    url: "https://tahakoleilat.github.io/MedCLIPSeg"
+    evidence_type: method
+    topics:
+      - foundation_model_integration
+      - uncertainty_quantification
+
+  - citation_key: kervadec2023dice_gradient
+    inline_citation: "Kervadec & de Bruijne (2023)"
+    authors: "Kervadec, H., & de Bruijne, M."
+    year: 2023
+    title: "On the Dice Loss Gradient and the Ways to Mimic It"
+    venue: "arXiv preprint arXiv:2304.03191"
+    doi: ""
+    url: "https://arxiv.org/abs/2304.03191"
+    evidence_type: theory
+    topics:
+      - loss_functions
+
+  - citation_key: wang2025vastsd
+    inline_citation: "Wang et al. (2025)"
+    authors: "Wang, Z., Yi, R., Wen, X., Zhu, C., & Xu, K."
+    year: 2025
+    title: "VasTSD: Learning 3D Vascular Tree-state Space Diffusion Model for Angiography Synthesis"
+    venue: "CVPR 2025"
+    doi: ""
+    url: ""
+    evidence_type: method
+    topics:
+      - data_management_strategy
+      - segmentation_models
+
+  - citation_key: yu2025crisp_sam2
+    inline_citation: "Yu et al. (2025)"
+    authors: "Yu, X., Wang, C., Jin, H., Elazab, A., Jia, G., Wan, X., Zou, C., & Ge, R."
+    year: 2025
+    title: "CRISP-SAM2: SAM2 with Cross-Modal Interaction and Semantic Prompting for Multi-Organ Segmentation"
+    venue: "ACM MM 2025"
+    doi: ""
+    url: "https://github.com/YU-deep/CRISP_SAM2"
+    evidence_type: method
+    topics:
+      - foundation_model_integration
+      - segmentation_models
+
+  - citation_key: giron2026prefect_slurm
+    inline_citation: "Giron (2026)"
+    authors: "Giron, L."
+    year: 2026
+    title: "Fast Workflows, Subflows, and SLURM at Scale with Prefect"
+    venue: "Medium blog post"
+    doi: ""
+    url: ""
+    evidence_type: method
+    topics:
+      - pipeline_orchestration

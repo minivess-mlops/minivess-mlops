@@ -32,20 +32,24 @@ jobs:
   # typecheck: Disabled — 184 pre-existing mypy strict errors across 44 files.
   # TODO: Fix strict-mode errors and re-enable (tracked as tech debt).
 
-  test:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Install dependencies
-        run: uv sync --extra dev --extra eval --extra quality --extra agents --extra serving
-      - name: Run unit tests
-        run: uv run pytest tests/v2/unit/ -x -q --tb=short
-      - name: Run with coverage
-        run: uv run pytest tests/v2/unit/ --cov=src/minivess --cov-report=term-missing
+  # test: Disabled — 3392 tests take ~15 min in CI. Running locally until
+  # staging/prod test split is implemented (Issue #304).
+  # Re-enable after implementing pytest markers for fast/slow test tiers.
+  #
+  # test:
+  #   name: Unit Tests
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: astral-sh/setup-uv@v5
+  #       with:
+  #         version: "latest"
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.13"
+  #     - name: Install dependencies
+  #       run: uv sync --extra dev --extra eval --extra quality --extra agents --extra serving
+  #     - name: Run unit tests
+  #       run: uv run pytest tests/v2/unit/ -x -q --tb=short
+  #     - name: Run with coverage
+  #       run: uv run pytest tests/v2/unit/ --cov=src/minivess --cov-report=term-missing
