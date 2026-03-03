@@ -1,0 +1,14 @@
+# MinIVess MLOps v2 — Deployment Flow (Flow 4)
+# BentoML, ONNX Runtime, model promotion.
+#
+# Build: docker build -t minivess-deploy:latest -f deployment/docker/Dockerfile.deploy .
+
+FROM minivess-base:latest
+
+LABEL flow="deploy"
+LABEL description="Deployment flow — BentoML, ONNX export, model promotion"
+
+# Copy scripts
+COPY --chown=minivess:minivess scripts/ scripts/
+
+CMD ["python", "-m", "minivess.orchestration.flows.deploy_flow"]

@@ -1,0 +1,43 @@
+# MinIVess MLOps v2 — Model Training Flow (Flow 2)
+# CUDA-enabled: PyTorch, MONAI, Optuna, full ML stack.
+#
+# Build: docker build -t minivess-train:latest -f deployment/docker/Dockerfile.train .
+# Requires: NVIDIA Container Toolkit for GPU access
+
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS train-base
+
+LABEL flow="train"
+LABEL description="Model training flow — CUDA, PyTorch, MONAI, Optuna"
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 \
+    python3.12-venv \
+    python3-pip \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash minivess
+USER minivess
+WORKDIR /app
+
+# Copy project metadata
+COPY --chown=minivess:minivess pyproject.toml uv.lock* ./
+
+# Install full ML dependencies
+RUN uv sync --no-dev --no-install-project 2>/dev/null || true
+
+# Copy source code and scripts
+COPY --chown=minivess:minivess src/ src/
+COPY --chown=minivess:minivess configs/ configs/
+COPY --chown=minivess:minivess scripts/ scripts/
+
+ENV PYTHONPATH=/app/src
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "-m", "minivess.orchestration.flows.train_flow"]

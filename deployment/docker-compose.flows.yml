@@ -1,0 +1,133 @@
+# MinIVess MLOps v2 — Per-Flow Docker Compose
+#
+# Each Prefect flow runs in its own container with independent
+# scaling and resource management. Flows communicate via MLflow
+# artifacts — no shared filesystem or direct function calls.
+#
+# Usage:
+#   docker compose -f deployment/docker-compose.flows.yml build
+#   docker compose -f deployment/docker-compose.flows.yml up data
+#   docker compose -f deployment/docker-compose.flows.yml up train
+#
+# Prerequisites: Run `docker compose -f deployment/docker-compose.yml --profile dev up`
+# first to start PostgreSQL, MinIO, and MLflow.
+
+x-common-env: &common-env
+  MLFLOW_TRACKING_URI: http://minivess-mlflow:5000
+  PREFECT_API_URL: http://minivess-prefect:4200/api
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minivess}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minivess_secret}
+  MLFLOW_S3_ENDPOINT_URL: http://minivess-minio:9000
+
+x-common-labels: &common-labels
+  labels:
+    project: minivess-mlops
+    managed-by: docker-compose
+
+services:
+  # Flow 1: Data Engineering
+  data:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.data
+    image: minivess-data:latest
+    container_name: minivess-flow-data
+    environment:
+      <<: *common-env
+      FLOW_NAME: data
+    volumes:
+      - data_cache:/app/data
+    networks:
+      - minivess
+    <<: *common-labels
+
+  # Flow 2: Model Training (GPU)
+  train:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.train
+    image: minivess-train:latest
+    container_name: minivess-flow-train
+    environment:
+      <<: *common-env
+      FLOW_NAME: train
+    volumes:
+      - data_cache:/app/data:ro
+      - checkpoint_cache:/app/checkpoints
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - minivess
+    <<: *common-labels
+
+  # Flow 3: Model Analysis
+  analyze:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.analyze
+    image: minivess-analyze:latest
+    container_name: minivess-flow-analyze
+    environment:
+      <<: *common-env
+      FLOW_NAME: analyze
+    networks:
+      - minivess
+    <<: *common-labels
+
+  # Flow 4: Deployment
+  deploy:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.deploy
+    image: minivess-deploy:latest
+    container_name: minivess-flow-deploy
+    environment:
+      <<: *common-env
+      FLOW_NAME: deploy
+    networks:
+      - minivess
+    <<: *common-labels
+
+  # Flow 5: Dashboard & Reporting
+  dashboard:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.dashboard
+    image: minivess-dashboard:latest
+    container_name: minivess-flow-dashboard
+    environment:
+      <<: *common-env
+      FLOW_NAME: dashboard
+    networks:
+      - minivess
+    <<: *common-labels
+
+  # Flow 6: QA
+  qa:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.qa
+    image: minivess-qa:latest
+    container_name: minivess-flow-qa
+    environment:
+      <<: *common-env
+      FLOW_NAME: qa
+    networks:
+      - minivess
+    <<: *common-labels
+
+volumes:
+  data_cache:
+    driver: local
+  checkpoint_cache:
+    driver: local
+
+networks:
+  minivess:
+    external: true
+    name: minivess-network

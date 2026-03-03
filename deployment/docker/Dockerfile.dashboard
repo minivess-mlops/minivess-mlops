@@ -1,0 +1,14 @@
+# MinIVess MLOps v2 — Dashboard Flow (Flow 5)
+# Paper figures, Parquet export, drift reports.
+#
+# Build: docker build -t minivess-dashboard:latest -f deployment/docker/Dockerfile.dashboard .
+
+FROM minivess-base:latest
+
+LABEL flow="dashboard"
+LABEL description="Dashboard flow — paper figures, Parquet export, drift reports"
+
+# Copy scripts
+COPY --chown=minivess:minivess scripts/ scripts/
+
+CMD ["python", "-m", "minivess.orchestration.flows.dashboard_flow"]
