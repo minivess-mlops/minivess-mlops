@@ -106,6 +106,60 @@ services:
     <<: *common-labels
 
   # ===========================================================================
+  # Prefect Server + Workers (workflow orchestration)
+  # ===========================================================================
+
+  prefect-server:
+    image: prefecthq/prefect:3-python3.12
+    container_name: minivess-prefect
+    profiles: ["dev", "monitoring", "full"]
+    command: prefect server start --host 0.0.0.0
+    environment:
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://${POSTGRES_USER:-minivess}:${POSTGRES_PASSWORD:-minivess_secret}@postgres:5432/prefect
+    ports:
+      - "${PREFECT_PORT:-4200}:4200"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    <<: *common-labels
+
+  prefect-worker-cpu:
+    image: prefecthq/prefect:3-python3.12
+    container_name: minivess-prefect-worker-cpu
+    profiles: ["monitoring", "full"]
+    command: prefect worker start --pool cpu-pool --type docker
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+    depends_on:
+      - prefect-server
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    <<: *common-labels
+
+  prefect-worker-gpu:
+    image: prefecthq/prefect:3-python3.12
+    container_name: minivess-prefect-worker-gpu
+    profiles: ["full"]
+    command: prefect worker start --pool gpu-pool --type docker
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+    depends_on:
+      - prefect-server
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    <<: *common-labels
+
+  # ===========================================================================
   # Profile: monitoring — Observability stack (+4 services, ~8 GB RAM total)
   # ===========================================================================
 

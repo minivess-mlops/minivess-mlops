@@ -78,3 +78,20 @@ else:
     def get_run_logger() -> logging.Logger:
         """Return a stdlib logger as a stand-in for Prefect's run logger."""
         return logging.getLogger("minivess.orchestration")
+
+
+def get_work_pool(flow_name: str) -> str:
+    """Get the work pool name for a given flow.
+
+    Parameters
+    ----------
+    flow_name:
+        Name of the flow (e.g., 'train', 'data').
+
+    Returns
+    -------
+    Work pool name string (e.g., 'gpu-pool', 'cpu-pool').
+    """
+    from minivess.orchestration.deployments import FLOW_WORK_POOL_MAP
+
+    return FLOW_WORK_POOL_MAP.get(flow_name, "cpu-pool")
