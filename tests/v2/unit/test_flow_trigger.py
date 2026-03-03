@@ -57,17 +57,17 @@ class TestFlowTriggerResult:
 class TestPipelineTriggerChain:
     """PipelineTriggerChain orchestrates flow execution."""
 
-    def test_chain_has_5_flows(self) -> None:
+    def test_chain_has_6_flows(self) -> None:
         from minivess.orchestration.trigger import PipelineTriggerChain
 
         chain = PipelineTriggerChain()
-        assert len(chain.flow_names) == 5
+        assert len(chain.flow_names) == 6
 
     def test_chain_order(self) -> None:
         from minivess.orchestration.trigger import PipelineTriggerChain
 
         chain = PipelineTriggerChain()
-        expected = ["data", "train", "analyze", "deploy", "dashboard"]
+        expected = ["data", "train", "analyze", "deploy", "dashboard", "qa"]
         assert chain.flow_names == expected
 
     def test_chain_skips_disabled_flows(self) -> None:
@@ -102,7 +102,7 @@ class TestPipelineTriggerChain:
         assert data_result.status == "failed"
         # Subsequent core flows should be skipped
         for r in results[1:]:
-            if r.flow_name != "dashboard":
+            if r.flow_name not in ("dashboard", "qa"):
                 assert r.status == "skipped", f"{r.flow_name} should be skipped"
 
     def test_chain_dashboard_runs_despite_core_failure(self) -> None:

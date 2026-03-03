@@ -65,6 +65,22 @@ train-debug *ARGS:
 train-sweep *ARGS:
     uv run python scripts/train.py --compute gpu_low --loss dice_ce,dice_ce_cldice,cbdice {{ARGS}}
 
+# Launch SkyPilot training job
+sky-train CONFIG="deployment/skypilot/train_generic.yaml" *ARGS:
+    sky jobs launch {{CONFIG}} {{ARGS}}
+
+# Launch SkyPilot HPO sweep
+sky-sweep CONFIG="deployment/skypilot/train_hpo_sweep.yaml" *ARGS:
+    sky jobs launch {{CONFIG}} {{ARGS}}
+
+# Show SkyPilot job status
+sky-status:
+    sky jobs queue
+
+# Build per-flow Docker images
+build-flows:
+    docker compose -f deployment/docker-compose.flows.yml build
+
 # Run serving (placeholder)
 serve:
     uv run bentoml serve src/minivess/serving/service.py

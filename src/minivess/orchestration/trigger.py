@@ -134,14 +134,14 @@ class PipelineTriggerChain:
         results = chain.run_chain(trigger_source="manual")
     """
 
-    # Default flow order
-    _DEFAULT_FLOWS = ["data", "train", "analyze", "deploy", "dashboard"]
+    # Default flow order (7 flows: 4 core + dashboard best-effort + QA)
+    _DEFAULT_FLOWS = ["data", "train", "analyze", "deploy", "dashboard", "qa"]
 
     def __init__(self) -> None:
         self._flows: dict[str, _FlowEntry] = {}
         # Initialize with default flow names (no-op callables)
         for name in self._DEFAULT_FLOWS:
-            is_core = name != "dashboard"
+            is_core = name not in ("dashboard", "qa")
             self._flows[name] = _FlowEntry(name=name, callable=_noop, is_core=is_core)
 
     @property

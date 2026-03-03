@@ -1,0 +1,53 @@
+# MinIVess MLOps — Prefect Work Pool Configuration
+#
+# Work pools define resource-grouped execution environments:
+# - cpu-pool: For data, analyze, deploy, dashboard, QA flows
+# - gpu-pool: For training flows (NVIDIA GPU required)
+# - sky-pool: For SkyPilot-managed cloud/on-prem jobs (Phase 3)
+#
+# Apply with: prefect work-pool create --type docker <pool-name>
+
+work_pools:
+  - name: cpu-pool
+    type: docker
+    description: "CPU-only work pool for data/analyze/deploy/dashboard/QA flows"
+    base_job_template:
+      variables:
+        image: "minivess-base:latest"
+        auto_remove: true
+        networks:
+          - minivess-network
+        environment:
+          MLFLOW_TRACKING_URI: "http://minivess-mlflow:5000"
+          PREFECT_API_URL: "http://minivess-prefect:4200/api"
+    concurrency_limit: 4
+
+  - name: gpu-pool
+    type: docker
+    description: "GPU work pool for training flows (NVIDIA Container Toolkit required)"
+    base_job_template:
+      variables:
+        image: "minivess-train:latest"
+        auto_remove: true
+        networks:
+          - minivess-network
+        device_requests:
+          - driver: nvidia
+            count: -1
+            capabilities:
+              - - gpu
+        environment:
+          MLFLOW_TRACKING_URI: "http://minivess-mlflow:5000"
+          PREFECT_API_URL: "http://minivess-prefect:4200/api"
+          NVIDIA_VISIBLE_DEVICES: all
+    concurrency_limit: 1
+
+  - name: sky-pool
+    type: process
+    description: "SkyPilot-managed pool for cloud/on-prem GPU jobs (Phase 3)"
+    base_job_template:
+      variables:
+        working_dir: "."
+        env:
+          MLFLOW_TRACKING_URI: "http://mlflow:5000"
+    concurrency_limit: 8

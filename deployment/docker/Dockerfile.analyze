@@ -1,0 +1,14 @@
+# MinIVess MLOps v2 — Model Analysis Flow (Flow 3)
+# Evaluation, ensembling, DuckDB analytics.
+#
+# Build: docker build -t minivess-analyze:latest -f deployment/docker/Dockerfile.analyze .
+
+FROM minivess-base:latest
+
+LABEL flow="analyze"
+LABEL description="Model analysis flow — evaluation, ensembling, DuckDB"
+
+# Copy scripts
+COPY --chown=minivess:minivess scripts/ scripts/
+
+CMD ["python", "-m", "minivess.orchestration.flows.analysis_flow"]

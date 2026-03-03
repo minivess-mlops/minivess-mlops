@@ -1,0 +1,19 @@
+# MinIVess MLOps v2 — Data Engineering Flow (Flow 1)
+# DVC, data validation, profiling.
+#
+# Build: docker build -t minivess-data:latest -f deployment/docker/Dockerfile.data .
+
+FROM minivess-base:latest
+
+LABEL flow="data"
+LABEL description="Data engineering flow — DVC, validation, profiling"
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+USER minivess
+
+# Copy scripts
+COPY --chown=minivess:minivess scripts/ scripts/
+
+CMD ["python", "-m", "minivess.orchestration.flows.data_flow"]

@@ -1,0 +1,40 @@
+# MinIVess MLOps — SkyPilot HPO Sweep Task
+#
+# Launches multiple training jobs for hyperparameter optimization.
+# Uses SkyPilot managed jobs for fault-tolerant parallel execution.
+#
+# Launch: sky jobs launch deployment/skypilot/train_hpo_sweep.yaml
+
+name: minivess-hpo-sweep
+
+resources:
+  accelerators: A100:1
+  use_spot: true
+  disk_size: 100
+
+file_mounts:
+  /data:
+    source: s3://minivess-data/raw
+    mode: COPY
+
+  /checkpoints:
+    name: minivess-hpo-checkpoints
+    store: s3
+    mode: MOUNT
+
+envs:
+  MLFLOW_TRACKING_URI: http://mlflow:5000
+  HPO_CONFIG: configs/experiments/hpo_dynunet_example.yaml
+  N_TRIALS: 20
+  STUDY_NAME: minivess_hpo
+
+setup: |
+  pip install uv
+  cd /app && uv sync --no-dev
+
+run: |
+  cd /app
+  uv run python scripts/run_hpo.py \
+    --config ${HPO_CONFIG} \
+    --n-trials ${N_TRIALS} \
+    --study-name ${STUDY_NAME}
