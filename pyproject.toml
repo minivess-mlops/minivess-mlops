@@ -246,8 +246,10 @@ module = [
     "minivess.orchestration.flows.*",
     "minivess.orchestration.deploy_flow",
     "minivess.serving.bento_service",
+    "minivess.serving.mlflow_wrapper",
 ]
 disallow_untyped_decorators = false
+warn_unused_ignores = false
 
 [[tool.mypy.overrides]]
 module = ["scripts.*", "train_monitored", "run_experiment"]

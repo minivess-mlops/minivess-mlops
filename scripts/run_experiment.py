@@ -23,6 +23,16 @@ from typing import Any
 
 import yaml
 
+# Attempt to import ModelFamily for early validation.
+# Graceful degradation: if minivess package is unavailable, validation is skipped.
+try:
+    from minivess.config.models import ModelFamily as _ModelFamily
+
+    _HAS_MODEL_FAMILY = True
+except (ImportError, ModuleNotFoundError):
+    _HAS_MODEL_FAMILY = False
+    _ModelFamily = None  # type: ignore[assignment,misc]
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
@@ -144,6 +154,92 @@ def extract_extra_target_keys(condition: dict[str, Any]) -> list[str]:
                 if gt_key:
                     keys.append(gt_key)
     return keys
+
+
+def _build_train_argv(
+    config: dict[str, Any],
+    profile: dict[str, Any],
+    loss_name: str,
+    experiment_name: str,
+) -> list[str]:
+    """Build the argv list passed to train_monitored.py (or train.py).
+
+    This is the single canonical place where all CLI flags for the training
+    sub-process are assembled.  Both ``_run_losses_mode()`` and
+    ``_run_single_condition()`` delegate here so that new flags (e.g.
+    ``--model-family``) are automatically propagated to every execution path.
+
+    Parameters
+    ----------
+    config:
+        Full experiment configuration dict.
+    profile:
+        Resolved compute profile dict (output of :func:`resolve_compute_profile`).
+    loss_name:
+        Loss function name for this particular training run.
+    experiment_name:
+        MLflow experiment name for this run.
+
+    Returns
+    -------
+    list[str]
+        Ordered list of CLI argument strings suitable for ``parse_args()``.
+
+    Raises
+    ------
+    ValueError
+        If ``model_family`` in *config* is not a valid :class:`ModelFamily` value.
+    """
+    compute = config.get("compute", "cpu")
+    data_dir = Path(config.get("data_dir", "data/raw"))
+
+    # Resolve splits file path (relative to project root)
+    splits_file = config.get("splits_file")
+    if splits_file:
+        splits_path = PROJECT_ROOT / splits_file
+    else:
+        _seed = config.get("seed", 42)
+        _nfolds = config.get("num_folds", 3)
+        splits_path = (
+            PROJECT_ROOT / "configs" / "splits" / f"{_nfolds}fold_seed{_seed}.json"
+        )
+
+    # Validate and resolve model_family early — fail loudly for typos.
+    model_family_raw: str = config.get("model_family") or "dynunet"
+    if _HAS_MODEL_FAMILY and _ModelFamily is not None:
+        try:
+            _ModelFamily(model_family_raw)
+        except ValueError as exc:
+            valid = [e.value for e in _ModelFamily]  # type: ignore[union-attr]
+            raise ValueError(
+                f"Invalid model_family {model_family_raw!r}. Valid values: {valid}"
+            ) from exc
+    model_family_str: str = model_family_raw
+
+    argv: list[str] = [
+        "--compute",
+        profile["name"] if compute != "auto" else "cpu",
+        "--model-family",
+        model_family_str,
+        "--loss",
+        loss_name,
+        "--data-dir",
+        str(data_dir),
+        "--num-folds",
+        str(config.get("num_folds", 3)),
+        "--seed",
+        str(config.get("seed", 42)),
+        "--experiment-name",
+        experiment_name,
+        "--splits-file",
+        str(splits_path),
+    ]
+    if config.get("max_epochs") is not None:
+        argv += ["--max-epochs", str(config["max_epochs"])]
+    if config.get("debug", False):
+        argv.append("--debug")
+
+    return argv
 
 
 def resolve_compute_profile(
@@ -306,41 +402,15 @@ def _run_single_condition(
 
     cond_name = condition["name"]
     loss_name = config.get("loss", "cbdice_cldice")
-    data_dir = Path(config.get("data_dir", "data/raw"))
 
     logger.info("Launching condition: %s (loss=%s)", cond_name, loss_name)
 
-    compute = config.get("compute", "cpu")
-    splits_file = config.get("splits_file")
-    if splits_file:
-        splits_path = PROJECT_ROOT / splits_file
-    else:
-        _seed = config.get("seed", 42)
-        _nfolds = config.get("num_folds", 3)
-        splits_path = (
-            PROJECT_ROOT / "configs" / "splits" / f"{_nfolds}fold_seed{_seed}.json"
-        )
-
-    train_argv = [
-        "--compute",
-        profile["name"] if compute != "auto" else "cpu",
-        "--loss",
+    train_argv = _build_train_argv(
+        config,
+        profile,
         loss_name,
-        "--data-dir",
-        str(data_dir),
-        "--num-folds",
-        str(config.get("num_folds", 3)),
-        "--seed",
-        str(config.get("seed", 42)),
-        "--experiment-name",
         f"{config.get('experiment_name', 'experiment')}_{cond_name}",
-        "--splits-file",
-        str(splits_path),
-    ]
-    if config.get("max_epochs") is not None:
-        train_argv += ["--max-epochs", str(config["max_epochs"])]
-    if config.get("debug", False):
-        train_argv.append("--debug")
+    )
 
     try:
         train_script = PROJECT_ROOT / "scripts" / "train_monitored.py"
@@ -527,37 +597,12 @@ def _run_losses_mode(config: dict[str, Any]) -> None:
 
     for loss in losses:
         logger.info("Launching training run: loss=%s", loss)
-        # Resolve splits file path (relative to project root)
-        splits_file = config.get("splits_file")
-        if splits_file:
-            splits_path = PROJECT_ROOT / splits_file
-        else:
-            _seed = config.get("seed", 42)
-            _nfolds = config.get("num_folds", 3)
-            splits_path = (
-                PROJECT_ROOT / "configs" / "splits" / f"{_nfolds}fold_seed{_seed}.json"
-            )
-
-        train_argv = [
-            "--compute",
-            profile["name"] if compute != "auto" else "cpu",
-            "--loss",
+        train_argv = _build_train_argv(
+            config,
+            profile,
             loss,
-            "--data-dir",
-            str(data_dir),
-            "--num-folds",
-            str(config.get("num_folds", 3)),
-            "--seed",
-            str(config.get("seed", 42)),
-            "--experiment-name",
             config.get("experiment_name", "experiment"),
-            "--splits-file",
-            str(splits_path),
-        ]
-        if config.get("max_epochs") is not None:
-            train_argv += ["--max-epochs", str(config["max_epochs"])]
-        if config.get("debug", False):
-            train_argv.append("--debug")
+        )
 
         try:
             # Import and run the memory-safe monitored training script

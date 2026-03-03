@@ -62,15 +62,20 @@ def export_champion_to_onnx(
 
     dummy_input = torch.randn(*input_shape)
 
-    torch.onnx.export(
-        model,
-        dummy_input,
-        str(onnx_path),
-        opset_version=opset_version,
-        input_names=["input"],
-        output_names=["output"],
-        dynamo=False,
-    )
+    # SAM3 adapters have custom export_onnx() (handles SegmentationOutput → logits)
+    model_family = (champion.model_config or {}).get("model_family", "")
+    if model_family.startswith("sam3_") and hasattr(model, "export_onnx"):
+        model.export_onnx(onnx_path, dummy_input)
+    else:
+        torch.onnx.export(
+            model,
+            dummy_input,
+            str(onnx_path),
+            opset_version=opset_version,
+            input_names=["input"],
+            output_names=["output"],
+            dynamo=False,
+        )
 
     logger.info(
         "Exported champion %s to ONNX: %s",
@@ -142,14 +147,22 @@ def validate_onnx_model(
 def _load_model_from_checkpoint(champion: ChampionModel) -> Any:
     """Load a PyTorch model from a champion checkpoint.
 
-    Attempts to reconstruct the DynUNet architecture from the state dict
-    when model config is not sufficient. Falls back to a simple Conv3d
-    for mock checkpoints.
+    Model-agnostic: uses ``model_family`` from MLflow params to dispatch
+    to the correct adapter via ``build_adapter()``. Falls back to DynUNet
+    state-dict inference for legacy checkpoints without model_family.
     """
     import torch
 
     assert champion.checkpoint_path is not None  # noqa: S101
 
+    model_config = champion.model_config or {}
+    model_family = model_config.get("model_family", "")
+
+    # Model-agnostic path: use build_adapter() + adapter.load_checkpoint()
+    if model_family:
+        return _load_via_adapter(champion, model_family)
+
+    # Legacy fallback: no model_family param → try DynUNet state dict inference
     checkpoint = torch.load(
         champion.checkpoint_path,
         map_location="cpu",
@@ -172,7 +185,6 @@ def _load_model_from_checkpoint(champion: ChampionModel) -> Any:
     # Strip common prefixes and try simple Conv3d (for mock checkpoints)
     import torch.nn as nn
 
-    model_config = champion.model_config or {}
     in_channels = int(model_config.get("in_channels", 1))
     out_channels = int(model_config.get("out_channels", 2))
 
@@ -180,6 +192,42 @@ def _load_model_from_checkpoint(champion: ChampionModel) -> Any:
     model = nn.Conv3d(in_channels, out_channels, kernel_size=1)
     model.load_state_dict(cleaned_state_dict)
     return model
+
+
+def _load_via_adapter(champion: ChampionModel, model_family: str) -> Any:
+    """Load any model from checkpoint using build_adapter().
+
+    Model-agnostic: dispatches on ``model_family`` to reconstruct the adapter,
+    then loads weights from the champion checkpoint.
+
+    Parameters
+    ----------
+    champion:
+        Champion model with checkpoint path and config.
+    model_family:
+        Model family string (e.g., dynunet, sam3_vanilla, sam3_topolora).
+    """
+    from minivess.adapters.model_builder import build_adapter
+    from minivess.config.models import ModelConfig, ModelFamily
+
+    model_config = champion.model_config or {}
+    config = ModelConfig(
+        family=ModelFamily(model_family),
+        name=model_family,
+        in_channels=int(model_config.get("in_channels", 1)),
+        out_channels=int(model_config.get("out_channels", 2)),
+    )
+
+    adapter = build_adapter(config)
+    assert champion.checkpoint_path is not None  # noqa: S101
+    adapter.load_checkpoint(champion.checkpoint_path)
+
+    logger.info(
+        "Loaded %s adapter from %s",
+        model_family,
+        champion.checkpoint_path,
+    )
+    return adapter
 
 
 def _load_dynunet_from_state_dict(

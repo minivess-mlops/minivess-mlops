@@ -1,0 +1,41 @@
+experiment_name: sam3_topolora_debug
+model_family: sam3_topolora
+model: sam3_topolora
+losses:
+  - cbdice_cldice
+compute: cpu
+data_dir: data/raw/minivess
+num_folds: 3
+max_epochs: 6
+seed: 42
+debug: false
+split_mode: file
+splits_file: configs/splits/3fold_seed42.json
+memory_limit_gb: 24
+monitor_interval: 10
+architecture_params:
+  backbone: vit_32l
+  input_size: 1008
+  embed_dim: 1024
+  pretrained: false
+  lora_rank: 16
+  lora_alpha: 32.0
+  lora_dropout: 0.1
+  lora_targets:
+    - mlp.lin1
+    - mlp.lin2
+checkpoint:
+  tracked_metrics:
+    - name: val_loss
+      direction: minimize
+      patience: 10
+  early_stopping_strategy: all
+  primary_metric: val_loss
+  min_delta: 1.0e-4
+  min_epochs: 2
+  save_last: true
+  save_history: false
+notes: >
+  SAM3 V2 debug: TopoLoRA SAM3 ViT-32L + LoRA (r=16, alpha=32) + cbdice_cldice.
+  Short validation run to verify LoRA wiring and topology loss integration.
+  Go/No-Go Gate G2: clDice improvement >= 2% over V1.

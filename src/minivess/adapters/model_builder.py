@@ -22,6 +22,39 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _sam3_package_available() -> bool:
+    """Check if SAM3 or compatible transformers is installed."""
+    try:
+        import sam3  # noqa: F401
+
+        return True
+    except ImportError:
+        pass
+    try:
+        from transformers import Sam3Model  # noqa: F401
+
+        return True
+    except (ImportError, AttributeError):
+        pass
+    return False
+
+
+def _auto_stub_sam3(config: ModelConfig, kwargs: dict[str, Any]) -> None:
+    """Auto-enable stub encoder when SAM3 package is unavailable or pretrained=false."""
+    if "use_stub" in kwargs:
+        return
+    pretrained = config.architecture_params.get("pretrained", True)
+    if not pretrained:
+        kwargs["use_stub"] = True
+        logger.info("SAM3 pretrained=false: using stub encoder (random weights)")
+    elif not _sam3_package_available():
+        kwargs["use_stub"] = True
+        logger.warning(
+            "SAM3 package not installed: falling back to stub encoder. "
+            "Install SAM3 for real pretrained weights."
+        )
+
+
 def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     """Build a ModelAdapter from a ModelConfig.
 
@@ -83,16 +116,19 @@ def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     if family == ModelFamily.SAM3_VANILLA:
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 
+        _auto_stub_sam3(config, kwargs)
         return Sam3VanillaAdapter(config, **kwargs)
 
     if family == ModelFamily.SAM3_TOPOLORA:
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
+        _auto_stub_sam3(config, kwargs)
         return Sam3TopoLoraAdapter(config, **kwargs)
 
     if family == ModelFamily.SAM3_HYBRID:
         from minivess.adapters.sam3_hybrid import Sam3HybridAdapter
 
+        _auto_stub_sam3(config, kwargs)
         return Sam3HybridAdapter(config, **kwargs)
 
     msg = (

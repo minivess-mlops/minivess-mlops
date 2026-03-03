@@ -81,14 +81,17 @@ class TestStubSam3Encoder:
         features = encoder(x)
         assert features.shape[1] == 1024
 
-    def test_stub_encoder_resize_to_1008(self) -> None:
+    def test_stub_encoder_native_resolution(self) -> None:
         from minivess.adapters.sam3_backbone import _StubSam3Encoder
 
         encoder = _StubSam3Encoder(embed_dim=1024)
-        # Non-1008 input: should handle gracefully
-        x = torch.randn(1, 3, 512, 512)
+        # Stub operates at native resolution (no 1008x1008 upscale)
+        x = torch.randn(1, 3, 56, 56)
         features = encoder(x)
         assert features.shape[1] == 1024
+        # 56 / 14 = 4 (native patch embedding stride)
+        assert features.shape[2] == 4
+        assert features.shape[3] == 4
 
 
 class TestSam3Backbone:

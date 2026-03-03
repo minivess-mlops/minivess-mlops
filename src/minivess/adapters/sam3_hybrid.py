@@ -30,6 +30,8 @@ from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, Segmentation
 from minivess.adapters.sam3_backbone import SAM3_FPN_DIM, SAM3_INPUT_SIZE, Sam3Backbone
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from minivess.config.models import ModelConfig
 
 logger = logging.getLogger(__name__)
@@ -90,7 +92,7 @@ class GatedFeatureFusion(nn.Module):  # type: ignore[misc]
         return f_3d + gate * projected
 
 
-class Sam3HybridAdapter(ModelAdapter):  # type: ignore[misc]
+class Sam3HybridAdapter(ModelAdapter):
     """Frozen SAM3 features + trainable DynUNet + gated fusion.
 
     Parameters
@@ -234,6 +236,52 @@ class Sam3HybridAdapter(ModelAdapter):  # type: ignore[misc]
             input_size=SAM3_INPUT_SIZE,
             fusion="gated_residual",
         )
+
+    def save_checkpoint(self, path: Path) -> None:
+        """Save adapter state dict (no self.net dependency)."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save({"model_state_dict": self.state_dict()}, path)
+
+    def load_checkpoint(self, path: Path) -> None:
+        """Load adapter state dict (no self.net dependency)."""
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+        if isinstance(payload, dict) and "model_state_dict" in payload:
+            self.load_state_dict(payload["model_state_dict"])
+        else:
+            self.load_state_dict(payload)
+
+    def export_onnx(self, path: Path, example_input: Tensor) -> None:
+        """Export adapter to ONNX (no self.net dependency).
+
+        Uses a thin wrapper to return raw logits tensor instead of
+        SegmentationOutput, which ONNX tracing cannot handle.
+        """
+        import warnings
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.eval()
+
+        class _LogitsWrapper(torch.nn.Module):  # type: ignore[misc]
+            def __init__(self, adapter: Sam3HybridAdapter) -> None:
+                super().__init__()
+                self.adapter = adapter
+
+            def forward(self, x: Tensor) -> Tensor:
+                return self.adapter(x).logits
+
+        wrapper = _LogitsWrapper(self)
+        wrapper.eval()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            torch.onnx.export(
+                wrapper,
+                example_input,
+                str(path),
+                input_names=["images"],
+                output_names=["logits"],
+                opset_version=17,
+                dynamo=False,
+            )
 
     def trainable_parameters(self) -> int:
         """Count trainable parameters (DynUNet + fusion)."""

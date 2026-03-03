@@ -1,18 +1,18 @@
-experiment_name: sam3_all_debug
+experiment_name: sam3_vanilla_debug
 model_family: sam3_vanilla
 model: sam3_vanilla
 losses:
   - dice_ce
 compute: cpu
 data_dir: data/raw/minivess
-num_folds: 2
-max_epochs: 1
+num_folds: 3
+max_epochs: 6
 seed: 42
+debug: false
 split_mode: file
 splits_file: configs/splits/3fold_seed42.json
-debug: true
 memory_limit_gb: 24
-monitor_interval: 30
+monitor_interval: 10
 architecture_params:
   backbone: vit_32l
   input_size: 1008
@@ -22,17 +22,14 @@ checkpoint:
   tracked_metrics:
     - name: val_loss
       direction: minimize
-      patience: 5
+      patience: 10
   early_stopping_strategy: all
   primary_metric: val_loss
   min_delta: 1.0e-4
-  min_epochs: 0
+  min_epochs: 2
   save_last: true
   save_history: false
 notes: >
-  LEGACY: Minimal smoke test config (vanilla only, 1 epoch, 2 folds).
-  For per-variant debug training, use the dedicated configs instead:
-    - sam3_vanilla_debug.yaml (3 folds x 6 epochs)
-    - sam3_topolora_debug.yaml (3 folds x 6 epochs)
-    - sam3_hybrid_debug.yaml (3 folds x 6 epochs)
-  Or run all 3 via: python scripts/run_sam3_debug_experiment.py
+  SAM3 V1 debug: Vanilla SAM3 ViT-32L, dice_ce, 3 folds x 6 epochs.
+  Short validation run to verify SAM3 backbone + decoder pipeline integrity.
+  Go/No-Go Gate G1: DSC >= 0.10 or abandon SAM.

@@ -50,7 +50,7 @@ import torch
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from minivess.adapters.dynunet import DynUNetAdapter
+from minivess.adapters.model_builder import build_adapter
 from minivess.config.compute_profiles import apply_profile, get_compute_profile
 from minivess.config.debug import (
     DEBUG_CACHE_RATE,
@@ -105,6 +105,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     # Training args (same as train.py)
     parser.add_argument("--compute", type=str, default="cpu")
+    parser.add_argument(
+        "--model-family",
+        type=str,
+        default="dynunet",
+        help="Model family name (e.g. dynunet, sam3_vanilla, sam3_topolora, sam3_hybrid)",
+    )
     parser.add_argument("--loss", type=str, default="cbdice_cldice")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
@@ -151,11 +157,24 @@ def _build_configs(
     """Build configuration objects with memory-safe overrides."""
     data_config = DataConfig(dataset_name="minivess", data_dir=args.data_dir)
     arch_params = getattr(args, "architecture_params", None) or {}
+
+    # Model-agnostic: use --model-family to dispatch to correct adapter
+    model_family_str = getattr(args, "model_family", "dynunet")
+    model_family = ModelFamily(model_family_str)
+
+    # Extract LoRA params from architecture_params if present (SAM3 TopoLoRA)
+    lora_rank = arch_params.pop("lora_rank", 16)
+    lora_alpha = arch_params.pop("lora_alpha", 32.0)
+    lora_dropout = arch_params.pop("lora_dropout", 0.1)
+
     model_config = ModelConfig(
-        family=ModelFamily.MONAI_DYNUNET,
-        name="dynunet",
+        family=model_family,
+        name=model_family_str,
         in_channels=1,
         out_channels=2,
+        lora_rank=lora_rank,
+        lora_alpha=lora_alpha,
+        lora_dropout=lora_dropout,
         architecture_params=arch_params,
     )
     training_config = TrainingConfig(
@@ -395,6 +414,7 @@ def run_fold_safe(
     log_model_info: bool = False,
     condition: dict[str, Any] | None = None,
     precomputed_dir: Path | None = None,
+    compute: str = "auto",
 ) -> dict:
     """Train and evaluate a single fold with memory-safe cache rates.
 
@@ -410,6 +430,9 @@ def run_fold_safe(
         and auxiliary targets are loaded into the data pipeline.
     precomputed_dir:
         Directory containing precomputed auxiliary NIfTI files.
+    compute:
+        Compute profile name (determines resource budget, not device).
+        Device is always auto-detected (CUDA if available, else CPU).
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     cond_name = condition["name"] if condition else "none"
@@ -509,8 +532,8 @@ def run_fold_safe(
         else None,
     )
 
-    # Build model
-    base_model = DynUNetAdapter(model_config)
+    # Build model — model-agnostic via build_adapter() factory
+    base_model = build_adapter(model_config)
 
     if condition and condition.get("wrappers"):
         from minivess.pipeline.condition_builder import build_condition_model
@@ -542,6 +565,11 @@ def run_fold_safe(
 
     # Build trainer — use sliding window inference for validation
     # because full 512x512xZ volumes don't fit in 8 GB VRAM
+    # SAM3 models need sw_batch_size=1 to avoid OOM during sliding window
+    # (each patch does slice-by-slice 1008x1008 processing)
+    _is_sam3 = model_config.family.value.startswith("sam3_")
+    _sw_bs = 1 if _is_sam3 else 4
+
     trainer = SegmentationTrainer(
         model,
         training_config,
@@ -550,6 +578,7 @@ def run_fold_safe(
         metrics=metrics,
         criterion=criterion,
         val_roi_size=data_config.patch_size,
+        sw_batch_size=_sw_bs,
     )
 
     # Create checkpoint directory
@@ -587,6 +616,7 @@ def run_fold_safe(
             roi_size=data_config.patch_size,
             num_classes=model_config.out_channels,
             overlap=0.25 if not debug else 0.0,
+            sw_batch_size=_sw_bs,
         )
 
         # MEMORY FIX: Rebuild val_loader with reduced cache for inference
@@ -886,6 +916,7 @@ def _run_experiment_inner(
                     log_model_info=(not _model_info_logged),
                     condition=getattr(args, "condition", None),
                     precomputed_dir=getattr(args, "precomputed_dir", None),
+                    compute=getattr(args, "compute", "auto"),
                 )
                 _model_info_logged = True
                 fold_results.append(fold_result)
