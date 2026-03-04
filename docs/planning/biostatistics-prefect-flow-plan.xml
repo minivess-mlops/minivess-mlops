@@ -1,0 +1,757 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Biostatistics Prefect Flow — Executable Implementation Plan
+  Issue: #340 | Branch: feat/flow-biostatistics
+  Source: docs/planning/biostatistics-prefect-flow.md (1014-line design doc)
+  Review: 3 reviewer agents (statistical methodology, visualization, provenance)
+  Skill: self-learning-iterative-coder (TDD RED→GREEN→VERIFY→FIX→CHECKPOINT→CONVERGE)
+
+  Architecture: 9 Prefect tasks, DuckDB reproducibility contract, per-figure JSON sidecars
+  Pipeline position: Flow 5 (best-effort), between Analysis (4) and Deployment (6)
+  Statistical engine: BCa bootstrap + Wilcoxon + Bayesian signed-rank + Holm/BH-FDR
+-->
+<plan version="1.0" issue="340" branch="feat/flow-biostatistics">
+
+  <!-- ================================================================== -->
+  <!-- THEORETICAL FOUNDATIONS (from 3 reviewer agents)                    -->
+  <!-- ================================================================== -->
+  <theoretical-foundations>
+    <section name="statistical-methodology">
+      <finding id="F1" priority="critical" source="Nadeau-Bengio-2003">
+        Pooling per-volume metrics across folds: within a single CV split, the 70
+        test-set scores are genuinely independent. Paired bootstrap on per-volume
+        differences (N=70) is valid. However, any parametric test on fold-level
+        aggregates (N=3) MUST use the Nadeau-Bengio correction via correctipy.
+        Grandvalet-Bengio (2004) proved this variance cannot be unbiasedly estimated.
+      </finding>
+      <finding id="F2" priority="critical" source="Demsar-2006,Garcia-Herrera-2008">
+        Friedman+Nemenyi is severely underpowered for K=3 folds. Nemenyi CD is too
+        wide; with 3 data points, Wilcoxon minimum p-value is 0.125 (impossible to
+        reach 0.05). Solution: use per-volume paired bootstrap (N=70) as PRIMARY
+        inference. Keep Friedman only as a supplementary omnibus screening test with
+        explicit power-limitation caveat.
+      </finding>
+      <finding id="F3" priority="critical" source="Maier-Hein-2024,Abrahamsson-2017">
+        Two-tier multiple comparison correction: Holm-Bonferroni for PRIMARY metric
+        (clDice, 6 pairwise tests), BH-FDR for SECONDARY metrics (7 metrics x 6 pairs
+        = 42 tests). Pre-register clDice as primary per CLAUDE.md loss experiment.
+      </finding>
+      <finding id="F4" priority="high" source="Benavoli-2017">
+        Bayesian signed-rank test with ROPE via baycomp: can confirm equivalence
+        (BF &lt; 1/3), not just fail to reject null. Three-way: P(A>B), P(A≈B), P(B>A).
+        ROPE values: DSC ±0.01, clDice ±0.01, HD95 ±0.5 voxel, NSD ±0.01.
+      </finding>
+      <finding id="F5" priority="high" source="Vargha-Delaney-2000">
+        Report three effect sizes: Cohen's d (literature comparability), Cliff's delta
+        (non-parametric), Vargha-Delaney A (clinical interpretability = P(A>B)).
+        VDA = (Cliff's delta + 1) / 2. Thresholds: negligible &lt;0.56, small 0.56-0.64,
+        medium 0.64-0.71, large &gt;0.71.
+      </finding>
+      <finding id="F6" priority="high" source="Koo-Li-2016">
+        ICC(2,1) is correct for cross-fold consistency (volumes=targets, folds=raters).
+        Bland-Altman is WRONG here — it's for comparing two measurement methods, not
+        cross-validation folds. Drop Bland-Altman from flow unless comparing annotators.
+      </finding>
+      <finding id="F7" priority="medium" source="Wiesenfarth-2021">
+        challengeR R package for bootstrap ranking aggregation and stability
+        visualization. Optional — Python-only MVP, R as Phase 2 addition.
+      </finding>
+    </section>
+
+    <section name="visualization">
+      <finding id="V1" priority="high" source="Allen-2019">
+        Raincloud plots (ptitprince) replace box plots for N=70 volumes.
+        Shows raw data + distribution + summary simultaneously.
+        Outlier volumes (e.g., mv02 at 4.97μm spacing) visible as individual points.
+      </finding>
+      <finding id="V2" priority="high" source="Ho-2019">
+        DABEST estimation plots for pairwise comparisons. Gardner-Altman paired plot
+        shows magnitude and direction of effect with bootstrap CI. Complements p-value
+        tables with visual evidence.
+      </finding>
+      <finding id="V3" priority="high" source="Herbold-2020">
+        scikit-posthocs (v0.11.2) for CD diagrams + Nemenyi. Single dependency covers
+        both statistical test and visualization. Caveat: CD diagram underpowered for K=3.
+      </finding>
+      <finding id="V4" priority="medium" source="Okabe-Ito-2008">
+        Okabe-Ito 8-color palette for colorblind safety. First 4 for 4 loss functions.
+        Yellow (#F0E442) has poor contrast on white — substitute Blue (#0072B2) if needed.
+      </finding>
+      <finding id="V5" priority="low">
+        Skip radar charts entirely — effect size heatmap covers same space without
+        perceptual distortions. Add parallel coordinates for multi-metric profiles.
+      </finding>
+    </section>
+
+    <section name="provenance-reporting">
+      <finding id="P1" priority="critical" source="Gibson-2026">
+        124 studies on 2 Kaggle health datasets scored 0/9 on TRIPOD+AI data provenance.
+        3 deployed in clinical practice, 1 in a patent — from likely fabricated data.
+        Automated lineage makes this failure mode structurally impossible.
+      </finding>
+      <finding id="P2" priority="high" source="Collins-2024">
+        TRIPOD+AI 27-item checklist. Key items for biostatistics flow:
+        Item 10 (sample size), Item 12a (data partitioning), Item 12c (model building),
+        Item 12e (performance measures), Item 23a (CIs for performance).
+      </finding>
+      <finding id="P3" priority="high" source="Norgeot-2020">
+        MI-CLAIM 6 categories: study design, data partitioning, optimization,
+        performance evaluation, model examination, reproducible pipeline.
+        Auto-checkable from MLflow metadata + DuckDB.
+      </finding>
+    </section>
+
+    <section name="new-dependencies">
+      <dependency name="scikit-posthocs" version=">=0.11" reason="Nemenyi post-hoc, CD diagrams" />
+      <dependency name="pingouin" version=">=0.5" reason="ICC, Bayes factor, effect sizes" />
+      <dependency name="baycomp" version=">=1.0" reason="Bayesian signed-rank test with ROPE" />
+      <dependency name="ptitprince" version=">=0.2" reason="Raincloud plots" />
+      <dependency name="dabest" version=">=2023" reason="DABEST estimation plots" />
+      <!-- correctipy for Nadeau-Bengio — check PyPI availability first -->
+    </section>
+  </theoretical-foundations>
+
+  <!-- ================================================================== -->
+  <!-- EXISTING CODE TO REUSE                                              -->
+  <!-- ================================================================== -->
+  <reuse-inventory>
+    <item file="src/minivess/pipeline/ci.py" functions="bca_bootstrap_ci, bootstrap_ci, compute_metrics_with_ci, ConfidenceInterval" />
+    <item file="src/minivess/pipeline/comparison.py" functions="paired_bootstrap_test, holm_bonferroni_correction, cohens_d, compute_all_pairwise_comparisons, format_comparison_latex, format_significance_matrix_markdown, PairwiseComparison" />
+    <item file="src/minivess/pipeline/duckdb_extraction.py" functions="extract_runs_to_duckdb (extend with experiment_name, per_volume_metrics)" />
+    <item file="src/minivess/pipeline/champion_tagger.py" functions="rank_then_aggregate, select_champions" />
+    <item file="src/minivess/pipeline/comparison_report.py" functions="format_extended_markdown (fix array truncation bug)" />
+    <item file="src/minivess/orchestration/_prefect_compat.py" functions="flow, task (Prefect 3.x compat layer)" />
+    <item file="src/minivess/orchestration/trigger.py" functions="PipelineTriggerChain (add biostatistics flow)" />
+    <item file="src/minivess/orchestration/deployments.py" functions="FLOW_WORK_POOL_MAP, FLOW_IMAGE_MAP (add biostatistics)" />
+  </reuse-inventory>
+
+  <!-- ================================================================== -->
+  <!-- IMPLEMENTATION PHASES                                               -->
+  <!-- ================================================================== -->
+
+  <!-- PHASE 1: Config & Data Types ===================================== -->
+  <phase id="1" name="Config and Data Types" tasks="3">
+    <description>
+      Pydantic config model, result dataclasses, and source run manifest types.
+      Zero external dependencies — pure Python dataclasses + Pydantic.
+    </description>
+
+    <task id="1.1" name="BiostatisticsConfig Pydantic model">
+      <file>src/minivess/config/biostatistics_config.py</file>
+      <test>tests/v2/unit/test_biostatistics_config.py</test>
+      <description>
+        BiostatisticsConfig with fields: experiment_names (list[str]),
+        mlruns_dir (Path), output_dir (Path), metrics (list[str]),
+        primary_metric (str, default="cldice"), alpha (float, 0.05),
+        n_bootstrap (int, 10_000), rope_values (dict[str, float]),
+        min_folds_per_condition (int, 3), min_conditions (int, 2),
+        seed (int, 42). Validates: alpha in (0,1), n_bootstrap > 100,
+        primary_metric in metrics list.
+      </description>
+      <tests>
+        - test_default_config_valid
+        - test_custom_config
+        - test_primary_metric_must_be_in_metrics_list
+        - test_alpha_bounds_validation
+        - test_rope_values_positive
+        - test_serialization_round_trip
+      </tests>
+    </task>
+
+    <task id="1.2" name="Result and manifest dataclasses">
+      <file>src/minivess/pipeline/biostatistics_types.py</file>
+      <test>tests/v2/unit/test_biostatistics_types.py</test>
+      <description>
+        SourceRun(run_id, experiment_id, experiment_name, loss_function, fold_id, status).
+        SourceRunManifest(runs, fingerprint=SHA256, discovered_at).
+        ValidationResult(valid, warnings, errors, n_conditions, n_folds_per_condition).
+        PairwiseResult(condition_a, condition_b, metric, p_value, p_adjusted,
+          correction_method, significant, cohens_d, cliffs_delta, vda,
+          bayesian_left, bayesian_rope, bayesian_right).
+        VarianceDecompositionResult(metric, friedman_statistic, friedman_p,
+          nemenyi_matrix, icc_value, icc_ci_lower, icc_ci_upper, icc_type).
+        RankingResult(metric, condition_ranks, mean_ranks, cd_value).
+        FigureArtifact(figure_id, title, paths, sidecar_path).
+        TableArtifact(table_id, title, path, format).
+        BiostatisticsResult(manifest, db_path, pairwise, variance, rankings,
+          figures, tables, mlflow_run_id).
+      </description>
+      <tests>
+        - test_source_run_manifest_fingerprint_deterministic
+        - test_source_run_manifest_fingerprint_changes_with_run_ids
+        - test_validation_result_valid_when_no_errors
+        - test_pairwise_result_effect_size_interpretation
+        - test_biostatistics_result_artifact_counts
+      </tests>
+    </task>
+
+    <task id="1.3" name="Default YAML config">
+      <file>configs/biostatistics/default.yaml</file>
+      <test>tests/v2/unit/test_biostatistics_config.py (extend)</test>
+      <description>
+        Default config YAML with: experiment_names=[dynunet_loss_variation_v2],
+        metrics=[dsc, hd95, assd, nsd, cldice, be_0, be_1, junction_f1],
+        primary_metric=cldice, alpha=0.05, n_bootstrap=10000,
+        rope_values={dsc: 0.01, cldice: 0.01, hd95: 0.5, nsd: 0.01}.
+        Test that YAML loads into BiostatisticsConfig without error.
+      </description>
+      <tests>
+        - test_default_yaml_loads
+        - test_default_yaml_has_all_8_metrics
+      </tests>
+    </task>
+  </phase>
+
+  <!-- PHASE 2: DuckDB Foundation ====================================== -->
+  <phase id="2" name="DuckDB Foundation" tasks="3" depends="1">
+    <description>
+      Multi-experiment DuckDB extraction with per-volume metrics table,
+      source run discovery, and completeness validation.
+    </description>
+
+    <task id="2.1" name="Extended DuckDB schema + extraction">
+      <file>src/minivess/pipeline/biostatistics_duckdb.py</file>
+      <test>tests/v2/unit/test_biostatistics_duckdb.py</test>
+      <description>
+        Extend existing duckdb_extraction.py with: experiment_name + experiment_id
+        columns in runs table, new per_volume_metrics table (run_id, fold_id,
+        volume_id, metric_name, metric_value), new ensemble_members table.
+        build_biostatistics_duckdb(manifest, mlruns_dir, output_path) -> Path.
+        Full rebuild every time (small dataset: ~840 metric rows).
+        Export Parquet alongside DuckDB for portability.
+      </description>
+      <tests>
+        - test_schema_has_7_tables
+        - test_runs_table_has_experiment_columns
+        - test_per_volume_metrics_table_exists
+        - test_parquet_export_alongside_duckdb
+        - test_extraction_from_mock_mlruns
+        - test_idempotent_rebuild
+      </tests>
+    </task>
+
+    <task id="2.2" name="Source run discovery">
+      <file>src/minivess/pipeline/biostatistics_discovery.py</file>
+      <test>tests/v2/unit/test_biostatistics_discovery.py</test>
+      <description>
+        discover_source_runs(mlruns_dir, experiment_names) -> SourceRunManifest.
+        Reads mlruns filesystem, finds all FINISHED runs in specified experiments.
+        Returns SourceRunManifest with SHA256 fingerprint for idempotency.
+        Reuses mlruns_inspector.py reading functions.
+      </description>
+      <tests>
+        - test_discover_finds_finished_runs
+        - test_discover_excludes_failed_runs
+        - test_discover_multi_experiment
+        - test_fingerprint_is_sha256
+        - test_empty_experiment_returns_empty_manifest
+      </tests>
+    </task>
+
+    <task id="2.3" name="Source completeness validation">
+      <file>src/minivess/pipeline/biostatistics_discovery.py (extend)</file>
+      <test>tests/v2/unit/test_biostatistics_discovery.py (extend)</test>
+      <description>
+        validate_source_completeness(manifest, min_folds, min_conditions) -> ValidationResult.
+        Checks: all conditions have >= min_folds completed folds, no FAILED/RUNNING,
+        at least min_conditions conditions, per-volume metric arrays exist.
+        Raises BiostatisticsValidationError on critical failures.
+      </description>
+      <tests>
+        - test_validation_passes_for_complete_data
+        - test_validation_fails_missing_folds
+        - test_validation_fails_too_few_conditions
+        - test_validation_warns_on_missing_per_volume_metrics
+        - test_validation_error_is_raised_not_silent
+      </tests>
+    </task>
+  </phase>
+
+  <!-- PHASE 3: Statistical Engine ===================================== -->
+  <phase id="3" name="Statistical Engine" tasks="4" depends="2">
+    <description>
+      Core statistical computations: pairwise tests, effect sizes, Bayesian
+      analysis, variance decomposition. All functions are pure (no Prefect
+      dependency) — they read from DuckDB and return result dataclasses.
+    </description>
+
+    <task id="3.1" name="Fix CI averaging bug + add Cliff's delta + VDA">
+      <file>src/minivess/pipeline/comparison.py (extend)</file>
+      <test>tests/v2/unit/test_comparison_extensions.py</test>
+      <description>
+        1. Fix _summarise_metric() CI averaging bug — average of CI endpoints is NOT
+           a valid CI. Replace with pooled BCa bootstrap.
+        2. Add cliffs_delta(a, b) -> float. Formula: np.sign(a[:,None] - b[None,:]).
+           Thresholds: |δ| &lt; 0.147 negligible, &lt; 0.33 small, &lt; 0.474 medium, >= 0.474 large.
+        3. Add vargha_delaney_a(a, b) -> float. VDA = (cliffs_delta + 1) / 2.
+        4. Add interpret_cliffs_delta(d) -> str and interpret_vda(a) -> str.
+      </description>
+      <tests>
+        - test_cliffs_delta_identical_arrays_is_zero
+        - test_cliffs_delta_perfectly_separated_is_one
+        - test_cliffs_delta_relationship_to_vda
+        - test_vda_interpretation_thresholds
+        - test_ci_averaging_bug_is_fixed (regression test)
+        - test_cliffs_delta_antisymmetric
+      </tests>
+    </task>
+
+    <task id="3.2" name="Pairwise comparisons from DuckDB">
+      <file>src/minivess/pipeline/biostatistics_statistics.py</file>
+      <test>tests/v2/unit/test_biostatistics_statistics.py</test>
+      <description>
+        compute_pairwise_comparisons(db_path, config) -> list[PairwiseResult].
+        For each metric x condition pair:
+        1. Query per-volume metrics from DuckDB
+        2. BCa bootstrap CI (B=10k, pooled N=70)
+        3. Wilcoxon signed-rank test (scipy.stats.wilcoxon)
+        4. Cohen's d, Cliff's delta, VDA (from comparison.py)
+        5. Two-tier MCC: Holm for primary metric, BH-FDR for secondary
+        Uses existing paired_bootstrap_test() + bca_bootstrap_ci().
+      </description>
+      <tests>
+        - test_pairwise_returns_correct_number_of_comparisons
+        - test_primary_metric_uses_holm_correction
+        - test_secondary_metrics_use_bh_fdr
+        - test_all_three_effect_sizes_computed
+        - test_wilcoxon_p_value_present
+        - test_symmetric_pairs (A vs B same as B vs A with sign flip)
+      </tests>
+    </task>
+
+    <task id="3.3" name="Bayesian signed-rank test with ROPE">
+      <file>src/minivess/pipeline/biostatistics_statistics.py (extend)</file>
+      <test>tests/v2/unit/test_biostatistics_statistics.py (extend)</test>
+      <description>
+        compute_bayesian_comparisons(db_path, config) -> list[PairwiseResult update].
+        For each condition pair x primary metric:
+        1. baycomp.SignedRankTest.probs(scores_A, scores_B, rope=config.rope)
+        2. Returns P(A>B), P(A≈B within ROPE), P(B>A)
+        3. Updates PairwiseResult.bayesian_left/rope/right fields
+        Optional dependency — gracefully skip if baycomp not installed.
+      </description>
+      <tests>
+        - test_bayesian_three_way_sums_to_one
+        - test_bayesian_identical_data_concentrates_on_rope
+        - test_bayesian_separated_data_favors_direction
+        - test_graceful_skip_without_baycomp
+      </tests>
+    </task>
+
+    <task id="3.4" name="Variance decomposition (Friedman + ICC)">
+      <file>src/minivess/pipeline/biostatistics_statistics.py (extend)</file>
+      <test>tests/v2/unit/test_biostatistics_statistics.py (extend)</test>
+      <description>
+        compute_variance_decomposition(db_path, config) -> list[VarianceDecompositionResult].
+        For each metric:
+        1. Friedman test (scipy.stats.friedmanchisquare) — K=3 blocks x conditions
+        2. Nemenyi post-hoc (scikit_posthocs.posthoc_nemenyi_friedman) if significant
+        3. ICC(2,1) via pingouin.intraclass_corr — fold consistency per metric
+        Report power limitations explicitly in results.
+      </description>
+      <tests>
+        - test_friedman_returns_statistic_and_pvalue
+        - test_nemenyi_only_after_significant_friedman
+        - test_icc_returns_value_and_ci
+        - test_icc_type_is_ICC2
+        - test_power_caveat_flag_set_for_k3
+      </tests>
+    </task>
+  </phase>
+
+  <!-- PHASE 4: Rankings =============================================== -->
+  <phase id="4" name="Rankings" tasks="1" depends="3">
+    <task id="4.1" name="Multi-metric ranking and champion confirmation">
+      <file>src/minivess/pipeline/biostatistics_rankings.py</file>
+      <test>tests/v2/unit/test_biostatistics_rankings.py</test>
+      <description>
+        compute_rankings(db_path, pairwise_results, config) -> list[RankingResult].
+        1. Per-metric ranking of conditions (lower rank = better)
+        2. Mean rank across all metrics (Demsar rank-then-aggregate)
+        3. Critical Difference value for CD diagram
+        4. Champion confirmation: does statistical evidence support each champion category?
+        Reuses existing rank_then_aggregate() from champion_tagger.py.
+      </description>
+      <tests>
+        - test_ranking_order_matches_metric_direction
+        - test_mean_rank_aggregation
+        - test_cd_value_computed
+        - test_champion_confirmation_with_evidence
+        - test_ranking_with_ties
+      </tests>
+    </task>
+  </phase>
+
+  <!-- PHASE 5: Figure Generation ====================================== -->
+  <phase id="5" name="Figure Generation" tasks="2" depends="3,4">
+    <description>
+      Publication-quality figures with JSON sidecars. Each figure produces
+      PNG + SVG + JSON sidecar. Matplotlib + seaborn + specialized libs.
+      11 figure types in 3 tiers (must-have, should-have, nice-to-have).
+    </description>
+
+    <task id="5.1" name="Figure generation engine + JSON sidecars">
+      <file>src/minivess/pipeline/biostatistics_figures.py</file>
+      <test>tests/v2/unit/test_biostatistics_figures.py</test>
+      <description>
+        generate_figures(db_path, pairwise, variance, rankings, config, output_dir)
+          -> list[FigureArtifact].
+
+        Tier 1 (must-have, paper main text):
+        F1: Per-metric condition comparison — raincloud plot (ptitprince)
+        F2: Cross-condition pairwise effect size matrix — heatmap (Cliff's delta)
+        F3: Critical Difference diagram — scikit-posthocs CD diagram
+        F4: Forest plot — per-metric BCa CIs
+        F5: Training curves overlay — line plot with shaded CI
+
+        Tier 2 (should-have, supplementary):
+        F6: Fold stability heatmap
+        F7: Metric correlation matrix (Spearman)
+        F8: DABEST estimation plot (paired mean difference)
+
+        Color: Okabe-Ito palette (first 4 colors for 4 losses).
+        Export: PNG (300 DPI) + SVG/PDF (vector) + JSON sidecar.
+        matplotlib rcParams: font.size=9, pdf.fonttype=42, dpi=300.
+      </description>
+      <tests>
+        - test_figure_generates_png_and_svg
+        - test_json_sidecar_has_required_fields
+        - test_sidecar_data_field_has_plotting_arrays
+        - test_sidecar_statistical_tests_field
+        - test_sidecar_source_lineage_fields
+        - test_colorblind_palette_used
+        - test_figure_count_matches_config
+      </tests>
+    </task>
+
+    <task id="5.2" name="JSON sidecar schema and writer">
+      <file>src/minivess/pipeline/biostatistics_figures.py (extend or shared)</file>
+      <test>tests/v2/unit/test_biostatistics_figures.py (extend)</test>
+      <description>
+        FigureSidecar dataclass with fields:
+        figure_id, figure_title, generated_at, git_commit, software_versions,
+        source (duckdb_artifact, query, source_run_ids, experiment_name),
+        data_summary (n_conditions, n_volumes, conditions),
+        data (per-condition: values, mean, ci_lower, ci_upper, n),
+        statistical_tests (pairwise list, friedman dict).
+        write_sidecar(sidecar, path) -> Path.
+        Self-contained: re-plottable without DuckDB access.
+      </description>
+      <tests>
+        - test_sidecar_json_is_valid_json
+        - test_sidecar_round_trips_through_json
+        - test_sidecar_data_arrays_match_n_volumes
+      </tests>
+    </task>
+  </phase>
+
+  <!-- PHASE 6: LaTeX Table Generation ================================= -->
+  <phase id="6" name="LaTeX Tables" tasks="1" depends="3,4">
+    <task id="6.1" name="LaTeX table generation">
+      <file>src/minivess/pipeline/biostatistics_tables.py</file>
+      <test>tests/v2/unit/test_biostatistics_tables.py</test>
+      <description>
+        generate_tables(pairwise, variance, rankings, config, output_dir)
+          -> list[TableArtifact].
+
+        Tables:
+        T1: Main comparison table — metrics x conditions with CIs + significance markers
+        T2: Pairwise p-value matrix — per metric, Holm-Bonferroni corrected
+        T3: Effect size table — Cohen's d + Cliff's delta + VDA
+        T4: Variance decomposition — Friedman statistic, ICC
+        T5: Champion summary — 3 categories with statistical evidence
+
+        Uses booktabs (toprule/midrule/bottomrule), textbf for best values.
+        Reuses format_comparison_latex() pattern from comparison.py.
+      </description>
+      <tests>
+        - test_comparison_table_has_booktabs
+        - test_best_values_are_bold
+        - test_significance_markers_present
+        - test_champion_summary_has_3_categories
+        - test_tables_compile_without_latex_errors (syntax check only)
+      </tests>
+    </task>
+  </phase>
+
+  <!-- PHASE 7: MLflow Logging & Lineage =============================== -->
+  <phase id="7" name="MLflow Logging and Lineage" tasks="2" depends="5,6">
+    <task id="7.1" name="Lineage manifest generation">
+      <file>src/minivess/pipeline/biostatistics_lineage.py</file>
+      <test>tests/v2/unit/test_biostatistics_lineage.py</test>
+      <description>
+        build_lineage_manifest(manifest, config, figures, tables) -> dict.
+        Generates lineage.json with schema_version, biostatistics_run_id,
+        generated_at, fingerprint, git_commit, git_branch, git_dirty,
+        environment (python, torch, scipy, duckdb versions),
+        source_experiments (name, id, run_ids, conditions per run),
+        dataset_provenance (name, version, n_volumes, source, ethics),
+        tripod_ai_items (9 items with automated evidence),
+        artifacts_produced (duckdb, figures, tables, parquet),
+        statistical_methods (primary_ci, pairwise_test, effect_sizes, seed).
+      </description>
+      <tests>
+        - test_lineage_has_schema_version
+        - test_lineage_fingerprint_matches_manifest
+        - test_lineage_tripod_ai_items_present
+        - test_lineage_git_commit_not_empty
+        - test_lineage_round_trips_through_json
+      </tests>
+    </task>
+
+    <task id="7.2" name="MLflow run logging">
+      <file>src/minivess/pipeline/biostatistics_mlflow.py</file>
+      <test>tests/v2/unit/test_biostatistics_mlflow.py</test>
+      <description>
+        log_biostatistics_run(manifest, db_path, figures, tables,
+          pairwise, variance, lineage) -> str (run_id).
+        Creates ONE mlrun in 'minivess_biostatistics' experiment.
+        Logs artifacts: biostatistics.duckdb, parquet/, figures/ (PNG+SVG),
+        figures/sidecars/ (JSON), tables/ (.tex), lineage.json.
+        Tags: upstream_fingerprint, upstream_experiment_names,
+        upstream_lineage_artifact, n_source_runs, n_conditions, n_metrics,
+        biostat_generated_at, tripod_ai_coverage.
+      </description>
+      <tests>
+        - test_creates_mlflow_run_with_correct_experiment
+        - test_logs_lineage_artifact
+        - test_logs_duckdb_artifact
+        - test_logs_figure_artifacts
+        - test_tags_include_upstream_fingerprint
+        - test_mocked_mlflow_no_side_effects
+      </tests>
+    </task>
+  </phase>
+
+  <!-- PHASE 8: Flow Assembly & Trigger Chain ========================== -->
+  <phase id="8" name="Flow Assembly" tasks="2" depends="7">
+    <task id="8.1" name="Prefect flow assembly">
+      <file>src/minivess/orchestration/flows/biostatistics_flow.py</file>
+      <test>tests/v2/unit/test_biostatistics_flow.py</test>
+      <description>
+        @flow(name="minivess-biostatistics")
+        def run_biostatistics_flow(config, trigger_source="manual", **kwargs)
+          -> BiostatisticsResult.
+
+        Task sequence:
+        1. task_discover_source_runs(mlruns_dir, experiment_names)
+        2. task_validate_source_completeness(manifest, min_folds, min_conditions)
+        3. task_build_biostatistics_duckdb(manifest, mlruns_dir, output_path)
+        4. task_compute_pairwise_comparisons(db_path, config) [parallel]
+        5. task_compute_variance_decomposition(db_path, config) [parallel with 4]
+        6. task_compute_rankings(db_path, pairwise, config)
+        7. task_generate_figures(db_path, pairwise, variance, rankings, output_dir)
+        8. task_generate_latex_tables(pairwise, variance, rankings, output_dir)
+        9. task_log_biostatistics_run(manifest, db_path, figures, tables, pairwise, variance)
+
+        Uses _prefect_compat.py for graceful degradation without Prefect.
+        Fingerprint-based short-circuit: if source runs haven't changed, skip.
+      </description>
+      <tests>
+        - test_flow_runs_with_mock_data
+        - test_flow_produces_all_artifact_types
+        - test_flow_short_circuits_on_same_fingerprint
+        - test_flow_raises_on_validation_failure
+        - test_flow_works_without_prefect (compat mode)
+      </tests>
+    </task>
+
+    <task id="8.2" name="Trigger chain + deployment integration">
+      <file>src/minivess/orchestration/trigger.py (modify)</file>
+      <file>src/minivess/orchestration/deployments.py (modify)</file>
+      <test>tests/v2/unit/test_flow_trigger.py (modify)</test>
+      <description>
+        1. Add "biostatistics" to _DEFAULT_FLOWS in trigger.py after "analyze"
+           (position 5, best-effort). Update flow count 8->9.
+        2. Add to deployments.py: "biostatistics": "cpu-pool" (FLOW_WORK_POOL_MAP),
+           "biostatistics": "minivess-biostatistics:latest" (FLOW_IMAGE_MAP).
+        3. Update existing tests: flow count, flow order, chain integration.
+      </description>
+      <tests>
+        - test_chain_has_9_flows (was 8)
+        - test_chain_order_includes_biostatistics_after_analyze
+        - test_biostatistics_is_best_effort
+        - test_deployment_maps_include_biostatistics
+      </tests>
+    </task>
+  </phase>
+
+  <!-- PHASE 9: Integration Tests & Docker ============================= -->
+  <phase id="9" name="Integration and Docker" tasks="2" depends="8">
+    <task id="9.1" name="Integration test">
+      <file>tests/v2/integration/test_biostatistics_flow_integration.py</file>
+      <description>
+        Full pipeline test: mock mlruns -> DuckDB -> statistics -> figures -> tables
+        -> MLflow run. Creates synthetic mlruns structure with 4 conditions x 3 folds,
+        runs the full flow, validates all output artifacts exist and are well-formed.
+      </description>
+      <tests>
+        - test_full_flow_with_synthetic_mlruns
+        - test_flow_output_contains_duckdb
+        - test_flow_output_contains_figures_with_sidecars
+        - test_flow_output_contains_latex_tables
+        - test_flow_output_contains_lineage_json
+        - test_trigger_chain_with_biostatistics
+      </tests>
+    </task>
+
+    <task id="9.2" name="Dockerfile">
+      <file>deployment/docker/Dockerfile.biostatistics</file>
+      <description>
+        CPU-only Dockerfile for biostatistics flow.
+        FROM minivess-base:latest.
+        No GPU needed — pure statistical computation.
+        Installs: duckdb, scikit-posthocs, pingouin, baycomp, matplotlib.
+      </description>
+      <tests>
+        - (manual Docker build verification)
+      </tests>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- FILE MANIFEST                                                       -->
+  <!-- ================================================================== -->
+  <file-manifest>
+    <new-files count="14">
+      <!-- Source files -->
+      <file>src/minivess/config/biostatistics_config.py</file>
+      <file>src/minivess/pipeline/biostatistics_types.py</file>
+      <file>src/minivess/pipeline/biostatistics_duckdb.py</file>
+      <file>src/minivess/pipeline/biostatistics_discovery.py</file>
+      <file>src/minivess/pipeline/biostatistics_statistics.py</file>
+      <file>src/minivess/pipeline/biostatistics_rankings.py</file>
+      <file>src/minivess/pipeline/biostatistics_figures.py</file>
+      <file>src/minivess/pipeline/biostatistics_tables.py</file>
+      <file>src/minivess/pipeline/biostatistics_lineage.py</file>
+      <file>src/minivess/pipeline/biostatistics_mlflow.py</file>
+      <file>src/minivess/orchestration/flows/biostatistics_flow.py</file>
+      <file>configs/biostatistics/default.yaml</file>
+      <file>deployment/docker/Dockerfile.biostatistics</file>
+      <!-- Test files -->
+      <file>tests/v2/unit/test_biostatistics_config.py</file>
+      <file>tests/v2/unit/test_biostatistics_types.py</file>
+      <file>tests/v2/unit/test_biostatistics_duckdb.py</file>
+      <file>tests/v2/unit/test_biostatistics_discovery.py</file>
+      <file>tests/v2/unit/test_biostatistics_statistics.py</file>
+      <file>tests/v2/unit/test_biostatistics_rankings.py</file>
+      <file>tests/v2/unit/test_biostatistics_figures.py</file>
+      <file>tests/v2/unit/test_biostatistics_tables.py</file>
+      <file>tests/v2/unit/test_biostatistics_lineage.py</file>
+      <file>tests/v2/unit/test_biostatistics_mlflow.py</file>
+      <file>tests/v2/unit/test_biostatistics_flow.py</file>
+      <file>tests/v2/unit/test_comparison_extensions.py</file>
+      <file>tests/v2/integration/test_biostatistics_flow_integration.py</file>
+    </new-files>
+    <modified-files count="4">
+      <file>src/minivess/pipeline/comparison.py</file>
+      <file>src/minivess/orchestration/trigger.py</file>
+      <file>src/minivess/orchestration/deployments.py</file>
+      <file>tests/v2/unit/test_flow_trigger.py</file>
+    </modified-files>
+  </file-manifest>
+
+  <!-- ================================================================== -->
+  <!-- VERIFICATION COMMANDS                                               -->
+  <!-- ================================================================== -->
+  <verification>
+    <command phase="per-task">uv run pytest {test_file} -x -v</command>
+    <command phase="per-phase">uv run pytest tests/v2/unit/test_biostatistics_*.py tests/v2/unit/test_comparison_extensions.py -x -v</command>
+    <command phase="full-suite">uv run pytest tests/ -x -q</command>
+    <command phase="lint">uv run ruff check src/ tests/</command>
+    <command phase="typecheck">uv run mypy src/</command>
+    <command phase="all-gates">uv run pytest tests/ -x -q &amp;&amp; uv run ruff check src/ tests/ &amp;&amp; uv run mypy src/</command>
+  </verification>
+
+  <!-- ================================================================== -->
+  <!-- CRASH-RESISTANT EXECUTION PROTOCOL                                  -->
+  <!-- ================================================================== -->
+  <execution-protocol>
+    <rule id="E1">Each task follows TDD: RED (write failing test) → GREEN (implement minimum) → VERIFY (test+lint+type) → FIX → CHECKPOINT (git commit) → CONVERGE</rule>
+    <rule id="E2">Commit after each task passes. Commit message: "feat(biostatistics): Task X.Y — description"</rule>
+    <rule id="E3">If a task fails, do NOT move to next task. Fix the current task first.</rule>
+    <rule id="E4">Run full test suite after each phase completes to catch regressions.</rule>
+    <rule id="E5">Before implementing any task, re-read the task description AND the relevant section of docs/planning/biostatistics-prefect-flow.md.</rule>
+    <rule id="E6">All statistical functions have ZERO Prefect dependency. Only the flow assembly (Phase 8) imports @task/@flow decorators.</rule>
+    <rule id="E7">Never hardcode metric names, loss names, or experiment names in statistical functions. Everything config-driven.</rule>
+    <rule id="E8">New dependencies: run "uv add {package}" BEFORE writing import statements. Verify import works.</rule>
+    <rule id="E9">If context is lost mid-session: read this XML plan, check git log for last completed task, resume from next task.</rule>
+  </execution-protocol>
+
+  <!-- ================================================================== -->
+  <!-- STATISTICAL PIPELINE SUMMARY (revised per reviewer findings)       -->
+  <!-- ================================================================== -->
+  <statistical-pipeline>
+    <level name="per-volume-paired" n="70" primary="true">
+      <step>BCa bootstrap CI (B=10k, seed=42)</step>
+      <step>Wilcoxon signed-rank test (scipy.stats.wilcoxon)</step>
+      <step>Bayesian signed-rank test + ROPE (baycomp.SignedRankTest)</step>
+      <step>Effect sizes: Cohen's d, Cliff's delta, Vargha-Delaney A</step>
+    </level>
+    <level name="multiple-comparison-correction">
+      <step>Primary metric (clDice): Holm-Bonferroni, 6 pairwise tests</step>
+      <step>Secondary metrics (7 x 6 = 42 tests): Benjamini-Hochberg FDR</step>
+    </level>
+    <level name="fold-level" n="3" supplementary="true">
+      <step>Friedman test (K=3 blocks) — report power limitation</step>
+      <step>Nemenyi post-hoc (scikit-posthocs) — if Friedman significant</step>
+      <step>ICC(2,1) for fold consistency (pingouin.intraclass_corr)</step>
+    </level>
+    <level name="reporting">
+      <step>Per-metric: mean, median, IQR, 95% BCa CI</step>
+      <step>Pre-registered primary metric: clDice</step>
+      <step>Exact metric implementations with version pins (MONAI)</step>
+    </level>
+  </statistical-pipeline>
+
+  <!-- ================================================================== -->
+  <!-- FIGURE CATALOG (11 types, 3 tiers)                                  -->
+  <!-- ================================================================== -->
+  <figure-catalog>
+    <tier name="must-have" location="paper-main-text">
+      <figure id="F1" type="raincloud" library="ptitprince" data="per_volume_metrics">Per-metric condition comparison (8 panels)</figure>
+      <figure id="F2" type="heatmap" library="seaborn" data="pairwise_results">Cross-condition pairwise effect size matrix (Cliff's delta)</figure>
+      <figure id="F3" type="cd-diagram" library="scikit-posthocs" data="ranking_results">Critical Difference diagram (8 metrics, K=3 caveat)</figure>
+      <figure id="F4" type="forest" library="matplotlib" data="pairwise_results">Forest plot: per-metric BCa CIs</figure>
+      <figure id="F5" type="line" library="matplotlib" data="training_metrics">Training curves overlay with shaded CI</figure>
+    </tier>
+    <tier name="should-have" location="supplementary">
+      <figure id="F6" type="heatmap" library="seaborn" data="eval_metrics">Fold stability heatmap</figure>
+      <figure id="F7" type="clustermap" library="seaborn" data="per_volume_metrics">Metric correlation matrix (Spearman ρ)</figure>
+      <figure id="F8" type="estimation" library="dabest" data="per_volume_metrics">DABEST Cumming estimation plot (paired mean difference)</figure>
+    </tier>
+    <tier name="nice-to-have" location="supplementary">
+      <figure id="F9" type="parallel" library="matplotlib" data="eval_metrics">Parallel coordinates: multi-metric profile</figure>
+      <figure id="F10" type="forest" library="matplotlib" data="multi_experiment">Cross-experiment delta forest plot</figure>
+      <figure id="F11" type="bayesian" library="matplotlib" data="pairwise_results">Bayesian three-way probability bars (P(A>B), P(rope), P(B>A))</figure>
+    </tier>
+  </figure-catalog>
+
+  <!-- ================================================================== -->
+  <!-- KEY REFERENCES (author-year per CLAUDE.md citation rules)           -->
+  <!-- ================================================================== -->
+  <references>
+    <ref cite="nadeau-bengio-2003">Nadeau C, Bengio Y. (2003). Inference for the Generalization Error. Machine Learning.</ref>
+    <ref cite="grandvalet-bengio-2004">Grandvalet Y, Bengio Y. (2004). No Unbiased Estimator of the Variance of K-Fold CV. JMLR 5.</ref>
+    <ref cite="demsar-2006">Demšar J. (2006). Statistical Comparisons of Classifiers over Multiple Data Sets. JMLR 7.</ref>
+    <ref cite="garcia-herrera-2008">Garcia S, Herrera F. (2008). Extension on Statistical Comparisons. JMLR 9.</ref>
+    <ref cite="benavoli-2017">Benavoli A, Corani G, Demšar J, Zaffalon M. (2017). Time for a Change. JMLR 18.</ref>
+    <ref cite="maier-hein-2024">Maier-Hein L, et al. (2024). Metrics Reloaded. Nature Methods 21(2).</ref>
+    <ref cite="reinke-2024">Reinke A, et al. (2024). Understanding Metric-Related Pitfalls. Nature Methods.</ref>
+    <ref cite="wiesenfarth-2021">Wiesenfarth M, et al. (2021). challengeR. Scientific Reports 11.</ref>
+    <ref cite="collins-2024">Collins GS, et al. (2024). TRIPOD+AI Statement. BMJ.</ref>
+    <ref cite="gibson-2026">Gibson AD, et al. (2026). Evidence of Unreliable Data Provenance. medRxiv.</ref>
+    <ref cite="norgeot-2020">Norgeot B, et al. (2020). MI-CLAIM. Nature Medicine.</ref>
+    <ref cite="allen-2019">Allen M, et al. (2019). Raincloud Plots. Wellcome Open Research 4:63.</ref>
+    <ref cite="ho-2019">Ho J, et al. (2019). Moving Beyond P Values: DABEST. Nature Methods.</ref>
+    <ref cite="herbold-2020">Herbold S. (2020). Autorank. JOSS.</ref>
+    <ref cite="vargha-delaney-2000">Vargha A, Delaney HD. (2000). Common Language Effect Size. JEBS 25(2).</ref>
+    <ref cite="koo-li-2016">Koo TK, Li MY. (2016). ICC Guideline. J Chiropractic Medicine.</ref>
+    <ref cite="romano-2006">Romano J, et al. (2006). Appropriate Statistics for Ordinal Level Data. JGME.</ref>
+    <ref cite="efron-1987">Efron B. (1987). Better Bootstrap Confidence Intervals. JASA 82(397).</ref>
+    <ref cite="abrahamsson-2017">Abrahamsson N, et al. (2017). Multiple Comparisons. BMC Med Inform Decis Mak.</ref>
+    <ref cite="vancalster-2024">Van Calster B, et al. (2024). Performance Measure Taxonomy. STRATOS.</ref>
+    <ref cite="riley-2023">Riley RD, Collins GS. (2023). Multiverse of Clinical Prediction Models.</ref>
+  </references>
+
+</plan>
