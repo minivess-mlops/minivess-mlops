@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from monai.transforms import (
+from monai.transforms import (  # type: ignore[attr-defined]
     Compose,
     DivisiblePadd,
     EnsureChannelFirstd,

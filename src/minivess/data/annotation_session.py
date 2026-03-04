@@ -32,7 +32,7 @@ class InteractionRecord:
     """
 
     prompt_description: str
-    predicted_mask: NDArray
+    predicted_mask: NDArray[np.bool_]
     timestamp: str = field(
         default_factory=lambda: datetime.now(UTC).isoformat(),
     )
@@ -55,7 +55,7 @@ class AnnotationSession:
     def add_interaction(
         self,
         prompt_description: str,
-        predicted_mask: NDArray,
+        predicted_mask: NDArray[np.bool_],
     ) -> None:
         """Record a prompt-result interaction.
 
@@ -73,7 +73,7 @@ class AnnotationSession:
             ),
         )
 
-    def compute_agreement(self, reference: NDArray) -> float:
+    def compute_agreement(self, reference: NDArray[np.bool_]) -> float:
         """Compute Dice agreement between latest prediction and reference.
 
         Parameters

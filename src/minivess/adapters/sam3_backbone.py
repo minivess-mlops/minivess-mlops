@@ -55,7 +55,7 @@ SAM3_FEATURE_MAP_SIZE: int = SAM3_INPUT_SIZE // SAM3_PATCH_SIZE  # 72
 # ---------------------------------------------------------------------------
 # Stub encoder for testing without SAM3 package
 # ---------------------------------------------------------------------------
-class _StubMLP(nn.Module):  # type: ignore[misc]
+class _StubMLP(nn.Module):
     """Stub MLP mimicking a transformer block FFN.
 
     Real SAM3 has transformer blocks with ``mlp.lin1`` and ``mlp.lin2``
@@ -78,7 +78,7 @@ class _StubMLP(nn.Module):  # type: ignore[misc]
         return result
 
 
-class _StubSam3Encoder(nn.Module):  # type: ignore[misc]
+class _StubSam3Encoder(nn.Module):
     """Lightweight stub mimicking SAM3 ViT-32L output shape.
 
     Used for testing and CI where the real SAM3 package is not installed.
@@ -132,7 +132,7 @@ class _StubSam3Encoder(nn.Module):  # type: ignore[misc]
 # ---------------------------------------------------------------------------
 # Stub FPN neck for testing
 # ---------------------------------------------------------------------------
-class _StubFPNNeck(nn.Module):  # type: ignore[misc]
+class _StubFPNNeck(nn.Module):
     """Lightweight stub mimicking SAM3 FPN neck output."""
 
     def __init__(
@@ -152,7 +152,7 @@ class _StubFPNNeck(nn.Module):  # type: ignore[misc]
 # ---------------------------------------------------------------------------
 # Sam3Backbone
 # ---------------------------------------------------------------------------
-class Sam3Backbone(nn.Module):  # type: ignore[misc]
+class Sam3Backbone(nn.Module):
     """SAM3 perception encoder wrapper for feature extraction.
 
     Wraps either the real SAM3 ViT-32L encoder or a stub for testing.
@@ -257,9 +257,12 @@ class Sam3Backbone(nn.Module):  # type: ignore[misc]
             logger.info("Loading SAM3 via HuggingFace transformers")
             model = Sam3Model.from_pretrained(SAM3_HF_MODEL_ID)
             # Extract perception encoder from HF model
-            encoder = model.vision_encoder
-            fpn_neck = model.neck if hasattr(model, "neck") else _StubFPNNeck()
-            return encoder, fpn_neck
+            hf_encoder: nn.Module = model.vision_encoder
+            neck_attr = getattr(model, "neck", None)
+            hf_neck: nn.Module = (
+                neck_attr if isinstance(neck_attr, nn.Module) else _StubFPNNeck()
+            )
+            return hf_encoder, hf_neck
         except ImportError:
             pass
 

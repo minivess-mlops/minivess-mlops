@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 from huggingface_hub import hf_hub_download
-from monai.networks.nets import DynUNet
+from monai.networks.nets import DynUNet  # type: ignore[attr-defined]
 from torch import Tensor
 
 from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput

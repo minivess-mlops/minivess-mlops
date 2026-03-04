@@ -36,7 +36,7 @@ except ImportError:
     pass
 
 
-class BettiMatchingLoss(nn.Module):  # type: ignore[misc]
+class BettiMatchingLoss(nn.Module):
     """Betti matching loss for topology-preserving segmentation.
 
     Uses persistence diagram matching to penalise topological differences.

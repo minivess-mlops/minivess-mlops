@@ -22,7 +22,7 @@ from scipy import ndimage
 from skimage.morphology import skeletonize
 
 
-class CAPELoss(nn.Module):  # type: ignore[misc]
+class CAPELoss(nn.Module):
     """Connectivity-Aware Path Enforcement loss.
 
     Extracts true skeleton from GT via skimage thinning, then measures
@@ -103,7 +103,7 @@ class CAPELoss(nn.Module):  # type: ignore[misc]
             return torch.zeros_like(gt_volume).detach()
 
         # True morphological skeleton
-        skeleton = skeletonize(mask_np).astype(np.float32)
+        skeleton = skeletonize(mask_np).astype(np.float32)  # type: ignore[no-untyped-call]
 
         if skeleton.sum() == 0:
             # Fallback for thin structures: use eroded boundary
@@ -158,4 +158,7 @@ class CAPELoss(nn.Module):  # type: ignore[misc]
         ) + temperature * np.log(len(prob_at_skel))
 
         # Combined loss: penalize both low mean and weak links
-        return 1.0 - 0.5 * mean_coverage - 0.5 * soft_min_coverage.clamp(0, 1)
+        result: torch.Tensor = (
+            1.0 - 0.5 * mean_coverage - 0.5 * soft_min_coverage.clamp(0, 1)
+        )
+        return result

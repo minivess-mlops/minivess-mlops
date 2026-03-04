@@ -136,7 +136,7 @@ class MapieConformalSegmentation:
         -------
         ConformalResult with boolean prediction sets (B, C, D, H, W).
         """
-        if not self.is_calibrated:
+        if self._mapie_clf is None:
             msg = "Must calibrate() before predict()"
             raise RuntimeError(msg)
 

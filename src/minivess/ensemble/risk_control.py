@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 class RiskFunction(Protocol):
     """Protocol for risk functions: (prediction_set, ground_truth) -> float."""
 
-    def __call__(self, pred_set: NDArray, ground_truth: NDArray) -> float: ...
+    def __call__(
+        self, pred_set: NDArray[np.bool_], ground_truth: NDArray[np.bool_]
+    ) -> float: ...
 
 
 # ---------------------------------------------------------------------------
@@ -33,7 +35,9 @@ class RiskFunction(Protocol):
 # ---------------------------------------------------------------------------
 
 
-def dice_loss_risk(pred_set: NDArray, ground_truth: NDArray) -> float:
+def dice_loss_risk(
+    pred_set: NDArray[np.bool_], ground_truth: NDArray[np.bool_]
+) -> float:
     """1 - Dice coefficient between prediction set and ground truth.
 
     Parameters
@@ -56,7 +60,7 @@ def dice_loss_risk(pred_set: NDArray, ground_truth: NDArray) -> float:
     return 1.0 - 2.0 * intersection / total
 
 
-def fnr_risk(pred_set: NDArray, ground_truth: NDArray) -> float:
+def fnr_risk(pred_set: NDArray[np.bool_], ground_truth: NDArray[np.bool_]) -> float:
     """False negative rate: GT voxels not in prediction set.
 
     Parameters
@@ -78,7 +82,7 @@ def fnr_risk(pred_set: NDArray, ground_truth: NDArray) -> float:
     return float((gt_bool & ~pred_bool).sum()) / gt_sum
 
 
-def fpr_risk(pred_set: NDArray, ground_truth: NDArray) -> float:
+def fpr_risk(pred_set: NDArray[np.bool_], ground_truth: NDArray[np.bool_]) -> float:
     """False positive rate: prediction set voxels not in GT.
 
     Parameters
@@ -100,7 +104,9 @@ def fpr_risk(pred_set: NDArray, ground_truth: NDArray) -> float:
     return float((pred_bool & ~gt_bool).sum()) / non_gt_sum
 
 
-def volume_error_risk(pred_set: NDArray, ground_truth: NDArray) -> float:
+def volume_error_risk(
+    pred_set: NDArray[np.bool_], ground_truth: NDArray[np.bool_]
+) -> float:
     """|volume(pred_set) - volume(GT)| / volume(GT).
 
     Parameters
@@ -171,8 +177,8 @@ class RiskControllingPredictor:
 
     def calibrate(
         self,
-        softmax_probs: list[NDArray],
-        labels: list[NDArray],
+        softmax_probs: list[NDArray[np.float32]],
+        labels: list[NDArray[np.bool_]],
     ) -> None:
         """Calibrate the threshold to control risk at level alpha.
 
@@ -226,7 +232,7 @@ class RiskControllingPredictor:
 
     def predict(
         self,
-        softmax_probs: NDArray,
+        softmax_probs: NDArray[np.float32],
     ) -> NDArray[np.bool_]:
         """Produce risk-controlled prediction set.
 
@@ -243,4 +249,5 @@ class RiskControllingPredictor:
             msg = "Must calibrate() before predict()"
             raise RuntimeError(msg)
 
+        assert self._optimal_threshold is not None  # noqa: S101
         return np.asarray(softmax_probs >= self._optimal_threshold, dtype=bool)

@@ -119,7 +119,7 @@ def find_ghost_runs(
     -------
     List of MLflow Run objects that are RUNNING and likely orphaned.
     """
-    ghost_runs = []
+    ghost_runs: list[Any] = []
     for exp_id in experiment_ids:
         runs = client.search_runs(
             experiment_ids=[exp_id],

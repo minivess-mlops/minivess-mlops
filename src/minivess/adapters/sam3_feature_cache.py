@@ -108,7 +108,7 @@ def load_cached_volume_features(volume_id: str, cache_dir: Path) -> Tensor:
     return result
 
 
-class Sam3CachedFeatureDataset(Dataset[tuple[str, Tensor]]):  # type: ignore[misc]
+class Sam3CachedFeatureDataset(Dataset[tuple[str, Tensor]]):
     """PyTorch Dataset wrapping cached SAM3 features.
 
     Each item is a (volume_id, features) tuple where features has shape

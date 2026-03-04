@@ -20,7 +20,7 @@ import torch.nn.functional as F
 from skimage.morphology import skeletonize
 
 
-class SkeletonRecallLoss(nn.Module):  # type: ignore[misc]
+class SkeletonRecallLoss(nn.Module):
     """Skeleton recall loss for topology-preserving segmentation.
 
     Computes the true morphological skeleton of the ground truth using
@@ -96,7 +96,7 @@ class SkeletonRecallLoss(nn.Module):  # type: ignore[misc]
         for b in range(batch_size):
             mask_np = gt[b, 0].detach().cpu().numpy() > 0.5
             if mask_np.any():
-                skel_np = skeletonize(mask_np).astype(np.float32)
+                skel_np = skeletonize(mask_np).astype(np.float32)  # type: ignore[no-untyped-call]
                 if skel_np.sum() == 0:
                     # Fallback for thin structures: use the mask itself
                     skel_np = mask_np.astype(np.float32)

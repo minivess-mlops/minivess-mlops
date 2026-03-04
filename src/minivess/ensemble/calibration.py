@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -77,4 +77,4 @@ def temperature_scale(
     # Stable softmax
     shifted = scaled - scaled.max(axis=-1, keepdims=True)
     exp = np.exp(shifted)
-    return exp / exp.sum(axis=-1, keepdims=True)
+    return cast("NDArray[np.float64]", exp / exp.sum(axis=-1, keepdims=True))

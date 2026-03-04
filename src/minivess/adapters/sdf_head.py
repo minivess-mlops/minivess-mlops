@@ -10,7 +10,7 @@ import torch.nn as nn
 from torch import Tensor
 
 
-class SDFHead(nn.Module):  # type: ignore[misc]
+class SDFHead(nn.Module):
     """Lightweight 3D regression head for SDF prediction.
 
     Architecture: Conv3d(C, C//4, 1) -> InstanceNorm3d -> GELU -> Conv3d(C//4, 1, 1)
@@ -32,4 +32,5 @@ class SDFHead(nn.Module):  # type: ignore[misc]
 
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass: [B, C, D, H, W] -> [B, 1, D, H, W]."""
-        return self.net(x)
+        result: Tensor = self.net(x)
+        return result

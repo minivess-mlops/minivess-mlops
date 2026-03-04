@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from minivess.serving.bento_service import BENTO_MODEL_TAG, SegmentationService
+from minivess.serving.bento_service import (  # type: ignore[attr-defined]
+    BENTO_MODEL_TAG,
+    SegmentationService,
+)
 from minivess.serving.clinical_deploy import (
     ClinicalDeployConfig,
     ClinicalDeploymentPipeline,

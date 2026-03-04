@@ -58,8 +58,8 @@ class DistanceTransformConformalPredictor:
 
     def calibrate(
         self,
-        predictions: list[NDArray],
-        labels: list[NDArray],
+        predictions: list[NDArray[np.bool_]],
+        labels: list[NDArray[np.bool_]],
     ) -> None:
         """Calibrate the distance threshold on holdout volumes.
 
@@ -99,7 +99,7 @@ class DistanceTransformConformalPredictor:
 
     def predict(
         self,
-        prediction: NDArray,
+        prediction: NDArray[np.bool_],
     ) -> NDArray[np.bool_]:
         """Produce FNR-controlled prediction set by distance dilation.
 
@@ -115,7 +115,7 @@ class DistanceTransformConformalPredictor:
         -------
         Boolean prediction set (D, H, W).
         """
-        if not self.is_calibrated:
+        if self._threshold is None:
             msg = "Must calibrate() before predict()"
             raise RuntimeError(msg)
 
@@ -132,8 +132,8 @@ class DistanceTransformConformalPredictor:
 
 
 def compute_distance_metrics(
-    prediction_set: NDArray,
-    ground_truth: NDArray,
+    prediction_set: NDArray[np.bool_],
+    ground_truth: NDArray[np.bool_],
     *,
     threshold: float = 0.0,
 ) -> dict[str, float]:

@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 _WARNED = False
 
 
-class TopoSegLoss(nn.Module):  # type: ignore[misc]
+class TopoSegLoss(nn.Module):
     """Topology loss via critical point detection (simplified proxy).
 
     EXPERIMENTAL: Uses multi-scale max-pooling to approximate topological

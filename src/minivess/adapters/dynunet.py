@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from monai.networks.nets import DynUNet as MonaiDynUNet
+from monai.networks.nets import DynUNet as MonaiDynUNet  # type: ignore[attr-defined]
 
 from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 
@@ -92,7 +92,7 @@ class DynUNetAdapter(ModelAdapter):
         output = self.net(images)
 
         # Deep supervision returns stacked outputs; take the first (main)
-        if self._deep_supervision and isinstance(output, (list, tuple)):
+        if self._deep_supervision and isinstance(output, list | tuple):
             logits = output[0]
         else:
             logits = output

@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class TFFMWrapper(ModelAdapter):  # type: ignore[misc]
+class TFFMWrapper(ModelAdapter):
     """TFFM wrapper that applies graph attention fusion to any ModelAdapter.
 
     Uses the composition pattern (like LoRA): holds ``_base_model`` and
@@ -117,17 +117,25 @@ class TFFMWrapper(ModelAdapter):  # type: ignore[misc]
         -------
         Tuple of (target_module, n_channels).
         """
-        net: nn.Module = model.net
+        net_raw = model.net
+        assert isinstance(net_raw, nn.Module)
+        net: nn.Module = net_raw
 
         # Strategy 1: MONAI DynUNet — bottleneck is the last module before upsamples
-        if hasattr(net, "bottleneck"):
-            bottleneck: nn.Module = net.bottleneck
+        bottleneck_attr = getattr(net, "bottleneck", None)
+        if bottleneck_attr is not None and isinstance(bottleneck_attr, nn.Module):
+            bottleneck: nn.Module = bottleneck_attr
             n_channels = _get_output_channels(bottleneck)
             return bottleneck, n_channels
 
         # Strategy 2: MONAI models with down_layers — look for down_layers[-1]
-        if hasattr(net, "down_layers"):
-            last_down: nn.Module = net.down_layers[-1]
+        down_layers = getattr(net, "down_layers", None)
+        if (
+            down_layers is not None
+            and isinstance(down_layers, nn.ModuleList)
+            and len(down_layers) > 0
+        ):
+            last_down: nn.Module = down_layers[-1]
             n_channels = _get_output_channels(last_down)
             return last_down, n_channels
 

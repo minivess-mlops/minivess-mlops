@@ -47,7 +47,7 @@ def load_npz_prediction(path: str) -> np.ndarray:
     Integer prediction array ``(D, H, W)``.
     """
     data = np.load(path)
-    return data["hard_pred"]
+    return np.asarray(data["hard_pred"])
 
 
 def load_npz_label(path: str) -> np.ndarray:
@@ -63,7 +63,7 @@ def load_npz_label(path: str) -> np.ndarray:
     Integer label array ``(D, H, W)``.
     """
     data = np.load(path)
-    return data["arr_0"]
+    return np.asarray(data["arr_0"])
 
 
 # ---------------------------------------------------------------------------
@@ -218,13 +218,13 @@ def compound_eval_fn(
 # ---------------------------------------------------------------------------
 
 
-dice_metric = make_metric(
+dice_metric = make_metric(  # type: ignore[no-untyped-call]
     eval_fn=dice_eval_fn,
     greater_is_better=True,
     name="dice_coefficient",
 )
 
-compound_metric = make_metric(
+compound_metric = make_metric(  # type: ignore[no-untyped-call]
     eval_fn=compound_eval_fn,
     greater_is_better=True,
     name="compound_masd_cldice",

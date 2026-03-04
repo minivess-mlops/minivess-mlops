@@ -99,7 +99,7 @@ def extract_centreline(mask: np.ndarray) -> CentrelineGraph:
         return CentrelineGraph(nodes=[], edges=[])
 
     # Step 1: Skeletonize
-    skeleton = skeletonize(mask_bin).astype(np.uint8)
+    skeleton = skeletonize(mask_bin).astype(np.uint8)  # type: ignore[no-untyped-call]
 
     if skeleton.sum() == 0:
         return CentrelineGraph(nodes=[], edges=[])

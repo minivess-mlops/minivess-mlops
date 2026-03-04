@@ -164,6 +164,8 @@ class PPRMDetector:
         proxy_var = float(np.var(proxy_risk, ddof=1)) if n_deploy > 1 else 0.0
 
         # Prediction-powered risk estimate
+        assert self._rectifier is not None
+        assert self._rectifier_var is not None
         risk = proxy_mean + self._rectifier
 
         # Combined standard error (calibration + deployment)

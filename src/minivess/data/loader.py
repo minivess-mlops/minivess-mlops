@@ -5,7 +5,11 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
-from monai.data import CacheDataset, ThreadDataLoader, list_data_collate
+from monai.data import (  # type: ignore[attr-defined]
+    CacheDataset,
+    ThreadDataLoader,
+    list_data_collate,
+)
 
 from minivess.config.defaults import DEFAULT_BATCH_SIZE as _DEFAULT_BATCH_SIZE
 from minivess.data.transforms import build_train_transforms, build_val_transforms
@@ -13,7 +17,7 @@ from minivess.data.transforms import build_train_transforms, build_val_transform
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from monai.transforms import Compose
+    from monai.transforms import Compose  # type: ignore[attr-defined]
 
     from minivess.config.models import DataConfig
 

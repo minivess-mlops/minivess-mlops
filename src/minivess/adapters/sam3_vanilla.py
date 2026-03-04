@@ -145,13 +145,14 @@ class Sam3VanillaAdapter(ModelAdapter):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.eval()
 
-        class _LogitsWrapper(torch.nn.Module):  # type: ignore[misc]
+        class _LogitsWrapper(torch.nn.Module):
             def __init__(self, adapter: Sam3VanillaAdapter) -> None:
                 super().__init__()
                 self.adapter = adapter
 
             def forward(self, x: Tensor) -> Tensor:
-                return self.adapter(x).logits
+                result: Tensor = self.adapter(x).logits
+                return result
 
         wrapper = _LogitsWrapper(self)
         wrapper.eval()
@@ -159,7 +160,7 @@ class Sam3VanillaAdapter(ModelAdapter):
             warnings.simplefilter("ignore")
             torch.onnx.export(
                 wrapper,
-                example_input,
+                (example_input,),
                 str(path),
                 input_names=["images"],
                 output_names=["logits"],

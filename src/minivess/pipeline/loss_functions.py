@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 
 import torch
-from monai.losses import DiceCELoss, DiceLoss, FocalLoss
+from monai.losses import DiceCELoss, DiceLoss, FocalLoss  # type: ignore[attr-defined]
 from monai.losses.cldice import SoftclDiceLoss
 from torch import nn
 
@@ -57,7 +57,7 @@ _EXPERIMENTAL_LOSSES: dict[str, str] = {
 _WARNED_LOSSES: set[str] = set()
 
 
-class VesselCompoundLoss(nn.Module):  # type: ignore[misc]
+class VesselCompoundLoss(nn.Module):
     """Compound loss combining DiceCE + SoftclDice for vessel segmentation.
 
     Parameters
@@ -108,7 +108,10 @@ class VesselCompoundLoss(nn.Module):  # type: ignore[misc]
         probs, labels_onehot = _labels_to_onehot(logits, labels)
         cldice_loss = self.cldice(probs, labels_onehot)
 
-        return self.lambda_dice_ce * dice_ce_loss + self.lambda_cldice * cldice_loss
+        result: torch.Tensor = (
+            self.lambda_dice_ce * dice_ce_loss + self.lambda_cldice * cldice_loss
+        )
+        return result
 
 
 def _labels_to_onehot(
@@ -126,7 +129,7 @@ def _labels_to_onehot(
     return probs, labels_onehot
 
 
-class _WrappedSoftclDiceLoss(nn.Module):  # type: ignore[misc]
+class _WrappedSoftclDiceLoss(nn.Module):
     """Wrapper that applies softmax + one-hot preprocessing before SoftclDiceLoss.
 
     Compound losses (VesselCompoundLoss, CbDiceClDiceLoss) handle this via
@@ -135,15 +138,16 @@ class _WrappedSoftclDiceLoss(nn.Module):  # type: ignore[misc]
 
     def __init__(self, **kwargs: object) -> None:
         super().__init__()
-        self.cldice = SoftclDiceLoss(**kwargs)
+        self.cldice = SoftclDiceLoss(**kwargs)  # type: ignore[arg-type]
 
     def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         """Apply softmax + one-hot, then delegate to SoftclDiceLoss."""
         probs, labels_onehot = _labels_to_onehot(logits, labels)
-        return self.cldice(probs, labels_onehot)
+        result: torch.Tensor = self.cldice(probs, labels_onehot)
+        return result
 
 
-class ClassBalancedDiceLoss(nn.Module):  # type: ignore[misc]
+class ClassBalancedDiceLoss(nn.Module):
     """Class-balanced Dice loss with inverse-frequency weighting.
 
     Computes per-class weights from label frequencies in each batch,
@@ -209,7 +213,7 @@ class ClassBalancedDiceLoss(nn.Module):  # type: ignore[misc]
         return 1.0 - weighted_dice.mean()
 
 
-class BettiLoss(nn.Module):  # type: ignore[misc]
+class BettiLoss(nn.Module):
     """Differentiable Betti-0 (connected component) topology loss.
 
     Approximates Betti-0 differences using soft thresholding and
@@ -269,7 +273,7 @@ class BettiLoss(nn.Module):  # type: ignore[misc]
         return self.lambda_betti * (pred_frag - gt_frag).abs()
 
 
-class TopologyCompoundLoss(nn.Module):  # type: ignore[misc]
+class TopologyCompoundLoss(nn.Module):
     """Full topology-aware compound loss: DiceCE + clDice + Betti.
 
     Parameters
@@ -310,14 +314,15 @@ class TopologyCompoundLoss(nn.Module):  # type: ignore[misc]
         probs, labels_onehot = _labels_to_onehot(logits, labels)
         cldice_loss = self.cldice(probs, labels_onehot)
         betti_loss = self.betti(logits, labels)
-        return (
+        result: torch.Tensor = (
             self.lambda_dice_ce * dice_ce_loss
             + self.lambda_cldice * cldice_loss
             + self.lambda_betti * betti_loss
         )
+        return result
 
 
-class CbDiceClDiceLoss(nn.Module):  # type: ignore[misc]
+class CbDiceClDiceLoss(nn.Module):
     """Compound loss combining cbDice + dice_ce_cldice for vessel segmentation.
 
     cbDice captures boundary-aware centerline topology (diameter-sensitive),
@@ -360,10 +365,13 @@ class CbDiceClDiceLoss(nn.Module):  # type: ignore[misc]
         """Compute compound cbDice + dice_ce_cldice loss."""
         cbdice_loss = self.cbdice(logits, labels)
         cldice_loss = self.dice_ce_cldice(logits, labels)
-        return self.lambda_cbdice * cbdice_loss + self.lambda_cldice * cldice_loss
+        result: torch.Tensor = (
+            self.lambda_cbdice * cbdice_loss + self.lambda_cldice * cldice_loss
+        )
+        return result
 
 
-class GraphTopologyLoss(nn.Module):  # type: ignore[misc]
+class GraphTopologyLoss(nn.Module):
     """Compound graph topology loss: cbdice_cldice + skeleton_recall + CAPE.
 
     Combines voxel overlap preservation (cbdice_cldice) with topology-aware

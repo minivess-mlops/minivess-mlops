@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from minivess.config.models import ModelConfig
 
 
-class _MambaBlock3D(nn.Module):  # type: ignore[misc]
+class _MambaBlock3D(nn.Module):
     """3D Mamba-style block with depthwise convolution and gating.
 
     Approximates selective scan using 3D DWConv + gating on flattened
@@ -54,7 +54,7 @@ class _MambaBlock3D(nn.Module):  # type: ignore[misc]
         return x + residual
 
 
-class _EncoderBlock(nn.Module):  # type: ignore[misc]
+class _EncoderBlock(nn.Module):
     """Encoder block: Conv + MambaBlock + downsampling."""
 
     def __init__(self, in_ch: int, out_ch: int) -> None:
@@ -75,7 +75,7 @@ class _EncoderBlock(nn.Module):  # type: ignore[misc]
         return x, skip
 
 
-class _DecoderBlock(nn.Module):  # type: ignore[misc]
+class _DecoderBlock(nn.Module):
     """Decoder block: upsample + concat skip + Conv + MambaBlock."""
 
     def __init__(self, in_ch: int, skip_ch: int, out_ch: int) -> None:
@@ -97,7 +97,8 @@ class _DecoderBlock(nn.Module):  # type: ignore[misc]
             )
         x = torch.cat([x, skip], dim=1)
         x = self.conv(x)
-        return self.mamba(x)
+        result: Tensor = self.mamba(x)
+        return result
 
 
 class MambaAdapter(ModelAdapter):

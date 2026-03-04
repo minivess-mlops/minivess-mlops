@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 SAM3_DECODER_IN_DIM: int = 256
 
 
-class _StubSam3Decoder(nn.Module):  # type: ignore[misc]
+class _StubSam3Decoder(nn.Module):
     """Lightweight stub mimicking SAM3 mask decoder output.
 
     Used for testing and CI where the real SAM3 package is not installed.
@@ -73,7 +73,7 @@ class _StubSam3Decoder(nn.Module):  # type: ignore[misc]
         return result
 
 
-class Sam3MaskDecoder(nn.Module):  # type: ignore[misc]
+class Sam3MaskDecoder(nn.Module):
     """SAM3 mask decoder wrapper for binary segmentation.
 
     Parameters

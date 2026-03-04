@@ -19,7 +19,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 
-class GraphAttentionLayer(nn.Module):  # type: ignore[misc]
+class GraphAttentionLayer(nn.Module):
     """Dense multi-head graph attention layer.
 
     Operates on dense tensors [B, N, F] with dense adjacency [B, N, N].
@@ -117,7 +117,7 @@ class GraphAttentionLayer(nn.Module):  # type: ignore[misc]
         return out
 
 
-class TFFMBlock3D(nn.Module):  # type: ignore[misc]
+class TFFMBlock3D(nn.Module):
     """Topology Feature Fusion Module for 3D volumes.
 
     Takes a 3D feature map (B, C, D, H, W) and enhances it via graph-based

@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class CentrelineHeadAdapter(ModelAdapter):  # type: ignore[misc]
+class CentrelineHeadAdapter(ModelAdapter):
     """Multi-task adapter: segmentation + centreline distance map.
 
     Wraps any ModelAdapter and adds a regression head that predicts
@@ -105,21 +105,29 @@ class CentrelineHeadAdapter(ModelAdapter):  # type: ignore[misc]
         -------
         Tuple of (target_module, n_channels).
         """
-        net: nn.Module = model.net
+        net_raw = model.net
+        assert isinstance(net_raw, nn.Module)
+        net: nn.Module = net_raw
 
         # Strategy 1: MONAI DynUNet — hook the last upsampling block
-        if hasattr(net, "upsamples") and len(net.upsamples) > 0:
-            last_up: nn.Module = net.upsamples[-1]
+        upsamples = getattr(net, "upsamples", None)
+        if (
+            upsamples is not None
+            and isinstance(upsamples, nn.ModuleList)
+            and len(upsamples) > 0
+        ):
+            last_up: nn.Module = upsamples[-1]
             n_channels = _get_output_channels(last_up)
             if n_channels > 0:
                 return last_up, n_channels
 
         # Strategy 2: Look for output_block and hook the layer before it
-        if hasattr(net, "output_block"):
+        output_block = getattr(net, "output_block", None)
+        if output_block is not None and isinstance(output_block, nn.Module):
             # Find the first Conv3d in the output block to get its in_channels
-            for m in net.output_block.modules():
+            for m in output_block.modules():
                 if isinstance(m, nn.Conv3d):
-                    return net.output_block, m.in_channels
+                    return output_block, m.in_channels
 
         # Strategy 3: Generic fallback — find second-to-last Conv3d
         convs: list[tuple[nn.Module, int]] = []
@@ -237,7 +245,7 @@ def compute_centreline_distance_map(mask: np.ndarray) -> np.ndarray:
         return np.zeros_like(mask_bin, dtype=np.float32)
 
     # Step 1: Extract skeleton via skimage (Lee94)
-    skeleton = skeletonize(mask_bin)
+    skeleton = skeletonize(mask_bin)  # type: ignore[no-untyped-call]
 
     if not skeleton.any():
         # Thin structure: skeleton is empty, return all zeros
@@ -245,7 +253,7 @@ def compute_centreline_distance_map(mask: np.ndarray) -> np.ndarray:
 
     # Step 2: Distance to nearest skeleton voxel via scipy EDT
     # Invert skeleton: EDT computes distance to nearest True voxel
-    dist_map = distance_transform_edt(~skeleton).astype(np.float32)
+    dist_map: np.ndarray = distance_transform_edt(~skeleton).astype(np.float32)
 
     return dist_map
 

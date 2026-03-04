@@ -46,7 +46,7 @@ def precompute_auxiliary_targets(
     for pair in volume_pairs:
         volume_id = pair.get("volume_id", Path(pair["label"]).stem.split(".")[0])
         label_path = Path(pair["label"])
-        label_img = nib.load(str(label_path))
+        label_img = nib.load(str(label_path))  # type: ignore[attr-defined]
         label_data: np.ndarray | None = None  # lazy load
 
         for config in target_configs:
@@ -59,7 +59,7 @@ def precompute_auxiliary_targets(
 
             # Lazy load label data
             if label_data is None:
-                label_data = np.asarray(label_img.dataobj)
+                label_data = np.asarray(label_img.dataobj)  # type: ignore[attr-defined]
 
             logger.info(
                 "Computing %s for %s via %s",
@@ -71,8 +71,8 @@ def precompute_auxiliary_targets(
             target = target.astype(np.float32)
 
             # Save with same affine as label
-            nib.save(
-                nib.Nifti1Image(target, label_img.affine),
+            nib.save(  # type: ignore[attr-defined]
+                nib.Nifti1Image(target, label_img.affine),  # type: ignore[attr-defined,no-untyped-call]
                 str(out_path),
             )
             computed += 1

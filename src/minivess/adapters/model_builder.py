@@ -153,7 +153,7 @@ def apply_wrappers(
             from minivess.adapters.tffm_wrapper import TFFMWrapper
 
             model = TFFMWrapper(
-                base_model=model,
+                base_model=model,  # type: ignore[arg-type]
                 grid_size=wrapper_cfg.get("grid_size", 8),
                 hidden_dim=wrapper_cfg.get("hidden_dim", 32),
                 n_heads=wrapper_cfg.get("n_heads", 4),

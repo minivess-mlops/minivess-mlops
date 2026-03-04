@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from torch import nn
 
 
-class WarpLoss(nn.Module):  # type: ignore[misc]
+class WarpLoss(nn.Module):
     """Warping-based topology loss from CoLeTra.
 
     Computes a differentiable topology-aware penalty by comparing
@@ -80,7 +80,7 @@ class WarpLoss(nn.Module):  # type: ignore[misc]
         return local_max - local_min
 
 
-class TopoLoss(nn.Module):  # type: ignore[misc]
+class TopoLoss(nn.Module):
     """Topology-preserving loss from CoLeTra.
 
     Penalises topological differences between prediction and ground truth

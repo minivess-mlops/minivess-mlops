@@ -87,7 +87,8 @@ def _slerp_tensor(v1: Tensor, v2: Tensor, t: float) -> Tensor:
     result_flat = coeff1 * v1_unit + coeff2 * v2_unit
     result_flat = result_flat * magnitude
 
-    return result_flat.reshape(v1.shape).to(v1.dtype)
+    merged: Tensor = result_flat.reshape(v1.shape).to(v1.dtype)
+    return merged
 
 
 def slerp_merge(

@@ -121,11 +121,14 @@ class ModelAdapter(ABC, nn.Module):
         -------
         AdapterConfigInfo with common fields auto-populated.
         """
+        cfg: Any = self.config
         return AdapterConfigInfo(
-            family=self.config.family.value,
-            name=self.config.name,
-            in_channels=self.config.in_channels,
-            out_channels=self.config.out_channels,
+            family=str(cfg.family.value),
+            name=str(cfg.name),
+            in_channels=int(cfg.in_channels) if cfg.in_channels is not None else None,
+            out_channels=int(cfg.out_channels)
+            if cfg.out_channels is not None
+            else None,
             trainable_params=self.trainable_parameters(),
             extras=dict(extras),
         )
@@ -156,7 +159,9 @@ class ModelAdapter(ABC, nn.Module):
             self.load_state_dict(state_dict)
         else:
             # Legacy format: bare net state dict, load into self.net
-            self.net.load_state_dict(payload)
+            net = self.net
+            assert isinstance(net, nn.Module)
+            net.load_state_dict(payload)
 
     def save_checkpoint(self, path: Path) -> None:
         """Save model weights to a checkpoint file.
@@ -164,7 +169,9 @@ class ModelAdapter(ABC, nn.Module):
         Default implementation saves ``self.net`` state dict.
         """
         path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(self.net.state_dict(), path)
+        net = self.net
+        assert isinstance(net, nn.Module)
+        torch.save(net.state_dict(), path)
 
     def trainable_parameters(self) -> int:
         """Return the count of trainable parameters.
@@ -172,7 +179,9 @@ class ModelAdapter(ABC, nn.Module):
         Default implementation counts ``self.net`` parameters with
         ``requires_grad=True``.
         """
-        return sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+        net = self.net
+        assert isinstance(net, nn.Module)
+        return sum(p.numel() for p in net.parameters() if p.requires_grad)
 
     def export_onnx(self, path: Path, example_input: Tensor) -> None:
         """Export the model to ONNX format.
@@ -182,21 +191,24 @@ class ModelAdapter(ABC, nn.Module):
         Override for adapters that need special export logic.
         """
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.net.eval()
+        net = self.net
+        assert isinstance(net, nn.Module)
+        net.eval()
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             try:
                 onnx_program = torch.onnx.export(
-                    self.net,
-                    example_input,
+                    net,
+                    (example_input,),
                     dynamo=True,
                 )
-                onnx_program.save(str(path))
+                if onnx_program is not None:
+                    onnx_program.save(str(path))
             except Exception:
                 torch.onnx.export(
-                    self.net,
-                    example_input,
+                    net,
+                    (example_input,),
                     str(path),
                     input_names=["images"],
                     output_names=["logits"],

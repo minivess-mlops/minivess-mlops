@@ -60,6 +60,7 @@ class TestSPWLoss:
         loss_val = loss_fn(logits, labels)
         loss_val.backward()
 
+        assert logits.grad is not None  # noqa: S101
         grad_norm = logits.grad.norm().item()
         assert grad_norm > 1e-8, f"Gradient norm too small: {grad_norm}"
 

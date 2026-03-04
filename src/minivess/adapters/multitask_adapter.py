@@ -80,7 +80,7 @@ def _build_head(head_type: str, in_channels: int, out_channels: int) -> nn.Modul
     )
 
 
-class MultiTaskAdapter(nn.Module):  # type: ignore[misc]
+class MultiTaskAdapter(nn.Module):
     """Generic multi-task adapter wrapping any base model.
 
     Adds N auxiliary heads defined by AuxHeadConfig. Uses a forward hook

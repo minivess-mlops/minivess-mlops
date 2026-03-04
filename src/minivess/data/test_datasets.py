@@ -15,7 +15,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from monai.data import CacheDataset, ThreadDataLoader
+from monai.data import CacheDataset, ThreadDataLoader  # type: ignore[attr-defined]
 from pydantic import BaseModel, Field
 
 from minivess.data.loader import discover_nifti_pairs

@@ -80,12 +80,17 @@ class LineageEmitter:
         datasets: list[dict[str, str]] | None,
         *,
         is_input: bool,
-    ) -> list[InputDataset] | list[OutputDataset]:
+    ) -> list[InputDataset | OutputDataset]:
         """Convert dataset dicts to OpenLineage dataset objects."""
         if not datasets:
             return []
-        cls = InputDataset if is_input else OutputDataset
-        return [cls(namespace=d["namespace"], name=d["name"]) for d in datasets]
+        result: list[InputDataset | OutputDataset] = [
+            (InputDataset if is_input else OutputDataset)(
+                namespace=d["namespace"], name=d["name"]
+            )
+            for d in datasets
+        ]
+        return result
 
     def _emit(self, event: RunEvent) -> RunEvent:
         """Store event locally and optionally send to Marquez."""
@@ -128,13 +133,15 @@ class LineageEmitter:
         if run_id is None:
             run_id = str(generate_new_uuid())
 
+        input_datasets = self._build_datasets(inputs, is_input=True)
+        output_datasets = self._build_datasets(outputs, is_input=False)
         event = RunEvent(
             eventType=RunState.START,
             eventTime=self._now_iso(),
             run=Run(runId=run_id),
             job=Job(namespace=self.namespace, name=job_name),
-            inputs=self._build_datasets(inputs, is_input=True),
-            outputs=self._build_datasets(outputs, is_input=False),
+            inputs=input_datasets,  # type: ignore[arg-type]
+            outputs=output_datasets,  # type: ignore[arg-type]
             producer=_PRODUCER,
         )
         return self._emit(event)
@@ -164,13 +171,15 @@ class LineageEmitter:
         -------
         The emitted RunEvent.
         """
+        input_datasets = self._build_datasets(inputs, is_input=True)
+        output_datasets = self._build_datasets(outputs, is_input=False)
         event = RunEvent(
             eventType=RunState.COMPLETE,
             eventTime=self._now_iso(),
             run=Run(runId=run_id),
             job=Job(namespace=self.namespace, name=job_name),
-            inputs=self._build_datasets(inputs, is_input=True),
-            outputs=self._build_datasets(outputs, is_input=False),
+            inputs=input_datasets,  # type: ignore[arg-type]
+            outputs=output_datasets,  # type: ignore[arg-type]
             producer=_PRODUCER,
         )
         return self._emit(event)
@@ -200,13 +209,15 @@ class LineageEmitter:
         -------
         The emitted RunEvent.
         """
+        input_datasets = self._build_datasets(inputs, is_input=True)
+        output_datasets = self._build_datasets(outputs, is_input=False)
         event = RunEvent(
             eventType=RunState.FAIL,
             eventTime=self._now_iso(),
             run=Run(runId=run_id),
             job=Job(namespace=self.namespace, name=job_name),
-            inputs=self._build_datasets(inputs, is_input=True),
-            outputs=self._build_datasets(outputs, is_input=False),
+            inputs=input_datasets,  # type: ignore[arg-type]
+            outputs=output_datasets,  # type: ignore[arg-type]
             producer=_PRODUCER,
         )
         return self._emit(event)

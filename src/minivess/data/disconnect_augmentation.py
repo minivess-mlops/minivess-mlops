@@ -78,7 +78,7 @@ class DisconnectToConnectd:
         # Select random subset of junctions to disconnect
         n_junctions = min(
             len(junctions),
-            self._rng.integers(1, self.max_junctions + 1),
+            int(self._rng.integers(1, self.max_junctions + 1)),
         )
         selected_indices = self._rng.choice(
             len(junctions), size=n_junctions, replace=False
