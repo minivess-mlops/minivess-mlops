@@ -38,7 +38,7 @@ class TestDiscoverImplementedModels:
 
     def test_returns_nonempty_list(self) -> None:
         models = discover_implemented_models()
-        assert len(models) >= 10
+        assert len(models) >= 7
 
     def test_contains_dynunet(self) -> None:
         models = discover_implemented_models()
@@ -149,7 +149,7 @@ class TestLoadCapabilitySchema:
 
     def test_schema_has_implemented_models(self) -> None:
         schema = load_capability_schema()
-        assert len(schema.implemented_models) >= 10
+        assert len(schema.implemented_models) >= 7
 
     def test_schema_not_implemented_separate(self) -> None:
         schema = load_capability_schema()

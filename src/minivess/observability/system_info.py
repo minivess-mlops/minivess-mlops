@@ -87,7 +87,7 @@ def get_library_versions() -> dict[str, str]:
         if torch.cuda.is_available():
             versions["sys_cuda_version"] = torch.version.cuda or "N/A"
             try:
-                cudnn_ver = torch.backends.cudnn.version()
+                cudnn_ver = torch.backends.cudnn.version()  # type: ignore[no-untyped-call]
                 versions["sys_cudnn_version"] = str(cudnn_ver) if cudnn_ver else "N/A"
             except (AttributeError, RuntimeError):
                 versions["sys_cudnn_version"] = "N/A"

@@ -9,6 +9,7 @@ Provides two service classes:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 import bentoml
@@ -93,7 +94,7 @@ class OnnxSegmentationService:
 
         self._model_tag = model_tag or BENTO_MODEL_TAG
         model_ref = bentoml.models.get(self._model_tag)
-        model_path = model_ref.path_of("saved_model.onnx")
+        model_path = Path(model_ref.path_of("saved_model.onnx"))
         self._engine = OnnxSegmentationInference(model_path)
         logger.info("ONNX model loaded: %s", self._model_tag)
 

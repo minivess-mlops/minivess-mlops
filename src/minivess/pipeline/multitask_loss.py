@@ -54,7 +54,7 @@ def _build_aux_loss(loss_type: str) -> nn.Module:
     raise ValueError(msg)
 
 
-class MultiTaskLoss(nn.Module):  # type: ignore[misc]
+class MultiTaskLoss(nn.Module):
     """Generic multi-task loss composer.
 
     forward(output: SegmentationOutput, batch: dict) -> Tensor

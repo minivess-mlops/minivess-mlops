@@ -11,7 +11,7 @@ import torch
 if TYPE_CHECKING:
     from pathlib import Path
 
-from minivess.adapters.segresnet import SegResNetAdapter
+from minivess.adapters.dynunet import DynUNetAdapter
 from minivess.config.models import (
     DataConfig,
     ExperimentConfig,
@@ -34,7 +34,7 @@ def experiment_config() -> ExperimentConfig:
         run_name="test-run",
         data=DataConfig(dataset_name="minivess"),
         model=ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="test-model",
             in_channels=1,
             out_channels=2,
@@ -257,14 +257,14 @@ class TestExperimentTrackerLocalBackend:
             experiment_config,
             tracking_uri=local_tracking_uri,
         )
-        model = SegResNetAdapter(experiment_config.model)
+        model = DynUNetAdapter(experiment_config.model)
         with tracker.start_run() as run_id:
             tracker.log_model_info(model)
 
         client = MlflowClient(tracking_uri=local_tracking_uri)
         run = client.get_run(run_id)
         assert "model_family" in run.data.params
-        assert run.data.params["model_family"] == "segresnet"
+        assert run.data.params["model_family"] == "dynunet"
         assert "trainable_parameters" in run.data.metrics
 
     def test_log_artifact(
@@ -504,7 +504,7 @@ class TestExperimentTrackerLocalBackend:
         from minivess.observability.tracking import ExperimentTracker
 
         tracker = ExperimentTracker(experiment_config, tracking_uri=local_tracking_uri)
-        model = SegResNetAdapter(experiment_config.model)
+        model = DynUNetAdapter(experiment_config.model)
         # This must not raise MlflowException about changing param values
         with tracker.start_run():
             tracker.log_model_info(model)
@@ -1071,7 +1071,7 @@ class TestTrainerMLflowIntegration:
             experiment_config,
             tracking_uri=local_tracking_uri,
         )
-        model = SegResNetAdapter(experiment_config.model)
+        model = DynUNetAdapter(experiment_config.model)
         trainer = SegmentationTrainer(
             model,
             experiment_config.training,
@@ -1091,9 +1091,9 @@ class TestTrainerMLflowIntegration:
             mixed_precision=False,
             warmup_epochs=1,
         )
-        model = SegResNetAdapter(
+        model = DynUNetAdapter(
             ModelConfig(
-                family=ModelFamily.MONAI_SEGRESNET,
+                family=ModelFamily.MONAI_DYNUNET,
                 name="no-tracker",
                 in_channels=1,
                 out_channels=2,
@@ -1119,7 +1119,7 @@ class TestTrainerMLflowIntegration:
             experiment_config,
             tracking_uri=local_tracking_uri,
         )
-        model = SegResNetAdapter(experiment_config.model)
+        model = DynUNetAdapter(experiment_config.model)
         trainer = SegmentationTrainer(
             model,
             experiment_config.training,
@@ -1152,7 +1152,7 @@ class TestTrainerMLflowIntegration:
             experiment_config,
             tracking_uri=local_tracking_uri,
         )
-        model = SegResNetAdapter(experiment_config.model)
+        model = DynUNetAdapter(experiment_config.model)
         trainer = SegmentationTrainer(
             model,
             experiment_config.training,
@@ -1183,7 +1183,7 @@ class TestTrainerMLflowIntegration:
             experiment_config,
             tracking_uri=local_tracking_uri,
         )
-        model = SegResNetAdapter(experiment_config.model)
+        model = DynUNetAdapter(experiment_config.model)
         trainer = SegmentationTrainer(
             model,
             experiment_config.training,
@@ -1321,7 +1321,7 @@ class TestTrainTrackAnalyzeRoundtrip:
             experiment_config,
             tracking_uri=local_tracking_uri,
         )
-        model = SegResNetAdapter(experiment_config.model)
+        model = DynUNetAdapter(experiment_config.model)
         trainer = SegmentationTrainer(
             model,
             experiment_config.training,

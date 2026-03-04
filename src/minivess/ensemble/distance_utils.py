@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-def signed_distance_transform(mask: NDArray) -> NDArray[np.float64]:
+def signed_distance_transform(mask: NDArray[np.bool_]) -> NDArray[np.float64]:
     """Compute signed distance transform: positive inside, negative outside.
 
     Parameters
@@ -29,19 +29,19 @@ def signed_distance_transform(mask: NDArray) -> NDArray[np.float64]:
     """
     mask_bool = mask.astype(bool)
     if not mask_bool.any():
-        return -distance_transform_edt(~mask_bool)
+        return np.asarray(-distance_transform_edt(~mask_bool))
     if mask_bool.all():
-        return distance_transform_edt(mask_bool)
+        return np.asarray(distance_transform_edt(mask_bool))
 
     # Distance from boundary: positive inside, negative outside
-    dist_inside = distance_transform_edt(mask_bool)
-    dist_outside = distance_transform_edt(~mask_bool)
+    dist_inside: NDArray[np.float64] = np.asarray(distance_transform_edt(mask_bool))
+    dist_outside: NDArray[np.float64] = np.asarray(distance_transform_edt(~mask_bool))
     return dist_inside - dist_outside
 
 
 def boundary_distance(
-    mask_a: NDArray,
-    mask_b: NDArray,
+    mask_a: NDArray[np.bool_],
+    mask_b: NDArray[np.bool_],
 ) -> float:
     """Symmetric boundary distance between two binary masks.
 
@@ -88,8 +88,8 @@ def _directed_hausdorff_mean(
 
 
 def asymmetric_hausdorff_percentile(
-    ground_truth: NDArray,
-    prediction: NDArray,
+    ground_truth: NDArray[np.bool_],
+    prediction: NDArray[np.bool_],
     percentile: float = 95,
 ) -> float:
     """Asymmetric Hausdorff distance at given percentile.

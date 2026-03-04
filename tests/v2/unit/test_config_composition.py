@@ -65,7 +65,6 @@ class TestConfigGroupStructure:
         "model_name",
         [
             "dynunet",
-            "segresnet",
             "sam3_vanilla",
             "sam3_topolora",
             "sam3_hybrid",

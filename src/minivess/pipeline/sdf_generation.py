@@ -31,7 +31,7 @@ def compute_sdf_from_mask(mask: np.ndarray) -> np.ndarray:
     # Sign convention: negative inside, positive outside
     sdf = dist_outside - dist_inside
 
-    return sdf
+    return np.asarray(sdf)
 
 
 def normalize_sdf(sdf: np.ndarray, max_dist: float = 10.0) -> np.ndarray:
@@ -46,4 +46,4 @@ def normalize_sdf(sdf: np.ndarray, max_dist: float = 10.0) -> np.ndarray:
     """
     clipped = np.clip(sdf, -max_dist, max_dist)
     normalized = (clipped / max_dist).astype(np.float32)
-    return normalized
+    return np.asarray(normalized)

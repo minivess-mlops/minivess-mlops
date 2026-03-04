@@ -281,7 +281,9 @@ def _log_single_model_safe(
                 checkpoint_path=ckpt_path,
                 model_config_dict=model_config,
             )
-            return f"runs:/{mlflow.active_run().info.run_id}/model"
+            active_run = mlflow.active_run()
+            assert active_run is not None
+            return f"runs:/{active_run.info.run_id}/model"
     except Exception:
         logger.warning(
             "Could not log pyfunc model for run %s",
@@ -312,7 +314,9 @@ def _log_ensemble_model_safe(
                 ensemble_spec=ensemble_spec,
                 model_config_dict=model_config,
             )
-            return f"runs:/{mlflow.active_run().info.run_id}/ensemble_model"
+            active_run = mlflow.active_run()
+            assert active_run is not None
+            return f"runs:/{active_run.info.run_id}/ensemble_model"
     except Exception:
         logger.warning(
             "Could not log pyfunc ensemble model '%s'",

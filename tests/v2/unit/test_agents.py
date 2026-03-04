@@ -298,7 +298,7 @@ class TestEvalSuites:
         result = EvalResult(
             input_id="sample_001",
             scores={"dice": 0.85},
-            metadata={"model": "segresnet"},
+            metadata={"model": "dynunet"},
         )
         assert result.input_id == "sample_001"
         assert result.scores["dice"] == 0.85

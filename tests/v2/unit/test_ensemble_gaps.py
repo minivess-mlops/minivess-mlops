@@ -15,16 +15,16 @@ from minivess.config.models import (
 )
 
 
-def _segresnet_model() -> object:
-    from minivess.adapters.segresnet import SegResNetAdapter
+def _dynunet_model() -> object:
+    from minivess.adapters.dynunet import DynUNetAdapter
 
     config = ModelConfig(
-        family=ModelFamily.MONAI_SEGRESNET,
+        family=ModelFamily.MONAI_DYNUNET,
         name="test",
         in_channels=1,
         out_channels=2,
     )
-    return SegResNetAdapter(config)
+    return DynUNetAdapter(config)
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ class TestGreedySoup:
         """greedy_soup with one model should return its state dict."""
         from minivess.ensemble.strategies import greedy_soup
 
-        model = _segresnet_model()
+        model = _dynunet_model()
         metric_fn = MagicMock(return_value=0.85)
         result = greedy_soup([model], metric_fn, val_loader=None)
         assert isinstance(result, dict)
@@ -56,8 +56,8 @@ class TestGreedySoup:
         """greedy_soup with two models should return a valid state dict."""
         from minivess.ensemble.strategies import greedy_soup
 
-        model1 = _segresnet_model()
-        model2 = _segresnet_model()
+        model1 = _dynunet_model()
+        model2 = _dynunet_model()
         # Second model always improves → should be added to soup
         call_count = 0
 
@@ -75,8 +75,8 @@ class TestGreedySoup:
         """When a candidate worsens the metric, it should be rejected."""
         from minivess.ensemble.strategies import greedy_soup
 
-        model1 = _segresnet_model()
-        model2 = _segresnet_model()
+        model1 = _dynunet_model()
+        model2 = _dynunet_model()
         # Metric decreases on second call → model2 should be rejected
         call_count = 0
 
@@ -145,7 +145,7 @@ class TestEnsemblePredictorEdgeCases:
         """Ensemble with a single model should return that model's prediction."""
         from minivess.ensemble.strategies import EnsemblePredictor
 
-        model = _segresnet_model()
+        model = _dynunet_model()
         config = EnsembleConfig(strategy=EnsembleStrategy.MEAN)
         ensemble = EnsemblePredictor([model], config)
         x = torch.randn(1, 1, 16, 16, 16)
@@ -156,8 +156,8 @@ class TestEnsemblePredictorEdgeCases:
         """Mean ensemble predictions should be valid probabilities."""
         from minivess.ensemble.strategies import EnsemblePredictor
 
-        model1 = _segresnet_model()
-        model2 = _segresnet_model()
+        model1 = _dynunet_model()
+        model2 = _dynunet_model()
         config = EnsembleConfig(strategy=EnsembleStrategy.MEAN)
         ensemble = EnsemblePredictor([model1, model2], config)
         x = torch.randn(1, 1, 16, 16, 16)
@@ -169,7 +169,7 @@ class TestEnsemblePredictorEdgeCases:
         """Unknown strategy should raise ValueError."""
         from minivess.ensemble.strategies import EnsemblePredictor
 
-        model = _segresnet_model()
+        model = _dynunet_model()
         config = EnsembleConfig(strategy=EnsembleStrategy.GREEDY_SOUP)
         ensemble = EnsemblePredictor([model], config)
         with pytest.raises(ValueError, match="Unsupported"):
@@ -179,8 +179,8 @@ class TestEnsemblePredictorEdgeCases:
         """Majority voting should produce correct output shape."""
         from minivess.ensemble.strategies import EnsemblePredictor
 
-        model1 = _segresnet_model()
-        model2 = _segresnet_model()
+        model1 = _dynunet_model()
+        model2 = _dynunet_model()
         config = EnsembleConfig(strategy=EnsembleStrategy.MAJORITY_VOTE)
         ensemble = EnsemblePredictor([model1, model2], config)
         x = torch.randn(1, 1, 16, 16, 16)

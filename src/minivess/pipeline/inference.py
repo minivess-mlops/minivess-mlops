@@ -86,7 +86,7 @@ class SlidingWindowInferenceRunner:
             with torch.no_grad():
                 output = model(x)
             if isinstance(output, SegmentationOutput):
-                return output.logits  # type: ignore[no-any-return]
+                return output.logits
             return output  # type: ignore[no-any-return]
 
         with torch.no_grad():

@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
-from monai.inferers import sliding_window_inference
-from torch.amp import GradScaler, autocast
+from monai.inferers import sliding_window_inference  # type: ignore[attr-defined]
+from torch.amp import GradScaler, autocast  # type: ignore[attr-defined]
 from torch.optim import SGD, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
@@ -196,8 +196,10 @@ class SegmentationTrainer:
         from minivess.pipeline.multitask_loss import MultiTaskLoss
 
         if isinstance(self.criterion, MultiTaskLoss):
-            return self.criterion(output, batch)
-        return self.criterion(output.logits, labels)
+            result: torch.Tensor = self.criterion(output, batch)
+            return result
+        result2: torch.Tensor = self.criterion(output.logits, labels)
+        return result2
 
     def train_epoch(self, loader: Any) -> EpochResult:
         """Run one training epoch with mixed precision.
@@ -241,7 +243,7 @@ class SegmentationTrainer:
                 )
                 raise ValueError(msg)
 
-            self.scaler.scale(loss).backward()
+            self.scaler.scale(loss).backward()  # type: ignore[no-untyped-call]
             if self.config.gradient_clip_val > 0:
                 self.scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(
@@ -265,7 +267,7 @@ class SegmentationTrainer:
             self.metrics.reset()
         return EpochResult(loss=avg_loss, metrics=epoch_metrics)
 
-    @torch.no_grad()  # type: ignore[misc]
+    @torch.no_grad()
     def validate_epoch(
         self, loader: Any, *, compute_extended: bool = False
     ) -> EpochResult:
@@ -310,15 +312,18 @@ class SegmentationTrainer:
                 if self.val_roi_size is not None:
 
                     def _model_fn(x: torch.Tensor) -> torch.Tensor:
-                        return self.model(x).logits
+                        result: torch.Tensor = self.model(x).logits
+                        return result
 
-                    logits = sliding_window_inference(
+                    logits_raw = sliding_window_inference(
                         images,
                         roi_size=self.val_roi_size,
                         sw_batch_size=self.sw_batch_size,
                         predictor=_model_fn,
                         overlap=0.25,
                     )
+                    assert isinstance(logits_raw, torch.Tensor)  # noqa: S101
+                    logits = logits_raw
                     # Sliding window: standard loss only (no multi-task aux)
                     from minivess.pipeline.multitask_loss import MultiTaskLoss
 

@@ -210,12 +210,12 @@ class TestAdaptationComparison:
             ),
         ]
         report = FeasibilityReport(
-            model_name="SegResNet",
+            model_name="DynUNet",
             target_anatomy="cerebral_vessels",
             results=results,
         )
         md = report.to_markdown()
         assert "Feasibility" in md
-        assert "SegResNet" in md
+        assert "DynUNet" in md
         assert "lora" in md
         assert "atlas_oneshot" in md

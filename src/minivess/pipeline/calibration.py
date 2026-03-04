@@ -48,10 +48,13 @@ def pixel_temperature_scale(
     # Stable softmax along class axis (axis=1)
     shifted = scaled - scaled.max(axis=1, keepdims=True)
     exp = np.exp(shifted)
-    return (exp / exp.sum(axis=1, keepdims=True)).astype(np.float32)
+    result: NDArray[np.float32] = (exp / exp.sum(axis=1, keepdims=True)).astype(
+        np.float32
+    )
+    return result
 
 
-class MetaTemperatureNetwork(nn.Module):  # type: ignore[misc]
+class MetaTemperatureNetwork(nn.Module):
     """Meta Temperature Network (MTN) for pixel-level calibration.
 
     A lightweight 3D CNN that takes logits as input and produces a
@@ -85,7 +88,7 @@ class MetaTemperatureNetwork(nn.Module):  # type: ignore[misc]
         with torch.no_grad():
             last_conv = self.net[-2]
             if hasattr(last_conv, "bias") and last_conv.bias is not None:
-                last_conv.bias.fill_(0.5413)  # softplus(0.5413) ≈ 1.0
+                last_conv.bias.fill_(0.5413)  # type: ignore[operator]  # softplus(0.5413) ≈ 1.0
 
     def forward(self, logits: Tensor) -> Tensor:
         """Produce pixel-level temperature map from logits.
@@ -99,4 +102,5 @@ class MetaTemperatureNetwork(nn.Module):  # type: ignore[misc]
         -------
         Temperature map (B, 1, D, H, W), all values > 0.
         """
-        return self.net(logits)
+        result: Tensor = self.net(logits)
+        return result

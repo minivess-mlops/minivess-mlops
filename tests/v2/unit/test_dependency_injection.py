@@ -18,7 +18,7 @@ from minivess.config.models import ModelConfig, ModelFamily, TrainingConfig
 
 def _make_model_config() -> ModelConfig:
     return ModelConfig(
-        family=ModelFamily.MONAI_SEGRESNET,
+        family=ModelFamily.MONAI_DYNUNET,
         name="test",
         in_channels=1,
         out_channels=2,
@@ -58,10 +58,10 @@ class TestTrainerCriterionInjection:
 
     def test_injected_criterion_used(self) -> None:
         """When criterion is provided, trainer should use it instead of default."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.pipeline.trainer import SegmentationTrainer
 
-        model = SegResNetAdapter(_make_model_config())
+        model = DynUNetAdapter(_make_model_config())
         custom_criterion = nn.MSELoss()
         trainer = SegmentationTrainer(
             model,
@@ -72,10 +72,10 @@ class TestTrainerCriterionInjection:
 
     def test_default_criterion_when_not_injected(self) -> None:
         """When criterion is not provided, trainer builds its own."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.pipeline.trainer import SegmentationTrainer
 
-        model = SegResNetAdapter(_make_model_config())
+        model = DynUNetAdapter(_make_model_config())
         trainer = SegmentationTrainer(model, _make_training_config())
         assert trainer.criterion is not None
         # Default should not be MSELoss
@@ -87,10 +87,10 @@ class TestTrainerOptimizerInjection:
 
     def test_injected_optimizer_used(self) -> None:
         """When optimizer is provided, trainer should use it."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.pipeline.trainer import SegmentationTrainer
 
-        model = SegResNetAdapter(_make_model_config())
+        model = DynUNetAdapter(_make_model_config())
         custom_optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
         trainer = SegmentationTrainer(
             model,
@@ -101,10 +101,10 @@ class TestTrainerOptimizerInjection:
 
     def test_default_optimizer_when_not_injected(self) -> None:
         """When optimizer is not provided, trainer builds its own."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.pipeline.trainer import SegmentationTrainer
 
-        model = SegResNetAdapter(_make_model_config())
+        model = DynUNetAdapter(_make_model_config())
         trainer = SegmentationTrainer(model, _make_training_config())
         assert trainer.optimizer is not None
 
@@ -114,10 +114,10 @@ class TestTrainerSchedulerInjection:
 
     def test_injected_scheduler_used(self) -> None:
         """When scheduler is provided, trainer should use it."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.pipeline.trainer import SegmentationTrainer
 
-        model = SegResNetAdapter(_make_model_config())
+        model = DynUNetAdapter(_make_model_config())
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
         custom_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10)
         trainer = SegmentationTrainer(
@@ -130,10 +130,10 @@ class TestTrainerSchedulerInjection:
 
     def test_default_scheduler_when_not_injected(self) -> None:
         """When scheduler is not provided, trainer builds its own."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.pipeline.trainer import SegmentationTrainer
 
-        model = SegResNetAdapter(_make_model_config())
+        model = DynUNetAdapter(_make_model_config())
         trainer = SegmentationTrainer(model, _make_training_config())
         assert trainer.scheduler is not None
 
@@ -143,11 +143,11 @@ class TestTrainerInjectionFunctional:
 
     def test_train_with_injected_criterion(self) -> None:
         """Training should work with an injected criterion."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.pipeline.loss_functions import build_loss_function
         from minivess.pipeline.trainer import SegmentationTrainer
 
-        model = SegResNetAdapter(_make_model_config())
+        model = DynUNetAdapter(_make_model_config())
         custom_criterion = build_loss_function("focal")
         trainer = SegmentationTrainer(
             model,

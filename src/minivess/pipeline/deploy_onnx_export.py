@@ -69,7 +69,7 @@ def export_champion_to_onnx(
     else:
         torch.onnx.export(
             model,
-            dummy_input,
+            (dummy_input,),
             str(onnx_path),
             opset_version=opset_version,
             input_names=["input"],
@@ -239,7 +239,7 @@ def _load_dynunet_from_state_dict(
     Infers architecture parameters from the state dict structure when
     model_config is incomplete.
     """
-    from monai.networks.nets import DynUNet
+    from monai.networks.nets import DynUNet  # type: ignore[attr-defined]
 
     config = model_config or {}
 

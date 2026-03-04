@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -85,7 +85,7 @@ class SyntheticVesselGenerator:
     def __init__(self, seed: int | None = None) -> None:
         self._rng = np.random.default_rng(seed)
 
-    def random_tubular_mask(self, shape: tuple[int, ...]) -> NDArray:
+    def random_tubular_mask(self, shape: tuple[int, ...]) -> NDArray[np.uint8]:
         """Generate a random tubular binary mask.
 
         Creates synthetic vessel-like structures using random walks
@@ -110,7 +110,7 @@ class SyntheticVesselGenerator:
                 # Random walk direction
                 direction = self._rng.normal(0, 1, len(shape))
                 direction = direction / (np.linalg.norm(direction) + 1e-8)
-                pos = pos + direction
+                pos = np.asarray(pos + direction, dtype=np.float32)
 
                 # Clamp to volume bounds
                 idx = tuple(
@@ -120,13 +120,13 @@ class SyntheticVesselGenerator:
 
         # Dilate with Gaussian to create tube-like structures
         mask = gaussian_filter(mask, sigma=1.0)
-        return (mask > 0.1).astype(np.uint8)
+        return np.asarray((mask > 0.1).astype(np.uint8))
 
     def randomize_intensity(
         self,
-        volume: NDArray,
+        volume: NDArray[np.floating[Any]],
         scale_range: tuple[float, float] = (0.7, 1.3),
-    ) -> NDArray:
+    ) -> NDArray[np.floating[Any]]:
         """Apply random intensity scaling.
 
         Parameters
@@ -141,9 +141,9 @@ class SyntheticVesselGenerator:
 
     def randomize_contrast(
         self,
-        volume: NDArray,
+        volume: NDArray[np.floating[Any]],
         gamma_range: tuple[float, float] = (0.5, 2.0),
-    ) -> NDArray:
+    ) -> NDArray[np.floating[Any]]:
         """Apply random gamma contrast adjustment.
 
         Parameters
@@ -156,9 +156,14 @@ class SyntheticVesselGenerator:
         gamma = self._rng.uniform(*gamma_range)
         # Clamp to [0, 1] to avoid negative values in power
         clamped = np.clip(volume, 0, 1)
-        return np.power(clamped, gamma).astype(volume.dtype)
+        result: NDArray[np.floating[Any]] = np.power(clamped, gamma).astype(
+            volume.dtype
+        )
+        return result
 
-    def add_noise(self, volume: NDArray, std: float = 0.05) -> NDArray:
+    def add_noise(
+        self, volume: NDArray[np.floating[Any]], std: float = 0.05
+    ) -> NDArray[np.floating[Any]]:
         """Add Gaussian noise to the volume.
 
         Parameters
@@ -195,9 +200,9 @@ class DomainRandomizationPipeline:
 
     def apply(
         self,
-        volume: NDArray,
-        mask: NDArray,
-    ) -> tuple[NDArray, NDArray]:
+        volume: NDArray[np.floating[Any]],
+        mask: NDArray[np.bool_],
+    ) -> tuple[NDArray[np.floating[Any]], NDArray[np.bool_]]:
         """Apply domain randomization to a volume.
 
         Intensity-only transforms — the mask is returned unchanged.
@@ -236,10 +241,10 @@ class DomainRandomizationPipeline:
 
     def generate_batch(
         self,
-        volume: NDArray,
-        mask: NDArray,
+        volume: NDArray[np.floating[Any]],
+        mask: NDArray[np.bool_],
         n: int = 10,
-    ) -> list[tuple[NDArray, NDArray]]:
+    ) -> list[tuple[NDArray[np.floating[Any]], NDArray[np.bool_]]]:
         """Generate N domain-randomized samples from a single volume.
 
         Parameters
@@ -251,7 +256,7 @@ class DomainRandomizationPipeline:
         n:
             Number of randomized samples.
         """
-        batch: list[tuple[NDArray, NDArray]] = []
+        batch: list[tuple[NDArray[np.floating[Any]], NDArray[np.bool_]]] = []
         for i in range(n):
             # Use different sub-seed per sample
             self._generator = SyntheticVesselGenerator(

@@ -73,7 +73,9 @@ def _compose_with_hydra(
 
     # Convert OmegaConf → plain dict
     container = OmegaConf.to_container(cfg, resolve=True)
-    plain: dict[str, Any] = dict(container) if isinstance(container, dict) else {}
+    plain: dict[str, Any] = (
+        {str(k): v for k, v in container.items()} if isinstance(container, dict) else {}
+    )
 
     # Flatten config groups: Hydra nests group contents under the group
     # name (e.g., data.data_dir), but run_experiment.py expects flat keys.

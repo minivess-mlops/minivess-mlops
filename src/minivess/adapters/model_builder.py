@@ -88,21 +88,6 @@ def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
 
         return DynUNetAdapter(config)
 
-    if family == ModelFamily.MONAI_SEGRESNET:
-        from minivess.adapters.segresnet import SegResNetAdapter
-
-        return SegResNetAdapter(config)
-
-    if family == ModelFamily.MONAI_SWINUNETR:
-        from minivess.adapters.swinunetr import SwinUNETRAdapter
-
-        return SwinUNETRAdapter(config)
-
-    if family == ModelFamily.MONAI_VISTA3D:
-        from minivess.adapters.vista3d import Vista3dAdapter
-
-        return Vista3dAdapter(config)
-
     if family == ModelFamily.VESSEL_FM:
         from minivess.adapters.vesselfm import VesselFMAdapter
 
@@ -168,7 +153,7 @@ def apply_wrappers(
             from minivess.adapters.tffm_wrapper import TFFMWrapper
 
             model = TFFMWrapper(
-                base_model=model,
+                base_model=model,  # type: ignore[arg-type]
                 grid_size=wrapper_cfg.get("grid_size", 8),
                 hidden_dim=wrapper_cfg.get("hidden_dim", 32),
                 n_heads=wrapper_cfg.get("n_heads", 4),

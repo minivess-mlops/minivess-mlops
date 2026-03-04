@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -63,13 +63,15 @@ class AtlasRegistrationResult:
         Dense displacement field (only for deformable registration).
     """
 
-    warped_atlas: NDArray
+    warped_atlas: NDArray[np.floating[Any]]
     similarity_score: float
     method: str
-    deformation_field: NDArray | None = None
+    deformation_field: NDArray[np.float32] | None = None
 
 
-def _normalized_cross_correlation(a: NDArray, b: NDArray) -> float:
+def _normalized_cross_correlation(
+    a: NDArray[np.floating[Any]], b: NDArray[np.floating[Any]]
+) -> float:
     """Compute normalized cross-correlation between two volumes."""
     a_norm = a - np.mean(a)
     b_norm = b - np.mean(b)
@@ -79,7 +81,9 @@ def _normalized_cross_correlation(a: NDArray, b: NDArray) -> float:
     return float(np.sum(a_norm * b_norm) / denom)
 
 
-def _affine_register(atlas: NDArray, target: NDArray) -> NDArray:
+def _affine_register(
+    atlas: NDArray[np.floating[Any]], target: NDArray[np.floating[Any]]
+) -> NDArray[np.floating[Any]]:
     """Simple affine registration via intensity-based alignment.
 
     Rescales atlas intensity range to match target statistics.
@@ -94,15 +98,16 @@ def _affine_register(atlas: NDArray, target: NDArray) -> NDArray:
     # Normalize atlas to [0, 1] then rescale to target range
     normalized = (atlas - atlas_min) / (atlas_max - atlas_min)
     warped = normalized * (target_max - target_min) + target_min
-    return warped.astype(target.dtype)
+    result: NDArray[np.floating[Any]] = warped.astype(target.dtype)
+    return result
 
 
 def _deformable_register(
-    atlas: NDArray,
-    target: NDArray,
+    atlas: NDArray[np.floating[Any]],
+    target: NDArray[np.floating[Any]],
     *,
     seed: int | None = None,
-) -> tuple[NDArray, NDArray]:
+) -> tuple[NDArray[np.floating[Any]], NDArray[np.float32]]:
     """Simple deformable registration prototype.
 
     Applies affine registration followed by a small random deformation
@@ -120,8 +125,8 @@ def _deformable_register(
 
 
 def register_atlas(
-    atlas: NDArray,
-    target: NDArray,
+    atlas: NDArray[np.floating[Any]],
+    target: NDArray[np.floating[Any]],
     *,
     method: str = "affine",
     seed: int | None = None,

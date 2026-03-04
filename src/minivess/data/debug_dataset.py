@@ -59,13 +59,13 @@ def create_debug_dataset(
 
         # Create random image volume (float32, similar to microscopy data)
         image = rng.random(volume_shape, dtype=np.float32)
-        img_nii = nib.Nifti1Image(image, affine)
-        nib.save(img_nii, str(raw_dir / f"{stem}.nii.gz"))
+        img_nii = nib.Nifti1Image(image, affine)  # type: ignore[attr-defined,no-untyped-call]
+        nib.save(img_nii, str(raw_dir / f"{stem}.nii.gz"))  # type: ignore[attr-defined]
 
         # Create binary label with vessel-like tube structures
         label = _create_vessel_label(rng, volume_shape)
-        label_nii = nib.Nifti1Image(label, affine)
-        nib.save(label_nii, str(seg_dir / f"{stem}_y.nii.gz"))
+        label_nii = nib.Nifti1Image(label, affine)  # type: ignore[attr-defined,no-untyped-call]
+        nib.save(label_nii, str(seg_dir / f"{stem}_y.nii.gz"))  # type: ignore[attr-defined]
 
     logger.info("Created debug dataset with %d volumes at %s", n_volumes, output_dir)
     return output_dir

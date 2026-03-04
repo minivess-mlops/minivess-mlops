@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from minivess.config.models import ModelConfig
 
 
-class Sam3Adapter(ModelAdapter):  # type: ignore[misc]
+class Sam3Adapter(ModelAdapter):
     """SAM3/MedSAM3 adapter (DEPRECATED).
 
     .. deprecated:: 2.0.0

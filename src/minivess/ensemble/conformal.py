@@ -105,7 +105,7 @@ class ConformalPredictor:
         -------
         ConformalResult with boolean prediction sets.
         """
-        if not self.is_calibrated:
+        if self._quantile is None:
             msg = "ConformalPredictor must be calibrated before predict()"
             raise RuntimeError(msg)
 

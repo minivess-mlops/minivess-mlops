@@ -54,7 +54,7 @@ class MorphologicalConformalResult:
     alpha: float
 
 
-def _covers(dilated: NDArray, ground_truth: NDArray) -> bool:
+def _covers(dilated: NDArray[np.bool_], ground_truth: NDArray[np.bool_]) -> bool:
     """Check if dilated mask fully covers ground truth."""
     gt_bool = ground_truth.astype(bool)
     if not gt_bool.any():
@@ -62,7 +62,7 @@ def _covers(dilated: NDArray, ground_truth: NDArray) -> bool:
     return bool(np.all(gt_bool <= dilated))
 
 
-def _contained_in(eroded: NDArray, ground_truth: NDArray) -> bool:
+def _contained_in(eroded: NDArray[np.bool_], ground_truth: NDArray[np.bool_]) -> bool:
     """Check if eroded mask is fully contained in ground truth."""
     eroded_bool = eroded.astype(bool)
     if not eroded_bool.any():
@@ -71,9 +71,9 @@ def _contained_in(eroded: NDArray, ground_truth: NDArray) -> bool:
 
 
 def _find_min_dilation(
-    prediction: NDArray,
-    ground_truth: NDArray,
-    structuring_element: NDArray,
+    prediction: NDArray[np.bool_],
+    ground_truth: NDArray[np.bool_],
+    structuring_element: NDArray[np.bool_],
     max_radius: int,
 ) -> int:
     """Find minimal dilation iterations for prediction to cover ground truth."""
@@ -91,9 +91,9 @@ def _find_min_dilation(
 
 
 def _find_min_erosion(
-    prediction: NDArray,
-    ground_truth: NDArray,
-    structuring_element: NDArray,
+    prediction: NDArray[np.bool_],
+    ground_truth: NDArray[np.bool_],
+    structuring_element: NDArray[np.bool_],
     max_radius: int,
 ) -> int:
     """Find minimal erosion iterations for eroded prediction to be inside GT."""
@@ -133,7 +133,7 @@ class MorphologicalConformalPredictor:
         self.max_radius = max_radius
         self._dilation_radius: int | None = None
         self._erosion_radius: int | None = None
-        self._struct_elem: NDArray | None = None
+        self._struct_elem: NDArray[np.bool_] | None = None
 
     @property
     def is_calibrated(self) -> bool:
@@ -158,8 +158,8 @@ class MorphologicalConformalPredictor:
 
     def calibrate(
         self,
-        predictions: list[NDArray],
-        labels: list[NDArray],
+        predictions: list[NDArray[np.bool_]],
+        labels: list[NDArray[np.bool_]],
     ) -> None:
         """Calibrate dilation and erosion radii on holdout volumes.
 
@@ -212,7 +212,7 @@ class MorphologicalConformalPredictor:
 
     def predict(
         self,
-        prediction: NDArray,
+        prediction: NDArray[np.bool_],
     ) -> MorphologicalConformalResult:
         """Produce inner/outer contour prediction sets.
 
@@ -225,7 +225,7 @@ class MorphologicalConformalPredictor:
         -------
         MorphologicalConformalResult with inner/outer contours.
         """
-        if not self.is_calibrated:
+        if self._dilation_radius is None or self._erosion_radius is None:
             msg = "Must calibrate() before predict()"
             raise RuntimeError(msg)
 
@@ -267,7 +267,7 @@ class MorphologicalConformalPredictor:
 
 def compute_morphological_metrics(
     result: MorphologicalConformalResult,
-    ground_truth: NDArray,
+    ground_truth: NDArray[np.bool_],
 ) -> dict[str, float]:
     """Compute morphological conformal prediction metrics.
 

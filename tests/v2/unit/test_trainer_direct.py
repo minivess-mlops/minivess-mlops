@@ -14,7 +14,7 @@ from minivess.config.models import ModelConfig, ModelFamily, TrainingConfig
 
 def _make_config() -> ModelConfig:
     return ModelConfig(
-        family=ModelFamily.MONAI_SEGRESNET,
+        family=ModelFamily.MONAI_DYNUNET,
         name="test",
         in_channels=1,
         out_channels=2,
@@ -54,20 +54,20 @@ class TestTrainEpoch:
 
     def test_returns_epoch_result(self) -> None:
         """train_epoch should return an EpochResult."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.pipeline.trainer import EpochResult, SegmentationTrainer
 
-        model = SegResNetAdapter(_make_config())
+        model = DynUNetAdapter(_make_config())
         trainer = SegmentationTrainer(model, _make_training_config())
         result = trainer.train_epoch(_fake_loader())
         assert isinstance(result, EpochResult)
 
     def test_loss_is_finite(self) -> None:
         """Training loss should be finite (not NaN or Inf)."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.pipeline.trainer import SegmentationTrainer
 
-        model = SegResNetAdapter(_make_config())
+        model = DynUNetAdapter(_make_config())
         trainer = SegmentationTrainer(model, _make_training_config())
         result = trainer.train_epoch(_fake_loader())
         assert result.loss > 0
@@ -76,10 +76,10 @@ class TestTrainEpoch:
 
     def test_loss_decreases_over_epochs(self) -> None:
         """Loss should generally decrease with more training."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.pipeline.trainer import SegmentationTrainer
 
-        model = SegResNetAdapter(_make_config())
+        model = DynUNetAdapter(_make_config())
         loader = _fake_loader(n_batches=4)
         trainer = SegmentationTrainer(model, _make_training_config(learning_rate=0.01))
         loss1 = trainer.train_epoch(loader).loss
@@ -92,10 +92,10 @@ class TestTrainEpoch:
 
     def test_empty_loader(self) -> None:
         """train_epoch with empty loader should return 0.0 loss."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.pipeline.trainer import SegmentationTrainer
 
-        model = SegResNetAdapter(_make_config())
+        model = DynUNetAdapter(_make_config())
         trainer = SegmentationTrainer(model, _make_training_config())
         result = trainer.train_epoch([])
         assert result.loss == 0.0
@@ -111,20 +111,20 @@ class TestValidateEpoch:
 
     def test_returns_epoch_result(self) -> None:
         """validate_epoch should return an EpochResult."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.pipeline.trainer import EpochResult, SegmentationTrainer
 
-        model = SegResNetAdapter(_make_config())
+        model = DynUNetAdapter(_make_config())
         trainer = SegmentationTrainer(model, _make_training_config())
         result = trainer.validate_epoch(_fake_loader())
         assert isinstance(result, EpochResult)
 
     def test_no_gradient_tracking(self) -> None:
         """Validation should not compute gradients."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.pipeline.trainer import SegmentationTrainer
 
-        model = SegResNetAdapter(_make_config())
+        model = DynUNetAdapter(_make_config())
         trainer = SegmentationTrainer(model, _make_training_config())
         trainer.validate_epoch(_fake_loader())
         # After validation, no parameter should have accumulated grads
@@ -133,10 +133,10 @@ class TestValidateEpoch:
 
     def test_model_in_eval_mode_during_validation(self) -> None:
         """Model should be in eval mode after validate_epoch."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.pipeline.trainer import SegmentationTrainer
 
-        model = SegResNetAdapter(_make_config())
+        model = DynUNetAdapter(_make_config())
         trainer = SegmentationTrainer(model, _make_training_config())
         trainer.validate_epoch(_fake_loader())
         assert not model.training

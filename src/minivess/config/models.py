@@ -10,9 +10,6 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 class ModelFamily(StrEnum):
     """Supported model families."""
 
-    MONAI_SEGRESNET = "segresnet"
-    MONAI_SWINUNETR = "swinunetr"
-    MONAI_VISTA3D = "vista3d"
     MONAI_DYNUNET = "dynunet"
     VESSEL_FM = "vesselfm"
     COMMA_MAMBA = "comma_mamba"

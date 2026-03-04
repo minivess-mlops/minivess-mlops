@@ -68,13 +68,15 @@ class LoraModelAdapter(ModelAdapter):
 
         lora_config = LoraConfig(
             r=lora_rank,
-            lora_alpha=lora_alpha,
+            lora_alpha=int(lora_alpha),
             lora_dropout=lora_dropout,
             target_modules=target_modules,
         )
 
         # Apply PEFT to the inner network
-        self._peft_model = get_peft_model(base_model.net, lora_config)
+        net = base_model.net
+        assert isinstance(net, torch.nn.Module)
+        self._peft_model = get_peft_model(net, lora_config)  # type: ignore[arg-type]
 
         # Freeze base model parameters, only LoRA params trainable
         for name, param in self._peft_model.named_parameters():
@@ -95,9 +97,11 @@ class LoraModelAdapter(ModelAdapter):
     @staticmethod
     def _find_target_modules(model: ModelAdapter) -> list[str]:
         """Find linear and conv3d layer names suitable for LoRA."""
+        net = model.net
+        assert isinstance(net, torch.nn.Module)
         targets: list[str] = []
-        for name, module in model.net.named_modules():
-            if isinstance(module, (torch.nn.Linear, torch.nn.Conv3d)) and name:
+        for name, module in net.named_modules():
+            if isinstance(module, torch.nn.Linear | torch.nn.Conv3d) and name:
                 targets.append(name)
         return targets
 
@@ -109,12 +113,11 @@ class LoraModelAdapter(ModelAdapter):
         """
         if self._peft_model is not None:
             output = self._peft_model(images)
-            logits = output[0] if isinstance(output, (list, tuple)) else output
-        else:
-            result = self._base_model(images, **kwargs)
-            return result
+            logits: Tensor = output[0] if isinstance(output, list | tuple) else output
+            return self._build_output(logits, "lora_adapted")
 
-        return self._build_output(logits, "lora_adapted")
+        result: SegmentationOutput = self._base_model(images, **kwargs)
+        return result
 
     def get_config(self) -> AdapterConfigInfo:
         base_config = self._base_model.get_config()
@@ -164,7 +167,7 @@ class LoraModelAdapter(ModelAdapter):
             merged.eval()
             torch.onnx.export(
                 merged,
-                example_input,
+                (example_input,),
                 str(path),
                 input_names=["images"],
                 output_names=["logits"],

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from minivess.adapters.segresnet import SegResNetAdapter
+from minivess.adapters.dynunet import DynUNetAdapter
 from minivess.config.models import ModelConfig, ModelFamily, TrainingConfig
 from minivess.pipeline.loss_functions import build_loss_function
 from minivess.pipeline.metrics import MetricResult, SegmentationMetrics
@@ -177,12 +177,12 @@ class TestSegmentationTrainer:
             warmup_epochs=1,
         )
         model_config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="test",
             in_channels=1,
             out_channels=2,
         )
-        model = SegResNetAdapter(model_config)
+        model = DynUNetAdapter(model_config)
         return SegmentationTrainer(model, config, device="cpu")
 
     def test_build_optimizer_adamw(self, trainer: SegmentationTrainer) -> None:
@@ -200,12 +200,12 @@ class TestSegmentationTrainer:
             optimizer="sgd",
         )
         model_config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="test-sgd",
             in_channels=1,
             out_channels=2,
         )
-        model = SegResNetAdapter(model_config)
+        model = DynUNetAdapter(model_config)
         trainer = SegmentationTrainer(model, config, device="cpu")
         assert trainer.optimizer.__class__.__name__ == "SGD"
 
@@ -218,12 +218,12 @@ class TestSegmentationTrainer:
             optimizer="lamb",  # valid in config but not in trainer
         )
         model_config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="test-bad",
             in_channels=1,
             out_channels=2,
         )
-        model = SegResNetAdapter(model_config)
+        model = DynUNetAdapter(model_config)
         with pytest.raises(ValueError, match="Unknown optimizer"):
             SegmentationTrainer(model, config, device="cpu")
 

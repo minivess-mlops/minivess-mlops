@@ -60,9 +60,9 @@ class ConformalEvaluator:
 
     def evaluate(
         self,
-        predictions: list[NDArray],
-        softmax_probs: list[NDArray],
-        labels: list[NDArray],
+        predictions: list[NDArray[np.bool_]],
+        softmax_probs: list[NDArray[np.float32]],
+        labels: list[NDArray[np.bool_]],
         *,
         calibration_fraction: float = 0.3,
     ) -> dict[str, dict[str, float]]:
@@ -198,10 +198,10 @@ class ConformalEvaluator:
 
     def _run_voxel(
         self,
-        cal_probs: list[NDArray],
-        cal_labels: list[NDArray],
-        test_probs: list[NDArray],
-        test_labels: list[NDArray],
+        cal_probs: list[NDArray[np.float32]],
+        cal_labels: list[NDArray[np.bool_]],
+        test_probs: list[NDArray[np.float32]],
+        test_labels: list[NDArray[np.bool_]],
     ) -> dict[str, float]:
         """Run voxel-level split conformal prediction."""
         try:
@@ -237,10 +237,10 @@ class ConformalEvaluator:
 
     def _run_morphological(
         self,
-        cal_preds: list[NDArray],
-        cal_labels: list[NDArray],
-        test_preds: list[NDArray],
-        test_labels: list[NDArray],
+        cal_preds: list[NDArray[np.bool_]],
+        cal_labels: list[NDArray[np.bool_]],
+        test_preds: list[NDArray[np.bool_]],
+        test_labels: list[NDArray[np.bool_]],
     ) -> dict[str, float]:
         """Run morphological conformal prediction."""
         try:
@@ -271,10 +271,10 @@ class ConformalEvaluator:
 
     def _run_distance(
         self,
-        cal_preds: list[NDArray],
-        cal_labels: list[NDArray],
-        test_preds: list[NDArray],
-        test_labels: list[NDArray],
+        cal_preds: list[NDArray[np.bool_]],
+        cal_labels: list[NDArray[np.bool_]],
+        test_preds: list[NDArray[np.bool_]],
+        test_labels: list[NDArray[np.bool_]],
     ) -> dict[str, float]:
         """Run distance-transform conformal prediction."""
         try:
@@ -301,10 +301,10 @@ class ConformalEvaluator:
 
     def _run_risk_control(
         self,
-        cal_probs: list[NDArray],
-        cal_labels: list[NDArray],
-        test_probs: list[NDArray],
-        test_labels: list[NDArray],
+        cal_probs: list[NDArray[np.float32]],
+        cal_labels: list[NDArray[np.bool_]],
+        test_probs: list[NDArray[np.float32]],
+        test_labels: list[NDArray[np.bool_]],
     ) -> dict[str, float]:
         """Run risk-controlling prediction sets."""
         try:

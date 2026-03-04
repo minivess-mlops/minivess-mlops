@@ -113,7 +113,8 @@ class MambaBlock(nn.Module):
         y = x_ssm * self.act(z)
         y = self.out_proj(y)
 
-        return y + residual
+        result: Tensor = y + residual
+        return result
 
 
 class CoordinateEmbedding(nn.Module):
@@ -158,7 +159,8 @@ class CoordinateEmbedding(nn.Module):
 
         # Concatenate coords with features, then project back
         x_coord = torch.cat([x, grid_d, grid_h, grid_w], dim=1)
-        return self.proj(x_coord)
+        result: Tensor = self.proj(x_coord)
+        return result
 
 
 class _CommaEncoderBlock(nn.Module):
@@ -223,7 +225,8 @@ class _CommaDecoderBlock(nn.Module):
     def forward(self, x: Tensor, skip: Tensor) -> Tensor:
         x = self.upsample(x)
         x = torch.cat([x, skip], dim=1)
-        return self.conv(x)
+        result: Tensor = self.conv(x)
+        return result
 
 
 class CommaAdapter(ModelAdapter):
@@ -331,14 +334,15 @@ class CommaAdapter(ModelAdapter):
             try:
                 onnx_program = torch.onnx.export(
                     self,
-                    example_input,
+                    (example_input,),
                     dynamo=True,
                 )
-                onnx_program.save(str(path))
+                if onnx_program is not None:
+                    onnx_program.save(str(path))
             except Exception:
                 torch.onnx.export(
                     self,
-                    example_input,
+                    (example_input,),
                     str(path),
                     input_names=["images"],
                     output_names=["logits"],

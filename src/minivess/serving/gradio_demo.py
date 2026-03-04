@@ -29,8 +29,8 @@ def load_nifti_volume(file_path: str) -> NDArray[np.float32]:
     """
     import nibabel as nib
 
-    nii = nib.load(file_path)
-    data = np.asarray(nii.dataobj, dtype=np.float32)
+    nii = nib.load(file_path)  # type: ignore[attr-defined]
+    data = np.asarray(nii.dataobj, dtype=np.float32)  # type: ignore[attr-defined]
     return data
 
 
@@ -57,7 +57,7 @@ def extract_slice(
     # Clamp index to valid range
     max_idx = volume.shape[axis] - 1
     index = max(0, min(index, max_idx))
-    return np.take(volume, index, axis=axis).astype(np.float32)
+    return np.asarray(np.take(volume, index, axis=axis), dtype=np.float32)
 
 
 def build_demo(
@@ -108,7 +108,7 @@ def build_demo(
             h, w = volume_slice.shape
             input_tensor = volume_slice.reshape(1, 1, 1, h, w).astype(np.float32)
             result = engine.predict(input_tensor)
-            mask = result["segmentation"][0, 0].astype(np.float32)
+            mask = result.segmentation[0, 0].astype(np.float32)
             info = f"ONNX model prediction (shape: {mask.shape})"
 
         return mask, info

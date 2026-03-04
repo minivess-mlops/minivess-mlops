@@ -29,10 +29,7 @@ from minivess.adapters.model_builder import build_adapter
 from minivess.adapters.sam3_hybrid import Sam3HybridAdapter
 from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
-from minivess.adapters.segresnet import SegResNetAdapter
-from minivess.adapters.swinunetr import SwinUNETRAdapter
 from minivess.adapters.vesselfm import VesselFMAdapter
-from minivess.adapters.vista3d import Vista3dAdapter
 
 __all__ = [
     "AdaptationMethod",
@@ -54,11 +51,8 @@ __all__ = [
     "Sam3HybridAdapter",
     "Sam3TopoLoraAdapter",
     "Sam3VanillaAdapter",
-    "SegResNetAdapter",
     "SegmentationOutput",
-    "SwinUNETRAdapter",
     "VesselFMAdapter",
-    "Vista3dAdapter",
     "build_adapter",
     "compare_adaptation_methods",
     "register_atlas",

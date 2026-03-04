@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import torch
 
-from minivess.adapters.segresnet import SegResNetAdapter
+from minivess.adapters.dynunet import DynUNetAdapter
 from minivess.compliance.audit import AuditTrail
 from minivess.compliance.model_card import ModelCard
 from minivess.config.models import (
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 def test_full_pipeline_e2e(
     tmp_path: Path,
     model_config: ModelConfig,
-    segresnet_adapter: SegResNetAdapter,
+    dynunet_adapter: DynUNetAdapter,
     synthetic_batch: dict[str, torch.Tensor],
     synthetic_loader: list[dict[str, torch.Tensor]],
 ) -> None:
@@ -56,9 +56,9 @@ def test_full_pipeline_e2e(
     assert labels.shape == (2, 1, 16, 16, 16)
 
     # ------------------------------------------------------------------
-    # Step 2: Instantiate SegResNet adapter & verify forward pass
+    # Step 2: Instantiate DynUNet adapter & verify forward pass
     # ------------------------------------------------------------------
-    model = segresnet_adapter
+    model = dynunet_adapter
     model.eval()
     with torch.no_grad():
         output = model(images)
@@ -128,12 +128,12 @@ def test_full_pipeline_e2e(
     # ------------------------------------------------------------------
     # Create a second model to form a 2-member ensemble
     model_config_2 = ModelConfig(
-        family=ModelFamily.MONAI_SEGRESNET,
+        family=ModelFamily.MONAI_DYNUNET,
         name="ensemble-member-2",
         in_channels=1,
         out_channels=2,
     )
-    model_2 = SegResNetAdapter(model_config_2)
+    model_2 = DynUNetAdapter(model_config_2)
 
     ensemble_config = EnsembleConfig(
         strategy=EnsembleStrategy.MEAN,
@@ -201,7 +201,7 @@ def test_full_pipeline_e2e(
     # Step 7: Generate a model card
     # ------------------------------------------------------------------
     card = ModelCard(
-        model_name="SegResNet-E2E",
+        model_name="DynUNet-E2E",
         model_version="0.1.0",
         model_type="3D Segmentation",
         description="End-to-end integration test model",
@@ -213,7 +213,7 @@ def test_full_pipeline_e2e(
         authors=["Integration Test Suite"],
     )
     markdown = card.to_markdown()
-    assert "SegResNet-E2E" in markdown
+    assert "DynUNet-E2E" in markdown
     assert "v0.1.0" in markdown
     assert "dice" in markdown.lower()
 
@@ -222,7 +222,7 @@ def test_full_pipeline_e2e(
     card_path.write_text(markdown, encoding="utf-8")
     assert card_path.exists()
     reloaded = card_path.read_text(encoding="utf-8")
-    assert "SegResNet-E2E" in reloaded
+    assert "DynUNet-E2E" in reloaded
 
     # ------------------------------------------------------------------
     # Step 8: Create audit trail entries
@@ -240,7 +240,7 @@ def test_full_pipeline_e2e(
 
     # Log model training
     train_entry = audit.log_model_training(
-        model_name="SegResNet-E2E",
+        model_name="DynUNet-E2E",
         config=training_config.model_dump(),
         actor="integration-test",
     )
@@ -248,7 +248,7 @@ def test_full_pipeline_e2e(
 
     # Log test evaluation
     eval_entry = audit.log_test_evaluation(
-        model_name="SegResNet-E2E",
+        model_name="DynUNet-E2E",
         metrics=metric_result.to_dict(),
         actor="integration-test",
     )
@@ -256,7 +256,7 @@ def test_full_pipeline_e2e(
 
     # Log deployment
     deploy_entry = audit.log_model_deployment(
-        model_name="SegResNet-E2E",
+        model_name="DynUNet-E2E",
         version="0.1.0",
         actor="integration-test",
     )

@@ -130,7 +130,7 @@ class TestMetricDefinition:
             description="Overlap",
         )
         with pytest.raises((AttributeError, TypeError)):
-            defn.name = "new_name"
+            defn.name = "new_name"  # type: ignore[misc]
 
     def test_bounds_is_tuple(self) -> None:
         defn = MetricDefinition(

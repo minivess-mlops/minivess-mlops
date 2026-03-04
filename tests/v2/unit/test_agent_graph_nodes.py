@@ -77,7 +77,7 @@ class TestTrainNode:
         from minivess.agents.graph import train_node
 
         state: dict[str, Any] = {
-            "model_name": "segresnet",
+            "model_name": "dynunet",
             "dataset": "synthetic",
             "status": "data_ready",
             "results": {},
@@ -92,7 +92,7 @@ class TestTrainNode:
         from minivess.agents.graph import train_node
 
         state: dict[str, Any] = {
-            "model_name": "segresnet",
+            "model_name": "dynunet",
             "dataset": "synthetic",
             "status": "data_ready",
             "results": {},
@@ -108,7 +108,7 @@ class TestTrainNode:
         from minivess.agents.graph import train_node
 
         state: dict[str, Any] = {
-            "model_name": "segresnet",
+            "model_name": "dynunet",
             "dataset": "synthetic",
             "status": "data_ready",
             "results": {},
@@ -147,7 +147,7 @@ class TestEvaluateNode:
         from minivess.agents.graph import evaluate_node
 
         state: dict[str, Any] = {
-            "model_name": "segresnet",
+            "model_name": "dynunet",
             "dataset": "synthetic",
             "status": "trained",
             "results": {"train_loss": 0.3},
@@ -162,7 +162,7 @@ class TestEvaluateNode:
         from minivess.agents.graph import evaluate_node
 
         state: dict[str, Any] = {
-            "model_name": "segresnet",
+            "model_name": "dynunet",
             "dataset": "synthetic",
             "status": "trained",
             "results": {},
@@ -178,7 +178,7 @@ class TestEvaluateNode:
         from minivess.agents.graph import evaluate_node
 
         state: dict[str, Any] = {
-            "model_name": "segresnet",
+            "model_name": "dynunet",
             "dataset": "synthetic",
             "status": "trained",
             "results": {"train_loss": 0.3, "val_loss": 0.4},
@@ -204,7 +204,7 @@ class TestRegisterNode:
         from minivess.agents.graph import register_node
 
         state: dict[str, Any] = {
-            "model_name": "segresnet",
+            "model_name": "dynunet",
             "dataset": "synthetic",
             "status": "evaluated",
             "results": {},
@@ -219,7 +219,7 @@ class TestRegisterNode:
         from minivess.agents.graph import register_node
 
         state: dict[str, Any] = {
-            "model_name": "segresnet",
+            "model_name": "dynunet",
             "dataset": "synthetic",
             "status": "evaluated",
             "results": {},
@@ -234,7 +234,7 @@ class TestRegisterNode:
         from minivess.agents.graph import register_node
 
         state: dict[str, Any] = {
-            "model_name": "vista3d",
+            "model_name": "dynunet",
             "dataset": "synthetic",
             "status": "evaluated",
             "results": {},
@@ -242,7 +242,7 @@ class TestRegisterNode:
             "metrics_pass": True,
         }
         result = register_node(state)
-        assert any("vista3d" in m for m in result["messages"])
+        assert any("dynunet" in m for m in result["messages"])
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +258,7 @@ class TestNotifyNode:
         from minivess.agents.graph import notify_node
 
         state: dict[str, Any] = {
-            "model_name": "segresnet",
+            "model_name": "dynunet",
             "dataset": "synthetic",
             "status": "evaluated",
             "results": {},
@@ -273,7 +273,7 @@ class TestNotifyNode:
         from minivess.agents.graph import notify_node
 
         state: dict[str, Any] = {
-            "model_name": "segresnet",
+            "model_name": "dynunet",
             "dataset": "synthetic",
             "status": "evaluated",
             "results": {},
@@ -288,7 +288,7 @@ class TestNotifyNode:
         from minivess.agents.graph import notify_node
 
         state: dict[str, Any] = {
-            "model_name": "segresnet",
+            "model_name": "dynunet",
             "dataset": "synthetic",
             "status": "evaluated",
             "results": {},
@@ -312,7 +312,7 @@ class TestRouteAfterEvaluate:
         from minivess.agents.graph import _route_after_evaluate
 
         state: dict[str, Any] = {
-            "model_name": "segresnet",
+            "model_name": "dynunet",
             "dataset": "synthetic",
             "status": "evaluated",
             "results": {},
@@ -326,7 +326,7 @@ class TestRouteAfterEvaluate:
         from minivess.agents.graph import _route_after_evaluate
 
         state: dict[str, Any] = {
-            "model_name": "segresnet",
+            "model_name": "dynunet",
             "dataset": "synthetic",
             "status": "evaluated",
             "results": {},
@@ -340,7 +340,7 @@ class TestRouteAfterEvaluate:
         from minivess.agents.graph import _route_after_evaluate
 
         state: dict[str, Any] = {
-            "model_name": "segresnet",
+            "model_name": "dynunet",
             "dataset": "synthetic",
             "status": "evaluated",
             "results": {},

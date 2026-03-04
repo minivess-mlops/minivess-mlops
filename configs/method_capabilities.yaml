@@ -10,9 +10,6 @@ version: "1.0"
 # Models that are implemented and testable via build_adapter()
 implemented_models:
   - dynunet
-  - segresnet
-  - swinunetr
-  - vista3d
   - vesselfm
   - comma_mamba
   - ulike_mamba
@@ -40,9 +37,6 @@ deployment_exclusions:
 # Per-model default loss (for practical variant — one loss per model)
 model_default_loss:
   dynunet: cbdice_cldice
-  segresnet: cbdice_cldice
-  swinunetr: cbdice_cldice
-  vista3d: dice_ce
   vesselfm: cbdice_cldice
   comma_mamba: cbdice_cldice
   ulike_mamba: cbdice_cldice

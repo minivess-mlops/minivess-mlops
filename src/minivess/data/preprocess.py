@@ -59,7 +59,7 @@ def preprocess_dataset(
     img_out.mkdir(parents=True, exist_ok=True)
     lbl_out.mkdir(parents=True, exist_ok=True)
 
-    volume_reports: list[dict] = []
+    volume_reports: list[dict[str, object]] = []
 
     for pair in pairs:
         img_path = Path(pair["image"])
@@ -92,19 +92,21 @@ def preprocess_dataset(
     return report_path
 
 
-def _collect_volume_stats(img_path: Path, lbl_path: Path, filename: str) -> dict:
+def _collect_volume_stats(
+    img_path: Path, lbl_path: Path, filename: str
+) -> dict[str, object]:
     """Collect per-volume statistics for the validation report."""
-    img_nii = nib.load(img_path)
-    img_data = np.asarray(img_nii.dataobj)
+    img_nii = nib.load(img_path)  # type: ignore[attr-defined]
+    img_data = np.asarray(img_nii.dataobj)  # type: ignore[attr-defined]
     header = img_nii.header
 
     # Extract voxel spacing from header
-    zooms = header.get_zooms()
+    zooms = header.get_zooms()  # type: ignore[attr-defined]
     spacing = [float(z) for z in zooms[:3]] if zooms else [1.0, 1.0, 1.0]
 
     # Load label for foreground stats
-    lbl_nii = nib.load(lbl_path)
-    lbl_data = np.asarray(lbl_nii.dataobj)
+    lbl_nii = nib.load(lbl_path)  # type: ignore[attr-defined]
+    lbl_data = np.asarray(lbl_nii.dataobj)  # type: ignore[attr-defined]
     fg_ratio = float(np.mean(lbl_data > 0))
 
     return {

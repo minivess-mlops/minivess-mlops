@@ -40,7 +40,7 @@ class MultiRaterData:
     """
 
     volume_id: str
-    rater_masks: list[NDArray] = field(default_factory=list)
+    rater_masks: list[NDArray[np.bool_]] = field(default_factory=list)
 
     @property
     def num_raters(self) -> int:
@@ -67,7 +67,7 @@ class GenerativeUQConfig:
     num_samples: int = 16
 
 
-def _dice_distance(a: NDArray, b: NDArray) -> float:
+def _dice_distance(a: NDArray[np.bool_], b: NDArray[np.bool_]) -> float:
     """Compute 1 - Dice between two binary masks."""
     a_bool = a.astype(bool)
     b_bool = b.astype(bool)
@@ -76,12 +76,12 @@ def _dice_distance(a: NDArray, b: NDArray) -> float:
     if total == 0:
         return 0.0
     dice = 2.0 * intersection / total
-    return 1.0 - dice
+    return float(1.0 - dice)
 
 
 def generalized_energy_distance(
-    samples: list[NDArray],
-    references: list[NDArray],
+    samples: list[NDArray[np.bool_]],
+    references: list[NDArray[np.bool_]],
 ) -> float:
     """Compute Generalized Energy Distance (GED) between sample sets.
 
@@ -137,8 +137,8 @@ def generalized_energy_distance(
 
 
 def q_dice(
-    prob_map: NDArray,
-    reference: NDArray,
+    prob_map: NDArray[np.float32],
+    reference: NDArray[np.bool_],
     thresholds: list[float] | None = None,
 ) -> float:
     """Compute Q-Dice (Quantized Dice) from QUBIQ benchmark.
@@ -186,8 +186,8 @@ class GenerativeUQEvaluator:
     def add_volume(
         self,
         volume_id: str,
-        prediction_samples: list[NDArray],
-        rater_annotations: list[NDArray],
+        prediction_samples: list[NDArray[np.bool_]],
+        rater_annotations: list[NDArray[np.bool_]],
     ) -> None:
         """Register prediction samples and rater annotations for a volume.
 

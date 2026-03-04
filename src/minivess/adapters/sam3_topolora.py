@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class LoRALinear(nn.Module):  # type: ignore[misc]
+class LoRALinear(nn.Module):
     """Low-Rank Adaptation layer wrapping an existing linear/conv layer.
 
     Adds a low-rank decomposition: output = original(x) + (B @ A)(x) * scaling.
@@ -99,12 +99,14 @@ class LoRALinear(nn.Module):  # type: ignore[misc]
             x_avg = self.lora_dropout(x_avg)
             lora_out = (x_avg @ self.lora_A.T @ self.lora_B.T) * self.scaling
             lora_out = lora_out.unsqueeze(-1).unsqueeze(-1)  # (B, C_out, 1, 1)
-            return original_out + lora_out
+            result: Tensor = original_out + lora_out
+            return result
         else:
             x_dropped = self.lora_dropout(x)
             lora_out = (x_dropped @ self.lora_A.T @ self.lora_B.T) * self.scaling
 
-        return original_out + lora_out
+        result_lin: Tensor = original_out + lora_out
+        return result_lin
 
 
 def _apply_lora_to_encoder(
@@ -267,13 +269,14 @@ class Sam3TopoLoraAdapter(ModelAdapter):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.eval()
 
-        class _LogitsWrapper(torch.nn.Module):  # type: ignore[misc]
+        class _LogitsWrapper(torch.nn.Module):
             def __init__(self, adapter: Sam3TopoLoraAdapter) -> None:
                 super().__init__()
                 self.adapter = adapter
 
             def forward(self, x: Tensor) -> Tensor:
-                return self.adapter(x).logits
+                result: Tensor = self.adapter(x).logits
+                return result
 
         wrapper = _LogitsWrapper(self)
         wrapper.eval()
@@ -281,7 +284,7 @@ class Sam3TopoLoraAdapter(ModelAdapter):
             warnings.simplefilter("ignore")
             torch.onnx.export(
                 wrapper,
-                example_input,
+                (example_input,),
                 str(path),
                 input_names=["images"],
                 output_names=["logits"],

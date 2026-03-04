@@ -13,7 +13,7 @@ References:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -129,4 +129,4 @@ def varisco_heatmap(
     -------
     Heatmap (B, D, H, W) with values in [0, C].
     """
-    return prediction_sets.sum(axis=1).astype(np.int64)
+    return cast("NDArray[np.int64]", prediction_sets.sum(axis=1).astype(np.int64))

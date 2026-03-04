@@ -84,12 +84,12 @@ class TestModelConfigNegative:
     def test_zero_in_channels(self) -> None:
         """in_channels=0 should be rejected (ge=1)."""
         with pytest.raises(ValidationError):
-            ModelConfig(family=ModelFamily.MONAI_SEGRESNET, name="test", in_channels=0)
+            ModelConfig(family=ModelFamily.MONAI_DYNUNET, name="test", in_channels=0)
 
     def test_zero_out_channels(self) -> None:
         """out_channels=0 should be rejected (ge=1)."""
         with pytest.raises(ValidationError):
-            ModelConfig(family=ModelFamily.MONAI_SEGRESNET, name="test", out_channels=0)
+            ModelConfig(family=ModelFamily.MONAI_DYNUNET, name="test", out_channels=0)
 
     def test_lora_rank_zero(self) -> None:
         """lora_rank=0 should be rejected (ge=1)."""

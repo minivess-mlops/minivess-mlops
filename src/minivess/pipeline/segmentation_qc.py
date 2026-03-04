@@ -75,19 +75,21 @@ class SegmentationQC:
         self.max_volume_ratio = max_volume_ratio
         self.min_confidence = min_confidence
 
-    def count_connected_components(self, mask: NDArray) -> int:
+    def count_connected_components(self, mask: NDArray[np.bool_]) -> int:
         """Count the number of connected components in a binary mask."""
         labeled, n_components = ndimage.label(mask)
         return int(n_components)
 
-    def compute_volume_ratio(self, mask: NDArray) -> float:
+    def compute_volume_ratio(self, mask: NDArray[np.bool_]) -> float:
         """Compute the fraction of voxels that are foreground."""
         total = mask.size
         if total == 0:
             return 0.0
         return float(np.sum(mask > 0)) / total
 
-    def compute_confidence(self, prob_map: NDArray, mask: NDArray) -> float:
+    def compute_confidence(
+        self, prob_map: NDArray[np.float32], mask: NDArray[np.bool_]
+    ) -> float:
         """Compute mean probability in the foreground region.
 
         Parameters
@@ -102,7 +104,7 @@ class SegmentationQC:
             return 0.0
         return float(np.mean(fg_voxels))
 
-    def check_border_touching(self, mask: NDArray) -> bool:
+    def check_border_touching(self, mask: NDArray[np.bool_]) -> bool:
         """Check if the foreground mask touches the volume boundaries."""
         if mask.ndim < 3:  # noqa: PLR2004
             return False
@@ -119,8 +121,8 @@ class SegmentationQC:
 
 
 def evaluate_segmentation_quality(
-    mask: NDArray,
-    prob_map: NDArray,
+    mask: NDArray[np.bool_],
+    prob_map: NDArray[np.float32],
     *,
     max_components: int = 10,
     max_volume_ratio: float = 0.30,

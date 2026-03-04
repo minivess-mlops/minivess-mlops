@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 import torch
 from torch import Tensor, nn
 
@@ -27,7 +26,7 @@ class _StubAdapter(ModelAdapter):
     def __init__(self) -> None:
         super().__init__()
         self.config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="stub",
             in_channels=1,
             out_channels=2,
@@ -107,7 +106,7 @@ class TestBuildConfig:
         """_build_config should auto-populate family, name, channels."""
         adapter = _StubAdapter()
         cfg = adapter._build_config()
-        assert cfg.family == "segresnet"
+        assert cfg.family == "dynunet"
         assert cfg.name == "stub"
         assert cfg.in_channels == 1
         assert cfg.out_channels == 2
@@ -130,82 +129,8 @@ class TestBuildConfig:
         """_StubAdapter.get_config should use _build_config correctly."""
         adapter = _StubAdapter()
         cfg = adapter.get_config()
-        assert cfg.family == "segresnet"
+        assert cfg.family == "dynunet"
         assert cfg.extras["custom_key"] == "custom_val"
-
-
-# =========================================================================
-# R5.3/R5.5: Verify real adapters can use helpers
-# =========================================================================
-
-
-class TestAdaptersUseBuildHelpers:
-    """Verify that real adapters use _build_output and _build_config."""
-
-    @pytest.fixture
-    def segresnet_adapter(self) -> ModelAdapter:
-        config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
-            name="test-segresnet",
-            in_channels=1,
-            out_channels=2,
-        )
-        from minivess.adapters.segresnet import SegResNetAdapter
-
-        return SegResNetAdapter(config)
-
-    @pytest.fixture
-    def swinunetr_adapter(self) -> ModelAdapter:
-        config = ModelConfig(
-            family=ModelFamily.MONAI_SWINUNETR,
-            name="test-swinunetr",
-            in_channels=1,
-            out_channels=2,
-        )
-        from minivess.adapters.swinunetr import SwinUNETRAdapter
-
-        return SwinUNETRAdapter(config, feature_size=24)
-
-    def test_segresnet_forward_still_works(
-        self, segresnet_adapter: ModelAdapter
-    ) -> None:
-        """SegResNetAdapter should still produce correct output after refactor."""
-        x = torch.randn(1, 1, 32, 32, 16)
-        output = segresnet_adapter(x)
-        assert isinstance(output, SegmentationOutput)
-        assert output.prediction.shape == (1, 2, 32, 32, 16)
-        assert output.metadata["architecture"] == "segresnet"
-        sums = output.prediction.sum(dim=1)
-        assert torch.allclose(sums, torch.ones_like(sums), atol=1e-5)
-
-    def test_segresnet_get_config_still_works(
-        self, segresnet_adapter: ModelAdapter
-    ) -> None:
-        """SegResNetAdapter.get_config should still produce correct output."""
-        cfg = segresnet_adapter.get_config()
-        assert cfg.family == "segresnet"
-        assert cfg.in_channels == 1
-        assert cfg.out_channels == 2
-        assert cfg.trainable_params is not None
-        assert cfg.extras["init_filters"] == 32
-
-    def test_swinunetr_forward_still_works(
-        self, swinunetr_adapter: ModelAdapter
-    ) -> None:
-        """SwinUNETRAdapter should still produce correct output after refactor."""
-        x = torch.randn(1, 1, 64, 64, 32)
-        output = swinunetr_adapter(x)
-        assert isinstance(output, SegmentationOutput)
-        assert output.prediction.shape == (1, 2, 64, 64, 32)
-        assert output.metadata["architecture"] == "swinunetr"
-
-    def test_swinunetr_get_config_still_works(
-        self, swinunetr_adapter: ModelAdapter
-    ) -> None:
-        """SwinUNETRAdapter.get_config should still produce correct output."""
-        cfg = swinunetr_adapter.get_config()
-        assert cfg.family == "swinunetr"
-        assert cfg.extras["feature_size"] == 24
 
 
 # =========================================================================

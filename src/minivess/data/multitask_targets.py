@@ -87,8 +87,8 @@ class LoadAuxiliaryTargetsd:
             nifti_path = self.precomputed_dir / f"{volume_id}_{config.suffix}.nii.gz"
             if nifti_path.exists():
                 logger.debug("Loading precomputed %s from %s", config.name, nifti_path)
-                img = nib.load(str(nifti_path))
-                return np.asarray(img.dataobj, dtype=np.float32)
+                img = nib.load(str(nifti_path))  # type: ignore[attr-defined]
+                return np.asarray(img.dataobj, dtype=np.float32)  # type: ignore[attr-defined]
 
         # Fall back to on-the-fly computation
         logger.debug(

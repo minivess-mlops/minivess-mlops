@@ -17,7 +17,10 @@ import logging
 import networkx as nx
 import numpy as np
 import torch
-from monai.metrics import HausdorffDistanceMetric, SurfaceDiceMetric
+from monai.metrics import (  # type: ignore[attr-defined]
+    HausdorffDistanceMetric,
+    SurfaceDiceMetric,
+)
 from scipy import ndimage
 from scipy.optimize import linear_sum_assignment
 
@@ -62,6 +65,7 @@ def compute_nsd(
         reduction="mean",
     )
     result = metric(pred_tensor, target_tensor)
+    assert isinstance(result, torch.Tensor)  # noqa: S101
     value = result.item()
 
     if np.isnan(value):
@@ -104,6 +108,7 @@ def compute_hd95(
         reduction="mean",
     )
     result = metric(pred_tensor, target_tensor)
+    assert isinstance(result, torch.Tensor)  # noqa: S101
     value = result.item()
 
     if np.isnan(value):
@@ -286,7 +291,7 @@ def _compute_persistence_diagram(mask: np.ndarray, gudhi_module: object) -> np.n
     # Get all finite persistence pairs
     pairs = cc.persistence_intervals_in_dimension(0)
     finite_pairs = pairs[np.isfinite(pairs).all(axis=1)]
-    return finite_pairs
+    return np.asarray(finite_pairs)
 
 
 # ---------------------------------------------------------------------------
@@ -538,7 +543,7 @@ def compute_skeleton_recall(
         return 1.0
 
     # Compute true GT skeleton via skimage
-    gt_skeleton = skeletonize(gt_bin).astype(np.uint8)
+    gt_skeleton = skeletonize(gt_bin).astype(np.uint8)  # type: ignore[no-untyped-call]
 
     if gt_skeleton.sum() == 0:
         # Thin structure: fall back to the mask itself

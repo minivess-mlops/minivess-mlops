@@ -23,9 +23,6 @@ class MemoryBudgetError(ValueError):
 # VRAM overhead per model family in megabytes (model weights + framework overhead)
 _MODEL_VRAM_OVERHEAD_MB: dict[str, int] = {
     "dynunet": 300,
-    "segresnet": 200,
-    "swinunetr": 500,
-    "vista3d": 600,
     "vesselfm": 400,
     "comma_mamba": 400,
     "sam3_lora": 400,
@@ -81,7 +78,7 @@ def validate_patch_divisibility(
         3D patch size as (x, y, z).
     model_divisor:
         Required divisor for the model architecture (e.g. 8 for DynUNet
-        with 4 pooling levels, 16 for SwinUNETR).
+        with 4 pooling levels).
 
     Raises
     ------

@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.nn.functional as F
-from monai.networks.nets import DynUNet
+from monai.networks.nets import DynUNet  # type: ignore[attr-defined]
 from torch import Tensor, nn
 
 from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class GatedFeatureFusion(nn.Module):  # type: ignore[misc]
+class GatedFeatureFusion(nn.Module):
     """Gated residual fusion of SAM features into 3D features.
 
     ``output = f_3d + sigmoid(alpha) * proj_conv(f_sam)``
@@ -261,13 +261,14 @@ class Sam3HybridAdapter(ModelAdapter):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.eval()
 
-        class _LogitsWrapper(torch.nn.Module):  # type: ignore[misc]
+        class _LogitsWrapper(torch.nn.Module):
             def __init__(self, adapter: Sam3HybridAdapter) -> None:
                 super().__init__()
                 self.adapter = adapter
 
             def forward(self, x: Tensor) -> Tensor:
-                return self.adapter(x).logits
+                result: Tensor = self.adapter(x).logits
+                return result
 
         wrapper = _LogitsWrapper(self)
         wrapper.eval()
@@ -275,7 +276,7 @@ class Sam3HybridAdapter(ModelAdapter):
             warnings.simplefilter("ignore")
             torch.onnx.export(
                 wrapper,
-                example_input,
+                (example_input,),
                 str(path),
                 input_names=["images"],
                 output_names=["logits"],

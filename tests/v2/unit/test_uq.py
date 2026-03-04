@@ -158,18 +158,18 @@ class TestMCDropout:
         r2 = predictor.predict(x)
         assert torch.allclose(r1.prediction, r2.prediction, atol=1e-6)
 
-    def test_mc_dropout_with_segresnet(self) -> None:
-        """MC Dropout should work with the real SegResNet adapter."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+    def test_mc_dropout_with_dynunet(self) -> None:
+        """MC Dropout should work with the real DynUNet adapter."""
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.ensemble.mc_dropout import MCDropoutPredictor
 
         config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="test_mc",
             in_channels=1,
             out_channels=2,
         )
-        model = SegResNetAdapter(config)
+        model = DynUNetAdapter(config)
         predictor = MCDropoutPredictor(model, n_samples=3)
         x = torch.randn(1, 1, 32, 32, 16)
         result = predictor.predict(x)
@@ -240,18 +240,18 @@ class TestDeepEnsembles:
         with pytest.raises(ValueError, match="at least one model"):
             DeepEnsemblePredictor([])
 
-    def test_ensemble_uq_with_segresnet(self) -> None:
-        """Deep ensemble should work with real SegResNet adapters."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+    def test_ensemble_uq_with_dynunet(self) -> None:
+        """Deep ensemble should work with real DynUNet adapters."""
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.ensemble.deep_ensembles import DeepEnsemblePredictor
 
         config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="test_ens",
             in_channels=1,
             out_channels=2,
         )
-        models = [SegResNetAdapter(config) for _ in range(3)]
+        models = [DynUNetAdapter(config) for _ in range(3)]
         predictor = DeepEnsemblePredictor(models)
         x = torch.randn(1, 1, 32, 32, 16)
         result = predictor.predict(x)

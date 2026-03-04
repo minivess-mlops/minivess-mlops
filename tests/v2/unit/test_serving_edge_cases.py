@@ -44,17 +44,17 @@ class TestOnnxErrorPaths:
 
         import torch
 
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.config.models import ModelConfig, ModelFamily
         from minivess.serving.onnx_inference import OnnxSegmentationInference
 
         config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="test_meta",
             in_channels=1,
             out_channels=2,
         )
-        model = SegResNetAdapter(config)
+        model = DynUNetAdapter(config)
         with tempfile.NamedTemporaryFile(suffix=".onnx", delete=False) as f:
             onnx_path = Path(f.name)
             example = torch.randn(1, 1, 16, 16, 16)
@@ -190,14 +190,14 @@ class TestClinicalPipelineEdgeCases:
         )
 
         config = ClinicalDeployConfig(
-            model_name="segresnet",
+            model_name="dynunet",
             model_path="/model.onnx",
             version="1.2.0",
         )
         pipeline = ClinicalDeploymentPipeline(config)
         manifest = pipeline.generate_manifest()
         assert isinstance(manifest, MonaiDeployManifest)
-        assert manifest.model_name == "segresnet"
+        assert manifest.model_name == "dynunet"
         assert manifest.version == "1.2.0"
 
     def test_to_markdown_contains_validation(self) -> None:

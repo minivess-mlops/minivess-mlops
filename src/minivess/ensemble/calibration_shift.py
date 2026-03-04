@@ -54,12 +54,12 @@ class ShiftedCalibrationResult:
 
 
 def apply_synthetic_shift(
-    data: NDArray,
+    data: NDArray[np.float64],
     *,
     shift_type: str,
     magnitude: float,
     seed: int | None = None,
-) -> NDArray:
+) -> NDArray[np.float64]:
     """Apply a synthetic domain shift to confidence data.
 
     Parameters
@@ -89,10 +89,10 @@ def apply_synthetic_shift(
 
 def evaluate_calibration_transfer(
     *,
-    source_confidences: NDArray,
-    source_accuracies: NDArray,
-    target_confidences: NDArray,
-    target_accuracies: NDArray,
+    source_confidences: NDArray[np.float64],
+    source_accuracies: NDArray[np.float64],
+    target_confidences: NDArray[np.float64],
+    target_accuracies: NDArray[np.float64],
     n_bins: int = 15,
     source_domain: str = "source",
     target_domain: str = "target",
@@ -142,8 +142,8 @@ class CalibrationShiftAnalyzer:
     def add_domain(
         self,
         name: str,
-        confidences: NDArray,
-        accuracies: NDArray,
+        confidences: NDArray[np.float64],
+        accuracies: NDArray[np.float64],
     ) -> None:
         """Register a domain's predictions.
 

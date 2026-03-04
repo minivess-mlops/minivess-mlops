@@ -17,9 +17,11 @@ Use this skill when:
 - **Repository**: `minivess-mlops/minivess-mlops`
 - **Project**: `Minivess MLOps` (ID: `PVT_kwDOCPpnGc4AYSAM`, Number: 1)
 - **Priority field ID**: `PVTSSF_lADOCPpnGc4AYSAMzgPhgsk`
-  - High: `9ac26196` (P0 — critical, must do next)
-  - Medium: `9d51ccf2` (P1 — high priority, should do soon)
-  - Low: `17b6c978` (P2 — medium priority, nice to have)
+  - P0: `c128192a` (Must do next)
+  - P1: `b419b06f` (Should do soon)
+  - P2: `5bb35602` (Nice to have)
+  - P3: `4b1f5dd3` (At some point maybe)
+- **See also**: `.claude/skills/sync-roadmap/SKILL.md` for all field IDs
 
 ## Labels
 | Label | Color | Description |

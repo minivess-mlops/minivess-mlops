@@ -6,7 +6,7 @@ import torch
 
 # Import directly from submodules to avoid __init__.py transitive imports
 # (e.g. minivess.validation.__init__ pulls in pandera which may be absent).
-from minivess.adapters.segresnet import SegResNetAdapter
+from minivess.adapters.dynunet import DynUNetAdapter
 from minivess.config.models import (
     EnsembleConfig,
     EnsembleStrategy,
@@ -26,16 +26,16 @@ class TestEnsemblePredictor:
     """Test ensemble prediction strategies."""
 
     @pytest.fixture
-    def models(self) -> list[SegResNetAdapter]:
+    def models(self) -> list[DynUNetAdapter]:
         config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="test",
             in_channels=1,
             out_channels=2,
         )
-        return [SegResNetAdapter(config) for _ in range(3)]
+        return [DynUNetAdapter(config) for _ in range(3)]
 
-    def test_mean_ensemble(self, models: list[SegResNetAdapter]) -> None:
+    def test_mean_ensemble(self, models: list[DynUNetAdapter]) -> None:
         config = EnsembleConfig(strategy=EnsembleStrategy.MEAN, num_members=3)
         predictor = EnsemblePredictor(models, config)
         x = torch.randn(1, 1, 32, 32, 16)
@@ -44,7 +44,7 @@ class TestEnsemblePredictor:
         # Probabilities should sum to ~1
         assert torch.allclose(result.sum(dim=1), torch.ones(1, 32, 32, 16), atol=0.1)
 
-    def test_majority_voting(self, models: list[SegResNetAdapter]) -> None:
+    def test_majority_voting(self, models: list[DynUNetAdapter]) -> None:
         config = EnsembleConfig(strategy=EnsembleStrategy.MAJORITY_VOTE, num_members=3)
         predictor = EnsemblePredictor(models, config)
         x = torch.randn(1, 1, 32, 32, 16)
@@ -53,7 +53,7 @@ class TestEnsemblePredictor:
         # One-hot encoded — should have only 0s and 1s
         assert torch.all((result == 0) | (result == 1))
 
-    def test_weighted_mean(self, models: list[SegResNetAdapter]) -> None:
+    def test_weighted_mean(self, models: list[DynUNetAdapter]) -> None:
         config = EnsembleConfig(
             strategy=EnsembleStrategy.WEIGHTED,
             num_members=3,

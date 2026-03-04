@@ -61,19 +61,19 @@ class TestOnnxInferenceMetadata:
 
 
 class TestOnnxExportRoundtrip:
-    """Export SegResNet to ONNX and run inference."""
+    """Export DynUNet to ONNX and run inference."""
 
     def test_onnx_export_creates_file(self, tmp_path: Path) -> None:
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.config.models import ModelConfig, ModelFamily
 
         config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="onnx-test",
             in_channels=1,
             out_channels=2,
         )
-        adapter = SegResNetAdapter(config)
+        adapter = DynUNetAdapter(config)
         onnx_path = tmp_path / "model.onnx"
         example = torch.randn(1, 1, 16, 16, 8)
         adapter.export_onnx(onnx_path, example)
@@ -84,17 +84,17 @@ class TestOnnxExportRoundtrip:
     def test_onnx_roundtrip_inference(self, tmp_path: Path) -> None:
         """Export → load → predict should produce valid output."""
         pytest.importorskip("onnxruntime")
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.config.models import ModelConfig, ModelFamily
         from minivess.serving.onnx_inference import OnnxSegmentationInference
 
         config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="roundtrip",
             in_channels=1,
             out_channels=2,
         )
-        adapter = SegResNetAdapter(config)
+        adapter = DynUNetAdapter(config)
         onnx_path = tmp_path / "model.onnx"
         example = torch.randn(1, 1, 16, 16, 8)
         adapter.export_onnx(onnx_path, example)
@@ -110,17 +110,17 @@ class TestOnnxExportRoundtrip:
     def test_onnx_output_shape_matches_pytorch(self, tmp_path: Path) -> None:
         """ONNX output shape should match PyTorch model output."""
         pytest.importorskip("onnxruntime")
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.config.models import ModelConfig, ModelFamily
         from minivess.serving.onnx_inference import OnnxSegmentationInference
 
         config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="shape-check",
             in_channels=1,
             out_channels=2,
         )
-        adapter = SegResNetAdapter(config)
+        adapter = DynUNetAdapter(config)
         onnx_path = tmp_path / "model.onnx"
         example = torch.randn(1, 1, 16, 16, 8)
         adapter.export_onnx(onnx_path, example)
@@ -145,17 +145,17 @@ class TestOnnxExportRoundtrip:
     def test_onnx_metadata(self, tmp_path: Path) -> None:
         """ONNX engine should report model metadata."""
         pytest.importorskip("onnxruntime")
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.config.models import ModelConfig, ModelFamily
         from minivess.serving.onnx_inference import OnnxSegmentationInference
 
         config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="meta",
             in_channels=1,
             out_channels=2,
         )
-        adapter = SegResNetAdapter(config)
+        adapter = DynUNetAdapter(config)
         onnx_path = tmp_path / "model.onnx"
         adapter.export_onnx(onnx_path, torch.randn(1, 1, 16, 16, 8))
 
@@ -332,18 +332,18 @@ class TestOnnxServingIntegration:
     def test_export_serve_predict_roundtrip(self, tmp_path: Path) -> None:
         """Full serving pipeline: adapter → ONNX → engine → prediction."""
         pytest.importorskip("onnxruntime")
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.config.models import ModelConfig, ModelFamily
         from minivess.serving.onnx_inference import OnnxSegmentationInference
 
         # Create and export model
         config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="e2e-test",
             in_channels=1,
             out_channels=2,
         )
-        adapter = SegResNetAdapter(config)
+        adapter = DynUNetAdapter(config)
         onnx_path = tmp_path / "model.onnx"
         adapter.export_onnx(onnx_path, torch.randn(1, 1, 16, 16, 8))
 

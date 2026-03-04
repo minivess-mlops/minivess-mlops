@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from torch import nn
 
 
-class CenterlineBoundaryDiceLoss(nn.Module):  # type: ignore[misc]
+class CenterlineBoundaryDiceLoss(nn.Module):
     """Centerline-boundary Dice loss combining standard Dice with
     distance-weighted components for centerline and boundary fidelity.
 

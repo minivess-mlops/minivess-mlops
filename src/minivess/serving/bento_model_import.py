@@ -90,7 +90,7 @@ def import_champion_to_bento(
 
         bento_model = bentoml.onnx.save_model(
             tag,
-            str(onnx_path),
+            str(onnx_path),  # type: ignore[arg-type]
             metadata=metadata,
         )
         actual_tag = str(bento_model.tag)

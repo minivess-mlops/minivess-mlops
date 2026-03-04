@@ -7,6 +7,8 @@ import torch
 from torch import Tensor
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from minivess.adapters.base import ModelAdapter
     from minivess.config.models import EnsembleConfig
 
@@ -77,7 +79,7 @@ class EnsemblePredictor:
 
 def greedy_soup(
     models: list[ModelAdapter],
-    val_metric_fn: object,
+    val_metric_fn: Callable[..., float],
     val_loader: object,
 ) -> dict[str, Tensor]:
     """Greedy model soup: iteratively average weights, keep if metric improves.

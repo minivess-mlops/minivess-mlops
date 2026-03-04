@@ -53,7 +53,7 @@ def extract_vessel_graph(
         return nx.Graph()
 
     # Step 1: Skeletonize via skimage Lee94
-    skeleton = skeletonize(mask_bin).astype(np.uint8)
+    skeleton = skeletonize(mask_bin).astype(np.uint8)  # type: ignore[no-untyped-call]
 
     if skeleton.sum() == 0:
         return nx.Graph()

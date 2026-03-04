@@ -20,7 +20,7 @@ import torch.nn.functional as F  # noqa: N812
 from torch import Tensor, nn
 
 
-class SPWLoss(nn.Module):  # type: ignore[misc]
+class SPWLoss(nn.Module):
     """Steerable Pyramid Weighted cross-entropy loss.
 
     Uses multi-scale decomposition of the ground truth to weight the

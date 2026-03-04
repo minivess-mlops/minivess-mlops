@@ -20,18 +20,6 @@ class TestModelProfile:
         assert profile.divisor == 8
         assert profile.model_overhead_mb > 0
 
-    def test_load_segresnet_profile(self):
-        """SegResNet profile loads."""
-        profile = load_model_profile("segresnet")
-        assert profile.name == "segresnet"
-        assert profile.divisor == 8
-
-    def test_load_vista3d_profile(self):
-        """VISTA-3D profile loads with higher divisor."""
-        profile = load_model_profile("vista3d")
-        assert profile.name == "vista3d"
-        assert profile.divisor >= 16
-
     def test_load_custom_profile(self, tmp_path):
         """Custom YAML profile can be loaded from arbitrary path."""
         custom = {
@@ -58,11 +46,9 @@ class TestModelProfile:
             load_model_profile("nonexistent_model_xyz")
 
     def test_list_available_profiles(self):
-        """Lists at least dynunet, segresnet, vista3d."""
+        """Lists at least dynunet."""
         profiles = list_available_profiles()
         assert "dynunet" in profiles
-        assert "segresnet" in profiles
-        assert "vista3d" in profiles
 
 
 class TestVRAMEstimation:

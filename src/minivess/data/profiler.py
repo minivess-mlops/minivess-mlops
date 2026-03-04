@@ -92,14 +92,14 @@ def scan_volume(path: Path) -> VolumeStats:
         Dataclass with shape, voxel spacing, intensity statistics and an
         ``is_anisotropic`` flag (True when max / min spacing ratio > 2.0).
     """
-    img = nib.load(str(path))
-    data: np.ndarray = np.asarray(img.dataobj, dtype=np.float32)
+    img = nib.load(str(path))  # type: ignore[attr-defined]
+    data: np.ndarray = np.asarray(img.dataobj, dtype=np.float32)  # type: ignore[attr-defined]
 
     # Shape as plain integers (avoids numpy int64 in frozen dataclass)
     shape: tuple[int, ...] = tuple(int(s) for s in data.shape)
 
     # Voxel spacings from the affine diagonal (absolute values, first 3 dims)
-    zooms = img.header.get_zooms()
+    zooms = img.header.get_zooms()  # type: ignore[attr-defined]
     spacing: tuple[float, ...] = tuple(float(abs(z)) for z in zooms[:3])
 
     # Intensity statistics over the raw float32 array
