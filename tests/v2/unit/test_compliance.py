@@ -29,7 +29,7 @@ class TestAuditTrail:
         from minivess.compliance.audit import AuditTrail
 
         trail = AuditTrail()
-        entry = trail.log_model_training("segresnet", {"epochs": 100})
+        entry = trail.log_model_training("dynunet", {"epochs": 100})
         assert entry.event_type == "MODEL_TRAINING"
 
     def test_save_and_load(self, tmp_path: Path) -> None:
@@ -61,21 +61,21 @@ class TestModelCard:
     def test_creation(self) -> None:
         from minivess.compliance.model_card import ModelCard
 
-        card = ModelCard(model_name="SegResNet", model_version="1.0")
-        assert card.model_name == "SegResNet"
+        card = ModelCard(model_name="DynUNet", model_version="1.0")
+        assert card.model_name == "DynUNet"
         assert card.model_type == "3D Segmentation"
 
     def test_to_markdown(self) -> None:
         from minivess.compliance.model_card import ModelCard
 
         card = ModelCard(
-            model_name="SegResNet",
+            model_name="DynUNet",
             model_version="1.0",
             metrics={"dice": 0.85, "f1": 0.82},
             authors=["Researcher A"],
         )
         md = card.to_markdown()
-        assert "# Model Card: SegResNet v1.0" in md
+        assert "# Model Card: DynUNet v1.0" in md
         assert "0.8500" in md
         assert "Researcher A" in md
 

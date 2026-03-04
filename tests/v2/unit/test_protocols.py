@@ -14,31 +14,15 @@ from __future__ import annotations
 class TestPredictorProtocol:
     """Test that adapters satisfy the Predictor protocol."""
 
-    def test_segresnet_is_predictor(self) -> None:
-        """SegResNetAdapter should satisfy the Predictor protocol."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+    def test_dynunet_is_predictor(self) -> None:
+        """DynUNetAdapter should satisfy the Predictor protocol."""
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.config.models import ModelConfig, ModelFamily
         from minivess.utils.protocols import Predictor
 
-        model = SegResNetAdapter(
+        model = DynUNetAdapter(
             ModelConfig(
-                family=ModelFamily.MONAI_SEGRESNET,
-                name="test",
-                in_channels=1,
-                out_channels=2,
-            )
-        )
-        assert isinstance(model, Predictor)
-
-    def test_swinunetr_is_predictor(self) -> None:
-        """SwinUNETRAdapter should satisfy the Predictor protocol."""
-        from minivess.adapters.swinunetr import SwinUNETRAdapter
-        from minivess.config.models import ModelConfig, ModelFamily
-        from minivess.utils.protocols import Predictor
-
-        model = SwinUNETRAdapter(
-            ModelConfig(
-                family=ModelFamily.MONAI_SWINUNETR,
+                family=ModelFamily.MONAI_DYNUNET,
                 name="test",
                 in_channels=1,
                 out_channels=2,
@@ -55,15 +39,15 @@ class TestPredictorProtocol:
 class TestCheckpointableProtocol:
     """Test that adapters satisfy the Checkpointable protocol."""
 
-    def test_segresnet_is_checkpointable(self) -> None:
-        """SegResNetAdapter should be Checkpointable."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+    def test_dynunet_is_checkpointable(self) -> None:
+        """DynUNetAdapter should be Checkpointable."""
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.config.models import ModelConfig, ModelFamily
         from minivess.utils.protocols import Checkpointable
 
-        model = SegResNetAdapter(
+        model = DynUNetAdapter(
             ModelConfig(
-                family=ModelFamily.MONAI_SEGRESNET,
+                family=ModelFamily.MONAI_DYNUNET,
                 name="test",
                 in_channels=1,
                 out_channels=2,

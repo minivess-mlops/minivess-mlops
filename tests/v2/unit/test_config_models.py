@@ -75,7 +75,7 @@ class TestDefaultConstruction:
         assert cfg.num_workers == 4
 
     def test_model_config_defaults(self) -> None:
-        cfg = ModelConfig(family=ModelFamily.MONAI_SEGRESNET, name="segresnet")
+        cfg = ModelConfig(family=ModelFamily.MONAI_DYNUNET, name="dynunet")
         assert cfg.in_channels == 1
         assert cfg.out_channels == 2
         assert cfg.pretrained is False
@@ -100,7 +100,7 @@ class TestDefaultConstruction:
         cfg = ExperimentConfig(
             experiment_name="test",
             data=DataConfig(dataset_name="minivess"),
-            model=ModelConfig(family=ModelFamily.MONAI_SEGRESNET, name="segresnet"),
+            model=ModelConfig(family=ModelFamily.MONAI_DYNUNET, name="dynunet"),
             training=TrainingConfig(),
         )
         assert cfg.experiment_name == "test"
@@ -204,13 +204,13 @@ class TestJsonSerialization:
         cfg = ExperimentConfig(
             experiment_name="test_experiment",
             data=DataConfig(dataset_name="minivess"),
-            model=ModelConfig(family=ModelFamily.MONAI_VISTA3D, name="vista3d"),
+            model=ModelConfig(family=ModelFamily.MONAI_DYNUNET, name="dynunet"),
             training=TrainingConfig(max_epochs=50, learning_rate=5e-5),
             tags={"project": "minivess", "phase": "0"},
         )
         json_str = cfg.model_dump_json()
         restored = ExperimentConfig.model_validate_json(json_str)
         assert restored.experiment_name == cfg.experiment_name
-        assert restored.model.family == ModelFamily.MONAI_VISTA3D
+        assert restored.model.family == ModelFamily.MONAI_DYNUNET
         assert restored.training.max_epochs == 50
         assert restored.tags["project"] == "minivess"

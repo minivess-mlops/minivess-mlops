@@ -13,15 +13,15 @@ def _make_sample_audit_trail() -> AuditTrail:
         file_paths=["/data/raw/vol001.nii.gz", "/data/raw/vol002.nii.gz"],
     )
     trail.log_model_training(
-        model_name="segresnet_v1",
+        model_name="dynunet_v1",
         config={"learning_rate": 1e-4, "batch_size": 2, "max_epochs": 100},
     )
     trail.log_test_evaluation(
-        model_name="segresnet_v1",
+        model_name="dynunet_v1",
         metrics={"val_dice": 0.85, "val_cldice": 0.72, "hausdorff95": 3.2},
     )
     trail.log_model_deployment(
-        model_name="segresnet_v1",
+        model_name="dynunet_v1",
         version="1.0.0",
     )
     return trail

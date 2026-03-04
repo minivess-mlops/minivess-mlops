@@ -19,8 +19,8 @@ class TestAdapterConfigInfo:
         """AdapterConfigInfo should expose family, name, and extras."""
         from minivess.adapters.base import AdapterConfigInfo
 
-        info = AdapterConfigInfo(family="segresnet", name="test")
-        assert info.family == "segresnet"
+        info = AdapterConfigInfo(family="dynunet", name="test")
+        assert info.family == "dynunet"
         assert info.name == "test"
         assert info.extras == {}
 
@@ -38,7 +38,7 @@ class TestAdapterConfigInfo:
         from minivess.adapters.base import AdapterConfigInfo
 
         info = AdapterConfigInfo(
-            family="segresnet",
+            family="dynunet",
             name="test",
             in_channels=1,
             out_channels=2,
@@ -53,7 +53,7 @@ class TestAdapterConfigInfo:
         from minivess.adapters.base import AdapterConfigInfo
 
         info = AdapterConfigInfo(
-            family="segresnet",
+            family="dynunet",
             name="test",
             in_channels=1,
             out_channels=2,
@@ -61,7 +61,7 @@ class TestAdapterConfigInfo:
             extras={"init_filters": 32},
         )
         d = info.to_dict()
-        assert d["family"] == "segresnet"
+        assert d["family"] == "dynunet"
         assert d["name"] == "test"
         assert d["in_channels"] == 1
         assert d["init_filters"] == 32
@@ -75,46 +75,6 @@ class TestAdapterConfigInfo:
 
 class TestAdaptersReturnConfigInfo:
     """Test that concrete adapters return AdapterConfigInfo from get_config()."""
-
-    def test_segresnet_returns_config_info(self) -> None:
-        """SegResNetAdapter.get_config() should return AdapterConfigInfo."""
-        from minivess.adapters.base import AdapterConfigInfo
-        from minivess.adapters.segresnet import SegResNetAdapter
-        from minivess.config.models import ModelConfig, ModelFamily
-
-        model = SegResNetAdapter(
-            ModelConfig(
-                family=ModelFamily.MONAI_SEGRESNET,
-                name="test",
-                in_channels=1,
-                out_channels=2,
-            )
-        )
-        cfg = model.get_config()
-        assert isinstance(cfg, AdapterConfigInfo)
-        assert cfg.family == ModelFamily.MONAI_SEGRESNET.value
-        assert cfg.in_channels == 1
-        assert cfg.out_channels == 2
-        assert cfg.trainable_params is not None and cfg.trainable_params > 0
-
-    def test_swinunetr_returns_config_info(self) -> None:
-        """SwinUNETRAdapter.get_config() should return AdapterConfigInfo."""
-        from minivess.adapters.base import AdapterConfigInfo
-        from minivess.adapters.swinunetr import SwinUNETRAdapter
-        from minivess.config.models import ModelConfig, ModelFamily
-
-        model = SwinUNETRAdapter(
-            ModelConfig(
-                family=ModelFamily.MONAI_SWINUNETR,
-                name="test",
-                in_channels=1,
-                out_channels=2,
-            )
-        )
-        cfg = model.get_config()
-        assert isinstance(cfg, AdapterConfigInfo)
-        assert cfg.extras["feature_size"] == 48
-        assert cfg.extras["depths"] == (2, 2, 2, 2)
 
     def test_dynunet_returns_config_info(self) -> None:
         """DynUNetAdapter.get_config() should return AdapterConfigInfo."""
@@ -155,13 +115,13 @@ class TestAdaptersReturnConfigInfo:
     def test_lora_returns_config_info_with_lora_fields(self) -> None:
         """LoraModelAdapter.get_config() should include LoRA extras."""
         from minivess.adapters.base import AdapterConfigInfo
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.adapters.lora import LoraModelAdapter
-        from minivess.adapters.segresnet import SegResNetAdapter
         from minivess.config.models import ModelConfig, ModelFamily
 
-        base = SegResNetAdapter(
+        base = DynUNetAdapter(
             ModelConfig(
-                family=ModelFamily.MONAI_SEGRESNET,
+                family=ModelFamily.MONAI_DYNUNET,
                 name="test",
                 in_channels=1,
                 out_channels=2,

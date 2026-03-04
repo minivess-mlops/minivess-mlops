@@ -113,7 +113,7 @@ class TestMonaiDeployManifest:
         manifest = MonaiDeployManifest(
             app_name="minivess-segmentation",
             version="1.0.0",
-            model_name="segresnet_v1",
+            model_name="dynunet_v1",
         )
         assert manifest.app_name == "minivess-segmentation"
         assert manifest.version == "1.0.0"
@@ -125,7 +125,7 @@ class TestMonaiDeployManifest:
         manifest = MonaiDeployManifest(
             app_name="minivess-segmentation",
             version="1.0.0",
-            model_name="segresnet_v1",
+            model_name="dynunet_v1",
         )
         d = manifest.to_dict()
         assert d["app_name"] == "minivess-segmentation"
@@ -138,7 +138,7 @@ class TestMonaiDeployManifest:
         manifest = MonaiDeployManifest(
             app_name="minivess-segmentation",
             version="1.0.0",
-            model_name="segresnet_v1",
+            model_name="dynunet_v1",
         )
         md = manifest.to_markdown()
         assert "MONAI" in md
@@ -161,8 +161,8 @@ class TestClinicalDeploymentPipeline:
         )
 
         config = ClinicalDeployConfig(
-            model_path="/models/segresnet.onnx",
-            model_name="segresnet_v1",
+            model_path="/models/dynunet.onnx",
+            model_name="dynunet_v1",
             version="1.0.0",
             deployment_target="clinical",
         )
@@ -178,7 +178,7 @@ class TestClinicalDeploymentPipeline:
         )
 
         config = ClinicalDeployConfig(
-            model_path="/models/segresnet.onnx",
+            model_path="/models/dynunet.onnx",
             model_name="",
             version="1.0.0",
         )
@@ -194,12 +194,12 @@ class TestClinicalDeploymentPipeline:
         )
 
         config = ClinicalDeployConfig(
-            model_path="/models/segresnet.onnx",
-            model_name="segresnet_v1",
+            model_path="/models/dynunet.onnx",
+            model_name="dynunet_v1",
             version="1.0.0",
             deployment_target="clinical",
         )
         pipeline = ClinicalDeploymentPipeline(config)
         md = pipeline.to_markdown()
         assert "Clinical" in md
-        assert "segresnet_v1" in md
+        assert "dynunet_v1" in md

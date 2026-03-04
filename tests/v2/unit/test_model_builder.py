@@ -76,16 +76,3 @@ class TestBuildAdapter:
         )
         with pytest.raises(ValueError, match="Unsupported model family"):
             build_adapter(config)
-
-    def test_build_segresnet(self) -> None:
-        from minivess.adapters.model_builder import build_adapter
-
-        config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
-            name="segresnet-test",
-            in_channels=1,
-            out_channels=2,
-        )
-        adapter = build_adapter(config)
-        cfg = adapter.get_config()
-        assert cfg.family == "segresnet"

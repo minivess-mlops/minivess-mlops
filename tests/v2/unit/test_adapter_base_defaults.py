@@ -123,48 +123,12 @@ class TestBaseOnnxExportDefault:
 class TestAdaptersInheritDefaults:
     """Verify standard adapters removed their checkpoint overrides."""
 
-    def test_segresnet_uses_base_save(self) -> None:
-        """SegResNetAdapter should NOT define its own save_checkpoint."""
-        from minivess.adapters.segresnet import SegResNetAdapter
-
-        assert "save_checkpoint" not in SegResNetAdapter.__dict__
-
-    def test_segresnet_uses_base_load(self) -> None:
-        """SegResNetAdapter should NOT define its own load_checkpoint."""
-        from minivess.adapters.segresnet import SegResNetAdapter
-
-        assert "load_checkpoint" not in SegResNetAdapter.__dict__
-
-    def test_segresnet_uses_base_trainable(self) -> None:
-        """SegResNetAdapter should NOT define its own trainable_parameters."""
-        from minivess.adapters.segresnet import SegResNetAdapter
-
-        assert "trainable_parameters" not in SegResNetAdapter.__dict__
-
-    def test_swinunetr_uses_base_methods(self) -> None:
-        """SwinUNETRAdapter should NOT define checkpoint/trainable methods."""
-        from minivess.adapters.swinunetr import SwinUNETRAdapter
-
-        for method in ("save_checkpoint", "load_checkpoint", "trainable_parameters"):
-            assert method not in SwinUNETRAdapter.__dict__, (
-                f"{method} should be inherited"
-            )
-
     def test_dynunet_uses_base_methods(self) -> None:
         """DynUNetAdapter should NOT define checkpoint/trainable methods."""
         from minivess.adapters.dynunet import DynUNetAdapter
 
         for method in ("save_checkpoint", "load_checkpoint", "trainable_parameters"):
             assert method not in DynUNetAdapter.__dict__, (
-                f"{method} should be inherited"
-            )
-
-    def test_vista3d_uses_base_methods(self) -> None:
-        """Vista3dAdapter should NOT define checkpoint/trainable methods."""
-        from minivess.adapters.vista3d import Vista3dAdapter
-
-        for method in ("save_checkpoint", "load_checkpoint", "trainable_parameters"):
-            assert method not in Vista3dAdapter.__dict__, (
                 f"{method} should be inherited"
             )
 

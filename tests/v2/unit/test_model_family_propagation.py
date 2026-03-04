@@ -328,9 +328,6 @@ class TestInvalidModelFamily:
 
         valid_families = [
             "dynunet",
-            "segresnet",
-            "swinunetr",
-            "vista3d",
             "vesselfm",
             "comma_mamba",
             "sam3_lora",

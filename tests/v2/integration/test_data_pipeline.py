@@ -1,4 +1,4 @@
-"""Integration test: synthetic NIfTI files → MONAI loader → training step.
+"""Integration test: synthetic NIfTI files -> MONAI loader -> training step.
 
 Exercises the full data pipeline with real files on disk, not just
 tensor fixtures. This catches mismatches between NIfTI I/O, transforms,
@@ -16,11 +16,11 @@ if TYPE_CHECKING:
 
 
 class TestNiftiToTrainingStep:
-    """End-to-end: NIfTI files → discover → load → forward pass."""
+    """End-to-end: NIfTI files -> discover -> load -> forward pass."""
 
     def test_nifti_to_training_step(self, tmp_path: Path) -> None:
         """Full pipeline: create NIfTI, discover, load, run one training step."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.config.models import DataConfig, ModelConfig, ModelFamily
         from minivess.data.loader import build_train_loader, discover_nifti_pairs
         from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
@@ -51,12 +51,12 @@ class TestNiftiToTrainingStep:
 
         # Create model and run forward pass
         model_config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="integration-test",
             in_channels=1,
             out_channels=2,
         )
-        adapter = SegResNetAdapter(model_config)
+        adapter = DynUNetAdapter(model_config)
         model = adapter.net
         model.train()
 
@@ -77,8 +77,8 @@ class TestNiftiToTrainingStep:
         assert has_grad, "Gradients should flow through the model"
 
     def test_nifti_to_validation_metrics(self, tmp_path: Path) -> None:
-        """Validation path: load → predict → compute dice-like metric."""
-        from minivess.adapters.segresnet import SegResNetAdapter
+        """Validation path: load -> predict -> compute dice-like metric."""
+        from minivess.adapters.dynunet import DynUNetAdapter
         from minivess.config.models import DataConfig, ModelConfig, ModelFamily
         from minivess.data.loader import build_val_loader, discover_nifti_pairs
         from tests.v2.fixtures.synthetic_nifti import create_synthetic_nifti_dataset
@@ -99,12 +99,12 @@ class TestNiftiToTrainingStep:
         batch = next(iter(loader))
 
         model_config = ModelConfig(
-            family=ModelFamily.MONAI_SEGRESNET,
+            family=ModelFamily.MONAI_DYNUNET,
             name="val-test",
             in_channels=1,
             out_channels=2,
         )
-        adapter = SegResNetAdapter(model_config)
+        adapter = DynUNetAdapter(model_config)
         model = adapter.net
         model.eval()
 
@@ -119,7 +119,7 @@ class TestNiftiToTrainingStep:
 
 
 class TestEbrainsLayoutPipeline:
-    """EBRAINS raw/seg layout → discover → load pipeline."""
+    """EBRAINS raw/seg layout -> discover -> load pipeline."""
 
     def test_ebrains_layout_to_loader(self, tmp_path: Path) -> None:
         from minivess.config.models import DataConfig

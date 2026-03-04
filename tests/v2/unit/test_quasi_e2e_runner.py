@@ -7,7 +7,6 @@ test IDs, validates model instantiation, and loss construction.
 from __future__ import annotations
 
 import pytest
-import torch
 from torch import nn
 
 from minivess.testing.capability_discovery import (
@@ -51,10 +50,6 @@ class TestBuildModelForTest:
 
     def test_builds_dynunet(self) -> None:
         model = build_model_for_test("dynunet")
-        assert isinstance(model, nn.Module)
-
-    def test_builds_segresnet(self) -> None:
-        model = build_model_for_test("segresnet")
         assert isinstance(model, nn.Module)
 
     def test_all_implemented_models_build(self) -> None:
@@ -105,20 +100,6 @@ class TestRunSingleForwardBackward:
         assert result["loss_value"] is not None
         assert isinstance(result["loss_value"], float)
         assert result["output_shape"] is not None
-
-    def test_segresnet_dice_ce(self) -> None:
-        model = build_model_for_test("segresnet")
-        loss_fn = build_loss_for_test("dice_ce")
-        result = run_single_forward_backward(
-            model=model,
-            loss_fn=loss_fn,
-            patch_size=(32, 32, 8),
-            batch_size=1,
-            in_channels=1,
-            num_classes=2,
-        )
-        assert result["loss_value"] is not None
-        assert not torch.isnan(torch.tensor(result["loss_value"]))
 
     def test_result_has_required_keys(self) -> None:
         model = build_model_for_test("dynunet")

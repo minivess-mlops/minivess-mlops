@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from minivess.adapters.segresnet import SegResNetAdapter
+from minivess.adapters.dynunet import DynUNetAdapter
 from minivess.config.models import ModelConfig, ModelFamily
 
 # Spatial size for synthetic volumes — small enough for fast CPU tests.
@@ -17,19 +17,19 @@ BATCH_SIZE = 2
 
 @pytest.fixture()
 def model_config() -> ModelConfig:
-    """Minimal SegResNet model config for integration tests."""
+    """Minimal DynUNet model config for integration tests."""
     return ModelConfig(
-        family=ModelFamily.MONAI_SEGRESNET,
-        name="integration-segresnet",
+        family=ModelFamily.MONAI_DYNUNET,
+        name="integration-dynunet",
         in_channels=IN_CHANNELS,
         out_channels=NUM_CLASSES,
     )
 
 
 @pytest.fixture()
-def segresnet_adapter(model_config: ModelConfig) -> SegResNetAdapter:
-    """Pre-built SegResNet adapter for integration tests."""
-    return SegResNetAdapter(model_config)
+def dynunet_adapter(model_config: ModelConfig) -> DynUNetAdapter:
+    """Pre-built DynUNet adapter for integration tests."""
+    return DynUNetAdapter(model_config)
 
 
 @pytest.fixture()
