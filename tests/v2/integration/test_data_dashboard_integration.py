@@ -283,5 +283,5 @@ class TestDataToDashboardIntegration:
         chain = PipelineTriggerChain()
         config = FlowTriggerConfig(dry_run=True)
         results = chain.run_chain(trigger_source="dvc_version_change", config=config)
-        assert len(results) == 7
+        assert len(results) == 8
         assert all(r.status == "skipped" for r in results)
