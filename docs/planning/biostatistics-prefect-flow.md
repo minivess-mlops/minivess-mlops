@@ -363,17 +363,25 @@ def task_generate_figures(
     """
 ```
 
-**Figure catalog** (driven by config, not hardcoded):
+**Figure catalog** (11 types, 3 tiers — driven by config, not hardcoded):
 
-| Figure | Type | Data Source | Statistical Content |
-|--------|------|-------------|-------------------|
-| Loss comparison (per metric) | Box plot / forest plot | `per_volume_metrics` | BCa CIs, pairwise p-values |
-| Fold stability heatmap | Heatmap | `eval_metrics` | Per-fold × per-loss means |
-| Metric correlation matrix | Heatmap | `per_volume_metrics` | Spearman ρ between metrics |
-| Critical Difference diagram | CD diagram | `ranking_results` | Friedman + Nemenyi |
-| Effect size matrix | Heatmap | `pairwise_results` | Cliff's delta, color-coded |
-| Cross-experiment delta | Forest plot | Multi-experiment query | Between-experiment differences |
-| Training curves overlay | Line plot | `training_metrics` | Per-condition learning curves |
+| ID | Figure | Type | Library | Data Source |
+|----|--------|------|---------|-------------|
+| F1 | Per-metric comparison | **Raincloud** | `ptitprince` | `per_volume_metrics` |
+| F2 | Effect size matrix | Heatmap (Cliff's delta) | `seaborn` | `pairwise_results` |
+| F3 | Critical Difference diagram | CD diagram | `scikit-posthocs` | `ranking_results` |
+| F4 | Forest plot (BCa CIs) | Forest | `matplotlib` | `pairwise_results` |
+| F5 | Training curves overlay | Line + shaded CI | `matplotlib` | `training_metrics` |
+| F6 | Fold stability heatmap | Heatmap | `seaborn` | `eval_metrics` |
+| F7 | Metric correlation | Clustermap (Spearman ρ) | `seaborn` | `per_volume_metrics` |
+| F8 | DABEST estimation | Paired mean diff | `dabest` | `per_volume_metrics` |
+| F9 | Parallel coordinates | Multi-metric profiles | `matplotlib` | `eval_metrics` |
+| F10 | Cross-experiment delta | Forest | `matplotlib` | multi-experiment |
+| F11 | Bayesian probabilities | Three-way bars | `matplotlib` | `pairwise_results` |
+
+**Tier 1** (must-have, paper main text): F1-F5
+**Tier 2** (should-have, supplementary): F6-F8
+**Tier 3** (nice-to-have, supplementary): F9-F11
 
 ### JSON Sidecar Schema
 
@@ -526,30 +534,95 @@ to avoid the 500-character tag value limit. A tag `upstream_lineage_artifact` po
 
 ## Statistical Methodology
 
+> **Revised 2026-03-04** per 3 reviewer agents (statistical methodology, visualization,
+> provenance). Key changes: two-tier MCC, Bayesian signed-rank with ROPE, VDA effect
+> size, ICC(2,1) for fold consistency, raincloud plots, DABEST estimation plots.
+
+### Independence and Validity of Per-Volume Tests
+
+Within a single CV fold, the N test-set scores are genuinely independent — they come
+from different volumes processed by the same model. Paired bootstrap on per-volume
+differences (N=70 pooled) is valid (Nadeau and Bengio, 2003). However, **any parametric
+test on fold-level aggregates** (N=3) MUST use the Nadeau-Bengio correction (via
+`correctipy`) because training sets overlap across folds and Grandvalet and Bengio
+(2004) proved this variance cannot be unbiasedly estimated.
+
 ### Primary Analysis (must-have for paper)
 
 | Analysis | Method | Level | N | Library |
 |----------|--------|-------|---|---------|
 | Point estimates + CIs | BCa bootstrap (B=10,000) | Per-volume, pooled across folds | 70 | Existing `bca_bootstrap_ci` |
-| Pairwise significance | Paired bootstrap test | Per-volume, paired by volume_id | 70 | Existing `paired_bootstrap_test` |
-| Multiple comparison correction | Holm-Bonferroni (within metric) | Per metric family (6 tests) | — | Existing `holm_bonferroni_correction` |
-| Effect sizes | Cohen's d + Cliff's delta | Per-volume pairs | 70 | Existing d + new delta |
+| Pairwise significance | Wilcoxon signed-rank test | Per-volume, paired by volume_id | 70 | `scipy.stats.wilcoxon` |
+| Bayesian complement | Bayesian signed-rank + ROPE | Per-volume | 70 | `baycomp.two_on_single` |
+| Multiple comparison correction | **Two-tier**: Holm (primary), BH-FDR (secondary) | Per metric family | — | `statsmodels.stats.multitest` |
+| Effect sizes | Cohen's d + Cliff's delta + **VDA** | Per-volume pairs | 70 | Existing d + new delta/VDA |
+
+**Two-tier MCC strategy** (Maier-Hein et al., 2024; Abrahamsson et al., 2017):
+- **Primary metric** (clDice, pre-registered): Holm-Bonferroni across 6 pairwise tests
+  (C(4,2)=6 for 4 loss functions). FWER control — any false positive is unacceptable.
+- **Secondary metrics** (7 remaining × 6 pairs = 42 tests): Benjamini-Hochberg FDR at
+  q=0.05. Exploratory — accept some false positives for greater power.
+
+**Bayesian signed-rank test** (Benavoli et al., 2017):
+- `baycomp.two_on_single(scores_A, scores_B, rope=config.rope)` returns three probabilities:
+  P(A>B), P(A≈B within ROPE), P(B>A). These sum to 1.0.
+- Can confirm equivalence (P(rope) > 0.95), not just fail to reject null.
+- ROPE values: DSC ±0.01, clDice ±0.01, HD95 ±0.5 voxels, NSD ±0.01.
+- Optional dependency — gracefully skip if `baycomp` not installed.
+
+**Three effect sizes** (report all three for different audiences):
+- **Cohen's d**: parametric, for literature comparability
+- **Cliff's delta**: non-parametric dominance statistic. Thresholds (Romano et al., 2006):
+  |δ| < 0.147 negligible, < 0.33 small, < 0.474 medium, ≥ 0.474 large.
+- **Vargha-Delaney A** (VDA): clinical interpretability = P(random draw from A > random
+  draw from B). VDA = (Cliff's delta + 1) / 2. Thresholds: <0.56 negligible, 0.56-0.64
+  small, 0.64-0.71 medium, >0.71 large (Vargha and Delaney, 2000).
 
 ### Secondary Analysis (should-have)
 
 | Analysis | Method | Level | N | Library |
 |----------|--------|-------|---|---------|
 | Omnibus test | Friedman test | Fold-level (3 blocks × 4 treatments) | 3 | `scipy.stats.friedmanchisquare` |
-| Post-hoc | Nemenyi test | After significant Friedman | 3 | `scikit_posthocs` |
+| Post-hoc | Nemenyi test | After significant Friedman | 3 | `scikit_posthocs.posthoc_nemenyi_friedman` |
 | Multi-metric ranking | Rank-then-aggregate + CD diagram | Fold-level | 3 | Existing + `scikit_posthocs` |
 | Cross-metric sensitivity | BH-FDR across all 48 tests | All tests | — | `statsmodels.stats.multitest` |
+| Fold consistency | **ICC(2,1)** two-way random, absolute | Per-volume | 70 | `pingouin.intraclass_corr` |
 
-### Nice-to-Have
+**ICC(2,1)** for cross-fold consistency (Koo and Li, 2016):
+- Volumes = targets, folds = raters. ICC(2,1) treats folds as random effects and measures
+  absolute agreement.
+- Interpretation: <0.50 poor, 0.50-0.75 moderate, 0.75-0.90 good, ≥0.90 excellent.
+- Report the 95% CI, not just the point estimate.
+- **Note**: Bland-Altman is NOT appropriate here — it compares two measurement methods,
+  not cross-validation folds. ICC is the correct tool.
 
-| Analysis | Method | Level | N | Library |
-|----------|--------|-------|---|---------|
-| Variance decomposition | ICC (intraclass correlation) | Per-volume with fold random effect | 70 | `pingouin.intraclass_corr` |
-| Calibration | ECE + reliability diagram | Per-voxel | All voxels | `netcal` |
+### Visualization (revised per reviewer)
+
+| Figure | Type | Library | Data Source |
+|--------|------|---------|-------------|
+| **F1**: Per-metric comparison | **Raincloud plot** | `ptitprince` | `per_volume_metrics` |
+| **F2**: Effect size matrix | Heatmap (Cliff's delta) | `seaborn` | `pairwise_results` |
+| **F3**: Critical Difference diagram | CD diagram | `scikit-posthocs` | `ranking_results` |
+| **F4**: Forest plot (BCa CIs) | Forest plot | `matplotlib` | `pairwise_results` |
+| **F5**: Training curves overlay | Line + shaded CI | `matplotlib` | `training_metrics` |
+| **F6**: Fold stability heatmap | Heatmap | `seaborn` | `eval_metrics` |
+| **F7**: Metric correlation | Clustermap (Spearman ρ) | `seaborn` | `per_volume_metrics` |
+| **F8**: Estimation plot | **DABEST** paired mean diff | `dabest` | `per_volume_metrics` |
+| **F9**: Parallel coordinates | Multi-metric profiles | `matplotlib` | `eval_metrics` |
+| **F10**: Cross-experiment delta | Forest plot | `matplotlib` | multi-experiment |
+| **F11**: Bayesian probabilities | Three-way bars | `matplotlib` | `pairwise_results` |
+
+**Key visualization decisions** (Allen et al., 2019; Ho et al., 2019):
+- **Raincloud plots** replace box plots for N=70 — shows raw data + distribution +
+  summary simultaneously. Outlier volumes (e.g., mv02 at 4.97μm spacing) visible.
+- **DABEST estimation plots** for pairwise comparisons — Gardner-Altman paired plot
+  shows magnitude and direction of effect with bootstrap CI.
+- **Skip radar/spider charts** — effect size heatmap covers same space without
+  perceptual distortions.
+- **Okabe-Ito palette** (8-color colorblind-safe): first 4 for 4 loss functions.
+  Yellow (#F0E442) has poor contrast on white — substitute Blue (#0072B2) if needed.
+- **Per-figure JSON sidecars**: self-contained re-plottable data + statistical tests.
+- **matplotlib rcParams**: font.size=9, pdf.fonttype=42, dpi=300 for publication.
 
 ### Critical Statistical Fixes (from review)
 
@@ -557,27 +630,44 @@ to avoid the 500-character tag value limit. A tag `upstream_lineage_artifact` po
    CI endpoints across folds — this is NOT a valid confidence interval. Replace with
    pooled BCa bootstrap across all per-volume observations.
 
-2. **Add Cliff's delta**: Non-parametric effect size, better for skewed metrics (HD95, MASD).
+2. **Add Cliff's delta + VDA**: Non-parametric effect sizes for skewed metrics (HD95).
    ```python
    def cliffs_delta(a: np.ndarray, b: np.ndarray) -> float:
        comparisons = np.sign(a[:, None] - b[None, :])
        return float(np.sum(comparisons)) / (len(a) * len(b))
+
+   def vargha_delaney_a(a: np.ndarray, b: np.ndarray) -> float:
+       return (cliffs_delta(a, b) + 1) / 2
    ```
-   Thresholds: |δ| < 0.147 negligible, < 0.33 small, < 0.474 medium, ≥ 0.474 large.
 
 3. **Fix array truncation**: `comparison_report.py` silently truncates mismatched arrays.
    Should raise an error or use unpaired testing explicitly.
 
 4. **Report per-volume AND per-fold**: Per-volume (pooled, N=70) as primary with CIs.
-   Per-fold (N=3) as supplementary showing split stability.
+   Per-fold (N=3) as supplementary showing split stability with ICC.
 
 ### Power Limitations (must acknowledge in paper)
 
-- Friedman test with K=3 folds has very low statistical power. A non-significant result
-  does NOT mean no difference — it means we cannot detect it with 3 blocks.
+- **Friedman + Nemenyi is severely underpowered** for K=3 folds (Demšar, 2006; Garcia
+  and Herrera, 2008). Nemenyi CD is too wide; with 3 data points, Wilcoxon minimum
+  p-value is 0.125 (impossible to reach 0.05). Solution: use per-volume paired tests
+  (N=70) as PRIMARY inference. Keep Friedman only as supplementary omnibus screening
+  with explicit power-limitation caveat.
 - Bootstrap CIs from N=3 fold-level aggregates are unreliable. Always pool to N=70.
 - For heavily skewed metrics (HD95), BCa CIs may undercover even with N=70.
   Report CI width as a quality indicator.
+- BCa can have coverage problems near boundaries when Dice scores cluster near 1.0
+  (Carpenter and Bithell, 2000). Verify with percentile method as sanity check.
+
+### Bootstrap Considerations for Bounded Metrics
+
+- **Volume-level bootstrap** (resampling volumes): spatial correlation between voxels
+  within a volume is NOT a problem because the entire volume is the resampling unit.
+- **Never bootstrap at the voxel level** — adjacent voxels are highly correlated.
+- **BCa** is preferred over percentile for left-skewed metrics (clustered near 1.0)
+  because it adjusts for skewness and is second-order accurate.
+- **B=10,000** for reporting (Hesterberg, 2015 recommendation); B=2,000 for exploration.
+- If BCa produces CIs that hit boundary (0 or 1), fall back to percentile method.
 
 ## Relationship to Existing Code
 
@@ -606,8 +696,12 @@ Scripts become thin wrappers that call the flow's tasks directly.
 ## New Dependencies
 
 ```bash
-uv add scikit-posthocs  # Nemenyi post-hoc, CD diagrams
-uv add pingouin         # ICC, mixed ANOVA (optional — statsmodels alternative)
+uv add scikit-posthocs  # Nemenyi post-hoc, CD diagrams (>=0.11)
+uv add pingouin         # ICC, Bayes factor, effect sizes (>=0.5)
+uv add baycomp          # Bayesian signed-rank test with ROPE (>=1.0, Benavoli et al. 2017)
+uv add ptitprince       # Raincloud plots (>=0.2, Allen et al. 2019)
+uv add dabest           # DABEST estimation plots (Ho et al. 2019)
+# correctipy — Nadeau-Bengio corrected t-test (check PyPI availability first)
 ```
 
 ## File Structure
@@ -935,6 +1029,55 @@ alongside its statistical artifacts (from appendix-cards.md taxonomy):
 in the biostatistics run. These are machine-readable; human-readable markdown versions
 can be auto-generated for paper supplementary materials.
 
+### Cross-Standard Compliance Matrix
+
+> **Added 2026-03-04** per provenance reviewer agent. Maps 7 reporting standards to
+> auto-verifiable items.
+
+| Requirement | TRIPOD+AI | CLAIM 2024 | MI-CLAIM | FUTURE-AI | Metrics Reloaded | BIAS |
+|-------------|-----------|------------|----------|-----------|-------------------|------|
+| Sample size justification | Item 10 | Item 21 | Part 1 | G4 | FP4 | Yes |
+| CV/split documentation | Item 12a | Items 19-20 | Part 2 | — | — | Yes |
+| Metric rationale | Item 12e | Item 28 | Part 4 | G4 | FP1-FP5 | Yes |
+| CIs required | **Item 23a** | **Items 29,38** | Part 4 | — | **Explicit** | Yes |
+| Statistical tests | Implicit | Item 29 | Part 4 | — | — | Explicit |
+| Fairness/subgroups | Item 20 | Item 37 | Part 5 | F1-F3 | — | — |
+| Code availability | Item 18 | Item 43 | Part 6 | T2 | — | Preferred |
+| Environment spec | Implicit | Item 25 | Part 6 Tier 4 | T5 | — | Yes |
+| Ranking stability | — | — | — | — | — | **Mandatory** |
+| Multi-metric | Item 12e | Item 28 | Part 4 | — | **Mandatory** | Mandatory |
+
+**Auto-verifiable from MLflow + DuckDB** (15 items):
+- TRIPOD+AI: Items 10, 12a, 12c, 18, 21, 23a (sample size, splits, hyperparams, code, counts, CIs)
+- CLAIM 2024: Items 9, 19, 20, 25, 29, 43 (preprocessing, partitions, disjointness, training, stats, code)
+- MI-CLAIM: Part 6 (environment params, Docker config)
+- BIAS: Ranking stability (bootstrap), metric sensitivity
+
+**Needs manual review** (8 items): metric rationale narrative, fairness narrative,
+imaging acquisition protocol, explainability, discussion/interpretation.
+
+### CLAIM 2024 Update (Tejani et al., Radiology: AI, 2024)
+
+Key items for statistical reporting (developed by 72-expert panel):
+- **Item 29**: Statistical uncertainty — CIs, significance tests, statistical software version
+- **Item 37**: Performance on all partitions and demographic subgroups
+- **Item 38**: Diagnostic accuracy estimates with 95% CIs
+- **Item 43**: Software, model, and data availability statement
+
+### FUTURE-AI (Lekadir et al., BMJ, 2025)
+
+Six guiding principles (FUTURE): Fairness, Universality, Traceability, Usability,
+Robustness, Explainability. 30 best practices across 117 experts from 50 countries.
+Most relevant for biostatistics flow: T3 (QC for inputs/outputs), T5 (AI logging),
+R3 (robustness evaluation). Auto-generatable from MLflow metadata.
+
+### RIDGE Framework (J Imaging Informatics in Medicine, 2024)
+
+Checklist for Reproducibility, Integrity, Dependability, Generalizability, and
+Efficiency of medical image segmentation models. Found most papers miss critical
+criteria: rationale for reference standard, inter-observer variability measurement,
+robustness/sensitivity analysis.
+
 ### Paper Framing: Provenance as Infrastructure
 
 The paper should frame the MLOps platform as **provenance infrastructure** —
@@ -953,61 +1096,114 @@ publications and 3 clinical deployments.
 
 **Key citations for the paper**:
 - Gibson et al. (2026) — empirical evidence of provenance failure
-- Collins et al. (2024) — TRIPOD+AI checklist
+- Collins et al. (2024) — TRIPOD+AI checklist (27 items)
+- Tejani et al. (2024) — CLAIM 2024 update (72-expert panel)
+- Norgeot et al. (2020) — MI-CLAIM (6 categories)
+- Lekadir et al. (2025) — FUTURE-AI (6 principles, 30 practices)
+- Maier-Hein et al. (2024) — Metrics Reloaded (problem fingerprint framework)
+- Maier-Hein et al. (2020) — BIAS (transparent reporting of challenges)
+- RIDGE (2024) — segmentation model assessment checklist
 - Gebru et al. (2021) — Datasheets for Datasets
 - Pushkarna et al. (2022) — Data Cards
 - Mitchell et al. (2019) — Model Cards
 - Albertoni et al. (2023) — ML reproducibility terminology (arXiv:2302.12691)
 - W3C PROV (2013) — provenance standard (cite for academic framing)
 - EU AI Act (2024) — regulatory requirements
+- Leipzig et al. (2021) — five-layer analytic metadata stack (Patterns)
+- Varoquaux and Cheplygina (2022) — methodological failures in medical ML
+- Isensee et al. (2024) — nnU-Net Revisited (rigorous validation call)
 
 ## Open Questions
 
 1. **Naming**: "Biostatistics Flow" vs "Experiment Comparison Flow" vs "Statistical
    Reporting Flow"? The architecture reviewer noted that "biostatistics" implies
    clinical/epidemiological statistics. However, the user explicitly requested this name.
+   **Decision**: keep "Biostatistics Flow" per user request.
 
 2. **Cross-experiment comparison scope**: Should the flow compare across experiments
    (e.g., full-width vs half-width DynUNet) in the MVP, or defer to Phase 2?
-   Recommendation: include in MVP since the DuckDB already supports multi-experiment.
+   **Decision**: include in MVP since the DuckDB already supports multi-experiment.
 
 3. **R integration**: foundation-PLR uses ggplot2 for publication figures. Should we
-   support R figure generation? Recommendation: Python-only for MVP (matplotlib/seaborn),
-   R as optional Phase 2 addition.
+   support R figure generation? **Decision**: Python-only for MVP (matplotlib/seaborn
+   + ptitprince + dabest), R as optional Phase 2 addition. challengeR (Wiesenfarth
+   et al., 2021) is the main R-only capability gap.
 
 4. **TRIPOD+AI automation depth**: Should the Biostatistics Flow auto-generate a
-   TRIPOD+AI compliance report mapping MLflow metadata to checklist items? This is
-   the `clinical_contract_schema` PRD decision (Pydantic v2 TRIPOD+AI Contracts,
-   prior 0.45). Recommendation: yes for Tier 2, not MVP.
+   TRIPOD+AI compliance report mapping MLflow metadata to checklist items?
+   **Decision**: YES in MVP — 15 items are auto-verifiable from MLflow + DuckDB
+   (per provenance reviewer). Generate `compliance_report.json` as MLflow artifact.
 
 5. **Gibson et al. response in paper**: Should the paper explicitly cite Gibson et al.
-   and frame the platform as a response to the provenance crisis? Recommendation:
-   yes — it strengthens the contribution and is topically relevant (March 2026 preprint).
+   and frame the platform as a response to the provenance crisis?
+   **Decision**: YES — strengthens contribution. 124 studies on fabricated Kaggle data
+   scoring 0/9 on TRIPOD+AI data provenance is a powerful motivating example.
+
+6. **Bland-Altman plots**: The statistical methodology reviewer confirmed Bland-Altman
+   is NOT appropriate for cross-fold comparison (it compares two measurement methods).
+   **Decision**: drop Bland-Altman from the flow. Use ICC(2,1) for fold consistency
+   instead (Koo and Li, 2016). Keep Bland-Altman only if comparing annotators.
+
+7. **Friedman power limitation**: With K=3 folds, Nemenyi minimum p-value is 0.125
+   (impossible to reach 0.05). **Decision**: per-volume paired tests (N=70) are PRIMARY
+   inference. Friedman is supplementary only with explicit power caveat in all outputs.
 
 ## References
 
+### Statistical Methodology
+- Nadeau C, Bengio Y. (2003). Inference for the Generalization Error. Machine Learning 52, 239-281.
+- Grandvalet Y, Bengio Y. (2004). No Unbiased Estimator of the Variance of K-Fold Cross-Validation. JMLR 5, 1089-1105.
+- Bouckaert RR, Frank E. (2004). Evaluating the Replicability of Significance Tests for Comparing Learning Algorithms. PAKDD, 3-12.
+- Demšar J. (2006). Statistical Comparisons of Classifiers over Multiple Data Sets. JMLR 7, 1-30.
+- Garcia S, Herrera F. (2008). Extension on Statistical Comparisons of Classifiers over Multiple Data Sets. JMLR 9, 2677-2694.
+- Romano J, et al. (2006). Appropriate statistics for ordinal level data. Annual Meeting of FAIR.
+- Cliff N. (1993). Dominance Statistics: Ordinal Analyses to Answer Ordinal Questions. Psychological Bulletin 114, 494-509.
+- Vargha A, Delaney HD. (2000). A Critique and Improvement of the CL Common Language Effect Size Statistics. JEBS 25(2).
+- Benavoli A, Corani G, Demšar J, Zaffalon M. (2017). Time for a Change: Bayesian Analysis of Multiple Classifiers. JMLR 18, 1-36.
+- Koo TK, Li MY. (2016). A Guideline of Selecting and Reporting Intraclass Correlation Coefficients for Reliability Research. J Chiropractic Medicine 15(2), 155-163.
+- Efron B. (1987). Better Bootstrap Confidence Intervals. JASA 82(397), 171-185.
+- Hesterberg T. (2015). What Teachers Should Know About the Bootstrap. The American Statistician 69(4), 371-386.
+- Carpenter J, Bithell J. (2000). Bootstrap Confidence Intervals: When, Which, What? Statistics in Medicine 19, 1141-1164.
+- Abrahamsson N, et al. (2017). Multiple Comparisons. BMC Med Inform Decis Mak.
+- Dietterich TG. (1998). Approximate Statistical Tests for Comparing Supervised Classification Learning Algorithms. Neural Computation 10(7), 1895-1923.
+
+### Visualization
+- Allen M, et al. (2019). Raincloud Plots: A Multi-Platform Tool for Robust Data Visualization. Wellcome Open Research 4:63.
+- Ho J, et al. (2019). Moving Beyond P Values: Data Analysis with Estimation Graphics. Nature Methods.
+- Herbold S. (2020). Autorank: A Python package for automated ranking of multiple classifiers. JOSS.
+- Okabe M, Ito K. (2008). Color Universal Design (CUD): How to Make Figures and Presentations That Are Friendly to Colorblind People.
+
+### Reporting Standards & Provenance
 - Gibson AD, White NM, Collins GS, Barnett A. (2026). Evidence of Unreliable Data and Poor Data Provenance in Clinical Prediction Model Research. medRxiv. doi:10.64898/2026.02.24.26347028.
-- Collins GS, et al. (2024). TRIPOD+AI statement: updated guidance for reporting clinical prediction models that use regression or machine learning methods. BMJ. doi:10.1136/bmj-2023-078378.
+- Collins GS, et al. (2024). TRIPOD+AI statement: updated guidance for reporting clinical prediction models. BMJ. doi:10.1136/bmj-2023-078378.
+- Tejani AS, et al. (2024). CLAIM 2024 Update: Checklist for Artificial Intelligence in Medical Imaging. Radiology: AI.
+- Norgeot B, et al. (2020). MI-CLAIM: Minimum Information about CLinical AI Modeling. Nature Medicine.
+- Lekadir K, et al. (2025). FUTURE-AI: International Consensus Guideline for Trustworthy AI in Healthcare. BMJ.
+- Maier-Hein L, et al. (2024). Metrics Reloaded: Recommendations for Image Analysis Validation. Nature Methods 21, 195-212.
+- Reinke A, et al. (2024). Understanding Metric-Related Pitfalls in Image Analysis Validation. Nature Methods.
+- Maier-Hein L, et al. (2020). BIAS: Transparent Reporting of Biomedical Image Analysis Challenges. Medical Image Analysis.
+- Maier-Hein L, et al. (2018). Why Rankings of Biomedical Image Analysis Competitions Should Be Interpreted with Care. Nature Communications 9, 5217.
+- RIDGE (2024). Checklist for Reproducibility, Integrity, Dependability, Generalizability, and Efficiency. J Imaging Informatics in Medicine.
+- Stable B, et al. (2025). STARD-AI. Nature Medicine.
+- Isensee F, et al. (2024). nnU-Net Revisited: A Call for Rigorous Validation in 3D Medical Image Segmentation. MICCAI.
+- Leipzig J, et al. (2021). The Role of Metadata in Reproducible Computational Research. Patterns.
+- Varoquaux G, Cheplygina V. (2022). Machine Learning for Medical Imaging: Methodological Failures and Recommendations. npj Digital Medicine.
+- Haibe-Kains B, et al. (2020). Transparency and Reproducibility in Artificial Intelligence. Nature.
+
+### Data & Model Documentation
 - Gebru T, et al. (2021). Datasheets for Datasets. Communications of the ACM. doi:10.1145/3458723.
-- Pushkarna M, Zaldivar A, Kjartansson O. (2022). Data Cards: Purposeful and Transparent Dataset Documentation. FAccT. doi:10.1145/3531146.3533231.
+- Pushkarna M, Zaldivar A, Kjartansson O. (2022). Data Cards. FAccT. doi:10.1145/3531146.3533231.
 - Mitchell M, et al. (2019). Model Cards for Model Reporting. FAccT. arXiv:1810.03993.
-- Albertoni R, et al. (2023). Reproducibility of Machine Learning: Terminology, Recommendations and Open Issues. arXiv:2302.12691.
-- Demšar J. (2006). Statistical Comparisons of Classifiers over Multiple Data Sets. JMLR.
-- Nadeau C, Bengio Y. (2003). Inference for the Generalization Error. Machine Learning.
-- Romano J, et al. (2006). Appropriate statistics for ordinal level data. JGME.
-- Herbold S. (2020). Autorank: A Python package for automated ranking. JOSS.
+- Albertoni R, et al. (2023). Reproducibility of Machine Learning: Terminology and Open Issues. arXiv:2302.12691.
+
+### Standards & Regulations
 - W3C. (2013). PROV-Overview. https://www.w3.org/TR/prov-overview/.
 - EU AI Act. (2024). Regulation 2024/1689. Articles 10-11.
 - IEC 62304:2006+A1:2015. Medical device software lifecycle processes.
+
+### MLOps & Infrastructure
 - Schelter S, et al. (2017). Automatically Tracking Metadata and Provenance of ML Experiments. NeurIPS MLSys Workshop.
 - Kreuzberger D, et al. (2023). Machine Learning Operations (MLOps): Overview, Definition, and Architecture. IEEE Access.
-- Raschka S, et al. (2022). Machine Learning in Python: Main Developments and Technology Trends. arXiv:2207.09315.
-- Liu P, et al. (2021). Pre-train, Prompt, and Predict: A Systematic Survey of Prompting Methods. arXiv:2107.13586.
 - Ojewale V, et al. (2026). Hash-Chained Audit Logging for AI Systems.
 - De la Torre L. (2026). Zero-Trust Verified Logging (RAL/FCV architecture).
-- foundation-PLR: DuckDB + JSON sidecar patterns (internal reference implementation).
-- Demšar (2006). Statistical Comparisons of Classifiers over Multiple Data Sets. JMLR.
-- Nadeau & Bengio (2003). Inference for the Generalization Error. Machine Learning.
-- Romano et al. (2006). Appropriate statistics for ordinal level data. JGME.
-- Herbold (2020). Autorank: A Python package for automated ranking. JOSS.
 - foundation-PLR: DuckDB + JSON sidecar patterns (internal reference implementation).
