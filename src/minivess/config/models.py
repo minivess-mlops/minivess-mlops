@@ -21,6 +21,7 @@ class ModelFamily(StrEnum):
     SAM3_TOPOLORA = "sam3_topolora"
     SAM3_HYBRID = "sam3_hybrid"
     MULTITASK_DYNUNET = "multitask_dynunet"
+    ULIKE_MAMBA = "ulike_mamba"
     CUSTOM = "custom"
 
 

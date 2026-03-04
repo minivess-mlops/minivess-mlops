@@ -1,0 +1,303 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Advanced Segmentation Infrastructure Execution Plan
+  Issue: #305
+  Branch: feat/advanced-segmentation-double-check
+  Literature: docs/planning/advanced-segmentation-double-check-plan.md
+  TDD Skill: .claude/skills/self-learning-iterative-coder/SKILL.md
+-->
+<execution-plan>
+  <metadata>
+    <title>Advanced Segmentation Infrastructure: P0-P2 Improvements</title>
+    <issue>305</issue>
+    <date>2026-03-04</date>
+    <approach>TDD — RED tests first, then GREEN implementation</approach>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 0: SDC Quality Gate (P0, ~1 hour)                           -->
+  <!-- ================================================================== -->
+  <phase id="0" name="SDC Quality Gate" priority="P0" effort="very-low">
+    <description>
+      Soft Dice Confidence (Borges 2025) as a model-agnostic deployment
+      quality gate. SDC = 2*sum(p*y_hat) / sum(p + y_hat). Near-optimal
+      confidence estimator computable in O(n).
+    </description>
+
+    <task id="T0.1" type="RED">
+      <title>Write SDC metric tests</title>
+      <file>tests/v2/unit/test_sdc_confidence.py</file>
+      <tests>
+        <test>test_sdc_perfect_prediction_returns_one</test>
+        <test>test_sdc_empty_prediction_returns_zero</test>
+        <test>test_sdc_bounded_zero_one</test>
+        <test>test_sdc_nan_safe</test>
+        <test>test_sdc_batch_computation</test>
+        <test>test_sdc_registered_in_metric_registry</test>
+      </tests>
+    </task>
+
+    <task id="T0.2" type="GREEN">
+      <title>Implement compute_sdc() in validation_metrics.py</title>
+      <file>src/minivess/pipeline/validation_metrics.py</file>
+      <description>
+        Add compute_sdc(softmax_probs, hard_predictions) -> float.
+        Register in configs/metric_registry.yaml.
+      </description>
+    </task>
+
+    <task id="T0.3" type="GREEN">
+      <title>Wire SDC into BentoML service response</title>
+      <file>src/minivess/serving/onnx_service.py</file>
+      <description>
+        Add sdc_confidence field to inference response. Threshold
+        configurable via deploy config.
+      </description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Complete Model Soup/SWA (P0, ~2 hours)                   -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Model Soup SWA" priority="P0" effort="low">
+    <description>
+      Complete the existing model soup ensemble strategy by averaging
+      DynUNet checkpoints across folds.
+    </description>
+
+    <task id="T1.1" type="RED">
+      <title>Write SWA completion tests</title>
+      <file>tests/v2/unit/test_model_soup_swa.py</file>
+      <tests>
+        <test>test_swa_averages_state_dicts</test>
+        <test>test_swa_preserves_architecture</test>
+        <test>test_swa_produces_single_model</test>
+        <test>test_swa_from_fold_checkpoints</test>
+      </tests>
+    </task>
+
+    <task id="T1.2" type="GREEN">
+      <title>Implement SWA utility</title>
+      <file>src/minivess/ensemble/model_soup.py</file>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: CRC Conformal Segmentation + Varisco (P0-P1, ~4 hours)  -->
+  <!-- ================================================================== -->
+  <phase id="2" name="CRC Conformal Segmentation" priority="P0-P1" effort="low-medium">
+    <description>
+      Post-hoc Conformalized Risk Control (Mossina 2024) extending
+      existing ConformalEvaluator. Varisco uncertainty heatmaps for
+      dashboard visualization.
+    </description>
+
+    <task id="T2.1" type="RED">
+      <title>Write CRC and varisco tests</title>
+      <file>tests/v2/unit/test_crc_conformal.py</file>
+      <tests>
+        <test>test_lac_thresholding_includes_true_class</test>
+        <test>test_crc_coverage_guarantee</test>
+        <test>test_varisco_heatmap_shape</test>
+        <test>test_varisco_heatmap_values_bounded</test>
+        <test>test_crc_integrates_with_conformal_evaluator</test>
+      </tests>
+    </task>
+
+    <task id="T2.2" type="GREEN">
+      <title>Implement CRC predictor and varisco heatmaps</title>
+      <file>src/minivess/pipeline/conformal.py</file>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: Model Merging — MedSAMix + SLERP (P1, ~6 hours)        -->
+  <!-- ================================================================== -->
+  <phase id="3" name="Model Merging" priority="P1" effort="medium">
+    <description>
+      Training-free model merging: (1) linear/SLERP interpolation between
+      loss-specialized models, (2) MedSAMix-style layer-wise merging with
+      SMAC search.
+    </description>
+
+    <task id="T3.1" type="RED">
+      <title>Write model merging tests</title>
+      <file>tests/v2/unit/test_model_merging.py</file>
+      <tests>
+        <test>test_linear_merge_two_state_dicts</test>
+        <test>test_slerp_merge_two_state_dicts</test>
+        <test>test_slerp_t0_returns_first_model</test>
+        <test>test_slerp_t1_returns_second_model</test>
+        <test>test_layer_wise_merge_config</test>
+        <test>test_merged_model_produces_valid_output</test>
+      </tests>
+    </task>
+
+    <task id="T3.2" type="GREEN">
+      <title>Implement merge utilities</title>
+      <file>src/minivess/ensemble/model_merging.py</file>
+      <description>
+        linear_merge(), slerp_merge(), layer_wise_merge() functions.
+        All operate on state_dict level (model-agnostic).
+      </description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: SPW Vessel Loss (P1, ~4 hours)                          -->
+  <!-- ================================================================== -->
+  <phase id="4" name="SPW Loss Function" priority="P1" effort="medium">
+    <description>
+      Steerable Pyramid Weighted Loss (Lu 2025) for thin vessel
+      structures. Multi-scale adaptive weighting via steerable pyramid
+      decomposition.
+    </description>
+
+    <task id="T4.1" type="RED">
+      <title>Write SPW loss tests</title>
+      <file>tests/v2/unit/test_spw_loss.py</file>
+      <tests>
+        <test>test_spw_loss_differentiable</test>
+        <test>test_spw_loss_finite_values</test>
+        <test>test_spw_loss_gradient_nonzero</test>
+        <test>test_spw_loss_registered_in_factory</test>
+        <test>test_spw_loss_higher_weight_on_boundaries</test>
+      </tests>
+    </task>
+
+    <task id="T4.2" type="GREEN">
+      <title>Implement SPWLoss</title>
+      <file>src/minivess/pipeline/loss_functions.py</file>
+      <description>
+        SPWLoss using steerable pyramid decomposition. Register in
+        build_loss_function() factory.
+      </description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 5: DA-Cal Pixel Calibration (P1, ~4 hours)                 -->
+  <!-- ================================================================== -->
+  <phase id="5" name="DA-Cal Calibration" priority="P1" effort="medium">
+    <description>
+      Meta Temperature Network for pixel-level cross-domain calibration
+      (Li 2026). Extends existing calibration infrastructure.
+    </description>
+
+    <task id="T5.1" type="RED">
+      <title>Write pixel calibration tests</title>
+      <file>tests/v2/unit/test_pixel_calibration.py</file>
+      <tests>
+        <test>test_pixel_temperature_scaling_reduces_ece</test>
+        <test>test_meta_temperature_network_forward</test>
+        <test>test_calibrated_softmax_sums_to_one</test>
+        <test>test_pixel_calibration_preserves_predictions</test>
+      </tests>
+    </task>
+
+    <task id="T5.2" type="GREEN">
+      <title>Implement pixel-level calibration</title>
+      <file>src/minivess/pipeline/calibration.py</file>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 6: CaCT Class-Adaptive CP (P1, ~4 hours)                   -->
+  <!-- ================================================================== -->
+  <phase id="6" name="CaCT Conformal Training" priority="P1" effort="medium">
+    <description>
+      Class Adaptive Conformal Training (Vakalopoulou 2026). Augmented
+      Lagrangian optimization with class-wise multipliers for tighter
+      prediction sets on underrepresented vessel substructures.
+    </description>
+
+    <task id="T6.1" type="RED">
+      <title>Write CaCT tests</title>
+      <file>tests/v2/unit/test_cact_conformal_training.py</file>
+      <tests>
+        <test>test_cact_loss_differentiable</test>
+        <test>test_cact_class_wise_multipliers</test>
+        <test>test_cact_tighter_sets_for_rare_classes</test>
+        <test>test_cact_maintains_coverage</test>
+      </tests>
+    </task>
+
+    <task id="T6.2" type="GREEN">
+      <title>Implement CaCT training loss</title>
+      <file>src/minivess/pipeline/conformal_training.py</file>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 7: SegQC Automated QC (P1, ~6 hours)                       -->
+  <!-- ================================================================== -->
+  <phase id="7" name="SegQC Quality Control" priority="P1" effort="medium">
+    <description>
+      Segmentation quality control without ground truth (Specktor-Fadida
+      2025). Estimate Dice/IoU from scan + mask, flag low-quality
+      predictions for human review. Add to QA flow.
+    </description>
+
+    <task id="T7.1" type="RED">
+      <title>Write SegQC tests</title>
+      <file>tests/v2/unit/test_segqc.py</file>
+      <tests>
+        <test>test_segqc_estimates_dice</test>
+        <test>test_segqc_error_map_shape</test>
+        <test>test_segqc_flags_low_quality</test>
+        <test>test_segqc_integrates_with_qa_flow</test>
+      </tests>
+    </task>
+
+    <task id="T7.2" type="GREEN">
+      <title>Implement SegQC module</title>
+      <file>src/minivess/pipeline/segqc.py</file>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 8: MambaAdapter (P2, ~8 hours)                              -->
+  <!-- ================================================================== -->
+  <phase id="8" name="MambaAdapter" priority="P2" effort="medium-high">
+    <description>
+      3D Mamba model adapter based on UlikeMamba (Wang 2025). O(n)
+      complexity alternative to DynUNet. 3D DWConv + Tri-scan strategy.
+    </description>
+
+    <task id="T8.1" type="RED">
+      <title>Write MambaAdapter tests</title>
+      <file>tests/v2/unit/test_mamba_adapter.py</file>
+      <tests>
+        <test>test_mamba_adapter_creation</test>
+        <test>test_mamba_adapter_forward_shape</test>
+        <test>test_mamba_adapter_implements_model_adapter</test>
+        <test>test_mamba_model_profile_exists</test>
+        <test>test_mamba_registered_in_model_builder</test>
+      </tests>
+    </task>
+
+    <task id="T8.2" type="GREEN">
+      <title>Implement MambaAdapter</title>
+      <file>src/minivess/adapters/mamba.py</file>
+      <description>
+        U-shaped Mamba architecture with 3D DWConv and Tri-scan.
+        Uses mamba-ssm library for core SSM operations.
+      </description>
+    </task>
+
+    <task id="T8.3" type="GREEN">
+      <title>Create Mamba model profile</title>
+      <file>configs/model_profiles/mamba.yaml</file>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- VERIFICATION                                                       -->
+  <!-- ================================================================== -->
+  <verification>
+    <command>uv run pytest tests/v2/ -x -q --tb=short</command>
+    <command>uv run ruff check src/ tests/</command>
+    <command>uv run ruff format --check src/ tests/</command>
+    <expected>All tests pass, no lint errors, no format issues</expected>
+  </verification>
+</execution-plan>

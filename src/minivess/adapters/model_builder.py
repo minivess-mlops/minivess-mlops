@@ -114,6 +114,11 @@ def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
 
         return CommaAdapter(config)
 
+    if family == ModelFamily.ULIKE_MAMBA:
+        from minivess.adapters.mamba import MambaAdapter
+
+        return MambaAdapter(config)
+
     if family == ModelFamily.SAM3_VANILLA:
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 

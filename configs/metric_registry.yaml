@@ -241,3 +241,19 @@ metrics:
       EXPERIMENTAL: Measures how well vessel bifurcations follow Murray's cubic
       branching law (r_parent^3 = sum r_daughter_i^3). Uses centreline graph
       radii estimated from distance transform. Score 1.0 = perfect compliance.
+
+  # --------------------------------------------------------------------------
+  # Confidence metrics (deployment quality gates)
+  # --------------------------------------------------------------------------
+
+  - name: sdc_confidence
+    display_name: "Soft Dice Confidence (SDC)"
+    mlflow_name: "eval_fold{fold_id}_sdc_confidence"
+    direction: maximize
+    unit: ""
+    bounds: [0.0, 1.0]
+    description: >
+      Image-level confidence estimator for selective prediction
+      (Borges et al. 2025, arXiv:2402.10665v4). SDC = 2*sum(p*y_hat)/sum(p+y_hat).
+      Near-optimal and model-agnostic. Used as deployment quality gate:
+      if SDC < threshold, route prediction to human expert.

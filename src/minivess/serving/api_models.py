@@ -129,6 +129,7 @@ class SegmentationResponse:
     probabilities: NDArray[np.float32] | None = None
     uncertainty: list[dict[str, Any]] | None = None
     ensemble_member_count: int = 0
+    sdc_confidence: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dictionary.
@@ -145,5 +146,6 @@ class SegmentationResponse:
             ),
             "uncertainty": self.uncertainty,
             "ensemble_member_count": self.ensemble_member_count,
+            "sdc_confidence": self.sdc_confidence,
         }
         return result

@@ -404,6 +404,60 @@ def load_training_artifacts(
     return runs
 
 
+@task(name="discover-post-training-models")
+def discover_post_training_models(
+    *,
+    experiment_name: str = "minivess_post_training",
+    tracking_uri: str | None = None,
+) -> list[dict[str, Any]]:
+    """Discover models produced by the post-training flow.
+
+    Queries the ``minivess_post_training`` MLflow experiment for models
+    produced by SWA, merging, calibration, etc. Returns empty list if
+    the experiment doesn't exist or has no runs.
+
+    Parameters
+    ----------
+    experiment_name:
+        Post-training MLflow experiment name.
+    tracking_uri:
+        Optional MLflow tracking URI override.
+
+    Returns
+    -------
+    List of post-training model info dicts.
+    """
+    log = get_run_logger()
+    log.info("Discovering post-training models from %s...", experiment_name)
+
+    try:
+        import mlflow
+
+        if tracking_uri:
+            mlflow.set_tracking_uri(tracking_uri)
+
+        experiment = mlflow.get_experiment_by_name(experiment_name)
+        if experiment is None:
+            log.info(
+                "Post-training experiment '%s' not found — skipping", experiment_name
+            )
+            return []
+
+        runs = mlflow.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            filter_string="attributes.status = 'FINISHED'",
+            output_format="list",
+        )
+        log.info("Found %d post-training model(s)", len(runs))
+        return [{"run_id": r.info.run_id, "tags": dict(r.data.tags)} for r in runs]
+    except ImportError:
+        log.info("MLflow not available — skipping post-training discovery")
+        return []
+    except Exception:
+        log.warning("Post-training model discovery failed", exc_info=True)
+        return []
+
+
 @task(name="build-ensembles")
 def build_ensembles(
     runs: list[dict[str, Any]],
@@ -1351,6 +1405,7 @@ def run_analysis_flow(
     output_dir: Path | None = None,
     environment: str = "staging",
     tracking_uri: str | None = None,
+    include_post_training: bool = True,
 ) -> dict[str, Any]:
     """Main analysis flow orchestrating all tasks.
 
@@ -1386,6 +1441,18 @@ def run_analysis_flow(
     """
     log = get_run_logger()
     log.info("Starting analysis flow...")
+
+    # Step 0 (optional): Discover post-training models
+    post_training_models: list[dict[str, Any]] = []
+    if include_post_training:
+        post_training_models = discover_post_training_models(
+            tracking_uri=tracking_uri,
+        )
+        if post_training_models:
+            log.info(
+                "Discovered %d post-training model(s) for evaluation",
+                len(post_training_models),
+            )
 
     # Step 1: Load training artifacts
     runs = load_training_artifacts(eval_config, model_config, tracking_uri=tracking_uri)
@@ -1454,4 +1521,5 @@ def run_analysis_flow(
         "mlflow_evaluation": mlflow_eval_results,
         "champion_tags": champion_info,
         "artifact_paths": artifact_paths,
+        "post_training_models": post_training_models,
     }

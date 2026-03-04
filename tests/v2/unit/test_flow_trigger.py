@@ -57,18 +57,54 @@ class TestFlowTriggerResult:
 class TestPipelineTriggerChain:
     """PipelineTriggerChain orchestrates flow execution."""
 
-    def test_chain_has_6_flows(self) -> None:
+    def test_chain_has_7_flows(self) -> None:
         from minivess.orchestration.trigger import PipelineTriggerChain
 
         chain = PipelineTriggerChain()
-        assert len(chain.flow_names) == 6
+        assert len(chain.flow_names) == 7
 
     def test_chain_order(self) -> None:
         from minivess.orchestration.trigger import PipelineTriggerChain
 
         chain = PipelineTriggerChain()
-        expected = ["data", "train", "analyze", "deploy", "dashboard", "qa"]
+        expected = [
+            "data",
+            "train",
+            "post_training",
+            "analyze",
+            "deploy",
+            "dashboard",
+            "qa",
+        ]
         assert chain.flow_names == expected
+
+    def test_post_training_position(self) -> None:
+        """post_training should be after train, before analyze."""
+        from minivess.orchestration.trigger import PipelineTriggerChain
+
+        chain = PipelineTriggerChain()
+        names = chain.flow_names
+        assert names.index("post_training") == names.index("train") + 1
+        assert names.index("post_training") == names.index("analyze") - 1
+
+    def test_post_training_is_best_effort(self) -> None:
+        """post_training failure should NOT stop downstream core flows."""
+        from minivess.orchestration.trigger import PipelineTriggerChain
+
+        def failing_post_training(**kwargs: Any) -> None:
+            msg = "Post-training plugin error"
+            raise RuntimeError(msg)
+
+        chain = PipelineTriggerChain()
+        chain.register_flow("post_training", failing_post_training, is_core=False)
+
+        results = chain.run_chain(trigger_source="test")
+        pt_result = [r for r in results if r.flow_name == "post_training"][0]
+        assert pt_result.status == "failed"
+
+        # Analyze should still run (not skipped)
+        analyze_result = [r for r in results if r.flow_name == "analyze"][0]
+        assert analyze_result.status == "success"
 
     def test_chain_skips_disabled_flows(self) -> None:
         from minivess.orchestration.trigger import (
@@ -100,9 +136,10 @@ class TestPipelineTriggerChain:
         # Data should fail
         data_result = results[0]
         assert data_result.status == "failed"
-        # Subsequent core flows should be skipped
+        # Subsequent core flows should be skipped; best-effort flows still run
+        best_effort = {"post_training", "dashboard", "qa"}
         for r in results[1:]:
-            if r.flow_name not in ("dashboard", "qa"):
+            if r.flow_name not in best_effort:
                 assert r.status == "skipped", f"{r.flow_name} should be skipped"
 
     def test_chain_dashboard_runs_despite_core_failure(self) -> None:

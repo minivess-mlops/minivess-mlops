@@ -1,8 +1,8 @@
 """Pipeline trigger chain — cascades flows from data to dashboard.
 
-Manages the 5-flow pipeline execution order:
-data → train → analyze → deploy → dashboard.
-Core flows (1-4) stop on failure; dashboard (5) is best-effort.
+Manages the 7-flow pipeline execution order:
+data → train → post_training → analyze → deploy → dashboard → qa.
+Core flows (1-4) stop on failure; post_training, dashboard, qa are best-effort.
 """
 
 from __future__ import annotations
@@ -134,14 +134,24 @@ class PipelineTriggerChain:
         results = chain.run_chain(trigger_source="manual")
     """
 
-    # Default flow order (7 flows: 4 core + dashboard best-effort + QA)
-    _DEFAULT_FLOWS = ["data", "train", "analyze", "deploy", "dashboard", "qa"]
+    # Default flow order (7 flows: 4 core + 3 best-effort)
+    _DEFAULT_FLOWS = [
+        "data",
+        "train",
+        "post_training",
+        "analyze",
+        "deploy",
+        "dashboard",
+        "qa",
+    ]
 
     def __init__(self) -> None:
         self._flows: dict[str, _FlowEntry] = {}
         # Initialize with default flow names (no-op callables)
+        # Best-effort flows: post_training, dashboard, qa
+        _best_effort = {"post_training", "dashboard", "qa"}
         for name in self._DEFAULT_FLOWS:
-            is_core = name not in ("dashboard", "qa")
+            is_core = name not in _best_effort
             self._flows[name] = _FlowEntry(name=name, callable=_noop, is_core=is_core)
 
     @property

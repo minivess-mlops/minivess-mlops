@@ -1,0 +1,49 @@
+# Post-training flow configuration (Flow 2.5)
+# Sits between train(2) and analyze(3) in the pipeline.
+# Classification: Best-effort (failure does NOT block analyze).
+
+mlflow_experiment: minivess_post_training
+
+# --- Weight-based plugins (no calibration data needed) ---
+
+swa:
+  enabled: true
+  per_loss: true
+  cross_loss: false
+
+multi_swa:
+  enabled: false
+  n_models: 3
+  subsample_fraction: 0.7
+  seed: 42
+
+model_merging:
+  enabled: true
+  method: slerp
+  t: 0.5
+  merge_pairs:
+    - [topology, overlap]
+
+# --- Data-dependent plugins (require calibration data) ---
+
+calibration:
+  enabled: true
+  methods:
+    - global_temperature
+    - isotonic_regression
+    - spatial_platt
+  calibration_fraction: 0.3
+  n_bins: 15
+
+crc_conformal:
+  enabled: true
+  alpha: 0.1
+
+conseco_fp_control:
+  enabled: false
+  tolerance: 0.05
+  shrink_method: erosion
+
+# NOT SUPPORTED (requires training-time changes):
+# swag: { reason: "Requires second-moment collection during training" }
+# multi_swag: { reason: "Requires M independent SWAG training runs" }
