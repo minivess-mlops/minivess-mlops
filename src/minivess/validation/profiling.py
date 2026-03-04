@@ -31,7 +31,7 @@ class DatasetProfileView:
 
     def get_columns(self) -> list[str]:
         """Return the column names in the profile."""
-        return list(self._view.get_columns().keys())
+        return list(self._view.get_columns().keys())  # type: ignore[attr-defined]
 
     @property
     def raw(self) -> object:
@@ -82,8 +82,8 @@ def compare_profiles(
     drifted: list[str] = []
     summaries: dict[str, dict[str, float]] = {}
 
-    ref_cols = reference._view.get_columns()
-    cur_cols = current._view.get_columns()
+    ref_cols = reference._view.get_columns()  # type: ignore[attr-defined]
+    cur_cols = current._view.get_columns()  # type: ignore[attr-defined]
 
     for col_name in ref_cols:
         if col_name not in cur_cols:

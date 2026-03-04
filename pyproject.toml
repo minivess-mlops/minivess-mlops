@@ -265,6 +265,15 @@ warn_return_any = false
 warn_unused_ignores = false
 disable_error_code = ["type-arg"]
 
+# Validation: pandera DataFrameModel resolves to Any (incomplete stubs),
+# and @pa.check / @pa.dataframe_check decorators are untyped.
+# whylogs ResultSet also lacks stubs (get_columns → object).
+[[tool.mypy.overrides]]
+module = ["minivess.validation.*"]
+disallow_subclassing_any = false
+disallow_untyped_decorators = false
+warn_return_any = false
+
 # Archive: SAM2 reference code (archived, not part of active codebase)
 [[tool.mypy.overrides]]
 module = ["_archive.*"]
