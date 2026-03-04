@@ -125,10 +125,20 @@ class OnnxSegmentationService:
             volume = volume[np.newaxis, ...]
 
         result = self._engine.predict(volume)
+
+        # Compute SDC confidence (Borges et al. 2025) as quality gate
+        from minivess.pipeline.validation_metrics import compute_sdc
+
+        sdc = compute_sdc(
+            result.probabilities,
+            result.segmentation[:, np.newaxis],  # (B, D, H, W) → (B, 1, D, H, W)
+        )
+
         return {
             "segmentation": result.segmentation.tolist(),
             "probabilities": result.probabilities.tolist(),
             "shape": result.shape,
+            "sdc_confidence": sdc,
         }
 
     def health(self) -> dict[str, str]:

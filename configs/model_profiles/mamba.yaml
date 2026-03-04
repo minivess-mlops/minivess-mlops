@@ -1,0 +1,16 @@
+# UlikeMamba: U-shaped Mamba with 3D DWConv, ~2M params (lightweight)
+# O(n) complexity alternative to DynUNet for 3D segmentation
+divisor: 16
+overhead_mb: 300
+bytes_per_voxel_amp: 6
+max_batch_size:
+  cpu: 1
+  gpu_low: 4
+  gpu_high: 8
+  gpu_extreme: 16
+default_patch_size_xy: 64
+efficient: true
+notes: >
+  UlikeMamba architecture (Wang 2025). Pure-PyTorch SSM approximation
+  (no mamba-ssm CUDA kernels required). Lightweight U-Net with Mamba
+  blocks at each resolution. Good for quick iteration and baselines.

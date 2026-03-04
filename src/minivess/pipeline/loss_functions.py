@@ -51,6 +51,7 @@ _EXPERIMENTAL_LOSSES: dict[str, str] = {
     "full_topo": "Compound: DiceCE + clDice + BettiLoss proxy — BettiLoss is experimental",
     "graph_topology": "Compound: cbdice_cldice + skeleton_recall + cape — hand-tuned weights, interaction effects unknown",
     "toposeg": "Discrete Morse critical points (Gupta & Essa IJCV 2025) — simplified proxy, NOT full discrete Morse",
+    "spw": "Steerable Pyramid Weighted CE (Lu 2025) — simplified Laplacian proxy, NOT full steerable pyramid",
 }
 
 _WARNED_LOSSES: set[str] = set()
@@ -526,6 +527,10 @@ def build_loss_function(
         from minivess.pipeline.vendored_losses.toposeg import TopoSegLoss
 
         loss_fn = TopoSegLoss(softmax=softmax)
+    elif loss_name == "spw":
+        from minivess.pipeline.vendored_losses.spw_loss import SPWLoss
+
+        loss_fn = SPWLoss()
 
     if loss_fn is None:
         msg = f"Unknown loss function: {loss_name}"
