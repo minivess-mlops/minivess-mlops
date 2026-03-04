@@ -1,0 +1,21 @@
+# MinIVess MLOps v2 — Data Acquisition Flow (Flow 0)
+# Dataset download, format conversion (TIFF → NIfTI).
+# CPU-only — no GPU needed.
+#
+# Build: docker build -t minivess-acquisition:latest -f deployment/docker/Dockerfile.acquisition .
+
+FROM minivess-base:latest
+
+LABEL flow="acquisition"
+LABEL description="Data acquisition flow — download, convert, verify"
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+USER minivess
+
+# Copy scripts
+COPY --chown=minivess:minivess scripts/ scripts/
+
+CMD ["python", "-m", "minivess.orchestration.flows.acquisition_flow"]

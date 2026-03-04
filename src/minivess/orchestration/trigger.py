@@ -1,8 +1,8 @@
-"""Pipeline trigger chain — cascades flows from data to dashboard.
+"""Pipeline trigger chain — cascades flows from acquisition to QA.
 
-Manages the 7-flow pipeline execution order:
-data → train → post_training → analyze → deploy → dashboard → qa.
-Core flows (1-4) stop on failure; post_training, dashboard, qa are best-effort.
+Manages the 8-flow pipeline execution order:
+acquisition → data → train → post_training → analyze → deploy → dashboard → qa.
+Core flows (0-4) stop on failure; post_training, dashboard, qa are best-effort.
 """
 
 from __future__ import annotations
@@ -134,8 +134,9 @@ class PipelineTriggerChain:
         results = chain.run_chain(trigger_source="manual")
     """
 
-    # Default flow order (7 flows: 4 core + 3 best-effort)
+    # Default flow order (8 flows: 5 core + 3 best-effort)
     _DEFAULT_FLOWS = [
+        "acquisition",
         "data",
         "train",
         "post_training",

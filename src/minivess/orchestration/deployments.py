@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 # Flow → Work Pool mapping
 FLOW_WORK_POOL_MAP: dict[str, str] = {
+    "acquisition": "cpu-pool",
     "data": "cpu-pool",
     "train": "gpu-pool",
     "analyze": "cpu-pool",
@@ -23,6 +24,7 @@ FLOW_WORK_POOL_MAP: dict[str, str] = {
 
 # Flow → Docker image mapping
 FLOW_IMAGE_MAP: dict[str, str] = {
+    "acquisition": "minivess-acquisition:latest",
     "data": "minivess-data:latest",
     "train": "minivess-train:latest",
     "analyze": "minivess-analyze:latest",
