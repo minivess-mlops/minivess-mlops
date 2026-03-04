@@ -6,12 +6,17 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.14.1
+  - repo: local
     hooks:
       - id: mypy
-        additional_dependencies: [pydantic>=2.10]
-        args: [--ignore-missing-imports, --follow-imports=silent]
+        name: mypy
+        entry: uv run mypy
+        language: system
+        types: [python]
+        # Run on staged Python files only (uses project venv with all deps).
+        # mirrors-mypy ran in an isolated venv without torch/monai/pandera,
+        # causing false "Class cannot subclass Any" [misc] errors (#225).
+        pass_filenames: true
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
