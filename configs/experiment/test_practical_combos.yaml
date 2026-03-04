@@ -1,0 +1,44 @@
+# Quasi-E2E Debug Config — Mechanics Testing Only
+# Focus: verify that ALL model×loss combinations train without errors.
+# NOT for performance evaluation — use full experiment configs for that.
+#
+# Usage:
+#   python -m minivess.testing.debug_data_config
+#   ./scripts/run_quasi_e2e.sh
+
+# Training overrides (minimal)
+max_epochs: 1
+num_folds: 1
+batch_size: 2
+warmup_epochs: 0
+num_workers: 0
+mixed_precision: true
+seed: 42
+
+# Volume selection (2 train + 2 val, disjoint)
+n_train_volumes: 2
+n_val_volumes: 2
+train_volume_ids:
+  - mv01
+  - mv03
+val_volume_ids:
+  - mv05
+  - mv07
+
+# External test datasets
+external_test_datasets:
+  tubenet_2pm:
+    enabled: true
+    max_volumes: 1
+  vesselnn:
+    enabled: true
+    max_volumes: 2
+  deepvess:
+    enabled: false
+    max_volumes: 1
+
+# Data config overrides
+cache_rate: 0.0
+
+# Skip post-training in debug mode
+skip_post_training: true

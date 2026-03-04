@@ -41,6 +41,16 @@ repos:
         pass_filenames: false
         always_run: false
 
+  - repo: local
+    hooks:
+      - id: capability-schema-check
+        name: Capability Schema Consistency
+        entry: uv run python -m minivess.testing.capability_discovery --check
+        language: system
+        files: '(method_capabilities\.yaml|config/models\.py|loss_functions\.py)'
+        pass_filenames: false
+        always_run: false
+
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.22.1
     hooks:
