@@ -1,0 +1,38 @@
+# Biostatistics flow — default configuration
+# See: docs/planning/biostatistics-prefect-flow-plan.xml
+
+experiment_names:
+  - dynunet_loss_variation_v2
+
+mlruns_dir: mlruns
+output_dir: outputs/biostatistics
+
+# 8 metrics per Metrics Reloaded recommendations
+metrics:
+  - dsc
+  - hd95
+  - assd
+  - nsd
+  - cldice
+  - be_0
+  - be_1
+  - junction_f1
+
+# Pre-registered primary metric (Holm-Bonferroni correction)
+primary_metric: cldice
+
+# Statistical testing parameters
+alpha: 0.05
+n_bootstrap: 10000
+seed: 42
+
+# ROPE values per reviewer findings (Benavoli et al. 2017)
+rope_values:
+  dsc: 0.01
+  cldice: 0.01
+  hd95: 0.5
+  nsd: 0.01
+
+# Minimum data requirements
+min_folds_per_condition: 3
+min_conditions: 2
