@@ -1,0 +1,68 @@
+# Method Capability Schema — Exceptions-Based
+# Default: ALL losses work with ALL models unless excluded here.
+# Default: ALL post-hoc methods are model-agnostic unless excluded here.
+#
+# To add a new method, implement it and optionally declare exclusions.
+# If no exclusions, the method works with everything (zero config).
+
+version: "1.0"
+
+# Models that are implemented and testable via build_adapter()
+implemented_models:
+  - dynunet
+  - segresnet
+  - swinunetr
+  - vista3d
+  - vesselfm
+  - comma_mamba
+  - ulike_mamba
+  - sam3_vanilla
+  - sam3_topolora
+  - sam3_hybrid
+
+# Loss exclusions: {loss_name: [model_families that CANNOT use this loss]}
+# Empty dict = all losses work with all models (current state)
+loss_exclusions: {}
+
+# Post-training plugin exclusions: {plugin_name: [model_families excluded]}
+post_training_exclusions: {}
+
+# Ensemble exclusions: {strategy: [conditions where it fails]}
+# "*" means excluded entirely (not implementable)
+ensemble_exclusions:
+  swag: ["*"]               # Requires training-time second-moment collection
+  learned_stacking: ["*"]   # Requires held-out data + training (future)
+
+# Deployment exclusions: {method: [model_families excluded]}
+deployment_exclusions:
+  monai_deploy: ["*"]       # Disabled by default, opt-in only
+
+# Per-model default loss (for practical variant — one loss per model)
+model_default_loss:
+  dynunet: cbdice_cldice
+  segresnet: cbdice_cldice
+  swinunetr: cbdice_cldice
+  vista3d: dice_ce
+  vesselfm: cbdice_cldice
+  comma_mamba: cbdice_cldice
+  ulike_mamba: cbdice_cldice
+  sam3_vanilla: dice_ce
+  sam3_topolora: cbdice_cldice
+  sam3_hybrid: cbdice_cldice
+
+# Per-model additional losses to test (beyond default)
+model_extra_losses:
+  dynunet:
+    - dice_ce
+    - dice_ce_cldice
+    - skeleton_recall
+  sam3_vanilla:
+    - cbdice_cldice
+  sam3_topolora:
+    - dice_ce_cldice
+
+# Models excluded from quasi-e2e (not implemented in build_adapter)
+not_implemented:
+  - sam3_lora
+  - multitask_dynunet
+  - custom

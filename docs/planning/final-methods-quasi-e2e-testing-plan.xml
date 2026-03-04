@@ -1,0 +1,341 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Quasi-E2E Testing Execution Plan
+  Branch: test/final-quasi-e2e-testing
+  Generated: 2026-03-04
+  TDD Skill: .claude/skills/self-learning-iterative-coder/SKILL.md
+-->
+<execution-plan version="1.0">
+  <metadata>
+    <title>Final Methods Quasi-E2E Testing</title>
+    <branch>test/final-quasi-e2e-testing</branch>
+    <base-commit>fb864d5</base-commit>
+    <estimated-tests>58</estimated-tests>
+    <estimated-phases>7</estimated-phases>
+    <plan-doc>docs/planning/final-methods-quasi-e2e-testing.md</plan-doc>
+    <prompt-doc>docs/planning/final-methods-quasi-e2e-testing-prompt.md</prompt-doc>
+  </metadata>
+
+  <design-decisions>
+    <decision id="D1" topic="schema">Optional[T] = None — flat, BentoML-compatible</decision>
+    <decision id="D2" topic="reduction">allpairspy pairwise + filter_func for exclusions</decision>
+    <decision id="D3" topic="capabilities">Exceptions-based: all work by default, declare exclusions</decision>
+    <decision id="D4" topic="data">Real data only, no mocks — even 1-epoch training</decision>
+    <decision id="D5" topic="debug">1 epoch, 2 train + 2 val volumes, external test subsets</decision>
+    <decision id="D6" topic="enforcement">Pre-commit + tests + CLAUDE.md guardrails</decision>
+  </design-decisions>
+
+  <phase id="0" name="Capability Schema + Discovery">
+    <description>
+      Create method_capabilities.yaml (exceptions-based) and capability_discovery.py
+      with functions to dynamically discover all implemented models, losses, metrics,
+      plugins, ensemble strategies, and deployment methods.
+    </description>
+    <test-count>12</test-count>
+
+    <task id="0.1" type="red">
+      <title>Write test_capability_discovery.py</title>
+      <file>tests/v2/unit/test_capability_discovery.py</file>
+      <tests>
+        <test>test_discover_implemented_models</test>
+        <test>test_discover_all_losses</test>
+        <test>test_discover_all_metrics</test>
+        <test>test_discover_post_training_plugins</test>
+        <test>test_discover_ensemble_strategies</test>
+        <test>test_load_capability_schema</test>
+        <test>test_get_valid_losses_for_model</test>
+        <test>test_exclusion_filtering</test>
+        <test>test_all_model_families_accounted_for</test>
+        <test>test_all_losses_buildable</test>
+        <test>test_discovery_deterministic</test>
+        <test>test_capability_schema_version</test>
+      </tests>
+    </task>
+
+    <task id="0.2" type="green">
+      <title>Create method_capabilities.yaml</title>
+      <file>configs/method_capabilities.yaml</file>
+      <notes>
+        Exceptions-based: loss_exclusions and post_training_exclusions start empty.
+        All 10 implemented models listed. model_default_loss for practical variant.
+      </notes>
+    </task>
+
+    <task id="0.3" type="green">
+      <title>Create capability_discovery.py</title>
+      <file>src/minivess/testing/capability_discovery.py</file>
+      <functions>
+        <function>discover_implemented_models() -> list[str]</function>
+        <function>discover_all_losses() -> list[str]</function>
+        <function>discover_all_metrics() -> list[str]</function>
+        <function>discover_post_training_plugins() -> list[str]</function>
+        <function>discover_ensemble_strategies() -> list[str]</function>
+        <function>discover_deployment_methods() -> list[str]</function>
+        <function>load_capability_schema() -> CapabilitySchema</function>
+        <function>get_valid_losses_for_model(model: str) -> list[str]</function>
+      </functions>
+    </task>
+
+    <task id="0.4" type="verify">
+      <command>uv run pytest tests/v2/unit/test_capability_discovery.py -x -q</command>
+      <command>uv run ruff check src/minivess/testing/ tests/v2/unit/test_capability_discovery.py</command>
+      <command>uv run mypy src/minivess/testing/capability_discovery.py</command>
+    </task>
+
+    <task id="0.5" type="checkpoint">
+      <commit-message>feat: capability schema + dynamic discovery (Phase 0)</commit-message>
+    </task>
+  </phase>
+
+  <phase id="1" name="Harmonized Serving Output Schema">
+    <description>
+      Create HarmonizedSegmentationOutput dataclass with Optional[T] = None for
+      missing fields. Single source of truth for all model outputs.
+    </description>
+    <test-count>8</test-count>
+
+    <task id="1.1" type="red">
+      <title>Write test_harmonized_output.py</title>
+      <file>tests/v2/unit/test_harmonized_output.py</file>
+      <tests>
+        <test>test_deterministic_output_valid</test>
+        <test>test_probabilistic_output_valid</test>
+        <test>test_ensemble_output_valid</test>
+        <test>test_conformal_output_valid</test>
+        <test>test_validate_output_catches_dtype_error</test>
+        <test>test_validate_output_catches_shape_mismatch</test>
+        <test>test_validate_output_catches_probability_range</test>
+        <test>test_validate_output_catches_conformal_inconsistency</test>
+      </tests>
+    </task>
+
+    <task id="1.2" type="green">
+      <title>Create harmonized_output.py</title>
+      <file>src/minivess/serving/harmonized_output.py</file>
+      <notes>
+        Frozen dataclass. Validation function returns list of errors.
+        Compatible with MLflow ColSpec and BentoML flat model.
+      </notes>
+    </task>
+
+    <task id="1.3" type="verify">
+      <command>uv run pytest tests/v2/unit/test_harmonized_output.py -x -q</command>
+      <command>uv run ruff check src/minivess/serving/harmonized_output.py</command>
+      <command>uv run mypy src/minivess/serving/harmonized_output.py</command>
+    </task>
+
+    <task id="1.4" type="checkpoint">
+      <commit-message>feat: harmonized serving output schema (Phase 1)</commit-message>
+    </task>
+  </phase>
+
+  <phase id="2" name="Combination Generators">
+    <description>
+      Add build_full_combinations() and build_practical_combinations() using allpairspy
+      for pairwise reduction. Generate reproducible YAML from discovered methods.
+    </description>
+    <test-count>10</test-count>
+    <dependency>allpairspy (uv add --dev allpairspy)</dependency>
+
+    <task id="2.1" type="red">
+      <title>Extend test_capability_discovery.py with combination tests</title>
+      <file>tests/v2/unit/test_capability_discovery.py</file>
+      <tests>
+        <test>test_build_full_combinations_count</test>
+        <test>test_build_practical_combinations_covers_all_models</test>
+        <test>test_build_practical_combinations_covers_all_tiers</test>
+        <test>test_practical_fewer_than_full</test>
+        <test>test_allpairspy_reduction</test>
+        <test>test_filter_func_excludes_invalid</test>
+        <test>test_generate_combos_yaml</test>
+        <test>test_generated_yaml_reproducible</test>
+        <test>test_post_training_only_on_representative</test>
+        <test>test_ensemble_needs_minimum_runs</test>
+      </tests>
+    </task>
+
+    <task id="2.2" type="green">
+      <title>Add combination generators to capability_discovery.py</title>
+      <file>src/minivess/testing/capability_discovery.py</file>
+      <functions>
+        <function>build_full_combinations() -> list[TestCombination]</function>
+        <function>build_practical_combinations() -> list[TestCombination]</function>
+        <function>generate_combos_yaml(combos, output_path) -> Path</function>
+      </functions>
+    </task>
+
+    <task id="2.3" type="verify">
+      <command>uv run pytest tests/v2/unit/test_capability_discovery.py -x -q</command>
+    </task>
+
+    <task id="2.4" type="checkpoint">
+      <commit-message>feat: combination generators with allpairspy reduction (Phase 2)</commit-message>
+    </task>
+  </phase>
+
+  <phase id="3" name="Debug Data Config">
+    <description>
+      Create debug_data_config.py for 2+2 volume subsets and external test dataset
+      configuration. Create test_practical_combos.yaml.
+    </description>
+    <test-count>8</test-count>
+
+    <task id="3.1" type="red">
+      <title>Write test_debug_data_config.py</title>
+      <file>tests/v2/unit/test_debug_data_config.py</file>
+      <tests>
+        <test>test_debug_subset_selects_volumes</test>
+        <test>test_debug_subset_single_fold</test>
+        <test>test_external_dataset_subset</test>
+        <test>test_external_dataset_full</test>
+        <test>test_debug_config_loads_from_yaml</test>
+        <test>test_debug_config_overrides_defaults</test>
+        <test>test_volume_ids_exist</test>
+        <test>test_data_paths_resolve</test>
+      </tests>
+    </task>
+
+    <task id="3.2" type="green">
+      <title>Create debug_data_config.py</title>
+      <file>src/minivess/testing/debug_data_config.py</file>
+    </task>
+
+    <task id="3.3" type="green">
+      <title>Create test_practical_combos.yaml</title>
+      <file>configs/experiments/test_practical_combos.yaml</file>
+    </task>
+
+    <task id="3.4" type="verify">
+      <command>uv run pytest tests/v2/unit/test_debug_data_config.py -x -q</command>
+    </task>
+
+    <task id="3.5" type="checkpoint">
+      <commit-message>feat: debug data config + test_practical_combos.yaml (Phase 3)</commit-message>
+    </task>
+  </phase>
+
+  <phase id="4" name="pytest Quasi-E2E Runner">
+    <description>
+      Create test_all_permutations.py with dynamic parametrization via
+      pytest_generate_tests hook. Each (model, loss) combo = one test case.
+    </description>
+    <test-count>10</test-count>
+
+    <task id="4.1" type="red">
+      <title>Write quasi-E2E conftest and test runner</title>
+      <file>tests/v2/quasi_e2e/conftest.py</file>
+      <file>tests/v2/quasi_e2e/test_all_permutations.py</file>
+      <tests>
+        <test>test_parametrize_generates_correct_count</test>
+        <test>test_parametrize_covers_all_models</test>
+        <test>test_conftest_loads_without_error</test>
+        <test>test_combo_ids_are_unique</test>
+        <test>test_subtests_isolate_failures</test>
+        <test>test_results_logged_to_json</test>
+        <test>test_mlflow_experiment_created</test>
+        <test>test_artifacts_written_to_output_dir</test>
+        <test>test_external_datasets_evaluated</test>
+        <test>test_report_generated</test>
+      </tests>
+    </task>
+
+    <task id="4.2" type="green">
+      <title>Implement conftest + test runner</title>
+      <file>tests/v2/quasi_e2e/conftest.py</file>
+      <file>tests/v2/quasi_e2e/test_all_permutations.py</file>
+    </task>
+
+    <task id="4.3" type="verify">
+      <command>uv run pytest tests/v2/quasi_e2e/ -x -q --collect-only</command>
+    </task>
+
+    <task id="4.4" type="checkpoint">
+      <commit-message>feat: pytest quasi-E2E test runner (Phase 4)</commit-message>
+    </task>
+  </phase>
+
+  <phase id="5" name="Guardrails + Enforcement">
+    <description>
+      Add pre-commit capability-schema-check hook and CLAUDE.md Critical Rule #16.
+      Enforce that every new method is discoverable.
+    </description>
+    <test-count>6</test-count>
+
+    <task id="5.1" type="red">
+      <title>Write test_capability_precommit.py</title>
+      <file>tests/v2/unit/test_capability_precommit.py</file>
+      <tests>
+        <test>test_check_mode_passes_on_consistent_schema</test>
+        <test>test_check_mode_catches_missing_model</test>
+        <test>test_check_mode_catches_orphan_exclusion</test>
+        <test>test_check_mode_catches_missing_default_loss</test>
+        <test>test_check_output_format</test>
+        <test>test_check_mode_exit_code</test>
+      </tests>
+    </task>
+
+    <task id="5.2" type="green">
+      <title>Add --check mode to capability_discovery.py</title>
+      <file>src/minivess/testing/capability_discovery.py</file>
+    </task>
+
+    <task id="5.3" type="green">
+      <title>Add pre-commit hook</title>
+      <file>.pre-commit-config.yaml</file>
+    </task>
+
+    <task id="5.4" type="green">
+      <title>Add Critical Rule #16 to CLAUDE.md</title>
+      <file>CLAUDE.md</file>
+    </task>
+
+    <task id="5.5" type="verify">
+      <command>uv run pytest tests/v2/unit/test_capability_precommit.py -x -q</command>
+      <command>uv run python -m minivess.testing.capability_discovery --check</command>
+    </task>
+
+    <task id="5.6" type="checkpoint">
+      <commit-message>feat: pre-commit capability check + CLAUDE.md rule (Phase 5)</commit-message>
+    </task>
+  </phase>
+
+  <phase id="6" name="Bash Script + Integration">
+    <description>
+      Create run_quasi_e2e.sh and verify end-to-end script execution in dry-run mode.
+    </description>
+    <test-count>4</test-count>
+
+    <task id="6.1" type="red">
+      <title>Write test_quasi_e2e_script.py</title>
+      <file>tests/v2/unit/test_quasi_e2e_script.py</file>
+      <tests>
+        <test>test_script_exists_and_executable</test>
+        <test>test_script_accepts_config_flag</test>
+        <test>test_script_dry_run_mode</test>
+        <test>test_results_json_schema</test>
+      </tests>
+    </task>
+
+    <task id="6.2" type="green">
+      <title>Create run_quasi_e2e.sh</title>
+      <file>scripts/run_quasi_e2e.sh</file>
+    </task>
+
+    <task id="6.3" type="verify">
+      <command>bash scripts/run_quasi_e2e.sh --dry-run</command>
+      <command>uv run pytest tests/v2/unit/test_quasi_e2e_script.py -x -q</command>
+    </task>
+
+    <task id="6.4" type="checkpoint">
+      <commit-message>feat: run_quasi_e2e.sh script + integration (Phase 6)</commit-message>
+    </task>
+  </phase>
+
+  <verification>
+    <step>uv run pytest tests/ -x -q</step>
+    <step>uv run ruff check src/ tests/</step>
+    <step>uv run mypy src/</step>
+    <step>uv run python -m minivess.testing.capability_discovery --check</step>
+    <step>bash scripts/run_quasi_e2e.sh --dry-run</step>
+  </verification>
+</execution-plan>
