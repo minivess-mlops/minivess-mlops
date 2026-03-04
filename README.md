@@ -30,10 +30,13 @@ designed as a **portfolio-grade reference implementation** of an end-to-end ML p
    Betti matching, skeleton recall) to graph-constrained (compound graph topology)
 3. **Conformal uncertainty quantification** -- 5 methods (split conformal, morphological,
    distance transform, risk-controlling, MAPIE)
-4. **5 Prefect flows** -- persona-based orchestration (data, train, analyze, deploy, dashboard)
-5. **Reproducible experiments** -- all 5 flows verified end-to-end with real data
+4. **Post-training plugin architecture** -- 6 configurable post-hoc plugins (SWA,
+   Multi-SWA, model merging, calibration, CRC conformal, ConSeCo FP control)
+5. **7 Prefect flows** -- persona-based orchestration (data, train, post-training,
+   analyze, deploy, dashboard, qa)
+6. **Reproducible experiments** -- all flows verified end-to-end with real data
    (70 volumes, 4 losses, 3 folds, 100 epochs)
-6. **SaMD-principled** -- IEC 62304 lifecycle mapping, audit trails, model cards
+7. **SaMD-principled** -- IEC 62304 lifecycle mapping, audit trails, model cards
 
 The platform is an **academic software project** -- the PRD system (78 Bayesian decision
 nodes across 5 levels) serves as the evidence base for a peer-reviewed article.
@@ -75,27 +78,31 @@ See [ADR-0006](docs/adr/0006-sam3-variant-architecture.md) for architecture deci
 ### Pipeline
 
 ```
-                        Prefect Orchestration (5 flows)
+                        Prefect Orchestration (7 flows)
                         ============================
 
-Flow 1: Data Engineering     Flow 2: Training         Flow 3: Analysis
-  DVC + NIfTI                  Hydra-zen configs        8-metric evaluation
-  TorchIO augmentation         Mixed precision          Bootstrap CIs
-  Pydantic validation          Grad checkpointing       Ensemble strategies
-  Pandera schemas              18 loss functions         Conformal UQ
-  Dataset profiling            12 model families         Graph topology
+Flow 1: Data Engineering     Flow 2: Training       Flow 2.5: Post-Training
+  DVC + NIfTI                  Hydra-zen configs      6 post-hoc plugins
+  TorchIO augmentation         Mixed precision         SWA + Multi-SWA
+  Pydantic validation          Grad checkpointing     Model merging (slerp)
+  Pandera schemas              18 loss functions       Calibration (temp/Platt)
+  Dataset profiling            12 model families       CRC conformal + ConSeCo
           |                          |                        |
           v                          v                        v
         MLflow <=================  MLflow  ===============> MLflow
           |                          |                        |
           v                          v                        v
-Flow 4: Deployment           Flow 5: Dashboard (best-effort)
-  Champion discovery           Paper figures (PNG+SVG)
-  ONNX export + validate       Parquet + DuckDB export
-  BentoML model store          Comparison tables (MD+TEX)
-  Gradio demo                  Drift reports
-  MONAI Deploy MAP
-  DEV -> STAGING -> PROD
+Flow 3: Analysis             Flow 4: Deployment     Flow 5: Dashboard
+  8-metric evaluation          Champion discovery      Paper figures (PNG+SVG)
+  Bootstrap CIs                ONNX export + validate  Parquet + DuckDB export
+  Ensemble strategies          BentoML model store     Comparison tables (MD+TEX)
+  Conformal UQ                 Gradio demo             Drift reports
+  Graph topology               MONAI Deploy MAP
+  Post-training discovery      DEV -> STAGING -> PROD
+                                                     Flow 6: QA (best-effort)
+                                                       MLflow data integrity
+                                                       Ghost run cleanup
+                                                       Param validation
 ```
 
 ### ModelAdapter Pattern
@@ -183,6 +190,23 @@ Additional UQ: `MCDropoutPredictor`, `DeepEnsemblePredictor`, `CalibrationShiftA
 Mean, majority vote, weighted, greedy soup, SWAG, TIES-DARE, learned stacking --
 configured via `EnsembleStrategy` enum.
 
+### Post-Training Plugins (6)
+
+Config-driven post-hoc enhancement plugins (Flow 2.5, best-effort between train and analyze):
+
+| Plugin | Wraps | Cal Data? |
+|--------|-------|-----------|
+| **SWA** | `model_soup.uniform_swa()` | No |
+| **Multi-SWA** | M independent SWA models (subsampled) | No |
+| **Model Merging** | `linear_merge()`, `slerp_merge()`, `layer_wise_merge()` | No |
+| **Calibration** | Temperature scaling, isotonic regression, spatial Platt | Yes |
+| **CRC Conformal** | `CRCPredictor` + `varisco_heatmap()` | Yes |
+| **ConSeCo FP Control** | Threshold/erosion shrinking with conformal guarantees | Yes |
+
+Each plugin implements `PostTrainingPlugin` protocol. Enable/disable via
+`configs/post_training/default.yaml`. See
+[`docs/planning/post-training-plugins-and-swa-planning.md`](docs/planning/post-training-plugins-and-swa-planning.md).
+
 ---
 
 ## Technology Stack
@@ -192,7 +216,7 @@ configured via `EnsembleStrategy` enum.
 | **Language** | Python 3.12+ | Runtime |
 | **Package Manager** | uv | Dependency management (only -- never pip/conda) |
 | **ML Framework** | PyTorch 2.5+ / MONAI 1.4+ / TorchIO / TorchMetrics | Training and inference |
-| **Orchestration** | Prefect 3.x | 5 persona-based flows (required, not optional) |
+| **Orchestration** | Prefect 3.x | 7 persona-based flows (required, not optional) |
 | **Config (train)** | Hydra-zen | Experiment configs with Pydantic v2 validation |
 | **Config (deploy)** | Dynaconf | Environment-layered deployment settings |
 | **Data Validation** | Pydantic v2 + Pandera + Great Expectations | Schema, DataFrame, batch quality |
@@ -235,7 +259,7 @@ uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/ && uv ru
 # Run a debug training experiment (DynUNet, 1 epoch, 2 folds)
 uv run python scripts/run_experiment.py --experiment dynunet_e2e_debug
 
-# Run the full reproducibility pipeline (all 5 flows)
+# Run the full reproducibility pipeline (all 7 flows)
 uv run python scripts/run_full_pipeline.py
 ```
 
@@ -349,17 +373,26 @@ minivess-mlops/
 |   |   +-- calibration.py         Temperature scaling, ECE/MCE
 |   |-- orchestration/             Prefect 3.x flows
 |   |   |-- flows/data_flow.py     Flow 1: Data Engineering
+|   |   |-- flows/post_training_flow.py  Flow 2.5: Post-Training Plugins
 |   |   |-- flows/analysis_flow.py Flow 3: Model Analysis
 |   |   |-- flows/annotation_flow.py  Label Studio integration
 |   |   |-- flows/dashboard_flow.py   Flow 5: Dashboard (best-effort)
 |   |   |-- deploy_flow.py         Flow 4: Deployment
-|   |   |-- trigger.py             PipelineTriggerChain (all flows)
+|   |   |-- trigger.py             PipelineTriggerChain (7 flows)
 |   |   +-- _prefect_compat.py     Graceful degradation for CI
+|   |-- pipeline/post_training_plugins/  6 post-hoc plugin implementations
+|   |   |-- swa.py                 SWA plugin (checkpoint averaging)
+|   |   |-- multi_swa.py           Multi-SWA plugin (M independent models)
+|   |   |-- model_merging.py       Linear/SLERP/layer-wise merging
+|   |   |-- calibration.py         Temperature scaling, isotonic, Platt
+|   |   |-- crc_conformal.py       CRC conformal prediction
+|   |   +-- conseco_fp_control.py  ConSeCo FP rate control
 |   |-- config/                    Pydantic v2 config models
 |   |   |-- models.py              ModelFamily, ModelConfig, DataConfig
 |   |   |-- adaptive_profiles.py   HardwareBudget, auto compute detection
 |   |   |-- model_profiles.py      Per-model YAML profiles
-|   |   +-- deploy_config.py       DeployConfig, ChampionCategory
+|   |   |-- deploy_config.py       DeployConfig, ChampionCategory
+|   |   +-- post_training_config.py  PostTrainingConfig + plugin sub-configs
 |   |-- data/                      Data loading, profiling, DVC integration
 |   |-- serving/                   BentoML, ONNX inference, Gradio demo
 |   |-- observability/             MLflow tracking, DuckDB analytics
@@ -374,19 +407,22 @@ minivess-mlops/
 |
 |-- configs/
 |   |-- experiments/               19 experiment YAML configs
+|   |-- post_training/             Post-training plugin config (default.yaml)
 |   |-- model_profiles/            Per-model VRAM/compute profiles
 |   +-- splits/                    Cross-validation fold definitions
 |
 |-- scripts/                       26 operational scripts
 |   |-- train_monitored.py         Crash-resistant training with checkpoints
 |   |-- run_experiment.py          YAML-driven experiment runner
-|   |-- run_full_pipeline.py       Full 5-flow pipeline trigger
+|   |-- run_full_pipeline.py       Full 7-flow pipeline trigger
 |   |-- verify_all_artifacts.py    73 artifact validation checks
 |   |-- assemble_paper_artifacts.py  25 paper-ready figures/tables
 |   +-- ...                        analysis, export, monitoring scripts
 |
 |-- deployment/
 |   |-- docker-compose.yml         Profile-based (dev/monitoring/full)
+|   |-- docker-compose.flows.yml   Per-flow Docker services (7 flows)
+|   |-- docker/Dockerfile.post_training  Post-training flow container
 |   +-- Dockerfile                 Multi-stage build
 |
 |-- docs/
@@ -447,6 +483,7 @@ structured evidence base for a future peer-reviewed article. See
 |--------|-------|
 | Model families | 12 |
 | Loss functions | 18 |
+| Post-training plugins | 6 |
 | Experiment configs | 19 |
 | Conformal/UQ methods | 7 |
 | Ensemble strategies | 7 |
@@ -454,7 +491,7 @@ structured evidence base for a future peer-reviewed article. See
 | PRD decision nodes | 78 |
 | ADRs | 6 |
 | CI workflows | 6 |
-| Prefect flows | 5 |
+| Prefect flows | 7 |
 
 ---
 
@@ -497,8 +534,9 @@ instantiations, not code. See CLAUDE.md Core Principle #8.
 - [x] Serving (BentoML, ONNX Runtime, Gradio)
 - [x] Deployment flow (champion discovery, ONNX export, promotion)
 - [x] Observability (MLflow, DuckDB, OpenLineage, Langfuse)
-- [x] Real-data E2E pipeline verification (all 5 flows)
+- [x] Real-data E2E pipeline verification (all flows)
 - [x] SAM3 integration: backbone, decoder, 3 adapter variants, 153 tests
+- [x] Post-training plugin architecture (6 plugins, 96 tests, Flow 2.5)
 
 ### In Progress
 
@@ -520,6 +558,7 @@ instantiations, not code. See CLAUDE.md Core Principle #8.
 - [Full Modernization Plan](docs/modernize-minivess-mlops-plan.md) -- architecture, tool rationale, phased roadmap
 - [Claude Code Patterns](docs/claude-code-patterns.md) -- TDD patterns demonstrated during v2 development
 - [SAM3 Literature Report](docs/planning/sam3-literature-research-report.md) -- 80+ paper survey on SAM for segmentation
+- [Post-Training Plugins Plan](docs/planning/post-training-plugins-and-swa-planning.md) -- Plugin architecture, SWA vs SWAG distinction, 6 plugins
 - [Graph Topology Analysis](docs/planning/graph-connectivity-analysis.md) -- 80+ paper survey on topology metrics
 - [Loss Variation Results](docs/results/dynunet_loss_variation_v2_report.md) -- DynUNet baseline analysis
 - [PRD Overview](docs/planning/prd/README.md) -- Bayesian decision network navigation

@@ -1,0 +1,14 @@
+# MinIVess MLOps v2 — Post-Training Flow (Flow 2.5)
+# SWA, model merging, calibration, conformal prediction.
+#
+# Build: docker build -t minivess-post-training:latest -f deployment/docker/Dockerfile.post_training .
+
+FROM minivess-base:latest
+
+LABEL flow="post_training"
+LABEL description="Post-training flow — SWA, merging, calibration, conformal"
+
+# Copy scripts
+COPY --chown=minivess:minivess scripts/ scripts/
+
+CMD ["python", "-m", "minivess.orchestration.flows.post_training_flow"]

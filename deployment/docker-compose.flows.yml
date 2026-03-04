@@ -65,6 +65,22 @@ services:
       - minivess
     <<: *common-labels
 
+  # Flow 2.5: Post-Training (best-effort)
+  post_training:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.post_training
+    image: minivess-post-training:latest
+    container_name: minivess-flow-post-training
+    environment:
+      <<: *common-env
+      FLOW_NAME: post_training
+    volumes:
+      - checkpoint_cache:/app/checkpoints:ro
+    networks:
+      - minivess
+    <<: *common-labels
+
   # Flow 3: Model Analysis
   analyze:
     build:
