@@ -209,6 +209,84 @@ def check_consistency(yaml_path: Path | None = None) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Combination data model
+# ---------------------------------------------------------------------------
+
+
+class TestCombination(BaseModel):
+    """A single (model, loss) test combination."""
+
+    model: str
+    loss: str
+
+
+# ---------------------------------------------------------------------------
+# Combination generators
+# ---------------------------------------------------------------------------
+
+
+def build_full_combinations(
+    yaml_path: Path | None = None,
+) -> list[TestCombination]:
+    """Brute-force: every valid (model, loss) pair."""
+    models = discover_implemented_models(yaml_path)
+    combos: list[TestCombination] = []
+    for model in models:
+        valid_losses = get_valid_losses_for_model(model, yaml_path)
+        for loss in valid_losses:
+            combos.append(TestCombination(model=model, loss=loss))
+    return combos
+
+
+def build_practical_combinations(
+    yaml_path: Path | None = None,
+) -> list[TestCombination]:
+    """Reduced: model_default_loss + model_extra_losses from schema.
+
+    Each model gets its default loss plus any extra losses defined in
+    the capability schema. Deterministic and reproducible.
+    """
+    schema = load_capability_schema(yaml_path)
+    combos: list[TestCombination] = []
+    seen: set[tuple[str, str]] = set()
+
+    for model in sorted(schema.implemented_models):
+        # Default loss
+        default_loss = schema.model_default_loss.get(model)
+        if default_loss:
+            key = (model, default_loss)
+            if key not in seen:
+                combos.append(TestCombination(model=model, loss=default_loss))
+                seen.add(key)
+
+        # Extra losses
+        for loss in schema.model_extra_losses.get(model, []):
+            key = (model, loss)
+            if key not in seen:
+                combos.append(TestCombination(model=model, loss=loss))
+                seen.add(key)
+
+    return combos
+
+
+def generate_combos_yaml(
+    combos: list[TestCombination],
+    output_path: Path,
+) -> Path:
+    """Write test combinations to a YAML file for reproducibility."""
+    data = {
+        "generated": True,
+        "n_combinations": len(combos),
+        "combinations": [c.model_dump() for c in combos],
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as fh:
+        yaml.dump(data, fh, default_flow_style=False, sort_keys=False)
+    logger.info("Wrote %d combinations to %s", len(combos), output_path)
+    return output_path
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 

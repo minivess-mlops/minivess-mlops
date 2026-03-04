@@ -349,6 +349,7 @@ override-dependencies = [
 
 [dependency-groups]
 dev = [
+    "allpairspy>=2.5.1",
     "pytest>=8.4.2",
     "types-psutil>=7.2.2.20260130",
 ]

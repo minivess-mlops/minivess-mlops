@@ -1,24 +1,35 @@
-"""Tests for dynamic method capability discovery (Phase 0, #332).
+"""Tests for dynamic method capability discovery (Phase 0+2, #332, #334).
 
 Verifies that capability_discovery.py can dynamically discover all
 implemented models, losses, metrics, plugins, ensemble strategies,
-and deployment methods from the codebase.
+and deployment methods from the codebase. Also tests combination generators.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from minivess.testing.capability_discovery import (
     CapabilitySchema,
+    build_full_combinations,
+    build_practical_combinations,
     discover_all_losses,
     discover_deployment_methods,
     discover_ensemble_strategies,
     discover_implemented_models,
     discover_metrics,
     discover_post_training_plugins,
+    generate_combos_yaml,
     get_valid_losses_for_model,
     load_capability_schema,
+)
+from minivess.testing.capability_discovery import (
+    TestCombination as _TestCombination,
 )
 
 
@@ -191,3 +202,94 @@ class TestCapabilityConsistency:
         all_losses = discover_all_losses()
         for model, loss in schema.model_default_loss.items():
             assert loss in all_losses, f"Default loss {loss} for {model} not found"
+
+
+# -----------------------------------------------------------------------
+# Phase 2: Combination generators (#334)
+# -----------------------------------------------------------------------
+
+
+class TestBuildFullCombinations:
+    """build_full_combinations produces all valid (model, loss) pairs."""
+
+    def test_returns_nonempty(self) -> None:
+        combos = build_full_combinations()
+        assert len(combos) > 0
+
+    def test_all_are_test_combinations(self) -> None:
+        combos = build_full_combinations()
+        for combo in combos:
+            assert isinstance(combo, _TestCombination)
+
+    def test_count_matches_model_times_loss(self) -> None:
+        combos = build_full_combinations()
+        models = discover_implemented_models()
+        losses = discover_all_losses()
+        # No exclusions currently, so full cross product
+        assert len(combos) == len(models) * len(losses)
+
+
+class TestBuildPracticalCombinations:
+    """build_practical_combinations covers all models with reduced combos."""
+
+    def test_covers_all_models(self) -> None:
+        combos = build_practical_combinations()
+        combo_models = {c.model for c in combos}
+        models = set(discover_implemented_models())
+        assert combo_models == models
+
+    def test_fewer_than_full(self) -> None:
+        practical = build_practical_combinations()
+        full = build_full_combinations()
+        assert len(practical) < len(full)
+
+    def test_covers_all_loss_tiers(self) -> None:
+        """Practical variant tests at least one loss from each tier."""
+        from minivess.pipeline.loss_functions import (
+            _HYBRID_LOSSES,
+            _LIBRARY_COMPOUND_LOSSES,
+            _LIBRARY_LOSSES,
+        )
+
+        combos = build_practical_combinations()
+        combo_losses = {c.loss for c in combos}
+        assert combo_losses & _LIBRARY_LOSSES, "Missing LIBRARY tier"
+        assert combo_losses & _LIBRARY_COMPOUND_LOSSES, "Missing LIBRARY-COMPOUND tier"
+        assert combo_losses & set(_HYBRID_LOSSES.keys()), "Missing HYBRID tier"
+        # EXPERIMENTAL may or may not be in practical — not required
+
+    def test_reproducible(self) -> None:
+        """Same call twice produces same result."""
+        combos1 = build_practical_combinations()
+        combos2 = build_practical_combinations()
+        assert combos1 == combos2
+
+
+class TestGenerateCombosYaml:
+    """generate_combos_yaml writes valid YAML from combinations."""
+
+    def test_writes_yaml_file(self, tmp_path: Path) -> None:
+        combos = build_practical_combinations()
+        output = tmp_path / "combos.yaml"
+        result = generate_combos_yaml(combos, output)
+        assert result.exists()
+        assert result.suffix == ".yaml"
+
+    def test_yaml_is_loadable(self, tmp_path: Path) -> None:
+        import yaml
+
+        combos = build_practical_combinations()
+        output = tmp_path / "combos.yaml"
+        generate_combos_yaml(combos, output)
+        with output.open(encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+        assert "combinations" in data
+        assert len(data["combinations"]) == len(combos)
+
+    def test_yaml_is_reproducible(self, tmp_path: Path) -> None:
+        combos = build_practical_combinations()
+        out1 = tmp_path / "combos1.yaml"
+        out2 = tmp_path / "combos2.yaml"
+        generate_combos_yaml(combos, out1)
+        generate_combos_yaml(combos, out2)
+        assert out1.read_text(encoding="utf-8") == out2.read_text(encoding="utf-8")
