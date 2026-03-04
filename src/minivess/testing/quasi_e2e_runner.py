@@ -20,13 +20,9 @@ logger = logging.getLogger(__name__)
 
 # Model-specific minimum test patch sizes.
 # SAM3: 14×14 kernel on 2D slices → all dims >= 16
-# SwinUNETR: divisible by 2^5=32 on all dims
-# VISTA3D: divisible by 16
 # VesselFM: divisible by 32
-# Default: (32, 32, 8) is fine for dynunet/segresnet/mamba
+# Default: (32, 32, 8) is fine for dynunet/mamba
 _SAM3_MODELS = frozenset({"sam3_vanilla", "sam3_topolora", "sam3_hybrid"})
-_SWINUNETR_MODELS = frozenset({"swinunetr"})
-_VISTA3D_MODELS = frozenset({"vista3d"})
 _VESSELFM_MODELS = frozenset({"vesselfm"})
 
 _PATCH_MAP: dict[str, tuple[int, int, int]] = {
@@ -34,10 +30,6 @@ _PATCH_MAP: dict[str, tuple[int, int, int]] = {
     "sam3_vanilla": (16, 32, 32),
     "sam3_topolora": (16, 32, 32),
     "sam3_hybrid": (16, 32, 32),
-    # SwinUNETR: all dims divisible by 32, needs >32 for InstanceNorm at deep levels
-    "swinunetr": (64, 64, 64),
-    # VISTA3D: all dims divisible by 16
-    "vista3d": (32, 32, 32),
     # VesselFM: 6 encoder levels → needs >= 64 per dim
     "vesselfm": (64, 64, 64),
 }

@@ -60,7 +60,7 @@ def load_model_profile(
     Parameters
     ----------
     name:
-        Model profile name (e.g., ``"dynunet"``, ``"vista3d"``).
+        Model profile name (e.g., ``"dynunet"``).
     search_dirs:
         Optional list of directories to search before the default location.
 

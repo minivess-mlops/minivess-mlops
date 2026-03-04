@@ -48,7 +48,7 @@ class ConfigDashboardSection:
     experiment_config:
         Name of the experiment config file.
     model_profile_name:
-        Name of the model profile (dynunet, segresnet, etc.).
+        Name of the model profile (dynunet, vesselfm, etc.).
     """
 
     environment: str
@@ -64,7 +64,7 @@ class ModelDashboardSection:
     Attributes
     ----------
     architecture_name:
-        Model architecture name (DynUNet, SegResNet, etc.).
+        Model architecture name (DynUNet, VesselFM, etc.).
     param_count:
         Number of trainable parameters.
     onnx_exported:

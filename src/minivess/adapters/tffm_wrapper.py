@@ -125,7 +125,7 @@ class TFFMWrapper(ModelAdapter):  # type: ignore[misc]
             n_channels = _get_output_channels(bottleneck)
             return bottleneck, n_channels
 
-        # Strategy 2: MONAI SegResNet / SegResNetDS2 — look for down_layers[-1]
+        # Strategy 2: MONAI models with down_layers — look for down_layers[-1]
         if hasattr(net, "down_layers"):
             last_down: nn.Module = net.down_layers[-1]
             n_channels = _get_output_channels(last_down)

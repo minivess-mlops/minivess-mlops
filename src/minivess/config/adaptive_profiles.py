@@ -22,9 +22,6 @@ if TYPE_CHECKING:
 # Model-specific patch size divisors
 _MODEL_DIVISORS: dict[str, int] = {
     "dynunet": 8,
-    "segresnet": 8,
-    "vista3d": 16,
-    "swinunetr": 32,
 }
 
 # Batch sizes per GPU tier

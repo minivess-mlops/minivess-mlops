@@ -48,10 +48,7 @@ replaced with a modular architecture using 11 subpackages:
 All models implement `ModelAdapter` ABC with unified `forward()`, `get_config()`,
 `save_checkpoint()`, `load_checkpoint()`, `export_onnx()`, and `trainable_parameters()`:
 
-- **SegResNet** — MONAI's residual encoder-decoder (primary architecture)
-- **SwinUNETR** — Shifted-window transformer for 3D segmentation
-- **DynUNet** — Dynamic UNet with configurable width ablation
-- **VISTA-3D** — MONAI foundation model with prompt-based segmentation
+- **DynUNet** — Dynamic UNet with configurable width ablation (primary architecture)
 - **vesselFM** — HuggingFace-hosted vascular foundation model with weight checksums
 - **AtlasSegFM** — One-shot foundation model customization
 - **COMMA/Mamba** — State-space model with coordinate embedding

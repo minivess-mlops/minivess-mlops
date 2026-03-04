@@ -13,34 +13,17 @@ from minivess.config.models import (
 )
 
 # --- Data configs ---
-MinivessDataConf = builds(DataConfig, dataset_name="minivess", populate_full_signature=True)
+MinivessDataConf = builds(
+    DataConfig, dataset_name="minivess", populate_full_signature=True
+)
 
 # --- Model configs ---
-SegResNetConf = builds(
+DynUNetConf = builds(
     ModelConfig,
-    family=ModelFamily.MONAI_SEGRESNET,
-    name="segresnet",
+    family=ModelFamily.MONAI_DYNUNET,
+    name="dynunet",
     in_channels=1,
     out_channels=2,
-    populate_full_signature=True,
-)
-
-SwinUNETRConf = builds(
-    ModelConfig,
-    family=ModelFamily.MONAI_SWINUNETR,
-    name="swinunetr",
-    in_channels=1,
-    out_channels=2,
-    populate_full_signature=True,
-)
-
-Vista3DConf = builds(
-    ModelConfig,
-    family=ModelFamily.MONAI_VISTA3D,
-    name="vista3d",
-    in_channels=1,
-    out_channels=2,
-    pretrained=True,
     populate_full_signature=True,
 )
 
@@ -103,7 +86,7 @@ ConformalConf = builds(
 ExperimentConf = make_config(
     experiment_name="minivess_v2",
     data=MinivessDataConf,
-    model=SegResNetConf,
+    model=DynUNetConf,
     training=DefaultTrainConf,
     ensemble=MeanEnsembleConf,
 )
@@ -113,9 +96,7 @@ cs = store(group="experiment")
 cs(ExperimentConf, name="default")
 
 model_store = store(group="experiment/model")
-model_store(SegResNetConf, name="segresnet")
-model_store(SwinUNETRConf, name="swinunetr")
-model_store(Vista3DConf, name="vista3d")
+model_store(DynUNetConf, name="dynunet")
 model_store(Sam3LoraConf, name="sam3_lora")
 
 training_store = store(group="experiment/training")

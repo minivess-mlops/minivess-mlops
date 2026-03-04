@@ -24,8 +24,8 @@ MinIVess MLOps v2 is a **complete rewrite** of [v0.1-alpha](https://github.com/p
 designed as a **portfolio-grade reference implementation** of an end-to-end ML pipeline for
 3D biomedical image segmentation. It demonstrates:
 
-1. **Model-agnostic architecture** -- 12 model families (DynUNet, SegResNet, SwinUNETR,
-   SAM3, VesselFM, TFFM, ...) behind a single `ModelAdapter` ABC
+1. **Model-agnostic architecture** -- 9 model families (DynUNet, SAM3, VesselFM,
+   COMMA/Mamba, TFFM, ...) behind a single `ModelAdapter` ABC
 2. **18 loss functions** -- from standard (Dice+CE) to topology-aware (clDice, CAPE,
    Betti matching, skeleton recall) to graph-constrained (compound graph topology)
 3. **Conformal uncertainty quantification** -- 5 methods (split conformal, morphological,
@@ -122,14 +122,11 @@ class ModelAdapter(ABC):
 The training engine, ensemble module, evaluation pipeline, serving layer, and ONNX
 export all program against this interface. Adding a new model = one new file.
 
-### Model Families (12)
+### Model Families (9)
 
 | Family | Module | Description |
 |--------|--------|-------------|
 | `dynunet` | `adapters/dynunet.py` | MONAI DynUNet -- primary 3D baseline |
-| `segresnet` | `adapters/segresnet.py` | MONAI SegResNet |
-| `swinunetr` | `adapters/swinunetr.py` | MONAI SwinUNETR (transformer) |
-| `vista3d` | `adapters/vista3d.py` | MONAI VISTA-3D |
 | `vesselfm` | `adapters/vesselfm.py` | VesselFM foundation model |
 | `comma_mamba` | `adapters/comma.py` | COMMA Mamba state-space model |
 | `sam3_vanilla` | `adapters/sam3_vanilla.py` | SAM3 frozen encoder + decoder |
@@ -353,7 +350,7 @@ minivess-mlops/
 |   |   |-- sam3_hybrid.py         SAM3 features + DynUNet 3D fusion
 |   |   |-- multitask_adapter.py   Generic multi-task (config-driven heads)
 |   |   |-- tffm_wrapper.py        TFFM dense GAT wrapper
-|   |   +-- ...                    segresnet, swinunetr, vista3d, vesselfm, comma
+|   |   +-- ...                    vesselfm, comma, mamba
 |   |-- pipeline/                  Training, evaluation, metrics, losses
 |   |   |-- loss_functions.py      18 loss functions with build_loss_function()
 |   |   |-- comparison.py          Cross-loss comparison + paired bootstrap

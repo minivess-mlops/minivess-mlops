@@ -88,21 +88,6 @@ def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
 
         return DynUNetAdapter(config)
 
-    if family == ModelFamily.MONAI_SEGRESNET:
-        from minivess.adapters.segresnet import SegResNetAdapter
-
-        return SegResNetAdapter(config)
-
-    if family == ModelFamily.MONAI_SWINUNETR:
-        from minivess.adapters.swinunetr import SwinUNETRAdapter
-
-        return SwinUNETRAdapter(config)
-
-    if family == ModelFamily.MONAI_VISTA3D:
-        from minivess.adapters.vista3d import Vista3dAdapter
-
-        return Vista3dAdapter(config)
-
     if family == ModelFamily.VESSEL_FM:
         from minivess.adapters.vesselfm import VesselFMAdapter
 
