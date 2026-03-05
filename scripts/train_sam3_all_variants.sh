@@ -78,7 +78,7 @@ Usage: $0 [OPTIONS]
 Train all 3 SAMv3 variants for MiniVess segmentation.
 
 Options:
-    --epochs N              Number of epochs (default: 100)
+    --epochs N              Number of max epochs (default: 100)
     --compute PROFILE       Compute profile: auto, gpu_low, gpu_mid, gpu_full, cpu
                            (default: auto)
     --log-dir DIR          Output directory for logs and checkpoints
@@ -195,8 +195,8 @@ for VARIANT in "${VARIANTS[@]}"; do
     # Build command
     CMD=(
         "uv" "run" "python" "scripts/train_monitored.py"
-        "--model" "${VARIANT}"
-        "--epochs" "${EPOCHS}"
+        "--model-family" "${VARIANT}"
+        "--max-epochs" "${EPOCHS}"
         "--compute" "${COMPUTE}"
         "--log-dir" "${LOG_DIR}"
     )
