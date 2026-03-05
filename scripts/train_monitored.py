@@ -107,6 +107,12 @@ import json
 import logging
 import sys
 import tempfile
+
+# Load .env early so HF_TOKEN (and other secrets) are available before
+# any model imports. Environment variables always override .env values.
+from minivess.utils.hf_auth import load_dotenv_if_present
+
+load_dotenv_if_present(".env")
 import traceback
 from datetime import UTC, datetime
 from pathlib import Path

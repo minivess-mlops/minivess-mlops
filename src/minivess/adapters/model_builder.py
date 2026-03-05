@@ -102,6 +102,11 @@ def _auto_stub_sam3(config: ModelConfig, kwargs: dict[str, Any]) -> None:
         )
         raise RuntimeError(msg)
 
+    # SAM3 is available — verify HF token before triggering a download
+    from minivess.utils.hf_auth import require_hf_token
+
+    require_hf_token("facebook/sam3")
+
 
 def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     """Build a ModelAdapter from a ModelConfig.

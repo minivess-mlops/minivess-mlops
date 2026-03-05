@@ -18,6 +18,9 @@ x-common-env: &common-env
   AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minivess}
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minivess_secret}
   MLFLOW_S3_ENDPOINT_URL: http://minivess-minio:9000
+  # HuggingFace token for gated models (SAM3, VesselFM).
+  # Set HF_TOKEN in your shell or .env file — never hard-code here.
+  HF_TOKEN: ${HF_TOKEN:-}
 
 x-common-labels: &common-labels
   labels:
