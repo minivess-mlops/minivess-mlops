@@ -34,20 +34,40 @@ from __future__ import annotations
 
 # Warning routing: BEFORE any heavy imports.
 #
-# Rule: warnings from site-packages (third-party libs) → DEBUG logger.
+# Rule: warnings from site-packages OR frozen stdlib → DEBUG logger.
 #       warnings from our own code (minivess/, scripts/) → WARNING logger.
 #
-# This means researchers only see warnings they can act on.
-# Third-party library warnings (MONAI API changes, CUDA deprecations, etc.)
-# are invisible at INFO level but visible when debugging with DEBUG logging.
+# Researchers only see warnings they can act on.
 # To see all warnings: set log level to DEBUG or PYTHONWARNINGS=always.
+import contextlib
 import logging as _logging
 import os
 import warnings
 
-# ONNX Runtime C++ device discovery warning (card0 vs card1 sysfs path):
-# controlled via env var, must be set before onnxruntime is imported.
-os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
+
+@contextlib.contextmanager  # type: ignore[misc]
+def _suppress_fd2():  # type: ignore[return]
+    """Redirect OS-level stderr (fd 2) to /dev/null for the duration.
+
+    Required for ONNX Runtime: its C++ device discovery warning fires at
+    .so load time, before Python's warnings module is consulted, so the
+    only reliable suppression is at the file-descriptor level.
+    """
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    saved = os.dup(2)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    try:
+        yield
+    finally:
+        os.dup2(saved, 2)
+        os.close(saved)
+
+
+# Pre-import onnxruntime with fd 2 redirected so the C++ device-discovery
+# warning never reaches the terminal. Subsequent imports are no-ops (cached).
+with _suppress_fd2(), contextlib.suppress(ImportError):
+    import onnxruntime as _ort  # noqa: F401
 
 
 def _route_warning(
@@ -58,8 +78,13 @@ def _route_warning(
     file: object = None,
     line: str | None = None,
 ) -> None:
-    """Route site-packages warnings to DEBUG; project warnings to WARNING."""
-    is_external = "site-packages" in str(filename)
+    """Route third-party warnings to DEBUG; project warnings to WARNING.
+
+    "Third-party" = anything from site-packages or Python's frozen stdlib
+    (e.g. <frozen importlib._bootstrap_external>).
+    """
+    fname = str(filename)
+    is_external = "site-packages" in fname or fname.startswith("<frozen ")
     level = _logging.DEBUG if is_external else _logging.WARNING
     _logging.getLogger("py.warnings").log(
         level, "%s:%d: %s: %s", filename, lineno, category.__name__, message
