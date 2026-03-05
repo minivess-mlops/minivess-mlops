@@ -32,42 +32,48 @@ See docs/planning/dynunet-evaluation-plan.xml for the full plan.
 
 from __future__ import annotations
 
-# Suppress third-party cosmetic warnings BEFORE any heavy imports.
-# These are known non-actionable warnings from upstream libraries that
-# would otherwise flood training output and hide real signals.
+# Warning routing: BEFORE any heavy imports.
+#
+# Rule: warnings from site-packages (third-party libs) → DEBUG logger.
+#       warnings from our own code (minivess/, scripts/) → WARNING logger.
+#
+# This means researchers only see warnings they can act on.
+# Third-party library warnings (MONAI API changes, CUDA deprecations, etc.)
+# are invisible at INFO level but visible when debugging with DEBUG logging.
+# To see all warnings: set log level to DEBUG or PYTHONWARNINGS=always.
+import logging as _logging
 import os
 import warnings
 
-# ONNX Runtime: GPU device discovery probes card0 first; on systems where
-# card0 is a display adapter (not the training GPU), it logs a spurious
-# warning. Control with ORT_LOGGING_LEVEL (3 = ERROR only).
+# ONNX Runtime C++ device discovery warning (card0 vs card1 sysfs path):
+# controlled via env var, must be set before onnxruntime is imported.
 os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
 
-# Route any warnings that DO pass through into the logging system.
-# Logging level controls their visibility: set logger "py.warnings" to
-# DEBUG (or above) to show them. They never appear at INFO or above.
-import logging as _logging
 
-_logging.captureWarnings(True)
-_logging.getLogger("py.warnings").setLevel(_logging.DEBUG)
+def _route_warning(
+    message: Warning | str,
+    category: type[Warning],
+    filename: str,
+    lineno: int,
+    file: object = None,
+    line: str | None = None,
+) -> None:
+    """Route site-packages warnings to DEBUG; project warnings to WARNING."""
+    is_external = "site-packages" in str(filename)
+    level = _logging.DEBUG if is_external else _logging.WARNING
+    _logging.getLogger("py.warnings").log(
+        level, "%s:%d: %s: %s", filename, lineno, category.__name__, message
+    )
 
-# MONAI sliding-window inference: fires one UserWarning per inference window
-# about deprecated non-tuple indexing (upstream PyTorch API change, not our
-# code). Will be fixed in pytorch 2.9; until then, suppress entirely.
-# Note: module regex must match full dotted name (e.g. monai.inferers.utils);
-# omitting module= lets the message= pattern do the filtering safely.
+
+warnings.showwarning = _route_warning  # type: ignore[assignment]
+
+# MONAI sliding-window: fires once per inference *window* (hundreds/epoch).
+# Even routing to DEBUG would flood debug logs — suppress entirely.
 warnings.filterwarnings(
     "ignore",
     category=UserWarning,
     message=".*non-tuple sequence for multidimensional indexing.*",
-)
-
-# CUDA cudart FutureWarning from importlib bootstrap — fires on import,
-# not actionable until we pin a newer cuda-python release.
-warnings.filterwarnings(
-    "ignore",
-    category=FutureWarning,
-    message=".*cuda.cudart.*",
 )
 
 import argparse
