@@ -253,6 +253,9 @@ class CommaAdapter(ModelAdapter):
     ) -> None:
         super().__init__()
         self.config = config
+        params = config.architecture_params
+        init_filters = int(params.get("init_filters", init_filters))
+        d_state = int(params.get("d_state", d_state))
         self.init_filters = init_filters
         self.d_state = d_state
 
