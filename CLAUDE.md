@@ -20,7 +20,13 @@ feature, every configuration, every automation should be evaluated against this 
 5. **Dataset-agnostic patches** — Patch sizes constrained by dataset's smallest volume,
    not hardcoded. Pre-training validation ensures patches fit all volumes.
 6. **Transparent automation** — Every automatic decision is logged and overridable via YAML
-7. **Portfolio-grade code** — Every component demonstrates production ML engineering
+7. **Zero cosmetic noise** — Training output must show only actionable signals. Suppress all
+   third-party non-actionable warnings (ONNX Runtime device discovery, MONAI deprecated
+   indexing, CUDA cudart FutureWarning) at the script entry point. Users who learn to ignore
+   warnings will also ignore real ones. Entry-point suppression pattern:
+   `os.environ.setdefault("ORT_LOGGING_LEVEL", "3")` + `warnings.filterwarnings(...)`.
+   **NEVER tell the user to "just ignore" a warning.** Fix it or suppress it.
+8. **Portfolio-grade code** — Every component demonstrates production ML engineering
 8. **Task-agnostic multi-task architecture** — Multi-task learning (auxiliary heads,
    multi-task losses, per-head metrics) is a GENERIC framework configured via YAML,
    NOT hardcoded to any specific set of tasks. The platform supports arbitrary

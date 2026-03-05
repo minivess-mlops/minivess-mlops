@@ -13,14 +13,14 @@
 #   - MiniVess dataset available in configured data path
 #
 # Usage:
-#   ./scripts/train_sam3_all_variants.sh                    # 100 epochs, auto compute
-#   ./scripts/train_sam3_all_variants.sh --epochs 50        # 50 epochs
-#   ./scripts/train_sam3_all_variants.sh --compute gpu_low  # explicit compute profile
-#   ./scripts/train_sam3_all_variants.sh --debug            # smoke test (1 epoch)
+#   ./scripts/train_sam3_all_variants.sh                     # 100 epochs, gpu_low
+#   ./scripts/train_sam3_all_variants.sh --epochs 50         # 50 epochs
+#   ./scripts/train_sam3_all_variants.sh --compute gpu_high  # higher-VRAM profile
+#   ./scripts/train_sam3_all_variants.sh --debug             # smoke test (1 epoch)
 #
 # Environment:
 #   MINIVESS_LOG_DIR  Override log directory (default: ./logs/sam3_variants)
-#   MINIVESS_COMPUTE  Override compute profile (default: auto)
+#   MINIVESS_COMPUTE  Override compute profile (default: gpu_low)
 #   MINIVESS_EPOCHS   Override epochs (default: 100)
 #
 # Exit codes:
@@ -39,7 +39,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 EPOCHS="${MINIVESS_EPOCHS:-100}"
-COMPUTE="${MINIVESS_COMPUTE:-auto}"
+COMPUTE="${MINIVESS_COMPUTE:-gpu_low}"
 LOG_BASE="${MINIVESS_LOG_DIR:-${PROJECT_ROOT}/logs/sam3_variants}"
 DEBUG_MODE=0
 RESUME_MODE=0
@@ -79,8 +79,8 @@ Train all 3 SAMv3 variants for MiniVess segmentation.
 
 Options:
     --epochs N              Number of max epochs (default: 100)
-    --compute PROFILE       Compute profile: auto, gpu_low, gpu_mid, gpu_full, cpu
-                           (default: auto)
+    --compute PROFILE       Compute profile: cpu, gpu_low, gpu_high, dgx_spark,
+                           cloud_single, cloud_multi (default: gpu_low)
     --log-dir DIR          Output directory for logs and checkpoints
                            (default: ./logs/sam3_variants)
     --debug                Smoke test mode: 1 epoch per variant (debug loss)

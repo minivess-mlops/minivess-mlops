@@ -32,11 +32,48 @@ See docs/planning/dynunet-evaluation-plan.xml for the full plan.
 
 from __future__ import annotations
 
+# Suppress third-party cosmetic warnings BEFORE any heavy imports.
+# These are known non-actionable warnings from upstream libraries that
+# would otherwise flood training output and hide real signals.
+import os
+import warnings
+
+# ONNX Runtime: GPU device discovery probes card0 first; on systems where
+# card0 is a display adapter (not the training GPU), it logs a spurious
+# warning. Control with ORT_LOGGING_LEVEL (3 = ERROR only).
+os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
+
+# Route any warnings that DO pass through into the logging system.
+# Logging level controls their visibility: set logger "py.warnings" to
+# DEBUG (or above) to show them. They never appear at INFO or above.
+import logging as _logging
+
+_logging.captureWarnings(True)
+_logging.getLogger("py.warnings").setLevel(_logging.DEBUG)
+
+# MONAI sliding-window inference: fires one UserWarning per inference window
+# about deprecated non-tuple indexing (upstream PyTorch API change, not our
+# code). Will be fixed in pytorch 2.9; until then, suppress entirely.
+# Note: module regex must match full dotted name (e.g. monai.inferers.utils);
+# omitting module= lets the message= pattern do the filtering safely.
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message=".*non-tuple sequence for multidimensional indexing.*",
+)
+
+# CUDA cudart FutureWarning from importlib bootstrap — fires on import,
+# not actionable until we pin a newer cuda-python release.
+warnings.filterwarnings(
+    "ignore",
+    category=FutureWarning,
+    message=".*cuda.cudart.*",
+)
+
 import argparse
 import gc
 import json
 import logging
-import os
 import sys
 import tempfile
 import traceback
