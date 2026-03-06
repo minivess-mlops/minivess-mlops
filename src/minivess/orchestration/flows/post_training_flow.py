@@ -219,9 +219,63 @@ def post_training_flow(
     n_run = len(plugin_results)
     log.info("Post-training flow complete: %d plugin(s) executed", n_run)
 
+    # Log results to MLflow
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+    mlflow_run_id: str | None = None
+
+    # Find upstream training run
+    upstream_training_run_id: str = "no_upstream"
+    try:
+        from minivess.orchestration.flow_contract import FlowContract
+
+        contract = FlowContract(tracking_uri=tracking_uri)
+        upstream = contract.find_upstream_run(
+            experiment_name="minivess_training",
+            upstream_flow="train",
+        )
+        if upstream:
+            upstream_training_run_id = upstream["run_id"]
+    except Exception:
+        log.warning("Could not find upstream training run", exc_info=True)
+
+    try:
+        import mlflow
+
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment("minivess_training")
+        with mlflow.start_run(
+            tags={
+                "flow_name": "post_training",
+                "upstream_training_run_id": upstream_training_run_id,
+            }
+        ) as active_run:
+            mlflow_run_id = active_run.info.run_id
+            mlflow.log_metric("n_plugins_run", float(n_run))
+            # Log per-plugin metrics with post_ prefix
+            for plugin_name, plugin_result in plugin_results.items():
+                for metric_name, metric_value in plugin_result.get(
+                    "metrics", {}
+                ).items():
+                    if isinstance(metric_value, int | float):
+                        mlflow.log_metric(
+                            f"post_{plugin_name}_{metric_name}", float(metric_value)
+                        )
+
+        from minivess.orchestration.flow_contract import FlowContract
+
+        contract = FlowContract(tracking_uri=tracking_uri)
+        contract.log_flow_completion(
+            flow_name="post_training",
+            run_id=mlflow_run_id,
+        )
+    except Exception:
+        log.warning("Failed to log post_training_flow to MLflow", exc_info=True)
+
     return {
         "status": "success",
         "n_plugins_run": n_run,
         "plugin_results": plugin_results,
         "trigger_source": trigger_source,
+        "mlflow_run_id": mlflow_run_id,
+        "upstream_training_run_id": upstream_training_run_id,
     }
