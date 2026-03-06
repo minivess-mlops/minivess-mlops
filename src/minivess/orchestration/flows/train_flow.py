@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from minivess.orchestration._prefect_compat import flow, task
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,49 @@ class TrainingFlowResult:
 # ---------------------------------------------------------------------------
 # Focused tasks
 # ---------------------------------------------------------------------------
+
+
+@task(name="check-resume-state")
+def check_resume_state_task(checkpoint_dir: Path) -> dict[str, Any] | None:
+    """Check for epoch_latest.yaml to determine if this is a resumed run.
+
+    Uses yaml.safe_load() exclusively — NO regex (CLAUDE.md Rule #16).
+
+    Parameters
+    ----------
+    checkpoint_dir:
+        Directory where epoch_latest.yaml would be written by SegmentationTrainer.
+
+    Returns
+    -------
+    State dict if a valid RUNNING MLflow run is found, None otherwise.
+    """
+    latest_path = checkpoint_dir / "epoch_latest.yaml"
+    if not latest_path.exists():
+        return None
+
+    with latest_path.open(encoding="utf-8") as f:
+        state = yaml.safe_load(f)
+
+    if not isinstance(state, dict):
+        logger.warning("epoch_latest.yaml is not a dict — ignoring")
+        return None
+
+    run_id = state.get("mlflow_run_id")
+    if not run_id:
+        return None
+
+    # Validate the referenced MLflow run is still RUNNING
+    try:
+        import mlflow
+
+        run = mlflow.get_run(run_id)
+        if run.info.status == "RUNNING":
+            return state
+    except Exception:
+        logger.debug("Could not fetch MLflow run %s — treating as stale", run_id)
+
+    return None
 
 
 @task(name="load-fold-splits")
