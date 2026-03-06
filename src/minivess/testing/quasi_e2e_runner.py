@@ -107,7 +107,10 @@ def build_model_for_test(
         out_channels=out_channels,
     )
 
-    return build_adapter(config)
+    # SAM3 variants require a token + large download — use stub for testing
+    sam3_families = {"sam3_vanilla", "sam3_topolora", "sam3_hybrid"}
+    kwargs = {"use_stub": True} if model_name in sam3_families else {}
+    return build_adapter(config, **kwargs)
 
 
 def build_loss_for_test(
