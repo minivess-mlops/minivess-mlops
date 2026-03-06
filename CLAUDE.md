@@ -211,6 +211,22 @@ Each of the 6 Prefect flows runs in its own Docker container:
     Claude does NOT get to self-assess whether "regex is sufficient". The ban applies
     always. "Regex is sufficient" is itself a banned phrase.
     See: `.claude/metalearning/2026-03-06-regex-ban.md`
+17. **NEVER Suggest Standalone Scripts as a Run Path (Non-Negotiable)** — Training,
+    evaluation, and pipeline execution MUST go through Prefect flows running in Docker.
+    `scripts/*.py` files are migration utilities or one-off tools — they are NEVER a
+    supported run path for the pipeline. There is no "dev" environment that bypasses Docker.
+    - **WRONG:** `uv run python scripts/train_monitored.py --loss dice_ce`
+    - **CORRECT:** `prefect deployment run 'train-flow/default' --params '{"loss": "dice_ce"}'`
+    - **CORRECT:** A `.sh` script that wraps a Prefect deployment invocation
+    Creating a GitHub issue to "fix this later" does NOT grant permission to keep offering
+    the shortcut. The answer to "Prefect flow not yet implemented" is to implement it.
+    See: `.claude/metalearning/2026-03-06-standalone-script-antipattern.md`
+18. **Explicit Docker Volume Mounts for ALL Artifacts (Non-Negotiable)** — Every input
+    and output in a Docker-per-flow run must be explicitly volume-mounted. `/tmp` and
+    `tempfile.mkdtemp()` are FORBIDDEN for any artifact that must survive the container.
+    Required mounts: `/data` (inputs), `/mlruns` (tracking), `/checkpoints` (model files),
+    `/logs` (monitor CSV/JSONL), `/configs` (YAML configs + splits).
+    See: `.claude/metalearning/2026-03-06-standalone-script-antipattern.md`
 
 ## What AI Must NEVER Do (Extended)
 
@@ -223,6 +239,9 @@ Each of the 6 Prefect flows runs in its own Docker container:
   use config-driven registries. This is an MLOps platform for ALL segmentation research.
 - Use `import re` or regex patterns for parsing structured data (Python, YAML, JSON,
   log lines, metric names). Use proper parsers. "Regex is sufficient" is banned.
+- Suggest `python scripts/*.py` as a training or pipeline run command — use Prefect flows.
+- Use `/tmp` or `tempfile.mkdtemp()` for artifacts that must survive Docker container exit.
+- Offer a standalone-script shortcut while a GitHub issue to "fix it properly" is open.
 
 ## TDD Workflow (Non-Negotiable)
 
