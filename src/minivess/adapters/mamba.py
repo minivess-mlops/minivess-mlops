@@ -173,6 +173,10 @@ class MambaAdapter(ModelAdapter):
             logits=logits,
         )
 
+    def trainable_parameters(self) -> int:
+        """Return count of trainable parameters."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
     def get_config(self) -> AdapterConfigInfo:
         """Return model configuration."""
         return AdapterConfigInfo(
@@ -180,7 +184,7 @@ class MambaAdapter(ModelAdapter):
             name="UlikeMamba",
             in_channels=self._in_channels,
             out_channels=self._out_channels,
-            trainable_params=sum(p.numel() for p in self.parameters()),
+            trainable_params=self.trainable_parameters(),
         )
 
     def export_onnx(self, path: Path, example_input: Any = None) -> None:
