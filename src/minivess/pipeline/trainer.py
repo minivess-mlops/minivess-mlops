@@ -127,9 +127,11 @@ class SegmentationTrainer:
         scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
         val_roi_size: tuple[int, int, int] | None = None,
         sw_batch_size: int = 4,
+        fold_label: str = "",
     ) -> None:
         self.model = model
         self.config = config
+        self._fold_label = f"{fold_label}: " if fold_label else ""
         self.device = torch.device(device)
         self.model.to(self.device)
         self.tracker = tracker
@@ -487,7 +489,8 @@ class SegmentationTrainer:
 
             current_lr = self.optimizer.param_groups[0]["lr"]
             logger.info(
-                "Epoch %d/%d — train_loss: %.4f, val_loss: %.4f, lr: %.2e",
+                "%sEpoch %d/%d — train_loss: %.4f, val_loss: %.4f, lr: %.2e",
+                self._fold_label,
                 epoch + 1,
                 self.config.max_epochs,
                 train_result.loss,

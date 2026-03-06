@@ -663,6 +663,7 @@ def run_fold_safe(
         criterion=criterion,
         val_roi_size=data_config.patch_size,
         sw_batch_size=_sw_bs,
+        fold_label=f"f #{fold_id + 1}/{training_config.num_folds}",
     )
 
     # Create checkpoint directory
