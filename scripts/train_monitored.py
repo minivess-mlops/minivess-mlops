@@ -105,9 +105,7 @@ import argparse
 import gc
 import json
 import logging
-import shutil
 import sys
-import tempfile
 
 # Load .env early so HF_TOKEN (and other secrets) are available before
 # any model imports. Environment variables always override .env values.
@@ -669,8 +667,10 @@ def run_fold_safe(
         system_monitor=system_monitor,
     )
 
-    # Create checkpoint directory
-    checkpoint_dir = Path(tempfile.mkdtemp()) / f"fold_{fold_id}"
+    # Create checkpoint directory — resolved from CHECKPOINT_DIR env var (never /tmp)
+    checkpoint_dir = (
+        Path(os.environ.get("CHECKPOINT_DIR", "/app/checkpoints")) / f"fold_{fold_id}"
+    )
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     # === Phase 1: Train ===
@@ -770,10 +770,7 @@ def run_fold_safe(
     del model
     _cleanup_memory(f"end-fold{fold_id}")
 
-    # T10: Clean up the tmp checkpoint directory (checkpoints already uploaded to MLflow)
-    _tmp_root = checkpoint_dir.parent
-    shutil.rmtree(_tmp_root, ignore_errors=True)
-    logger.info("Removed tmp checkpoint dir: %s", _tmp_root)
+    # Checkpoints persist on the mounted volume (CHECKPOINT_DIR) — no cleanup needed.
 
     return result
 
