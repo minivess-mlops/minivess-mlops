@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 import math
-import re
 from collections import defaultdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -1030,7 +1029,36 @@ def generate_report(
 # ---------------------------------------------------------------------------
 
 # Model name convention: "{loss_type}_fold{fold_id}" for single-fold models.
-_FOLD_RE = re.compile(r"^(.+)_fold(\d+)$")
+# NOTE: re.compile() is BANNED (CLAUDE.md Rule #16). Use str.rsplit() instead.
+
+
+def parse_fold_metric(model_name: str) -> tuple[str, int]:
+    """Parse a model name into ``(loss_function, fold_id)`` using str.rsplit().
+
+    Parameters
+    ----------
+    model_name:
+        E.g. ``"dice_ce_fold0"`` or ``"cbdice_cldice_fold2"``.
+
+    Returns
+    -------
+    Tuple of ``(loss_function, fold_id)``.
+
+    Raises
+    ------
+    ValueError
+        If ``model_name`` does not contain ``_fold`` followed by an integer.
+    """
+    if "_fold" not in model_name:
+        msg = f"Model name {model_name!r} has no '_fold' component"
+        raise ValueError(msg)
+    prefix, fold_part = model_name.rsplit("_fold", 1)
+    try:
+        fold_id = int(fold_part)
+    except ValueError:
+        msg = f"Model name {model_name!r} has non-integer fold suffix {fold_part!r}"
+        raise ValueError(msg) from None
+    return prefix, fold_id
 
 
 def _parse_model_name(model_name: str) -> tuple[str | None, int | None]:
@@ -1047,10 +1075,10 @@ def _parse_model_name(model_name: str) -> tuple[str | None, int | None]:
     -------
     Tuple of ``(loss_function, fold_id)`` or ``(None, None)``.
     """
-    m = _FOLD_RE.match(model_name)
-    if m:
-        return m.group(1), int(m.group(2))
-    return None, None
+    try:
+        return parse_fold_metric(model_name)
+    except ValueError:
+        return None, None
 
 
 def _extract_primary_metric_value(
