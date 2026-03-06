@@ -10,14 +10,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from minivess.orchestration import flow, task
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from minivess.orchestration.flows.dashboard_sections import (
         ConfigDashboardSection,
         DataDashboardSection,
@@ -291,7 +291,7 @@ def export_metadata(
 
 @flow(name="minivess-dashboard")
 def run_dashboard_flow(
-    output_dir: Path,
+    output_dir: Path | None = None,
     *,
     # Data section params
     n_volumes: int = 0,
@@ -324,6 +324,8 @@ def run_dashboard_flow(
     output_dir:
         Root directory for all dashboard outputs.
     """
+    if output_dir is None:
+        output_dir = Path(os.environ.get("DASHBOARD_OUTPUT", "/app/outputs/dashboard"))
     logger.info("Starting everything dashboard flow → %s", output_dir)
 
     # Collect sections
@@ -370,8 +372,31 @@ def run_dashboard_flow(
     metadata_path = export_metadata(dashboard=dashboard, output_dir=output_dir)
 
     logger.info("Everything dashboard flow complete")
+
+    # --- FlowContract: tag run and log completion ---
+    _tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+    mlflow_run_id: str | None = None
+    try:
+        import mlflow
+
+        from minivess.orchestration.flow_contract import FlowContract
+
+        mlflow.set_tracking_uri(_tracking_uri)
+        mlflow.set_experiment("minivess_training")
+        with mlflow.start_run(tags={"flow_name": "dashboard"}) as active_run:
+            mlflow_run_id = active_run.info.run_id
+
+        contract = FlowContract(tracking_uri=_tracking_uri)
+        contract.log_flow_completion(
+            flow_name="dashboard",
+            run_id=mlflow_run_id,
+        )
+    except Exception:
+        logger.warning("Failed to log dashboard_flow to MLflow", exc_info=True)
+
     return {
         "dashboard": dashboard,
         "report_path": report_path,
         "metadata_path": metadata_path,
+        "mlflow_run_id": mlflow_run_id,
     }
