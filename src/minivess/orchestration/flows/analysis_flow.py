@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from collections import defaultdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -1381,7 +1382,9 @@ def _export_analysis_artifacts(
 
     from minivess.pipeline.viz.generate_all_figures import generate_all_figures
 
-    base_dir = output_dir or _Path("outputs/analysis")
+    base_dir = output_dir or _Path(
+        os.environ.get("ANALYSIS_OUTPUT", "/app/outputs/analysis")
+    )
     base_dir.mkdir(parents=True, exist_ok=True)
 
     artifact_paths: dict[str, str] = {}
@@ -1545,6 +1548,48 @@ def run_analysis_flow(
         "Analysis flow complete. Champion: %s", promotion_info.get("champion_name")
     )
 
+    # --- FlowContract: tag run and log completion ---
+    _tracking_uri = tracking_uri or os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+    upstream_training_run_id: str = "no_upstream"
+    mlflow_run_id: str | None = None
+    try:
+        import mlflow
+
+        from minivess.orchestration.flow_contract import FlowContract
+
+        contract = FlowContract(tracking_uri=_tracking_uri)
+        upstream = contract.find_upstream_run(
+            experiment_name="minivess_training",
+            upstream_flow="train",
+        )
+        if upstream:
+            upstream_training_run_id = upstream["run_id"]
+    except Exception:
+        log.warning("Could not find upstream training run", exc_info=True)
+
+    try:
+        import mlflow
+
+        from minivess.orchestration.flow_contract import FlowContract
+
+        mlflow.set_tracking_uri(_tracking_uri)
+        mlflow.set_experiment("minivess_training")
+        with mlflow.start_run(
+            tags={
+                "flow_name": "analyze",
+                "upstream_training_run_id": upstream_training_run_id,
+            }
+        ) as active_run:
+            mlflow_run_id = active_run.info.run_id
+
+        contract = FlowContract(tracking_uri=_tracking_uri)
+        contract.log_flow_completion(
+            flow_name="analyze",
+            run_id=mlflow_run_id,
+        )
+    except Exception:
+        log.warning("Failed to log analysis_flow to MLflow", exc_info=True)
+
     return {
         "results": all_results,
         "comparison": comparison_md,
@@ -1554,4 +1599,6 @@ def run_analysis_flow(
         "champion_tags": champion_info,
         "artifact_paths": artifact_paths,
         "post_training_models": post_training_models,
+        "mlflow_run_id": mlflow_run_id,
+        "upstream_training_run_id": upstream_training_run_id,
     }
