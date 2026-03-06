@@ -5,6 +5,11 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+# system_monitor.py is in scripts/ (not in the package).
+# We use Any to avoid a hard dependency — the monitor is duck-typed.
+# Expected interface: epoch_summary() -> dict[str, float]
+#                    get_latest_snapshot() -> ResourceSnapshot | None
+#                    gpu_status(snap) -> str
 import numpy as np
 import torch
 from monai.inferers import sliding_window_inference  # type: ignore[attr-defined]
@@ -128,10 +133,12 @@ class SegmentationTrainer:
         val_roi_size: tuple[int, int, int] | None = None,
         sw_batch_size: int = 4,
         fold_label: str = "",
+        system_monitor: Any | None = None,
     ) -> None:
         self.model = model
         self.config = config
         self._fold_label = f"{fold_label}: " if fold_label else ""
+        self._monitor = system_monitor
         self.device = torch.device(device)
         self.model.to(self.device)
         self.tracker = tracker
@@ -498,6 +505,46 @@ class SegmentationTrainer:
                 current_lr,
             )
 
+            # T4/T5: GPU efficiency line + MLflow metrics (every epoch)
+            gpu_metrics: dict[str, float] = {}
+            if self._monitor is not None:
+                snap = self._monitor.get_latest_snapshot()
+                gpu_metrics = self._monitor.epoch_summary()
+                if snap is not None and snap.gpu_memory_total_mb > 0:
+                    status = self._monitor.gpu_status(snap)
+                    logger.info(
+                        "%s[GPU]  util=%d%%  bw=%d%%  temp=%dC  pwr=%.0fW"
+                        " | cpu=%.0f%% | vram=%d/%dMB  clk=%dMHz  %s",
+                        self._fold_label,
+                        snap.gpu_utilization_percent,
+                        snap.gpu_mem_bw_util_pct,
+                        snap.gpu_temperature_c,
+                        snap.gpu_power_w,
+                        snap.cpu_percent,
+                        snap.gpu_memory_used_mb,
+                        snap.gpu_memory_total_mb,
+                        snap.gpu_sm_clock_mhz,
+                        status,
+                    )
+
+            # T9: [MEM] slow resource line every 10 epochs
+            if self._monitor is not None and (epoch + 1) % 10 == 0:
+                snap = self._monitor.get_latest_snapshot()
+                if snap is not None:
+                    logger.info(
+                        "%s[MEM]  ram=%.1f/%.1fGB(%.0f%%)  swap=%.1f/%.1fGB"
+                        "  vram=%d/%dMB  rss=%.1fGB",
+                        self._fold_label,
+                        snap.ram_used_gb,
+                        snap.ram_total_gb,
+                        snap.ram_percent,
+                        snap.swap_used_gb,
+                        snap.swap_total_gb,
+                        snap.gpu_memory_used_mb,
+                        snap.gpu_memory_total_mb,
+                        snap.process_rss_gb,
+                    )
+
             # Log to MLflow / experiment tracker if present
             if self.tracker is not None:
                 epoch_log: dict[str, float] = {
@@ -509,6 +556,9 @@ class SegmentationTrainer:
                     epoch_log[f"train_{k}"] = v
                 for k, v in val_result.metrics.items():
                     epoch_log[f"val_{k}"] = v
+                # T5: GPU epoch summary → MLflow (prefixed with sys_gpu_)
+                for k, v in gpu_metrics.items():
+                    epoch_log[f"sys_gpu_{k}"] = v
                 self.tracker.log_epoch_metrics(epoch_log, step=epoch + 1)
 
             # Update multi-metric tracker and save per-metric best checkpoints

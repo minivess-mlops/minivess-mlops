@@ -105,6 +105,7 @@ import argparse
 import gc
 import json
 import logging
+import shutil
 import sys
 import tempfile
 
@@ -499,6 +500,7 @@ def run_fold_safe(
     condition: dict[str, Any] | None = None,
     precomputed_dir: Path | None = None,
     compute: str = "auto",
+    system_monitor: Any | None = None,
 ) -> dict:
     """Train and evaluate a single fold with memory-safe cache rates.
 
@@ -664,6 +666,7 @@ def run_fold_safe(
         val_roi_size=data_config.patch_size,
         sw_batch_size=_sw_bs,
         fold_label=f"f #{fold_id + 1}/{training_config.num_folds}",
+        system_monitor=system_monitor,
     )
 
     # Create checkpoint directory
@@ -767,6 +770,11 @@ def run_fold_safe(
     del model
     _cleanup_memory(f"end-fold{fold_id}")
 
+    # T10: Clean up the tmp checkpoint directory (checkpoints already uploaded to MLflow)
+    _tmp_root = checkpoint_dir.parent
+    shutil.rmtree(_tmp_root, ignore_errors=True)
+    logger.info("Removed tmp checkpoint dir: %s", _tmp_root)
+
     return result
 
 
@@ -865,7 +873,7 @@ def run_monitored_experiment(args: argparse.Namespace) -> dict:
     monitor.start()
 
     try:
-        return _run_experiment_inner(args, checkpoint_mgr, abort_requested)
+        return _run_experiment_inner(args, checkpoint_mgr, abort_requested, monitor)
     except Exception:
         logger.exception("TRAINING FAILED WITH EXCEPTION")
         # Save crash info to checkpoint
@@ -893,6 +901,7 @@ def _run_experiment_inner(
     args: argparse.Namespace,
     checkpoint_mgr: CheckpointManager,
     abort_requested: dict,
+    monitor: SystemMonitor | None = None,
 ) -> dict:
     """Inner experiment loop with checkpoint awareness."""
     data_config, model_config, training_config = _build_configs(args)
@@ -1002,6 +1011,7 @@ def _run_experiment_inner(
                     condition=getattr(args, "condition", None),
                     precomputed_dir=getattr(args, "precomputed_dir", None),
                     compute=getattr(args, "compute", "auto"),
+                    system_monitor=monitor,
                 )
                 _model_info_logged = True
                 fold_results.append(fold_result)
@@ -1017,6 +1027,13 @@ def _run_experiment_inner(
             # Log training time
             _training_time = _time_mod.monotonic() - _run_start
             _mlflow.log_param("training_time_seconds", str(round(_training_time, 1)))
+
+            # T8: Upload system monitor CSV + JSONL to MLflow artifact store
+            if monitor is not None:
+                if monitor.csv_path is not None and monitor.csv_path.exists():
+                    _mlflow.log_artifact(str(monitor.csv_path), "system_monitor")
+                if monitor.jsonl_path is not None and monitor.jsonl_path.exists():
+                    _mlflow.log_artifact(str(monitor.jsonl_path), "system_monitor")
 
         all_results[loss_name] = fold_results
         all_eval_results[loss_name] = fold_eval_results
