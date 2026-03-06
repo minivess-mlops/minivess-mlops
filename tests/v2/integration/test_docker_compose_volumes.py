@@ -59,6 +59,33 @@ class TestAcquisitionService:
         svc = compose["services"].get("acquisition", {})
         assert svc.get("image") == "minivess-acquisition:latest"
 
+    def test_acquisition_image_correct(self) -> None:
+        """acquisition service image must be minivess-acquisition:latest."""
+        compose = _load_compose()
+        svc = compose["services"].get("acquisition", {})
+        assert svc.get("image") == "minivess-acquisition:latest", (
+            f"acquisition image is {svc.get('image')!r}, expected 'minivess-acquisition:latest'"
+        )
+
+    def test_acquisition_env_has_output_dir(self) -> None:
+        """acquisition service must have ACQUISITION_OUTPUT_DIR in environment."""
+        compose = _load_compose()
+        svc = compose["services"].get("acquisition", {})
+        env = svc.get("environment", {})
+        assert "ACQUISITION_OUTPUT_DIR" in env, (
+            "acquisition service missing ACQUISITION_OUTPUT_DIR environment variable. "
+            "Add ACQUISITION_OUTPUT_DIR: /app/data/raw to the environment section."
+        )
+
+    def test_raw_data_volume_declared(self) -> None:
+        """raw_data named volume must be declared at top level."""
+        compose = _load_compose()
+        top_volumes = compose.get("volumes", {})
+        assert "raw_data" in top_volumes, (
+            "raw_data named volume not declared in docker-compose.flows.yml volumes section. "
+            "Add raw_data: under the top-level volumes key."
+        )
+
 
 # ---------------------------------------------------------------------------
 # Data service
