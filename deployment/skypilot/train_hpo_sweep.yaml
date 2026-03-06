@@ -24,6 +24,7 @@ file_mounts:
 
 envs:
   MLFLOW_TRACKING_URI: http://mlflow:5000
+  PREFECT_API_URL: ${PREFECT_API_URL}
   HPO_CONFIG: configs/hpo/dynunet_example.yaml
   N_TRIALS: 20
   STUDY_NAME: minivess_hpo
@@ -34,7 +35,6 @@ setup: |
 
 run: |
   cd /app
-  uv run python scripts/run_hpo.py \
-    --config ${HPO_CONFIG} \
-    --n-trials ${N_TRIALS} \
-    --study-name ${STUDY_NAME}
+  prefect deployment run 'hpo-flow/default' \
+    --params "{\"hpo_config\": \"${HPO_CONFIG}\", \"n_trials\": ${N_TRIALS}, \
+               \"study_name\": \"${STUDY_NAME}\"}"
