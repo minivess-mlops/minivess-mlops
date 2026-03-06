@@ -194,6 +194,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--experiment-name", type=str, default="dynunet_loss_variation")
     parser.add_argument("--max-epochs", type=int, default=None)
     parser.add_argument("--patch-size", type=str, default=None)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Override batch size from compute profile (e.g. --batch-size 1 for COMMA Mamba)",
+    )
 
     # Monitoring args
     parser.add_argument(
@@ -276,6 +282,10 @@ def _build_configs(
         parts = [int(x) for x in args.patch_size.split("x")]
         if len(parts) == 3:
             data_config.patch_size = (parts[0], parts[1], parts[2])
+
+    if getattr(args, "batch_size", None) is not None:
+        training_config.batch_size = args.batch_size
+        logger.info("Batch size overridden to %d via --batch-size", args.batch_size)
 
     if args.debug:
         apply_debug_overrides(training_config, data_config)
