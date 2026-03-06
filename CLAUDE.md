@@ -200,6 +200,17 @@ Each of the 6 Prefect flows runs in its own Docker container:
     ALWAYS write it to disk using the Write tool. Never leave requested artifacts only
     in conversation context or plan files. If unsure whether a file was requested, re-read
     the user's original prompt.
+16. **STRICT BAN: No Regex for Structured Data (Non-Negotiable)** — `import re` and
+    regex patterns are BANNED for parsing any structured data: Python source, YAML, JSON,
+    log lines, metric names, file paths, config keys. Use proper parsers instead:
+    - Python source → `ast.parse()` + `ast.walk()`
+    - YAML/TOML/JSON → `yaml.safe_load()`, `tomllib`, `json.loads()`
+    - Log lines / metric keys → emit as JSON (JSONL), parse with `json.loads()`
+    - String splitting → `str.split()`, `str.rsplit()`, `str.partition()`
+    - File paths → `pathlib.Path` attributes (`.stem`, `.suffix`, `.parts`)
+    Claude does NOT get to self-assess whether "regex is sufficient". The ban applies
+    always. "Regex is sufficient" is itself a banned phrase.
+    See: `.claude/metalearning/2026-03-06-regex-ban.md`
 
 ## What AI Must NEVER Do (Extended)
 
@@ -210,6 +221,8 @@ Each of the 6 Prefect flows runs in its own Docker container:
 - Ignore user-provided URLs (arXiv, GitHub) — always fetch them for context
 - Hardcode specific task names (SDF, centerline, etc.) into multi-task infrastructure —
   use config-driven registries. This is an MLOps platform for ALL segmentation research.
+- Use `import re` or regex patterns for parsing structured data (Python, YAML, JSON,
+  log lines, metric names). Use proper parsers. "Regex is sufficient" is banned.
 
 ## TDD Workflow (Non-Negotiable)
 
