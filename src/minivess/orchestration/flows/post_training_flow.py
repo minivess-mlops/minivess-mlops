@@ -16,6 +16,7 @@ Task DAG:
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -148,7 +149,9 @@ def post_training_flow(
     if run_metadata is None:
         run_metadata = []
     if output_dir is None:
-        output_dir = Path("outputs/post_training")
+        output_dir = Path(
+            os.environ.get("POST_TRAINING_OUTPUT_DIR", "/app/outputs/post_training")
+        )
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
