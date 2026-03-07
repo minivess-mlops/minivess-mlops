@@ -37,6 +37,22 @@ from minivess.pipeline.post_training_plugin import (
 
 logger = logging.getLogger(__name__)
 
+
+def _require_docker_context() -> None:
+    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
+    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
+        return
+    if os.environ.get("DOCKER_CONTAINER"):
+        return
+    if Path("/.dockerenv").exists():
+        return
+    raise RuntimeError(
+        "Post-training flow must run inside a Docker container.\n"
+        "Run: docker compose -f deployment/docker-compose.flows.yml run post_training\n"
+        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
+    )
+
+
 # Weight-based plugins (no calibration data needed)
 _WEIGHT_PLUGINS = {"swa", "multi_swa", "model_merging"}
 
@@ -165,6 +181,8 @@ def post_training_flow(
     trigger_source:
         What triggered this flow.
     """
+    _require_docker_context()
+
     log = get_run_logger()
     log.info("Post-training flow started (trigger: %s)", trigger_source)
 

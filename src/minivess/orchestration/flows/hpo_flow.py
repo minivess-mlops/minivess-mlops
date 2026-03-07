@@ -1,28 +1,50 @@
 """HPO Prefect flow — hyperparameter optimization as a managed flow.
 
 Flow 2.5: Wraps HPOEngine (Optuna + ASHA) as a Prefect @flow.
-Each trial calls training_flow() with suggested hyperparameters and
-reports val_loss back to Optuna.
+Each trial triggers a training deployment via Prefect's run_deployment() API,
+ensuring each training run occurs in its own Docker container.
 
 This enables:
 - Prefect UI visibility into HPO progress
-- Work pool routing (GPU pool)
+- Work pool routing (GPU pool for training, CPU for HPO orchestration)
 - Integration with the trigger chain
 - Fault-tolerant parallel trial execution
+- Total Docker isolation between HPO controller and training runs
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+import os
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import optuna
 from prefect import flow, task
+from prefect.deployments import run_deployment
 
-from minivess.orchestration.constants import FLOW_NAME_HPO
-from minivess.orchestration.flows.train_flow import training_flow
+from minivess.orchestration.constants import FLOW_NAME_HPO, FLOW_NAME_TRAIN
+
+if TYPE_CHECKING:
+    from prefect.client.schemas.objects import FlowRun
 
 logger = logging.getLogger(__name__)
+
+
+def _require_docker_context() -> None:
+    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
+    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
+        return
+    if os.environ.get("DOCKER_CONTAINER"):
+        return
+    if Path("/.dockerenv").exists():
+        return
+    raise RuntimeError(
+        "HPO flow must run inside a Docker container.\n"
+        "Run: docker compose -f deployment/docker-compose.flows.yml run hpo\n"
+        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
+    )
+
 
 # Suppress Optuna's INFO logs unless debugging — they're verbose
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -37,6 +59,9 @@ _DEFAULT_SEARCH_SPACE: dict[str, dict[str, Any]] = {
     },
 }
 
+# Deployment name for the training flow (must match deployments.yaml)
+_TRAINING_DEPLOYMENT = f"{FLOW_NAME_TRAIN}/default"
+
 
 @task(name="run-hpo-trial")
 def run_trial_task(
@@ -44,7 +69,10 @@ def run_trial_task(
     params: dict[str, Any],
     base_config: dict[str, Any],
 ) -> float:
-    """Run one HPO trial and return the objective value (val_loss).
+    """Run one HPO trial via Prefect run_deployment() and return val_loss.
+
+    Each trial triggers a separate training container via the Prefect worker.
+    Results are read from the deployment return value (which comes from MLflow).
 
     Parameters
     ----------
@@ -66,19 +94,36 @@ def run_trial_task(
         {k: v for k, v in params.items()},
     )
 
-    raw_result: Any = training_flow(
-        loss_name=config.get("loss_name", "cbdice_cldice"),
-        model_family=config.get("model_family", "dynunet"),
-        compute=config.get("compute", "auto"),
-        debug=config.get("debug", False),
-        experiment_name=config.get("experiment_name", "minivess_hpo"),
-        num_folds=config.get("num_folds", 1),
-        max_epochs=config.get("max_epochs", 20),
-        batch_size=config.get("batch_size", 2),
-        learning_rate=config.get("learning_rate", 1e-3),
+    # Build parameters for the training deployment
+    training_params: dict[str, Any] = {
+        "loss_name": config.get("loss_name", "cbdice_cldice"),
+        "model_family": config.get("model_family", "dynunet"),
+        "compute": config.get("compute", "auto"),
+        "debug": config.get("debug", False),
+        "experiment_name": config.get("experiment_name", "minivess_hpo"),
+        "num_folds": config.get("num_folds", 1),
+        "max_epochs": config.get("max_epochs", 20),
+        "batch_size": config.get("batch_size", 2),
+        "learning_rate": config.get("learning_rate", 1e-3),
+    }
+
+    # Trigger training in a separate Docker container via Prefect
+    deployment_name = config.get("training_deployment", _TRAINING_DEPLOYMENT)
+    timeout = config.get("trial_timeout", 86400)  # 24h default per trial
+
+    # run_deployment() returns FlowRun in synchronous @task context
+    flow_run: FlowRun = run_deployment(  # type: ignore[assignment]
+        name=deployment_name,
+        parameters=training_params,
+        timeout=timeout,
     )
 
-    # Extract objective value (minimize val_loss)
+    # Extract objective value from the training flow result
+    raw_result = flow_run.state.result() if flow_run.state else None
+    if raw_result is None:
+        logger.warning("Trial %d: no result from training deployment", trial_number)
+        return float("inf")
+
     fold_results: list[dict[str, Any]] = (
         raw_result.fold_results if hasattr(raw_result, "fold_results") else []
     )
@@ -101,8 +146,8 @@ def hpo_flow(
 ) -> dict[str, Any]:
     """HPO Prefect flow — runs n_trials of Optuna optimization.
 
-    Each trial calls training_flow() with Optuna-suggested hyperparameters
-    and reports the resulting val_loss as the objective value.
+    Each trial triggers a training deployment via run_deployment(),
+    ensuring Docker isolation between the HPO controller and training.
 
     Parameters
     ----------
@@ -126,6 +171,8 @@ def hpo_flow(
     -------
     Dict with ``best_params``, ``best_value``, ``n_trials``, ``study_name``.
     """
+    _require_docker_context()
+
     logger.info(
         "HPO flow started: study=%r, n_trials=%d, sampler=%s (trigger: %s)",
         study_name,

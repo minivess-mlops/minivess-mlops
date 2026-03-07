@@ -7,9 +7,6 @@ Flows must communicate ONLY via MLflow artifacts and Prefect run_deployment().
 Allowed imports within the flows/ package:
   - dashboard_flow.py → dashboard_sections.py (helper module, not a flow)
 
-Known violations (to be fixed):
-  - hpo_flow.py → train_flow.training_flow (T-1.1: replace with run_deployment)
-
 Uses ast.parse() for source inspection — NO regex (CLAUDE.md Rule #16).
 """
 
@@ -26,9 +23,8 @@ _FLOWS_DIR = Path("src/minivess/orchestration/flows")
 _HELPER_MODULES = {"dashboard_sections"}
 
 # Known violations with tracking issues (skip until fixed)
-_KNOWN_VIOLATIONS = {
-    ("hpo_flow", "train_flow"),  # T-1.1: replace with run_deployment
-}
+# T-1.1 FIXED: hpo_flow no longer imports train_flow (uses run_deployment)
+_KNOWN_VIOLATIONS: set[tuple[str, str]] = set()
 
 # All flow module names (files that define @flow functions)
 _FLOW_MODULES = {
@@ -95,18 +91,8 @@ class TestNoCrossFlowImports:
             "Flows must communicate via MLflow artifacts and run_deployment()."
         )
 
-    def test_known_violations_are_tracked(self) -> None:
-        """Known violations must actually exist (remove from list when fixed)."""
-        if not _FLOWS_DIR.is_dir():
-            pytest.skip("flows/ directory not found")
-
-        for importer, target in _KNOWN_VIOLATIONS:
-            flow_file = _FLOWS_DIR / f"{importer}.py"
-            if not flow_file.exists():
-                continue
-            violations = _get_flow_imports(flow_file)
-            pairs = [(i, t) for i, t in violations]
-            assert (importer, target) in pairs, (
-                f"Known violation ({importer} → {target}) no longer exists. "
-                f"Remove it from _KNOWN_VIOLATIONS in {__file__}."
-            )
+    def test_no_known_violations_remain(self) -> None:
+        """All known violations have been fixed — list must be empty."""
+        assert not _KNOWN_VIOLATIONS, (
+            f"Known violations should be empty after T-1.1 fix: {_KNOWN_VIOLATIONS}"
+        )

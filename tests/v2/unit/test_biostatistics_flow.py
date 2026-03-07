@@ -98,9 +98,11 @@ class TestFlowRunsWithMockData:
 
 class TestFlowRaisesOutsideDocker:
     def test_flow_raises_outside_docker(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Flow must raise RuntimeError when not in Docker and MINIVESS_TESTING is unset."""
-        # Temporarily unset MINIVESS_TESTING
+        """Flow must raise RuntimeError when not in Docker and escape hatches unset."""
+        # Clear all Docker gate escape hatches
         monkeypatch.delenv("MINIVESS_TESTING", raising=False)
+        monkeypatch.delenv("MINIVESS_ALLOW_HOST", raising=False)
+        monkeypatch.delenv("DOCKER_CONTAINER", raising=False)
 
         from minivess.orchestration.flows.biostatistics_flow import (
             _require_docker_context,

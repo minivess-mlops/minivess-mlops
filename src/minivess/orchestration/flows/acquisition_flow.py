@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 import os
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 from prefect import flow, task
 
@@ -22,10 +23,22 @@ from minivess.config.acquisition_config import (
 from minivess.data.downloaders import get_downloader
 from minivess.orchestration.constants import FLOW_NAME_ACQUISITION
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 logger = logging.getLogger(__name__)
+
+
+def _require_docker_context() -> None:
+    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
+    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
+        return
+    if os.environ.get("DOCKER_CONTAINER"):
+        return
+    if Path("/.dockerenv").exists():
+        return
+    raise RuntimeError(
+        "Acquisition flow must run inside a Docker container.\n"
+        "Run: docker compose -f deployment/docker-compose.flows.yml run acquisition\n"
+        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +242,8 @@ def run_acquisition_flow(
     -------
     AcquisitionResult with per-dataset status and provenance.
     """
+    _require_docker_context()
+
     from minivess.config.acquisition_config import AcquisitionConfig
 
     if config is None:

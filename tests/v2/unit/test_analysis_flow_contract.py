@@ -50,38 +50,26 @@ class TestNoHardcodedRelativePath:
 
 
 class TestAnalysisFlowContract:
-    def test_analysis_flow_has_flow_name_tag(self, monkeypatch, tmp_path) -> None:
-        """run_analysis_flow() must tag its MLflow run with flow_name='analyze'."""
-        import mlflow
-
-        mlflow_dir = tmp_path / "mlruns"
-        monkeypatch.setenv("PREFECT_DISABLED", "1")
-        monkeypatch.setenv("MLFLOW_TRACKING_URI", str(mlflow_dir))
-        monkeypatch.setenv("ANALYSIS_OUTPUT", str(tmp_path / "analysis"))
-
-        mlflow.set_tracking_uri(str(mlflow_dir))
-
-        # We cannot run the full flow (needs real data/models), so test the
-        # FlowContract wiring via source inspection: flow_name="analyze" must appear.
+    def test_analysis_flow_has_flow_name_tag(self) -> None:
+        """run_analysis_flow() must tag its MLflow run with FLOW_NAME_ANALYSIS constant."""
         source = _ANALYSIS_FLOW_SRC.read_text(encoding="utf-8")
         tree = ast.parse(source)
 
-        found_analyze_tag = False
+        # The flow must reference FLOW_NAME_ANALYSIS (from constants) for flow_name tags.
+        # Check for ast.Name references to the constant.
+        found_flow_name_ref = False
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Constant):
-                continue
-            if node.value == "analyze":
-                found_analyze_tag = True
+            if isinstance(node, ast.Name) and node.id == "FLOW_NAME_ANALYSIS":
+                found_flow_name_ref = True
                 break
 
-        assert found_analyze_tag, (
-            "analysis_flow.py must contain the string 'analyze' as a flow_name tag value. "
-            "Add FlowContract.log_flow_completion(flow_name='analyze', ...) and "
-            "tag MLflow run with flow_name='analyze'."
+        assert found_flow_name_ref, (
+            "analysis_flow.py must use FLOW_NAME_ANALYSIS constant for flow_name tags. "
+            "Use: from minivess.orchestration.constants import FLOW_NAME_ANALYSIS"
         )
 
     def test_analysis_flow_references_flow_contract(self) -> None:
-        """analysis_flow.py must import or reference FlowContract."""
+        """analysis_flow.py must use FlowContract (directly or via mlflow_helpers)."""
         source = _ANALYSIS_FLOW_SRC.read_text(encoding="utf-8")
         tree = ast.parse(source)
 
@@ -100,16 +88,23 @@ class TestAnalysisFlowContract:
             if isinstance(node, ast.Attribute) and node.attr == "FlowContract":
                 found = True
                 break
-            # Check import statements
+            # Check import statements — accept FlowContract or mlflow_helpers
             if isinstance(node, ast.ImportFrom):
                 for alias in node.names:
-                    if alias.name == "FlowContract" or alias.asname == "FlowContract":
+                    if alias.name in (
+                        "FlowContract",
+                        "log_completion_safe",
+                        "find_upstream_safely",
+                    ):
+                        found = True
+                        break
+                    if alias.asname in ("FlowContract",):
                         found = True
                         break
 
         assert found, (
-            "analysis_flow.py must reference FlowContract. "
-            "Add: from minivess.orchestration.flow_contract import FlowContract"
+            "analysis_flow.py must reference FlowContract (directly or via mlflow_helpers). "
+            "Add: from minivess.orchestration.mlflow_helpers import log_completion_safe"
         )
 
     def test_analysis_flow_references_upstream_run(self) -> None:
@@ -122,10 +117,13 @@ class TestAnalysisFlowContract:
         )
 
     def test_analysis_flow_references_log_flow_completion(self) -> None:
-        """analysis_flow.py must call log_flow_completion."""
+        """analysis_flow.py must call log_flow_completion or log_completion_safe."""
         source = _ANALYSIS_FLOW_SRC.read_text(encoding="utf-8")
-        assert "log_flow_completion" in source, (
-            "analysis_flow.py must call FlowContract.log_flow_completion(). "
+        has_completion = (
+            "log_flow_completion" in source or "log_completion_safe" in source
+        )
+        assert has_completion, (
+            "analysis_flow.py must call log_flow_completion() or log_completion_safe(). "
             "Add the call near the end of run_analysis_flow()."
         )
 

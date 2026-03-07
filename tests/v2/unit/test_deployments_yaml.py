@@ -26,10 +26,14 @@ _ALL_FLOW_NAMES = [
     "Deploy Pipeline",
     "minivess-dashboard",
     "qa-flow",
+    "biostatistics-flow",
     "minivess-annotation",
+    "hpo-flow",
+    "pipeline-flow",
 ]
 
-_CPU_FLOW_NAMES = [n for n in _ALL_FLOW_NAMES if n != "training-flow"]
+_GPU_FLOW_NAMES = {"training-flow", "hpo-flow"}
+_CPU_FLOW_NAMES = [n for n in _ALL_FLOW_NAMES if n not in _GPU_FLOW_NAMES]
 
 
 def _load_deployments() -> dict:
@@ -96,14 +100,14 @@ class TestAllFlowsHaveDeployment:
             "Each flow must have an entry with flow_name matching its @flow(name=...) decorator."
         )
 
-    def test_exactly_nine_deployments(self) -> None:
-        """There must be exactly 9 deployments (one per flow)."""
+    def test_exactly_twelve_deployments(self) -> None:
+        """There must be exactly 12 deployments (one per flow)."""
         if not _DEPLOYMENTS_YAML.exists():
             return
         data = _load_deployments()
         deployments = data.get("deployments", [])
-        assert len(deployments) == 9, (
-            f"Expected 9 deployments, found {len(deployments)}. "
+        assert len(deployments) == 12, (
+            f"Expected 12 deployments, found {len(deployments)}. "
             "One deployment per flow."
         )
 

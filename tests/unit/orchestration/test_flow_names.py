@@ -10,9 +10,8 @@ import ast
 from pathlib import Path
 
 FLOWS_DIR = Path("src/minivess/orchestration/flows")
-ORCH_DIR = Path("src/minivess/orchestration")
-# Include flows/ subdir AND orchestration root (deploy_flow.py lives there)
-FLOW_FILES = list(FLOWS_DIR.glob("*.py")) + [ORCH_DIR / "deploy_flow.py"]
+# All flow files are in flows/ directory (deploy_flow moved from root in T-0.2)
+FLOW_FILES = list(FLOWS_DIR.glob("*.py"))
 
 # deployments.py at the orchestration level
 DEPLOYMENTS_FILE = Path("src/minivess/orchestration/deployments.py")
@@ -40,8 +39,17 @@ def _get_flow_decorator_names(source_path: Path) -> list[str]:
             if func_name != "flow":
                 continue
             for kw in decorator.keywords:
-                if kw.arg == "name" and isinstance(kw.value, ast.Constant):
+                if kw.arg != "name":
+                    continue
+                if isinstance(kw.value, ast.Constant):
                     val = kw.value.value
+                    if isinstance(val, str):
+                        names.append(val)
+                elif isinstance(kw.value, ast.Name):
+                    # name=FLOW_NAME_TRAIN — resolve from constants
+                    from minivess.orchestration import constants as _c
+
+                    val = getattr(_c, kw.value.id, None)
                     if isinstance(val, str):
                         names.append(val)
     return names

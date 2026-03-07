@@ -18,12 +18,15 @@ EXPECTED_TAGS: dict[Path, str] = {
     FLOWS_DIR / "post_training_flow.py": "post-training-flow",
     FLOWS_DIR / "analysis_flow.py": "analysis-flow",
     FLOWS_DIR / "data_flow.py": "data-flow",
-    ORCH_DIR / "deploy_flow.py": "deploy-flow",
+    FLOWS_DIR / "deploy_flow.py": "deploy-flow",
 }
 
 
 def _find_start_run_flow_name_tags(source_path: Path) -> list[str]:
-    """Extract flow_name values from mlflow.start_run(tags={...}) calls via AST."""
+    """Extract flow_name values from mlflow.start_run(tags={...}) calls via AST.
+
+    Handles both literal strings and constant references (e.g., FLOW_NAME_TRAIN).
+    """
     tree = ast.parse(source_path.read_text(encoding="utf-8"))
     found: list[str] = []
 
@@ -51,6 +54,13 @@ def _find_start_run_flow_name_tags(source_path: Path) -> list[str]:
                 # Extract the string value of the flow_name entry
                 if isinstance(val, ast.Constant) and isinstance(val.value, str):
                     found.append(val.value)
+                elif isinstance(val, ast.Name):
+                    # Resolve constant reference (e.g., FLOW_NAME_TRAIN)
+                    from minivess.orchestration import constants as _c
+
+                    resolved = getattr(_c, val.id, None)
+                    if isinstance(resolved, str):
+                        found.append(resolved)
 
     return found
 

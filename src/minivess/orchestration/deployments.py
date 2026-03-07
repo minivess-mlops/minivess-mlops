@@ -23,6 +23,8 @@ FLOW_WORK_POOL_MAP: dict[str, str] = {
     "qa": "cpu-pool",
     "annotation": "cpu-pool",
     "biostatistics": "cpu-pool",
+    "hpo": "gpu-pool",
+    "pipeline": "cpu-pool",
 }
 
 # Flow → Docker image mapping
@@ -37,6 +39,8 @@ FLOW_IMAGE_MAP: dict[str, str] = {
     "qa": "minivess-qa:latest",
     "annotation": "minivess-annotation:latest",
     "biostatistics": "minivess-biostatistics:latest",
+    "hpo": "minivess-hpo:latest",
+    "pipeline": "minivess-pipeline:latest",
 }
 
 

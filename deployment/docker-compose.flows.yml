@@ -237,6 +237,51 @@ services:
       - minivess
     <<: *common-labels
 
+  # HPO Flow — hyperparameter optimization (GPU for training trials)
+  hpo:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.hpo
+    image: minivess-hpo:latest
+    container_name: minivess-flow-hpo
+    environment:
+      <<: *common-env
+      FLOW_NAME: hpo
+      CHECKPOINT_DIR: /app/checkpoints
+      SPLITS_DIR: /app/configs/splits
+    volumes:
+      - data_cache:/app/data:ro
+      - configs_splits:/app/configs/splits:ro
+      - checkpoint_cache:/app/checkpoints
+      - mlruns_data:/app/mlruns
+      - logs_data:/app/logs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - minivess
+    <<: *common-labels
+
+  # Pipeline Orchestrator — cascades all flows in sequence
+  pipeline:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.pipeline
+    image: minivess-pipeline:latest
+    container_name: minivess-flow-pipeline
+    environment:
+      <<: *common-env
+      FLOW_NAME: pipeline
+    volumes:
+      - mlruns_data:/app/mlruns:ro
+    networks:
+      - minivess
+    <<: *common-labels
+
 volumes:
   # Input data
   raw_data:

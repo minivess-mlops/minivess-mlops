@@ -7,8 +7,10 @@ session, and optionally computes agreement with a reference segmentation.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -24,6 +26,21 @@ if TYPE_CHECKING:
     from minivess.serving.inference_client import InferenceClient
 
 logger = logging.getLogger(__name__)
+
+
+def _require_docker_context() -> None:
+    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
+    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
+        return
+    if os.environ.get("DOCKER_CONTAINER"):
+        return
+    if Path("/.dockerenv").exists():
+        return
+    raise RuntimeError(
+        "Annotation flow must run inside a Docker container.\n"
+        "Run: docker compose -f deployment/docker-compose.flows.yml run annotation\n"
+        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
+    )
 
 
 @dataclass
@@ -181,6 +198,8 @@ def run_annotation_flow(
     -------
     AnnotationFlowResult with response dict, session report, and agreement.
     """
+    _require_docker_context()
+
     if config is None:
         config = AnnotationFlowConfig()
 
@@ -192,4 +211,14 @@ def run_annotation_flow(
         response=response.to_dict(),
         session_report=session_report,
         agreement_dice=agreement,
+    )
+
+
+if __name__ == "__main__":
+    # Annotation flow requires volume and volume_id parameters.
+    # Direct invocation prints usage instructions.
+    raise SystemExit(
+        "annotation_flow cannot be invoked directly — it requires volume "
+        "and volume_id parameters.\n"
+        "Use: prefect deployment run 'minivess-annotation/default'"
     )

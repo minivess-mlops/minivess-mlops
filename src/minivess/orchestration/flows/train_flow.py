@@ -27,6 +27,11 @@ from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
 )
+from minivess.pipeline.resume_discovery import (
+    compute_config_fingerprint,
+    find_completed_config,
+    load_fold_result_from_mlflow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -345,7 +350,25 @@ def train_one_fold_task(
     )
 
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    with tracker.start_run(tags={"fold_id": str(fold_id), "loss_name": loss_name}):
+    # Compute config fingerprint for auto-resume discovery
+    from minivess.pipeline.resume_discovery import compute_config_fingerprint as _fp
+
+    fingerprint = _fp(
+        loss_name=loss_name,
+        model_family=model_family_str,
+        fold_id=fold_id,
+        max_epochs=max_epochs,
+        batch_size=batch_size,
+        patch_size=patch_size,
+    )
+
+    with tracker.start_run(
+        tags={
+            "fold_id": str(fold_id),
+            "loss_name": loss_name,
+            "config_fingerprint": fingerprint,
+        }
+    ):
         return trainer.fit(
             train_loader, val_loader, checkpoint_dir=checkpoint_dir, fold_id=fold_id
         )
@@ -487,9 +510,30 @@ def training_flow(
         "batch_size": batch_size,
     }
 
-    # Train each fold and collect results (outside MLflow context — avoids re-entry issues)
+    # Train each fold, skipping already-completed configs (auto-resume)
     fold_results: list[dict[str, Any]] = []
     for fold_id, fold_split in enumerate(folds_to_run):
+        # Check for already-completed run with matching config fingerprint
+        fingerprint = compute_config_fingerprint(
+            loss_name=loss_name,
+            model_family=model_family,
+            fold_id=fold_id,
+            max_epochs=max_epochs,
+            batch_size=batch_size,
+        )
+        existing_run_id = find_completed_config(
+            tracking_uri=tracking_uri,
+            experiment_name=experiment_name,
+            config_fingerprint=fingerprint,
+        )
+        if existing_run_id is not None:
+            logger.info(
+                "Fold %d: resuming from completed run %s", fold_id, existing_run_id
+            )
+            fold_result = load_fold_result_from_mlflow(tracking_uri, existing_run_id)
+            fold_results.append(fold_result)
+            continue
+
         checkpoint_dir = checkpoint_base / f"fold_{fold_id}"
         fold_result = train_one_fold_task(fold_id, fold_split, config, checkpoint_dir)
         fold_results.append(fold_result)
@@ -503,7 +547,7 @@ def training_flow(
         mlflow.set_experiment(experiment_name)
         with mlflow.start_run(
             tags={
-                "flow_name": "training-flow",
+                "flow_name": FLOW_NAME_TRAIN,
                 "upstream_data_run_id": upstream_data_run_id,
                 "loss_name": loss_name,
                 "model_family": model_family,
@@ -523,7 +567,7 @@ def training_flow(
 
     # Log flow completion tag (best-effort, non-blocking)
     log_completion_safe(
-        flow_name="training-flow",
+        flow_name=FLOW_NAME_TRAIN,
         tracking_uri=tracking_uri,
         run_id=mlflow_run_id,
     )
