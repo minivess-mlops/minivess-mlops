@@ -63,16 +63,21 @@ _SAM3_INSTALL_INSTRUCTIONS = """
 
 
 def _require_sam3(config: ModelConfig) -> None:
-    """Validate SAM3 availability; raise loudly if not installed.
+    """Validate SAM3 availability; raise loudly if not installed or GPU insufficient.
 
     SAM3 ALWAYS requires real pretrained weights. There is no stub or
     pretrained:false fallback — they were removed to prevent silent
     random-weight training (see .claude/metalearning/2026-03-02-sam3-implementation-fuckup.md).
 
+    Checks (in order):
+    1. SAM3 package is installed.
+    2. GPU VRAM ≥ 16 GB (via check_sam3_vram()).
+    3. HuggingFace token is present (for gated model download).
+
     Raises
     ------
     RuntimeError
-        When SAM3 package is not installed.
+        When SAM3 package is not installed, GPU VRAM < 16 GB, or HF token missing.
     """
     if not _sam3_package_available():
         logger.error(_SAM3_INSTALL_INSTRUCTIONS)
@@ -81,6 +86,11 @@ def _require_sam3(config: ModelConfig) -> None:
             "See installation instructions logged above (ERROR level)."
         )
         raise RuntimeError(msg)
+
+    # Enforce 16 GB VRAM minimum before loading any SAM3 weights
+    from minivess.adapters.sam3_vram_check import check_sam3_vram
+
+    check_sam3_vram(variant=config.name)
 
     # SAM3 is available — verify HF token before triggering a download
     from minivess.utils.hf_auth import require_hf_token
