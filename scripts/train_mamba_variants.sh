@@ -2,30 +2,32 @@
 ################################################################################
 # train_mamba_variants.sh
 #
-# Full training pipeline for Mamba model variants on MiniVess dataset:
+# Full training pipeline for Mamba model variants on MiniVess dataset.
+# Runs inside Docker via docker compose (CLAUDE.md Rules #17, #18).
+#
+# Variants:
 #   - comma_mamba:  Coordinate Mamba 3D segmentation (Shi et al., 2025)
 #                   ~6 GB VRAM, O(n) state-space complexity
 #   - ulike_mamba:  U-Like Mamba, lightweight ~2M params, ~4 GB VRAM
 #
-# Both variants run 3 folds (from configs/splits/3fold_seed42.json) with
-# the default cbdice_cldice loss.
+# Both variants run 3 folds with the default cbdice_cldice loss.
+#
+# Volume mounts defined in docker-compose.flows.yml:
+#   data_cache   -> /app/data
+#   configs      -> /app/configs/splits
+#   checkpoints  -> /app/checkpoints
+#   mlruns       -> /app/mlruns
+#   logs         -> /app/logs
 #
 # Prerequisites:
-#   - uv installed and project dependencies synced
-#   - GPU with 8GB VRAM (gpu_low profile)
-#   - MiniVess dataset available in configured data path
+#   - Docker with GPU support (nvidia-container-toolkit)
+#   - Infrastructure stack running (docker compose -f deployment/docker-compose.yml up)
+#   - MiniVess dataset available in the data_cache volume
 #
 # Usage:
-#   ./scripts/train_mamba_variants.sh                    # 100 epochs, gpu_low
+#   ./scripts/train_mamba_variants.sh                    # 100 epochs
 #   ./scripts/train_mamba_variants.sh --epochs 50        # 50 epochs
-#   ./scripts/train_mamba_variants.sh --compute gpu_high # higher-VRAM profile
 #   ./scripts/train_mamba_variants.sh --debug            # smoke test (1 epoch)
-#   ./scripts/train_mamba_variants.sh --resume           # resume checkpoints
-#
-# Environment:
-#   MINIVESS_LOG_DIR  Override log directory (default: ./logs/mamba_variants)
-#   MINIVESS_COMPUTE  Override compute profile (default: gpu_low)
-#   MINIVESS_EPOCHS   Override epochs (default: 100)
 #
 # Exit codes:
 #   0  All variants trained successfully
@@ -34,19 +36,17 @@
 ################################################################################
 
 set -euo pipefail
+cd "$(dirname "$0")/.."
 
 # ==============================================================================
 # Configuration
 # ==============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
-EPOCHS="${MINIVESS_EPOCHS:-100}"
-COMPUTE="${MINIVESS_COMPUTE:-gpu_low}"
-LOG_BASE="${MINIVESS_LOG_DIR:-${PROJECT_ROOT}/logs/mamba_variants}"
+EPOCHS=100
+LOSS="cbdice_cldice"
+NUM_FOLDS=3
+BATCH_SIZE=1
 DEBUG_MODE=0
-RESUME_MODE=0
 
 # Colors for output
 RED='\033[0;31m'
@@ -64,7 +64,7 @@ log_info() {
 }
 
 log_success() {
-    echo -e "${GREEN}[✓]${NC} $*"
+    echo -e "${GREEN}[OK]${NC} $*"
 }
 
 log_warn() {
@@ -72,14 +72,14 @@ log_warn() {
 }
 
 log_error() {
-    echo -e "${RED}[✗]${NC} $*"
+    echo -e "${RED}[FAIL]${NC} $*"
 }
 
 usage() {
     cat << EOF
 Usage: $0 [OPTIONS]
 
-Train both Mamba variants for MiniVess segmentation (3 folds each).
+Train both Mamba variants for MiniVess segmentation (3 folds each) via Docker Compose.
 
 Variants:
     comma_mamba  Coordinate Mamba 3D (Shi et al., 2025), ~6 GB VRAM
@@ -87,17 +87,12 @@ Variants:
 
 Options:
     --epochs N              Number of max epochs (default: 100)
-    --compute PROFILE       Compute profile: cpu, gpu_low, gpu_high
-                            (default: gpu_low)
-    --log-dir DIR           Output directory for logs and checkpoints
-                            (default: ./logs/mamba_variants)
     --debug                 Smoke test mode: 1 epoch per variant
-    --resume                Resume from existing checkpoints (if available)
     -h, --help              Show this help message
 
 VRAM guide:
-    ulike_mamba  ~4 GB  → gpu_low safe
-    comma_mamba  ~6 GB  → gpu_low safe
+    ulike_mamba  ~4 GB  -> safe on 8GB
+    comma_mamba  ~6 GB  -> safe on 8GB
 
 Examples:
     # Full 100-epoch training
@@ -105,9 +100,6 @@ Examples:
 
     # Quick smoke test (1 epoch each variant)
     $0 --debug
-
-    # Resume interrupted run
-    $0 --resume
 EOF
     exit 0
 }
@@ -122,21 +114,9 @@ while [[ $# -gt 0 ]]; do
             EPOCHS="$2"
             shift 2
             ;;
-        --compute)
-            COMPUTE="$2"
-            shift 2
-            ;;
-        --log-dir)
-            LOG_BASE="$2"
-            shift 2
-            ;;
         --debug)
             DEBUG_MODE=1
             EPOCHS=1
-            shift
-            ;;
-        --resume)
-            RESUME_MODE=1
             shift
             ;;
         -h|--help)
@@ -153,20 +133,15 @@ done
 # Validation
 # ==============================================================================
 
-if ! command -v uv &> /dev/null; then
-    log_error "uv not found. Install uv or add to PATH."
+if ! command -v docker &> /dev/null; then
+    log_error "docker not found. Install Docker with GPU support."
     exit 2
 fi
 
-if [ ! -f "${PROJECT_ROOT}/pyproject.toml" ]; then
-    log_error "pyproject.toml not found in ${PROJECT_ROOT}"
+if [ ! -f "deployment/docker-compose.flows.yml" ]; then
+    log_error "deployment/docker-compose.flows.yml not found."
     exit 2
 fi
-
-cd "${PROJECT_ROOT}" || exit 2
-
-log_info "Syncing dependencies..."
-uv sync --quiet || { log_error "Failed to sync dependencies"; exit 2; }
 
 # ==============================================================================
 # Setup
@@ -174,17 +149,17 @@ uv sync --quiet || { log_error "Failed to sync dependencies"; exit 2; }
 
 VARIANTS=("comma_mamba" "ulike_mamba")
 
-mkdir -p "${LOG_BASE}"
-
-log_info "Mamba Variants Training Pipeline"
-log_info "=========================================="
+echo ""
+log_info "=== Mamba Variants Training (Docker) ==="
+log_info "Start:    $(date)"
+log_info "GPU:      $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo 'none')"
 log_info "Variants: ${VARIANTS[*]}"
-log_info "Epochs: ${EPOCHS}"
-log_info "Compute: ${COMPUTE}"
-log_info "Log dir: ${LOG_BASE}"
-log_info "Debug mode: $([ $DEBUG_MODE -eq 1 ] && echo 'YES' || echo 'NO')"
-log_info "Resume mode: $([ $RESUME_MODE -eq 1 ] && echo 'YES' || echo 'NO')"
-log_info ""
+log_info "Loss:     ${LOSS}"
+log_info "Epochs:   ${EPOCHS}"
+log_info "Folds:    ${NUM_FOLDS}"
+log_info "Debug:    $([ $DEBUG_MODE -eq 1 ] && echo 'YES' || echo 'NO')"
+log_info "========================================="
+echo ""
 
 # ==============================================================================
 # Training Loop
@@ -194,40 +169,23 @@ FAILED=()
 PASSED=()
 
 for VARIANT in "${VARIANTS[@]}"; do
-    LOG_DIR="${LOG_BASE}/${VARIANT}"
-
     echo ""
-    log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log_info "--------------------------------------------"
     log_info "Training: ${VARIANT}"
-    log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log_info "--------------------------------------------"
 
-    CMD=(
-        "uv" "run" "python" "scripts/run_training_flow.py"
-        "--model-family" "${VARIANT}"
-        "--max-epochs" "${EPOCHS}"
-        "--compute" "${COMPUTE}"
-        "--trigger-source" "train_mamba_variants.sh"
-    )
-
-    # Model-specific memory overrides for gpu_low (8 GB VRAM)
-    # COMMA Mamba flattens full spatial volume to sequence → more memory intensive.
-    # batch-size=1 stays within 7.5 GB; compute profile handles patch-size.
-    if [[ "${VARIANT}" == "comma_mamba" && "${COMPUTE}" == "gpu_low" ]]; then
-        CMD+=("--batch-size" "1")
-        log_info "  comma_mamba gpu_low override: batch-size=1"
-    fi
-
-    if [ $DEBUG_MODE -eq 1 ]; then
-        CMD+=("--debug")
-    fi
-
-    if [ $RESUME_MODE -eq 1 ]; then
-        CMD+=("--resume")
-    fi
-
-    log_info "Command: ${CMD[*]}"
-
-    if "${CMD[@]}"; then
+    if docker compose \
+        -f deployment/docker-compose.flows.yml \
+        run \
+        --rm \
+        -e MODEL_FAMILY="${VARIANT}" \
+        -e LOSS_NAME="${LOSS}" \
+        -e MAX_EPOCHS="${EPOCHS}" \
+        -e NUM_FOLDS="${NUM_FOLDS}" \
+        -e BATCH_SIZE="${BATCH_SIZE}" \
+        -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+        -e ORT_LOGGING_LEVEL=3 \
+        train; then
         log_success "${VARIANT} completed"
         PASSED+=("${VARIANT}")
     else
@@ -241,9 +199,9 @@ done
 # ==============================================================================
 
 echo ""
-log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-log_info "Training Complete"
-log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log_info "========================================="
+log_info "Training Complete: $(date)"
+log_info "========================================="
 
 if [ ${#PASSED[@]} -gt 0 ]; then
     log_success "Passed (${#PASSED[@]}/${#VARIANTS[@]}): ${PASSED[*]}"
@@ -251,19 +209,8 @@ fi
 
 if [ ${#FAILED[@]} -gt 0 ]; then
     log_error "Failed (${#FAILED[@]}/${#VARIANTS[@]}): ${FAILED[*]}"
-    echo ""
-    log_warn "Check logs for details:"
-    for variant in "${FAILED[@]}"; do
-        echo "  ${LOG_BASE}/${variant}/"
-    done
     exit 1
 else
     log_success "All Mamba variants trained successfully!"
-    echo ""
-    log_info "Results saved to: ${LOG_BASE}"
-    log_info "Next steps:"
-    log_info "  1. Inspect logs: ls -lh ${LOG_BASE}/*/monitor/"
-    log_info "  2. Check metrics: uv run python scripts/analyze_mlflow_runs.py"
-    log_info "  3. Compare vs DynUNet baseline: uv run python scripts/compare_models.py"
     exit 0
 fi

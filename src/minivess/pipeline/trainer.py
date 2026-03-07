@@ -43,6 +43,64 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def validate_checkpoint_path(checkpoint_dir: Path) -> None:
+    """Validate that checkpoint_dir is a Docker volume or test path.
+
+    Rejects repo-relative paths like ``checkpoints/`` or ``./checkpoints``.
+    Accepts:
+    - Docker paths (``/app/checkpoints/...``)
+    - pytest tmp_path (contains ``tmp`` or ``pytest`` in path parts)
+    - Any path when ``MINIVESS_ALLOW_HOST=1`` is set
+
+    Parameters
+    ----------
+    checkpoint_dir:
+        Path to validate.
+
+    Raises
+    ------
+    ValueError
+        When the path appears to be repo-relative (not volume-mounted).
+
+    See Also
+    --------
+    CLAUDE.md Rule #18 (volume mounts), Rule #19 (STOP protocol)
+    docs/planning/minivess-vision-enforcement-plan-execution.xml (T-02)
+    """
+    import os
+    from pathlib import Path as _Path
+
+    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
+        return
+
+    path = (
+        _Path(checkpoint_dir).resolve()
+        if not checkpoint_dir.is_absolute()
+        else checkpoint_dir
+    )
+    path_str = str(path)
+    parts = path.parts
+
+    # Accept Docker volume paths
+    if path_str.startswith("/app/"):
+        return
+
+    # Accept pytest tmp paths
+    if any(
+        p in ("tmp", "pytest") or p.startswith("pytest") or p.startswith("tmp")
+        for p in parts
+    ):
+        return
+
+    raise ValueError(
+        f"Checkpoint path must be a volume-mounted Docker path, not repo-relative.\n"
+        f"  Got: {checkpoint_dir}\n"
+        f"  Expected: /app/checkpoints/... (Docker volume)\n"
+        f"  Escape hatch (pytest ONLY): export MINIVESS_ALLOW_HOST=1\n"
+        f"  See: CLAUDE.md Rule #18, docs/planning/minivess-vision-enforcement-plan.md"
+    )
+
+
 @dataclass
 class EpochResult:
     """Metrics from a single training or validation epoch."""
@@ -459,6 +517,10 @@ class SegmentationTrainer:
             Summary with ``best_val_loss`` (backward compat), ``final_epoch``,
             ``history``, and ``best_metrics``.
         """
+        # Validate checkpoint path (CLAUDE.md Rule #18, #19)
+        if checkpoint_dir is not None:
+            validate_checkpoint_path(checkpoint_dir)
+
         history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
         final_epoch = 0
         ckpt_cfg = self.config.checkpoint

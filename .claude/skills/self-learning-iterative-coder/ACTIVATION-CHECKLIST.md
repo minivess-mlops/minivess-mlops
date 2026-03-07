@@ -99,7 +99,20 @@ Forbidden: ___
 Required patterns: ___
 ```
 
-## 6. Execution Mode
+## 6. STOP Protocol (Training/Pipeline Tasks Only)
+
+If the task involves training, pipeline execution, or model evaluation:
+
+- [ ] **S**(ource): Will this run inside a Docker container? If not → build Docker image first
+- [ ] **T**(racking): Is Prefect orchestration active? `PREFECT_DISABLED=1` is BANNED outside pytest
+- [ ] **O**(utputs): Are ALL artifact paths volume-mounted? Repo-relative paths are BANNED
+- [ ] **P**(rovenance): Is this reproducible on another machine? Host-env dependencies are BANNED
+
+**If ANY check fails → FIX IT before entering the RED phase.**
+
+See: `docs/planning/minivess-vision-enforcement-plan.md` | CLAUDE.md Rule #19
+
+## 7. Execution Mode
 
 - [ ] Choose execution mode:
   - **autonomous**: Run through tasks without pausing (Ralph Wiggum mode)
@@ -110,4 +123,4 @@ Required patterns: ___
 
 ## Ready to Start
 
-Once all checks pass, proceed to [protocols/task-selection.md](protocols/task-selection.md) to pick the first task.
+Once all checks pass (including STOP for training tasks), proceed to [protocols/task-selection.md](protocols/task-selection.md) to pick the first task.

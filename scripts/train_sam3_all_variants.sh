@@ -2,26 +2,31 @@
 ################################################################################
 # train_sam3_all_variants.sh
 #
-# Full training pipeline for all 3 SAMv3 variants on MiniVess dataset
-# - sam3_vanilla:   Frozen SAM3 + trainable decoder
-# - sam3_topolora:  SAM3 + LoRA + topology-aware loss (cbdice_cldice)
-# - sam3_hybrid:    Frozen SAM3 + DynUNet 3D + gated fusion
+# Full training pipeline for all 3 SAMv3 variants on MiniVess dataset.
+# Runs inside Docker via docker compose (CLAUDE.md Rules #17, #18).
+#
+# Variants:
+#   - sam3_vanilla:   Frozen SAM3 ViT-32L + trainable decoder
+#   - sam3_topolora:  SAM3 + LoRA + topology-aware loss (cbdice_cldice)
+#   - sam3_hybrid:    Frozen SAM3 + DynUNet 3D + gated fusion
+#
+# Volume mounts defined in docker-compose.flows.yml:
+#   data_cache   -> /app/data
+#   configs      -> /app/configs/splits
+#   checkpoints  -> /app/checkpoints
+#   mlruns       -> /app/mlruns
+#   logs         -> /app/logs
 #
 # Prerequisites:
-#   - uv installed and project dependencies in sync
-#   - GPU with 8GB+ VRAM (or adjust --compute accordingly)
-#   - MiniVess dataset available in configured data path
+#   - Docker with GPU support (nvidia-container-toolkit)
+#   - Infrastructure stack running (docker compose -f deployment/docker-compose.yml up)
+#   - MiniVess dataset available in the data_cache volume
+#   - HF_TOKEN set in environment (for gated SAM3 weights)
 #
 # Usage:
-#   ./scripts/train_sam3_all_variants.sh                     # 100 epochs, gpu_low
+#   ./scripts/train_sam3_all_variants.sh                     # 100 epochs
 #   ./scripts/train_sam3_all_variants.sh --epochs 50         # 50 epochs
-#   ./scripts/train_sam3_all_variants.sh --compute gpu_high  # higher-VRAM profile
 #   ./scripts/train_sam3_all_variants.sh --debug             # smoke test (1 epoch)
-#
-# Environment:
-#   MINIVESS_LOG_DIR  Override log directory (default: ./logs/sam3_variants)
-#   MINIVESS_COMPUTE  Override compute profile (default: gpu_low)
-#   MINIVESS_EPOCHS   Override epochs (default: 100)
 #
 # Exit codes:
 #   0  All variants trained successfully
@@ -30,19 +35,17 @@
 ################################################################################
 
 set -euo pipefail
+cd "$(dirname "$0")/.."
 
 # ==============================================================================
 # Configuration
 # ==============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
-EPOCHS="${MINIVESS_EPOCHS:-100}"
-COMPUTE="${MINIVESS_COMPUTE:-gpu_low}"
-LOG_BASE="${MINIVESS_LOG_DIR:-${PROJECT_ROOT}/logs/sam3_variants}"
+EPOCHS=100
+LOSS="cbdice_cldice"
+NUM_FOLDS=3
+BATCH_SIZE=1
 DEBUG_MODE=0
-RESUME_MODE=0
 
 # Colors for output
 RED='\033[0;31m'
@@ -60,7 +63,7 @@ log_info() {
 }
 
 log_success() {
-    echo -e "${GREEN}[✓]${NC} $*"
+    echo -e "${GREEN}[OK]${NC} $*"
 }
 
 log_warn() {
@@ -68,24 +71,24 @@ log_warn() {
 }
 
 log_error() {
-    echo -e "${RED}[✗]${NC} $*"
+    echo -e "${RED}[FAIL]${NC} $*"
 }
 
 usage() {
     cat << EOF
 Usage: $0 [OPTIONS]
 
-Train all 3 SAMv3 variants for MiniVess segmentation.
+Train all 3 SAMv3 variants for MiniVess segmentation via Docker Compose.
+
+Variants:
+    sam3_vanilla   Frozen SAM3 ViT-32L + trainable decoder
+    sam3_topolora  SAM3 + LoRA + topology-aware loss
+    sam3_hybrid    Frozen SAM3 + DynUNet 3D + gated fusion
 
 Options:
     --epochs N              Number of max epochs (default: 100)
-    --compute PROFILE       Compute profile: cpu, gpu_low, gpu_high, dgx_spark,
-                           cloud_single, cloud_multi (default: gpu_low)
-    --log-dir DIR          Output directory for logs and checkpoints
-                           (default: ./logs/sam3_variants)
-    --debug                Smoke test mode: 1 epoch per variant (debug loss)
-    --resume               Resume from existing checkpoints (if available)
-    -h, --help            Show this help message
+    --debug                 Smoke test mode: 1 epoch per variant
+    -h, --help              Show this help message
 
 Examples:
     # Full 100-epoch training on GPU
@@ -94,11 +97,8 @@ Examples:
     # Quick smoke test (1 epoch each)
     $0 --debug
 
-    # 50 epochs with explicit GPU profile
-    $0 --epochs 50 --compute gpu_low
-
-    # Resume interrupted training
-    $0 --resume
+    # 50 epochs
+    $0 --epochs 50
 EOF
     exit 0
 }
@@ -113,21 +113,9 @@ while [[ $# -gt 0 ]]; do
             EPOCHS="$2"
             shift 2
             ;;
-        --compute)
-            COMPUTE="$2"
-            shift 2
-            ;;
-        --log-dir)
-            LOG_BASE="$2"
-            shift 2
-            ;;
         --debug)
             DEBUG_MODE=1
             EPOCHS=1
-            shift
-            ;;
-        --resume)
-            RESUME_MODE=1
             shift
             ;;
         -h|--help)
@@ -144,73 +132,66 @@ done
 # Validation
 # ==============================================================================
 
-if ! command -v uv &> /dev/null; then
-    log_error "uv not found. Install uv or add to PATH."
+if ! command -v docker &> /dev/null; then
+    log_error "docker not found. Install Docker with GPU support."
     exit 2
 fi
 
-if [ ! -f "${PROJECT_ROOT}/pyproject.toml" ]; then
-    log_error "pyproject.toml not found in ${PROJECT_ROOT}"
+if [ ! -f "deployment/docker-compose.flows.yml" ]; then
+    log_error "deployment/docker-compose.flows.yml not found."
     exit 2
 fi
 
-cd "${PROJECT_ROOT}" || exit 2
-
-# Verify uv sync is up to date
-log_info "Syncing dependencies..."
-uv sync --quiet || { log_error "Failed to sync dependencies"; exit 2; }
+if [ -z "${HF_TOKEN:-}" ]; then
+    log_warn "HF_TOKEN not set. SAM3 requires a HuggingFace token for gated weights."
+    log_warn "Set it with: export HF_TOKEN=hf_..."
+fi
 
 # ==============================================================================
 # Setup
 # ==============================================================================
 
-mkdir -p "${LOG_BASE}"
+VARIANTS=("sam3_vanilla" "sam3_topolora" "sam3_hybrid")
 
-log_info "SAMv3 Full Training Pipeline"
-log_info "=========================================="
-log_info "Variants: sam3_vanilla, sam3_topolora, sam3_hybrid"
-log_info "Epochs: ${EPOCHS}"
-log_info "Compute: ${COMPUTE}"
-log_info "Log dir: ${LOG_BASE}"
-log_info "Debug mode: $([ $DEBUG_MODE -eq 1 ] && echo 'YES' || echo 'NO')"
-log_info "Resume mode: $([ $RESUME_MODE -eq 1 ] && echo 'YES' || echo 'NO')"
-log_info ""
+echo ""
+log_info "=== SAMv3 All Variants Training (Docker) ==="
+log_info "Start:    $(date)"
+log_info "GPU:      $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo 'none')"
+log_info "Variants: ${VARIANTS[*]}"
+log_info "Loss:     ${LOSS}"
+log_info "Epochs:   ${EPOCHS}"
+log_info "Folds:    ${NUM_FOLDS}"
+log_info "Debug:    $([ $DEBUG_MODE -eq 1 ] && echo 'YES' || echo 'NO')"
+log_info "=============================================="
+echo ""
 
 # ==============================================================================
 # Training Loop
 # ==============================================================================
 
-VARIANTS=("sam3_vanilla" "sam3_topolora" "sam3_hybrid")
 FAILED=()
 PASSED=()
 
 for VARIANT in "${VARIANTS[@]}"; do
-    LOG_DIR="${LOG_BASE}/${VARIANT}"
-
     echo ""
-    log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log_info "--------------------------------------------"
     log_info "Training: ${VARIANT}"
-    log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log_info "--------------------------------------------"
 
-    # Build command — calls training_flow() directly (Prefect-aware, no orphan run)
-    CMD=(
-        "uv" "run" "python" "scripts/run_training_flow.py"
-        "--model-family" "${VARIANT}"
-        "--max-epochs" "${EPOCHS}"
-        "--compute" "${COMPUTE}"
-        "--trigger-source" "train_sam3_all_variants.sh"
-    )
-
-    # Add optional flags
-    if [ $DEBUG_MODE -eq 1 ]; then
-        CMD+=("--debug")
-    fi
-
-    # Log the command (--resume not supported via training_flow; resume via CHECKPOINT_DIR)
-    log_info "Command: ${CMD[*]}"
-
-    # Run training
-    if "${CMD[@]}"; then
+    if docker compose \
+        -f deployment/docker-compose.flows.yml \
+        run \
+        --rm \
+        -e MODEL_FAMILY="${VARIANT}" \
+        -e LOSS_NAME="${LOSS}" \
+        -e MAX_EPOCHS="${EPOCHS}" \
+        -e NUM_FOLDS="${NUM_FOLDS}" \
+        -e BATCH_SIZE="${BATCH_SIZE}" \
+        -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+        -e HF_HUB_DISABLE_PROGRESS_BARS=1 \
+        -e ORT_LOGGING_LEVEL=3 \
+        -e HF_TOKEN="${HF_TOKEN:-}" \
+        train; then
         log_success "${VARIANT} completed"
         PASSED+=("${VARIANT}")
     else
@@ -224,9 +205,9 @@ done
 # ==============================================================================
 
 echo ""
-log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-log_info "Training Complete"
-log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log_info "=============================================="
+log_info "Training Complete: $(date)"
+log_info "=============================================="
 
 if [ ${#PASSED[@]} -gt 0 ]; then
     log_success "Passed (${#PASSED[@]}/${#VARIANTS[@]}): ${PASSED[*]}"
@@ -234,19 +215,8 @@ fi
 
 if [ ${#FAILED[@]} -gt 0 ]; then
     log_error "Failed (${#FAILED[@]}/${#VARIANTS[@]}): ${FAILED[*]}"
-    echo ""
-    log_warn "Check logs for details:"
-    for variant in "${FAILED[@]}"; do
-        echo "  ${LOG_BASE}/${variant}/"
-    done
     exit 1
 else
-    log_success "All variants trained successfully!"
-    echo ""
-    log_info "Results saved to: ${LOG_BASE}"
-    log_info "Next steps:"
-    log_info "  1. Inspect logs: ls -lh ${LOG_BASE}/*/logs/"
-    log_info "  2. Check metrics: uv run python scripts/analyze_mlflow_runs.py"
-    log_info "  3. Compare SAMv3 vs DynUNet baseline: ./scripts/compare_models.sh"
+    log_success "All SAMv3 variants trained successfully!"
     exit 0
 fi

@@ -40,6 +40,9 @@ COPY --chown=minivess:minivess scripts/ scripts/
 ENV PYTHONPATH=/app/src
 ENV PYTHONUNBUFFERED=1
 
+# Docker context marker — detected by _require_docker_context() in train_flow.py
+ENV DOCKER_CONTAINER=1
+
 # Volume-mapped paths — must match docker-compose.flows.yml volume declarations.
 # Override at runtime via environment section if container mounts differ.
 ENV DATA_DIR=/app/data
@@ -47,5 +50,9 @@ ENV MLFLOW_TRACKING_URI=file:///app/mlruns
 ENV CHECKPOINT_DIR=/app/checkpoints
 ENV LOGS_DIR=/app/logs
 ENV SPLITS_DIR=/app/configs/splits
+
+# HuggingFace token for gated models (SAM3). Pass at runtime:
+#   docker compose run -e HF_TOKEN=$HF_TOKEN train
+# or set in docker-compose.flows.yml environment section.
 
 CMD ["python", "-m", "minivess.orchestration.flows.train_flow"]

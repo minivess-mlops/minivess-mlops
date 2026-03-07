@@ -230,6 +230,16 @@ Each of the 6 Prefect flows runs in its own Docker container:
     Required mounts: `/data` (inputs), `/mlruns` (tracking), `/checkpoints` (model files),
     `/logs` (monitor CSV/JSONL), `/configs` (YAML configs + splits).
     See: `.claude/metalearning/2026-03-06-standalone-script-antipattern.md`
+19. **STOP Protocol Before Execution (Non-Negotiable)** — Before launching ANY training
+    or pipeline execution, verify ALL four checks:
+    - **S**(ource): Running inside Docker container? If not → build/use Docker image first
+    - **T**(racking): Prefect orchestration active? If `PREFECT_DISABLED=1` → REJECT
+    - **O**(utputs): All artifact paths volume-mounted? If repo-relative → REJECT
+    - **P**(rovenance): Reproducible on another machine? If host-env dependent → REJECT
+    If ANY check fails, FIX IT — do not bypass. `_require_docker_context()` in
+    `train_flow.py` enforces (S) at runtime. Escape hatch: `MINIVESS_ALLOW_HOST=1`
+    for pytest ONLY — never in scripts or production.
+    See: `docs/planning/minivess-vision-enforcement-plan.md`
 
 ## What AI Must NEVER Do (Extended)
 
