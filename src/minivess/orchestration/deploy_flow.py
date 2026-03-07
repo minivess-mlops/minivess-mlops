@@ -192,7 +192,7 @@ def promote_task(
 # ---------------------------------------------------------------------------
 
 
-@flow(name="Deploy Pipeline")
+@flow(name="deploy-flow")
 def deploy_flow(
     config: DeployConfig | None = None,
     experiment_id: str = "1",

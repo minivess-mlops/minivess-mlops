@@ -131,7 +131,7 @@ class PostTrainingFlowResult:
     failed_operations: list[str] = field(default_factory=list)
 
 
-@flow(name="Post-Training Pipeline")
+@flow(name="post-training-flow")
 def post_training_flow(
     *,
     config: PostTrainingConfig | None = None,

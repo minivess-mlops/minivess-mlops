@@ -355,7 +355,7 @@ def _compute_dataset_hash(pairs: list[dict[str, str]]) -> str:
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
-@flow(name="minivess-data")
+@flow(name="data-flow")
 def run_data_flow(
     data_dir: Path,
     n_folds: int = 3,

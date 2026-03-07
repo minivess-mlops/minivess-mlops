@@ -289,7 +289,7 @@ def export_metadata(
     return _Path(json_path)
 
 
-@flow(name="minivess-dashboard")
+@flow(name="dashboard-flow")
 def run_dashboard_flow(
     output_dir: Path | None = None,
     *,
