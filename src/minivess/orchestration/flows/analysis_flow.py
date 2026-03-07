@@ -137,7 +137,7 @@ class _EnsembleInferenceWrapper(nn.Module):  # type: ignore[misc]
 
 def _discover_runs(
     eval_config: EvaluationConfig,
-    model_config: dict[str, Any],
+    model_config_dict: dict[str, Any],
     *,
     tracking_uri: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -150,7 +150,7 @@ def _discover_runs(
     ----------
     eval_config:
         Evaluation configuration.
-    model_config:
+    model_config_dict:
         Model architecture configuration.
     tracking_uri:
         Optional MLflow tracking URI override.
@@ -160,7 +160,7 @@ def _discover_runs(
     List of run info dicts, each with keys:
     ``run_id``, ``loss_type``, ``fold_id``, ``artifact_dir``, ``metrics``.
     """
-    builder = EnsembleBuilder(eval_config, model_config, tracking_uri=tracking_uri)
+    builder = EnsembleBuilder(eval_config, model_config_dict, tracking_uri=tracking_uri)
     result: list[dict[str, Any]] = builder.discover_training_runs()
     return result
 
@@ -272,7 +272,7 @@ def _extract_single_models_as_modules(
 
 def _log_single_model_safe(
     run: dict[str, Any],
-    model_config: dict[str, Any],
+    model_config_dict: dict[str, Any],
     eval_config: EvaluationConfig,
 ) -> str | None:
     """Attempt to log a single model as MLflow pyfunc artifact.
@@ -300,7 +300,7 @@ def _log_single_model_safe(
         with mlflow.start_run(run_name=f"pyfunc_{name}"):
             log_single_model(
                 checkpoint_path=ckpt_path,
-                model_config_dict=model_config,
+                model_config_dict=model_config_dict,
             )
             active_run = mlflow.active_run()
             assert active_run is not None
@@ -316,7 +316,7 @@ def _log_single_model_safe(
 
 def _log_ensemble_model_safe(
     ensemble_spec: EnsembleSpec,
-    model_config: dict[str, Any],
+    model_config_dict: dict[str, Any],
     eval_config: EvaluationConfig,
 ) -> str | None:
     """Attempt to log an ensemble model as MLflow pyfunc artifact.
@@ -333,7 +333,7 @@ def _log_ensemble_model_safe(
         with mlflow.start_run(run_name=f"pyfunc_{ensemble_spec.name}"):
             log_ensemble_model(
                 ensemble_spec=ensemble_spec,
-                model_config_dict=model_config,
+                model_config_dict=model_config_dict,
             )
             active_run = mlflow.active_run()
             assert active_run is not None
@@ -395,7 +395,7 @@ def _run_mlflow_eval_safe(
 @task(name="load-training-artifacts")
 def load_training_artifacts(
     eval_config: EvaluationConfig,
-    model_config: dict[str, Any],
+    model_config_dict: dict[str, Any],
     *,
     tracking_uri: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -407,7 +407,7 @@ def load_training_artifacts(
     ----------
     eval_config:
         Evaluation configuration with MLflow experiment name.
-    model_config:
+    model_config_dict:
         Model architecture configuration.
     tracking_uri:
         Optional MLflow tracking URI override.
@@ -419,7 +419,7 @@ def load_training_artifacts(
     log = get_run_logger()
     log.info("Loading training artifacts from MLflow...")
 
-    runs = _discover_runs(eval_config, model_config, tracking_uri=tracking_uri)
+    runs = _discover_runs(eval_config, model_config_dict, tracking_uri=tracking_uri)
 
     log.info(
         "Loaded %d training runs (%d unique losses)",
@@ -487,7 +487,7 @@ def discover_post_training_models(
 def build_ensembles(
     runs: list[dict[str, Any]],
     eval_config: EvaluationConfig,
-    model_config: dict[str, Any],
+    model_config_dict: dict[str, Any],
 ) -> dict[str, EnsembleSpec]:
     """Build all configured ensemble strategies.
 
@@ -500,7 +500,7 @@ def build_ensembles(
         Pre-fetched run info dicts from :func:`load_training_artifacts`.
     eval_config:
         Evaluation configuration with ensemble strategy list.
-    model_config:
+    model_config_dict:
         Model architecture configuration.
 
     Returns
@@ -513,7 +513,7 @@ def build_ensembles(
         len(eval_config.ensemble_strategies),
     )
 
-    builder = EnsembleBuilder(eval_config, model_config)
+    builder = EnsembleBuilder(eval_config, model_config_dict)
     ensembles: dict[str, Any] = builder.build_all(runs)
 
     log.info(
@@ -529,7 +529,7 @@ def log_models_to_mlflow(
     runs: list[dict[str, Any]],
     ensembles: dict[str, EnsembleSpec],
     eval_config: EvaluationConfig,
-    model_config: dict[str, Any],
+    model_config_dict: dict[str, Any],
 ) -> dict[str, str | None]:
     """Log single and ensemble models as MLflow pyfunc artifacts.
 
@@ -545,7 +545,7 @@ def log_models_to_mlflow(
         Built ensemble specifications.
     eval_config:
         Evaluation configuration.
-    model_config:
+    model_config_dict:
         Model architecture configuration.
 
     Returns
@@ -558,14 +558,14 @@ def log_models_to_mlflow(
     # Log individual fold models
     for run in runs:
         name = f"{run['loss_type']}_fold{run['fold_id']}"
-        uri = _log_single_model_safe(run, model_config, eval_config)
+        uri = _log_single_model_safe(run, model_config_dict, eval_config)
         model_uris[name] = uri
         if uri:
             log.info("Logged pyfunc model: %s -> %s", name, uri)
 
     # Log ensemble models
     for ens_name, spec in ensembles.items():
-        uri = _log_ensemble_model_safe(spec, model_config, eval_config)
+        uri = _log_ensemble_model_safe(spec, model_config_dict, eval_config)
         model_uris[ens_name] = uri
         if uri:
             log.info("Logged pyfunc ensemble: %s -> %s", ens_name, uri)
@@ -1455,7 +1455,7 @@ def _export_analysis_artifacts(
 @flow(name="analysis-flow", validate_parameters=False)
 def run_analysis_flow(
     eval_config: EvaluationConfig,
-    model_config: dict[str, Any],
+    model_config_dict: dict[str, Any],
     dataloaders_dict: HierarchicalDataLoaderDict,
     *,
     output_dir: Path | None = None,
@@ -1481,7 +1481,7 @@ def run_analysis_flow(
     ----------
     eval_config:
         :class:`EvaluationConfig` with metric and MLflow settings.
-    model_config:
+    model_config_dict:
         Model architecture configuration dict.
     dataloaders_dict:
         ``{dataset: {subset: DataLoader}}``.
@@ -1515,13 +1515,15 @@ def run_analysis_flow(
             )
 
     # Step 1: Load training artifacts
-    runs = load_training_artifacts(eval_config, model_config, tracking_uri=tracking_uri)
+    runs = load_training_artifacts(
+        eval_config, model_config_dict, tracking_uri=tracking_uri
+    )
 
     # Step 2: Build ensembles
-    ensembles = build_ensembles(runs, eval_config, model_config)
+    ensembles = build_ensembles(runs, eval_config, model_config_dict)
 
     # Step 3: Log models as MLflow pyfunc artifacts
-    model_uris = log_models_to_mlflow(runs, ensembles, eval_config, model_config)
+    model_uris = log_models_to_mlflow(runs, ensembles, eval_config, model_config_dict)
 
     # Step 4: Extract single-fold models from ensemble members
     single_models = _extract_single_models_as_modules(ensembles)

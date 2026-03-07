@@ -335,6 +335,15 @@ class TestGenerateReport:
 class TestRunAnalysisFlow:
     """Tests for run_analysis_flow (the @flow)."""
 
+    @patch("minivess.orchestration.flows.analysis_flow.log_completion_safe")
+    @patch("minivess.orchestration.flows.analysis_flow.find_upstream_safely")
+    @patch("minivess.orchestration.flows.analysis_flow._export_analysis_artifacts")
+    @patch("minivess.orchestration.flows.analysis_flow.tag_champion_models")
+    @patch("minivess.orchestration.flows.analysis_flow.create_analysis_experiment")
+    @patch("minivess.orchestration.flows.analysis_flow.evaluate_with_mlflow")
+    @patch("minivess.orchestration.flows.analysis_flow.log_models_to_mlflow")
+    @patch("minivess.orchestration.flows.analysis_flow.discover_post_training_models")
+    @patch("minivess.orchestration.flows.analysis_flow._validate_analysis_env")
     @patch("minivess.orchestration.flows.analysis_flow.generate_report")
     @patch("minivess.orchestration.flows.analysis_flow.register_champion_task")
     @patch("minivess.orchestration.flows.analysis_flow.generate_comparison")
@@ -349,6 +358,15 @@ class TestRunAnalysisFlow:
         mock_compare: MagicMock,
         mock_register: MagicMock,
         mock_report: MagicMock,
+        mock_validate_env: MagicMock,
+        mock_discover: MagicMock,
+        mock_log_models: MagicMock,
+        mock_mlflow_eval: MagicMock,
+        mock_create_experiment: MagicMock,
+        mock_tag_champions: MagicMock,
+        mock_export_artifacts: MagicMock,
+        mock_find_upstream: MagicMock,
+        mock_log_completion: MagicMock,
     ) -> None:
         """run_analysis_flow returns dict with results, comparison, promotion, report."""
         from minivess.orchestration.flows.analysis_flow import (
@@ -365,6 +383,13 @@ class TestRunAnalysisFlow:
             "promotion_report": "# Report",
         }
         mock_report.return_value = "# Full Report"
+        mock_discover.return_value = []
+        mock_log_models.return_value = {}
+        mock_mlflow_eval.return_value = {}
+        mock_create_experiment.return_value = []
+        mock_tag_champions.return_value = {}
+        mock_export_artifacts.return_value = {}
+        mock_find_upstream.return_value = None
 
         config = _make_eval_config()
         model_config: dict[str, Any] = {"model_name": "DynUNet"}
@@ -382,6 +407,8 @@ class TestRunAnalysisFlow:
             "champion_tags",
             "artifact_paths",
             "post_training_models",
+            "mlflow_run_id",
+            "upstream_training_run_id",
         }
         assert set(result.keys()) == expected_keys
 
@@ -429,6 +456,15 @@ class TestEachTaskIndependentlyCallable:
 class TestAnalysisFlowWithMockData:
     """End-to-end test of the analysis flow with mocked dependencies."""
 
+    @patch("minivess.orchestration.flows.analysis_flow.log_completion_safe")
+    @patch("minivess.orchestration.flows.analysis_flow.find_upstream_safely")
+    @patch("minivess.orchestration.flows.analysis_flow._export_analysis_artifacts")
+    @patch("minivess.orchestration.flows.analysis_flow.tag_champion_models")
+    @patch("minivess.orchestration.flows.analysis_flow.create_analysis_experiment")
+    @patch("minivess.orchestration.flows.analysis_flow.evaluate_with_mlflow")
+    @patch("minivess.orchestration.flows.analysis_flow.log_models_to_mlflow")
+    @patch("minivess.orchestration.flows.analysis_flow.discover_post_training_models")
+    @patch("minivess.orchestration.flows.analysis_flow._validate_analysis_env")
     @patch("minivess.orchestration.flows.analysis_flow.ModelPromoter")
     @patch("minivess.orchestration.flows.analysis_flow.EnsembleBuilder")
     @patch("minivess.orchestration.flows.analysis_flow._discover_runs")
@@ -439,6 +475,15 @@ class TestAnalysisFlowWithMockData:
         mock_discover: MagicMock,
         mock_builder_cls: MagicMock,
         mock_promoter_cls: MagicMock,
+        mock_validate_env: MagicMock,
+        mock_discover_post: MagicMock,
+        mock_log_models: MagicMock,
+        mock_mlflow_eval: MagicMock,
+        mock_create_experiment: MagicMock,
+        mock_tag_champions: MagicMock,
+        mock_export_artifacts: MagicMock,
+        mock_find_upstream: MagicMock,
+        mock_log_completion: MagicMock,
     ) -> None:
         """Full flow executes all tasks and returns complete result."""
         from minivess.orchestration.flows.analysis_flow import (
@@ -471,6 +516,15 @@ class TestAnalysisFlowWithMockData:
         ]
         mock_promoter.generate_promotion_report.return_value = "# Promotion Report"
         mock_promoter_cls.return_value = mock_promoter
+
+        # Setup new mocks
+        mock_discover_post.return_value = []
+        mock_log_models.return_value = {}
+        mock_mlflow_eval.return_value = {}
+        mock_create_experiment.return_value = []
+        mock_tag_champions.return_value = {}
+        mock_export_artifacts.return_value = {}
+        mock_find_upstream.return_value = None
 
         config = _make_eval_config()
         model_config: dict[str, Any] = {"model_name": "DynUNet"}
@@ -676,6 +730,13 @@ class TestEvaluateWithMlflow:
 class TestUpdatedFlowWithMlflowSteps:
     """Tests for the updated run_analysis_flow with MLflow steps."""
 
+    @patch("minivess.orchestration.flows.analysis_flow.log_completion_safe")
+    @patch("minivess.orchestration.flows.analysis_flow.find_upstream_safely")
+    @patch("minivess.orchestration.flows.analysis_flow._export_analysis_artifacts")
+    @patch("minivess.orchestration.flows.analysis_flow.tag_champion_models")
+    @patch("minivess.orchestration.flows.analysis_flow.create_analysis_experiment")
+    @patch("minivess.orchestration.flows.analysis_flow.discover_post_training_models")
+    @patch("minivess.orchestration.flows.analysis_flow._validate_analysis_env")
     @patch("minivess.orchestration.flows.analysis_flow.generate_report")
     @patch("minivess.orchestration.flows.analysis_flow.register_champion_task")
     @patch("minivess.orchestration.flows.analysis_flow.generate_comparison")
@@ -694,6 +755,13 @@ class TestUpdatedFlowWithMlflowSteps:
         mock_compare: MagicMock,
         mock_register: MagicMock,
         mock_report: MagicMock,
+        mock_validate_env: MagicMock,
+        mock_discover: MagicMock,
+        mock_create_experiment: MagicMock,
+        mock_tag_champions: MagicMock,
+        mock_export_artifacts: MagicMock,
+        mock_find_upstream: MagicMock,
+        mock_log_completion: MagicMock,
     ) -> None:
         """Updated flow calls log_models_to_mlflow and evaluate_with_mlflow."""
         from minivess.orchestration.flows.analysis_flow import (
@@ -712,6 +780,11 @@ class TestUpdatedFlowWithMlflowSteps:
             "promotion_report": "# Report",
         }
         mock_report.return_value = "# Full Report"
+        mock_discover.return_value = []
+        mock_create_experiment.return_value = []
+        mock_tag_champions.return_value = {}
+        mock_export_artifacts.return_value = {}
+        mock_find_upstream.return_value = None
 
         config = _make_eval_config()
         model_config: dict[str, Any] = {"model_name": "DynUNet"}
