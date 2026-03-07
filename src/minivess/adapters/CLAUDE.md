@@ -16,6 +16,20 @@ Gate is enforced by `check_sam3_vram(variant, mode)` in `sam3_vram_check.py`.
 - `mode="inference"` → 6 GB gate → V1, V3
 - `mode="training"` → 16 GB gate → V2
 
+### Validation ROI Size ≠ Training Patch Size (Critical for Speed)
+
+The ViT-32L encoder always resizes input to 1008×1008 regardless of spatial size.
+A 64×64 patch costs the **same** encoder compute as a 512×512 patch.
+But with patch=(64,64,3), a 512×512 volume creates 11×11=121 spatial windows.
+
+**Training patches** (64,64,3): small crops for data augmentation + batch diversity.
+**Validation ROI** (512,512,3): full-slice windows to minimize encoder calls.
+
+With (512,512,3) validation: ~27 windows per 512×512×61 vol → ~4 min total validation.
+With (64,64,3) validation: ~3267 windows per volume → ~6 hours total validation.
+
+This is set in `train_flow.py` via separate `val_roi` for SAM3 models.
+
 ### SDPA is Non-Negotiable (Verified 2026-03-07)
 
 Without SDPA, the ViT-32L encoder materializes 5184×5184 attention matrices per head
@@ -54,18 +68,18 @@ and fixed on 2026-03-07.
 |------|-----------|------------|-----------|
 | V1 Vanilla training step (B=4, D=3) | 2.9 GB | ~3s | ✅ Yes |
 | V1 Vanilla training epoch (47 vols) | 3.5 GB | ~8 min | ✅ Yes |
-| V1 Vanilla validation (512×512×61, SW) | 3.6 GB | ~60 min | ⚠️ Slow |
+| V1 Vanilla validation (512×512×61, SW, roi=512²) | 3.6 GB | ~15 s/vol | ✅ Yes |
 | V2 TopoLoRA | — | — | ❌ No (OOM) |
 
-Validation is slow because sliding_window_inference creates ~3300 windows
-per volume (patch=(64,64,3), overlap=0.25), each requiring 3 encoder passes.
-Mitigated by `val_interval=25` (validate every 25 epochs).
+Validation uses `val_roi_size=(512,512,3)` (full-slice), reducing windows from
+~3300 to ~27 per volume. The encoder costs the same per-window (always 1008×1008),
+so larger ROI is strictly better. `val_interval=10` (validate every 10 epochs).
 
 ### Multi-Environment Compute (CPU / Consumer GPU / Cloud)
 
 | Variant | CPU (64 GB RAM) | RTX 2070 Super (8 GB) | A100-40GB |
 |---------|----------------|----------------------|-----------|
-| V1 Vanilla (50 ep × 3 fold) | ~30 days | **~18 h** (val_interval=25) | ~4 h |
+| V1 Vanilla (50 ep × 3 fold) | ~30 days | **~4-6 h** (val_roi=512², val_interval=10) | ~2 h |
 | V2 TopoLoRA | 470 days | OOM | **38 h** |
 | V3 Hybrid | TBD | TBD | TBD |
 

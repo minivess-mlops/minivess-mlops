@@ -28,6 +28,7 @@ export CHECKPOINT_DIR=checkpoints
 export MLFLOW_TRACKING_URI=mlruns
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export HF_HUB_DISABLE_PROGRESS_BARS=1
+export PYTHONUNBUFFERED=1
 
 # Suppress non-actionable warnings (CLAUDE.md Core Principle #7)
 export ORT_LOGGING_LEVEL=3
@@ -50,10 +51,12 @@ echo "Prefect: DISABLED (local dev run — MLflow logging only)"
 echo "============================"
 
 uv run python -c "
-import warnings, os
+import warnings, os, logging
 os.environ.setdefault('ORT_LOGGING_LEVEL', '3')
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', message='.*cuda.cudart.*')
+warnings.filterwarnings('ignore', message='.*non-tuple sequence for multidimensional.*')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 
 from minivess.orchestration.flows.train_flow import training_flow
 result = training_flow(

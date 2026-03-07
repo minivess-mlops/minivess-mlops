@@ -232,7 +232,7 @@ def train_one_fold_task(
     # on RTX 2070 Super) because each window requires 3 encoder forward passes
     # through the 454M-param ViT-32L. Validate every 10 epochs to keep training
     # practical (50 epochs × 3 folds ≈ 16h with val_interval=10, vs 300h without).
-    val_interval = 25 if _is_sam3 and not debug else 1
+    val_interval = 10 if _is_sam3 and not debug else 1
     training_config = TrainingConfig(
         max_epochs=1 if debug else max_epochs,
         num_folds=num_folds,
@@ -300,14 +300,21 @@ def train_one_fold_task(
     tracker = ExperimentTracker(exp_config, tracking_uri=tracking_uri)
 
     _is_sam3 = model_family_str.startswith("sam3_")
+    # SAM3 validation: use full-slice ROI (512,512,3) instead of training
+    # patch (64,64,3). The ViT-32L encoder always resizes to 1008×1008
+    # regardless of input size, so larger patches cost the same per-window
+    # but reduce window count by ~121× (11×11 spatial grid eliminated).
+    # sw_batch_size=1 for SAM3 to keep VRAM low with large validation patches.
+    val_roi = (512, 512, 3) if _is_sam3 else data_config.patch_size
+    val_sw_batch = 1 if _is_sam3 else 4
     trainer = SegmentationTrainer(
         model,
         training_config,
         device=device_str,
         metrics=metrics,
         criterion=criterion,
-        val_roi_size=data_config.patch_size,
-        sw_batch_size=4,
+        val_roi_size=val_roi,
+        sw_batch_size=val_sw_batch,
         fold_label=f"f #{fold_id + 1}/{num_folds}",
         tracker=tracker,
     )
