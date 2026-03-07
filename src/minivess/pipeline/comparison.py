@@ -523,6 +523,96 @@ def cohens_d(
     return mean_diff / s_pooled
 
 
+def cliffs_delta(
+    scores_a: NDArray[np.floating],
+    scores_b: NDArray[np.floating],
+) -> float:
+    """Compute Cliff's delta non-parametric effect size.
+
+    .. math::
+
+        \\delta = \\frac{\\sum_{i,j} \\text{sign}(a_i - b_j)}{n_a \\cdot n_b}
+
+    Parameters
+    ----------
+    scores_a:
+        Per-sample scores for method A (1-D array).
+    scores_b:
+        Per-sample scores for method B (1-D array).
+
+    Returns
+    -------
+    float
+        Cliff's delta in [-1, 1].
+
+    References
+    ----------
+    Vargha and Delaney (2000).
+    """
+    a = np.asarray(scores_a, dtype=float)
+    b = np.asarray(scores_b, dtype=float)
+    return float(np.mean(np.sign(a[:, None] - b[None, :])))
+
+
+def vargha_delaney_a(
+    scores_a: NDArray[np.floating],
+    scores_b: NDArray[np.floating],
+) -> float:
+    """Compute Vargha-Delaney A (common language effect size).
+
+    VDA = (Cliff's delta + 1) / 2. Values > 0.5 favour A; < 0.5 favour B.
+
+    Parameters
+    ----------
+    scores_a:
+        Per-sample scores for method A (1-D array).
+    scores_b:
+        Per-sample scores for method B (1-D array).
+
+    Returns
+    -------
+    float
+        VDA in [0, 1].
+
+    References
+    ----------
+    Vargha and Delaney (2000).
+    """
+    return (cliffs_delta(scores_a, scores_b) + 1.0) / 2.0
+
+
+def interpret_cliffs_delta(d: float) -> str:
+    """Interpret Cliff's delta magnitude.
+
+    Thresholds from Vargha and Delaney (2000):
+    |d| < 0.147: negligible, < 0.33: small, < 0.474: medium, else: large.
+    """
+    d_abs = abs(d)
+    if d_abs < 0.147:
+        return "negligible"
+    if d_abs < 0.33:
+        return "small"
+    if d_abs < 0.474:
+        return "medium"
+    return "large"
+
+
+def interpret_vda(a: float) -> str:
+    """Interpret Vargha-Delaney A magnitude.
+
+    Converted from Cliff's delta thresholds:
+    |A - 0.5| < 0.0735: negligible, < 0.165: small, < 0.237: medium, else: large.
+    """
+    deviation = abs(a - 0.5)
+    if deviation < 0.0735:
+        return "negligible"
+    if deviation < 0.165:
+        return "small"
+    if deviation < 0.237:
+        return "medium"
+    return "large"
+
+
 @dataclass
 class PairwiseComparison:
     """Result of a single pairwise comparison between two loss functions.

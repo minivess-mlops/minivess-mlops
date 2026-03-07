@@ -57,11 +57,11 @@ class TestFlowTriggerResult:
 class TestPipelineTriggerChain:
     """PipelineTriggerChain orchestrates flow execution."""
 
-    def test_chain_has_8_flows(self) -> None:
+    def test_chain_has_9_flows(self) -> None:
         from minivess.orchestration.trigger import PipelineTriggerChain
 
         chain = PipelineTriggerChain()
-        assert len(chain.flow_names) == 8
+        assert len(chain.flow_names) == 9
 
     def test_chain_order(self) -> None:
         from minivess.orchestration.trigger import PipelineTriggerChain
@@ -73,6 +73,7 @@ class TestPipelineTriggerChain:
             "train",
             "post_training",
             "analyze",
+            "biostatistics",
             "deploy",
             "dashboard",
             "qa",
@@ -87,6 +88,16 @@ class TestPipelineTriggerChain:
         names = chain.flow_names
         assert names.index("post_training") == names.index("train") + 1
         assert names.index("post_training") == names.index("analyze") - 1
+
+    def test_biostatistics_position_and_best_effort(self) -> None:
+        """biostatistics should be after analyze, best-effort."""
+        from minivess.orchestration.trigger import PipelineTriggerChain
+
+        chain = PipelineTriggerChain()
+        names = chain.flow_names
+        assert names.index("biostatistics") == names.index("analyze") + 1
+        # Verify it's best-effort (not core)
+        assert chain._flows["biostatistics"].is_core is False
 
     def test_post_training_is_best_effort(self) -> None:
         """post_training failure should NOT stop downstream core flows."""
@@ -138,7 +149,13 @@ class TestPipelineTriggerChain:
         results_by_name = {r.flow_name: r for r in results}
         assert results_by_name["data"].status == "failed"
         # Subsequent core flows should be skipped; best-effort flows still run
-        best_effort = {"acquisition", "post_training", "dashboard", "qa"}
+        best_effort = {
+            "acquisition",
+            "post_training",
+            "biostatistics",
+            "dashboard",
+            "qa",
+        }
         for r in results:
             if r.flow_name not in best_effort and r.flow_name != "data":
                 assert r.status == "skipped", f"{r.flow_name} should be skipped"
