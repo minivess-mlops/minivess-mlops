@@ -243,6 +243,21 @@ def train_one_fold_task(
         device=device_str,
     )
 
+    # Create ExperimentTracker for per-fold MLflow epoch-level logging
+    from minivess.config.models import ExperimentConfig
+    from minivess.observability.tracking import ExperimentTracker
+
+    tracking_uri: str = config.get("tracking_uri", "mlruns")
+    experiment_name: str = config.get("experiment_name", "minivess_training")
+    exp_config = ExperimentConfig(
+        experiment_name=experiment_name,
+        run_name=f"fold_{fold_id}_{loss_name}",
+        data=data_config,
+        model=model_config,
+        training=training_config,
+    )
+    tracker = ExperimentTracker(exp_config, tracking_uri=tracking_uri)
+
     _is_sam3 = model_family_str.startswith("sam3_")
     trainer = SegmentationTrainer(
         model,
@@ -253,10 +268,14 @@ def train_one_fold_task(
         val_roi_size=data_config.patch_size,
         sw_batch_size=1 if _is_sam3 else 4,
         fold_label=f"f #{fold_id + 1}/{num_folds}",
+        tracker=tracker,
     )
 
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    return trainer.fit(train_loader, val_loader, checkpoint_dir=checkpoint_dir)
+    with tracker.start_run(tags={"fold_id": str(fold_id), "loss_name": loss_name}):
+        return trainer.fit(
+            train_loader, val_loader, checkpoint_dir=checkpoint_dir, fold_id=fold_id
+        )
 
 
 @task(name="log-fold-results")

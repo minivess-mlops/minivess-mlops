@@ -459,6 +459,10 @@ class SegmentationTrainer:
         history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
         final_epoch = 0
         ckpt_cfg = self.config.checkpoint
+        # Capture MLflow run ID from tracker (if active) for return dict
+        _active_run_id: str | None = (
+            self.tracker.run_id if self.tracker is not None else None
+        )
         epoch_start_time = time.perf_counter()
 
         # Determine if extended metrics (MetricsReloaded) are needed
@@ -710,4 +714,5 @@ class SegmentationTrainer:
                 tracker.name: tracker.best_value
                 for tracker in self._multi_tracker.trackers
             },
+            "mlflow_run_id": _active_run_id,
         }
