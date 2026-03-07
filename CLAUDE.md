@@ -251,6 +251,15 @@ Each of the 6 Prefect flows runs in its own Docker container:
     changes" is BANNED — every failure in this repo was co-authored by Claude Code
     and is therefore Claude Code's responsibility.
     See: `.claude/metalearning/2026-03-07-silent-existing-failures.md`
+21. **No Automatic GitHub Actions CI (Non-Negotiable)** — GitHub Actions workflows
+    MUST NOT trigger automatically on push or pull_request until the repo is
+    submission-ready. Actions consume credits. All validation runs LOCALLY via:
+    - Pre-commit hooks (ruff, mypy, test collection gate)
+    - `scripts/pr_readiness_check.sh` (full suite before PR creation)
+    CI workflows may only use `workflow_dispatch` (manual trigger) until the user
+    explicitly lifts this ban. NEVER add `on: push` or `on: pull_request` triggers
+    to workflows without user approval. The Docker build gate is the only exception
+    (runs only on Dockerfile/dependency changes, not on every push).
 
 ## What AI Must NEVER Do (Extended)
 
@@ -269,6 +278,8 @@ Each of the 6 Prefect flows runs in its own Docker container:
 - Dismiss test failures as "pre-existing" or "not related to current changes" without
   creating a GitHub issue — every observed failure needs immediate action.
 - Say "separate issue" without creating the issue in the same response.
+- Add automatic `on: push` or `on: pull_request` triggers to GitHub Actions workflows
+  without explicit user approval — Actions consume credits and are banned until submission.
 
 ## TDD Workflow (Non-Negotiable)
 

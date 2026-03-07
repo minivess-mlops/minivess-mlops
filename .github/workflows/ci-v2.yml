@@ -1,11 +1,22 @@
+# CI v2 — DISABLED until submission-ready.
+#
+# All validation runs LOCALLY via:
+#   - Pre-commit hooks (ruff, mypy, test collection gate)
+#   - scripts/pr_readiness_check.sh (full suite before PR)
+#
+# GitHub Actions consume credits and are banned until the repo is
+# submission-ready. See CLAUDE.md Rule #21.
+#
+# When re-enabled, this workflow will run:
+#   1. Lint & Format (ruff)
+#   2. Type Check (mypy)
+#   3. Unit Tests (tests/unit/)
+#   4. Test Collection Gate (verify all test files import)
+
 name: CI v2
 
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
+  workflow_dispatch:  # Manual trigger only — no automatic runs
 
 permissions:
   contents: read
