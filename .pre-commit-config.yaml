@@ -61,6 +61,16 @@ repos:
         pass_filenames: false
         always_run: false
 
+  - repo: local
+    hooks:
+      - id: test-collection-gate
+        name: Test Collection Gate (import check)
+        entry: uv run pytest --collect-only -q tests/unit/ tests/v2/unit/
+        language: system
+        pass_filenames: false
+        always_run: false
+        files: '(\.py$|pyproject\.toml|uv\.lock)'
+
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.22.1
     hooks:

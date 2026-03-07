@@ -240,6 +240,17 @@ Each of the 6 Prefect flows runs in its own Docker container:
     `train_flow.py` enforces (S) at runtime. Escape hatch: `MINIVESS_ALLOW_HOST=1`
     for pytest ONLY — never in scripts or production.
     See: `docs/planning/minivess-vision-enforcement-plan.md`
+20. **Zero Tolerance for Observed Failures (Non-Negotiable)** — Every test failure,
+    import error, or warning encountered during a session MUST result in one of:
+    (a) **Fixed immediately** if root cause is clear and fix is < 5 minutes
+    (b) **GitHub issue created** with root cause, affected files, and priority label
+    (c) **Explicitly reported to user** with recommendation
+    "Pre-existing" is NOT a valid classification. "Not related to current changes"
+    is NOT an excuse to move on. "Separate issue" without actually creating the
+    issue within the same response is a lie. The phrase "not related to current
+    changes" is BANNED — every failure in this repo was co-authored by Claude Code
+    and is therefore Claude Code's responsibility.
+    See: `.claude/metalearning/2026-03-07-silent-existing-failures.md`
 
 ## What AI Must NEVER Do (Extended)
 
@@ -255,6 +266,9 @@ Each of the 6 Prefect flows runs in its own Docker container:
 - Suggest `python scripts/*.py` as a training or pipeline run command — use Prefect flows.
 - Use `/tmp` or `tempfile.mkdtemp()` for artifacts that must survive Docker container exit.
 - Offer a standalone-script shortcut while a GitHub issue to "fix it properly" is open.
+- Dismiss test failures as "pre-existing" or "not related to current changes" without
+  creating a GitHub issue — every observed failure needs immediate action.
+- Say "separate issue" without creating the issue in the same response.
 
 ## TDD Workflow (Non-Negotiable)
 
