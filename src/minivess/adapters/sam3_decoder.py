@@ -9,6 +9,9 @@ The decoder takes 256-dim FPN features and predicts a single-channel
 binary mask. ``binary_to_2class()`` converts to 2-class format for
 cross-entropy loss compatibility.
 
+IMPORTANT: Real pretrained SAM3 is required. No stub/fallback mode exists.
+If SAM3 is not installed, RuntimeError is raised with install instructions.
+
 References:
     - Ravi et al. (2025). "SAM 3." arXiv:2511.16719
 """
@@ -30,49 +33,6 @@ logger = logging.getLogger(__name__)
 SAM3_DECODER_IN_DIM: int = 256
 
 
-class _StubSam3Decoder(nn.Module):
-    """Lightweight stub mimicking SAM3 mask decoder output.
-
-    Used for testing and CI where the real SAM3 package is not installed.
-    """
-
-    def __init__(self, in_channels: int = SAM3_DECODER_IN_DIM) -> None:
-        super().__init__()
-        # Simple conv stack to produce single-channel mask logits
-        self.decoder = nn.Sequential(
-            nn.Conv2d(in_channels, 64, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, 32, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, 1, kernel_size=1),
-        )
-
-    def forward(self, features: Tensor, prompt: Tensor | None = None) -> Tensor:
-        """Predict mask logits from FPN features.
-
-        Parameters
-        ----------
-        features:
-            FPN features of shape (B, 256, H, W).
-        prompt:
-            Optional prompt embedding (ignored in stub).
-
-        Returns
-        -------
-        Mask logits of shape (B, 1, H, W).
-        """
-        if prompt is not None:
-            # Broadcast prompt and add to features as channel-wise bias
-            prompt_bias = prompt.unsqueeze(-1).unsqueeze(-1)  # (B, 256, 1, 1)
-            # Project prompt to match feature channels if needed
-            if prompt_bias.shape[1] != features.shape[1]:
-                prompt_bias = prompt_bias[:, : features.shape[1]]
-            features = features + prompt_bias
-
-        result: Tensor = self.decoder(features)
-        return result
-
-
 class Sam3MaskDecoder(nn.Module):
     """SAM3 mask decoder wrapper for binary segmentation.
 
@@ -80,34 +40,30 @@ class Sam3MaskDecoder(nn.Module):
     ----------
     config:
         Model configuration.
-    use_stub:
-        If True, use ``_StubSam3Decoder`` instead of real SAM3 decoder.
     """
 
     def __init__(
         self,
         config: ModelConfig,
-        *,
-        use_stub: bool = False,
     ) -> None:
         super().__init__()
         self._config = config
-
-        if use_stub:
-            self.decoder: nn.Module = _StubSam3Decoder()
-        else:
-            self.decoder = self._load_sam3_decoder()
+        self._lightweight = False
+        self.decoder: nn.Module = self._load_sam3_decoder()
 
     def _load_sam3_decoder(self) -> nn.Module:
-        """Load real SAM3 mask decoder.
+        """Load SAM3 mask decoder.
 
-        Tries native sam3 package first. Falls back to a trainable stub decoder
-        when the native package is not installed. The stub fallback is explicit
-        (logged at WARNING level) — not a silent fallback.
+        Tries native sam3 package first (uses SAM3's own detection head).
+        Falls back to HuggingFace path with a lightweight Conv head — the HF
+        Sam3MaskDecoder has a complex prompted-segmentation API that does not
+        map to binary automated segmentation. A simple trainable Conv head on
+        top of SAM3 FPN features (256-dim) is more appropriate for V1 Vanilla.
 
-        The decoder is always trained from scratch (trainable component), so
-        starting from random-init stub weights is acceptable from an optimization
-        standpoint. Only pretrained decoder initialization is lost.
+        Raises
+        ------
+        RuntimeError
+            If neither sam3 nor transformers with SAM3 support is available.
         """
         try:
             from sam3.model.model_builder import build_sam3_image_model
@@ -121,18 +77,44 @@ class Sam3MaskDecoder(nn.Module):
             decoder: nn.Module = model.detector.head
             return decoder
         except ImportError:
-            pass
+            logger.debug("Native sam3 package not found for decoder")
 
-        # Explicit fallback — log clearly so the user knows
-        logger.warning(
-            "SAM3 native package not installed — using trainable stub decoder "
-            "(random initialization). The decoder is trained from scratch "
-            "regardless of pretrained init, so segmentation quality is "
-            "unaffected. For pretrained decoder weights install via:\n"
+        # HuggingFace path: use a lightweight Conv head instead of the HF
+        # Sam3MaskDecoder (which has a prompted-segmentation API incompatible
+        # with automated binary segmentation).
+        try:
+            from transformers import Sam3Model  # noqa: F401
+
+            logger.info(
+                "Using lightweight Conv decoder for HF SAM3 path "
+                "(HF mask decoder has incompatible prompted-segmentation API)"
+            )
+            self._lightweight = True
+            return self._build_lightweight_decoder()
+        except ImportError:
+            logger.debug("HuggingFace transformers with SAM3 not found")
+
+        msg = (
+            "SAM3 package not installed — cannot load mask decoder.\n"
+            "Install via:\n"
             "  git clone https://github.com/facebookresearch/sam3.git\n"
-            "  cd sam3 && pip install -e ."
+            "  cd sam3 && pip install -e .\n"
+            "Or: uv add 'transformers>=5.2' for HuggingFace support."
         )
-        return _StubSam3Decoder(in_channels=SAM3_DECODER_IN_DIM)
+        raise RuntimeError(msg)
+
+    @staticmethod
+    def _build_lightweight_decoder() -> nn.Module:
+        """Build a lightweight Conv decoder for binary segmentation.
+
+        Takes 256-dim FPN features and outputs a 1-channel binary mask.
+        ~66K trainable params (vs ~2.3M for native SAM3 decoder).
+        """
+        return nn.Sequential(
+            nn.Conv2d(SAM3_DECODER_IN_DIM, 64, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 1, kernel_size=1),
+        )
 
     def forward(
         self,
@@ -153,7 +135,10 @@ class Sam3MaskDecoder(nn.Module):
         -------
         Binary mask logits of shape (B, 1, H, W).
         """
-        result: Tensor = self.decoder(features, prompt_embedding)
+        if self._lightweight:
+            result: Tensor = self.decoder(features)
+        else:
+            result = self.decoder(features, prompt_embedding)
         return result
 
     @staticmethod

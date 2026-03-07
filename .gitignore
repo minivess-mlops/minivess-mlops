@@ -57,3 +57,7 @@ docs/snapshots/*.zip
 
 # DuckDB databases — regenerable from mlruns via scripts/export_duckdb_parquet.py
 outputs/**/*.duckdb
+configs/splits/splits.json
+checkpoints/
+*.log
+sam3_training.log

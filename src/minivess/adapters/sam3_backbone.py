@@ -14,7 +14,10 @@ Two loading modes:
     1. Native: ``build_sam3_image_model()`` from sam3 package (git clone)
     2. HuggingFace: ``Sam3Model.from_pretrained("facebook/sam3")``
 
-Provides ``_StubSam3Encoder`` for testing without SAM3 installed.
+IMPORTANT: Real pretrained weights are ALWAYS required. There is no stub mode.
+GPU VRAM is enforced per-variant before loading (see sam3_vram_check.py):
+  - Frozen encoder (V1, V3): ≥6 GB (inference mode)
+  - LoRA training (V2): ≥16 GB (training mode)
 
 References:
     - Ravi et al. (2025). "SAM 3." arXiv:2511.16719
@@ -53,109 +56,12 @@ SAM3_FEATURE_MAP_SIZE: int = SAM3_INPUT_SIZE // SAM3_PATCH_SIZE  # 72
 
 
 # ---------------------------------------------------------------------------
-# Stub encoder for testing without SAM3 package
-# ---------------------------------------------------------------------------
-class _StubMLP(nn.Module):
-    """Stub MLP mimicking a transformer block FFN.
-
-    Real SAM3 has transformer blocks with ``mlp.lin1`` and ``mlp.lin2``
-    (nn.Linear layers). This stub provides the same structure so LoRA
-    can target these layers during testing.
-    """
-
-    def __init__(self, embed_dim: int) -> None:
-        super().__init__()
-        self.lin1 = nn.Linear(embed_dim, embed_dim)
-        self.lin2 = nn.Linear(embed_dim, embed_dim)
-
-    def forward(self, x: Tensor) -> Tensor:
-        """MLP forward: lin1 → GELU → lin2 (residual)."""
-        # x: (B, C, H, W) → permute to (B, H, W, C) for Linear
-        x_perm = x.permute(0, 2, 3, 1)
-        h = torch.nn.functional.gelu(self.lin1(x_perm))
-        out = self.lin2(h)
-        result: Tensor = (x_perm + out).permute(0, 3, 1, 2)
-        return result
-
-
-class _StubSam3Encoder(nn.Module):
-    """Lightweight stub mimicking SAM3 ViT-32L output shape.
-
-    Used for testing and CI where the real SAM3 package is not installed.
-    Produces random features with the correct output dimensions.
-
-    Includes a single ``_StubMLP`` block with ``mlp.lin1``/``mlp.lin2``
-    so that LoRA adapters can target Linear layers (matching the real SAM3
-    transformer block structure).
-    """
-
-    def __init__(self, embed_dim: int = SAM3_EMBED_DIM) -> None:
-        super().__init__()
-        self.embed_dim = embed_dim
-        self.feature_map_size = SAM3_FEATURE_MAP_SIZE
-        # Minimal conv to produce features with correct shape
-        self.proj = nn.Conv2d(
-            3, embed_dim, kernel_size=SAM3_PATCH_SIZE, stride=SAM3_PATCH_SIZE
-        )
-        # Stub MLP block — provides Linear layers for LoRA targeting
-        self.mlp = _StubMLP(embed_dim)
-
-    def forward(self, x: Tensor) -> Tensor:
-        """Extract stub features at native input resolution.
-
-        Parameters
-        ----------
-        x:
-            Input tensor. Accepts (B, 1, H, W) or (B, 3, H, W).
-            Operates at native resolution (no 1008x1008 upscale) to save VRAM.
-            Feature spatial size = H // patch_size × W // patch_size.
-
-        Returns
-        -------
-        Feature tensor of shape (B, embed_dim, H // 14, W // 14).
-        """
-        # Grayscale → 3-channel
-        if x.shape[1] == 1:
-            x = x.expand(-1, 3, -1, -1)
-
-        # NOTE: No resize to 1008x1008 — stub operates at native resolution.
-        # Real SAM3 encoder expects 1008x1008 (handled by _preprocess),
-        # but the stub should be lightweight for testing/CI.
-
-        # Project to feature space via patch embedding
-        features = self.proj(x)
-        # Apply stub MLP (provides Linear targets for LoRA)
-        result: Tensor = self.mlp(features)
-        return result
-
-
-# ---------------------------------------------------------------------------
-# Stub FPN neck for testing
-# ---------------------------------------------------------------------------
-class _StubFPNNeck(nn.Module):
-    """Lightweight stub mimicking SAM3 FPN neck output."""
-
-    def __init__(
-        self,
-        in_channels: int = SAM3_EMBED_DIM,
-        out_channels: int = SAM3_FPN_DIM,
-    ) -> None:
-        super().__init__()
-        self.proj = nn.Conv2d(in_channels, out_channels, kernel_size=1)
-
-    def forward(self, x: Tensor) -> Tensor:
-        """Project ViT features to FPN dimension."""
-        result: Tensor = self.proj(x)
-        return result
-
-
-# ---------------------------------------------------------------------------
 # Sam3Backbone
 # ---------------------------------------------------------------------------
 class Sam3Backbone(nn.Module):
     """SAM3 perception encoder wrapper for feature extraction.
 
-    Wraps either the real SAM3 ViT-32L encoder or a stub for testing.
+    Wraps the real SAM3 ViT-32L encoder (pretrained weights required).
     Provides methods for:
     - Single-image feature extraction (2D)
     - Volume feature extraction (slice-by-slice, 3D)
@@ -165,36 +71,40 @@ class Sam3Backbone(nn.Module):
     ----------
     config:
         Model configuration.
-    use_stub:
-        If True, use ``_StubSam3Encoder`` instead of real SAM3.
     freeze:
         If True (default), freeze all encoder parameters.
+    input_size:
+        SAM3 input resolution. Default 1008 (native). Use 504 for 8 GB GPUs
+        to reduce attention memory by ~4x (1296 vs 5184 tokens). Must be
+        divisible by SAM3_PATCH_SIZE (14).
     """
 
     def __init__(
         self,
         config: ModelConfig,
         *,
-        use_stub: bool = False,
         freeze: bool = True,
+        input_size: int | None = None,
     ) -> None:
         super().__init__()
         self._config = config
         self._embed_dim = SAM3_EMBED_DIM
         self._fpn_dim = SAM3_FPN_DIM
         self._frozen = freeze
-        self._use_stub = use_stub
+        # Allow override from config or constructor for 8 GB GPUs.
+        # Auto-detect: if VRAM < 10 GB and no explicit size, use 504 (half res).
+        explicit_size = input_size or config.architecture_params.get(
+            "sam3_input_size", None
+        )
+        if explicit_size is not None:
+            self._input_size = explicit_size
+        else:
+            self._input_size = self._auto_input_size()
 
         self.encoder: nn.Module
         self.fpn_neck: nn.Module
 
-        if use_stub:
-            self.encoder = _StubSam3Encoder(embed_dim=self._embed_dim)
-            self.fpn_neck = _StubFPNNeck(
-                in_channels=self._embed_dim, out_channels=self._fpn_dim
-            )
-        else:
-            self.encoder, self.fpn_neck = self._load_sam3_encoder()
+        self.encoder, self.fpn_neck = self._load_sam3_encoder()
 
         if freeze:
             self._freeze_encoder()
@@ -208,6 +118,15 @@ class Sam3Backbone(nn.Module):
     def fpn_channels(self) -> int:
         """FPN neck output dimension (256)."""
         return self._fpn_dim
+
+    @staticmethod
+    def _auto_input_size() -> int:
+        """Return native SAM3 input size (1008).
+
+        Always uses full resolution. For 8 GB GPUs, the encoder runs on CPU
+        instead of reducing resolution (RoPE is fixed for 72×72 tokens).
+        """
+        return SAM3_INPUT_SIZE
 
     def _freeze_encoder(self) -> None:
         """Freeze all encoder parameters."""
@@ -249,7 +168,7 @@ class Sam3Backbone(nn.Module):
             fpn_neck = model.detector.backbone  # neck is part of backbone
             return encoder, fpn_neck
         except ImportError:
-            pass
+            logger.debug("Native sam3 package not found, trying HuggingFace")
 
         try:
             from transformers import Sam3Model
@@ -258,14 +177,26 @@ class Sam3Backbone(nn.Module):
 
             logger.info("Loading SAM3 via HuggingFace transformers")
             token = get_hf_token()
-            model = Sam3Model.from_pretrained(SAM3_HF_MODEL_ID, token=token)
+            # Load with SDPA attention — avoids materializing 5184×5184 attention
+            # matrices per head, reducing encoder peak VRAM from ~7 GB to ~1.1 GB.
+            # This makes SAM3 training feasible on 8 GB consumer GPUs.
+            # FP16 for GPU (918 MB weights vs 1.8 GB FP32).
+            model = Sam3Model.from_pretrained(
+                SAM3_HF_MODEL_ID,
+                token=token,
+                torch_dtype=torch.float16,
+                device_map="cpu",
+                attn_implementation="sdpa",
+            )
             # The HF vision_encoder already integrates ViT backbone + FPN neck
             # (confirmed by LoRA targeting backbone.layers.* and neck.fpn_layers.*).
             # Use Identity as the separate neck — FPN is already inside the encoder.
             hf_encoder: nn.Module = model.vision_encoder
+            # Discard the rest of the model (text encoder, DETR, etc.)
+            del model
             return hf_encoder, nn.Identity()
         except ImportError:
-            pass
+            logger.debug("HuggingFace transformers with SAM3 not found")
 
         msg = (
             "SAM3 package not available. Install via:\n"
@@ -278,27 +209,35 @@ class Sam3Backbone(nn.Module):
     def _preprocess(self, x: Tensor) -> Tensor:
         """Preprocess input for SAM3.
 
-        Handles grayscale→3ch expansion, resize to 1008, and normalization.
-        Stub mode skips the expensive 1008x1008 resize to save VRAM.
+        Handles grayscale→3ch expansion, resize to 1008×1008, and normalization.
+        Converts MONAI MetaTensor to plain Tensor to avoid __torch_function__
+        dispatch overhead inside the ViT encoder.
         """
+        # Strip MONAI MetaTensor wrapper (saves memory + avoids dispatch overhead)
+        if hasattr(x, "as_tensor"):
+            x = x.as_tensor()
+
         # Grayscale → 3-channel
         if x.shape[1] == 1:
             x = x.expand(-1, 3, -1, -1)
 
-        # Resize to SAM3 input size (skip for stub — saves VRAM)
-        if not self._use_stub and (
-            x.shape[2] != SAM3_INPUT_SIZE or x.shape[3] != SAM3_INPUT_SIZE
-        ):
+        # Resize to SAM3 input size (default 1008, or smaller for 8 GB GPUs)
+        sz = self._input_size
+        if x.shape[2] != sz or x.shape[3] != sz:
             x = F.interpolate(
                 x,
-                size=(SAM3_INPUT_SIZE, SAM3_INPUT_SIZE),
+                size=(sz, sz),
                 mode="bilinear",
                 align_corners=False,
             )
 
-        # Normalize: mean=0.5, std=0.5 per channel
-        mean = torch.tensor(SAM3_IMAGE_MEAN, device=x.device).view(1, 3, 1, 1)
-        std = torch.tensor(SAM3_IMAGE_STD, device=x.device).view(1, 3, 1, 1)
+        # Normalize: mean=0.5, std=0.5 per channel (match input dtype to avoid upcast)
+        mean = torch.tensor(SAM3_IMAGE_MEAN, device=x.device, dtype=x.dtype).view(
+            1, 3, 1, 1
+        )
+        std = torch.tensor(SAM3_IMAGE_STD, device=x.device, dtype=x.dtype).view(
+            1, 3, 1, 1
+        )
         return (x - mean) / std
 
     def extract_features(self, x: Tensor) -> Tensor:
@@ -315,8 +254,11 @@ class Sam3Backbone(nn.Module):
         For the HF path the encoder includes the FPN neck, so the returned
         tensor is already at FPN dimension (256) rather than ViT dimension (1024).
         """
+        target_device = x.device
         x = self._preprocess(x)
         if self._frozen:
+            # Cast input to FP16 to match encoder weights (loaded in FP16)
+            x = x.half()
             with torch.no_grad():
                 out = self.encoder(x)
         else:
@@ -333,7 +275,7 @@ class Sam3Backbone(nn.Module):
             elif hasattr(out, "last_hidden_state"):
                 out = out.last_hidden_state
 
-        result: Tensor = out
+        result: Tensor = out.to(target_device)
         return result
 
     def extract_fpn_features(self, x: Tensor) -> Tensor:

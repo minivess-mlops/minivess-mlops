@@ -99,22 +99,18 @@ class Sam3HybridAdapter(ModelAdapter):
     ----------
     config:
         ModelConfig with ``SAM3_HYBRID`` family.
-    use_stub:
-        If True, use stub encoder for testing.
     """
 
     def __init__(
         self,
         config: ModelConfig,
-        *,
-        use_stub: bool = False,
     ) -> None:
         super().__init__()
         self.config = config
         arch = config.architecture_params
 
         # Frozen SAM3 backbone (feature extractor)
-        self.sam_backbone = Sam3Backbone(config=config, use_stub=use_stub, freeze=True)
+        self.sam_backbone = Sam3Backbone(config=config, freeze=True)
 
         # Trainable DynUNet 3D encoder/decoder
         filters = arch.get("filters", [32, 64, 128, 256])

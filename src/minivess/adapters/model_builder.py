@@ -29,13 +29,13 @@ def _sam3_package_available() -> bool:
 
         return True
     except ImportError:
-        pass
+        logger.debug("Native sam3 package not found")
     try:
         from transformers import Sam3Model  # noqa: F401
 
         return True
     except (ImportError, AttributeError):
-        pass
+        logger.debug("HuggingFace transformers with Sam3Model not found")
     return False
 
 
@@ -58,42 +58,37 @@ _SAM3_INSTALL_INSTRUCTIONS = """
  Step 3b: Or install from Meta's GitHub source:
           uv add "sam3 @ git+https://github.com/facebookresearch/sam3.git"
 
- ── For pipeline testing WITHOUT real SAM3 weights ─────────────
- Set in your model YAML:  architecture_params.pretrained: false
- This uses a random-weight stub. Results will be meaningless.
 ════════════════════════════════════════════════════════════════
 """
 
 
-def _auto_stub_sam3(config: ModelConfig, kwargs: dict[str, Any]) -> None:
-    """Validate SAM3 availability; raise loudly if pretrained weights are needed.
+def _require_sam3(config: ModelConfig, *, encoder_frozen: bool) -> None:
+    """Validate SAM3 availability; raise loudly if not installed or GPU insufficient.
 
-    Stub mode is ONLY activated when explicitly requested:
-    - ``use_stub=True`` passed to ``build_adapter()`` (test fixtures)
-    - ``architecture_params.pretrained: false`` in the model config (deliberate baseline)
+    SAM3 ALWAYS requires real pretrained weights. There is no stub or
+    pretrained:false fallback — they were removed to prevent silent
+    random-weight training (see .claude/metalearning/2026-03-02-sam3-implementation-fuckup.md).
 
-    Silent fallback to a random-weight stub is NEVER acceptable when a
-    pretrained SAM3 is expected — it produces meaningless training metrics
-    while appearing to succeed.
+    VRAM gate depends on whether the SAM3 encoder is frozen:
+
+    - ``encoder_frozen=True`` (V1 Vanilla, V3 Hybrid): The encoder forward pass runs
+      inside ``torch.no_grad()``, so no activation graph is stored for the 848M encoder
+      params. Peak VRAM ≈ inference peak (~6 GB BF16). Gate: ``mode="inference"`` (6 GB).
+
+    - ``encoder_frozen=False`` (V2 TopoLoRA): LoRA adapters are applied to the encoder
+      FFN layers; gradients flow through all 32 ViT transformer blocks. Full activation
+      graphs must be retained for backprop. Gate: ``mode="training"`` (16 GB).
+
+    Checks (in order):
+    1. SAM3 package is installed.
+    2. GPU VRAM meets the mode-appropriate threshold.
+    3. HuggingFace token is present (for gated model download).
 
     Raises
     ------
     RuntimeError
-        When SAM3 package is not installed and pretrained weights are required.
+        When SAM3 package is not installed, VRAM is insufficient, or HF token missing.
     """
-    if "use_stub" in kwargs:
-        # Explicit caller request (e.g. test fixture) — honour it
-        return
-
-    pretrained = config.architecture_params.get("pretrained", True)
-    if not pretrained:
-        kwargs["use_stub"] = True
-        logger.info(
-            "SAM3 pretrained=false: using stub encoder (random weights, deliberate)"
-        )
-        return
-
-    # pretrained=True (default) — real SAM3 package required
     if not _sam3_package_available():
         logger.error(_SAM3_INSTALL_INSTRUCTIONS)
         msg = (
@@ -101,6 +96,11 @@ def _auto_stub_sam3(config: ModelConfig, kwargs: dict[str, Any]) -> None:
             "See installation instructions logged above (ERROR level)."
         )
         raise RuntimeError(msg)
+
+    from minivess.adapters.sam3_vram_check import check_sam3_vram
+
+    vram_mode = "inference" if encoder_frozen else "training"
+    check_sam3_vram(variant=config.name, mode=vram_mode)
 
     # SAM3 is available — verify HF token before triggering a download
     from minivess.utils.hf_auth import require_hf_token
@@ -120,8 +120,9 @@ def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     config:
         Model configuration specifying family and architecture params.
     **kwargs:
-        Extra keyword arguments forwarded to the adapter constructor
-        (e.g., ``use_stub=True`` for SAM3 adapters in tests).
+        Extra keyword arguments forwarded to the adapter constructor.
+        Note: SAM3 adapters no longer accept ``use_stub`` — pretrained
+        weights are always required.
 
     Returns
     -------
@@ -131,6 +132,8 @@ def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     ------
     ValueError
         If the model family is not supported.
+    RuntimeError
+        If a SAM3 family is requested but SAM3 is not installed.
     """
     from minivess.config.models import ModelFamily
 
@@ -160,20 +163,24 @@ def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     if family == ModelFamily.SAM3_VANILLA:
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 
-        _auto_stub_sam3(config, kwargs)
-        return Sam3VanillaAdapter(config, **kwargs)
+        # Encoder is frozen → no_grad during encoder pass → inference-level VRAM (~6 GB)
+        _require_sam3(config, encoder_frozen=True)
+        return Sam3VanillaAdapter(config)
 
     if family == ModelFamily.SAM3_TOPOLORA:
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
-        _auto_stub_sam3(config, kwargs)
-        return Sam3TopoLoraAdapter(config, **kwargs)
+        # LoRA adapters on encoder FFN → gradients flow → training-level VRAM (≥16 GB)
+        _require_sam3(config, encoder_frozen=False)
+        return Sam3TopoLoraAdapter(config)
 
     if family == ModelFamily.SAM3_HYBRID:
         from minivess.adapters.sam3_hybrid import Sam3HybridAdapter
 
-        _auto_stub_sam3(config, kwargs)
-        return Sam3HybridAdapter(config, **kwargs)
+        # SAM encoder is frozen + detach() → inference-level VRAM for SAM part
+        # DynUNet-3D trains alongside — total peak ~8-10 GB on typical patch sizes
+        _require_sam3(config, encoder_frozen=True)
+        return Sam3HybridAdapter(config)
 
     msg = (
         f"Unsupported model family '{family}'. "

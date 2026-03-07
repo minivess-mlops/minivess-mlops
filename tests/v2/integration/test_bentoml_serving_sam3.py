@@ -1,19 +1,30 @@
-"""Tests for BentoML model import with SAM3 ONNX models (T11).
+"""Tests for BentoML model import with SAM3 ONNX models.
 
 Verifies that SAM3 ONNX models can be imported into BentoML model store
-and served via BentoML service. CI-compatible (uses stub encoders).
+and served via BentoML service.
+
+IMPORTANT: SAM3 export/import tests require real pretrained weights (GPU ≥16 GB).
+They are skipped in CI where SAM3 is not installed.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 import torch
+
+from minivess.adapters.model_builder import _sam3_package_available
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+_sam3_skip = pytest.mark.skipif(
+    not _sam3_package_available(), reason="SAM3 not installed"
+)
 
+
+@_sam3_skip
 class TestBentoImportSam3:
     """Test BentoML model import with SAM3 ONNX files."""
 
@@ -28,7 +39,7 @@ class TestBentoImportSam3:
             in_channels=1,
             out_channels=2,
         )
-        adapter = build_adapter(config, use_stub=True)
+        adapter = build_adapter(config)
         onnx_path = tmp_path / "sam3_test.onnx"
         example_input = torch.randn(1, 1, 4, 32, 32)
         adapter.export_onnx(onnx_path, example_input)

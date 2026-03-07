@@ -1,0 +1,416 @@
+---
+# SAM3 Cold-Start Plan for Opus 4.6
+# Generated: 2026-03-07
+# Purpose: Reliable session-start context for the next AI session.
+#   Read this FIRST before doing anything. Verify each claim with commands below.
+#   Do NOT trust previous session's claims without re-running verification commands.
+#
+# MANDATORY first actions (no exceptions):
+#   1. Run all commands in §verification to confirm current state
+#   2. Read all §key_files
+#   3. Only then proceed to §immediate_tasks
+
+session_context:
+  date: "2026-03-07"
+  ai_session_model: "claude-sonnet-4-6 (completed stub removal)"
+  intended_next_model: "claude-opus-4-6 (run actual SAM3)"
+  branch: "feat/sam3-remove-stub"
+  base_branch: "main"
+  status: "SAM3 adapter infrastructure complete. Training pipeline NOT wired. No real runs."
+
+hardware:
+  gpu: "NVIDIA GeForce RTX 2070 SUPER"
+  vram_mb: 8192
+  vram_gb: 8
+  cuda: "12.x (check with nvidia-smi)"
+  constraint_summary: |
+    - V1 Vanilla (frozen encoder, torch.no_grad): ~5-7 GB BF16 → FEASIBLE locally
+    - V2 TopoLoRA (LoRA on unfrozen encoder): ~12-16 GB → requires A100-40GB cloud
+    - V3 Hybrid (frozen ViT-32L + DynUNet-3D): ~18-22 GB → requires A100-40GB cloud
+
+sam3_package:
+  installed: true  # transformers 5.2.0 contains Sam3Model
+  verify_command: "uv run python -c \"from transformers import Sam3Model; print('OK')\""
+  torchvision_added: true  # uv add torchvision (2026-03-07)
+  weights_downloaded: false  # First from_pretrained() call has NOT happened yet
+  hf_token_available: true  # in .env, user has facebook/sam3 access confirmed
+
+vram_gate_status:
+  implementation_file: "src/minivess/adapters/sam3_vram_check.py"
+  last_commit: "33a5101"
+  modes:
+    inference:
+      threshold_mb: 6144  # 6 GB
+      threshold_gb: 6
+      applies_to: ["V1 Vanilla (frozen encoder)", "V3 Hybrid (frozen encoder part)"]
+      rtx2070super_passes: true
+    training:
+      threshold_mb: 16384  # 16 GB
+      threshold_gb: 16
+      applies_to: ["V2 TopoLoRA (LoRA on unfrozen encoder)"]
+      rtx2070super_passes: false
+  model_builder_integration:
+    sam3_vanilla: "encoder_frozen=True → mode='inference' → 6 GB gate"
+    sam3_topolora: "encoder_frozen=False → mode='training' → 16 GB gate"
+    sam3_hybrid: "encoder_frozen=True → mode='inference' → 6 GB gate"
+
+what_is_done:
+  - id: T-01
+    commit: "30ac50c"
+    description: "Remove _StubSam3Encoder and all use_stub paths from all adapters"
+    files_changed:
+      - "src/minivess/adapters/sam3_backbone.py (stubs removed)"
+      - "src/minivess/adapters/sam3_decoder.py (stub removed)"
+      - "src/minivess/adapters/sam3_vanilla.py (use_stub removed)"
+      - "src/minivess/adapters/sam3_topolora.py (use_stub removed)"
+      - "src/minivess/adapters/sam3_hybrid.py (use_stub removed)"
+      - "src/minivess/adapters/sam3_feature_cache.py (use_stub removed)"
+      - "src/minivess/adapters/model_builder.py (_auto_stub_sam3 removed)"
+      - "src/minivess/testing/quasi_e2e_runner.py (use_stub kwargs removed)"
+      - "14 test files migrated from use_stub=True to @_sam3_skip"
+      - "tests/unit/adapters/test_no_sam3_stub.py (10 AST enforcement tests CREATED)"
+
+  - id: T-02
+    commit: "867a64d + e0eb1c5 + 33a5101"
+    description: "VRAM enforcement (inference/training split, per-variant gates)"
+    files_changed:
+      - "src/minivess/adapters/sam3_vram_check.py (CREATED — mode split)"
+      - "src/minivess/adapters/model_builder.py (_require_sam3 with encoder_frozen param)"
+      - "tests/unit/adapters/test_sam3_vram_check.py (11 tests CREATED)"
+
+  - id: T-03
+    commit: "680337b"
+    description: "Progressive documentation"
+    files_changed:
+      - "src/minivess/adapters/CLAUDE.md (CREATED — but still says 16 GB absolute; update it)"
+      - "docs/adr/0006-sam3-variant-architecture.md (stub removal section added)"
+      - "CLAUDE.md (SAM3 section updated)"
+      - "LEARNINGS.md (2026-03-07 entry added)"
+
+  - id: "torchvision"
+    commit: "e0eb1c5"
+    description: "torchvision added to pyproject.toml as runtime dep"
+
+what_is_NOT_done:
+  - id: CRITICAL-01
+    priority: P0
+    description: |
+      Training pipeline hardcodes DynUNetAdapter.
+      scripts/train_monitored.py line ~513: `base_model = DynUNetAdapter(model_config)`
+      This must be: `base_model = build_adapter(model_config)`
+      Until this is fixed, SAM3 CANNOT be trained regardless of adapter code quality.
+    plan_reference: "docs/planning/sam3-real-data-e2e-plan.xml Task T1 (Phase P0)"
+    fix_files:
+      - "scripts/train_monitored.py"
+      - "tests/v2/unit/test_model_agnostic_training.py (new)"
+
+  - id: CRITICAL-02
+    priority: P0
+    description: |
+      SAM3 weights not yet downloaded. First from_pretrained() call needed.
+      Will pull ~3.2 GB to HF cache (~/.cache/huggingface/).
+      HF token must be loaded from .env before calling.
+    command_to_run: |
+      source .env && uv run python -c "
+      import os, torch
+      from transformers import Sam3Model
+      os.environ.setdefault('HF_TOKEN', os.environ.get('HUGGINGFACE_TOKEN', ''))
+      model = Sam3Model.from_pretrained('facebook/sam3', torch_dtype=torch.bfloat16)
+      n = sum(p.numel() for p in model.parameters())
+      print(f'Loaded: {n/1e6:.0f}M params')
+      "
+
+  - id: CRITICAL-03
+    priority: P0
+    description: |
+      src/minivess/adapters/CLAUDE.md still says '≥16 GB for all variants'.
+      This is wrong — V1 Vanilla and V3 Hybrid need only 6 GB for inference/frozen training.
+      Update it to reflect per-variant VRAM gates after confirming local inference works.
+
+  - id: IMPORTANT-01
+    priority: P1
+    description: |
+      synthesis report docs/planning/sam3-installation-issues-and-synthesis.md
+      is only 21.8 kB. User requested comprehensive ~100 kB document with scientific
+      grounding from 12 bibliography papers. Expand it in the next session.
+    bibliography_files:
+      - "sci-llm-writer/biblio/biblio-vascular/li-2024-sam-ambiguous-segmentation.md"
+      - "sci-llm-writer/biblio/biblio-vascular/yu-2025-unsamv-self.md"
+      - "sci-llm-writer/biblio/biblio-vascular/yang-2025-medsamix-training.md"
+      - "sci-llm-writer/biblio/biblio-vascular/huang-2024-p2sam-probabilistic-segmentation.md"
+      - "sci-llm-writer/biblio/biblio-vascular/ma-2025-medsam-segment.md"
+      - "sci-llm-writer/biblio/biblio-vascular/yu-2025-crisp-sam2-multi-organ.md"
+      - "sci-llm-writer/biblio/biblio-vascular/liu-2026-medsam-agent.md"
+      - "sci-llm-writer/biblio/biblio-vascular/chen-2025-conformalsam-unlocking.md"
+      - "sci-llm-writer/biblio/biblio-vascular/chen-2025-dynamic-snake-upsampling-tubular.md"
+      - "sci-llm-writer/biblio/biblio-vascular/zhong-2024-convolution-meets-lora-sam.md"
+      - "sci-llm-writer/biblio/biblio-vascular/martin-2025-prediction-to-prompt-nnunet-sam.md"
+      - "sci-llm-writer/biblio/biblio-vascular/vascular-tmp/yildiz-2024-sam-3d-slicer-segmentwithsam.md"
+
+  - id: IMPORTANT-02
+    priority: P1
+    description: |
+      No real SAM3 MLflow runs exist. All prior "training" used stub weights.
+      After fixing CRITICAL-01, run V1 Vanilla for 5 debug epochs on local machine.
+
+verification_commands:
+  # Run these FIRST, in order, to confirm current state before doing anything
+  - step: 1
+    command: "git checkout feat/sam3-remove-stub && git log --oneline -5"
+    expected: "33a5101 at top — per-variant VRAM gate commit"
+
+  - step: 2
+    command: "uv run python -c \"from transformers import Sam3Model; print('OK')\""
+    expected: "OK — confirms torchvision + transformers 5.2.0 installed"
+
+  - step: 3
+    command: "uv run pytest tests/unit/adapters/test_no_sam3_stub.py tests/unit/adapters/test_sam3_vram_check.py -v 2>&1 | tail -20"
+    expected: "All 21 tests pass (10 AST + 11 VRAM)"
+
+  - step: 4
+    command: "uv run pytest tests/ -x -q 2>&1 | tail -10"
+    expected: "~200+ tests pass, SAM3 tests skipped (SAM3 not installed in test env)"
+
+  - step: 5
+    command: "grep -n 'DynUNetAdapter' scripts/train_monitored.py | head -5"
+    expected: "DynUNetAdapter hardcoded at ~line 513 — confirms CRITICAL-01 still needs fixing"
+
+  - step: 6
+    command: "uv run python -c \"from minivess.adapters.sam3_vram_check import check_sam3_vram, MIN_VRAM_INFERENCE_MB, MIN_VRAM_TRAINING_MB; print(MIN_VRAM_INFERENCE_MB, MIN_VRAM_TRAINING_MB)\""
+    expected: "6144 16384 — confirms mode split is in place"
+
+  - step: 7
+    command: "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader"
+    expected: "NVIDIA GeForce RTX 2070 SUPER, 8192 MiB"
+
+key_files:
+  # Read these BEFORE starting work — do not rely on session summary alone
+  - path: "src/minivess/adapters/model_builder.py"
+    why: "Shows _require_sam3() with encoder_frozen param, per-variant VRAM dispatch"
+  - path: "src/minivess/adapters/sam3_vram_check.py"
+    why: "Current VRAM gate implementation (inference: 6 GB, training: 16 GB)"
+  - path: "src/minivess/adapters/sam3_vanilla.py"
+    why: "V1 Vanilla: confirms encoder is frozen (Sam3Backbone(freeze=True))"
+  - path: "src/minivess/adapters/sam3_topolora.py"
+    why: "V2 TopoLoRA: confirms encoder NOT frozen (Sam3Backbone(freeze=False))"
+  - path: "src/minivess/adapters/sam3_hybrid.py"
+    why: "V3 Hybrid: confirms encoder frozen + .detach() on SAM features"
+  - path: "src/minivess/adapters/sam3_backbone.py"
+    why: "Shows torch.no_grad() wrapper on frozen encoder forward pass"
+  - path: "scripts/train_monitored.py"
+    why: "Line ~513: hardcoded DynUNetAdapter — the critical gap to fix"
+  - path: "docs/planning/sam3-real-data-e2e-plan.xml"
+    why: "Full plan for wiring build_adapter() and running SAM3 training"
+  - path: ".claude/metalearning/2026-03-02-sam3-implementation-fuckup.md"
+    why: "Root cause analysis of SAM2 vs SAM3 confusion — must not repeat"
+  - path: "docs/planning/sam3-installation-issues-and-synthesis.md"
+    why: "Current synthesis report (21.8 kB, needs expansion)"
+
+immediate_tasks:
+  - id: TASK-A
+    priority: P0
+    title: "Wire build_adapter() into training pipeline (most critical)"
+    plan: "docs/planning/sam3-real-data-e2e-plan.xml Phase P0 Task T1"
+    branch: "test/sam3-segmentation-with-real-data (NEW — branch from feat/sam3-remove-stub)"
+    description: |
+      In scripts/train_monitored.py:
+      1. Add --model-family CLI arg (default="dynunet")
+      2. In _build_configs(): use ModelFamily(args.model_family) to set ModelConfig.family
+      3. In run_fold_safe(): replace `DynUNetAdapter(model_config)` with `build_adapter(model_config)`
+      4. Remove hardcoded DynUNetAdapter import
+      5. Write tests in tests/v2/unit/test_model_agnostic_training.py (TDD — write tests first)
+    tdd_tests_to_write_first:
+      - "test_parse_args_model_family_flag"
+      - "test_build_configs_sam3_vanilla_sets_correct_family"
+      - "test_build_configs_dynunet_default"
+      - "test_run_fold_safe_does_not_hardcode_dynunet (static AST analysis)"
+    completion_check: "uv run pytest tests/v2/unit/test_model_agnostic_training.py -v"
+
+  - id: TASK-B
+    priority: P0
+    title: "Download SAM3 weights (one-time, ~3.2 GB)"
+    description: |
+      Source .env for HF_TOKEN, then run from_pretrained().
+      First download will take 5-15 minutes depending on connection.
+      Expected cache location: ~/.cache/huggingface/hub/models--facebook--sam3/
+    command: |
+      source .env && uv run python -c "
+      import os, torch
+      from transformers import Sam3Model, Sam3Config
+      token = os.environ.get('HUGGINGFACE_TOKEN') or os.environ.get('HF_TOKEN')
+      print(f'HF token: {token[:8]}...' if token else 'ERROR: No HF token found')
+      model = Sam3Model.from_pretrained(
+          'facebook/sam3',
+          torch_dtype=torch.bfloat16,
+          token=token
+      )
+      n = sum(p.numel() for p in model.parameters())
+      print(f'OK: {n/1e6:.0f}M params loaded ({n*2/1e9:.1f} GB BF16)')
+      "
+    success_check: "848M params, ~1.7 GB BF16 in memory"
+
+  - id: TASK-C
+    priority: P0
+    title: "Verify V1 Vanilla inference works on RTX 2070 Super (8 GB)"
+    description: |
+      After TASK-B (weights downloaded), verify inference with a real MiniVess slice.
+      Expected peak VRAM: 5-7 GB BF16 with torch.no_grad().
+      If OOM: set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    command: |
+      uv run python -c "
+      import torch, os
+      from minivess.adapters.model_builder import build_adapter
+      from minivess.config.models import ModelConfig, ModelFamily
+      config = ModelConfig(
+          family=ModelFamily.SAM3_VANILLA,
+          name='sam3_vanilla',
+          architecture_params={'pretrained': True},
+      )
+      adapter = build_adapter(config)
+      # Create dummy 3D volume (B=1, C=1, D=5, H=512, W=512)
+      x = torch.zeros(1, 1, 5, 512, 512)
+      with torch.no_grad():
+          out = adapter.predict(x.cuda())
+      print(f'V1 output shape: {out.shape}')
+      print(f'Peak VRAM: {torch.cuda.max_memory_allocated()/1e9:.2f} GB')
+      "
+    success_check: "Output shape matches input spatial dims, peak VRAM < 8 GB"
+
+  - id: TASK-D
+    priority: P1
+    title: "Run V1 Vanilla training smoke test (5 epochs, local machine)"
+    depends_on: ["TASK-A", "TASK-B", "TASK-C"]
+    description: |
+      Use the Prefect training flow (NOT train_monitored.py directly — see CLAUDE.md rule #17).
+      Run via: prefect deployment run 'train-flow/default' --params '{"model_family":"sam3_vanilla","loss":"dice_ce","max_epochs":5}'
+      Monitor VRAM — expect 5-7 GB with frozen encoder.
+      Log to MLflow alongside existing DynUNet runs.
+    success_check: |
+      - MLflow run created for experiment 'minivess_training'
+      - Run has model_family=sam3_vanilla tag
+      - val_loss decreases over 5 epochs
+      - Peak GPU VRAM stays < 8 GB
+
+  - id: TASK-E
+    priority: P1
+    title: "Expand synthesis report to ~100 kB with literature grounding"
+    description: |
+      Expand docs/planning/sam3-installation-issues-and-synthesis.md from 21.8 kB
+      by incorporating findings from 12 bibliography papers:
+      - li-2024-sam-ambiguous-segmentation (SAM prompt sensitivity → impacts V1)
+      - yu-2025-unsamv-self (self-supervised SAM → justifies V2 LoRA approach)
+      - yang-2025-medsamix-training (SAM medical fine-tuning strategy)
+      - huang-2024-p2sam-probabilistic-segmentation (uncertainty in SAM → ConformalSAM context)
+      - ma-2025-medsam-segment (MedSAM: largest medical SAM fine-tuning study)
+      - yu-2025-crisp-sam2-multi-organ (SAM2 multi-organ → demonstrates SAM adapter patterns)
+      - liu-2026-medsam-agent (LLM agent for SAM prompting → future V4 direction)
+      - chen-2025-conformalsam-unlocking (ConformalSAM: UQ on SAM outputs → V1 extension)
+      - chen-2025-dynamic-snake-upsampling-tubular (DSCNet: tubular structs → V3 decoder)
+      - zhong-2024-convolution-meets-lora-sam (Conv+LoRA for SAM: direct V2 justification)
+      - martin-2025-prediction-to-prompt-nnunet-sam (nnU-Net+SAM: hybrid → V3 justification)
+      - yildiz-2024-sam-3d-slicer-segmentwithsam (3D Slicer SAM: slice-by-slice approach)
+      Target size: 80-120 kB.
+
+  - id: TASK-F
+    priority: P2
+    title: "Cloud training for V2 TopoLoRA and V3 Hybrid (SkyPilot A100)"
+    depends_on: ["TASK-A", "TASK-B"]
+    description: |
+      V2 and V3 require A100-40GB minimum (LoRA gradients + full encoder activation graph).
+      Use deployment/skypilot/train_generic.yaml.
+      Configure for 3 folds x 100 epochs each (matching DynUNet baseline).
+    skypilot_command: "sky launch deployment/skypilot/train_generic.yaml --env MODEL_FAMILY=sam3_topolora"
+
+vram_decision_matrix:
+  # For ANY new VRAM claim: verify against this table FIRST. No exceptions.
+  # Do NOT make VRAM claims without citing one of these verified sources.
+  local_machine_rtx2070super_8gb:
+    single_image_inference_bfloat16_nograd:
+      verdict: "FEASIBLE"
+      expected_gb: 4.5-6.0
+      sources:
+        - "GH Issue #235 facebookresearch/sam3 — community-measured 4-6 GB"
+        - "debuggercafe.com — single image inference benchmark"
+    frozen_encoder_training_decoder_only:
+      verdict: "LIKELY FEASIBLE (verify empirically)"
+      expected_gb: 5.0-7.0
+      rationale: |
+        Encoder: frozen, torch.no_grad() → no activation graph stored → ~4-6 GB
+        Decoder: ~1-5M params, optimizer states << 100 MB
+        Total: frozen forward pass peak + tiny optimizer overhead
+        NOTE: This is our V1 Vanilla case. Not yet experimentally verified.
+    lora_training_unfrozen_encoder:
+      verdict: "NOT FEASIBLE"
+      expected_gb: 12-16
+      sources:
+        - "GH Issue #200 — Meta DETR fine-tuning: 22-24 GB (decoder heavier than ours)"
+        - "Community LoRA estimate: ~12-16 GB (no concrete benchmark found)"
+    hybrid_frozen_ViT_plus_dynunet:
+      verdict: "NOT FEASIBLE (too tight even if frozen)"
+      expected_gb: 18-22
+      rationale: "ViT-32L BF16 (~6 GB) + DynUNet-3D with 3D patch activations (~8-12 GB)"
+
+  cloud_a100_40gb:
+    all_variants: "FEASIBLE"
+    v1_vanilla_frozen: "Very comfortable — 6-8 GB peak"
+    v2_topolora_lora: "Comfortable — estimated 12-16 GB of 40 GB"
+    v3_hybrid: "May need grad checkpointing — estimated 18-22 GB of 40 GB"
+
+known_errors_and_resolutions:
+  - error: "ModuleNotFoundError: No module named 'torchvision'"
+    resolution: "uv add torchvision (done 2026-03-07, committed in pyproject.toml)"
+    root_cause: "transformers/models/sam3/modeling_sam3.py imports torchvision at top level"
+
+  - error: "RuntimeError: SAM3 requires ≥16 GB GPU VRAM (on 8 GB machine)"
+    resolution: "FIXED in commit 33a5101. Now: inference variants use 6 GB gate, LoRA uses 16 GB."
+    was_wrong_because: "16 GB was set without community benchmark evidence; frozen encoder doesn't build activation graph"
+
+  - error: "SAM3 not installed (even with transformers 5.2.0)"
+    resolution: "torchvision was missing → caused Sam3Model import to fail silently in _sam3_package_available()"
+
+  - error: "SAM2 implemented instead of SAM3"
+    resolution: "Rebuilt adapters from scratch using real SAM3 (ViT-32L 848M) architecture (2026-03-07)"
+    reference: ".claude/metalearning/2026-03-02-sam3-implementation-fuckup.md"
+
+anti_patterns_to_avoid:
+  - "DO NOT claim SAM3 'works' without running a real forward pass with actual weights"
+  - "DO NOT set VRAM thresholds without citing a source (GH issue, paper, benchmark)"
+  - "DO NOT use scripts/train_monitored.py as a standalone run — Prefect flow only"
+  - "DO NOT re-introduce _StubSam3Encoder or use_stub — the AST tests will catch it"
+  - "DO NOT confabulate VRAM numbers — say 'estimate based on X' or 'not benchmarked'"
+  - "DO NOT assume sam3-real-data-e2e-plan.xml is up to date — re-read it to verify"
+  - "DO NOT make DynUNet-specific assumptions — all 3 SAM3 variants use different decoder sizes"
+
+scientific_context:
+  # Key findings from literature to guide architecture decisions
+  sam_adaptation_for_medical:
+    key_challenge: "SAM trained on natural images; large domain gap to medical microscopy"
+    adaptation_approaches:
+      frozen_encoder_trainable_decoder: "Li et al. 2024 (ambiguous segmentation), MedSAM (Ma et al. 2025)"
+      lora_on_encoder: "Zhong et al. 2024 (Conv+LoRA), multiple medical SAM papers"
+      hybrid_with_task_specific_head: "Martin et al. 2025 (nnU-Net+SAM), Chen et al. 2025 (DSCNet for tubular)"
+
+  tubular_structure_specific:
+    key_challenge: "SAM's 2D prompt-driven segmentation misses 3D connectivity of vessels"
+    relevant_papers:
+      - "Chen et al. 2025: Dynamic Snake upsampling → topology-preserving decoder design for our V3"
+      - "Yildiz et al. 2024: slice-by-slice SAM on 3D Slicer → validates our slice inference strategy"
+    our_solution: "V3 Hybrid: frozen SAM3 features + DynUNet-3D with gated fusion + cbdice_cldice loss"
+
+  uncertainty_quantification:
+    key_challenge: "SAM's point/box prompts sensitive to placement (Li et al. 2024)"
+    relevant_papers:
+      - "Huang et al. 2024 (P2SAM): probabilistic SAM with CVAE for ambiguous outputs"
+      - "Chen et al. 2025 (ConformalSAM): conformal prediction on SAM to bound false negatives"
+    our_solution: "V1 + conformal predictor from feat/conformal-uq branch (future integration)"
+
+  lora_for_sam:
+    key_finding: "LoRA on ViT FFN layers: 4-16 rank sufficient for medical domain adaptation"
+    source: "Zhong et al. 2024 (Conv+LoRA for SAM medical segmentation)"
+    our_implementation: "Sam3TopoLoraAdapter: LoRA on all 32 ViT-32L transformer blocks (rank=16 default)"
+
+next_session_first_message: |
+  "Read docs/planning/sam3-cold-start-opus4.yaml first.
+  Run all verification_commands to confirm current state.
+  Then implement TASK-A (wire build_adapter into training pipeline) using TDD.
+  Do NOT claim anything works without running the verification commands first."

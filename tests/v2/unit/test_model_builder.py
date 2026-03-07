@@ -1,13 +1,19 @@
-"""Tests for model builder factory (SAM-10).
+"""Tests for model builder factory.
 
 Validates build_adapter() dispatches correctly for all model families.
+SAM3 tests are skipped when SAM3 is not installed.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from minivess.adapters.model_builder import _sam3_package_available
 from minivess.config.models import ModelConfig, ModelFamily
+
+_sam3_skip = pytest.mark.skipif(
+    not _sam3_package_available(), reason="SAM3 not installed"
+)
 
 
 class TestBuildAdapter:
@@ -26,6 +32,7 @@ class TestBuildAdapter:
         cfg = adapter.get_config()
         assert cfg.family == "dynunet"
 
+    @_sam3_skip
     def test_build_sam3_vanilla(self) -> None:
         from minivess.adapters.model_builder import build_adapter
 
@@ -35,10 +42,11 @@ class TestBuildAdapter:
             in_channels=1,
             out_channels=2,
         )
-        adapter = build_adapter(config, use_stub=True)
+        adapter = build_adapter(config)
         cfg = adapter.get_config()
         assert cfg.family == "sam3_vanilla"
 
+    @_sam3_skip
     def test_build_sam3_topolora(self) -> None:
         from minivess.adapters.model_builder import build_adapter
 
@@ -49,10 +57,11 @@ class TestBuildAdapter:
             out_channels=2,
             lora_rank=2,
         )
-        adapter = build_adapter(config, use_stub=True)
+        adapter = build_adapter(config)
         cfg = adapter.get_config()
         assert cfg.family == "sam3_topolora"
 
+    @_sam3_skip
     def test_build_sam3_hybrid(self) -> None:
         from minivess.adapters.model_builder import build_adapter
 
@@ -63,7 +72,7 @@ class TestBuildAdapter:
             out_channels=2,
             architecture_params={"filters": [16, 32, 64]},
         )
-        adapter = build_adapter(config, use_stub=True)
+        adapter = build_adapter(config)
         cfg = adapter.get_config()
         assert cfg.family == "sam3_hybrid"
 
@@ -75,4 +84,25 @@ class TestBuildAdapter:
             name="unknown-test",
         )
         with pytest.raises(ValueError, match="Unsupported model family"):
+            build_adapter(config)
+
+    def test_build_sam3_raises_without_installation(self) -> None:
+        """build_adapter raises RuntimeError for SAM3 when not installed."""
+        from unittest.mock import patch
+
+        from minivess.adapters.model_builder import build_adapter
+
+        config = ModelConfig(
+            family=ModelFamily.SAM3_VANILLA,
+            name="vanilla-no-sam3",
+            in_channels=1,
+            out_channels=2,
+        )
+        with (
+            patch(
+                "minivess.adapters.model_builder._sam3_package_available",
+                return_value=False,
+            ),
+            pytest.raises(RuntimeError, match="SAM3"),
+        ):
             build_adapter(config)

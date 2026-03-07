@@ -34,7 +34,13 @@ _DISABLED = os.environ.get("PREFECT_DISABLED", "0") == "1"
 
 PREFECT_AVAILABLE: bool = False
 
-if not _DISABLED:
+_logger = logging.getLogger(__name__)
+
+if _DISABLED:
+    _logger.info(
+        "PREFECT_DISABLED=1 — using no-op decorators (Prefect orchestration OFF)"
+    )
+elif not _DISABLED:
     try:
         from prefect import flow as _prefect_flow
         from prefect import get_run_logger as _prefect_get_run_logger
@@ -43,6 +49,17 @@ if not _DISABLED:
         PREFECT_AVAILABLE = True
     except ImportError:
         PREFECT_AVAILABLE = False
+        _logger.warning(
+            "\n"
+            "════════════════════════════════════════════════════════════════\n"
+            " WARNING: Prefect is NOT installed but PREFECT_DISABLED is not set.\n"
+            " Falling back to no-op @flow/@task decorators.\n"
+            " This means NO orchestration, NO retries, NO Prefect UI tracking.\n"
+            "\n"
+            " To install: uv add 'prefect>=3.4,<4.0'\n"
+            " To silence: export PREFECT_DISABLED=1\n"
+            "════════════════════════════════════════════════════════════════"
+        )
 
 if PREFECT_AVAILABLE:
     task = _prefect_task
@@ -73,9 +90,9 @@ else:
         return _decorator
 
     task = _noop_decorator_factory
-    flow = _noop_decorator_factory
+    flow = _noop_decorator_factory  # type: ignore[assignment]
 
-    def get_run_logger() -> logging.Logger:
+    def get_run_logger() -> logging.Logger:  # type: ignore[misc]
         """Return a stdlib logger as a stand-in for Prefect's run logger."""
         return logging.getLogger("minivess.orchestration")
 

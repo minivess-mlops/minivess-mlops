@@ -1,7 +1,10 @@
-"""Tests for Sam3VanillaAdapter (T6).
+"""Tests for Sam3VanillaAdapter.
 
 V1: Frozen SAM3 ViT-32L encoder + trainable decoder.
 Slice-by-slice 2D inference, null prompts, dice_ce loss.
+
+IMPORTANT: These tests require real SAM3 pretrained weights (GPU ≥16 GB).
+They are skipped in CI where SAM3 is not installed.
 """
 
 from __future__ import annotations
@@ -9,7 +12,12 @@ from __future__ import annotations
 import pytest
 import torch
 
+from minivess.adapters.model_builder import _sam3_package_available
 from minivess.config.models import ModelConfig, ModelFamily
+
+_sam3_skip = pytest.mark.skipif(
+    not _sam3_package_available(), reason="SAM3 not installed"
+)
 
 
 @pytest.fixture()
@@ -23,13 +31,14 @@ def sam3_config() -> ModelConfig:
     )
 
 
+@_sam3_skip
 class TestSam3VanillaAdapter:
     """Sam3VanillaAdapter: frozen encoder + trainable decoder."""
 
-    def test_adapter_creates_with_stub(self, sam3_config: ModelConfig) -> None:
+    def test_adapter_creates(self, sam3_config: ModelConfig) -> None:
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 
-        adapter = Sam3VanillaAdapter(config=sam3_config, use_stub=True)
+        adapter = Sam3VanillaAdapter(config=sam3_config)
         assert adapter is not None
 
     def test_forward_produces_segmentation_output(
@@ -38,8 +47,7 @@ class TestSam3VanillaAdapter:
         from minivess.adapters.base import SegmentationOutput
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 
-        adapter = Sam3VanillaAdapter(config=sam3_config, use_stub=True)
-        # Small 3D volume: (B, C, D, H, W)
+        adapter = Sam3VanillaAdapter(config=sam3_config)
         volume = torch.randn(1, 1, 3, 64, 64)
         output = adapter(volume)
         assert isinstance(output, SegmentationOutput)
@@ -47,10 +55,9 @@ class TestSam3VanillaAdapter:
     def test_forward_output_shape_2class(self, sam3_config: ModelConfig) -> None:
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 
-        adapter = Sam3VanillaAdapter(config=sam3_config, use_stub=True)
+        adapter = Sam3VanillaAdapter(config=sam3_config)
         volume = torch.randn(1, 1, 3, 64, 64)
         output = adapter(volume)
-        # Should produce 2-class output (B, 2, D, H, W)
         assert output.logits.shape[0] == 1  # batch
         assert output.logits.shape[1] == 2  # classes
         assert output.logits.shape[2] == 3  # depth
@@ -58,21 +65,18 @@ class TestSam3VanillaAdapter:
     def test_encoder_frozen_decoder_trainable(self, sam3_config: ModelConfig) -> None:
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 
-        adapter = Sam3VanillaAdapter(config=sam3_config, use_stub=True)
-        # Encoder should be frozen
+        adapter = Sam3VanillaAdapter(config=sam3_config)
         for p in adapter.backbone.encoder.parameters():
             assert not p.requires_grad, "Encoder must be frozen"
-        # Decoder should be trainable
         trainable = [p for p in adapter.decoder.parameters() if p.requires_grad]
         assert len(trainable) > 0, "Decoder must have trainable params"
 
     def test_gradient_flows_through_decoder(self, sam3_config: ModelConfig) -> None:
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 
-        adapter = Sam3VanillaAdapter(config=sam3_config, use_stub=True)
+        adapter = Sam3VanillaAdapter(config=sam3_config)
         volume = torch.randn(1, 1, 2, 64, 64)
         output = adapter(volume)
-        # Use cross-entropy loss (not sum, which cancels due to [-logits, logits])
         target = torch.zeros(1, 2, 64, 64, dtype=torch.long)
         loss = torch.nn.functional.cross_entropy(
             output.logits[:, :, 0, :, :], target[:, 0, :, :]
@@ -88,7 +92,7 @@ class TestSam3VanillaAdapter:
         from minivess.adapters.base import AdapterConfigInfo
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 
-        adapter = Sam3VanillaAdapter(config=sam3_config, use_stub=True)
+        adapter = Sam3VanillaAdapter(config=sam3_config)
         info = adapter.get_config()
         assert isinstance(info, AdapterConfigInfo)
         assert info.family == "sam3_vanilla"
@@ -96,9 +100,8 @@ class TestSam3VanillaAdapter:
     def test_trainable_parameters_count(self, sam3_config: ModelConfig) -> None:
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 
-        adapter = Sam3VanillaAdapter(config=sam3_config, use_stub=True)
+        adapter = Sam3VanillaAdapter(config=sam3_config)
         trainable = adapter.trainable_parameters()
         assert trainable > 0, "Should have trainable parameters (decoder)"
-        # Encoder is frozen, so trainable should be much less than total
         total = sum(p.numel() for p in adapter.parameters())
         assert trainable < total

@@ -1,7 +1,11 @@
-"""Tests for SAM3 mask decoder wrapper (T3).
+"""Tests for SAM3 mask decoder wrapper.
 
 Validates Sam3MaskDecoder: null prompt mode, concept prompt mode,
 binary-to-2class conversion, gradient flow.
+
+IMPORTANT: Tests that instantiate Sam3MaskDecoder require real SAM3
+pretrained weights and are skipped in CI. TestBinaryTo2Class tests
+pure-static methods and run in CI.
 """
 
 from __future__ import annotations
@@ -9,7 +13,12 @@ from __future__ import annotations
 import pytest
 import torch
 
+from minivess.adapters.model_builder import _sam3_package_available
 from minivess.config.models import ModelConfig, ModelFamily
+
+_sam3_skip = pytest.mark.skipif(
+    not _sam3_package_available(), reason="SAM3 not installed"
+)
 
 
 @pytest.fixture()
@@ -23,24 +32,23 @@ def sam3_config() -> ModelConfig:
     )
 
 
+@_sam3_skip
 class TestSam3MaskDecoder:
     """Sam3MaskDecoder wraps SAM3 decoder head for mask prediction."""
 
     def test_decoder_creates(self, sam3_config: ModelConfig) -> None:
         from minivess.adapters.sam3_decoder import Sam3MaskDecoder
 
-        decoder = Sam3MaskDecoder(config=sam3_config, use_stub=True)
+        decoder = Sam3MaskDecoder(config=sam3_config)
         assert decoder is not None
 
     def test_decoder_output_shape_matches_input(self, sam3_config: ModelConfig) -> None:
         """Output spatial dims match input (after resize back)."""
         from minivess.adapters.sam3_decoder import Sam3MaskDecoder
 
-        decoder = Sam3MaskDecoder(config=sam3_config, use_stub=True)
-        # FPN features: (B, 256, H_feat, W_feat)
+        decoder = Sam3MaskDecoder(config=sam3_config)
         features = torch.randn(1, 256, 72, 72)
         output = decoder(features)
-        # Output should be (B, 1, H_feat, W_feat) for binary mask
         assert output.shape[0] == 1
         assert output.shape[1] == 1  # single-channel binary logits
         assert output.shape[2] == 72
@@ -50,7 +58,7 @@ class TestSam3MaskDecoder:
         """Gradients flow through decoder during backward pass."""
         from minivess.adapters.sam3_decoder import Sam3MaskDecoder
 
-        decoder = Sam3MaskDecoder(config=sam3_config, use_stub=True)
+        decoder = Sam3MaskDecoder(config=sam3_config)
         features = torch.randn(1, 256, 72, 72)
         output = decoder(features)
         loss = output.sum()
@@ -65,9 +73,8 @@ class TestSam3MaskDecoder:
         """Works with null embeddings for automatic segmentation."""
         from minivess.adapters.sam3_decoder import Sam3MaskDecoder
 
-        decoder = Sam3MaskDecoder(config=sam3_config, use_stub=True)
+        decoder = Sam3MaskDecoder(config=sam3_config)
         features = torch.randn(1, 256, 72, 72)
-        # Null prompt = no prompt embeddings, automatic mode
         output = decoder(features, prompt_embedding=None)
         assert output.shape[0] == 1
 
@@ -75,32 +82,28 @@ class TestSam3MaskDecoder:
         """Works with concept text prompt embedding."""
         from minivess.adapters.sam3_decoder import Sam3MaskDecoder
 
-        decoder = Sam3MaskDecoder(config=sam3_config, use_stub=True)
+        decoder = Sam3MaskDecoder(config=sam3_config)
         features = torch.randn(1, 256, 72, 72)
-        # Simulate concept prompt embedding (e.g., "microvasculature")
         prompt = torch.randn(1, 256)
         output = decoder(features, prompt_embedding=prompt)
         assert output.shape[0] == 1
 
 
 class TestBinaryTo2Class:
-    """binary_to_2class() converts single-channel logits to 2-class."""
+    """binary_to_2class() — static method, no SAM3 required."""
 
-    def test_binary_to_2class_shape(self, sam3_config: ModelConfig) -> None:
+    def test_binary_to_2class_shape(self) -> None:
         from minivess.adapters.sam3_decoder import Sam3MaskDecoder
 
-        decoder = Sam3MaskDecoder(config=sam3_config, use_stub=True)
         logits = torch.randn(1, 1, 72, 72)
-        two_class = decoder.binary_to_2class(logits)
+        two_class = Sam3MaskDecoder.binary_to_2class(logits)
         assert two_class.shape == (1, 2, 72, 72)
 
-    def test_binary_to_2class_symmetry(self, sam3_config: ModelConfig) -> None:
+    def test_binary_to_2class_symmetry(self) -> None:
         """Output is [-logits, logits] concatenated along channel dim."""
         from minivess.adapters.sam3_decoder import Sam3MaskDecoder
 
-        decoder = Sam3MaskDecoder(config=sam3_config, use_stub=True)
         logits = torch.randn(1, 1, 8, 8)
-        two_class = decoder.binary_to_2class(logits)
-        # Channel 0 should be -logits, channel 1 should be logits
+        two_class = Sam3MaskDecoder.binary_to_2class(logits)
         assert torch.allclose(two_class[:, 0:1], -logits, atol=1e-6)
         assert torch.allclose(two_class[:, 1:2], logits, atol=1e-6)

@@ -33,7 +33,10 @@ try:
 
     _GUDHI_AVAILABLE = True
 except ImportError:
-    pass
+    logger.warning(
+        "gudhi not installed — BettiMatchingLoss will use differentiable proxy "
+        "(no persistence diagrams). Install: uv add gudhi"
+    )
 
 
 class BettiMatchingLoss(nn.Module):

@@ -1,11 +1,12 @@
-"""Integration smoke tests for SAM3 adapter training loop (T11).
+"""Integration smoke tests for SAM3 adapter training loop.
 
 Tests that each SAM3 adapter can:
 1. Complete one forward + backward step
 2. Have gradients flow to trainable parameters
 3. Work with AMP (mixed precision)
 
-All tests use stub encoders (no real SAM3 weights needed).
+IMPORTANT: These tests require real SAM3 pretrained weights (GPU ≥16 GB).
+They are skipped in CI where SAM3 is not installed.
 """
 
 from __future__ import annotations
@@ -15,7 +16,12 @@ import torch
 import torch.nn.functional as F
 
 from minivess.adapters.base import SegmentationOutput
+from minivess.adapters.model_builder import _sam3_package_available
 from minivess.config.models import ModelConfig, ModelFamily
+
+_sam3_skip = pytest.mark.skipif(
+    not _sam3_package_available(), reason="SAM3 not installed"
+)
 
 
 @pytest.fixture()
@@ -31,7 +37,7 @@ def sam3_vanilla_config() -> ModelConfig:
 
 @pytest.fixture()
 def sam3_topolora_config() -> ModelConfig:
-    """Minimal SAM3 topolora config (rank=2 for stub encoder)."""
+    """Minimal SAM3 topolora config."""
     return ModelConfig(
         family=ModelFamily.SAM3_TOPOLORA,
         name="sam3-topolora-integration",
@@ -45,7 +51,7 @@ def sam3_topolora_config() -> ModelConfig:
 
 @pytest.fixture()
 def sam3_hybrid_config() -> ModelConfig:
-    """Minimal SAM3 hybrid config (3 filter levels for depth=4)."""
+    """Minimal SAM3 hybrid config."""
     return ModelConfig(
         family=ModelFamily.SAM3_HYBRID,
         name="sam3-hybrid-integration",
@@ -55,6 +61,7 @@ def sam3_hybrid_config() -> ModelConfig:
     )
 
 
+@_sam3_skip
 class TestSam3VanillaTraining:
     """Sam3VanillaAdapter: one training step integration."""
 
@@ -62,7 +69,7 @@ class TestSam3VanillaTraining:
         """Forward + backward + optimizer step completes without error."""
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 
-        adapter = Sam3VanillaAdapter(config=sam3_vanilla_config, use_stub=True)
+        adapter = Sam3VanillaAdapter(config=sam3_vanilla_config)
         optimizer = torch.optim.Adam(
             filter(lambda p: p.requires_grad, adapter.parameters()), lr=1e-3
         )
@@ -71,7 +78,6 @@ class TestSam3VanillaTraining:
         output = adapter(volume)
         assert isinstance(output, SegmentationOutput)
 
-        # Cross-entropy loss on first slice
         target = torch.zeros(1, 64, 64, dtype=torch.long)
         loss = F.cross_entropy(output.logits[:, :, 0, :, :], target)
         loss.backward()
@@ -82,7 +88,7 @@ class TestSam3VanillaTraining:
         """Gradients reach decoder parameters."""
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 
-        adapter = Sam3VanillaAdapter(config=sam3_vanilla_config, use_stub=True)
+        adapter = Sam3VanillaAdapter(config=sam3_vanilla_config)
         volume = torch.randn(1, 1, 2, 64, 64)
         output = adapter(volume)
         target = torch.zeros(1, 64, 64, dtype=torch.long)
@@ -100,7 +106,7 @@ class TestSam3VanillaTraining:
         """Forward pass works under AMP autocast."""
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 
-        adapter = Sam3VanillaAdapter(config=sam3_vanilla_config, use_stub=True)
+        adapter = Sam3VanillaAdapter(config=sam3_vanilla_config)
         volume = torch.randn(1, 1, 2, 64, 64)
 
         with torch.amp.autocast("cpu"):
@@ -108,6 +114,7 @@ class TestSam3VanillaTraining:
         assert output.logits.shape == (1, 2, 2, 64, 64)
 
 
+@_sam3_skip
 class TestSam3TopoLoraTraining:
     """Sam3TopoLoraAdapter: one training step integration."""
 
@@ -115,7 +122,7 @@ class TestSam3TopoLoraTraining:
         """Forward + backward + optimizer step completes without error."""
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
-        adapter = Sam3TopoLoraAdapter(config=sam3_topolora_config, use_stub=True)
+        adapter = Sam3TopoLoraAdapter(config=sam3_topolora_config)
         optimizer = torch.optim.Adam(
             filter(lambda p: p.requires_grad, adapter.parameters()), lr=1e-3
         )
@@ -134,7 +141,7 @@ class TestSam3TopoLoraTraining:
         """LoRA A/B matrices receive gradients."""
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
-        adapter = Sam3TopoLoraAdapter(config=sam3_topolora_config, use_stub=True)
+        adapter = Sam3TopoLoraAdapter(config=sam3_topolora_config)
         volume = torch.randn(1, 1, 2, 64, 64)
         output = adapter(volume)
         target = torch.zeros(1, 64, 64, dtype=torch.long)
@@ -152,7 +159,7 @@ class TestSam3TopoLoraTraining:
         """Forward pass works under AMP autocast."""
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
-        adapter = Sam3TopoLoraAdapter(config=sam3_topolora_config, use_stub=True)
+        adapter = Sam3TopoLoraAdapter(config=sam3_topolora_config)
         volume = torch.randn(1, 1, 2, 64, 64)
 
         with torch.amp.autocast("cpu"):
@@ -160,6 +167,7 @@ class TestSam3TopoLoraTraining:
         assert output.logits.shape == (1, 2, 2, 64, 64)
 
 
+@_sam3_skip
 class TestSam3HybridTraining:
     """Sam3HybridAdapter: one training step integration."""
 
@@ -167,7 +175,7 @@ class TestSam3HybridTraining:
         """Forward + backward + optimizer step completes without error."""
         from minivess.adapters.sam3_hybrid import Sam3HybridAdapter
 
-        adapter = Sam3HybridAdapter(config=sam3_hybrid_config, use_stub=True)
+        adapter = Sam3HybridAdapter(config=sam3_hybrid_config)
         optimizer = torch.optim.Adam(
             filter(lambda p: p.requires_grad, adapter.parameters()), lr=1e-3
         )
@@ -186,7 +194,7 @@ class TestSam3HybridTraining:
         """DynUNet encoder/decoder receives gradients."""
         from minivess.adapters.sam3_hybrid import Sam3HybridAdapter
 
-        adapter = Sam3HybridAdapter(config=sam3_hybrid_config, use_stub=True)
+        adapter = Sam3HybridAdapter(config=sam3_hybrid_config)
         volume = torch.randn(1, 1, 4, 64, 64)
         output = adapter(volume)
         target = torch.zeros(1, 64, 64, dtype=torch.long)
@@ -204,7 +212,7 @@ class TestSam3HybridTraining:
         """Fusion gate_alpha parameter receives gradient."""
         from minivess.adapters.sam3_hybrid import Sam3HybridAdapter
 
-        adapter = Sam3HybridAdapter(config=sam3_hybrid_config, use_stub=True)
+        adapter = Sam3HybridAdapter(config=sam3_hybrid_config)
         volume = torch.randn(1, 1, 4, 64, 64)
         output = adapter(volume)
         target = torch.zeros(1, 64, 64, dtype=torch.long)
@@ -218,7 +226,7 @@ class TestSam3HybridTraining:
         """Forward pass works under AMP autocast."""
         from minivess.adapters.sam3_hybrid import Sam3HybridAdapter
 
-        adapter = Sam3HybridAdapter(config=sam3_hybrid_config, use_stub=True)
+        adapter = Sam3HybridAdapter(config=sam3_hybrid_config)
         volume = torch.randn(1, 1, 4, 64, 64)
 
         with torch.amp.autocast("cpu"):
@@ -226,13 +234,14 @@ class TestSam3HybridTraining:
         assert output.logits.shape == (1, 2, 4, 64, 64)
 
 
+@_sam3_skip
 class TestBuildAdapterIntegration:
     """build_adapter() → training step for each SAM3 family."""
 
     def test_build_and_train_vanilla(self, sam3_vanilla_config: ModelConfig) -> None:
         from minivess.adapters.model_builder import build_adapter
 
-        adapter = build_adapter(sam3_vanilla_config, use_stub=True)
+        adapter = build_adapter(sam3_vanilla_config)
         volume = torch.randn(1, 1, 2, 64, 64)
         output = adapter(volume)
         target = torch.zeros(1, 64, 64, dtype=torch.long)
@@ -243,7 +252,7 @@ class TestBuildAdapterIntegration:
     def test_build_and_train_topolora(self, sam3_topolora_config: ModelConfig) -> None:
         from minivess.adapters.model_builder import build_adapter
 
-        adapter = build_adapter(sam3_topolora_config, use_stub=True)
+        adapter = build_adapter(sam3_topolora_config)
         volume = torch.randn(1, 1, 2, 64, 64)
         output = adapter(volume)
         target = torch.zeros(1, 64, 64, dtype=torch.long)
@@ -254,7 +263,7 @@ class TestBuildAdapterIntegration:
     def test_build_and_train_hybrid(self, sam3_hybrid_config: ModelConfig) -> None:
         from minivess.adapters.model_builder import build_adapter
 
-        adapter = build_adapter(sam3_hybrid_config, use_stub=True)
+        adapter = build_adapter(sam3_hybrid_config)
         volume = torch.randn(1, 1, 4, 64, 64)
         output = adapter(volume)
         target = torch.zeros(1, 64, 64, dtype=torch.long)

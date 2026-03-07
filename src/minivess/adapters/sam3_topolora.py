@@ -9,7 +9,7 @@ Architecture:
     - LoRA: low-rank adaptation (r=16, alpha=32 default)
     - Loss: cbdice_cldice (topology-aware)
 
-Based on: TopoLoRA-SAM (Xiang et al., arXiv:2601.02273)
+Based on: TopoLoRA-SAM (Khazem, 2026, arXiv:2601.02273)
 Expected: +10-20% clDice over V1 (vanilla)
 Go/No-Go Gate G2: clDice improvement >= 2% over V1.
 """
@@ -153,15 +153,11 @@ class Sam3TopoLoraAdapter(ModelAdapter):
     ----------
     config:
         ModelConfig with ``SAM3_TOPOLORA`` family and LoRA params.
-    use_stub:
-        If True, use stub encoder/decoder for testing.
     """
 
     def __init__(
         self,
         config: ModelConfig,
-        *,
-        use_stub: bool = False,
     ) -> None:
         super().__init__()
         self.config = config
@@ -169,7 +165,7 @@ class Sam3TopoLoraAdapter(ModelAdapter):
         self._lora_alpha = config.lora_alpha
 
         # SAM3 backbone (NOT frozen yet — LoRA applied first)
-        self.backbone = Sam3Backbone(config=config, use_stub=use_stub, freeze=False)
+        self.backbone = Sam3Backbone(config=config, freeze=False)
 
         # Apply LoRA to encoder, then freeze base weights
         lora_targets = _apply_lora_to_encoder(
@@ -185,7 +181,7 @@ class Sam3TopoLoraAdapter(ModelAdapter):
             param.requires_grad = False
 
         # Trainable mask decoder
-        self.decoder = Sam3MaskDecoder(config=config, use_stub=use_stub)
+        self.decoder = Sam3MaskDecoder(config=config)
 
         trainable = self.trainable_parameters()
         total = sum(p.numel() for p in self.parameters())

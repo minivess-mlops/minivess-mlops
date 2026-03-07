@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 from torch import nn
 
+from minivess.adapters.model_builder import _sam3_package_available
 from minivess.testing.capability_discovery import (
     build_practical_combinations,
     discover_all_losses,
@@ -20,6 +21,8 @@ from minivess.testing.quasi_e2e_runner import (
     generate_test_ids,
     run_single_forward_backward,
 )
+
+_SAM3_FAMILIES = frozenset({"sam3_vanilla", "sam3_topolora", "sam3_hybrid"})
 
 
 class TestGenerateTestIds:
@@ -53,9 +56,11 @@ class TestBuildModelForTest:
         assert isinstance(model, nn.Module)
 
     def test_all_implemented_models_build(self) -> None:
-        """Every discovered model can be instantiated."""
+        """Every discovered model can be instantiated (SAM3 skipped when not installed)."""
         models = discover_implemented_models()
         for model_name in models:
+            if model_name in _SAM3_FAMILIES and not _sam3_package_available():
+                continue  # SAM3 requires real pretrained weights — skip when not installed
             model = build_model_for_test(model_name)
             assert isinstance(model, nn.Module), f"Failed to build {model_name}"
 

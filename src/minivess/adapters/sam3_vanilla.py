@@ -13,6 +13,9 @@ Architecture:
 Expected results: DSC ~0.35-0.55, clDice ~0.3-0.5
 Go/No-Go Gate G1: DSC >= 0.10 or abandon SAM for segmentation.
 
+IMPORTANT: Real pretrained SAM3 weights are required (GPU VRAM ≥6 GB, frozen encoder).
+No stub/fallback mode exists — use pytest.mark.skipif for CI tests.
+
 References:
     - Ravi et al. (2025). "SAM 3." arXiv:2511.16719
 """
@@ -41,28 +44,28 @@ logger = logging.getLogger(__name__)
 class Sam3VanillaAdapter(ModelAdapter):
     """Frozen SAM3 encoder + trainable decoder for segmentation.
 
+    Uses SDPA (Scaled Dot-Product Attention) to avoid materializing
+    5184×5184 attention matrices, reducing encoder peak VRAM from ~7 GB
+    to ~1.1 GB. This makes training feasible on 8 GB consumer GPUs.
+
     Parameters
     ----------
     config:
         ModelConfig with ``SAM3_VANILLA`` family.
-    use_stub:
-        If True, use stub encoder/decoder for testing.
     """
 
     def __init__(
         self,
         config: ModelConfig,
-        *,
-        use_stub: bool = False,
     ) -> None:
         super().__init__()
         self.config = config
 
         # Frozen SAM3 backbone (encoder + FPN neck)
-        self.backbone = Sam3Backbone(config=config, use_stub=use_stub, freeze=True)
+        self.backbone = Sam3Backbone(config=config, freeze=True)
 
         # Trainable mask decoder
-        self.decoder = Sam3MaskDecoder(config=config, use_stub=use_stub)
+        self.decoder = Sam3MaskDecoder(config=config)
 
         logger.info(
             "Sam3VanillaAdapter: encoder=%d params (frozen), decoder=%d params (trainable)",
@@ -76,20 +79,24 @@ class Sam3VanillaAdapter(ModelAdapter):
         Parameters
         ----------
         images:
-            Input 3D volume of shape (B, C, D, H, W).
+            Input 3D volume of shape (B, C, H, W, D) — MONAI convention
+            where D (depth/Z) is the last spatial dimension.
 
         Returns
         -------
         SegmentationOutput with 2-class predictions.
         """
-        b, c, d, h, w = images.shape
+        b, c, h, w, d = images.shape
         slice_logits: list[Tensor] = []
 
         for z_idx in range(d):
-            slice_2d = images[:, :, z_idx, :, :]  # (B, C, H, W)
+            slice_2d = images[:, :, :, :, z_idx]  # (B, C, H, W)
 
-            # Extract FPN features (frozen, no grad)
+            # Extract FPN features (frozen encoder with SDPA, FP16)
             fpn_features = self.backbone.extract_fpn_features(slice_2d)
+
+            # Cast to FP32 for trainable decoder (encoder outputs FP16)
+            fpn_features = fpn_features.float()
 
             # Decode to binary mask (trainable)
             binary_logits = self.decoder(fpn_features)  # (B, 1, H_f, W_f)
@@ -107,8 +114,8 @@ class Sam3VanillaAdapter(ModelAdapter):
             two_class = self.decoder.binary_to_2class(binary_logits)  # (B, 2, H, W)
             slice_logits.append(two_class)
 
-        # Stack along depth: (B, 2, D, H, W)
-        logits_3d = torch.stack(slice_logits, dim=2)
+        # Stack along depth (last dim): (B, 2, H, W, D) — MONAI convention
+        logits_3d = torch.stack(slice_logits, dim=4)
 
         return self._build_output(logits_3d, "sam3_vanilla")
 
