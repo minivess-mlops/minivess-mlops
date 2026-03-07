@@ -78,6 +78,7 @@ class DataFlowResult:
     splits: list[FoldSplit] | None
     external_datasets: dict[str, list[dict[str, str]]]
     provenance: dict[str, Any]
+    mlflow_run_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -396,18 +397,27 @@ def run_data_flow(
         dataset_hash=dataset_hash,
     )
 
-    # Log DVC commit to MLflow (if available)
-    if data_dvc_commit is not None:
-        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+    # Open MLflow run for data engineering provenance (always — not conditional on DVC)
+    mlflow_run_id: str | None = None
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+    try:
+        from minivess.orchestration.flow_contract import FlowContract
+
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment("minivess_data")
         with mlflow.start_run(tags={"flow_name": "data"}) as active_run:
-            mlflow.log_param("data_dvc_commit", data_dvc_commit)
-            logger.info(
-                "MLflow: data_dvc_commit=%s in run %s",
-                data_dvc_commit,
-                active_run.info.run_id,
-            )
+            mlflow_run_id = active_run.info.run_id
+            mlflow.log_param("data_n_volumes", len(pairs))
+            mlflow.log_param("data_n_folds", n_folds)
+            mlflow.log_param("data_hash", dataset_hash)
+            if data_dvc_commit is not None:
+                mlflow.log_param("data_dvc_commit", data_dvc_commit)
+            logger.info("MLflow data run opened: %s", mlflow_run_id)
+
+        contract = FlowContract(tracking_uri=tracking_uri)
+        contract.log_flow_completion(flow_name="data", run_id=mlflow_run_id)
+    except Exception:
+        logger.warning("Failed to open/finalize MLflow data run", exc_info=True)
 
     logger.info("Data flow complete: %d pairs, quality=%s", len(pairs), quality_passed)
     return DataFlowResult(
@@ -418,4 +428,5 @@ def run_data_flow(
         splits=splits,
         external_datasets=external_datasets,
         provenance=provenance,
+        mlflow_run_id=mlflow_run_id,
     )
