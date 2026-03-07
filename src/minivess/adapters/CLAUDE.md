@@ -7,9 +7,9 @@ When frozen, `torch.no_grad()` is applied → no activation graph built for 848M
 
 | Variant | Encoder Frozen | Task | Min VRAM | Notes |
 |---------|---------------|------|----------|-------|
-| V1 Vanilla | ✅ Yes | Inference-level gate | **≥6 GB** | Only lightweight decoder trains |
+| V1 Vanilla | ✅ Yes | Inference-level gate | **≥6 GB** | Only lightweight decoder trains; ~5-7 GB peak FP16 |
 | V2 TopoLoRA | ❌ No | Training gate | **≥16 GB** | LoRA on all 32 ViT-32L blocks, gradients flow |
-| V3 Hybrid | ✅ Yes | Inference-level gate | **≥6 GB** | SAM encoder frozen + `.detach()`; DynUNet-3D adds ~2-4 GB |
+| V3 Hybrid | ✅ Yes | Inference-level gate | **≥6 GB** | Sequential execution: SAM frozen (5-7 GB peak) then DynUNet (~2.8 GB) |
 
 Gate is enforced by `check_sam3_vram(variant, mode)` in `sam3_vram_check.py`.
 - `mode="inference"` → 6 GB gate → V1, V3
@@ -32,11 +32,36 @@ This means V1 Vanilla with frozen encoder has similar VRAM to pure inference.
 | Task | Feasible? |
 |------|-----------|
 | V1 Vanilla frozen encoder training | ✅ Likely (5-7 GB expected) — **VERIFY EMPIRICALLY** |
-| V3 Hybrid (SAM frozen + DynUNet-3D) | ⚠️ Tight (8-12 GB expected) — OOM risk |
+| V3 Hybrid (SAM frozen + DynUNet-3D) | ✅ Likely (5-7 GB peak) — sequential SAM→DynUNet, not simultaneous |
 | V2 TopoLoRA (LoRA on unfrozen encoder) | ❌ No — requires A100-40GB |
 
 Sources for VRAM numbers: GH Issues #235, #200, #307 at facebookresearch/sam3;
 debuggercafe.com SAM3 benchmarks. **Do not state VRAM numbers without citing a source.**
+
+### Dtype Selection (AMP handles this automatically)
+
+PyTorch AMP (`torch.cuda.amp.autocast()`) automatically picks the optimal dtype per GPU.
+**No hardcoded dtypes in adapter code.** Dtype is config-driven or auto-detected.
+
+| GPU Architecture | Compute Cap | AMP autocast dtype | Note |
+|-----------------|-------------|-------------------|------|
+| Turing (RTX 2070 Super) | 7.5 | FP16 (auto) | BF16 exists but 6.7x slower (software emulation) |
+| Ampere (RTX 3090, A100) | 8.0+ | BF16 or FP16 (auto) | Both native |
+
+Only relevant if someone explicitly forces a dtype in config — don't force BF16 on Turing.
+
+### Multi-Environment Compute (CPU / Consumer GPU / Cloud)
+
+| Variant | CPU (64 GB RAM) | RTX 2070 Super (8 GB) | A100-40GB |
+|---------|----------------|----------------------|-----------|
+| V1 Vanilla (cached) | 75 h (3.2 days) | **2 h** | <1 h |
+| V1 Vanilla (no cache) | 157 days | 2.6 days | ~6 h |
+| V2 TopoLoRA | 470 days | OOM | **38 h** |
+| V3 Hybrid (cached) | 76 h (3.2 days) | **13-25 h** | ~4 h |
+
+**Feature caching** is the critical optimization for V1/V3: extract frozen SAM3
+features once to disk (8 GB/fold), then train decoder on cached tensors.
+This makes CPU training feasible for a long-weekend job.
 
 ## No Stub, Never
 
