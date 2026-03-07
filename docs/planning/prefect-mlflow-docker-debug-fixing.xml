@@ -1,0 +1,732 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Executable TDD Plan: Prefect/MLflow/Docker Code Review Fixes
+  ============================================================
+  Plan ID   : prefect-mlflow-docker-debug-fixing
+  Created   : 2026-03-07
+  Closes    : #404 (meta-issue)
+  Sub-issues: #405–#419 (15 code review findings from PR #400 review)
+  Skill     : .claude/skills/self-learning-iterative-coder/SKILL.md
+  Branch    : feat/prefect-mlflow-cleanup (to be created)
+  Base      : main
+
+  Execution order is determined by <depends_on> tags.
+  Tasks with no dependencies can be parallelized.
+  Run with: self-learning-iterative-coder skill (TDD Red→Green→Verify→Fix→Checkpoint→Converge)
+
+  Issue map:
+    #405 → T-03 (duplicate FlowContract imports)
+    #406 → T-02 (duplicate MLflow init helper)
+    #407 → T-08 (env var naming standardization)
+    #408 → T-09 (deploy_flow config default)
+    #409 → T-04 (log_flow_completion helper)
+    #410 → T-07 (flow name vs MLflow tag mismatch)
+    #411 → T-10 (silent exception swallowing)
+    #412 → T-14 (explicit upstream IDs in analysis_flow)
+    #413 → T-01 (orchestration constants module)
+    #414 → T-13 (PostTrainingFlowResult dataclass)
+    #415 → T-11 (bare exception handlers in deploy/post_training)
+    #416 → T-06 (standardize @flow decorator names)
+    #417 → T-12 (preflight env var validation)
+    #418 → T-14 (explicit upstream IDs in all flows — combined with #412)
+    #419 → T-05 (merge adjacent try-except blocks)
+-->
+
+<plan
+  id="prefect-mlflow-docker-debug-fixing"
+  version="1.0"
+  meta_issue="404"
+  skill="self-learning-iterative-coder"
+>
+
+  <metadata>
+    <title>Prefect/MLflow/Docker Code Review Cleanup</title>
+    <description>
+      Fix 15 code quality issues identified in the deep review of PR #400 (28-task
+      Prefect/Docker hardening). Issues fall into five categories:
+      1. DRY violations (MLflow init, FlowContract, log_flow_completion, try-except)
+      2. Naming consistency (env vars, @flow decorators, MLflow tags)
+      3. Error handling (silent failures, sentinel strings, bare except)
+      4. Missing features (deploy_flow config default, preflight validation, upstream IDs)
+      5. Type improvements (PostTrainingFlowResult dataclass, return annotations)
+    </description>
+    <affected_files>
+      <file>src/minivess/orchestration/flows/train_flow.py</file>
+      <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+      <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+      <file>src/minivess/orchestration/flows/dashboard_flow.py</file>
+      <file>src/minivess/orchestration/flows/qa_flow.py</file>
+      <file>src/minivess/orchestration/flows/hpo_flow.py</file>
+      <file>src/minivess/orchestration/deploy_flow.py</file>
+      <file>src/minivess/orchestration/deployments.py</file>
+      <file>src/minivess/orchestration/flow_contract.py</file>
+      <file>src/minivess/orchestration/constants.py (NEW)</file>
+      <file>src/minivess/orchestration/mlflow_helpers.py (NEW)</file>
+      <file>deployment/docker-compose.flows.yml</file>
+    </affected_files>
+    <test_dirs>
+      <test_dir>tests/unit/orchestration/</test_dir>
+      <test_dir>tests/integration/orchestration/</test_dir>
+    </test_dirs>
+    <verify_commands>
+      <command>uv run pytest tests/unit/orchestration/ tests/integration/orchestration/ -x -q</command>
+      <command>uv run ruff check src/minivess/orchestration/ tests/unit/orchestration/</command>
+      <command>uv run mypy src/minivess/orchestration/</command>
+    </verify_commands>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 1: Foundation — new modules and constants (no dependencies)       -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <task id="T-01" closes="#413" effort="S" group="foundation">
+    <title>Create orchestration constants module</title>
+    <description>
+      All MLflow experiment name strings are hardcoded across 6+ flow files.
+      A typo causes silent cross-flow isolation failure.
+      Create src/minivess/orchestration/constants.py with all experiment names
+      and flow name constants as module-level string constants.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/orchestration/test_constants.py:
+        - test_experiment_names_are_strings: all EXPERIMENT_* constants are non-empty strings
+        - test_flow_names_are_lowercase_hyphen: all FLOW_NAME_* constants match pattern [a-z][a-z-]*
+        - test_no_duplicate_values: all experiment names are unique
+        - test_all_expected_constants_exist: check for EXPERIMENT_TRAINING,
+          EXPERIMENT_DATA, EXPERIMENT_EVALUATION, EXPERIMENT_POST_TRAINING,
+          EXPERIMENT_DEPLOYMENT, EXPERIMENT_DASHBOARD, EXPERIMENT_QA,
+          FLOW_NAME_TRAIN, FLOW_NAME_DATA, FLOW_NAME_POST_TRAINING,
+          FLOW_NAME_ANALYSIS, FLOW_NAME_DEPLOY, FLOW_NAME_DASHBOARD, FLOW_NAME_QA
+      </red_phase>
+      <green_phase>
+        Create src/minivess/orchestration/constants.py:
+        - EXPERIMENT_* string constants for each MLflow experiment
+        - FLOW_NAME_* string constants for each Prefect flow (lowercase-hyphen)
+        - Module docstring explaining the naming convention
+        - Export via __init__.py
+      </green_phase>
+      <acceptance_criteria>
+        - All constants module tests pass
+        - No hardcoded experiment/flow name strings remain in flow files (verified in T-06)
+        - mypy: clean
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on/>
+  </task>
+
+  <task id="T-02" closes="#406" effort="S" group="foundation">
+    <title>Extract open_mlflow_run() helper to eliminate 6-flow duplication</title>
+    <description>
+      The 3-liner (set_tracking_uri + set_experiment + start_run) is duplicated across
+      all 6 flows. Create src/minivess/orchestration/mlflow_helpers.py with a
+      context-manager helper that wraps this pattern.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/orchestration/test_mlflow_helpers.py:
+        - test_open_mlflow_run_sets_uri: mock mlflow; verify set_tracking_uri called
+        - test_open_mlflow_run_sets_experiment: verify set_experiment called
+        - test_open_mlflow_run_enters_context: verify start_run() called and run_id returned
+        - test_open_mlflow_run_with_tags: verify tags passed through to start_run()
+        - test_open_mlflow_run_exception_propagates: verify exceptions are not swallowed
+      </red_phase>
+      <green_phase>
+        Create src/minivess/orchestration/mlflow_helpers.py:
+        - open_mlflow_run(tracking_uri, experiment_name, tags) -> contextlib.AbstractContextManager
+          that calls set_tracking_uri, set_experiment, then starts and yields the run
+        - log_completion_safe(flow_name, tracking_uri, run_id) -> None
+          helper that wraps FlowContract.log_flow_completion() with safe exception handling
+        - find_upstream_safely(tracking_uri, experiment_name, upstream_flow) -> dict | None
+          helper that wraps FlowContract.find_upstream_run() returning None on exception
+      </green_phase>
+      <acceptance_criteria>
+        - All helper tests pass
+        - Helpers are importable from minivess.orchestration.mlflow_helpers
+        - mypy: clean with full type annotations
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-01</depends_on>
+  </task>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 2: DRY refactors — eliminate duplication across flows             -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <task id="T-03" closes="#405" effort="S" group="dry_refactors">
+    <title>Deduplicate FlowContract imports — import at module level, reuse instance</title>
+    <description>
+      FlowContract is imported inside try-except blocks twice per flow function.
+      Move import to module top-level; create a single FlowContract instance per
+      tracking_uri within each flow call, reuse it for both find_upstream_run()
+      and log_flow_completion() calls.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/orchestration/test_flow_contract_dedup.py:
+        - test_flow_contract_import_is_top_level: use ast.parse() + ast.walk() to verify
+          FlowContract import is NOT inside a try-except block in any flow file
+          (checked files: train_flow.py, post_training_flow.py, deploy_flow.py, analysis_flow.py)
+        - test_find_upstream_uses_contract: verify that after T-02 helpers are applied,
+          each flow calls find_upstream_safely() (not raw FlowContract) inside functions
+      </red_phase>
+      <green_phase>
+        Update all 4 affected flows:
+        - Move FlowContract import to module top-level (from minivess.orchestration.flow_contract)
+        - In each flow function: create one contract instance, call find_upstream_safely()
+          and log_completion_safe() from mlflow_helpers (T-02)
+        - Remove the duplicate try-except import pattern
+      </green_phase>
+      <acceptance_criteria>
+        - No FlowContract import inside try-except blocks (AST-checked)
+        - Existing flow tests still pass
+        - ruff/mypy: clean
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-02</depends_on>
+  </task>
+
+  <task id="T-04" closes="#409" effort="S" group="dry_refactors">
+    <title>Replace inline log_flow_completion try-except with log_completion_safe() helper</title>
+    <description>
+      The FlowContract.log_flow_completion() call wrapped in try-except is duplicated
+      verbatim in 5 flows. Replace with the log_completion_safe() helper from T-02.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Extend tests/unit/orchestration/test_mlflow_helpers.py:
+        - test_log_completion_safe_calls_contract: mock FlowContract; verify log_flow_completion called
+        - test_log_completion_safe_handles_exception: exception from FlowContract is caught; warning logged
+        - test_log_completion_safe_skips_none_run_id: when run_id is None, no FlowContract call made
+      </red_phase>
+      <green_phase>
+        Update all 5 flows (train_flow, post_training_flow, analysis_flow, deploy_flow, dashboard_flow):
+        - Replace inline try-except + FlowContract instantiation with:
+          from minivess.orchestration.mlflow_helpers import log_completion_safe
+          log_completion_safe(FLOW_NAME_*, tracking_uri, mlflow_run_id)
+        - Use FLOW_NAME_* constants from T-01 for the flow_name argument
+      </green_phase>
+      <acceptance_criteria>
+        - All 5 flows use log_completion_safe() instead of inline boilerplate
+        - Tests for log_completion_safe pass
+        - No regression in existing flow tests
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-02, T-03</depends_on>
+  </task>
+
+  <task id="T-05" closes="#419" effort="S" group="dry_refactors">
+    <title>Merge adjacent try-except blocks into single per-flow block</title>
+    <description>
+      After T-02–T-04, the remaining try-except blocks in flows can be merged or
+      eliminated. Verify that each flow function has at most one infrastructure
+      try-except block after the DRY refactors are applied.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/orchestration/test_flow_structure.py:
+        - test_train_flow_single_try_block: use ast.parse() + ast.walk() to count
+          top-level Try nodes in training_flow() body; assert count &lt;= 1
+        - test_post_training_flow_single_try_block: same for post_training_flow()
+        - test_analysis_flow_single_try_block: same for run_analysis_flow()
+        - test_deploy_flow_single_try_block: same for deploy_flow()
+        NOTE: AST parsing is MANDATORY — no regex (CLAUDE.md Rule #16)
+      </red_phase>
+      <green_phase>
+        For each flow where T-03/T-04 leaves adjacent try-except blocks:
+        - Merge into a single try-except that handles both upstream discovery and MLflow setup
+        - OR: verify that helpers already eliminated the blocks and the test passes as-is
+        The goal is clean, readable flow bodies without boilerplate repetition.
+      </green_phase>
+      <acceptance_criteria>
+        - AST test: at most 1 top-level try block in each main flow function
+        - All existing flow tests still pass
+        - ruff format: clean (no excessive nesting)
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-04</depends_on>
+  </task>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 3: Naming consistency — decorators, env vars, MLflow tags         -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <task id="T-06" closes="#416" effort="S" group="naming">
+    <title>Standardize all @flow decorator names to lowercase-hyphen style</title>
+    <description>
+      Flow decorator names use inconsistent styles (spaces, title-case, lowercase-hyphen).
+      Prefect convention is lowercase-hyphen. Standardize all flows and update
+      deployments.py to use the FLOW_NAME_* constants from T-01.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/orchestration/test_flow_names.py:
+        - test_all_flow_names_lowercase_hyphen: use ast.parse() + ast.walk() to find
+          @flow(name=...) decorator calls in all flow files; assert each name matches
+          pattern r'^[a-z][a-z0-9-]*$' — NOTE: use str.match() not regex compile
+          Actually: use str.lower() + str.replace(' ', '-') comparison, not regex (Rule #16)
+          Better: check name == name.lower() and ' ' not in name and '_' not in name
+        - test_deployments_keys_match_flow_names: import deployments.py FLOW_DEPLOYMENTS dict;
+          assert all keys are values of FLOW_NAME_* constants from constants.py
+        - test_constants_match_decorators: verify FLOW_NAME_TRAIN == "training-flow" etc.
+      </red_phase>
+      <green_phase>
+        Update flow files:
+        - post_training_flow.py: @flow(name="Post-Training Pipeline") → @flow(name=FLOW_NAME_POST_TRAINING)
+        - deploy_flow.py: @flow(name="Deploy Pipeline") → @flow(name=FLOW_NAME_DEPLOY)
+        - dashboard_flow.py: @flow(name="minivess-dashboard") → @flow(name=FLOW_NAME_DASHBOARD)
+        - Others: verify and align with constants
+        Update deployments.py: replace string keys with FLOW_NAME_* constants
+      </green_phase>
+      <acceptance_criteria>
+        - All @flow names are lowercase-hyphen and use FLOW_NAME_* constants
+        - deployments.py keys match constants
+        - Tests pass
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-01</depends_on>
+  </task>
+
+  <task id="T-07" closes="#410" effort="M" group="naming">
+    <title>Fix flow name vs MLflow tag mismatch — FlowContract.find_upstream_run() was broken</title>
+    <description>
+      FlowContract.find_upstream_run() searches MLflow by the flow_name tag that flows
+      write when logging completion. But the tag values (e.g., "analyze") don't match
+      the @flow decorator names (e.g., "analysis-flow"), causing silent discovery failure.
+      After T-06, all names are standardized; now ensure logged tags match constants.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Extend tests/unit/orchestration/test_flow_names.py:
+        - test_logged_flow_name_matches_flow_decorator: for each flow, verify that the
+          flow_name argument passed to log_flow_completion() equals the @flow(name=) value
+          (check via AST walk on the flow function body)
+        Write tests/integration/orchestration/test_flow_chain_discovery.py:
+        - test_training_flow_can_be_discovered_by_analysis: mock MLflow; training_flow logs
+          completion with FLOW_NAME_TRAIN tag; analysis_flow discovery query returns it
+        - test_post_training_can_be_discovered_by_deploy: same for post_training → deploy chain
+      </red_phase>
+      <green_phase>
+        Update all log_flow_completion() calls to use FLOW_NAME_* constants:
+        - train_flow.py: log_completion_safe(FLOW_NAME_TRAIN, ...)
+        - post_training_flow.py: log_completion_safe(FLOW_NAME_POST_TRAINING, ...)
+        - analysis_flow.py: log_completion_safe(FLOW_NAME_ANALYSIS, ...)
+        - deploy_flow.py: log_completion_safe(FLOW_NAME_DEPLOY, ...)
+        - dashboard_flow.py: log_completion_safe(FLOW_NAME_DASHBOARD, ...)
+        Update FlowContract.find_upstream_run() call sites to use FLOW_NAME_* for
+        the upstream_flow argument.
+      </green_phase>
+      <acceptance_criteria>
+        - Tag logged by each flow matches the constant; integration test passes
+        - FlowContract queries use FLOW_NAME_* constants (no hardcoded strings)
+        - End-to-end chain discovery test passes
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-06, T-04</depends_on>
+  </task>
+
+  <task id="T-08" closes="#407" effort="M" group="naming">
+    <title>Standardize output directory env vars to _OUTPUT_DIR suffix</title>
+    <description>
+      Output directory env vars use inconsistent naming: ANALYSIS_OUTPUT vs
+      POST_TRAINING_OUTPUT_DIR. Standardize all to use _OUTPUT_DIR suffix and
+      update docker-compose.flows.yml and all Dockerfiles accordingly.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/orchestration/test_env_var_naming.py:
+        - test_output_dir_env_vars_have_dir_suffix: use ast.parse() + ast.walk() to find
+          os.environ.get("...OUTPUT...") calls in all flow files; assert each name ends with
+          "_OUTPUT_DIR" (use str.endswith(), not regex)
+        - test_docker_compose_uses_dir_suffix: read deployment/docker-compose.flows.yml with
+          yaml.safe_load(); find all env var names containing "OUTPUT"; assert all end with "_DIR"
+      </red_phase>
+      <green_phase>
+        Update flow files:
+        - analysis_flow.py: ANALYSIS_OUTPUT → ANALYSIS_OUTPUT_DIR
+        - dashboard_flow.py: DASHBOARD_OUTPUT → DASHBOARD_OUTPUT_DIR
+        Update docker-compose.flows.yml: rename env vars in all services that use OUTPUT
+        Update Dockerfile.analyze and Dockerfile.dashboard: update ENV defaults
+        Update any scripts that set these env vars
+      </green_phase>
+      <acceptance_criteria>
+        - No env vars ending in _OUTPUT (without _DIR) in flow code or docker-compose
+        - All Dockerfiles updated
+        - Tests pass
+        - docker-compose.flows.yml: yaml.safe_load() succeeds with correct var names
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on/>
+  </task>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 4: Error handling — fix silent failures and sentinel strings       -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <task id="T-09" closes="#408" effort="M" group="error_handling">
+    <title>Fix deploy_flow() — make config parameter optional with from_env() default</title>
+    <description>
+      deploy_flow() has a required DeployConfig positional parameter with no default.
+      This makes the flow uncallable from Prefect UI and untestable without building config.
+      Add DeployConfig.from_env() and make the parameter optional.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/orchestration/test_deploy_flow_config.py:
+        - test_deploy_config_from_env_reads_tracking_uri: set MLFLOW_TRACKING_URI env var;
+          DeployConfig.from_env() must return config with that tracking_uri
+        - test_deploy_config_from_env_reads_champion_dir: set CHECKPOINT_DIR; verify
+        - test_deploy_flow_callable_without_config: call deploy_flow.__wrapped__() with no config;
+          verify it doesn't raise TypeError (uses from_env default)
+        - test_deploy_flow_accepts_explicit_config: pass DeployConfig explicitly; verify used
+      </red_phase>
+      <green_phase>
+        Update src/minivess/orchestration/deploy_flow.py:
+        - Add DeployConfig.from_env() classmethod that reads from environment
+        - Change signature: def deploy_flow(config: DeployConfig | None = None, ...)
+        - At function start: if config is None: config = DeployConfig.from_env()
+        Update src/minivess/config/deploy_config.py: add from_env() classmethod
+      </green_phase>
+      <acceptance_criteria>
+        - deploy_flow() callable with no arguments (uses env vars)
+        - Explicit DeployConfig still works
+        - All unit tests pass
+        - mypy: clean
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on/>
+  </task>
+
+  <task id="T-10" closes="#411" effort="M" group="error_handling">
+    <title>Fix silent exception swallowing — replace sentinel strings with None, fix MLflow failures</title>
+    <description>
+      Multiple flows use "no_upstream" sentinel strings and catch all exceptions silently.
+      This violates CLAUDE.md "Never Silent-Fail" rule. Fix upstream discovery to return None,
+      and MLflow logging failures to raise RuntimeError with actionable instructions.
+      The find_upstream_safely() helper from T-02 provides the safe upstream discovery;
+      this task ensures callers handle None correctly.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/orchestration/test_no_sentinels.py:
+        - test_no_sentinel_strings_in_flows: use ast.parse() + ast.walk() to scan all flow
+          files for string literal "no_upstream"; assert not found
+        - test_upstream_returns_none_on_failure: mock FlowContract.find_upstream_run to raise;
+          find_upstream_safely() must return None (not raise, not return sentinel)
+        - test_mlflow_failure_logs_warning: mock mlflow.start_run() to raise; verify warning logged
+          (we allow graceful degradation for MLflow — it's observability, not blocking)
+        Write tests/unit/orchestration/test_upstream_none_handling.py:
+        - test_training_flow_handles_none_upstream: call training_flow with mock that returns
+          None for upstream; verify flow proceeds and upstream_data_run_id is None in result
+      </red_phase>
+      <green_phase>
+        Update all flows that use "no_upstream" sentinel:
+        - Replace: upstream_data_run_id: str = "no_upstream"
+          With:     upstream_data_run_id: str | None = None
+        - Update all downstream consumers that compared to "no_upstream" to check for None
+        - Ensure TrainingFlowResult, PostTrainingFlowResult etc. use str | None for upstream fields
+        - Verify find_upstream_safely() (T-02) handles exceptions and returns None
+      </green_phase>
+      <acceptance_criteria>
+        - grep for "no_upstream" returns 0 results (use Grep tool, not regex)
+        - All None-handling tests pass
+        - mypy: str | None types properly annotated
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-02</depends_on>
+  </task>
+
+  <task id="T-11" closes="#415" effort="M" group="error_handling">
+    <title>Fix bare exception handlers — ONNX export failure must propagate</title>
+    <description>
+      In deploy_flow.py and post_training_flow.py, critical operations (ONNX export,
+      champion discovery) are caught by bare except and execution continues. The flow
+      returns success even when ONNX export failed. This silently corrupts the deployment.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/orchestration/test_deploy_error_propagation.py:
+        - test_onnx_export_failure_fails_flow: mock export_onnx() to raise RuntimeError;
+          verify deploy_flow() raises (not returns success dict)
+        - test_champion_discovery_failure_fails_flow: mock discover_champions() to raise;
+          verify deploy_flow() raises
+        - test_optional_plugin_failure_is_non_fatal: mock a best-effort plugin to raise;
+          verify flow succeeds but failed_operations list is populated in result
+        Write tests/unit/orchestration/test_post_training_error_propagation.py:
+        - test_swa_failure_fails_flow: mock SWA to raise; verify post_training_flow() raises
+        - test_calibration_failure_is_non_fatal: calibration is best-effort; failure → logged + continued
+      </red_phase>
+      <green_phase>
+        Update deploy_flow.py:
+        - ONNX export: remove try-except; let exception propagate (it's blocking)
+        - Champion discovery: same
+        - Add failed_operations: list[str] to DeployFlowResult
+        Update post_training_flow.py:
+        - SWA: blocking — re-raise on failure
+        - Calibration/conformal: best-effort — catch, log, add to failed list in result
+        Update PostTrainingFlowResult (T-13): add failed_operations: list[str] field
+      </green_phase>
+      <acceptance_criteria>
+        - ONNX export failure causes deploy_flow to raise
+        - Optional plugin failures populate failed_operations but don't fail the flow
+        - Tests pass
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-13</depends_on>
+  </task>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 5: Missing features — preflight, typed results, explicit IDs      -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <task id="T-12" closes="#417" effort="S" group="features">
+    <title>Add preflight env var validation to training_flow and analysis_flow</title>
+    <description>
+      Critical paths (SPLITS_DIR, CHECKPOINT_DIR) are read from environment without
+      validation. When missing, flow fails cryptically mid-execution. Add preflight
+      validation that raises RuntimeError with clear setup instructions.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/orchestration/test_preflight_validation.py:
+        - test_training_flow_raises_on_missing_splits_dir: unset SPLITS_DIR; call
+          training_flow.__wrapped__() without splits_dir; assert RuntimeError raised
+          with message containing "SPLITS_DIR"
+        - test_training_flow_raises_on_missing_checkpoint_dir: unset CHECKPOINT_DIR; same
+        - test_analysis_flow_raises_on_missing_output_dir: unset ANALYSIS_OUTPUT_DIR; same
+        - test_validation_passes_when_vars_set: set all required vars; no RuntimeError
+      </red_phase>
+      <green_phase>
+        Add _validate_required_env() helpers in each affected flow:
+        training_flow: validate SPLITS_DIR, CHECKPOINT_DIR
+        analysis_flow: validate ANALYSIS_OUTPUT_DIR (after T-08 rename)
+        Call at the start of each flow function before any heavy computation.
+        Error message format: "Required env var {var} not set. Set it with:\n  export {var}=/path/to/dir"
+      </green_phase>
+      <acceptance_criteria>
+        - RuntimeError raised with clear message when required env vars missing
+        - No RuntimeError when vars are set
+        - Tests pass
+        - mypy: clean
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-08</depends_on>
+  </task>
+
+  <task id="T-13" closes="#414" effort="S" group="features">
+    <title>Add PostTrainingFlowResult dataclass to match pattern of other flow results</title>
+    <description>
+      post_training_flow() returns dict[str, Any] — untyped and inconsistent with
+      TrainingFlowResult and DeployFlowResult. Create a typed dataclass.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/orchestration/test_post_training_result.py:
+        - test_result_is_dataclass: import PostTrainingFlowResult; assert dataclasses.is_dataclass()
+        - test_result_has_required_fields: verify fields: flow_name, status, mlflow_run_id,
+          upstream_training_run_id, swa_completed, calibration_completed, conformal_completed,
+          failed_operations
+        - test_result_default_values: PostTrainingFlowResult() has sensible defaults (not raises)
+        - test_post_training_flow_returns_typed_result: mock all heavy operations; verify
+          post_training_flow.__wrapped__() returns PostTrainingFlowResult (not dict)
+      </red_phase>
+      <green_phase>
+        Add to src/minivess/orchestration/flows/post_training_flow.py (at top):
+        @dataclass
+        class PostTrainingFlowResult:
+            flow_name: str = "post-training-flow"
+            status: str = "completed"
+            mlflow_run_id: str | None = None
+            upstream_training_run_id: str | None = None
+            swa_completed: bool = False
+            calibration_completed: bool = False
+            conformal_completed: bool = False
+            failed_operations: list[str] = field(default_factory=list)
+
+        Update post_training_flow() return type annotation.
+        Update all return statements to return PostTrainingFlowResult instances.
+      </green_phase>
+      <acceptance_criteria>
+        - PostTrainingFlowResult is a proper dataclass
+        - post_training_flow() has return type annotation -> PostTrainingFlowResult
+        - mypy: clean
+        - Tests pass
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on/>
+  </task>
+
+  <task id="T-14" closes="#412,#418" effort="M" group="features">
+    <title>Add explicit upstream_run_id params to all flows for deterministic chaining</title>
+    <description>
+      Flows only discover upstream runs via MLflow tag queries (FlowContract), which is
+      fragile when tags are missing. Add optional upstream_run_id parameters to all
+      consumer flows so explicit chaining is possible (for CI, trigger chains, tests).
+      Closes #412 (analysis_flow specifically) and #418 (all flows generally).
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/orchestration/test_explicit_upstream.py:
+        - test_training_flow_accepts_upstream_data_run_id: verify training_flow signature
+          has upstream_data_run_id: str | None = None parameter
+        - test_post_training_flow_accepts_upstream_training_run_id: same
+        - test_analysis_flow_accepts_upstream_training_run_id: same
+        - test_deploy_flow_accepts_upstream_analysis_run_id: same
+        - test_dashboard_flow_accepts_upstream_analysis_run_id: same
+        - test_explicit_id_skips_mlflow_discovery: mock FlowContract; when explicit ID provided,
+          find_upstream_run() must NOT be called (mock.assert_not_called())
+        - test_none_id_triggers_mlflow_discovery: when parameter is None, find_upstream_run() IS called
+        Write tests/integration/orchestration/test_trigger_chain.py:
+        - test_trigger_chain_passes_run_ids_explicitly: simulate PipelineTriggerChain;
+          verify each downstream flow receives the upstream run ID explicitly
+      </red_phase>
+      <green_phase>
+        Update flow signatures (where not already done):
+        - post_training_flow(..., upstream_training_run_id: str | None = None)
+        - run_analysis_flow(..., upstream_training_run_id: str | None = None)
+        - deploy_flow(..., upstream_analysis_run_id: str | None = None)
+        - dashboard_flow(..., upstream_analysis_run_id: str | None = None)
+
+        Update each flow body:
+        if upstream_X_run_id is not None:
+            discovered_upstream = {"run_id": upstream_X_run_id}
+        else:
+            discovered_upstream = find_upstream_safely(...)
+
+        Update PipelineTriggerChain in orchestration/trigger.py to pass run IDs explicitly.
+      </green_phase>
+      <acceptance_criteria>
+        - All 5 consumer flows have optional upstream run ID parameter
+        - Explicit ID skips MLflow discovery (verified by mock assertion)
+        - PipelineTriggerChain uses explicit IDs
+        - All tests pass, mypy clean
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-07, T-10</depends_on>
+  </task>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 6: Integration verification                                       -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <task id="T-15" closes="#404" effort="S" group="integration">
+    <title>End-to-end integration test: flow chain with all fixes applied</title>
+    <description>
+      After all 14 preceding tasks, verify the complete flow chain works end-to-end
+      with mocked MLflow and Prefect. This is the acceptance test for issue #404.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/integration/orchestration/test_full_flow_chain.py:
+        - test_full_chain_with_mocked_mlflow: mock mlflow, mock all heavy computation;
+          run PipelineTriggerChain from data → train → post_training → analyze → deploy;
+          verify each flow:
+          (a) logs with correct FLOW_NAME_* constant
+          (b) receives the upstream run ID explicitly (not via discovery)
+          (c) returns typed result dataclass (not dict)
+          (d) no "no_upstream" sentinel strings in any result
+        - test_all_flow_names_in_constants: for each @flow in all flow files, verify
+          the name is one of the FLOW_NAME_* constants (AST + constants lookup)
+        - test_all_experiment_names_in_constants: same for MLflow experiment names
+        - test_docker_compose_env_vars_consistent: load docker-compose.flows.yml with
+          yaml.safe_load(); verify all OUTPUT env vars end with _OUTPUT_DIR
+      </red_phase>
+      <green_phase>
+        Fix any remaining issues found by the integration tests.
+        Ensure PipelineTriggerChain passes all explicit run IDs through the chain.
+      </green_phase>
+      <acceptance_criteria>
+        - All integration tests pass
+        - Full flow chain runs with zero sentinel strings
+        - All constant references verified
+        - ruff + mypy: clean across all orchestration modules
+        - Issue #404 closed
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-05, T-07, T-08, T-09, T-10, T-11, T-12, T-13, T-14</depends_on>
+  </task>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- Execution summary                                                        -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <execution_order>
+    <!-- Wave 1: Foundation — no dependencies, can all run in sequence -->
+    <wave id="1" description="Foundation modules (no dependencies)">
+      <task_ref>T-01</task_ref>  <!-- constants module -->
+      <task_ref>T-09</task_ref>  <!-- deploy_flow config default — independent -->
+      <task_ref>T-13</task_ref>  <!-- PostTrainingFlowResult — independent -->
+      <task_ref>T-08</task_ref>  <!-- env var naming — independent -->
+    </wave>
+
+    <!-- Wave 2: Helpers — depend only on T-01 -->
+    <wave id="2" description="MLflow helper extraction">
+      <task_ref>T-02</task_ref>  <!-- mlflow_helpers.py — depends on T-01 -->
+      <task_ref>T-06</task_ref>  <!-- flow decorator names — depends on T-01 -->
+    </wave>
+
+    <!-- Wave 3: DRY refactors — depend on T-02 -->
+    <wave id="3" description="DRY refactors — eliminate duplication">
+      <task_ref>T-03</task_ref>  <!-- dedup FlowContract imports — depends on T-02 -->
+      <task_ref>T-10</task_ref>  <!-- sentinel string removal — depends on T-02 -->
+    </wave>
+
+    <!-- Wave 4: Complete DRY chain + naming fix -->
+    <wave id="4" description="Complete DRY chain and fix tag mismatches">
+      <task_ref>T-04</task_ref>  <!-- log_completion_safe — depends on T-03 -->
+      <task_ref>T-07</task_ref>  <!-- flow name vs tag mismatch — depends on T-06, T-04 -->
+    </wave>
+
+    <!-- Wave 5: Structural improvements -->
+    <wave id="5" description="Structural and feature improvements">
+      <task_ref>T-05</task_ref>  <!-- merge try-except blocks — depends on T-04 -->
+      <task_ref>T-11</task_ref>  <!-- ONNX export propagation — depends on T-13 -->
+      <task_ref>T-12</task_ref>  <!-- preflight validation — depends on T-08 -->
+    </wave>
+
+    <!-- Wave 6: Explicit chaining — depends on T-07, T-10 -->
+    <wave id="6" description="Explicit upstream run ID chaining">
+      <task_ref>T-14</task_ref>  <!-- explicit upstream IDs — depends on T-07, T-10 -->
+    </wave>
+
+    <!-- Wave 7: Integration verification -->
+    <wave id="7" description="End-to-end integration verification">
+      <task_ref>T-15</task_ref>  <!-- integration test — depends on everything -->
+    </wave>
+  </execution_order>
+
+  <statistics>
+    <total_tasks>15</total_tasks>
+    <total_issues_closed>16</total_issues_closed>  <!-- #404 + #405-#419 -->
+    <effort_breakdown>
+      <xs_tasks>0</xs_tasks>
+      <s_tasks>9</s_tasks>
+      <m_tasks>6</m_tasks>
+      <l_tasks>0</l_tasks>
+    </effort_breakdown>
+    <test_files_to_create>
+      <file>tests/unit/orchestration/test_constants.py</file>
+      <file>tests/unit/orchestration/test_mlflow_helpers.py</file>
+      <file>tests/unit/orchestration/test_flow_contract_dedup.py</file>
+      <file>tests/unit/orchestration/test_flow_names.py</file>
+      <file>tests/unit/orchestration/test_flow_structure.py</file>
+      <file>tests/unit/orchestration/test_env_var_naming.py</file>
+      <file>tests/unit/orchestration/test_deploy_flow_config.py</file>
+      <file>tests/unit/orchestration/test_no_sentinels.py</file>
+      <file>tests/unit/orchestration/test_upstream_none_handling.py</file>
+      <file>tests/unit/orchestration/test_deploy_error_propagation.py</file>
+      <file>tests/unit/orchestration/test_post_training_error_propagation.py</file>
+      <file>tests/unit/orchestration/test_preflight_validation.py</file>
+      <file>tests/unit/orchestration/test_post_training_result.py</file>
+      <file>tests/unit/orchestration/test_explicit_upstream.py</file>
+      <file>tests/integration/orchestration/test_flow_chain_discovery.py</file>
+      <file>tests/integration/orchestration/test_trigger_chain.py</file>
+      <file>tests/integration/orchestration/test_full_flow_chain.py</file>
+    </test_files_to_create>
+    <new_source_files>
+      <file>src/minivess/orchestration/constants.py</file>
+      <file>src/minivess/orchestration/mlflow_helpers.py</file>
+    </new_source_files>
+  </statistics>
+
+</plan>
