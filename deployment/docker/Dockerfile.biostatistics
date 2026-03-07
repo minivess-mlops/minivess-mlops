@@ -1,0 +1,24 @@
+# MinIVess MLOps v2 — Biostatistics Flow
+# Cross-run statistical comparisons, figures, tables, lineage.
+# CPU-only — no GPU needed. Reads mlruns (read-only), writes to output volume.
+#
+# Build: docker build -t minivess-biostatistics:latest -f deployment/docker/Dockerfile.biostatistics .
+# Requires: minivess-base:latest built first
+
+FROM minivess-base:latest
+
+LABEL flow="biostatistics"
+LABEL description="Biostatistics flow — cross-run stats, figures, tables, lineage"
+
+# Copy scripts
+COPY --chown=minivess:minivess scripts/ scripts/
+
+# Docker context marker — detected by _require_docker_context()
+ENV DOCKER_CONTAINER=1
+
+# Volume-mapped paths — must match docker-compose.flows.yml volume declarations.
+ENV MLFLOW_TRACKING_URI=/app/mlruns
+ENV BIOSTATISTICS_OUTPUT_DIR=/app/outputs/biostatistics
+ENV BIOSTATISTICS_CONFIG_DIR=/app/configs/biostatistics
+
+CMD ["python", "-m", "minivess.orchestration.flows.biostatistics_flow"]

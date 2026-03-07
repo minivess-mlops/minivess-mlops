@@ -183,6 +183,28 @@ deployments:
       - cpu
 
   # ---------------------------------------------------------------------------
+  # Biostatistics Flow (CPU — best-effort)
+  # ---------------------------------------------------------------------------
+  - name: default
+    flow_name: minivess-biostatistics
+    entrypoint: src/minivess/orchestration/flows/biostatistics_flow.py:run_biostatistics_flow
+    description: >
+      Cross-run statistical comparisons: bootstrap CIs, Wilcoxon signed-rank,
+      Bayesian tests, ICC, Friedman/Nemenyi, effect sizes. Generates publication
+      figures, LaTeX tables, and lineage manifests. CPU-only, reads mlruns read-only.
+    work_pool:
+      name: cpu-pool
+      work_queue_name: default
+    schedules: []
+    parameters:
+      config_path: /app/configs/biostatistics/default.yaml
+    tags:
+      - biostatistics
+      - analysis
+      - best-effort
+      - cpu
+
+  # ---------------------------------------------------------------------------
   # Flow 7: Annotation (CPU — best-effort)
   # ---------------------------------------------------------------------------
   - name: default

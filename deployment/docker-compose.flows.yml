@@ -197,6 +197,26 @@ services:
       - minivess
     <<: *common-labels
 
+  # Biostatistics Flow (CPU — best-effort)
+  biostatistics:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.biostatistics
+    image: minivess-biostatistics:latest
+    container_name: minivess-flow-biostatistics
+    environment:
+      <<: *common-env
+      FLOW_NAME: biostatistics
+      BIOSTATISTICS_OUTPUT_DIR: /app/outputs/biostatistics
+      BIOSTATISTICS_CONFIG_DIR: /app/configs/biostatistics
+    volumes:
+      - mlruns_data:/app/mlruns:ro
+      - outputs_biostatistics:/app/outputs/biostatistics
+      - configs_biostatistics:/app/configs/biostatistics:ro
+    networks:
+      - minivess
+    <<: *common-labels
+
   # Data Annotation App (reads BentoML models from Flow 4)
   annotation:
     build:
@@ -242,6 +262,11 @@ volumes:
   outputs_deploy:
     driver: local
   outputs_dashboard:
+    driver: local
+  # Biostatistics
+  outputs_biostatistics:
+    driver: local
+  configs_biostatistics:
     driver: local
   # Model serving store
   bentoml_store:
