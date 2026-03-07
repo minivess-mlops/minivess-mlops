@@ -145,7 +145,7 @@ class Sam3Backbone(nn.Module):
             fpn_neck = model.detector.backbone  # neck is part of backbone
             return encoder, fpn_neck
         except ImportError:
-            pass
+            logger.debug("Native sam3 package not found, trying HuggingFace")
 
         try:
             from transformers import Sam3Model
@@ -161,7 +161,7 @@ class Sam3Backbone(nn.Module):
             hf_encoder: nn.Module = model.vision_encoder
             return hf_encoder, nn.Identity()
         except ImportError:
-            pass
+            logger.debug("HuggingFace transformers with SAM3 not found")
 
         msg = (
             "SAM3 package not available. Install via:\n"

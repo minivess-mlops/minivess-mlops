@@ -72,7 +72,7 @@ class Sam3MaskDecoder(nn.Module):
             decoder: nn.Module = model.detector.head
             return decoder
         except ImportError:
-            pass
+            logger.debug("Native sam3 package not found for decoder")
 
         msg = (
             "SAM3 package not installed — cannot load mask decoder.\n"

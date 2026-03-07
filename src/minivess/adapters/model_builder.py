@@ -29,13 +29,13 @@ def _sam3_package_available() -> bool:
 
         return True
     except ImportError:
-        pass
+        logger.debug("Native sam3 package not found")
     try:
         from transformers import Sam3Model  # noqa: F401
 
         return True
     except (ImportError, AttributeError):
-        pass
+        logger.debug("HuggingFace transformers with Sam3Model not found")
     return False
 
 
