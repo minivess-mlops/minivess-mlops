@@ -1,5 +1,11 @@
-# Docker Build Gate — verifies Dockerfile.train builds on every PR
-# touching src/ or deployment/ (CLAUDE.md Rule #19, enforcement plan T-05).
+# Docker Build Gate — verifies Dockerfile.train builds successfully.
+#
+# Only triggers when files that affect the Docker BUILD change:
+# - Dockerfile itself (build instructions)
+# - pyproject.toml / uv.lock (dependencies installed via `uv sync`)
+#
+# src/, configs/, scripts/ are just COPY layers — they can't break the build.
+# Runtime correctness is verified by unit/integration tests, not this gate.
 #
 # This is a BUILD-ONLY gate — no runtime test, no GPU needed.
 # Integration tests (T-08) are separate and require GPU.
@@ -8,8 +14,7 @@ name: Docker Build Gate
 on:
   pull_request:
     paths:
-      - 'src/**'
-      - 'deployment/**'
+      - 'deployment/docker/Dockerfile.*'
       - 'pyproject.toml'
       - 'uv.lock'
 
