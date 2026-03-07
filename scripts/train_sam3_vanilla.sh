@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Train SAM3 Vanilla (V1) — frozen encoder + trainable decoder.
-# Run this and go to sleep. Logs to mlruns/ and stdout.
+# Runs inside Docker via docker compose (CLAUDE.md Rules #17, #18, #19).
 #
 # Architecture: Frozen SAM3 ViT-32L (454M params, SDPA attention) + trainable
 # lightweight Conv decoder (66K params). SDPA reduces encoder peak VRAM from
@@ -20,25 +20,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# ---------------------------------------------------------------------------
-# Environment
-# ---------------------------------------------------------------------------
-export SPLITS_DIR=configs/splits
-export CHECKPOINT_DIR=checkpoints
-export MLFLOW_TRACKING_URI=mlruns
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export HF_HUB_DISABLE_PROGRESS_BARS=1
-export PYTHONUNBUFFERED=1
-
-# Suppress non-actionable warnings (CLAUDE.md Core Principle #7)
-export ORT_LOGGING_LEVEL=3
-
-# Local dev run: disable Prefect orchestration (no server required).
-# Training still logs to MLflow. Set PREFECT_DISABLED=0 + start a Prefect
-# server if you want full orchestration (retries, UI tracking).
-export PREFECT_DISABLED=1
-
-echo "=== SAM3 Vanilla Training ==="
+echo "=== SAM3 Vanilla Training (Docker) ==="
 echo "Start:  $(date)"
 echo "GPU:    $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo 'none')"
 echo "Model:  sam3_vanilla (frozen ViT-32L + trainable Conv decoder)"
@@ -47,27 +29,30 @@ echo "Epochs: 50"
 echo "Folds:  3"
 echo "SDPA:   enabled (peak ~2.9 GB vs ~7 GB eager)"
 echo "ValInt: 10 (validate every 10 epochs)"
-echo "Prefect: DISABLED (local dev run — MLflow logging only)"
-echo "============================"
+echo "============================="
 
-uv run python -c "
-import warnings, os, logging
-os.environ.setdefault('ORT_LOGGING_LEVEL', '3')
-warnings.filterwarnings('ignore', category=FutureWarning)
-warnings.filterwarnings('ignore', message='.*cuda.cudart.*')
-warnings.filterwarnings('ignore', message='.*non-tuple sequence for multidimensional.*')
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
-
-from minivess.orchestration.flows.train_flow import training_flow
-result = training_flow(
-    model_family='sam3_vanilla',
-    loss_name='cbdice_cldice',
-    debug=False,
-    max_epochs=50,
-    num_folds=3,
-    batch_size=1,
-)
-print(f'=== Result: status={result.status}, folds={result.n_folds}, run_id={result.mlflow_run_id} ===')
-"
+# ---------------------------------------------------------------------------
+# Docker Compose run — training happens inside the container.
+# Volume mounts defined in docker-compose.flows.yml:
+#   data_cache   → /app/data
+#   configs      → /app/configs
+#   checkpoints  → /app/checkpoints
+#   mlruns       → /app/mlruns
+#   logs         → /app/logs
+# ---------------------------------------------------------------------------
+docker compose \
+    -f deployment/docker-compose.flows.yml \
+    run \
+    --rm \
+    -e MODEL_FAMILY=sam3_vanilla \
+    -e LOSS_NAME=cbdice_cldice \
+    -e MAX_EPOCHS=50 \
+    -e NUM_FOLDS=3 \
+    -e BATCH_SIZE=1 \
+    -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    -e HF_HUB_DISABLE_PROGRESS_BARS=1 \
+    -e ORT_LOGGING_LEVEL=3 \
+    -e HF_TOKEN="${HF_TOKEN:-}" \
+    train
 
 echo "=== Training complete: $(date) ==="

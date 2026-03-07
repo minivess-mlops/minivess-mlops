@@ -30,6 +30,30 @@ from minivess.orchestration.mlflow_helpers import (
 logger = logging.getLogger(__name__)
 
 
+def _require_docker_context() -> None:
+    """Raise RuntimeError if not running inside a Docker container.
+
+    Checks for /.dockerenv (standard Docker marker) or DOCKER_CONTAINER env var.
+    Escape hatch: MINIVESS_ALLOW_HOST=1 for pytest only — never in scripts.
+
+    See: docs/planning/minivess-vision-enforcement-plan.md (T-00)
+    """
+    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
+        return
+    if os.environ.get("DOCKER_CONTAINER"):
+        return
+    if Path("/.dockerenv").exists():
+        return
+    raise RuntimeError(
+        "Training flow must run inside a Docker container.\n"
+        "Run: docker compose -f deployment/docker-compose.flows.yml run train\n"
+        "Or for SAM3: docker compose -f deployment/docker-compose.flows.yml "
+        "run -e MODEL_FAMILY=sam3_vanilla train\n\n"
+        "Escape hatch (pytest ONLY): export MINIVESS_ALLOW_HOST=1\n"
+        "See: docs/planning/minivess-vision-enforcement-plan.md"
+    )
+
+
 def _validate_training_env() -> None:
     """Validate required environment variables for training flow.
 
@@ -424,6 +448,9 @@ def training_flow(
     TrainingFlowResult with fold results, MLflow run ID, and upstream link.
     """
     logger.info("Training flow started (trigger: %s)", trigger_source)
+
+    # Preflight: Docker context gate (CLAUDE.md Rule #19 — STOP Protocol)
+    _require_docker_context()
 
     # Preflight: validate required environment variables
     _validate_training_env()

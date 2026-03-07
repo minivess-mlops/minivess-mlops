@@ -2,8 +2,8 @@
 ################################################################################
 # train_all_best.sh
 #
-# Train the best-validated configuration of EACH model family on MiniVess.
-# One run per family — the production "reference" set for comparison tables.
+# Train the best-validated configuration of EACH model family on MiniVess
+# via Docker (CLAUDE.md Rules #17-19).
 #
 # Best settings (validated by experiments):
 #   dynunet        cbdice_cldice   Standard width ~5M params
@@ -18,23 +18,17 @@
 #   ./scripts/train_all_best.sh --debug      # smoke test, 1 epoch each
 #   ./scripts/train_all_best.sh --epochs 50  # quick check
 #   ./scripts/train_all_best.sh --families dynunet,comma_mamba
-#                                            # subset of families
 #
 # Environment:
 #   MINIVESS_EPOCHS    Override epochs (default: 100)
-#   MINIVESS_COMPUTE   Override compute profile (default: gpu_low)
 #   MINIVESS_FAMILIES  Override families as comma-separated list
 ################################################################################
 
 set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-cd "${PROJECT_ROOT}"
+cd "$(dirname "$0")/.."
 
 EPOCHS="${MINIVESS_EPOCHS:-100}"
-COMPUTE="${MINIVESS_COMPUTE:-gpu_low}"
-DEBUG_MODE=0
+DEBUG_FLAG=""
 
 # Best config per family: (model_family, loss_name)
 declare -A BEST_LOSS=(
@@ -52,10 +46,9 @@ FAMILIES_CSV="${MINIVESS_FAMILIES:-dynunet,sam3_vanilla,comma_mamba}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --epochs)   EPOCHS="$2";      shift 2 ;;
-        --compute)  COMPUTE="$2";     shift 2 ;;
-        --families) FAMILIES_CSV="$2"; shift 2 ;;
-        --debug)    DEBUG_MODE=1;      shift   ;;
+        --epochs)   EPOCHS="$2";        shift 2 ;;
+        --families) FAMILIES_CSV="$2";  shift 2 ;;
+        --debug)    DEBUG_FLAG="true";  shift   ;;
         *) echo "[ERROR] Unknown argument: $1" >&2; exit 1 ;;
     esac
 done
@@ -75,14 +68,13 @@ for FAM in "${FAMILIES[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
-# Run
+# Run each family via Docker
 # ---------------------------------------------------------------------------
 
-echo "[INFO] Training best configuration for each model family"
+echo "[INFO] Training best configuration for each model family (Docker)"
 echo "[INFO]   families : ${FAMILIES[*]}"
 echo "[INFO]   epochs   : ${EPOCHS}"
-echo "[INFO]   compute  : ${COMPUTE}"
-echo "[INFO]   debug    : $([ $DEBUG_MODE -eq 1 ] && echo YES || echo NO)"
+echo "[INFO]   debug    : ${DEBUG_FLAG:-false}"
 
 FAILED=()
 PASSED=()
@@ -91,30 +83,32 @@ for MODEL in "${FAMILIES[@]}"; do
     LOSS="${BEST_LOSS[$MODEL]}"
 
     echo ""
-    echo "[INFO] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "[INFO] Training: ${MODEL} (loss=${LOSS})"
-    echo "[INFO] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-    CMD=(
-        "uv" "run" "python" "scripts/run_training_flow.py"
-        "--model-family"   "${MODEL}"
-        "--loss-name"      "${LOSS}"
-        "--compute"        "${COMPUTE}"
-        "--max-epochs"     "${EPOCHS}"
-        "--trigger-source" "train_all_best.sh"
-    )
-
-    if [ $DEBUG_MODE -eq 1 ]; then
-        CMD+=("--debug")
+    BATCH=2
+    HF_ARGS=""
+    if [[ "$MODEL" == sam3_* ]]; then
+        BATCH=1
+        HF_ARGS="-e HF_TOKEN=${HF_TOKEN:-}"
     fi
 
-    echo "[INFO] Command: ${CMD[*]}"
-
-    if "${CMD[@]}"; then
+    if docker compose \
+        -f deployment/docker-compose.flows.yml \
+        run \
+        --rm \
+        -e MODEL_FAMILY="${MODEL}" \
+        -e LOSS_NAME="${LOSS}" \
+        -e MAX_EPOCHS="${EPOCHS}" \
+        -e BATCH_SIZE="${BATCH}" \
+        -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+        -e ORT_LOGGING_LEVEL=3 \
+        ${HF_ARGS} \
+        ${DEBUG_FLAG:+-e DEBUG=true} \
+        train; then
         echo "[OK] ${MODEL} complete"
         PASSED+=("${MODEL}")
     else
-        echo "[ERROR] ${MODEL} failed (exit code: $?)" >&2
+        echo "[ERROR] ${MODEL} failed" >&2
         FAILED+=("${MODEL}")
     fi
 done
@@ -124,9 +118,7 @@ done
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "[INFO] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "[INFO] Training Complete"
-echo "[INFO] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 if [[ ${#PASSED[@]} -gt 0 ]]; then
     echo "[OK] Passed (${#PASSED[@]}/${#FAMILIES[@]}): ${PASSED[*]}"

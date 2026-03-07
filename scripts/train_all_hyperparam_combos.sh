@@ -7,7 +7,7 @@
 #
 # Before this script can be created, the following must be decided:
 #   1. Which hyperparameters vary per model family (losses, lr, batch sizes)?
-#   2. Compute budget (combinations × epochs × folds = hours on GPU)
+#   2. Compute budget (combinations x epochs x folds = hours on GPU)
 #   3. Which model families to include in the grid?
 #   4. Should this use manual grid or hpo_flow.py (Optuna-based HPO)?
 #
@@ -17,11 +17,9 @@
 #   ./scripts/train_sam3_all_variants.sh  — all SAM3 variants
 #   ./scripts/train_mamba_variants.sh     — all Mamba variants
 #
-# For smarter HPO (Bayesian search), use the Optuna-based flow:
-#   uv run python -c "
-#     from minivess.orchestration.flows.hpo_flow import hpo_flow
-#     hpo_flow(n_trials=50, model_family='dynunet')
-#   "
+# For smarter HPO (Bayesian search), use the Optuna-based flow via Docker:
+#   docker compose -f deployment/docker-compose.flows.yml run --rm \
+#       -e MODEL_FAMILY=dynunet -e HPO_N_TRIALS=50 train
 #
 # Closes: #401
 ################################################################################
@@ -44,10 +42,8 @@ In the meantime, use:
   ./scripts/train_mamba_variants.sh     # all Mamba variants
 
 For Bayesian HPO (smarter than a manual grid):
-  uv run python -c "
-    from minivess.orchestration.flows.hpo_flow import hpo_flow
-    hpo_flow(n_trials=50, model_family='dynunet')
-  "
+  docker compose -f deployment/docker-compose.flows.yml run --rm \
+      -e MODEL_FAMILY=dynunet -e HPO_N_TRIALS=50 train
 MSG
 
 exit 1

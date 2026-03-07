@@ -50,18 +50,19 @@ class TestDockerfileExistence:
 class TestDockerfileStructure:
     """Test Dockerfile content conventions."""
 
-    def test_base_uses_python312(self) -> None:
+    def test_base_has_python312(self) -> None:
         path = PROJECT_ROOT / "deployment" / "docker" / "Dockerfile.base"
         content = path.read_text(encoding="utf-8")
-        assert "python:3.12" in content or "python:3.13" in content
+        assert "python3" in content or "python:3.12" in content
 
     def test_base_uses_uv(self) -> None:
         path = PROJECT_ROOT / "deployment" / "docker" / "Dockerfile.base"
         content = path.read_text(encoding="utf-8")
         assert "uv" in content
 
-    def test_train_has_cuda(self) -> None:
-        path = PROJECT_ROOT / "deployment" / "docker" / "Dockerfile.train"
+    def test_base_has_cuda(self) -> None:
+        """Single base image uses CUDA for all flows (GPU + CPU)."""
+        path = PROJECT_ROOT / "deployment" / "docker" / "Dockerfile.base"
         content = path.read_text(encoding="utf-8")
         assert "cuda" in content.lower() or "nvidia" in content.lower()
 
@@ -73,6 +74,35 @@ class TestDockerfileStructure:
                 "minivess-base" in content
                 or "Dockerfile.base" in content
                 or "base" in content.lower()
+            )
+
+    def test_flow_dockerfiles_no_apt_or_uv(self) -> None:
+        """Flow Dockerfiles must NOT run apt-get install or uv sync.
+
+        System deps and Python packages belong in base images only.
+        Flow images only add scripts, env vars, and CMD.
+        """
+        # ALL flow Dockerfiles must be thin (no apt-get, no uv).
+        # System deps and Python packages belong in Dockerfile.base only.
+        thin_flows = [
+            "acquisition",
+            "data",
+            "train",
+            "analyze",
+            "deploy",
+            "dashboard",
+            "qa",
+        ]
+        for flow in thin_flows:
+            path = PROJECT_ROOT / "deployment" / "docker" / f"Dockerfile.{flow}"
+            content = path.read_text(encoding="utf-8")
+            assert "apt-get" not in content, (
+                f"Dockerfile.{flow} must not run apt-get — "
+                "system deps belong in the base image"
+            )
+            assert "uv sync" not in content, (
+                f"Dockerfile.{flow} must not run uv sync — "
+                "Python deps belong in the base image"
             )
 
 

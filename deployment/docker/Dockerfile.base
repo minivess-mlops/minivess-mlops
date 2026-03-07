@@ -1,17 +1,34 @@
-# MinIVess MLOps v2 — Base Docker image
-# Shared foundation for all per-flow containers.
-# Python 3.12 + uv + common dependencies (no ML framework).
+# MinIVess MLOps v2 — Base Docker image (Layer 2)
+# Shared foundation for ALL per-flow containers (CPU and GPU flows).
+#
+# 3-Layer Hierarchy:
+#   Layer 1: nvidia/cuda:12.6.3-runtime-ubuntu24.04  (upstream, never modified)
+#   Layer 2: minivess-base:latest                     (THIS — all shared deps)
+#   Layer 3: Dockerfile.{flow}                        (thin — scripts, env, CMD only)
+#
+# Uses CUDA base for all flows. CPU-only flows simply don't request GPU devices
+# in docker-compose. CUDA runtime is inert without --gpus / device reservations.
 #
 # Build: docker build -t minivess-base:latest -f deployment/docker/Dockerfile.base .
+#
+# Rebuilt only when dependencies or system packages change:
+# - pyproject.toml / uv.lock (Python dependencies)
+# - This Dockerfile (system-level packages)
+#
+# Flow Dockerfiles must NEVER run apt-get or uv — all deps belong here.
 
-FROM python:3.12-slim AS base
+FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04 AS base
 
 LABEL maintainer="petteri.teikari@gmail.com"
 LABEL project="minivess-mlops"
-LABEL description="MinIVess MLOps base image — Python 3.12, uv, common deps"
+LABEL description="MinIVess MLOps base — CUDA 12.6.3, Python 3.12, uv, all deps"
 
-# System dependencies
+# System dependencies (Ubuntu 24.04 ships Python 3.12 natively)
+# CUDA 12.6 runtime is backward-compatible; PyTorch bundles its own CUDA libs.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-venv \
+    python3-pip \
     git \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -27,11 +44,10 @@ WORKDIR /app
 # Copy project metadata for dependency resolution
 COPY --chown=minivess:minivess pyproject.toml uv.lock* ./
 
-# Install base dependencies (no extras yet — flow images add their own)
-RUN uv sync --no-dev --no-install-project 2>/dev/null || \
-    uv pip install --system -e "." 2>/dev/null || true
+# Install all dependencies (full ML stack: PyTorch, MONAI, Optuna, etc.)
+RUN uv sync --no-dev --no-install-project 2>/dev/null || true
 
-# Copy source code
+# Copy source code and configs
 COPY --chown=minivess:minivess src/ src/
 COPY --chown=minivess:minivess configs/ configs/
 

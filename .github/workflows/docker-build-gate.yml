@@ -1,0 +1,47 @@
+# Docker Build Gate — verifies Docker images build successfully.
+#
+# Only triggers when files that affect the Docker BUILD change:
+# - Dockerfile itself (build instructions)
+# - pyproject.toml / uv.lock (dependencies installed via `uv sync`)
+#
+# src/, configs/, scripts/ are just COPY layers — they can't break the build.
+# Runtime correctness is verified by unit/integration tests, not this gate.
+#
+# This is a BUILD-ONLY gate — no runtime test, no GPU needed.
+# Integration tests (T-08) are separate and require GPU.
+name: Docker Build Gate
+
+on:
+  pull_request:
+    paths:
+      - 'deployment/docker/Dockerfile.*'
+      - 'pyproject.toml'
+      - 'uv.lock'
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build base first — all flow Dockerfiles inherit FROM it.
+      # Uses plain `docker build` (not buildx push) so the image is in the
+      # local daemon and available for the subsequent FROM reference.
+      - name: Build base image
+        run: |
+          docker build \
+            -t minivess-base:latest \
+            -f deployment/docker/Dockerfile.base \
+            .
+
+      - name: Build training Docker image
+        run: |
+          docker build \
+            -t minivess-train:test \
+            -f deployment/docker/Dockerfile.train \
+            .

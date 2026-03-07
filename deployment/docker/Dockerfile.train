@@ -1,44 +1,20 @@
 # MinIVess MLOps v2 — Model Training Flow (Flow 2)
-# CUDA-enabled: PyTorch, MONAI, Optuna, full ML stack.
+# Inherits CUDA + Python + ML deps from base. Adds only scripts and env vars.
 #
 # Build: docker build -t minivess-train:latest -f deployment/docker/Dockerfile.train .
+# Requires: minivess-base:latest built first
 # Requires: NVIDIA Container Toolkit for GPU access
 
-FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS train-base
+FROM minivess-base:latest
 
 LABEL flow="train"
 LABEL description="Model training flow — CUDA, PyTorch, MONAI, Optuna"
 
-# System dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.12 \
-    python3.12-venv \
-    python3-pip \
-    git \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash minivess
-USER minivess
-WORKDIR /app
-
-# Copy project metadata
-COPY --chown=minivess:minivess pyproject.toml uv.lock* ./
-
-# Install full ML dependencies
-RUN uv sync --no-dev --no-install-project 2>/dev/null || true
-
-# Copy source code and scripts
-COPY --chown=minivess:minivess src/ src/
-COPY --chown=minivess:minivess configs/ configs/
+# Copy scripts (not in base image)
 COPY --chown=minivess:minivess scripts/ scripts/
 
-ENV PYTHONPATH=/app/src
-ENV PYTHONUNBUFFERED=1
+# Docker context marker — detected by _require_docker_context() in train_flow.py
+ENV DOCKER_CONTAINER=1
 
 # Volume-mapped paths — must match docker-compose.flows.yml volume declarations.
 # Override at runtime via environment section if container mounts differ.
@@ -47,5 +23,9 @@ ENV MLFLOW_TRACKING_URI=file:///app/mlruns
 ENV CHECKPOINT_DIR=/app/checkpoints
 ENV LOGS_DIR=/app/logs
 ENV SPLITS_DIR=/app/configs/splits
+
+# HuggingFace token for gated models (SAM3). Pass at runtime:
+#   docker compose run -e HF_TOKEN=$HF_TOKEN train
+# or set in docker-compose.flows.yml environment section.
 
 CMD ["python", "-m", "minivess.orchestration.flows.train_flow"]
