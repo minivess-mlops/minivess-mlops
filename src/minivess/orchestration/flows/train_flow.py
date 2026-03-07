@@ -364,6 +364,7 @@ def training_flow(
     num_folds: int = 3,
     max_epochs: int = 100,
     batch_size: int = 2,
+    upstream_data_run_id: str | None = None,
     **kwargs: Any,
 ) -> TrainingFlowResult:
     """Training Prefect flow — orchestrates model training.
@@ -407,13 +408,14 @@ def training_flow(
     checkpoint_base = Path(os.environ.get("CHECKPOINT_DIR", "/app/checkpoints"))
     tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
 
-    # Find upstream data run
-    upstream = find_upstream_safely(
-        tracking_uri=tracking_uri,
-        experiment_name="minivess_data",
-        upstream_flow="data",
-    )
-    upstream_data_run_id: str | None = upstream["run_id"] if upstream else None
+    # Find upstream data run (explicit param takes priority over auto-discovery)
+    if upstream_data_run_id is None:
+        upstream = find_upstream_safely(
+            tracking_uri=tracking_uri,
+            experiment_name="minivess_data",
+            upstream_flow="data",
+        )
+        upstream_data_run_id = upstream["run_id"] if upstream else None
     if upstream_data_run_id:
         logger.info("Upstream data run: %s", upstream_data_run_id)
 

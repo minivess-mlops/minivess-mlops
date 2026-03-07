@@ -1462,6 +1462,7 @@ def run_analysis_flow(
     environment: str = "staging",
     tracking_uri: str | None = None,
     include_post_training: bool = True,
+    upstream_training_run_id: str | None = None,
 ) -> dict[str, Any]:
     """Main analysis flow orchestrating all tasks.
 
@@ -1574,12 +1575,14 @@ def run_analysis_flow(
 
     # --- FlowContract: tag run and log completion ---
     _tracking_uri = tracking_uri or os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
-    upstream = find_upstream_safely(
-        tracking_uri=_tracking_uri,
-        experiment_name="minivess_training",
-        upstream_flow="train",
-    )
-    upstream_training_run_id: str | None = upstream["run_id"] if upstream else None
+    # Use provided upstream ID or auto-discover from MLflow
+    if upstream_training_run_id is None:
+        upstream = find_upstream_safely(
+            tracking_uri=_tracking_uri,
+            experiment_name="minivess_training",
+            upstream_flow="train",
+        )
+        upstream_training_run_id = upstream["run_id"] if upstream else None
     mlflow_run_id: str | None = None
     try:
         import mlflow

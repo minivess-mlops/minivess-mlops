@@ -200,6 +200,7 @@ def promote_task(
 def deploy_flow(
     config: DeployConfig | None = None,
     experiment_id: str = "1",
+    upstream_analysis_run_id: str | None = None,
 ) -> DeployResult:
     """Orchestrate the full deployment pipeline.
 
@@ -314,12 +315,14 @@ def deploy_flow(
 
     # --- FlowContract: tag run and log completion ---
     _tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
-    upstream = find_upstream_safely(
-        tracking_uri=_tracking_uri,
-        experiment_name="minivess_training",
-        upstream_flow="analyze",
-    )
-    upstream_analysis_run_id: str | None = upstream["run_id"] if upstream else None
+    # Use provided upstream ID or auto-discover from MLflow
+    if upstream_analysis_run_id is None:
+        upstream = find_upstream_safely(
+            tracking_uri=_tracking_uri,
+            experiment_name="minivess_training",
+            upstream_flow="analyze",
+        )
+        upstream_analysis_run_id = upstream["run_id"] if upstream else None
     mlflow_run_id: str | None = None
     try:
         import mlflow

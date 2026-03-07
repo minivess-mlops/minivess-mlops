@@ -144,6 +144,7 @@ def post_training_flow(
     output_dir: Path | None = None,
     calibration_data: dict[str, Any] | None = None,
     trigger_source: str = "manual",
+    upstream_training_run_id: str | None = None,
 ) -> PostTrainingFlowResult:
     """Post-training flow (Flow 2.5) — orchestrate post-hoc plugins.
 
@@ -241,13 +242,14 @@ def post_training_flow(
     tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
     mlflow_run_id: str | None = None
 
-    # Find upstream training run
-    upstream = find_upstream_safely(
-        tracking_uri=tracking_uri,
-        experiment_name="minivess_training",
-        upstream_flow="train",
-    )
-    upstream_training_run_id: str | None = upstream["run_id"] if upstream else None
+    # Find upstream training run (explicit param takes priority over auto-discovery)
+    if upstream_training_run_id is None:
+        upstream = find_upstream_safely(
+            tracking_uri=tracking_uri,
+            experiment_name="minivess_training",
+            upstream_flow="train",
+        )
+        upstream_training_run_id = upstream["run_id"] if upstream else None
 
     try:
         import mlflow
