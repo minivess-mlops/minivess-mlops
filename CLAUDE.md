@@ -251,15 +251,16 @@ Each of the 6 Prefect flows runs in its own Docker container:
     changes" is BANNED — every failure in this repo was co-authored by Claude Code
     and is therefore Claude Code's responsibility.
     See: `.claude/metalearning/2026-03-07-silent-existing-failures.md`
-21. **No Automatic GitHub Actions CI (Non-Negotiable)** — GitHub Actions workflows
-    MUST NOT trigger automatically on push or pull_request until the repo is
-    submission-ready. Actions consume credits. All validation runs LOCALLY via:
-    - Pre-commit hooks (ruff, mypy, test collection gate)
-    - `scripts/pr_readiness_check.sh` (full suite before PR creation)
-    CI workflows may only use `workflow_dispatch` (manual trigger) until the user
-    explicitly lifts this ban. NEVER add `on: push` or `on: pull_request` triggers
-    to workflows without user approval. The Docker build gate is the only exception
-    (runs only on Dockerfile/dependency changes, not on every push).
+21. **GitHub Actions CI EXPLICITLY DISABLED (Non-Negotiable)** — The user has
+    explicitly forbidden automatic GitHub Actions CI. Actions consume credits.
+    ALL CI jobs in `ci-v2.yml` are commented out. ALL workflows use
+    `workflow_dispatch` only (manual trigger). **NEVER:**
+    - Uncomment CI jobs in `.github/workflows/ci-v2.yml`
+    - Add `on: push` or `on: pull_request` triggers to ANY workflow
+    - Create new workflows with automatic triggers
+    - Re-enable the Docker build gate's `pull_request` trigger
+    All validation runs LOCALLY via pre-commit hooks and
+    `scripts/pr_readiness_check.sh`. Only the user can lift this ban.
 
 ## What AI Must NEVER Do (Extended)
 
@@ -278,8 +279,9 @@ Each of the 6 Prefect flows runs in its own Docker container:
 - Dismiss test failures as "pre-existing" or "not related to current changes" without
   creating a GitHub issue — every observed failure needs immediate action.
 - Say "separate issue" without creating the issue in the same response.
-- Add automatic `on: push` or `on: pull_request` triggers to GitHub Actions workflows
-  without explicit user approval — Actions consume credits and are banned until submission.
+- Uncomment, re-enable, or add ANY automatic GitHub Actions trigger — CI jobs are
+  EXPLICITLY DISABLED by the user. Actions consume credits. Only the user can lift this ban.
+  ALL validation runs locally. This is not a suggestion — it is an absolute prohibition.
 
 ## TDD Workflow (Non-Negotiable)
 
