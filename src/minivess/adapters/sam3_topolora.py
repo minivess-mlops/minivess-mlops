@@ -9,7 +9,7 @@ Architecture:
     - LoRA: low-rank adaptation (r=16, alpha=32 default)
     - Loss: cbdice_cldice (topology-aware)
 
-Based on: TopoLoRA-SAM (Xiang et al., arXiv:2601.02273)
+Based on: TopoLoRA-SAM (Khazem, 2026, arXiv:2601.02273)
 Expected: +10-20% clDice over V1 (vanilla)
 Go/No-Go Gate G2: clDice improvement >= 2% over V1.
 """

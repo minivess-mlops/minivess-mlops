@@ -13,7 +13,7 @@ Architecture:
 Expected results: DSC ~0.35-0.55, clDice ~0.3-0.5
 Go/No-Go Gate G1: DSC >= 0.10 or abandon SAM for segmentation.
 
-IMPORTANT: Real pretrained SAM3 weights are required (GPU VRAM ≥16 GB).
+IMPORTANT: Real pretrained SAM3 weights are required (GPU VRAM ≥6 GB, frozen encoder).
 No stub/fallback mode exists — use pytest.mark.skipif for CI tests.
 
 References:

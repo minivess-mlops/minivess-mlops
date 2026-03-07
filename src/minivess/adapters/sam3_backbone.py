@@ -15,7 +15,9 @@ Two loading modes:
     2. HuggingFace: ``Sam3Model.from_pretrained("facebook/sam3")``
 
 IMPORTANT: Real pretrained weights are ALWAYS required. There is no stub mode.
-GPU VRAM ≥16 GB is enforced before loading (see sam3_vram_check.py).
+GPU VRAM is enforced per-variant before loading (see sam3_vram_check.py):
+  - Frozen encoder (V1, V3): ≥6 GB (inference mode)
+  - LoRA training (V2): ≥16 GB (training mode)
 
 References:
     - Ravi et al. (2025). "SAM 3." arXiv:2511.16719
