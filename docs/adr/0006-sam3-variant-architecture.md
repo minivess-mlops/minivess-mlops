@@ -56,7 +56,7 @@ We implement three SAM3-based adapters as a controlled experiment:
 | Prompts | Null embeddings | Points/boxes/concepts — requires interactive annotation |
 | Fusion | Gated residual at output | Cross-attention at bottleneck — higher VRAM, complexity |
 | LoRA targets | mlp.lin1, mlp.lin2 (FFN) | q_proj, v_proj (attention) — FFN has more parameters |
-| SAM3 dependency | Optional (stub for testing) | Required — would break installs without SAM3 |
+| SAM3 dependency | Required (no stub) | Optional with stub — removed 2026-03-07 (see Stub Removal section) |
 | Weight loading | Native sam3 pkg or HuggingFace | Single path — dual reduces install friction |
 
 ## Consequences
@@ -66,18 +66,50 @@ We implement three SAM3-based adapters as a controlled experiment:
 - Three variants form a controlled ablation study: frozen → LoRA → hybrid.
 - Each variant implements the `ModelAdapter` ABC, integrating with existing training, evaluation, and serving pipelines with zero model-specific code.
 - Go/no-go gates (G1, G2, G3) provide clear decision criteria.
-- VRAM budgets verified to fit 8GB, enabling reproducibility on commodity hardware.
-- Stub encoder (`_StubSam3Encoder`) enables CI testing without SAM3 installed.
 - Conditional `torch.no_grad()` in backbone methods: frozen mode uses no_grad, unfrozen (LoRA) allows gradient flow.
 - Feature caching infrastructure (`sam3_feature_cache.py`) reduces VRAM for hybrid variant.
+- GPU VRAM ≥16 GB enforced at `build_adapter()` time via `check_sam3_vram()` — prevents
+  silent low-VRAM failures before any weights are loaded.
 
 **Negative:**
 
 - Slice-by-slice inference loses inter-slice context (V1/V2). The hybrid (V3) partially addresses this via axial projection.
 - SAM3 on microvasculature is expected to significantly underperform DynUNet. This is the intended scientific finding — demonstrating the domain gap.
-- ViT-32L is large (648M backbone). Feature caching or AMP is needed to fit 8GB.
+- ViT-32L is large (648M backbone). True VRAM requirement is ≥16 GB (not the original 8 GB estimate).
 
 **Neutral:**
 
 - The `sam3_*` naming convention refers to Meta's SAM3 (Segment Anything Model 3, Nov 2025). "Vanilla/TopoLoRA/Hybrid" distinguish our three adaptation strategies.
 - 2.5D input (3 adjacent slices as RGB) is deferred to a future iteration as a stretch goal.
+
+## Stub Removal (2026-03-07)
+
+The `_StubSam3Encoder`, `_StubFPNNeck`, `_StubMLP`, and `_StubSam3Decoder` classes
+have been **permanently removed**.
+
+### Why
+
+The stub produced valid-looking training output (loss curves, metrics, model checkpoints)
+from random weights. On 2026-03-02, a training run completed on stub weights, producing
+metrics that appeared meaningful. The error was not caught until manual inspection.
+See `.claude/metalearning/2026-03-02-sam3-implementation-fuckup.md`.
+
+> **Any "convenient" stub that produces valid-looking outputs from random weights is a trap.**
+
+### What changed
+
+| Before (removed) | After |
+|------------------|-------|
+| `_StubSam3Encoder` class | Deleted |
+| `use_stub: bool = False` param in all adapters | Deleted |
+| `_auto_stub_sam3()` in `model_builder.py` | Deleted |
+| `pretrained: false` path | Deleted |
+| VRAM claim: ~3.0-7.5 GB (was stub VRAM) | Real: ≥16 GB (ViT-32L actual) |
+
+### Decision (2026-03-07)
+
+- **`pretrained=false` is not supported.** SAM3 always requires pretrained ViT-32L weights.
+- **GPU VRAM ≥16 GB is enforced** at `build_adapter()` time via `check_sam3_vram()`.
+- Tests that required `use_stub=True` are migrated to `pytest.mark.skipif(not _sam3_package_available())`.
+- 10 AST-based enforcement tests in `tests/unit/adapters/test_no_sam3_stub.py` catch any
+  future stub regression at the CI level.

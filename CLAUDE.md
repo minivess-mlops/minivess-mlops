@@ -177,6 +177,9 @@ Each of the 6 Prefect flows runs in its own Docker container:
    writing any code. If the user provides URLs (arXiv, GitHub, docs), ALWAYS fetch them
    first. **SAMv3 = Meta's Segment Anything Model 3** (github.com/facebookresearch/sam3,
    Nov 2025), NOT SAM2. See `.claude/metalearning/2026-03-02-sam3-implementation-fuckup.md`.
+   **SAM3 ALWAYS requires real pretrained weights (ViT-32L, 648M params).** The
+   `_StubSam3Encoder` has been permanently removed (2026-03-07). GPU VRAM ≥16 GB is
+   enforced at model build time via `sam3_vram_check.py`. See `src/minivess/adapters/CLAUDE.md`.
 11. **Plans Are Not Infallible** — When a plan says "ModelX" but CLAUDE.md says "ModelY",
     or the plan contradicts the user's original prompt, STOP and clarify with the user
     before implementing. Cross-reference plans with CLAUDE.md, literature reports, and
