@@ -1452,7 +1452,7 @@ def _export_analysis_artifacts(
 # ---------------------------------------------------------------------------
 
 
-@flow(name="analysis-flow")
+@flow(name="analysis-flow", validate_parameters=False)
 def run_analysis_flow(
     eval_config: EvaluationConfig,
     model_config: dict[str, Any],
