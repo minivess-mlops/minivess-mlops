@@ -62,22 +62,32 @@ _SAM3_INSTALL_INSTRUCTIONS = """
 """
 
 
-def _require_sam3(config: ModelConfig) -> None:
+def _require_sam3(config: ModelConfig, *, encoder_frozen: bool) -> None:
     """Validate SAM3 availability; raise loudly if not installed or GPU insufficient.
 
     SAM3 ALWAYS requires real pretrained weights. There is no stub or
     pretrained:false fallback — they were removed to prevent silent
     random-weight training (see .claude/metalearning/2026-03-02-sam3-implementation-fuckup.md).
 
+    VRAM gate depends on whether the SAM3 encoder is frozen:
+
+    - ``encoder_frozen=True`` (V1 Vanilla, V3 Hybrid): The encoder forward pass runs
+      inside ``torch.no_grad()``, so no activation graph is stored for the 848M encoder
+      params. Peak VRAM ≈ inference peak (~6 GB BF16). Gate: ``mode="inference"`` (6 GB).
+
+    - ``encoder_frozen=False`` (V2 TopoLoRA): LoRA adapters are applied to the encoder
+      FFN layers; gradients flow through all 32 ViT transformer blocks. Full activation
+      graphs must be retained for backprop. Gate: ``mode="training"`` (16 GB).
+
     Checks (in order):
     1. SAM3 package is installed.
-    2. GPU VRAM ≥ 16 GB (via check_sam3_vram()).
+    2. GPU VRAM meets the mode-appropriate threshold.
     3. HuggingFace token is present (for gated model download).
 
     Raises
     ------
     RuntimeError
-        When SAM3 package is not installed, GPU VRAM < 16 GB, or HF token missing.
+        When SAM3 package is not installed, VRAM is insufficient, or HF token missing.
     """
     if not _sam3_package_available():
         logger.error(_SAM3_INSTALL_INSTRUCTIONS)
@@ -87,10 +97,10 @@ def _require_sam3(config: ModelConfig) -> None:
         )
         raise RuntimeError(msg)
 
-    # Enforce 16 GB VRAM minimum before loading any SAM3 weights
     from minivess.adapters.sam3_vram_check import check_sam3_vram
 
-    check_sam3_vram(variant=config.name)
+    vram_mode = "inference" if encoder_frozen else "training"
+    check_sam3_vram(variant=config.name, mode=vram_mode)
 
     # SAM3 is available — verify HF token before triggering a download
     from minivess.utils.hf_auth import require_hf_token
@@ -153,19 +163,23 @@ def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     if family == ModelFamily.SAM3_VANILLA:
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 
-        _require_sam3(config)
+        # Encoder is frozen → no_grad during encoder pass → inference-level VRAM (~6 GB)
+        _require_sam3(config, encoder_frozen=True)
         return Sam3VanillaAdapter(config)
 
     if family == ModelFamily.SAM3_TOPOLORA:
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
-        _require_sam3(config)
+        # LoRA adapters on encoder FFN → gradients flow → training-level VRAM (≥16 GB)
+        _require_sam3(config, encoder_frozen=False)
         return Sam3TopoLoraAdapter(config)
 
     if family == ModelFamily.SAM3_HYBRID:
         from minivess.adapters.sam3_hybrid import Sam3HybridAdapter
 
-        _require_sam3(config)
+        # SAM encoder is frozen + detach() → inference-level VRAM for SAM part
+        # DynUNet-3D trains alongside — total peak ~8-10 GB on typical patch sizes
+        _require_sam3(config, encoder_frozen=True)
         return Sam3HybridAdapter(config)
 
     msg = (
