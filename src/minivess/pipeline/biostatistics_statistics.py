@@ -396,7 +396,7 @@ def _compute_icc(
             return 0.0, 0.0, 0.0
 
         icc_val = float(icc2_row["ICC"].iloc[0])
-        ci = icc2_row["CI95%"].iloc[0]
+        ci = icc2_row["CI95"].iloc[0]
         ci_lower = float(ci[0])
         ci_upper = float(ci[1])
         return icc_val, ci_lower, ci_upper
