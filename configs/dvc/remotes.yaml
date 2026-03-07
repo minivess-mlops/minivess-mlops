@@ -1,0 +1,60 @@
+# MinIVess MLOps — DVC Remote Definitions
+#
+# Defines named DVC remotes for cloud-agnostic data versioning.
+# Active remote selected by DVC_REMOTE env var or --remote CLI flag.
+#
+# Apply a remote config with:
+#   dvc remote add <name> <url>
+#   dvc remote modify <name> <key> <value>
+#
+# Or configure via this file + scripts/configure_dvc_remote.sh
+
+remotes:
+
+  # ---------------------------------------------------------------------------
+  # Local (dev) — filesystem-based, no credentials required
+  # ---------------------------------------------------------------------------
+  local:
+    url: /tmp/dvc-cache
+    description: "Local filesystem cache for development and CI"
+    env_hint: "DVC_REMOTE=local"
+
+  # ---------------------------------------------------------------------------
+  # S3 (MinIO-compatible) — production artifact storage
+  # ---------------------------------------------------------------------------
+  s3:
+    url: s3://minivess-dvc/cache
+    description: "MinIO (S3-compatible) bucket — default production remote"
+    config:
+      endpointurl: "${MINIO_ENDPOINT:-http://minivess-minio:9000}"
+      access_key_id: "${MINIO_ACCESS_KEY:-minioadmin}"
+      secret_access_key: "${MINIO_SECRET_KEY:-minioadmin}"
+    env_hint: "DVC_REMOTE=s3"
+
+  # ---------------------------------------------------------------------------
+  # GCS (Google Cloud Storage)
+  # ---------------------------------------------------------------------------
+  gcs:
+    url: gs://minivess-dvc/cache
+    description: "Google Cloud Storage bucket for GCP deployments"
+    config:
+      credentialspath: "${GOOGLE_APPLICATION_CREDENTIALS:-}"
+    env_hint: "DVC_REMOTE=gcs"
+
+  # ---------------------------------------------------------------------------
+  # Azure Blob Storage
+  # ---------------------------------------------------------------------------
+  azure:
+    url: azure://minivess-dvc/cache
+    description: "Azure Blob Storage for Azure deployments"
+    config:
+      connection_string: "${AZURE_STORAGE_CONNECTION_STRING:-}"
+    env_hint: "DVC_REMOTE=azure"
+
+  # ---------------------------------------------------------------------------
+  # HuggingFace Hub (zero-infrastructure option for public datasets)
+  # ---------------------------------------------------------------------------
+  hf:
+    url: hf://datasets/minivess/minivess-data
+    description: "HuggingFace Hub — public dataset hosting, no infra required"
+    env_hint: "DVC_REMOTE=hf"

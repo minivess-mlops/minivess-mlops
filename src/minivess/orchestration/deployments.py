@@ -16,10 +16,12 @@ FLOW_WORK_POOL_MAP: dict[str, str] = {
     "acquisition": "cpu-pool",
     "data": "cpu-pool",
     "train": "gpu-pool",
+    "post_training": "cpu-pool",
     "analyze": "cpu-pool",
     "deploy": "cpu-pool",
     "dashboard": "cpu-pool",
     "qa": "cpu-pool",
+    "annotation": "cpu-pool",
 }
 
 # Flow → Docker image mapping
@@ -27,10 +29,12 @@ FLOW_IMAGE_MAP: dict[str, str] = {
     "acquisition": "minivess-acquisition:latest",
     "data": "minivess-data:latest",
     "train": "minivess-train:latest",
+    "post_training": "minivess-post-training:latest",
     "analyze": "minivess-analyze:latest",
     "deploy": "minivess-deploy:latest",
     "dashboard": "minivess-dashboard:latest",
     "qa": "minivess-qa:latest",
+    "annotation": "minivess-annotation:latest",
 }
 
 

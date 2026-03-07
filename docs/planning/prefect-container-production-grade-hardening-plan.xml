@@ -1,0 +1,1729 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Prefect + Container Production-Grade Hardening Plan
+  ====================================================
+  Branch:          feat/flow-biostatistics (or new feat/prefect-hardening)
+  Closes:          #367 (Prefect-only execution), #369 (Docker volume audit)
+  Related:         metalearning 2026-03-06-standalone-script-antipattern.md
+  Date:            2026-03-07
+  Synthesized from: intermedia-plan-synthesis.md + all flow source files + all Dockerfiles
+
+  Execution model: self-learning-iterative-coder skill
+  Order:           RED (tests first) → GREEN (implement) → VERIFY (lint+type+test) → CHECKPOINT
+
+  ALL 9 FLOWS COVERED:
+    Flow 0: acquisition_flow.py
+    Flow 1: data_flow.py
+    Flow 2: train_flow.py
+    Flow 2.5: post_training_flow.py
+    Flow 3: analysis_flow.py
+    Flow 4: deploy_flow.py
+    Flow 5: dashboard_flow.py
+    Flow 6: qa_flow.py
+    Cross-cutting: annotation_flow.py, docker-compose.flows.yml, SkyPilot, regex fixes
+
+  CONSTRAINTS (non-negotiable):
+    - import re → BANNED for structured data (use ast.parse, json.loads, yaml.safe_load, str.split)
+    - /tmp + tempfile.mkdtemp() → BANNED for artifacts that must survive container exit
+    - python scripts/*.py → BANNED as training entry point (use prefect deployment run)
+    - All Docker outputs → must be volume-mounted
+    - MLflow → ONLY inter-flow contract (no shared filesystem)
+    - from __future__ import annotations → top of every Python file
+    - pathlib.Path() → always (never string concatenation)
+    - datetime.now(timezone.utc) → always
+    - TDD → tests first, ALWAYS
+-->
+<plan>
+  <metadata>
+    <title>Prefect Container Production-Grade Hardening Plan</title>
+    <date>2026-03-07</date>
+    <branch>feat/prefect-hardening</branch>
+    <closes_issues>367, 369</closes_issues>
+    <skill>self-learning-iterative-coder</skill>
+    <phases>8</phases>
+    <tasks>28</tasks>
+    <estimated_new_tests>~120</estimated_new_tests>
+    <synthesis_source>docs/planning/intermedia-plan-synthesis.md</synthesis_source>
+  </metadata>
+
+  <!-- ======================================================================
+       PHASE 0: Cross-Cutting Fixes — Regex Ban + Deployment Config
+       Priority: P0 (blocks analysis flow correctness)
+       ====================================================================== -->
+  <phase id="0" name="Cross-Cutting Fixes: Regex Ban and Deployment Config">
+    <description>
+      Fix all banned regex violations (CLAUDE.md Rule #16) and the missing post_training
+      entry in FLOW_WORK_POOL_MAP. These are independent of the main volume audit and
+      can be done first as they unblock analysis flow and eliminate silent correctness bugs.
+    </description>
+
+    <task id="T-01">
+      <title>Fix regex violation in analysis_flow.py — replace re.compile with rsplit()</title>
+      <flow>Flow 3: Analysis</flow>
+      <priority>P0</priority>
+      <github_issue>#369 (regex ban is a sub-constraint of the audit)</github_issue>
+      <current_state>
+        src/minivess/orchestration/flows/analysis_flow.py line 1033:
+          _FOLD_RE = re.compile(r"^(.+)_fold(\d+)$")
+        import re is at the top of analysis_flow.py (line ~22).
+        This is an explicit violation of CLAUDE.md Rule #16 and the regex ban metalearning doc.
+        Metric names like "val_dice_fold0" are structured strings that must be parsed with
+        str methods, not regex.
+      </current_state>
+      <target_state>
+        - import re is removed from analysis_flow.py
+        - _FOLD_RE is replaced by a helper function using str.rsplit("_fold", 1)
+        - All uses of _FOLD_RE.match() are replaced with the str.rsplit() approach
+        - The file passes `uv run ruff check` and `uv run mypy`
+      </target_state>
+      <tdd_spec>
+        RED phase — write tests/v2/unit/test_analysis_flow_no_regex.py:
+          test_fold_name_parse_basic: assert parse_fold_metric("val_dice_fold0") == ("val_dice", 0)
+          test_fold_name_parse_multi_fold: assert parse_fold_metric("compound_masd_cldice_fold2") == ("compound_masd_cldice", 2)
+          test_fold_name_parse_no_fold: parse_fold_metric("val_loss") raises ValueError (no _fold suffix)
+          test_analysis_flow_no_re_import: ast.parse(source) walk finds no import re or import regex node
+        GREEN phase:
+          Add parse_fold_metric(name: str) -> tuple[str, int] function using str.rsplit("_fold", 1)
+          Replace all _FOLD_RE.match() calls with parse_fold_metric()
+          Remove import re from analysis_flow.py
+      </tdd_spec>
+      <acceptance_criteria>
+        - grep -n "import re" src/minivess/orchestration/flows/analysis_flow.py returns nothing
+        - All existing analysis_flow tests continue to pass
+        - New test_fold_name_parse_* tests pass
+        - ruff check reports no violations
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/analysis_flow.py
+        tests/v2/unit/test_analysis_flow_no_regex.py (new)
+      </files_to_modify>
+      <depends_on/>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T-02">
+      <title>Fix regex violation in duckdb_extraction.py — replace re.match with str.split()</title>
+      <flow>Cross-cutting (analytics)</flow>
+      <priority>P0</priority>
+      <github_issue>#369 (regex ban)</github_issue>
+      <current_state>
+        src/minivess/pipeline/duckdb_extraction.py line 364:
+          re.match(r"eval_fold(\d+)_(.+)", metric_name)
+        Parses metric names like "eval_fold0_val_dice" to extract fold index and metric name.
+        This is structured string parsing that must use str.split() per CLAUDE.md Rule #16.
+      </current_state>
+      <target_state>
+        - import re is removed from duckdb_extraction.py (or re is no longer used for metric parsing)
+        - Metric name parsing uses str.partition("_fold") + str.split("_", 1) or equivalent
+        - All 5 components of the metric name (prefix, fold_index, metric_name) are correctly extracted
+        - The file passes ruff check and mypy
+      </target_state>
+      <tdd_spec>
+        RED phase — write tests/v2/unit/test_duckdb_extraction_no_regex.py:
+          test_metric_parse_eval_fold: parse_eval_fold_metric("eval_fold0_val_dice") == (0, "val_dice")
+          test_metric_parse_multi_digit_fold: parse_eval_fold_metric("eval_fold12_compound_masd") == (12, "compound_masd")
+          test_metric_parse_non_fold: parse_eval_fold_metric("train_loss") returns None (not an eval fold metric)
+          test_duckdb_no_re_import: ast.parse(source) walk finds no import re for metric parsing
+        GREEN phase:
+          Add parse_eval_fold_metric(name: str) -> tuple[int, str] | None
+          Using: if "_fold" not in name: return None
+                 _, rest = name.partition("_fold")
+                 fold_str, _, metric = rest.partition("_")
+                 return int(fold_str), metric
+          Replace re.match() call at line 364 with parse_eval_fold_metric()
+      </tdd_spec>
+      <acceptance_criteria>
+        - grep -n "re.match" src/minivess/pipeline/duckdb_extraction.py returns nothing
+        - Existing DuckDB extraction tests continue to pass
+        - New metric parsing tests pass
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/duckdb_extraction.py
+        tests/v2/unit/test_duckdb_extraction_no_regex.py (new)
+      </files_to_modify>
+      <depends_on/>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T-03">
+      <title>Add post_training to FLOW_WORK_POOL_MAP in deployments.py</title>
+      <flow>Flow 2.5: Post-Training</flow>
+      <priority>P0</priority>
+      <github_issue>#369</github_issue>
+      <current_state>
+        src/minivess/orchestration/deployments.py:
+          FLOW_WORK_POOL_MAP does NOT contain "post_training"
+          FLOW_IMAGE_MAP DOES contain "post_training": "minivess-post-training:latest"
+        get_flow_deployment_config("post_training") returns cpu-pool (default fallback)
+        but FLOW_IMAGE_MAP.get("post_training") returns the correct image.
+        The inconsistency means the deployment config is partially wrong.
+      </current_state>
+      <target_state>
+        - FLOW_WORK_POOL_MAP["post_training"] = "cpu-pool"
+        - get_flow_deployment_config("post_training") returns correct work_pool + image
+        - "annotation" is also added to both maps
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_deployments_config.py (add to existing or create):
+          test_all_flows_in_work_pool_map: all flow names in FLOW_IMAGE_MAP are also in FLOW_WORK_POOL_MAP
+          test_post_training_config: get_flow_deployment_config("post_training")["work_pool"] == "cpu-pool"
+          test_post_training_image: get_flow_deployment_config("post_training")["image"] == "minivess-post-training:latest"
+          test_annotation_config: get_flow_deployment_config("annotation")["work_pool"] == "cpu-pool"
+        GREEN phase:
+          Add "post_training": "cpu-pool" to FLOW_WORK_POOL_MAP
+          Add "annotation": "cpu-pool" to FLOW_WORK_POOL_MAP
+          Add "annotation": "minivess-annotation:latest" to FLOW_IMAGE_MAP
+      </tdd_spec>
+      <acceptance_criteria>
+        - All flows listed in trigger.py._DEFAULT_FLOWS are in FLOW_WORK_POOL_MAP
+        - FLOW_IMAGE_MAP and FLOW_WORK_POOL_MAP have identical key sets
+        - Deployment config tests pass
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/deployments.py
+        tests/v2/unit/test_deployments_config.py (new or extend existing)
+      </files_to_modify>
+      <depends_on/>
+      <estimated_iterations>1</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- ======================================================================
+       PHASE 1: Docker Volume Audit — docker-compose.flows.yml
+       Priority: P0 (Issue #369)
+       ====================================================================== -->
+  <phase id="1" name="Docker Volume Audit — docker-compose.flows.yml">
+    <description>
+      Add missing volume declarations to all flow services. This is a surgical edit
+      to docker-compose.flows.yml that enables all flows to persist their outputs
+      across container restarts. Also adds the missing acquisition service.
+      Every artifact that must survive container exit must have an explicit mount.
+    </description>
+
+    <task id="T-04">
+      <title>Add acquisition service and all missing volume mounts to docker-compose.flows.yml</title>
+      <flow>All flows (cross-cutting)</flow>
+      <priority>P0</priority>
+      <github_issue>#369</github_issue>
+      <current_state>
+        deployment/docker-compose.flows.yml:
+          - acquisition service: MISSING ENTIRELY (no service definition)
+          - data service: only data_cache:/app/data (missing mlruns, splits)
+          - train service: data_cache + checkpoint_cache (missing mlruns, logs, splits)
+          - post_training service: checkpoint_cache:ro (missing outputs, mlruns, data for calibration)
+          - analyze service: NO VOLUMES AT ALL
+          - deploy service: NO VOLUMES AT ALL
+          - dashboard service: NO VOLUMES AT ALL
+          - qa service: NO VOLUMES AT ALL
+
+        Named volumes defined: only data_cache and checkpoint_cache
+        Missing named volumes: mlruns_data, raw_data, outputs_analysis, outputs_deploy,
+          outputs_dashboard, outputs_qa, bentoml_store, logs_data, configs_splits, post_training_out
+      </current_state>
+      <target_state>
+        Full volume specification per service (see intermedia-plan-synthesis.md Part 2.1):
+
+        acquisition:
+          - raw_data:/app/data/raw (rw)
+          - logs_data:/app/logs (rw)
+
+        data:
+          - raw_data:/app/data/raw:ro
+          - data_cache:/app/data/processed (rw)
+          - configs_splits:/app/configs/splits (rw)
+          - mlruns_data:/app/mlruns (rw)
+
+        train:
+          - data_cache:/app/data:ro
+          - configs_splits:/app/configs/splits:ro
+          - checkpoint_cache:/app/checkpoints (rw)
+          - mlruns_data:/app/mlruns (rw)
+          - logs_data:/app/logs (rw)
+
+        post_training:
+          - checkpoint_cache:/app/checkpoints:ro
+          - data_cache:/app/data:ro
+          - post_training_out:/app/outputs/post_training (rw)
+          - mlruns_data:/app/mlruns (rw)
+
+        analyze:
+          - data_cache:/app/data:ro
+          - checkpoint_cache:/app/checkpoints:ro
+          - configs_splits:/app/configs/splits:ro
+          - mlruns_data:/app/mlruns (rw)
+          - outputs_analysis:/app/outputs/analysis (rw)
+
+        deploy:
+          - checkpoint_cache:/app/checkpoints:ro
+          - mlruns_data:/app/mlruns:ro
+          - outputs_deploy:/app/outputs/deploy (rw)
+          - bentoml_store:/home/minivess/bentoml (rw)
+
+        dashboard:
+          - mlruns_data:/app/mlruns:ro
+          - outputs_analysis:/app/outputs/analysis:ro
+          - outputs_dashboard:/app/outputs/dashboard (rw)
+
+        qa:
+          - mlruns_data:/app/mlruns:ro
+          - outputs_dashboard:/app/outputs/dashboard (rw)
+
+        All new named volumes declared in the top-level volumes: section.
+        acquisition service added with Dockerfile.acquisition and correct env vars.
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/integration/test_docker_compose_volumes.py:
+          test_acquisition_service_exists: parse docker-compose.flows.yml with yaml.safe_load(),
+            assert "acquisition" in services
+          test_acquisition_has_raw_data_mount: assert any(v.startswith("raw_data:") for v in services["acquisition"]["volumes"])
+          test_analyze_has_mlruns_mount: assert any("mlruns_data" in v for v in services["analyze"]["volumes"])
+          test_analyze_has_outputs_mount: assert any("outputs_analysis" in v for v in services["analyze"]["volumes"])
+          test_deploy_has_outputs_mount: assert any("outputs_deploy" in v for v in services["deploy"]["volumes"])
+          test_deploy_has_bentoml_mount: assert any("bentoml_store" in v for v in services["deploy"]["volumes"])
+          test_dashboard_has_outputs_mount: assert any("outputs_dashboard" in v for v in services["dashboard"]["volumes"])
+          test_qa_has_mlruns_mount: assert any("mlruns_data" in v for v in services["qa"]["volumes"])
+          test_all_referenced_volumes_declared: all volume names in services["*"]["volumes"] appear in top-level volumes
+          test_train_has_no_tmp_paths: no volume in services["train"]["volumes"] contains "/tmp"
+          NOTE: All parsing uses yaml.safe_load() — NO regex, NO string scanning
+        GREEN phase:
+          Edit deployment/docker-compose.flows.yml with all required volume declarations
+          Add acquisition service
+          Add all 10 new named volumes to the volumes: section
+          Verify with: docker compose -f deployment/docker-compose.flows.yml config
+      </tdd_spec>
+      <acceptance_criteria>
+        - `docker compose -f deployment/docker-compose.flows.yml config` exits 0
+        - All integration tests in test_docker_compose_volumes.py pass
+        - No service has zero volumes declared
+        - No volume path contains "/tmp"
+        - All volume names referenced in services appear in the top-level volumes section
+      </acceptance_criteria>
+      <files_to_modify>
+        deployment/docker-compose.flows.yml
+        tests/v2/integration/test_docker_compose_volumes.py (new)
+      </files_to_modify>
+      <depends_on/>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- ======================================================================
+       PHASE 2: Fix tempfile.mkdtemp() in train_monitored.py
+       Priority: P0 (Issue #369)
+       ====================================================================== -->
+  <phase id="2" name="Fix Ephemeral Checkpoint Directory in Training">
+    <description>
+      The root cause of checkpoint loss on container exit: scripts/train_monitored.py:673
+      creates checkpoint_dir via tempfile.mkdtemp(). This is /tmp/tmpXXXXXX inside Docker,
+      which is ephemeral and lost on container exit. The fix reads CHECKPOINT_DIR from env.
+
+      This is the most impactful single-line fix in the entire codebase.
+    </description>
+
+    <task id="T-05">
+      <title>Replace tempfile.mkdtemp() with env-var-configured checkpoint path in train_monitored.py</title>
+      <flow>Flow 2: Training</flow>
+      <priority>P0</priority>
+      <github_issue>#369</github_issue>
+      <current_state>
+        scripts/train_monitored.py line 673:
+          checkpoint_dir = Path(tempfile.mkdtemp()) / f"fold_{fold_id}"
+        import tempfile at line 110.
+
+        This means:
+        - Inside Docker: checkpoints go to /tmp/tmpXXX/fold_0/ — lost on container exit
+        - Resume (--resume flag) always fails because there is nothing to resume from
+        - MLflow artifact upload of checkpoints is never triggered (the checkpoint is gone)
+
+        The checkpoint_cache volume is mounted at /app/checkpoints but never written to.
+      </current_state>
+      <target_state>
+        - import tempfile removed from scripts/train_monitored.py (or no longer used for checkpoints)
+        - checkpoint_dir = Path(os.environ.get("CHECKPOINT_DIR", "/app/checkpoints")) / f"fold_{fold_id}"
+        - The /app/checkpoints path maps to the checkpoint_cache named volume
+        - Resume logic correctly reads from CHECKPOINT_DIR on restart
+        - CHECKPOINT_DIR env var documented in deployment/docker-compose.flows.yml train service
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_train_monitored_checkpoint_dir.py:
+          test_checkpoint_dir_from_env: with CHECKPOINT_DIR=/test/ckpt set in env,
+            the resolved checkpoint_dir.parts includes "test" and "ckpt"
+          test_checkpoint_dir_not_in_tmp: the resolved checkpoint_dir does not start with /tmp
+          test_checkpoint_dir_includes_fold_id: checkpoint_dir.name == "fold_0" for fold_id=0
+          test_no_tempfile_import: ast.parse(open("scripts/train_monitored.py").read()) walk
+            finds no import for "tempfile" module (or tempfile is not used for checkpoint_dir)
+        GREEN phase:
+          Replace line 673 of scripts/train_monitored.py:
+            OLD: checkpoint_dir = Path(tempfile.mkdtemp()) / f"fold_{fold_id}"
+            NEW: checkpoint_dir = Path(os.environ.get("CHECKPOINT_DIR", "/app/checkpoints")) / f"fold_{fold_id}"
+          Remove `import tempfile` if no longer used elsewhere
+          Add CHECKPOINT_DIR to docker-compose.flows.yml train environment section
+      </tdd_spec>
+      <acceptance_criteria>
+        - checkpoint_dir never resolves to a /tmp path when CHECKPOINT_DIR env var is set
+        - import tempfile is not present in train_monitored.py (or is clearly not used for checkpoints)
+        - After container restart, checkpoints written before restart are still present
+          (verified by integration test that writes and reads across simulated restart)
+      </acceptance_criteria>
+      <files_to_modify>
+        scripts/train_monitored.py (line 673 and import section)
+        deployment/docker-compose.flows.yml (add CHECKPOINT_DIR to train environment)
+        tests/v2/unit/test_train_monitored_checkpoint_dir.py (new)
+      </files_to_modify>
+      <depends_on>T-04</depends_on>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- ======================================================================
+       PHASE 3: Training Flow — Implement Real Body (Issue #367)
+       Priority: P0
+       ====================================================================== -->
+  <phase id="3" name="Training Flow — Implement Real Execution Body">
+    <description>
+      The training_flow() in train_flow.py is a stub that returns {"status": "configured"}
+      without executing any training. This is the central violation of Issue #367.
+      The flow must call SegmentationTrainer.fit() directly, not delegate to train_monitored.py.
+
+      This task is the largest single implementation task in the entire plan.
+    </description>
+
+    <task id="T-06">
+      <title>Implement training_flow() body — replace stub with real SegmentationTrainer.fit() call</title>
+      <flow>Flow 2: Training</flow>
+      <priority>P0</priority>
+      <github_issue>#367</github_issue>
+      <current_state>
+        src/minivess/orchestration/flows/train_flow.py:
+          run_training() task returns:
+            {"status": "configured",
+             "message": "Training flow configured. Use scripts/train_monitored.py for execution."}
+          training_flow() calls run_training() and returns the stub dict.
+
+          The flow:
+          - Does NOT open an MLflow run
+          - Does NOT read fold splits from /app/configs/splits
+          - Does NOT call SegmentationTrainer.fit()
+          - Does NOT write checkpoints to the checkpoint volume
+          - Does NOT log upstream_data_run_id tag
+          - Does NOT call FlowContract.log_flow_completion()
+      </current_state>
+      <target_state>
+        training_flow() must:
+        1. Open MLflow run in "minivess_training" experiment via ExperimentTracker
+        2. Read upstream data run ID via FlowContract.find_upstream_run()
+        3. Load TrainingConfig from experiment YAML (not hardcoded defaults)
+        4. Load fold splits from Path(os.environ["SPLITS_DIR"]) / "splits.json"
+        5. For each fold:
+           a. Build DataLoaders from the fold split
+           b. Build ModelAdapter (DynUNet or configured model)
+           c. Build SegmentationTrainer
+           d. Call trainer.fit(train_loader, val_loader,
+                checkpoint_dir=Path(os.environ["CHECKPOINT_DIR"]) / f"fold_{fold_id}")
+           e. Log fold results to MLflow
+        6. Tag training run with upstream_data_run_id, flow_name="train"
+        7. Call FlowContract.log_flow_completion()
+        8. Return TrainingFlowResult dataclass (not a plain dict stub)
+
+        run_training() task must be split into multiple focused tasks:
+          - load_fold_splits_task()
+          - build_data_loaders_task()
+          - train_one_fold_task() [calls SegmentationTrainer.fit()]
+          - log_fold_results_task()
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_train_flow_real.py:
+          test_training_flow_returns_real_result: training_flow() with minimal config returns
+            TrainingFlowResult (not a dict with status="configured")
+          test_training_flow_opens_mlflow_run: after training_flow() runs (with mock trainer),
+            mlflow.search_runs("minivess_training") finds a run with flow_name tag
+          test_training_flow_reads_splits: with a mock splits.json at SPLITS_DIR,
+            training_flow() uses it (not hardcoded fold assignment)
+          test_training_flow_checkpoint_dir_not_tmp: the checkpoint_dir used in train_one_fold_task
+            does not start with /tmp
+          test_training_flow_logs_upstream_run_id: MLflow run has "upstream_data_run_id" tag
+          test_train_flow_no_argparse_namespace: ast.parse() walk on train_flow.py finds no
+            argparse.Namespace construction (the stub pattern)
+          test_run_training_task_deprecated_message: if run_training() stub is called directly,
+            it logs a deprecation warning and raises NotImplementedError
+
+        RED phase — tests/v2/integration/test_train_flow_with_monai.py:
+          test_train_flow_one_fold_cpu: training_flow() with debug=True, num_folds=1,
+            max_epochs=1 completes without error on CPU
+          test_train_flow_creates_checkpoint: after training_flow() debug run,
+            checkpoint file exists in CHECKPOINT_DIR/fold_0/
+          test_train_flow_mlflow_has_epoch_metrics: MLflow run has val_loss metric at step=1
+
+        GREEN phase:
+          Rewrite src/minivess/orchestration/flows/train_flow.py
+          Add TrainingFlowResult dataclass
+          Add load_fold_splits_task(), build_data_loaders_task(), train_one_fold_task(),
+            log_fold_results_task()
+          Wire FlowContract into training_flow()
+          DO NOT delete run_training() — add deprecation warning + NotImplementedError
+      </tdd_spec>
+      <acceptance_criteria>
+        - training_flow(debug=True, num_folds=1, max_epochs=1) completes without error
+        - At least one MLflow run exists in "minivess_training" after flow completes
+        - The run has val_loss metric at step=1 (epoch-level logging works)
+        - The run has upstream_data_run_id tag (or "no_upstream" if no data run found)
+        - Checkpoint file exists at CHECKPOINT_DIR/fold_0/best_val_loss.pth
+        - grep "Use scripts/train_monitored.py" src/minivess/orchestration/flows/train_flow.py
+          returns nothing (stub message removed)
+        - The string "configured" does not appear as the only status in training_flow() output
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/train_flow.py (major rewrite)
+        tests/v2/unit/test_train_flow_real.py (new)
+        tests/v2/integration/test_train_flow_with_monai.py (new)
+      </files_to_modify>
+      <depends_on>T-05</depends_on>
+      <estimated_iterations>5</estimated_iterations>
+    </task>
+
+    <task id="T-07">
+      <title>Fix SkyPilot train_generic.yaml — replace python scripts/ with prefect deployment run</title>
+      <flow>Flow 2: Training (SkyPilot compute)</flow>
+      <priority>P0</priority>
+      <github_issue>#367</github_issue>
+      <current_state>
+        deployment/skypilot/train_generic.yaml line 50:
+          run: |
+            cd /app
+            uv run python scripts/train_monitored.py \
+              --compute ${COMPUTE} \
+              --loss ${LOSS_NAME} \
+              ...
+        This invokes a standalone Python script — explicitly banned per Issue #367 and
+        metalearning 2026-03-06-standalone-script-antipattern.md.
+      </current_state>
+      <target_state>
+        deployment/skypilot/train_generic.yaml run section:
+          run: |
+            cd /app
+            prefect deployment run 'training-flow/default' \
+              --params "{\"loss_name\": \"${LOSS_NAME}\", \"model_family\": \"${MODEL_FAMILY}\",
+                         \"compute\": \"${COMPUTE}\", \"experiment_name\": \"${EXPERIMENT_NAME}\"}"
+
+        The setup section must install prefect and configure PREFECT_API_URL.
+        The SkyPilot job must have access to the Prefect server (via VPN or public URL).
+        If Prefect server is not accessible from spot instance, use PREFECT_DISABLED=0
+        and point at the on-prem server IP via PREFECT_API_URL env var.
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_skypilot_configs.py:
+          test_train_generic_no_python_script_invocation: yaml.safe_load(train_generic.yaml),
+            assert "scripts/train_monitored.py" not in config["run"]
+          test_train_generic_uses_prefect_run: assert "prefect deployment run" in config["run"]
+          test_train_hpo_no_python_script: yaml.safe_load(train_hpo_sweep.yaml),
+            assert "scripts/run_hpo.py" not in config["run"]
+          NOTE: All YAML parsing uses yaml.safe_load() — no regex
+        GREEN phase:
+          Edit deployment/skypilot/train_generic.yaml run section
+          Edit deployment/skypilot/train_hpo_sweep.yaml run section (see T-08)
+          Verify setup section installs prefect: pip install uv &amp;&amp; uv sync --no-dev
+      </tdd_spec>
+      <acceptance_criteria>
+        - "scripts/train_monitored.py" does not appear in any SkyPilot run section
+        - "prefect deployment run" appears in train_generic.yaml run section
+        - YAML files are syntactically valid (yaml.safe_load() parses without error)
+      </acceptance_criteria>
+      <files_to_modify>
+        deployment/skypilot/train_generic.yaml
+        tests/v2/unit/test_skypilot_configs.py (new)
+      </files_to_modify>
+      <depends_on>T-06</depends_on>
+      <estimated_iterations>1</estimated_iterations>
+    </task>
+
+    <task id="T-08">
+      <title>Fix SkyPilot train_hpo_sweep.yaml — replace python scripts/ with prefect deployment run</title>
+      <flow>Flow 2: Training / HPO</flow>
+      <priority>P0</priority>
+      <github_issue>#367</github_issue>
+      <current_state>
+        deployment/skypilot/train_hpo_sweep.yaml line 37:
+          run: |
+            cd /app
+            uv run python scripts/run_hpo.py \
+              --config ${HPO_CONFIG} ...
+        Same violation as T-07: standalone Python script invocation.
+        Note: hpo_flow.py does not yet exist as a Prefect flow.
+      </current_state>
+      <target_state>
+        Either:
+        (a) Create src/minivess/orchestration/flows/hpo_flow.py as a proper Prefect flow
+            wrapping HPOEngine, and invoke via prefect deployment run 'hpo-flow/default'
+        OR
+        (b) Wrap run_hpo.py in an Optuna-Prefect integration where each trial is a
+            Prefect task submitted to the gpu-pool
+
+        The SkyPilot run section must use prefect deployment run.
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_hpo_flow.py (new, if creating hpo_flow.py):
+          test_hpo_flow_decorated: hpo_flow function has @flow decorator
+          test_hpo_flow_returns_study: hpo_flow(n_trials=1) returns dict with "best_params" key
+          test_hpo_flow_no_python_script: ast.parse(hpo_flow.py source) finds no subprocess.run call
+            with "scripts/run_hpo.py"
+        GREEN phase:
+          Create src/minivess/orchestration/flows/hpo_flow.py
+          Update deployment/skypilot/train_hpo_sweep.yaml run section
+      </tdd_spec>
+      <acceptance_criteria>
+        - "scripts/run_hpo.py" does not appear in any SkyPilot run section
+        - hpo_flow.py has a @flow decorated function
+        - YAML is syntactically valid
+      </acceptance_criteria>
+      <files_to_modify>
+        deployment/skypilot/train_hpo_sweep.yaml
+        src/minivess/orchestration/flows/hpo_flow.py (new)
+        tests/v2/unit/test_hpo_flow.py (new)
+      </files_to_modify>
+      <depends_on>T-07</depends_on>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- ======================================================================
+       PHASE 4: Post-Training Flow — Volume and Output Path Fixes
+       Priority: P1
+       ====================================================================== -->
+  <phase id="4" name="Post-Training Flow — Volume and Output Path Fixes">
+
+    <task id="T-09">
+      <title>Fix post_training_flow output_dir relative path — use env var for /app/outputs/post_training</title>
+      <flow>Flow 2.5: Post-Training</flow>
+      <priority>P1</priority>
+      <github_issue>#369</github_issue>
+      <current_state>
+        src/minivess/orchestration/flows/post_training_flow.py line 152:
+          if output_dir is None:
+              output_dir = Path("outputs/post_training")
+        Inside Docker, this resolves to /app/outputs/post_training which has no volume mount.
+        All SWA, merging, calibration artifacts are lost on container exit.
+      </current_state>
+      <target_state>
+        if output_dir is None:
+            output_dir = Path(os.environ.get("POST_TRAINING_OUTPUT_DIR", "/app/outputs/post_training"))
+        The /app/outputs/post_training path maps to the post_training_out named volume.
+        Plugin output sub-paths (output_dir / plugin_name) are all within the mounted volume.
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_post_training_output_dir.py:
+          test_output_dir_from_env: with POST_TRAINING_OUTPUT_DIR=/test/pt set,
+            post_training_flow() uses Path("/test/pt") as output root
+          test_output_dir_not_relative: resolved output_dir.is_absolute() is True
+          test_plugin_subdirs_within_output: for each plugin, output subdir is a child of output_dir
+          test_no_hardcoded_relative_path: ast.parse() walk on post_training_flow.py finds no
+            Path("outputs/post_training") literal construction
+        GREEN phase:
+          Add import os at top of post_training_flow.py (after from __future__ import annotations)
+          Replace line 152 with env-var-based path
+          Update docker-compose.flows.yml post_training service environment section to add
+          POST_TRAINING_OUTPUT_DIR=/app/outputs/post_training
+      </tdd_spec>
+      <acceptance_criteria>
+        - POST_TRAINING_OUTPUT_DIR env var controls output path
+        - Default resolves to /app/outputs/post_training (absolute)
+        - No relative Path("outputs/...") literals in post_training_flow.py
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/post_training_flow.py
+        deployment/docker-compose.flows.yml (environment section for post_training)
+        tests/v2/unit/test_post_training_output_dir.py (new)
+      </files_to_modify>
+      <depends_on>T-04</depends_on>
+      <estimated_iterations>1</estimated_iterations>
+    </task>
+
+    <task id="T-10">
+      <title>Add MLflow run logging to post_training_flow — log plugin metrics with post_ prefix</title>
+      <flow>Flow 2.5: Post-Training</flow>
+      <priority>P1</priority>
+      <github_issue>#369</github_issue>
+      <current_state>
+        post_training_flow() returns plugin results as a Python dict but does NOT:
+        - Open an MLflow run
+        - Log plugin metrics to MLflow
+        - Read upstream_training_run_id from FlowContract
+        - Call FlowContract.log_flow_completion()
+        Plugin execution results (SWA model paths, calibration metrics) are ephemeral.
+      </current_state>
+      <target_state>
+        post_training_flow() must:
+        1. Open MLflow run in "minivess_training" experiment
+        2. Read upstream training run ID via FlowContract.find_upstream_run()
+        3. Log each plugin's metrics with "post_{plugin_name}_" prefix
+        4. Log model paths as MLflow artifacts (or tags)
+        5. Call FlowContract.log_flow_completion()
+        6. Return enriched result dict with mlflow_run_id
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_post_training_mlflow.py:
+          test_post_training_opens_mlflow_run: after post_training_flow() with mock plugins,
+            mlflow.search_runs("minivess_training") finds a run with flow_name="post_training"
+          test_post_training_logs_plugin_metrics: MLflow run has metrics with "post_" prefix
+          test_post_training_logs_upstream_run_id: run has "upstream_training_run_id" tag
+          test_post_training_result_has_run_id: returned dict contains "mlflow_run_id" key
+        GREEN phase:
+          Add ExperimentTracker and FlowContract imports to post_training_flow.py
+          Wrap flow body with mlflow.start_run() context
+          Log plugin results with post_ prefix
+          Call FlowContract.log_flow_completion() at end
+      </tdd_spec>
+      <acceptance_criteria>
+        - MLflow run created for each post_training_flow() invocation
+        - Plugin metrics visible in MLflow UI with post_ prefix
+        - upstream_training_run_id tag links to training run
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/post_training_flow.py
+        tests/v2/unit/test_post_training_mlflow.py (new)
+      </files_to_modify>
+      <depends_on>T-09</depends_on>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- ======================================================================
+       PHASE 5: Analysis, Deployment, Dashboard, QA — MLflow + Volumes
+       Priority: P1
+       ====================================================================== -->
+  <phase id="5" name="Analysis, Deployment, Dashboard, QA — Volume and Contract Wiring">
+
+    <task id="T-11">
+      <title>Wire FlowContract into analysis_flow — add flow_name tag and log_flow_completion</title>
+      <flow>Flow 3: Analysis</flow>
+      <priority>P1</priority>
+      <github_issue>#369</github_issue>
+      <current_state>
+        analysis_flow.py opens MLflow runs (ExperimentTracker is used).
+        However:
+        - The flow does not read upstream training run ID via FlowContract
+        - The flow does not tag itself with flow_name="analyze"
+        - FlowContract.log_flow_completion() is never called
+        - Output figures/tables go to relative paths (not /app/outputs/analysis from env var)
+      </current_state>
+      <target_state>
+        analysis_flow():
+        1. Reads upstream training run ID via FlowContract.find_upstream_run("minivess_training", "train")
+        2. Tags its MLflow run with upstream_training_run_id and flow_name="analyze"
+        3. Writes output figures to Path(os.environ.get("ANALYSIS_OUTPUT", "/app/outputs/analysis"))
+        4. Calls FlowContract.log_flow_completion(flow_name="analyze", ...)
+        5. Returns analysis result with mlflow_run_id included
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_analysis_flow_contract.py:
+          test_analysis_flow_tags_upstream_run: MLflow run has "upstream_training_run_id" tag
+          test_analysis_flow_sets_flow_name_tag: MLflow run has tags["flow_name"] == "analyze"
+          test_analysis_output_dir_from_env: with ANALYSIS_OUTPUT=/test/analysis,
+            figures are written to /test/analysis/
+          test_analysis_no_hardcoded_relative_outputs: ast.parse() finds no Path("outputs/analysis")
+            literals in analysis_flow.py
+        GREEN phase:
+          Add FlowContract import and wiring at start of analysis_flow()
+          Replace hardcoded output paths with ANALYSIS_OUTPUT env var
+          Add FlowContract.log_flow_completion() call at end
+      </tdd_spec>
+      <acceptance_criteria>
+        - Analysis MLflow runs link to upstream training runs via tag
+        - Output directory is env-var-controlled
+        - FlowContract.log_flow_completion() is called for every successful analysis run
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/analysis_flow.py
+        tests/v2/unit/test_analysis_flow_contract.py (new)
+      </files_to_modify>
+      <depends_on>T-01, T-04</depends_on>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+
+    <task id="T-12">
+      <title>Fix deploy_flow output paths and add BentoML store volume wiring</title>
+      <flow>Flow 4: Deployment</flow>
+      <priority>P1</priority>
+      <github_issue>#369</github_issue>
+      <current_state>
+        deploy_flow.py:
+        - onnx_dir = config.output_dir / "onnx" — depends on DeployConfig.output_dir
+        - DeployConfig default output_dir may not be /app/outputs/deploy
+        - BentoML model store path is not explicitly configured — uses BentoML default
+          (~/.bentoml inside the container, not a mounted volume)
+        - deploy service in docker-compose.flows.yml has ZERO volume mounts
+      </current_state>
+      <target_state>
+        - DeployConfig.output_dir defaults to Path(os.environ.get("DEPLOY_OUTPUT_DIR", "/app/outputs/deploy"))
+        - BENTOML_HOME env var is set to /home/minivess/bentoml (mapped to bentoml_store volume)
+        - deploy service has volume mounts for mlruns (ro), outputs_deploy (rw), bentoml_store (rw)
+        - FlowContract.log_flow_completion() called at end of deploy_flow()
+        - deploy_flow() tags MLflow run with flow_name="deploy" and upstream_analysis_run_id
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_deploy_flow_paths.py:
+          test_deploy_output_dir_from_env: DeployConfig with DEPLOY_OUTPUT_DIR=/test/deploy
+            uses Path("/test/deploy") as output root
+          test_deploy_onnx_dir_within_output: onnx_dir is output_dir / "onnx" (absolute)
+          test_deploy_bentoml_home_from_env: BentoML import uses BENTOML_HOME env var
+          test_deploy_flow_no_relative_paths: ast.parse() finds no Path("outputs/deploy") literals
+        GREEN phase:
+          Update src/minivess/config/deploy_config.py DeployConfig.output_dir default
+          Add BENTOML_HOME env var wiring to deploy_flow()
+          Add FlowContract wiring
+          Update docker-compose.flows.yml deploy service (covered in T-04)
+      </tdd_spec>
+      <acceptance_criteria>
+        - ONNX files persisted to outputs_deploy volume after deploy_flow()
+        - BentoML models in bentoml_store volume (not in container-ephemeral ~/.bentoml)
+        - deploy service in docker-compose.flows.yml has at least 3 volume mounts
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/config/deploy_config.py
+        src/minivess/orchestration/deploy_flow.py
+        tests/v2/unit/test_deploy_flow_paths.py (new)
+      </files_to_modify>
+      <depends_on>T-04</depends_on>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T-13">
+      <title>Fix dashboard_flow output paths and add FlowContract wiring</title>
+      <flow>Flow 5: Dashboard</flow>
+      <priority>P1</priority>
+      <github_issue>#369</github_issue>
+      <current_state>
+        dashboard_flow.py run_dashboard_flow(output_dir: Path, ...):
+        - output_dir is a required parameter — caller must provide it
+        - No default that reads from DASHBOARD_OUTPUT env var
+        - No FlowContract wiring
+        - dashboard service in docker-compose.flows.yml has ZERO volume mounts
+      </current_state>
+      <target_state>
+        - run_dashboard_flow accepts output_dir with default:
+            Path(os.environ.get("DASHBOARD_OUTPUT", "/app/outputs/dashboard"))
+        - dashboard service has volume mounts for mlruns (ro), outputs_analysis (ro),
+            outputs_dashboard (rw)
+        - FlowContract reads from any upstream completed flow (analyze or deploy)
+        - FlowContract.log_flow_completion() called at end
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_dashboard_flow_paths.py:
+          test_dashboard_output_from_env: with DASHBOARD_OUTPUT=/test/dash, report written to /test/dash/
+          test_dashboard_creates_report: run_dashboard_flow() creates everything_dashboard_report.md
+          test_dashboard_report_not_in_tmp: report_path does not start with /tmp
+          test_dashboard_metadata_json_created: everything_dashboard_metadata.json is created
+        GREEN phase:
+          Update run_dashboard_flow() output_dir default
+          Add FlowContract wiring
+          Update docker-compose.flows.yml dashboard service (covered in T-04)
+      </tdd_spec>
+      <acceptance_criteria>
+        - Dashboard report persisted to outputs_dashboard volume after run_dashboard_flow()
+        - DASHBOARD_OUTPUT env var controls output location
+        - Report and JSON files created at the end of a successful flow run
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/dashboard_flow.py
+        tests/v2/unit/test_dashboard_flow_paths.py (new)
+      </files_to_modify>
+      <depends_on>T-04</depends_on>
+      <estimated_iterations>1</estimated_iterations>
+    </task>
+
+    <task id="T-14">
+      <title>Fix qa_flow tracking URI to use MLFLOW_TRACKING_URI env var and add report persistence</title>
+      <flow>Flow 6: QA</flow>
+      <priority>P1</priority>
+      <github_issue>#369</github_issue>
+      <current_state>
+        qa_flow.py:
+          qa_flow(tracking_uri: str = "mlruns", ...):
+          - Default "mlruns" is a relative path — in Docker resolves to /app/mlruns
+          - /app/mlruns has no volume mount → qa_flow sees an empty mlruns directory
+          - QA report is returned as a string but never persisted to disk
+          - qa service in docker-compose.flows.yml has ZERO volume mounts
+      </current_state>
+      <target_state>
+        qa_flow():
+        - Default tracking_uri reads from MLFLOW_TRACKING_URI env var
+          (which is "http://minivess-mlflow:5000" in Docker context — the server backend)
+        - QA report is written to Path(os.environ.get("DASHBOARD_OUTPUT", "/app/outputs/dashboard")) / "qa_report.md"
+        - MLflow QA results (ghost run count, param violations) logged as tags via mlflow.set_tag()
+        - qa service has volume mount for outputs_dashboard (rw) and mlruns (ro)
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_qa_flow_uri.py:
+          test_qa_uses_env_tracking_uri: with MLFLOW_TRACKING_URI=http://test:5000 set,
+            qa_flow() uses "http://test:5000" not "mlruns"
+          test_qa_report_written_to_disk: qa_flow() writes qa_report.md to DASHBOARD_OUTPUT dir
+          test_qa_report_path_absolute: qa report path is absolute (not relative)
+          test_qa_flow_on_empty_mlruns_does_not_crash: qa_flow() with empty tracking store
+            returns summary with 0 ghost runs (not exception)
+        GREEN phase:
+          Update qa_flow() default tracking_uri to read from os.environ
+          Add report file write at end of qa_flow()
+          Update docker-compose.flows.yml qa service (covered in T-04)
+      </tdd_spec>
+      <acceptance_criteria>
+        - MLFLOW_TRACKING_URI env var controls tracking backend for qa_flow()
+        - QA report written to disk at env-configured path
+        - qa_flow() does not crash when MLflow server is unreachable (returns warning summary)
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/qa_flow.py
+        tests/v2/unit/test_qa_flow_uri.py (new)
+      </files_to_modify>
+      <depends_on>T-04</depends_on>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- ======================================================================
+       PHASE 6: Acquisition Flow — Add Docker Service and Volume
+       Priority: P1
+       ====================================================================== -->
+  <phase id="6" name="Acquisition Flow — Docker Service and MLflow Logging">
+
+    <task id="T-15">
+      <title>Add acquisition service to docker-compose.flows.yml with raw_data volume mount</title>
+      <flow>Flow 0: Acquisition</flow>
+      <priority>P1</priority>
+      <github_issue>#369</github_issue>
+      <current_state>
+        acquisition_flow.py is well-implemented with @flow decorator and proper task structure.
+        Dockerfile.acquisition exists at deployment/docker/Dockerfile.acquisition.
+        deployments.py has "acquisition" in FLOW_WORK_POOL_MAP and FLOW_IMAGE_MAP.
+        BUT: deployment/docker-compose.flows.yml has NO "acquisition" service definition.
+        The flow has no Docker infrastructure for running via compose.
+      </current_state>
+      <target_state>
+        docker-compose.flows.yml acquisition service:
+          build: deployment/docker/Dockerfile.acquisition
+          image: minivess-acquisition:latest
+          container_name: minivess-flow-acquisition
+          environment:
+            MLFLOW_TRACKING_URI: http://minivess-mlflow:5000
+            PREFECT_API_URL: http://minivess-prefect:4200/api
+            ACQUISITION_OUTPUT_DIR: /app/data/raw
+            FLOW_NAME: acquisition
+          volumes:
+            - raw_data:/app/data/raw
+            - logs_data:/app/logs
+          networks:
+            - minivess
+      </target_state>
+      <tdd_spec>
+        RED phase — extend tests/v2/integration/test_docker_compose_volumes.py (from T-04):
+          test_acquisition_service_has_raw_data_volume (already in T-04 spec)
+          test_acquisition_image_correct: services["acquisition"]["image"] == "minivess-acquisition:latest"
+          test_acquisition_env_has_output_dir: "ACQUISITION_OUTPUT_DIR" in services["acquisition"]["environment"]
+          test_raw_data_volume_declared: "raw_data" in compose_config["volumes"]
+        GREEN phase:
+          Add acquisition service to docker-compose.flows.yml
+          Add raw_data and logs_data to volumes section if not already added in T-04
+      </tdd_spec>
+      <acceptance_criteria>
+        - docker compose -f deployment/docker-compose.flows.yml config includes acquisition service
+        - acquisition service has raw_data volume mount
+        - raw_data named volume is declared
+      </acceptance_criteria>
+      <files_to_modify>
+        deployment/docker-compose.flows.yml (acquisition service addition — may be done in T-04)
+        tests/v2/integration/test_docker_compose_volumes.py (extend)
+      </files_to_modify>
+      <depends_on>T-04</depends_on>
+      <estimated_iterations>1</estimated_iterations>
+    </task>
+
+    <task id="T-16">
+      <title>Add MLflow run logging to acquisition_flow — log acq_ params to minivess_acquisition experiment</title>
+      <flow>Flow 0: Acquisition</flow>
+      <priority>P1</priority>
+      <github_issue>#369</github_issue>
+      <current_state>
+        acquisition_flow.py log_acquisition_provenance_task() returns a dict with acq_ prefixed
+        params, but never logs them to MLflow. No MLflow run is opened in run_acquisition_flow().
+        The provenance data is returned to the caller but not persisted.
+      </current_state>
+      <target_state>
+        run_acquisition_flow():
+        1. Opens MLflow run in "minivess_acquisition" experiment
+        2. Logs acq_n_datasets, acq_total_volumes, acq_timestamp, acq_statuses to MLflow
+        3. Tags run with flow_name="acquisition"
+        4. Calls FlowContract.log_flow_completion()
+        5. AcquisitionResult includes mlflow_run_id field
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_acquisition_mlflow.py:
+          test_acquisition_opens_mlflow_run: after run_acquisition_flow() with test config,
+            mlflow.search_runs("minivess_acquisition") returns at least 1 run
+          test_acquisition_logs_acq_params: MLflow run params include "acq_n_datasets"
+          test_acquisition_flow_name_tag: MLflow run tags["flow_name"] == "acquisition"
+          test_acquisition_result_has_run_id: AcquisitionResult.mlflow_run_id is not None
+        GREEN phase:
+          Add MLflow run opening to run_acquisition_flow()
+          Add mlflow_run_id field to AcquisitionResult dataclass
+          Add FlowContract wiring
+      </tdd_spec>
+      <acceptance_criteria>
+        - MLflow run created in "minivess_acquisition" experiment per flow invocation
+        - Provenance params visible in MLflow UI with acq_ prefix
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/acquisition_flow.py
+        src/minivess/config/acquisition_config.py (add mlflow_run_id to AcquisitionResult)
+        tests/v2/unit/test_acquisition_mlflow.py (new)
+      </files_to_modify>
+      <depends_on>T-15</depends_on>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- ======================================================================
+       PHASE 7: Spot Preemption Recovery — epoch_latest.yaml
+       Priority: P1
+       ====================================================================== -->
+  <phase id="7" name="Spot Preemption Recovery — epoch_latest.yaml">
+
+    <task id="T-17">
+      <title>Implement epoch_latest.yaml writer in SegmentationTrainer.fit() loop</title>
+      <flow>Flow 2: Training (SegmentationTrainer)</flow>
+      <priority>P1</priority>
+      <github_issue>#367 (resume capability)</github_issue>
+      <current_state>
+        src/minivess/pipeline/trainer.py:
+        - Saves best-metric checkpoints on improvement (lines 568-591)
+        - Saves metric_history.json
+        - Does NOT write epoch_latest.yaml
+        - Does NOT write a resume-from-any-epoch checkpoint (epoch_latest.pth)
+        - No SIGTERM handler
+        - The concept "epoch_latest.yaml" does not exist anywhere in the codebase
+      </current_state>
+      <target_state>
+        SegmentationTrainer.fit() loop:
+        After each epoch (after logging metrics and saving best-metric checkpoints):
+        1. Write epoch_latest.yaml to checkpoint_dir / "epoch_latest.yaml":
+            epoch: {epoch_number}
+            fold: {fold_id}
+            mlflow_run_id: {tracker.run_id}
+            best_val_loss: {best_val_loss}
+            timestamp: {datetime.now(timezone.utc).isoformat()}
+        2. Save epoch_latest.pth (model state_dict only, not optimizer state):
+            torch.save(model.state_dict(), checkpoint_dir / "epoch_latest.pth")
+        3. SIGTERM handler: on receipt, write epoch_latest.yaml and epoch_latest.pth then sys.exit(0)
+
+        Uses yaml.dump() for writing (NOT f-string or string concatenation).
+        Uses yaml.safe_load() for reading in check_resume_state_task().
+        NO regex for reading epoch_latest.yaml.
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_epoch_latest_artifact.py:
+          test_epoch_latest_yaml_written: after trainer.fit() for 1 epoch with mock data,
+            checkpoint_dir / "epoch_latest.yaml" exists
+          test_epoch_latest_yaml_parseable: yaml.safe_load(epoch_latest.yaml content) returns dict
+            with keys: epoch, fold, mlflow_run_id, best_val_loss, timestamp
+          test_epoch_latest_yaml_no_regex: epoch is int (not str), fold is int, mlflow_run_id is str
+          test_epoch_latest_yaml_epoch_increments: after 3 epochs, epoch_latest.yaml["epoch"] == 2
+          test_epoch_latest_pth_written: checkpoint_dir / "epoch_latest.pth" exists
+          test_epoch_latest_pth_loadable: torch.load(epoch_latest.pth) is a dict (state_dict)
+          test_epoch_latest_yaml_utc_timestamp: timestamp in epoch_latest.yaml ends with "+00:00" or "Z"
+        GREEN phase:
+          Add epoch_latest_path = checkpoint_dir / "epoch_latest.yaml" in SegmentationTrainer.fit()
+          Write after each epoch using:
+            import yaml
+            state = {"epoch": epoch, "fold": fold_id, "mlflow_run_id": tracker.run_id, ...}
+            epoch_latest_path.write_text(yaml.dump(state), encoding="utf-8")
+          Save epoch_latest.pth after each epoch
+          Add signal.signal(signal.SIGTERM, lambda *_: save_and_exit()) handler
+      </tdd_spec>
+      <acceptance_criteria>
+        - epoch_latest.yaml exists after each training epoch
+        - yaml.safe_load() can parse it without error
+        - epoch number in YAML matches the completed epoch (not off-by-one)
+        - SIGTERM causes graceful write of epoch_latest.yaml before exit
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/trainer.py
+        tests/v2/unit/test_epoch_latest_artifact.py (new)
+      </files_to_modify>
+      <depends_on>T-05, T-06</depends_on>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+
+    <task id="T-18">
+      <title>Implement check_resume_state_task in training_flow — read epoch_latest.yaml with yaml.safe_load()</title>
+      <flow>Flow 2: Training</flow>
+      <priority>P1</priority>
+      <github_issue>#367</github_issue>
+      <current_state>
+        training_flow() (post T-06) will call SegmentationTrainer.fit() but does not check
+        for existing epoch_latest.yaml before starting. Every invocation starts from epoch 0.
+        There is no resume detection logic.
+      </current_state>
+      <target_state>
+        @task(name="check-resume-state")
+        def check_resume_state_task(checkpoint_dir: Path) -> dict | None:
+            """Check for epoch_latest.yaml to determine if this is a resumed run.
+            Uses yaml.safe_load() — NO regex.
+            """
+            latest_path = checkpoint_dir / "epoch_latest.yaml"
+            if not latest_path.exists():
+                return None
+            import yaml
+            with latest_path.open(encoding="utf-8") as f:
+                state = yaml.safe_load(f)
+            # Validate the referenced MLflow run is RUNNING
+            import mlflow
+            run = mlflow.get_run(state["mlflow_run_id"])
+            if run.info.status == "RUNNING":
+                return state
+            return None  # Stale state from a completed or failed run
+
+        training_flow() calls check_resume_state_task() before starting training.
+        If resume state found: resumes from epoch_latest + 1, reuses existing MLflow run.
+        If not found: starts fresh MLflow run.
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_resume_detection.py:
+          test_no_resume_when_no_yaml: check_resume_state_task(empty_dir) returns None
+          test_resume_detected_when_yaml_exists: with epoch_latest.yaml present,
+            check_resume_state_task() returns dict with "epoch" key
+          test_resume_yaml_parsed_with_yaml_safe_load: mock confirms yaml.safe_load called,
+            not ast.literal_eval or any regex
+          test_stale_state_ignored: if MLflow run status is FINISHED, returns None
+          test_running_state_resumable: if MLflow run status is RUNNING, returns state dict
+          test_training_flow_resumes_from_epoch: training_flow() called with existing epoch_latest.yaml
+            (epoch=5), starts training from epoch 6 (not epoch 0)
+        GREEN phase:
+          Add check_resume_state_task() to train_flow.py
+          Wire into training_flow() before fold loop
+          Update fold training to accept start_epoch parameter
+      </tdd_spec>
+      <acceptance_criteria>
+        - check_resume_state_task() uses yaml.safe_load() exclusively for YAML parsing
+        - NO import re or regex in check_resume_state_task()
+        - training_flow() resumes from correct epoch when epoch_latest.yaml is present and run is RUNNING
+        - Epoch-level metrics in resumed run continue from the correct step number
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/train_flow.py (add task + wiring)
+        tests/v2/unit/test_resume_detection.py (new)
+      </files_to_modify>
+      <depends_on>T-17</depends_on>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- ======================================================================
+       PHASE 8: Shell Entry Points + Prefect Deployment Registration
+       Priority: P1
+       ====================================================================== -->
+  <phase id="8" name="Shell Entry Points and Prefect Deployment Registration">
+
+    <task id="T-19">
+      <title>Create scripts/run_training.sh — shell wrapper calling prefect deployment run</title>
+      <flow>Flow 2: Training (entry point)</flow>
+      <priority>P1</priority>
+      <github_issue>#367</github_issue>
+      <current_state>
+        No shell script exists that wraps a Prefect flow invocation.
+        The only shell scripts available call Python scripts directly — banned.
+        train_alternative_variants.sh (from recent commits) calls python scripts — banned.
+      </current_state>
+      <target_state>
+        scripts/run_training.sh:
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          LOSS="${1:-cbdice_cldice}"
+          MODEL="${2:-dynunet}"
+          COMPUTE="${3:-auto}"
+          EXPERIMENT="${4:-dynunet_loss_variation}"
+
+          echo "Submitting training flow: loss=${LOSS} model=${MODEL}"
+          prefect deployment run 'training-flow/default' \
+            --params "{\"loss_name\": \"${LOSS}\", \"model_family\": \"${MODEL}\",
+                       \"compute\": \"${COMPUTE}\", \"experiment_name\": \"${EXPERIMENT}\"}"
+
+        scripts/run_pipeline.sh:
+          Wraps the full pipeline trigger chain via Prefect deployments.
+
+        scripts/run_analysis.sh:
+          Wraps analysis flow invocation.
+
+        All scripts: executable bit set (chmod +x), shebang #!/usr/bin/env bash,
+        set -euo pipefail, no python scripts/*.py invocations.
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_shell_scripts.py:
+          test_run_training_sh_no_python_script: open("scripts/run_training.sh").read() does not
+            contain "python scripts/"
+          test_run_training_sh_has_prefect_run: "prefect deployment run" in script content
+          test_run_training_sh_executable: os.access("scripts/run_training.sh", os.X_OK) is True
+          test_run_pipeline_sh_no_python_script: same for run_pipeline.sh
+          test_run_analysis_sh_no_python_script: same for run_analysis.sh
+          NOTE: All file reads use open().read() — no subprocess invocation in tests
+        GREEN phase:
+          Create scripts/run_training.sh with prefect deployment run
+          Create scripts/run_pipeline.sh
+          Create scripts/run_analysis.sh
+          chmod +x all scripts
+      </tdd_spec>
+      <acceptance_criteria>
+        - scripts/run_training.sh, run_pipeline.sh, run_analysis.sh exist and are executable
+        - None contain "python scripts/*.py" or "uv run python scripts/"
+        - All use "prefect deployment run" as the execution primitive
+        - Scripts accept command-line arguments for key parameters
+      </acceptance_criteria>
+      <files_to_modify>
+        scripts/run_training.sh (new)
+        scripts/run_pipeline.sh (new)
+        scripts/run_analysis.sh (new)
+        tests/v2/unit/test_shell_scripts.py (new)
+      </files_to_modify>
+      <depends_on>T-06</depends_on>
+      <estimated_iterations>1</estimated_iterations>
+    </task>
+
+    <task id="T-20">
+      <title>Add deprecation warning to train_monitored.py — make it non-invocable as primary entry point</title>
+      <flow>Flow 2: Training (retire standalone script)</flow>
+      <priority>P1</priority>
+      <github_issue>#367</github_issue>
+      <current_state>
+        scripts/train_monitored.py is a fully functional standalone training script.
+        It has no indication that it is not the supported entry point.
+        It is documented in its own docstring as the way to run training:
+          "Usage: uv run python scripts/train_monitored.py ..."
+        The script remains needed for migration reference and CI-mode (PREFECT_DISABLED=1).
+      </current_state>
+      <target_state>
+        At the top of scripts/train_monitored.py __main__ block, add:
+          import warnings
+          warnings.warn(
+              "\n\n"
+              "DEPRECATED ENTRY POINT: scripts/train_monitored.py\n"
+              "This script is NOT the supported way to run training.\n"
+              "The correct entry point is:\n"
+              "  prefect deployment run 'training-flow/default' --params '{...}'\n"
+              "Or use: scripts/run_training.sh &lt;loss&gt; &lt;model&gt;\n"
+              "This script will be removed in a future release.\n"
+              "Set ALLOW_STANDALONE_TRAINING=1 to suppress this warning.",
+              DeprecationWarning,
+              stacklevel=2,
+          )
+          if not os.environ.get("ALLOW_STANDALONE_TRAINING"):
+              sys.exit(1)
+        Update docstring to remove "Usage:" examples that show direct invocation.
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_train_monitored_deprecation.py:
+          test_train_monitored_warns_without_env: without ALLOW_STANDALONE_TRAINING,
+            importing and running __main__ raises SystemExit(1)
+          test_train_monitored_allowed_with_env: with ALLOW_STANDALONE_TRAINING=1,
+            the script continues past the deprecation gate
+          test_deprecation_warning_is_deprecationwarning: the warning category is DeprecationWarning
+        GREEN phase:
+          Add deprecation gate to scripts/train_monitored.py __main__ block
+          Update docstring to remove direct invocation examples
+      </tdd_spec>
+      <acceptance_criteria>
+        - Running scripts/train_monitored.py without ALLOW_STANDALONE_TRAINING=1 exits with error
+        - Error message clearly states the correct entry point
+        - CI tests that use train_monitored.py set ALLOW_STANDALONE_TRAINING=1 explicitly
+      </acceptance_criteria>
+      <files_to_modify>
+        scripts/train_monitored.py (deprecation gate in __main__)
+        tests/v2/unit/test_train_monitored_deprecation.py (new)
+        Any CI scripts that invoke train_monitored.py (add ALLOW_STANDALONE_TRAINING=1)
+      </files_to_modify>
+      <depends_on>T-19</depends_on>
+      <estimated_iterations>1</estimated_iterations>
+    </task>
+
+    <task id="T-21">
+      <title>Create deployment/prefect/deployments.yaml with all 9 flows defined</title>
+      <flow>All flows (Prefect deployment registration)</flow>
+      <priority>P1</priority>
+      <github_issue>#367</github_issue>
+      <current_state>
+        deployment/prefect/ directory contains only work-pools.yaml.
+        No deployments.yaml exists. Flows are not registered with Prefect Server.
+        `prefect deployment run 'training-flow/default'` would fail because no deployment
+        named "default" exists for "training-flow".
+      </current_state>
+      <target_state>
+        deployment/prefect/deployments.yaml (Prefect 3.x deployment YAML or Python serve):
+          deployments for all 9 flows:
+          - minivess-acquisition/default → cpu-pool
+          - minivess-data/default → cpu-pool
+          - training-flow/default → gpu-pool
+          - Post-Training Pipeline/default → cpu-pool
+          - analysis-flow/default → cpu-pool (name from @flow decorator)
+          - Deploy Pipeline/default → cpu-pool
+          - minivess-dashboard/default → cpu-pool
+          - qa-flow/default → cpu-pool
+          - minivess-annotation/default → cpu-pool
+
+        OR: src/minivess/orchestration/serve.py (Python serve API):
+          from prefect.deployments import Deployment
+          Deployment.build_from_flow(training_flow, name="default", work_pool_name="gpu-pool")
+          (etc. for all flows)
+
+        Either approach must result in `prefect deployment run` working for all flows.
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_deployments_yaml.py:
+          test_deployments_yaml_parseable: yaml.safe_load(deployments.yaml) returns dict
+          test_all_flows_have_deployment: all 9 flow names appear in deployments YAML
+          test_train_flow_on_gpu_pool: training-flow deployment uses work_pool_name == "gpu-pool"
+          test_cpu_flows_on_cpu_pool: all non-train flows use work_pool_name == "cpu-pool"
+          NOTE: YAML parsing uses yaml.safe_load() — no regex
+        GREEN phase:
+          Create deployment/prefect/deployments.yaml
+          OR create src/minivess/orchestration/serve.py
+          Register all 9 flows with correct work pools
+      </tdd_spec>
+      <acceptance_criteria>
+        - deployment/prefect/deployments.yaml exists and is valid YAML
+        - All 9 flows have a "default" deployment registered
+        - training-flow/default uses gpu-pool
+        - All other deployments use cpu-pool
+        - `prefect deployment ls` shows all 9 deployments after registration
+      </acceptance_criteria>
+      <files_to_modify>
+        deployment/prefect/deployments.yaml (new)
+        src/minivess/orchestration/serve.py (new, optional)
+        tests/v2/unit/test_deployments_yaml.py (new)
+      </files_to_modify>
+      <depends_on>T-06, T-10, T-11, T-12, T-13, T-14</depends_on>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T-22">
+      <title>Verify MLflow epoch-level curve logging works end-to-end in training_flow()</title>
+      <flow>Flow 2: Training (MLflow curves)</flow>
+      <priority>P1</priority>
+      <github_issue>#367</github_issue>
+      <current_state>
+        ExperimentTracker.log_epoch_metrics() at tracking.py:209 uses mlflow.log_metrics(step=step).
+        SegmentationTrainer.fit() calls self.tracker.log_epoch_metrics(epoch_log, step=epoch+1).
+        This works in train_monitored.py but is NOT wired into training_flow() (which is a stub).
+
+        After T-06 implements real training_flow(), this must be verified end-to-end:
+        epoch-level curves must appear in MLflow with correct step numbers.
+      </current_state>
+      <target_state>
+        After training_flow(debug=True, max_epochs=3) completes:
+        - MLflow run in "minivess_training" has val_loss metric at step=1, step=2, step=3
+        - train_loss metric appears at step=1, step=2, step=3
+        - sys_gpu_* metrics appear at each step (if GPU available) or are absent (CPU)
+        - learning_rate metric appears at each step
+        The MLflow UI shows smooth learning curves for the run.
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/integration/test_epoch_curve_logging.py:
+          test_val_loss_at_each_epoch: after training_flow(debug=True, max_epochs=3, num_folds=1),
+            run = mlflow.search_runs("minivess_training")[-1]
+            history = mlflow.MlflowClient().get_metric_history(run.info.run_id, "val_loss")
+            assert len(history) == 3
+            assert history[0].step == 1 and history[1].step == 2 and history[2].step == 3
+          test_train_loss_at_each_epoch: same check for "train_loss"
+          test_learning_rate_logged: "learning_rate" in run.data.metrics
+          test_epoch_curves_monotone_in_step: steps are sequential integers starting at 1
+        GREEN phase:
+          Ensure training_flow() (post T-06) correctly passes tracker to SegmentationTrainer
+          Verify tracker has the active MLflow run ID before training starts
+          Verify no step reset between epochs
+      </tdd_spec>
+      <acceptance_criteria>
+        - MLflow run has val_loss history with exactly max_epochs entries
+        - Steps are sequential starting at 1
+        - MLflow UI renders learning curves (not flat lines or single points)
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/train_flow.py (verify wiring — post T-06)
+        tests/v2/integration/test_epoch_curve_logging.py (new)
+      </files_to_modify>
+      <depends_on>T-06</depends_on>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- ======================================================================
+       Cross-Cutting: Data Flow DVC Integration
+       Priority: P2
+       ====================================================================== -->
+  <phase id="9" name="Data Flow — DVC Integration and Cloud-Agnostic Storage">
+
+    <task id="T-23">
+      <title>Add dvc_pull_task to data_flow.py — cloud-agnostic DVC remote configuration</title>
+      <flow>Flow 1: Data Engineering</flow>
+      <priority>P2</priority>
+      <github_issue>New (DVC integration gap)</github_issue>
+      <current_state>
+        data_flow.py does NOT use DVC. It calls discover_external_test_pairs() directly on
+        the filesystem. There is no dvc pull invocation, no DVC cache, and no version tracking.
+        The "DVC versioning as inter-flow contract" is entirely absent.
+      </current_state>
+      <target_state>
+        @task(name="dvc-pull")
+        def dvc_pull_task(data_dir: Path, dvc_rev: str | None = None,
+                           remote: str | None = None) -> str:
+            """Pull DVC-tracked data at optional revision.
+            Returns: git commit hash of the DVC revision pulled.
+            """
+            import subprocess
+            cmd = ["dvc", "pull"]
+            if dvc_rev:
+                cmd.extend(["--rev", dvc_rev])
+            if remote:
+                cmd.extend(["--remote", remote])
+            result = subprocess.run(cmd, capture_output=True, text=True, cwd=data_dir, check=True)
+            # Get current DVC commit: use subprocess.run(["git", "rev-parse", "HEAD"])
+            rev_result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True, text=True, cwd=data_dir, check=True
+            )
+            return rev_result.stdout.strip()
+
+        run_data_flow() accepts dvc_rev and dvc_remote parameters.
+        Logs data_dvc_commit param to MLflow.
+
+        configs/dvc/remotes.yaml defines local, s3, gcs, azure, hetzner remotes.
+        DVC_REMOTE env var selects the active remote.
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_dvc_pull_task.py:
+          test_dvc_pull_task_returns_commit_hash: with mock subprocess, returns a hex string
+          test_dvc_pull_task_passes_rev: with dvc_rev="abc123", subprocess cmd includes "--rev abc123"
+          test_dvc_pull_task_passes_remote: with remote="s3", subprocess cmd includes "--remote s3"
+          test_data_flow_logs_dvc_commit: MLflow run from run_data_flow() has "data_dvc_commit" param
+          test_dvc_remotes_yaml_parseable: yaml.safe_load(configs/dvc/remotes.yaml) returns dict with
+            "remotes" key containing local, s3, gcs, azure entries
+          NOTE: YAML parsing with yaml.safe_load() — no regex
+        GREEN phase:
+          Add dvc_pull_task() to data_flow.py
+          Update run_data_flow() signature and MLflow logging
+          Create configs/dvc/remotes.yaml
+      </tdd_spec>
+      <acceptance_criteria>
+        - dvc_pull_task() invocable with mock DVC environment
+        - data_dvc_commit param logged to MLflow in data engineering runs
+        - configs/dvc/remotes.yaml covers local, S3 (MinIO), GCS, Azure backends
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/data_flow.py
+        configs/dvc/remotes.yaml (new)
+        tests/v2/unit/test_dvc_pull_task.py (new)
+      </files_to_modify>
+      <depends_on>T-04</depends_on>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+
+    <task id="T-24">
+      <title>Add MLflow run logging to data_flow — log data_ params to minivess_data experiment</title>
+      <flow>Flow 1: Data Engineering</flow>
+      <priority>P1</priority>
+      <github_issue>#369</github_issue>
+      <current_state>
+        data_flow.py log_data_provenance_task() computes provenance dict with data_ prefix
+        but does NOT open an MLflow run. The provenance is returned to the caller but never
+        persisted to MLflow. No downstream flow can discover the data engineering run via
+        FlowContract.find_upstream_run("minivess_data", "data").
+      </current_state>
+      <target_state>
+        run_data_flow():
+        1. Opens MLflow run in "minivess_data" experiment
+        2. Logs data_n_volumes, data_n_folds, data_hash, (data_dvc_commit if T-23 done)
+        3. Tags run with flow_name="data"
+        4. Calls FlowContract.log_flow_completion()
+        5. DataFlowResult includes mlflow_run_id field
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_data_flow_mlflow.py:
+          test_data_flow_opens_mlflow_run: after run_data_flow() with minimal data,
+            mlflow.search_runs("minivess_data") returns at least 1 run
+          test_data_flow_logs_n_volumes: MLflow run params["data_n_volumes"] == str(n_pairs)
+          test_data_flow_logs_hash: MLflow run params include "data_hash" (16-char hex string)
+          test_data_flow_flow_name_tag: MLflow run tags["flow_name"] == "data"
+          test_data_flow_result_has_run_id: DataFlowResult.mlflow_run_id is not None
+        GREEN phase:
+          Add ExperimentTracker and FlowContract imports to data_flow.py
+          Open MLflow run in run_data_flow()
+          Add mlflow_run_id to DataFlowResult
+      </tdd_spec>
+      <acceptance_criteria>
+        - MLflow run created in "minivess_data" experiment per flow invocation
+        - Training flow can discover data run via FlowContract.find_upstream_run()
+        - data_n_volumes and data_hash params visible in MLflow UI
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/data_flow.py
+        tests/v2/unit/test_data_flow_mlflow.py (new)
+      </files_to_modify>
+      <depends_on>T-04</depends_on>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- ======================================================================
+       Cross-Cutting: Annotation Flow Docker Infrastructure
+       Priority: P2
+       ====================================================================== -->
+  <phase id="10" name="Annotation Flow — Docker Infrastructure">
+
+    <task id="T-25">
+      <title>Create Dockerfile.annotation and add annotation service to docker-compose.flows.yml</title>
+      <flow>Annotation App</flow>
+      <priority>P2</priority>
+      <github_issue>New (annotation Docker gap)</github_issue>
+      <current_state>
+        annotation_flow.py exists with @flow decorator and real implementation.
+        BUT: No Dockerfile.annotation exists.
+        No annotation service in docker-compose.flows.yml.
+        Not in FLOW_WORK_POOL_MAP (fixed in T-03) but still no Docker infrastructure.
+        The flow cannot be run in Docker context — only directly in Python.
+      </current_state>
+      <target_state>
+        deployment/docker/Dockerfile.annotation:
+          FROM minivess-base:latest
+          LABEL flow="annotation"
+          COPY scripts/ scripts/
+          CMD ["python", "-m", "minivess.orchestration.flows.annotation_flow"]
+
+        docker-compose.flows.yml annotation service:
+          volumes:
+            - bentoml_store:/home/minivess/bentoml:ro  (read BentoML models)
+            - data_cache:/app/data:ro                   (input volumes)
+            - mlruns_data:/app/mlruns                   (log annotation sessions)
+          environment:
+            BENTOML_HOME: /home/minivess/bentoml
+            BENTO_SERVER_URL: http://minivess-bentoml:3000  (or empty for local inference)
+      </target_state>
+      <tdd_spec>
+        RED phase — extend tests/v2/integration/test_docker_compose_volumes.py:
+          test_annotation_service_exists: "annotation" in yaml.safe_load(compose)["services"]
+          test_annotation_has_bentoml_mount: bentoml_store volume in annotation volumes
+          test_dockerfile_annotation_exists: Path("deployment/docker/Dockerfile.annotation").exists()
+        GREEN phase:
+          Create deployment/docker/Dockerfile.annotation
+          Add annotation service to docker-compose.flows.yml (covered in T-04 scope or separately)
+      </tdd_spec>
+      <acceptance_criteria>
+        - Dockerfile.annotation exists and is valid
+        - annotation service in docker-compose.flows.yml with bentoml_store mount
+        - docker compose -f deployment/docker-compose.flows.yml build annotation exits 0
+      </acceptance_criteria>
+      <files_to_modify>
+        deployment/docker/Dockerfile.annotation (new)
+        deployment/docker-compose.flows.yml (annotation service)
+        tests/v2/integration/test_docker_compose_volumes.py (extend)
+      </files_to_modify>
+      <depends_on>T-03, T-04</depends_on>
+      <estimated_iterations>1</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- ======================================================================
+       Cross-Cutting: Split File Serialization
+       Priority: P1
+       ====================================================================== -->
+  <phase id="11" name="Split File Serialization — Persist Fold Splits to Volume">
+
+    <task id="T-26">
+      <title>Serialize fold splits to JSON in data_flow — write to configs_splits volume</title>
+      <flow>Flow 1: Data Engineering → Flow 2: Training (consumer)</flow>
+      <priority>P1</priority>
+      <github_issue>#369 (split files not persisted)</github_issue>
+      <current_state>
+        data_flow.py split_data_task() returns list[FoldSplit] as Python objects.
+        These objects are returned in DataFlowResult.splits.
+        There is NO serialization of splits to disk.
+        There is NO volume mount for configs_splits in the data service.
+        The training flow cannot read splits from a file — it would need to call data_flow
+        directly, which violates the no-direct-function-calls rule.
+      </current_state>
+      <target_state>
+        @task(name="serialize-splits")
+        def serialize_splits_task(splits: list[FoldSplit],
+                                   splits_dir: Path) -> Path:
+            """Serialize FoldSplit list to JSON at splits_dir/splits.json.
+            Returns path to the splits file.
+            Uses json.dumps() — no regex.
+            """
+            splits_dir.mkdir(parents=True, exist_ok=True)
+            splits_path = splits_dir / "splits.json"
+            import json
+            serialized = [
+                {"fold_id": s.fold_id,
+                 "train": [str(p["image"]) for p in s.train],
+                 "val": [str(p["image"]) for p in s.val]}
+                for s in splits
+            ]
+            splits_path.write_text(json.dumps(serialized, indent=2), encoding="utf-8")
+            return splits_path
+
+        run_data_flow() calls serialize_splits_task() after split_data_task().
+        splits_dir defaults to Path(os.environ.get("SPLITS_OUTPUT_DIR", "/app/configs/splits"))
+        DataFlowResult includes splits_path field.
+      </target_state>
+      <tdd_spec>
+        RED phase — tests/v2/unit/test_splits_serialization.py:
+          test_splits_written_to_json: after run_data_flow() with mock pairs, splits.json exists
+          test_splits_json_parseable: json.loads(splits.json content) returns list of dicts
+          test_splits_json_has_fold_id: each dict in splits list has "fold_id" key
+          test_splits_json_has_train_val: each dict has "train" and "val" lists
+          test_splits_path_from_env: with SPLITS_OUTPUT_DIR=/test/splits, splits written to /test/splits/
+          test_training_flow_reads_splits: training_flow() with SPLITS_DIR=/test/splits,
+            mock splits.json present, flow reads it via json.loads() (not yaml, not regex)
+        GREEN phase:
+          Add serialize_splits_task() to data_flow.py
+          Wire into run_data_flow() after split_data_task()
+          Add SPLITS_OUTPUT_DIR env var reading
+          Update training_flow() (post T-06) to read splits from SPLITS_DIR/splits.json
+      </tdd_spec>
+      <acceptance_criteria>
+        - splits.json written to SPLITS_OUTPUT_DIR after data flow completes
+        - json.loads() can parse the file without error
+        - training_flow() reads splits from splits.json (not from Python DataFlowResult object)
+        - No regex in splits serialization or deserialization
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/data_flow.py
+        src/minivess/orchestration/flows/train_flow.py (splits reader — post T-06)
+        tests/v2/unit/test_splits_serialization.py (new)
+      </files_to_modify>
+      <depends_on>T-06, T-24</depends_on>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- ======================================================================
+       Cross-Cutting: Verification and Integration Tests
+       Priority: P1
+       ====================================================================== -->
+  <phase id="12" name="Integration Verification — End-to-End Flow Tests">
+
+    <task id="T-27">
+      <title>Write integration test: data_flow → training_flow artifact handoff via volumes</title>
+      <flow>Flow 1 → Flow 2 (integration)</flow>
+      <priority>P1</priority>
+      <github_issue>#367, #369</github_issue>
+      <current_state>
+        No integration test verifies the data → training flow handoff.
+        The only verified handoff was via Python function calls (not Docker volumes).
+        Volume-based handoff (splits.json + data_cache) has never been tested.
+      </current_state>
+      <target_state>
+        tests/v2/integration/test_data_to_train_handoff.py:
+          test_data_flow_writes_splits_readable_by_train:
+            1. Create temp dirs for SPLITS_OUTPUT_DIR and DATA_DIR
+            2. Run run_data_flow() with mock data and SPLITS_OUTPUT_DIR set
+            3. Assert splits.json written to SPLITS_OUTPUT_DIR
+            4. Set SPLITS_DIR = SPLITS_OUTPUT_DIR
+            5. Run training_flow(debug=True, max_epochs=1, num_folds=1)
+            6. Assert training ran (MLflow run exists, checkpoint written)
+            7. Assert training read from splits.json (not hardcoded)
+          NOTE: uses actual file I/O via tmp_path pytest fixture, not mocks
+      </target_state>
+      <tdd_spec>
+        The test itself is the RED phase (it will fail until T-06 and T-26 are done).
+        Run after T-06 and T-26 are complete to verify end-to-end.
+      </tdd_spec>
+      <acceptance_criteria>
+        - Integration test passes after T-06 and T-26 are complete
+        - test verifies actual file I/O, not just Python object passing
+        - test verifies MLflow run created by training_flow has correct data provenance
+      </acceptance_criteria>
+      <files_to_modify>
+        tests/v2/integration/test_data_to_train_handoff.py (new)
+      </files_to_modify>
+      <depends_on>T-06, T-26, T-24</depends_on>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T-28">
+      <title>Write integration test: all flows produce non-ephemeral outputs — no /tmp artifacts</title>
+      <flow>All flows (cross-cutting audit)</flow>
+      <priority>P1</priority>
+      <github_issue>#369</github_issue>
+      <current_state>
+        No automated test verifies that flow outputs go to mounted volumes, not /tmp.
+        The only evidence of correct behavior is manual inspection after container runs.
+      </current_state>
+      <target_state>
+        tests/v2/integration/test_no_ephemeral_outputs.py:
+          test_train_flow_checkpoint_not_in_tmp:
+            Run training_flow(debug=True, max_epochs=1, num_folds=1) with CHECKPOINT_DIR=/test/ckpt
+            Assert all .pth files are under /test/ckpt, NOT under /tmp
+          test_post_training_outputs_not_in_tmp:
+            Run post_training_flow() with POST_TRAINING_OUTPUT_DIR=/test/pt
+            Assert all plugin outputs are under /test/pt
+          test_analysis_outputs_not_in_tmp:
+            Run analysis_flow() with ANALYSIS_OUTPUT=/test/analysis
+            Assert all figures/tables are under /test/analysis
+          test_deploy_outputs_not_in_tmp:
+            Run deploy_flow() with DEPLOY_OUTPUT_DIR=/test/deploy
+            Assert ONNX files and bentofiles are under /test/deploy
+          test_dashboard_outputs_not_in_tmp:
+            Run run_dashboard_flow() with DASHBOARD_OUTPUT=/test/dashboard
+            Assert report and JSON under /test/dashboard
+      </target_state>
+      <tdd_spec>
+        Tests are RED until all preceding phase tasks are complete.
+        After T-05, T-06, T-09, T-11, T-12, T-13: run the tests to verify.
+        Tests use os.walk() over /tmp and each env-var-configured output dir.
+        No regex in path checking — use pathlib.Path.is_relative_to() or str.startswith()
+      </tdd_spec>
+      <acceptance_criteria>
+        - All test assertions pass
+        - No artifact produced by any flow resides under /tmp after flow completion
+        - Every flow writes outputs to its env-var-configured path
+      </acceptance_criteria>
+      <files_to_modify>
+        tests/v2/integration/test_no_ephemeral_outputs.py (new)
+      </files_to_modify>
+      <depends_on>T-05, T-06, T-09, T-11, T-12, T-13, T-14</depends_on>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- ======================================================================
+       Task Dependency Summary
+       ====================================================================== -->
+  <dependency_summary>
+    <independent_tasks>T-01, T-02, T-03, T-04</independent_tasks>
+    <chain_1>T-04 → T-05 → T-06 → T-07, T-08, T-17 → T-18 → T-22</chain_1>
+    <chain_2>T-04 → T-09 → T-10</chain_2>
+    <chain_3>T-01, T-04 → T-11</chain_3>
+    <chain_4>T-04 → T-12, T-13, T-14</chain_4>
+    <chain_5>T-06 → T-19 → T-20, T-21</chain_5>
+    <chain_6>T-06, T-26 → T-27 → T-28</chain_6>
+    <chain_7>T-03, T-04 → T-15 → T-16</chain_7>
+    <chain_8>T-04 → T-23, T-24 → T-26</chain_8>
+    <p0_critical_path>T-01, T-02, T-03, T-04, T-05, T-06</p0_critical_path>
+    <total_tasks>28</total_tasks>
+  </dependency_summary>
+
+  <!-- ======================================================================
+       Constraint Checklist (enforced for every task)
+       ====================================================================== -->
+  <constraints>
+    <constraint id="C1">import re is BANNED — use ast.parse, json.loads, yaml.safe_load, str.split, str.partition, str.rsplit, pathlib.Path attributes</constraint>
+    <constraint id="C2">/tmp and tempfile.mkdtemp() are BANNED for artifacts that must survive container exit — use CHECKPOINT_DIR env var</constraint>
+    <constraint id="C3">python scripts/*.py is BANNED as training entry point — use prefect deployment run or a shell script wrapping it</constraint>
+    <constraint id="C4">All Docker container outputs must be on named volumes — no ephemeral writes</constraint>
+    <constraint id="C5">MLflow is the ONLY inter-flow contract — no shared filesystem, no direct function calls between containers</constraint>
+    <constraint id="C6">from __future__ import annotations at top of every Python file</constraint>
+    <constraint id="C7">pathlib.Path() always — never string concatenation for paths</constraint>
+    <constraint id="C8">datetime.now(timezone.utc) always — never datetime.now()</constraint>
+    <constraint id="C9">TDD mandatory — tests FIRST, implementation SECOND, ALWAYS</constraint>
+    <constraint id="C10">uv ONLY — never pip, conda, requirements.txt</constraint>
+    <constraint id="C11">No placeholder implementations — pass, TODO, NotImplementedError banned in production code</constraint>
+    <constraint id="C12">Hard-fail on missing required components — RuntimeError with actionable multi-line error message, never silent fallback</constraint>
+    <constraint id="C13">Never confabulate — web-search or ask user when uncertain</constraint>
+    <constraint id="C14">encoding='utf-8' always for file operations</constraint>
+  </constraints>
+
+</plan>

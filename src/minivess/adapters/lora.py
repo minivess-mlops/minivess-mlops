@@ -132,9 +132,14 @@ class LoraModelAdapter(ModelAdapter):
         return base_config
 
     def load_checkpoint(self, path: Path) -> None:
-        state_dict = torch.load(path, map_location="cpu", weights_only=True)
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+        if isinstance(payload, dict) and "model_state_dict" in payload:
+            # Trainer format: load full adapter state dict into self
+            self.load_state_dict(payload["model_state_dict"])
+            return
+        # Legacy LoRA-only format (saved by save_checkpoint)
         if self._peft_model is not None:
-            self._peft_model.load_state_dict(state_dict, strict=False)
+            self._peft_model.load_state_dict(payload, strict=False)
         else:
             self._base_model.load_checkpoint(path)
 

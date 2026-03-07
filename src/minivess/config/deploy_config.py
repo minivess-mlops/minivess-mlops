@@ -7,6 +7,7 @@ service configuration, and optional MONAI Deploy MAP packaging.
 
 from __future__ import annotations
 
+import os
 from enum import StrEnum
 from pathlib import Path  # noqa: TC003 — Pydantic needs Path at runtime
 
@@ -47,7 +48,12 @@ class DeployConfig(BaseModel):
     """
 
     mlruns_dir: Path = Field(description="Root MLflow tracking directory")
-    output_dir: Path = Field(description="Directory for deployment artifacts")
+    output_dir: Path = Field(
+        default_factory=lambda: Path(
+            os.environ.get("DEPLOY_OUTPUT_DIR", "/app/outputs/deploy")
+        ),
+        description="Directory for deployment artifacts",
+    )
     champion_categories: list[ChampionCategory] = Field(
         default_factory=lambda: [
             ChampionCategory.BALANCED,

@@ -4,13 +4,16 @@
 # scaling and resource management. Flows communicate via MLflow
 # artifacts — no shared filesystem or direct function calls.
 #
+# ALL flow outputs are volume-mounted — /tmp is never used for artifacts.
+# See docs/planning/intermedia-plan-synthesis.md Part 2 for full audit.
+#
 # Usage:
 #   docker compose -f deployment/docker-compose.flows.yml build
-#   docker compose -f deployment/docker-compose.flows.yml up data
+#   docker compose -f deployment/docker-compose.flows.yml up acquisition
 #   docker compose -f deployment/docker-compose.flows.yml up train
 #
 # Prerequisites: Run `docker compose -f deployment/docker-compose.yml --profile dev up`
-# first to start PostgreSQL, MinIO, and MLflow.
+# first to start PostgreSQL, MinIO, MLflow, and Prefect.
 
 x-common-env: &common-env
   MLFLOW_TRACKING_URI: http://minivess-mlflow:5000
@@ -18,6 +21,9 @@ x-common-env: &common-env
   AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minivess}
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minivess_secret}
   MLFLOW_S3_ENDPOINT_URL: http://minivess-minio:9000
+  # HuggingFace token for gated models (SAM3, VesselFM).
+  # Set HF_TOKEN in your shell or .env file — never hard-code here.
+  HF_TOKEN: ${HF_TOKEN:-}
 
 x-common-labels: &common-labels
   labels:
@@ -25,6 +31,24 @@ x-common-labels: &common-labels
     managed-by: docker-compose
 
 services:
+  # Flow 0: Data Acquisition
+  acquisition:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.acquisition
+    image: minivess-acquisition:latest
+    container_name: minivess-flow-acquisition
+    environment:
+      <<: *common-env
+      FLOW_NAME: acquisition
+      ACQUISITION_OUTPUT_DIR: /app/data/raw
+    volumes:
+      - raw_data:/app/data/raw
+      - logs_data:/app/logs
+    networks:
+      - minivess
+    <<: *common-labels
+
   # Flow 1: Data Engineering
   data:
     build:
@@ -35,8 +59,12 @@ services:
     environment:
       <<: *common-env
       FLOW_NAME: data
+      SPLITS_OUTPUT_DIR: /app/configs/splits
     volumes:
-      - data_cache:/app/data
+      - raw_data:/app/data/raw:ro
+      - data_cache:/app/data/processed
+      - configs_splits:/app/configs/splits
+      - mlruns_data:/app/mlruns
     networks:
       - minivess
     <<: *common-labels
@@ -51,9 +79,14 @@ services:
     environment:
       <<: *common-env
       FLOW_NAME: train
+      CHECKPOINT_DIR: /app/checkpoints
+      SPLITS_DIR: /app/configs/splits
     volumes:
       - data_cache:/app/data:ro
+      - configs_splits:/app/configs/splits:ro
       - checkpoint_cache:/app/checkpoints
+      - mlruns_data:/app/mlruns
+      - logs_data:/app/logs
     deploy:
       resources:
         reservations:
@@ -65,7 +98,7 @@ services:
       - minivess
     <<: *common-labels
 
-  # Flow 2.5: Post-Training (best-effort)
+  # Flow 2.5: Post-Training (SWA, calibration, conformal)
   post_training:
     build:
       context: ../
@@ -75,8 +108,12 @@ services:
     environment:
       <<: *common-env
       FLOW_NAME: post_training
+      POST_TRAINING_OUTPUT_DIR: /app/outputs/post_training
     volumes:
       - checkpoint_cache:/app/checkpoints:ro
+      - data_cache:/app/data:ro
+      - post_training_out:/app/outputs/post_training
+      - mlruns_data:/app/mlruns
     networks:
       - minivess
     <<: *common-labels
@@ -91,11 +128,18 @@ services:
     environment:
       <<: *common-env
       FLOW_NAME: analyze
+      ANALYSIS_OUTPUT: /app/outputs/analysis
+    volumes:
+      - data_cache:/app/data:ro
+      - checkpoint_cache:/app/checkpoints:ro
+      - configs_splits:/app/configs/splits:ro
+      - mlruns_data:/app/mlruns
+      - outputs_analysis:/app/outputs/analysis
     networks:
       - minivess
     <<: *common-labels
 
-  # Flow 4: Deployment
+  # Flow 4: Deployment (ONNX export, BentoML, promotion)
   deploy:
     build:
       context: ../
@@ -105,6 +149,13 @@ services:
     environment:
       <<: *common-env
       FLOW_NAME: deploy
+      DEPLOY_OUTPUT_DIR: /app/outputs/deploy
+      BENTOML_HOME: /home/minivess/bentoml
+    volumes:
+      - checkpoint_cache:/app/checkpoints:ro
+      - mlruns_data:/app/mlruns:ro
+      - outputs_deploy:/app/outputs/deploy
+      - bentoml_store:/home/minivess/bentoml
     networks:
       - minivess
     <<: *common-labels
@@ -119,11 +170,16 @@ services:
     environment:
       <<: *common-env
       FLOW_NAME: dashboard
+      DASHBOARD_OUTPUT: /app/outputs/dashboard
+    volumes:
+      - mlruns_data:/app/mlruns:ro
+      - outputs_analysis:/app/outputs/analysis:ro
+      - outputs_dashboard:/app/outputs/dashboard
     networks:
       - minivess
     <<: *common-labels
 
-  # Flow 6: QA
+  # Flow 6: QA (MLflow integrity, ghost run cleanup, param validation)
   qa:
     build:
       context: ../
@@ -133,14 +189,62 @@ services:
     environment:
       <<: *common-env
       FLOW_NAME: qa
+      DASHBOARD_OUTPUT: /app/outputs/dashboard
+    volumes:
+      - mlruns_data:/app/mlruns:ro
+      - outputs_dashboard:/app/outputs/dashboard
+    networks:
+      - minivess
+    <<: *common-labels
+
+  # Data Annotation App (reads BentoML models from Flow 4)
+  annotation:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.annotation
+    image: minivess-annotation:latest
+    container_name: minivess-flow-annotation
+    environment:
+      <<: *common-env
+      FLOW_NAME: annotation
+      BENTOML_HOME: /home/minivess/bentoml
+      BENTO_SERVER_URL: ${BENTO_SERVER_URL:-}
+    volumes:
+      - bentoml_store:/home/minivess/bentoml:ro
+      - data_cache:/app/data:ro
+      - mlruns_data:/app/mlruns
     networks:
       - minivess
     <<: *common-labels
 
 volumes:
+  # Input data
+  raw_data:
+    driver: local
   data_cache:
     driver: local
+  # Configuration
+  configs_splits:
+    driver: local
+  # Training artifacts
   checkpoint_cache:
+    driver: local
+  logs_data:
+    driver: local
+  # MLflow runs (shared read-only by most flows, written by train/data/acquisition)
+  mlruns_data:
+    driver: local
+  # Flow outputs
+  post_training_out:
+    driver: local
+  outputs_analysis:
+    driver: local
+  outputs_deploy:
+    driver: local
+  outputs_dashboard:
+    driver: local
+  # Model serving store
+  bentoml_store:
     driver: local
 
 networks:

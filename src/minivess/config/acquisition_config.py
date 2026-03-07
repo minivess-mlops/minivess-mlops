@@ -87,3 +87,4 @@ class AcquisitionResult:
     total_volumes: int
     conversion_log: list[str]
     provenance: dict[str, Any]
+    mlflow_run_id: str | None = None

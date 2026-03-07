@@ -1,0 +1,203 @@
+# MinIVess MLOps — Prefect 3.x Deployment Definitions
+#
+# Registers all 9 flows with the Prefect Server.
+#
+# Apply with:
+#   prefect deploy --prefect-file deployment/prefect/deployments.yaml --all
+#
+# Or apply a single deployment:
+#   prefect deploy --prefect-file deployment/prefect/deployments.yaml \
+#     -n "training-flow/default"
+#
+# Then trigger with:
+#   prefect deployment run 'training-flow/default' --params '{"loss_name": "cbdice_cldice"}'
+#
+# Work pools (defined in work-pools.yaml):
+#   cpu-pool — CPU-only flows (data, analyze, deploy, dashboard, QA, annotation)
+#   gpu-pool — GPU training flow (training-flow only)
+
+deployments:
+
+  # ---------------------------------------------------------------------------
+  # Flow 0: Data Acquisition (CPU)
+  # ---------------------------------------------------------------------------
+  - name: default
+    flow_name: minivess-acquisition
+    entrypoint: src/minivess/orchestration/flows/acquisition_flow.py:run_acquisition_flow
+    description: >
+      Acquire raw MiniVess datasets from HuggingFace Hub or local paths.
+      Runs on CPU; writes to the raw-data volume.
+    work_pool:
+      name: cpu-pool
+      work_queue_name: default
+    schedules: []
+    parameters: {}
+    tags:
+      - acquisition
+      - data
+      - cpu
+
+  # ---------------------------------------------------------------------------
+  # Flow 1: Data Engineering (CPU)
+  # ---------------------------------------------------------------------------
+  - name: default
+    flow_name: minivess-data
+    entrypoint: src/minivess/orchestration/flows/data_flow.py:run_data_flow
+    description: >
+      Validate, split, and profile MiniVess volumes.
+      Logs data provenance to MLflow and writes fold splits to configs-splits volume.
+    work_pool:
+      name: cpu-pool
+      work_queue_name: default
+    schedules: []
+    parameters:
+      data_dir: /data/raw
+      output_dir: /app/outputs/data
+    tags:
+      - data
+      - engineering
+      - cpu
+
+  # ---------------------------------------------------------------------------
+  # Flow 2: Model Training (GPU)
+  # ---------------------------------------------------------------------------
+  - name: default
+    flow_name: training-flow
+    entrypoint: src/minivess/orchestration/flows/train_flow.py:training_flow
+    description: >
+      Train a segmentation model (DynUNet, SegResNet, Mamba, SAMv3) across all folds.
+      Requires GPU — runs on gpu-pool with NVIDIA device reservation.
+    work_pool:
+      name: gpu-pool
+      work_queue_name: default
+    schedules: []
+    parameters:
+      loss_name: cbdice_cldice
+      model_family: dynunet
+      compute: auto
+      experiment_name: minivess_training
+    tags:
+      - training
+      - gpu
+      - segmentation
+
+  # ---------------------------------------------------------------------------
+  # Flow 2.5: Post-Training Plugins (CPU)
+  # ---------------------------------------------------------------------------
+  - name: default
+    flow_name: Post-Training Pipeline
+    entrypoint: src/minivess/orchestration/flows/post_training_flow.py:post_training_flow
+    description: >
+      Run post-training plugin suite (biostatistics, uncertainty, explainability)
+      after training-flow completes. Reads upstream run ID from MLflow.
+    work_pool:
+      name: cpu-pool
+      work_queue_name: default
+    schedules: []
+    parameters: {}
+    tags:
+      - post-training
+      - plugins
+      - cpu
+
+  # ---------------------------------------------------------------------------
+  # Flow 3: Model Analysis (CPU)
+  # ---------------------------------------------------------------------------
+  - name: default
+    flow_name: analysis-flow
+    entrypoint: src/minivess/orchestration/flows/analysis_flow.py:run_analysis_flow
+    description: >
+      Evaluate ensembles, compute bootstrap CIs, generate comparison tables and figures.
+      Reads training runs from MLflow; writes analysis artifacts to ANALYSIS_OUTPUT volume.
+    work_pool:
+      name: cpu-pool
+      work_queue_name: default
+    schedules: []
+    parameters:
+      experiment_name: minivess_training
+      output_dir: null
+    tags:
+      - analysis
+      - evaluation
+      - cpu
+
+  # ---------------------------------------------------------------------------
+  # Flow 4: Model Deployment (CPU)
+  # ---------------------------------------------------------------------------
+  - name: default
+    flow_name: Deploy Pipeline
+    entrypoint: src/minivess/orchestration/deploy_flow.py:deploy_flow
+    description: >
+      Discover champion models, export to ONNX, import to BentoML store, and promote
+      through DEV → STAGING → PROD. Writes artifacts to DEPLOY_OUTPUT_DIR volume.
+    work_pool:
+      name: cpu-pool
+      work_queue_name: default
+    schedules: []
+    parameters: {}
+    tags:
+      - deploy
+      - onnx
+      - bentoml
+      - cpu
+
+  # ---------------------------------------------------------------------------
+  # Flow 5: Dashboard & Reporting (CPU — best-effort)
+  # ---------------------------------------------------------------------------
+  - name: default
+    flow_name: minivess-dashboard
+    entrypoint: src/minivess/orchestration/flows/dashboard_flow.py:run_dashboard_flow
+    description: >
+      Generate paper figures, Parquet exports, and drift reports.
+      Best-effort flow — failure does not block the pipeline.
+    work_pool:
+      name: cpu-pool
+      work_queue_name: default
+    schedules: []
+    parameters:
+      output_dir: null
+    tags:
+      - dashboard
+      - reporting
+      - best-effort
+      - cpu
+
+  # ---------------------------------------------------------------------------
+  # Flow 6: QA (CPU — best-effort)
+  # ---------------------------------------------------------------------------
+  - name: default
+    flow_name: qa-flow
+    entrypoint: src/minivess/orchestration/flows/qa_flow.py:qa_flow
+    description: >
+      MLflow data integrity checks, ghost run cleanup, and param validation.
+      Best-effort flow — failure does not block the pipeline.
+    work_pool:
+      name: cpu-pool
+      work_queue_name: default
+    schedules: []
+    parameters:
+      tracking_uri: null
+    tags:
+      - qa
+      - best-effort
+      - cpu
+
+  # ---------------------------------------------------------------------------
+  # Flow 7: Annotation (CPU — best-effort)
+  # ---------------------------------------------------------------------------
+  - name: default
+    flow_name: minivess-annotation
+    entrypoint: src/minivess/orchestration/flows/annotation_flow.py:run_annotation_flow
+    description: >
+      Run model inference for pre-annotation and submit candidates to Label Studio.
+      Best-effort flow; requires Label Studio to be running.
+    work_pool:
+      name: cpu-pool
+      work_queue_name: default
+    schedules: []
+    parameters: {}
+    tags:
+      - annotation
+      - label-studio
+      - best-effort
+      - cpu

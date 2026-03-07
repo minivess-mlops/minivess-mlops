@@ -99,6 +99,59 @@ class TestLoraAdapter:
         lora_model.save_checkpoint(ckpt)
         assert ckpt.exists()
 
+    def test_lora_load_trainer_format_checkpoint(
+        self, tmp_path: pytest.FixtureRequest
+    ) -> None:
+        """LoRA load_checkpoint must actually load weights from trainer-wrapped format.
+
+        The trainer saves: {"model_state_dict": model.state_dict(), "optimizer_state_dict": ...}
+        lora.py used strict=False which silently ignored all keys (cosmetic success).
+        This test verifies weights are actually loaded, not just "no exception raised".
+        """
+        from pathlib import Path
+
+        import torch
+
+        from minivess.adapters.dynunet import DynUNetAdapter
+        from minivess.adapters.lora import LoraModelAdapter
+
+        base_config = ModelConfig(
+            family=ModelFamily.MONAI_DYNUNET,
+            name="test_lora",
+            in_channels=1,
+            out_channels=2,
+        )
+        base_model = DynUNetAdapter(base_config)
+        lora_model = LoraModelAdapter(base_model, lora_rank=4, lora_alpha=8.0)
+
+        # Mutate LoRA weights so we can detect if loading restores them
+        for name, p in lora_model.named_parameters():
+            if "lora_" in name:
+                p.data.fill_(3.14)
+
+        # Simulate what save_metric_checkpoint() produces
+        ckpt = Path(str(tmp_path)) / "trainer_lora.pt"
+        wrapped = {
+            "model_state_dict": lora_model.state_dict(),
+            "optimizer_state_dict": {},
+            "scheduler_state_dict": {},
+            "checkpoint_metadata": {"epoch": 10},
+            "scaler_state_dict": None,
+        }
+        torch.save(wrapped, ckpt)
+
+        # Create a fresh adapter (LoRA weights randomly initialized, NOT 3.14)
+        base_model2 = DynUNetAdapter(base_config)
+        lora_model2 = LoraModelAdapter(base_model2, lora_rank=4, lora_alpha=8.0)
+        lora_model2.load_checkpoint(ckpt)
+
+        # Verify LoRA weights were actually loaded (should be 3.14, not random)
+        for name, p in lora_model2.named_parameters():
+            if "lora_" in name:
+                assert torch.allclose(p.data, torch.full_like(p.data, 3.14)), (
+                    f"LoRA weight {name!r} was not loaded from trainer checkpoint"
+                )
+
 
 # ---------------------------------------------------------------------------
 # T2: SAM3 adapter (exploratory stub)
