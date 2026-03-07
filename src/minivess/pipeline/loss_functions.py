@@ -8,7 +8,13 @@ from __future__ import annotations
 import logging
 
 import torch
-from monai.losses import DiceCELoss, DiceLoss, FocalLoss  # type: ignore[attr-defined]
+from monai.losses import (  # type: ignore[attr-defined]
+    DiceCELoss,
+    DiceLoss,
+    FocalLoss,
+    HausdorffDTLoss,
+    LogHausdorffDTLoss,
+)
 from monai.losses.cldice import SoftclDiceLoss
 from torch import nn
 
@@ -25,6 +31,8 @@ _LIBRARY_LOSSES: frozenset[str] = frozenset(
         "dice",
         "focal",
         "cldice",
+        "hausdorff_dt",
+        "log_hausdorff_dt",
     }
 )
 
@@ -436,7 +444,8 @@ def build_loss_function(
     ----------
     loss_name:
         Loss function identifier. One of ``"dice_ce"``, ``"dice"``,
-        ``"focal"``, ``"cldice"``, ``"dice_ce_cldice"``, ``"cb_dice"``,
+        ``"focal"``, ``"cldice"``, ``"hausdorff_dt"``,
+        ``"log_hausdorff_dt"``, ``"dice_ce_cldice"``, ``"cb_dice"``,
         ``"betti"``, ``"full_topo"``, ``"cbdice_cldice"``, ``"cbdice"``,
         ``"centerline_ce"``, ``"warp"``, ``"topo"``.
     num_classes:
@@ -473,6 +482,18 @@ def build_loss_function(
         )
     elif loss_name == "cldice":
         loss_fn = _WrappedSoftclDiceLoss(smooth=1e-5, iter_=3)
+    elif loss_name == "hausdorff_dt":
+        loss_fn = HausdorffDTLoss(
+            alpha=2.0,
+            softmax=softmax,
+            to_onehot_y=to_onehot_y,
+        )
+    elif loss_name == "log_hausdorff_dt":
+        loss_fn = LogHausdorffDTLoss(
+            alpha=2.0,
+            softmax=softmax,
+            to_onehot_y=to_onehot_y,
+        )
     # --- LIBRARY-COMPOUND losses ---
     elif loss_name == "dice_ce_cldice":
         loss_fn = VesselCompoundLoss(

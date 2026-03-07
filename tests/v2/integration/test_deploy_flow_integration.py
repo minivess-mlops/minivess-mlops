@@ -110,7 +110,7 @@ class TestDeployFlowIntegration:
     def test_full_pipeline_single_champion(self, tmp_path: Path) -> None:
         """Full pipeline with one champion: discover -> export -> import -> artifacts."""
         from minivess.config.deploy_config import DeployConfig
-        from minivess.orchestration.deploy_flow import deploy_flow
+        from minivess.orchestration.flows.deploy_flow import deploy_flow
 
         mlruns_dir = _create_mock_mlruns(tmp_path)
         config = DeployConfig(
@@ -129,7 +129,7 @@ class TestDeployFlowIntegration:
     def test_full_pipeline_no_champions(self, tmp_path: Path) -> None:
         """Flow completes gracefully when no champions are found."""
         from minivess.config.deploy_config import DeployConfig
-        from minivess.orchestration.deploy_flow import deploy_flow
+        from minivess.orchestration.flows.deploy_flow import deploy_flow
 
         mlruns_dir = _create_mock_mlruns(tmp_path, champions=[])
         config = DeployConfig(
@@ -146,7 +146,7 @@ class TestDeployFlowIntegration:
     def test_onnx_export_produces_valid_model(self, tmp_path: Path) -> None:
         """Exported ONNX model can be loaded and run inference."""
         from minivess.config.deploy_config import DeployConfig
-        from minivess.orchestration.deploy_flow import deploy_flow
+        from minivess.orchestration.flows.deploy_flow import deploy_flow
         from minivess.pipeline.deploy_onnx_export import validate_onnx_model
 
         mlruns_dir = _create_mock_mlruns(tmp_path)
@@ -164,7 +164,7 @@ class TestDeployFlowIntegration:
     def test_artifacts_generated(self, tmp_path: Path) -> None:
         """Deployment artifacts are generated correctly."""
         from minivess.config.deploy_config import DeployConfig
-        from minivess.orchestration.deploy_flow import deploy_flow
+        from minivess.orchestration.flows.deploy_flow import deploy_flow
 
         mlruns_dir = _create_mock_mlruns(tmp_path)
         config = DeployConfig(
@@ -182,7 +182,7 @@ class TestDeployFlowIntegration:
     def test_deploy_result_summary(self, tmp_path: Path) -> None:
         """DeployResult.to_summary() returns valid summary dict."""
         from minivess.config.deploy_config import DeployConfig
-        from minivess.orchestration.deploy_flow import deploy_flow
+        from minivess.orchestration.flows.deploy_flow import deploy_flow
 
         mlruns_dir = _create_mock_mlruns(tmp_path)
         config = DeployConfig(
@@ -201,7 +201,7 @@ class TestDeployFlowIntegration:
     def test_promotion_audit_trail(self, tmp_path: Path) -> None:
         """Promotion creates audit trail entries."""
         from minivess.config.deploy_config import DeployConfig
-        from minivess.orchestration.deploy_flow import deploy_flow
+        from minivess.orchestration.flows.deploy_flow import deploy_flow
 
         mlruns_dir = _create_mock_mlruns(tmp_path)
         config = DeployConfig(
@@ -220,7 +220,7 @@ class TestDeployFlowIntegration:
     def test_multiple_champions(self, tmp_path: Path) -> None:
         """Pipeline handles multiple champions from different categories."""
         from minivess.config.deploy_config import DeployConfig
-        from minivess.orchestration.deploy_flow import deploy_flow
+        from minivess.orchestration.flows.deploy_flow import deploy_flow
 
         champions = [
             {

@@ -11,8 +11,7 @@ Orchestrates post-training model analysis:
 7. Register best model as champion
 8. Generate summary report
 
-Uses ``_prefect_compat`` decorators for graceful degradation when Prefect
-is disabled (``PREFECT_DISABLED=1`` for CI/test environments).
+Uses Prefect @flow and @task decorators for orchestration.
 """
 
 from __future__ import annotations
@@ -25,13 +24,14 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import torch
+from prefect import flow, get_run_logger, task
 from torch import nn
 
 from minivess.ensemble.builder import (
     EnsembleBuilder,
     EnsembleSpec,
 )
-from minivess.orchestration import flow, get_run_logger, task
+from minivess.orchestration.constants import FLOW_NAME_ANALYSIS
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -1452,7 +1452,7 @@ def _export_analysis_artifacts(
 # ---------------------------------------------------------------------------
 
 
-@flow(name="analysis-flow", validate_parameters=False)
+@flow(name=FLOW_NAME_ANALYSIS, validate_parameters=False)
 def run_analysis_flow(
     eval_config: EvaluationConfig,
     model_config_dict: dict[str, Any],

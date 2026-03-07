@@ -412,17 +412,15 @@ class TestRunAnalysisFlow:
         }
         assert set(result.keys()) == expected_keys
 
-    def test_flow_works_without_prefect(self) -> None:
-        """Verify the flow is usable with PREFECT_DISABLED=1."""
+    def test_flow_is_prefect_flow(self) -> None:
+        """Verify the flow is a real Prefect Flow object."""
         from minivess.orchestration.flows.analysis_flow import (
             run_analysis_flow,
         )
 
-        # The flow decorator should be a no-op, so run_analysis_flow
-        # should be a regular callable
         assert callable(run_analysis_flow)
-        # Verify it is not a Prefect Flow object (since Prefect is disabled)
-        assert not hasattr(run_analysis_flow, "fn")
+        # Real Prefect flow has .fn attribute (the underlying function)
+        assert hasattr(run_analysis_flow, "fn")
 
 
 class TestEachTaskIndependentlyCallable:

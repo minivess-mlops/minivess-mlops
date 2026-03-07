@@ -14,7 +14,7 @@ FLOW_FILES = [
     Path("src/minivess/orchestration/flows/train_flow.py"),
     Path("src/minivess/orchestration/flows/post_training_flow.py"),
     Path("src/minivess/orchestration/flows/analysis_flow.py"),
-    Path("src/minivess/orchestration/deploy_flow.py"),
+    Path("src/minivess/orchestration/flows/deploy_flow.py"),
 ]
 
 

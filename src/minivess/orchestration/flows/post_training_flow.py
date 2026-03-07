@@ -21,8 +21,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from prefect import flow, get_run_logger, task
+
 from minivess.config.post_training_config import PostTrainingConfig
-from minivess.orchestration import flow, get_run_logger, task
+from minivess.orchestration.constants import FLOW_NAME_POST_TRAINING
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -135,7 +137,7 @@ class PostTrainingFlowResult:
     failed_operations: list[str] = field(default_factory=list)
 
 
-@flow(name="post-training-flow")
+@flow(name=FLOW_NAME_POST_TRAINING)
 def post_training_flow(
     *,
     config: PostTrainingConfig | None = None,
@@ -297,3 +299,7 @@ def post_training_flow(
         and plugin_results.get("calibration", {}).get("status") == "success",
         conformal_completed=conformal_ran,
     )
+
+
+if __name__ == "__main__":
+    post_training_flow()

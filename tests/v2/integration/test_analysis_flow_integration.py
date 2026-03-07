@@ -922,6 +922,13 @@ class TestAnalysisFlowDataContract:
 class TestAnalysisFlowE2E:
     """End-to-end analysis flow with mocked inference but real MLflow data."""
 
+    @pytest.fixture(autouse=True)
+    def _set_analysis_output_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Set ANALYSIS_OUTPUT_DIR to a temp dir for all tests in this class."""
+        monkeypatch.setenv("ANALYSIS_OUTPUT_DIR", str(tmp_path / "analysis"))
+
     @patch("minivess.orchestration.flows.analysis_flow._run_mlflow_eval_safe")
     @patch("minivess.orchestration.flows.analysis_flow._log_ensemble_model_safe")
     @patch("minivess.orchestration.flows.analysis_flow._log_single_model_safe")

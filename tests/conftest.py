@@ -1,8 +1,40 @@
 from __future__ import annotations
 
+import os
 import warnings
 
 import pytest
+from prefect.testing.utilities import prefect_test_harness
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _prefect_test_server():
+    """Start an ephemeral Prefect server for the entire test session.
+
+    Prefect 3.x flows/tasks require a running API server. The test harness
+    spins up a temporary SQLite-backed server (~6s startup, shared across
+    all tests). This replaces the old PREFECT_DISABLED=1 no-op approach.
+
+    PREFECT_LOGGING_TO_API_WHEN_MISSING_FLOW=ignore allows @task functions
+    to be called directly in tests (outside a @flow context) without
+    raising MissingContextError.
+    """
+    os.environ["PREFECT_LOGGING_TO_API_WHEN_MISSING_FLOW"] = "ignore"
+    with prefect_test_harness():
+        yield
+    os.environ.pop("PREFECT_LOGGING_TO_API_WHEN_MISSING_FLOW", None)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _allow_host_env():
+    """Bypass Docker context gate for all tests.
+
+    Sets MINIVESS_ALLOW_HOST=1 so that _require_docker_context() does not
+    reject test runs executed outside Docker containers.
+    """
+    os.environ["MINIVESS_ALLOW_HOST"] = "1"
+    yield
+    os.environ.pop("MINIVESS_ALLOW_HOST", None)
 
 
 def pytest_configure(config: pytest.Config) -> None:

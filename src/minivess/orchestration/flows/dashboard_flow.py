@@ -3,7 +3,7 @@
 Best-effort 5th flow for paper-quality figures, markdown reports,
 and metadata export. Failure does not block the core pipeline.
 
-Uses ``_prefect_compat`` decorators for graceful degradation.
+Uses Prefect @flow and @task decorators for orchestration.
 """
 
 from __future__ import annotations
@@ -15,7 +15,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from minivess.orchestration import flow, task
+from prefect import flow, task
+
+from minivess.orchestration.constants import FLOW_NAME_DASHBOARD
 
 if TYPE_CHECKING:
     from minivess.orchestration.flows.dashboard_sections import (
@@ -289,7 +291,7 @@ def export_metadata(
     return _Path(json_path)
 
 
-@flow(name="dashboard-flow")
+@flow(name=FLOW_NAME_DASHBOARD)
 def run_dashboard_flow(
     output_dir: Path | None = None,
     *,
@@ -402,3 +404,7 @@ def run_dashboard_flow(
         "metadata_path": metadata_path,
         "mlflow_run_id": mlflow_run_id,
     }
+
+
+if __name__ == "__main__":
+    run_dashboard_flow()

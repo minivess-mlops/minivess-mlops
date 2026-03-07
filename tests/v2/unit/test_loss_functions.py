@@ -156,3 +156,84 @@ class TestLossNumericalStability:
             logits, labels = _make_logits_labels()
             loss = loss_fn(logits, labels)
             assert torch.isfinite(loss).item(), f"{name} produced non-finite loss"
+
+
+# ---------------------------------------------------------------------------
+# HausdorffDTLoss and LogHausdorffDTLoss registration (#475)
+# ---------------------------------------------------------------------------
+
+
+class TestHausdorffDTLossRegistration:
+    """Test MONAI HausdorffDTLoss is registered in the factory."""
+
+    def test_build_hausdorff_dt(self) -> None:
+        """build_loss_function('hausdorff_dt') should return MONAI HausdorffDTLoss."""
+        from monai.losses import HausdorffDTLoss
+
+        from minivess.pipeline.loss_functions import build_loss_function
+
+        loss_fn = build_loss_function("hausdorff_dt")
+        assert isinstance(loss_fn, HausdorffDTLoss)
+
+    def test_hausdorff_dt_forward_scalar(self) -> None:
+        """HausdorffDTLoss forward should return a scalar tensor."""
+        from minivess.pipeline.loss_functions import build_loss_function
+
+        loss_fn = build_loss_function("hausdorff_dt")
+        logits, labels = _make_logits_labels()
+        loss = loss_fn(logits, labels)
+        assert loss.ndim == 0
+
+    def test_hausdorff_dt_forward_finite(self) -> None:
+        """HausdorffDTLoss should produce finite loss."""
+        from minivess.pipeline.loss_functions import build_loss_function
+
+        loss_fn = build_loss_function("hausdorff_dt")
+        logits, labels = _make_logits_labels()
+        loss = loss_fn(logits, labels)
+        assert torch.isfinite(loss).item()
+
+    def test_hausdorff_dt_backward(self) -> None:
+        """HausdorffDTLoss should produce finite gradients."""
+        from minivess.pipeline.loss_functions import build_loss_function
+
+        loss_fn = build_loss_function("hausdorff_dt")
+        logits, labels = _make_logits_labels()
+        loss = loss_fn(logits, labels)
+        loss.backward()
+        assert logits.grad is not None
+        assert torch.isfinite(logits.grad).all().item()
+
+    def test_hausdorff_dt_in_library_losses(self) -> None:
+        """hausdorff_dt should be classified as a LIBRARY loss (no warning)."""
+        from minivess.pipeline.loss_functions import _LIBRARY_LOSSES
+
+        assert "hausdorff_dt" in _LIBRARY_LOSSES
+
+
+class TestLogHausdorffDTLossRegistration:
+    """Test MONAI LogHausdorffDTLoss is registered in the factory."""
+
+    def test_build_log_hausdorff_dt(self) -> None:
+        """build_loss_function('log_hausdorff_dt') should return MONAI LogHausdorffDTLoss."""
+        from monai.losses import LogHausdorffDTLoss
+
+        from minivess.pipeline.loss_functions import build_loss_function
+
+        loss_fn = build_loss_function("log_hausdorff_dt")
+        assert isinstance(loss_fn, LogHausdorffDTLoss)
+
+    def test_log_hausdorff_dt_forward_finite(self) -> None:
+        """LogHausdorffDTLoss should produce finite loss."""
+        from minivess.pipeline.loss_functions import build_loss_function
+
+        loss_fn = build_loss_function("log_hausdorff_dt")
+        logits, labels = _make_logits_labels()
+        loss = loss_fn(logits, labels)
+        assert torch.isfinite(loss).item()
+
+    def test_log_hausdorff_dt_in_library_losses(self) -> None:
+        """log_hausdorff_dt should be classified as a LIBRARY loss (no warning)."""
+        from minivess.pipeline.loss_functions import _LIBRARY_LOSSES
+
+        assert "log_hausdorff_dt" in _LIBRARY_LOSSES

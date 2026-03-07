@@ -1,7 +1,7 @@
 """Prefect Data Flow (Flow 1) — Data Engineering.
 
 Discovers, validates, profiles, and splits datasets for the training pipeline.
-Uses ``_prefect_compat`` decorators for graceful degradation without Prefect.
+Uses Prefect @flow and @task decorators for orchestration.
 """
 
 from __future__ import annotations
@@ -13,7 +13,9 @@ import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from minivess.orchestration import flow, task
+from prefect import flow, task
+
+from minivess.orchestration.constants import FLOW_NAME_DATA
 from minivess.orchestration.mlflow_helpers import log_completion_safe
 
 if TYPE_CHECKING:
@@ -356,7 +358,7 @@ def _compute_dataset_hash(pairs: list[dict[str, str]]) -> str:
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
-@flow(name="data-flow")
+@flow(name=FLOW_NAME_DATA)
 def run_data_flow(
     data_dir: Path,
     n_folds: int = 3,
@@ -364,6 +366,7 @@ def run_data_flow(
     external_dirs: dict[str, Path] | None = None,
     dvc_rev: str | None = None,
     dvc_remote: str | None = None,
+    trigger_source: str = "manual",
 ) -> DataFlowResult:
     """Data Engineering Flow (Flow 1).
 
@@ -475,3 +478,11 @@ def run_data_flow(
         mlflow_run_id=mlflow_run_id,
         splits_path=splits_path,
     )
+
+
+if __name__ == "__main__":
+    import os
+    from pathlib import Path
+
+    data_dir = Path(os.environ.get("DATA_DIR", "/app/data/raw"))
+    run_data_flow(data_dir=data_dir)

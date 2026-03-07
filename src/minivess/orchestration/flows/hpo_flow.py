@@ -17,8 +17,9 @@ import logging
 from typing import Any
 
 import optuna
+from prefect import flow, task
 
-from minivess.orchestration._prefect_compat import flow, task
+from minivess.orchestration.constants import FLOW_NAME_HPO
 from minivess.orchestration.flows.train_flow import training_flow
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ def run_trial_task(
     return float("inf")
 
 
-@flow(name="hpo-flow")
+@flow(name=FLOW_NAME_HPO)
 def hpo_flow(
     *,
     n_trials: int = 20,
@@ -168,3 +169,7 @@ def hpo_flow(
         "best_params": best_params,
         "best_value": best_value,
     }
+
+
+if __name__ == "__main__":
+    hpo_flow()

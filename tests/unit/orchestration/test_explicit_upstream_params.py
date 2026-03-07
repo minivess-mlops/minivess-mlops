@@ -78,7 +78,7 @@ class TestAnalysisFlowUpstreamParam:
 class TestDeployFlowUpstreamParam:
     def test_deploy_flow_accepts_upstream_analysis_run_id(self) -> None:
         """deploy_flow() accepts optional upstream_analysis_run_id parameter."""
-        from minivess.orchestration.deploy_flow import deploy_flow
+        from minivess.orchestration.flows.deploy_flow import deploy_flow
 
         params = _get_param_names(deploy_flow)
         assert "upstream_analysis_run_id" in params, (
@@ -87,7 +87,7 @@ class TestDeployFlowUpstreamParam:
 
     def test_upstream_analysis_run_id_default_is_none(self) -> None:
         """upstream_analysis_run_id default must be None."""
-        from minivess.orchestration.deploy_flow import deploy_flow
+        from minivess.orchestration.flows.deploy_flow import deploy_flow
 
         sig = inspect.signature(deploy_flow)
         param = sig.parameters.get("upstream_analysis_run_id")

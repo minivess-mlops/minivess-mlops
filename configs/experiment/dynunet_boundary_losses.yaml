@@ -1,0 +1,12 @@
+# @package _global_
+# Delta-only: overrides base.yaml defaults
+#
+# Boundary-distance losses (Karimi & Salcudean 2019).
+# Both are MONAI built-in — zero custom code.
+
+experiment_name: dynunet_boundary_losses_v1
+model: dynunet
+losses:
+  - dice_ce
+  - hausdorff_dt
+  - log_hausdorff_dt

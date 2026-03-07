@@ -820,7 +820,7 @@ class TestDeployResult:
     """Test DeployResult dataclass."""
 
     def test_deploy_result_creation(self) -> None:
-        from minivess.orchestration.deploy_flow import DeployResult
+        from minivess.orchestration.flows.deploy_flow import DeployResult
 
         result = DeployResult(
             champions=[],
@@ -832,7 +832,7 @@ class TestDeployResult:
         assert result.artifacts_dir == Path("/tmp/artifacts")
 
     def test_deploy_result_to_summary(self) -> None:
-        from minivess.orchestration.deploy_flow import DeployResult
+        from minivess.orchestration.flows.deploy_flow import DeployResult
 
         result = DeployResult(
             champions=[],
@@ -851,32 +851,32 @@ class TestDeployFlowTasks:
     """Test individual deploy flow tasks."""
 
     def test_discover_task_callable(self) -> None:
-        from minivess.orchestration.deploy_flow import discover_task
+        from minivess.orchestration.flows.deploy_flow import discover_task
 
         assert callable(discover_task)
 
     def test_export_task_callable(self) -> None:
-        from minivess.orchestration.deploy_flow import export_task
+        from minivess.orchestration.flows.deploy_flow import export_task
 
         assert callable(export_task)
 
     def test_import_task_callable(self) -> None:
-        from minivess.orchestration.deploy_flow import import_task
+        from minivess.orchestration.flows.deploy_flow import import_task
 
         assert callable(import_task)
 
     def test_generate_artifacts_task_callable(self) -> None:
-        from minivess.orchestration.deploy_flow import generate_artifacts_task
+        from minivess.orchestration.flows.deploy_flow import generate_artifacts_task
 
         assert callable(generate_artifacts_task)
 
     def test_promote_task_callable(self) -> None:
-        from minivess.orchestration.deploy_flow import promote_task
+        from minivess.orchestration.flows.deploy_flow import promote_task
 
         assert callable(promote_task)
 
     def test_deploy_flow_callable(self) -> None:
-        from minivess.orchestration.deploy_flow import deploy_flow
+        from minivess.orchestration.flows.deploy_flow import deploy_flow
 
         assert callable(deploy_flow)
 
@@ -886,7 +886,7 @@ class TestDeployFlowExecution:
 
     def test_discover_task_returns_champions(self, tmp_path: Path) -> None:
         from minivess.config.deploy_config import DeployConfig
-        from minivess.orchestration.deploy_flow import discover_task
+        from minivess.orchestration.flows.deploy_flow import discover_task
 
         mlruns_dir = _make_mock_mlruns(
             tmp_path,
@@ -904,7 +904,7 @@ class TestDeployFlowExecution:
         assert isinstance(champions, list)
 
     def test_export_task_produces_onnx(self, tmp_path: Path) -> None:
-        from minivess.orchestration.deploy_flow import export_task
+        from minivess.orchestration.flows.deploy_flow import export_task
         from minivess.pipeline.deploy_champion_discovery import ChampionModel
 
         ckpt_path = _create_mock_checkpoint(tmp_path / "ckpt")
@@ -925,7 +925,7 @@ class TestDeployFlowExecution:
     def test_deploy_flow_handles_no_champions(self, tmp_path: Path) -> None:
         """Flow should complete gracefully when no champions found."""
         from minivess.config.deploy_config import DeployConfig
-        from minivess.orchestration.deploy_flow import deploy_flow
+        from minivess.orchestration.flows.deploy_flow import deploy_flow
 
         mlruns_dir = _make_mock_mlruns(tmp_path, champion_tags={})
         config = DeployConfig(
@@ -939,7 +939,7 @@ class TestDeployFlowExecution:
     def test_deploy_flow_e2e_with_mock_champion(self, tmp_path: Path) -> None:
         """Full flow with a mock champion."""
         from minivess.config.deploy_config import DeployConfig
-        from minivess.orchestration.deploy_flow import deploy_flow
+        from minivess.orchestration.flows.deploy_flow import deploy_flow
 
         ckpt_path = _create_mock_checkpoint(tmp_path / "ckpt")
         mlruns_dir = _make_mock_mlruns(

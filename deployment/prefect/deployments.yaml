@@ -126,7 +126,7 @@ deployments:
   # ---------------------------------------------------------------------------
   - name: default
     flow_name: Deploy Pipeline
-    entrypoint: src/minivess/orchestration/deploy_flow.py:deploy_flow
+    entrypoint: src/minivess/orchestration/flows/deploy_flow.py:deploy_flow
     description: >
       Discover champion models, export to ONNX, import to BentoML store, and promote
       through DEV → STAGING → PROD. Writes artifacts to DEPLOY_OUTPUT_DIR volume.

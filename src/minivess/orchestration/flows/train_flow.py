@@ -20,8 +20,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from prefect import flow, task
 
-from minivess.orchestration._prefect_compat import flow, task
+from minivess.orchestration.constants import FLOW_NAME_TRAIN
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -401,7 +402,7 @@ def log_fold_results_task(
 # ---------------------------------------------------------------------------
 
 
-@flow(name="training-flow")
+@flow(name=FLOW_NAME_TRAIN)
 def training_flow(
     *,
     loss_name: str = "cbdice_cldice",
@@ -541,3 +542,7 @@ def training_flow(
         mlflow_run_id,
     )
     return result
+
+
+if __name__ == "__main__":
+    training_flow()

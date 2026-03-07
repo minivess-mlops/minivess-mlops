@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Any
 
-from minivess.orchestration._prefect_compat import task
+from prefect import task
 
 logger = logging.getLogger(__name__)
 

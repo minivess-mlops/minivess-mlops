@@ -1,12 +1,11 @@
-"""Orchestration package — Prefect compatibility layer for MinIVess MLOps."""
+"""Orchestration package — Prefect integration for MinIVess MLOps."""
 
 from __future__ import annotations
 
-from minivess.orchestration._prefect_compat import (
-    PREFECT_AVAILABLE,
-    flow,
-    get_run_logger,
-    task,
-)
+from prefect import flow, get_run_logger, task
 
-__all__ = ["PREFECT_AVAILABLE", "flow", "get_run_logger", "task"]
+from minivess.orchestration.deployments import get_work_pool
+
+PREFECT_AVAILABLE = True
+
+__all__ = ["PREFECT_AVAILABLE", "flow", "get_run_logger", "get_work_pool", "task"]

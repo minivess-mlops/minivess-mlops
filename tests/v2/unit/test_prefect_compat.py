@@ -1,116 +1,39 @@
 from __future__ import annotations
 
-import os
-from unittest.mock import patch
 
+class TestOrchestrationPackageExports:
+    """Verify that minivess.orchestration re-exports the real Prefect symbols."""
 
-class TestPrefectCompat:
-    def test_noop_task_preserves_function(self):
-        """When PREFECT_DISABLED=1, @task decorator is a no-op passthrough."""
-        with patch.dict(os.environ, {"PREFECT_DISABLED": "1"}):
-            # Re-import to pick up env var
-            import importlib
+    def test_exports_flow(self):
+        from prefect import flow as real_flow
 
-            import minivess.orchestration._prefect_compat as mod
+        from minivess.orchestration import flow
 
-            importlib.reload(mod)
+        assert flow is real_flow
 
-            @mod.task
-            def my_func(x: int) -> int:
-                return x * 2
+    def test_exports_task(self):
+        from prefect import task as real_task
 
-            assert my_func(5) == 10
+        from minivess.orchestration import task
 
-    def test_noop_flow_preserves_function(self):
-        """When PREFECT_DISABLED=1, @flow decorator is a no-op passthrough."""
-        with patch.dict(os.environ, {"PREFECT_DISABLED": "1"}):
-            import importlib
+        assert task is real_task
 
-            import minivess.orchestration._prefect_compat as mod
+    def test_exports_get_run_logger(self):
+        from prefect import get_run_logger as real_logger
 
-            importlib.reload(mod)
+        from minivess.orchestration import get_run_logger
 
-            @mod.flow
-            def my_flow(name: str) -> str:
-                return f"hello {name}"
+        assert get_run_logger is real_logger
 
-            assert my_flow("world") == "hello world"
+    def test_prefect_available_is_true(self):
+        from minivess.orchestration import PREFECT_AVAILABLE
 
-    def test_prefect_disabled_env_var(self):
-        """PREFECT_DISABLED=1 prevents Prefect import."""
-        with patch.dict(os.environ, {"PREFECT_DISABLED": "1"}):
-            import importlib
+        assert PREFECT_AVAILABLE is True
 
-            import minivess.orchestration._prefect_compat as mod
+    def test_exports_get_work_pool(self):
+        from minivess.orchestration import get_work_pool
+        from minivess.orchestration.deployments import (
+            get_work_pool as real_get_work_pool,
+        )
 
-            importlib.reload(mod)
-
-            assert mod.PREFECT_AVAILABLE is False
-
-    def test_get_run_logger_fallback(self):
-        """get_run_logger returns stdlib logger when Prefect is disabled."""
-        with patch.dict(os.environ, {"PREFECT_DISABLED": "1"}):
-            import importlib
-
-            import minivess.orchestration._prefect_compat as mod
-
-            importlib.reload(mod)
-
-            logger = mod.get_run_logger()
-            assert hasattr(logger, "info")
-            assert hasattr(logger, "warning")
-
-    def test_decorated_function_callable(self):
-        """Decorated functions remain callable with correct signatures."""
-        with patch.dict(os.environ, {"PREFECT_DISABLED": "1"}):
-            import importlib
-
-            import minivess.orchestration._prefect_compat as mod
-
-            importlib.reload(mod)
-
-            @mod.task(name="add")
-            def add(a: int, b: int) -> int:
-                return a + b
-
-            @mod.flow(name="pipeline")
-            def pipeline() -> int:
-                return add(1, 2)
-
-            assert pipeline() == 3
-
-    def test_task_with_kwargs(self):
-        """@task decorator works with keyword arguments like cache_key_fn."""
-        with patch.dict(os.environ, {"PREFECT_DISABLED": "1"}):
-            import importlib
-
-            import minivess.orchestration._prefect_compat as mod
-
-            importlib.reload(mod)
-
-            @mod.task(name="compute", retries=3, cache_key_fn=None)
-            def compute(x: int) -> int:
-                return x**2
-
-            assert compute(4) == 16
-
-
-class TestPrefectCompatInit:
-    def test_orchestration_package_importable(self):
-        """The orchestration package is importable."""
-        import minivess.orchestration
-
-        assert hasattr(minivess.orchestration, "__name__")
-
-    def test_public_exports(self):
-        """Key symbols are re-exported from __init__."""
-        with patch.dict(os.environ, {"PREFECT_DISABLED": "1"}):
-            import importlib
-
-            import minivess.orchestration as orch
-
-            importlib.reload(orch)
-            # Should export task, flow, get_run_logger
-            assert hasattr(orch, "task")
-            assert hasattr(orch, "flow")
-            assert hasattr(orch, "get_run_logger")
+        assert get_work_pool is real_get_work_pool

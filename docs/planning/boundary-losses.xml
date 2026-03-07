@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Boundary Losses Implementation Plan (Converged)
+  Issues: #100 (Boundary Loss — NOT PLANNED), #101 (GSL — NOT PLANNED)
+  Branch: feat/boundary-losses
+  Date: 2026-03-07
+
+  Prior art: docs/planning/boundary-loss-implementation-plan.md (2026-03-04)
+
+  SCOPE DECISION (2026-03-07):
+  MONAI already provides HausdorffDTLoss (Karimi 2019) — use it directly.
+  Kervadec Boundary Loss (2019): too old, precomputation burden, NOT PLANNED.
+  Celaya GSL (2024): interesting but P3-low, NOT PLANNED.
+  The only implementation work is registering MONAI's existing loss in our factory.
+
+  CRITICAL RULE: If it exists in MONAI, use it directly — NEVER reimplement.
+
+  References:
+  - Karimi & Salcudean (2019) "Reducing the Hausdorff Distance" IEEE TMI → MONAI HausdorffDTLoss
+  - Kervadec et al. (2019) "Boundary loss for highly unbalanced segmentation" MIDL — NOT PLANNED
+  - Celaya et al. (2024) "A Generalized Surface Loss" arXiv:2302.03868 — NOT PLANNED (P3-low)
+-->
+<plan name="boundary-losses" version="3" issues="#100,#101">
+
+  <!-- ================================================================== -->
+  <!-- RESEARCH SUMMARY (from reviewer agents)                             -->
+  <!-- ================================================================== -->
+  <context>
+    <summary>
+      Three distance-transform-based losses were evaluated. Only MONAI's built-in
+      HausdorffDTLoss will be registered. The other two are deferred/not-planned.
+    </summary>
+
+    <loss name="hausdorff_dt" source="monai" paper="Karimi 2019" status="IMPLEMENT">
+      <formula>L = mean( (P - G)^2 × (EDT(P)^α + EDT(G)^α) )</formula>
+      <monai-class>monai.losses.HausdorffDTLoss</monai-class>
+      <monai-class>monai.losses.LogHausdorffDTLoss</monai-class>
+      <precomputation>None — computes EDT inline in forward()</precomputation>
+      <output-range>[0, +inf)</output-range>
+      <action>Register in loss factory as LIBRARY loss. Zero custom code.</action>
+      <note>
+        Computes distance transform on BOTH prediction and ground truth inline.
+        Uses @torch.no_grad() for DT computation; gradients flow through (P-G)^2 term.
+        Patch safety is limited (EDT on patches has boundary artifacts) but acceptable
+        for evaluation and as a training regularizer.
+      </note>
+    </loss>
+
+    <loss name="boundary" source="NOT PLANNED" paper="Kervadec 2019" status="NOT_PLANNED">
+      <formula>L = (1/N) × sum(softmax_fg × φ_G)</formula>
+      <reason-not-planned>
+        1. Paper is from 2019 — well-established but old approach
+        2. Requires dataloader-level signed DT precomputation (infrastructure burden)
+        3. Unbounded output range requires careful alpha scheduling
+        4. MONAI has HausdorffDTLoss which solves the same class of problem
+        5. Kervadec's approach requires BatchAwareLoss protocol extension to trainer
+        6. Implementation effort disproportionate to marginal benefit over MONAI built-in
+      </reason-not-planned>
+      <action>Close #100 as not-planned. Update issue description for audit trail.</action>
+    </loss>
+
+    <loss name="gsl" source="NOT PLANNED" paper="Celaya 2024" status="NOT_PLANNED">
+      <formula>L = 1 - [sum(w_k × (D × (1-(T+P)))^2)] / [sum(w_k × D^2) + ε]</formula>
+      <reason-not-planned>
+        1. Bounded [0,1] output is nice but not critical for current experiments
+        2. Same dataloader infrastructure burden as Boundary Loss
+        3. Requires dataset-level class weight precomputation
+        4. Can be revisited if HausdorffDTLoss proves insufficient (P3-low)
+      </reason-not-planned>
+      <action>Mark #101 as P3-low, not-planned. Update issue description.</action>
+    </loss>
+
+    <comparison title="Why MONAI HausdorffDTLoss is sufficient">
+      For the current MiniVess experiments, MONAI's HausdorffDTLoss provides:
+      - Zero-infrastructure surface distance optimization (no dataloader changes)
+      - Direct MONAI import (library-first rule)
+      - Standard forward(input, target) interface (no trainer changes needed)
+      - Proven implementation with 3+ years of community testing
+
+      If future experiments show HausdorffDTLoss is insufficient for HD95/MASD
+      optimization, the Celaya GSL (bounded, patch-safe) would be the next step.
+      The existing plan at boundary-loss-implementation-plan.md is preserved as
+      a reference for that future work.
+    </comparison>
+  </context>
+
+  <!-- ================================================================== -->
+  <!-- IMPLEMENTATION: SINGLE PHASE                                        -->
+  <!-- ================================================================== -->
+
+  <phase id="1" name="Register MONAI HausdorffDTLoss" tasks="2" depends="">
+    <task id="1.1" name="Register MONAI HausdorffDTLoss + LogHausdorffDTLoss" github-issue="true">
+      <file>src/minivess/pipeline/loss_functions.py</file>
+      <description>
+        Add hausdorff_dt and log_hausdorff_dt to build_loss_function().
+        Direct import from monai.losses — ZERO custom code.
+        Add both to _LIBRARY_LOSSES frozenset (no warning emitted).
+        Standard MONAI interface: forward(input, target).
+        Parameters: alpha=2.0, softmax=softmax, to_onehot_y=to_onehot_y,
+        include_background=False.
+      </description>
+      <tests>
+        - test_hausdorff_dt_factory_returns_monai_loss
+        - test_hausdorff_dt_forward_returns_scalar
+        - test_hausdorff_dt_gradient_flow
+        - test_hausdorff_dt_no_nan_on_synthetic_data
+        - test_log_hausdorff_dt_factory_returns_monai_loss
+        - test_log_hausdorff_dt_forward_returns_scalar
+        - test_hausdorff_dt_in_library_losses_no_warning
+      </tests>
+    </task>
+
+    <task id="1.2" name="Experiment config update" github-issue="true">
+      <file>configs/experiment/dynunet_boundary_losses.yaml</file>
+      <description>
+        New experiment config for surface-distance ablation:
+        - dice_ce (baseline)
+        - hausdorff_dt (MONAI direct — new)
+        - cbdice_cldice (current default)
+        No precompute_targets needed (HausdorffDTLoss computes EDT inline).
+        3 folds × 100 epochs.
+      </description>
+      <tests>
+        - test_experiment_config_loads_valid_yaml
+        - test_experiment_config_all_losses_registered
+      </tests>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- FOLLOW-UP: MONAI Compatibility Audit (separate branch/PR)           -->
+  <!-- ================================================================== -->
+  <followup>
+    <issue number="343" title="Audit ModelAdapter for MONAI-native compatibility" priority="P0">
+      CRITICAL: Next branch/PR after this task. Must close #343 and verify:
+      1. ModelAdapter ABC does not over-wrap MONAI models
+      2. Any monai.networks.nets.* model wrappable in less than 30 lines
+      3. monai.losses.* work without adaptation (proven by hausdorff_dt here)
+      4. monai.transforms.* work without adaptation
+      5. Re-add SegResNet, SwinUNETR, AttentionUnet, UNETR as thin wrappers
+      Create P0 issue — MONAI ecosystem compatibility is the #1 DevEx priority.
+    </issue>
+  </followup>
+
+  <!-- ================================================================== -->
+  <!-- FILE MANIFEST                                                       -->
+  <!-- ================================================================== -->
+  <files>
+    <new>configs/experiment/dynunet_boundary_losses.yaml</new>
+    <new>tests/v2/unit/test_hausdorff_dt_loss.py</new>
+    <modify>src/minivess/pipeline/loss_functions.py</modify>
+  </files>
+
+  <!-- ================================================================== -->
+  <!-- ISSUE TRACKING                                                      -->
+  <!-- ================================================================== -->
+  <issues>
+    <issue task="1.1" title="boundary-losses: Register MONAI HausdorffDTLoss + LogHausdorffDTLoss" labels="training,P1-high" />
+    <issue task="1.2" title="boundary-losses: Experiment config for surface-distance ablation" labels="training,P1-high" />
+    <close number="100" reason="not-planned" note="MONAI HausdorffDTLoss covers this use case. Kervadec approach (2019) requires significant dataloader infrastructure. See boundary-losses.xml for full analysis." />
+    <close number="101" reason="not-planned" label="P3-low" note="Bounded GSL is interesting but deferred. MONAI HausdorffDTLoss is sufficient for current experiments. See boundary-losses.xml for full analysis." />
+  </issues>
+
+</plan>

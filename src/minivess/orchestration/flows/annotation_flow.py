@@ -12,8 +12,9 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from prefect import flow, task
 
-from minivess.orchestration import flow, task
+from minivess.orchestration.constants import FLOW_NAME_ANNOTATION
 from minivess.serving.api_models import SegmentationRequest
 
 if TYPE_CHECKING:
@@ -156,7 +157,7 @@ def record_annotation_task(
     return report, agreement
 
 
-@flow(name="minivess-annotation")
+@flow(name=FLOW_NAME_ANNOTATION)
 def run_annotation_flow(
     volume: NDArray[np.float32],
     volume_id: str,

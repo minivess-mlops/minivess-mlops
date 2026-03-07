@@ -72,16 +72,16 @@ class TestFlowDeployments:
 
 
 class TestPrefectCompatWorkPools:
-    """Test _prefect_compat.py work pool awareness."""
+    """Test deployments.py get_work_pool function."""
 
     def test_get_work_pool_for_flow(self) -> None:
-        from minivess.orchestration._prefect_compat import get_work_pool
+        from minivess.orchestration.deployments import get_work_pool
 
         pool = get_work_pool("train")
         assert pool == "gpu-pool"
 
     def test_get_work_pool_default(self) -> None:
-        from minivess.orchestration._prefect_compat import get_work_pool
+        from minivess.orchestration.deployments import get_work_pool
 
         pool = get_work_pool("unknown_flow")
         assert pool == "cpu-pool"
