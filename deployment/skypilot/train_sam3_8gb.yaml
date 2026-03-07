@@ -1,0 +1,108 @@
+# MinIVess MLOps — SAM3 Training on Local 8 GB GPU via SkyPilot SSH Node Pool
+#
+# Target: RTX 2070 Super (8 GB VRAM) registered as a SkyPilot SSH node pool.
+# See docs: https://docs.skypilot.co/en/stable/reservations/existing-machines.html
+#
+# Variants that fit in 8 GB:
+#   sam3_vanilla   — frozen encoder + decoder   ~5-6 GB  ✓ safe
+#   sam3_topolora  — LoRA rank=16 + decoder     ~5.5-6.5 GB  ✓ safe
+#   sam3_hybrid    — SAM3 features + DynUNet3D  ~7.5 GB  ⚠ marginal (batch_size=1, AMP)
+#
+# SAM3 variants NOT suitable for 8 GB:
+#   Full fine-tune / unfrozen SAM3 encoder (848 M params): requires 16+ GB
+#   VesselFM fine-tune: requires ~10 GB (see finetune_vesselfm.yaml)
+#
+# Setup prerequisites (one-time):
+#   1. Ensure SSH server is running on the workstation:
+#        sudo systemctl enable --now ssh
+#   2. Register SSH node pool:
+#        sky ssh up  (installs SkyPilot runtime; requires kubectl)
+#   3. Verify GPU is detected:
+#        sky show-gpus --infra ssh/<pool_name>
+#
+# Launch:
+#   sky launch deployment/skypilot/train_sam3_8gb.yaml --infra ssh/<pool_name>
+#   sky launch deployment/skypilot/train_sam3_8gb.yaml --env MODEL_FAMILY=sam3_topolora
+#
+# Or via script (handles all 3 variants + fallback):
+#   ./scripts/train_sam3_local_sky.sh
+#
+# NOTE: sky jobs launch (managed spot) is NOT supported on SSH node pools.
+# Use plain `sky launch` for local workstation targets.
+
+name: mnvss-sam3-8gb
+
+resources:
+  # SSH node pool: your local workstation registered via sky ssh up
+  # Replace <pool_name> with the name you chose during sky ssh up
+  # Example: infra: ssh/local-gpu
+  infra: ssh/local-gpu
+  # Request 1 GPU — SkyPilot detects RTX 2070 Super via nvidia-smi on the host
+  # Leave ~0.5 GB headroom for OS + SkyPilot runtime (out of 8 GB total)
+  gpus: 1
+  # Small disk since data and checkpoints are on local paths
+  disk_size: 10
+
+# workdir syncs project code to ~/sky_workdir on the SSH host.
+# For localhost SSH, this is a no-op copy of the project.
+workdir: .
+
+# For local runs: use filesystem paths directly (no S3 needed).
+# MLFLOW_TRACKING_URI points to local file-based store — no network required.
+# CHECKPOINT_DIR and DATA_DIR must exist on the LOCAL machine.
+envs:
+  # ── MLflow (local file backend — no server needed) ──────────────────────────
+  MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-file:///home/petteri/Dropbox/github-personal/minivess-mlops/mlruns}
+
+  # ── Training config ─────────────────────────────────────────────────────────
+  MODEL_FAMILY: sam3_vanilla
+  LOSS_NAME: cbdice_cldice
+  # gpu_low profile: batch_size=1 for SAM3 (handled by train_flow.py _is_sam3 check)
+  COMPUTE: gpu_low
+  NUM_FOLDS: 3
+  MAX_EPOCHS: ${MAX_EPOCHS:-100}
+  EXPERIMENT_NAME: minivess_training
+
+  # ── Local paths (adjust to your data location) ──────────────────────────────
+  SPLITS_DIR: ${SPLITS_DIR:-/home/petteri/Dropbox/github-personal/minivess-mlops/configs/splits}
+  CHECKPOINT_DIR: ${CHECKPOINT_DIR:-/home/petteri/Dropbox/github-personal/minivess-mlops/checkpoints}
+  DATA_DIR: ${DATA_DIR:-/data/minivess/raw}
+
+  # ── HuggingFace token (for SAM3 model weights from HF Hub) ──────────────────
+  HF_TOKEN: ${HF_TOKEN:-}
+
+  # ── Prefect (disabled for local runs — no server needed) ────────────────────
+  PREFECT_DISABLED: "1"
+
+setup: |
+  # Ensure uv is on PATH (installed by sky ssh up runtime, but verify)
+  export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+  which uv || curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.cargo/bin:$PATH"
+
+  # Sync project dependencies (no dev extras)
+  cd "$SKYPILOT_TASK_WORKDIR"
+  uv sync --no-dev
+
+  # Verify GPU is accessible
+  nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+
+run: |
+  export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+  cd "$SKYPILOT_TASK_WORKDIR"
+
+  # Set env vars for the training process
+  export SPLITS_DIR="${SPLITS_DIR}"
+  export CHECKPOINT_DIR="${CHECKPOINT_DIR}"
+  export MLFLOW_TRACKING_URI="${MLFLOW_TRACKING_URI}"
+  export PREFECT_DISABLED="${PREFECT_DISABLED:-1}"
+
+  # Run via the canonical training entry point (Prefect-compat, no server needed)
+  uv run python scripts/run_training_flow.py \
+    --model-family "${MODEL_FAMILY}" \
+    --loss-name "${LOSS_NAME}" \
+    --compute "${COMPUTE}" \
+    --num-folds "${NUM_FOLDS}" \
+    --max-epochs "${MAX_EPOCHS}" \
+    --experiment-name "${EXPERIMENT_NAME}" \
+    --trigger-source "train_sam3_8gb.yaml"

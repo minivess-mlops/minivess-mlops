@@ -1,0 +1,787 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Executable TDD Plan: All Training via SkyPilot
+  ================================================
+  Plan ID   : skypilot-advanced-plan-execution
+  Created   : 2026-03-07
+  Depends on: docs/planning/skypilot-advanced-plan.md (architecture decisions)
+  Issues    : #420 (SkyServe P2), references skypilot-advanced-plan.md gap list (G1-G5)
+  Skill     : .claude/skills/self-learning-iterative-coder/SKILL.md
+  Branch    : feat/skypilot-all-training (to be created)
+  Base      : main
+
+  GOAL: Route ALL minivess training through SkyPilot (`sky launch` or `sky jobs launch`),
+  whether the compute target is:
+    a) Local 8 GB RTX 2070 Super (via SkyPilot SSH node pool)
+    b) Cloud spot instance (RunPod → Lambda → AWS → GCP, via managed jobs)
+    c) Prefect-dispatched Docker container running training_flow() inside SkyPilot VM
+
+  ARCHITECTURE (from skypilot-advanced-plan.md):
+    - Only Flow 2 (Training) needs cloud GPU.
+    - SkyPilot dispatches based on model family:
+        local 8 GB → SSH node pool (sky launch, infra=ssh/POOL_NAME)
+        cloud spot  → sky jobs launch (managed, auto-recovers preemption)
+    - Prefect remains the workflow orchestrator; SkyPilot is the compute layer.
+    - MLflow is the inter-flow contract (tracking URI must be public for cloud runs).
+
+  GAPS FROM skypilot-advanced-plan.md:
+    G1 — /checkpoints uses MOUNT (not MOUNT_CACHED): 9.6x slower checkpoint I/O
+    G2 — MLFLOW_TRACKING_URI: http://mlflow:5000 unreachable from cloud
+    G3 — wait_sky_job polls with time.sleep() instead of sky.stream_and_get()
+    G4 — No VesselFM-specific YAML (DONE: finetune_vesselfm.yaml in PR #403)
+    G5 — RunPod spot: 5-second SIGTERM — checkpoint every epoch
+
+  EXECUTION MODEL:
+    Wave 1 (T-01 to T-03): Foundation — SSH setup docs, local YAML, cloud YAML fixes
+    Wave 2 (T-04 to T-06): Infrastructure fixes — MOUNT_CACHED, MLflow URI, stream_and_get
+    Wave 3 (T-07 to T-09): All training scripts route through SkyPilot
+    Wave 4 (T-10 to T-11): Prefect + Docker inside SkyPilot (target architecture)
+    Wave 5 (T-12 to T-13): SkyServe stub (P2) + integration verification
+-->
+
+<plan
+  id="skypilot-advanced-plan-execution"
+  version="1.0"
+  parent_plan="skypilot-advanced-plan.md"
+  skill="self-learning-iterative-coder"
+>
+
+  <metadata>
+    <title>All Training via SkyPilot — Execution Plan</title>
+    <description>
+      Route all minivess training through SkyPilot with two compute paths:
+      (A) Local GPU via SSH node pool (8 GB variants), and
+      (B) Cloud spot instances via managed jobs (cloud variants).
+      Fix the 5 identified gaps in train_generic.yaml and prefect_sky_tasks.py.
+      Add Docker-inside-SkyPilot support for Prefect flow isolation.
+    </description>
+    <affected_files>
+      <file>deployment/skypilot/train_generic.yaml</file>
+      <file>deployment/skypilot/train_hpo_sweep.yaml</file>
+      <file>deployment/skypilot/train_sam3_8gb.yaml (NEW — in PR #403)</file>
+      <file>deployment/skypilot/finetune_vesselfm.yaml (NEW — in PR #403)</file>
+      <file>deployment/skypilot/train_cloud_all.yaml (NEW)</file>
+      <file>deployment/skypilot/serve_onnx.yaml (NEW — P2)</file>
+      <file>scripts/train_sam3_local_sky.sh (NEW — in PR #403)</file>
+      <file>scripts/train_sam3_all_variants.sh</file>
+      <file>scripts/train_all_best.sh</file>
+      <file>scripts/train_dynunet.sh</file>
+      <file>scripts/train_mamba_variants.sh</file>
+      <file>src/minivess/compute/skypilot_launcher.py</file>
+      <file>src/minivess/compute/prefect_sky_tasks.py</file>
+      <file>configs/sky/local-workstation.yaml (NEW)</file>
+    </affected_files>
+    <verify_commands>
+      <command>sky check</command>
+      <command>python -c "import yaml; [yaml.safe_load(open(f).read()) for f in ['deployment/skypilot/train_generic.yaml', 'deployment/skypilot/train_sam3_8gb.yaml']]"</command>
+      <command>uv run pytest tests/unit/compute/ -x -q</command>
+      <command>uv run ruff check src/minivess/compute/ tests/unit/compute/</command>
+      <command>uv run mypy src/minivess/compute/</command>
+      <command>sky jobs launch deployment/skypilot/train_generic.yaml --dryrun</command>
+      <command>sky launch deployment/skypilot/train_sam3_8gb.yaml --dryrun</command>
+    </verify_commands>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- WAVE 1: Foundation — Local SSH setup + cloud YAML correctness           -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <task id="T-01" effort="S" group="foundation">
+    <title>Document and script local GPU SSH node pool setup (RTX 2070 Super / 8 GB)</title>
+    <description>
+      SkyPilot can target the local workstation's GPU via SSH Node Pools.
+      This enables a uniform `sky launch` interface for all training, whether local
+      or cloud. Create a one-time setup script and README for registering localhost.
+
+      Key insight: SSH node pools use `sky launch` (NOT `sky jobs launch`).
+      Managed jobs (spot recovery) are for cloud VMs only. For local GPU, use
+      plain `sky launch --infra ssh/local-gpu ...`.
+
+      Note on kubectl dependency: SkyPilot SSH node pools currently require kubectl
+      on the client machine even for non-Kubernetes workflows. This is a known
+      architectural coupling in SkyPilot's SSH backend.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/compute/test_ssh_pool_config.py:
+        - test_ssh_pool_yaml_is_valid: load configs/sky/local-workstation.yaml with
+          yaml.safe_load(); assert required keys: 'hosts' (list) or 'infra'
+        - test_sky_launch_dryrun_local: run `sky launch --dryrun deployment/skypilot/train_sam3_8gb.yaml`
+          as a subprocess; assert exit code 0 (dry-run validates YAML structure)
+        - test_setup_script_executable: assert scripts/setup_sky_ssh_pool.sh is executable
+          (os.access with os.X_OK)
+        - test_train_sam3_local_sky_has_fallback: read scripts/train_sam3_local_sky.sh via
+          pathlib.Path.read_text(); use str.partition('force-direct') to verify --force-direct
+          flag exists (fallback without SkyPilot)
+        NOTE: Use pathlib.Path and str methods. No regex (CLAUDE.md Rule #16).
+      </red_phase>
+      <green_phase>
+        Create configs/sky/local-workstation.yaml:
+          # SkyPilot SSH Node Pool — Local GPU
+          local-gpu:
+            user: ${USER}
+            identity_file: ~/.ssh/id_rsa
+            hosts:
+              - localhost  # or use $(hostname -I | awk '{print $1}') — localhost support unverified in SkyPilot docs
+
+        Create scripts/setup_sky_ssh_pool.sh:
+          - Check SSH server is running (systemctl is-active ssh)
+          - If not running: print instructions (do NOT auto-enable; user must consent)
+          - Check kubectl is installed (sky ssh up dependency)
+          - Print `sky ssh up` command with explanation
+          - Print `sky show-gpus --infra ssh/local-gpu` to verify GPU detection
+          - Print `sky launch deployment/skypilot/train_sam3_8gb.yaml --dryrun` to test
+
+        Update deployment/skypilot/train_sam3_8gb.yaml to reference configs/sky/ pattern.
+      </green_phase>
+      <acceptance_criteria>
+        - YAML configs validate (yaml.safe_load)
+        - Dry-run YAML validation passes
+        - Setup script is executable and prints actionable instructions
+        - train_sam3_local_sky.sh has --force-direct fallback
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on/>
+  </task>
+
+  <task id="T-02" closes_gap="G1" effort="S" group="foundation">
+    <title>Switch /checkpoints from MOUNT to MOUNT_CACHED in all cloud SkyPilot YAMLs</title>
+    <description>
+      Gap G1: train_generic.yaml and train_hpo_sweep.yaml use `mode: MOUNT` for /checkpoints.
+      SkyPilot benchmarks show MOUNT_CACHED delivers 9.6x faster checkpoint writes by
+      writing to local NVMe first, then async-syncing to S3 via rclone VFS cache.
+      (Benchmark context: Llama 7B, 8×A100, 30-min intervals. Gain for smaller MONAI
+      checkpoints (~200 MB–2 GB) will be lower but async-write still helps under spot.)
+      Critical for cloud spot training where checkpoint frequency mitigates preemption loss.
+
+      Also add `disk_tier: best` to request NVMe storage (required for MOUNT_CACHED perf).
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/compute/test_sky_yaml_correctness.py:
+        - test_cloud_yamls_use_mount_cached: load each cloud YAML with yaml.safe_load();
+          for each file_mounts entry with 'name' (= S3 bucket mounts), assert mode == 'MOUNT_CACHED'
+          Files to check: train_generic.yaml, train_hpo_sweep.yaml
+        - test_cloud_yamls_have_disk_tier_best: load YAMLs; assert resources.disk_tier == 'best'
+        - test_local_yaml_has_no_s3_mount: load train_sam3_8gb.yaml; assert no 'store: s3' entry
+          (local YAML uses local paths, not S3 mounts)
+        NOTE: Use yaml.safe_load() for all YAML parsing. No regex.
+      </red_phase>
+      <green_phase>
+        Update deployment/skypilot/train_generic.yaml:
+          /checkpoints:
+            name: minivess-checkpoints
+            store: s3
+            mode: MOUNT_CACHED   # was MOUNT
+          resources:
+            disk_tier: best      # add NVMe for cache
+
+        Update deployment/skypilot/train_hpo_sweep.yaml: same change
+        Update deployment/skypilot/finetune_vesselfm.yaml: already has MOUNT_CACHED (verify)
+
+        Add comment in each YAML explaining the benchmark: "9.6x faster vs plain MOUNT"
+      </green_phase>
+      <acceptance_criteria>
+        - All cloud YAMLs use mode: MOUNT_CACHED for checkpoint buckets
+        - disk_tier: best present in resources
+        - Tests pass
+        - yaml.safe_load validates all modified files
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on/>
+  </task>
+
+  <task id="T-03" closes_gap="G2" effort="M" group="foundation">
+    <title>Fix MLFLOW_TRACKING_URI in cloud SkyPilot YAMLs — placeholder for public URI</title>
+    <description>
+      Gap G2: train_generic.yaml hardcodes MLFLOW_TRACKING_URI: http://mlflow:5000 which
+      is a Docker Compose internal hostname — unreachable from AWS/RunPod/Lambda instances.
+      For cloud training, the tracking URI must be publicly routable.
+
+      Options (in order of simplicity):
+      A) ${MLFLOW_TRACKING_URI} passthrough — inject at launch time
+      B) S3 artifact store — s3://minivess-mlruns/
+      C) Tunnel — documented in skypilot-advanced-plan.md section 6
+
+      This task implements Option A (simplest, covers all cases) and documents B and C.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/compute/test_sky_yaml_correctness.py (extend):
+        - test_cloud_yamls_use_env_placeholder_for_mlflow: load each cloud YAML with yaml.safe_load();
+          assert envs.MLFLOW_TRACKING_URI uses ${...} substitution syntax
+          (not hardcoded http://mlflow:5000)
+          Use str.startswith('${') check on the YAML value, not regex.
+        - test_local_yaml_uses_file_backend: load train_sam3_8gb.yaml;
+          verify MLFLOW_TRACKING_URI contains 'file://' or starts with 'file:'
+          (local file backend, no network required for local SSH runs)
+        - test_sky_launch_passes_mlflow_uri: verify scripts/train_sam3_local_sky.sh contains
+          'MLFLOW_TRACKING_URI' passed via --env to sky launch
+          (use pathlib.Path.read_text() + str.find() — no regex)
+      </red_phase>
+      <green_phase>
+        Update deployment/skypilot/train_generic.yaml envs section:
+          MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+          # IMPORTANT: Set MLFLOW_TRACKING_URI before launching:
+          #   export MLFLOW_TRACKING_URI=http://YOUR_PUBLIC_IP:5000
+          #   OR: export MLFLOW_TRACKING_URI=s3://minivess-mlruns/
+          # See docs/planning/skypilot-advanced-plan.md section 6 for all options.
+
+        Update train_hpo_sweep.yaml: same change
+        Update finetune_vesselfm.yaml: already has ${MLFLOW_TRACKING_URI:-...} (verify)
+
+        Create docs/ops/mlflow-remote-tracking.md with the three setup options.
+      </green_phase>
+      <acceptance_criteria>
+        - Cloud YAMLs use ${MLFLOW_TRACKING_URI:-...} substitution (not hardcoded URI)
+        - Local YAML uses file:// backend by default
+        - Docs file created
+        - Tests pass
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on/>
+  </task>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- WAVE 2: Infrastructure fixes — Python SDK improvements                  -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <task id="T-04" closes_gap="G3" effort="S" group="infrastructure">
+    <title>Replace time.sleep polling in wait_sky_job with sky.stream_and_get()</title>
+    <description>
+      Gap G3: prefect_sky_tasks.py wait_sky_job() uses time.sleep(30) polling to check
+      job status, losing all log streaming. SkyPilot's sky.stream_and_get() blocks until
+      the job completes and streams logs to stdout — the Prefect task then logs them.
+
+      Also: SkyPilotLauncher.launch_training_job() calls sky.jobs.launch() which returns
+      a request_id (not a job_id). sky.stream_and_get(request_id) blocks until done.
+      The wait_sky_job() polling task becomes unnecessary after this change.
+
+      Requires SkyPilot 0.10+ (client-server SDK where most API calls are async and
+      return request_ids). In older 0.9.x, sky.jobs.launch() was synchronous.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/compute/test_prefect_sky_tasks.py:
+        - test_launch_sky_training_calls_stream_and_get: mock sky.jobs.launch() and
+          sky.stream_and_get(); call launch_sky_training({...}); assert stream_and_get called
+          with the request_id returned by launch()
+        - test_wait_sky_job_deprecated: import wait_sky_job; assert it has a deprecation
+          warning in its docstring or raises DeprecationWarning
+        - test_launch_sky_training_dry_run: call launch_sky_training({...}, dry_run=True);
+          assert sky.jobs.launch NOT called; assert returned status == "dry_run"
+      </red_phase>
+      <green_phase>
+        Update src/minivess/compute/prefect_sky_tasks.py:
+          @task(name="launch-sky-training")
+          def launch_sky_training(config, *, dry_run=False) -> dict:
+              from minivess.compute.skypilot_launcher import SkyPilotLauncher
+              launcher = SkyPilotLauncher()
+              result = launcher.launch_training_job(config, dry_run=dry_run)
+              # sky.stream_and_get() already called inside launch_training_job
+              return result
+
+        Update SkyPilotLauncher.launch_training_job() in skypilot_launcher.py:
+          request_id = sky.jobs.launch(task, name=...)
+          sky.stream_and_get(request_id)  # blocks; streams logs
+          return {"status": "completed", "request_id": str(request_id), ...}
+
+        Deprecate wait_sky_job() — add DeprecationWarning, keep for backward compat.
+      </green_phase>
+      <acceptance_criteria>
+        - launch_sky_training calls sky.stream_and_get (verified by mock)
+        - wait_sky_job issues DeprecationWarning
+        - dry_run still works without calling sky
+        - Tests pass, mypy clean
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-01</depends_on>
+  </task>
+
+  <task id="T-05" effort="S" group="infrastructure">
+    <title>Create cloud training YAML for all model families (single-GPU cloud variant)</title>
+    <description>
+      train_generic.yaml is parameterized via MODEL_FAMILY env var but defaults to dynunet.
+      Create a unified deployment/skypilot/train_cloud_all.yaml that makes the model-family
+      param explicit and supports all families (dynunet, mamba variants, sam3 cloud variants).
+      SAM3 cloud variants need 16+ GB (sam3_hybrid full, sam3_topolora with full encoder).
+      This YAML handles cloud spot (managed jobs); local 8GB uses train_sam3_8gb.yaml.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Extend tests/unit/compute/test_sky_yaml_correctness.py:
+        - test_train_cloud_all_yaml_valid: load deployment/skypilot/train_cloud_all.yaml
+          with yaml.safe_load(); assert keys: name, resources, envs, setup, run
+        - test_train_cloud_all_has_model_family_env: verify envs.MODEL_FAMILY exists
+        - test_train_cloud_all_failover_includes_runpod: verify resources.any_of list
+          contains at least one entry with cloud: runpod
+        - test_yaml_dryrun: subprocess `sky jobs launch deployment/skypilot/train_cloud_all.yaml --dryrun`
+          exits 0
+      </red_phase>
+      <green_phase>
+        Create deployment/skypilot/train_cloud_all.yaml:
+          name: mnvss-train-cloud
+
+          resources:
+            disk_size: 150
+            disk_tier: best
+            use_spot: true
+            any_of:
+              - cloud: runpod
+                accelerators: {A100:1}     # cheapest, spot only
+              - cloud: lambda
+                accelerators: {A100:1}     # reliable, no spot
+              - cloud: aws
+                accelerators: {A100:1}
+              - cloud: gcp
+                accelerators: {A100:1}
+
+          file_mounts:
+            /data:
+              source: s3://minivess-data/raw
+              mode: COPY
+            /checkpoints:
+              name: minivess-checkpoints
+              store: s3
+              mode: MOUNT_CACHED
+
+          envs:
+            MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+            MODEL_FAMILY: ${MODEL_FAMILY:-dynunet}
+            LOSS_NAME: ${LOSS_NAME:-cbdice_cldice}
+            COMPUTE: ${COMPUTE:-gpu_low}
+            NUM_FOLDS: ${NUM_FOLDS:-3}
+            MAX_EPOCHS: ${MAX_EPOCHS:-100}
+            CHECKPOINT_INTERVAL_EPOCHS: ${CHECKPOINT_INTERVAL_EPOCHS:-5}
+            PREFECT_API_URL: ${PREFECT_API_URL:-}
+            HF_TOKEN: ${HF_TOKEN:-}
+
+          [same setup/run as train_generic.yaml, but using ${MODEL_FAMILY}]
+      </green_phase>
+      <acceptance_criteria>
+        - YAML validates with yaml.safe_load()
+        - Dry-run exits 0
+        - All model families can be passed via --env MODEL_FAMILY=
+        - Tests pass
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-02, T-03</depends_on>
+  </task>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- WAVE 3: All training scripts route through SkyPilot                     -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <task id="T-06" effort="M" group="routing">
+    <title>Update all training .sh scripts to dispatch via SkyPilot (with direct fallback)</title>
+    <description>
+      Currently scripts/train_*.sh call `uv run python scripts/run_training_flow.py`
+      directly. The target architecture routes ALL training through SkyPilot with a direct
+      fallback for environments without SkyPilot credentials:
+
+      Priority dispatch logic (same pattern as train_sam3_local_sky.sh):
+        1. If SkyPilot installed + cloud credentials (sky check passes for any cloud):
+             sky jobs launch deployment/skypilot/train_cloud_all.yaml --env MODEL_FAMILY=X
+        2. Else if SkyPilot SSH pool configured (sky check ssh passes):
+             sky launch --infra ssh/local-gpu deployment/skypilot/train_sam3_8gb.yaml
+        3. Else fallback:
+             uv run python scripts/run_training_flow.py --model-family X
+
+      Scripts to update:
+        - train_all_best.sh         (3 families)
+        - train_dynunet.sh          (1 family)
+        - train_mamba_variants.sh   (comma_mamba, ulike_mamba)
+        - train_alternative_variants.sh  (vesselfm, comma_mamba, ulike_mamba)
+        - train_sam3_all_variants.sh     (sam3_vanilla, sam3_topolora, sam3_hybrid)
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/compute/test_training_scripts.py:
+        - test_all_training_scripts_have_sky_dispatch: for each train_*.sh, use
+          pathlib.Path.read_text() + str.find() to verify it contains 'sky launch' OR
+          'sky jobs launch' OR 'sky check' (routing logic)
+        - test_all_training_scripts_have_fallback: for each script, verify
+          'run_training_flow.py' still appears (fallback path)
+        - test_scripts_are_executable: for each script, os.access(path, os.X_OK)
+        NOTE: Use pathlib.Path and str methods. No regex (CLAUDE.md Rule #16).
+      </red_phase>
+      <green_phase>
+        Extract shared _dispatch_training() shell function into a sourced helper
+        scripts/_sky_dispatch.sh:
+
+          # Source this file in training scripts to get _dispatch_training()
+          _sky_dispatch() {
+            local model_family="$1"
+            local loss_name="${2:-cbdice_cldice}"
+            local max_epochs="${3:-100}"
+
+            if command -v sky &amp;>/dev/null; then
+              if sky check 2>/dev/null | grep -qi "enabled"; then
+                # Cloud credentials available: use managed spot jobs
+                sky jobs launch "${PROJECT_ROOT}/deployment/skypilot/train_cloud_all.yaml" \
+                  --name "mnvss-${model_family}-$$" \
+                  --env "MODEL_FAMILY=${model_family}" \
+                  --env "LOSS_NAME=${loss_name}" \
+                  --env "MAX_EPOCHS=${max_epochs}" \
+                  --env "MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-}" \
+                  --down --yes
+                return $?
+              elif sky check 2>/dev/null | grep -qi "ssh"; then
+                # SSH node pool only: local GPU
+                sky launch "${PROJECT_ROOT}/deployment/skypilot/train_cloud_all.yaml" \
+                  --infra "ssh/${SKY_POOL:-local-gpu}" \
+                  --name "mnvss-${model_family}-$$" \
+                  --env "MODEL_FAMILY=${model_family}" --env "LOSS_NAME=${loss_name}" \
+                  --env "MAX_EPOCHS=${max_epochs}" --down --yes
+                return $?
+              fi
+            fi
+            # Fallback: direct execution
+            uv run python "${PROJECT_ROOT}/scripts/run_training_flow.py" \
+              --model-family "${model_family}" \
+              --loss-name "${loss_name}" \
+              --max-epochs "${max_epochs}" \
+              --trigger-source "$(basename "$0")"
+          }
+
+        Update each train_*.sh to source _sky_dispatch.sh and call _dispatch_training().
+      </green_phase>
+      <acceptance_criteria>
+        - All training scripts contain SkyPilot dispatch logic
+        - All scripts retain direct fallback
+        - Tests pass
+        - Scripts remain executable
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-05, T-04</depends_on>
+  </task>
+
+  <task id="T-07" effort="S" group="routing">
+    <title>Add per-model-family VRAM routing: auto-select local vs cloud YAML</title>
+    <description>
+      Different model families have different VRAM requirements. The dispatch logic
+      should automatically select the appropriate YAML:
+        - 8GB models (dynunet, mamba, sam3_vanilla, sam3_topolora): try local SSH first
+        - Marginal models (sam3_hybrid at ~7.5GB): try local with warning
+        - Cloud-only models (vesselfm ~10GB, sam3 full fine-tune 16GB+): cloud only
+
+      This avoids OOM errors and provides helpful guidance when local GPU is insufficient.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/compute/test_vram_routing.py:
+        - test_dynunet_routed_to_local_or_cloud: get_target_yaml("dynunet") returns either
+          train_sam3_8gb.yaml (local) or train_cloud_all.yaml (cloud) — both are valid
+        - test_vesselfm_routed_to_cloud_only: get_target_yaml("vesselfm") never returns
+          the local 8GB YAML — it requires cloud GPU
+        - test_sam3_hybrid_emits_warning: get_target_yaml("sam3_hybrid") for local target
+          returns local YAML but logs a warning about 7.5 GB usage
+      </red_phase>
+      <green_phase>
+        Create src/minivess/compute/vram_routing.py:
+          - VRAM_BUDGET_GB: dict[str, float] mapping model_family to estimated VRAM
+          - LOCAL_GPU_VRAM_GB = 8.0 (RTX 2070 Super)
+          - LOCAL_HEADROOM_GB = 0.5  (SkyPilot runtime + OS)
+          - get_target_yaml(model_family, infra="auto") -> tuple[str, str]:
+              Returns (yaml_path, infra_hint) based on VRAM budget vs local limit.
+              infra_hint is "ssh/local-gpu", "cloud_spot", or "cloud_only"
+          - Integrate into _sky_dispatch.sh via a uv run python call
+      </green_phase>
+      <acceptance_criteria>
+        - get_target_yaml() returns correct YAML for each model family
+        - VesselFM and SAM3 full fine-tune always routed to cloud
+        - Warning logged for marginal (sam3_hybrid) on local
+        - Tests pass, mypy clean
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-06</depends_on>
+  </task>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- WAVE 4: Prefect + Docker inside SkyPilot (target architecture)          -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <task id="T-08" effort="M" group="docker_integration">
+    <title>Add Docker-in-SkyPilot mode: run Prefect training_flow() inside Docker on cloud VM</title>
+    <description>
+      Target architecture: SkyPilot provisions a cloud VM, then runs the Prefect training
+      flow inside a Docker container (minivess-train:latest) for full dependency isolation.
+
+      Benefits:
+      - Exact same environment as local Docker Compose development
+      - No uv sync on remote (just docker pull)
+      - Prefect flow runs inside container, MLflow writes to /app/mlruns (mounted)
+
+      The run: block in train_cloud_all.yaml gets a Docker wrapper:
+        docker run --gpus all \
+          -e MLFLOW_TRACKING_URI="${MLFLOW_TRACKING_URI}" \
+          -v /checkpoints:/app/checkpoints \
+          -v /data:/app/data:ro \
+          minivess-train:${IMAGE_TAG:-latest} \
+          uv run python scripts/run_training_flow.py --model-family "${MODEL_FAMILY}"
+
+      This requires the image to be accessible from cloud instances (Docker Hub or GHCR).
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/compute/test_docker_in_sky.py:
+        - test_train_cloud_docker_yaml_valid: load deployment/skypilot/train_cloud_docker.yaml
+          with yaml.safe_load(); assert 'docker run' in run section
+        - test_docker_run_has_gpu_flag: use str.find('--gpus all') on run block content
+          (pathlib.Path.read_text() + yaml.safe_load() + str.find())
+        - test_docker_image_tag_is_parameterized: verify IMAGE_TAG appears in envs section
+          (use str.find() on the YAML content — not hardcoded 'latest')
+        - test_docker_mounts_match_file_mounts: /data and /checkpoints in docker run -v
+          args correspond to file_mounts in the YAML (cross-check)
+      </red_phase>
+      <green_phase>
+        Create deployment/skypilot/train_cloud_docker.yaml:
+          - Same resources/file_mounts as train_cloud_all.yaml
+          - envs adds: IMAGE_TAG: ${IMAGE_TAG:-latest}
+          - setup installs Docker if not present (apt-get docker.io on Ubuntu cloud VMs)
+          - setup pulls image: docker pull ghcr.io/minivess-mlops/minivess-train:${IMAGE_TAG}
+          - run uses docker run --gpus all with volume mounts from file_mounts paths
+
+        Document in YAML: Docker Hub image must be pushed before launching.
+        Add build+push step to GitHub Actions CI (separate PR).
+      </green_phase>
+      <acceptance_criteria>
+        - train_cloud_docker.yaml validates and dry-runs successfully
+        - Docker run command includes --gpus all and correct volume mounts
+        - IMAGE_TAG is parameterizable
+        - Tests pass
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-05</depends_on>
+  </task>
+
+  <task id="T-09" effort="S" group="docker_integration">
+    <title>Add Docker image push step to CI for SkyPilot cloud pulls</title>
+    <description>
+      For SkyPilot cloud VMs to pull minivess-train:latest, the image must be in a
+      public registry (Docker Hub or GHCR). Add a GitHub Actions step that builds and
+      pushes Dockerfile.train to GHCR on main branch merges.
+
+      This is a prerequisite for T-08 to work on cloud instances.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/compute/test_ci_docker_push.py:
+        - test_docker_push_workflow_exists: assert pathlib.Path('.github/workflows/docker-push.yml').exists()
+        - test_docker_push_targets_train_image: load workflow YAML; use yaml.safe_load();
+          verify Dockerfile.train is referenced in the build steps
+        - test_docker_push_uses_ghcr: verify ghcr.io/minivess-mlops appears in the workflow
+          (str.find() on yaml content)
+      </red_phase>
+      <green_phase>
+        Create .github/workflows/docker-push.yml:
+          name: Build and Push Training Docker Image
+          on:
+            push:
+              branches: [main]
+              paths:
+                - 'deployment/docker/Dockerfile.train'
+                - 'pyproject.toml'
+                - 'uv.lock'
+          jobs:
+            push:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - uses: docker/login-action@v3
+                  with:
+                    registry: ghcr.io
+                    username: ${{ github.actor }}
+                    password: ${{ secrets.GITHUB_TOKEN }}
+                - uses: docker/build-push-action@v5
+                  with:
+                    context: .
+                    file: deployment/docker/Dockerfile.train
+                    push: true
+                    tags: ghcr.io/minivess-mlops/minivess-train:latest
+      </green_phase>
+      <acceptance_criteria>
+        - Workflow file exists and validates
+        - Builds Dockerfile.train and pushes to GHCR
+        - Tests pass
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-08</depends_on>
+  </task>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- WAVE 5: SkyServe stub (P2) + integration verification                   -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <task id="T-10" priority="P2" closes="#420" effort="S" group="serve">
+    <title>Create SkyServe YAML stub for ONNX/BentoML inference (P2 — closes #420)</title>
+    <description>
+      P2 issue #420: SkyServe deploys inference replicas as auto-scaled multi-cloud HTTP
+      services. Create a stub YAML for the BentoML/ONNX Runtime inference service.
+
+      Key design decisions:
+      - min_replicas: 0 for scale-to-zero (idle periods between experiments)
+      - readiness_probe: /healthz (BentoML) or /v2/health/ready (Triton/ONNX Server)
+      - target_qps_per_replica: 1.0 (conservative — 3D segmentation is slow)
+      - accelerators: {L4:1, A10g:1, RTX-3090:1} — cheapest GPUs with enough VRAM
+
+      NOTE: SkyServe support for SSH node pool backends is poorly documented. Official docs
+      say "services" run on SSH pools, but practical limitations (load balancer, public
+      endpoints) may apply. Use cloud VMs or Kubernetes for production SkyServe deployments.
+      The local RTX 2070 Super cannot serve as a SkyServe replica.
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/unit/compute/test_sky_serve_yaml.py:
+        - test_serve_onnx_yaml_valid: load deployment/skypilot/serve_onnx.yaml with
+          yaml.safe_load(); assert required keys: service, resources, run
+        - test_serve_has_scale_to_zero: load YAML; assert service.replica_policy.min_replicas == 0
+        - test_serve_has_readiness_probe: assert service.readiness_probe exists and is non-empty
+        - test_serve_has_port: assert resources.ports is defined (HTTP port for inference)
+        - test_serve_dry_run: subprocess 'sky serve up deployment/skypilot/serve_onnx.yaml
+          --dry-run'; assert exit 0
+      </red_phase>
+      <green_phase>
+        Create deployment/skypilot/serve_onnx.yaml:
+          service:
+            readiness_probe: /healthz
+            replica_policy:
+              min_replicas: 0
+              max_replicas: 4
+              target_qps_per_replica: 1.0
+              upscale_delay_seconds: 60
+              downscale_delay_seconds: 600
+
+          resources:
+            ports: 8080
+            accelerators: {L4:1, A10g:1, RTX-3090:1}
+            disk_size: 50
+
+          setup: |
+            pip install bentoml onnxruntime-gpu huggingface_hub
+            # Pull champion ONNX model from MLflow registry
+            python -c "from minivess.serving.bento_model_import import pull_champion; pull_champion()"
+
+          run: |
+            bentoml serve minivess_service:latest --port 8080
+
+        Create deployment/skypilot/serve_bentoml.yaml: variant with BentoML serve
+
+        Add scripts/serve_champion_sky.sh:
+          sky serve up deployment/skypilot/serve_onnx.yaml -n minivess-serve
+      </green_phase>
+      <acceptance_criteria>
+        - YAML validates and dry-run exits 0
+        - scale-to-zero (min_replicas: 0) configured
+        - readiness_probe set
+        - Tests pass
+        - P2 issue #420 closed (P0 milestone)
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-05</depends_on>
+  </task>
+
+  <task id="T-11" effort="M" group="verification">
+    <title>Integration test: end-to-end SkyPilot dispatch for all model families</title>
+    <description>
+      Verify the complete routing logic works for all model families (dry-run mode):
+      - Dry-run tests that SkyPilot YAMLs are valid and sky commands would succeed
+      - Unit tests that vram_routing.py routes correctly per family
+      - Smoke test that _sky_dispatch.sh fallback works without credentials
+    </description>
+    <tdd_spec>
+      <red_phase>
+        Write tests/integration/compute/test_sky_dispatch_integration.py:
+        - test_dry_run_train_generic: subprocess sky jobs launch train_generic.yaml --dryrun; exit 0
+        - test_dry_run_train_cloud_all: subprocess sky jobs launch train_cloud_all.yaml --dryrun; exit 0
+        - test_dry_run_train_sam3_8gb: subprocess sky launch train_sam3_8gb.yaml --dryrun; exit 0
+        - test_dry_run_finetune_vesselfm: subprocess sky jobs launch finetune_vesselfm.yaml --dryrun; exit 0
+        - test_dry_run_serve_onnx: subprocess sky serve up serve_onnx.yaml --dry-run; exit 0
+        - test_vram_routing_all_families: for each ModelFamily enum value, get_target_yaml()
+          returns a valid file path (pathlib.Path exists check)
+        - test_dispatch_fallback_without_sky: unset SKYPILOT env; set PATH to exclude sky;
+          assert _dispatch_training() falls back to run_training_flow.py call
+      </red_phase>
+      <green_phase>
+        Fix any issues found by the dry-run tests.
+        Ensure all YAML files validate against SkyPilot's schema expectations.
+        Verify fallback paths work without credentials.
+      </green_phase>
+      <acceptance_criteria>
+        - All sky --dryrun commands exit 0
+        - VRAM routing covers all ModelFamily enum values
+        - Fallback works without SkyPilot installed
+        - Integration tests pass in CI (CI has no SkyPilot credentials — tests dry-run only)
+      </acceptance_criteria>
+    </tdd_spec>
+    <depends_on>T-07, T-10</depends_on>
+  </task>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- Execution order summary                                                  -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <execution_order>
+    <wave id="1" description="Foundation — parallel, no dependencies">
+      <task_ref>T-01</task_ref>  <!-- SSH node pool setup + train_sam3_8gb.yaml docs -->
+      <task_ref>T-02</task_ref>  <!-- MOUNT → MOUNT_CACHED in cloud YAMLs -->
+      <task_ref>T-03</task_ref>  <!-- MLflow URI ${} substitution -->
+    </wave>
+
+    <wave id="2" description="Infrastructure — depends on Wave 1">
+      <task_ref>T-04</task_ref>  <!-- stream_and_get replaces polling -->
+      <task_ref>T-05</task_ref>  <!-- train_cloud_all.yaml unified YAML -->
+    </wave>
+
+    <wave id="3" description="Routing — all scripts dispatch via SkyPilot">
+      <task_ref>T-06</task_ref>  <!-- _sky_dispatch.sh + update all .sh scripts -->
+      <task_ref>T-07</task_ref>  <!-- vram_routing.py per-model-family routing -->
+    </wave>
+
+    <wave id="4" description="Docker integration — target architecture">
+      <task_ref>T-08</task_ref>  <!-- train_cloud_docker.yaml -->
+      <task_ref>T-09</task_ref>  <!-- CI Docker push workflow -->
+    </wave>
+
+    <wave id="5" description="SkyServe + verification">
+      <task_ref>T-10</task_ref>  <!-- serve_onnx.yaml stub (P2) -->
+      <task_ref>T-11</task_ref>  <!-- integration test -->
+    </wave>
+  </execution_order>
+
+  <statistics>
+    <total_tasks>11</total_tasks>
+    <effort_breakdown>
+      <s_tasks>7</s_tasks>
+      <m_tasks>4</m_tasks>
+    </effort_breakdown>
+    <gaps_closed>G1 G2 G3</gaps_closed>
+    <gaps_deferred>G4 (done in PR #403) G5 (done in finetune_vesselfm.yaml)</gaps_deferred>
+    <issues_closed>#420 (T-10)</issues_closed>
+    <new_files_created>
+      <file>configs/sky/local-workstation.yaml</file>
+      <file>scripts/setup_sky_ssh_pool.sh</file>
+      <file>scripts/_sky_dispatch.sh</file>
+      <file>deployment/skypilot/train_cloud_all.yaml</file>
+      <file>deployment/skypilot/train_cloud_docker.yaml</file>
+      <file>deployment/skypilot/serve_onnx.yaml</file>
+      <file>deployment/skypilot/serve_bentoml.yaml</file>
+      <file>scripts/serve_champion_sky.sh</file>
+      <file>src/minivess/compute/vram_routing.py</file>
+      <file>docs/ops/mlflow-remote-tracking.md</file>
+      <file>.github/workflows/docker-push.yml</file>
+    </new_files_created>
+    <test_files_to_create>
+      <file>tests/unit/compute/test_ssh_pool_config.py</file>
+      <file>tests/unit/compute/test_sky_yaml_correctness.py</file>
+      <file>tests/unit/compute/test_prefect_sky_tasks.py</file>
+      <file>tests/unit/compute/test_training_scripts.py</file>
+      <file>tests/unit/compute/test_vram_routing.py</file>
+      <file>tests/unit/compute/test_docker_in_sky.py</file>
+      <file>tests/unit/compute/test_ci_docker_push.py</file>
+      <file>tests/unit/compute/test_sky_serve_yaml.py</file>
+      <file>tests/integration/compute/test_sky_dispatch_integration.py</file>
+    </test_files_to_create>
+  </statistics>
+
+</plan>
