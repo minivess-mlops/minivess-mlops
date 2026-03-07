@@ -109,6 +109,11 @@ class ExperimentTracker:
         self.client = MlflowClient(tracking_uri=resolved_uri)
         self._run_id: str | None = None
 
+    @property
+    def run_id(self) -> str | None:
+        """Active MLflow run ID, or None when no run is open."""
+        return self._run_id
+
     @contextmanager
     def start_run(
         self,

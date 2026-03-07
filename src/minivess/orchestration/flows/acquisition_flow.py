@@ -8,6 +8,7 @@ Uses ``_prefect_compat`` decorators for graceful degradation without Prefect.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -295,9 +296,37 @@ def run_acquisition_flow(
         total_volumes,
         len(config.datasets),
     )
+
+    # --- MLflow logging ---
+    _tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+    mlflow_run_id: str | None = None
+    try:
+        import mlflow
+
+        from minivess.orchestration.flow_contract import FlowContract
+
+        mlflow.set_tracking_uri(_tracking_uri)
+        mlflow.set_experiment("minivess_acquisition")
+        with mlflow.start_run(tags={"flow_name": "acquisition"}) as active_run:
+            mlflow_run_id = active_run.info.run_id
+            mlflow.log_param("acq_n_datasets", len(config.datasets))
+            mlflow.log_param("acq_total_volumes", total_volumes)
+            for key, value in provenance.items():
+                if isinstance(value, str | int | float | bool):
+                    mlflow.log_param(key, value)
+
+        contract = FlowContract(tracking_uri=_tracking_uri)
+        contract.log_flow_completion(
+            flow_name="acquisition",
+            run_id=mlflow_run_id,
+        )
+    except Exception:
+        logger.warning("Failed to log acquisition_flow to MLflow", exc_info=True)
+
     return AcquisitionResult(
         datasets_acquired=datasets_acquired,
         total_volumes=total_volumes,
         conversion_log=conversion_log,
         provenance=provenance,
+        mlflow_run_id=mlflow_run_id,
     )

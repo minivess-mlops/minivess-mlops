@@ -32,13 +32,86 @@ See docs/planning/dynunet-evaluation-plan.xml for the full plan.
 
 from __future__ import annotations
 
+# Warning routing: BEFORE any heavy imports.
+#
+# Rule: warnings from site-packages OR frozen stdlib → DEBUG logger.
+#       warnings from our own code (minivess/, scripts/) → WARNING logger.
+#
+# Researchers only see warnings they can act on.
+# To see all warnings: set log level to DEBUG or PYTHONWARNINGS=always.
+import contextlib
+import logging as _logging
+import os
+import warnings
+
+
+@contextlib.contextmanager  # type: ignore[misc]
+def _suppress_fd2():  # type: ignore[return]
+    """Redirect OS-level stderr (fd 2) to /dev/null for the duration.
+
+    Required for ONNX Runtime: its C++ device discovery warning fires at
+    .so load time, before Python's warnings module is consulted, so the
+    only reliable suppression is at the file-descriptor level.
+    """
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    saved = os.dup(2)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    try:
+        yield
+    finally:
+        os.dup2(saved, 2)
+        os.close(saved)
+
+
+# Pre-import onnxruntime with fd 2 redirected so the C++ device-discovery
+# warning never reaches the terminal. Subsequent imports are no-ops (cached).
+with _suppress_fd2(), contextlib.suppress(ImportError):
+    import onnxruntime as _ort  # noqa: F401
+
+
+def _route_warning(
+    message: Warning | str,
+    category: type[Warning],
+    filename: str,
+    lineno: int,
+    file: object = None,
+    line: str | None = None,
+) -> None:
+    """Route third-party warnings to DEBUG; project warnings to WARNING.
+
+    "Third-party" = anything from site-packages or Python's frozen stdlib
+    (e.g. <frozen importlib._bootstrap_external>).
+    """
+    fname = str(filename)
+    is_external = "site-packages" in fname or fname.startswith("<frozen ")
+    level = _logging.DEBUG if is_external else _logging.WARNING
+    _logging.getLogger("py.warnings").log(
+        level, "%s:%d: %s: %s", filename, lineno, category.__name__, message
+    )
+
+
+warnings.showwarning = _route_warning  # type: ignore[assignment]
+
+# MONAI sliding-window: fires once per inference *window* (hundreds/epoch).
+# Even routing to DEBUG would flood debug logs — suppress entirely.
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message=".*non-tuple sequence for multidimensional indexing.*",
+)
+
 import argparse
 import gc
 import json
 import logging
-import os
 import sys
-import tempfile
+
+# Load .env early so HF_TOKEN (and other secrets) are available before
+# any model imports. Environment variables always override .env values.
+from minivess.utils.hf_auth import load_dotenv_if_present
+
+load_dotenv_if_present(".env")
 import traceback
 from datetime import UTC, datetime
 from pathlib import Path
@@ -120,6 +193,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--experiment-name", type=str, default="dynunet_loss_variation")
     parser.add_argument("--max-epochs", type=int, default=None)
     parser.add_argument("--patch-size", type=str, default=None)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Override batch size from compute profile (e.g. --batch-size 1 for COMMA Mamba)",
+    )
 
     # Monitoring args
     parser.add_argument(
@@ -202,6 +281,10 @@ def _build_configs(
         parts = [int(x) for x in args.patch_size.split("x")]
         if len(parts) == 3:
             data_config.patch_size = (parts[0], parts[1], parts[2])
+
+    if getattr(args, "batch_size", None) is not None:
+        training_config.batch_size = args.batch_size
+        logger.info("Batch size overridden to %d via --batch-size", args.batch_size)
 
     if args.debug:
         apply_debug_overrides(training_config, data_config)
@@ -415,6 +498,7 @@ def run_fold_safe(
     condition: dict[str, Any] | None = None,
     precomputed_dir: Path | None = None,
     compute: str = "auto",
+    system_monitor: Any | None = None,
 ) -> dict:
     """Train and evaluate a single fold with memory-safe cache rates.
 
@@ -579,10 +663,14 @@ def run_fold_safe(
         criterion=criterion,
         val_roi_size=data_config.patch_size,
         sw_batch_size=_sw_bs,
+        fold_label=f"f #{fold_id + 1}/{training_config.num_folds}",
+        system_monitor=system_monitor,
     )
 
-    # Create checkpoint directory
-    checkpoint_dir = Path(tempfile.mkdtemp()) / f"fold_{fold_id}"
+    # Create checkpoint directory — resolved from CHECKPOINT_DIR env var (never /tmp)
+    checkpoint_dir = (
+        Path(os.environ.get("CHECKPOINT_DIR", "/app/checkpoints")) / f"fold_{fold_id}"
+    )
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     # === Phase 1: Train ===
@@ -682,6 +770,8 @@ def run_fold_safe(
     del model
     _cleanup_memory(f"end-fold{fold_id}")
 
+    # Checkpoints persist on the mounted volume (CHECKPOINT_DIR) — no cleanup needed.
+
     return result
 
 
@@ -780,7 +870,7 @@ def run_monitored_experiment(args: argparse.Namespace) -> dict:
     monitor.start()
 
     try:
-        return _run_experiment_inner(args, checkpoint_mgr, abort_requested)
+        return _run_experiment_inner(args, checkpoint_mgr, abort_requested, monitor)
     except Exception:
         logger.exception("TRAINING FAILED WITH EXCEPTION")
         # Save crash info to checkpoint
@@ -808,6 +898,7 @@ def _run_experiment_inner(
     args: argparse.Namespace,
     checkpoint_mgr: CheckpointManager,
     abort_requested: dict,
+    monitor: SystemMonitor | None = None,
 ) -> dict:
     """Inner experiment loop with checkpoint awareness."""
     data_config, model_config, training_config = _build_configs(args)
@@ -917,6 +1008,7 @@ def _run_experiment_inner(
                     condition=getattr(args, "condition", None),
                     precomputed_dir=getattr(args, "precomputed_dir", None),
                     compute=getattr(args, "compute", "auto"),
+                    system_monitor=monitor,
                 )
                 _model_info_logged = True
                 fold_results.append(fold_result)
@@ -932,6 +1024,13 @@ def _run_experiment_inner(
             # Log training time
             _training_time = _time_mod.monotonic() - _run_start
             _mlflow.log_param("training_time_seconds", str(round(_training_time, 1)))
+
+            # T8: Upload system monitor CSV + JSONL to MLflow artifact store
+            if monitor is not None:
+                if monitor.csv_path is not None and monitor.csv_path.exists():
+                    _mlflow.log_artifact(str(monitor.csv_path), "system_monitor")
+                if monitor.jsonl_path is not None and monitor.jsonl_path.exists():
+                    _mlflow.log_artifact(str(monitor.jsonl_path), "system_monitor")
 
         all_results[loss_name] = fold_results
         all_eval_results[loss_name] = fold_eval_results
@@ -992,4 +1091,20 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
+    # Deprecation gate — direct invocation is no longer supported.
+    # Set ALLOW_STANDALONE_TRAINING=1 to bypass (e.g. in CI or migration).
+    warnings.warn(
+        "\n\n"
+        "DEPRECATED ENTRY POINT: scripts/train_monitored.py\n"
+        "This script is NOT the supported way to run training.\n"
+        "The correct entry point is:\n"
+        "  prefect deployment run 'training-flow/default' --params '{...}'\n"
+        "Or use the shell wrapper: scripts/run_training.sh <loss> <model>\n"
+        "This script will be removed in a future release.\n"
+        "Set ALLOW_STANDALONE_TRAINING=1 to suppress this warning and continue.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    if not os.environ.get("ALLOW_STANDALONE_TRAINING"):
+        sys.exit(1)
     main()

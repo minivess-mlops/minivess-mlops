@@ -254,15 +254,16 @@ class Sam3Backbone(nn.Module):
         try:
             from transformers import Sam3Model
 
+            from minivess.utils.hf_auth import get_hf_token
+
             logger.info("Loading SAM3 via HuggingFace transformers")
-            model = Sam3Model.from_pretrained(SAM3_HF_MODEL_ID)
-            # Extract perception encoder from HF model
+            token = get_hf_token()
+            model = Sam3Model.from_pretrained(SAM3_HF_MODEL_ID, token=token)
+            # The HF vision_encoder already integrates ViT backbone + FPN neck
+            # (confirmed by LoRA targeting backbone.layers.* and neck.fpn_layers.*).
+            # Use Identity as the separate neck — FPN is already inside the encoder.
             hf_encoder: nn.Module = model.vision_encoder
-            neck_attr = getattr(model, "neck", None)
-            hf_neck: nn.Module = (
-                neck_attr if isinstance(neck_attr, nn.Module) else _StubFPNNeck()
-            )
-            return hf_encoder, hf_neck
+            return hf_encoder, nn.Identity()
         except ImportError:
             pass
 
@@ -301,7 +302,7 @@ class Sam3Backbone(nn.Module):
         return (x - mean) / std
 
     def extract_features(self, x: Tensor) -> Tensor:
-        """Extract ViT backbone features (1024-dim).
+        """Extract ViT backbone features (1024-dim, or FPN-dim for HF path).
 
         Parameters
         ----------
@@ -310,14 +311,29 @@ class Sam3Backbone(nn.Module):
 
         Returns
         -------
-        Feature tensor of shape (B, 1024, H_feat, W_feat).
+        Feature tensor of shape (B, embed_dim, H_feat, W_feat).
+        For the HF path the encoder includes the FPN neck, so the returned
+        tensor is already at FPN dimension (256) rather than ViT dimension (1024).
         """
         x = self._preprocess(x)
         if self._frozen:
             with torch.no_grad():
-                result: Tensor = self.encoder(x)
-                return result
-        result = self.encoder(x)
+                out = self.encoder(x)
+        else:
+            out = self.encoder(x)
+
+        # HF Sam3VisionEncoderOutput has two relevant attributes:
+        #   - last_hidden_state : ViT sequence output (B, N, D)  ← WRONG for us
+        #   - fpn_hidden_states : tuple of (B, 256, H, W) maps   ← CORRECT
+        # Use fpn_hidden_states[0] (highest-resolution FPN level, ~72×72 for
+        # 1008×1008 input) so downstream code receives proper spatial features.
+        if not isinstance(out, Tensor):
+            if hasattr(out, "fpn_hidden_states") and out.fpn_hidden_states:
+                out = out.fpn_hidden_states[0]
+            elif hasattr(out, "last_hidden_state"):
+                out = out.last_hidden_state
+
+        result: Tensor = out
         return result
 
     def extract_fpn_features(self, x: Tensor) -> Tensor:

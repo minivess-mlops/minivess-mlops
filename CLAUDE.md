@@ -20,7 +20,13 @@ feature, every configuration, every automation should be evaluated against this 
 5. **Dataset-agnostic patches** — Patch sizes constrained by dataset's smallest volume,
    not hardcoded. Pre-training validation ensures patches fit all volumes.
 6. **Transparent automation** — Every automatic decision is logged and overridable via YAML
-7. **Portfolio-grade code** — Every component demonstrates production ML engineering
+7. **Zero cosmetic noise** — Training output must show only actionable signals. Suppress all
+   third-party non-actionable warnings (ONNX Runtime device discovery, MONAI deprecated
+   indexing, CUDA cudart FutureWarning) at the script entry point. Users who learn to ignore
+   warnings will also ignore real ones. Entry-point suppression pattern:
+   `os.environ.setdefault("ORT_LOGGING_LEVEL", "3")` + `warnings.filterwarnings(...)`.
+   **NEVER tell the user to "just ignore" a warning.** Fix it or suppress it.
+8. **Portfolio-grade code** — Every component demonstrates production ML engineering
 8. **Task-agnostic multi-task architecture** — Multi-task learning (auxiliary heads,
    multi-task losses, per-head metrics) is a GENERIC framework configured via YAML,
    NOT hardcoded to any specific set of tasks. The platform supports arbitrary
@@ -194,6 +200,33 @@ Each of the 6 Prefect flows runs in its own Docker container:
     ALWAYS write it to disk using the Write tool. Never leave requested artifacts only
     in conversation context or plan files. If unsure whether a file was requested, re-read
     the user's original prompt.
+16. **STRICT BAN: No Regex for Structured Data (Non-Negotiable)** — `import re` and
+    regex patterns are BANNED for parsing any structured data: Python source, YAML, JSON,
+    log lines, metric names, file paths, config keys. Use proper parsers instead:
+    - Python source → `ast.parse()` + `ast.walk()`
+    - YAML/TOML/JSON → `yaml.safe_load()`, `tomllib`, `json.loads()`
+    - Log lines / metric keys → emit as JSON (JSONL), parse with `json.loads()`
+    - String splitting → `str.split()`, `str.rsplit()`, `str.partition()`
+    - File paths → `pathlib.Path` attributes (`.stem`, `.suffix`, `.parts`)
+    Claude does NOT get to self-assess whether "regex is sufficient". The ban applies
+    always. "Regex is sufficient" is itself a banned phrase.
+    See: `.claude/metalearning/2026-03-06-regex-ban.md`
+17. **NEVER Suggest Standalone Scripts as a Run Path (Non-Negotiable)** — Training,
+    evaluation, and pipeline execution MUST go through Prefect flows running in Docker.
+    `scripts/*.py` files are migration utilities or one-off tools — they are NEVER a
+    supported run path for the pipeline. There is no "dev" environment that bypasses Docker.
+    - **WRONG:** `uv run python scripts/train_monitored.py --loss dice_ce`
+    - **CORRECT:** `prefect deployment run 'train-flow/default' --params '{"loss": "dice_ce"}'`
+    - **CORRECT:** A `.sh` script that wraps a Prefect deployment invocation
+    Creating a GitHub issue to "fix this later" does NOT grant permission to keep offering
+    the shortcut. The answer to "Prefect flow not yet implemented" is to implement it.
+    See: `.claude/metalearning/2026-03-06-standalone-script-antipattern.md`
+18. **Explicit Docker Volume Mounts for ALL Artifacts (Non-Negotiable)** — Every input
+    and output in a Docker-per-flow run must be explicitly volume-mounted. `/tmp` and
+    `tempfile.mkdtemp()` are FORBIDDEN for any artifact that must survive the container.
+    Required mounts: `/data` (inputs), `/mlruns` (tracking), `/checkpoints` (model files),
+    `/logs` (monitor CSV/JSONL), `/configs` (YAML configs + splits).
+    See: `.claude/metalearning/2026-03-06-standalone-script-antipattern.md`
 
 ## What AI Must NEVER Do (Extended)
 
@@ -204,6 +237,11 @@ Each of the 6 Prefect flows runs in its own Docker container:
 - Ignore user-provided URLs (arXiv, GitHub) — always fetch them for context
 - Hardcode specific task names (SDF, centerline, etc.) into multi-task infrastructure —
   use config-driven registries. This is an MLOps platform for ALL segmentation research.
+- Use `import re` or regex patterns for parsing structured data (Python, YAML, JSON,
+  log lines, metric names). Use proper parsers. "Regex is sufficient" is banned.
+- Suggest `python scripts/*.py` as a training or pipeline run command — use Prefect flows.
+- Use `/tmp` or `tempfile.mkdtemp()` for artifacts that must survive Docker container exit.
+- Offer a standalone-script shortcut while a GitHub issue to "fix it properly" is open.
 
 ## TDD Workflow (Non-Negotiable)
 

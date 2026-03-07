@@ -16,6 +16,7 @@ Prefect is not installed.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -212,6 +213,9 @@ def deploy_flow(
     log = get_run_logger()
     log.info("Starting deploy flow for experiment %s", experiment_id)
 
+    # Ensure BentoML uses mounted volume instead of container-ephemeral ~/.bentoml
+    os.environ.setdefault("BENTOML_HOME", "/home/minivess/bentoml")
+
     # 1. Discover champions
     champions = discover_task(config, experiment_id)
 
@@ -297,4 +301,45 @@ def deploy_flow(
     )
 
     log.info("Deploy flow complete: %s", result.to_summary())
+
+    # --- FlowContract: tag run and log completion ---
+    _tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+    upstream_analysis_run_id: str = "no_upstream"
+    mlflow_run_id: str | None = None
+    try:
+        from minivess.orchestration.flow_contract import FlowContract
+
+        contract = FlowContract(tracking_uri=_tracking_uri)
+        upstream = contract.find_upstream_run(
+            experiment_name="minivess_training",
+            upstream_flow="analyze",
+        )
+        if upstream:
+            upstream_analysis_run_id = upstream["run_id"]
+    except Exception:
+        log.warning("Could not find upstream analysis run", exc_info=True)
+
+    try:
+        import mlflow
+
+        from minivess.orchestration.flow_contract import FlowContract
+
+        mlflow.set_tracking_uri(_tracking_uri)
+        mlflow.set_experiment("minivess_training")
+        with mlflow.start_run(
+            tags={
+                "flow_name": "deploy",
+                "upstream_analysis_run_id": upstream_analysis_run_id,
+            }
+        ) as active_run:
+            mlflow_run_id = active_run.info.run_id
+
+        contract = FlowContract(tracking_uri=_tracking_uri)
+        contract.log_flow_completion(
+            flow_name="deploy",
+            run_id=mlflow_run_id,
+        )
+    except Exception:
+        log.warning("Failed to log deploy_flow to MLflow", exc_info=True)
+
     return result

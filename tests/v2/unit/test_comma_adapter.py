@@ -209,6 +209,40 @@ class TestCommaConfig:
         adapter.save_checkpoint(ckpt_path)
         assert ckpt_path.exists()
 
+    def test_load_trainer_format_checkpoint(
+        self, adapter: ModelAdapter, config: ModelConfig, tmp_path: Path
+    ) -> None:
+        """load_checkpoint must handle trainer-wrapped format.
+
+        The training loop (save_metric_checkpoint) saves checkpoints as:
+            {"model_state_dict": ..., "optimizer_state_dict": ..., ...}
+        This is the format produced at the end of every fold and used when
+        evaluating the best checkpoint. load_checkpoint must unwrap it.
+        """
+        from minivess.adapters.comma import CommaAdapter
+
+        ckpt_path = tmp_path / "trainer_format.pth"
+        # Simulate what save_metric_checkpoint() produces
+        wrapped = {
+            "model_state_dict": adapter.state_dict(),
+            "optimizer_state_dict": {},
+            "scheduler_state_dict": {},
+            "checkpoint_metadata": {"epoch": 99, "val_loss": 0.1695},
+            "scaler_state_dict": None,
+        }
+        torch.save(wrapped, ckpt_path)
+
+        new_adapter = CommaAdapter(config)
+        new_adapter.load_checkpoint(ckpt_path)  # must not raise RuntimeError
+
+        adapter.eval()
+        new_adapter.eval()
+        x = torch.randn(1, 1, 32, 32, 16)
+        with torch.no_grad():
+            orig = adapter(x)
+            loaded = new_adapter(x)
+        assert torch.allclose(orig.logits, loaded.logits, atol=1e-6)
+
     def test_model_family_enum(self) -> None:
         """COMMA_MAMBA should be in ModelFamily enum."""
         assert hasattr(ModelFamily, "COMMA_MAMBA")

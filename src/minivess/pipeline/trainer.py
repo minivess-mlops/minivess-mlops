@@ -3,10 +3,17 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+# system_monitor.py is in scripts/ (not in the package).
+# We use Any to avoid a hard dependency — the monitor is duck-typed.
+# Expected interface: epoch_summary() -> dict[str, float]
+#                    get_latest_snapshot() -> ResourceSnapshot | None
+#                    gpu_status(snap) -> str
 import numpy as np
 import torch
+import yaml
 from monai.inferers import sliding_window_inference  # type: ignore[attr-defined]
 from torch.amp import GradScaler, autocast  # type: ignore[attr-defined]
 from torch.optim import SGD, AdamW
@@ -127,9 +134,13 @@ class SegmentationTrainer:
         scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
         val_roi_size: tuple[int, int, int] | None = None,
         sw_batch_size: int = 4,
+        fold_label: str = "",
+        system_monitor: Any | None = None,
     ) -> None:
         self.model = model
         self.config = config
+        self._fold_label = f"{fold_label}: " if fold_label else ""
+        self._monitor = system_monitor
         self.device = torch.device(device)
         self.model.to(self.device)
         self.tracker = tracker
@@ -421,6 +432,7 @@ class SegmentationTrainer:
         train_loader: Any,
         val_loader: Any,
         *,
+        fold_id: int = 0,
         checkpoint_dir: Path | None = None,
     ) -> dict[str, Any]:
         """Full training loop with multi-metric early stopping.
@@ -447,6 +459,10 @@ class SegmentationTrainer:
         history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
         final_epoch = 0
         ckpt_cfg = self.config.checkpoint
+        # Capture MLflow run ID from tracker (if active) for return dict
+        _active_run_id: str | None = (
+            self.tracker.run_id if self.tracker is not None else None
+        )
         epoch_start_time = time.perf_counter()
 
         # Determine if extended metrics (MetricsReloaded) are needed
@@ -487,13 +503,54 @@ class SegmentationTrainer:
 
             current_lr = self.optimizer.param_groups[0]["lr"]
             logger.info(
-                "Epoch %d/%d — train_loss: %.4f, val_loss: %.4f, lr: %.2e",
+                "%sEpoch %d/%d — train_loss: %.4f, val_loss: %.4f, lr: %.2e",
+                self._fold_label,
                 epoch + 1,
                 self.config.max_epochs,
                 train_result.loss,
                 val_result.loss,
                 current_lr,
             )
+
+            # T4/T5: GPU efficiency line + MLflow metrics (every epoch)
+            gpu_metrics: dict[str, float] = {}
+            if self._monitor is not None:
+                snap = self._monitor.get_latest_snapshot()
+                gpu_metrics = self._monitor.epoch_summary()
+                if snap is not None and snap.gpu_memory_total_mb > 0:
+                    status = self._monitor.gpu_status(snap)
+                    logger.info(
+                        "%s[GPU]  util=%d%%  bw=%d%%  temp=%dC  pwr=%.0fW"
+                        " | cpu=%.0f%% | vram=%d/%dMB  clk=%dMHz  %s",
+                        self._fold_label,
+                        snap.gpu_utilization_percent,
+                        snap.gpu_mem_bw_util_pct,
+                        snap.gpu_temperature_c,
+                        snap.gpu_power_w,
+                        snap.cpu_percent,
+                        snap.gpu_memory_used_mb,
+                        snap.gpu_memory_total_mb,
+                        snap.gpu_sm_clock_mhz,
+                        status,
+                    )
+
+            # T9: [MEM] slow resource line every 10 epochs
+            if self._monitor is not None and (epoch + 1) % 10 == 0:
+                snap = self._monitor.get_latest_snapshot()
+                if snap is not None:
+                    logger.info(
+                        "%s[MEM]  ram=%.1f/%.1fGB(%.0f%%)  swap=%.1f/%.1fGB"
+                        "  vram=%d/%dMB  rss=%.1fGB",
+                        self._fold_label,
+                        snap.ram_used_gb,
+                        snap.ram_total_gb,
+                        snap.ram_percent,
+                        snap.swap_used_gb,
+                        snap.swap_total_gb,
+                        snap.gpu_memory_used_mb,
+                        snap.gpu_memory_total_mb,
+                        snap.process_rss_gb,
+                    )
 
             # Log to MLflow / experiment tracker if present
             if self.tracker is not None:
@@ -506,6 +563,9 @@ class SegmentationTrainer:
                     epoch_log[f"train_{k}"] = v
                 for k, v in val_result.metrics.items():
                     epoch_log[f"val_{k}"] = v
+                # T5: GPU epoch summary → MLflow (prefixed with sys_gpu_)
+                for k, v in gpu_metrics.items():
+                    epoch_log[f"sys_gpu_{k}"] = v
                 self.tracker.log_epoch_metrics(epoch_log, step=epoch + 1)
 
             # Update multi-metric tracker and save per-metric best checkpoints
@@ -584,6 +644,34 @@ class SegmentationTrainer:
                 checkpoint_dir.mkdir(parents=True, exist_ok=True)
                 self._metric_history.save_json(checkpoint_dir / "metric_history.json")
 
+            # Write epoch_latest.yaml and epoch_latest.pth for spot-preemption recovery
+            if checkpoint_dir is not None:
+                checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                _primary = (
+                    self._multi_tracker.trackers[0]
+                    if self._multi_tracker.trackers
+                    else None
+                )
+                _best_val_loss = (
+                    float(_primary.best_value) if _primary is not None else float("inf")
+                )
+                _run_id: str | None = None
+                if self.tracker is not None:
+                    _run_id = getattr(self.tracker, "run_id", None)
+                _epoch_state: dict[str, object] = {
+                    "epoch": int(epoch),
+                    "fold": int(fold_id),
+                    "mlflow_run_id": _run_id,
+                    "best_val_loss": _best_val_loss,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+                epoch_latest_path = checkpoint_dir / "epoch_latest.yaml"
+                epoch_latest_path.write_text(yaml.dump(_epoch_state), encoding="utf-8")
+                torch.save(
+                    self.model.state_dict(),
+                    checkpoint_dir / "epoch_latest.pth",
+                )
+
             # Early stopping decision via MultiMetricTracker
             if self._multi_tracker.should_stop(epoch):
                 logger.info(
@@ -626,4 +714,5 @@ class SegmentationTrainer:
                 tracker.name: tracker.best_value
                 for tracker in self._multi_tracker.trackers
             },
+            "mlflow_run_id": _active_run_id,
         }

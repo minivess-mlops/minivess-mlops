@@ -39,20 +39,73 @@ def _sam3_package_available() -> bool:
     return False
 
 
+_SAM3_INSTALL_INSTRUCTIONS = """
+════════════════════════════════════════════════════════════════
+ SAM3 IS NOT INSTALLED — real pretrained weights required
+════════════════════════════════════════════════════════════════
+
+ Step 1: Request model access (Meta gated model — usually instant):
+         https://huggingface.co/facebook/sam3
+         → click "Agree and access repository"
+
+ Step 2: Authenticate your HuggingFace token:
+         uv run huggingface-cli login
+
+ Step 3a: Install via Transformers (recommended):
+          uv add "transformers>=4.50"
+          uv run python -c "from transformers import Sam3Model; print('OK')"
+
+ Step 3b: Or install from Meta's GitHub source:
+          uv add "sam3 @ git+https://github.com/facebookresearch/sam3.git"
+
+ ── For pipeline testing WITHOUT real SAM3 weights ─────────────
+ Set in your model YAML:  architecture_params.pretrained: false
+ This uses a random-weight stub. Results will be meaningless.
+════════════════════════════════════════════════════════════════
+"""
+
+
 def _auto_stub_sam3(config: ModelConfig, kwargs: dict[str, Any]) -> None:
-    """Auto-enable stub encoder when SAM3 package is unavailable or pretrained=false."""
+    """Validate SAM3 availability; raise loudly if pretrained weights are needed.
+
+    Stub mode is ONLY activated when explicitly requested:
+    - ``use_stub=True`` passed to ``build_adapter()`` (test fixtures)
+    - ``architecture_params.pretrained: false`` in the model config (deliberate baseline)
+
+    Silent fallback to a random-weight stub is NEVER acceptable when a
+    pretrained SAM3 is expected — it produces meaningless training metrics
+    while appearing to succeed.
+
+    Raises
+    ------
+    RuntimeError
+        When SAM3 package is not installed and pretrained weights are required.
+    """
     if "use_stub" in kwargs:
+        # Explicit caller request (e.g. test fixture) — honour it
         return
+
     pretrained = config.architecture_params.get("pretrained", True)
     if not pretrained:
         kwargs["use_stub"] = True
-        logger.info("SAM3 pretrained=false: using stub encoder (random weights)")
-    elif not _sam3_package_available():
-        kwargs["use_stub"] = True
-        logger.warning(
-            "SAM3 package not installed: falling back to stub encoder. "
-            "Install SAM3 for real pretrained weights."
+        logger.info(
+            "SAM3 pretrained=false: using stub encoder (random weights, deliberate)"
         )
+        return
+
+    # pretrained=True (default) — real SAM3 package required
+    if not _sam3_package_available():
+        logger.error(_SAM3_INSTALL_INSTRUCTIONS)
+        msg = (
+            "SAM3 package not installed. "
+            "See installation instructions logged above (ERROR level)."
+        )
+        raise RuntimeError(msg)
+
+    # SAM3 is available — verify HF token before triggering a download
+    from minivess.utils.hf_auth import require_hf_token
+
+    require_hf_token("facebook/sam3")
 
 
 def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
