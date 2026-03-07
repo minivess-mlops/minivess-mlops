@@ -389,6 +389,9 @@ def _parse_and_insert_eval_metric(
     # Pattern: eval_fold{i}_{base_metric} — parsed with str.partition (no regex)
     parsed = parse_eval_fold_metric(metric_name)
     if parsed is None:
+        logger.debug(
+            "Metric %r does not match eval_fold pattern — skipping", metric_name
+        )
         return
 
     fold_id, base_metric = parsed

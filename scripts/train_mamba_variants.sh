@@ -202,20 +202,19 @@ for VARIANT in "${VARIANTS[@]}"; do
     log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
     CMD=(
-        "uv" "run" "python" "scripts/train_monitored.py"
+        "uv" "run" "python" "scripts/run_training_flow.py"
         "--model-family" "${VARIANT}"
         "--max-epochs" "${EPOCHS}"
         "--compute" "${COMPUTE}"
-        "--log-dir" "${LOG_DIR}"
+        "--trigger-source" "train_mamba_variants.sh"
     )
 
     # Model-specific memory overrides for gpu_low (8 GB VRAM)
     # COMMA Mamba flattens full spatial volume to sequence → more memory intensive.
-    # Use patch=48x48x24 + batch=1 on gpu_low to stay within 7.5 GB.
-    # Z=24 matches the DynUNet pipeline convention; XY reduced from 96→48 for memory.
+    # batch-size=1 stays within 7.5 GB; compute profile handles patch-size.
     if [[ "${VARIANT}" == "comma_mamba" && "${COMPUTE}" == "gpu_low" ]]; then
-        CMD+=("--patch-size" "48x48x24" "--batch-size" "1")
-        log_info "  comma_mamba gpu_low override: patch=48x48x24 batch=1"
+        CMD+=("--batch-size" "1")
+        log_info "  comma_mamba gpu_low override: batch-size=1"
     fi
 
     if [ $DEBUG_MODE -eq 1 ]; then
@@ -227,7 +226,6 @@ for VARIANT in "${VARIANTS[@]}"; do
     fi
 
     log_info "Command: ${CMD[*]}"
-    log_info "Logging to: ${LOG_DIR}"
 
     if "${CMD[@]}"; then
         log_success "${VARIANT} completed"
