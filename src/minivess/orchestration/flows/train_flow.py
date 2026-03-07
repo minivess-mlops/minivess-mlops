@@ -426,7 +426,7 @@ def training_flow(
         mlflow.set_experiment(experiment_name)
         with mlflow.start_run(
             tags={
-                "flow_name": "train",
+                "flow_name": "training-flow",
                 "upstream_data_run_id": upstream_data_run_id,
                 "loss_name": loss_name,
                 "model_family": model_family,

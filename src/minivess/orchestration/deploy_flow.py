@@ -328,7 +328,7 @@ def deploy_flow(
         mlflow.set_experiment("minivess_training")
         with mlflow.start_run(
             tags={
-                "flow_name": "deploy",
+                "flow_name": "deploy-flow",
                 "upstream_analysis_run_id": upstream_analysis_run_id,
             }
         ) as active_run:

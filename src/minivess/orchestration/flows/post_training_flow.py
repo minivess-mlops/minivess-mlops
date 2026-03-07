@@ -256,7 +256,7 @@ def post_training_flow(
         mlflow.set_experiment("minivess_training")
         with mlflow.start_run(
             tags={
-                "flow_name": "post_training",
+                "flow_name": "post-training-flow",
                 "upstream_training_run_id": upstream_training_run_id,
             }
         ) as active_run:

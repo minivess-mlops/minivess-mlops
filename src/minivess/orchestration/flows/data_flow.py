@@ -445,7 +445,7 @@ def run_data_flow(
     try:
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment("minivess_data")
-        with mlflow.start_run(tags={"flow_name": "data"}) as active_run:
+        with mlflow.start_run(tags={"flow_name": "data-flow"}) as active_run:
             mlflow_run_id = active_run.info.run_id
             mlflow.log_param("data_n_volumes", len(pairs))
             mlflow.log_param("data_n_folds", n_folds)
