@@ -303,3 +303,79 @@ class TestVolumeDeclarations:
             f"Services with ZERO volume mounts (all outputs will be lost on container exit): "
             f"{zero_volume_services}"
         )
+
+
+# ---------------------------------------------------------------------------
+# T-25: Annotation service Docker infrastructure
+# ---------------------------------------------------------------------------
+
+
+class TestAnnotationDockerInfrastructure:
+    def test_annotation_service_exists(self) -> None:
+        """'annotation' service must exist in docker-compose.flows.yml."""
+        compose = _load_compose()
+        assert "annotation" in compose.get("services", {}), (
+            "'annotation' service not found in docker-compose.flows.yml. "
+            "Add it with bentoml_store, data_cache, and mlruns_data volumes."
+        )
+
+    def test_annotation_has_bentoml_mount(self) -> None:
+        """annotation service must mount bentoml_store volume."""
+        compose = _load_compose()
+        vols = _service_volume_names(compose["services"], "annotation")
+        assert "bentoml_store" in vols, (
+            f"annotation service must mount 'bentoml_store' to read BentoML models. "
+            f"Found volumes: {vols}"
+        )
+
+    def test_annotation_has_data_cache_mount(self) -> None:
+        """annotation service must mount data_cache volume for input volumes."""
+        compose = _load_compose()
+        vols = _service_volume_names(compose["services"], "annotation")
+        assert "data_cache" in vols, (
+            f"annotation service must mount 'data_cache' for input data access. "
+            f"Found volumes: {vols}"
+        )
+
+    def test_annotation_has_mlruns_mount(self) -> None:
+        """annotation service must mount mlruns_data to log annotation sessions."""
+        compose = _load_compose()
+        vols = _service_volume_names(compose["services"], "annotation")
+        assert "mlruns_data" in vols, (
+            f"annotation service must mount 'mlruns_data' for MLflow tracking. "
+            f"Found volumes: {vols}"
+        )
+
+    def test_annotation_has_bentoml_env(self) -> None:
+        """annotation service must set BENTOML_HOME environment variable."""
+        compose = _load_compose()
+        svc = compose["services"].get("annotation", {})
+        env = svc.get("environment", {})
+        # environment can be a dict or a list of KEY=VAL strings
+        if isinstance(env, dict):
+            env_keys = set(env.keys())
+        else:
+            env_keys = {str(e).split("=")[0] for e in env}
+        assert "BENTOML_HOME" in env_keys, (
+            f"annotation service must set BENTOML_HOME env var. "
+            f"Found env keys: {env_keys}"
+        )
+
+    def test_dockerfile_annotation_exists(self) -> None:
+        """deployment/docker/Dockerfile.annotation must exist."""
+        dockerfile = Path("deployment/docker/Dockerfile.annotation")
+        assert dockerfile.exists(), (
+            "deployment/docker/Dockerfile.annotation does not exist. "
+            "Create it FROM minivess-base:latest with annotation flow CMD."
+        )
+
+    def test_dockerfile_annotation_has_flow_label(self) -> None:
+        """Dockerfile.annotation must have LABEL flow=annotation."""
+        dockerfile = Path("deployment/docker/Dockerfile.annotation")
+        if not dockerfile.exists():
+            return
+        content = dockerfile.read_text(encoding="utf-8")
+        assert "flow" in content and "annotation" in content, (
+            "Dockerfile.annotation must include a LABEL identifying the flow. "
+            'Add: LABEL flow="annotation"'
+        )
