@@ -1,23 +1,39 @@
 {
-  "plan_file": "docs/planning/sam3-stub-removal.xml",
+  "plan_file": "docs/planning/prefect-mlflow-docker-debug-fixing.xml",
   "plan_version": "1.0",
   "execution_mode": "interactive",
-  "current_task_id": null,
+  "current_task_id": "DONE",
   "current_phase": "CONVERGED",
-  "inner_iteration": 0,
-  "session_task_count": 3,
-  "session_inner_iterations": 3,
+  "inner_iteration": 15,
+  "session_task_count": 15,
+  "session_inner_iterations": 15,
   "session_start": "2026-03-07T00:00:00Z",
-  "branch": "feat/sam3-remove-stub",
+  "branch": "feat/prefect-mlflow-cleanup",
+  "pr": 421,
   "tasks": {
-    "T-01": {"status": "DONE", "commit": "30ac50c"},
-    "T-02": {"status": "DONE", "commit": "867a64d"},
-    "T-03": {"status": "DONE", "commit": "680337b"}
+    "T-01": {"status": "DONE", "closes": "#413", "commit": "c2a9bde"},
+    "T-02": {"status": "DONE", "closes": "#406", "commit": "ec44685"},
+    "T-03": {"status": "DONE", "closes": "#405", "commit": "6c1e86f"},
+    "T-04": {"status": "DONE", "closes": "#409", "commit": "6c1e86f"},
+    "T-05": {"status": "DONE", "closes": "#419", "commit": "6c1e86f"},
+    "T-06": {"status": "DONE", "closes": "#416", "commit": "ec44685"},
+    "T-07": {"status": "DONE", "closes": "#410", "commit": "2beb56f"},
+    "T-08": {"status": "DONE", "closes": "#407", "commit": "8aacb99"},
+    "T-09": {"status": "DONE", "closes": "#408", "commit": "739a304"},
+    "T-10": {"status": "DONE", "closes": "#411", "commit": "6c1e86f"},
+    "T-11": {"status": "DONE", "closes": "#415", "commit": "eb14870"},
+    "T-12": {"status": "DONE", "closes": "#417", "commit": "c4bc7ad"},
+    "T-13": {"status": "DONE", "closes": "#414", "commit": "739a304"},
+    "T-14": {"status": "DONE", "closes": "#412,#418", "commit": "f6a0d27"},
+    "T-15": {"status": "DONE", "closes": "#404", "commit": "a261ac8"}
   },
   "convergence": {
     "reached": true,
-    "tasks_done": 3,
-    "tasks_total": 3,
-    "tasks_stuck": 0
+    "tasks_done": 15,
+    "tasks_total": 15,
+    "tasks_stuck": 0,
+    "tasks_deferred": 0,
+    "total_tests": 47,
+    "all_non_deferred_complete": true
   }
 }
