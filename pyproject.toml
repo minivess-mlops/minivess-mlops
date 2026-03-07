@@ -49,6 +49,8 @@ dependencies = [
     "mapie>=1.0,<2.0",
     # Serving
     "bentoml>=1.4,<2.0",
+    # Orchestration
+    "prefect>=3.4,<4.0",
     # Observability
     "opentelemetry-api>=1.29,<2.0",
     "opentelemetry-sdk>=1.29,<2.0",
