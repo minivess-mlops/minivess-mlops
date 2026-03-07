@@ -12,11 +12,10 @@
 name: Docker Build Gate
 
 on:
-  pull_request:
-    paths:
-      - 'deployment/docker/Dockerfile.*'
-      - 'pyproject.toml'
-      - 'uv.lock'
+  # DISABLED — GitHub Actions consume credits. Run Docker builds locally.
+  # Re-enable pull_request trigger when repo is submission-ready.
+  # See CLAUDE.md Rule #21.
+  workflow_dispatch:
 
 jobs:
   docker-build:

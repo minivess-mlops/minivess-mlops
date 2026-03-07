@@ -240,6 +240,27 @@ Each of the 6 Prefect flows runs in its own Docker container:
     `train_flow.py` enforces (S) at runtime. Escape hatch: `MINIVESS_ALLOW_HOST=1`
     for pytest ONLY — never in scripts or production.
     See: `docs/planning/minivess-vision-enforcement-plan.md`
+20. **Zero Tolerance for Observed Failures (Non-Negotiable)** — Every test failure,
+    import error, or warning encountered during a session MUST result in one of:
+    (a) **Fixed immediately** if root cause is clear and fix is < 5 minutes
+    (b) **GitHub issue created** with root cause, affected files, and priority label
+    (c) **Explicitly reported to user** with recommendation
+    "Pre-existing" is NOT a valid classification. "Not related to current changes"
+    is NOT an excuse to move on. "Separate issue" without actually creating the
+    issue within the same response is a lie. The phrase "not related to current
+    changes" is BANNED — every failure in this repo was co-authored by Claude Code
+    and is therefore Claude Code's responsibility.
+    See: `.claude/metalearning/2026-03-07-silent-existing-failures.md`
+21. **GitHub Actions CI EXPLICITLY DISABLED (Non-Negotiable)** — The user has
+    explicitly forbidden automatic GitHub Actions CI. Actions consume credits.
+    ALL CI jobs in `ci-v2.yml` are commented out. ALL workflows use
+    `workflow_dispatch` only (manual trigger). **NEVER:**
+    - Uncomment CI jobs in `.github/workflows/ci-v2.yml`
+    - Add `on: push` or `on: pull_request` triggers to ANY workflow
+    - Create new workflows with automatic triggers
+    - Re-enable the Docker build gate's `pull_request` trigger
+    All validation runs LOCALLY via pre-commit hooks and
+    `scripts/pr_readiness_check.sh`. Only the user can lift this ban.
 
 ## What AI Must NEVER Do (Extended)
 
@@ -255,6 +276,12 @@ Each of the 6 Prefect flows runs in its own Docker container:
 - Suggest `python scripts/*.py` as a training or pipeline run command — use Prefect flows.
 - Use `/tmp` or `tempfile.mkdtemp()` for artifacts that must survive Docker container exit.
 - Offer a standalone-script shortcut while a GitHub issue to "fix it properly" is open.
+- Dismiss test failures as "pre-existing" or "not related to current changes" without
+  creating a GitHub issue — every observed failure needs immediate action.
+- Say "separate issue" without creating the issue in the same response.
+- Uncomment, re-enable, or add ANY automatic GitHub Actions trigger — CI jobs are
+  EXPLICITLY DISABLED by the user. Actions consume credits. Only the user can lift this ban.
+  ALL validation runs locally. This is not a suggestion — it is an absolute prohibition.
 
 ## TDD Workflow (Non-Negotiable)
 

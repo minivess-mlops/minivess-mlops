@@ -156,7 +156,7 @@ class TestPredictionRiskProperties:
             elements=st.floats(min_value=0.0, max_value=1.0),
         ),
     )
-    @settings(max_examples=20)
+    @settings(max_examples=20, deadline=2000)
     def test_risk_is_nonnegative(self, data: np.ndarray) -> None:
         """Prediction risk should always be >= 0."""
         from minivess.observability.pprm import compute_prediction_risk

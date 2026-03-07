@@ -1,55 +1,72 @@
+# CI v2 — EXPLICITLY DISABLED. DO NOT RE-ENABLE.
+#
+# GitHub Actions consume credits. ALL CI is banned until the repo is
+# submission-ready. The user has EXPLICITLY forbidden automatic CI.
+# See CLAUDE.md Rule #21.
+#
+# ALL validation runs LOCALLY:
+#   - Pre-commit hooks (ruff, mypy, test collection gate)
+#   - scripts/pr_readiness_check.sh (full suite before PR creation)
+#
+# DO NOT uncomment the jobs below. DO NOT add on:push or on:pull_request.
+# Only the user can lift this ban.
+
 name: CI v2
 
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
+  workflow_dispatch:  # Manual trigger only — NEVER automatic
 
-permissions:
-  contents: read
-
-jobs:
-  lint:
-    name: Lint & Format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Install dependencies
-        run: uv sync --extra dev
-      - name: Ruff check
-        run: uv run ruff check src/minivess/ tests/v2/
-      - name: Ruff format check
-        run: uv run ruff format --check src/minivess/ tests/v2/
-
-  # typecheck: Disabled — 184 pre-existing mypy strict errors across 44 files.
-  # TODO: Fix strict-mode errors and re-enable (tracked as tech debt).
-
-  # test: Disabled — 3392 tests take ~15 min in CI. Running locally until
-  # staging/prod test split is implemented (Issue #304).
-  # Re-enable after implementing pytest markers for fast/slow test tiers.
-  #
-  # test:
-  #   name: Unit Tests
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: astral-sh/setup-uv@v5
-  #       with:
-  #         version: "latest"
-  #     - uses: actions/setup-python@v5
-  #       with:
-  #         python-version: "3.13"
-  #     - name: Install dependencies
-  #       run: uv sync --extra dev --extra eval --extra quality --extra agents --extra serving
-  #     - name: Run unit tests
-  #       run: uv run pytest tests/v2/unit/ -x -q --tb=short
-  #     - name: Run with coverage
-  #       run: uv run pytest tests/v2/unit/ --cov=src/minivess --cov-report=term-missing
+# ALL JOBS DISABLED — run locally via pre-commit and scripts/pr_readiness_check.sh
+#
+# jobs:
+#   lint:
+#     name: Lint & Format
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: astral-sh/setup-uv@v5
+#         with:
+#           version: "latest"
+#       - uses: actions/setup-python@v5
+#         with:
+#           python-version: "3.13"
+#       - name: Install dependencies
+#         run: uv sync --extra dev
+#       - name: Ruff check
+#         run: uv run ruff check src/minivess/ tests/v2/
+#       - name: Ruff format check
+#         run: uv run ruff format --check src/minivess/ tests/v2/
+#
+#   typecheck:
+#     name: Type Check
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: astral-sh/setup-uv@v5
+#         with:
+#           version: "latest"
+#       - uses: actions/setup-python@v5
+#         with:
+#           python-version: "3.13"
+#       - name: Install dependencies
+#         run: uv sync --extra dev
+#       - name: mypy
+#         run: uv run mypy src/minivess/
+#
+#   test:
+#     name: Unit Tests (fast)
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: astral-sh/setup-uv@v5
+#         with:
+#           version: "latest"
+#       - uses: actions/setup-python@v5
+#         with:
+#           python-version: "3.13"
+#       - name: Install dependencies
+#         run: uv sync --extra dev
+#       - name: Run fast unit tests
+#         run: uv run pytest tests/unit/ -x -q --tb=short
+#       - name: Test collection gate (verify all test files import)
+#         run: uv run pytest --collect-only -q tests/unit/ tests/v2/unit/
