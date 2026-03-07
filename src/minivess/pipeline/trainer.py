@@ -314,9 +314,12 @@ class SegmentationTrainer:
             images = batch["image"]
             labels = batch["label"]
 
-            with autocast(
-                device_type=self.device.type,
-                enabled=self.config.mixed_precision,
+            with (
+                torch.no_grad(),
+                autocast(
+                    device_type=self.device.type,
+                    enabled=self.config.mixed_precision,
+                ),
             ):
                 # Use sliding window inference when val_roi_size is set,
                 # needed because full 512x512xZ volumes exceed GPU memory.
@@ -474,16 +477,30 @@ class SegmentationTrainer:
         # Compute every N epochs to keep overhead manageable (~2x instead of 14x).
         extended_frequency = 5
 
+        val_interval = self.config.val_interval
+        _last_val_result: EpochResult | None = None
+
         for epoch in range(self.config.max_epochs):
             t0 = time.perf_counter()
             train_result = self.train_epoch(train_loader)
-            # Compute extended metrics every N epochs + first + last
-            compute_ext_this_epoch = needs_extended and (
-                epoch % extended_frequency == 0 or epoch == self.config.max_epochs - 1
-            )
-            val_result = self.validate_epoch(
-                val_loader, compute_extended=compute_ext_this_epoch
-            )
+
+            # Validate every val_interval epochs + first + last epoch
+            is_last = epoch == self.config.max_epochs - 1
+            run_val = epoch % val_interval == 0 or epoch == 0 or is_last
+
+            if run_val:
+                # Compute extended metrics every N epochs + first + last
+                compute_ext_this_epoch = needs_extended and (
+                    epoch % extended_frequency == 0 or is_last
+                )
+                val_result = self.validate_epoch(
+                    val_loader, compute_extended=compute_ext_this_epoch
+                )
+                _last_val_result = val_result
+            else:
+                # Reuse last validation result for logging (no new validation)
+                val_result = _last_val_result or EpochResult(loss=float("nan"))
+
             self.scheduler.step()
             epoch_wall_time = time.perf_counter() - t0
 

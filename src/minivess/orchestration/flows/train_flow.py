@@ -195,9 +195,17 @@ def train_one_fold_task(
     cache_rate: float = 0.0 if debug else 0.5
 
     # Build DataConfig (dataset_name required, cache_rate passed to loaders)
+    _is_sam3 = model_family_str.startswith("sam3_")
+    # SAM3: each z-slice goes through ViT-32L encoder at 1008×1008 — limit depth
+    # to 3 slices and batch=1 to fit on 8 GB GPUs. MONAI's RandCropByPosNegLabeld
+    # with num_samples=4 produces 4 crops, so effective batch is 4× — this is fine
+    # with small patch depth.
+    default_patch = (64, 64, 3) if _is_sam3 else (64, 64, 16)
     patch_size: tuple[int, int, int] = tuple(  # type: ignore[assignment]
-        config.get("patch_size", (64, 64, 16))
+        config.get("patch_size", default_patch)
     )
+    if _is_sam3:
+        batch_size = min(batch_size, 1)
     data_dir: Path = Path(config.get("data_dir", "data/raw"))
     num_workers: int = 0 if debug else config.get("num_workers", 4)
 
@@ -220,17 +228,27 @@ def train_one_fold_task(
     )
 
     # Build TrainingConfig
+    # SAM3: validation with sliding_window_inference is very slow (~2h per epoch
+    # on RTX 2070 Super) because each window requires 3 encoder forward passes
+    # through the 454M-param ViT-32L. Validate every 10 epochs to keep training
+    # practical (50 epochs × 3 folds ≈ 16h with val_interval=10, vs 300h without).
+    val_interval = 25 if _is_sam3 and not debug else 1
     training_config = TrainingConfig(
         max_epochs=1 if debug else max_epochs,
         num_folds=num_folds,
         batch_size=batch_size,
         warmup_epochs=0 if debug else 5,
         early_stopping_patience=1 if debug else 20,
+        val_interval=val_interval,
     )
 
-    # Extract volume dicts from the fold split
-    train_dicts: list[Any] = fold_split.get("train", [])
-    val_dicts: list[Any] = fold_split.get("val", [])
+    # Extract volume dicts from the fold split (FoldSplit dataclass or dict)
+    if hasattr(fold_split, "train"):
+        train_dicts: list[Any] = fold_split.train  # type: ignore[attr-defined]
+        val_dicts: list[Any] = fold_split.val  # type: ignore[attr-defined]
+    else:
+        train_dicts = fold_split.get("train", [])
+        val_dicts = fold_split.get("val", [])
 
     if debug:
         from minivess.config.debug import DEBUG_MAX_VOLUMES
@@ -289,7 +307,7 @@ def train_one_fold_task(
         metrics=metrics,
         criterion=criterion,
         val_roi_size=data_config.patch_size,
-        sw_batch_size=1 if _is_sam3 else 4,
+        sw_batch_size=4,
         fold_label=f"f #{fold_id + 1}/{num_folds}",
         tracker=tracker,
     )
