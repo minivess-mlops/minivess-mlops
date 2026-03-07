@@ -289,7 +289,7 @@ def export_metadata(
     return _Path(json_path)
 
 
-@flow(name="minivess-dashboard")
+@flow(name="dashboard-flow")
 def run_dashboard_flow(
     output_dir: Path | None = None,
     *,
@@ -325,7 +325,9 @@ def run_dashboard_flow(
         Root directory for all dashboard outputs.
     """
     if output_dir is None:
-        output_dir = Path(os.environ.get("DASHBOARD_OUTPUT", "/app/outputs/dashboard"))
+        output_dir = Path(
+            os.environ.get("DASHBOARD_OUTPUT_DIR", "/app/outputs/dashboard")
+        )
     logger.info("Starting everything dashboard flow → %s", output_dir)
 
     # Collect sections

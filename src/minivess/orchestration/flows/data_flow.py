@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from minivess.orchestration import flow, task
+from minivess.orchestration.mlflow_helpers import log_completion_safe
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -355,7 +356,7 @@ def _compute_dataset_hash(pairs: list[dict[str, str]]) -> str:
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
-@flow(name="minivess-data")
+@flow(name="data-flow")
 def run_data_flow(
     data_dir: Path,
     n_folds: int = 3,
@@ -442,11 +443,9 @@ def run_data_flow(
     mlflow_run_id: str | None = None
     tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
     try:
-        from minivess.orchestration.flow_contract import FlowContract
-
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment("minivess_data")
-        with mlflow.start_run(tags={"flow_name": "data"}) as active_run:
+        with mlflow.start_run(tags={"flow_name": "data-flow"}) as active_run:
             mlflow_run_id = active_run.info.run_id
             mlflow.log_param("data_n_volumes", len(pairs))
             mlflow.log_param("data_n_folds", n_folds)
@@ -454,11 +453,15 @@ def run_data_flow(
             if data_dvc_commit is not None:
                 mlflow.log_param("data_dvc_commit", data_dvc_commit)
             logger.info("MLflow data run opened: %s", mlflow_run_id)
-
-        contract = FlowContract(tracking_uri=tracking_uri)
-        contract.log_flow_completion(flow_name="data", run_id=mlflow_run_id)
     except Exception:
         logger.warning("Failed to open/finalize MLflow data run", exc_info=True)
+
+    # Log flow completion (best-effort, non-blocking)
+    log_completion_safe(
+        flow_name="data-flow",
+        tracking_uri=tracking_uri,
+        run_id=mlflow_run_id,
+    )
 
     logger.info("Data flow complete: %d pairs, quality=%s", len(pairs), quality_passed)
     return DataFlowResult(

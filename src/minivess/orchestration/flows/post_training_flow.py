@@ -17,11 +17,16 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from minivess.config.post_training_config import PostTrainingConfig
 from minivess.orchestration import flow, get_run_logger, task
+from minivess.orchestration.mlflow_helpers import (
+    find_upstream_safely,
+    log_completion_safe,
+)
 from minivess.pipeline.post_training_plugin import (
     PluginInput,
     PluginRegistry,
@@ -112,7 +117,25 @@ def _is_json_serializable(v: Any) -> bool:
     return isinstance(v, str | int | float | bool | list | dict | type(None))
 
 
-@flow(name="Post-Training Pipeline")
+@dataclass
+class PostTrainingFlowResult:
+    """Typed result returned by post_training_flow().
+
+    Replaces the plain dict[str, Any] return for type safety and
+    consistency with TrainingFlowResult and DeployResult.
+    """
+
+    flow_name: str = "post-training-flow"
+    status: str = "completed"
+    mlflow_run_id: str | None = None
+    upstream_training_run_id: str | None = None
+    swa_completed: bool = False
+    calibration_completed: bool = False
+    conformal_completed: bool = False
+    failed_operations: list[str] = field(default_factory=list)
+
+
+@flow(name="post-training-flow")
 def post_training_flow(
     *,
     config: PostTrainingConfig | None = None,
@@ -121,7 +144,8 @@ def post_training_flow(
     output_dir: Path | None = None,
     calibration_data: dict[str, Any] | None = None,
     trigger_source: str = "manual",
-) -> dict[str, Any]:
+    upstream_training_run_id: str | None = None,
+) -> PostTrainingFlowResult:
     """Post-training flow (Flow 2.5) — orchestrate post-hoc plugins.
 
     Parameters
@@ -158,12 +182,7 @@ def post_training_flow(
     enabled = config.enabled_plugin_names()
     if not enabled:
         log.info("No post-training plugins enabled")
-        return {
-            "status": "success",
-            "n_plugins_run": 0,
-            "plugin_results": {},
-            "trigger_source": trigger_source,
-        }
+        return PostTrainingFlowResult(status="completed")
 
     registry = _build_registry()
     plugin_results: dict[str, dict[str, Any]] = {}
@@ -223,20 +242,14 @@ def post_training_flow(
     tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
     mlflow_run_id: str | None = None
 
-    # Find upstream training run
-    upstream_training_run_id: str = "no_upstream"
-    try:
-        from minivess.orchestration.flow_contract import FlowContract
-
-        contract = FlowContract(tracking_uri=tracking_uri)
-        upstream = contract.find_upstream_run(
+    # Find upstream training run (explicit param takes priority over auto-discovery)
+    if upstream_training_run_id is None:
+        upstream = find_upstream_safely(
+            tracking_uri=tracking_uri,
             experiment_name="minivess_training",
             upstream_flow="train",
         )
-        if upstream:
-            upstream_training_run_id = upstream["run_id"]
-    except Exception:
-        log.warning("Could not find upstream training run", exc_info=True)
+        upstream_training_run_id = upstream["run_id"] if upstream else None
 
     try:
         import mlflow
@@ -245,7 +258,7 @@ def post_training_flow(
         mlflow.set_experiment("minivess_training")
         with mlflow.start_run(
             tags={
-                "flow_name": "post_training",
+                "flow_name": "post-training-flow",
                 "upstream_training_run_id": upstream_training_run_id,
             }
         ) as active_run:
@@ -261,21 +274,26 @@ def post_training_flow(
                             f"post_{plugin_name}_{metric_name}", float(metric_value)
                         )
 
-        from minivess.orchestration.flow_contract import FlowContract
-
-        contract = FlowContract(tracking_uri=tracking_uri)
-        contract.log_flow_completion(
-            flow_name="post_training",
-            run_id=mlflow_run_id,
-        )
     except Exception:
         log.warning("Failed to log post_training_flow to MLflow", exc_info=True)
 
-    return {
-        "status": "success",
-        "n_plugins_run": n_run,
-        "plugin_results": plugin_results,
-        "trigger_source": trigger_source,
-        "mlflow_run_id": mlflow_run_id,
-        "upstream_training_run_id": upstream_training_run_id,
-    }
+    # Log flow completion (best-effort, non-blocking)
+    log_completion_safe(
+        flow_name="post-training-flow",
+        tracking_uri=tracking_uri,
+        run_id=mlflow_run_id,
+    )
+
+    swa_ran = any(k in plugin_results for k in ("swa", "multi_swa"))
+    calibration_ran = "calibration" in plugin_results
+    conformal_ran = any(k in plugin_results for k in ("crc_conformal", "conseco_fp"))
+    return PostTrainingFlowResult(
+        status="completed",
+        mlflow_run_id=mlflow_run_id,
+        upstream_training_run_id=upstream_training_run_id,
+        swa_completed=swa_ran
+        and plugin_results.get("swa", {}).get("status") == "success",
+        calibration_completed=calibration_ran
+        and plugin_results.get("calibration", {}).get("status") == "success",
+        conformal_completed=conformal_ran,
+    )

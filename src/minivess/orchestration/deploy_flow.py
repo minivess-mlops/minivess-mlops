@@ -21,6 +21,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from minivess.orchestration._prefect_compat import flow, get_run_logger, task
+from minivess.orchestration.mlflow_helpers import (
+    find_upstream_safely,
+    log_completion_safe,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,6 +66,7 @@ class DeployResult:
     artifacts_dir: Path
     promotion_results: dict[str, bool]
     audit_trails: list[dict[str, Any]] = field(default_factory=list)
+    failed_operations: list[str] = field(default_factory=list)
 
     def to_summary(self) -> dict[str, Any]:
         """Return a summary dict for logging and reporting."""
@@ -192,17 +197,19 @@ def promote_task(
 # ---------------------------------------------------------------------------
 
 
-@flow(name="Deploy Pipeline")
+@flow(name="deploy-flow")
 def deploy_flow(
-    config: DeployConfig,
+    config: DeployConfig | None = None,
     experiment_id: str = "1",
+    upstream_analysis_run_id: str | None = None,
 ) -> DeployResult:
     """Orchestrate the full deployment pipeline.
 
     Parameters
     ----------
     config:
-        Deploy flow configuration.
+        Deploy flow configuration. If None, built from environment variables
+        via ``DeployConfig.from_env()`` (reads MLFLOW_TRACKING_URI).
     experiment_id:
         MLflow experiment ID to search for champions.
 
@@ -210,6 +217,11 @@ def deploy_flow(
     -------
     :class:`DeployResult` with all deployment artifacts and status.
     """
+    from minivess.config.deploy_config import DeployConfig as _DeployConfig
+
+    if config is None:
+        config = _DeployConfig.from_env()
+
     log = get_run_logger()
     log.info("Starting deploy flow for experiment %s", experiment_id)
 
@@ -235,6 +247,7 @@ def deploy_flow(
     onnx_dir.mkdir(parents=True, exist_ok=True)
 
     onnx_paths: dict[str, Path] = {}
+    failed_operations: list[str] = []
     for champion in champions:
         if champion.checkpoint_path is not None:
             try:
@@ -245,7 +258,10 @@ def deploy_flow(
                 )
                 onnx_paths[champion.category] = onnx_path
             except Exception:
-                log.exception("ONNX export failed for %s — skipping", champion.run_id)
+                log.exception("ONNX export failed for %s", champion.run_id)
+                failed_operations.append(
+                    f"onnx_export:{champion.category}:{champion.run_id}"
+                )
         else:
             log.warning(
                 "No checkpoint for champion %s — skipping ONNX export",
@@ -298,48 +314,42 @@ def deploy_flow(
         artifacts_dir=artifacts_dir,
         promotion_results=promotion_results,
         audit_trails=audit_trails,
+        failed_operations=failed_operations,
     )
 
     log.info("Deploy flow complete: %s", result.to_summary())
 
     # --- FlowContract: tag run and log completion ---
     _tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
-    upstream_analysis_run_id: str = "no_upstream"
-    mlflow_run_id: str | None = None
-    try:
-        from minivess.orchestration.flow_contract import FlowContract
-
-        contract = FlowContract(tracking_uri=_tracking_uri)
-        upstream = contract.find_upstream_run(
+    # Use provided upstream ID or auto-discover from MLflow
+    if upstream_analysis_run_id is None:
+        upstream = find_upstream_safely(
+            tracking_uri=_tracking_uri,
             experiment_name="minivess_training",
             upstream_flow="analyze",
         )
-        if upstream:
-            upstream_analysis_run_id = upstream["run_id"]
-    except Exception:
-        log.warning("Could not find upstream analysis run", exc_info=True)
-
+        upstream_analysis_run_id = upstream["run_id"] if upstream else None
+    mlflow_run_id: str | None = None
     try:
         import mlflow
-
-        from minivess.orchestration.flow_contract import FlowContract
 
         mlflow.set_tracking_uri(_tracking_uri)
         mlflow.set_experiment("minivess_training")
         with mlflow.start_run(
             tags={
-                "flow_name": "deploy",
+                "flow_name": "deploy-flow",
                 "upstream_analysis_run_id": upstream_analysis_run_id,
             }
         ) as active_run:
             mlflow_run_id = active_run.info.run_id
-
-        contract = FlowContract(tracking_uri=_tracking_uri)
-        contract.log_flow_completion(
-            flow_name="deploy",
-            run_id=mlflow_run_id,
-        )
     except Exception:
         log.warning("Failed to log deploy_flow to MLflow", exc_info=True)
+
+    # Log flow completion (best-effort, non-blocking)
+    log_completion_safe(
+        flow_name="deploy-flow",
+        tracking_uri=_tracking_uri,
+        run_id=mlflow_run_id,
+    )
 
     return result

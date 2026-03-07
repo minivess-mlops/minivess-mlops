@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Executable TDD Plan: Prefect/MLflow Code Review Cleanup
+  Parent issue: #404
+  Branch: feat/prefect-mlflow-cleanup
+  PR: #421
+  Executed: 2026-03-07 using self-learning-iterative-coder skill
+
+  All 15 tasks COMPLETED. This file serves as documentation.
+-->
+<plan version="1.0">
+  <title>Prefect/MLflow Code Review Findings — 15-Task Cleanup Plan</title>
+  <description>
+    Systematic cleanup of 15 recurring code quality issues found during PR #400
+    review. Groups: DRY violations (MLflow init duplicated in 6 flows),
+    inconsistent naming (env vars, flow names), and silent exception swallowing.
+  </description>
+  <branch>feat/prefect-mlflow-cleanup</branch>
+  <pr>421</pr>
+
+  <!-- WAVE 1: Foundation infrastructure -->
+  <wave id="1" name="Foundation">
+
+    <task id="T-01" status="DONE" closes="#413" commit="c2a9bde">
+      <title>Centralize EXPERIMENT_* and FLOW_NAME_* constants</title>
+      <description>
+        All MLflow experiment names and Prefect flow names are scattered as
+        magic strings across 6+ flow files. Extract to orchestration/constants.py.
+      </description>
+      <tdd_spec>
+        <red>tests/unit/orchestration/test_constants.py: verify EXPERIMENT_* and
+        FLOW_NAME_* constants exist, are non-empty strings, flow names
+        use lowercase-hyphen convention</red>
+        <green>src/minivess/orchestration/constants.py with 8 EXPERIMENT_* and
+        9 FLOW_NAME_* constants</green>
+      </tdd_spec>
+    </task>
+
+    <task id="T-02" status="DONE" closes="#406" commit="ec44685">
+      <title>Extract find_upstream_safely() and log_completion_safe() helpers</title>
+      <description>
+        FlowContract boilerplate (6-line try-except wrapper) repeated in every flow.
+        Extract to mlflow_helpers.py with proper exception isolation.
+      </description>
+      <tdd_spec>
+        <red>tests/unit/orchestration/test_mlflow_helpers.py: 6 tests covering
+        success path, exception isolation, None run_id guard</red>
+        <green>src/minivess/orchestration/mlflow_helpers.py with find_upstream_safely()
+        and log_completion_safe()</green>
+      </tdd_spec>
+    </task>
+
+  </wave>
+
+  <!-- WAVE 2: Naming consistency -->
+  <wave id="2" name="Naming">
+
+    <task id="T-06" status="DONE" closes="#416" commit="ec44685">
+      <title>Standardize @flow(name=...) to lowercase-hyphen convention</title>
+      <description>
+        Some flows use "Post-Training Pipeline", "Deploy Pipeline" etc. instead
+        of Prefect's expected lowercase-hyphen convention.
+      </description>
+      <tdd_spec>
+        <red>tests/unit/orchestration/test_flow_names.py: AST scan verifying all
+        @flow(name=...) values match FLOW_NAME_* constants</red>
+        <green>Fix flow names in post_training_flow.py, deploy_flow.py,
+        data_flow.py, dashboard_flow.py</green>
+      </tdd_spec>
+    </task>
+
+    <task id="T-08" status="DONE" closes="#407" commit="8aacb99">
+      <title>Standardize output env var naming to _OUTPUT_DIR suffix</title>
+      <description>
+        ANALYSIS_OUTPUT and DASHBOARD_OUTPUT must become ANALYSIS_OUTPUT_DIR
+        and DASHBOARD_OUTPUT_DIR for consistency with other env vars.
+      </description>
+      <tdd_spec>
+        <red>tests/unit/orchestration/test_env_var_naming.py: AST scan verifying
+        all OUTPUT env vars end with _OUTPUT_DIR</red>
+        <green>Update analysis_flow.py, dashboard_flow.py, qa_flow.py,
+        docker-compose.flows.yml</green>
+      </tdd_spec>
+    </task>
+
+    <task id="T-07" status="DONE" closes="#410" commit="2beb56f">
+      <title>Align MLflow flow_name tags with @flow decorator names</title>
+      <description>
+        flow_name tags written to mlflow.start_run() don't match @flow(name=...)
+        values. FlowContract.find_upstream_run() searches by tag.
+      </description>
+      <tdd_spec>
+        <red>tests/unit/orchestration/test_flow_name_tags.py: AST scan verifying
+        flow_name tag values match @flow decorator names</red>
+        <green>Update all 5 flow files: "train"→"training-flow", "analyze"→
+        "analysis-flow", "post_training"→"post-training-flow", "deploy"→
+        "deploy-flow", "data"→"data-flow"</green>
+      </tdd_spec>
+      <depends_on>T-06</depends_on>
+    </task>
+
+  </wave>
+
+  <!-- WAVE 3: Typed results -->
+  <wave id="3" name="TypedResults">
+
+    <task id="T-13" status="DONE" closes="#414" commit="739a304">
+      <title>Replace dict return with PostTrainingFlowResult dataclass</title>
+      <description>
+        post_training_flow() returns plain dict. Replace with typed dataclass
+        for consistency with TrainingFlowResult and DeployResult.
+      </description>
+      <tdd_spec>
+        <red>tests/unit/orchestration/test_post_training_result.py: verify return
+        type annotation and field types</red>
+        <green>Add PostTrainingFlowResult dataclass to post_training_flow.py,
+        update return statements</green>
+      </tdd_spec>
+    </task>
+
+    <task id="T-09" status="DONE" closes="#408" commit="739a304">
+      <title>Make deploy_flow config parameter optional with from_env() factory</title>
+      <description>
+        deploy_flow(config=...) requires explicit config. Add from_env() classmethod
+        to DeployConfig and make config parameter optional.
+      </description>
+      <tdd_spec>
+        <red>tests/unit/orchestration/test_deploy_flow_config.py: verify from_env()
+        raises RuntimeError when MLFLOW_TRACKING_URI missing</red>
+        <green>Add DeployConfig.from_env() classmethod; update deploy_flow signature</green>
+      </tdd_spec>
+    </task>
+
+  </wave>
+
+  <!-- WAVE 4: FlowContract deduplication -->
+  <wave id="4" name="FlowContractDedup">
+
+    <task id="T-03" status="DONE" closes="#405" commit="6c1e86f">
+      <title>Move FlowContract imports from try-except to module top-level</title>
+      <description>
+        FlowContract is imported inside try-except blocks in 5 flow files (×2 each).
+        Violates "imports at module level" convention and prevents proper IDE analysis.
+      </description>
+      <tdd_spec>
+        <red>tests/unit/orchestration/test_flow_contract_dedup.py: AST scan detecting
+        FlowContract ImportFrom nodes inside ast.Try nodes</red>
+        <green>Replace inline FlowContract usage with find_upstream_safely() and
+        log_completion_safe() in all 5 flow files</green>
+      </tdd_spec>
+      <depends_on>T-02</depends_on>
+    </task>
+
+    <task id="T-04" status="DONE" closes="#409" commit="6c1e86f">
+      <title>Adopt log_completion_safe() in all flows</title>
+      <description>
+        Replace inline log_flow_completion try-except with log_completion_safe() helper.
+        Implemented as part of T-03.
+      </description>
+      <depends_on>T-02,T-03</depends_on>
+    </task>
+
+    <task id="T-05" status="DONE" closes="#419" commit="6c1e86f">
+      <title>Eliminate adjacent try-except blocks</title>
+      <description>
+        After T-03/T-04, each flow function has at most one try-except block.
+        Implemented as part of T-03.
+      </description>
+      <depends_on>T-04</depends_on>
+    </task>
+
+    <task id="T-10" status="DONE" closes="#411" commit="6c1e86f">
+      <title>Replace sentinel "no_upstream" strings with None</title>
+      <description>
+        upstream_*_run_id: str = "no_upstream" sentinel strings violate
+        Never-Silent-Fail rule. Replace with str | None = None.
+      </description>
+      <tdd_spec>
+        <red>tests/unit/orchestration/test_no_sentinels.py: AST scan for
+        "no_upstream" string constants in flow files</red>
+        <green>Replace in train_flow.py, post_training_flow.py, analysis_flow.py,
+        deploy_flow.py</green>
+      </tdd_spec>
+      <depends_on>T-02</depends_on>
+    </task>
+
+  </wave>
+
+  <!-- WAVE 5: Error handling -->
+  <wave id="5" name="ErrorHandling">
+
+    <task id="T-11" status="DONE" closes="#415" commit="eb14870">
+      <title>Expose ONNX export failures in DeployResult</title>
+      <description>
+        ONNX export failures silently swallowed in deploy_flow. Add
+        failed_operations field to DeployResult; capture all failures.
+      </description>
+      <tdd_spec>
+        <red>tests/unit/orchestration/test_onnx_failure_propagation.py: verify
+        DeployResult has failed_operations field; PostTrainingFlowResult already
+        has it</red>
+        <green>Add failed_operations: list[str] to DeployResult; populate on
+        ONNX export exception</green>
+      </tdd_spec>
+      <depends_on>T-13</depends_on>
+    </task>
+
+    <task id="T-12" status="DONE" closes="#417" commit="c4bc7ad">
+      <title>Add preflight env var validation to training and analysis flows</title>
+      <description>
+        Training and analysis flows fail cryptically mid-run when SPLITS_DIR,
+        CHECKPOINT_DIR, or ANALYSIS_OUTPUT_DIR are missing. Add explicit
+        validation at flow start.
+      </description>
+      <tdd_spec>
+        <red>tests/unit/orchestration/test_preflight_validation.py: 6 tests
+        covering missing/present env vars for both flows</red>
+        <green>Add _validate_training_env() and _validate_analysis_env() with
+        RuntimeError + actionable instructions; call at flow start</green>
+      </tdd_spec>
+      <depends_on>T-08</depends_on>
+    </task>
+
+  </wave>
+
+  <!-- WAVE 6: Explicit chaining -->
+  <wave id="6" name="ExplicitChaining">
+
+    <task id="T-14" status="DONE" closes="#412,#418" commit="f6a0d27">
+      <title>Add explicit upstream run ID params for deterministic chaining</title>
+      <description>
+        Flows auto-discover upstream runs via MLflow tag queries. Fragile when
+        tags are missing. Add optional upstream_X_run_id params that bypass
+        auto-discovery when provided.
+      </description>
+      <tdd_spec>
+        <red>tests/unit/orchestration/test_explicit_upstream_params.py: 8 tests
+        verifying param presence and None default for all 4 consumer flows</red>
+        <green>Add upstream_data_run_id to training_flow, upstream_training_run_id
+        to post_training_flow and run_analysis_flow, upstream_analysis_run_id
+        to deploy_flow</green>
+      </tdd_spec>
+      <depends_on>T-07,T-10</depends_on>
+    </task>
+
+  </wave>
+
+  <!-- WAVE 7: Completion -->
+  <wave id="7" name="Completion">
+
+    <task id="T-15" status="DONE" closes="#404">
+      <title>Save XML plan to disk and close parent issue</title>
+      <description>
+        Rule #15 compliance: write this plan file to disk at the path specified
+        in issue #404. Close parent issue after all 15 sub-issues are done.
+      </description>
+      <tdd_spec>
+        <red>All 47 unit tests in tests/unit/orchestration/ passing</red>
+        <green>This file; all sub-issues #405–#419 closed</green>
+      </tdd_spec>
+      <depends_on>T-01,T-02,T-03,T-04,T-05,T-06,T-07,T-08,T-09,T-10,T-11,T-12,T-13,T-14</depends_on>
+    </task>
+
+  </wave>
+
+</plan>

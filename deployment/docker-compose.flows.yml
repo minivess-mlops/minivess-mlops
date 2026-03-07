@@ -128,7 +128,7 @@ services:
     environment:
       <<: *common-env
       FLOW_NAME: analyze
-      ANALYSIS_OUTPUT: /app/outputs/analysis
+      ANALYSIS_OUTPUT_DIR: /app/outputs/analysis
     volumes:
       - data_cache:/app/data:ro
       - checkpoint_cache:/app/checkpoints:ro
@@ -170,7 +170,7 @@ services:
     environment:
       <<: *common-env
       FLOW_NAME: dashboard
-      DASHBOARD_OUTPUT: /app/outputs/dashboard
+      DASHBOARD_OUTPUT_DIR: /app/outputs/dashboard
     volumes:
       - mlruns_data:/app/mlruns:ro
       - outputs_analysis:/app/outputs/analysis:ro
@@ -189,7 +189,7 @@ services:
     environment:
       <<: *common-env
       FLOW_NAME: qa
-      DASHBOARD_OUTPUT: /app/outputs/dashboard
+      DASHBOARD_OUTPUT_DIR: /app/outputs/dashboard
     volumes:
       - mlruns_data:/app/mlruns:ro
       - outputs_dashboard:/app/outputs/dashboard
