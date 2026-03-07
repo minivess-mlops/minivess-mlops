@@ -1383,7 +1383,7 @@ def _export_analysis_artifacts(
     from minivess.pipeline.viz.generate_all_figures import generate_all_figures
 
     base_dir = output_dir or _Path(
-        os.environ.get("ANALYSIS_OUTPUT", "/app/outputs/analysis")
+        os.environ.get("ANALYSIS_OUTPUT_DIR", "/app/outputs/analysis")
     )
     base_dir.mkdir(parents=True, exist_ok=True)
 

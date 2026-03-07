@@ -233,7 +233,7 @@ def qa_flow(
     logger.info("\n%s", report)
 
     # Persist report to disk
-    report_dir = Path(os.environ.get("DASHBOARD_OUTPUT", "/app/outputs/dashboard"))
+    report_dir = Path(os.environ.get("DASHBOARD_OUTPUT_DIR", "/app/outputs/dashboard"))
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / "qa_report.md"
     report_path.write_text(report, encoding="utf-8")
