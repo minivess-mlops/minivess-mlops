@@ -1,0 +1,346 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MinIVess Vision Enforcement Plan — Executable Task List
+  Purpose: Prevent AI assistant from bypassing Docker+Prefect architecture
+  Source: docs/planning/minivess-vision-enforcement-plan.md
+  Created: 2026-03-07
+  Trigger: 6th instance of "shortcut training outside Docker"
+-->
+<execution-plan>
+  <metadata>
+    <title>Vision Enforcement: Hard Gates Against Architecture Bypass</title>
+    <created>2026-03-07</created>
+    <branch>feat/vision-enforcement</branch>
+    <approach>TDD — red-green-verify per CLAUDE.md</approach>
+    <estimated-tasks>14</estimated-tasks>
+    <phases>4</phases>
+    <goal>Make it physically impossible to train outside Docker without an explicit test-only escape hatch</goal>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 0: IMMEDIATE HARD GATES (P0 — must be done before any training) -->
+  <!-- ================================================================== -->
+  <phase id="0" name="Hard Gates" priority="P0-IMMEDIATE">
+    <description>
+      Code-level enforcement that PREVENTS wrong execution paths.
+      After this phase, `training_flow()` raises RuntimeError when called
+      outside Docker. `.sh` scripts invoke Docker, not bare Python.
+    </description>
+
+    <task id="T-00" name="Docker context detection in train_flow">
+      <description>
+        Add `_require_docker_context()` check at the top of `training_flow()`.
+        Raises RuntimeError if not running inside Docker container.
+        Escape hatch: `MINIVESS_ALLOW_HOST=1` for pytest only.
+      </description>
+      <test-first>
+        tests/unit/orchestration/test_docker_context_gate.py:
+        - test_training_flow_raises_outside_docker: No /.dockerenv, no env var → RuntimeError
+        - test_training_flow_runs_inside_docker: /.dockerenv exists → no error
+        - test_training_flow_runs_with_allow_host: MINIVESS_ALLOW_HOST=1 → no error
+        - test_allow_host_only_in_tests: Verify MINIVESS_ALLOW_HOST not in any .sh script
+      </test-first>
+      <files>
+        src/minivess/orchestration/flows/train_flow.py
+        tests/unit/orchestration/test_docker_context_gate.py
+      </files>
+      <acceptance>
+        `uv run python -c "from minivess.orchestration.flows.train_flow import training_flow; training_flow(debug=True)"`
+        raises RuntimeError with Docker instructions (not inside container).
+      </acceptance>
+    </task>
+
+    <task id="T-01" name="Rewrite train_sam3_vanilla.sh to use Docker">
+      <description>
+        Replace bare `uv run python` with `docker compose -f deployment/docker-compose.flows.yml run`.
+        Remove PREFECT_DISABLED=1. Pass SAM3-specific params via environment variables.
+      </description>
+      <test-first>
+        tests/unit/scripts/test_sh_scripts_use_docker.py:
+        - test_no_bare_python_in_training_scripts: Parse all scripts/*.sh, verify none contain
+          `uv run python` for training (allow for utility scripts like linting)
+        - test_no_prefect_disabled_in_scripts: Grep scripts/*.sh for PREFECT_DISABLED=1
+        - test_training_scripts_invoke_docker: Verify `docker compose` or `docker run` present
+      </test-first>
+      <files>
+        scripts/train_sam3_vanilla.sh
+        tests/unit/scripts/test_sh_scripts_use_docker.py
+      </files>
+      <acceptance>
+        `scripts/train_sam3_vanilla.sh` runs `docker compose ... run train` with proper
+        environment overrides for SAM3 (model_family, loss_name, etc.).
+      </acceptance>
+    </task>
+
+    <task id="T-02" name="Checkpoint path validation in SegmentationTrainer">
+      <description>
+        SegmentationTrainer.__init__ or fit() validates that checkpoint_dir is either:
+        - Under /app/checkpoints (Docker standard path)
+        - A pytest tmp_path (contains 'pytest' or 'tmp' in path)
+        - Explicitly allowed via MINIVESS_ALLOW_HOST=1
+        Repo-relative paths like `checkpoints/` or `./checkpoints` are rejected.
+      </description>
+      <test-first>
+        tests/unit/pipeline/test_checkpoint_path_validation.py:
+        - test_rejects_repo_relative_path: `checkpoint_dir=Path("checkpoints")` → ValueError
+        - test_accepts_docker_path: `checkpoint_dir=Path("/app/checkpoints/fold_0")` → OK
+        - test_accepts_pytest_tmp_path: `checkpoint_dir=tmp_path / "fold_0"` → OK
+        - test_accepts_with_allow_host: MINIVESS_ALLOW_HOST=1 → any path OK
+      </test-first>
+      <files>
+        src/minivess/pipeline/trainer.py
+        tests/unit/pipeline/test_checkpoint_path_validation.py
+      </files>
+    </task>
+
+    <task id="T-03" name="Update Dockerfile.train for SAM3 dependencies">
+      <description>
+        Verify Dockerfile.train includes transformers>=5.2.0 and torchvision
+        (required for SAM3). Add HF_TOKEN passthrough. Test that the image builds
+        and can import Sam3Model.
+      </description>
+      <test-first>
+        Manual: `docker build -t minivess-train:test -f deployment/docker/Dockerfile.train .`
+        must succeed. Then:
+        `docker run minivess-train:test python -c "from transformers import Sam3Model; print('OK')"`
+      </test-first>
+      <files>
+        deployment/docker/Dockerfile.train
+      </files>
+      <acceptance>
+        Docker image builds, SAM3 imports work, `docker compose run train` starts.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: PRE-COMMIT AND CI GUARDS (P1 — this week) -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Automated Guards" priority="P1-THIS-WEEK">
+    <description>
+      CI and pre-commit hooks that catch violations before they reach main.
+    </description>
+
+    <task id="T-04" name="Pre-commit hook: no PREFECT_DISABLED in scripts">
+      <description>
+        Add a local pre-commit hook that greps .sh files for PREFECT_DISABLED=1
+        and fails if found. Only allowed in tests/ and conftest files.
+      </description>
+      <files>
+        .pre-commit-config.yaml
+      </files>
+      <acceptance>
+        `git commit` with a .sh file containing PREFECT_DISABLED=1 fails pre-commit.
+      </acceptance>
+    </task>
+
+    <task id="T-05" name="CI: Docker build gate on PR">
+      <description>
+        Add a GitHub Actions job that builds Dockerfile.train on every PR that
+        touches src/ or deployment/. If the training image can't build, PR fails.
+      </description>
+      <files>
+        .github/workflows/docker-build.yml
+      </files>
+      <acceptance>
+        PR touching src/minivess/adapters/ triggers Docker build check.
+      </acceptance>
+    </task>
+
+    <task id="T-06" name="AST test: .sh scripts invoke Docker">
+      <description>
+        Extend test_sh_scripts_use_docker.py to parse ALL .sh scripts in scripts/
+        and verify that any script containing training-related keywords (train,
+        training_flow, model_family) uses `docker compose` or `docker run`.
+      </description>
+      <files>
+        tests/unit/scripts/test_sh_scripts_use_docker.py
+      </files>
+    </task>
+
+    <task id="T-07" name="Pre-commit hook: no repo-relative checkpoint paths">
+      <description>
+        A pre-commit hook or AST test that scans Python files for
+        `CHECKPOINT_DIR=checkpoints` or `checkpoint_dir=Path("checkpoints")`
+        patterns outside of test files.
+      </description>
+      <files>
+        tests/unit/orchestration/test_no_repo_relative_paths.py
+      </files>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: INTEGRATION TESTS (P1 — this week) -->
+  <!-- ================================================================== -->
+  <phase id="2" name="Integration Tests" priority="P1-THIS-WEEK">
+    <description>
+      Tests that verify the ACTUAL training path works end-to-end through Docker.
+      Not mocked — real Docker, real (tiny) data, real model.
+    </description>
+
+    <task id="T-08" name="Docker smoke test: debug training in container">
+      <description>
+        Integration test that:
+        1. Builds minivess-train Docker image
+        2. Runs `docker compose run train` with debug=True, max_epochs=1, num_folds=1
+        3. Verifies checkpoint exists at /app/checkpoints/ (inside container)
+        4. Verifies MLflow run exists and is FINISHED
+        5. Verifies Prefect was active (not compat mode)
+        Requires: Docker, NVIDIA runtime, SAM3 weights (skip in CI without GPU).
+      </description>
+      <test-first>
+        tests/integration/test_docker_training_smoke.py:
+        - test_docker_build_succeeds
+        - test_docker_training_debug_mode
+        - test_checkpoint_in_volume_not_repo
+        - test_mlflow_run_exists_after_training
+      </test-first>
+      <files>
+        tests/integration/test_docker_training_smoke.py
+      </files>
+      <acceptance>
+        Full training cycle completes inside Docker container with proper volume mounts.
+      </acceptance>
+    </task>
+
+    <task id="T-09" name="Volume mount compliance test">
+      <description>
+        Parse docker-compose.flows.yml and verify:
+        - Every service that writes artifacts has volume mounts
+        - All declared ENV paths (CHECKPOINT_DIR, MLFLOW_TRACKING_URI, etc.)
+          map to volume-mounted directories
+        - No service uses /tmp for persistent output
+      </description>
+      <test-first>
+        tests/unit/deployment/test_volume_mount_compliance.py:
+        - test_train_service_has_checkpoint_volume
+        - test_train_service_has_mlruns_volume
+        - test_all_env_paths_are_mounted
+        - test_no_tmp_in_env_paths
+      </test-first>
+      <files>
+        tests/unit/deployment/test_volume_mount_compliance.py
+      </files>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: CLAUDE.md AND MEMORY HARDENING (P0 — immediate) -->
+  <!-- ================================================================== -->
+  <phase id="3" name="Documentation Hardening" priority="P0-IMMEDIATE">
+    <description>
+      Update CLAUDE.md with the STOP protocol rule and strengthen the existing
+      rules to be more specific and actionable.
+    </description>
+
+    <task id="T-10" name="Add STOP Protocol to CLAUDE.md Critical Rules">
+      <description>
+        Add Rule #19: STOP Protocol Before Execution.
+        Before ANY training/pipeline execution, verify:
+        S(ource in Docker), T(racking via Prefect), O(utputs volume-mounted),
+        P(rovenance reproducible).
+        Reference: docs/planning/minivess-vision-enforcement-plan.md
+      </description>
+      <files>
+        CLAUDE.md
+      </files>
+    </task>
+
+    <task id="T-11" name="Update MEMORY.md with enforcement context">
+      <description>
+        Add to MEMORY.md:
+        - The STOP protocol as a session-start checklist
+        - "Architecture IS the product" reminder
+        - Docker infrastructure already exists (Dockerfile.train, docker-compose.flows.yml)
+        - Direct link to enforcement plan
+      </description>
+      <files>
+        Memory file (auto-memory)
+      </files>
+    </task>
+
+    <task id="T-12" name="Update Activation Checklist">
+      <description>
+        Add STOP protocol verification to the self-learning-iterative-coder
+        ACTIVATION-CHECKLIST.md. Any task involving training/pipeline execution
+        must pass STOP before entering the RED phase.
+      </description>
+      <files>
+        .claude/skills/self-learning-iterative-coder/ACTIVATION-CHECKLIST.md
+      </files>
+    </task>
+
+    <task id="T-13" name="Create P0 GitHub Issue">
+      <description>
+        Create a P0 issue documenting this failure and linking to the enforcement
+        plan. Label: architecture, P0, docker, prefect.
+        Title: "CRITICAL: Enforce Docker-per-flow execution — training runs outside Docker"
+      </description>
+      <acceptance>
+        Issue created on GitHub with full context and task checklist.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- DEPENDENCY GRAPH -->
+  <!-- ================================================================== -->
+  <dependencies>
+    <!-- Phase 0 tasks are independent of each other -->
+    <dep from="T-01" to="T-00" reason="Script needs Docker gate to test against" />
+    <!-- Phase 1 depends on Phase 0 patterns -->
+    <dep from="T-04" to="T-01" reason="Hook enforces pattern established in T-01" />
+    <dep from="T-06" to="T-01" reason="Test verifies pattern from T-01" />
+    <!-- Phase 2 depends on Phase 0 Docker setup -->
+    <dep from="T-08" to="T-03" reason="Smoke test needs working Docker image" />
+    <dep from="T-08" to="T-00" reason="Smoke test verifies Docker gate works" />
+    <!-- Phase 3 is independent (documentation) -->
+  </dependencies>
+
+  <!-- ================================================================== -->
+  <!-- EXECUTION ORDER -->
+  <!-- ================================================================== -->
+  <execution-order>
+    <step order="1" tasks="T-00,T-03,T-10,T-11" parallel="true">
+      Docker gate + Dockerfile fix + CLAUDE.md update (independent, do first)
+    </step>
+    <step order="2" tasks="T-01,T-02,T-12" parallel="true">
+      Rewrite .sh script + checkpoint validation + activation checklist
+    </step>
+    <step order="3" tasks="T-04,T-05,T-06,T-07" parallel="true">
+      Pre-commit hooks + CI gates + AST tests
+    </step>
+    <step order="4" tasks="T-08,T-09" parallel="true">
+      Integration tests (require Docker build from step 1)
+    </step>
+    <step order="5" tasks="T-13" parallel="false">
+      Create P0 GitHub Issue (after plan is committed)
+    </step>
+  </execution-order>
+
+  <!-- ================================================================== -->
+  <!-- SUCCESS CRITERIA -->
+  <!-- ================================================================== -->
+  <success-criteria>
+    <criterion id="SC-1">
+      `training_flow()` raises RuntimeError when called outside Docker
+      (without MINIVESS_ALLOW_HOST=1).
+    </criterion>
+    <criterion id="SC-2">
+      All .sh training scripts invoke `docker compose run`, not `uv run python`.
+    </criterion>
+    <criterion id="SC-3">
+      Pre-commit rejects PREFECT_DISABLED=1 in .sh scripts.
+    </criterion>
+    <criterion id="SC-4">
+      CI builds Dockerfile.train on every PR touching src/.
+    </criterion>
+    <criterion id="SC-5">
+      Integration test verifies end-to-end Docker training with volume mounts.
+    </criterion>
+    <criterion id="SC-6">
+      Zero instances of shortcut training in the next 10 AI sessions.
+    </criterion>
+  </success-criteria>
+</execution-plan>
