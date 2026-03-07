@@ -13,7 +13,7 @@ import dataclasses
 class TestDeployResultHasFailedOperations:
     def test_deploy_result_has_failed_operations_field(self) -> None:
         """DeployResult must have a failed_operations field."""
-        from minivess.orchestration.deploy_flow import DeployResult
+        from minivess.orchestration.flows.deploy_flow import DeployResult
 
         fields = {f.name for f in dataclasses.fields(DeployResult)}
         assert "failed_operations" in fields, (
@@ -23,7 +23,7 @@ class TestDeployResultHasFailedOperations:
 
     def test_failed_operations_default_is_empty_list(self) -> None:
         """failed_operations must default to empty list."""
-        from minivess.orchestration.deploy_flow import DeployResult
+        from minivess.orchestration.flows.deploy_flow import DeployResult
 
         # Construct with minimal required fields
         result = DeployResult(
@@ -37,7 +37,7 @@ class TestDeployResultHasFailedOperations:
 
     def test_failed_operations_is_list_of_str(self) -> None:
         """failed_operations must be a list of strings."""
-        from minivess.orchestration.deploy_flow import DeployResult
+        from minivess.orchestration.flows.deploy_flow import DeployResult
 
         fields = {f.name: f for f in dataclasses.fields(DeployResult)}
         fo_field = fields["failed_operations"]

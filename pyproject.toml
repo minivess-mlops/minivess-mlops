@@ -270,12 +270,12 @@ disable_error_code = [
     "operator", "method-assign", "no-untyped-def",
 ]
 
-# Orchestration flows: @task/@flow decorators from _prefect_compat are
-# dynamically typed (noop passthrough when Prefect is unavailable).
+# Orchestration flows: Prefect @task/@flow decorators use dynamic typing
+# that mypy cannot fully resolve.
 [[tool.mypy.overrides]]
 module = [
     "minivess.orchestration.flows.*",
-    "minivess.orchestration.deploy_flow",
+    "minivess.orchestration.flows.deploy_flow",
     "minivess.serving.bento_service",
     "minivess.serving.mlflow_wrapper",
     "minivess.compute.prefect_sky_tasks",

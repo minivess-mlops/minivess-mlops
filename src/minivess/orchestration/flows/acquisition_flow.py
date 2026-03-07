@@ -2,7 +2,7 @@
 
 Sits before Flow 1 (Data Engineering). Downloads datasets where possible,
 prints manual instructions where not, and converts TIFF → NIfTI.
-Uses ``_prefect_compat`` decorators for graceful degradation without Prefect.
+Uses Prefect @flow and @task decorators for orchestration.
 """
 
 from __future__ import annotations
@@ -12,17 +12,18 @@ import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from prefect import flow, task
+
 from minivess.config.acquisition_config import (
+    AcquisitionConfig,
     AcquisitionResult,
     DatasetAcquisitionStatus,
 )
 from minivess.data.downloaders import get_downloader
-from minivess.orchestration import flow, task
+from minivess.orchestration.constants import FLOW_NAME_ACQUISITION
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from minivess.config.acquisition_config import AcquisitionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +206,7 @@ def print_manual_instructions_task(
 # ---------------------------------------------------------------------------
 
 
-@flow(name="minivess-acquisition")
+@flow(name=FLOW_NAME_ACQUISITION)
 def run_acquisition_flow(
     config: AcquisitionConfig | None = None,
     *,
@@ -330,3 +331,7 @@ def run_acquisition_flow(
         provenance=provenance,
         mlflow_run_id=mlflow_run_id,
     )
+
+
+if __name__ == "__main__":
+    run_acquisition_flow()

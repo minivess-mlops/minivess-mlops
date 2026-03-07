@@ -9,8 +9,7 @@ Orchestrates the deployment pipeline:
 6. Optionally package for MONAI Deploy MAP
 
 Each step is a Prefect @task; the flow assembles them with dependency
-tracking. Uses ``_prefect_compat.py`` for graceful degradation when
-Prefect is not installed.
+tracking. Uses Prefect @flow and @task decorators for orchestration.
 """
 
 from __future__ import annotations
@@ -20,7 +19,9 @@ import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from minivess.orchestration._prefect_compat import flow, get_run_logger, task
+from prefect import flow, get_run_logger, task
+
+from minivess.orchestration.constants import FLOW_NAME_DEPLOY
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -197,11 +198,12 @@ def promote_task(
 # ---------------------------------------------------------------------------
 
 
-@flow(name="deploy-flow")
+@flow(name=FLOW_NAME_DEPLOY)
 def deploy_flow(
     config: DeployConfig | None = None,
     experiment_id: str = "1",
     upstream_analysis_run_id: str | None = None,
+    trigger_source: str = "manual",
 ) -> DeployResult:
     """Orchestrate the full deployment pipeline.
 
@@ -353,3 +355,7 @@ def deploy_flow(
     )
 
     return result
+
+
+if __name__ == "__main__":
+    deploy_flow()

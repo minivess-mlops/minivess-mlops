@@ -67,5 +67,8 @@ FLOW_NAME_QA: str = "qa-flow"
 FLOW_NAME_HPO: str = "hpo-flow"
 """Prefect flow name for the HPO flow."""
 
+FLOW_NAME_ACQUISITION: str = "acquisition-flow"
+"""Prefect flow name for the data acquisition flow (Flow 0)."""
+
 FLOW_NAME_ANNOTATION: str = "annotation-flow"
 """Prefect flow name for the annotation flow."""

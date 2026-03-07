@@ -67,7 +67,7 @@ def on_analysis_completion(
     )
 
 
-def _noop(**kwargs: Any) -> None:  # noqa: ARG001
+def _noop(**_kwargs: Any) -> None:
     """Default no-op callable for unregistered flows."""
 
 
@@ -253,10 +253,13 @@ class PipelineTriggerChain:
                 )
                 continue
 
-            # Execute the flow
+            # Execute the flow — try with trigger_source, fall back to no-args
             start = time.monotonic()
             try:
-                entry.callable(trigger_source=trigger_source)
+                try:
+                    entry.callable(trigger_source=trigger_source)
+                except TypeError:
+                    entry.callable()
                 duration = time.monotonic() - start
                 results.append(
                     FlowTriggerResult(

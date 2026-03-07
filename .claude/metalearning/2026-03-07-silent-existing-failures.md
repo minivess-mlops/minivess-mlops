@@ -58,6 +58,14 @@ Nobody creates an issue. Nobody fixes it. The failure becomes invisible.
 - **Action taken:** None — never even noticed until full audit
 - **Root cause:** Test calls real Prefect task without mocking API connection
 
+### Instance 8: mypy cache crash dismissed during boundary-losses task (2026-03-07)
+- **What happened:** `uv run mypy src/minivess/pipeline/loss_functions.py` crashed with `AssertionError: Cannot find module for google`
+- **Dismissal phrase:** "The mypy error is unrelated to our changes (it's a known issue with the google module lookup)"
+- **Action taken:** Re-ran with `--ignore-missing-imports` to get green, moved on
+- **Time to discovery:** User called it out: "you should ignore nothing remember, fix if you find errors"
+- **Root cause:** Transient mypy cache corruption (453MB cache at `.mypy_cache/`). Resolved on next run without intervention, but investigation should have happened immediately.
+- **Correct action:** Investigate, determine root cause (cache corruption), clear cache if needed, document
+
 ## Why This Happens (Root Cause Analysis)
 
 ### 1. Cognitive shortcut: "Not my fault = not my problem"

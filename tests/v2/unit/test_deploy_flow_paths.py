@@ -11,7 +11,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-_DEPLOY_FLOW_SRC = Path("src/minivess/orchestration/deploy_flow.py")
+_DEPLOY_FLOW_SRC = Path("src/minivess/orchestration/flows/deploy_flow.py")
 _DEPLOY_CONFIG_SRC = Path("src/minivess/config/deploy_config.py")
 
 

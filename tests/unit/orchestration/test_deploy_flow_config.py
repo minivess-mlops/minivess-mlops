@@ -38,7 +38,7 @@ class TestDeployFlowOptionalConfig:
         """deploy_flow() signature must have config: DeployConfig | None = None."""
         import inspect
 
-        from minivess.orchestration.deploy_flow import deploy_flow
+        from minivess.orchestration.flows.deploy_flow import deploy_flow
 
         fn = getattr(deploy_flow, "__wrapped__", deploy_flow)
         sig = inspect.signature(fn)

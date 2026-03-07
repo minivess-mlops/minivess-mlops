@@ -16,9 +16,11 @@ import os
 from pathlib import Path
 from typing import Any
 
+from prefect import flow, task
+
 from minivess.observability.mlflow_backend import detect_backend_type
 from minivess.observability.mlflow_schema import check_required_params
-from minivess.orchestration._prefect_compat import flow, task
+from minivess.orchestration.constants import FLOW_NAME_QA
 
 logger = logging.getLogger(__name__)
 
@@ -189,10 +191,11 @@ def summarize_qa_results(checks: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
-@flow(name="qa-flow")
+@flow(name=FLOW_NAME_QA)
 def qa_flow(
     tracking_uri: str | None = None,
     experiment_ids: list[str] | None = None,
+    trigger_source: str = "manual",
 ) -> dict[str, Any]:
     """QA Prefect flow — runs all MLflow quality checks.
 
@@ -245,3 +248,7 @@ def qa_flow(
         "report": report,
         "report_path": str(report_path),
     }
+
+
+if __name__ == "__main__":
+    qa_flow()

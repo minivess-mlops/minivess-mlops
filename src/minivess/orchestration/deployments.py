@@ -38,6 +38,21 @@ FLOW_IMAGE_MAP: dict[str, str] = {
 }
 
 
+def get_work_pool(flow_name: str) -> str:
+    """Get the work pool name for a given flow.
+
+    Parameters
+    ----------
+    flow_name:
+        Name of the flow (e.g., 'train', 'data').
+
+    Returns
+    -------
+    Work pool name string (e.g., 'gpu-pool', 'cpu-pool').
+    """
+    return FLOW_WORK_POOL_MAP.get(flow_name, "cpu-pool")
+
+
 def get_flow_deployment_config(flow_name: str) -> dict[str, Any]:
     """Get deployment configuration for a specific flow.
 
