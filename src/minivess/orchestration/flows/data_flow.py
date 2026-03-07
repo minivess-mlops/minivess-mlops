@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -82,6 +83,45 @@ class DataFlowResult:
 # ---------------------------------------------------------------------------
 # @task functions
 # ---------------------------------------------------------------------------
+
+
+@task(name="dvc-pull")
+def dvc_pull_task(
+    data_dir: Path,
+    *,
+    dvc_rev: str | None = None,
+    remote: str | None = None,
+) -> str:
+    """Pull DVC-tracked data at an optional revision from an optional remote.
+
+    Parameters
+    ----------
+    data_dir:
+        Working directory for both dvc and git commands.
+    dvc_rev:
+        Optional DVC/git revision to pull (e.g. a git tag or commit hash).
+    remote:
+        Optional DVC remote name to pull from (overrides default remote).
+
+    Returns
+    -------
+    Current git commit hash (HEAD) after the pull, as a hex string.
+    """
+    cmd: list[str] = ["dvc", "pull"]
+    if dvc_rev:
+        cmd.extend(["--rev", dvc_rev])
+    if remote:
+        cmd.extend(["--remote", remote])
+    subprocess.run(cmd, capture_output=True, text=True, cwd=data_dir, check=True)
+
+    rev_result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        cwd=data_dir,
+        check=True,
+    )
+    return rev_result.stdout.strip()
 
 
 @task(name="discover-data")
@@ -285,6 +325,8 @@ def run_data_flow(
     n_folds: int = 3,
     seed: int = 42,
     external_dirs: dict[str, Path] | None = None,
+    dvc_rev: str | None = None,
+    dvc_remote: str | None = None,
 ) -> DataFlowResult:
     """Data Engineering Flow (Flow 1).
 
@@ -300,12 +342,29 @@ def run_data_flow(
         Random seed for reproducibility.
     external_dirs:
         Optional dict of dataset_name → data_dir for external datasets.
+    dvc_rev:
+        Optional DVC revision to pull (git tag or commit hash).
+    dvc_remote:
+        Optional DVC remote name (overrides DVC_REMOTE env var).
 
     Returns
     -------
     DataFlowResult with all flow outputs.
     """
+    import os
+
+    import mlflow
+
     logger.info("Starting data flow → %s", data_dir)
+
+    # Step 0: DVC pull (optional — skipped if dvc binary not available)
+    data_dvc_commit: str | None = None
+    active_remote = dvc_remote or os.environ.get("DVC_REMOTE")
+    try:
+        data_dvc_commit = dvc_pull_task(data_dir, dvc_rev=dvc_rev, remote=active_remote)
+        logger.info("DVC pull complete, commit=%s", data_dvc_commit)
+    except Exception:
+        logger.warning("DVC pull skipped (dvc not installed or data already present)")
 
     # Step 1: Discover
     pairs = discover_data_task(data_dir=data_dir)
@@ -336,6 +395,19 @@ def run_data_flow(
         n_folds=n_folds,
         dataset_hash=dataset_hash,
     )
+
+    # Log DVC commit to MLflow (if available)
+    if data_dvc_commit is not None:
+        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment("minivess_data")
+        with mlflow.start_run(tags={"flow_name": "data"}) as active_run:
+            mlflow.log_param("data_dvc_commit", data_dvc_commit)
+            logger.info(
+                "MLflow: data_dvc_commit=%s in run %s",
+                data_dvc_commit,
+                active_run.info.run_id,
+            )
 
     logger.info("Data flow complete: %d pairs, quality=%s", len(pairs), quality_passed)
     return DataFlowResult(
