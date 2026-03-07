@@ -1836,3 +1836,492 @@ randomization is the primary driver of zero-shot generalization).
 *sam3-implementation-plan.xml, 2026-03-02-sam3-implementation-fuckup.md,*
 *docs/adr/0006-sam3-variant-architecture.md,*
 *15 bibliography papers from sci-llm-writer/biblio/biblio-vascular/*
+
+---
+
+## 16. Opus 4.6 Independent Review (2026-03-07)
+
+This section was added by Claude Opus 4.6 as an independent cold-start review of all
+claims in sections 1-15. Each claim was re-verified against the codebase, the installed
+transformers package, GPU hardware measurements, and web-searched primary sources.
+
+### 16.1 Corrections to Previous Claims
+
+#### CORRECTION 1: BF16 is NOT Suitable for RTX 2070 Super
+
+**Previous claim:** "~4-6 GB BF16" throughout sections 4, 5, and the VRAM decision matrix.
+
+**Reality:** RTX 2070 Super (Turing architecture, compute capability 7.5) does NOT have
+native BF16 tensor cores. Native BF16 requires Ampere (CC 8.0+).
+
+**Measured:** BF16 matmul is **6.71x slower** than FP16 on this GPU.
+
+```
+FP16 matmul (1024x1024): 0.092 ms
+BF16 matmul (1024x1024): 0.615 ms
+BF16/FP16 ratio: 6.71x
+```
+
+PyTorch's `torch.cuda.is_bf16_supported()` returns `True` because software emulation
+works, but performance is catastrophic. PyTorch 2.10.0+cu128 does not warn about this.
+
+**Action required:** None — the codebase has zero hardcoded dtypes. PyTorch AMP
+(`torch.cuda.amp.autocast()`) automatically selects FP16 on Turing and BF16 on Ampere+.
+The only risk is if someone explicitly forces `torch_dtype=torch.bfloat16` in config
+on a Turing GPU. The dtype should come from YAML config (or be left to AMP auto-detection),
+never hardcoded in adapter code.
+
+**Impact on VRAM estimates:** FP16 and BF16 use the same 2 bytes per parameter, so
+VRAM estimates are unchanged. Only throughput is affected.
+
+#### CORRECTION 2: V3 Hybrid Does NOT Require 18-22 GB
+
+**Previous claim (section 5, row "V3 Hybrid training"):** "18-22 GB", "NOT FEASIBLE"
+on RTX 2070 Super.
+
+**Reality:** V3 Hybrid runs SAM3 encoder and DynUNet-3D **sequentially**, not
+simultaneously. The VRAM peak is determined by whichever phase uses more:
+
+```
+Phase 1 — SAM3 encoder forward (frozen, no_grad):
+  Model weights:       1.7 GB (persistent)
+  Intermediates:      ~3-5 GB (freed after no_grad forward)
+  Peak:               ~5-7 GB
+
+Phase 2 — DynUNet backward (after SAM3 features cached):
+  SAM3 weights:        1.7 GB (still resident)
+  SAM FPN features:    0.11 GB (stored for fusion)
+  DynUNet activations: 0.95 GB (encoder levels 0-3)
+  Optimizer states:    0.02 GB
+  Peak:               ~2.8 GB
+
+Overall peak = max(5-7 GB, 2.8 GB) = 5-7 GB
+```
+
+**V3 Hybrid is FEASIBLE on 8 GB**, not "NOT FEASIBLE". The 18-22 GB estimate assumed
+simultaneous execution and full activation graphs for the SAM3 encoder. In reality,
+`torch.no_grad()` prevents activation storage, and the two models run sequentially
+in `Sam3HybridAdapter.forward()`.
+
+**Caveat:** PyTorch memory fragmentation typically adds ~0.5-1 GB overhead. With
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`, this can be mitigated. OOM is
+still possible on the tightest volumes (D=110 slices), but typical MiniVess volumes
+(D=43) should fit.
+
+#### CORRECTION 3: Total Parameters — 840.4M, Not 848M
+
+**Previous claim:** "848M" total parameters, "~648M" perception encoder.
+
+**Measured from `Sam3Model(Sam3Config())` in transformers 5.2.0:**
+
+```
+Total model params:    840.4M
+Vision encoder params: 454.0M
+Non-vision params:     386.3M
+Model memory FP16:     1.68 GB
+Model memory FP32:     3.36 GB
+```
+
+The "848M" figure from DeepWiki/GitHub README is an approximation. The exact count
+from the HuggingFace implementation is 840.4M. The "648M perception encoder" figure
+does not match the HF `vision_encoder` module (454M). The discrepancy may reflect
+different decomposition boundaries in the original paper vs. HuggingFace implementation.
+
+**Impact:** The FP16 model weight of 1.68 GB is consistent with previous estimates
+of "~1.7 GB". No VRAM estimate changes needed.
+
+#### CORRECTION 4: CRITICAL-01 Is ALREADY RESOLVED
+
+**Previous claim (cold-start YAML):** "`train_monitored.py` line ~513 hardcodes
+`DynUNetAdapter`. SAM3 CANNOT be trained."
+
+**Reality (verified 2026-03-07):**
+
+```python
+# scripts/train_monitored.py
+Line 126: from minivess.adapters.model_builder import build_adapter
+Line 182: parser.add_argument("--model-family", type=str, default="dynunet")
+Line 241: model_family_str = getattr(args, "model_family", "dynunet")
+Line 242: model_family = ModelFamily(model_family_str)
+Line 620: base_model = build_adapter(model_config)
+```
+
+The training pipeline IS model-agnostic. `build_adapter()` dispatches to the correct
+adapter based on `--model-family`. The cold-start YAML was written before this fix
+was applied (or the Sonnet session fixed it but didn't update the YAML).
+
+**Status:** RESOLVED. SAM3 training can proceed once weights are downloaded.
+
+#### CORRECTION 5: sam3_topolora.py Author Attribution
+
+Line 12 of `sam3_topolora.py` says: `Based on: TopoLoRA-SAM (Xiang et al., arXiv:2601.02273)`
+
+The correct author is **Khazem (2026)**, not "Xiang et al."
+
+Full citation: Khazem, S. (2026). "TopoLoRA-SAM: Topology-Aware Parameter-Efficient
+Adaptation of Foundation Segmenters for Thin-Structure and Cross-Domain Binary
+Semantic Segmentation." arXiv:2601.02273v1.
+
+### 16.2 Architecture Verification (All Constants Confirmed)
+
+From `Sam3Config()` / `Sam3ViTConfig` in transformers 5.2.0:
+
+| Parameter | Code (sam3_backbone.py) | HF Config | Match |
+|-----------|------------------------|-----------|-------|
+| hidden_size | SAM3_EMBED_DIM = 1024 | 1024 | YES |
+| num_hidden_layers | — | 32 | YES |
+| patch_size | SAM3_PATCH_SIZE = 14 | 14 | YES |
+| image_size | SAM3_INPUT_SIZE = 1008 | 1008 | YES |
+| fpn_hidden_size | SAM3_FPN_DIM = 256 | 256 | YES |
+| feature_map_size | SAM3_FEATURE_MAP_SIZE = 72 | 1008/14 = 72 | YES |
+| intermediate_size | — | 4736 | N/A |
+| num_attention_heads | — | 16 | N/A |
+| backbone_feature_sizes | — | [[288,288],[144,144],[72,72]] | N/A |
+| window_size | — | 24 | N/A |
+| global_attn_indexes | — | [7, 15, 23, 31] | N/A |
+
+All architecture constants in `sam3_backbone.py` are verified correct against
+the actual transformers 5.2.0 implementation.
+
+### 16.3 Codebase State Verification
+
+| Check | Status | Evidence |
+|-------|--------|----------|
+| No stub code anywhere | VERIFIED | 10 AST tests pass, grep confirms zero matches |
+| VRAM gates correct | VERIFIED | 6144/16384 MB, mode="inference"/"training" |
+| Per-variant dispatch correct | VERIFIED | V1/V3: encoder_frozen=True (6 GB), V2: False (16 GB) |
+| Sam3Backbone uses Sam3Model | VERIFIED | `from transformers import Sam3Model` at line 149 |
+| Frozen encoder uses no_grad | VERIFIED | Lines 210-214 in sam3_backbone.py |
+| Training pipeline model-agnostic | VERIFIED | build_adapter() at line 620, --model-family CLI arg |
+| 21 enforcement tests pass | VERIFIED | 10 stub + 11 VRAM, all green |
+| Model config YAMLs exist | VERIFIED | 3 model + 6 experiment configs |
+
+### 16.4 Potential Bug: V3 Hybrid axial_proj Has No Gradient Flow
+
+In `sam3_hybrid.py`, the axial projection module is defined and used, but its output
+is `.detach()`ed before reaching the fusion layer:
+
+```python
+# Line 196: axial_proj IS in computation graph
+sam_features = self.axial_proj(sam_features)
+
+# Line 213: .detach() CUTS gradient flow
+sam_projected = self.fusion.proj(sam_features.detach())
+```
+
+This means `self.axial_proj` weights will never receive gradients. The module has
+trainable parameters that will never be updated. This is either a bug (the `.detach()`
+should be removed from one of these locations) or the design intent is unclear.
+
+**Impact:** Minor — axial_proj has ~197K parameters (Conv3d 256→256, kernel 3×1×1).
+The fusion gate still works because `self.fusion.gate_alpha` gets gradients through
+`logits + gate * sam_projected`. But the axial smoothing across Z-slices has no
+learned behavior.
+
+**Recommendation:** Remove `.detach()` from `self.fusion.proj(sam_features.detach())`
+at line 213 if axial smoothing should be learned. Or remove `self.axial_proj` entirely
+if it's not needed.
+
+### 16.5 Updated VRAM Decision Matrix (Corrected)
+
+| Variant | RTX 2070 Super (8 GB FP16) | A100-40GB | Cloud Min |
+|---------|---------------------------|-----------|-----------|
+| V1 Vanilla (frozen encoder) | **FEASIBLE** (~5-7 GB peak) | Very comfortable | RTX 3090 |
+| V2 TopoLoRA (LoRA, gradients) | **NOT FEASIBLE** (~12-16 GB) | Comfortable | A100-40GB |
+| V3 Hybrid (frozen SAM3 + DynUNet) | **FEASIBLE** (~5-7 GB peak) | Very comfortable | RTX 3090 |
+
+**Key change from previous matrix:** V3 Hybrid moved from "NOT FEASIBLE (18-22 GB)"
+to "FEASIBLE (~5-7 GB)" based on sequential execution analysis.
+
+### 16.6 GPU Dtype — AMP Handles This Automatically
+
+PyTorch AMP (`torch.cuda.amp.autocast()`) auto-selects the optimal dtype per GPU.
+**No hardcoded dtypes in adapter code** — dtype comes from YAML config or AMP auto-detection.
+
+| GPU Architecture | Compute Cap | AMP autocast | Note |
+|-----------------|-------------|-------------|------|
+| Turing (RTX 2070 Super) | 7.5 | FP16 (auto) | BF16 exists but 6.7x slower (software emulation) |
+| Ampere (RTX 3090, A100) | 8.0+ | BF16 or FP16 (auto) | Both have native tensor cores |
+| Hopper (H100) | 9.0 | BF16 (auto) | Also supports FP8 |
+
+The only risk is explicitly forcing `torch_dtype=torch.bfloat16` in config on Turing hardware.
+Don't do that. Either use AMP (recommended) or set dtype in YAML config based on hardware.
+
+### 16.7 Training Time Estimates (CPU vs GPU)
+
+#### CPU/GPU Performance Ratio (Measured)
+
+```
+GPU FP16 matmul (5184×1024 @ 1024×4736): 1.92 ms
+CPU FP32 matmul (5184×1024 @ 1024×4736): 114.96 ms
+CPU/GPU ratio: 60x slower
+```
+
+This ratio was measured on the local machine (RTX 2070 Super vs. AMD/Intel CPU with
+64 GB RAM) using matmul dimensions representative of SAM3 ViT-32L FFN layers.
+
+#### V1 Vanilla Training Times
+
+SAM3 encoder forward per slice (1008x1008, FP16): ~500 ms GPU, ~30 s CPU.
+MiniVess dataset: 70 volumes x 43 avg slices = 3,010 2D images per epoch.
+
+**With feature caching (RECOMMENDED):**
+
+Cache SAM3 FPN features to disk once per fold, then train only the lightweight
+decoder on cached features. This eliminates the encoder forward pass from every epoch.
+
+| Metric | GPU (RTX 2070 Super) | CPU (64 GB RAM) |
+|--------|---------------------|-----------------|
+| Cache generation (per fold) | 25 min | 25 hours |
+| Cache size (per fold) | 8.0 GB disk | 8.0 GB disk |
+| 50 epochs x 3 folds (cached) | 1.9 hours | 75.9 hours (3.2 days) |
+| 100 epochs x 3 folds (cached) | 2.5 hours | 76.5 hours (3.2 days) |
+
+Feature caching reduces training from days to hours. The decoder-only training
+(~2-4M params) is negligible regardless of device. The bottleneck is the one-time
+feature extraction pass through the frozen 840M-param encoder.
+
+**CPU feature caching is the "leave for a long weekend" option.** At 25 hours per
+fold, 3 folds complete in ~75 hours (~3 days). This is feasible for a researcher
+who starts the job Friday evening and returns Monday morning.
+
+**Without feature caching:**
+
+| Epochs x Folds | GPU (RTX 2070 Super) | CPU (64 GB RAM) |
+|----------------|---------------------|-----------------|
+| 10 x 3 | 13 hours (0.5 days) | 752 hours (31 days) |
+| 50 x 3 | 63 hours (2.6 days) | 3,762 hours (157 days) |
+| 100 x 3 | 125 hours (5.2 days) | 7,525 hours (314 days) |
+
+Without caching, CPU training is not feasible for any reasonable number of epochs.
+GPU training without caching is feasible but slow (2.6 days for 50 epochs).
+
+#### V2 TopoLoRA Training Times
+
+V2 requires backward pass through the LoRA-adapted encoder. Training step =
+forward + backward ~ 3x forward time per slice.
+
+| Epochs x Folds | A100-40GB (est.) | CPU (64 GB RAM) |
+|----------------|-----------------|-----------------|
+| 50 x 3 | ~38 hours | 11,288 hours (470 days) |
+| 100 x 3 | ~75 hours | 22,575 hours (941 days) |
+
+**CPU V2 training is completely infeasible.** Even with a one-week holiday, only
+~168 hours are available, covering <2% of the 50-epoch workload.
+
+**Cloud A100 spot pricing (approximate, 2026):**
+
+| Provider | $/hour (A100-40GB) | 3 folds x 50 epochs (~18h) | Notes |
+|----------|-------------------|---------------------------|-------|
+| vast.ai / Thunder | ~$0.66-0.80 | **$12-14** | Community spots, variable availability |
+| Lambda Cloud | ~$1.10-1.29 | **$20-23** | Reliable, SkyPilot-supported |
+| RunPod | ~$1.64 | **$30** | Community cloud, SkyPilot-supported |
+| GCP a2-highgpu-1g spot | ~$3-5 | **$54-90** | Enterprise-grade, auto-restart |
+
+Total cloud cost for V2 TopoLoRA (3 folds x 50 epochs): **$12-90 USD** depending
+on provider. Compare to ~193 EUR in electricity for 153 days of CPU training.
+Cloud is **~10x cheaper and ~200x faster** than CPU.
+
+**Alternative: QLoRA (4-bit) + Gradient Checkpointing on RTX 2070 Super**
+
+The CPU training research agent identified a promising local option for V2 TopoLoRA:
+- **QLoRA** (4-bit NF4 quantization via bitsandbytes): reduces the 840M frozen encoder
+  from 1.68 GB (FP16) to ~0.42 GB (4-bit), freeing ~1.26 GB VRAM.
+- **Per-block gradient checkpointing**: reduces activation memory from ~20 GB
+  (504 MB/block × 32 blocks held simultaneously) to ~504 MB (only 1 block at a time,
+  recomputed during backward pass).
+- **Combined estimate**: model weights (0.42 GB) + LoRA params (0.02 GB) +
+  single-block activations (0.5 GB) + optimizer (0.08 GB) + overhead ≈ **~2.7 GB**.
+- This leaves ~5 GB headroom on the 8 GB RTX 2070 Super.
+
+**Tradeoff:** Gradient checkpointing trades compute time for VRAM — expect ~30-50%
+slower training per step. QLoRA introduces quantization noise in the frozen encoder
+features, which may slightly reduce accuracy vs. FP16 LoRA.
+
+**Status:** Not yet implemented. Requires adding bitsandbytes quantization support
+to `Sam3Backbone._load_sam3_encoder()` and gradient checkpointing to the ViT blocks.
+This is a P2 implementation task.
+
+**Detailed VRAM breakdown (why attention memory is the real bottleneck):**
+
+The naive assumption is that model weights (1.68 GB FP16) and optimizer states dominate
+VRAM. In reality, **attention activation memory** is the dominant consumer for LoRA
+training on large ViTs:
+
+| Component (per ViT block, FP16) | Size | Notes |
+|--------------------------------|------|-------|
+| Attention weight matrix (n^2 × heads) | **504 MB** | n=3969 patches for 1008×1008 |
+| FFN intermediate activations | 41 MB | |
+| Q, K, V projection tensors | 31 MB | |
+| Other activations | 51 MB | |
+| **Total per block** | **626 MB** | |
+| **× 32 blocks (held simultaneously)** | **20 GB** | Without checkpointing |
+
+This explains why V2 TopoLoRA needs 12-16 GB even though the model weights are only
+1.68 GB — the activation memory for backprop through 32 transformer blocks is ~20 GB.
+
+**Gradient checkpointing strategies:**
+
+| Strategy | Activation memory | Compute overhead | Total VRAM (QLoRA) |
+|----------|------------------|------------------|--------------------|
+| No checkpointing | 20.0 GB | 0% | ~22.7 GB |
+| sqrt(N) checkpointing | 6.89 GB | ~20% | ~8.3 GB (tight) |
+| **Every-block checkpointing** | **1.25 GB** | **~30-50%** | **~2.7 GB** |
+| Every-block + 512×512 input | 0.13 GB | ~30-50% | ~1.6 GB |
+
+Every-block checkpointing recomputes each block's activations during backward pass
+instead of storing all 32 blocks simultaneously. Combined with QLoRA (4-bit encoder
+weights), total VRAM drops to ~2.7 GB — fitting the 8 GB RTX 2070 Super with 5 GB
+headroom. The 30-50% compute overhead is acceptable for a research training run.
+
+**MiniVess 512×512 input optimization:** MiniVess volumes are natively 512×512 in XY.
+SAM3 resizes input to 1008×1008. If we pass 512×512 directly (adjusting RoPE positional
+embeddings), attention memory drops by ~4× (n=1024 patches vs n=3969), making even
+FP16 LoRA feasible on 8 GB without quantization. This requires verification that
+SAM3's RoPE supports arbitrary input sizes (the HF config shows `pretrain_image_size=336`,
+suggesting resolution flexibility).
+
+**Electricity cost comparison (CPU training):**
+
+A full 3-fold × 50-epoch V2 TopoLoRA run on CPU takes ~153 days of continuous computation.
+At ~350W average system power draw:
+- Energy: 153 days × 24h × 0.35 kW = ~1,288 kWh
+- Cost (EU average ~0.15 EUR/kWh): ~193 EUR
+
+Compare to cloud A100 spot: **$12-24 USD for 18 hours**. Cloud is ~10x cheaper and
+~200x faster than CPU training.
+
+**Note for resource-constrained researchers:** The "poor grad student on a desktop"
+scenario is explicitly supported by this architecture. V1 Vanilla and V3 Hybrid with
+feature caching work on CPU (3 days). V2 TopoLoRA with QLoRA + gradient checkpointing
+may work on consumer GPUs with as little as 4 GB VRAM (pending verification). When
+real hardware is available, the same Prefect + Docker + SkyPilot infrastructure scales
+to multi-GPU cloud training without code changes — only the `--compute` parameter changes.
+
+#### V3 Hybrid Training Times
+
+V3 Hybrid can use the same feature caching strategy as V1 Vanilla (the SAM3
+encoder is frozen in both). The DynUNet-3D component trains on the full 3D volume.
+
+| Metric | GPU (RTX 2070 Super) | Notes |
+|--------|---------------------|-------|
+| SAM3 feature cache (per fold) | 25 min | Same as V1 |
+| DynUNet-3D training, 50 epochs | ~4-8 hours | Trains on cached SAM features + raw volume |
+| Total (50 epochs x 3 folds) | ~13-25 hours | Feasible locally |
+
+V3 Hybrid is the most architecturally complex variant but its training time is
+comparable to V1 Vanilla thanks to the frozen encoder + feature caching.
+
+### 16.8 Feature Caching Implementation
+
+The `sam3_feature_cache.py` module already supports saving and loading cached
+features. The recommended training workflow for V1 Vanilla and V3 Hybrid:
+
+```
+Step 1: Generate feature cache (one-time per fold)
+  - Load SAM3 model in FP16
+  - For each training volume:
+    - For each Z-slice:
+      - Extract FPN features (256-dim, 72x72)
+    - Stack → (1, 256, D, 72, 72)
+    - Save to disk as .pt file
+  - Total: 25 min GPU / 25 hours CPU per fold
+
+Step 2: Train decoder on cached features
+  - Load cached features from disk (8 GB per fold)
+  - Train decoder/DynUNet using cached features as input
+  - No SAM3 encoder needed during training
+  - Training speed: 50 epochs in ~1 hour (decoder-only)
+```
+
+Disk space requirement: 8 GB per fold x 3 folds = 24 GB total. This is well
+within the available disk space and eliminates the encoder bottleneck entirely.
+
+### 16.9 Scientific Claim Verification (Independent Web Search)
+
+All major factual claims in sections 1-15 were independently verified via web search
+against primary sources (arXiv, HuggingFace, GitHub). Results:
+
+| # | Claim | Verdict | Detail |
+|---|-------|---------|--------|
+| 1 | SAM3 = arXiv:2511.16719, ViT-32L, 848M, 1008x1008 | **VERIFIED** | All architectural details confirmed |
+| 2 | transformers 5.2.0 contains Sam3Model | **PARTIALLY** | Sam3Model was added in v5.0.0, not 5.2.0. >=5.2.0 works but overstates minimum. |
+| 3 | VRAM: inference 4-6 GB (GH #235), OOM >24 GB (GH #307) | **PARTIALLY** | Inference 4-6 GB confirmed. GH #307 is about memory leakage, not directly "OOM at 24 GB". |
+| 4 | VesselFM: MiniVess is class 21, zero-shot Dice numbers | **VERIFIED** | Class 21 in Table 1, all Dice numbers match Table 2 exactly. CVPR 2025. |
+| 5 | TopoLoRA-SAM (Khazem 2026): r=16, clDice, CHASE_DB1 0.569 | **VERIFIED** | All numbers confirmed from Table 2 and Section 4.2. |
+| 6 | Conv-LoRA (Zhong et al. 2024): ICLR 2024, MoE experts | **VERIFIED** | Accepted at ICLR 2024, architecture confirmed. |
+| 7 | MedSAM2: 455K pairs, model size irrelevant | **VERIFIED** | arXiv:2504.03600, all claims confirmed. |
+| 8 | Ma et al. 2024: Aorta 0.1835 → 0.6397 DSC | **VERIFIED** | Numbers match Table 5 exactly. |
+| 9 | SAM3 checkpoint ~3.2 GB | **PARTIALLY** | Actual: 3.44-3.45 GB per HF file listing. Understated by ~7%. |
+| 10 | ConformalSAM: VOC drops 50.65 → 42.00 with uncalibrated SAM | **VERIFIED** | ICCV 2025, numbers from Table 1 confirmed. |
+
+**Summary:** 7/10 fully verified, 3/10 partially correct with cosmetic inaccuracies.
+No claim would lead to an incorrect engineering decision.
+
+### 16.10 Multi-Environment Compute: From Desktop to Cloud
+
+This project follows Design Goal #1 (EXCELLENT DevEx): everything must work
+identically from a grad student's desktop to an on-prem server to cloud GPUs.
+SAM3 training supports this continuum:
+
+#### Tier 1: CPU-only Desktop (no GPU, 32-64 GB RAM)
+
+A grad student or undergrad researcher with only a CPU desktop can still contribute
+to the SAM3 work using **feature caching**:
+
+1. Download SAM3 weights (~3.45 GB) and extract features for all MiniVess volumes.
+   This is a one-time job: ~25 hours per fold on CPU, ~75 hours total.
+   **Leave it running over a long weekend** — start Friday evening, done Monday.
+
+2. Once features are cached to disk (24 GB total for 3 folds), decoder-only training
+   is trivially fast even on CPU (~1 hour for 100 epochs).
+
+3. V1 Vanilla and V3 Hybrid both use frozen encoders, so both benefit from caching.
+   V2 TopoLoRA (LoRA on encoder) requires a GPU and cannot use caching.
+
+**Practical workflow for CPU-only researchers:**
+```bash
+# Step 1: Cache features (leave overnight or over weekend)
+prefect deployment run 'cache-sam3-features/default' --params '{"fold": 0}'
+prefect deployment run 'cache-sam3-features/default' --params '{"fold": 1}'
+prefect deployment run 'cache-sam3-features/default' --params '{"fold": 2}'
+
+# Step 2: Train decoder on cached features (fast, ~1 hour)
+prefect deployment run 'train-flow/default' \
+  --params '{"model_family": "sam3_vanilla", "use_cached_features": true}'
+```
+
+#### Tier 2: Consumer GPU (RTX 2070 Super, 8 GB VRAM)
+
+V1 Vanilla and V3 Hybrid are both feasible in FP16:
+- Feature caching: 25 min per fold (vs. 25 hours on CPU — **60x speedup**)
+- Decoder training: 2-25 hours depending on variant and epochs
+- **MUST use FP16**, not BF16 (BF16 is 6.7x slower on Turing GPUs)
+
+V2 TopoLoRA requires >8 GB VRAM and must use cloud or on-prem GPU.
+
+#### Tier 3: Research GPU (A100-40GB, on-prem or cloud spot)
+
+All three variants are comfortable. V2 TopoLoRA training takes ~13 hours per fold.
+Cloud A100 spot instances cost ~$1-5/hour depending on provider, making a full
+3-fold experiment feasible for **$40-190 USD**.
+
+#### The Same Infrastructure Scales
+
+The critical design decision: **Prefect flows + Docker isolation + SkyPilot compute**
+mean the same YAML config runs identically on all three tiers. The researcher changes
+one parameter (`--compute cpu`, `--compute local_gpu`, `--compute cloud_a100`) and
+the platform handles everything else.
+
+### 16.11 Corrected Executive Summary Table
+
+| Claim (from Section 0) | Previous Status | Corrected Status (Opus 4.6 Review) |
+|------------------------|-----------------|-------------------------------------|
+| "SAM3 is implemented" | Stub-only | **Stub removed, real adapters exist, no real training yet** |
+| "SAM3 requires >= 16 GB" | Wrong | **CONFIRMED: inference/frozen = 6 GB, LoRA = 16 GB** |
+| "torchvision was installed" | Fixed | **CONFIRMED fixed** |
+| "SAM3 can run on RTX 2070 Super" | V1 only | **V1 AND V3 feasible (5-7 GB). V2 requires A100.** |
+| "Training pipeline calls build_adapter()" | Not wired | **ALREADY FIXED — build_adapter() at line 620** |
+| "BF16 is the correct dtype" | Assumed | **WRONG for Turing. Use FP16 (6.7x faster).** |
+| "V3 Hybrid requires 18-22 GB" | Assumed | **WRONG. Sequential execution = 5-7 GB peak.** |
+| "CPU training is feasible" | Not evaluated | **V1+cache: 3 days. V2 LoRA: 470 days (infeasible).** |

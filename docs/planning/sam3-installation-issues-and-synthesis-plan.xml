@@ -1,0 +1,777 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SAM3 Variants Implementation Plan (v2 — post-review)
+  =====================================================
+  Branch: feat/sam3-qlora (from feat/sam3-remove-stub)
+  Date: 2026-03-07
+  Author: Opus 4.6 cold-start review session
+  Reviewed by: 3 parallel agents (feasibility, architecture, TDD)
+
+  Goal: Implement QLoRA variant (V4), fix V3 gradient bug, create experiment
+  configs for full SAM3 comparison study on RTX 2070 Super (8 GB).
+
+  CRITICAL FINDING FROM REVIEW (arXiv:2502.00418):
+  ViTs are ACTIVATION-BOUND, not parameter-bound. QLoRA on SAM ViT provides
+  negligible VRAM savings over standard LoRA (~0.1-1.5 GB). The plan's original
+  3-4 GB estimate was wrong. Revised to 6-8 GB (borderline on 8 GB GPU).
+
+  However, the academic value is REAL:
+  1. Demonstrating the negative result (QLoRA on ViTs != QLoRA on LLMs)
+  2. Comparing segmentation quality with 4-bit quantized weights
+  3. Testing "late QLoRA" (LoRA on last 8 layers only) as genuine VRAM saver
+  4. Benchmarking 4-bit vs full-precision on real biomedical data
+
+  Variant Matrix (revised post-review):
+  ┌──────────────────┬──────────┬───────────┬──────────────────────────────────┐
+  │ Variant          │ VRAM     │ Feasible? │ Status                           │
+  ├──────────────────┼──────────┼───────────┼──────────────────────────────────┤
+  │ V1 Vanilla       │ ~6 GB    │ YES       │ DONE — ready to train            │
+  │ V2 TopoLoRA      │ ~16 GB   │ NO (8GB)  │ DONE — needs A100                │
+  │ V3 Hybrid        │ ~5-7 GB  │ YES       │ DONE — has gradient bug (T-06)   │
+  │ V4 QLoRA (NEW)   │ ~6-8 GB  │ BORDERLINE│ TO BUILD — 4-bit + peft LoRA     │
+  │ V4b Late QLoRA   │ ~5-6 GB  │ YES       │ TO BUILD — LoRA on layers 24-31  │
+  └──────────────────┴──────────┴───────────┴──────────────────────────────────┘
+
+  Key: V4b "Late QLoRA" applies LoRA only to the last 8 (of 32) encoder layers,
+  providing genuine VRAM savings by reducing activation memory. This is the
+  approach recommended by arXiv:2502.00418 for consumer GPUs.
+
+  Dependencies to add: bitsandbytes (OPTIONAL — [qlora] extra)
+  Already present: peft>=0.14 (core dep)
+
+  Review findings incorporated (30+ items from 3 reviewers):
+  - Feasibility: 2 BLOCKERS, 2 RISKS, 2 CONFIRMED
+  - Architecture: 1 CRITICAL, 5 IMPORTANT, 6 MINOR
+  - TDD: 4 CRITICAL, 4 IMPORTANT
+  See: Review Summary section at end of file
+-->
+<plan>
+  <metadata>
+    <title>SAM3 QLoRA + Variant Comparison Study (v2)</title>
+    <branch>feat/sam3-qlora</branch>
+    <parent_branch>feat/sam3-remove-stub</parent_branch>
+    <total_tasks>13</total_tasks>
+    <phases>4</phases>
+    <estimated_tests>~55 new tests</estimated_tests>
+    <review_status>3/3 reviewers complete, all findings incorporated</review_status>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       CI TEST STRATEGY (from TDD reviewer — CRITICAL)
+       ═══════════════════════════════════════════════════════════════════
+
+       All QLoRA tests split into two tiers:
+
+       Tier 1 (CI-safe, always runs):
+         - AST checks (no stub patterns)
+         - Config validation (YAML parsing, enum values)
+         - VRAM check with mocked hardware
+         - Import guard tests (graceful error when bnb missing)
+
+       Tier 2 (GPU-only, skipped in CI):
+         - Model instantiation, forward pass, gradient flow
+         - VRAM profiling gates
+         - Integration tests
+
+       Skip markers:
+         _sam3_skip = pytest.mark.skipif(not _sam3_package_available(), ...)
+         _qlora_skip = pytest.mark.skipif(
+             not _sam3_package_available() or not _bnb_available(), ...
+         )
+
+       RED phase for GPU-required tests: run on development machine (RTX 2070),
+       not CI. CI RED verification comes from Tier 1 tests only.
+  -->
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 1: QLoRA Infrastructure (dependencies + config + VRAM)
+       ═══════════════════════════════════════════════════════════════════ -->
+  <phase id="1" name="QLoRA Infrastructure">
+    <description>
+      Add bitsandbytes as optional dependency, extend ModelFamily enum,
+      add availability check, update VRAM dispatch to use mode string.
+    </description>
+
+    <task id="T-01" status="NOT_STARTED">
+      <title>Add bitsandbytes optional dep, ModelFamily.SAM3_QLORA, cleanup SAM3_LORA</title>
+      <description>
+        1. Add bitsandbytes to pyproject.toml as OPTIONAL dependency:
+           [project.optional-dependencies]
+           qlora = ["bitsandbytes>=0.45"]
+           (NOT core — bnb requires CUDA, breaks macOS/CPU installs)
+
+        2. Add SAM3_QLORA = "sam3_qlora" to ModelFamily enum.
+
+        3. Remove stale SAM3_LORA = "sam3_lora" from ModelFamily enum
+           (deprecated, no adapter implementation, no build_adapter case).
+
+        4. Add _bnb_available() utility to model_builder.py:
+           def _bnb_available() -> bool:
+               try:
+                   import bitsandbytes; return True
+               except ImportError:
+                   return False
+
+        5. Add _BNB_INSTALL_INSTRUCTIONS with clear error message:
+           "SAM3 QLoRA requires bitsandbytes. Install: uv add bitsandbytes"
+
+        Note: peft is already a core dependency (pyproject.toml line 35).
+        Do NOT add it again.
+      </description>
+      <test_file>tests/unit/adapters/test_sam3_qlora_config.py</test_file>
+      <files>
+        <file action="modify">pyproject.toml</file>
+        <file action="modify">src/minivess/config/models.py</file>
+        <file action="modify">src/minivess/adapters/model_builder.py</file>
+      </files>
+      <tests>
+        <test tier="1">test ModelFamily.SAM3_QLORA enum value exists and equals "sam3_qlora"</test>
+        <test tier="1">test ModelFamily has no SAM3_LORA value (removed)</test>
+        <test tier="1">test ModelConfig accepts architecture_params with quantize_4bit=True</test>
+        <test tier="1">test _bnb_available() returns bool without crashing</test>
+      </tests>
+    </task>
+
+    <task id="T-02" status="NOT_STARTED" depends="T-01">
+      <title>Refactor VRAM check: encoder_frozen → vram_mode string dispatch</title>
+      <description>
+        REVIEWER FINDING: The current _require_sam3(encoder_frozen: bool) creates a
+        mode gap for QLoRA (encoder not frozen, but VRAM is 6 GB not 16 GB).
+
+        Refactor:
+        1. Change _require_sam3() signature from encoder_frozen: bool to
+           vram_mode: str accepting "inference", "training", "qlora".
+
+        2. Add MIN_VRAM_QLORA_MB = 6_144 (6 GB — same as inference, because
+           QLoRA saves weight memory but activation memory dominates on ViTs).
+           Original plan said 4 GB but arXiv:2502.00418 shows this is wrong.
+
+        3. Update build_adapter() dispatch table:
+           SAM3_VANILLA  → vram_mode="inference"   (6 GB)
+           SAM3_TOPOLORA → vram_mode="training"    (16 GB)
+           SAM3_HYBRID   → vram_mode="inference"   (6 GB)
+           SAM3_QLORA    → vram_mode="qlora"        (6 GB)
+
+        4. Add _require_bnb() check before QLoRA — raises RuntimeError with
+           install instructions if bitsandbytes not available.
+      </description>
+      <test_file>tests/unit/adapters/test_sam3_vram_check.py</test_file>
+      <files>
+        <file action="modify">src/minivess/adapters/sam3_vram_check.py</file>
+        <file action="modify">src/minivess/adapters/model_builder.py</file>
+      </files>
+      <tests>
+        <test tier="1">test check_sam3_vram(mode="qlora") passes with 6 GB+ VRAM (mocked)</test>
+        <test tier="1">test check_sam3_vram(mode="qlora") raises RuntimeError with 4 GB (mocked)</test>
+        <test tier="1">test check_sam3_vram rejects unknown mode strings</test>
+        <test tier="1">test _require_sam3 accepts vram_mode string parameter</test>
+        <test tier="1">test build_adapter(SAM3_QLORA) raises RuntimeError when bnb not installed
+              (mock _bnb_available() → False)</test>
+      </tests>
+    </task>
+
+    <task id="T-03" status="NOT_STARTED" depends="T-01">
+      <title>Sam3QLoraBackbone — quantized backbone with peft LoRA</title>
+      <description>
+        Create sam3_qlora_backbone.py wrapping Sam3Model with BitsAndBytesConfig
+        for 4-bit NF4 quantization + peft LoRA adapters.
+
+        REVIEWER FINDINGS incorporated:
+        1. target_modules: ["q_proj", "v_proj"] (confirmed from Sam3ViTRoPEAttention)
+           Configurable via architecture_params.lora_targets for experimentation.
+
+        2. Gradient checkpointing is MANDATORY (not optional) because ViTs are
+           activation-bound. Call model.gradient_checkpointing_enable(
+           gradient_checkpointing_kwargs={"use_reentrant": False}).
+
+        3. "Late QLoRA" mode: when architecture_params.lora_layers is set
+           (e.g., [24,25,26,27,28,29,30,31]), apply LoRA only to those layers.
+           This provides genuine VRAM savings on ViTs.
+
+        4. Lazy import of bitsandbytes — ImportError produces clear RuntimeError
+           with installation instructions (never silent-fail).
+
+        5. Shares preprocessing logic with Sam3Backbone (_preprocess method).
+           Extract to a shared mixin or utility if duplication exceeds 3 methods.
+
+        Loading flow:
+          bnb_config = BitsAndBytesConfig(
+              load_in_4bit=True,
+              bnb_4bit_quant_type="nf4",
+              bnb_4bit_compute_dtype=torch.float16,  # AMP handles this
+              bnb_4bit_use_double_quant=True,
+          )
+          model = Sam3Model.from_pretrained("facebook/sam3",
+              quantization_config=bnb_config, device_map="auto", token=hf_token)
+          model.gradient_checkpointing_enable(
+              gradient_checkpointing_kwargs={"use_reentrant": False})
+          peft_config = LoraConfig(r=16, lora_alpha=32,
+              target_modules=["q_proj", "v_proj"], ...)
+          model = get_peft_model(model, peft_config)
+          self.encoder = model.vision_encoder
+      </description>
+      <test_file>tests/v2/unit/test_sam3_qlora_backbone.py</test_file>
+      <files>
+        <file action="create">src/minivess/adapters/sam3_qlora_backbone.py</file>
+      </files>
+      <tests>
+        <test tier="1">test importing sam3_qlora_backbone without bnb raises RuntimeError
+              with install instructions (not ImportError)</test>
+        <test tier="2">test Sam3QLoraBackbone creates without error (requires SAM3+GPU+bnb)</test>
+        <test tier="2">test quantized model weights are frozen (requires_grad=False)</test>
+        <test tier="2">test LoRA adapter weights are trainable (requires_grad=True)</test>
+        <test tier="2">test gradient checkpointing is enabled on encoder</test>
+        <test tier="2">test extract_features returns correct shape (B, 256, H_feat, W_feat)</test>
+        <test tier="2">test total trainable params &lt;5M (LoRA on q_proj+v_proj only)</test>
+        <test tier="2">test late_qlora mode (lora_layers=[24..31]) applies LoRA to 8 layers only</test>
+      </tests>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 2: QLoRA Adapter + Factory
+       ═══════════════════════════════════════════════════════════════════ -->
+  <phase id="2" name="QLoRA Adapter">
+    <description>
+      Build Sam3QLoraAdapter implementing ModelAdapter ABC.
+      Handle checkpoint save/load for quantized+peft models.
+      Handle ONNX export via dequantize-merge-export pipeline.
+      Wire into model_builder factory.
+    </description>
+
+    <task id="T-04" status="NOT_STARTED" depends="T-03">
+      <title>Sam3QLoraAdapter — full adapter with checkpoint and ONNX handling</title>
+      <description>
+        Create sam3_qlora.py implementing Sam3QLoraAdapter(ModelAdapter).
+
+        REVIEWER FINDINGS incorporated:
+
+        1. CHECKPOINT FORMAT (CRITICAL — peft save_pretrained creates directory):
+           save_checkpoint(path) creates a directory at path.with_suffix(''):
+             path_dir/
+               decoder_state_dict.pt     — standard torch.save
+               peft_adapter/             — peft save_pretrained directory
+                 adapter_config.json
+                 adapter_model.safetensors
+               manifest.json             — links both, records peft version
+           load_checkpoint(path) must:
+             a. Re-create quantized backbone from scratch (BitsAndBytesConfig)
+             b. Load peft adapter via model.load_adapter()
+             c. Load decoder state_dict
+
+        2. ONNX EXPORT (BLOCKER — bnb NF4 has no ONNX operator):
+           export_onnx() implements dequantize-merge-export pipeline:
+             a. Load base Sam3Model in FP16 (not quantized) — ~1.7 GB
+             b. Load peft adapter onto FP16 model
+             c. merge_and_unload() — merges LoRA into base weights
+             d. Export merged FP16 model to ONNX via _LogitsWrapper pattern
+           Note: merge_and_unload() FAILS on quantized models but works on FP16.
+           This means ONNX export needs ~1.7 GB + activations. Add warning.
+
+        3. DECODER REUSE (IMPORTANT — avoid double model load):
+           Do NOT instantiate a separate Sam3MaskDecoder (which loads full model).
+           Instead, extract decoder from the already-loaded quantized model:
+             self.decoder_module = model.sam_mask_decoder  # from same load
+           If Sam3MaskDecoder must be used, add constructor param to accept
+           a pre-loaded decoder module.
+
+        4. merge_and_unload() is NOT available on quantized models. Never call it
+           except during ONNX export (which uses a separate FP16 model load).
+      </description>
+      <test_file>tests/v2/unit/test_sam3_qlora.py</test_file>
+      <files>
+        <file action="create">src/minivess/adapters/sam3_qlora.py</file>
+      </files>
+      <tests>
+        <test tier="2">test adapter creates from ModelConfig with SAM3_QLORA family</test>
+        <test tier="2">test forward produces SegmentationOutput with 2-class logits</test>
+        <test tier="2">test forward output shape matches input spatial dims (B, 2, D, H, W)</test>
+        <test tier="2">test trainable_parameters returns count (LoRA + decoder only)</test>
+        <test tier="2">test gradient flows through LoRA adapters (backward produces nonzero grads)</test>
+        <test tier="2">test get_config returns variant="qlora" and lora_rank info</test>
+        <test tier="2">test save_checkpoint creates directory with manifest.json + peft_adapter/</test>
+        <test tier="2">test save_checkpoint + load_checkpoint round-trip preserves weights</test>
+        <test tier="2">test export_onnx uses dequantize-merge pipeline (produces valid ONNX)</test>
+        <test tier="1">test adapter raises RuntimeError on CPU-only system (not opaque CUDA error)</test>
+      </tests>
+    </task>
+
+    <task id="T-05" status="NOT_STARTED" depends="T-04,T-02">
+      <title>Wire SAM3_QLORA into model_builder factory</title>
+      <description>
+        Add SAM3_QLORA case to build_adapter() in model_builder.py.
+        Dispatch chain:
+          1. Check _sam3_package_available() — same as other SAM3 variants
+          2. Check _bnb_available() — QLoRA-specific, raises with install instructions
+          3. Check VRAM via _require_sam3(config, vram_mode="qlora")
+          4. Check HF token via require_hf_token()
+          5. Return Sam3QLoraAdapter(config)
+      </description>
+      <test_file>tests/v2/unit/test_sam3_qlora.py</test_file>
+      <files>
+        <file action="modify">src/minivess/adapters/model_builder.py</file>
+      </files>
+      <tests>
+        <test tier="2">test build_adapter(SAM3_QLORA config) returns Sam3QLoraAdapter</test>
+        <test tier="1">test build_adapter(SAM3_QLORA) raises RuntimeError when SAM3 missing</test>
+        <test tier="1">test build_adapter(SAM3_QLORA) raises RuntimeError when bnb missing</test>
+        <test tier="1">test error message includes "uv add bitsandbytes" install instructions</test>
+      </tests>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 3: Bug Fixes + Config Cleanup
+       ═══════════════════════════════════════════════════════════════════ -->
+  <phase id="3" name="Bug Fixes and Config Cleanup">
+    <description>
+      Fix V3 Hybrid gradient bug. Clean up misleading config values.
+      Update no-stub tests for new variant.
+    </description>
+
+    <task id="T-06" status="NOT_STARTED">
+      <title>Fix V3 Hybrid gradient bug — .detach() + refactor inline fusion</title>
+      <description>
+        REVIEWER FINDINGS (architecture + TDD) — expanded scope:
+
+        BUG: axial_proj (Conv3d, ~197K params) never receives gradients.
+
+        ROOT CAUSE: Two .detach() sites plus code duplication.
+
+        1. Sam3HybridAdapter.forward() line 213:
+           sam_projected = self.fusion.proj(sam_features.detach())
+           → .detach() cuts gradient to axial_proj (which sits between
+             frozen encoder and this call)
+
+        2. GatedFeatureFusion.forward() line 80:
+           projected: Tensor = self.proj(f_sam.detach())
+           → Same bug, but this method is DEAD CODE (never called by adapter —
+             adapter manually reimplements the fusion logic)
+
+        3. The adapter's forward() bypasses self.fusion() entirely, calling
+           self.fusion.proj() and self.fusion.gate_alpha directly (lines 213-223).
+           This code duplication is what caused the bug.
+
+        FIX (3 parts):
+        a. Remove .detach() from line 213 of Sam3HybridAdapter.forward()
+           (torch.no_grad() on SAM encoder already prevents gradient to frozen params)
+        b. Remove .detach() from line 80 of GatedFeatureFusion.forward()
+           (prevent same bug if someone refactors to use self.fusion() properly)
+        c. Refactor Sam3HybridAdapter.forward() to actually call
+           self.fusion(logits, sam_features) instead of reimplementing inline
+      </description>
+      <test_file>tests/v2/unit/test_sam3_hybrid.py</test_file>
+      <files>
+        <file action="modify">src/minivess/adapters/sam3_hybrid.py</file>
+      </files>
+      <tests>
+        <test tier="2">test axial_proj weights receive gradients after backward pass</test>
+        <test tier="2">test GatedFeatureFusion.proj weights receive gradients</test>
+        <test tier="2">test GatedFeatureFusion.gate_alpha receives gradients</test>
+        <test tier="2">test frozen SAM3 encoder params still have requires_grad=False</test>
+        <test tier="2">test forward output shape unchanged after fix</test>
+        <test tier="2">test self.fusion() is called (not bypassed) in forward()</test>
+      </tests>
+    </task>
+
+    <task id="T-07" status="NOT_STARTED" depends="T-01">
+      <title>Clean up SAM3 YAML configs + create QLoRA configs</title>
+      <description>
+        1. Remove "pretrained: false" from all SAM3 model/experiment YAMLs
+           (SAM3 ALWAYS loads pretrained — field is ignored but misleading)
+        2. Change V1 vanilla baseline loss to cbdice_cldice (project default)
+        3. Create configs/model/sam3_qlora.yaml with:
+           - quantize_4bit: true
+           - lora_rank: 16
+           - lora_alpha: 32
+           - lora_targets: [q_proj, v_proj]
+           - gradient_checkpointing: true
+        4. Create configs/experiment/sam3_qlora_topology.yaml
+        5. Create configs/experiment/sam3_late_qlora_topology.yaml
+           (lora_layers: [24,25,26,27,28,29,30,31])
+        6. Create configs/experiment/sam3_comparison.yaml (all variants)
+
+        Note: T-07 depends on T-01 because configs reference sam3_qlora model family.
+      </description>
+      <test_file>tests/v2/unit/test_sam3_debug_configs.py</test_file>
+      <files>
+        <file action="modify">configs/model/sam3_vanilla.yaml</file>
+        <file action="modify">configs/model/sam3_topolora.yaml</file>
+        <file action="modify">configs/model/sam3_hybrid.yaml</file>
+        <file action="create">configs/model/sam3_qlora.yaml</file>
+        <file action="modify">configs/experiment/sam3_vanilla_baseline.yaml</file>
+        <file action="modify">configs/experiment/sam3_topolora_topology.yaml</file>
+        <file action="create">configs/experiment/sam3_qlora_topology.yaml</file>
+        <file action="create">configs/experiment/sam3_late_qlora_topology.yaml</file>
+        <file action="create">configs/experiment/sam3_comparison.yaml</file>
+      </files>
+      <tests>
+        <test tier="1">test all SAM3 model YAML configs parse without errors</test>
+        <test tier="1">test no SAM3 config contains "pretrained: false"</test>
+        <test tier="1">test sam3_qlora.yaml specifies quantize_4bit: true</test>
+        <test tier="1">test sam3_late_qlora has lora_layers with 8 entries</test>
+        <test tier="1">test sam3_comparison.yaml lists all 5 variants (V1-V4b)</test>
+      </tests>
+    </task>
+
+    <task id="T-08" status="NOT_STARTED" depends="T-05">
+      <title>Update enforcement tests for SAM3_QLORA</title>
+      <description>
+        1. Add sam3_qlora.py and sam3_qlora_backbone.py to no-stub AST checks.
+        2. Update VRAM check tests for new "qlora" mode.
+        3. Add _bnb_available() to the import guard test matrix.
+      </description>
+      <test_file>tests/unit/adapters/test_no_sam3_stub.py</test_file>
+      <files>
+        <file action="modify">tests/unit/adapters/test_no_sam3_stub.py</file>
+        <file action="modify">tests/unit/adapters/test_sam3_vram_check.py</file>
+      </files>
+      <tests>
+        <test tier="1">test sam3_qlora.py has no stub/fallback patterns (AST check)</test>
+        <test tier="1">test sam3_qlora_backbone.py has no stub/fallback patterns (AST check)</test>
+        <test tier="1">test VRAM check mode="qlora" is covered</test>
+      </tests>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 4: Integration + Observability
+       ═══════════════════════════════════════════════════════════════════ -->
+  <phase id="4" name="Integration and Observability">
+    <description>
+      Feature caching for V1/V3, VRAM profiling for empirical verification,
+      documentation update.
+    </description>
+
+    <task id="T-09" status="NOT_STARTED">
+      <title>Feature caching Prefect task for V1/V3</title>
+      <description>
+        Add a Prefect task in the training flow that optionally runs feature
+        extraction before training when model_family is sam3_vanilla or sam3_hybrid
+        and architecture_params.use_cached_features is true.
+
+        Flow: extract features → save to cache_dir → train decoder on cached features.
+
+        The existing sam3_feature_cache.py module handles extraction and loading.
+        This task wires it into the Prefect training flow.
+
+        IMPORTANT: cache_dir must be a Docker volume mount (/data/sam3_cache),
+        NOT /tmp (per CLAUDE.md rule #18).
+      </description>
+      <test_file>tests/v2/integration/test_sam3_training_integration.py</test_file>
+      <files>
+        <file action="modify">src/minivess/orchestration/flows/train_flow.py</file>
+      </files>
+      <tests>
+        <test tier="1">test training flow config accepts use_cached_features param</test>
+        <test tier="1">test cache_dir is not under /tmp (Docker volume compliance)</test>
+        <test tier="2">test training with cached features loads from cache_dir</test>
+      </tests>
+    </task>
+
+    <task id="T-10" status="NOT_STARTED">
+      <title>VRAM profiling utility for empirical verification</title>
+      <description>
+        Add a lightweight VRAM profiler that logs peak GPU memory at key points.
+        Uses torch.cuda.reset_peak_memory_stats() before each phase, then
+        torch.cuda.max_memory_allocated() after.
+
+        Measurement methodology (from TDD reviewer):
+          1. torch.cuda.reset_peak_memory_stats()
+          2. Execute phase (model load / forward / backward)
+          3. peak_mb = torch.cuda.max_memory_allocated() / 1e6
+          4. Log to MLflow artifacts as JSON
+
+        Output: JSON dict with keys: model_load_mb, encoder_forward_peak_mb,
+        decoder_forward_peak_mb, backward_peak_mb, optimizer_step_peak_mb.
+
+        Works on CPU too (returns zeros, no crash).
+      </description>
+      <test_file>tests/v2/unit/test_vram_profiler.py</test_file>
+      <files>
+        <file action="create">src/minivess/observability/vram_profiler.py</file>
+      </files>
+      <tests>
+        <test tier="1">test VRAMProfiler records peak memory at each stage (mocked)</test>
+        <test tier="1">test VRAMProfiler.report() returns dict with expected keys</test>
+        <test tier="1">test VRAMProfiler works on CPU (returns zeros, no crash)</test>
+        <test tier="1">test VRAMProfiler.reset() clears peak stats</test>
+      </tests>
+    </task>
+
+    <task id="T-11" status="NOT_STARTED" depends="T-07">
+      <title>Update adapter CLAUDE.md with V4 QLoRA info</title>
+      <description>
+        Update src/minivess/adapters/CLAUDE.md:
+        - Add V4 QLoRA and V4b Late QLoRA to VRAM table
+        - Add sam3_qlora.py and sam3_qlora_backbone.py to Key Files table
+        - Add note about ViTs being activation-bound (QLoRA != LLM QLoRA)
+        - Remove any remaining "pretrained: false" references
+        - Note ONNX export requires dequantize-merge pipeline for QLoRA
+      </description>
+      <test_file>tests/unit/adapters/test_no_sam3_stub.py</test_file>
+      <files>
+        <file action="modify">src/minivess/adapters/CLAUDE.md</file>
+      </files>
+      <tests>
+        <test tier="1">test CLAUDE.md contains "qlora" (case-insensitive grep)</test>
+      </tests>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       GO/NO-GO GATES (revised post-review)
+       ═══════════════════════════════════════════════════════════════════ -->
+  <gates>
+    <gate id="G0" after="T-03">
+      <criterion>Sam3QLoraBackbone loads 4-bit quantized SAM3 model.
+        Measurement: torch.cuda.reset_peak_memory_stats() before load,
+        torch.cuda.max_memory_allocated() after load shows &lt;1 GB for
+        model weights (vs 1.68 GB FP16). Confirms quantization works.</criterion>
+      <action_if_fail>Check bitsandbytes version compatibility with CUDA 12.8.
+        Verify bnb_4bit_compute_dtype matches GPU capabilities.
+        Try load_in_8bit as fallback. If still fails, drop QLoRA variant.</action_if_fail>
+    </gate>
+
+    <gate id="G1" after="T-04">
+      <criterion>Sam3QLoraAdapter forward+backward with peak VRAM &lt;8 GB
+        (measured, not estimated). Input: 1×1×3×64×64 (internally processed
+        at 1008×1008 by SAM3 — the 64×64 input does NOT reduce internal
+        resolution). Methodology: reset_peak_memory_stats before forward,
+        measure after backward + optimizer.step().</criterion>
+      <action_if_fail>
+        Step 1: Switch to late QLoRA (layers 24-31 only).
+        Step 2: Reduce LoRA rank from 16 to 8.
+        Step 3: Reduce to 2 depth slices instead of 3.
+        Step 4: If still exceeds 8 GB, QLoRA is cloud-only like V2 TopoLoRA.
+      </action_if_fail>
+    </gate>
+
+    <gate id="G2" after="T-06">
+      <criterion>V3 Hybrid: axial_proj.weight.grad.abs().sum() > 0 AND
+        fusion.proj.weight.grad.abs().sum() > 0 AND
+        fusion.gate_alpha.grad is not None — all after a single backward pass.
+        Expressible as a standard pytest assertion.</criterion>
+      <action_if_fail>Trace gradient flow with register_hook() on intermediate
+        tensors to find where it breaks. The .detach() removal should be
+        sufficient given torch.no_grad() on the SAM encoder.</action_if_fail>
+    </gate>
+  </gates>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       TRAINING PLAN (post-implementation)
+       ═══════════════════════════════════════════════════════════════════ -->
+  <training_plan>
+    <description>
+      After all tasks are DONE, run the SAM3 comparison study.
+      Same dataset (MiniVess 70 vols), same loss (cbdice_cldice),
+      same epochs (50) — only model_family changes.
+
+      Academic story: 5 SAM3 adaptation strategies compared on the same
+      biomedical segmentation task, scaling from 8 GB desktop to A100 cloud.
+    </description>
+
+    <run id="R1" hardware="RTX 2070 Super (8 GB)" priority="P0">
+      <variant>sam3_vanilla</variant>
+      <loss>cbdice_cldice</loss>
+      <epochs>50</epochs>
+      <folds>3</folds>
+      <estimated_time>2h (with feature caching)</estimated_time>
+      <estimated_vram>~6 GB</estimated_vram>
+      <command>
+        prefect deployment run 'training-flow/default' \
+          --params '{"model_family": "sam3_vanilla", "loss_name": "cbdice_cldice"}'
+      </command>
+    </run>
+
+    <run id="R2" hardware="RTX 2070 Super (8 GB)" priority="P0">
+      <variant>sam3_qlora (full, all 32 layers)</variant>
+      <loss>cbdice_cldice</loss>
+      <epochs>50</epochs>
+      <folds>3</folds>
+      <estimated_time>~8-12h</estimated_time>
+      <estimated_vram>~6-8 GB (borderline — may need late QLoRA fallback)</estimated_vram>
+      <command>
+        prefect deployment run 'training-flow/default' \
+          --params '{"model_family": "sam3_qlora", "loss_name": "cbdice_cldice"}'
+      </command>
+    </run>
+
+    <run id="R2b" hardware="RTX 2070 Super (8 GB)" priority="P0">
+      <variant>sam3_qlora (late, layers 24-31 only)</variant>
+      <loss>cbdice_cldice</loss>
+      <epochs>50</epochs>
+      <folds>3</folds>
+      <estimated_time>~6-10h</estimated_time>
+      <estimated_vram>~5-6 GB</estimated_vram>
+      <note>Fallback if R2 OOMs. Also interesting comparison: full vs late LoRA.</note>
+      <command>
+        prefect deployment run 'training-flow/default' \
+          --params '{"model_family": "sam3_qlora", "loss_name": "cbdice_cldice",
+                     "architecture_params": {"lora_layers": [24,25,26,27,28,29,30,31]}}'
+      </command>
+    </run>
+
+    <run id="R3" hardware="RTX 2070 Super (8 GB)" priority="P1">
+      <variant>sam3_hybrid</variant>
+      <loss>cbdice_cldice</loss>
+      <epochs>50</epochs>
+      <folds>3</folds>
+      <estimated_time>13-25h</estimated_time>
+      <estimated_vram>~5-7 GB</estimated_vram>
+      <command>
+        prefect deployment run 'training-flow/default' \
+          --params '{"model_family": "sam3_hybrid", "loss_name": "cbdice_cldice"}'
+      </command>
+    </run>
+
+    <run id="R4" hardware="A100-40GB (cloud)" priority="P2">
+      <variant>sam3_topolora</variant>
+      <loss>cbdice_cldice</loss>
+      <epochs>50</epochs>
+      <folds>3</folds>
+      <estimated_time>~38h</estimated_time>
+      <estimated_vram>~16-20 GB</estimated_vram>
+      <note>Cloud-only. Use SkyPilot: sky launch deployment/skypilot/train_generic.yaml
+            -c sam3-topolora --env MODEL_FAMILY=sam3_topolora</note>
+    </run>
+
+    <comparison>
+      <baseline>DynUNet cbdice_cldice (already trained, DSC 0.776, clDice 0.906)</baseline>
+      <metrics>DSC, clDice, HD95, NSD, ccDice</metrics>
+      <hypothesis>
+        V1 (vanilla frozen) &lt; V4 (QLoRA) ≈ V2 (TopoLoRA) &lt; DynUNet baseline.
+        V3 (hybrid) may exceed DynUNet if gated fusion learns useful features.
+        Key academic findings:
+        1. QLoRA vs standard LoRA quality gap on biomedical ViT segmentation
+        2. Full QLoRA vs late QLoRA (layers 24-31): VRAM vs quality tradeoff
+        3. Whether quantization-induced noise hurts fine-grained vessel topology
+        4. Demonstration that ViTs are activation-bound (QLoRA ≠ LLM experience)
+      </hypothesis>
+    </comparison>
+  </training_plan>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       REVIEW SUMMARY (from 3 parallel reviewer agents)
+       ═══════════════════════════════════════════════════════════════════ -->
+  <review_summary>
+    <reviewer name="Technical Feasibility">
+      <finding id="F1" verdict="RISK" status="INCORPORATED">
+        QLoRA on ViTs provides negligible VRAM savings vs LoRA (~0.1-1.5 GB).
+        ViTs are activation-bound. VRAM estimate revised from 3-4 to 6-8 GB.
+        Source: arXiv:2502.00418 (Tischer et al., 2025)
+      </finding>
+      <finding id="F2" verdict="CONFIRMED" status="INCORPORATED">
+        peft target_modules: q_proj, v_proj, o_proj, fc1, fc2 in Sam3ViTRoPEAttention.
+        Default: ["q_proj", "v_proj"]. Added to T-03 description.
+      </finding>
+      <finding id="F3" verdict="RISK" status="INCORPORATED">
+        Gradient checkpointing needs use_reentrant=False on PyTorch 2.5+.
+        Added to T-03 loading flow.
+      </finding>
+      <finding id="F4" verdict="BLOCKER" status="INCORPORATED">
+        VRAM estimate 3-4 GB was wrong. Revised to 6-8 GB. Gate G1 updated.
+      </finding>
+      <finding id="F5" verdict="CONFIRMED" status="INCORPORATED">
+        peft save/load works for 4-bit. Gotcha: merge_and_unload fails on
+        quantized models. Added to T-04 description.
+      </finding>
+      <finding id="F6" verdict="BLOCKER" status="INCORPORATED">
+        ONNX export impossible from bnb NF4. Dequantize-merge-export pipeline
+        added to T-04. Requires ~1.7 GB for separate FP16 model load.
+      </finding>
+    </reviewer>
+
+    <reviewer name="Architecture Coherence">
+      <finding id="A1" severity="IMPORTANT" status="ACKNOWLEDGED">
+        Custom LoRA (V2) vs peft LoRA (V4) comparison fairness.
+        Decision: Keep both — they are intentionally different approaches.
+        V2 = custom LoRA on all layers. V4 = peft LoRA on targeted modules + 4-bit.
+        Document as intentional comparison variable in the paper.
+      </finding>
+      <finding id="A2" severity="MINOR" status="DEFERRED">
+        Missing shared backbone abstraction (Sam3BackboneBase mixin).
+        Deferred — extract only if duplication exceeds 3 methods.
+      </finding>
+      <finding id="A3" severity="IMPORTANT" status="INCORPORATED">
+        Double SAM3 model load (backbone + decoder independently).
+        Added to T-04: extract decoder from already-loaded model.
+      </finding>
+      <finding id="A4" severity="CRITICAL" status="INCORPORATED">
+        peft save_pretrained creates directory, not .pt file.
+        Checkpoint format redesigned in T-04 description.
+      </finding>
+      <finding id="A5" severity="IMPORTANT" status="INCORPORATED">
+        VRAM mode dispatch gap. Changed to vram_mode string in T-02.
+      </finding>
+      <finding id="A6" severity="IMPORTANT" status="INCORPORATED">
+        V3 bug fix expanded: remove both .detach() sites + refactor
+        inline fusion back to self.fusion() call. Updated T-06.
+      </finding>
+      <finding id="A7" severity="MINOR" status="INCORPORATED">
+        T-07 missing dependency on T-01. Fixed.
+      </finding>
+      <finding id="A8" severity="IMPORTANT" status="INCORPORATED">
+        Test coverage gaps (ONNX, CPU, integration). Added to T-04/T-05.
+      </finding>
+      <finding id="A9" severity="MINOR" status="INCORPORATED">
+        Stale SAM3_LORA enum. Added removal to T-01.
+      </finding>
+      <finding id="A10" severity="MINOR" status="DEFERRED">
+        _LogitsWrapper duplication. ONNX export may change for QLoRA anyway.
+      </finding>
+      <finding id="A11" severity="MINOR" status="INCORPORATED">
+        pretrained: false field confusion. Cleanup in T-07.
+      </finding>
+      <finding id="A12" severity="IMPORTANT" status="INCORPORATED">
+        bitsandbytes should be optional dep. Changed to [qlora] extra in T-01.
+      </finding>
+    </reviewer>
+
+    <reviewer name="TDD Compliance">
+      <finding id="T1" severity="CRITICAL" status="INCORPORATED">
+        No CI skip-marker strategy. Added _qlora_skip marker definition
+        and Tier 1/Tier 2 test split to plan header.
+      </finding>
+      <finding id="T2" severity="CRITICAL" status="INCORPORATED">
+        No CPU-only test isolation. Each task now has tier="1" or tier="2"
+        annotations on tests. Tier 1 always runs in CI.
+      </finding>
+      <finding id="T3" severity="IMPORTANT" status="INCORPORATED">
+        RED phase on CI produces zero failures. Added note that RED verification
+        for GPU tests must run on development machine.
+      </finding>
+      <finding id="T4" severity="IMPORTANT" status="INCORPORATED">
+        Gate measurement methodology. Added reset_peak_memory_stats pattern
+        to G0 and G1 criteria.
+      </finding>
+      <finding id="T5a" severity="CRITICAL" status="INCORPORATED">
+        bitsandbytes not installed → uncontrolled ImportError.
+        Added _bnb_available() + _BNB_INSTALL_INSTRUCTIONS to T-01.
+        Added graceful-failure test to T-05.
+      </finding>
+      <finding id="T5b" severity="CRITICAL" status="INCORPORATED">
+        peft available but bnb not → opaque crash. Added explicit check
+        and RuntimeError in T-03 description.
+      </finding>
+      <finding id="T5c" severity="IMPORTANT" status="INCORPORATED">
+        4 GB VRAM threshold too tight. Raised to 6 GB in T-02.
+      </finding>
+      <finding id="T6a" severity="IMPORTANT" status="INCORPORATED">
+        No test file paths. Added test_file elements to all tasks.
+      </finding>
+      <finding id="T6b" severity="IMPORTANT" status="INCORPORATED">
+        T-11 had "no tests". Added grep-based documentation test.
+      </finding>
+      <finding id="T6c" severity="MINOR" status="INCORPORATED">
+        TODO → NOT_STARTED vocabulary alignment.
+      </finding>
+      <finding id="T7" severity="IMPORTANT" status="INCORPORATED">
+        T-06 bug description conflated two .detach() call sites. Clarified.
+      </finding>
+      <finding id="T8" severity="MINOR" status="INCORPORATED">
+        peft already in pyproject.toml. Noted in T-01.
+      </finding>
+    </reviewer>
+  </review_summary>
+</plan>
