@@ -192,13 +192,13 @@ for VARIANT in "${VARIANTS[@]}"; do
     log_info "Training: ${VARIANT}"
     log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-    # Build command
+    # Build command — calls training_flow() directly (Prefect-aware, no orphan run)
     CMD=(
-        "uv" "run" "python" "scripts/train_monitored.py"
+        "uv" "run" "python" "scripts/run_training_flow.py"
         "--model-family" "${VARIANT}"
         "--max-epochs" "${EPOCHS}"
         "--compute" "${COMPUTE}"
-        "--log-dir" "${LOG_DIR}"
+        "--trigger-source" "train_sam3_all_variants.sh"
     )
 
     # Add optional flags
@@ -206,13 +206,8 @@ for VARIANT in "${VARIANTS[@]}"; do
         CMD+=("--debug")
     fi
 
-    if [ $RESUME_MODE -eq 1 ]; then
-        CMD+=("--resume")
-    fi
-
-    # Log the command
+    # Log the command (--resume not supported via training_flow; resume via CHECKPOINT_DIR)
     log_info "Command: ${CMD[*]}"
-    log_info "Logging to: ${LOG_DIR}"
 
     # Run training
     if "${CMD[@]}"; then

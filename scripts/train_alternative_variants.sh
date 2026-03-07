@@ -218,25 +218,20 @@ for VARIANT in "${VARIANTS[@]}"; do
     log_info "Training: ${VARIANT}"
     log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-    # Build command
+    # Build command — calls training_flow() directly (Prefect-aware, no orphan run)
     CMD=(
-        "uv" "run" "python" "scripts/train_monitored.py"
+        "uv" "run" "python" "scripts/run_training_flow.py"
         "--model-family" "${VARIANT}"
         "--max-epochs" "${EPOCHS}"
         "--compute" "${COMPUTE}"
-        "--log-dir" "${LOG_DIR}"
+        "--trigger-source" "train_alternative_variants.sh"
     )
 
     if [ $DEBUG_MODE -eq 1 ]; then
         CMD+=("--debug")
     fi
 
-    if [ $RESUME_MODE -eq 1 ]; then
-        CMD+=("--resume")
-    fi
-
     log_info "Command: ${CMD[*]}"
-    log_info "Logging to: ${LOG_DIR}"
 
     if "${CMD[@]}"; then
         log_success "${VARIANT} completed"
