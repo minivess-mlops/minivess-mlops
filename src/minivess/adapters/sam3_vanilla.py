@@ -13,6 +13,9 @@ Architecture:
 Expected results: DSC ~0.35-0.55, clDice ~0.3-0.5
 Go/No-Go Gate G1: DSC >= 0.10 or abandon SAM for segmentation.
 
+IMPORTANT: Real pretrained SAM3 weights are required (GPU VRAM ≥16 GB).
+No stub/fallback mode exists — use pytest.mark.skipif for CI tests.
+
 References:
     - Ravi et al. (2025). "SAM 3." arXiv:2511.16719
 """
@@ -45,24 +48,20 @@ class Sam3VanillaAdapter(ModelAdapter):
     ----------
     config:
         ModelConfig with ``SAM3_VANILLA`` family.
-    use_stub:
-        If True, use stub encoder/decoder for testing.
     """
 
     def __init__(
         self,
         config: ModelConfig,
-        *,
-        use_stub: bool = False,
     ) -> None:
         super().__init__()
         self.config = config
 
         # Frozen SAM3 backbone (encoder + FPN neck)
-        self.backbone = Sam3Backbone(config=config, use_stub=use_stub, freeze=True)
+        self.backbone = Sam3Backbone(config=config, freeze=True)
 
         # Trainable mask decoder
-        self.decoder = Sam3MaskDecoder(config=config, use_stub=use_stub)
+        self.decoder = Sam3MaskDecoder(config=config)
 
         logger.info(
             "Sam3VanillaAdapter: encoder=%d params (frozen), decoder=%d params (trainable)",

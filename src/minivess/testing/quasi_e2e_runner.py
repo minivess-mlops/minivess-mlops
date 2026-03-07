@@ -73,7 +73,8 @@ def build_model_for_test(
     """Instantiate a model adapter's nn.Module for testing.
 
     Uses ``build_adapter()`` with appropriate config. SAM3 models
-    get ``use_stub=True`` to avoid downloading full checkpoints.
+    require real pretrained weights — if SAM3 is not installed,
+    ``RuntimeError`` is raised by ``build_adapter()``.
 
     Parameters
     ----------
@@ -107,10 +108,7 @@ def build_model_for_test(
         out_channels=out_channels,
     )
 
-    # SAM3 variants require a token + large download — use stub for testing
-    sam3_families = {"sam3_vanilla", "sam3_topolora", "sam3_hybrid"}
-    kwargs = {"use_stub": True} if model_name in sam3_families else {}
-    return build_adapter(config, **kwargs)
+    return build_adapter(config)
 
 
 def build_loss_for_test(

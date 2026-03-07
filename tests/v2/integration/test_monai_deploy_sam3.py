@@ -2,6 +2,9 @@
 
 Verifies that MiniVessInferenceOperator and MiniVessSegApp work
 with SAM3-exported ONNX models. CI-compatible (duck-typed, no SDK).
+
+IMPORTANT: SAM3 tests require real pretrained weights (GPU ≥16 GB).
+They are skipped in CI where SAM3 is not installed.
 """
 
 from __future__ import annotations
@@ -9,12 +12,20 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 import torch
+
+from minivess.adapters.model_builder import _sam3_package_available
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+_sam3_skip = pytest.mark.skipif(
+    not _sam3_package_available(), reason="SAM3 not installed"
+)
 
+
+@_sam3_skip
 class TestMonaiDeploySam3:
     """Test MAP operator with SAM3 ONNX models."""
 
@@ -29,7 +40,7 @@ class TestMonaiDeploySam3:
             in_channels=1,
             out_channels=2,
         )
-        adapter = build_adapter(config, use_stub=True)
+        adapter = build_adapter(config)
         onnx_path = tmp_path / "sam3_map_test.onnx"
         example_input = torch.randn(1, 1, 4, 32, 32)
         adapter.export_onnx(onnx_path, example_input)

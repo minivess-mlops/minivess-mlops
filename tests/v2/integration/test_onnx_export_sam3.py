@@ -1,19 +1,30 @@
-"""Tests for model-agnostic ONNX export including SAM3 (T10).
+"""Tests for model-agnostic ONNX export including SAM3.
 
 Verifies that deploy_onnx_export.py works with SAM3 adapters,
-not just DynUNet. CI-compatible (uses stub encoders).
+not just DynUNet.
+
+IMPORTANT: SAM3 tests require real pretrained weights (GPU ≥16 GB).
+They are skipped in CI where SAM3 is not installed.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import pytest
 import torch
+
+from minivess.adapters.model_builder import _sam3_package_available
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+_sam3_skip = pytest.mark.skipif(
+    not _sam3_package_available(), reason="SAM3 not installed"
+)
 
+
+@_sam3_skip
 class TestModelAgnosticCheckpointLoading:
     """Test _load_model_from_checkpoint with different model families."""
 
@@ -33,7 +44,7 @@ class TestModelAgnosticCheckpointLoading:
             in_channels=1,
             out_channels=2,
         )
-        adapter = build_adapter(config, use_stub=True)
+        adapter = build_adapter(config)
 
         # Save checkpoint
         ckpt_path = tmp_path / f"{model_family}_ckpt.pth"
@@ -88,6 +99,7 @@ class TestModelAgnosticCheckpointLoading:
         assert model is not None
 
 
+@_sam3_skip
 class TestSam3OnnxExport:
     """Test ONNX export for SAM3 adapters."""
 
@@ -101,7 +113,7 @@ class TestSam3OnnxExport:
             in_channels=1,
             out_channels=2,
         )
-        adapter = build_adapter(config, use_stub=True)
+        adapter = build_adapter(config)
         onnx_path = tmp_path / "sam3_vanilla.onnx"
         example_input = torch.randn(1, 1, 16, 64, 64)
         adapter.export_onnx(onnx_path, example_input)
@@ -115,8 +127,6 @@ class TestSam3OnnxExport:
         try:
             import onnxruntime as ort
         except ImportError:
-            import pytest
-
             pytest.skip("onnxruntime not installed")
 
         from minivess.adapters.model_builder import build_adapter
@@ -128,7 +138,7 @@ class TestSam3OnnxExport:
             in_channels=1,
             out_channels=2,
         )
-        adapter = build_adapter(config, use_stub=True)
+        adapter = build_adapter(config)
         onnx_path = tmp_path / "sam3_test.onnx"
         example_input = torch.randn(1, 1, 16, 64, 64)
         adapter.export_onnx(onnx_path, example_input)

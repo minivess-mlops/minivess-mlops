@@ -58,42 +58,22 @@ _SAM3_INSTALL_INSTRUCTIONS = """
  Step 3b: Or install from Meta's GitHub source:
           uv add "sam3 @ git+https://github.com/facebookresearch/sam3.git"
 
- ── For pipeline testing WITHOUT real SAM3 weights ─────────────
- Set in your model YAML:  architecture_params.pretrained: false
- This uses a random-weight stub. Results will be meaningless.
 ════════════════════════════════════════════════════════════════
 """
 
 
-def _auto_stub_sam3(config: ModelConfig, kwargs: dict[str, Any]) -> None:
-    """Validate SAM3 availability; raise loudly if pretrained weights are needed.
+def _require_sam3(config: ModelConfig) -> None:
+    """Validate SAM3 availability; raise loudly if not installed.
 
-    Stub mode is ONLY activated when explicitly requested:
-    - ``use_stub=True`` passed to ``build_adapter()`` (test fixtures)
-    - ``architecture_params.pretrained: false`` in the model config (deliberate baseline)
-
-    Silent fallback to a random-weight stub is NEVER acceptable when a
-    pretrained SAM3 is expected — it produces meaningless training metrics
-    while appearing to succeed.
+    SAM3 ALWAYS requires real pretrained weights. There is no stub or
+    pretrained:false fallback — they were removed to prevent silent
+    random-weight training (see .claude/metalearning/2026-03-02-sam3-implementation-fuckup.md).
 
     Raises
     ------
     RuntimeError
-        When SAM3 package is not installed and pretrained weights are required.
+        When SAM3 package is not installed.
     """
-    if "use_stub" in kwargs:
-        # Explicit caller request (e.g. test fixture) — honour it
-        return
-
-    pretrained = config.architecture_params.get("pretrained", True)
-    if not pretrained:
-        kwargs["use_stub"] = True
-        logger.info(
-            "SAM3 pretrained=false: using stub encoder (random weights, deliberate)"
-        )
-        return
-
-    # pretrained=True (default) — real SAM3 package required
     if not _sam3_package_available():
         logger.error(_SAM3_INSTALL_INSTRUCTIONS)
         msg = (
@@ -120,8 +100,9 @@ def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     config:
         Model configuration specifying family and architecture params.
     **kwargs:
-        Extra keyword arguments forwarded to the adapter constructor
-        (e.g., ``use_stub=True`` for SAM3 adapters in tests).
+        Extra keyword arguments forwarded to the adapter constructor.
+        Note: SAM3 adapters no longer accept ``use_stub`` — pretrained
+        weights are always required.
 
     Returns
     -------
@@ -131,6 +112,8 @@ def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     ------
     ValueError
         If the model family is not supported.
+    RuntimeError
+        If a SAM3 family is requested but SAM3 is not installed.
     """
     from minivess.config.models import ModelFamily
 
@@ -160,20 +143,20 @@ def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     if family == ModelFamily.SAM3_VANILLA:
         from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
 
-        _auto_stub_sam3(config, kwargs)
-        return Sam3VanillaAdapter(config, **kwargs)
+        _require_sam3(config)
+        return Sam3VanillaAdapter(config)
 
     if family == ModelFamily.SAM3_TOPOLORA:
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
-        _auto_stub_sam3(config, kwargs)
-        return Sam3TopoLoraAdapter(config, **kwargs)
+        _require_sam3(config)
+        return Sam3TopoLoraAdapter(config)
 
     if family == ModelFamily.SAM3_HYBRID:
         from minivess.adapters.sam3_hybrid import Sam3HybridAdapter
 
-        _auto_stub_sam3(config, kwargs)
-        return Sam3HybridAdapter(config, **kwargs)
+        _require_sam3(config)
+        return Sam3HybridAdapter(config)
 
     msg = (
         f"Unsupported model family '{family}'. "

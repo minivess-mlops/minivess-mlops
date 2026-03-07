@@ -1,7 +1,11 @@
-"""Tests for MLflow pyfunc serving with SAM3 models (T9).
+"""Tests for MLflow pyfunc serving with SAM3 models.
 
 Verifies that MiniVessSegModel can load SAM3 adapters and produce
-correct predictions. CI-compatible (uses stub encoders).
+correct predictions.
+
+IMPORTANT: SAM3 tests require real pretrained weights (GPU ≥16 GB).
+TestBuildNetFromConfig SAM3 tests are skipped in CI where SAM3 is not installed.
+TestBuildNetFromConfig DynUNet and unknown-family tests always run.
 """
 
 from __future__ import annotations
@@ -10,14 +14,22 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import pytest
+
+from minivess.adapters.model_builder import _sam3_package_available
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+_sam3_skip = pytest.mark.skipif(
+    not _sam3_package_available(), reason="SAM3 not installed"
+)
 
 
 class TestBuildNetFromConfig:
     """Test _build_net_from_config model-agnostic dispatch."""
 
+    @_sam3_skip
     def test_build_sam3_vanilla_net(self) -> None:
         from minivess.serving.mlflow_wrapper import _build_net_from_config, _SimpleNet
 
@@ -29,9 +41,9 @@ class TestBuildNetFromConfig:
         }
         net = _build_net_from_config(config)
         assert net is not None
-        # Must be an actual adapter, not _SimpleNet fallback
         assert not isinstance(net, _SimpleNet), "Expected SAM3 adapter, got _SimpleNet"
 
+    @_sam3_skip
     def test_build_sam3_topolora_net(self) -> None:
         from minivess.serving.mlflow_wrapper import _build_net_from_config, _SimpleNet
 
@@ -45,6 +57,7 @@ class TestBuildNetFromConfig:
         assert net is not None
         assert not isinstance(net, _SimpleNet)
 
+    @_sam3_skip
     def test_build_sam3_hybrid_net(self) -> None:
         from minivess.serving.mlflow_wrapper import _build_net_from_config, _SimpleNet
 
@@ -76,10 +89,10 @@ class TestBuildNetFromConfig:
 
         config: dict[str, Any] = {"family": "unknown_model"}
         net = _build_net_from_config(config)
-        # Should fall back to _SimpleNet
         assert net is not None
 
 
+@_sam3_skip
 class TestMlflowServingSam3:
     """Test MiniVessSegModel with SAM3 adapter checkpoints."""
 
@@ -98,13 +111,11 @@ class TestMlflowServingSam3:
             in_channels=1,
             out_channels=2,
         )
-        adapter = build_adapter(config, use_stub=True)
+        adapter = build_adapter(config)
 
-        # Save checkpoint
         ckpt_path = tmp_path / f"{model_family}_ckpt.pth"
         adapter.save_checkpoint(ckpt_path)
 
-        # Save model config JSON
         config_dict: dict[str, Any] = {
             "family": model_family,
             "name": model_family,
@@ -132,14 +143,13 @@ class TestMlflowServingSam3:
         ctx = _FakeContext(artifacts)
         model.load_context(ctx)
 
-        # 3D input: (B, C, D, H, W)
         dummy = np.random.rand(1, 1, 4, 32, 32).astype(np.float32)
         output = model.predict(ctx, dummy)
 
         assert isinstance(output, np.ndarray)
-        assert output.shape[0] == 1  # batch
-        assert output.shape[1] == 2  # 2 classes (bg + fg)
-        assert output.shape[2] == 4  # depth preserved
+        assert output.shape[0] == 1
+        assert output.shape[1] == 2
+        assert output.shape[2] == 4
 
     def test_sam3_model_metadata_preserved(self, tmp_path: Path) -> None:
         """Verify model_family metadata roundtrips through config JSON."""

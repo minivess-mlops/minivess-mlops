@@ -1,39 +1,23 @@
 {
-  "plan_file": "docs/planning/prefect-mlflow-docker-debug-fixing.xml",
+  "plan_file": "docs/planning/sam3-stub-removal.xml",
   "plan_version": "1.0",
   "execution_mode": "interactive",
-  "current_task_id": "DONE",
-  "current_phase": "CONVERGED",
-  "inner_iteration": 15,
-  "session_task_count": 15,
-  "session_inner_iterations": 15,
+  "current_task_id": null,
+  "current_phase": null,
+  "inner_iteration": 0,
+  "session_task_count": 0,
+  "session_inner_iterations": 0,
   "session_start": "2026-03-07T00:00:00Z",
-  "branch": "feat/prefect-mlflow-cleanup",
-  "pr": 421,
+  "branch": "feat/sam3-remove-stub",
   "tasks": {
-    "T-01": {"status": "DONE", "closes": "#413", "commit": "c2a9bde"},
-    "T-02": {"status": "DONE", "closes": "#406", "commit": "ec44685"},
-    "T-03": {"status": "DONE", "closes": "#405", "commit": "6c1e86f"},
-    "T-04": {"status": "DONE", "closes": "#409", "commit": "6c1e86f"},
-    "T-05": {"status": "DONE", "closes": "#419", "commit": "6c1e86f"},
-    "T-06": {"status": "DONE", "closes": "#416", "commit": "ec44685"},
-    "T-07": {"status": "DONE", "closes": "#410", "commit": "2beb56f"},
-    "T-08": {"status": "DONE", "closes": "#407", "commit": "8aacb99"},
-    "T-09": {"status": "DONE", "closes": "#408", "commit": "739a304"},
-    "T-10": {"status": "DONE", "closes": "#411", "commit": "6c1e86f"},
-    "T-11": {"status": "DONE", "closes": "#415", "commit": "eb14870"},
-    "T-12": {"status": "DONE", "closes": "#417", "commit": "c4bc7ad"},
-    "T-13": {"status": "DONE", "closes": "#414", "commit": "739a304"},
-    "T-14": {"status": "DONE", "closes": "#412,#418", "commit": "f6a0d27"},
-    "T-15": {"status": "DONE", "closes": "#404", "commit": "a261ac8"}
+    "T-01": {"status": "NOT_STARTED"},
+    "T-02": {"status": "NOT_STARTED"},
+    "T-03": {"status": "NOT_STARTED"}
   },
   "convergence": {
-    "reached": true,
-    "tasks_done": 15,
-    "tasks_total": 15,
-    "tasks_stuck": 0,
-    "tasks_deferred": 0,
-    "total_tests": 47,
-    "all_non_deferred_complete": true
+    "reached": false,
+    "tasks_done": 0,
+    "tasks_total": 3,
+    "tasks_stuck": 0
   }
 }

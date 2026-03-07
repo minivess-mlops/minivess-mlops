@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan version="1.0" created="2026-03-07" branch="feat/sam3-remove-stub">
+  <title>SAM3: Remove Stub, Add GPU VRAM Enforcement, Progressive Documentation</title>
+
+  <context>
+    The _StubSam3Encoder created a silent-failure scenario: training ran to completion
+    producing meaningful-looking metrics from random weights. User directive (2026-03-07):
+    "Always use pretrained weights! And never the stub."
+
+    This plan:
+    1. Removes _StubSam3Encoder and all use_stub paths entirely
+    2. Adds llmfit-style GPU VRAM check (16 GB minimum) that fires before any SAM3 load
+    3. Creates progressive disclosure documentation
+  </context>
+
+  <tasks>
+    <task id="T-01" status="NOT_STARTED" depends_on="">
+      <name>Remove _StubSam3Encoder and use_stub from all adapters</name>
+      <description>
+        Remove _StubMLP, _StubSam3Encoder, _StubFPNNeck from sam3_backbone.py;
+        _StubSam3Decoder from sam3_decoder.py; use_stub param from Sam3Backbone,
+        Sam3VanillaAdapter, Sam3TopoLoraAdapter, Sam3HybridAdapter, Sam3MaskDecoder,
+        extract_and_cache_features; remove _auto_stub_sam3() and pretrained:false path
+        from model_builder.py.
+
+        Existing tests in tests/v2/unit/test_sam3_*.py updated to use
+        pytest.mark.skipif(not _sam3_package_available(), reason="SAM3 not installed").
+        TestStubSam3Encoder class removed entirely.
+
+        New anti-stub tests in tests/unit/adapters/test_no_sam3_stub.py.
+      </description>
+      <tdd_spec>
+        RED: Write tests/unit/adapters/test_no_sam3_stub.py first:
+          - test_stub_encoder_class_does_not_exist
+          - test_stub_mlp_class_does_not_exist
+          - test_stub_fpn_neck_class_does_not_exist
+          - test_stub_decoder_class_does_not_exist
+          - test_sam3_vanilla_has_no_use_stub_param
+          - test_sam3_topolora_has_no_use_stub_param
+          - test_sam3_hybrid_has_no_use_stub_param
+          - test_sam3_backbone_has_no_use_stub_param
+          - test_build_adapter_raises_without_sam3_installed
+        GREEN: Remove stub classes and use_stub params from all files.
+              Update existing tests.
+      </tdd_spec>
+    </task>
+
+    <task id="T-02" status="NOT_STARTED" depends_on="T-01">
+      <name>Add sam3_vram_check.py with GPU VRAM enforcement</name>
+      <description>
+        Create src/minivess/adapters/sam3_vram_check.py with check_sam3_vram(variant)
+        that raises RuntimeError when gpu_vram_mb &lt; 16384. Call it at top of
+        build_adapter() for all SAM3 families.
+      </description>
+      <tdd_spec>
+        RED: Write tests/unit/adapters/test_sam3_vram_check.py first:
+          - test_raises_when_vram_below_16gb
+          - test_passes_when_vram_meets_16gb
+          - test_passes_at_exactly_16gb_boundary
+          - test_error_message_includes_detected_vram
+          - test_error_message_includes_variant_name
+        GREEN: Create sam3_vram_check.py and integrate into model_builder.py.
+      </tdd_spec>
+    </task>
+
+    <task id="T-03" status="NOT_STARTED" depends_on="T-02">
+      <name>Progressive documentation</name>
+      <description>
+        Create src/minivess/adapters/CLAUDE.md.
+        Update docs/adr/0006-sam3-variant-architecture.md.
+        Update root CLAUDE.md SAM3 section.
+        Update LEARNINGS.md with 2026-03-07 stub removal entry.
+      </description>
+      <tdd_spec>
+        No TDD spec (documentation-only task).
+        Verify: all files created/updated, content is accurate.
+      </tdd_spec>
+    </task>
+  </tasks>
+</plan>

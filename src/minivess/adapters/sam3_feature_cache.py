@@ -39,8 +39,6 @@ def extract_and_cache_features(
     config: ModelConfig,
     volumes: dict[str, Tensor],
     cache_dir: Path,
-    *,
-    use_stub: bool = False,
 ) -> None:
     """Extract SAM3 features for all volumes and cache to disk.
 
@@ -52,11 +50,9 @@ def extract_and_cache_features(
         Mapping of volume_id → tensor of shape (B, C, D, H, W).
     cache_dir:
         Directory for cached .pt files.
-    use_stub:
-        If True, use stub encoder (for testing).
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
-    backbone = Sam3Backbone(config=config, use_stub=use_stub, freeze=True)
+    backbone = Sam3Backbone(config=config, freeze=True)
     backbone.eval()
 
     for vol_id, volume in volumes.items():

@@ -1,7 +1,10 @@
-"""Tests for Sam3TopoLoraAdapter (T7).
+"""Tests for Sam3TopoLoraAdapter.
 
 V2: SAM3 + LoRA on FFN (mlp.lin1, mlp.lin2) + topology-aware loss.
 Same as V1 + LoRA adapters + cbdice_cldice loss.
+
+IMPORTANT: These tests require real SAM3 pretrained weights (GPU ≥16 GB).
+They are skipped in CI where SAM3 is not installed.
 """
 
 from __future__ import annotations
@@ -9,7 +12,12 @@ from __future__ import annotations
 import pytest
 import torch
 
+from minivess.adapters.model_builder import _sam3_package_available
 from minivess.config.models import ModelConfig, ModelFamily
+
+_sam3_skip = pytest.mark.skipif(
+    not _sam3_package_available(), reason="SAM3 not installed"
+)
 
 
 @pytest.fixture()
@@ -26,13 +34,14 @@ def sam3_lora_config() -> ModelConfig:
     )
 
 
+@_sam3_skip
 class TestSam3TopoLoraAdapter:
     """Sam3TopoLoraAdapter: SAM3 + LoRA + topology loss."""
 
-    def test_adapter_creates_with_stub(self, sam3_lora_config: ModelConfig) -> None:
+    def test_adapter_creates(self, sam3_lora_config: ModelConfig) -> None:
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
-        adapter = Sam3TopoLoraAdapter(config=sam3_lora_config, use_stub=True)
+        adapter = Sam3TopoLoraAdapter(config=sam3_lora_config)
         assert adapter is not None
 
     def test_forward_produces_segmentation_output(
@@ -41,7 +50,7 @@ class TestSam3TopoLoraAdapter:
         from minivess.adapters.base import SegmentationOutput
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
-        adapter = Sam3TopoLoraAdapter(config=sam3_lora_config, use_stub=True)
+        adapter = Sam3TopoLoraAdapter(config=sam3_lora_config)
         volume = torch.randn(1, 1, 3, 64, 64)
         output = adapter(volume)
         assert isinstance(output, SegmentationOutput)
@@ -49,7 +58,7 @@ class TestSam3TopoLoraAdapter:
     def test_forward_output_shape_2class(self, sam3_lora_config: ModelConfig) -> None:
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
-        adapter = Sam3TopoLoraAdapter(config=sam3_lora_config, use_stub=True)
+        adapter = Sam3TopoLoraAdapter(config=sam3_lora_config)
         volume = torch.randn(1, 1, 3, 64, 64)
         output = adapter(volume)
         assert output.logits.shape[1] == 2  # 2-class
@@ -58,8 +67,7 @@ class TestSam3TopoLoraAdapter:
     def test_lora_params_are_trainable(self, sam3_lora_config: ModelConfig) -> None:
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
-        adapter = Sam3TopoLoraAdapter(config=sam3_lora_config, use_stub=True)
-        # LoRA params should exist and be trainable
+        adapter = Sam3TopoLoraAdapter(config=sam3_lora_config)
         lora_params = [
             (name, p)
             for name, p in adapter.named_parameters()
@@ -70,8 +78,7 @@ class TestSam3TopoLoraAdapter:
     def test_base_encoder_weights_frozen(self, sam3_lora_config: ModelConfig) -> None:
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
-        adapter = Sam3TopoLoraAdapter(config=sam3_lora_config, use_stub=True)
-        # Base encoder (non-LoRA) params should be frozen
+        adapter = Sam3TopoLoraAdapter(config=sam3_lora_config)
         base_params = [
             (name, p)
             for name, p in adapter.backbone.encoder.named_parameters()
@@ -83,7 +90,7 @@ class TestSam3TopoLoraAdapter:
     def test_gradient_flows_through_lora(self, sam3_lora_config: ModelConfig) -> None:
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
-        adapter = Sam3TopoLoraAdapter(config=sam3_lora_config, use_stub=True)
+        adapter = Sam3TopoLoraAdapter(config=sam3_lora_config)
         volume = torch.randn(1, 1, 2, 64, 64)
         output = adapter(volume)
         target = torch.zeros(1, 2, 64, 64, dtype=torch.long)
@@ -91,7 +98,6 @@ class TestSam3TopoLoraAdapter:
             output.logits[:, :, 0, :, :], target[:, 0, :, :]
         )
         loss.backward()
-        # Check decoder has gradients
         has_decoder_grad = any(
             p.grad is not None and p.grad.abs().sum() > 0
             for p in adapter.decoder.parameters()
@@ -101,7 +107,7 @@ class TestSam3TopoLoraAdapter:
     def test_get_config_returns_lora_info(self, sam3_lora_config: ModelConfig) -> None:
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
-        adapter = Sam3TopoLoraAdapter(config=sam3_lora_config, use_stub=True)
+        adapter = Sam3TopoLoraAdapter(config=sam3_lora_config)
         info = adapter.get_config()
         assert info.family == "sam3_topolora"
         assert info.extras.get("variant") == "topolora"
@@ -120,17 +126,13 @@ class TestSam3TopoLoraAdapter:
             in_channels=1,
             out_channels=2,
         )
-        vanilla = Sam3VanillaAdapter(config=vanilla_config, use_stub=True)
-        topolora = Sam3TopoLoraAdapter(config=sam3_lora_config, use_stub=True)
+        vanilla = Sam3VanillaAdapter(config=vanilla_config)
+        topolora = Sam3TopoLoraAdapter(config=sam3_lora_config)
 
         assert topolora.trainable_parameters() > vanilla.trainable_parameters()
 
     def test_lora_applied_with_real_rank_16(self) -> None:
-        """LoRA must apply to >=1 layer even with rank=16 (training default).
-
-        This catches the bug where stub Conv2d(3→1024) has in_channels=3 < rank=16,
-        so the LoRA size check skips it and no LoRA layers are created.
-        """
+        """LoRA must apply to >=1 layer even with rank=16 (training default)."""
         from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 
         config = ModelConfig(
@@ -142,13 +144,12 @@ class TestSam3TopoLoraAdapter:
             lora_alpha=32.0,
             lora_dropout=0.1,
         )
-        adapter = Sam3TopoLoraAdapter(config=config, use_stub=True)
+        adapter = Sam3TopoLoraAdapter(config=config)
         lora_params = [
             name
             for name, p in adapter.named_parameters()
             if "lora" in name.lower() and p.requires_grad
         ]
         assert len(lora_params) > 0, (
-            "LoRA must be applied to at least 1 layer with rank=16, "
-            "but found 0 LoRA params. Stub encoder needs Linear layers."
+            "LoRA must be applied to at least 1 layer with rank=16."
         )

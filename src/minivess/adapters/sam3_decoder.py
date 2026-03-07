@@ -9,6 +9,9 @@ The decoder takes 256-dim FPN features and predicts a single-channel
 binary mask. ``binary_to_2class()`` converts to 2-class format for
 cross-entropy loss compatibility.
 
+IMPORTANT: Real pretrained SAM3 is required. No stub/fallback mode exists.
+If SAM3 is not installed, RuntimeError is raised with install instructions.
+
 References:
     - Ravi et al. (2025). "SAM 3." arXiv:2511.16719
 """
@@ -30,49 +33,6 @@ logger = logging.getLogger(__name__)
 SAM3_DECODER_IN_DIM: int = 256
 
 
-class _StubSam3Decoder(nn.Module):
-    """Lightweight stub mimicking SAM3 mask decoder output.
-
-    Used for testing and CI where the real SAM3 package is not installed.
-    """
-
-    def __init__(self, in_channels: int = SAM3_DECODER_IN_DIM) -> None:
-        super().__init__()
-        # Simple conv stack to produce single-channel mask logits
-        self.decoder = nn.Sequential(
-            nn.Conv2d(in_channels, 64, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, 32, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, 1, kernel_size=1),
-        )
-
-    def forward(self, features: Tensor, prompt: Tensor | None = None) -> Tensor:
-        """Predict mask logits from FPN features.
-
-        Parameters
-        ----------
-        features:
-            FPN features of shape (B, 256, H, W).
-        prompt:
-            Optional prompt embedding (ignored in stub).
-
-        Returns
-        -------
-        Mask logits of shape (B, 1, H, W).
-        """
-        if prompt is not None:
-            # Broadcast prompt and add to features as channel-wise bias
-            prompt_bias = prompt.unsqueeze(-1).unsqueeze(-1)  # (B, 256, 1, 1)
-            # Project prompt to match feature channels if needed
-            if prompt_bias.shape[1] != features.shape[1]:
-                prompt_bias = prompt_bias[:, : features.shape[1]]
-            features = features + prompt_bias
-
-        result: Tensor = self.decoder(features)
-        return result
-
-
 class Sam3MaskDecoder(nn.Module):
     """SAM3 mask decoder wrapper for binary segmentation.
 
@@ -80,34 +40,25 @@ class Sam3MaskDecoder(nn.Module):
     ----------
     config:
         Model configuration.
-    use_stub:
-        If True, use ``_StubSam3Decoder`` instead of real SAM3 decoder.
     """
 
     def __init__(
         self,
         config: ModelConfig,
-        *,
-        use_stub: bool = False,
     ) -> None:
         super().__init__()
         self._config = config
-
-        if use_stub:
-            self.decoder: nn.Module = _StubSam3Decoder()
-        else:
-            self.decoder = self._load_sam3_decoder()
+        self.decoder: nn.Module = self._load_sam3_decoder()
 
     def _load_sam3_decoder(self) -> nn.Module:
         """Load real SAM3 mask decoder.
 
-        Tries native sam3 package first. Falls back to a trainable stub decoder
-        when the native package is not installed. The stub fallback is explicit
-        (logged at WARNING level) — not a silent fallback.
+        Tries native sam3 package first.
 
-        The decoder is always trained from scratch (trainable component), so
-        starting from random-init stub weights is acceptable from an optimization
-        standpoint. Only pretrained decoder initialization is lost.
+        Raises
+        ------
+        RuntimeError
+            If SAM3 package is not installed.
         """
         try:
             from sam3.model.model_builder import build_sam3_image_model
@@ -123,16 +74,14 @@ class Sam3MaskDecoder(nn.Module):
         except ImportError:
             pass
 
-        # Explicit fallback — log clearly so the user knows
-        logger.warning(
-            "SAM3 native package not installed — using trainable stub decoder "
-            "(random initialization). The decoder is trained from scratch "
-            "regardless of pretrained init, so segmentation quality is "
-            "unaffected. For pretrained decoder weights install via:\n"
+        msg = (
+            "SAM3 package not installed — cannot load mask decoder.\n"
+            "Install via:\n"
             "  git clone https://github.com/facebookresearch/sam3.git\n"
-            "  cd sam3 && pip install -e ."
+            "  cd sam3 && pip install -e .\n"
+            "Or: uv add 'transformers>=4.50' for HuggingFace support."
         )
-        return _StubSam3Decoder(in_channels=SAM3_DECODER_IN_DIM)
+        raise RuntimeError(msg)
 
     def forward(
         self,
