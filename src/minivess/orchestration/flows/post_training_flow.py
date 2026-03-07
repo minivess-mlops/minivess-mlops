@@ -23,6 +23,10 @@ from typing import Any
 
 from minivess.config.post_training_config import PostTrainingConfig
 from minivess.orchestration import flow, get_run_logger, task
+from minivess.orchestration.mlflow_helpers import (
+    find_upstream_safely,
+    log_completion_safe,
+)
 from minivess.pipeline.post_training_plugin import (
     PluginInput,
     PluginRegistry,
@@ -238,19 +242,12 @@ def post_training_flow(
     mlflow_run_id: str | None = None
 
     # Find upstream training run
-    upstream_training_run_id: str = "no_upstream"
-    try:
-        from minivess.orchestration.flow_contract import FlowContract
-
-        contract = FlowContract(tracking_uri=tracking_uri)
-        upstream = contract.find_upstream_run(
-            experiment_name="minivess_training",
-            upstream_flow="train",
-        )
-        if upstream:
-            upstream_training_run_id = upstream["run_id"]
-    except Exception:
-        log.warning("Could not find upstream training run", exc_info=True)
+    upstream = find_upstream_safely(
+        tracking_uri=tracking_uri,
+        experiment_name="minivess_training",
+        upstream_flow="train",
+    )
+    upstream_training_run_id: str | None = upstream["run_id"] if upstream else None
 
     try:
         import mlflow
@@ -275,15 +272,15 @@ def post_training_flow(
                             f"post_{plugin_name}_{metric_name}", float(metric_value)
                         )
 
-        from minivess.orchestration.flow_contract import FlowContract
-
-        contract = FlowContract(tracking_uri=tracking_uri)
-        contract.log_flow_completion(
-            flow_name="post_training",
-            run_id=mlflow_run_id,
-        )
     except Exception:
         log.warning("Failed to log post_training_flow to MLflow", exc_info=True)
+
+    # Log flow completion (best-effort, non-blocking)
+    log_completion_safe(
+        flow_name="post-training-flow",
+        tracking_uri=tracking_uri,
+        run_id=mlflow_run_id,
+    )
 
     swa_ran = any(k in plugin_results for k in ("swa", "multi_swa"))
     calibration_ran = "calibration" in plugin_results

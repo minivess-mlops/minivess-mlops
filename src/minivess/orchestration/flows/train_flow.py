@@ -22,6 +22,10 @@ from typing import Any
 import yaml
 
 from minivess.orchestration._prefect_compat import flow, task
+from minivess.orchestration.mlflow_helpers import (
+    find_upstream_safely,
+    log_completion_safe,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -382,20 +386,14 @@ def training_flow(
     tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
 
     # Find upstream data run
-    upstream_data_run_id: str = "no_upstream"
-    try:
-        from minivess.orchestration.flow_contract import FlowContract
-
-        contract = FlowContract(tracking_uri=tracking_uri)
-        upstream = contract.find_upstream_run(
-            experiment_name="minivess_data",
-            upstream_flow="data",
-        )
-        if upstream:
-            upstream_data_run_id = upstream["run_id"]
-            logger.info("Upstream data run: %s", upstream_data_run_id)
-    except Exception:
-        logger.warning("Could not find upstream data run", exc_info=True)
+    upstream = find_upstream_safely(
+        tracking_uri=tracking_uri,
+        experiment_name="minivess_data",
+        upstream_flow="data",
+    )
+    upstream_data_run_id: str | None = upstream["run_id"] if upstream else None
+    if upstream_data_run_id:
+        logger.info("Upstream data run: %s", upstream_data_run_id)
 
     # Load fold splits (outside MLflow run — no side effects)
     splits = load_fold_splits_task(splits_dir)
@@ -443,16 +441,15 @@ def training_flow(
 
             mlflow.log_metric("n_folds_completed", float(len(fold_results)))
 
-        # Log flow completion tag after run is closed
-        from minivess.orchestration.flow_contract import FlowContract
-
-        contract = FlowContract(tracking_uri=tracking_uri)
-        contract.log_flow_completion(
-            flow_name="train",
-            run_id=mlflow_run_id,
-        )
     except Exception:
         logger.warning("Failed to open/finalize MLflow run", exc_info=True)
+
+    # Log flow completion tag (best-effort, non-blocking)
+    log_completion_safe(
+        flow_name="training-flow",
+        tracking_uri=tracking_uri,
+        run_id=mlflow_run_id,
+    )
 
     result = TrainingFlowResult(
         flow_name="train",

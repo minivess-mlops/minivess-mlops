@@ -32,6 +32,10 @@ from minivess.ensemble.builder import (
     EnsembleSpec,
 )
 from minivess.orchestration import flow, get_run_logger, task
+from minivess.orchestration.mlflow_helpers import (
+    find_upstream_safely,
+    log_completion_safe,
+)
 from minivess.pipeline.champion_tagger import tag_champions
 from minivess.pipeline.comparison import (
     ComparisonTable,
@@ -1550,27 +1554,15 @@ def run_analysis_flow(
 
     # --- FlowContract: tag run and log completion ---
     _tracking_uri = tracking_uri or os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
-    upstream_training_run_id: str = "no_upstream"
+    upstream = find_upstream_safely(
+        tracking_uri=_tracking_uri,
+        experiment_name="minivess_training",
+        upstream_flow="train",
+    )
+    upstream_training_run_id: str | None = upstream["run_id"] if upstream else None
     mlflow_run_id: str | None = None
     try:
         import mlflow
-
-        from minivess.orchestration.flow_contract import FlowContract
-
-        contract = FlowContract(tracking_uri=_tracking_uri)
-        upstream = contract.find_upstream_run(
-            experiment_name="minivess_training",
-            upstream_flow="train",
-        )
-        if upstream:
-            upstream_training_run_id = upstream["run_id"]
-    except Exception:
-        log.warning("Could not find upstream training run", exc_info=True)
-
-    try:
-        import mlflow
-
-        from minivess.orchestration.flow_contract import FlowContract
 
         mlflow.set_tracking_uri(_tracking_uri)
         mlflow.set_experiment("minivess_training")
@@ -1581,14 +1573,15 @@ def run_analysis_flow(
             }
         ) as active_run:
             mlflow_run_id = active_run.info.run_id
-
-        contract = FlowContract(tracking_uri=_tracking_uri)
-        contract.log_flow_completion(
-            flow_name="analyze",
-            run_id=mlflow_run_id,
-        )
     except Exception:
         log.warning("Failed to log analysis_flow to MLflow", exc_info=True)
+
+    # Log flow completion (best-effort, non-blocking)
+    log_completion_safe(
+        flow_name="analysis-flow",
+        tracking_uri=_tracking_uri,
+        run_id=mlflow_run_id,
+    )
 
     return {
         "results": all_results,

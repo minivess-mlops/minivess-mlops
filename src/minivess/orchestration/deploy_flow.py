@@ -21,6 +21,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from minivess.orchestration._prefect_compat import flow, get_run_logger, task
+from minivess.orchestration.mlflow_helpers import (
+    find_upstream_safely,
+    log_completion_safe,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -310,25 +314,15 @@ def deploy_flow(
 
     # --- FlowContract: tag run and log completion ---
     _tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
-    upstream_analysis_run_id: str = "no_upstream"
+    upstream = find_upstream_safely(
+        tracking_uri=_tracking_uri,
+        experiment_name="minivess_training",
+        upstream_flow="analyze",
+    )
+    upstream_analysis_run_id: str | None = upstream["run_id"] if upstream else None
     mlflow_run_id: str | None = None
     try:
-        from minivess.orchestration.flow_contract import FlowContract
-
-        contract = FlowContract(tracking_uri=_tracking_uri)
-        upstream = contract.find_upstream_run(
-            experiment_name="minivess_training",
-            upstream_flow="analyze",
-        )
-        if upstream:
-            upstream_analysis_run_id = upstream["run_id"]
-    except Exception:
-        log.warning("Could not find upstream analysis run", exc_info=True)
-
-    try:
         import mlflow
-
-        from minivess.orchestration.flow_contract import FlowContract
 
         mlflow.set_tracking_uri(_tracking_uri)
         mlflow.set_experiment("minivess_training")
@@ -339,13 +333,14 @@ def deploy_flow(
             }
         ) as active_run:
             mlflow_run_id = active_run.info.run_id
-
-        contract = FlowContract(tracking_uri=_tracking_uri)
-        contract.log_flow_completion(
-            flow_name="deploy",
-            run_id=mlflow_run_id,
-        )
     except Exception:
         log.warning("Failed to log deploy_flow to MLflow", exc_info=True)
+
+    # Log flow completion (best-effort, non-blocking)
+    log_completion_safe(
+        flow_name="deploy-flow",
+        tracking_uri=_tracking_uri,
+        run_id=mlflow_run_id,
+    )
 
     return result
