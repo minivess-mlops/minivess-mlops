@@ -56,6 +56,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _validate_analysis_env() -> None:
+    """Validate required environment variables for analysis flow.
+
+    Raises
+    ------
+    RuntimeError
+        When ANALYSIS_OUTPUT_DIR is not set, with actionable instructions.
+    """
+    if not os.environ.get("ANALYSIS_OUTPUT_DIR"):
+        raise RuntimeError(
+            "Required environment variable ANALYSIS_OUTPUT_DIR not set.\n"
+            "Set it before running the analysis flow:\n"
+            "  export ANALYSIS_OUTPUT_DIR=/path/to/outputs/analysis\n"
+            "Or configure it in your .env file."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Ensemble inference wrapper (uses all members, not just first)
 # ---------------------------------------------------------------------------
@@ -1480,6 +1497,9 @@ def run_analysis_flow(
     """
     log = get_run_logger()
     log.info("Starting analysis flow...")
+
+    # Preflight: validate required environment variables
+    _validate_analysis_env()
 
     # Step 0 (optional): Discover post-training models
     post_training_models: list[dict[str, Any]] = []

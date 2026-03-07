@@ -30,6 +30,25 @@ from minivess.orchestration.mlflow_helpers import (
 logger = logging.getLogger(__name__)
 
 
+def _validate_training_env() -> None:
+    """Validate required environment variables for training flow.
+
+    Raises
+    ------
+    RuntimeError
+        When SPLITS_DIR or CHECKPOINT_DIR is not set, with actionable instructions.
+    """
+    missing = [v for v in ("SPLITS_DIR", "CHECKPOINT_DIR") if not os.environ.get(v)]
+    if missing:
+        raise RuntimeError(
+            f"Required environment variables not set: {missing}\n"
+            "Set them before running the training flow:\n"
+            "  export SPLITS_DIR=/path/to/configs/splits\n"
+            "  export CHECKPOINT_DIR=/path/to/checkpoints\n"
+            "Or configure them in your .env file."
+        )
+
+
 @dataclass
 class TrainingFlowResult:
     """Result returned by training_flow().
@@ -379,6 +398,9 @@ def training_flow(
     TrainingFlowResult with fold results, MLflow run ID, and upstream link.
     """
     logger.info("Training flow started (trigger: %s)", trigger_source)
+
+    # Preflight: validate required environment variables
+    _validate_training_env()
 
     # Resolve environment variables
     splits_dir = Path(os.environ.get("SPLITS_DIR", "configs/splits"))
