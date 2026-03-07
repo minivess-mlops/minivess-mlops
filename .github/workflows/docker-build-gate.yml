@@ -1,4 +1,4 @@
-# Docker Build Gate — verifies Dockerfile.train builds successfully.
+# Docker Build Gate — verifies Docker images build successfully.
 #
 # Only triggers when files that affect the Docker BUILD change:
 # - Dockerfile itself (build instructions)
@@ -29,12 +29,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Build base first — all flow Dockerfiles inherit FROM it.
+      # Uses plain `docker build` (not buildx push) so the image is in the
+      # local daemon and available for the subsequent FROM reference.
+      - name: Build base image
+        run: |
+          docker build \
+            -t minivess-base:latest \
+            -f deployment/docker/Dockerfile.base \
+            .
+
       - name: Build training Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deployment/docker/Dockerfile.train
-          push: false
-          tags: minivess-train:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: |
+          docker build \
+            -t minivess-train:test \
+            -f deployment/docker/Dockerfile.train \
+            .
