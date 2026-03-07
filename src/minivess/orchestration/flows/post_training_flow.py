@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -112,6 +113,24 @@ def _is_json_serializable(v: Any) -> bool:
     return isinstance(v, str | int | float | bool | list | dict | type(None))
 
 
+@dataclass
+class PostTrainingFlowResult:
+    """Typed result returned by post_training_flow().
+
+    Replaces the plain dict[str, Any] return for type safety and
+    consistency with TrainingFlowResult and DeployResult.
+    """
+
+    flow_name: str = "post-training-flow"
+    status: str = "completed"
+    mlflow_run_id: str | None = None
+    upstream_training_run_id: str | None = None
+    swa_completed: bool = False
+    calibration_completed: bool = False
+    conformal_completed: bool = False
+    failed_operations: list[str] = field(default_factory=list)
+
+
 @flow(name="Post-Training Pipeline")
 def post_training_flow(
     *,
@@ -121,7 +140,7 @@ def post_training_flow(
     output_dir: Path | None = None,
     calibration_data: dict[str, Any] | None = None,
     trigger_source: str = "manual",
-) -> dict[str, Any]:
+) -> PostTrainingFlowResult:
     """Post-training flow (Flow 2.5) — orchestrate post-hoc plugins.
 
     Parameters
@@ -158,12 +177,7 @@ def post_training_flow(
     enabled = config.enabled_plugin_names()
     if not enabled:
         log.info("No post-training plugins enabled")
-        return {
-            "status": "success",
-            "n_plugins_run": 0,
-            "plugin_results": {},
-            "trigger_source": trigger_source,
-        }
+        return PostTrainingFlowResult(status="completed")
 
     registry = _build_registry()
     plugin_results: dict[str, dict[str, Any]] = {}
@@ -271,11 +285,16 @@ def post_training_flow(
     except Exception:
         log.warning("Failed to log post_training_flow to MLflow", exc_info=True)
 
-    return {
-        "status": "success",
-        "n_plugins_run": n_run,
-        "plugin_results": plugin_results,
-        "trigger_source": trigger_source,
-        "mlflow_run_id": mlflow_run_id,
-        "upstream_training_run_id": upstream_training_run_id,
-    }
+    swa_ran = any(k in plugin_results for k in ("swa", "multi_swa"))
+    calibration_ran = "calibration" in plugin_results
+    conformal_ran = any(k in plugin_results for k in ("crc_conformal", "conseco_fp"))
+    return PostTrainingFlowResult(
+        status="completed",
+        mlflow_run_id=mlflow_run_id,
+        upstream_training_run_id=upstream_training_run_id,
+        swa_completed=swa_ran
+        and plugin_results.get("swa", {}).get("status") == "success",
+        calibration_completed=calibration_ran
+        and plugin_results.get("calibration", {}).get("status") == "success",
+        conformal_completed=conformal_ran,
+    )

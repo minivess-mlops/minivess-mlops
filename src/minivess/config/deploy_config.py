@@ -83,3 +83,30 @@ class DeployConfig(BaseModel):
         default=False,
         description="Include auxiliary heads in ONNX export (default: mask-only)",
     )
+
+    @classmethod
+    def from_env(cls) -> DeployConfig:
+        """Create DeployConfig from environment variables.
+
+        Required:
+            MLFLOW_TRACKING_URI: MLflow tracking URI (local path or remote).
+
+        Optional:
+            DEPLOY_OUTPUT_DIR: Output directory for artifacts (default: /app/outputs/deploy).
+
+        Raises
+        ------
+        RuntimeError
+            If MLFLOW_TRACKING_URI is not set.
+        """
+        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
+        if not tracking_uri:
+            raise RuntimeError(
+                "Required env var MLFLOW_TRACKING_URI not set.\n"
+                "Set it with:\n"
+                "  export MLFLOW_TRACKING_URI=file:///path/to/mlruns\n"
+                "  # or: export MLFLOW_TRACKING_URI=http://mlflow-server:5000"
+            )
+        # Strip file:// prefix if present to get the actual path
+        mlruns_path = tracking_uri.removeprefix("file://")
+        return cls(mlruns_dir=Path(mlruns_path))

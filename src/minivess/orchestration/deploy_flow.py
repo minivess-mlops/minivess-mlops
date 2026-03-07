@@ -194,7 +194,7 @@ def promote_task(
 
 @flow(name="Deploy Pipeline")
 def deploy_flow(
-    config: DeployConfig,
+    config: DeployConfig | None = None,
     experiment_id: str = "1",
 ) -> DeployResult:
     """Orchestrate the full deployment pipeline.
@@ -202,7 +202,8 @@ def deploy_flow(
     Parameters
     ----------
     config:
-        Deploy flow configuration.
+        Deploy flow configuration. If None, built from environment variables
+        via ``DeployConfig.from_env()`` (reads MLFLOW_TRACKING_URI).
     experiment_id:
         MLflow experiment ID to search for champions.
 
@@ -210,6 +211,11 @@ def deploy_flow(
     -------
     :class:`DeployResult` with all deployment artifacts and status.
     """
+    from minivess.config.deploy_config import DeployConfig as _DeployConfig
+
+    if config is None:
+        config = _DeployConfig.from_env()
+
     log = get_run_logger()
     log.info("Starting deploy flow for experiment %s", experiment_id)
 
