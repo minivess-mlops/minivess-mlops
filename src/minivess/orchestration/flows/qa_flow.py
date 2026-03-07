@@ -12,6 +12,8 @@ This flow is designed to run periodically, after training, or in CI.
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
 from minivess.observability.mlflow_backend import detect_backend_type
@@ -189,7 +191,7 @@ def summarize_qa_results(checks: list[dict[str, Any]]) -> dict[str, int]:
 
 @flow(name="qa-flow")
 def qa_flow(
-    tracking_uri: str = "mlruns",
+    tracking_uri: str | None = None,
     experiment_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """QA Prefect flow — runs all MLflow quality checks.
@@ -197,14 +199,18 @@ def qa_flow(
     Parameters
     ----------
     tracking_uri:
-        MLflow tracking URI.
+        MLflow tracking URI. Defaults to MLFLOW_TRACKING_URI env var,
+        falling back to "mlruns".
     experiment_ids:
         Experiment IDs to check. If None, checks all.
 
     Returns
     -------
-    Dict with ``checks`` list and ``summary``.
+    Dict with ``checks`` list, ``summary``, ``report``, and ``report_path``.
     """
+    if tracking_uri is None:
+        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+
     checks: list[dict[str, Any]] = []
 
     # Check 1: Backend consistency
@@ -226,8 +232,16 @@ def qa_flow(
     logger.info("QA flow complete: %s", summary)
     logger.info("\n%s", report)
 
+    # Persist report to disk
+    report_dir = Path(os.environ.get("DASHBOARD_OUTPUT", "/app/outputs/dashboard"))
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / "qa_report.md"
+    report_path.write_text(report, encoding="utf-8")
+    logger.info("QA report saved: %s", report_path)
+
     return {
         "checks": checks,
         "summary": summary,
         "report": report,
+        "report_path": str(report_path),
     }

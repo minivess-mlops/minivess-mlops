@@ -1,0 +1,21 @@
+# MinIVess MLOps v2 — Annotation Flow (Flow 7)
+# Runs model inference for pre-annotation and submits candidates to Label Studio.
+#
+# Build: docker build -t minivess-annotation:latest -f deployment/docker/Dockerfile.annotation .
+
+FROM minivess-base:latest
+
+LABEL flow="annotation"
+LABEL description="Annotation flow — pre-annotate volumes via BentoML and submit to Label Studio"
+
+# Copy scripts
+COPY --chown=minivess:minivess scripts/ scripts/
+
+# BentoML home (read-only mount from deploy flow)
+ENV BENTOML_HOME=/home/minivess/bentoml
+
+# Label Studio endpoint (configure at runtime)
+ENV LABEL_STUDIO_URL=""
+ENV LABEL_STUDIO_TOKEN=""
+
+CMD ["python", "-m", "minivess.orchestration.flows.annotation_flow"]

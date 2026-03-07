@@ -7,7 +7,9 @@ Uses ``_prefect_compat`` decorators for graceful degradation without Prefect.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -77,11 +79,85 @@ class DataFlowResult:
     splits: list[FoldSplit] | None
     external_datasets: dict[str, list[dict[str, str]]]
     provenance: dict[str, Any]
+    mlflow_run_id: str | None = None
+    splits_path: Path | None = None
 
 
 # ---------------------------------------------------------------------------
 # @task functions
 # ---------------------------------------------------------------------------
+
+
+@task(name="serialize-splits")
+def serialize_splits_task(splits: list[FoldSplit], splits_dir: Path) -> Path:
+    """Serialize FoldSplit list to JSON at splits_dir/splits.json.
+
+    Parameters
+    ----------
+    splits:
+        List of FoldSplit objects to serialize.
+    splits_dir:
+        Directory where splits.json will be written.
+
+    Returns
+    -------
+    Path to the written splits.json file.
+    """
+    from pathlib import Path as _Path
+
+    splits_dir = _Path(splits_dir)
+    splits_dir.mkdir(parents=True, exist_ok=True)
+    splits_path = splits_dir / "splits.json"
+    serialized = [
+        {
+            "fold_id": fold_id,
+            "train": fold.train,
+            "val": fold.val,
+        }
+        for fold_id, fold in enumerate(splits)
+    ]
+    splits_path.write_text(json.dumps(serialized, indent=2), encoding="utf-8")
+    logger.info("Serialized %d fold splits to %s", len(splits), splits_path)
+    return splits_path
+
+
+@task(name="dvc-pull")
+def dvc_pull_task(
+    data_dir: Path,
+    *,
+    dvc_rev: str | None = None,
+    remote: str | None = None,
+) -> str:
+    """Pull DVC-tracked data at an optional revision from an optional remote.
+
+    Parameters
+    ----------
+    data_dir:
+        Working directory for both dvc and git commands.
+    dvc_rev:
+        Optional DVC/git revision to pull (e.g. a git tag or commit hash).
+    remote:
+        Optional DVC remote name to pull from (overrides default remote).
+
+    Returns
+    -------
+    Current git commit hash (HEAD) after the pull, as a hex string.
+    """
+    cmd: list[str] = ["dvc", "pull"]
+    if dvc_rev:
+        cmd.extend(["--rev", dvc_rev])
+    if remote:
+        cmd.extend(["--remote", remote])
+    subprocess.run(cmd, capture_output=True, text=True, cwd=data_dir, check=True)
+
+    rev_result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        cwd=data_dir,
+        check=True,
+    )
+    return rev_result.stdout.strip()
 
 
 @task(name="discover-data")
@@ -285,6 +361,8 @@ def run_data_flow(
     n_folds: int = 3,
     seed: int = 42,
     external_dirs: dict[str, Path] | None = None,
+    dvc_rev: str | None = None,
+    dvc_remote: str | None = None,
 ) -> DataFlowResult:
     """Data Engineering Flow (Flow 1).
 
@@ -300,12 +378,29 @@ def run_data_flow(
         Random seed for reproducibility.
     external_dirs:
         Optional dict of dataset_name → data_dir for external datasets.
+    dvc_rev:
+        Optional DVC revision to pull (git tag or commit hash).
+    dvc_remote:
+        Optional DVC remote name (overrides DVC_REMOTE env var).
 
     Returns
     -------
     DataFlowResult with all flow outputs.
     """
+    import os
+
+    import mlflow
+
     logger.info("Starting data flow → %s", data_dir)
+
+    # Step 0: DVC pull (optional — skipped if dvc binary not available)
+    data_dvc_commit: str | None = None
+    active_remote = dvc_remote or os.environ.get("DVC_REMOTE")
+    try:
+        data_dvc_commit = dvc_pull_task(data_dir, dvc_rev=dvc_rev, remote=active_remote)
+        logger.info("DVC pull complete, commit=%s", data_dvc_commit)
+    except Exception:
+        logger.warning("DVC pull skipped (dvc not installed or data already present)")
 
     # Step 1: Discover
     pairs = discover_data_task(data_dir=data_dir)
@@ -318,8 +413,14 @@ def run_data_flow(
 
     # Step 4: Split (only if quality gate passed)
     splits: list[FoldSplit] | None = None
+    splits_path: Path | None = None
     if quality_passed and len(pairs) >= n_folds:
         splits = split_data_task(pairs=pairs, n_folds=n_folds, seed=seed)
+        # Step 4b: Serialize splits to JSON for inter-flow handoff
+        from pathlib import Path as _Path
+
+        splits_dir = _Path(os.environ.get("SPLITS_OUTPUT_DIR", "/app/configs/splits"))
+        splits_path = serialize_splits_task(splits, splits_dir)
 
     # Step 5: External datasets
     external_datasets: dict[str, list[dict[str, str]]] = {}
@@ -337,6 +438,28 @@ def run_data_flow(
         dataset_hash=dataset_hash,
     )
 
+    # Open MLflow run for data engineering provenance (always — not conditional on DVC)
+    mlflow_run_id: str | None = None
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+    try:
+        from minivess.orchestration.flow_contract import FlowContract
+
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment("minivess_data")
+        with mlflow.start_run(tags={"flow_name": "data"}) as active_run:
+            mlflow_run_id = active_run.info.run_id
+            mlflow.log_param("data_n_volumes", len(pairs))
+            mlflow.log_param("data_n_folds", n_folds)
+            mlflow.log_param("data_hash", dataset_hash)
+            if data_dvc_commit is not None:
+                mlflow.log_param("data_dvc_commit", data_dvc_commit)
+            logger.info("MLflow data run opened: %s", mlflow_run_id)
+
+        contract = FlowContract(tracking_uri=tracking_uri)
+        contract.log_flow_completion(flow_name="data", run_id=mlflow_run_id)
+    except Exception:
+        logger.warning("Failed to open/finalize MLflow data run", exc_info=True)
+
     logger.info("Data flow complete: %d pairs, quality=%s", len(pairs), quality_passed)
     return DataFlowResult(
         pairs=pairs,
@@ -346,4 +469,6 @@ def run_data_flow(
         splits=splits,
         external_datasets=external_datasets,
         provenance=provenance,
+        mlflow_run_id=mlflow_run_id,
+        splits_path=splits_path,
     )

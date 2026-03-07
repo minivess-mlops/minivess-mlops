@@ -105,9 +105,7 @@ import argparse
 import gc
 import json
 import logging
-import shutil
 import sys
-import tempfile
 
 # Load .env early so HF_TOKEN (and other secrets) are available before
 # any model imports. Environment variables always override .env values.
@@ -669,8 +667,10 @@ def run_fold_safe(
         system_monitor=system_monitor,
     )
 
-    # Create checkpoint directory
-    checkpoint_dir = Path(tempfile.mkdtemp()) / f"fold_{fold_id}"
+    # Create checkpoint directory — resolved from CHECKPOINT_DIR env var (never /tmp)
+    checkpoint_dir = (
+        Path(os.environ.get("CHECKPOINT_DIR", "/app/checkpoints")) / f"fold_{fold_id}"
+    )
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     # === Phase 1: Train ===
@@ -770,10 +770,7 @@ def run_fold_safe(
     del model
     _cleanup_memory(f"end-fold{fold_id}")
 
-    # T10: Clean up the tmp checkpoint directory (checkpoints already uploaded to MLflow)
-    _tmp_root = checkpoint_dir.parent
-    shutil.rmtree(_tmp_root, ignore_errors=True)
-    logger.info("Removed tmp checkpoint dir: %s", _tmp_root)
+    # Checkpoints persist on the mounted volume (CHECKPOINT_DIR) — no cleanup needed.
 
     return result
 
@@ -1094,4 +1091,20 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
+    # Deprecation gate — direct invocation is no longer supported.
+    # Set ALLOW_STANDALONE_TRAINING=1 to bypass (e.g. in CI or migration).
+    warnings.warn(
+        "\n\n"
+        "DEPRECATED ENTRY POINT: scripts/train_monitored.py\n"
+        "This script is NOT the supported way to run training.\n"
+        "The correct entry point is:\n"
+        "  prefect deployment run 'training-flow/default' --params '{...}'\n"
+        "Or use the shell wrapper: scripts/run_training.sh <loss> <model>\n"
+        "This script will be removed in a future release.\n"
+        "Set ALLOW_STANDALONE_TRAINING=1 to suppress this warning and continue.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    if not os.environ.get("ALLOW_STANDALONE_TRAINING"):
+        sys.exit(1)
     main()

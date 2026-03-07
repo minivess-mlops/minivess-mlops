@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 # system_monitor.py is in scripts/ (not in the package).
@@ -12,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 #                    gpu_status(snap) -> str
 import numpy as np
 import torch
+import yaml
 from monai.inferers import sliding_window_inference  # type: ignore[attr-defined]
 from torch.amp import GradScaler, autocast  # type: ignore[attr-defined]
 from torch.optim import SGD, AdamW
@@ -430,6 +432,7 @@ class SegmentationTrainer:
         train_loader: Any,
         val_loader: Any,
         *,
+        fold_id: int = 0,
         checkpoint_dir: Path | None = None,
     ) -> dict[str, Any]:
         """Full training loop with multi-metric early stopping.
@@ -456,6 +459,10 @@ class SegmentationTrainer:
         history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
         final_epoch = 0
         ckpt_cfg = self.config.checkpoint
+        # Capture MLflow run ID from tracker (if active) for return dict
+        _active_run_id: str | None = (
+            self.tracker.run_id if self.tracker is not None else None
+        )
         epoch_start_time = time.perf_counter()
 
         # Determine if extended metrics (MetricsReloaded) are needed
@@ -637,6 +644,34 @@ class SegmentationTrainer:
                 checkpoint_dir.mkdir(parents=True, exist_ok=True)
                 self._metric_history.save_json(checkpoint_dir / "metric_history.json")
 
+            # Write epoch_latest.yaml and epoch_latest.pth for spot-preemption recovery
+            if checkpoint_dir is not None:
+                checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                _primary = (
+                    self._multi_tracker.trackers[0]
+                    if self._multi_tracker.trackers
+                    else None
+                )
+                _best_val_loss = (
+                    float(_primary.best_value) if _primary is not None else float("inf")
+                )
+                _run_id: str | None = None
+                if self.tracker is not None:
+                    _run_id = getattr(self.tracker, "run_id", None)
+                _epoch_state: dict[str, object] = {
+                    "epoch": int(epoch),
+                    "fold": int(fold_id),
+                    "mlflow_run_id": _run_id,
+                    "best_val_loss": _best_val_loss,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+                epoch_latest_path = checkpoint_dir / "epoch_latest.yaml"
+                epoch_latest_path.write_text(yaml.dump(_epoch_state), encoding="utf-8")
+                torch.save(
+                    self.model.state_dict(),
+                    checkpoint_dir / "epoch_latest.pth",
+                )
+
             # Early stopping decision via MultiMetricTracker
             if self._multi_tracker.should_stop(epoch):
                 logger.info(
@@ -679,4 +714,5 @@ class SegmentationTrainer:
                 tracker.name: tracker.best_value
                 for tracker in self._multi_tracker.trackers
             },
+            "mlflow_run_id": _active_run_id,
         }

@@ -7,7 +7,6 @@ tables for efficient querying during academic report generation.
 from __future__ import annotations
 
 import logging
-import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -328,6 +327,33 @@ def query_champion_runs(db: Any) -> list[tuple[Any, ...]]:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+# NOTE: regex module is BANNED (CLAUDE.md Rule #16). Use str.partition() instead.
+
+
+def parse_eval_fold_metric(metric_name: str) -> tuple[int, str] | None:
+    """Parse an ``eval_fold{i}_{name}`` metric name into ``(fold_id, base_metric)``.
+
+    Uses ``str.partition()`` — NOT regex (CLAUDE.md Rule #16 ban).
+
+    Parameters
+    ----------
+    metric_name:
+        E.g. ``"eval_fold0_val_dice"`` or ``"eval_fold12_compound_masd"``.
+
+    Returns
+    -------
+    ``(fold_id, base_metric)`` if metric_name matches ``eval_fold{i}_{name}``,
+    or ``None`` if it does not match the pattern.
+    """
+    prefix = "eval_fold"
+    if not metric_name.startswith(prefix):
+        return None
+    rest = metric_name[len(prefix) :]  # e.g. "0_val_dice"
+    fold_str, sep, base_metric = rest.partition("_")
+    if not sep or not fold_str.isdigit():
+        return None
+    return int(fold_str), base_metric
+
 
 def _parse_and_insert_eval_metric(
     db: Any,
@@ -360,13 +386,12 @@ def _parse_and_insert_eval_metric(
     """
     from minivess.pipeline.mlruns_inspector import read_metric_last_value
 
-    # Pattern: eval_fold{i}_{base_metric}
-    match = re.match(r"eval_fold(\d+)_(.+)", metric_name)
-    if not match:
+    # Pattern: eval_fold{i}_{base_metric} — parsed with str.partition (no regex)
+    parsed = parse_eval_fold_metric(metric_name)
+    if parsed is None:
         return
 
-    fold_id = int(match.group(1))
-    base_metric = match.group(2)
+    fold_id, base_metric = parsed
 
     # Skip CI variant metrics — handled when their point estimate is processed
     if base_metric.endswith(_CI_SUFFIXES):

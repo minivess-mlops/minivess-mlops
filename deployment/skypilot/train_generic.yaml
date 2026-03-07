@@ -35,11 +35,14 @@ file_mounts:
 
 envs:
   MLFLOW_TRACKING_URI: http://mlflow:5000
+  PREFECT_API_URL: ${PREFECT_API_URL}
   LOSS_NAME: cbdice_cldice
   MODEL_FAMILY: dynunet
   COMPUTE: gpu_low
   NUM_FOLDS: 3
   MAX_EPOCHS: 100
+  EXPERIMENT_NAME: minivess_training
+  CHECKPOINT_DIR: /checkpoints
 
 setup: |
   pip install uv
@@ -47,10 +50,7 @@ setup: |
 
 run: |
   cd /app
-  uv run python scripts/train_monitored.py \
-    --compute ${COMPUTE} \
-    --loss ${LOSS_NAME} \
-    --model-family ${MODEL_FAMILY} \
-    --num-folds ${NUM_FOLDS} \
-    --max-epochs ${MAX_EPOCHS} \
-    --log-dir /checkpoints/logs
+  prefect deployment run 'training-flow/default' \
+    --params "{\"loss_name\": \"${LOSS_NAME}\", \"model_family\": \"${MODEL_FAMILY}\", \
+               \"compute\": \"${COMPUTE}\", \"num_folds\": ${NUM_FOLDS}, \
+               \"max_epochs\": ${MAX_EPOCHS}, \"experiment_name\": \"${EXPERIMENT_NAME}\"}"
