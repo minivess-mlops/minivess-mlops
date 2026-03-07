@@ -2,66 +2,72 @@
 
 ## VRAM Requirements (Per-Variant)
 
-VRAM requirements depend on **whether the SAM3 encoder is frozen**.
-When frozen, `torch.no_grad()` is applied → no activation graph built for 848M params.
+VRAM requirements depend on **whether the SAM3 encoder is frozen** AND on
+**attention implementation**. SDPA (Scaled Dot-Product Attention) is critical.
 
-| Variant | Encoder Frozen | Task | Min VRAM | Notes |
-|---------|---------------|------|----------|-------|
-| V1 Vanilla | ✅ Yes | Inference-level gate | **≥6 GB** | Only lightweight decoder trains; ~5-7 GB peak FP16 |
-| V2 TopoLoRA | ❌ No | Training gate | **≥16 GB** | LoRA on all 32 ViT-32L blocks, gradients flow |
-| V3 Hybrid | ✅ Yes | Inference-level gate | **≥6 GB** | Sequential execution: SAM frozen (5-7 GB peak) then DynUNet (~2.8 GB) |
+| Variant | Encoder Frozen | Attention | Min VRAM | Peak (measured) | Notes |
+|---------|---------------|-----------|----------|----------------|-------|
+| V1 Vanilla | Yes | SDPA | **≥4 GB** | **2.9 GB** | Verified on RTX 2070 Super (2026-03-07) |
+| V1 Vanilla | Yes | Eager | ≥8 GB | **7+ GB OOM** | Eager materializes 5184×5184 attention matrices |
+| V2 TopoLoRA | No | SDPA | **≥16 GB** | TBD | LoRA on all 32 ViT-32L blocks, gradients flow |
+| V3 Hybrid | Yes | SDPA | **≥4 GB** | TBD | Sequential SAM→DynUNet, not simultaneous |
 
 Gate is enforced by `check_sam3_vram(variant, mode)` in `sam3_vram_check.py`.
 - `mode="inference"` → 6 GB gate → V1, V3
 - `mode="training"` → 16 GB gate → V2
 
-### What "Frozen Encoder" Means for VRAM
+### SDPA is Non-Negotiable (Verified 2026-03-07)
+
+Without SDPA, the ViT-32L encoder materializes 5184×5184 attention matrices per head
+(72×72 patch grid from 1008×1008 input). With 16 heads, this is ~862 MB per layer.
+**Eager attention OOMs on 8 GB GPUs.**
+
+SDPA avoids materializing the full attention matrix, reducing encoder peak from
+~7 GB to ~1.1 GB. This is set via `attn_implementation="sdpa"` in
+`Sam3Model.from_pretrained()`.
 
 ```python
-# In Sam3Backbone.extract_features() when self._frozen=True:
-with torch.no_grad():
-    out = self.encoder(x)  # no activation graph stored for 848M params
+model = Sam3Model.from_pretrained(
+    "facebook/sam3",
+    attn_implementation="sdpa",  # CRITICAL for 8 GB GPUs
+    torch_dtype=torch.float16,
+)
 ```
 
-The 848M-param ViT-32L encoder pass uses ~4-6 GB BF16 for activation values, but
-since `torch.no_grad()` prevents gradient tracking, no backward graph is allocated.
-This means V1 Vanilla with frozen encoder has similar VRAM to pure inference.
+### MONAI Dimension Order (B, C, H, W, D) — NOT (B, C, D, H, W)
 
-### Practical on RTX 2070 Super (8 GB)
+**CRITICAL:** MONAI outputs volumes as `(B, C, H, W, D)` where depth is LAST.
+The SAM3 adapters must use:
+```python
+b, c, h, w, d = images.shape
+for z_idx in range(d):
+    slice_2d = images[:, :, :, :, z_idx]  # (B, C, H, W)
+```
 
-| Task | Feasible? |
-|------|-----------|
-| V1 Vanilla frozen encoder training | ✅ Likely (5-7 GB expected) — **VERIFY EMPIRICALLY** |
-| V3 Hybrid (SAM frozen + DynUNet-3D) | ✅ Likely (5-7 GB peak) — sequential SAM→DynUNet, not simultaneous |
-| V2 TopoLoRA (LoRA on unfrozen encoder) | ❌ No — requires A100-40GB |
+Getting this wrong (treating dim 2 as depth) causes 21x more encoder calls
+(64 instead of 3 with patch_size=(64,64,3)) → OOM. This was a bug found
+and fixed on 2026-03-07.
 
-Sources for VRAM numbers: GH Issues #235, #200, #307 at facebookresearch/sam3;
-debuggercafe.com SAM3 benchmarks. **Do not state VRAM numbers without citing a source.**
+### Practical on RTX 2070 Super (8 GB) — Verified 2026-03-07
 
-### Dtype Selection (AMP handles this automatically)
+| Task | Peak VRAM | Time/Epoch | Feasible? |
+|------|-----------|------------|-----------|
+| V1 Vanilla training step (B=4, D=3) | 2.9 GB | ~3s | ✅ Yes |
+| V1 Vanilla training epoch (47 vols) | 3.5 GB | ~8 min | ✅ Yes |
+| V1 Vanilla validation (512×512×61, SW) | 3.6 GB | ~60 min | ⚠️ Slow |
+| V2 TopoLoRA | — | — | ❌ No (OOM) |
 
-PyTorch AMP (`torch.cuda.amp.autocast()`) automatically picks the optimal dtype per GPU.
-**No hardcoded dtypes in adapter code.** Dtype is config-driven or auto-detected.
-
-| GPU Architecture | Compute Cap | AMP autocast dtype | Note |
-|-----------------|-------------|-------------------|------|
-| Turing (RTX 2070 Super) | 7.5 | FP16 (auto) | BF16 exists but 6.7x slower (software emulation) |
-| Ampere (RTX 3090, A100) | 8.0+ | BF16 or FP16 (auto) | Both native |
-
-Only relevant if someone explicitly forces a dtype in config — don't force BF16 on Turing.
+Validation is slow because sliding_window_inference creates ~3300 windows
+per volume (patch=(64,64,3), overlap=0.25), each requiring 3 encoder passes.
+Mitigated by `val_interval=25` (validate every 25 epochs).
 
 ### Multi-Environment Compute (CPU / Consumer GPU / Cloud)
 
 | Variant | CPU (64 GB RAM) | RTX 2070 Super (8 GB) | A100-40GB |
 |---------|----------------|----------------------|-----------|
-| V1 Vanilla (cached) | 75 h (3.2 days) | **2 h** | <1 h |
-| V1 Vanilla (no cache) | 157 days | 2.6 days | ~6 h |
+| V1 Vanilla (50 ep × 3 fold) | ~30 days | **~18 h** (val_interval=25) | ~4 h |
 | V2 TopoLoRA | 470 days | OOM | **38 h** |
-| V3 Hybrid (cached) | 76 h (3.2 days) | **13-25 h** | ~4 h |
-
-**Feature caching** is the critical optimization for V1/V3: extract frozen SAM3
-features once to disk (8 GB/fold), then train decoder on cached tensors.
-This makes CPU training feasible for a long-weekend job.
+| V3 Hybrid | TBD | TBD | TBD |
 
 ## No Stub, Never
 
@@ -82,11 +88,11 @@ If GPU VRAM below mode-appropriate threshold → **RuntimeError** with hardware 
 
 | File | Role |
 |------|------|
-| `sam3_backbone.py` | `Sam3Backbone` — wraps real SAM3 ViT-32L + FPN neck; `freeze=True` wraps encoder in `no_grad` |
-| `sam3_vanilla.py` | V1: frozen encoder (inference gate 6 GB), trainable mask decoder |
+| `sam3_backbone.py` | `Sam3Backbone` — wraps real SAM3 ViT-32L + FPN neck; SDPA + FP16; `freeze=True` wraps encoder in `no_grad` |
+| `sam3_vanilla.py` | V1: frozen encoder, lightweight Conv decoder (66K params), slice-by-slice 3D |
 | `sam3_topolora.py` | V2: LoRA on FFN layers (training gate 16 GB), `cbdice_cldice` loss |
-| `sam3_hybrid.py` | V3: frozen ViT-32L + gated DynUNet-3D fusion (inference gate 6 GB) |
-| `sam3_decoder.py` | `Sam3MaskDecoder` — wraps SAM3 mask prediction head |
+| `sam3_hybrid.py` | V3: frozen ViT-32L + gated DynUNet-3D fusion |
+| `sam3_decoder.py` | `Sam3MaskDecoder` — native SAM3 head or lightweight Conv decoder (HF path) |
 | `sam3_feature_cache.py` | Feature caching for slice-by-slice 3D inference (reduces VRAM) |
 | `sam3_vram_check.py` | Pre-flight VRAM enforcement (`mode="inference"` ≥6 GB, `mode="training"` ≥16 GB) |
 | `model_builder.py` | `build_adapter()` factory — calls `_require_sam3(config, encoder_frozen=bool)` |
