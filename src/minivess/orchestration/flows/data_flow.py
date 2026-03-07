@@ -7,6 +7,7 @@ Uses ``_prefect_compat`` decorators for graceful degradation without Prefect.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import subprocess
 from dataclasses import dataclass
@@ -79,11 +80,45 @@ class DataFlowResult:
     external_datasets: dict[str, list[dict[str, str]]]
     provenance: dict[str, Any]
     mlflow_run_id: str | None = None
+    splits_path: Path | None = None
 
 
 # ---------------------------------------------------------------------------
 # @task functions
 # ---------------------------------------------------------------------------
+
+
+@task(name="serialize-splits")
+def serialize_splits_task(splits: list[FoldSplit], splits_dir: Path) -> Path:
+    """Serialize FoldSplit list to JSON at splits_dir/splits.json.
+
+    Parameters
+    ----------
+    splits:
+        List of FoldSplit objects to serialize.
+    splits_dir:
+        Directory where splits.json will be written.
+
+    Returns
+    -------
+    Path to the written splits.json file.
+    """
+    from pathlib import Path as _Path
+
+    splits_dir = _Path(splits_dir)
+    splits_dir.mkdir(parents=True, exist_ok=True)
+    splits_path = splits_dir / "splits.json"
+    serialized = [
+        {
+            "fold_id": fold_id,
+            "train": fold.train,
+            "val": fold.val,
+        }
+        for fold_id, fold in enumerate(splits)
+    ]
+    splits_path.write_text(json.dumps(serialized, indent=2), encoding="utf-8")
+    logger.info("Serialized %d fold splits to %s", len(splits), splits_path)
+    return splits_path
 
 
 @task(name="dvc-pull")
@@ -378,8 +413,14 @@ def run_data_flow(
 
     # Step 4: Split (only if quality gate passed)
     splits: list[FoldSplit] | None = None
+    splits_path: Path | None = None
     if quality_passed and len(pairs) >= n_folds:
         splits = split_data_task(pairs=pairs, n_folds=n_folds, seed=seed)
+        # Step 4b: Serialize splits to JSON for inter-flow handoff
+        from pathlib import Path as _Path
+
+        splits_dir = _Path(os.environ.get("SPLITS_OUTPUT_DIR", "/app/configs/splits"))
+        splits_path = serialize_splits_task(splits, splits_dir)
 
     # Step 5: External datasets
     external_datasets: dict[str, list[dict[str, str]]] = {}
@@ -429,4 +470,5 @@ def run_data_flow(
         external_datasets=external_datasets,
         provenance=provenance,
         mlflow_run_id=mlflow_run_id,
+        splits_path=splits_path,
     )
