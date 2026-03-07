@@ -1091,4 +1091,20 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
+    # Deprecation gate — direct invocation is no longer supported.
+    # Set ALLOW_STANDALONE_TRAINING=1 to bypass (e.g. in CI or migration).
+    warnings.warn(
+        "\n\n"
+        "DEPRECATED ENTRY POINT: scripts/train_monitored.py\n"
+        "This script is NOT the supported way to run training.\n"
+        "The correct entry point is:\n"
+        "  prefect deployment run 'training-flow/default' --params '{...}'\n"
+        "Or use the shell wrapper: scripts/run_training.sh <loss> <model>\n"
+        "This script will be removed in a future release.\n"
+        "Set ALLOW_STANDALONE_TRAINING=1 to suppress this warning and continue.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    if not os.environ.get("ALLOW_STANDALONE_TRAINING"):
+        sys.exit(1)
     main()
