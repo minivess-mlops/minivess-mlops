@@ -25,6 +25,21 @@ from minivess.orchestration.constants import FLOW_NAME_QA
 logger = logging.getLogger(__name__)
 
 
+def _require_docker_context() -> None:
+    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
+    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
+        return
+    if os.environ.get("DOCKER_CONTAINER"):
+        return
+    if Path("/.dockerenv").exists():
+        return
+    raise RuntimeError(
+        "QA flow must run inside a Docker container.\n"
+        "Run: docker compose -f deployment/docker-compose.flows.yml run qa\n"
+        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
+    )
+
+
 @task(name="check-backend-consistency")
 def check_backend_consistency(tracking_uri: str) -> dict[str, Any]:
     """Check MLflow backend type and warn on local filesystem.
@@ -211,6 +226,8 @@ def qa_flow(
     -------
     Dict with ``checks`` list, ``summary``, ``report``, and ``report_path``.
     """
+    _require_docker_context()
+
     if tracking_uri is None:
         tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
 

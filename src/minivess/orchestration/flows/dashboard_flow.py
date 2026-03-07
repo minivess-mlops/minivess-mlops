@@ -31,6 +31,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _require_docker_context() -> None:
+    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
+    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
+        return
+    if os.environ.get("DOCKER_CONTAINER"):
+        return
+    if Path("/.dockerenv").exists():
+        return
+    raise RuntimeError(
+        "Dashboard flow must run inside a Docker container.\n"
+        "Run: docker compose -f deployment/docker-compose.flows.yml run dashboard\n"
+        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
+    )
+
+
 @task(name="collect-data-section")
 def collect_data_section_task(
     n_volumes: int,
@@ -326,6 +341,8 @@ def run_dashboard_flow(
     output_dir:
         Root directory for all dashboard outputs.
     """
+    _require_docker_context()
+
     if output_dir is None:
         output_dir = Path(
             os.environ.get("DASHBOARD_OUTPUT_DIR", "/app/outputs/dashboard")

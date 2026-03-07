@@ -407,6 +407,7 @@ class TestRunAnalysisFlow:
             "champion_tags",
             "artifact_paths",
             "post_training_models",
+            "experiment_summary",
             "mlflow_run_id",
             "upstream_training_run_id",
         }

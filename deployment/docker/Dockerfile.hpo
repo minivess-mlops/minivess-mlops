@@ -1,0 +1,16 @@
+# MinIVess MLOps v2 — HPO Flow
+# Hyperparameter optimization via Optuna + ASHA (HyperbandPruner).
+# HPO orchestrator is CPU-only — individual training trials run in
+# separate GPU containers via Prefect work pool routing.
+#
+# Build: docker build -t minivess-hpo:latest -f deployment/docker/Dockerfile.hpo .
+
+FROM minivess-base:latest
+
+LABEL flow="hpo"
+LABEL description="HPO flow — Optuna + ASHA hyperparameter optimization"
+
+# Copy scripts
+COPY --chown=minivess:minivess scripts/ scripts/
+
+CMD ["python", "-m", "minivess.orchestration.flows.hpo_flow"]

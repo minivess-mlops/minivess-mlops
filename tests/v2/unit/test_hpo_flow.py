@@ -1,14 +1,15 @@
 """Tests for T-08: hpo_flow.py — Prefect flow wrapping HPOEngine.
 
 Uses ast.parse() for source inspection — NO regex (CLAUDE.md Rule #16).
-training_flow() is mocked so no real GPU training is needed for unit tests.
+run_deployment() is mocked so no real GPU training or Prefect server is needed.
 """
 
 from __future__ import annotations
 
 import ast
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 _HPO_FLOW_SRC = Path("src/minivess/orchestration/flows/hpo_flow.py")
 
@@ -18,17 +19,24 @@ _TEST_SEARCH_SPACE = {
 }
 
 
-def _mock_training_flow(**kwargs):
-    """Return a fake TrainingFlowResult so unit tests skip real GPU training."""
+def _mock_run_deployment(**kwargs):
+    """Return a fake FlowRun with TrainingFlowResult-like state."""
     from minivess.orchestration.flows.train_flow import TrainingFlowResult
 
-    lr = kwargs.get("learning_rate", 1e-3)
+    params = kwargs.get("parameters", {})
+    lr = params.get("learning_rate", 1e-3)
     # Simple convex objective: distance from 1e-3
     fake_val_loss = abs(lr - 1e-3) + 0.1
-    return TrainingFlowResult(
+    result = TrainingFlowResult(
         status="completed",
         fold_results=[{"best_val_loss": fake_val_loss, "final_epoch": 1}],
     )
+
+    # Simulate a Prefect FlowRun with state.result()
+    state = MagicMock()
+    state.result.return_value = result
+    flow_run = SimpleNamespace(state=state)
+    return flow_run
 
 
 # ---------------------------------------------------------------------------
@@ -63,9 +71,32 @@ class TestHpoFlowStructure:
                     "Use HPOEngine directly instead of subprocess invocation."
                 )
 
+    def test_hpo_flow_uses_run_deployment(self) -> None:
+        """hpo_flow.py must use run_deployment() for trial execution."""
+        source = _HPO_FLOW_SRC.read_text(encoding="utf-8")
+        assert "run_deployment" in source, (
+            "hpo_flow.py must use run_deployment() to trigger training in separate containers"
+        )
+
+    def test_hpo_flow_no_training_flow_import(self) -> None:
+        """hpo_flow.py must NOT import training_flow directly (decoupled)."""
+        source = _HPO_FLOW_SRC.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module
+                and "train_flow" in node.module
+            ):
+                for alias in node.names:
+                    assert alias.name != "training_flow", (
+                        "hpo_flow.py must not import training_flow. "
+                        "Use run_deployment() instead."
+                    )
+
 
 # ---------------------------------------------------------------------------
-# Functional tests (with mocked training_flow)
+# Functional tests (with mocked run_deployment)
 # ---------------------------------------------------------------------------
 
 
@@ -78,8 +109,8 @@ class TestHpoFlowFunctional:
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(tmp_path / "mlruns"))
 
         with patch(
-            "minivess.orchestration.flows.hpo_flow.training_flow",
-            side_effect=_mock_training_flow,
+            "minivess.orchestration.flows.hpo_flow.run_deployment",
+            side_effect=_mock_run_deployment,
         ):
             from minivess.orchestration.flows import (
                 hpo_flow as hpo_module,  # type: ignore[import]
@@ -105,8 +136,8 @@ class TestHpoFlowFunctional:
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(tmp_path / "mlruns"))
 
         with patch(
-            "minivess.orchestration.flows.hpo_flow.training_flow",
-            side_effect=_mock_training_flow,
+            "minivess.orchestration.flows.hpo_flow.run_deployment",
+            side_effect=_mock_run_deployment,
         ):
             from minivess.orchestration.flows import (
                 hpo_flow as hpo_module,  # type: ignore[import]
@@ -129,8 +160,8 @@ class TestHpoFlowFunctional:
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(tmp_path / "mlruns"))
 
         with patch(
-            "minivess.orchestration.flows.hpo_flow.training_flow",
-            side_effect=_mock_training_flow,
+            "minivess.orchestration.flows.hpo_flow.run_deployment",
+            side_effect=_mock_run_deployment,
         ):
             from minivess.orchestration.flows import (
                 hpo_flow as hpo_module,  # type: ignore[import]

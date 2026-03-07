@@ -9,8 +9,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from prefect import flow, task
@@ -19,11 +21,24 @@ from minivess.orchestration.constants import FLOW_NAME_DATA
 from minivess.orchestration.mlflow_helpers import log_completion_safe
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from minivess.data.splits import FoldSplit
 
 logger = logging.getLogger(__name__)
+
+
+def _require_docker_context() -> None:
+    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
+    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
+        return
+    if os.environ.get("DOCKER_CONTAINER"):
+        return
+    if Path("/.dockerenv").exists():
+        return
+    raise RuntimeError(
+        "Data flow must run inside a Docker container.\n"
+        "Run: docker compose -f deployment/docker-compose.flows.yml run data\n"
+        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -391,7 +406,7 @@ def run_data_flow(
     -------
     DataFlowResult with all flow outputs.
     """
-    import os
+    _require_docker_context()
 
     import mlflow
 

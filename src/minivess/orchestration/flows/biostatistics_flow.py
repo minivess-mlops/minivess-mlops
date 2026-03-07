@@ -1,14 +1,12 @@
 """Biostatistics Prefect flow — cross-run statistical analysis.
 
-IMPORTS FROM prefect DIRECTLY — no _prefect_compat fallback.
-If Prefect is not installed, ImportError is the CORRECT behavior.
+Imports directly from prefect. If Prefect is not installed,
+ImportError is the CORRECT behavior.
 
 Entry points:
-  - Prefect: prefect deployment run 'minivess-biostatistics/default'
+  - Prefect: prefect deployment run 'biostatistics-flow/default'
   - Docker:  docker compose -f deployment/docker-compose.flows.yml run biostatistics
-  - Tests:   MINIVESS_TESTING=1 pytest (escape hatch for Docker context check)
-
-NEVER run via: uv run python scripts/run_biostatistics.py (does not exist, banned)
+  - Tests:   MINIVESS_ALLOW_HOST=1 pytest (escape hatch for Docker context check)
 """
 
 from __future__ import annotations
@@ -22,6 +20,7 @@ import numpy as np
 from prefect import flow, task
 
 from minivess.config.biostatistics_config import BiostatisticsConfig
+from minivess.orchestration.constants import FLOW_NAME_BIOSTATISTICS
 from minivess.pipeline.biostatistics_discovery import (
     discover_source_runs,
     validate_source_completeness,
@@ -51,26 +50,25 @@ logger = logging.getLogger(__name__)
 
 
 def _require_docker_context() -> None:
-    """Require Docker container context or MINIVESS_TESTING=1.
+    """Require Docker container context or MINIVESS_ALLOW_HOST=1.
 
     Raises
     ------
     RuntimeError
-        If not running inside Docker and MINIVESS_TESTING is not set.
+        If not running inside Docker and MINIVESS_ALLOW_HOST is not set.
     """
-    if os.environ.get("MINIVESS_TESTING") == "1":
+    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
+        return
+    if os.environ.get("DOCKER_CONTAINER"):
         return
     if Path("/.dockerenv").exists():
         return
-    msg = (
+    raise RuntimeError(
         "Biostatistics flow must run inside a Docker container.\n"
-        "Run via:\n"
-        "  docker compose -f deployment/docker-compose.flows.yml run biostatistics\n"
-        "  OR\n"
-        "  prefect deployment run 'minivess-biostatistics/default'\n\n"
-        "For tests, set MINIVESS_TESTING=1."
+        "Run: docker compose -f deployment/docker-compose.flows.yml "
+        "run biostatistics\n"
+        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
     )
-    raise RuntimeError(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +234,7 @@ def task_log_mlflow(
 # ---------------------------------------------------------------------------
 
 
-@flow(name="minivess-biostatistics", validate_parameters=False)
+@flow(name=FLOW_NAME_BIOSTATISTICS, validate_parameters=False)
 def run_biostatistics_flow(
     config_path: str = "/app/configs/biostatistics/default.yaml",
     trigger_source: str = "manual",
@@ -427,3 +425,7 @@ def _build_per_volume_data(
                 result[metric][cond][fold] = np.array(values)
 
     return result
+
+
+if __name__ == "__main__":
+    run_biostatistics_flow()

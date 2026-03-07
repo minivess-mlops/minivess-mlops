@@ -53,17 +53,74 @@ up:
 down:
     docker compose -f deployment/docker-compose.yml down
 
-# Train a model (full experiment)
+# ---------------------------------------------------------------------------
+# Prefect Flow Execution (Docker Compose)
+# ---------------------------------------------------------------------------
+# All flow execution goes through Docker containers.
+# See CLAUDE.md Rule #17: training MUST go through Prefect flows in Docker.
+# Prerequisites: `just dev` to start PostgreSQL, MinIO, MLflow, Prefect.
+
+FLOWS_COMPOSE := "deployment/docker-compose.flows.yml"
+
+# Flow 0: Data Acquisition
+acquisition *ARGS:
+    docker compose -f {{FLOWS_COMPOSE}} run --rm acquisition {{ARGS}}
+
+# Flow 1: Data Engineering
+data *ARGS:
+    docker compose -f {{FLOWS_COMPOSE}} run --rm data {{ARGS}}
+
+# Flow 2: Model Training (GPU)
 train *ARGS:
-    uv run python scripts/train.py {{ARGS}}
+    docker compose -f {{FLOWS_COMPOSE}} run --rm train {{ARGS}}
 
-# Quick debug training (1 epoch, CPU, small data)
-train-debug *ARGS:
-    uv run python scripts/train.py --compute cpu --loss dice_ce --debug {{ARGS}}
+# Quick debug training (1 epoch, 1 fold)
+train-debug:
+    docker compose -f {{FLOWS_COMPOSE}} run --rm -e DEBUG=true -e MAX_EPOCHS=1 -e NUM_FOLDS=1 train
 
-# Full 3-loss sweep
-train-sweep *ARGS:
-    uv run python scripts/train.py --compute gpu_low --loss dice_ce,dice_ce_cldice,cbdice {{ARGS}}
+# Flow 2.5: Post-Training (SWA, calibration, conformal)
+post-training *ARGS:
+    docker compose -f {{FLOWS_COMPOSE}} run --rm post_training {{ARGS}}
+
+# Flow 3: Model Analysis
+analyze *ARGS:
+    docker compose -f {{FLOWS_COMPOSE}} run --rm analyze {{ARGS}}
+
+# Flow 4: Deployment (ONNX export, BentoML, promotion)
+deploy-flow *ARGS:
+    docker compose -f {{FLOWS_COMPOSE}} run --rm deploy {{ARGS}}
+
+# Flow 5: Dashboard & Reporting (best-effort)
+dashboard *ARGS:
+    docker compose -f {{FLOWS_COMPOSE}} run --rm dashboard {{ARGS}}
+
+# Flow 6: QA (best-effort — MLflow integrity, ghost run cleanup)
+qa *ARGS:
+    docker compose -f {{FLOWS_COMPOSE}} run --rm qa {{ARGS}}
+
+# Biostatistics (statistical analysis + publication figures)
+biostatistics *ARGS:
+    docker compose -f {{FLOWS_COMPOSE}} run --rm biostatistics {{ARGS}}
+
+# Hyperparameter Optimization (CPU — trials run in separate GPU containers)
+hpo *ARGS:
+    docker compose -f {{FLOWS_COMPOSE}} run --rm hpo {{ARGS}}
+
+# Data Annotation App
+annotation *ARGS:
+    docker compose -f {{FLOWS_COMPOSE}} run --rm annotation {{ARGS}}
+
+# Build all per-flow Docker images
+build-flows:
+    docker compose -f {{FLOWS_COMPOSE}} build
+
+# Full pipeline (triggers flows via Prefect run_deployment)
+pipeline *ARGS:
+    docker compose -f {{FLOWS_COMPOSE}} run --rm pipeline {{ARGS}}
+
+# ---------------------------------------------------------------------------
+# SkyPilot (Cloud Compute)
+# ---------------------------------------------------------------------------
 
 # Launch SkyPilot training job
 sky-train CONFIG="deployment/skypilot/train_generic.yaml" *ARGS:
@@ -76,38 +133,6 @@ sky-sweep CONFIG="deployment/skypilot/train_hpo_sweep.yaml" *ARGS:
 # Show SkyPilot job status
 sky-status:
     sky jobs queue
-
-# Build per-flow Docker images
-build-flows:
-    docker compose -f deployment/docker-compose.flows.yml build
-
-# Run serving (placeholder)
-serve:
-    uv run bentoml serve src/minivess/serving/service.py
-
-# ---------------------------------------------------------------------------
-# Experiments (Hydra composition)
-# ---------------------------------------------------------------------------
-
-# Run experiment by name (Hydra composition)
-experiment NAME:
-    uv run python scripts/run_experiment.py --experiment {{NAME}}
-
-# Dry run experiment (validate only)
-experiment-dry NAME:
-    uv run python scripts/run_experiment.py --experiment {{NAME}} --dry-run
-
-# VesselFM zero-shot evaluation
-vesselfm-zeroshot:
-    uv run python scripts/run_experiment.py --experiment vesselfm_zeroshot
-
-# VesselFM fine-tuning
-vesselfm-finetune:
-    uv run python scripts/run_experiment.py --experiment vesselfm_finetune
-
-# DynUNet loss variation (Hydra)
-dynunet-losses:
-    uv run python scripts/run_experiment.py --experiment dynunet_losses
 
 # Clean build artifacts
 clean:

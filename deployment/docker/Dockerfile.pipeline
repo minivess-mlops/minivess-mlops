@@ -1,0 +1,12 @@
+# MinIVess MLOps v2 — Pipeline Orchestrator
+# Runs the PipelineTriggerChain — cascades all flows in sequence.
+# CPU-only: this container orchestrates other flow containers via Prefect API.
+#
+# Build: docker build -t minivess-pipeline:latest -f deployment/docker/Dockerfile.pipeline .
+
+FROM minivess-base:latest
+
+LABEL flow="pipeline"
+LABEL description="Pipeline orchestrator — cascades flows via run_deployment()"
+
+CMD ["python", "-m", "minivess.orchestration.flows.pipeline_flow"]

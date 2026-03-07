@@ -72,3 +72,9 @@ FLOW_NAME_ACQUISITION: str = "acquisition-flow"
 
 FLOW_NAME_ANNOTATION: str = "annotation-flow"
 """Prefect flow name for the annotation flow."""
+
+FLOW_NAME_BIOSTATISTICS: str = "biostatistics-flow"
+"""Prefect flow name for the biostatistics flow."""
+
+FLOW_NAME_PIPELINE: str = "pipeline-flow"
+"""Prefect flow name for the meta-pipeline orchestrator flow."""

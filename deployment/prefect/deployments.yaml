@@ -1,6 +1,6 @@
 # MinIVess MLOps — Prefect 3.x Deployment Definitions
 #
-# Registers all 9 flows with the Prefect Server.
+# Registers all 12 flows with the Prefect Server.
 #
 # Apply with:
 #   prefect deploy --prefect-file deployment/prefect/deployments.yaml --all
@@ -186,7 +186,7 @@ deployments:
   # Biostatistics Flow (CPU — best-effort)
   # ---------------------------------------------------------------------------
   - name: default
-    flow_name: minivess-biostatistics
+    flow_name: biostatistics-flow
     entrypoint: src/minivess/orchestration/flows/biostatistics_flow.py:run_biostatistics_flow
     description: >
       Cross-run statistical comparisons: bootstrap CIs, Wilcoxon signed-rank,
@@ -222,4 +222,42 @@ deployments:
       - annotation
       - label-studio
       - best-effort
+      - cpu
+
+  # ---------------------------------------------------------------------------
+  # HPO Flow (GPU — runs trial containers via run_deployment)
+  # ---------------------------------------------------------------------------
+  - name: default
+    flow_name: hpo-flow
+    entrypoint: src/minivess/orchestration/flows/hpo_flow.py:hpo_flow
+    description: >
+      Hyperparameter optimization using Optuna. Each trial triggers a separate
+      training container via run_deployment(). The HPO orchestrator itself is CPU-only.
+    work_pool:
+      name: gpu-pool
+      work_queue_name: default
+    schedules: []
+    parameters: {}
+    tags:
+      - hpo
+      - optimization
+      - gpu
+
+  # ---------------------------------------------------------------------------
+  # Pipeline Orchestrator (CPU — cascades all flows)
+  # ---------------------------------------------------------------------------
+  - name: default
+    flow_name: pipeline-flow
+    entrypoint: src/minivess/orchestration/flows/pipeline_flow.py:pipeline_flow
+    description: >
+      Full pipeline orchestrator. Cascades all flows in sequence via run_deployment().
+      CPU-only — orchestrates other flow containers.
+    work_pool:
+      name: cpu-pool
+      work_queue_name: default
+    schedules: []
+    parameters: {}
+    tags:
+      - pipeline
+      - orchestration
       - cpu

@@ -23,7 +23,7 @@ class TestDashboardOutputEnvVar:
     def test_dashboard_flow_references_dashboard_output(self) -> None:
         """dashboard_flow.py must reference DASHBOARD_OUTPUT env var."""
         source = _DASHBOARD_FLOW_SRC.read_text(encoding="utf-8")
-        assert "DASHBOARD_OUTPUT" in source, (
+        assert "DASHBOARD_OUTPUT_DIR" in source, (
             "dashboard_flow.py must read DASHBOARD_OUTPUT env var. "
             "Change output_dir from required positional to optional with default: "
             "Path(os.environ.get('DASHBOARD_OUTPUT', '/app/outputs/dashboard'))"
@@ -33,8 +33,10 @@ class TestDashboardOutputEnvVar:
         """Default DASHBOARD_OUTPUT must be absolute."""
         import os
 
-        monkeypatch.delenv("DASHBOARD_OUTPUT", raising=False)
-        resolved = Path(os.environ.get("DASHBOARD_OUTPUT", "/app/outputs/dashboard"))
+        monkeypatch.delenv("DASHBOARD_OUTPUT_DIR", raising=False)
+        resolved = Path(
+            os.environ.get("DASHBOARD_OUTPUT_DIR", "/app/outputs/dashboard")
+        )
         assert resolved.is_absolute(), (
             f"Default DASHBOARD_OUTPUT is not absolute: {resolved}"
         )
@@ -43,16 +45,20 @@ class TestDashboardOutputEnvVar:
         """Default DASHBOARD_OUTPUT must be /app/outputs/dashboard."""
         import os
 
-        monkeypatch.delenv("DASHBOARD_OUTPUT", raising=False)
-        resolved = Path(os.environ.get("DASHBOARD_OUTPUT", "/app/outputs/dashboard"))
+        monkeypatch.delenv("DASHBOARD_OUTPUT_DIR", raising=False)
+        resolved = Path(
+            os.environ.get("DASHBOARD_OUTPUT_DIR", "/app/outputs/dashboard")
+        )
         assert str(resolved) == "/app/outputs/dashboard"
 
     def test_dashboard_output_from_env(self, monkeypatch) -> None:
         """DASHBOARD_OUTPUT env var must control output_dir default."""
         import os
 
-        monkeypatch.setenv("DASHBOARD_OUTPUT", "/test/dash")
-        resolved = Path(os.environ.get("DASHBOARD_OUTPUT", "/app/outputs/dashboard"))
+        monkeypatch.setenv("DASHBOARD_OUTPUT_DIR", "/test/dash")
+        resolved = Path(
+            os.environ.get("DASHBOARD_OUTPUT_DIR", "/app/outputs/dashboard")
+        )
         assert str(resolved) == "/test/dash"
 
 
@@ -65,7 +71,7 @@ class TestDashboardOutputFiles:
     def test_dashboard_creates_report(self, monkeypatch, tmp_path) -> None:
         """run_dashboard_flow() must create everything_dashboard_report.md."""
         monkeypatch.setenv("PREFECT_DISABLED", "1")
-        monkeypatch.setenv("DASHBOARD_OUTPUT", str(tmp_path / "dash"))
+        monkeypatch.setenv("DASHBOARD_OUTPUT_DIR", str(tmp_path / "dash"))
 
         from minivess.orchestration.flows.dashboard_flow import run_dashboard_flow
 
@@ -88,7 +94,7 @@ class TestDashboardOutputFiles:
     def test_dashboard_metadata_json_created(self, monkeypatch, tmp_path) -> None:
         """run_dashboard_flow() must create everything_dashboard_metadata.json."""
         monkeypatch.setenv("PREFECT_DISABLED", "1")
-        monkeypatch.setenv("DASHBOARD_OUTPUT", str(tmp_path / "dash"))
+        monkeypatch.setenv("DASHBOARD_OUTPUT_DIR", str(tmp_path / "dash"))
 
         from minivess.orchestration.flows.dashboard_flow import run_dashboard_flow
 

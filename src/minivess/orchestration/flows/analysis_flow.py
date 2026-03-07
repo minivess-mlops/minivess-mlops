@@ -21,6 +21,7 @@ import math
 import os
 from collections import defaultdict
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -47,13 +48,26 @@ from minivess.pipeline.comparison import (
 from minivess.pipeline.model_promoter import ModelPromoter
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from minivess.config.evaluation_config import EvaluationConfig
     from minivess.data.test_datasets import HierarchicalDataLoaderDict
     from minivess.pipeline.evaluation_runner import EvaluationResult
 
 logger = logging.getLogger(__name__)
+
+
+def _require_docker_context() -> None:
+    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
+    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
+        return
+    if os.environ.get("DOCKER_CONTAINER"):
+        return
+    if Path("/.dockerenv").exists():
+        return
+    raise RuntimeError(
+        "Analysis flow must run inside a Docker container.\n"
+        "Run: docker compose -f deployment/docker-compose.flows.yml run analyze\n"
+        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
+    )
 
 
 def _validate_analysis_env() -> None:
@@ -1046,6 +1060,39 @@ def generate_report(
     return report
 
 
+@task(name="summarize-experiment")
+def summarize_experiment(
+    all_results: dict[str, dict[str, dict[str, Any]]],
+    promotion_info: dict[str, Any],
+) -> dict[str, Any]:
+    """Summarize experiment results — future LangGraph agent point.
+
+    Currently uses a deterministic stub. Will be replaced by a
+    Pydantic AI agent for natural-language summaries (see #341).
+
+    Parameters
+    ----------
+    all_results:
+        ``{model_name: {dataset: {subset: EvaluationResult}}}``.
+    promotion_info:
+        Dict from :func:`register_champion_task`.
+
+    Returns
+    -------
+    Summary dict with ``action``, ``reasoning``, and ``summary`` keys.
+    """
+    from minivess.orchestration.agent_interface import DeterministicExperimentSummary
+
+    agent = DeterministicExperimentSummary()
+    return agent.decide(
+        context={
+            "n_models": len(all_results),
+            "best_model": promotion_info.get("champion_name", "unknown"),
+            "best_metric_value": promotion_info.get("champion_score", 0.0),
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # Analysis experiment entry builder
 # ---------------------------------------------------------------------------
@@ -1496,6 +1543,8 @@ def run_analysis_flow(
     -------
     Dict with keys: ``results``, ``comparison``, ``promotion``, ``report``.
     """
+    _require_docker_context()
+
     log = get_run_logger()
     log.info("Starting analysis flow...")
 
@@ -1564,6 +1613,9 @@ def run_analysis_flow(
     # Step 10: Generate report
     report = generate_report(all_results, comparison_md, promotion_info)
 
+    # Step 10b: Experiment summary (agent decision point — deterministic stub)
+    experiment_summary = summarize_experiment(all_results, promotion_info)
+
     # Step 11: Export comparison tables and figures to disk
     artifact_paths = _export_analysis_artifacts(
         comparison_md,
@@ -1593,7 +1645,7 @@ def run_analysis_flow(
         mlflow.set_experiment("minivess_training")
         with mlflow.start_run(
             tags={
-                "flow_name": "analysis-flow",
+                "flow_name": FLOW_NAME_ANALYSIS,
                 "upstream_training_run_id": upstream_training_run_id,
             }
         ) as active_run:
@@ -1603,7 +1655,7 @@ def run_analysis_flow(
 
     # Log flow completion (best-effort, non-blocking)
     log_completion_safe(
-        flow_name="analysis-flow",
+        flow_name=FLOW_NAME_ANALYSIS,
         tracking_uri=_tracking_uri,
         run_id=mlflow_run_id,
     )
@@ -1617,6 +1669,18 @@ def run_analysis_flow(
         "champion_tags": champion_info,
         "artifact_paths": artifact_paths,
         "post_training_models": post_training_models,
+        "experiment_summary": experiment_summary,
         "mlflow_run_id": mlflow_run_id,
         "upstream_training_run_id": upstream_training_run_id,
     }
+
+
+if __name__ == "__main__":
+    # Docker entry point — analysis flow requires eval_config, model_config_dict,
+    # and dataloaders_dict which are built by the pipeline orchestrator.
+    # Direct invocation prints usage instructions.
+    raise SystemExit(
+        "analysis_flow cannot be invoked directly — it requires eval_config, "
+        "model_config_dict, and dataloaders_dict parameters.\n"
+        "Use: prefect deployment run 'analysis-flow/default'"
+    )

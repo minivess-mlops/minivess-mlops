@@ -52,12 +52,13 @@ class TestJustfileExists:
             PROJECT_ROOT / "Justfile"
         ).exists()
 
-    def test_justfile_has_experiment_recipe(self) -> None:
+    def test_justfile_has_train_recipe(self) -> None:
+        """justfile must have a train recipe (Docker-per-flow architecture)."""
         path = PROJECT_ROOT / "justfile"
         if not path.exists():
             path = PROJECT_ROOT / "Justfile"
         content = path.read_text(encoding="utf-8")
-        assert "experiment NAME" in content
+        assert "train" in content
 
 
 class TestRunExperimentCLI:
