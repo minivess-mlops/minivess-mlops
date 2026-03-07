@@ -66,6 +66,7 @@ class DeployResult:
     artifacts_dir: Path
     promotion_results: dict[str, bool]
     audit_trails: list[dict[str, Any]] = field(default_factory=list)
+    failed_operations: list[str] = field(default_factory=list)
 
     def to_summary(self) -> dict[str, Any]:
         """Return a summary dict for logging and reporting."""
@@ -246,6 +247,7 @@ def deploy_flow(
     onnx_dir.mkdir(parents=True, exist_ok=True)
 
     onnx_paths: dict[str, Path] = {}
+    failed_operations: list[str] = []
     for champion in champions:
         if champion.checkpoint_path is not None:
             try:
@@ -256,7 +258,10 @@ def deploy_flow(
                 )
                 onnx_paths[champion.category] = onnx_path
             except Exception:
-                log.exception("ONNX export failed for %s — skipping", champion.run_id)
+                log.exception("ONNX export failed for %s", champion.run_id)
+                failed_operations.append(
+                    f"onnx_export:{champion.category}:{champion.run_id}"
+                )
         else:
             log.warning(
                 "No checkpoint for champion %s — skipping ONNX export",
@@ -309,6 +314,7 @@ def deploy_flow(
         artifacts_dir=artifacts_dir,
         promotion_results=promotion_results,
         audit_trails=audit_trails,
+        failed_operations=failed_operations,
     )
 
     log.info("Deploy flow complete: %s", result.to_summary())
