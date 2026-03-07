@@ -1,0 +1,123 @@
+# MinIVess MLOps — VesselFM Fine-Tuning Task
+#
+# VesselFM (Wittmann et al., CVPR 2025): ~30M param DynUNet pre-trained on 17 vessel
+# datasets. Requires ~10GB VRAM for fine-tuning (over local RTX 2070 Super budget).
+#
+# Launch:
+#   sky jobs launch deployment/skypilot/finetune_vesselfm.yaml
+#   sky jobs launch deployment/skypilot/finetune_vesselfm.yaml --dryrun
+#
+# Or via script:
+#   ./scripts/finetune_vesselfm_runpod.sh
+#
+# RunPod caveats:
+#   - Spot interrupt gives only 5-second SIGTERM (vs AWS 2-min)
+#   - CHECKPOINT_INTERVAL_EPOCHS=1 ensures minimal data loss
+#   - MOUNT_CACHED uses local NVMe cache with async S3 write for fast checkpoint I/O
+#
+# Closes: #366 (VesselFM fine-tuning on RunPod — external compute DevEx)
+
+name: mnvss-finetune-vfm
+
+resources:
+  # VesselFM requires ~10GB VRAM for fine-tuning; 16GB+ strongly preferred.
+  # Priority: RunPod Community Cloud (cheapest) → Lambda (reliable) → AWS spot
+  disk_size: 150
+  disk_tier: best          # NVMe for fast checkpoint I/O
+  use_spot: true
+  any_of:
+    - cloud: runpod
+      accelerators: {A100-80GB:1}    # $1.50/hr — maximum headroom
+    - cloud: runpod
+      accelerators: {A100:1}         # $0.60/hr — tight on 10GB; may OOM at batch>1
+    - cloud: lambda
+      accelerators: {A100:1}         # $1.29/hr — no spot, very reliable
+    - cloud: aws
+      accelerators: {A100:1}         # ~$1.20/hr spot — AWS managed preemption recovery
+    - cloud: gcp
+      accelerators: {A100:1}         # ~$1.50/hr spot
+
+file_mounts:
+  /data:
+    source: s3://minivess-data/raw
+    mode: COPY             # pre-fetch dataset at pod start; read-only during training
+
+  # MOUNT_CACHED: write to local NVMe first, async sync to S3
+  # 9.6x faster than plain MOUNT for checkpoint writes.
+  # Volume name ≤30 chars (RunPod requirement): mnvss-ckpts-vfm
+  /checkpoints:
+    name: mnvss-ckpts-vfm
+    store: s3
+    mode: MOUNT_CACHED
+
+envs:
+  # ── MLflow ──────────────────────────────────────────────────────────────────
+  # IMPORTANT: Set MLFLOW_TRACKING_URI to a publicly reachable URI before launch.
+  # The default http://mlflow:5000 only works inside Docker Compose (not on cloud).
+  # Options:
+  #   1. Public IP:  http://<your-public-ip>:5000
+  #   2. S3 backend: s3://minivess-mlruns/
+  #   3. Tunnel:     See docs/planning/skypilot-advanced-plan.md section 6
+  MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+
+  # ── Prefect (optional) ──────────────────────────────────────────────────────
+  # Required for H3 (SkyPilot runs Prefect flow on remote).
+  # Leave empty to run training_flow() directly (PREFECT_DISABLED=1).
+  PREFECT_API_URL: ${PREFECT_API_URL:-}
+
+  # ── Training config ─────────────────────────────────────────────────────────
+  MODEL_FAMILY: vesselfm
+  LOSS_NAME: cbdice_cldice
+  COMPUTE: gpu_high         # 16GB+ profile; reduce batch size vs gpu_low
+  NUM_FOLDS: 3
+  MAX_EPOCHS: ${MAX_EPOCHS:-100}
+  EXPERIMENT_NAME: minivess_training
+  CHECKPOINT_DIR: /checkpoints
+
+  # ── RunPod spot mitigation ──────────────────────────────────────────────────
+  # RunPod spot gives only 5-second SIGTERM. Checkpoint every epoch to lose
+  # at most 1 epoch of work on preemption.
+  CHECKPOINT_INTERVAL_EPOCHS: 1
+
+  # ── HuggingFace token for gated VesselFM weights ───────────────────────────
+  HF_TOKEN: ${HF_TOKEN:-}
+
+setup: |
+  # Install uv (not pre-installed on most cloud images)
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.cargo/bin:$PATH"
+
+  # Sync project dependencies (no dev extras)
+  cd /app && uv sync --no-dev
+
+  # Pre-download VesselFM weights into the HuggingFace cache
+  # (avoids downloading during training proper; weights are auto-fetched if omitted)
+  if [ -n "${HF_TOKEN:-}" ]; then
+    uv run python -c "from minivess.adapters.vesselfm import VesselFMAdapter; VesselFMAdapter.download_weights(token='${HF_TOKEN}')"
+  fi
+
+run: |
+  export PATH="$HOME/.cargo/bin:$PATH"
+  cd /app
+
+  # Determine launch mode: Prefect deployment or direct Python call
+  if [ -n "${PREFECT_API_URL}" ]; then
+    # H3 pattern: trigger via Prefect deployment
+    prefect deployment run 'training-flow/default' \
+      --params "{\"model_family\": \"${MODEL_FAMILY}\", \
+                 \"loss_name\": \"${LOSS_NAME}\", \
+                 \"compute\": \"${COMPUTE}\", \
+                 \"num_folds\": ${NUM_FOLDS}, \
+                 \"max_epochs\": ${MAX_EPOCHS}, \
+                 \"experiment_name\": \"${EXPERIMENT_NAME}\"}"
+  else
+    # H1 pattern: direct Python invocation (PREFECT_DISABLED=1 graceful fallback)
+    PREFECT_DISABLED=1 uv run python scripts/run_training_flow.py \
+      --model-family "${MODEL_FAMILY}" \
+      --loss-name "${LOSS_NAME}" \
+      --compute "${COMPUTE}" \
+      --num-folds "${NUM_FOLDS}" \
+      --max-epochs "${MAX_EPOCHS}" \
+      --experiment-name "${EXPERIMENT_NAME}" \
+      --trigger-source "finetune_vesselfm.yaml"
+  fi
