@@ -70,6 +70,7 @@ dependencies = [
     "grpcio>=1.78.0,!=1.78.1",
     "seaborn>=0.13.2",
     "onnxruntime>=1.24.2",
+    "torchvision>=0.25.0",
 ]
 
 [project.optional-dependencies]

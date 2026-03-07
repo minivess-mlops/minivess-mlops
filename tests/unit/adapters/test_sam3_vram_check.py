@@ -1,7 +1,12 @@
-"""Tests for SAM3 GPU VRAM enforcement check (T-02).
+"""Tests for SAM3 GPU VRAM enforcement check (T-02, updated for mode split).
 
-Verifies that check_sam3_vram() raises RuntimeError when GPU VRAM
-is below the 16 GB minimum, and passes when VRAM meets or exceeds it.
+Verifies that check_sam3_vram() raises RuntimeError when GPU VRAM is below
+the mode-appropriate minimum:
+- mode="training"  → 16 GB minimum (LoRA / fine-tuning)
+- mode="inference" → 6 GB minimum (single-image BF16 forward pass)
+
+Sources for thresholds: GitHub Issues #200, #235, #307 at facebookresearch/sam3;
+debuggercafe.com SAM3 memory benchmarks.
 """
 
 from __future__ import annotations
@@ -19,14 +24,14 @@ def _make_hw(gpu_vram_mb: int, gpu_name: str = "Test GPU") -> MagicMock:
     return hw
 
 
-class TestCheckSam3Vram:
-    """check_sam3_vram() raises when GPU VRAM < 16 GB."""
+class TestCheckSam3VramTraining:
+    """check_sam3_vram(mode='training') — 16 GB minimum."""
 
     def test_raises_when_vram_below_16gb(self) -> None:
-        """RuntimeError raised when VRAM is 8 GB (below 16 GB minimum)."""
+        """RuntimeError raised when VRAM is 8 GB (below 16 GB training minimum)."""
         from minivess.adapters.sam3_vram_check import check_sam3_vram
 
-        hw = _make_hw(gpu_vram_mb=8192, gpu_name="RTX 3070")
+        hw = _make_hw(gpu_vram_mb=8192, gpu_name="RTX 2070 Super")
         with (
             patch(
                 "minivess.adapters.sam3_vram_check.detect_hardware",
@@ -34,10 +39,10 @@ class TestCheckSam3Vram:
             ),
             pytest.raises(RuntimeError),
         ):
-            check_sam3_vram()
+            check_sam3_vram(mode="training")
 
     def test_passes_when_vram_meets_16gb(self) -> None:
-        """No exception raised when VRAM is 20 GB (above minimum)."""
+        """No exception raised when VRAM is 20 GB (above 16 GB minimum)."""
         from minivess.adapters.sam3_vram_check import check_sam3_vram
 
         hw = _make_hw(gpu_vram_mb=20480, gpu_name="A100-40GB")
@@ -45,7 +50,7 @@ class TestCheckSam3Vram:
             "minivess.adapters.sam3_vram_check.detect_hardware",
             return_value=hw,
         ):
-            check_sam3_vram()  # Must not raise
+            check_sam3_vram(mode="training")  # Must not raise
 
     def test_passes_at_exactly_16gb_boundary(self) -> None:
         """No exception raised at exactly 16384 MB (boundary is inclusive)."""
@@ -56,13 +61,13 @@ class TestCheckSam3Vram:
             "minivess.adapters.sam3_vram_check.detect_hardware",
             return_value=hw,
         ):
-            check_sam3_vram()  # Must not raise
+            check_sam3_vram(mode="training")  # Must not raise
 
     def test_error_message_includes_detected_vram(self) -> None:
         """Error message must include detected VRAM in GB."""
         from minivess.adapters.sam3_vram_check import check_sam3_vram
 
-        hw = _make_hw(gpu_vram_mb=8192, gpu_name="RTX 3070")
+        hw = _make_hw(gpu_vram_mb=8192, gpu_name="RTX 2070 Super")
         with (
             patch(
                 "minivess.adapters.sam3_vram_check.detect_hardware",
@@ -70,10 +75,10 @@ class TestCheckSam3Vram:
             ),
             pytest.raises(RuntimeError, match="8.0 GB"),
         ):
-            check_sam3_vram()
+            check_sam3_vram(mode="training")
 
     def test_error_message_includes_variant_name(self) -> None:
-        """Error message must include the variant name passed to check_sam3_vram()."""
+        """Error message must include the variant name."""
         from minivess.adapters.sam3_vram_check import check_sam3_vram
 
         hw = _make_hw(gpu_vram_mb=4096, gpu_name="GTX 1080")
@@ -84,7 +89,7 @@ class TestCheckSam3Vram:
             ),
             pytest.raises(RuntimeError, match="sam3_topolora"),
         ):
-            check_sam3_vram(variant="sam3_topolora")
+            check_sam3_vram(variant="sam3_topolora", mode="training")
 
     def test_raises_when_no_gpu_detected(self) -> None:
         """RuntimeError raised when VRAM is 0 (no GPU)."""
@@ -98,4 +103,76 @@ class TestCheckSam3Vram:
             ),
             pytest.raises(RuntimeError),
         ):
-            check_sam3_vram()
+            check_sam3_vram(mode="training")
+
+    def test_default_mode_is_training(self) -> None:
+        """Default mode is 'training' — 8 GB raises."""
+        from minivess.adapters.sam3_vram_check import check_sam3_vram
+
+        hw = _make_hw(gpu_vram_mb=8192)
+        with (
+            patch(
+                "minivess.adapters.sam3_vram_check.detect_hardware",
+                return_value=hw,
+            ),
+            pytest.raises(RuntimeError),
+        ):
+            check_sam3_vram()  # No mode arg → training → 8 GB fails
+
+
+class TestCheckSam3VramInference:
+    """check_sam3_vram(mode='inference') — 6 GB minimum."""
+
+    def test_8gb_passes_for_inference(self) -> None:
+        """RTX 2070 Super (8 GB) passes the inference gate."""
+        from minivess.adapters.sam3_vram_check import check_sam3_vram
+
+        hw = _make_hw(gpu_vram_mb=8192, gpu_name="RTX 2070 Super")
+        with patch(
+            "minivess.adapters.sam3_vram_check.detect_hardware",
+            return_value=hw,
+        ):
+            check_sam3_vram(mode="inference")  # Must not raise
+
+    def test_passes_at_exactly_6gb_boundary(self) -> None:
+        """No exception at exactly 6144 MB (inclusive boundary)."""
+        from minivess.adapters.sam3_vram_check import check_sam3_vram
+
+        hw = _make_hw(gpu_vram_mb=6144, gpu_name="RTX 3060")
+        with patch(
+            "minivess.adapters.sam3_vram_check.detect_hardware",
+            return_value=hw,
+        ):
+            check_sam3_vram(mode="inference")  # Must not raise
+
+    def test_raises_below_6gb_for_inference(self) -> None:
+        """RuntimeError when VRAM is 4 GB (below 6 GB inference minimum)."""
+        from minivess.adapters.sam3_vram_check import check_sam3_vram
+
+        hw = _make_hw(gpu_vram_mb=4096, gpu_name="GTX 1650")
+        with (
+            patch(
+                "minivess.adapters.sam3_vram_check.detect_hardware",
+                return_value=hw,
+            ),
+            pytest.raises(RuntimeError),
+        ):
+            check_sam3_vram(mode="inference")
+
+
+class TestCheckSam3VramEdgeCases:
+    """Edge cases and invalid inputs."""
+
+    def test_invalid_mode_raises_value_error(self) -> None:
+        """ValueError raised for unknown mode."""
+        from minivess.adapters.sam3_vram_check import check_sam3_vram
+
+        hw = _make_hw(gpu_vram_mb=40960)
+        with (
+            patch(
+                "minivess.adapters.sam3_vram_check.detect_hardware",
+                return_value=hw,
+            ),
+            pytest.raises(ValueError, match="mode must be"),
+        ):
+            check_sam3_vram(mode="finetuning")  # Invalid string
