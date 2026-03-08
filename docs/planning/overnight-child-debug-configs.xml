@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MinIVess MLOps — Overnight Child Plan: Debug Configs + Shell Wrapper
+  Parent: script-consolidation.xml (Phases 2-5)
+  Branch: feat/debug-configs
+  Depends on: feat/hydra-bridge (must be merged first)
+
+  PURPOSE:
+  Create debug experiment YAMLs, shell wrapper (run_debug.sh), justfile
+  integration, multi-flow chaining, and documentation updates.
+
+  CONTEXT:
+  - Read CLAUDE.md first for all rules
+  - Read configs/README.md for config system architecture
+  - Read src/minivess/config/CLAUDE.md for Hydra-zen rules
+  - Read docs/planning/script-consolidation.xml for full plan context
+  - Debug configs are STANDARD Hydra experiment YAMLs — NOT a separate system
+  - TDD: use self-learning-iterative-coder skill for every task
+
+  EXECUTION:
+  claude --dangerously-skip-permissions -p \
+    "Read and execute docs/planning/overnight-child-debug-configs.xml autonomously."
+-->
+<child-plan>
+  <metadata>
+    <title>Debug Experiment Configs + Shell Wrapper + Flow Chaining</title>
+    <branch>feat/debug-configs</branch>
+    <base>main</base>
+    <depends-on>feat/hydra-bridge must be merged into main first</depends-on>
+    <estimated-duration>3-4 hours</estimated-duration>
+    <pr-title>feat(debug): Hydra experiment configs + run_debug.sh + flow chaining</pr-title>
+  </metadata>
+
+  <setup>
+    git checkout main &amp;&amp; git pull origin main
+    git checkout -b feat/debug-configs
+
+    Read: CLAUDE.md
+    Read: configs/README.md
+    Read: src/minivess/config/CLAUDE.md
+    Read: deployment/CLAUDE.md
+    Read: docs/planning/script-consolidation.xml (Phases 2-5)
+    Read: configs/base.yaml
+    Read: configs/experiment/ (list existing configs for format reference)
+  </setup>
+
+  <!-- ================================================================ -->
+  <!-- PHASE 2: Create debug experiment configs                         -->
+  <!-- ================================================================ -->
+  <phase id="2" name="Create Debug Experiment Configs">
+
+    <task id="2.1" name="Create 5 debug experiment YAMLs">
+      <files>
+        configs/experiment/debug_single_model.yaml
+        configs/experiment/debug_all_models.yaml
+        configs/experiment/debug_full_pipeline.yaml
+        configs/experiment/debug_multi_loss.yaml
+        configs/experiment/debug_data_validation.yaml
+      </files>
+      <tdd-phase>RED</tdd-phase>
+      <test-file>tests/unit/config/test_debug_experiment_configs.py</test-file>
+      <tests>
+        <test>test_debug_single_model_compose — compose_experiment_config("debug_single_model")
+          succeeds and returns dict with max_epochs=1, debug=true</test>
+        <test>test_debug_all_models_compose — verify models_to_test list has 5 entries</test>
+        <test>test_debug_multi_loss_compose — verify losses list has 3 entries</test>
+        <test>test_all_debug_configs_have_debug_flag — all debug_* configs set debug=true</test>
+        <test>test_debug_configs_have_volume_subset — all set max_train_volumes=2</test>
+      </tests>
+
+      <tdd-phase>GREEN</tdd-phase>
+      <implementation>
+        Create each YAML using '@package _global_' header and lightweight checkpoint
+        defaults. See script-consolidation.xml design section for exact contents.
+        Each file is a standard Hydra experiment YAML — same format as existing configs.
+      </implementation>
+    </task>
+
+    <task id="2.2" name="Create lightweight checkpoint config">
+      <file>configs/checkpoint/lightweight.yaml</file>
+      <implementation>
+        Minimal checkpoint config for debug runs:
+        - save_top_k: 1
+        - monitor: val_loss (simpler than full metrics)
+        - patience: 999 (no early stopping in debug)
+      </implementation>
+    </task>
+
+    <commit>
+      git commit -m "feat(config): 5 debug experiment YAMLs + lightweight checkpoint
+
+      Phase 2 of script-consolidation plan:
+      - debug_single_model: 1 model, 1 fold, 1 epoch (~2 min)
+      - debug_all_models: 5 models, 3 folds, 2 epochs (~30 min)
+      - debug_full_pipeline: train + post-training + analysis (~15 min)
+      - debug_multi_loss: 3 losses for ensemble testing (~15 min)
+      - debug_data_validation: MONAI dataloader check
+      - lightweight checkpoint config for fast iteration
+
+      Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;"
+    </commit>
+  </phase>
+
+  <!-- ================================================================ -->
+  <!-- PHASE 3: Shell wrapper + Preflight                               -->
+  <!-- ================================================================ -->
+  <phase id="3" name="Shell Wrapper and Preflight">
+
+    <task id="3.1" name="Create run_debug.sh">
+      <file>scripts/run_debug.sh</file>
+      <implementation>
+        Shell wrapper that:
+        1. Preflight: Docker daemon, NVIDIA runtime, minivess-base image,
+           minivess-network, data accessible, HF_TOKEN (if SAM3)
+        2. Read models_to_test from experiment YAML via Python one-liner:
+           python3 -c "import yaml; print(' '.join(yaml.safe_load(open('configs/experiment/$EXPERIMENT.yaml'))
+           .get('models_to_test', [yaml.safe_load(open('configs/experiment/$EXPERIMENT.yaml')).get('model','dynunet')])))"
+        3. For each model:
+           docker compose -f deployment/docker-compose.flows.yml run --rm \
+             -e EXPERIMENT=$experiment \
+             -e HYDRA_OVERRIDES="model=$model,$user_overrides" \
+             train 2>&amp;1 | tee outputs/debug/logs/$model.log
+        4. If flows includes post_training or analyze: chain them
+        5. Validate MLflow runs, print summary
+
+        CLI: --experiment NAME --override KEY=VALUE [--dry-run]
+      </implementation>
+    </task>
+
+    <task id="3.2" name="Justfile integration">
+      <file>justfile</file>
+      <implementation>
+        Add recipes:
+          just debug                      # debug_single_model
+          just debug-all-models           # debug_all_models
+          just debug-pipeline             # debug_full_pipeline
+          just debug EXPERIMENT OVERRIDES  # custom
+      </implementation>
+    </task>
+
+    <commit>
+      git commit -m "feat(debug): run_debug.sh wrapper + justfile integration
+
+      Phase 3 of script-consolidation plan:
+      - run_debug.sh: preflight, model iteration, Docker compose, log capture
+      - Justfile recipes: just debug, just debug-all-models, just debug-pipeline
+
+      Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;"
+    </commit>
+  </phase>
+
+  <!-- ================================================================ -->
+  <!-- PHASE 4: Multi-flow chaining                                     -->
+  <!-- ================================================================ -->
+  <phase id="4" name="Multi-Flow Chaining">
+
+    <task id="4.1" name="Flow chaining in run_debug.sh">
+      <implementation>
+        Read 'flows' list from experiment YAML. After training completes:
+        - If 'post_training' in flows: docker compose run post_training
+          with -e UPSTREAM_EXPERIMENT=$experiment_name
+        - If 'analyze' in flows: docker compose run analyze
+          with -e UPSTREAM_EXPERIMENT=$experiment_name
+        Chain sequentially. Capture per-flow status.
+      </implementation>
+    </task>
+
+    <task id="4.2" name="Pipeline summary report">
+      <implementation>
+        After all flows complete, print summary table and save JSON:
+        - Per-flow: status, duration, MLflow run count
+        - Per-model: timing, error context
+        - Total duration, experiment name for MLflow lookup
+        - Save to outputs/debug/summary_{timestamp}.json
+      </implementation>
+    </task>
+
+    <commit>
+      git commit -m "feat(debug): multi-flow chaining + pipeline summary report
+
+      Phase 4 of script-consolidation plan:
+      - run_debug.sh chains train → post_training → analyze when flows list defined
+      - Pipeline summary JSON saved to outputs/debug/
+
+      Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;"
+    </commit>
+  </phase>
+
+  <!-- ================================================================ -->
+  <!-- PHASE 5: Documentation                                           -->
+  <!-- ================================================================ -->
+  <phase id="5" name="Documentation">
+
+    <task id="5.1" name="Update configs/README.md with debug section">
+      <file>configs/README.md</file>
+      <implementation>
+        Add debug experiment config documentation with usage examples.
+        Already partially done — verify and expand.
+      </implementation>
+    </task>
+
+    <commit>
+      git commit -m "docs: update configs/README.md with debug experiment docs
+
+      Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;"
+    </commit>
+  </phase>
+
+  <finalize>
+    uv run pytest tests/ -x -q
+    uv run ruff check src/ tests/
+    uv run mypy src/
+
+    git push -u origin feat/debug-configs
+    gh pr create --title "feat(debug): Hydra experiment configs + run_debug.sh + flow chaining" \
+      --body "## Summary
+    - 5 debug experiment YAMLs (standard Hydra format, same directory as all other experiments)
+    - run_debug.sh: preflight, multi-model iteration, Docker compose, log capture
+    - Multi-flow chaining: train → post_training → analyze
+    - Pipeline summary report (JSON)
+    - Justfile integration: just debug, just debug-all-models, just debug-pipeline
+
+    ## Plan
+    Implements Phases 2-5 of docs/planning/script-consolidation.xml
+
+    ## Test plan
+    - [ ] compose_experiment_config() resolves all 5 debug configs
+    - [ ] run_debug.sh --dry-run shows correct Docker compose commands
+    - [ ] Pipeline summary JSON generated after multi-flow run
+
+    Generated with Claude Code"
+  </finalize>
+</child-plan>
