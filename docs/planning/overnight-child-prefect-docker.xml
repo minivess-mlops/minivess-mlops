@@ -1,0 +1,355 @@
+<?xml version="1.0" encoding="utf-8"?>
+<child-plan id="prefect-docker">
+  <metadata>
+    <title>Prefect/Docker Optimization — #434 #503 #504</title>
+    <branch>fix/prefect-docker-monai-optimization</branch>
+    <closes-issues>#434, #503, #504</closes-issues>
+    <base-branch>main</base-branch>
+    <next-plan>docs/planning/overnight-child-monai-eval.xml</next-plan>
+  </metadata>
+
+  <context-files>
+    <file>CLAUDE.md</file>
+    <file>docs/planning/prefect-docker-optimization-and-monai-consolidation.md</file>
+    <file>.env.example</file>
+    <file>deployment/docker/Dockerfile.base</file>
+    <file>deployment/docker/Dockerfile.train</file>
+    <file>deployment/docker-compose.flows.yml</file>
+    <file>src/minivess/orchestration/flows/train_flow.py</file>
+    <file>src/minivess/orchestration/flows/hpo_flow.py</file>
+    <file>src/minivess/optimization/hpo_engine.py</file>
+    <file>tests/integration/orchestration/test_docker_training_smoke.py</file>
+    <file>configs/hpo/dynunet_example.yaml</file>
+  </context-files>
+
+  <setup>
+    <step>git checkout fix/prefect-docker-monai-optimization</step>
+    <step>git pull origin main --rebase</step>
+    <step>Verify branch exists: git branch --show-current</step>
+  </setup>
+
+  <critical-rules>
+    - CLAUDE.md Rule #22: ALL config values in .env.example FIRST. BANNED: ENV VAR=value in
+      Dockerfiles for anything other than structural Python paths (PATH, PYTHONPATH, PYTHONUNBUFFERED,
+      DOCKER_CONTAINER=1). Service URLs, ports, artifact paths go to .env.example + compose.
+    - CLAUDE.md Rule #17: NO standalone scripts as run path. All flows go through Prefect in Docker.
+    - CLAUDE.md Rule #18: /tmp FORBIDDEN for artifacts. Use pytest.tmp_path for test bind-mounts.
+    - CLAUDE.md Rule #16: NO regex for structured data. JSON → json.loads(). YAML → yaml.safe_load().
+    - CLAUDE.md Rule #21: GitHub Actions EXPLICITLY DISABLED. Never add on: push or on: pull_request.
+    - TDD MANDATORY: failing test first, then minimum implementation. Use self-learning-iterative-coder skill.
+    - NEVER suggest python scripts/*.py as a run path while Prefect flows exist.
+  </critical-rules>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="1" name="Commit Dockerfile.base + Rule #22 .env.example audit">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      Commit the already-correct uncommitted Dockerfile.base changes as an atomic first commit.
+      Then audit and extend .env.example with all missing container-path and HPO variables.
+    </description>
+
+    <task id="T-PD.1.1" name="Commit Dockerfile.base">
+      <description>
+        The diff is already correct (UID/GID args, fail-fast uv sync, venv perms, umask, PATH).
+        Commit it atomically — no other files.
+      </description>
+      <file>deployment/docker/Dockerfile.base</file>
+      <changes>
+        git add deployment/docker/Dockerfile.base
+        git commit -m "fix(docker): Dockerfile.base — UID/GID args, fail-fast uv sync, venv perms"
+      </changes>
+      <acceptance>git show HEAD shows only Dockerfile.base; pre-commit passes.</acceptance>
+    </task>
+
+    <task id="T-PD.1.2" name="RED — test_env_single_source.py Rule #22 checks">
+      <description>
+        Add failing tests to tests/unit/deployment/test_env_single_source.py (or create if absent)
+        that assert: DATA_DIR, CHECKPOINT_DIR, LOGS_DIR, SPLITS_DIR, POSTGRES_DB_OPTUNA,
+        REPLICA_INDEX, OPTUNA_STORAGE_URL, PREFECT_LOGGING_EXTRA_LOGGERS are all in .env.example.
+        Tests must parse .env.example with str.split() (no regex). They must FAIL before adding vars.
+      </description>
+      <test-first>
+        - test_data_dir_in_env_example
+        - test_checkpoint_dir_in_env_example
+        - test_logs_dir_in_env_example
+        - test_splits_dir_in_env_example
+        - test_postgres_db_optuna_in_env_example
+        - test_replica_index_in_env_example
+        - test_optuna_storage_url_in_env_example
+        - test_prefect_logging_extra_loggers_in_env_example
+      </test-first>
+      <file>tests/unit/deployment/test_env_single_source.py</file>
+    </task>
+
+    <task id="T-PD.1.3" name="GREEN — add missing vars to .env.example">
+      <description>
+        Add the 8 missing variables to .env.example with correct defaults and comments.
+        After adding, all T-PD.1.2 tests must pass.
+        Then remove the corresponding ENV declarations from Dockerfile.train (DATA_DIR,
+        CHECKPOINT_DIR, LOGS_DIR, SPLITS_DIR) — these should come only from compose injection.
+        Update docker-compose.flows.yml x-common-env to reference ${VAR:-default} for each.
+      </description>
+      <file>.env.example</file>
+      <file>deployment/docker/Dockerfile.train</file>
+      <file>deployment/docker-compose.flows.yml</file>
+      <content-guidance>
+        .env.example additions:
+          # Container-internal artifact paths
+          DATA_DIR=/app/data
+          CHECKPOINT_DIR=/app/checkpoints
+          LOGS_DIR=/app/logs
+          SPLITS_DIR=/app/configs/splits
+          # HPO
+          POSTGRES_DB_OPTUNA=optuna
+          OPTUNA_STORAGE_URL=
+          REPLICA_INDEX=0
+          # Logging
+          PREFECT_LOGGING_EXTRA_LOGGERS=minivess
+
+        In Dockerfile.train: DELETE lines like `ENV DATA_DIR=/app/data` — add comment:
+          # DATA_DIR, CHECKPOINT_DIR, LOGS_DIR, SPLITS_DIR are injected by docker-compose
+          # from .env.example. Do NOT hardcode them here (CLAUDE.md Rule #22).
+
+        In docker-compose.flows.yml x-common-env: add
+          DATA_DIR: ${DATA_DIR:-/app/data}
+          CHECKPOINT_DIR: ${CHECKPOINT_DIR:-/app/checkpoints}
+          LOGS_DIR: ${LOGS_DIR:-/app/logs}
+          SPLITS_DIR: ${SPLITS_DIR:-/app/configs/splits}
+          PREFECT_LOGGING_EXTRA_LOGGERS: ${PREFECT_LOGGING_EXTRA_LOGGERS:-minivess}
+      </content-guidance>
+      <acceptance>MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/deployment/test_env_single_source.py -x -q passes.</acceptance>
+    </task>
+
+    <task id="T-PD.1.4" name="Checkpoint phase 1">
+      <test-command>MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/deployment/ -x -q &amp;&amp; uv run ruff check src/ tests/ &amp;&amp; uv run mypy src/ --ignore-missing-imports</test-command>
+      <acceptance>All pass. Commit: "fix(env): add missing container path vars to .env.example (Rule #22)"</acceptance>
+      <on-failure>Fix the failing test or type error before proceeding.</on-failure>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="2" name="Issue #503 — Double-logging">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      Make training logs visible in both terminal (already works via PYTHONUNBUFFERED) AND
+      Prefect UI (via PREFECT_LOGGING_EXTRA_LOGGERS) AND durable JSONL files on the volume.
+    </description>
+
+    <task id="T-PD.2.1" name="RED — test_flow_logging.py">
+      <test-first>
+        - test_configure_flow_logging_adds_jsonl_handler: call configure_flow_logging(tmp_path),
+          assert logging.getLogger("minivess") has a FileHandler writing to tmp_path/train.jsonl
+        - test_jsonl_output_is_parseable: write a test log line, read the file, assert
+          json.loads(line) succeeds (no regex — CLAUDE.md Rule #16)
+        - test_flow_logging_does_not_add_duplicate_handlers: call configure_flow_logging twice,
+          assert only ONE FileHandler added (idempotent)
+        - test_configure_flow_logging_requires_path_not_string: assert TypeError if passed str
+      </test-first>
+      <file>tests/unit/orchestration/test_flow_logging.py</file>
+    </task>
+
+    <task id="T-PD.2.2" name="GREEN — src/minivess/observability/flow_logging.py">
+      <description>
+        Implement configure_flow_logging(). JSONL format uses json.dumps() on the log record
+        dict — no regex. Must be idempotent (check existing handlers before adding).
+        Call once at the top of train_flow() and hpo_flow() entrypoints (NOT inside tasks).
+      </description>
+      <file>src/minivess/observability/flow_logging.py</file>
+      <file>src/minivess/orchestration/flows/train_flow.py</file>
+      <file>src/minivess/orchestration/flows/hpo_flow.py</file>
+      <content-guidance>
+        from __future__ import annotations
+        import json
+        import logging
+        import os
+        from pathlib import Path
+
+        def configure_flow_logging(logs_dir: Path, logger_name: str = "minivess") -> None:
+            """Add JSONL FileHandler to the named logger. Idempotent."""
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            log_path = logs_dir / "train.jsonl"
+            logger = logging.getLogger(logger_name)
+            # Idempotency check — avoid duplicate handlers
+            if any(isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", "") == str(log_path)
+                   for h in logger.handlers):
+                return
+            handler = logging.FileHandler(log_path, encoding="utf-8")
+            handler.setFormatter(_JsonlFormatter())
+            logger.addHandler(handler)
+
+        class _JsonlFormatter(logging.Formatter):
+            def format(self, record: logging.LogRecord) -> str:
+                payload = {
+                    "ts": record.created,
+                    "level": record.levelname,
+                    "logger": record.name,
+                    "msg": record.getMessage(),
+                }
+                return json.dumps(payload)
+
+        In train_flow.py, at top of training_flow():
+            from minivess.observability.flow_logging import configure_flow_logging
+            configure_flow_logging(logs_dir=Path(os.environ.get("LOGS_DIR", "/app/logs")))
+      </content-guidance>
+      <acceptance>MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/orchestration/test_flow_logging.py -x -q passes.</acceptance>
+    </task>
+
+    <task id="T-PD.2.3" name="Checkpoint phase 2">
+      <test-command>MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/orchestration/test_flow_logging.py tests/unit/deployment/ -x -q &amp;&amp; uv run ruff check src/ tests/ &amp;&amp; uv run mypy src/ --ignore-missing-imports</test-command>
+      <acceptance>All pass. Commit: "feat(#503): flow_logging.py — JSONL handler + Prefect log wiring"</acceptance>
+      <on-failure>Fix before proceeding.</on-failure>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="3" name="Issue #434 — Docker smoke test">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      Extend the existing integration smoke test to verify: checkpoint artifact exists on
+      volume after container exit, MLflow run is FINISHED, Prefect was active.
+    </description>
+
+    <task id="T-PD.3.1" name="RED — extend test_docker_training_smoke.py">
+      <test-first>
+        - test_train_debug_run_produces_checkpoint: markers @pytest.mark.requires_docker,
+          @pytest.mark.requires_train_image, @pytest.mark.slow.
+          Bind-mount tmp_path/"checkpoints" to /app/checkpoints.
+          Run: docker compose -f deployment/docker-compose.flows.yml run --rm
+               -v {checkpoint_path}:/app/checkpoints
+               -e MINIVESS_DEBUG=1 -e MLFLOW_TRACKING_URI=mlruns
+               train --debug --max-epochs 1 --num-folds 1
+          Assert: any(checkpoint_path.rglob("*.pt")) is True.
+          NOTE: use tmp_path (pytest fixture), NOT /tmp directly (CLAUDE.md Rule #18).
+        - test_train_debug_run_mlflow_finished: same run, then use mlflow Python API to load
+          the most recent run from mlruns/ and assert run.info.status == "FINISHED".
+        - test_train_debug_run_prefect_active: assert the container logs contain
+          "Prefect" and do NOT contain "PREFECT_DISABLED" active message.
+      </test-first>
+      <file>tests/integration/orchestration/test_docker_training_smoke.py</file>
+      <file>tests/conftest.py</file>
+    </task>
+
+    <task id="T-PD.3.2" name="GREEN — register pytest markers + implement smoke runner">
+      <description>
+        Register requires_docker, requires_train_image, slow, gpu_required markers in
+        pyproject.toml [tool.pytest.ini_options] markers section.
+        Implement the smoke runner using subprocess.run() with the docker compose command.
+        The test should skip (not fail) if Docker daemon not running or image not built.
+        Use pytest.importorskip or a conftest fixture that checks docker info.
+      </description>
+      <file>pyproject.toml</file>
+      <file>tests/conftest.py</file>
+      <file>tests/integration/orchestration/test_docker_training_smoke.py</file>
+      <acceptance>
+        Tests run (skip gracefully if Docker not available) or pass if Docker is running.
+        MINIVESS_ALLOW_HOST=1 uv run pytest tests/integration/orchestration/test_docker_training_smoke.py -x -q -m "not requires_docker"
+        must pass (skips properly).
+      </acceptance>
+    </task>
+
+    <task id="T-PD.3.3" name="Checkpoint phase 3">
+      <test-command>MINIVESS_ALLOW_HOST=1 uv run pytest tests/integration/orchestration/ -x -q -m "not requires_docker" &amp;&amp; uv run ruff check src/ tests/ &amp;&amp; uv run mypy src/ --ignore-missing-imports</test-command>
+      <acceptance>All pass. Commit: "test(#434): Docker training smoke test — checkpoint + MLflow + Prefect assertions"</acceptance>
+      <on-failure>Fix before proceeding.</on-failure>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="4" name="Issue #504 — Flexible HPO allocation">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      Add config-driven HPO allocation strategies: sequential (default), parallel (Postgres),
+      hybrid (multi-GPU via CUDA_VISIBLE_DEVICES). No code changes to switch strategy.
+    </description>
+
+    <task id="T-PD.4.1" name="RED — test_hpo_allocation.py">
+      <test-first>
+        - test_allocation_strategy_sequential_parsed_from_yaml: load dynunet_example.yaml with
+          allocation.strategy=sequential, assert AllocationStrategy.SEQUENTIAL
+        - test_allocation_strategy_parallel_requires_postgres: AllocationStrategy.PARALLEL with
+          optuna_storage=None raises ValueError("parallel strategy requires postgresql storage")
+        - test_allocation_strategy_parallel_with_postgres_accepted: with
+          optuna_storage="postgresql://user:pass@host/optuna" → no error
+        - test_allocation_strategy_hybrid_sets_gpu_fields: strategy=hybrid,
+          n_containers=4, trials_per_container=3 → AllocationConfig.n_containers==4
+        - test_hpo_engine_from_config_roundtrip: build HPOEngine via from_config(yaml_dict),
+          assert sampler and pruner set correctly
+      </test-first>
+      <file>tests/unit/orchestration/test_hpo_allocation.py</file>
+    </task>
+
+    <task id="T-PD.4.2" name="GREEN — AllocationStrategy enum in hpo_engine.py">
+      <description>
+        Add AllocationStrategy enum (SEQUENTIAL, PARALLEL, HYBRID) and AllocationConfig
+        dataclass to hpo_engine.py. Add from_config(yaml_dict) classmethod to HPOEngine.
+        Enforce: if strategy==PARALLEL and optuna_storage is None or not postgresql://,
+        raise ValueError with clear message.
+      </description>
+      <file>src/minivess/optimization/hpo_engine.py</file>
+    </task>
+
+    <task id="T-PD.4.3" name="GREEN — YAML config update + compose hpo-worker service">
+      <description>
+        Add allocation block to configs/hpo/dynunet_example.yaml (see planning doc §4.5).
+        Add hpo-worker service to deployment/docker-compose.flows.yml for parallel strategy.
+        Create scripts/hpo_worker_entrypoint.sh for hybrid GPU assignment.
+      </description>
+      <file>configs/hpo/dynunet_example.yaml</file>
+      <file>deployment/docker-compose.flows.yml</file>
+      <file>scripts/hpo_worker_entrypoint.sh</file>
+      <content-guidance>
+        hpo_worker_entrypoint.sh:
+          #!/usr/bin/env bash
+          set -euo pipefail
+          # Assign GPU based on REPLICA_INDEX (set by docker compose or orchestrator)
+          export CUDA_VISIBLE_DEVICES="${REPLICA_INDEX:-0}"
+          exec uv run prefect flow run ...
+      </content-guidance>
+    </task>
+
+    <task id="T-PD.4.4" name="GREEN — hpo_flow.py dispatch to strategy runner">
+      <description>
+        Update hpo_flow() to read allocation config and dispatch:
+        - SEQUENTIAL: optimize in-process (no subprocess)
+        - PARALLEL: raise NotImplementedError with instructions (requires postgres + scale)
+        - HYBRID: set CUDA_VISIBLE_DEVICES before calling optimize
+        Add smoke integration test.
+      </description>
+      <file>src/minivess/orchestration/flows/hpo_flow.py</file>
+      <file>tests/integration/orchestration/test_hpo_smoke.py</file>
+    </task>
+
+    <task id="T-PD.4.5" name="Checkpoint phase 4">
+      <test-command>MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/orchestration/test_hpo_allocation.py tests/integration/orchestration/test_hpo_smoke.py -x -q -m "not requires_docker" &amp;&amp; uv run ruff check src/ tests/ &amp;&amp; uv run mypy src/ --ignore-missing-imports</test-command>
+      <acceptance>All pass. Commit: "feat(#504): flexible HPO allocation — sequential/parallel/hybrid strategies"</acceptance>
+      <on-failure>Fix before proceeding.</on-failure>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="5" name="Full verify + PR">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <task id="T-PD.5.1" name="Full test suite + PR creation">
+      <test-command>MINIVESS_ALLOW_HOST=1 uv run pytest tests/ -x -q -m "not requires_docker and not slow" &amp;&amp; uv run ruff check src/ tests/ &amp;&amp; uv run mypy src/ --ignore-missing-imports</test-command>
+      <acceptance>All pass.</acceptance>
+      <on-failure>Fix any failures. Do NOT dismiss as pre-existing.</on-failure>
+    </task>
+
+    <task id="T-PD.5.2" name="Create PR">
+      <description>
+        Push branch and create PR closing #434, #503, #504.
+        PR title: "fix: Docker/Prefect optimization — smoke test, log streaming, HPO allocation"
+        PR body must include: summary, test plan, closes #434 #503 #504.
+      </description>
+      <changes>
+        git push -u origin fix/prefect-docker-monai-optimization
+        gh pr create --title "fix: Docker/Prefect optimization — smoke test, log streaming, HPO allocation (#434 #503 #504)" --body "..."
+      </changes>
+    </task>
+  </phase>
+
+  <completion-signal>
+    When this plan is complete, the next plan is:
+    docs/planning/overnight-child-monai-eval.xml (MONAI multi-strategy evaluation — #505)
+  </completion-signal>
+</child-plan>

@@ -1,0 +1,389 @@
+<?xml version="1.0" encoding="utf-8"?>
+<child-plan id="monai-eval">
+  <metadata>
+    <title>MONAI Multi-Strategy Evaluation — #505</title>
+    <branch>feat/analysis-multi-strategy-eval</branch>
+    <closes-issues>#505</closes-issues>
+    <base-branch>main</base-branch>
+    <next-plan>NONE</next-plan>
+  </metadata>
+
+  <context-files>
+    <file>CLAUDE.md</file>
+    <file>docs/planning/prefect-docker-optimization-and-monai-consolidation.md</file>
+    <file>src/minivess/adapters/base.py</file>
+    <file>src/minivess/adapters/dynunet.py</file>
+    <file>src/minivess/adapters/sam3_vanilla.py</file>
+    <file>src/minivess/adapters/mamba.py</file>
+    <file>src/minivess/adapters/vesselfm.py</file>
+    <file>src/minivess/config/evaluation_config.py</file>
+    <file>src/minivess/pipeline/inference.py</file>
+    <file>src/minivess/pipeline/trainer.py</file>
+    <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+    <file>configs/evaluation/default.yaml</file>
+  </context-files>
+
+  <setup>
+    <step>git checkout main</step>
+    <step>git pull origin main</step>
+    <step>git checkout -b feat/analysis-multi-strategy-eval</step>
+    <step>Verify: git branch --show-current</step>
+  </setup>
+
+  <critical-rules>
+    - CLAUDE.md Rule #16: NO regex. Use str.partition() for metric key manipulation,
+      ast.parse() for Python source guards, yaml.safe_load() for YAML parsing.
+    - CLAUDE.md Rule #3: Library-First. monai.inferers.sliding_window_inference is the ONLY
+      allowed sliding-window inference path for ALL models. NO custom inference loops.
+    - CLAUDE.md Rule #9: Task-Agnostic. NO if model_family == "sam3" branches in analysis_flow.py.
+      All model-specific logic goes in adapter methods (get_eval_roi_size).
+    - CLAUDE.md Rule #2: TDD mandatory. Failing test FIRST, then minimum implementation.
+    - MONAI-First vision: This fix enforces identical MONAI sliding_window_inference parameters
+      across ALL models. This is the scientific integrity requirement for paper tables.
+    - Do NOT touch train_flow.py or trainer.py — training-time fast validation is intentionally
+      model-specific and must NOT be changed.
+    - The hardcoded roi_size=(32,32,32) in analysis_flow.py is the bug. An AST guard test
+      (Task T-ME.5.3) will permanently prevent this literal from returning.
+  </critical-rules>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="1" name="Pydantic schema — InferenceStrategyConfig">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      Add InferenceStrategyConfig Pydantic model and inference_strategies list to EvaluationConfig.
+      Validation: exactly one strategy with is_primary=True; unique names; roi_size constraints.
+    </description>
+
+    <task id="T-ME.1.1" name="RED — test_inference_strategy_config.py">
+      <test-first>
+        - test_strategy_config_constructed_from_dict: basic happy path
+        - test_roi_size_per_model_string_accepted: roi_size="per_model" is valid
+        - test_roi_size_list_of_ints_accepted: roi_size=[128, 128, 16] is valid
+        - test_roi_size_wildcard_depth_accepted: roi_size=[512, 512, -1] is valid
+        - test_overlap_must_be_less_than_one: overlap=1.0 raises ValidationError
+        - test_sw_batch_size_must_be_positive: sw_batch_size=0 raises ValidationError
+        - test_evaluation_config_requires_exactly_one_primary: two is_primary=True raises
+        - test_evaluation_config_no_primary_raises: zero is_primary=True raises
+        - test_evaluation_config_unique_names_enforced: duplicate name raises
+        - test_evaluation_config_empty_strategies_allowed: [] is valid (no evaluation run)
+      </test-first>
+      <file>tests/unit/config/test_inference_strategy_config.py</file>
+    </task>
+
+    <task id="T-ME.1.2" name="GREEN — evaluation_config.py">
+      <description>
+        Add InferenceStrategyConfig (Pydantic BaseModel) and extend EvaluationConfig
+        with inference_strategies: list[InferenceStrategyConfig] field.
+        Use @model_validator for primary-strategy uniqueness.
+        Default value: one standard_patch strategy (is_primary=True) so existing code
+        that doesn't pass inference_strategies still works.
+      </description>
+      <file>src/minivess/config/evaluation_config.py</file>
+      <content-guidance>
+        from __future__ import annotations
+        from typing import Literal
+        from pydantic import BaseModel, Field, model_validator
+
+        class InferenceStrategyConfig(BaseModel):
+            name: str
+            description: str = ""
+            roi_size: list[int] | Literal["per_model"]
+            overlap: float = Field(default=0.5, ge=0.0, lt=1.0)
+            sw_batch_size: int = Field(default=4, ge=1)
+            aggregation_mode: Literal["gaussian", "constant"] = "gaussian"
+            is_primary: bool = False
+
+        Add to EvaluationConfig:
+            inference_strategies: list[InferenceStrategyConfig] = Field(default_factory=lambda: [
+                InferenceStrategyConfig(
+                    name="standard_patch",
+                    description="Fixed patch for cross-model scientific comparability",
+                    roi_size=[128, 128, 16],
+                    overlap=0.5,
+                    sw_batch_size=4,
+                    is_primary=True,
+                )
+            ])
+
+            @model_validator(mode="after")
+            def _validate_strategies(self) -> "EvaluationConfig":
+                if self.inference_strategies:
+                    primaries = [s for s in self.inference_strategies if s.is_primary]
+                    if len(primaries) != 1:
+                        raise ValueError(f"Exactly 1 strategy must have is_primary=True, got {len(primaries)}")
+                    names = [s.name for s in self.inference_strategies]
+                    if len(names) != len(set(names)):
+                        raise ValueError("Inference strategy names must be unique")
+                return self
+      </content-guidance>
+      <acceptance>MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/config/test_inference_strategy_config.py -x -q passes.</acceptance>
+    </task>
+
+    <task id="T-ME.1.3" name="Checkpoint phase 1">
+      <test-command>MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/config/test_inference_strategy_config.py -x -q &amp;&amp; uv run ruff check src/ tests/ &amp;&amp; uv run mypy src/ --ignore-missing-imports</test-command>
+      <acceptance>All pass. Commit: "feat(#505): InferenceStrategyConfig Pydantic schema for multi-strategy evaluation"</acceptance>
+      <on-failure>Fix before proceeding.</on-failure>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="2" name="YAML config — inference_strategies block">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <task id="T-ME.2.1" name="RED — test_evaluation_yaml_loading.py">
+      <test-first>
+        - test_default_yaml_loads_without_error: yaml.safe_load(default.yaml) → EvaluationConfig OK
+        - test_default_yaml_has_standard_patch_strategy: exactly one strategy, name="standard_patch"
+        - test_default_yaml_standard_patch_is_primary: standard_patch.is_primary == True
+        - test_default_yaml_roi_size_is_list_of_ints: roi_size == [128, 128, 16]
+        - test_default_yaml_has_fast_strategy: strategy named "fast" with roi_size="per_model"
+        - test_default_yaml_fast_is_not_primary: fast.is_primary == False
+      </test-first>
+      <file>tests/unit/config/test_evaluation_yaml_loading.py</file>
+    </task>
+
+    <task id="T-ME.2.2" name="GREEN — configs/evaluation/default.yaml">
+      <description>
+        Add the inference_strategies block to configs/evaluation/default.yaml with
+        standard_patch (primary) and fast strategies. Do NOT add full_volume to default
+        (requires >= 24 GB VRAM — document it as an optional addition).
+      </description>
+      <file>configs/evaluation/default.yaml</file>
+      <content-guidance>
+        inference_strategies:
+          - name: standard_patch
+            description: "Fixed patch across ALL models — use for paper tables"
+            roi_size: [128, 128, 16]
+            overlap: 0.5
+            sw_batch_size: 4
+            aggregation_mode: gaussian
+            is_primary: true
+
+          - name: fast
+            description: "Per-model-optimal ROI for quick iteration (not in paper tables)"
+            roi_size: per_model
+            overlap: 0.25
+            sw_batch_size: 4
+            aggregation_mode: gaussian
+            is_primary: false
+
+        # Optional (NOT in default — requires >= 24 GB VRAM for DynUNet):
+        # - name: full_volume
+        #   description: "Full HW slice sweep; -1 in depth = use actual volume depth"
+        #   roi_size: [512, 512, -1]
+        #   overlap: 0.5
+        #   sw_batch_size: 1
+        #   aggregation_mode: gaussian
+        #   is_primary: false
+      </content-guidance>
+      <acceptance>MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/config/test_evaluation_yaml_loading.py -x -q passes.</acceptance>
+    </task>
+
+    <task id="T-ME.2.3" name="Checkpoint phase 2">
+      <test-command>MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/config/ -x -q &amp;&amp; uv run ruff check src/ tests/ &amp;&amp; uv run mypy src/ --ignore-missing-imports</test-command>
+      <acceptance>All pass. Commit: "feat(#505): default.yaml inference_strategies — standard_patch + fast"</acceptance>
+      <on-failure>Fix before proceeding.</on-failure>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="3" name="ModelAdapter.get_eval_roi_size()">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <task id="T-ME.3.1" name="RED — test_eval_roi_size.py">
+      <test-first>
+        - test_base_class_default_returns_128_128_16: create any mock adapter (minimal
+          concrete subclass of ModelAdapter) and assert get_eval_roi_size() == (128, 128, 16)
+        - test_sam3_vanilla_returns_512_512_3: mock-construct Sam3VanillaAdapter (patch
+          sam3 weights loading to avoid requiring GPU) and assert (512, 512, 3)
+        - test_mamba_uses_base_default: MambaAdapter constructed with mock config → (128, 128, 16)
+        - test_vesselfm_uses_base_default: VesselFMAdapter(config, pretrained=False) → (128, 128, 16)
+        - test_dynunet_uses_base_default: DynUNetAdapter → (128, 128, 16)
+      </test-first>
+      <file>tests/unit/adapters/test_eval_roi_size.py</file>
+    </task>
+
+    <task id="T-ME.3.2" name="GREEN — base.py + sam3_vanilla.py">
+      <description>
+        Add get_eval_roi_size() concrete method (not abstract) to ModelAdapter in base.py.
+        Override only in Sam3VanillaAdapter → (512, 512, 3).
+        Rationale for SAM3: ViT-32L resizes all inputs to 1008x1008 regardless of spatial size,
+        so fewer depth slices per window = fewer encoder calls = faster eval.
+        Do NOT override in DynUNet, Mamba, VesselFM — base default (128, 128, 16) is correct.
+      </description>
+      <file>src/minivess/adapters/base.py</file>
+      <file>src/minivess/adapters/sam3_vanilla.py</file>
+      <acceptance>MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/adapters/test_eval_roi_size.py -x -q passes.</acceptance>
+    </task>
+
+    <task id="T-ME.3.3" name="Checkpoint phase 3">
+      <test-command>MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/adapters/ -x -q &amp;&amp; uv run ruff check src/ tests/ &amp;&amp; uv run mypy src/ --ignore-missing-imports</test-command>
+      <acceptance>All pass. Commit: "feat(#505): ModelAdapter.get_eval_roi_size() — SAM3 override to (512,512,3)"</acceptance>
+      <on-failure>Fix before proceeding.</on-failure>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="4" name="MultiStrategyInferenceRunner">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <task id="T-ME.4.1" name="RED — test_multi_strategy_inference.py">
+      <test-first>
+        - test_resolve_roi_size_per_model_calls_adapter: mock adapter with get_eval_roi_size()
+          returning (64,64,8); per_model strategy resolves to (64,64,8)
+        - test_resolve_roi_size_literal: strategy with roi_size=[128,128,16] resolves to
+          (128,128,16) regardless of model
+        - test_resolve_roi_size_wildcard_depth: roi_size=[512,512,-1] with volume shape
+          (1,1,64,64,30) resolves to (512,512,30)
+        - test_plain_nn_module_uses_fallback_roi: model without get_eval_roi_size() (plain
+          nn.Module) + per_model strategy → fallback (128,128,16)
+        - test_predictor_handles_segmentation_output: model that returns SegmentationOutput
+          is correctly unwrapped to tensor by _make_predictor()
+        - test_predictor_handles_plain_tensor: model that returns plain tensor works too
+        - test_run_all_strategies_returns_dict_keyed_by_strategy_name: mock sliding_window_inference,
+          2 strategies → dict with 2 keys matching strategy names
+      </test-first>
+      <file>tests/unit/pipeline/test_multi_strategy_inference.py</file>
+    </task>
+
+    <task id="T-ME.4.2" name="GREEN — multi_strategy_inference.py">
+      <description>
+        Implement MultiStrategyInferenceRunner in src/minivess/pipeline/multi_strategy_inference.py.
+        Use monai.inferers.sliding_window_inference as the ONLY inference path (MONAI-first).
+        The _make_predictor() pattern matches trainer.py's _model_fn — copy that pattern exactly.
+        NO regex anywhere. Use hasattr() for SegmentationOutput detection.
+        Key method: _resolve_roi_size(strategy, model, volume_shape) → tuple[int,int,int].
+          - If roi_size == "per_model": call model.get_eval_roi_size() if exists, else (128,128,16)
+          - If roi_size has -1: replace -1 with volume_shape dimension at that index
+          - Otherwise: return roi_size as tuple
+      </description>
+      <file>src/minivess/pipeline/multi_strategy_inference.py</file>
+      <acceptance>MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/pipeline/test_multi_strategy_inference.py -x -q passes.</acceptance>
+    </task>
+
+    <task id="T-ME.4.3" name="Checkpoint phase 4">
+      <test-command>MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/pipeline/test_multi_strategy_inference.py -x -q &amp;&amp; uv run ruff check src/ tests/ &amp;&amp; uv run mypy src/ --ignore-missing-imports</test-command>
+      <acceptance>All pass. Commit: "feat(#505): MultiStrategyInferenceRunner — MONAI sliding_window for all models"</acceptance>
+      <on-failure>Fix before proceeding.</on-failure>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="5" name="Wire into Analysis Flow + metric logging">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <task id="T-ME.5.1" name="RED — test_analysis_flow_multi_strategy.py">
+      <test-first>
+        - test_evaluate_single_model_calls_each_strategy: mock sliding_window_inference,
+          assert called once per strategy in config (2 strategies → 2 calls)
+        - test_primary_strategy_results_have_no_prefix: primary strategy metrics returned
+          under bare keys (dsc, cldice), not prefixed
+        - test_non_primary_strategy_results_have_prefix: fast strategy metrics returned
+          as fast/dsc, fast/cldice — use str.partition("/") to split, no regex
+        - test_primary_strategy_tag_logged: MLflow tag "eval_inference_strategy_primary"
+          is set to the primary strategy name
+      </test-first>
+      <file>tests/unit/orchestration/test_analysis_flow_multi_strategy.py</file>
+    </task>
+
+    <task id="T-ME.5.2" name="GREEN — analysis_flow.py: replace hardcoded SlidingWindowInferenceRunner">
+      <description>
+        In _evaluate_single_model_on_all(): replace the hardcoded
+          SlidingWindowInferenceRunner(roi_size=(32, 32, 32), num_classes=2, overlap=0.25)
+        with MultiStrategyInferenceRunner(strategies=eval_config.inference_strategies).
+        Add inference_strategies parameter to _evaluate_single_model_on_all() signature.
+        Metric key prefixing: use str.partition("/") — NO regex (CLAUDE.md Rule #16).
+      </description>
+      <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+      <content-guidance>
+        from minivess.pipeline.multi_strategy_inference import MultiStrategyInferenceRunner
+
+        def _evaluate_single_model_on_all(model, dataloaders_dict, eval_config, *, model_name, output_dir=None):
+            runner = MultiStrategyInferenceRunner(
+                strategies=eval_config.inference_strategies,
+                num_classes=2,
+            )
+            # runner.run_all_strategies() returns {strategy_name: {metric_name: value}}
+            # Primary strategy metrics: bare keys. Non-primary: "strategy_name/metric_name"
+            all_results = {}
+            for strategy_name, metrics in runner.run_all_strategies(model, dataloaders_dict).items():
+                strategy = next(s for s in eval_config.inference_strategies if s.name == strategy_name)
+                if strategy.is_primary:
+                    all_results.update(metrics)
+                else:
+                    all_results.update({f"{strategy_name}/{k}": v for k, v in metrics.items()})
+            return all_results
+      </content-guidance>
+      <acceptance>MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/orchestration/test_analysis_flow_multi_strategy.py -x -q passes.</acceptance>
+    </task>
+
+    <task id="T-ME.5.3" name="Guard tests — AST-based regression prevention">
+      <description>
+        Write two permanent guard tests that prevent future regressions:
+        1. AST guard: assert literal (32, 32, 32) as a tuple does NOT appear in analysis_flow.py
+           Use ast.parse() + ast.walk() to find ast.Tuple nodes — no regex.
+        2. Task-Agnostic guard: assert analysis_flow.py contains no string comparison against
+           model family names ("sam3", "dynunet", "mamba") in if-branch conditions.
+           Use ast.parse() + ast.walk() to find ast.Compare nodes comparing to string literals.
+        These tests run EVERY time and act as a permanent CLAUDE.md Rules #9 + #16 enforcement.
+      </description>
+      <test-first>
+        - test_no_hardcoded_32_roi_in_analysis_flow (AST check)
+        - test_no_model_family_string_comparison_in_analysis_flow (AST check)
+      </test-first>
+      <file>tests/unit/orchestration/test_analysis_flow_guard.py</file>
+    </task>
+
+    <task id="T-ME.5.4" name="Checkpoint phase 5">
+      <test-command>MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/orchestration/ -x -q &amp;&amp; uv run ruff check src/ tests/ &amp;&amp; uv run mypy src/ --ignore-missing-imports</test-command>
+      <acceptance>All pass. Commit: "fix(#505): analysis_flow — replace hardcoded roi_size with YAML-driven MultiStrategyInferenceRunner"</acceptance>
+      <on-failure>Fix before proceeding.</on-failure>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="6" name="Integration smoke + Mamba dimension verification">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <task id="T-ME.6.1" name="Integration smoke — 2 strategies × DynUNet CPU">
+      <description>
+        Integration test: build DynUNetAdapter (CPU, in-memory), create 2 InferenceStrategyConfig
+        objects (standard_patch + fast), create synthetic volume (1,1,16,64,64), run
+        MultiStrategyInferenceRunner.run_all_strategies(), assert:
+        - Two result dicts returned
+        - fast strategy uses adapter's default roi_size (128,128,16)
+        - standard_patch uses [128,128,16] literal
+        - Both produce output tensors of shape (1,2,16,64,64)
+        Also: verify Mamba adapter produces correct output shape — if it silently transposes
+        dimensions internally, this will catch it.
+      </description>
+      <test-first>
+        - test_multi_strategy_dynunet_cpu_smoke
+        - test_multi_strategy_mamba_cpu_smoke: assert output shape (1,2,H,W,D) not (1,2,D,H,W)
+      </test-first>
+      <file>tests/integration/pipeline/test_multi_strategy_evaluation_integration.py</file>
+    </task>
+
+    <task id="T-ME.6.2" name="Full verify + PR">
+      <test-command>MINIVESS_ALLOW_HOST=1 uv run pytest tests/ -x -q -m "not requires_docker and not slow and not gpu_required" &amp;&amp; uv run ruff check src/ tests/ &amp;&amp; uv run mypy src/ --ignore-missing-imports</test-command>
+      <acceptance>All pass.</acceptance>
+      <on-failure>Fix any failures. Do NOT dismiss as pre-existing.</on-failure>
+    </task>
+
+    <task id="T-ME.6.3" name="Create PR closing #505">
+      <description>
+        Push branch and create PR. Title must be clear about scientific importance.
+        If Mamba dimension test (T-ME.6.1) fails, create a SEPARATE issue before creating the PR.
+        Do NOT close #505 if Mamba dimension bug is found — create a follow-up issue.
+      </description>
+      <changes>
+        git push -u origin feat/analysis-multi-strategy-eval
+        gh pr create --title "feat(analysis-flow): YAML-driven multi-strategy sliding-window evaluation — scientific fairness (#505)" --body "..."
+      </changes>
+    </task>
+  </phase>
+
+  <completion-signal>
+    When this plan is complete:
+    - PR created for feat/analysis-multi-strategy-eval closing #505
+    - All tests passing (or Mamba dimension issue filed separately)
+    - MONAI multi-strategy evaluation enforced in Analysis Flow
+    - Paper tables can now be generated from standardized standard_patch evaluation
+    This is the final plan in the overnight-prefect-docker-monai.sh sequence. DONE.
+  </completion-signal>
+</child-plan>
