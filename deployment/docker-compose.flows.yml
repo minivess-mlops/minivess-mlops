@@ -136,6 +136,7 @@ services:
       - configs_splits:/app/configs/splits:ro
       - mlruns_data:/app/mlruns
       - outputs_analysis:/app/outputs/analysis
+      - post_training_out:/app/outputs/post_training:ro
     networks:
       - minivess
     <<: *common-labels

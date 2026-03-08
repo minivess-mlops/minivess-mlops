@@ -281,10 +281,20 @@ def train_one_fold_task(
         train_dicts = fold_split.get("train", [])
         val_dicts = fold_split.get("val", [])
 
-    if debug:
+    # Config-driven data subsetting (max_train_volumes / max_val_volumes from Hydra)
+    max_train_volumes: int | None = config.get("max_train_volumes")
+    max_val_volumes: int | None = config.get("max_val_volumes")
+    if max_train_volumes is not None:
+        train_dicts = train_dicts[:max_train_volumes]
+    elif debug:
         from minivess.config.debug import DEBUG_MAX_VOLUMES
 
         train_dicts = train_dicts[:DEBUG_MAX_VOLUMES]
+    if max_val_volumes is not None:
+        val_dicts = val_dicts[:max_val_volumes]
+    elif debug:
+        from minivess.config.debug import DEBUG_MAX_VOLUMES
+
         val_dicts = val_dicts[: max(2, DEBUG_MAX_VOLUMES // 3)]
 
     logger.info(
@@ -366,10 +376,11 @@ def train_one_fold_task(
     with tracker.start_run(
         tags={
             "fold_id": str(fold_id),
-            "loss_name": loss_name,
+            "loss_function": loss_name,
             "config_fingerprint": fingerprint,
         }
     ):
+        tracker.log_hydra_config(config)
         return trainer.fit(
             train_loader, val_loader, checkpoint_dir=checkpoint_dir, fold_id=fold_id
         )
@@ -439,6 +450,7 @@ def training_flow(
     max_epochs: int = 100,
     batch_size: int = 2,
     upstream_data_run_id: str | None = None,
+    config_dict: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> TrainingFlowResult:
     """Training Prefect flow — orchestrates model training.
@@ -473,6 +485,24 @@ def training_flow(
     TrainingFlowResult with fold results, MLflow run ID, and upstream link.
     """
     logger.info("Training flow started (trigger: %s)", trigger_source)
+
+    # Extract params from config_dict when provided (Hydra-zen bridge, Rule #23)
+    if config_dict is not None:
+        losses = config_dict.get("losses", [loss_name])
+        loss_name = losses[0] if losses else loss_name
+        model_family = str(config_dict.get("model", model_family))
+        debug = bool(config_dict.get("debug", debug))
+        max_epochs = int(config_dict.get("max_epochs", max_epochs))
+        num_folds = int(config_dict.get("num_folds", num_folds))
+        batch_size = int(config_dict.get("batch_size", batch_size))
+        experiment_name = str(config_dict.get("experiment_name", experiment_name))
+        logger.info(
+            "Config loaded from Hydra dict: experiment=%s model=%s loss=%s epochs=%d",
+            experiment_name,
+            model_family,
+            loss_name,
+            max_epochs,
+        )
 
     # Preflight: Docker context gate (CLAUDE.md Rule #19 — STOP Protocol)
     _require_docker_context()
@@ -513,6 +543,12 @@ def training_flow(
         "tracking_uri": tracking_uri,
     }
 
+    # Merge full Hydra config so train_one_fold_task can log it and use all keys
+    if config_dict is not None:
+        merged = dict(config_dict)
+        merged.update(config)  # individual params take precedence
+        config = merged
+
     # Train each fold, skipping already-completed configs (auto-resume)
     fold_results: list[dict[str, Any]] = []
     for fold_id, fold_split in enumerate(folds_to_run):
@@ -552,7 +588,7 @@ def training_flow(
             tags={
                 "flow_name": FLOW_NAME_TRAIN,
                 "upstream_data_run_id": upstream_data_run_id,
-                "loss_name": loss_name,
+                "loss_function": loss_name,
                 "model_family": model_family,
             }
         ) as active_run:
@@ -592,39 +628,56 @@ def training_flow(
 
 
 if __name__ == "__main__":
-    import argparse
+    # Hydra-zen bridge (Rule #23): EXPERIMENT env var → compose_experiment_config()
+    # → resolved config dict → training_flow(config_dict=resolved)
+    _experiment = os.environ.get("EXPERIMENT")
+    _hydra_overrides_str = os.environ.get("HYDRA_OVERRIDES", "")
+    _hydra_overrides = [o.strip() for o in _hydra_overrides_str.split(",") if o.strip()]
 
-    parser = argparse.ArgumentParser(description="Training Prefect flow")
-    parser.add_argument(
-        "--model-family", default=os.environ.get("MODEL_FAMILY", "dynunet")
-    )
-    parser.add_argument(
-        "--loss-name", default=os.environ.get("LOSS_NAME", "cbdice_cldice")
-    )
-    parser.add_argument(
-        "--max-epochs", type=int, default=int(os.environ.get("MAX_EPOCHS", "100"))
-    )
-    parser.add_argument(
-        "--num-folds", type=int, default=int(os.environ.get("NUM_FOLDS", "3"))
-    )
-    parser.add_argument(
-        "--batch-size", type=int, default=int(os.environ.get("BATCH_SIZE", "2"))
-    )
-    parser.add_argument(
-        "--experiment-name",
-        default=os.environ.get("EXPERIMENT_NAME", "minivess_training"),
-    )
-    parser.add_argument(
-        "--debug", action="store_true", default=os.environ.get("DEBUG", "") == "1"
-    )
-    args = parser.parse_args()
+    if _experiment:
+        from minivess.config.compose import compose_experiment_config
 
-    training_flow(
-        model_family=args.model_family,
-        loss_name=args.loss_name,
-        max_epochs=args.max_epochs,
-        num_folds=args.num_folds,
-        batch_size=args.batch_size,
-        experiment_name=args.experiment_name,
-        debug=args.debug,
-    )
+        _config = compose_experiment_config(
+            experiment_name=_experiment,
+            overrides=_hydra_overrides,
+        )
+        training_flow(config_dict=_config)
+    else:
+        # Backward compat: build from individual env vars when EXPERIMENT not set.
+        # This path is retained for existing docker-compose configs using old env vars.
+        import argparse
+
+        parser = argparse.ArgumentParser(description="Training Prefect flow")
+        parser.add_argument(
+            "--model-family", default=os.environ.get("MODEL_FAMILY", "dynunet")
+        )
+        parser.add_argument(
+            "--loss-name", default=os.environ.get("LOSS_NAME", "cbdice_cldice")
+        )
+        parser.add_argument(
+            "--max-epochs", type=int, default=int(os.environ.get("MAX_EPOCHS", "100"))
+        )
+        parser.add_argument(
+            "--num-folds", type=int, default=int(os.environ.get("NUM_FOLDS", "3"))
+        )
+        parser.add_argument(
+            "--batch-size", type=int, default=int(os.environ.get("BATCH_SIZE", "2"))
+        )
+        parser.add_argument(
+            "--experiment-name",
+            default=os.environ.get("EXPERIMENT_NAME", "minivess_training"),
+        )
+        parser.add_argument(
+            "--debug", action="store_true", default=os.environ.get("DEBUG", "") == "1"
+        )
+        args = parser.parse_args()
+
+        training_flow(
+            model_family=args.model_family,
+            loss_name=args.loss_name,
+            max_epochs=args.max_epochs,
+            num_folds=args.num_folds,
+            batch_size=args.batch_size,
+            experiment_name=args.experiment_name,
+            debug=args.debug,
+        )

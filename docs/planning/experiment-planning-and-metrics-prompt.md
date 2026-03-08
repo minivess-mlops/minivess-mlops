@@ -139,24 +139,21 @@ Validation and evaluation of algorithms could go far beyond purely technical per
   all your decisions, then we'll enter plan mode for implementation.
 
 
-The ensembling requirement is also mandatory! Is this clear! We should be         
-  flexibly ensemble easily 1) different hyperparameter runs of the same model (e.g. 
-   dyNUnet of same size optimized with different loss functions), 2) different      
-  folds of the same model (3-fold CV), 3) totally different models (dynUnet of      
-  different loss functions with some SAMv3 variants). Remember that this is should  
-  be a tool for researchers allowing them to do quick experimentation easily and    
-  fast! Researchers should be just be doing "I found this interesting new loss from 
-   arxiv and would like to see how this performs", "this new paper showed that if   
-  combine MAMBA, Transformer and CNN models as ensemble they complement each other      
-  and provide more robust segmentation than each of the single models". So we don't 
-   want to be too opinionated how the models should be ensembled, but create as         
-  flexible architecture allowing different kinds of ensembles done while running     
-  the experiment, and EVEN better, allowing flexible post-training ensemble         
-  construction so that all the models used are saved to the artifact store and      
-  there is a MLflow deploy built for those so that you can run inference on every   
-  mdoel saved without having to re-run the experiments. Is this clear? Plan how to  
-  make sure that you don't build with the self-learning TDD coding skill anything   
-  that makes this vision hard to achieve                                            
-
-
-
+The ensembling requirement is also mandatory! Is this clear! We should be
+  flexibly ensemble easily 1) different hyperparameter runs of the same model (e.g.
+   dyNUnet of same size optimized with different loss functions), 2) different
+  folds of the same model (3-fold CV), 3) totally different models (dynUnet of
+  different loss functions with some SAMv3 variants). Remember that this is should
+  be a tool for researchers allowing them to do quick experimentation easily and
+  fast! Researchers should be just be doing "I found this interesting new loss from
+   arxiv and would like to see how this performs", "this new paper showed that if
+  combine MAMBA, Transformer and CNN models as ensemble they complement each other
+  and provide more robust segmentation than each of the single models". So we don't
+   want to be too opinionated how the models should be ensembled, but create as
+  flexible architecture allowing different kinds of ensembles done while running
+  the experiment, and EVEN better, allowing flexible post-training ensemble
+  construction so that all the models used are saved to the artifact store and
+  there is a MLflow deploy built for those so that you can run inference on every
+  mdoel saved without having to re-run the experiments. Is this clear? Plan how to
+  make sure that you don't build with the self-learning TDD coding skill anything
+  that makes this vision hard to achieve

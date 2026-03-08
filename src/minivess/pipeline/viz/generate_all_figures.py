@@ -28,6 +28,8 @@ from minivess.pipeline.viz.figure_export import save_figure
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from matplotlib.figure import Figure
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,7 +74,7 @@ def _demo_comparison_table() -> ComparisonTable:
 
 def _gen_loss_comparison(
     table: ComparisonTable | None = None,
-) -> plt.Figure:
+) -> Figure:
     from minivess.pipeline.viz.loss_comparison import plot_loss_comparison
 
     return plot_loss_comparison(table or _demo_comparison_table())
@@ -80,7 +82,7 @@ def _gen_loss_comparison(
 
 def _gen_fold_heatmap(
     table: ComparisonTable | None = None,
-) -> plt.Figure:
+) -> Figure:
     from minivess.pipeline.viz.fold_heatmap import plot_fold_heatmap
 
     return plot_fold_heatmap(table or _demo_comparison_table())
@@ -88,7 +90,7 @@ def _gen_fold_heatmap(
 
 def _gen_metric_correlation(
     table: ComparisonTable | None = None,
-) -> plt.Figure:
+) -> Figure:
     from minivess.pipeline.viz.metric_correlation import plot_metric_correlation
 
     return plot_metric_correlation(table or _demo_comparison_table())
@@ -96,7 +98,7 @@ def _gen_metric_correlation(
 
 def _gen_sensitivity_heatmap(
     table: ComparisonTable | None = None,
-) -> plt.Figure:
+) -> Figure:
     from minivess.pipeline.viz.factorial_analysis import plot_sensitivity_heatmap
 
     return plot_sensitivity_heatmap(table or _demo_comparison_table())
