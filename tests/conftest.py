@@ -61,12 +61,29 @@ def pytest_configure(config: pytest.Config) -> None:
     )
 
 
+def _docker_daemon_available() -> bool:
+    """Return True if a Docker daemon socket is reachable on this host."""
+    import socket
+    from pathlib import Path
+
+    # Linux/macOS: check for the Unix socket
+    if Path("/var/run/docker.sock").exists():
+        return True
+    # Fallback: try TCP (Docker Desktop on Windows or remote daemon)
+    try:
+        with socket.create_connection(("localhost", 2375), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
 def pytest_collection_modifyitems(
     config: pytest.Config,
     items: list[pytest.Item],
 ) -> None:
     """Auto-tag and auto-skip tests based on location and markers."""
     _mlflow_healthy: bool | None = None
+    _docker_available: bool | None = None
 
     for item in items:
         # Auto-tag all tests in tests/v2/integration/ or tests/integration/ with
@@ -74,6 +91,14 @@ def pytest_collection_modifyitems(
         item_path = str(item.fspath)
         if "/integration/" in item_path:
             item.add_marker(pytest.mark.integration)
+
+        if item.get_closest_marker("requires_docker") is not None:
+            nonlocal_docker = _docker_available
+            if nonlocal_docker is None:
+                nonlocal_docker = _docker_daemon_available()
+                _docker_available = nonlocal_docker
+            if not nonlocal_docker:
+                item.add_marker(pytest.mark.skip(reason="Docker daemon not reachable"))
 
         if item.get_closest_marker("requires_mlflow_server") is not None:
             # Lazy-evaluate health once per session

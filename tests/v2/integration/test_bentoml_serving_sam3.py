@@ -25,6 +25,7 @@ _sam3_skip = pytest.mark.skipif(
 
 
 @_sam3_skip
+@pytest.mark.slow
 class TestBentoImportSam3:
     """Test BentoML model import with SAM3 ONNX files."""
 

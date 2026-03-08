@@ -349,6 +349,7 @@ filterwarnings = [
     "ignore::FutureWarning",
     "ignore::DeprecationWarning",
     "ignore::pytest.PytestUnraisableExceptionWarning",
+    "ignore::PendingDeprecationWarning",
 ]
 
 # ---------------------------------------------------------------------------

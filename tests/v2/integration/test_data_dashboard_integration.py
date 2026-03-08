@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+import pytest
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -122,11 +124,14 @@ class TestDataFlowWithSyntheticDrift:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestDataToDashboardIntegration:
     """End-to-end: data flow → everything dashboard."""
 
     def test_data_flow_feeds_dashboard(self, tmp_path: Path) -> None:
         """DataFlowResult feeds into dashboard flow."""
+        import os
+
         from minivess.orchestration.flows.dashboard_flow import (
             run_dashboard_flow,
         )
@@ -140,8 +145,13 @@ class TestDataToDashboardIntegration:
             (data_dir / "images" / f"vol_{i:03d}.nii.gz").write_bytes(b"fake")
             (data_dir / "labels" / f"vol_{i:03d}.nii.gz").write_bytes(b"fake")
 
-        # Run data flow
-        data_result = run_data_flow(data_dir=data_dir, n_folds=2, seed=42)
+        # Point SPLITS_DIR to tmp_path so run_data_flow() doesn't write to /app
+        splits_dir = tmp_path / "splits"
+        os.environ["SPLITS_DIR"] = str(splits_dir)
+        try:
+            data_result = run_data_flow(data_dir=data_dir, n_folds=2, seed=42)
+        finally:
+            os.environ.pop("SPLITS_DIR", None)
 
         # Feed into everything dashboard
         output_dir = tmp_path / "dashboard"
@@ -283,5 +293,5 @@ class TestDataToDashboardIntegration:
         chain = PipelineTriggerChain()
         config = FlowTriggerConfig(dry_run=True)
         results = chain.run_chain(trigger_source="dvc_version_change", config=config)
-        assert len(results) == 8
+        assert len(results) == len(chain._DEFAULT_FLOWS)
         assert all(r.status == "skipped" for r in results)

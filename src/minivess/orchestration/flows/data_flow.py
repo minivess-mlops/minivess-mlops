@@ -503,7 +503,7 @@ def run_data_flow(
         # Step 4b: Serialize splits to JSON for inter-flow handoff
         from pathlib import Path as _Path
 
-        splits_dir = _Path(os.environ.get("SPLITS_OUTPUT_DIR", "/app/configs/splits"))
+        splits_dir = _Path(os.environ.get("SPLITS_DIR", "/app/configs/splits"))
         splits_path = serialize_splits_task(splits, splits_dir)
 
     # Step 5: External datasets
