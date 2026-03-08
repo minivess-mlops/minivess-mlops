@@ -1,0 +1,11 @@
+# @package _global_
+# MONAI dataloader validation for all 70 volumes.
+# No training -- data pipeline check only.
+# Duration: ~5 min.
+defaults: []
+
+experiment_name: debug_data_validation
+debug: true
+# Uses all volumes (no subsetting)
+flows:
+  - data_validation

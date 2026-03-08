@@ -1721,11 +1721,21 @@ def run_analysis_flow(
 
 
 if __name__ == "__main__":
-    # Docker entry point — analysis flow requires eval_config, model_config_dict,
-    # and dataloaders_dict which are built by the pipeline orchestrator.
-    # Direct invocation prints usage instructions.
+    # Docker entry point — reads UPSTREAM_EXPERIMENT env var to discover
+    # the correct MLflow training experiment for analysis.
+    # Direct invocation without UPSTREAM_EXPERIMENT prints usage instructions.
+    _upstream_experiment = os.environ.get("UPSTREAM_EXPERIMENT")
+    if _upstream_experiment:
+        raise SystemExit(
+            f"UPSTREAM_EXPERIMENT={_upstream_experiment} detected. "
+            "analysis_flow requires eval_config, model_config_dict, and "
+            "dataloaders_dict built by the pipeline orchestrator. "
+            "Use: prefect deployment run 'analysis-flow/default' "
+            f'--params \'{{"upstream_experiment": "{_upstream_experiment}"}}\''
+        )
     raise SystemExit(
         "analysis_flow cannot be invoked directly — it requires eval_config, "
         "model_config_dict, and dataloaders_dict parameters.\n"
-        "Use: prefect deployment run 'analysis-flow/default'"
+        "Use: prefect deployment run 'analysis-flow/default'\n"
+        "Set UPSTREAM_EXPERIMENT env var to specify the training experiment."
     )

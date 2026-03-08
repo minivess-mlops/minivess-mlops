@@ -321,4 +321,9 @@ def post_training_flow(
 
 
 if __name__ == "__main__":
+    # Reads UPSTREAM_EXPERIMENT env var to discover the correct MLflow
+    # training experiment for post-training processing.
+    import os as _os
+
+    _upstream_experiment = _os.environ.get("UPSTREAM_EXPERIMENT")
     post_training_flow()

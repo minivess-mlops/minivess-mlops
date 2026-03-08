@@ -164,7 +164,9 @@ class EnsembleBuilder:
 
         return expand_runs_to_per_fold(raw_runs)
 
-    def discover_training_runs_raw(self) -> list[dict[str, Any]]:
+    def discover_training_runs_raw(
+        self, *, require_eval_metrics: bool = True
+    ) -> list[dict[str, Any]]:
         """Query MLflow for completed production training runs (raw).
 
         Returns one entry per loss function (not per fold).  Production
@@ -173,6 +175,13 @@ class EnsembleBuilder:
 
         The ``loss_type`` field is read from the ``loss_function`` tag
         (the name used by ``train_monitored.py``).
+
+        Parameters
+        ----------
+        require_eval_metrics:
+            If ``True`` (default), skip runs without ``eval_fold2_dsc``
+            metric (incomplete runs). Set to ``False`` for debug runs
+            that do not produce eval metrics.
 
         Returns
         -------
@@ -208,8 +217,13 @@ class EnsembleBuilder:
             tags = run.data.tags
             metrics = dict(run.data.metrics)
 
-            # Use loss_function tag (set by train_monitored.py)
-            loss_type = tags.get("loss_function") or tags.get("loss_type")
+            # Use loss_function tag (standardized); fall back to loss_name for
+            # backward compat with runs tagged before the standardization.
+            loss_type = (
+                tags.get("loss_function")
+                or tags.get("loss_type")
+                or tags.get("loss_name")
+            )
             if loss_type is None:
                 logger.debug(
                     "Skipping run %s: missing loss_function tag",
@@ -218,7 +232,7 @@ class EnsembleBuilder:
                 continue
 
             # Filter production runs: must have fold 2 eval metrics
-            if "eval_fold2_dsc" not in metrics:
+            if require_eval_metrics and "eval_fold2_dsc" not in metrics:
                 logger.debug(
                     "Skipping run %s (%s): no eval_fold2_dsc (incomplete run)",
                     run.info.run_id,
@@ -469,10 +483,12 @@ class EnsembleBuilder:
             if inner_net is not None:
                 inner_net.load_state_dict(state_dict)
             else:
-                logger.warning(
-                    "State dict keys do not match for %s; using initialized weights",
-                    path,
-                )
+                raise RuntimeError(
+                    f"State dict keys do not match for checkpoint '{path}'. "
+                    "Cannot load weights into the network. "
+                    "Verify the checkpoint was saved with the same model architecture. "
+                    f"Model keys (first 5): {list(net.state_dict().keys())[:5]}"
+                ) from None
 
         net.eval()
         return net

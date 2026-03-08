@@ -1,0 +1,27 @@
+# @package _global_
+# Multiple losses for ensemble strategy testing.
+# Required to test cross-loss diversity in all_loss_single_best
+# and all_loss_all_best ensemble strategies.
+# Duration: ~15 min.
+#
+# Usage:
+#   docker compose -f deployment/docker-compose.flows.yml run --rm \
+#     -e EXPERIMENT=debug_multi_loss train
+defaults:
+  - override /checkpoint: lightweight
+
+experiment_name: debug_multi_loss
+model: dynunet
+losses:
+  - cbdice_cldice
+  - dice_ce
+  - dice_ce_cldice
+max_epochs: 2
+debug: true
+max_train_volumes: 2
+max_val_volumes: 2
+num_folds: 3
+
+flows:
+  - train
+  - analyze

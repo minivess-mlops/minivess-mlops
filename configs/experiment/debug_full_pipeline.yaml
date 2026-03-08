@@ -1,0 +1,30 @@
+# @package _global_
+# Full pipeline: Train -> Post-Training -> Analysis.
+# Tests inter-flow MLflow contract with DynUNet.
+# Duration: ~15 min.
+#
+# Usage:
+#   docker compose -f deployment/docker-compose.flows.yml run --rm \
+#     -e EXPERIMENT=debug_full_pipeline train
+defaults:
+  - override /checkpoint: lightweight
+
+experiment_name: debug_full_pipeline
+model: dynunet
+losses:
+  - cbdice_cldice
+max_epochs: 2
+debug: true
+max_train_volumes: 2
+max_val_volumes: 2
+num_folds: 3
+
+flows:
+  - train
+  - post_training
+  - analyze
+
+post_training:
+  plugins:
+    - swa
+    - calibration

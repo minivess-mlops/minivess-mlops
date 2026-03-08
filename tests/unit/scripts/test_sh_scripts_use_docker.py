@@ -48,7 +48,17 @@ class TestNoBarePythonInTrainingScripts:
         violations: list[str] = []
         for name, content in _read_sh_scripts():
             is_training = any(kw in content for kw in _TRAINING_KEYWORDS)
-            if is_training and "uv run python" in content:
+            if not is_training:
+                continue
+            # Skip comment lines (lines starting with #) — comments may document
+            # what NOT to do without actually doing it.
+            non_comment_lines = [
+                line
+                for line in content.splitlines()
+                if not line.lstrip().startswith("#")
+            ]
+            non_comment_content = " ".join(non_comment_lines)
+            if "uv run python" in non_comment_content:
                 violations.append(name)
         assert not violations, (
             f"Training scripts using bare 'uv run python' (must use Docker): {violations}"

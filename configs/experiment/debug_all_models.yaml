@@ -1,0 +1,32 @@
+# @package _global_
+# All 8GB-compatible models with minimal training.
+# Duration: ~30 min (5 models × 3 folds × 2 epochs).
+#
+# Usage:
+#   docker compose -f deployment/docker-compose.flows.yml run --rm \
+#     -e EXPERIMENT=debug_all_models train
+#   # Single-epoch variant:
+#   docker compose -f deployment/docker-compose.flows.yml run --rm \
+#     -e EXPERIMENT=debug_all_models \
+#     -e HYDRA_OVERRIDES="max_epochs=1" train
+defaults:
+  - override /checkpoint: lightweight
+
+experiment_name: debug_all_models
+losses:
+  - cbdice_cldice
+max_epochs: 2
+debug: true
+max_train_volumes: 2
+max_val_volumes: 2
+num_folds: 3
+
+# Multi-model iteration handled by run_debug.sh outer loop.
+# This YAML is used once per model invocation. The script
+# passes model=X as a Hydra override for each model.
+models_to_test:
+  - dynunet
+  - sam3_vanilla
+  - sam3_hybrid
+  - comma_mamba
+  - ulike_mamba

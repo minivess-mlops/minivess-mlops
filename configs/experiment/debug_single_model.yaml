@@ -1,0 +1,25 @@
+# @package _global_
+# Fastest possible mechanics test: 1 model, 1 fold, 1 epoch.
+# Duration: ~2 min on any GPU.
+#
+# Usage:
+#   docker compose -f deployment/docker-compose.flows.yml run --rm \
+#     -e EXPERIMENT=debug_single_model train
+#   # Override model:
+#   docker compose -f deployment/docker-compose.flows.yml run --rm \
+#     -e EXPERIMENT=debug_single_model \
+#     -e HYDRA_OVERRIDES="model=sam3_vanilla" train
+defaults:
+  - override /checkpoint: lightweight
+
+experiment_name: debug_single_model
+model: dynunet
+losses:
+  - cbdice_cldice
+max_epochs: 1
+debug: true
+
+# Data subsetting (consumed by train_flow.py)
+max_train_volumes: 2
+max_val_volumes: 2
+num_folds: 1

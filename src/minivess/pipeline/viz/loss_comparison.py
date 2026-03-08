@@ -16,6 +16,7 @@ from minivess.pipeline.viz.figure_dimensions import get_figsize
 from minivess.pipeline.viz.plot_config import COLORS, LOSS_LABELS, setup_style
 
 if TYPE_CHECKING:
+    from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
     from minivess.pipeline.comparison import ComparisonTable, PairwiseComparison
@@ -72,7 +73,7 @@ def plot_loss_comparison(
 
 
 def _draw_metric_boxplot(
-    ax: plt.Axes,
+    ax: Axes,
     table: ComparisonTable,
     metric_name: str,
 ) -> None:
@@ -127,7 +128,7 @@ def _draw_metric_boxplot(
 
 
 def _annotate_significance(
-    ax: plt.Axes,
+    ax: Axes,
     table: ComparisonTable,
     pairwise: list[PairwiseComparison],
     metric_name: str,
@@ -228,7 +229,7 @@ def plot_forest_comparison(
         ]
         if all_means:
             ax.axvline(
-                np.mean(all_means),
+                float(np.mean(all_means)),
                 color="gray",
                 linestyle="--",
                 alpha=0.5,
