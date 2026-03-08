@@ -1,0 +1,23 @@
+model_name: unetr
+architecture: UNETR (ViT-Base encoder + CNN decoder)
+monai_class: monai.networks.nets.UNETR
+default_img_size: [96, 96, 96]
+default_hidden_size: 768
+default_feature_size: 16
+param_count_approx: 92_500_000
+divisor: 16
+model_overhead_mb: 400
+bytes_per_voxel_amp: 16
+bytes_per_voxel_fp32: 32
+max_batch_size:
+  cpu: 1
+  gpu_low: 1
+  gpu_high: 1
+  gpu_extreme: 2
+default_patch_xy: 96
+notes: >
+  Pure ViT-Base encoder + CNN decoder. ~92.5M params (ViT-Base: hidden=768).
+  img_size MUST match actual patch size — set via architecture_params.img_size.
+  High VRAM: full attention over 3D patches. Divisor=16 from patch size 16.
+  Recommended only on A100+ GPUs (40 GB). On 8 GB GPUs, use hidden_size=256
+  and feature_size=8 to reduce to ~5M params. img_size must be divisible by 16.

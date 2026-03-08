@@ -1,0 +1,20 @@
+model_name: segresnet
+architecture: SegResNet (encoder-decoder)
+monai_class: monai.networks.nets.SegResNet
+default_init_filters: 16
+param_count_approx: 4_700_000
+divisor: 1
+model_overhead_mb: 50
+bytes_per_voxel_amp: 8
+bytes_per_voxel_fp32: 16
+max_batch_size:
+  cpu: 2
+  gpu_low: 4
+  gpu_high: 8
+  gpu_extreme: 16
+default_patch_xy: 128
+notes: >
+  Lightweight ResNet encoder-decoder. ~4.7M params with init_filters=16.
+  No divisibility requirement (divisor=1). Good baseline for memory-constrained
+  scenarios and ablation studies. init_filters doubles the size: 32 -> ~18.9M params.
+  Measured on RTX 2070 Super: batch=4, patch=128x128x32 -> ~2.1 GB AMP.

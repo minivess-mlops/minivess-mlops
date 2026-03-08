@@ -1,11 +1,12 @@
 """Model builder factory and wrapper composition.
 
 Provides:
-- ``build_adapter(config)`` — dispatches ModelConfig to concrete adapters.
+- ``build_adapter(config)`` — dispatches ModelConfig to concrete adapters via registry.
 - ``apply_wrappers(model, wrappers)`` — applies config-driven wrappers (TFFM, multi-task).
 
 Lazy imports ensure that SAM3 dependencies are only loaded when a
-SAM3 variant is actually requested.
+SAM3 variant is actually requested. Each registration factory function
+uses a local import so MONAI models never trigger SAM3 imports and vice versa.
 """
 
 from __future__ import annotations
@@ -16,10 +17,36 @@ from typing import TYPE_CHECKING, Any
 import torch.nn as nn  # noqa: TC002 — used at runtime in function signature
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from minivess.adapters.base import ModelAdapter
-    from minivess.config.models import ModelConfig
+    from minivess.config.models import ModelConfig, ModelFamily
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Registry
+# ---------------------------------------------------------------------------
+
+# Maps ModelFamily → zero-arg factory that returns a (config, **kwargs) → adapter callable.
+# Populated by _register() calls below. Lazily imported adapter modules live inside
+# each factory closure so only the requested model family is imported.
+_MODEL_REGISTRY: dict[ModelFamily, Callable[..., ModelAdapter]] = {}
+
+
+def _register(family: ModelFamily) -> Callable:  # type: ignore[type-arg]
+    """Decorator that registers a builder function in _MODEL_REGISTRY."""
+
+    def decorator(fn: Callable[..., ModelAdapter]) -> Callable[..., ModelAdapter]:
+        _MODEL_REGISTRY[family] = fn
+        return fn
+
+    return decorator
+
+
+# ---------------------------------------------------------------------------
+# SAM3 helpers (unchanged)
+# ---------------------------------------------------------------------------
 
 
 def _sam3_package_available() -> bool:
@@ -108,10 +135,113 @@ def _require_sam3(config: ModelConfig, *, encoder_frozen: bool) -> None:
     require_hf_token("facebook/sam3")
 
 
+# ---------------------------------------------------------------------------
+# MONAI adapter registrations
+# ---------------------------------------------------------------------------
+
+
+def _build_dynunet(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
+    from minivess.adapters.dynunet import DynUNetAdapter
+
+    return DynUNetAdapter(config)
+
+
+def _build_segresnet(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
+    from minivess.adapters.segresnet import SegResNetAdapter
+
+    return SegResNetAdapter(config)
+
+
+def _build_swinunetr(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
+    from minivess.adapters.swinunetr import SwinUNETRAdapter
+
+    return SwinUNETRAdapter(config)
+
+
+def _build_unetr(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
+    from minivess.adapters.unetr import UNETRAdapter
+
+    return UNETRAdapter(config)
+
+
+def _build_attentionunet(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
+    from minivess.adapters.attentionunet import AttentionUnetAdapter
+
+    return AttentionUnetAdapter(config)
+
+
+def _build_vesselfm(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
+    from minivess.adapters.vesselfm import VesselFMAdapter
+
+    pretrained = config.architecture_params.get("pretrained", False)
+    return VesselFMAdapter(config, pretrained=pretrained)
+
+
+def _build_comma(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
+    from minivess.adapters.comma import CommaAdapter
+
+    return CommaAdapter(config)
+
+
+def _build_mamba(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
+    from minivess.adapters.mamba import MambaAdapter
+
+    return MambaAdapter(config)
+
+
+def _build_sam3_vanilla(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
+    from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
+
+    # Encoder is frozen → no_grad during encoder pass → inference-level VRAM (~6 GB)
+    _require_sam3(config, encoder_frozen=True)
+    return Sam3VanillaAdapter(config)
+
+
+def _build_sam3_topolora(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
+    from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
+
+    # LoRA adapters on encoder FFN → gradients flow → training-level VRAM (≥16 GB)
+    _require_sam3(config, encoder_frozen=False)
+    return Sam3TopoLoraAdapter(config)
+
+
+def _build_sam3_hybrid(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
+    from minivess.adapters.sam3_hybrid import Sam3HybridAdapter
+
+    # SAM encoder is frozen + detach() → inference-level VRAM for SAM part
+    _require_sam3(config, encoder_frozen=True)
+    return Sam3HybridAdapter(config)
+
+
+# Populate registry — order does not matter; dict lookup is O(1)
+def _populate_registry() -> None:
+    from minivess.config.models import ModelFamily
+
+    _MODEL_REGISTRY[ModelFamily.MONAI_DYNUNET] = _build_dynunet
+    _MODEL_REGISTRY[ModelFamily.MONAI_SEGRESNET] = _build_segresnet
+    _MODEL_REGISTRY[ModelFamily.MONAI_SWINUNETR] = _build_swinunetr
+    _MODEL_REGISTRY[ModelFamily.MONAI_UNETR] = _build_unetr
+    _MODEL_REGISTRY[ModelFamily.MONAI_ATTENTIONUNET] = _build_attentionunet
+    _MODEL_REGISTRY[ModelFamily.VESSEL_FM] = _build_vesselfm
+    _MODEL_REGISTRY[ModelFamily.COMMA_MAMBA] = _build_comma
+    _MODEL_REGISTRY[ModelFamily.ULIKE_MAMBA] = _build_mamba
+    _MODEL_REGISTRY[ModelFamily.SAM3_VANILLA] = _build_sam3_vanilla
+    _MODEL_REGISTRY[ModelFamily.SAM3_TOPOLORA] = _build_sam3_topolora
+    _MODEL_REGISTRY[ModelFamily.SAM3_HYBRID] = _build_sam3_hybrid
+
+
+_populate_registry()
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
 def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     """Build a ModelAdapter from a ModelConfig.
 
-    Dispatches on ``config.family`` to the correct adapter class.
+    Dispatches on ``config.family`` via ``_MODEL_REGISTRY``.
     Uses lazy imports so that SAM3 dependencies are not required
     when only using MONAI models.
 
@@ -131,62 +261,19 @@ def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     Raises
     ------
     ValueError
-        If the model family is not supported.
+        If the model family is not registered.
     RuntimeError
         If a SAM3 family is requested but SAM3 is not installed.
     """
-    from minivess.config.models import ModelFamily
-
     family = config.family
+    builder = _MODEL_REGISTRY.get(family)
 
-    if family == ModelFamily.MONAI_DYNUNET:
-        from minivess.adapters.dynunet import DynUNetAdapter
+    if builder is None:
+        available = sorted(f.value for f in _MODEL_REGISTRY)
+        msg = f"Unsupported model family '{family}'. Available: {available}"
+        raise ValueError(msg)
 
-        return DynUNetAdapter(config)
-
-    if family == ModelFamily.VESSEL_FM:
-        from minivess.adapters.vesselfm import VesselFMAdapter
-
-        pretrained = config.architecture_params.get("pretrained", False)
-        return VesselFMAdapter(config, pretrained=pretrained)
-
-    if family == ModelFamily.COMMA_MAMBA:
-        from minivess.adapters.comma import CommaAdapter
-
-        return CommaAdapter(config)
-
-    if family == ModelFamily.ULIKE_MAMBA:
-        from minivess.adapters.mamba import MambaAdapter
-
-        return MambaAdapter(config)
-
-    if family == ModelFamily.SAM3_VANILLA:
-        from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
-
-        # Encoder is frozen → no_grad during encoder pass → inference-level VRAM (~6 GB)
-        _require_sam3(config, encoder_frozen=True)
-        return Sam3VanillaAdapter(config)
-
-    if family == ModelFamily.SAM3_TOPOLORA:
-        from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
-
-        # LoRA adapters on encoder FFN → gradients flow → training-level VRAM (≥16 GB)
-        _require_sam3(config, encoder_frozen=False)
-        return Sam3TopoLoraAdapter(config)
-
-    if family == ModelFamily.SAM3_HYBRID:
-        from minivess.adapters.sam3_hybrid import Sam3HybridAdapter
-
-        # SAM encoder is frozen + detach() → inference-level VRAM for SAM part
-        # DynUNet-3D trains alongside — total peak ~8-10 GB on typical patch sizes
-        _require_sam3(config, encoder_frozen=True)
-        return Sam3HybridAdapter(config)
-
-    msg = (
-        f"Unsupported model family '{family}'. "
-        f"Available: {[f.value for f in ModelFamily]}"
-    )
-    raise ValueError(msg)
+    return builder(config, **kwargs)
 
 
 def apply_wrappers(
