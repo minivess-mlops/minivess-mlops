@@ -6,12 +6,81 @@ configuration for hyperparameter optimization of segmentation models.
 
 from __future__ import annotations
 
+import enum
 import logging
+import os
+from dataclasses import dataclass
 from typing import Any
 
 import optuna
 
 logger = logging.getLogger(__name__)
+
+_PG_PREFIXES = ("postgresql://", "postgresql+psycopg2://")
+_POSTGRESQL_ERROR = (
+    "PostgreSQL storage required for Optuna studies. "
+    "Set OPTUNA_STORAGE_URL to a postgresql:// URL in .env.example. "
+    "SQLite and in-memory are not supported in this project "
+    "(CLAUDE.md MEMORY: PostgreSQL is ONLY Database 2026-03-08)."
+)
+
+
+def _validate_postgresql_url(url: str | None, *, env_fallback: bool = True) -> str:
+    """Validate that *url* is a PostgreSQL URL. Falls back to OPTUNA_STORAGE_URL env var.
+
+    Raises
+    ------
+    ValueError
+        If the resolved URL is None or not a postgresql:// URL.
+    """
+    resolved = url
+    if resolved is None and env_fallback:
+        resolved = os.environ.get("OPTUNA_STORAGE_URL")
+    if resolved is None or not any(resolved.startswith(p) for p in _PG_PREFIXES):
+        raise ValueError(_POSTGRESQL_ERROR)
+    return resolved
+
+
+class AllocationStrategy(enum.Enum):
+    """HPO trial allocation strategy.
+
+    SEQUENTIAL — optimize in-process, one trial at a time (default).
+    PARALLEL   — multiple workers via PostgreSQL-backed Optuna study.
+    HYBRID     — multi-GPU on a single host via CUDA_VISIBLE_DEVICES.
+    """
+
+    SEQUENTIAL = "sequential"
+    PARALLEL = "parallel"
+    HYBRID = "hybrid"
+
+
+@dataclass
+class AllocationConfig:
+    """Configuration for HPO trial allocation.
+
+    All strategies require a postgresql:// storage URL (no SQLite, no in-memory).
+    When *optuna_storage* is None, the OPTUNA_STORAGE_URL env var is read.
+
+    Parameters
+    ----------
+    strategy:
+        Allocation strategy to use.
+    optuna_storage:
+        PostgreSQL connection URL. If None, reads OPTUNA_STORAGE_URL env var.
+    n_containers:
+        Number of parallel worker containers (PARALLEL / HYBRID only).
+    trials_per_container:
+        Trials per container in HYBRID mode.
+    """
+
+    strategy: AllocationStrategy
+    optuna_storage: str | None  # validated in __post_init__
+    n_containers: int = 1
+    trials_per_container: int = 1
+
+    def __post_init__(self) -> None:
+        # Resolve and validate storage -- raises ValueError for non-PostgreSQL
+        self.optuna_storage = _validate_postgresql_url(self.optuna_storage)
 
 
 class HPOEngine:
@@ -28,6 +97,8 @@ class HPOEngine:
     sampler:
         Sampler type: ``"tpe"`` (default), ``"cmaes"``, ``"grid"``.
     """
+
+    allocation: AllocationConfig | None = None  # set by from_config()
 
     def __init__(
         self,
@@ -96,6 +167,38 @@ class HPOEngine:
             type(self._pruner).__name__ if self._pruner else "None",
         )
         return study
+
+    @classmethod
+    def from_config(cls, yaml_dict: dict[str, Any]) -> HPOEngine:
+        """Construct HPOEngine from a YAML config dict.
+
+        Parameters
+        ----------
+        yaml_dict:
+            Dict with keys: study_name, sampler, pruner, allocation.
+            allocation must have: strategy (str), optuna_storage (str|None).
+
+        Returns
+        -------
+        HPOEngine instance with AllocationConfig attached.
+        """
+        alloc_raw = yaml_dict.get("allocation", {})
+        strategy_str = alloc_raw.get("strategy", "sequential")
+        strategy = AllocationStrategy(strategy_str.lower())
+        allocation = AllocationConfig(
+            strategy=strategy,
+            optuna_storage=alloc_raw.get("optuna_storage"),
+            n_containers=int(alloc_raw.get("n_containers", 1)),
+            trials_per_container=int(alloc_raw.get("trials_per_container", 1)),
+        )
+        engine = cls(
+            study_name=yaml_dict.get("study_name", "minivess_hpo"),
+            storage=allocation.optuna_storage,
+            pruner=yaml_dict.get("pruner"),
+            sampler=yaml_dict.get("sampler", "tpe"),
+        )
+        engine.allocation = allocation
+        return engine
 
     def suggest_params(
         self,

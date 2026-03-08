@@ -143,6 +143,7 @@ def hpo_flow(
     search_space: dict[str, dict[str, Any]] | None = None,
     base_config: dict[str, Any] | None = None,
     trigger_source: str = "manual",
+    allocation_strategy: str = "sequential",
 ) -> dict[str, Any]:
     """HPO Prefect flow — runs n_trials of Optuna optimization.
 
@@ -166,6 +167,10 @@ def hpo_flow(
         Base training config dict merged with trial-suggested params.
     trigger_source:
         What triggered this flow (for logging).
+    allocation_strategy:
+        Trial allocation strategy: ``"sequential"`` (default), ``"parallel"``,
+        or ``"hybrid"``. See ``AllocationStrategy`` in hpo_engine.py.
+        PostgreSQL storage is required for all strategies.
 
     Returns
     -------
@@ -173,11 +178,31 @@ def hpo_flow(
     """
     _require_docker_context()
 
+    from minivess.optimization.hpo_engine import AllocationStrategy, HPOEngine
+
+    strategy = AllocationStrategy(allocation_strategy.lower())
+
+    if strategy == AllocationStrategy.PARALLEL:
+        raise NotImplementedError(
+            "PARALLEL HPO requires multiple worker containers. "
+            "Use: docker compose -f deployment/docker-compose.flows.yml "
+            "up --scale hpo-worker=N\n"
+            "Each worker reads from the shared PostgreSQL Optuna study. "
+            "The hpo_flow orchestrator should not run directly in PARALLEL mode — "
+            "launch hpo-worker replicas instead."
+        )
+
+    # Wire JSONL log handler — Issue #503
+    from minivess.observability.flow_logging import configure_flow_logging
+
+    configure_flow_logging(logs_dir=Path(os.environ.get("LOGS_DIR", "/app/logs")))
+
     logger.info(
-        "HPO flow started: study=%r, n_trials=%d, sampler=%s (trigger: %s)",
+        "HPO flow started: study=%r, n_trials=%d, sampler=%s, strategy=%s (trigger: %s)",
         study_name,
         n_trials,
         sampler,
+        strategy.value,
         trigger_source,
     )
 
@@ -186,14 +211,19 @@ def hpo_flow(
     if base_config is None:
         base_config = {}
 
-    from minivess.optimization.hpo_engine import HPOEngine
-
     engine = HPOEngine(
         study_name=study_name,
+        storage=os.environ.get("OPTUNA_STORAGE_URL"),
         pruner=pruner,
         sampler=sampler,
     )
     study = engine.create_study(direction="minimize")
+
+    if strategy == AllocationStrategy.HYBRID:
+        # HYBRID: set CUDA_VISIBLE_DEVICES from REPLICA_INDEX before optimizing
+        replica_index = int(os.environ.get("REPLICA_INDEX", "0"))
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(replica_index)
+        logger.info("HYBRID strategy: CUDA_VISIBLE_DEVICES=%d", replica_index)
 
     def _objective(trial: optuna.Trial) -> float:
         params = engine.suggest_params(trial, search_space)
@@ -215,6 +245,7 @@ def hpo_flow(
         "n_trials": n_trials,
         "best_params": best_params,
         "best_value": best_value,
+        "allocation_strategy": strategy.value,
     }
 
 
