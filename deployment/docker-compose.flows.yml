@@ -16,13 +16,14 @@
 # first to start PostgreSQL, MinIO, MLflow, and Prefect.
 
 x-common-env: &common-env
-  MLFLOW_TRACKING_URI: http://minivess-mlflow:5000
-  PREFECT_API_URL: http://minivess-prefect:4200/api
-  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minivess}
-  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minivess_secret}
-  MLFLOW_S3_ENDPOINT_URL: http://minivess-minio:9000
+  # All values derive from .env.example — never hardcode here.
+  MLFLOW_TRACKING_URI: http://${MLFLOW_DOCKER_HOST:-minivess-mlflow}:${MLFLOW_PORT:-5000}
+  PREFECT_API_URL: http://${PREFECT_DOCKER_HOST:-minivess-prefect}:${PREFECT_PORT:-4200}/api
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin_secret}
+  MLFLOW_S3_ENDPOINT_URL: http://${MINIO_DOCKER_HOST:-minio}:${MINIO_API_PORT:-9000}
   # HuggingFace token for gated models (SAM3, VesselFM).
-  # Set HF_TOKEN in your shell or .env file — never hard-code here.
+  # Set HF_TOKEN in .env — never hard-code here.
   HF_TOKEN: ${HF_TOKEN:-}
 
 x-common-labels: &common-labels
@@ -150,12 +151,12 @@ services:
       <<: *common-env
       FLOW_NAME: deploy
       DEPLOY_OUTPUT_DIR: /app/outputs/deploy
-      BENTOML_HOME: /home/minivess/bentoml
+      BENTOML_HOME: ${BENTOML_HOME:-/home/minivess/bentoml}
     volumes:
       - checkpoint_cache:/app/checkpoints:ro
       - mlruns_data:/app/mlruns:ro
       - outputs_deploy:/app/outputs/deploy
-      - bentoml_store:/home/minivess/bentoml
+      - bentoml_store:${BENTOML_HOME:-/home/minivess/bentoml}
     networks:
       - minivess
     <<: *common-labels
@@ -227,10 +228,10 @@ services:
     environment:
       <<: *common-env
       FLOW_NAME: annotation
-      BENTOML_HOME: /home/minivess/bentoml
+      BENTOML_HOME: ${BENTOML_HOME:-/home/minivess/bentoml}
       BENTO_SERVER_URL: ${BENTO_SERVER_URL:-}
     volumes:
-      - bentoml_store:/home/minivess/bentoml:ro
+      - bentoml_store:${BENTOML_HOME:-/home/minivess/bentoml}:ro
       - data_cache:/app/data:ro
       - mlruns_data:/app/mlruns
     networks:

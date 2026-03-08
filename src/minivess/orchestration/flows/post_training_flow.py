@@ -24,6 +24,7 @@ from typing import Any
 from prefect import flow, get_run_logger, task
 
 from minivess.config.post_training_config import PostTrainingConfig
+from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_POST_TRAINING
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
@@ -259,7 +260,7 @@ def post_training_flow(
     log.info("Post-training flow complete: %d plugin(s) executed", n_run)
 
     # Log results to MLflow
-    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+    tracking_uri = resolve_tracking_uri()
     mlflow_run_id: str | None = None
 
     # Find upstream training run (explicit param takes priority over auto-discovery)

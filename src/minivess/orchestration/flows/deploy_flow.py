@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from prefect import flow, get_run_logger, task
 
+from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_DEPLOY
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
@@ -338,7 +339,7 @@ def deploy_flow(
     log.info("Deploy flow complete: %s", result.to_summary())
 
     # --- FlowContract: tag run and log completion ---
-    _tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+    _tracking_uri = resolve_tracking_uri()
     # Use provided upstream ID or auto-discover from MLflow
     if upstream_analysis_run_id is None:
         upstream = find_upstream_safely(

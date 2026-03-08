@@ -34,7 +34,8 @@ file_mounts:
     mode: MOUNT
 
 envs:
-  MLFLOW_TRACKING_URI: http://mlflow:5000
+  # Values from .env.example. MLFLOW_SKYPILOT_HOST and MLFLOW_PORT must be set in shell.
+  MLFLOW_TRACKING_URI: http://${MLFLOW_SKYPILOT_HOST:-mlflow}:${MLFLOW_PORT:-5000}
   PREFECT_API_URL: ${PREFECT_API_URL}
   LOSS_NAME: cbdice_cldice
   MODEL_FAMILY: dynunet

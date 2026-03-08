@@ -32,6 +32,7 @@ from minivess.ensemble.builder import (
     EnsembleBuilder,
     EnsembleSpec,
 )
+from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_ANALYSIS
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
@@ -1672,7 +1673,7 @@ def run_analysis_flow(
     )
 
     # --- FlowContract: tag run and log completion ---
-    _tracking_uri = tracking_uri or os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+    _tracking_uri = tracking_uri or resolve_tracking_uri()
     # Use provided upstream ID or auto-discover from MLflow
     if upstream_training_run_id is None:
         upstream = find_upstream_safely(

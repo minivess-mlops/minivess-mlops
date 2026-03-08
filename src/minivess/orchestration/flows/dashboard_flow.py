@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from prefect import flow, task
 
+from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_DASHBOARD
 
 if TYPE_CHECKING:
@@ -395,7 +396,7 @@ def run_dashboard_flow(
     logger.info("Everything dashboard flow complete")
 
     # --- FlowContract: tag run and log completion ---
-    _tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+    _tracking_uri = resolve_tracking_uri()
     mlflow_run_id: str | None = None
     try:
         import mlflow

@@ -1,6 +1,6 @@
 [staging]
 debug = false
-mlflow_tracking_uri = "http://localhost:5000"
+# mlflow_tracking_uri removed — read from MLFLOW_TRACKING_URI env var (.env.example)
 langfuse_enabled = true
 braintrust_enabled = true
 agent_provider = "anthropic:claude-sonnet-4-6"

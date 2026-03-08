@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from minivess.observability.tracking import resolve_tracking_uri
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,8 +30,10 @@ class FlowContract:
         MLflow tracking URI.
     """
 
-    def __init__(self, tracking_uri: str = "mlruns") -> None:
-        self.tracking_uri = tracking_uri
+    def __init__(self, tracking_uri: str | None = None) -> None:
+        self.tracking_uri = (
+            tracking_uri if tracking_uri is not None else resolve_tracking_uri()
+        )
 
     def find_upstream_run(
         self,

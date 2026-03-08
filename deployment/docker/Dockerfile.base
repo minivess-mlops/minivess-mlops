@@ -9,7 +9,12 @@
 # Uses CUDA base for all flows. CPU-only flows simply don't request GPU devices
 # in docker-compose. CUDA runtime is inert without --gpus / device reservations.
 #
-# Build: docker build -t minivess-base:latest -f deployment/docker/Dockerfile.base .
+# Build:
+#   docker build -t minivess-base:latest -f deployment/docker/Dockerfile.base .
+#
+# For bind-mount dev (match host UID to avoid permission issues):
+#   docker build --build-arg UID=$(id -u) --build-arg GID=$(id -g) \
+#     -t minivess-base:latest -f deployment/docker/Dockerfile.base .
 #
 # Rebuilt only when dependencies or system packages change:
 # - pyproject.toml / uv.lock (Python dependencies)
@@ -36,8 +41,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install uv (package manager)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash minivess
+# Create non-root user with configurable UID/GID (matches host user for bind mounts).
+# Default UID=1000 works for most Linux users; override with --build-arg UID=$(id -u).
+ARG UID=1000
+ARG GID=1000
+RUN groupadd -g $GID minivess 2>/dev/null || true && \
+    useradd --create-home --shell /bin/bash -u $UID -g $GID -o minivess
 USER minivess
 WORKDIR /app
 
@@ -45,11 +54,21 @@ WORKDIR /app
 COPY --chown=minivess:minivess pyproject.toml uv.lock* ./
 
 # Install all dependencies (full ML stack: PyTorch, MONAI, Optuna, etc.)
-RUN uv sync --no-dev --no-install-project 2>/dev/null || true
+# Errors are NOT suppressed — if uv sync fails, the build fails.
+RUN uv sync --no-dev --no-install-project
+
+# Make the venv + uv-managed Python readable by ALL users so that
+# `docker run --user X:Y` still works even if UID doesn't match.
+RUN chmod -R a+rX /home/minivess/.local 2>/dev/null || true && \
+    chmod -R a+rX /app/.venv
 
 # Copy source code and configs
 COPY --chown=minivess:minivess src/ src/
 COPY --chown=minivess:minivess configs/ configs/
 
+# Default umask: new files are group+world readable (for bind-mount sharing)
+RUN echo 'umask 0002' >> /home/minivess/.bashrc
+
+ENV PATH=/app/.venv/bin:$PATH
 ENV PYTHONPATH=/app/src
 ENV PYTHONUNBUFFERED=1
