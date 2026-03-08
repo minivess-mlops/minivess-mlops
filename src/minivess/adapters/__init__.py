@@ -14,6 +14,7 @@ from minivess.adapters.atlas import (
     AtlasRegistrationResult,
     register_atlas,
 )
+from minivess.adapters.attentionunet import AttentionUnetAdapter
 from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 from minivess.adapters.comma import CommaAdapter
 from minivess.adapters.dynunet import DynUNetAdapter
@@ -29,6 +30,9 @@ from minivess.adapters.model_builder import build_adapter
 from minivess.adapters.sam3_hybrid import Sam3HybridAdapter
 from minivess.adapters.sam3_topolora import Sam3TopoLoraAdapter
 from minivess.adapters.sam3_vanilla import Sam3VanillaAdapter
+from minivess.adapters.segresnet import SegResNetAdapter
+from minivess.adapters.swinunetr import SwinUNETRAdapter
+from minivess.adapters.unetr import UNETRAdapter
 from minivess.adapters.vesselfm import VesselFMAdapter
 
 __all__ = [
@@ -39,6 +43,7 @@ __all__ = [
     "AtlasConfig",
     "AtlasRegistrationMethod",
     "AtlasRegistrationResult",
+    "AttentionUnetAdapter",
     "CommaAdapter",
     "DynUNetAdapter",
     "FeasibilityReport",
@@ -51,7 +56,10 @@ __all__ = [
     "Sam3HybridAdapter",
     "Sam3TopoLoraAdapter",
     "Sam3VanillaAdapter",
+    "SegResNetAdapter",
     "SegmentationOutput",
+    "SwinUNETRAdapter",
+    "UNETRAdapter",
     "VesselFMAdapter",
     "build_adapter",
     "compare_adaptation_methods",
