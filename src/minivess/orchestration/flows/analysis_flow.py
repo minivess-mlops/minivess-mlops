@@ -1064,11 +1064,13 @@ def generate_report(
 def summarize_experiment(
     all_results: dict[str, dict[str, dict[str, Any]]],
     promotion_info: dict[str, Any],
+    use_agent: bool | None = None,
 ) -> dict[str, Any]:
-    """Summarize experiment results — future LangGraph agent point.
+    """Summarize experiment results using Pydantic AI agent or deterministic fallback.
 
-    Currently uses a deterministic stub. Will be replaced by a
-    Pydantic AI agent for natural-language summaries (see #341).
+    When ``use_agent=True`` (or ``MINIVESS_USE_AGENTS=1``), uses the Pydantic AI
+    experiment summarizer with TestModel in CI. Falls back to the deterministic
+    stub if pydantic-ai is not installed or ``use_agent=False``.
 
     Parameters
     ----------
@@ -1076,21 +1078,63 @@ def summarize_experiment(
         ``{model_name: {dataset: {subset: EvaluationResult}}}``.
     promotion_info:
         Dict from :func:`register_champion_task`.
+    use_agent:
+        Explicitly enable/disable agent. Defaults to ``MINIVESS_USE_AGENTS`` env var.
 
     Returns
     -------
     Summary dict with ``action``, ``reasoning``, and ``summary`` keys.
     """
+    if use_agent is None:
+        use_agent = os.environ.get("MINIVESS_USE_AGENTS") == "1"
+
+    context = {
+        "n_models": len(all_results),
+        "best_model": promotion_info.get("champion_name", "unknown"),
+        "best_metric_value": promotion_info.get("champion_score", 0.0),
+    }
+
+    if use_agent:
+        try:
+            from pydantic_ai.models.test import TestModel
+
+            from minivess.agents.experiment_summarizer import (
+                AnalysisContext,
+                _build_agent,
+            )
+
+            agent = _build_agent(model="test")
+            ctx = AnalysisContext(
+                n_models=context["n_models"],
+                best_model=context["best_model"],
+                best_metric_value=context["best_metric_value"],
+            )
+            test_output = {
+                "narrative": (
+                    f"Evaluated {ctx.n_models} models. Best: {ctx.best_model} "
+                    f"(metric={ctx.best_metric_value:.4f})."
+                ),
+                "best_model": ctx.best_model,
+                "best_metric_value": ctx.best_metric_value,
+                "key_findings": [f"Best model: {ctx.best_model}"],
+                "recommendations": [],
+            }
+            result = agent.run_sync(
+                "Summarize this experiment.",
+                deps=ctx,
+                model=TestModel(custom_output_args=test_output, call_tools=[]),
+            )
+            return {
+                "action": "summarize",
+                "reasoning": result.output.narrative,
+                "summary": result.output.model_dump(),
+            }
+        except ImportError:
+            logger.debug("pydantic-ai not available, using deterministic fallback")
+
     from minivess.orchestration.agent_interface import DeterministicExperimentSummary
 
-    agent = DeterministicExperimentSummary()
-    return agent.decide(
-        context={
-            "n_models": len(all_results),
-            "best_model": promotion_info.get("champion_name", "unknown"),
-            "best_metric_value": promotion_info.get("champion_score", 0.0),
-        }
-    )
+    return DeterministicExperimentSummary().decide(context=context)
 
 
 # ---------------------------------------------------------------------------

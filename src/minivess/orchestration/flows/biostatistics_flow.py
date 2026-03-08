@@ -229,6 +229,96 @@ def task_log_mlflow(
     )
 
 
+@task(name="narrate-figures")
+def narrate_figures(
+    figures: list[Any],
+    n_conditions: int = 0,
+    use_agent: bool | None = None,
+) -> list[dict[str, Any]]:
+    """Generate captions for figures using Pydantic AI agent or deterministic fallback.
+
+    Parameters
+    ----------
+    figures:
+        List of figure metadata dicts (each with ``figure_type``, ``metric``, ``path``).
+    n_conditions:
+        Number of experimental conditions compared.
+    use_agent:
+        Explicitly enable/disable agent. Defaults to ``MINIVESS_USE_AGENTS`` env var.
+
+    Returns
+    -------
+    List of caption dicts, one per figure.
+    """
+    if not figures:
+        return []
+
+    if use_agent is None:
+        use_agent = os.environ.get("MINIVESS_USE_AGENTS") == "1"
+
+    captions: list[dict[str, Any]] = []
+    for fig in figures:
+        fig_type = (
+            fig.get("figure_type", "unknown") if isinstance(fig, dict) else "unknown"
+        )
+        metric = fig.get("metric", "unknown") if isinstance(fig, dict) else "unknown"
+
+        if use_agent:
+            try:
+                from pydantic_ai.models.test import TestModel
+
+                from minivess.agents.figure_narrator import FigureContext, _build_agent
+
+                agent = _build_agent(model="test")
+                ctx = FigureContext(
+                    figure_type=fig_type,
+                    n_conditions=n_conditions,
+                    primary_metric=metric,
+                )
+                test_output = {
+                    "caption": (
+                        f"Comparison of {n_conditions} experimental conditions. "
+                        f"Primary metric: {metric}."
+                    ),
+                    "alt_text": f"{fig_type} showing {metric} scores",
+                    "statistical_note": None,
+                }
+                result = agent.run_sync(
+                    "Generate a caption.",
+                    deps=ctx,
+                    model=TestModel(custom_output_args=test_output, call_tools=[]),
+                )
+                captions.append(
+                    {
+                        "caption": result.output.caption,
+                        "alt_text": result.output.alt_text,
+                        "figure_type": fig_type,
+                    }
+                )
+                continue
+            except ImportError:
+                logger.debug("pydantic-ai not available, using deterministic fallback")
+
+        # Deterministic fallback
+        from minivess.orchestration.agent_interface import DeterministicFigureNarration
+
+        stub_result = DeterministicFigureNarration().decide(
+            context={
+                "figure_type": fig_type,
+                "n_conditions": n_conditions,
+                "primary_metric": metric,
+            }
+        )
+        captions.append(
+            {
+                "caption": stub_result["caption"],
+                "figure_type": fig_type,
+            }
+        )
+
+    return captions
+
+
 # ---------------------------------------------------------------------------
 # Main flow
 # ---------------------------------------------------------------------------

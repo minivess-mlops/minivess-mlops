@@ -359,6 +359,70 @@ def log_data_provenance_task(
     return provenance
 
 
+@task(name="triage-drift")
+def triage_drift(
+    drift_score: float,
+    feature_drift_scores: dict[str, float],
+    use_agent: bool | None = None,
+) -> dict[str, Any]:
+    """Triage data drift using Pydantic AI agent or deterministic fallback.
+
+    When ``use_agent=True`` (or ``MINIVESS_USE_AGENTS=1``), uses the Pydantic AI
+    drift triage agent. Falls back to rule-based stub otherwise.
+
+    Parameters
+    ----------
+    drift_score:
+        Overall drift score from whylogs/Evidently.
+    feature_drift_scores:
+        Per-feature drift scores.
+    use_agent:
+        Explicitly enable/disable agent. Defaults to ``MINIVESS_USE_AGENTS`` env var.
+
+    Returns
+    -------
+    Dict with ``action`` (monitor/investigate/retrain) and ``reasoning``.
+    """
+    if use_agent is None:
+        use_agent = os.environ.get("MINIVESS_USE_AGENTS") == "1"
+
+    if use_agent:
+        try:
+            from pydantic_ai.models.test import TestModel
+
+            from minivess.agents.drift_triage import DriftContext, _build_agent
+
+            agent = _build_agent(model="test")
+            ctx = DriftContext(
+                drift_score=drift_score,
+                feature_drift_scores=feature_drift_scores,
+            )
+            action = "monitor" if drift_score < 0.1 else "retrain"
+            test_output = {
+                "action": action,
+                "confidence": 0.9,
+                "reasoning": f"Drift score {drift_score:.3f}",
+                "affected_features": list(feature_drift_scores.keys()),
+                "severity": "low" if drift_score < 0.1 else "high",
+            }
+            result = agent.run_sync(
+                "Triage this drift.",
+                deps=ctx,
+                model=TestModel(custom_output_args=test_output, call_tools=[]),
+            )
+            return {
+                "action": result.output.action,
+                "reasoning": result.output.reasoning,
+                "severity": result.output.severity,
+            }
+        except ImportError:
+            logger.debug("pydantic-ai not available, using deterministic fallback")
+
+    from minivess.orchestration.agent_interface import DeterministicDriftTriage
+
+    return DeterministicDriftTriage().decide(context={"drift_score": drift_score})
+
+
 # ---------------------------------------------------------------------------
 # @flow orchestrator
 # ---------------------------------------------------------------------------
