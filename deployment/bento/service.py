@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import os
 import sys
+
 import bentoml
 
 bentoml_path = os.path.dirname(os.path.abspath(__file__))
@@ -22,5 +25,5 @@ input_spec = bentoml.io.NumpyNdarray(
 
 
 @svc.api(input=input_spec, output=bentoml.io.NumpyNdarray())
-def predict(input_arr):
+def predict(input_arr):  # type: ignore[no-untyped-def]
     return minivess_runner.predict.run(input_arr)
