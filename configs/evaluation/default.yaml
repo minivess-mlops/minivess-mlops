@@ -21,3 +21,24 @@ ensemble_strategies:
   - all_loss_all_best
 
 model_registry_name: MiniVess-Segmentor
+
+# Sliding-window inference strategies (#505)
+# standard_patch: fixed patch for cross-model scientific comparability (paper tables)
+# fast: per-model-optimal ROI for quick iteration (NOT for paper tables)
+# full_volume: optional, NOT included here — requires >= 24 GB VRAM for DynUNet
+inference_strategies:
+  - name: standard_patch
+    description: "Fixed patch across ALL models — use for paper tables"
+    roi_size: [128, 128, 16]
+    overlap: 0.5
+    sw_batch_size: 4
+    aggregation_mode: gaussian
+    is_primary: true
+
+  - name: fast
+    description: "Per-model-optimal ROI for quick iteration (not in paper tables)"
+    roi_size: per_model
+    overlap: 0.25
+    sw_batch_size: 4
+    aggregation_mode: gaussian
+    is_primary: false

@@ -4,8 +4,9 @@ from enum import StrEnum
 from pathlib import (
     Path,  # noqa: TC003 — Pydantic needs runtime access for field validation
 )
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class EnsembleStrategyName(StrEnum):
@@ -31,6 +32,24 @@ class MetricDirection(StrEnum):
 
     MINIMIZE = "minimize"
     MAXIMIZE = "maximize"
+
+
+class InferenceStrategyConfig(BaseModel):
+    """Configuration for a single sliding-window inference strategy.
+
+    Multiple strategies allow comparing per-model-optimal vs. fixed-patch
+    evaluation in a single analysis run. The ``is_primary`` strategy produces
+    bare metric keys (for paper tables); all others are prefixed with the
+    strategy name (e.g., ``fast/dsc``).
+    """
+
+    name: str
+    description: str = ""
+    roi_size: list[int] | Literal["per_model"]
+    overlap: float = Field(default=0.5, ge=0.0, lt=1.0)
+    sw_batch_size: int = Field(default=4, ge=1)
+    aggregation_mode: Literal["gaussian", "constant"] = "gaussian"
+    is_primary: bool = False
 
 
 class EvaluationConfig(BaseModel):
@@ -106,6 +125,40 @@ class EvaluationConfig(BaseModel):
         default=None,
         description="Path to a YAML file listing evaluation datasets.",
     )
+
+    # ------------------------------------------------------------------
+    # Inference strategies (multi-strategy evaluation — #505)
+    # ------------------------------------------------------------------
+    inference_strategies: list[InferenceStrategyConfig] = Field(
+        default_factory=lambda: [
+            InferenceStrategyConfig(
+                name="standard_patch",
+                description="Fixed patch across ALL models — use for paper tables",
+                roi_size=[128, 128, 16],
+                overlap=0.5,
+                sw_batch_size=4,
+                is_primary=True,
+            )
+        ],
+        description="Sliding-window strategies to run during evaluation.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_strategies(self) -> EvaluationConfig:
+        strats = self.inference_strategies
+        if strats:
+            primaries = [s for s in strats if s.is_primary]
+            if len(primaries) != 1:
+                msg = (
+                    f"Exactly 1 inference strategy must have is_primary=True, "
+                    f"got {len(primaries)}"
+                )
+                raise ValueError(msg)
+            names = [s.name for s in strats]
+            if len(names) != len(set(names)):
+                msg = "Inference strategy names must be unique"
+                raise ValueError(msg)
+        return self
 
     # ------------------------------------------------------------------
     # Validators

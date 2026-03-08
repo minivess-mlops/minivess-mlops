@@ -213,10 +213,27 @@ def _evaluate_single_model_on_all(
     from minivess.pipeline.evaluation_runner import UnifiedEvaluationRunner
     from minivess.pipeline.inference import SlidingWindowInferenceRunner
 
+    # Resolve roi_size from the primary inference strategy (CLAUDE.md Rule #9 — no
+    # hardcoded roi_size here; all inference configuration comes from eval_config).
+    primary_strategy = next(
+        (s for s in eval_config.inference_strategies if s.is_primary), None
+    )
+    if primary_strategy is not None and isinstance(primary_strategy.roi_size, list):
+        _r = primary_strategy.roi_size
+        primary_roi: tuple[int, int, int] = (_r[0], _r[1], _r[2])
+        primary_overlap = primary_strategy.overlap
+        primary_sw_batch_size = primary_strategy.sw_batch_size
+    else:
+        # Empty inference_strategies — use sensible defaults that are NOT (32, 32, 32)
+        primary_roi = (128, 128, 16)
+        primary_overlap = 0.5
+        primary_sw_batch_size = 4
+
     inference_runner = SlidingWindowInferenceRunner(
-        roi_size=(32, 32, 32),
+        roi_size=primary_roi,
         num_classes=2,
-        overlap=0.25,
+        overlap=primary_overlap,
+        sw_batch_size=primary_sw_batch_size,
     )
     runner = UnifiedEvaluationRunner(eval_config, inference_runner)
     eval_result: dict[str, dict[str, Any]] = runner.evaluate_model(
