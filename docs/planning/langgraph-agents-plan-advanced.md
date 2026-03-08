@@ -23,6 +23,45 @@ type-safe replacement with first-class Prefect integration.
 
 ## 1. Architecture: Two-Layer Orchestration
 
+```mermaid
+graph TB
+    subgraph "MACRO Layer — Prefect 3.x"
+        DF["data_flow"]
+        TF["train_flow"]
+        AF["analysis_flow"]
+        BF["biostatistics_flow"]
+        DeF["deploy_flow"]
+    end
+
+    subgraph "MICRO Layer — Pydantic AI + PrefectAgent"
+        DT["drift_triage agent"]
+        ES["experiment_summarizer agent"]
+        FN["figure_narrator agent"]
+    end
+
+    subgraph "Observability"
+        MLF["MLflow (inter-flow contract)"]
+        LF["Langfuse (OTEL traces)"]
+        PUI["Prefect UI (task visibility)"]
+    end
+
+    DF -->|"@task triage_drift"| DT
+    AF -->|"@task summarize_experiment"| ES
+    BF -->|"@task narrate_figures"| FN
+
+    DT --> MLF
+    ES --> MLF
+    FN --> MLF
+
+    DT -.-> LF
+    ES -.-> LF
+    FN -.-> LF
+
+    DT -.-> PUI
+    ES -.-> PUI
+    FN -.-> PUI
+```
+
 ```
 MACRO layer (Prefect 3.x)
   Scheduling, retries, Docker-per-flow isolation, caching, observability
