@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MinIVess MLOps — Overnight Autonomous Execution Master Plan
+  Purpose: Close issues #304, #343, #365, #401, #424, #469, #474
+  Created: 2026-03-08
+  Author: Claude Code (reviewed by 4 subagents)
+
+  EXECUTION MODEL:
+  Each child plan is a self-contained session. Run sequentially:
+
+    for plan in docs/planning/overnight-child-{01..04}.xml; do
+      claude -p "Read and execute $plan autonomously. Follow ALL instructions
+        in the file. Commit after each phase. When complete, stop." \
+        --dangerously-skip-permissions
+    done
+
+  Each child plan:
+  1. Reads CLAUDE.md and MEMORY.md for context
+  2. Creates a feature branch from latest main
+  3. Executes TDD phases (red → green → verify → commit)
+  4. Pushes branch, creates PR, closes issues
+  5. Instructs next session to read the next child plan
+
+  CONTEXT MANAGEMENT:
+  - Each child plan is designed for ~30-60 min of autonomous work
+  - Tasks are ordered smallest-first to maximize completions overnight
+  - Each plan includes full file paths, test expectations, and acceptance criteria
+  - No cross-plan dependencies (each PR merges independently)
+-->
+<master-plan>
+  <metadata>
+    <title>Overnight Autonomous Pipeline — 7 Issues, 4 Branches</title>
+    <created>2026-03-08</created>
+    <total-issues>7</total-issues>
+    <total-branches>4</total-branches>
+    <estimated-duration>3-5 hours total</estimated-duration>
+    <execution-order>sequential (child-01 → child-02 → child-03 → child-04)</execution-order>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- BRANCH 1: Infrastructure hardening (smallest, highest confidence)   -->
+  <!-- ================================================================== -->
+  <branch id="1" name="fix/infrastructure-hardening">
+    <plan-file>docs/planning/overnight-child-01.xml</plan-file>
+    <closes-issues>#424, #469</closes-issues>
+    <priority>P0 — do first (quick wins, unblocks confidence)</priority>
+    <estimated-duration>30-45 min</estimated-duration>
+    <summary>
+      Complete Docker enforcement plan (#424) — 95% already done.
+      Wire pre-push git hook (#469) — script exists, needs hook.
+      Add Prefect decoupling quadruple-check verification commit.
+    </summary>
+    <tasks>
+      <task>T-01.1: Close enforcement gaps (T-08 smoke test annotation, T-13 admin)</task>
+      <task>T-01.2: Wire git pre-push hook calling pr_readiness_check.sh</task>
+      <task>T-01.3: Add Prefect decoupling verification test (quadruple-check)</task>
+      <task>T-01.4: Push, PR, close #424 and #469</task>
+    </tasks>
+    <risk>LOW — mostly verification and wiring of existing code</risk>
+  </branch>
+
+  <!-- ================================================================== -->
+  <!-- BRANCH 2: MONAI ecosystem audit (largest, core platform value)      -->
+  <!-- ================================================================== -->
+  <branch id="2" name="feat/monai-ecosystem-audit">
+    <plan-file>docs/planning/overnight-child-02.xml</plan-file>
+    <closes-issues>#474, #343</closes-issues>
+    <priority>P0 — core platform value</priority>
+    <estimated-duration>90-120 min</estimated-duration>
+    <summary>
+      Audit ModelAdapter ABC for MONAI-native compatibility.
+      Re-add 4 MONAI model thin wrappers (SegResNet, SwinUNETR, UNETR, AttentionUnet).
+      Refactor model factory from if/elif dispatch to registry dict.
+      Create model profile configs. Document template adapter pattern.
+    </summary>
+    <tasks>
+      <task>T-02.1: Audit and slim ModelAdapter ABC if needed</task>
+      <task>T-02.2: Refactor model_builder.py to registry dict pattern</task>
+      <task>T-02.3: Add SegResNet thin wrapper + tests + profile</task>
+      <task>T-02.4: Add SwinUNETR thin wrapper + tests + profile</task>
+      <task>T-02.5: Add UNETR thin wrapper + tests + profile</task>
+      <task>T-02.6: Add AttentionUnet thin wrapper + tests + profile</task>
+      <task>T-02.7: Verify MONAI losses/inferers work with all adapters</task>
+      <task>T-02.8: Template adapter documentation</task>
+      <task>T-02.9: Push, PR, close #474 and #343</task>
+    </tasks>
+    <risk>MEDIUM — new code, but following well-established DynUNet pattern</risk>
+    <guardrails>
+      Each adapter MUST be under 150 lines. If it exceeds that, the ABC needs fixing.
+      Use MONAI native constructors — zero custom architecture code.
+      Every adapter needs: instantiation test, forward pass test, config test.
+    </guardrails>
+  </branch>
+
+  <!-- ================================================================== -->
+  <!-- BRANCH 3: Test tiers for faster CI (medium, DevEx improvement)      -->
+  <!-- ================================================================== -->
+  <branch id="3" name="feat/test-tiers">
+    <plan-file>docs/planning/overnight-child-03.xml</plan-file>
+    <closes-issues>#304</closes-issues>
+    <priority>P2 — DevEx improvement</priority>
+    <estimated-duration>30-45 min</estimated-duration>
+    <summary>
+      Split 3800+ tests into staging (fast, PR default) vs prod (full, nightly).
+      Apply pytest markers consistently. Update pytest config.
+      Create scripts/run_staging_tests.sh and scripts/run_prod_tests.sh.
+    </summary>
+    <tasks>
+      <task>T-03.1: Audit test timing — identify slow tests (>5s each)</task>
+      <task>T-03.2: Apply @pytest.mark.slow to integration/slow tests</task>
+      <task>T-03.3: Create staging vs prod pytest configs</task>
+      <task>T-03.4: Update pr_readiness_check.sh to use staging tier</task>
+      <task>T-03.5: Push, PR, close #304</task>
+    </tasks>
+    <risk>LOW — no code changes, only test configuration</risk>
+  </branch>
+
+  <!-- ================================================================== -->
+  <!-- BRANCH 4: Training resume + HPO grid (medium, training features)    -->
+  <!-- ================================================================== -->
+  <branch id="4" name="feat/training-resume-hpo">
+    <plan-file>docs/planning/overnight-child-04.xml</plan-file>
+    <closes-issues>#365, #401</closes-issues>
+    <priority>P1 — training workflow</priority>
+    <estimated-duration>45-60 min</estimated-duration>
+    <summary>
+      Fix auto-resume bug (fold_count vs n_folds). Add integration test.
+      Implement train_all_hyperparam_combos.sh via Docker + hpo_flow.
+      Create experiment YAML configs for grid sweeps.
+    </summary>
+    <tasks>
+      <task>T-04.1: Fix run_training_flow.py bug (fold_count → n_folds)</task>
+      <task>T-04.2: Add auto-resume integration test with mock MLflow</task>
+      <task>T-04.3: Create experiment configs (configs/experiments/*.yaml)</task>
+      <task>T-04.4: Implement train_all_hyperparam_combos.sh via Docker</task>
+      <task>T-04.5: Connect scripts/run_hpo.py to hpo_flow deployment</task>
+      <task>T-04.6: Push, PR, close #365 and #401</task>
+    </tasks>
+    <risk>MEDIUM — training integration requires careful Docker volume testing</risk>
+    <guardrails>
+      Scripts MUST use docker compose run, NEVER bare uv run python.
+      Auto-resume must preserve MLflow fingerprint stability.
+      HPO grid reads from YAML — no hardcoded combinations in bash.
+    </guardrails>
+  </branch>
+
+  <!-- ================================================================== -->
+  <!-- CROSS-CUTTING: Prefect decoupling verification                      -->
+  <!-- ================================================================== -->
+  <verification name="prefect-decoupling-quadruple-check">
+    <description>
+      Woven into Branch 1. Verified by 4 subagents on 2026-03-08.
+      Result: ZERO violations across all 12 flows.
+      Scorecard: all flows have docker gates, no cross-imports,
+      MLflow-only communication, explicit volume mounts.
+    </description>
+    <status>VERIFIED — see Agent analysis in session transcript</status>
+    <action>Add verification test in Branch 1 (T-01.3)</action>
+  </verification>
+
+  <!-- ================================================================== -->
+  <!-- OVERNIGHT EXECUTION INSTRUCTIONS                                    -->
+  <!-- ================================================================== -->
+  <execution-instructions>
+    <prerequisite>
+      1. Ensure main branch is up to date: git checkout main and git pull
+      2. Ensure uv sync has been run recently
+      3. Ensure no uncommitted changes on main
+    </prerequisite>
+
+    <run-command>
+      <!-- Option A: Manual sequential (safest) -->
+      claude -p "Read /home/petteri/Dropbox/github-personal/minivess-mlops/docs/planning/overnight-child-01.xml and execute it autonomously. Follow ALL instructions in the file. Commit after each phase. When complete, push and create the PR, then stop."
+
+      <!-- Option B: Loop (for overnight) -->
+      for i in 01 02 03 04; do
+        claude -p "Read and execute /home/petteri/Dropbox/github-personal/minivess-mlops/docs/planning/overnight-child-$i.xml autonomously. Follow ALL instructions. Commit after each phase. Push, create PR, close issues when done. Then stop."
+      done
+    </run-command>
+
+    <failure-handling>
+      If a child plan fails mid-execution:
+      1. The branch will have partial commits (safe — no force push)
+      2. The next child plan starts fresh from main (no dependency)
+      3. Review the failed branch manually in the morning
+      4. Each child plan is independent — later plans still work
+    </failure-handling>
+
+    <context-management>
+      Each child plan is designed for a FRESH context window:
+      - No assumption of prior session state
+      - Full file paths provided (no "the file we edited earlier")
+      - Acceptance criteria are self-verifiable (pytest commands included)
+      - Each plan starts with "git checkout main and git pull"
+    </context-management>
+  </execution-instructions>
+</master-plan>

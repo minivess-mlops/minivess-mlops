@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Child Plan 04: Training Auto-Resume + HPO Grid
+  Closes: #365 (auto-resume), #401 (HPO grid script)
+  Branch: feat/training-resume-hpo
+  Duration: ~45-60 min
+  Parent: docs/planning/overnight-master-plan.xml
+-->
+<child-plan id="04">
+  <metadata>
+    <title>Training Auto-Resume + HPO Grid Implementation</title>
+    <branch>feat/training-resume-hpo</branch>
+    <closes-issues>#365, #401</closes-issues>
+    <base-branch>main</base-branch>
+    <next-plan>NONE — this is the last child plan</next-plan>
+  </metadata>
+
+  <context-files>
+    <file>CLAUDE.md</file>
+    <file>src/minivess/pipeline/resume_discovery.py</file>
+    <file>src/minivess/orchestration/flows/train_flow.py</file>
+    <file>src/minivess/orchestration/flows/hpo_flow.py</file>
+    <file>src/minivess/optimization/hpo_engine.py</file>
+    <file>configs/hpo/dynunet_example.yaml</file>
+    <file>scripts/train_all_hyperparam_combos.sh</file>
+    <file>scripts/run_hpo.py</file>
+    <file>scripts/run_training_flow.py</file>
+  </context-files>
+
+  <setup>
+    <step>git checkout main</step>
+    <step>git pull origin main</step>
+    <step>git checkout -b feat/training-resume-hpo</step>
+  </setup>
+
+  <critical-rules>
+    - Scripts MUST use "docker compose run", NEVER "uv run python" for training.
+    - Auto-resume must preserve MLflow fingerprint stability.
+    - HPO grid reads from YAML — no hardcoded combinations in bash.
+    - CLAUDE.md Rule #17: Never suggest standalone scripts as a run path.
+    - CLAUDE.md Rule #18: Explicit Docker volume mounts for ALL artifacts.
+  </critical-rules>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Fix auto-resume bug                                        -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Fix auto-resume bug">
+    <description>
+      scripts/run_training_flow.py line 112 has `result.fold_count` but the
+      TrainingFlowResult dataclass field is `n_folds`. This crashes at runtime.
+    </description>
+
+    <task id="T-04.1a" name="Write regression test">
+      <test-file>tests/v2/unit/test_auto_resume.py</test-file>
+      <tests>
+        - test_training_flow_result_has_n_folds: TrainingFlowResult has n_folds attribute
+        - test_training_flow_result_no_fold_count: TrainingFlowResult does NOT have fold_count
+        - test_run_training_flow_script_references_n_folds: AST scan of run_training_flow.py
+          does NOT contain "fold_count" (use ast.parse, NOT regex — CLAUDE.md Rule #16)
+        - test_resume_fingerprint_deterministic: Same config → same fingerprint
+        - test_resume_fingerprint_changes_with_loss: Different loss → different fingerprint
+      </tests>
+    </task>
+
+    <task id="T-04.1b" name="Fix the bug">
+      <file>scripts/run_training_flow.py</file>
+      <change>Replace result.fold_count with result.n_folds (line ~112)</change>
+      <acceptance>Test passes. Script no longer crashes on result access.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: Auto-resume integration test                               -->
+  <!-- ================================================================== -->
+  <phase id="2" name="Auto-resume integration test">
+    <task id="T-04.2" name="Write integration test with mock MLflow">
+      <test-file>tests/v2/unit/test_auto_resume_integration.py</test-file>
+      <tests>
+        - test_find_completed_config_returns_none_when_no_match:
+            Mock MLflow search_runs returning empty → find_completed_config returns None
+        - test_find_completed_config_returns_run_id_when_match:
+            Mock MLflow search_runs returning a run → find_completed_config returns run_id
+        - test_compute_config_fingerprint_stable:
+            Same inputs → same fingerprint across calls
+        - test_load_fold_result_from_mlflow:
+            Mock MLflow get_run → load_fold_result returns correct metrics
+      </tests>
+      <guidance>
+        Use unittest.mock.patch to mock mlflow.search_runs and mlflow.get_run.
+        Import from minivess.pipeline.resume_discovery.
+        Do NOT require a running MLflow server.
+      </guidance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: Experiment configs                                         -->
+  <!-- ================================================================== -->
+  <phase id="3" name="Experiment YAML configs">
+    <description>
+      Create experiment configs that define hyperparameter grids.
+      These are read by train_all_hyperparam_combos.sh.
+    </description>
+
+    <task id="T-04.3a" name="Create DynUNet grid config">
+      <file>configs/experiments/dynunet_grid.yaml</file>
+      <content-guidance>
+        experiment_name: dynunet_grid
+        model_family: dynunet
+        hyperparameters:
+          loss_name: [cbdice_cldice, dice_ce, dice_ce_cldice]
+          learning_rate: [1e-3, 3e-4]
+          batch_size: [1, 2]
+        fixed:
+          max_epochs: 100
+          num_folds: 3
+          compute: auto
+        mlflow_experiment: minivess_hpo_grid
+      </content-guidance>
+    </task>
+
+    <task id="T-04.3b" name="Create minimal smoke test config">
+      <file>configs/experiments/smoke_test.yaml</file>
+      <content-guidance>
+        experiment_name: smoke_test
+        model_family: dynunet
+        hyperparameters:
+          loss_name: [dice_ce]
+        fixed:
+          max_epochs: 1
+          num_folds: 1
+          batch_size: 1
+          compute: auto
+        mlflow_experiment: minivess_smoke_test
+      </content-guidance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: Implement HPO grid script                                  -->
+  <!-- ================================================================== -->
+  <phase id="4" name="HPO grid script">
+    <description>
+      Replace the placeholder train_all_hyperparam_combos.sh with a real
+      implementation that reads YAML configs and launches Docker-based training.
+    </description>
+
+    <task id="T-04.4a" name="Write grid script tests">
+      <test-file>tests/v2/unit/test_hpo_grid_script.py</test-file>
+      <tests>
+        - test_grid_script_exists: scripts/train_all_hyperparam_combos.sh exists
+        - test_grid_script_uses_docker: Contains "docker compose" (AST/grep of shell)
+        - test_grid_script_no_bare_python: Does NOT contain "uv run python" for training
+        - test_grid_script_reads_yaml: Contains reference to configs/experiments/
+        - test_grid_script_has_dry_run: Contains "--dry-run" flag handling
+        - test_experiment_configs_exist: configs/experiments/*.yaml files exist
+        - test_experiment_config_valid_yaml: Each config is valid YAML with required keys
+      </tests>
+    </task>
+
+    <task id="T-04.4b" name="Implement train_all_hyperparam_combos.sh">
+      <file>scripts/train_all_hyperparam_combos.sh</file>
+      <description>
+        Replace placeholder with real implementation:
+        1. Parse CLI args (--config, --dry-run, --families, --losses)
+        2. Read YAML config with yq or python -c "import yaml; ..."
+        3. Generate Cartesian product of hyperparameters
+        4. For each combination:
+           - Check MLflow for existing completed run (auto-resume via fingerprint)
+           - If not found, launch: docker compose -f deployment/docker-compose.flows.yml
+             run --rm train python -m minivess.orchestration.flows.train_flow ...
+        5. --dry-run prints the grid without launching training
+
+        MUST use Docker. NEVER use bare "uv run python" for training.
+        The script is a grid LAUNCHER — actual HPO (Bayesian search) uses hpo_flow.py.
+      </description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 5: Connect run_hpo.py to Prefect deployment                   -->
+  <!-- ================================================================== -->
+  <phase id="5" name="Connect HPO script to Prefect">
+    <task id="T-04.5" name="Fix run_hpo.py placeholder">
+      <file>scripts/run_hpo.py</file>
+      <description>
+        The objective function currently returns 0.0 (placeholder).
+        Replace with: invoke hpo_flow via Prefect deployment.
+
+        Pattern:
+          def objective(trial):
+              params = engine.suggest_params(trial, search_space.params)
+              # Launch via Docker + Prefect
+              result = subprocess.run([
+                  "docker", "compose", "-f", "deployment/docker-compose.flows.yml",
+                  "run", "--rm", "train", ...
+              ])
+              # Parse MLflow for result metric
+              return best_val_loss
+
+        OR: Document that run_hpo.py is a LOCAL convenience wrapper and the
+        proper path is: prefect deployment run 'hpo-flow/default'
+      </description>
+      <acceptance>
+        Script either invokes Docker or clearly documents that the proper
+        execution path is via Prefect hpo_flow deployment.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 6: Ship it                                                    -->
+  <!-- ================================================================== -->
+  <phase id="6" name="Ship it">
+    <task id="T-04.6" name="Commit, push, PR, close issues">
+      <steps>
+        1. Run: MINIVESS_ALLOW_HOST=1 uv run pytest tests/v2/unit/test_auto_resume.py tests/v2/unit/test_auto_resume_integration.py tests/v2/unit/test_hpo_grid_script.py -v
+        2. Run: uv run ruff check scripts/ src/ and uv run mypy src/
+        3. git add and git commit (pre-commit hooks must pass)
+        4. git push -u origin feat/training-resume-hpo
+        5. gh pr create --title "feat: auto-resume + HPO grid — training workflow (#365, #401)"
+        6. gh issue close 365 --comment "Completed in PR #NNN. Auto-resume via config fingerprinting."
+        7. gh issue close 401 --comment "Completed in PR #NNN. Grid script reads YAML, launches via Docker."
+      </steps>
+    </task>
+  </phase>
+
+  <completion-signal>
+    This is the LAST child plan. All 7 issues should now be closed:
+    #304, #343, #365, #401, #424, #469, #474
+
+    Master plan: docs/planning/overnight-master-plan.xml
+  </completion-signal>
+</child-plan>

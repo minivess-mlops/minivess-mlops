@@ -1,0 +1,293 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Child Plan 02: MONAI Ecosystem Compatibility Audit
+  Closes: #474 (MONAI audit), #343 (ModelAdapter audit)
+  Branch: feat/monai-ecosystem-audit
+  Duration: ~90-120 min
+  Parent: docs/planning/overnight-master-plan.xml
+-->
+<child-plan id="02">
+  <metadata>
+    <title>MONAI Ecosystem Audit — 4 Model Adapters + Registry Refactor</title>
+    <branch>feat/monai-ecosystem-audit</branch>
+    <closes-issues>#474, #343</closes-issues>
+    <base-branch>main</base-branch>
+    <next-plan>docs/planning/overnight-child-03.xml</next-plan>
+  </metadata>
+
+  <context-files>
+    <file>CLAUDE.md</file>
+    <file>src/minivess/adapters/base.py</file>
+    <file>src/minivess/adapters/dynunet.py</file>
+    <file>src/minivess/adapters/model_builder.py</file>
+    <file>src/minivess/adapters/__init__.py</file>
+    <file>src/minivess/config/models.py</file>
+    <file>configs/model_profiles/dynunet.yaml</file>
+  </context-files>
+
+  <setup>
+    <step>git checkout main</step>
+    <step>git pull origin main</step>
+    <step>git checkout -b feat/monai-ecosystem-audit</step>
+  </setup>
+
+  <critical-rules>
+    - MONAI is the standard. Our MLOps pipeline adapts to MONAI, not the reverse.
+    - Any monai.networks.nets.* model MUST be wrappable in under 150 lines.
+    - If wrapping requires more, the ABC interface needs fixing FIRST.
+    - Use MONAI native constructors — ZERO custom architecture code.
+    - Follow the DynUNet adapter pattern exactly (src/minivess/adapters/dynunet.py).
+    - Library-First (CLAUDE.md Rule #3): Use monai.networks.nets.* directly.
+    - TDD mandatory: Write failing tests FIRST, then implement.
+  </critical-rules>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Registry refactor (model_builder.py)                       -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Model registry refactor">
+    <description>
+      Replace if/elif dispatch in model_builder.py with a registry dict.
+      This enables scalable model addition without touching core dispatch.
+    </description>
+
+    <task id="T-02.1" name="Write registry refactor tests">
+      <test-file>tests/v2/unit/test_model_registry.py</test-file>
+      <tests>
+        - test_registry_contains_dynunet: ModelFamily.MONAI_DYNUNET in registry
+        - test_build_adapter_dynunet: build_adapter(dynunet config) returns DynUNetAdapter
+        - test_unknown_family_raises: build_adapter(unknown) raises ValueError with available list
+        - test_registry_introspectable: Can list all registered families at runtime
+        - test_all_registered_families_buildable: Every registered family can be instantiated
+      </tests>
+    </task>
+
+    <task id="T-02.2" name="Refactor model_builder.py">
+      <description>
+        Replace if/elif chains with _MODEL_REGISTRY dict.
+        Pattern:
+          _MODEL_REGISTRY: dict[ModelFamily, Callable] = {}
+          def register_adapter(family): decorator that adds to registry
+          def build_adapter(config): lookup in registry, raise if missing
+
+        Keep lazy imports inside the registration functions for optional deps.
+        Keep SAM3 VRAM gating logic (_require_sam3).
+      </description>
+      <file>src/minivess/adapters/model_builder.py</file>
+      <acceptance>All existing model tests still pass. New registry tests pass.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: Add ModelFamily enum entries                               -->
+  <!-- ================================================================== -->
+  <phase id="2" name="ModelFamily enum additions">
+    <task id="T-02.3" name="Add enum entries for MONAI models">
+      <file>src/minivess/config/models.py</file>
+      <additions>
+        ModelFamily enum needs:
+        - MONAI_SEGRESNET = "segresnet"
+        - MONAI_SWINUNETR = "swinunetr"
+        - MONAI_UNETR = "unetr"
+        - MONAI_ATTENTIONUNET = "attentionunet"
+      </additions>
+      <test>Verify enum values are unique and lowercase.</test>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: SegResNet thin wrapper                                     -->
+  <!-- ================================================================== -->
+  <phase id="3" name="SegResNet adapter">
+    <description>
+      monai.networks.nets.SegResNet — lightweight ResNet-based encoder-decoder.
+      4.7M params (vs DynUNet 30M). Good for memory-constrained scenarios.
+      MONAI docs: https://docs.monai.io/en/stable/networks.html#segresnet
+    </description>
+
+    <task id="T-02.4a" name="Write SegResNet tests">
+      <test-file>tests/v2/unit/test_segresnet_adapter.py</test-file>
+      <tests>
+        - test_instantiation_default: SegResNetAdapter(config) works with defaults
+        - test_instantiation_custom_filters: Custom init_filters parameter
+        - test_forward_shape: Input (1,1,64,64,32) → output (1,2,64,64,32)
+        - test_get_config_returns_info: get_config() returns AdapterConfigInfo
+        - test_trainable_params_positive: trainable_parameters() > 0
+        - test_registered_in_factory: build_adapter(segresnet config) works
+      </tests>
+    </task>
+
+    <task id="T-02.4b" name="Implement SegResNet adapter">
+      <file>src/minivess/adapters/segresnet.py</file>
+      <max-lines>120</max-lines>
+      <pattern>
+        Follow dynunet.py exactly:
+        1. Import from monai.networks.nets import SegResNet
+        2. __init__: construct SegResNet(spatial_dims=3, in_channels, out_channels, init_filters)
+        3. forward: self.net(images) → _build_output(logits, "SegResNet")
+        4. get_config: _build_config(init_filters=...)
+      </pattern>
+    </task>
+
+    <task id="T-02.4c" name="Create SegResNet model profile">
+      <file>configs/model_profiles/segresnet.yaml</file>
+      <content-guidance>
+        model_name: segresnet
+        architecture: SegResNet (encoder-decoder)
+        monai_class: monai.networks.nets.SegResNet
+        default_init_filters: 16
+        param_count_approx: 4_700_000
+        divisor: 1 (no divisibility requirement)
+        model_overhead_mb: 50
+        bytes_per_voxel_fwd: 12
+        bytes_per_voxel_bwd: 24
+        max_batch_size:
+          cpu: 2
+          gpu_low_8gb: 4
+          gpu_mid_16gb: 8
+          gpu_high_24gb: 16
+        default_patch_xy: 128
+        notes: "Lightweight alternative to DynUNet. Good baseline for comparison."
+      </content-guidance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: SwinUNETR thin wrapper                                     -->
+  <!-- ================================================================== -->
+  <phase id="4" name="SwinUNETR adapter">
+    <description>
+      monai.networks.nets.SwinUNETR — Swin Transformer + UNETR decoder.
+      Transformer-based, needs img_size at init. ~62M params.
+    </description>
+
+    <task id="T-02.5a" name="Write SwinUNETR tests">
+      <test-file>tests/v2/unit/test_swinunetr_adapter.py</test-file>
+      <tests>
+        - test_instantiation: SwinUNETRAdapter(config) works
+        - test_forward_shape: Correct output shape
+        - test_get_config: Returns AdapterConfigInfo
+        - test_registered_in_factory: build_adapter(swinunetr config) works
+        - test_feature_size_configurable: feature_size parameter respected
+      </tests>
+    </task>
+
+    <task id="T-02.5b" name="Implement SwinUNETR adapter">
+      <file>src/minivess/adapters/swinunetr.py</file>
+      <max-lines>140</max-lines>
+      <pattern>
+        SwinUNETR needs img_size at init (patch size).
+        Extract from config.architecture_params or use default (96,96,96).
+        feature_size=48 is MONAI default.
+        from monai.networks.nets import SwinUNETR
+      </pattern>
+    </task>
+
+    <task id="T-02.5c" name="Create SwinUNETR model profile">
+      <file>configs/model_profiles/swinunetr.yaml</file>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 5: UNETR thin wrapper                                         -->
+  <!-- ================================================================== -->
+  <phase id="5" name="UNETR adapter">
+    <description>
+      monai.networks.nets.UNETR — ViT encoder + CNN decoder.
+      Needs img_size at init. ~92M params with default ViT config.
+    </description>
+
+    <task id="T-02.6a" name="Write UNETR tests">
+      <test-file>tests/v2/unit/test_unetr_adapter.py</test-file>
+      <tests>
+        - test_instantiation: UNETRAdapter(config) works
+        - test_forward_shape: Correct output shape
+        - test_get_config: Returns AdapterConfigInfo
+        - test_registered_in_factory: build_adapter(unetr config) works
+      </tests>
+    </task>
+
+    <task id="T-02.6b" name="Implement UNETR adapter">
+      <file>src/minivess/adapters/unetr.py</file>
+      <max-lines>130</max-lines>
+    </task>
+
+    <task id="T-02.6c" name="Create UNETR model profile">
+      <file>configs/model_profiles/unetr.yaml</file>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 6: AttentionUnet thin wrapper                                 -->
+  <!-- ================================================================== -->
+  <phase id="6" name="AttentionUnet adapter">
+    <description>
+      monai.networks.nets.AttentionUnet — U-Net with attention gates.
+      Lightweight, good for comparison. ~5M params.
+    </description>
+
+    <task id="T-02.7a" name="Write AttentionUnet tests">
+      <test-file>tests/v2/unit/test_attentionunet_adapter.py</test-file>
+      <tests>
+        - test_instantiation: AttentionUnetAdapter(config) works
+        - test_forward_shape: Correct output shape
+        - test_get_config: Returns AdapterConfigInfo
+        - test_registered_in_factory: build_adapter(attentionunet config) works
+      </tests>
+    </task>
+
+    <task id="T-02.7b" name="Implement AttentionUnet adapter">
+      <file>src/minivess/adapters/attentionunet.py</file>
+      <max-lines>120</max-lines>
+    </task>
+
+    <task id="T-02.7c" name="Create AttentionUnet model profile">
+      <file>configs/model_profiles/attentionunet.yaml</file>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 7: MONAI interop verification + template doc                  -->
+  <!-- ================================================================== -->
+  <phase id="7" name="MONAI interop verification">
+    <task id="T-02.8" name="Write MONAI interop tests">
+      <test-file>tests/v2/unit/test_monai_interop.py</test-file>
+      <tests>
+        - test_monai_dice_loss_works_with_adapters: DiceLoss with each adapter output
+        - test_monai_dice_ce_loss_works: DiceCELoss with adapter output
+        - test_monai_sliding_window_inferer: SlidingWindowInferer with each adapter
+        - test_all_adapters_output_segmentation_output: SegmentationOutput dataclass
+        - test_loss_factory_includes_monai_losses: All monai.losses.* registered
+      </tests>
+    </task>
+
+    <task id="T-02.9" name="Template adapter documentation">
+      <file>src/minivess/adapters/TEMPLATE_ADAPTER.py</file>
+      <description>
+        Copy-paste template showing how to wrap ANY monai.networks.nets.* model.
+        Include: docstring with 5-minute instructions, __init__, forward, get_config.
+        Mark with comments: "REPLACE THIS", "YOUR MODEL HERE", etc.
+      </description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 8: Ship it                                                    -->
+  <!-- ================================================================== -->
+  <phase id="8" name="Ship it">
+    <task id="T-02.10" name="Commit and create PR">
+      <steps>
+        1. Run: MINIVESS_ALLOW_HOST=1 uv run pytest tests/v2/unit/test_segresnet_adapter.py tests/v2/unit/test_swinunetr_adapter.py tests/v2/unit/test_unetr_adapter.py tests/v2/unit/test_attentionunet_adapter.py tests/v2/unit/test_model_registry.py tests/v2/unit/test_monai_interop.py -v
+        2. Run: uv run ruff check src/minivess/adapters/ and uv run mypy src/minivess/adapters/
+        3. git add and git commit (pre-commit hooks must pass)
+        4. git push -u origin feat/monai-ecosystem-audit
+        5. gh pr create --title "feat: MONAI ecosystem audit — 4 adapters + registry (#474, #343)"
+        6. gh issue close 474 --comment "Completed in PR #NNN."
+        7. gh issue close 343 --comment "Superseded by #474, completed in PR #NNN."
+      </steps>
+    </task>
+  </phase>
+
+  <completion-signal>
+    Next plan: docs/planning/overnight-child-03.xml (test tiers)
+  </completion-signal>
+</child-plan>

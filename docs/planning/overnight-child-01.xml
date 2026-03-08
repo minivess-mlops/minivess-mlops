@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Child Plan 01: Infrastructure Hardening
+  Closes: #424 (Docker enforcement), #469 (pre-push gate)
+  Branch: fix/infrastructure-hardening
+  Duration: ~30-45 min
+  Parent: docs/planning/overnight-master-plan.xml
+-->
+<child-plan id="01">
+  <metadata>
+    <title>Infrastructure Hardening — Docker Enforcement + Pre-Push Gate</title>
+    <branch>fix/infrastructure-hardening</branch>
+    <closes-issues>#424, #469</closes-issues>
+    <base-branch>main</base-branch>
+    <next-plan>docs/planning/overnight-child-02.xml</next-plan>
+  </metadata>
+
+  <!-- CRITICAL: Read these files first for project context -->
+  <context-files>
+    <file>CLAUDE.md</file>
+    <file>docs/planning/minivess-vision-enforcement-plan-execution.xml</file>
+    <file>scripts/pr_readiness_check.sh</file>
+    <file>.pre-commit-config.yaml</file>
+  </context-files>
+
+  <setup>
+    <step>git checkout main</step>
+    <step>git pull origin main</step>
+    <step>git checkout -b fix/infrastructure-hardening</step>
+  </setup>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Close Docker enforcement gaps                              -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Docker enforcement completion">
+    <description>
+      #424 is 95% done. The remaining items:
+      - T-08: Docker smoke test exists but skips (acceptable — needs image built)
+      - T-13: Administrative tracking (close the issue)
+      - T-05: CI workflow exists, manually triggered (intentional per CLAUDE.md Rule #21)
+
+      ACTION: Verify all 32 enforcement tests pass, then close #424.
+    </description>
+
+    <task id="T-01.1" name="Verify enforcement test suite">
+      <test-command>
+        MINIVESS_ALLOW_HOST=1 uv run pytest tests/unit/orchestration/test_docker_context_gate.py tests/unit/pipeline/test_checkpoint_path_validation.py tests/unit/scripts/test_sh_scripts_use_docker.py tests/unit/deployment/test_volume_mount_compliance.py tests/unit/orchestration/test_no_repo_relative_paths.py -v --tb=short
+      </test-command>
+      <acceptance>All tests pass. No failures.</acceptance>
+      <on-failure>Fix any failing tests. Do NOT skip or ignore.</on-failure>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: Pre-push git hook                                          -->
+  <!-- ================================================================== -->
+  <phase id="2" name="Pre-push git hook">
+    <description>
+      #469 asks for a pre-push hook that runs the full test suite before pushing.
+      scripts/pr_readiness_check.sh already exists and runs lint + mypy + tests.
+      We need to wire it as a git pre-push hook.
+    </description>
+
+    <task id="T-01.2a" name="Write test for pre-push hook">
+      <test-first>
+        tests/v2/unit/test_pre_push_hook.py:
+        - test_pr_readiness_script_exists: Verify scripts/pr_readiness_check.sh exists
+        - test_pr_readiness_script_executable: Verify it has execute permission
+        - test_pr_readiness_script_runs_pytest: Verify it contains "pytest" command
+        - test_pr_readiness_script_runs_ruff: Verify it contains "ruff" command
+        - test_pr_readiness_script_runs_mypy: Verify it contains "mypy" command
+        - test_pre_push_hook_template_exists: Verify scripts/install-hooks.sh exists
+      </test-first>
+    </task>
+
+    <task id="T-01.2b" name="Create install-hooks.sh">
+      <description>
+        Create scripts/install-hooks.sh that installs the pre-push hook.
+        The hook should call scripts/pr_readiness_check.sh.
+        NOT a pre-commit hook (too slow) — only runs on git push.
+      </description>
+      <file>scripts/install-hooks.sh</file>
+      <content-guidance>
+        #!/usr/bin/env bash
+        # Install git pre-push hook that runs PR readiness check
+        set -euo pipefail
+        HOOK_DIR="$(git rev-parse --git-dir)/hooks"
+        cat > "$HOOK_DIR/pre-push" &lt;&lt;'HOOK'
+        #!/usr/bin/env bash
+        echo "Running PR readiness check before push..."
+        bash scripts/pr_readiness_check.sh
+        HOOK
+        chmod +x "$HOOK_DIR/pre-push"
+        echo "Pre-push hook installed."
+      </content-guidance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: Prefect decoupling verification test                       -->
+  <!-- ================================================================== -->
+  <phase id="3" name="Prefect decoupling quadruple-check">
+    <description>
+      Add a comprehensive test that verifies ALL decoupling invariants.
+      This was verified by 4 subagents — now encode it as a permanent test.
+    </description>
+
+    <task id="T-01.3" name="Write decoupling verification test">
+      <test-file>tests/unit/orchestration/test_prefect_decoupling_verification.py</test-file>
+      <tests>
+        - test_all_flows_have_docker_gate: Every flow file has _require_docker_context
+        - test_no_cross_flow_imports: No flow imports from another flow module
+        - test_all_flows_have_flow_name_constant: Every @flow uses FLOW_NAME_* constant
+        - test_no_tmp_in_flow_files: No /tmp or tempfile usage in flow files
+        - test_upstream_params_explicit: Flows accepting upstream data use explicit params
+        - test_docker_compose_has_all_flow_services: docker-compose.flows.yml has entry for each flow
+      </tests>
+      <guidance>
+        Use ast.parse() for Python analysis (CLAUDE.md Rule #16 — no regex).
+        Use yaml.safe_load() for docker-compose parsing.
+        Glob src/minivess/orchestration/flows/*_flow.py for flow discovery.
+      </guidance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: Commit, push, PR, close issues                            -->
+  <!-- ================================================================== -->
+  <phase id="4" name="Ship it">
+    <task id="T-01.4" name="Commit and create PR">
+      <steps>
+        1. Run full verification: uv run pytest tests/ -x -q (expect all pass)
+        2. Run pre-commit: git add -A and git commit (hooks must pass)
+        3. git push -u origin fix/infrastructure-hardening
+        4. gh pr create --title "fix: infrastructure hardening — Docker enforcement + pre-push gate (#424, #469)"
+        5. gh issue close 424 --comment "Completed in PR #NNN. All 32 enforcement tests pass."
+        6. gh issue close 469 --comment "Completed in PR #NNN. install-hooks.sh wires pre-push gate."
+      </steps>
+    </task>
+  </phase>
+
+  <completion-signal>
+    When this plan is complete, the next plan is:
+    docs/planning/overnight-child-02.xml (MONAI ecosystem audit)
+  </completion-signal>
+</child-plan>

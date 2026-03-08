@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Child Plan 03: Test Tiers — Staging vs Prod Split
+  Closes: #304
+  Branch: feat/test-tiers
+  Duration: ~30-45 min
+  Parent: docs/planning/overnight-master-plan.xml
+-->
+<child-plan id="03">
+  <metadata>
+    <title>Test Tiers — Staging (fast PR) vs Prod (full nightly)</title>
+    <branch>feat/test-tiers</branch>
+    <closes-issues>#304</closes-issues>
+    <base-branch>main</base-branch>
+    <next-plan>docs/planning/overnight-child-04.xml</next-plan>
+  </metadata>
+
+  <context-files>
+    <file>CLAUDE.md</file>
+    <file>pyproject.toml</file>
+    <file>scripts/pr_readiness_check.sh</file>
+    <file>tests/conftest.py</file>
+  </context-files>
+
+  <setup>
+    <step>git checkout main</step>
+    <step>git pull origin main</step>
+    <step>git checkout -b feat/test-tiers</step>
+  </setup>
+
+  <critical-rules>
+    - GitHub Actions CI is EXPLICITLY DISABLED (CLAUDE.md Rule #21). Do NOT create
+      workflow files with automatic triggers. Test tiers are for LOCAL use only.
+    - Do NOT modify existing test logic — only add markers and configuration.
+    - The "staging" tier MUST complete in under 2 minutes locally.
+    - The "prod" tier runs ALL tests (no test left behind).
+  </critical-rules>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Audit test timing                                          -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Audit test timing">
+    <task id="T-03.1" name="Profile test durations">
+      <command>
+        MINIVESS_ALLOW_HOST=1 uv run pytest tests/v2/unit/ tests/unit/ --durations=50 -q 2>&amp;1 | tail -60
+      </command>
+      <description>
+        Identify tests taking >5 seconds each. These get @pytest.mark.slow.
+        Identify tests requiring external services (MLflow server, Docker).
+        Integration tests already in tests/v2/integration/ get @pytest.mark.integration.
+      </description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: Apply markers                                              -->
+  <!-- ================================================================== -->
+  <phase id="2" name="Apply pytest markers">
+    <task id="T-03.2a" name="Mark slow unit tests">
+      <description>
+        Add @pytest.mark.slow to unit tests that take >5 seconds.
+        Common slow tests: topology loss gradient checks, full model forward passes,
+        Hydra config composition with 20+ configs, hypothesis property-based tests.
+
+        DO NOT change test logic. Only add the marker decorator.
+      </description>
+      <guidance>
+        import pytest
+
+        @pytest.mark.slow
+        def test_something_expensive():
+            ...
+      </guidance>
+    </task>
+
+    <task id="T-03.2b" name="Mark integration tests">
+      <description>
+        All tests in tests/v2/integration/ should have @pytest.mark.integration.
+        Use a conftest.py autouse fixture or pytestmark at module level.
+      </description>
+      <guidance>
+        In tests/v2/integration/conftest.py, add:
+          import pytest
+          pytestmark = pytest.mark.integration  # Wrong — this only works per-module
+
+        Better: Add to existing conftest.py:
+          def pytest_collection_modifyitems(config, items):
+              for item in items:
+                  if "integration" in str(item.fspath):
+                      item.add_marker(pytest.mark.integration)
+      </guidance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: Staging vs Prod configuration                              -->
+  <!-- ================================================================== -->
+  <phase id="3" name="Staging vs Prod config">
+    <task id="T-03.3a" name="Create staging pytest config">
+      <file>pytest-staging.ini</file>
+      <content-guidance>
+        [pytest]
+        testpaths = tests/unit tests/v2/unit
+        addopts = -m "not slow and not integration and not e2e and not gpu" -x --tb=short -q
+        # Target: complete in under 2 minutes
+      </content-guidance>
+    </task>
+
+    <task id="T-03.3b" name="Create test tier scripts">
+      <file>scripts/run_staging_tests.sh</file>
+      <content-guidance>
+        #!/usr/bin/env bash
+        # Staging tests: fast unit tests only (target: under 2 min)
+        set -euo pipefail
+        echo "=== Staging Tests (fast) ==="
+        MINIVESS_ALLOW_HOST=1 uv run pytest -c pytest-staging.ini
+      </content-guidance>
+
+      <file>scripts/run_prod_tests.sh</file>
+      <content-guidance>
+        #!/usr/bin/env bash
+        # Prod tests: full suite including slow, integration, GPU tests
+        set -euo pipefail
+        echo "=== Prod Tests (full) ==="
+        MINIVESS_ALLOW_HOST=1 uv run pytest tests/ -x --tb=short
+      </content-guidance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: Update pr_readiness_check.sh                               -->
+  <!-- ================================================================== -->
+  <phase id="4" name="Update PR readiness check">
+    <task id="T-03.4" name="Use staging tier in PR check">
+      <description>
+        Update scripts/pr_readiness_check.sh to run staging tier by default,
+        with --full flag for prod tier.
+      </description>
+      <file>scripts/pr_readiness_check.sh</file>
+      <changes>
+        Replace the pytest command with:
+          if [[ "${1:-}" == "--full" ]]; then
+            echo "[3/4] Full test suite..."
+            MINIVESS_ALLOW_HOST=1 uv run pytest tests/ -x --tb=short -q
+          else
+            echo "[3/4] Staging tests (fast)..."
+            MINIVESS_ALLOW_HOST=1 uv run pytest -c pytest-staging.ini
+          fi
+      </changes>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 5: Verify and ship                                            -->
+  <!-- ================================================================== -->
+  <phase id="5" name="Ship it">
+    <task id="T-03.5a" name="Write test tier meta-tests">
+      <test-file>tests/v2/unit/test_test_tiers.py</test-file>
+      <tests>
+        - test_staging_config_exists: pytest-staging.ini exists and is valid
+        - test_staging_excludes_slow: Staging config has "not slow" in addopts
+        - test_staging_excludes_integration: Staging config has "not integration" in addopts
+        - test_staging_scripts_exist: run_staging_tests.sh and run_prod_tests.sh exist
+      </tests>
+    </task>
+
+    <task id="T-03.5b" name="Verify staging tier timing">
+      <command>
+        time bash scripts/run_staging_tests.sh
+      </command>
+      <acceptance>Staging tests complete in under 2 minutes.</acceptance>
+    </task>
+
+    <task id="T-03.5c" name="Commit, push, PR">
+      <steps>
+        1. git add and git commit
+        2. git push -u origin feat/test-tiers
+        3. gh pr create --title "feat: staging vs prod test tiers (#304)"
+        4. gh issue close 304 --comment "Completed in PR #NNN."
+      </steps>
+    </task>
+  </phase>
+
+  <completion-signal>
+    Next plan: docs/planning/overnight-child-04.xml (training resume + HPO)
+  </completion-signal>
+</child-plan>
