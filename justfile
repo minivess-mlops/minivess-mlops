@@ -78,6 +78,35 @@ train *ARGS:
 train-debug:
     docker compose -f {{FLOWS_COMPOSE}} run --rm -e DEBUG=true -e MAX_EPOCHS=1 -e NUM_FOLDS=1 train
 
+# ---------------------------------------------------------------------------
+# Debug Recipes — Hydra-zen experiment configs (CLAUDE.md Rule #17)
+# All use run_debug.sh which handles preflight, multi-model, flow chaining.
+# ---------------------------------------------------------------------------
+
+# Single model, 1 epoch, ~2 min
+debug:
+    bash scripts/run_debug.sh --experiment debug_single_model
+
+# All 8GB-compatible models, 2 epochs, ~30 min
+debug-all-models:
+    bash scripts/run_debug.sh --experiment debug_all_models
+
+# Train → post_training → analyze chain, ~15 min
+debug-pipeline:
+    bash scripts/run_debug.sh --experiment debug_full_pipeline
+
+# 3 losses for ensemble testing, ~15 min
+debug-multi-loss:
+    bash scripts/run_debug.sh --experiment debug_multi_loss
+
+# MONAI dataloader validation only, ~5 min
+debug-data:
+    bash scripts/run_debug.sh --experiment debug_data_validation
+
+# Custom debug: just debug EXPERIMENT OVERRIDES (e.g.: just debug-custom debug_single_model "max_epochs=2")
+debug-custom EXPERIMENT OVERRIDES="":
+    bash scripts/run_debug.sh --experiment {{EXPERIMENT}} --override "{{OVERRIDES}}"
+
 # Flow 2.5: Post-Training (SWA, calibration, conformal)
 post-training *ARGS:
     docker compose -f {{FLOWS_COMPOSE}} run --rm post_training {{ARGS}}
