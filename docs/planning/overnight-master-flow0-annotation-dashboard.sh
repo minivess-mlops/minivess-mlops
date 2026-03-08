@@ -68,13 +68,15 @@ run_child() {
     git -C "${REPO_ROOT}" pull origin main
   fi
 
-  # Run Claude Code with the child plan XML as the prompt
+  # Run Claude Code with the child plan XML as the prompt.
+  # Write prompt to a temp file to avoid heredoc/quoting issues with XML content.
   local start_time
   start_time=$(date +%s)
 
-  claude \
-    --dangerously-skip-permissions \
-    -p "$(cat << EOF
+  local prompt_file
+  prompt_file="${LOG_DIR}/child-${child_num}-prompt.txt"
+
+  cat > "${prompt_file}" << PROMPT_EOF
 You are executing a detailed TDD implementation plan. Read and follow ALL phases in order.
 
 CRITICAL RULES (non-negotiable, from CLAUDE.md):
@@ -88,7 +90,13 @@ CRITICAL RULES (non-negotiable, from CLAUDE.md):
 - Zero Tolerance: every test failure must be fixed or reported immediately
 
 Read the plan file and execute every phase in order:
-$(cat "${REPO_ROOT}/${plan_file}")
+
+PROMPT_EOF
+
+  # Append plan XML (no quoting issues — plain cat append)
+  cat "${REPO_ROOT}/${plan_file}" >> "${prompt_file}"
+
+  cat >> "${prompt_file}" << PROMPT_EOF
 
 After completing all phases:
 1. Verify all tests pass: uv run pytest (relevant test files) -q
@@ -97,10 +105,12 @@ After completing all phases:
 4. Report completion status
 
 Start now — read the plan and begin Phase 0.
-EOF
-)" \
-    --cwd "${REPO_ROOT}" \
-    2>&1 | tee "${log_file}"
+PROMPT_EOF
+
+  (cd "${REPO_ROOT}" && claude \
+    --dangerously-skip-permissions \
+    -p "$(cat "${prompt_file}")" \
+  ) 2>&1 | tee "${log_file}"
 
   local exit_code=$?
   local end_time
