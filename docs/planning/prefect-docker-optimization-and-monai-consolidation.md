@@ -86,7 +86,7 @@ SPLITS_DIR=/app/configs/splits
 
 # HPO
 POSTGRES_DB_OPTUNA=optuna
-OPTUNA_STORAGE_URL=         # empty = in-memory (sequential); postgresql://... for parallel
+OPTUNA_STORAGE_URL=postgresql+psycopg2://minivess:minivess_secret@postgres:5432/optuna  # always postgresql
 REPLICA_INDEX=0             # HPO hybrid mode: CUDA_VISIBLE_DEVICES assignment
 
 # Logging
@@ -157,15 +157,15 @@ allocation:
   strategy: sequential        # sequential | parallel | hybrid
   n_containers: 1             # parallel: N workers; hybrid: M GPUs
   trials_per_container: null  # hybrid only: K trials per GPU container
-  optuna_storage: null        # null=in-memory; postgresql://... for parallel/hybrid
+  optuna_storage: null        # null → use OPTUNA_STORAGE_URL env var (always postgresql)
   gpu_indices: null           # hybrid: list or "auto" (discover via nvidia-smi)
 ```
 
 **Strategy constraints (enforced in `HPOEngine.from_config()`):**
-- `sequential`: `optuna_storage` can be null (in-memory) or SQLite
-- `parallel`: `optuna_storage` MUST be `postgresql://...` — raise `ValueError` otherwise
-  (SQLite has file-locking failures under concurrent writers)
-- `hybrid`: `optuna_storage` MUST be postgresql; GPU assignment via
+- **ALL strategies** require a `postgresql://` or `postgresql+psycopg2://` URL — PostgreSQL
+  is the project's only database. No SQLite, no in-memory. If `optuna_storage` is null in
+  YAML, read `OPTUNA_STORAGE_URL` env var. `ValueError` if not a valid postgresql URL.
+- `hybrid`: GPU assignment via
   `scripts/hpo_worker_entrypoint.sh` setting `CUDA_VISIBLE_DEVICES=$REPLICA_INDEX`
 
 **New docker-compose service:**

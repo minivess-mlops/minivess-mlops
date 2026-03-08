@@ -99,9 +99,9 @@
           CHECKPOINT_DIR=/app/checkpoints
           LOGS_DIR=/app/logs
           SPLITS_DIR=/app/configs/splits
-          # HPO
+          # HPO — PostgreSQL is the ONLY database in this project (no SQLite, no in-memory)
           POSTGRES_DB_OPTUNA=optuna
-          OPTUNA_STORAGE_URL=
+          OPTUNA_STORAGE_URL=postgresql+psycopg2://minivess:minivess_secret@postgres:5432/optuna
           REPLICA_INDEX=0
           # Logging
           PREFECT_LOGGING_EXTRA_LOGGERS=minivess
@@ -266,10 +266,12 @@
       <test-first>
         - test_allocation_strategy_sequential_parsed_from_yaml: load dynunet_example.yaml with
           allocation.strategy=sequential, assert AllocationStrategy.SEQUENTIAL
-        - test_allocation_strategy_parallel_requires_postgres: AllocationStrategy.PARALLEL with
-          optuna_storage=None raises ValueError("parallel strategy requires postgresql storage")
-        - test_allocation_strategy_parallel_with_postgres_accepted: with
-          optuna_storage="postgresql://user:pass@host/optuna" → no error
+        - test_all_strategies_require_postgresql: for EACH of sequential/parallel/hybrid,
+          optuna_storage=None raises ValueError("PostgreSQL required — no SQLite or in-memory")
+        - test_sqlite_url_rejected: optuna_storage="sqlite:///..." raises ValueError for all strategies
+        - test_all_strategies_accept_postgresql_url: "postgresql://user:pass@host/optuna" → no error
+        - test_uses_env_var_when_storage_null: when YAML optuna_storage is null, reads
+          OPTUNA_STORAGE_URL env var; if that is also not set → ValueError
         - test_allocation_strategy_hybrid_sets_gpu_fields: strategy=hybrid,
           n_containers=4, trials_per_container=3 → AllocationConfig.n_containers==4
         - test_hpo_engine_from_config_roundtrip: build HPOEngine via from_config(yaml_dict),
@@ -282,8 +284,11 @@
       <description>
         Add AllocationStrategy enum (SEQUENTIAL, PARALLEL, HYBRID) and AllocationConfig
         dataclass to hpo_engine.py. Add from_config(yaml_dict) classmethod to HPOEngine.
-        Enforce: if strategy==PARALLEL and optuna_storage is None or not postgresql://,
-        raise ValueError with clear message.
+        Enforce for ALL strategies: optuna_storage must start with postgresql:// or
+        postgresql+psycopg2://. If null in YAML, read OPTUNA_STORAGE_URL env var.
+        If neither is a valid postgresql URL → ValueError:
+        "PostgreSQL storage required for Optuna studies. Set OPTUNA_STORAGE_URL to a
+        postgresql:// URL. SQLite and in-memory are not supported in this project."
       </description>
       <file>src/minivess/optimization/hpo_engine.py</file>
     </task>
