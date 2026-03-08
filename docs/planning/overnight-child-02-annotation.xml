@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="utf-8"?>
+<child-plan id="annotation-flow">
+  <metadata>
+    <title>Data Annotation — MONAI Label + 3D Slicer + BentoML champion pre-segmentation (#330)</title>
+    <branch>feat/annotation-flow</branch>
+    <closes-issues>#330</closes-issues>
+    <base-branch>main</base-branch>
+    <estimated-duration>4-5 hours (sequential TDD)</estimated-duration>
+  </metadata>
+
+  <context-files>
+    <file>CLAUDE.md</file>
+    <file>src/minivess/orchestration/flows/annotation_flow.py</file>
+    <file>src/minivess/serving/inference_client.py</file>
+    <file>src/minivess/serving/api_models.py</file>
+    <file>deployment/docker-compose.flows.yml</file>
+    <file>.env.example</file>
+    <file>src/minivess/data/external_datasets.py</file>
+    <file>configs/data/minivess.yaml</file>
+  </context-files>
+
+  <critical-rules>
+    - Rule #3: Library-First — use MONAI Label SDK (monailabel) directly. Do NOT reimplement label server.
+    - Rule #17: Annotation flow runs inside Docker. No standalone script fallback.
+    - Rule #22: MONAI_LABEL_PORT=8000 already in .env.example. Use it.
+    - MONAI-Compatibility Mandate: Any segmentation logic uses MONAI transforms/inference, never custom.
+    - Slicer is desktop-only (Option A confirmed): document 3D Slicer plugin install in README/issue.
+    - The champion model pre-segmentation comes from BentoML serving (existing annotation_flow.py logic).
+    - DVC auto-commit on approved annotation (approved mask → DVC add → version tag).
+    - Update issue #330 body with advanced annotation references before implementing.
+  </critical-rules>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="0" name="Update GitHub issue #330 with annotation literature">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      Update issue #330 with references to advanced annotation systems kept as future work.
+      Current implementation: MONAI Label + 3D Slicer.
+      Future alternatives documented in issue (not implemented):
+    </description>
+
+    <task id="T-ANN.0.1" name="Update issue #330 with advanced annotation references">
+      <description>
+        Update issue body to include:
+
+        CURRENT IMPLEMENTATION:
+        - MONAILabel (monailabel pip package, https://github.com/Project-MONAI/MONAILabel)
+        - 3D Slicer desktop app connecting to MONAI Label server
+        - BentoML champion model provides initial pre-segmentation mask
+        - Approved masks → DVC auto-commit
+
+        FUTURE ALTERNATIVES (not implemented, kept for reference):
+        - SlicerMONAIViz: https://github.com/Project-MONAI/SlicerMONAIViz
+        - SlicerMONAIAuto3DSeg: https://github.com/lassoan/SlicerMONAIAuto3DSeg
+        - Interactive Segmentation Survey: https://arxiv.org/abs/2408.15224 (Shi et al.)
+        - Segment Anything in Medical Images: https://arxiv.org/abs/2304.05622 (MedSAM)
+        - TMI 2025 annotation: https://doi.org/10.1109/TMI.2025.3627954
+        - CSCWD 2025: https://doi.org/10.1109/CSCWD64889.2025.11033595
+
+        UI NOTE: MONAI Label runs a server at http://localhost:8000. The browser UI is
+        minimal (volume list + label management only). Real annotation requires 3D Slicer
+        (desktop app) with the MONAILabel extension installed. This is the expected workflow
+        for any serious annotation work — 3D rotation of vascular microstructures requires
+        a full 3D rendering engine that browsers cannot provide without WebGPU.
+        WebGL could render the volumes but interactive annotation (brush, smart tools)
+        requires significant custom engineering not available in any web-based tool today.
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="1" name="MONAI Label server — Docker service">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      MONAI Label runs as a Docker service. The server hosts an "app" (a Python directory
+      that defines which AI models are loaded for annotation assistance).
+      We create a custom MONAI Label app that loads the BentoML champion model for
+      pre-segmentation, then exposes it via the MONAI Label API.
+    </description>
+
+    <task id="T-ANN.1.1" name="RED: Tests for MONAI Label service config">
+      <description>
+        Create tests/unit/annotation/test_monailabel_config.py:
+
+        class TestMonaiLabelConfig:
+          - test_monai_label_port_in_env_example() — grep .env.example for MONAI_LABEL_PORT
+          - test_monai_label_service_in_compose() — parse docker-compose.flows.yml (yaml.safe_load),
+            verify 'monai-label' service exists with MONAI_LABEL_PORT
+          - test_monailabel_app_dir_exists() — deployment/monailabel/minivess_app/ directory present
+          - test_monailabel_app_has_main() — deployment/monailabel/minivess_app/main.py exists
+          - test_monailabel_app_has_model_config() — deployment/monailabel/minivess_app/model/ exists
+
+        class TestMonaiLabelDockerfile:
+          - test_monailabel_dockerfile_exists() — deployment/docker/Dockerfile.monailabel exists
+          - test_monailabel_dockerfile_installs_monailabel() — file contains "monailabel" pip/uv install
+          - test_monailabel_port_not_hardcoded() — Dockerfile does not contain "EXPOSE 8000" literal
+            (port comes from compose via MONAI_LABEL_PORT env var)
+      </description>
+    </task>
+
+    <task id="T-ANN.1.2" name="GREEN: MONAI Label Docker service">
+      <description>
+        1. Create deployment/docker/Dockerfile.monailabel:
+           FROM python:3.12-slim
+           RUN pip install monailabel
+           COPY deployment/monailabel/minivess_app /app/monailabel_app
+           CMD ["monailabel", "start_server", "--app", "/app/monailabel_app", "--studies", "/data/studies", "--port", "${MONAI_LABEL_PORT:-8000}"]
+
+        2. Create deployment/monailabel/minivess_app/ — standard MONAI Label app structure:
+           - main.py: MONAILabelApp subclass loading the champion pre-segmenter
+           - model/: empty (models served via BentoML, not local weights)
+           - lib/infers/: Infer class wrapping BentoML champion client
+           - lib/trainers/: Trainer class (stub for active learning future work)
+
+        3. Add to deployment/docker-compose.flows.yml:
+           monai-label:
+             build:
+               context: .
+               dockerfile: deployment/docker/Dockerfile.monailabel
+             ports:
+               - "${MONAI_LABEL_PORT:-8000}:${MONAI_LABEL_PORT:-8000}"
+             volumes:
+               - ${DATA_DIR:-./data}:/data/studies
+               - ${MLRUNS_DIR:-./mlruns}:/mlruns
+             environment:
+               <<: *x-common-env
+               MONAI_LABEL_PORT: ${MONAI_LABEL_PORT:-8000}
+               BENTOML_URL: http://${BENTOML_DOCKER_HOST:-minivess-bento}:${BENTOML_PORT:-3333}
+
+        4. Add MONAI_LABEL_APP_DIR=/app/monailabel_app to .env.example (if not already).
+      </description>
+      <files-to-create>
+        deployment/docker/Dockerfile.monailabel
+        deployment/monailabel/minivess_app/main.py
+        deployment/monailabel/minivess_app/lib/__init__.py
+        deployment/monailabel/minivess_app/lib/infers/champion_infer.py
+      </files-to-create>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="2" name="BentoML champion → MONAI Label pre-segmentation bridge">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      The MONAI Label InferTask for the champion model queries BentoML serving.
+      When annotator opens a volume in Slicer, MONAI Label runs pre-segmentation
+      by calling the BentoML endpoint. The mask is returned as the starting point
+      for manual correction.
+    </description>
+
+    <task id="T-ANN.2.1" name="RED: Tests for champion pre-segmentation bridge">
+      <description>
+        Create tests/unit/annotation/test_champion_infer.py:
+
+        class TestChampionInfer:
+          - test_infer_returns_nifti_path(tmp_path) — infer(image_path) returns a .nii.gz path
+          - test_infer_calls_bentoml_client() — mock BentoML client, verify predict() called once
+          - test_infer_handles_bentoml_unavailable(tmp_path) — when BentoML returns error,
+            falls back to zero mask (not exception — graceful degradation for annotation)
+          - test_output_mask_shape_matches_input(tmp_path) — output mask same spatial shape as input
+          - test_output_is_binary_mask(tmp_path) — output values are 0 or 1 only
+      </description>
+    </task>
+
+    <task id="T-ANN.2.2" name="GREEN: champion_infer.py">
+      <description>
+        Implement deployment/monailabel/minivess_app/lib/infers/champion_infer.py:
+
+        class ChampionInfer(BasicInfer):
+            def __init__(self, bentoml_url: str):
+                self.bentoml_url = bentoml_url
+
+            def inferer(self):
+                return SimpleInferer()
+
+            def pre_transforms(self, data=None):
+                return [LoadImaged(keys="image"), EnsureChannelFirstd(keys="image")]
+
+            def post_transforms(self, data=None):
+                return [Activationsd(keys="pred"), AsDiscreted(keys="pred", argmax=True)]
+
+            def run_infer(self, request, callbacks=None):
+                # Load volume, call BentoML REST endpoint, return mask
+                from minivess.serving.inference_client import RemoteInferenceClient
+                client = RemoteInferenceClient(self.bentoml_url)
+                ...
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="3" name="Annotation approval → DVC auto-commit">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      When an annotator approves a corrected mask in 3D Slicer, the MONAI Label server
+      saves it to /data/studies/{volume_id}/final_label/. A Prefect task monitors this
+      directory and auto-commits new approved masks to DVC.
+    </description>
+
+    <task id="T-ANN.3.1" name="RED: Tests for annotation approval pipeline">
+      <description>
+        Create tests/integration/annotation/test_annotation_approval.py:
+
+        class TestAnnotationApproval:
+          - test_approved_label_triggers_dvc_add(tmp_path) — simulate approved .nii.gz,
+            verify dvc_add_annotation() called with correct path
+          - test_dvc_version_tag_format() — tag follows "annotation/v{YYYY-MM-DD}-{hash[:8]}" format
+          - test_mlflow_logs_annotation_event() — MLflow run created with annotation metadata
+          - test_approved_count_increments() — after 5 approvals, DVC commit count is 5
+          - test_annotation_result_has_volume_id() — AnnotationApprovalResult.volume_id matches input
+      </description>
+    </task>
+
+    <task id="T-ANN.3.2" name="GREEN: annotation approval Prefect task">
+      <description>
+        Extend src/minivess/orchestration/flows/annotation_flow.py:
+
+        @dataclass
+        class AnnotationApprovalResult:
+            volume_id: str
+            label_path: Path
+            dvc_tag: str
+            mlflow_run_id: str
+
+        @task(name="approve-annotation")
+        def approve_annotation_task(
+            volume_id: str,
+            label_path: Path,
+            mlruns_dir: Path,
+        ) -> AnnotationApprovalResult:
+            # 1. Validate mask (binary, correct shape)
+            # 2. dvc add label_path
+            # 3. Create version tag
+            # 4. Log to MLflow (experiment: minivess_annotation)
+            # 5. Return AnnotationApprovalResult
+
+        @flow(name="minivess-annotation-approval")
+        def run_annotation_approval_flow(
+            studies_dir: Path | None = None,
+        ) -> list[AnnotationApprovalResult]:
+            """Poll studies_dir for newly approved labels and commit via DVC."""
+            ...
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="4" name="3D Slicer setup documentation + smoke tests">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <task id="T-ANN.4.1" name="3D Slicer plugin documentation">
+      <description>
+        Create docs/annotation/slicer-setup.md with:
+        1. Install 3D Slicer (download from slicer.org, all platforms)
+        2. Install MONAILabel extension from Extension Manager
+        3. Configure server URL: http://localhost:8000 (or ${MONAI_LABEL_PORT})
+        4. Browse volumes, click "Get" for BentoML pre-segmentation
+        5. Correct mask using Segment Editor tools
+        6. Click "Submit" to trigger DVC auto-commit
+        7. Troubleshooting: if Slicer cannot connect, verify docker-compose services running
+      </description>
+    </task>
+
+    <task id="T-ANN.4.2" name="Smoke test: MONAI Label server health check">
+      <description>
+        Create tests/integration/annotation/test_monailabel_health.py:
+
+        @pytest.mark.requires_docker
+        @pytest.mark.slow
+        class TestMonaiLabelHealth:
+          - test_monailabel_server_responds() — GET http://localhost:MONAI_LABEL_PORT/info returns 200
+          - test_monailabel_has_minivess_app() — response JSON contains app info
+          - test_champion_infer_endpoint_exists() — /infer/champion endpoint available
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="5" name="Pre-commit, tests green, PR">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <task id="T-ANN.5.1" name="Run full test suite + pre-commit + PR">
+      <steps>
+        uv run pytest tests/unit/annotation/ -q
+        uv run pytest tests/integration/annotation/ -q -m "not requires_docker"
+        uv run pre-commit run --all-files
+        git checkout -b feat/annotation-flow
+        git add deployment/docker/Dockerfile.monailabel
+        git add deployment/monailabel/
+        git add src/minivess/orchestration/flows/annotation_flow.py
+        git add tests/unit/annotation/ tests/integration/annotation/
+        git add docs/annotation/
+        git commit -m "feat(annotation): MONAI Label + 3D Slicer + BentoML champion pre-segmentation (#330)"
+        git push -u origin feat/annotation-flow
+        gh pr create --title "feat(annotation): MONAI Label + 3D Slicer annotation pipeline" \
+          --body "Closes #330"
+      </steps>
+    </task>
+  </phase>
+
+</child-plan>

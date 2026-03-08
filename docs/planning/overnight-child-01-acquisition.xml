@@ -1,0 +1,347 @@
+<?xml version="1.0" encoding="utf-8"?>
+<child-plan id="acquisition-flow">
+  <metadata>
+    <title>Flow 0: Data Acquisition — MiniVess download, external test datasets, DVC, OME-TIFF (#328 #139 #150 #176)</title>
+    <branch>feat/acquisition-flow</branch>
+    <closes-issues>#328, #139, #150, #176</closes-issues>
+    <base-branch>main</base-branch>
+    <estimated-duration>3-4 hours (sequential TDD)</estimated-duration>
+  </metadata>
+
+  <context-files>
+    <file>CLAUDE.md</file>
+    <file>docs/datasets/README.md</file>
+    <file>src/minivess/data/CLAUDE.md</file>
+    <file>src/minivess/data/external_datasets.py</file>
+    <file>scripts/download_minivess.py</file>
+    <file>configs/splits/3fold_seed42.json</file>
+    <file>configs/data/minivess.yaml</file>
+    <file>configs/dvc/remotes.yaml</file>
+    <file>.env.example</file>
+    <file>deployment/docker-compose.flows.yml</file>
+    <file>src/minivess/orchestration/flows/data_flow.py</file>
+  </context-files>
+
+  <critical-rules>
+    - Rule #2: TDD MANDATORY — failing tests first, then implementation.
+    - Rule #3: Library-First — use existing EBRAINS API, httpx for downloads, dvc Python API for versioning.
+    - Rule #16: NO regex for parsing. Use json.loads(), pathlib.Path, str.split().
+    - Rule #17: ALL flows via Prefect in Docker. scripts/download_minivess.py is a UTILITY, not a run path.
+    - Rule #18: /tmp FORBIDDEN for artifacts. Use pytest tmp_path for tests, volume-mounted /data in Docker.
+    - Rule #22: .env.example is single source of truth. DATA_DIR, SPLITS_DIR already defined there.
+    - Rule #23: Hydra-zen for experiment config — acquisition flow parameters go through Hydra.
+    - MONAI Library-First: use monai.transforms for any NIfTI manipulation.
+    - Academic scope: issue description should mention real-time acquisition literature (see Phase 0).
+  </critical-rules>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="0" name="Update GitHub issue #328 with academic context">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      Update the GitHub issue #328 body with academic context for real-time acquisition systems.
+      This is documentation-only — no code changes. Sets the stage for the paper Discussion section.
+    </description>
+
+    <task id="T-ACQ.0.1" name="Update #328 issue body with acquisition literature">
+      <description>
+        Add a "Future Work / Discussion" section to issue #328 mentioning real-time adaptive
+        acquisition systems as the natural evolution of this pipeline:
+
+        References to include:
+        - Bhatt et al. (2013) nmeth.3041 — Apache Spark-based acquisition (Nature Methods)
+        - Bhatt/pysight (2016) 10.1101/061507 — real-time multi-photon (bioRxiv)
+        - Bhatt/STNeuroNet — github.com/soltanianzadeh/STNeuroNet
+        - PBLab/python-pysight — github.com/PBLab/python-pysight
+        - Nature Methods Real-time: doi.org/10.1016/j.neuron.2015.11.037
+        - nmeth.3217 — Nature Methods
+        - science.1260922 — Science
+        - pnas.1514209112 — PNAS real-time
+        - Draelos et al. (2025) s41467-025-64856-3 — Improving adaptive neuroscience platform
+          (file: sci-llm-writer/biblio/biblio-vascular/vascular-tmp/draelos-2025-improv-adaptive-neuroscience-platform.md)
+        - Inverse design / hardware: dx.doi.org/10.1364/BOE.6.003113 (custom 2-PM system)
+        - opg.optica.org/oe/fulltext.cfm?uri=oe-34-5-8961 (custom 2-PM additions)
+
+        Also note that the MiniVess dataset itself came from a 2PM system, and that
+        the acquisition_flow.py (Flow 0) simulates this pipeline in a reproducible way
+        for teams without access to live microscopy infrastructure.
+      </description>
+      <action>gh issue edit 328 --body "$(cat docs/planning/acquisition-issue-body.md)"</action>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="1" name="Prefect acquisition_flow wrapping existing download logic">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      The existing scripts/download_minivess.py already handles EBRAINS download + ZIP extraction.
+      This phase wraps it as a proper Prefect acquisition_flow with tasks, DVC versioning, and
+      manual fallback instructions. The flow is the first in the 9-flow pipeline.
+    </description>
+
+    <task id="T-ACQ.1.1" name="RED: Write failing tests for acquisition flow">
+      <description>
+        Create tests/integration/orchestration/test_acquisition_flow_smoke.py with:
+
+        class TestAcquisitionFlowSmoke:
+          - test_acquisition_flow_importable() — imports run_acquisition_flow without error
+          - test_acquisition_flow_has_prefect_decorator() — AST check: @flow decorator present
+          - test_acquisition_flow_returns_dataclass() — result has .n_volumes, .data_dir, .dvc_version fields
+          - test_acquisition_flow_skips_if_data_ready(tmp_path) — if imagesTr/ already has 70 files, skip download
+          - test_acquisition_flow_produces_dvc_tag() — DVC tag format "minivess/v{n}" returned
+          - test_acquisition_flow_manual_fallback_message() — if download fails, returns instructions dict
+
+        class TestAcquisitionFlowConfig:
+          - test_hydra_config_has_acquisition_experiment() — configs/experiment/acquisition.yaml exists
+          - test_data_dir_from_env() — flow reads DATA_DIR from os.environ (Rule #22)
+      </description>
+      <files-to-create>
+        tests/integration/orchestration/test_acquisition_flow_smoke.py
+      </files-to-create>
+    </task>
+
+    <task id="T-ACQ.1.2" name="GREEN: Implement run_acquisition_flow">
+      <description>
+        Create src/minivess/orchestration/flows/acquisition_flow.py:
+
+        @dataclass
+        class AcquisitionFlowResult:
+            data_dir: Path
+            n_volumes: int
+            dvc_version: str | None
+            manual_download_required: bool
+            instructions: str | None  # populated if download fails
+
+        @task(name="check-dataset-ready")
+        def check_dataset_task(data_dir: Path) -> bool:
+            from minivess.data.downloader import is_dataset_ready
+            return is_dataset_ready(data_dir)
+
+        @task(name="download-minivess")
+        def download_minivess_task(data_dir: Path) -> int:
+            from minivess.data.downloader import download_minivess
+            return download_minivess(data_dir)
+
+        @task(name="dvc-tag-dataset")
+        def dvc_tag_task(data_dir: Path, version: str) -> str:
+            from minivess.data.versioning import create_data_version_tag
+            return create_data_version_tag("minivess", version)
+
+        @flow(name="minivess-acquisition")
+        def run_acquisition_flow(
+            data_dir: Path | None = None,
+            force_download: bool = False,
+        ) -> AcquisitionFlowResult:
+            _require_docker_context()
+            data_dir = Path(os.environ.get("DATA_DIR", "/data")) / "raw" / "minivess"
+            ...
+
+        Move download logic from scripts/download_minivess.py into
+        src/minivess/data/downloader.py (importable module).
+        scripts/download_minivess.py becomes a thin CLI wrapper calling downloader.py.
+      </description>
+      <files-to-create>
+        src/minivess/orchestration/flows/acquisition_flow.py
+        src/minivess/data/downloader.py
+        configs/experiment/acquisition.yaml
+      </files-to-create>
+      <files-to-modify>
+        scripts/download_minivess.py  (thin wrapper calling downloader.py)
+        deployment/docker-compose.flows.yml  (add acquisition service)
+      </files-to-modify>
+    </task>
+
+    <task id="T-ACQ.1.3" name="OME-TIFF to NIfTI conversion task">
+      <description>
+        Add OME-TIFF → NIfTI conversion for real microscope data (non-EBRAINS input).
+        Uses tifffile + nibabel (both already in pyproject.toml or add via uv add).
+        Library-First: tifffile for reading, nibabel for writing.
+
+        @task(name="convert-ometiff-to-nifti")
+        def convert_ometiff_task(
+            input_dir: Path,
+            output_dir: Path,
+            voxel_size_um: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        ) -> list[Path]:
+            Reads *.tiff / *.tif / *.ome.tiff in input_dir.
+            Writes NIfTI to output_dir/imagesTr/.
+            Returns list of output paths.
+
+        Flow uses this task when input_dir contains TIFF files (not NIfTI).
+        Skipped for EBRAINS/ZIP input (already NIfTI).
+      </description>
+      <files-to-modify>
+        src/minivess/orchestration/flows/acquisition_flow.py
+        src/minivess/data/converters.py  (new: OME-TIFF conversion utilities)
+      </files-to-modify>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="2" name="External test dataset acquisition (#139 #150 #176)">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      Implement download + DVC tracking for the 3 external test datasets.
+      Closes #139 (acquisition), #150 (license verification), #176 (download helpers).
+      These datasets are TEST-ONLY — never used in training folds.
+    </description>
+
+    <task id="T-ACQ.2.1" name="RED: Tests for external dataset download">
+      <description>
+        Create tests/unit/data/test_external_dataset_download.py:
+
+        class TestExternalDatasetRegistry:
+          - test_all_three_datasets_registered() — EXTERNAL_DATASETS has deepvess, tubenet_2pm, vesselnn
+          - test_license_fields_present() — each entry has license + license_verified bool
+          - test_tubenet_license_verified() — tubenet_2pm.license_verified is True (CC-BY-4.0)
+          - test_vesselnn_license_verified() — vesselnn.license_verified is True (MIT)
+          - test_deepvess_license_unverified() — deepvess.license_verified is False (eCommons-educational)
+          - test_each_dataset_has_url() — each entry has source_url non-empty
+
+        class TestExternalDatasetDownloader:
+          - test_download_creates_output_dir(tmp_path) — output_dir created even if download skipped
+          - test_skip_if_already_present(tmp_path) — idempotent: skip if target dir non-empty
+          - test_download_raises_on_unknown_dataset() — ValueError for unknown dataset name
+          - test_manual_instructions_returned_on_failure() — returns dict with download_url key
+
+        class TestDVCConfigForExternalDatasets:
+          - test_dvc_config_exists_for_each_dataset() — DVC_CONFIGS dict has 3 entries
+          - test_dvc_path_format() — path follows "data/external/{name}.dvc" pattern
+      </description>
+    </task>
+
+    <task id="T-ACQ.2.2" name="GREEN: Extend external_datasets.py with download helpers">
+      <description>
+        Extend src/minivess/data/external_datasets.py:
+
+        1. Add license_verified: bool field to ExternalDatasetConfig
+        2. Update DeepVess: license="eCommons-educational", license_verified=False
+        3. Update TubeNet 2PM: license="CC-BY-4.0", license_verified=True
+        4. Update VesselNN: license="MIT", license_verified=True
+        5. Implement download_external_dataset(name, output_dir) function:
+           - Checks if target dir already populated (idempotent)
+           - For tubenet_2pm: downloads from UCL Figshare API (httpx)
+           - For vesselnn: clones GitHub repo or downloads release tarball
+           - For deepvess: downloads from Cornell eCommons (httpx) — warn on unverified license
+           - On failure: returns dict with manual instructions (never raises silently)
+        6. Add DatasetDVCConfig for per-dataset DVC tracking config
+        7. Add discover_external_test_pairs(name, data_dir) function
+      </description>
+    </task>
+
+    <task id="T-ACQ.2.3" name="Wire external datasets into acquisition_flow">
+      <description>
+        Add download_external_datasets_task to acquisition_flow.py.
+        Flow downloads external datasets concurrently (Prefect task concurrency).
+        Results logged to MLflow with eval_external_datasets_available tag.
+        If external dataset download fails: log warning, continue (best-effort).
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="3" name="DVC versioning integration">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      Implement automatic DVC tagging after successful download.
+      Each acquisition flow run produces a DVC commit + version tag.
+    </description>
+
+    <task id="T-ACQ.3.1" name="DVC auto-commit in acquisition flow">
+      <description>
+        After successful download of MiniVess + external datasets:
+        1. `dvc add data/raw/minivess/` (update minivess.dvc)
+        2. `dvc add data/external/{name}/` for each external dataset
+        3. `git add data/*.dvc data/external/*.dvc`
+        4. Create version tag: "minivess/v{YYYY-MM-DD}" or increment semver
+        5. Log DVC commit hash + version tag to MLflow run
+
+        Expose as @task(name="dvc-commit-datasets") in acquisition_flow.py.
+        Uses subprocess.run for DVC CLI commands (Python DVC API is unstable).
+        Error handling: if dvc not installed, log warning + continue.
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="4" name="Docker service + Hydra config">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      Add acquisition Prefect flow service to docker-compose.flows.yml.
+      Add configs/experiment/acquisition.yaml as Hydra-zen experiment config.
+    </description>
+
+    <task id="T-ACQ.4.1" name="Docker service for acquisition flow">
+      <description>
+        Add to deployment/docker-compose.flows.yml:
+
+        acquisition:
+          image: ${MINIVESS_BASE_IMAGE:-minivess-base:latest}
+          environment:
+            <<: *x-common-env
+            FLOW_NAME: acquisition
+          volumes:
+            - ${DATA_DIR:-./data}:/data
+            - ${MLRUNS_DIR:-./mlruns}:/mlruns
+          command: ["python", "-m", "minivess.orchestration.flows.acquisition_flow"]
+
+        Note: acquisition flow does NOT need GPU (download + OME-TIFF conversion is CPU-only).
+      </description>
+    </task>
+
+    <task id="T-ACQ.4.2" name="Hydra-zen experiment config for acquisition">
+      <description>
+        Create configs/experiment/acquisition.yaml:
+
+        defaults:
+          - base
+          - _self_
+
+        acquisition:
+          force_download: false
+          external_datasets:
+            - deepvess
+            - tubenet_2pm
+            - vesselnn
+          dvc_auto_commit: true
+          ometiff_input_dir: null  # set to path when converting real microscope data
+          ometiff_voxel_size_um: [1.0, 1.0, 1.0]
+
+        mlflow_experiment: minivess_acquisition
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="5" name="Pre-commit, tests green, PR">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <task id="T-ACQ.5.1" name="Run full test suite + pre-commit">
+      <steps>
+        uv run pytest tests/integration/orchestration/test_acquisition_flow_smoke.py -q
+        uv run pytest tests/unit/data/test_external_dataset_download.py -q
+        uv run pre-commit run --all-files
+        uv run mypy src/minivess/orchestration/flows/acquisition_flow.py
+        uv run mypy src/minivess/data/downloader.py
+        uv run mypy src/minivess/data/external_datasets.py
+      </steps>
+    </task>
+
+    <task id="T-ACQ.5.2" name="Commit and push PR">
+      <steps>
+        git checkout -b feat/acquisition-flow
+        git add src/minivess/orchestration/flows/acquisition_flow.py
+        git add src/minivess/data/downloader.py src/minivess/data/external_datasets.py
+        git add src/minivess/data/converters.py src/minivess/data/CLAUDE.md
+        git add configs/experiment/acquisition.yaml configs/dvc/remotes.yaml
+        git add deployment/docker-compose.flows.yml
+        git add tests/integration/orchestration/test_acquisition_flow_smoke.py
+        git add tests/unit/data/test_external_dataset_download.py
+        git add docs/datasets/README.md
+        git commit -m "feat(acquisition): Flow 0 — MiniVess + external test datasets + DVC (#328 #139 #150 #176)"
+        git push -u origin feat/acquisition-flow
+        gh pr create --title "feat(acquisition): Flow 0 — data acquisition + external datasets + DVC" \
+          --body "Closes #328, #139, #150, #176"
+      </steps>
+    </task>
+  </phase>
+
+</child-plan>

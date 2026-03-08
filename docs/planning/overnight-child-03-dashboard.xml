@@ -1,0 +1,343 @@
+<?xml version="1.0" encoding="utf-8"?>
+<child-plan id="dashboard">
+  <metadata>
+    <title>Unified Dashboard — React+Vite frontend + FastAPI backend + QA monitoring merged (#331 #342)</title>
+    <branch>feat/dashboard-ui</branch>
+    <closes-issues>#331, #342</closes-issues>
+    <base-branch>main</base-branch>
+    <estimated-duration>6-8 hours (sequential TDD)</estimated-duration>
+    <note>QA Flow (#342) merged into Dashboard backend — no separate QA Prefect flow.</note>
+  </metadata>
+
+  <context-files>
+    <file>CLAUDE.md</file>
+    <file>.env.example</file>
+    <file>deployment/docker-compose.flows.yml</file>
+    <file>src/minivess/orchestration/flows/dashboard_flow.py</file>
+    <file>src/minivess/orchestration/trigger.py</file>
+    <file>deployment/bento/service.py</file>
+  </context-files>
+
+  <visual-reference>
+    /home/petteri/Dropbox/github-personal/music-attribution-scaffold/frontend/src/app/page.tsx
+    Style: editorial typography, dark biomedical palette, section-based 2-col layout.
+    Adapt: replace cream/waveform aesthetic with deep navy/teal biomedical palette.
+    Imagery: two-photon microscopy vasculature renders (Nano Banana Pro assets if available,
+    else placeholder gradient with vascular-inspired line art using SVG).
+  </visual-reference>
+
+  <critical-rules>
+    - Rule #22: Add DASHBOARD_UI_PORT=3002 and DASHBOARD_API_PORT=8090 to .env.example FIRST.
+    - Rule #17: Dashboard served via Docker service in docker-compose.flows.yml.
+    - QA merged into Dashboard: NO separate qa_flow Prefect flow. Health checks run as
+      FastAPI background tasks on schedule. Results exposed via /api/health endpoint.
+    - Frontend: Vite + React (not Next.js). TypeScript. d3.js for charts.
+    - Backend: FastAPI (Python). One adapter class per data source.
+    - Port 3000 is taken by Grafana — use 3002 for UI, 8090 for API.
+    - NEVER hardcode service URLs in React source — all via VITE_API_URL env var.
+    - Tests for each FastAPI adapter are unit tests (mock the upstream service).
+    - Integration tests for the Docker service use @pytest.mark.requires_docker.
+    - Dashboard sections (per issue #331): Data, Models, Post-Training, Analysis,
+      Biostatistics, Deployment, Drift, Trust. Layout: 2-column, sections stacked.
+  </critical-rules>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="0" name=".env.example + docker-compose scaffold">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <task id="T-DASH.0.1" name="Add dashboard ports to .env.example">
+      <description>
+        Add to .env.example (FIRST — Rule #22):
+        DASHBOARD_UI_PORT=3002
+        DASHBOARD_API_PORT=8090
+        DASHBOARD_REFRESH_INTERVAL_S=30
+        DASHBOARD_HEALTH_CHECK_INTERVAL_S=300
+
+        Note: GRAFANA_PORT=3000 is already taken. LANGFUSE_PORT=3001 is taken.
+        Therefore dashboard UI=3002, API=8090.
+      </description>
+    </task>
+
+    <task id="T-DASH.0.2" name="RED: Tests that .env.example has dashboard ports">
+      <description>
+        Extend tests/unit/deployment/test_env_single_source_container_paths.py
+        (or create tests/unit/deployment/test_env_dashboard_ports.py):
+
+        class TestDashboardEnvVars:
+          - test_dashboard_ui_port_in_env_example() — DASHBOARD_UI_PORT defined
+          - test_dashboard_api_port_in_env_example() — DASHBOARD_API_PORT defined
+          - test_dashboard_ports_not_conflict_with_grafana() — 3002 != 3000
+          - test_dashboard_service_in_compose() — yaml.safe_load(compose), service 'dashboard-ui' exists
+          - test_dashboard_api_service_in_compose() — service 'dashboard-api' exists
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="1" name="FastAPI backend — service adapter framework">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      The hard/valuable part: FastAPI adapter framework with one class per data source.
+      Each adapter: connect(), query(endpoint, params) -> dict, cached with TTL.
+      All adapters are independently testable with mocked upstream services.
+    </description>
+
+    <task id="T-DASH.1.1" name="RED: Tests for adapter base class + MLflow adapter">
+      <description>
+        Create tests/unit/dashboard/test_service_adapters.py:
+
+        class TestAdapterBase:
+          - test_adapter_has_connect_method() — all adapters inherit ServiceAdapter ABC
+          - test_adapter_has_query_method() — query(endpoint, params) -> dict
+          - test_adapter_cache_ttl_respected() — second call within TTL returns cached result
+          - test_adapter_returns_empty_on_unavailable() — connection error → {} not exception
+          - test_adapter_status_reports_healthy_unhealthy() — status() returns {"healthy": bool}
+
+        class TestMLflowAdapter:
+          - test_mlflow_adapter_queries_experiments() — mock httpx, GET /api/2.0/mlflow/experiments/list
+          - test_mlflow_adapter_queries_runs() — mock httpx, GET /api/2.0/mlflow/runs/search
+          - test_mlflow_adapter_formats_metrics() — returns {"runs": [...], "n_experiments": int}
+          - test_mlflow_adapter_url_from_env() — reads MLFLOW_TRACKING_URI (Rule #22)
+
+        class TestPrefectAdapter:
+          - test_prefect_adapter_queries_flow_runs() — mock httpx, GET /api/flow_runs
+          - test_prefect_adapter_formats_status() — returns {"active_runs": int, "recent": [...]}
+
+        class TestBentoMLAdapter:
+          - test_bentoml_adapter_queries_models() — mock httpx, GET /metrics (or /docs)
+          - test_bentoml_adapter_formats_serving_info() — returns {"endpoints": [...], "latency_ms": float}
+      </description>
+    </task>
+
+    <task id="T-DASH.1.2" name="GREEN: ServiceAdapter ABC + core adapters">
+      <description>
+        Create src/minivess/dashboard/:
+        - __init__.py
+        - adapters/__init__.py
+        - adapters/base.py — ServiceAdapter ABC with connect/query/cache/status
+        - adapters/mlflow_adapter.py — MLflow REST API adapter
+        - adapters/prefect_adapter.py — Prefect REST API adapter
+        - adapters/bentoml_adapter.py — BentoML metrics adapter
+        - adapters/evidently_adapter.py — Evidently JSON report adapter
+        - adapters/prometheus_adapter.py — Prometheus instant query adapter
+        - adapters/optuna_adapter.py — Optuna PostgreSQL study adapter
+        - adapters/duckdb_adapter.py — DuckDB in-process analytics
+        - adapters/health_adapter.py — aggregated health check across all adapters (QA merged here)
+
+        FastAPI app:
+        - app/main.py — FastAPI app, lifespan handler initializing all adapters
+        - app/routers/mlflow.py — /api/mlflow/* endpoints
+        - app/routers/prefect.py — /api/prefect/* endpoints
+        - app/routers/serving.py — /api/serving/* endpoints
+        - app/routers/health.py — /api/health/* (QA monitoring — drift alerts, model health)
+        - app/routers/analytics.py — /api/analytics/* (DuckDB queries)
+        - app/background.py — scheduled health check tasks (replaces QA flow)
+
+        QA monitoring in app/background.py (periodic tasks, default 5-min interval):
+        - check_prediction_drift() — queries Evidently JSON reports
+        - check_model_health() — runs WeightWatcher on latest checkpoint
+        - check_data_quality() — queries whylogs profiles
+        - POST to /api/health/alerts when thresholds exceeded
+        - Log alert to MLflow (experiment: minivess_monitoring)
+      </description>
+      <files-to-create>
+        src/minivess/dashboard/
+        deployment/docker/Dockerfile.dashboard-api
+        deployment/docker/Dockerfile.dashboard-ui
+      </files-to-create>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="2" name="React + Vite frontend — layout + sections">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      Frontend: Vite + React + TypeScript + d3.js + TailwindCSS.
+      Visual style: deep navy background (#0a1628), teal accent (#14b8a6), warm white cards,
+      biomedical palette. 2-column section layout. Hero with two-photon microscopy imagery.
+      Editorial typography (Inter or similar clean sans-serif).
+    </description>
+
+    <task id="T-DASH.2.1" name="Scaffold React+Vite project">
+      <description>
+        Create frontend/ at repo root:
+        npm create vite@latest frontend -- --template react-ts
+        cd frontend && npm install
+        npm install d3 @types/d3 tailwindcss autoprefixer postcss
+
+        Key files to create:
+        - frontend/src/App.tsx — main layout: sidebar nav + main content area
+        - frontend/src/lib/api.ts — typed fetch wrappers for each /api/* endpoint
+        - frontend/src/hooks/useAdapterData.ts — React hook with auto-refresh (DASHBOARD_REFRESH_INTERVAL_S)
+        - frontend/src/components/StatusBadge.tsx — green/amber/red health badge
+        - frontend/src/components/MetricCard.tsx — number + label + sparkline card
+        - frontend/src/components/SectionHeader.tsx — editorial-caps section label
+        - frontend/src/components/charts/BarChart.tsx — d3.js bar chart (experiment metrics)
+        - frontend/src/components/charts/LineChart.tsx — d3.js line chart (drift over time)
+        - frontend/src/components/charts/BoxPlot.tsx — d3.js box plot (model comparison, biostatistics)
+
+        Dashboard sections (each as src/sections/):
+        - DataSection.tsx — volume counts, spacing distributions, DVC version, 3 dataset tiles
+        - ModelSection.tsx — 4 model families (DynUNet, Mamba, SAM3, VesselFM), DSC/clDice bars
+        - PostTrainingSection.tsx — SWA/calibration improvements, conformal coverage
+        - AnalysisSection.tsx — ensemble comparison bars, strategy table
+        - BiostatisticsSection.tsx — bootstrap CIs, pairwise significance table
+        - DeploymentSection.tsx — BentoML endpoints, latency/throughput, ONNX model sizes
+        - DriftSection.tsx — Evidently drift metrics, whylogs profiles, alert badges
+        - TrustSection.tsx — WeightWatcher spectral metrics, Deepchecks validation results
+
+        Layout: 2-column grid inside each section. Sections stacked vertically with accent
+        dividers between them (similar to music-attribution-scaffold pattern).
+      </description>
+    </task>
+
+    <task id="T-DASH.2.2" name="Docker build for frontend">
+      <description>
+        Create deployment/docker/Dockerfile.dashboard-ui:
+        FROM node:20-alpine AS builder
+        WORKDIR /app
+        COPY frontend/package*.json ./
+        RUN npm ci
+        COPY frontend/ .
+        ARG VITE_API_URL=http://localhost:8090
+        RUN npm run build
+
+        FROM nginx:alpine
+        COPY --from=builder /app/dist /usr/share/nginx/html
+        COPY deployment/nginx/dashboard.conf /etc/nginx/conf.d/default.conf
+        EXPOSE ${DASHBOARD_UI_PORT:-3002}
+
+        Note: VITE_API_URL is a build-time env var (Vite bakes it in at build).
+        For development: vite dev proxy to API at localhost:8090.
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="3" name="QA monitoring integrated into health adapter">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <description>
+      #342 QA monitoring is implemented as FastAPI background tasks in the dashboard backend.
+      No separate Prefect flow. The /api/health endpoint aggregates all monitoring results.
+      Human-in-the-loop: health alerts link to GitHub Issues creation via GitHub API.
+    </description>
+
+    <task id="T-DASH.3.1" name="RED: Tests for health adapter (QA monitoring)">
+      <description>
+        Create tests/unit/dashboard/test_health_adapter.py:
+
+        class TestHealthAdapter:
+          - test_health_adapter_aggregates_all_adapters() — queries MLflow, Prefect, BentoML adapters
+          - test_health_adapter_flags_drift_alert() — Evidently drift > threshold → alert=True
+          - test_health_adapter_model_health_spectral() — WeightWatcher alpha < 2.0 → warning
+          - test_health_alert_creates_github_issue() — mock GH API, verify issue POST called
+          - test_health_alert_not_duplicate() — if issue already open with same title, skip creation
+          - test_health_summary_schema() — returns {"overall": str, "alerts": [...], "last_checked": str}
+          - test_health_refresh_interval_from_env() — reads DASHBOARD_HEALTH_CHECK_INTERVAL_S
+      </description>
+    </task>
+
+    <task id="T-DASH.3.2" name="GREEN: health_adapter.py + background scheduler">
+      <description>
+        Implement src/minivess/dashboard/adapters/health_adapter.py:
+        - Queries all adapters in parallel (asyncio.gather)
+        - Applies threshold rules (from configs/dashboard/health_thresholds.yaml)
+        - Creates GitHub Issues for critical alerts (gh api via subprocess or PyGithub)
+        - Returns HealthSummary dataclass
+
+        Implement src/minivess/dashboard/app/background.py:
+        - asyncio periodic task (default: 5 min) calling health_adapter.check_all()
+        - Results stored in-memory cache (Redis optional, dict for MVP)
+        - Exposed via /api/health GET endpoint
+
+        Create configs/dashboard/health_thresholds.yaml:
+        drift_psi_threshold: 0.2
+        model_alpha_min: 2.0
+        flow_failure_window_hours: 24
+        latency_p99_ms_max: 500
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="4" name="docker-compose services + integration smoke tests">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <task id="T-DASH.4.1" name="Add dashboard services to docker-compose.flows.yml">
+      <description>
+        Add to deployment/docker-compose.flows.yml:
+
+        dashboard-api:
+          build:
+            context: .
+            dockerfile: deployment/docker/Dockerfile.dashboard-api
+          ports:
+            - "${DASHBOARD_API_PORT:-8090}:${DASHBOARD_API_PORT:-8090}"
+          environment:
+            <<: *x-common-env
+            DASHBOARD_HEALTH_CHECK_INTERVAL_S: ${DASHBOARD_HEALTH_CHECK_INTERVAL_S:-300}
+            DASHBOARD_API_PORT: ${DASHBOARD_API_PORT:-8090}
+          volumes:
+            - ${MLRUNS_DIR:-./mlruns}:/mlruns:ro
+            - ${DATA_DIR:-./data}:/data:ro
+
+        dashboard-ui:
+          build:
+            context: .
+            dockerfile: deployment/docker/Dockerfile.dashboard-ui
+            args:
+              VITE_API_URL: http://${DASHBOARD_API_DOCKER_HOST:-dashboard-api}:${DASHBOARD_API_PORT:-8090}
+          ports:
+            - "${DASHBOARD_UI_PORT:-3002}:80"
+          depends_on:
+            - dashboard-api
+      </description>
+    </task>
+
+    <task id="T-DASH.4.2" name="Integration smoke tests for dashboard">
+      <description>
+        Create tests/integration/dashboard/test_dashboard_smoke.py:
+
+        @pytest.mark.requires_docker
+        @pytest.mark.slow
+        class TestDashboardSmoke:
+          - test_dashboard_api_health_endpoint() — GET http://localhost:8090/api/health returns 200
+          - test_dashboard_api_mlflow_endpoint() — GET /api/mlflow/experiments returns 200
+          - test_dashboard_api_prefect_endpoint() — GET /api/prefect/flows returns 200
+          - test_dashboard_ui_serves_html() — GET http://localhost:3002 returns 200 HTML
+
+        @pytest.mark.slow
+        class TestDashboardAPIUnit:
+          - test_all_routers_importable() — import all router modules without error
+          - test_fastapi_app_starts() — TestClient(app).get("/health") returns 200
+          - test_adapters_all_instantiable() — all adapter classes construct without error
+          - test_health_endpoint_returns_schema() — /api/health response has "overall", "alerts" keys
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <phase id="5" name="Pre-commit, tests green, PR">
+  <!-- ═══════════════════════════════════════════════════════ -->
+    <task id="T-DASH.5.1" name="Run full suite + pre-commit + PR">
+      <steps>
+        uv run pytest tests/unit/dashboard/ -q
+        uv run pytest tests/integration/dashboard/ -q -m "not requires_docker"
+        uv run pre-commit run --all-files
+        cd frontend && npm run build  # verify frontend builds
+        git checkout -b feat/dashboard-ui
+        git add src/minivess/dashboard/
+        git add deployment/docker/Dockerfile.dashboard-api
+        git add deployment/docker/Dockerfile.dashboard-ui
+        git add deployment/docker-compose.flows.yml
+        git add frontend/
+        git add configs/dashboard/
+        git add tests/unit/dashboard/ tests/integration/dashboard/
+        git add .env.example
+        git commit -m "feat(dashboard): Unified React+Vite dashboard + QA monitoring merged (#331 #342)"
+        git push -u origin feat/dashboard-ui
+        gh pr create --title "feat(dashboard): Unified React+Vite dashboard + integrated QA monitoring" \
+          --body "Closes #331, #342"
+      </steps>
+    </task>
+  </phase>
+
+</child-plan>

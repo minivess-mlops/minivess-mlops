@@ -365,6 +365,26 @@ Every feature, bugfix, or refactor MUST use the self-learning-iterative-coder sk
 
 **Skill reference**: `.claude/skills/self-learning-iterative-coder/SKILL.md`
 
+## Datasets (Layer 0 — always discoverable)
+
+Full documentation: **`docs/datasets/README.md`** (single authoritative reference).
+Authoritative code registry: **`src/minivess/data/external_datasets.py`**.
+
+| Dataset | Role | Volumes | Modality | Source |
+|---------|------|---------|----------|--------|
+| **MiniVess** | Primary training | 70 | 2PM mouse brain vasculature | EBRAINS `bf268b89-...` |
+| **DeepVess** | External test only | ~6 sub-vols | Multi-photon mouse brain | Cornell eCommons |
+| **TubeNet 2PM** | External test only | ~2 sub-vols | Two-photon mouse brain | UCL Figshare |
+| **VesselNN** | External test only | 12 | Two-photon mouse brain | github.com/petteriTeikari/vesselNN |
+
+**Critical facts (no need to search):**
+- MiniVess splits: 3-fold, seed=42, defined in `configs/splits/3fold_seed42.json` (47 train / 23 val)
+- mv02 outlier: spacing 4.97 μm → OOM with Spacingd. Fix: `voxel_spacing=(0,0,0)` disables Spacingd
+- VesselFM was pre-trained on MiniVess (1 of 17 datasets) → data leakage on MiniVess eval
+- External datasets are test-only — never used in training folds
+- Download: `scripts/download_minivess.py` (EBRAINS API → ZIP fallback → already-present check)
+- DVC: `data/minivess.dvc` tracks 211 files (984 MB compressed); HF Hub: `hf://datasets/minivess/minivess-data`
+
 ## Default Loss Function
 
 The default single-model loss is **`cbdice_cldice`** (CbDiceClDiceLoss). This was
