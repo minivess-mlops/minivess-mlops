@@ -145,7 +145,7 @@ Each of the 6 Prefect flows runs in its own Docker container:
 | **Cloud Compute** | SkyPilot (multi-cloud spot instances) |
 | **GPU Partitioning** | NVIDIA MIG (multi-model inference) |
 | **Workflow Orchestration** | Prefect 3.x (required, 6 flows: data, train, analyze, deploy, dashboard, qa) |
-| **Agent Orchestration** | LangGraph |
+| **Agent Orchestration** | Pydantic AI + PrefectAgent (see ADR 0007) |
 | **CI/CD** | GitHub Actions + CML (ML-specific PR comments) |
 | **Lineage** | OpenLineage (Marquez) |
 
@@ -343,7 +343,7 @@ minivess-mlops/
 │   ├── data/                  # Data loading, profiling, DVC integration
 │   ├── orchestration/         # Prefect flows + _prefect_compat.py
 │   ├── serving/               # BentoML service definitions
-│   ├── agents/                # LangGraph agent definitions
+│   ├── agents/                # Pydantic AI agent definitions (PrefectAgent wrappers)
 │   ├── observability/         # Langfuse + Braintrust integration
 │   ├── compliance/            # Audit trails, SaMD lifecycle hooks
 │   └── config/                # Hydra-zen + Dynaconf config schemas
@@ -383,7 +383,7 @@ minivess-mlops/
 | **Optuna** | HPO with ASHA (HyperbandPruner), TPE/CmaES samplers | Library (in-process) |
 | **Langfuse** | Production LLM tracing, cost tracking | Self-hosted (Docker Compose) |
 | **Braintrust** | Offline evaluation, CI/CD quality gates, AutoEvals | Hybrid deployment (data plane local) |
-| **LangGraph** | Agent orchestration, multi-step workflows | Library (in-process) |
+| **Pydantic AI** | Agent micro-orchestration via PrefectAgent (ADR 0007) | Library (in-process) |
 | **LiteLLM** | Unified LLM API, provider flexibility | Library (in-process) |
 | **MLflow** | Experiment tracking, model registry | Local Docker Compose |
 | **DuckDB** | In-process SQL analytics over MLflow runs | Library (in-process) |

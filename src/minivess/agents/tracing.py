@@ -1,4 +1,12 @@
-"""Langfuse tracing integration for LangGraph agent execution."""
+"""Langfuse + OpenTelemetry tracing for Pydantic AI agents.
+
+Pydantic AI instruments via OpenTelemetry. Langfuse can receive OTEL traces
+when configured as an OTEL exporter. This module provides a single
+``configure_agent_tracing()`` entry point.
+
+Gracefully degrades: if langfuse or opentelemetry are not installed,
+tracing is silently disabled.
+"""
 
 from __future__ import annotations
 
@@ -7,60 +15,94 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-
-def _get_langfuse_client() -> Any | None:
-    """Get a Langfuse client, returning None if unavailable.
-
-    Returns None if langfuse is not installed, not configured,
-    or if the client is disabled (no credentials), allowing
-    graceful degradation.
-    """
-    try:
-        from langfuse import Langfuse
-
-        client = Langfuse()
-        # Verify the client is functional (has trace method and credentials)
-        if not hasattr(client, "trace") or not callable(getattr(client, "trace", None)):
-            logger.debug("Langfuse client disabled — no credentials")
-            return None
-        return client
-    except Exception:  # noqa: BLE001
-        logger.debug("Langfuse client unavailable — tracing disabled")
-        return None
+_tracing_configured = False
 
 
-def traced_graph_run(
-    graph: Any,
-    state: dict[str, Any],
-    *,
-    trace_name: str = "agent_run",
-) -> dict[str, Any]:
-    """Run a LangGraph graph with optional Langfuse tracing.
+def configure_agent_tracing() -> bool:
+    """Configure Pydantic AI agent tracing via Langfuse/OpenTelemetry.
 
-    Parameters
-    ----------
-    graph:
-        Compiled LangGraph StateGraph with .invoke() method.
-    state:
-        Initial state dict for the graph.
-    trace_name:
-        Name for the Langfuse trace.
+    Call once at application startup (e.g., in the Prefect flow entry point).
+    Subsequent calls are no-ops.
 
     Returns
     -------
-    Final state dict after graph execution.
+    True if tracing was successfully configured, False otherwise.
     """
-    client = _get_langfuse_client()
+    global _tracing_configured  # noqa: PLW0603
+    if _tracing_configured:
+        return True
 
-    if client is not None:
-        trace = client.trace(name=trace_name)
-        logger.info("Langfuse trace started: %s", trace_name)
+    try:
+        from pydantic_ai import Agent
+        from pydantic_ai.agent import InstrumentationSettings
+
+        # Check if Langfuse OTEL exporter is available
         try:
-            result = graph.invoke(state)
-            trace.update(output=str(result.get("status", "unknown")))
-            return dict(result)
-        except Exception:
-            trace.update(output="error")
-            raise
-    else:
-        return dict(graph.invoke(state))
+            from langfuse.opentelemetry import LangfuseSpanProcessor
+
+            # Langfuse auto-configures from LANGFUSE_PUBLIC_KEY,
+            # LANGFUSE_SECRET_KEY, LANGFUSE_HOST env vars
+            processor = LangfuseSpanProcessor()
+
+            from opentelemetry.sdk.trace import TracerProvider
+
+            provider = TracerProvider()
+            provider.add_span_processor(processor)
+
+            Agent.instrument_all(InstrumentationSettings(tracer_provider=provider))
+            _tracing_configured = True
+            logger.info("Agent tracing configured via Langfuse OTEL exporter")
+            return True
+        except ImportError:
+            logger.debug("langfuse not installed — trying bare OTEL")
+
+        # Fallback: bare OpenTelemetry (e.g., for Jaeger, Zipkin)
+        try:
+            from opentelemetry.sdk.trace import TracerProvider
+
+            provider = TracerProvider()
+            Agent.instrument_all(InstrumentationSettings(tracer_provider=provider))
+            _tracing_configured = True
+            logger.info("Agent tracing configured via OpenTelemetry")
+            return True
+        except ImportError:
+            logger.debug("opentelemetry not installed — tracing disabled")
+
+    except ImportError:
+        logger.debug("pydantic-ai not installed — tracing disabled")
+
+    return False
+
+
+def reset_tracing() -> None:
+    """Reset tracing state (for testing)."""
+    global _tracing_configured  # noqa: PLW0603
+    _tracing_configured = False
+
+
+def get_tracing_status() -> dict[str, Any]:
+    """Return current tracing configuration status.
+
+    Returns
+    -------
+    Dict with ``enabled``, ``backend``, and ``configured`` keys.
+    """
+    backend = "none"
+    if _tracing_configured:
+        try:
+            import langfuse  # noqa: F401
+
+            backend = "langfuse"
+        except ImportError:
+            try:
+                import opentelemetry  # noqa: F401
+
+                backend = "opentelemetry"
+            except ImportError:
+                backend = "unknown"
+
+    return {
+        "enabled": _tracing_configured,
+        "backend": backend,
+        "configured": _tracing_configured,
+    }

@@ -1,39 +1,30 @@
-"""Agents -- LangGraph agent definitions for automated ML workflows."""
+"""Agents — Pydantic AI agents for automated ML workflow decisions.
+
+Public API:
+  - AgentConfig, load_agent_config — configuration
+  - make_prefect_agent — factory for durable Prefect execution
+  - EvalResult, EvalSuite — Braintrust evaluation framework (orthogonal)
+
+Legacy LangGraph code is in agents/_deprecated/ (see #341).
+"""
 
 from __future__ import annotations
 
-from minivess.agents.comparison import (
-    ComparisonState,
-    build_comparison_graph,
-)
+from minivess.agents.config import AgentConfig, load_agent_config
 from minivess.agents.evaluation import (
     EvalResult,
     EvalSuite,
     build_agent_eval_suite,
     build_segmentation_eval_suite,
 )
-from minivess.agents.graph import (
-    TrainingState,
-    build_training_graph,
-)
-from minivess.agents.llm import (
-    call_llm,
-    call_llm_structured,
-)
-from minivess.agents.tracing import (
-    traced_graph_run,
-)
+from minivess.agents.factory import make_prefect_agent
 
 __all__ = [
-    "ComparisonState",
+    "AgentConfig",
     "EvalResult",
     "EvalSuite",
-    "TrainingState",
     "build_agent_eval_suite",
-    "build_comparison_graph",
     "build_segmentation_eval_suite",
-    "build_training_graph",
-    "call_llm",
-    "call_llm_structured",
-    "traced_graph_run",
+    "load_agent_config",
+    "make_prefect_agent",
 ]

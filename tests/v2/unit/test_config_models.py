@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import pytest
-from hypothesis import HealthCheck, given, settings
-from hypothesis import strategies as st
-from pydantic import ValidationError
 
-from minivess.config.models import (
+hypothesis = pytest.importorskip("hypothesis", reason="hypothesis not installed")
+from hypothesis import HealthCheck, given, settings  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
+
+from minivess.config.models import (  # noqa: E402
     DataConfig,
     EnsembleConfig,
     EnsembleStrategy,

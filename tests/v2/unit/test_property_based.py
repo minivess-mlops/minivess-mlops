@@ -13,9 +13,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import torch
-from hypothesis import given, settings
-from hypothesis import strategies as st
-from hypothesis.extra.numpy import arrays
+
+hypothesis = pytest.importorskip("hypothesis", reason="hypothesis not installed")
+from hypothesis import given, settings  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
+from hypothesis.extra.numpy import arrays  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # T1: ConfidenceInterval invariants
