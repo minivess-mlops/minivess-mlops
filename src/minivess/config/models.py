@@ -11,6 +11,10 @@ class ModelFamily(StrEnum):
     """Supported model families."""
 
     MONAI_DYNUNET = "dynunet"
+    MONAI_SEGRESNET = "segresnet"
+    MONAI_SWINUNETR = "swinunetr"
+    MONAI_UNETR = "unetr"
+    MONAI_ATTENTIONUNET = "attentionunet"
     VESSEL_FM = "vesselfm"
     COMMA_MAMBA = "comma_mamba"
     SAM3_LORA = "sam3_lora"

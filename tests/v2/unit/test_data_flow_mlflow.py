@@ -117,11 +117,13 @@ class TestDataFlowMlflowFunctional:
             tmp = Path(tmp_str)
             tracking_uri = f"file://{tmp}/mlruns"
             os.environ["MLFLOW_TRACKING_URI"] = tracking_uri
+            os.environ["SPLITS_OUTPUT_DIR"] = str(tmp / "splits")
             data_dir = self._make_data_dir(tmp)
             try:
                 result = run_data_flow(data_dir=data_dir, n_folds=2)
             finally:
                 del os.environ["MLFLOW_TRACKING_URI"]
+                del os.environ["SPLITS_OUTPUT_DIR"]
 
             assert result.mlflow_run_id is not None, (
                 "DataFlowResult.mlflow_run_id must be set after run_data_flow(). "
@@ -140,11 +142,13 @@ class TestDataFlowMlflowFunctional:
             tmp = Path(tmp_str)
             tracking_uri = f"file://{tmp}/mlruns"
             os.environ["MLFLOW_TRACKING_URI"] = tracking_uri
+            os.environ["SPLITS_OUTPUT_DIR"] = str(tmp / "splits")
             data_dir = self._make_data_dir(tmp)
             try:
                 result = run_data_flow(data_dir=data_dir, n_folds=2)
             finally:
                 del os.environ["MLFLOW_TRACKING_URI"]
+                del os.environ["SPLITS_OUTPUT_DIR"]
 
             run_id = result.mlflow_run_id
             mlflow.set_tracking_uri(tracking_uri)
@@ -166,11 +170,13 @@ class TestDataFlowMlflowFunctional:
             tmp = Path(tmp_str)
             tracking_uri = f"file://{tmp}/mlruns"
             os.environ["MLFLOW_TRACKING_URI"] = tracking_uri
+            os.environ["SPLITS_OUTPUT_DIR"] = str(tmp / "splits")
             data_dir = self._make_data_dir(tmp)
             try:
                 result = run_data_flow(data_dir=data_dir, n_folds=2)
             finally:
                 del os.environ["MLFLOW_TRACKING_URI"]
+                del os.environ["SPLITS_OUTPUT_DIR"]
 
             mlflow.set_tracking_uri(tracking_uri)
             run = mlflow.get_run(result.mlflow_run_id)
@@ -191,15 +197,17 @@ class TestDataFlowMlflowFunctional:
             tmp = Path(tmp_str)
             tracking_uri = f"file://{tmp}/mlruns"
             os.environ["MLFLOW_TRACKING_URI"] = tracking_uri
+            os.environ["SPLITS_OUTPUT_DIR"] = str(tmp / "splits")
             data_dir = self._make_data_dir(tmp)
             try:
                 result = run_data_flow(data_dir=data_dir, n_folds=2)
             finally:
                 del os.environ["MLFLOW_TRACKING_URI"]
+                del os.environ["SPLITS_OUTPUT_DIR"]
 
             mlflow.set_tracking_uri(tracking_uri)
             run = mlflow.get_run(result.mlflow_run_id)
-            assert run.data.tags.get("flow_name") == "data", (
-                f"MLflow run must have flow_name='data' tag. "
+            assert run.data.tags.get("flow_name") == "data-flow", (
+                f"MLflow run must have flow_name='data-flow' tag (FLOW_NAME_DATA constant). "
                 f"Found tags: {run.data.tags}"
             )

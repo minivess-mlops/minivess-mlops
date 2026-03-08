@@ -32,6 +32,7 @@ def sam3_config() -> ModelConfig:
 
 
 @_sam3_skip
+@pytest.mark.slow
 class TestSam3VanillaAdapter:
     """Sam3VanillaAdapter: frozen encoder + trainable decoder."""
 

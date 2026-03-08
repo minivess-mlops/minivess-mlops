@@ -1,0 +1,22 @@
+model_name: attentionunet
+architecture: AttentionUnet (U-Net with attention gates)
+monai_class: monai.networks.nets.AttentionUnet
+default_channels: [16, 32, 64, 128, 256]
+default_strides: [2, 2, 2, 2]
+param_count_approx: 5_100_000
+divisor: 16
+model_overhead_mb: 60
+bytes_per_voxel_amp: 8
+bytes_per_voxel_fp32: 16
+max_batch_size:
+  cpu: 2
+  gpu_low: 4
+  gpu_high: 8
+  gpu_extreme: 16
+default_patch_xy: 128
+notes: >
+  U-Net with attention gates at skip connections. ~5.1M params with default channels.
+  Lightweight alternative to DynUNet. Attention gates add ~10% overhead vs plain U-Net
+  but improve focus on relevant structures. channels list determines depth; strides must
+  have length len(channels)-1. Good for lesion/vessel segmentation baselines.
+  Divisor=16 from 4 stride-2 downsamples.

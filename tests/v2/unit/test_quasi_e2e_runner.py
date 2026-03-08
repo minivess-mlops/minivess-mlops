@@ -23,6 +23,20 @@ from minivess.testing.quasi_e2e_runner import (
 )
 
 _SAM3_FAMILIES = frozenset({"sam3_vanilla", "sam3_topolora", "sam3_hybrid"})
+# SAM3 families that require ≥16 GB VRAM for training (VRAM check raises at build time)
+_SAM3_HIGH_VRAM = frozenset({"sam3_topolora"})
+
+
+def _gpu_vram_gb() -> float:
+    """Return detected GPU VRAM in GB, or 0.0 if no GPU available."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return torch.cuda.get_device_properties(0).total_memory / (1024**3)
+    except Exception:
+        pass
+    return 0.0
 
 
 class TestGenerateTestIds:
@@ -57,10 +71,13 @@ class TestBuildModelForTest:
 
     def test_all_implemented_models_build(self) -> None:
         """Every discovered model can be instantiated (SAM3 skipped when not installed)."""
+        vram_gb = _gpu_vram_gb()
         models = discover_implemented_models()
         for model_name in models:
             if model_name in _SAM3_FAMILIES and not _sam3_package_available():
                 continue  # SAM3 requires real pretrained weights — skip when not installed
+            if model_name in _SAM3_HIGH_VRAM and vram_gb < 16.0:
+                continue  # SAM3 LoRA requires ≥16 GB VRAM — skip on insufficient hardware
             model = build_model_for_test(model_name)
             assert isinstance(model, nn.Module), f"Failed to build {model_name}"
 

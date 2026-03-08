@@ -509,6 +509,8 @@ def training_flow(
         "max_epochs": max_epochs,
         "num_folds": num_folds,
         "batch_size": batch_size,
+        "experiment_name": experiment_name,
+        "tracking_uri": tracking_uri,
     }
 
     # Train each fold, skipping already-completed configs (auto-resume)
@@ -590,4 +592,39 @@ def training_flow(
 
 
 if __name__ == "__main__":
-    training_flow()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Training Prefect flow")
+    parser.add_argument(
+        "--model-family", default=os.environ.get("MODEL_FAMILY", "dynunet")
+    )
+    parser.add_argument(
+        "--loss-name", default=os.environ.get("LOSS_NAME", "cbdice_cldice")
+    )
+    parser.add_argument(
+        "--max-epochs", type=int, default=int(os.environ.get("MAX_EPOCHS", "100"))
+    )
+    parser.add_argument(
+        "--num-folds", type=int, default=int(os.environ.get("NUM_FOLDS", "3"))
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=int(os.environ.get("BATCH_SIZE", "2"))
+    )
+    parser.add_argument(
+        "--experiment-name",
+        default=os.environ.get("EXPERIMENT_NAME", "minivess_training"),
+    )
+    parser.add_argument(
+        "--debug", action="store_true", default=os.environ.get("DEBUG", "") == "1"
+    )
+    args = parser.parse_args()
+
+    training_flow(
+        model_family=args.model_family,
+        loss_name=args.loss_name,
+        max_epochs=args.max_epochs,
+        num_folds=args.num_folds,
+        batch_size=args.batch_size,
+        experiment_name=args.experiment_name,
+        debug=args.debug,
+    )

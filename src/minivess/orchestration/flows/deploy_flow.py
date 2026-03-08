@@ -22,15 +22,13 @@ from typing import TYPE_CHECKING, Any
 
 from prefect import flow, get_run_logger, task
 
+from minivess.config.deploy_config import DeployConfig  # noqa: TC001
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_DEPLOY
-from minivess.orchestration.mlflow_helpers import (
-    find_upstream_safely,
-    log_completion_safe,
-)
+from minivess.orchestration.flow_contract import FlowContract
+from minivess.orchestration.mlflow_helpers import find_upstream_safely
 
 if TYPE_CHECKING:
-    from minivess.config.deploy_config import DeployConfig
     from minivess.pipeline.deploy_champion_discovery import ChampionModel
 
 logger = logging.getLogger(__name__)
@@ -364,12 +362,12 @@ def deploy_flow(
     except Exception:
         log.warning("Failed to log deploy_flow to MLflow", exc_info=True)
 
-    # Log flow completion (best-effort, non-blocking)
-    log_completion_safe(
-        flow_name="deploy-flow",
-        tracking_uri=_tracking_uri,
-        run_id=mlflow_run_id,
-    )
+    if mlflow_run_id is not None:
+        try:
+            contract = FlowContract(tracking_uri=_tracking_uri)
+            contract.log_flow_completion(flow_name="deploy-flow", run_id=mlflow_run_id)
+        except Exception:
+            log.warning("Failed to log flow completion — non-fatal", exc_info=True)
 
     return result
 

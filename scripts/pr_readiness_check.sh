@@ -23,8 +23,13 @@ uv run ruff check src/minivess/ tests/
 echo "[2/4] mypy typecheck..."
 uv run mypy src/minivess/
 
-echo "[3/4] Unit tests..."
-uv run pytest tests/unit/ -x -q --tb=short
+if [[ "${1:-}" == "--full" ]]; then
+  echo "[3/4] Full test suite (prod tier)..."
+  uv run pytest tests/ -x --tb=short -q
+else
+  echo "[3/4] Staging tests (fast unit tests only)..."
+  uv run pytest -c pytest-staging.ini
+fi
 
 echo "[4/4] Test collection gate (import check)..."
 uv run pytest --collect-only -q tests/unit/ tests/v2/unit/

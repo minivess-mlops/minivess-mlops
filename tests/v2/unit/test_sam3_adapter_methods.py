@@ -76,6 +76,7 @@ def hybrid_adapter() -> Any:
 # Test save_checkpoint
 # ---------------------------------------------------------------------------
 @_sam3_skip
+@pytest.mark.slow
 class TestSaveCheckpoint:
     """save_checkpoint must not crash."""
 
@@ -99,6 +100,7 @@ class TestSaveCheckpoint:
 # Test load_checkpoint roundtrip
 # ---------------------------------------------------------------------------
 @_sam3_skip
+@pytest.mark.slow
 class TestLoadCheckpoint:
     """load_checkpoint after save_checkpoint produces identical forward output."""
 
@@ -158,6 +160,7 @@ class TestLoadCheckpoint:
 # Test trainable_parameters
 # ---------------------------------------------------------------------------
 @_sam3_skip
+@pytest.mark.slow
 class TestTrainableParameters:
     """trainable_parameters must return a positive int for all variants."""
 
@@ -181,6 +184,7 @@ class TestTrainableParameters:
 # Test export_onnx
 # ---------------------------------------------------------------------------
 @_sam3_skip
+@pytest.mark.slow
 class TestExportOnnx:
     """export_onnx must produce a valid file."""
 

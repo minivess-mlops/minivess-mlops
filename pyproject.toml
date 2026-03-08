@@ -315,6 +315,7 @@ ignore_errors = true
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -374,8 +375,10 @@ build-constraint-dependencies = [
     "setuptools<82",
 ]
 # weightwatcher pins pandas==2.1.4 which fails to build from source on Python 3.13+
+# matplotlib 3.7.x has no wheels for Python 3.13 and fails to build from source
 override-dependencies = [
     "pandas>=2.2",
+    "matplotlib>=3.9",
 ]
 
 [dependency-groups]
@@ -383,5 +386,7 @@ dev = [
     "allpairspy>=2.5.1",
     "mypy>=1.19.1",
     "pytest>=8.4.2",
+    "pytest-timeout>=2.4.0",
+    "pytest-xdist>=3.8.0",
     "types-psutil>=7.2.2.20260130",
 ]
