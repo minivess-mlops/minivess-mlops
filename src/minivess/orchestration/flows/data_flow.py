@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from prefect import flow, task
 
 from minivess.orchestration.constants import FLOW_NAME_DATA
-from minivess.orchestration.mlflow_helpers import log_completion_safe
+from minivess.orchestration.flow_contract import FlowContract
 
 if TYPE_CHECKING:
     from minivess.data.splits import FoldSplit
@@ -538,12 +538,15 @@ def run_data_flow(
     except Exception:
         logger.warning("Failed to open/finalize MLflow data run", exc_info=True)
 
-    # Log flow completion (best-effort, non-blocking)
-    log_completion_safe(
-        flow_name="data-flow",
-        tracking_uri=tracking_uri,
-        run_id=mlflow_run_id,
-    )
+    # --- FlowContract: tag run and log completion ---
+    # This marks the run as FLOW_COMPLETE so training_flow can discover it
+    # via FlowContract.find_upstream_run(flow_name="data-flow").
+    if mlflow_run_id is not None:
+        try:
+            contract = FlowContract(tracking_uri=tracking_uri)
+            contract.log_flow_completion(flow_name="data-flow", run_id=mlflow_run_id)
+        except Exception:
+            logger.warning("Failed to log flow completion — non-fatal", exc_info=True)
 
     logger.info("Data flow complete: %d pairs, quality=%s", len(pairs), quality_passed)
     return DataFlowResult(

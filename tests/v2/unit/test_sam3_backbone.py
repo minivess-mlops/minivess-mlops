@@ -60,6 +60,7 @@ class TestSam3Constants:
 
 
 @_sam3_skip
+@pytest.mark.slow
 class TestSam3Backbone:
     """Sam3Backbone wrapper for the full perception encoder."""
 
@@ -112,6 +113,7 @@ class TestSam3Backbone:
 
 
 @_sam3_skip
+@pytest.mark.slow
 class TestSam3FeatureCache:
     """Offline feature caching for 8GB VRAM workflow."""
 

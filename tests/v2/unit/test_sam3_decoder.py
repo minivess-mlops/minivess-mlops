@@ -33,6 +33,7 @@ def sam3_config() -> ModelConfig:
 
 
 @_sam3_skip
+@pytest.mark.slow
 class TestSam3MaskDecoder:
     """Sam3MaskDecoder wraps SAM3 decoder head for mask prediction."""
 
