@@ -2,11 +2,18 @@
 
 Unit tests for each node function in isolation, covering state
 transformations, routing logic, and edge cases.
+
+Deprecated: These test LangGraph code moved to agents/_deprecated/.
+Skipped if langgraph is not installed.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+import pytest
+
+langgraph = pytest.importorskip("langgraph", reason="langgraph not installed")
 
 # ---------------------------------------------------------------------------
 # T1: Training graph – prepare_data_node
@@ -18,7 +25,7 @@ class TestPrepareDataNode:
 
     def test_sets_status_to_data_ready(self) -> None:
         """prepare_data_node should set status to 'data_ready'."""
-        from minivess.agents.graph import prepare_data_node
+        from minivess.agents._deprecated.graph import prepare_data_node
 
         state: dict[str, Any] = {
             "model_name": "test",
@@ -33,7 +40,7 @@ class TestPrepareDataNode:
 
     def test_appends_message(self) -> None:
         """prepare_data_node should append a message about the dataset."""
-        from minivess.agents.graph import prepare_data_node
+        from minivess.agents._deprecated.graph import prepare_data_node
 
         state: dict[str, Any] = {
             "model_name": "test",
@@ -49,7 +56,7 @@ class TestPrepareDataNode:
 
     def test_preserves_existing_messages(self) -> None:
         """prepare_data_node should not drop existing messages."""
-        from minivess.agents.graph import prepare_data_node
+        from minivess.agents._deprecated.graph import prepare_data_node
 
         state: dict[str, Any] = {
             "model_name": "test",
@@ -74,7 +81,7 @@ class TestTrainNode:
 
     def test_sets_status_to_trained(self) -> None:
         """train_node should set status to 'trained'."""
-        from minivess.agents.graph import train_node
+        from minivess.agents._deprecated.graph import train_node
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -89,7 +96,7 @@ class TestTrainNode:
 
     def test_populates_train_loss(self) -> None:
         """train_node should add train_loss to results."""
-        from minivess.agents.graph import train_node
+        from minivess.agents._deprecated.graph import train_node
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -105,7 +112,7 @@ class TestTrainNode:
 
     def test_populates_val_loss(self) -> None:
         """train_node should add val_loss to results."""
-        from minivess.agents.graph import train_node
+        from minivess.agents._deprecated.graph import train_node
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -120,7 +127,7 @@ class TestTrainNode:
 
     def test_appends_model_name_to_messages(self) -> None:
         """train_node should mention model name in message."""
-        from minivess.agents.graph import train_node
+        from minivess.agents._deprecated.graph import train_node
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -144,7 +151,7 @@ class TestEvaluateNode:
 
     def test_sets_status_to_evaluated(self) -> None:
         """evaluate_node should set status to 'evaluated'."""
-        from minivess.agents.graph import evaluate_node
+        from minivess.agents._deprecated.graph import evaluate_node
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -159,7 +166,7 @@ class TestEvaluateNode:
 
     def test_adds_val_dice_to_results(self) -> None:
         """evaluate_node should add val_dice metric."""
-        from minivess.agents.graph import evaluate_node
+        from minivess.agents._deprecated.graph import evaluate_node
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -175,7 +182,7 @@ class TestEvaluateNode:
 
     def test_preserves_existing_results(self) -> None:
         """evaluate_node should not overwrite prior results."""
-        from minivess.agents.graph import evaluate_node
+        from minivess.agents._deprecated.graph import evaluate_node
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -201,7 +208,7 @@ class TestRegisterNode:
 
     def test_sets_status_to_completed(self) -> None:
         """register_node should set status to 'completed'."""
-        from minivess.agents.graph import register_node
+        from minivess.agents._deprecated.graph import register_node
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -216,7 +223,7 @@ class TestRegisterNode:
 
     def test_sets_registered_flag(self) -> None:
         """register_node should set registered=True in results."""
-        from minivess.agents.graph import register_node
+        from minivess.agents._deprecated.graph import register_node
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -231,7 +238,7 @@ class TestRegisterNode:
 
     def test_appends_model_name_to_messages(self) -> None:
         """register_node should mention model name in message."""
-        from minivess.agents.graph import register_node
+        from minivess.agents._deprecated.graph import register_node
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -255,7 +262,7 @@ class TestNotifyNode:
 
     def test_sets_status_to_completed(self) -> None:
         """notify_node should set status to 'completed'."""
-        from minivess.agents.graph import notify_node
+        from minivess.agents._deprecated.graph import notify_node
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -270,7 +277,7 @@ class TestNotifyNode:
 
     def test_skipped_registration_when_metrics_fail(self) -> None:
         """notify_node should mark skipped_registration when metrics_pass=False."""
-        from minivess.agents.graph import notify_node
+        from minivess.agents._deprecated.graph import notify_node
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -285,7 +292,7 @@ class TestNotifyNode:
 
     def test_no_skipped_registration_when_metrics_pass(self) -> None:
         """notify_node should NOT set skipped_registration when metrics_pass=True."""
-        from minivess.agents.graph import notify_node
+        from minivess.agents._deprecated.graph import notify_node
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -309,7 +316,7 @@ class TestRouteAfterEvaluate:
 
     def test_routes_to_register_when_pass(self) -> None:
         """Should route to 'register' when metrics_pass=True."""
-        from minivess.agents.graph import _route_after_evaluate
+        from minivess.agents._deprecated.graph import _route_after_evaluate
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -323,7 +330,7 @@ class TestRouteAfterEvaluate:
 
     def test_routes_to_notify_when_fail(self) -> None:
         """Should route to 'notify' when metrics_pass=False."""
-        from minivess.agents.graph import _route_after_evaluate
+        from minivess.agents._deprecated.graph import _route_after_evaluate
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -337,7 +344,7 @@ class TestRouteAfterEvaluate:
 
     def test_routes_to_notify_when_missing(self) -> None:
         """Should default to 'notify' when metrics_pass is missing."""
-        from minivess.agents.graph import _route_after_evaluate
+        from minivess.agents._deprecated.graph import _route_after_evaluate
 
         state: dict[str, Any] = {
             "model_name": "dynunet",
@@ -359,7 +366,7 @@ class TestAnalyseRunsNode:
 
     def test_analyses_run_metrics(self) -> None:
         """analyse_runs_node should compute best Dice from runs."""
-        from minivess.agents.comparison import analyse_runs_node
+        from minivess.agents._deprecated.comparison import analyse_runs_node
 
         state: dict[str, Any] = {
             "experiment_name": "test",
@@ -376,7 +383,7 @@ class TestAnalyseRunsNode:
 
     def test_handles_empty_runs(self) -> None:
         """analyse_runs_node should handle empty runs_data."""
-        from minivess.agents.comparison import analyse_runs_node
+        from minivess.agents._deprecated.comparison import analyse_runs_node
 
         state: dict[str, Any] = {
             "experiment_name": "test",
@@ -390,7 +397,7 @@ class TestAnalyseRunsNode:
 
     def test_preserves_existing_messages(self) -> None:
         """analyse_runs_node should append to existing messages."""
-        from minivess.agents.comparison import analyse_runs_node
+        from minivess.agents._deprecated.comparison import analyse_runs_node
 
         state: dict[str, Any] = {
             "experiment_name": "test",
@@ -414,7 +421,7 @@ class TestFetchRunsNodeEdgeCases:
 
     def test_uses_synthetic_data_when_empty(self) -> None:
         """fetch_runs_node should generate synthetic runs when runs_data is empty."""
-        from minivess.agents.comparison import fetch_runs_node
+        from minivess.agents._deprecated.comparison import fetch_runs_node
 
         state: dict[str, Any] = {
             "experiment_name": "test",
@@ -428,7 +435,7 @@ class TestFetchRunsNodeEdgeCases:
 
     def test_preserves_existing_runs_data(self) -> None:
         """fetch_runs_node should keep existing runs_data if present."""
-        from minivess.agents.comparison import fetch_runs_node
+        from minivess.agents._deprecated.comparison import fetch_runs_node
 
         existing_runs = [{"run_id": "custom", "metric_val_dice": 0.95}]
         state: dict[str, Any] = {

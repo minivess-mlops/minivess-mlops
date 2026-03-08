@@ -57,7 +57,7 @@ def analyse_runs_node(state: ComparisonState) -> dict[str, Any]:
 
 def summarise_node(state: ComparisonState) -> dict[str, Any]:
     """Summarise comparison using LLM."""
-    from minivess.agents.llm import call_llm
+    from minivess.agents._deprecated.llm import call_llm
 
     runs_text = "\n".join(
         f"- Run {r.get('run_id', '?')}: Dice={r.get('metric_val_dice', '?')}"

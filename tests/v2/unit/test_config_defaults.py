@@ -49,7 +49,7 @@ class TestBackwardsCompatibility:
 
         assert _DEFAULT_BATCH_SIZE == 2
 
-    def test_default_model_importable_from_llm(self) -> None:
-        from minivess.agents.llm import DEFAULT_MODEL
+    def test_default_model_importable_from_config(self) -> None:
+        from minivess.agents.config import AgentConfig
 
-        assert DEFAULT_MODEL == "anthropic:claude-sonnet-4-6"
+        assert AgentConfig().model == "anthropic:claude-sonnet-4-6"
