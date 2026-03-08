@@ -80,6 +80,20 @@ class ModelAdapter(ABC, nn.Module):
         """Return model configuration as a typed dataclass."""
         ...
 
+    def get_eval_roi_size(self) -> tuple[int, int, int]:
+        """Return the sliding-window ROI size for full-volume evaluation.
+
+        Override this method in adapters that require a non-standard evaluation
+        patch size (e.g., SAM3 uses (512, 512, 3) to minimise encoder calls).
+        The default (128, 128, 16) is appropriate for DynUNet, Mamba, VesselFM,
+        and any adapter that does not override this method.
+
+        Returns
+        -------
+        (H, W, D) tuple used for monai.inferers.sliding_window_inference.
+        """
+        return (128, 128, 16)
+
     def _build_output(self, logits: Tensor, architecture: str) -> SegmentationOutput:
         """Build a standardized SegmentationOutput from raw logits.
 

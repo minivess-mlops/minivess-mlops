@@ -119,6 +119,16 @@ class Sam3VanillaAdapter(ModelAdapter):
 
         return self._build_output(logits_3d, "sam3_vanilla")
 
+    def get_eval_roi_size(self) -> tuple[int, int, int]:
+        """Return the sliding-window ROI size for full-volume evaluation.
+
+        SAM3 ViT-32L resizes every input to 1008×1008 regardless of spatial
+        size, so larger ROI windows cost the same encoder FLOPS as small ones.
+        Using (512, 512, 3) reduces windows from ~3300 to ~27 per 512×512×61
+        volume, cutting evaluation time from ~6 hours to ~4 minutes.
+        """
+        return (512, 512, 3)
+
     def get_config(self) -> AdapterConfigInfo:
         """Return adapter configuration info."""
         return self._build_config(
