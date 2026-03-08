@@ -1,0 +1,296 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MinIVess MLOps — Overnight Child Plan: Hydra-zen Bridge
+  Parent: script-consolidation.xml (Phases 0-1)
+  Branch: feat/hydra-bridge
+  Issues: (new — config reproducibility)
+
+  PURPOSE:
+  Bridge Hydra-zen composition to train_flow.py. This is THE foundational
+  change. train_flow.py must call compose_experiment_config() and log the
+  resolved config to MLflow. Everything else depends on this.
+
+  CONTEXT:
+  - Read CLAUDE.md first for all rules
+  - Read configs/README.md for config system architecture
+  - Read src/minivess/config/CLAUDE.md for Hydra-zen rules
+  - Read src/minivess/orchestration/CLAUDE.md for flow rules
+  - Read docs/planning/script-consolidation.xml for full plan context
+  - TDD: use self-learning-iterative-coder skill for every task
+
+  EXECUTION:
+  claude --dangerously-skip-permissions -p \
+    "Read and execute docs/planning/overnight-child-hydra-bridge.xml autonomously."
+-->
+<child-plan>
+  <metadata>
+    <title>Hydra-zen Bridge — train_flow.py + blocker fixes</title>
+    <branch>feat/hydra-bridge</branch>
+    <base>main</base>
+    <estimated-duration>3-5 hours</estimated-duration>
+    <pr-title>feat(config): bridge Hydra-zen composition to train_flow.py</pr-title>
+  </metadata>
+
+  <setup>
+    <!-- 1. Checkout main and pull latest -->
+    git checkout main &amp;&amp; git pull origin main
+
+    <!-- 2. Create feature branch -->
+    git checkout -b feat/hydra-bridge
+
+    <!-- 3. Read context files -->
+    Read: CLAUDE.md
+    Read: configs/README.md
+    Read: src/minivess/config/CLAUDE.md
+    Read: src/minivess/orchestration/CLAUDE.md
+    Read: src/minivess/config/compose.py
+    Read: src/minivess/orchestration/flows/train_flow.py
+    Read: src/minivess/observability/tracking.py (lines 327-350 for log_hydra_config)
+    Read: src/minivess/ensemble/builder.py (lines 200-230 for discover_training_runs_raw)
+    Read: docs/planning/script-consolidation.xml
+  </setup>
+
+  <!-- ================================================================ -->
+  <!-- PHASE 0: Bridge Hydra-zen to train_flow.py                       -->
+  <!-- ================================================================ -->
+  <phase id="0" name="Bridge Hydra-zen to train_flow.py">
+
+    <task id="0.1" name="Refactor train_flow.py __main__ to use Hydra composition">
+      <tdd-phase>RED</tdd-phase>
+      <test-file>tests/unit/orchestration/test_train_flow_hydra.py</test-file>
+      <tests>
+        <test>test_main_with_experiment_env_var — sets EXPERIMENT=debug_single_model,
+          verifies compose_experiment_config called with correct args</test>
+        <test>test_main_with_hydra_overrides — sets HYDRA_OVERRIDES="max_epochs=1",
+          verifies overrides list passed correctly</test>
+        <test>test_main_backward_compat — sets MODEL_FAMILY=dynunet without EXPERIMENT,
+          verifies fallback to env-var based config building</test>
+      </tests>
+
+      <tdd-phase>GREEN</tdd-phase>
+      <implementation>
+        In train_flow.py __main__ block:
+
+        experiment = os.environ.get("EXPERIMENT")
+        overrides_str = os.environ.get("HYDRA_OVERRIDES", "")
+        overrides = [o.strip() for o in overrides_str.split(",") if o.strip()]
+
+        if experiment:
+            from minivess.config.compose import compose_experiment_config
+            config = compose_experiment_config(
+                experiment_name=experiment,
+                overrides=overrides,
+            )
+            training_flow(config_dict=config)
+        else:
+            # Backward compat: build config from individual env vars
+            # (existing argparse-based flow — will be removed after migration)
+            ...existing code...
+      </implementation>
+
+      <acceptance>
+        uv run pytest tests/unit/orchestration/test_train_flow_hydra.py -x -q
+      </acceptance>
+    </task>
+
+    <task id="0.2" name="Refactor training_flow() to accept config_dict">
+      <tdd-phase>RED</tdd-phase>
+      <tests>
+        <test>test_training_flow_with_config_dict — passes full resolved dict,
+          verifies params extracted correctly</test>
+        <test>test_training_flow_extracts_max_train_volumes — verifies
+          max_train_volumes read from config dict</test>
+        <test>test_training_flow_backward_compat — passes individual params
+          (no config_dict), verifies existing behavior unchanged</test>
+      </tests>
+
+      <tdd-phase>GREEN</tdd-phase>
+      <implementation>
+        Add config_dict: dict[str, Any] | None = None parameter to training_flow().
+        When provided, extract: model_family, loss_name, max_epochs, experiment_name,
+        max_train_volumes, max_val_volumes, num_folds, data_dir, debug, etc.
+        Store full dict for downstream log_hydra_config() call.
+      </implementation>
+
+      <acceptance>
+        uv run pytest tests/unit/orchestration/test_train_flow_hydra.py -x -q
+      </acceptance>
+    </task>
+
+    <task id="0.3" name="Call log_hydra_config() in training runs">
+      <tdd-phase>RED</tdd-phase>
+      <tests>
+        <test>test_log_hydra_config_called — mock tracker, verify log_hydra_config
+          called with config dict during training run</test>
+        <test>test_mlflow_artifact_created — integration test with real MLflow,
+          verify config/resolved_config.yaml artifact exists after run</test>
+      </tests>
+
+      <tdd-phase>GREEN</tdd-phase>
+      <implementation>
+        In train_one_fold_task(), after opening MLflow run (around line 551):
+          if config_dict:
+              tracker.log_hydra_config(config_dict)
+      </implementation>
+
+      <acceptance>
+        uv run pytest tests/unit/orchestration/test_train_flow_hydra.py -x -q
+      </acceptance>
+    </task>
+
+    <task id="0.4" name="Add max_train_volumes / max_val_volumes data subsetting">
+      <tdd-phase>RED</tdd-phase>
+      <tests>
+        <test>test_data_subsetting_limits_volumes — pass max_train_volumes=2,
+          verify only 2 train volumes used</test>
+        <test>test_data_subsetting_none_uses_all — pass no max, verify all used</test>
+      </tests>
+
+      <tdd-phase>GREEN</tdd-phase>
+      <implementation>
+        In train_one_fold_task(), after loading fold data:
+          max_train = config.get("max_train_volumes") if config else None
+          max_val = config.get("max_val_volumes") if config else None
+          if max_train:
+              train_dicts = train_dicts[:max_train]
+          if max_val:
+              val_dicts = val_dicts[:max_val]
+      </implementation>
+    </task>
+
+    <task id="0.5" name="Fix loss_name to loss_function tag standardization">
+      <tdd-phase>RED</tdd-phase>
+      <tests>
+        <test>test_training_run_tags_loss_function — verify MLflow tag key is
+          "loss_function" not "loss_name"</test>
+        <test>test_builder_reads_loss_function_with_fallback — verify builder
+          reads "loss_function" first, falls back to "loss_name"</test>
+      </tests>
+
+      <tdd-phase>GREEN</tdd-phase>
+      <implementation>
+        train_flow.py: change tag from "loss_name" to "loss_function".
+        builder.py: read "loss_function" first, fallback to "loss_name".
+      </implementation>
+    </task>
+
+    <commit>
+      git add -A
+      git commit -m "feat(config): bridge Hydra-zen composition to train_flow.py
+
+      Phase 0 of script-consolidation plan:
+      - train_flow.py __main__ calls compose_experiment_config()
+      - training_flow() accepts config_dict parameter
+      - log_hydra_config() called in every training run
+      - max_train_volumes/max_val_volumes data subsetting
+      - loss_name → loss_function tag standardization
+
+      Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;"
+    </commit>
+  </phase>
+
+  <!-- ================================================================ -->
+  <!-- PHASE 1: Fix remaining blockers                                  -->
+  <!-- ================================================================ -->
+  <phase id="1" name="Fix Remaining Pipeline Blockers">
+
+    <task id="1.1" name="Make eval_fold2_dsc gate configurable">
+      <file>src/minivess/ensemble/builder.py</file>
+      <tdd-phase>RED</tdd-phase>
+      <tests>
+        <test>test_discover_runs_without_eval_metrics — pass require_eval_metrics=False,
+          verify runs without eval_fold2_dsc are included</test>
+        <test>test_discover_runs_default_requires_metrics — default behavior unchanged</test>
+      </tests>
+      <implementation>
+        Add require_eval_metrics: bool = True to discover_training_runs_raw().
+        When False, skip the eval_fold2_dsc filter.
+      </implementation>
+    </task>
+
+    <task id="1.2" name="Log checkpoints as MLflow artifacts">
+      <file>src/minivess/pipeline/trainer.py</file>
+      <tdd-phase>RED</tdd-phase>
+      <tests>
+        <test>test_checkpoint_logged_to_mlflow — verify best_*.pth logged as artifact</test>
+      </tests>
+      <implementation>
+        After saving best checkpoint, call mlflow.log_artifact(checkpoint_path).
+      </implementation>
+    </task>
+
+    <task id="1.3" name="Add --upstream-experiment to analysis + post-training">
+      <files>
+        src/minivess/orchestration/flows/analysis_flow.py
+        src/minivess/orchestration/flows/post_training_flow.py
+      </files>
+      <tdd-phase>RED</tdd-phase>
+      <tests>
+        <test>test_analysis_flow_upstream_experiment — verify UPSTREAM_EXPERIMENT
+          env var passed to EvaluationConfig</test>
+      </tests>
+      <implementation>
+        Add UPSTREAM_EXPERIMENT env var to both flows' __main__ blocks.
+      </implementation>
+    </task>
+
+    <task id="1.4" name="Add post_training_out volume to analyze container">
+      <file>deployment/docker-compose.flows.yml</file>
+      <implementation>
+        Add post_training_out:/app/outputs/post_training:ro to analyze service.
+      </implementation>
+    </task>
+
+    <task id="1.5" name="Fix load_checkpoint random-weights fallback">
+      <file>src/minivess/ensemble/builder.py</file>
+      <tdd-phase>RED</tdd-phase>
+      <tests>
+        <test>test_load_checkpoint_raises_on_mismatch — verify RuntimeError raised
+          when state_dict keys don't match model</test>
+      </tests>
+      <implementation>
+        Replace silent fallback with RuntimeError.
+      </implementation>
+    </task>
+
+    <commit>
+      git add -A
+      git commit -m "fix(pipeline): resolve 5 blockers for debug training scenarios
+
+      Phase 1 of script-consolidation plan:
+      - eval_fold2_dsc gate configurable (require_eval_metrics param)
+      - Checkpoints logged as MLflow artifacts
+      - UPSTREAM_EXPERIMENT env var for analysis + post-training
+      - post_training_out volume mount added to analyze container
+      - load_checkpoint raises on state_dict mismatch (no random weights)
+
+      Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;"
+    </commit>
+  </phase>
+
+  <finalize>
+    <!-- Run full verification -->
+    uv run pytest tests/ -x -q
+    uv run ruff check src/ tests/
+    uv run mypy src/
+
+    <!-- Push and create PR -->
+    git push -u origin feat/hydra-bridge
+    gh pr create --title "feat(config): bridge Hydra-zen composition to train_flow.py" \
+      --body "## Summary
+    - train_flow.py now calls compose_experiment_config() via EXPERIMENT env var
+    - Resolved config logged to MLflow via log_hydra_config() on every training run
+    - 5 pipeline blockers fixed (eval gate, checkpoint artifacts, upstream experiment, volume mount, random weights)
+    - MLflow tag standardized: loss_function (not loss_name)
+
+    ## Plan
+    Implements Phases 0-1 of docs/planning/script-consolidation.xml
+
+    ## Test plan
+    - [ ] Unit tests for Hydra composition in train_flow.py
+    - [ ] Integration test: resolved config artifact in MLflow
+    - [ ] Backward compat: existing env-var based config still works
+
+    Generated with Claude Code"
+  </finalize>
+</child-plan>

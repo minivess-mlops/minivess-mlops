@@ -1,0 +1,910 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Script Consolidation & Debug Mode Integration Plan
+  MinIVess MLOps v2
+
+  Purpose: Integrate debug/testing modes into the existing Hydra-zen
+  experiment configuration system. NOT a separate system — debug configs
+  are standard Hydra experiment YAMLs, CLI overrides flow through Hydra
+  grammar, and the resolved config is logged to MLflow as the single
+  source of truth for reproducibility.
+
+  Branch: test/train-mechanics-debug
+  Created: 2026-03-08
+  Status: REVIEWED v3 — Hydra-zen native, no parallel systems
+  Revision: 3 (post user correction: "no parallel implementations")
+-->
+<plan name="script-consolidation" version="3.0">
+
+  <!-- ================================================================== -->
+  <!-- METADATA                                                            -->
+  <!-- ================================================================== -->
+  <metadata>
+    <created>2026-03-08</created>
+    <revised>2026-03-08</revised>
+    <branch>test/train-mechanics-debug</branch>
+    <author>Claude Code (Opus 4.6)</author>
+    <status>reviewed-v3</status>
+    <parent-issues>
+      <issue id="503" priority="P2">Double-logging (Prefect + MLflow)</issue>
+      <issue id="504" priority="P1">Flexible HPO across containers</issue>
+      <issue id="505" priority="P1">Standardized validation across models</issue>
+    </parent-issues>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- ARCHITECTURAL INSIGHT (v3 revision)                                 -->
+  <!-- ================================================================== -->
+  <architectural-insight>
+    <problem>
+      v1 and v2 of this plan proposed a PARALLEL config system:
+      configs/debug/ with custom YAML merge, separate Pydantic models,
+      CLI flags bypassing Hydra. This violates the fundamental principle:
+      Hydra-zen is the single source of truth for experiment configuration.
+    </problem>
+
+    <root-cause>
+      train_flow.py bypasses Hydra-zen entirely. Its __main__ block uses
+      argparse for individual params (--model-family, --loss-name, etc.)
+      and builds a 9-key minimal config dict. It never calls
+      compose_experiment_config(). Meanwhile:
+      - compose_experiment_config() exists and works (compose.py)
+      - log_hydra_config() exists in ExperimentTracker but is NEVER called
+      - 22 Hydra experiment configs already exist in configs/experiment/
+      The gap between Hydra composition and Prefect flow execution is
+      the root cause of all config fragmentation.
+    </root-cause>
+
+    <solution>
+      Bridge the gap. train_flow.py calls compose_experiment_config()
+      with the experiment name + Hydra overrides. CLI overrides become
+      Hydra overrides (max_epochs=2, not --max-epochs 2). The resolved
+      config dict is logged to MLflow via log_hydra_config(). Debug configs
+      are standard Hydra experiment YAMLs in configs/experiment/debug_*.yaml.
+      No new config system. No parallel YAML format. No custom merge logic.
+    </solution>
+
+    <config-pipeline>
+      Hydra experiment YAML (configs/experiment/debug_single_model.yaml)
+        ↓ compose_experiment_config(experiment_name, overrides)
+      Resolved config dict (full: data, model, training, checkpoint, etc.)
+        ↓ train_flow.py extracts params from resolved dict
+      training_flow(config_dict=resolved_config)
+        ↓ ExperimentTracker.log_hydra_config(resolved_config)
+      MLflow artifact: config/resolved_config.yaml
+        ↓ downstream flows read via MLflow API
+      Post-training + Analysis flows discover upstream config
+    </config-pipeline>
+
+    <reproducibility-guarantee>
+      Any experiment can be EXACTLY reproduced by:
+      1. Downloading config/resolved_config.yaml from MLflow
+      2. Running compose_experiment_config() with the same inputs
+      3. OR: passing the YAML directly to train_flow.py
+      The CLI arguments are NOT the record — the logged YAML artifact IS.
+    </reproducibility-guarantee>
+  </architectural-insight>
+
+  <!-- ================================================================== -->
+  <!-- MOTIVATION                                                          -->
+  <!-- ================================================================== -->
+  <motivation>
+    <problem>
+      Every debugging session requires re-explaining the same workflow.
+      The pipeline must encode testing knowledge in deterministic Hydra
+      experiment configs that any researcher can run without assistance.
+    </problem>
+
+    <goal>
+      A single command like:
+        docker compose run --rm -e EXPERIMENT=debug_single_model train
+      or:
+        ./scripts/run_debug.sh --experiment debug_single_model
+      that runs training with the FULL resolved Hydra config logged to
+      MLflow. The exact config is always recoverable from MLflow artifacts.
+    </goal>
+
+    <principles>
+      <principle id="P1">Hydra-zen native — debug configs are standard
+        experiment YAMLs, not a parallel system</principle>
+      <principle id="P2">CLI → Hydra override → resolved dict → MLflow
+        artifact — this is the ONLY config pipeline</principle>
+      <principle id="P3">Resolved config IS the record — not CLI args,
+        not env vars, not the YAML file alone</principle>
+      <principle id="P4">Deterministic — same experiment YAML + same
+        overrides = same behavior, always</principle>
+      <principle id="P5">Docker-native — STOP Protocol enforced</principle>
+    </principles>
+  </motivation>
+
+  <!-- ================================================================== -->
+  <!-- BLOCKERS (from MLOps reviewer — still valid)                        -->
+  <!-- ================================================================== -->
+  <blockers>
+    <blocker id="B1" severity="critical">
+      <title>train_flow.py bypasses Hydra-zen composition</title>
+      <description>
+        __main__ block uses argparse for individual params and builds a
+        9-key minimal config dict. Never calls compose_experiment_config().
+        Never logs resolved config to MLflow. This is the root cause of
+        ALL config reproducibility gaps.
+      </description>
+      <fix>
+        Refactor __main__ to accept --experiment NAME and --override KEY=VALUE.
+        Call compose_experiment_config(experiment_name, overrides).
+        Pass full resolved dict through training_flow().
+        Log via tracker.log_hydra_config(resolved_config).
+      </fix>
+    </blocker>
+
+    <blocker id="B2" severity="critical">
+      <title>log_hydra_config() never called</title>
+      <description>
+        ExperimentTracker.log_hydra_config() exists (tracking.py:327-350)
+        but is never invoked anywhere in the codebase. The resolved
+        experiment config is NOT logged to MLflow as an artifact.
+      </description>
+      <fix>
+        Call tracker.log_hydra_config(resolved_config) in train_one_fold_task
+        after starting the MLflow run. This logs config/resolved_config.yaml
+        as an MLflow artifact for every training run.
+      </fix>
+    </blocker>
+
+    <blocker id="B3" severity="critical">
+      <title>MLflow tag mismatch: loss_name vs loss_function</title>
+      <description>
+        train_flow.py:555 tags runs with "loss_name" but ensemble
+        builder.py reads "loss_function". Debug training runs will be
+        invisible to the analysis flow.
+      </description>
+      <fix>
+        Standardize on "loss_function" in train_flow.py.
+        Add "loss_name" fallback in builder.py for backward compat.
+      </fix>
+    </blocker>
+
+    <blocker id="B4" severity="critical">
+      <title>eval_fold2_dsc gate rejects debug runs</title>
+      <description>
+        builder.py:221 requires eval_fold2_dsc metric. Debug runs
+        with 2 epochs won't have this. All debug runs silently skipped.
+      </description>
+      <fix>
+        Make configurable: require_eval_metrics=True parameter.
+        Debug scenarios pass False.
+      </fix>
+    </blocker>
+
+    <blocker id="B5" severity="critical">
+      <title>Checkpoint path resolution mismatch</title>
+      <description>
+        Trainer saves to CHECKPOINT_DIR. Ensemble builder looks in
+        artifact_uri (MLflow). Checkpoints not logged as MLflow artifacts.
+      </description>
+      <fix>
+        Log checkpoint .pth files as MLflow artifacts during training.
+      </fix>
+    </blocker>
+
+    <blocker id="B6" severity="critical">
+      <title>Analysis flow --upstream-experiment missing</title>
+      <description>
+        EvaluationConfig.mlflow_training_experiment defaults to
+        "minivess_training". Analysis flow can't find debug experiment runs.
+      </description>
+      <fix>
+        Add --upstream-experiment to analysis_flow.py and
+        post_training_flow.py __main__ blocks.
+      </fix>
+    </blocker>
+
+    <blocker id="B7" severity="high">
+      <title>post_training_out volume not in analyze container</title>
+      <fix>Add post_training_out:/app/outputs/post_training:ro to analyze.</fix>
+    </blocker>
+
+    <blocker id="B8" severity="high">
+      <title>load_checkpoint silently returns random weights</title>
+      <fix>Raise error instead of returning uninitialized network.</fix>
+    </blocker>
+  </blockers>
+
+  <!-- ================================================================== -->
+  <!-- DESIGN: HYDRA-ZEN NATIVE DEBUG MODE                                 -->
+  <!-- ================================================================== -->
+  <design>
+
+    <how-it-works>
+      <step n="1">
+        Researcher picks an experiment config:
+          configs/experiment/debug_single_model.yaml
+        This is a STANDARD Hydra experiment YAML — same format as
+        dynunet_e2e_debug.yaml, sam3_vanilla_debug.yaml, etc.
+      </step>
+
+      <step n="2">
+        Docker container receives experiment name + optional overrides:
+          docker compose run --rm \
+            -e EXPERIMENT=debug_single_model \
+            -e HYDRA_OVERRIDES="max_epochs=1" \
+            train
+      </step>
+
+      <step n="3">
+        train_flow.py __main__ calls compose_experiment_config():
+          config = compose_experiment_config(
+              experiment_name=os.environ.get("EXPERIMENT"),
+              overrides=parse_hydra_overrides(os.environ.get("HYDRA_OVERRIDES", "")),
+          )
+        This resolves base.yaml + config groups + experiment + overrides
+        into a single dict.
+      </step>
+
+      <step n="4">
+        Resolved config dict flows through training_flow():
+          training_flow(config_dict=config)
+        The flow extracts what it needs from the full dict.
+      </step>
+
+      <step n="5">
+        Resolved config logged to MLflow as artifact:
+          tracker.log_hydra_config(config)
+          → MLflow artifact: config/resolved_config.yaml
+        This is the SINGLE SOURCE OF TRUTH for what ran.
+      </step>
+
+      <step n="6">
+        Downstream flows read upstream config from MLflow:
+          analysis_flow reads config/resolved_config.yaml from
+          training run → knows model, loss, all params.
+      </step>
+    </how-it-works>
+
+    <!-- ================================================================ -->
+    <!-- DEBUG EXPERIMENT CONFIGS                                           -->
+    <!-- ================================================================ -->
+    <debug-experiment-configs>
+      <description>
+        Standard Hydra experiment YAMLs. Same format as all 22 existing
+        experiment configs. Live in configs/experiment/ alongside them.
+        NOT in a separate directory. Use '@package _global_' and defaults
+        overrides like every other experiment config.
+      </description>
+
+      <config name="debug_single_model">
+        <file>configs/experiment/debug_single_model.yaml</file>
+        <yaml>
+          # @package _global_
+          # Fastest possible mechanics test: 1 model, 1 fold, 1 epoch.
+          # Duration: ~2 min on any GPU.
+          #
+          # Usage:
+          #   docker compose run --rm -e EXPERIMENT=debug_single_model train
+          #   # Override model:
+          #   docker compose run --rm -e EXPERIMENT=debug_single_model \
+          #     -e HYDRA_OVERRIDES="model=sam3_vanilla" train
+          defaults:
+            - override /checkpoint: lightweight
+
+          experiment_name: debug_single_model
+          model: dynunet
+          losses:
+            - cbdice_cldice
+          max_epochs: 1
+          debug: true
+
+          # Data subsetting (consumed by train_flow.py)
+          max_train_volumes: 2
+          max_val_volumes: 2
+          num_folds: 1
+        </yaml>
+      </config>
+
+      <config name="debug_all_models">
+        <file>configs/experiment/debug_all_models.yaml</file>
+        <yaml>
+          # @package _global_
+          # All 8GB-compatible models with minimal training.
+          # Duration: ~30 min (5 models × 3 folds × 2 epochs).
+          #
+          # Usage:
+          #   ./scripts/run_debug.sh --experiment debug_all_models
+          #   # Single-epoch variant:
+          #   ./scripts/run_debug.sh --experiment debug_all_models \
+          #     --override max_epochs=1
+          defaults:
+            - override /checkpoint: lightweight
+
+          experiment_name: debug_all_models
+          losses:
+            - cbdice_cldice
+          max_epochs: 2
+          debug: true
+          max_train_volumes: 2
+          max_val_volumes: 2
+          num_folds: 3
+
+          # Multi-model iteration handled by run_debug.sh outer loop.
+          # This YAML is used once per model invocation. The script
+          # passes model=X as a Hydra override for each model.
+          models_to_test:
+            - dynunet
+            - sam3_vanilla
+            - sam3_hybrid
+            - comma_mamba
+            - ulike_mamba
+        </yaml>
+      </config>
+
+      <config name="debug_full_pipeline">
+        <file>configs/experiment/debug_full_pipeline.yaml</file>
+        <yaml>
+          # @package _global_
+          # Full pipeline: Train → Post-Training → Analysis.
+          # Tests inter-flow MLflow contract with DynUNet.
+          # Duration: ~15 min.
+          #
+          # Usage:
+          #   ./scripts/run_debug.sh --experiment debug_full_pipeline
+          defaults:
+            - override /checkpoint: lightweight
+
+          experiment_name: debug_full_pipeline
+          model: dynunet
+          losses:
+            - cbdice_cldice
+          max_epochs: 2
+          debug: true
+          max_train_volumes: 2
+          max_val_volumes: 2
+          num_folds: 3
+
+          flows:
+            - train
+            - post_training
+            - analyze
+
+          post_training:
+            plugins: [swa, calibration]
+        </yaml>
+      </config>
+
+      <config name="debug_multi_loss">
+        <file>configs/experiment/debug_multi_loss.yaml</file>
+        <yaml>
+          # @package _global_
+          # Multiple losses for ensemble strategy testing.
+          # Required to test cross-loss diversity in all_loss_single_best
+          # and all_loss_all_best ensemble strategies.
+          # Duration: ~15 min.
+          #
+          # Usage:
+          #   ./scripts/run_debug.sh --experiment debug_multi_loss
+          defaults:
+            - override /checkpoint: lightweight
+
+          experiment_name: debug_multi_loss
+          model: dynunet
+          losses:
+            - cbdice_cldice
+            - dice_ce
+            - dice_ce_cldice
+          max_epochs: 2
+          debug: true
+          max_train_volumes: 2
+          max_val_volumes: 2
+          num_folds: 3
+
+          flows:
+            - train
+            - analyze
+        </yaml>
+      </config>
+
+      <config name="debug_data_validation">
+        <file>configs/experiment/debug_data_validation.yaml</file>
+        <yaml>
+          # @package _global_
+          # MONAI dataloader validation for all 70 volumes.
+          # No training — data pipeline check only.
+          # Duration: ~5 min.
+          defaults: []
+
+          experiment_name: debug_data_validation
+          debug: true
+          # Uses all volumes (no subsetting)
+          flows:
+            - data_validation
+        </yaml>
+      </config>
+    </debug-experiment-configs>
+
+    <!-- ================================================================ -->
+    <!-- ENTRY POINTS                                                      -->
+    <!-- ================================================================ -->
+    <entry-points>
+      <description>
+        Two entry points, both feeding into compose_experiment_config():
+        1. Direct Docker: env var EXPERIMENT + HYDRA_OVERRIDES
+        2. Shell wrapper: translates CLI flags to env vars + iterates models
+      </description>
+
+      <direct-docker>
+        # Single model, single invocation:
+        docker compose -f deployment/docker-compose.flows.yml run --rm \
+          -e EXPERIMENT=debug_single_model \
+          train
+
+        # With Hydra override:
+        docker compose -f deployment/docker-compose.flows.yml run --rm \
+          -e EXPERIMENT=debug_single_model \
+          -e HYDRA_OVERRIDES="max_epochs=5,model=sam3_vanilla" \
+          train
+
+        Inside the container, train_flow.py __main__:
+          experiment = os.environ.get("EXPERIMENT")
+          overrides = os.environ.get("HYDRA_OVERRIDES", "").split(",")
+          config = compose_experiment_config(experiment, overrides)
+          training_flow(config_dict=config)
+      </direct-docker>
+
+      <shell-wrapper path="scripts/run_debug.sh">
+        # Multi-model orchestrator. Reads models_to_test from experiment
+        # YAML, loops over models, passes model=X as Hydra override.
+
+        ./scripts/run_debug.sh --experiment debug_all_models
+        ./scripts/run_debug.sh --experiment debug_full_pipeline
+        ./scripts/run_debug.sh --experiment debug_single_model \
+          --override max_epochs=5
+
+        # Internally:
+        # 1. Preflight check
+        # 2. Read models_to_test from YAML (via Python one-liner)
+        # 3. For each model:
+        #    docker compose run --rm \
+        #      -e EXPERIMENT=$experiment \
+        #      -e HYDRA_OVERRIDES="model=$model,$user_overrides" \
+        #      train
+        # 4. Capture logs to outputs/debug/logs/
+        # 5. Validate MLflow runs
+        # 6. Print summary
+      </shell-wrapper>
+
+      <justfile-integration>
+        # justfile recipes (thin wrappers):
+        just debug                              # debug_single_model
+        just debug-all-models                   # debug_all_models
+        just debug-pipeline                     # debug_full_pipeline
+        just debug EXPERIMENT [OVERRIDES]       # custom
+      </justfile-integration>
+    </entry-points>
+
+    <!-- ================================================================ -->
+    <!-- CONFIG PIPELINE DETAIL                                            -->
+    <!-- ================================================================ -->
+    <config-pipeline-detail>
+      <step n="1" component="configs/experiment/debug_*.yaml">
+        Standard Hydra experiment YAML. Sets experiment_name, model,
+        losses, max_epochs, debug=true, max_train_volumes, etc.
+        Uses '@package _global_' and defaults overrides.
+      </step>
+
+      <step n="2" component="EXPERIMENT env var">
+        Docker Compose passes EXPERIMENT=debug_single_model to container.
+        Optional HYDRA_OVERRIDES="max_epochs=1,model=sam3_vanilla".
+      </step>
+
+      <step n="3" component="train_flow.py __main__">
+        REFACTORED: calls compose_experiment_config(experiment_name, overrides).
+        Gets full resolved dict with ALL config (data, model, training,
+        checkpoint, etc.). Passes to training_flow(config_dict=resolved).
+      </step>
+
+      <step n="4" component="training_flow()">
+        REFACTORED: accepts config_dict parameter (full Hydra dict).
+        Extracts individual params: config["model"], config["losses"],
+        config["max_epochs"], config.get("max_train_volumes"), etc.
+        Passes full dict to train_one_fold_task for config logging.
+      </step>
+
+      <step n="5" component="train_one_fold_task()">
+        Calls tracker.log_hydra_config(config_dict).
+        MLflow artifact created: config/resolved_config.yaml.
+        This is the immutable record of EXACTLY what was configured.
+      </step>
+
+      <step n="6" component="MLflow artifact">
+        config/resolved_config.yaml contains the FULL resolved Hydra
+        config. Any downstream flow or human can:
+        - Read it to understand what ran
+        - Reproduce the exact experiment
+        - Diff two configs to understand what changed
+      </step>
+
+      <step n="7" component="Downstream flows">
+        post_training_flow and analysis_flow read upstream config from
+        MLflow artifacts via --upstream-experiment. They discover runs,
+        read config/resolved_config.yaml, and extract what they need.
+      </step>
+    </config-pipeline-detail>
+
+    <!-- ================================================================ -->
+    <!-- WHAT DOES NOT EXIST AND MUST NOT BE CREATED                       -->
+    <!-- ================================================================ -->
+    <anti-patterns>
+      <banned item="configs/debug/ directory">
+        Debug configs live in configs/experiment/ alongside all other
+        experiment configs. No separate directory.
+      </banned>
+      <banned item="merge_debug_config.py">
+        compose_experiment_config() already handles YAML merging.
+        No custom merge script.
+      </banned>
+      <banned item="yaml_merge.py">
+        compose.py already has _compose_with_manual_merge().
+        No duplicate merge utility.
+      </banned>
+      <banned item="DebugScenarioConfig Pydantic model">
+        The resolved Hydra dict IS the config. No separate Pydantic
+        model for debug scenarios. QuasiE2EConfig stays for unit tests
+        but is NOT the experiment config system.
+      </banned>
+      <banned item="CLI flags that bypass Hydra">
+        --max-epochs 1 is WRONG. max_epochs=1 as a Hydra override is
+        CORRECT. CLI flags translate to Hydra overrides, never bypass.
+      </banned>
+      <banned item="Single-key override YAML files">
+        Hydra overrides handle this: HYDRA_OVERRIDES="max_epochs=1".
+        No configs/debug/overrides/ directory.
+      </banned>
+    </anti-patterns>
+
+    <!-- ================================================================ -->
+    <!-- MODELS FOR 8GB GPU                                                -->
+    <!-- ================================================================ -->
+    <models-8gb>
+      <model family="dynunet" peak_vram_gb="3.5" feasible="yes"/>
+      <model family="sam3_vanilla" peak_vram_gb="2.9" feasible="yes"/>
+      <model family="sam3_hybrid" peak_vram_gb="7.5" feasible="marginal"/>
+      <model family="comma_mamba" peak_vram_gb="2.5" feasible="yes"/>
+      <model family="ulike_mamba" peak_vram_gb="2.5" feasible="yes"/>
+    </models-8gb>
+
+  </design>
+
+  <!-- ================================================================== -->
+  <!-- PHASES                                                              -->
+  <!-- ================================================================== -->
+  <phases>
+
+    <!-- ================================================================ -->
+    <!-- PHASE 0: Bridge Hydra-zen to train_flow.py                        -->
+    <!-- ================================================================ -->
+    <phase id="0" name="Bridge Hydra-zen → train_flow.py"
+           effort="high" priority="P0-CRITICAL">
+      <description>
+        THE foundational change. train_flow.py must call
+        compose_experiment_config() and log the resolved config to MLflow.
+        Everything else depends on this.
+      </description>
+
+      <task id="0.1" name="Refactor train_flow.py __main__ to use Hydra composition">
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <details>
+          CURRENT (broken):
+            parser.add_argument("--model-family", default=env("MODEL_FAMILY"))
+            parser.add_argument("--loss-name", default=env("LOSS_NAME"))
+            ...
+            training_flow(model_family=args.model_family, ...)
+
+          NEW (Hydra-native):
+            experiment = os.environ.get("EXPERIMENT")
+            overrides_str = os.environ.get("HYDRA_OVERRIDES", "")
+            overrides = [o.strip() for o in overrides_str.split(",") if o.strip()]
+
+            from minivess.config.compose import compose_experiment_config
+            config = compose_experiment_config(
+                experiment_name=experiment,
+                overrides=overrides,
+            )
+            training_flow(config_dict=config)
+
+          BACKWARD COMPAT: If EXPERIMENT is not set but MODEL_FAMILY is,
+          fall back to building overrides from env vars for existing
+          Docker Compose configs that use the old env-var pattern.
+          This is a migration bridge, not permanent.
+        </details>
+      </task>
+
+      <task id="0.2" name="Refactor training_flow() to accept config_dict">
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <details>
+          Add config_dict: dict[str, Any] | None = None parameter.
+          When provided, extract all params from it:
+            loss_name = config_dict.get("losses", ["cbdice_cldice"])[0]
+            model_family = config_dict.get("model", "dynunet")
+            max_epochs = config_dict.get("max_epochs", 100)
+            experiment_name = config_dict.get("experiment_name", "minivess_training")
+            max_train_volumes = config_dict.get("max_train_volumes")
+            max_val_volumes = config_dict.get("max_val_volumes")
+            ...etc from full Hydra dict
+
+          When config_dict is None, use individual params (backward compat).
+          Store config_dict on the flow for downstream logging.
+        </details>
+      </task>
+
+      <task id="0.3" name="Call log_hydra_config() in training runs">
+        <files>
+          <file>src/minivess/orchestration/flows/train_flow.py</file>
+          <file>src/minivess/observability/tracking.py</file>
+        </files>
+        <details>
+          After opening the MLflow run (train_flow.py:551-558),
+          call tracker.log_hydra_config(config_dict) to persist
+          the resolved config as config/resolved_config.yaml artifact.
+
+          This is the SINGLE SOURCE OF TRUTH for what ran. Any
+          downstream flow or human can download this artifact to
+          understand or reproduce the experiment.
+        </details>
+      </task>
+
+      <task id="0.4" name="Add max_train_volumes / max_val_volumes to data subsetting">
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <details>
+          In train_one_fold_task(), replace the hardcoded DEBUG_MAX_VOLUMES
+          logic with config-driven subsetting:
+            max_train = config.get("max_train_volumes")
+            max_val = config.get("max_val_volumes")
+            if max_train:
+                train_dicts = train_dicts[:max_train]
+            if max_val:
+                val_dicts = val_dicts[:max_val]
+
+          These values come from the Hydra config (debug_single_model.yaml
+          sets max_train_volumes: 2, max_val_volumes: 2). Not hardcoded.
+        </details>
+      </task>
+
+      <task id="0.5" name="Fix loss_name → loss_function tag standardization">
+        <files>
+          <file>src/minivess/orchestration/flows/train_flow.py</file>
+          <file>src/minivess/ensemble/builder.py</file>
+        </files>
+        <details>
+          train_flow.py:555 change "loss_name" → "loss_function".
+          builder.py: add "loss_name" to fallback chain for backward compat.
+        </details>
+      </task>
+    </phase>
+
+    <!-- ================================================================ -->
+    <!-- PHASE 1: Fix remaining blockers                                   -->
+    <!-- ================================================================ -->
+    <phase id="1" name="Fix Remaining Pipeline Blockers"
+           effort="medium" priority="P0">
+
+      <task id="1.1" name="Make eval_fold2_dsc gate configurable">
+        <file>src/minivess/ensemble/builder.py</file>
+        <details>
+          Add require_eval_metrics: bool = True to discover_training_runs_raw().
+          Debug scenarios pass False via analysis_flow config.
+        </details>
+      </task>
+
+      <task id="1.2" name="Log checkpoints as MLflow artifacts">
+        <file>src/minivess/pipeline/trainer.py</file>
+        <details>
+          After saving best_*.pth, call mlflow.log_artifact() so
+          ensemble builder can find them via artifact_uri.
+        </details>
+      </task>
+
+      <task id="1.3" name="Add --upstream-experiment to analysis + post-training">
+        <files>
+          <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+          <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+        </files>
+        <details>
+          Add UPSTREAM_EXPERIMENT env var to both flows' __main__ blocks.
+          Pass through to EvaluationConfig.mlflow_training_experiment.
+        </details>
+      </task>
+
+      <task id="1.4" name="Add post_training_out volume to analyze container">
+        <file>deployment/docker-compose.flows.yml</file>
+      </task>
+
+      <task id="1.5" name="Fix load_checkpoint random-weights fallback">
+        <file>src/minivess/ensemble/builder.py</file>
+        <details>Raise error instead of returning uninitialized network.</details>
+      </task>
+    </phase>
+
+    <!-- ================================================================ -->
+    <!-- PHASE 2: Create debug experiment configs                          -->
+    <!-- ================================================================ -->
+    <phase id="2" name="Create Debug Experiment Configs"
+           effort="small" priority="P0">
+      <description>
+        Standard Hydra experiment YAMLs in configs/experiment/.
+        Same format as all 22 existing experiment configs.
+      </description>
+
+      <task id="2.1" name="Create debug experiment YAMLs">
+        <files>
+          configs/experiment/debug_single_model.yaml
+          configs/experiment/debug_all_models.yaml
+          configs/experiment/debug_full_pipeline.yaml
+          configs/experiment/debug_multi_loss.yaml
+          configs/experiment/debug_data_validation.yaml
+        </files>
+        <details>
+          Each uses '@package _global_' + lightweight checkpoint defaults.
+          Sets debug: true, max_train_volumes: 2, max_val_volumes: 2,
+          and scenario-specific overrides. See design section for contents.
+        </details>
+      </task>
+
+      <task id="2.2" name="Create configs/README.md">
+        <file>configs/README.md</file>
+        <details>
+          Document the config system architecture:
+          - base.yaml: Hydra entry point + defaults list
+          - Config groups: data/, model/, training/, checkpoint/
+          - Experiment configs: experiment/*.yaml
+          - How composition works: base + groups + experiment + overrides
+          - The resolved dict is logged to MLflow
+          - How to create new experiments
+          - Debug experiments: debug_*.yaml prefix convention
+        </details>
+      </task>
+    </phase>
+
+    <!-- ================================================================ -->
+    <!-- PHASE 3: Shell wrapper + Preflight                                -->
+    <!-- ================================================================ -->
+    <phase id="3" name="Shell Wrapper and Preflight"
+           effort="medium" priority="P1">
+
+      <task id="3.1" name="Create run_debug.sh">
+        <file>scripts/run_debug.sh</file>
+        <details>
+          Thin wrapper that:
+          1. Preflight check (Docker, GPU, data, images, network)
+          2. Read models_to_test from experiment YAML (1 Python line)
+          3. For each model:
+             docker compose run --rm \
+               -e EXPERIMENT=$experiment \
+               -e HYDRA_OVERRIDES="model=$model,$user_overrides" \
+               train 2>&amp;1 | tee outputs/debug/logs/$model.log
+          4. If flows includes post_training or analyze: chain them
+          5. Validate MLflow runs, print summary
+
+          --experiment maps to EXPERIMENT env var.
+          --override maps to HYDRA_OVERRIDES env var.
+          These are NOT parallel CLI systems — they're env var setters.
+        </details>
+      </task>
+
+      <task id="3.2" name="Preflight checker">
+        <details>
+          Function in run_debug.sh that validates:
+          - Docker daemon running
+          - NVIDIA runtime available
+          - minivess-base:latest image exists
+          - minivess-network Docker network exists
+          - MiniVess data accessible
+          - HF_TOKEN set (if SAM3 models in scenario)
+          Each failure prints actionable fix command.
+        </details>
+      </task>
+
+      <task id="3.3" name="Justfile integration">
+        <file>justfile</file>
+        <details>
+          just debug                     # debug_single_model
+          just debug-all-models          # debug_all_models
+          just debug-pipeline            # debug_full_pipeline
+          Thin wrappers calling run_debug.sh.
+        </details>
+      </task>
+    </phase>
+
+    <!-- ================================================================ -->
+    <!-- PHASE 4: Multi-flow chaining                                      -->
+    <!-- ================================================================ -->
+    <phase id="4" name="Multi-Flow Chaining"
+           effort="medium" priority="P1">
+
+      <task id="4.1" name="Post-training flow chaining">
+        <details>
+          run_debug.sh chains flows when experiment YAML has flows list.
+          After training: passes UPSTREAM_EXPERIMENT to post-training Docker.
+          After post-training: passes to analysis Docker.
+          Experiment name is the inter-flow contract key.
+        </details>
+      </task>
+
+      <task id="4.2" name="Analysis flow chaining + ensemble validation">
+        <details>
+          Analysis flow receives UPSTREAM_EXPERIMENT, discovers training runs,
+          builds ensembles, generates comparison table.
+          Validation: comparison table exists, ensemble members > 0.
+        </details>
+      </task>
+
+      <task id="4.3" name="Pipeline summary report">
+        <details>
+          After all flows complete, print summary table with:
+          - Per-flow status, duration, MLflow run count
+          - Per-model timing and error context
+          - Total duration
+          - Experiment name for MLflow lookup
+          Save to outputs/debug/summary_{timestamp}.json.
+        </details>
+      </task>
+    </phase>
+
+    <!-- ================================================================ -->
+    <!-- PHASE 5: Documentation                                            -->
+    <!-- ================================================================ -->
+    <phase id="5" name="Documentation"
+           effort="small" priority="P1">
+
+      <task id="5.1" name="Add CLAUDE.md Rule #23: Hydra-zen single source of truth">
+        <file>CLAUDE.md</file>
+        <details>
+          New Critical Rule documenting:
+          - Hydra-zen configs ARE the single source of truth for experiments
+          - CLI overrides flow through Hydra grammar, never bypass
+          - Resolved config logged to MLflow as config/resolved_config.yaml
+          - NEVER create parallel config systems
+          - NEVER hardcode hyperparams in Python — parameterize via Hydra
+        </details>
+      </task>
+
+      <task id="5.2" name="Update MEMORY.md with Hydra-zen insight">
+        <file>MEMORY.md (auto-memory)</file>
+        <details>
+          Add: "Hydra-zen = single source of truth for experiment config.
+          CLI → Hydra override → resolved dict → MLflow artifact.
+          NEVER create parallel config systems."
+        </details>
+      </task>
+    </phase>
+
+  </phases>
+
+  <!-- ================================================================== -->
+  <!-- DEPENDENCIES                                                        -->
+  <!-- ================================================================== -->
+  <dependencies>
+    <dependency from="1" to="0">Blockers need Hydra bridge first</dependency>
+    <dependency from="2" to="0">Debug YAMLs need Hydra bridge to work</dependency>
+    <dependency from="3" to="0">Shell wrapper uses EXPERIMENT env var</dependency>
+    <dependency from="3" to="2">Shell wrapper reads debug YAMLs</dependency>
+    <dependency from="4" to="1">Flow chaining needs blocker fixes</dependency>
+    <dependency from="4" to="3">Flow chaining in run_debug.sh</dependency>
+  </dependencies>
+
+  <!-- ================================================================== -->
+  <!-- EFFORT SUMMARY                                                      -->
+  <!-- ================================================================== -->
+  <effort-summary>
+    <phase id="0" tasks="5" estimate="3-4 hours">Bridge Hydra-zen to train_flow.py (foundational)</phase>
+    <phase id="1" tasks="5" estimate="2-3 hours">Fix remaining pipeline blockers</phase>
+    <phase id="2" tasks="2" estimate="1 hour">Debug experiment YAMLs + configs README</phase>
+    <phase id="3" tasks="3" estimate="2 hours">Shell wrapper + preflight + justfile</phase>
+    <phase id="4" tasks="3" estimate="2-3 hours">Multi-flow chaining + validation</phase>
+    <phase id="5" tasks="2" estimate="30 min">CLAUDE.md rule + MEMORY.md update</phase>
+    <total tasks="20" estimate="10-14 hours">
+      Reduced from v2's 28 tasks / 12-18h by eliminating all parallel
+      infrastructure (merge_debug_config.py, yaml_merge.py, override YAMLs,
+      DebugScenarioConfig, configs/debug/ directory).
+    </total>
+  </effort-summary>
+
+</plan>

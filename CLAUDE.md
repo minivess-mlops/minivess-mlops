@@ -287,6 +287,24 @@ Each of the 6 Prefect flows runs in its own Docker container:
    See `.env.example` for the complete authoritative list of all configurable values.
    See `tests/v2/unit/test_env_single_source.py` for enforcement checks.
 
+23. **Hydra-zen = Single Source of Truth for Experiment Config (Non-Negotiable)** —
+    ALL experiment parameters flow through Hydra-zen composition in
+    `configs/experiment/*.yaml`. The pipeline is: CLI override → Hydra grammar →
+    `compose_experiment_config()` → resolved dict → `log_hydra_config()` → MLflow
+    artifact `config/resolved_config.yaml`. The logged artifact IS the record of
+    what ran — not CLI args, not env vars, not the YAML file alone.
+    - **NEVER** create parallel config systems (custom YAML merge, separate Pydantic
+      models for experiment config, TOML/JSON config files for hyperparameters).
+    - **NEVER** hardcode hyperparameters in Python — parameterize via Hydra YAML.
+    - **NEVER** bypass Hydra composition with direct argparse/env-var config dicts.
+      Env vars like `EXPERIMENT` and `HYDRA_OVERRIDES` feed INTO compose_experiment_config(),
+      they don't replace it.
+    - **ALWAYS** log the resolved config to MLflow via `tracker.log_hydra_config()`.
+    - Debug/test configs are standard experiment YAMLs (`debug_*.yaml`), NOT a separate system.
+    - Key files: `src/minivess/config/compose.py` (composition), `configs/base.yaml` (entry point),
+      `configs/experiment/*.yaml` (22+ experiments), `src/minivess/observability/tracking.py`
+      (`log_hydra_config()` method).
+
 21. **GitHub Actions CI EXPLICITLY DISABLED (Non-Negotiable)** — The user has
     explicitly forbidden automatic GitHub Actions CI. Actions consume credits.
     ALL CI jobs in `ci-v2.yml` are commented out. ALL workflows use
@@ -324,6 +342,11 @@ Each of the 6 Prefect flows runs in its own Docker container:
   in flow files — use `resolve_tracking_uri()` or fail loudly on missing env var.
 - Define `mlflow_tracking_uri` or any service URL in Dynaconf TOML files — they are read
   directly from env vars; TOML duplication creates a hidden second source of truth.
+- Create parallel experiment config systems — Hydra-zen is the ONLY experiment config
+  mechanism. No custom YAML merge scripts, no separate debug config Pydantic models,
+  no configs/debug/ directory. Debug configs are `configs/experiment/debug_*.yaml`.
+- Bypass Hydra-zen composition with argparse/env-var config dicts in flow files —
+  flows must call `compose_experiment_config()` and log the resolved dict to MLflow.
 
 ## TDD Workflow (Non-Negotiable)
 
