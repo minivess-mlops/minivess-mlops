@@ -1,0 +1,21 @@
+# Smoke test configuration — minimal grid for CI/integration verification.
+#
+# 1 loss × 1 epoch × 1 fold = fastest possible run to verify the grid
+# launcher works end-to-end without spending GPU time.
+#
+# Used by scripts/train_all_hyperparam_combos.sh --config configs/experiments/smoke_test.yaml
+
+experiment_name: smoke_test
+model_family: dynunet
+
+hyperparameters:
+  loss_name:
+    - dice_ce
+
+fixed:
+  max_epochs: 1
+  num_folds: 1
+  batch_size: 1
+  compute: auto
+
+mlflow_experiment: minivess_smoke_test

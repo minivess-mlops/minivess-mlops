@@ -1,0 +1,30 @@
+# DynUNet hyperparameter grid configuration.
+#
+# Used by scripts/train_all_hyperparam_combos.sh to generate a Cartesian
+# product of hyperparameters and launch Docker-based training runs.
+#
+# Closes: #401
+
+experiment_name: dynunet_grid
+model_family: dynunet
+
+# Hyperparameters to sweep — Cartesian product = 3 × 2 × 2 = 12 combinations
+hyperparameters:
+  loss_name:
+    - cbdice_cldice
+    - dice_ce
+    - dice_ce_cldice
+  learning_rate:
+    - 1.0e-3
+    - 3.0e-4
+  batch_size:
+    - 1
+    - 2
+
+# Fixed parameters applied to every run
+fixed:
+  max_epochs: 100
+  num_folds: 3
+  compute: auto
+
+mlflow_experiment: minivess_hpo_grid

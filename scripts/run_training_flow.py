@@ -109,7 +109,7 @@ def main() -> int:
     )
 
     print(
-        f"[run_training_flow] complete — folds={result.fold_count}  "
+        f"[run_training_flow] complete — folds={result.n_folds}  "
         f"mlflow_run_id={result.mlflow_run_id}"
     )
     return 0
