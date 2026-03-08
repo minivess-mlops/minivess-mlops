@@ -84,8 +84,36 @@ def main() -> None:
     def objective(trial):  # type: ignore[no-untyped-def]
         params = engine.suggest_params(trial, search_space.params)
         logger.info("Trial %d params: %s", trial.number, params)
-        # Placeholder: in real usage, this calls training and returns val_loss
-        return 0.0
+
+        # NOTE: run_hpo.py is a LOCAL convenience wrapper for interactive HPO.
+        # The correct production path for HPO is via the Prefect hpo_flow deployment:
+        #
+        #   prefect deployment run 'hpo-flow/default' \
+        #       --params '{"model_family": "dynunet", "n_trials": 50}'
+        #
+        # For Docker-based training in a grid sweep (Cartesian product, not Bayesian),
+        # use scripts/train_all_hyperparam_combos.sh instead.
+        #
+        # To implement a real Bayesian objective here, launch via Docker and read the
+        # MLflow result metric back:
+        #
+        #   import subprocess, json
+        #   result = subprocess.run(
+        #       ["docker", "compose", "-f", "deployment/docker-compose.flows.yml",
+        #        "run", "--rm", "-e", f"LOSS_NAME={params['loss_name']}", "train"],
+        #       capture_output=True, text=True, check=False,
+        #   )
+        #   # Then query MLflow for the resulting val_loss via the config fingerprint.
+        #
+        # This wrapper raises NotImplementedError so callers get a clear error rather
+        # than silently returning 0.0 (which would produce a bogus "best" trial).
+        raise NotImplementedError(
+            "run_hpo.py objective is not connected to real training.\n"
+            "Use the Prefect hpo_flow deployment instead:\n"
+            "  prefect deployment run 'hpo-flow/default' "
+            '--params \'{"model_family": "dynunet", "n_trials": 50}\'\n'
+            "Or use train_all_hyperparam_combos.sh for a Cartesian grid sweep."
+        )
 
     study.optimize(objective, n_trials=n_trials)
 
