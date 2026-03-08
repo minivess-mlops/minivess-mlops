@@ -35,7 +35,7 @@ class TestQaFlowTrackingUri:
         mlflow_dir = tmp_path / "mlruns"
         mlflow_dir.mkdir()
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(mlflow_dir))
-        monkeypatch.setenv("DASHBOARD_OUTPUT", str(tmp_path / "dashboard"))
+        monkeypatch.setenv("DASHBOARD_OUTPUT_DIR", str(tmp_path / "dashboard"))
 
         from minivess.orchestration.flows.qa_flow import qa_flow
 
@@ -53,7 +53,7 @@ class TestQaFlowTrackingUri:
         empty_mlruns = tmp_path / "mlruns"
         empty_mlruns.mkdir()
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(empty_mlruns))
-        monkeypatch.setenv("DASHBOARD_OUTPUT", str(tmp_path / "dashboard"))
+        monkeypatch.setenv("DASHBOARD_OUTPUT_DIR", str(tmp_path / "dashboard"))
 
         from minivess.orchestration.flows.qa_flow import qa_flow
 
@@ -91,7 +91,7 @@ class TestQaReportPersistence:
         empty_mlruns.mkdir()
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(empty_mlruns))
         dashboard_dir = tmp_path / "dashboard"
-        monkeypatch.setenv("DASHBOARD_OUTPUT", str(dashboard_dir))
+        monkeypatch.setenv("DASHBOARD_OUTPUT_DIR", str(dashboard_dir))
 
         from minivess.orchestration.flows.qa_flow import qa_flow
 
@@ -114,7 +114,7 @@ class TestQaReportPersistence:
         empty_mlruns.mkdir()
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(empty_mlruns))
         dashboard_dir = tmp_path / "dashboard"
-        monkeypatch.setenv("DASHBOARD_OUTPUT", str(dashboard_dir))
+        monkeypatch.setenv("DASHBOARD_OUTPUT_DIR", str(dashboard_dir))
 
         from minivess.orchestration.flows.qa_flow import qa_flow
 

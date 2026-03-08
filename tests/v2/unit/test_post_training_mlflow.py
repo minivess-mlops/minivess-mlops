@@ -32,8 +32,8 @@ class TestPostTrainingMlflow:
         from minivess.orchestration.flows.post_training_flow import post_training_flow
 
         result = post_training_flow()
-        assert "mlflow_run_id" in result, (
-            f"post_training_flow() result missing 'mlflow_run_id'. Got: {list(result.keys())}"
+        assert hasattr(result, "mlflow_run_id"), (
+            f"post_training_flow() result missing 'mlflow_run_id' attribute. Got: {type(result)}"
         )
 
     def test_post_training_opens_mlflow_run(self, monkeypatch, tmp_path) -> None:
@@ -58,7 +58,7 @@ class TestPostTrainingMlflow:
 
         runs = client.search_runs(
             experiment_ids=[experiment.experiment_id],
-            filter_string="tags.flow_name = 'post_training'",
+            filter_string="tags.flow_name = 'post-training-flow'",
         )
         assert runs, (
             "No MLflow run with flow_name='post_training' found after post_training_flow(). "
@@ -85,7 +85,7 @@ class TestPostTrainingMlflow:
 
         runs = client.search_runs(
             experiment_ids=[experiment.experiment_id],
-            filter_string="tags.flow_name = 'post_training'",
+            filter_string="tags.flow_name = 'post-training-flow'",
         )
         if not runs:
             return

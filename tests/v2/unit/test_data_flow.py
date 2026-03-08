@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import pytest
+
 
 # ---------------------------------------------------------------------------
 # Task 3.1: Individual @task function tests
@@ -164,11 +166,16 @@ class TestDataFlowResult:
 class TestRunDataFlow:
     """run_data_flow orchestrator."""
 
-    def test_run_data_flow_returns_result(self, tmp_path: Path) -> None:
+    def test_run_data_flow_returns_result(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from minivess.orchestration.flows.data_flow import (
             DataFlowResult,
             run_data_flow,
         )
+
+        # Route Docker-default output paths to tmp_path so the test works outside Docker.
+        monkeypatch.setenv("SPLITS_OUTPUT_DIR", str(tmp_path / "splits"))
 
         # Create minimal dataset
         (tmp_path / "images").mkdir()
@@ -180,8 +187,13 @@ class TestRunDataFlow:
         result = run_data_flow(data_dir=tmp_path, n_folds=2, seed=42)
         assert isinstance(result, DataFlowResult)
 
-    def test_data_flow_result_has_pairs(self, tmp_path: Path) -> None:
+    def test_data_flow_result_has_pairs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from minivess.orchestration.flows.data_flow import run_data_flow
+
+        # Route Docker-default output paths to tmp_path so the test works outside Docker.
+        monkeypatch.setenv("SPLITS_OUTPUT_DIR", str(tmp_path / "splits"))
 
         (tmp_path / "images").mkdir()
         (tmp_path / "labels").mkdir()
@@ -192,8 +204,12 @@ class TestRunDataFlow:
         result = run_data_flow(data_dir=tmp_path, n_folds=2, seed=42)
         assert len(result.pairs) == 4
 
-    def test_data_flow_result_has_splits(self, tmp_path: Path) -> None:
+    def test_data_flow_result_has_splits(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from minivess.orchestration.flows.data_flow import run_data_flow
+
+        monkeypatch.setenv("SPLITS_OUTPUT_DIR", str(tmp_path / "splits"))
 
         (tmp_path / "images").mkdir()
         (tmp_path / "labels").mkdir()
@@ -205,8 +221,12 @@ class TestRunDataFlow:
         assert result.splits is not None
         assert len(result.splits) == 2
 
-    def test_data_flow_result_has_external(self, tmp_path: Path) -> None:
+    def test_data_flow_result_has_external(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from minivess.orchestration.flows.data_flow import run_data_flow
+
+        monkeypatch.setenv("SPLITS_OUTPUT_DIR", str(tmp_path / "splits"))
 
         (tmp_path / "images").mkdir()
         (tmp_path / "labels").mkdir()
@@ -217,8 +237,12 @@ class TestRunDataFlow:
         result = run_data_flow(data_dir=tmp_path, n_folds=2, seed=42)
         assert isinstance(result.external_datasets, dict)
 
-    def test_data_flow_quality_gate_runs(self, tmp_path: Path) -> None:
+    def test_data_flow_quality_gate_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from minivess.orchestration.flows.data_flow import run_data_flow
+
+        monkeypatch.setenv("SPLITS_OUTPUT_DIR", str(tmp_path / "splits"))
 
         (tmp_path / "images").mkdir()
         (tmp_path / "labels").mkdir()

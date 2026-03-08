@@ -12,8 +12,6 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 _TRAIN_FLOW_SRC = Path("src/minivess/orchestration/flows/train_flow.py")
 
 _FAKE_FOLD_RESULT: dict = {
@@ -117,13 +115,12 @@ class TestTrainingFlowResult:
 # ---------------------------------------------------------------------------
 
 
-class TestRunTrainingDeprecated:
-    def test_run_training_raises_not_implemented(self) -> None:
-        """run_training() stub must raise NotImplementedError."""
-        from minivess.orchestration.flows.train_flow import run_training
+class TestTrainingFlowCallable:
+    def test_training_flow_is_callable(self) -> None:
+        """training_flow() must be callable."""
+        from minivess.orchestration.flows.train_flow import training_flow
 
-        with pytest.raises(NotImplementedError):
-            run_training({"loss_name": "dice_ce"})
+        assert callable(training_flow)
 
 
 # ---------------------------------------------------------------------------

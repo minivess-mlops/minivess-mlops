@@ -14,14 +14,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from numpy.typing import NDArray  # noqa: TC002
 from prefect import flow, task
 
 from minivess.orchestration.constants import FLOW_NAME_ANNOTATION
 from minivess.serving.api_models import SegmentationRequest
 
 if TYPE_CHECKING:
-    from numpy.typing import NDArray
-
     from minivess.serving.api_models import SegmentationResponse
     from minivess.serving.inference_client import InferenceClient
 

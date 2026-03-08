@@ -35,6 +35,7 @@ def sam3_lora_config() -> ModelConfig:
 
 
 @_sam3_skip
+@pytest.mark.gpu
 class TestSam3TopoLoraAdapter:
     """Sam3TopoLoraAdapter: SAM3 + LoRA + topology loss."""
 

@@ -79,6 +79,7 @@ class TestGatedFeatureFusion:
 
 
 @_sam3_skip
+@pytest.mark.slow
 class TestSam3HybridAdapter:
     """Sam3HybridAdapter: SAM3 features + DynUNet fusion."""
 

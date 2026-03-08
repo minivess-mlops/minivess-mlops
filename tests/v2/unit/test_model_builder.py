@@ -47,6 +47,7 @@ class TestBuildAdapter:
         assert cfg.family == "sam3_vanilla"
 
     @_sam3_skip
+    @pytest.mark.gpu
     def test_build_sam3_topolora(self) -> None:
         from minivess.adapters.model_builder import build_adapter
 

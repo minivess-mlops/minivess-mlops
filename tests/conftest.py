@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import warnings
 
 import pytest
@@ -38,7 +39,18 @@ def _allow_host_env():
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register custom markers."""
+    """Configure markers and isolate Prefect home per xdist worker.
+
+    When running with pytest-xdist (-n N), each worker gets its own
+    PREFECT_HOME directory to prevent SQLite locking between concurrent
+    Prefect test servers.
+    """
+    # Isolate Prefect home per xdist worker to avoid SQLite locking.
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER")
+    if worker_id is not None:
+        tmp_dir = tempfile.mkdtemp(prefix=f"prefect_home_{worker_id}_")
+        os.environ["PREFECT_HOME"] = tmp_dir
+
     config.addinivalue_line(
         "markers", "real_data: requires real MiniVess dataset (not run in CI)"
     )
@@ -53,10 +65,16 @@ def pytest_collection_modifyitems(
     config: pytest.Config,
     items: list[pytest.Item],
 ) -> None:
-    """Auto-skip tests marked with requires_mlflow_server when server is down."""
+    """Auto-tag and auto-skip tests based on location and markers."""
     _mlflow_healthy: bool | None = None
 
     for item in items:
+        # Auto-tag all tests in tests/v2/integration/ or tests/integration/ with
+        # @pytest.mark.integration so the staging tier can exclude them via -m filter.
+        item_path = str(item.fspath)
+        if "/integration/" in item_path:
+            item.add_marker(pytest.mark.integration)
+
         if item.get_closest_marker("requires_mlflow_server") is not None:
             # Lazy-evaluate health once per session
             nonlocal_healthy = _mlflow_healthy

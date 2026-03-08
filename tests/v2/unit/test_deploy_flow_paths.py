@@ -156,18 +156,19 @@ class TestDeployFlowContract:
         )
 
     def test_deploy_flow_tags_flow_name(self) -> None:
-        """deploy_flow.py must contain 'deploy' as a flow_name tag value."""
+        """deploy_flow.py must contain 'deploy-flow' as a flow_name tag value."""
         source = _DEPLOY_FLOW_SRC.read_text(encoding="utf-8")
         tree = ast.parse(source)
 
         found = False
         for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and node.value == "deploy":
+            if isinstance(node, ast.Constant) and node.value == "deploy-flow":
                 found = True
                 break
         assert found, (
-            "deploy_flow.py must tag MLflow run with flow_name='deploy'. "
-            "Add flow_name='deploy' tag when opening MLflow run."
+            "deploy_flow.py must tag MLflow run with flow_name='deploy-flow' "
+            "(matches FLOW_NAME_DEPLOY constant). "
+            "Add flow_name='deploy-flow' tag when opening MLflow run."
         )
 
     def test_deploy_flow_references_upstream_analysis_run(self) -> None:
