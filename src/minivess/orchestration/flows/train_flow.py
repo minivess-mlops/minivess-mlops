@@ -486,6 +486,14 @@ def training_flow(
     """
     logger.info("Training flow started (trigger: %s)", trigger_source)
 
+    # Wire JSONL log handler so training output reaches: terminal + Prefect UI + volume file
+    # Issue #503: double-logging to durable JSONL on the logs volume
+    import os
+
+    from minivess.observability.flow_logging import configure_flow_logging
+
+    configure_flow_logging(logs_dir=Path(os.environ.get("LOGS_DIR", "/app/logs")))
+
     # Extract params from config_dict when provided (Hydra-zen bridge, Rule #23)
     if config_dict is not None:
         losses = config_dict.get("losses", [loss_name])

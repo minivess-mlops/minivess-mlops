@@ -1,34 +1,35 @@
-import os
+from __future__ import annotations
 
-import hydra
+import os
+from typing import Any
+
 from hydra import compose, initialize
-from omegaconf import DictConfig, OmegaConf
 
 cwd = os.getcwd()
 repo_dir = os.path.join(cwd, "..", "..")
 if not os.path.exists(repo_dir):
-    raise IOError(f"repo_dir: {repo_dir} does not exist")
+    raise OSError(f"repo_dir: {repo_dir} does not exist")
 
 DEFAULTS_NAME = "defaults"
 DEFAULTS = f"{DEFAULTS_NAME}.yaml"
 DEFAULT_DIR = os.path.join(repo_dir, "configs")
 DEFAULT_DIR_RELATIVE = os.path.join("..", "..", "configs")
 if not os.path.exists(DEFAULT_DIR):
-    raise IOError(f"DEFAULT_DIR: {DEFAULT_DIR} does not exist")
+    raise OSError(f"DEFAULT_DIR: {DEFAULT_DIR} does not exist")
 
 DEFAULTS_PATH = os.path.join(DEFAULT_DIR, DEFAULTS)
 if not os.path.exists(DEFAULTS_PATH):
-    raise IOError(f"DEFAULTS_PATH: {DEFAULTS_PATH} does not exist")
+    raise OSError(f"DEFAULTS_PATH: {DEFAULTS_PATH} does not exist")
 
 TASK_NAME = "test_dataload_config"
 TASK_CONFIG_FILE = f"{TASK_NAME}.yaml"
 TASK_DIR = os.path.join(DEFAULT_DIR, "runmode_configs")
 if not os.path.exists(TASK_DIR):
-    raise IOError(f"TASK_DIR: {TASK_DIR} does not exist")
+    raise OSError(f"TASK_DIR: {TASK_DIR} does not exist")
 
 TASK_PATH = os.path.join(TASK_DIR, TASK_CONFIG_FILE)
 if not os.path.exists(TASK_PATH):
-    raise IOError(f"TASK_PATH: {TASK_PATH} does not exist")
+    raise OSError(f"TASK_PATH: {TASK_PATH} does not exist")
 
 TASK_EX = os.path.join(TASK_DIR, TASK_NAME)  # without the .yaml
 
@@ -47,7 +48,7 @@ TASK_EX = os.path.join(TASK_DIR, TASK_NAME)  # without the .yaml
 #     print(OmegaConf.to_yaml(cfg))
 
 
-def import_config_hydra():
+def import_config_hydra() -> Any:
     # https://stackoverflow.com/a/61169706/6412152
     # init with the dir where your defaults.yaml is
     with initialize(
@@ -56,9 +57,8 @@ def import_config_hydra():
         version_base="1.2",
     ):
         # compose the config
-        args_task_cfg_file = TASK_EX
         # https://stackoverflow.com/a/77147018
-        # cfg = compose(config_name=DEFAULTS_NAME, overrides=[f'config={args_task_cfg_file}'])
+        # cfg = compose(config_name=DEFAULTS_NAME, overrides=[f'config={TASK_EX}'])
         # cfg = compose(config_name='config', overrides=['+fast_learn=c'])
         cfg = compose(
             config_name="defaults", overrides=["+runmode_configs=test_dataload_config"]

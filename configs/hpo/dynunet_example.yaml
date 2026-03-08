@@ -40,3 +40,12 @@ search_space:
 model_family: dynunet
 compute: gpu_low
 dataset: minivess
+
+# HPO allocation strategy (Issue #504)
+# PostgreSQL is the ONLY allowed storage (no SQLite, no in-memory).
+# Leave optuna_storage as null to read OPTUNA_STORAGE_URL from .env.example.
+allocation:
+  strategy: sequential       # sequential | parallel | hybrid
+  optuna_storage: null       # null => reads OPTUNA_STORAGE_URL env var
+  n_containers: 1            # parallel/hybrid: number of worker containers
+  trials_per_container: 1    # hybrid: trials per container per GPU

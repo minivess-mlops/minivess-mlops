@@ -27,9 +27,7 @@ EBRAINS_API_BASE = f"https://data-proxy.ebrains.eu/api/v1/datasets/{EBRAINS_DATA
 EXPECTED_VOLUMES = 70
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "raw" / "minivess"
-DEFAULT_ZIP_PATH = (
-    PROJECT_ROOT / "dataset_local" / f"d-{EBRAINS_DATASET_ID}.zip"
-)
+DEFAULT_ZIP_PATH = PROJECT_ROOT / "dataset_local" / f"d-{EBRAINS_DATASET_ID}.zip"
 
 
 def is_dataset_ready(data_dir: Path, expected_volumes: int = EXPECTED_VOLUMES) -> bool:

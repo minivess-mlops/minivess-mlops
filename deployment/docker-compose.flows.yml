@@ -16,12 +16,22 @@
 # first to start PostgreSQL, MinIO, MLflow, and Prefect.
 
 x-common-env: &common-env
-  # All values derive from .env.example — never hardcode here.
+  # All values derive from .env.example — never hardcode here (CLAUDE.md Rule #22).
   MLFLOW_TRACKING_URI: http://${MLFLOW_DOCKER_HOST:-minivess-mlflow}:${MLFLOW_PORT:-5000}
   PREFECT_API_URL: http://${PREFECT_DOCKER_HOST:-minivess-prefect}:${PREFECT_PORT:-4200}/api
   AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin_secret}
   MLFLOW_S3_ENDPOINT_URL: http://${MINIO_DOCKER_HOST:-minio}:${MINIO_API_PORT:-9000}
+  # Container-internal artifact paths — defaults match .env.example (Rule #22)
+  DATA_DIR: ${DATA_DIR:-/app/data}
+  CHECKPOINT_DIR: ${CHECKPOINT_DIR:-/app/checkpoints}
+  LOGS_DIR: ${LOGS_DIR:-/app/logs}
+  SPLITS_DIR: ${SPLITS_DIR:-/app/configs/splits}
+  # HPO — PostgreSQL is the ONLY backend (no SQLite, no in-memory)
+  OPTUNA_STORAGE_URL: ${OPTUNA_STORAGE_URL:-postgresql+psycopg2://minivess:minivess_secret@postgres:5432/optuna}
+  REPLICA_INDEX: ${REPLICA_INDEX:-0}
+  # Prefect log forwarding
+  PREFECT_LOGGING_EXTRA_LOGGERS: ${PREFECT_LOGGING_EXTRA_LOGGERS:-minivess}
   # HuggingFace token for gated models (SAM3, VesselFM).
   # Set HF_TOKEN in .env — never hard-code here.
   HF_TOKEN: ${HF_TOKEN:-}
@@ -80,8 +90,7 @@ services:
     environment:
       <<: *common-env
       FLOW_NAME: train
-      CHECKPOINT_DIR: /app/checkpoints
-      SPLITS_DIR: /app/configs/splits
+      # CHECKPOINT_DIR and SPLITS_DIR come from x-common-env (Rule #22)
     volumes:
       - data_cache:/app/data:ro
       - configs_splits:/app/configs/splits:ro
@@ -249,8 +258,7 @@ services:
     environment:
       <<: *common-env
       FLOW_NAME: hpo
-      CHECKPOINT_DIR: /app/checkpoints
-      SPLITS_DIR: /app/configs/splits
+      # CHECKPOINT_DIR and SPLITS_DIR come from x-common-env (Rule #22)
     volumes:
       - data_cache:/app/data:ro
       - configs_splits:/app/configs/splits:ro
@@ -268,7 +276,36 @@ services:
       - minivess
     <<: *common-labels
 
-  # Pipeline Orchestrator — cascades all flows in sequence
+  # HPO Worker — parallel strategy: one worker per GPU replica
+  # Scale with: docker compose -f docker-compose.flows.yml up --scale hpo-worker=N
+  # Each replica gets its own GPU via CUDA_VISIBLE_DEVICES set by hpo_worker_entrypoint.sh
+  hpo-worker:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.hpo
+    image: minivess-hpo:latest
+    entrypoint: ["bash", "scripts/hpo_worker_entrypoint.sh"]
+    environment:
+      <<: *common-env
+      FLOW_NAME: hpo-worker
+    volumes:
+      - data_cache:/app/data:ro
+      - configs_splits:/app/configs/splits:ro
+      - checkpoint_cache:/app/checkpoints
+      - mlruns_data:/app/mlruns
+      - logs_data:/app/logs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - minivess
+    <<: *common-labels
+
+  # Pipeline Orchestrator -- cascades all flows in sequence
   pipeline:
     build:
       context: ../
