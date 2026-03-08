@@ -22,6 +22,7 @@ from typing import Any
 import yaml
 from prefect import flow, task
 
+from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_TRAIN
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
@@ -482,7 +483,7 @@ def training_flow(
     # Resolve environment variables
     splits_dir = Path(os.environ.get("SPLITS_DIR", "configs/splits"))
     checkpoint_base = Path(os.environ.get("CHECKPOINT_DIR", "/app/checkpoints"))
-    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+    tracking_uri = resolve_tracking_uri()
 
     # Find upstream data run (explicit param takes priority over auto-discovery)
     if upstream_data_run_id is None:

@@ -21,6 +21,7 @@ from minivess.config.acquisition_config import (
     DatasetAcquisitionStatus,
 )
 from minivess.data.downloaders import get_downloader
+from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_ACQUISITION
 
 logger = logging.getLogger(__name__)
@@ -314,7 +315,7 @@ def run_acquisition_flow(
     )
 
     # --- MLflow logging ---
-    _tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+    _tracking_uri = resolve_tracking_uri()
     mlflow_run_id: str | None = None
     try:
         import mlflow

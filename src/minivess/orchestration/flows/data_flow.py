@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from prefect import flow, task
 
+from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_DATA
 from minivess.orchestration.flow_contract import FlowContract
 
@@ -523,7 +524,7 @@ def run_data_flow(
 
     # Open MLflow run for data engineering provenance (always — not conditional on DVC)
     mlflow_run_id: str | None = None
-    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+    tracking_uri = resolve_tracking_uri()
     try:
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment("minivess_data")

@@ -251,6 +251,42 @@ Each of the 6 Prefect flows runs in its own Docker container:
     changes" is BANNED — every failure in this repo was co-authored by Claude Code
     and is therefore Claude Code's responsibility.
     See: `.claude/metalearning/2026-03-07-silent-existing-failures.md`
+22. **Single-Source Config via `.env.example` (Non-Negotiable)** — ALL configurable
+   values (service URLs, ports, credentials, hostnames, artifact paths) MUST be defined
+   in `.env.example` FIRST and ONLY. This file is the project's configuration contract.
+   Before writing any configuration value anywhere, CHECK `.env.example`.
+   - **If the variable IS in `.env.example`**: reference it as `${VAR_NAME:-default}`
+     in Docker Compose / shell, or `os.environ["VAR_NAME"]` in Python (no fallback literal).
+   - **If the variable is NOT in `.env.example`**: ADD IT THERE FIRST, then reference it.
+   - **`:-default` fallbacks in Compose MUST equal the default shown in `.env.example`.**
+     Copy-paste the value — do not invent a new default in the fallback.
+
+   **BANNED patterns** (each is a rule violation):
+   - `ENV MLFLOW_TRACKING_URI=...` in any Dockerfile — Dockerfiles set structural paths
+     only (`DATA_DIR`, `CHECKPOINT_DIR`); all service URLs come from compose `x-common-env`.
+   - `os.environ.get("VAR", "some_hardcoded_value")` in flow files — use
+     `resolve_tracking_uri()` for MLflow; for others use `os.environ["VAR"]` and let
+     a missing var fail loudly rather than silently use a wrong default.
+   - `mlflow_tracking_uri = "http://localhost:5000"` in Dynaconf TOML — MLflow URI is
+     consumed directly from the env var by `resolve_tracking_uri()`, not via Dynaconf.
+   - Any hardcoded URL/hostname/port in compose files NOT wrapped in `${VAR:-fallback}`.
+   - Duplicating a URL in 4 environment TOML files that all have the same value — that
+     signals the value belongs in `.env.example`, not in TOML.
+
+   **CORRECT patterns**:
+   ```yaml
+   # docker-compose.flows.yml
+   MLFLOW_TRACKING_URI: http://${MLFLOW_DOCKER_HOST:-minivess-mlflow}:${MLFLOW_PORT:-5000}
+   ```
+   ```python
+   # Python flow files
+   from minivess.observability.tracking import resolve_tracking_uri
+   tracking_uri = resolve_tracking_uri()  # reads MLFLOW_TRACKING_URI env var
+   ```
+
+   See `.env.example` for the complete authoritative list of all configurable values.
+   See `tests/v2/unit/test_env_single_source.py` for enforcement checks.
+
 21. **GitHub Actions CI EXPLICITLY DISABLED (Non-Negotiable)** — The user has
     explicitly forbidden automatic GitHub Actions CI. Actions consume credits.
     ALL CI jobs in `ci-v2.yml` are commented out. ALL workflows use
@@ -282,6 +318,12 @@ Each of the 6 Prefect flows runs in its own Docker container:
 - Uncomment, re-enable, or add ANY automatic GitHub Actions trigger — CI jobs are
   EXPLICITLY DISABLED by the user. Actions consume credits. Only the user can lift this ban.
   ALL validation runs locally. This is not a suggestion — it is an absolute prohibition.
+- Set `ENV VAR=hardcoded_value` in a Dockerfile for any service URL, port, or credential
+  — these belong in `.env.example` and are injected by docker-compose, not the Dockerfile.
+- Use `os.environ.get("MLFLOW_TRACKING_URI", "mlruns")` or any `get(VAR, literal)` pattern
+  in flow files — use `resolve_tracking_uri()` or fail loudly on missing env var.
+- Define `mlflow_tracking_uri` or any service URL in Dynaconf TOML files — they are read
+  directly from env vars; TOML duplication creates a hidden second source of truth.
 
 ## TDD Workflow (Non-Negotiable)
 

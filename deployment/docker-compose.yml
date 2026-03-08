@@ -31,14 +31,14 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-minivess}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minivess_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-mlflow}
-      POSTGRES_MULTIPLE_DATABASES: mlflow,langfuse
+      POSTGRES_DB: ${POSTGRES_DB_MLFLOW:-mlflow}
+      POSTGRES_MULTIPLE_DATABASES: ${POSTGRES_DB_MLFLOW:-mlflow},${POSTGRES_DB_LANGFUSE:-langfuse}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-minivess} -d ${POSTGRES_DB:-mlflow}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-minivess} -d ${POSTGRES_DB_MLFLOW:-mlflow}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -50,10 +50,10 @@ services:
     image: minio/minio:latest
     container_name: minivess-minio
     profiles: ["dev", "monitoring", "full"]
-    command: server /data --console-address ":9001"
+    command: server /data --console-address ":${MINIO_CONSOLE_PORT:-9001}"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minivess}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minivess_secret}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin_secret}
     ports:
       - "${MINIO_API_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
@@ -74,14 +74,14 @@ services:
     profiles: ["dev", "monitoring", "full"]
     command: >
       mlflow server
-        --backend-store-uri postgresql://${POSTGRES_USER:-minivess}:${POSTGRES_PASSWORD:-minivess_secret}@postgres:5432/${POSTGRES_DB:-mlflow}
-        --default-artifact-root s3://mlflow-artifacts/
+        --backend-store-uri postgresql://${POSTGRES_USER:-minivess}:${POSTGRES_PASSWORD:-minivess_secret}@${POSTGRES_DOCKER_HOST:-postgres}:5432/${POSTGRES_DB_MLFLOW:-mlflow}
+        --default-artifact-root s3://${MLFLOW_ARTIFACT_BUCKET:-mlflow-artifacts}/
         --host 0.0.0.0
-        --port 5000
+        --port ${MLFLOW_PORT:-5000}
     environment:
-      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minivess}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minivess_secret}
+      MLFLOW_S3_ENDPOINT_URL: http://${MINIO_DOCKER_HOST:-minio}:${MINIO_API_PORT:-9000}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin_secret}
     ports:
       - "${MLFLOW_PORT:-5000}:5000"
     volumes:
@@ -101,7 +101,7 @@ services:
     ports:
       - "${BENTOML_PORT:-3333}:3000"
     environment:
-      BENTOML_HOME: /home/bentoml
+      BENTOML_HOME: ${BENTOML_HOME:-/home/minivess/bentoml}
     restart: unless-stopped
     <<: *common-labels
 
@@ -115,7 +115,7 @@ services:
     profiles: ["dev", "monitoring", "full"]
     command: prefect server start --host 0.0.0.0
     environment:
-      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://${POSTGRES_USER:-minivess}:${POSTGRES_PASSWORD:-minivess_secret}@postgres:5432/prefect
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://${POSTGRES_USER:-minivess}:${POSTGRES_PASSWORD:-minivess_secret}@${POSTGRES_DOCKER_HOST:-postgres}:5432/${POSTGRES_DB_PREFECT:-prefect}
     ports:
       - "${PREFECT_PORT:-4200}:4200"
     depends_on:
@@ -221,7 +221,7 @@ services:
     container_name: minivess-langfuse
     profiles: ["full"]
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-minivess}:${POSTGRES_PASSWORD:-minivess_secret}@postgres:5432/langfuse
+      DATABASE_URL: postgresql://${POSTGRES_USER:-minivess}:${POSTGRES_PASSWORD:-minivess_secret}@${POSTGRES_DOCKER_HOST:-postgres}:5432/${POSTGRES_DB_LANGFUSE:-langfuse}
       NEXTAUTH_URL: http://localhost:${LANGFUSE_PORT:-3001}
       NEXTAUTH_SECRET: ${LANGFUSE_SECRET:-changeme-langfuse-secret}
       SALT: ${LANGFUSE_SALT:-changeme-langfuse-salt}
@@ -275,6 +275,8 @@ services:
     image: marquezproject/marquez:latest
     container_name: minivess-marquez
     profiles: ["full"]
+    # MARQUEZ_PORT / MARQUEZ_ADMIN_PORT are Marquez-internal env vars (container port).
+    # The host-side port mappings below use the .env.example variables.
     environment:
       MARQUEZ_PORT: 5000
       MARQUEZ_ADMIN_PORT: 5001

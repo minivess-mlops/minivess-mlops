@@ -6,8 +6,8 @@
 project_name = "minivess-mlops-v2"
 debug = false
 
-# MLflow
-mlflow_tracking_uri = "http://localhost:5000"
+# MLflow — URI comes from MLFLOW_TRACKING_URI env var (defined in .env.example).
+# Never set mlflow_tracking_uri here; resolve_tracking_uri() reads the env var directly.
 mlflow_artifact_root = "s3://mlflow-artifacts/"
 
 # MinIO (S3-compatible object store)

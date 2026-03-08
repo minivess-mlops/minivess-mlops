@@ -17,7 +17,7 @@ COPY --chown=minivess:minivess scripts/ scripts/
 ENV DOCKER_CONTAINER=1
 
 # Volume-mapped paths — must match docker-compose.flows.yml volume declarations.
-ENV MLFLOW_TRACKING_URI=/app/mlruns
+# MLFLOW_TRACKING_URI is injected by docker-compose.flows.yml x-common-env, NOT here.
 ENV BIOSTATISTICS_OUTPUT_DIR=/app/outputs/biostatistics
 ENV BIOSTATISTICS_CONFIG_DIR=/app/configs/biostatistics
 

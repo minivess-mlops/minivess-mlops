@@ -4,6 +4,7 @@
 /src/wandb/*
 /src/mlruns/*
 /mlruns/*
+/mlruns-docker/*
 *.pdf
 /archived/*
 /deployment/archived/*

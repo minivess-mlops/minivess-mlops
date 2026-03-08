@@ -17,9 +17,10 @@ work_pools:
         auto_remove: true
         networks:
           - minivess-network
+        # Values from .env.example — fallbacks match .env.example defaults.
         environment:
-          MLFLOW_TRACKING_URI: "http://minivess-mlflow:5000"
-          PREFECT_API_URL: "http://minivess-prefect:4200/api"
+          MLFLOW_TRACKING_URI: "http://${MLFLOW_DOCKER_HOST:-minivess-mlflow}:${MLFLOW_PORT:-5000}"
+          PREFECT_API_URL: "http://${PREFECT_DOCKER_HOST:-minivess-prefect}:${PREFECT_PORT:-4200}/api"
     concurrency_limit: 4
 
   - name: gpu-pool
@@ -37,8 +38,8 @@ work_pools:
             capabilities:
               - - gpu
         environment:
-          MLFLOW_TRACKING_URI: "http://minivess-mlflow:5000"
-          PREFECT_API_URL: "http://minivess-prefect:4200/api"
+          MLFLOW_TRACKING_URI: "http://${MLFLOW_DOCKER_HOST:-minivess-mlflow}:${MLFLOW_PORT:-5000}"
+          PREFECT_API_URL: "http://${PREFECT_DOCKER_HOST:-minivess-prefect}:${PREFECT_PORT:-4200}/api"
           NVIDIA_VISIBLE_DEVICES: all
     concurrency_limit: 1
 
@@ -49,5 +50,6 @@ work_pools:
       variables:
         working_dir: "."
         env:
-          MLFLOW_TRACKING_URI: "http://mlflow:5000"
+          # SkyPilot uses a different DNS from Docker Compose (see .env.example MLFLOW_SKYPILOT_HOST)
+          MLFLOW_TRACKING_URI: "http://${MLFLOW_SKYPILOT_HOST:-mlflow}:${MLFLOW_PORT:-5000}"
     concurrency_limit: 8

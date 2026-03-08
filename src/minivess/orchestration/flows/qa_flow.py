@@ -20,6 +20,7 @@ from prefect import flow, task
 
 from minivess.observability.mlflow_backend import detect_backend_type
 from minivess.observability.mlflow_schema import check_required_params
+from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_QA
 
 logger = logging.getLogger(__name__)
@@ -229,7 +230,7 @@ def qa_flow(
     _require_docker_context()
 
     if tracking_uri is None:
-        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
+        tracking_uri = resolve_tracking_uri()
 
     checks: list[dict[str, Any]] = []
 
