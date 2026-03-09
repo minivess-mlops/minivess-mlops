@@ -324,6 +324,30 @@ services:
       - minivess
     <<: [*common-security, *default-logging, *light-resources, *common-labels]
 
+  # MONAI Label Server — interactive annotation via 3D Slicer
+  # Hosts the MinIVess MONAI Label app with BentoML champion pre-segmentation.
+  # Connect 3D Slicer to http://localhost:${MONAI_LABEL_PORT:-8000}
+  monai-label:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.monailabel
+    image: minivess-monailabel:latest
+    container_name: minivess-monai-label
+    ports:
+      - "${MONAI_LABEL_PORT:-8000}:${MONAI_LABEL_PORT:-8000}"
+    environment:
+      <<: *common-env
+      FLOW_NAME: monai-label
+      MONAI_LABEL_PORT: ${MONAI_LABEL_PORT:-8000}
+      BENTOML_URL: http://${BENTOML_DOCKER_HOST:-minivess-bento}:${BENTOML_PORT:-3333}
+      STUDIES_DIR: /data/studies
+    volumes:
+      - data_cache:/data/studies:ro
+      - mlruns_data:/app/mlruns:ro
+    networks:
+      - minivess
+    <<: [*common-security, *default-logging, *light-resources, *common-labels]
+
   # HPO Flow — hyperparameter optimization (GPU for training trials)
   hpo:
     build:

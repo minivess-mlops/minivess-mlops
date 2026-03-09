@@ -1,0 +1,27 @@
+# MinIVess MLOps v2 — MONAI Label Server
+# Serves the MinIVess MONAI Label app for interactive annotation via 3D Slicer.
+#
+# Build: docker build -t minivess-monailabel:latest -f deployment/docker/Dockerfile.monailabel .
+#
+# The MONAI Label server hosts an "app" directory that defines which AI models
+# are loaded for annotation assistance. Our app loads the BentoML champion model
+# for pre-segmentation via HTTP.
+#
+# Port comes from MONAI_LABEL_PORT env var (docker-compose), NOT hardcoded here.
+
+FROM minivess-base:latest
+
+LABEL flow="monai-label"
+LABEL description="MONAI Label server — 3D Slicer annotation with BentoML champion pre-segmentation"
+
+# Install monailabel server
+RUN pip install --no-cache-dir monailabel
+
+# Copy the MinIVess MONAI Label app
+COPY --chown=minivess:minivess deployment/monailabel/minivess_app /app/monailabel_app
+
+# Studies directory (volume-mounted at runtime)
+ENV STUDIES_DIR=/data/studies
+
+# Start MONAI Label server. Port comes from MONAI_LABEL_PORT env var.
+CMD ["sh", "-c", "monailabel start_server --app /app/monailabel_app --studies ${STUDIES_DIR} --port ${MONAI_LABEL_PORT:-8000}"]
