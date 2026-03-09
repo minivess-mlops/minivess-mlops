@@ -235,6 +235,12 @@ def _parse_value(value: str) -> Any:
         return float(value)
     except ValueError:
         pass
+    # Parse YAML list/dict syntax: [32,32,3] → [32, 32, 3], {k: v} → {"k": v}
+    if value.startswith("[") or value.startswith("{"):
+        try:
+            return yaml.safe_load(value)
+        except yaml.YAMLError:
+            pass
     return value
 
 
