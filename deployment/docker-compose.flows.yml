@@ -66,6 +66,18 @@ x-common-security: &common-security
     - no-new-privileges:true
   restart: "no"
 
+# GPU services use enforce-mode seccomp profile (SCMP_ACT_ERRNO for unlisted syscalls).
+# Derived from Docker moby default (~340 syscalls) — all syscalls needed for CUDA/PyTorch.
+# Path is relative to REPO_ROOT; always invoke docker compose from repo root.
+# NOTE: x-gpu-security MUST keep cap_drop + no-new-privileges in sync with x-common-security.
+x-gpu-security: &gpu-security
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+    - "seccomp=deployment/seccomp/train-enforce.json"
+  restart: "no"
+
 # ── Log driver (production log rotation — prevents unbounded log files) ───────
 # local driver: binary format (more efficient than json-file), auto-compression
 # non-blocking mode: log backend slowness doesn't block the training process
@@ -170,7 +182,7 @@ services:
       - "nvidia.com/gpu=all"
     networks:
       - minivess
-    <<: [*common-security, *default-logging, *gpu-resources, *common-labels]
+    <<: [*gpu-security, *default-logging, *gpu-resources, *common-labels]
 
   # Flow 2.5: Post-Training (SWA, calibration, conformal)
   post_training:
@@ -335,7 +347,7 @@ services:
       - "nvidia.com/gpu=all"
     networks:
       - minivess
-    <<: [*common-security, *default-logging, *gpu-resources, *common-labels]
+    <<: [*gpu-security, *default-logging, *gpu-resources, *common-labels]
 
   # HPO Worker — parallel strategy: one worker per GPU replica
   # Scale with: docker compose -f docker-compose.flows.yml up --scale hpo-worker=N
@@ -361,7 +373,7 @@ services:
       - "nvidia.com/gpu=all"
     networks:
       - minivess
-    <<: [*common-security, *default-logging, *gpu-resources, *common-labels]
+    <<: [*gpu-security, *default-logging, *gpu-resources, *common-labels]
 
   # Pipeline Orchestrator -- cascades all flows in sequence
   pipeline:
