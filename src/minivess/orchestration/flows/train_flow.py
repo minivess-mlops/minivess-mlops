@@ -642,7 +642,28 @@ if __name__ == "__main__":
     # → resolved config dict → training_flow(config_dict=resolved)
     _experiment = os.environ.get("EXPERIMENT")
     _hydra_overrides_str = os.environ.get("HYDRA_OVERRIDES", "")
-    _hydra_overrides = [o.strip() for o in _hydra_overrides_str.split(",") if o.strip()]
+    # Bracket-aware split: preserve commas inside [...] (e.g. patch_size=[32,32,3]).
+    # Plain str.split(",") would break list overrides like patch_size=[32,32,3].
+    _hydra_overrides: list[str] = []
+    _current: list[str] = []
+    _depth = 0
+    for _ch in _hydra_overrides_str:
+        if _ch == "[":
+            _depth += 1
+            _current.append(_ch)
+        elif _ch == "]":
+            _depth -= 1
+            _current.append(_ch)
+        elif _ch == "," and _depth == 0:
+            _part = "".join(_current).strip()
+            if _part:
+                _hydra_overrides.append(_part)
+            _current = []
+        else:
+            _current.append(_ch)
+    _part = "".join(_current).strip()
+    if _part:
+        _hydra_overrides.append(_part)
 
     if _experiment:
         from minivess.config.compose import compose_experiment_config

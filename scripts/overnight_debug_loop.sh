@@ -101,7 +101,7 @@ print('ALL_PASS:', 'yes' if not failed else 'no')
   if grep -q "OutOfMemoryError\|out of memory" "$RUN_LOG" 2>/dev/null; then
     OOM_INFO=$(grep "out of memory" "$RUN_LOG" | head -1 | grep -oP '\d+\.\d+ GiB.*?free' || true)
     echo "  → OOM detected: $OOM_INFO"
-    echo "  → PYTORCH_ALLOC_CONF=$(grep PYTORCH_ALLOC_CONF deployment/docker-compose.flows.yml | head -1 | tr -d ' ')"
+    echo "  → sam3_hybrid patch fix: patch_size=[32,32,3] (run_debug.sh override)"
   fi
   if grep -q "IndexError" "$RUN_LOG" 2>/dev/null; then
     echo "  → IndexError detected in post_training plugins"
