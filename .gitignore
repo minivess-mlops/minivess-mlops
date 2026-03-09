@@ -65,3 +65,6 @@ configs/splits/splits.json
 checkpoints/
 *.log
 sam3_training.log
+
+# MLSecOps artifacts (regenerable from make scan/sbom)
+sbom/
