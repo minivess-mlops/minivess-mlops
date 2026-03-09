@@ -69,3 +69,45 @@ def test_claude_md_documents_multi_stage() -> None:
         "Dockerfile.base uses builder (devel) → runner (runtime) stages. "
         "Document in the 'Building' section."
     )
+
+
+# ── T-01.2: Network isolation docs + rootless Docker note (#552, #549) ────────
+
+
+def test_claude_md_has_network_isolation_section() -> None:
+    """deployment/CLAUDE.md must have a Network Isolation Strategy section."""
+    content = _content()
+    assert "Network Isolation" in content, (
+        "deployment/CLAUDE.md missing 'Network Isolation' section. "
+        "Document why icc:false is banned and the correct isolation strategy."
+    )
+
+
+def test_claude_md_documents_icc_false_ban() -> None:
+    """deployment/CLAUDE.md must explain why icc:false is BANNED."""
+    content = _content()
+    assert "icc" in content and "false" in content, (
+        "deployment/CLAUDE.md must document that icc:false is BANNED. "
+        "icc:false breaks minivess-network inter-container communication."
+    )
+
+
+def test_claude_md_shows_network_topology() -> None:
+    """deployment/CLAUDE.md must include service names in network topology."""
+    content = _content()
+    assert "minivess-mlflow" in content, (
+        "deployment/CLAUDE.md missing network topology showing minivess-mlflow. "
+        "Add ASCII diagram of service-to-service connections."
+    )
+    assert "minivess-prefect" in content or "prefect" in content.lower(), (
+        "deployment/CLAUDE.md missing Prefect in network topology."
+    )
+
+
+def test_claude_md_documents_rootless_docker_blocker() -> None:
+    """deployment/CLAUDE.md must document rootless Docker is blocked (#549)."""
+    content = _content()
+    assert "rootless" in content.lower(), (
+        "deployment/CLAUDE.md missing rootless Docker blocker note. "
+        "NVIDIA CTK Ubuntu 24.04 bug blocks rootless Docker — document it (#549)."
+    )

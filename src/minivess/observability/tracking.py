@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse, urlunparse
 
 import mlflow
 from mlflow.tracking import MlflowClient
@@ -81,6 +82,16 @@ def resolve_tracking_uri(
         return tracking_uri
     env_uri = os.environ.get("MLFLOW_TRACKING_URI")
     if env_uri:
+        username = os.environ.get("MLFLOW_TRACKING_USERNAME", "")
+        password = os.environ.get("MLFLOW_TRACKING_PASSWORD", "")
+        if username and password:
+            parsed = urlparse(env_uri)
+            authed = parsed._replace(
+                netloc=f"{username}:{password}@{parsed.hostname}:{parsed.port}"
+                if parsed.port
+                else f"{username}:{password}@{parsed.hostname}"
+            )
+            return urlunparse(authed)
         return env_uri
     if use_dynaconf:
         try:

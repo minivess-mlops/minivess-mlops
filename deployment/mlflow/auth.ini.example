@@ -1,0 +1,19 @@
+# MLflow Basic Auth Configuration Template
+#
+# Copy to auth.ini and fill in your values:
+#   cp deployment/mlflow/auth.ini.example deployment/mlflow/auth.ini
+#
+# NEVER commit auth.ini — it contains hashed passwords.
+# It is listed in .gitignore.
+#
+# Used by mlflow-secure service (docker compose --profile secure):
+#   docker compose --env-file .env -f deployment/docker-compose.yml --profile secure up -d mlflow-secure
+#
+# NOTE: mlflow and mlflow-secure are mutually exclusive — they bind the same port.
+# Stop the default mlflow service before starting mlflow-secure.
+
+[mlflow]
+default_permission = READ
+database_uri = sqlite:///basic_auth.db
+admin_username = admin
+admin_password = REPLACE_WITH_SECURE_PASSWORD

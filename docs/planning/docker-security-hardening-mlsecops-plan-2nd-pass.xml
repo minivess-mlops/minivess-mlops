@@ -1,0 +1,1014 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MinIVess MLOps — Docker Security Hardening 2nd Pass
+  Branch: feat/docker-hardening-2nd-pass
+  Created: 2026-03-09
+  Closes: #547, #548, #549 (doc-only), #550, #551, #552, #553
+  Predecessor: docs/planning/docker-security-hardening-mlsecops-plan.xml (PR #542)
+
+  EXECUTION:
+    git checkout feat/docker-hardening-2nd-pass
+    claude -p "Read and execute docs/planning/docker-security-hardening-mlsecops-plan-2nd-pass.xml"
+
+  PHASE ORDER (increasing breaking-change risk):
+    Phase 1 — Pure additions: Trivy CI gate, network isolation docs, rootless Docker note
+    Phase 2 — Seccomp enforce profile (compose change, but additive)
+    Phase 3 — SOPS scaffolding + credential rotation (new files, no compose change)
+    Phase 4 — MLflow auth opt-in (new compose profile, non-breaking by design)
+    Phase 5 — Falco optional service (new compose profile, additive)
+
+  REVIEWER NOTES (incorporated from review pass 2026-03-09):
+    - All test assertions use concrete patterns, not substring-of-comment traps
+    - seccomp path is absolute (resolved from REPO_ROOT), not CWD-relative
+    - mlflow-secure uses exclusive profiles — port collision documented and tested
+    - init_credentials uses Python + str.split (Rule #16), not sed/regex
+    - integration tests have Docker availability guard, not just pytest.mark
+    - auth.ini added to .gitignore; test_env_single_source.py referenced for new vars
+    - Falco uses privileged: true — regression test guards other services remain unprivileged
+    - train-enforce.json tested as strict superset of audit.json syscalls
+    - No --users-db-uri flag (not in MLflow 3.x); basic_auth.db auto-created
+-->
+<plan id="docker-hardening-2nd-pass" version="1.0">
+
+  <metadata>
+    <title>Docker Security Hardening 2nd Pass — Enforce Seccomp, SOPS, MLflow Auth, Falco</title>
+    <branch>feat/docker-hardening-2nd-pass</branch>
+    <base-branch>main</base-branch>
+    <created>2026-03-09</created>
+    <estimated-duration>6-8 hours</estimated-duration>
+    <closes-issues>#547, #548, #549 (doc), #550, #551, #552, #553</closes-issues>
+    <research-report>docs/planning/docker-security-hardening-mlsecops-report.md</research-report>
+    <priority>P2 — security hardening (non-breaking by design)</priority>
+    <phases>5</phases>
+    <total-tasks>14</total-tasks>
+  </metadata>
+
+  <!-- Read all of these before starting any task -->
+  <context-files>
+    <file>CLAUDE.md</file>
+    <file>deployment/CLAUDE.md</file>
+    <file>deployment/seccomp/audit.json</file>
+    <file>deployment/seccomp/README.md</file>
+    <file>deployment/docker-compose.flows.yml</file>
+    <file>deployment/docker-compose.yml</file>
+    <file>.env.example</file>
+    <file>scripts/pr_readiness_check.sh</file>
+    <file>Makefile</file>
+    <file>tests/v2/unit/deployment/test_security_tooling.py</file>
+    <file>tests/v2/unit/deployment/test_deployment_docs.py</file>
+    <file>tests/v2/unit/deployment/test_compose_hardening.py</file>
+    <file>tests/v2/unit/test_env_single_source.py</file>
+    <file>src/minivess/observability/tracking.py</file>
+    <file>.gitignore</file>
+  </context-files>
+
+  <setup>
+    <step>git checkout feat/docker-hardening-2nd-pass</step>
+    <step>Verify you are NOT on fix/prefect-flow-connectivity or main</step>
+    <step>Read tdd-state.json — reset to new plan if it references docker-hardening-mlsecops-plan.xml</step>
+    <step>Initialize tdd-state.json for this plan (plan_file: docker-security-hardening-mlsecops-plan-2nd-pass.xml)</step>
+  </setup>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Pure Additions — zero compose changes, zero breaking risk  -->
+  <!-- Closes: #548 (Trivy CI gate), #552 (network isolation docs), #549   -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Trivy CI Gate + Documentation">
+    <description>
+      Scripts and documentation additions only. No Dockerfile or compose file changes.
+      All tests are unit-level (no Docker daemon required). Safest phase.
+    </description>
+
+    <task id="T-01.1" name="RED+GREEN: Trivy into pr_readiness_check.sh (#548)">
+      <closes-issue>#548 (partial — script gate)</closes-issue>
+      <description>
+        Add Trivy CRITICAL scan as step [5/5] in scripts/pr_readiness_check.sh.
+        Trivy images may not exist yet — skip gracefully if no minivess-* images are built.
+        Also create scripts/weekly_security_scan.sh for scheduled scanning.
+      </description>
+      <test-first>
+        Update tests/v2/unit/deployment/test_security_tooling.py:
+
+        test_pr_readiness_check_has_trivy_step():
+          content = Path("scripts/pr_readiness_check.sh").read_text(encoding="utf-8")
+          lines = content.splitlines()
+          # Find lines matching the step header pattern "\[N/N\]" (not substring-in-comment)
+          step_lines = [l for l in lines if l.strip().startswith("[") and "/"] and "Trivy" in l]
+          assert len(step_lines) >= 1, "No Trivy step found in pr_readiness_check.sh"
+          # Verify it calls make trivy-critical
+          trivy_lines = [l for l in lines if "trivy-critical" in l or "trivy_critical" in l]
+          assert len(trivy_lines) >= 1
+
+        test_pr_readiness_check_trivy_skips_if_no_images():
+          content = Path("scripts/pr_readiness_check.sh").read_text(encoding="utf-8")
+          # Must have a guard: skip if docker images | grep minivess returns empty
+          assert "docker images" in content or "|| true" in content or "|| echo" in content, \
+            "Trivy step must skip gracefully if no images are built"
+
+        test_weekly_security_scan_exists_and_covers_all_flow_images():
+          script = Path("scripts/weekly_security_scan.sh")
+          assert script.exists()
+          content = script.read_text(encoding="utf-8")
+          # Check image name prefixes (minivess-IMAGE, not service key strings)
+          required_image_prefixes = [
+            "minivess-train", "minivess-data", "minivess-analyze",
+            "minivess-hpo", "minivess-deploy", "minivess-dashboard",
+            "minivess-acquisition", "minivess-annotation",
+            "minivess-biostatistics", "minivess-post-training",
+            "minivess-pipeline", "minivess-qa",
+          ]
+          for prefix in required_image_prefixes:
+            assert prefix in content, f"weekly_security_scan.sh missing image: {prefix}"
+      </test-first>
+      <implementation>
+        1. Edit scripts/pr_readiness_check.sh:
+           - Change echo "=== ALL CHECKS PASSED ===" to step [5/5]
+           - Add step: check if any minivess-* images exist; if yes, call make trivy-critical;
+             if no images, print "[5/5] Trivy scan... SKIPPED (no images built yet)" and continue
+           - Use: if docker images --format "{{.Repository}}" | grep -q "^minivess-"; then...
+
+        2. Create scripts/weekly_security_scan.sh:
+           - Loops over all 12 image names (minivess-train, minivess-data, etc.)
+           - Calls: trivy image --exit-code 0 --severity CRITICAL,HIGH "$image" || FAILURES+=("$image")
+           - At end: if FAILURES non-empty, exit 1 with list of failed images
+           - Header comment: "Run weekly: bash scripts/weekly_security_scan.sh"
+           - Make executable: chmod +x
+      </implementation>
+      <acceptance>
+        - uv run pytest tests/v2/unit/deployment/test_security_tooling.py -k "trivy" passes
+        - bash scripts/pr_readiness_check.sh runs without error (trivy step skips if no images)
+        - bash -n scripts/weekly_security_scan.sh passes (syntax check)
+      </acceptance>
+    </task>
+
+    <task id="T-01.2" name="RED+GREEN: Network isolation docs + rootless Docker note (#552, #549)">
+      <closes-issue>#552 (docs + integration test scaffold), #549 (doc-only)</closes-issue>
+      <description>
+        Add "Network Isolation Strategy" section to deployment/CLAUDE.md explaining why
+        icc:false is banned. Add "Future Hardening / Upstream Blockers" section documenting
+        rootless Docker blocker. Add ASCII network topology diagram.
+        Create integration test scaffold (skips if Docker unavailable).
+      </description>
+      <test-first>
+        Update tests/v2/unit/deployment/test_deployment_docs.py:
+
+        test_deployment_claude_md_has_network_isolation_section():
+          content = Path("deployment/CLAUDE.md").read_text(encoding="utf-8")
+          assert "Network Isolation" in content
+          assert "icc" in content and "false" in content  # documents the ban
+          assert "minivess-network" in content
+
+        test_deployment_claude_md_documents_rootless_docker_blocker():
+          content = Path("deployment/CLAUDE.md").read_text(encoding="utf-8")
+          assert "rootless" in content.lower()
+          assert "549" in content or "nvidia-container-toolkit" in content.lower()
+
+        test_deployment_claude_md_has_network_topology():
+          content = Path("deployment/CLAUDE.md").read_text(encoding="utf-8")
+          # ASCII diagram must show key service relationships
+          assert "minivess-mlflow" in content
+          assert "minivess-prefect" in content or "prefect" in content.lower()
+
+        Create tests/integration/deployment/test_network_connectivity.py:
+          - Add Docker availability guard at MODULE level (not just mark):
+            try:
+                subprocess.run(["docker", "info"], capture_output=True, check=True, timeout=5)
+                DOCKER_AVAILABLE = True
+            except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                DOCKER_AVAILABLE = False
+
+          - All test functions: @pytest.mark.integration + skip if not DOCKER_AVAILABLE
+          - test_flow_can_reach_mlflow: docker compose run curl -sf http://minivess-mlflow:5000/health
+          - test_flow_can_reach_minio: docker compose run curl -sf http://minio:9000/minio/health/live
+          - test_flow_can_reach_prefect: docker compose run curl -sf http://minivess-prefect:4200/api/health
+          - Each test uses --rm --no-deps and passes --env-file (deployment/CLAUDE.md pattern)
+      </test-first>
+      <implementation>
+        1. Edit deployment/CLAUDE.md — add after existing content:
+
+           ## Network Isolation Strategy
+
+           All MinIVess services share `minivess-network` (custom user-defined bridge).
+           Flow containers reach infra via service names: `minivess-mlflow`, `minio`, `minivess-prefect`.
+
+           ASCII topology:
+           ```
+           [train/hpo/analyze] ──► [minivess-mlflow:5000]  (MLflow tracking)
+                             ──► [minio:9000]             (artifact store)
+                             ──► [minivess-prefect:4200]  (orchestration)
+           [dashboard/qa]    ──► [minivess-mlflow:5000]  (read-only queries)
+           All services share: minivess-network (external, pre-created)
+           ```
+
+           ### Why `icc: false` Is BANNED
+
+           `icc: false` in `/etc/docker/daemon.json` is a CIS Benchmark 2.1 recommendation
+           but is INCOMPATIBLE with this project. Reason:
+           - `icc: false` affects the default bridge only — but some Docker Compose versions
+             apply it to ALL networks including `minivess-network`
+           - Breaking it causes: MLflow 403/connection refused, MinIO artifact upload failures,
+             Prefect heartbeat timeouts — all silent failures that look like training bugs
+           - Correct isolation: explicit `networks:` declaration per service (already done)
+
+           ### Future: Rootless Docker (Blocked — Issue #549)
+
+           Rootless Docker (daemon without root socket) is blocked by NVIDIA Container Toolkit
+           issue #434 on Ubuntu 24.04. The CDI spec generator does not produce correct rootless
+           specs. Monitor https://github.com/NVIDIA/nvidia-container-toolkit/releases.
+           DO NOT attempt workarounds — they break GPU access.
+
+        2. Create tests/integration/deployment/__init__.py (empty)
+        3. Create tests/integration/deployment/test_network_connectivity.py (as spec'd above)
+      </implementation>
+      <acceptance>
+        - uv run pytest tests/v2/unit/deployment/test_deployment_docs.py passes
+        - tests/integration/deployment/test_network_connectivity.py is collected without error
+          (all 3 tests skip if Docker unavailable — verified with pytest --collect-only)
+      </acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: Seccomp Enforce Mode                                       -->
+  <!-- Closes: #547                                                         -->
+  <!-- ================================================================== -->
+  <phase id="2" name="Seccomp Enforce Mode">
+    <description>
+      Build train-enforce.json from the Docker moby default seccomp profile (well-maintained
+      ~300-syscall allow-list for container workloads) extended with GPU/ML syscalls.
+      Wire GPU flow services in docker-compose.flows.yml to use the enforce profile.
+      Uses ABSOLUTE path from REPO_ROOT to avoid CWD-relative resolution bugs.
+      Does NOT require a live training run to collect syscalls.
+    </description>
+
+    <task id="T-02.1" name="RED: seccomp enforce profile tests (#547)">
+      <closes-issue>#547 (test phase)</closes-issue>
+      <description>
+        Write tests that will fail until train-enforce.json is created and wired into compose.
+        Tests verify: file exists, defaultAction=SCMP_ACT_ERRNO, syscalls list is non-empty,
+        no duplicates, train-enforce is a strict superset of audit.json syscalls.
+      </description>
+      <test-first>
+        Create tests/v2/unit/deployment/test_seccomp_enforce.py:
+
+        import json
+        from pathlib import Path
+
+        SECCOMP_DIR = Path("deployment/seccomp")
+        AUDIT_PROFILE = SECCOMP_DIR / "audit.json"
+        ENFORCE_PROFILE = SECCOMP_DIR / "train-enforce.json"
+
+        def _load_profile(path: Path) -> dict:
+            return json.loads(path.read_text(encoding="utf-8"))
+
+        def test_train_enforce_profile_exists():
+            assert ENFORCE_PROFILE.exists(), f"Missing: {ENFORCE_PROFILE}"
+
+        def test_train_enforce_default_action_is_errno():
+            profile = _load_profile(ENFORCE_PROFILE)
+            assert profile["defaultAction"] == "SCMP_ACT_ERRNO", \
+                f"Expected SCMP_ACT_ERRNO, got {profile['defaultAction']}"
+
+        def test_train_enforce_has_nonempty_syscall_allow_list():
+            profile = _load_profile(ENFORCE_PROFILE)
+            syscalls = profile.get("syscalls", [])
+            allow_entries = [s for s in syscalls if s.get("action") == "SCMP_ACT_ALLOW"]
+            names = []
+            for entry in allow_entries:
+                names.extend(entry.get("names", []))
+            assert len(names) >= 200, f"Expected >=200 allowed syscalls, got {len(names)}"
+            # No empty strings in names
+            assert all(n for n in names), "Found empty syscall name in allow list"
+
+        def test_train_enforce_has_no_duplicate_syscall_names():
+            profile = _load_profile(ENFORCE_PROFILE)
+            all_names = []
+            for entry in profile.get("syscalls", []):
+                all_names.extend(entry.get("names", []))
+            duplicates = [n for n in set(all_names) if all_names.count(n) > 1]
+            assert not duplicates, f"Duplicate syscall names: {duplicates}"
+
+        def test_train_enforce_is_superset_of_audit_syscalls():
+            """audit.json has empty syscalls (SCMP_ACT_LOG=allow-all).
+            Enforce must allow at least the Docker default set.
+            Since audit has no explicit names, we verify enforce has >= 200 names
+            (Docker default has ~305). This is the superset invariant."""
+            enforce = _load_profile(ENFORCE_PROFILE)
+            all_names = []
+            for entry in enforce.get("syscalls", []):
+                all_names.extend(entry.get("names", []))
+            assert len(all_names) >= 200, \
+                "train-enforce.json must include Docker-default syscall set (>=200 names)"
+
+        def test_train_enforce_includes_gpu_specific_syscalls():
+            profile = _load_profile(ENFORCE_PROFILE)
+            all_names = []
+            for entry in profile.get("syscalls", []):
+                all_names.extend(entry.get("names", []))
+            # GPU/ML specific additions beyond Docker default
+            gpu_syscalls = ["perf_event_open", "get_mempolicy", "mbind", "set_mempolicy"]
+            for sc in gpu_syscalls:
+                assert sc in all_names, f"GPU syscall '{sc}' missing from enforce profile"
+
+        def test_compose_gpu_services_reference_enforce_profile():
+            import yaml
+            compose = yaml.safe_load(
+                Path("deployment/docker-compose.flows.yml").read_text(encoding="utf-8")
+            )
+            gpu_services = ["train", "hpo", "hpo-worker"]
+            for svc in gpu_services:
+                service_def = compose["services"][svc]
+                security_opts = service_def.get("security_opt", [])
+                seccomp_opts = [o for o in security_opts if "seccomp" in o]
+                assert seccomp_opts, f"Service '{svc}' missing seccomp security_opt"
+                assert "train-enforce.json" in seccomp_opts[0], \
+                    f"Service '{svc}' should reference train-enforce.json"
+      </test-first>
+      <implementation>None yet — this is the RED phase. All tests should FAIL.</implementation>
+      <acceptance>
+        uv run pytest tests/v2/unit/deployment/test_seccomp_enforce.py — all tests FAIL
+        (confirms the tests are real and detecting the missing implementation)
+      </acceptance>
+    </task>
+
+    <task id="T-02.2" name="GREEN: Create train-enforce.json + wire compose (#547)">
+      <closes-issue>#547</closes-issue>
+      <description>
+        Build train-enforce.json from the Docker moby default seccomp profile
+        (https://github.com/moby/moby/blob/master/profiles/seccomp/default.json)
+        plus GPU/ML-specific syscalls. Wire GPU compose services to use it.
+
+        CRITICAL: seccomp path in docker-compose.flows.yml must resolve from REPO_ROOT.
+        Use: deployment/seccomp/train-enforce.json (relative to repo root, always invoked
+        from repo root via scripts/run_debug.sh). Document in deployment/CLAUDE.md.
+
+        CRITICAL: Do NOT use --users-db-uri (not a valid MLflow flag — reserved for Phase 4).
+      </description>
+      <implementation>
+        1. Create deployment/seccomp/train-enforce.json:
+           Structure:
+           {
+             "defaultAction": "SCMP_ACT_ERRNO",
+             "architectures": ["SCMP_ARCH_X86_64"],
+             "syscalls": [
+               {
+                 "names": [
+                   ... (Docker moby default allow-list: ~305 syscalls including accept4,
+                   access, adjtimex, alarm, bind, brk, capget, capset, chdir, chmod, chown,
+                   clock_getres, clock_gettime, clock_nanosleep, close, connect, copy_file_range,
+                   creat, dup, dup2, dup3, epoll_create, epoll_create1, epoll_ctl, epoll_pwait,
+                   epoll_wait, eventfd, eventfd2, execve, execveat, exit, exit_group, faccessat,
+                   faccessat2, fadvise64, fallocate, fanotify_mark, fchdir, fchmod, fchmodat,
+                   fchown, fchownat, fcntl, fdatasync, fgetxattr, flistxattr, flock, fork,
+                   fremovexattr, fsetxattr, fstat, fstatfs, fsync, ftruncate, futex, getcpu,
+                   getcwd, getdents, getdents64, getegid, geteuid, getgid, getgroups,
+                   getitimer, getpeername, getpgid, getpgrp, getpid, getppid, getpriority,
+                   getrandom, getresgid, getresuid, getrlimit, getrusage, getsid, getsockname,
+                   getsockopt, gettid, gettimeofday, getuid, getxattr, inotify_add_watch,
+                   inotify_init, inotify_init1, inotify_rm_watch, ioctl, ioprio_get,
+                   ioprio_set, ipc, kill, lchown, lgetxattr, link, linkat, listen,
+                   listxattr, llistxattr, lremovexattr, lseek, lsetxattr, lstat, madvise,
+                   memfd_create, mincore, mkdir, mkdirat, mknod, mknodat, mlock, mlock2,
+                   mlockall, mmap, mprotect, mq_getsetattr, mq_notify, mq_open, mq_timedreceive,
+                   mq_timedsend, mq_unlink, mremap, msgctl, msgget, msgrcv, msgsnd, msync,
+                   munlock, munlockall, munmap, nanosleep, newfstatat, open, openat, openat2,
+                   pause, personality, pipe, pipe2, poll, ppoll, prctl, pread64, preadv,
+                   preadv2, prlimit64, pselect6, ptrace, pwrite64, pwritev, pwritev2, read,
+                   readahead, readlink, readlinkat, readv, recv, recvfrom, recvmmsg, recvmsg,
+                   remap_file_pages, removexattr, rename, renameat, renameat2, restart_syscall,
+                   rmdir, rt_sigaction, rt_sigpending, rt_sigprocmask, rt_sigqueueinfo,
+                   rt_sigreturn, rt_sigsuspend, rt_sigtimedwait, rt_tgsigqueueinfo, sched_getaffinity,
+                   sched_getattr, sched_getparam, sched_getscheduler, sched_get_priority_max,
+                   sched_get_priority_min, sched_rr_get_interval, sched_setaffinity,
+                   sched_setattr, sched_setparam, sched_setscheduler, sched_yield, seccomp,
+                   select, semctl, semget, semop, semtimedop, send, sendfile, sendmmsg,
+                   sendmsg, sendto, setfsgid, setfsuid, setgid, setgroups, setitimer,
+                   setpgid, setpriority, setregid, setresgid, setresuid, setreuid,
+                   setrlimit, setsid, setsockopt, setuid, setxattr, shmat, shmctl,
+                   shmdt, shmget, shutdown, sigaltstack, signalfd, signalfd4, sigreturn,
+                   socket, socketpair, splice, stat, statfs, statx, symlink, symlinkat,
+                   sync, sync_file_range, syncfs, sysinfo, syslog, tee, tgkill,
+                   time, timer_create, timer_delete, timer_getoverrun, timer_gettime,
+                   timer_settime, timerfd_create, timerfd_gettime, timerfd_settime,
+                   times, tkill, truncate, uname, unlink, unlinkat, unshare, utime,
+                   utimensat, utimes, vfork, vmsplice, wait4, waitid, write, writev)
+                   ],
+                 "action": "SCMP_ACT_ALLOW"
+               },
+               {
+                 "names": ["perf_event_open", "get_mempolicy", "mbind", "set_mempolicy"],
+                 "action": "SCMP_ACT_ALLOW",
+                 "comment": "GPU/NUMA memory policy syscalls for CUDA/PyTorch training"
+               }
+             ]
+           }
+
+           NOTE: The exact syscall list must come from the Docker moby default profile.
+           Use WebFetch to retrieve the latest from:
+           https://raw.githubusercontent.com/moby/moby/master/profiles/seccomp/default.json
+           and extract the names arrays. This ensures the list is maintained by Docker.
+
+        2. Edit deployment/docker-compose.flows.yml:
+           Add x-gpu-security YAML anchor after x-common-env:
+             x-gpu-security: &amp;gpu-security
+               security_opt:
+                 - "seccomp=deployment/seccomp/train-enforce.json"
+               cap_drop: [ALL]
+               no_new_privileges: true
+
+           For train, hpo, hpo-worker services: replace cap_drop/no_new_privileges with
+           &lt;&lt;: *gpu-security (merge the anchor). Keep shm_size and resource limits as-is.
+
+           NOTE: YAML merge does not deep-merge lists. The anchor must contain cap_drop
+           and no_new_privileges to avoid divergence. Add comment:
+           # x-gpu-security MUST keep cap_drop+no_new_privileges in sync with x-common-security.
+           # Run: grep -n 'cap_drop\|no_new_privileges' deployment/docker-compose.flows.yml
+           # to verify all GPU services use gpu-security anchor.
+
+        3. Update deployment/seccomp/README.md:
+           - Add: "Current status: train-enforce.json deployed (SCMP_ACT_ERRNO)"
+           - Add note: "seccomp path is relative to REPO_ROOT. Always invoke docker compose
+             from the repo root or use scripts/run_debug.sh (which does this automatically)."
+      </implementation>
+      <acceptance>
+        - deployment/seccomp/train-enforce.json exists, parses as valid JSON
+        - uv run pytest tests/v2/unit/deployment/test_seccomp_enforce.py — all 6 tests PASS
+        - uv run pytest tests/v2/unit/deployment/test_compose_hardening.py — still PASS
+          (regression: cap_drop not broken for GPU services)
+        - bash -n deployment/docker-compose.flows.yml fails gracefully (YAML valid)
+        - docker compose -f deployment/docker-compose.flows.yml config validates
+      </acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: SOPS Scaffolding + Credential Rotation                    -->
+  <!-- Closes: #550 (SOPS), closes #538 (rotation script)                 -->
+  <!-- ================================================================== -->
+  <phase id="3" name="SOPS Scaffolding and Credential Rotation">
+    <description>
+      Scaffold SOPS+age support for team deployments WITHOUT encrypting the user's .env.
+      Deliverables: .sops.yaml config, scripts/setup_dev.sh, scripts/_rotate_credentials.py
+      (Python, Rule #16 compliant — uses str.split, not sed/regex).
+
+      CRITICAL Rule #16: init_credentials uses Python str.split("=", 1) to parse .env,
+      NOT sed with regex patterns. Shell script calls `uv run python scripts/_rotate_credentials.py`.
+    </description>
+
+    <task id="T-03.1" name="RED: SOPS scaffolding tests (#550, #538)">
+      <closes-issue>#550 (partial), #538 (partial)</closes-issue>
+      <description>Write failing tests for SOPS config, setup_dev.sh, and credential rotation.</description>
+      <test-first>
+        Create tests/v2/unit/deployment/test_secrets_management.py:
+
+        import yaml
+        from pathlib import Path
+
+        def test_sops_yaml_exists():
+            assert Path(".sops.yaml").exists()
+
+        def test_sops_yaml_has_required_structure():
+            config = yaml.safe_load(Path(".sops.yaml").read_text(encoding="utf-8"))
+            assert "creation_rules" in config
+            rules = config["creation_rules"]
+            assert len(rules) >= 1
+            # Must reference .env files
+            env_rules = [r for r in rules if ".env" in r.get("path_regex", "")]
+            assert env_rules, "No creation rule for .env files found in .sops.yaml"
+            # Must have age or pgp key group
+            for rule in env_rules:
+                has_age = "age" in rule or "key_groups" in rule
+                assert has_age, f"No age key group in rule: {rule}"
+
+        def test_setup_dev_sh_exists_and_is_executable():
+            script = Path("scripts/setup_dev.sh")
+            assert script.exists()
+            content = script.read_text(encoding="utf-8")
+            assert "sops" in content.lower() or "decrypt" in content.lower()
+            assert "setup_dev" in content.lower() or "env" in content.lower()
+
+        def test_setup_dev_sh_has_env_validation_step():
+            content = Path("scripts/setup_dev.sh").read_text(encoding="utf-8")
+            # Must check for required env vars after decrypt
+            assert "MODEL_CACHE_HOST_PATH" in content or "required" in content.lower()
+
+        def test_rotate_credentials_is_python_not_sed():
+            script = Path("scripts/_rotate_credentials.py")
+            assert script.exists()
+            content = script.read_text(encoding="utf-8")
+            # Rule #16: must NOT use regex for parsing .env
+            assert "import re" not in content, "Rule #16 violation: regex banned for .env parsing"
+            assert "sed" not in content, "sed banned — use Python str.split"
+            # Must use str.split or str.partition
+            assert ".split(" in content or ".partition(" in content
+
+        def test_rotate_credentials_uses_secrets_module():
+            content = Path("scripts/_rotate_credentials.py").read_text(encoding="utf-8")
+            assert "import secrets" in content, "Must use secrets.token_hex for credential generation"
+
+        def test_env_example_documents_sops_usage():
+            content = Path(".env.example").read_text(encoding="utf-8")
+            # .env.example should mention SOPS or point to setup_dev.sh
+            assert "sops" in content.lower() or "setup_dev" in content.lower()
+      </test-first>
+      <implementation>None yet — RED phase. Tests should FAIL.</implementation>
+      <acceptance>
+        uv run pytest tests/v2/unit/deployment/test_secrets_management.py — all tests FAIL
+      </acceptance>
+    </task>
+
+    <task id="T-03.2" name="GREEN: SOPS config + setup_dev.sh + credential rotation (#550, #538)">
+      <closes-issue>#550, #538</closes-issue>
+      <description>
+        Create all SOPS scaffolding files. Python credential rotation (Rule #16).
+      </description>
+      <implementation>
+        1. Create .sops.yaml:
+           creation_rules:
+             - path_regex: '\.env(\.enc)?$'
+               key_groups:
+                 - age:
+                     - "age1REPLACE_WITH_YOUR_AGE_PUBLIC_KEY"
+               # Generate your age key: age-keygen -o ~/.config/sops/age/keys.txt
+               # Get public key: age-keygen -y ~/.config/sops/age/keys.txt
+             - path_regex: '.*'
+               key_groups:
+                 - age:
+                     - "age1REPLACE_WITH_YOUR_AGE_PUBLIC_KEY"
+
+        2. Create scripts/setup_dev.sh:
+           #!/usr/bin/env bash
+           set -euo pipefail
+           # MinIVess dev environment setup.
+           # Run once after cloning or when .env.enc changes.
+           REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." &amp;&amp; pwd)"
+           ENV_FILE="$REPO_ROOT/.env"
+           ENC_FILE="$REPO_ROOT/.env.enc"
+           if [[ -f "$ENC_FILE" ]]; then
+             echo "[setup_dev] Decrypting .env.enc → .env (requires age key in ~/.config/sops/age/keys.txt)"
+             sops --decrypt "$ENC_FILE" &gt; "$ENV_FILE"
+             echo "[setup_dev] .env decrypted successfully"
+           elif [[ -f "$ENV_FILE" ]]; then
+             echo "[setup_dev] .env already present (no .env.enc — using as-is)"
+           else
+             echo "[setup_dev] ERROR: neither .env nor .env.enc found"
+             echo "  Copy .env.example → .env and fill in your values:"
+             echo "  cp .env.example .env"
+             exit 1
+           fi
+           # Validate required vars are non-empty
+           required_vars=("MODEL_CACHE_HOST_PATH" "MINIO_ROOT_PASSWORD" "POSTGRES_PASSWORD")
+           for var in "${required_vars[@]}"; do
+             val=$(grep "^${var}=" "$ENV_FILE" | cut -d= -f2-)
+             if [[ -z "$val" ]] || [[ "$val" == *"REPLACE"* ]]; then
+               echo "[setup_dev] WARNING: $var is unset or still a placeholder in .env"
+             fi
+           done
+           echo "[setup_dev] Environment ready. Run: docker compose --env-file .env -f deployment/docker-compose.yml up -d"
+
+        3. Create scripts/_rotate_credentials.py:
+           """
+           Credential rotation utility for MinIVess MLOps.
+           Generates new random credentials and writes them to .env.
+           Rule #16 compliant: uses str.split("=", 1), NOT regex or sed.
+           """
+           from __future__ import annotations
+           import secrets
+           import sys
+           from pathlib import Path
+
+           REPO_ROOT = Path(__file__).parent.parent
+           ENV_FILE = REPO_ROOT / ".env"
+
+           # Variables to rotate with secrets.token_hex(32)
+           ROTATE_TARGETS = [
+               "POSTGRES_PASSWORD",
+               "MINIO_ROOT_PASSWORD",
+               "LANGFUSE_SECRET",
+               "LANGFUSE_SALT",
+               "GRAFANA_PASSWORD",
+           ]
+
+           def rotate(env_file: Path = ENV_FILE) -> None:
+               if not env_file.exists():
+                   print(f"ERROR: {env_file} not found. Run: cp .env.example .env")
+                   sys.exit(1)
+               lines = env_file.read_text(encoding="utf-8").splitlines()
+               new_lines = []
+               rotated = []
+               for line in lines:
+                   if "=" in line and not line.startswith("#"):
+                       key, _, value = line.partition("=")
+                       key = key.strip()
+                       if key in ROTATE_TARGETS:
+                           new_value = secrets.token_hex(32)
+                           new_lines.append(f"{key}={new_value}")
+                           rotated.append(key)
+                           continue
+                   new_lines.append(line)
+               env_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+               print(f"Rotated {len(rotated)} credentials: {', '.join(rotated)}")
+               print("WARNING: Update OPTUNA_STORAGE_URL in .env to match new POSTGRES_PASSWORD")
+               print("NEXT: docker compose --env-file .env restart")
+
+           if __name__ == "__main__":
+               rotate()
+
+        4. Update .env.example — add SOPS section header before first variable group:
+           # Team Setup (multi-developer):
+           #   Install age: sudo apt-get install age
+           #   Install sops: see https://github.com/getsops/sops/releases
+           #   Decrypt env: bash scripts/setup_dev.sh
+           #   Rotate credentials: uv run python scripts/_rotate_credentials.py
+
+        5. chmod +x scripts/setup_dev.sh
+      </implementation>
+      <acceptance>
+        - uv run pytest tests/v2/unit/deployment/test_secrets_management.py — all PASS
+        - bash -n scripts/setup_dev.sh (syntax check passes)
+        - uv run python scripts/_rotate_credentials.py --help or dry-run on a temp .env
+        - uv run ruff check scripts/_rotate_credentials.py
+        - uv run mypy scripts/_rotate_credentials.py
+      </acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: MLflow Auth Opt-In                                         -->
+  <!-- Closes: #553                                                         -->
+  <!-- ================================================================== -->
+  <phase id="4" name="MLflow Auth Opt-In">
+    <description>
+      Add MLflow basic-auth as an opt-in docker compose profile "secure".
+      Default workflow (solo dev) remains unchanged — mlflow service has no auth.
+      The "secure" profile adds mlflow-secure service on the SAME PORT — both cannot
+      run simultaneously. Tests verify this mutual exclusivity is documented.
+
+      CRITICAL: MLflow basic-auth does NOT use --users-db-uri (not a valid MLflow 3.x flag).
+      Use --app-name basic-auth. MLflow auto-creates basic_auth.db in working directory.
+      auth.ini is added to .gitignore (it may contain hashed passwords).
+      New env vars go in .env.example first (Rule #22) and are tested by test_env_single_source.py.
+    </description>
+
+    <task id="T-04.1" name="RED: MLflow auth tests (#553)">
+      <closes-issue>#553 (test phase)</closes-issue>
+      <description>Write failing tests for auth config, env vars, tracking.py credential support.</description>
+      <test-first>
+        Create tests/v2/unit/deployment/test_mlflow_auth.py:
+
+        import yaml
+        from pathlib import Path
+
+        def test_mlflow_auth_ini_example_exists():
+            assert Path("deployment/mlflow/auth.ini.example").exists()
+
+        def test_mlflow_auth_ini_example_has_required_sections():
+            content = Path("deployment/mlflow/auth.ini.example").read_text(encoding="utf-8")
+            assert "[mlflow]" in content
+            assert "default_permission" in content
+            assert "admin_username" in content or "username" in content
+
+        def test_mlflow_auth_ini_is_gitignored():
+            gitignore = Path(".gitignore").read_text(encoding="utf-8")
+            gitignore_lines = gitignore.splitlines()
+            # auth.ini (with real passwords) must be gitignored
+            assert any("auth.ini" in line and not line.startswith("#")
+                       for line in gitignore_lines), \
+                "deployment/mlflow/auth.ini must be in .gitignore"
+
+        def test_env_example_has_mlflow_auth_vars():
+            content = Path(".env.example").read_text(encoding="utf-8")
+            assert "MLFLOW_TRACKING_USERNAME" in content
+            assert "MLFLOW_TRACKING_PASSWORD" in content
+
+        def test_init_mlflow_auth_script_exists():
+            assert Path("scripts/init_mlflow_auth.sh").exists()
+            content = Path("scripts/init_mlflow_auth.sh").read_text(encoding="utf-8")
+            # Must call mlflow server --app-name basic-auth (not --users-db-uri)
+            assert "basic-auth" in content
+            assert "users-db-uri" not in content, \
+                "--users-db-uri is not a valid MLflow 3.x flag"
+
+        def test_compose_has_mlflow_secure_profile():
+            compose = yaml.safe_load(
+                Path("deployment/docker-compose.yml").read_text(encoding="utf-8")
+            )
+            services = compose.get("services", {})
+            assert "mlflow-secure" in services, "mlflow-secure service missing"
+            secure = services["mlflow-secure"]
+            profiles = secure.get("profiles", [])
+            assert "secure" in profiles, "mlflow-secure must be under 'secure' profile"
+            # Verify --app-name basic-auth in command
+            command = str(secure.get("command", ""))
+            assert "basic-auth" in command
+
+        def test_mlflow_and_mlflow_secure_cannot_share_port_simultaneously():
+            """Both bind the same port — document they are mutually exclusive."""
+            content = Path("deployment/docker-compose.yml").read_text(encoding="utf-8")
+            assert "mutually exclusive" in content.lower() or \
+                   "cannot run simultaneously" in content.lower() or \
+                   "stop mlflow before" in content.lower(), \
+                "docker-compose.yml must document that mlflow and mlflow-secure are mutually exclusive"
+
+        Update tests/v2/unit/test_env_single_source.py to verify no duplicate definitions
+        of MLFLOW_TRACKING_USERNAME / MLFLOW_TRACKING_PASSWORD in Dynaconf TOMLs.
+        (Follow existing patterns in that test file.)
+      </test-first>
+      <implementation>None yet — RED phase.</implementation>
+      <acceptance>
+        uv run pytest tests/v2/unit/deployment/test_mlflow_auth.py — all tests FAIL (RED confirmed)
+      </acceptance>
+    </task>
+
+    <task id="T-04.2" name="GREEN: MLflow auth files + compose profile + tracking.py (#553)">
+      <closes-issue>#553</closes-issue>
+      <description>
+        Create auth config files, add mlflow-secure compose profile, update tracking.py.
+        Keep default mlflow service unchanged (no-auth remains default for solo dev).
+      </description>
+      <implementation>
+        1. Create deployment/mlflow/ directory.
+
+        2. Create deployment/mlflow/auth.ini.example:
+           [mlflow]
+           default_permission = READ
+           database_uri = sqlite:///basic_auth.db
+           admin_username = admin
+           admin_password = REPLACE_WITH_STRONG_PASSWORD
+           # Generate password: uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
+
+        3. Add to .gitignore:
+           deployment/mlflow/auth.ini
+
+        4. Add to .env.example (per Rule #22 — single source of truth):
+           # ─── MLflow Auth (optional — activate with docker compose --profile secure) ────
+           MLFLOW_TRACKING_USERNAME=
+           MLFLOW_TRACKING_PASSWORD=
+
+        5. Edit deployment/docker-compose.yml — add mlflow-secure service after mlflow:
+           # mlflow-secure: MLflow with basic-auth. Profile: "secure".
+           # MUTUALLY EXCLUSIVE with default mlflow service — both bind MLFLOW_PORT.
+           # Cannot run simultaneously. Stop mlflow before starting mlflow-secure:
+           #   docker compose stop mlflow
+           #   docker compose --profile secure up mlflow-secure
+           mlflow-secure:
+             build:
+               context: ..
+               dockerfile: deployment/docker/Dockerfile.mlflow
+             image: minivess-mlflow:v3.10.0
+             container_name: minivess-mlflow
+             profiles: ["secure"]
+             environment:
+               MLFLOW_AUTH_CONFIG_PATH: /etc/mlflow/auth.ini
+             command: >-
+               mlflow server
+                 --backend-store-uri postgresql://${POSTGRES_USER:-minivess}:${POSTGRES_PASSWORD:-minivess_secret}@${POSTGRES_DOCKER_HOST:-postgres}:5432/${POSTGRES_DB_MLFLOW:-mlflow}
+                 --artifacts-destination s3://${MLFLOW_ARTIFACT_BUCKET:-mlflow-artifacts}
+                 --host 0.0.0.0
+                 --port ${MLFLOW_PORT:-5000}
+                 --app-name basic-auth
+             volumes:
+               - ./mlflow/auth.ini:/etc/mlflow/auth.ini:ro
+             ... (same depends_on, networks, ports as default mlflow service)
+
+        6. Create scripts/init_mlflow_auth.sh:
+           #!/usr/bin/env bash
+           set -euo pipefail
+           # Initialise MLflow basic-auth. Run once after deploying mlflow-secure.
+           # Creates admin user and sets default permissions.
+           MLFLOW_URI="${MLFLOW_TRACKING_URI:-http://localhost:5000}"
+           echo "Initialising MLflow auth at $MLFLOW_URI"
+           echo "After running: set MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD in .env"
+           # MLflow basic-auth creates basic_auth.db automatically on first --app-name basic-auth start.
+           # This script documents the post-startup steps:
+           echo "Step 1: Start mlflow-secure: docker compose --profile secure up mlflow-secure"
+           echo "Step 2: Set env vars in .env: MLFLOW_TRACKING_USERNAME=admin MLFLOW_TRACKING_PASSWORD=..."
+           echo "Step 3: Test: curl -u admin:password http://localhost:5000/api/2.0/mlflow/experiments/list"
+
+        7. Edit src/minivess/observability/tracking.py — update resolve_tracking_uri():
+           After existing URI resolution, check for auth credentials:
+             username = os.environ.get("MLFLOW_TRACKING_USERNAME")
+             password = os.environ.get("MLFLOW_TRACKING_PASSWORD")
+             if username and password:
+                 # Inject credentials into URI: http://user:pass@host:port
+                 from urllib.parse import urlparse, urlunparse
+                 parsed = urlparse(tracking_uri)
+                 authed = parsed._replace(netloc=f"{username}:{password}@{parsed.netloc}")
+                 tracking_uri = urlunparse(authed)
+             return tracking_uri
+      </implementation>
+      <acceptance>
+        - uv run pytest tests/v2/unit/deployment/test_mlflow_auth.py — all PASS
+        - uv run pytest tests/v2/unit/test_env_single_source.py — still PASS
+        - uv run mypy src/minivess/observability/tracking.py — clean
+        - uv run ruff check src/minivess/observability/tracking.py
+        - docker compose -f deployment/docker-compose.yml config validates (YAML valid)
+      </acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 5: Falco Runtime Monitoring (optional, profile "security")    -->
+  <!-- Closes: #551                                                         -->
+  <!-- ================================================================== -->
+  <phase id="5" name="Falco Runtime Monitoring">
+    <description>
+      Add Falco as an optional Docker Compose profile "security".
+      Falco requires privileged: true — regression test guards other services
+      remain unprivileged after this change.
+      Lightweight: config files + compose service definition only.
+      No Kubernetes/Helm — local Docker Compose only.
+    </description>
+
+    <task id="T-05.1" name="RED: Falco tests (#551)">
+      <closes-issue>#551 (test phase)</closes-issue>
+      <description>Write failing tests for Falco rules YAML and compose service.</description>
+      <test-first>
+        Create tests/v2/unit/deployment/test_falco.py:
+
+        import yaml
+        from pathlib import Path
+
+        FALCO_RULES = Path("deployment/falco/minivess_rules.yaml")
+        FALCO_COMPOSE_SERVICE = "falco"
+
+        def test_falco_rules_file_exists():
+            assert FALCO_RULES.exists()
+
+        def test_falco_rules_is_valid_yaml():
+            rules = yaml.safe_load(FALCO_RULES.read_text(encoding="utf-8"))
+            assert rules is not None
+
+        def test_falco_rules_has_minivess_specific_rules():
+            content = FALCO_RULES.read_text(encoding="utf-8")
+            # Must have rules targeting minivess containers
+            assert "minivess" in content.lower()
+            # Must cover the three ML-specific threat scenarios from issue #551
+            assert "checkpoints" in content or "checkpoint" in content  # model exfiltration
+            assert "spawned" in content.lower() or "shell" in content.lower()  # shell spawn
+
+        def test_falco_service_in_compose():
+            compose = yaml.safe_load(
+                Path("deployment/docker-compose.yml").read_text(encoding="utf-8")
+            )
+            services = compose.get("services", {})
+            assert FALCO_COMPOSE_SERVICE in services
+            falco = services[FALCO_COMPOSE_SERVICE]
+            assert "security" in falco.get("profiles", [])
+
+        def test_falco_service_is_the_only_privileged_service():
+            """Regression: adding Falco (privileged) must not cause other services to be privileged."""
+            compose = yaml.safe_load(
+                Path("deployment/docker-compose.yml").read_text(encoding="utf-8")
+            )
+            for name, svc in compose.get("services", {}).items():
+                if name == FALCO_COMPOSE_SERVICE:
+                    continue  # Falco intentionally requires privileged
+                assert not svc.get("privileged", False), \
+                    f"Service '{name}' is unexpectedly privileged after Falco addition"
+
+        def test_falco_deployment_claude_md_documents_security_profile():
+            content = Path("deployment/CLAUDE.md").read_text(encoding="utf-8")
+            assert "falco" in content.lower()
+            assert "--profile security" in content or "profile security" in content.lower()
+      </test-first>
+      <implementation>None yet — RED phase.</implementation>
+      <acceptance>
+        uv run pytest tests/v2/unit/deployment/test_falco.py — all FAIL (RED confirmed)
+      </acceptance>
+    </task>
+
+    <task id="T-05.2" name="GREEN: Falco rules + compose service (#551)">
+      <closes-issue>#551</closes-issue>
+      <description>
+        Create ML-specific Falco rules targeting model weight exfiltration, shell spawns,
+        and unexpected outbound connections. Add falco service to docker-compose.yml
+        under profile "security". Falco requires privileged: true (documented + tested).
+      </description>
+      <implementation>
+        1. Create deployment/falco/ directory.
+
+        2. Create deployment/falco/minivess_rules.yaml:
+           # MinIVess MLOps — Custom Falco Security Rules
+           # These rules detect anomalous behaviour specific to ML training containers.
+           # Run Falco: docker compose --profile security up falco
+           # Reference: https://falco.org/docs/rules/
+
+           - rule: MinIVess checkpoint exfiltration
+             desc: A process other than the training script writes checkpoints to a remote destination
+             condition: &gt;
+               container.name startswith "minivess-flow" and
+               (evt.type = connect or evt.type = sendto) and
+               fd.name contains "/app/checkpoints"
+             output: &gt;
+               Possible model exfiltration (user=%user.name command=%proc.cmdline
+               container=%container.name file=%fd.name)
+             priority: WARNING
+             tags: [minivess, ml-security, exfiltration]
+
+           - rule: MinIVess shell spawn in flow container
+             desc: A shell process is spawned inside a running flow container (deserialization attack)
+             condition: &gt;
+               container.name startswith "minivess-flow" and
+               evt.type = execve and
+               (proc.name = bash or proc.name = sh or proc.name = dash) and
+               proc.pname != "run_debug.sh" and
+               proc.pname != "entrypoint.sh"
+             output: &gt;
+               Shell spawned in flow container (user=%user.name shell=%proc.name
+               parent=%proc.pname container=%container.name)
+             priority: CRITICAL
+             tags: [minivess, ml-security, shell-spawn]
+
+           - rule: MinIVess unexpected outbound connection
+             desc: Flow container connects to an IP not in the expected service list
+             condition: &gt;
+               container.name startswith "minivess-flow" and
+               evt.type = connect and
+               fd.typechar = 4 and
+               not fd.rip in (minivess-mlflow, minio, minivess-prefect, postgres)
+             output: &gt;
+               Unexpected outbound connection from flow container (container=%container.name
+               dest=%fd.rip:%fd.rport command=%proc.cmdline)
+             priority: WARNING
+             tags: [minivess, ml-security, network]
+
+        3. Edit deployment/docker-compose.yml — add falco service:
+           # Falco runtime security monitoring. Optional — activate with:
+           #   docker compose --profile security up falco
+           # Falco REQUIRES privileged: true for eBPF kernel module access.
+           # All other services remain unprivileged (tested: test_falco.py).
+           falco:
+             image: falcosecurity/falco-no-driver:latest
+             container_name: minivess-falco
+             profiles: ["security"]
+             privileged: true
+             volumes:
+               - /var/run/docker.sock:/host/var/run/docker.sock:ro
+               - /proc:/host/proc:ro
+               - ./falco/minivess_rules.yaml:/etc/falco/rules.d/minivess.yaml:ro
+             environment:
+               FALCO_BPF_PROBE: ""
+             command: ["/usr/bin/falco", "--modern-bpf", "-r", "/etc/falco/rules.d/minivess.yaml"]
+             networks:
+               - minivess
+             restart: "no"
+
+        4. Update deployment/CLAUDE.md — add Falco section:
+           ## Falco Runtime Security Monitoring (Optional)
+
+           Falco detects anomalous container behaviour in real-time. Activate with:
+           ```bash
+           docker compose --profile security up falco
+           ```
+           Custom rules: `deployment/falco/minivess_rules.yaml`
+           Alerts on: model weight exfiltration, shell spawns, unexpected network connections.
+
+           NOTE: Falco requires `privileged: true` for eBPF kernel access.
+           All other MinIVess services remain unprivileged (enforced by test_falco.py).
+      </implementation>
+      <acceptance>
+        - uv run pytest tests/v2/unit/deployment/test_falco.py — all PASS
+        - uv run pytest tests/v2/unit/deployment/test_compose_hardening.py — still PASS
+          (regression: non-Falco services not privileged)
+        - docker compose -f deployment/docker-compose.yml config validates
+        - yamllint deployment/falco/minivess_rules.yaml (valid YAML)
+      </acceptance>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- FINAL VERIFICATION                                                   -->
+  <!-- ================================================================== -->
+  <task id="T-FINAL" name="VERIFY: Full test suite + commit + push">
+    <description>
+      Run all deployment tests, check for regressions, commit, push, and update tdd-state.json.
+    </description>
+    <implementation>
+      1. uv run pytest tests/v2/unit/deployment/ -v --tb=short
+      2. uv run pytest tests/v2/unit/test_env_single_source.py
+      3. uv run ruff check src/minivess/ tests/
+      4. uv run mypy src/minivess/observability/tracking.py
+      5. docker compose -f deployment/docker-compose.yml config (YAML validates)
+      6. docker compose -f deployment/docker-compose.flows.yml config (YAML validates)
+      7. git add -p  (review each change before staging)
+      8. git commit
+      9. git push origin feat/docker-hardening-2nd-pass
+      10. Update tdd-state.json: all tasks DONE, convergence.reached = true
+    </implementation>
+    <acceptance>
+      - All tests pass (no regressions in test_compose_hardening.py, test_security_tooling.py,
+        test_deployment_docs.py, test_env_single_source.py)
+      - ruff: no errors
+      - mypy: no new errors
+      - Both compose files validate
+      - Closes issues: #547, #548, #549, #550, #551, #552, #553
+    </acceptance>
+  </task>
+
+</plan>

@@ -1,0 +1,15 @@
+creation_rules:
+  # Encrypt .env and .env.enc files with your age public key.
+  # Generate a key pair: age-keygen -o ~/.config/sops/age/keys.txt
+  # Get public key:      age-keygen -y ~/.config/sops/age/keys.txt
+  # Decrypt on new machine: sops --decrypt .env.enc > .env
+  - path_regex: '\.env(\.enc)?$'
+    key_groups:
+      - age:
+          - age1REPLACE_WITH_YOUR_AGE_PUBLIC_KEY
+
+  # All other files fall back to the same key group.
+  - path_regex: '.*'
+    key_groups:
+      - age:
+          - age1REPLACE_WITH_YOUR_AGE_PUBLIC_KEY

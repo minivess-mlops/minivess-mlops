@@ -36,6 +36,9 @@ build/
 # Docker
 .env
 
+# MLflow auth config — may contain hashed passwords, never commit
+deployment/mlflow/auth.ini
+
 # DVC
 /data/raw/
 /data/processed/
