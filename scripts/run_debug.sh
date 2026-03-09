@@ -39,6 +39,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Export EXPERIMENT so Python subprocesses (YAML parsing) can read it via os.environ.
+# Without this, --experiment CLI flag sets a shell variable (not inherited by subprocess).
+export EXPERIMENT
+
 cd "$REPO_ROOT"
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
