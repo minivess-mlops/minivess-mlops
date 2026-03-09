@@ -209,6 +209,12 @@ for model in "${MODELS_ARRAY[@]}"; do
 
   # Build Hydra overrides: model=X [,user overrides]
   OVERRIDES="model=$model"
+  # sam3_hybrid uses 7.18 GiB / 7.60 GiB CUDA budget at patch=(64,64,3).
+  # Reduce to (32,32,3) to save ~200 MB activations and avoid OOM on 8 GB GPU.
+  # expandable_segments alone insufficient when physically out of CUDA memory.
+  if [ "$model" = "sam3_hybrid" ]; then
+    OVERRIDES="$OVERRIDES,patch_size=[32,32,3]"
+  fi
   if [ -n "$USER_OVERRIDES" ]; then
     OVERRIDES="$OVERRIDES,$USER_OVERRIDES"
   fi

@@ -9,10 +9,17 @@ max_batch_size:
   gpu_high: 1
   gpu_extreme: 2
 default_patch_xy: 64
+# For 8 GB GPUs (e.g. RTX 2070 Super): use patch_size=[32,32,3] not [64,64,3].
+# patch=(64,64,3) OOMs: 7.18 GiB used / 7.60 GiB CUDA budget, 76 MiB free vs 82 needed.
+# PYTORCH_ALLOC_CONF=expandable_segments:True insufficient when physically out of memory.
+# Verified 2026-03-09. debug_all_models overrides via run_debug.sh automatically.
+gpu8gb_debug_patch_xy: 32
 notes: >
   SAM3 Hybrid Fusion (Meta SAM3 + DynUNet LoRA). ViT-32L backbone (648M params)
   with LoRA adapters (rank=16, alpha=32) and gated feature fusion with DynUNet.
   Higher overhead than vanilla due to fusion layers and dual-branch forward pass.
   SDPA mandatory — attn_implementation='sdpa' enforced (Rule: never eager on 8 GB).
-  GPU VRAM >= 16 GB strongly recommended; marginally fits 8 GB with AMP + patch=(64,64,3).
+  GPU VRAM >= 16 GB strongly recommended. On 8 GB GPUs must use patch=(32,32,3);
+  patch=(64,64,3) OOMs (7.18 GiB used of 7.60 GiB CUDA budget, only 76 MiB free
+  vs 82 MiB needed — verified 2026-03-09 on RTX 2070 Super).
   See src/minivess/adapters/CLAUDE.md for VRAM enforcement (sam3_vram_check.py).
