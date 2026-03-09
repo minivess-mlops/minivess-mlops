@@ -142,6 +142,17 @@ Makefile target that invokes `docker compose` MUST include `--env-file`.
 
 **NEVER** tell users to `export HF_TOKEN=...` — all secrets belong in `.env`.
 
+## Required .env Variables (No Default — Must Be Set)
+
+```
+MODEL_CACHE_HOST_PATH=/your/local/model/cache
+```
+
+`MODEL_CACHE_HOST_PATH` is required. It has **no fallback** in docker-compose.flows.yml
+(removed 2026-03-09, was `/home/petteri/download_cache` — machine-specific = broken on other machines).
+Copy `.env.example` → `.env` and set this to your local model weight cache directory.
+The cache persists across container restarts, preventing re-downloading SAM3 (~9 GB) etc.
+
 ## Running Flows
 
 ```bash

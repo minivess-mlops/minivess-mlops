@@ -1,0 +1,20 @@
+# Hadolint configuration — Dockerfile linting
+# https://github.com/hadolint/hadolint
+
+# Fail CI only on errors, not style warnings
+failure-threshold: error
+
+ignored:
+  # DL3008: pin versions in apt-get — Ubuntu LTS base images are stable;
+  # pinning every system package version adds maintenance burden without
+  # reproducibility benefit (LTS patch versions are ABI-compatible).
+  - DL3008
+
+override:
+  error:
+    # DL3002: last USER should not be root — enforce non-root user
+    - DL3002
+    # DL3006: always tag the image used — no FROM ubuntu or FROM python
+    - DL3006
+    # DL4006: set the SHELL option -o pipefail with RUN pipefail
+    - DL4006

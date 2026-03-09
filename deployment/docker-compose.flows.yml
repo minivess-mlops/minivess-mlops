@@ -31,7 +31,8 @@ x-common-env: &common-env
   LOGS_DIR: ${LOGS_DIR:-/app/logs}
   SPLITS_DIR: ${SPLITS_DIR:-/app/configs/splits}
   # HPO — PostgreSQL is the ONLY backend (no SQLite, no in-memory)
-  OPTUNA_STORAGE_URL: ${OPTUNA_STORAGE_URL:-postgresql+psycopg2://minivess:minivess_secret@postgres:5432/optuna}
+  # Rule #22: No hardcoded credentials — use ${POSTGRES_PASSWORD} variable reference.
+  OPTUNA_STORAGE_URL: ${OPTUNA_STORAGE_URL:-postgresql+psycopg2://${POSTGRES_USER:-minivess}:${POSTGRES_PASSWORD:-minivess_secret}@${POSTGRES_DOCKER_HOST:-postgres}:5432/${POSTGRES_DB_OPTUNA:-optuna}}
   REPLICA_INDEX: ${REPLICA_INDEX:-0}
   # Prefect log forwarding
   PREFECT_LOGGING_EXTRA_LOGGERS: ${PREFECT_LOGGING_EXTRA_LOGGERS:-minivess}
@@ -111,8 +112,8 @@ services:
       - mlruns_data:/app/mlruns
       - logs_data:/app/logs
       # Persistent model weight cache — avoids re-downloading SAM3 (~9GB), MONAI bundles.
-      # Host path set by MODEL_CACHE_HOST_PATH in .env (default: /home/petteri/download_cache).
-      - ${MODEL_CACHE_HOST_PATH:-/home/petteri/download_cache}:/model_cache
+      # MODEL_CACHE_HOST_PATH must be set in .env — no default (machine-specific path).
+      - ${MODEL_CACHE_HOST_PATH}:/model_cache
     # CDI GPU access — works without nvidia container runtime (Docker 25+)
     devices:
       - "nvidia.com/gpu=all"
@@ -277,7 +278,7 @@ services:
       - checkpoint_cache:/app/checkpoints
       - mlruns_data:/app/mlruns
       - logs_data:/app/logs
-      - ${MODEL_CACHE_HOST_PATH:-/home/petteri/download_cache}:/model_cache
+      - ${MODEL_CACHE_HOST_PATH}:/model_cache
     # CDI GPU access — works without nvidia container runtime (Docker 25+)
     devices:
       - "nvidia.com/gpu=all"
@@ -303,7 +304,7 @@ services:
       - checkpoint_cache:/app/checkpoints
       - mlruns_data:/app/mlruns
       - logs_data:/app/logs
-      - ${MODEL_CACHE_HOST_PATH:-/home/petteri/download_cache}:/model_cache
+      - ${MODEL_CACHE_HOST_PATH}:/model_cache
     # CDI GPU access — works without nvidia container runtime (Docker 25+)
     devices:
       - "nvidia.com/gpu=all"
