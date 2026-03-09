@@ -2,6 +2,33 @@
 
 Model-agnostic biomedical segmentation MLOps platform. Clean rewrite from v0.1-alpha.
 
+## Overarching Principle (TOP-1): Flexible MLOps as MONAI Ecosystem Extension
+
+> **We are building a highly flexible MLOps architecture for multiphoton biomedical imaging
+> experiments as an extension to the MONAI ecosystem. Do not constrain expansion.**
+
+This principle governs every architectural decision in this repository. MinIVess is NOT a
+bespoke pipeline for one segmentation task — it is a general-purpose MLOps scaffold that
+the MONAI ecosystem currently lacks. Expansion must always be possible:
+
+- **New flow topologies** — Parallel flows (Survival Analysis runs independently of
+  segmentation), sequential flows (Classification on segmentation masks), and hybrid
+  topologies must all be first-class citizens. Never hardcode a fixed DAG.
+- **New data modalities** — A new dataset type, a new imaging protocol, or a new
+  annotator should add a YAML config, not a code branch.
+- **New model families** — Any model that implements the `ModelAdapter` ABC integrates
+  automatically. The platform never assumes DynUNet, SAM3, or any specific architecture.
+- **New downstream consumers** — Dashboard, Biostatistics, Annotation all read from
+  MLflow and the service layer. Adding a new consumer is adding a new flow + adapter,
+  not modifying core infrastructure.
+- **MONAI-first** — If MONAI has it, use it directly. Zero custom code for things MONAI
+  already implements. This repo extends MONAI, never forks it.
+
+**Corollary**: Any design that makes adding a new flow, a new model, or a new dataset
+harder than editing one YAML file is a design flaw. Escalate to user before implementing.
+
+---
+
 ## Design Goal #1: EXCELLENT DevEx for PhD Researchers
 
 > **MLOps as a scaffold that frees PhD researchers from infrastructure wrangling.**
