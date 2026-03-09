@@ -1,0 +1,18 @@
+name: comma_mamba
+divisor: 8
+model_overhead_mb: 800
+bytes_per_voxel_amp: 10
+bytes_per_voxel_fp32: 20
+max_batch_size:
+  cpu: 1
+  gpu_low: 1
+  gpu_high: 2
+  gpu_extreme: 4
+default_patch_xy: 48
+notes: >
+  COMMA Mamba (Shi et al. 2025). Coordinate-based Mamba 3D segmentation.
+  Flattens full spatial volume to sequence (B, D*H*W, C) at each encoder
+  level — memory scales with patch volume, not just XY. Use patch=48x48x24
+  (XY halved vs DynUNet 96, Z=24 matches DynUNet convention) on 8 GB GPUs
+  (gpu_low) with batch=1. AMP required. clDice loss adds ~15% overhead from
+  soft_skel max_pool3d ops. MONAI patch sampling handles volumes with Z<24.
