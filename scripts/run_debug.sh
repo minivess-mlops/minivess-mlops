@@ -180,7 +180,14 @@ mkdir -p "$SUMMARY_DIR/logs"
 FLOW_STATUSES=()
 TOTAL_START=$(date +%s)
 
-while IFS= read -r model; do
+# Use readarray to load ALL model names into a bash array upfront.
+# This avoids the stdin-consumption bug: `while read ... done <<< VAR` shares stdin
+# with the loop body. `docker compose run` (even with -T) can read ahead and consume
+# remaining model names from the herestring before the next loop iteration.
+# readarray loads everything in one shot, then the for loop uses no stdin at all.
+readarray -t MODELS_ARRAY <<< "$MODELS_TO_TEST"
+
+for model in "${MODELS_ARRAY[@]}"; do
   [ -z "$model" ] && continue
 
   print_banner "Training: $model (experiment=$EXPERIMENT)"
@@ -194,10 +201,9 @@ while IFS= read -r model; do
     OVERRIDES="$OVERRIDES,$USER_OVERRIDES"
   fi
 
-  # -T: disable pseudo-TTY allocation so docker compose run does NOT consume the
-  # while-loop's stdin (the MODELS_TO_TEST herestring). Without -T, docker reads
-  # the remaining model names from stdin, causing the loop to stop after dynunet.
-  # < /dev/null: belt-and-suspenders — explicitly detach container stdin.
+  # -T: disable pseudo-TTY; </dev/null: detach container stdin.
+  # docker compose run attaches to container stdin by default — without these,
+  # it can consume the shell's stdin unexpectedly.
   run_or_dry "docker compose train ($model)" \
     docker compose -f "$FLOWS_COMPOSE" run --rm -T \
       -e EXPERIMENT="$EXPERIMENT" \
@@ -216,7 +222,7 @@ while IFS= read -r model; do
     FLOW_STATUSES+=("train/$model:FAILED:${MODEL_DUR}m")
   fi
 
-done <<< "$MODELS_TO_TEST"
+done
 
 # ─── Flow chaining ────────────────────────────────────────────────────────────
 # Run post_training and analyze flows if experiment config specifies them
@@ -255,21 +261,33 @@ TOTAL_DUR=$(( (TOTAL_END - TOTAL_START) / 60 ))
 SUMMARY_JSON="$SUMMARY_DIR/summary_${TIMESTAMP}.json"
 
 if [ "$DRY_RUN" = "false" ]; then
+  # Pass FLOW_STATUSES as a JSON array via a temp file to avoid bash-into-Python
+  # injection (the old approach used ${FLOW_STATUSES[@]} directly in Python source,
+  # producing `statuses = train/dynunet:OK:0m` — a SyntaxError).
+  STATUSES_JSON_FILE=$(mktemp /tmp/minivess-statuses-XXXXXX.json)
+  # Build a JSON array from the bash array
+  printf '%s\n' "${FLOW_STATUSES[@]:-}" | uv run python3 -c "
+import sys, json
+lines = [l.rstrip() for l in sys.stdin if l.strip()]
+json.dump(lines, sys.stdout)
+" > "$STATUSES_JSON_FILE"
+
   uv run python3 - <<PYEOF
 from __future__ import annotations
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-statuses = ${FLOW_STATUSES[@]+"${FLOW_STATUSES[@]}"}
+with open("$STATUSES_JSON_FILE", encoding="utf-8") as f:
+    statuses = json.load(f)
+
 timestamp = "$TIMESTAMP"
 experiment = "$EXPERIMENT"
 total_dur = $TOTAL_DUR
 
 # Parse status strings "flow/model:STATUS:DURm"
 parsed = []
-for s in statuses if isinstance(statuses, list) else [statuses] if statuses else []:
+for s in statuses:
     parts = s.split(":")
     parsed.append({"name": parts[0], "status": parts[1] if len(parts) > 1 else "UNKNOWN",
                    "duration_min": parts[2].rstrip("m") if len(parts) > 2 else "?"})
@@ -286,6 +304,7 @@ out.parent.mkdir(parents=True, exist_ok=True)
 out.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 print(f"  Summary saved: $SUMMARY_JSON")
 PYEOF
+  rm -f "$STATUSES_JSON_FILE"
 fi
 
 print_banner "Debug Run Complete"
