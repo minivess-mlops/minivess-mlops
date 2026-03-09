@@ -18,7 +18,11 @@ from typing import TYPE_CHECKING, Any
 from prefect import flow, task
 
 from minivess.observability.tracking import resolve_tracking_uri
-from minivess.orchestration.constants import FLOW_NAME_DATA
+from minivess.orchestration.constants import (
+    EXPERIMENT_DATA,
+    FLOW_NAME_DATA,
+    resolve_experiment_name,
+)
 from minivess.orchestration.flow_contract import (
     FlowContract,  # noqa: F401  # used via log_completion_safe
 )
@@ -530,7 +534,7 @@ def run_data_flow(
     tracking_uri = resolve_tracking_uri()
     try:
         mlflow.set_tracking_uri(tracking_uri)
-        mlflow.set_experiment("minivess_data")
+        mlflow.set_experiment(resolve_experiment_name(EXPERIMENT_DATA))
         with mlflow.start_run(tags={"flow_name": "data-flow"}) as active_run:
             mlflow_run_id = active_run.info.run_id
             mlflow.log_param("data_n_volumes", len(pairs))
@@ -538,6 +542,8 @@ def run_data_flow(
             mlflow.log_param("data_hash", dataset_hash)
             if data_dvc_commit is not None:
                 mlflow.log_param("data_dvc_commit", data_dvc_commit)
+            if splits_path is not None:
+                mlflow.set_tag("splits_path", str(splits_path))
             logger.info("MLflow data run opened: %s", mlflow_run_id)
     except Exception:
         logger.warning("Failed to open/finalize MLflow data run", exc_info=True)
