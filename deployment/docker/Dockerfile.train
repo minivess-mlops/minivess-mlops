@@ -16,13 +16,9 @@ COPY --chown=minivess:minivess scripts/ scripts/
 # Docker context marker — detected by _require_docker_context() in train_flow.py
 ENV DOCKER_CONTAINER=1
 
-# Volume-mapped paths — must match docker-compose.flows.yml volume declarations.
+# Volume-mapped paths are injected by docker-compose.flows.yml x-common-env (Rule #22).
+# DATA_DIR, CHECKPOINT_DIR, LOGS_DIR, SPLITS_DIR all come from .env.example defaults.
 # MLFLOW_TRACKING_URI is injected by docker-compose.flows.yml x-common-env, NOT here.
-# Override at runtime via the environment section in docker-compose.flows.yml.
-ENV DATA_DIR=/app/data
-ENV CHECKPOINT_DIR=/app/checkpoints
-ENV LOGS_DIR=/app/logs
-ENV SPLITS_DIR=/app/configs/splits
 
 # HuggingFace token for gated models (SAM3). Pass at runtime:
 #   docker compose run -e HF_TOKEN=$HF_TOKEN train

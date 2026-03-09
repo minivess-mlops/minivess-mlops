@@ -335,6 +335,7 @@ markers = [
     "e2e: End-to-end pipeline tests",
     "slow: Tests that take >30s",
     "gpu: Tests requiring CUDA GPU",
+    "gpu_heavy: GPU-heavy tests (SAM3 forward passes, large model training). Auto-skipped unless --run-gpu-heavy is passed. These tests are for GPU deployment validation, not daily development.",
     "requires_mlflow_server: Tests requiring a running MLflow server (auto-skipped if unhealthy)",
     "requires_docker: Tests requiring a running Docker daemon",
     "requires_train_image: Tests requiring minivess-train Docker image built",

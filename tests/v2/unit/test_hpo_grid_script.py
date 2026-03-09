@@ -14,7 +14,8 @@ from pathlib import Path
 import yaml
 
 GRID_SCRIPT = Path("scripts/train_all_hyperparam_combos.sh")
-EXPERIMENTS_DIR = Path("configs/experiments")
+EXPERIMENTS_DIR = Path("configs/experiment")
+HPO_DIR = Path("configs/hpo")
 
 
 # ---------------------------------------------------------------------------
@@ -96,18 +97,18 @@ def test_experiment_configs_exist() -> None:
 
 
 def test_dynunet_grid_config_exists() -> None:
-    """configs/experiments/dynunet_grid.yaml must exist."""
-    assert (EXPERIMENTS_DIR / "dynunet_grid.yaml").exists()
+    """configs/hpo/dynunet_grid.yaml must exist."""
+    assert (HPO_DIR / "dynunet_grid.yaml").exists()
 
 
 def test_smoke_test_config_exists() -> None:
-    """configs/experiments/smoke_test.yaml must exist."""
-    assert (EXPERIMENTS_DIR / "smoke_test.yaml").exists()
+    """configs/hpo/smoke_test.yaml must exist."""
+    assert (HPO_DIR / "smoke_test.yaml").exists()
 
 
-def test_experiment_configs_valid_yaml() -> None:
-    """Every config in configs/experiments/ must be valid YAML."""
-    for yaml_path in sorted(EXPERIMENTS_DIR.glob("*.yaml")):
+def test_hpo_configs_valid_yaml() -> None:
+    """Every config in configs/hpo/ must be valid YAML."""
+    for yaml_path in sorted(HPO_DIR.glob("*.yaml")):
         content = yaml_path.read_text(encoding="utf-8")
         parsed = yaml.safe_load(content)
         assert isinstance(parsed, dict), (
@@ -115,19 +116,30 @@ def test_experiment_configs_valid_yaml() -> None:
         )
 
 
-def test_experiment_configs_have_required_keys() -> None:
-    """Every experiment config must have: experiment_name, model_family, hyperparameters, fixed."""
+def test_hpo_grid_configs_have_required_keys() -> None:
+    """Grid-sweep HPO configs must have: experiment_name, model_family, hyperparameters, fixed.
+
+    Only checks configs that use the grid schema (contain ``hyperparameters`` key).
+    Optuna-style configs (``search_space`` key) have a different schema and are
+    validated separately.
+    """
     required_keys = {"experiment_name", "model_family", "hyperparameters", "fixed"}
-    for yaml_path in sorted(EXPERIMENTS_DIR.glob("*.yaml")):
+    grid_configs_found = False
+    for yaml_path in sorted(HPO_DIR.glob("*.yaml")):
         content = yaml_path.read_text(encoding="utf-8")
         parsed = yaml.safe_load(content)
+        # Skip Optuna-style configs (they use search_space, not hyperparameters)
+        if "search_space" in parsed:
+            continue
+        grid_configs_found = True
         missing = required_keys - set(parsed.keys())
         assert not missing, f"{yaml_path} missing required keys: {missing}"
+    assert grid_configs_found, "No grid-schema HPO configs found in configs/hpo/"
 
 
 def test_dynunet_grid_hyperparameters() -> None:
     """dynunet_grid.yaml must have the expected hyperparameter lists."""
-    config_path = EXPERIMENTS_DIR / "dynunet_grid.yaml"
+    config_path = HPO_DIR / "dynunet_grid.yaml"
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
     hp = config["hyperparameters"]
@@ -138,7 +150,7 @@ def test_dynunet_grid_hyperparameters() -> None:
 
 def test_smoke_test_is_minimal() -> None:
     """smoke_test.yaml must have max_epochs=1 and num_folds=1."""
-    config_path = EXPERIMENTS_DIR / "smoke_test.yaml"
+    config_path = HPO_DIR / "smoke_test.yaml"
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
     fixed = config["fixed"]
@@ -150,11 +162,14 @@ def test_smoke_test_is_minimal() -> None:
     )
 
 
-def test_experiment_configs_mlflow_experiment_key() -> None:
-    """Every experiment config must have an mlflow_experiment key."""
-    for yaml_path in sorted(EXPERIMENTS_DIR.glob("*.yaml")):
+def test_hpo_grid_configs_mlflow_experiment_key() -> None:
+    """Grid-sweep HPO configs must have an mlflow_experiment key."""
+    for yaml_path in sorted(HPO_DIR.glob("*.yaml")):
         content = yaml_path.read_text(encoding="utf-8")
         parsed = yaml.safe_load(content)
+        # Skip Optuna-style configs (they don't use mlflow_experiment)
+        if "search_space" in parsed:
+            continue
         assert "mlflow_experiment" in parsed, (
             f"{yaml_path} missing 'mlflow_experiment' key"
         )

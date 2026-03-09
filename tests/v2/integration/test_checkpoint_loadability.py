@@ -537,10 +537,10 @@ class TestMetricHistoryValidation:
         first_loss = first_metrics.get("train_loss")
         last_loss = last_metrics.get("train_loss")
 
-        assert isinstance(first_loss, (int, float)) and not math.isnan(first_loss), (
+        assert isinstance(first_loss, int | float) and not math.isnan(first_loss), (
             f"Run {run_id}: epoch 0 'train_loss' is missing or NaN: {first_loss}"
         )
-        assert isinstance(last_loss, (int, float)) and not math.isnan(last_loss), (
+        assert isinstance(last_loss, int | float) and not math.isnan(last_loss), (
             f"Run {run_id}: final epoch 'train_loss' is missing or NaN: {last_loss}"
         )
         assert last_loss < first_loss, (

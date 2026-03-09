@@ -106,7 +106,9 @@ class TestHpoFlowFunctional:
     ) -> None:
         """hpo_flow() must return a dict with 'best_params' key."""
         monkeypatch.setenv("PREFECT_DISABLED", "1")
+        monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(tmp_path / "mlruns"))
+        monkeypatch.setenv("LOGS_DIR", str(tmp_path / "logs"))
 
         with patch(
             "minivess.orchestration.flows.hpo_flow.run_deployment",
@@ -133,7 +135,9 @@ class TestHpoFlowFunctional:
     def test_hpo_flow_returns_best_value(self, monkeypatch, tmp_path) -> None:
         """hpo_flow() result must contain 'best_value' key."""
         monkeypatch.setenv("PREFECT_DISABLED", "1")
+        monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(tmp_path / "mlruns"))
+        monkeypatch.setenv("LOGS_DIR", str(tmp_path / "logs"))
 
         with patch(
             "minivess.orchestration.flows.hpo_flow.run_deployment",
@@ -157,7 +161,9 @@ class TestHpoFlowFunctional:
     def test_hpo_flow_returns_n_trials(self, monkeypatch, tmp_path) -> None:
         """hpo_flow() result must contain 'n_trials' key."""
         monkeypatch.setenv("PREFECT_DISABLED", "1")
+        monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(tmp_path / "mlruns"))
+        monkeypatch.setenv("LOGS_DIR", str(tmp_path / "logs"))
 
         with patch(
             "minivess.orchestration.flows.hpo_flow.run_deployment",

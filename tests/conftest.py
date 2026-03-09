@@ -38,6 +38,17 @@ def _allow_host_env():
     os.environ.pop("MINIVESS_ALLOW_HOST", None)
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Add custom CLI options for GPU test tiers."""
+    parser.addoption(
+        "--run-gpu-heavy",
+        action="store_true",
+        default=False,
+        help="Run GPU-heavy tests (SAM3 forward passes, large model training). "
+        "These are skipped by default — they are for GPU deployment validation.",
+    )
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Configure markers and isolate Prefect home per xdist worker.
 
@@ -84,6 +95,7 @@ def pytest_collection_modifyitems(
     """Auto-tag and auto-skip tests based on location and markers."""
     _mlflow_healthy: bool | None = None
     _docker_available: bool | None = None
+    _run_gpu_heavy = config.getoption("--run-gpu-heavy", default=False)
 
     for item in items:
         # Auto-tag all tests in tests/v2/integration/ or tests/integration/ with
@@ -91,6 +103,15 @@ def pytest_collection_modifyitems(
         item_path = str(item.fspath)
         if "/integration/" in item_path:
             item.add_marker(pytest.mark.integration)
+
+        # Auto-skip gpu_heavy tests unless --run-gpu-heavy is passed.
+        # GPU-heavy tests (SAM3 forward passes, large model training) are NOT
+        # part of the standard dev test suite. They are for GPU deployment
+        # validation on machines with adequate VRAM.
+        if not _run_gpu_heavy and item.get_closest_marker("gpu_heavy") is not None:
+            item.add_marker(
+                pytest.mark.skip(reason="GPU-heavy test — pass --run-gpu-heavy to run")
+            )
 
         if item.get_closest_marker("requires_docker") is not None:
             nonlocal_docker = _docker_available
