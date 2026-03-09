@@ -68,3 +68,6 @@ sam3_training.log
 
 # MLSecOps artifacts (regenerable from make scan/sbom)
 sbom/
+
+# Debug run outputs
+outputs/debug/
