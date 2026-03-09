@@ -182,6 +182,67 @@ def log_acquisition_provenance_task(
     return provenance
 
 
+@task(name="dvc-commit-datasets")
+def dvc_commit_datasets_task(
+    data_dir: Path,
+    datasets_acquired: list[str],
+) -> str | None:
+    """Create DVC tracking entries and version tags for acquired datasets.
+
+    Runs ``dvc add`` for each dataset directory and creates a version tag.
+    Skips gracefully if DVC is not installed.
+
+    Parameters
+    ----------
+    data_dir:
+        Root data directory containing dataset subdirectories.
+    datasets_acquired:
+        List of dataset names that were successfully acquired.
+
+    Returns
+    -------
+    Version tag string if successful, None if DVC is not available.
+    """
+    import subprocess
+
+    from minivess.data.versioning import create_data_version_tag
+
+    # Check if dvc is installed
+    try:
+        subprocess.run(
+            ["dvc", "version"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        logger.warning("DVC not installed — skipping dataset versioning")
+        return None
+
+    for dataset_name in datasets_acquired:
+        dataset_path = data_dir / dataset_name
+        if not dataset_path.is_dir():
+            logger.info("Skipping DVC add for missing dir: %s", dataset_path)
+            continue
+
+        result = subprocess.run(
+            ["dvc", "add", str(dataset_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            logger.warning("dvc add failed for '%s': %s", dataset_name, result.stderr)
+
+    # Create a version tag for the acquisition
+    tag = create_data_version_tag(
+        "minivess",
+        datetime.now(UTC).strftime("%Y-%m-%d"),
+    )
+    logger.info("DVC version tag: %s", tag)
+    return tag
+
+
 @task(name="print-manual-instructions")
 def print_manual_instructions_task(
     manual_datasets: list[str],

@@ -106,12 +106,22 @@ class Sam3Backbone(nn.Module):
 
         self.encoder, self.fpn_neck = self._load_sam3_encoder()
 
+        # HF path: vision_encoder already includes FPN neck → output is 256-dim.
+        # Native path: encoder outputs 1024-dim, FPN neck reduces to 256.
+        self._uses_hf_integrated_fpn = isinstance(self.fpn_neck, nn.Identity)
+        if self._uses_hf_integrated_fpn:
+            self._embed_dim = SAM3_FPN_DIM  # 256 — FPN already integrated
+
         if freeze:
             self._freeze_encoder()
 
     @property
     def out_channels(self) -> int:
-        """ViT backbone output dimension (1024)."""
+        """Feature extractor output dimension.
+
+        Native SAM3: 1024 (raw ViT backbone).
+        HuggingFace SAM3: 256 (FPN neck integrated into vision_encoder).
+        """
         return self._embed_dim
 
     @property

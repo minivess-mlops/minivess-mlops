@@ -15,8 +15,20 @@ import torch
 from minivess.adapters.model_builder import _sam3_package_available
 from minivess.config.models import ModelConfig, ModelFamily
 
+
+def _gpu_vram_gb() -> float:
+    """Return VRAM of first CUDA GPU in GB, or 0.0 if no GPU."""
+    if not torch.cuda.is_available():
+        return 0.0
+    return torch.cuda.get_device_properties(0).total_memory / (1024**3)
+
+
 _sam3_skip = pytest.mark.skipif(
     not _sam3_package_available(), reason="SAM3 not installed"
+)
+_vram_16gb_skip = pytest.mark.skipif(
+    _gpu_vram_gb() < 16.0,
+    reason=f"SAM3 TopoLoRA requires >= 16 GB VRAM (detected {_gpu_vram_gb():.1f} GB)",
 )
 
 
@@ -35,6 +47,7 @@ def sam3_lora_config() -> ModelConfig:
 
 
 @_sam3_skip
+@_vram_16gb_skip
 @pytest.mark.gpu
 class TestSam3TopoLoraAdapter:
     """Sam3TopoLoraAdapter: SAM3 + LoRA + topology loss."""

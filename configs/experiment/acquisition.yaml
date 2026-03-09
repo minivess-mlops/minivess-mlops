@@ -1,0 +1,23 @@
+# @package _global_
+# Flow 0: Data Acquisition — MiniVess + external test datasets + DVC versioning.
+#
+# CPU-only flow (no GPU required). Downloads datasets where automated
+# downloaders exist, prints manual instructions otherwise.
+#
+# Usage:
+#   docker compose -f deployment/docker-compose.flows.yml run --rm acquisition
+#
+# Note: This config is for Hydra-zen composition. The acquisition flow
+# also reads DATA_DIR from the environment (.env.example, Rule #22).
+
+acquisition:
+  force_download: false
+  external_datasets:
+    - deepvess
+    - tubenet_2pm
+    - vesselnn
+  dvc_auto_commit: true
+  ometiff_input_dir: null  # set to path when converting real microscope data
+  ometiff_voxel_size_um: [1.0, 1.0, 1.0]
+
+mlflow_experiment: minivess_acquisition

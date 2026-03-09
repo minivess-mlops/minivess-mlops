@@ -34,10 +34,50 @@ try:
 except (FileNotFoundError, subprocess.TimeoutExpired):
     _DOCKER_AVAILABLE = False
 
+# ── Infra stack running guard ────────────────────────────────────────────────
+# Docker being installed is not enough — the MinIVess infra stack must be up.
+# Check for at least one running container on the minivess-network.
+_INFRA_STACK_RUNNING = False
+if _DOCKER_AVAILABLE:
+    try:
+        _compose_file = (
+            Path(__file__).parent.parent.parent.parent
+            / "deployment"
+            / "docker-compose.yml"
+        )
+        ps_result = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "-f",
+                str(_compose_file),
+                "ps",
+                "--status=running",
+                "-q",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        # If any container IDs are returned, the stack has running services.
+        _INFRA_STACK_RUNNING = (
+            ps_result.returncode == 0 and len(ps_result.stdout.strip()) > 0
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        _INFRA_STACK_RUNNING = False
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
         not _DOCKER_AVAILABLE, reason="Docker not available on this host"
+    ),
+    pytest.mark.skipif(
+        not _INFRA_STACK_RUNNING,
+        reason=(
+            "MinIVess infra stack not running. Start with: "
+            "docker compose -f deployment/docker-compose.yml --profile dev up -d"
+        ),
     ),
 ]
 

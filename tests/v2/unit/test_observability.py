@@ -110,10 +110,15 @@ class TestResolveTrackingUri:
         uri = resolve_tracking_uri(tracking_uri="http://custom:5000")
         assert uri == "http://custom:5000"
 
-    def test_dynaconf_tier_returns_server_uri(
+    def test_dynaconf_tier_without_mlflow_uri_falls_to_default(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """With Dynaconf active and no env var, should return server URI."""
+        """With no env var and no mlflow_tracking_uri in Dynaconf, fall to default.
+
+        Rule #22: mlflow_tracking_uri is NOT in Dynaconf settings.toml.
+        It comes from the MLFLOW_TRACKING_URI env var via .env.example.
+        When the env var is absent, resolve_tracking_uri() returns "mlruns".
+        """
         from minivess.config.settings import clear_settings_cache
         from minivess.observability.tracking import resolve_tracking_uri
 
@@ -121,7 +126,7 @@ class TestResolveTrackingUri:
         monkeypatch.delenv("ENV_FOR_DYNACONF", raising=False)
         clear_settings_cache()
         uri = resolve_tracking_uri()
-        assert uri == "http://localhost:5000"
+        assert uri == "mlruns"
 
     def test_env_var_overrides_dynaconf(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """MLFLOW_TRACKING_URI env var should still override Dynaconf."""
@@ -675,7 +680,12 @@ class TestExperimentTrackerLocalBackend:
         local_tracking_uri: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """log_dynaconf_config should log cfg_mlflow_tracking_uri and cfg_project_name."""
+        """log_dynaconf_config should log cfg_project_name and cfg_data_dir.
+
+        Rule #22: mlflow_tracking_uri is NOT in Dynaconf settings.toml,
+        so cfg_mlflow_tracking_uri will NOT appear in logged params.
+        Only keys present in the Dynaconf singleton are logged.
+        """
         from mlflow.tracking import MlflowClient
 
         from minivess.config.settings import clear_settings_cache
@@ -690,7 +700,7 @@ class TestExperimentTrackerLocalBackend:
 
         client = MlflowClient(tracking_uri=local_tracking_uri)
         run = client.get_run(run_id)
-        assert "cfg_mlflow_tracking_uri" in run.data.params
+        assert "cfg_mlflow_tracking_uri" not in run.data.params
         assert "cfg_project_name" in run.data.params
 
     def test_log_dynaconf_config_backwards_compat_path(

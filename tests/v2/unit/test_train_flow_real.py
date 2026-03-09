@@ -138,6 +138,7 @@ class TestTrainingFlowOrchestration:
         monkeypatch.setenv("SPLITS_DIR", str(splits_dir))
         monkeypatch.setenv("CHECKPOINT_DIR", str(tmp_path / "checkpoints"))
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(tmp_path / "mlruns"))
+        monkeypatch.setenv("LOGS_DIR", str(tmp_path / "logs"))
 
         with patch(
             "minivess.orchestration.flows.train_flow.train_one_fold_task",
@@ -169,6 +170,7 @@ class TestTrainingFlowOrchestration:
         ckpt_dir = tmp_path / "vol_checkpoints"
         monkeypatch.setenv("CHECKPOINT_DIR", str(ckpt_dir))
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(tmp_path / "mlruns"))
+        monkeypatch.setenv("LOGS_DIR", str(tmp_path / "logs"))
 
         captured: list[str] = []
 
@@ -203,6 +205,7 @@ class TestTrainingFlowOrchestration:
         monkeypatch.setenv("SPLITS_DIR", str(splits_dir))
         monkeypatch.setenv("CHECKPOINT_DIR", str(tmp_path / "checkpoints"))
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(tmp_path / "mlruns"))
+        monkeypatch.setenv("LOGS_DIR", str(tmp_path / "logs"))
 
         call_count = [0]
 
@@ -235,6 +238,7 @@ class TestTrainingFlowOrchestration:
         monkeypatch.setenv("SPLITS_DIR", str(splits_dir))
         monkeypatch.setenv("CHECKPOINT_DIR", str(tmp_path / "checkpoints"))
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(tmp_path / "mlruns"))
+        monkeypatch.setenv("LOGS_DIR", str(tmp_path / "logs"))
 
         with patch(
             "minivess.orchestration.flows.train_flow.train_one_fold_task",
