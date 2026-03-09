@@ -1,0 +1,57 @@
+# MinIVess MLOps — Custom Falco Security Rules
+#
+# These rules detect anomalous behaviour specific to ML training containers.
+#
+# Activate: docker compose --profile security up falco
+# Reference: https://falco.org/docs/rules/
+#
+# Coverage:
+#   1. Model weight exfiltration — writes to checkpoint paths from unexpected processes
+#   2. Shell spawn in flow container — deserialization / code injection attacks
+#   3. Unexpected outbound connections — data exfiltration via network
+
+- rule: MinIVess checkpoint exfiltration
+  desc: >
+    A process other than the training script connects to a remote destination
+    while /app/checkpoints is in the file descriptor path — potential model weight exfiltration.
+  condition: >
+    container.name startswith "minivess-flow" and
+    (evt.type = connect or evt.type = sendto) and
+    fd.name contains "/app/checkpoints"
+  output: >
+    Possible model checkpoint exfiltration
+    (user=%user.name command=%proc.cmdline container=%container.name file=%fd.name)
+  priority: WARNING
+  tags: [minivess, ml-security, exfiltration]
+
+- rule: MinIVess shell spawned in flow container
+  desc: >
+    A shell process is spawned inside a running flow container.
+    Legitimate flow containers run Python entrypoints only — an unexpected shell
+    indicates deserialization attacks or command injection.
+  condition: >
+    container.name startswith "minivess-flow" and
+    evt.type = execve and
+    (proc.name = bash or proc.name = sh or proc.name = dash) and
+    proc.pname != "run_debug.sh" and
+    proc.pname != "entrypoint.sh"
+  output: >
+    Shell spawned in flow container
+    (user=%user.name shell=%proc.name parent=%proc.pname container=%container.name)
+  priority: CRITICAL
+  tags: [minivess, ml-security, shell-spawn]
+
+- rule: MinIVess unexpected outbound connection
+  desc: >
+    A flow container opens a TCP connection to an IP not in the expected service set.
+    All outbound connections from minivess-flow containers must go to internal services only.
+  condition: >
+    container.name startswith "minivess-flow" and
+    evt.type = connect and
+    fd.typechar = 4 and
+    not fd.rip in (minivess-mlflow, minio, minivess-prefect, postgres)
+  output: >
+    Unexpected outbound connection from flow container
+    (container=%container.name dest=%fd.rip:%fd.rport command=%proc.cmdline)
+  priority: WARNING
+  tags: [minivess, ml-security, network]

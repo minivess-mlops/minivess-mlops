@@ -305,3 +305,22 @@ vector entirely. It is blocked by an upstream NVIDIA Container Toolkit bug on Ub
   user provides strong isolation without rootless mode.
 - **When to revisit**: When NVIDIA CTK releases rootless CDI support for Ubuntu 24.04.
 - **DO NOT attempt workarounds** — they break GPU CDI access and waste GPU hours.
+
+## Falco Runtime Security Monitoring (Optional)
+
+Falco detects anomalous container behaviour in real-time via eBPF kernel tracing.
+
+Activate:
+```bash
+docker compose --env-file .env -f deployment/docker-compose.yml --profile security up falco
+```
+
+Custom ML-specific rules: `deployment/falco/minivess_rules.yaml`
+
+Alerts on:
+- **Model weight exfiltration** — process connecting to remote while accessing `/app/checkpoints`
+- **Shell spawn in flow container** — unexpected bash/sh in a Python-only flow (deserialization attack)
+- **Unexpected outbound connections** — flow container reaches IPs outside the trusted service set
+
+**NOTE: Falco requires `privileged: true`** for eBPF kernel module access.
+All other MinIVess services remain unprivileged (enforced by `test_falco.py`).

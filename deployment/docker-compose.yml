@@ -356,6 +356,33 @@ services:
     restart: unless-stopped
     <<: *common-labels
 
+  # ---------------------------------------------------------------------------
+  # Falco — eBPF runtime security monitoring (profile: security)
+  #
+  # Falco REQUIRES privileged: true for eBPF kernel module access.
+  # All other MinIVess services remain unprivileged (enforced by test_falco.py).
+  #
+  # Activate: docker compose --profile security up falco
+  # Custom rules: deployment/falco/minivess_rules.yaml
+  # Alerts on: model checkpoint exfiltration, shell spawns in flow containers,
+  #            unexpected outbound network connections.
+  # ---------------------------------------------------------------------------
+  falco:
+    image: falcosecurity/falco-no-driver:latest
+    container_name: minivess-falco
+    profiles: ["security"]
+    privileged: true
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - ./falco/minivess_rules.yaml:/etc/falco/rules.d/minivess.yaml:ro
+    environment:
+      FALCO_BPF_PROBE: ""
+    command: ["/usr/bin/falco", "--modern-bpf", "-r", "/etc/falco/rules.d/minivess.yaml"]
+    networks:
+      - minivess
+    restart: "no"
+
 volumes:
   postgres_data:
     driver: local
