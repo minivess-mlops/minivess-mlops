@@ -227,6 +227,7 @@ def train_one_fold_task(
 
     # Build DataConfig (dataset_name required, cache_rate passed to loaders)
     _is_sam3 = model_family_str.startswith("sam3_")
+    _is_sam3_hybrid = model_family_str == "sam3_hybrid"
     # SAM3: each z-slice goes through ViT-32L encoder at 1008×1008 — limit depth
     # to 3 slices and batch=1 to fit on 8 GB GPUs. MONAI's RandCropByPosNegLabeld
     # with num_samples=4 produces 4 crops, so effective batch is 4× — this is fine
@@ -261,11 +262,20 @@ def train_one_fold_task(
     )
 
     # Build TrainingConfig
-    # SAM3: validation with sliding_window_inference is very slow (~2h per epoch
-    # on RTX 2070 Super) because each window requires 3 encoder forward passes
-    # through the 454M-param ViT-32L. Validate every 10 epochs to keep training
-    # practical (50 epochs × 3 folds ≈ 16h with val_interval=10, vs 300h without).
-    val_interval = 10 if _is_sam3 and not debug else 1
+    # Validation interval strategy:
+    # sam3_hybrid: 6.65 GiB model weights → <1 GiB VRAM free for inference.
+    #   SAM3 ViT-32L ALWAYS resizes any patch to 1008×1008, so every inference
+    #   forward pass needs ~5 GiB → OOM on 8 GB GPU. Skip validation in debug mode
+    #   by setting val_interval > training max_epochs (which is 1 in debug mode).
+    # sam3_vanilla: 2.9 GiB model → val_roi=(512,512,3) fits. Validate every 10
+    #   epochs in production (slow inference); every epoch in debug.
+    # Other models: validate every epoch always.
+    if _is_sam3_hybrid and debug:
+        val_interval = max_epochs + 1  # never validate: OOM on 8 GB GPU
+    elif _is_sam3 and not debug:
+        val_interval = 10  # sparse validation in production (slow inference)
+    else:
+        val_interval = 1
     training_config = TrainingConfig(
         max_epochs=1 if debug else max_epochs,
         num_folds=num_folds,
