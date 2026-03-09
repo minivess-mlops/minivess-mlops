@@ -208,13 +208,17 @@ for model in "${MODELS_ARRAY[@]}"; do
   # -T: disable pseudo-TTY; </dev/null: detach container stdin.
   # docker compose run attaches to container stdin by default — without these,
   # it can consume the shell's stdin unexpectedly.
+  # set +e / set -e: suspend errexit so a failed model doesn't abort the entire
+  # loop — each model is independent and we want all models to attempt training.
+  # PIPESTATUS[0] captures docker compose exit code (not tee's).
+  set +e
   run_or_dry "docker compose train ($model)" \
     docker compose -f "$FLOWS_COMPOSE" run --rm -T \
       -e EXPERIMENT="$EXPERIMENT" \
       -e HYDRA_OVERRIDES="$OVERRIDES" \
       train </dev/null 2>&1 | tee "$MODEL_LOG"
-
-  MODEL_STATUS=$?
+  MODEL_STATUS=${PIPESTATUS[0]}
+  set -e
   MODEL_END=$(date +%s)
   MODEL_DUR=$(( (MODEL_END - MODEL_START) / 60 ))
 
@@ -239,13 +243,14 @@ for flow in $FLOWS; do
   FLOW_LOG="$SUMMARY_DIR/logs/${TIMESTAMP}_${flow}.log"
   FLOW_START=$(date +%s)
 
+  set +e
   run_or_dry "docker compose $flow" \
-    docker compose -f "$FLOWS_COMPOSE" run --rm \
+    docker compose -f "$FLOWS_COMPOSE" run --rm -T \
       -e UPSTREAM_EXPERIMENT="$EXPERIMENT" \
       -e EXPERIMENT="$EXPERIMENT" \
-      "$flow" 2>&1 | tee "$FLOW_LOG"
-
-  CHAIN_STATUS=$?
+      "$flow" </dev/null 2>&1 | tee "$FLOW_LOG"
+  CHAIN_STATUS=${PIPESTATUS[0]}
+  set -e
   FLOW_END=$(date +%s)
   FLOW_DUR=$(( (FLOW_END - FLOW_START) / 60 ))
 
