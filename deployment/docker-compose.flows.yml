@@ -21,7 +21,10 @@ x-common-env: &common-env
   PREFECT_API_URL: http://${PREFECT_DOCKER_HOST:-minivess-prefect}:${PREFECT_PORT:-4200}/api
   AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin_secret}
-  MLFLOW_S3_ENDPOINT_URL: http://${MINIO_DOCKER_HOST:-minio}:${MINIO_API_PORT:-9000}
+  # MINIO_DOCKER_HOST uses container name (minivess-minio) since flow containers
+  # reach MinIO via minivess-network (not the infra compose project's internal network).
+  # Service name "minio" only resolves within deployment_default network.
+  MLFLOW_S3_ENDPOINT_URL: http://${MINIO_DOCKER_HOST:-minivess-minio}:${MINIO_API_PORT:-9000}
   # Container-internal artifact paths — defaults match .env.example (Rule #22)
   DATA_DIR: ${DATA_DIR:-/app/data}
   CHECKPOINT_DIR: ${CHECKPOINT_DIR:-/app/checkpoints}

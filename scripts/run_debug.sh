@@ -194,11 +194,15 @@ while IFS= read -r model; do
     OVERRIDES="$OVERRIDES,$USER_OVERRIDES"
   fi
 
+  # -T: disable pseudo-TTY allocation so docker compose run does NOT consume the
+  # while-loop's stdin (the MODELS_TO_TEST herestring). Without -T, docker reads
+  # the remaining model names from stdin, causing the loop to stop after dynunet.
+  # < /dev/null: belt-and-suspenders — explicitly detach container stdin.
   run_or_dry "docker compose train ($model)" \
-    docker compose -f "$FLOWS_COMPOSE" run --rm \
+    docker compose -f "$FLOWS_COMPOSE" run --rm -T \
       -e EXPERIMENT="$EXPERIMENT" \
       -e HYDRA_OVERRIDES="$OVERRIDES" \
-      train 2>&1 | tee "$MODEL_LOG"
+      train </dev/null 2>&1 | tee "$MODEL_LOG"
 
   MODEL_STATUS=$?
   MODEL_END=$(date +%s)
