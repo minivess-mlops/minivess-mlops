@@ -7,13 +7,20 @@ includes mlflow_run_id.
 Uses source-level inspection (ast.parse) and minimal functional tests
 with a temp mlruns directory. No subprocess — all MLflow calls via real API
 with file:// tracking URI.
+
+Refactored (Issue #558): TestDataFlowMlflowFunctional now uses tmp_path fixture
+and monkeypatch.setenv() instead of tempfile.TemporaryDirectory() + direct
+os.environ manipulation, preventing SQLite telemetry lock collisions.
 """
 
 from __future__ import annotations
 
 import ast
-import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pytest
 
 _DATA_FLOW_SRC = Path("src/minivess/orchestration/flows/data_flow.py")
 
@@ -25,11 +32,22 @@ _DATA_FLOW_SRC = Path("src/minivess/orchestration/flows/data_flow.py")
 
 class TestDataFlowMlflowSource:
     def test_data_flow_opens_mlflow_experiment(self) -> None:
-        """data_flow.py must open an MLflow run in 'minivess_data' experiment."""
+        """data_flow.py must open an MLflow run in the minivess_data experiment.
+
+        The experiment name is set via resolve_experiment_name(EXPERIMENT_DATA) so that
+        debug runs land in a separate experiment. We check for the constant name, not
+        the raw string (which lives only in constants.py, not data_flow.py).
+        """
         source = _DATA_FLOW_SRC.read_text(encoding="utf-8")
-        assert "minivess_data" in source, (
-            "run_data_flow() must call mlflow.set_experiment('minivess_data') to "
-            "ensure data engineering runs are discoverable by training_flow via FlowContract."
+        assert "EXPERIMENT_DATA" in source, (
+            "run_data_flow() must use EXPERIMENT_DATA constant (from constants.py) "
+            "via resolve_experiment_name(EXPERIMENT_DATA) so debug runs land in a "
+            "separate experiment. Hard-coding 'minivess_data' string is forbidden "
+            "— use the constant."
+        )
+        assert "resolve_experiment_name" in source, (
+            "run_data_flow() must call resolve_experiment_name(EXPERIMENT_DATA) to "
+            "support MINIVESS_DEBUG_SUFFIX-based experiment isolation."
         )
 
     def test_data_flow_logs_n_volumes(self) -> None:
@@ -96,118 +114,114 @@ class TestDataFlowMlflowSource:
 
 
 class TestDataFlowMlflowFunctional:
-    def _make_data_dir(self, tmp: Path) -> Path:
+    """Functional tests using isolated tmp_path + monkeypatch for each test.
+
+    Using tmp_path fixture + monkeypatch.setenv() instead of
+    tempfile.TemporaryDirectory() + direct os.environ manipulation:
+    - pytest guarantees cleanup of env vars even on test failure
+    - each test gets its own mlruns/ directory (no shared SQLite state)
+    - prevents Prefect/MLflow telemetry SQLite lock collisions (Issue #558)
+    """
+
+    def _make_data_dir(self, tmp_path: Path) -> Path:
         """Create a minimal data directory with images/labels subdirs."""
-        data_dir = tmp / "data"
+        data_dir = tmp_path / "data"
         (data_dir / "images").mkdir(parents=True)
         (data_dir / "labels").mkdir(parents=True)
-        # Create a few fake NIfTI files
         for i in range(3):
             (data_dir / "images" / f"vol_{i:02d}.nii.gz").write_bytes(b"fake")
             (data_dir / "labels" / f"vol_{i:02d}.nii.gz").write_bytes(b"fake")
         return data_dir
 
-    def test_data_flow_result_has_run_id(self) -> None:
+    def test_data_flow_result_has_run_id(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """DataFlowResult.mlflow_run_id must not be None after run_data_flow()."""
-        import os
+        import mlflow
 
         from minivess.orchestration.flows.data_flow import run_data_flow
 
-        with tempfile.TemporaryDirectory() as tmp_str:
-            tmp = Path(tmp_str)
-            tracking_uri = f"file://{tmp}/mlruns"
-            os.environ["MLFLOW_TRACKING_URI"] = tracking_uri
-            os.environ["SPLITS_OUTPUT_DIR"] = str(tmp / "splits")
-            data_dir = self._make_data_dir(tmp)
-            try:
-                result = run_data_flow(data_dir=data_dir, n_folds=2)
-            finally:
-                del os.environ["MLFLOW_TRACKING_URI"]
-                del os.environ["SPLITS_OUTPUT_DIR"]
+        tracking_uri = str(tmp_path / "mlruns")
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", tracking_uri)
+        monkeypatch.setenv("SPLITS_OUTPUT_DIR", str(tmp_path / "splits"))
+        monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
+        mlflow.set_tracking_uri(tracking_uri)
 
-            assert result.mlflow_run_id is not None, (
-                "DataFlowResult.mlflow_run_id must be set after run_data_flow(). "
-                "Open an MLflow run in run_data_flow() and store the run_id."
-            )
+        data_dir = self._make_data_dir(tmp_path)
+        result = run_data_flow(data_dir=data_dir, n_folds=2)
 
-    def test_data_flow_run_in_correct_experiment(self) -> None:
+        assert result.mlflow_run_id is not None, (
+            "DataFlowResult.mlflow_run_id must be set after run_data_flow(). "
+            "Open an MLflow run in run_data_flow() and store the run_id."
+        )
+
+    def test_data_flow_run_in_correct_experiment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """MLflow run from run_data_flow() must be in 'minivess_data' experiment."""
-        import os
-
         import mlflow
 
         from minivess.orchestration.flows.data_flow import run_data_flow
 
-        with tempfile.TemporaryDirectory() as tmp_str:
-            tmp = Path(tmp_str)
-            tracking_uri = f"file://{tmp}/mlruns"
-            os.environ["MLFLOW_TRACKING_URI"] = tracking_uri
-            os.environ["SPLITS_OUTPUT_DIR"] = str(tmp / "splits")
-            data_dir = self._make_data_dir(tmp)
-            try:
-                result = run_data_flow(data_dir=data_dir, n_folds=2)
-            finally:
-                del os.environ["MLFLOW_TRACKING_URI"]
-                del os.environ["SPLITS_OUTPUT_DIR"]
+        tracking_uri = str(tmp_path / "mlruns")
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", tracking_uri)
+        monkeypatch.setenv("SPLITS_OUTPUT_DIR", str(tmp_path / "splits"))
+        monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
+        # Ensure no debug suffix so experiment name is exactly 'minivess_data'
+        monkeypatch.delenv("MINIVESS_DEBUG_SUFFIX", raising=False)
+        mlflow.set_tracking_uri(tracking_uri)
 
-            run_id = result.mlflow_run_id
-            mlflow.set_tracking_uri(tracking_uri)
-            run = mlflow.get_run(run_id)
-            experiment = mlflow.get_experiment(run.info.experiment_id)
-            assert experiment.name == "minivess_data", (
-                f"Run must be in 'minivess_data' experiment, got: {experiment.name!r}"
-            )
+        data_dir = self._make_data_dir(tmp_path)
+        result = run_data_flow(data_dir=data_dir, n_folds=2)
 
-    def test_data_flow_logs_n_volumes_param(self) -> None:
+        run = mlflow.get_run(result.mlflow_run_id)
+        experiment = mlflow.get_experiment(run.info.experiment_id)
+        assert experiment.name == "minivess_data", (
+            f"Run must be in 'minivess_data' experiment, got: {experiment.name!r}"
+        )
+
+    def test_data_flow_logs_n_volumes_param(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """MLflow run must have data_n_volumes logged as a param."""
-        import os
-
         import mlflow
 
         from minivess.orchestration.flows.data_flow import run_data_flow
 
-        with tempfile.TemporaryDirectory() as tmp_str:
-            tmp = Path(tmp_str)
-            tracking_uri = f"file://{tmp}/mlruns"
-            os.environ["MLFLOW_TRACKING_URI"] = tracking_uri
-            os.environ["SPLITS_OUTPUT_DIR"] = str(tmp / "splits")
-            data_dir = self._make_data_dir(tmp)
-            try:
-                result = run_data_flow(data_dir=data_dir, n_folds=2)
-            finally:
-                del os.environ["MLFLOW_TRACKING_URI"]
-                del os.environ["SPLITS_OUTPUT_DIR"]
+        tracking_uri = str(tmp_path / "mlruns")
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", tracking_uri)
+        monkeypatch.setenv("SPLITS_OUTPUT_DIR", str(tmp_path / "splits"))
+        monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
+        mlflow.set_tracking_uri(tracking_uri)
 
-            mlflow.set_tracking_uri(tracking_uri)
-            run = mlflow.get_run(result.mlflow_run_id)
-            assert "data_n_volumes" in run.data.params, (
-                f"MLflow run must have data_n_volumes param. "
-                f"Found params: {list(run.data.params.keys())}"
-            )
+        data_dir = self._make_data_dir(tmp_path)
+        result = run_data_flow(data_dir=data_dir, n_folds=2)
 
-    def test_data_flow_run_has_flow_name_tag(self) -> None:
-        """MLflow run from run_data_flow() must have flow_name='data' tag."""
-        import os
+        run = mlflow.get_run(result.mlflow_run_id)
+        assert "data_n_volumes" in run.data.params, (
+            f"MLflow run must have data_n_volumes param. "
+            f"Found params: {list(run.data.params.keys())}"
+        )
 
+    def test_data_flow_run_has_flow_name_tag(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """MLflow run from run_data_flow() must have flow_name='data-flow' tag."""
         import mlflow
 
         from minivess.orchestration.flows.data_flow import run_data_flow
 
-        with tempfile.TemporaryDirectory() as tmp_str:
-            tmp = Path(tmp_str)
-            tracking_uri = f"file://{tmp}/mlruns"
-            os.environ["MLFLOW_TRACKING_URI"] = tracking_uri
-            os.environ["SPLITS_OUTPUT_DIR"] = str(tmp / "splits")
-            data_dir = self._make_data_dir(tmp)
-            try:
-                result = run_data_flow(data_dir=data_dir, n_folds=2)
-            finally:
-                del os.environ["MLFLOW_TRACKING_URI"]
-                del os.environ["SPLITS_OUTPUT_DIR"]
+        tracking_uri = str(tmp_path / "mlruns")
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", tracking_uri)
+        monkeypatch.setenv("SPLITS_OUTPUT_DIR", str(tmp_path / "splits"))
+        monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
+        mlflow.set_tracking_uri(tracking_uri)
 
-            mlflow.set_tracking_uri(tracking_uri)
-            run = mlflow.get_run(result.mlflow_run_id)
-            assert run.data.tags.get("flow_name") == "data-flow", (
-                f"MLflow run must have flow_name='data-flow' tag (FLOW_NAME_DATA constant). "
-                f"Found tags: {run.data.tags}"
-            )
+        data_dir = self._make_data_dir(tmp_path)
+        result = run_data_flow(data_dir=data_dir, n_folds=2)
+
+        run = mlflow.get_run(result.mlflow_run_id)
+        assert run.data.tags.get("flow_name") == "data-flow", (
+            f"MLflow run must have flow_name='data-flow' tag (FLOW_NAME_DATA constant). "
+            f"Found tags: {run.data.tags}"
+        )

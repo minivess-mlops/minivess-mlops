@@ -37,17 +37,21 @@ class TestDynaconfSettingsSingleton:
         settings = get_settings()
         assert settings.PROJECT_NAME == "minivess-mlops-v2"
 
-    def test_mlflow_tracking_uri_is_nonempty_string(
+    def test_resolve_tracking_uri_reads_env_var(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Settings should contain a non-empty MLFLOW_TRACKING_URI."""
-        monkeypatch.delenv("ENV_FOR_DYNACONF", raising=False)
-        from minivess.config.settings import clear_settings_cache, get_settings
+        """resolve_tracking_uri() must return the MLFLOW_TRACKING_URI env var.
 
-        clear_settings_cache()
-        settings = get_settings()
-        assert isinstance(settings.MLFLOW_TRACKING_URI, str)
-        assert len(settings.MLFLOW_TRACKING_URI) > 0
+        Per Rule #22, MLFLOW_TRACKING_URI is NOT a Dynaconf setting — it is read
+        directly from the environment via resolve_tracking_uri() (Issue #541).
+        """
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow-unit-test:5000")
+        from minivess.observability.tracking import resolve_tracking_uri
+
+        uri = resolve_tracking_uri()
+        assert isinstance(uri, str)
+        assert len(uri) > 0
+        assert uri == "http://mlflow-unit-test:5000"
 
     def test_debug_exists_and_is_bool(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Settings should contain DEBUG as a boolean."""
