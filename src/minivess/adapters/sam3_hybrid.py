@@ -159,17 +159,21 @@ class Sam3HybridAdapter(ModelAdapter):
         Parameters
         ----------
         images:
-            Input 3D volume (B, C, D, H, W).
+            Input 3D volume (B, C, H, W, D) — MONAI depth-last convention.
 
         Returns
         -------
         SAM features (B, 256, D, H_feat, W_feat).
         """
-        b, c, d, h, w = images.shape
+        # MONAI uses (B, C, H, W, D) — depth is the LAST dimension.
+        # Wrong unpacking (b,c,d,h,w) causes 21× more encoder calls on 8 GB GPU
+        # (64 instead of 3 for patch=(64,64,3)), accumulating ~5 GiB of features
+        # before torch.stack → OOM. See src/minivess/adapters/CLAUDE.md.
+        b, c, h, w, d = images.shape
         slice_features: list[Tensor] = []
 
         for z_idx in range(d):
-            slice_2d = images[:, :, z_idx, :, :]
+            slice_2d = images[:, :, :, :, z_idx]  # (B, C, H, W)
             fpn_feat = self.sam_backbone.extract_fpn_features(slice_2d)
             slice_features.append(fpn_feat)
 
