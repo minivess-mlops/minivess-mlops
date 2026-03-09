@@ -253,3 +253,55 @@ See `deployment/seccomp/README.md` for the full workflow:
 ```bash
 make seccomp-audit-train  # Run train flow with audit profile
 ```
+
+## Network Isolation Strategy
+
+All MinIVess services communicate over `minivess-network` (custom user-defined bridge,
+pre-created with `docker network create minivess-network`). Flow containers reach infra
+services by container name:
+
+```
+[train/hpo/analyze/post_training]
+    ──► minivess-mlflow:5000   (MLflow experiment tracking + artifact registry)
+    ──► minio:9000             (MinIO S3-compatible artifact store)
+    ──► minivess-prefect:4200  (Prefect orchestration API)
+    ──► postgres:5432          (PostgreSQL — Optuna HPO storage)
+
+[dashboard/qa/biostatistics]
+    ──► minivess-mlflow:5000   (read-only run queries)
+    ──► minio:9000             (artifact download)
+
+[annotation]
+    ──► minivess-mlflow:5000
+    ──► minio:9000
+
+All services share: minivess-network (external bridge, created once)
+```
+
+### Why `icc: false` Is BANNED
+
+Setting `icc: false` in `/etc/docker/daemon.json` (CIS Docker Benchmark 2.1) is
+**INCOMPATIBLE** with this project and must never be set.
+
+**Reason**: `icc: false` disables inter-container communication on the default bridge.
+While it technically only affects the default bridge, some Docker Compose versions apply
+daemon-level `icc: false` to all networks including `minivess-network`. This breaks:
+- MLflow tracking URI → 403 / connection refused from flow containers
+- MinIO artifact uploads → silent boto3 connection failures
+- Prefect heartbeats → flow runs stall with no error message
+
+**Correct isolation**: explicit `networks:` declarations per service (already in place).
+Each service only joins the networks it actually needs.
+
+## Future Hardening (Upstream Blocked)
+
+### Rootless Docker — Blocked (#549)
+
+Rootless Docker (daemon without root socket) eliminates the host root socket attack
+vector entirely. It is blocked by an upstream NVIDIA Container Toolkit bug on Ubuntu 24.04:
+- **Blocker**: [NVIDIA CTK issue #434](https://github.com/NVIDIA/nvidia-container-toolkit/issues/434)
+  — CDI spec generator does not produce correct rootless specs on Ubuntu 24.04.
+- **Current mitigation**: `cap_drop: ALL` + `no-new-privileges: true` + non-root container
+  user provides strong isolation without rootless mode.
+- **When to revisit**: When NVIDIA CTK releases rootless CDI support for Ubuntu 24.04.
+- **DO NOT attempt workarounds** — they break GPU CDI access and waste GPU hours.
