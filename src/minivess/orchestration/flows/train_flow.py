@@ -348,7 +348,11 @@ def train_one_fold_task(
     # regardless of input size, so larger patches cost the same per-window
     # but reduce window count by ~121× (11×11 spatial grid eliminated).
     # sw_batch_size=1 for SAM3 to keep VRAM low with large validation patches.
-    val_roi = (512, 512, 3) if _is_sam3 else data_config.patch_size
+    # Debug mode exception: val_roi=(512,512,3) OOMs on 8 GB GPU alongside 6.65 GiB
+    # model weights (needs 5+ GiB extra). In debug mode, use patch_size for val_roi
+    # to avoid OOM — debug runs don't need production-quality validation metrics.
+    _sam3_val_roi = patch_size if debug else (512, 512, 3)
+    val_roi = _sam3_val_roi if _is_sam3 else data_config.patch_size
     val_sw_batch = 1 if _is_sam3 else 4
     trainer = SegmentationTrainer(
         model,
