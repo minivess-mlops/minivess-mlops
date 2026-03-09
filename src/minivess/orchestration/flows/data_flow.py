@@ -19,6 +19,9 @@ from prefect import flow, task
 
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_DATA
+from minivess.orchestration.flow_contract import (
+    FlowContract,  # noqa: F401  # used via log_completion_safe
+)
 from minivess.orchestration.mlflow_helpers import log_completion_safe
 
 if TYPE_CHECKING:

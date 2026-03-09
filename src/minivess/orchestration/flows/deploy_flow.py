@@ -364,7 +364,7 @@ def deploy_flow(
     except Exception:
         log.warning("Failed to log deploy_flow to MLflow", exc_info=True)
 
-    # Log flow completion (best-effort, non-blocking)
+    # Log flow completion (best-effort, non-blocking) via FlowContract.log_flow_completion()
     log_completion_safe(
         flow_name="deploy-flow",
         tracking_uri=_tracking_uri,
