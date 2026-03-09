@@ -12,12 +12,20 @@ Layer 3: Dockerfile.{flow}                        (thin — scripts, env, CMD on
 
 ## Building
 
+Dockerfile.base uses a **multi-stage build** (H3/H4 hardening):
+- **builder** stage: `nvidia/cuda:12.6.3-devel-ubuntu24.04` — compiles packages
+- **runner** stage: `nvidia/cuda:12.6.3-runtime-ubuntu24.04` — ships only the runtime
+
+The builder stage installs all Python deps into `/app/.venv` using BuildKit cache
+mounts. The runner stage copies only the `.venv`, `src/`, and `configs/` directories —
+no compiler toolchain, no uv binary, no build artifacts in production.
+
 ```bash
 # Base image (rebuild when pyproject.toml or Dockerfile.base changes):
-docker build -t minivess-base:latest -f deployment/docker/Dockerfile.base .
+DOCKER_BUILDKIT=1 docker build -t minivess-base:latest -f deployment/docker/Dockerfile.base .
 
 # Match host UID for bind-mount dev:
-docker build --build-arg UID=$(id -u) --build-arg GID=$(id -g) \
+DOCKER_BUILDKIT=1 docker build --build-arg UID=$(id -u) --build-arg GID=$(id -g) \
   -t minivess-base:latest -f deployment/docker/Dockerfile.base .
 ```
 
@@ -142,19 +150,106 @@ Makefile target that invokes `docker compose` MUST include `--env-file`.
 
 **NEVER** tell users to `export HF_TOKEN=...` — all secrets belong in `.env`.
 
+## Required .env Variables (No Default — Must Be Set)
+
+```
+MODEL_CACHE_HOST_PATH=/your/local/model/cache
+```
+
+`MODEL_CACHE_HOST_PATH` is required. It has **no fallback** in docker-compose.flows.yml
+(removed 2026-03-09, was `/home/petteri/download_cache` — machine-specific = broken on other machines).
+Copy `.env.example` → `.env` and set this to your local model weight cache directory.
+The cache persists across container restarts, preventing re-downloading SAM3 (~9 GB) etc.
+
+## One-Time Stack Setup
+
+After first `docker compose up`, run these initialization steps:
+
+```bash
+# 1. Initialize named volume ownership (fixes "permission denied" in containers)
+make init-volumes
+
+# MinIO buckets are created automatically by the minio-init service.
+# If minio-init fails, create buckets manually:
+docker compose exec minio mc mb --ignore-existing minio/mlflow-artifacts
+```
+
+## Makefile Targets
+
+```bash
+make init-volumes        # Fix Docker named volume ownership (run once after first up)
+make scan                # Trivy vulnerability scan on all minivess-* images (CRITICAL+HIGH)
+make sbom                # Generate CycloneDX SBOM for minivess-base
+make seccomp-audit-train # Run train flow with seccomp audit profile (syscall discovery)
+make install-trivy       # Install Trivy scanner to /usr/local/bin
+```
+
 ## Running Flows
+
+**`--shm-size` is REQUIRED for GPU flows (train, hpo, hpo-worker)**
+
+`docker compose run` ignores `shm_size` from the compose file — it must be passed
+explicitly. Without it, MONAI 3D DataLoader uses /dev/shm for IPC and triggers a
+Bus error (SIGBUS) on large batch sizes.
 
 ```bash
 # Start infrastructure first:
 docker compose -f deployment/docker-compose.yml --profile dev up -d
 
-# Run a flow:
-docker compose -f deployment/docker-compose.flows.yml run --rm \
+# Run a GPU flow (note --shm-size 8g):
+docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm \
+  --shm-size 8g \
   -e EXPERIMENT=debug_single_model train
 
+# CPU flows (no --shm-size needed):
+docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm \
+  -e EXPERIMENT=debug_single_model data
+
 # With Hydra overrides:
-docker compose -f deployment/docker-compose.flows.yml run --rm \
+docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm \
+  --shm-size 8g \
   -e EXPERIMENT=debug_single_model \
   -e HYDRA_OVERRIDES="max_epochs=5,model=sam3_vanilla" \
   train
+```
+
+## CVE-2025-23266 — NVIDIA CTK Version Check
+
+CVE-2025-23266 (CVSS 9.0): container-to-host escape in NVIDIA Container Toolkit
+versions < 1.17.8. Before running GPU containers, verify the installed version:
+
+```bash
+nvidia-ctk --version
+# Expected: v1.17.8 or later
+```
+
+If the version is below 1.17.8, upgrade before running any GPU workloads:
+```bash
+# Ubuntu:
+sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+# Verify:
+nvidia-ctk --version
+```
+
+## Image Scanning (MLSecOps)
+
+```bash
+make scan          # CRITICAL+HIGH CVE scan on all built images (--ignore-unfixed)
+make sbom          # CycloneDX SBOM for minivess-base (supply-chain transparency)
+make install-trivy # Install Trivy scanner if not present
+```
+
+## Seccomp Profiles
+
+Per-flow seccomp allowlist profiles reduce the attack surface of containers by
+restricting available syscalls to only those the flow actually uses.
+
+See `deployment/seccomp/README.md` for the full workflow:
+1. Run flow with `deployment/seccomp/audit.json` (SCMP_ACT_LOG) to discover syscalls
+2. Extract syscall list from audit log
+3. Build per-flow allowlist profile (SCMP_ACT_ERRNO for unlisted)
+4. Apply with `--security-opt seccomp=deployment/seccomp/{flow}.json`
+
+```bash
+make seccomp-audit-train  # Run train flow with audit profile
 ```

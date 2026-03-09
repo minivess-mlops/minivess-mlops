@@ -71,6 +71,12 @@ repos:
         always_run: false
         files: '(\.py$|pyproject\.toml|uv\.lock)'
 
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint
+        args: [--config, .hadolint.yaml]
+
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.22.1
     hooks:

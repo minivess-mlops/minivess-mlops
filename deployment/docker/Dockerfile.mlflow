@@ -1,0 +1,17 @@
+# MinIVess MLOps — Custom MLflow image with baked-in PostgreSQL + S3 drivers
+#
+# Bakes psycopg2-binary and boto3 at build time to avoid pip install at startup.
+# Eliminates the 15-30s startup delay and makes the image reproducible + air-gap safe.
+#
+# Build: docker compose -f deployment/docker-compose.yml build mlflow
+# Base:  ghcr.io/mlflow/mlflow:v3.10.0
+
+FROM ghcr.io/mlflow/mlflow:v3.10.0
+
+# Bake in PostgreSQL + S3/MinIO drivers at build time.
+# Pinned to specific versions for reproducibility.
+# psycopg2-binary: PostgreSQL backend for --backend-store-uri postgresql://...
+# boto3: S3/MinIO artifact storage for --default-artifact-root s3://...
+RUN pip install --no-cache-dir \
+    psycopg2-binary==2.9.10 \
+    boto3==1.34.162

@@ -19,7 +19,10 @@ from prefect import flow, task
 
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_DATA
-from minivess.orchestration.flow_contract import FlowContract
+from minivess.orchestration.flow_contract import (
+    FlowContract,  # noqa: F401  # used via log_completion_safe
+)
+from minivess.orchestration.mlflow_helpers import log_completion_safe
 
 if TYPE_CHECKING:
     from minivess.data.splits import FoldSplit
@@ -503,7 +506,7 @@ def run_data_flow(
         # Step 4b: Serialize splits to JSON for inter-flow handoff
         from pathlib import Path as _Path
 
-        splits_dir = _Path(os.environ.get("SPLITS_DIR", "/app/configs/splits"))
+        splits_dir = _Path(os.environ.get("SPLITS_OUTPUT_DIR", "/app/configs/splits"))
         splits_path = serialize_splits_task(splits, splits_dir)
 
     # Step 5: External datasets
@@ -539,15 +542,12 @@ def run_data_flow(
     except Exception:
         logger.warning("Failed to open/finalize MLflow data run", exc_info=True)
 
-    # --- FlowContract: tag run and log completion ---
-    # This marks the run as FLOW_COMPLETE so training_flow can discover it
-    # via FlowContract.find_upstream_run(flow_name="data-flow").
-    if mlflow_run_id is not None:
-        try:
-            contract = FlowContract(tracking_uri=tracking_uri)
-            contract.log_flow_completion(flow_name="data-flow", run_id=mlflow_run_id)
-        except Exception:
-            logger.warning("Failed to log flow completion — non-fatal", exc_info=True)
+    # Log flow completion (best-effort, non-blocking)
+    log_completion_safe(
+        flow_name="data-flow",
+        tracking_uri=tracking_uri,
+        run_id=mlflow_run_id,
+    )
 
     logger.info("Data flow complete: %d pairs, quality=%s", len(pairs), quality_passed)
     return DataFlowResult(

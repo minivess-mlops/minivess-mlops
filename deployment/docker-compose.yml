@@ -18,8 +18,6 @@ x-common-labels: &common-labels
   labels:
     project: minivess-mlops
     managed-by: docker-compose
-  networks:
-    - minivess
 
 services:
   # ===========================================================================
@@ -34,7 +32,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-minivess}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minivess_secret}
       POSTGRES_DB: ${POSTGRES_DB_MLFLOW:-mlflow}
-      POSTGRES_MULTIPLE_DATABASES: ${POSTGRES_DB_MLFLOW:-mlflow},${POSTGRES_DB_PREFECT:-prefect},${POSTGRES_DB_LANGFUSE:-langfuse},${POSTGRES_DB_OPTUNA:-optuna}
+      POSTGRES_MULTIPLE_DATABASES: ${POSTGRES_DB_MLFLOW:-mlflow},${POSTGRES_DB_LANGFUSE:-langfuse}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -49,7 +47,7 @@ services:
     <<: *common-labels
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-02-08T19-54-51Z
     container_name: minivess-minio
     profiles: ["dev", "monitoring", "full"]
     command: server /data --console-address ":${MINIO_CONSOLE_PORT:-9001}"
@@ -70,20 +68,42 @@ services:
     restart: unless-stopped
     <<: *common-labels
 
-  mlflow:
-    image: ghcr.io/mlflow/mlflow:v3.10.0
-    container_name: minivess-mlflow
+  # minio-init: auto-create required buckets on stack startup.
+  # Runs once after MinIO is healthy, then exits (restart: "no").
+  # Fixes: MLflow artifact logging failure when mlflow-artifacts bucket doesn't exist.
+  minio-init:
+    image: minio/mc:RELEASE.2025-02-08T19-54-51Z
+    container_name: minivess-minio-init
     profiles: ["dev", "monitoring", "full"]
-    # Install PostgreSQL and S3/MinIO drivers at startup (not in base image).
-    # NOTE: Use YAML list form — YAML ">" folded scalar converts indented newlines to spaces,
-    # causing "sh -c" to run "mlflow server" with NO args (all defaults: host=127.0.0.1).
-    # List form passes the shell script as a single string to /bin/sh -c correctly.
+    depends_on:
+      minio:
+        condition: service_healthy
     entrypoint:
       - /bin/sh
       - -c
       - >-
-        pip install --quiet psycopg2-binary boto3 &&
-        mlflow server
+        mc alias set local http://minivess-minio:9000
+        $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+        mc mb --ignore-existing local/${MLFLOW_ARTIFACT_BUCKET:-mlflow-artifacts} &&
+        mc mb --ignore-existing local/model-registry &&
+        echo 'MinIO buckets initialized successfully'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin_secret}
+    networks:
+      - minivess
+    restart: "no"
+    <<: *common-labels
+
+  mlflow:
+    build:
+      context: ..
+      dockerfile: deployment/docker/Dockerfile.mlflow
+    image: minivess-mlflow:v3.10.0
+    container_name: minivess-mlflow
+    profiles: ["dev", "monitoring", "full"]
+    command: >
+      mlflow server
         --backend-store-uri postgresql://${POSTGRES_USER:-minivess}:${POSTGRES_PASSWORD:-minivess_secret}@${POSTGRES_DOCKER_HOST:-postgres}:5432/${POSTGRES_DB_MLFLOW:-mlflow}
         --default-artifact-root s3://${MLFLOW_ARTIFACT_BUCKET:-mlflow-artifacts}/
         --host 0.0.0.0
@@ -92,9 +112,6 @@ services:
       MLFLOW_S3_ENDPOINT_URL: http://${MINIO_DOCKER_HOST:-minio}:${MINIO_API_PORT:-9000}
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin_secret}
-      # MLflow 3.x security middleware — allow connections from Docker network (not just localhost)
-      # The correct env var is MLFLOW_SERVER_ALLOWED_HOSTS (from mlflow/server/security_utils.py)
-      MLFLOW_SERVER_ALLOWED_HOSTS: "*"
     ports:
       - "${MLFLOW_PORT:-5000}:5000"
     volumes:
@@ -312,8 +329,3 @@ volumes:
     driver: local
   ollama_data:
     driver: local
-
-networks:
-  minivess:
-    external: true
-    name: minivess-network

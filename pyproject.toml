@@ -339,6 +339,7 @@ markers = [
     "requires_docker: Tests requiring a running Docker daemon",
     "requires_train_image: Tests requiring minivess-train Docker image built",
     "gpu_required: Tests requiring a physical CUDA GPU",
+    "security_audit: Security posture checks (warnings, not hard failures)",
 ]
 filterwarnings = [
     "error",
