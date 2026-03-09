@@ -170,6 +170,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/*" = ["E402"]  # sys.path manipulation requires imports after path setup
+"tests/*" = ["TC003"]   # Path used at runtime in test bodies (not annotation-only)
 
 [tool.ruff.lint.isort]
 known-first-party = ["minivess"]

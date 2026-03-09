@@ -39,12 +39,9 @@ class ModelMergingPlugin:
                 f"Invalid merge method: {method!r}. Must be one of {sorted(_VALID_METHODS)}"
             )
 
-        merge_pairs = plugin_input.config.get("merge_pairs")
-        if merge_pairs:
-            # Need metadata to match categories to checkpoints
-            return errors
-
-        # Default: need exactly 2 checkpoints
+        # Always require at least 2 checkpoints regardless of merge_pairs config.
+        # Previously returned early when merge_pairs was truthy, silently skipping
+        # this check — causing IndexError in execute(). Fix for #535.
         if len(plugin_input.checkpoint_paths) < 2:
             errors.append(
                 f"Model merging needs at least 2 checkpoints (one pair), "
@@ -53,6 +50,13 @@ class ModelMergingPlugin:
         return errors
 
     def execute(self, plugin_input: PluginInput) -> PluginOutput:
+        if len(plugin_input.checkpoint_paths) < 2:
+            msg = (
+                f"Model merging requires at least 2 checkpoints, "
+                f"got {len(plugin_input.checkpoint_paths)}. "
+                "Call validate_inputs() before execute()."
+            )
+            raise ValueError(msg)
         config = plugin_input.config
         method: str = config.get("method", "slerp")
         t: float = config.get("t", 0.5)
