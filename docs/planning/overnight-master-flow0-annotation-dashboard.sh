@@ -36,6 +36,8 @@ LOG_DIR="/tmp/minivess-overnight"
 SKIP_TO="${SKIP_TO:-1}"
 CHILD_TIMEOUT_SEC="${CHILD_TIMEOUT_SEC:-7200}"   # 2h default; override for longer plans
 BASE_BRANCH="main"
+FAILED_CHILDREN=()            # accumulate failures; script continues to next child
+SKIP_END="${SKIP_END:-999}"   # set to N to stop after child N (e.g. re-run just child 2)
 
 mkdir -p "${LOG_DIR}"
 
@@ -59,19 +61,28 @@ start_heartbeat() {
   echo $!
 }
 
-# ── Watchdog: STALL WARNING if log is 0 bytes 10 min after start ─────────────
+# ── Watchdog: warn at 10 min, auto-kill at 20 min if log still empty ─────────
+# STALL_KILL_MIN: minutes of zero-byte log before auto-kill (default 20)
+
+STALL_KILL_MIN="${STALL_KILL_MIN:-20}"
 
 start_watchdog() {
   local log_file="$1"
   local child_num="$2"
-  ( sleep 600
+  local claude_pid="$3"
+  ( sleep 600   # first check at 10 min
+    local stall_count=0
     while true; do
       local bytes
       bytes=$(wc -c < "${log_file}" 2>/dev/null || echo 0)
       if [ "${bytes}" -lt 1 ]; then
-        log "⚠ STALL WARNING: child-${child_num} log still empty — claude may be frozen!"
-        log "  Claude PIDs: $(pgrep -f 'claude.*dangerously' | tr '\n' ' ' || echo none)"
-        log "  Kill & resume: SKIP_TO=${child_num} $0"
+        stall_count=$(( stall_count + 1 ))
+        log "⚠ STALL WARNING #${stall_count}: child-${child_num} log empty for $(( 10 + stall_count - 1 ))m"
+        if [ "${stall_count}" -ge "${STALL_KILL_MIN}" ]; then
+          log "✂ AUTO-KILL: child-${child_num} stalled ${STALL_KILL_MIN}m with 0 bytes — killing PID ${claude_pid}"
+          kill "${claude_pid}" 2>/dev/null || true
+          break
+        fi
       else
         log "♥ watchdog: child-${child_num} log ${bytes} bytes — alive"
       fi
@@ -92,6 +103,10 @@ run_child() {
 
   if [ "${child_num}" -lt "${SKIP_TO}" ]; then
     log "SKIP: Child ${child_num} (${description}) — SKIP_TO=${SKIP_TO}"
+    return 0
+  fi
+  if [ "${child_num}" -gt "${SKIP_END}" ]; then
+    log "SKIP: Child ${child_num} (${description}) — SKIP_END=${SKIP_END}"
     return 0
   fi
 
@@ -117,9 +132,8 @@ run_child() {
   local start_time
   start_time=$(date +%s)
 
-  local heartbeat_pid watchdog_pid
+  local heartbeat_pid watchdog_pid claude_pid
   heartbeat_pid=$(start_heartbeat "${child_num}")
-  watchdog_pid=$(start_watchdog "${log_file}" "${child_num}")
 
   local exit_code=0
 
@@ -183,6 +197,10 @@ FORBIDDEN (each is a violation — do not do any of these):
     | jq -rj 'select(.type=="stream_event" and (.event.delta.type?=="text_delta")) | .event.delta.text' \
     || exit_code=$?
 
+  # Get claude PID after it starts, pass to watchdog (best-effort)
+  claude_pid=$(pgrep -f 'claude.*dangerously' | tail -1 || echo 0)
+  watchdog_pid=$(start_watchdog "${log_file}" "${child_num}" "${claude_pid}")
+
   kill "${heartbeat_pid}" "${watchdog_pid}" 2>/dev/null || true
   wait "${heartbeat_pid}" "${watchdog_pid}" 2>/dev/null || true
 
@@ -195,15 +213,13 @@ FORBIDDEN (each is a violation — do not do any of these):
     log "DONE: Child ${child_num} — ${description}"
     log "  Duration: ${duration}s ($(( duration / 60 ))m)  Log: ${log_bytes} bytes"
   elif [ "${exit_code}" -eq 124 ]; then
-    log "TIMEOUT: Child ${child_num} — hit ${CHILD_TIMEOUT_SEC}s limit"
+    log "TIMEOUT: Child ${child_num} — hit ${CHILD_TIMEOUT_SEC}s limit — skipping to next child"
     log "  Partial log: ${log_file} (${log_bytes} bytes)"
-    log "  Resume: SKIP_TO=${child_num} $0"
-    exit 1
+    FAILED_CHILDREN+=("${child_num}:TIMEOUT:${description}")
   else
-    log "FAILED: Child ${child_num} — exit=${exit_code} (${duration}s)"
+    log "FAILED: Child ${child_num} — exit=${exit_code} (${duration}s) — skipping to next child"
     log "  Log: ${log_file} (${log_bytes} bytes)"
-    log "  Resume: SKIP_TO=${child_num} $0"
-    exit "${exit_code}"
+    FAILED_CHILDREN+=("${child_num}:FAILED(${exit_code}):${description}")
   fi
 
   log "Pausing 30s between sessions (Node.js GC)..."
@@ -261,7 +277,20 @@ run_child 3 \
 # Post-run summary
 # =============================================================================
 log_sep
-log "ALL CHILDREN COMPLETE"
+log "ALL CHILDREN ATTEMPTED"
+if [ "${#FAILED_CHILDREN[@]}" -eq 0 ]; then
+  log "ALL CHILDREN: ✓ succeeded"
+else
+  log "SKIPPED/FAILED children (${#FAILED_CHILDREN[@]}):"
+  for entry in "${FAILED_CHILDREN[@]}"; do
+    log "  ✗ ${entry}"
+  done
+  log "Re-run skipped children individually:"
+  for entry in "${FAILED_CHILDREN[@]}"; do
+    num="${entry%%:*}"
+    log "  SKIP_TO=${num} SKIP_END=${num} $0"
+  done
+fi
 log_sep
 
 log "Open PRs:"
