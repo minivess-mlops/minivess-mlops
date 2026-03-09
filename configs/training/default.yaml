@@ -5,3 +5,6 @@ compute: gpu_low
 memory_limit_gb: 24
 monitor_interval: 10
 max_epochs: 100
+# patch_size: null means "use model-adaptive default" (set by train_flow.py per model family).
+# Override per-experiment: patch_size=[32,32,3] for sam3_hybrid on 8 GB GPU.
+patch_size: null

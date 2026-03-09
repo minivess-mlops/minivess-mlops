@@ -232,8 +232,10 @@ def train_one_fold_task(
     # with num_samples=4 produces 4 crops, so effective batch is 4× — this is fine
     # with small patch depth.
     default_patch = (64, 64, 3) if _is_sam3 else (64, 64, 16)
-    patch_size: tuple[int, int, int] = tuple(  # type: ignore[assignment]
-        config.get("patch_size", default_patch)
+    # patch_size=null in config means "use model-adaptive default" (set above).
+    _patch_raw = config.get("patch_size")
+    patch_size: tuple[int, int, int] = (  # type: ignore[assignment]
+        default_patch if _patch_raw is None else tuple(_patch_raw)
     )
     if _is_sam3:
         batch_size = min(batch_size, 1)
