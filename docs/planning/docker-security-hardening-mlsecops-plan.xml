@@ -1,0 +1,942 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MinIVess MLOps — Docker Security Hardening & MLSecOps Implementation Plan
+  Branch: feat/docker-hardening
+  Created: 2026-03-09
+  Research report: docs/planning/docker-security-hardening-mlsecops-report.md
+  GitHub issue: #537 (multi-tier Docker optimization — tracked separately, P2)
+
+  IMPLEMENTATION STRATEGY:
+  H3 (systematic hardening of NVIDIA CUDA images) + H4 (multi-stage builds)
+  Applied to ALL current flow images that share nvidia/cuda:12.6.3-runtime-ubuntu24.04
+  The 3-layer hierarchy is PRESERVED:
+    Layer 1: nvidia/cuda:12.6.3-runtime-ubuntu24.04  (upstream, never modified)
+    Layer 2: minivess-base:latest                     (multi-stage, hardened)
+    Layer 3: minivess-{flow}:latest                   (scripts + CMD only)
+
+  EXECUTION:
+  Run phases sequentially. Each phase ends with a commit.
+  Execute with: claude -p "Read and execute docs/planning/docker-security-hardening-mlsecops-plan.xml"
+
+  SCOPE EXCLUSION:
+  Multi-tier base image optimization (dashboard/biostatistics/etc separate bases)
+  is tracked in GitHub issue #537 and implemented AFTER this plan completes.
+-->
+<plan id="docker-hardening" version="1.0">
+  <metadata>
+    <title>Docker Security Hardening + MLSecOps — H3+H4 Implementation</title>
+    <branch>feat/docker-hardening</branch>
+    <base-branch>main</base-branch>
+    <created>2026-03-09</created>
+    <estimated-duration>4-6 hours</estimated-duration>
+    <closes-issues>none (creates/references #537)</closes-issues>
+    <research-report>docs/planning/docker-security-hardening-mlsecops-report.md</research-report>
+    <priority>P1 — security hardening</priority>
+    <phases>4</phases>
+    <total-tasks>24</total-tasks>
+  </metadata>
+
+  <!-- CRITICAL: Read these files first -->
+  <context-files>
+    <file>CLAUDE.md</file>
+    <file>deployment/CLAUDE.md</file>
+    <file>deployment/docker/Dockerfile.base</file>
+    <file>deployment/docker-compose.flows.yml</file>
+    <file>deployment/docker-compose.yml</file>
+    <file>.env.example</file>
+    <file>docs/planning/docker-security-hardening-mlsecops-report.md</file>
+  </context-files>
+
+  <setup>
+    <step>git checkout feat/docker-hardening</step>
+    <step>Verify branch exists (was created at session start)</step>
+  </setup>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Critical Safety — Day 1 blockers                          -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Critical Safety">
+    <description>
+      Immediate security fixes that must be done before any training run.
+      Does NOT touch Dockerfiles (those are Phase 2).
+      Outputs: comprehensive .dockerignore, pre-commit hadolint hook,
+      OPTUNA credential fix, MODEL_CACHE_HOST_PATH fix.
+    </description>
+
+    <task id="T-01.1" name="Verify NVIDIA Container Toolkit version">
+      <description>
+        CVE-2025-23266 (CVSS 9.0 Critical, NVIDIAScape) — container-to-host escape.
+        Fixed in Container Toolkit v1.17.8+. Must verify before any GPU training.
+      </description>
+      <test-first>
+        Write tests/v2/unit/deployment/test_nvidia_ctk_version.py:
+        - test_nvidia_ctk_version_is_safe: parse `nvidia-ctk --version` output,
+          assert version >= (1, 17, 8). Skip if nvidia-ctk not installed.
+          Use subprocess.run, parse with str.split() (not regex — Rule #16).
+        - test_cuda_compat_hook_not_disabled_by_config: Read
+          /etc/nvidia-container-toolkit/config.toml if it exists; warn if
+          disable-cuda-compat-lib-hook is True (override to fix, not workaround).
+      </test-first>
+      <acceptance>
+        nvidia-ctk --version output parses to >= 1.17.8.
+        Test passes or provides clear remediation instructions.
+      </acceptance>
+      <on-failure>
+        If nvidia-ctk is below 1.17.8: STOP. Document in a GitHub issue.
+        Do NOT proceed with training until patched.
+        Patch: sudo apt-get install --only-upgrade nvidia-container-toolkit
+      </on-failure>
+    </task>
+
+    <task id="T-01.2" name="Add comprehensive .dockerignore">
+      <description>
+        Current .dockerignore is empty/minimal. A missing .env in build context
+        can leak credentials into image layers. This also reduces build context size.
+      </description>
+      <test-first>
+        Write tests/v2/unit/deployment/test_dockerignore.py:
+        - test_dockerignore_exists: assert Path(".dockerignore").exists()
+        - test_dockerignore_excludes_env: read .dockerignore, assert ".env" in lines
+        - test_dockerignore_excludes_git: assert ".git" in lines
+        - test_dockerignore_excludes_mlruns: assert "mlruns/" in lines
+        - test_dockerignore_excludes_pycache: assert "__pycache__/" in lines
+        - test_dockerignore_excludes_pytest_cache: assert ".pytest_cache/" in lines
+        Parse with Path.read_text().splitlines() — not regex.
+      </test-first>
+      <implementation>
+        Write .dockerignore at repo root with:
+        .env, *.env, secrets/, .git, .gitignore, __pycache__/, *.pyc, *.egg-info/,
+        .pytest_cache/, .mypy_cache/, .ruff_cache/, dist/, build/,
+        mlruns/, outputs/duckdb/, data/minivess/, data/raw/, outputs/checkpoints/,
+        *.onnx, node_modules/, .vscode/, .idea/, *.swp, *.tmp, *.log,
+        docs/, wiki/, .github/, tests/
+      </implementation>
+      <acceptance>All 6 dockerignore tests pass.</acceptance>
+    </task>
+
+    <task id="T-01.3" name="Fix OPTUNA_STORAGE_URL credential hardcode in compose">
+      <description>
+        docker-compose.flows.yml line 34 has:
+          OPTUNA_STORAGE_URL: ${OPTUNA_STORAGE_URL:-postgresql+psycopg2://minivess:minivess_secret@postgres:5432/optuna}
+        The fallback hardcodes "minivess_secret". This violates Rule #22.
+        Fix: use ${POSTGRES_PASSWORD} in the fallback, not a literal password.
+      </description>
+      <test-first>
+        Write tests/v2/unit/test_env_single_source.py (add to existing or create):
+        - test_no_hardcoded_password_in_compose_flows: read
+          deployment/docker-compose.flows.yml with yaml.safe_load(),
+          find OPTUNA_STORAGE_URL value, assert "minivess_secret" not in the
+          literal string (should be ${POSTGRES_PASSWORD} reference).
+        Parse with yaml.safe_load() — not regex (Rule #16).
+      </test-first>
+      <implementation>
+        In deployment/docker-compose.flows.yml, change:
+          OPTUNA_STORAGE_URL: ${OPTUNA_STORAGE_URL:-postgresql+psycopg2://minivess:minivess_secret@postgres:5432/optuna}
+        To:
+          OPTUNA_STORAGE_URL: ${OPTUNA_STORAGE_URL:-postgresql+psycopg2://${POSTGRES_USER:-minivess}:${POSTGRES_PASSWORD:-minivess_secret}@${POSTGRES_DOCKER_HOST:-postgres}:5432/${POSTGRES_DB_OPTUNA:-optuna}}
+        Note: The outer fallback still works since OPTUNA_STORAGE_URL in .env takes priority.
+      </implementation>
+      <acceptance>Test passes. yaml.safe_load confirms no literal "minivess_secret" in compose value.</acceptance>
+    </task>
+
+    <task id="T-01.4" name="Fix MODEL_CACHE_HOST_PATH hardcoded home directory">
+      <description>
+        docker-compose.flows.yml has fallback /home/petteri/download_cache.
+        This breaks silently on any other machine. Remove fallback; require
+        MODEL_CACHE_HOST_PATH to be set explicitly in .env.
+      </description>
+      <test-first>
+        Add to tests/v2/unit/deployment/test_compose_correctness.py (create if missing):
+        - test_model_cache_has_no_hardcoded_home_path: read compose with yaml.safe_load(),
+          find model_cache volume definition, assert "/home/petteri" not in any value.
+      </test-first>
+      <implementation>
+        In deployment/docker-compose.flows.yml, change train and hpo services:
+          - ${MODEL_CACHE_HOST_PATH:-/home/petteri/download_cache}:/model_cache
+        To:
+          - ${MODEL_CACHE_HOST_PATH}:/model_cache
+        Update .env.example: add comment "# Required: no default. Set to your local model cache path."
+        Update deployment/CLAUDE.md: document that MODEL_CACHE_HOST_PATH must be set.
+      </implementation>
+      <acceptance>Test passes. No /home/petteri in compose files.</acceptance>
+    </task>
+
+    <task id="T-01.5" name="Add Hadolint to pre-commit configuration">
+      <description>
+        Hadolint is the standard Dockerfile linter. Catches: missing HEALTHCHECK,
+        missing --no-install-recommends, ADD instead of COPY, root USER, etc.
+        Add as a pre-commit hook to enforce Dockerfile quality continuously.
+      </description>
+      <test-first>
+        Write tests/v2/unit/deployment/test_hadolint_config.py:
+        - test_hadolint_config_exists: assert Path(".hadolint.yaml").exists()
+        - test_pre_commit_includes_hadolint: read .pre-commit-config.yaml with
+          yaml.safe_load(), find hadolint entry in repos list, assert it exists.
+        - test_dockerfiles_pass_hadolint: skip if hadolint not installed.
+          Run hadolint via subprocess on each Dockerfile in deployment/docker/.
+          Assert exit code 0 for all. Log any warnings.
+      </test-first>
+      <implementation>
+        1. Create .hadolint.yaml at repo root:
+           failure-threshold: error
+           ignored: [DL3008]  # apt version pinning — Ubuntu LTS is stable
+           override:
+             error: [DL3002, DL3006, DL4006]
+
+        2. Add to .pre-commit-config.yaml:
+           - repo: https://github.com/hadolint/hadolint
+             rev: v2.12.0
+             hooks:
+               - id: hadolint
+                 args: [--config, .hadolint.yaml]
+      </implementation>
+      <acceptance>hadolint runs cleanly on all Dockerfiles in deployment/docker/.</acceptance>
+    </task>
+
+    <task id="T-01.6" name="Phase 1 commit">
+      <steps>
+        1. uv run pytest tests/v2/unit/deployment/ -x -q
+        2. uv run ruff check . and uv run mypy src/
+        3. git add .dockerignore .hadolint.yaml .pre-commit-config.yaml
+           deployment/docker-compose.flows.yml .env.example deployment/CLAUDE.md
+           tests/v2/unit/deployment/
+        4. git commit -m "fix(docker): Phase 1 critical safety — dockerignore, hadolint, credential fixes"
+      </steps>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: H4 Multi-Stage Dockerfile.base (H3+H4 Combined)          -->
+  <!-- ================================================================== -->
+  <phase id="2" name="Dockerfile.base Refactoring — H3+H4">
+    <description>
+      Convert Dockerfile.base from single-stage to two-stage:
+        builder: nvidia/cuda:12.6.3-devel-ubuntu24.04 (uv, git, curl, CUDA headers)
+        runner:  nvidia/cuda:12.6.3-runtime-ubuntu24.04 (Python only, no build tools)
+      Add BuildKit cache mounts for uv (critical for rebuild speed).
+      Add OCI labels, PYTHONDONTWRITEBYTECODE, HEALTHCHECK, proper umask via entrypoint.
+      Fix: uv.lock* glob → uv.lock; venv permissions; uv --frozen flag.
+    </description>
+
+    <task id="T-02.1" name="Write Dockerfile.base tests (RED phase)">
+      <description>
+        Before changing Dockerfile.base, write tests that verify the properties
+        we want. These will fail until the Dockerfile is updated.
+      </description>
+      <test-first>
+        Write tests/v2/unit/deployment/test_dockerfile_base.py:
+
+        - test_dockerfile_base_uses_two_stages: read Dockerfile.base, parse with
+          [line for line in content.splitlines() if line.strip().startswith("FROM")].
+          Assert len(from_lines) >= 2 (builder + runner stages).
+          Assert "AS builder" in from_lines[0].
+          Assert "AS runner" in from_lines[1] (or check for the runner FROM).
+
+        - test_dockerfile_base_builder_uses_devel: the builder FROM must reference
+          "devel" in the image name (cuda:*-devel-*).
+
+        - test_dockerfile_base_runner_uses_runtime: the runner FROM must reference
+          "runtime" and NOT "devel".
+
+        - test_dockerfile_base_no_git_in_runner: the runner stage (content after
+          second FROM) must not contain "apt-get install" with "git". Use
+          ast-free line parsing: split on FROM boundaries, check second stage.
+
+        - test_dockerfile_base_no_uv_in_runner: runner stage must not COPY uv
+          binary (no "COPY --from=ghcr.io/astral-sh/uv" in runner stage).
+
+        - test_dockerfile_base_no_pip_in_runner: runner stage must not install
+          python3-pip.
+
+        - test_dockerfile_base_has_oci_labels: content must contain
+          "org.opencontainers.image.source" and "org.opencontainers.image.revision".
+
+        - test_dockerfile_base_has_buildkit_cache_mount: content must contain
+          "--mount=type=cache,target=/root/.cache/uv".
+
+        - test_dockerfile_base_uv_sync_frozen: content must contain "--frozen" in
+          uv sync command.
+
+        - test_dockerfile_base_pythondontwritebytecode: content must contain
+          "PYTHONDONTWRITEBYTECODE".
+
+        - test_dockerfile_base_uv_lock_exact: content must contain "uv.lock" as
+          a standalone token (not "uv.lock*" glob).
+
+        - test_dockerfile_base_venv_group_only: the chmod command must not use
+          "a+rX" — use "g+rX" (group-readable, not world-readable).
+
+        - test_dockerfile_base_has_uv_env_vars: content must contain all three:
+          "UV_COMPILE_BYTECODE", "UV_LINK_MODE", "UV_PYTHON_DOWNLOADS".
+
+        All file reads use Path.read_text(encoding="utf-8"). No regex (Rule #16).
+        Use str methods: splitlines(), partition(), split(), "in" operator.
+      </test-first>
+      <acceptance>All 13 tests FAIL (expected in RED phase — Dockerfile not yet changed).</acceptance>
+    </task>
+
+    <task id="T-02.2" name="Implement new Dockerfile.base (GREEN phase)">
+      <description>
+        Rewrite deployment/docker/Dockerfile.base with multi-stage H3+H4 pattern.
+        Preserve the 3-layer hierarchy.
+      </description>
+      <implementation>
+        Write deployment/docker/Dockerfile.base:
+
+        ```
+        # syntax=docker/dockerfile:1
+        # MinIVess MLOps v2 — Base Docker image (Layer 2)
+        # H3+H4: Multi-stage build — builder uses devel, runner uses runtime.
+        # Build tools (uv, git, curl) are confined to builder stage only.
+        #
+        # Build:
+        #   docker build \
+        #     --build-arg GIT_COMMIT=$(git rev-parse HEAD) \
+        #     --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+        #     -t minivess-base:latest \
+        #     -f deployment/docker/Dockerfile.base .
+
+        # ── Stage 1: Builder ─────────────────────────────────────────────────
+        # Uses devel variant for CUDA headers + nvcc (needed by some MONAI ops).
+        # Contains uv, git, curl — NEVER in final image.
+        FROM nvidia/cuda:12.6.3-devel-ubuntu24.04 AS builder
+
+        RUN apt-get update && apt-get install -y --no-install-recommends \
+            python3 \
+            python3-venv \
+            git \
+            curl \
+            && rm -rf /var/lib/apt/lists/*
+
+        # Install uv — BUILD STAGE ONLY
+        COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+        # uv env: compile bytecodes, copy-link mode (required for cache mounts),
+        # never auto-download Python, never install dev deps.
+        ENV UV_COMPILE_BYTECODE=1 \
+            UV_LINK_MODE=copy \
+            UV_PYTHON_DOWNLOADS=never \
+            UV_NO_DEV=1
+
+        WORKDIR /app
+
+        # Phase A: install deps only (cacheable when only src/ changes)
+        # --mount=type=cache: persists uv download cache across rebuilds locally.
+        # --frozen: treats uv.lock as immutable (fail if out of sync with pyproject.toml).
+        RUN --mount=type=cache,target=/root/.cache/uv \
+            --mount=type=bind,source=uv.lock,target=uv.lock \
+            --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+            uv sync --frozen --no-dev --no-install-project
+
+        # Phase B: copy source and install project
+        COPY src/ src/
+        COPY configs/ configs/
+        RUN --mount=type=cache,target=/root/.cache/uv \
+            uv sync --frozen --no-dev
+
+        # ── Stage 2: Runner ──────────────────────────────────────────────────
+        # Minimal runtime — NO uv, NO git, NO curl, NO pip, NO CUDA headers.
+        # PyTorch wheels bundle their own CUDA math libs (cublas, cufft, etc.)
+        # so nvidia/cuda:*-runtime is sufficient.
+        FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04 AS runner
+
+        # Build-time provenance args (inject via --build-arg at CI time)
+        ARG GIT_COMMIT=unknown
+        ARG BUILD_DATE=unknown
+        ARG UID=1000
+        ARG GID=1000
+
+        # OCI standard image annotations (NIST SP 800-190 traceability)
+        LABEL maintainer="petteri.teikari@gmail.com"
+        LABEL project="minivess-mlops"
+        LABEL org.opencontainers.image.title="minivess-base"
+        LABEL org.opencontainers.image.source="https://github.com/minivess-mlops/minivess-mlops"
+        LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
+        LABEL org.opencontainers.image.created="${BUILD_DATE}"
+        LABEL org.opencontainers.image.licenses="CC-BY-NC-SA-4.0"
+        LABEL org.opencontainers.image.base.name="nvidia/cuda:12.6.3-runtime-ubuntu24.04"
+
+        # Minimal runtime Python only — no pip, no build tools
+        RUN apt-get update && apt-get install -y --no-install-recommends \
+            python3 \
+            python3-venv \
+            && rm -rf /var/lib/apt/lists/*
+
+        # Non-root user with configurable UID/GID (matches host user for bind mounts)
+        RUN groupadd -g $GID minivess 2>/dev/null || true && \
+            useradd --create-home --shell /bin/bash -u $UID -g $GID -o minivess
+
+        WORKDIR /app
+
+        # Copy only the built venv and application code from builder
+        # NEVER copy: uv binary, git history, build caches, devel headers
+        COPY --from=builder --chown=minivess:minivess /app/.venv /app/.venv
+        COPY --from=builder --chown=minivess:minivess /app/src /app/src
+        COPY --from=builder --chown=minivess:minivess /app/configs /app/configs
+
+        # Group-readable venv (not world-readable — limit to minivess group)
+        RUN chmod -R g+rX /app/.venv
+
+        USER minivess
+
+        # Python environment
+        ENV PATH=/app/.venv/bin:$PATH
+        ENV PYTHONPATH=/app/src
+        ENV PYTHONUNBUFFERED=1
+        ENV PYTHONDONTWRITEBYTECODE=1
+
+        # HEALTHCHECK: verify Python and core package imports work
+        HEALTHCHECK --interval=60s --timeout=10s --retries=3 --start-period=120s \
+          CMD python3 -c "import sys; sys.exit(0)" || exit 1
+        ```
+      </implementation>
+      <acceptance>All 13 tests from T-02.1 now PASS (GREEN phase).</acceptance>
+      <on-failure>
+        If docker build fails: check uv.lock exists at repo root.
+        If cache mount causes issues: add --no-cache flag for first build.
+        If CUDA devel image unavailable: use runtime for both stages (less optimal).
+      </on-failure>
+    </task>
+
+    <task id="T-02.3" name="Create Dockerfile.mlflow with baked-in deps">
+      <description>
+        Currently docker-compose.yml installs psycopg2-binary and boto3 via pip
+        at every MLflow startup (15-30 seconds, non-reproducible, breaks air-gapped).
+        Create a custom MLflow Dockerfile with deps baked in.
+      </description>
+      <test-first>
+        Add to tests/v2/unit/deployment/test_dockerfile_mlflow.py:
+        - test_dockerfile_mlflow_exists: assert Path("deployment/docker/Dockerfile.mlflow").exists()
+        - test_mlflow_dockerfile_has_pinned_psycopg2: read file, assert "psycopg2-binary" in content
+        - test_mlflow_dockerfile_has_boto3: assert "boto3" in content
+        - test_mlflow_dockerfile_no_pip_at_runtime: compose entrypoint for mlflow
+          must NOT contain "pip install" (use yaml.safe_load to verify compose).
+        - test_mlflow_image_reference_in_compose: mlflow service must use "build:"
+          referencing Dockerfile.mlflow, not just "image: ghcr.io/mlflow/mlflow:*"
+      </test-first>
+      <implementation>
+        Create deployment/docker/Dockerfile.mlflow:
+        ```
+        FROM ghcr.io/mlflow/mlflow:v3.10.0
+        # Bake in PostgreSQL + S3/MinIO drivers at build time.
+        # These are stable deps — pin to specific versions for reproducibility.
+        RUN pip install --no-cache-dir \
+            psycopg2-binary==2.9.10 \
+            boto3==1.34.162
+        ```
+
+        Update deployment/docker-compose.yml mlflow service:
+        - Change image: to build: context + dockerfile: Dockerfile.mlflow
+        - Remove pip install from entrypoint (keep only mlflow server command)
+        - Update image: to minivess-mlflow:v3.10.0
+      </implementation>
+      <acceptance>MLflow service starts without pip install step. All 5 tests pass.</acceptance>
+    </task>
+
+    <task id="T-02.4" name="Add OCI labels to per-flow Dockerfiles">
+      <description>
+        Each flow Dockerfile (train, data, analyze, etc.) should add flow-specific
+        OCI labels for traceability. LABEL inherits from base; add flow-specific ones.
+      </description>
+      <test-first>
+        Add to tests/v2/unit/deployment/test_dockerfile_flows.py:
+        - test_all_flow_dockerfiles_have_flow_label: for each Dockerfile.{flow}
+          in deployment/docker/, verify LABEL flow= is present.
+        - test_all_flow_dockerfiles_have_description_label: verify LABEL description= is present.
+        - test_no_flow_dockerfile_runs_apt: verify no flow Dockerfile contains
+          "apt-get" (all deps belong in base).
+        - test_no_flow_dockerfile_runs_uv: verify no flow Dockerfile contains "uv sync".
+        - test_all_flow_dockerfiles_inherit_from_base: verify FROM line is
+          "FROM minivess-base:latest" (not FROM nvidia/cuda directly).
+      </test-first>
+      <implementation>
+        For each per-flow Dockerfile, ensure these labels are present:
+        LABEL flow="{name}"
+        LABEL description="{description}"
+        LABEL org.opencontainers.image.title="minivess-{flow}"
+
+        No other changes to per-flow Dockerfiles in this task.
+      </implementation>
+      <acceptance>All 5 flow Dockerfile tests pass.</acceptance>
+    </task>
+
+    <task id="T-02.5" name="Phase 2 commit">
+      <steps>
+        1. uv run pytest tests/v2/unit/deployment/ -x -q (all pass)
+        2. Run hadolint on Dockerfile.base and Dockerfile.mlflow
+        3. git add deployment/docker/Dockerfile.base deployment/docker/Dockerfile.mlflow
+           deployment/docker/Dockerfile.* deployment/docker-compose.yml
+           tests/v2/unit/deployment/
+        4. git commit -m "feat(docker): H4 multi-stage Dockerfile.base + MLflow custom image"
+      </steps>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: Docker Compose Hardening                                  -->
+  <!-- ================================================================== -->
+  <phase id="3" name="Docker Compose Hardening">
+    <description>
+      Add to docker-compose.flows.yml:
+        - cap_drop: ALL + security_opt: no-new-privileges (CIS 5.3, 5.25)
+        - Resource limits: mem_limit, cpus, pids_limit per flow (CIS 5.11, OWASP D07)
+        - shm_size: 8g for train and hpo (CRITICAL: MONAI DataLoader Bus error prevention)
+        - Log driver: local, non-blocking, rotation (production logging)
+        - restart: "no" explicitly on flow containers (prevent ghost runs)
+        - minio-init service for bucket auto-creation (fixes #528 pattern)
+        - volume-init service for ownership setup (fixes #529 pattern)
+      Fix docker-compose.yml:
+        - Pin MinIO image tag
+        - Remove icc: false from daemon.json recommendation (breaks inter-container comm)
+        - Restrict port bindings to 127.0.0.1 (localhost-only)
+    </description>
+
+    <task id="T-03.1" name="Write compose hardening tests (RED phase)">
+      <test-first>
+        Write tests/v2/unit/deployment/test_compose_hardening.py:
+
+        All parsing via yaml.safe_load(Path(...).read_text(encoding="utf-8")).
+        No regex (Rule #16).
+
+        For docker-compose.flows.yml:
+
+        - test_all_flows_have_cap_drop_all: for each service in flows compose,
+          assert service["cap_drop"] == ["ALL"] or service.get("cap_drop", []) == ["ALL"].
+
+        - test_all_flows_have_no_new_privileges: for each service, assert
+          "no-new-privileges:true" in service.get("security_opt", []).
+
+        - test_train_has_shm_size: train service must have shm_size set.
+          Assert shm_size value is not None. (Can be string "8g" or int.)
+
+        - test_hpo_has_shm_size: hpo service must have shm_size.
+
+        - test_train_has_mem_limit: assert "mem_limit" in train service config.
+
+        - test_all_flows_have_pids_limit: for each service, assert pids_limit > 0.
+
+        - test_all_flows_have_log_driver: for each service, assert
+          service.get("logging", {}).get("driver") is not None.
+
+        - test_all_flows_have_restart_no: for each service, assert
+          service.get("restart") == "no".
+
+        - test_minio_init_service_exists: docker-compose.yml must have "minio-init"
+          service (or "minivess-minio-init" container_name).
+
+        - test_volume_init_documented: deployment/CLAUDE.md must contain
+          "make init-volumes" or "volume-init" (init step is documented).
+
+        - test_no_hardcoded_home_in_model_cache: no "/home/petteri" in any compose value.
+          (Covered by Phase 1 T-01.4 as well.)
+
+        For docker-compose.yml:
+        - test_minio_image_pinned: minio service image must NOT be "minio/minio:latest".
+          It must contain a specific version or date tag.
+
+        - test_ports_bound_to_localhost: each port mapping in docker-compose.yml
+          (postgres, minio, mlflow, prefect) should use "127.0.0.1:" prefix.
+          Note: This may be a warning, not a hard failure, since some dev setups
+          need 0.0.0.0. Mark as @pytest.mark.security_audit.
+      </test-first>
+      <acceptance>All tests FAIL (RED — compose not yet updated).</acceptance>
+    </task>
+
+    <task id="T-03.2" name="Add capability drop and security options to flows compose">
+      <description>
+        Add to ALL services in docker-compose.flows.yml:
+          cap_drop: [ALL]
+          security_opt: [no-new-privileges:true]
+          restart: "no"
+        Use x-common-security anchor to avoid duplication.
+      </description>
+      <implementation>
+        Add to docker-compose.flows.yml after x-common-env anchor:
+
+        x-common-security: &amp;common-security
+          cap_drop:
+            - ALL
+          security_opt:
+            - no-new-privileges:true
+          restart: "no"
+
+        Then in each service, add: &lt;&lt;: *common-security
+
+        NOTE: GPU flows (train, hpo) do NOT need cap_add after dropping ALL.
+        PyTorch/CUDA/Optuna/Prefect require zero Linux capabilities.
+        EXCEPTION: If MONAI pin_memory DataLoader fails with mlock errors,
+        add cap_add: [IPC_LOCK] to train and hpo ONLY and document why.
+      </implementation>
+      <acceptance>cap_drop, security_opt, restart tests pass.</acceptance>
+    </task>
+
+    <task id="T-03.3" name="Add resource limits and shm_size">
+      <description>
+        CRITICAL: shm_size for train and hpo prevents MONAI 3D DataLoader Bus error.
+        Formula: num_workers * batch_size * sample_bytes * 2
+        For 3D MiniVess patches (256x256x128, float32): 8GB covers any realistic workload.
+        Also add mem_limit, cpus, pids_limit per flow class.
+      </description>
+      <implementation>
+        Add x-resource-* anchors to docker-compose.flows.yml:
+
+        x-gpu-resources: &amp;gpu-resources
+          mem_limit: 32g
+          memswap_limit: 32g
+          cpus: 8.0
+          pids_limit: 2048
+          shm_size: "8g"    # CRITICAL: prevents MONAI DataLoader Bus error
+
+        x-cpu-resources: &amp;cpu-resources
+          mem_limit: 16g
+          memswap_limit: 16g
+          cpus: 4.0
+          pids_limit: 512
+
+        x-light-resources: &amp;light-resources
+          mem_limit: 4g
+          cpus: 2.0
+          pids_limit: 256
+
+        Apply per service:
+        - train, hpo: *gpu-resources
+        - data, analyze, post_training, acquisition, biostatistics: *cpu-resources
+        - dashboard, qa, pipeline, annotation: *light-resources
+
+        IMPORTANT: For docker compose run (not up), shm_size from compose is
+        NOT automatically applied. Scripts using `docker compose run` MUST add:
+          --shm-size 8g (for train/hpo)
+        Update scripts/run_debug.sh and deployment/CLAUDE.md with this requirement.
+      </implementation>
+      <acceptance>
+        shm_size tests pass for train and hpo.
+        mem_limit and pids_limit tests pass for all services.
+        run_debug.sh includes --shm-size for GPU flows.
+      </acceptance>
+    </task>
+
+    <task id="T-03.4" name="Add log driver configuration">
+      <description>
+        Default docker logging (json-file without rotation) produces unbounded log files
+        during long training runs. The local driver is more efficient than json-file.
+        Non-blocking mode prevents log backend slowness from blocking training process.
+      </description>
+      <implementation>
+        Add to docker-compose.flows.yml after x-common-security:
+
+        x-logging: &amp;default-logging
+          logging:
+            driver: local
+            options:
+              max-size: "50m"
+              max-file: "10"
+              compress: "true"
+              mode: non-blocking
+              max-buffer-size: "4m"
+
+        Apply to ALL services: &lt;&lt;: *default-logging
+
+        Note: local driver still supports `docker logs` command.
+        It uses binary format (more efficient than json-file) with auto-compression.
+        500MB max per container (50MB × 10 files) is appropriate for training.
+      </implementation>
+      <acceptance>Log driver test passes for all services.</acceptance>
+    </task>
+
+    <task id="T-03.5" name="Add minio-init service for bucket auto-creation">
+      <description>
+        Issue #528: MinIO does not auto-create buckets. The mlflow-artifacts bucket
+        must exist before MLflow can log artifacts. Add an init container.
+      </description>
+      <implementation>
+        Add to deployment/docker-compose.yml (in dev/monitoring/full profiles):
+
+        minio-init:
+          image: minio/mc:RELEASE.2025-02-08T19-54-51Z
+          container_name: minivess-minio-init
+          profiles: ["dev", "monitoring", "full"]
+          depends_on:
+            minio:
+              condition: service_healthy
+          entrypoint: &gt;
+            /bin/sh -c "
+            mc alias set local http://minivess-minio:9000
+              $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+            mc mb --ignore-existing local/mlflow-artifacts &&
+            mc mb --ignore-existing local/model-registry &&
+            echo 'MinIO buckets initialized successfully'
+            "
+          environment:
+            MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+            MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin_secret}
+          networks:
+            - minivess
+          restart: "no"
+          labels:
+            project: minivess-mlops
+            managed-by: docker-compose
+      </implementation>
+      <acceptance>minio-init service exists in compose. Test passes.</acceptance>
+    </task>
+
+    <task id="T-03.6" name="Pin MinIO image tag and add volume-init documentation">
+      <description>
+        minio/minio:latest is non-reproducible. Pin to a specific release.
+        Document volume initialization as a `make init-volumes` target.
+      </description>
+      <implementation>
+        1. In docker-compose.yml, change:
+             image: minio/minio:latest
+           To:
+             image: minio/minio:RELEASE.2025-02-08T19-54-51Z
+           (Use a recent stable release — verify at hub.docker.com/r/minio/minio/tags)
+
+        2. Add Makefile target (create Makefile if not exists):
+           init-volumes:
+               @echo "Initializing Docker named volumes..."
+               docker run --rm --user root \
+                 -v deployment_checkpoint_cache:/app/checkpoints \
+                 -v deployment_logs_data:/app/logs \
+                 -v deployment_mlruns_data:/app/mlruns \
+                 -v deployment_data_cache:/app/data \
+                 -v deployment_configs_splits:/app/configs/splits \
+                 ubuntu:22.04 \
+                 chown -R 1000:1000 \
+                   /app/checkpoints /app/logs /app/mlruns /app/data /app/configs/splits
+               @echo "Volume ownership initialized"
+
+           scan:
+               @echo "Scanning MinIVess Docker images with Trivy..."
+               @which trivy || (echo "Install: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin" &amp;&amp; exit 1)
+               @for flow in base train data analyze deploy dashboard qa hpo post_training; do \
+                 echo "Scanning minivess-$$flow:latest..."; \
+                 trivy image --exit-code 0 --severity CRITICAL,HIGH --ignore-unfixed \
+                   minivess-$$flow:latest 2>/dev/null || echo "Image not built yet: minivess-$$flow"; \
+               done
+
+        3. Update deployment/CLAUDE.md: add "make init-volumes" to setup steps.
+      </implementation>
+      <acceptance>MinIO image tag is not "latest". Makefile has init-volumes and scan targets.</acceptance>
+    </task>
+
+    <task id="T-03.7" name="Phase 3 commit">
+      <steps>
+        1. uv run pytest tests/v2/unit/deployment/ -x -q
+        2. git add deployment/docker-compose.flows.yml deployment/docker-compose.yml
+           Makefile deployment/CLAUDE.md scripts/run_debug.sh
+           tests/v2/unit/deployment/test_compose_hardening.py
+        3. git commit -m "feat(docker): Phase 3 compose hardening — cap_drop, shm_size, resource limits, minio-init"
+      </steps>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: MLSecOps Tooling Integration                              -->
+  <!-- ================================================================== -->
+  <phase id="4" name="MLSecOps Tooling">
+    <description>
+      Integrate Trivy scanning, verify NVIDIA CTK version, add seccomp audit
+      scaffolding, update deployment/CLAUDE.md with production runbook.
+      This phase produces: Trivy CI gate, seccomp audit profiles directory,
+      SBOM generation target, updated operational docs.
+    </description>
+
+    <task id="T-04.1" name="Add Trivy scan integration">
+      <description>
+        Trivy is the recommended scanner for ML/AI container images.
+        Policy: block on CRITICAL CVEs only initially (NVIDIA base images carry
+        many HIGH CVEs with no fix available — use --ignore-unfixed).
+        The scan Makefile target was added in T-03.6; expand it here.
+      </description>
+      <test-first>
+        Add to tests/v2/unit/deployment/test_security_tooling.py:
+        - test_makefile_has_scan_target: read Makefile, assert "scan:" in content.
+        - test_makefile_has_sbom_target: assert "sbom:" in content.
+        - test_trivy_policy_uses_ignore_unfixed: assert "--ignore-unfixed" in scan target.
+        - test_trivy_policy_blocks_on_critical: assert "--severity CRITICAL" in scan target.
+      </test-first>
+      <implementation>
+        Expand Makefile scan and add sbom target:
+
+        sbom:
+          @echo "Generating SBOM for MinIVess base image..."
+          @which trivy || (echo "Install trivy first: make install-trivy" &amp;&amp; exit 1)
+          @mkdir -p sbom/
+          @trivy image --format cyclonedx --output sbom/minivess-base-sbom.json \
+            minivess-base:latest
+          @echo "SBOM written to sbom/minivess-base-sbom.json"
+
+        install-trivy:
+          @curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin
+          @echo "Trivy installed at /usr/local/bin/trivy"
+
+        Add sbom/ to .gitignore (SBOMs are artifacts, not source).
+        Add sbom/ to .dockerignore (not needed in images).
+      </implementation>
+      <acceptance>All 4 tests pass. `make scan` runs without error (even if images not built).</acceptance>
+    </task>
+
+    <task id="T-04.2" name="Create seccomp profile scaffolding">
+      <description>
+        Seccomp profiles restrict syscalls available to containers (CIS 5.21, OWASP D05).
+        Phase 4 creates the directory structure and audit profile.
+        Actual per-flow profiles are generated by running each flow with the audit
+        profile and observing syscalls — this is done as operational work after deploy.
+      </description>
+      <test-first>
+        Add to tests/v2/unit/deployment/test_security_tooling.py:
+        - test_seccomp_profiles_dir_exists: assert Path("deployment/seccomp/").exists()
+        - test_seccomp_audit_profile_exists: assert Path("deployment/seccomp/audit.json").exists()
+        - test_seccomp_audit_profile_is_valid_json: json.loads(audit_profile_content)
+          must not raise. Use json.loads() — not yaml or regex.
+        - test_seccomp_audit_profile_action_is_log: parsed["defaultAction"] == "SCMP_ACT_LOG"
+        - test_seccomp_readme_exists: assert Path("deployment/seccomp/README.md").exists()
+      </test-first>
+      <implementation>
+        Create deployment/seccomp/ directory.
+
+        Create deployment/seccomp/audit.json:
+        {
+          "defaultAction": "SCMP_ACT_LOG",
+          "architectures": ["SCMP_ARCH_X86_64"],
+          "syscalls": []
+        }
+        Note: SCMP_ACT_LOG logs all syscalls without blocking — use in staging to
+        discover required syscalls before building allowlist profile.
+
+        Create deployment/seccomp/README.md documenting:
+        1. How to run with audit profile (docker compose run --security-opt seccomp=...)
+        2. How to extract syscalls from /var/log/audit/audit.log
+        3. How to build per-flow allowlist profile
+        4. Warning: seccomp is silently ignored with privileged: true
+        5. IPC_LOCK caveat: MONAI pin_memory may need cap_add: [IPC_LOCK]
+
+        Add to Makefile:
+        seccomp-audit-train:
+          @echo "Running train flow with seccomp audit profile..."
+          @docker compose -f deployment/docker-compose.flows.yml run --rm -T \
+            --security-opt seccomp=deployment/seccomp/audit.json \
+            --shm-size 8g \
+            train &lt;/dev/null 2>&amp;1 | head -50
+          @echo "Check /var/log/audit/audit.log for syscall log"
+      </implementation>
+      <acceptance>All 5 seccomp tests pass. audit.json is valid JSON.</acceptance>
+    </task>
+
+    <task id="T-04.3" name="Update deployment/CLAUDE.md production runbook">
+      <description>
+        Update deployment/CLAUDE.md with all new patterns from this plan:
+        - Multi-stage build instructions
+        - shm_size requirement for docker compose run
+        - CVE-2025-23266 mitigation (verify nvidia-ctk version)
+        - Trivy scan before deployment
+        - minio-init and volume-init setup steps
+        - Seccomp audit workflow
+      </description>
+      <test-first>
+        Add to tests/v2/unit/deployment/test_deployment_docs.py:
+        - test_claude_md_documents_shm_size: read deployment/CLAUDE.md,
+          assert "--shm-size" in content.
+        - test_claude_md_documents_nvidia_ctk: assert "nvidia-ctk" in content.
+        - test_claude_md_documents_trivy: assert "trivy" in content.lower()
+        - test_claude_md_documents_minio_init: assert "minio-init" in content
+          or "make init-buckets" in content.
+        - test_claude_md_documents_multi_stage: assert "builder" in content
+          and "runner" in content.
+      </test-first>
+      <implementation>
+        Add new sections to deployment/CLAUDE.md:
+        - "First-time Setup" (ordered: network → init-volumes → start infra → minio-init → scan → run flow)
+        - "CVE-2025-23266 Verification" (nvidia-ctk --version check)
+        - "shm_size Requirement" (why, formula, how to pass to docker compose run)
+        - "Image Scanning" (make scan, make sbom)
+        - "Seccomp Profiles" (link to deployment/seccomp/README.md)
+      </implementation>
+      <acceptance>All 5 docs tests pass.</acceptance>
+    </task>
+
+    <task id="T-04.4" name="Final verification and PR">
+      <steps>
+        1. Run full test suite: uv run pytest tests/ -x -q --ignore=tests/e2e
+        2. Run lint: uv run ruff check src/ tests/ deployment/
+        3. Run type check: uv run mypy src/
+        4. Run hadolint on all Dockerfiles: hadolint deployment/docker/Dockerfile.*
+        5. Build minivess-base locally to verify multi-stage works:
+           docker build --build-arg GIT_COMMIT=$(git rev-parse HEAD) \
+             --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+             -t minivess-base:latest \
+             -f deployment/docker/Dockerfile.base .
+        6. Run make scan against built image
+        7. git add -A and git commit -m "feat(docker): Phase 4 MLSecOps tooling"
+        8. git push -u origin feat/docker-hardening
+        9. gh pr create --title "feat(docker): H3+H4 hardening — multi-stage build, cap_drop, shm_size, MLSecOps"
+           --body "Implements docker-security-hardening-mlsecops-plan.xml.
+                   Multi-stage Dockerfile.base, compose hardening, Trivy integration.
+                   Related: #537 (multi-tier optimization — tracked separately)"
+      </steps>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- VERIFICATION: Full test suite specification                         -->
+  <!-- ================================================================== -->
+  <verification>
+    <test-files>
+      <file>tests/v2/unit/deployment/test_nvidia_ctk_version.py</file>
+      <file>tests/v2/unit/deployment/test_dockerignore.py</file>
+      <file>tests/v2/unit/deployment/test_compose_correctness.py</file>
+      <file>tests/v2/unit/deployment/test_dockerfile_base.py</file>
+      <file>tests/v2/unit/deployment/test_dockerfile_mlflow.py</file>
+      <file>tests/v2/unit/deployment/test_dockerfile_flows.py</file>
+      <file>tests/v2/unit/deployment/test_compose_hardening.py</file>
+      <file>tests/v2/unit/deployment/test_security_tooling.py</file>
+      <file>tests/v2/unit/deployment/test_deployment_docs.py</file>
+    </test-files>
+    <total-new-tests>approximately 45-55 tests</total-new-tests>
+    <run-command>uv run pytest tests/v2/unit/deployment/ -v --tb=short</run-command>
+    <acceptance>Zero failures. Zero skips except nvidia-ctk tests on CPU-only CI runners.</acceptance>
+  </verification>
+
+  <!-- ================================================================== -->
+  <!-- KNOWN LIMITATIONS AND FUTURE WORK                                  -->
+  <!-- ================================================================== -->
+  <future-work>
+    <item>Multi-tier base images (GPU/CPU/web/light) — tracked in GitHub issue #537</item>
+    <item>Per-flow seccomp allowlist profiles (requires running each flow with audit profile first)</item>
+    <item>read_only: true for non-GPU flows (requires CUDA tmpfs discovery — ~/.nv, /tmp/cuda)</item>
+    <item>Chainguard CUDA/PyTorch images (when commercial budget available)</item>
+    <item>SLSA Build Level 2 attestation (requires registry push infrastructure)</item>
+    <item>cosign image signing (requires cosign key management decision)</item>
+    <item>Per-flow MinIO IAM policies (scoped bucket access, not root credentials)</item>
+    <item>HashiCorp Vault for secret management (replaces env var credentials)</item>
+    <item>AppArmor profile for GPU flows (ubuntu 24.04 LSM — document docker-default adequacy)</item>
+  </future-work>
+
+  <!-- ================================================================== -->
+  <!-- KEY RULES FOR EXECUTION (from CLAUDE.md)                           -->
+  <!-- ================================================================== -->
+  <guardrails>
+    <rule>NEVER use import re or regex for parsing Dockerfile, YAML, or JSON — Rule #16</rule>
+    <rule>ALL config values come from .env.example first — Rule #22</rule>
+    <rule>TDD mandatory: write failing tests BEFORE implementing — Rule #2</rule>
+    <rule>NO standalone script shortcuts: training goes through docker compose run — Rule #17</rule>
+    <rule>GitHub Actions CI is DISABLED: all validation runs locally — Rule #21</rule>
+    <rule>The 3-layer Docker hierarchy must be preserved (only Layer 1/2 of base changes)</rule>
+    <rule>cap_drop: ALL is added to ALL flow services — no exceptions without documented reason</rule>
+    <rule>shm_size: "8g" is mandatory for train and hpo — prevents Bus error in MONAI DataLoader</rule>
+    <rule>Multi-stage builds: uv and git MUST be in builder stage ONLY — never in runner</rule>
+    <rule>Seccomp JSON must not contain // comments — JSON does not support comments</rule>
+    <rule>icc: false at daemon level breaks all inter-container communication — DO NOT add</rule>
+  </guardrails>
+
+  <completion-signal>
+    When this plan is complete:
+    1. PR is created on feat/docker-hardening branch
+    2. All ~50 tests in tests/v2/unit/deployment/ pass
+    3. hadolint passes on all Dockerfiles
+    4. make scan runs without error
+    5. minivess-base:latest builds successfully with multi-stage Dockerfile
+    6. Next work: implement multi-tier base images per GitHub issue #537
+  </completion-signal>
+</plan>

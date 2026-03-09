@@ -35,9 +35,10 @@ x-common-env: &common-env
   REPLICA_INDEX: ${REPLICA_INDEX:-0}
   # Prefect log forwarding
   PREFECT_LOGGING_EXTRA_LOGGERS: ${PREFECT_LOGGING_EXTRA_LOGGERS:-minivess}
-  # PyTorch CUDA memory allocator — expandable_segments reduces fragmentation OOM
+  # PyTorch 2.x memory allocator — expandable_segments reduces fragmentation OOM
   # on marginal-VRAM models (sam3_hybrid ~7.5GB on 8GB GPU). Fix for #534.
-  PYTORCH_CUDA_ALLOC_CONF: ${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+  # PyTorch 2.x reads PYTORCH_ALLOC_CONF (not PYTORCH_CUDA_ALLOC_CONF).
+  PYTORCH_ALLOC_CONF: ${PYTORCH_ALLOC_CONF:-expandable_segments:True}
   # HuggingFace token for gated models (SAM3, VesselFM).
   # Set HF_TOKEN in .env — never hard-code here.
   HF_TOKEN: ${HF_TOKEN:-}

@@ -134,10 +134,10 @@ def test_dockerfile_train_does_not_hardcode_splits_dir() -> None:
 
 
 def test_pytorch_cuda_alloc_conf_in_env_example() -> None:
-    """PYTORCH_CUDA_ALLOC_CONF must be in .env.example (Rule #22) — fixes #534 sam3_hybrid OOM."""
-    assert "PYTORCH_CUDA_ALLOC_CONF" in _env_example_vars(), (
-        "PYTORCH_CUDA_ALLOC_CONF missing from .env.example — "
-        "add: PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
+    """PYTORCH_ALLOC_CONF must be in .env.example (Rule #22) — fixes #534 sam3_hybrid OOM."""
+    assert "PYTORCH_ALLOC_CONF" in _env_example_vars(), (
+        "PYTORCH_ALLOC_CONF missing from .env.example — "
+        "add: PYTORCH_ALLOC_CONF=expandable_segments:True"
     )
 
 
@@ -145,18 +145,18 @@ def test_pytorch_cuda_alloc_conf_value_is_expandable_segments() -> None:
     """Default must be expandable_segments:True (fixes fragmentation OOM on 8GB GPU)."""
     for line in ENV_EXAMPLE.read_text(encoding="utf-8").splitlines():
         line = line.strip()
-        if line.startswith("PYTORCH_CUDA_ALLOC_CONF="):
+        if line.startswith("PYTORCH_ALLOC_CONF="):
             _, _, value = line.partition("=")
             assert "expandable_segments:True" in value, (
-                f"PYTORCH_CUDA_ALLOC_CONF should be 'expandable_segments:True', got: {value!r}"
+                f"PYTORCH_ALLOC_CONF should be 'expandable_segments:True', got: {value!r}"
             )
             return
     # Variable not found — test_pytorch_cuda_alloc_conf_in_env_example will catch this
-    pytest.skip("PYTORCH_CUDA_ALLOC_CONF not in .env.example (covered by other test)")
+    pytest.skip("PYTORCH_ALLOC_CONF not in .env.example (covered by other test)")
 
 
 def test_compose_flows_injects_pytorch_cuda_alloc_conf() -> None:
-    """x-common-env in docker-compose.flows.yml must inject PYTORCH_CUDA_ALLOC_CONF."""
+    """x-common-env in docker-compose.flows.yml must inject PYTORCH_ALLOC_CONF."""
     import yaml  # noqa: PLC0415
 
     compose_file = ROOT / "deployment" / "docker-compose.flows.yml"
@@ -165,7 +165,7 @@ def test_compose_flows_injects_pytorch_cuda_alloc_conf() -> None:
     compose = yaml.safe_load(compose_file.read_text(encoding="utf-8"))
     # x-common-env is an extension field — anchored into services
     common_env = compose.get("x-common-env", {})
-    assert "PYTORCH_CUDA_ALLOC_CONF" in common_env, (
-        "PYTORCH_CUDA_ALLOC_CONF missing from x-common-env in docker-compose.flows.yml. "
-        "Add: PYTORCH_CUDA_ALLOC_CONF: ${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+    assert "PYTORCH_ALLOC_CONF" in common_env, (
+        "PYTORCH_ALLOC_CONF missing from x-common-env in docker-compose.flows.yml. "
+        "Add: PYTORCH_ALLOC_CONF: ${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
     )
