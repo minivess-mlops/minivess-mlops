@@ -592,14 +592,16 @@ def training_flow(
 
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment(experiment_name)
-        with mlflow.start_run(
-            tags={
-                "flow_name": FLOW_NAME_TRAIN,
-                "upstream_data_run_id": upstream_data_run_id,
-                "loss_function": loss_name,
-                "model_family": model_family,
-            }
-        ) as active_run:
+        # MLflow tags must be strings — exclude None values or they raise TypeError
+        # during protobuf serialization (tag.to_proto()).
+        _tags: dict[str, str] = {
+            "flow_name": FLOW_NAME_TRAIN,
+            "loss_function": loss_name,
+            "model_family": model_family,
+        }
+        if upstream_data_run_id is not None:
+            _tags["upstream_data_run_id"] = upstream_data_run_id
+        with mlflow.start_run(tags=_tags) as active_run:
             mlflow_run_id = active_run.info.run_id
             logger.info("MLflow run opened: %s", mlflow_run_id)
 

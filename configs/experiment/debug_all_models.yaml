@@ -30,3 +30,14 @@ models_to_test:
   - sam3_hybrid
   - comma_mamba
   - ulike_mamba
+
+# Quasi-E2E: train all models, then run post_training + analyze once.
+flows:
+  - train
+  - post_training
+  - analyze
+
+post_training:
+  plugins:
+    - swa
+    - calibration

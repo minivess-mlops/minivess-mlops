@@ -20,6 +20,14 @@ USER_OVERRIDES=""
 DRY_RUN=false
 FLOWS_COMPOSE="deployment/docker-compose.flows.yml"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Docker Compose V2 resolves .env from the compose file's directory (deployment/),
+# NOT the working directory. Use --env-file to explicitly load repo-root .env
+# so HF_TOKEN and other secrets defined there reach the containers.
+# Reference: deployment/CLAUDE.md, memory/docker-infra-learnings.md entry #13.
+ENV_FILE_ARG=""
+if [ -f "$REPO_ROOT/.env" ]; then
+  ENV_FILE_ARG="--env-file $REPO_ROOT/.env"
+fi
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 SUMMARY_DIR="outputs/debug"
 
@@ -38,6 +46,10 @@ while [[ $# -gt 0 ]]; do
       exit 1 ;;
   esac
 done
+
+# Export EXPERIMENT so Python subprocesses (YAML parsing) can read it via os.environ.
+# Without this, --experiment CLI flag sets a shell variable (not inherited by subprocess).
+export EXPERIMENT
 
 cd "$REPO_ROOT"
 
@@ -78,11 +90,14 @@ else
   echo "  ✓ Docker daemon running"
 fi
 
-# 2. NVIDIA runtime (warn only — CPU containers still work)
-if ! docker run --rm --gpus all --runtime nvidia alpine:latest true &>/dev/null 2>&1; then
-  echo "  ⚠ NVIDIA runtime unavailable — CPU-only mode"
+# 2. NVIDIA CDI GPU access (required — training without GPU is theater, not training)
+# Uses CDI (docker 25+) — NOT --runtime nvidia (requires daemon config)
+if ! docker run --rm --device nvidia.com/gpu=all ubuntu:22.04 ls /dev/nvidia0 &>/dev/null 2>&1; then
+  echo "  ✗ GPU not accessible via CDI (nvidia.com/gpu=all). Check: nvidia-ctk cdi list"
+  echo "    Training requires GPU. Fix GPU access before proceeding."
+  PREFLIGHT_OK=false
 else
-  echo "  ✓ NVIDIA runtime available"
+  echo "  ✓ GPU accessible via CDI (/dev/nvidia0 present)"
 fi
 
 # 3. minivess-base image
@@ -177,7 +192,14 @@ mkdir -p "$SUMMARY_DIR/logs"
 FLOW_STATUSES=()
 TOTAL_START=$(date +%s)
 
-while IFS= read -r model; do
+# Use readarray to load ALL model names into a bash array upfront.
+# This avoids the stdin-consumption bug: `while read ... done <<< VAR` shares stdin
+# with the loop body. `docker compose run` (even with -T) can read ahead and consume
+# remaining model names from the herestring before the next loop iteration.
+# readarray loads everything in one shot, then the for loop uses no stdin at all.
+readarray -t MODELS_ARRAY <<< "$MODELS_TO_TEST"
+
+for model in "${MODELS_ARRAY[@]}"; do
   [ -z "$model" ] && continue
 
   print_banner "Training: $model (experiment=$EXPERIMENT)"
@@ -191,13 +213,20 @@ while IFS= read -r model; do
     OVERRIDES="$OVERRIDES,$USER_OVERRIDES"
   fi
 
+  # -T: disable pseudo-TTY; </dev/null: detach container stdin.
+  # docker compose run attaches to container stdin by default — without these,
+  # it can consume the shell's stdin unexpectedly.
+  # set +e / set -e: suspend errexit so a failed model doesn't abort the entire
+  # loop — each model is independent and we want all models to attempt training.
+  # PIPESTATUS[0] captures docker compose exit code (not tee's).
+  set +e
   run_or_dry "docker compose train ($model)" \
-    docker compose -f "$FLOWS_COMPOSE" run --rm \
+    docker compose $ENV_FILE_ARG -f "$FLOWS_COMPOSE" run --rm -T \
       -e EXPERIMENT="$EXPERIMENT" \
       -e HYDRA_OVERRIDES="$OVERRIDES" \
-      train 2>&1 | tee "$MODEL_LOG"
-
-  MODEL_STATUS=$?
+      train </dev/null 2>&1 | tee "$MODEL_LOG"
+  MODEL_STATUS=${PIPESTATUS[0]}
+  set -e
   MODEL_END=$(date +%s)
   MODEL_DUR=$(( (MODEL_END - MODEL_START) / 60 ))
 
@@ -209,7 +238,7 @@ while IFS= read -r model; do
     FLOW_STATUSES+=("train/$model:FAILED:${MODEL_DUR}m")
   fi
 
-done <<< "$MODELS_TO_TEST"
+done
 
 # ─── Flow chaining ────────────────────────────────────────────────────────────
 # Run post_training and analyze flows if experiment config specifies them
@@ -222,13 +251,14 @@ for flow in $FLOWS; do
   FLOW_LOG="$SUMMARY_DIR/logs/${TIMESTAMP}_${flow}.log"
   FLOW_START=$(date +%s)
 
+  set +e
   run_or_dry "docker compose $flow" \
-    docker compose -f "$FLOWS_COMPOSE" run --rm \
+    docker compose $ENV_FILE_ARG -f "$FLOWS_COMPOSE" run --rm -T \
       -e UPSTREAM_EXPERIMENT="$EXPERIMENT" \
       -e EXPERIMENT="$EXPERIMENT" \
-      "$flow" 2>&1 | tee "$FLOW_LOG"
-
-  CHAIN_STATUS=$?
+      "$flow" </dev/null 2>&1 | tee "$FLOW_LOG"
+  CHAIN_STATUS=${PIPESTATUS[0]}
+  set -e
   FLOW_END=$(date +%s)
   FLOW_DUR=$(( (FLOW_END - FLOW_START) / 60 ))
 
@@ -248,21 +278,33 @@ TOTAL_DUR=$(( (TOTAL_END - TOTAL_START) / 60 ))
 SUMMARY_JSON="$SUMMARY_DIR/summary_${TIMESTAMP}.json"
 
 if [ "$DRY_RUN" = "false" ]; then
+  # Pass FLOW_STATUSES as a JSON array via a temp file to avoid bash-into-Python
+  # injection (the old approach used ${FLOW_STATUSES[@]} directly in Python source,
+  # producing `statuses = train/dynunet:OK:0m` — a SyntaxError).
+  STATUSES_JSON_FILE=$(mktemp /tmp/minivess-statuses-XXXXXX.json)
+  # Build a JSON array from the bash array
+  printf '%s\n' "${FLOW_STATUSES[@]:-}" | uv run python3 -c "
+import sys, json
+lines = [l.rstrip() for l in sys.stdin if l.strip()]
+json.dump(lines, sys.stdout)
+" > "$STATUSES_JSON_FILE"
+
   uv run python3 - <<PYEOF
 from __future__ import annotations
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-statuses = ${FLOW_STATUSES[@]+"${FLOW_STATUSES[@]}"}
+with open("$STATUSES_JSON_FILE", encoding="utf-8") as f:
+    statuses = json.load(f)
+
 timestamp = "$TIMESTAMP"
 experiment = "$EXPERIMENT"
 total_dur = $TOTAL_DUR
 
 # Parse status strings "flow/model:STATUS:DURm"
 parsed = []
-for s in statuses if isinstance(statuses, list) else [statuses] if statuses else []:
+for s in statuses:
     parts = s.split(":")
     parsed.append({"name": parts[0], "status": parts[1] if len(parts) > 1 else "UNKNOWN",
                    "duration_min": parts[2].rstrip("m") if len(parts) > 2 else "?"})
@@ -279,6 +321,7 @@ out.parent.mkdir(parents=True, exist_ok=True)
 out.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 print(f"  Summary saved: $SUMMARY_JSON")
 PYEOF
+  rm -f "$STATUSES_JSON_FILE"
 fi
 
 print_banner "Debug Run Complete"

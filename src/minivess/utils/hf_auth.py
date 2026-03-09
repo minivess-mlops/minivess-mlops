@@ -30,21 +30,19 @@ _MISSING_TOKEN_INSTRUCTIONS = """\
  HF_TOKEN NOT SET — required for gated models (SAM3, VesselFM)
 ════════════════════════════════════════════════════════════════
 
- Option A — Local dev (.env file, gitignored):
+ PRIMARY FIX — Add to .env file at repo root (ALWAYS preferred):
    echo 'HF_TOKEN=hf_YOUR_TOKEN' >> .env
-   # Token is loaded automatically by train_monitored.py at startup.
 
- Option B — Export for current shell session:
-   export HF_TOKEN=hf_YOUR_TOKEN
+   In Docker Compose V2, .env is loaded from the compose file's
+   directory by default. run_debug.sh passes --env-file .env explicitly
+   so the repo-root .env is always used. If you see this error while
+   using run_debug.sh, check that .env exists at the repo root.
 
- Option C — Run huggingface-cli login once (cached in ~/.cache/hf/token):
+   NEVER use `export HF_TOKEN=...` (shell env vars are ephemeral and
+   not the authoritative source for this project).
+
+ ALTERNATIVE — huggingface-cli login (cached in ~/.cache/hf/token):
    uv run huggingface-cli login
-
- Option D — Docker / RunPod (recommended for containers):
-   Set HF_TOKEN as an environment variable in the container / pod config.
-   RunPod: Pod Settings → Environment Variables → add HF_TOKEN
-   Docker: docker run -e HF_TOKEN=$HF_TOKEN ...
-   docker-compose: env_file: .env  (or environment: HF_TOKEN: ${HF_TOKEN})
 
  Get your token: https://huggingface.co/settings/tokens
  Request SAM3 access: https://huggingface.co/facebook/sam3

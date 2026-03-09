@@ -21,7 +21,10 @@ x-common-env: &common-env
   PREFECT_API_URL: http://${PREFECT_DOCKER_HOST:-minivess-prefect}:${PREFECT_PORT:-4200}/api
   AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin_secret}
-  MLFLOW_S3_ENDPOINT_URL: http://${MINIO_DOCKER_HOST:-minio}:${MINIO_API_PORT:-9000}
+  # MINIO_DOCKER_HOST uses container name (minivess-minio) since flow containers
+  # reach MinIO via minivess-network (not the infra compose project's internal network).
+  # Service name "minio" only resolves within deployment_default network.
+  MLFLOW_S3_ENDPOINT_URL: http://${MINIO_DOCKER_HOST:-minivess-minio}:${MINIO_API_PORT:-9000}
   # Container-internal artifact paths — defaults match .env.example (Rule #22)
   DATA_DIR: ${DATA_DIR:-/app/data}
   CHECKPOINT_DIR: ${CHECKPOINT_DIR:-/app/checkpoints}
@@ -35,6 +38,12 @@ x-common-env: &common-env
   # HuggingFace token for gated models (SAM3, VesselFM).
   # Set HF_TOKEN in .env — never hard-code here.
   HF_TOKEN: ${HF_TOKEN:-}
+  # Model weight cache — mapped from host MODEL_CACHE_HOST_PATH (see .env.example).
+  # HF_HOME: HuggingFace hub cache (models, tokenizers, datasets)
+  # TORCH_HOME: PyTorch hub cache (MONAI pre-trained bundles, torchvision)
+  # Setting these avoids re-downloading multi-GB weights on every container restart.
+  HF_HOME: /model_cache/huggingface
+  TORCH_HOME: /model_cache/torch
 
 x-common-labels: &common-labels
   labels:
@@ -97,13 +106,12 @@ services:
       - checkpoint_cache:/app/checkpoints
       - mlruns_data:/app/mlruns
       - logs_data:/app/logs
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      # Persistent model weight cache — avoids re-downloading SAM3 (~9GB), MONAI bundles.
+      # Host path set by MODEL_CACHE_HOST_PATH in .env (default: /home/petteri/download_cache).
+      - ${MODEL_CACHE_HOST_PATH:-/home/petteri/download_cache}:/model_cache
+    # CDI GPU access — works without nvidia container runtime (Docker 25+)
+    devices:
+      - "nvidia.com/gpu=all"
     networks:
       - minivess
     <<: *common-labels
@@ -265,13 +273,10 @@ services:
       - checkpoint_cache:/app/checkpoints
       - mlruns_data:/app/mlruns
       - logs_data:/app/logs
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      - ${MODEL_CACHE_HOST_PATH:-/home/petteri/download_cache}:/model_cache
+    # CDI GPU access — works without nvidia container runtime (Docker 25+)
+    devices:
+      - "nvidia.com/gpu=all"
     networks:
       - minivess
     <<: *common-labels
@@ -294,13 +299,10 @@ services:
       - checkpoint_cache:/app/checkpoints
       - mlruns_data:/app/mlruns
       - logs_data:/app/logs
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      - ${MODEL_CACHE_HOST_PATH:-/home/petteri/download_cache}:/model_cache
+    # CDI GPU access — works without nvidia container runtime (Docker 25+)
+    devices:
+      - "nvidia.com/gpu=all"
     networks:
       - minivess
     <<: *common-labels

@@ -49,3 +49,21 @@ Accumulated discoveries from TDD iterations. Persists across sessions.
   - V1 Vanilla: ≥16 GB (full ViT-32L must load even when frozen)
   - V2 TopoLoRA: ≥18 GB
   - V3 Hybrid: ≥22 GB
+
+## 2026-03-09 — Docker Infra: 12 Failures on First Staging Run (Issues #524–#532)
+
+- **Discovery**: First full staging run (train → post_training → analyze in Docker) hit 12 distinct infrastructure failures, all fixable but requiring systematic debugging. Root causes documented here for other projects.
+- **Failures and resolutions**:
+  1. Docker named volumes start root-owned → one-time `chown -R 1000:1000` with project-prefixed names (`deployment_*`)
+  2. Docker Compose project name prefix (`deployment_`) must be used for volume names in `docker run` commands
+  3. MLflow 3.x YAML folded scalar bug: `>` preserves newlines → `mlflow server` gets no args → binds 127.0.0.1 → Fixed with list entrypoint + `>-`
+  4. Wrong MLflow security env var: `MLFLOW_ALLOWED_HOSTS` ignored → correct is `MLFLOW_SERVER_ALLOWED_HOSTS`
+  5. Cross-compose service name resolution fails → use container names (`minivess-minio`) not service names (`minio`) on external networks
+  6. MinIO bucket not auto-created → must create `mlflow-artifacts` bucket manually before first run
+  7. Data volume empty → must copy dataset into `deployment_data_cache` before training
+  8. GPU CDI vs nvidia-runtime: `--runtime nvidia` requires daemon config. Use CDI: `devices: ["nvidia.com/gpu=all"]`
+  9. `docker compose run` in while loop consumes herestring stdin → only first model trains. Fix: `readarray` + `for` loop
+  10. Bash variable expansion into Python heredoc: `statuses = ${ARRAY[@]}` → SyntaxError. Fix: temp JSON file
+  11. MLflow tag value `None` → TypeError in protobuf. Fix: filter None before passing tags
+  12. Base image must be rebuilt with `--no-cache` after `src/` changes; train Dockerfile only copies `scripts/`
+- **Persistence**: Full catalog saved in `.claude/projects/.../memory/docker-infra-learnings.md`

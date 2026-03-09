@@ -305,6 +305,40 @@ Each of the 6 Prefect flows runs in its own Docker container:
       `configs/experiment/*.yaml` (22+ experiments), `src/minivess/observability/tracking.py`
       (`log_hydra_config()` method).
 
+24. **ABSOLUTE BAN: Infrastructure Shortcuts / "Good Enough for Now" (Non-Negotiable)** —
+    Every debug run, every training run, every E2E test MUST run with ALL infrastructure
+    at full capacity: GPU, Prefect server, MLflow server, PostgreSQL. There are NO exceptions.
+    **Any infrastructure failure is an immediate STOP, diagnose, FIX — NEVER proceed past it.**
+
+    **BANNED phrases** (each one means I am about to accept a degraded, useless run):
+    - "CPU-only mode" (when GPU is expected — GPU is ALWAYS expected for training)
+    - "we can try without [service]..."
+    - "as a workaround..."
+    - "for now we can..."
+    - "this should still work even though [service] is down..."
+    - "the training will be slower but..."
+    - "it might fall back to..."
+    - Any sentence accepting a degraded state of infrastructure
+
+    **Protocol when any infrastructure check fails:**
+    1. STOP — kill any running containers / processes immediately
+    2. DIAGNOSE — check logs, check configs, understand root cause
+    3. FIX — fix the root cause (not a workaround)
+    4. VERIFY — confirm fix works before proceeding
+    5. PROCEED — only then continue with the original task
+
+    **Infra that must be running for ANY training or E2E test:**
+    - NVIDIA GPU (verify: `docker run --device nvidia.com/gpu=0 ubuntu ls /dev/nvidia*`)
+    - Prefect server (verify: `curl http://localhost:4200/api/health`)
+    - MLflow server (verify: `curl http://localhost:5000/health`)
+    - PostgreSQL (verify: postgres healthcheck in docker-compose.yml)
+    - MinIO (verify: minio healthcheck in docker-compose.yml)
+
+    **This is not a suggestion. This repo exists to demonstrate production ML engineering.**
+    A training run without GPU is not a training run — it is theater.
+    See: `.claude/metalearning/2026-03-09-infrastructure-shortcut-ban.md`
+    Cross-reference: Issues #460, #424, #422, #423, #436 (recurring failures of this rule)
+
 21. **GitHub Actions CI EXPLICITLY DISABLED (Non-Negotiable)** — The user has
     explicitly forbidden automatic GitHub Actions CI. Actions consume credits.
     ALL CI jobs in `ci-v2.yml` are commented out. ALL workflows use

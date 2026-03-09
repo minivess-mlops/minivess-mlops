@@ -41,6 +41,8 @@ dependencies = [
     "pydantic>=2.10,<3.0",
     # Experiment Tracking
     "mlflow>=3.10,<4.0",
+    "boto3>=1.35,<2.0",        # S3/MinIO artifact store for MLflow
+    "psycopg2-binary>=2.9,<3.0",  # PostgreSQL backend for MLflow
     "dvc[s3,gs]>=3.66,<4.0",
     "optuna>=4.7,<5.0",
     "duckdb>=1.2,<2.0",
