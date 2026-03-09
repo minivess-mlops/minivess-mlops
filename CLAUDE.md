@@ -287,58 +287,6 @@ Each of the 6 Prefect flows runs in its own Docker container:
    See `.env.example` for the complete authoritative list of all configurable values.
    See `tests/v2/unit/test_env_single_source.py` for enforcement checks.
 
-23. **Hydra-zen = Single Source of Truth for Experiment Config (Non-Negotiable)** —
-    ALL experiment parameters flow through Hydra-zen composition in
-    `configs/experiment/*.yaml`. The pipeline is: CLI override → Hydra grammar →
-    `compose_experiment_config()` → resolved dict → `log_hydra_config()` → MLflow
-    artifact `config/resolved_config.yaml`. The logged artifact IS the record of
-    what ran — not CLI args, not env vars, not the YAML file alone.
-    - **NEVER** create parallel config systems (custom YAML merge, separate Pydantic
-      models for experiment config, TOML/JSON config files for hyperparameters).
-    - **NEVER** hardcode hyperparameters in Python — parameterize via Hydra YAML.
-    - **NEVER** bypass Hydra composition with direct argparse/env-var config dicts.
-      Env vars like `EXPERIMENT` and `HYDRA_OVERRIDES` feed INTO compose_experiment_config(),
-      they don't replace it.
-    - **ALWAYS** log the resolved config to MLflow via `tracker.log_hydra_config()`.
-    - Debug/test configs are standard experiment YAMLs (`debug_*.yaml`), NOT a separate system.
-    - Key files: `src/minivess/config/compose.py` (composition), `configs/base.yaml` (entry point),
-      `configs/experiment/*.yaml` (22+ experiments), `src/minivess/observability/tracking.py`
-      (`log_hydra_config()` method).
-
-24. **ABSOLUTE BAN: Infrastructure Shortcuts / "Good Enough for Now" (Non-Negotiable)** —
-    Every debug run, every training run, every E2E test MUST run with ALL infrastructure
-    at full capacity: GPU, Prefect server, MLflow server, PostgreSQL. There are NO exceptions.
-    **Any infrastructure failure is an immediate STOP, diagnose, FIX — NEVER proceed past it.**
-
-    **BANNED phrases** (each one means I am about to accept a degraded, useless run):
-    - "CPU-only mode" (when GPU is expected — GPU is ALWAYS expected for training)
-    - "we can try without [service]..."
-    - "as a workaround..."
-    - "for now we can..."
-    - "this should still work even though [service] is down..."
-    - "the training will be slower but..."
-    - "it might fall back to..."
-    - Any sentence accepting a degraded state of infrastructure
-
-    **Protocol when any infrastructure check fails:**
-    1. STOP — kill any running containers / processes immediately
-    2. DIAGNOSE — check logs, check configs, understand root cause
-    3. FIX — fix the root cause (not a workaround)
-    4. VERIFY — confirm fix works before proceeding
-    5. PROCEED — only then continue with the original task
-
-    **Infra that must be running for ANY training or E2E test:**
-    - NVIDIA GPU (verify: `docker run --device nvidia.com/gpu=0 ubuntu ls /dev/nvidia*`)
-    - Prefect server (verify: `curl http://localhost:4200/api/health`)
-    - MLflow server (verify: `curl http://localhost:5000/health`)
-    - PostgreSQL (verify: postgres healthcheck in docker-compose.yml)
-    - MinIO (verify: minio healthcheck in docker-compose.yml)
-
-    **This is not a suggestion. This repo exists to demonstrate production ML engineering.**
-    A training run without GPU is not a training run — it is theater.
-    See: `.claude/metalearning/2026-03-09-infrastructure-shortcut-ban.md`
-    Cross-reference: Issues #460, #424, #422, #423, #436 (recurring failures of this rule)
-
 21. **GitHub Actions CI EXPLICITLY DISABLED (Non-Negotiable)** — The user has
     explicitly forbidden automatic GitHub Actions CI. Actions consume credits.
     ALL CI jobs in `ci-v2.yml` are commented out. ALL workflows use
@@ -363,6 +311,10 @@ Each of the 6 Prefect flows runs in its own Docker container:
   log lines, metric names). Use proper parsers. "Regex is sufficient" is banned.
 - Suggest `python scripts/*.py` as a training or pipeline run command — use Prefect flows.
 - Use `/tmp` or `tempfile.mkdtemp()` for artifacts that must survive Docker container exit.
+- Write an academic citation without a clickable hyperlink. Every citation in any `.md`,
+  Issue, or PR MUST be: `[Author et al. (Year). "Title." *Journal*.](URL)`. If no URL
+  exists, write `[Full citation — preprint pending]` to make the gap visibly explicit.
+  See: `.claude/metalearning/2026-03-09-missing-hyperlinks-academic-references.md`
 - Offer a standalone-script shortcut while a GitHub issue to "fix it properly" is open.
 - Dismiss test failures as "pre-existing" or "not related to current changes" without
   creating a GitHub issue — every observed failure needs immediate action.
@@ -376,11 +328,6 @@ Each of the 6 Prefect flows runs in its own Docker container:
   in flow files — use `resolve_tracking_uri()` or fail loudly on missing env var.
 - Define `mlflow_tracking_uri` or any service URL in Dynaconf TOML files — they are read
   directly from env vars; TOML duplication creates a hidden second source of truth.
-- Create parallel experiment config systems — Hydra-zen is the ONLY experiment config
-  mechanism. No custom YAML merge scripts, no separate debug config Pydantic models,
-  no configs/debug/ directory. Debug configs are `configs/experiment/debug_*.yaml`.
-- Bypass Hydra-zen composition with argparse/env-var config dicts in flow files —
-  flows must call `compose_experiment_config()` and log the resolved dict to MLflow.
 
 ## TDD Workflow (Non-Negotiable)
 
@@ -398,26 +345,6 @@ Every feature, bugfix, or refactor MUST use the self-learning-iterative-coder sk
 **Activation**: Before starting a multi-task implementation, run the [ACTIVATION-CHECKLIST](.claude/skills/self-learning-iterative-coder/ACTIVATION-CHECKLIST.md).
 
 **Skill reference**: `.claude/skills/self-learning-iterative-coder/SKILL.md`
-
-## Datasets (Layer 0 — always discoverable)
-
-Full documentation: **`docs/datasets/README.md`** (single authoritative reference).
-Authoritative code registry: **`src/minivess/data/external_datasets.py`**.
-
-| Dataset | Role | Volumes | Modality | Source |
-|---------|------|---------|----------|--------|
-| **MiniVess** | Primary training | 70 | 2PM mouse brain vasculature | EBRAINS `bf268b89-...` |
-| **DeepVess** | External test only | ~6 sub-vols | Multi-photon mouse brain | Cornell eCommons |
-| **TubeNet 2PM** | External test only | ~2 sub-vols | Two-photon mouse brain | UCL Figshare |
-| **VesselNN** | External test only | 12 | Two-photon mouse brain | github.com/petteriTeikari/vesselNN |
-
-**Critical facts (no need to search):**
-- MiniVess splits: 3-fold, seed=42, defined in `configs/splits/3fold_seed42.json` (47 train / 23 val)
-- mv02 outlier: spacing 4.97 μm → OOM with Spacingd. Fix: `voxel_spacing=(0,0,0)` disables Spacingd
-- VesselFM was pre-trained on MiniVess (1 of 17 datasets) → data leakage on MiniVess eval
-- External datasets are test-only — never used in training folds
-- Download: `scripts/download_minivess.py` (EBRAINS API → ZIP fallback → already-present check)
-- DVC: `data/minivess.dvc` tracks 211 files (984 MB compressed); HF Hub: `hf://datasets/minivess/minivess-data`
 
 ## Default Loss Function
 
