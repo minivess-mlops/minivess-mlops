@@ -141,12 +141,31 @@ CRITICAL RULES (from CLAUDE.md — non-negotiable):
 - GitHub Actions EXPLICITLY DISABLED — never add automatic CI triggers
 - Every test failure must be fixed or reported immediately
 
-After all phases complete:
-1. uv run pytest (relevant test files) -q
-2. uv run pre-commit run --all-files
-3. git push -u origin HEAD
-4. gh pr create with descriptive title and body
-5. Report completion status"
+COMPLETION PROTOCOL — mandatory, no shortcuts, no exceptions:
+
+STEP 1 — FULL TEST SUITE (loop until zero failures):
+  uv run pytest tests/ -x -q
+  - If ANY test fails: diagnose root cause, fix code, run full suite again from scratch
+  - NEVER use -k, --ignore, or -m to reduce scope
+  - NEVER add xfail/skip markers to hide failures — fix the root cause
+  - Repeat until pytest exits 0 with zero failures
+
+STEP 2 — PRE-COMMIT ON ALL FILES (loop until fully clean):
+  uv run pre-commit run --all-files
+  - If ANY hook fails: fix the issue, run --all-files again
+  - NEVER use --no-verify, SKIP= env var, or bypass any hook
+  - Repeat until all hooks pass with exit 0
+
+STEP 3 — ONLY after Step 1 AND Step 2 are both exit 0:
+  git push -u origin HEAD
+  gh pr create with descriptive title and body
+  Report completion status.
+
+FORBIDDEN (each is a violation — do not do any of these):
+  pytest -k 'subset'      never filter tests
+  pytest --ignore=...     never ignore test directories
+  git commit --no-verify  never bypass pre-commit
+  SKIP=hook pre-commit    never skip individual hooks"
   ) 2>&1 \
     | tee "${log_file}" \
     | jq -rj 'select(.type=="stream_event" and (.event.delta.type?=="text_delta")) | .event.delta.text' \
