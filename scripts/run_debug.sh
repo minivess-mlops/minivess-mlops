@@ -20,6 +20,14 @@ USER_OVERRIDES=""
 DRY_RUN=false
 FLOWS_COMPOSE="deployment/docker-compose.flows.yml"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Docker Compose V2 resolves .env from the compose file's directory (deployment/),
+# NOT the working directory. Use --env-file to explicitly load repo-root .env
+# so HF_TOKEN and other secrets defined there reach the containers.
+# Reference: deployment/CLAUDE.md, memory/docker-infra-learnings.md entry #13.
+ENV_FILE_ARG=""
+if [ -f "$REPO_ROOT/.env" ]; then
+  ENV_FILE_ARG="--env-file $REPO_ROOT/.env"
+fi
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 SUMMARY_DIR="outputs/debug"
 
@@ -213,7 +221,7 @@ for model in "${MODELS_ARRAY[@]}"; do
   # PIPESTATUS[0] captures docker compose exit code (not tee's).
   set +e
   run_or_dry "docker compose train ($model)" \
-    docker compose -f "$FLOWS_COMPOSE" run --rm -T \
+    docker compose $ENV_FILE_ARG -f "$FLOWS_COMPOSE" run --rm -T \
       -e EXPERIMENT="$EXPERIMENT" \
       -e HYDRA_OVERRIDES="$OVERRIDES" \
       train </dev/null 2>&1 | tee "$MODEL_LOG"
@@ -245,7 +253,7 @@ for flow in $FLOWS; do
 
   set +e
   run_or_dry "docker compose $flow" \
-    docker compose -f "$FLOWS_COMPOSE" run --rm -T \
+    docker compose $ENV_FILE_ARG -f "$FLOWS_COMPOSE" run --rm -T \
       -e UPSTREAM_EXPERIMENT="$EXPERIMENT" \
       -e EXPERIMENT="$EXPERIMENT" \
       "$flow" </dev/null 2>&1 | tee "$FLOW_LOG"

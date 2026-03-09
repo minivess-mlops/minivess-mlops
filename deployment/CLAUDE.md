@@ -123,6 +123,25 @@ entrypoint: >
     --host 0.0.0.0"  # BUG: this newline is a shell command separator!
 ```
 
+## Docker Compose V2 .env Loading — CRITICAL
+
+Docker Compose V2 looks for `.env` in the **compose file's directory** (e.g., `deployment/`),
+NOT the working directory. The repo root `.env` is INVISIBLE to Docker Compose V2 by default.
+
+**ALL `docker compose` invocations MUST use `--env-file /path/to/repo/.env`:**
+```bash
+# CORRECT — .env loaded from repo root:
+docker compose --env-file /path/to/repo/.env -f deployment/docker-compose.flows.yml run train
+
+# BROKEN — .env at repo root NOT loaded (Docker Compose looks in deployment/):
+docker compose -f deployment/docker-compose.flows.yml run train
+```
+
+`scripts/run_debug.sh` handles this automatically via `ENV_FILE_ARG`. Any new script or
+Makefile target that invokes `docker compose` MUST include `--env-file`.
+
+**NEVER** tell users to `export HF_TOKEN=...` — all secrets belong in `.env`.
+
 ## Running Flows
 
 ```bash
