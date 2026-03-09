@@ -225,6 +225,7 @@ for flow in $FLOWS; do
   run_or_dry "docker compose $flow" \
     docker compose -f "$FLOWS_COMPOSE" run --rm \
       -e UPSTREAM_EXPERIMENT="$EXPERIMENT" \
+      -e EXPERIMENT="$EXPERIMENT" \
       "$flow" 2>&1 | tee "$FLOW_LOG"
 
   CHAIN_STATUS=$?

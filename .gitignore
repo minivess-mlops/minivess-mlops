@@ -20,6 +20,9 @@ configs/deployment/.secrets.toml
 .venv/
 uv.lock
 
+# nohup output (created by overnight batch scripts)
+nohup.out
+
 # Python
 __pycache__/
 *.pyo

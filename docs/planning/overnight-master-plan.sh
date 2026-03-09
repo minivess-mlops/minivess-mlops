@@ -48,7 +48,7 @@ for idx in "${!CHILDREN[@]}"; do
 
   START=$(date +%s)
 
-  if claude --dangerously-skip-permissions -p \
+  if stdbuf -o0 claude --dangerously-skip-permissions -p \
     "Read and execute $plan autonomously. Follow ALL instructions exactly. Commit after each phase. Push, create PR, close issues when done. Then stop." \
     2>&1 | tee "$log"; then
 

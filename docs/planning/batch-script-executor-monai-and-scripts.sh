@@ -195,7 +195,7 @@ for idx in "${!PLAN_FILES[@]}"; do
   # 3. Run pre-commit
   # 4. Create PR
   # 5. Merge the PR
-  if claude --dangerously-skip-permissions -p \
+  if stdbuf -o0 claude --dangerously-skip-permissions -p \
     "You are executing an autonomous overnight plan. Read and execute the plan at:
 $plan
 

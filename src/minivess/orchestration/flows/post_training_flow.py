@@ -263,11 +263,17 @@ def post_training_flow(
     tracking_uri = resolve_tracking_uri()
     mlflow_run_id: str | None = None
 
+    # Read upstream experiment name from env (Rule #22 — single-source config).
+    # UPSTREAM_EXPERIMENT: which training experiment to search for upstream runs.
+    # EXPERIMENT: which experiment to log post-training results to (defaults to same).
+    upstream_exp = os.environ.get("UPSTREAM_EXPERIMENT", "minivess_training")
+    log_exp = os.environ.get("EXPERIMENT", upstream_exp)
+
     # Find upstream training run (explicit param takes priority over auto-discovery)
     if upstream_training_run_id is None:
         upstream = find_upstream_safely(
             tracking_uri=tracking_uri,
-            experiment_name="minivess_training",
+            experiment_name=upstream_exp,
             upstream_flow="train",
         )
         upstream_training_run_id = upstream["run_id"] if upstream else None
@@ -276,7 +282,7 @@ def post_training_flow(
         import mlflow
 
         mlflow.set_tracking_uri(tracking_uri)
-        mlflow.set_experiment("minivess_training")
+        mlflow.set_experiment(log_exp)
         with mlflow.start_run(
             tags={
                 "flow_name": "post-training-flow",
@@ -321,9 +327,6 @@ def post_training_flow(
 
 
 if __name__ == "__main__":
-    # Reads UPSTREAM_EXPERIMENT env var to discover the correct MLflow
-    # training experiment for post-training processing.
-    import os as _os
-
-    _upstream_experiment = _os.environ.get("UPSTREAM_EXPERIMENT")
+    # Docker entry point.  UPSTREAM_EXPERIMENT and EXPERIMENT are read inside
+    # the flow function body — no need to pass them as arguments here.
     post_training_flow()

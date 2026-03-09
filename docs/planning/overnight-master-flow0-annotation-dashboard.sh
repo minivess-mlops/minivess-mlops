@@ -6,11 +6,14 @@
 # Runs 3 child plans sequentially via Claude Code headless sessions.
 # Each child plan is a self-contained TDD branch.
 #
-# Usage:
+# Usage (foreground — all output to terminal + saved to logs):
 #   chmod +x docs/planning/overnight-master-flow0-annotation-dashboard.sh
-#   nohup ./docs/planning/overnight-master-flow0-annotation-dashboard.sh \
-#     > /tmp/overnight-master.log 2>&1 &
-#   tail -f /tmp/overnight-master.log
+#   ./docs/planning/overnight-master-flow0-annotation-dashboard.sh
+#
+# Run in screen/tmux to survive disconnects (DO NOT use nohup — it hides output):
+#   screen -S overnight
+#   ./docs/planning/overnight-master-flow0-annotation-dashboard.sh
+#   # Ctrl-A D to detach, `screen -r overnight` to reattach
 #
 # RAM note: each Claude Code session accumulates context (10-20 GB Node.js heap
 # over hundreds of tool calls). Sessions are SEQUENTIAL — one at a time — so
@@ -107,7 +110,8 @@ After completing all phases:
 Start now — read the plan and begin Phase 0.
 PROMPT_EOF
 
-  (cd "${REPO_ROOT}" && claude \
+  # stdbuf -o0 forces line-buffered output so logs appear in real-time (not at process end)
+  (cd "${REPO_ROOT}" && stdbuf -o0 claude \
     --dangerously-skip-permissions \
     -p "$(cat "${prompt_file}")" \
   ) 2>&1 | tee "${log_file}"

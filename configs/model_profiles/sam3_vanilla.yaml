@@ -1,0 +1,18 @@
+name: sam3_vanilla
+divisor: 16
+model_overhead_mb: 400
+bytes_per_voxel_amp: 12
+bytes_per_voxel_fp32: 24
+max_batch_size:
+  cpu: 1
+  gpu_low: 1
+  gpu_high: 2
+  gpu_extreme: 4
+default_patch_xy: 64
+notes: >
+  SAM3 Vanilla (Meta, Nov 2025). ViT-32L backbone (648M params).
+  SDPA mandatory — attn_implementation='sdpa' is enforced at build time
+  (eager = OOM). Depth last: MONAI dimension order (B,C,H,W,D).
+  Training on 8 GB GPU: patch=(64,64,3), batch=1, val_roi=(512,512,3),
+  val_interval=10. Pretrained weights required (ViT-32L, 1008x1008).
+  See src/minivess/adapters/CLAUDE.md and metalearning/2026-03-02-sam3.md.

@@ -144,3 +144,51 @@ class TestAllDebugConfigs:
         assert cfg["max_train_volumes"] <= 4, (
             f"{name} max_train_volumes must be small for debug"
         )
+
+
+class TestModelConfigs:
+    """Verify that every model listed in debug_all_models.yaml has YAML configs.
+
+    T-1.5 RED: these tests FAIL when comma_mamba.yaml / ulike_mamba.yaml /
+    sam3_vanilla.yaml (model_profiles) / sam3_hybrid.yaml (model_profiles) are absent.
+    T-1.5 GREEN: create the 4 missing files.
+    """
+
+    def _models_to_test(self) -> list[str]:
+        """Load models_to_test list from debug_all_models.yaml (yaml.safe_load, not regex)."""
+        from pathlib import Path
+
+        import yaml
+
+        cfg_path = Path("configs/experiment/debug_all_models.yaml")
+        cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        return cfg.get("models_to_test", [])
+
+    def test_all_debug_models_have_model_yaml(self) -> None:
+        """Every model in debug_all_models.yaml must have a configs/model/<model>.yaml."""
+        from pathlib import Path
+
+        missing = []
+        for model in self._models_to_test():
+            yaml_path = Path(f"configs/model/{model}.yaml")
+            if not yaml_path.exists():
+                missing.append(str(yaml_path))
+
+        assert not missing, "Missing model YAML files:\n" + "\n".join(
+            f"  {p}" for p in missing
+        )
+
+    def test_all_debug_models_have_profile_yaml(self) -> None:
+        """Every model in debug_all_models.yaml must have a configs/model_profiles/<model>.yaml."""
+        from pathlib import Path
+
+        # dynunet maps to dynunet.yaml (already exists)
+        missing = []
+        for model in self._models_to_test():
+            profile_path = Path(f"configs/model_profiles/{model}.yaml")
+            if not profile_path.exists():
+                missing.append(str(profile_path))
+
+        assert not missing, "Missing model_profiles YAML files:\n" + "\n".join(
+            f"  {p}" for p in missing
+        )

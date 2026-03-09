@@ -1737,22 +1737,123 @@ def run_analysis_flow(
     }
 
 
+# ---------------------------------------------------------------------------
+# Docker entry point helpers
+# ---------------------------------------------------------------------------
+
+
+def _load_config_from_mlflow(run_id: str, tracking_uri: str) -> dict[str, Any]:
+    """Load resolved experiment config from MLflow artifact (config/resolved_config.yaml).
+
+    Falls back to empty dict if the artifact is not present (e.g. legacy runs).
+    """
+    import yaml
+
+    try:
+        import mlflow
+
+        mlflow.set_tracking_uri(tracking_uri)
+        client = mlflow.MlflowClient()
+        local_path = client.download_artifacts(run_id, "config/resolved_config.yaml")
+        with open(local_path, encoding="utf-8") as fh:
+            return yaml.safe_load(fh) or {}
+    except Exception:
+        logger.warning(
+            "Could not load config/resolved_config.yaml for run %s — using defaults",
+            run_id,
+        )
+        return {}
+
+
+def _build_eval_config_from_dict(config_dict: dict[str, Any]) -> EvaluationConfig:
+    """Build EvaluationConfig from a resolved config dict.
+
+    Overrides mlflow_training_experiment from config when available.
+    """
+    from minivess.config.evaluation_config import EvaluationConfig
+
+    upstream_exp = os.environ.get("UPSTREAM_EXPERIMENT")
+    overrides: dict[str, Any] = {}
+    if upstream_exp:
+        overrides["mlflow_training_experiment"] = upstream_exp
+    return EvaluationConfig(**overrides)
+
+
+def _build_model_config_from_dict(config_dict: dict[str, Any]) -> dict[str, Any]:
+    """Extract model configuration dict from resolved config.
+
+    Returns the 'model' sub-dict if present, otherwise wraps the full dict.
+    """
+    result: dict[str, Any] = config_dict.get("model") or config_dict
+    return result
+
+
+def _build_dataloaders_from_config(config_dict: dict[str, Any]) -> dict[str, Any]:
+    """Build minimal dataloaders dict from config for Docker entry point.
+
+    Returns an empty dict — the analysis flow accepts empty dataloaders and
+    builds loaders internally when running in full pipeline mode.
+    In Docker entry point mode the flow discovers checkpoints via MLflow,
+    not via pre-built dataloaders.
+    """
+    return {}
+
+
+def _entry_point_from_env() -> dict[str, Any]:
+    """Discover analysis parameters from UPSTREAM_EXPERIMENT env var.
+
+    Called by the Docker entry point (__main__) to build the parameters
+    needed by run_analysis_flow() without requiring the caller to supply
+    eval_config, model_config_dict, and dataloaders_dict explicitly.
+
+    Returns
+    -------
+    dict with keys: eval_config, model_config_dict, dataloaders_dict,
+                    upstream_training_run_id, tracking_uri
+    """
+    upstream_exp = os.environ.get("UPSTREAM_EXPERIMENT")
+    if not upstream_exp:
+        raise RuntimeError(
+            "UPSTREAM_EXPERIMENT not set.\n"
+            "Run: docker compose run -e UPSTREAM_EXPERIMENT=<experiment_name> analyze\n"
+            "Example: docker compose run -e UPSTREAM_EXPERIMENT=debug_full_pipeline analyze"
+        )
+
+    tracking_uri = resolve_tracking_uri()
+    upstream = find_upstream_safely(
+        tracking_uri=tracking_uri,
+        experiment_name=upstream_exp,
+        upstream_flow="train",
+    )
+    if not upstream:
+        raise RuntimeError(
+            f"No completed training runs found in experiment '{upstream_exp}'. "
+            "Run training first: docker compose run -e EXPERIMENT=<name> train"
+        )
+
+    config_dict = _load_config_from_mlflow(upstream["run_id"], tracking_uri)
+    eval_config = _build_eval_config_from_dict(config_dict)
+    model_config_dict = _build_model_config_from_dict(config_dict)
+    dataloaders_dict = _build_dataloaders_from_config(config_dict)
+
+    return {
+        "eval_config": eval_config,
+        "model_config_dict": model_config_dict,
+        "dataloaders_dict": dataloaders_dict,
+        "upstream_training_run_id": upstream["run_id"],
+        "tracking_uri": tracking_uri,
+    }
+
+
 if __name__ == "__main__":
     # Docker entry point — reads UPSTREAM_EXPERIMENT env var to discover
     # the correct MLflow training experiment for analysis.
-    # Direct invocation without UPSTREAM_EXPERIMENT prints usage instructions.
-    _upstream_experiment = os.environ.get("UPSTREAM_EXPERIMENT")
-    if _upstream_experiment:
-        raise SystemExit(
-            f"UPSTREAM_EXPERIMENT={_upstream_experiment} detected. "
-            "analysis_flow requires eval_config, model_config_dict, and "
-            "dataloaders_dict built by the pipeline orchestrator. "
-            "Use: prefect deployment run 'analysis-flow/default' "
-            f'--params \'{{"upstream_experiment": "{_upstream_experiment}"}}\''
-        )
-    raise SystemExit(
-        "analysis_flow cannot be invoked directly — it requires eval_config, "
-        "model_config_dict, and dataloaders_dict parameters.\n"
-        "Use: prefect deployment run 'analysis-flow/default'\n"
-        "Set UPSTREAM_EXPERIMENT env var to specify the training experiment."
+    # UPSTREAM_EXPERIMENT and EXPERIMENT are single-source config (Rule #22).
+    params = _entry_point_from_env()
+    run_analysis_flow(
+        eval_config=params["eval_config"],
+        model_config_dict=params["model_config_dict"],
+        dataloaders_dict=params["dataloaders_dict"],
+        upstream_training_run_id=params["upstream_training_run_id"],
+        tracking_uri=params["tracking_uri"],
     )

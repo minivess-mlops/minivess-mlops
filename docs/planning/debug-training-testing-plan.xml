@@ -1,0 +1,788 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MinIVess MLOps — Debug Training Pipeline Testing Plan
+  Branch: test/debug-training-pipeline
+  Dual mandate:
+    (A) Validate that the train→post_training→analyze chain runs end-to-end (mechanics only)
+    (B) Fix every real bug found along the way — root cause first, no panic fixes
+  Real metric values do NOT matter. 2 epochs, 2 train vols, 2 val vols, 3 folds.
+-->
+<plan id="debug-training-pipeline">
+  <metadata>
+    <title>Debug Training Pipeline — Quasi-E2E Mechanics Validation</title>
+    <branch>test/debug-training-pipeline</branch>
+    <base-branch>main</base-branch>
+    <entry-script>scripts/run_debug.sh</entry-script>
+    <justfile-recipes>debug, debug-all-models, debug-pipeline, debug-multi-loss</justfile-recipes>
+    <estimated-duration>90–180 min (depends on number of bugs found)</estimated-duration>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <dual-mandate>
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+    <mandate id="A">
+      MECHANICS VALIDATION: Verify that the Docker → Prefect → MLflow → train →
+      post_training → analyze chain runs without crashing for every model listed in
+      configs/experiment/debug_all_models.yaml. Numbers do not matter.
+      Any run that completes without exception = PASS.
+    </mandate>
+    <mandate id="B">
+      BUG FIXING PROTOCOL (non-negotiable):
+      1. Observe failure → read FULL traceback (not just last line)
+      2. Identify root cause (wrong import, missing env var, bad config key, etc.)
+      3. Create GitHub issue: gh issue create --title "fix(train-debug): [root cause]"
+      4. Write failing unit test that reproduces the root cause
+      5. Fix the root cause (not the symptom)
+      6. Verify fix: re-run only the failing step, not the full suite
+      7. Commit fix to test/debug-training-pipeline branch
+      BANNED: adding try/except to silence errors, hardcoded fallback values,
+      skipping the failing test, re-running hoping it goes away.
+    </mandate>
+  </dual-mandate>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <reviewer-findings id="pre-run-blockers">
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!--
+      Two reviewer agents identified CRITICAL blockers that will crash the pipeline
+      before any model runs. FIX THESE FIRST (Phase -1) before Phase 0.
+
+      BLOCKER #1 (Reviewer A — Infrastructure): analysis_flow entry point
+        analysis_flow.py __main__ unconditionally raises SystemExit with instructions
+        to "use Prefect deployment". When docker compose runs the analyze container,
+        it immediately exits with code 1 — before any model evaluation.
+        File: src/minivess/orchestration/flows/analysis_flow.py, lines 1740-1758
+        Root cause: run_analysis_flow() requires eval_config + model_config_dict +
+        dataloaders_dict — complex objects that cannot be passed via env vars.
+        Fix: implement _entry_point_from_env() that discovers params from MLflow
+        artifacts of the upstream training run (experiment_name from UPSTREAM_EXPERIMENT).
+
+      BLOCKER #2 (Reviewer A — Infrastructure): post_training hardcodes experiment name
+        post_training_flow.py line 270: find_upstream_safely(experiment_name="minivess_training")
+        HARDCODED — ignores UPSTREAM_EXPERIMENT env var.
+        Also line 279: mlflow.set_experiment("minivess_training") HARDCODED.
+        Also __main__ (line 328): reads UPSTREAM_EXPERIMENT but never passes it to flow.
+        Result: post_training searches wrong MLflow experiment, finds no training runs.
+        Fix: propagate os.environ.get("UPSTREAM_EXPERIMENT") through the call chain.
+
+      BLOCKER #3 (Reviewer B — Models): Missing model config YAMLs
+        configs/model/comma_mamba.yaml → MISSING (Hydra will fail to compose)
+        configs/model/ulike_mamba.yaml → MISSING (Hydra will fail to compose)
+        configs/model_profiles/sam3_vanilla.yaml → MISSING (no VRAM budgeting)
+        configs/model_profiles/sam3_hybrid.yaml → MISSING (no VRAM budgeting)
+        Fix: create these 4 YAML files before running debug_all_models.
+
+      CORRECTED risk assessment (Reviewer B):
+        sam3_vanilla: MEDIUM (HF token required; SDPA enforced → 2.9 GB VRAM ✓)
+        sam3_hybrid:  MEDIUM (same + DynUNet fusion ~3.4 GB VRAM ✓)
+        comma_mamba:  MEDIUM (batch=1, patch=(48,48,24) required; model config missing)
+        ulike_mamba:  LOW (pure PyTorch SSM, batch=4 on 8 GB ✓; model config missing)
+    -->
+  </reviewer-findings>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <phase id="-1" name="Pre-run blockers — fix before anything else">
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+    <rationale>
+      Reviewer agents identified 3 blockers that will crash the debug pipeline
+      before any training runs. These must be fixed first using TDD (red→green).
+    </rationale>
+
+    <task id="T-1.1" name="RED: Tests for post_training UPSTREAM_EXPERIMENT propagation">
+      <description>
+        Create tests/unit/orchestration/test_post_training_upstream_experiment.py:
+
+        class TestPostTrainingUpstreamExperiment:
+          - test_finds_upstream_from_env_var(monkeypatch) — set UPSTREAM_EXPERIMENT=foo,
+            mock find_upstream_safely, verify it is called with experiment_name="foo"
+          - test_hardcoded_experiment_name_banned() — parse post_training_flow.py with
+            ast.parse(); verify no Constant node with value "minivess_training" exists
+            in the flow body (using ast.walk(), NOT regex — Rule #16)
+          - test_flow_logs_to_upstream_experiment(monkeypatch) — set EXPERIMENT=debug_foo,
+            mock mlflow.set_experiment, verify called with "debug_foo"
+          - test_main_passes_upstream_to_flow(monkeypatch) — set UPSTREAM_EXPERIMENT=bar,
+            mock post_training_flow(), verify call receives the env var value
+      </description>
+    </task>
+
+    <task id="T-1.2" name="GREEN: Fix post_training_flow hardcoded experiment names">
+      <description>
+        Fix src/minivess/orchestration/flows/post_training_flow.py:
+
+        1. In find_upstream_safely call (currently line 270):
+           upstream_exp = os.environ.get("UPSTREAM_EXPERIMENT", "minivess_training")
+           upstream = find_upstream_safely(
+               tracking_uri=tracking_uri,
+               experiment_name=upstream_exp,
+               upstream_flow="train",
+           )
+
+        2. In mlflow.set_experiment (currently line 279):
+           mlflow_exp = os.environ.get("EXPERIMENT", "minivess_training")
+           mlflow.set_experiment(mlflow_exp)
+
+        3. Fix __main__ block to pass env var to flow:
+           _upstream_experiment = _os.environ.get("UPSTREAM_EXPERIMENT")
+           post_training_flow()  # ensure flow reads env var internally (step 1 above handles it)
+      </description>
+    </task>
+
+    <task id="T-1.3" name="RED: Tests for analysis_flow Docker entry point">
+      <description>
+        Create tests/unit/orchestration/test_analysis_flow_entry_point.py:
+
+        class TestAnalysisFlowEntryPoint:
+          - test_entry_point_from_env_exists() — import analysis_flow; assert hasattr module,
+            "_entry_point_from_env"
+          - test_entry_point_reads_upstream_experiment(monkeypatch, tmp_path) — set
+            UPSTREAM_EXPERIMENT=foo, mock find_upstream_safely to return a fake run,
+            verify _entry_point_from_env() does not raise and returns non-None params
+          - test_main_block_does_not_raise_on_upstream_experiment(monkeypatch) — set
+            UPSTREAM_EXPERIMENT=foo, mock _entry_point_from_env, verify __main__ no longer
+            raises SystemExit unconditionally
+          - test_main_raises_without_upstream_experiment() — clear UPSTREAM_EXPERIMENT,
+            verify __main__ raises RuntimeError (not SystemExit) with useful message
+      </description>
+    </task>
+
+    <task id="T-1.4" name="GREEN: Implement analysis_flow Docker entry point">
+      <description>
+        Implement in src/minivess/orchestration/flows/analysis_flow.py:
+
+        def _entry_point_from_env() -> dict[str, Any]:
+            """Discover analysis parameters from UPSTREAM_EXPERIMENT env var."""
+            upstream_exp = os.environ.get("UPSTREAM_EXPERIMENT")
+            if not upstream_exp:
+                raise RuntimeError(
+                    "UPSTREAM_EXPERIMENT not set. "
+                    "Run: docker compose run -e UPSTREAM_EXPERIMENT=debug_full_pipeline analyze"
+                )
+            tracking_uri = resolve_tracking_uri()
+            upstream = find_upstream_safely(
+                tracking_uri=tracking_uri,
+                experiment_name=upstream_exp,
+                upstream_flow="train",
+            )
+            if not upstream:
+                raise RuntimeError(f"No training runs found in experiment '{upstream_exp}'")
+            # Load config from MLflow artifact (or use minimal defaults for debug)
+            config_dict = _load_config_from_mlflow(upstream["run_id"], tracking_uri)
+            eval_config = _build_eval_config_from_dict(config_dict)
+            model_config_dict = _build_model_config_from_dict(config_dict)
+            dataloaders_dict = _build_dataloaders_from_config(config_dict)
+            return {
+                "eval_config": eval_config,
+                "model_config_dict": model_config_dict,
+                "dataloaders_dict": dataloaders_dict,
+                "upstream_training_run_id": upstream["run_id"],
+                "tracking_uri": tracking_uri,
+            }
+
+        Replace __main__ block:
+        if __name__ == "__main__":
+            _require_docker_context()
+            params = _entry_point_from_env()
+            result = run_analysis_flow(**params)
+            sys.exit(0 if result.get("status") == "success" else 1)
+
+        Note: This is a significant refactor. The helper functions
+        (_load_config_from_mlflow, _build_eval_config_from_dict, etc.) must be
+        implemented using MLflow artifacts from the training run. If these artifacts
+        don't exist (debug runs), fall back to minimal defaults (debug=True mode).
+      </description>
+    </task>
+
+    <task id="T-1.5" name="RED+GREEN: Create 4 missing YAML configs">
+      <description>
+        1. RED: Add to tests/unit/config/test_debug_experiment_configs.py:
+           class TestModelConfigs:
+             - test_all_debug_models_have_model_yaml() — for each model in
+               debug_all_models.yaml[models_to_test], assert Path(f"configs/model/{model}.yaml").exists()
+             - test_all_debug_models_have_profile_yaml() — for each model, assert
+               Path(f"configs/model_profiles/{model}.yaml").exists() or model == "dynunet"
+               (dynunet profile YAML is dynunet.yaml, matches)
+
+        2. GREEN: Create:
+           configs/model/comma_mamba.yaml — references CommaAdapter
+           configs/model/ulike_mamba.yaml — references MambaAdapter
+           configs/model_profiles/sam3_vanilla.yaml — overhead=400MB, bytes_per_voxel_amp=12,
+             gpu_low batch=1, patch_xy=64, notes="SDPA mandatory; attn_implementation=sdpa enforced"
+           configs/model_profiles/sam3_hybrid.yaml — similar to vanilla + DynUNet fusion overhead
+      </description>
+    </task>
+
+    <task id="T-1.6" name="Fix run_debug.sh: pass EXPERIMENT to post_training and analyze">
+      <description>
+        In scripts/run_debug.sh, update the flow chaining section (lines 225-228):
+
+        BEFORE:
+          docker compose -f "$FLOWS_COMPOSE" run --rm \
+            -e UPSTREAM_EXPERIMENT="$EXPERIMENT" \
+            "$flow" 2>&1 | tee "$FLOW_LOG"
+
+        AFTER:
+          docker compose -f "$FLOWS_COMPOSE" run --rm \
+            -e UPSTREAM_EXPERIMENT="$EXPERIMENT" \
+            -e EXPERIMENT="$EXPERIMENT" \
+            "$flow" 2>&1 | tee "$FLOW_LOG"
+
+        This propagates both:
+          UPSTREAM_EXPERIMENT: where to find training runs (read-only)
+          EXPERIMENT: where to log own results (write)
+      </description>
+    </task>
+
+    <task id="T-1.7" name="Verify all pre-run fixes pass tests">
+      <steps>
+        uv run pytest tests/unit/orchestration/test_post_training_upstream_experiment.py -v
+        uv run pytest tests/unit/orchestration/test_analysis_flow_entry_point.py -v
+        uv run pytest tests/unit/config/test_debug_experiment_configs.py -v
+        uv run pre-commit run --all-files
+      </steps>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <phase id="0" name="Infrastructure preflight">
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+    <rationale>
+      Catch obvious blockers before any training runs. Building Docker images
+      up-front avoids mid-run surprises.
+    </rationale>
+
+    <task id="T0.1" name="Verify dev services are running">
+      <steps>
+        docker compose -f deployment/docker-compose.yml --profile dev ps
+      </steps>
+      <expected>
+        PostgreSQL, MinIO, MLflow, Prefect all in "Up" or "running" state.
+        If not: just dev
+      </expected>
+      <on-failure>
+        Services not starting = infrastructure bug. Check docker-compose.yml,
+        port conflicts (mlflow:5000, prefect:4200, postgres:5432, minio:9000).
+        Fix the compose file, do NOT use host-env fallbacks.
+      </on-failure>
+    </task>
+
+    <task id="T0.2" name="Verify and build required Docker images">
+      <steps>
+        # Check which images already exist:
+        docker images --format "table {{.Repository}}:{{.Tag}}" | grep minivess
+
+        # Known to exist: minivess-base:latest, minivess-train:latest (20.6 GB each)
+        # Likely MISSING: minivess-post-training, minivess-analyze
+        # Build only what is missing (do NOT rebuild train — 20 GB, takes 30+ min):
+        docker compose -f deployment/docker-compose.flows.yml build post_training analyze
+      </steps>
+      <expected>
+        minivess-post-training:latest and minivess-analyze:latest exist after build.
+      </expected>
+      <on-failure>
+        Build error → read Dockerfile.post_training / Dockerfile.analyze.
+        Common causes: missing apt package, bad COPY path, Python import at build time.
+        Fix the Dockerfile. Open GitHub issue.
+      </on-failure>
+    </task>
+
+    <task id="T0.3" name="Dry-run preflight check">
+      <steps>
+        bash scripts/run_debug.sh --experiment debug_full_pipeline --dry-run
+      </steps>
+      <expected>
+        Script prints DRY-RUN commands for: train (dynunet) + post_training + analyze.
+        No errors. Confirms: experiment YAML exists, Docker daemon available,
+        minivess-base:latest found.
+      </expected>
+    </task>
+
+    <task id="T0.5" name="Verify all models_to_test have config files">
+      <steps>
+        for model in dynunet sam3_vanilla sam3_hybrid comma_mamba ulike_mamba; do
+          if [ ! -f "configs/model/${model}.yaml" ]; then
+            echo "MISSING: configs/model/${model}.yaml — run Phase -1 task T-1.5"
+            exit 1
+          fi
+          echo "  ✓ configs/model/${model}.yaml"
+        done
+      </steps>
+      <expected>All 5 model config YAMLs found (created in Phase -1 T-1.5).</expected>
+    </task>
+
+    <task id="T0.4" name="Check Docker named volumes exist">
+      <steps>
+        docker volume ls | grep minivess
+      </steps>
+      <expected>
+        Volumes: minivess_raw_data, minivess_data_cache, minivess_configs_splits,
+        minivess_checkpoint_cache, minivess_mlruns_data, minivess_logs_data,
+        minivess_post_training_out, minivess_outputs_analysis exist.
+        If not: docker compose -f deployment/docker-compose.flows.yml run --rm train true
+        (creates volumes on first run)
+      </expected>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <phase id="1" name="Stage 1 — DynUNet full chain (debug_full_pipeline)">
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+    <rationale>
+      Validate the train→post_training→analyze chain with the most reliable model
+      (DynUNet, 3.5 GB VRAM) before testing all 5 models. Fix chain-level bugs here.
+    </rationale>
+    <config-file>configs/experiment/debug_full_pipeline.yaml</config-file>
+    <config-summary>
+      model=dynunet, losses=[cbdice_cldice], max_epochs=2,
+      max_train_volumes=2, max_val_volumes=2, num_folds=3,
+      flows=[train, post_training, analyze],
+      post_training.plugins=[swa, calibration]
+    </config-summary>
+
+    <task id="T1.1" name="Run debug_full_pipeline">
+      <steps>
+        just debug-pipeline
+        # OR: bash scripts/run_debug.sh --experiment debug_full_pipeline
+        # Logs: outputs/debug/logs/{TIMESTAMP}_dynunet.log
+        #        outputs/debug/logs/{TIMESTAMP}_post_training.log
+        #        outputs/debug/logs/{TIMESTAMP}_analyze.log
+        # Summary: outputs/debug/summary_{TIMESTAMP}.json
+      </steps>
+      <expected-per-flow>
+        train/dynunet: Prefect flow completes, 6 runs logged to MLflow (3 folds × 1 loss).
+        post_training: SWA checkpoint + calibration artifacts written to /app/outputs/post_training.
+        analyze: Comparison table artifact written to MLflow.
+        Summary JSON: all statuses = "OK".
+      </expected-per-flow>
+    </task>
+
+    <task id="T1.2" name="Inspect MLflow runs after Stage 1">
+      <steps>
+        # From the host (not in Docker):
+        uv run mlflow ui --backend-store-uri mlruns --port 5001 &
+        # Or query directly:
+        uv run python3 -c "
+import mlflow
+mlflow.set_tracking_uri('mlruns')
+runs = mlflow.search_runs(experiment_names=['debug_full_pipeline'])
+print(runs[['run_id','status','tags.mlflow.runName']].head(20))
+"
+      </steps>
+      <expected>
+        6 runs with status=FINISHED. Each run has: train_loss, val_dsc, val_cldice metrics.
+        config/resolved_config.yaml artifact present (validates Rule #23 Hydra logging).
+      </expected>
+      <failure-modes-to-investigate>
+        - status=FAILED → read mlflow run artifacts for error_type tag + traceback
+        - Missing config artifact → compose_experiment_config() or log_hydra_config() not called
+        - 0 runs → MLflow tracking URI mismatch (check MLFLOW_TRACKING_URI in container vs host)
+      </failure-modes-to-investigate>
+    </task>
+
+    <task id="T1.3" name="Verify post_training MLflow contract">
+      <steps>
+        # post_training_flow uses find_upstream_safely() to locate training runs.
+        # Confirm it found the debug_full_pipeline runs:
+        grep -i "upstream" outputs/debug/logs/*post_training*.log | tail -20
+        # OR inside the container:
+        docker compose -f deployment/docker-compose.flows.yml run --rm \
+          -e UPSTREAM_EXPERIMENT=debug_full_pipeline \
+          -e MINIVESS_ALLOW_HOST=0 \
+          post_training
+      </steps>
+      <expected>
+        Log shows: "Found N upstream runs for experiment=debug_full_pipeline"
+        SWA checkpoint: /app/outputs/post_training/swa_*.pt
+        Calibration: /app/outputs/post_training/calibration_*.json
+      </expected>
+    </task>
+
+    <task id="T1.4" name="Verify analysis flow MLflow contract">
+      <steps>
+        grep -i "comparison\|champion\|ensemble" outputs/debug/logs/*analyze*.log | tail -20
+      </steps>
+      <expected>
+        Log shows: ComparisonTable created with N=1 loss × 1 model.
+        Champion tagged in MLflow.
+        Analysis output: /app/outputs/analysis/comparison_table.md
+      </expected>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <phase id="2" name="Bug triage protocol — after Stage 1">
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+    <rationale>
+      Stage 1 will almost certainly surface bugs. This phase defines HOW to handle them
+      systematically before moving to all-model testing. No panic fixing.
+    </rationale>
+
+    <bug-triage-protocol>
+      For EACH failure observed in Phase 1:
+
+      1. CLASSIFY: Which category?
+         - ImportError / ModuleNotFoundError → missing dependency or wrong package name
+         - AttributeError / KeyError → API mismatch between flow and expected config key
+         - RuntimeError from _require_docker_context() → flow run outside Docker (not expected here)
+         - MLflow MlflowException → tracking URI mismatch, experiment not found
+         - CUDA OOM → patch size / batch too large for 8 GB (check model profile)
+         - FileNotFoundError → volume not mounted, wrong path in compose
+
+      2. SEARCH: Before writing any fix, search the codebase:
+         - grep the exact error class/message in src/ to understand what raises it
+         - Check the relevant CLAUDE.md for the module (Layer 1 context)
+         - Check orchestration/CLAUDE.md for inter-flow contract rules
+
+      3. CREATE ISSUE:
+         gh issue create \
+           --title "fix(debug-pipeline): [short root cause]" \
+           --label "bug,test-infra" \
+           --body "[Full traceback + affected file:line + root cause analysis]"
+
+      4. WRITE TEST:
+         # Unit test that fails with the same error:
+         tests/unit/orchestration/test_[flow_name]_[symptom].py
+
+      5. FIX root cause (not symptom).
+
+      6. VERIFY: re-run only the failing step:
+         just debug-pipeline  # if chain-level
+         just debug  # if training only
+
+      7. COMMIT: git add + git commit on test/debug-training-pipeline
+    </bug-triage-protocol>
+
+    <known-risk-areas>
+      <risk id="R1" area="UPSTREAM_EXPERIMENT env var handoff">
+        run_debug.sh passes -e UPSTREAM_EXPERIMENT to post_training/analyze containers.
+        But post_training_flow.py uses find_upstream_safely() with experiment_name=
+        os.environ.get("UPSTREAM_EXPERIMENT"). Verify this env var flows correctly.
+        Test: docker compose run --rm -e UPSTREAM_EXPERIMENT=debug_full_pipeline post_training
+      </risk>
+      <risk id="R2" area="MLflow tracking URI inside container vs host">
+        MLFLOW_TRACKING_URI in compose = http://minivess-mlflow:5000 (Docker network).
+        On host: mlruns/ directory. These are DIFFERENT backends.
+        Risk: post_training/analyze look for runs that were logged to the Docker MLflow server,
+        but if train_flow writes to the volume-mounted mlruns dir, there's a mismatch.
+        Verify: both train and post_training use the same MLFLOW_TRACKING_URI.
+      </risk>
+      <risk id="R3" area="post_training plugins for debug run">
+        SWA requires checkpoints from training. If debug run uses lightweight checkpoint
+        (configs/checkpoint/lightweight.yaml), SWA may fail to find what it needs.
+        Fix: ensure SWA plugin has a graceful skip (not crash) for missing checkpoints.
+      </risk>
+      <risk id="R4" area="analysis flow with 1 loss × 1 model">
+        ComparisonTable is designed for multi-loss, multi-model experiments.
+        May fail or produce empty comparison for debug_full_pipeline (1 loss, 1 model).
+        Fix: guard against single-row comparison tables.
+      </risk>
+      <risk id="R5" area="Hydra-zen compose_experiment_config() integration">
+        PR #513 bridged Hydra-zen to train_flow. post_training and analyze may not
+        yet call compose_experiment_config() — they may be reading env vars directly.
+        This is acceptable for now but document as a known gap.
+      </risk>
+    </known-risk-areas>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <phase id="3" name="Stage 2 — All models, training only (debug_all_models)">
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+    <rationale>
+      After the chain is verified for DynUNet, test that all 5 models can at least
+      complete 2 epochs × 3 folds × 2 train vols without crashing. Model-specific
+      bugs are isolated here before adding post-training complexity.
+    </rationale>
+    <config-file>configs/experiment/debug_all_models.yaml</config-file>
+    <models>
+      dynunet, sam3_vanilla, sam3_hybrid, comma_mamba, ulike_mamba
+    </models>
+
+    <task id="T3.1" name="Run debug_all_models">
+      <steps>
+        just debug-all-models
+        # OR: bash scripts/run_debug.sh --experiment debug_all_models
+        # This runs 5 × docker compose run --rm -e EXPERIMENT=debug_all_models
+        #                                   -e HYDRA_OVERRIDES=model=X train
+        # Logs: outputs/debug/logs/{TIMESTAMP}_{model}.log for each model
+      </steps>
+      <expected>
+        Each model completes 6 runs (3 folds × 1 loss). Summary JSON shows all OK.
+        DynUNet should be the most reliable. SAM3 models may fail on missing HF weights.
+      </expected>
+    </task>
+
+    <task id="T3.2" name="Model-specific expected failure modes">
+      <model name="sam3_vanilla" expected-risk="MEDIUM">
+        *** REVIEWER B CORRECTION: risk downgraded from HIGH to MEDIUM ***
+        Adapter: src/minivess/adapters/sam3_vanilla.py — COMPLETE.
+        VRAM: 2.9 GB measured (SDPA mandatory, hardcoded in sam3_backbone.py:174-190).
+        SDPA is enforced in code — eager mode (7+ GB OOM) cannot happen accidentally.
+        Requires HF_TOKEN in .env (HuggingFace gated model). This is the only real risk.
+        Action: ensure HF_TOKEN is set. If gated download fails → skip and create issue.
+        Profile YAML: created in Phase -1 T-1.5.
+      </model>
+      <model name="sam3_hybrid" expected-risk="MEDIUM">
+        *** REVIEWER B CORRECTION: risk downgraded from HIGH to MEDIUM ***
+        Adapter: src/minivess/adapters/sam3_hybrid.py — COMPLETE.
+        VRAM: ~3.4 GB (sam3_vanilla + DynUNet fusion). Fits 8 GB with SDPA.
+        Same HF_TOKEN requirement as vanilla.
+        Profile YAML: created in Phase -1 T-1.5.
+      </model>
+      <model name="comma_mamba" expected-risk="MEDIUM">
+        *** REVIEWER B CORRECTION: adapter is COMPLETE (src/minivess/adapters/comma.py) ***
+        VRAM: ~2.5 GB, batch=1 (gpu_low), patch=(48,48,24) required.
+        Risk: memory scales with volume — ensure patch size constraint from profile.
+        Missing: configs/model/comma_mamba.yaml (created in Phase -1 T-1.5).
+      </model>
+      <model name="ulike_mamba" expected-risk="LOW">
+        *** REVIEWER B CONFIRMS: adapter is COMPLETE (src/minivess/adapters/mamba.py) ***
+        Pure-PyTorch SSM approximation (no mamba-ssm CUDA kernels). batch=4 on 8 GB.
+        Missing: configs/model/ulike_mamba.yaml (created in Phase -1 T-1.5).
+      </model>
+      <model name="dynunet" expected-risk="VERY_LOW">
+        Already verified in Stage 1. Should pass cleanly.
+      </model>
+    </task>
+
+    <task id="T3.3" name="After each model run — check VRAM">
+      <steps>
+        # Between models, check GPU VRAM is recovered:
+        nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits
+      </steps>
+      <expected>
+        VRAM returns to ~0 MB between models (Docker container stops, GPU memory freed).
+        If VRAM leaks: docker stop force + docker system prune -f (and investigate).
+      </expected>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <phase id="4" name="Bug triage — model-specific failures">
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+    <protocol>
+      Same triage protocol as Phase 2.
+      For model-specific failures:
+      - If model adapter is missing → create GitHub issue, exclude model from debug_all_models
+        by adding it to a skip_models list in the YAML (new config key).
+      - If VRAM OOM → check model profile (configs/model_profiles/{model}.yaml) for
+        gpu_low batch size. Verify HYDRA_OVERRIDES are passing the right batch size.
+      - If import error for a model → check src/minivess/adapters/{model}_adapter.py exists.
+
+      Rule: NEVER add a try/except around model init to skip failing models silently.
+      Either fix it properly or exclude it explicitly via config.
+    </protocol>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <phase id="5" name="Stage 3 — All models + full chain (new combined config)">
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+    <rationale>
+      After Stage 1 (chain works for DynUNet) and Stage 2 (all models train),
+      combine them: all WORKING models (skip failed ones from Phase 4) + full chain.
+      This requires a new experiment config.
+    </rationale>
+
+    <task id="T5.1" name="Create debug_all_models_pipeline.yaml">
+      <description>
+        Create configs/experiment/debug_all_models_pipeline.yaml:
+
+        @package _global_
+        # All working 8GB models + full train→post_training→analyze chain.
+        # Models: set to those that passed Phase 3 (remove failed ones).
+        # Duration: ~60 min.
+        defaults:
+          - override /checkpoint: lightweight
+
+        experiment_name: debug_all_models_pipeline
+        losses:
+          - cbdice_cldice
+        max_epochs: 2
+        debug: true
+        max_train_volumes: 2
+        max_val_volumes: 2
+        num_folds: 3
+
+        flows:
+          - train
+          - post_training
+          - analyze
+
+        post_training:
+          plugins:
+            - swa
+            - calibration
+
+        models_to_test:
+          - dynunet
+          # add other working models from Phase 3
+
+        Write failing test FIRST (TDD):
+        tests/unit/config/test_debug_experiment_configs.py:
+        class TestDebugAllModelsPipeline:
+          - test_composes_without_error()
+          - test_has_models_to_test()
+          - test_has_flows_including_post_training()
+          - test_has_flows_including_analyze()
+      </description>
+    </task>
+
+    <task id="T5.2" name="Run debug_all_models_pipeline">
+      <steps>
+        bash scripts/run_debug.sh --experiment debug_all_models_pipeline
+        # OR after adding justfile recipe:
+        # just debug-all-pipeline
+      </steps>
+      <expected>
+        All working models complete train → post_training → analyze.
+        Summary JSON: all flows OK.
+        MLflow: N_models × 6 runs (3 folds × 1 loss) all FINISHED.
+      </expected>
+    </task>
+
+    <task id="T5.3" name="Add debug-all-pipeline recipe to justfile">
+      <description>
+        Add to justfile:
+        # All working models + full chain (train → post_training → analyze)
+        debug-all-pipeline:
+            bash scripts/run_debug.sh --experiment debug_all_models_pipeline
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <phase id="6" name="Observability: monitoring the debug run in real-time">
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+    <rationale>
+      The debug run takes 60-90 min. Use these commands to monitor progress
+      without re-running the whole suite.
+    </rationale>
+
+    <task id="T6.1" name="Real-time log monitoring">
+      <steps>
+        # Terminal 1: tail the per-model log (run_debug.sh creates these):
+        tail -f outputs/debug/logs/$(ls -t outputs/debug/logs/ | head -1)
+
+        # Terminal 2: MLflow run status:
+        watch -n 10 "uv run python3 -c \"
+import mlflow; mlflow.set_tracking_uri('mlruns')
+r = mlflow.search_runs(experiment_names=['debug_all_models_pipeline'])
+print(r[['tags.mlflow.runName','status','metrics.val_dsc']].tail(10))
+\""
+
+        # Terminal 3: GPU utilization:
+        watch -n 5 nvidia-smi
+      </steps>
+    </task>
+
+    <task id="T6.2" name="Inspect summary after run">
+      <steps>
+        # Read JSON summary:
+        uv run python3 -c "
+import json; from pathlib import Path
+f = sorted(Path('outputs/debug').glob('summary_*.json'))[-1]
+s = json.loads(f.read_text(encoding='utf-8'))
+print(json.dumps(s, indent=2))
+"
+      </steps>
+      <expected>
+        All flows have status=OK. Total duration within expected bounds.
+        Any FAILED flow → trigger Phase 2/4 bug triage protocol.
+      </expected>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <phase id="7" name="Test coverage — prevent regression">
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+    <rationale>
+      Every bug found in Phases 2/4 gets a regression test. This is the
+      "pipeline improvement" part of the dual mandate.
+    </rationale>
+
+    <task id="T7.1" name="Unit tests for debug config">
+      <steps>
+        uv run pytest tests/unit/config/test_debug_experiment_configs.py -v
+      </steps>
+      <expected>All tests pass including new TestDebugAllModelsPipeline class.</expected>
+    </task>
+
+    <task id="T7.2" name="Unit tests for flow integration">
+      <description>
+        For each bug fixed in Phase 2/4, a corresponding unit test must exist.
+        Naming: tests/unit/orchestration/test_[flow_name]_[failure_symptom].py
+        Examples:
+          test_post_training_upstream_experiment_env_var.py
+          test_analysis_single_model_comparison_table.py
+          test_train_flow_hydra_config_artifact.py
+      </description>
+    </task>
+
+    <task id="T7.3" name="Run full unit test suite">
+      <steps>
+        uv run pytest tests/unit/ -x -q
+        uv run ruff check src/ tests/
+        uv run pre-commit run --all-files
+      </steps>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <phase id="8" name="PR and issue cleanup">
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+    <task id="T8.1" name="Commit and push">
+      <steps>
+        git add configs/experiment/debug_all_models_pipeline.yaml
+        git add justfile
+        git add tests/unit/config/test_debug_experiment_configs.py
+        git add tests/unit/orchestration/  # regression tests from bug triage
+        git add outputs/debug/summary_*.json  # for review evidence
+        git commit -m "test(debug-pipeline): quasi-E2E mechanics validation — all models + full chain"
+        git push -u origin test/debug-training-pipeline
+      </steps>
+    </task>
+
+    <task id="T8.2" name="Create PR">
+      <steps>
+        gh pr create \
+          --title "test(debug-pipeline): quasi-E2E debug training validation + bug fixes" \
+          --body "## Summary
+        - Adds debug_all_models_pipeline.yaml: all working 8GB models + train→post_training→analyze chain
+        - Fixes [list of bugs discovered during run] — each with root cause analysis + regression test
+        - Documents model-specific exclusions (SAM3 missing HF weights, etc.) as GitHub issues
+        - Adds just debug-all-pipeline recipe
+
+        ## Bugs Fixed
+        [To be filled during run — each bug = 1 GH issue linked here]
+
+        ## Known Gaps (issues created, not fixed in this PR)
+        [To be filled]
+
+        ## Validation
+        - Summary JSON at outputs/debug/summary_{TIMESTAMP}.json shows all OK
+        - uv run pytest tests/unit/ passes
+        - pre-commit passes"
+      </steps>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <reviewer-instructions>
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- See: docs/planning/debug-training-testing-plan-review-A.md -->
+    <!-- See: docs/planning/debug-training-testing-plan-review-B.md -->
+    <reviewer id="A" focus="Infrastructure and Docker wiring">
+      Verify that the Docker compose services, volume mounts, and env var
+      flow (UPSTREAM_EXPERIMENT, MLFLOW_TRACKING_URI) are correctly described.
+      Check: does post_training actually receive MLflow runs from train?
+      Check: does analyze actually receive post_training artifacts?
+      Flag any steps that would fail given the current state of docker-compose.flows.yml.
+    </reviewer>
+    <reviewer id="B" focus="Model readiness and risk assessment">
+      Review the model-specific risk assessments in Phase 3.
+      Verify: which models have complete adapter implementations vs stubs.
+      Verify: SAM3 VRAM requirements vs 8GB RTX 2070 Super (see MEMORY.md SAM3 section).
+      Check: comma_mamba and ulike_mamba adapter status in src/minivess/adapters/.
+      Flag any model listed in debug_all_models.yaml that cannot realistically run.
+    </reviewer>
+  </reviewer-instructions>
+
+</plan>
