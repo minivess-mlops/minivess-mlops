@@ -11,6 +11,8 @@ Naming conventions:
 
 from __future__ import annotations
 
+import os
+
 # ---------------------------------------------------------------------------
 # MLflow experiment names
 # ---------------------------------------------------------------------------
@@ -78,3 +80,32 @@ FLOW_NAME_BIOSTATISTICS: str = "biostatistics-flow"
 
 FLOW_NAME_PIPELINE: str = "pipeline-flow"
 """Prefect flow name for the meta-pipeline orchestrator flow."""
+
+
+# ---------------------------------------------------------------------------
+# Experiment name resolution (debug suffix support)
+# ---------------------------------------------------------------------------
+
+
+def resolve_experiment_name(base_name: str) -> str:
+    """Return experiment name with optional debug suffix appended.
+
+    Reads ``MINIVESS_DEBUG_SUFFIX`` env var (e.g. ``_DEBUG``) and appends it
+    to *base_name*. If the env var is not set, returns *base_name* unchanged.
+
+    This ensures that debug/test runs land in a separate MLflow experiment
+    (``minivess_training_DEBUG``) rather than polluting the production
+    ``minivess_training`` experiment.
+
+    Parameters
+    ----------
+    base_name:
+        Canonical experiment name constant (e.g. ``EXPERIMENT_TRAINING``).
+
+    Returns
+    -------
+    str
+        ``base_name + os.environ.get("MINIVESS_DEBUG_SUFFIX", "")``
+    """
+    suffix = os.environ.get("MINIVESS_DEBUG_SUFFIX", "")
+    return f"{base_name}{suffix}"
