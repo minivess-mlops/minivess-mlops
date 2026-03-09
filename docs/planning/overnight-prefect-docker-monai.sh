@@ -66,7 +66,7 @@ for idx in "${!CHILDREN[@]}"; do
 
   START=$(date +%s)
 
-  if claude --dangerously-skip-permissions -p \
+  if stdbuf -o0 claude --dangerously-skip-permissions -p \
     "Read and execute $plan autonomously. Follow ALL instructions exactly. \
      Use the self-learning-iterative-coder TDD skill for every task. \
      Commit after each phase. Create PR when branch is complete. \
