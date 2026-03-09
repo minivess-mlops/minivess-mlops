@@ -116,8 +116,12 @@ class Sam3HybridAdapter(ModelAdapter):
         filters = arch.get("filters", [32, 64, 128, 256])
         n_levels = len(filters)
         kernel_size = [[3, 3, 3]] * n_levels
-        strides = [[1, 1, 1]] + [[2, 2, 2]] * (n_levels - 1)
-        upsample_kernel_size = [[2, 2, 2]] * (n_levels - 1)
+        # SAM3 patch depth D=3 (MONAI (B,C,H,W,D) convention, depth last).
+        # DynUNet with stride (2,2,2) would downsample D: 3→2→1→1 but upsample
+        # 1→2, creating a skip-connection mismatch (encoder D=1 vs decoder D=2).
+        # Fix: stride (2,2,1) keeps D constant — only H,W are downsampled.
+        strides = [[1, 1, 1]] + [[2, 2, 1]] * (n_levels - 1)
+        upsample_kernel_size = [[2, 2, 1]] * (n_levels - 1)
 
         self.dynunet = DynUNet(
             spatial_dims=3,
