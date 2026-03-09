@@ -145,6 +145,9 @@ run_child() {
   # jq filter: human-readable text in terminal; full JSON saved in log_file
   (
     cd "${REPO_ROOT}"
+    # Unset CLAUDECODE so claude can launch even if this script was started
+    # from inside another Claude Code session (nested session guard trips otherwise)
+    unset CLAUDECODE
     timeout "${CHILD_TIMEOUT_SEC}" claude \
       --dangerously-skip-permissions \
       --output-format stream-json \
