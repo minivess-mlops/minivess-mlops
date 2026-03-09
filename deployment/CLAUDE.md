@@ -153,6 +153,26 @@ MODEL_CACHE_HOST_PATH=/your/local/model/cache
 Copy `.env.example` → `.env` and set this to your local model weight cache directory.
 The cache persists across container restarts, preventing re-downloading SAM3 (~9 GB) etc.
 
+## One-Time Stack Setup
+
+After first `docker compose up`, run these initialization steps:
+
+```bash
+# 1. Initialize named volume ownership (fixes "permission denied" in containers)
+make init-volumes
+
+# MinIO buckets are created automatically by the minio-init service.
+# If minio-init fails, create buckets manually:
+docker compose exec minio mc mb --ignore-existing minio/mlflow-artifacts
+```
+
+## Makefile Targets
+
+```bash
+make init-volumes   # Fix Docker named volume ownership (run once after first up)
+make scan           # Trivy vulnerability scan on all minivess-* images
+```
+
 ## Running Flows
 
 ```bash

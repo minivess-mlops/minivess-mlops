@@ -55,6 +55,57 @@ x-common-labels: &common-labels
     project: minivess-mlops
     managed-by: docker-compose
 
+# ── Security (CIS Docker Benchmark 5.3, 5.25) ────────────────────────────────
+# cap_drop ALL: drop all Linux capabilities (deny privilege escalation)
+# no-new-privileges: prevent setuid/setgid binaries from gaining new privs
+# restart: "no" prevents ghost runs from auto-restarting after exit
+x-common-security: &common-security
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  restart: "no"
+
+# ── Log driver (production log rotation — prevents unbounded log files) ───────
+# local driver: binary format (more efficient than json-file), auto-compression
+# non-blocking mode: log backend slowness doesn't block the training process
+# 500MB max per container (50MB × 10 files) — appropriate for long training runs
+x-logging: &default-logging
+  logging:
+    driver: local
+    options:
+      max-size: "50m"
+      max-file: "10"
+      compress: "true"
+      mode: non-blocking
+      max-buffer-size: "4m"
+
+# ── Resource limits (OWASP D07) ────────────────────────────────────────────────
+# GPU flows (train, hpo, hpo-worker)
+# shm_size: CRITICAL — prevents MONAI 3D DataLoader Bus error (SIGBUS).
+# Formula: num_workers * batch_size * patch_bytes * 2 ≈ 8GB for realistic 3D workloads.
+# NOTE: shm_size from compose is NOT applied by `docker compose run`.
+# Scripts using `docker compose run` must add --shm-size 8g explicitly.
+x-gpu-resources: &gpu-resources
+  mem_limit: 32g
+  memswap_limit: 32g
+  cpus: 8.0
+  pids_limit: 2048
+  shm_size: "8g"
+
+# CPU-intensive flows (data, analyze, post_training, acquisition, biostatistics)
+x-cpu-resources: &cpu-resources
+  mem_limit: 16g
+  memswap_limit: 16g
+  cpus: 4.0
+  pids_limit: 512
+
+# Lightweight flows (dashboard, qa, pipeline, annotation, deploy)
+x-light-resources: &light-resources
+  mem_limit: 4g
+  cpus: 2.0
+  pids_limit: 256
+
 services:
   # Flow 0: Data Acquisition
   acquisition:
@@ -72,7 +123,7 @@ services:
       - logs_data:/app/logs
     networks:
       - minivess
-    <<: *common-labels
+    <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
 
   # Flow 1: Data Engineering
   data:
@@ -92,7 +143,7 @@ services:
       - mlruns_data:/app/mlruns
     networks:
       - minivess
-    <<: *common-labels
+    <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
 
   # Flow 2: Model Training (GPU)
   train:
@@ -119,7 +170,7 @@ services:
       - "nvidia.com/gpu=all"
     networks:
       - minivess
-    <<: *common-labels
+    <<: [*common-security, *default-logging, *gpu-resources, *common-labels]
 
   # Flow 2.5: Post-Training (SWA, calibration, conformal)
   post_training:
@@ -139,7 +190,7 @@ services:
       - mlruns_data:/app/mlruns
     networks:
       - minivess
-    <<: *common-labels
+    <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
 
   # Flow 3: Model Analysis
   analyze:
@@ -161,7 +212,7 @@ services:
       - post_training_out:/app/outputs/post_training:ro
     networks:
       - minivess
-    <<: *common-labels
+    <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
 
   # Flow 4: Deployment (ONNX export, BentoML, promotion)
   deploy:
@@ -182,7 +233,7 @@ services:
       - bentoml_store:${BENTOML_HOME:-/home/minivess/bentoml}
     networks:
       - minivess
-    <<: *common-labels
+    <<: [*common-security, *default-logging, *light-resources, *common-labels]
 
   # Flow 5: Dashboard & Reporting
   dashboard:
@@ -201,7 +252,7 @@ services:
       - outputs_dashboard:/app/outputs/dashboard
     networks:
       - minivess
-    <<: *common-labels
+    <<: [*common-security, *default-logging, *light-resources, *common-labels]
 
   # Flow 6: QA (MLflow integrity, ghost run cleanup, param validation)
   qa:
@@ -219,7 +270,7 @@ services:
       - outputs_dashboard:/app/outputs/dashboard
     networks:
       - minivess
-    <<: *common-labels
+    <<: [*common-security, *default-logging, *light-resources, *common-labels]
 
   # Biostatistics Flow (CPU — best-effort)
   biostatistics:
@@ -239,7 +290,7 @@ services:
       - configs_biostatistics:/app/configs/biostatistics:ro
     networks:
       - minivess
-    <<: *common-labels
+    <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
 
   # Data Annotation App (reads BentoML models from Flow 4)
   annotation:
@@ -259,7 +310,7 @@ services:
       - mlruns_data:/app/mlruns
     networks:
       - minivess
-    <<: *common-labels
+    <<: [*common-security, *default-logging, *light-resources, *common-labels]
 
   # HPO Flow — hyperparameter optimization (GPU for training trials)
   hpo:
@@ -284,7 +335,7 @@ services:
       - "nvidia.com/gpu=all"
     networks:
       - minivess
-    <<: *common-labels
+    <<: [*common-security, *default-logging, *gpu-resources, *common-labels]
 
   # HPO Worker — parallel strategy: one worker per GPU replica
   # Scale with: docker compose -f docker-compose.flows.yml up --scale hpo-worker=N
@@ -310,7 +361,7 @@ services:
       - "nvidia.com/gpu=all"
     networks:
       - minivess
-    <<: *common-labels
+    <<: [*common-security, *default-logging, *gpu-resources, *common-labels]
 
   # Pipeline Orchestrator -- cascades all flows in sequence
   pipeline:
@@ -326,7 +377,7 @@ services:
       - mlruns_data:/app/mlruns:ro
     networks:
       - minivess
-    <<: *common-labels
+    <<: [*common-security, *default-logging, *light-resources, *common-labels]
 
 volumes:
   # Input data
