@@ -209,12 +209,12 @@ for model in "${MODELS_ARRAY[@]}"; do
 
   # Build Hydra overrides: model=X [,user overrides]
   OVERRIDES="model=$model"
-  # sam3_hybrid uses 7.18 GiB / 7.60 GiB CUDA budget at patch=(64,64,3).
-  # Reduce to (32,32,3) to save ~200 MB activations and avoid OOM on 8 GB GPU.
-  # expandable_segments alone insufficient when physically out of CUDA memory.
-  if [ "$model" = "sam3_hybrid" ]; then
-    OVERRIDES="$OVERRIDES,patch_size=[32,32,3]"
-  fi
+  # sam3_hybrid: uses default patch_size=(64,64,3) from configs.
+  # No patch_size override needed: validation is skipped (val_interval>max_epochs)
+  # so val_roi OOM is not a concern. Training at (64,64,3) uses ~0.5 GiB activation
+  # + 6.65 GiB model = ~7.15 GiB, which fits in 7.60 GiB CUDA budget.
+  # Dimension fix (2026-03-09): sam3_hybrid.py now correctly iterates D=3 slices
+  # (not H=64) using MONAI (B,C,H,W,D) order → 3 encoder calls instead of 64.
   if [ -n "$USER_OVERRIDES" ]; then
     OVERRIDES="$OVERRIDES,$USER_OVERRIDES"
   fi
