@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from prefect import flow, get_run_logger, task
 
+from minivess.config.deploy_config import DeployConfig
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_DEPLOY
 from minivess.orchestration.mlflow_helpers import (
@@ -30,7 +31,6 @@ from minivess.orchestration.mlflow_helpers import (
 )
 
 if TYPE_CHECKING:
-    from minivess.config.deploy_config import DeployConfig
     from minivess.pipeline.deploy_champion_discovery import ChampionModel
 
 logger = logging.getLogger(__name__)
@@ -236,10 +236,8 @@ def deploy_flow(
     """
     _require_docker_context()
 
-    from minivess.config.deploy_config import DeployConfig as _DeployConfig
-
     if config is None:
-        config = _DeployConfig.from_env()
+        config = DeployConfig.from_env()
 
     log = get_run_logger()
     log.info("Starting deploy flow for experiment %s", experiment_id)
