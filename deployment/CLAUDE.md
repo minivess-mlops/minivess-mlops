@@ -52,8 +52,16 @@ docker network create minivess-network
 
 ## GPU Reservation
 
-Only `train` and `hpo` services reserve GPU devices:
+Only `train` and `hpo` services reserve GPU devices using CDI (Docker 25+, no nvidia runtime config needed):
 ```yaml
+# CDI GPU access — works without nvidia container runtime
+devices:
+  - "nvidia.com/gpu=all"
+```
+
+**BANNED** (requires daemon config that isn't set up):
+```yaml
+# BANNED — causes "GPU not accessible" even with nvidia-ctk installed
 deploy:
   resources:
     reservations:
@@ -61,6 +69,58 @@ deploy:
         - driver: nvidia
           count: all
           capabilities: [gpu]
+```
+
+## Volume Initialization (One-Time Setup)
+
+Named volumes start owned by `root`. Fix ownership before first run:
+```bash
+docker run --rm --user root \
+  -v deployment_checkpoint_cache:/app/checkpoints \
+  -v deployment_logs_data:/app/logs \
+  -v deployment_mlruns_data:/app/mlruns \
+  -v deployment_data_cache:/app/data \
+  -v deployment_configs_splits:/app/configs/splits \
+  ubuntu:22.04 \
+  chown -R 1000:1000 /app/checkpoints /app/logs /app/mlruns /app/data /app/configs/splits
+```
+
+**Docker Compose project name**: The project name is `deployment` (derived from the
+compose file's parent directory). Volumes are named `deployment_{volume_name}` NOT just
+`{volume_name}`. Always use `deployment_` prefix when referencing volumes with `docker run`.
+
+## Data Population (One-Time Setup)
+
+The `data_cache` volume must be populated with MiniVess data before training:
+```bash
+docker run --rm --user root \
+  -v deployment_data_cache:/app/data \
+  -v /path/to/minivess-mlops/data:/src:ro \
+  ubuntu:22.04 \
+  sh -c "mkdir -p /app/data/raw && cp -r /src/raw/minivess /app/data/raw/ && chown -R 1000:1000 /app/data"
+```
+
+## MLflow 3.x Security Middleware
+
+MLflow 3.x defaults to localhost-only binding. Required env var:
+```yaml
+environment:
+  MLFLOW_SERVER_ALLOWED_HOSTS: "*"  # NOT MLFLOW_ALLOWED_HOSTS
+```
+
+**YAML entrypoint syntax**: Use list form to avoid newline-as-separator bugs:
+```yaml
+# CORRECT: list form passes args as a single string to /bin/sh
+entrypoint:
+  - /bin/sh
+  - -c
+  - >-
+    mlflow server --host 0.0.0.0 --port 5000
+
+# BANNED: ">" folded scalar preserves newlines → mlflow server runs with NO args
+entrypoint: >
+  sh -c "mlflow server
+    --host 0.0.0.0"  # BUG: this newline is a shell command separator!
 ```
 
 ## Running Flows

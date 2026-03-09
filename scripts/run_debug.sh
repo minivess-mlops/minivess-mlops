@@ -78,11 +78,14 @@ else
   echo "  ✓ Docker daemon running"
 fi
 
-# 2. NVIDIA runtime (warn only — CPU containers still work)
-if ! docker run --rm --gpus all --runtime nvidia alpine:latest true &>/dev/null 2>&1; then
-  echo "  ⚠ NVIDIA runtime unavailable — CPU-only mode"
+# 2. NVIDIA CDI GPU access (required — training without GPU is theater, not training)
+# Uses CDI (docker 25+) — NOT --runtime nvidia (requires daemon config)
+if ! docker run --rm --device nvidia.com/gpu=all ubuntu:22.04 ls /dev/nvidia0 &>/dev/null 2>&1; then
+  echo "  ✗ GPU not accessible via CDI (nvidia.com/gpu=all). Check: nvidia-ctk cdi list"
+  echo "    Training requires GPU. Fix GPU access before proceeding."
+  PREFLIGHT_OK=false
 else
-  echo "  ✓ NVIDIA runtime available"
+  echo "  ✓ GPU accessible via CDI (/dev/nvidia0 present)"
 fi
 
 # 3. minivess-base image

@@ -97,13 +97,9 @@ services:
       - checkpoint_cache:/app/checkpoints
       - mlruns_data:/app/mlruns
       - logs_data:/app/logs
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # CDI GPU access — works without nvidia container runtime (Docker 25+)
+    devices:
+      - "nvidia.com/gpu=all"
     networks:
       - minivess
     <<: *common-labels
@@ -265,13 +261,9 @@ services:
       - checkpoint_cache:/app/checkpoints
       - mlruns_data:/app/mlruns
       - logs_data:/app/logs
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # CDI GPU access — works without nvidia container runtime (Docker 25+)
+    devices:
+      - "nvidia.com/gpu=all"
     networks:
       - minivess
     <<: *common-labels
@@ -294,13 +286,9 @@ services:
       - checkpoint_cache:/app/checkpoints
       - mlruns_data:/app/mlruns
       - logs_data:/app/logs
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    # CDI GPU access — works without nvidia container runtime (Docker 25+)
+    devices:
+      - "nvidia.com/gpu=all"
     networks:
       - minivess
     <<: *common-labels
