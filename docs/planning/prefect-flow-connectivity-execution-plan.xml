@@ -1,0 +1,958 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MinIVess MLOps — Prefect Flow Connectivity: MLflow as Inter-Flow Contract
+  Branch: fix/prefect-flow-connectivity
+  Created: 2026-03-09
+  Design document: docs/planning/prefect-flow-connectivity.md
+
+  ROOT CAUSE:
+  Train flow never logs checkpoint_dir to MLflow → post-training gets 0 checkpoints
+  → all 4 plugins skip → analysis evaluates 0 models → no champion → no figures.
+
+  EXECUTION:
+  Execute with the self-learning-iterative-coder skill.
+  Each phase ends with a commit. Phase 0 is the critical fix.
+
+  GITHUB ISSUES TO CREATE (before executing):
+  - Phase 0: "fix: train→post-training→analysis broken seam — no checkpoint_dir tags"
+  - Phase 1: "feat: data-flow → train-flow handoff via splits_path MLflow tag"
+
+  PHASES:
+  Phase 0 — Fix the core seam: Train→Post-training→Analysis (6 tasks)
+  Phase 1 — Data Engineering → Train handoff (3 tasks)
+-->
+<plan id="prefect-flow-connectivity" version="1.0">
+  <metadata>
+    <title>Prefect Flow Connectivity — MLflow as Inter-Flow Contract</title>
+    <branch>fix/prefect-flow-connectivity</branch>
+    <base-branch>main</base-branch>
+    <created>2026-03-09</created>
+    <design-document>docs/planning/prefect-flow-connectivity.md</design-document>
+    <priority>P0 — pipeline produces no real results without this fix</priority>
+    <phases>2</phases>
+    <total-tasks>9</total-tasks>
+  </metadata>
+
+  <!-- CRITICAL: Read these files before starting any task -->
+  <context-files>
+    <file>CLAUDE.md</file>
+    <file>src/minivess/orchestration/CLAUDE.md</file>
+    <file>docs/planning/prefect-flow-connectivity.md</file>
+    <file>src/minivess/orchestration/flow_contract.py</file>
+    <file>src/minivess/orchestration/constants.py</file>
+    <file>src/minivess/orchestration/flows/train_flow.py</file>
+    <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+    <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+    <file>src/minivess/orchestration/flows/data_flow.py</file>
+  </context-files>
+
+  <setup>
+    <step>Confirm on branch fix/prefect-flow-connectivity</step>
+    <step>Create GitHub issue for Phase 0 (broken seam fix)</step>
+    <step>Create GitHub issue for Phase 1 (data-flow → train-flow handoff)</step>
+    <step>Load state/tdd-state.json — reset to this plan</step>
+  </setup>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 0: Fix the broken Train → Post-training → Analysis seam      -->
+  <!-- ================================================================== -->
+  <phase id="0" name="Fix Core Seam">
+    <description>
+      Minimum viable fix so post-training plugins actually execute and analysis
+      evaluates real models. The debug run should show:
+        - post-training: plugins execute (not skipped)
+        - analysis: ≥1 model evaluated, champion tagged in MLflow
+
+      Root cause summary:
+      1. train_flow.py never logs checkpoint_dir as an MLflow tag on fold runs
+      2. FlowContract.log_flow_completion() uses tag "completed" not "FLOW_COMPLETE"
+      3. FlowContract has no find_fold_checkpoints() method
+      4. constants.py has no resolve_experiment_name() utility
+      5. analysis_flow.py hardcodes "minivess_training" (breaks with _DEBUG suffix)
+      6. post_training_flow.py has checkpoint_paths=[] default (all plugins skip)
+    </description>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- T0.1 RED: Tests for FlowContract enhancements + resolve_experiment_name -->
+    <!-- ---------------------------------------------------------------- -->
+    <task id="T0.1" type="RED" name="Tests for FlowContract + resolve_experiment_name">
+      <description>
+        Write failing unit tests for:
+        1. resolve_experiment_name() in constants.py
+        2. FlowContract._debug_suffix from MINIVESS_DEBUG_SUFFIX env var
+        3. FlowContract.find_fold_checkpoints() new method
+        4. FlowContract.log_flow_completion() writing FLOW_COMPLETE (not "completed")
+           and accepting checkpoint_dir kwarg
+
+        These tests must FAIL before T0.2 (GREEN) implements the code.
+      </description>
+      <test-first>
+        Create tests/unit/orchestration/test_flow_contract_connectivity.py
+
+        Use pytest fixtures. All tests use MINIVESS_ALLOW_HOST=1 env and
+        a tmp_path-based mlflow tracking URI (mlflow.set_tracking_uri(str(tmp_path))).
+        Do NOT mock mlflow — use a real local mlflow file store.
+
+        Required test functions:
+
+        class TestResolveExperimentName:
+          def test_no_suffix_when_env_unset(monkeypatch):
+            monkeypatch.delenv("MINIVESS_DEBUG_SUFFIX", raising=False)
+            from minivess.orchestration.constants import resolve_experiment_name
+            assert resolve_experiment_name("minivess_training") == "minivess_training"
+
+          def test_debug_suffix_appended_when_env_set(monkeypatch):
+            monkeypatch.setenv("MINIVESS_DEBUG_SUFFIX", "_DEBUG")
+            from minivess.orchestration.constants import resolve_experiment_name
+            assert resolve_experiment_name("minivess_training") == "minivess_training_DEBUG"
+
+          def test_custom_suffix(monkeypatch):
+            monkeypatch.setenv("MINIVESS_DEBUG_SUFFIX", "_CI")
+            from minivess.orchestration.constants import resolve_experiment_name
+            assert resolve_experiment_name("minivess_data") == "minivess_data_CI"
+
+        class TestFlowContractDebugSuffix:
+          def test_debug_suffix_empty_when_env_unset(monkeypatch, tmp_path):
+            monkeypatch.delenv("MINIVESS_DEBUG_SUFFIX", raising=False)
+            from minivess.orchestration.flow_contract import FlowContract
+            fc = FlowContract(tracking_uri=str(tmp_path / "mlruns"))
+            assert fc._debug_suffix == ""
+
+          def test_debug_suffix_set_from_env(monkeypatch, tmp_path):
+            monkeypatch.setenv("MINIVESS_DEBUG_SUFFIX", "_DEBUG")
+            from minivess.orchestration.flow_contract import FlowContract
+            fc = FlowContract(tracking_uri=str(tmp_path / "mlruns"))
+            assert fc._debug_suffix == "_DEBUG"
+
+          def test_resolve_experiment_uses_suffix(monkeypatch, tmp_path):
+            monkeypatch.setenv("MINIVESS_DEBUG_SUFFIX", "_DEBUG")
+            from minivess.orchestration.flow_contract import FlowContract
+            fc = FlowContract(tracking_uri=str(tmp_path / "mlruns"))
+            assert fc._resolve_experiment("minivess_training") == "minivess_training_DEBUG"
+
+        class TestLogFlowCompletionWritesFLOW_COMPLETE:
+          def test_log_completion_writes_FLOW_COMPLETE_tag(tmp_path):
+            """log_flow_completion must set flow_status=FLOW_COMPLETE (not 'completed')."""
+            import mlflow
+            from mlflow.tracking import MlflowClient
+            from minivess.orchestration.flow_contract import FlowContract
+
+            tracking_uri = str(tmp_path / "mlruns")
+            mlflow.set_tracking_uri(tracking_uri)
+            mlflow.set_experiment("test_exp")
+            with mlflow.start_run() as run:
+                run_id = run.info.run_id
+
+            fc = FlowContract(tracking_uri=tracking_uri)
+            fc.log_flow_completion(flow_name="test-flow", run_id=run_id)
+
+            client = MlflowClient(tracking_uri=tracking_uri)
+            run_data = client.get_run(run_id)
+            assert run_data.data.tags["flow_status"] == "FLOW_COMPLETE"
+
+          def test_log_completion_with_checkpoint_dir(tmp_path):
+            """log_flow_completion must tag checkpoint_dir when provided."""
+            from pathlib import Path
+            import mlflow
+            from mlflow.tracking import MlflowClient
+            from minivess.orchestration.flow_contract import FlowContract
+
+            tracking_uri = str(tmp_path / "mlruns")
+            mlflow.set_tracking_uri(tracking_uri)
+            mlflow.set_experiment("test_exp")
+            with mlflow.start_run() as run:
+                run_id = run.info.run_id
+
+            ckpt_dir = tmp_path / "checkpoints" / "fold_0"
+            fc = FlowContract(tracking_uri=tracking_uri)
+            fc.log_flow_completion(
+                flow_name="training-flow",
+                run_id=run_id,
+                checkpoint_dir=ckpt_dir,
+            )
+
+            client = MlflowClient(tracking_uri=tracking_uri)
+            run_data = client.get_run(run_id)
+            assert run_data.data.tags["checkpoint_dir"] == str(ckpt_dir)
+            assert run_data.data.tags["flow_status"] == "FLOW_COMPLETE"
+
+        class TestFindFoldCheckpoints:
+          def test_find_fold_checkpoints_returns_empty_when_no_runs(tmp_path):
+            from minivess.orchestration.flow_contract import FlowContract
+            fc = FlowContract(tracking_uri=str(tmp_path / "mlruns"))
+            result = fc.find_fold_checkpoints(parent_run_id="nonexistent_id")
+            assert result == []
+
+          def test_find_fold_checkpoints_returns_checkpoint_dirs(tmp_path):
+            """When fold runs have parent_run_id tag + checkpoint_dir tag, find them."""
+            import mlflow
+            from mlflow.tracking import MlflowClient
+            from minivess.orchestration.flow_contract import FlowContract
+
+            tracking_uri = str(tmp_path / "mlruns")
+            mlflow.set_tracking_uri(tracking_uri)
+            mlflow.set_experiment("minivess_training")
+
+            # Create a fake parent run
+            with mlflow.start_run(tags={"flow_name": "training-flow"}) as parent:
+                parent_run_id = parent.info.run_id
+
+            # Create two fake fold runs tagged with parent_run_id
+            ckpt_dirs = []
+            fold_run_ids = []
+            for fold_id in range(2):
+                ckpt_dir = tmp_path / f"checkpoints/fold_{fold_id}"
+                ckpt_dir.mkdir(parents=True)
+                # Write a fake checkpoint file
+                (ckpt_dir / "best.ckpt").write_text("fake", encoding="utf-8")
+                with mlflow.start_run(
+                    tags={
+                        "parent_run_id": parent_run_id,
+                        "fold_id": str(fold_id),
+                        "checkpoint_dir": str(ckpt_dir),
+                        "flow_name": "training-flow",
+                        "flow_status": "FLOW_COMPLETE",
+                    }
+                ) as fold_run:
+                    fold_run_ids.append(fold_run.info.run_id)
+                    ckpt_dirs.append(ckpt_dir)
+
+            # Mark fold runs as FINISHED
+            client = MlflowClient(tracking_uri=tracking_uri)
+            for fold_run_id in fold_run_ids:
+                client.set_terminated(fold_run_id, status="FINISHED")
+
+            fc = FlowContract(tracking_uri=tracking_uri)
+            results = fc.find_fold_checkpoints(parent_run_id=parent_run_id)
+
+            assert len(results) == 2
+            returned_dirs = {Path(r["checkpoint_dir"]) for r in results}
+            assert returned_dirs == set(ckpt_dirs)
+            assert all("fold_id" in r for r in results)
+            assert all("run_id" in r for r in results)
+      </test-first>
+      <acceptance>
+        uv run pytest tests/unit/orchestration/test_flow_contract_connectivity.py -v
+        All 10 tests FAIL (ImportError or AssertionError) — FlowContract lacks the new methods.
+      </acceptance>
+    </task>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- T0.2 GREEN: Implement FlowContract + constants.py changes        -->
+    <!-- ---------------------------------------------------------------- -->
+    <task id="T0.2" type="GREEN" name="Implement FlowContract enhancements + resolve_experiment_name">
+      <description>
+        Implement minimum code to make T0.1 tests pass.
+        Do NOT add unused features. Every line of code must be tested by T0.1.
+      </description>
+      <implementation>
+        1. src/minivess/orchestration/constants.py
+           Add after the FLOW_NAME_* constants:
+
+           import os
+
+           def resolve_experiment_name(base_name: str) -> str:
+               """Append MINIVESS_DEBUG_SUFFIX to experiment name if set."""
+               suffix = os.environ.get("MINIVESS_DEBUG_SUFFIX", "")
+               return f"{base_name}{suffix}"
+
+        2. src/minivess/orchestration/flow_contract.py
+           a) Add `import os` at top
+           b) Update __init__:
+              self._debug_suffix = os.environ.get("MINIVESS_DEBUG_SUFFIX", "")
+           c) Add _resolve_experiment() method:
+              def _resolve_experiment(self, base_name: str) -> str:
+                  return f"{base_name}{self._debug_suffix}"
+           d) Update log_flow_completion() signature:
+              def log_flow_completion(
+                  self,
+                  *,
+                  flow_name: str,
+                  run_id: str,
+                  checkpoint_dir: Path | None = None,
+                  artifacts: list[str] | None = None,
+              ) -> None:
+              - Change: client.set_tag(run_id, "flow_status", "FLOW_COMPLETE")
+                (was "completed" — fix the typo)
+              - Add: if checkpoint_dir is not None:
+                         client.set_tag(run_id, "checkpoint_dir", str(checkpoint_dir))
+           e) Add find_fold_checkpoints() method:
+              def find_fold_checkpoints(
+                  self,
+                  *,
+                  parent_run_id: str,
+              ) -> list[dict[str, Any]]:
+                  """Find all fold runs tagged with parent_run_id.
+                  Returns [{fold_id, run_id, checkpoint_dir}, ...]
+                  Queries all experiments for runs with parent_run_id tag.
+                  Returns empty list on any failure.
+                  """
+                  try:
+                      from mlflow.tracking import MlflowClient
+                      client = MlflowClient(tracking_uri=self.tracking_uri)
+                      # Search across all experiments for fold runs of this parent
+                      runs = client.search_runs(
+                          experiment_ids=[],  # search all experiments
+                          filter_string=f"tags.parent_run_id = '{parent_run_id}' "
+                                        f"AND attributes.status = 'FINISHED'",
+                          order_by=["tags.fold_id ASC"],
+                      )
+                      result = []
+                      for run in runs:
+                          tags = run.data.tags
+                          if "checkpoint_dir" not in tags:
+                              continue
+                          result.append({
+                              "run_id": run.info.run_id,
+                              "fold_id": int(tags.get("fold_id", "0")),
+                              "checkpoint_dir": Path(tags["checkpoint_dir"]),
+                          })
+                      return result
+                  except Exception:
+                      logger.warning("find_fold_checkpoints failed", exc_info=True)
+                      return []
+
+        NOTE: search_runs with experiment_ids=[] may not be supported in all MLflow
+        versions. If it fails, use a known experiment name. Check MLflow docs/source.
+        Alternative: accept experiment_name as a parameter and resolve it internally
+        using _resolve_experiment("minivess_training").
+
+        IMPORTANT: Add `from pathlib import Path` import to flow_contract.py if not present.
+      </implementation>
+      <acceptance>
+        uv run pytest tests/unit/orchestration/test_flow_contract_connectivity.py -v
+        All 10 tests PASS.
+        uv run ruff check src/minivess/orchestration/flow_contract.py src/minivess/orchestration/constants.py
+        uv run mypy src/minivess/orchestration/flow_contract.py src/minivess/orchestration/constants.py
+      </acceptance>
+    </task>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- T0.3 RED+GREEN: train_flow.py checkpoint_dir + flow_status tags  -->
+    <!-- ---------------------------------------------------------------- -->
+    <task id="T0.3" type="RED_GREEN" name="train_flow logs checkpoint_dir per fold + FLOW_COMPLETE">
+      <description>
+        RED: Write tests verifying train_flow logs required tags.
+        GREEN: Add the 3 missing tag writes to train_flow.py.
+
+        Current gaps in train_flow.py (verified from code):
+        - checkpoint_dir computed as `checkpoint_base / f"fold_{fold_id}"` at line 604
+          but NEVER logged to MLflow
+        - log_fold_results_task() logs metrics only (val_loss, final_epoch)
+        - parent MLflow run has no flow_status=FLOW_COMPLETE tag
+        - fold runs have no parent_run_id tag (makes find_fold_checkpoints impossible)
+
+        IMPORTANT: The current code opens ONE parent MLflow run for ALL folds,
+        then logs fold metrics into it. We need to change the architecture so that:
+        - Each fold gets its OWN MLflow run (child run) with checkpoint_dir tag
+        - Parent run gets flow_status=FLOW_COMPLETE at end
+
+        However: changing to per-fold runs is a bigger refactor.
+        MINIMUM FIX for Phase 0:
+        Log fold-specific tags on the PARENT run using fold-indexed tag names:
+          checkpoint_dir_fold_0, checkpoint_dir_fold_1, etc.
+          fold_run_status_0, fold_run_status_1, etc.
+        This is simpler and doesn't change the run architecture.
+        find_fold_checkpoints() adapts to read these parent-run tags instead.
+
+        REVISION to T0.1: If per-fold runs are kept as parent-run tags,
+        update find_fold_checkpoints() to query parent run tags instead of
+        searching for child runs. This is the minimal correct approach.
+      </description>
+      <test-first>
+        Create tests/unit/orchestration/test_train_flow_tags.py
+
+        Since train_flow calls actual GPU training, write tests that exercise
+        the MLflow tagging logic WITHOUT running training:
+        - Mock or stub train_one_fold_task to return a fake result dict
+        - Use MINIVESS_ALLOW_HOST=1 and a tmp_path mlflow tracking URI
+
+        class TestTrainFlowMLflowTags:
+          @pytest.fixture
+          def mock_fold_result():
+              return {
+                  "best_val_loss": 0.5,
+                  "final_epoch": 10,
+                  "history": {"val_loss": [0.8, 0.6, 0.5]},
+              }
+
+          def test_log_fold_results_task_logs_checkpoint_dir(tmp_path, mock_fold_result):
+              """log_fold_results_task must set checkpoint_dir_{fold_id} tag on run."""
+              import mlflow
+              from mlflow.tracking import MlflowClient
+              from minivess.orchestration.flows.train_flow import log_fold_results_task
+
+              tracking_uri = str(tmp_path / "mlruns")
+              mlflow.set_tracking_uri(tracking_uri)
+              mlflow.set_experiment("test_train")
+              ckpt_dir = tmp_path / "checkpoints" / "fold_0"
+              ckpt_dir.mkdir(parents=True)
+
+              with mlflow.start_run() as run:
+                  run_id = run.info.run_id
+                  log_fold_results_task(
+                      fold_id=0,
+                      result=mock_fold_result,
+                      mlflow_run_id=run_id,
+                      checkpoint_dir=ckpt_dir,  # NEW parameter
+                  )
+
+              client = MlflowClient(tracking_uri=tracking_uri)
+              run_data = client.get_run(run_id)
+              assert run_data.data.tags.get("checkpoint_dir_fold_0") == str(ckpt_dir)
+
+          def test_log_fold_results_task_logs_fold_id_tag(tmp_path, mock_fold_result):
+              """log_fold_results_task must tag fold_id_0, fold_id_1 etc."""
+              import mlflow
+              from mlflow.tracking import MlflowClient
+              from minivess.orchestration.flows.train_flow import log_fold_results_task
+
+              tracking_uri = str(tmp_path / "mlruns")
+              mlflow.set_tracking_uri(tracking_uri)
+              mlflow.set_experiment("test_train")
+              ckpt_dir = tmp_path / "checkpoints" / "fold_1"
+              ckpt_dir.mkdir(parents=True)
+
+              with mlflow.start_run() as run:
+                  run_id = run.info.run_id
+                  log_fold_results_task(
+                      fold_id=1,
+                      result=mock_fold_result,
+                      mlflow_run_id=run_id,
+                      checkpoint_dir=ckpt_dir,
+                  )
+
+              client = MlflowClient(tracking_uri=tracking_uri)
+              run_data = client.get_run(run_id)
+              assert "checkpoint_dir_fold_1" in run_data.data.tags
+
+          def test_training_flow_result_has_checkpoint_dirs(tmp_path):
+              """TrainingFlowResult must expose checkpoint_dirs dict."""
+              from minivess.orchestration.flows.train_flow import TrainingFlowResult
+              result = TrainingFlowResult(
+                  flow_name="train",
+                  n_folds=2,
+                  loss_name="dice_ce",
+                  model_family="dynunet",
+                  checkpoint_dirs={0: tmp_path / "fold_0", 1: tmp_path / "fold_1"},
+              )
+              assert result.checkpoint_dirs[0] == tmp_path / "fold_0"
+              assert len(result.checkpoint_dirs) == 2
+
+        Also add to TestFindFoldCheckpoints in test_flow_contract_connectivity.py:
+          def test_find_fold_checkpoints_from_parent_run_tags(tmp_path):
+              """find_fold_checkpoints must read checkpoint_dir_fold_N tags from parent run."""
+              import mlflow
+              from mlflow.tracking import MlflowClient
+              from minivess.orchestration.flow_contract import FlowContract
+
+              tracking_uri = str(tmp_path / "mlruns")
+              mlflow.set_tracking_uri(tracking_uri)
+              mlflow.set_experiment("minivess_training")
+
+              ckpt_dir_0 = tmp_path / "checkpoints/fold_0"
+              ckpt_dir_1 = tmp_path / "checkpoints/fold_1"
+              ckpt_dir_0.mkdir(parents=True)
+              ckpt_dir_1.mkdir(parents=True)
+
+              with mlflow.start_run(
+                  tags={
+                      "flow_name": "training-flow",
+                      "checkpoint_dir_fold_0": str(ckpt_dir_0),
+                      "checkpoint_dir_fold_1": str(ckpt_dir_1),
+                      "n_folds": "2",
+                  }
+              ) as run:
+                  parent_run_id = run.info.run_id
+
+              client = MlflowClient(tracking_uri=tracking_uri)
+              client.set_terminated(parent_run_id, status="FINISHED")
+
+              fc = FlowContract(tracking_uri=tracking_uri)
+              results = fc.find_fold_checkpoints(parent_run_id=parent_run_id)
+
+              assert len(results) == 2
+              dirs = {r["checkpoint_dir"] for r in results}
+              assert ckpt_dir_0 in dirs
+              assert ckpt_dir_1 in dirs
+      </test-first>
+      <implementation>
+        1. src/minivess/orchestration/flows/train_flow.py
+           a) Update log_fold_results_task signature to accept checkpoint_dir:
+              def log_fold_results_task(
+                  fold_id: int,
+                  result: dict[str, Any],
+                  mlflow_run_id: str | None,
+                  checkpoint_dir: Path | None = None,    # NEW
+              ) -> None:
+
+           b) Inside the try block, after existing metric logging, add:
+              if checkpoint_dir is not None:
+                  client.set_tag(run_id, f"checkpoint_dir_fold_{fold_id}", str(checkpoint_dir))
+
+           c) Update the caller in training_flow():
+              for fold_id, fold_result in enumerate(fold_results):
+                  log_fold_results_task(
+                      fold_id, fold_result, mlflow_run_id,
+                      checkpoint_dir=checkpoint_base / f"fold_{fold_id}",  # ADD
+                  )
+
+           d) After the for loop logging folds, add:
+              mlflow.set_tag("n_folds", str(len(fold_results)))
+
+           e) After mlflow run context closes, flow_status tag is written by
+              log_completion_safe (already present). Verify it uses "FLOW_COMPLETE"
+              after T0.2 fixes the value.
+
+        2. src/minivess/orchestration/flows/train_flow.py
+           Update TrainingFlowResult dataclass to include checkpoint_dirs field:
+           @dataclass
+           class TrainingFlowResult:
+               ...
+               checkpoint_dirs: dict[int, Path] = field(default_factory=dict)
+
+        3. src/minivess/orchestration/flow_contract.py
+           Update find_fold_checkpoints() to also read parent-run tags
+           (checkpoint_dir_fold_0, checkpoint_dir_fold_1, etc.) as an alternative
+           to child-run tags. Check both approaches: if tags on parent run, use those;
+           if fold runs with parent_run_id tag exist, use those.
+           This makes the method backward-compatible with both designs.
+      </implementation>
+      <acceptance>
+        uv run pytest tests/unit/orchestration/test_train_flow_tags.py -v
+        uv run pytest tests/unit/orchestration/test_flow_contract_connectivity.py -v
+        All tests pass.
+        uv run ruff check src/minivess/orchestration/flows/train_flow.py
+        uv run mypy src/minivess/orchestration/flows/train_flow.py
+      </acceptance>
+    </task>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- T0.4 RED+GREEN: post_training_flow discovers checkpoints via FlowContract -->
+    <!-- ---------------------------------------------------------------- -->
+    <task id="T0.4" type="RED_GREEN" name="post_training_flow discovers checkpoints via FlowContract">
+      <description>
+        RED: Write tests verifying post_training_flow resolves checkpoint_paths
+        from FlowContract.find_fold_checkpoints() when none are explicitly provided.
+
+        GREEN: Update post_training_flow.py so that when checkpoint_paths is None
+        or empty, it calls find_fold_checkpoints(parent_run_id=upstream_training_run_id)
+        and resolves .ckpt files on the volume.
+      </description>
+      <test-first>
+        Create tests/unit/orchestration/test_post_training_contract.py
+
+        def test_post_training_resolves_checkpoints_from_flow_contract(
+            tmp_path, monkeypatch
+        ):
+            """When checkpoint_paths=None, post_training must query FlowContract."""
+            import mlflow
+            from mlflow.tracking import MlflowClient
+            from unittest.mock import patch, MagicMock
+            from minivess.orchestration.flows.post_training_flow import (
+                resolve_checkpoint_paths_from_contract,  # new helper function
+            )
+
+            tracking_uri = str(tmp_path / "mlruns")
+            monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
+
+            # Create fake fold checkpoint files
+            ckpt_dir_0 = tmp_path / "checkpoints" / "fold_0"
+            ckpt_dir_0.mkdir(parents=True)
+            ckpt_file = ckpt_dir_0 / "best.ckpt"
+            ckpt_file.write_text("fake", encoding="utf-8")
+
+            # Mock FlowContract.find_fold_checkpoints to return our fake checkpoint
+            with patch(
+                "minivess.orchestration.flow_contract.FlowContract.find_fold_checkpoints"
+            ) as mock_find:
+                mock_find.return_value = [
+                    {"fold_id": 0, "run_id": "fake_run", "checkpoint_dir": ckpt_dir_0}
+                ]
+                paths = resolve_checkpoint_paths_from_contract(
+                    parent_run_id="fake_parent",
+                    tracking_uri=tracking_uri,
+                )
+
+            assert len(paths) == 1
+            assert paths[0] == ckpt_file
+
+        def test_resolve_checkpoint_paths_returns_empty_when_no_upstream(
+            tmp_path, monkeypatch
+        ):
+            """When no upstream run found, returns empty list (graceful)."""
+            from unittest.mock import patch
+            from minivess.orchestration.flows.post_training_flow import (
+                resolve_checkpoint_paths_from_contract,
+            )
+
+            monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
+
+            with patch(
+                "minivess.orchestration.flow_contract.FlowContract.find_fold_checkpoints"
+            ) as mock_find:
+                mock_find.return_value = []
+                paths = resolve_checkpoint_paths_from_contract(
+                    parent_run_id=None,
+                    tracking_uri=str(tmp_path / "mlruns"),
+                )
+
+            assert paths == []
+
+        def test_resolve_checkpoint_globs_best_ckpt(tmp_path, monkeypatch):
+            """resolve_checkpoint_paths_from_contract globs *.ckpt from checkpoint_dir."""
+            from unittest.mock import patch
+            from minivess.orchestration.flows.post_training_flow import (
+                resolve_checkpoint_paths_from_contract,
+            )
+
+            monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
+
+            ckpt_dir = tmp_path / "fold_0"
+            ckpt_dir.mkdir(parents=True)
+            (ckpt_dir / "epoch_005.ckpt").write_text("a", encoding="utf-8")
+            (ckpt_dir / "best.ckpt").write_text("b", encoding="utf-8")
+
+            with patch(
+                "minivess.orchestration.flow_contract.FlowContract.find_fold_checkpoints"
+            ) as mock_find:
+                mock_find.return_value = [
+                    {"fold_id": 0, "run_id": "r0", "checkpoint_dir": ckpt_dir}
+                ]
+                paths = resolve_checkpoint_paths_from_contract(
+                    parent_run_id="fake",
+                    tracking_uri=str(tmp_path / "mlruns"),
+                )
+
+            # Should find best.ckpt (prefer best.ckpt over epoch_*.ckpt)
+            assert any("best.ckpt" in str(p) for p in paths)
+      </test-first>
+      <implementation>
+        1. Add helper function to src/minivess/orchestration/flows/post_training_flow.py:
+
+           def resolve_checkpoint_paths_from_contract(
+               *,
+               parent_run_id: str | None,
+               tracking_uri: str,
+           ) -> list[Path]:
+               """Resolve checkpoint .ckpt files from FlowContract fold tags.
+
+               Calls FlowContract.find_fold_checkpoints(parent_run_id) to get
+               checkpoint_dir paths, then globs for .ckpt files in each dir.
+               Prefers best.ckpt over epoch_*.ckpt when both exist.
+               Returns empty list on any failure.
+               """
+               if parent_run_id is None:
+                   return []
+               from minivess.orchestration.flow_contract import FlowContract
+               fc = FlowContract(tracking_uri=tracking_uri)
+               fold_info = fc.find_fold_checkpoints(parent_run_id=parent_run_id)
+               if not fold_info:
+                   return []
+               paths = []
+               for fold in fold_info:
+                   ckpt_dir = Path(fold["checkpoint_dir"])
+                   if not ckpt_dir.exists():
+                       logger.warning("checkpoint_dir %s does not exist", ckpt_dir)
+                       continue
+                   # Prefer best.ckpt
+                   best = ckpt_dir / "best.ckpt"
+                   if best.exists():
+                       paths.append(best)
+                       continue
+                   # Fallback: last epoch_*.ckpt sorted by name
+                   epoch_ckpts = sorted(ckpt_dir.glob("epoch_*.ckpt"))
+                   if epoch_ckpts:
+                       paths.append(epoch_ckpts[-1])
+               return paths
+
+        2. In run_post_training_flow() in post_training_flow.py, update the section
+           that builds checkpoint_paths to call resolve_checkpoint_paths_from_contract
+           when checkpoint_paths is None:
+
+           After finding upstream_training_run_id, add:
+           if not checkpoint_paths:
+               checkpoint_paths = resolve_checkpoint_paths_from_contract(
+                   parent_run_id=upstream_training_run_id,
+                   tracking_uri=tracking_uri,
+               )
+               if checkpoint_paths:
+                   log.info(
+                       "Resolved %d checkpoint(s) from FlowContract",
+                       len(checkpoint_paths),
+                   )
+               else:
+                   log.warning(
+                       "No checkpoints found via FlowContract for run %s — "
+                       "all plugins will skip",
+                       upstream_training_run_id,
+                   )
+      </implementation>
+      <acceptance>
+        uv run pytest tests/unit/orchestration/test_post_training_contract.py -v
+        All 3 tests pass.
+        uv run ruff check src/minivess/orchestration/flows/post_training_flow.py
+      </acceptance>
+    </task>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- T0.5 RED+GREEN: analysis_flow uses resolve_experiment_name        -->
+    <!-- ---------------------------------------------------------------- -->
+    <task id="T0.5" type="RED_GREEN" name="analysis_flow uses resolve_experiment_name">
+      <description>
+        RED: Write tests verifying analysis_flow does NOT hardcode "minivess_training".
+        GREEN: Replace the two hardcoded occurrences in analysis_flow.py.
+
+        Locations in analysis_flow.py (verified from code):
+        - Line 1698: experiment_name="minivess_training"
+        - Line 1707: mlflow.set_experiment("minivess_training")
+
+        Both must use resolve_experiment_name("minivess_training") instead.
+        Also: UPSTREAM_EXPERIMENT env var should override the resolved name
+        (already partially present — wire it through properly).
+      </description>
+      <test-first>
+        Create tests/unit/orchestration/test_analysis_flow_experiment_name.py
+
+        def test_analysis_flow_uses_resolve_experiment_name(monkeypatch):
+            """analysis_flow source must not contain hardcoded 'minivess_training'."""
+            import ast
+            import inspect
+            from minivess.orchestration.flows import analysis_flow as af_module
+
+            source = inspect.getsource(af_module)
+            # Parse the source — no regex (Rule #16)
+            tree = ast.parse(source)
+            # Look for string constants "minivess_training" in the AST
+            hardcoded = []
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Constant) and node.value == "minivess_training":
+                    hardcoded.append(node)
+            assert len(hardcoded) == 0, (
+                f"Found {len(hardcoded)} hardcoded 'minivess_training' string(s) "
+                f"in analysis_flow.py — use resolve_experiment_name() instead"
+            )
+
+        def test_analysis_flow_reads_debug_suffix_from_env(monkeypatch):
+            """When MINIVESS_DEBUG_SUFFIX=_DEBUG, analysis queries minivess_training_DEBUG."""
+            monkeypatch.setenv("MINIVESS_DEBUG_SUFFIX", "_DEBUG")
+            from minivess.orchestration.constants import resolve_experiment_name
+            name = resolve_experiment_name("minivess_training")
+            assert name == "minivess_training_DEBUG"
+
+        def test_upstream_experiment_env_overrides_resolved_name(monkeypatch):
+            """UPSTREAM_EXPERIMENT env var must take priority over resolve_experiment_name."""
+            monkeypatch.setenv("UPSTREAM_EXPERIMENT", "my_custom_experiment")
+            # analysis_flow reads UPSTREAM_EXPERIMENT; if set, use it directly
+            import os
+            from minivess.orchestration.constants import resolve_experiment_name
+            upstream_exp = os.environ.get(
+                "UPSTREAM_EXPERIMENT",
+                resolve_experiment_name("minivess_training")
+            )
+            assert upstream_exp == "my_custom_experiment"
+      </test-first>
+      <implementation>
+        In src/minivess/orchestration/flows/analysis_flow.py:
+
+        1. Add import at top (after existing imports):
+           from minivess.orchestration.constants import resolve_experiment_name
+
+        2. Find the section near line 1698 where experiment_name is hardcoded.
+           Read lines 1690-1720 of analysis_flow.py to identify the exact pattern.
+           Replace hardcoded "minivess_training" with:
+           upstream_exp = os.environ.get(
+               "UPSTREAM_EXPERIMENT",
+               resolve_experiment_name("minivess_training"),
+           )
+
+        3. Replace the mlflow.set_experiment("minivess_training") at line 1707 with:
+           mlflow.set_experiment(resolve_experiment_name("minivess_analysis"))
+           (analysis flow writes to its own experiment, not to training)
+
+        NOTE: Read lines 1680-1730 of analysis_flow.py carefully before making
+        changes — the logic may be more complex than these two simple replacements.
+      </implementation>
+      <acceptance>
+        uv run pytest tests/unit/orchestration/test_analysis_flow_experiment_name.py -v
+        All 3 tests pass.
+        uv run ruff check src/minivess/orchestration/flows/analysis_flow.py
+        (mypy may have pre-existing errors in analysis_flow.py — only fix new ones)
+      </acceptance>
+    </task>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- T0.6 CHECKPOINT: Phase 0 integration verification + commit       -->
+    <!-- ---------------------------------------------------------------- -->
+    <task id="T0.6" type="CHECKPOINT" name="Phase 0 full test run + commit">
+      <description>
+        Run the full test suite for the affected files. Verify no regressions.
+        Commit Phase 0 changes. Update state/tdd-state.json.
+        Close the GitHub issue for Phase 0.
+      </description>
+      <verify>
+        uv run pytest tests/unit/orchestration/ -v --tb=short
+        uv run ruff check src/minivess/orchestration/
+        uv run mypy src/minivess/orchestration/flow_contract.py src/minivess/orchestration/constants.py
+
+        Expected: all new tests pass, no regressions in existing tests.
+        If pre-existing failures exist: create GitHub issue, DO NOT block Phase 0 commit.
+      </verify>
+      <commit-message>
+        fix(connectivity): wire train→post-training→analysis MLflow contract
+
+        - constants.py: add resolve_experiment_name() (reads MINIVESS_DEBUG_SUFFIX)
+        - flow_contract.py: _debug_suffix from env; find_fold_checkpoints();
+          log_flow_completion() writes FLOW_COMPLETE (was 'completed') +
+          accepts checkpoint_dir kwarg
+        - train_flow.py: log checkpoint_dir_fold_{N} tags per fold;
+          add checkpoint_dirs to TrainingFlowResult
+        - post_training_flow.py: add resolve_checkpoint_paths_from_contract();
+          call it when checkpoint_paths is None
+        - analysis_flow.py: replace hardcoded "minivess_training" with
+          resolve_experiment_name(); write to minivess_analysis experiment
+
+        Fixes: post-training plugins no longer skip (0 checkpoints → real paths).
+        Analysis now queries correct experiment name with debug suffix support.
+
+        Closes #[PHASE0_ISSUE]
+      </commit-message>
+    </task>
+
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Data Engineering → Train Flow Handoff                     -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Data Engineering → Train Handoff">
+    <description>
+      Wire data_flow.py to write splits_path as an MLflow tag so that train_flow.py
+      can discover and use the correct data splits from the previous data engineering run.
+
+      Currently: data_flow.py writes to mlflow experiment "minivess_data" but never
+      writes the splits_path tag. train_flow.py calls find_upstream_safely() which
+      always returns None (no FLOW_COMPLETE tag in the data experiment).
+    </description>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- T1.1 RED: Tests for data_flow splits_path tag                    -->
+    <!-- ---------------------------------------------------------------- -->
+    <task id="T1.1" type="RED" name="Tests for data_flow splits_path MLflow tag">
+      <description>
+        Write failing tests verifying data_flow writes splits_path tag on FLOW_COMPLETE.
+      </description>
+      <test-first>
+        Create tests/unit/orchestration/test_data_flow_contract.py
+
+        def test_data_flow_writes_splits_path_tag(tmp_path, monkeypatch):
+            """run_data_flow must set splits_path tag on the MLflow run."""
+            from unittest.mock import patch, MagicMock
+            from minivess.orchestration.flows.data_flow import run_data_flow
+            from mlflow.tracking import MlflowClient
+            import mlflow
+
+            monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
+            tracking_uri = str(tmp_path / "mlruns")
+            mlflow.set_tracking_uri(tracking_uri)
+            monkeypatch.setenv("SPLITS_DIR", str(tmp_path / "splits"))
+
+            data_dir = tmp_path / "data"
+            data_dir.mkdir()
+
+            # Create minimal fake data pairs
+            with patch(
+                "minivess.orchestration.flows.data_flow.discover_data_task"
+            ) as mock_discover:
+                mock_discover.return_value = [
+                    {"image": str(tmp_path / "img1.nii"), "label": str(tmp_path / "lbl1.nii")}
+                ] * 5
+                with patch(
+                    "minivess.orchestration.flows.data_flow.dvc_pull_task",
+                    side_effect=Exception("dvc not installed"),
+                ):
+                    result = run_data_flow(data_dir=data_dir, n_folds=2, seed=42)
+
+            assert result.splits_path is not None, "splits_path must be set in result"
+
+            # Check MLflow tag was written
+            client = MlflowClient(tracking_uri=tracking_uri)
+            experiments = client.search_experiments()
+            data_exp = next(
+                (e for e in experiments if "minivess_data" in e.name), None
+            )
+            assert data_exp is not None, "minivess_data experiment must exist"
+            runs = client.search_runs([data_exp.experiment_id])
+            assert len(runs) >= 1
+            run = runs[0]
+            assert "splits_path" in run.data.tags, (
+                "data_flow must write splits_path tag for train_flow to discover"
+            )
+            assert "flow_status" in run.data.tags
+            assert run.data.tags["flow_status"] == "FLOW_COMPLETE"
+
+        def test_data_flow_writes_flow_complete_tag(tmp_path, monkeypatch):
+            """run_data_flow must set flow_status=FLOW_COMPLETE (not 'completed')."""
+            # Same setup as above, just check flow_status value
+            # (tests that T0.2's fix to log_flow_completion propagates here too)
+            pass  # merge into test above or test separately
+      </test-first>
+      <acceptance>
+        uv run pytest tests/unit/orchestration/test_data_flow_contract.py -v
+        Tests FAIL before T1.2 implementation (splits_path tag not written).
+      </acceptance>
+    </task>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- T1.2 GREEN: data_flow.py writes splits_path tag                  -->
+    <!-- ---------------------------------------------------------------- -->
+    <task id="T1.2" type="GREEN" name="data_flow.py writes splits_path tag to MLflow">
+      <description>
+        Update data_flow.py so that when splits are serialized, the path is written
+        as an MLflow tag on the flow completion run. Use log_flow_completion() from
+        FlowContract (already imported in data_flow.py via log_completion_safe).
+      </description>
+      <implementation>
+        In src/minivess/orchestration/flows/data_flow.py:
+
+        Find the section where mlflow.start_run() is called (around line 530).
+        After `mlflow_run_id = active_run.info.run_id`, add:
+            if splits_path is not None:
+                mlflow.set_tag("splits_path", str(splits_path))
+
+        Also find the log_completion_safe() call at the bottom and verify it writes
+        "FLOW_COMPLETE" (after T0.2 fix). If not, update accordingly.
+
+        Also ensure the experiment name uses resolve_experiment_name():
+        Replace mlflow.set_experiment("minivess_data") with:
+            mlflow.set_experiment(resolve_experiment_name("minivess_data"))
+        Add import: from minivess.orchestration.constants import resolve_experiment_name
+      </implementation>
+      <acceptance>
+        uv run pytest tests/unit/orchestration/test_data_flow_contract.py -v
+        All tests pass.
+        uv run ruff check src/minivess/orchestration/flows/data_flow.py
+      </acceptance>
+    </task>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- T1.3 CHECKPOINT: Phase 1 commit                                  -->
+    <!-- ---------------------------------------------------------------- -->
+    <task id="T1.3" type="CHECKPOINT" name="Phase 1 commit + close issue">
+      <verify>
+        uv run pytest tests/unit/orchestration/ -v --tb=short
+        uv run ruff check src/minivess/orchestration/
+      </verify>
+      <commit-message>
+        feat(connectivity): data-flow writes splits_path tag to MLflow
+
+        - data_flow.py: write splits_path MLflow tag after split serialization
+        - data_flow.py: use resolve_experiment_name("minivess_data") for debug suffix
+        - Flow contract: data experiment now discoverable by train_flow
+
+        Closes #[PHASE1_ISSUE]
+      </commit-message>
+    </task>
+
+  </phase>
+
+</plan>
