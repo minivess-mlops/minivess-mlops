@@ -1,16 +1,19 @@
+# syntax=docker/dockerfile:1
 # MinIVess MLOps v2 — Base Docker image (Layer 2)
-# Shared foundation for ALL per-flow containers (CPU and GPU flows).
+# H3+H4: Multi-stage build — builder uses devel, runner uses runtime.
+# Build tools (uv, git, curl) are confined to builder stage only.
 #
 # 3-Layer Hierarchy:
 #   Layer 1: nvidia/cuda:12.6.3-runtime-ubuntu24.04  (upstream, never modified)
 #   Layer 2: minivess-base:latest                     (THIS — all shared deps)
 #   Layer 3: Dockerfile.{flow}                        (thin — scripts, env, CMD only)
 #
-# Uses CUDA base for all flows. CPU-only flows simply don't request GPU devices
-# in docker-compose. CUDA runtime is inert without --gpus / device reservations.
-#
 # Build:
-#   docker build -t minivess-base:latest -f deployment/docker/Dockerfile.base .
+#   docker build \
+#     --build-arg GIT_COMMIT=$(git rev-parse HEAD) \
+#     --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+#     -t minivess-base:latest \
+#     -f deployment/docker/Dockerfile.base .
 #
 # For bind-mount dev (match host UID to avoid permission issues):
 #   docker build --build-arg UID=$(id -u) --build-arg GID=$(id -g) \
@@ -19,56 +22,101 @@
 # Rebuilt only when dependencies or system packages change:
 # - pyproject.toml / uv.lock (Python dependencies)
 # - This Dockerfile (system-level packages)
-#
-# Flow Dockerfiles must NEVER run apt-get or uv — all deps belong here.
 
-FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04 AS base
+# ── Stage 1: Builder ─────────────────────────────────────────────────────────
+# Uses devel variant for CUDA headers + nvcc (needed by some MONAI ops).
+# Contains uv, git, curl — NEVER copied to final image.
+FROM nvidia/cuda:12.6.3-devel-ubuntu24.04 AS builder
 
-LABEL maintainer="petteri.teikari@gmail.com"
-LABEL project="minivess-mlops"
-LABEL description="MinIVess MLOps base — CUDA 12.6.3, Python 3.12, uv, all deps"
-
-# System dependencies (Ubuntu 24.04 ships Python 3.12 natively)
-# CUDA 12.6 runtime is backward-compatible; PyTorch bundles its own CUDA libs.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-venv \
-    python3-pip \
     git \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv (package manager)
+# Install uv — BUILD STAGE ONLY (not copied to runner)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Create non-root user with configurable UID/GID (matches host user for bind mounts).
-# Default UID=1000 works for most Linux users; override with --build-arg UID=$(id -u).
-ARG UID=1000
-ARG GID=1000
-RUN groupadd -g $GID minivess 2>/dev/null || true && \
-    useradd --create-home --shell /bin/bash -u $UID -g $GID -o minivess
-USER minivess
+# uv env: compile bytecodes, copy-link mode (required for cache mounts),
+# never auto-download Python, never install dev deps.
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_NO_DEV=1
+
 WORKDIR /app
 
-# Copy project metadata for dependency resolution
-COPY --chown=minivess:minivess pyproject.toml uv.lock* ./
+# Phase A: install deps only (cacheable when only src/ changes).
+# --mount=type=cache: persists uv download cache across rebuilds locally.
+# --frozen: treats uv.lock as immutable (fail if out of sync with pyproject.toml).
+# --mount=type=bind: read-only bind mounts avoid COPY before sync (cache hit).
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-dev --no-install-project
 
-# Install all dependencies (full ML stack: PyTorch, MONAI, Optuna, etc.)
-# Errors are NOT suppressed — if uv sync fails, the build fails.
-RUN uv sync --no-dev --no-install-project
+# Phase B: copy source and install project
+COPY src/ src/
+COPY configs/ configs/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
 
-# Make the venv + uv-managed Python readable by ALL users so that
-# `docker run --user X:Y` still works even if UID doesn't match.
-RUN chmod -R a+rX /home/minivess/.local 2>/dev/null || true && \
-    chmod -R a+rX /app/.venv
+# ── Stage 2: Runner ───────────────────────────────────────────────────────────
+# Minimal runtime — NO uv, NO git, NO curl, NO pip, NO CUDA headers.
+# PyTorch wheels bundle their own CUDA math libs (cublas, cufft, etc.)
+# so nvidia/cuda:*-runtime is sufficient for inference and training.
+FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04 AS runner
 
-# Copy source code and configs
-COPY --chown=minivess:minivess src/ src/
-COPY --chown=minivess:minivess configs/ configs/
+# Build-time provenance args (inject via --build-arg at CI time)
+ARG GIT_COMMIT=unknown
+ARG BUILD_DATE=unknown
+ARG UID=1000
+ARG GID=1000
+
+# OCI standard image annotations (NIST SP 800-190 traceability)
+LABEL maintainer="petteri.teikari@gmail.com"
+LABEL project="minivess-mlops"
+LABEL description="MinIVess MLOps base — CUDA 12.6.3 runtime, Python 3.12, all deps"
+LABEL org.opencontainers.image.title="minivess-base"
+LABEL org.opencontainers.image.source="https://github.com/minivess-mlops/minivess-mlops"
+LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.licenses="CC-BY-NC-SA-4.0"
+LABEL org.opencontainers.image.base.name="nvidia/cuda:12.6.3-runtime-ubuntu24.04"
+
+# Minimal runtime Python only — no pip, no build tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user with configurable UID/GID (matches host user for bind mounts)
+RUN groupadd -g $GID minivess 2>/dev/null || true && \
+    useradd --create-home --shell /bin/bash -u $UID -g $GID -o minivess
+
+WORKDIR /app
+
+# Copy only the built venv and application code from builder.
+# NEVER copy: uv binary, git history, build caches, devel headers.
+COPY --from=builder --chown=minivess:minivess /app/.venv /app/.venv
+COPY --from=builder --chown=minivess:minivess /app/src /app/src
+COPY --from=builder --chown=minivess:minivess /app/configs /app/configs
+
+# Group-readable venv (not world-readable — limit to minivess group)
+RUN chmod -R g+rX /app/.venv
+
+USER minivess
+
+# Python environment
+ENV PATH=/app/.venv/bin:$PATH
+ENV PYTHONPATH=/app/src
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 
 # Default umask: new files are group+world readable (for bind-mount sharing)
 RUN echo 'umask 0002' >> /home/minivess/.bashrc
 
-ENV PATH=/app/.venv/bin:$PATH
-ENV PYTHONPATH=/app/src
-ENV PYTHONUNBUFFERED=1
+# HEALTHCHECK: verify Python interpreter works
+HEALTHCHECK --interval=60s --timeout=10s --retries=3 --start-period=120s \
+    CMD python3 -c "import sys; sys.exit(0)" || exit 1

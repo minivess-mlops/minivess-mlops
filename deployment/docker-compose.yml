@@ -69,7 +69,10 @@ services:
     <<: *common-labels
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v3.10.0
+    build:
+      context: ..
+      dockerfile: deployment/docker/Dockerfile.mlflow
+    image: minivess-mlflow:v3.10.0
     container_name: minivess-mlflow
     profiles: ["dev", "monitoring", "full"]
     command: >
