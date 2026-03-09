@@ -195,42 +195,50 @@ for idx in "${!PLAN_FILES[@]}"; do
   # 3. Run pre-commit
   # 4. Create PR
   # 5. Merge the PR
-  if stdbuf -o0 claude --dangerously-skip-permissions -p \
-    "You are executing an autonomous overnight plan. Read and execute the plan at:
-$plan
+  prompt="You are executing an autonomous overnight plan. Read and execute the plan at:
+${plan}
 
-Follow ALL instructions in the plan file exactly.
+Use the Read tool to read the plan file. Follow ALL instructions exactly.
 Use the self-learning-iterative-coder TDD skill for every task.
 Commit after each phase.
 
-CRITICAL FINAL STEPS — you MUST complete ALL of these before stopping:
+COMPLETION PROTOCOL — mandatory, no shortcuts, no exceptions:
 
-1. RUN THE FULL TEST SUITE:
-   uv run pytest tests/ -x -q
-   If any tests fail, fix them and re-run until green.
+STEP 1 — FULL TEST SUITE (loop until zero failures):
+  uv run pytest tests/ -x -q
+  - If ANY test fails: diagnose root cause, fix code, run full suite again from scratch
+  - NEVER use -k, --ignore, or -m to reduce scope
+  - NEVER add xfail/skip markers to hide failures — fix the root cause
+  - Repeat until pytest exits 0 with zero failures
 
-2. RUN PRE-COMMIT ON ALL FILES:
-   uv run pre-commit run --all-files
-   If any hooks fail, fix the issues and re-run until clean.
+STEP 2 — PRE-COMMIT ON ALL FILES (loop until fully clean):
+  uv run pre-commit run --all-files
+  - If ANY hook fails: fix the issue, run --all-files again
+  - NEVER use --no-verify, SKIP= env var, or bypass any hook
+  - Repeat until all hooks pass with exit 0
 
-3. PUSH THE BRANCH:
-   git push -u origin $branch
+STEP 3 — ONLY after Step 1 AND Step 2 are both exit 0:
+  git push -u origin ${branch}
+  gh pr create with descriptive title and body
+  gh pr merge --squash --delete-branch
+  Verify: gh pr view ${branch} --json state --jq '.state' → MERGED
 
-4. CREATE THE PR:
-   Use gh pr create with a descriptive title and body.
-   Include a summary of changes and test plan.
+FORBIDDEN (each is a violation — do not do any of these):
+  pytest -k 'subset'      never filter tests
+  pytest --ignore=...     never ignore test directories
+  git commit --no-verify  never bypass pre-commit
+  SKIP=hook pre-commit    never skip individual hooks
 
-5. MERGE THE PR (this is an overnight batch run, auto-merge is intended):
-   gh pr merge --squash --delete-branch --admin
-   If --admin fails, try without it:
-   gh pr merge --squash --delete-branch
+Then stop. Do NOT continue to the next plan — the batch script handles sequencing."
 
-6. Verify merge succeeded:
-   gh pr view $branch --json state --jq '.state'
-   Expected output: MERGED
-
-Then stop. Do NOT continue to the next plan — the batch script handles sequencing." \
-    2>&1 | tee "$log"; then
+  exit_code=0
+  if timeout "${CHILD_TIMEOUT_SEC:-7200}" claude \
+    --dangerously-skip-permissions \
+    --output-format stream-json \
+    --verbose \
+    --include-partial-messages \
+    -p "${prompt}" \
+    2>&1 | tee "$log" | jq -rj 'select(.type=="stream_event" and (.event.delta.type?=="text_delta")) | .event.delta.text'; then
 
     END=$(date +%s)
     echo ""
