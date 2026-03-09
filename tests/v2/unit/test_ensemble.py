@@ -21,6 +21,8 @@ from minivess.ensemble.calibration import (
 from minivess.ensemble.strategies import EnsemblePredictor
 from minivess.validation.drift import DriftReport, detect_prediction_drift
 
+pytestmark = pytest.mark.model_loading
+
 
 class TestEnsemblePredictor:
     """Test ensemble prediction strategies."""

@@ -19,6 +19,8 @@ import torch
 
 from minivess.config.models import ModelConfig, ModelFamily
 
+pytestmark = pytest.mark.model_loading
+
 
 class TestVesselFMAdapterCreation:
     """Test VesselFMAdapter instantiation."""

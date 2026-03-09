@@ -391,9 +391,6 @@ experiment config YAML which specifies the full loss list.
 # Install dependencies
 uv sync
 
-# Run tests
-uv run pytest tests/ -x -q
-
 # Lint and format
 uv run ruff check src/ tests/
 uv run ruff format src/ tests/
@@ -401,9 +398,34 @@ uv run ruff format src/ tests/
 # Type check
 uv run mypy src/
 
-# Full verify (all three gates)
-uv run pytest tests/ -x -q && uv run ruff check src/ tests/ && uv run mypy src/
+# Full verify (all three gates — uses staging tier)
+make test-staging && uv run ruff check src/ tests/ && uv run mypy src/
 ```
+
+## Test Tiers (Non-Negotiable)
+
+Three tiers, invoked via Makefile. **NEVER run SAM3 model tests in standard CI.**
+
+| Tier | Command | What runs | Target time |
+|------|---------|-----------|-------------|
+| **Staging** | `make test-staging` | No model loading, no slow, no integration | <3 min |
+| **Prod** | `make test-prod` | Everything except GPU instance tests | ~5-10 min |
+| **GPU** | `make test-gpu` | SAM3 + GPU-heavy tests in `tests/gpu_instance/` | GPU instance only |
+
+```bash
+make test-staging    # PR readiness — fast, no models
+make test-prod       # Pre-merge — includes model loading + slow tests
+make test-gpu        # RunPod / intranet GPU — SAM3 forward passes
+```
+
+**Key rules:**
+- `tests/gpu_instance/` is **excluded** from default pytest collection. Standard
+  `uv run pytest tests/` never touches these files. Zero noise.
+- `@pytest.mark.model_loading` marks tests that instantiate PyTorch models (DynUNet,
+  SegResNet, etc.). Excluded from staging tier.
+- SAM3 tests are NEVER run on the dev machine or GitHub Actions. They run on external
+  GPU instances only. See #564 for the dockerized GPU benchmark plan.
+- `@pytest.mark.slow` marks tests that take >30s. Excluded from staging tier.
 
 ## Directory Structure (Target v2)
 

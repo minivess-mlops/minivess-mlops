@@ -5,10 +5,13 @@ Closes: #474 (MONAI ecosystem audit)
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 from minivess.config.models import ModelConfig, ModelFamily
+
+pytestmark = pytest.mark.model_loading
 
 
 def _make_config(**kwargs: object) -> ModelConfig:

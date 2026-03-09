@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 import pytest
 import torch
 
+pytestmark = pytest.mark.model_loading
+
 _gradio_functional = False
 try:
     import gradio as _gr

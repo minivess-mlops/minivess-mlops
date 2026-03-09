@@ -9,11 +9,14 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 import torch
 from torch import Tensor, nn
 
 from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 from minivess.config.models import ModelConfig, ModelFamily
+
+pytestmark = pytest.mark.model_loading
 
 # ---------------------------------------------------------------------------
 # Minimal concrete adapter for testing base helpers

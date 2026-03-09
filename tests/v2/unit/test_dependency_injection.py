@@ -10,10 +10,13 @@ from __future__ import annotations
 import contextlib
 from typing import Any
 
+import pytest
 import torch
 from torch import nn
 
 from minivess.config.models import ModelConfig, ModelFamily, TrainingConfig
+
+pytestmark = pytest.mark.model_loading
 
 
 def _make_model_config() -> ModelConfig:

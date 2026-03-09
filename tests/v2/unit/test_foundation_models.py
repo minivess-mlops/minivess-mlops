@@ -8,6 +8,8 @@ import torch
 from minivess.adapters.base import ModelAdapter
 from minivess.config.models import ModelConfig, ModelFamily
 
+pytestmark = pytest.mark.model_loading
+
 # ---------------------------------------------------------------------------
 # T1: LoRA wrapper
 # ---------------------------------------------------------------------------

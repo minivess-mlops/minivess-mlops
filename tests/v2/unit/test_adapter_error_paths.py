@@ -16,6 +16,8 @@ import torch
 
 from minivess.config.models import ModelConfig, ModelFamily
 
+pytestmark = pytest.mark.model_loading
+
 
 def _dynunet_config() -> ModelConfig:
     return ModelConfig(

@@ -5,11 +5,14 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import pytest
 import torch
 
 from minivess.adapters.base import SegmentationOutput
 from minivess.adapters.multitask_adapter import AuxHeadConfig, MultiTaskAdapter
 from minivess.config.deploy_config import DeployConfig
+
+pytestmark = pytest.mark.model_loading
 
 
 class _StubNet(torch.nn.Module):  # type: ignore[misc]

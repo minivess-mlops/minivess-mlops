@@ -8,10 +8,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import pytest
 import torch
 from torch import Tensor, nn
 
 from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
+
+pytestmark = pytest.mark.model_loading
 
 if TYPE_CHECKING:
     from pathlib import Path

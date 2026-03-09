@@ -11,6 +11,8 @@ import torch
 from minivess.adapters.base import ModelAdapter, SegmentationOutput
 from minivess.config.models import ModelConfig, ModelFamily
 
+pytestmark = pytest.mark.model_loading
+
 if TYPE_CHECKING:
     from pathlib import Path
 

@@ -14,6 +14,8 @@ from minivess.config.models import (
     ModelFamily,
 )
 
+pytestmark = pytest.mark.model_loading
+
 
 def _dynunet_model() -> object:
     from minivess.adapters.dynunet import DynUNetAdapter

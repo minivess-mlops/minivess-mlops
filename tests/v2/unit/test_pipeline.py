@@ -9,6 +9,8 @@ from minivess.pipeline.loss_functions import build_loss_function
 from minivess.pipeline.metrics import MetricResult, SegmentationMetrics
 from minivess.pipeline.trainer import EpochResult, SegmentationTrainer
 
+pytestmark = pytest.mark.model_loading
+
 
 class TestLossFunctions:
     """Test loss function factory."""
