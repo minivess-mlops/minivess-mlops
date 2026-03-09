@@ -33,7 +33,12 @@ from minivess.ensemble.builder import (
     EnsembleSpec,
 )
 from minivess.observability.tracking import resolve_tracking_uri
-from minivess.orchestration.constants import FLOW_NAME_ANALYSIS
+from minivess.orchestration.constants import (
+    EXPERIMENT_EVALUATION,
+    EXPERIMENT_TRAINING,
+    FLOW_NAME_ANALYSIS,
+    resolve_experiment_name,
+)
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -1695,7 +1700,9 @@ def run_analysis_flow(
     if upstream_training_run_id is None:
         upstream = find_upstream_safely(
             tracking_uri=_tracking_uri,
-            experiment_name="minivess_training",
+            experiment_name=os.environ.get(
+                "UPSTREAM_EXPERIMENT", resolve_experiment_name(EXPERIMENT_TRAINING)
+            ),
             upstream_flow="train",
         )
         upstream_training_run_id = upstream["run_id"] if upstream else None
@@ -1704,7 +1711,7 @@ def run_analysis_flow(
         import mlflow
 
         mlflow.set_tracking_uri(_tracking_uri)
-        mlflow.set_experiment("minivess_training")
+        mlflow.set_experiment(resolve_experiment_name(EXPERIMENT_EVALUATION))
         with mlflow.start_run(
             tags={
                 "flow_name": FLOW_NAME_ANALYSIS,

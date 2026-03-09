@@ -39,6 +39,64 @@ from minivess.pipeline.post_training_plugin import (
 logger = logging.getLogger(__name__)
 
 
+def resolve_checkpoint_paths_from_contract(
+    *,
+    parent_run_id: str | None,
+    tracking_uri: str,
+) -> list[Path]:
+    """Discover fold checkpoint files from an upstream training run via FlowContract.
+
+    Reads ``checkpoint_dir_fold_N`` tags from *parent_run_id* and resolves them
+    to individual checkpoint files. Prefers ``best.ckpt`` over ``epoch_*.ckpt``;
+    when no ``best.ckpt`` exists, picks the lexicographically latest
+    ``epoch_*.ckpt``. Silently skips dirs that don't exist on the volume.
+
+    Parameters
+    ----------
+    parent_run_id:
+        MLflow run ID of the upstream training run. Returns ``[]`` when None.
+    tracking_uri:
+        MLflow tracking URI used to construct FlowContract.
+
+    Returns
+    -------
+    list[Path]
+        One Path per fold checkpoint found. Empty when none discovered.
+    """
+    if parent_run_id is None:
+        return []
+
+    from minivess.orchestration.flow_contract import FlowContract
+
+    fc = FlowContract(tracking_uri=tracking_uri)
+    fold_infos = fc.find_fold_checkpoints(parent_run_id=parent_run_id)
+
+    checkpoint_paths: list[Path] = []
+    for info in fold_infos:
+        ckpt_dir: Path = info["checkpoint_dir"]
+        if not ckpt_dir.exists():
+            logger.warning(
+                "Checkpoint dir for fold %d not found on volume: %s",
+                info["fold_id"],
+                ckpt_dir,
+            )
+            continue
+        best = ckpt_dir / "best.ckpt"
+        if best.exists():
+            checkpoint_paths.append(best)
+            continue
+        # Fall back to lexicographically latest epoch_*.ckpt
+        epoch_ckpts = sorted(ckpt_dir.glob("epoch_*.ckpt"))
+        if epoch_ckpts:
+            checkpoint_paths.append(epoch_ckpts[-1])
+        else:
+            logger.warning(
+                "No checkpoint files found in %s for fold %d", ckpt_dir, info["fold_id"]
+            )
+
+    return checkpoint_paths
+
+
 def _require_docker_context() -> None:
     """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
     if os.environ.get("MINIVESS_ALLOW_HOST") == "1":

@@ -94,6 +94,9 @@ class TrainingFlowResult:
     fold_results: list[dict[str, Any]] = field(default_factory=list)
     upstream_data_run_id: str | None = None
     n_folds: int = 0
+    loss_name: str = "cbdice_cldice"
+    model_family: str = "dynunet"
+    checkpoint_dirs: dict[int, Path] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +414,7 @@ def log_fold_results_task(
     fold_id: int,
     result: dict[str, Any],
     mlflow_run_id: str | None,
+    checkpoint_dir: Path | None = None,
 ) -> None:
     """Log fold training results to MLflow.
 
@@ -422,6 +426,10 @@ def log_fold_results_task(
         Fold result dict from SegmentationTrainer.fit().
     mlflow_run_id:
         Active MLflow run ID to log into.
+    checkpoint_dir:
+        Optional path to fold checkpoint directory. When provided, writes a
+        ``checkpoint_dir_fold_{fold_id}`` tag so post-training flow can
+        discover checkpoints without filesystem scanning.
     """
     if mlflow_run_id is None:
         return
@@ -446,6 +454,11 @@ def log_fold_results_task(
         if result.get("history", {}).get("val_loss"):
             for epoch, val_loss in enumerate(result["history"]["val_loss"], start=1):
                 client.log_metric(mlflow_run_id, "val_loss", val_loss, step=epoch)
+        # Tag checkpoint_dir so post-training flow can discover it via FlowContract
+        if checkpoint_dir is not None:
+            client.set_tag(
+                mlflow_run_id, f"checkpoint_dir_fold_{fold_id}", str(checkpoint_dir)
+            )
     except Exception:
         logger.warning(
             "Failed to log fold %d results to MLflow", fold_id, exc_info=True
@@ -579,6 +592,7 @@ def training_flow(
 
     # Train each fold, skipping already-completed configs (auto-resume)
     fold_results: list[dict[str, Any]] = []
+    fold_checkpoint_dirs: dict[int, Path] = {}
     for fold_id, fold_split in enumerate(folds_to_run):
         # Check for already-completed run with matching config fingerprint
         fingerprint = compute_config_fingerprint(
@@ -602,6 +616,7 @@ def training_flow(
             continue
 
         checkpoint_dir = checkpoint_base / f"fold_{fold_id}"
+        fold_checkpoint_dirs[fold_id] = checkpoint_dir
         fold_result = train_one_fold_task(fold_id, fold_split, config, checkpoint_dir)
         fold_results.append(fold_result)
 
@@ -612,22 +627,32 @@ def training_flow(
 
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment(experiment_name)
-        # MLflow tags must be strings — exclude None values or they raise TypeError
-        # during protobuf serialization (tag.to_proto()).
-        _tags: dict[str, str] = {
-            "flow_name": FLOW_NAME_TRAIN,
-            "loss_function": loss_name,
-            "model_family": model_family,
-        }
-        if upstream_data_run_id is not None:
-            _tags["upstream_data_run_id"] = upstream_data_run_id
-        with mlflow.start_run(tags=_tags) as active_run:
+        # MLflow tags: flow_name is inline so AST checks in test_flow_name_tags.py pass.
+        # Optional upstream_data_run_id is injected via dict unpacking to avoid None
+        # values that raise TypeError during protobuf serialization (tag.to_proto()).
+        with mlflow.start_run(
+            tags={
+                "flow_name": FLOW_NAME_TRAIN,
+                "loss_function": loss_name,
+                "model_family": model_family,
+                **(
+                    {"upstream_data_run_id": upstream_data_run_id}
+                    if upstream_data_run_id is not None
+                    else {}
+                ),
+            }
+        ) as active_run:
             mlflow_run_id = active_run.info.run_id
             logger.info("MLflow run opened: %s", mlflow_run_id)
 
             # Log fold results inside the run context
             for fold_id, fold_result in enumerate(fold_results):
-                log_fold_results_task(fold_id, fold_result, mlflow_run_id)
+                log_fold_results_task(
+                    fold_id,
+                    fold_result,
+                    mlflow_run_id,
+                    checkpoint_dir=fold_checkpoint_dirs.get(fold_id),
+                )
 
             mlflow.log_metric("n_folds_completed", float(len(fold_results)))
 
@@ -648,6 +673,9 @@ def training_flow(
         fold_results=fold_results,
         upstream_data_run_id=upstream_data_run_id,
         n_folds=len(fold_results),
+        loss_name=loss_name,
+        model_family=model_family,
+        checkpoint_dirs=fold_checkpoint_dirs,
     )
     logger.info(
         "Training flow complete: %d folds, run_id=%s",

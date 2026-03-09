@@ -10,11 +10,16 @@ run results and passing context between flows.
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
 from minivess.observability.tracking import resolve_tracking_uri
 
 logger = logging.getLogger(__name__)
+
+# Sentinel written by log_flow_completion(); find_upstream_run() filters on it.
+_FLOW_COMPLETE_TAG = "FLOW_COMPLETE"
 
 
 class FlowContract:
@@ -34,6 +39,21 @@ class FlowContract:
         self.tracking_uri = (
             tracking_uri if tracking_uri is not None else resolve_tracking_uri()
         )
+        # Read debug suffix at construction time so tests can monkeypatch the env
+        # before instantiating FlowContract and get deterministic behavior.
+        self._debug_suffix: str = os.environ.get("MINIVESS_DEBUG_SUFFIX", "")
+
+    # ------------------------------------------------------------------
+    # Experiment name helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_experiment(self, base_name: str) -> str:
+        """Return *base_name* with the debug suffix appended (may be empty)."""
+        return f"{base_name}{self._debug_suffix}"
+
+    # ------------------------------------------------------------------
+    # Upstream run discovery
+    # ------------------------------------------------------------------
 
     def find_upstream_run(
         self,
@@ -96,12 +116,77 @@ class FlowContract:
             logger.warning("Failed to find upstream run", exc_info=True)
             return None
 
+    # ------------------------------------------------------------------
+    # Fold checkpoint discovery
+    # ------------------------------------------------------------------
+
+    def find_fold_checkpoints(
+        self,
+        *,
+        parent_run_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return fold checkpoint info from a parent training run's MLflow tags.
+
+        Reads tags of the form ``checkpoint_dir_fold_N`` from *parent_run_id*
+        and returns one entry per fold found.
+
+        Parameters
+        ----------
+        parent_run_id:
+            MLflow run ID of the upstream training run.
+
+        Returns
+        -------
+        List of dicts, each with:
+        - ``fold_id`` (int)
+        - ``run_id`` (str) — same as *parent_run_id* for now
+        - ``checkpoint_dir`` (Path)
+        """
+        try:
+            from mlflow.tracking import MlflowClient
+
+            client = MlflowClient(tracking_uri=self.tracking_uri)
+            run_data = client.get_run(parent_run_id)
+            tags = run_data.data.tags
+        except Exception:
+            logger.warning(
+                "Failed to read tags for run %s", parent_run_id, exc_info=True
+            )
+            return []
+
+        prefix = "checkpoint_dir_fold_"
+        results: list[dict[str, Any]] = []
+        for tag_key, tag_value in tags.items():
+            if not tag_key.startswith(prefix):
+                continue
+            fold_str = tag_key[len(prefix) :]
+            try:
+                fold_id = int(fold_str)
+            except ValueError:
+                logger.warning("Unexpected checkpoint tag key: %s", tag_key)
+                continue
+            results.append(
+                {
+                    "fold_id": fold_id,
+                    "run_id": parent_run_id,
+                    "checkpoint_dir": Path(tag_value),
+                }
+            )
+
+        results.sort(key=lambda r: r["fold_id"])
+        return results
+
+    # ------------------------------------------------------------------
+    # Flow completion logging
+    # ------------------------------------------------------------------
+
     def log_flow_completion(
         self,
         *,
         flow_name: str,
         run_id: str,
         artifacts: list[str] | None = None,
+        checkpoint_dir: Path | None = None,
     ) -> None:
         """Log flow completion metadata for downstream flows.
 
@@ -113,14 +198,19 @@ class FlowContract:
             MLflow run ID.
         artifacts:
             List of artifact paths produced by this flow.
+        checkpoint_dir:
+            Optional top-level checkpoint directory (tagged for post-training
+            discovery).
         """
         try:
             from mlflow.tracking import MlflowClient
 
             client = MlflowClient(tracking_uri=self.tracking_uri)
             client.set_tag(run_id, "flow_name", flow_name)
-            client.set_tag(run_id, "flow_status", "completed")
+            client.set_tag(run_id, "flow_status", _FLOW_COMPLETE_TAG)
             if artifacts:
                 client.set_tag(run_id, "flow_artifacts", ",".join(artifacts))
+            if checkpoint_dir is not None:
+                client.set_tag(run_id, "checkpoint_dir", str(checkpoint_dir))
         except Exception:
             logger.warning("Failed to log flow completion", exc_info=True)
