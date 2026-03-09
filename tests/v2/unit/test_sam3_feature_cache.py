@@ -40,6 +40,7 @@ def sam3_config() -> ModelConfig:
 
 @_sam3_skip
 @pytest.mark.slow
+@pytest.mark.gpu_heavy
 class TestExtractAndCache:
     """Offline feature extraction and disk caching."""
 
@@ -71,6 +72,7 @@ class TestExtractAndCache:
 
 @_sam3_skip
 @pytest.mark.slow
+@pytest.mark.gpu_heavy
 class TestLoadCachedFeatures:
     """Loading cached features from disk."""
 

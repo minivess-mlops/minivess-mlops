@@ -77,6 +77,7 @@ def hybrid_adapter() -> Any:
 # ---------------------------------------------------------------------------
 @_sam3_skip
 @pytest.mark.slow
+@pytest.mark.gpu_heavy
 class TestSaveCheckpoint:
     """save_checkpoint must not crash."""
 
@@ -101,6 +102,7 @@ class TestSaveCheckpoint:
 # ---------------------------------------------------------------------------
 @_sam3_skip
 @pytest.mark.slow
+@pytest.mark.gpu_heavy
 class TestLoadCheckpoint:
     """load_checkpoint after save_checkpoint produces identical forward output."""
 
@@ -161,6 +163,7 @@ class TestLoadCheckpoint:
 # ---------------------------------------------------------------------------
 @_sam3_skip
 @pytest.mark.slow
+@pytest.mark.gpu_heavy
 class TestTrainableParameters:
     """trainable_parameters must return a positive int for all variants."""
 
@@ -185,6 +188,7 @@ class TestTrainableParameters:
 # ---------------------------------------------------------------------------
 @_sam3_skip
 @pytest.mark.slow
+@pytest.mark.gpu_heavy
 class TestExportOnnx:
     """export_onnx must produce a valid file."""
 
