@@ -38,6 +38,12 @@ x-common-env: &common-env
   # HuggingFace token for gated models (SAM3, VesselFM).
   # Set HF_TOKEN in .env — never hard-code here.
   HF_TOKEN: ${HF_TOKEN:-}
+  # Model weight cache — mapped from host MODEL_CACHE_HOST_PATH (see .env.example).
+  # HF_HOME: HuggingFace hub cache (models, tokenizers, datasets)
+  # TORCH_HOME: PyTorch hub cache (MONAI pre-trained bundles, torchvision)
+  # Setting these avoids re-downloading multi-GB weights on every container restart.
+  HF_HOME: /model_cache/huggingface
+  TORCH_HOME: /model_cache/torch
 
 x-common-labels: &common-labels
   labels:
@@ -100,6 +106,9 @@ services:
       - checkpoint_cache:/app/checkpoints
       - mlruns_data:/app/mlruns
       - logs_data:/app/logs
+      # Persistent model weight cache — avoids re-downloading SAM3 (~9GB), MONAI bundles.
+      # Host path set by MODEL_CACHE_HOST_PATH in .env (default: /home/petteri/download_cache).
+      - ${MODEL_CACHE_HOST_PATH:-/home/petteri/download_cache}:/model_cache
     # CDI GPU access — works without nvidia container runtime (Docker 25+)
     devices:
       - "nvidia.com/gpu=all"
@@ -264,6 +273,7 @@ services:
       - checkpoint_cache:/app/checkpoints
       - mlruns_data:/app/mlruns
       - logs_data:/app/logs
+      - ${MODEL_CACHE_HOST_PATH:-/home/petteri/download_cache}:/model_cache
     # CDI GPU access — works without nvidia container runtime (Docker 25+)
     devices:
       - "nvidia.com/gpu=all"
@@ -289,6 +299,7 @@ services:
       - checkpoint_cache:/app/checkpoints
       - mlruns_data:/app/mlruns
       - logs_data:/app/logs
+      - ${MODEL_CACHE_HOST_PATH:-/home/petteri/download_cache}:/model_cache
     # CDI GPU access — works without nvidia container runtime (Docker 25+)
     devices:
       - "nvidia.com/gpu=all"
