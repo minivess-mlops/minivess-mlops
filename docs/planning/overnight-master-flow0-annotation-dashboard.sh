@@ -16,6 +16,11 @@
 # ── OVERRIDE TIMEOUT ─────────────────────────────────────────────────────────
 #   CHILD_TIMEOUT_SEC=14400 ./docs/planning/overnight-master-flow0-annotation-dashboard.sh
 #
+# ── SYSTEM DEPENDENCIES (not installed by default — install once) ─────────────
+#   sudo apt install -y jq screen
+#   jq    — required to parse --output-format stream-json and show live tokens
+#   screen — required to detach/reattach without losing output (tmux also works)
+#
 # ── WHAT YOU WILL SEE ─────────────────────────────────────────────────────────
 #   Claude token stream live in terminal via jq filter (real-time, not buffered)
 #   ♥ heartbeat line every 60s — proves master script is alive
