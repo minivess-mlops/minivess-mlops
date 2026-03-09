@@ -343,15 +343,19 @@ def train_one_fold_task(
     tracker = ExperimentTracker(exp_config, tracking_uri=tracking_uri)
 
     _is_sam3 = model_family_str.startswith("sam3_")
+    _is_sam3_hybrid = model_family_str == "sam3_hybrid"
     # SAM3 validation: use full-slice ROI (512,512,3) instead of training
     # patch (64,64,3). The ViT-32L encoder always resizes to 1008×1008
     # regardless of input size, so larger patches cost the same per-window
     # but reduce window count by ~121× (11×11 spatial grid eliminated).
     # sw_batch_size=1 for SAM3 to keep VRAM low with large validation patches.
-    # Debug mode exception: val_roi=(512,512,3) OOMs on 8 GB GPU alongside 6.65 GiB
-    # model weights (needs 5+ GiB extra). In debug mode, use patch_size for val_roi
-    # to avoid OOM — debug runs don't need production-quality validation metrics.
-    _sam3_val_roi = patch_size if debug else (512, 512, 3)
+    #
+    # sam3_hybrid exception: model weights = 6.65 GiB, leaving only ~1 GiB
+    # CUDA budget. val_roi=(512,512,3) needs 5+ GiB extra → always OOM on 8 GB GPU.
+    # Use patch_size for sam3_hybrid to avoid OOM — even in production.
+    # sam3_vanilla (2.9 GiB weights): (512,512,3) fits fine (4.5 GiB free) and
+    # is ~100× faster than patch-sized val_roi (fewer sliding-window patches).
+    _sam3_val_roi = patch_size if _is_sam3_hybrid else (512, 512, 3)
     val_roi = _sam3_val_roi if _is_sam3 else data_config.patch_size
     val_sw_batch = 1 if _is_sam3 else 4
     trainer = SegmentationTrainer(
