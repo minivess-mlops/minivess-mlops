@@ -21,3 +21,6 @@ experiment_name: unnamed
 losses:
   - dice_ce
 debug: false
+# patch_size: null = use model-adaptive default in train_flow.py (64,64,3 for SAM3, 64,64,16 otherwise).
+# Override per-invocation: patch_size=[32,32,3] for sam3_hybrid on 8 GB GPU.
+patch_size: null

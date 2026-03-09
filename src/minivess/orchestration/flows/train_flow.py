@@ -227,13 +227,16 @@ def train_one_fold_task(
 
     # Build DataConfig (dataset_name required, cache_rate passed to loaders)
     _is_sam3 = model_family_str.startswith("sam3_")
+    _is_sam3_hybrid = model_family_str == "sam3_hybrid"
     # SAM3: each z-slice goes through ViT-32L encoder at 1008×1008 — limit depth
     # to 3 slices and batch=1 to fit on 8 GB GPUs. MONAI's RandCropByPosNegLabeld
     # with num_samples=4 produces 4 crops, so effective batch is 4× — this is fine
     # with small patch depth.
     default_patch = (64, 64, 3) if _is_sam3 else (64, 64, 16)
-    patch_size: tuple[int, int, int] = tuple(  # type: ignore[assignment]
-        config.get("patch_size", default_patch)
+    # patch_size=null in config means "use model-adaptive default" (set above).
+    _patch_raw = config.get("patch_size")
+    patch_size: tuple[int, int, int] = (  # type: ignore[assignment]
+        default_patch if _patch_raw is None else tuple(_patch_raw)
     )
     if _is_sam3:
         batch_size = min(batch_size, 1)
@@ -259,11 +262,20 @@ def train_one_fold_task(
     )
 
     # Build TrainingConfig
-    # SAM3: validation with sliding_window_inference is very slow (~2h per epoch
-    # on RTX 2070 Super) because each window requires 3 encoder forward passes
-    # through the 454M-param ViT-32L. Validate every 10 epochs to keep training
-    # practical (50 epochs × 3 folds ≈ 16h with val_interval=10, vs 300h without).
-    val_interval = 10 if _is_sam3 and not debug else 1
+    # Validation interval strategy:
+    # sam3_hybrid: 6.65 GiB model weights → <1 GiB VRAM free for inference.
+    #   SAM3 ViT-32L ALWAYS resizes any patch to 1008×1008, so every inference
+    #   forward pass needs ~5 GiB → OOM on 8 GB GPU. Skip validation in debug mode
+    #   by setting val_interval > training max_epochs (which is 1 in debug mode).
+    # sam3_vanilla: 2.9 GiB model → val_roi=(512,512,3) fits. Validate every 10
+    #   epochs in production (slow inference); every epoch in debug.
+    # Other models: validate every epoch always.
+    if _is_sam3_hybrid and debug:
+        val_interval = max_epochs + 1  # never validate: OOM on 8 GB GPU
+    elif _is_sam3 and not debug:
+        val_interval = 10  # sparse validation in production (slow inference)
+    else:
+        val_interval = 1
     training_config = TrainingConfig(
         max_epochs=1 if debug else max_epochs,
         num_folds=num_folds,
@@ -341,12 +353,20 @@ def train_one_fold_task(
     tracker = ExperimentTracker(exp_config, tracking_uri=tracking_uri)
 
     _is_sam3 = model_family_str.startswith("sam3_")
+    _is_sam3_hybrid = model_family_str == "sam3_hybrid"
     # SAM3 validation: use full-slice ROI (512,512,3) instead of training
     # patch (64,64,3). The ViT-32L encoder always resizes to 1008×1008
     # regardless of input size, so larger patches cost the same per-window
     # but reduce window count by ~121× (11×11 spatial grid eliminated).
     # sw_batch_size=1 for SAM3 to keep VRAM low with large validation patches.
-    val_roi = (512, 512, 3) if _is_sam3 else data_config.patch_size
+    #
+    # sam3_hybrid exception: model weights = 6.65 GiB, leaving only ~1 GiB
+    # CUDA budget. val_roi=(512,512,3) needs 5+ GiB extra → always OOM on 8 GB GPU.
+    # Use patch_size for sam3_hybrid to avoid OOM — even in production.
+    # sam3_vanilla (2.9 GiB weights): (512,512,3) fits fine (4.5 GiB free) and
+    # is ~100× faster than patch-sized val_roi (fewer sliding-window patches).
+    _sam3_val_roi = patch_size if _is_sam3_hybrid else (512, 512, 3)
+    val_roi = _sam3_val_roi if _is_sam3 else data_config.patch_size
     val_sw_batch = 1 if _is_sam3 else 4
     trainer = SegmentationTrainer(
         model,
@@ -642,7 +662,28 @@ if __name__ == "__main__":
     # → resolved config dict → training_flow(config_dict=resolved)
     _experiment = os.environ.get("EXPERIMENT")
     _hydra_overrides_str = os.environ.get("HYDRA_OVERRIDES", "")
-    _hydra_overrides = [o.strip() for o in _hydra_overrides_str.split(",") if o.strip()]
+    # Bracket-aware split: preserve commas inside [...] (e.g. patch_size=[32,32,3]).
+    # Plain str.split(",") would break list overrides like patch_size=[32,32,3].
+    _hydra_overrides: list[str] = []
+    _current: list[str] = []
+    _depth = 0
+    for _ch in _hydra_overrides_str:
+        if _ch == "[":
+            _depth += 1
+            _current.append(_ch)
+        elif _ch == "]":
+            _depth -= 1
+            _current.append(_ch)
+        elif _ch == "," and _depth == 0:
+            _part = "".join(_current).strip()
+            if _part:
+                _hydra_overrides.append(_part)
+            _current = []
+        else:
+            _current.append(_ch)
+    _part = "".join(_current).strip()
+    if _part:
+        _hydra_overrides.append(_part)
 
     if _experiment:
         from minivess.config.compose import compose_experiment_config

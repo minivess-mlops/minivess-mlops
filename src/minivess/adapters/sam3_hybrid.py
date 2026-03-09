@@ -116,8 +116,12 @@ class Sam3HybridAdapter(ModelAdapter):
         filters = arch.get("filters", [32, 64, 128, 256])
         n_levels = len(filters)
         kernel_size = [[3, 3, 3]] * n_levels
-        strides = [[1, 1, 1]] + [[2, 2, 2]] * (n_levels - 1)
-        upsample_kernel_size = [[2, 2, 2]] * (n_levels - 1)
+        # SAM3 patch depth D=3 (MONAI (B,C,H,W,D) convention, depth last).
+        # DynUNet with stride (2,2,2) would downsample D: 3→2→1→1 but upsample
+        # 1→2, creating a skip-connection mismatch (encoder D=1 vs decoder D=2).
+        # Fix: stride (2,2,1) keeps D constant — only H,W are downsampled.
+        strides = [[1, 1, 1]] + [[2, 2, 1]] * (n_levels - 1)
+        upsample_kernel_size = [[2, 2, 1]] * (n_levels - 1)
 
         self.dynunet = DynUNet(
             spatial_dims=3,
@@ -159,17 +163,21 @@ class Sam3HybridAdapter(ModelAdapter):
         Parameters
         ----------
         images:
-            Input 3D volume (B, C, D, H, W).
+            Input 3D volume (B, C, H, W, D) — MONAI depth-last convention.
 
         Returns
         -------
         SAM features (B, 256, D, H_feat, W_feat).
         """
-        b, c, d, h, w = images.shape
+        # MONAI uses (B, C, H, W, D) — depth is the LAST dimension.
+        # Wrong unpacking (b,c,d,h,w) causes 21× more encoder calls on 8 GB GPU
+        # (64 instead of 3 for patch=(64,64,3)), accumulating ~5 GiB of features
+        # before torch.stack → OOM. See src/minivess/adapters/CLAUDE.md.
+        b, c, h, w, d = images.shape
         slice_features: list[Tensor] = []
 
         for z_idx in range(d):
-            slice_2d = images[:, :, z_idx, :, :]
+            slice_2d = images[:, :, :, :, z_idx]  # (B, C, H, W)
             fpn_feat = self.sam_backbone.extract_fpn_features(slice_2d)
             slice_features.append(fpn_feat)
 

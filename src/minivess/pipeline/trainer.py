@@ -546,9 +546,14 @@ class SegmentationTrainer:
             t0 = time.perf_counter()
             train_result = self.train_epoch(train_loader)
 
-            # Validate every val_interval epochs + first + last epoch
+            # Validate every val_interval epochs + first + last epoch.
+            # val_interval > max_epochs is a sentinel for "never validate"
+            # (e.g. sam3_hybrid debug: val_interval = max_epochs + 1).
             is_last = epoch == self.config.max_epochs - 1
-            run_val = epoch % val_interval == 0 or epoch == 0 or is_last
+            _skip_all_val = val_interval > self.config.max_epochs
+            run_val = not _skip_all_val and (
+                epoch % val_interval == 0 or epoch == 0 or is_last
+            )
 
             if run_val:
                 # Compute extended metrics every N epochs + first + last
