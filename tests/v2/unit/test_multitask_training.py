@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from minivess.adapters.base import AdapterConfigInfo, SegmentationOutput
@@ -9,6 +10,8 @@ from minivess.adapters.multitask_adapter import AuxHeadConfig, MultiTaskAdapter
 from minivess.config.models import ModelFamily
 from minivess.pipeline.multitask_loss import AuxHeadLossConfig, MultiTaskLoss
 from minivess.pipeline.multitask_metrics import compute_per_head_metrics
+
+pytestmark = pytest.mark.model_loading
 
 
 class _StubNet(torch.nn.Module):  # type: ignore[misc]

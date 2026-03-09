@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import torch
+
+pytestmark = pytest.mark.model_loading
 
 
 class TestMambaAdapter:

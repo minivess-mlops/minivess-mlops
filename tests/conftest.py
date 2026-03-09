@@ -7,6 +7,13 @@ import warnings
 import pytest
 from prefect.testing.utilities import prefect_test_harness
 
+# Exclude GPU instance tests from default collection.
+# tests/gpu_instance/ contains SAM3 and other GPU-heavy tests that are
+# NEVER part of the standard suite. Run them explicitly:
+#     uv run pytest tests/gpu_instance/
+#     make test-gpu
+collect_ignore_glob = ["gpu_instance/*"]
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _prefect_test_server():

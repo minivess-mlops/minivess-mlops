@@ -11,6 +11,8 @@ import torch
 
 from minivess.config.models import ModelConfig, ModelFamily, TrainingConfig
 
+pytestmark = pytest.mark.model_loading
+
 
 def _make_config() -> ModelConfig:
     return ModelConfig(

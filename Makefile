@@ -2,18 +2,49 @@
 # Convenience targets for Docker infrastructure management.
 # All training/evaluation goes through Prefect flows, not this Makefile.
 
-.PHONY: init-volumes scan sbom seccomp-audit-train install-trivy help
+.PHONY: init-volumes scan sbom seccomp-audit-train install-trivy help \
+       test-staging test-prod test-gpu
 
 help:
 	@echo "MinIVess MLOps Makefile"
 	@echo ""
-	@echo "Targets:"
+	@echo "Test Tiers:"
+	@echo "  test-staging        Fast tests, no model loading (<3 min)"
+	@echo "  test-prod           Full suite except GPU instance tests"
+	@echo "  test-gpu            GPU instance tests (SAM3, requires CUDA + weights)"
+	@echo ""
+	@echo "Infrastructure:"
 	@echo "  init-volumes        Fix Docker named volume ownership (run once after first up)"
 	@echo "  scan                Trivy vulnerability scan on all minivess-* images"
 	@echo "  sbom                Generate CycloneDX SBOM for minivess-base image"
 	@echo "  seccomp-audit-train Run train flow with seccomp audit profile (syscall discovery)"
 	@echo "  install-trivy       Install Trivy scanner to /usr/local/bin"
 	@echo "  help                Show this help message"
+
+# ---------------------------------------------------------------------------
+# Test tiers
+# ---------------------------------------------------------------------------
+# Staging: no model loading, no integration, no slow tests. Target: <3 min.
+test-staging:
+	MINIVESS_ALLOW_HOST=1 uv run pytest tests/ -x -q \
+	  -m "not model_loading and not slow and not integration" \
+	  --ignore=tests/v2/quasi_e2e/ \
+	  --timeout=60
+
+# Prod: everything except GPU instance tests. Includes slow + model loading.
+# Excludes integration tests (Docker stack not guaranteed).
+test-prod:
+	MINIVESS_ALLOW_HOST=1 uv run pytest tests/ -x -q \
+	  -m "not integration" \
+	  --ignore=tests/v2/quasi_e2e/ \
+	  --timeout=300
+
+# GPU instance: SAM3 tests in tests/gpu_instance/. Requires CUDA + SAM3 weights.
+# Run on RunPod / intranet GPU servers, NOT on dev machines.
+test-gpu:
+	MINIVESS_ALLOW_HOST=1 uv run pytest tests/gpu_instance/ -x -q \
+	  -o "collect_ignore_glob=" \
+	  --timeout=600
 
 init-volumes:
 	@echo "Initializing Docker named volume ownership..."

@@ -13,6 +13,8 @@ import torch
 from minivess.adapters.model_builder import _sam3_package_available
 from minivess.config.models import ModelConfig, ModelFamily
 
+pytestmark = pytest.mark.model_loading
+
 _sam3_skip = pytest.mark.skipif(
     not _sam3_package_available(), reason="SAM3 not installed"
 )
