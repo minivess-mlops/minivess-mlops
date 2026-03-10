@@ -173,3 +173,29 @@ def test_flow_dockerfiles_use_correct_tier() -> None:
     assert not failures, "Flow Dockerfiles use wrong base image:\n" + "\n".join(
         failures
     )
+
+
+def test_flow_dockerfiles_have_warning_suppression() -> None:
+    """Flow Dockerfiles with Python CMD must have -W flags for noise suppression (DG1.7).
+
+    MetricsReloaded SyntaxWarnings fire during compilation, FutureWarning from CUDA,
+    UserWarning from MONAI — all non-actionable. Must be suppressed at interpreter level.
+    """
+    failures = []
+    for df in _flow_dockerfiles():
+        content = df.read_text(encoding="utf-8")
+        # Only check Dockerfiles that have python CMD
+        has_python_cmd = any(
+            "python" in line and "CMD" in line and not line.strip().startswith("#")
+            for line in content.splitlines()
+        )
+        if not has_python_cmd:
+            continue
+        has_w_flag = "-W" in content
+        if not has_w_flag:
+            failures.append(df.name)
+
+    assert not failures, (
+        f"Flow Dockerfiles with Python CMD missing -W warning flags (DG1.7): {failures}. "
+        "Add: -W ignore::SyntaxWarning -W ignore::FutureWarning"
+    )

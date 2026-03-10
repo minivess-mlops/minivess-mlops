@@ -12,4 +12,7 @@ LABEL description="Data acquisition flow — download, convert, verify"
 # Copy scripts
 COPY --chown=minivess:minivess scripts/ scripts/
 
-CMD ["python", "-m", "minivess.orchestration.flows.acquisition_flow"]
+# DG1.7: -W flags suppress non-actionable third-party warnings at interpreter level.
+CMD ["python", "-W", "ignore::SyntaxWarning", "-W", "ignore::FutureWarning", \
+     "-W", "ignore:Using a non-tuple:UserWarning", \
+     "-m", "minivess.orchestration.flows.acquisition_flow"]
