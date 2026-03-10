@@ -5,10 +5,11 @@
 # Build: docker build -t minivess-biostatistics:latest -f deployment/docker/Dockerfile.biostatistics .
 # Requires: minivess-base:latest built first
 
-FROM minivess-base:latest
+FROM minivess-base-cpu:latest
 
 LABEL flow="biostatistics"
 LABEL description="Biostatistics flow — cross-run stats, figures, tables, lineage"
+LABEL tier="cpu"
 
 # Copy scripts
 COPY --chown=minivess:minivess scripts/ scripts/

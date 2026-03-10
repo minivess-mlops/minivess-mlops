@@ -3,7 +3,8 @@
 # All training/evaluation goes through Prefect flows, not this Makefile.
 
 .PHONY: init-volumes scan sbom seccomp-audit-train install-trivy help \
-       test-staging test-prod test-gpu
+       test-staging test-prod test-gpu \
+       build-base-gpu build-base-cpu build-base-light build-bases requirements-tiers
 
 help:
 	@echo "MinIVess MLOps Makefile"
@@ -12,6 +13,13 @@ help:
 	@echo "  test-staging        Fast tests, no model loading (<3 min)"
 	@echo "  test-prod           Full suite except GPU instance tests"
 	@echo "  test-gpu            GPU instance tests (SAM3, requires CUDA + weights)"
+	@echo ""
+	@echo "Docker Images:"
+	@echo "  build-base-gpu      Build minivess-base:latest (CUDA + PyTorch + MONAI)"
+	@echo "  build-base-cpu      Build minivess-base-cpu:latest (scipy/pandas/DuckDB)"
+	@echo "  build-base-light    Build minivess-base-light:latest (prefect/FastAPI)"
+	@echo "  build-bases         Build all 3 base images"
+	@echo "  requirements-tiers  Regenerate requirements-{cpu,light}.txt from uv.lock"
 	@echo ""
 	@echo "Infrastructure:"
 	@echo "  init-volumes        Fix Docker named volume ownership (run once after first up)"
@@ -46,6 +54,39 @@ test-gpu:
 	  -o "collect_ignore_glob=" \
 	  --timeout=600
 
+# ---------------------------------------------------------------------------
+# Docker base image builds (3-tier hierarchy)
+# ---------------------------------------------------------------------------
+build-base-gpu:
+	DOCKER_BUILDKIT=1 docker build \
+	  --build-arg GIT_COMMIT=$$(git rev-parse HEAD) \
+	  --build-arg BUILD_DATE=$$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+	  -t minivess-base:latest \
+	  -f deployment/docker/Dockerfile.base .
+
+build-base-cpu:
+	DOCKER_BUILDKIT=1 docker build \
+	  --build-arg GIT_COMMIT=$$(git rev-parse HEAD) \
+	  --build-arg BUILD_DATE=$$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+	  -t minivess-base-cpu:latest \
+	  -f deployment/docker/Dockerfile.base-cpu .
+
+build-base-light:
+	DOCKER_BUILDKIT=1 docker build \
+	  --build-arg GIT_COMMIT=$$(git rev-parse HEAD) \
+	  --build-arg BUILD_DATE=$$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+	  -t minivess-base-light:latest \
+	  -f deployment/docker/Dockerfile.base-light .
+
+build-bases: build-base-gpu build-base-cpu build-base-light
+
+requirements-tiers:
+	uv export --frozen --only-group cpu --no-emit-project \
+	  --output-file deployment/docker/requirements-cpu.txt
+	uv export --frozen --only-group light --no-emit-project \
+	  --output-file deployment/docker/requirements-light.txt
+	@echo "Regenerated requirements-cpu.txt and requirements-light.txt"
+
 init-volumes:
 	@echo "Initializing Docker named volume ownership..."
 	docker run --rm --user root \
@@ -62,7 +103,7 @@ init-volumes:
 scan:
 	@echo "Scanning MinIVess Docker images with Trivy..."
 	@which trivy || (echo "Install Trivy: make install-trivy" && exit 1)
-	@for flow in base train data analyze deploy dashboard hpo post_training; do \
+	@for flow in base base-cpu base-light train data analyze deploy dashboard hpo post_training; do \
 	  echo "Scanning minivess-$$flow:latest..."; \
 	  trivy image --exit-code 0 --severity CRITICAL,HIGH --ignore-unfixed \
 	    minivess-$$flow:latest 2>/dev/null || echo "  Image not built: minivess-$$flow"; \

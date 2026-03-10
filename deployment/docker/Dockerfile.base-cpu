@@ -1,0 +1,93 @@
+# syntax=docker/dockerfile:1
+# MinIVess MLOps v2 — CPU Base Docker image (Tier B)
+# H3+H4: Multi-stage build mirroring Dockerfile.base hardening.
+# NO CUDA, NO PyTorch, NO MONAI — scipy/pandas/DuckDB analytics only.
+#
+# 3-Tier Hierarchy:
+#   Tier A (GPU):   minivess-base:latest       — CUDA + PyTorch + MONAI
+#   Tier B (CPU):   minivess-base-cpu:latest    — THIS — scipy/pandas/DuckDB
+#   Tier C (Light): minivess-base-light:latest  — orchestration/web only
+#
+# Build:
+#   docker build \
+#     --build-arg GIT_COMMIT=$(git rev-parse HEAD) \
+#     --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+#     -t minivess-base-cpu:latest \
+#     -f deployment/docker/Dockerfile.base-cpu .
+
+# ── Stage 1: Builder ─────────────────────────────────────────────────────────
+# Uses slim-bookworm — no CUDA headers needed.
+# Contains uv — NEVER copied to final image.
+FROM python:3.13-slim-bookworm AS builder
+
+# gcc + python3-dev needed for C-extension wheels (psycopg2, scipy)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv — BUILD STAGE ONLY (not copied to runner)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Install from pre-generated pinned requirements (no pyproject.toml needed)
+COPY deployment/docker/requirements-cpu.txt requirements.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv venv /app/.venv && \
+    uv pip install --python /app/.venv/bin/python -r requirements.txt
+
+# Copy source and config
+COPY src/ src/
+COPY configs/ configs/
+
+# ── Stage 2: Runner ───────────────────────────────────────────────────────────
+# Minimal runtime — NO uv, NO gcc, NO build tools.
+FROM python:3.13-slim-bookworm AS runner
+
+# Build-time provenance args (inject via --build-arg at CI time)
+ARG GIT_COMMIT=unknown
+ARG BUILD_DATE=unknown
+ARG UID=1000
+ARG GID=1000
+
+# OCI standard image annotations
+LABEL maintainer="petteri.teikari@gmail.com"
+LABEL project="minivess-mlops"
+LABEL tier="cpu"
+LABEL description="MinIVess MLOps CPU base — Python 3.13, scipy/pandas/DuckDB (no GPU)"
+LABEL org.opencontainers.image.title="minivess-base-cpu"
+LABEL org.opencontainers.image.source="https://github.com/minivess-mlops/minivess-mlops"
+LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.licenses="CC-BY-NC-SA-4.0"
+LABEL org.opencontainers.image.base.name="python:3.13-slim-bookworm"
+
+# Non-root user with configurable UID/GID (matches host user for bind mounts)
+RUN groupadd -g $GID minivess 2>/dev/null || true && \
+    useradd --create-home --shell /bin/bash -u $UID -g $GID -o minivess
+
+WORKDIR /app
+
+# Copy only the built venv and application code from builder.
+COPY --from=builder --chown=minivess:minivess /app/.venv /app/.venv
+COPY --from=builder --chown=minivess:minivess /app/src /app/src
+COPY --from=builder --chown=minivess:minivess /app/configs /app/configs
+
+# Group-readable venv
+RUN chmod -R g+rX /app/.venv
+
+USER minivess
+
+# Python environment
+ENV PATH=/app/.venv/bin:$PATH
+ENV PYTHONPATH=/app/src
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Default umask: new files are group+world readable
+RUN echo 'umask 0002' >> /home/minivess/.bashrc
+
+# HEALTHCHECK: verify Python interpreter works
+HEALTHCHECK --interval=60s --timeout=10s --retries=3 --start-period=30s \
+    CMD python3 -c "import sys; sys.exit(0)" || exit 1
