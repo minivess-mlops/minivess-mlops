@@ -18,6 +18,10 @@ set -euo pipefail
 EXPERIMENT="${EXPERIMENT:-debug_single_model}"
 USER_OVERRIDES=""
 DRY_RUN=false
+# Debug suffix isolates debug experiments from production in MLflow.
+# Flows read MINIVESS_DEBUG_SUFFIX and append it to experiment names
+# (e.g. minivess_training → minivess_training_DEBUG).
+export MINIVESS_DEBUG_SUFFIX="_DEBUG"
 FLOWS_COMPOSE="deployment/docker-compose.flows.yml"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Docker Compose V2 resolves .env from the compose file's directory (deployment/),
@@ -230,6 +234,7 @@ for model in "${MODELS_ARRAY[@]}"; do
     docker compose $ENV_FILE_ARG -f "$FLOWS_COMPOSE" run --rm -T \
       -e EXPERIMENT="$EXPERIMENT" \
       -e HYDRA_OVERRIDES="$OVERRIDES" \
+      -e MINIVESS_DEBUG_SUFFIX="$MINIVESS_DEBUG_SUFFIX" \
       train </dev/null 2>&1 | tee "$MODEL_LOG"
   MODEL_STATUS=${PIPESTATUS[0]}
   set -e
@@ -262,6 +267,7 @@ for flow in $FLOWS; do
     docker compose $ENV_FILE_ARG -f "$FLOWS_COMPOSE" run --rm -T \
       -e UPSTREAM_EXPERIMENT="$EXPERIMENT" \
       -e EXPERIMENT="$EXPERIMENT" \
+      -e MINIVESS_DEBUG_SUFFIX="$MINIVESS_DEBUG_SUFFIX" \
       "$flow" </dev/null 2>&1 | tee "$FLOW_LOG"
   CHAIN_STATUS=${PIPESTATUS[0]}
   set -e

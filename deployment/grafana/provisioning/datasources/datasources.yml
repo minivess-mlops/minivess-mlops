@@ -1,0 +1,9 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://${PROMETHEUS_DOCKER_HOST:-minivess-prometheus}:${PROMETHEUS_PORT:-9090}
+    isDefault: true
+    editable: false

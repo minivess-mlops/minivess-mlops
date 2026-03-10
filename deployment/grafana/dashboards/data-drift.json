@@ -1,0 +1,38 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "minivess-data-drift",
+    "title": "Data Drift",
+    "tags": ["minivess", "drift", "evidently"],
+    "timezone": "utc",
+    "schemaVersion": 39,
+    "version": 1,
+    "panels": [
+      {
+        "id": 1,
+        "title": "Drift Score Time Series",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "evidently_drift_score",
+            "legendFormat": "drift_score"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Feature Drift by Feature",
+        "type": "barchart",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "evidently_feature_drift",
+            "legendFormat": "{{feature_name}}"
+          }
+        ]
+      }
+    ]
+  },
+  "overwrite": true
+}

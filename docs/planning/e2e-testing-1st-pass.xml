@@ -1,0 +1,1409 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MinIVess MLOps: End-to-End Testing Plan (1st Pass)
+  Created: 2026-03-10
+  Author: Claude Code + petteri
+
+  PURPOSE:
+  Comprehensive e2e testing plan for the full MinIVess MLOps pipeline.
+  5 phases (0~4), each with TDD-first test specifications.
+  Executed using the self-learning-iterative-coder skill.
+
+  MODELS TESTED: DynUNet, SAM3 Vanilla, SAM3 Hybrid, CoMMA Mamba, U-Like Mamba
+  DEFERRED: VesselFM + SAM3 TopoLoRA (issue #366, external GPU required)
+  EXCLUDED: VesselNN (potential MiniVess data leakage, PI authored it)
+
+  RUNTIME: ~40~60 min total, marked @slow + @integration
+  EXECUTION: Docker via Prefect (real containerized, no MINIVESS_ALLOW_HOST=1)
+
+  PREREQUISITE ISSUES:
+  - #574: Synthetic drift simulation (P0, deferred from this plan)
+  - #366: VesselFM + SAM3 TopoLoRA external GPU testing (P1)
+
+  CHAMPION METRIC:
+  val_compound_masd_cldice = 0.5*(1 - MASD/50) + 0.5*clDice (MetricsReloaded)
+-->
+<plan name="e2e-testing-1st-pass" version="1.0">
+  <metadata>
+    <created>2026-03-10</created>
+    <author>Claude Code + petteri</author>
+    <purpose>End-to-end testing plan for the full MinIVess MLOps pipeline</purpose>
+    <alignment-doc>docs/planning/e2e-testing-user-prompt.md</alignment-doc>
+    <estimated-total-effort>5~7 working days</estimated-total-effort>
+    <estimated-runtime>40~60 minutes per full e2e run</estimated-runtime>
+    <prerequisite-issues>
+      <issue id="574" title="Synthetic drift simulation" status="open" priority="P0"/>
+      <issue id="366" title="VesselFM + SAM3 TopoLoRA external GPU" status="open" priority="P1"/>
+    </prerequisite-issues>
+    <critical-context-files>
+      <file>CLAUDE.md</file>
+      <file>deployment/CLAUDE.md</file>
+      <file>src/minivess/orchestration/CLAUDE.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>docs/planning/prefect-flow-connectivity.md</file>
+      <file>docs/planning/prefect-flow-connectivity-execution-plan.xml</file>
+      <file>.env.example</file>
+      <file>deployment/docker-compose.yml</file>
+      <file>deployment/docker-compose.flows.yml</file>
+      <file>configs/experiment/debug_all_models.yaml</file>
+    </critical-context-files>
+    <key-design-decisions>
+      <decision id="1">All 5 local-GPU models: DynUNet, SAM3 Vanilla, SAM3 Hybrid, CoMMA Mamba, U-Like Mamba</decision>
+      <decision id="2">Training: 2 epochs, 3 folds per model via debug_all_models.yaml</decision>
+      <decision id="3">Champion metric: val_compound_masd_cldice = 0.5*(1 - MASD/50) + 0.5*clDice</decision>
+      <decision id="4">Post-training: SWA + calibration + conformal prediction plugins</decision>
+      <decision id="5">Ensembles: per-model best fold + cross-model ensemble</decision>
+      <decision id="6">External datasets: DeepVess + TubeNet only (VesselNN EXCLUDED)</decision>
+      <decision id="7">Deployment: champion by compound metric to ONNX to BentoML serve</decision>
+      <decision id="8">BentoML response: mask + calibrated probabilities + uncertainty intervals</decision>
+      <decision id="9">Monitoring: Grafana dashboards (provisioned JSON), Evidently drift, Prometheus scraping BentoML</decision>
+      <decision id="10">Infrastructure: pytest-docker plugin managing real docker-compose files</decision>
+      <decision id="11">Execution: Docker via Prefect (real containerized, not host Python)</decision>
+      <decision id="12">Verification: Triple: Prefect API status + MLflow artifacts + container logs</decision>
+      <decision id="13">MLflow storage: verify artifacts in MinIO + full round-trip retrieval</decision>
+      <decision id="14">Logging: structured JSONL events for flow/task/agent transitions</decision>
+      <decision id="15">Test location: make test-e2e with @slow + @integration markers</decision>
+      <decision id="16">Runtime: ~40~60 min accepted, marked @slow</decision>
+      <decision id="17">Annotation flow: no-op (empty DVC queue OK) + BentoML health check</decision>
+      <decision id="18">Data flow: verify MiniVess + Pandera/GE validation + download DeepVess/TubeNet</decision>
+      <decision id="19">Biostatistics: Markdown comparison table + DuckDB Parquet export</decision>
+      <decision id="20">Drift simulation: deferred to P0 issue #574</decision>
+    </key-design-decisions>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 0: Fix Broken Inter-Flow Seams (PREREQUISITE)                -->
+  <!-- ================================================================== -->
+  <phase id="0" name="Fix Broken Inter-Flow Seams">
+    <description>
+      The audit found that train flow never logs checkpoint_dir tags to MLflow.
+      Post-training gets 0 checkpoints, analysis evaluates 0 models. Everything
+      downstream is empty. This MUST be fixed before any e2e test can pass.
+
+      Root causes (from prefect-flow-connectivity.md):
+      1. train_flow.py never logs checkpoint_dir_fold_N to MLflow tags
+      2. Post-training receives empty checkpoint list from FlowContract
+      3. analysis_flow.py hardcodes experiment_name="minivess_training" (breaks _DEBUG suffix)
+      4. No MINIVESS_DEBUG_SUFFIX propagation through flow chain
+      5. No structured JSONL logging for flow/task transitions
+
+      Cross-reference: docs/planning/prefect-flow-connectivity-execution-plan.xml
+      contains the detailed fix plan. Phase 0 here ensures those fixes are in
+      place and verified before e2e testing begins.
+    </description>
+    <acceptance-criteria>
+      <criterion>Train flow logs checkpoint_dir_fold_N tags for each fold in MLflow</criterion>
+      <criterion>Train flow logs parent_run_id and flow_status=FLOW_COMPLETE tags on completion</criterion>
+      <criterion>FlowContract.find_fold_checkpoints() returns non-empty list for a real training run</criterion>
+      <criterion>Post-training plugins receive non-empty checkpoint paths</criterion>
+      <criterion>Analysis flow uses resolve_experiment_name(), not hardcoded experiment names</criterion>
+      <criterion>MINIVESS_DEBUG_SUFFIX propagates through all flow containers</criterion>
+      <criterion>Structured JSONL events logged for flow start/end transitions</criterion>
+    </acceptance-criteria>
+
+    <!-- T0.1: Train flow checkpoint tagging -->
+    <task id="T0.1" name="Train flow: log checkpoint_dir and parent_run_id tags" effort="3h" status="NOT_STARTED">
+      <description>
+        After each fold's training completes in train_flow.py, log MLflow tags:
+        - mlflow.set_tag("checkpoint_dir_fold_{n}", str(checkpoint_dir))
+        - mlflow.set_tag("parent_run_id", parent_run_id)
+        On parent run completion:
+        - mlflow.set_tag("flow_status", "FLOW_COMPLETE")
+
+        This is the root cause of the entire downstream pipeline failure.
+        Without these tags, FlowContract.find_fold_checkpoints() returns [],
+        post-training plugins skip, and analysis evaluates nothing.
+      </description>
+      <files-to-modify>
+        <file action="modify">src/minivess/orchestration/flows/train_flow.py</file>
+      </files-to-modify>
+      <dependencies/>
+      <tdd-spec>
+        <test-file>tests/v2/unit/orchestration/test_train_flow_checkpoint_tags.py</test-file>
+        <test-cases>
+          <case>test_fold_training_logs_checkpoint_dir_tag: After a fold completes, verify mlflow tag checkpoint_dir_fold_0 exists and points to a real path</case>
+          <case>test_fold_training_logs_parent_run_id_tag: Verify parent_run_id tag matches the outer run</case>
+          <case>test_parent_run_completion_logs_flow_complete: After all folds, verify flow_status=FLOW_COMPLETE tag</case>
+          <case>test_multiple_folds_log_separate_checkpoint_tags: With 3 folds, verify checkpoint_dir_fold_0, _fold_1, _fold_2 all present</case>
+          <case>test_checkpoint_dir_tag_value_is_absolute_path: Tag value must be an absolute path, not relative</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>fix-interflow-seam</github-issue-group>
+    </task>
+
+    <!-- T0.2: FlowContract find_fold_checkpoints verification -->
+    <task id="T0.2" name="Flow contract: verify find_fold_checkpoints with real tags" effort="2h" status="NOT_STARTED">
+      <description>
+        Verify FlowContract.find_fold_checkpoints(parent_run_id) correctly reads
+        checkpoint_dir_fold_N tags from MLflow and returns structured results.
+        Use a real local MLflow file store (tmp_path based), not mocks.
+
+        This method already exists in flow_contract.py but has never been tested
+        against real MLflow data. We need integration-level verification that the
+        tag format matches what train_flow.py writes (from T0.1).
+      </description>
+      <files-to-modify>
+        <file action="modify">src/minivess/orchestration/flow_contract.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T0.1"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/unit/orchestration/test_flow_contract_checkpoint_discovery.py</test-file>
+        <test-cases>
+          <case>test_find_fold_checkpoints_returns_sorted_folds: Write 3 checkpoint tags, verify list sorted by fold_id</case>
+          <case>test_find_fold_checkpoints_empty_when_no_tags: Run with no checkpoint tags, verify returns []</case>
+          <case>test_find_fold_checkpoints_returns_path_objects: Verify each result has checkpoint_dir as pathlib.Path</case>
+          <case>test_find_fold_checkpoints_ignores_non_checkpoint_tags: Write non-checkpoint tags, verify they are filtered out</case>
+          <case>test_find_fold_checkpoints_with_invalid_run_id: Pass a nonexistent run_id, verify returns [] (no crash)</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>fix-interflow-seam</github-issue-group>
+    </task>
+
+    <!-- T0.3: Post-training consumes checkpoints from FlowContract -->
+    <task id="T0.3" name="Post-training flow: consume checkpoint paths from FlowContract" effort="3h" status="NOT_STARTED">
+      <description>
+        Modify post_training_flow.py to call FlowContract.find_fold_checkpoints(parent_run_id)
+        instead of using checkpoint_paths=[] default. This ensures SWA, calibration, and
+        conformal plugins receive non-empty checkpoint lists.
+
+        Current behavior: post_training_flow.py calls find_upstream_safely() which returns
+        a run_id but no checkpoint paths. The PluginInput.checkpoint_paths defaults to []
+        and all plugins skip with "No checkpoint paths provided".
+
+        Target behavior: FlowContract reads checkpoint_dir_fold_N tags from the upstream
+        training run and populates PluginInput.checkpoint_paths with real paths.
+      </description>
+      <files-to-modify>
+        <file action="modify">src/minivess/orchestration/flows/post_training_flow.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T0.1"/>
+        <dep task-id="T0.2"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/unit/orchestration/test_post_training_checkpoint_consumption.py</test-file>
+        <test-cases>
+          <case>test_post_training_reads_checkpoints_from_flow_contract: Mock FlowContract to return 3 folds, verify PluginInput.checkpoint_paths has 3 entries</case>
+          <case>test_post_training_fails_gracefully_when_no_checkpoints: FlowContract returns [], verify plugins skip with warning (not crash)</case>
+          <case>test_swa_plugin_receives_non_empty_checkpoints: Verify SWA plugin gets real checkpoint paths from FlowContract</case>
+          <case>test_calibration_plugin_receives_non_empty_checkpoints: Verify calibration plugin gets checkpoint paths</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>fix-interflow-seam</github-issue-group>
+    </task>
+
+    <!-- T0.4: Analysis flow uses resolve_experiment_name -->
+    <task id="T0.4" name="Analysis flow: use resolve_experiment_name for debug isolation" effort="2h" status="NOT_STARTED">
+      <description>
+        Replace any hardcoded experiment names in analysis_flow.py with
+        FlowContract._resolve_experiment() or the standalone resolve_experiment_name()
+        from constants.py. This ensures debug runs (MINIVESS_DEBUG_SUFFIX=_DEBUG) search
+        the correct experiment namespace.
+
+        Current bug: analysis_flow.py searches experiment_name="minivess_training" but
+        debug training runs create experiment "minivess_training_DEBUG". Analysis finds
+        0 runs and produces no outputs.
+      </description>
+      <files-to-modify>
+        <file action="modify">src/minivess/orchestration/flows/analysis_flow.py</file>
+        <file action="modify">src/minivess/orchestration/constants.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T0.1"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/unit/orchestration/test_analysis_experiment_name_resolution.py</test-file>
+        <test-cases>
+          <case>test_analysis_resolves_experiment_with_debug_suffix: Set MINIVESS_DEBUG_SUFFIX=_DEBUG, verify analysis searches "minivess_training_DEBUG"</case>
+          <case>test_analysis_resolves_experiment_without_suffix: Unset MINIVESS_DEBUG_SUFFIX, verify analysis searches "minivess_training"</case>
+          <case>test_resolve_experiment_name_in_constants: Verify resolve_experiment_name() applies suffix from env var</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>fix-interflow-seam</github-issue-group>
+    </task>
+
+    <!-- T0.5: Debug suffix propagation -->
+    <task id="T0.5" name="Debug suffix propagation in compose and scripts" effort="1h" status="NOT_STARTED">
+      <description>
+        Ensure MINIVESS_DEBUG_SUFFIX is exported in debug runs (scripts/run_debug.sh)
+        and passed through docker-compose.flows.yml environment blocks.
+        All flows must see the same suffix so inter-flow MLflow queries work.
+
+        Verify that docker-compose.flows.yml includes MINIVESS_DEBUG_SUFFIX in
+        the x-common-env anchor (or equivalent environment section).
+      </description>
+      <files-to-modify>
+        <file action="modify">scripts/run_debug.sh</file>
+        <file action="modify">deployment/docker-compose.flows.yml</file>
+      </files-to-modify>
+      <dependencies/>
+      <tdd-spec>
+        <test-file>tests/v2/unit/orchestration/test_debug_suffix_propagation.py</test-file>
+        <test-cases>
+          <case>test_debug_suffix_in_compose_env: Parse docker-compose.flows.yml YAML, verify MINIVESS_DEBUG_SUFFIX present in x-common-env or environment</case>
+          <case>test_run_debug_sh_exports_suffix: Read run_debug.sh, verify it exports MINIVESS_DEBUG_SUFFIX=_DEBUG</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>fix-interflow-seam</github-issue-group>
+    </task>
+
+    <!-- T0.6: Structured JSONL logging -->
+    <task id="T0.6" name="Structured JSONL logging for flow/task transitions" effort="4h" status="NOT_STARTED">
+      <description>
+        Create src/minivess/observability/structured_logging.py with JSONL event
+        emitters for flow lifecycle events. Each event is a single JSON line with:
+        - timestamp (ISO 8601 UTC)
+        - event_type (flow_start, flow_end, task_start, task_end, agent_decision)
+        - flow_name, task_name (where applicable)
+        - status (started, completed, failed, skipped)
+        - metadata (dict with additional context)
+
+        Integrate with Prefect's logger so events appear in Prefect UI logs.
+        Write to a JSONL file at LOGS_DIR/flow_events.jsonl for container log parsing.
+
+        This supports Phase 2 verification (T2.3: container log verification).
+      </description>
+      <files-to-modify>
+        <file action="create">src/minivess/observability/structured_logging.py</file>
+        <file action="modify">src/minivess/orchestration/flows/train_flow.py</file>
+        <file action="modify">src/minivess/orchestration/flows/post_training_flow.py</file>
+        <file action="modify">src/minivess/orchestration/flows/analysis_flow.py</file>
+        <file action="modify">src/minivess/orchestration/flows/deploy_flow.py</file>
+        <file action="modify">src/minivess/orchestration/flows/acquisition_flow.py</file>
+        <file action="modify">src/minivess/orchestration/flows/data_flow.py</file>
+        <file action="modify">src/minivess/orchestration/flows/annotation_flow.py</file>
+        <file action="modify">src/minivess/orchestration/flows/biostatistics_flow.py</file>
+      </files-to-modify>
+      <dependencies/>
+      <tdd-spec>
+        <test-file>tests/v2/unit/observability/test_structured_logging.py</test-file>
+        <test-cases>
+          <case>test_flow_start_event_has_required_fields: Emit flow_start, verify JSON has timestamp, event_type, flow_name, status</case>
+          <case>test_flow_end_event_includes_duration: Emit flow_end, verify duration_seconds field present</case>
+          <case>test_task_start_event_includes_task_name: Emit task_start, verify task_name field</case>
+          <case>test_jsonl_output_is_parseable: Write multiple events, verify each line is valid JSON via json.loads()</case>
+          <case>test_event_timestamp_is_utc_iso8601: Verify timestamp matches ISO 8601 format with UTC timezone</case>
+          <case>test_events_written_to_file_at_logs_dir: Verify events are appended to LOGS_DIR/flow_events.jsonl</case>
+          <case>test_prefect_logger_integration: Verify events emitted via get_run_logger() when Prefect is active</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>structured-logging</github-issue-group>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Individual Flow Testing (per-flow smoke tests)            -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Individual Flow Testing">
+    <description>
+      Each flow tested in isolation within its Docker container. Upstream data
+      is either real (for early flows) or mocked/pre-seeded in MLflow (for
+      downstream flows). Each test verifies the flow produces correct MLflow
+      artifacts, tags, and metrics.
+
+      All tests run in Docker via Prefect (no MINIVESS_ALLOW_HOST=1).
+      Tests use pytest-docker fixtures from Phase 4 infrastructure.
+    </description>
+    <acceptance-criteria>
+      <criterion>Acquisition flow downloads MiniVess + DeepVess + TubeNet and logs to MLflow</criterion>
+      <criterion>Data flow passes Pandera/GE validation and logs splits_path tag</criterion>
+      <criterion>Annotation flow handles empty DVC queue gracefully + BentoML health check</criterion>
+      <criterion>Training flow produces checkpoints for all 5 models x 3 folds x 2 epochs</criterion>
+      <criterion>Post-training flow executes SWA + calibration plugins with real checkpoints</criterion>
+      <criterion>Analysis flow evaluates models, creates ensembles, tags champion</criterion>
+      <criterion>Biostatistics flow generates comparison table + DuckDB/Parquet exports</criterion>
+      <criterion>Deploy flow exports champion to ONNX and serves via BentoML</criterion>
+    </acceptance-criteria>
+
+    <!-- T1.1: Acquisition flow -->
+    <task id="T1.1" name="Acquisition flow: verify MiniVess + download external datasets" effort="3h" status="NOT_STARTED">
+      <description>
+        Test the acquisition flow in its Docker container:
+        1. Verify MiniVess volumes exist in the data volume mount (/app/data/raw/minivess)
+        2. Download DeepVess dataset (Cornell eCommons)
+        3. Download TubeNet 2PM dataset (UCL Figshare)
+        4. Do NOT download VesselNN (excluded: potential MiniVess data leakage, PI authored it)
+        5. Log acquisition_complete tag to MLflow
+        6. Verify volumes are accessible and converted to NIfTI format
+
+        Uses: src/minivess/orchestration/flows/acquisition_flow.py
+        Config: AcquisitionConfig with datasets=[minivess, deepvess, tubenet_2pm]
+      </description>
+      <files-to-modify>
+        <file action="modify">tests/v2/integration/test_acquisition_flow_integration.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T0.6"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_acquisition_flow_integration.py</test-file>
+        <test-cases>
+          <case>test_minivess_volumes_accessible: Verify /app/data/raw/minivess contains NIfTI volumes</case>
+          <case>test_deepvess_download_succeeds: Verify DeepVess dataset downloaded and accessible</case>
+          <case>test_tubenet_download_succeeds: Verify TubeNet 2PM dataset downloaded and accessible</case>
+          <case>test_vesselnn_not_downloaded: Verify VesselNN is NOT in downloaded datasets (excluded)</case>
+          <case>test_acquisition_complete_mlflow_tag: Verify acquisition_complete tag logged to MLflow</case>
+          <case>test_structured_jsonl_events_emitted: Verify flow_start and flow_end JSONL events in logs</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>e2e-flow-testing</github-issue-group>
+    </task>
+
+    <!-- T1.2: Data engineering flow -->
+    <task id="T1.2" name="Data engineering flow: Pandera/GE validation + splits" effort="3h" status="NOT_STARTED">
+      <description>
+        Test the data engineering flow in isolation:
+        1. Run Pandera schema validation on MiniVess volume metadata (spacing, shape, dtype)
+        2. Run Great Expectations validation suite (non-null, range checks, consistency)
+        3. Verify splits file (configs/splits/3fold_seed42.json) is valid and consistent
+        4. Log data_flow_complete tag with splits_path to MLflow
+        5. Verify debug suffix propagation on experiment name
+
+        Uses: src/minivess/orchestration/flows/data_flow.py
+      </description>
+      <files-to-modify>
+        <file action="modify">tests/v2/integration/test_data_pipeline.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T1.1"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_data_pipeline.py</test-file>
+        <test-cases>
+          <case>test_pandera_validation_passes: Verify MiniVess volume metadata passes Pandera schema</case>
+          <case>test_great_expectations_suite_passes: Verify GE batch validation produces no critical failures</case>
+          <case>test_splits_file_consistent: Verify 3fold_seed42.json has 47 train + 23 val volumes per fold</case>
+          <case>test_data_flow_complete_tag_logged: Verify data_flow_complete + splits_path tags in MLflow</case>
+          <case>test_debug_suffix_on_experiment_name: With _DEBUG suffix, verify experiment uses correct name</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>e2e-flow-testing</github-issue-group>
+    </task>
+
+    <!-- T1.3: Annotation flow -->
+    <task id="T1.3" name="Annotation flow: empty queue no-op + BentoML health check" effort="2h" status="NOT_STARTED">
+      <description>
+        Test the annotation flow handles the empty-queue case gracefully:
+        1. Check DVC for un-versioned volumes. In e2e test scenario, finds none.
+        2. Return {status: "ok", new_volumes: 0} without error
+        3. Verify BentoML pre-segmentation endpoint is reachable (HTTP health check)
+        4. Log annotation_complete tag to MLflow
+
+        Uses: src/minivess/orchestration/flows/annotation_flow.py
+      </description>
+      <files-to-modify>
+        <file action="modify">tests/v2/integration/annotation/test_monailabel_health.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T0.6"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_annotation_flow_e2e.py</test-file>
+        <test-cases>
+          <case>test_empty_dvc_queue_returns_ok: No new volumes, verify flow returns status=ok, new_volumes=0</case>
+          <case>test_bentoml_health_check_reachable: Verify BentoML endpoint responds 200 on /healthz</case>
+          <case>test_annotation_complete_tag_logged: Verify annotation_complete tag in MLflow</case>
+          <case>test_no_error_on_empty_queue: Verify no ERROR level log lines when queue is empty</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>e2e-flow-testing</github-issue-group>
+    </task>
+
+    <!-- T1.4: Training flow -->
+    <task id="T1.4" name="Training flow: all 5 models x 2 epochs x 3 folds" effort="4h" status="NOT_STARTED">
+      <description>
+        Test the training flow with debug_all_models.yaml config:
+        - Models: dynunet, sam3_vanilla, sam3_hybrid, comma_mamba, ulike_mamba
+        - max_epochs: 2, num_folds: 3, max_train_volumes: 2, max_val_volumes: 2
+        - Loss: cbdice_cldice (default)
+        - Verify checkpoint files exist after each fold (non-empty .pt files)
+        - Verify MLflow tags: checkpoint_dir_fold_N, parent_run_id, flow_status=FLOW_COMPLETE
+        - Verify metrics logged: train_loss, val_dice per epoch
+
+        Duration: ~30 min for 5 models x 3 folds x 2 epochs on local GPU.
+        SAM3 Hybrid requires patch_size=[32,32,3] on 8GB GPU.
+
+        Uses: src/minivess/orchestration/flows/train_flow.py
+        Config: configs/experiment/debug_all_models.yaml
+      </description>
+      <files-to-modify>
+        <file action="create">tests/v2/integration/test_training_flow_all_models.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T0.1"/>
+        <dep task-id="T0.4"/>
+        <dep task-id="T0.5"/>
+        <dep task-id="T0.6"/>
+        <dep task-id="T1.2"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_training_flow_all_models.py</test-file>
+        <test-cases>
+          <case>test_dynunet_3folds_checkpoints_exist: Verify 3 checkpoint files for DynUNet after training</case>
+          <case>test_sam3_vanilla_3folds_checkpoints_exist: Verify 3 checkpoint files for SAM3 Vanilla</case>
+          <case>test_sam3_hybrid_3folds_checkpoints_exist: Verify 3 checkpoint files for SAM3 Hybrid (patch 32x32x3)</case>
+          <case>test_comma_mamba_3folds_checkpoints_exist: Verify 3 checkpoint files for CoMMA Mamba</case>
+          <case>test_ulike_mamba_3folds_checkpoints_exist: Verify 3 checkpoint files for U-Like Mamba</case>
+          <case>test_checkpoint_dir_fold_tags_in_mlflow: For each model, verify checkpoint_dir_fold_0/1/2 tags</case>
+          <case>test_parent_run_id_tag_present: Verify parent_run_id tag on each model's parent run</case>
+          <case>test_flow_status_complete_tag: Verify flow_status=FLOW_COMPLETE on parent runs</case>
+          <case>test_train_loss_metrics_logged: Verify train_loss metric exists for each epoch</case>
+          <case>test_val_dice_metrics_logged: Verify val_dice metric logged at validation intervals</case>
+          <case>test_checkpoint_files_non_empty: Each .pt file must be > 0 bytes</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>e2e-flow-testing</github-issue-group>
+    </task>
+
+    <!-- T1.5: Post-training flow -->
+    <task id="T1.5" name="Post-training flow: SWA + calibration + conformal" effort="3h" status="NOT_STARTED">
+      <description>
+        Test the post-training flow consuming checkpoints from T1.4:
+        1. Call FlowContract.find_fold_checkpoints() to get checkpoint paths from training
+        2. Run SWA plugin: average weights across folds, produce swa checkpoint
+        3. Run calibration plugin: temperature scaling on validation set, log temperature param
+        4. Run conformal prediction plugin: compute conformal prediction sets
+        5. Verify sibling runs (__swa, __calibrated, __conformal) created in MLflow
+        6. Verify each sibling run has appropriate artifacts
+
+        Note: conformal prediction may not be in debug_all_models.yaml plugins list.
+        The config specifies plugins: [swa, calibration]. Test what is configured.
+
+        Uses: src/minivess/orchestration/flows/post_training_flow.py
+        Upstream: T1.4 training runs
+      </description>
+      <files-to-modify>
+        <file action="create">tests/v2/integration/test_post_training_flow_e2e.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T0.3"/>
+        <dep task-id="T1.4"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_post_training_flow_e2e.py</test-file>
+        <test-cases>
+          <case>test_post_training_finds_upstream_checkpoints: Verify FlowContract returns non-empty checkpoint list from training run</case>
+          <case>test_swa_sibling_run_created: Verify MLflow run with __swa suffix exists after post-training</case>
+          <case>test_calibration_sibling_run_created: Verify MLflow run with __calibrated suffix exists</case>
+          <case>test_calibrated_model_has_temperature_param: Verify temperature parameter logged in calibration run</case>
+          <case>test_swa_checkpoint_artifact_exists: Verify SWA averaged checkpoint file in MLflow artifacts</case>
+          <case>test_plugin_skips_logged_not_crashed: If a plugin has no checkpoint, verify warning log (not exception)</case>
+          <case>test_post_training_flow_status_complete: Verify flow_status=FLOW_COMPLETE on post-training parent run</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>e2e-flow-testing</github-issue-group>
+    </task>
+
+    <!-- T1.6: Analysis flow -->
+    <task id="T1.6" name="Analysis flow: evaluation + ensembles + champion tagging" effort="4h" status="NOT_STARTED">
+      <description>
+        Test the analysis flow end-to-end:
+        1. Evaluate all 5 models from T1.4 + post-training variants from T1.5
+        2. Compute per-model metrics: DSC, clDice, MASD, HD95
+        3. Compute val_compound_masd_cldice = 0.5*(1 - MASD/50) + 0.5*clDice
+        4. Create per-model best-fold ensembles (select best fold per model)
+        5. Create cross-model ensemble (combine best models)
+        6. Tag champion by val_compound_masd_cldice (MetricsReloaded)
+        7. Generate comparison table (Markdown + LaTeX)
+        8. Generate analysis figures (PNG + SVG)
+
+        Uses: src/minivess/orchestration/flows/analysis_flow.py
+        Upstream: T1.4 training + T1.5 post-training
+      </description>
+      <files-to-modify>
+        <file action="modify">tests/v2/integration/test_analysis_flow_integration.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T0.4"/>
+        <dep task-id="T1.5"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_analysis_flow_integration.py</test-file>
+        <test-cases>
+          <case>test_all_5_models_evaluated: Verify analysis evaluated at least dynunet + sam3_vanilla + sam3_hybrid + comma_mamba + ulike_mamba</case>
+          <case>test_champion_tagged_by_compound_metric: Verify champion model tagged in MLflow with val_compound_masd_cldice</case>
+          <case>test_compound_metric_formula_correct: Verify val_compound_masd_cldice = 0.5*(1 - MASD/50) + 0.5*clDice</case>
+          <case>test_per_model_best_fold_ensemble_created: Verify per-model ensemble artifacts in MLflow</case>
+          <case>test_cross_model_ensemble_created: Verify cross-model ensemble artifact exists</case>
+          <case>test_comparison_table_markdown_generated: Verify comparison table .md file in outputs/</case>
+          <case>test_comparison_table_has_all_models: Verify Markdown table contains all 5 model names</case>
+          <case>test_analysis_figures_generated: Verify at least 1 PNG figure artifact in MLflow or outputs/</case>
+          <case>test_analysis_uses_resolved_experiment_name: Verify experiment name includes _DEBUG suffix if set</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>e2e-flow-testing</github-issue-group>
+    </task>
+
+    <!-- T1.7: Biostatistics flow -->
+    <task id="T1.7" name="Biostatistics flow: summary + DuckDB + Parquet" effort="3h" status="NOT_STARTED">
+      <description>
+        Test the biostatistics flow:
+        1. Read all analysis results from MLflow experiment runs
+        2. Generate Markdown comparison table across all models and run names
+        3. Export to DuckDB database + Parquet files
+        4. Verify DuckDB is queryable (SELECT * FROM runs)
+        5. Verify Parquet files readable via pyarrow/pandas
+
+        Uses: src/minivess/orchestration/flows/biostatistics_flow.py
+        Upstream: T1.6 analysis results in MLflow
+      </description>
+      <files-to-modify>
+        <file action="modify">tests/v2/integration/test_biostatistics_flow_integration.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T1.6"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_biostatistics_flow_integration.py</test-file>
+        <test-cases>
+          <case>test_markdown_comparison_table_generated: Verify .md file exists and is non-empty</case>
+          <case>test_markdown_table_contains_all_models: Verify table has rows for all 5 models</case>
+          <case>test_duckdb_export_created: Verify .duckdb file exists (if not gitignored in output path)</case>
+          <case>test_duckdb_queryable: Open DuckDB file, execute SELECT COUNT(*) FROM runs, verify > 0</case>
+          <case>test_parquet_export_created: Verify .parquet file exists</case>
+          <case>test_parquet_readable: Read Parquet with pyarrow, verify columns include model_name, val_dice</case>
+          <case>test_biostatistics_flow_complete_tag: Verify flow_status=FLOW_COMPLETE tag in MLflow</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>e2e-flow-testing</github-issue-group>
+    </task>
+
+    <!-- T1.8: Deploy flow -->
+    <task id="T1.8" name="Deployment flow: champion to ONNX to BentoML" effort="4h" status="NOT_STARTED">
+      <description>
+        Test the deployment flow end-to-end:
+        1. Discover champion model from MLflow (tagged by analysis flow in T1.6)
+        2. Load champion checkpoint and export to ONNX format
+        3. Verify ONNX file is valid (onnx.load + onnx.checker.check_model)
+        4. Import ONNX model into BentoML model store
+        5. Start BentoML serving endpoint
+        6. Verify health check endpoint responds with HTTP 200
+
+        Champion selection uses val_compound_masd_cldice metric.
+        ONNX export must handle all 5 model architectures via ModelAdapter.export_onnx().
+
+        Uses: src/minivess/orchestration/flows/deploy_flow.py
+        Upstream: T1.6 champion tag in MLflow
+      </description>
+      <files-to-modify>
+        <file action="modify">tests/v2/integration/test_deploy_flow_integration.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T1.6"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_deploy_flow_integration.py</test-file>
+        <test-cases>
+          <case>test_champion_discovered_from_mlflow: Verify deploy flow finds a champion model with the compound metric tag</case>
+          <case>test_onnx_export_produces_valid_file: Verify ONNX file passes onnx.checker.check_model()</case>
+          <case>test_onnx_file_non_empty: Verify ONNX file size > 0 bytes</case>
+          <case>test_bentoml_model_import: Verify model imported into BentoML store (bentoml.models.list() includes it)</case>
+          <case>test_bentoml_health_check: Verify BentoML /healthz endpoint returns HTTP 200</case>
+          <case>test_deploy_flow_complete_tag: Verify flow_status=FLOW_COMPLETE tag in MLflow</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>e2e-flow-testing</github-issue-group>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: Integration Contracts (inter-flow verification)           -->
+  <!-- ================================================================== -->
+  <phase id="2" name="Integration Contracts">
+    <description>
+      Verify the inter-flow communication contracts work end-to-end.
+      Triple verification: Prefect API status + MLflow artifacts + container logs.
+      These tests run AFTER Phase 1 flows complete and verify the seams.
+    </description>
+    <acceptance-criteria>
+      <criterion>MLflow artifacts stored in MinIO (not local filesystem), full round-trip verified</criterion>
+      <criterion>All Prefect flow runs show COMPLETED status via Prefect API</criterion>
+      <criterion>Container logs contain structured JSONL events, no unexpected errors</criterion>
+      <criterion>All volume mounts contain expected artifacts after pipeline completion</criterion>
+    </acceptance-criteria>
+
+    <!-- T2.1: MLflow MinIO contract -->
+    <task id="T2.1" name="MLflow contract: verify artifacts in MinIO with round-trip" effort="3h" status="NOT_STARTED">
+      <description>
+        After the full pipeline completes, verify:
+        1. Training artifacts (checkpoints, configs) exist in MinIO bucket via boto3
+           - Bucket: mlflow-artifacts (from .env.example MLFLOW_ARTIFACT_BUCKET)
+           - Access: MinIO at minio:9000 (MINIO_DOCKER_HOST:MINIO_API_PORT)
+        2. Download artifacts back via MLflow API (mlflow.artifacts.download_artifacts)
+        3. Verify downloaded artifacts match uploaded ones (file size, content hash)
+        4. Verify experiment names use debug suffix correctly
+        5. Verify all runs have FINISHED status (not RUNNING or FAILED)
+      </description>
+      <files-to-modify>
+        <file action="create">tests/v2/integration/test_mlflow_minio_contract.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T1.4"/>
+        <dep task-id="T1.8"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_mlflow_minio_contract.py</test-file>
+        <test-cases>
+          <case>test_training_artifacts_in_minio: boto3 list_objects on mlflow-artifacts bucket returns training checkpoint keys</case>
+          <case>test_mlflow_download_matches_upload: Download checkpoint via MLflow API, verify SHA256 matches original</case>
+          <case>test_experiment_names_have_debug_suffix: All experiments created during e2e use _DEBUG suffix</case>
+          <case>test_all_runs_finished_status: Query MLflow for all runs, verify none have status RUNNING or FAILED</case>
+          <case>test_config_artifact_round_trip: Upload resolved_config.yaml, download, verify YAML content matches</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>integration-contracts</github-issue-group>
+    </task>
+
+    <!-- T2.2: Prefect API contract -->
+    <task id="T2.2" name="Prefect contract: verify flow run status via API" effort="2h" status="NOT_STARTED">
+      <description>
+        Query the Prefect API for all flow runs created during e2e testing:
+        1. List all flow runs via Prefect client (prefect.client.get_client)
+        2. Verify each flow run has state_type=COMPLETED
+        3. Verify no FAILED, CRASHED, or CANCELLED flow runs
+        4. Verify task-level transitions are recorded
+        5. Cross-reference Prefect flow names with expected flows:
+           acquisition, data, annotation, train, post_training, analysis, biostatistics, deploy
+
+        Prefect API at: http://PREFECT_DOCKER_HOST:PREFECT_PORT/api
+      </description>
+      <files-to-modify>
+        <file action="create">tests/v2/integration/test_prefect_api_contract.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T1.8"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_prefect_api_contract.py</test-file>
+        <test-cases>
+          <case>test_all_expected_flows_completed: Verify 8 flow types show COMPLETED state</case>
+          <case>test_no_failed_flow_runs: Verify zero FAILED or CRASHED flow runs</case>
+          <case>test_task_runs_recorded: Verify task-level runs exist for each flow</case>
+          <case>test_flow_run_duration_reasonable: Verify no flow run exceeds 60 min (indicates hang)</case>
+          <case>test_prefect_api_healthy: Verify Prefect API /health returns 200</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>integration-contracts</github-issue-group>
+    </task>
+
+    <!-- T2.3: Container log verification -->
+    <task id="T2.3" name="Container log verification: JSONL events + no errors" effort="2h" status="NOT_STARTED">
+      <description>
+        Capture and analyze container logs for each flow run:
+        1. Read JSONL events from LOGS_DIR/flow_events.jsonl (written by T0.6)
+        2. Verify each flow has at least flow_start + flow_end events
+        3. Verify no ERROR-level log lines (warnings OK if suppressed per Rule #7)
+        4. Verify Pydantic AI agent events logged if any agent invocations occurred
+        5. Parse JSONL events with json.loads() (no regex, Rule #16)
+
+        Container logs captured via docker logs or pytest-docker log fixture.
+      </description>
+      <files-to-modify>
+        <file action="create">tests/v2/integration/test_container_log_verification.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T0.6"/>
+        <dep task-id="T1.8"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_container_log_verification.py</test-file>
+        <test-cases>
+          <case>test_jsonl_events_file_exists: Verify flow_events.jsonl exists in logs volume</case>
+          <case>test_each_flow_has_start_and_end_events: For each flow name, verify both flow_start and flow_end events</case>
+          <case>test_no_error_level_in_container_logs: Parse container logs, verify no ERROR lines (except suppressed warnings)</case>
+          <case>test_jsonl_events_parseable: Every line in flow_events.jsonl passes json.loads()</case>
+          <case>test_flow_end_events_have_status_completed: All flow_end events have status="completed"</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>integration-contracts</github-issue-group>
+    </task>
+
+    <!-- T2.4: Volume mount verification -->
+    <task id="T2.4" name="Volume mount verification: all artifact paths populated" effort="2h" status="NOT_STARTED">
+      <description>
+        After the full pipeline completes, verify all Docker volume mounts contain
+        the expected artifacts. This catches silent failures where a flow "completes"
+        but writes nothing to disk.
+
+        Volume mounts (from deployment/CLAUDE.md):
+        - checkpoint_cache:/app/checkpoints: model .pt files (one per fold per model)
+        - mlruns_data:/app/mlruns: MLflow experiment data
+        - data_cache:/app/data: preprocessed volumes
+        - configs_splits:/app/configs/splits: fold definition JSON
+        - logs_data:/app/logs: JSONL events, training CSVs
+
+        Each volume must contain non-empty files matching expected patterns.
+      </description>
+      <files-to-modify>
+        <file action="modify">tests/v2/integration/test_docker_compose_volumes.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T1.8"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_docker_compose_volumes.py</test-file>
+        <test-cases>
+          <case>test_checkpoint_cache_has_model_files: Verify .pt files exist in checkpoint volume for each trained model</case>
+          <case>test_mlruns_data_has_experiments: Verify MLflow experiment directories exist in mlruns volume</case>
+          <case>test_data_cache_has_preprocessed_volumes: Verify data cache contains processed NIfTI files</case>
+          <case>test_configs_splits_has_fold_json: Verify 3fold_seed42.json exists in splits volume</case>
+          <case>test_logs_data_has_jsonl_events: Verify flow_events.jsonl exists in logs volume</case>
+          <case>test_no_empty_volumes: Verify each volume has at least one file (catch silent write failures)</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>integration-contracts</github-issue-group>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: Monitoring + Serving (Grafana, Evidently, Prometheus, BentoML) -->
+  <!-- ================================================================== -->
+  <phase id="3" name="Monitoring and Serving">
+    <description>
+      Verify the full monitoring stack: BentoML inference with calibrated responses,
+      Grafana dashboard provisioning, Evidently data quality/drift reports, and
+      Prometheus metrics pipeline. These tests verify production-readiness of the
+      serving and observability infrastructure.
+
+      Drift SIMULATION is deferred to issue #574. This phase only verifies the
+      monitoring infrastructure works (Evidently report generation, Prometheus
+      scraping, Grafana dashboard rendering) using real inference data.
+    </description>
+    <acceptance-criteria>
+      <criterion>BentoML returns mask + calibrated probabilities + uncertainty intervals</criterion>
+      <criterion>Grafana has 4 provisioned dashboards with functional panels</criterion>
+      <criterion>Evidently generates data quality + prediction drift HTML reports</criterion>
+      <criterion>Prometheus scrapes BentoML metrics and Grafana queries them</criterion>
+    </acceptance-criteria>
+
+    <!-- T3.1: BentoML calibrated inference -->
+    <task id="T3.1" name="BentoML inference with calibrated response" effort="4h" status="NOT_STARTED">
+      <description>
+        Send a real external test volume (DeepVess or TubeNet) to the BentoML endpoint
+        and verify the response contains all three outputs:
+
+        1. mask: binary segmentation mask (same spatial dims as input volume)
+        2. probabilities: calibrated probability map (post temperature scaling from T1.5)
+        3. uncertainties: dict with conformal prediction intervals
+
+        Verify:
+        - Response HTTP status 200
+        - mask dtype is uint8 or bool, shape matches input spatial dims
+        - probabilities are float32, values in [0, 1]
+        - uncertainties dict has expected keys (lower_bound, upper_bound, coverage)
+        - Inference latency under 30 seconds for a single volume
+      </description>
+      <files-to-modify>
+        <file action="create">tests/v2/integration/test_bentoml_calibrated_inference.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T1.8"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_bentoml_calibrated_inference.py</test-file>
+        <test-cases>
+          <case>test_inference_returns_mask: Send volume, verify response["mask"] exists with correct spatial dims</case>
+          <case>test_mask_dtype_binary: Verify mask values are 0 or 1 (uint8 or bool)</case>
+          <case>test_inference_returns_calibrated_probabilities: Verify response["probabilities"] exists, dtype float32</case>
+          <case>test_probabilities_in_unit_interval: Verify all probability values in [0.0, 1.0]</case>
+          <case>test_inference_returns_uncertainties: Verify response["uncertainties"] dict has lower_bound, upper_bound</case>
+          <case>test_inference_latency_under_30s: Verify end-to-end inference completes within 30 seconds</case>
+          <case>test_inference_on_deepvess_volume: Send a real DeepVess volume, verify non-trivial mask (not all zeros)</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>monitoring-serving</github-issue-group>
+    </task>
+
+    <!-- T3.2: Grafana dashboard provisioning -->
+    <task id="T3.2" name="Grafana dashboard provisioning" effort="4h" status="NOT_STARTED">
+      <description>
+        Create provisioned Grafana dashboard JSON files and configure automatic loading:
+
+        1. deployment/grafana/dashboards/model-performance.json
+           - Panels: val_dice, val_cldice, val_masd per model (bar chart + time series)
+        2. deployment/grafana/dashboards/inference-latency.json
+           - Panels: BentoML request duration histogram, p50/p95/p99 latencies
+        3. deployment/grafana/dashboards/data-drift.json
+           - Panels: Evidently drift score time series, feature importance
+        4. deployment/grafana/dashboards/bentoml-requests.json
+           - Panels: request rate, error rate, active connections
+
+        Configure Grafana provisioning in docker-compose.yml:
+        - deployment/grafana/provisioning/dashboards/dashboards.yml
+        - deployment/grafana/provisioning/datasources/datasources.yml (Prometheus)
+
+        Test via Grafana API: /api/dashboards returns 4 dashboards, each has panels.
+      </description>
+      <files-to-modify>
+        <file action="create">deployment/grafana/dashboards/model-performance.json</file>
+        <file action="create">deployment/grafana/dashboards/inference-latency.json</file>
+        <file action="create">deployment/grafana/dashboards/data-drift.json</file>
+        <file action="create">deployment/grafana/dashboards/bentoml-requests.json</file>
+        <file action="create">deployment/grafana/provisioning/dashboards/dashboards.yml</file>
+        <file action="create">deployment/grafana/provisioning/datasources/datasources.yml</file>
+        <file action="modify">deployment/docker-compose.yml</file>
+      </files-to-modify>
+      <dependencies/>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_grafana_dashboards.py</test-file>
+        <test-cases>
+          <case>test_grafana_api_healthy: Verify GET /api/health returns "ok"</case>
+          <case>test_four_dashboards_provisioned: Verify GET /api/search returns 4 dashboards</case>
+          <case>test_model_performance_dashboard_has_panels: Verify model-performance dashboard has val_dice panel</case>
+          <case>test_inference_latency_dashboard_has_panels: Verify inference-latency dashboard has histogram panel</case>
+          <case>test_data_drift_dashboard_has_panels: Verify data-drift dashboard has drift score panel</case>
+          <case>test_bentoml_requests_dashboard_has_panels: Verify bentoml-requests dashboard has request rate panel</case>
+          <case>test_prometheus_datasource_configured: Verify Grafana has Prometheus datasource via /api/datasources</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>monitoring-serving</github-issue-group>
+    </task>
+
+    <!-- T3.3: Evidently reports -->
+    <task id="T3.3" name="Evidently data quality + drift report generation" effort="3h" status="NOT_STARTED">
+      <description>
+        Wire Evidently into the BentoML serving pipeline to generate quality and
+        drift reports after inference on external test volumes:
+
+        1. Data quality report: input feature statistics (intensity distribution,
+           spatial dimensions, spacing range)
+        2. Prediction drift report: output distribution compared to training set
+           predictions (proxy for model drift detection)
+        3. Save reports as HTML artifacts in MLflow under the deploy experiment
+
+        NOTE: Full drift SIMULATION (synthetic data shift, concept drift, model
+        degradation) is deferred to issue #574 (P0). This task only verifies that
+        the Evidently infrastructure works and can generate reports.
+      </description>
+      <files-to-modify>
+        <file action="create">src/minivess/observability/evidently_reports.py</file>
+        <file action="modify">src/minivess/orchestration/flows/deploy_flow.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T3.1"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_evidently_reports.py</test-file>
+        <test-cases>
+          <case>test_data_quality_report_generated: Verify Evidently DataQualityReport produces non-empty HTML</case>
+          <case>test_prediction_drift_report_generated: Verify Evidently DataDriftReport produces non-empty HTML</case>
+          <case>test_reports_saved_as_mlflow_artifacts: Verify HTML reports uploaded to MLflow artifact store</case>
+          <case>test_report_html_contains_expected_sections: Verify HTML has data quality metrics sections</case>
+          <case>test_evidently_handles_3d_volume_features: Verify Evidently works with 3D spatial statistics</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>monitoring-serving</github-issue-group>
+    </task>
+
+    <!-- T3.4: Prometheus to Grafana pipeline -->
+    <task id="T3.4" name="Prometheus to Grafana metrics pipeline" effort="3h" status="NOT_STARTED">
+      <description>
+        Configure the full metrics pipeline: BentoML exposes metrics to Prometheus to Grafana.
+
+        1. Configure BentoML to expose /metrics endpoint (Prometheus format)
+           - Request count, request duration, error count, active requests
+        2. Configure Prometheus to scrape BentoML metrics
+           - deployment/prometheus/prometheus.yml with bentoml scrape target
+        3. Verify metrics flow: BentoML /metrics to Prometheus /api/v1/query to Grafana panels
+        4. After running inference (T3.1), verify Prometheus has bentoml_* metrics
+        5. Verify Grafana can query these metrics (datasource test)
+
+        Prometheus config at: deployment/prometheus/prometheus.yml
+        BentoML at: BENTOML_DOCKER_HOST:BENTOML_PORT (minivess-bento:3333)
+      </description>
+      <files-to-modify>
+        <file action="create">deployment/prometheus/prometheus.yml</file>
+        <file action="modify">deployment/docker-compose.yml</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T3.1"/>
+        <dep task-id="T3.2"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/test_prometheus_grafana_pipeline.py</test-file>
+        <test-cases>
+          <case>test_bentoml_metrics_endpoint_accessible: Verify GET /metrics on BentoML returns Prometheus-format text</case>
+          <case>test_prometheus_scrapes_bentoml: Query Prometheus /api/v1/targets, verify BentoML target is UP</case>
+          <case>test_prometheus_has_bentoml_metrics: Query Prometheus for bentoml_api_server_request_total, verify non-empty</case>
+          <case>test_grafana_prometheus_datasource_healthy: Verify Grafana datasource health check passes</case>
+          <case>test_grafana_query_returns_data: Execute a Grafana Prometheus query, verify non-empty result</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>monitoring-serving</github-issue-group>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: E2E Pytest Harness                                        -->
+  <!-- ================================================================== -->
+  <phase id="4" name="E2E Pytest Harness">
+    <description>
+      Build the pytest infrastructure that orchestrates all previous phases into a
+      single make test-e2e invocation. Uses pytest-docker to manage the real
+      docker-compose stack (infrastructure + flow containers).
+
+      Runtime: ~40~60 min total (training is the bottleneck).
+      Markers: @pytest.mark.slow + @pytest.mark.integration
+      Execution: Docker via Prefect (no MINIVESS_ALLOW_HOST=1 escape hatch).
+    </description>
+    <acceptance-criteria>
+      <criterion>pytest-docker manages real docker-compose.yml + docker-compose.flows.yml</criterion>
+      <criterion>Health check fixtures wait for PostgreSQL, MinIO, MLflow, Prefect, Grafana</criterion>
+      <criterion>Full pipeline passes end-to-end in a single make test-e2e invocation</criterion>
+      <criterion>Makefile has test-e2e target with 1-hour timeout</criterion>
+      <criterion>Issue #366 updated with external GPU verification plan</criterion>
+    </acceptance-criteria>
+
+    <!-- T4.1: pytest-docker integration -->
+    <task id="T4.1" name="pytest-docker integration setup" effort="3h" status="NOT_STARTED">
+      <description>
+        Add pytest-docker to dev dependencies (uv add --dev pytest-docker) and configure
+        it to use the real docker-compose files:
+        - deployment/docker-compose.yml (infrastructure services)
+        - deployment/docker-compose.flows.yml (flow containers)
+
+        Create docker_compose_file fixture pointing to both compose files.
+        The fixture must:
+        1. Create/use the minivess-network Docker network
+        2. Start infrastructure services (PostgreSQL, MinIO, MLflow, Prefect, Grafana)
+        3. Wait for health checks before yielding
+        4. Tear down after all e2e tests complete
+
+        Health checks needed:
+        - PostgreSQL: pg_isready
+        - MinIO: /minio/health/live
+        - MLflow: GET /health (or /api/2.0/mlflow/experiments/list)
+        - Prefect: GET /api/health
+        - Grafana: GET /api/health
+      </description>
+      <files-to-modify>
+        <file action="modify">pyproject.toml</file>
+        <file action="create">tests/v2/integration/e2e/conftest.py</file>
+      </files-to-modify>
+      <dependencies/>
+      <tdd-spec>
+        <test-file>tests/v2/integration/e2e/test_infrastructure_health.py</test-file>
+        <test-cases>
+          <case>test_postgresql_healthy: Verify PostgreSQL accepts connections via pg_isready equivalent</case>
+          <case>test_minio_healthy: Verify MinIO /minio/health/live returns 200</case>
+          <case>test_mlflow_healthy: Verify MLflow health endpoint returns 200</case>
+          <case>test_prefect_healthy: Verify Prefect /api/health returns 200</case>
+          <case>test_grafana_healthy: Verify Grafana /api/health returns "ok"</case>
+          <case>test_minivess_network_exists: Verify docker network minivess-network exists</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>e2e-harness</github-issue-group>
+    </task>
+
+    <!-- T4.2: E2E test orchestration file -->
+    <task id="T4.2" name="E2E test file: full pipeline orchestration" effort="4h" status="NOT_STARTED">
+      <description>
+        Create the main e2e test file that orchestrates the full pipeline:
+        acquisition to data to annotation to train to post_training to analysis
+        to biostatistics to deploy.
+
+        The test:
+        1. Starts all infrastructure via pytest-docker (T4.1 fixtures)
+        2. Runs each flow in Docker via docker compose run (or Prefect deployment API)
+        3. Verifies all Phase 1 assertions (flow outputs)
+        4. Verifies all Phase 2 assertions (inter-flow contracts)
+        5. Verifies all Phase 3 assertions (monitoring + serving)
+        6. Total runtime ~40~60 min, marked @slow + @integration
+
+        Flow execution order:
+        1. acquisition_flow (download datasets)
+        2. data_flow (validate + split)
+        3. annotation_flow (no-op, health check)
+        4. train_flow (5 models x 3 folds x 2 epochs)
+        5. post_training_flow (SWA + calibration)
+        6. analysis_flow (evaluate + ensemble + champion)
+        7. biostatistics_flow (comparison + DuckDB + Parquet)
+        8. deploy_flow (ONNX + BentoML)
+
+        Each flow invoked via docker compose run with proper env vars and
+        --shm-size 8g for GPU flows. Uses --env-file for .env loading.
+      </description>
+      <files-to-modify>
+        <file action="create">tests/v2/integration/e2e/test_full_pipeline_e2e.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T4.1"/>
+        <dep task-id="T0.1"/>
+        <dep task-id="T0.2"/>
+        <dep task-id="T0.3"/>
+        <dep task-id="T0.4"/>
+        <dep task-id="T0.5"/>
+        <dep task-id="T0.6"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/e2e/test_full_pipeline_e2e.py</test-file>
+        <test-cases>
+          <case>test_full_pipeline_acquisition_to_deploy: Run all 8 flows sequentially, verify each completes without error</case>
+          <case>test_all_flows_have_completed_status_in_prefect: After pipeline, query Prefect API for COMPLETED state on all flows</case>
+          <case>test_champion_model_deployed: After pipeline, verify BentoML serves the champion model</case>
+          <case>test_mlflow_has_all_experiments: Verify MLflow has experiments for training, analysis, deploy</case>
+          <case>test_all_5_models_trained: Verify 5 model parent runs exist in MLflow training experiment</case>
+          <case>test_post_training_plugins_executed: Verify SWA + calibration sibling runs exist</case>
+          <case>test_comparison_table_generated: Verify Markdown comparison table artifact exists</case>
+          <case>test_onnx_champion_in_bentoml: Verify BentoML model store contains the champion ONNX model</case>
+          <case>test_pipeline_runtime_under_60_min: Assert total pipeline duration under 3600 seconds</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>e2e-harness</github-issue-group>
+    </task>
+
+    <!-- T4.3: Makefile target -->
+    <task id="T4.3" name="Makefile: add test-e2e target" effort="1h" status="NOT_STARTED">
+      <description>
+        Add test-e2e target to the Makefile that runs the full e2e test suite:
+
+        test-e2e:
+          uv run pytest tests/v2/integration/e2e/ -x -q \
+            -m "slow and integration" \
+            --timeout=3600 \
+            -v
+
+        Prerequisites documented in Makefile comments:
+        - Docker daemon running
+        - MiniVess data downloaded (data/raw/minivess/)
+        - .env file configured (from .env.example)
+        - Docker images built (make build-bases + flow images)
+        - minivess-network created (docker network create minivess-network)
+
+        Also add to the help target.
+      </description>
+      <files-to-modify>
+        <file action="modify">Makefile</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T4.2"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/unit/test_makefile_targets.py</test-file>
+        <test-cases>
+          <case>test_makefile_has_test_e2e_target: Parse Makefile, verify test-e2e target exists</case>
+          <case>test_makefile_help_lists_test_e2e: Run make help, verify test-e2e appears in output</case>
+          <case>test_test_e2e_uses_correct_timeout: Verify test-e2e target has --timeout=3600</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>e2e-harness</github-issue-group>
+    </task>
+
+    <!-- T4.4: Update issue #366 -->
+    <task id="T4.4" name="Update issue #366 with external GPU verification plan" effort="1h" status="NOT_STARTED">
+      <description>
+        Update GitHub issue #366 (VesselFM + SAM3 TopoLoRA external GPU) with:
+        1. Cross-reference to this e2e testing plan
+        2. List of models deferred: VesselFM, SAM3 TopoLoRA (require > 8GB VRAM)
+        3. External GPU test infrastructure: RunPod / intranet server via make test-gpu
+        4. Cross-reference to P0 drift issue #574
+        5. Estimated effort and priority for external GPU testing phase
+
+        This task does NOT implement the external GPU tests, just documents
+        the plan and links it to the e2e testing framework.
+      </description>
+      <files-to-modify/>
+      <dependencies/>
+      <tdd-spec>
+        <test-file>N/A (GitHub issue update only)</test-file>
+        <test-cases>
+          <case>Verify issue #366 updated with e2e plan cross-reference via gh issue view 366</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>documentation</github-issue-group>
+    </task>
+
+    <!-- T4.5: pytest-docker conftest fixtures -->
+    <task id="T4.5" name="Create pytest-docker conftest.py fixtures" effort="3h" status="NOT_STARTED">
+      <description>
+        Create comprehensive conftest.py fixtures for e2e testing:
+
+        1. docker_compose_file: Returns list of compose file paths
+           [deployment/docker-compose.yml, deployment/docker-compose.flows.yml]
+
+        2. docker_compose_project_name: Returns "e2e_test" to avoid conflicts
+           with dev stack
+
+        3. wait_for_services: Session-scoped fixture that waits for all infra
+           services to be healthy (PostgreSQL, MinIO, MLflow, Prefect, Grafana)
+           with exponential backoff and 120s timeout
+
+        4. mlflow_client: Returns MlflowClient connected to test stack
+
+        5. prefect_client: Returns Prefect async client connected to test stack
+
+        6. run_flow_in_docker: Fixture function that runs a named flow via
+           docker compose run with proper env vars, --shm-size, --env-file
+
+        7. cleanup_e2e_data: Session-scoped fixture that cleans up test
+           experiment data after the test session (delete _DEBUG experiments)
+
+        All fixtures use .env.example values for service URLs/ports.
+        No MINIVESS_ALLOW_HOST=1 in e2e fixtures (Docker-only execution).
+      </description>
+      <files-to-modify>
+        <file action="create">tests/v2/integration/e2e/__init__.py</file>
+        <file action="create">tests/v2/integration/e2e/conftest.py</file>
+      </files-to-modify>
+      <dependencies>
+        <dep task-id="T4.1"/>
+      </dependencies>
+      <tdd-spec>
+        <test-file>tests/v2/integration/e2e/test_fixtures_smoke.py</test-file>
+        <test-cases>
+          <case>test_docker_compose_file_fixture_returns_paths: Verify fixture returns 2 compose file paths that exist</case>
+          <case>test_wait_for_services_completes: Verify all 5 service health checks pass within 120s</case>
+          <case>test_mlflow_client_connects: Verify MlflowClient can list experiments</case>
+          <case>test_prefect_client_connects: Verify Prefect client can read /api/health</case>
+          <case>test_run_flow_in_docker_returns_exit_code: Run a trivial flow, verify exit code 0</case>
+        </test-cases>
+      </tdd-spec>
+      <github-issue-group>e2e-harness</github-issue-group>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- CROSS-CUTTING CONCERNS                                             -->
+  <!-- ================================================================== -->
+  <cross-cutting>
+    <concern name="No MINIVESS_ALLOW_HOST=1">
+      All e2e tests run in Docker via Prefect. The MINIVESS_ALLOW_HOST=1
+      escape hatch is NEVER used in e2e tests. Only unit tests may use it.
+    </concern>
+    <concern name="Debug suffix isolation">
+      All e2e tests use MINIVESS_DEBUG_SUFFIX=_E2E_TEST to isolate test
+      experiments from production and debug runs. Cleanup fixture removes
+      _E2E_TEST experiments after the test session.
+    </concern>
+    <concern name="No VesselNN">
+      VesselNN is excluded from all external dataset tests due to potential
+      data leakage with MiniVess (PI authored VesselNN, volumes may overlap).
+      Only DeepVess and TubeNet 2PM are used as external test datasets.
+    </concern>
+    <concern name="Champion metric">
+      val_compound_masd_cldice = 0.5*(1 - MASD/50) + 0.5*clDice
+      This compound metric from MetricsReloaded balances topology (clDice)
+      and boundary accuracy (MASD). Used for champion tagging and deployment.
+    </concern>
+    <concern name="Drift deferred">
+      Synthetic drift simulation (data drift, model drift, concept drift)
+      is deferred to issue #574 (P0). Phase 3 only verifies the monitoring
+      infrastructure (Evidently, Prometheus, Grafana) works correctly.
+    </concern>
+    <concern name="No regex">
+      All log parsing uses json.loads() on JSONL lines (CLAUDE.md Rule #16).
+      No regex patterns for parsing structured data anywhere in tests.
+    </concern>
+    <concern name="Docker Compose V2 .env">
+      All docker compose invocations use --env-file to explicitly load .env
+      from the repo root (CLAUDE.md / deployment/CLAUDE.md requirement).
+    </concern>
+  </cross-cutting>
+
+  <!-- ================================================================== -->
+  <!-- GITHUB ISSUE GROUPING                                              -->
+  <!-- ================================================================== -->
+  <github-issue-groups>
+    <group name="fix-interflow-seam" title="fix: broken train/post-training/analysis inter-flow seam">
+      <description>
+        Fix the core pipeline seam: train flow never logs checkpoint_dir tags
+        to MLflow, causing post-training and analysis to operate on empty data.
+        Prerequisite for all e2e testing.
+      </description>
+      <tasks>
+        <task-ref id="T0.1"/>
+        <task-ref id="T0.2"/>
+        <task-ref id="T0.3"/>
+        <task-ref id="T0.4"/>
+        <task-ref id="T0.5"/>
+      </tasks>
+      <estimated-effort>11h</estimated-effort>
+      <priority>P0</priority>
+    </group>
+
+    <group name="structured-logging" title="feat: structured JSONL logging for flow/task transitions">
+      <description>
+        Add structured JSONL event logging for all flow lifecycle events.
+        Enables container log verification in e2e tests and Prefect UI observability.
+      </description>
+      <tasks>
+        <task-ref id="T0.6"/>
+      </tasks>
+      <estimated-effort>4h</estimated-effort>
+      <priority>P1</priority>
+    </group>
+
+    <group name="e2e-flow-testing" title="test: per-flow e2e smoke tests for all 8 pipeline flows">
+      <description>
+        Individual flow tests verifying each flow produces correct outputs
+        when run in Docker with real data. Covers acquisition through deploy.
+      </description>
+      <tasks>
+        <task-ref id="T1.1"/>
+        <task-ref id="T1.2"/>
+        <task-ref id="T1.3"/>
+        <task-ref id="T1.4"/>
+        <task-ref id="T1.5"/>
+        <task-ref id="T1.6"/>
+        <task-ref id="T1.7"/>
+        <task-ref id="T1.8"/>
+      </tasks>
+      <estimated-effort>26h</estimated-effort>
+      <priority>P0</priority>
+    </group>
+
+    <group name="integration-contracts" title="test: inter-flow MLflow/Prefect/volume integration contracts">
+      <description>
+        Triple verification of inter-flow communication: MLflow artifacts in MinIO,
+        Prefect API flow statuses, container log JSONL events, volume mount contents.
+      </description>
+      <tasks>
+        <task-ref id="T2.1"/>
+        <task-ref id="T2.2"/>
+        <task-ref id="T2.3"/>
+        <task-ref id="T2.4"/>
+      </tasks>
+      <estimated-effort>9h</estimated-effort>
+      <priority>P0</priority>
+    </group>
+
+    <group name="monitoring-serving" title="feat: BentoML calibrated serving + Grafana/Evidently/Prometheus monitoring">
+      <description>
+        Production monitoring stack: BentoML with calibrated responses,
+        Grafana provisioned dashboards, Evidently drift reports, Prometheus metrics.
+      </description>
+      <tasks>
+        <task-ref id="T3.1"/>
+        <task-ref id="T3.2"/>
+        <task-ref id="T3.3"/>
+        <task-ref id="T3.4"/>
+      </tasks>
+      <estimated-effort>14h</estimated-effort>
+      <priority>P1</priority>
+    </group>
+
+    <group name="e2e-harness" title="test: pytest-docker e2e harness with make test-e2e target">
+      <description>
+        pytest-docker integration, conftest fixtures, full pipeline orchestration
+        test file, and Makefile target for single-command e2e execution.
+      </description>
+      <tasks>
+        <task-ref id="T4.1"/>
+        <task-ref id="T4.2"/>
+        <task-ref id="T4.3"/>
+        <task-ref id="T4.5"/>
+      </tasks>
+      <estimated-effort>11h</estimated-effort>
+      <priority>P0</priority>
+    </group>
+
+    <group name="documentation" title="docs: update issue #366 with external GPU verification plan">
+      <description>
+        Update the existing GitHub issue for VesselFM + SAM3 TopoLoRA with
+        cross-references to this e2e plan and drift issue #574.
+      </description>
+      <tasks>
+        <task-ref id="T4.4"/>
+      </tasks>
+      <estimated-effort>1h</estimated-effort>
+      <priority>P2</priority>
+    </group>
+  </github-issue-groups>
+
+  <!-- ================================================================== -->
+  <!-- EXECUTION ORDER (dependency-resolved)                              -->
+  <!-- ================================================================== -->
+  <execution-order>
+    <step order="1" tasks="T0.1, T0.5, T0.6, T4.1, T4.4, T3.2" parallel="true">
+      <rationale>
+        These tasks have no upstream dependencies and can start immediately.
+        T0.1 (checkpoint tags) is the critical path. T0.5 (debug suffix),
+        T0.6 (JSONL logging), T4.1 (pytest-docker), T4.4 (issue update),
+        and T3.2 (Grafana dashboards) are independent.
+      </rationale>
+    </step>
+    <step order="2" tasks="T0.2, T0.4, T4.5" parallel="true">
+      <rationale>
+        T0.2 depends on T0.1 (checkpoint tags exist to read).
+        T0.4 depends on T0.1 (experiment name resolution).
+        T4.5 depends on T4.1 (pytest-docker configured).
+      </rationale>
+    </step>
+    <step order="3" tasks="T0.3" parallel="false">
+      <rationale>
+        T0.3 depends on T0.1 + T0.2 (post-training needs both checkpoint
+        tagging and FlowContract reading to work together).
+      </rationale>
+    </step>
+    <step order="4" tasks="T1.1, T1.3" parallel="true">
+      <rationale>
+        Acquisition and annotation flows are independent.
+        T1.1 depends on T0.6 (JSONL logging).
+        T1.3 depends on T0.6 (JSONL logging).
+      </rationale>
+    </step>
+    <step order="5" tasks="T1.2" parallel="false">
+      <rationale>
+        Data flow depends on acquisition flow (T1.1) for downloaded data.
+      </rationale>
+    </step>
+    <step order="6" tasks="T1.4" parallel="false">
+      <rationale>
+        Training flow depends on T0.1, T0.4, T0.5, T0.6, T1.2.
+        This is the longest-running step (~30 min).
+      </rationale>
+    </step>
+    <step order="7" tasks="T1.5" parallel="false">
+      <rationale>
+        Post-training depends on T0.3 (checkpoint consumption) and T1.4 (training results).
+      </rationale>
+    </step>
+    <step order="8" tasks="T1.6" parallel="false">
+      <rationale>
+        Analysis depends on T0.4 (experiment name resolution) and T1.5 (post-training variants).
+      </rationale>
+    </step>
+    <step order="9" tasks="T1.7, T1.8" parallel="true">
+      <rationale>
+        Biostatistics and deploy can run in parallel. Both depend on T1.6 (analysis results).
+      </rationale>
+    </step>
+    <step order="10" tasks="T2.1, T2.2, T2.3, T2.4" parallel="true">
+      <rationale>
+        All integration contract tests can run in parallel after the pipeline completes.
+        They all depend on T1.8 (deploy flow, the last pipeline step).
+      </rationale>
+    </step>
+    <step order="11" tasks="T3.1" parallel="false">
+      <rationale>
+        BentoML inference test depends on T1.8 (deploy flow serving the model).
+      </rationale>
+    </step>
+    <step order="12" tasks="T3.3, T3.4" parallel="true">
+      <rationale>
+        Evidently and Prometheus tests depend on T3.1 (inference results).
+        T3.4 also depends on T3.2 (Grafana dashboards).
+      </rationale>
+    </step>
+    <step order="13" tasks="T4.2, T4.3" parallel="true">
+      <rationale>
+        Full pipeline test and Makefile target depend on all previous work.
+        T4.2 orchestrates everything. T4.3 adds the make target.
+      </rationale>
+    </step>
+  </execution-order>
+
+  <!-- ================================================================== -->
+  <!-- TOTAL EFFORT SUMMARY                                               -->
+  <!-- ================================================================== -->
+  <effort-summary>
+    <phase id="0" name="Fix Broken Inter-Flow Seams" hours="15" tasks="6"/>
+    <phase id="1" name="Individual Flow Testing" hours="26" tasks="8"/>
+    <phase id="2" name="Integration Contracts" hours="9" tasks="4"/>
+    <phase id="3" name="Monitoring and Serving" hours="14" tasks="4"/>
+    <phase id="4" name="E2E Pytest Harness" hours="12" tasks="5"/>
+    <total hours="76" tasks="27" working-days="5~7"/>
+  </effort-summary>
+</plan>
