@@ -22,45 +22,61 @@ EXPECTED_TAGS: dict[Path, str] = {
 }
 
 
+def _extract_flow_name_from_dict(dict_node: ast.Dict) -> list[str]:
+    """Extract flow_name values from an AST Dict node."""
+    found: list[str] = []
+    for key, val in zip(dict_node.keys, dict_node.values, strict=False):
+        if not isinstance(key, ast.Constant):
+            continue
+        if not isinstance(key.value, str):
+            continue
+        if key.value != "flow_name":
+            continue
+        if isinstance(val, ast.Constant) and isinstance(val.value, str):
+            found.append(val.value)
+        elif isinstance(val, ast.Name):
+            from minivess.orchestration import constants as _c
+
+            resolved = getattr(_c, val.id, None)
+            if isinstance(resolved, str):
+                found.append(resolved)
+    return found
+
+
 def _find_start_run_flow_name_tags(source_path: Path) -> list[str]:
     """Extract flow_name values from mlflow.start_run(tags={...}) calls via AST.
 
     Handles both literal strings and constant references (e.g., FLOW_NAME_TRAIN).
+    Also handles the pattern where tags dict is assigned to a variable first:
+        run_tags = {"flow_name": CONST}
+        mlflow.start_run(tags=run_tags)
     """
     tree = ast.parse(source_path.read_text(encoding="utf-8"))
     found: list[str] = []
 
+    # First pass: collect variable assignments like `run_tags = {"flow_name": ...}`
+    var_tags: dict[str, list[str]] = {}
     for node in ast.walk(tree):
-        # Match Call nodes
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if isinstance(target, ast.Name) and isinstance(node.value, ast.Dict):
+                tags = _extract_flow_name_from_dict(node.value)
+                if tags:
+                    var_tags[target.id] = tags
+
+    # Second pass: find mlflow.start_run(tags=...) calls
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        # Match mlflow.start_run(...)
         if not (isinstance(node.func, ast.Attribute) and node.func.attr == "start_run"):
             continue
-        # Find tags= keyword argument
         for kw in node.keywords:
             if kw.arg != "tags":
                 continue
-            # tags must be a dict literal
-            if not isinstance(kw.value, ast.Dict):
-                continue
-            for key, val in zip(kw.value.keys, kw.value.values, strict=False):
-                if not isinstance(key, ast.Constant):
-                    continue
-                if not isinstance(key.value, str):
-                    continue
-                if key.value != "flow_name":
-                    continue
-                # Extract the string value of the flow_name entry
-                if isinstance(val, ast.Constant) and isinstance(val.value, str):
-                    found.append(val.value)
-                elif isinstance(val, ast.Name):
-                    # Resolve constant reference (e.g., FLOW_NAME_TRAIN)
-                    from minivess.orchestration import constants as _c
-
-                    resolved = getattr(_c, val.id, None)
-                    if isinstance(resolved, str):
-                        found.append(resolved)
+            if isinstance(kw.value, ast.Dict):
+                found.extend(_extract_flow_name_from_dict(kw.value))
+            elif isinstance(kw.value, ast.Name) and kw.value.id in var_tags:
+                found.extend(var_tags[kw.value.id])
 
     return found
 
