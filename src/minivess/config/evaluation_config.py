@@ -82,6 +82,13 @@ class EvaluationConfig(BaseModel):
         default="minivess_training",
         description="MLflow experiment that stores training runs (read-only during eval).",
     )
+    require_eval_metrics: bool = Field(
+        default=True,
+        description=(
+            "When True (production), skip runs without eval_fold2_dsc metric. "
+            "Set to False for debug runs that don't produce full eval metrics (#588)."
+        ),
+    )
 
     # ------------------------------------------------------------------
     # MetricsReloaded / statistical testing

@@ -87,6 +87,9 @@ class FlowContract:
                 return None
 
             filter_parts = ["attributes.status = 'FINISHED'"]
+            # Filter by flow_name tag so we find the correct upstream flow
+            # (e.g. "training-flow" not "post-training-flow") (#586).
+            filter_parts.append(f"tags.flow_name = '{upstream_flow}'")
             if tags:
                 for key, value in tags.items():
                     filter_parts.append(f"tags.{key} = '{value}'")

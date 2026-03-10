@@ -247,8 +247,6 @@ def post_training_flow(
 
     if config is None:
         config = PostTrainingConfig()
-    if checkpoint_paths is None:
-        checkpoint_paths = []
     if run_metadata is None:
         run_metadata = []
     if output_dir is None:
@@ -257,6 +255,35 @@ def post_training_flow(
         )
 
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Auto-discover upstream training run and checkpoints (#587).
+    tracking_uri = resolve_tracking_uri()
+    upstream_exp = os.environ.get("UPSTREAM_EXPERIMENT", "minivess_training")
+
+    if upstream_training_run_id is None:
+        upstream = find_upstream_safely(
+            tracking_uri=tracking_uri,
+            experiment_name=upstream_exp,
+            upstream_flow="train",
+        )
+        upstream_training_run_id = upstream["run_id"] if upstream else None
+
+    if checkpoint_paths is None or len(checkpoint_paths) == 0:
+        checkpoint_paths = resolve_checkpoint_paths_from_contract(
+            parent_run_id=upstream_training_run_id,
+            tracking_uri=tracking_uri,
+        )
+        if checkpoint_paths:
+            log.info(
+                "Auto-discovered %d checkpoint(s) from upstream run %s",
+                len(checkpoint_paths),
+                upstream_training_run_id,
+            )
+        else:
+            log.warning(
+                "No checkpoints found from upstream run %s — plugins may skip",
+                upstream_training_run_id,
+            )
 
     enabled = config.enabled_plugin_names()
     if not enabled:
@@ -318,23 +345,8 @@ def post_training_flow(
     log.info("Post-training flow complete: %d plugin(s) executed", n_run)
 
     # Log results to MLflow
-    tracking_uri = resolve_tracking_uri()
     mlflow_run_id: str | None = None
-
-    # Read upstream experiment name from env (Rule #22 — single-source config).
-    # UPSTREAM_EXPERIMENT: which training experiment to search for upstream runs.
-    # EXPERIMENT: which experiment to log post-training results to (defaults to same).
-    upstream_exp = os.environ.get("UPSTREAM_EXPERIMENT", "minivess_training")
     log_exp = os.environ.get("EXPERIMENT", upstream_exp)
-
-    # Find upstream training run (explicit param takes priority over auto-discovery)
-    if upstream_training_run_id is None:
-        upstream = find_upstream_safely(
-            tracking_uri=tracking_uri,
-            experiment_name=upstream_exp,
-            upstream_flow="train",
-        )
-        upstream_training_run_id = upstream["run_id"] if upstream else None
 
     try:
         import mlflow
