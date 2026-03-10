@@ -180,7 +180,6 @@ _FLOW_FILES = [
     "deploy_flow",
     "acquisition_flow",
     "dashboard_flow",
-    "qa_flow",
 ]
 
 

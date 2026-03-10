@@ -21,7 +21,11 @@ from prefect import flow, task
 from minivess.observability.mlflow_backend import detect_backend_type
 from minivess.observability.mlflow_schema import check_required_params
 from minivess.observability.tracking import resolve_tracking_uri
-from minivess.orchestration.constants import FLOW_NAME_QA
+
+# QA was merged into the dashboard health adapter (#342, PR #567).
+# FLOW_NAME_QA removed from orchestration.constants; defined locally for
+# backward compatibility until this module is fully retired.
+FLOW_NAME_QA: str = "qa-flow"
 
 logger = logging.getLogger(__name__)
 

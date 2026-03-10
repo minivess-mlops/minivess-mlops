@@ -1,14 +1,35 @@
 # Deployment — Docker Infrastructure
 
-## Three-Layer Docker Hierarchy
+## Three-Tier Base Image Hierarchy
 
 ```
-Layer 1: nvidia/cuda:12.6.3-runtime-ubuntu24.04  (upstream, never modified)
-Layer 2: minivess-base:latest                     (THIS — all shared deps)
-Layer 3: Dockerfile.{flow}                        (thin — scripts, env, CMD only)
+Tier A (GPU):   nvidia/cuda → minivess-base:latest       — CUDA + PyTorch + MONAI (~8-12 GB)
+Tier B (CPU):   python:3.13 → minivess-base-cpu:latest   — scipy/pandas/DuckDB   (~1.5-2.5 GB)
+Tier C (Light): python:3.13 → minivess-base-light:latest — prefect/FastAPI/mlflow (~1.0-1.5 GB)
 ```
 
-**Flow Dockerfiles NEVER run `apt-get` or `uv`** — all deps belong in Dockerfile.base.
+| Tier | Base Image | Flows |
+|------|-----------|-------|
+| A (GPU) | `minivess-base:latest` | train, hpo, post_training, analyze, deploy, data, annotation, monailabel, acquisition |
+| B (CPU) | `minivess-base-cpu:latest` | biostatistics |
+| C (Light) | `minivess-base-light:latest` | dashboard, dashboard-api, pipeline |
+| N/A | `node:20-alpine` | dashboard-ui |
+| N/A | `ghcr.io/mlflow/mlflow` | mlflow |
+
+**Flow Dockerfiles NEVER run `apt-get` or `uv`** — all deps belong in the base images.
+
+### Adding a New Flow
+1. Determine which tier (does it need torch? → A. scipy? → B. Neither? → C)
+2. Create `Dockerfile.{flow}` with `FROM minivess-base-{tier}:latest`
+3. Add `LABEL flow="{name}"`, `LABEL description="..."`, `LABEL tier="{tier}"`
+4. Add to `TIER_MAPPING` in `tests/v2/unit/deployment/test_dockerfile_flows.py`
+5. Run `make test-staging` to verify
+
+### Regenerating Requirements
+After modifying `pyproject.toml` or `uv.lock`:
+```bash
+make requirements-tiers  # regenerates requirements-cpu.txt and requirements-light.txt
+```
 
 ## Building
 
@@ -34,7 +55,7 @@ DOCKER_BUILDKIT=1 docker build --build-arg UID=$(id -u) --build-arg GID=$(id -g)
 | File | Purpose |
 |------|---------|
 | `docker-compose.yml` | Infrastructure: PostgreSQL, MinIO, MLflow, Prefect, Grafana |
-| `docker-compose.flows.yml` | Per-flow services: 12 flow containers |
+| `docker-compose.flows.yml` | Per-flow services: 11 flow containers |
 
 ## Volume Mount Rules (Non-Negotiable)
 
@@ -267,7 +288,7 @@ services by container name:
     ──► minivess-prefect:4200  (Prefect orchestration API)
     ──► postgres:5432          (PostgreSQL — Optuna HPO storage)
 
-[dashboard/qa/biostatistics]
+[dashboard/biostatistics]
     ──► minivess-mlflow:5000   (read-only run queries)
     ──► minio:9000             (artifact download)
 

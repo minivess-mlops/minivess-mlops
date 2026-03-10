@@ -3,10 +3,11 @@
 #
 # Build: docker build -t minivess-dashboard:latest -f deployment/docker/Dockerfile.dashboard .
 
-FROM minivess-base:latest
+FROM minivess-base-light:latest
 
 LABEL flow="dashboard"
 LABEL description="Dashboard flow — paper figures, Parquet export, drift reports"
+LABEL tier="light"
 
 # Copy scripts
 COPY --chown=minivess:minivess scripts/ scripts/

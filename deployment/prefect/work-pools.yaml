@@ -1,7 +1,7 @@
 # MinIVess MLOps — Prefect Work Pool Configuration
 #
 # Work pools define resource-grouped execution environments:
-# - cpu-pool: For data, analyze, deploy, dashboard, QA flows
+# - cpu-pool: For data, analyze, deploy, dashboard flows
 # - gpu-pool: For training flows (NVIDIA GPU required)
 # - sky-pool: For SkyPilot-managed cloud/on-prem jobs (Phase 3)
 #
@@ -10,7 +10,7 @@
 work_pools:
   - name: cpu-pool
     type: docker
-    description: "CPU-only work pool for data/analyze/deploy/dashboard/QA flows"
+    description: "CPU-only work pool for data/analyze/deploy/dashboard flows"
     base_job_template:
       variables:
         image: "minivess-base:latest"

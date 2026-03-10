@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from minivess.pipeline.evaluation import FoldResult
 
 from minivess.config.defaults import DEFAULT_TRACKING_URI as _DEFAULT_TRACKING_URI
-from minivess.serving.model_logger import log_single_model
 
 logger = logging.getLogger(__name__)
 
@@ -656,6 +655,9 @@ class ExperimentTracker:
         if self._run_id is None:
             msg = "Cannot log pyfunc model outside of a run context"
             raise RuntimeError(msg)
+
+        # Lazy import to avoid pulling torch at module level (Tier C isolation)
+        from minivess.serving.model_logger import log_single_model
 
         log_single_model(
             checkpoint_path=checkpoint_path,

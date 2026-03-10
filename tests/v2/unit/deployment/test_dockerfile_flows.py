@@ -20,7 +20,13 @@ DOCKERFILES_DIR = ROOT / "deployment" / "docker"
 # Dockerfile.base is the base image, not a flow — exclude from flow checks
 # Dockerfile.mlflow is infrastructure (not a Prefect flow) — exclude
 # Dockerfile.dashboard-ui is React/nginx frontend (not Python, no base inheritance) — exclude
-_EXCLUDED = {"Dockerfile.base", "Dockerfile.mlflow", "Dockerfile.dashboard-ui"}
+_EXCLUDED = {
+    "Dockerfile.base",
+    "Dockerfile.base-cpu",
+    "Dockerfile.base-light",
+    "Dockerfile.mlflow",
+    "Dockerfile.dashboard-ui",
+}
 
 
 def _flow_dockerfiles() -> list[Path]:
@@ -105,24 +111,65 @@ def test_no_flow_dockerfile_runs_uv() -> None:
     )
 
 
+_VALID_BASES = (
+    "FROM minivess-base:latest",
+    "FROM minivess-base-cpu:latest",
+    "FROM minivess-base-light:latest",
+)
+
+
 def test_all_flow_dockerfiles_inherit_from_base() -> None:
-    """All flow Dockerfiles must use 'FROM minivess-base:latest'."""
+    """All flow Dockerfiles must use a valid minivess base image."""
     failures = []
     for df in _flow_dockerfiles():
         content = df.read_text(encoding="utf-8")
         has_base = any(
-            line.strip() == "FROM minivess-base:latest" for line in content.splitlines()
+            any(line.strip().startswith(base) for base in _VALID_BASES)
+            for line in content.splitlines()
         )
-        if not has_base:
-            # Also accept FROM with trailing comment
-            has_base = any(
-                line.strip().startswith("FROM minivess-base:latest")
-                for line in content.splitlines()
-            )
         if not has_base:
             failures.append(df.name)
 
     assert not failures, (
-        f"Flow Dockerfiles do not inherit from minivess-base:latest: {failures}. "
+        f"Flow Dockerfiles do not inherit from a minivess base: {failures}. "
         f"Use: FROM minivess-base:latest"
+    )
+
+
+# Canonical tier mapping — single source of truth for which base each flow uses
+TIER_MAPPING: dict[str, str] = {
+    "Dockerfile.train": "minivess-base:latest",
+    "Dockerfile.hpo": "minivess-base:latest",
+    "Dockerfile.post_training": "minivess-base:latest",
+    "Dockerfile.analyze": "minivess-base:latest",
+    "Dockerfile.deploy": "minivess-base:latest",
+    "Dockerfile.data": "minivess-base:latest",
+    "Dockerfile.annotation": "minivess-base:latest",
+    "Dockerfile.monailabel": "minivess-base:latest",
+    "Dockerfile.acquisition": "minivess-base:latest",
+    "Dockerfile.biostatistics": "minivess-base-cpu:latest",
+    "Dockerfile.dashboard": "minivess-base-light:latest",
+    "Dockerfile.dashboard-api": "minivess-base-light:latest",
+    "Dockerfile.pipeline": "minivess-base-light:latest",
+}
+
+
+def test_flow_dockerfiles_use_correct_tier() -> None:
+    """Each flow Dockerfile must use its tier-correct base image."""
+    failures = []
+    for dockerfile_name, expected_base in TIER_MAPPING.items():
+        path = DOCKERFILES_DIR / dockerfile_name
+        if not path.exists():
+            failures.append(f"{dockerfile_name}: file not found")
+            continue
+        content = path.read_text(encoding="utf-8")
+        has_correct_base = any(
+            line.strip().startswith(f"FROM {expected_base}")
+            for line in content.splitlines()
+        )
+        if not has_correct_base:
+            failures.append(f"{dockerfile_name}: expected FROM {expected_base}")
+
+    assert not failures, "Flow Dockerfiles use wrong base image:\n" + "\n".join(
+        failures
     )

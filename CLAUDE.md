@@ -64,16 +64,16 @@ feature, every configuration, every automation should be evaluated against this 
    task-specific logic** into the multi-task infrastructure — all task semantics
    come from config files.
 9. **Division of labor via Prefect** — Prefect flows are **required** (not optional),
-   separating concerns into 6 persona-based flows even for solo researchers. Each flow
+   separating concerns into 5 persona-based flows even for solo researchers. Each flow
    is independently testable, resumable, cacheable, and uses MLflow as the inter-flow
-   contract. The first 4 flows are **core** (always run); the last 2 are **best-effort**
+   contract. The first 4 flows are **core** (always run); the last is **best-effort**
    (runs when resources allow, failure does not block the pipeline):
    - Flow 1: Data Engineering (core)
    - Flow 2: Model Training (core)
    - Flow 3: Model Analysis (core)
    - Flow 4: Deployment (core)
-   - Flow 5: Dashboard & Reporting (best-effort — paper figures, Parquet export, drift reports)
-   - Flow 6: QA (best-effort — MLflow data integrity, ghost run cleanup, param validation)
+   - Flow 5: Dashboard & Reporting (best-effort — paper figures, Parquet export, drift reports, QA health checks)
+   QA was merged into the dashboard health adapter (#342, PR #567).
 
 ### Reproducibility via Real-Data E2E Pipeline (Verified 2026-03-02)
 
@@ -121,7 +121,7 @@ Everything must work identically on:
 
 ### Docker-Per-Flow Isolation
 Each of the 6 Prefect flows runs in its own Docker container:
-- `deployment/docker/Dockerfile.{base,data,train,analyze,deploy,dashboard,qa}`
+- `deployment/docker/Dockerfile.{base,data,train,analyze,deploy,dashboard}`
 - `deployment/docker-compose.flows.yml` — per-flow services
 - Flows communicate ONLY through MLflow artifacts + Prefect artifacts (no shared filesystem)
 - GPU reservation for training flow via Docker Compose device requests
@@ -171,7 +171,7 @@ Each of the 6 Prefect flows runs in its own Docker container:
 | **HPO** | Optuna + ASHA (HyperbandPruner) |
 | **Cloud Compute** | SkyPilot (multi-cloud spot instances) |
 | **GPU Partitioning** | NVIDIA MIG (multi-model inference) |
-| **Workflow Orchestration** | Prefect 3.x (required, 6 flows: data, train, analyze, deploy, dashboard, qa) |
+| **Workflow Orchestration** | Prefect 3.x (required, 5 flows: data, train, analyze, deploy, dashboard) |
 | **Agent Orchestration** | Pydantic AI + PrefectAgent (see ADR 0007) |
 | **CI/CD** | GitHub Actions + CML (ML-specific PR comments) |
 | **Lineage** | OpenLineage (Marquez) |
@@ -477,7 +477,7 @@ minivess-mlops/
 
 | Tool | Role | Deployment |
 |------|------|-----------|
-| **Prefect 3.x** | Workflow orchestration (6 flows: data, train, analyze, deploy + dashboard/qa best-effort) | Prefect Server (Docker Compose) |
+| **Prefect 3.x** | Workflow orchestration (5 flows: data, train, analyze, deploy + dashboard best-effort) | Prefect Server (Docker Compose) |
 | **SkyPilot** | Multi-cloud GPU compute provisioning (spot instances, failover) | Library + cloud SDK |
 | **Optuna** | HPO with ASHA (HyperbandPruner), TPE/CmaES samplers | Library (in-process) |
 | **Langfuse** | Production LLM tracing, cost tracking | Self-hosted (Docker Compose) |

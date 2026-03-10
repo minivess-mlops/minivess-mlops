@@ -4,9 +4,10 @@
 #
 # Build: docker build -t minivess-pipeline:latest -f deployment/docker/Dockerfile.pipeline .
 
-FROM minivess-base:latest
+FROM minivess-base-light:latest
 
 LABEL flow="pipeline"
 LABEL description="Pipeline orchestrator — cascades flows via run_deployment()"
+LABEL tier="light"
 
 CMD ["python", "-m", "minivess.orchestration.flows.pipeline_flow"]

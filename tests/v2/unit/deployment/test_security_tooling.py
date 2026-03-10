@@ -164,12 +164,12 @@ def test_weekly_security_scan_exists() -> None:
     """scripts/weekly_security_scan.sh must exist."""
     assert WEEKLY_SCAN.exists(), (
         "scripts/weekly_security_scan.sh not found. "
-        "Create weekly scan script covering all 12 flow images."
+        "Create weekly scan script covering all flow images."
     )
 
 
 def test_weekly_security_scan_covers_all_flow_images() -> None:
-    """weekly_security_scan.sh must reference all 12 flow image names (not service keys)."""
+    """weekly_security_scan.sh must reference all 11 flow image names (not service keys)."""
     content = WEEKLY_SCAN.read_text(encoding="utf-8")
     required_images = [
         "minivess-train",
@@ -183,10 +183,9 @@ def test_weekly_security_scan_covers_all_flow_images() -> None:
         "minivess-biostatistics",
         "minivess-post-training",
         "minivess-pipeline",
-        "minivess-qa",
     ]
     for image in required_images:
         assert image in content, (
             f"weekly_security_scan.sh missing image reference: {image}. "
-            "Must scan all 12 flow images."
+            "Must scan all 11 flow images."
         )

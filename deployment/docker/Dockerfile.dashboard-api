@@ -4,10 +4,11 @@
 # Build: docker build -t minivess-dashboard-api:latest -f deployment/docker/Dockerfile.dashboard-api .
 # Port comes from DASHBOARD_API_PORT env var (docker-compose), NOT hardcoded here.
 
-FROM minivess-base:latest
+FROM minivess-base-light:latest
 
 LABEL flow="dashboard-api"
 LABEL description="Dashboard FastAPI backend — unified integration hub for platform services"
+LABEL tier="light"
 
 # FastAPI + uvicorn are already in base image via dependencies.
 # If not, they would be added here.

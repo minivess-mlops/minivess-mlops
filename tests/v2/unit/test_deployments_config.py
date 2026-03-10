@@ -88,7 +88,6 @@ class TestMapConsistency:
             "analyze",
             "deploy",
             "dashboard",
-            "qa",
             "annotation",
         }
         missing = required - set(FLOW_WORK_POOL_MAP.keys())

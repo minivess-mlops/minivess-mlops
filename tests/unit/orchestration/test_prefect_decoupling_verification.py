@@ -24,7 +24,6 @@ CORE_FLOW_NAMES = {
     "analysis_flow",
     "deploy_flow",
     "dashboard_flow",
-    "qa_flow",
 }
 
 # Docker service names corresponding to each core flow
@@ -34,7 +33,6 @@ CORE_DOCKER_SERVICES = {
     "analyze",
     "deploy",
     "dashboard",
-    "qa",
 }
 
 
@@ -130,8 +128,14 @@ class TestNoCrossFlowImports:
 class TestAllFlowsHaveFlowNameConstant:
     """Every flow must import a FLOW_NAME_* constant from orchestration.constants."""
 
+    # qa_flow is a legacy module — QA merged into dashboard health adapter (#342, PR #567).
+    # It defines FLOW_NAME_QA locally, not via orchestration.constants.
+    _LEGACY_FLOW_MODULES = {"qa_flow"}
+
     @pytest.mark.parametrize("flow_file", _get_flow_files(), ids=lambda p: p.stem)
     def test_all_flows_have_flow_name_constant(self, flow_file: Path) -> None:
+        if flow_file.stem in self._LEGACY_FLOW_MODULES:
+            return
         tree = _parse_flow(flow_file)
         imports = _get_imports(tree)
         # Look for imports of FLOW_NAME_* from minivess.orchestration.constants

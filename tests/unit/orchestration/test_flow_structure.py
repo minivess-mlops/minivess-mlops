@@ -61,10 +61,15 @@ class TestFlowStructure:
             "All flows must validate Docker context at entry."
         )
 
+    # qa_flow is a legacy module — QA merged into dashboard health adapter (#342, PR #567).
+    _LEGACY_FLOW_MODULES = {"qa_flow.py"}
+
     def test_all_flows_use_constants(self) -> None:
         """Every flow file must import flow name from constants module."""
         missing = []
         for flow_file in _get_flow_files():
+            if flow_file.name in self._LEGACY_FLOW_MODULES:
+                continue
             source = flow_file.read_text(encoding="utf-8")
             tree = ast.parse(source)
             uses_constant = False

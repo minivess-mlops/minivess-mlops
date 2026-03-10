@@ -1,8 +1,8 @@
-"""Tests for T-21: deployment/prefect/deployments.yaml with all 9 flows defined.
+"""Tests for T-21: deployment/prefect/deployments.yaml with all flow deployments defined.
 
 Verifies that:
 - The YAML is parseable via yaml.safe_load()
-- All 9 flow names appear in the deployments
+- All flow names appear in the deployments
 - training-flow uses gpu-pool
 - All other flows use cpu-pool
 
@@ -25,7 +25,6 @@ _ALL_FLOW_NAMES = [
     "analysis-flow",
     "Deploy Pipeline",
     "minivess-dashboard",
-    "qa-flow",
     "biostatistics-flow",
     "minivess-annotation",
     "hpo-flow",
@@ -46,7 +45,7 @@ class TestDeploymentsYamlBasic:
         """deployment/prefect/deployments.yaml must exist."""
         assert _DEPLOYMENTS_YAML.exists(), (
             "deployment/prefect/deployments.yaml does not exist. "
-            "Create it with all 9 flow deployments."
+            "Create it with all flow deployments."
         )
 
     def test_deployments_yaml_parseable(self) -> None:
@@ -90,7 +89,7 @@ class TestAllFlowsHaveDeployment:
         return [d.get("flow_name", "") for d in deployments if isinstance(d, dict)]
 
     def test_all_flows_have_deployment(self) -> None:
-        """All 9 flow names must appear in deployments YAML."""
+        """All flow names must appear in deployments YAML."""
         if not _DEPLOYMENTS_YAML.exists():
             return
         registered = set(self._get_flow_names())
@@ -100,14 +99,14 @@ class TestAllFlowsHaveDeployment:
             "Each flow must have an entry with flow_name matching its @flow(name=...) decorator."
         )
 
-    def test_exactly_twelve_deployments(self) -> None:
-        """There must be exactly 12 deployments (one per flow)."""
+    def test_exactly_eleven_deployments(self) -> None:
+        """There must be exactly 11 deployments (one per flow)."""
         if not _DEPLOYMENTS_YAML.exists():
             return
         data = _load_deployments()
         deployments = data.get("deployments", [])
-        assert len(deployments) == 12, (
-            f"Expected 12 deployments, found {len(deployments)}. "
+        assert len(deployments) == 11, (
+            f"Expected 11 deployments, found {len(deployments)}. "
             "One deployment per flow."
         )
 

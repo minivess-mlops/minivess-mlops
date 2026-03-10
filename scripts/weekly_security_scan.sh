@@ -4,7 +4,7 @@
 # Usage:
 #   bash scripts/weekly_security_scan.sh
 #
-# Scans all 12 flow images for CRITICAL + HIGH CVEs using Trivy.
+# Scans all 11 flow images for CRITICAL + HIGH CVEs using Trivy.
 # Images that are not built locally are skipped.
 # Exit code 1 if any built image has CRITICAL CVEs.
 #
@@ -26,7 +26,6 @@ FLOW_IMAGES=(
   "minivess-biostatistics:latest"
   "minivess-post-training:latest"
   "minivess-pipeline:latest"
-  "minivess-qa:latest"
   "minivess-mlflow:latest"
   "minivess-base:latest"
 )

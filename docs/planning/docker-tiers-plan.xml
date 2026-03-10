@@ -1,0 +1,952 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MinIVess MLOps — Flow-Specific Docker Image Tiers
+  Branch: feat/flow-specific-docker-images
+  Created: 2026-03-10
+  Closes: #537 (flow-specific base image tiers)
+
+  PREDECESSOR PRs (merged, builds upon their work):
+    PR #542 — sec(docker): H3/H4 multi-stage builds, cap_drop, Trivy, seccomp
+      - Established 3-layer Docker hierarchy (Layer 1: nvidia/cuda, Layer 2: minivess-base, Layer 3: flow)
+      - Multi-stage Dockerfile.base: builder (devel) → runner (runtime)
+      - cap_drop: ALL, no-new-privileges, shm_size, resource limits on all services
+      - Trivy scanning (make scan), CycloneDX SBOM (make sbom), seccomp audit profile
+      - .dockerignore, Hadolint, non-root user (minivess), OCI labels
+      - 10 new test files (1,065 lines) validating all hardening
+
+    PR #559 — feat(security): Docker Security Hardening 2nd Pass
+      - Seccomp enforce mode (train-enforce.json, x-gpu-security anchor)
+      - SOPS+age secrets management (.sops.yaml, setup_dev.sh, _rotate_credentials.py)
+      - MLflow basic-auth opt-in (mlflow-secure profile, auth.ini, resolve_tracking_uri)
+      - Falco runtime monitoring (deployment/falco/, profile security)
+      - Weekly security scan (scripts/weekly_security_scan.sh)
+      - 49 new tests across 6 files
+
+  PREDECESSOR PLANS (read for context):
+    docker-security-hardening-mlsecops-plan.xml
+    docker-security-hardening-mlsecops-plan-2nd-pass.xml
+
+  RESEARCH REPORTS (read for context):
+    docs/planning/docker-security-hardening-mlsecops-report.md
+    docs/planning/docker-improvements-for-debug-training.md
+    docs/planning/prefect-docker-optimization-and-monai-consolidation.md
+
+  CONTEXT:
+  PR #542 established the 3-layer Docker hierarchy:
+    Layer 1: nvidia/cuda:12.6.3-runtime-ubuntu24.04
+    Layer 2: minivess-base:latest (multi-stage, hardened, ALL deps)
+    Layer 3: Dockerfile.{flow} (thin — scripts, ENV, CMD only)
+
+  PROBLEM:
+  All 14 flow Dockerfiles inherit from minivess-base:latest (~8-12 GB with
+  full CUDA runtime + PyTorch + MONAI). Multiple flows never use GPU:
+    - biostatistics: scipy, matplotlib, DuckDB, MLflow client (NO PyTorch)
+    - dashboard/dashboard-api: FastAPI, mlflow-client, matplotlib (NO PyTorch)
+    - pipeline: prefect-client, httpx, constants (NO PyTorch)
+    - qa: DEAD CODE — merged into dashboard (#342, PR #567)
+
+  SOLUTION:
+  Extend the 3-layer hierarchy to 3 parallel tiers. minivess-base:latest is
+  KEPT AS-IS (the GPU tier). Two NEW base images are added:
+
+    Tier A (GPU):   minivess-base:latest          — unchanged (CUDA + PyTorch + MONAI)
+    Tier B (CPU):   minivess-base-cpu:latest       — python:3.13-slim + scipy/pandas stack
+    Tier C (Light): minivess-base-light:latest      — python:3.13-slim + minimal deps
+
+  VERIFIED IMPORT CHAINS (2026-03-10):
+    - data flow: transitively imports PyTorch via splits.py → loader.py → TIER A
+    - analyze flow: runs inference on served models → TIER A
+    - deploy flow: runs torch.onnx.export() → TIER A
+    - biostatistics flow: scipy, matplotlib, DuckDB only → TIER B
+    - pipeline flow: prefect + constants only → TIER C
+    - dashboard flow: imports tracking.py which had top-level torch import → FIXED (T1.5-T1.6)
+    - dashboard-api: FastAPI + mlflow-client (no flow code) → TIER C
+    - dashboard-ui: already node/nginx (PR #567) → EXCLUDED
+
+  BUILD STRATEGY (revised after reviewer feedback):
+  Use PEP 735 [dependency-groups] with uv export to generate
+  pinned requirements files. These are committed to git and used
+  by uv pip install in the builder stage. NO pyproject.toml rewriting.
+
+  Why [dependency-groups] not [project.optional-dependencies]:
+    uv sync with extra cpu always installs core deps (PyTorch) plus extras
+    uv sync with only-group cpu installs ONLY the group deps (CORRECT)
+    uv export with only-group cpu exports ONLY group deps to requirements.txt
+    [dependency-groups] is for dev/build tooling (not published to PyPI)
+    No extract_tier_deps.py rewrite hack needed (SIMPLER, MORE ROBUST)
+
+  PYTHON VERSION NOTE:
+  pyproject.toml requires-python = "==3.13.*". All new base images MUST use
+  python:3.13-slim-bookworm, NOT python:3.12-slim-bookworm.
+
+  EXECUTION:
+    git checkout -b feat/flow-specific-docker-images
+    claude -p "Read and execute docs/planning/docker-tiers-plan.xml"
+
+  TDD SKILL:
+    All phases use the self-learning-iterative-coder skill:
+    RED → GREEN → VERIFY → FIX → CHECKPOINT → CONVERGE
+
+  REVIEWER FINDINGS (3 parallel specialist agents, 2026-03-10):
+
+  R1 — Docker/MLSecOps Specialist:
+    - CRITICAL: Python version mismatch — project uses ==3.13.*, plan had 3.12 → FIXED
+    - Security hardening parity: non-GPU tiers maintain same hardening (LGTM)
+    - Attack surface REDUCED: no CUDA libs in Tier B/C (CVE-2025-23266 irrelevant)
+    - Tier C size target unrealistic with matplotlib+duckdb → updated to ~1.0-1.5 GB
+    - Compose security anchors still applied (service blocks unchanged) → LGTM
+    - Suggestion: read_only: true for Tier B/C compose services → NOTED, follow-up
+    - Supply chain (Trivy + SBOM for all tiers): LGTM
+
+  R2 — Python Packaging Specialist:
+    - CRITICAL: extract_tier_deps.py rewrite approach will break frozen validation → FIXED
+    - RECOMMENDATION: Use [dependency-groups] + uv export only-group → requirements.txt
+    - `uv pip install -r requirements-{tier}.txt` in builder stage → no rewrite needed
+    - requirements files committed to git, regenerated via Makefile target
+    - Transitive deps handled automatically by uv's resolver in export
+    - Version constraints in groups must match core deps for shared packages
+
+  R3 — Test Architecture Specialist:
+    - CRITICAL: QA removal blast radius much larger than planned:
+      * tests/v2/unit/test_qa_flow.py (5 tests)
+      * tests/v2/unit/test_qa_flow_uri.py (8+ tests)
+      * tests/v2/unit/test_docker_per_flow.py (4 tests reference "qa")
+      * tests/unit/orchestration/test_no_cross_flow_imports.py
+      * tests/unit/orchestration/test_prefect_decoupling_verification.py
+      * tests/unit/orchestration/test_env_var_naming.py
+      * tests/v2/integration/test_no_ephemeral_outputs.py
+      * tests/v2/unit/test_env_single_source.py
+      * src/minivess/orchestration/trigger.py (_DEFAULT_FLOWS)
+      * src/minivess/orchestration/deployments.py
+      * deployment/prefect/deployments.yaml
+      * scripts/weekly_security_scan.sh
+      * tests/v2/unit/deployment/test_security_tooling.py
+    - CRITICAL: _EXCLUDED must include Dockerfile.base-cpu and Dockerfile.base-light
+    - HIGH: test_docker_per_flow.py hardcodes "qa" in flow lists → must update
+    - HIGH: PipelineTriggerChain lists "qa" in _DEFAULT_FLOWS → runtime failure
+    - All new test files are pure static parsing → staging tier (LGTM)
+    - Suggestion: single-source tier mapping (e.g., YAML file or constants module)
+-->
+<plan id="docker-tiers" version="2.0">
+
+  <metadata>
+    <title>Flow-Specific Docker Image Tiers — 3-Tier Base Hierarchy</title>
+    <branch>feat/flow-specific-docker-images</branch>
+    <base-branch>main</base-branch>
+    <created>2026-03-10</created>
+    <version>2.3 (round-4 final — converged)</version>
+    <estimated-duration>4-5 hours</estimated-duration>
+    <closes-issues>537</closes-issues>
+    <predecessor-prs>
+      PR #542 — sec(docker): H3/H4 multi-stage builds, cap_drop, Trivy, seccomp
+      PR #559 — feat(security): Docker Security Hardening 2nd Pass (seccomp enforce, SOPS, MLflow auth, Falco)
+    </predecessor-prs>
+    <priority>P2 — efficiency and security posture</priority>
+    <phases>4</phases>
+    <total-tasks>20</total-tasks>
+    <tdd-skill>.claude/skills/self-learning-iterative-coder/SKILL.md</tdd-skill>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       TIER MAPPING — FINAL (verified 2026-03-10)
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <tier-mapping>
+    <tier id="A" name="GPU" base="minivess-base:latest" status="unchanged">
+      <description>
+        CUDA 12.6.3 runtime + PyTorch + MONAI + full ML stack.
+        minivess-base:latest is NEVER modified by this plan.
+        Built from Dockerfile.base (H3+H4 hardened, PR #542).
+      </description>
+      <flows>
+        <flow name="train" dockerfile="Dockerfile.train" gpu="yes-cdi" />
+        <flow name="hpo" dockerfile="Dockerfile.hpo" gpu="yes-cdi" />
+        <flow name="hpo-worker" dockerfile="Dockerfile.hpo" gpu="yes-cdi" note="reuses hpo Dockerfile" />
+        <flow name="post_training" dockerfile="Dockerfile.post_training" gpu="no" note="PyTorch for ONNX export validation" />
+        <flow name="analyze" dockerfile="Dockerfile.analyze" gpu="yes-cdi" note="runs inference on served models from MLflow" />
+        <flow name="deploy" dockerfile="Dockerfile.deploy" gpu="no" note="torch.onnx.export() requires PyTorch" />
+        <flow name="data" dockerfile="Dockerfile.data" gpu="no" note="transitively imports PyTorch via splits.py → loader.py → MONAI transforms" />
+        <flow name="annotation" dockerfile="Dockerfile.annotation" gpu="no" note="BentoML inference bridge" />
+        <flow name="monai-label" dockerfile="Dockerfile.monailabel" gpu="no" note="MONAI Label server needs PyTorch" />
+        <flow name="acquisition" dockerfile="Dockerfile.acquisition" gpu="no" note="future GPU ambitions per Draelos et al. 2025" />
+      </flows>
+    </tier>
+
+    <tier id="B" name="CPU" base="minivess-base-cpu:latest" status="new">
+      <description>
+        python:3.13-slim-bookworm + scipy/pandas/matplotlib/DuckDB/MLflow stack.
+        No PyTorch, no MONAI, no CUDA. Optimized for embarrassingly parallel
+        CPU workloads (bootstrap CI, Bayesian analysis, figure generation).
+        Target image size: ~1.5-2.5 GB (vs ~8-12 GB for Tier A).
+      </description>
+      <flows>
+        <flow name="biostatistics" dockerfile="Dockerfile.biostatistics" gpu="no" />
+      </flows>
+    </tier>
+
+    <tier id="C" name="Light" base="minivess-base-light:latest" status="new">
+      <description>
+        python:3.13-slim-bookworm + orchestration/web deps: prefect, mlflow-client,
+        FastAPI, uvicorn, httpx, pydantic, matplotlib, duckdb.
+        Target image size: ~1.0-1.5 GB (vs ~8-12 GB for Tier A).
+        NOTE: matplotlib+duckdb make this ~1.0-1.5 GB, not ~500 MB.
+        Still a 6-8x reduction from the GPU base.
+      </description>
+      <flows>
+        <flow name="dashboard" dockerfile="Dockerfile.dashboard" gpu="no" note="paper figures, Parquet export" />
+        <flow name="dashboard-api" dockerfile="Dockerfile.dashboard-api" gpu="no" note="FastAPI backend — verified clean imports" />
+        <flow name="pipeline" dockerfile="Dockerfile.pipeline" gpu="no" note="PipelineTriggerChain orchestrator" />
+      </flows>
+    </tier>
+
+    <tier id="remove" name="Dead Code" status="delete">
+      <description>
+        QA flow was merged into dashboard health adapter (#342, PR #567).
+        Dockerfile.qa, the qa compose service, and ALL references to qa as a
+        flow must be removed. Blast radius is large (see R3 reviewer findings).
+      </description>
+      <flows>
+        <flow name="qa" dockerfile="Dockerfile.qa" action="delete" />
+      </flows>
+      <blast-radius-files>
+        <!-- Files that MUST be updated when QA is removed -->
+        deployment/docker/Dockerfile.qa (DELETE)
+        deployment/docker-compose.flows.yml (remove qa service)
+        src/minivess/orchestration/trigger.py (_DEFAULT_FLOWS, _best_effort)
+        src/minivess/orchestration/deployments.py (qa entries)
+        deployment/prefect/deployments.yaml (qa deployment block)
+        scripts/weekly_security_scan.sh (minivess-qa scan target)
+        tests/v2/unit/test_docker_per_flow.py (4 tests reference qa)
+        tests/v2/unit/test_qa_flow.py (DELETE or skip entire file)
+        tests/v2/unit/test_qa_flow_uri.py (DELETE or skip entire file)
+        tests/unit/orchestration/test_no_cross_flow_imports.py (qa_flow in list)
+        tests/unit/orchestration/test_prefect_decoupling_verification.py (qa_flow)
+        tests/unit/orchestration/test_env_var_naming.py (qa_flow.py path)
+        tests/v2/integration/test_no_ephemeral_outputs.py (qa_flow entry)
+        tests/v2/unit/test_env_single_source.py (qa_flow)
+        tests/v2/unit/deployment/test_security_tooling.py (minivess-qa scan)
+        tests/v2/unit/deployment/test_dockerfile_flows.py (_EXCLUDED cleanup)
+        src/minivess/orchestration/constants.py (EXPERIMENT_QA, FLOW_NAME_QA constants)
+        tests/v2/unit/test_deployments_yaml.py ("qa-flow" in flow name list)
+        Makefile (line 65: qa in the flow image scan loop)
+        deployment/docker-compose.flows.yml (line 115: stale "qa" in comment)
+        tests/v2/unit/test_flow_trigger.py (lines 79, 157: "qa" in flow/best_effort lists)
+        tests/v2/unit/test_deployments_config.py (line 91: "qa" in required set)
+        tests/v2/integration/test_docker_compose_volumes.py (lines 252-272: TestQaService class)
+        tests/unit/orchestration/test_flow_names.py (lines 86, 104: FLOW_NAME_QA import)
+        tests/unit/orchestration/test_constants.py (lines 19-118: EXPERIMENT_QA, FLOW_NAME_QA)
+        src/minivess/orchestration/flows/pipeline_flow.py (line 46: imports FLOW_NAME_QA, line 111: uses it)
+        src/minivess/orchestration/agent_interface.py (line 110: DeterministicQATriage class — dead code)
+        src/minivess/orchestration/CLAUDE.md (line 54: qa_flow.py in table)
+        deployment/CLAUDE.md (line 270: "dashboard/qa/biostatistics" reference)
+        tests/v2/unit/test_docker_per_flow.py (lines 70, 94, 166-170: qa in flow lists + test_chain_has_qa_flow)
+        CLAUDE.md (lines 76, 124, 174, 476: "Flow 6: QA", Dockerfile.qa, "6 flows")
+        README.md (lines 36, 102: QA listed as standalone flow)
+        deployment/prefect/work-pools.yaml (lines 4, 13: QA in work pool comments)
+      </blast-radius-files>
+    </tier>
+
+    <tier id="excluded" name="Already Correct" status="no-change">
+      <flows>
+        <flow name="dashboard-ui" dockerfile="Dockerfile.dashboard-ui" note="node:20-alpine → nginx:alpine (PR #567)" />
+        <flow name="mlflow" dockerfile="Dockerfile.mlflow" note="infrastructure, ghcr.io/mlflow/mlflow" />
+      </flows>
+    </tier>
+  </tier-mapping>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       BUILD STRATEGY — uv export + requirements.txt (post-review)
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <build-strategy>
+    <rationale>
+      The original plan proposed rewriting pyproject.toml at build time with
+      extract_tier_deps.py. Reviewer R2 identified this as fragile:
+      - `uv sync --frozen` with a rewritten pyproject.toml bypasses lock validation
+      - `uv sync --locked` would FAIL because the rewritten toml doesn't match the lock
+      - The rewritten file is a lie — it doesn't represent the project's actual deps
+
+      SOLUTION: Use PEP 735 [dependency-groups] + `uv export --only-group`.
+    </rationale>
+
+    <step id="1" description="Define tier groups in [dependency-groups] section of pyproject.toml">
+      <!-- [dependency-groups] is for dev/build/deploy tooling, NOT published to PyPI.
+           This is semantically correct for Docker build tier isolation. -->
+    </step>
+
+    <step id="2" description="Generate pinned requirements files from the lock">
+      <command>
+        uv export --frozen --only-group cpu --no-emit-project \
+            --output-file deployment/docker/requirements-cpu.txt
+
+        uv export --frozen --only-group light --no-emit-project \
+            --output-file deployment/docker/requirements-light.txt
+      </command>
+      <note>
+        These files are committed to git. Regenerated via `make requirements-tiers`.
+        A pre-commit hook or CI check should verify they're up-to-date.
+      </note>
+    </step>
+
+    <step id="3" description="Dockerfile builder stage uses uv pip install -r">
+      <dockerfile-pattern>
+        FROM python:3.13-slim-bookworm AS builder
+        COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+        WORKDIR /app
+        COPY deployment/docker/requirements-{tier}.txt requirements.txt
+        RUN --mount=type=cache,target=/root/.cache/uv \
+            uv venv /app/.venv &amp;&amp; \
+            uv pip install --python /app/.venv/bin/python -r requirements.txt
+        COPY src/ src/
+        COPY configs/ configs/
+      </dockerfile-pattern>
+      <note>
+        No pyproject.toml copy needed in tier base images.
+        No uv sync, no --frozen mismatch risk.
+        Pinned versions from the lock file via uv export.
+        IMPORTANT: Runner stage must set ENV PYTHONPATH=/app/src so that
+        `import minivess` works. This mirrors Dockerfile.base.
+      </note>
+    </step>
+
+    <step id="4" description="Makefile target to regenerate requirements">
+      <command>
+        make requirements-tiers
+      </command>
+    </step>
+  </build-strategy>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PHASE 1: Foundation — dependency groups + QA full cleanup
+       Risk: LOW-MEDIUM (additive + deletion with large blast radius)
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <phase id="1" name="Foundation: Dependency Groups + QA Full Cleanup">
+    <description>
+      Add [dependency-groups] cpu and light to pyproject.toml. Generate
+      requirements-{tier}.txt files. Perform COMPLETE QA flow removal
+      across all files (not just Dockerfile + compose).
+    </description>
+
+    <task id="T1.1" type="RED" phase="1">
+      <title>Test: pyproject.toml has cpu and light dependency groups</title>
+      <description>
+        Write tests in tests/v2/unit/deployment/test_dependency_groups.py:
+        1. Parse pyproject.toml with tomllib
+        2. Assert [dependency-groups] contains 'cpu' and 'light' keys
+        3. Assert 'cpu' group does NOT contain torch, monai, torchio, torchvision, torchmetrics
+        4. Assert 'light' group does NOT contain torch, monai, scipy, numpy, torchio
+        5. Assert 'cpu' group DOES contain: scipy, pandas, matplotlib, duckdb, mlflow
+        6. Assert 'light' group DOES contain: prefect, mlflow, fastapi, pydantic
+        7. Assert requirements-cpu.txt exists in deployment/docker/
+        8. Assert requirements-light.txt exists in deployment/docker/
+        9. Assert requirements files do NOT contain 'torch' (case-insensitive, but
+           allow 'torchmetrics' to NOT appear — just check 'torch==' or 'torch>=' is absent)
+
+        All tests are static file parsing — staging tier, no markers needed.
+      </description>
+      <files>
+        <file action="create">tests/v2/unit/deployment/test_dependency_groups.py</file>
+      </files>
+      <test-command>uv run pytest tests/v2/unit/deployment/test_dependency_groups.py -x -q</test-command>
+      <expected-result>FAIL (groups don't exist yet)</expected-result>
+    </task>
+
+    <task id="T1.2" type="GREEN" phase="1">
+      <title>Add cpu and light dependency groups + generate requirements files</title>
+      <description>
+        1. Add [dependency-groups] cpu and light to pyproject.toml.
+           Version constraints MUST match those in [project.dependencies] for
+           shared packages (mlflow, prefect, pydantic, etc.) — copy-paste.
+
+           cpu group:
+             numpy, scipy, pandas, matplotlib, seaborn, duckdb, mlflow,
+             pydantic, nibabel, scikit-posthocs, pingouin, baycomp, statsmodels,
+             prefect, httpx, psycopg2-binary, boto3, openlineage-python, psutil
+
+           light group:
+             prefect, httpx, pydantic, mlflow, boto3, psycopg2-binary,
+             fastapi, uvicorn, matplotlib, seaborn, duckdb, psutil
+
+        2. Run `uv lock` to regenerate uv.lock with the new groups.
+
+        3. Generate requirements files:
+           uv export --frozen --only-group cpu --no-emit-project \
+               --output-file deployment/docker/requirements-cpu.txt
+           uv export --frozen --only-group light --no-emit-project \
+               --output-file deployment/docker/requirements-light.txt
+
+        4. Verify requirements files do NOT contain torch/monai.
+      </description>
+      <files>
+        <file action="modify">pyproject.toml</file>
+        <file action="create">deployment/docker/requirements-cpu.txt</file>
+        <file action="create">deployment/docker/requirements-light.txt</file>
+      </files>
+      <test-command>uv run pytest tests/v2/unit/deployment/test_dependency_groups.py -x -q</test-command>
+      <expected-result>PASS</expected-result>
+    </task>
+
+    <task id="T1.3" type="RED" phase="1">
+      <title>Test: QA flow fully removed from codebase</title>
+      <description>
+        Write tests in tests/v2/unit/deployment/test_qa_removed.py:
+        1. deployment/docker/Dockerfile.qa does NOT exist
+        2. docker-compose.flows.yml does NOT contain a 'qa:' service key
+        3. PipelineTriggerChain._DEFAULT_FLOWS does not contain "qa"
+           (parse trigger.py with ast module — Rule #16)
+        4. deployment/prefect/deployments.yaml does not contain "qa" deployment
+        5. scripts/weekly_security_scan.sh does not scan "minivess-qa"
+        6. src/minivess/orchestration/constants.py does not define EXPERIMENT_QA or FLOW_NAME_QA
+        7. tests/v2/unit/test_deployments_yaml.py does not list "qa-flow"
+        8. Makefile scan target does not list "qa" as a flow image
+        9. src/minivess/orchestration/flows/pipeline_flow.py does not import FLOW_NAME_QA
+        10. tests/v2/unit/test_flow_trigger.py does not contain "qa" in flow lists
+        11. tests/unit/orchestration/test_constants.py does not import EXPERIMENT_QA or FLOW_NAME_QA
+        12. tests/unit/orchestration/test_flow_names.py does not import FLOW_NAME_QA
+
+        All tests are static file parsing — staging tier.
+      </description>
+      <files>
+        <file action="create">tests/v2/unit/deployment/test_qa_removed.py</file>
+      </files>
+      <test-command>uv run pytest tests/v2/unit/deployment/test_qa_removed.py -x -q</test-command>
+      <expected-result>FAIL (qa still exists)</expected-result>
+    </task>
+
+    <task id="T1.4" type="GREEN" phase="1">
+      <title>Complete QA flow removal across entire codebase</title>
+      <description>
+        DELETE:
+          - deployment/docker/Dockerfile.qa
+
+        MODIFY (remove qa references):
+          - deployment/docker-compose.flows.yml → remove qa service block
+          - src/minivess/orchestration/trigger.py → remove "qa" from _DEFAULT_FLOWS
+            and _best_effort set. The dashboard now handles QA (#342).
+          - src/minivess/orchestration/deployments.py → remove qa entries
+          - deployment/prefect/deployments.yaml → remove qa deployment block
+          - scripts/weekly_security_scan.sh → remove minivess-qa from image list
+          - src/minivess/orchestration/constants.py → remove EXPERIMENT_QA and FLOW_NAME_QA
+          - Makefile → remove "qa" from the scan flow image loop (line 65)
+
+        TEST FILES (remove qa test expectations):
+          - tests/v2/unit/test_docker_per_flow.py → remove "qa" from all flow lists,
+            remove test_qa_dockerfile_exists, update test_chain_has_qa_flow
+          - tests/v2/unit/test_qa_flow.py → DELETE (dead tests for dead flow)
+          - tests/v2/unit/test_qa_flow_uri.py → DELETE (dead tests for dead flow)
+          - tests/unit/orchestration/test_no_cross_flow_imports.py → remove qa_flow
+          - tests/unit/orchestration/test_prefect_decoupling_verification.py → remove qa_flow
+          - tests/unit/orchestration/test_env_var_naming.py → remove qa_flow.py path
+          - tests/v2/integration/test_no_ephemeral_outputs.py → remove qa_flow entry
+          - tests/v2/unit/test_env_single_source.py → remove qa_flow
+          - tests/v2/unit/deployment/test_security_tooling.py → remove minivess-qa
+          - tests/v2/unit/deployment/test_dockerfile_flows.py → remove any qa exclusion
+          - tests/v2/unit/test_deployments_yaml.py → remove "qa-flow" from flow name list
+          - tests/v2/unit/test_flow_trigger.py → remove "qa" from flow_names/best_effort lists,
+            update flow count assertion (9 → 8)
+          - tests/v2/unit/test_deployments_config.py → remove "qa" from required set
+          - tests/v2/integration/test_docker_compose_volumes.py → DELETE TestQaService class
+          - tests/unit/orchestration/test_flow_names.py → remove FLOW_NAME_QA import + assertions
+          - tests/unit/orchestration/test_constants.py → remove EXPERIMENT_QA/FLOW_NAME_QA imports + tests
+          - src/minivess/orchestration/flows/pipeline_flow.py → remove FLOW_NAME_QA import,
+            remove "qa" from _DEFAULT_PIPELINE_STEPS, update docstring (9→8 steps)
+          - src/minivess/orchestration/agent_interface.py → remove DeterministicQATriage class (dead code)
+          - src/minivess/orchestration/CLAUDE.md → remove qa_flow.py from file table
+          - deployment/CLAUDE.md → remove "qa" from "dashboard/qa/biostatistics" reference
+
+        DOCUMENTATION (update QA-as-standalone-flow references):
+          - CLAUDE.md → update "Flow 6: QA" to show QA merged into dashboard,
+            remove Dockerfile.qa reference, update "6 flows" to "5 flows + QA merged"
+          - README.md → remove QA as standalone flow, note merged into dashboard
+          - deployment/prefect/work-pools.yaml → remove "QA" from work pool comments
+
+        ALSO FIX (stale references):
+          - deployment/docker-compose.flows.yml → line 115 comment "dashboard, qa," → remove "qa,"
+
+        PRE-EXISTING BUGS (fix opportunistically):
+          - deployment/docker/Dockerfile.base → line 80 LABEL says "Python 3.12" → fix to "Python 3.13"
+          - tests/v2/unit/test_docker_per_flow.py → line 56 checks "python:3.12" → fix to "python:3.13"
+
+        KEEP (for now):
+          - src/minivess/orchestration/flows/qa_flow.py → the Python module stays
+            until all importers are confirmed zero. It's dead code but harmless.
+            Create a follow-up issue to track its eventual deletion.
+      </description>
+      <files>
+        <file action="delete">deployment/docker/Dockerfile.qa</file>
+        <file action="modify">deployment/docker-compose.flows.yml</file>
+        <file action="modify">src/minivess/orchestration/trigger.py</file>
+        <file action="modify">src/minivess/orchestration/deployments.py</file>
+        <file action="modify">deployment/prefect/deployments.yaml</file>
+        <file action="modify">scripts/weekly_security_scan.sh</file>
+        <file action="delete">tests/v2/unit/test_qa_flow.py</file>
+        <file action="delete">tests/v2/unit/test_qa_flow_uri.py</file>
+        <file action="modify">tests/v2/unit/test_docker_per_flow.py</file>
+        <file action="modify">tests/unit/orchestration/test_no_cross_flow_imports.py</file>
+        <file action="modify">tests/unit/orchestration/test_prefect_decoupling_verification.py</file>
+        <file action="modify">tests/unit/orchestration/test_env_var_naming.py</file>
+        <file action="modify">tests/v2/integration/test_no_ephemeral_outputs.py</file>
+        <file action="modify">tests/v2/unit/test_env_single_source.py</file>
+        <file action="modify">tests/v2/unit/deployment/test_security_tooling.py</file>
+        <file action="modify">tests/v2/unit/deployment/test_dockerfile_flows.py</file>
+        <file action="modify">src/minivess/orchestration/constants.py</file>
+        <file action="modify">tests/v2/unit/test_deployments_yaml.py</file>
+        <file action="modify">Makefile</file>
+        <file action="modify">deployment/docker/Dockerfile.base</file>
+        <file action="modify">tests/v2/unit/test_flow_trigger.py</file>
+        <file action="modify">tests/v2/unit/test_deployments_config.py</file>
+        <file action="modify">tests/v2/integration/test_docker_compose_volumes.py</file>
+        <file action="modify">tests/unit/orchestration/test_flow_names.py</file>
+        <file action="modify">tests/unit/orchestration/test_constants.py</file>
+        <file action="modify">src/minivess/orchestration/flows/pipeline_flow.py</file>
+        <file action="modify">src/minivess/orchestration/agent_interface.py</file>
+        <file action="modify">src/minivess/orchestration/CLAUDE.md</file>
+        <file action="modify">deployment/CLAUDE.md</file>
+        <file action="modify">CLAUDE.md</file>
+        <file action="modify">README.md</file>
+        <file action="modify">deployment/prefect/work-pools.yaml</file>
+      </files>
+      <test-command>uv run pytest tests/v2/unit/deployment/test_qa_removed.py tests/v2/unit/deployment/test_dockerfile_flows.py -x -q</test-command>
+      <expected-result>PASS</expected-result>
+      <post-verify>
+        Run make test-staging to catch any remaining qa references.
+        If any test fails with "qa" in the error message, fix it immediately.
+      </post-verify>
+    </task>
+
+    <task id="T1.5" type="RED" phase="1">
+      <title>Test: tracking.py resolve_tracking_uri is importable without torch</title>
+      <description>
+        Write test in tests/v2/unit/deployment/test_import_tiers.py:
+        1. Parse src/minivess/observability/tracking.py with ast module
+        2. Assert NO top-level import of minivess.serving.model_logger
+           (it must be inside a function, not at module level)
+        3. Assert resolve_tracking_uri is still importable (basic import check)
+
+        This ensures Tier C flows can import resolve_tracking_uri without
+        pulling in torch → CUDA → 8 GB of GPU dependencies.
+
+        Static file parsing — staging tier, no markers needed.
+      </description>
+      <files>
+        <file action="create">tests/v2/unit/deployment/test_import_tiers.py</file>
+      </files>
+      <test-command>uv run pytest tests/v2/unit/deployment/test_import_tiers.py -x -q</test-command>
+      <expected-result>FAIL (import is still at module level)</expected-result>
+    </task>
+
+    <task id="T1.6" type="GREEN" phase="1">
+      <title>Make log_single_model import lazy in tracking.py</title>
+      <description>
+        In src/minivess/observability/tracking.py:
+        - REMOVE line 26: `from minivess.serving.model_logger import log_single_model`
+        - ADD lazy import inside the log_model() method at line ~660:
+          `from minivess.serving.model_logger import log_single_model`
+
+        This breaks the torch import chain for all code that only uses
+        resolve_tracking_uri (dashboard_flow, pipeline_flow, qa_flow, etc.)
+        without affecting the training flows that actually call log_model().
+
+        VERIFIED: log_single_model is only called in one method (line 660).
+        No other code in tracking.py references it.
+      </description>
+      <files>
+        <file action="modify">src/minivess/observability/tracking.py</file>
+      </files>
+      <test-command>uv run pytest tests/v2/unit/deployment/test_import_tiers.py tests/v2/unit/test_observability.py -x -q</test-command>
+      <expected-result>PASS (both tier isolation and existing tracking tests)</expected-result>
+    </task>
+
+    <task id="T1.7" type="CHECKPOINT" phase="1">
+      <title>Commit: dependency groups + QA full cleanup + import chain fix</title>
+      <description>
+        Stage and commit all Phase 1 changes.
+        Message: "feat(docker): add cpu/light dependency groups, remove QA flow, break torch import chain"
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PHASE 2: New Base Images — Dockerfile.base-cpu + Dockerfile.base-light
+       Risk: MEDIUM (new Docker build infrastructure)
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <phase id="2" name="New Base Images">
+    <description>
+      Create Dockerfile.base-cpu and Dockerfile.base-light following the same
+      H3+H4 hardening pattern as Dockerfile.base (PR #542). Both use
+      python:3.13-slim-bookworm as Layer 1 instead of nvidia/cuda.
+
+      BUILD STRATEGY (post-review):
+      Use pre-generated requirements-{tier}.txt files (from Phase 1) with
+      `uv pip install -r`. No pyproject.toml rewriting. No extract_tier_deps.py.
+    </description>
+
+    <task id="T2.1" type="RED" phase="2">
+      <title>Test: new base Dockerfiles exist with correct structure</title>
+      <description>
+        Write tests in tests/v2/unit/deployment/test_base_image_tiers.py.
+        ALL checks are STATIC TEXT ANALYSIS of Dockerfile content, NOT runtime.
+
+        Dockerfile.base-cpu:
+        1. File exists in deployment/docker/
+        2. Uses python:3.13-slim-bookworm as builder base (NOT nvidia/cuda)
+        3. Uses python:3.13-slim-bookworm as runner base
+        4. Has multi-stage build (contains "AS builder" and "AS runner")
+        5. Has LABEL tier="cpu"
+        6. Does NOT contain "nvidia" or "cuda" anywhere
+        7. Has non-root user creation (contains "useradd" and "minivess")
+        8. Has HEALTHCHECK
+        9. Contains "requirements-cpu.txt" (uses the pre-generated requirements)
+        10. Contains "uv pip install" (NOT "uv sync")
+
+        Dockerfile.base-light:
+        11-19. Same checks but with tier="light" and requirements-light.txt
+
+        Cross-tier:
+        20. All three base Dockerfiles (base, base-cpu, base-light) exist
+        21. Only Dockerfile.base contains "nvidia/cuda"
+      </description>
+      <files>
+        <file action="create">tests/v2/unit/deployment/test_base_image_tiers.py</file>
+      </files>
+      <test-command>uv run pytest tests/v2/unit/deployment/test_base_image_tiers.py -x -q</test-command>
+      <expected-result>FAIL (files don't exist yet)</expected-result>
+    </task>
+
+    <task id="T2.2" type="GREEN" phase="2">
+      <title>Create Dockerfile.base-cpu</title>
+      <description>
+        Multi-stage build mirroring Dockerfile.base (PR #542) hardening:
+
+        Stage 1 (builder):
+          FROM python:3.13-slim-bookworm AS builder
+          - apt-get: gcc, python3-dev (for C-extension wheels: psycopg2, scipy)
+          - COPY uv from ghcr.io/astral-sh/uv:latest
+          - COPY deployment/docker/requirements-cpu.txt
+          - uv venv + uv pip install -r requirements-cpu.txt (with cache mount)
+          - COPY src/ configs/
+
+        Stage 2 (runner):
+          FROM python:3.13-slim-bookworm AS runner
+          - ARG GIT_COMMIT, BUILD_DATE, UID, GID (same as Dockerfile.base)
+          - OCI labels: tier="cpu", maintainer, project, source, revision, etc.
+          - Non-root user: minivess (configurable UID/GID)
+          - COPY --from=builder .venv, src/, configs/
+          - chmod g+rX, umask 0002
+          - ENV PATH, PYTHONPATH, PYTHONUNBUFFERED, PYTHONDONTWRITEBYTECODE
+          - HEALTHCHECK
+
+        NO nvidia/cuda references anywhere.
+        NO apt-get in runner stage.
+        NO uv binary in runner stage.
+
+        ALSO: Add "Dockerfile.base-cpu" and "Dockerfile.base-light" to
+        _EXCLUDED set in test_dockerfile_flows.py (they are base images,
+        not flow images — the glob would pick them up and fail flow checks).
+      </description>
+      <files>
+        <file action="create">deployment/docker/Dockerfile.base-cpu</file>
+        <file action="modify">tests/v2/unit/deployment/test_dockerfile_flows.py</file>
+      </files>
+      <test-command>uv run pytest tests/v2/unit/deployment/test_base_image_tiers.py -x -q</test-command>
+      <expected-result>PASS (for cpu tests)</expected-result>
+    </task>
+
+    <task id="T2.3" type="GREEN" phase="2">
+      <title>Create Dockerfile.base-light</title>
+      <description>
+        Same multi-stage pattern as Dockerfile.base-cpu but uses
+        requirements-light.txt. Even smaller footprint.
+
+        Key differences from cpu:
+        - requirements-light.txt instead of requirements-cpu.txt
+        - LABEL tier="light" instead of tier="cpu"
+        - May not need gcc/python3-dev if all light deps are pure Python
+          or have pre-built wheels. Test: if `uv pip install` fails without
+          gcc, add it. Otherwise omit for smaller builder stage.
+      </description>
+      <files>
+        <file action="create">deployment/docker/Dockerfile.base-light</file>
+      </files>
+      <test-command>uv run pytest tests/v2/unit/deployment/test_base_image_tiers.py -x -q</test-command>
+      <expected-result>PASS (all tier tests)</expected-result>
+    </task>
+
+    <task id="T2.4" type="CHECKPOINT" phase="2">
+      <title>Commit: new base images</title>
+      <description>
+        Message: "feat(docker): add Dockerfile.base-cpu and Dockerfile.base-light (no CUDA)"
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PHASE 3: Switch Flow Dockerfiles to Correct Tier
+       Risk: MEDIUM (changes FROM lines in 4 flow Dockerfiles)
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <phase id="3" name="Switch Flow Dockerfiles to Tier-Correct Bases">
+    <description>
+      Update 4 flow Dockerfiles to use their tier-correct base image.
+      Add tier validation test to test_dockerfile_flows.py.
+    </description>
+
+    <task id="T3.1" type="RED" phase="3">
+      <title>Test: flow Dockerfiles use tier-correct base images</title>
+      <description>
+        Add test_flow_dockerfiles_use_correct_tier() to test_dockerfile_flows.py.
+
+        Define the canonical tier mapping as a module-level dict:
+          TIER_MAPPING = {
+              "Dockerfile.train": "minivess-base:latest",
+              "Dockerfile.hpo": "minivess-base:latest",
+              "Dockerfile.post_training": "minivess-base:latest",
+              "Dockerfile.analyze": "minivess-base:latest",
+              "Dockerfile.deploy": "minivess-base:latest",
+              "Dockerfile.data": "minivess-base:latest",
+              "Dockerfile.annotation": "minivess-base:latest",
+              "Dockerfile.monailabel": "minivess-base:latest",
+              "Dockerfile.acquisition": "minivess-base:latest",
+              "Dockerfile.biostatistics": "minivess-base-cpu:latest",
+              "Dockerfile.dashboard": "minivess-base-light:latest",
+              "Dockerfile.dashboard-api": "minivess-base-light:latest",
+              "Dockerfile.pipeline": "minivess-base-light:latest",
+          }
+
+        For each entry: assert the Dockerfile contains "FROM {expected_base}".
+
+        ALSO update test_all_flow_dockerfiles_inherit_from_base to accept
+        all three base image names (not just minivess-base:latest).
+      </description>
+      <files>
+        <file action="modify">tests/v2/unit/deployment/test_dockerfile_flows.py</file>
+      </files>
+      <test-command>uv run pytest tests/v2/unit/deployment/test_dockerfile_flows.py -x -q</test-command>
+      <expected-result>FAIL (4 Dockerfiles still use wrong base)</expected-result>
+    </task>
+
+    <task id="T3.2" type="GREEN" phase="3">
+      <title>Switch biostatistics to minivess-base-cpu:latest</title>
+      <description>
+        In Dockerfile.biostatistics:
+          FROM minivess-base:latest → FROM minivess-base-cpu:latest
+          Add: LABEL tier="cpu"
+      </description>
+      <files>
+        <file action="modify">deployment/docker/Dockerfile.biostatistics</file>
+      </files>
+    </task>
+
+    <task id="T3.3" type="GREEN" phase="3">
+      <title>Switch dashboard, dashboard-api, pipeline to minivess-base-light:latest</title>
+      <description>
+        In each Dockerfile:
+          FROM minivess-base:latest → FROM minivess-base-light:latest
+          Add: LABEL tier="light"
+
+        Files:
+        - deployment/docker/Dockerfile.dashboard
+        - deployment/docker/Dockerfile.dashboard-api
+        - deployment/docker/Dockerfile.pipeline
+      </description>
+      <files>
+        <file action="modify">deployment/docker/Dockerfile.dashboard</file>
+        <file action="modify">deployment/docker/Dockerfile.dashboard-api</file>
+        <file action="modify">deployment/docker/Dockerfile.pipeline</file>
+      </files>
+      <test-command>uv run pytest tests/v2/unit/deployment/test_dockerfile_flows.py -x -q</test-command>
+      <expected-result>PASS</expected-result>
+    </task>
+
+    <task id="T3.4" type="CHECKPOINT" phase="3">
+      <title>Commit: switch flow Dockerfiles to tier-correct bases</title>
+      <description>
+        Message: "feat(docker): switch biostatistics/dashboard/pipeline to tier-correct bases"
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PHASE 4: Infrastructure — Makefile, docs, final verification
+       Risk: LOW (additive infrastructure)
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <phase id="4" name="Infrastructure: Build Targets, Scanning, Documentation">
+    <description>
+      Update Makefile build/scan/requirements targets, deployment/CLAUDE.md docs.
+      Final staging test verification.
+    </description>
+
+    <task id="T4.1" type="RED" phase="4">
+      <title>Test: Makefile has tier-aware build, scan, and requirements targets</title>
+      <description>
+        Write tests in tests/v2/unit/deployment/test_makefile_tiers.py:
+        1. Makefile contains target 'build-base-cpu'
+        2. Makefile contains target 'build-base-light'
+        3. Makefile contains target 'build-bases' (builds all 3)
+        4. Makefile 'scan' target references all 3 base images
+        5. Makefile contains target 'requirements-tiers' (regenerates requirements files)
+      </description>
+      <files>
+        <file action="create">tests/v2/unit/deployment/test_makefile_tiers.py</file>
+      </files>
+      <test-command>uv run pytest tests/v2/unit/deployment/test_makefile_tiers.py -x -q</test-command>
+      <expected-result>FAIL</expected-result>
+    </task>
+
+    <task id="T4.2" type="GREEN" phase="4">
+      <title>Update Makefile with tier-aware targets</title>
+      <description>
+        Add targets:
+
+        build-base-gpu:
+          DOCKER_BUILDKIT=1 docker build -t minivess-base:latest \
+            -f deployment/docker/Dockerfile.base .
+
+        build-base-cpu:
+          DOCKER_BUILDKIT=1 docker build -t minivess-base-cpu:latest \
+            -f deployment/docker/Dockerfile.base-cpu .
+
+        build-base-light:
+          DOCKER_BUILDKIT=1 docker build -t minivess-base-light:latest \
+            -f deployment/docker/Dockerfile.base-light .
+
+        build-bases: build-base-gpu build-base-cpu build-base-light
+
+        requirements-tiers:
+          uv export --frozen --only-group cpu --no-emit-project \
+              --output-file deployment/docker/requirements-cpu.txt
+          uv export --frozen --only-group light --no-emit-project \
+              --output-file deployment/docker/requirements-light.txt
+
+        Update 'scan' target to include base-cpu and base-light.
+      </description>
+      <files>
+        <file action="modify">Makefile</file>
+      </files>
+      <test-command>uv run pytest tests/v2/unit/deployment/test_makefile_tiers.py -x -q</test-command>
+      <expected-result>PASS</expected-result>
+    </task>
+
+    <task id="T4.3" type="GREEN" phase="4">
+      <title>Update deployment/CLAUDE.md with tier documentation</title>
+      <description>
+        Replace the "Three-Layer Docker Hierarchy" section with an expanded
+        "Three-Tier Base Image Hierarchy" section showing the parallel tiers.
+
+        Include:
+        - Tier mapping table (flows → base image → Layer 1)
+        - Build commands (make build-bases, make requirements-tiers)
+        - "Adding a new flow" guide (determine tier → FROM → LABEL → test)
+        - "Changing a flow's tier" migration guide
+        - Note about requirements-{tier}.txt regeneration after uv lock
+      </description>
+      <files>
+        <file action="modify">deployment/CLAUDE.md</file>
+      </files>
+    </task>
+
+    <task id="T4.4" type="VERIFY" phase="4">
+      <title>Run full staging test suite</title>
+      <description>
+        Run `make test-staging` to verify all tests pass with the new tier
+        structure and QA removal. All 4000+ tests must pass (minus deleted
+        QA test files).
+      </description>
+      <test-command>make test-staging</test-command>
+      <expected-result>ALL PASS</expected-result>
+    </task>
+
+    <task id="T4.5" type="CHECKPOINT" phase="4">
+      <title>Final commit + PR</title>
+      <description>
+        Stage all remaining changes. Create PR closing #537.
+        Title: "feat(docker): flow-specific base image tiers (GPU/CPU/Light)"
+        Body: tier mapping table, image size savings, predecessor PRs.
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       REVIEWER AGENTS — Findings preserved from 2026-03-10 review
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <review version="round-1-completed-2026-03-10">
+    <summary>
+      Three specialist agents reviewed the v1.0 plan in parallel.
+      All critical findings incorporated into v2.0:
+
+      R1 (Docker/MLSecOps): Python version mismatch fixed (3.13 not 3.12).
+        Image size targets corrected. Security hardening parity confirmed.
+
+      R2 (Python Packaging): Build strategy completely revised.
+        extract_tier_deps.py REPLACED with [dependency-groups] + uv export.
+
+      R3 (Test Architecture): QA blast radius enumerated (16 files).
+        _EXCLUDED set updated. test_docker_per_flow.py added.
+    </summary>
+  </review>
+
+  <review version="round-2-completed-2026-03-10">
+    <summary>
+      Round 2 verified all critical v1.0 fixes present in v2.0.
+      Remaining findings (all MEDIUM/LOW) incorporated into v2.1:
+
+      R3: 3 additional QA blast-radius files missed:
+        - src/minivess/orchestration/constants.py (EXPERIMENT_QA, FLOW_NAME_QA)
+        - tests/v2/unit/test_deployments_yaml.py ("qa-flow")
+        - Makefile scan target (qa in flow image loop, line 65)
+
+      R1: analyze flow gpu="no" contradicts CUDA need → fixed to gpu="yes-cdi"
+      R1: Dockerfile.base LABEL says "Python 3.12" → fix noted in T1.4
+      R1: stale "qa" comment in docker-compose.flows.yml line 115 → fix in T1.4
+      R2: PYTHONPATH=/app/src must be in runner stage → added to build strategy note
+      R2: --no-emit-project redundant with --only-group → harmless, kept for clarity
+    </summary>
+  </review>
+
+  <review version="round-3-completed-2026-03-10">
+    <summary>
+      Round 3 found 1 CRITICAL + 3 HIGH issues. All incorporated into v2.2:
+
+      R1: CONVERGED — no critical or high issues. One MEDIUM: analyze service
+        lacks GPU devices in docker-compose.flows.yml (pre-existing, out of scope).
+
+      R2: CRITICAL — dashboard flow imports tracking.py which has top-level
+        `from minivess.serving.model_logger import log_single_model` pulling in torch.
+        Tier C assignment invalid without breaking this chain.
+        FIX: New tasks T1.5-T1.6 make the import lazy (inside log_model() method).
+        Only 1 call site. No functional impact on training flows.
+
+      R3: CRITICAL — 8 additional files with "qa" references missed:
+        - tests/v2/unit/test_flow_trigger.py (flow lists + count assertion)
+        - tests/v2/unit/test_deployments_config.py (required set)
+        - tests/v2/integration/test_docker_compose_volumes.py (TestQaService class)
+        - tests/unit/orchestration/test_flow_names.py (FLOW_NAME_QA import)
+        - tests/unit/orchestration/test_constants.py (EXPERIMENT_QA + FLOW_NAME_QA)
+        - src/minivess/orchestration/flows/pipeline_flow.py (FLOW_NAME_QA — hard ImportError)
+        - src/minivess/orchestration/agent_interface.py (DeterministicQATriage dead code)
+        - src/minivess/orchestration/CLAUDE.md + deployment/CLAUDE.md (docs)
+        All added to blast-radius, T1.3 checks, and T1.4 modification list.
+        Also: test_docker_per_flow.py has 3 more qa refs (lines 70, 94, 166-170).
+        Pre-existing bug: test checks "python:3.12" added to T1.4 fixes.
+    </summary>
+  </review>
+
+  <review version="round-4-completed-2026-03-10">
+    <summary>
+      Round 4 CONVERGED — no CRITICAL or HIGH issues found.
+
+      MEDIUM: Task count was wrong (22 → 20). Fixed.
+      LOW-MEDIUM: 3 documentation files with stale QA-as-standalone-flow refs:
+        - CLAUDE.md (4 locations)
+        - README.md (2 locations)
+        - deployment/prefect/work-pools.yaml (2 comments)
+        Added to blast-radius and T1.4 modification list.
+
+      All round-3 fixes verified:
+        - T1.5-T1.6 import chain fix correctly scoped
+        - All 30 blast-radius files now listed
+        - Pre-existing bug fixes in T1.4
+        - Task numbering correct
+
+      PLAN IS READY FOR EXECUTION.
+    </summary>
+  </review>
+
+</plan>

@@ -249,30 +249,6 @@ class TestDashboardService:
 
 
 # ---------------------------------------------------------------------------
-# QA service (was ZERO volumes)
-# ---------------------------------------------------------------------------
-
-
-class TestQaService:
-    def test_qa_has_mlruns_mount(self) -> None:
-        compose = _load_compose()
-        vol_names = _service_volume_names(compose["services"], "qa")
-        assert "mlruns_data" in vol_names, "qa service missing mlruns_data volume"
-
-    def test_qa_has_dashboard_output_mount(self) -> None:
-        compose = _load_compose()
-        vol_names = _service_volume_names(compose["services"], "qa")
-        assert "outputs_dashboard" in vol_names, (
-            "qa service missing outputs_dashboard volume for QA reports"
-        )
-
-    def test_qa_not_zero_volumes(self) -> None:
-        compose = _load_compose()
-        vols = compose["services"].get("qa", {}).get("volumes", [])
-        assert len(vols) > 0, "qa service has ZERO volume mounts"
-
-
-# ---------------------------------------------------------------------------
 # Top-level volumes declaration consistency
 # ---------------------------------------------------------------------------
 

@@ -16,7 +16,6 @@ COMPOSE_FILE = Path("deployment/docker-compose.flows.yml")
 FLOW_FILES = [
     FLOWS_DIR / "analysis_flow.py",
     FLOWS_DIR / "dashboard_flow.py",
-    FLOWS_DIR / "qa_flow.py",
     FLOWS_DIR / "post_training_flow.py",
     FLOWS_DIR / "train_flow.py",
     FLOWS_DIR / "data_flow.py",

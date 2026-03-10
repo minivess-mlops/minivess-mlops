@@ -35,9 +35,6 @@ EXPERIMENT_DEPLOYMENT: str = "minivess_deployment"
 EXPERIMENT_DASHBOARD: str = "minivess_dashboard"
 """Dashboard and reporting experiment (figures, Parquet export)."""
 
-EXPERIMENT_QA: str = "minivess_qa"
-"""QA experiment (MLflow integrity checks, ghost run cleanup)."""
-
 EXPERIMENT_HPO: str = "minivess_hpo"
 """Hyperparameter optimization experiment (Optuna + ASHA)."""
 
@@ -62,9 +59,6 @@ FLOW_NAME_DEPLOY: str = "deploy-flow"
 
 FLOW_NAME_DASHBOARD: str = "dashboard-flow"
 """Prefect flow name for the dashboard/reporting flow (Flow 5)."""
-
-FLOW_NAME_QA: str = "qa-flow"
-"""Prefect flow name for the QA flow (Flow 6)."""
 
 FLOW_NAME_HPO: str = "hpo-flow"
 """Prefect flow name for the HPO flow."""

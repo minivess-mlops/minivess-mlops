@@ -57,11 +57,11 @@ class TestFlowTriggerResult:
 class TestPipelineTriggerChain:
     """PipelineTriggerChain orchestrates flow execution."""
 
-    def test_chain_has_9_flows(self) -> None:
+    def test_chain_has_8_flows(self) -> None:
         from minivess.orchestration.trigger import PipelineTriggerChain
 
         chain = PipelineTriggerChain()
-        assert len(chain.flow_names) == 9
+        assert len(chain.flow_names) == 8
 
     def test_chain_order(self) -> None:
         from minivess.orchestration.trigger import PipelineTriggerChain
@@ -76,7 +76,6 @@ class TestPipelineTriggerChain:
             "biostatistics",
             "deploy",
             "dashboard",
-            "qa",
         ]
         assert chain.flow_names == expected
 
@@ -154,7 +153,6 @@ class TestPipelineTriggerChain:
             "post_training",
             "biostatistics",
             "dashboard",
-            "qa",
         }
         for r in results:
             if r.flow_name not in best_effort and r.flow_name != "data":

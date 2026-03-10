@@ -36,7 +36,6 @@ _FLOW_MODULES = {
     "deploy_flow",
     "hpo_flow",
     "post_training_flow",
-    "qa_flow",
     "train_flow",
 }
 

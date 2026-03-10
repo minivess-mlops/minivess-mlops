@@ -325,7 +325,7 @@ class TestExperimentTrackerLogPyfunc:
         ckpt_path = _make_checkpoint(tmp_path)
         config_dict = _make_model_config_dict()
 
-        with patch("minivess.observability.tracking.log_single_model") as mock_log:
+        with patch("minivess.serving.model_logger.log_single_model") as mock_log:
             mock_log.return_value = MagicMock()
             tracker.log_pyfunc_model(ckpt_path, config_dict)
 
