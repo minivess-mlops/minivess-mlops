@@ -33,7 +33,8 @@ class TestModelLossForwardBackward:
 
     def test_model_instantiates(self, model_loss_combo: TestCombination) -> None:
         """Model can be instantiated from config."""
-        model = build_model_for_test(model_loss_combo.model)
+        patch = _get_patch_size_for_model(model_loss_combo.model)
+        model = build_model_for_test(model_loss_combo.model, patch_size=patch)
         assert model is not None
 
     def test_loss_instantiates(self, model_loss_combo: TestCombination) -> None:
@@ -45,12 +46,13 @@ class TestModelLossForwardBackward:
         self, model_loss_combo: TestCombination
     ) -> None:
         """Single forward+backward pass completes without error."""
-        model = build_model_for_test(model_loss_combo.model)
+        patch = _get_patch_size_for_model(model_loss_combo.model)
+        model = build_model_for_test(model_loss_combo.model, patch_size=patch)
         loss_fn = build_loss_for_test(model_loss_combo.loss)
         result = run_single_forward_backward(
             model=model,
             loss_fn=loss_fn,
-            patch_size=_get_patch_size_for_model(model_loss_combo.model),
+            patch_size=patch,
             batch_size=1,
             in_channels=1,
             num_classes=2,
@@ -59,12 +61,13 @@ class TestModelLossForwardBackward:
 
     def test_loss_is_finite(self, model_loss_combo: TestCombination) -> None:
         """Loss value is finite (not NaN or Inf)."""
-        model = build_model_for_test(model_loss_combo.model)
+        patch = _get_patch_size_for_model(model_loss_combo.model)
+        model = build_model_for_test(model_loss_combo.model, patch_size=patch)
         loss_fn = build_loss_for_test(model_loss_combo.loss)
         result = run_single_forward_backward(
             model=model,
             loss_fn=loss_fn,
-            patch_size=_get_patch_size_for_model(model_loss_combo.model),
+            patch_size=patch,
             batch_size=1,
             in_channels=1,
             num_classes=2,
@@ -79,12 +82,13 @@ class TestModelLossForwardBackward:
 
     def test_gradients_flow(self, model_loss_combo: TestCombination) -> None:
         """Gradients are non-zero after backward pass."""
-        model = build_model_for_test(model_loss_combo.model)
+        patch = _get_patch_size_for_model(model_loss_combo.model)
+        model = build_model_for_test(model_loss_combo.model, patch_size=patch)
         loss_fn = build_loss_for_test(model_loss_combo.loss)
         result = run_single_forward_backward(
             model=model,
             loss_fn=loss_fn,
-            patch_size=_get_patch_size_for_model(model_loss_combo.model),
+            patch_size=patch,
             batch_size=1,
             in_channels=1,
             num_classes=2,
