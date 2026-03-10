@@ -192,7 +192,27 @@ print(" ".join(flows))
 PYEOF
 )
 
+# Parse losses list from YAML (multi-loss experiments train once per loss)
+LOSSES=$(uv run python3 - <<'PYEOF'
+from __future__ import annotations
+import os
+import yaml
+from pathlib import Path
+
+experiment = os.environ.get("EXPERIMENT", "debug_single_model")
+yaml_path = Path(f"configs/experiment/{experiment}.yaml")
+if not yaml_path.exists():
+    print("cbdice_cldice")
+    exit(0)
+
+cfg = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+losses = cfg.get("losses", ["cbdice_cldice"])
+print("\n".join(losses))
+PYEOF
+)
+
 echo "  Models : $(echo "$MODELS_TO_TEST" | tr '\n' ' ')"
+echo "  Losses : $(echo "$LOSSES" | tr '\n' ' ')"
 echo "  Flows  : $FLOWS"
 echo ""
 
@@ -209,54 +229,50 @@ TOTAL_START=$(date +%s)
 # remaining model names from the herestring before the next loop iteration.
 # readarray loads everything in one shot, then the for loop uses no stdin at all.
 readarray -t MODELS_ARRAY <<< "$MODELS_TO_TEST"
+readarray -t LOSSES_ARRAY <<< "$LOSSES"
 
 for model in "${MODELS_ARRAY[@]}"; do
   [ -z "$model" ] && continue
 
-  print_banner "Training: $model (experiment=$EXPERIMENT)"
+  for loss in "${LOSSES_ARRAY[@]}"; do
+    [ -z "$loss" ] && continue
 
-  MODEL_LOG="$SUMMARY_DIR/logs/${TIMESTAMP}_${model}.log"
-  MODEL_START=$(date +%s)
+    print_banner "Training: $model / $loss (experiment=$EXPERIMENT)"
 
-  # Build Hydra overrides: model=X [,user overrides]
-  OVERRIDES="model=$model"
-  # sam3_hybrid: uses default patch_size=(64,64,3) from configs.
-  # No patch_size override needed: validation is skipped (val_interval>max_epochs)
-  # so val_roi OOM is not a concern. Training at (64,64,3) uses ~0.5 GiB activation
-  # + 6.65 GiB model = ~7.15 GiB, which fits in 7.60 GiB CUDA budget.
-  # Dimension fix (2026-03-09): sam3_hybrid.py now correctly iterates D=3 slices
-  # (not H=64) using MONAI (B,C,H,W,D) order → 3 encoder calls instead of 64.
-  if [ -n "$USER_OVERRIDES" ]; then
-    OVERRIDES="$OVERRIDES,$USER_OVERRIDES"
-  fi
+    MODEL_LOG="$SUMMARY_DIR/logs/${TIMESTAMP}_${model}_${loss}.log"
+    MODEL_START=$(date +%s)
 
-  # -T: disable pseudo-TTY; </dev/null: detach container stdin.
-  # docker compose run attaches to container stdin by default — without these,
-  # it can consume the shell's stdin unexpectedly.
-  # set +e / set -e: suspend errexit so a failed model doesn't abort the entire
-  # loop — each model is independent and we want all models to attempt training.
-  # PIPESTATUS[0] captures docker compose exit code (not tee's).
-  set +e
-  run_or_dry "docker compose train ($model)" \
-    docker compose $ENV_FILE_ARG -f "$FLOWS_COMPOSE" run --rm -T \
-      $DEV_SRC_MOUNT \
-      -e EXPERIMENT="$EXPERIMENT" \
-      -e HYDRA_OVERRIDES="$OVERRIDES" \
-      -e MINIVESS_DEBUG_SUFFIX="$MINIVESS_DEBUG_SUFFIX" \
-      train </dev/null 2>&1 | tee "$MODEL_LOG"
-  MODEL_STATUS=${PIPESTATUS[0]}
-  set -e
-  MODEL_END=$(date +%s)
-  MODEL_DUR=$(( (MODEL_END - MODEL_START) / 60 ))
+    # Build Hydra overrides: model=X,loss=Y [,user overrides]
+    OVERRIDES="model=$model,loss=$loss"
+    if [ -n "$USER_OVERRIDES" ]; then
+      OVERRIDES="$OVERRIDES,$USER_OVERRIDES"
+    fi
 
-  if [ "$MODEL_STATUS" -eq 0 ]; then
-    echo "  ✓ $model — ${MODEL_DUR}m"
-    FLOW_STATUSES+=("train/$model:OK:${MODEL_DUR}m")
-  else
-    echo "  ✗ $model — FAILED after ${MODEL_DUR}m. Log: $MODEL_LOG"
-    FLOW_STATUSES+=("train/$model:FAILED:${MODEL_DUR}m")
-  fi
+    # -T: disable pseudo-TTY; </dev/null: detach container stdin.
+    # set +e / set -e: suspend errexit so a failed model doesn't abort the loop.
+    # PIPESTATUS[0] captures docker compose exit code (not tee's).
+    set +e
+    run_or_dry "docker compose train ($model/$loss)" \
+      docker compose $ENV_FILE_ARG -f "$FLOWS_COMPOSE" run --rm -T \
+        $DEV_SRC_MOUNT \
+        -e EXPERIMENT="$EXPERIMENT" \
+        -e HYDRA_OVERRIDES="$OVERRIDES" \
+        -e MINIVESS_DEBUG_SUFFIX="$MINIVESS_DEBUG_SUFFIX" \
+        train </dev/null 2>&1 | tee "$MODEL_LOG"
+    MODEL_STATUS=${PIPESTATUS[0]}
+    set -e
+    MODEL_END=$(date +%s)
+    MODEL_DUR=$(( (MODEL_END - MODEL_START) / 60 ))
 
+    if [ "$MODEL_STATUS" -eq 0 ]; then
+      echo "  ✓ $model/$loss — ${MODEL_DUR}m"
+      FLOW_STATUSES+=("train/$model/$loss:OK:${MODEL_DUR}m")
+    else
+      echo "  ✗ $model/$loss — FAILED after ${MODEL_DUR}m. Log: $MODEL_LOG"
+      FLOW_STATUSES+=("train/$model/$loss:FAILED:${MODEL_DUR}m")
+    fi
+
+  done
 done
 
 # ─── Flow chaining ────────────────────────────────────────────────────────────
