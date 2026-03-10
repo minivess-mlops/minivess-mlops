@@ -49,6 +49,9 @@ x-common-env: &common-env
   # Setting these avoids re-downloading multi-GB weights on every container restart.
   HF_HOME: /model_cache/huggingface
   TORCH_HOME: /model_cache/torch
+  # DG1.7: Suppress non-actionable ONNX Runtime GPU discovery warning.
+  # ORT C++ layer reads this env var before Python code can set it.
+  ORT_LOGGING_LEVEL: ${ORT_LOGGING_LEVEL:-3}
 
 x-common-labels: &common-labels
   labels:
