@@ -32,8 +32,9 @@ _PATCH_MAP: dict[str, tuple[int, int, int]] = {
     "sam3_hybrid": (16, 32, 32),
     # VesselFM: 6 encoder levels → needs >= 64 per dim (divisor=32)
     "vesselfm": (64, 64, 64),
-    # SwinUNETR: 5 stride-2 levels → divisor=32, all dims >= 32
-    "swinunetr": (32, 32, 32),
+    # SwinUNETR: 5 stride-2 levels → divisor=32; InstanceNorm needs spatial>1
+    # at bottleneck, so all dims must be > 32 (use 64)
+    "swinunetr": (64, 64, 64),
     # divisor=16 models: 4 stride-2 levels → D >= 16
     "attentionunet": (32, 32, 16),
     "unetr": (32, 32, 16),
@@ -71,11 +72,17 @@ def _model_name_to_family(model_name: str) -> str:
     raise ValueError(msg)
 
 
+# Models that need img_size in architecture_params to match the test patch.
+# UNETR uses img_size for positional embedding computation — mismatch crashes.
+_IMG_SIZE_MODELS = frozenset({"unetr"})
+
+
 def build_model_for_test(
     model_name: str,
     *,
     in_channels: int = 1,
     out_channels: int = 2,
+    patch_size: tuple[int, int, int] | None = None,
 ) -> nn.Module:
     """Instantiate a model adapter's nn.Module for testing.
 
@@ -91,6 +98,9 @@ def build_model_for_test(
         Input channels (default 1 for grayscale).
     out_channels:
         Output channels/classes (default 2 for binary seg).
+    patch_size:
+        Test patch size. For UNETR, this is used to set ``img_size``
+        in architecture_params so positional embeddings match input.
 
     Returns
     -------
@@ -108,11 +118,16 @@ def build_model_for_test(
     family_value = _model_name_to_family(model_name)
     family = ModelFamily(family_value)
 
+    arch_params: dict[str, Any] = {}
+    if model_name in _IMG_SIZE_MODELS and patch_size is not None:
+        arch_params["img_size"] = list(patch_size)
+
     config = ModelConfig(
         family=family,
         name=model_name,
         in_channels=in_channels,
         out_channels=out_channels,
+        architecture_params=arch_params,
     )
 
     return build_adapter(config)
