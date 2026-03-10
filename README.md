@@ -32,8 +32,8 @@ designed as a **portfolio-grade reference implementation** of an end-to-end ML p
    distance transform, risk-controlling, MAPIE)
 4. **Post-training plugin architecture** -- 6 configurable post-hoc plugins (SWA,
    Multi-SWA, model merging, calibration, CRC conformal, ConSeCo FP control)
-5. **7 Prefect flows** -- persona-based orchestration (data, train, post-training,
-   analyze, deploy, dashboard, qa)
+5. **6 Prefect flows** -- persona-based orchestration (data, train, post-training,
+   analyze, deploy, dashboard; QA merged into dashboard health adapter)
 6. **Reproducible experiments** -- all flows verified end-to-end with real data
    (70 volumes, 4 losses, 3 folds, 100 epochs)
 7. **SaMD-principled** -- IEC 62304 lifecycle mapping, audit trails, model cards
@@ -99,10 +99,8 @@ Flow 3: Analysis             Flow 4: Deployment     Flow 5: Dashboard
   Conformal UQ                 Gradio demo             Drift reports
   Graph topology               MONAI Deploy MAP
   Post-training discovery      DEV -> STAGING -> PROD
-                                                     Flow 6: QA (best-effort)
-                                                       MLflow data integrity
-                                                       Ghost run cleanup
-                                                       Param validation
+                                                     (QA merged into dashboard
+                                                      health adapter, PR #567)
 ```
 
 ### ModelAdapter Pattern

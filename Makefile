@@ -62,7 +62,7 @@ init-volumes:
 scan:
 	@echo "Scanning MinIVess Docker images with Trivy..."
 	@which trivy || (echo "Install Trivy: make install-trivy" && exit 1)
-	@for flow in base train data analyze deploy dashboard qa hpo post_training; do \
+	@for flow in base train data analyze deploy dashboard hpo post_training; do \
 	  echo "Scanning minivess-$$flow:latest..."; \
 	  trivy image --exit-code 0 --severity CRITICAL,HIGH --ignore-unfixed \
 	    minivess-$$flow:latest 2>/dev/null || echo "  Image not built: minivess-$$flow"; \

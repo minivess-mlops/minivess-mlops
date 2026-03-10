@@ -83,7 +83,6 @@ class TestFlowDecoratorNames:
             FLOW_NAME_DEPLOY,
             FLOW_NAME_HPO,
             FLOW_NAME_POST_TRAINING,
-            FLOW_NAME_QA,
             FLOW_NAME_TRAIN,
         )
 
@@ -101,7 +100,6 @@ class TestFlowDecoratorNames:
             FLOW_NAME_ANALYSIS,
             FLOW_NAME_DEPLOY,
             FLOW_NAME_DASHBOARD,
-            FLOW_NAME_QA,
             FLOW_NAME_HPO,
         }
         missing = core_constants - all_names_in_files

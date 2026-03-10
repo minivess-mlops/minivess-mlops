@@ -50,8 +50,7 @@ Downstream flows discover upstream runs via MLflow:
 | `flows/analysis_flow.py` | Analysis — ensemble building, evaluation, comparison |
 | `flows/post_training_flow.py` | Post-training — SWA, calibration, conformal |
 | `flows/deploy_flow.py` | Deployment — ONNX export, BentoML, promotion |
-| `flows/dashboard_flow.py` | Dashboard — paper figures, reports |
-| `flows/qa_flow.py` | QA — MLflow integrity, ghost runs, param validation |
+| `flows/dashboard_flow.py` | Dashboard — paper figures, reports (includes QA health checks since PR #567) |
 | `_prefect_compat.py` | Prefect compatibility layer (CI/test fallback) |
 | `deployments.py` | Flow deployment configurations |
 | `trigger.py` | PipelineTriggerChain for cascading flows |

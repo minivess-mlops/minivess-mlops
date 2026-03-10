@@ -107,38 +107,6 @@ class DeterministicPromotionDecision:
         }
 
 
-class DeterministicQATriage:
-    """Stub for qa_flow: QA anomaly triage.
-
-    Rule: classify by number of failures.
-    TODO(#341): Replace with Pydantic AI agent for severity classification.
-    """
-
-    def decide(self, context: dict[str, Any]) -> dict[str, Any]:
-        n_failures = context.get("n_failures", 0)
-        n_warnings = context.get("n_warnings", 0)
-
-        if n_failures > 0:
-            return {
-                "action": "alert",
-                "reasoning": (
-                    f"{n_failures} failures found. Immediate attention required."
-                ),
-                "severity": "high",
-            }
-        if n_warnings > 0:
-            return {
-                "action": "review",
-                "reasoning": (f"{n_warnings} warnings found. Review recommended."),
-                "severity": "medium",
-            }
-        return {
-            "action": "pass",
-            "reasoning": "No issues found.",
-            "severity": "low",
-        }
-
-
 class DeterministicExperimentSummary:
     """Stub for analysis_flow: experiment summarization.
 

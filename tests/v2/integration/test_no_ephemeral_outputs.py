@@ -39,11 +39,6 @@ _FLOW_CONTRACTS = {
         "env_var": "DASHBOARD_OUTPUT",
         "safe_default_prefix": "/app",
     },
-    "qa_flow": {
-        "path": Path("src/minivess/orchestration/flows/qa_flow.py"),
-        "env_var": "DASHBOARD_OUTPUT",
-        "safe_default_prefix": "/app",
-    },
 }
 
 

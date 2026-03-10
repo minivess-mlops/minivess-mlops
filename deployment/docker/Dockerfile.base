@@ -77,7 +77,7 @@ ARG GID=1000
 # OCI standard image annotations (NIST SP 800-190 traceability)
 LABEL maintainer="petteri.teikari@gmail.com"
 LABEL project="minivess-mlops"
-LABEL description="MinIVess MLOps base — CUDA 12.6.3 runtime, Python 3.12, all deps"
+LABEL description="MinIVess MLOps base — CUDA 12.6.3 runtime, Python 3.13, all deps"
 LABEL org.opencontainers.image.title="minivess-base"
 LABEL org.opencontainers.image.source="https://github.com/minivess-mlops/minivess-mlops"
 LABEL org.opencontainers.image.revision="${GIT_COMMIT}"

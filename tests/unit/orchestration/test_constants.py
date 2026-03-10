@@ -16,7 +16,6 @@ class TestExperimentNameConstants:
             EXPERIMENT_EVALUATION,
             EXPERIMENT_HPO,
             EXPERIMENT_POST_TRAINING,
-            EXPERIMENT_QA,
             EXPERIMENT_TRAINING,
         )
 
@@ -27,7 +26,6 @@ class TestExperimentNameConstants:
             EXPERIMENT_POST_TRAINING,
             EXPERIMENT_DEPLOYMENT,
             EXPERIMENT_DASHBOARD,
-            EXPERIMENT_QA,
             EXPERIMENT_HPO,
         ]:
             assert isinstance(const, str), f"Expected str, got {type(const)}"
@@ -41,7 +39,6 @@ class TestExperimentNameConstants:
             EXPERIMENT_EVALUATION,
             EXPERIMENT_HPO,
             EXPERIMENT_POST_TRAINING,
-            EXPERIMENT_QA,
             EXPERIMENT_TRAINING,
         )
 
@@ -52,7 +49,6 @@ class TestExperimentNameConstants:
             EXPERIMENT_POST_TRAINING,
             EXPERIMENT_DEPLOYMENT,
             EXPERIMENT_DASHBOARD,
-            EXPERIMENT_QA,
             EXPERIMENT_HPO,
         ]
         assert len(values) == len(set(values)), "All experiment names must be unique"
@@ -68,7 +64,6 @@ class TestFlowNameConstants:
             FLOW_NAME_DEPLOY,
             FLOW_NAME_HPO,
             FLOW_NAME_POST_TRAINING,
-            FLOW_NAME_QA,
             FLOW_NAME_TRAIN,
         )
 
@@ -79,7 +74,6 @@ class TestFlowNameConstants:
             FLOW_NAME_ANALYSIS,
             FLOW_NAME_DEPLOY,
             FLOW_NAME_DASHBOARD,
-            FLOW_NAME_QA,
             FLOW_NAME_HPO,
             FLOW_NAME_ANNOTATION,
         ]:
@@ -99,7 +93,6 @@ class TestFlowNameConstants:
             "EXPERIMENT_POST_TRAINING",
             "EXPERIMENT_DEPLOYMENT",
             "EXPERIMENT_DASHBOARD",
-            "EXPERIMENT_QA",
             "EXPERIMENT_HPO",
             "FLOW_NAME_TRAIN",
             "FLOW_NAME_DATA",
@@ -107,7 +100,6 @@ class TestFlowNameConstants:
             "FLOW_NAME_ANALYSIS",
             "FLOW_NAME_DEPLOY",
             "FLOW_NAME_DASHBOARD",
-            "FLOW_NAME_QA",
             "FLOW_NAME_HPO",
             "FLOW_NAME_ANNOTATION",
         ]

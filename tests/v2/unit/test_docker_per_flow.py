@@ -42,10 +42,6 @@ class TestDockerfileExistence:
         path = PROJECT_ROOT / "deployment" / "docker" / "Dockerfile.dashboard"
         assert path.exists(), f"Missing {path}"
 
-    def test_qa_dockerfile_exists(self) -> None:
-        path = PROJECT_ROOT / "deployment" / "docker" / "Dockerfile.qa"
-        assert path.exists(), f"Missing {path}"
-
 
 class TestDockerfileStructure:
     """Test Dockerfile content conventions."""
@@ -53,7 +49,7 @@ class TestDockerfileStructure:
     def test_base_has_python312(self) -> None:
         path = PROJECT_ROOT / "deployment" / "docker" / "Dockerfile.base"
         content = path.read_text(encoding="utf-8")
-        assert "python3" in content or "python:3.12" in content
+        assert "python3" in content or "python:3.13" in content
 
     def test_base_uses_uv(self) -> None:
         path = PROJECT_ROOT / "deployment" / "docker" / "Dockerfile.base"
@@ -67,7 +63,7 @@ class TestDockerfileStructure:
         assert "cuda" in content.lower() or "nvidia" in content.lower()
 
     def test_all_flow_dockerfiles_reference_base(self) -> None:
-        for flow in ["data", "train", "analyze", "deploy", "dashboard", "qa"]:
+        for flow in ["data", "train", "analyze", "deploy", "dashboard"]:
             path = PROJECT_ROOT / "deployment" / "docker" / f"Dockerfile.{flow}"
             content = path.read_text(encoding="utf-8")
             assert (
@@ -91,7 +87,6 @@ class TestDockerfileStructure:
             "analyze",
             "deploy",
             "dashboard",
-            "qa",
         ]
         for flow in thin_flows:
             path = PROJECT_ROOT / "deployment" / "docker" / f"Dockerfile.{flow}"
@@ -158,13 +153,3 @@ class TestInterFlowContract:
         contract = FlowContract(tracking_uri="mlruns")
         # Should not raise even with no runs
         assert hasattr(contract, "find_upstream_run")
-
-
-class TestTriggerChainUpdate:
-    """Test PipelineTriggerChain now includes QA flow."""
-
-    def test_chain_has_qa_flow(self) -> None:
-        from minivess.orchestration.trigger import PipelineTriggerChain
-
-        chain = PipelineTriggerChain()
-        assert "qa" in chain.flow_names

@@ -112,7 +112,7 @@ x-cpu-resources: &cpu-resources
   cpus: 4.0
   pids_limit: 512
 
-# Lightweight flows (dashboard, qa, pipeline, annotation, deploy)
+# Lightweight flows (dashboard, pipeline, annotation, deploy)
 x-light-resources: &light-resources
   mem_limit: 4g
   cpus: 2.0
@@ -261,24 +261,6 @@ services:
     volumes:
       - mlruns_data:/app/mlruns:ro
       - outputs_analysis:/app/outputs/analysis:ro
-      - outputs_dashboard:/app/outputs/dashboard
-    networks:
-      - minivess
-    <<: [*common-security, *default-logging, *light-resources, *common-labels]
-
-  # Flow 6: QA (MLflow integrity, ghost run cleanup, param validation)
-  qa:
-    build:
-      context: ../
-      dockerfile: deployment/docker/Dockerfile.qa
-    image: minivess-qa:latest
-    container_name: minivess-flow-qa
-    environment:
-      <<: *common-env
-      FLOW_NAME: qa
-      DASHBOARD_OUTPUT_DIR: /app/outputs/dashboard
-    volumes:
-      - mlruns_data:/app/mlruns:ro
       - outputs_dashboard:/app/outputs/dashboard
     networks:
       - minivess

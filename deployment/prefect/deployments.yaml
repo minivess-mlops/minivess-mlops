@@ -1,6 +1,6 @@
 # MinIVess MLOps — Prefect 3.x Deployment Definitions
 #
-# Registers all 12 flows with the Prefect Server.
+# Registers all 11 flows with the Prefect Server.
 #
 # Apply with:
 #   prefect deploy --prefect-file deployment/prefect/deployments.yaml --all
@@ -13,7 +13,7 @@
 #   prefect deployment run 'training-flow/default' --params '{"loss_name": "cbdice_cldice"}'
 #
 # Work pools (defined in work-pools.yaml):
-#   cpu-pool — CPU-only flows (data, analyze, deploy, dashboard, QA, annotation)
+#   cpu-pool — CPU-only flows (data, analyze, deploy, dashboard, annotation)
 #   gpu-pool — GPU training flow (training-flow only)
 
 deployments:
@@ -159,26 +159,6 @@ deployments:
     tags:
       - dashboard
       - reporting
-      - best-effort
-      - cpu
-
-  # ---------------------------------------------------------------------------
-  # Flow 6: QA (CPU — best-effort)
-  # ---------------------------------------------------------------------------
-  - name: default
-    flow_name: qa-flow
-    entrypoint: src/minivess/orchestration/flows/qa_flow.py:qa_flow
-    description: >
-      MLflow data integrity checks, ghost run cleanup, and param validation.
-      Best-effort flow — failure does not block the pipeline.
-    work_pool:
-      name: cpu-pool
-      work_queue_name: default
-    schedules: []
-    parameters:
-      tracking_uri: null
-    tags:
-      - qa
       - best-effort
       - cpu
 

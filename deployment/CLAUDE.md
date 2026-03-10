@@ -34,7 +34,7 @@ DOCKER_BUILDKIT=1 docker build --build-arg UID=$(id -u) --build-arg GID=$(id -g)
 | File | Purpose |
 |------|---------|
 | `docker-compose.yml` | Infrastructure: PostgreSQL, MinIO, MLflow, Prefect, Grafana |
-| `docker-compose.flows.yml` | Per-flow services: 12 flow containers |
+| `docker-compose.flows.yml` | Per-flow services: 11 flow containers |
 
 ## Volume Mount Rules (Non-Negotiable)
 
@@ -267,7 +267,7 @@ services by container name:
     ──► minivess-prefect:4200  (Prefect orchestration API)
     ──► postgres:5432          (PostgreSQL — Optuna HPO storage)
 
-[dashboard/qa/biostatistics]
+[dashboard/biostatistics]
     ──► minivess-mlflow:5000   (read-only run queries)
     ──► minio:9000             (artifact download)
 

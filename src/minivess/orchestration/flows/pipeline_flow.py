@@ -13,10 +13,10 @@ Pipeline order:
   6. biostatistics (optional)
   7. deploy (core)
   8. dashboard (best-effort)
-  9. qa (best-effort)
 
 Core flow failure stops the pipeline. Optional/best-effort flows can fail
-without blocking downstream flows.
+without blocking downstream flows. QA was merged into the dashboard health
+adapter (#342, PR #567).
 """
 
 from __future__ import annotations
@@ -43,7 +43,6 @@ from minivess.orchestration.constants import (
     FLOW_NAME_DEPLOY,
     FLOW_NAME_PIPELINE,
     FLOW_NAME_POST_TRAINING,
-    FLOW_NAME_QA,
     FLOW_NAME_TRAIN,
 )
 
@@ -108,7 +107,6 @@ _PIPELINE_STEPS: list[tuple[str, bool]] = [
     (f"{FLOW_NAME_BIOSTATISTICS}/default", False),
     (f"{FLOW_NAME_DEPLOY}/default", True),
     (f"{FLOW_NAME_DASHBOARD}/default", False),
-    (f"{FLOW_NAME_QA}/default", False),
 ]
 
 
