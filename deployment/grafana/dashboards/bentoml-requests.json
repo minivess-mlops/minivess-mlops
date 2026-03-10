@@ -1,0 +1,62 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "minivess-bentoml-requests",
+    "title": "BentoML Requests",
+    "tags": ["minivess", "bentoml", "serving"],
+    "timezone": "utc",
+    "schemaVersion": 39,
+    "version": 1,
+    "panels": [
+      {
+        "id": 1,
+        "title": "Request Rate (req/s)",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "rate(bentoml_api_server_request_total[5m])",
+            "legendFormat": "{{endpoint}}"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Error Rate",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "rate(bentoml_api_server_request_total{http_response_code!~\"2..\"}[5m])",
+            "legendFormat": "errors/s"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Active Connections",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "bentoml_api_server_request_in_progress",
+            "legendFormat": "active"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Total Requests",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "bentoml_api_server_request_total",
+            "legendFormat": "total"
+          }
+        ]
+      }
+    ]
+  },
+  "overwrite": true
+}

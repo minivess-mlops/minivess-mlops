@@ -3,7 +3,7 @@
 # All training/evaluation goes through Prefect flows, not this Makefile.
 
 .PHONY: init-volumes scan sbom seccomp-audit-train install-trivy help \
-       test-staging test-prod test-gpu \
+       test-staging test-prod test-gpu test-e2e \
        build-base-gpu build-base-cpu build-base-light build-bases requirements-tiers
 
 help:
@@ -13,6 +13,7 @@ help:
 	@echo "  test-staging        Fast tests, no model loading (<3 min)"
 	@echo "  test-prod           Full suite except GPU instance tests"
 	@echo "  test-gpu            GPU instance tests (SAM3, requires CUDA + weights)"
+	@echo "  test-e2e            Full e2e pipeline (Docker + GPU + data, ~60 min)"
 	@echo ""
 	@echo "Docker Images:"
 	@echo "  build-base-gpu      Build minivess-base:latest (CUDA + PyTorch + MONAI)"
@@ -46,6 +47,15 @@ test-prod:
 	  -m "not integration" \
 	  --ignore=tests/v2/quasi_e2e/ \
 	  --timeout=300
+
+# E2E: Full pipeline via Docker. Requires Docker daemon, GPU, MiniVess data,
+# .env configured (from .env.example), Docker images built, minivess-network created.
+# Runtime: ~40-60 min. Uses pytest-docker to manage Docker Compose lifecycle.
+test-e2e:
+	uv run pytest tests/v2/integration/e2e/ -x -q \
+	  -m "slow and integration" \
+	  --timeout=3600 \
+	  -v
 
 # GPU instance: SAM3 tests in tests/gpu_instance/. Requires CUDA + SAM3 weights.
 # Run on RunPod / intranet GPU servers, NOT on dev machines.

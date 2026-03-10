@@ -1,0 +1,62 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "minivess-model-performance",
+    "title": "Model Performance",
+    "tags": ["minivess", "models"],
+    "timezone": "utc",
+    "schemaVersion": 39,
+    "version": 1,
+    "panels": [
+      {
+        "id": 1,
+        "title": "Validation Dice Score by Model",
+        "type": "barchart",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "mlflow_metric_val_dice",
+            "legendFormat": "{{model_family}}"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Validation clDice by Model",
+        "type": "barchart",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "mlflow_metric_val_cldice",
+            "legendFormat": "{{model_family}}"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Validation MASD by Model",
+        "type": "barchart",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "mlflow_metric_val_masd",
+            "legendFormat": "{{model_family}}"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Compound Metric (0.5*clDice + 0.5*(1-MASD/50))",
+        "type": "barchart",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "mlflow_metric_val_compound_masd_cldice",
+            "legendFormat": "{{model_family}}"
+          }
+        ]
+      }
+    ]
+  },
+  "overwrite": true
+}
