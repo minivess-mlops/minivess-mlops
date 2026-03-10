@@ -1,0 +1,15 @@
+# MinIVess MLOps v2 — Dashboard API (FastAPI)
+# Unified integration hub serving data from MLflow, Prefect, BentoML, etc.
+#
+# Build: docker build -t minivess-dashboard-api:latest -f deployment/docker/Dockerfile.dashboard-api .
+# Port comes from DASHBOARD_API_PORT env var (docker-compose), NOT hardcoded here.
+
+FROM minivess-base:latest
+
+LABEL flow="dashboard-api"
+LABEL description="Dashboard FastAPI backend — unified integration hub for platform services"
+
+# FastAPI + uvicorn are already in base image via dependencies.
+# If not, they would be added here.
+
+CMD ["sh", "-c", "python -m uvicorn minivess.dashboard.app.main:app --host 0.0.0.0 --port ${DASHBOARD_API_PORT:-8090}"]
