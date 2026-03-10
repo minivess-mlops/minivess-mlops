@@ -33,17 +33,17 @@ class NiftiMetadataSchema(pa.DataFrameModel):
     @classmethod
     def intensity_max_gt_min(cls, series: Series[float]) -> Series[bool]:
         """Intensity max must be greater than min (checked at row level via dataframe check)."""
-        return series >= 0  # Basic check; cross-column validated below
+        return series >= 0  # type: ignore[return-value]  # Basic check; cross-column validated below
 
     @pa.dataframe_check
     @classmethod
-    def intensity_range_valid(cls, df: pa.typing.DataFrame) -> Series[bool]:
+    def intensity_range_valid(cls, df: pa.typing.DataFrame) -> Series[bool]:  # type: ignore[type-arg]
         """Intensity max must exceed intensity min for each sample."""
         return df["intensity_max"] > df["intensity_min"]
 
     @pa.dataframe_check
     @classmethod
-    def affine_all_valid(cls, df: pa.typing.DataFrame) -> Series[bool]:
+    def affine_all_valid(cls, df: pa.typing.DataFrame) -> Series[bool]:  # type: ignore[type-arg]
         """All samples must have valid affine matrices."""
         return df["has_valid_affine"]
 

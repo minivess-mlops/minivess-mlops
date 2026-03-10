@@ -23,22 +23,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Mapping from suite config expectation_type to GE expectation classes
+# Mapping from suite config expectation_type to GE expectation classes.
+# GE's type stubs are incomplete — suppress attr-defined errors.
 _EXPECTATION_MAP: dict[str, type] = {
-    "expect_column_values_to_not_be_null": gx.expectations.ExpectColumnValuesToNotBeNull,
-    "expect_column_values_to_be_between": gx.expectations.ExpectColumnValuesToBeBetween,
-    "expect_column_values_to_be_unique": gx.expectations.ExpectColumnValuesToBeUnique,
-    "expect_column_values_to_be_increasing": gx.expectations.ExpectColumnValuesToBeIncreasing,
-    "expect_column_values_to_be_true": gx.expectations.ExpectColumnValuesToBeInSet,
-    "expect_column_pair_values_a_to_be_greater_than_b": gx.expectations.ExpectColumnPairValuesAToBeGreaterThanB,
-    "expect_table_row_count_to_be_between": gx.expectations.ExpectTableRowCountToBeBetween,
+    "expect_column_values_to_not_be_null": gx.expectations.ExpectColumnValuesToNotBeNull,  # type: ignore[attr-defined]
+    "expect_column_values_to_be_between": gx.expectations.ExpectColumnValuesToBeBetween,  # type: ignore[attr-defined]
+    "expect_column_values_to_be_unique": gx.expectations.ExpectColumnValuesToBeUnique,  # type: ignore[attr-defined]
+    "expect_column_values_to_be_increasing": gx.expectations.ExpectColumnValuesToBeIncreasing,  # type: ignore[attr-defined]
+    "expect_column_values_to_be_true": gx.expectations.ExpectColumnValuesToBeInSet,  # type: ignore[attr-defined]
+    "expect_column_pair_values_a_to_be_greater_than_b": gx.expectations.ExpectColumnPairValuesAToBeGreaterThanB,  # type: ignore[attr-defined]
+    "expect_table_row_count_to_be_between": gx.expectations.ExpectTableRowCountToBeBetween,  # type: ignore[attr-defined]
 }
 
 
 def _build_ge_suite(
-    context: gx.data_context.EphemeralDataContext,
+    context: Any,
     suite_config: dict[str, Any],
-) -> gx.ExpectationSuite:
+) -> Any:
     """Convert a suite config dict to a GE ExpectationSuite.
 
     Parameters
@@ -53,7 +54,7 @@ def _build_ge_suite(
     Registered ExpectationSuite.
     """
     suite_name = suite_config["expectation_suite_name"]
-    suite = context.suites.add(gx.ExpectationSuite(name=suite_name))
+    suite = context.suites.add(gx.ExpectationSuite(name=suite_name))  # type: ignore[attr-defined]
 
     for exp_config in suite_config["expectations"]:
         exp_type = exp_config["expectation_type"]
@@ -91,7 +92,7 @@ def run_expectation_suite(
     -------
     GateResult with pass/fail, errors, and statistics.
     """
-    context = gx.get_context()
+    context = gx.get_context()  # type: ignore[attr-defined]
 
     # Set up data source and batch
     suite_name = suite_config["expectation_suite_name"]
@@ -115,10 +116,11 @@ def run_expectation_suite(
 
     # Build statistics
     n_evaluated = len(validation_result.results)
-    n_successful = sum(1 for r in validation_result.results if r.success)
+    results_list = validation_result.results
+    n_successful = sum(bool(r.success) for r in results_list)
 
     return GateResult(
-        passed=validation_result.success,
+        passed=bool(validation_result.success),
         errors=errors,
         statistics={
             "evaluated_expectations": n_evaluated,
