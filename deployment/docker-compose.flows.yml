@@ -284,6 +284,44 @@ services:
       - minivess
     <<: [*common-security, *default-logging, *light-resources, *common-labels]
 
+  # Dashboard API (FastAPI — unified integration hub)
+  dashboard-api:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.dashboard-api
+    image: minivess-dashboard-api:latest
+    container_name: minivess-dashboard-api
+    ports:
+      - "${DASHBOARD_API_PORT:-8090}:${DASHBOARD_API_PORT:-8090}"
+    environment:
+      <<: *common-env
+      FLOW_NAME: dashboard-api
+      DASHBOARD_API_PORT: ${DASHBOARD_API_PORT:-8090}
+      DASHBOARD_HEALTH_CHECK_INTERVAL_S: ${DASHBOARD_HEALTH_CHECK_INTERVAL_S:-300}
+    volumes:
+      - mlruns_data:/app/mlruns:ro
+      - data_cache:/app/data:ro
+    networks:
+      - minivess
+    <<: [*common-security, *default-logging, *light-resources, *common-labels]
+
+  # Dashboard UI (React + Vite — served via nginx)
+  dashboard-ui:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.dashboard-ui
+      args:
+        VITE_API_URL: http://${DASHBOARD_API_DOCKER_HOST:-dashboard-api}:${DASHBOARD_API_PORT:-8090}
+    image: minivess-dashboard-ui:latest
+    container_name: minivess-dashboard-ui
+    ports:
+      - "${DASHBOARD_UI_PORT:-3002}:80"
+    depends_on:
+      - dashboard-api
+    networks:
+      - minivess
+    <<: [*common-security, *default-logging, *light-resources, *common-labels]
+
   # Biostatistics Flow (CPU — best-effort)
   biostatistics:
     build:

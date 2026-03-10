@@ -19,7 +19,8 @@ DOCKERFILES_DIR = ROOT / "deployment" / "docker"
 
 # Dockerfile.base is the base image, not a flow — exclude from flow checks
 # Dockerfile.mlflow is infrastructure (not a Prefect flow) — exclude
-_EXCLUDED = {"Dockerfile.base", "Dockerfile.mlflow"}
+# Dockerfile.dashboard-ui is React/nginx frontend (not Python, no base inheritance) — exclude
+_EXCLUDED = {"Dockerfile.base", "Dockerfile.mlflow", "Dockerfile.dashboard-ui"}
 
 
 def _flow_dockerfiles() -> list[Path]:

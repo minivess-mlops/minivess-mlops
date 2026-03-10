@@ -1,0 +1,20 @@
+# MinIVess MLOps v2 — Dashboard UI (React + Vite)
+# Builds the React frontend and serves via nginx.
+#
+# Build: docker build -t minivess-dashboard-ui:latest -f deployment/docker/Dockerfile.dashboard-ui .
+# VITE_API_URL is baked in at build time — set via docker-compose build args.
+
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ .
+ARG VITE_API_URL=http://localhost:8090
+ENV VITE_API_URL=${VITE_API_URL}
+RUN npm run build
+
+FROM nginx:alpine
+LABEL flow="dashboard-ui"
+LABEL description="Dashboard React frontend — single-pane-of-glass UI for platform monitoring"
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY deployment/nginx/dashboard.conf /etc/nginx/conf.d/default.conf

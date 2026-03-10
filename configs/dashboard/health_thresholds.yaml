@@ -1,0 +1,6 @@
+# Health check thresholds for QA monitoring (#342)
+# Alerts are generated when metrics exceed these thresholds.
+drift_psi_threshold: 0.2
+model_alpha_min: 2.0
+flow_failure_window_hours: 24
+latency_p99_ms_max: 500
