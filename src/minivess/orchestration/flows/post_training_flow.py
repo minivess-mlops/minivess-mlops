@@ -25,7 +25,7 @@ from prefect import flow, get_run_logger, task
 
 from minivess.config.post_training_config import PostTrainingConfig
 from minivess.observability.tracking import resolve_tracking_uri
-from minivess.orchestration.constants import FLOW_NAME_POST_TRAINING
+from minivess.orchestration.constants import FLOW_NAME_POST_TRAINING, FLOW_NAME_TRAIN
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -81,12 +81,27 @@ def resolve_checkpoint_paths_from_contract(
                 ckpt_dir,
             )
             continue
-        best = ckpt_dir / "best.ckpt"
-        if best.exists():
-            checkpoint_paths.append(best)
+        # Prefer best checkpoint: try both naming conventions (.ckpt and .pth)
+        best_candidates = [
+            ckpt_dir / "best.ckpt",
+            ckpt_dir / "best_val_loss.pth",
+        ]
+        found_best = False
+        for best in best_candidates:
+            if best.exists():
+                checkpoint_paths.append(best)
+                found_best = True
+                break
+        if found_best:
             continue
-        # Fall back to lexicographically latest epoch_*.ckpt
-        epoch_ckpts = sorted(ckpt_dir.glob("epoch_*.ckpt"))
+        # Fall back to last.pth or lexicographically latest epoch_*.{ckpt,pth}
+        last = ckpt_dir / "last.pth"
+        if last.exists():
+            checkpoint_paths.append(last)
+            continue
+        epoch_ckpts = sorted(
+            list(ckpt_dir.glob("epoch_*.ckpt")) + list(ckpt_dir.glob("epoch_*.pth"))
+        )
         if epoch_ckpts:
             checkpoint_paths.append(epoch_ckpts[-1])
         else:
@@ -247,8 +262,6 @@ def post_training_flow(
 
     if config is None:
         config = PostTrainingConfig()
-    if checkpoint_paths is None:
-        checkpoint_paths = []
     if run_metadata is None:
         run_metadata = []
     if output_dir is None:
@@ -257,6 +270,35 @@ def post_training_flow(
         )
 
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Auto-discover upstream training run and checkpoints (#587).
+    tracking_uri = resolve_tracking_uri()
+    upstream_exp = os.environ.get("UPSTREAM_EXPERIMENT", "minivess_training")
+
+    if upstream_training_run_id is None:
+        upstream = find_upstream_safely(
+            tracking_uri=tracking_uri,
+            experiment_name=upstream_exp,
+            upstream_flow=FLOW_NAME_TRAIN,
+        )
+        upstream_training_run_id = upstream["run_id"] if upstream else None
+
+    if checkpoint_paths is None or len(checkpoint_paths) == 0:
+        checkpoint_paths = resolve_checkpoint_paths_from_contract(
+            parent_run_id=upstream_training_run_id,
+            tracking_uri=tracking_uri,
+        )
+        if checkpoint_paths:
+            log.info(
+                "Auto-discovered %d checkpoint(s) from upstream run %s",
+                len(checkpoint_paths),
+                upstream_training_run_id,
+            )
+        else:
+            log.warning(
+                "No checkpoints found from upstream run %s — plugins may skip",
+                upstream_training_run_id,
+            )
 
     enabled = config.enabled_plugin_names()
     if not enabled:
@@ -318,35 +360,19 @@ def post_training_flow(
     log.info("Post-training flow complete: %d plugin(s) executed", n_run)
 
     # Log results to MLflow
-    tracking_uri = resolve_tracking_uri()
     mlflow_run_id: str | None = None
-
-    # Read upstream experiment name from env (Rule #22 — single-source config).
-    # UPSTREAM_EXPERIMENT: which training experiment to search for upstream runs.
-    # EXPERIMENT: which experiment to log post-training results to (defaults to same).
-    upstream_exp = os.environ.get("UPSTREAM_EXPERIMENT", "minivess_training")
     log_exp = os.environ.get("EXPERIMENT", upstream_exp)
-
-    # Find upstream training run (explicit param takes priority over auto-discovery)
-    if upstream_training_run_id is None:
-        upstream = find_upstream_safely(
-            tracking_uri=tracking_uri,
-            experiment_name=upstream_exp,
-            upstream_flow="train",
-        )
-        upstream_training_run_id = upstream["run_id"] if upstream else None
 
     try:
         import mlflow
 
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment(log_exp)
-        with mlflow.start_run(
-            tags={
-                "flow_name": "post-training-flow",
-                "upstream_training_run_id": upstream_training_run_id,
-            }
-        ) as active_run:
+        # MLflow tags must be strings — None causes TypeError in to_proto().
+        run_tags = {"flow_name": FLOW_NAME_POST_TRAINING}
+        if upstream_training_run_id is not None:
+            run_tags["upstream_training_run_id"] = upstream_training_run_id
+        with mlflow.start_run(tags=run_tags) as active_run:
             mlflow_run_id = active_run.info.run_id
             mlflow.log_metric("n_plugins_run", float(n_run))
             # Log per-plugin metrics with post_ prefix

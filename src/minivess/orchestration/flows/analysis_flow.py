@@ -37,6 +37,7 @@ from minivess.orchestration.constants import (
     EXPERIMENT_EVALUATION,
     EXPERIMENT_TRAINING,
     FLOW_NAME_ANALYSIS,
+    FLOW_NAME_TRAIN,
     resolve_experiment_name,
 )
 from minivess.orchestration.mlflow_helpers import (
@@ -181,7 +182,9 @@ def _discover_runs(
     ``run_id``, ``loss_type``, ``fold_id``, ``artifact_dir``, ``metrics``.
     """
     builder = EnsembleBuilder(eval_config, model_config_dict, tracking_uri=tracking_uri)
-    result: list[dict[str, Any]] = builder.discover_training_runs()
+    result: list[dict[str, Any]] = builder.discover_training_runs(
+        require_eval_metrics=eval_config.require_eval_metrics,
+    )
     return result
 
 
@@ -1783,6 +1786,9 @@ def _build_eval_config_from_dict(config_dict: dict[str, Any]) -> EvaluationConfi
     overrides: dict[str, Any] = {}
     if upstream_exp:
         overrides["mlflow_training_experiment"] = upstream_exp
+        # Debug experiments don't produce eval_fold2_dsc — relax the gate (#588).
+        if upstream_exp.startswith("debug_"):
+            overrides["require_eval_metrics"] = False
     return EvaluationConfig(**overrides)
 
 
@@ -1830,7 +1836,7 @@ def _entry_point_from_env() -> dict[str, Any]:
     upstream = find_upstream_safely(
         tracking_uri=tracking_uri,
         experiment_name=upstream_exp,
-        upstream_flow="train",
+        upstream_flow=FLOW_NAME_TRAIN,
     )
     if not upstream:
         raise RuntimeError(

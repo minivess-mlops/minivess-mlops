@@ -130,7 +130,10 @@ class EnsembleBuilder:
     # ------------------------------------------------------------------
 
     def discover_training_runs(
-        self, *, expand_folds: bool = True
+        self,
+        *,
+        expand_folds: bool = True,
+        require_eval_metrics: bool = True,
     ) -> list[dict[str, Any]]:
         """Query MLflow for completed training runs.
 
@@ -156,8 +159,13 @@ class EnsembleBuilder:
         expand_folds:
             If ``True``, synthesize per-fold entries from per-loss runs.
             If ``False``, return raw per-loss entries (1 per loss).
+        require_eval_metrics:
+            If ``True`` (default), skip runs without ``eval_fold2_dsc``.
+            Set to ``False`` for debug runs (#588).
         """
-        raw_runs = self.discover_training_runs_raw()
+        raw_runs = self.discover_training_runs_raw(
+            require_eval_metrics=require_eval_metrics,
+        )
 
         if not expand_folds:
             return raw_runs
