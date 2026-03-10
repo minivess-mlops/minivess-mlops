@@ -13,4 +13,5 @@ LABEL tier="light"
 # FastAPI + uvicorn are already in base image via dependencies.
 # If not, they would be added here.
 
-CMD ["sh", "-c", "python -m uvicorn minivess.dashboard.app.main:app --host 0.0.0.0 --port ${DASHBOARD_API_PORT:-8090}"]
+# DG1.7: -W flags suppress non-actionable third-party warnings at interpreter level.
+CMD ["sh", "-c", "python -W 'ignore::SyntaxWarning' -W 'ignore::FutureWarning' -W 'ignore:Using a non-tuple:UserWarning' -m uvicorn minivess.dashboard.app.main:app --host 0.0.0.0 --port ${DASHBOARD_API_PORT:-8090}"]

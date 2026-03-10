@@ -49,6 +49,9 @@ x-common-env: &common-env
   # Setting these avoids re-downloading multi-GB weights on every container restart.
   HF_HOME: /model_cache/huggingface
   TORCH_HOME: /model_cache/torch
+  # DG1.7: Suppress non-actionable ONNX Runtime GPU discovery warning.
+  # ORT C++ layer reads this env var before Python code can set it.
+  ORT_LOGGING_LEVEL: ${ORT_LOGGING_LEVEL:-3}
 
 x-common-labels: &common-labels
   labels:
@@ -68,14 +71,14 @@ x-common-security: &common-security
 
 # GPU services use enforce-mode seccomp profile (SCMP_ACT_ERRNO for unlisted syscalls).
 # Derived from Docker moby default (~340 syscalls) — all syscalls needed for CUDA/PyTorch.
-# Path is relative to REPO_ROOT; always invoke docker compose from repo root.
+# Path is relative to the compose file's directory (deployment/).
 # NOTE: x-gpu-security MUST keep cap_drop + no-new-privileges in sync with x-common-security.
 x-gpu-security: &gpu-security
   cap_drop:
     - ALL
   security_opt:
     - no-new-privileges:true
-    - "seccomp=deployment/seccomp/train-enforce.json"
+    - "seccomp=seccomp/train-enforce.json"
   restart: "no"
 
 # ── Log driver (production log rotation — prevents unbounded log files) ───────
@@ -185,6 +188,8 @@ services:
     <<: [*gpu-security, *default-logging, *gpu-resources, *common-labels]
 
   # Flow 2.5: Post-Training (SWA, calibration, conformal)
+  # GPU required: SWA weight averaging, temperature scaling, conformal calibration
+  # all operate on GPU model tensors.
   post_training:
     build:
       context: ../
@@ -200,11 +205,16 @@ services:
       - data_cache:/app/data:ro
       - post_training_out:/app/outputs/post_training
       - mlruns_data:/app/mlruns
+      - ${MODEL_CACHE_HOST_PATH}:/model_cache
+    # CDI GPU access — SWA/calibration need GPU for model weight operations
+    devices:
+      - "nvidia.com/gpu=all"
     networks:
       - minivess
-    <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
+    <<: [*gpu-security, *default-logging, *gpu-resources, *common-labels]
 
   # Flow 3: Model Analysis
+  # GPU required: sliding_window_inference for model evaluation, ensemble inference.
   analyze:
     build:
       context: ../
@@ -222,9 +232,13 @@ services:
       - mlruns_data:/app/mlruns
       - outputs_analysis:/app/outputs/analysis
       - post_training_out:/app/outputs/post_training:ro
+      - ${MODEL_CACHE_HOST_PATH}:/model_cache
+    # CDI GPU access — model evaluation uses sliding_window_inference on GPU
+    devices:
+      - "nvidia.com/gpu=all"
     networks:
       - minivess
-    <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
+    <<: [*gpu-security, *default-logging, *gpu-resources, *common-labels]
 
   # Flow 4: Deployment (ONNX export, BentoML, promotion)
   deploy:

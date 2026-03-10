@@ -18,4 +18,7 @@ ENV BENTOML_HOME=/home/minivess/bentoml
 ENV LABEL_STUDIO_URL=""
 ENV LABEL_STUDIO_TOKEN=""
 
-CMD ["python", "-m", "minivess.orchestration.flows.annotation_flow"]
+# DG1.7: -W flags suppress non-actionable third-party warnings at interpreter level.
+CMD ["python", "-W", "ignore::SyntaxWarning", "-W", "ignore::FutureWarning", \
+     "-W", "ignore:Using a non-tuple:UserWarning", \
+     "-m", "minivess.orchestration.flows.annotation_flow"]

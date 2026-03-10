@@ -24,4 +24,12 @@ ENV DOCKER_CONTAINER=1
 #   docker compose run -e HF_TOKEN=$HF_TOKEN train
 # or set in docker-compose.flows.yml environment section.
 
-CMD ["python", "-m", "minivess.orchestration.flows.train_flow"]
+# DG1.7: -W flags suppress non-actionable third-party warnings at interpreter level.
+# SyntaxWarning: MetricsReloaded invalid escape sequences (fires during compilation).
+# FutureWarning: CUDA cudart deprecation.
+# UserWarning: MONAI/PyTorch non-tuple indexing (triggered from C++ internals,
+#   so module filter doesn't work — must use message filter).
+# -W format: action:message:category:module:lineno
+CMD ["python", "-W", "ignore::SyntaxWarning", "-W", "ignore::FutureWarning", \
+     "-W", "ignore:Using a non-tuple:UserWarning", \
+     "-m", "minivess.orchestration.flows.train_flow"]

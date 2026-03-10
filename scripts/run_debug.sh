@@ -22,6 +22,9 @@ DRY_RUN=false
 # Flows read MINIVESS_DEBUG_SUFFIX and append it to experiment names
 # (e.g. minivess_training → minivess_training_DEBUG).
 export MINIVESS_DEBUG_SUFFIX="_DEBUG"
+# Suppress "Found orphan containers" warning — infra containers (postgres, minio, mlflow,
+# prefect) from docker-compose.yml share the project name "deployment" with flows compose.
+export COMPOSE_IGNORE_ORPHANS=True
 FLOWS_COMPOSE="deployment/docker-compose.flows.yml"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Docker Compose V2 resolves .env from the compose file's directory (deployment/),

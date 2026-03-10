@@ -45,6 +45,29 @@ def test_no_hardcoded_password_in_compose_flows() -> None:
             )
 
 
+def test_gpu_flows_have_cdi_device_mapping() -> None:
+    """Flows that need GPU must have CDI device mapping (nvidia.com/gpu=all).
+
+    Post-training (SWA, calibration) and analyze (sliding_window_inference)
+    need GPU access alongside train/hpo. Without the device mapping, the
+    container runs on CPU-only even though it has the CUDA base image.
+    """
+    compose = _load_flows_compose()
+    # Services that MUST have GPU device mapping
+    gpu_required = ["train", "hpo", "hpo-worker", "post_training", "analyze"]
+    for svc_name in gpu_required:
+        svc = compose["services"].get(svc_name)
+        if svc is None:
+            continue  # Service not defined yet
+        devices = svc.get("devices", [])
+        has_gpu = any("nvidia.com/gpu" in d for d in devices)
+        assert has_gpu, (
+            f"Service '{svc_name}' is missing CDI GPU device mapping. "
+            f'Add: devices: ["nvidia.com/gpu=all"]. '
+            f"This flow needs GPU for model inference/weight operations."
+        )
+
+
 def test_model_cache_has_no_hardcoded_home_path() -> None:
     """MODEL_CACHE_HOST_PATH volume mount must not fall back to /home/petteri."""
     content = FLOWS_COMPOSE.read_text(encoding="utf-8")

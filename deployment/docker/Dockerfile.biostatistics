@@ -22,4 +22,7 @@ ENV DOCKER_CONTAINER=1
 ENV BIOSTATISTICS_OUTPUT_DIR=/app/outputs/biostatistics
 ENV BIOSTATISTICS_CONFIG_DIR=/app/configs/biostatistics
 
-CMD ["python", "-m", "minivess.orchestration.flows.biostatistics_flow"]
+# DG1.7: -W flags suppress non-actionable third-party warnings at interpreter level.
+CMD ["python", "-W", "ignore::SyntaxWarning", "-W", "ignore::FutureWarning", \
+     "-W", "ignore:Using a non-tuple:UserWarning", \
+     "-m", "minivess.orchestration.flows.biostatistics_flow"]

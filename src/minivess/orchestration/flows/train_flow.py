@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -687,6 +688,17 @@ def training_flow(
 
 
 if __name__ == "__main__":
+    # CLAUDE.md DG1.7: Suppress non-actionable third-party noise at entry point.
+    # MetricsReloaded SyntaxWarnings fire during import; MONAI/CUDA warnings at runtime.
+    os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
+    warnings.filterwarnings("ignore", category=SyntaxWarning, module="MetricsReloaded")
+    warnings.filterwarnings("ignore", category=FutureWarning, message=".*cuda.cudart.*")
+    warnings.filterwarnings(
+        "ignore",
+        category=UserWarning,
+        message=".*non-tuple sequence for multidimensional indexing.*",
+    )
+
     # Hydra-zen bridge (Rule #23): EXPERIMENT env var → compose_experiment_config()
     # → resolved config dict → training_flow(config_dict=resolved)
     _experiment = os.environ.get("EXPERIMENT")

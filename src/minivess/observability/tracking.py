@@ -296,7 +296,7 @@ class ExperimentTracker:
             logger.info("Logged git hash: %s", git_hash[:8])
             return git_hash
         except (subprocess.CalledProcessError, FileNotFoundError):
-            logger.warning("Could not determine git hash")
+            logger.debug("Could not determine git hash (expected inside Docker)")
             return None
 
     def log_frozen_deps(self) -> None:
