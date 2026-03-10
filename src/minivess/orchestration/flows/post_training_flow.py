@@ -81,12 +81,27 @@ def resolve_checkpoint_paths_from_contract(
                 ckpt_dir,
             )
             continue
-        best = ckpt_dir / "best.ckpt"
-        if best.exists():
-            checkpoint_paths.append(best)
+        # Prefer best checkpoint: try both naming conventions (.ckpt and .pth)
+        best_candidates = [
+            ckpt_dir / "best.ckpt",
+            ckpt_dir / "best_val_loss.pth",
+        ]
+        found_best = False
+        for best in best_candidates:
+            if best.exists():
+                checkpoint_paths.append(best)
+                found_best = True
+                break
+        if found_best:
             continue
-        # Fall back to lexicographically latest epoch_*.ckpt
-        epoch_ckpts = sorted(ckpt_dir.glob("epoch_*.ckpt"))
+        # Fall back to last.pth or lexicographically latest epoch_*.{ckpt,pth}
+        last = ckpt_dir / "last.pth"
+        if last.exists():
+            checkpoint_paths.append(last)
+            continue
+        epoch_ckpts = sorted(
+            list(ckpt_dir.glob("epoch_*.ckpt")) + list(ckpt_dir.glob("epoch_*.pth"))
+        )
         if epoch_ckpts:
             checkpoint_paths.append(epoch_ckpts[-1])
         else:
