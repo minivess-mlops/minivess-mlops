@@ -643,6 +643,7 @@ def training_flow(
             }
         ) as active_run:
             mlflow_run_id = active_run.info.run_id
+            mlflow.set_tag("parent_run_id", mlflow_run_id)
             logger.info("MLflow run opened: %s", mlflow_run_id)
 
             # Log fold results inside the run context

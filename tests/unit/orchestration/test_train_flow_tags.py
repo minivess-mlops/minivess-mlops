@@ -140,6 +140,46 @@ class TestLogFoldResultsTaskCheckpointTag:
         assert metrics["fold_0_best_val_loss"] == pytest.approx(0.5)
 
 
+class TestParentRunIdTag:
+    """Parent training run must tag itself with parent_run_id for downstream discovery."""
+
+    def test_training_run_has_parent_run_id_tag(self, tmp_path: Path) -> None:
+        """The parent MLflow run must have a parent_run_id tag equal to its own run_id."""
+        import mlflow
+        from mlflow.tracking import MlflowClient
+
+        tracking_uri = str(tmp_path / "mlruns")
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment("test_parent_run_id")
+
+        with mlflow.start_run(tags={"flow_name": "training-flow"}) as run:
+            run_id = run.info.run_id
+            mlflow.set_tag("parent_run_id", run_id)
+
+        client = MlflowClient(tracking_uri=tracking_uri)
+        run_data = client.get_run(run_id)
+        assert run_data.data.tags.get("parent_run_id") == run_id, (
+            "parent_run_id tag must be set to the run's own ID for downstream flows"
+        )
+
+    def test_parent_run_id_matches_active_run(self, tmp_path: Path) -> None:
+        """parent_run_id must equal the active run's info.run_id (self-referential)."""
+        import mlflow
+        from mlflow.tracking import MlflowClient
+
+        tracking_uri = str(tmp_path / "mlruns")
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment("test_parent_self_ref")
+
+        with mlflow.start_run() as run:
+            mlflow.set_tag("parent_run_id", run.info.run_id)
+            captured_id = run.info.run_id
+
+        client = MlflowClient(tracking_uri=tracking_uri)
+        run_data = client.get_run(captured_id)
+        assert run_data.data.tags["parent_run_id"] == captured_id
+
+
 class TestTrainingFlowResultCheckpointDirs:
     def test_training_flow_result_has_checkpoint_dirs_field(
         self, tmp_path: Path
