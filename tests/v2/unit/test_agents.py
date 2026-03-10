@@ -243,7 +243,7 @@ class TestTracedGraphRun:
         traced_graph_run(mock_graph, state, trace_name="test_trace")
         mock_graph.invoke.assert_called_once_with(state)
 
-    @patch("minivess.agents.tracing._get_langfuse_client")
+    @patch("minivess.agents._deprecated.tracing._get_langfuse_client")
     def test_traced_run_creates_trace(self, mock_get_client: MagicMock) -> None:
         """Should create a Langfuse trace when client is available."""
         from minivess.agents._deprecated.tracing import traced_graph_run

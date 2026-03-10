@@ -178,7 +178,11 @@ Each of the 6 Prefect flows runs in its own Docker container:
 
 ## Critical Rules
 
-1. **uv ONLY** — Never use pip, conda, poetry, or requirements.txt. Use `uv add`, `uv sync`, `uv run`.
+1. **uv ONLY** — Never use pip, conda, poetry, or requirements.txt. Use `uv add`, `uv sync --all-extras`, `uv run`.
+   **`--all-extras` is REQUIRED for dev installs.** Without it, PRD-selected tools
+   (pandera, hypothesis, great_expectations, whylogs, langgraph, deepchecks, captum,
+   quantus, gradio, etc.) are missing and 126+ tests silently skip. Plain `uv sync`
+   is BANNED for development — always use `uv sync --all-extras`.
 2. **TDD MANDATORY** — All implementation MUST follow the self-learning-iterative-coder skill (`.claude/skills/self-learning-iterative-coder/SKILL.md`). Write failing tests FIRST, then implement. No exceptions.
 3. **Library-First (Non-Negotiable)** — Before implementing ANY algorithm, loss function,
    metric, or data processing step, ALWAYS search for existing implementations in established
@@ -388,8 +392,8 @@ experiment config YAML which specifies the full loss list.
 ## Quick Commands
 
 ```bash
-# Install dependencies
-uv sync
+# Install dependencies (--all-extras is REQUIRED for dev — without it, 126 tests silently skip)
+uv sync --all-extras
 
 # Lint and format
 uv run ruff check src/ tests/
