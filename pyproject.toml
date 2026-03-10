@@ -110,6 +110,8 @@ agents = [
     "pydantic-ai-slim[prefect,anthropic,openai]>=1.60,<2.0",
     "langfuse>=2.56,<3.0",
     "braintrust>=0.0.180,<1.0",
+    "langgraph>=0.4,<1.0",
+    "litellm>=1.70,<2.0",
 ]
 sam = [
     "sam2>=1.0,<2.0",
