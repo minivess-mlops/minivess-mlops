@@ -37,6 +37,7 @@ from minivess.orchestration.constants import (
     EXPERIMENT_EVALUATION,
     EXPERIMENT_TRAINING,
     FLOW_NAME_ANALYSIS,
+    FLOW_NAME_TRAIN,
     resolve_experiment_name,
 )
 from minivess.orchestration.mlflow_helpers import (
@@ -1835,7 +1836,7 @@ def _entry_point_from_env() -> dict[str, Any]:
     upstream = find_upstream_safely(
         tracking_uri=tracking_uri,
         experiment_name=upstream_exp,
-        upstream_flow="train",
+        upstream_flow=FLOW_NAME_TRAIN,
     )
     if not upstream:
         raise RuntimeError(

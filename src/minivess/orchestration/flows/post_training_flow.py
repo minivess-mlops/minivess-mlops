@@ -25,7 +25,7 @@ from prefect import flow, get_run_logger, task
 
 from minivess.config.post_training_config import PostTrainingConfig
 from minivess.observability.tracking import resolve_tracking_uri
-from minivess.orchestration.constants import FLOW_NAME_POST_TRAINING
+from minivess.orchestration.constants import FLOW_NAME_POST_TRAINING, FLOW_NAME_TRAIN
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -264,7 +264,7 @@ def post_training_flow(
         upstream = find_upstream_safely(
             tracking_uri=tracking_uri,
             experiment_name=upstream_exp,
-            upstream_flow="train",
+            upstream_flow=FLOW_NAME_TRAIN,
         )
         upstream_training_run_id = upstream["run_id"] if upstream else None
 
@@ -353,12 +353,11 @@ def post_training_flow(
 
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment(log_exp)
-        with mlflow.start_run(
-            tags={
-                "flow_name": "post-training-flow",
-                "upstream_training_run_id": upstream_training_run_id,
-            }
-        ) as active_run:
+        # MLflow tags must be strings — None causes TypeError in to_proto().
+        run_tags = {"flow_name": FLOW_NAME_POST_TRAINING}
+        if upstream_training_run_id is not None:
+            run_tags["upstream_training_run_id"] = upstream_training_run_id
+        with mlflow.start_run(tags=run_tags) as active_run:
             mlflow_run_id = active_run.info.run_id
             mlflow.log_metric("n_plugins_run", float(n_run))
             # Log per-plugin metrics with post_ prefix

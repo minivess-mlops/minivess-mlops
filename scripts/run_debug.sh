@@ -37,6 +37,10 @@ if [ -f "$REPO_ROOT/.env" ]; then
 fi
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 SUMMARY_DIR="outputs/debug"
+# Dev source overlay: bind-mount host src/ into containers so code changes
+# take effect without rebuilding the base image. The base image has src/ baked
+# in via COPY; this overlay shadows it with the latest host version.
+DEV_SRC_MOUNT="-v $REPO_ROOT/src/minivess:/app/src/minivess:ro"
 
 # ─── Argument parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -235,6 +239,7 @@ for model in "${MODELS_ARRAY[@]}"; do
   set +e
   run_or_dry "docker compose train ($model)" \
     docker compose $ENV_FILE_ARG -f "$FLOWS_COMPOSE" run --rm -T \
+      $DEV_SRC_MOUNT \
       -e EXPERIMENT="$EXPERIMENT" \
       -e HYDRA_OVERRIDES="$OVERRIDES" \
       -e MINIVESS_DEBUG_SUFFIX="$MINIVESS_DEBUG_SUFFIX" \
@@ -268,6 +273,7 @@ for flow in $FLOWS; do
   set +e
   run_or_dry "docker compose $flow" \
     docker compose $ENV_FILE_ARG -f "$FLOWS_COMPOSE" run --rm -T \
+      $DEV_SRC_MOUNT \
       -e UPSTREAM_EXPERIMENT="$EXPERIMENT" \
       -e EXPERIMENT="$EXPERIMENT" \
       -e MINIVESS_DEBUG_SUFFIX="$MINIVESS_DEBUG_SUFFIX" \
