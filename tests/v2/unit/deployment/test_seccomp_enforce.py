@@ -107,16 +107,40 @@ def test_train_enforce_includes_gpu_specific_syscalls() -> None:
 def test_compose_gpu_services_reference_enforce_profile() -> None:
     """train, hpo, hpo-worker must have seccomp security_opt pointing to train-enforce.json."""
     compose = yaml.safe_load(COMPOSE_FLOWS.read_text(encoding="utf-8"))
-    gpu_services = ["train", "hpo", "hpo-worker"]
+    gpu_services = ["train", "hpo", "hpo-worker", "post_training", "analyze"]
     for svc_name in gpu_services:
         svc = compose["services"][svc_name]
         security_opts: list[str] = svc.get("security_opt", [])
         seccomp_opts = [o for o in security_opts if "seccomp" in o]
         assert seccomp_opts, (
             f"Service '{svc_name}' missing seccomp in security_opt. "
-            'Add: security_opt: ["seccomp=deployment/seccomp/train-enforce.json"]'
+            'Add: security_opt: ["seccomp=seccomp/train-enforce.json"]'
         )
         assert "train-enforce.json" in seccomp_opts[0], (
             f"Service '{svc_name}' seccomp points to wrong profile: {seccomp_opts[0]}. "
-            "Must reference deployment/seccomp/train-enforce.json."
+            "Must reference seccomp/train-enforce.json (relative to compose dir)."
         )
+
+
+def test_compose_seccomp_paths_resolve_from_compose_dir() -> None:
+    """Seccomp paths in compose file must resolve relative to the compose file's directory.
+
+    Docker Compose V2 resolves security_opt seccomp= paths relative to
+    the compose file's parent directory, NOT the working directory.
+    """
+    compose = yaml.safe_load(COMPOSE_FLOWS.read_text(encoding="utf-8"))
+    compose_dir = COMPOSE_FLOWS.parent
+
+    for svc_name, svc in compose.get("services", {}).items():
+        security_opts: list[str] = svc.get("security_opt", [])
+        for opt in security_opts:
+            if not opt.startswith("seccomp="):
+                continue
+            seccomp_path = opt.split("=", 1)[1]
+            resolved = compose_dir / seccomp_path
+            assert resolved.exists(), (
+                f"Service '{svc_name}' seccomp path does not resolve: {opt}. "
+                f"Resolved to: {resolved}. "
+                "Paths are relative to compose file directory (deployment/), "
+                "not the repo root."
+            )
