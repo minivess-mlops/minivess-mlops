@@ -1,3 +1,9 @@
+---
+title: "DiLLS Agent Diagnostics Plan"
+status: planned
+created: ""
+---
+
 # DiLLS Agent Diagnostics — Implementation Plan (Issue #16)
 
 ## Current State

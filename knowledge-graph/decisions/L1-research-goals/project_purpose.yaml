@@ -1,0 +1,35 @@
+decision_id: project_purpose
+title: "Primary Project Purpose"
+level: L1-research-goals
+status: resolved
+
+options:
+  - id: self_learning
+    name: "Self-Learning Vehicle"
+    prior_probability: 0.50
+    posterior_probability: 0.85
+  - id: portfolio
+    name: "Portfolio Project"
+    prior_probability: 0.35
+    posterior_probability: 0.10
+  - id: research_publication
+    name: "Research Publication"
+    prior_probability: 0.15
+    posterior_probability: 0.05
+
+resolved_option: self_learning
+resolution_evidence:
+  - type: discussion
+    source: "docs/modernize-minivess-mlops-plan-prompt.md"
+    finding: "Primary goal is maximizing tool exposure and learning production-grade MLOps"
+
+implementation:
+  files: [CLAUDE.md]
+  tests: []
+
+conditional_on: []
+
+volatility:
+  classification: stable
+  next_review: "2026-09-13"
+  rationale: "Core project identity — unlikely to change"

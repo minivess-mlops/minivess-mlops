@@ -1,0 +1,735 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Implementation Plan: VesselNN Dataset Integration & Simulated Dataset Growth
+  Parent Issue: #574 (T4 — Register VesselNN as 4th dataset)
+  Date: 2026-03-12
+  Derived from: drift-monitoring-implementation-plan.xml T4 (expanded)
+
+  Scope:
+    - Fix VesselNN downloader to clone the DATASET repo (not code repo)
+    - Filename pairing table (denoised/ vs labels/ names don't match)
+    - TIFF → NIfTI conversion with standardized naming (vesselnn_01-12)
+    - DVC versioning for VesselNN + composite (MiniVess+VesselNN) datasets
+    - Cross-dataset drift detection (MiniVess reference vs VesselNN)
+    - Simulated dataset growth scenarios (clean, drifted, incremental, temporal)
+    - Model generalization assessment (no retraining — evaluate existing model on new data)
+    - Dashboard panels for dataset growth & cross-dataset drift
+
+  Out of Scope (future issues):
+    - Automated retraining trigger based on drift severity
+    - VesselNN as training data (currently external-test-only)
+    - DeepVess/TubeNet download automation (manual-only datasets)
+    - SPC control charts (Shewhart/CUSUM/EWMA)
+    - Grafana dashboard provisioning
+
+  Key Discovery — VesselNN Dataset:
+    - ACTUAL data lives in github.com/petteriTeikari/vesselNN_dataset (~234 MB)
+    - NOT in github.com/petteriTeikari/vesselNN (code repo, ~67 MB)
+    - 12 volumes as multi-layer TIFF in denoised/ + labels/ directories
+    - Image/label filenames DO NOT MATCH — hardcoded pairing table required
+    - Three acquisition campaigns: Burgess 2014 (4), Poon 2015 (5), Santos 2015 (3)
+    - Format: 8-bit TIFF (not NIfTI) — conversion step required
+    - Resolution: ~0.5 × 0.5 × 1.0 μm (registered in external_datasets.py)
+
+  Architecture:
+    - Phase 1 (T1-T3): Acquisition — download, pair, convert, prepare
+    - Phase 2 (T4):     DVC — composite dataset versioning
+    - Phase 3 (T5-T6):  Drift — cross-dataset feature extraction + detection
+    - Phase 4 (T7):     Simulation — dataset growth scenarios
+    - Phase 5 (T8-T9):  Generalization — model evaluation on composite data
+    - Phase 6 (T10-T11): Dashboard — growth & drift visualization
+    - Support (T12-T14): Docs, config, integration test
+-->
+<plan id="vesselnn-dataset-integration" version="1.1">
+  <!-- v1.1: Post-review fixes (6 CRITICAL, 7 MEDIUM issues resolved)
+       - C1: Fixed filename typo vessellnn → vesselnn
+       - C2: Added backward compatibility note for source_format change
+       - C3: Added persist_drift_reports() tmp_dir + mlflow context requirements
+       - C4: Added analysis_flow signature change scope note
+       - C5: Fixed dependency graph (T8 depends T7, T14 depends T8-T11)
+       - C6: Clarified EXPERIMENT_GENERALIZATION is a new constant
+       - M1: Kept T5/T6/T7 in data_flow.py (matches existing drift_detection_task pattern)
+       - M2: Added NIfTI loading step note (nibabel → numpy → extract_batch_features)
+       - M3: Added frozen dataclass constraint note (new section, not modified existing)
+       - M4: Added tensor↔DataFrame bridge note for Scenario D
+       - M6: Added downloaders.py vs downloader.py naming note
+  -->
+  <metadata>
+    <issue>602</issue>
+    <title>VesselNN Dataset Integration &amp; Simulated Dataset Growth</title>
+    <branch>feat/vesselnn-integration-602</branch>
+    <parent_plan>drift-monitoring-implementation-plan.xml (T4)</parent_plan>
+    <depends_on>
+      <issue>574</issue>  <!-- drift detection suite (T1-T3, T5-T9 DONE) -->
+    </depends_on>
+  </metadata>
+
+  <!-- ================================================================ -->
+  <!-- PHASE 1: VesselNN Download & Preparation                        -->
+  <!-- ================================================================ -->
+
+  <!-- T1: Fix download URL to point to dataset repo -->
+  <task id="T1" title="Fix download_vesselnn() to clone the dataset repo">
+    <description>
+      The current downloaders.py has _VESSELNN_URL pointing to
+      github.com/petteriTeikari/vesselNN (the CODE repo, ~67 MB).
+      The actual TIFF data lives in github.com/petteriTeikari/vesselNN_dataset
+      (~234 MB, separate repo). Fix the URL and update all registry entries.
+
+      Also fix source_format in acquisition_registry.py: VesselNN contains
+      TIFF files (not NIfTI as currently declared). This affects whether
+      convert_formats_task() runs for this dataset.
+
+      BACKWARD COMPATIBILITY NOTE: Changing source_format from "nifti" to "tiff"
+      will change existing acquisition flow behavior — convert_formats_task() will
+      no longer skip VesselNN. Tests that assert source_format=="nifti" must be
+      updated. This is correct behavior (the registry was wrong).
+
+      NAMING NOTE: Two downloader files exist in the codebase:
+        - downloaders.py (plural) — VesselNN + dispatch registry (edit this one)
+        - downloader.py (singular) — MiniVess/EBRAINS download (do NOT edit)
+    </description>
+    <files>
+      <file action="edit">src/minivess/data/downloaders.py</file>
+      <file action="edit">src/minivess/data/external_datasets.py</file>
+      <file action="edit">src/minivess/data/acquisition_registry.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_vesselnn_downloader.py</test_file>
+      <tests>
+        <test>test_vesselnn_url_points_to_dataset_repo — _VESSELNN_URL contains "vesselNN_dataset"</test>
+        <test>test_vesselnn_registry_source_format_is_tiff — ACQUISITION_REGISTRY["vesselnn"].source_format == "tiff"</test>
+        <test>test_vesselnn_external_dataset_url_matches — EXTERNAL_DATASETS["vesselnn"].source_url matches downloaders._VESSELNN_URL</test>
+        <test>test_download_vesselnn_calls_git_clone — mock subprocess.run, verify correct URL used</test>
+        <test>test_download_vesselnn_skip_existing — returns immediately if .git dir exists</test>
+      </tests>
+    </tdd>
+    <acceptance>
+      URL points to vesselNN_dataset; source_format is "tiff";
+      acquisition_registry, external_datasets, and downloaders all agree on URL.
+    </acceptance>
+  </task>
+
+  <!-- T2: VesselNN filename pairing table -->
+  <task id="T2" title="Create VesselNN filename pairing table">
+    <description>
+      In the vesselNN_dataset repo, filenames between denoised/ (images) and
+      labels/ directories DO NOT match. Each of the 3 acquisition campaigns
+      uses different naming conventions. A hardcoded pairing table is necessary
+      because the mismatch is in the original source data.
+
+      The table maps each of the 12 denoised TIFF files to its corresponding
+      label TIFF file, assigns a standardized name (vesselnn_01 through
+      vesselnn_12), and records the campaign (Burgess2014, Poon2015, Santos2015).
+
+      Pairing (from vesselNN_dataset repo inspection):
+        1. burgess2014_bbbDisruption_BM4D_denoised.tif ↔ burgess2014_bbbDisruption_labels_v1.tif
+        2. burgess2014_lowerRes_hiSNR_BM4D_denoised.tif ↔ burgess2014_lowerRes_hiSNR_labels_v1.tif
+        3. burgess2014_noisySparseVessels_BM4D_denoised.tif ↔ burgess2014_noisySparseVessels_labels_v1.tif
+        4. burgess2014_tgMouse_BM4D_denoised.tif ↔ burgess2014_tgMouse_labels_v1.tif
+        5. poon2015_BBB_Leakage_BM4D_denoised.tif ↔ poon2015_BBB_Leakage_manualLabels_v2.tif
+        6. poon2015_BBB_noLeakage_BM4D_denoised.tif ↔ poon2015_BBB_noLeakage_manualLabel_v2.tif
+        7. poon2015_mixedSize1_BM4D_denoised.tif ↔ poon2015_mixedSize1_manualLabel_v2.tif
+        8. poon2015_mixedSize2_BM4D_denoised.tif ↔ poon2015_mixedSize2_labels_v1.tif
+        9. poon2015_plaqueVessels_BM4D_denoised.tif ↔ poon2015_plaqueVessels_label_underSegmented.tif
+       10. santos2015_lowContrastVessels_BM4D_denoised.tif ↔ santos2015_lowContrastVessels_labelsMarc.tif
+       11. santos2015_mixedSizelowContrastVessels_BM4D_denoised.tif ↔ santos2015_mixedSizelowContrastVessels_labelsMarc.tif
+       12. santos2015_tumor_BM4D_denoised.tif ↔ santos2015_tumor_initLabel_v1.tif
+
+      NOTE: These filenames must be verified against the actual repo. If any
+      filename is wrong, the prepare step will fail with a clear FileNotFoundError
+      listing the expected and actual files.
+    </description>
+    <files>
+      <file action="create">src/minivess/data/vesselnn_pairing.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_vesselnn_pairing.py</test_file>
+      <tests>
+        <test>test_pairing_table_has_12_entries — len(VESSELNN_PAIRING_TABLE) == 12</test>
+        <test>test_pairing_table_has_required_keys — each entry has image_filename, label_filename, campaign, standardized_name</test>
+        <test>test_standardized_names_are_sequential — vesselnn_01 through vesselnn_12, zero-padded</test>
+        <test>test_campaigns_cover_all_three — {"burgess_2014", "poon_2015", "santos_2015"} all present</test>
+        <test>test_campaign_volume_counts — burgess=4, poon=5, santos=3</test>
+        <test>test_no_duplicate_image_filenames — all image filenames unique</test>
+        <test>test_no_duplicate_label_filenames — all label filenames unique</test>
+        <test>test_get_vesselnn_pairs_validates_existence — raises FileNotFoundError on missing file with helpful message</test>
+        <test>test_get_vesselnn_pairs_returns_tuples — returns list of (image_path, label_path, standardized_name)</test>
+        <test>test_write_pairing_manifest_creates_json — JSON parseable with 12 entries</test>
+      </tests>
+    </tdd>
+    <acceptance>
+      Table has 12 entries spanning 3 campaigns; standardized names sequential;
+      manifest JSON validates; no duplicate filenames.
+    </acceptance>
+  </task>
+
+  <!-- T3: prepare_vesselnn_task in acquisition flow -->
+  <task id="T3" title="Create prepare_vesselnn_task() in acquisition flow" depends="T1,T2">
+    <description>
+      After download_vesselnn() clones the dataset repo, the TIFF files need to be:
+        (a) paired via T2's table
+        (b) converted to NIfTI via existing convert_tiff_to_nifti()
+        (c) placed in standardized images/ + labels/ directories
+
+      The prepare function:
+        1. Reads TIFF files from clone_dir/denoised/ and clone_dir/labels/
+        2. Uses get_vesselnn_pairs() to match them
+        3. Converts each pair to NIfTI with voxel_spacing=(0.5, 0.5, 1.0)
+        4. Saves as output_dir/images/vesselnn_NN.nii.gz + output_dir/labels/vesselnn_NN.nii.gz
+        5. Writes pairing_manifest.json to output_dir/
+
+      Integration into acquisition_flow.py:
+        - After download_dataset_task() returns DOWNLOADED for vesselnn
+        - Call prepare_vesselnn_task() (which handles TIFF→NIfTI internally)
+        - Skip convert_formats_task() for vesselnn (preparation already handles it)
+    </description>
+    <files>
+      <file action="create">src/minivess/data/vesselnn_preparation.py</file>
+      <file action="edit">src/minivess/orchestration/flows/acquisition_flow.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_vesselnn_preparation.py</test_file>
+      <tests>
+        <test>test_prepare_vesselnn_creates_images_labels_dirs — using synthetic TIFF fixtures (tifffile.imwrite)</test>
+        <test>test_prepare_vesselnn_outputs_standardized_names — vesselnn_01.nii.gz through vesselnn_12.nii.gz</test>
+        <test>test_prepare_vesselnn_correct_voxel_spacing — NIfTI affine diagonal matches (0.5, 0.5, 1.0, 1.0)</test>
+        <test>test_prepare_vesselnn_writes_manifest — pairing_manifest.json with 12 entries</test>
+        <test>test_prepare_vesselnn_skip_existing — skip_existing=True returns early if images/ populated</test>
+        <test>test_prepare_vesselnn_raises_on_missing_tiff — clear FileNotFoundError message</test>
+        <test>test_prepare_vesselnn_task_has_prefect_decorator — AST inspection for @task</test>
+        <test>test_acquisition_flow_calls_prepare_for_vesselnn — mock, verify task called after download</test>
+      </tests>
+    </tdd>
+    <acceptance>
+      Synthetic TIFF fixtures converted to 12 NIfTI pairs with correct names,
+      spacing, and manifest; acquisition flow wires task correctly.
+    </acceptance>
+  </task>
+
+  <!-- ================================================================ -->
+  <!-- PHASE 2: DVC Versioning                                         -->
+  <!-- ================================================================ -->
+
+  <!-- T4: Composite dataset versioning -->
+  <task id="T4" title="DVC versioning for VesselNN and composite datasets" depends="T3">
+    <description>
+      After VesselNN is prepared, create DVC tracking for:
+        1. The VesselNN dataset itself (data/raw/vesselnn → data/external/vesselnn.dvc)
+        2. A composite dataset (data/composite/v{date}/) combining MiniVess + VesselNN
+
+      The composite dataset is a directory containing symlinks (or copies) to NIfTI
+      files from all constituent datasets, with a composite_manifest.json recording
+      which datasets contributed, their DVC hashes, and volume counts.
+
+      Why physical directory (not just metadata): Docker containers need actual
+      files on volume-mounted paths. Symlinks across mount points fail silently.
+      MONAI CacheDataset needs a flat directory of NIfTI files.
+
+      DVC versioning scheme:
+        - Individual: data/vesselnn/v{version} (git tags)
+        - Composite: data/composite/v{date} (git tags)
+        - composite_manifest.json records constituent dataset hashes
+    </description>
+    <files>
+      <file action="edit">src/minivess/data/versioning.py</file>
+      <file action="edit">src/minivess/data/external_datasets.py</file>
+      <file action="edit">src/minivess/orchestration/flows/acquisition_flow.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_composite_versioning.py</test_file>
+      <tests>
+        <test>test_composite_dataset_version_dataclass — fields: datasets, version, created_at, hashes</test>
+        <test>test_create_composite_version_creates_directory — composite dir with NIfTI files</test>
+        <test>test_create_composite_version_writes_manifest — JSON with constituent dataset names + hashes</test>
+        <test>test_composite_hash_deterministic — same inputs → same hash</test>
+        <test>test_composite_manifest_records_volume_counts — per-dataset volume count</test>
+        <test>test_dvc_commit_handles_composite — mock subprocess, verify dvc add on composite dir</test>
+        <test>test_composite_dvc_config_registered — DVC_CONFIGS has "composite" entry</test>
+      </tests>
+    </tdd>
+    <acceptance>
+      Composite directory created with manifest; DVC add invoked;
+      deterministic hashing for change detection.
+    </acceptance>
+  </task>
+
+  <!-- ================================================================ -->
+  <!-- PHASE 3: Cross-Dataset Feature Extraction & Drift Detection     -->
+  <!-- ================================================================ -->
+
+  <!-- T5: Extract features from external dataset volumes -->
+  <task id="T5" title="Extract features from VesselNN volumes via data flow task" depends="T3">
+    <description>
+      New @task in data_flow.py that loads NIfTI volumes from an external dataset
+      directory and extracts the 9 statistical features (mean, std, min, max, p5,
+      p95, snr, contrast, entropy) using existing extract_batch_features().
+
+      The extracted features are returned as a DataFrame and optionally logged
+      as an MLflow artifact (CSV) for downstream drift detection.
+
+      IMPLEMENTATION NOTE: extract_batch_features() takes list[NDArray[np.float32]],
+      NOT file paths. This task must:
+        1. Discover NIfTI files in the dataset directory (glob *.nii.gz)
+        2. Load each volume via nibabel: nib.load(path).get_fdata().astype(np.float32)
+        3. Pass the list of arrays to extract_batch_features()
+      This NIfTI loading step is the new code; feature extraction reuses existing code.
+
+      This task is generic — works for any external dataset, not just VesselNN.
+    </description>
+    <files>
+      <file action="edit">src/minivess/orchestration/flows/data_flow.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_external_feature_extraction.py</test_file>
+      <tests>
+        <test>test_extract_external_features_task_exists — function exists with @task decorator</test>
+        <test>test_extract_external_features_returns_dataframe — 9 columns, N rows</test>
+        <test>test_extracted_features_schema_matches_reference — same column names as MiniVess features</test>
+        <test>test_extract_features_handles_empty_dir — returns empty DataFrame</test>
+        <test>test_extract_features_logs_artifact — mock MLflow, verify CSV artifact logged</test>
+      </tests>
+    </tdd>
+    <acceptance>
+      9-feature DataFrame extracted from NIfTI volumes; schema matches reference;
+      empty directory handled gracefully.
+    </acceptance>
+  </task>
+
+  <!-- T6: Cross-dataset drift detection -->
+  <task id="T6" title="Cross-dataset drift detection (MiniVess vs external)" depends="T5">
+    <description>
+      New @task in data_flow.py that runs FeatureDriftDetector for each external
+      dataset against the MiniVess reference features. This is the "natural drift"
+      use case — VesselNN data from different labs shows genuine covariate shift.
+
+      This serves as ground truth for drift detection sensitivity calibration:
+      we EXPECT to see drift between datasets from different labs/microscopes,
+      and the magnitude tells us how sensitive our detector is.
+
+      The task:
+        1. Takes reference_features (MiniVess) and a dict of external DataFrames
+        2. Runs FeatureDriftDetector for each external dataset
+        3. Calls persist_drift_reports() per external dataset inside mlflow.start_run()
+        4. Returns per-dataset DriftDetectionResult with per-feature breakdown
+        5. Logs results under drift_reports/{dataset_name}/ in MLflow
+
+      IMPLEMENTATION NOTE: persist_drift_reports() requires:
+        - tmp_dir: Path — for intermediate HTML/JSON files (use volume-mounted path,
+          NOT /tmp or tempfile.mkdtemp per CLAUDE.md Rule #18)
+        - Must be called inside an active mlflow.start_run() context
+        - Each external dataset gets its own MLflow run for artifact isolation
+    </description>
+    <files>
+      <file action="edit">src/minivess/orchestration/flows/data_flow.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_cross_dataset_drift.py</test_file>
+      <tests>
+        <test>test_cross_dataset_drift_task_exists — @task decorator present</test>
+        <test>test_detects_drift_on_shifted_features — synthetic features with shifted distributions</test>
+        <test>test_no_drift_on_identical_features — same distribution → drift_detected=False</test>
+        <test>test_returns_per_dataset_results — dict keyed by dataset name</test>
+        <test>test_result_includes_per_feature_scores — all 9 features have p-values</test>
+        <test>test_drift_reports_saved_per_dataset — artifact path includes dataset name</test>
+      </tests>
+    </tdd>
+    <acceptance>
+      Drift detected between shifted synthetic features; per-feature p-values available;
+      MLflow artifacts saved under drift_reports/{dataset_name}/.
+    </acceptance>
+  </task>
+
+  <!-- ================================================================ -->
+  <!-- PHASE 4: Simulated Dataset Growth Scenarios                     -->
+  <!-- ================================================================ -->
+
+  <!-- T7: DatasetGrowthSimulator class -->
+  <task id="T7" title="DatasetGrowthSimulator with 4 growth scenarios" depends="T6">
+    <description>
+      New library class implementing 4 dataset growth simulation scenarios for
+      drift monitoring validation. Each scenario measures how drift scores change
+      as the dataset composition changes.
+
+      Scenario A: Clean Addition
+        - Merge VesselNN features into MiniVess features without modification
+        - Measure drift score of combined vs reference (MiniVess-only)
+        - Represents: "New lab joins study, data is genuine"
+
+      Scenario B: Drifted Addition
+        - Apply synthetic drift (from drift_synthetic.py) to VesselNN features before merge
+        - Parameterized by drift_type and severity
+        - Represents: "New data has quality problems"
+
+      Scenario C: Incremental Growth
+        - Add VesselNN volumes one-by-one (1 vol, 2 vols, ..., 12 vols)
+        - Track drift score evolution curve
+        - Represents: "How fast does drift compound with more external data?"
+
+      Scenario D: Temporal Simulation
+        - Use SyntheticAcquisitionSimulator with real VesselNN volumes as base
+        - Apply progressive drift schedules (linear, exponential, step)
+        - Extract features from each drifted volume AFTER applying drift
+        - Represents: "What happens over time as microscope degrades?"
+
+      IMPLEMENTATION NOTE: SyntheticAcquisitionSimulator operates on torch.Tensor
+      volumes, not DataFrames. Scenario D must bridge the two domains:
+        1. Load VesselNN NIfTI as numpy → convert to torch.Tensor
+        2. Apply drift via SyntheticAcquisitionSimulator.generate_timepoint()
+        3. Convert drifted tensors back to numpy
+        4. Extract features via extract_volume_features()
+        5. Build DataFrame for FeatureDriftDetector
+      Steps 1-5 are an adapter function, not changes to the simulator itself.
+
+      The class is a pure computation — no Prefect/Docker dependency.
+      A @task-wrapped entry point in data_flow.py invokes it.
+    </description>
+    <files>
+      <file action="create">src/minivess/data/growth_simulator.py</file>
+      <file action="edit">src/minivess/orchestration/flows/data_flow.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_growth_simulator.py</test_file>
+      <tests>
+        <test>test_growth_scenario_result_dataclass — fields: scenario_name, drift_score, feature_scores, n_volumes_total</test>
+        <test>test_scenario_clean_addition_no_drift — identical distributions → drift_score ≈ 0</test>
+        <test>test_scenario_clean_addition_with_shift — shifted distributions → positive drift_score</test>
+        <test>test_scenario_drifted_addition_increases_score — severity=0.5 produces higher drift than severity=0.0</test>
+        <test>test_scenario_incremental_growth_returns_curve — list of GrowthScenarioResult with increasing n_volumes</test>
+        <test>test_incremental_curve_monotonic_for_drifted_data — drift score non-decreasing with more drifted volumes</test>
+        <test>test_scenario_temporal_uses_schedules — drift schedule severity affects output</test>
+        <test>test_simulate_growth_task_has_prefect_decorator — @task decorator on entry point</test>
+      </tests>
+    </tdd>
+    <acceptance>
+      All 4 scenarios produce GrowthScenarioResult; incremental curve is a list;
+      drifted addition increases drift score vs clean addition.
+    </acceptance>
+  </task>
+
+  <!-- ================================================================ -->
+  <!-- PHASE 5: Model Generalization Assessment (No Retraining)        -->
+  <!-- ================================================================ -->
+
+  <!-- T8: Evaluate existing models on composite dataset -->
+  <task id="T8" title="Model generalization assessment on VesselNN" depends="T4,T6,T7">
+    <description>
+      Load existing MiniVess-trained model checkpoints and evaluate on VesselNN
+      WITHOUT retraining. This tells us: "How much does our model degrade when
+      exposed to data from a different lab?"
+
+      The assessment:
+        1. Discovers most recent training run via FlowContract
+        2. Loads model checkpoint (best_val_loss.pth)
+        3. Builds MONAI DataLoader for VesselNN NIfTI volumes
+        4. Runs sliding_window_inference on each volume
+        5. Computes metrics: DSC, clDice per volume
+        6. Compares MiniVess-only metrics vs VesselNN metrics
+        7. Logs generalization gap: delta_dsc = mean(vesselnn_dsc) - mean(minivess_dsc)
+        8. Saves to MLflow experiment: minivess_generalization_assessment
+
+      This runs in the analysis flow container (GPU required for inference).
+      The generalization config is a YAML experiment config, not hardcoded.
+
+      SCOPE NOTE: Adding external_test_dirs to run_analysis_flow() is a non-trivial
+      signature change. The function currently has no such parameter. This change
+      must also update:
+        - PipelineTriggerChain in trigger.py (if it passes kwargs to analysis flow)
+        - Docker Compose flow definitions (if params are env-var-driven)
+        - Any deployment configurations that reference the flow signature
+      The external_test_dirs parameter MUST have a default (None) to avoid
+      breaking existing callers.
+
+      NOTE: This task requires GPU and real model weights. The TDD tests use
+      mock models and synthetic NIfTI to test the pipeline logic, not the
+      actual inference accuracy.
+    </description>
+    <files>
+      <file action="create">configs/experiment/vesselnn_generalization.yaml</file>
+      <file action="edit">src/minivess/orchestration/constants.py</file>
+      <file action="edit">src/minivess/orchestration/flows/analysis_flow.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_generalization_assessment.py</test_file>
+      <tests>
+        <test>test_experiment_generalization_constant_added — EXPERIMENT_GENERALIZATION defined in constants.py (new constant)</test>
+        <test>test_vesselnn_generalization_config_parseable — YAML loads without error</test>
+        <test>test_analysis_flow_accepts_external_test_dirs — parameter present in function signature</test>
+        <test>test_evaluation_logs_per_dataset_metrics — mock model, verify eval_vesselnn_all_dsc logged</test>
+        <test>test_generalization_gap_computed — delta_dsc = vesselnn_dsc - minivess_dsc logged as metric</test>
+      </tests>
+    </tdd>
+    <acceptance>
+      Generalization constant registered; config parseable; analysis flow accepts
+      external test dirs; per-dataset metrics and generalization gap logged.
+    </acceptance>
+  </task>
+
+  <!-- T9: VesselNN campaign-level subsets -->
+  <task id="T9" title="Register VesselNN campaign subsets for per-campaign evaluation" depends="T2,T8">
+    <description>
+      The 12 VesselNN volumes come from 3 acquisition campaigns. Registering
+      them as DatasetSubsets enables per-campaign evaluation (Burgess 2014
+      performance vs Poon 2015 vs Santos 2015).
+
+      This reveals whether model degradation is uniform across campaigns or
+      concentrated in specific acquisition conditions (e.g., low contrast,
+      tumor vasculature, BBB disruption).
+
+      Subsets:
+        - burgess_2014: volumes 1-4 (BBB disruption, sparse vessels, transgenic, low-res)
+        - poon_2015: volumes 5-9 (BBB leakage, mixed-size, plaque vasculature)
+        - santos_2015: volumes 10-12 (low contrast, mixed-size low contrast, tumor)
+    </description>
+    <files>
+      <file action="edit">src/minivess/data/vesselnn_pairing.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_vesselnn_subsets.py</test_file>
+      <tests>
+        <test>test_get_vesselnn_subsets_returns_3 — exactly 3 subsets</test>
+        <test>test_subset_indices_cover_all_12 — union of all indices = {0..11}, no overlaps</test>
+        <test>test_subset_names_match_campaigns — burgess_2014, poon_2015, santos_2015</test>
+        <test>test_burgess_has_4_volumes — indices 0-3</test>
+        <test>test_poon_has_5_volumes — indices 4-8</test>
+        <test>test_santos_has_3_volumes — indices 9-11</test>
+      </tests>
+    </tdd>
+    <acceptance>
+      3 campaign subsets with correct volume indices; full coverage of all 12 volumes.
+    </acceptance>
+  </task>
+
+  <!-- ================================================================ -->
+  <!-- PHASE 6: Dashboard Integration                                  -->
+  <!-- ================================================================ -->
+
+  <!-- T10: Dashboard "Dataset Growth & Drift" panel -->
+  <task id="T10" title="Dashboard dataset growth and drift visualization panel" depends="T7,T8">
+    <description>
+      New dashboard section showing dataset growth over time with associated
+      drift scores. This panel helps researchers answer:
+        - "How much has our data distribution changed since the last version?"
+        - "Which features drift most when adding external data?"
+        - "How does model performance change with dataset composition?"
+
+      The section includes:
+        - Timeline of DVC versions with constituent datasets
+        - Drift score per version (Tier 1 dataset_drift_score)
+        - Feature-level drift breakdown (which of 9 features drift most)
+        - Generalization gap per dataset version (if available)
+        - Growth scenario results (clean/drifted/incremental curves)
+
+      Data source: MLflow artifacts from drift detection and generalization runs.
+
+      IMPLEMENTATION NOTE: DataDashboardSection is @dataclass(frozen=True).
+      New fields (dvc_versions, drift_scores, etc.) MUST have defaults (None or
+      empty dict) to avoid breaking existing instantiation sites in
+      collect_data_section_task(). A separate DatasetGrowthDashboardSection
+      dataclass is preferred — add it as a new section rather than modifying
+      the frozen DataDashboardSection.
+    </description>
+    <files>
+      <file action="edit">src/minivess/orchestration/flows/dashboard_sections.py</file>
+      <file action="edit">src/minivess/orchestration/flows/dashboard_flow.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_dashboard_growth_panel.py</test_file>
+      <tests>
+        <test>test_dataset_growth_section_dataclass — fields: dvc_versions, drift_scores, feature_breakdown, generalization_gap</test>
+        <test>test_collect_growth_section_task_exists — @task decorator</test>
+        <test>test_collect_growth_queries_mlflow — mock MLflow client, verify artifact queries</test>
+        <test>test_growth_section_handles_no_data — returns empty/status when no growth runs exist</test>
+        <test>test_growth_report_markdown_contains_drift_table — verify table in markdown output</test>
+      </tests>
+    </tdd>
+    <acceptance>
+      Dashboard includes growth section; markdown report has drift table;
+      graceful handling when no data available.
+    </acceptance>
+  </task>
+
+  <!-- T11: Dashboard cross-dataset drift section -->
+  <task id="T11" title="Extend dashboard with cross-dataset drift comparison" depends="T6,T10">
+    <description>
+      Extend the existing DataDashboardSection to include cross-dataset drift
+      results — a table showing drift scores between MiniVess and each external
+      dataset, with per-feature breakdown.
+
+      This supplements the existing drift_summary (temporal drift) with spatial
+      drift (between datasets from different labs/instruments).
+    </description>
+    <files>
+      <file action="edit">src/minivess/orchestration/flows/dashboard_sections.py</file>
+      <file action="edit">src/minivess/orchestration/flows/dashboard_flow.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_dashboard_cross_dataset_drift.py</test_file>
+      <tests>
+        <test>test_data_section_has_cross_dataset_drift_field — field exists on DataDashboardSection</test>
+        <test>test_cross_dataset_drift_populated_from_mlflow — mock MLflow, verify data loaded</test>
+        <test>test_cross_dataset_drift_rendered_in_markdown — table in report output</test>
+        <test>test_cross_dataset_drift_handles_missing — None/empty when no external data</test>
+      </tests>
+    </tdd>
+    <acceptance>
+      Dashboard shows per-external-dataset drift scores; handles missing data gracefully.
+    </acceptance>
+  </task>
+
+  <!-- ================================================================ -->
+  <!-- SUPPORTING TASKS                                                -->
+  <!-- ================================================================ -->
+
+  <!-- T12: Documentation update -->
+  <task id="T12" title="Update docs/datasets/README.md with VesselNN preparation details" depends="T3">
+    <description>
+      Expand the VesselNN section in the dataset README with:
+        - Preparation instructions (automatic via acquisition flow)
+        - Filename pairing note (why standardized names are needed)
+        - Campaign descriptions with volume counts
+        - Expected on-disk layout after preparation
+        - "Composite Datasets" section documenting data/composite/ versioning
+    </description>
+    <files>
+      <file action="edit">docs/datasets/README.md</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_vesselnn_docs.py</test_file>
+      <tests>
+        <test>test_datasets_readme_mentions_vesselnn_preparation — "prepare_vesselnn" or "vesselnn_pairing" in file</test>
+        <test>test_datasets_readme_mentions_composite — "composite" section present</test>
+      </tests>
+    </tdd>
+    <acceptance>README documents the full VesselNN pipeline and composite versioning.</acceptance>
+  </task>
+
+  <!-- T13: Hydra-zen data config for VesselNN -->
+  <task id="T13" title="Add configs/data/vesselnn.yaml for Hydra-zen composition" depends="T3">
+    <description>
+      Hydra-zen config file for the VesselNN dataset. Used by
+      compose_experiment_config() when an experiment references vesselnn.
+
+      Contents:
+        - data_dir: data/raw/vesselnn
+        - n_volumes: 12
+        - split_mode: none (external test only — no training splits)
+        - campaigns: list of {name, volumes} for each acquisition campaign
+        - voxel_spacing: [0.5, 0.5, 1.0]
+    </description>
+    <files>
+      <file action="create">configs/data/vesselnn.yaml</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_vesselnn_config.py</test_file>
+      <tests>
+        <test>test_vesselnn_yaml_parseable — yaml.safe_load succeeds</test>
+        <test>test_vesselnn_yaml_has_required_keys — data_dir, n_volumes, split_mode present</test>
+        <test>test_vesselnn_yaml_n_volumes_is_12 — matches registry</test>
+        <test>test_vesselnn_yaml_split_mode_none — external test only</test>
+      </tests>
+    </tdd>
+    <acceptance>Config parseable with correct metadata; split_mode=none for test-only use.</acceptance>
+  </task>
+
+  <!-- T14: Integration test — full VesselNN pipeline -->
+  <task id="T14" title="Integration test: VesselNN preparation to drift detection" depends="T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11">
+    <description>
+      End-to-end integration test using synthetic TIFF fixtures (not real data).
+      Exercises the complete pipeline:
+        1. Create synthetic TIFF files mimicking vesselNN_dataset layout
+        2. Run prepare_vesselnn() → produces NIfTI pairs
+        3. Extract features from prepared volumes
+        4. Run cross-dataset drift detection (synthetic ref vs synthetic vesselnn)
+        5. Create composite dataset version
+        6. Run incremental growth scenario
+        7. Verify all MLflow artifacts produced
+
+      Marked @pytest.mark.integration — excluded from staging tier.
+    </description>
+    <files>
+      <file action="create">tests/v2/integration/test_vesselnn_pipeline_e2e.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/integration/test_vesselnn_pipeline_e2e.py</test_file>
+      <tests>
+        <test>test_vesselnn_tiff_to_nifti_pipeline — synthetic TIFFs → NIfTI pairs with correct spacing</test>
+        <test>test_vesselnn_features_differ_from_minivess — different distributions detectable</test>
+        <test>test_vesselnn_composite_version_created — composite dir + manifest</test>
+        <test>test_vesselnn_incremental_growth_curve — drift scores for 1-6 volumes</test>
+        <test>test_vesselnn_all_mlflow_artifacts_present — drift reports, feature CSVs</test>
+      </tests>
+    </tdd>
+    <acceptance>
+      Full pipeline exercises all phases with synthetic data; all artifacts produced.
+    </acceptance>
+  </task>
+
+  <!-- ================================================================ -->
+  <!-- DEPENDENCY GRAPH                                                -->
+  <!-- ================================================================ -->
+  <!--
+    T1 (fix downloader) ─────┐
+                              │
+    T2 (pairing table) ───────┤
+                              ▼
+                        T3 (prepare_vesselnn) ──────┬──────────────┐
+                              │                     │              │
+                              ▼                     ▼              ▼
+                        T4 (DVC versioning)   T5 (features)   T12 (docs)
+                              │                     │              │
+                              │                     ▼              │
+                              │              T6 (cross-dataset     │
+                              │                   drift)           │
+                              │                     │              │
+                              ▼                     ▼              │
+                        T8 (generalization) ◄─ T7 (growth sim)   T13 (config)
+                              │                     │
+                              ▼                     │
+                        T9 (campaign subsets)        │
+                              │                     │
+                              ▼                     ▼
+                        T10 (dashboard growth panel)
+                              │
+                              ▼
+                        T11 (dashboard cross-dataset)
+                              │
+                              ▼
+                        T14 (integration test)
+  -->
+
+  <!-- ================================================================ -->
+  <!-- RISK REGISTER                                                   -->
+  <!-- ================================================================ -->
+  <!--
+    R1: Pairing table accuracy (T2)
+        Risk: Filenames in vesselNN_dataset may differ from what web search found.
+        Mitigation: prepare_vesselnn raises FileNotFoundError listing expected vs actual.
+        Impact: LOW — easy to fix in pairing table.
+
+    R2: Dataset size (T1)
+        Risk: ~234 MB git clone may be slow in CI/Docker.
+        Mitigation: git clone - -depth 1 - -single-branch already used.
+        Impact: LOW — one-time download, cached by DVC.
+
+    R3: TIFF format variations (T3)
+        Risk: Different campaigns may use different bit depths or axis orders.
+        Mitigation: tifffile.imread() handles most variants; add shape validation.
+        Impact: MEDIUM — may need per-campaign normalization.
+
+    R4: Docker volume mounts (T3)
+        Risk: Git clone creates files inside container. If not on volume mount, lost on exit.
+        Mitigation: Clone target is /app/data/raw/vesselnn (volume-mounted).
+        Impact: LOW — existing pattern.
+
+    R5: Drift sensitivity calibration (T6)
+        Risk: Natural inter-dataset drift might be too subtle for default threshold.
+        Mitigation: Log actual p-values; let researcher adjust threshold.
+        Impact: LOW — informational, not blocking.
+
+    R6: Model evaluation GPU (T8)
+        Risk: Requires GPU container with model weights available.
+        Mitigation: TDD tests use mock models; real evaluation deferred to GPU instance.
+        Impact: LOW — tests pass without GPU.
+  -->
+</plan>

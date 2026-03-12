@@ -22,3 +22,8 @@ docs/prd/bibliography.yaml:generic-api-key:3795
 docs/prd/bibliography.yaml:generic-api-key:3808
 docs/prd/bibliography.yaml:generic-api-key:3833
 docs/prd/bibliography.yaml:generic-api-key:3846
+knowledge-graph/decisions/L3-technology/hpo_engine.yaml:generic-api-key:16
+knowledge-graph/decisions/L3-technology/augmentation_library.yaml:generic-api-key:16
+knowledge-graph/decisions/L3-technology/xai_voxel_tool.yaml:generic-api-key:12
+knowledge-graph/decisions/L3-technology/xai_meta_tool.yaml:generic-api-key:12
+knowledge-graph/decisions/L3-technology/xai_meta_tool.yaml:generic-api-key:15

@@ -1,0 +1,22 @@
+decision_id: label_quality_tool
+title: "Label Quality Assessment"
+level: L3-technology
+status: config_only
+options:
+  - {id: cleanlab, name: "Cleanlab", prior_probability: 0.40, posterior_probability: 0.50}
+  - {id: label_studio_agreement, name: "Label Studio Agreement", prior_probability: 0.30, posterior_probability: 0.30}
+  - {id: custom_topology_checks, name: "Custom Topology Checks", prior_probability: 0.20, posterior_probability: 0.15}
+  - {id: none, name: "None", prior_probability: 0.10, posterior_probability: 0.05}
+resolution_evidence:
+  - type: implementation
+    source: "pyproject.toml"
+    finding: "Cleanlab in optional dependencies"
+implementation:
+  files: []
+  tests: []
+conditional_on:
+  - {parent_decision_id: data_validation_depth, influence_strength: moderate}
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "Tool selected but not deeply integrated"

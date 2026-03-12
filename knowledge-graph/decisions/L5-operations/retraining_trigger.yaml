@@ -1,0 +1,20 @@
+decision_id: retraining_trigger
+title: "Retraining Trigger Mechanism"
+level: L5-operations
+status: not_started
+options:
+  - {id: drift_alert_webhook, name: "Drift Alert Webhook", prior_probability: 0.35, posterior_probability: 0.35}
+  - {id: scheduled_periodic, name: "Scheduled Periodic", prior_probability: 0.25, posterior_probability: 0.25}
+  - {id: manual_only, name: "Manual Only", prior_probability: 0.30, posterior_probability: 0.30}
+  - {id: active_learning_loop, name: "Active Learning Loop", prior_probability: 0.10, posterior_probability: 0.10}
+resolution_evidence: []
+implementation:
+  files: []
+  tests: []
+conditional_on:
+  - {parent_decision_id: gpu_compute, influence_strength: moderate}
+  - {parent_decision_id: gitops_engine, influence_strength: strong}
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "Depends on drift monitoring and GitOps setup"

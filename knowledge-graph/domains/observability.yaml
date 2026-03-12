@@ -1,0 +1,66 @@
+domain: observability
+description: MLflow, DuckDB, Langfuse, Braintrust, LiteLLM, agents, XAI
+last_reviewed: "2026-03-13"
+
+decisions:
+  experiment_tracker:
+    status: resolved
+    winner: mlflow_local
+    rationale: "MLflow local filesystem backend + DuckDB analytics"
+    implementation: [src/minivess/observability/tracking.py, src/minivess/observability/analytics.py]
+    prd_node: knowledge-graph/decisions/L3-technology/experiment_tracker.yaml
+
+  llm_tracing:
+    status: resolved
+    winner: langfuse_self_hosted
+    implementation: src/minivess/observability/langfuse_tracing.py
+    prd_node: knowledge-graph/decisions/L3-technology/llm_tracing.yaml
+
+  llm_evaluation:
+    status: resolved
+    winner: braintrust_autoevals
+    implementation: src/minivess/observability/braintrust_eval.py
+    prd_node: knowledge-graph/decisions/L3-technology/llm_evaluation.yaml
+
+  llm_provider_strategy:
+    status: resolved
+    winner: litellm_multi_provider
+    implementation: src/minivess/agents/
+    prd_node: knowledge-graph/decisions/L3-technology/llm_provider_strategy.yaml
+
+  xai_strategy:
+    status: partial
+    candidates: [multi_layer_xai, gradcam_only]
+    prd_node: knowledge-graph/decisions/L2-architecture/xai_strategy.yaml
+
+  xai_voxel_tool:
+    status: config_only
+    candidates: [captum_gradcam, captum_integrated_gradients]
+    prd_node: knowledge-graph/decisions/L3-technology/xai_voxel_tool.yaml
+
+  xai_meta_tool:
+    status: config_only
+    candidates: [shap_tabular, quantus_meta_eval, both_shap_quantus]
+    prd_node: knowledge-graph/decisions/L3-technology/xai_meta_tool.yaml
+
+  observability_depth:
+    status: resolved
+    winner: full_stack_otel
+    rationale: "Prometheus + Grafana + MLflow + Langfuse full stack"
+    implementation: [deployment/docker-compose.yml]
+    prd_node: knowledge-graph/decisions/L2-architecture/observability_depth.yaml
+
+  agent_architecture:
+    status: resolved
+    winner: langgraph_stateful
+    rationale: "Pydantic AI + PrefectAgent wrappers (ADR 0007)"
+    implementation: src/minivess/agents/
+    prd_node: knowledge-graph/decisions/L2-architecture/agent_architecture.yaml
+
+metalearning: []
+
+planning_docs:
+  - file: docs/planning/langfuse-braintrust-integration-report.md
+    status: implemented
+
+open_issues: []

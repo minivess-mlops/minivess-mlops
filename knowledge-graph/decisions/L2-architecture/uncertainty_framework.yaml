@@ -1,0 +1,43 @@
+decision_id: uncertainty_framework
+title: "Uncertainty Quantification Approach"
+level: L2-architecture
+status: resolved
+
+options:
+  - id: conformal_prediction
+    name: "Conformal Prediction (MAPIE)"
+    prior_probability: 0.40
+    posterior_probability: 0.70
+  - id: mc_dropout
+    name: "MC Dropout"
+    prior_probability: 0.25
+    posterior_probability: 0.15
+  - id: deep_ensemble_disagreement
+    name: "Deep Ensemble Disagreement"
+    prior_probability: 0.20
+    posterior_probability: 0.10
+  - id: swag_bayesian
+    name: "SWAG Bayesian"
+    prior_probability: 0.15
+    posterior_probability: 0.05
+
+resolved_option: conformal_prediction
+resolution_evidence:
+  - type: literature
+    citation_key: romano_2019_conformal
+    source: "https://arxiv.org/abs/1905.03222"
+    finding: "Distribution-free coverage guarantees without model assumptions"
+
+implementation:
+  files:
+    - src/minivess/ensemble/conformal.py
+  tests: []
+
+conditional_on:
+  - parent_decision_id: model_philosophy
+    influence_strength: moderate
+
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "Conformal prediction is model-agnostic, aligns with platform philosophy"

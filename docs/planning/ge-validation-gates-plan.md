@@ -1,3 +1,9 @@
+---
+title: "Great Expectations Validation Gates Plan"
+status: planned
+created: ""
+---
+
 # Great Expectations Validation Gates — Implementation Plan (Issue #45)
 
 ## Current State

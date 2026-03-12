@@ -1,3 +1,9 @@
+---
+title: "BentoML + ONNX + Gradio Serving Plan"
+status: planned
+created: "2026-02-24"
+---
+
 # BentoML + ONNX + Gradio Serving Plan
 
 **Issue**: #36 — Make BentoML/ONNX/Gradio serving production-ready

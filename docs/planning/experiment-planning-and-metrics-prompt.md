@@ -1,3 +1,9 @@
+---
+title: "Experiment Planning and Metrics: Original Prompt"
+status: reference
+created: "2026-02-25"
+---
+
 # Experiment Planning & Metrics — Original Prompt
 
 > Verbatim user prompt captured on 2026-02-25

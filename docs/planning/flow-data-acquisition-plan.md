@@ -1,3 +1,9 @@
+---
+title: "Flow 0: Data Acquisition Implementation Plan"
+status: implemented
+created: "2026-03-04"
+---
+
 # Flow 0: Data Acquisition — Implementation Plan
 
 **Issue:** #328 | **Branch:** `feat/flow-data-acquisition` | **Date:** 2026-03-04

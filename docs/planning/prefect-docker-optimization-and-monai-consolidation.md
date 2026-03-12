@@ -1,3 +1,9 @@
+---
+title: "Prefect/Docker Optimization and MONAI Consolidation Plan"
+status: implemented
+created: "2026-03-08"
+---
+
 # Prefect/Docker Optimization & MONAI Consolidation Plan
 
 **Date:** 2026-03-08

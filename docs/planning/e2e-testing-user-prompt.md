@@ -1,3 +1,9 @@
+---
+title: "E2E Testing Plan: Original User Prompt"
+status: reference
+created: "2026-03-10"
+---
+
 # E2E Testing Plan — Original User Prompt (Verbatim)
 
 **Date**: 2026-03-10

@@ -1,0 +1,40 @@
+decision_id: model_philosophy
+title: "Model Strategy Philosophy"
+level: L1-research-goals
+status: resolved
+
+options:
+  - id: model_agnostic_platform
+    name: "Model-Agnostic Platform"
+    prior_probability: 0.60
+    posterior_probability: 0.90
+  - id: foundation_model_first
+    name: "Foundation Model First"
+    prior_probability: 0.25
+    posterior_probability: 0.05
+  - id: ensemble_first
+    name: "Ensemble First"
+    prior_probability: 0.15
+    posterior_probability: 0.05
+
+resolved_option: model_agnostic_platform
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/adapters/base.py"
+    finding: "ModelAdapter ABC: any model implementing train/predict/export integrates automatically"
+  - type: discussion
+    source: "CLAUDE.md"
+    finding: "Task-agnostic architecture rule — NEVER hardcode specific model assumptions"
+
+implementation:
+  files:
+    - src/minivess/adapters/base.py
+  tests:
+    - tests/v2/unit/test_model_adapters.py
+
+conditional_on: []
+
+volatility:
+  classification: stable
+  next_review: "2026-12-13"
+  rationale: "Foundational design principle — change would require major refactoring"

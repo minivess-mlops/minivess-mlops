@@ -1,3 +1,9 @@
+---
+title: "Issue 340 Update: Analysis at the Wrong Hierarchical Level"
+status: reference
+created: ""
+---
+
 ## Problem: Analysis at the Wrong Hierarchical Level
 
 The issue is NOT that analysis artifacts are "scattered across MLflow runs." The real problem is that the Analysis Flow (Flow 4) operates at the **wrong hierarchical level**. Each mlrun evaluates a single model configuration and has no access to other mlruns — it cannot create cross-condition comparisons.

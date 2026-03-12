@@ -1,3 +1,9 @@
+---
+title: "Graph-Based Topology Metrics: Code Examples"
+status: reference
+created: "2026-02-28"
+---
+
 # Graph-Based Topology Metrics - Code Examples
 
 **For MinIVess Issue #124 (Graph-based evaluation metrics)**

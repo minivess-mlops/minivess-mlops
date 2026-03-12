@@ -1,3 +1,9 @@
+---
+title: "Multi-Metric Downstream Double-Check"
+status: reference
+created: "2026-02-26"
+---
+
 # Multi-Metric Downstream Double-Check
 
 > **Created:** 2026-02-26

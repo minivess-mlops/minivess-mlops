@@ -1,3 +1,9 @@
+---
+title: "Optuna HPO Integration Plan"
+status: planned
+created: ""
+---
+
 # Optuna HPO Integration — Implementation Plan (Issue #43)
 
 ## Current State

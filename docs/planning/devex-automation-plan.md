@@ -1,3 +1,9 @@
+---
+title: "DevEx Automation Plan: Single-Command Multi-Environment Compute"
+status: planned
+created: "2026-02-25"
+---
+
 # DevEx Automation Plan: Single-Command Multi-Environment Compute
 
 **Status**: DRAFT

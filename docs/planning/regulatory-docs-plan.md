@@ -1,3 +1,9 @@
+---
+title: "Automated Regulatory Documentation Generation Plan"
+status: planned
+created: ""
+---
+
 # Automated Regulatory Documentation Generation — Implementation Plan (Issue #8)
 
 ## Current State

@@ -1,3 +1,9 @@
+---
+title: "Model Registry with Promotion Stages Plan"
+status: planned
+created: ""
+---
+
 # Model Registry with Promotion Stages — Implementation Plan (Issue #50)
 
 ## Current State

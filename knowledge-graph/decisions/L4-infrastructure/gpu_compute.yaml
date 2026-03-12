@@ -1,0 +1,25 @@
+decision_id: gpu_compute
+title: "GPU Compute Strategy"
+level: L4-infrastructure
+status: partial
+options:
+  - {id: local_gpu, name: "Local GPU", prior_probability: 0.35, posterior_probability: 0.50}
+  - {id: cloud_spot_instances, name: "Cloud Spot Instances (SkyPilot)", prior_probability: 0.25, posterior_probability: 0.25}
+  - {id: lambda_labs, name: "Lambda Labs", prior_probability: 0.15, posterior_probability: 0.10}
+  - {id: colab_pro, name: "Colab Pro", prior_probability: 0.15, posterior_probability: 0.10}
+  - {id: cpu_only, name: "CPU Only", prior_probability: 0.10, posterior_probability: 0.05}
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/compute/skypilot_launcher.py"
+    finding: "SkyPilot launcher implemented; local GPU primary for development"
+implementation:
+  files: [src/minivess/compute/skypilot_launcher.py, deployment/skypilot/]
+  tests: []
+conditional_on:
+  - {parent_decision_id: primary_3d_model, influence_strength: strong}
+  - {parent_decision_id: foundation_model, influence_strength: strong}
+  - {parent_decision_id: hpo_engine, influence_strength: moderate}
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "Local GPU primary; cloud for SAM3 and HPO sweeps"

@@ -1,3 +1,9 @@
+---
+title: "RegOps CI/CD Pipeline Extension Plan"
+status: planned
+created: ""
+---
+
 # RegOps CI/CD Pipeline Extension — Implementation Plan (Issue #21)
 
 ## Current State

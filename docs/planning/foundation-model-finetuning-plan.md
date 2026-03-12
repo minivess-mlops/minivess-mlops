@@ -1,3 +1,9 @@
+---
+title: "Foundation Model Fine-Tuning Plan"
+status: planned
+created: ""
+---
+
 # Foundation Model Fine-Tuning — Implementation Plan (Issue #42)
 
 ## Current State

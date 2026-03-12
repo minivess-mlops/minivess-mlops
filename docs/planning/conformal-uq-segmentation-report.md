@@ -1,3 +1,9 @@
+---
+title: "Conformal Prediction for 3D Segmentation Uncertainty"
+status: reference
+created: "2026-02-27"
+---
+
 # Conformal Prediction for 3D Segmentation Uncertainty — Academic Multi-Decision Report
 
 **Date:** 2026-02-27

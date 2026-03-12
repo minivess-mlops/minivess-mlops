@@ -1,0 +1,27 @@
+archetype_id: lab_group
+title: "Lab Group"
+description: "Small academic research group (3-8 people) with shared compute"
+status: planned
+
+characteristics:
+  team_size: "3-8"
+  budget: "University compute cluster + some cloud"
+  gpu_access: "Shared DGX or multi-GPU cluster"
+  primary_constraint: "Coordination (multi-annotator, shared experiments)"
+  tool_preference: "Balance reproducibility with collaboration"
+  deployment_target: "Docker Compose to shared server, optional K8s"
+  compliance_need: "Research reproducibility, not regulatory"
+
+probability_shifts:
+  label_quality_tool:
+    label_studio_agreement: +0.20
+    cleanlab: -0.10
+  experiment_tracker:
+    mlflow_plus_wandb: +0.15
+    mlflow_local: -0.10
+  data_versioning:
+    dvc_s3: +0.15
+    dvc_local_minio: -0.10
+  retraining_trigger:
+    scheduled_periodic: +0.10
+    manual_only: -0.10

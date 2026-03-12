@@ -1,3 +1,9 @@
+---
+title: "LangGraph Agent Orchestration Plan"
+status: planned
+created: "2026-02-24"
+---
+
 # LangGraph Agent Orchestration Plan
 
 **Issue**: #40 — Implement LangGraph agent orchestration

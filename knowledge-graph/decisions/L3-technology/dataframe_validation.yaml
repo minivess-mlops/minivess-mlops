@@ -1,0 +1,23 @@
+decision_id: dataframe_validation
+title: "DataFrame Validation Tool"
+level: L3-technology
+status: resolved
+options:
+  - {id: pandera_schemas, name: "Pandera Schemas", prior_probability: 0.45, posterior_probability: 0.85}
+  - {id: great_expectations_suites, name: "Great Expectations Suites", prior_probability: 0.30, posterior_probability: 0.08}
+  - {id: pydantic_only, name: "Pydantic Only", prior_probability: 0.20, posterior_probability: 0.05}
+  - {id: none, name: "None", prior_probability: 0.05, posterior_probability: 0.02}
+resolved_option: pandera_schemas
+resolution_evidence:
+  - type: implementation
+    source: "pyproject.toml"
+    finding: "Pandera in dependencies for DataFrame schema validation"
+implementation:
+  files: []
+  tests: []
+conditional_on:
+  - {parent_decision_id: data_validation_depth, influence_strength: strong}
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "Pandera provides type-safe DataFrame validation"

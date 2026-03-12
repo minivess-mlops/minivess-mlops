@@ -1,0 +1,171 @@
+# knowledge-graph/bibliography.yaml
+# Central bibliography for all PRD decisions.
+# All citations in decision files reference by citation_key.
+# Append-only: pre-commit hook blocks citation removal.
+# Validation: scripts/review_prd_integrity.py
+
+version: "1.0"
+last_updated: "2026-03-13"
+
+citations:
+  shit_2021_cldice:
+    authors: "Shit S, Paetzold JC, Sekuboyina A, et al."
+    year: 2021
+    title: "clDice — A Novel Topology-Preserving Loss Function for Tubular Structure Segmentation"
+    venue: "CVPR 2021"
+    url: "https://arxiv.org/abs/2003.07311"
+    used_in: [loss_function]
+
+  isensee_2021_nnunet:
+    authors: "Isensee F, Jaeger PF, Kohl SAA, Petersen J, Maier-Hein KH"
+    year: 2021
+    title: "nnU-Net: a self-configuring method for deep learning-based biomedical image segmentation"
+    venue: "Nature Methods"
+    url: "https://doi.org/10.1038/s41592-020-01008-z"
+    used_in: [primary_3d_model]
+
+  cardoso_2022_monai:
+    authors: "Cardoso MJ, Li W, Brown R, et al."
+    year: 2022
+    title: "MONAI: An open-source framework for deep learning in healthcare"
+    venue: "arXiv"
+    url: "https://arxiv.org/abs/2211.02701"
+    used_in: [monai_alignment, primary_3d_model, augmentation_library]
+
+  tang_2022_vista3d:
+    authors: "Tang Y, Yang D, Li W, et al."
+    year: 2022
+    title: "Self-Supervised Pre-Training of Swin Transformers for 3D Medical Image Analysis"
+    venue: "CVPR 2022"
+    url: "https://arxiv.org/abs/2111.14791"
+    used_in: [primary_3d_model]
+
+  ravi_2025_sam3:
+    authors: "Ravi N, Gabeur V, Hu YT, et al."
+    year: 2025
+    title: "Segment Anything Model 3 (SAM 3)"
+    venue: "Meta AI Research"
+    url: "https://github.com/facebookresearch/sam3"
+    used_in: [foundation_model]
+
+  maier_hein_2024_metrics_reloaded:
+    authors: "Maier-Hein L, Reinke A, Godau P, et al."
+    year: 2024
+    title: "Metrics Reloaded: Recommendations for image analysis validation"
+    venue: "Nature Methods"
+    url: "https://doi.org/10.1038/s41592-023-02151-z"
+    used_in: [primary_metrics]
+
+  akiba_2019_optuna:
+    authors: "Akiba T, Sano S, Yanase T, Ohta T, Koyama M"
+    year: 2019
+    title: "Optuna: A Next-generation Hyperparameter Optimization Framework"
+    venue: "KDD 2019"
+    url: "https://arxiv.org/abs/1907.10902"
+    used_in: [hpo_engine]
+
+  mcmillan_2026_structured_context:
+    authors: "McMillan K"
+    year: 2026
+    title: "Structured Context Engineering for File-Native Agentic Systems"
+    venue: "OpenSpec Research"
+    url: "https://github.com/Fission-AI/OpenSpec"
+    used_in: []
+    note: "9,649 experiments; format doesn't matter (p=0.484), architecture matters"
+
+  vasilopoulos_2026_codified_context:
+    authors: "Vasilopoulos A"
+    year: 2026
+    title: "3-Tier Codified Context for Agentic Systems"
+    venue: "Preprint"
+    url: "https://arxiv.org/abs/placeholder"
+    used_in: []
+    note: "Hot/Specialist/Cold tiers; trigger tables for agent routing"
+
+  yu_2026_agemem:
+    authors: "Yu Z, et al."
+    year: 2026
+    title: "AgeMem: Working/episodic/semantic/procedural memory with progressive RL"
+    venue: "Preprint"
+    url: "https://arxiv.org/abs/placeholder"
+    used_in: []
+
+  gal_2016_dropout:
+    authors: "Gal Y, Ghahramani Z"
+    year: 2016
+    title: "Dropout as a Bayesian Approximation: Representing Model Uncertainty in Deep Learning"
+    venue: "ICML 2016"
+    url: "https://arxiv.org/abs/1506.02142"
+    used_in: [uncertainty_framework]
+
+  lakshminarayanan_2017_deep_ensembles:
+    authors: "Lakshminarayanan B, Pritzel A, Blundell C"
+    year: 2017
+    title: "Simple and Scalable Predictive Uncertainty Estimation using Deep Ensembles"
+    venue: "NeurIPS 2017"
+    url: "https://arxiv.org/abs/1612.01474"
+    used_in: [uncertainty_framework, ensemble_strategy]
+
+  romano_2019_conformal:
+    authors: "Romano Y, Patterson E, Candes EJ"
+    year: 2019
+    title: "Conformalized Quantile Regression"
+    venue: "NeurIPS 2019"
+    url: "https://arxiv.org/abs/1905.03222"
+    used_in: [uncertainty_framework, calibration_method]
+
+  perez_fernandez_2023_monai_label:
+    authors: "Perez-Garcia F, Sparks R, Ourselin S"
+    year: 2021
+    title: "TorchIO: A Python library for efficient loading, preprocessing, augmentation and patch-based sampling of medical images in deep learning"
+    venue: "Computer Methods and Programs in Biomedicine"
+    url: "https://doi.org/10.1016/j.cmpb.2021.106236"
+    used_in: [augmentation_library]
+
+  selvaraju_2017_gradcam:
+    authors: "Selvaraju RR, Cogswell M, Das A, Vedantam R, Parikh D, Batra D"
+    year: 2017
+    title: "Grad-CAM: Visual Explanations from Deep Networks via Gradient-based Localization"
+    venue: "ICCV 2017"
+    url: "https://arxiv.org/abs/1610.02391"
+    used_in: [xai_strategy, xai_voxel_tool]
+
+  sundararajan_2017_integrated_gradients:
+    authors: "Sundararajan M, Taly A, Yan Q"
+    year: 2017
+    title: "Axiomatic Attribution for Deep Networks"
+    venue: "ICML 2017"
+    url: "https://arxiv.org/abs/1703.01365"
+    used_in: [xai_voxel_tool]
+
+  lundberg_2017_shap:
+    authors: "Lundberg SM, Lee SI"
+    year: 2017
+    title: "A Unified Approach to Interpreting Model Predictions"
+    venue: "NeurIPS 2017"
+    url: "https://arxiv.org/abs/1705.07874"
+    used_in: [xai_meta_tool]
+
+  hedstrom_2023_quantus:
+    authors: "Hedstrom A, Weber L, Krakowczyk D, et al."
+    year: 2023
+    title: "Quantus: An Explainability Toolkit for Responsible Evaluation of Neural Network Explanations and Beyond"
+    venue: "JMLR"
+    url: "https://arxiv.org/abs/2202.06861"
+    used_in: [xai_meta_tool]
+
+  martin_2021_weightwatcher:
+    authors: "Martin CH, Mahoney MW"
+    year: 2021
+    title: "Implicit Self-Regularization in Deep Neural Networks: Evidence from Random Matrix Theory and Implications for Training"
+    venue: "JMLR"
+    url: "https://arxiv.org/abs/1810.01075"
+    used_in: [model_diagnostics]
+
+  li_2024_cleanlab:
+    authors: "Northcutt CG, Jiang L, Chuang IL"
+    year: 2021
+    title: "Confident Learning: Estimating Uncertainty in Dataset Labels"
+    venue: "JAIR"
+    url: "https://arxiv.org/abs/1911.00068"
+    used_in: [label_quality_tool]

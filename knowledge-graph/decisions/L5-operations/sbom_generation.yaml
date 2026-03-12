@@ -1,0 +1,20 @@
+decision_id: sbom_generation
+title: "SBOM and Supply Chain"
+level: L5-operations
+status: not_started
+options:
+  - {id: syft_uv_lock, name: "Syft + uv.lock", prior_probability: 0.45, posterior_probability: 0.45}
+  - {id: cyclonedx, name: "CycloneDX", prior_probability: 0.25, posterior_probability: 0.25}
+  - {id: manual_lockfile, name: "Manual Lockfile", prior_probability: 0.20, posterior_probability: 0.20}
+  - {id: none, name: "None", prior_probability: 0.10, posterior_probability: 0.10}
+resolution_evidence: []
+implementation:
+  files: []
+  tests: []
+conditional_on:
+  - {parent_decision_id: ci_cd_platform, influence_strength: moderate}
+  - {parent_decision_id: compliance_posture, influence_strength: moderate}
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "SBOM not yet generated; Trivy scan available via Makefile"

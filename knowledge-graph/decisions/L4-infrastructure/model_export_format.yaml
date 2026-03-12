@@ -1,0 +1,24 @@
+decision_id: model_export_format
+title: "Model Export Format"
+level: L4-infrastructure
+status: resolved
+options:
+  - {id: onnx_runtime, name: "ONNX Runtime", prior_probability: 0.40, posterior_probability: 0.80}
+  - {id: torchscript, name: "TorchScript", prior_probability: 0.25, posterior_probability: 0.10}
+  - {id: monai_bundle, name: "MONAI Bundle", prior_probability: 0.25, posterior_probability: 0.08}
+  - {id: raw_pytorch, name: "Raw PyTorch", prior_probability: 0.10, posterior_probability: 0.02}
+resolved_option: onnx_runtime
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/orchestration/flows/deploy_flow.py"
+    finding: "ONNX export in deploy flow"
+implementation:
+  files: [src/minivess/orchestration/flows/deploy_flow.py]
+  tests: []
+conditional_on:
+  - {parent_decision_id: primary_3d_model, influence_strength: moderate}
+  - {parent_decision_id: monai_alignment, influence_strength: strong}
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "ONNX is industry standard for deployment"

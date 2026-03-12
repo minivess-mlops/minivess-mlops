@@ -1,3 +1,9 @@
+---
+title: "Validation Pipeline Plan"
+status: planned
+created: "2026-02-24"
+---
+
 # Validation Pipeline Plan
 
 **Issue**: #39 — Build validation pipeline (Pandera + Deepchecks Vision)

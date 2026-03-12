@@ -1,3 +1,9 @@
+---
+title: "Agentic Architecture Self-Reflection: SDD Frameworks and Upgrade Plan"
+status: planned
+created: "2026-03-01"
+---
+
 # Agentic Architecture Self-Reflection: SDD Frameworks, Context Engineering, and an Actionable Upgrade Plan for MinIVess MLOps
 
 **Date:** 2026-03-01

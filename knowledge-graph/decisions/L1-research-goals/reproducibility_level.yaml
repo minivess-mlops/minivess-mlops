@@ -1,0 +1,41 @@
+decision_id: reproducibility_level
+title: "Reproducibility Target"
+level: L1-research-goals
+status: resolved
+
+options:
+  - id: bit_reproducible
+    name: "Bit-Reproducible"
+    prior_probability: 0.15
+    posterior_probability: 0.05
+  - id: statistically_reproducible
+    name: "Statistically Reproducible"
+    prior_probability: 0.55
+    posterior_probability: 0.85
+  - id: conceptually_reproducible
+    name: "Conceptually Reproducible"
+    prior_probability: 0.30
+    posterior_probability: 0.10
+
+resolved_option: statistically_reproducible
+resolution_evidence:
+  - type: implementation
+    source: "configs/splits/3fold_seed42.json"
+    finding: "Fixed 3-fold splits with seed=42; Docker-per-flow isolation; Hydra-zen config logging"
+  - type: implementation
+    source: "src/minivess/observability/tracking.py"
+    finding: "Every run logs git hash, system info, full resolved config to MLflow"
+
+implementation:
+  files:
+    - configs/splits/3fold_seed42.json
+    - src/minivess/observability/tracking.py
+    - src/minivess/config/compose.py
+  tests: []
+
+conditional_on: []
+
+volatility:
+  classification: stable
+  next_review: "2026-09-13"
+  rationale: "Statistical reproducibility is the right level for GPU-based training"

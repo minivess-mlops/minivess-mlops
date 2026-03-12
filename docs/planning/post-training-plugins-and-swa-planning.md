@@ -1,3 +1,9 @@
+---
+title: "Post-Training Plugin Architecture + Multi-SWA Plan"
+status: implemented
+created: "2026-03-04"
+---
+
 # Post-Training Plugin Architecture + Multi-SWA Implementation Plan
 
 **Branch:** `feat/advanced-segmentation-double-check`

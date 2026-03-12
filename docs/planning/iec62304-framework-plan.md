@@ -1,3 +1,9 @@
+---
+title: "Full IEC 62304 Compliance Framework Plan"
+status: planned
+created: ""
+---
+
 # Full IEC 62304 Compliance Framework — Implementation Plan (Issue #46)
 
 ## Current State

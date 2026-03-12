@@ -1,0 +1,63 @@
+# Active scenario — represents current implementation (Phases 0-6 complete)
+scenario_id: learning_first_mvp
+title: "Learning-First MVP"
+description: "Solo researcher building a portfolio project with emphasis on learning and tool breadth"
+status: active
+archetype: solo-researcher
+
+resolved_decisions:
+  # L1 — all 7 resolved
+  project_purpose: self_learning
+  impact_target: tool_breadth
+  monai_alignment: monai_plus_external
+  model_philosophy: model_agnostic_platform
+  compliance_posture: samd_principled
+  reproducibility_level: statistically_reproducible
+  # portfolio_role_target: NOT resolved (partial)
+
+  # L2 — 8 of 10 resolved
+  model_adapter_pattern: abc_protocol
+  ensemble_strategy: heterogeneous_multi_model
+  uncertainty_framework: conformal_prediction
+  config_architecture: dual_config
+  serving_architecture: bentoml_primary
+  data_validation_depth: validation_onion_12_layer
+  agent_architecture: langgraph_stateful
+  observability_depth: full_stack_otel
+  # xai_strategy: NOT resolved (partial)
+  # api_protocol: NOT resolved (config_only)
+
+  # L3 — 12 of 20 resolved
+  primary_3d_model: vista3d
+  loss_function: cldice_soft_skeleton
+  primary_metrics: metricsreloaded_full
+  experiment_tracker: mlflow_local
+  hpo_engine: optuna_multi_objective
+  data_versioning: dvc_local_minio
+  augmentation_library: torchio_monai_combined
+  model_diagnostics: both_deepchecks_ww
+  llm_tracing: langfuse_self_hosted
+  llm_evaluation: braintrust_autoevals
+  llm_provider_strategy: litellm_multi_provider
+  dataframe_validation: pandera_schemas
+  # 8 L3 nodes NOT resolved: foundation_model, topology_metrics, calibration_method,
+  #   label_quality_tool, data_profiling, xai_voxel_tool, xai_meta_tool, lineage_tracking
+
+  # L4 — 4 of 8 resolved
+  container_strategy: docker_compose_profiles
+  ci_cd_platform: github_actions_cml
+  model_export_format: onnx_runtime
+  secrets_management: dynaconf_dotenv
+  # 4 L4 nodes NOT resolved: iac_tool, gitops_engine, gpu_compute, air_gap_strategy
+
+  # L5 — 2 of 7 resolved
+  drift_monitoring: evidently_lib
+  audit_trail: structured_json_otel
+  # 5 L5 nodes NOT resolved: dashboarding, retraining_trigger, model_governance,
+  #   sbom_generation, federated_learning
+
+summary:
+  total_decisions: 52
+  resolved: 33
+  unresolved: 19
+  coverage: 0.63

@@ -1,3 +1,9 @@
+---
+title: "Medical MLOps Standards: From Research to Clinical Deployment"
+status: reference
+created: ""
+---
+
 # Medical MLOps Standards: From Research to Clinical Deployment
 
 > **Phase 11 Deliverable** — This document was generated as part of Phase 11 of the

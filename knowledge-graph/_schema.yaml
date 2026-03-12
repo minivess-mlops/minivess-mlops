@@ -1,0 +1,62 @@
+# knowledge-graph/_schema.yaml
+# Schema definition for decision node YAML files.
+# All files in decisions/ MUST conform to this schema.
+# Validation: scripts/review_prd_integrity.py
+
+version: "1.0"
+
+required_fields:
+  - decision_id          # Unique snake_case identifier
+  - title                # Human-readable decision title
+  - level                # L1-research-goals | L2-architecture | L3-technology | L4-infrastructure | L5-operations
+  - status               # resolved | partial | config_only | not_started
+
+optional_fields:
+  options:               # List of candidate options
+    required_per_item:
+      - id               # snake_case option identifier
+      - name             # Human-readable name
+      - prior_probability  # Float [0.0, 1.0], sum across options = 1.0
+    optional_per_item:
+      - posterior_probability  # Float [0.0, 1.0], after evidence
+      - description            # Brief description
+
+  resolved_option:       # id of the winning option (when status = resolved)
+
+  resolution_evidence:   # List of evidence items
+    fields_per_item:
+      - type             # experiment | literature | implementation | discussion
+      - source           # File path or URL
+      - finding          # One-line summary (optional)
+      - citation_key     # Key into bibliography.yaml (optional)
+
+  implementation:
+    files: []            # Source files implementing this decision
+    tests: []            # Test files verifying this decision
+    openspec: ""         # Path to OpenSpec spec (optional)
+
+  conditional_on:        # Parent dependencies in the DAG
+    fields_per_item:
+      - parent_decision_id  # decision_id of the parent
+      - influence_strength  # strong | moderate | weak
+
+  volatility:
+    classification: ""   # stable | evolving | volatile | experimental
+    next_review: ""      # ISO date
+    rationale: ""        # Why this classification
+
+  domain_overlays:       # Per-domain probability adjustments
+    # Keys are domain names, values contain probability_shift and rationale
+
+status_values:
+  resolved: "Decision made, option selected, implementation exists"
+  partial: "Some options explored, winner not yet clear"
+  config_only: "Tool selected but only configured, not deeply integrated"
+  not_started: "Decision not yet actively explored"
+
+level_values:
+  L1-research-goals: "Strategic goals (root nodes, no parents)"
+  L2-architecture: "System shape decisions (conditioned on L1)"
+  L3-technology: "Specific tool/library selections (conditioned on L2)"
+  L4-infrastructure: "Compute, containers, CI/CD (conditioned on L3)"
+  L5-operations: "Runtime operations, monitoring (conditioned on L4)"

@@ -1,3 +1,9 @@
+---
+title: "vesselFM Foundation Model Adapter Plan"
+status: planned
+created: ""
+---
+
 # vesselFM Foundation Model Adapter — Implementation Plan (Issue #3)
 
 ## Current State

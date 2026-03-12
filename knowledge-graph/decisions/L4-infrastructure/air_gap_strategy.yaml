@@ -1,0 +1,19 @@
+decision_id: air_gap_strategy
+title: "Air-Gapped Deployment"
+level: L4-infrastructure
+status: not_started
+options:
+  - {id: offline_docker_bundle, name: "Offline Docker Bundle", prior_probability: 0.45, posterior_probability: 0.45}
+  - {id: helm_oci_vendored, name: "Helm OCI Vendored", prior_probability: 0.25, posterior_probability: 0.25}
+  - {id: not_applicable, name: "Not Applicable", prior_probability: 0.20, posterior_probability: 0.20}
+  - {id: custom_tarball, name: "Custom Tarball", prior_probability: 0.10, posterior_probability: 0.10}
+resolution_evidence: []
+implementation:
+  files: []
+  tests: []
+conditional_on:
+  - {parent_decision_id: iac_tool, influence_strength: strong}
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "Relevant for ICEYE portfolio target; not yet needed"

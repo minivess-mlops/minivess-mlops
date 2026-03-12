@@ -1,0 +1,25 @@
+decision_id: experiment_tracker
+title: "Experiment Tracking Tool"
+level: L3-technology
+status: resolved
+options:
+  - {id: mlflow_local, name: "MLflow Local Filesystem", prior_probability: 0.60, posterior_probability: 0.95}
+  - {id: mlflow_plus_wandb, name: "MLflow + W&B", prior_probability: 0.20, posterior_probability: 0.03}
+  - {id: wandb_only, name: "W&B Only", prior_probability: 0.10, posterior_probability: 0.01}
+  - {id: tensorboard_only, name: "TensorBoard Only", prior_probability: 0.10, posterior_probability: 0.01}
+resolved_option: mlflow_local
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/observability/tracking.py"
+    finding: "ExperimentTracker with automatic system info, config, git hash logging"
+implementation:
+  files: [src/minivess/observability/tracking.py, src/minivess/observability/analytics.py]
+  tests: [tests/v2/unit/test_tracking.py]
+conditional_on:
+  - {parent_decision_id: config_architecture, influence_strength: moderate}
+  - {parent_decision_id: observability_depth, influence_strength: strong}
+  - {parent_decision_id: reproducibility_level, influence_strength: moderate}
+volatility:
+  classification: stable
+  next_review: "2026-09-13"
+  rationale: "MLflow deeply integrated; migration cost very high"

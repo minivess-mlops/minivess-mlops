@@ -1,0 +1,27 @@
+domain: testing
+description: Test tiers, markers, fixtures, CI, QA
+last_reviewed: "2026-03-13"
+
+decisions: {}
+
+tiers:
+  staging:
+    command: "make test-staging"
+    markers_excluded: [model_loading, slow, integration]
+    target_time: "< 3 min"
+  prod:
+    command: "make test-prod"
+    markers_excluded: [gpu_heavy]
+    target_time: "5-10 min"
+  gpu:
+    command: "make test-gpu"
+    runs_on: "GPU instances only (RunPod, intranet)"
+
+metalearning:
+  - file: .claude/metalearning/2026-03-07-silent-existing-failures.md
+    applies_to: [tests/]
+    rule: "Every test failure needs immediate action"
+
+planning_docs: []
+
+open_issues: []

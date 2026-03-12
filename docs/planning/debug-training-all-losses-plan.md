@@ -1,3 +1,9 @@
+---
+title: "Debug Training All 18 Losses: Pre-PR Validation"
+status: reference
+created: ""
+---
+
 # Debug Training All 18 Losses — Pre-PR Validation
 
 ## Context

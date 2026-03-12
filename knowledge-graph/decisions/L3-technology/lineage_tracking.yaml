@@ -1,0 +1,22 @@
+decision_id: lineage_tracking
+title: "Data Lineage Tool"
+level: L3-technology
+status: config_only
+options:
+  - {id: openlineage_marquez, name: "OpenLineage + Marquez", prior_probability: 0.45, posterior_probability: 0.50}
+  - {id: mlflow_lineage, name: "MLflow Lineage", prior_probability: 0.30, posterior_probability: 0.30}
+  - {id: custom_audit_log, name: "Custom Audit Log", prior_probability: 0.20, posterior_probability: 0.15}
+  - {id: none, name: "None", prior_probability: 0.05, posterior_probability: 0.05}
+resolution_evidence:
+  - type: implementation
+    source: "deployment/docker-compose.yml"
+    finding: "Marquez in docker-compose for OpenLineage"
+implementation:
+  files: []
+  tests: []
+conditional_on:
+  - {parent_decision_id: data_validation_depth, influence_strength: moderate}
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "OpenLineage configured but not deeply integrated"

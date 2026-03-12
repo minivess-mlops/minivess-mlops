@@ -1,0 +1,24 @@
+decision_id: primary_metrics
+title: "Primary Evaluation Metrics"
+level: L3-technology
+status: resolved
+options:
+  - {id: metricsreloaded_full, name: "Metrics Reloaded Full Suite", prior_probability: 0.50, posterior_probability: 0.85}
+  - {id: torchmetrics_dice_f1, name: "TorchMetrics Dice + F1", prior_probability: 0.30, posterior_probability: 0.08}
+  - {id: cldice_nsd_hd95, name: "clDice + NSD + HD95", prior_probability: 0.15, posterior_probability: 0.05}
+  - {id: dice_only, name: "Dice Only", prior_probability: 0.05, posterior_probability: 0.02}
+resolved_option: metricsreloaded_full
+resolution_evidence:
+  - type: literature
+    citation_key: maier_hein_2024_metrics_reloaded
+    source: "https://doi.org/10.1038/s41592-023-02151-z"
+implementation:
+  files: [src/minivess/pipeline/metrics.py]
+  tests: [tests/v2/unit/test_metrics.py]
+conditional_on:
+  - {parent_decision_id: model_adapter_pattern, influence_strength: weak}
+  - {parent_decision_id: uncertainty_framework, influence_strength: weak}
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "Metrics Reloaded is the Nature Methods standard"

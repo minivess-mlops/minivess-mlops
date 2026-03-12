@@ -1,0 +1,22 @@
+decision_id: xai_voxel_tool
+title: "Voxel-Level XAI Tool"
+level: L3-technology
+status: config_only
+options:
+  - {id: captum_gradcam, name: "Captum GradCAM", prior_probability: 0.45, posterior_probability: 0.50}
+  - {id: captum_integrated_gradients, name: "Captum Integrated Gradients", prior_probability: 0.30, posterior_probability: 0.30}
+  - {id: monai_occlusion, name: "MONAI Occlusion", prior_probability: 0.15, posterior_probability: 0.10}
+  - {id: none, name: "None", prior_probability: 0.10, posterior_probability: 0.10}
+resolution_evidence:
+  - type: literature
+    citation_key: selvaraju_2017_gradcam
+    source: "https://arxiv.org/abs/1610.02391"
+implementation:
+  files: []
+  tests: []
+conditional_on:
+  - {parent_decision_id: xai_strategy, influence_strength: strong}
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "XAI not yet implemented"

@@ -1,0 +1,40 @@
+decision_id: xai_strategy
+title: "Explainability Strategy"
+level: L2-architecture
+status: partial
+
+options:
+  - id: multi_layer_xai
+    name: "Multi-Layer XAI (Captum + SHAP + Quantus)"
+    prior_probability: 0.55
+    posterior_probability: 0.65
+  - id: gradcam_only
+    name: "GradCAM Only"
+    prior_probability: 0.25
+    posterior_probability: 0.20
+  - id: uncertainty_as_xai
+    name: "Uncertainty as XAI"
+    prior_probability: 0.15
+    posterior_probability: 0.10
+  - id: no_xai
+    name: "No XAI"
+    prior_probability: 0.05
+    posterior_probability: 0.05
+
+resolution_evidence:
+  - type: discussion
+    source: "docs/modernize-minivess-mlops-plan.md"
+    finding: "Multi-layer XAI strategy: Captum for 3D voxel, SHAP for tabular, Quantus for meta-eval"
+
+implementation:
+  files: []
+  tests: []
+
+conditional_on:
+  - parent_decision_id: impact_target
+    influence_strength: moderate
+
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "XAI implementation not yet started; tool landscape evolving"

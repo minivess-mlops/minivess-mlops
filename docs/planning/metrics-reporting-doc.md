@@ -1,3 +1,9 @@
+---
+title: "Comprehensive Metrics Reporting Plan for MinIVess"
+status: reference
+created: "2026-02-28"
+---
+
 # Comprehensive Metrics Reporting Plan for MinIVess
 
 **Date:** 2026-02-28

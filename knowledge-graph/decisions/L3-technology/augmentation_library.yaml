@@ -1,0 +1,27 @@
+decision_id: augmentation_library
+title: "Augmentation Strategy"
+level: L3-technology
+status: resolved
+options:
+  - {id: torchio_monai_combined, name: "TorchIO + MONAI Combined", prior_probability: 0.50, posterior_probability: 0.90}
+  - {id: monai_transforms_only, name: "MONAI Transforms Only", prior_probability: 0.30, posterior_probability: 0.05}
+  - {id: albumentations3d, name: "Albumentations 3D", prior_probability: 0.10, posterior_probability: 0.03}
+  - {id: custom_only, name: "Custom Only", prior_probability: 0.10, posterior_probability: 0.02}
+resolved_option: torchio_monai_combined
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/data/transforms.py"
+    finding: "MONAI + TorchIO transforms for 3D augmentation"
+  - type: literature
+    citation_key: perez_fernandez_2023_monai_label
+    source: "https://doi.org/10.1016/j.cmpb.2021.106236"
+implementation:
+  files: [src/minivess/data/transforms.py]
+  tests: []
+conditional_on:
+  - {parent_decision_id: config_architecture, influence_strength: weak}
+  - {parent_decision_id: monai_alignment, influence_strength: moderate}
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "TorchIO + MONAI well-suited for 3D anisotropic data"

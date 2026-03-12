@@ -1,3 +1,9 @@
+---
+title: "Docker Debug Training Fix Plan"
+status: active
+created: "2026-03-09"
+---
+
 # Docker Debug Training — Fix Plan
 
 **Created**: 2026-03-09

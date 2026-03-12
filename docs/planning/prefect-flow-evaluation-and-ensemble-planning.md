@@ -1,3 +1,9 @@
+---
+title: "Prefect Flow: Evaluation and Ensemble Planning"
+status: reference
+created: "2026-02-26"
+---
+
 # Prefect Flow: Evaluation & Ensemble Planning
 
 > **User prompt (verbatim, 2026-02-26)**

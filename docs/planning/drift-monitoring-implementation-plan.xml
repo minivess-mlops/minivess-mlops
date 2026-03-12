@@ -1,0 +1,320 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Implementation Plan for Issue #574: Full Drift Detection Suite
+  Derived from: synthetic-data-qa-engineering-drifts-knowledge-agentic-systems-report.md (Draft v2.0)
+  Date: 2026-03-12
+  Supersedes: drift-monitoring-plan.md (Issue #38), validation-pipeline-plan.md (Issue #39)
+
+  Scope:
+    - Wire Evidently DataDriftPreset into Tier 1 (currently custom scipy KS tests)
+    - Add alibi-detect for Tier 2 MMD with permutation p-values
+    - Register VesselNN as 4th dataset for natural drift simulation
+    - Persist drift reports as MLflow artifacts
+    - Integrate drift detection into Data Flow (Flow 1) and Post-Training Flow (Flow 3)
+    - Dashboard Flow (Flow 5) drift panels
+
+  Out of Scope (future issues):
+    - SPC control charts (Shewhart/CUSUM/EWMA) — Zamzmi et al. pattern, separate issue
+    - Grafana dashboard provisioning — infrastructure, separate issue
+    - Automated retraining trigger — requires confidence in detection accuracy first
+    - WATCH sequential testing (Prinster et al. 2025) — research-grade, future work
+    - Physics-based synthetic data generation — deferred to VasTSD availability
+
+  Architecture:
+    - Tier 1: Evidently DataDriftPreset on tabular volume features (9 features from feature_extraction.py)
+    - Tier 2: Alibi-Detect MMDDrift on model embeddings (penultimate layer)
+    - Tier 3: Label-free performance proxy via conformal prediction set width + SegQC-style
+    - VesselNN: Natural covariate shift source (12 volumes, different acquisition)
+    - Reports: HTML + JSON saved to MLflow as artifacts
+    - Triage: Existing Pydantic AI agent in data_flow.py:370
+-->
+<plan id="issue-574-drift-detection" version="1.0">
+  <metadata>
+    <issue>574</issue>
+    <title>Full Drift Detection Suite with Evidently + Alibi-Detect + VesselNN</title>
+    <branch>feat/drift-detection-574</branch>
+    <depends_on>
+      <issue>38</issue>  <!-- drift-monitoring-plan -->
+      <issue>39</issue>  <!-- validation-pipeline-plan -->
+    </depends_on>
+  </metadata>
+
+  <!-- ================================================================ -->
+  <!-- TASK 1: Add alibi-detect dependency + verify Evidently wiring    -->
+  <!-- ================================================================ -->
+  <task id="T1" title="Add alibi-detect dependency and verify Evidently import" github_issue="599">
+    <description>
+      Add alibi-detect[torch] to the quality optional group in pyproject.toml.
+      Verify evidently (already declared >=0.7) imports correctly.
+      Update __init__.py graceful degradation for alibi-detect.
+    </description>
+    <files>
+      <file action="edit">pyproject.toml</file>
+      <file action="edit">src/minivess/validation/__init__.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_drift_dependencies.py</test_file>
+      <tests>
+        <test>test_evidently_importable — verify evidently can be imported</test>
+        <test>test_alibi_detect_importable — verify alibi_detect can be imported</test>
+        <test>test_alibi_detect_mmd_available — verify alibi_detect.cd.MMDDrift exists</test>
+        <test>test_evidently_data_drift_preset_available — verify DataDriftPreset importable</test>
+      </tests>
+    </tdd>
+    <acceptance>All 4 imports succeed after uv sync --all-extras</acceptance>
+  </task>
+
+  <!-- ================================================================ -->
+  <!-- TASK 2: Evidently Tier 1 — DataDriftPreset on volume features    -->
+  <!-- ================================================================ -->
+  <task id="T2" title="Wire Evidently DataDriftPreset into Tier 1 detector" depends="T1" github_issue="600">
+    <description>
+      Extend FeatureDriftDetector in src/minivess/observability/drift.py to
+      generate Evidently DataDriftPreset reports alongside existing KS tests.
+      The existing scipy-based KS implementation stays as the statistical backbone;
+      Evidently adds rich HTML reports and Grafana-exportable JSON.
+
+      Key: Do NOT replace existing KS tests — Evidently supplements them with
+      visualization and the DataDriftPreset column-level summary.
+    </description>
+    <files>
+      <file action="edit">src/minivess/observability/drift.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_evidently_tier1.py</test_file>
+      <tests>
+        <test>test_evidently_report_generated — DataDriftPreset produces Report object</test>
+        <test>test_evidently_report_html_export — report.save_html() produces valid HTML</test>
+        <test>test_evidently_report_json_export — report.as_dict() returns drift metrics</test>
+        <test>test_evidently_detects_synthetic_intensity_drift — inject intensity shift, verify drift_detected=True</test>
+        <test>test_evidently_no_drift_on_same_distribution — same data twice, drift_detected=False</test>
+        <test>test_evidently_report_contains_all_9_features — all feature columns present in report</test>
+        <test>test_feature_drift_detector_returns_evidently_html — DriftResult includes html_report path</test>
+      </tests>
+    </tdd>
+    <acceptance>Evidently HTML report generated from volume features, drift detected on synthetic data</acceptance>
+  </task>
+
+  <!-- ================================================================ -->
+  <!-- TASK 3: Alibi-Detect Tier 2 — MMDDrift on embeddings            -->
+  <!-- ================================================================ -->
+  <task id="T3" title="Add Alibi-Detect MMDDrift to Tier 2 detector" depends="T1" github_issue="601">
+    <description>
+      Extend EmbeddingDriftDetector in src/minivess/observability/drift.py to
+      optionally use alibi_detect.cd.MMDDrift with permutation-based p-values
+      when alibi-detect is available, falling back to the existing sklearn-based
+      MMD implementation when it is not.
+
+      Key improvements over existing implementation:
+      - Permutation-based p-values (statistically rigorous)
+      - Configurable kernel (RBF, linear, learned)
+      - Online detection support (for streaming scenarios)
+    </description>
+    <files>
+      <file action="edit">src/minivess/observability/drift.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_alibi_detect_tier2.py</test_file>
+      <tests>
+        <test>test_alibi_mmd_drift_detected_on_shifted_embeddings — synthetic shift detected</test>
+        <test>test_alibi_mmd_no_drift_on_same_embeddings — no false positive</test>
+        <test>test_alibi_mmd_returns_p_value — p_value field populated in DriftResult</test>
+        <test>test_alibi_fallback_to_sklearn_when_unavailable — graceful degradation</test>
+        <test>test_embedding_drift_detector_configurable_kernel — RBF vs linear kernel</test>
+      </tests>
+    </tdd>
+    <acceptance>Alibi-Detect MMD test with p-values on synthetic embeddings, graceful fallback</acceptance>
+  </task>
+
+  <!-- ================================================================ -->
+  <!-- TASK 4: VesselNN dataset registration as drift source            -->
+  <!-- ================================================================ -->
+  <task id="T4" title="Register VesselNN as 4th dataset for natural drift simulation" depends="T2" github_issue="602">
+    <description>
+      Add VesselNN (github.com/petteriTeikari/vesselNN_dataset) to the external
+      dataset registry in src/minivess/data/external_datasets.py. Implement
+      download + format conversion (TIFF to NIfTI if needed). Extract volume
+      features from VesselNN using existing extract_volume_features() and
+      compare against MiniVess reference distribution as a natural drift test.
+
+      The 12 VesselNN volumes come from 3 different acquisition campaigns
+      (Burgess 2014, Poon 2015, Santos 2015) with different tissue preparations,
+      creating genuine covariate shift vs. MiniVess data.
+    </description>
+    <files>
+      <file action="edit">src/minivess/data/external_datasets.py</file>
+      <file action="create">src/minivess/data/vesselnn_loader.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_vesselnn_drift.py</test_file>
+      <tests>
+        <test>test_vesselnn_registered_in_dataset_registry — VesselNN entry exists</test>
+        <test>test_vesselnn_feature_extraction — features extractable from VesselNN format</test>
+        <test>test_vesselnn_vs_minivess_drift_detected — Tier 1 detects natural covariate shift</test>
+        <test>test_vesselnn_feature_dataframe_schema — Pandera validates extracted features</test>
+      </tests>
+    </tdd>
+    <acceptance>VesselNN features extracted, Tier 1 drift detected vs. MiniVess reference</acceptance>
+    <note>Tests that require actual VesselNN download should be marked @pytest.mark.slow
+    and use cached test fixtures for CI</note>
+  </task>
+
+  <!-- ================================================================ -->
+  <!-- TASK 5: Drift report persistence to MLflow artifacts             -->
+  <!-- ================================================================ -->
+  <task id="T5" title="Persist drift reports as MLflow artifacts" depends="T2,T3" github_issue="603">
+    <description>
+      Add drift report persistence to MLflow: save Evidently HTML reports,
+      drift detection JSON summaries, and per-feature drift scores as MLflow
+      artifacts under a standardized path convention.
+
+      Artifact paths:
+      - drift_reports/tier1_evidently_report.html
+      - drift_reports/tier1_drift_summary.json
+      - drift_reports/tier2_mmd_summary.json
+      - drift_reports/drift_metadata.json (timestamps, thresholds, versions)
+    </description>
+    <files>
+      <file action="edit">src/minivess/observability/drift.py</file>
+      <file action="edit">src/minivess/observability/tracking.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_drift_mlflow_artifacts.py</test_file>
+      <tests>
+        <test>test_tier1_report_saved_as_mlflow_artifact — HTML report logged to run</test>
+        <test>test_tier1_json_summary_saved — JSON drift summary in artifacts</test>
+        <test>test_tier2_mmd_summary_saved — MMD results in artifacts</test>
+        <test>test_drift_metadata_includes_timestamps — provenance fields populated</test>
+        <test>test_artifact_paths_follow_convention — paths match drift_reports/ prefix</test>
+      </tests>
+    </tdd>
+    <acceptance>Drift reports retrievable from MLflow artifact store after detection run</acceptance>
+  </task>
+
+  <!-- ================================================================ -->
+  <!-- TASK 6: Wire drift detection into Data Flow (Flow 1)             -->
+  <!-- ================================================================ -->
+  <task id="T6" title="Integrate drift detection into Data Flow" depends="T5" github_issue="604">
+    <description>
+      Add drift detection as a Prefect task in the Data Flow (Flow 1).
+      After data loading and feature extraction, run Tier 1 drift detection
+      comparing current batch features against the reference distribution
+      (stored from previous successful run). If Tier 1 triggers, invoke
+      the existing drift triage agent (data_flow.py:370) with Evidently
+      results.
+
+      Flow integration point:
+      1. data_loading_task → feature_extraction_task → drift_detection_task → triage_drift
+      2. drift_detection_task saves reports to MLflow (T5)
+      3. triage_drift recommends action (monitor/investigate/retrain)
+    </description>
+    <files>
+      <file action="edit">src/minivess/orchestration/flows/data_flow.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_data_flow_drift_integration.py</test_file>
+      <tests>
+        <test>test_drift_detection_task_exists — @task decorator on drift detection function</test>
+        <test>test_drift_task_receives_feature_dataframe — correct input type</test>
+        <test>test_drift_task_calls_tier1_detector — FeatureDriftDetector invoked</test>
+        <test>test_drift_task_triggers_triage_on_positive — triage_drift called when drift detected</test>
+        <test>test_drift_task_skips_triage_on_negative — triage NOT called when no drift</test>
+        <test>test_drift_reference_distribution_loaded — reference features loaded from MLflow</test>
+      </tests>
+    </tdd>
+    <acceptance>Data Flow runs drift detection post-loading, triggers triage when drift detected</acceptance>
+  </task>
+
+  <!-- ================================================================ -->
+  <!-- TASK 7: Wire embedding drift into Post-Training Flow (Flow 3)    -->
+  <!-- ================================================================ -->
+  <task id="T7" title="Integrate embedding drift into Post-Training Flow" depends="T5" github_issue="605">
+    <description>
+      Add Tier 2 embedding-space drift detection to the Post-Training Flow
+      (Flow 3 / Analysis Flow). After model evaluation, extract penultimate-layer
+      embeddings from the trained model for validation volumes, then run
+      EmbeddingDriftDetector comparing against reference embeddings from the
+      training run.
+
+      This catches model-level drift: if the model's learned representations
+      have shifted relative to the reference model, it indicates either
+      data drift impact on training or concept drift.
+    </description>
+    <files>
+      <file action="edit">src/minivess/orchestration/flows/analysis_flow.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_analysis_flow_drift_integration.py</test_file>
+      <tests>
+        <test>test_embedding_drift_task_exists — @task decorator present</test>
+        <test>test_embedding_extraction_from_model — penultimate layer features extracted</test>
+        <test>test_embedding_drift_detected_on_shifted_model — synthetic model shift detected</test>
+        <test>test_embedding_drift_report_saved_to_mlflow — Tier 2 artifacts persisted</test>
+      </tests>
+    </tdd>
+    <acceptance>Analysis Flow runs embedding drift check, saves Tier 2 report to MLflow</acceptance>
+  </task>
+
+  <!-- ================================================================ -->
+  <!-- TASK 8: Dashboard Flow drift panels                              -->
+  <!-- ================================================================ -->
+  <task id="T8" title="Add drift summary to Dashboard Flow" depends="T6,T7" github_issue="606">
+    <description>
+      Extend the Dashboard Flow (Flow 5) to include drift detection summaries
+      in the dashboard JSON output. Pull Tier 1 and Tier 2 drift results from
+      MLflow artifacts and include in the dashboard data section.
+
+      Dashboard sections:
+      - drift_tier1: feature-level drift scores, drifted features list
+      - drift_tier2: MMD p-value, embedding drift score
+      - drift_history: temporal trend of drift scores across runs
+      - drift_triage: latest triage recommendation
+    </description>
+    <files>
+      <file action="edit">src/minivess/orchestration/flows/dashboard_flow.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/unit/test_dashboard_drift_panels.py</test_file>
+      <tests>
+        <test>test_dashboard_includes_drift_tier1_section — drift_tier1 key in output</test>
+        <test>test_dashboard_includes_drift_tier2_section — drift_tier2 key in output</test>
+        <test>test_dashboard_drift_history_populated — temporal trend data present</test>
+        <test>test_dashboard_handles_missing_drift_data — graceful when no drift runs exist</test>
+      </tests>
+    </tdd>
+    <acceptance>Dashboard JSON includes drift summaries from both tiers</acceptance>
+  </task>
+
+  <!-- ================================================================ -->
+  <!-- TASK 9: End-to-end integration test                              -->
+  <!-- ================================================================ -->
+  <task id="T9" title="E2E integration test: synthetic drift through full pipeline" depends="T6,T7,T8" github_issue="607">
+    <description>
+      Integration test that exercises the complete drift detection pipeline:
+      1. Generate reference features from synthetic "clean" volumes
+      2. Apply parametric drift (intensity shift, noise injection) via drift_synthetic.py
+      3. Run Tier 1 detection → verify drift detected
+      4. Generate synthetic embeddings with shift
+      5. Run Tier 2 detection → verify drift detected
+      6. Verify reports saved to MLflow artifacts
+      7. Verify triage agent recommends action
+
+      This test uses synthetic data only (no real volumes needed) and is marked
+      @pytest.mark.integration.
+    </description>
+    <files>
+      <file action="create">tests/v2/integration/test_drift_pipeline_e2e.py</file>
+    </files>
+    <tdd>
+      <test_file>tests/v2/integration/test_drift_pipeline_e2e.py</test_file>
+      <tests>
+        <test>test_e2e_synthetic_drift_detected_tier1 — full Tier 1 pipeline on synthetic data</test>
+        <test>test_e2e_synthetic_drift_detected_tier2 — full Tier 2 pipeline on synthetic embeddings</test>
+        <test>test_e2e_drift_reports_in_mlflow — both tier reports in artifact store</test>
+        <test>test_e2e_triage_agent_recommends_action — agent produces valid recommendation</test>
+        <test>test_e2e_no_false_positive_on_clean_data — no drift on identical distributions</test>
+      </tests>
+    </tdd>
+    <acceptance>Full pipeline: inject → detect → report → triage, all assertions pass</acceptance>
+  </task>
+</plan>

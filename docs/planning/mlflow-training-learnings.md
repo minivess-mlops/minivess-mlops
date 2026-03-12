@@ -1,3 +1,9 @@
+---
+title: "MLflow Training Learnings: Half-Width DynUNet v1"
+status: reference
+created: "2026-02-28"
+---
+
 # MLflow Training Learnings — Half-Width DynUNet v1
 
 **Date:** 2026-02-28

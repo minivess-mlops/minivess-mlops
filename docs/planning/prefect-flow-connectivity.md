@@ -1,3 +1,9 @@
+---
+title: "Prefect Flow Connectivity: MLflow as Inter-Flow Contract"
+status: implemented
+created: "2026-03-09"
+---
+
 # Prefect Flow Connectivity — MLflow as Inter-Flow Contract
 
 **Branch**: `fix/prefect-flow-connectivity`

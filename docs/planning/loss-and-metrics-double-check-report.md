@@ -1,3 +1,9 @@
+---
+title: "Loss Functions and Metrics: Double-Check Report"
+status: reference
+created: "2026-02-27"
+---
+
 # Loss Functions & Metrics: Double-Check Report
 
 > **Date**: 2026-02-27

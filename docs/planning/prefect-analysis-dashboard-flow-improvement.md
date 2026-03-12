@@ -1,3 +1,9 @@
+---
+title: "Prefect Analysis and Dashboard Flow Improvement Plan"
+status: planned
+created: ""
+---
+
 # Prefect Analysis & Dashboard Flow Improvement Plan
 
 > **Scope:** Complete the analysis flow with reproducibility verification, external test

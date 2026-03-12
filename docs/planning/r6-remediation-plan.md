@@ -1,3 +1,9 @@
+---
+title: "R6 Remediation Plan: 2nd-Pass Code Review Execution"
+status: implemented
+created: "2026-02-25"
+---
+
 # R6 Remediation Plan — 2nd-Pass Code Review Execution
 
 > **Created:** 2026-02-25

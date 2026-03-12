@@ -1,0 +1,38 @@
+decision_id: portfolio_role_target
+title: "Portfolio Role Priority"
+level: L1-research-goals
+status: partial
+
+options:
+  - id: iceye_forward_deployed
+    name: "ICEYE Forward-Deployed ML"
+    prior_probability: 0.30
+    posterior_probability: 0.25
+  - id: cohere_applied_ai
+    name: "Cohere Applied AI"
+    prior_probability: 0.30
+    posterior_probability: 0.25
+  - id: curio_mlops_sme
+    name: "Curio MLOps SME"
+    prior_probability: 0.25
+    posterior_probability: 0.25
+  - id: general_ml_engineer
+    name: "General ML Engineer"
+    prior_probability: 0.15
+    posterior_probability: 0.25
+
+resolution_evidence:
+  - type: discussion
+    source: "docs/modernize-minivess-mlops-plan-prompt.md"
+    finding: "Multiple portfolio targets with no single winner yet"
+
+implementation:
+  files: []
+  tests: []
+
+conditional_on: []
+
+volatility:
+  classification: volatile
+  next_review: "2026-04-13"
+  rationale: "Shifts with job market and interview pipeline"

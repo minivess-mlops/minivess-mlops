@@ -1,0 +1,27 @@
+decision_id: model_diagnostics
+title: "Model Diagnostic Tool"
+level: L3-technology
+status: resolved
+options:
+  - {id: deepchecks_vision, name: "Deepchecks Vision", prior_probability: 0.35, posterior_probability: 0.30}
+  - {id: weightwatcher_spectral, name: "WeightWatcher Spectral", prior_probability: 0.30, posterior_probability: 0.30}
+  - {id: both_deepchecks_ww, name: "Both Deepchecks + WW", prior_probability: 0.30, posterior_probability: 0.35}
+  - {id: none, name: "None", prior_probability: 0.05, posterior_probability: 0.05}
+resolved_option: both_deepchecks_ww
+resolution_evidence:
+  - type: implementation
+    source: "pyproject.toml"
+    finding: "Both deepchecks and weightwatcher in dependencies"
+  - type: literature
+    citation_key: martin_2021_weightwatcher
+    source: "https://arxiv.org/abs/1810.01075"
+implementation:
+  files: []
+  tests: []
+conditional_on:
+  - {parent_decision_id: observability_depth, influence_strength: moderate}
+  - {parent_decision_id: ensemble_strategy, influence_strength: weak}
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "Both tools complement each other"

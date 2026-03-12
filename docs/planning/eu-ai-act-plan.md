@@ -1,3 +1,9 @@
+---
+title: "EU AI Act Compliance Checklist Plan"
+status: planned
+created: ""
+---
+
 # EU AI Act Compliance Checklist — Implementation Plan (Issue #20)
 
 ## Current State

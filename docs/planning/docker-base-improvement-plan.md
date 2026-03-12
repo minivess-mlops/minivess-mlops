@@ -1,3 +1,9 @@
+---
+title: "Docker Base Image Improvement Plan"
+status: implemented
+created: ""
+---
+
 # Docker Base Image Improvement Plan
 
 ## Status: COMPLETE

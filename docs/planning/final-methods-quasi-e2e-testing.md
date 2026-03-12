@@ -1,3 +1,9 @@
+---
+title: "Final Methods Quasi-E2E Testing Plan"
+status: planned
+created: ""
+---
+
 # Final Methods Quasi-E2E Testing Plan
 
 > **Branch:** `test/final-quasi-e2e-testing`

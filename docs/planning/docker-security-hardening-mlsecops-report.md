@@ -1,3 +1,9 @@
+---
+title: "Docker Security Hardening and MLSecOps Audit"
+status: reference
+created: "2026-03-09"
+---
+
 # Docker Security Hardening & MLSecOps: Total Quality Audit
 
 **Date:** 2026-03-09

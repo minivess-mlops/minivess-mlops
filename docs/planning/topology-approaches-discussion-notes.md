@@ -1,3 +1,9 @@
+---
+title: "Topology-Aware Segmentation: Discussion Notes"
+status: reference
+created: ""
+---
+
 # Topology-Aware Segmentation: Discussion Notes
 
 ## Implemented Approaches

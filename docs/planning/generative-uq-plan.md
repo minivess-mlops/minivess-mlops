@@ -1,3 +1,9 @@
+---
+title: "Generative UQ Methods Plan"
+status: planned
+created: ""
+---
+
 # Generative UQ Methods — Implementation Plan (Issue #51)
 
 ## Current State

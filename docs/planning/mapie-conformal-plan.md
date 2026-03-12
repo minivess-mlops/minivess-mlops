@@ -1,3 +1,9 @@
+---
+title: "MAPIE Conformal Prediction Integration Plan"
+status: planned
+created: ""
+---
+
 # MAPIE Conformal Prediction Integration — Implementation Plan (Issue #7)
 
 ## Current State

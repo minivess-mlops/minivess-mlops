@@ -1,3 +1,9 @@
+---
+title: "Confidence Interval Reporting Plan"
+status: planned
+created: ""
+---
+
 # Confidence Interval Reporting — Implementation Plan (Issue #6)
 
 ## Current State

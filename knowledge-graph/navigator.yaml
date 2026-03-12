@@ -1,0 +1,88 @@
+# knowledge-graph/navigator.yaml
+# PURPOSE: Entry point for all knowledge queries.
+# An agent reads THIS FIRST, then loads only the relevant domain file(s).
+# Pattern: McMillan 2026 domain-partitioned schema navigation.
+
+version: "1.0"
+last_updated: "2026-03-13"
+
+domains:
+  architecture:
+    navigator: knowledge-graph/domains/architecture.yaml
+    covers: [model adapters, ensemble strategies, config systems, serving, API]
+    claude_md: [src/minivess/adapters/CLAUDE.md, src/minivess/config/CLAUDE.md]
+    decisions: [model_adapter_pattern, ensemble_strategy, config_architecture,
+                serving_architecture, api_protocol]
+
+  training:
+    navigator: knowledge-graph/domains/training.yaml
+    covers: [loss functions, metrics, augmentation, HPO, calibration]
+    claude_md: [src/minivess/pipeline/CLAUDE.md]
+    decisions: [loss_function, primary_metrics, topology_metrics, hpo_engine,
+                augmentation_library, calibration_method]
+
+  infrastructure:
+    navigator: knowledge-graph/domains/infrastructure.yaml
+    covers: [Docker, Prefect, CI/CD, GPU compute, SkyPilot, IaC, security]
+    claude_md: [deployment/CLAUDE.md, src/minivess/orchestration/CLAUDE.md]
+    decisions: [container_strategy, ci_cd_platform, iac_tool, gitops_engine,
+                gpu_compute, secrets_management, air_gap_strategy]
+
+  data:
+    navigator: knowledge-graph/domains/data.yaml
+    covers: [datasets, validation, profiling, versioning, lineage, drift]
+    claude_md: [src/minivess/data/CLAUDE.md]
+    decisions: [data_versioning, data_validation_depth, dataframe_validation,
+                data_profiling, label_quality_tool, lineage_tracking, drift_monitoring]
+
+  models:
+    navigator: knowledge-graph/domains/models.yaml
+    covers: [DynUNet, SAM3, SegResNet, UNETR, SwinUNETR, VesselFM, Mamba, foundation]
+    claude_md: [src/minivess/adapters/CLAUDE.md]
+    decisions: [primary_3d_model, foundation_model]
+
+  observability:
+    navigator: knowledge-graph/domains/observability.yaml
+    covers: [MLflow, DuckDB, Langfuse, Braintrust, LiteLLM, agents, XAI]
+    claude_md: [src/minivess/observability/CLAUDE.md]
+    decisions: [experiment_tracker, llm_tracing, llm_evaluation,
+                llm_provider_strategy, xai_strategy, xai_voxel_tool,
+                xai_meta_tool, observability_depth, agent_architecture]
+
+  operations:
+    navigator: knowledge-graph/domains/operations.yaml
+    covers: [monitoring, governance, retraining, SBOM, compliance, audit, federated]
+    claude_md: []
+    decisions: [dashboarding, retraining_trigger, model_governance,
+                audit_trail, sbom_generation, federated_learning]
+
+  testing:
+    navigator: knowledge-graph/domains/testing.yaml
+    covers: [test tiers, markers, fixtures, CI, QA]
+    claude_md: [tests/CLAUDE.md]
+    decisions: []
+
+keywords:
+  docker: infrastructure
+  prefect: infrastructure
+  skypilot: infrastructure
+  loss: training
+  metric: training
+  hpo: training
+  optuna: training
+  sam3: models
+  dynunet: models
+  mamba: models
+  mlflow: observability
+  langfuse: observability
+  drift: data
+  dataset: data
+  minivess: data
+  security: infrastructure
+  onnx: architecture
+  bentoml: architecture
+  calibration: training
+  ensemble: architecture
+  xai: observability
+  compliance: operations
+  audit: operations

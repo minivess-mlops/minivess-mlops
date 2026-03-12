@@ -1,3 +1,9 @@
+---
+title: "Segmentation Quality Control Plan"
+status: planned
+created: ""
+---
+
 # Segmentation Quality Control — Implementation Plan (Issue #13)
 
 ## Current State

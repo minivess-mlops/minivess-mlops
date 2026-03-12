@@ -1,3 +1,9 @@
+---
+title: "AtlasSegFM One-Shot Foundation Model Customization Plan"
+status: planned
+created: ""
+---
+
 # AtlasSegFM One-Shot Foundation Model Customization — Implementation Plan (Issue #15)
 
 ## Current State

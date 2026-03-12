@@ -1,0 +1,33 @@
+decision_id: loss_function
+title: "Primary Loss Function"
+level: L3-technology
+status: resolved
+options:
+  - {id: dice_ce_combined, name: "Dice + Cross-Entropy Combined", prior_probability: 0.40, posterior_probability: 0.10}
+  - {id: cldice_soft_skeleton, name: "clDice + Soft Skeleton (cbdice_cldice)", prior_probability: 0.30, posterior_probability: 0.85}
+  - {id: generalized_dice, name: "Generalized Dice Loss", prior_probability: 0.20, posterior_probability: 0.03}
+  - {id: focal_tversky, name: "Focal Tversky Loss", prior_probability: 0.10, posterior_probability: 0.02}
+resolved_option: cldice_soft_skeleton
+resolution_evidence:
+  - type: experiment
+    source: "docs/results/dynunet_loss_variation_v2_report.md"
+    finding: "0.906 clDice (best topology) with only -5.3% DSC penalty"
+  - type: literature
+    citation_key: shit_2021_cldice
+    source: "https://arxiv.org/abs/2003.07311"
+implementation:
+  files: [src/minivess/pipeline/loss_functions.py, configs/base.yaml]
+  tests: [tests/v2/unit/test_loss_functions.py]
+conditional_on:
+  - {parent_decision_id: model_adapter_pattern, influence_strength: weak}
+  - {parent_decision_id: monai_alignment, influence_strength: weak}
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "Empirically validated on MiniVess; unlikely to change unless new topology loss published"
+domain_overlays:
+  vascular-segmentation:
+    probability_shift:
+      cldice_soft_skeleton: +0.20
+      dice_ce_combined: -0.15
+    rationale: "Topology preservation critical for vessel connectivity"

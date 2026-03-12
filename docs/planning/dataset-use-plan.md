@@ -1,3 +1,9 @@
+---
+title: "Dataset Use Plan: MiniVess NIfTI Integration"
+status: implemented
+created: "2026-02-24"
+---
+
 # Dataset Use Plan: MiniVess NIfTI Integration
 
 **Issue**: #35 — Wire real MiniVess NIfTI data into v2 training pipeline

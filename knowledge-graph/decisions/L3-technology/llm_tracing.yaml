@@ -1,0 +1,24 @@
+decision_id: llm_tracing
+title: "LLM Observability Tool"
+level: L3-technology
+status: resolved
+options:
+  - {id: langfuse_self_hosted, name: "Langfuse Self-Hosted", prior_probability: 0.50, posterior_probability: 0.85}
+  - {id: langfuse_plus_braintrust, name: "Langfuse + Braintrust", prior_probability: 0.30, posterior_probability: 0.10}
+  - {id: braintrust_only, name: "Braintrust Only", prior_probability: 0.10, posterior_probability: 0.03}
+  - {id: none, name: "None", prior_probability: 0.10, posterior_probability: 0.02}
+resolved_option: langfuse_self_hosted
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/observability/langfuse_tracing.py"
+    finding: "Self-hosted Langfuse in Docker Compose"
+implementation:
+  files: [src/minivess/observability/langfuse_tracing.py]
+  tests: []
+conditional_on:
+  - {parent_decision_id: agent_architecture, influence_strength: strong}
+  - {parent_decision_id: observability_depth, influence_strength: moderate}
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "Langfuse self-hosted for cost control"

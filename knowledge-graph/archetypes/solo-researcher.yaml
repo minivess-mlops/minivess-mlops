@@ -1,0 +1,30 @@
+archetype_id: solo_researcher
+title: "Solo Researcher"
+description: "Single researcher building a portfolio project"
+status: active
+
+characteristics:
+  team_size: 1
+  budget: "< $100/month cloud spend"
+  gpu_access: "Single consumer GPU (RTX 2070-4090) or cloud spot"
+  primary_constraint: "Time (one person doing everything)"
+  tool_preference: "Maximize breadth over depth"
+  deployment_target: "Docker Compose on local machine"
+  compliance_need: "SaMD-principled (demonstrate, not certify)"
+
+probability_shifts:
+  container_strategy:
+    docker_compose_profiles: +0.15
+    k8s_kustomize: -0.10
+  gpu_compute:
+    local_gpu: +0.15
+    cloud_spot_instances: -0.10
+  retraining_trigger:
+    manual_only: +0.15
+    drift_alert_webhook: -0.10
+  federated_learning:
+    not_applicable: +0.20
+    monai_fl: -0.15
+  secrets_management:
+    dynaconf_dotenv: +0.10
+    vault_hashicorp: -0.10

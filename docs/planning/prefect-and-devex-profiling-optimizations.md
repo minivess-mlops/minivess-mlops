@@ -1,3 +1,9 @@
+---
+title: "Prefect Orchestration and Adaptive DevEx Profiling Plan"
+status: planned
+created: "2026-02-25"
+---
+
 # Prefect Orchestration & Adaptive DevEx Profiling Plan
 
 **Status**: DRAFT

@@ -1,3 +1,9 @@
+---
+title: "MLflow Robustifying Plan: Comprehensive Reproducibility"
+status: implemented
+created: "2026-02-28"
+---
+
 # MLflow Robustifying Plan: Comprehensive Reproducibility for Academic Publication
 
 **Status:** v2 (reviewed by 3 agents) — 2026-02-28

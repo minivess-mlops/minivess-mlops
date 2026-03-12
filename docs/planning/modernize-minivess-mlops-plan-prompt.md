@@ -1,3 +1,9 @@
+---
+title: "Modernization Plan Prompt: Original User Prompt and Q&A"
+status: reference
+created: "2026-02-23"
+---
+
 # Modernization Plan Prompt — MinIVess MLOps
 
 > This document preserves (1) the **verbatim user prompt** that initiated the planning, (2) the **clarification Q&A**, and (3) an **optimized prompt** rewritten for downstream LLM use.

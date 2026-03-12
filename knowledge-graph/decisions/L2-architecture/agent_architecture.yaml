@@ -1,0 +1,44 @@
+decision_id: agent_architecture
+title: "Agent Orchestration Approach"
+level: L2-architecture
+status: resolved
+
+options:
+  - id: langgraph_stateful
+    name: "LangGraph Stateful Agents"
+    prior_probability: 0.55
+    posterior_probability: 0.80
+  - id: langchain_sequential
+    name: "LangChain Sequential"
+    prior_probability: 0.20
+    posterior_probability: 0.05
+  - id: custom_state_machine
+    name: "Custom State Machine"
+    prior_probability: 0.15
+    posterior_probability: 0.10
+  - id: no_agents
+    name: "No Agents"
+    prior_probability: 0.10
+    posterior_probability: 0.05
+
+resolved_option: langgraph_stateful
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/agents/"
+    finding: "Pydantic AI + PrefectAgent wrappers per ADR 0007"
+
+implementation:
+  files:
+    - src/minivess/agents/
+  tests: []
+
+conditional_on:
+  - parent_decision_id: project_purpose
+    influence_strength: weak
+  - parent_decision_id: portfolio_role_target
+    influence_strength: moderate
+
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "Agent framework landscape rapidly evolving"

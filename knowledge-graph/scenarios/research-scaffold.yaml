@@ -1,0 +1,14 @@
+# Planned scenario — optimized for manuscript production
+scenario_id: research_scaffold
+title: "Research Scaffold"
+description: "Optimized for STAR Protocols + Medical Image Analysis manuscripts"
+status: planned
+archetype: solo-researcher
+
+notes: |
+  Key differences from learning-first-mvp:
+  - project_purpose → research_publication
+  - impact_target → manuscript_quality
+  - reproducibility_level → bit_reproducible
+  - topology_metrics → betti_gudhi (required for vessel paper)
+  - Resolves all metric and evaluation decisions

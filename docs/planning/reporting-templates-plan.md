@@ -1,3 +1,9 @@
+---
+title: "Reporting Standard Templates Plan"
+status: planned
+created: ""
+---
+
 # Reporting Standard Templates — Implementation Plan (Issue #14)
 
 ## Current State

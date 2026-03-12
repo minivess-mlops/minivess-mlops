@@ -1,0 +1,23 @@
+decision_id: ci_cd_platform
+title: "CI/CD Platform"
+level: L4-infrastructure
+status: resolved
+options:
+  - {id: github_actions_cml, name: "GitHub Actions + CML", prior_probability: 0.60, posterior_probability: 0.90}
+  - {id: github_actions_only, name: "GitHub Actions Only", prior_probability: 0.25, posterior_probability: 0.05}
+  - {id: gitlab_ci, name: "GitLab CI", prior_probability: 0.10, posterior_probability: 0.03}
+  - {id: local_just_only, name: "Local Just Only", prior_probability: 0.05, posterior_probability: 0.02}
+resolved_option: github_actions_cml
+resolution_evidence:
+  - type: implementation
+    source: ".github/workflows/ci-v2.yml"
+    finding: "GitHub Actions + CML, but EXPLICITLY DISABLED to save credits"
+implementation:
+  files: [.github/workflows/ci-v2.yml]
+  tests: []
+conditional_on:
+  - {parent_decision_id: experiment_tracker, influence_strength: moderate}
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "Platform selected; CI disabled for cost control"

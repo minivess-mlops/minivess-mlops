@@ -1,3 +1,9 @@
+---
+title: "Graph-Based Topology Evaluation Metrics Survey"
+status: reference
+created: "2026-02-28"
+---
+
 # Graph-Based Topology Evaluation Metrics for Vessel/Tube Segmentation
 
 **Survey Date:** 2026-02-28
