@@ -164,6 +164,69 @@ def collect_pipeline_section_task(
     )
 
 
+@task(name="collect-drift-section")
+def collect_drift_section_task(
+    *,
+    tracking_uri: str,
+    drift_run_id: str,
+) -> dict[str, Any]:
+    """Collect drift detection summaries for dashboard.
+
+    Reads Tier 1 and Tier 2 drift artifacts from an MLflow run.
+
+    Parameters
+    ----------
+    tracking_uri:
+        MLflow tracking URI.
+    drift_run_id:
+        Run ID containing drift detection artifacts.
+
+    Returns
+    -------
+    Dict with drift_tier1, drift_tier2, and status keys.
+    """
+    import mlflow
+
+    mlflow.set_tracking_uri(tracking_uri)
+    client = mlflow.tracking.MlflowClient()
+
+    result: dict[str, Any] = {"status": "no_drift_data"}
+    try:
+        artifacts = client.list_artifacts(drift_run_id, "drift_reports")
+        artifact_paths = [a.path for a in artifacts]
+    except Exception:  # noqa: BLE001
+        logger.debug("No drift_reports artifacts for run %s", drift_run_id)
+        return result
+
+    if not artifact_paths:
+        return result
+
+    result["status"] = "ok"
+
+    # Load Tier 1 summary
+    tier1_matches = [p for p in artifact_paths if "tier1_drift_summary" in p]
+    if tier1_matches:
+        local_path = client.download_artifacts(drift_run_id, tier1_matches[0])
+        tier1_data = json.loads(Path(local_path).read_text(encoding="utf-8"))
+        result["drift_tier1"] = tier1_data
+
+    # Load Tier 2 summary
+    tier2_matches = [p for p in artifact_paths if "tier2_mmd_summary" in p]
+    if tier2_matches:
+        local_path = client.download_artifacts(drift_run_id, tier2_matches[0])
+        tier2_data = json.loads(Path(local_path).read_text(encoding="utf-8"))
+        result["drift_tier2"] = tier2_data
+
+    # Load metadata
+    metadata_matches = [p for p in artifact_paths if "drift_metadata" in p]
+    if metadata_matches:
+        local_path = client.download_artifacts(drift_run_id, metadata_matches[0])
+        meta_data = json.loads(Path(local_path).read_text(encoding="utf-8"))
+        result["drift_metadata"] = meta_data
+
+    return result
+
+
 def generate_report(
     dashboard: EverythingDashboard,
     output_dir: Path,
