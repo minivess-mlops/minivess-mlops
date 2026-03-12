@@ -29,6 +29,8 @@ from minivess.orchestration.flow_contract import (
 from minivess.orchestration.mlflow_helpers import log_completion_safe
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from minivess.data.splits import FoldSplit
 
 logger = logging.getLogger(__name__)
@@ -365,6 +367,69 @@ def log_data_provenance_task(
     }
     logger.info("Data provenance: %s", provenance)
     return provenance
+
+
+@dataclass
+class DriftDetectionResult:
+    """Result from drift_detection_task."""
+
+    drift_detected: bool
+    dataset_drift_score: float
+    feature_scores: dict[str, float]
+    drifted_features: list[str]
+    triage_recommendation: dict[str, Any] | None = None
+
+
+@task(name="drift-detection")
+def drift_detection_task(
+    *,
+    reference_features: pd.DataFrame,
+    current_features: pd.DataFrame,
+    threshold: float = 0.05,
+    drift_share: float = 0.5,
+) -> DriftDetectionResult:
+    """Run Tier 1 drift detection on volume features.
+
+    Compares current batch features against reference distribution using
+    FeatureDriftDetector (KS tests + Evidently DataDriftPreset).
+    Triggers triage_drift when drift is detected.
+
+    Parameters
+    ----------
+    reference_features:
+        Reference feature DataFrame from previous successful run.
+    current_features:
+        Current batch feature DataFrame.
+    threshold:
+        P-value threshold for per-feature drift.
+    drift_share:
+        Fraction of features that must drift for dataset drift.
+
+    Returns
+    -------
+    DriftDetectionResult with drift assessment and optional triage.
+    """
+    from minivess.observability.drift import FeatureDriftDetector
+
+    detector = FeatureDriftDetector(
+        reference_features, threshold=threshold, drift_share=drift_share
+    )
+    result = detector.detect(current_features)
+
+    triage_rec = None
+    if result.drift_detected:
+        triage_rec = triage_drift(
+            drift_score=result.dataset_drift_score,
+            feature_drift_scores=result.feature_scores,
+        )
+
+    return DriftDetectionResult(
+        drift_detected=result.drift_detected,
+        dataset_drift_score=result.dataset_drift_score,
+        feature_scores=result.feature_scores,
+        drifted_features=result.drifted_features,
+        triage_recommendation=triage_rec,
+    )
 
 
 @task(name="triage-drift")
