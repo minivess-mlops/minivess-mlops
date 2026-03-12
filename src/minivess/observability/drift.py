@@ -266,10 +266,15 @@ class EmbeddingDriftDetector:
         *,
         p_val_threshold: float = 0.05,
         n_permutations: int = 100,
+        kernel: str = "rbf",
     ) -> None:
         self.reference = reference_embeddings
         self.p_val_threshold = p_val_threshold
         self.n_permutations = n_permutations
+        if kernel not in ("rbf", "linear"):
+            msg = f"Unsupported kernel: {kernel!r}. Use 'rbf' or 'linear'."
+            raise ValueError(msg)
+        self.kernel = kernel
 
     def detect(self, current_embeddings: NDArray[np.float32]) -> DriftResult:
         """Run kernel MMD test on current embeddings vs reference.
@@ -319,7 +324,7 @@ class EmbeddingDriftDetector:
         combined = np.vstack([x, y])
 
         # Compute observed MMD
-        observed_mmd = self._compute_mmd(x, y)
+        observed_mmd = self._compute_mmd(x, y, kernel=self.kernel)
 
         # Permutation test
         rng = np.random.default_rng(42)
@@ -328,7 +333,7 @@ class EmbeddingDriftDetector:
             perm = rng.permutation(n + m)
             x_perm = combined[perm[:n]]
             y_perm = combined[perm[n:]]
-            perm_mmd = self._compute_mmd(x_perm, y_perm)
+            perm_mmd = self._compute_mmd(x_perm, y_perm, kernel=self.kernel)
             if perm_mmd >= observed_mmd:
                 count_ge += 1
 
@@ -339,29 +344,40 @@ class EmbeddingDriftDetector:
     def _compute_mmd(
         x: NDArray[np.float32],
         y: NDArray[np.float32],
+        *,
+        kernel: str = "rbf",
     ) -> float:
-        """Compute unbiased MMD^2 estimate with RBF kernel (median bandwidth).
+        """Compute unbiased MMD^2 estimate with configurable kernel.
 
         Parameters
         ----------
         x, y:
             Two samples, shape (n, d) and (m, d).
+        kernel:
+            Kernel type: 'rbf' (Gaussian, median bandwidth) or 'linear'.
 
         Returns
         -------
         Unbiased MMD^2 estimate.
         """
-        from sklearn.metrics.pairwise import rbf_kernel
+        from sklearn.metrics.pairwise import linear_kernel, rbf_kernel
 
-        # Median heuristic for bandwidth
-        combined = np.vstack([x, y])
-        dists = np.linalg.norm(combined[:, None] - combined[None, :], axis=-1)
-        median_dist = float(np.median(dists[dists > 0]))
-        gamma = 1.0 / (2.0 * max(median_dist, 1e-10) ** 2)
-
-        k_xx = rbf_kernel(x, x, gamma=gamma)
-        k_yy = rbf_kernel(y, y, gamma=gamma)
-        k_xy = rbf_kernel(x, y, gamma=gamma)
+        if kernel == "rbf":
+            # Median heuristic for bandwidth
+            combined = np.vstack([x, y])
+            dists = np.linalg.norm(combined[:, None] - combined[None, :], axis=-1)
+            median_dist = float(np.median(dists[dists > 0]))
+            gamma = 1.0 / (2.0 * max(median_dist, 1e-10) ** 2)
+            k_xx = rbf_kernel(x, x, gamma=gamma)
+            k_yy = rbf_kernel(y, y, gamma=gamma)
+            k_xy = rbf_kernel(x, y, gamma=gamma)
+        elif kernel == "linear":
+            k_xx = linear_kernel(x, x)
+            k_yy = linear_kernel(y, y)
+            k_xy = linear_kernel(x, y)
+        else:
+            msg = f"Unsupported kernel: {kernel!r}"
+            raise ValueError(msg)
 
         n = len(x)
         m = len(y)
