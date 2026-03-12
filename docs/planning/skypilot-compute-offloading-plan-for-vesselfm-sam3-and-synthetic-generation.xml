@@ -1,0 +1,1452 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SkyPilot Compute Offloading Plan
+  ================================
+  Connects existing but disconnected SkyPilot infrastructure to the main pipeline,
+  enabling cloud GPU training for models that cannot train locally (VesselFM, SAM3
+  full fine-tuning, synthetic vascular generators).
+
+  Source report: docs/planning/skypilot-and-finops-complete-report.md
+  Issue: https://github.com/minivess-mlops/minivess-mlops/issues/609
+  Cross-ref: #366 (RunPod via SkyPilot)
+
+  Architecture summary:
+    LOCAL:  Prefect orchestration + PostgreSQL (Optuna)
+    ORACLE: MLflow tracking server on OCI Always Free (ARM A1, 24 GB, $0/month)
+    REMOTE: SkyPilot VMs run training, log to MLflow at https://mlflow.minivess.fi
+    CONTRACT: MLflow artifacts are the ONLY inter-environment communication channel
+
+  Key constraints (from CLAUDE.md):
+    - TDD mandatory: tests first, then implementation
+    - uv only (no pip)
+    - All training through Prefect flows in Docker
+    - .env.example is single source of truth for config
+    - resolve_tracking_uri() is the ONLY way to get MLflow URI in Python
+    - STOP protocol: S(Docker), T(Prefect), O(volumes), P(provenance)
+    - No standalone scripts as training entry points
+    - No regex for structured data parsing
+-->
+<plan>
+  <metadata>
+    <title>SkyPilot Compute Offloading for VesselFM, SAM3, and Synthetic Generation</title>
+    <issue>609</issue>
+    <branch>feat/synthetic-vasculature-stack-generation</branch>
+    <created>2026-03-12</created>
+    <report>docs/planning/skypilot-and-finops-complete-report.md</report>
+    <version>1.2.0</version>
+    <notes>
+      v1.2.0 (2026-03-12): USER DECISION — Oracle Cloud Always Free chosen for MLflow
+      hosting. T1 status changed from NEEDS_USER_DECISION to DECIDED. T1b unblocked
+      and now targets Oracle Cloud specifically (pulumi-oci provider). Added T1c for
+      multi-arch Docker builds (aarch64 support). T2 updated with OCI env vars.
+
+      v1.1.0 (2026-03-12): Added Pulumi IaC integration for MLflow deployment.
+      Pulumi integration is CONDITIONAL on user's IaC choice — if the user already has
+      (or plans to have) a Pulumi subscription managing broader research infrastructure,
+      Options C/D in T1 become the recommended MLflow deployment path because `pulumi up`
+      automates the entire server provisioning. This repo is one part of a larger
+      Pulumi-managed stack. The infra person is Pulumi-literate.
+    </notes>
+  </metadata>
+
+  <!-- ===================================================================
+       PHASE 0: MLflow Accessibility (CRITICAL — blocks everything else)
+       =================================================================== -->
+
+  <tasks>
+    <task id="T1" priority="P0" effort="2h" status="DECIDED">
+      <name>MLflow Remote Accessibility — Strategy Selection</name>
+      <description>
+        MLflow at http://minivess-mlflow:5000 is inside Docker Compose internal
+        network. SkyPilot VMs cannot reach it. This was the #1 blocker for ALL
+        remote training.
+
+        USER DECISION (2026-03-12): OPTION C — Oracle Cloud Always Free Tier chosen.
+
+        Rationale: Oracle Cloud Always Free provides 4 OCPU Arm Ampere A1, 24 GB
+        RAM, 200 GB storage at $0/month forever. The MLflow server will be shared
+        as a paper artifact, allowing reviewers and readers to browse experiments.
+
+        IMPORTANT: The Arm (aarch64) architecture requires either multi-arch Docker
+        builds or `--platform linux/amd64` QEMU emulation. See T1c for multi-arch
+        build support.
+
+        === Other options evaluated (kept for reference) ===
+
+        OPTION A: DagsHub Managed MLflow (NOT CHOSEN)
+          - Set MLFLOW_TRACKING_URI=https://dagshub.com/USER/REPO.mlflow
+          - Free tier: 20 GB storage, 100 experiments
+          - Pro: $9/user/month for unlimited
+          - Pros: zero infrastructure, always accessible, free for solo researcher
+          - Cons: vendor dependency, data leaves local machine, 20 GB storage limit
+
+        OPTION B: Tailscale / Cloudflare Tunnel (NOT CHOSEN)
+          - Cloudflare Tunnel: free, zero-trust, outbound-only connection
+            CAVEAT: 100 MB upload limit — DEALBREAKER for ONNX models >100 MB
+          - Tailscale: free for personal use (100 devices), no upload limit,
+            WireGuard-based mesh VPN.
+          - Pros: free, data stays local, no vendor lock-in
+          - Cons: tunnel must run on dev machine during training, added latency
+
+        OPTION C: Oracle Cloud Always Free Tier — SELECTED
+          - 4 OCPU ARM Ampere A1, 24 GB RAM, 200 GB block storage — $0/month forever
+          - Deploy MLflow + PostgreSQL + MinIO on OCI ARM VM
+          - Pulumi-oci provider automates provisioning via `pulumi up`
+          - See T1b for the Pulumi stack implementation
+          - See T1c for multi-arch Docker build support (aarch64)
+          - Pros: truly free forever, always-on, no tunnel dependency, paper artifact
+          - Cons: ARM compatibility testing required, OCI account setup (manual)
+          - WITH PULUMI: setup complexity drops from HIGH to LOW (one-time stack dev)
+
+        OPTION D: Hetzner VPS (NOT CHOSEN — EUR 3.49/month CX22)
+          - 2 vCPU, 4 GB RAM, 40 GB — cheapest paid VPS option
+          - Pros: cheap, x86 (no ARM issues), fast EU network
+          - Cons: monthly cost when Oracle offers $0 forever
+
+        OPTION E: Post-hoc Sync (NOT CHOSEN)
+          - SkyPilot VM trains with MLFLOW_TRACKING_URI=mlruns (local filesystem)
+          - Pros: zero infrastructure, works immediately
+          - Cons: no real-time monitoring, no live metrics, not shareable as paper artifact
+      </description>
+      <tdd>
+        <red>
+          Write test in tests/v2/unit/test_mlflow_remote_accessibility.py:
+          - test_mlflow_tracking_uri_remote_defined_in_env_example:
+            Assert MLFLOW_TRACKING_URI_REMOTE exists in .env.example
+          - test_resolve_tracking_uri_prefers_remote_when_set:
+            When MLFLOW_TRACKING_URI_REMOTE is set and non-empty,
+            resolve_tracking_uri() should return it (for SkyPilot context)
+          - test_resolve_tracking_uri_falls_back_to_local:
+            When MLFLOW_TRACKING_URI_REMOTE is unset, resolve_tracking_uri()
+            returns the standard MLFLOW_TRACKING_URI value
+        </red>
+        <green>
+          1. Add MLFLOW_TRACKING_URI_REMOTE to .env.example with documentation
+          2. Update resolve_tracking_uri() in src/minivess/observability/tracking.py
+             to check MLFLOW_TRACKING_URI_REMOTE first when running in SkyPilot context
+             (detected via SKYPILOT_TASK_ID env var)
+        </green>
+        <verify>
+          make test-staging — all new tests pass, no regressions
+          uv run ruff check src/minivess/observability/tracking.py
+        </verify>
+      </tdd>
+      <files>
+        <file action="create">tests/v2/unit/test_mlflow_remote_accessibility.py</file>
+        <file action="modify">.env.example</file>
+        <file action="modify">src/minivess/observability/tracking.py</file>
+      </files>
+      <depends_on/>
+    </task>
+
+    <task id="T1b" priority="P1" effort="4h" status="NOT_STARTED">
+      <name>Pulumi MLflow Stack — Oracle Cloud Always Free (OCI ARM A1.Flex)</name>
+      <description>
+        Oracle Cloud Always Free was chosen in T1 (DECIDED 2026-03-12). This task
+        implements the Pulumi stack to deploy MLflow on OCI.
+
+        Prerequisites (manual, not automatable):
+          - Create OCI account at https://cloud.oracle.com/
+          - Generate API signing key pair for Pulumi authentication
+          - Note tenancy OCID, user OCID, compartment OCID, region
+
+        Create a Pulumi Python program (pulumi-oci provider) that deploys the
+        complete MLflow tracking stack to Oracle Cloud Always Free:
+
+          1. Compute: OCI A1 Flex instance (4 OCPU Arm Ampere, 24 GB RAM)
+             - Shape: VM.Standard.A1.Flex (Always Free eligible)
+             - Boot volume: 50 GB (Always Free includes 200 GB total)
+             - OS: Oracle Linux 9 or Ubuntu 22.04 (aarch64)
+          2. Networking: VCN + public subnet + security list
+             - Ingress: allow HTTPS (443) and SSH (22) only
+             - Egress: allow all (for Docker pulls, package installs)
+             - MLflow behind nginx reverse proxy — port 5000 NOT exposed directly
+          3. DNS: A record via pulumi-cloudflare for `mlflow.minivess.fi` (or similar)
+          4. Docker: Install Docker + Docker Compose via cloud-init user data script
+          5. Services: Deploy MLflow + PostgreSQL + MinIO via Docker Compose
+             (reuse existing deployment/docker-compose.yml with remote overrides)
+          6. TLS: Let's Encrypt via nginx reverse proxy (certbot or acme.sh)
+          7. Auth: Basic auth via nginx (htpasswd) for public access control
+
+        IMPORTANT: Arm (aarch64) architecture requires either multi-arch Docker
+        builds or `--platform linux/amd64` QEMU emulation. See T1c for multi-arch
+        build support. For the MLflow/PostgreSQL/MinIO stack, official images
+        already support arm64 — no custom builds needed for server-side services.
+
+        Security hardening:
+          - Firewall rules: only HTTPS (443) and SSH (22) inbound
+          - MLflow behind nginx reverse proxy with Let's Encrypt TLS
+          - PostgreSQL and MinIO on internal Docker network only (not exposed)
+          - SSH key-only auth (no password), fail2ban for brute-force protection
+
+        The stack is designed to be part of a LARGER Pulumi-managed research
+        infrastructure. This repo's stack is one component; the user's Pulumi
+        org may manage other services (Langfuse, Prefect Cloud, etc.) alongside it.
+
+        Effort: 4h one-time stack development, then 5 min per deployment via
+        `pulumi up`. Tear-down is `pulumi destroy`.
+
+        Provider: pulumi-oci (PyPI: pulumi-oci) — $0/month forever (Always Free Tier)
+      </description>
+      <tdd>
+        <red>
+          Create tests/v2/unit/test_pulumi_mlflow_stack.py:
+          - test_pulumi_project_yaml_exists:
+            Assert deployment/pulumi/Pulumi.yaml exists and is valid YAML
+          - test_pulumi_program_importable:
+            Assert deployment/pulumi/__init__.py can be imported without error
+          - test_pulumi_program_has_required_exports:
+            Assert stack exports mlflow_url, postgres_connection, minio_endpoint
+          - test_pulumi_dev_stack_config_exists:
+            Assert deployment/pulumi/Pulumi.dev.yaml exists
+          - test_pulumi_preview_succeeds:
+            Run `pulumi preview --stack dev --non-interactive` in dry-run mode
+            (requires pulumi CLI installed; skip with @pytest.mark.integration
+            if not available)
+          - test_pulumi_requirements_has_oci_provider:
+            Assert deployment/pulumi/requirements.txt contains pulumi and pulumi-oci
+          - test_pulumi_config_targets_oracle:
+            Assert Pulumi.dev.yaml specifies Oracle Cloud (oci) as the provider
+          - test_pulumi_program_provisions_a1_flex:
+            Assert __init__.py references VM.Standard.A1.Flex shape
+          - test_pulumi_program_has_vcn_and_security_list:
+            Assert __init__.py creates VCN, subnet, and security list resources
+          - test_pulumi_program_has_nginx_tls:
+            Assert cloud-init or provisioner configures nginx with Let's Encrypt
+        </red>
+        <green>
+          1. Create deployment/pulumi/Pulumi.yaml (project definition)
+          2. Create deployment/pulumi/__init__.py (Pulumi program):
+             - Provision oci_core_vcn + oci_core_subnet + oci_core_security_list
+               (ingress: 443 HTTPS + 22 SSH only)
+             - Provision oci_core_instance (VM.Standard.A1.Flex, 4 OCPU, 24 GB RAM)
+             - cloud-init user data: install Docker, Docker Compose, nginx, certbot
+             - remote-exec provisioner: copy docker-compose.yml, nginx config,
+               `docker compose up -d`, configure Let's Encrypt TLS
+             - Export mlflow_url, postgres_connection, minio_endpoint
+          3. Create deployment/pulumi/Pulumi.dev.yaml (dev stack config):
+             - oci_compartment_id: (must be set via `pulumi config set`)
+             - oci_region: eu-frankfurt-1 (or user's home region)
+             - instance_shape: VM.Standard.A1.Flex
+             - instance_ocpus: 4
+             - instance_memory_gb: 24
+             - mlflow_domain: mlflow.minivess.fi
+             - postgres_password: (secret, must be set via `pulumi config set --secret`)
+          4. Create deployment/pulumi/requirements.txt:
+             - pulumi>=3.0
+             - pulumi-oci>=2.0
+             - pulumi-cloudflare>=5.0 (for DNS record)
+             - pulumi-command>=0.9 (for remote-exec provisioning)
+          5. Create deployment/pulumi/cloud-init.yaml:
+             - Install Docker CE (arm64), Docker Compose plugin
+             - Install nginx, certbot, python3-certbot-nginx
+             - Configure fail2ban for SSH brute-force protection
+        </green>
+        <verify>
+          - `pulumi preview --stack dev --cwd deployment/pulumi` succeeds
+            (validates program syntax and config references — no actual deployment)
+          - `pulumi up --stack dev --cwd deployment/pulumi` deploys MLflow
+            (manual verification — MLflow UI accessible at https://mlflow.minivess.fi)
+          - make test-staging — unit tests for file existence and structure pass
+          - uv run ruff check deployment/pulumi/__init__.py
+        </verify>
+      </tdd>
+      <files>
+        <file action="create">deployment/pulumi/__init__.py</file>
+        <file action="create">deployment/pulumi/Pulumi.yaml</file>
+        <file action="create">deployment/pulumi/Pulumi.dev.yaml</file>
+        <file action="create">deployment/pulumi/requirements.txt</file>
+        <file action="create">deployment/pulumi/cloud-init.yaml</file>
+        <file action="create">tests/v2/unit/test_pulumi_mlflow_stack.py</file>
+      </files>
+      <depends_on>T1</depends_on>
+    </task>
+
+    <task id="T1c" priority="P1" effort="2h" status="NOT_STARTED">
+      <name>Multi-arch Docker base image builds (amd64 + arm64)</name>
+      <description>
+        The Oracle Cloud Always Free instance uses Arm Ampere A1 (aarch64), so
+        Docker images need to be built for both amd64 and arm64 architectures.
+        This affects Dockerfile.base and all flow Dockerfiles in
+        deployment/docker/.
+
+        Two approaches (choose one):
+          A. Multi-platform builds via `docker buildx` (RECOMMENDED)
+             - Uses Docker Buildx with QEMU emulation for cross-compilation
+             - Single build command produces images for both architectures
+             - Images pushed to registry with multi-arch manifest
+             - Slower build time (~2x) but simpler workflow
+
+          B. QEMU emulation only (`--platform linux/amd64`)
+             - Run amd64 images on arm64 via QEMU user-space emulation
+             - Simpler: no changes to Dockerfiles or build process
+             - Slower runtime (~2-5x) due to instruction translation
+             - Suitable as fallback if native arm64 builds are problematic
+
+        For the MLflow server stack (PostgreSQL, MinIO, MLflow, nginx), official
+        images already support arm64 natively — no custom builds needed.
+        Multi-arch builds are needed for the MinIVess flow images that run
+        training, analysis, etc. on the Oracle instance (if needed) or on
+        mixed-architecture compute clusters.
+
+        Changes:
+          1. Add `docker buildx create --use` setup to Makefile
+          2. Add `make docker-build-multiarch` target that builds all images
+             for linux/amd64,linux/arm64
+          3. Update Dockerfile.base to use multi-stage build compatible with
+             both architectures (avoid x86-specific instructions)
+          4. Test that resulting images work on both architectures
+      </description>
+      <tdd>
+        <red>
+          Create tests/v2/unit/test_docker_multiarch.py:
+          - test_makefile_has_multiarch_target:
+            Assert Makefile contains "docker-build-multiarch" target
+          - test_dockerfile_base_no_arch_specific_instructions:
+            Parse Dockerfile.base, verify no hardcoded x86 package URLs
+            or architecture-specific apt repo additions
+          - test_docker_buildx_succeeds_for_base_image:
+            Run `docker buildx build --platform linux/amd64,linux/arm64`
+            for Dockerfile.base (requires Docker Buildx; skip with
+            @pytest.mark.integration if not available)
+        </red>
+        <green>
+          1. Add buildx builder setup and multi-arch build targets to Makefile
+          2. Audit Dockerfile.base for architecture-specific instructions
+          3. Verify official base images (nvidia/cuda, python) have arm64 variants
+             NOTE: nvidia/cuda does NOT have arm64 — if CUDA is in base image,
+             arm64 build uses python:3.12-slim instead (no GPU on Oracle ARM)
+          4. Add architecture detection in Dockerfile.base via TARGETARCH build arg
+        </green>
+        <verify>
+          - `docker buildx build --platform linux/amd64,linux/arm64 -f
+            deployment/docker/Dockerfile.base .` succeeds for both architectures
+          - Both architecture images produce working containers
+          - make test-staging passes
+          - Alternative: `docker buildx build --platform linux/amd64 -f
+            deployment/docker/Dockerfile.base .` succeeds (QEMU fallback)
+        </verify>
+      </tdd>
+      <files>
+        <file action="modify">Makefile</file>
+        <file action="modify">deployment/docker/Dockerfile.base</file>
+        <file action="create">tests/v2/unit/test_docker_multiarch.py</file>
+      </files>
+      <depends_on>T1</depends_on>
+    </task>
+
+    <task id="T2" priority="P0" effort="1h">
+      <name>Add MLFLOW_TRACKING_URI_REMOTE, OCI, and SKYPILOT env vars to .env.example</name>
+      <description>
+        Add all SkyPilot-related and Oracle Cloud environment variables to
+        .env.example as the single source of truth (Rule #22). These variables
+        are consumed by SkyPilot YAML task specs, by resolve_tracking_uri()
+        when running on remote VMs, and by Pulumi for OCI provisioning.
+
+        Variables to add:
+
+        # Oracle Cloud MLflow hosting (T1 decision: Always Free tier)
+          MLFLOW_TRACKING_URI_REMOTE=https://mlflow.minivess.fi
+          OCI_TENANCY_OCID=  (from OCI console)
+          OCI_USER_OCID=  (from OCI console)
+          OCI_COMPARTMENT_OCID=  (from OCI console)
+          OCI_REGION=eu-frankfurt-1
+          OCI_FINGERPRINT=  (API signing key fingerprint)
+          OCI_PRIVATE_KEY_PATH=~/.oci/oci_api_key.pem
+
+        # SkyPilot compute offloading
+          SKYPILOT_CLOUD_CREDENTIALS=  (path to cloud credential file)
+          SKYPILOT_DEFAULT_CLOUD=runpod
+          SKYPILOT_AUTOSTOP_MINUTES=30
+          SKYPILOT_API_SERVER_ENDPOINT=  (optional, for shared state)
+
+        Also add a comment block noting the T1 decision (Oracle Cloud Always
+        Free) and cross-referencing the FinOps report.
+      </description>
+      <tdd>
+        <red>
+          Write test in tests/v2/unit/test_env_single_source.py (extend existing):
+          - test_env_example_has_skypilot_section:
+            Assert .env.example contains MLFLOW_TRACKING_URI_REMOTE
+          - test_env_example_has_skypilot_default_cloud:
+            Assert .env.example contains SKYPILOT_DEFAULT_CLOUD
+          - test_env_example_has_skypilot_autostop:
+            Assert .env.example contains SKYPILOT_AUTOSTOP_MINUTES
+        </red>
+        <green>
+          Add the SkyPilot section to .env.example between the HPO section
+          and the Prefect logging section.
+        </green>
+        <verify>
+          make test-staging
+          Verify .env.example parses correctly (no syntax errors)
+        </verify>
+      </tdd>
+      <files>
+        <file action="modify">.env.example</file>
+        <file action="modify">tests/v2/unit/test_env_single_source.py</file>
+      </files>
+      <depends_on>T1</depends_on>
+    </task>
+
+    <!-- ===================================================================
+         PHASE 1: Compute Dispatcher
+         =================================================================== -->
+
+    <task id="T3" priority="P0" effort="4h">
+      <name>Extract train_fold as standalone callable module</name>
+      <description>
+        The train_one_fold_task() in train_flow.py is a Prefect @task. SkyPilot
+        VMs run training without Prefect (report Section 18, Q5: "No Prefect on
+        VM"). Extract the core fold training logic into a standalone module
+        that can be called both:
+          1. By the Prefect @task (existing path — no behavior change)
+          2. By a __main__ entry point for SkyPilot VMs
+
+        Create src/minivess/pipeline/train_fold.py containing:
+          - train_single_fold() — pure function, no Prefect decorators
+          - __main__ block that parses EXPERIMENT env var + Hydra overrides
+          - MLflow logging via ExperimentTracker (same as current train_flow.py)
+          - SKYPILOT_TASK_ID tag for grouping runs across preemption recoveries
+
+        The existing train_one_fold_task() in train_flow.py becomes a thin
+        wrapper that calls train_single_fold().
+
+        IMPORTANT: This does NOT violate Rule #17 (no standalone scripts).
+        The SkyPilot VM is a managed compute environment with proper lifecycle.
+        The Prefect flow still orchestrates locally. See report Section 18, Q5.
+      </description>
+      <tdd>
+        <red>
+          Create tests/v2/unit/test_train_fold_module.py:
+          - test_train_fold_module_importable:
+            from minivess.pipeline.train_fold import train_single_fold
+          - test_train_single_fold_signature:
+            Verify train_single_fold accepts (fold_id, fold_split, config, checkpoint_dir)
+          - test_train_single_fold_returns_dict:
+            Mock model/data, verify return type is dict with expected keys
+          - test_train_fold_has_main_entry_point:
+            Verify __main__ block exists (ast.parse, check for if __name__)
+          - test_train_fold_logs_skypilot_task_id:
+            When SKYPILOT_TASK_ID env var is set, verify it appears in MLflow tags
+          - test_train_one_fold_task_delegates_to_train_single_fold:
+            Verify train_one_fold_task calls train_single_fold internally
+        </red>
+        <green>
+          1. Create src/minivess/pipeline/train_fold.py with train_single_fold()
+          2. Refactor train_one_fold_task() to delegate to train_single_fold()
+          3. Add __main__ block with EXPERIMENT env var parsing
+          4. Add SKYPILOT_TASK_ID tagging in MLflow run context
+        </green>
+        <verify>
+          make test-staging — new tests pass
+          uv run ruff check src/minivess/pipeline/train_fold.py
+          uv run mypy src/minivess/pipeline/train_fold.py
+          Verify existing train_flow tests still pass (no behavior change)
+        </verify>
+      </tdd>
+      <files>
+        <file action="create">src/minivess/pipeline/train_fold.py</file>
+        <file action="modify">src/minivess/orchestration/flows/train_flow.py</file>
+        <file action="create">tests/v2/unit/test_train_fold_module.py</file>
+      </files>
+      <depends_on/>
+    </task>
+
+    <task id="T4" priority="P0" effort="2h">
+      <name>Add compute_backend config parameter to training flow</name>
+      <description>
+        The training_flow() currently accepts compute="auto" but ignores it
+        (report Section 3: "compute parameter accepted, never used"). Replace
+        the ignored `compute` parameter with a proper `compute_backend` parameter
+        that dispatches between local Docker execution and SkyPilot.
+
+        Valid values:
+          - "local_docker" (default) — existing path, no behavior change
+          - "skypilot" — launches training on SkyPilot VM, polls until complete
+
+        Add ComputeBackend enum to src/minivess/config/models.py.
+        Update training_flow() signature: compute_backend: str = "local_docker".
+        The actual SkyPilot dispatch logic is implemented in T5.
+      </description>
+      <tdd>
+        <red>
+          Create tests/v2/unit/test_compute_backend.py:
+          - test_compute_backend_enum_values:
+            ComputeBackend has LOCAL_DOCKER and SKYPILOT members
+          - test_training_flow_accepts_compute_backend_param:
+            Inspect training_flow signature, verify compute_backend parameter exists
+          - test_training_flow_default_compute_backend_is_local_docker:
+            Default value is "local_docker"
+          - test_compute_backend_in_config_dict:
+            When config_dict has compute_backend key, it overrides the parameter
+          - test_invalid_compute_backend_raises:
+            ComputeBackend("invalid") raises ValueError
+        </red>
+        <green>
+          1. Add ComputeBackend enum to src/minivess/config/models.py
+          2. Update training_flow() signature: replace compute with compute_backend
+          3. Add compute_backend extraction from config_dict
+          4. Add validation: ComputeBackend(compute_backend) early in flow
+        </green>
+        <verify>
+          make test-staging — new and existing tests pass
+          uv run ruff check src/minivess/config/models.py
+          uv run ruff check src/minivess/orchestration/flows/train_flow.py
+        </verify>
+      </tdd>
+      <files>
+        <file action="modify">src/minivess/config/models.py</file>
+        <file action="modify">src/minivess/orchestration/flows/train_flow.py</file>
+        <file action="create">tests/v2/unit/test_compute_backend.py</file>
+      </files>
+      <depends_on>T3</depends_on>
+    </task>
+
+    <task id="T5" priority="P0" effort="4h">
+      <name>Implement SkyPilot dispatch path in training flow</name>
+      <description>
+        When compute_backend="skypilot", the training flow must:
+          1. Build the experiment config (Hydra-zen)
+          2. Call SkyPilotLauncher.launch_training_job() with env overrides
+          3. Poll via wait_sky_job() until SUCCEEDED/FAILED
+          4. Read results from MLflow (training logged by remote VM)
+          5. Return TrainingFlowResult with source="skypilot"
+
+        The local Prefect flow owns the lifecycle. The SkyPilot VM is a "dumb"
+        training worker that logs to MLflow only (report Section 18, Q2).
+
+        For multi-fold training on SkyPilot: launch one job per fold (parallel)
+        using sky.jobs.launch --async, then barrier-wait for all.
+
+        Update SkyPilotLauncher to:
+          - Accept MLFLOW_TRACKING_URI_REMOTE from env
+          - Pass all training config as env vars to the SkyPilot task
+          - Support --async mode for parallel fold launches
+          - Return structured result with job_id, status, cloud, cost_estimate
+      </description>
+      <tdd>
+        <red>
+          Create tests/v2/unit/test_skypilot_dispatch.py:
+          - test_skypilot_dispatch_calls_launcher:
+            Mock SkyPilotLauncher, verify launch_training_job called when
+            compute_backend="skypilot"
+          - test_skypilot_dispatch_passes_config_as_envs:
+            Verify loss_name, model_family, max_epochs passed as env overrides
+          - test_skypilot_dispatch_passes_mlflow_remote_uri:
+            Verify MLFLOW_TRACKING_URI set to MLFLOW_TRACKING_URI_REMOTE value
+          - test_skypilot_dispatch_waits_for_completion:
+            Mock wait_sky_job, verify it is called with correct job_id
+          - test_skypilot_dispatch_raises_on_failure:
+            When job status is FAILED, RuntimeError is raised
+          - test_skypilot_dispatch_returns_correct_result:
+            TrainingFlowResult has source="skypilot"
+          - test_skypilot_dispatch_parallel_folds:
+            For num_folds=3, verify 3 jobs launched with --async
+          - test_skypilot_dispatch_dry_run_no_launch:
+            When SkyPilot not installed, dry_run result returned
+        </red>
+        <green>
+          1. Add _dispatch_skypilot() private function in train_flow.py
+          2. Update training_flow() to call _dispatch_skypilot() when
+             compute_backend == "skypilot"
+          3. Update SkyPilotLauncher.launch_training_job() to accept
+             mlflow_uri and async_mode parameters
+          4. Add SkyPilotLauncher.wait_all_jobs() for barrier pattern
+        </green>
+        <verify>
+          make test-staging — all dispatch tests pass
+          uv run ruff check src/minivess/compute/skypilot_launcher.py
+          uv run ruff check src/minivess/orchestration/flows/train_flow.py
+        </verify>
+      </tdd>
+      <files>
+        <file action="modify">src/minivess/orchestration/flows/train_flow.py</file>
+        <file action="modify">src/minivess/compute/skypilot_launcher.py</file>
+        <file action="modify">src/minivess/compute/prefect_sky_tasks.py</file>
+        <file action="create">tests/v2/unit/test_skypilot_dispatch.py</file>
+      </files>
+      <depends_on>T3 T4</depends_on>
+    </task>
+
+    <task id="T6" priority="P0" effort="2h">
+      <name>Update train_generic.yaml with MOUNT_CACHED, job_recovery, secrets</name>
+      <description>
+        The existing train_generic.yaml (deployment/skypilot/train_generic.yaml)
+        has several gaps identified in the report:
+          1. Uses MOUNT (slow) instead of MOUNT_CACHED (9x faster writes)
+          2. No job_recovery section for spot preemption handling
+          3. No secrets section for HF_TOKEN
+          4. MLFLOW_TRACKING_URI uses hardcoded pattern instead of MLFLOW_TRACKING_URI_REMOTE
+          5. run section invokes prefect deployment run — should use
+             python -m minivess.pipeline.train_fold (no Prefect on VM)
+          6. Missing RunPod in failover chain (should be first, cheapest)
+          7. setup section uses pip instead of uv
+
+        Also update train_hpo_sweep.yaml with same fixes.
+
+        Update the failover chain to prioritize consumer GPUs:
+          RunPod RTX4090 ($0.34) -> RunPod RTX3090 ($0.22) -> RunPod A100 ($1.74)
+          -> Lambda A100 ($0.78) -> GCP Spot A100
+      </description>
+      <tdd>
+        <red>
+          Update tests/v2/unit/test_skypilot_configs.py:
+          - test_train_generic_uses_mount_cached:
+            Assert /checkpoints mount mode is MOUNT_CACHED, not MOUNT
+          - test_train_generic_has_job_recovery:
+            Assert job_recovery section exists in resources
+          - test_train_generic_has_hf_token_secret:
+            Assert secrets section contains HF_TOKEN
+          - test_train_generic_uses_remote_mlflow_uri:
+            Assert MLFLOW_TRACKING_URI references MLFLOW_TRACKING_URI_REMOTE
+          - test_train_generic_uses_train_fold_module:
+            Assert run section contains "python -m minivess.pipeline.train_fold"
+            (NOT "prefect deployment run")
+          - test_train_generic_setup_uses_uv:
+            Assert setup section contains "uv sync" (not "pip install")
+          - test_train_generic_runpod_in_failover:
+            Assert any_of contains a RunPod entry
+          - test_train_hpo_uses_mount_cached:
+            Same MOUNT_CACHED check for HPO YAML
+        </red>
+        <green>
+          1. Rewrite deployment/skypilot/train_generic.yaml with all fixes
+          2. Rewrite deployment/skypilot/train_hpo_sweep.yaml with same fixes
+          3. Update consumer GPU failover chain per report Section 7
+        </green>
+        <verify>
+          make test-staging — all YAML config tests pass
+          sky check --dry-run (if SkyPilot installed)
+        </verify>
+      </tdd>
+      <files>
+        <file action="modify">deployment/skypilot/train_generic.yaml</file>
+        <file action="modify">deployment/skypilot/train_hpo_sweep.yaml</file>
+        <file action="modify">tests/v2/unit/test_skypilot_configs.py</file>
+      </files>
+      <depends_on>T2 T3</depends_on>
+    </task>
+
+    <task id="T7" priority="P1" effort="1h">
+      <name>Add skypilot extras group to pyproject.toml</name>
+      <description>
+        SkyPilot is not currently in pyproject.toml. Add it as an optional
+        extras group so it can be installed with uv sync --extra sky.
+
+        Package: skypilot-nightly[runpod,aws,gcp,kubernetes]
+        (nightly required for RunPod support — not available in stable release)
+
+        Also add runpod>=1.6 as a dependency of the sky extras group.
+      </description>
+      <tdd>
+        <red>
+          Create tests/v2/unit/test_skypilot_extras.py:
+          - test_pyproject_has_sky_extras_group:
+            Parse pyproject.toml, assert optional-dependencies has "sky" key
+          - test_sky_extras_includes_skypilot:
+            Assert "skypilot-nightly" in sky extras dependencies
+          - test_sky_extras_includes_runpod:
+            Assert "runpod" in sky extras dependencies
+        </red>
+        <green>
+          1. Add [project.optional-dependencies.sky] to pyproject.toml
+          2. Include skypilot-nightly[runpod,aws,gcp,kubernetes] and runpod>=1.6
+        </green>
+        <verify>
+          uv sync --extra sky (should resolve without errors)
+          make test-staging
+        </verify>
+      </tdd>
+      <files>
+        <file action="modify">pyproject.toml</file>
+        <file action="create">tests/v2/unit/test_skypilot_extras.py</file>
+      </files>
+      <depends_on/>
+    </task>
+
+    <!-- ===================================================================
+         PHASE 2: HPO on SkyPilot
+         =================================================================== -->
+
+    <task id="T8" priority="P1" effort="3h">
+      <name>HPO flow pre-generates trial grid from Optuna search space</name>
+      <description>
+        For SkyPilot HPO, use the pre-generated grid approach (report Section 12,
+        Option 1 — recommended for MVP). Optuna's TPE sampler generates trial
+        configs locally, then all trials are launched as independent SkyPilot
+        jobs. No shared Optuna database needed on remote VMs.
+
+        Add generate_trial_grid() to src/minivess/optimization/hpo_engine.py:
+          - Takes HPOEngine + search_space + n_trials
+          - Calls study.ask() n_trials times
+          - Returns list of flat config dicts (each is a complete training config)
+          - Each config gets a unique trial_tag for MLflow grouping
+
+        Update hpo_flow.py to use generate_trial_grid() when
+        compute_backend="skypilot", then launch all trials in parallel.
+      </description>
+      <tdd>
+        <red>
+          Create tests/v2/unit/test_hpo_trial_grid.py:
+          - test_generate_trial_grid_returns_list_of_dicts:
+            generate_trial_grid(engine, search_space, n_trials=4) returns list of 4 dicts
+          - test_generate_trial_grid_dicts_have_required_keys:
+            Each dict has learning_rate, batch_size, loss_name keys
+          - test_generate_trial_grid_dicts_have_trial_tag:
+            Each dict has unique trial_tag string
+          - test_generate_trial_grid_values_in_search_space:
+            learning_rate is between 1e-5 and 1e-2, batch_size in [1,2,4]
+          - test_generate_trial_grid_reproducible_with_seed:
+            Same seed produces same grid
+          - test_generate_trial_grid_merges_base_config:
+            Base config keys (model_family, max_epochs) present in output
+        </red>
+        <green>
+          1. Add generate_trial_grid() to src/minivess/optimization/hpo_engine.py
+          2. Uses HPOEngine.study.ask() + suggest_params() pattern
+          3. Returns list of flat training config dicts
+        </green>
+        <verify>
+          make test-staging — grid generation tests pass
+          uv run ruff check src/minivess/optimization/hpo_engine.py
+        </verify>
+      </tdd>
+      <files>
+        <file action="modify">src/minivess/optimization/hpo_engine.py</file>
+        <file action="create">tests/v2/unit/test_hpo_trial_grid.py</file>
+      </files>
+      <depends_on/>
+    </task>
+
+    <task id="T9" priority="P1" effort="3h">
+      <name>HPO flow dispatches trials as parallel SkyPilot async jobs</name>
+      <description>
+        Update hpo_flow.py to support compute_backend="skypilot":
+          1. Generate trial grid via generate_trial_grid() (T8)
+          2. For each trial config, call SkyPilotLauncher.launch_training_job()
+             with async_mode=True (equivalent to sky jobs launch --async)
+          3. Collect all job_ids
+          4. Return job_ids for the barrier task (T10)
+
+        The SkyPilot launch is non-blocking — each trial runs on its own VM.
+        Parallelism is limited only by cloud GPU availability.
+
+        Add compute_backend parameter to hpo_flow() signature.
+        When compute_backend="local_docker", use existing sequential path.
+        When compute_backend="skypilot", use parallel async launches.
+      </description>
+      <tdd>
+        <red>
+          Create tests/v2/unit/test_hpo_skypilot_dispatch.py:
+          - test_hpo_flow_accepts_compute_backend_param:
+            Inspect hpo_flow signature
+          - test_hpo_skypilot_launches_n_async_jobs:
+            Mock SkyPilotLauncher, verify launch called n_trials times with async
+          - test_hpo_skypilot_passes_trial_configs_as_envs:
+            Each launch call has different learning_rate, batch_size
+          - test_hpo_skypilot_returns_job_ids:
+            Result dict includes job_ids list
+          - test_hpo_local_docker_uses_existing_path:
+            When compute_backend="local_docker", run_deployment called (not SkyPilot)
+        </red>
+        <green>
+          1. Add compute_backend parameter to hpo_flow()
+          2. Add _dispatch_hpo_skypilot() private function
+          3. Use generate_trial_grid() + SkyPilotLauncher.launch_training_job(async_mode=True)
+          4. Return result dict with job_ids for barrier
+        </green>
+        <verify>
+          make test-staging
+          uv run ruff check src/minivess/orchestration/flows/hpo_flow.py
+        </verify>
+      </tdd>
+      <files>
+        <file action="modify">src/minivess/orchestration/flows/hpo_flow.py</file>
+        <file action="create">tests/v2/unit/test_hpo_skypilot_dispatch.py</file>
+      </files>
+      <depends_on>T5 T8</depends_on>
+    </task>
+
+    <task id="T10" priority="P1" effort="2h">
+      <name>Completion barrier — poll all job_ids, trigger Analysis Flow</name>
+      <description>
+        After launching N parallel SkyPilot HPO trials, the HPO flow must wait
+        for ALL trials to reach a terminal state (SUCCEEDED, FAILED, CANCELLED)
+        before returning. This is the "barrier" pattern (report Section 13).
+
+        Add wait_all_sky_jobs() to src/minivess/compute/prefect_sky_tasks.py:
+          - Takes list of job_ids
+          - Polls each using SkyPilotLauncher.get_job_status()
+          - Returns summary: {succeeded: N, failed: N, cancelled: N, total: N}
+          - Logs progress every poll interval
+          - Configurable poll_interval (default 60s) and max_wait (default 48h)
+          - On timeout: log warning, return partial results (don't raise)
+
+        The HPO flow calls wait_all_sky_jobs() after launching, then returns.
+        The PipelineTriggerChain (T11) handles downstream flow dispatch.
+
+        Key design: Analysis Flow does NOT need to know about HPO. It queries
+        MLflow for all FINISHED runs in the experiment and builds ensembles
+        from whatever it finds (report Section 13).
+      </description>
+      <tdd>
+        <red>
+          Create tests/v2/unit/test_sky_completion_barrier.py:
+          - test_wait_all_sky_jobs_returns_summary:
+            Mock get_job_status returning SUCCEEDED for all, verify summary
+          - test_wait_all_sky_jobs_handles_mixed_results:
+            2 SUCCEEDED + 1 FAILED, verify summary counts
+          - test_wait_all_sky_jobs_polls_until_terminal:
+            Mock status progression: PENDING -> RUNNING -> SUCCEEDED
+          - test_wait_all_sky_jobs_timeout_returns_partial:
+            When max_wait exceeded, returns partial results without raising
+          - test_wait_all_sky_jobs_empty_list:
+            Empty job_ids list returns {succeeded:0, failed:0, total:0}
+          - test_wait_all_sky_jobs_logs_progress:
+            Verify logging output includes progress messages
+        </red>
+        <green>
+          1. Add wait_all_sky_jobs() to src/minivess/compute/prefect_sky_tasks.py
+          2. Wraps individual wait_sky_job() calls with summary aggregation
+          3. Add @task decorator for Prefect visibility
+        </green>
+        <verify>
+          make test-staging
+          uv run ruff check src/minivess/compute/prefect_sky_tasks.py
+        </verify>
+      </tdd>
+      <files>
+        <file action="modify">src/minivess/compute/prefect_sky_tasks.py</file>
+        <file action="create">tests/v2/unit/test_sky_completion_barrier.py</file>
+      </files>
+      <depends_on>T5</depends_on>
+    </task>
+
+    <!-- ===================================================================
+         PHASE 3: Flow Integration
+         =================================================================== -->
+
+    <task id="T11" priority="P1" effort="3h">
+      <name>Update PipelineTriggerChain for HPO barrier and Analysis dispatch</name>
+      <description>
+        The PipelineTriggerChain currently runs flows sequentially:
+          acquisition -> data -> train -> post_training -> analyze -> ...
+
+        For HPO workflows, the chain should be:
+          data -> hpo_flow (contains training + barrier) -> analyze -> deploy -> dashboard
+
+        The HPO flow acts as the barrier point. When it returns, ALL trials are
+        complete, and Analysis Flow can safely query MLflow for all runs.
+
+        Changes:
+          1. Add "hpo" to _DEFAULT_FLOWS (between "train" and "post_training")
+          2. Make "train" and "hpo" mutually exclusive (register one or the other)
+          3. Add register_hpo_flow() convenience method
+          4. When HPO flow is registered, skip "train" flow automatically
+
+        Also update trigger.py to pass compute_backend to registered flows.
+      </description>
+      <tdd>
+        <red>
+          Create tests/v2/unit/test_trigger_chain_hpo.py:
+          - test_trigger_chain_has_hpo_slot:
+            PipelineTriggerChain().flow_names contains "hpo"
+          - test_hpo_replaces_train_in_chain:
+            When hpo registered and train not, hpo runs and train is skipped
+          - test_hpo_before_analyze_in_order:
+            "hpo" comes before "analyze" in flow_names
+          - test_chain_passes_compute_backend:
+            When compute_backend="skypilot", it is passed to registered flow
+          - test_chain_result_includes_hpo:
+            After chain run, results include hpo flow entry
+        </red>
+        <green>
+          1. Add "hpo" to _DEFAULT_FLOWS after "train"
+          2. Update run_chain() to handle hpo/train mutual exclusion
+          3. Pass compute_backend in trigger_source kwargs
+        </green>
+        <verify>
+          make test-staging
+          uv run ruff check src/minivess/orchestration/trigger.py
+        </verify>
+      </tdd>
+      <files>
+        <file action="modify">src/minivess/orchestration/trigger.py</file>
+        <file action="create">tests/v2/unit/test_trigger_chain_hpo.py</file>
+      </files>
+      <depends_on>T9 T10</depends_on>
+    </task>
+
+    <task id="T12" priority="P2" effort="2h">
+      <name>SkyPilot cost tracking — log $/job as MLflow metrics</name>
+      <description>
+        Every SkyPilot job has a cost (cloud provider charges). Track this as
+        MLflow metrics for FinOps visibility:
+          - sky_cost_total_usd: total cost of the SkyPilot job
+          - sky_cost_per_hour_usd: hourly rate charged
+          - sky_duration_hours: total runtime
+          - sky_cloud_provider: which cloud the job ran on
+          - sky_gpu_type: GPU type used
+          - sky_spot_instance: whether spot was used
+
+        SkyPilot provides cost info via sky.jobs.queue() and
+        sky.core.cost_report(). Extract after job completion in
+        wait_sky_job() and log to MLflow.
+
+        These metrics feed into the Dashboard Flow's cost section (T13).
+      </description>
+      <tdd>
+        <red>
+          Create tests/v2/unit/test_skypilot_cost_tracking.py:
+          - test_cost_tracking_extracts_from_sky_status:
+            Mock sky.jobs.queue() response, verify cost fields extracted
+          - test_cost_tracking_logs_to_mlflow:
+            Verify mlflow.log_metric called with sky_cost_total_usd
+          - test_cost_tracking_handles_missing_cost:
+            When cost info unavailable, logs NaN (not error)
+          - test_cost_tracking_includes_gpu_type:
+            sky_gpu_type tag set correctly
+        </red>
+        <green>
+          1. Add _extract_sky_cost() to src/minivess/compute/skypilot_launcher.py
+          2. Add log_sky_cost_to_mlflow() utility function
+          3. Call from wait_sky_job() after job reaches terminal state
+        </green>
+        <verify>
+          make test-staging
+          uv run ruff check src/minivess/compute/skypilot_launcher.py
+        </verify>
+      </tdd>
+      <files>
+        <file action="modify">src/minivess/compute/skypilot_launcher.py</file>
+        <file action="create">tests/v2/unit/test_skypilot_cost_tracking.py</file>
+      </files>
+      <depends_on>T5</depends_on>
+    </task>
+
+    <task id="T13" priority="P2" effort="2h">
+      <name>Dashboard Flow cost section — aggregate SkyPilot spend</name>
+      <description>
+        Add a cost aggregation adapter to the Dashboard Flow that reads
+        sky_cost_total_usd metrics from all MLflow runs in an experiment
+        and generates:
+          - Total spend per experiment (table)
+          - Cost per trial in HPO sweep (bar chart)
+          - Cost breakdown by cloud provider and GPU type
+          - Cumulative spend timeline
+
+        The adapter reads from MLflow (DuckDB analytics) and writes
+        cost_summary.json + cost_breakdown.png to the dashboard output dir.
+
+        This is a best-effort addition to the existing dashboard flow —
+        if no sky_cost metrics exist, the section is silently skipped.
+      </description>
+      <tdd>
+        <red>
+          Create tests/v2/unit/test_dashboard_cost_section.py:
+          - test_cost_adapter_reads_sky_metrics_from_mlflow:
+            Mock MLflow client, verify sky_cost_total_usd queried
+          - test_cost_adapter_generates_summary_json:
+            Verify cost_summary.json written with total_usd, per_trial breakdown
+          - test_cost_adapter_skips_when_no_sky_metrics:
+            When no runs have sky_cost metrics, adapter returns empty dict
+          - test_cost_adapter_aggregates_by_provider:
+            Multiple runs from different clouds, verify per-provider totals
+        </red>
+        <green>
+          1. Create src/minivess/pipeline/dashboard_adapters/cost_adapter.py
+          2. Add CostSummaryAdapter class with generate() method
+          3. Register in dashboard_flow.py adapter list
+        </green>
+        <verify>
+          make test-staging
+          uv run ruff check src/minivess/pipeline/dashboard_adapters/cost_adapter.py
+        </verify>
+      </tdd>
+      <files>
+        <file action="create">src/minivess/pipeline/dashboard_adapters/cost_adapter.py</file>
+        <file action="modify">src/minivess/orchestration/flows/dashboard_flow.py</file>
+        <file action="create">tests/v2/unit/test_dashboard_cost_section.py</file>
+      </files>
+      <depends_on>T12</depends_on>
+    </task>
+
+    <!-- ===================================================================
+         PHASE 4: Model-Specific SkyPilot YAMLs
+         =================================================================== -->
+
+    <task id="T14" priority="P1" effort="3h">
+      <name>SAM3 fine-tuning SkyPilot YAML (RTX 4090/5090/A100, 48h budget)</name>
+      <description>
+        Create deployment/skypilot/train_sam3.yaml for SAM3 model fine-tuning
+        on cloud GPUs. SAM3 has specific requirements:
+          - 848M params, ViT-32L encoder, SDPA mandatory
+          - sam3_vanilla: 2.9 GB — fits RTX 3090+ trivially
+          - sam3_hybrid: 7.5 GB — fits RTX 4090 (24 GB)
+          - Full fine-tuning: needs >= 32 GB VRAM (RTX 5090 or A100)
+          - LoRA/QLoRA fine-tuning: fits RTX 4090 (24 GB)
+          - HF_TOKEN required for gated model download
+
+        Failover chain (SAM3 specific):
+          RTX 4090 ($0.34/hr) for LoRA -> RTX 5090 ($0.69/hr) for full fine-tune
+          -> A100 ($1.74/hr) for large batch -> H100 ($1.99/hr) for speed
+
+        Budget guard: autostop after 48h max to prevent runaway costs.
+        Estimated cost: $12-50 depending on GPU and fine-tuning strategy.
+      </description>
+      <tdd>
+        <red>
+          Add to tests/v2/unit/test_skypilot_configs.py:
+          - test_train_sam3_yaml_exists:
+            deployment/skypilot/train_sam3.yaml exists
+          - test_train_sam3_yaml_valid:
+            Parses without error
+          - test_train_sam3_has_hf_token_secret:
+            secrets section contains HF_TOKEN
+          - test_train_sam3_has_job_recovery:
+            job_recovery section exists
+          - test_train_sam3_uses_mount_cached:
+            /checkpoints mount mode is MOUNT_CACHED
+          - test_train_sam3_has_sdpa_env:
+            envs contain ATTN_IMPLEMENTATION=sdpa
+          - test_train_sam3_has_autostop:
+            resources section has idle_minutes_to_autostop
+          - test_train_sam3_model_family_is_sam3:
+            MODEL_FAMILY env is sam3_vanilla or contains sam3
+        </red>
+        <green>
+          Create deployment/skypilot/train_sam3.yaml with:
+          - Consumer GPU failover chain
+          - HF_TOKEN secret
+          - MOUNT_CACHED checkpoints
+          - job_recovery: FAILOVER + max_restarts
+          - SDPA mandatory env var
+          - 48h autostop budget guard
+          - python -m minivess.pipeline.train_fold entry point
+        </green>
+        <verify>
+          make test-staging — SAM3 YAML tests pass
+        </verify>
+      </tdd>
+      <files>
+        <file action="create">deployment/skypilot/train_sam3.yaml</file>
+        <file action="modify">tests/v2/unit/test_skypilot_configs.py</file>
+      </files>
+      <depends_on>T6</depends_on>
+    </task>
+
+    <task id="T15" priority="P1" effort="3h">
+      <name>VesselFM integration SkyPilot YAML</name>
+      <description>
+        Create deployment/skypilot/train_vesselfm.yaml for VesselFM
+        foundation model fine-tuning. VesselFM is a vessel-specific
+        foundation model that requires:
+          - HF_TOKEN for gated model access
+          - Large VRAM (estimated 16-48 GB depending on variant)
+          - Long training time (estimated 24-72h for fine-tuning)
+
+        The YAML should support both:
+          1. Feature extraction (frozen backbone, train head only) — faster, less VRAM
+          2. Full fine-tuning — slow, needs large VRAM
+
+        Failover chain:
+          RTX 5090 ($0.69/hr, 32 GB) for feature extraction
+          -> A100 ($1.74/hr, 80 GB) for full fine-tuning
+          -> H100 ($1.99/hr, 80 GB) for speed
+
+        NOTE: VesselFM ModelAdapter must exist before this YAML can be used.
+        This task creates the SkyPilot YAML only — the adapter is a separate task.
+      </description>
+      <tdd>
+        <red>
+          Add to tests/v2/unit/test_skypilot_configs.py:
+          - test_train_vesselfm_yaml_exists:
+            deployment/skypilot/train_vesselfm.yaml exists
+          - test_train_vesselfm_yaml_valid:
+            Parses without error
+          - test_train_vesselfm_has_hf_token_secret:
+            secrets section contains HF_TOKEN
+          - test_train_vesselfm_has_large_vram_gpus:
+            Failover chain includes A100-80GB or RTX5090
+          - test_train_vesselfm_uses_mount_cached:
+            /checkpoints mount mode is MOUNT_CACHED
+          - test_train_vesselfm_model_family:
+            MODEL_FAMILY env contains "vesselfm"
+        </red>
+        <green>
+          Create deployment/skypilot/train_vesselfm.yaml
+        </green>
+        <verify>
+          make test-staging
+        </verify>
+      </tdd>
+      <files>
+        <file action="create">deployment/skypilot/train_vesselfm.yaml</file>
+        <file action="modify">tests/v2/unit/test_skypilot_configs.py</file>
+      </files>
+      <depends_on>T6</depends_on>
+    </task>
+
+    <task id="T16" priority="P2" effort="3h">
+      <name>Synthetic generator training SkyPilot YAMLs (VesselVAE, VQ-VAE)</name>
+      <description>
+        Create SkyPilot YAMLs for training synthetic vascular generators:
+
+        1. deployment/skypilot/train_vessel_vae.yaml
+           - VesselVAE: lightweight VAE for synthetic vessel generation
+           - ~4 GB VRAM, fits RTX 3090 easily
+           - Estimated 6h training, cost ~$1.32 on RTX 3090
+           - Failover: RTX3090 ($0.22) -> RTX4090 ($0.34) -> RTX5090 ($0.69)
+
+        2. deployment/skypilot/train_vqvae.yaml
+           - VQ-VAE: vector-quantized VAE for patch-based generation
+           - ~4-8 GB VRAM
+           - Estimated 8h training, cost ~$1.76 on RTX 3090
+           - Same failover chain as VesselVAE
+
+        Both generators produce synthetic training data that feeds into
+        the data flow for augmentation and drift detection experiments.
+
+        NOTE: Generator model implementations are separate tasks.
+        These YAMLs only define the SkyPilot compute configuration.
+      </description>
+      <tdd>
+        <red>
+          Add to tests/v2/unit/test_skypilot_configs.py:
+          - test_train_vessel_vae_yaml_exists:
+            deployment/skypilot/train_vessel_vae.yaml exists
+          - test_train_vessel_vae_yaml_valid:
+            Parses without error
+          - test_train_vessel_vae_uses_consumer_gpu:
+            First failover entry is RTX3090 or RTX4090
+          - test_train_vqvae_yaml_exists:
+            deployment/skypilot/train_vqvae.yaml exists
+          - test_train_vqvae_yaml_valid:
+            Parses without error
+          - test_generator_yamls_use_mount_cached:
+            Both YAMLs use MOUNT_CACHED for checkpoints
+        </red>
+        <green>
+          1. Create deployment/skypilot/train_vessel_vae.yaml
+          2. Create deployment/skypilot/train_vqvae.yaml
+          3. Consumer GPU failover chains optimized for lightweight models
+        </green>
+        <verify>
+          make test-staging
+        </verify>
+      </tdd>
+      <files>
+        <file action="create">deployment/skypilot/train_vessel_vae.yaml</file>
+        <file action="create">deployment/skypilot/train_vqvae.yaml</file>
+        <file action="modify">tests/v2/unit/test_skypilot_configs.py</file>
+      </files>
+      <depends_on>T6</depends_on>
+    </task>
+
+    <!-- ===================================================================
+         PHASE 5: Spot Instance Checkpointing + Resilience
+         =================================================================== -->
+
+    <task id="T17" priority="P1" effort="3h">
+      <name>Checkpoint-on-preemption logic for spot instance training</name>
+      <description>
+        SkyPilot spot instances get a 5-second SIGTERM before SIGKILL on
+        preemption (RunPod Community Cloud). The training loop must handle
+        this gracefully:
+
+        1. Register a SIGTERM handler in train_single_fold() that:
+           - Sets a "preemption_requested" flag
+           - Saves current model/optimizer state to /checkpoints immediately
+           - Logs "preempted_at_epoch" to MLflow
+
+        2. On restart (SkyPilot job_recovery: FAILOVER), the training loop:
+           - Checks for existing checkpoint in /checkpoints (MOUNT_CACHED = persistent)
+           - Loads model/optimizer/scheduler/RNG state
+           - Resumes from last saved epoch
+           - Logs "resumed_from_epoch" to MLflow
+           - Uses SKYPILOT_TASK_ID to group preemption/recovery runs
+
+        3. The existing SegmentationTrainer already saves epoch_latest.yaml
+           and periodic checkpoints. Extend it with:
+           - save_on_signal() method (5-second budget checkpoint)
+           - resume_from_checkpoint() method (load state dict + epoch)
+           - SIGTERM signal handler registration
+
+        This is critical for cost optimization: spot instances are 3-6x cheaper
+        but can be preempted at any time.
+      </description>
+      <tdd>
+        <red>
+          Create tests/v2/unit/test_spot_checkpointing.py:
+          - test_trainer_registers_sigterm_handler:
+            When running with SKYPILOT_TASK_ID set, SIGTERM handler registered
+          - test_save_on_signal_creates_checkpoint:
+            Calling save_on_signal() creates a checkpoint file
+          - test_save_on_signal_within_5_seconds:
+            save_on_signal() completes within 5 seconds (timeout test)
+          - test_resume_from_checkpoint_loads_state:
+            When checkpoint exists, training resumes from saved epoch
+          - test_resume_from_checkpoint_logs_to_mlflow:
+            resumed_from_epoch metric logged after resumption
+          - test_no_checkpoint_starts_fresh:
+            When no checkpoint exists, training starts from epoch 0
+          - test_skypilot_task_id_groups_runs:
+            Multiple runs with same SKYPILOT_TASK_ID share the group tag
+        </red>
+        <green>
+          1. Add save_on_signal() to SegmentationTrainer
+          2. Add resume_from_checkpoint() to SegmentationTrainer
+          3. Register SIGTERM handler when SKYPILOT_TASK_ID is set
+          4. Add SKYPILOT_TASK_ID tagging in MLflow
+        </green>
+        <verify>
+          make test-staging
+          uv run ruff check src/minivess/pipeline/trainer.py
+        </verify>
+      </tdd>
+      <files>
+        <file action="modify">src/minivess/pipeline/trainer.py</file>
+        <file action="modify">src/minivess/pipeline/train_fold.py</file>
+        <file action="create">tests/v2/unit/test_spot_checkpointing.py</file>
+      </files>
+      <depends_on>T3</depends_on>
+    </task>
+
+    <task id="T18" priority="P2" effort="2h">
+      <name>SkyPilot work pool in Prefect deployments</name>
+      <description>
+        Add a "sky-gpu-pool" work pool configuration to Prefect deployments
+        so that flows can be routed to SkyPilot compute via Prefect's work
+        pool system. This enables:
+          - Prefect UI visibility of SkyPilot-dispatched work
+          - Work pool routing: cpu-pool for orchestration, gpu-pool for local
+            training, sky-gpu-pool for cloud training
+          - Future: Prefect workers that natively dispatch to SkyPilot
+
+        Update src/minivess/orchestration/deployments.py:
+          - Add SKY_GPU_POOL constant
+          - Add sky-gpu-pool to deployment configs
+          - Update training-flow deployment to accept work_pool parameter
+
+        This is a "nice to have" for better Prefect UI integration.
+        The core SkyPilot dispatch (T5) works without this.
+      </description>
+      <tdd>
+        <red>
+          Create tests/v2/unit/test_sky_work_pool.py:
+          - test_deployments_has_sky_gpu_pool:
+            SKY_GPU_POOL constant defined in deployments.py
+          - test_sky_gpu_pool_value:
+            SKY_GPU_POOL == "sky-gpu-pool"
+          - test_training_deployment_supports_sky_pool:
+            Training flow deployment config accepts work_pool param
+        </red>
+        <green>
+          1. Add SKY_GPU_POOL = "sky-gpu-pool" to deployments.py
+          2. Update training deployment to include sky-gpu-pool option
+        </green>
+        <verify>
+          make test-staging
+        </verify>
+      </tdd>
+      <files>
+        <file action="modify">src/minivess/orchestration/deployments.py</file>
+        <file action="create">tests/v2/unit/test_sky_work_pool.py</file>
+      </files>
+      <depends_on>T4</depends_on>
+    </task>
+
+    <!-- ===================================================================
+         PHASE 6: Documentation and Integration Testing
+         =================================================================== -->
+
+    <task id="T19" priority="P1" effort="2h">
+      <name>Update deployment/CLAUDE.md with SkyPilot operational guide</name>
+      <description>
+        Add a SkyPilot section to deployment/CLAUDE.md documenting:
+          1. How to set up SkyPilot (uv sync --extra sky, cloud credentials)
+          2. How to configure MLflow accessibility (ref T1 decision)
+          3. How to launch a single training job via SkyPilot
+          4. How to run an HPO sweep on cloud GPUs
+          5. How to monitor running jobs (sky jobs queue, sky jobs logs)
+          6. Cost optimization tips (consumer GPUs, spot, autostop)
+          7. Troubleshooting: common failure modes and fixes
+          8. Environment variables reference (MLFLOW_TRACKING_URI_REMOTE, etc.)
+
+        Also update the "Running Flows" section to include SkyPilot paths:
+          docker compose run train (local) vs compute_backend=skypilot (cloud)
+
+        IMPORTANT: Do NOT create a new README or docs file. Update the
+        existing deployment/CLAUDE.md which is the canonical deployment reference.
+      </description>
+      <tdd>
+        <red>
+          This is a documentation task. Tests verify the docs are accurate:
+          - test_deployment_claude_md_has_skypilot_section:
+            deployment/CLAUDE.md contains "## SkyPilot" section header
+          - test_deployment_claude_md_references_env_vars:
+            deployment/CLAUDE.md mentions MLFLOW_TRACKING_URI_REMOTE
+          - test_deployment_claude_md_references_train_fold:
+            deployment/CLAUDE.md mentions "python -m minivess.pipeline.train_fold"
+        </red>
+        <green>
+          Update deployment/CLAUDE.md with SkyPilot operational guide section.
+        </green>
+        <verify>
+          make test-staging
+          Read deployment/CLAUDE.md and verify accuracy against implementation
+        </verify>
+      </tdd>
+      <files>
+        <file action="modify">deployment/CLAUDE.md</file>
+        <file action="create">tests/v2/unit/test_skypilot_docs.py</file>
+      </files>
+      <depends_on>T1 T5 T6</depends_on>
+    </task>
+
+    <task id="T20" priority="P2" effort="4h">
+      <name>Integration test: DynUNet training on RunPod via SkyPilot (dry run)</name>
+      <description>
+        Create an integration test that verifies the full SkyPilot dispatch
+        path works end-to-end in dry-run mode (no actual cloud launch):
+
+        1. Build experiment config via Hydra-zen
+        2. Set compute_backend="skypilot"
+        3. SkyPilotLauncher runs in dry-run mode (no sky import needed)
+        4. Verify config is correctly translated to SkyPilot env vars
+        5. Verify MLFLOW_TRACKING_URI_REMOTE is passed correctly
+        6. Verify wait_sky_job would be called with correct job_id
+        7. Verify TrainingFlowResult has source="skypilot"
+
+        This test runs in the staging tier (no GPU, no cloud, no Docker).
+        It validates the wiring between all Phase 1-2 components.
+
+        A separate manual test (not automated) verifies actual RunPod execution:
+          MLFLOW_TRACKING_URI_REMOTE=https://... \
+          sky jobs launch deployment/skypilot/train_generic.yaml \
+            --env LOSS_NAME=dice_ce --env MODEL_FAMILY=dynunet --env MAX_EPOCHS=2
+      </description>
+      <tdd>
+        <red>
+          Create tests/v2/integration/test_skypilot_e2e_dry_run.py:
+          - test_full_skypilot_dispatch_dry_run:
+            Set compute_backend="skypilot", verify full dispatch path
+          - test_skypilot_config_translation:
+            Hydra config -> SkyPilot env vars mapping is correct
+          - test_skypilot_mlflow_uri_propagation:
+            MLFLOW_TRACKING_URI_REMOTE appears in launch config
+          - test_skypilot_hpo_dispatch_dry_run:
+            HPO flow with n_trials=3, compute_backend="skypilot" in dry run
+        </red>
+        <green>
+          Implement integration tests using monkeypatch for env vars
+          and SkyPilot dry-run mode.
+        </green>
+        <verify>
+          make test-staging (integration tests included in staging if no Docker needed)
+          Verify all 4 tests pass
+        </verify>
+      </tdd>
+      <files>
+        <file action="create">tests/v2/integration/test_skypilot_e2e_dry_run.py</file>
+      </files>
+      <depends_on>T5 T9 T10</depends_on>
+    </task>
+
+  </tasks>
+
+  <!-- ===================================================================
+       EXECUTION ORDER (respecting dependencies)
+       =================================================================== -->
+
+  <execution_order>
+    <!-- Phase 0: MLflow accessibility (DECIDED — Oracle Cloud Always Free) -->
+    <step order="1" tasks="T1" note="DECIDED (2026-03-12): Oracle Cloud Always Free chosen. No further user input needed."/>
+    <step order="1b" tasks="T1b T1c" note="Pulumi OCI stack + multi-arch Docker builds. Both unblocked by T1 decision. Can run in parallel."/>
+    <step order="2" tasks="T2 T7 T3 T8" note="Independent tasks: env vars (now includes OCI vars), pyproject.toml, train_fold extraction, HPO grid — all can run in parallel"/>
+
+    <!-- Phase 1: Compute dispatcher -->
+    <step order="3" tasks="T4" note="Depends on T3 (train_fold module)"/>
+    <step order="4" tasks="T5 T6" note="SkyPilot dispatch + YAML updates — can run in parallel"/>
+
+    <!-- Phase 2: HPO on SkyPilot -->
+    <step order="5" tasks="T9 T10" note="HPO dispatch + barrier — depend on T5"/>
+
+    <!-- Phase 3: Flow integration -->
+    <step order="6" tasks="T11 T12" note="Trigger chain + cost tracking"/>
+    <step order="7" tasks="T13" note="Dashboard cost section — depends on T12"/>
+
+    <!-- Phase 4: Model-specific YAMLs (after generic YAML is finalized) -->
+    <step order="8" tasks="T14 T15 T16" note="SAM3, VesselFM, synthetic generators — all independent, all depend on T6"/>
+
+    <!-- Phase 5: Resilience + integration -->
+    <step order="9" tasks="T17 T18" note="Spot checkpointing + work pool — independent"/>
+
+    <!-- Phase 6: Documentation + integration test -->
+    <step order="10" tasks="T19 T20" note="Docs + dry-run integration test — after all implementation"/>
+  </execution_order>
+
+  <!-- ===================================================================
+       COST ESTIMATES (from report Section 14)
+       =================================================================== -->
+
+  <cost_estimates>
+    <estimate workload="DynUNet 3-fold x 100 epochs" gpu="RTX 3090" cost_usd="2.64" wall_hours="12"/>
+    <estimate workload="DynUNet 3-fold x 100 epochs" gpu="RTX 4090" cost_usd="2.92" wall_hours="8.6"/>
+    <estimate workload="SAM3 fine-tuning (LoRA)" gpu="RTX 4090" cost_usd="12.24" wall_hours="36"/>
+    <estimate workload="SAM3 fine-tuning (full)" gpu="RTX 5090" cost_usd="14.49" wall_hours="21"/>
+    <estimate workload="16-trial HPO sweep" gpu="RTX 3090 x16" cost_usd="42.24" wall_hours="12"/>
+    <estimate workload="VesselVAE training" gpu="RTX 3090" cost_usd="1.32" wall_hours="6"/>
+    <estimate workload="VQ-VAE training" gpu="RTX 3090" cost_usd="1.76" wall_hours="8"/>
+    <estimate workload="Monthly research budget (consumer GPUs)" cost_usd="154" note="See report Section 8"/>
+    <estimate workload="Monthly research budget (A100 only)" cost_usd="556" note="See report Section 8"/>
+  </cost_estimates>
+
+  <!-- ===================================================================
+       DEFERRED TASKS (Phase 5 from report — not in this plan)
+       =================================================================== -->
+
+  <deferred>
+    <item id="D1" reason="PROMOTED to T1b (2026-03-12). User chose Oracle Cloud Always Free (Option C). T1b is now NOT_STARTED with P1 priority. T1c added for multi-arch Docker builds.">Cloud-deploy MLflow + PostgreSQL via Pulumi — PROMOTED to T1b + T1c (Oracle Cloud Always Free)</item>
+    <item id="D2" reason="SkyPilot v0.11 beta, unstable">SkyPilot worker pools for HPO</item>
+    <item id="D3" reason="Pre-generated grid is sufficient">Shared Optuna study on cloud PostgreSQL</item>
+    <item id="D4" reason="Not needed until multi-user">SkyPilot API server for shared state</item>
+    <item id="D5" reason="Monthly spend currently low">Cost alerting + budget caps</item>
+    <item id="D6" reason="Tunnel works for now">Prefect on SkyPilot VMs (Prefect Cloud integration)</item>
+    <item id="D7" reason="Depends on model implementation">VesselFM ModelAdapter (separate plan)</item>
+    <item id="D8" reason="Depends on model implementation">VesselVAE / VQ-VAE model implementations (separate plan)</item>
+  </deferred>
+
+  <!-- ===================================================================
+       RISKS AND MITIGATIONS
+       =================================================================== -->
+
+  <risks>
+    <risk id="R1" severity="MEDIUM" probability="LOW">
+      <description>Oracle Cloud Always Free instance provisioning delays (OCI account creation, ARM compatibility issues)</description>
+      <mitigation>DECIDED (2026-03-12): Oracle Cloud Always Free chosen. Risk reduced from HIGH to MEDIUM. Pulumi stack (T1b) automates provisioning. Fallback: use Option E (post-hoc sync) during OCI setup. Multi-arch Docker builds (T1c) address ARM compatibility.</mitigation>
+    </risk>
+    <risk id="R2" severity="MEDIUM" probability="HIGH">
+      <description>RunPod GPU availability varies — 151+ outages in 6 months</description>
+      <mitigation>SkyPilot multi-cloud failover: RunPod -> Lambda -> GCP Spot -> AWS. Never depend on single provider.</mitigation>
+    </risk>
+    <risk id="R3" severity="HIGH" probability="LOW">
+      <description>Spot preemption during SAM3 fine-tuning (48h job) loses progress</description>
+      <mitigation>MOUNT_CACHED checkpoints (T6) + SIGTERM handler (T17) + job_recovery: FAILOVER. Checkpoint interval: every 5 epochs.</mitigation>
+    </risk>
+    <risk id="R4" severity="MEDIUM" probability="MEDIUM">
+      <description>SkyPilot nightly package instability (RunPod support not in stable)</description>
+      <mitigation>Pin skypilot-nightly version in pyproject.toml. Test before upgrading. Fall back to Lambda/GCP if RunPod support breaks.</mitigation>
+    </risk>
+    <risk id="R5" severity="LOW" probability="HIGH">
+      <description>Cloud GPU costs exceed budget during active HPO</description>
+      <mitigation>Use consumer GPUs (RTX 3090/4090) for 80%+ of workloads. A100/H100 only for >32 GB VRAM needs. autostop=30min. Dashboard cost tracking (T13).</mitigation>
+    </risk>
+    <risk id="R6" severity="MEDIUM" probability="LOW">
+      <description>Data sovereignty: MiniVess (EBRAINS, CC BY-NC-SA) on cloud GPUs</description>
+      <mitigation>MiniVess is public data with CC BY-NC-SA license — cloud transfer is permitted. For future restricted datasets, use local GPU or EU-only cloud regions.</mitigation>
+    </risk>
+  </risks>
+
+</plan>
