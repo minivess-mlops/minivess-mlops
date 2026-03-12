@@ -15,7 +15,7 @@ import html
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from scipy.stats import ks_2samp
@@ -40,6 +40,7 @@ class DriftResult:
     n_features: int = 0
     n_drifted: int = 0
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    evidently_html_path: Path | None = None
 
 
 class FeatureDriftDetector:
@@ -72,13 +73,20 @@ class FeatureDriftDetector:
         self.threshold = threshold
         self.drift_share = drift_share
 
-    def detect(self, current_features: pd.DataFrame) -> DriftResult:
+    def detect(
+        self,
+        current_features: pd.DataFrame,
+        *,
+        evidently_html_path: Path | None = None,
+    ) -> DriftResult:
         """Run drift detection on current features vs reference.
 
         Parameters
         ----------
         current_features:
             DataFrame of current feature values (same columns as reference).
+        evidently_html_path:
+            If provided, save an Evidently HTML report to this path.
 
         Returns
         -------
@@ -100,6 +108,12 @@ class FeatureDriftDetector:
         dataset_drift_score = n_drifted / max(n_features, 1)
         dataset_drift = dataset_drift_score >= self.drift_share
 
+        html_path = None
+        if evidently_html_path is not None:
+            html_path = self.save_evidently_html(
+                current_features, output_path=evidently_html_path
+            )
+
         return DriftResult(
             drift_detected=dataset_drift,
             dataset_drift_score=dataset_drift_score,
@@ -107,7 +121,69 @@ class FeatureDriftDetector:
             drifted_features=drifted_features,
             n_features=n_features,
             n_drifted=n_drifted,
+            evidently_html_path=html_path,
         )
+
+    def generate_evidently_report(self, current_features: pd.DataFrame) -> Any:
+        """Generate an Evidently DataDriftPreset report.
+
+        Parameters
+        ----------
+        current_features:
+            DataFrame of current feature values.
+
+        Returns
+        -------
+        Evidently Snapshot object with drift analysis results.
+        """
+        from evidently import Report
+        from evidently.presets import DataDriftPreset
+
+        report = Report(metrics=[DataDriftPreset(drift_share=self.drift_share)])
+        snapshot = report.run(
+            reference_data=self.reference, current_data=current_features
+        )
+        return snapshot
+
+    def save_evidently_html(
+        self,
+        current_features: pd.DataFrame,
+        *,
+        output_path: Path,
+    ) -> Path:
+        """Save an Evidently DataDriftPreset HTML report.
+
+        Parameters
+        ----------
+        current_features:
+            DataFrame of current feature values.
+        output_path:
+            Path to write the HTML report.
+
+        Returns
+        -------
+        Path to the generated HTML file.
+        """
+        snapshot = self.generate_evidently_report(current_features)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        snapshot.save_html(str(output_path))
+        logger.info("Evidently drift report saved to %s", output_path)
+        return output_path
+
+    def get_evidently_dict(self, current_features: pd.DataFrame) -> dict[str, Any]:
+        """Get Evidently report as a dictionary.
+
+        Parameters
+        ----------
+        current_features:
+            DataFrame of current feature values.
+
+        Returns
+        -------
+        Dict with 'metrics' and 'tests' keys from Evidently Snapshot.
+        """
+        snapshot = self.generate_evidently_report(current_features)
+        return snapshot.dict()  # type: ignore[no-any-return]
 
     def generate_html_report(
         self,
