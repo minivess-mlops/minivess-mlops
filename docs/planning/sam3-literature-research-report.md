@@ -1,3 +1,9 @@
+---
+title: "SAM3 for 3D Microvasculature: Multi-Hypothesis Research"
+status: reference
+created: ""
+---
+
 # SAM3 for 3D Microvasculature: A Multi-Hypothesis Research Exploration
 
 **Status**: Living document — multi-hypothesis open-ended exploration

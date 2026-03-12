@@ -1,3 +1,9 @@
+---
+title: "MONAI Deploy Clinical Deployment Pathway Plan"
+status: planned
+created: ""
+---
+
 # MONAI Deploy Clinical Deployment Pathway — Implementation Plan (Issue #47)
 
 ## Current State

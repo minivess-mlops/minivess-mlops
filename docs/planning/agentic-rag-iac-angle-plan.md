@@ -1,3 +1,9 @@
+---
+title: "Agentic RAG and Infrastructure-as-Code Angle Plan"
+status: planned
+created: "2026-02-24"
+---
+
 # Agentic RAG & Infrastructure-as-Code Angle Plan
 
 **Phase 16 — Agentic Capabilities for MinIVess MLOps v2**

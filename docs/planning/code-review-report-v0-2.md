@@ -1,3 +1,9 @@
+---
+title: "Code Review Report v0.2: Multi-Agent Deep Review"
+status: reference
+created: "2026-02-25"
+---
+
 # Code Review Report v0.2 — Multi-Agent Deep Review
 
 > **Generated:** 2026-02-25

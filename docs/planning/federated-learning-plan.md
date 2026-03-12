@@ -1,3 +1,9 @@
+---
+title: "Federated Learning Support (NVIDIA FLARE) Plan"
+status: planned
+created: ""
+---
+
 # Federated Learning Support (NVIDIA FLARE) — Implementation Plan (Issue #48)
 
 ## Current State

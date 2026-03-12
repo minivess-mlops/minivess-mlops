@@ -1,3 +1,9 @@
+---
+title: "MedSAM3 Interactive Annotation Adapter Plan"
+status: planned
+created: ""
+---
+
 # MedSAM3 Interactive Annotation Adapter — Implementation Plan (Issue #22)
 
 ## Current State

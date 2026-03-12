@@ -1,3 +1,9 @@
+---
+title: "DATA-CARE Data Quality Assessment Plan"
+status: planned
+created: ""
+---
+
 # DATA-CARE Data Quality Assessment — Implementation Plan (Issue #11)
 
 ## Current State

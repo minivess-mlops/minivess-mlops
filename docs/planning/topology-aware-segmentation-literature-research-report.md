@@ -1,3 +1,9 @@
+---
+title: "Topology-Aware 3D Microvascular Segmentation Literature Report"
+status: reference
+created: "2026-03-02"
+---
+
 # Topology-Aware 3D Microvascular Segmentation: A Multi-Hypothesis Literature Exploration
 
 **Project:** MinIVess MLOps v2 — `feat/advanced-topological-segmentation`

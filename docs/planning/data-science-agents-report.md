@@ -1,3 +1,9 @@
+---
+title: "Data Science Practices with Agents Report"
+status: reference
+created: "2026-02-24"
+---
+
 # Phase 18: Data Science Practices with Agents for Vascular Imaging MLOps
 
 > **Date**: 2026-02-24

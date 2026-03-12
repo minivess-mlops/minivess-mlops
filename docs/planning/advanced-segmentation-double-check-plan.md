@@ -1,3 +1,9 @@
+---
+title: "Advanced Segmentation Double-Check: Literature Report"
+status: reference
+created: "2026-03-04"
+---
+
 # Advanced Segmentation Double-Check: Literature Report
 
 **Date:** 2026-03-04

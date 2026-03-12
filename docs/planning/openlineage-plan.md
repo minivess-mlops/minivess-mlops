@@ -1,3 +1,9 @@
+---
+title: "OpenLineage/Marquez Lineage Tracking Plan"
+status: planned
+created: ""
+---
+
 # OpenLineage/Marquez Lineage Tracking — Implementation Plan (Issue #44)
 
 ## Current State

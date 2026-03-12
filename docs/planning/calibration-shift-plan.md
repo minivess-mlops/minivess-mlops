@@ -1,3 +1,9 @@
+---
+title: "Calibration-Under-Shift Framework Plan"
+status: planned
+created: ""
+---
+
 # Calibration-Under-Shift Framework — Implementation Plan (Issue #19)
 
 ## Current State

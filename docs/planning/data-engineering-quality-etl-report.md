@@ -1,3 +1,9 @@
+---
+title: "Data Engineering: Quality, ETL, and Interoperability Report"
+status: reference
+created: "2026-02-24"
+---
+
 # Phase 17: Data Engineering — Quality, ETL, and Interoperability for Vascular Imaging MLOps
 
 > **Date**: 2026-02-24

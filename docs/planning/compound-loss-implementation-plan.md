@@ -1,3 +1,9 @@
+---
+title: "Compound Loss and Multi-Metric Improvement Plan"
+status: implemented
+created: "2026-02-26"
+---
+
 # Compound Loss & Multi-Metric Improvement Plan
 
 > **Created:** 2026-02-26

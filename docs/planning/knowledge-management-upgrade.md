@@ -1,3 +1,9 @@
+---
+title: "Knowledge Management Upgrade: From Scattered Files to Navigable Graph"
+status: active
+created: "2026-03-13"
+---
+
 # Knowledge Management Upgrade: From Scattered Files to Navigable Graph
 
 **Created**: 2026-03-13

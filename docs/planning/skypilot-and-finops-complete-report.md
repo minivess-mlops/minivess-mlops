@@ -1,3 +1,9 @@
+---
+title: "SkyPilot Remote GPU Training: Complete Architecture Report"
+status: reference
+created: "2026-03-12"
+---
+
 # SkyPilot Remote GPU Training: Complete Architecture Report
 
 **Date:** 2026-03-12
@@ -38,7 +44,10 @@ MinIVess MLOps has well-designed SkyPilot infrastructure that is **completely di
 
 **The core problem is not GPU provisioning — it's service accessibility.** MLflow, Prefect, and PostgreSQL (Optuna) all run on `localhost` / Docker Compose internal network. SkyPilot-provisioned VMs cannot reach them. This is the #1 blocker.
 
-**Recommended path:** Cloudflare Tunnel (zero-trust, free tier) to expose MLflow + Prefect + PostgreSQL to SkyPilot VMs without opening firewall ports or deploying to cloud. This works for solo-researcher scale; cloud-deployed services for team scale.
+**Recommended path:** DagsHub Managed MLflow (drop-in, free, 5-minute setup) for immediate use;
+Oracle Cloud Always Free ($0 forever, 24 GB RAM) for long-term self-hosted; Hetzner VPS
+(EUR 3.49/month) for academic lab teams. See Section 10 for full analysis of 6 options with
+decision matrix — **NEEDS USER VERDICT** on which to implement.
 
 **Cost impact:** RunPod is 5-28x cheaper than AWS for single-GPU workloads (A100/H100). A 48-hour SAM3 fine-tuning run costs $96 on RunPod vs $2,642 on AWS. SkyPilot's multi-cloud failover (RunPod → Lambda → GCP Spot → AWS) automates cost optimization.
 
@@ -142,14 +151,17 @@ For MinIVess today (solo researcher, local Docker Compose for infra), SkyPilot a
 
 **Options (detailed in [Section 10](#10-mlflow-accessibility)):**
 
-| Option | Complexity | Cost | Security | Solo Researcher | Team |
-|--------|-----------|------|----------|-----------------|------|
-| A: Cloudflare Tunnel | Low | Free | Zero-trust | Best | OK |
-| B: Cloud VM MLflow | Medium | $30-50/mo | VPC | OK | Best |
-| C: Post-hoc sync | Low | Free | Excellent | Acceptable | No |
-| D: Managed MLflow | Low | $100+/mo | Managed | Overkill | Good |
+| Option | Setup | Cost | Solo Researcher | Team |
+|--------|-------|------|-----------------|------|
+| A: DagsHub Managed | 5 min | Free-$9/mo | **Best** | Good ($39/user) |
+| B: Cloudflare Tunnel | 30 min | Free | Good | Poor |
+| C: Oracle Cloud Free | 2 hours | $0 forever | Good | Good |
+| D: Hetzner VPS | 1 hour | EUR 3.49+/mo | Good | **Best** |
+| E: Post-hoc sync | 0 min | ~$0.50/mo | Acceptable | No |
+| F: Managed MLflow | 1 hour | $50-200+/mo | Overkill | Good |
 
-**Recommendation:** Option A (Cloudflare Tunnel) for immediate unblocking, migrate to Option B when team grows.
+**Recommendation:** Option A (DagsHub) for immediate unblocking — 5 min, free, drop-in. Migrate
+to C (Oracle Free) or D (Hetzner) when team grows. **NEEDS USER VERDICT.** See Section 10.
 
 ### B2: Prefect API Accessibility (HIGH)
 
@@ -700,9 +712,40 @@ Pulumi (persistent):                    SkyPilot (ephemeral):
                                     Local Prefect flow
 ```
 
+### Pulumi and SkyPilot Are Complementary, Not Competing
+
+A common misconception is that Pulumi and SkyPilot overlap. They do not — they manage
+orthogonal concerns in the ML infrastructure stack:
+
+- **Pulumi** manages **persistent infrastructure**: the MLflow server, PostgreSQL database,
+  DNS records, TLS certificates, monitoring dashboards, firewall rules, backup schedules.
+  These resources live for weeks to months and must be reproducible, version-controlled,
+  and tear-down-able via `pulumi destroy`.
+
+- **SkyPilot** manages **ephemeral GPU compute**: training jobs, HPO sweep trials, inference
+  benchmarks. These resources live for minutes to hours, are provisioned on-demand across
+  20+ clouds, and are automatically torn down after completion.
+
+When both are in use, the workflow is:
+
+```
+pulumi up        → Standing infrastructure (MLflow, PostgreSQL, MinIO, DNS, monitoring)
+sky jobs launch  → Ephemeral GPU jobs that LOG TO the Pulumi-managed MLflow server
+pulumi destroy   → Tear down infrastructure when the research phase ends
+```
+
+Both are managed from the SAME repository, version-controlled in `deployment/pulumi/`
+and `deployment/skypilot/` respectively. A researcher can spin up the entire research
+environment (infra + compute) and tear it down cleanly — no orphaned resources, no
+manual cleanup, no "works on my machine."
+
 ### Recommendation
 
 **Phase 0-1 (now):** SkyPilot only. Local Docker Compose for infra, Cloudflare Tunnel for accessibility. Zero Pulumi needed.
+
+**Phase 0-1 (if Pulumi already in your stack):** SkyPilot for GPU compute + Pulumi for
+MLflow/PostgreSQL infrastructure. See Section 10 "Pulumi IaC Dimension" for how this
+changes the MLflow hosting decision.
 
 **Phase 2 (team grows):** Add Pulumi for cloud-deploying MLflow + PostgreSQL. SkyPilot for GPU compute.
 
@@ -712,9 +755,82 @@ Pulumi (persistent):                    SkyPilot (ephemeral):
 
 ## 10. MLflow Accessibility Solutions {#10-mlflow-accessibility}
 
-### Option A: Cloudflare Tunnel (Recommended for Solo Researcher)
+**The #1 blocker for SkyPilot training.** Local MLflow (`minivess-mlflow:5000`) is unreachable
+from SkyPilot VMs. Without solving this, no remote training can log metrics or artifacts.
 
-[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) creates a secure outbound-only connection from your machine to Cloudflare's edge. No firewall ports opened, no public IP needed.
+**Requirement:** ONE MLflow server for all local Docker runs AND SkyPilot cloud runs.
+Also consider academic lab team use case (multiple researchers sharing one tracker).
+
+### Option A: DagsHub Managed MLflow (Zero Effort, Drop-In)
+
+[DagsHub](https://dagshub.com/) provides a fully managed MLflow tracking server as part of
+its Git-based ML platform. It is **100% MLflow-compatible** — just change the tracking URI.
+
+**Setup (5 minutes):**
+```bash
+# 1. Create DagsHub repo (or connect existing GitHub repo)
+# 2. Set tracking URI
+export MLFLOW_TRACKING_URI=https://dagshub.com/<user>/minivess-mlops.mlflow
+
+# 3. Authenticate (token from dagshub.com/user/settings/tokens)
+export MLFLOW_TRACKING_USERNAME=<user>
+export MLFLOW_TRACKING_PASSWORD=<dagshub_token>
+```
+
+**SkyPilot YAML:**
+```yaml
+envs:
+  MLFLOW_TRACKING_URI: https://dagshub.com/<user>/minivess-mlops.mlflow
+  MLFLOW_TRACKING_USERNAME: <user>
+  MLFLOW_TRACKING_PASSWORD: ${DAGSHUB_TOKEN}
+```
+
+**Integration with existing code** — No code changes needed:
+```python
+# resolve_tracking_uri() already reads MLFLOW_TRACKING_URI env var
+# Just set the env var to DagsHub URL — everything works
+from minivess.observability.tracking import resolve_tracking_uri
+tracking_uri = resolve_tracking_uri()  # → https://dagshub.com/<user>/minivess-mlops.mlflow
+```
+
+**Import existing local runs** ([docs](https://dagshub.com/docs/integration_guide/mlflow_tracking/#how-to-import-mlflow-local-objects-to-dagshub-mlflow-remote)):
+```bash
+# DagsHub provides built-in import from local mlruns/
+dagshub upload <user>/minivess-mlops --source mlruns/
+```
+
+**Pricing:**
+| Tier | Storage | Experiments | Users | Price |
+|------|---------|-------------|-------|-------|
+| Free | 20 GB | 100 | 1 | $0 |
+| Pro | 500 GB | Unlimited | 1 | $9/month |
+| Team | 1 TB | Unlimited | 5+ | $39/user/month |
+
+**Pros:**
+- Zero infrastructure to manage — MLflow is just a URL
+- Drop-in compatible with MLflow SDK (no code changes)
+- Built-in experiment comparison UI, model registry
+- Git integration (DagsHub links runs to commits)
+- DVC integration for data versioning
+- Free tier is sufficient for most academic research
+- Team plan supports lab-wide collaboration
+- Built-in import tool for existing local mlruns/
+
+**Cons:**
+- Data on DagsHub servers (acceptable for non-sensitive academic data)
+- Free tier limited to 100 experiments (need Pro for large sweeps)
+- Network latency for artifact upload (~200-500ms per call)
+- Yet another service account to manage
+- Large ONNX model artifacts may hit upload timeouts on slow connections
+
+**Verdict: Best immediate option.** 5-minute setup, zero maintenance, free for solo use.
+Issue [#612](https://github.com/minivess-mlops/minivess-mlops/issues/612) tracks DagsHub migration.
+
+### Option B: Cloudflare Tunnel (Free, Self-Hosted)
+
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+creates a secure outbound-only connection from your machine to Cloudflare's edge.
+No firewall ports opened, no public IP needed.
 
 **Setup:**
 
@@ -749,29 +865,103 @@ envs:
   MLFLOW_TRACKING_URI: https://mlflow.minivess.example.com
 ```
 
-**Pros:** Free tier, zero-trust security, no firewall changes, works behind NAT
-**Cons:** Requires domain name, tunnel must run on dev machine during training, added latency (~50ms)
+**CRITICAL LIMITATION: 100 MB upload limit.** Cloudflare free tier enforces a 100 MB per-request
+body limit. ONNX models (100-800 MB) and large checkpoint artifacts WILL FAIL to upload through
+the tunnel. This is a dealbreaker for the deploy flow (ONNX export).
 
-### Option B: Cloud VM MLflow (Recommended for Team)
+**Workaround: Tailscale for large artifacts.** Use [Tailscale](https://tailscale.com/) (free for
+personal use, 100 devices) as a VPN mesh. No upload limit — direct IP connectivity. SkyPilot VMs
+join the Tailnet via `tailscale up --authkey=<key>` in the setup section.
 
-Deploy MLflow + PostgreSQL to a cheap cloud VM ($10-30/month):
+```yaml
+# SkyPilot setup with Tailscale
+setup: |
+  curl -fsSL https://tailscale.com/install.sh | sh
+  tailscale up --authkey=${TAILSCALE_AUTH_KEY} --hostname=skypilot-${SKYPILOT_TASK_ID}
 
-```bash
-# Smallest VM with Docker
-# AWS: t3.small ($0.02/hr ≈ $15/mo)
-# GCP: e2-small ($0.017/hr ≈ $12/mo)
-# Hetzner: CX22 ($4.15/mo)
-
-# Docker Compose on cloud VM (reuse existing docker-compose.yml)
-docker compose -f docker-compose.yml up -d mlflow postgres minio
+envs:
+  MLFLOW_TRACKING_URI: http://100.x.y.z:5000  # Tailscale IP of dev machine
 ```
 
-**Pros:** Always accessible, team-ready, no tunnel dependency
-**Cons:** Monthly cost, requires cloud account, security hardening needed
+**Pros:** Free, zero-trust security, no firewall changes, works behind NAT, keeps data local
+**Cons:** 100 MB upload limit (dealbreaker without Tailscale), requires domain name, tunnel must
+run on dev machine during training, added latency (~50ms), dev machine must stay on
 
-### Option C: Post-Hoc Sync (Simplest MVP)
+### Option C: Oracle Cloud Always Free Tier (Best Free Self-Hosted)
 
-Training logs to local filesystem on the SkyPilot VM. After completion, sync artifacts to local MLflow:
+[Oracle Cloud Infrastructure (OCI) Always Free](https://www.oracle.com/cloud/free/) provides
+a genuinely free-forever compute instance — not a 12-month trial.
+
+**Always Free resources:**
+- 4 OCPU (Arm Ampere A1), 24 GB RAM
+- 200 GB block storage
+- 10 TB/month egress (!)
+- No credit card charge after trial period
+
+**Setup:**
+```bash
+# 1. Create OCI account (requires credit card for verification only)
+# 2. Launch Always Free A1 Flex instance (4 OCPU, 24 GB)
+# 3. Install Docker
+# 4. Deploy existing docker-compose.yml
+scp docker-compose.yml opc@<oci-ip>:~/
+ssh opc@<oci-ip> "docker compose up -d mlflow postgres minio"
+```
+
+**Why this is the best free option:**
+- 24 GB RAM handles MLflow + PostgreSQL + MinIO comfortably
+- 200 GB storage accommodates years of experiment metadata + moderate artifacts
+- 10 TB egress means SkyPilot VMs can download artifacts freely
+- Arm CPU is fine for MLflow server (no GPU needed)
+- Truly free — Oracle does not charge after trial credits expire
+
+**Comparison to other free tiers:**
+| Provider | Free Compute | RAM | Storage | Duration |
+|----------|-------------|-----|---------|----------|
+| **Oracle OCI** | 4 OCPU Arm | 24 GB | 200 GB | **Forever** |
+| AWS Free Tier | 1 vCPU (t2.micro) | 1 GB | 30 GB | 12 months |
+| GCP Free Tier | 1 vCPU (e2-micro) | 1 GB | 30 GB | Forever (but tiny) |
+| Azure Free | 1 vCPU (B1s) | 1 GB | 64 GB | 12 months |
+
+**Pros:** Free forever, 24 GB RAM (huge for MLflow), always accessible, self-hosted (full control),
+team-ready, 10 TB egress
+**Cons:** Oracle UX is notoriously painful, initial setup takes ~2 hours, must manage updates/backups,
+Arm architecture (Docker images must be multi-arch — our base images are x86 only currently)
+
+### Option D: Hetzner VPS (Cheapest Paid, Reliable)
+
+[Hetzner Cloud](https://www.hetzner.com/cloud) offers the cheapest VPS in Europe with excellent
+reliability and no hidden fees.
+
+**Pricing:**
+| Tier | vCPU | RAM | Storage | Price |
+|------|------|-----|---------|-------|
+| CX22 | 2 | 4 GB | 40 GB | EUR 3.49/month |
+| CX32 | 4 | 8 GB | 80 GB | EUR 5.99/month |
+| CX42 | 8 | 16 GB | 160 GB | EUR 14.99/month |
+
+CX22 (EUR 3.49/month ≈ $3.80/month) is sufficient for MLflow + PostgreSQL.
+CX32 (EUR 5.99 ≈ $6.50/month) recommended for comfort margin.
+
+**Setup:**
+```bash
+# 1. Create Hetzner account
+# 2. Provision CX22 server (Ubuntu 24.04)
+# 3. SSH in, install Docker
+# 4. Deploy MLflow stack
+scp docker-compose.yml root@<hetzner-ip>:~/
+ssh root@<hetzner-ip> "docker compose up -d mlflow postgres minio"
+```
+
+**Pros:** Extremely cheap (EUR 3.49/month), reliable (99.9% SLA), EU data sovereignty,
+fast provisioning, always accessible, team-ready
+**Cons:** Monthly cost (small but nonzero), requires initial setup, must manage updates,
+EU-only datacenters (latency from US RunPod regions ~100ms)
+
+### Option E: Post-Hoc Sync (Simplest MVP, No Infrastructure)
+
+Training logs to local filesystem on the SkyPilot VM. After completion, sync artifacts
+to local MLflow via S3 bucket as intermediary.
 
 ```bash
 # In SkyPilot run section:
@@ -790,17 +980,287 @@ aws s3 sync s3://minivess-mlruns/ /tmp/remote-mlruns/
 python scripts/import_remote_runs.py /tmp/remote-mlruns/
 ```
 
-**Pros:** Zero infrastructure changes, works immediately
-**Cons:** No real-time monitoring, requires post-hoc import script, no system metrics during training
+**Pros:** Zero infrastructure changes, works immediately, no network dependency during training
+**Cons:** No real-time monitoring (blind during 48h SAM3 runs), requires post-hoc import script,
+no MLflow system metrics during training, manual sync step, S3 bucket cost (~$0.50/month)
 
-### Option D: Managed MLflow
+### Option F: Managed MLflow (Enterprise)
 
-- [Nebius Managed MLflow](https://nebius.com) — Integrated with SkyPilot
-- [Databricks Managed MLflow](https://databricks.com/product/managed-mlflow) — Enterprise, $$
-- [MLflow on Kubernetes](https://mlflow.org/docs/latest/deployment/deploy-model-to-kubernetes) — Self-managed
+- [Databricks Managed MLflow](https://databricks.com/product/managed-mlflow) — $100+/month, enterprise features, model serving built-in
+- [Nebius Managed MLflow](https://nebius.com/blog/posts/orchestrating-llm-fine-tuning-k8s-skypilot-mlflow) — Integrated with SkyPilot (has a reference blog post)
+- [Azure ML](https://learn.microsoft.com/en-us/azure/machine-learning/concept-mlflow) — MLflow-compatible tracking, $50+/month
+- ~~[Neptune.ai](https://neptune.ai)~~ — **DEAD** (acquired by OpenAI, shut down March 5, 2026)
 
-**Pros:** Zero maintenance, always accessible
-**Cons:** Cost ($100+/month), vendor lock-in, may not support all MLflow features
+**Pros:** Zero maintenance, always accessible, enterprise SLAs, team-ready
+**Cons:** $50-200+/month, vendor lock-in, may not support all MLflow features,
+overkill for solo/small-team academic use
+
+### Decision Matrix
+
+| Criterion | DagsHub | CF Tunnel | Oracle Free | Hetzner | Post-Hoc | Managed |
+|-----------|---------|-----------|-------------|---------|----------|---------|
+| **Setup time** | 5 min | 30 min | 2 hours | 1 hour | 0 min | 1 hour |
+| **Setup time (with Pulumi)** | N/A | N/A | **5 min*** | **5 min*** | N/A | N/A |
+| **Monthly cost** | $0-9 | $0 | $0 | $3.50-6 | ~$0.50 | $50-200+ |
+| **Real-time monitoring** | Yes | Yes | Yes | Yes | **No** | Yes |
+| **Large artifacts (>100MB)** | Yes | **No**** | Yes | Yes | Yes | Yes |
+| **Dev machine can sleep** | Yes | **No** | Yes | Yes | Yes | Yes |
+| **Team-ready** | Yes (Team plan) | No | Yes | Yes | No | Yes |
+| **Data sovereignty** | DagsHub servers | Local | Oracle Cloud | EU (Hetzner) | S3 bucket | Vendor |
+| **Code changes needed** | Env var only | Env var only | Env var only | Env var only | Import script | Env var only |
+| **Reproducible teardown** | N/A | Manual | Manual | Manual | N/A | Vendor |
+| **Reproducible teardown (Pulumi)** | N/A | N/A | **`pulumi destroy`** | **`pulumi destroy`** | N/A | N/A |
+| **Academic lab fit** | Excellent | Poor | Good | Good | Poor | Overkill |
+| **Academic lab fit (with Pulumi)** | Excellent | Poor | **Excellent** | **Excellent** | Poor | Overkill |
+
+*After initial Pulumi stack development (~3-4h one-time). Subsequent deployments are `pulumi up`.
+
+**Cloudflare: unless combined with Tailscale for artifact transfer
+
+### Pulumi IaC Dimension
+
+When Pulumi is already part of the researcher's infrastructure stack, the MLflow hosting
+analysis changes significantly. The "manual setup overhead" that makes self-hosted options
+less attractive **disappears** — it becomes `pulumi up` (reproducible, version-controlled,
+tear-down-able). This section is relevant ONLY if you already have (or plan to have) a
+Pulumi subscription. If you do not use Pulumi, skip to the Recommendation below.
+
+#### How Pulumi Changes the Setup Time Estimates
+
+| Option | Without Pulumi | With Pulumi (first time) | With Pulumi (subsequent) |
+|--------|:-:|:-:|:-:|
+| **Oracle Cloud Free** | 2 hours (manual) | ~4 hours (write stack + `pulumi up`) | **5 min (`pulumi up`)** |
+| **Hetzner CX32** | 1 hour (manual) | ~3 hours (write stack + `pulumi up`) | **5 min (`pulumi up`)** |
+| **DagsHub** | 5 min | N/A (managed service) | N/A |
+
+The one-time Pulumi stack development cost (3-4 hours) amortizes across ALL future
+deployments, teardowns, and re-creations. More importantly, it amortizes across the
+**entire research infrastructure** — MLflow is just ONE service in a broader Pulumi
+stack that also manages DNS, monitoring, backups, and secrets rotation.
+
+#### Available Pulumi Providers
+
+Both target clouds have well-maintained official Pulumi providers with Python SDKs:
+
+- **[`pulumi-hcloud`](https://www.pulumi.com/registry/packages/hcloud/)** — Official Hetzner
+  Cloud provider. Supports servers, volumes, firewalls, SSH keys, floating IPs, networks.
+- **[`pulumi-oci`](https://www.pulumi.com/registry/packages/oci/)** — Official Oracle Cloud
+  Infrastructure provider. Supports compute instances, VCN, subnets, block storage, NSG rules.
+- **[`pulumi-cloudflare`](https://www.pulumi.com/registry/packages/cloudflare/)** — DNS records,
+  TLS certificates, Tunnel configurations.
+- **[`pulumi-aws`](https://www.pulumi.com/registry/packages/aws/)** / **[`pulumi-gcp`](https://www.pulumi.com/registry/packages/gcp/)** —
+  If migrating to major clouds later.
+
+All providers support Python (matching this project's stack), and the
+[Pulumi Automation API](https://www.pulumi.com/docs/iac/packages-and-automation/automation-api/)
+allows programmatic `pulumi up`/`destroy` from Python scripts.
+
+#### Example: MLflow + PostgreSQL on Hetzner CX32 via Pulumi
+
+```python
+"""deployment/pulumi/mlflow_hetzner/__main__.py"""
+from __future__ import annotations
+
+import pulumi
+import pulumi_hcloud as hcloud
+
+config = pulumi.Config()
+ssh_public_key = config.require("ssh_public_key")
+
+# SSH key for access
+ssh_key = hcloud.SshKey("mlflow-ssh-key", public_key=ssh_public_key)
+
+# Firewall: allow SSH + MLflow + HTTPS only
+firewall = hcloud.Firewall(
+    "mlflow-firewall",
+    rules=[
+        hcloud.FirewallRuleArgs(direction="in", protocol="tcp", port="22",
+                                source_ips=["0.0.0.0/0", "::/0"]),
+        hcloud.FirewallRuleArgs(direction="in", protocol="tcp", port="443",
+                                source_ips=["0.0.0.0/0", "::/0"]),
+        hcloud.FirewallRuleArgs(direction="in", protocol="tcp", port="5000",
+                                source_ips=["0.0.0.0/0", "::/0"]),
+    ],
+)
+
+# CX32: 4 vCPU, 8 GB RAM, 80 GB disk — EUR 5.99/month
+server = hcloud.Server(
+    "mlflow-server",
+    server_type="cx32",
+    image="ubuntu-24.04",
+    location="hel1",  # Helsinki — low latency from Finland
+    ssh_keys=[ssh_key.id],
+    firewall_ids=[firewall.id],
+    user_data="""#!/bin/bash
+set -euo pipefail
+apt-get update && apt-get install -y docker.io docker-compose-v2
+systemctl enable --now docker
+# Pull and start MLflow stack
+mkdir -p /opt/mlflow && cd /opt/mlflow
+curl -fsSL https://raw.githubusercontent.com/<org>/minivess-mlops/main/deployment/docker-compose.yml \
+  -o docker-compose.yml
+docker compose up -d mlflow postgres minio
+""",
+)
+
+pulumi.export("server_ip", server.ipv4_address)
+pulumi.export("mlflow_url", server.ipv4_address.apply(lambda ip: f"http://{ip}:5000"))
+```
+
+Deploy: `cd deployment/pulumi/mlflow_hetzner && pulumi up`
+Teardown: `pulumi destroy` (clean removal, no orphaned resources)
+Recreate after config change: `pulumi up` (idempotent)
+
+#### Example: MLflow on Oracle Cloud Always Free A1 via Pulumi
+
+```python
+"""deployment/pulumi/mlflow_oracle/__main__.py"""
+from __future__ import annotations
+
+import pulumi
+import pulumi_oci as oci
+
+config = pulumi.Config()
+compartment_id = config.require("compartment_id")
+ssh_public_key = config.require("ssh_public_key")
+availability_domain = config.get("availability_domain") or "AD-1"
+
+# VCN + subnet
+vcn = oci.core.Vcn(
+    "mlflow-vcn",
+    compartment_id=compartment_id,
+    cidr_blocks=["10.0.0.0/16"],
+    display_name="mlflow-vcn",
+)
+
+internet_gw = oci.core.InternetGateway(
+    "mlflow-igw", compartment_id=compartment_id, vcn_id=vcn.id,
+)
+
+route_table = oci.core.RouteTable(
+    "mlflow-rt",
+    compartment_id=compartment_id,
+    vcn_id=vcn.id,
+    route_rules=[oci.core.RouteTableRouteRuleArgs(
+        network_entity_id=internet_gw.id,
+        destination="0.0.0.0/0",
+    )],
+)
+
+subnet = oci.core.Subnet(
+    "mlflow-subnet",
+    compartment_id=compartment_id,
+    vcn_id=vcn.id,
+    cidr_block="10.0.1.0/24",
+    route_table_id=route_table.id,
+)
+
+# Always Free A1 Flex: 4 OCPU, 24 GB RAM — $0 forever
+instance = oci.core.Instance(
+    "mlflow-instance",
+    compartment_id=compartment_id,
+    availability_domain=availability_domain,
+    shape="VM.Standard.A1.Flex",
+    shape_config=oci.core.InstanceShapeConfigArgs(ocpus=4, memory_in_gbs=24),
+    source_details=oci.core.InstanceSourceDetailsArgs(
+        source_type="image",
+        source_id="<oracle-linux-aarch64-image-ocid>",  # Oracle Linux 9 Aarch64
+    ),
+    create_vnic_details=oci.core.InstanceCreateVnicDetailsArgs(
+        subnet_id=subnet.id, assign_public_ip=True,
+    ),
+    metadata={"ssh_authorized_keys": ssh_public_key},
+)
+
+pulumi.export("instance_ip", instance.public_ip)
+pulumi.export("mlflow_url", instance.public_ip.apply(lambda ip: f"http://{ip}:5000"))
+```
+
+Note: Oracle Always Free A1 instances are Arm (aarch64). Docker images must be multi-arch.
+The existing `minivess-base` image is x86-only; a multi-arch build step would be needed.
+
+#### MLflow as Part of a Broader Pulumi Stack
+
+When Pulumi manages your research infrastructure, MLflow is just one component. A
+typical Pulumi stack for an ML research lab might include:
+
+```
+deployment/pulumi/
+├── mlflow_hetzner/         # MLflow + PostgreSQL + MinIO
+├── dns_cloudflare/         # DNS records (mlflow.lab.example.com)
+├── monitoring_grafana/     # Grafana Cloud dashboards
+├── secrets_rotation/       # Automated credential rotation
+└── Pulumi.yaml             # Stack configuration
+```
+
+Cross-stack references allow components to depend on each other:
+
+```python
+# dns_cloudflare/__main__.py
+mlflow_stack = pulumi.StackReference("org/mlflow_hetzner/prod")
+server_ip = mlflow_stack.get_output("server_ip")
+
+cloudflare.Record("mlflow-dns",
+    zone_id=zone_id,
+    name="mlflow",
+    type="A",
+    content=server_ip,
+    proxied=True,  # Cloudflare proxy for HTTPS + DDoS protection
+)
+```
+
+This means:
+- **DNS**: `mlflow.lab.example.com` automatically points to the Pulumi-managed server
+- **TLS**: Cloudflare provides free HTTPS certificates (proxied mode)
+- **Monitoring**: Grafana Cloud dashboards track MLflow server health
+- **Secrets**: Database passwords and API tokens rotate on schedule
+- **Teardown**: `pulumi destroy` across all stacks cleanly removes everything
+
+The IaC investment amortizes across ALL research infrastructure, not just this repo.
+A lab managing 3-5 ML projects shares one Pulumi stack for common services.
+
+#### Updated Time Estimates: With Pulumi vs Without
+
+| Scenario | Without Pulumi | With Pulumi (amortized) |
+|----------|:-:|:-:|
+| **First MLflow deployment** | 1-2 hours (manual) | 3-4 hours (write stack) |
+| **Recreate after failure** | 1-2 hours (repeat manual) | **5 min (`pulumi up`)** |
+| **Migrate to bigger server** | 30-60 min (manual) | **Edit config + `pulumi up`** |
+| **Add DNS + TLS** | 30-60 min | **Already in stack** |
+| **Add monitoring** | 1-2 hours | **Already in stack** |
+| **Clean teardown** | Manual cleanup, orphans likely | **`pulumi destroy` (clean)** |
+| **Reproduce on colleague's account** | Re-do everything manually | **`pulumi up` (identical)** |
+| **Disaster recovery** | Full manual rebuild | **`pulumi up` from git** |
+
+The break-even point is approximately the **second deployment**. After that, Pulumi
+saves time on every subsequent operation.
+
+### Recommendation
+
+**For immediate use (today):** **Option A (DagsHub)** — 5-minute setup, free, zero maintenance.
+Start training on SkyPilot immediately. DagsHub migration script: [#612](https://github.com/minivess-mlops/minivess-mlops/issues/612).
+
+**For long-term self-hosted:** **Option C (Oracle Cloud Always Free)** — Deploy when DagsHub
+free tier limits become constraining. 24 GB RAM handles MLflow + PostgreSQL + MinIO for years.
+$0 forever.
+
+**For team/lab:** **Option D (Hetzner CX32)** — EUR 5.99/month for a reliable, always-on server
+accessible by the whole lab. Better UX than Oracle, negligible cost.
+
+**If Pulumi is already your IaC tool:** **Option C (Oracle Free) or Option D (Hetzner) via
+Pulumi stack is the best long-term choice.** The manual setup overhead that normally favors
+DagsHub disappears — MLflow deployment becomes a `pulumi up` away, and the stack integrates
+with your broader research infrastructure (DNS, monitoring, backups, secrets rotation). The
+one-time Pulumi stack investment (~3-4 hours) pays for itself on the second deployment and
+amortizes across all research projects sharing the infrastructure. Start with Hetzner CX32
+(EUR 5.99/month, simpler Pulumi stack) unless the $0 cost of Oracle Free is critical.
+
+**If no IaC in place:** **Option A (DagsHub)** remains the fastest path. Adding Pulumi
+solely for MLflow is not justified — the IaC overhead only pays off when managing broader
+infrastructure across multiple services and projects.
+
+**NEEDS USER VERDICT:** Which MLflow hosting strategy to implement? The XML plan (Section 19)
+can proceed with any option — the only code change is `MLFLOW_TRACKING_URI` in `.env.example`.
 
 ---
 
@@ -1381,14 +1841,18 @@ These questions need resolution before or during implementation. Each has a reco
 
 **Question:** How should MLflow be made accessible from SkyPilot VMs?
 
-| Option | Complexity | Monthly Cost | Best For |
-|--------|-----------|-------------|----------|
-| **A: Cloudflare Tunnel** | Low | Free | Solo researcher (NOW) |
-| B: Cloud VM | Medium | $15-30 | Team of 2-5 |
-| C: Post-hoc sync | Lowest | Free | Offline-first workflow |
-| D: Managed MLflow | Low | $100+ | Enterprise |
+| Option | Setup | Monthly Cost | Best For |
+|--------|-------|-------------|----------|
+| **A: DagsHub** | 5 min | Free-$9 | Solo researcher (NOW) |
+| B: Cloudflare Tunnel | 30 min | Free | Self-hosted, <100MB artifacts |
+| C: Oracle Cloud Free | 2 hours | $0 forever | Long-term self-hosted |
+| D: Hetzner VPS | 1 hour | EUR 3.49+ | Academic lab team |
+| E: Post-hoc sync | 0 min | ~$0.50 | Offline-first workflow |
+| F: Managed MLflow | 1 hour | $50-200+ | Enterprise |
 
-**Recommendation:** Start with **A** (Cloudflare Tunnel). Zero cost, zero firewall changes. Migrate to **B** when team grows or tunnel reliability becomes a bottleneck.
+**Recommendation:** Start with **A** (DagsHub) — 5-minute setup, free, drop-in compatible.
+Migrate to **C** (Oracle Free) or **D** (Hetzner) when DagsHub limits become constraining
+or team grows. See Section 10 for full decision matrix.
 
 ### Q2: Prefect on SkyPilot VMs
 
@@ -1457,7 +1921,7 @@ These questions need resolution before or during implementation. Each has a reco
 
 ### What to Build First (Unblocks Everything)
 
-1. **Cloudflare Tunnel for MLflow** — 1 hour setup, zero cost, unblocks all remote training
+1. **MLflow hosting solution** — DagsHub (5 min, free) or Oracle Cloud Free (2h, $0) or Hetzner ($3.50/mo) — unblocks all remote training
 2. **`train_fold` standalone module** — Extract fold training logic from Prefect tasks into importable module
 3. **Compute dispatcher in training flow** — `compute_backend` parameter: "local_docker" | "skypilot"
 4. **Update `train_generic.yaml`** — MOUNT_CACHED, job_recovery, secrets, correct MLFLOW_TRACKING_URI
@@ -1468,16 +1932,18 @@ These questions need resolution before or during implementation. Each has a reco
 After these 5 items:
 - Any model can be trained on RunPod/Lambda/GCP via `compute_backend=skypilot`
 - HPO sweeps run in parallel on cloud GPUs (N trials simultaneously)
-- Results are tracked in local MLflow (via tunnel)
+- Results are tracked in MLflow (via DagsHub / self-hosted / tunnel)
 - Analysis Flow triggers after all HPO trials complete
 - Dashboard Flow generates figures from the full experiment
 
 ### What to Defer
 
-- Pulumi cloud infrastructure (not needed for solo researcher)
+- Pulumi cloud infrastructure (not needed for solo researcher **unless Pulumi is already in
+  your stack** — in that case, Pulumi-managed MLflow/PostgreSQL becomes Phase 0, not deferred.
+  See Section 10 "Pulumi IaC Dimension" and Section 20 "Alternative Phase 0" below.)
 - SkyPilot worker pools (beta, complex)
 - Shared Optuna PostgreSQL (pre-generated grid is sufficient)
-- Cloud-deployed MLflow (tunnel works for now)
+- Cloud-deployed MLflow (DagsHub or self-hosted works for now)
 - Prefect on SkyPilot VMs (local Prefect wraps SkyPilot)
 
 ---
@@ -1488,10 +1954,34 @@ After these 5 items:
 
 | Task | Description | Effort |
 |------|-------------|--------|
-| T0.1 | Install cloudflared, create tunnel for MLflow | 1h |
-| T0.2 | Add `MLFLOW_TUNNEL_URL` to `.env.example` | 15min |
-| T0.3 | Test MLflow logging from external network | 30min |
-| T0.4 | Document tunnel setup in `deployment/CLAUDE.md` | 30min |
+| T0.1 | **USER DECISION**: Choose MLflow hosting (DagsHub / Oracle Free / Hetzner / CF Tunnel) | — |
+| T0.2 | Set up chosen MLflow hosting solution | 5min-2h |
+| T0.3 | Add `MLFLOW_TRACKING_URI_REMOTE` + credentials to `.env.example` | 15min |
+| T0.4 | Test MLflow logging from external network (non-local IP) | 30min |
+| T0.5 | Import existing local mlruns to remote MLflow ([#612](https://github.com/minivess-mlops/minivess-mlops/issues/612)) | 1h |
+| T0.6 | Document hosting setup in `deployment/CLAUDE.md` | 30min |
+
+#### Alternative Phase 0 for Pulumi Users
+
+If Pulumi is already part of your infrastructure stack, Phase 0 replaces manual setup
+with IaC. The one-time stack development is higher effort but produces a reproducible,
+version-controlled, tear-down-able deployment.
+
+| Task | Description | Effort |
+|------|-------------|--------|
+| T0.1-P | **USER DECISION**: Choose target cloud (Hetzner recommended, Oracle Free if $0 critical) | — |
+| T0.2-P | Write Pulumi stack for MLflow + PostgreSQL + MinIO (see Section 10 examples) | 3-4h (one-time) |
+| T0.3-P | Add Pulumi config to `deployment/pulumi/` and commit | 15min |
+| T0.4-P | `pulumi up` — deploy MLflow infrastructure | **5 min** |
+| T0.5-P | (Optional) Add DNS stack via `pulumi-cloudflare` for `mlflow.lab.example.com` | 1h (one-time) |
+| T0.6-P | Add `MLFLOW_TRACKING_URI_REMOTE` to `.env.example` pointing to Pulumi-managed server | 15min |
+| T0.7-P | Test MLflow logging from external network | 30min |
+| T0.8-P | Import existing local mlruns to remote MLflow | 1h |
+| T0.9-P | Document `pulumi up`/`destroy` workflow in `deployment/CLAUDE.md` | 30min |
+
+**Key advantage:** After T0.2-P, every subsequent deployment (disaster recovery, migration,
+colleague onboarding) is `pulumi up` — 5 minutes, identical result, no manual steps.
+The Pulumi stack also serves as living documentation of the infrastructure.
 
 ### Phase 1: Compute Dispatcher (Week 1-2)
 
@@ -1569,6 +2059,15 @@ After these 5 items:
 - [Shopify: SkyPilot at Scale](https://shopify.engineering/skypilot)
 - [SkyPilot Blog: GPU Neoclouds](https://blog.skypilot.co/ai-job-orchestration-pt1-gpu-neoclouds/)
 - [SkyPilot Blog: Job Groups](https://blog.skypilot.co/job-groups/)
+
+### MLflow Hosting Options
+- [DagsHub MLflow Integration](https://dagshub.com/docs/integration_guide/mlflow_tracking/)
+- [DagsHub: Import Local MLflow Objects](https://dagshub.com/docs/integration_guide/mlflow_tracking/#how-to-import-mlflow-local-objects-to-dagshub-mlflow-remote)
+- [Oracle Cloud Always Free Tier](https://www.oracle.com/cloud/free/)
+- [Hetzner Cloud Pricing](https://www.hetzner.com/cloud)
+- [Cloudflare Tunnel Docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+- [Tailscale](https://tailscale.com/) — VPN mesh for large artifact transfer
+- [Databricks Managed MLflow](https://databricks.com/product/managed-mlflow)
 
 ### Cost Comparison
 - [ComputePrices: AWS vs RunPod](https://computeprices.com/compare/aws-vs-runpod)

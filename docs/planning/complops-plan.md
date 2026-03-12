@@ -1,3 +1,9 @@
+---
+title: "ComplOps Regulatory Automation Plan"
+status: planned
+created: ""
+---
+
 # ComplOps Regulatory Automation — Implementation Plan (Issue #49)
 
 ## Current State

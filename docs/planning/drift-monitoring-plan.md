@@ -1,3 +1,9 @@
+---
+title: "Drift Detection and Monitoring Plan"
+status: planned
+created: "2026-02-24"
+---
+
 # Drift Detection & Monitoring Plan
 
 **Issue**: #38 — Integrate drift detection into v2 pipeline (Evidently + Alibi-Detect)

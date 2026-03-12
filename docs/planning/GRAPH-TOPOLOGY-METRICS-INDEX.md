@@ -1,3 +1,9 @@
+---
+title: "Graph-Based Topology Metrics for Vessel Segmentation: Research Index"
+status: reference
+created: "2026-02-28"
+---
+
 # Graph-Based Topology Metrics for Vessel Segmentation - Research Index
 
 **Project:** MinIVess MLOps v2

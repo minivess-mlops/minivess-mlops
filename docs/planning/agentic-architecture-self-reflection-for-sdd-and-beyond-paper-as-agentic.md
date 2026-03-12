@@ -1,3 +1,9 @@
+---
+title: "Second-Pass Analysis: The Paper IS the Agentic Process"
+status: reference
+created: "2026-03-01"
+---
+
 # Second-Pass Analysis: The Paper IS the Agentic Process
 
 **Date:** 2026-03-01

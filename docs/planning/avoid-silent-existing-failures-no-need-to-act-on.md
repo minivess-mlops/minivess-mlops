@@ -1,3 +1,9 @@
+---
+title: "Eliminate Silent Existing Failures"
+status: active
+created: ""
+---
+
 # Plan: Eliminate Silent Existing Failures
 
 ## Status: IN PROGRESS

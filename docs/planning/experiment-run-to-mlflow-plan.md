@@ -1,3 +1,9 @@
+---
+title: "Experiment Pipeline Plan: DynUNet Loss Variation Study"
+status: implemented
+created: "2026-02-25"
+---
+
 # Experiment Pipeline Plan — DynUNet Loss Variation Study
 
 > **Created:** 2026-02-25

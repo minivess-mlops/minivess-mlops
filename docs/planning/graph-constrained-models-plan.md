@@ -1,3 +1,9 @@
+---
+title: "Graph-Constrained Models Execution Plan"
+status: implemented
+created: "2026-02-28"
+---
+
 # Graph-Constrained Models Execution Plan
 
 > **Branch**: `feat/graph-constrained-models`

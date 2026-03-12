@@ -1,3 +1,9 @@
+---
+title: "UQ Beyond Temperature Scaling Plan"
+status: planned
+created: ""
+---
+
 # UQ Beyond Temperature Scaling — Implementation Plan (Issue #41)
 
 ## Current State

@@ -1,3 +1,9 @@
+---
+title: "MLOps Practices for Vascular Imaging Pipelines"
+status: reference
+created: "2026-02-24"
+---
+
 # Phase 19: MLOps Practices for Vascular Imaging Pipelines
 
 > **Date**: 2026-02-24

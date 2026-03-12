@@ -1,3 +1,9 @@
+---
+title: "Advanced Ensembling, Bootstrapping, and Statistical Testing"
+status: reference
+created: "2026-03-04"
+---
+
 # Advanced Ensembling, Bootstrapping, and Statistical Testing for Medical Image Segmentation
 
 > **Research Report for MinIVess MLOps — Biostatistics Flow (Issue #340)**

@@ -1,3 +1,9 @@
+---
+title: "COMMA/Mamba Architecture Adapter Plan"
+status: planned
+created: ""
+---
+
 # COMMA/Mamba Architecture Adapter — Implementation Plan (Issue #9)
 
 ## Current State

@@ -1,3 +1,9 @@
+---
+title: "VessQC Uncertainty-Guided Annotation Curation Plan"
+status: planned
+created: ""
+---
+
 # VessQC-Style Uncertainty-Guided Annotation Curation — Implementation Plan (Issue #10)
 
 ## Current State

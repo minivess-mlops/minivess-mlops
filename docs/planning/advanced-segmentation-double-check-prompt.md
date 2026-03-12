@@ -1,3 +1,9 @@
+---
+title: "User Prompt: Advanced Segmentation Double-Check"
+status: reference
+created: "2026-03-04"
+---
+
 # User Prompt — Advanced Segmentation Double-Check (2026-03-04)
 
 > this got merged and deleted, so fetch the latest remote and create branch feat/advanced-segmentation-double-check and let's first comment away the unit tests on Github Actions as we are now running these locally to save time, and bring the unit tests back to CI when we have implemented the prod and staging split in practice. This branch should be about double-checking that we have all the relevant state-of-art (SOTA) methods implemented for our MLOps repo which does not have the focus on the model SOTA, but building an architecture / platform helping researchers to come up with new SOTA a lot faster! So read these /home/petteri/Dropbox/github-personal/sci-llm-writer/biblio/biblio-vascular/vascular-tmp/albarqouni-2025-prosona-personalization-segmentation.md

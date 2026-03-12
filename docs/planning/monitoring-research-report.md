@@ -1,3 +1,9 @@
+---
+title: "Monitoring, Drift Detection, and Continuous Retraining Research Report"
+status: reference
+created: "2026-02-24"
+---
+
 # Monitoring, Drift Detection, and Continuous Retraining for Tiny-Dataset Medical Segmentation MLOps
 
 **MinIVess MLOps v2 -- Research Report**

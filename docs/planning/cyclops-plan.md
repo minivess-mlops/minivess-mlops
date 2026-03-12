@@ -1,3 +1,9 @@
+---
+title: "CyclOps Healthcare ML Auditing Integration Plan"
+status: planned
+created: ""
+---
+
 # CyclOps Healthcare ML Auditing Integration — Implementation Plan (Issue #12)
 
 ## Current State

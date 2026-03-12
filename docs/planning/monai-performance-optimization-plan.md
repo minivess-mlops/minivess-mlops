@@ -1,3 +1,9 @@
+---
+title: "MONAI Performance Optimization Plan"
+status: implemented
+created: "2026-02-25"
+---
+
 # MONAI Performance Optimization Plan for MiniVess
 
 **Created**: 2026-02-25

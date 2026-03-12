@@ -1,3 +1,9 @@
+---
+title: "LangGraph/Pydantic AI Micro-Orchestration: Advanced Plan"
+status: planned
+created: "2026-03-08"
+---
+
 # LangGraph/Pydantic AI Micro-Orchestration: Advanced Plan
 
 **Issue**: #341 — Fine-grained Prefect Sub-Flows/Tasks + LangGraph Agent Integration

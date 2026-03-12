@@ -1,3 +1,9 @@
+---
+title: "GPU Efficiency Logging Plan"
+status: planned
+created: "2026-03-06"
+---
+
 # GPU Efficiency Logging Plan
 
 **Date:** 2026-03-06

@@ -1,3 +1,9 @@
+---
+title: "Boundary Loss and Generalized Surface Loss Implementation Plan"
+status: planned
+created: "2026-03-04"
+---
+
 # Boundary Loss & Generalized Surface Loss Implementation Plan
 
 **Issues:** #100 (Boundary Loss), #101 (Generalized Surface Loss)

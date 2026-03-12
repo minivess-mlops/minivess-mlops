@@ -1,3 +1,9 @@
+---
+title: "Interactive Segmentation for Proofreading 3D Vascular Annotations"
+status: reference
+created: "2026-02-24"
+---
+
 # Interactive Segmentation for Proofreading 3D Vascular Annotations
 
 **Research Report — MinIVess MLOps**

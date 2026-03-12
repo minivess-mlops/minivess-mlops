@@ -1,3 +1,9 @@
+---
+title: "Synthetic 3D Vascular Stack Generators Roadmap"
+status: planned
+created: "2026-03-12"
+---
+
 # Synthetic 3D Vascular Stack Generators: Roadmap & Literature Synthesis
 
 **Date:** 2026-03-12

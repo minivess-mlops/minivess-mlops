@@ -1,3 +1,9 @@
+---
+title: "MinIVess MLOps v2: Comprehensive Modernization Plan"
+status: implemented
+created: "2026-02-23"
+---
+
 # MinIVess MLOps v2 — Comprehensive Modernization Plan
 
 > **Status:** Draft v3 (expanded tool stack) — 2026-02-23

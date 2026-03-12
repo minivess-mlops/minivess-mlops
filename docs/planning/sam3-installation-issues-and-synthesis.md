@@ -1,3 +1,9 @@
+---
+title: "SAM3 Complete Saga: Failures, Scientific Grounding, and Path Forward"
+status: reference
+created: "2026-03-07"
+---
+
 # SAM3 Complete Saga: Failures, Scientific Grounding, and Path Forward
 
 **Author:** Generated 2026-03-07 via multi-source audit (git log, GitHub issues,

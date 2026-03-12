@@ -1,3 +1,9 @@
+---
+title: "GitHub Projects Migration and Cleaning Plan"
+status: active
+created: "2026-03-12"
+---
+
 # GitHub Projects Migration & Cleaning Plan
 
 **Created**: 2026-03-12

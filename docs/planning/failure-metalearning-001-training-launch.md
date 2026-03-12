@@ -1,3 +1,9 @@
+---
+title: "Metalearning Failure Report 001: Training Launched Without Multi-Metric Config"
+status: reference
+created: "2026-02-25"
+---
+
 # Metalearning Failure Report #001: Training Launched Without Multi-Metric Config
 
 **Date**: 2026-02-25

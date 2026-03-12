@@ -1,3 +1,9 @@
+---
+title: "MONAI Segmentation Model Selection for Tubular Vasculature"
+status: reference
+created: ""
+---
+
 # MONAI Segmentation Model Selection for Tubular Vasculature
 
 > **Phase 12 Research Report** | MinIVess MLOps

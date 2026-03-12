@@ -1,3 +1,9 @@
+---
+title: "Hierarchical Probabilistic PRD: Planning Document"
+status: implemented
+created: "2026-02-23"
+---
+
 # Hierarchical Probabilistic PRD — Planning Document
 
 > **Status:** Draft v1 — 2026-02-23

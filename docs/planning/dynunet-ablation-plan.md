@@ -1,3 +1,9 @@
+---
+title: "DynUNet Width Ablation Study Plan"
+status: implemented
+created: ""
+---
+
 # DynUNet Width Ablation Study — Implementation Plan (Issue #33)
 
 ## Current State

@@ -1,3 +1,9 @@
+---
+title: "Compound Metric Double-Check: val_compound_masd_cldice"
+status: reference
+created: "2026-02-28"
+---
+
 # Compound Metric Double-Check: `val_compound_masd_cldice`
 
 **Date:** 2026-02-28

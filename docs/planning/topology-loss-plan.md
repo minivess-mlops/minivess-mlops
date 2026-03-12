@@ -1,3 +1,9 @@
+---
+title: "Topology-Aware Loss Functions Plan"
+status: implemented
+created: ""
+---
+
 # Topology-Aware Loss Functions — Implementation Plan (Issue #5)
 
 ## Current State

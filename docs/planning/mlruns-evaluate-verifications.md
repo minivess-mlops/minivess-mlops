@@ -1,3 +1,9 @@
+---
+title: "MLflow Runs Evaluation and Verification Plan"
+status: implemented
+created: "2026-02-27"
+---
+
 # MLflow Runs Evaluation & Verification Plan
 
 > **Date**: 2026-02-27

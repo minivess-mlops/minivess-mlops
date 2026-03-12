@@ -1,3 +1,9 @@
+---
+title: "SynthICL Domain Randomization Augmentation Plan"
+status: planned
+created: ""
+---
+
 # SynthICL Domain Randomization Augmentation — Implementation Plan (Issue #17)
 
 ## Current State

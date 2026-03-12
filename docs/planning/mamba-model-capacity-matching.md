@@ -1,3 +1,9 @@
+---
+title: "Mamba Model Capacity Matching for MiniVess Segmentation"
+status: reference
+created: "2026-03-05"
+---
+
 # Mamba Model Capacity Matching for MiniVess Segmentation
 
 **Date:** 2026-03-05 (revised — earlier estimates were wrong, see §1)

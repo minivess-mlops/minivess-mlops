@@ -1,3 +1,9 @@
+---
+title: "MLflow Tracking Integration Plan"
+status: implemented
+created: "2026-02-24"
+---
+
 # MLflow Tracking Integration Plan
 
 **Issue**: #37 — Wire MLflow tracking into v2 training loop

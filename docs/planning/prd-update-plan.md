@@ -1,3 +1,9 @@
+---
+title: "PRD Update Plan: Phase 8 Paper Ingestion and Evidence Integration"
+status: active
+created: "2026-02-23"
+---
+
 # PRD Update Plan — Phase 8: Paper Ingestion & Evidence Integration
 
 **Date**: 2026-02-23

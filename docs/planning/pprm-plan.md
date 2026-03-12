@@ -1,3 +1,9 @@
+---
+title: "PPRM: Prediction-Powered Risk Monitoring Plan"
+status: planned
+created: ""
+---
+
 # PPRM — Prediction-Powered Risk Monitoring (Issue #4)
 
 ## Current State

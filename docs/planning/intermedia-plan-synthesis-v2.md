@@ -1,3 +1,9 @@
+---
+title: "Intermediate Plan Synthesis v2"
+status: reference
+created: "2026-03-08"
+---
+
 # MinIVess MLOps v2 — Intermediate Plan Synthesis v2
 
 **Date:** 2026-03-08
