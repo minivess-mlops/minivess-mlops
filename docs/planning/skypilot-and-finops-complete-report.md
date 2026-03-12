@@ -22,10 +22,13 @@
 11. [Prefect + SkyPilot Integration](#11-prefect-skypilot-integration)
 12. [HPO Sweep Architecture](#12-hpo-sweep-architecture)
 13. [Flow Orchestration: Completion Barriers](#13-flow-orchestration)
-14. [Spot Instance Checkpointing](#14-spot-checkpointing)
-15. [Multi-Answer Questions](#15-multi-answer-questions)
-16. [Minimum Viable Architecture](#16-minimum-viable-architecture)
-17. [Implementation Roadmap](#17-implementation-roadmap)
+14. [Performance x Cost: Absolute Training Costs](#14-performance-cost)
+15. [Numerical Precision: Speed, Memory, and ML Quality](#15-numerical-precision)
+16. [Mamba Training Economics](#16-mamba-training)
+17. [Spot Instance Checkpointing](#17-spot-checkpointing)
+18. [Multi-Answer Questions](#18-multi-answer-questions)
+19. [Minimum Viable Architecture](#19-minimum-viable-architecture)
+20. [Implementation Roadmap](#20-implementation-roadmap)
 
 ---
 
@@ -1014,7 +1017,299 @@ This is already the intended architecture — Analysis Flow already contains ens
 
 ---
 
-## 14. Spot Instance Checkpointing {#14-spot-checkpointing}
+## 14. Performance x Cost: Absolute Training Costs {#14-performance-cost}
+
+### The Key Insight: $/hour Is Misleading
+
+A GPU at $0.22/hr that takes 10 hours costs $2.20. A GPU at $0.69/hr that finishes in 4 hours costs $2.76. The user needs to know **"how much does it cost to train my model?"** — not the hourly rate.
+
+### GPU Speedup Ratios (Benchmarked)
+
+From [nikolasent (Computer Vision Lab)](https://nikolasent.github.io/hardware/deeplearning/benchmark/2025/02/17/RTX5090-Benchmark.html) and [Lambda Labs](https://lambda.ai/blog/nvidia-rtx-4090-vs-rtx-3090-deep-learning-benchmark):
+
+| Comparison | CNN (ResNet/U-Net) FP16 | Transformer (ViT/Swin) FP16 | Average |
+|-----------|:-:|:-:|:-:|
+| **RTX 5090 vs 4090** | 1.19-1.49x | 1.38-1.92x | **~1.44x** |
+| **RTX 5090 vs 3090** | 1.83-2.16x | 2.35-2.85x | **~2.32x** |
+| **RTX 4090 vs 3090** | 1.19-1.61x | 1.53-1.73x | **~1.50x** |
+
+**Key pattern:** Transformer/attention architectures benefit more from newer GPUs (tensor core improvements favor matrix-multiply-heavy workloads). CNN/U-Net gains are smaller.
+
+### Absolute Cost Per Training Job (MinIVess Workloads)
+
+Using DynUNet 3-fold x 100 epochs on MiniVess (70 volumes) as the reference workload. Baseline: ~24 hours on RTX 2070 Super (our current local GPU).
+
+#### DynUNet Training (CNN — ~1.3x speedup per generation)
+
+| GPU | Speedup vs 3090 | Est. Wall Time | RunPod $/hr | **Total Cost** | **Speed Premium** |
+|-----|:-:|:-:|:-:|:-:|:-:|
+| RTX 3090 | 1.0x | ~12 hr | $0.22 | **$2.64** | Baseline |
+| RTX 4090 | 1.4x | ~8.6 hr | $0.34 | **$2.92** | +$0.28 (+11%) for 28% faster |
+| RTX 5090 | 1.8x | ~6.7 hr | $0.69 | **$4.62** | +$1.98 (+75%) for 44% faster |
+| A100 80GB | ~2.0x | ~6.0 hr | $1.74 | **$10.44** | +$7.80 (+295%) for 50% faster |
+
+**Verdict for DynUNet:** RTX 3090 ($2.64) and RTX 4090 ($2.92) are essentially tied on total cost. RTX 5090 costs 75% more for 44% faster wall time. **Pay the 4090 premium only if you value the 3.4 hr time savings.**
+
+#### SAM3 Hybrid Fine-Tuning (Transformer-heavy — ~1.7x speedup per generation)
+
+SAM3 hybrid: 848M params, ViT-32L encoder. Estimated ~50 epochs x 3 folds on MiniVess. Requires >=32 GB for full fine-tuning.
+
+| GPU | Speedup vs 4090 | Est. Wall Time | RunPod $/hr | **Total Cost** | Notes |
+|-----|:-:|:-:|:-:|:-:|:--|
+| RTX 3090 | — | — | — | **N/A** | 24 GB insufficient for full fine-tuning |
+| RTX 4090 | 1.0x | ~36 hr | $0.34 | **$12.24** | 24 GB — LoRA/QLoRA only |
+| RTX 5090 | 1.7x | ~21 hr | $0.69 | **$14.49** | 32 GB — full fine-tuning possible |
+| A100 80GB | 2.2x | ~16 hr | $1.74 | **$27.84** | 80 GB — full fine-tuning + large batch |
+| H100 | 3.5x | ~10 hr | $1.99 | **$19.90** | Fastest, but 2.3x cost of 5090 |
+
+**Verdict for SAM3:** RTX 4090 ($12.24) is cheapest if LoRA is acceptable. RTX 5090 ($14.49) is +$2.25 for full fine-tuning capability. H100 ($19.90) makes sense only if wall time matters (results in 10 hr vs 21 hr).
+
+#### HPO Sweep: 16 Trials x DynUNet (Parallel on Cloud)
+
+Each trial: ~8 hours on RTX 4090. All 16 trials run in parallel.
+
+| GPU | Time per Trial | Wall Time (parallel) | Cost per Trial | **Total Sweep Cost** |
+|-----|:-:|:-:|:-:|:-:|
+| RTX 3090 | ~12 hr | 12 hr | $2.64 | **$42.24** |
+| RTX 4090 | ~8.6 hr | 8.6 hr | $2.92 | **$46.72** |
+| RTX 5090 | ~6.7 hr | 6.7 hr | $4.62 | **$73.92** |
+| A100 80GB | ~6.0 hr | 6.0 hr | $10.44 | **$167.04** |
+
+**Verdict for HPO:** RTX 3090 ($42) wins on cost. RTX 4090 ($47) is +$5 for 28% faster results. RTX 5090 ($74) is 75% more expensive — the speed premium is NOT worth it for parallel HPO where wall time = single trial time regardless.
+
+#### VesselVAE / VQ-VAE Training (Lightweight, ~4 GB VRAM)
+
+Estimated ~4 hours on RTX 4090 (small model, patch-based).
+
+| GPU | Speedup | Est. Wall Time | RunPod $/hr | **Total Cost** |
+|-----|:-:|:-:|:-:|:-:|
+| RTX 3090 | 1.0x | ~6 hr | $0.22 | **$1.32** |
+| RTX 4090 | 1.4x | ~4.3 hr | $0.34 | **$1.46** |
+| RTX 5090 | 1.8x | ~3.3 hr | $0.69 | **$2.28** |
+
+**Verdict:** RTX 3090 wins decisively. Any card works, cheapest wins.
+
+### The "Speed Premium" Decision Framework
+
+| If you need... | Best GPU | Why |
+|----------------|----------|-----|
+| **Cheapest absolute cost** | RTX 3090 ($0.22/hr) | Slowest but cheapest $/job for CNN workloads |
+| **Best cost/speed balance** | RTX 4090 ($0.34/hr) | ~11% more $/job, ~28% faster. Sweet spot. |
+| **Fastest results, budget flexible** | RTX 5090 ($0.69/hr) | 44-70% faster than 3090, but 75% more $/job |
+| **Maximum VRAM (>24 GB models)** | RTX 5090 ($0.69/hr) | Only consumer GPU with 32 GB |
+| **Maximum speed, cost irrelevant** | H100 ($1.99/hr) | 3-4x faster than 3090, but 5-8x more $/job |
+
+### Concrete Scenario: "I need results by tomorrow morning"
+
+You submit a DynUNet 3-fold training at 6 PM, need results by 8 AM (14 hours).
+
+| GPU | Finishes At | On Time? | Cost |
+|-----|:-:|:-:|:-:|
+| RTX 3090 | 6:00 AM | Yes (12 hr) | $2.64 |
+| RTX 4090 | 2:36 AM | Yes (8.6 hr) | $2.92 |
+| RTX 5090 | 12:42 AM | Yes (6.7 hr) | $4.62 |
+
+All three finish before deadline. **RTX 3090 wins** — no point paying more for speed you don't need.
+
+But for a 128-trial HPO sweep:
+
+| GPU | Finishes At | On Time? | Cost |
+|-----|:-:|:-:|:-:|
+| RTX 3090 | 6:00 AM | Barely (12 hr) | $42.24 |
+| RTX 4090 | 2:36 AM | Comfortable | $46.72 |
+| RTX 5090 | 12:42 AM | Easy | $73.92 |
+
+Here RTX 4090 is worth the +$5 for comfortable margin. RTX 5090 is still not worth +$31.
+
+---
+
+## 15. Numerical Precision: Speed, Memory, and ML Quality {#15-numerical-precision}
+
+### Precision Formats and GPU Support
+
+| Format | Bits | RTX 2070S (Turing) | RTX 3090 (Ampere) | RTX 4090 (Ada) | RTX 5090 (Blackwell) | A100 | H100 |
+|--------|:----:|:--:|:--:|:--:|:--:|:--:|:--:|
+| FP32 | 32 | Yes | Yes | Yes | Yes | Yes | Yes |
+| TF32 | 19 | No | Yes (auto) | Yes (auto) | Yes (auto) | Yes | Yes |
+| FP16 | 16 | Yes (TC) | Yes | Yes | Yes | Yes | Yes |
+| BF16 | 16 | **No** | Yes | Yes | Yes | Yes | Yes |
+| FP8 | 8 | No | No | Yes (TE) | Yes (TE) | No | Yes |
+| FP4 | 4 | No | No | No | Yes | No | No |
+
+**Critical for our RTX 2070 Super:** Turing supports FP16 only (no BF16, no TF32, no FP8). BF16 requires Ampere (compute capability 8.0+).
+
+### Speed Impact by Precision
+
+| Precision | vs FP32 Speed | Memory Savings | Code Changes |
+|-----------|:--:|:--:|:--|
+| **TF32** | **2-3x faster** | 0% (same storage) | None — automatic on Ampere+ |
+| **FP16 AMP** | **1.5-2x faster** | ~30% VRAM | `torch.amp.autocast` + `GradScaler` |
+| **BF16 AMP** | **1.5-2x faster** | ~30% VRAM | `torch.amp.autocast` only (no scaler) |
+| **FP8** | **1.3-4x faster** (vs FP16) | ~50% vs FP16 | TransformerEngine per-layer config |
+
+### ML Quality Impact (Dice/IoU for Medical Segmentation)
+
+| Precision | Quality Impact | Evidence |
+|-----------|:--|:--|
+| **TF32** | **Zero loss** | [NVIDIA: "same perplexity and convergence as FP32"](https://developer.nvidia.com/blog/accelerating-ai-training-with-tf32-tensor-cores/) |
+| **FP16 AMP** | **Zero measurable loss** | [NVIDIA V-Net: "no noticeable degradation"](https://github.com/NVIDIA/DeepLearningExamples/blob/master/TensorFlow/Segmentation/VNet/README.md); MONAI: "almost same validation metric" |
+| **BF16 AMP** | **Zero measurable loss** | Same as FP16, easier to use (no loss scaling) |
+| **FP8** | **Near-lossless** | "Validation perplexity follows closely BF16" ([NVIDIA](https://developer.nvidia.com/blog/floating-point-8-an-introduction-to-efficient-lower-precision-ai-training/)) |
+
+**No published study shows measurable Dice score degradation from AMP in 3D medical segmentation.** NVIDIA V-Net, nnUNet, and MONAI tutorials all report equivalent metrics.
+
+### BF16 vs FP16: Why BF16 Is Strictly Preferred
+
+| Property | FP16 | BF16 |
+|----------|:--:|:--:|
+| Exponent bits | 5 | 8 (same as FP32) |
+| Mantissa bits | 10 | 7 |
+| Dynamic range | up to 65,504 | up to 3.4e38 (same as FP32) |
+| Overflow risk | **HIGH** (activations can exceed 65K) | Essentially zero |
+| Loss scaling needed | **YES** (mandatory) | No |
+| NaN risk | Significant (Inf - Inf = NaN) | Minimal |
+
+**Bottom line:** Use BF16 on Ampere+. Use FP16 only on Turing (RTX 20xx) where BF16 is unavailable.
+
+### Precision Impact on Training Time: Concrete Numbers
+
+Using ResNet50 FP16 throughput from [nikolasent benchmarks](https://nikolasent.github.io/hardware/deeplearning/benchmark/2025/02/17/RTX5090-Benchmark.html):
+
+| GPU | FP32 (samples/s) | FP16 (samples/s) | FP16/FP32 Speedup | FP32 Time | FP16 Time |
+|-----|:-:|:-:|:-:|:-:|:-:|
+| RTX 3090 | 523.0 | 888.7 | **1.70x** | 12 hr | **7.1 hr** |
+| RTX 4090 | 757.5 | 1,360.6 | **1.80x** | 8.3 hr | **4.6 hr** |
+| RTX 5090 | 1,128.6 | 1,623.9 | **1.44x** | 5.5 hr | **3.9 hr** |
+
+**Important:** The 5090's FP16/FP32 speedup (1.44x) is *smaller* than the 3090 (1.70x) because the 5090 is already fast in FP32 (TF32 auto-enabled). The practical message: **always use mixed precision — it's free performance with zero quality loss.**
+
+### Absolute Cost Including Precision Choice
+
+DynUNet 3-fold × 100 epochs on MiniVess:
+
+| GPU | FP32 Time | FP32 Cost | **FP16 Time** | **FP16 Cost** | Savings |
+|-----|:-:|:-:|:-:|:-:|:-:|
+| RTX 3090 | 12 hr | $2.64 | **7.1 hr** | **$1.56** | 41% cheaper |
+| RTX 4090 | 8.6 hr | $2.92 | **4.6 hr** | **$1.56** | 47% cheaper |
+| RTX 5090 | 6.7 hr | $4.62 | **3.9 hr** | **$2.69** | 42% cheaper |
+
+**With FP16, RTX 3090 and RTX 4090 cost exactly the same ($1.56) — but the 4090 delivers results 2.5 hours sooner.** This is the performance×cost product insight the user asked for.
+
+### Precision Recommendation by Hardware
+
+| GPU | Recommended Precision | Why |
+|-----|:--|:--|
+| **RTX 2070 Super** (current) | FP16 AMP + GradScaler | Only mixed precision option. ~1.7x speedup. |
+| **RTX 3090** (cloud) | BF16 AMP | Simpler than FP16 (no scaler), same speed |
+| **RTX 4090** (cloud) | BF16 AMP | Sweet spot. FP8 available via TransformerEngine but marginal gain for CNNs |
+| **RTX 5090** (cloud) | BF16 AMP (default), FP8 for transformers | FP8 adds ~30% for attention-heavy models |
+| **A100/H100** | BF16 AMP | FP8 on H100 for transformer models |
+
+### When NOT to Use Mixed Precision
+
+- **Physics-Informed Neural Networks (PINNs):** Require FP64 ([arXiv:2505.10949](https://arxiv.org/abs/2505.10949))
+- **Custom loss functions with values >65,504:** Can overflow FP16 (use BF16 instead)
+- **Very small networks:** Tensor core overhead exceeds savings
+
+**None of these apply to MinIVess.** Mixed precision is safe and recommended for all our workloads.
+
+---
+
+## 16. Mamba Training Economics {#16-mamba-training}
+
+### Why Mamba Matters for MinIVess
+
+Two Mamba architectures are on our model roadmap:
+- **CoMMA** (Coordinate-aware Modulated Mamba) — specifically designed for dispersed vessel segmentation
+- **U-Like Mamba** — generic 3D volumetric segmentation
+
+### Mamba vs Transformer: The Training Paradox
+
+**Mamba is NOT faster than Transformers during training.** The advantage is at inference.
+
+| Aspect | Mamba | Transformer + FlashAttention |
+|--------|:--|:--|
+| Training throughput | Lower (non-matmul ops) | Higher (matmul-optimized) |
+| Training VRAM | Similar | Similar (with FlashAttn) |
+| **Inference throughput** | **5x faster** | Baseline |
+| **Inference memory** | **Constant** (no KV cache) | Grows with sequence length |
+| Long-sequence scaling | O(n) | O(n^2) but FlashAttn mitigates |
+
+From [GitHub issue analysis](https://github.com/state-spaces/mamba/issues/657): training a ~230M Mamba model was **5x slower** than BERT on A100 for short sequences. The selective scan kernel achieves only 57.5% of peak memory bandwidth. Tensor cores heavily favor matmul operations (Transformers) over the scan operations (Mamba).
+
+### 3D Medical Segmentation Mamba: Benchmarked Training Times
+
+From [SegResMamba (Das et al., 2025)](https://arxiv.org/html/2503.07766v1) — BraTS 2021, single A100 40GB, 200 epochs, batch=1, crop=128^3:
+
+| Model | Params (M) | VRAM (GB) | Epoch Time (s) | **Single Run (hr)** | **5-Fold (hr)** | CO2 (kg) |
+|-------|:-:|:-:|:-:|:-:|:-:|:-:|
+| **SegResMamba** | 119.98 | **4.78** | 267.83 | **14.9** | **74.4** | 11.35 |
+| SegMamba | 67.36 | 13.44 | 321.50 | 17.9 | 89.3 | 13.62 |
+| SwinUNETR | 62.19 | 7.68 | 321.39 | 17.9 | 89.3 | 13.61 |
+| UNETR | 93.01 | 3.02 | 262.83 | 14.6 | 73.0 | 11.13 |
+| 3D U-Net | 31.19 | — | 255.80 | 14.2 | 71.1 | 10.84 |
+
+**Key insight:** Mamba models train at **comparable speed** to transformer/CNN baselines for 3D segmentation. SegResMamba (14.9 hr) is close to U-Net (14.2 hr). The 3D-patch-based workflow is compute-bound by data loading and augmentation, not the model architecture.
+
+### COMMA (Vascular Segmentation) — Most Relevant for MinIVess
+
+From [COMMA (2025)](https://arxiv.org/html/2503.02332):
+
+| Model | FLOPs (G) | VRAM (GB) | Params (M) |
+|-------|:-:|:-:|:-:|
+| **COMMA** | **249.31** | **8.63** | — |
+| SegMamba | 655.49 | 6.40 | 67.36 |
+| UMamba | **3,814.20** | 12.65 | — |
+
+COMMA's FLOPs are **one order of magnitude lower** than UMamba. At 8.63 GB VRAM, it is marginal for RTX 2070 Super (8 GB) but fits comfortably on RTX 3090+.
+
+### U-Like Mamba — OOM Advantage Over Transformers
+
+From [comprehensive analysis (2025)](https://arxiv.org/html/2503.19308v1) on RTX 3090, 1000 epochs, input 128^3:
+
+| Model | AMOS Dice | BraTS Dice | FLOPs (G) | Status on 3090 |
+|-------|:-:|:-:|:-:|:--|
+| UlikeTrans_vanilla | — | — | — | **OOM** |
+| UlikeTrans_SRA | 88.00 | 90.12 | 64.47 | Runs |
+| **UlikeMamba_3d** | **89.45** | **90.29** | **46.03** | Runs |
+
+**Vanilla Transformer OOMs on 3D volumes while Mamba runs fine** with fewer FLOPs and better Dice.
+
+### Absolute Training Costs for Mamba Models
+
+Estimated for MinIVess-scale data (70 volumes, 3-fold, BF16 AMP):
+
+| Model | Est. Time (A100) | Est. Time (RTX 4090) | **Cost (RTX 3090)** | **Cost (RTX 4090)** | **Cost (RTX 5090)** | **Cost (A100)** |
+|-------|:-:|:-:|:-:|:-:|:-:|:-:|
+| **SegResMamba** (5-fold, 200ep) | 74 hr | ~105 hr | **$23** | **$36** | **$72** | **$129** |
+| **COMMA** (25K iter) | ~20 hr | ~28 hr | **$6** | **$10** | **$19** | **$35** |
+| **UlikeMamba_3d** (1000ep) | ~60 hr | ~85 hr | **$19** | **$29** | **$59** | **$104** |
+| **SegResMamba** (single run) | 15 hr | ~21 hr | **$5** | **$7** | **$15** | **$26** |
+
+### MambaSAM Hybrid (LoRA) — Extreme Budget Option
+
+From [Hybrid Mamba-SAM (2026)](https://arxiv.org/html/2602.00650):
+
+| Model | VRAM | Trainable Params | Mean Dice |
+|-------|:-:|:-:|:-:|
+| MambaSAM-Base | 11.57 GB | 23.88M (21%) | 0.906 |
+| **TP-Mamba (LoRA)** | **1.90 GB** | Very few | 0.796 |
+
+TP-Mamba with LoRA at **1.90 GB VRAM** could train on virtually any GPU, including our RTX 2070 Super. At $0.22/hr on RTX 3090, a full training run would cost under $2.
+
+### Summary: Cost-Optimal Mamba Strategy for MinIVess
+
+| Phase | Model | GPU | Est. Cost | Why |
+|-------|-------|-----|:-:|:--|
+| **Prototype** | COMMA | RTX 2070S (local, free) | $0 | 8.63 GB — marginal but possible with small batch |
+| **Full training** | COMMA | RTX 3090 (RunPod) | **$6** | Best cost/performance for vascular Mamba |
+| **5-fold validation** | SegResMamba | RTX 4090 (RunPod) | **$36** | Larger model, benefits from more VRAM |
+| **HPO sweep (16 trials)** | COMMA | 16x RTX 3090 | **$96** | Parallel, cheapest per trial |
+| **Mamba-SAM hybrid** | MambaSAM-Base | RTX 4090 | **~$10** | 11.57 GB, transformer-heavy |
+
+---
+
+## 17. Spot Instance Checkpointing {#17-spot-checkpointing}
 
 ### SkyPilot Checkpointing Pattern
 
@@ -1078,7 +1373,7 @@ resources:
 
 ---
 
-## 15. Multi-Answer Questions {#15-multi-answer-questions}
+## 18. Multi-Answer Questions {#18-multi-answer-questions}
 
 These questions need resolution before or during implementation. Each has a recommended answer based on the analysis above.
 
@@ -1158,7 +1453,7 @@ These questions need resolution before or during implementation. Each has a reco
 
 ---
 
-## 16. Minimum Viable Architecture {#16-minimum-viable-architecture}
+## 19. Minimum Viable Architecture {#19-minimum-viable-architecture}
 
 ### What to Build First (Unblocks Everything)
 
@@ -1187,7 +1482,7 @@ After these 5 items:
 
 ---
 
-## 17. Implementation Roadmap {#17-implementation-roadmap}
+## 20. Implementation Roadmap {#20-implementation-roadmap}
 
 ### Phase 0: Service Accessibility (Week 1)
 
