@@ -1,0 +1,35 @@
+# OpenSpec configuration for MinIVess MLOps v2
+# See: https://github.com/Fission-AI/OpenSpec
+
+project_name: minivess-mlops
+version: "2.0"
+description: "Model-agnostic biomedical segmentation MLOps platform"
+
+tech_stack:
+  language: python
+  version: "3.12+"
+  package_manager: uv
+  framework: [pytorch, monai, prefect]
+  testing: [pytest, hypothesis]
+  config: [hydra-zen, dynaconf]
+  tracking: mlflow
+  serving: [bentoml, onnx-runtime]
+  containers: docker-compose
+
+rules:
+  - "All specs use GIVEN/WHEN/THEN scenario format"
+  - "Every scenario MUST have a corresponding test"
+  - "Delta specs track ADDED/MODIFIED/REMOVED/RENAMED changes"
+  - "Archived changes preserve proposal rationale"
+  - "Specs are Layer 4 evidence in the knowledge graph"
+
+spec_directories:
+  - specs/training-pipeline
+  - specs/inter-flow-contract
+  - specs/model-adapters
+  - specs/data-pipeline
+  - specs/analysis-pipeline
+  - specs/deployment-pipeline
+  - specs/dashboard-pipeline
+  - specs/config-system
+  - specs/drift-monitoring
