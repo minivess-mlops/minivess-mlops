@@ -12,6 +12,7 @@ Tier 2 — EmbeddingDriftDetector:
 from __future__ import annotations
 
 import html
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -392,3 +393,111 @@ class EmbeddingDriftDetector:
             - 2.0 * k_xy.sum() / max(n * m, 1)
         )
         return float(mmd2)
+
+
+def persist_drift_reports(
+    *,
+    reference_features: pd.DataFrame,
+    current_features: pd.DataFrame,
+    reference_embeddings: NDArray[np.float32] | None = None,
+    current_embeddings: NDArray[np.float32] | None = None,
+    tmp_dir: Path,
+    threshold: float = 0.05,
+    drift_share: float = 0.5,
+) -> DriftResult:
+    """Run drift detection and persist reports as MLflow artifacts.
+
+    Saves under ``drift_reports/`` artifact path:
+    - ``tier1_evidently_report.html`` — Evidently DataDriftPreset HTML
+    - ``tier1_drift_summary.json`` — KS test results per feature
+    - ``tier2_mmd_summary.json`` — MMD test results (if embeddings provided)
+    - ``drift_metadata.json`` — timestamps, thresholds, library versions
+
+    Must be called inside an active ``mlflow.start_run()`` context.
+
+    Parameters
+    ----------
+    reference_features:
+        Reference feature DataFrame.
+    current_features:
+        Current feature DataFrame.
+    reference_embeddings:
+        Optional reference embeddings for Tier 2 MMD test.
+    current_embeddings:
+        Optional current embeddings for Tier 2 MMD test.
+    tmp_dir:
+        Temporary directory for writing artifacts before logging.
+    threshold:
+        P-value threshold for per-feature drift.
+    drift_share:
+        Fraction of features that must drift for dataset drift.
+
+    Returns
+    -------
+    DriftResult from Tier 1 detection.
+    """
+    import mlflow
+
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = "drift_reports"
+
+    # --- Tier 1: Feature drift ---
+    detector = FeatureDriftDetector(
+        reference_features, threshold=threshold, drift_share=drift_share
+    )
+    html_path = tmp_dir / "tier1_evidently_report.html"
+    tier1_result = detector.detect(current_features, evidently_html_path=html_path)
+
+    # Save HTML report
+    mlflow.log_artifact(str(html_path), artifact_path=artifact_path)
+
+    # Save JSON summary
+    tier1_json_path = tmp_dir / "tier1_drift_summary.json"
+    tier1_summary = {
+        "drift_detected": tier1_result.drift_detected,
+        "dataset_drift_score": tier1_result.dataset_drift_score,
+        "feature_scores": tier1_result.feature_scores,
+        "drifted_features": tier1_result.drifted_features,
+        "n_features": tier1_result.n_features,
+        "n_drifted": tier1_result.n_drifted,
+        "timestamp": tier1_result.timestamp.isoformat(),
+    }
+    tier1_json_path.write_text(json.dumps(tier1_summary, indent=2), encoding="utf-8")
+    mlflow.log_artifact(str(tier1_json_path), artifact_path=artifact_path)
+
+    # --- Tier 2: Embedding drift (optional) ---
+    if reference_embeddings is not None and current_embeddings is not None:
+        emb_detector = EmbeddingDriftDetector(
+            reference_embeddings, p_val_threshold=threshold
+        )
+        tier2_result = emb_detector.detect(current_embeddings)
+        tier2_json_path = tmp_dir / "tier2_mmd_summary.json"
+        tier2_summary = {
+            "drift_detected": tier2_result.drift_detected,
+            "p_value": tier2_result.dataset_drift_score,
+            "mmd_statistic": tier2_result.feature_scores.get("mmd_statistic"),
+            "timestamp": tier2_result.timestamp.isoformat(),
+        }
+        tier2_json_path.write_text(
+            json.dumps(tier2_summary, indent=2), encoding="utf-8"
+        )
+        mlflow.log_artifact(str(tier2_json_path), artifact_path=artifact_path)
+
+    # --- Metadata ---
+    import evidently
+
+    metadata_path = tmp_dir / "drift_metadata.json"
+    metadata = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "evidently_version": evidently.__version__,
+        "threshold": threshold,
+        "drift_share": drift_share,
+        "n_reference_samples": len(reference_features),
+        "n_current_samples": len(current_features),
+        "has_tier2": reference_embeddings is not None,
+    }
+    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    mlflow.log_artifact(str(metadata_path), artifact_path=artifact_path)
+
+    logger.info("Drift reports persisted to MLflow under %s/", artifact_path)
+    return tier1_result
