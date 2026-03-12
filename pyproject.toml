@@ -56,7 +56,7 @@ dependencies = [
     # Observability
     "opentelemetry-api>=1.29,<2.0",
     "opentelemetry-sdk>=1.29,<2.0",
-    "evidently>=0.7,<1.0",
+    "evidently>=0.7.21,<1.0",
     # Agent Orchestration — pydantic-ai is in [agents] optional group
     # to avoid dependency conflicts with whylogs (platformdirs version)
     # Code Quality
@@ -96,6 +96,9 @@ quality = [
     "great-expectations>=1.3,<2.0",
     "cleanlab>=2.7,<3.0",
     "whylogs>=1.5,<2.0",
+    # alibi-detect[torch]>=0.12 — BLOCKED: requires numpy<2.0, project needs numpy>=2.0
+    # See: docs/planning/drift-monitoring-implementation-plan.xml T1 spec adaptation
+    # T3 uses scipy.stats.permutation_test for MMD p-values instead
 ]
 dev = [
     "hypothesis>=6.115,<7.0",
@@ -330,6 +333,10 @@ addopts = [
     "--strict-config",
     "-x",
     "--tb=short",
+    # Disable jaxtyping pytest plugin: it installs beartype's import hook which
+    # raises SyntaxError on evidently's text_match.py docstring (Python 3.13
+    # invalid escape sequence \d). jaxtyping is a transitive dep via gpytorch.
+    "-p", "no:jaxtyping",
 ]
 markers = [
     "unit: Fast isolated unit tests",
