@@ -20,6 +20,7 @@ import logging
 import math
 import os
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -55,6 +56,9 @@ from minivess.pipeline.comparison import (
 from minivess.pipeline.model_promoter import ModelPromoter
 
 if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
+
     from minivess.config.evaluation_config import EvaluationConfig
     from minivess.data.test_datasets import HierarchicalDataLoaderDict
     from minivess.pipeline.evaluation_runner import EvaluationResult
@@ -1562,6 +1566,87 @@ def _export_analysis_artifacts(
         logger.warning("No comparison table built — skipping LaTeX and figures")
 
     return artifact_paths
+
+
+@dataclass
+class EmbeddingDriftResult:
+    """Result from embedding_drift_task."""
+
+    drift_detected: bool
+    p_value: float
+    mmd_statistic: float
+
+
+@task(name="embedding-drift")
+def embedding_drift_task(
+    *,
+    reference_embeddings: NDArray[np.float32],
+    current_embeddings: NDArray[np.float32],
+    p_val_threshold: float = 0.05,
+    n_permutations: int = 100,
+    tmp_dir: Path | None = None,
+) -> EmbeddingDriftResult:
+    """Run Tier 2 embedding-space drift detection.
+
+    Compares current model embeddings against reference embeddings using
+    EmbeddingDriftDetector (permutation MMD with RBF kernel).
+
+    Parameters
+    ----------
+    reference_embeddings:
+        Reference embedding array from training run.
+    current_embeddings:
+        Current embedding array from validation.
+    p_val_threshold:
+        P-value threshold for drift detection.
+    n_permutations:
+        Number of permutations for the MMD test.
+    tmp_dir:
+        If provided (inside active MLflow run), save MMD summary as artifact.
+
+    Returns
+    -------
+    EmbeddingDriftResult with p-value and MMD statistic.
+    """
+    import json
+
+    import mlflow
+
+    from minivess.observability.drift import EmbeddingDriftDetector
+
+    detector = EmbeddingDriftDetector(
+        reference_embeddings,
+        p_val_threshold=p_val_threshold,
+        n_permutations=n_permutations,
+    )
+    result = detector.detect(current_embeddings)
+    mmd_stat = result.feature_scores.get("mmd_statistic", 0.0)
+
+    # Persist to MLflow if tmp_dir provided and active run exists
+    if tmp_dir is not None:
+        try:
+            active_run = mlflow.active_run()
+            if active_run is not None:
+                tmp_dir.mkdir(parents=True, exist_ok=True)
+                tier2_path = tmp_dir / "tier2_mmd_summary.json"
+                summary = {
+                    "drift_detected": result.drift_detected,
+                    "p_value": result.dataset_drift_score,
+                    "mmd_statistic": mmd_stat,
+                    "timestamp": result.timestamp.isoformat(),
+                }
+                tier2_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+                mlflow.log_artifact(str(tier2_path), artifact_path="drift_reports")
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to persist Tier 2 drift report to MLflow", exc_info=True
+            )
+
+    return EmbeddingDriftResult(
+        drift_detected=result.drift_detected,
+        p_value=result.dataset_drift_score,
+        mmd_statistic=mmd_stat,
+    )
 
 
 # ---------------------------------------------------------------------------
