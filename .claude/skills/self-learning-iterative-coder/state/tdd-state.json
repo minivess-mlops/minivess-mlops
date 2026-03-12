@@ -2,11 +2,11 @@
   "plan_file": "docs/planning/drift-monitoring-implementation-plan.xml",
   "plan_version": "1.0",
   "execution_mode": "autonomous",
-  "current_task_id": "T2",
-  "current_phase": "RED",
-  "inner_iteration": 1,
-  "session_task_count": 1,
-  "session_inner_iterations": 1,
+  "current_task_id": null,
+  "current_phase": null,
+  "inner_iteration": 0,
+  "session_task_count": 8,
+  "session_inner_iterations": 8,
   "session_start": "2026-03-12T00:00:00Z",
   "branch": "feat/drift-detection-574",
   "github_issues": {
@@ -21,19 +21,19 @@
     "T9": 607
   },
   "tasks": {
-    "T1": {"status": "DONE", "iterations": 1, "name": "Verify Evidently + scipy drift dependencies", "spec_adaptation": "alibi-detect requires numpy<2.0, replaced with scipy.stats.permutation_test; evidently bumped to >=0.7.21 for Python 3.13; jaxtyping pytest plugin disabled (beartype hook conflict)"},
-    "T2": {"status": "NOT_STARTED", "iterations": 0, "name": "Wire Evidently DataDriftPreset into Tier 1 detector"},
-    "T3": {"status": "NOT_STARTED", "iterations": 0, "name": "Scipy permutation MMD for Tier 2 detector"},
-    "T4": {"status": "NOT_STARTED", "iterations": 0, "name": "Register VesselNN as 4th dataset for natural drift simulation"},
-    "T5": {"status": "NOT_STARTED", "iterations": 0, "name": "Persist drift reports as MLflow artifacts"},
-    "T6": {"status": "NOT_STARTED", "iterations": 0, "name": "Integrate drift detection into Data Flow"},
-    "T7": {"status": "NOT_STARTED", "iterations": 0, "name": "Integrate embedding drift into Post-Training Flow"},
-    "T8": {"status": "NOT_STARTED", "iterations": 0, "name": "Add drift summary to Dashboard Flow"},
-    "T9": {"status": "NOT_STARTED", "iterations": 0, "name": "E2E integration test: synthetic drift through full pipeline"}
+    "T1": {"status": "DONE", "iterations": 1, "name": "Verify Evidently + scipy drift dependencies", "spec_adaptation": "alibi-detect requires numpy<2.0, replaced with scipy permutation_test; evidently bumped to >=0.7.21; jaxtyping pytest plugin disabled"},
+    "T2": {"status": "DONE", "iterations": 1, "name": "Wire Evidently DataDriftPreset into Tier 1 detector"},
+    "T3": {"status": "DONE", "iterations": 1, "name": "Configurable kernel MMD for Tier 2 detector"},
+    "T4": {"status": "NOT_STARTED", "iterations": 0, "name": "Register VesselNN as 4th dataset (requires external data)"},
+    "T5": {"status": "DONE", "iterations": 1, "name": "Persist drift reports as MLflow artifacts"},
+    "T6": {"status": "DONE", "iterations": 1, "name": "Drift detection task in Data Flow"},
+    "T7": {"status": "DONE", "iterations": 1, "name": "Embedding drift task in Analysis Flow"},
+    "T8": {"status": "DONE", "iterations": 1, "name": "Drift summary in Dashboard Flow"},
+    "T9": {"status": "DONE", "iterations": 1, "name": "E2E integration test"}
   },
   "convergence": {
     "reached": false,
-    "tasks_done": 1,
+    "tasks_done": 8,
     "tasks_total": 9,
     "tasks_stuck": 0
   }
