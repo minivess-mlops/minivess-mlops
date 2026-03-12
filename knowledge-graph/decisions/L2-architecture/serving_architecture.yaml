@@ -1,0 +1,43 @@
+decision_id: serving_architecture
+title: "Model Serving Architecture"
+level: L2-architecture
+status: resolved
+
+options:
+  - id: bentoml_primary
+    name: "BentoML Primary"
+    prior_probability: 0.50
+    posterior_probability: 0.80
+  - id: torchserve
+    name: "TorchServe"
+    prior_probability: 0.20
+    posterior_probability: 0.05
+  - id: monai_deploy_map
+    name: "MONAI Deploy MAP"
+    prior_probability: 0.20
+    posterior_probability: 0.10
+  - id: custom_fastapi
+    name: "Custom FastAPI"
+    prior_probability: 0.10
+    posterior_probability: 0.05
+
+resolved_option: bentoml_primary
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/serving/"
+    finding: "BentoML service definitions for ONNX Runtime inference"
+
+implementation:
+  files:
+    - src/minivess/serving/
+    - deployment/bento/
+  tests: []
+
+conditional_on:
+  - parent_decision_id: monai_alignment
+    influence_strength: moderate
+
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "BentoML well-integrated; MONAI Deploy MAP as future alternative"

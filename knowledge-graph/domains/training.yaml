@@ -1,0 +1,64 @@
+domain: training
+description: Loss functions, metrics, augmentation, HPO, calibration
+last_reviewed: "2026-03-13"
+
+decisions:
+  loss_function:
+    status: resolved
+    winner: cbdice_cldice
+    rationale: "dynunet_loss_variation_v2 experiment — 0.906 clDice, best topology"
+    implementation: src/minivess/pipeline/loss_functions.py
+    evidence:
+      - docs/planning/loss-function-topology-research.md
+      - docs/results/dynunet_loss_variation_v2_report.md
+    prd_node: knowledge-graph/decisions/L3-technology/loss_function.yaml
+
+  primary_metrics:
+    status: resolved
+    winner: metricsreloaded_full
+    implementation: src/minivess/pipeline/metrics.py
+    prd_node: knowledge-graph/decisions/L3-technology/primary_metrics.yaml
+
+  topology_metrics:
+    status: not_started
+    candidates: [betti_gudhi, skeleton_precision_recall, cldice_as_metric]
+    evidence: [docs/planning/GRAPH-TOPOLOGY-METRICS-INDEX.md]
+    prd_node: knowledge-graph/decisions/L3-technology/topology_metrics.yaml
+
+  hpo_engine:
+    status: resolved
+    winner: optuna_multi_objective
+    implementation: src/minivess/optimization/hpo_engine.py
+    evidence: [docs/planning/hpo-optuna-asha-integration-plan.md]
+    prd_node: knowledge-graph/decisions/L3-technology/hpo_engine.yaml
+
+  augmentation_library:
+    status: resolved
+    winner: torchio_monai_combined
+    implementation: src/minivess/data/transforms.py
+    prd_node: knowledge-graph/decisions/L3-technology/augmentation_library.yaml
+
+  calibration_method:
+    status: partial
+    candidates: [temperature_scaling_netcal, local_temperature_scaling, mondrian_conformal_mapie]
+    evidence: [docs/planning/calibration-conformal-prediction-plan.md]
+    prd_node: knowledge-graph/decisions/L3-technology/calibration_method.yaml
+
+metalearning:
+  - file: .claude/metalearning/2026-03-06-regex-ban.md
+    applies_to: [loss_functions.py, metrics.py]
+    rule: "No regex for metric name parsing — use str.split()"
+
+planning_docs:
+  - file: docs/planning/loss-function-topology-research.md
+    status: implemented
+  - file: docs/planning/boundary-loss-implementation-plan.md
+    status: implemented
+  - file: docs/planning/hpo-optuna-asha-integration-plan.md
+    status: partial
+  - file: docs/planning/calibration-conformal-prediction-plan.md
+    status: partial
+
+open_issues:
+  - number: 611
+    title: "HPO completion barrier: Analysis Flow must wait for all trials"

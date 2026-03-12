@@ -1,0 +1,26 @@
+decision_id: hpo_engine
+title: "Hyperparameter Optimization"
+level: L3-technology
+status: resolved
+options:
+  - {id: optuna_multi_objective, name: "Optuna Multi-Objective + ASHA", prior_probability: 0.55, posterior_probability: 0.90}
+  - {id: optuna_single, name: "Optuna Single-Objective", prior_probability: 0.25, posterior_probability: 0.05}
+  - {id: ray_tune, name: "Ray Tune", prior_probability: 0.15, posterior_probability: 0.03}
+  - {id: manual_grid, name: "Manual Grid Search", prior_probability: 0.05, posterior_probability: 0.02}
+resolved_option: optuna_multi_objective
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/optimization/hpo_engine.py"
+    finding: "HPOEngine with TPE/CmaES + HyperbandPruner"
+  - type: literature
+    citation_key: akiba_2019_optuna
+    source: "https://arxiv.org/abs/1907.10902"
+implementation:
+  files: [src/minivess/optimization/hpo_engine.py, src/minivess/optimization/search_space.py]
+  tests: [tests/v2/unit/test_hpo.py]
+conditional_on:
+  - {parent_decision_id: config_architecture, influence_strength: moderate}
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "Optuna well-integrated with PostgreSQL storage"

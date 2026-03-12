@@ -1,0 +1,56 @@
+domain: data
+description: Datasets, validation, profiling, versioning, lineage, drift
+last_reviewed: "2026-03-13"
+
+decisions:
+  data_versioning:
+    status: resolved
+    winner: dvc_local_minio
+    implementation: [data/minivess.dvc, scripts/download_minivess.py]
+    prd_node: knowledge-graph/decisions/L3-technology/data_versioning.yaml
+
+  data_validation_depth:
+    status: resolved
+    winner: validation_onion_12_layer
+    rationale: "Pydantic + Pandera + Great Expectations layered validation"
+    implementation: src/minivess/data/
+    prd_node: knowledge-graph/decisions/L2-architecture/data_validation_depth.yaml
+
+  dataframe_validation:
+    status: resolved
+    winner: pandera_schemas
+    implementation: src/minivess/data/
+    prd_node: knowledge-graph/decisions/L3-technology/dataframe_validation.yaml
+
+  data_profiling:
+    status: config_only
+    winner: whylogs
+    prd_node: knowledge-graph/decisions/L3-technology/data_profiling.yaml
+
+  label_quality_tool:
+    status: config_only
+    candidates: [cleanlab, label_studio_agreement]
+    prd_node: knowledge-graph/decisions/L3-technology/label_quality_tool.yaml
+
+  lineage_tracking:
+    status: config_only
+    candidates: [openlineage_marquez, mlflow_lineage]
+    prd_node: knowledge-graph/decisions/L3-technology/lineage_tracking.yaml
+
+  drift_monitoring:
+    status: resolved
+    winner: evidently_lib
+    rationale: "Evidently DataDriftPreset + kernel MMD for embedding drift"
+    implementation: [src/minivess/pipeline/drift_detection.py, src/minivess/pipeline/embedding_drift.py]
+    evidence: [docs/planning/drift-monitoring-implementation-plan.xml]
+    prd_node: knowledge-graph/decisions/L5-operations/drift_monitoring.yaml
+
+metalearning: []
+
+planning_docs:
+  - file: docs/planning/drift-monitoring-implementation-plan.xml
+    status: implemented
+
+open_issues:
+  - number: 602
+    title: "Register VesselNN as 4th dataset"

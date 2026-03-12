@@ -1,0 +1,19 @@
+decision_id: topology_metrics
+title: "Topology-Aware Evaluation"
+level: L3-technology
+status: not_started
+options:
+  - {id: betti_gudhi, name: "Betti Numbers via GUDHI", prior_probability: 0.35, posterior_probability: 0.35}
+  - {id: skeleton_precision_recall, name: "Skeleton Precision/Recall", prior_probability: 0.30, posterior_probability: 0.30}
+  - {id: cldice_as_metric, name: "clDice as Metric", prior_probability: 0.25, posterior_probability: 0.25}
+  - {id: none, name: "No Topology Metrics", prior_probability: 0.10, posterior_probability: 0.10}
+resolution_evidence: []
+implementation:
+  files: []
+  tests: []
+conditional_on:
+  - {parent_decision_id: data_validation_depth, influence_strength: weak}
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "Active research area; GUDHI integration planned"

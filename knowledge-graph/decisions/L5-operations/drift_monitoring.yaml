@@ -1,0 +1,26 @@
+decision_id: drift_monitoring
+title: "Drift Detection Strategy"
+level: L5-operations
+status: resolved
+options:
+  - {id: evidently_lib, name: "Evidently Library", prior_probability: 0.45, posterior_probability: 0.85}
+  - {id: evidently_plus_whylogs, name: "Evidently + whylogs", prior_probability: 0.25, posterior_probability: 0.10}
+  - {id: custom_ks_test, name: "Custom KS Test", prior_probability: 0.20, posterior_probability: 0.03}
+  - {id: none, name: "None", prior_probability: 0.10, posterior_probability: 0.02}
+resolved_option: evidently_lib
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/pipeline/drift_detection.py"
+    finding: "Evidently DataDriftPreset for feature drift; kernel MMD for embedding drift"
+implementation:
+  files:
+    - src/minivess/pipeline/drift_detection.py
+    - src/minivess/pipeline/embedding_drift.py
+  tests:
+    - tests/v2/unit/test_drift_detection.py
+conditional_on:
+  - {parent_decision_id: container_strategy, influence_strength: moderate}
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "Evidently integration complete and tested"

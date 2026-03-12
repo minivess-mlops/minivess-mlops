@@ -1,0 +1,414 @@
+# knowledge-graph/_network.yaml
+# Bayesian decision network: 52 nodes, ~80 edges
+# Validation: acyclic, referentially complete, level-ordered
+# Each node references a YAML file in decisions/
+
+version: "1.0"
+last_updated: "2026-03-13"
+
+nodes:
+  # L1 — Research Goals (7 nodes, root layer)
+  - id: project_purpose
+    level: L1
+    file: decisions/L1-research-goals/project_purpose.yaml
+  - id: impact_target
+    level: L1
+    file: decisions/L1-research-goals/impact_target.yaml
+  - id: monai_alignment
+    level: L1
+    file: decisions/L1-research-goals/monai_alignment.yaml
+  - id: model_philosophy
+    level: L1
+    file: decisions/L1-research-goals/model_philosophy.yaml
+  - id: compliance_posture
+    level: L1
+    file: decisions/L1-research-goals/compliance_posture.yaml
+  - id: reproducibility_level
+    level: L1
+    file: decisions/L1-research-goals/reproducibility_level.yaml
+  - id: portfolio_role_target
+    level: L1
+    file: decisions/L1-research-goals/portfolio_role_target.yaml
+
+  # L2 — Architecture (10 nodes)
+  - id: model_adapter_pattern
+    level: L2
+    file: decisions/L2-architecture/model_adapter_pattern.yaml
+  - id: ensemble_strategy
+    level: L2
+    file: decisions/L2-architecture/ensemble_strategy.yaml
+  - id: uncertainty_framework
+    level: L2
+    file: decisions/L2-architecture/uncertainty_framework.yaml
+  - id: config_architecture
+    level: L2
+    file: decisions/L2-architecture/config_architecture.yaml
+  - id: serving_architecture
+    level: L2
+    file: decisions/L2-architecture/serving_architecture.yaml
+  - id: xai_strategy
+    level: L2
+    file: decisions/L2-architecture/xai_strategy.yaml
+  - id: data_validation_depth
+    level: L2
+    file: decisions/L2-architecture/data_validation_depth.yaml
+  - id: agent_architecture
+    level: L2
+    file: decisions/L2-architecture/agent_architecture.yaml
+  - id: observability_depth
+    level: L2
+    file: decisions/L2-architecture/observability_depth.yaml
+  - id: api_protocol
+    level: L2
+    file: decisions/L2-architecture/api_protocol.yaml
+
+  # L3 — Technology (20 nodes)
+  - id: primary_3d_model
+    level: L3
+    file: decisions/L3-technology/primary_3d_model.yaml
+  - id: foundation_model
+    level: L3
+    file: decisions/L3-technology/foundation_model.yaml
+  - id: loss_function
+    level: L3
+    file: decisions/L3-technology/loss_function.yaml
+  - id: primary_metrics
+    level: L3
+    file: decisions/L3-technology/primary_metrics.yaml
+  - id: topology_metrics
+    level: L3
+    file: decisions/L3-technology/topology_metrics.yaml
+  - id: experiment_tracker
+    level: L3
+    file: decisions/L3-technology/experiment_tracker.yaml
+  - id: hpo_engine
+    level: L3
+    file: decisions/L3-technology/hpo_engine.yaml
+  - id: data_versioning
+    level: L3
+    file: decisions/L3-technology/data_versioning.yaml
+  - id: augmentation_library
+    level: L3
+    file: decisions/L3-technology/augmentation_library.yaml
+  - id: calibration_method
+    level: L3
+    file: decisions/L3-technology/calibration_method.yaml
+  - id: label_quality_tool
+    level: L3
+    file: decisions/L3-technology/label_quality_tool.yaml
+  - id: data_profiling
+    level: L3
+    file: decisions/L3-technology/data_profiling.yaml
+  - id: model_diagnostics
+    level: L3
+    file: decisions/L3-technology/model_diagnostics.yaml
+  - id: xai_voxel_tool
+    level: L3
+    file: decisions/L3-technology/xai_voxel_tool.yaml
+  - id: xai_meta_tool
+    level: L3
+    file: decisions/L3-technology/xai_meta_tool.yaml
+  - id: llm_tracing
+    level: L3
+    file: decisions/L3-technology/llm_tracing.yaml
+  - id: llm_evaluation
+    level: L3
+    file: decisions/L3-technology/llm_evaluation.yaml
+  - id: llm_provider_strategy
+    level: L3
+    file: decisions/L3-technology/llm_provider_strategy.yaml
+  - id: dataframe_validation
+    level: L3
+    file: decisions/L3-technology/dataframe_validation.yaml
+  - id: lineage_tracking
+    level: L3
+    file: decisions/L3-technology/lineage_tracking.yaml
+
+  # L4 — Infrastructure (8 nodes)
+  - id: container_strategy
+    level: L4
+    file: decisions/L4-infrastructure/container_strategy.yaml
+  - id: ci_cd_platform
+    level: L4
+    file: decisions/L4-infrastructure/ci_cd_platform.yaml
+  - id: iac_tool
+    level: L4
+    file: decisions/L4-infrastructure/iac_tool.yaml
+  - id: gitops_engine
+    level: L4
+    file: decisions/L4-infrastructure/gitops_engine.yaml
+  - id: model_export_format
+    level: L4
+    file: decisions/L4-infrastructure/model_export_format.yaml
+  - id: gpu_compute
+    level: L4
+    file: decisions/L4-infrastructure/gpu_compute.yaml
+  - id: secrets_management
+    level: L4
+    file: decisions/L4-infrastructure/secrets_management.yaml
+  - id: air_gap_strategy
+    level: L4
+    file: decisions/L4-infrastructure/air_gap_strategy.yaml
+
+  # L5 — Operations (7 nodes)
+  - id: drift_monitoring
+    level: L5
+    file: decisions/L5-operations/drift_monitoring.yaml
+  - id: dashboarding
+    level: L5
+    file: decisions/L5-operations/dashboarding.yaml
+  - id: retraining_trigger
+    level: L5
+    file: decisions/L5-operations/retraining_trigger.yaml
+  - id: model_governance
+    level: L5
+    file: decisions/L5-operations/model_governance.yaml
+  - id: audit_trail
+    level: L5
+    file: decisions/L5-operations/audit_trail.yaml
+  - id: sbom_generation
+    level: L5
+    file: decisions/L5-operations/sbom_generation.yaml
+  - id: federated_learning
+    level: L5
+    file: decisions/L5-operations/federated_learning.yaml
+
+edges:
+  # L1 → L2 (strategy to architecture) — ~15 edges
+  - from: project_purpose
+    to: observability_depth
+    strength: moderate
+  - from: project_purpose
+    to: agent_architecture
+    strength: weak
+  - from: monai_alignment
+    to: model_adapter_pattern
+    strength: strong
+  - from: monai_alignment
+    to: serving_architecture
+    strength: moderate
+  - from: monai_alignment
+    to: data_validation_depth
+    strength: weak
+  - from: model_philosophy
+    to: ensemble_strategy
+    strength: strong
+  - from: model_philosophy
+    to: uncertainty_framework
+    strength: moderate
+  - from: compliance_posture
+    to: data_validation_depth
+    strength: strong
+  - from: compliance_posture
+    to: observability_depth
+    strength: moderate
+  - from: impact_target
+    to: xai_strategy
+    strength: moderate
+  - from: impact_target
+    to: config_architecture
+    strength: weak
+  - from: reproducibility_level
+    to: config_architecture
+    strength: moderate
+  - from: reproducibility_level
+    to: data_validation_depth
+    strength: moderate
+  - from: portfolio_role_target
+    to: api_protocol
+    strength: weak
+  - from: portfolio_role_target
+    to: agent_architecture
+    strength: moderate
+
+  # L2 → L3 (architecture to technology) — ~30 edges
+  - from: model_adapter_pattern
+    to: primary_3d_model
+    strength: strong
+  - from: model_adapter_pattern
+    to: foundation_model
+    strength: moderate
+  - from: ensemble_strategy
+    to: calibration_method
+    strength: moderate
+  - from: ensemble_strategy
+    to: primary_3d_model
+    strength: weak
+  - from: uncertainty_framework
+    to: calibration_method
+    strength: strong
+  - from: config_architecture
+    to: experiment_tracker
+    strength: moderate
+  - from: config_architecture
+    to: hpo_engine
+    strength: moderate
+  - from: serving_architecture
+    to: primary_3d_model
+    strength: weak
+  - from: xai_strategy
+    to: xai_voxel_tool
+    strength: strong
+  - from: xai_strategy
+    to: xai_meta_tool
+    strength: strong
+  - from: data_validation_depth
+    to: dataframe_validation
+    strength: strong
+  - from: data_validation_depth
+    to: data_profiling
+    strength: moderate
+  - from: data_validation_depth
+    to: label_quality_tool
+    strength: moderate
+  - from: data_validation_depth
+    to: data_versioning
+    strength: weak
+  - from: data_validation_depth
+    to: lineage_tracking
+    strength: moderate
+  - from: agent_architecture
+    to: llm_tracing
+    strength: strong
+  - from: agent_architecture
+    to: llm_evaluation
+    strength: strong
+  - from: agent_architecture
+    to: llm_provider_strategy
+    strength: strong
+  - from: observability_depth
+    to: experiment_tracker
+    strength: strong
+  - from: observability_depth
+    to: llm_tracing
+    strength: moderate
+  - from: observability_depth
+    to: model_diagnostics
+    strength: moderate
+  - from: model_adapter_pattern
+    to: loss_function
+    strength: weak
+  - from: model_adapter_pattern
+    to: primary_metrics
+    strength: weak
+  - from: ensemble_strategy
+    to: model_diagnostics
+    strength: weak
+  - from: uncertainty_framework
+    to: primary_metrics
+    strength: weak
+  - from: config_architecture
+    to: augmentation_library
+    strength: weak
+  - from: data_validation_depth
+    to: topology_metrics
+    strength: weak
+
+  # L3 → L4 (technology to infrastructure) — ~15 edges
+  - from: experiment_tracker
+    to: container_strategy
+    strength: moderate
+  - from: experiment_tracker
+    to: ci_cd_platform
+    strength: moderate
+  - from: primary_3d_model
+    to: gpu_compute
+    strength: strong
+  - from: foundation_model
+    to: gpu_compute
+    strength: strong
+  - from: hpo_engine
+    to: gpu_compute
+    strength: moderate
+  - from: primary_3d_model
+    to: model_export_format
+    strength: moderate
+  - from: llm_tracing
+    to: container_strategy
+    strength: weak
+  - from: data_versioning
+    to: container_strategy
+    strength: weak
+  - from: lineage_tracking
+    to: container_strategy
+    strength: weak
+  - from: experiment_tracker
+    to: secrets_management
+    strength: weak
+  - from: llm_provider_strategy
+    to: secrets_management
+    strength: moderate
+
+  # L4 → L5 (infrastructure to operations) — ~10 edges
+  - from: container_strategy
+    to: drift_monitoring
+    strength: moderate
+  - from: container_strategy
+    to: dashboarding
+    strength: moderate
+  - from: ci_cd_platform
+    to: sbom_generation
+    strength: moderate
+  - from: gpu_compute
+    to: retraining_trigger
+    strength: moderate
+  - from: gitops_engine
+    to: retraining_trigger
+    strength: strong
+  - from: model_export_format
+    to: model_governance
+    strength: moderate
+  - from: iac_tool
+    to: air_gap_strategy
+    strength: strong
+  - from: container_strategy
+    to: audit_trail
+    strength: weak
+  - from: secrets_management
+    to: audit_trail
+    strength: moderate
+  - from: gpu_compute
+    to: federated_learning
+    strength: moderate
+
+  # Skip connections (L1 → L3/L4/L5) — ~10 edges
+  - from: monai_alignment
+    to: model_export_format
+    strength: strong
+    skip: true
+  - from: monai_alignment
+    to: augmentation_library
+    strength: moderate
+    skip: true
+  - from: monai_alignment
+    to: loss_function
+    strength: weak
+    skip: true
+  - from: compliance_posture
+    to: audit_trail
+    strength: strong
+    skip: true
+  - from: compliance_posture
+    to: sbom_generation
+    strength: moderate
+    skip: true
+  - from: compliance_posture
+    to: model_governance
+    strength: strong
+    skip: true
+  - from: reproducibility_level
+    to: data_versioning
+    strength: moderate
+    skip: true
+  - from: reproducibility_level
+    to: experiment_tracker
+    strength: moderate
+    skip: true
+  - from: model_philosophy
+    to: foundation_model
+    strength: strong
+    skip: true
+  - from: project_purpose
+    to: federated_learning
+    strength: weak
+    skip: true

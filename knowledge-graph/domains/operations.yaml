@@ -1,0 +1,53 @@
+domain: operations
+description: Monitoring, governance, retraining, SBOM, compliance, audit, federated learning
+last_reviewed: "2026-03-13"
+
+decisions:
+  drift_monitoring:
+    status: resolved
+    winner: evidently_lib
+    rationale: "Evidently DataDriftPreset + kernel MMD"
+    implementation: [src/minivess/pipeline/drift_detection.py, src/minivess/pipeline/embedding_drift.py]
+    prd_node: knowledge-graph/decisions/L5-operations/drift_monitoring.yaml
+
+  dashboarding:
+    status: config_only
+    candidates: [grafana_prometheus, mlflow_ui_only]
+    implementation: deployment/docker-compose.yml
+    prd_node: knowledge-graph/decisions/L5-operations/dashboarding.yaml
+
+  retraining_trigger:
+    status: not_started
+    candidates: [drift_alert_webhook, scheduled_periodic, manual_only]
+    prd_node: knowledge-graph/decisions/L5-operations/retraining_trigger.yaml
+
+  model_governance:
+    status: partial
+    candidates: [mlflow_registry_gates, custom_approval_flow, weightwatcher_gate]
+    prd_node: knowledge-graph/decisions/L5-operations/model_governance.yaml
+
+  audit_trail:
+    status: resolved
+    winner: structured_json_otel
+    implementation: src/minivess/compliance/
+    prd_node: knowledge-graph/decisions/L5-operations/audit_trail.yaml
+
+  sbom_generation:
+    status: not_started
+    candidates: [syft_uv_lock, cyclonedx]
+    prd_node: knowledge-graph/decisions/L5-operations/sbom_generation.yaml
+
+  federated_learning:
+    status: not_started
+    candidates: [monai_fl, flower_framework, not_applicable]
+    prd_node: knowledge-graph/decisions/L5-operations/federated_learning.yaml
+
+metalearning: []
+
+planning_docs:
+  - file: docs/planning/drift-monitoring-implementation-plan.xml
+    status: implemented
+
+open_issues:
+  - number: 610
+    title: "Model governance pipeline"

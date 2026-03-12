@@ -1,0 +1,45 @@
+decision_id: observability_depth
+title: "Observability Stack Depth"
+level: L2-architecture
+status: resolved
+
+options:
+  - id: full_stack_otel
+    name: "Full Stack (Prometheus + Grafana + MLflow + Langfuse)"
+    prior_probability: 0.45
+    posterior_probability: 0.85
+  - id: metrics_plus_traces
+    name: "Metrics + Traces Only"
+    prior_probability: 0.30
+    posterior_probability: 0.10
+  - id: logging_only
+    name: "Logging Only"
+    prior_probability: 0.20
+    posterior_probability: 0.03
+  - id: no_observability
+    name: "No Observability"
+    prior_probability: 0.05
+    posterior_probability: 0.02
+
+resolved_option: full_stack_otel
+resolution_evidence:
+  - type: implementation
+    source: "deployment/docker-compose.yml"
+    finding: "Prometheus + Grafana + MLflow + Langfuse + whylogs in Docker Compose"
+
+implementation:
+  files:
+    - deployment/docker-compose.yml
+    - src/minivess/observability/
+  tests: []
+
+conditional_on:
+  - parent_decision_id: project_purpose
+    influence_strength: moderate
+  - parent_decision_id: compliance_posture
+    influence_strength: moderate
+
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "Full observability stack deployed and operational"

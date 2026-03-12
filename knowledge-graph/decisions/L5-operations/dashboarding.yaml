@@ -1,0 +1,22 @@
+decision_id: dashboarding
+title: "Monitoring Dashboard"
+level: L5-operations
+status: config_only
+options:
+  - {id: grafana_prometheus, name: "Grafana + Prometheus", prior_probability: 0.55, posterior_probability: 0.65}
+  - {id: mlflow_ui_only, name: "MLflow UI Only", prior_probability: 0.25, posterior_probability: 0.20}
+  - {id: custom_streamlit, name: "Custom Streamlit", prior_probability: 0.10, posterior_probability: 0.10}
+  - {id: none, name: "None", prior_probability: 0.10, posterior_probability: 0.05}
+resolution_evidence:
+  - type: implementation
+    source: "deployment/docker-compose.yml"
+    finding: "Grafana + Prometheus in Docker Compose"
+implementation:
+  files: [deployment/docker-compose.yml]
+  tests: []
+conditional_on:
+  - {parent_decision_id: container_strategy, influence_strength: moderate}
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "Grafana configured; custom dashboard planned"

@@ -1,0 +1,44 @@
+decision_id: ensemble_strategy
+title: "Ensemble Architecture"
+level: L2-architecture
+status: resolved
+
+options:
+  - id: heterogeneous_multi_model
+    name: "Heterogeneous Multi-Model"
+    prior_probability: 0.40
+    posterior_probability: 0.80
+  - id: homogeneous_multi_seed
+    name: "Homogeneous Multi-Seed"
+    prior_probability: 0.30
+    posterior_probability: 0.10
+  - id: model_soups_only
+    name: "Model Soups Only"
+    prior_probability: 0.20
+    posterior_probability: 0.05
+  - id: single_model_baseline
+    name: "Single Model Baseline"
+    prior_probability: 0.10
+    posterior_probability: 0.05
+
+resolved_option: heterogeneous_multi_model
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/ensemble/ensemble_builder.py"
+    finding: "Multi-loss x multi-fold ensembles with ComparisonTable"
+
+implementation:
+  files:
+    - src/minivess/ensemble/ensemble_builder.py
+    - src/minivess/ensemble/model_soups.py
+  tests:
+    - tests/v2/unit/test_ensemble.py
+
+conditional_on:
+  - parent_decision_id: model_philosophy
+    influence_strength: strong
+
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "Ensemble architecture proven in dynunet_loss_variation_v2 experiment"

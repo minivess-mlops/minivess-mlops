@@ -9,16 +9,27 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 CONFIGS_DIR = PROJECT_ROOT / "configs"
 
 
-class TestLegacyDefaultsRenamed:
-    """Verify the old defaults.yaml is renamed."""
+class TestLegacyArtifactsRemoved:
+    """Verify v0.1-alpha artifacts are fully removed."""
 
     def test_old_defaults_yaml_does_not_exist(self) -> None:
         assert not (CONFIGS_DIR / "defaults.yaml").exists(), (
-            "configs/defaults.yaml should be renamed to _legacy_v01_defaults.yaml"
+            "configs/defaults.yaml was removed in the v0.1→v2 migration"
         )
 
-    def test_legacy_defaults_yaml_exists(self) -> None:
-        assert (CONFIGS_DIR / "_legacy_v01_defaults.yaml").exists()
+    def test_legacy_defaults_yaml_deleted(self) -> None:
+        """_legacy_v01_defaults.yaml was deleted — git tags preserve history."""
+        assert not (CONFIGS_DIR / "_legacy_v01_defaults.yaml").exists(), (
+            "configs/_legacy_v01_defaults.yaml should be deleted — "
+            "use `git show v0.1-archive:configs/defaults.yaml` for history"
+        )
+
+    def test_wiki_directory_deleted(self) -> None:
+        """wiki/ was deleted — git tags preserve history."""
+        assert not (PROJECT_ROOT / "wiki").exists(), (
+            "wiki/ should be deleted — "
+            "use `git show v0.1-archive` for historical wiki content"
+        )
 
     def test_new_base_yaml_exists(self) -> None:
         assert (CONFIGS_DIR / "base.yaml").exists()

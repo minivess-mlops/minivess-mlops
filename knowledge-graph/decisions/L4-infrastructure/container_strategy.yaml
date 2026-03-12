@@ -1,0 +1,23 @@
+decision_id: container_strategy
+title: "Container Orchestration"
+level: L4-infrastructure
+status: resolved
+options:
+  - {id: docker_compose_profiles, name: "Docker Compose Profiles", prior_probability: 0.55, posterior_probability: 0.90}
+  - {id: k8s_kustomize, name: "Kubernetes + Kustomize", prior_probability: 0.20, posterior_probability: 0.05}
+  - {id: k3d_local_k8s, name: "k3d Local K8s", prior_probability: 0.15, posterior_probability: 0.03}
+  - {id: podman, name: "Podman", prior_probability: 0.10, posterior_probability: 0.02}
+resolved_option: docker_compose_profiles
+resolution_evidence:
+  - type: implementation
+    source: "deployment/docker-compose.yml"
+    finding: "Docker Compose with 12 flow services, profile-based activation"
+implementation:
+  files: [deployment/docker-compose.yml, deployment/docker-compose.flows.yml]
+  tests: [tests/v2/unit/deployment/test_dockerfile_flows.py]
+conditional_on:
+  - {parent_decision_id: experiment_tracker, influence_strength: moderate}
+volatility:
+  classification: stable
+  next_review: "2026-09-13"
+  rationale: "Docker Compose proven for solo researcher; K8s only for clinical deployment"

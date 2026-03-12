@@ -1,0 +1,23 @@
+decision_id: llm_evaluation
+title: "LLM Evaluation Framework"
+level: L3-technology
+status: resolved
+options:
+  - {id: braintrust_autoevals, name: "Braintrust AutoEvals", prior_probability: 0.45, posterior_probability: 0.80}
+  - {id: trulens_rag, name: "TruLens RAG", prior_probability: 0.15, posterior_probability: 0.05}
+  - {id: custom_scorers, name: "Custom Scorers", prior_probability: 0.25, posterior_probability: 0.10}
+  - {id: none, name: "None", prior_probability: 0.15, posterior_probability: 0.05}
+resolved_option: braintrust_autoevals
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/observability/braintrust_eval.py"
+    finding: "Braintrust AutoEvals for agent quality gates"
+implementation:
+  files: [src/minivess/observability/braintrust_eval.py]
+  tests: []
+conditional_on:
+  - {parent_decision_id: agent_architecture, influence_strength: strong}
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "LLM eval landscape rapidly evolving"

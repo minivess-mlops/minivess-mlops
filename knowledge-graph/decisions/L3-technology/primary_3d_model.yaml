@@ -1,0 +1,25 @@
+decision_id: primary_3d_model
+title: "Primary 3D Segmentation Model"
+level: L3-technology
+status: resolved
+options:
+  - {id: vista3d, name: "MONAI VISTA-3D", prior_probability: 0.45, posterior_probability: 0.80}
+  - {id: swinunetr, name: "SwinUNETR", prior_probability: 0.30, posterior_probability: 0.10}
+  - {id: segresnet, name: "SegResNet", prior_probability: 0.20, posterior_probability: 0.08}
+  - {id: unet_monai, name: "UNet (MONAI)", prior_probability: 0.05, posterior_probability: 0.02}
+resolved_option: vista3d
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/adapters/"
+    finding: "DynUNet as production model; VISTA-3D as MONAI-native primary"
+implementation:
+  files: [src/minivess/adapters/dynunet_adapter.py, src/minivess/adapters/segresnet_adapter.py]
+  tests: [tests/v2/unit/test_model_adapters.py]
+conditional_on:
+  - {parent_decision_id: model_adapter_pattern, influence_strength: strong}
+  - {parent_decision_id: serving_architecture, influence_strength: weak}
+  - {parent_decision_id: ensemble_strategy, influence_strength: weak}
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "DynUNet proven; VISTA-3D planned for Phase 8+"

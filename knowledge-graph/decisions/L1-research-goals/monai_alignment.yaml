@@ -1,0 +1,42 @@
+decision_id: monai_alignment
+title: "MONAI Ecosystem Alignment"
+level: L1-research-goals
+status: resolved
+
+options:
+  - id: monai_native
+    name: "MONAI Native Only"
+    prior_probability: 0.55
+    posterior_probability: 0.10
+  - id: monai_plus_external
+    name: "MONAI + External Models"
+    prior_probability: 0.35
+    posterior_probability: 0.85
+  - id: framework_agnostic
+    name: "Framework Agnostic"
+    prior_probability: 0.10
+    posterior_probability: 0.05
+
+resolved_option: monai_plus_external
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/adapters/"
+    finding: "DynUNet/SegResNet (MONAI-native) + SAM3 (external) via ModelAdapter ABC"
+  - type: discussion
+    source: "CLAUDE.md"
+    finding: "TOP-1 principle: MONAI extension, not fork. External models adapted to MONAI conventions"
+
+implementation:
+  files:
+    - src/minivess/adapters/base.py
+    - src/minivess/adapters/dynunet_adapter.py
+    - src/minivess/adapters/sam3_adapter.py
+  tests:
+    - tests/v2/unit/test_model_adapters.py
+
+conditional_on: []
+
+volatility:
+  classification: stable
+  next_review: "2026-09-13"
+  rationale: "Core architectural principle — MONAI ecosystem expansion"

@@ -1,0 +1,25 @@
+decision_id: audit_trail
+title: "Audit Trail Implementation"
+level: L5-operations
+status: resolved
+options:
+  - {id: structured_json_otel, name: "Structured JSON + OpenTelemetry", prior_probability: 0.50, posterior_probability: 0.80}
+  - {id: openlineage_marquez, name: "OpenLineage + Marquez", prior_probability: 0.25, posterior_probability: 0.10}
+  - {id: mlflow_tags_only, name: "MLflow Tags Only", prior_probability: 0.15, posterior_probability: 0.08}
+  - {id: none, name: "None", prior_probability: 0.10, posterior_probability: 0.02}
+resolved_option: structured_json_otel
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/compliance/"
+    finding: "Structured audit trails for SaMD-principled compliance"
+implementation:
+  files: [src/minivess/compliance/]
+  tests: []
+conditional_on:
+  - {parent_decision_id: container_strategy, influence_strength: weak}
+  - {parent_decision_id: secrets_management, influence_strength: moderate}
+  - {parent_decision_id: compliance_posture, influence_strength: strong}
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "Audit trail supports SaMD-principled compliance posture"

@@ -1,0 +1,24 @@
+decision_id: foundation_model
+title: "Foundation Model for Adaptation"
+level: L3-technology
+status: partial
+options:
+  - {id: sam3_lora, name: "SAM3 + LoRA", prior_probability: 0.35, posterior_probability: 0.45}
+  - {id: medsam3_adapter, name: "MedSAM3 Adapter", prior_probability: 0.25, posterior_probability: 0.20}
+  - {id: med_persam, name: "MedPerSAM", prior_probability: 0.20, posterior_probability: 0.15}
+  - {id: biomedclip, name: "BiomedCLIP", prior_probability: 0.10, posterior_probability: 0.10}
+  - {id: none, name: "No Foundation Model", prior_probability: 0.10, posterior_probability: 0.10}
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/adapters/sam3_adapter.py"
+    finding: "SAM3 adapter implemented; 848M params, ViT-32L, SDPA mandatory"
+implementation:
+  files: [src/minivess/adapters/sam3_adapter.py]
+  tests: [tests/gpu_instance/]
+conditional_on:
+  - {parent_decision_id: model_adapter_pattern, influence_strength: moderate}
+  - {parent_decision_id: model_philosophy, influence_strength: strong}
+volatility:
+  classification: volatile
+  next_review: "2026-04-13"
+  rationale: "Foundation model landscape rapidly evolving"

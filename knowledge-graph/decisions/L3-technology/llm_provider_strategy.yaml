@@ -1,0 +1,23 @@
+decision_id: llm_provider_strategy
+title: "LLM Provider Abstraction"
+level: L3-technology
+status: resolved
+options:
+  - {id: litellm_multi_provider, name: "LiteLLM Multi-Provider", prior_probability: 0.50, posterior_probability: 0.85}
+  - {id: anthropic_direct, name: "Anthropic Direct", prior_probability: 0.25, posterior_probability: 0.10}
+  - {id: ollama_local_only, name: "Ollama Local Only", prior_probability: 0.15, posterior_probability: 0.03}
+  - {id: no_llm, name: "No LLM", prior_probability: 0.10, posterior_probability: 0.02}
+resolved_option: litellm_multi_provider
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/agents/"
+    finding: "LiteLLM for provider flexibility"
+implementation:
+  files: [src/minivess/agents/]
+  tests: []
+conditional_on:
+  - {parent_decision_id: agent_architecture, influence_strength: strong}
+volatility:
+  classification: stable
+  next_review: "2026-06-13"
+  rationale: "LiteLLM provides vendor abstraction"

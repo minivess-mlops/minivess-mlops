@@ -1,0 +1,17 @@
+# Planned scenario — full compliance path
+scenario_id: clinical_production
+title: "Clinical Production"
+description: "Full IEC 62304 compliance for hypothetical regulatory submission"
+status: planned
+archetype: clinical-deployment
+
+notes: |
+  Key differences from learning-first-mvp:
+  - compliance_posture → full_iec_62304
+  - container_strategy → k8s_kustomize
+  - audit_trail → structured_json_otel (same, but with full OTel spans)
+  - sbom_generation → syft_uv_lock
+  - model_governance → custom_approval_flow
+  - air_gap_strategy → offline_docker_bundle
+  - federated_learning → monai_fl
+  - Resolves ALL 52 decisions

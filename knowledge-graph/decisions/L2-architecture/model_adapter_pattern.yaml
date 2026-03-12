@@ -1,0 +1,42 @@
+decision_id: model_adapter_pattern
+title: "Model Integration Pattern"
+level: L2-architecture
+status: resolved
+
+options:
+  - id: abc_protocol
+    name: "ABC Protocol (ModelAdapter)"
+    prior_probability: 0.70
+    posterior_probability: 0.95
+  - id: plugin_registry
+    name: "Plugin Registry"
+    prior_probability: 0.20
+    posterior_probability: 0.03
+  - id: duck_typing
+    name: "Duck Typing"
+    prior_probability: 0.10
+    posterior_probability: 0.02
+
+resolved_option: abc_protocol
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/adapters/base.py"
+    finding: "ModelAdapter ABC with train/predict/export contract; DynUNet, SegResNet, SAM3 adapters"
+
+implementation:
+  files:
+    - src/minivess/adapters/base.py
+    - src/minivess/adapters/dynunet_adapter.py
+    - src/minivess/adapters/segresnet_adapter.py
+    - src/minivess/adapters/sam3_adapter.py
+  tests:
+    - tests/v2/unit/test_model_adapters.py
+
+conditional_on:
+  - parent_decision_id: monai_alignment
+    influence_strength: strong
+
+volatility:
+  classification: stable
+  next_review: "2026-12-13"
+  rationale: "Core adapter pattern established; new models extend, not change"

@@ -1,0 +1,18 @@
+decision_id: gitops_engine
+title: "GitOps Deployment Engine"
+level: L4-infrastructure
+status: not_started
+options:
+  - {id: argocd, name: "ArgoCD", prior_probability: 0.45, posterior_probability: 0.45}
+  - {id: fluxcd, name: "FluxCD", prior_probability: 0.20, posterior_probability: 0.20}
+  - {id: github_actions_deploy, name: "GitHub Actions Deploy", prior_probability: 0.25, posterior_probability: 0.25}
+  - {id: manual_kubectl, name: "Manual kubectl", prior_probability: 0.10, posterior_probability: 0.10}
+resolution_evidence: []
+implementation:
+  files: []
+  tests: []
+conditional_on: []
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "Requires K8s; not needed for Docker Compose deployment"

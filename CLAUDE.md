@@ -585,10 +585,28 @@ the PRD (add decisions, update priors, ingest papers, validate).
 4. **Sub-citations mandatory** — When ingesting a paper, also extract its relevant references
 5. **Validation** — `uv run python scripts/validate_prd_citations.py` checks all citation invariants
 
+## Knowledge Graph (Layer 0 Navigator)
+
+The project uses a **5-layer progressive disclosure** knowledge graph for agent-queryable
+decision tracking:
+
+- **Layer 0**: [`knowledge-graph/navigator.yaml`](knowledge-graph/navigator.yaml) — Entry point mapping topics to domains
+- **Layer 1**: This file (CLAUDE.md) + MEMORY.md
+- **Layer 2**: Folder-level CLAUDE.md files (11 domain experts)
+- **Layer 3**: [`knowledge-graph/decisions/`](knowledge-graph/decisions/) — 52 PRD decision nodes as YAML
+- **Layer 4**: `docs/planning/` (research reports), `.claude/metalearning/` (failure analysis)
+
+Supporting files: [`_network.yaml`](knowledge-graph/_network.yaml) (DAG edges),
+[`_schema.yaml`](knowledge-graph/_schema.yaml) (node format),
+[`bibliography.yaml`](knowledge-graph/bibliography.yaml) (all citations).
+
+**Agent workflow**: Read `navigator.yaml` FIRST → route to domain file → load decision YAML on demand.
+
 ## See Also
 
 - [docs/modernize-minivess-mlops-plan.md](docs/modernize-minivess-mlops-plan.md) — Full modernization plan
 - [docs/modernize-minivess-mlops-plan-prompt.md](docs/modernize-minivess-mlops-plan-prompt.md) — Original prompt and Q&A
 - [.claude/skills/self-learning-iterative-coder/SKILL.md](.claude/skills/self-learning-iterative-coder/SKILL.md) — TDD skill reference
 - [.claude/skills/prd-update/SKILL.md](.claude/skills/prd-update/SKILL.md) — PRD maintenance skill reference
-- [wiki/](wiki/) — Legacy wiki (cloned from GitHub)
+- [knowledge-graph/navigator.yaml](knowledge-graph/navigator.yaml) — Knowledge graph entry point
+- ~~wiki/~~ — Deleted (v0.1 legacy, preserved at `v0.1-archive` git tag)

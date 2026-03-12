@@ -1,0 +1,25 @@
+decision_id: xai_meta_tool
+title: "Meta-Decision XAI Tool"
+level: L3-technology
+status: config_only
+options:
+  - {id: shap_tabular, name: "SHAP (Tabular Only)", prior_probability: 0.40, posterior_probability: 0.40}
+  - {id: quantus_meta_eval, name: "Quantus Meta-Eval", prior_probability: 0.25, posterior_probability: 0.25}
+  - {id: both_shap_quantus, name: "Both SHAP + Quantus", prior_probability: 0.25, posterior_probability: 0.25}
+  - {id: none, name: "None", prior_probability: 0.10, posterior_probability: 0.10}
+resolution_evidence:
+  - type: literature
+    citation_key: lundberg_2017_shap
+    source: "https://arxiv.org/abs/1705.07874"
+  - type: literature
+    citation_key: hedstrom_2023_quantus
+    source: "https://arxiv.org/abs/2202.06861"
+implementation:
+  files: []
+  tests: []
+conditional_on:
+  - {parent_decision_id: xai_strategy, influence_strength: strong}
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "XAI not yet implemented"

@@ -1,0 +1,36 @@
+decision_id: compliance_posture
+title: "Compliance Rigor"
+level: L1-research-goals
+status: resolved
+
+options:
+  - id: samd_principled
+    name: "SaMD-Principled (demonstrate, not certify)"
+    prior_probability: 0.50
+    posterior_probability: 0.80
+  - id: full_iec_62304
+    name: "Full IEC 62304 Compliance"
+    prior_probability: 0.20
+    posterior_probability: 0.05
+  - id: research_only
+    name: "Research Only (no compliance)"
+    prior_probability: 0.30
+    posterior_probability: 0.15
+
+resolved_option: samd_principled
+resolution_evidence:
+  - type: discussion
+    source: "CLAUDE.md"
+    finding: "SaMD-principled: IEC 62304 lifecycle mapping, audit trails, test set lockout"
+
+implementation:
+  files:
+    - src/minivess/compliance/
+  tests: []
+
+conditional_on: []
+
+volatility:
+  classification: stable
+  next_review: "2026-09-13"
+  rationale: "Portfolio project demonstrates compliance awareness without full certification burden"

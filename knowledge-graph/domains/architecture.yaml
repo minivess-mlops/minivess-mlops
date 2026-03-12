@@ -1,0 +1,50 @@
+domain: architecture
+description: Model adapters, ensemble strategies, config systems, serving, API
+last_reviewed: "2026-03-13"
+
+decisions:
+  model_adapter_pattern:
+    status: resolved
+    winner: abc_protocol
+    rationale: "ModelAdapter ABC with train/predict/export contract"
+    implementation: src/minivess/adapters/base.py
+    evidence: [docs/modernize-minivess-mlops-plan.md]
+    prd_node: knowledge-graph/decisions/L2-architecture/model_adapter_pattern.yaml
+
+  ensemble_strategy:
+    status: resolved
+    winner: heterogeneous_multi_model
+    rationale: "Multi-loss x multi-fold heterogeneous ensembles"
+    implementation: src/minivess/ensemble/ensemble_builder.py
+    evidence: [docs/planning/ensemble-strategy-research.md]
+    prd_node: knowledge-graph/decisions/L2-architecture/ensemble_strategy.yaml
+
+  config_architecture:
+    status: resolved
+    winner: dual_config
+    rationale: "Hydra-zen for experiment sweeps, Dynaconf for deployment"
+    implementation: [src/minivess/config/compose.py, src/minivess/config/dynaconf_config.py]
+    evidence: [docs/planning/script-consolidation.xml]
+    prd_node: knowledge-graph/decisions/L2-architecture/config_architecture.yaml
+
+  serving_architecture:
+    status: resolved
+    winner: bentoml_primary
+    rationale: "BentoML + ONNX Runtime for inference serving"
+    implementation: src/minivess/serving/
+    prd_node: knowledge-graph/decisions/L2-architecture/serving_architecture.yaml
+
+  api_protocol:
+    status: config_only
+    candidates: [rest_grpc_dual, rest_only]
+    prd_node: knowledge-graph/decisions/L2-architecture/api_protocol.yaml
+
+metalearning: []
+
+planning_docs:
+  - file: docs/planning/ensemble-strategy-research.md
+    status: implemented
+  - file: docs/planning/script-consolidation.xml
+    status: partial
+
+open_issues: []

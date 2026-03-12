@@ -1,0 +1,45 @@
+decision_id: data_validation_depth
+title: "Data Validation Strategy"
+level: L2-architecture
+status: resolved
+
+options:
+  - id: validation_onion_12_layer
+    name: "12-Layer Validation Onion"
+    prior_probability: 0.45
+    posterior_probability: 0.85
+  - id: schema_plus_drift
+    name: "Schema + Drift Only"
+    prior_probability: 0.35
+    posterior_probability: 0.10
+  - id: schema_only
+    name: "Schema Only"
+    prior_probability: 0.15
+    posterior_probability: 0.03
+  - id: no_validation
+    name: "No Validation"
+    prior_probability: 0.05
+    posterior_probability: 0.02
+
+resolved_option: validation_onion_12_layer
+resolution_evidence:
+  - type: implementation
+    source: "CLAUDE.md"
+    finding: "Pydantic v2 (schema) + Pandera (DataFrame) + Great Expectations (batch) + Evidently (drift)"
+
+implementation:
+  files:
+    - src/minivess/data/
+  tests:
+    - tests/v2/unit/test_data_validation.py
+
+conditional_on:
+  - parent_decision_id: compliance_posture
+    influence_strength: strong
+  - parent_decision_id: reproducibility_level
+    influence_strength: moderate
+
+volatility:
+  classification: stable
+  next_review: "2026-09-13"
+  rationale: "Validation layers implemented and tested"

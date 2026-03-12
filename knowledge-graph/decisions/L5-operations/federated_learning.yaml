@@ -1,0 +1,20 @@
+decision_id: federated_learning
+title: "Federated Learning Strategy"
+level: L5-operations
+status: not_started
+options:
+  - {id: monai_fl, name: "MONAI FL", prior_probability: 0.30, posterior_probability: 0.30}
+  - {id: flower_framework, name: "Flower Framework", prior_probability: 0.20, posterior_probability: 0.20}
+  - {id: custom_aggregation, name: "Custom Aggregation", prior_probability: 0.15, posterior_probability: 0.15}
+  - {id: not_applicable, name: "Not Applicable", prior_probability: 0.35, posterior_probability: 0.35}
+resolution_evidence: []
+implementation:
+  files: []
+  tests: []
+conditional_on:
+  - {parent_decision_id: gpu_compute, influence_strength: moderate}
+  - {parent_decision_id: project_purpose, influence_strength: weak}
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "Not applicable for solo researcher; relevant for clinical deployment archetype"

@@ -1,0 +1,22 @@
+decision_id: data_profiling
+title: "Data Profiling Tool"
+level: L3-technology
+status: config_only
+options:
+  - {id: whylogs, name: "whylogs", prior_probability: 0.45, posterior_probability: 0.55}
+  - {id: great_expectations, name: "Great Expectations", prior_probability: 0.30, posterior_probability: 0.25}
+  - {id: pandera_only, name: "Pandera Only", prior_probability: 0.20, posterior_probability: 0.15}
+  - {id: none, name: "None", prior_probability: 0.05, posterior_probability: 0.05}
+resolution_evidence:
+  - type: implementation
+    source: "pyproject.toml"
+    finding: "whylogs in optional dependencies"
+implementation:
+  files: []
+  tests: []
+conditional_on:
+  - {parent_decision_id: data_validation_depth, influence_strength: moderate}
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "whylogs selected but integration minimal"

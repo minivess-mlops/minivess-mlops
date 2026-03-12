@@ -1,0 +1,43 @@
+decision_id: config_architecture
+title: "Configuration System Design"
+level: L2-architecture
+status: resolved
+
+options:
+  - id: dual_config
+    name: "Dual Config (Hydra-zen + Dynaconf)"
+    prior_probability: 0.65
+    posterior_probability: 0.95
+  - id: hydra_only
+    name: "Hydra Only"
+    prior_probability: 0.20
+    posterior_probability: 0.03
+  - id: dynaconf_only
+    name: "Dynaconf Only"
+    prior_probability: 0.15
+    posterior_probability: 0.02
+
+resolved_option: dual_config
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/config/compose.py"
+    finding: "compose_experiment_config() via Hydra-zen for experiments; Dynaconf for deployment"
+
+implementation:
+  files:
+    - src/minivess/config/compose.py
+    - src/minivess/config/dynaconf_config.py
+    - configs/base.yaml
+  tests:
+    - tests/v2/unit/test_hydra_compose.py
+
+conditional_on:
+  - parent_decision_id: reproducibility_level
+    influence_strength: moderate
+  - parent_decision_id: impact_target
+    influence_strength: weak
+
+volatility:
+  classification: stable
+  next_review: "2026-09-13"
+  rationale: "Dual config proven; Hydra-zen for sweeps, Dynaconf for environments"

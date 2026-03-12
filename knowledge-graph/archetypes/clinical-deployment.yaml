@@ -1,0 +1,32 @@
+archetype_id: clinical_deployment
+title: "Clinical Deployment"
+description: "Clinical AI team building toward regulatory submission"
+status: planned
+
+characteristics:
+  team_size: "5-20 (including regulatory, QA)"
+  budget: "$5K-50K/month infrastructure"
+  gpu_access: "Cloud GPU instances with SLA"
+  primary_constraint: "Regulatory compliance (IEC 62304, ISO 13485)"
+  tool_preference: "Stability, auditability, vendor support"
+  deployment_target: "Kubernetes with full observability"
+  compliance_need: "Full IEC 62304 + ISO 14971"
+
+probability_shifts:
+  compliance_posture:
+    full_iec_62304: +0.45
+    samd_principled: -0.30
+  container_strategy:
+    k8s_kustomize: +0.30
+    docker_compose_profiles: -0.25
+  audit_trail:
+    structured_json_otel: +0.15
+  sbom_generation:
+    syft_uv_lock: +0.15
+  model_governance:
+    custom_approval_flow: +0.20
+  air_gap_strategy:
+    offline_docker_bundle: +0.10
+  federated_learning:
+    monai_fl: +0.15
+    not_applicable: -0.20

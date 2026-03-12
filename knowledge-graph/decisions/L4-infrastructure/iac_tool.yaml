@@ -1,0 +1,19 @@
+decision_id: iac_tool
+title: "Infrastructure as Code"
+level: L4-infrastructure
+status: not_started
+options:
+  - {id: pulumi_python, name: "Pulumi (Python)", prior_probability: 0.40, posterior_probability: 0.40}
+  - {id: terraform, name: "Terraform", prior_probability: 0.25, posterior_probability: 0.25}
+  - {id: helm_charts, name: "Helm Charts", prior_probability: 0.20, posterior_probability: 0.20}
+  - {id: kustomize_only, name: "Kustomize Only", prior_probability: 0.10, posterior_probability: 0.10}
+  - {id: none, name: "None", prior_probability: 0.05, posterior_probability: 0.05}
+resolution_evidence: []
+implementation:
+  files: []
+  tests: []
+conditional_on: []
+volatility:
+  classification: evolving
+  next_review: "2026-04-13"
+  rationale: "Not yet needed for solo researcher workflow"

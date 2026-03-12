@@ -1,0 +1,35 @@
+domain_id: vascular_segmentation
+title: "Vascular Segmentation"
+description: "Domain overlay for multiphoton vascular imaging segmentation"
+status: active
+
+probability_shifts:
+  loss_function:
+    cldice_soft_skeleton: +0.20
+    dice_ce_combined: -0.15
+    rationale: "Topology preservation critical for vessel connectivity"
+
+  topology_metrics:
+    betti_gudhi: +0.10
+    skeleton_precision_recall: +0.05
+    rationale: "Vessel connectivity requires topological metrics"
+
+  primary_metrics:
+    cldice_nsd_hd95: +0.20
+    metricsreloaded_full: -0.10
+    rationale: "Vessel-specific metrics more informative than generic suite"
+
+  augmentation_library:
+    torchio_monai_combined: +0.10
+    rationale: "Anisotropy handling critical for multiphoton data"
+
+  calibration_method:
+    mondrian_conformal_mapie: +0.10
+    rationale: "Boundary vs. interior calibration important for vessels"
+
+domain_metadata:
+  preferred_patch_size: [128, 128, 32]
+  anisotropy_aware_spacing: true
+  foreground_intensity_normalization: true
+  minimum_connected_component_filtering: true
+  datasets: [minivess, deepvess, tubenet_2pm, vesselnn]

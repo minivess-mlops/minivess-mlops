@@ -1,0 +1,43 @@
+domain: models
+description: DynUNet, SAM3, SegResNet, UNETR, SwinUNETR, VesselFM, Mamba, foundation models
+last_reviewed: "2026-03-13"
+
+decisions:
+  primary_3d_model:
+    status: resolved
+    winner: vista3d
+    rationale: "MONAI-native, no custom code; DynUNet and SegResNet as alternatives"
+    implementation: src/minivess/adapters/
+    evidence: [docs/planning/monai-model-adapter-integration-plan.md]
+    prd_node: knowledge-graph/decisions/L3-technology/primary_3d_model.yaml
+
+  foundation_model:
+    status: partial
+    candidates: [sam3_lora, medsam3_adapter, med_persam]
+    implementation: src/minivess/adapters/sam3_adapter.py
+    evidence:
+      - docs/planning/sam3-integration-research-report.md
+      - .claude/metalearning/2026-03-02-sam3-implementation-fuckup.md
+    prd_node: knowledge-graph/decisions/L3-technology/foundation_model.yaml
+
+metalearning:
+  - file: .claude/metalearning/2026-03-02-sam3-implementation-fuckup.md
+    applies_to: [sam3_adapter.py]
+    rule: "SAM3 = Meta SAM 3 (Nov 2025), NOT SAM2. Always web-search for models beyond cutoff"
+  - file: .claude/metalearning/2026-03-07-silent-existing-failures.md
+    applies_to: [adapters/]
+    rule: "Every test failure needs immediate action — no silent pre-existing failures"
+
+planning_docs:
+  - file: docs/planning/sam3-integration-research-report.md
+    status: partial
+  - file: docs/planning/monai-model-adapter-integration-plan.md
+    status: partial
+  - file: docs/planning/comma-mamba-integration-research-report.md
+    status: not_started
+
+open_issues:
+  - number: 366
+    title: "Full model adapter suite"
+  - number: 564
+    title: "Dockerized GPU benchmark"

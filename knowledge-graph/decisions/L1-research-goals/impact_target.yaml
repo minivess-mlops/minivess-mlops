@@ -1,0 +1,39 @@
+decision_id: impact_target
+title: "Impact Measurement Target"
+level: L1-research-goals
+status: resolved
+
+options:
+  - id: tool_breadth
+    name: "Tool Breadth (40+ tools)"
+    prior_probability: 0.40
+    posterior_probability: 0.75
+  - id: benchmark_depth
+    name: "Benchmark Depth"
+    prior_probability: 0.30
+    posterior_probability: 0.10
+  - id: manuscript_quality
+    name: "Manuscript Quality"
+    prior_probability: 0.20
+    posterior_probability: 0.10
+  - id: deployment_readiness
+    name: "Deployment Readiness"
+    prior_probability: 0.10
+    posterior_probability: 0.05
+
+resolved_option: tool_breadth
+resolution_evidence:
+  - type: implementation
+    source: "CLAUDE.md"
+    finding: "40+ tools across 12 validation layers integrated"
+
+implementation:
+  files: [CLAUDE.md, pyproject.toml]
+  tests: []
+
+conditional_on: []
+
+volatility:
+  classification: stable
+  next_review: "2026-09-13"
+  rationale: "Reflects project identity; manuscript emphasis may grow"

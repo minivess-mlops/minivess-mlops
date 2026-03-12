@@ -1,0 +1,68 @@
+domain: infrastructure
+description: Docker, Prefect, CI/CD, GPU compute, SkyPilot, IaC, security
+last_reviewed: "2026-03-13"
+
+decisions:
+  container_strategy:
+    status: resolved
+    winner: docker_compose_profiles
+    rationale: "Docker-per-flow isolation, 12 services"
+    implementation: [deployment/docker-compose.yml, deployment/docker-compose.flows.yml]
+    evidence: [docs/planning/docker-security-hardening-mlsecops-report.md]
+    prd_node: knowledge-graph/decisions/L4-infrastructure/container_strategy.yaml
+
+  ci_cd_platform:
+    status: resolved
+    winner: github_actions_cml
+    rationale: "GitHub Actions + CML, but EXPLICITLY DISABLED (credits)"
+    implementation: .github/workflows/ci-v2.yml
+    prd_node: knowledge-graph/decisions/L4-infrastructure/ci_cd_platform.yaml
+
+  iac_tool:
+    status: not_started
+    candidates: [pulumi_python, terraform, helm_charts]
+    prd_node: knowledge-graph/decisions/L4-infrastructure/iac_tool.yaml
+
+  gitops_engine:
+    status: not_started
+    candidates: [argocd, fluxcd, github_actions_deploy]
+    prd_node: knowledge-graph/decisions/L4-infrastructure/gitops_engine.yaml
+
+  gpu_compute:
+    status: partial
+    candidates: [local_gpu, cloud_spot_instances, lambda_labs]
+    implementation: [src/minivess/compute/skypilot_launcher.py, deployment/skypilot/]
+    evidence: [docs/planning/skypilot-runpod-architecture-report.md]
+    prd_node: knowledge-graph/decisions/L4-infrastructure/gpu_compute.yaml
+
+  secrets_management:
+    status: resolved
+    winner: dynaconf_dotenv
+    rationale: ".env.example = single source of truth"
+    implementation: .env.example
+    prd_node: knowledge-graph/decisions/L4-infrastructure/secrets_management.yaml
+
+  air_gap_strategy:
+    status: not_started
+    candidates: [offline_docker_bundle, helm_oci_vendored]
+    prd_node: knowledge-graph/decisions/L4-infrastructure/air_gap_strategy.yaml
+
+metalearning:
+  - file: .claude/metalearning/2026-03-09-dotenv-docker-compose-v2.md
+    applies_to: [docker-compose.yml, docker-compose.flows.yml]
+    rule: "Always use --env-file with docker compose"
+  - file: .claude/metalearning/2026-03-06-standalone-script-antipattern.md
+    applies_to: [scripts/]
+    rule: "Training goes through Prefect flows in Docker, not standalone scripts"
+
+planning_docs:
+  - file: docs/planning/docker-security-hardening-mlsecops-report.md
+    status: implemented
+  - file: docs/planning/skypilot-runpod-architecture-report.md
+    status: partial
+  - file: docs/planning/prefect-docker-optimization-and-monai-consolidation.md
+    status: partial
+
+open_issues:
+  - number: 564
+    title: "Dockerized GPU benchmark plan"

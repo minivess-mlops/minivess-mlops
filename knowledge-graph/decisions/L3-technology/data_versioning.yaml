@@ -1,0 +1,24 @@
+decision_id: data_versioning
+title: "Data Versioning Tool"
+level: L3-technology
+status: resolved
+options:
+  - {id: dvc_local_minio, name: "DVC + Local MinIO", prior_probability: 0.55, posterior_probability: 0.90}
+  - {id: dvc_s3, name: "DVC + S3", prior_probability: 0.25, posterior_probability: 0.05}
+  - {id: lakefs, name: "LakeFS", prior_probability: 0.10, posterior_probability: 0.03}
+  - {id: manual_hashing, name: "Manual Hashing", prior_probability: 0.10, posterior_probability: 0.02}
+resolved_option: dvc_local_minio
+resolution_evidence:
+  - type: implementation
+    source: "data/minivess.dvc"
+    finding: "DVC tracking with MinIO as local S3-compatible backend"
+implementation:
+  files: [data/minivess.dvc, scripts/download_minivess.py]
+  tests: []
+conditional_on:
+  - {parent_decision_id: data_validation_depth, influence_strength: weak}
+  - {parent_decision_id: reproducibility_level, influence_strength: moderate}
+volatility:
+  classification: stable
+  next_review: "2026-09-13"
+  rationale: "DVC + MinIO proven for single-researcher workflow"
