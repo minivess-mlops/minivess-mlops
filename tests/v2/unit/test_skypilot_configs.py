@@ -1,8 +1,9 @@
-"""Tests for T-07: SkyPilot YAML configs must use prefect deployment run.
+"""Tests for SkyPilot YAML configs.
+
+T-07: Configs must use prefect deployment run (not scripts).
+T1.1 (#633): Smoke test GPU YAML validates resources, envs, setup.
 
 Uses yaml.safe_load() for all YAML parsing — NO regex (CLAUDE.md Rule #16).
-Verifies that scripts/train_monitored.py and scripts/run_hpo.py are NOT invoked
-directly from SkyPilot run sections.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import yaml
 
 _TRAIN_GENERIC = Path("deployment/skypilot/train_generic.yaml")
 _TRAIN_HPO = Path("deployment/skypilot/train_hpo_sweep.yaml")
+_SMOKE_TEST_GPU = Path("deployment/skypilot/smoke_test_gpu.yaml")
 
 
 def _load(path: Path) -> dict:
@@ -85,4 +87,73 @@ class TestTrainHpoSweepYaml:
         assert "scripts/run_hpo.py" not in run_section, (
             "train_hpo_sweep.yaml still invokes scripts/run_hpo.py directly. "
             "Replace with: prefect deployment run 'hpo-flow/default' --params ..."
+        )
+
+
+# ---------------------------------------------------------------------------
+# smoke_test_gpu.yaml (#633, T1.1)
+# ---------------------------------------------------------------------------
+
+
+class TestSmokeTestGpuYaml:
+    """Validate smoke_test_gpu.yaml for RunPod 4090 GPU testing."""
+
+    def test_smoke_test_yaml_is_valid(self) -> None:
+        """smoke_test_gpu.yaml must parse without error."""
+        config = _load(_SMOKE_TEST_GPU)
+        assert isinstance(config, dict)
+
+    def test_smoke_test_resources_specify_4090(self) -> None:
+        """Resources must request RTX 4090 GPU."""
+        config = _load(_SMOKE_TEST_GPU)
+        resources = config.get("resources", {})
+        accel = resources.get("accelerators", "")
+        assert "4090" in str(accel), (
+            f"smoke_test_gpu.yaml must request RTX 4090, got: {accel}"
+        )
+
+    def test_smoke_test_resources_runpod_cloud(self) -> None:
+        """Resources must target RunPod cloud."""
+        config = _load(_SMOKE_TEST_GPU)
+        resources = config.get("resources", {})
+        cloud = resources.get("cloud", "")
+        assert cloud == "runpod", (
+            f"smoke_test_gpu.yaml must target runpod, got: {cloud}"
+        )
+
+    def test_smoke_test_envs_has_dvc_vars(self) -> None:
+        """Envs must include DVC_S3_* variables for data pull."""
+        config = _load(_SMOKE_TEST_GPU)
+        envs = config.get("envs", {})
+        for var in ("DVC_S3_ENDPOINT_URL", "DVC_S3_ACCESS_KEY", "DVC_S3_SECRET_KEY"):
+            assert var in envs, f"smoke_test_gpu.yaml missing {var} in envs"
+
+    def test_smoke_test_envs_has_mlflow_cloud_uri(self) -> None:
+        """Envs must include MLFLOW_TRACKING_URI for remote tracking."""
+        config = _load(_SMOKE_TEST_GPU)
+        envs = config.get("envs", {})
+        assert "MLFLOW_TRACKING_URI" in envs, (
+            "smoke_test_gpu.yaml missing MLFLOW_TRACKING_URI in envs"
+        )
+
+    def test_smoke_test_envs_has_host_escape_hatch(self) -> None:
+        """Envs must have MINIVESS_ALLOW_HOST=1 (cloud VM escape hatch)."""
+        config = _load(_SMOKE_TEST_GPU)
+        envs = config.get("envs", {})
+        assert envs.get("MINIVESS_ALLOW_HOST") == "1", (
+            "smoke_test_gpu.yaml must set MINIVESS_ALLOW_HOST=1"
+        )
+
+    def test_smoke_test_setup_installs_uv(self) -> None:
+        """Setup must install uv (not available on RunPod base images, RC8)."""
+        config = _load(_SMOKE_TEST_GPU)
+        setup = config.get("setup", "")
+        assert "uv" in setup, "smoke_test_gpu.yaml setup must install uv"
+
+    def test_smoke_test_setup_has_dvc_pull(self) -> None:
+        """Setup must include DVC pull step."""
+        config = _load(_SMOKE_TEST_GPU)
+        setup = config.get("setup", "")
+        assert "dvc pull" in setup, (
+            "smoke_test_gpu.yaml setup must include 'dvc pull -r upcloud'"
         )

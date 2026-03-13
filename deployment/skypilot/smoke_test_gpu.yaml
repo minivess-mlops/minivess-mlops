@@ -1,0 +1,81 @@
+# MinIVess MLOps — GPU Smoke Test on RunPod via SkyPilot
+#
+# Minimal training run to verify the cloud GPU pipeline works end-to-end:
+#   UpCloud S3 --DVC pull--> RunPod RTX 4090 --MLflow--> UpCloud MLflow
+#
+# Launch:
+#   sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+#     -e MODEL_FAMILY=sam3_vanilla
+#
+# Cost: ~$0.12/model (2 epochs, 1 fold, 4 volumes, RTX 4090 spot)
+# Total: ~$0.36 for all 3 models (sam3_vanilla, sam3_hybrid, vesselfm)
+#
+# Prerequisites:
+#   - RunPod API key configured: sky check runpod
+#   - UpCloud MLflow server running (Pulumi stack)
+#   - DVC data pushed to UpCloud S3: dvc push -r upcloud
+#   - .env populated with DVC_S3_*, MLFLOW_CLOUD_* variables
+
+name: minivess-smoke-test
+
+resources:
+  accelerators: RTX4090:1
+  cloud: runpod
+  use_spot: true
+  disk_size: 50
+
+envs:
+  # Model to test (override with -e MODEL_FAMILY=...)
+  MODEL_FAMILY: sam3_vanilla
+
+  # DVC data pull credentials (UpCloud S3)
+  DVC_S3_ENDPOINT_URL: ${DVC_S3_ENDPOINT_URL}
+  DVC_S3_ACCESS_KEY: ${DVC_S3_ACCESS_KEY}
+  DVC_S3_SECRET_KEY: ${DVC_S3_SECRET_KEY}
+  DVC_S3_BUCKET: ${DVC_S3_BUCKET:-minivess-dvc-data}
+  DVC_REMOTE: upcloud
+
+  # Remote MLflow tracking (UpCloud)
+  MLFLOW_TRACKING_URI: ${MLFLOW_CLOUD_URI}
+  MLFLOW_TRACKING_USERNAME: ${MLFLOW_CLOUD_USERNAME:-admin}
+  MLFLOW_TRACKING_PASSWORD: ${MLFLOW_CLOUD_PASSWORD}
+
+  # Cloud VM escape hatches (approved — same as pytest, RC12)
+  MINIVESS_ALLOW_HOST: "1"
+  PREFECT_DISABLED: "1"
+
+  # Experiment config
+  EXPERIMENT: smoke_${MODEL_FAMILY}
+
+  # PyTorch CUDA memory optimization
+  PYTORCH_ALLOC_CONF: "expandable_segments:True"
+
+setup: |
+  # RC8: RunPod base images don't include uv
+  curl -sSf https://astral.sh/uv/install.sh | sh
+  source $HOME/.local/bin/env
+
+  # Clone and install
+  git clone https://github.com/petteriTeikari/minivess-mlops.git /app
+  cd /app
+  uv sync --all-extras
+
+  # Configure DVC remote and pull training data
+  uv run python scripts/configure_dvc_remote.py
+  dvc pull -r upcloud
+
+run: |
+  source $HOME/.local/bin/env
+  cd /app
+
+  # UUID experiment isolation (RC9)
+  export EXPERIMENT_UUID=$(python3 -c "import uuid; print(uuid.uuid4().hex[:8])")
+  export EXPERIMENT="smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
+
+  echo "=== MinIVess GPU Smoke Test ==="
+  echo "Model: ${MODEL_FAMILY}"
+  echo "Experiment: ${EXPERIMENT}"
+  echo "MLflow: ${MLFLOW_TRACKING_URI}"
+
+  # Native execution on cloud VM (not Docker-in-Docker)
+  EXPERIMENT=${EXPERIMENT} uv run python -m minivess.orchestration.flows.train_flow
