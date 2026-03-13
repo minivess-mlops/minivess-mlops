@@ -1,0 +1,24 @@
+[
+  {
+    "train": [
+      {
+        "image": "data/raw/minivess/imagesTr/mv01.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv01.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv03.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv03.nii.gz"
+      }
+    ],
+    "val": [
+      {
+        "image": "data/raw/minivess/imagesTr/mv04.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv04.nii.gz"
+      },
+      {
+        "image": "data/raw/minivess/imagesTr/mv06.nii.gz",
+        "label": "data/raw/minivess/labelsTr/mv06.nii.gz"
+      }
+    ]
+  }
+]

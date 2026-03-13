@@ -1,0 +1,37 @@
+# @package _global_
+# GPU Smoke Test: SAM3 Vanilla on RunPod RTX 4090 via SkyPilot
+#
+# NOT scientifically valid — verifies cloud GPU pipeline only.
+# 2 epochs, 1 fold, 4 volumes = ~5 min on RTX 4090 (~$0.06).
+#
+# Usage:
+#   sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+#     -e MODEL_FAMILY=sam3_vanilla
+defaults:
+  - override /model: sam3_vanilla
+  - override /checkpoint: lightweight
+
+experiment_name: smoke_sam3_vanilla
+model: sam3_vanilla
+model_family: sam3_vanilla
+losses:
+  - dice_ce
+max_epochs: 2
+num_folds: 1
+debug: true
+
+# Data subsetting (belt-and-suspenders with 4-vol split file, RC10)
+max_train_volumes: 2
+max_val_volumes: 2
+splits_file: configs/splits/smoke_test_1fold_4vol.json
+
+# DVC provenance — which data version this run trained on
+data:
+  dvc_commit: HEAD
+
+# SAM3 Vanilla: ~2.9 GB VRAM (MEASURED — fits RTX 4090 easily)
+architecture_params:
+  backbone: vit_32l
+  input_size: 1008
+  embed_dim: 1024
+  pretrained: false
