@@ -31,6 +31,9 @@ class TestResolveTrackingUriCloud:
     ) -> None:
         """resolve_tracking_uri() returns cloud URI when set."""
         monkeypatch.setenv("MLFLOW_TRACKING_URI", cloud_mlflow_connection.tracking_uri)
+        # Clear auth env vars so resolve_tracking_uri doesn't embed credentials
+        monkeypatch.delenv("MLFLOW_TRACKING_USERNAME", raising=False)
+        monkeypatch.delenv("MLFLOW_TRACKING_PASSWORD", raising=False)
 
         from minivess.observability.tracking import resolve_tracking_uri
 

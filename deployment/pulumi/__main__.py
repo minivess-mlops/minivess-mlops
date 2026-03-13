@@ -249,6 +249,8 @@ deploy_mlflow = command.remote.Command(
                   MLFLOW_S3_ENDPOINT_URL: "{args[1]}"
                   MLFLOW_FLASK_SERVER_SECRET_KEY: "{args[4]}"
                   MLFLOW_AUTH_CONFIG_PATH: /app/basic_auth.ini
+                  AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
+                  AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
                 entrypoint:
                   - /bin/sh
                   - -c
