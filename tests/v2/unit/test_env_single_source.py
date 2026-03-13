@@ -74,6 +74,19 @@ def test_env_example_has_bentoml_home() -> None:
     assert "BENTOML_HOME" in vars_
 
 
+def test_env_example_has_dvc_s3_vars() -> None:
+    """DVC S3 cloud storage vars must be in .env.example (#630, T0.1)."""
+    vars_ = _env_example_vars()
+    for var in (
+        "DVC_S3_ENDPOINT_URL",
+        "DVC_S3_ACCESS_KEY",
+        "DVC_S3_SECRET_KEY",
+        "DVC_S3_BUCKET",
+        "DVC_REMOTE",
+    ):
+        assert var in vars_, f"{var} missing from .env.example"
+
+
 # ---------------------------------------------------------------------------
 # Dockerfiles: no ENV MLFLOW_TRACKING_URI
 # ---------------------------------------------------------------------------

@@ -193,3 +193,32 @@ class TestPulumiResourceTypes:
         content = (PULUMI_DIR / "__main__.py").read_text(encoding="utf-8")
         assert "depends_on=[server]" in content
         assert "depends_on=[provision_docker]" in content
+
+
+@pytest.mark.pulumi
+class TestPulumiDvcBucket:
+    """Validate DVC data bucket in Pulumi stack (#630, T0.1)."""
+
+    @pytest.fixture()
+    def main_content(self) -> str:
+        return (PULUMI_DIR / "__main__.py").read_text(encoding="utf-8")
+
+    def test_dvc_data_bucket_exists(self, main_content: str) -> None:
+        """Pulumi stack creates a 'minivess-dvc-data' bucket."""
+        assert "minivess-dvc-data" in main_content
+
+    def test_dvc_bucket_exported(self, main_content: str) -> None:
+        """Stack exports dvc_bucket output."""
+        assert (
+            'pulumi.export("dvc_bucket"' in main_content
+            or '"dvc_bucket"' in main_content
+            and "pulumi.export" in main_content
+        )
+
+    def test_dvc_s3_endpoint_exported(self, main_content: str) -> None:
+        """Stack exports dvc_s3_endpoint output."""
+        assert (
+            'pulumi.export("dvc_s3_endpoint"' in main_content
+            or '"dvc_s3_endpoint"' in main_content
+            and "pulumi.export" in main_content
+        )

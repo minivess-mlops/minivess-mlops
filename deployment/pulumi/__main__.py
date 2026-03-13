@@ -103,6 +103,14 @@ s3_bucket = upcloud.ManagedObjectStorageBucket(
     service_uuid=object_storage.id,
 )
 
+# DVC data bucket — MiniVess training data for cloud GPU training via SkyPilot.
+# RunPod instances pull data from this bucket using `dvc pull -r upcloud`.
+dvc_bucket = upcloud.ManagedObjectStorageBucket(
+    "dvc-data",
+    name="minivess-dvc-data",
+    service_uuid=object_storage.id,
+)
+
 s3_user = upcloud.ManagedObjectStorageUser(
     "mlflow-s3-user",
     username="mlflow",
@@ -271,3 +279,5 @@ pulumi.export(
     "ssh_command",
     server_ip.apply(lambda ip: f"ssh -i ~/.ssh/upcloud_minivess deploy@{ip}"),
 )
+pulumi.export("dvc_bucket", dvc_bucket.name)
+pulumi.export("dvc_s3_endpoint", s3_endpoint)

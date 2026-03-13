@@ -796,7 +796,7 @@
     <var name="DVC_REMOTE" example="upcloud" section="DVC Cloud Storage" description="DVC remote name (minio for local, upcloud for cloud)"/>
     <!-- DVC_COMMIT is a Hydra config field (data.dvc_commit), NOT an env var.
          Set in configs/experiment/smoke_*.yaml, not in .env.example.
-         Researchers can sweep: --multirun data.dvc_commit=abc123,def456 -->
+         Researchers can sweep: multirun data.dvc_commit=abc123,def456 -->
     <!-- RC5: RUNPOD_API_KEY is correct; legacy RUNPOD_TOKEN must be renamed -->
     <var name="RUNPOD_API_KEY" example="" section="RunPod GPU Compute" secret="true" description="RunPod API key for SkyPilot (NOT RUNPOD_TOKEN)"/>
     <var name="SMOKE_TEST_MODEL" example="sam3_vanilla" section="Smoke Test" description="Model for smoke test (sam3_vanilla, sam3_hybrid, vesselfm)"/>

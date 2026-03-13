@@ -1,28 +1,18 @@
 {
-  "plan_file": "docs/planning/prefect-flow-connectivity-execution-plan.xml",
-  "plan_version": "1.0",
+  "plan_file": "docs/planning/upcloud-runpod-skypilot-mlflow-integration-testing.xml",
+  "plan_version": "2.0",
   "execution_mode": "autonomous",
   "current_task_id": null,
   "current_phase": null,
   "inner_iteration": 0,
-  "tasks": {
-    "T0.1": {"status": "DONE", "commits": ["207922d"], "notes": "resolve_experiment_name() in constants.py + FlowContract._debug_suffix + _resolve_experiment()"},
-    "T0.2": {"status": "DONE", "commits": ["207922d"], "notes": "FlowContract.log_flow_completion() FLOW_COMPLETE fix + checkpoint_dir kwarg + find_fold_checkpoints()"},
-    "T0.3": {"status": "DONE", "commits": ["207922d"], "notes": "log_fold_results_task checkpoint_dir tag + TrainingFlowResult.checkpoint_dirs"},
-    "T0.4": {"status": "DONE", "commits": ["207922d"], "notes": "resolve_checkpoint_paths_from_contract() in post_training_flow.py"},
-    "T0.5": {"status": "DONE", "commits": ["207922d"], "notes": "analysis_flow.py — replaced 2 hardcoded minivess_training with EXPERIMENT_TRAINING constant via resolve_experiment_name()"},
-    "T0.6": {"status": "DONE", "commits": ["207922d"], "notes": "Phase 0 committed, 31/31 tests green, lint+mypy clean"},
-    "T1.1": {"status": "DONE", "commits": ["fd50f05"], "notes": "test_data_flow_contract.py — 4 tests RED confirmed (splits_path tag, FLOW_COMPLETE, no hardcoded experiment)"},
-    "T1.2": {"status": "DONE", "commits": ["fd50f05"], "notes": "data_flow.py — splits_path tag written in MLflow run; resolve_experiment_name(EXPERIMENT_DATA) replaces hardcoded string"},
-    "T1.3": {"status": "DONE", "commits": ["fd50f05"], "notes": "Phase 1 committed, 35/35 tests green, lint+mypy clean. Closes #556"}
-  },
+  "tasks": {},
   "convergence": {
-    "reached": true,
-    "tasks_done": 9,
-    "tasks_total": 9,
+    "reached": false,
+    "tasks_done": 0,
+    "tasks_total": 11,
     "tasks_stuck": 0
   },
-  "session_task_count": 9,
-  "session_inner_iterations": 9,
-  "session_start": "2026-03-09T00:00:00Z"
+  "session_task_count": 0,
+  "session_inner_iterations": 0,
+  "session_start": "2026-03-13T00:00:00Z"
 }

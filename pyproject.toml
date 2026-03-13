@@ -138,6 +138,7 @@ infra = [
     "pulumi>=3.0,<4.0",
     "pulumi-upcloud>=0.11,<1.0",
     "pulumi-command>=1.0,<2.0",
+    "skypilot-nightly[runpod]>=1.0.0.dev0",
 ]
 
 [project.urls]
