@@ -11,6 +11,7 @@
 #     -e HYDRA_OVERRIDES="model=sam3_vanilla" train
 defaults:
   - override /checkpoint: lightweight
+  - override /profiling: debug
 
 experiment_name: debug_single_model
 model: dynunet

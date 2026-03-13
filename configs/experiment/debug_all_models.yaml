@@ -11,6 +11,7 @@
 #     -e HYDRA_OVERRIDES="max_epochs=1" train
 defaults:
   - override /checkpoint: lightweight
+  - override /profiling: debug
 
 experiment_name: debug_all_models
 losses:

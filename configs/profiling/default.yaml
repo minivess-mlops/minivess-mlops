@@ -1,0 +1,18 @@
+# Default profiling config — profiling is core infrastructure, always ON.
+# Overhead budget: <=10% per profiled epoch, <=5% amortized across full run.
+#
+# To disable: use `profiling: disabled` or `override /profiling: disabled`.
+# For debug runs: use `override /profiling: debug` (2 epochs instead of 5).
+
+enabled: true
+epochs: 5
+activities:
+  - cpu
+  - cuda
+profile_memory: true
+record_shapes: false
+with_flops: true
+with_stack: false
+export_chrome_trace: true
+compress_traces: true
+trace_size_limit_mb: 50

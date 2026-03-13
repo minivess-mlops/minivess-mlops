@@ -175,6 +175,59 @@ class CheckpointConfig(BaseModel):
     save_history: bool = True
 
 
+class ProfilingConfig(BaseModel):
+    """Configuration for PyTorch profiler integration.
+
+    STANDALONE model — NOT a field on TrainingConfig (RC4).
+    Constructed from config_dict.get("profiling", {}) in train_one_fold_task()
+    and passed separately to build_profiler_context().
+
+    Profiling is core infrastructure, enabled by default. The overhead budget
+    is <=10% per individual profiled epoch, <=5% amortized across a full run.
+    """
+
+    enabled: bool = Field(default=True, description="Enable torch.profiler")
+    epochs: int = Field(default=5, description="Number of epochs to actively profile")
+    activities: list[str] = Field(
+        default_factory=lambda: ["cpu", "cuda"],
+        description="Profiler activities (cpu, cuda)",
+    )
+    profile_memory: bool = Field(
+        default=True, description="Track CUDA memory allocations"
+    )
+    record_shapes: bool = Field(
+        default=False, description="Record tensor shapes (~5-10% overhead)"
+    )
+    with_flops: bool = Field(
+        default=True, description="Estimate FLOPs (low overhead, high value)"
+    )
+    with_stack: bool = Field(
+        default=False, description="Record Python call stacks (~10-15% overhead)"
+    )
+    export_chrome_trace: bool = Field(
+        default=True, description="Export Chrome trace JSON"
+    )
+    compress_traces: bool = Field(
+        default=True, description="Gzip compress Chrome trace files"
+    )
+    trace_size_limit_mb: int = Field(
+        default=50,
+        ge=1,
+        description="Skip MLflow upload if uncompressed trace exceeds this size (MB)",
+    )
+
+    @model_validator(mode="after")
+    def validate_epochs_when_enabled(self) -> ProfilingConfig:
+        """When enabled=True, epochs must be >= 1."""
+        if self.enabled and self.epochs < 1:
+            msg = (
+                f"ProfilingConfig.epochs must be >= 1 when enabled=True, "
+                f"got {self.epochs}"
+            )
+            raise ValueError(msg)
+        return self
+
+
 class TrainingConfig(BaseModel):
     """Configuration for training loop."""
 
