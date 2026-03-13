@@ -13,7 +13,7 @@ without any cloud accounts.
 **Cross-references:**
 - [`.env.example`](../../.env.example) — All variables defined there, this doc explains how to get them
 - [`skypilot-and-finops-complete-report.md`](skypilot-and-finops-complete-report.md) — Architecture and cost analysis
-- [`mlflow-deployment-storage-analysis.md`](mlflow-deployment-storage-analysis.md) — MLflow hosting options compared
+- [`mlflow-deployment-storage-analysis.md`](mlflow-deployment-storage-analysis.md) — MLflow hosting options compared (Oracle rejected 2026-03-13)
 - [`pulumi-iac-implementation-guide.md`](pulumi-iac-implementation-guide.md) — Pulumi deep-dive
 
 ---
@@ -163,9 +163,9 @@ VMs can reach.
 
 | Option | Cost | Setup time | Best for |
 |--------|------|-----------|----------|
-| **Oracle Cloud Always Free** | $0/month forever | 2 hours (one-time) | Long-term, self-hosted |
+| **Hetzner VPS** (recommended) | EUR 4.50/month | 1 hour | Reliable, EU/US hosting |
 | **DagsHub** | $0 (20 GB free) | 5 minutes | Quick start, zero ops |
-| **Hetzner VPS** | EUR 4.50/month | 1 hour | Lab teams, EU hosting |
+| ~~Oracle Cloud Always Free~~ | ~~$0/month~~ | ~~2 hours~~ | **Rejected** — chronic ARM capacity shortage, garbage DevEx |
 | **Your own server** | Varies | Varies | If you already have one |
 
 <details>
@@ -259,12 +259,31 @@ Free resources.
 <summary><strong>Step-by-step: Create Oracle Cloud account</strong></summary>
 
 1. Go to [https://cloud.oracle.com/](https://cloud.oracle.com/) and click **Sign Up**
-2. Fill in your details. Choose your **home region** carefully:
-   - **Frankfurt** (`eu-frankfurt-1`) is popular but has chronic ARM capacity
-     shortages. You may wait weeks for a VM.
-   - **Milan** (`eu-milan-1`) or **Marseille** (`eu-marseille-1`) usually have
-     better availability.
-   - Home region is **permanent** — you cannot change it after sign-up.
+2. Fill in your details. Choose your **home region** carefully — it is
+   **permanent** and cannot be changed after sign-up. Pick the region
+   closest to you that has good ARM capacity:
+
+   | Region | Code | ARM availability | Best for |
+   |--------|------|-----------------|----------|
+   | **Milan** | `eu-milan-1` | Good | EU users (recommended) |
+   | **Marseille** | `eu-marseille-1` | Good | EU users |
+   | **Stockholm** | `eu-stockholm-1` | Good | Nordic users |
+   | Frankfurt | `eu-frankfurt-1` | **Chronically exhausted** | Avoid — weeks-long wait |
+   | **Phoenix** | `us-phoenix-1` | Good | US West users |
+   | **Ashburn** | `us-ashburn-1` | Moderate | US East users |
+   | **Chicago** | `us-chicago-1` | Good | US Central users |
+   | **San Jose** | `us-sanjose-1` | Good | US West users |
+   | **Tokyo** | `ap-tokyo-1` | Moderate | Asia-Pacific users |
+   | **Seoul** | `ap-seoul-1` | Good | Asia-Pacific users |
+   | **Sydney** | `ap-sydney-1` | Good | Oceania users |
+   | **Mumbai** | `ap-mumbai-1` | Good | South Asia users |
+   | **São Paulo** | `sa-saopaulo-1` | Good | South America users |
+
+   **Rule of thumb:** Avoid the most popular regions (Frankfurt, Ashburn).
+   Pick a region on the same continent as your SkyPilot GPU provider — RunPod
+   has data centers in EU and US, so latency from any EU/US Oracle region is
+   fine for MLflow metric logging.
+
 3. Add a credit card (required for verification, never charged for free tier)
 4. Wait for account activation (usually instant, sometimes up to 24 hours)
 
