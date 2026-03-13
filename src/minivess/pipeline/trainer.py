@@ -4,6 +4,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path  # Used at runtime in fit() for fallback profiler output_dir
 from typing import TYPE_CHECKING, Any
 
 # system_monitor.py is in scripts/ (not in the package).
@@ -32,12 +33,10 @@ from minivess.pipeline.multi_metric_tracker import (
 from minivess.pipeline.validation_metrics import compute_compound_masd_cldice
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from torch import nn
 
     from minivess.adapters.base import ModelAdapter
-    from minivess.config.models import TrainingConfig
+    from minivess.config.models import ProfilingConfig, TrainingConfig
     from minivess.observability.tracking import ExperimentTracker
     from minivess.pipeline.metrics import SegmentationMetrics
 
@@ -509,6 +508,7 @@ class SegmentationTrainer:
         *,
         fold_id: int = 0,
         checkpoint_dir: Path | None = None,
+        profiling_config: ProfilingConfig | None = None,
     ) -> dict[str, Any]:
         """Full training loop with multi-metric early stopping.
 
@@ -555,6 +555,22 @@ class SegmentationTrainer:
 
         val_interval = self.config.val_interval
         _last_val_result: EpochResult | None = None
+
+        # Build profiler context — nullcontext when disabled (zero overhead).
+        # Use ExitStack to avoid re-indenting the entire epoch loop body.
+        from contextlib import ExitStack
+
+        from minivess.pipeline.profiler_integration import build_profiler_context
+
+        _prof_config = profiling_config
+        if _prof_config is None:
+            from minivess.config.models import ProfilingConfig as _PC
+
+            _prof_config = _PC(enabled=False)
+        _prof_output_dir = checkpoint_dir if checkpoint_dir is not None else Path(".")
+        _prof_ctx = build_profiler_context(_prof_config, output_dir=_prof_output_dir)
+        _exit_stack = ExitStack()
+        _prof = _exit_stack.enter_context(_prof_ctx)
 
         for epoch in range(self.config.max_epochs):
             t0 = time.perf_counter()
@@ -770,6 +786,10 @@ class SegmentationTrainer:
                     checkpoint_dir / "epoch_latest.pth",
                 )
 
+            # Step profiler (per-EPOCH, not per-batch — RC3)
+            if _prof is not None:
+                _prof.step()
+
             # Early stopping decision via MultiMetricTracker
             if self._multi_tracker.should_stop(epoch):
                 logger.info(
@@ -778,6 +798,9 @@ class SegmentationTrainer:
                     ckpt_cfg.early_stopping_strategy,
                 )
                 break
+
+        # Close profiler context (ExitStack cleanup)
+        _exit_stack.close()
 
         # Upload last.pth and metric_history.json to MLflow
         if self.tracker is not None and checkpoint_dir is not None:
