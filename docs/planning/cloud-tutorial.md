@@ -271,41 +271,71 @@ Free resources.
 </details>
 
 <details>
-<summary><strong>Step-by-step: Get your OCI credentials (OCIDs and API key)</strong></summary>
+<summary><strong>Step-by-step: Find your Tenancy OCID</strong></summary>
 
-After your account is activated:
+Your Tenancy OCID identifies your entire Oracle Cloud account. You need it for
+Pulumi and the OCI CLI.
 
-**Find your Tenancy OCID:**
 1. Log in to [OCI Console](https://cloud.oracle.com/)
-2. Click the hamburger menu (top-left) -> **Governance & Administration** ->
-   **Tenancy Details**
-3. Copy the **OCID** (starts with `ocid1.tenancy.oc1..`)
-4. Add to `.env`:
+2. Click the **hamburger menu** (three horizontal lines, top-left corner)
+3. Scroll down to **Governance & Administration** -> click **Tenancy Details**
+4. On the Tenancy Details page, find **OCID** — it's a long string starting with
+   `ocid1.tenancy.oc1..`
+5. Click the **Copy** link next to it
+6. Add to `.env`:
    ```bash
-   OCI_TENANCY_OCID=ocid1.tenancy.oc1..aaaa...
+   OCI_TENANCY_OCID=ocid1.tenancy.oc1..aaaa...  # paste what you copied
    ```
 
-**Find your User OCID:**
-1. Click your avatar (top-right) -> **My Profile**
-2. Copy the **OCID** under your name (starts with `ocid1.user.oc1..`)
-3. Add to `.env`:
+</details>
+
+<details>
+<summary><strong>Step-by-step: Find your User OCID</strong></summary>
+
+Your User OCID identifies *you* within the Oracle Cloud account.
+
+1. In the OCI Console, click your **avatar icon** (top-right corner, looks like
+   a person silhouette)
+2. In the dropdown, click **User settings**
+3. On the User Details page, find **OCID** under your email address
+4. Click **Copy** next to it (starts with `ocid1.user.oc1..`)
+5. Add to `.env`:
    ```bash
-   OCI_USER_OCID=ocid1.user.oc1..aaaa...
+   OCI_USER_OCID=ocid1.user.oc1..aaaa...  # paste what you copied
    ```
 
-**Find your Compartment OCID:**
-1. Hamburger menu -> **Identity & Security** -> **Compartments**
-2. Click your root compartment (has the same name as your tenancy)
-3. Copy the **OCID**
-4. Add to `.env`:
+</details>
+
+<details>
+<summary><strong>Step-by-step: Find your Compartment OCID</strong></summary>
+
+A Compartment is like a folder for organizing your cloud resources. Every OCI
+account has a "root" compartment created automatically.
+
+1. Click the **hamburger menu** (top-left)
+2. Go to **Identity & Security** -> **Compartments**
+3. You should see one compartment with the same name as your tenancy
+   (e.g., `petteriteikari`)
+4. Click on it
+5. Copy the **OCID** (starts with `ocid1.compartment.oc1..`)
+6. Add to `.env`:
    ```bash
-   OCI_COMPARTMENT_OCID=ocid1.compartment.oc1..aaaa...
+   OCI_COMPARTMENT_OCID=ocid1.compartment.oc1..aaaa...  # paste what you copied
    ```
 
-**Generate API signing key (two options):**
+</details>
 
-You can generate the key pair via the **OCI CLI** (recommended, scriptable) or
-via the **OCI Console** (manual, web UI). Both produce the same result.
+<details>
+<summary><strong>Step-by-step: Generate and upload API signing key</strong></summary>
+
+Oracle uses RSA key pairs (like SSH keys) to authenticate API calls. You generate
+a key pair on your computer, then upload the **public** half to Oracle so it can
+verify your requests.
+
+You can generate the key pair via the **OCI CLI** (recommended) or via the
+**OCI Console web UI**. Both produce the same result.
+
+---
 
 **Option A — OCI CLI (recommended, scriptable):**
 
@@ -313,50 +343,75 @@ via the **OCI Console** (manual, web UI). Both produce the same result.
 # Install OCI CLI if you don't have it
 pip install oci-cli
 
-# Generate key pair (no passphrase for automation)
+# Generate key pair (no passphrase — press Enter twice when prompted)
 oci setup keys --output-dir ~/.oci --key-name oci_api_key
-# Output:
-#   Public key written to: ~/.oci/oci_api_key_public.pem
-#   Private key written to: ~/.oci/oci_api_key.pem
-#   Public key fingerprint: a8:10:05:...
 ```
 
-Now you need to upload the **public** key to OCI. This is the one manual step
-(chicken-and-egg: you need a key to call the API, but need the API to upload a key):
+This creates two files:
+- `~/.oci/oci_api_key.pem` — the **private** key (stays on your machine, never share)
+- `~/.oci/oci_api_key_public.pem` — the **public** key (you upload this to Oracle)
 
-1. Go to [OCI Console](https://cloud.oracle.com/) -> avatar (top-right) -> **My Profile**
-2. Scroll to **API Keys** -> **Add API Key**
-3. Select **Paste a public key**
-4. Paste the contents of `~/.oci/oci_api_key_public.pem`
+It also prints a fingerprint like `a8:10:05:a1:64:dc:...` — save this for later.
+
+Now upload the **public** key to Oracle. This is the one step you must do in the
+web browser (chicken-and-egg: you need a working key to call the API, but you
+need the API to upload a key):
+
+1. First, copy the public key contents to your clipboard. Run this in your
+   terminal:
+   ```bash
+   cat ~/.oci/oci_api_key_public.pem
+   ```
+   Select and copy the **entire output**, including the `-----BEGIN PUBLIC KEY-----`
+   and `-----END PUBLIC KEY-----` lines.
+
+2. In the OCI Console, click your **avatar icon** (top-right corner)
+3. Click **User settings**
+4. Click the **Tokens and keys** tab (in the row of tabs: Details, My groups,
+   My requests, My resources, **Tokens and keys**, ...)
+5. Scroll down to the **API keys** section
+6. Click the **Add API key** button
+7. In the dialog that appears, select **Paste a public key** (the third option)
+8. Paste the public key you copied in step 1 into the **Public key** text box
+9. Click **Add**
+10. Oracle shows a "Configuration file preview" dialog — you can close this
+    (we use `.env` instead of the OCI config file)
+
+The fingerprint shown should match what `oci setup keys` printed earlier.
+
+---
+
+**Option B — OCI Console (manual, no CLI needed):**
+
+If you don't want to install the OCI CLI, Oracle can generate the key pair for you:
+
+1. In the OCI Console: avatar -> **User settings** -> **Tokens and keys** tab
+2. Scroll to **API keys** -> click **Add API key**
+3. Select **Generate API key pair** (the first option)
+4. Click **Download private key** — save the `.pem` file
 5. Click **Add**
-6. Note the fingerprint shown (should match what `oci setup keys` printed)
-
-Add to `.env`:
-```bash
-OCI_FINGERPRINT=a8:10:05:a1:64:dc:7a:a5:8b:a2:9e:2b:36:c2:a5:d3
-OCI_PRIVATE_KEY_PATH=~/.oci/oci_api_key.pem
-OCI_REGION=eu-frankfurt-1
-```
-(Replace region with your actual home region.)
-
-**Option B — OCI Console (manual, web UI only):**
-
-1. Avatar (top-right) -> **My Profile** -> **API Keys** -> **Add API Key**
-2. Select **Generate API Key Pair**
-3. Click **Download Private Key** (saves `oci_api_key.pem`)
-4. Click **Add**
-5. Copy the **fingerprint** from the confirmation dialog
-6. Move the key:
+6. Copy the **fingerprint** from the confirmation dialog
+7. Move the downloaded key to the standard location:
    ```bash
    mkdir -p ~/.oci
-   mv ~/Downloads/oci_api_key.pem ~/.oci/
+   mv ~/Downloads/*.pem ~/.oci/oci_api_key.pem
    chmod 600 ~/.oci/oci_api_key.pem
    ```
+
+---
+
+**Add to `.env` (same for both options):**
+```bash
+OCI_FINGERPRINT=a8:10:05:a1:64:dc:7a:a5:8b:a2:9e:2b:36:c2:a5:d3  # your fingerprint
+OCI_PRIVATE_KEY_PATH=~/.oci/oci_api_key.pem
+OCI_REGION=eu-frankfurt-1  # replace with your actual home region
+```
 
 **Verify it works:**
 ```bash
 oci iam user get --user-id $OCI_USER_OCID
-# Should return your user details as JSON
+# Should return your user details as JSON (name, email, lifecycle-state: ACTIVE)
+# If you get "NotAuthenticated": double-check fingerprint and key path
 ```
 
 </details>
