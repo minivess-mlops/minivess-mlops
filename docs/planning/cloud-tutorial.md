@@ -32,6 +32,26 @@ Pick only the sections you need. Each section is independent.
 
 ---
 
+## Quick Start: One-Script Bootstrap
+
+> **Coming soon** ([#614](https://github.com/petteriTeikari/minivess-mlops/issues/614))
+> — A single interactive script that walks you through all cloud setup:
+>
+> ```bash
+> bash scripts/setup_cloud.sh
+> ```
+>
+> The script opens browser links, waits for you to paste tokens, verifies each
+> credential via API call, and writes everything to `.env`. Each service is
+> skippable. Re-running is safe (idempotent). Total time: ~10 minutes vs ~45
+> minutes of manual setup.
+>
+> **The manual steps below document what the script does behind the scenes.**
+> Read them to understand what each service is and why it's needed — the script
+> automates the mechanics, not the understanding.
+
+---
+
 ## 1. RunPod Account (Cloud GPU Provider)
 
 **What it is:** RunPod rents GPUs by the hour. Consumer GPUs (RTX 3090/4090) are
@@ -282,34 +302,93 @@ After your account is activated:
    OCI_COMPARTMENT_OCID=ocid1.compartment.oc1..aaaa...
    ```
 
-**Generate API signing key:**
-1. Click your avatar (top-right) -> **My Profile**
-2. Scroll down to **API Keys** -> click **Add API Key**
-3. Select **Generate API Key Pair**
-4. Click **Download Private Key** (saves `oci_api_key.pem`)
+**Generate API signing key (two options):**
+
+You can generate the key pair via the **OCI CLI** (recommended, scriptable) or
+via the **OCI Console** (manual, web UI). Both produce the same result.
+
+**Option A — OCI CLI (recommended, scriptable):**
+
+```bash
+# Install OCI CLI if you don't have it
+pip install oci-cli
+
+# Generate key pair (no passphrase for automation)
+oci setup keys --output-dir ~/.oci --key-name oci_api_key
+# Output:
+#   Public key written to: ~/.oci/oci_api_key_public.pem
+#   Private key written to: ~/.oci/oci_api_key.pem
+#   Public key fingerprint: a8:10:05:...
+```
+
+Now you need to upload the **public** key to OCI. This is the one manual step
+(chicken-and-egg: you need a key to call the API, but need the API to upload a key):
+
+1. Go to [OCI Console](https://cloud.oracle.com/) -> avatar (top-right) -> **My Profile**
+2. Scroll to **API Keys** -> **Add API Key**
+3. Select **Paste a public key**
+4. Paste the contents of `~/.oci/oci_api_key_public.pem`
 5. Click **Add**
-6. OCI shows a config snippet — copy the **fingerprint** line
-7. Move the key to the standard location:
+6. Note the fingerprint shown (should match what `oci setup keys` printed)
+
+Add to `.env`:
+```bash
+OCI_FINGERPRINT=a8:10:05:a1:64:dc:7a:a5:8b:a2:9e:2b:36:c2:a5:d3
+OCI_PRIVATE_KEY_PATH=~/.oci/oci_api_key.pem
+OCI_REGION=eu-frankfurt-1
+```
+(Replace region with your actual home region.)
+
+**Option B — OCI Console (manual, web UI only):**
+
+1. Avatar (top-right) -> **My Profile** -> **API Keys** -> **Add API Key**
+2. Select **Generate API Key Pair**
+3. Click **Download Private Key** (saves `oci_api_key.pem`)
+4. Click **Add**
+5. Copy the **fingerprint** from the confirmation dialog
+6. Move the key:
    ```bash
    mkdir -p ~/.oci
    mv ~/Downloads/oci_api_key.pem ~/.oci/
    chmod 600 ~/.oci/oci_api_key.pem
    ```
-8. Add to `.env`:
-   ```bash
-   OCI_FINGERPRINT=aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99
-   OCI_PRIVATE_KEY_PATH=~/.oci/oci_api_key.pem
-   OCI_REGION=eu-frankfurt-1
-   ```
-   (Replace `eu-frankfurt-1` with your actual home region.)
 
 **Verify it works:**
 ```bash
-# Install OCI CLI (optional but helpful for debugging)
-pip install oci-cli
 oci iam user get --user-id $OCI_USER_OCID
 # Should return your user details as JSON
 ```
+
+</details>
+
+<details>
+<summary><strong>Key rotation (after first key is working)</strong></summary>
+
+Once you have one working API key, future key rotations are fully programmatic
+(no console clicks needed):
+
+```bash
+# Generate new key pair
+oci setup keys --output-dir ~/.oci --key-name oci_api_key_new
+
+# Upload via API (uses your existing working key for auth)
+oci iam user api-key upload \
+  --user-id "$OCI_USER_OCID" \
+  --key-file ~/.oci/oci_api_key_new_public.pem
+
+# Update .env with new fingerprint
+# (printed by both oci setup keys and oci iam user api-key upload)
+
+# Optionally delete the old key
+oci iam user api-key delete \
+  --user-id "$OCI_USER_OCID" \
+  --fingerprint "$OLD_FINGERPRINT"
+```
+
+The `scripts/setup_cloud.sh` bootstrap script
+([#614](https://github.com/petteriTeikari/minivess-mlops/issues/614)) will
+automate this entire flow, including the first-time manual upload step with
+guided prompts.
 
 </details>
 
