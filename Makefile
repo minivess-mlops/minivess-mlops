@@ -64,6 +64,12 @@ test-gpu:
 	  -o "collect_ignore_glob=" \
 	  --timeout=600
 
+test-cloud-mlflow:  ## Run cloud MLflow tests (requires MLFLOW_CLOUD_* env vars)
+	uv run pytest tests/v2/cloud/ -m "cloud_mlflow or skypilot_cloud" -v
+
+test-pulumi:  ## Run Pulumi IaC validation tests
+	uv run pytest tests/v2/unit/test_pulumi_stack.py -v
+
 # ---------------------------------------------------------------------------
 # Docker base image builds (3-tier hierarchy)
 # ---------------------------------------------------------------------------

@@ -32,7 +32,9 @@ def detect_backend_type(tracking_uri: str) -> str:
     uri = tracking_uri.strip()
     if uri.startswith(("http://", "https://")):
         return "server"
-    if uri.startswith(("postgresql://", "sqlite://", "mysql://", "mssql://")):
+    if uri.startswith(
+        ("postgresql://", "postgres://", "sqlite://", "mysql://", "mssql://")
+    ):
         return "database"
     return "local"
 

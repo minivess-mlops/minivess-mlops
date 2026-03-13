@@ -134,6 +134,11 @@ ci = [
     # cml>=0.20 — disabled: PyPI 'cml' is a different package than iterative CML;
     # iterative CML is installed via npm, not pip.
 ]
+infra = [
+    "pulumi>=3.0,<4.0",
+    "pulumi-upcloud>=0.11,<1.0",
+    "pulumi-command>=1.0,<2.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/petteriTeworworx/minivess-mlops"
@@ -318,6 +323,7 @@ warn_return_any = false
 module = ["_archive.*"]
 ignore_errors = true
 
+
 # ---------------------------------------------------------------------------
 # Pytest
 # ---------------------------------------------------------------------------
@@ -351,6 +357,9 @@ markers = [
     "requires_train_image: Tests requiring minivess-train Docker image built",
     "gpu_required: Tests requiring a physical CUDA GPU",
     "security_audit: Security posture checks (warnings, not hard failures)",
+    "cloud_mlflow: Requires live cloud MLflow deployment (MLFLOW_CLOUD_* env vars)",
+    "pulumi: Pulumi IaC validation (no cloud credentials needed)",
+    "skypilot_cloud: SkyPilot to remote MLflow integration (cloud + SkyPilot creds)",
 ]
 filterwarnings = [
     "error",

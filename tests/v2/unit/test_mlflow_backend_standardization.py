@@ -52,6 +52,102 @@ class TestResolveTrackingUri:
         assert result == "http://explicit:5000"
 
 
+class TestTrackingUriCredentialEncoding:
+    """resolve_tracking_uri() must percent-encode credentials (#628).
+
+    Passwords with @, :, /, %, + produce malformed URIs if not encoded.
+    """
+
+    def test_password_with_at_sign(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Password containing '@' must be percent-encoded."""
+        from minivess.observability.tracking import resolve_tracking_uri
+
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+        monkeypatch.setenv("MLFLOW_TRACKING_USERNAME", "admin")
+        monkeypatch.setenv("MLFLOW_TRACKING_PASSWORD", "p@ssword")
+        uri = resolve_tracking_uri(tracking_uri=None, use_dynaconf=False)
+        # @ in password must be encoded as %40
+        assert "%40" in uri
+        # The URI must still be parseable and point to the right host
+        from urllib.parse import urlparse
+
+        parsed = urlparse(uri)
+        assert parsed.hostname == "mlflow"
+        assert parsed.port == 5000
+
+    def test_password_with_colon(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Password containing ':' must be percent-encoded."""
+        from minivess.observability.tracking import resolve_tracking_uri
+
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+        monkeypatch.setenv("MLFLOW_TRACKING_USERNAME", "admin")
+        monkeypatch.setenv("MLFLOW_TRACKING_PASSWORD", "pass:word")
+        uri = resolve_tracking_uri(tracking_uri=None, use_dynaconf=False)
+        assert "%3A" in uri
+
+    def test_password_with_slash(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Password containing '/' must be percent-encoded."""
+        from minivess.observability.tracking import resolve_tracking_uri
+
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+        monkeypatch.setenv("MLFLOW_TRACKING_USERNAME", "admin")
+        monkeypatch.setenv("MLFLOW_TRACKING_PASSWORD", "pass/word")
+        uri = resolve_tracking_uri(tracking_uri=None, use_dynaconf=False)
+        assert "%2F" in uri
+
+    def test_password_with_percent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Password containing '%' must be percent-encoded."""
+        from minivess.observability.tracking import resolve_tracking_uri
+
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+        monkeypatch.setenv("MLFLOW_TRACKING_USERNAME", "admin")
+        monkeypatch.setenv("MLFLOW_TRACKING_PASSWORD", "100%safe")
+        uri = resolve_tracking_uri(tracking_uri=None, use_dynaconf=False)
+        assert "%25" in uri
+
+    def test_username_with_special_chars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Username with special chars must also be encoded."""
+        from minivess.observability.tracking import resolve_tracking_uri
+
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+        monkeypatch.setenv("MLFLOW_TRACKING_USERNAME", "user@org")
+        monkeypatch.setenv("MLFLOW_TRACKING_PASSWORD", "plain")
+        uri = resolve_tracking_uri(tracking_uri=None, use_dynaconf=False)
+        assert "%40" in uri
+
+    def test_encoded_uri_roundtrips(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """URI with encoded credentials must parse back correctly."""
+        from urllib.parse import unquote, urlparse
+
+        from minivess.observability.tracking import resolve_tracking_uri
+
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+        monkeypatch.setenv("MLFLOW_TRACKING_USERNAME", "admin")
+        monkeypatch.setenv("MLFLOW_TRACKING_PASSWORD", "p@ss:w/rd%2B")
+        uri = resolve_tracking_uri(tracking_uri=None, use_dynaconf=False)
+        parsed = urlparse(uri)
+        assert parsed.hostname == "mlflow"
+        assert parsed.port == 5000
+        assert unquote(parsed.username or "") == "admin"
+        assert unquote(parsed.password or "") == "p@ss:w/rd%2B"
+
+    def test_no_port_uri_with_special_password(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """URI without explicit port must also encode credentials."""
+        from minivess.observability.tracking import resolve_tracking_uri
+
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow.example.com")
+        monkeypatch.setenv("MLFLOW_TRACKING_USERNAME", "admin")
+        monkeypatch.setenv("MLFLOW_TRACKING_PASSWORD", "p@ss")
+        uri = resolve_tracking_uri(tracking_uri=None, use_dynaconf=False)
+        assert "%40" in uri
+        from urllib.parse import urlparse
+
+        parsed = urlparse(uri)
+        assert parsed.hostname == "mlflow.example.com"
+
+
 class TestBackendTypeDetection:
     """Test detection of backend type (local vs server)."""
 
@@ -80,6 +176,27 @@ class TestBackendTypeDetection:
         from minivess.observability.mlflow_backend import detect_backend_type
 
         assert detect_backend_type("sqlite:///mlflow.db") == "database"
+
+    def test_detect_postgres_scheme_without_ql(self) -> None:
+        """postgres:// (without 'ql' suffix) must be detected as database (#629).
+
+        UpCloud managed PostgreSQL returns URIs starting with postgres://
+        which is valid per PostgreSQL docs but was not detected.
+        """
+        from minivess.observability.mlflow_backend import detect_backend_type
+
+        assert (
+            detect_backend_type("postgres://user:pass@host:5432/mlflow") == "database"
+        )
+
+    def test_detect_postgres_with_options(self) -> None:
+        """postgres:// with query params must also be detected."""
+        from minivess.observability.mlflow_backend import detect_backend_type
+
+        assert (
+            detect_backend_type("postgres://user:pass@host:5432/mlflow?sslmode=require")
+            == "database"
+        )
 
 
 class TestBackendWarning:
