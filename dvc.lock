@@ -1,0 +1,15 @@
+schema: '2.0'
+stages:
+  download:
+    cmd: uv run python scripts/download_minivess.py
+    deps:
+    - path: scripts/download_minivess.py
+      hash: md5
+      md5: 60cffea9444719ac5e6c0a233e64a420
+      size: 2197
+    outs:
+    - path: data/raw/minivess/
+      hash: md5
+      md5: e712f8b23f377a4990b91bef0b1aef76.dir
+      size: 2749883382
+      nfiles: 350

@@ -7,7 +7,7 @@
     secret_access_key = minioadmin
 ['remote "upcloud"']
     url = s3://minivess-dvc-data
-    endpointurl = https://REPLACE_WITH_PULUMI_OUTPUT.upcloudobjects.com
+    endpointurl = https://pgopc.upcloudobjects.com
 ['remote "remote_storage"']
     url = s3://minivessdataset
 ['remote "remote_readonly"']
