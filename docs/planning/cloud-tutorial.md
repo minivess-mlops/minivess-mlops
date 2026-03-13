@@ -24,8 +24,8 @@ without any cloud accounts.
 |--------------|----------------|-------------|
 | Train locally on my own GPU | Nothing from this page | $0 |
 | Train on cloud GPUs (RunPod) | RunPod + SkyPilot + Remote MLflow | ~$0.22-1.99/hr GPU time |
-| Share MLflow experiments publicly | Oracle Cloud (or Hetzner/DagsHub) | $0 (Oracle Free) |
-| Automate cloud deployment | Pulumi + Oracle Cloud | $0 (both free tier) |
+| Share MLflow experiments publicly | UpCloud (trial) / Hetzner / DagsHub | EUR 0 (trial) / EUR 3.79 |
+| Automate cloud deployment | Pulumi + UpCloud/Hetzner | EUR 0 (trial) |
 | Use a custom domain (mlflow.yourlab.org) | Cloudflare + domain registrar | ~$10/year for domain |
 
 Pick only the sections you need. Each section is independent.
@@ -163,10 +163,23 @@ VMs can reach.
 
 | Option | Cost | Setup time | Best for |
 |--------|------|-----------|----------|
-| **Hetzner VPS** (recommended) | EUR 4.50/month | 1 hour | Reliable, EU/US hosting |
+| **UpCloud VPS** (active — free trial) | EUR 0 for 30 days (EUR 250 credit) | 5 minutes | Free trial, Helsinki DC |
+| **Hetzner VPS** (archived fallback) | EUR 3.79/month | 5 minutes | Long-term, cheapest |
 | **DagsHub** | $0 (20 GB free) | 5 minutes | Quick start, zero ops |
+| **Scaleway** | EUR 9.30/month | 10 minutes | Alternative EU provider |
+| ~~Nebius~~ | ~~$40/month~~ | — | **Skip** — GPU-focused, overpriced for VPS |
 | ~~Oracle Cloud Always Free~~ | ~~$0/month~~ | ~~2 hours~~ | **Rejected** — chronic ARM capacity shortage, garbage DevEx |
 | **Your own server** | Varies | Varies | If you already have one |
+
+### Full Provider Comparison (researched 2026-03-13)
+
+| Provider | Plan | vCPU | RAM | Disk | EUR/month | Trial | CLI | Verdict |
+|----------|------|------|-----|------|-----------|-------|-----|---------|
+| **UpCloud** | DEV-2xCPU-4GB | 2 | 4 GB | 60 GB SSD | 19.42 | **EUR 250 / 30d** | `upctl` | **Active** |
+| **Hetzner** | CX22 | 2 | 4 GB | 40 GB NVMe | 3.79 | None | `hcloud` | **Fallback** |
+| **Scaleway** | DEV1-M + IPv4 | 3 | 4 GB | 40 GB NVMe | 17.33 | EUR 100 | `scw` | Alternative |
+| **Nebius** | cpu-e2 2x8GB | 2 | 8 GB | 50 GB SSD | ~36.50 | None | `nebius` | Skip |
+| **Oracle** | A1.Flex 4x24 | 4 | 24 GB | 200 GB | 0 | Always Free | `oci` | **Rejected** |
 
 <details>
 <summary><strong>Option A: DagsHub (fastest — 5 minutes, managed)</strong></summary>
@@ -194,53 +207,62 @@ PostgreSQL access for DuckDB analytics. DagsHub controls the MLflow version.
 </details>
 
 <details>
-<summary><strong>Option B: Oracle Cloud Always Free (recommended — $0/month forever)</strong></summary>
+<summary><strong>Option B: UpCloud VPS (active — EUR 250 free trial, 30 days)</strong></summary>
 
-Oracle Cloud gives you a powerful ARM server for free, forever. We deploy MLflow +
-PostgreSQL + MinIO on it via Docker Compose (or Pulumi, see section 5).
+UpCloud is a Finnish cloud provider with Helsinki datacenters. The 30-day free
+trial with EUR 250 credit is enough to run the MLflow stack for the entire trial.
 
-**See section 4 below** for Oracle Cloud account setup, then come back here.
+**Automated setup** (recommended — 5 minutes):
+```bash
+# 1. Get API token: https://hub.upcloud.com/account/api-tokens
+# 2. Add to .env: UPCLOUD_TOKEN=ucat_...
+# 3. Run:
+bash scripts/upcloud-setup-script.sh
+```
 
-After you have an Oracle Cloud VM running:
+The script creates the server, installs Docker, deploys the MLflow stack, sets up
+the firewall, and prints your access credentials. See `docs/planning/upcloud-mlflow-plan.md`.
 
-1. SSH into your Oracle Cloud instance:
-   ```bash
-   ssh -i ~/.ssh/oci_key ubuntu@YOUR_VM_PUBLIC_IP
-   ```
+**After the script completes**, add to `.env`:
+```bash
+MLFLOW_TRACKING_URI_REMOTE=http://SERVER_IP
+MLFLOW_TRACKING_USERNAME_REMOTE=minivess
+MLFLOW_TRACKING_PASSWORD_REMOTE=your_generated_password
+```
 
-2. Install Docker:
-   ```bash
-   sudo apt-get update
-   sudo apt-get install -y docker.io docker-compose-plugin
-   sudo usermod -aG docker $USER
-   # Log out and back in for group change to take effect
-   ```
+**Trial management:** Back up your data before day 30. See the backup section in
+`docs/planning/upcloud-mlflow-plan.md`. After trial, either deposit EUR 10 to keep
+the server, or migrate to Hetzner (`bash scripts/hetzner-setup-script.sh`).
 
-3. Copy the MLflow Docker Compose config to the server (a minimal version of
-   `deployment/docker-compose.yml` with just MLflow + PostgreSQL + MinIO + nginx)
+</details>
 
-4. Set up nginx reverse proxy with Let's Encrypt TLS (if using a custom domain):
-   ```bash
-   sudo apt-get install -y nginx certbot python3-certbot-nginx
-   # Configure nginx to proxy port 443 -> MLflow port 5000
-   # Run certbot for free TLS certificate
-   ```
+<details>
+<summary><strong>Option C: Hetzner VPS (archived fallback — EUR 3.79/month)</strong></summary>
 
-5. Start the stack:
-   ```bash
-   docker compose up -d
-   ```
+Hetzner is the cheapest long-term option. Use after UpCloud trial ends.
 
-6. Add to `.env`:
-   ```bash
-   MLFLOW_TRACKING_URI_REMOTE=https://mlflow.yourdomain.com
-   # Or if no domain: http://YOUR_VM_PUBLIC_IP:5000
-   MLFLOW_TRACKING_USERNAME_REMOTE=minivess
-   MLFLOW_TRACKING_PASSWORD_REMOTE=your_generated_password
-   ```
+**Automated setup:**
+```bash
+# 1. Get API token: https://console.hetzner.cloud → Security → API Tokens
+# 2. Add to .env: HETZNER_API_TOKEN=...
+# 3. Run:
+bash scripts/hetzner-setup-script.sh
+```
 
-**Tip:** If you also set up Pulumi (section 5), all of this is automated
-with `pulumi up`.
+See `docs/planning/hetzner-mlflow-plan.md` for details.
+
+</details>
+
+<details>
+<summary><strong>~~Option D: Oracle Cloud Always Free (REJECTED)~~</strong></summary>
+
+Oracle Cloud Always Free was rejected (2026-03-13) due to:
+- Chronic ARM capacity shortage in Frankfurt (all 3 ADs exhausted)
+- Home region is permanent — cannot change after sign-up
+- Card verification blocks second account on a better region
+- Terrible DevEx (PKCS#8 key format issues, intermittent auth errors, browser-only bootstrap)
+
+See `docs/planning/oracle-config-planning.md` (status: rejected).
 
 </details>
 
@@ -656,16 +678,18 @@ MLFLOW_TRACKING_USERNAME_REMOTE=minivess
 MLFLOW_TRACKING_PASSWORD_REMOTE=...
 ```
 
-### Add Oracle Cloud MLflow hosting (via Pulumi)
+### Add UpCloud MLflow hosting (free trial)
 ```bash
 # Add these to the above
-OCI_TENANCY_OCID=ocid1.tenancy.oc1..aaaa...
-OCI_USER_OCID=ocid1.user.oc1..aaaa...
-OCI_COMPARTMENT_OCID=ocid1.compartment.oc1..aaaa...
-OCI_REGION=eu-frankfurt-1
-OCI_FINGERPRINT=aa:bb:cc:...
-OCI_PRIVATE_KEY_PATH=~/.oci/oci_api_key.pem
-PULUMI_ACCESS_TOKEN=pul-...
+UPCLOUD_TOKEN=ucat_...
+# Then run: bash scripts/upcloud-setup-script.sh
+```
+
+### Add Hetzner MLflow hosting (long-term fallback)
+```bash
+# Add these to the above
+HETZNER_API_TOKEN=...
+# Then run: bash scripts/hetzner-setup-script.sh
 ```
 
 ### Add custom domain

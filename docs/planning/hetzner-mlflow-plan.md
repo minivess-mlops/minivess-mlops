@@ -1,8 +1,10 @@
 ---
 title: "Hetzner Cloud MLflow Server — Setup Plan"
-status: in-progress
+status: archived-fallback
 created: "2026-03-13"
+archived: "2026-03-13"
 replaces: oracle-config-planning.md
+replaced_by: upcloud-mlflow-plan.md (UpCloud used during free trial)
 depends_on:
   - cloud-tutorial.md
   - mlflow-deployment-storage-analysis.md
@@ -10,13 +12,17 @@ depends_on:
 
 # Hetzner Cloud MLflow Server
 
+> **STATUS: ARCHIVED FALLBACK** — UpCloud (EUR 250 free trial, 30 days) is the
+> active provider. Hetzner is the long-term fallback at EUR 3.79/month after
+> the UpCloud trial ends. All scripts and docs are preserved and ready to use.
+> See: `docs/planning/upcloud-mlflow-plan.md`
+
 **Goal:** Deploy MLflow + PostgreSQL + MinIO on a Hetzner VPS, accessible to
 SkyPilot training VMs and paper reviewers.
 
-**Why Hetzner (not Oracle):** Oracle Cloud Always Free was rejected (2026-03-13)
-due to chronic ARM capacity shortage, no region change, and terrible DevEx.
-Hetzner costs EUR 4-7/month but has: simple bearer token auth, `hcloud` CLI that
-just works, pre-built Docker images, zero capacity issues, 5-minute setup.
+**Why Hetzner as fallback:** Best price-to-value for long-term hosting.
+EUR 3.79/month for 2 vCPU, 4 GB RAM, 40 GB NVMe. Pre-built Docker images.
+Excellent `hcloud` CLI. Zero capacity issues.
 
 **Cost:** CX22 = EUR 3.79/month (~$50/year), CX32 = EUR 6.80/month (~$82/year).
 New accounts get $20 free credit (covers ~5 months of CX22).
