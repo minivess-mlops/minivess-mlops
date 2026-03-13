@@ -1,10 +1,11 @@
-"""Unit tests for DVC remote configuration (#631, T0.2).
+"""Unit tests for DVC remote configuration (#631 T0.2, #632 T0.3).
 
 Validates that .dvc/config has a properly structured 'upcloud' remote
 for S3-compatible data transport to RunPod GPU instances via SkyPilot.
 
 Approach: parse .dvc/config with configparser (INI-like format).
 No moto dependency — unit tests verify config structure only.
+DVC pull protocol tested via monkeypatch on subprocess.run (RC4).
 
 Run: uv run pytest tests/v2/unit/test_dvc_remote_config.py -v
 """
@@ -12,6 +13,7 @@ Run: uv run pytest tests/v2/unit/test_dvc_remote_config.py -v
 from __future__ import annotations
 
 import configparser
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -96,3 +98,111 @@ class TestDvcConfigureScript:
         import ast
 
         ast.parse(script.read_text(encoding="utf-8"), filename=str(script))
+
+
+class TestDvcPullProtocol:
+    """Verify DVC pull command construction via monkeypatch (#632, T0.3).
+
+    Uses monkeypatch on subprocess.run instead of moto (RC4).
+    """
+
+    def test_dvc_pull_uses_correct_remote_name(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """dvc pull -r upcloud must use 'upcloud' remote name."""
+        calls: list[list[str]] = []
+
+        def _mock_run(
+            cmd: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _mock_run)
+
+        from scripts.configure_dvc_remote import _run_dvc
+
+        _run_dvc("pull", "-r", "upcloud")
+        assert len(calls) == 1
+        assert calls[0] == ["dvc", "pull", "-r", "upcloud"]
+
+    def test_dvc_status_check_uses_upcloud_remote(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """verify_connectivity calls dvc status -r upcloud."""
+        calls: list[list[str]] = []
+
+        def _mock_run(
+            cmd: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _mock_run)
+
+        from scripts.configure_dvc_remote import verify_connectivity
+
+        env = {
+            "DVC_S3_ENDPOINT_URL": "https://test.example.com",
+            "DVC_S3_ACCESS_KEY": "key",
+            "DVC_S3_SECRET_KEY": "secret",
+            "DVC_S3_BUCKET": "minivess-dvc-data",
+        }
+        verify_connectivity(env)
+        assert any(cmd == ["dvc", "status", "-r", "upcloud"] for cmd in calls)
+
+    def test_configure_remote_sets_credentials(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """configure_remote writes endpoint, access_key, secret_key."""
+        calls: list[list[str]] = []
+
+        def _mock_run(
+            cmd: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            calls.append(list(cmd))
+            # Simulate remote listing (upcloud already exists)
+            if "list" in cmd:
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout="upcloud\ts3://minivess-dvc-data\n", stderr=""
+                )
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _mock_run)
+
+        from scripts.configure_dvc_remote import configure_remote
+
+        env = {
+            "DVC_S3_ENDPOINT_URL": "https://objects.example.com",
+            "DVC_S3_ACCESS_KEY": "AKTEST",
+            "DVC_S3_SECRET_KEY": "secret123",
+            "DVC_S3_BUCKET": "minivess-dvc-data",
+        }
+        configure_remote(env)
+
+        # Must have called dvc remote modify --local for endpoint, access_key, secret
+        modify_calls = [c for c in calls if "modify" in c]
+        assert len(modify_calls) == 3
+        assert any("endpointurl" in c for c in modify_calls)
+        assert any("access_key_id" in c for c in modify_calls)
+        assert any("secret_access_key" in c for c in modify_calls)
+
+
+class TestDvcVersionPinning:
+    """Verify DVC version pin in pyproject.toml (#632, T0.3)."""
+
+    def test_dvc_version_pinned_in_pyproject(self) -> None:
+        """pyproject.toml must pin DVC with upper bound."""
+        import tomllib
+
+        pyproject = ROOT / "pyproject.toml"
+        with pyproject.open("rb") as f:
+            config = tomllib.load(f)
+        deps = config["project"]["dependencies"]
+        dvc_deps = [d for d in deps if d.startswith("dvc")]
+        assert dvc_deps, "DVC not found in pyproject.toml dependencies"
+        # Must have version constraint (not unpinned)
+        dvc_spec = dvc_deps[0]
+        assert ">=" in dvc_spec or "==" in dvc_spec, (
+            f"DVC dependency '{dvc_spec}' must be version-pinned"
+        )
