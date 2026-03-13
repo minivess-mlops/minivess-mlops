@@ -18,6 +18,7 @@ from monai.inferers import sliding_window_inference  # type: ignore[attr-defined
 from torch.amp import GradScaler, autocast  # type: ignore[attr-defined]
 from torch.optim import SGD, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
+from torch.profiler import record_function
 
 from minivess.pipeline.loss_functions import build_loss_function
 from minivess.pipeline.multi_metric_tracker import (
@@ -290,20 +291,25 @@ class SegmentationTrainer:
 
         for batch in loader:
             # Move all tensor values to device (supports multi-task GT keys)
-            batch = {
-                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
-                for k, v in batch.items()
-            }
-            images = batch["image"]
-            labels = batch["label"]
+            with record_function("data_to_device"):
+                batch = {
+                    k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                    for k, v in batch.items()
+                }
+                images = batch["image"]
+                labels = batch["label"]
 
-            self.optimizer.zero_grad()
+            with record_function("zero_grad"):
+                self.optimizer.zero_grad()
+
             with autocast(
                 device_type=self.device.type,
                 enabled=self.config.mixed_precision,
             ):
-                output = self.model(images)
-                loss = self._compute_loss(output, batch, labels)
+                with record_function("forward"):
+                    output = self.model(images)
+                with record_function("loss_compute"):
+                    loss = self._compute_loss(output, batch, labels)
 
             if not torch.isfinite(loss):
                 msg = (
@@ -312,21 +318,22 @@ class SegmentationTrainer:
                 )
                 raise ValueError(msg)
 
-            self.scaler.scale(loss).backward()  # type: ignore[no-untyped-call]
-            if self.config.gradient_clip_val > 0:
-                self.scaler.unscale_(self.optimizer)
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(),
-                    self.config.gradient_clip_val,
-                )
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
+            with record_function("backward_optimizer"):
+                self.scaler.scale(loss).backward()  # type: ignore[no-untyped-call]
+                if self.config.gradient_clip_val > 0:
+                    self.scaler.unscale_(self.optimizer)
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(),
+                        self.config.gradient_clip_val,
+                    )
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
 
             running_loss += loss.item()
             num_batches += 1
 
             if self.metrics is not None:
-                with torch.no_grad():
+                with record_function("metrics_update"), torch.no_grad():
                     self.metrics.update(output.logits, labels)
 
         avg_loss = running_loss / max(num_batches, 1)
@@ -365,12 +372,13 @@ class SegmentationTrainer:
         collected_labels: list[np.ndarray] = []
 
         for batch in loader:
-            batch = {
-                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
-                for k, v in batch.items()
-            }
-            images = batch["image"]
-            labels = batch["label"]
+            with record_function("val_data_to_device"):
+                batch = {
+                    k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                    for k, v in batch.items()
+                }
+                images = batch["image"]
+                labels = batch["label"]
 
             with (
                 torch.no_grad(),
@@ -379,34 +387,39 @@ class SegmentationTrainer:
                     enabled=self.config.mixed_precision,
                 ),
             ):
-                # Use sliding window inference when val_roi_size is set,
-                # needed because full 512x512xZ volumes exceed GPU memory.
-                if self.val_roi_size is not None:
+                with record_function("val_forward"):
+                    # Use sliding window inference when val_roi_size is set,
+                    # needed because full 512x512xZ volumes exceed GPU memory.
+                    if self.val_roi_size is not None:
 
-                    def _model_fn(x: torch.Tensor) -> torch.Tensor:
-                        result: torch.Tensor = self.model(x).logits
-                        return result
+                        def _model_fn(x: torch.Tensor) -> torch.Tensor:
+                            result: torch.Tensor = self.model(x).logits
+                            return result
 
-                    logits_raw = sliding_window_inference(
-                        images,
-                        roi_size=self.val_roi_size,
-                        sw_batch_size=self.sw_batch_size,
-                        predictor=_model_fn,
-                        overlap=0.25,
-                    )
-                    assert isinstance(logits_raw, torch.Tensor)  # noqa: S101
-                    logits = logits_raw
-                    # Sliding window: standard loss only (no multi-task aux)
-                    from minivess.pipeline.multitask_loss import MultiTaskLoss
-
-                    if isinstance(self.criterion, MultiTaskLoss):
-                        loss = self.criterion.seg_criterion(logits, labels)
+                        logits_raw = sliding_window_inference(
+                            images,
+                            roi_size=self.val_roi_size,
+                            sw_batch_size=self.sw_batch_size,
+                            predictor=_model_fn,
+                            overlap=0.25,
+                        )
+                        assert isinstance(logits_raw, torch.Tensor)  # noqa: S101
+                        logits = logits_raw
                     else:
-                        loss = self.criterion(logits, labels)
-                else:
-                    output = self.model(images)
-                    logits = output.logits
-                    loss = self._compute_loss(output, batch, labels)
+                        output = self.model(images)
+                        logits = output.logits
+
+                with record_function("val_loss_compute"):
+                    if self.val_roi_size is not None:
+                        # Sliding window: standard loss only (no multi-task aux)
+                        from minivess.pipeline.multitask_loss import MultiTaskLoss
+
+                        if isinstance(self.criterion, MultiTaskLoss):
+                            loss = self.criterion.seg_criterion(logits, labels)
+                        else:
+                            loss = self.criterion(logits, labels)
+                    else:
+                        loss = self._compute_loss(output, batch, labels)
 
             running_loss += loss.item()
             num_batches += 1
@@ -415,18 +428,19 @@ class SegmentationTrainer:
                 self.metrics.update(logits, labels)
 
             if compute_extended:
-                # Move to CPU and convert to binary predictions
-                pred_probs = torch.softmax(logits, dim=1)
-                pred_binary = (
-                    pred_probs[:, 1:].argmax(dim=1)
-                    if logits.shape[1] > 2
-                    else (pred_probs[:, 1] > 0.5).long()
-                )
-                for b in range(images.shape[0]):
-                    pred_np = pred_binary[b].cpu().numpy().astype(np.uint8)
-                    label_np = labels[b, 0].cpu().numpy().astype(np.uint8)
-                    collected_preds.append(pred_np)
-                    collected_labels.append(label_np)
+                with record_function("val_extended_metrics"):
+                    # Move to CPU and convert to binary predictions
+                    pred_probs = torch.softmax(logits, dim=1)
+                    pred_binary = (
+                        pred_probs[:, 1:].argmax(dim=1)
+                        if logits.shape[1] > 2
+                        else (pred_probs[:, 1] > 0.5).long()
+                    )
+                    for b in range(images.shape[0]):
+                        pred_np = pred_binary[b].cpu().numpy().astype(np.uint8)
+                        label_np = labels[b, 0].cpu().numpy().astype(np.uint8)
+                        collected_preds.append(pred_np)
+                        collected_labels.append(label_np)
 
         avg_loss = running_loss / max(num_batches, 1)
         epoch_metrics: dict[str, float] = {}
