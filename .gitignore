@@ -74,3 +74,9 @@ sbom/
 
 # Debug run outputs
 outputs/debug/
+
+# Pulumi stack configs (contain encrypted secrets — per-developer)
+deployment/pulumi/Pulumi.*.yaml
+
+# MLflow server artifacts (created by MLflow server backend tests)
+mlartifacts/
