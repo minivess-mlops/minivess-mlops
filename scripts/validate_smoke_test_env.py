@@ -30,6 +30,7 @@ def _check_env_vars() -> list[str]:
         "MLFLOW_CLOUD_URI",
         "MLFLOW_CLOUD_USERNAME",
         "MLFLOW_CLOUD_PASSWORD",
+        "HF_TOKEN",
     ]
     return [v for v in required if not os.environ.get(v)]
 
