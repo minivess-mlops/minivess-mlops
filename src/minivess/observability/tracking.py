@@ -273,6 +273,93 @@ class ExperimentTracker:
         """Log a file as an MLflow artifact."""
         mlflow.log_artifact(str(local_path), artifact_path=artifact_path or None)
 
+    def log_profiling_artifacts(
+        self,
+        *,
+        trace_paths: list[Path],
+        key_averages_text: str,
+        summary_dict: dict[str, object],
+        profiling_config_dict: dict[str, object] | None = None,
+    ) -> None:
+        """Log profiling artifacts and metrics to MLflow (RC11).
+
+        Receives PRE-COMPUTED data — NOT the profiler object. This keeps
+        ExperimentTracker decoupled from torch.profiler internals.
+
+        Parameters
+        ----------
+        trace_paths:
+            List of Chrome trace files (.json.gz) on disk.
+        key_averages_text:
+            Pre-formatted key_averages table string (top-20 ops).
+        summary_dict:
+            Serializable profiling summary dict.
+        profiling_config_dict:
+            Optional ProfilingConfig as dict for logging as params.
+        """
+        import json
+        import tempfile
+
+        # 1. Upload Chrome trace files as artifacts under profiling/
+        for trace_path in trace_paths:
+            if trace_path.exists():
+                mlflow.log_artifact(str(trace_path), artifact_path="profiling")
+
+        # 2. Log key_averages text as artifact
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(key_averages_text)
+            key_avg_path = Path(f.name)
+        mlflow.log_artifact(str(key_avg_path), artifact_path="profiling")
+        key_avg_path.unlink(missing_ok=True)
+
+        # 3. Log summary.json as artifact
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8"
+        ) as f:
+            json.dump(summary_dict, f, indent=2, default=str)
+            summary_path = Path(f.name)
+        mlflow.log_artifact(str(summary_path), artifact_path="profiling")
+        summary_path.unlink(missing_ok=True)
+
+        # 4. Log summary metrics with prof_ prefix
+        if "overhead_pct" in summary_dict:
+            mlflow.log_metric(
+                "prof_overhead_pct", float(str(summary_dict["overhead_pct"]))
+            )
+        if "trace_sizes_mb" in summary_dict:
+            sizes = summary_dict["trace_sizes_mb"]
+            if isinstance(sizes, list) and sizes:
+                mlflow.log_metric(
+                    "prof_trace_size_mb", sum(float(str(s)) for s in sizes)
+                )
+
+        # 5. Log fraction metrics from summary
+        for key in (
+            "data_to_device_fraction",
+            "forward_fraction",
+            "backward_fraction",
+        ):
+            if key in summary_dict:
+                mlflow.log_metric(f"prof_{key}", float(str(summary_dict[key])))
+
+        # 6. Log profiling config as params (prof_cfg_ prefix)
+        if profiling_config_dict:
+            for key, value in profiling_config_dict.items():
+                with contextlib.suppress(Exception):
+                    mlflow.log_param(f"prof_cfg_{key}", value)
+
+        # 7. Clean up trace files from checkpoint_dir after upload
+        for trace_path in trace_paths:
+            trace_path.unlink(missing_ok=True)
+
+        logger.info(
+            "Logged %d profiling trace(s) to MLflow (overhead: %s%%)",
+            len(trace_paths),
+            summary_dict.get("overhead_pct", "N/A"),
+        )
+
     def log_test_set_hash(self, test_paths: list[str]) -> str:
         """Compute and log SHA-256 hash of test set file paths for audit trail."""
         content = "\n".join(sorted(test_paths))

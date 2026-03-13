@@ -71,6 +71,20 @@ _DDL_CHAMPION_TAGS = """
 # Suffixes that indicate a CI variant of an eval metric (not a point estimate)
 _CI_SUFFIXES = ("_ci_level", "_ci_lower", "_ci_upper")
 
+# Prefixes excluded from the training_metrics table (RC10).
+# prof_* = torch.profiler metrics, diag_* = diagnostics (WeightWatcher, pre-checks).
+# These are logged as one-shot run summaries, not per-epoch training curves.
+_EXCLUDED_METRIC_PREFIXES = ("prof_", "diag_")
+
+
+def _should_include_training_metric(metric_name: str) -> bool:
+    """Check if a metric should be included in the training_metrics table.
+
+    Excludes profiler (prof_*) and diagnostics (diag_*) metrics, which
+    are one-shot run summaries — not per-epoch training curves.
+    """
+    return not metric_name.startswith(_EXCLUDED_METRIC_PREFIXES)
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -183,7 +197,9 @@ def extract_runs_to_duckdb(
                     metric_name,
                     metrics_set,
                 )
-            elif not metric_name.startswith("eval_"):
+            elif not metric_name.startswith(
+                "eval_"
+            ) and _should_include_training_metric(metric_name):
                 # Non-eval metric: training / validation epoch curve last value
                 try:
                     value = read_metric_last_value(
