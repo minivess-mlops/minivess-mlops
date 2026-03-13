@@ -50,6 +50,12 @@ envs:
   # PyTorch CUDA memory optimization
   PYTORCH_ALLOC_CONF: "expandable_segments:True"
 
+  # HuggingFace token (required for VesselFM weight download)
+  HF_TOKEN: ${HF_TOKEN}
+
+  # Git branch to checkout (default: main; override for feature branch testing)
+  GIT_BRANCH: ${GIT_BRANCH:-main}
+
 setup: |
   # RC8: RunPod base images don't include uv
   curl -sSf https://astral.sh/uv/install.sh | sh
@@ -58,11 +64,12 @@ setup: |
   # Clone and install
   git clone https://github.com/petteriTeikari/minivess-mlops.git /app
   cd /app
+  git checkout ${GIT_BRANCH}
   uv sync --all-extras
 
   # Configure DVC remote and pull training data
   uv run python scripts/configure_dvc_remote.py
-  dvc pull -r upcloud
+  uv run dvc pull -r upcloud
 
 run: |
   source $HOME/.local/bin/env
