@@ -276,6 +276,8 @@ def train_one_fold_task(
         TrainingConfig,
     )
     from minivess.data.loader import build_train_loader, build_val_loader
+    from minivess.diagnostics.pre_training_checks import run_pre_training_checks
+    from minivess.diagnostics.weight_diagnostics import run_weightwatcher
     from minivess.pipeline.loss_functions import build_loss_function
     from minivess.pipeline.metrics import SegmentationMetrics
     from minivess.pipeline.trainer import SegmentationTrainer
@@ -466,9 +468,37 @@ def train_one_fold_task(
         }
     ):
         tracker.log_hydra_config(config)
-        return trainer.fit(
+
+        # --- Pre-training diagnostics (RC17: always run, not gated by profiling) ---
+        sample_batch = next(iter(train_loader))
+        device = torch.device(device_str)
+        sample_on_device = {
+            k: v.to(device) if isinstance(v, torch.Tensor) else v
+            for k, v in sample_batch.items()
+        }
+        pre_check_results = run_pre_training_checks(
+            model=model,
+            sample_batch=sample_on_device,
+            criterion=criterion,
+            expected_channels=model_config.out_channels,
+        )
+        errors = [
+            r for r in pre_check_results if not r.passed and r.severity == "error"
+        ]
+        if errors:
+            msg = "; ".join(f"{r.name}: {r.message}" for r in errors)
+            raise RuntimeError(f"Pre-training check failed: {msg}")
+
+        # --- Training ---
+        fit_result = trainer.fit(
             train_loader, val_loader, checkpoint_dir=checkpoint_dir, fold_id=fold_id
         )
+
+        # --- Post-training diagnostics (RC17: always run) ---
+        ww_summary = run_weightwatcher(model)
+        logger.info("WeightWatcher: %s", ww_summary)
+
+        return fit_result
 
 
 @task(name="log-fold-results")
