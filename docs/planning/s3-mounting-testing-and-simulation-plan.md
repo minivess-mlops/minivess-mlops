@@ -7,7 +7,7 @@ depends_on:
   - pulumi-upcloud-managed-deployment.md
   - cloud-tutorial.md
   - upcloud-runpod-skypilot-mlflow-integration-testing.xml
-related_issues: []
+related_issues: [642]
 ---
 
 # S3 Mounting, Testing & Simulation Plan

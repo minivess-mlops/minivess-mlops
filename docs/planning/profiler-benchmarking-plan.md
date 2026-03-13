@@ -917,22 +917,22 @@ defaults:
 
 ### Summary Table
 
-| # | Title | Phase | Priority | Est. |
-|---|-------|-------|----------|------|
-| P1.1 | Add Hydra profiling config group + ProfilingConfig model | 1 | P0 | 2h |
-| P1.2 | Add `record_function` annotations to trainer.py | 1 | P0 | 1h |
-| P1.3 | Integrate `torch.profiler.profile` context in `fit()` | 1 | P0 | 4h |
-| P1.4 | MLflow profiling artifact logging (`log_profiling_summary`) | 1 | P0 | 3h |
-| P2.1 | Pre-training sanity checks module | 2 | P1 | 3h |
-| P2.2 | Integrate pre-training checks into train_flow.py | 2 | P1 | 2h |
-| P2.3 | WeightWatcher post-training integration in train_flow | 2 | P1 | 1h |
-| P2.4 | Cleanlab label quality post-training check | 2 | P2 | 3h |
-| P3.1 | GPU benchmark script + cache YAML | 3 | P1 | 4h |
-| P3.2 | Dockerfile.benchmark + compose service | 3 | P1 | 2h |
-| P3.3 | Benchmark cache integration with training flow | 3 | P1 | 2h |
-| P4.1 | CUDA memory stats per-epoch logging | 4 | P2 | 2h |
-| P4.2 | Cloud vs. local comparison dashboard adapter | 4 | P2 | 3h |
-| P4.3 | Optional Nsight Systems integration | 4 | P3 | 3h |
+| # | Issue | Title | Phase | Priority | Est. |
+|---|-------|-------|-------|----------|------|
+| P1.1 | [#644](https://github.com/petteriTeikari/minivess-mlops/issues/644) | Add Hydra profiling config group + ProfilingConfig model | 1 | P0 | 2h |
+| P1.2 | [#645](https://github.com/petteriTeikari/minivess-mlops/issues/645) | Add `record_function` annotations to trainer.py | 1 | P0 | 1h |
+| P1.3 | [#646](https://github.com/petteriTeikari/minivess-mlops/issues/646) | Integrate `torch.profiler.profile` context in `fit()` | 1 | P0 | 4h |
+| P1.4 | [#647](https://github.com/petteriTeikari/minivess-mlops/issues/647) | MLflow profiling artifact logging (`log_profiling_summary`) | 1 | P0 | 3h |
+| P2.1 | [#648](https://github.com/petteriTeikari/minivess-mlops/issues/648) | Pre-training sanity checks module | 2 | P1 | 3h |
+| P2.2 | — | Integrate pre-training checks into train_flow.py | 2 | P1 | 2h |
+| P2.3 | [#649](https://github.com/petteriTeikari/minivess-mlops/issues/649) | WeightWatcher post-training integration in train_flow | 2 | P1 | 1h |
+| P2.4 | — | Cleanlab label quality post-training check | 2 | P2 | 3h |
+| P3.1 | [#650](https://github.com/petteriTeikari/minivess-mlops/issues/650) | GPU benchmark script + cache YAML | 3 | P1 | 4h |
+| P3.2 | [#651](https://github.com/petteriTeikari/minivess-mlops/issues/651) | Dockerfile.benchmark + compose service | 3 | P1 | 2h |
+| P3.3 | — | Benchmark cache integration with training flow | 3 | P1 | 2h |
+| P4.1 | — | CUDA memory stats per-epoch logging | 4 | P2 | 2h |
+| P4.2 | — | Cloud vs. local comparison dashboard adapter | 4 | P2 | 3h |
+| P4.3 | — | Optional Nsight Systems integration | 4 | P3 | 3h |
 
 **Total estimated effort**: ~35 hours across 14 issues.
 
