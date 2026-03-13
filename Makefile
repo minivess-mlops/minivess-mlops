@@ -71,6 +71,25 @@ test-pulumi:  ## Run Pulumi IaC validation tests
 	uv run pytest tests/v2/unit/test_pulumi_stack.py -v
 
 # ---------------------------------------------------------------------------
+# RunPod GPU Smoke Tests (manual — costs money on RunPod)
+# ---------------------------------------------------------------------------
+smoke-test-preflight:  ## Validate env vars + connectivity before GPU smoke test
+	uv run python scripts/validate_smoke_test_env.py
+
+smoke-test-gpu:  ## Launch GPU smoke test on RunPod (MODEL=sam3_vanilla)
+	@echo "=== Launching GPU smoke test: $(MODEL) on RunPod RTX 4090 ==="
+	sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+	  -e MODEL_FAMILY=$(or $(MODEL),sam3_vanilla) -y
+
+smoke-test-all:  ## Run all 3 GPU smoke tests sequentially (cost: ~$0.36)
+	$(MAKE) smoke-test-gpu MODEL=sam3_vanilla
+	$(MAKE) smoke-test-gpu MODEL=sam3_hybrid
+	$(MAKE) smoke-test-gpu MODEL=vesselfm
+
+verify-smoke-test:  ## Verify smoke test results on cloud MLflow
+	uv run python scripts/verify_smoke_test.py $(or $(MODEL),sam3_vanilla)
+
+# ---------------------------------------------------------------------------
 # Docker base image builds (3-tier hierarchy)
 # ---------------------------------------------------------------------------
 build-base-gpu:
