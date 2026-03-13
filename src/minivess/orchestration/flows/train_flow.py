@@ -81,6 +81,67 @@ def _validate_training_env() -> None:
         )
 
 
+def prepare_training_data(
+    *,
+    data_dir: Path | None = None,
+    dvc_remote: str | None = None,
+) -> dict[str, Any]:
+    """Ensure training data is available, pulling from DVC if needed.
+
+    Checks if DATA_DIR has MiniVess data files. If empty, runs
+    ``dvc pull -r <remote>`` to fetch data from the configured remote.
+
+    Parameters
+    ----------
+    data_dir:
+        Data directory to check. Defaults to DATA_DIR env var.
+    dvc_remote:
+        DVC remote name. Defaults to DVC_REMOTE env var or "minio".
+
+    Returns
+    -------
+    Dict with keys: ``pulled`` (bool), ``remote`` (str), ``duration_s`` (float).
+    """
+    import subprocess
+    import time
+
+    if data_dir is None:
+        data_dir = Path(os.environ.get("DATA_DIR", "/app/data"))
+
+    remote = dvc_remote or os.environ.get("DVC_REMOTE", "minio")
+
+    # Check if data already exists (volume-mounted in Docker)
+    images_dir = data_dir / "raw" / "minivess" / "imagesTr"
+    if images_dir.exists() and any(images_dir.iterdir()):
+        logger.info("Training data found at %s — skipping DVC pull", images_dir)
+        return {"pulled": False, "remote": remote, "duration_s": 0.0}
+
+    # Data not found — pull from DVC
+    logger.info("Training data not found. Pulling from DVC remote '%s'...", remote)
+    t0 = time.monotonic()
+    cmd = ["dvc", "pull", "-r", remote]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    duration = time.monotonic() - t0
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"DVC pull failed (exit {result.returncode}):\n{result.stderr}\n"
+            f"Command: {' '.join(cmd)}\n"
+            "Check DVC_S3_* variables in .env and run: "
+            "uv run python scripts/configure_dvc_remote.py"
+        )
+
+    # Verify data was actually pulled
+    if not images_dir.exists() or not any(images_dir.iterdir()):
+        raise FileNotFoundError(
+            f"DVC pull completed but no data at {images_dir}. "
+            "Verify DVC tracking file (data/minivess.dvc) is correct."
+        )
+
+    logger.info("DVC pull complete in %.1fs from remote '%s'", duration, remote)
+    return {"pulled": True, "remote": remote, "duration_s": duration}
+
+
 @dataclass
 class TrainingFlowResult:
     """Result returned by training_flow().
