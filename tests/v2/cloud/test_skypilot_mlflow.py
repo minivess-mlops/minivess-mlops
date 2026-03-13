@@ -32,6 +32,8 @@ class TestSkyPilotTrackingUriResolution:
         from minivess.observability.tracking import resolve_tracking_uri
 
         monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://my-mlflow-server:5000")
+        monkeypatch.delenv("MLFLOW_TRACKING_USERNAME", raising=False)
+        monkeypatch.delenv("MLFLOW_TRACKING_PASSWORD", raising=False)
         uri = resolve_tracking_uri(tracking_uri=None, use_dynaconf=False)
         assert uri == "http://my-mlflow-server:5000"
 

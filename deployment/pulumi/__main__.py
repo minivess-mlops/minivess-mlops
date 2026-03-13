@@ -136,6 +136,16 @@ s3_access_key = upcloud.ManagedObjectStorageUserAccessKey(
     status="Active",
 )
 
+# Grant the mlflow user full S3 access to both buckets.
+# Without this policy, PutObject fails with AccessDenied (#678).
+# Policy "ECSS3FullAccess" is a built-in UpCloud system policy.
+s3_policy = upcloud.ManagedObjectStorageUserPolicy(
+    "mlflow-s3-policy",
+    username=s3_user.username,
+    service_uuid=object_storage.id,
+    name="ECSS3FullAccess",
+)
+
 # ── Cloud Server (VPS) — runs MLflow only ─────────────────────────────────
 # Smallest viable plan. MLflow uses managed DB + managed S3, so the VPS
 # only needs enough resources for the MLflow Python process.

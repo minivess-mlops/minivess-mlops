@@ -36,8 +36,9 @@ help:
 # Staging: no model loading, no integration, no slow tests. Target: <3 min.
 test-staging:
 	MINIVESS_ALLOW_HOST=1 uv run pytest tests/ -x -q \
-	  -m "not model_loading and not slow and not integration" \
+	  -m "not model_loading and not slow and not integration and not cloud_mlflow and not skypilot_cloud" \
 	  --ignore=tests/v2/quasi_e2e/ \
+	  --ignore=tests/v2/cloud/ \
 	  --timeout=60
 
 # Prod: everything except GPU instance tests. Includes slow + model loading.
