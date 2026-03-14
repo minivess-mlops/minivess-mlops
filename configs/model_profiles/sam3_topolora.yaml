@@ -1,0 +1,22 @@
+name: sam3_topolora
+divisor: 16
+model_overhead_mb: 1500
+bytes_per_voxel_amp: 14
+bytes_per_voxel_fp32: 28
+max_batch_size:
+  cpu: 1
+  gpu_low: 1
+  gpu_high: 1
+  gpu_extreme: 1
+default_patch_xy: 64
+notes: >
+  SAM3 TopoLoRA (LoRA on ViT-32L FFN + trainable decoder).
+  LoRA rank=16, alpha=32 on all Conv2d/Linear in encoder.
+  topology-aware loss: cbdice_cldice.
+  CRITICAL: OOMs on RTX 4090 (24 GB) — measured 22.66 GiB PyTorch allocated.
+  Root cause: LoRA with freeze=False computes full backward through 32 ViT-32L blocks,
+  each storing activations for 5184 spatial tokens.
+  REQUIRES: gradient checkpointing (torch.utils.checkpoint) or A100 (40+ GB).
+  Code bugs fixed (dim order, FP16 cast, LoRA dtype) but VRAM remains the blocker.
+  Verified 2026-03-15 on RunPod RTX 4090 (EU-RO-1) — OOM confirmed.
+  See #680 for full context.

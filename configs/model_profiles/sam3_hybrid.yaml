@@ -22,4 +22,7 @@ notes: >
   GPU VRAM >= 16 GB strongly recommended. On 8 GB GPUs must use patch=(32,32,3);
   patch=(64,64,3) OOMs (7.18 GiB used of 7.60 GiB CUDA budget, only 76 MiB free
   vs 82 MiB needed — verified 2026-03-09 on RTX 2070 Super).
+  RTX 4090 (24 GB): trains fine with default patch. Measured 4.4s/epoch (smoke test).
+  val_interval sentinel skips validation on 8 GB — should validate on cloud (#710).
+  Verified 2026-03-15 on RunPod RTX 4090 (EU-RO-1).
   See src/minivess/adapters/CLAUDE.md for VRAM enforcement (sam3_vram_check.py).

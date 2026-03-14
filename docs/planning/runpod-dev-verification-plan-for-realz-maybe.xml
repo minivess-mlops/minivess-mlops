@@ -778,14 +778,29 @@
       </notes>
     </result>
 
-    <result model="vesselfm" phase="P3" status="FAILED">
-      <experiment>dev_2d3f8100_vesselfm (created but no runs)</experiment>
-      <error>RuntimeError: Sizes of tensors must match except in dimension 1</error>
+    <result model="vesselfm" phase="P3" status="FIXED_AND_PASSED">
+      <experiment>dev_5803ed0e_vesselfm</experiment>
+      <metrics train_loss="0.857" val_loss="0.896" train_dice="0.358" epoch_time_sec="9.3" />
+      <checkpoints count="3" />
+      <fix>Model-adaptive default_patch=(64,64,32) in train_flow.py. Z=16→Z=32 fixes skip connections.</fix>
+      <notes>First attempt failed (#711). Fixed in 627c9b9. Re-verified: PASS. #700 and #711 closed.</notes>
+    </result>
+
+    <result model="sam3_topolora" phase="P4" status="FIXED_BUT_OOM">
+      <experiment>N/A — OOM before training starts</experiment>
+      <error>torch.OutOfMemoryError: 22.66 GiB PyTorch allocated on RTX 4090 (24 GB)</error>
+      <fixes_applied>
+        1. Dim order: b,c,d,h,w → b,c,h,w,d (MONAI depth-last)
+        2. FP16 cast: fpn_features.float() after backbone
+        3. LoRA dtype: cast input to match LoRA param dtype
+        4. .weight proxy: LoRALinear exposes .weight/.bias for HF FPN code
+      </fixes_applied>
       <root_cause>
-        6-level DynUNet strides [[2,2,2]]×5 collapse Z-dimension (5-110 slices).
-        Pre-existing adapter bug — not RunPod-specific.
+        LoRA with freeze=False computes full backward through 32 ViT-32L blocks.
+        Each block stores activations for 5184 spatial tokens → 22.66 GiB.
+        RTX 4090 (24 GB) has insufficient VRAM.
       </root_cause>
-      <notes>Filed #711. Issue #700 stays open.</notes>
+      <notes>Requires gradient checkpointing or A100 (40+ GB). #680 stays open.</notes>
     </result>
 
     <result model="dynunet" phase="bonus" status="PASS">
@@ -802,6 +817,9 @@
       <learning id="L4">sky exec --env VAR (no =) passes local value automatically</learning>
       <learning id="L5">Network volume data survives across sky exec runs — DVC pull cached correctly</learning>
       <learning id="L6">HF weight cache on volume works — SAM3 weights downloaded once by sam3_vanilla, reused by sam3_hybrid</learning>
+      <learning id="L7">VesselFM 6-level DynUNet needs Z>=32 in patch — default Z=16 fails at level 4</learning>
+      <learning id="L8">sam3_topolora LoRA backward through ViT-32L uses 22.66 GiB — exceeds RTX 4090</learning>
+      <learning id="L9">LoRALinear must expose .weight/.bias properties — HF transformers accesses these directly</learning>
     </learnings>
   </execution-results>
 
