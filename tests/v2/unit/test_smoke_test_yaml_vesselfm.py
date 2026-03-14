@@ -1,11 +1,13 @@
-"""Verify smoke_test_gpu.yaml supports VesselFM + branch checkout (T2.2).
+"""Verify smoke_test_gpu.yaml supports VesselFM + Docker image_id (T2.2).
 
 Validates the SkyPilot YAML has all env vars and setup steps needed
-for VesselFM training on RunPod via SkyPilot.
+for VesselFM training on RunPod via SkyPilot with Docker image.
+
+Docker mandate: All deps baked into Docker image via image_id.
+Setup is DATA ONLY (DVC pull + config copy). No apt-get, uv sync, git clone.
 
 Failure hypotheses addressed:
   H13: splits_file ignored → setup copies smoke split to splits.json
-  H14: Python 3.13 not on RunPod → setup runs uv python install 3.13
   H15: SPLITS_DIR/CHECKPOINT_DIR missing → envs section sets them
   H17: boto3 CRC32C on RunPod → AWS_REQUEST_CHECKSUM_CALCULATION set
   H23: UUID EXPERIMENT breaks Hydra → separated via HYDRA_OVERRIDES
@@ -50,13 +52,26 @@ class TestSmokeTestYamlVesselFM:
             "run: block must compute EXPERIMENT from MODEL_FAMILY via shell expansion"
         )
 
-    def test_yaml_has_branch_checkout(self) -> None:
-        """Setup section must support git branch checkout."""
+    def test_yaml_has_docker_image_id(self) -> None:
+        """Resources must specify Docker image via image_id (bare VM is BANNED)."""
+        config = self._load_yaml()
+        resources = config.get("resources", {})
+        image_id = resources.get("image_id", "")
+        assert image_id.startswith("docker:"), (
+            f"image_id must start with 'docker:' (got '{image_id}'). "
+            "Bare VM setup scripts are BANNED — all deps in Docker image."
+        )
+
+    def test_setup_has_no_banned_commands(self) -> None:
+        """Setup must NOT contain apt-get, uv sync, git clone (Docker mandate)."""
         config = self._load_yaml()
         setup = config.get("setup", "")
-        assert "git checkout" in setup, "No git checkout in setup section"
-        envs = config.get("envs", {})
-        assert "GIT_BRANCH" in envs, "GIT_BRANCH not in envs"
+        banned = ["apt-get", "uv sync", "git clone", "pip install"]
+        for cmd in banned:
+            assert cmd not in setup, (
+                f"BANNED command '{cmd}' found in setup. "
+                "All deps must be in Docker image. Setup is DATA ONLY."
+            )
 
     def test_yaml_has_dvc_credentials(self) -> None:
         """DVC S3 credentials must be passed for data pull."""
@@ -90,11 +105,20 @@ class TestSmokeTestYamlCriticalFixes:
     def _load_yaml(self) -> dict:
         return yaml.safe_load(SMOKE_YAML.read_text(encoding="utf-8"))
 
-    def test_h14_python_install(self) -> None:
-        """H14: Setup must install Python 3.13 (RunPod has 3.10/3.11)."""
+    def test_docker_image_has_correct_registry(self) -> None:
+        """Docker image_id must reference a valid registry (not localhost)."""
         config = self._load_yaml()
-        setup = config.get("setup", "")
-        assert "uv python install" in setup, "Missing uv python install for H14"
+        resources = config.get("resources", {})
+        image_id = resources.get("image_id", "")
+        # Strip docker: prefix
+        image = image_id.removeprefix("docker:")
+        assert "/" in image, (
+            f"Docker image '{image}' must include registry (e.g., ghcr.io/user/image)"
+        )
+        # Must not be a localhost reference
+        assert not image.startswith("localhost"), (
+            "Docker image must be from a public/remote registry, not localhost"
+        )
 
     def test_h15_train_flow_env_vars(self) -> None:
         """H15: SPLITS_DIR and CHECKPOINT_DIR must be set for train_flow.py."""
