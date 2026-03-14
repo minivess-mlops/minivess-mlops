@@ -1,0 +1,826 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  RunPod Dev Environment Verification Plan v3.1 (Reviewer-Optimized)
+  ==================================================================
+  Goal: Verify end-to-end RunPod dev pipeline for heavy models (sam3_hybrid, VesselFM)
+        that cannot train on the local 8 GB GPU.
+
+  Success criteria (ALL must pass):
+    1. DVC data pulled from UpCloud S3 to RunPod pod (350 files verified)
+    2. Training completes for sam3_hybrid on RTX 4090/5090/3090
+    3. Training completes for VesselFM on RTX 4090/5090/3090
+    4. MLflow params + metrics appear on UpCloud MLflow server
+    5. Checkpoint .pth files upload to UpCloud MLflow (size > 0, not silent-fail)
+    6. Pod terminated after verification ($0 idle billing)
+
+  Architecture:
+    RunPod pod (container, NOT VM) ← SkyPilot orchestrates
+    ├── workdir: rsync (~36 MB source) via .skyignore
+    ├── setup: Python 3.13 + uv + deps + DVC pull (~8-12 min first time)
+    ├── run: python -m minivess.orchestration.flows.train_flow
+    └── MLflow → UpCloud (HTTP basic auth)
+
+  This is the "dev" environment: no Docker, no Prefect, direct execution.
+  MINIVESS_ALLOW_HOST=1 + PREFECT_DISABLED=1 are APPROVED escape hatches.
+
+  Budget: ~$2.00 total (3 models × ~$0.15-0.20 each + setup overhead + retries)
+  GPU: RTX 4090 (24 GB, $0.44/hr) primary, RTX 5090/3090 fallback. Consumer only.
+
+  Metalearning failures addressed:
+    ML-1: .skyignore unanchored globs → root-anchored, 36 MB verified
+    ML-2: RunPod container ≠ VM → no Docker-in-Docker, dev_runpod.yaml correct
+    ML-3: SkyPilot SSH needs root → N/A (dev uses workdir rsync, not image_id)
+    ML-4: Asking instead of checking → all preflight is programmatic
+    ML-5: Docker avoidance → RunPod dev is APPROVED non-Docker path
+    ML-6: SkyPilot = intercloud broker → correct usage as compute placer
+    ML-7: Bare VM setup banned → banned for staging/prod, APPROVED for dev
+    ML-8: Cloud test skip amnesia → skips treated as failures
+    ML-9: VRAM stochastic recall → all numbers from model_profiles YAML
+
+  Previous plans that failed:
+    - runpod-debug-profiling.xml (v1.0) → Docker image_id approach, never worked
+    - runpod-debug-profiling-execution-final.xml → 29 hypotheses, 80 commits, only sam3_vanilla verified
+    - runpod-debug-profiling-execution-final-debug-plan.xml → 6 systemic fixes, still no heavy model training
+    - upcloud-runpod-skypilot-mlflow-integration-testing.xml → 4 phases, never reached Phase 3 for heavy models
+
+  Why THIS plan will succeed (reviewer-hardened):
+    1. Uses dev_runpod.yaml (proven with sam3_vanilla on A40 in commit cfd8304)
+    2. Fixes the KNOWN blockers: MLFLOW_TRACKING_URI resolution (empty + literal ${})
+    3. Incrementally verifies each piece before moving to heavy models
+    4. No Docker-in-Docker attempted (architectural lesson learned)
+    5. Pre-flight is 100% programmatic (no "ask the user")
+    6. Artifact verification checks SIZE not just existence (reviewer C2 fix)
+    7. Experiment name alignment between launcher and verifier (reviewer I1 fix)
+    8. Explicit pod teardown between phases (reviewer H5/completeness fix)
+    9. Error recovery decision tree for each failure mode (reviewer completeness fix)
+    10. MLflow connectivity check FROM POD, not just local (reviewer S2 fix)
+
+  Issue refs: #688, #689, #690, #692, #683
+  Related issues: #668 (VesselFM launch), #671 (VesselFM smoke params),
+                  #674 (Hydra config artifact), #675 (sys_bench params)
+
+  Review history:
+    v3.0 — Initial plan (2026-03-14)
+    v3.1 — Incorporated 3 reviewer agents: adversarial, correctness, completeness
+           Fixed: experiment name mismatch, MLflow empty guard, python symlink,
+           cluster collision, pod cleanup, artifact size checks, error recovery,
+           cost estimates corrected, VesselFM OOM fallback added.
+-->
+<plan version="3.1" name="runpod-dev-verification">
+
+  <!-- ================================================================== -->
+  <!-- PHASE 0: Pre-Flight Validation (local, $0, ~30 min)                -->
+  <!-- ================================================================== -->
+  <phase id="P0" name="Pre-flight validation" cost="$0" effort="30 min">
+    <description>
+      Verify ALL prerequisites locally before spending any RunPod credits.
+      Every check is programmatic — NEVER ask the user about infrastructure state.
+    </description>
+
+    <task id="T0.1" name="Validate .env has all required RunPod dev vars">
+      <description>
+        Check that .env contains non-empty values for every variable that
+        dev_runpod.yaml references. Missing or empty vars cause silent failures
+        on the pod (metalearning ML-8: skip amnesia).
+      </description>
+      <tdd>
+        <red>
+          Write test that reads .env and asserts these vars are non-empty:
+          RUNPOD_API_KEY, DVC_S3_ENDPOINT_URL, DVC_S3_ACCESS_KEY,
+          DVC_S3_SECRET_KEY, DVC_S3_BUCKET, MLFLOW_CLOUD_URI,
+          MLFLOW_CLOUD_USERNAME, MLFLOW_CLOUD_PASSWORD, HF_TOKEN.
+          Test file: tests/v2/unit/test_runpod_dev_preflight.py
+        </red>
+        <green>
+          Script scripts/validate_runpod_dev_env.py that reads .env,
+          checks each required var, prints clear error for missing ones,
+          exits non-zero if any missing.
+        </green>
+      </tdd>
+      <acceptance>
+        All 9 env vars present and non-empty in .env.
+        Script exits 0. No "ask the user" — just check.
+      </acceptance>
+    </task>
+
+    <task id="T0.2" name="Verify SkyPilot RunPod backend enabled + version check">
+      <description>
+        Run 'sky check runpod' programmatically.
+        Also check SkyPilot version (task.update_envs() API requires 0.6+).
+        If it fails, print exact fix command.
+      </description>
+      <tdd>
+        <red>
+          Test that calls subprocess.run(['sky', 'check', 'runpod'])
+          and asserts returncode == 0.
+          Also check importlib.metadata.version("skypilot") >= "0.6.0".
+        </red>
+        <green>
+          Add to validate_runpod_dev_env.py: sky check + version check.
+        </green>
+      </tdd>
+      <acceptance>sky check runpod exits 0. SkyPilot >= 0.6.0.</acceptance>
+    </task>
+
+    <task id="T0.3" name="Verify UpCloud MLflow is reachable">
+      <description>
+        HTTP GET to MLFLOW_CLOUD_URI/health. Must return 200.
+        Include basic auth credentials from .env.
+        Metalearning ML-4: check programmatically, don't ask.
+      </description>
+      <tdd>
+        <red>
+          Test that reads MLFLOW_CLOUD_URI from .env,
+          sends HTTP GET with basic auth, asserts status 200.
+          Auto-skips if MLFLOW_CLOUD_URI not set (but logs WARNING, not silent skip).
+        </red>
+        <green>
+          Add to validate_runpod_dev_env.py: urllib.request with basic auth.
+        </green>
+      </tdd>
+      <acceptance>MLflow health endpoint returns HTTP 200.</acceptance>
+    </task>
+
+    <task id="T0.4" name="Verify DVC data synced to UpCloud S3">
+      <description>
+        Run 'dvc status -r upcloud' and check output.
+        Data must already be pushed (350 files, ~2.6 GB).
+      </description>
+      <tdd>
+        <red>
+          Test that runs dvc status -r upcloud and asserts no
+          "new" or "modified" entries (all in sync).
+        </red>
+        <green>
+          Add to validate_runpod_dev_env.py: subprocess dvc status check.
+          If not synced, print: "Run 'dvc push -r upcloud' first."
+        </green>
+      </tdd>
+      <acceptance>DVC remote status shows "Data and calculation will not change" or empty diff.</acceptance>
+    </task>
+
+    <task id="T0.5" name="Verify .skyignore sync size + critical file inclusion">
+      <description>
+        Metalearning ML-1: unanchored globs caused 12 GB syncs.
+        Measure actual sync size. Must be under 100 MB.
+        Current measurement: 2955 files, 36.5 MB.
+
+        REVIEWER FIX: Also verify critical files are NOT excluded:
+        - configs/splits/smoke_test_1fold_4vol.json (needed by setup block)
+        - configs/experiment/smoke_*.yaml (needed by run block)
+        - src/minivess/ (the actual code)
+        Print top-10 largest synced files for surprise detection.
+      </description>
+      <tdd>
+        <red>
+          Test that walks the project directory respecting .skyignore
+          patterns and asserts:
+          1. Total size under 100 MB
+          2. configs/splits/smoke_test_1fold_4vol.json IS included
+          3. configs/experiment/smoke_dynunet.yaml IS included
+        </red>
+        <green>
+          Add to validate_runpod_dev_env.py: os.walk with exclusion logic,
+          sum file sizes, check critical file inclusion, print top-10 largest.
+        </green>
+      </tdd>
+      <acceptance>
+        Sync size under 100 MB. Critical files included.
+        Print actual size + top-10 for operator awareness.
+      </acceptance>
+    </task>
+
+    <task id="T0.6" name="Harden MLFLOW_TRACKING_URI env var resolution">
+      <description>
+        KNOWN BUG (issue #689): dev_runpod.yaml has
+        MLFLOW_TRACKING_URI: ${MLFLOW_CLOUD_URI} in envs section.
+        SkyPilot may pass this literally (not resolved) OR as empty string.
+
+        launch_dev_runpod.py ALREADY handles this correctly (lines 109-124):
+        it reads MLFLOW_CLOUD_URI from .env and sets MLFLOW_TRACKING_URI
+        directly via task.update_envs(). The YAML envs section is a fallback.
+
+        REVIEWER FIX (C2): Guard must catch THREE failure modes:
+        1. Literal "${MLFLOW_CLOUD_URI}" string (SkyPilot didn't resolve)
+        2. Empty string (MLFLOW_CLOUD_URI was empty in .env)
+        3. "mlruns" fallback (resolve_tracking_uri() silent default)
+        All three result in artifacts going to local disk and being lost.
+
+        REVIEWER FIX (S2): Also test MLflow connectivity FROM the pod,
+        not just from local machine. Pod may have different network path.
+      </description>
+      <tdd>
+        <red>
+          Test that parses dev_runpod.yaml run: block and asserts
+          it contains guards for all three MLFLOW_TRACKING_URI failure modes.
+        </red>
+        <green>
+          Add to dev_runpod.yaml run block (before training execution):
+          ```
+          echo "MLflow URI resolved: ${MLFLOW_TRACKING_URI}"
+          echo "MLflow auth: ${MLFLOW_TRACKING_USERNAME}"
+          # Guard: catch literal ${}, empty, or local-only URI
+          if [ -z "${MLFLOW_TRACKING_URI}" ] || \
+             [ "${MLFLOW_TRACKING_URI}" = "mlruns" ] || \
+             echo "${MLFLOW_TRACKING_URI}" | grep -q '[$]{'; then
+            echo "FATAL: MLFLOW_TRACKING_URI is empty, local-only, or unresolved."
+            echo "Value: '${MLFLOW_TRACKING_URI}'"
+            echo "Use launch_dev_runpod.py, not 'sky launch' directly."
+            exit 1
+          fi
+          # Guard: MLflow auth must be set
+          if [ -z "${MLFLOW_TRACKING_USERNAME}" ] || [ -z "${MLFLOW_TRACKING_PASSWORD}" ]; then
+            echo "FATAL: MLflow auth credentials missing."
+            exit 1
+          fi
+          # Connectivity check from pod (reviewer S2)
+          if ! curl -sf -u "${MLFLOW_TRACKING_USERNAME}:${MLFLOW_TRACKING_PASSWORD}" \
+               "${MLFLOW_TRACKING_URI}/health" > /dev/null 2>&amp;1; then
+            echo "WARNING: Cannot reach MLflow from pod: ${MLFLOW_TRACKING_URI}"
+            echo "Training will proceed but artifacts may not upload."
+          fi
+          ```
+        </green>
+      </tdd>
+      <acceptance>
+        Run block contains guards for all three failure modes.
+        MLflow connectivity tested from pod before training starts.
+      </acceptance>
+    </task>
+
+    <task id="T0.7" name="Fix python symlink in setup block">
+      <description>
+        REVIEWER FIX (C1): The setup block uses bare `python` for weight
+        downloads and verification after creating a Python 3.13 venv.
+        If the venv only creates `python3.13` symlink (not `python`),
+        bare `python` resolves to system Python 3.10/3.11 which lacks
+        project deps. Weight downloads fail silently (|| true), and
+        verification checks crash on import.
+
+        Fix: Use explicit ${WORKDIR}/.venv/bin/python for all calls,
+        or add symlink verification after venv creation.
+      </description>
+      <tdd>
+        <red>
+          Test that parses dev_runpod.yaml setup: block and asserts
+          no bare `python -c` calls exist after venv creation —
+          all should use explicit venv path or ${WORKDIR}/.venv/bin/python.
+        </red>
+        <green>
+          In dev_runpod.yaml setup block, after venv creation add:
+          ```
+          # Verify python symlink exists in venv (reviewer C1 fix)
+          ls -la ${WORKDIR}/.venv/bin/python* | head -5
+          ```
+          Replace all `python -c` calls with `${WORKDIR}/.venv/bin/python -c`
+          or simply ensure `python` is on PATH via the export.
+        </green>
+      </tdd>
+      <acceptance>
+        All python calls in setup use explicit venv python.
+        `python --version` in setup shows 3.13, not system Python.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: DynUNet Plumbing Test (RunPod, ~$0.15, ~20 min)           -->
+  <!-- ================================================================== -->
+  <phase id="P1" name="DynUNet plumbing test" cost="~$0.15" effort="20 min">
+    <description>
+      Cheapest possible E2E test: DynUNet (3.5 GB VRAM) on RunPod RTX 4090.
+      This verifies the plumbing (DVC pull, training, MLflow upload) works
+      before risking credits on heavy models.
+
+      DynUNet can train locally on 8 GB GPU, but this test validates the
+      CLOUD PIPELINE, not the model.
+
+      Cost: RTX 4090 $0.44/hr × ~20 min (setup + training) = ~$0.15
+    </description>
+    <depends-on>P0 (all tasks green)</depends-on>
+
+    <task id="T1.1" name="Launch DynUNet on RunPod + teardown after">
+      <description>
+        Run: uv run python scripts/launch_dev_runpod.py --model dynunet
+        (or: make dev-gpu MODEL=dynunet)
+
+        Monitor via: sky logs minivess-dev
+
+        REVIEWER FIX (H5): After training completes and verification passes,
+        tear down the cluster: sky down minivess-dev -y
+        This prevents idle billing between phases.
+
+        Expected:
+        - Setup phase: ~8-12 min (Python install, uv sync, DVC pull)
+        - Training phase: ~2-3 min (2 epochs, 1 fold, 4 volumes)
+        - Total: ~15-20 min
+        - Cost: ~$0.15 (RTX 4090 $0.44/hr × 0.33 hr)
+      </description>
+      <acceptance>
+        sky logs shows "Training complete" or train_flow.py exit 0.
+        Pod status: SUCCEEDED (not FAILED, not CANCELLED).
+      </acceptance>
+    </task>
+
+    <task id="T1.2" name="Verify MLflow artifacts on UpCloud (with size + sanity checks)">
+      <description>
+        Query UpCloud MLflow server for the DynUNet training run.
+
+        REVIEWER FIX (I1): dev_runpod.yaml creates experiments named
+        "dev_{uuid}_{model}" (line 216), NOT "smoke_test_{model}".
+        The verification script must search for "dev_" prefix, not "smoke_test_".
+
+        Verify:
+        1. Run exists with status FINISHED
+        2. Params logged (model_family=dynunet, loss_name, max_epochs)
+        3. Metrics logged: train_loss present AND 0.01 &lt; train_loss &lt; 5.0
+           (REVIEWER FIX: sanity range, not just "exists")
+        4. Artifacts present AND total size > 1 MB for DynUNet
+           (REVIEWER FIX: check size, not just count.
+            DynUNet checkpoint ~4 MB; 0-byte = truncated upload)
+        5. Hydra config artifact logged (issue #674)
+
+        CRITICAL: If params/metrics logged but NO artifacts,
+        that's the silent upload failure from commit da4d93a.
+        This must be caught, not ignored.
+      </description>
+      <tdd>
+        <red>
+          Test that queries UpCloud MLflow API for the most recent
+          experiment matching "dev_*_dynunet", asserts:
+          - run.info.status == "FINISHED"
+          - "model_family" in run.data.params
+          - train_loss in run.data.metrics, 0.01 &lt; value &lt; 5.0
+          - artifacts exist with total size > 1 MB
+        </red>
+        <green>
+          Update scripts/verify_smoke_test.py to:
+          1. Search for both "dev_" and "smoke_test_" experiment prefixes
+          2. Add artifact size check via client.list_artifacts()
+          3. Add train_loss sanity range check
+          If artifacts empty or undersized: "FAIL: Artifacts not uploaded.
+          Check MLFLOW_TRACKING_URI resolution on the pod."
+        </green>
+      </tdd>
+      <acceptance>
+        Run FINISHED + params + metrics (sensible values) + artifacts (> 1 MB).
+        If artifacts missing or zero-size: FAIL (do not proceed to Phase 2).
+      </acceptance>
+    </task>
+
+    <task id="T1.3" name="Teardown Phase 1 pod">
+      <description>
+        REVIEWER FIX (H5, H4): Tear down cluster between phases to:
+        1. Prevent idle billing
+        2. Force fresh setup for Phase 2 (avoids state leakage)
+        3. Prevent cluster name collision with next launch
+
+        Run: sky down minivess-dev -y
+        Verify: sky status shows no minivess-dev cluster.
+      </description>
+      <acceptance>
+        No minivess-dev cluster in sky status output.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: sam3_hybrid Heavy Model Test (RunPod, ~$0.20, ~25 min)    -->
+  <!-- ================================================================== -->
+  <phase id="P2" name="sam3_hybrid verification" cost="~$0.20" effort="25 min">
+    <description>
+      First heavy model that CANNOT train on the local 8 GB GPU.
+      sam3_hybrid: 7.18 GiB measured at peak on RTX 2070 Super (64x64x3 patch),
+      which OOMed on the 8 GB card. Needs ≥16 GB recommended.
+      On RTX 4090 (24 GB): plenty of headroom.
+
+      VRAM source: configs/model_profiles/sam3_hybrid.yaml
+      (metalearning ML-9: never estimate, always read the file)
+
+      REVIEWER FIX (I4): sam3_hybrid 7.18 GiB was the peak-at-OOM on 8 GB card,
+      not a successful training measurement. Actual training VRAM on RTX 4090
+      will be measured here for the first time.
+    </description>
+    <depends-on>P1 (T1.2 + T1.3 green — plumbing verified, pod torn down)</depends-on>
+
+    <task id="T2.1" name="Launch sam3_hybrid on RunPod">
+      <description>
+        Run: uv run python scripts/launch_dev_runpod.py --model sam3_hybrid
+        (or: make dev-gpu MODEL=sam3_hybrid)
+
+        Uses smoke_sam3_hybrid experiment config:
+        - 2 epochs, 1 fold, 4 volumes
+        - val_interval=3 (> max_epochs=2, so validation skipped — OOM prevention)
+        - pretrained: false (smoke test validates pipeline, not pretrained quality)
+
+        Expected:
+        - Setup: ~8-12 min (fresh pod, full install + DVC pull)
+        - Training: ~5-8 min
+        - Cost: ~$0.15-0.20 (RTX 4090 $0.44/hr × ~0.4 hr)
+      </description>
+      <acceptance>
+        Training completes without OOM.
+        Pod status: SUCCEEDED.
+      </acceptance>
+    </task>
+
+    <task id="T2.2" name="Verify sam3_hybrid artifacts on UpCloud MLflow">
+      <description>
+        Same verification as T1.2 but for sam3_hybrid:
+        1. Run FINISHED on UpCloud MLflow
+        2. model_family=sam3_hybrid in params
+        3. train_loss metric: present AND 0.01 &lt; value &lt; 5.0
+        4. Checkpoint artifact uploaded AND size > 1 MB
+           (sam3_hybrid checkpoint ~2.5 GB — if size &lt; 100 MB, truncated)
+
+        Record actual VRAM usage from pod logs:
+        - Run `nvidia-smi` after training in run block
+        - Extract prof_cuda_peak_allocated_mb from MLflow metrics if profiling enabled
+        - Or check sky logs for nvidia-smi output during setup verification
+
+        REVIEWER FIX: Add post-training nvidia-smi to run block.
+      </description>
+      <acceptance>
+        Run FINISHED + params + metrics + artifacts (&gt; 1 MB) on UpCloud MLflow.
+        Measured VRAM recorded in issue #688 comment.
+      </acceptance>
+    </task>
+
+    <task id="T2.3" name="Teardown Phase 2 pod">
+      <description>
+        Tear down cluster for fresh Phase 3 start.
+        Run: sky down minivess-dev -y
+      </description>
+      <acceptance>No minivess-dev cluster in sky status.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: VesselFM Heavy Model Test (RunPod, ~$0.25, ~30 min)       -->
+  <!-- ================================================================== -->
+  <phase id="P3" name="VesselFM verification" cost="~$0.25" effort="30 min">
+    <description>
+      Second heavy model that CANNOT train on the local 8 GB GPU.
+      VesselFM needs ~10 GB VRAM (ESTIMATED, not yet measured).
+      On RTX 4090 (24 GB): should fit with margin.
+
+      VRAM source: configs/model_profiles/vesselfm.yaml
+      Note: This phase will provide the FIRST real measurement.
+
+      REVIEWER FIX: VesselFM OOM fallback documented in error recovery section.
+    </description>
+    <depends-on>P2 (T2.2 + T2.3 green — sam3_hybrid works, pod torn down)</depends-on>
+
+    <task id="T3.1" name="Launch VesselFM on RunPod">
+      <description>
+        Run: uv run python scripts/launch_dev_runpod.py --model vesselfm
+        (or: make dev-gpu MODEL=vesselfm)
+
+        Uses smoke_vesselfm experiment config:
+        - 2 epochs, 1 fold, 4 volumes
+        - HF_TOKEN required for weight download (pre-cached in setup)
+
+        REVIEWER FIX: If VesselFM OOMs on RTX 4090 (unlikely but possible
+        since VRAM is ESTIMATED at ~10 GB), fallback options:
+        a) Reduce patch_size in smoke_vesselfm.yaml
+        b) Ensure AMP/FP16 is enabled
+        c) Try A40 (48 GB, $0.39/hr on RunPod) — needs accelerators list update
+        d) File issue documenting actual VRAM and skip this phase
+
+        Expected:
+        - Setup: ~10-15 min (VesselFM weights download from HF)
+        - Training: ~8-10 min
+        - Cost: ~$0.20-0.25 (RTX 4090 $0.44/hr × ~0.5 hr)
+      </description>
+      <acceptance>
+        Training completes without OOM.
+        Pod status: SUCCEEDED.
+      </acceptance>
+    </task>
+
+    <task id="T3.2" name="Verify VesselFM artifacts on UpCloud MLflow">
+      <description>
+        Same verification as T2.2 but for VesselFM:
+        1. Run FINISHED on UpCloud MLflow
+        2. model_family=vesselfm in params
+        3. train_loss metric: present AND 0.01 &lt; value &lt; 5.0
+        4. Checkpoint artifact uploaded AND size > 1 MB
+           (VesselFM checkpoint ~120 MB)
+
+        Record ACTUAL VRAM usage — this will be the FIRST measurement.
+      </description>
+      <acceptance>
+        Run FINISHED + params + metrics + artifacts on UpCloud MLflow.
+        VesselFM VRAM measured and recorded.
+      </acceptance>
+    </task>
+
+    <task id="T3.3" name="Final pod teardown">
+      <description>
+        Tear down cluster after all verification complete.
+        Run: sky down minivess-dev -y
+        Verify no RunPod pods remain running.
+      </description>
+      <acceptance>No minivess-dev cluster. Zero ongoing RunPod billing.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: Documentation, Cost Audit, and Issue Closure ($0, ~30 min) -->
+  <!-- ================================================================== -->
+  <phase id="P4" name="Documentation and closure" cost="$0" effort="30 min">
+    <description>
+      Record results, update documentation, close issues, verify costs.
+      This phase makes the work permanent and discoverable.
+    </description>
+    <depends-on>P3 (T3.3 green — all models verified, pods down)</depends-on>
+
+    <task id="T4.1" name="Update issue #688 with verified results + actual costs">
+      <description>
+        Post comment on #688 with:
+        - DynUNet: VRAM, duration, cost, MLflow run ID
+        - sam3_hybrid: VRAM, duration, cost, MLflow run ID
+        - VesselFM: VRAM, duration, cost, MLflow run ID
+        - Total ACTUAL cost vs budget ($2.00)
+        - Close issue as verified.
+
+        REVIEWER FIX: Include actual costs from RunPod billing dashboard.
+        Compare against budget. Record any variance.
+      </description>
+      <acceptance>Issue #688 closed with verification evidence + cost audit.</acceptance>
+    </task>
+
+    <task id="T4.2" name="Close related issues with evidence">
+      <description>
+        Close or update these issues based on verification results:
+        - #689: MLFLOW_TRACKING_URI resolution → close if artifacts appeared
+        - #668: VesselFM training launch → close if Phase 3 succeeded
+        - #671: VesselFM smoke test params → close if params verified
+        - #674: Hydra config artifact → close if config artifact in MLflow
+        - #675: sys_bench params → close if bench metrics logged
+        If NOT working, update each with diagnostics from pod logs.
+      </description>
+      <acceptance>Related issues closed or updated with evidence.</acceptance>
+    </task>
+
+    <task id="T4.3" name="Update model profiles with measured VRAM">
+      <description>
+        Update configs/model_profiles/sam3_hybrid.yaml and
+        configs/model_profiles/vesselfm.yaml with measured values
+        from RTX 4090 training runs.
+        Metalearning ML-9: measured > estimated, always.
+
+        Add fields to notes section:
+          rtx4090_training_vram_gb: X.X
+          rtx4090_measured_date: "2026-03-14"
+          rtx4090_patch_size: [64, 64, 3]
+      </description>
+      <acceptance>
+        Both model profiles have RTX 4090 training VRAM measurements.
+      </acceptance>
+    </task>
+
+    <task id="T4.4" name="Document RunPod dev workflow">
+      <description>
+        Add clear section to deployment/CLAUDE.md or similar explaining:
+        - When to use RunPod (dev, no Docker, quick prototyping, >8 GB VRAM models)
+        - When to use Lambda Labs (staging/prod, Docker mandatory)
+        - make dev-gpu MODEL=X as the primary command
+        - make dev-gpu-heavy for sam3_hybrid + vesselfm
+        - EXPERIMENT env var auto-maps to configs/experiment/smoke_{model}.yaml
+        - Prerequisites: .env with all cloud vars populated
+        - Cost estimates per model (measured, not estimated)
+      </description>
+      <acceptance>
+        Documentation exists explaining the three-environment model
+        with concrete commands and measured cost/VRAM data.
+      </acceptance>
+    </task>
+
+    <task id="T4.5" name="Update MEMORY.md with verification results">
+      <description>
+        REVIEWER FIX (CLAUDE.md Rule #14): Persist all insights to durable files.
+        Update MEMORY.md with:
+        - RunPod verification complete date
+        - Measured VRAM for sam3_hybrid and VesselFM on RTX 4090
+        - Actual cost of verification
+        - Any surprises or lessons learned
+      </description>
+      <acceptance>MEMORY.md updated with verification results.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- ANTI-PATTERNS CHECKLIST (from 9 metalearning docs)                 -->
+  <!-- ================================================================== -->
+  <anti-patterns>
+    <check id="AP-1" name="No unanchored .skyignore globs">
+      Verified: .skyignore uses /data/ not data/. Sync size: 36.5 MB.
+    </check>
+    <check id="AP-2" name="No Docker-in-Docker on RunPod">
+      dev_runpod.yaml has NO image_id field. Correct for container-based RunPod.
+    </check>
+    <check id="AP-3" name="No non-root user issues">
+      N/A for dev_runpod.yaml (uses workdir rsync, not Docker image_id).
+      SkyPilot SSHes as root into RunPod pod regardless.
+    </check>
+    <check id="AP-4" name="No asking user about infrastructure">
+      All preflight checks in T0.1-T0.5 are programmatic.
+      validate_runpod_dev_env.py checks everything.
+    </check>
+    <check id="AP-5" name="Docker avoidance acknowledged">
+      RunPod dev is the APPROVED non-Docker escape hatch (CLAUDE.md).
+      MINIVESS_ALLOW_HOST=1 + PREFECT_DISABLED=1 are explicitly permitted.
+    </check>
+    <check id="AP-6" name="SkyPilot correctly described">
+      SkyPilot = intercloud broker (compute placement), not IaC.
+      SkyPilot decides cheapest GPU from {RTX4090, RTX5090, RTX3090}.
+    </check>
+    <check id="AP-7" name="Bare VM setup is approved for dev">
+      dev_runpod.yaml uses uv sync in setup block — APPROVED for dev tier.
+      Staging/prod must use Docker image_id (Lambda Labs).
+    </check>
+    <check id="AP-8" name="No skip amnesia">
+      T0.1 treats missing env vars as FATAL, not skip.
+      T1.2 treats empty artifacts as FATAL, not "expected".
+      REVIEWER FIX: T1.2 also checks artifact SIZE, not just existence.
+    </check>
+    <check id="AP-9" name="VRAM from model profiles only">
+      sam3_hybrid: configs/model_profiles/sam3_hybrid.yaml
+      VesselFM: configs/model_profiles/vesselfm.yaml
+      No estimates from architecture descriptions.
+      REVIEWER FIX: sam3_hybrid 7.18 GiB is OOM-at-peak, not training success.
+    </check>
+    <check id="AP-10" name="No cluster name collision (REVIEWER NEW)">
+      Each phase tears down minivess-dev before next phase launches.
+      Prevents state leakage, stale setup, and naming conflicts.
+    </check>
+    <check id="AP-11" name="No bare python calls in venv context (REVIEWER NEW)">
+      All python -c calls in setup use ${WORKDIR}/.venv/bin/python
+      or are after explicit PATH export verified by symlink check.
+    </check>
+  </anti-patterns>
+
+  <!-- ================================================================== -->
+  <!-- ERROR RECOVERY DECISION TREE (REVIEWER NEW)                        -->
+  <!-- ================================================================== -->
+  <error-recovery>
+    <scenario name="sky launch fails immediately">
+      <diagnostic>
+        1. Check sky check runpod output — API key valid?
+        2. Check GPU availability: sky show-gpus --cloud runpod
+        3. If all GPUs sold out: wait and retry, or fall back to Lambda Labs
+      </diagnostic>
+    </scenario>
+
+    <scenario name="Setup fails (non-zero exit)">
+      <diagnostic>
+        1. sky logs minivess-dev --setup — find specific error line
+        2. If Python install fails: deadsnakes PPA may be down, use default Python
+        3. If uv sync fails: missing system library. SSH in (make dev-gpu-ssh),
+           run uv sync --all-extras manually, note missing apt packages
+        4. If DVC pull fails: check S3 credentials, UpCloud endpoint reachability
+           SSH in, run dvc pull -r upcloud -v for verbose output
+      </diagnostic>
+    </scenario>
+
+    <scenario name="Training fails but setup succeeded">
+      <diagnostic>
+        1. sky logs minivess-dev — find Python traceback
+        2. If CUDA OOM: check model profile VRAM vs actual GPU. Reduce patch_size.
+        3. If MLflow connection error: check MLFLOW_TRACKING_URI diagnostic output
+        4. If import error: uv sync missed a dep. SSH in, install manually.
+        5. If HF weight download error: check HF_TOKEN, try manual download
+      </diagnostic>
+    </scenario>
+
+    <scenario name="Training succeeds but MLflow empty on UpCloud">
+      <diagnostic>
+        1. Check pod logs for MLFLOW_TRACKING_URI diagnostic echo
+        2. If URI was local "mlruns": launcher didn't set env var correctly
+        3. If URI was correct but artifacts empty: connection dropped during upload
+           → increase MLFLOW_ARTIFACT_UPLOAD_DOWNLOAD_TIMEOUT
+           → try: SSH to pod, manually upload checkpoint via mlflow CLI
+        4. If params/metrics present but artifacts empty: try/except in upload
+           code swallowed the error (commit da4d93a) → fix the swallowing
+      </diagnostic>
+    </scenario>
+
+    <scenario name="VesselFM OOM on RTX 4090">
+      <diagnostic>
+        1. Check nvidia-smi output for peak VRAM
+        2. ESTIMATED 10 GB may be wrong — first real measurement
+        3. Fallback options (in order):
+           a. Reduce patch_size in smoke_vesselfm.yaml (smallest that works)
+           b. Enable gradient checkpointing if supported
+           c. Try A40 (48 GB, $0.39/hr) — add to accelerators temporarily
+           d. File issue with measured VRAM, skip this phase, revisit later
+      </diagnostic>
+    </scenario>
+
+    <scenario name="Pod keeps running after training (idle billing)">
+      <diagnostic>
+        1. Check idle_minutes_to_autostop setting (should be 15)
+        2. Manual stop: sky down minivess-dev -y
+        3. Verify: sky status — no clusters listed
+        4. If sky down fails: use RunPod console to terminate pod directly
+      </diagnostic>
+    </scenario>
+  </error-recovery>
+
+  <!-- ================================================================== -->
+  <!-- RISK ASSESSMENT                                                     -->
+  <!-- ================================================================== -->
+  <risks>
+    <risk id="R1" severity="HIGH" name="MLflow artifact upload fails silently">
+      <description>
+        Commit da4d93a wrapped uploads in try/except. Large .pth files
+        may fail to upload to UpCloud MLflow (connection drops).
+      </description>
+      <mitigation>
+        T1.2 checks artifact SIZE, not just existence (reviewer fix).
+        If empty or undersized: do NOT proceed, fix upload first.
+        Potential fix: increase MLFLOW_ARTIFACT_UPLOAD_DOWNLOAD_TIMEOUT.
+        Fallback: SSH to pod, manually upload via mlflow CLI.
+      </mitigation>
+    </risk>
+
+    <risk id="R2" severity="HIGH" name="MLFLOW_TRACKING_URI resolves to empty or local">
+      <description>
+        REVIEWER FIX (C2): Three failure modes for the URI:
+        1. Literal "${MLFLOW_CLOUD_URI}" (SkyPilot didn't resolve)
+        2. Empty string (MLFLOW_CLOUD_URI empty in .env)
+        3. "mlruns" (resolve_tracking_uri() silent fallback)
+        All three cause artifacts to go to local disk and be lost.
+      </description>
+      <mitigation>
+        T0.6 adds guards for all three modes in the run block.
+        Training will ABORT if URI is empty, local, or unresolved.
+      </mitigation>
+    </risk>
+
+    <risk id="R3" severity="MEDIUM" name="RunPod RTX 4090/5090/3090 all sold out">
+      <description>
+        RunPod community GPUs have limited availability.
+        All three consumer GPU types might be unavailable.
+      </description>
+      <mitigation>
+        Budget allows retries. SkyPilot queues and retries automatically.
+        If consistently unavailable: fall back to Lambda Labs A10 for verification.
+      </mitigation>
+    </risk>
+
+    <risk id="R4" severity="MEDIUM" name="uv sync fails on RunPod base image">
+      <description>
+        RunPod's pre-cached image may lack system libraries for compiled
+        Python packages (h5py, lxml, psycopg2, etc.).
+        REVIEWER FIX: SkyPilot injects its own runtime (SSH, ray) which
+        may conflict with Python 3.13 + project deps.
+      </description>
+      <mitigation>
+        dev_runpod.yaml installs Python 3.13 from deadsnakes PPA.
+        If fails: SSH in, check specific error, install missing apt packages.
+        Last resort: switch to RunPod PyTorch template (has more system deps).
+      </mitigation>
+    </risk>
+
+    <risk id="R5" severity="MEDIUM" name="Cluster name collision between phases">
+      <description>
+        REVIEWER FIX (H4): All phases use cluster name "minivess-dev".
+        If Phase 1 pod is still running when Phase 2 launches,
+        SkyPilot may reuse the pod without re-running setup.
+      </description>
+      <mitigation>
+        Explicit sky down between phases (T1.3, T2.3, T3.3).
+        Each phase starts fresh with full setup.
+      </mitigation>
+    </risk>
+
+    <risk id="R6" severity="LOW" name="VesselFM HF weight download timeout">
+      <description>
+        VesselFM weights (~2 GB) downloaded during setup via HuggingFace.
+        RunPod pod network may be slow.
+      </description>
+      <mitigation>
+        Setup block pre-caches weights with || true (non-fatal).
+        If download fails: training will re-attempt in train_flow.py.
+        HF_TOKEN is in .env and passed to pod.
+      </mitigation>
+    </risk>
+  </risks>
+
+  <!-- ================================================================== -->
+  <!-- COST SUMMARY (REVIEWER-CORRECTED)                                  -->
+  <!-- ================================================================== -->
+  <cost-summary>
+    <!-- REVIEWER FIX (M1): Corrected cost estimates.
+         RTX 4090 = $0.44/hr. Per-phase costs include setup overhead. -->
+    <item phase="P0" cost="$0.00">Pre-flight (all local)</item>
+    <item phase="P1" cost="~$0.15">DynUNet plumbing (20 min @ $0.44/hr)</item>
+    <item phase="P2" cost="~$0.20">sam3_hybrid verification (25 min @ $0.44/hr)</item>
+    <item phase="P3" cost="~$0.25">VesselFM verification (30 min @ $0.44/hr)</item>
+    <item phase="P4" cost="$0.00">Documentation (all local)</item>
+    <total>~$0.60 happy path, ~$1.50 with retries, $2.00 hard cap</total>
+  </cost-summary>
+
+</plan>
