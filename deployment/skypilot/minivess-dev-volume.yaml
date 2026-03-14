@@ -12,5 +12,5 @@
 
 name: minivess-dev
 type: runpod-network-volume
-infra: runpod/US/US-TX-3
+infra: runpod/RO/EU-RO-1
 size: 50Gi
