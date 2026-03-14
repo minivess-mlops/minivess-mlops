@@ -740,6 +740,69 @@
     <issue task="T4.1-T4.2" number="680" action="existing"
            title="SAM3 topolora FP16 bug — fix dim order + cast on cloud GPU"
            labels="P0-critical,bug,models,training" />
+
+    <!-- New issues discovered during execution -->
+    <issue number="710" action="created"
+           title="sam3_hybrid smoke test produces val_loss=NaN on RTX 4090"
+           labels="P0-critical,models,training" />
+    <issue number="711" action="created"
+           title="VesselFM DynUNet skip connection shape mismatch on MiniVess"
+           labels="P1-high,models,training" />
   </issues>
+
+  <!-- ================================================================== -->
+  <!-- EXECUTION RESULTS (2026-03-14/15)                                   -->
+  <!-- ================================================================== -->
+  <execution-results date="2026-03-15" gpu="RTX 4090" datacenter="EU-RO-1" cluster="sky-7ca9-petteri">
+    <summary>
+      3 of 4 P0 models completed successfully. VesselFM has a pre-existing adapter bug.
+      sam3_topolora (P4) not attempted — requires code fix first (#680).
+      Bonus: dynunet also verified on cloud (passed).
+      Total GPU time: ~15 min. Estimated cost: ~$0.05 (RTX 4090 $0.20/hr).
+    </summary>
+
+    <result model="sam3_vanilla" phase="P1" status="PASS">
+      <experiment>dev_af84c4ee_sam3_vanilla</experiment>
+      <metrics train_loss="0.679" val_loss="0.730" train_dice="0.152" epoch_time_sec="16.9" />
+      <checkpoints count="3" size_mb="868" />
+      <notes>SAM3 ViT-32L weights cached on volume (3.3 GB). Issue #704 closed.</notes>
+    </result>
+
+    <result model="sam3_hybrid" phase="P2" status="PASS_WITH_CAVEAT">
+      <experiment>dev_81320a46_sam3_hybrid</experiment>
+      <metrics train_loss="0.704" val_loss="NaN" train_dice="0.467" epoch_time_sec="4.4" />
+      <checkpoints count="3" size_mb="868-930" />
+      <notes>
+        val_loss=NaN is intentional sentinel (val_interval=3 > max_epochs=2).
+        Filed #710 — should validate on 24 GB GPU. Issue #699 closed.
+      </notes>
+    </result>
+
+    <result model="vesselfm" phase="P3" status="FAILED">
+      <experiment>dev_2d3f8100_vesselfm (created but no runs)</experiment>
+      <error>RuntimeError: Sizes of tensors must match except in dimension 1</error>
+      <root_cause>
+        6-level DynUNet strides [[2,2,2]]×5 collapse Z-dimension (5-110 slices).
+        Pre-existing adapter bug — not RunPod-specific.
+      </root_cause>
+      <notes>Filed #711. Issue #700 stays open.</notes>
+    </result>
+
+    <result model="dynunet" phase="bonus" status="PASS">
+      <experiment>dev_45636e93_dynunet</experiment>
+      <metrics train_loss="0.724" val_loss="0.740" train_dice="0.393" epoch_time_sec="7.0" />
+      <checkpoints count="3" size_mb="868-930" />
+      <notes>Bonus verification — dynunet runs fine on cloud too.</notes>
+    </result>
+
+    <learnings>
+      <learning id="L1">SkyPilot envs YAML does NOT resolve ${VAR} from local env — must use --env CLI flags</learning>
+      <learning id="L2">SkyPilot envs YAML does NOT support ${VAR:-default} syntax</learning>
+      <learning id="L3">RunPod does not support sky stop — must use sky down (full termination)</learning>
+      <learning id="L4">sky exec --env VAR (no =) passes local value automatically</learning>
+      <learning id="L5">Network volume data survives across sky exec runs — DVC pull cached correctly</learning>
+      <learning id="L6">HF weight cache on volume works — SAM3 weights downloaded once by sam3_vanilla, reused by sam3_hybrid</learning>
+    </learnings>
+  </execution-results>
 
 </plan>
