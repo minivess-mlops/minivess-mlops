@@ -5,6 +5,9 @@ Cloud tests simulate SkyPilot VM logging to remote MLflow.
 
 Unit tests (no creds): run in staging tier.
 Cloud tests (@pytest.mark.skypilot_cloud): require MLFLOW_CLOUD_* env vars.
+
+Note: train_generic.yaml and train_hpo_sweep.yaml were deleted (bare-VM, Docker mandate).
+All SkyPilot YAMLs now use Docker image_id pattern (see smoke_test_gpu.yaml).
 """
 
 from __future__ import annotations
@@ -50,51 +53,44 @@ class TestSkyPilotTrackingUriResolution:
         assert "admin:secret@" in uri
 
 
-class TestSkyPilotYamlConfiguration:
-    """Validate SkyPilot YAML files reference correct env vars."""
+class TestSmokeTestYamlConfiguration:
+    """Validate smoke_test_gpu.yaml references correct env vars."""
 
-    def test_skypilot_yaml_env_var_references(self) -> None:
-        """train_generic.yaml references MLFLOW_SKYPILOT_HOST in envs."""
+    def test_smoke_test_yaml_has_mlflow_tracking(self) -> None:
+        """smoke_test_gpu.yaml has MLFLOW_TRACKING_URI in envs."""
         config = yaml.safe_load(
-            Path("deployment/skypilot/train_generic.yaml").read_text(encoding="utf-8")
+            Path("deployment/skypilot/smoke_test_gpu.yaml").read_text(encoding="utf-8")
         )
         envs = config.get("envs", {})
-        mlflow_uri = envs.get("MLFLOW_TRACKING_URI", "")
-        assert "MLFLOW_SKYPILOT_HOST" in mlflow_uri
-        assert "MLFLOW_PORT" in mlflow_uri
+        assert "MLFLOW_TRACKING_URI" in envs
 
-    def test_skypilot_yaml_uses_prefect_not_scripts(self) -> None:
-        """train_generic.yaml invokes prefect deployment, not scripts/*.py."""
-        content = Path("deployment/skypilot/train_generic.yaml").read_text(
-            encoding="utf-8"
-        )
-        assert "prefect deployment run" in content
-        assert "scripts/train_monitored" not in content
-
-    def test_skypilot_yaml_has_required_fields(self) -> None:
-        """train_generic.yaml has resources, envs, and run sections."""
+    def test_smoke_test_yaml_has_required_fields(self) -> None:
+        """smoke_test_gpu.yaml has resources, envs, and run sections."""
         config = yaml.safe_load(
-            Path("deployment/skypilot/train_generic.yaml").read_text(encoding="utf-8")
+            Path("deployment/skypilot/smoke_test_gpu.yaml").read_text(encoding="utf-8")
         )
         assert "resources" in config
         assert "envs" in config
         assert "run" in config or "setup" in config
 
-    def test_skypilot_yaml_requests_gpu(self) -> None:
-        """train_generic.yaml requests GPU resources."""
+    def test_smoke_test_yaml_requests_gpu(self) -> None:
+        """smoke_test_gpu.yaml requests GPU resources."""
         config = yaml.safe_load(
-            Path("deployment/skypilot/train_generic.yaml").read_text(encoding="utf-8")
+            Path("deployment/skypilot/smoke_test_gpu.yaml").read_text(encoding="utf-8")
         )
         resources = config.get("resources", {})
-        # Should have accelerators defined
         assert "accelerators" in resources, "SkyPilot YAML must request GPU"
 
-    def test_hpo_sweep_yaml_parseable(self) -> None:
-        """train_hpo_sweep.yaml is valid YAML."""
+    def test_smoke_test_yaml_uses_docker_image(self) -> None:
+        """smoke_test_gpu.yaml uses Docker image_id (not bare-VM)."""
         config = yaml.safe_load(
-            Path("deployment/skypilot/train_hpo_sweep.yaml").read_text(encoding="utf-8")
+            Path("deployment/skypilot/smoke_test_gpu.yaml").read_text(encoding="utf-8")
         )
-        assert "resources" in config
+        resources = config.get("resources", {})
+        image_id = resources.get("image_id", "")
+        assert str(image_id).startswith("docker:"), (
+            f"Must use Docker image_id, got: {image_id}"
+        )
 
 
 @pytest.mark.skypilot_cloud

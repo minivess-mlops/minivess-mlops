@@ -5,6 +5,9 @@ Covers:
 - SkyPilotLauncher class
 - Prefect-SkyPilot bridge tasks
 - Justfile targets
+
+Note: train_generic.yaml and train_hpo_sweep.yaml were deleted (bare-VM, Docker mandate).
+All SkyPilot YAMLs now use Docker image_id pattern.
 """
 
 from __future__ import annotations
@@ -17,27 +20,23 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 class TestSkyPilotYAMLs:
     """Test SkyPilot task YAML files."""
 
-    def test_train_generic_yaml_exists(self) -> None:
-        path = PROJECT_ROOT / "deployment" / "skypilot" / "train_generic.yaml"
+    def test_smoke_test_yaml_exists(self) -> None:
+        path = PROJECT_ROOT / "deployment" / "skypilot" / "smoke_test_gpu.yaml"
         assert path.exists()
 
-    def test_train_hpo_sweep_yaml_exists(self) -> None:
-        path = PROJECT_ROOT / "deployment" / "skypilot" / "train_hpo_sweep.yaml"
-        assert path.exists()
-
-    def test_train_yaml_valid(self) -> None:
+    def test_smoke_test_yaml_valid(self) -> None:
         import yaml
 
-        path = PROJECT_ROOT / "deployment" / "skypilot" / "train_generic.yaml"
+        path = PROJECT_ROOT / "deployment" / "skypilot" / "smoke_test_gpu.yaml"
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         assert "resources" in data
         assert "setup" in data or "run" in data
 
-    def test_train_yaml_has_gpu(self) -> None:
+    def test_smoke_test_yaml_has_gpu(self) -> None:
         import yaml
 
-        path = PROJECT_ROOT / "deployment" / "skypilot" / "train_generic.yaml"
+        path = PROJECT_ROOT / "deployment" / "skypilot" / "smoke_test_gpu.yaml"
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         resources = data.get("resources", {})
