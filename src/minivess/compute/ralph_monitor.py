@@ -91,6 +91,18 @@ _FAILURE_PATTERNS: list[tuple[str, str, bool, str]] = [
         True,
         "Spot instances sold out — try different GPU type, region, or use on-demand",
     ),
+    (
+        "unauthorized",
+        "REGISTRY_AUTH",
+        False,
+        "Docker registry auth failed — make GHCR package public or configure credentials",
+    ),
+    (
+        "denied: permission_denied",
+        "REGISTRY_AUTH",
+        False,
+        "Docker registry denied pull — make GHCR package public or configure credentials",
+    ),
 ]
 
 

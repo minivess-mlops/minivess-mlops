@@ -94,20 +94,33 @@ LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.licenses="CC-BY-NC-SA-4.0"
 LABEL org.opencontainers.image.base.name="nvidia/cuda:12.6.3-runtime-ubuntu24.04"
 
-# Minimal runtime Python 3.13 only — no pip, no build tools, no dev headers
+# Minimal runtime: Python 3.13 + SkyPilot/RunPod requirements.
+# SkyPilot's setup_cmd needs: openssh-server, rsync, curl, patch, sudo.
+# RunPod connects via SSH as root to run setup/run commands inside the container.
+# Without these packages, the SkyPilot setup_cmd fails and the container crash-loops.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     && add-apt-repository ppa:deadsnakes/ppa \
     && apt-get update && apt-get install -y --no-install-recommends \
     python3.13 \
     python3.13-venv \
+    openssh-server \
+    rsync \
+    curl \
+    patch \
+    sudo \
     && apt-get purge -y software-properties-common \
     && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /run/sshd
 
 # Non-root user with configurable UID/GID (matches host user for bind mounts)
+# Passwordless sudo: SkyPilot setup_cmd uses sudo when container runs as non-root.
+# Ubuntu 24.04 base has 'ubuntu' user at UID 1000 — grant sudo to BOTH users.
 RUN groupadd -g $GID minivess 2>/dev/null || true && \
-    useradd --create-home --shell /bin/bash -u $UID -g $GID -o minivess
+    useradd --create-home --shell /bin/bash -u $UID -g $GID -o minivess && \
+    echo 'minivess ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers && \
+    echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 WORKDIR /app
 
@@ -120,7 +133,13 @@ COPY --from=builder --chown=minivess:minivess /app/configs /app/configs
 # Group-readable venv (not world-readable — limit to minivess group)
 RUN chmod -R g+rX /app/.venv
 
-USER minivess
+# NOTE: USER minivess is intentionally NOT set here.
+# SkyPilot/RunPod requires root: the setup_cmd installs packages and configures
+# SSH as root, and SkyPilot SSHes as root. Setting USER to non-root causes the
+# SSH key to be placed in the wrong home directory, preventing SSH auth.
+# For local Docker Compose, use docker-compose.yml user: directive or
+# --user flag to run as non-root when needed.
+# USER minivess  # DISABLED — breaks SkyPilot SSH auth (see metalearning 2026-03-14)
 
 # Python environment
 ENV PATH=/app/.venv/bin:$PATH

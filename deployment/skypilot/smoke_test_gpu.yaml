@@ -35,12 +35,19 @@ resources:
   # SkyPilot resources: block doesn't support ${} interpolation — update here directly.
   # Supported registries: GHCR, Docker Hub, AWS ECR, GCP GAR, Azure ACR.
   image_id: docker:ghcr.io/petteriteikari/minivess-base:latest
-  # GPU fallback: SkyPilot tries cheapest available. All have ≥24 GB VRAM.
-  # sam3_vanilla needs 2.9 GB, sam3_hybrid ~7.5 GB, vesselfm ~10 GB — any works.
-  # If all spot instances sold out, SkyPilot queues and retries automatically.
-  accelerators: {RTX4090: 1, RTX3090: 1, A40: 1, L40S: 1, A100-80GB: 1}
+  # GHCR is private — RunPod needs Docker credentials to pull.
+  # Use scripts/launch_smoke_test.py (SkyPilot Python API) for private registry auth.
+  # Or make the GHCR package public: GitHub → Packages → minivess-base → Settings → Public.
+  # GPU fallback: SkyPilot tries cheapest available.
+  # sam3_vanilla needs 2.9 GB, sam3_hybrid ~7.5 GB, vesselfm ~10 GB.
+  # Wide fallback list for availability: ≥16 GB GPUs first, then cheaper options.
+  # RTX A4000 (16 GB, $0.16/hr) is good for sam3_vanilla/hybrid smoke tests.
+  # If all instances sold out, SkyPilot queues and retries automatically.
+  accelerators: {A4000: 1, RTX4090: 1, RTX3090: 1, A40: 1, RTX4080: 1, L40S: 1, A100-80GB: 1}
   cloud: runpod
-  use_spot: true
+  # On-demand for reliability (spot often sold out on RunPod, 2026-03-14).
+  # Switch to use_spot: true for production training to save 50-70%.
+  use_spot: false
   disk_size: 40
 
 envs:
