@@ -601,6 +601,16 @@ class SegmentationTrainer:
             self.scheduler.step()
             epoch_wall_time = time.perf_counter() - t0
 
+            # Log first/steady epoch wall time for profiling (#683)
+            if epoch == 0 and self.tracker is not None:
+                self.tracker.log_epoch_metrics(
+                    {"prof_first_epoch_seconds": epoch_wall_time}, step=0
+                )
+            elif epoch == 1 and self.tracker is not None:
+                self.tracker.log_epoch_metrics(
+                    {"prof_steady_epoch_seconds": epoch_wall_time}, step=1
+                )
+
             history["train_loss"].append(train_result.loss)
             history["val_loss"].append(val_result.loss)
             final_epoch = epoch + 1

@@ -738,6 +738,14 @@ def training_flow(
             mlflow.set_tag("parent_run_id", mlflow_run_id)
             logger.info("MLflow run opened: %s", mlflow_run_id)
 
+            # Log infrastructure timing from setup phase (#683)
+            from minivess.observability.infrastructure_timing import (
+                log_cost_analysis,
+                log_infrastructure_timing,
+            )
+
+            log_infrastructure_timing(timing_dir=Path.cwd())
+
             # Log fold results inside the run context
             for fold_id, fold_result in enumerate(fold_results):
                 log_fold_results_task(
@@ -748,6 +756,29 @@ def training_flow(
                 )
 
             mlflow.log_metric("n_folds_completed", float(len(fold_results)))
+
+            # Log cost analysis after training (#683)
+            _total_training_seconds = sum(
+                fr.get("training_time_seconds", 0.0)
+                for fr in fold_results
+                if isinstance(fr, dict)
+            )
+            _setup_seconds = 0.0
+            try:
+                from minivess.observability.infrastructure_timing import (
+                    parse_setup_timing,
+                )
+
+                _setup_durations = parse_setup_timing(Path.cwd() / "timing_setup.txt")
+                _setup_seconds = _setup_durations.get("setup_total", 0.0)
+            except Exception:
+                pass
+            if _total_training_seconds > 0 or _setup_seconds > 0:
+                log_cost_analysis(
+                    setup_seconds=_setup_seconds,
+                    training_seconds=_total_training_seconds,
+                    epoch_count=max_epochs * len(fold_results),
+                )
 
     except Exception:
         logger.warning("Failed to open/finalize MLflow run", exc_info=True)

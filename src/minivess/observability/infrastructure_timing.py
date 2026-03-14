@@ -251,7 +251,7 @@ def get_hourly_rate_usd() -> float:
 
 
 def log_infrastructure_timing(
-    tracker: ExperimentTracker,
+    tracker: ExperimentTracker | None = None,
     *,
     timing_dir: Path | None = None,
 ) -> None:
@@ -267,6 +267,7 @@ def log_infrastructure_timing(
     ----------
     tracker:
         ExperimentTracker instance with an active MLflow run.
+        If None, uses mlflow.log_artifact directly.
     timing_dir:
         Directory containing timing_setup.txt. Defaults to cwd.
     """
@@ -290,11 +291,14 @@ def log_infrastructure_timing(
 
     # Log the raw timing file as artifact
     if timing_file.exists():
-        tracker.log_artifact(timing_file, artifact_path="timing")
+        if tracker is not None:
+            tracker.log_artifact(timing_file, artifact_path="timing")
+        else:
+            mlflow.log_artifact(str(timing_file), artifact_path="timing")
 
 
 def log_cost_analysis(
-    tracker: ExperimentTracker,
+    tracker: ExperimentTracker | None = None,
     *,
     setup_seconds: float,
     training_seconds: float,
