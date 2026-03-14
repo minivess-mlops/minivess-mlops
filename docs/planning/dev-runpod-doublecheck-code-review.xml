@@ -1,0 +1,835 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Dev + RunPod Doublecheck Code Review Plan v1.0
+  Created: 2026-03-15
+  Branch: feat/skypilot-runpod-gpu-offloading
+  Author: Claude Opus 4.6
+
+  PURPOSE: Comprehensive code review + production polish for all RunPod dev
+  infrastructure, SAM3 adapters, VesselFM adapter, and GCP cloud code.
+  Dual mandate: (1) verify model correctness, (2) production-grade DevEx.
+
+  SKILL: self-learning-iterative-coder (TDD loop)
+  MONITOR: ralph-loop (infrastructure health)
+
+  PHASES:
+    P0 — Critical bugs from code review (local, no GPU)
+    P1 — val_loss=NaN multi-hypothesis investigation (#710)
+    P2 — Adapter code deduplication + production polish (/simplify)
+    P3 — Issue triage: close resolved, file new
+    P4 — GCP code hardening
+    P5 — Cloud verification (requires RunPod/GCP credits)
+-->
+
+<plan version="1.0" name="dev-runpod-doublecheck-code-review">
+
+  <metadata>
+    <created>2026-03-15</created>
+    <branch>feat/skypilot-runpod-gpu-offloading</branch>
+    <prerequisite-issues>
+      <issue number="710" title="sam3_hybrid val_loss=NaN on RTX 4090" priority="P0" />
+      <issue number="680" title="sam3_topolora OOM — needs gradient checkpointing" priority="P0" />
+      <issue number="707" title="Atomic checkpoint writes for spot preemption" priority="P1" />
+      <issue number="686" title="SkyPilot spot checkpointing MOUNT_CACHED" priority="P1" />
+      <issue number="689" title="MLflow env var resolution on RunPod" priority="P1" />
+      <issue number="703" title="Cloud GPU strategy in CLAUDE.md" priority="P1" />
+      <issue number="690" title="Makefile/Justfile targets for RunPod dev" priority="P2" />
+      <issue number="692" title="RunPod idle monitor with auto-shutdown" priority="P2" />
+    </prerequisite-issues>
+    <reviewer-agents>
+      <agent name="adapter-reviewer" scope="src/minivess/adapters/" focus="FP16 consistency, dim order, LoRA correctness" />
+      <agent name="trainer-reviewer" scope="src/minivess/pipeline/trainer.py" focus="validation logic, checkpoint safety, NaN handling" />
+      <agent name="skypilot-reviewer" scope="deployment/skypilot/" focus="env var resolution, hardcoded URLs, Docker-only" />
+      <agent name="simplify-agent" scope="src/minivess/adapters/" focus="deduplication, code reuse, production quality" />
+    </reviewer-agents>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 0: Critical Bugs from Code Review (LOCAL — no GPU needed)
+       ═══════════════════════════════════════════════════════════════════ -->
+  <phase id="P0" name="Critical Bugs from Code Review" environment="local" blocked="false">
+    <description>
+      Fix all critical and medium-severity bugs found by the adapter code review.
+      These are code-level fixes that can be tested locally without GPU.
+    </description>
+
+    <task id="T0.1" name="Remove dead Conv2d LoRA path in sam3_topolora"
+          priority="P1" estimated-iterations="1">
+      <description>
+        LoRALinear.forward() has a Conv2d branch that averages spatial dims and
+        reconstructs via unsqueeze — mathematically wrong for convolutions. SAM3
+        is pure ViT (all Linear), so this branch is NEVER executed. Remove it
+        with a clear error message to prevent silent failures if architecture changes.
+      </description>
+      <files>
+        <file path="src/minivess/adapters/sam3_topolora.py" action="edit" />
+        <file path="tests/v2/unit/adapters/test_sam3_topolora_lora.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          Test that LoRALinear raises TypeError for Conv2d input.
+          Test that LoRALinear works correctly for nn.Linear input.
+          Test that LoRA forward handles FP16→FP32 dtype casting.
+        </red>
+        <green>
+          Remove Conv2d branch from LoRALinear.__init__() and forward().
+          Keep only Linear support with clear TypeError for unsupported types.
+          Remove _is_conv flag.
+        </green>
+      </tdd-spec>
+    </task>
+
+    <task id="T0.2" name="Add input shape validation to sam3_backbone._preprocess()"
+          priority="P1" estimated-iterations="1">
+      <description>
+        sam3_backbone._preprocess() assumes 4D input (B,C,H,W) but has no validation.
+        A 3D tensor causes cryptic IndexError. Add explicit ndim check with helpful
+        error message mentioning MONAI's (B,C,H,W,D) convention.
+      </description>
+      <files>
+        <file path="src/minivess/adapters/sam3_backbone.py" action="edit" />
+        <file path="tests/v2/unit/adapters/test_sam3_backbone_validation.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          Test that _preprocess raises ValueError for 3D input.
+          Test that _preprocess raises ValueError for 5D input.
+          Test that _preprocess accepts 4D input without error.
+        </red>
+        <green>
+          Add `if x.ndim != 4: raise ValueError(...)` at top of _preprocess().
+          Error message: "Expected 4D input (B,C,H,W) for 2D slice, got {x.ndim}D.
+          SAM3 adapters process 3D volumes slice-by-slice; pass individual slices."
+        </green>
+      </tdd-spec>
+    </task>
+
+    <task id="T0.3" name="Standardize checkpoint load/save error handling"
+          priority="P1" estimated-iterations="1">
+      <description>
+        torch.load() in 3 SAM3 adapters has no error handling for missing files.
+        sam3_feature_cache.py has proper FileNotFoundError pattern. Standardize
+        all adapters to check path.exists() before loading.
+      </description>
+      <files>
+        <file path="src/minivess/adapters/sam3_vanilla.py" action="edit" />
+        <file path="src/minivess/adapters/sam3_topolora.py" action="edit" />
+        <file path="src/minivess/adapters/sam3_hybrid.py" action="edit" />
+        <file path="tests/v2/unit/adapters/test_checkpoint_error_handling.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          Test that load_checkpoint raises FileNotFoundError for nonexistent path.
+          Test that load_checkpoint succeeds for valid checkpoint file.
+          Test for all 3 adapters: sam3_vanilla, sam3_topolora, sam3_hybrid.
+        </red>
+        <green>
+          Add `if not path.exists(): raise FileNotFoundError(f"No checkpoint at {path}")`.
+          Same pattern as sam3_feature_cache.py:99-101.
+        </green>
+      </tdd-spec>
+    </task>
+
+    <task id="T0.4" name="Fix misleading dimension comments in SAM3 adapters"
+          priority="P2" estimated-iterations="1">
+      <description>
+        sam3_vanilla.py:117 comment says "(B, 2, H, W, D)" but torch.stack(dim=4)
+        from (B, 2, H, W) slices produces (B, 2, H, W, D). sam3_topolora.py:221
+        says output is "(B, C, H, W, D)" but torch.stack(dim=2) from (B, 2, H, W)
+        produces (B, 2, D, H, W). Fix all dimension comments to match actual output.
+        Verify test expectations match actual shapes.
+      </description>
+      <files>
+        <file path="src/minivess/adapters/sam3_vanilla.py" action="edit" />
+        <file path="src/minivess/adapters/sam3_topolora.py" action="edit" />
+        <file path="src/minivess/adapters/sam3_hybrid.py" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>No new tests — comment-only changes. Verify existing tests pass.</red>
+        <green>
+          Fix all dimension order comments to accurately reflect actual tensor shapes.
+          Document FP16→FP32 casting rationale in sam3_backbone.py comment.
+        </green>
+      </tdd-spec>
+    </task>
+
+    <task id="T0.5" name="Atomic checkpoint writes (tmp + rename)"
+          priority="P0" estimated-iterations="2">
+      <description>
+        trainer.py and multi_metric_tracker.py use direct torch.save() without
+        atomic write pattern. If spot instance is preempted mid-write, checkpoint
+        file is corrupted. ralph_monitor.py already detects this failure pattern
+        ("inline_container.cc") but the fix is not implemented.
+
+        Implement: write to tmp file, then os.replace() (atomic on POSIX).
+        This is critical for spot instance reliability (#707).
+      </description>
+      <files>
+        <file path="src/minivess/pipeline/trainer.py" action="edit" />
+        <file path="src/minivess/pipeline/multi_metric_tracker.py" action="edit" />
+        <file path="tests/v2/unit/pipeline/test_atomic_checkpoint.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          Test that checkpoint save creates a temporary file first.
+          Test that checkpoint save uses os.replace() for atomicity.
+          Test that interrupted save leaves no corrupted checkpoint.
+          Test that valid checkpoint is readable after atomic save.
+        </red>
+        <green>
+          Create helper: `_atomic_save(state_dict, path)` that:
+            1. Writes to `path.with_suffix('.tmp')`
+            2. Calls `os.replace(tmp_path, path)` (POSIX atomic)
+            3. Handles cleanup on exception
+          Use in trainer.py (lines 757-764, 802-805) and multi_metric_tracker.py:270.
+        </green>
+      </tdd-spec>
+      <issue number="707" action="close" reason="Atomic writes implemented" />
+    </task>
+
+    <task id="T0.6" name="Fix hardcoded Cloud Run URL in smoke_test_gcp.yaml"
+          priority="P1" estimated-iterations="1">
+      <description>
+        deployment/skypilot/smoke_test_gcp.yaml line 42 has hardcoded
+        Cloud Run URL. Replace with ${MLFLOW_GCP_URI} env var reference.
+        Per CLAUDE.md Rule #22: all service URLs via .env.example.
+      </description>
+      <files>
+        <file path="deployment/skypilot/smoke_test_gcp.yaml" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>No test — config file change. Verify YAML is valid.</red>
+        <green>Replace hardcoded URL with ${MLFLOW_GCP_URI} env var.</green>
+      </tdd-spec>
+    </task>
+
+    <github-issue-group value="P0-code-review-fixes">T0.1,T0.2,T0.3,T0.4,T0.5,T0.6</github-issue-group>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 1: val_loss=NaN Multi-Hypothesis Investigation (#710)
+       ═══════════════════════════════════════════════════════════════════ -->
+  <phase id="P1" name="val_loss=NaN Multi-Hypothesis Investigation" environment="local+cloud" blocked="false">
+    <description>
+      The sam3_hybrid smoke test on RTX 4090 produced val_loss=NaN. The KNOWN cause
+      is the val_interval sentinel (val_interval=3 > max_epochs=2 → skip all validation).
+      But this raises deeper questions: does the model actually produce valid predictions?
+      Are the loss values meaningful? Does training converge with real data?
+
+      This phase implements a systematic multi-hypothesis investigation with both
+      local code fixes and cloud GPU verification.
+    </description>
+
+    <hypotheses>
+      <hypothesis id="H1" name="Sentinel skip (known cause)" probability="0.90">
+        <description>
+          val_interval=3 > max_epochs=2 triggers _skip_all_val=True in trainer.py:583.
+          All validation epochs get EpochResult(loss=float("nan")). This is the direct
+          mechanism — NOT a model bug. Fix: create cloud smoke config with val_interval=1.
+        </description>
+        <test>Create smoke_sam3_hybrid_cloud.yaml with val_interval=1, run on RTX 4090</test>
+        <expected>val_loss is a real number (not NaN), validation runs without OOM</expected>
+      </hypothesis>
+
+      <hypothesis id="H2" name="FP16 encoder output causes NaN in loss" probability="0.15">
+        <description>
+          SAM3 encoder outputs FP16 features. If .float() cast is missing or incomplete
+          before loss computation, FP16 underflow/overflow could produce NaN loss values.
+          The .float() cast at line 205 fixes this for forward pass, but loss backward
+          might still encounter FP16 issues in gradient computation.
+        </description>
+        <test>Add gradient NaN check in trainer.py. Log gradient norm per epoch.</test>
+        <expected>If H2 is the cause, gradient norms will be NaN or Inf</expected>
+      </hypothesis>
+
+      <hypothesis id="H3" name="Model produces degenerate predictions" probability="0.10">
+        <description>
+          SAM3 hybrid's gated fusion might produce all-zeros or all-ones predictions
+          with the small smoke test dataset (2 volumes). The DynUNet branch may not
+          get meaningful gradients with only 2 training volumes. cbdice_cldice loss
+          with degenerate inputs could produce NaN.
+        </description>
+        <test>Log prediction stats (min, max, mean, std) per epoch. Check for degenerate
+          distributions (all same value, extreme values).</test>
+        <expected>If H3 is the cause, predictions will be near-constant</expected>
+      </hypothesis>
+
+      <hypothesis id="H4" name="Small dataset insufficient for SAM3 hybrid" probability="0.25">
+        <description>
+          The smoke test uses only 2 volumes for training. SAM3 hybrid has a frozen
+          648M-param ViT-32L encoder + trainable gated fusion + DynUNet-3D decoder.
+          With only 2 volumes, the model may not learn meaningful features, leading
+          to oscillating or diverging loss. This is NOT a code bug — it's expected
+          behavior with insufficient data.
+        </description>
+        <test>Run with full MiniVess dataset (47 train volumes, 3 folds) on cloud GPU.
+          Compare train_loss convergence: 2 vols vs 47 vols.</test>
+        <expected>If H4 is the cause, full dataset will show stable convergence</expected>
+      </hypothesis>
+
+      <hypothesis id="H5" name="Learning rate too high for frozen encoder" probability="0.10">
+        <description>
+          Default learning rate may be tuned for fully trainable models (DynUNet).
+          SAM3 hybrid has a frozen 648M-param encoder producing fixed features —
+          the trainable parameters are only the fusion layers + decoder. These may
+          need a lower learning rate to avoid gradient explosion in the small
+          trainable subnetwork.
+        </description>
+        <test>Run SAM3 hybrid with lr=1e-4 vs lr=1e-3 vs lr=5e-4. Compare stability.</test>
+        <expected>If H5 is the cause, lower LR will stabilize training</expected>
+      </hypothesis>
+
+      <hypothesis id="H6" name="cbdice_cldice loss incompatible with SAM3 output" probability="0.05">
+        <description>
+          cbdice_cldice computes centerline Dice which requires skeletonization of
+          predictions. If SAM3 hybrid predictions are not binary-like (sigmoid not
+          applied or threshold issue), skeletonization could fail and produce NaN.
+        </description>
+        <test>Run SAM3 hybrid with dice_ce loss instead of cbdice_cldice. Compare.</test>
+        <expected>If H6 is the cause, dice_ce will work while cbdice_cldice produces NaN</expected>
+      </hypothesis>
+
+      <hypothesis id="H7" name="Production validation will OOM on 8 GB GPU" probability="0.95">
+        <description>
+          For non-debug sam3_hybrid (max_epochs=100, val_interval=10), validation
+          WILL execute at epochs 0, 10, 20, etc. With 6.65 GB model + 5 GB inference
+          = 11.65 GB needed — OOM on 8 GB GPU. This is a production bug waiting
+          to happen. Need VRAM-aware validation gating, not just sentinel.
+        </description>
+        <test>Add VRAM-aware validation guard in train_flow.py. If available VRAM &lt;
+          required, warn and skip validation with explicit log message.</test>
+        <expected>Guard prevents OOM while logging clear warning</expected>
+      </hypothesis>
+    </hypotheses>
+
+    <task id="T1.1" name="Create cloud smoke config for sam3_hybrid"
+          priority="P0" estimated-iterations="1">
+      <description>
+        Create configs/experiment/smoke_sam3_hybrid_cloud.yaml with val_interval=1
+        and max_epochs=5 for cloud GPUs with ≥16 GB VRAM. Keep the existing
+        smoke_sam3_hybrid.yaml for 8 GB local GPUs (val_interval sentinel).
+      </description>
+      <files>
+        <file path="configs/experiment/smoke_sam3_hybrid_cloud.yaml" action="create" />
+      </files>
+      <tdd-spec>
+        <red>Test that cloud config file exists and has val_interval=1.</red>
+        <green>Create YAML config with val_interval=1, max_epochs=5, num_folds=1.</green>
+      </tdd-spec>
+    </task>
+
+    <task id="T1.2" name="VRAM-aware validation guard in train_flow.py"
+          priority="P0" estimated-iterations="2">
+      <description>
+        Add a VRAM-aware validation guard that reads the model profile YAML to
+        determine if validation is safe on the current GPU. Replace the fragile
+        val_interval sentinel with explicit VRAM budget check.
+
+        Logic:
+        1. Read model_overhead_mb from configs/model_profiles/{model}.yaml
+        2. Query available GPU VRAM via torch.cuda.get_device_properties()
+        3. If available VRAM &lt; model_overhead_mb + 2 GB headroom → skip validation
+        4. Log explicit warning: "Validation skipped: {available}MB &lt; {required}MB"
+        5. On cloud GPUs (≥16 GB), validation always runs
+
+        This replaces H7's production vulnerability with a proper guard.
+      </description>
+      <files>
+        <file path="src/minivess/orchestration/flows/train_flow.py" action="edit" />
+        <file path="tests/v2/unit/orchestration/test_vram_validation_guard.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          Test that validation is skipped when mocked VRAM &lt; threshold.
+          Test that validation runs when mocked VRAM ≥ threshold.
+          Test that warning is logged when validation is skipped.
+          Test that val_interval is preserved when VRAM is sufficient.
+        </red>
+        <green>
+          Add _should_skip_validation(model_family, available_vram_mb) helper.
+          Read model profile YAML for model_overhead_mb.
+          Use torch.cuda.get_device_properties if available, else assume CPU.
+          Set val_interval = max_epochs + 1 only when VRAM is insufficient.
+        </green>
+      </tdd-spec>
+      <issue number="710" action="close" reason="VRAM-aware validation guard + cloud smoke config" />
+    </task>
+
+    <task id="T1.3" name="Add gradient and prediction diagnostics to trainer"
+          priority="P1" estimated-iterations="2">
+      <description>
+        Add lightweight diagnostic logging to trainer.py for debugging model
+        convergence issues. Log per-epoch:
+        - Gradient L2 norm (total)
+        - Prediction stats: min, max, mean, std of logits
+        - Whether any NaN/Inf values in gradients or predictions
+
+        These diagnostics help verify H2 (FP16 gradient NaN), H3 (degenerate
+        predictions), and H5 (LR too high). They are lightweight (&lt;1% overhead)
+        and valuable for all models, not just SAM3.
+      </description>
+      <files>
+        <file path="src/minivess/pipeline/trainer.py" action="edit" />
+        <file path="tests/v2/unit/pipeline/test_training_diagnostics.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          Test that gradient norm is logged when diagnostics enabled.
+          Test that prediction stats are logged (min, max, mean, std).
+          Test that NaN detection raises warning (not error — training continues).
+          Test that diagnostics don't affect training results.
+        </red>
+        <green>
+          Add _log_diagnostics(model, predictions, epoch) method.
+          Call after each training step.
+          Use torch.nn.utils.clip_grad_norm_ result for gradient norm.
+          Log as MLflow metrics: grad_norm, pred_min, pred_max, pred_mean, pred_std.
+          Add NaN/Inf warning via logger.warning().
+        </green>
+      </tdd-spec>
+    </task>
+
+    <task id="T1.4" name="Create full-dataset SAM3 hybrid experiment config"
+          priority="P1" estimated-iterations="1"
+          blocked-by="T1.1,T1.2">
+      <description>
+        Create configs/experiment/sam3_hybrid_full.yaml for running SAM3 hybrid
+        with the full MiniVess dataset (47 train volumes, 3 folds, 50 epochs).
+        This tests H4 (small dataset insufficient). Must run on cloud GPU (≥24 GB).
+
+        Config: val_interval=5, max_epochs=50, num_folds=3, cbdice_cldice loss,
+        lr=1e-4 (conservative for frozen encoder), val_roi=(512,512,3).
+      </description>
+      <files>
+        <file path="configs/experiment/sam3_hybrid_full.yaml" action="create" />
+      </files>
+      <tdd-spec>
+        <red>Test that config file exists and is valid YAML with expected keys.</red>
+        <green>Create YAML config with full dataset settings.</green>
+      </tdd-spec>
+    </task>
+
+    <github-issue-group value="val-loss-nan-investigation">T1.1,T1.2,T1.3,T1.4</github-issue-group>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 2: Adapter Code Deduplication + Production Polish (/simplify)
+       ═══════════════════════════════════════════════════════════════════ -->
+  <phase id="P2" name="Adapter Code Deduplication + Production Polish" environment="local" blocked="false">
+    <description>
+      Apply /simplify to deduplicate code across SAM3 adapters and bring all
+      adapter code to production grade. Focus on DRY, clear error messages,
+      and consistent patterns across all model adapters.
+    </description>
+
+    <task id="T2.1" name="Extract shared checkpoint load/save to base.py"
+          priority="P2" estimated-iterations="2">
+      <description>
+        sam3_vanilla, sam3_topolora, and sam3_hybrid all have identical
+        load_checkpoint() and save_checkpoint() methods. Extract to
+        ModelAdapter base class (base.py). Keep adapter-specific overrides
+        possible via standard Python method override.
+      </description>
+      <files>
+        <file path="src/minivess/adapters/base.py" action="edit" />
+        <file path="src/minivess/adapters/sam3_vanilla.py" action="edit" />
+        <file path="src/minivess/adapters/sam3_topolora.py" action="edit" />
+        <file path="src/minivess/adapters/sam3_hybrid.py" action="edit" />
+        <file path="tests/v2/unit/adapters/test_base_checkpoint.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          Test that ModelAdapter.save_checkpoint creates valid file.
+          Test that ModelAdapter.load_checkpoint restores state dict.
+          Test that FileNotFoundError raised for missing file.
+          Test that all 3 SAM3 adapters inherit the base implementation.
+        </red>
+        <green>
+          Move save_checkpoint/load_checkpoint to ModelAdapter base.
+          Include path.exists() check. Use _atomic_save from T0.5.
+          Remove duplicate methods from 3 SAM3 adapters.
+        </green>
+      </tdd-spec>
+    </task>
+
+    <task id="T2.2" name="Extract shared ONNX export wrapper to base.py"
+          priority="P2" estimated-iterations="1">
+      <description>
+        All 3 SAM3 adapters define identical _LogitsWrapper + export_onnx().
+        Extract to ModelAdapter base class. The wrapper converts
+        SegmentationOutput → raw Tensor for ONNX tracing.
+      </description>
+      <files>
+        <file path="src/minivess/adapters/base.py" action="edit" />
+        <file path="src/minivess/adapters/sam3_vanilla.py" action="edit" />
+        <file path="src/minivess/adapters/sam3_topolora.py" action="edit" />
+        <file path="src/minivess/adapters/sam3_hybrid.py" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>No new tests needed — existing ONNX tests should still pass.</red>
+        <green>
+          Move _LogitsWrapper and export_onnx() to ModelAdapter base.
+          Remove duplicate code from 3 SAM3 adapters.
+          Run /simplify on the result.
+        </green>
+      </tdd-spec>
+    </task>
+
+    <task id="T2.3" name="Document FP16→FP32 casting rationale"
+          priority="P2" estimated-iterations="1">
+      <description>
+        All 3 SAM3 adapters have fpn_features.float() / sam_features.float()
+        but the rationale is undocumented. Add a clear comment in
+        sam3_backbone.py explaining:
+        - SAM3 loaded with torch_dtype=float16 (918 MB vs 1.8 GB FP32)
+        - All callers MUST cast to FP32 before trainable downstream modules
+        - This is separate from AMP — it's weight dtype, not autocast scope
+      </description>
+      <files>
+        <file path="src/minivess/adapters/sam3_backbone.py" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>No tests — documentation-only change.</red>
+        <green>Add docstring explaining FP16 loading and caller responsibility.</green>
+      </tdd-spec>
+    </task>
+
+    <task id="T2.4" name="Add logging to model_builder.py build_adapter()"
+          priority="P2" estimated-iterations="1">
+      <description>
+        build_adapter() successfully builds adapters silently. Add info-level
+        logging: "Building adapter: {family} — {model_name}". Helps debug
+        which model was built during training.
+      </description>
+      <files>
+        <file path="src/minivess/adapters/model_builder.py" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>No new tests — add logging statement only.</red>
+        <green>Add logger.info() after successful adapter build.</green>
+      </tdd-spec>
+    </task>
+
+    <task id="T2.5" name="Run /simplify on all adapter code"
+          priority="P2" estimated-iterations="1"
+          blocked-by="T2.1,T2.2,T2.3,T2.4">
+      <description>
+        After deduplication, run /simplify on all adapter files to catch
+        remaining code quality issues: unused imports, inconsistent patterns,
+        over-engineering, missing type annotations.
+      </description>
+      <files>
+        <file path="src/minivess/adapters/" action="review" />
+      </files>
+      <tdd-spec>
+        <red>No new tests — review-only.</red>
+        <green>Apply all /simplify recommendations. Run make test-staging.</green>
+      </tdd-spec>
+    </task>
+
+    <github-issue-group value="adapter-deduplication">T2.1,T2.2,T2.3,T2.4,T2.5</github-issue-group>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 3: Issue Triage — Close Resolved, File New
+       ═══════════════════════════════════════════════════════════════════ -->
+  <phase id="P3" name="Issue Triage and Closure" environment="local" blocked="false">
+    <description>
+      Triage all open RunPod/dev issues. Close those already resolved by code.
+      File new issues discovered during code review. Update issue labels and
+      cross-references.
+    </description>
+
+    <task id="T3.1" name="Close already-resolved issues"
+          priority="P1" estimated-iterations="1">
+      <description>
+        The following issues are already resolved in code:
+        - #668 VesselFM RunPod launch — dev_runpod.yaml supports MODEL_FAMILY=vesselfm
+        - #689 MLflow env var resolution — launch_dev_runpod.py resolves correctly
+        - #692 Idle monitor — SkyPilot idle_minutes_to_autostop implemented
+
+        Close each with evidence comment citing specific code locations.
+      </description>
+      <files>None — GitHub CLI only</files>
+      <tdd-spec>
+        <red>N/A — issue management.</red>
+        <green>
+          gh issue close 668 --comment "..."
+          gh issue close 689 --comment "..."
+          gh issue close 692 --comment "..."
+        </green>
+      </tdd-spec>
+    </task>
+
+    <task id="T3.2" name="Update partially-resolved issues"
+          priority="P2" estimated-iterations="1">
+      <description>
+        Update issues that are partially resolved:
+        - #669 SkyPilot monitoring — ralph_monitor.py exists but no real-time polling
+        - #690 Makefile targets — Makefile has dev-gpu, Justfile lacks equivalents
+        - #703 Cloud GPU strategy — CLAUDE.md has partial coverage, needs dedicated section
+        - #670-#676 Cloud tests — test files exist but need model-specific verification
+
+        Add comments documenting what's done and what remains.
+      </description>
+      <files>None — GitHub CLI only</files>
+      <tdd-spec>
+        <red>N/A — issue management.</red>
+        <green>Add status comments to each issue with evidence.</green>
+      </tdd-spec>
+    </task>
+
+    <task id="T3.3" name="File new issues from code review findings"
+          priority="P1" estimated-iterations="1">
+      <description>
+        File new issues for findings from the code review that are NOT addressed
+        in this plan's Phase 0:
+        - VesselFM data leakage warning → should it be configurable severity?
+        - sam3_backbone torch_dtype=float16 is hardcoded → should be configurable
+        - Dimension ordering inconsistency between adapters (dim=4 vs dim=2)
+        - VRAM check doesn't account for data loader memory overhead
+      </description>
+      <files>None — GitHub CLI only</files>
+      <tdd-spec>
+        <red>N/A — issue management.</red>
+        <green>Create 2-4 new issues with proper METADATA blocks.</green>
+      </tdd-spec>
+    </task>
+
+    <task id="T3.4" name="Add Justfile dev-gpu recipes"
+          priority="P2" estimated-iterations="1">
+      <description>
+        Justfile lacks explicit dev-gpu equivalents that Makefile has.
+        Add: dev-gpu, dev-gpu-stop, dev-gpu-ssh, dev-gpu-heavy recipes
+        mirroring the Makefile targets.
+      </description>
+      <files>
+        <file path="justfile" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>No tests — infrastructure config.</red>
+        <green>Add 4 Justfile recipes matching Makefile dev-gpu* targets.</green>
+      </tdd-spec>
+    </task>
+
+    <github-issue-group value="issue-triage">T3.1,T3.2,T3.3,T3.4</github-issue-group>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 4: GCP Code Hardening
+       ═══════════════════════════════════════════════════════════════════ -->
+  <phase id="P4" name="GCP Code Hardening" environment="local" blocked="false">
+    <description>
+      Harden all GCP-related code: replace hardcoded values with env var
+      references, verify Pulumi stack structure, ensure SkyPilot GCP YAML
+      follows Docker-only mandate.
+    </description>
+
+    <task id="T4.1" name="Verify GCP Pulumi stack follows .env.example SSoT"
+          priority="P1" estimated-iterations="1">
+      <description>
+        Review deployment/pulumi/gcp/__main__.py against .env.example.
+        Verify all configurable values (project, region, bucket names) come
+        from Pulumi config (which reads from .env) not hardcoded strings.
+        Fix any violations of Rule #22.
+      </description>
+      <files>
+        <file path="deployment/pulumi/gcp/__main__.py" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>
+          Test that GCP Pulumi __main__.py has no hardcoded project IDs.
+          Test that all bucket names reference Pulumi config, not literals.
+        </red>
+        <green>Replace any hardcoded values with pulumi.Config() references.</green>
+      </tdd-spec>
+    </task>
+
+    <task id="T4.2" name="Verify SkyPilot GCP YAML uses Docker image_id"
+          priority="P0" estimated-iterations="1">
+      <description>
+        Per CLAUDE.md: SkyPilot YAML MUST use image_id: docker:&lt;registry&gt;/&lt;image&gt;.
+        Verify smoke_test_gcp.yaml follows this mandate. No bare VM setup
+        (apt-get, uv sync, git clone in setup:).
+      </description>
+      <files>
+        <file path="deployment/skypilot/smoke_test_gcp.yaml" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>
+          Test that smoke_test_gcp.yaml has image_id with docker: prefix.
+          Test that setup block has no apt-get, uv sync, or git clone.
+        </red>
+        <green>Ensure Docker-only execution pattern.</green>
+      </tdd-spec>
+    </task>
+
+    <task id="T4.3" name="Add cloud GPU strategy section to CLAUDE.md"
+          priority="P1" estimated-iterations="1">
+      <description>
+        Add a "Cloud GPU Strategy" subsection to CLAUDE.md documenting:
+        - RunPod: dev/prototyping (consumer GPUs, $0.44-0.88/hr)
+        - GCP: staging/prod (spot T4/L4/A100, same-region everything)
+        - Lambda Labs: rejected (no EU availability)
+        - Decision tree: which cloud for which use case
+        - Local hardware: RTX 2070 Super (8 GB) — dev only
+      </description>
+      <files>
+        <file path="CLAUDE.md" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>No tests — documentation.</red>
+        <green>Add section with cloud provider comparison table.</green>
+      </tdd-spec>
+      <issue number="703" action="close" reason="Cloud GPU strategy added to CLAUDE.md" />
+    </task>
+
+    <github-issue-group value="gcp-hardening">T4.1,T4.2,T4.3</github-issue-group>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 5: Cloud Verification (BLOCKED — requires GPU credits)
+       ═══════════════════════════════════════════════════════════════════ -->
+  <phase id="P5" name="Cloud Verification" environment="cloud" blocked="true"
+         blocked-reason="Requires RunPod credits ($2-5) or GCP spot quota">
+    <description>
+      Run the val_loss=NaN hypothesis tests on cloud GPU. This phase CANNOT
+      be executed locally — it requires RTX 4090 or better.
+
+      Execution order:
+      1. Run smoke_sam3_hybrid_cloud.yaml (val_interval=1) — tests H1
+      2. If val_loss is real number → H1 confirmed, sentinel was the only issue
+      3. If val_loss is still NaN → investigate H2-H6 with diagnostic logging
+      4. Run sam3_hybrid_full.yaml (47 vols, 50 epochs) — tests H4
+      5. Document all results in model profiles and plan
+
+      Budget: ~$2-5 depending on how many hypotheses need testing.
+    </description>
+
+    <task id="T5.1" name="Run sam3_hybrid with val_interval=1 on RTX 4090"
+          priority="P0" estimated-iterations="1"
+          blocked-by="T1.1,T1.2,T1.3">
+      <description>
+        Deploy and run smoke_sam3_hybrid_cloud.yaml on RunPod RTX 4090.
+        Verify that val_loss is a real number. Record:
+        - val_loss values per epoch
+        - Gradient norms (from T1.3 diagnostics)
+        - Prediction stats (from T1.3 diagnostics)
+        - Total training time and VRAM peak
+      </description>
+      <files>None — cloud execution</files>
+      <expected-outcome>
+        val_loss is a real number (0.5-0.9 range), confirming H1 (sentinel skip).
+        If NaN persists, escalate to H2-H6 investigation.
+      </expected-outcome>
+    </task>
+
+    <task id="T5.2" name="Run sam3_hybrid full dataset (50 epochs) on RTX 4090"
+          priority="P1" estimated-iterations="1"
+          blocked-by="T1.4,T5.1">
+      <description>
+        Run sam3_hybrid_full.yaml (47 train volumes, 3 folds, 50 epochs).
+        Tests H4 (small dataset insufficient). Expected runtime: ~3-4 hours
+        on RTX 4090 (4.4s/epoch × 50 epochs × 3 folds ≈ 660s = 11 min training,
+        but validation adds ~15 min/fold). Cost: ~$3-4.
+
+        Record:
+        - Final val_loss and val_dice per fold
+        - Learning curve (loss vs epoch) for convergence analysis
+        - Compare against DynUNet baseline (val_dice ~0.74 from verified runs)
+      </description>
+      <files>None — cloud execution</files>
+      <expected-outcome>
+        SAM3 hybrid achieves val_dice comparable to or better than DynUNet (~0.74).
+        If significantly worse, the model architecture or loss configuration needs
+        attention (not a code bug).
+      </expected-outcome>
+    </task>
+
+    <task id="T5.3" name="Run VesselFM full dataset verification"
+          priority="P1" estimated-iterations="1"
+          blocked-by="T5.1">
+      <description>
+        Run VesselFM with full MiniVess dataset on RTX 4090 to establish
+        performance baseline. VesselFM was pre-trained on 17 datasets
+        (including MiniVess — data leakage!), so fine-tuning results
+        should be very strong but NOT usable for evaluation.
+
+        Key question: Does VesselFM converge faster than DynUNet due to
+        pre-training? (Expected: yes, significantly.)
+      </description>
+      <files>None — cloud execution</files>
+    </task>
+
+    <task id="T5.4" name="Document results and update model profiles"
+          priority="P1" estimated-iterations="1"
+          blocked-by="T5.1,T5.2,T5.3">
+      <description>
+        Update configs/model_profiles/ with verified full-dataset results.
+        Close #710 with evidence. Update adapters/CLAUDE.md VRAM tables.
+      </description>
+      <files>
+        <file path="configs/model_profiles/sam3_hybrid.yaml" action="edit" />
+        <file path="configs/model_profiles/vesselfm.yaml" action="edit" />
+        <file path="src/minivess/adapters/CLAUDE.md" action="edit" />
+      </files>
+    </task>
+
+    <github-issue-group value="cloud-verification">T5.1,T5.2,T5.3,T5.4</github-issue-group>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       ISSUES
+       ═══════════════════════════════════════════════════════════════════ -->
+  <issues>
+    <!-- Close existing issues -->
+    <close number="668" reason="VesselFM RunPod launch — already implemented in dev_runpod.yaml + launch_dev_runpod.py" />
+    <close number="689" reason="MLflow env var resolution — fixed in launch_dev_runpod.py:109-123 + file-based MLflow on Network Volume" />
+    <close number="692" reason="Idle monitor — SkyPilot native idle_minutes_to_autostop in launch_dev_runpod.py" />
+
+    <!-- Create new issues from code review -->
+    <issue task="T0.1,T0.2,T0.3,T0.4"
+           title="P1: SAM3 adapter code review fixes — LoRA, validation, checkpoint error handling"
+           labels="models, P1-high, refactor" />
+    <issue task="T0.5"
+           title="P0: Atomic checkpoint writes for spot preemption safety"
+           labels="training, P0-critical, infrastructure"
+           relates-to="707" />
+    <issue task="T1.1,T1.2"
+           title="P0: VRAM-aware validation guard + cloud smoke config for sam3_hybrid"
+           labels="models, training, P0-critical"
+           relates-to="710" />
+    <issue task="T1.3"
+           title="P1: Add gradient/prediction diagnostics to trainer for model convergence debugging"
+           labels="training, P1-high, monitoring" />
+    <issue task="T2.1,T2.2,T2.3,T2.4,T2.5"
+           title="P2: Adapter code deduplication — checkpoint, ONNX export, FP16 docs"
+           labels="models, P2-medium, refactor" />
+    <issue task="T4.1,T4.2,T4.3"
+           title="P1: GCP code hardening — env vars, Docker mandate, CLAUDE.md strategy"
+           labels="infrastructure, P1-high"
+           relates-to="703" />
+  </issues>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       EXECUTION NOTES
+       ═══════════════════════════════════════════════════════════════════ -->
+  <execution-notes>
+    <note>Phases P0-P4 are LOCAL — no GPU credits needed. Execute immediately.</note>
+    <note>Phase P5 is BLOCKED on cloud credits. Execute when user confirms budget.</note>
+    <note>Use ralph-loop monitor for Phase P5 cloud execution (auto-diagnose failures).</note>
+    <note>Run /simplify after Phase P2 completes for final polish.</note>
+    <note>Commit after each phase with descriptive message.</note>
+    <note>Total estimated TDD iterations: P0=7, P1=6, P2=6, P3=4, P4=3 = 26 iterations</note>
+    <note>Session budget: 20 iterations max. Split P2+P3 into second session if needed.</note>
+    <note>
+      val_loss=NaN PRIORITY ORDER:
+      1. T1.1 (cloud config) + T1.2 (VRAM guard) — fixes the sentinel issue
+      2. T5.1 (cloud run with val_interval=1) — confirms H1
+      3. T1.3 (diagnostics) — enables H2-H6 investigation if H1 insufficient
+      4. T5.2 (full dataset) — tests H4 (data sufficiency)
+      Only proceed to steps 3-4 if step 2 shows val_loss is STILL NaN.
+    </note>
+  </execution-notes>
+
+</plan>
