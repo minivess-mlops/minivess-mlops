@@ -1,0 +1,39 @@
+# @package _global_
+# GPU Smoke Test: DynUNet on RunPod RTX 4090 via SkyPilot
+#
+# NOT scientifically valid — verifies cloud GPU pipeline only.
+# 2 epochs, 1 fold, 4 volumes = ~3 min on RTX 4090 (~$0.04).
+#
+# Usage:
+#   sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+#     -e MODEL_FAMILY=dynunet
+defaults:
+  - override /model: dynunet
+  - override /checkpoint: lightweight
+
+experiment_name: smoke_dynunet
+model: dynunet
+model_family: dynunet
+losses:
+  - dice_ce
+max_epochs: 2
+num_folds: 1
+debug: true
+
+# Data subsetting (belt-and-suspenders with 4-vol split file, RC10)
+max_train_volumes: 2
+max_val_volumes: 2
+splits_file: configs/splits/smoke_test_1fold_4vol.json
+
+# DVC provenance
+data:
+  dvc_commit: HEAD
+
+# DynUNet: ~3.5 GB VRAM (MEASURED on RTX 2070S — fits any GPU)
+architecture_params:
+  filters:
+    - 32
+    - 64
+    - 128
+    - 256
+  deep_supervision: false

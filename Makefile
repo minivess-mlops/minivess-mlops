@@ -97,10 +97,19 @@ smoke-test-gpu:  ## Launch GPU smoke test on RunPod (MODEL=sam3_vanilla, BRANCH=
 	  --env GIT_BRANCH=$(or $(BRANCH),$(shell git rev-parse --abbrev-ref HEAD)) \
 	  -y
 
-smoke-test-all:  ## Run all 3 GPU smoke tests sequentially (cost: ~$0.36)
+smoke-test-all:  ## Run all GPU smoke tests sequentially (P0 first, then P1)
+	@echo "=== P0 Models (cannot finetune locally) ==="
 	$(MAKE) smoke-test-gpu MODEL=sam3_vanilla
 	$(MAKE) smoke-test-gpu MODEL=sam3_hybrid
 	$(MAKE) smoke-test-gpu MODEL=vesselfm
+	@echo "=== P1 Models (can finetune locally) ==="
+	$(MAKE) smoke-test-gpu MODEL=dynunet
+	$(MAKE) smoke-test-gpu MODEL=segresnet
+	$(MAKE) smoke-test-gpu MODEL=swinunetr
+	$(MAKE) smoke-test-gpu MODEL=unetr
+	$(MAKE) smoke-test-gpu MODEL=attentionunet
+	$(MAKE) smoke-test-gpu MODEL=comma_mamba
+	$(MAKE) smoke-test-gpu MODEL=ulike_mamba
 
 verify-smoke-test:  ## Verify smoke test results on cloud MLflow
 	uv run python scripts/verify_smoke_test.py $(or $(MODEL),sam3_vanilla)
