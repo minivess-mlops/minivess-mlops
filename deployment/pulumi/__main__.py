@@ -251,6 +251,8 @@ deploy_mlflow = command.remote.Command(
                   MLFLOW_AUTH_CONFIG_PATH: /app/basic_auth.ini
                   AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
                   AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
+                  MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD: "true"
+                  MLFLOW_ARTIFACT_UPLOAD_DOWNLOAD_TIMEOUT: "1800"
                 entrypoint:
                   - /bin/sh
                   - -c
