@@ -6,9 +6,9 @@
        test-staging test-prod test-gpu test-e2e \
        build-base-gpu build-base-cpu build-base-light build-bases requirements-tiers \
        ghcr-login push-ghcr \
-       smoke-test-preflight smoke-test-gpu smoke-test-all verify-smoke-test \
+       smoke-test-preflight smoke-test-lambda smoke-test-lambda-all verify-smoke-test \
        monitor-smoke-test diagnose-last-smoke-test \
-       dev-gpu dev-gpu-stop dev-gpu-ssh
+       dev-gpu dev-gpu-heavy dev-gpu-stop dev-gpu-ssh
 
 help:
 	@echo "MinIVess MLOps Makefile"
@@ -30,15 +30,16 @@ help:
 	@echo "  ghcr-login          Login to GitHub Container Registry"
 	@echo "  push-ghcr           Tag + push minivess-base:latest to GHCR"
 	@echo ""
-	@echo "Dev GPU (RunPod, no Docker):"
-	@echo "  dev-gpu               Launch dev GPU environment on RunPod (MODEL=dynunet)"
+	@echo "RunPod Dev GPU (no Docker, RTX 4090/5090):"
+	@echo "  dev-gpu               Launch dev GPU on RunPod (MODEL=dynunet)"
+	@echo "  dev-gpu-heavy         Train sam3_hybrid + vesselfm (need >8 GB VRAM)"
 	@echo "  dev-gpu-stop          Stop dev GPU pod (preserves state)"
 	@echo "  dev-gpu-ssh           SSH into dev GPU pod"
 	@echo ""
-	@echo "Cloud GPU Smoke Tests:"
+	@echo "Lambda Labs Smoke Tests (Docker, staging/prod):"
 	@echo "  smoke-test-preflight  Validate env vars + connectivity"
-	@echo "  smoke-test-gpu        Launch GPU smoke test on RunPod (MODEL=sam3_vanilla)"
-	@echo "  smoke-test-all        Run all 3 GPU smoke tests (~\$$0.36)"
+	@echo "  smoke-test-lambda     Launch smoke test on Lambda A10 (MODEL=sam3_vanilla)"
+	@echo "  smoke-test-lambda-all Run all smoke tests on Lambda"
 	@echo "  verify-smoke-test     Verify smoke test results on cloud MLflow"
 	@echo ""
 	@echo "Infrastructure:"
@@ -91,53 +92,56 @@ test-pulumi:  ## Run Pulumi IaC validation tests
 	uv run pytest tests/v2/unit/test_pulumi_stack.py -v
 
 # ---------------------------------------------------------------------------
-# RunPod GPU Smoke Tests (manual — costs money on RunPod)
+# RunPod Dev GPU (no Docker, deps via uv, RTX 4090/5090)
 # ---------------------------------------------------------------------------
-smoke-test-preflight:  ## Validate env vars + connectivity before GPU smoke test
-	uv run python scripts/validate_smoke_test_env.py
+# RunPod pods ARE containers — Docker-in-Docker is impossible.
+# This is the "dev" environment: direct uv execution, no Prefect.
+# For staging/prod (Docker mandatory): use Lambda Labs targets below.
 
-smoke-test-gpu:  ## Launch GPU smoke test on RunPod (MODEL=sam3_vanilla, BRANCH=main)
-	@echo "=== Launching GPU smoke test: $(MODEL) on RunPod RTX 4090 ==="
-	uv run sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
-	  --env-file .env \
-	  --env MODEL_FAMILY=$(or $(MODEL),sam3_vanilla) \
-	  --env GIT_BRANCH=$(or $(BRANCH),$(shell git rev-parse --abbrev-ref HEAD)) \
-	  -y
-
-smoke-test-all:  ## Run all GPU smoke tests sequentially (P0 first, then P1)
-	@echo "=== P0 Models (cannot finetune locally) ==="
-	$(MAKE) smoke-test-gpu MODEL=sam3_vanilla
-	$(MAKE) smoke-test-gpu MODEL=sam3_hybrid
-	$(MAKE) smoke-test-gpu MODEL=vesselfm
-	@echo "=== P1 Models (can finetune locally) ==="
-	$(MAKE) smoke-test-gpu MODEL=dynunet
-	$(MAKE) smoke-test-gpu MODEL=segresnet
-	$(MAKE) smoke-test-gpu MODEL=swinunetr
-	$(MAKE) smoke-test-gpu MODEL=unetr
-	$(MAKE) smoke-test-gpu MODEL=attentionunet
-	$(MAKE) smoke-test-gpu MODEL=comma_mamba
-	$(MAKE) smoke-test-gpu MODEL=ulike_mamba
-
-verify-smoke-test:  ## Verify smoke test results on cloud MLflow
-	uv run python scripts/verify_smoke_test.py $(or $(MODEL),sam3_vanilla)
-
-monitor-smoke-test:  ## Monitor latest RunPod smoke test (Ralph loop, 15s poll)
-	uv run python scripts/ralph_monitor.py --latest --poll-interval 15
-
-diagnose-last-smoke-test:  ## Diagnose the most recent failed smoke test
-	uv run python scripts/ralph_monitor.py --diagnose-last
-
-# ---------------------------------------------------------------------------
-# Dev GPU Environment (RunPod, no custom Docker image)
-# ---------------------------------------------------------------------------
-dev-gpu:  ## Launch dev GPU on RunPod (MODEL=dynunet, no Docker, deps via uv)
+dev-gpu:  ## Launch dev GPU on RunPod RTX 4090/5090 (MODEL=dynunet)
 	uv run python scripts/launch_dev_runpod.py --model $(or $(MODEL),dynunet)
+
+dev-gpu-heavy:  ## Train heavy models on RunPod (sam3_hybrid + vesselfm, need >8 GB VRAM)
+	@echo "=== Heavy models that CANNOT train on local 8 GB GPU ==="
+	@echo "--- sam3_hybrid (~7.5 GB VRAM) ---"
+	uv run python scripts/launch_dev_runpod.py --model sam3_hybrid
+	@echo "--- vesselfm (~10 GB VRAM) ---"
+	uv run python scripts/launch_dev_runpod.py --model vesselfm
 
 dev-gpu-stop:  ## Stop dev GPU pod (preserves state, restart with 'sky start minivess-dev')
 	sky stop minivess-dev
 
 dev-gpu-ssh:  ## SSH into dev GPU pod for interactive work
 	sky ssh minivess-dev
+
+# ---------------------------------------------------------------------------
+# Lambda Labs Smoke Tests (Docker, staging/prod, A10/A100)
+# ---------------------------------------------------------------------------
+# Lambda provides real VMs — Docker works natively via SkyPilot image_id.
+# Use scripts/launch_smoke_test.py for private GHCR auth + multi-region rotation.
+
+smoke-test-preflight:  ## Validate env vars + connectivity before GPU smoke test
+	uv run python scripts/validate_smoke_test_env.py
+
+smoke-test-lambda:  ## Launch smoke test on Lambda Labs A10 (MODEL=sam3_vanilla)
+	uv run python scripts/launch_smoke_test.py --model $(or $(MODEL),sam3_vanilla) --cloud lambda
+
+smoke-test-lambda-all:  ## Run all smoke tests on Lambda Labs sequentially
+	@echo "=== Heavy models (need >8 GB VRAM) ==="
+	$(MAKE) smoke-test-lambda MODEL=sam3_hybrid
+	$(MAKE) smoke-test-lambda MODEL=vesselfm
+	@echo "=== Standard models ==="
+	$(MAKE) smoke-test-lambda MODEL=sam3_vanilla
+	$(MAKE) smoke-test-lambda MODEL=dynunet
+
+verify-smoke-test:  ## Verify smoke test results on cloud MLflow
+	uv run python scripts/verify_smoke_test.py $(or $(MODEL),sam3_vanilla)
+
+monitor-smoke-test:  ## Monitor latest smoke test (Ralph loop, 15s poll)
+	uv run python scripts/ralph_monitor.py --latest --poll-interval 15
+
+diagnose-last-smoke-test:  ## Diagnose the most recent failed smoke test
+	uv run python scripts/ralph_monitor.py --diagnose-last
 
 # ---------------------------------------------------------------------------
 # GHCR (GitHub Container Registry) — push Docker images for SkyPilot

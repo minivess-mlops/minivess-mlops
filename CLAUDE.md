@@ -159,6 +159,19 @@ Each of the 6 Prefect flows runs in its own Docker container:
 | **staging** | Docker Compose | Local GPU in container | Integration testing |
 | **prod** | Docker + SkyPilot | Cloud spot / on-prem K8s | Full pipeline |
 
+### Zero Hardcoding of Cloud/GPU Config (Non-Negotiable)
+This is an **open-source academic repo** used by heterogeneous research labs. NEVER
+hardcode cloud providers, GPU types, instance counts, regions, or Docker registries.
+
+- **One lab** may want 1x RTX 4090 on RunPod. **Another** may want 8x A100 on AWS.
+- All cloud config must flow through **Hydra config groups** (`configs/cloud/`,
+  `configs/registry/`) so labs override via `configs/lab/lab_name.yaml` and users
+  override via `configs/user/user_name.yaml` — without touching repo defaults.
+- SkyPilot accelerator lists, region priorities, spot preferences, and disk sizes
+  are config, not code. A lab with AWS credits should need ZERO code changes.
+- Docker registry (GHCR, GAR, ECR, DockerHub) is a config choice, not hardcoded.
+- See: `docs/planning/hydra-config-verification-report.md` for the full audit.
+
 ### SkyPilot = Intercloud Broker for AI Workloads (Non-Negotiable)
 SkyPilot is an **intercloud broker** ([Yang et al., NSDI'23](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng))
 — a unified system that automatically places and manages AI jobs across heterogeneous
@@ -397,6 +410,11 @@ See: `.claude/metalearning/2026-03-14-skypilot-purpose-misunderstanding.md`
 - Ignore user-provided URLs (arXiv, GitHub) — always fetch them for context
 - Hardcode specific task names (SDF, centerline, etc.) into multi-task infrastructure —
   use config-driven registries. This is an MLOps platform for ALL segmentation research.
+- Hardcode cloud providers, GPU types, instance counts, regions, or Docker registries
+  in SkyPilot YAMLs or Python code. ALL cloud config must be in Hydra config groups
+  (`configs/cloud/`, `configs/registry/`) overridable per lab and per user. One lab
+  wants 1x RTX 4090 on RunPod, another wants 8x A100 on AWS — both must work via
+  config, not code changes. This is an open-source academic repo for heterogeneous labs.
 - Use `import re` or regex patterns for parsing structured data (Python, YAML, JSON,
   log lines, metric names). Use proper parsers. "Regex is sufficient" is banned.
 - Suggest `python scripts/*.py` as a training or pipeline run command — use Prefect flows.
