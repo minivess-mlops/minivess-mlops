@@ -1,0 +1,177 @@
+# MinIVess MLOps — GPU Smoke Test on Lambda Labs via SkyPilot
+#
+# Lambda Labs provides VM-based instances with Docker preinstalled.
+# Unlike RunPod (container-based), Docker works natively on Lambda.
+# See: docs/runpod-vs-lambda-vs-rest-for-skypilot-with-docker.md
+#
+# Minimal training run to verify the cloud GPU pipeline works end-to-end:
+#   UpCloud S3 --DVC pull--> Lambda A10 --MLflow--> UpCloud MLflow
+#
+# Launch via Python API (handles private GHCR auth):
+#   uv run python scripts/launch_smoke_test.py --model sam3_vanilla --cloud lambda
+#
+# Or via SkyPilot CLI (requires public GHCR or manual docker login):
+#   sky launch deployment/skypilot/smoke_test_lambda.yaml \
+#     --env-file .env --env MODEL_FAMILY=sam3_vanilla -y
+#
+# Docker image: All deps (Python, PyTorch, MONAI, uv, project code) are baked
+# into the GHCR image. SkyPilot setup: only pulls data + copies config.
+# BANNED: apt-get, uv sync, git clone in setup (see metalearning 2026-03-14).
+#
+# Cost: ~$0.22/model on A10 ($0.86/hr, ~15 min per smoke test)
+# Total: ~$0.65 for all 3 models (sam3_vanilla, sam3_hybrid, vesselfm)
+#
+# Prerequisites:
+#   - Lambda API key configured: sky check lambda
+#   - Docker image pushed: make push-ghcr
+#   - UpCloud MLflow server running (Pulumi stack)
+#   - DVC data pushed to UpCloud S3: dvc push -r upcloud
+#   - .env populated with DVC_S3_*, MLFLOW_CLOUD_* variables
+
+name: minivess-smoke-test
+
+resources:
+  # Docker image from registry — all deps pre-installed, no bare VM setup.
+  # Lambda is VM-based: Docker daemon pulls and runs this image inside the VM.
+  # This is the well-tested path (same as AWS/GCP/Azure).
+  image_id: docker:ghcr.io/petteriteikari/minivess-base:latest
+  # GPU fallback: SkyPilot tries cheapest available on Lambda.
+  # A10 (24 GB, $0.86/hr) fits all models — cheapest Lambda GPU.
+  # All our models need ≤10 GB VRAM, A10 has 24 GB — plenty of headroom.
+  # GH200 (96 GB, $1.99/hr) for future large models.
+  accelerators: {A10: 1, A100: 1, GH200: 1, H100: 1}
+  cloud: lambda
+  # Lambda does NOT support spot instances — on-demand only.
+  # A10 at $0.86/hr is cheaper than RunPod RTX 4090 on-demand ($1.64/hr).
+  use_spot: false
+  disk_size: 40
+
+envs:
+  # Model to test (override with --env MODEL_FAMILY=...)
+  MODEL_FAMILY: sam3_vanilla
+
+  # DVC data pull credentials (UpCloud S3)
+  DVC_S3_ENDPOINT_URL: ${DVC_S3_ENDPOINT_URL}
+  DVC_S3_ACCESS_KEY: ${DVC_S3_ACCESS_KEY}
+  DVC_S3_SECRET_KEY: ${DVC_S3_SECRET_KEY}
+  DVC_S3_BUCKET: ${DVC_S3_BUCKET:-minivess-dvc-data}
+  DVC_REMOTE: upcloud
+
+  # boto3 CRC32C checksum workaround for UpCloud S3 (H17)
+  AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
+  AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
+
+  # Remote MLflow tracking (UpCloud)
+  MLFLOW_TRACKING_URI: ${MLFLOW_CLOUD_URI}
+  MLFLOW_TRACKING_USERNAME: ${MLFLOW_CLOUD_USERNAME:-admin}
+  MLFLOW_TRACKING_PASSWORD: ${MLFLOW_CLOUD_PASSWORD}
+
+  # Suppress git warning (runner image has no git — by design)
+  GIT_PYTHON_REFRESH: quiet
+
+  # Cloud VM escape hatches (approved — same as pytest, RC12)
+  MINIVESS_ALLOW_HOST: "1"
+  PREFECT_DISABLED: "1"
+
+  # train_flow.py env requirements (H15)
+  SPLITS_DIR: /app/configs/splits
+  CHECKPOINT_DIR: /app/checkpoints
+  LOGS_DIR: /app/logs
+
+  # PyTorch CUDA memory optimization
+  PYTORCH_ALLOC_CONF: "expandable_segments:True"
+
+  # HuggingFace token (required for VesselFM weight download)
+  HF_TOKEN: ${HF_TOKEN}
+
+setup: |
+  set -ex  # Fail fast, trace commands
+
+  # All deps are in the Docker image — setup is DATA ONLY.
+  # NOTE: uv, git, scripts/ are NOT in the runner image.
+  # Use python/dvc directly (.venv/bin is on PATH).
+  cd /app
+
+  # Initialize DVC without git (container has no .git)
+  dvc init --no-scm
+
+  # Configure DVC upcloud remote with S3 credentials from env
+  dvc remote add upcloud s3://${DVC_S3_BUCKET}
+  dvc remote modify upcloud endpointurl ${DVC_S3_ENDPOINT_URL}
+  dvc remote modify --local upcloud access_key_id ${DVC_S3_ACCESS_KEY}
+  dvc remote modify --local upcloud secret_access_key ${DVC_S3_SECRET_KEY}
+
+  # Write minimal DVC pipeline for data pull (only download stage needed).
+  # The MD5 hash comes from the committed dvc.lock — stable unless data changes.
+  cat > dvc.yaml << 'DVCEOF'
+  stages:
+    download:
+      cmd: "true"
+      outs:
+        - data/raw/minivess/
+      frozen: true
+  DVCEOF
+
+  cat > dvc.lock << 'LOCKEOF'
+  schema: '2.0'
+  stages:
+    download:
+      cmd: "true"
+      outs:
+      - path: data/raw/minivess/
+        hash: md5
+        md5: e712f8b23f377a4990b91bef0b1aef76.dir
+        size: 2749883382
+        nfiles: 350
+  LOCKEOF
+
+  # Pull training data from UpCloud S3
+  dvc pull -r upcloud
+
+  # H13: Use smoke test splits (4 volumes) instead of full 3-fold (70 volumes)
+  cp configs/splits/smoke_test_1fold_4vol.json configs/splits/splits.json
+
+  # Create required directories (H15)
+  mkdir -p /app/checkpoints /app/logs
+
+  # Pre-cache VesselFM weights during setup (H20: don't burn GPU time on download)
+  if [ "${MODEL_FAMILY}" = "vesselfm" ]; then
+    python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" || true
+  fi
+
+  # Verify environment
+  echo "=== Pre-flight Check ==="
+  nvidia-smi
+  python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}, GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"}')"
+  ls -la configs/splits/splits.json
+  ls data/raw/minivess/imagesTr/ | head -5 || echo "WARNING: No training data!"
+
+run: |
+  cd /app
+
+  # Guard: verify setup completed (catches sky exec without setup)
+  if [ ! -f configs/splits/splits.json ]; then
+    echo "FATAL: splits.json missing — setup did not complete. Use 'sky launch' not 'sky exec'."
+    exit 1
+  fi
+  if [ ! -d data/raw/minivess/imagesTr ]; then
+    echo "FATAL: Training data missing — DVC pull failed in setup."
+    exit 1
+  fi
+
+  # Compute EXPERIMENT in shell (NOT in envs — SkyPilot can't resolve intra-envs ${})
+  export EXPERIMENT="smoke_${MODEL_FAMILY}"
+
+  # UUID isolation via HYDRA_OVERRIDES → experiment_name in resolved config
+  export EXPERIMENT_UUID=$(python -c "import uuid; print(uuid.uuid4().hex[:8])")
+  export HYDRA_OVERRIDES="experiment_name=smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
+
+  echo "=== MinIVess GPU Smoke Test (Lambda Labs) ==="
+  echo "Model: ${MODEL_FAMILY}"
+  echo "Hydra config: ${EXPERIMENT}"
+  echo "MLflow experiment: smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
+  echo "MLflow server: ${MLFLOW_TRACKING_URI}"
+  echo "Splits: $(cat configs/splits/splits.json | python -c 'import json,sys; d=json.load(sys.stdin); print(f"{len(d)} folds")')"
+
+  # Execute training flow (python is on PATH from .venv/bin)
+  python -m minivess.orchestration.flows.train_flow
