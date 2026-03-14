@@ -166,6 +166,9 @@ class ExperimentTracker:
                 # Tag the run as failed before re-raising
                 try:
                     mlflow.set_tag("error_type", type(exc).__name__)
+                    # Truncate message to 5000 chars (MLflow tag value limit)
+                    error_msg = str(exc)[:5000]
+                    mlflow.set_tag("error_message", error_msg)
                     mlflow.end_run(status="FAILED")
                 except Exception:
                     logger.warning("Failed to set FAILED status", exc_info=True)

@@ -200,6 +200,10 @@ class Sam3HybridAdapter(ModelAdapter):
         with torch.no_grad():
             sam_features = self._extract_sam_volume_features(images)
 
+        # SAM3 encoder runs in FP16 (torch_dtype=float16 in from_pretrained).
+        # Cast to FP32 before passing to trainable FP32 modules (axial_proj, fusion).
+        sam_features = sam_features.float()
+
         # Axial smoothing of stacked 2D features
         sam_features = self.axial_proj(sam_features)
 
