@@ -8,57 +8,67 @@ When the Docker-only violation was discovered (see `2026-03-14-skypilot-bare-vm-
 Claude's initial reaction implied "SkyPilot defaults to bare VM, so maybe we should bypass SkyPilot."
 This reveals a fundamental failure to understand WHY SkyPilot is in this repo.
 
+Then Claude compounded the error by writing a wrong analogy: "SkyPilot is like Pulumi for IaC."
+The user explicitly corrected this — SkyPilot is NOT Infrastructure as Code. SkyPilot and
+Pulumi/Terraform operate at completely different abstraction levels.
+
+## What SkyPilot Actually Is
+
+SkyPilot is an **intercloud broker** — a term coined in the
+[NSDI'23 paper](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng)
+by Yang et al. at UC Berkeley.
+
+Official self-description: *"A system to run, manage, and scale AI workloads on any
+AI infrastructure."*
+
+**The key distinction from IaC:**
+- **Terraform/Pulumi** = "Create this specific VM on AWS us-east-1 with this AMI."
+  You tell it EXACTLY what resource to provision. It manages resource lifecycle.
+- **SkyPilot** = "I need 1×A100 for 8 hours, cheapest option." It AUTOMATICALLY decides
+  which cloud, region, and instance type to use. It handles placement optimization,
+  spot preemption recovery, and cross-cloud failover.
+
+**Better analogies:**
+- SkyPilot is like **Slurm for the multi-cloud era** — you submit a job, it places it
+- SkyPilot is like **a travel aggregator (Kayak)** — you say "cheapest flight A→B",
+  it searches across all airlines
+- The NSDI paper explicitly differentiates from Terraform: *"Terraform provisions and
+  manages resources on different clouds, but requires the usage of provider-specific
+  APIs, and also does not handle job placement."*
+
+SkyPilot combines your infrastructure (K8s clusters, Slurm clusters, cloud VMs, SSH
+machines) into a **unified compute pool** optimized for AI workloads.
+
 ## Why SkyPilot Exists in This Repo
 
-SkyPilot is the **cloud-agnostic compute orchestrator** — the equivalent of Pulumi for IaC.
-It abstracts away provider-specific APIs so the SAME YAML works on:
-- RunPod (current)
-- Lambda Labs
-- AWS (EC2 spot)
-- GCP (Preemptible VMs)
-- Azure (Spot VMs)
-- Local intranet servers (via SSH)
-- On-prem K8s clusters
+This repo's highest priorities are **excellent DevEx** and **reproducibility**. Nobody
+should manually launch pods, VMs, or instances. SkyPilot automates this:
 
-**The whole point is provider portability.** Suggesting to bypass SkyPilot for RunPod-native
-Docker is like suggesting to bypass Pulumi and manually configure servers. It defeats the
-entire purpose of the abstraction layer.
+1. **Zero manual work** — `sky jobs launch task.yaml` handles everything
+2. **Provider portability** — same YAML works on RunPod, Lambda, AWS, GCP, SSH
+3. **Cost optimization** — automatic spot instances with preemption recovery
+4. **Reproducibility** — declarative YAML = reproducible compute environment
 
-## The Correct Mental Model
+The SAME SkyPilot YAML works on:
+- RunPod (current: cloud GPU spot RTX 4090)
+- Lambda Labs (A100)
+- AWS (p4d spot)
+- GCP (preemptible)
+- Intranet servers (SSH connector)
+- Local LAN multi-GPU (SSH)
 
-```
-WRONG mental model (what Claude had):
-  SkyPilot = "a way to launch VMs on RunPod"
-  Docker = "an alternative to SkyPilot"
-  → Led to: bare VM scripts, then "maybe bypass SkyPilot for Docker"
+**The whole point is that the researcher never thinks about infrastructure.**
 
-CORRECT mental model:
-  SkyPilot = "cloud-agnostic compute orchestrator (like Pulumi for IaC)"
-  Docker = "execution environment WITHIN SkyPilot"
-  → Leads to: SkyPilot launches Docker containers on ANY cloud
+## The Root Failure: Wrong Analogy
 
-ANALOGY:
-  SkyPilot : GPU compute = Pulumi : cloud infrastructure
-  Docker : SkyPilot = containers : Pulumi
-  RunPod : SkyPilot = AWS : Pulumi (just one provider, not THE provider)
-```
+Claude wrote "SkyPilot is like Pulumi for IaC" without web-searching what SkyPilot
+actually calls itself. This is a violation of CLAUDE.md Rule #12 (Never Confabulate)
+and Rule #10 (Verify Beyond Knowledge Cutoff).
 
-## What Must Change
-
-1. **SkyPilot + Docker = ALWAYS together**. SkyPilot YAMLs use `image_id: docker:<image>`.
-   SkyPilot orchestrates WHERE the Docker container runs. Docker defines WHAT runs.
-
-2. **SkyPilot scope is broader than cloud**. It should be used for:
-   - Cloud GPU training (RunPod, Lambda Labs, AWS, GCP)
-   - Intranet GPU servers (via SSH connector)
-   - Local LAN multi-GPU (via SSH)
-   - Any compute that's not the dev machine itself
-
-3. **Never suggest bypassing SkyPilot.** Just like never suggesting "skip Pulumi, use
-   AWS console manually." The abstraction layer IS the value.
-
-4. **CLAUDE.md must clarify** that SkyPilot's role is cloud-agnostic orchestration,
-   not "a RunPod launcher."
+The correct approach was:
+1. Web-search SkyPilot's official docs and NSDI paper
+2. Read their self-description
+3. Use THEIR terminology, not fabricated analogies
 
 ## Anti-Pattern: Tool Reduction Under Pressure
 
@@ -71,13 +81,13 @@ abandoning the tool.
 
 This is the same anti-pattern as "Prefect is complex → run scripts directly" or
 "Docker is complex → run on host." The complexity is the VALUE — it provides
-portability, reproducibility, and isolation.
+portability, reproducibility, and isolation. These tools exist because the repo's
+#1 priority is excellent DevEx and reproducibility.
 
 ## Resolution
 
 - [x] Metalearning doc created (this file)
-- [ ] Update CLAUDE.md SkyPilot section to clarify cloud-agnostic purpose
-- [ ] Add SkyPilot scope diagram to knowledge graph
-- [ ] Ensure SkyPilot YAML uses `image_id: docker:<image>` (GHCR)
+- [x] Wrong Pulumi analogy corrected in CLAUDE.md, navigator.yaml, infrastructure.yaml
+- [x] Correct terminology: "intercloud broker" (NSDI'23)
 - [ ] Add SSH connector setup for intranet servers
 - [ ] Add regression test: SkyPilot YAML must have `image_id` key

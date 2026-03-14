@@ -57,7 +57,7 @@ decisions:
 metalearning:
   - file: .claude/metalearning/2026-03-14-skypilot-purpose-misunderstanding.md
     applies_to: [deployment/skypilot/, src/minivess/compute/]
-    rule: "SkyPilot = cloud-agnostic orchestrator (like Pulumi for IaC). NEVER bypass. NEVER treat as RunPod-specific."
+    rule: "SkyPilot = intercloud broker (NSDI'23). Like Slurm for multi-cloud, NOT IaC. NEVER bypass. NEVER treat as RunPod-specific."
   - file: .claude/metalearning/2026-03-14-skypilot-bare-vm-docker-violation.md
     applies_to: [deployment/skypilot/]
     rule: "Cloud GPU execution MUST use Docker images via image_id. Bare VM setup scripts are BANNED."

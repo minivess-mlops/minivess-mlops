@@ -65,8 +65,11 @@ domains:
 invariants:
   # HARD CONSTRAINTS — apply before any decision node is evaluated.
   # These are non-negotiable architectural mandates that override all other guidance.
+  - id: devex_reproducibility_first
+    rule: "The two highest priorities are (1) excellent DevEx (zero manual work, everything automatic) and (2) reproducibility (combat reproducibility crisis in science/ML). Every tool exists to serve these goals: Pulumi=IaC, SkyPilot=compute, Docker=execution, Prefect=orchestration, DVC=data."
+    violation_doc: .claude/metalearning/2026-03-14-docker-resistance-anti-pattern.md
   - id: docker_only
-    rule: "ALL execution (local, cloud, CI) MUST run inside Docker containers. Bare VM setup scripts are BANNED."
+    rule: "ALL execution (local, cloud, CI) MUST run inside Docker containers. Bare VM setup scripts are BANNED. Docker is THE execution model — the reproducibility guarantee — NOT optional overhead."
     applies_to: [deployment/skypilot/, deployment/docker/, scripts/]
     violation_doc: .claude/metalearning/2026-03-14-skypilot-bare-vm-docker-violation.md
     claude_md_rules: [17, 18, 19]
@@ -74,7 +77,7 @@ invariants:
     rule: "Cloud GPU training requires Docker images in a registry (GHCR/DockerHub). SkyPilot YAMLs MUST have image_id."
     applies_to: [deployment/skypilot/]
   - id: skypilot_always
-    rule: "SkyPilot = cloud-agnostic compute orchestrator (like Pulumi for IaC). ALWAYS use SkyPilot for compute beyond dev machine. NEVER bypass it. NEVER treat it as RunPod-specific."
+    rule: "SkyPilot = intercloud broker (NSDI'23) — automatic workload placement across clouds/K8s/Slurm/SSH. Like Slurm for multi-cloud, NOT IaC. ALWAYS use for compute beyond dev machine. NEVER bypass. NEVER treat as RunPod-specific."
     violation_doc: .claude/metalearning/2026-03-14-skypilot-purpose-misunderstanding.md
     applies_to: [deployment/skypilot/, src/minivess/compute/]
 
