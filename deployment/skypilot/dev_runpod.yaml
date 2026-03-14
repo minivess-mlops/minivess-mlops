@@ -1,44 +1,52 @@
-# MinIVess MLOps — Dev Environment on RunPod (No Custom Docker Image)
+# MinIVess MLOps — Dev Environment on RunPod (Network Volume + File-Based MLflow)
 #
-# Quick GPU iteration without the 21.4 GB Docker image pull.
+# Quick GPU iteration without custom Docker images or remote MLflow servers.
 # Uses SkyPilot's default RunPod image + installs deps via uv in setup.
+# All persistent data lives on RunPod Network Volume "minivess-dev".
+#
+# Architecture (plan v4.0):
+#   RunPod Network Volume (persistent NVMe, $3.50/month for 50 GB):
+#     /opt/vol/data/raw/minivess/   ← DVC data (pulled once, cached forever)
+#     /opt/vol/mlruns/              ← MLflow tracking (file-based, no server)
+#     /opt/vol/checkpoints/         ← Saved model weights
+#     /opt/vol/.cache/huggingface/  ← SAM3 ViT-32L (~1.8 GB), VesselFM (~120 MB)
+#     /opt/vol/.cache/torch/        ← torchvision/torchhub weights
+#
+#   Key optimization: model weights download ONCE (sam3_vanilla first run),
+#   then cached on the Network Volume forever. sam3_hybrid, sam3_topolora
+#   reuse the same SAM3 encoder weights — zero re-download.
 #
 # Launch:
-#   uv run python scripts/launch_dev_runpod.py --model dynunet
-#   uv run python scripts/launch_dev_runpod.py --model sam3_vanilla --spot
+#   sky launch deployment/skypilot/dev_runpod.yaml --env MODEL_FAMILY=sam3_vanilla
+#   sky launch deployment/skypilot/dev_runpod.yaml --env MODEL_FAMILY=sam3_hybrid
+#   sky launch deployment/skypilot/dev_runpod.yaml --env MODEL_FAMILY=vesselfm
 #
-# Or via Makefile:
-#   make dev-gpu MODEL=dynunet
+# Volume setup (one-time):
+#   sky volumes apply deployment/skypilot/minivess-dev-volume.yaml
 #
-# Architecture:
-#   RunPod pod = container (SkyPilot default image, pre-cached = instant start)
-#   setup: installs Python 3.13 + uv + project deps + pulls DVC data (~8-12 min)
-#   run: executes training directly (no Docker-in-Docker, no Prefect)
-#
-# This is the "dev" environment — no Docker, no Prefect, direct execution.
-# For staging/prod (Docker-mandatory), use Lambda Labs (issue #681).
-#
-# Cost: RTX 4090 $0.44/hr, RTX 5090 ~$0.69/hr (on-demand, RunPod community)
-# Auto-stop: 15 min idle → pod stops (restart with 'sky start')
+# Cost: RTX 3090 $0.22/hr (community), ~15-20 min/run = ~$0.06-0.08/run
 #
 # Prerequisites:
 #   - RunPod API key configured: sky check runpod
-#   - UpCloud MLflow server running
+#   - Network volume "minivess-dev" exists: sky volumes ls
 #   - DVC data pushed to UpCloud S3: dvc push -r upcloud
-#   - .env populated with DVC_S3_*, MLFLOW_CLOUD_* variables
+#   - .env populated with DVC_S3_*, HF_TOKEN
 
 name: minivess-dev
 
 resources:
   cloud: runpod
-  # Default GPU list for dev prototyping: consumer RTX with ≥24 GB VRAM.
-  # sam3_hybrid ~7.5 GB, VesselFM ~10 GB — all fit on 24 GB.
-  # Override this list freely for your lab/budget (e.g. add A4000, A40, L40S).
+  # Consumer RTX with ≥24 GB VRAM. sam3_hybrid ~7.5 GB, VesselFM ~10 GB.
   # SkyPilot tries cheapest available from this list.
   accelerators: {RTX4090: 1, RTX5090: 1, RTX3090: 1}
   # On-demand for dev reliability (spot can preempt during debugging).
   use_spot: false
   disk_size: 50
+
+# Persistent storage — survives pod termination.
+# Created via: sky volumes apply deployment/skypilot/minivess-dev-volume.yaml
+volumes:
+  /opt/vol: minivess-dev
 
 # Sync project source to the pod via rsync. SkyPilot places files at
 # ~/sky_workdir/ and cds there before running setup:/run:.
@@ -60,10 +68,8 @@ envs:
   AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
   AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
 
-  # Remote MLflow tracking (UpCloud) — resolved by launcher script
-  MLFLOW_TRACKING_URI: ${MLFLOW_CLOUD_URI}
-  MLFLOW_TRACKING_USERNAME: ${MLFLOW_CLOUD_USERNAME:-admin}
-  MLFLOW_TRACKING_PASSWORD: ${MLFLOW_CLOUD_PASSWORD}
+  # File-based MLflow on Network Volume — NO remote server needed
+  MLFLOW_TRACKING_URI: /opt/vol/mlruns
 
   # Suppress git warning
   GIT_PYTHON_REFRESH: quiet
@@ -78,11 +84,15 @@ envs:
   # HuggingFace token (required for SAM3 + VesselFM weight download)
   HF_TOKEN: ${HF_TOKEN}
 
+  # Weight cache on Network Volume — download once, reuse forever
+  HF_HOME: /opt/vol/.cache/huggingface
+  TORCH_HOME: /opt/vol/.cache/torch
+
 setup: |
   set -ex  # Fail fast, trace commands
 
   echo "=== MinIVess Dev Environment Setup ==="
-  echo "This installs Python 3.13 + all project deps (~8-12 min first time)"
+  echo "Network Volume mounted at /opt/vol"
 
   # SkyPilot workdir: we're already in ~/sky_workdir/ with all source files.
   WORKDIR=$(pwd)
@@ -90,6 +100,18 @@ setup: |
 
   # Infrastructure timing: record setup_start (issue #683)
   echo "setup_start=$(date +%s.%N)" > "$TIMING_FILE"
+
+  # Verify volume is mounted
+  if [ ! -d /opt/vol ]; then
+    echo "FATAL: Network volume not mounted at /opt/vol"
+    echo "  Create it: sky volumes apply deployment/skypilot/minivess-dev-volume.yaml"
+    exit 1
+  fi
+  echo "Network volume OK: $(df -h /opt/vol | tail -1)"
+
+  # Create persistent directories on volume (idempotent)
+  mkdir -p /opt/vol/data/raw /opt/vol/mlruns /opt/vol/checkpoints /opt/vol/logs
+  mkdir -p /opt/vol/.cache/huggingface /opt/vol/.cache/torch
 
   # Step 1: Install Python 3.13 from deadsnakes PPA
   # SkyPilot's default RunPod image has Python 3.10/3.11 — we need 3.13
@@ -120,7 +142,6 @@ setup: |
   export PATH="${WORKDIR}/.venv/bin:$HOME/.local/bin:$PATH"
   uv sync --all-extras
   # T0.7: Verify python symlink exists in venv (reviewer C1 fix, #696)
-  # uv venv may create python3.13 but not python — bare `python` would use system Python
   ls -la "${WORKDIR}/.venv/bin/python"* | head -5
   if [ ! -e "${WORKDIR}/.venv/bin/python" ]; then
     echo "WARNING: No python symlink in venv — creating one"
@@ -129,17 +150,22 @@ setup: |
   echo "Python in venv: $(${WORKDIR}/.venv/bin/python --version)"
   echo "uv_sync_end=$(date +%s.%N)" >> "$TIMING_FILE"
 
-  # Step 4: Configure DVC + pull training data
+  # Step 4: Pull training data to Network Volume (skip if already cached)
   echo "dvc_config_start=$(date +%s.%N)" >> "$TIMING_FILE"
-  dvc init --no-scm -f
+  if [ -d /opt/vol/data/raw/minivess/imagesTr ] && \
+     [ "$(ls /opt/vol/data/raw/minivess/imagesTr/ 2>/dev/null | wc -l)" -gt 10 ]; then
+    echo "Training data already cached on Network Volume — skipping DVC pull"
+  else
+    echo "First run: pulling training data via DVC (~2.6 GB, ~5 min)"
+    dvc init --no-scm -f
 
-  dvc remote add upcloud s3://${DVC_S3_BUCKET}
-  dvc remote modify upcloud endpointurl ${DVC_S3_ENDPOINT_URL}
-  dvc remote modify --local upcloud access_key_id ${DVC_S3_ACCESS_KEY}
-  dvc remote modify --local upcloud secret_access_key ${DVC_S3_SECRET_KEY}
+    dvc remote add upcloud s3://${DVC_S3_BUCKET}
+    dvc remote modify upcloud endpointurl ${DVC_S3_ENDPOINT_URL}
+    dvc remote modify --local upcloud access_key_id ${DVC_S3_ACCESS_KEY}
+    dvc remote modify --local upcloud secret_access_key ${DVC_S3_SECRET_KEY}
 
-  # Write minimal DVC pipeline for data pull
-  cat > dvc.yaml << 'DVCEOF'
+    # Write minimal DVC pipeline for data pull
+    cat > dvc.yaml << 'DVCEOF'
   stages:
     download:
       cmd: "true"
@@ -148,7 +174,7 @@ setup: |
       frozen: true
   DVCEOF
 
-  cat > dvc.lock << 'LOCKEOF'
+    cat > dvc.lock << 'LOCKEOF'
   schema: '2.0'
   stages:
     download:
@@ -160,20 +186,30 @@ setup: |
         size: 2749883382
         nfiles: 350
   LOCKEOF
+
+    dvc pull -r upcloud
+    # Move data to persistent volume
+    if [ -d data/raw/minivess ] && [ ! -d /opt/vol/data/raw/minivess/imagesTr ]; then
+      cp -r data/raw/minivess /opt/vol/data/raw/
+    fi
+  fi
   echo "dvc_config_end=$(date +%s.%N)" >> "$TIMING_FILE"
 
-  echo "dvc_pull_start=$(date +%s.%N)" >> "$TIMING_FILE"
-  dvc pull -r upcloud
-  echo "dvc_pull_end=$(date +%s.%N)" >> "$TIMING_FILE"
+  # Symlink volume data into workdir (train_flow.py expects data/raw/minivess/)
+  mkdir -p data/raw
+  if [ -d /opt/vol/data/raw/minivess ] && [ ! -L data/raw/minivess ]; then
+    rm -rf data/raw/minivess
+    ln -sf /opt/vol/data/raw/minivess data/raw/minivess
+  fi
 
   # Step 5: Use smoke test splits (4 volumes — dev is for quick iteration)
   cp configs/splits/smoke_test_1fold_4vol.json configs/splits/splits.json
 
-  # Step 6: Create required directories for train_flow.py
+  # Step 6: Create required directories
   mkdir -p checkpoints logs
 
   # Step 7: Pre-cache model weights during setup (don't burn GPU time)
-  # T0.7: Use explicit venv python — bare `python` may resolve to system Python (#696)
+  # Weights go to HF_HOME/TORCH_HOME on Network Volume — cached forever
   echo "model_weights_start=$(date +%s.%N)" >> "$TIMING_FILE"
   if [ "${MODEL_FAMILY}" = "vesselfm" ]; then
     "${WORKDIR}/.venv/bin/python" -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" || true
@@ -184,7 +220,6 @@ setup: |
   echo "model_weights_end=$(date +%s.%N)" >> "$TIMING_FILE"
 
   # Step 8: Verify environment
-  # T0.7: Use explicit venv python for all verification calls (#696)
   echo "verification_start=$(date +%s.%N)" >> "$TIMING_FILE"
   echo "=== Pre-flight Check ==="
   nvidia-smi
@@ -192,6 +227,9 @@ setup: |
   "${WORKDIR}/.venv/bin/python" -c "import monai; print(f'MONAI: {monai.__version__}')"
   ls -la configs/splits/splits.json
   ls data/raw/minivess/imagesTr/ | head -5 || echo "WARNING: No training data!"
+  echo "=== Volume contents ==="
+  ls /opt/vol/
+  du -sh /opt/vol/.cache/ 2>/dev/null || true
   echo "verification_end=$(date +%s.%N)" >> "$TIMING_FILE"
 
   echo "setup_end=$(date +%s.%N)" >> "$TIMING_FILE"
@@ -204,10 +242,10 @@ run: |
   export PATH="${WORKDIR}/.venv/bin:$HOME/.local/bin:$PATH"
   export VIRTUAL_ENV="${WORKDIR}/.venv"
 
-  # Set train_flow.py env requirements (paths relative to workdir)
+  # Set train_flow.py env requirements
   export SPLITS_DIR="${WORKDIR}/configs/splits"
-  export CHECKPOINT_DIR="${WORKDIR}/checkpoints"
-  export LOGS_DIR="${WORKDIR}/logs"
+  export CHECKPOINT_DIR="/opt/vol/checkpoints"
+  export LOGS_DIR="/opt/vol/logs"
 
   # Guard: verify setup completed
   if [ ! -f configs/splits/splits.json ]; then
@@ -219,36 +257,16 @@ run: |
     exit 1
   fi
 
-  # T0.6: Guard MLFLOW_TRACKING_URI — three failure modes (plan v3.1 #695)
-  # Mode 1: empty string (MLFLOW_CLOUD_URI was empty in .env)
-  # Mode 2: literal "${MLFLOW_CLOUD_URI}" (SkyPilot didn't resolve env interpolation)
-  # Mode 3: "mlruns" (resolve_tracking_uri() silent local fallback)
-  # All three result in artifacts being lost when the pod terminates.
-  echo "MLflow URI resolved: ${MLFLOW_TRACKING_URI}"
-  echo "MLflow auth user:    ${MLFLOW_TRACKING_USERNAME}"
-  if [ -z "${MLFLOW_TRACKING_URI}" ] || \
-     [ "${MLFLOW_TRACKING_URI}" = "mlruns" ] || \
-     echo "${MLFLOW_TRACKING_URI}" | grep -qF '${'; then
-    echo "FATAL: MLFLOW_TRACKING_URI is empty, local-only, or unresolved."
-    echo "  Value: '${MLFLOW_TRACKING_URI}'"
-    echo "  Use scripts/launch_dev_runpod.py (not 'sky launch' directly)."
-    echo "  Ensure MLFLOW_CLOUD_URI is set in .env."
+  # Guard: verify Network Volume is mounted
+  if [ ! -d /opt/vol/mlruns ]; then
+    echo "FATAL: Network volume not mounted at /opt/vol — mlruns dir missing."
     exit 1
   fi
-  if [ -z "${MLFLOW_TRACKING_USERNAME}" ] || [ -z "${MLFLOW_TRACKING_PASSWORD}" ]; then
-    echo "FATAL: MLflow auth credentials missing (MLFLOW_TRACKING_USERNAME or PASSWORD)."
-    exit 1
-  fi
-  # Connectivity check from pod — warn only, don't abort (pod network may differ)
-  if command -v curl >/dev/null 2>&1; then
-    if ! curl -sf -u "${MLFLOW_TRACKING_USERNAME}:${MLFLOW_TRACKING_PASSWORD}" \
-         "${MLFLOW_TRACKING_URI}/health" > /dev/null 2>&1; then
-      echo "WARNING: Cannot reach MLflow from pod: ${MLFLOW_TRACKING_URI}"
-      echo "  Training will proceed but artifacts may not upload."
-    else
-      echo "MLflow connectivity from pod: OK"
-    fi
-  fi
+
+  # File-based MLflow — just verify the directory exists
+  echo "MLflow tracking: ${MLFLOW_TRACKING_URI} (file-based on Network Volume)"
+  echo "HF cache: ${HF_HOME}"
+  echo "Torch cache: ${TORCH_HOME}"
 
   # Compute EXPERIMENT in shell (SkyPilot can't resolve intra-envs ${})
   export EXPERIMENT="smoke_${MODEL_FAMILY}"
@@ -261,11 +279,10 @@ run: |
   echo "Model: ${MODEL_FAMILY}"
   echo "Hydra config: ${EXPERIMENT}"
   echo "MLflow experiment: dev_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
-  echo "MLflow server: ${MLFLOW_TRACKING_URI}"
+  echo "MLflow tracking: ${MLFLOW_TRACKING_URI} (file-based)"
   echo "Splits: $(cat configs/splits/splits.json | ${WORKDIR}/.venv/bin/python -c 'import json,sys; d=json.load(sys.stdin); print(f"{len(d)} folds")')"
 
   # Infrastructure timing: timing_setup.txt written by setup block (#683)
-  # train_flow.py reads it via infrastructure_timing.log_infrastructure_timing()
   if [ -f "${WORKDIR}/timing_setup.txt" ]; then
     echo "Infrastructure timing file found: $(wc -l < ${WORKDIR}/timing_setup.txt) entries"
   fi

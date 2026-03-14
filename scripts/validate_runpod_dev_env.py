@@ -1,49 +1,42 @@
-"""Pre-flight validation for RunPod dev environment (plan v3.1 T0.1-T0.5).
+"""Pre-flight validation for RunPod dev environment (plan v4.0).
 
 Checks all prerequisites before spending RunPod credits:
-1. T0.1: Required env vars (9 total for dev environment)
-2. T0.2: SkyPilot RunPod backend + version >= 0.6.0
-3. T0.3: UpCloud MLflow health endpoint (with basic auth)
-4. T0.4: DVC data synced to UpCloud S3 (350 files)
-5. T0.5: Workdir sync size < 100 MB + critical files included
+1. Required env vars (5 total — simplified from 9 after dropping remote MLflow)
+2. SkyPilot RunPod backend + version >= 0.6.0
+3. RunPod Network Volume exists (replaces MLflow health check)
+4. DVC data synced to UpCloud S3 (350 files)
+5. Workdir sync size < 100 MB + critical files included
+6. RunPod balance > $1.00
 
 Every check is programmatic — this script NEVER asks the user a question.
-Metalearning ML-4: check infrastructure state, don't ask about it.
+Architecture: Network Volume + file-based MLflow (plan v4.0).
 
 GitHub: #694
 
 Usage:
     uv run python scripts/validate_runpod_dev_env.py
-    # or: make smoke-test-preflight (checks smoke env too)
 """
 
 from __future__ import annotations
 
-import base64
 import importlib.metadata
 import os
 import subprocess
 import sys
-import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 
 
 # ---------------------------------------------------------------------------
-# T0.1: Required env var check
+# T0.1: Required env var check (simplified — no MLFLOW_CLOUD_* needed)
 # ---------------------------------------------------------------------------
 
-# All 9 env vars required for dev_runpod.yaml to work correctly
 _REQUIRED_VARS = [
     "RUNPOD_API_KEY",
     "DVC_S3_ENDPOINT_URL",
     "DVC_S3_ACCESS_KEY",
     "DVC_S3_SECRET_KEY",
-    "DVC_S3_BUCKET",
-    "MLFLOW_CLOUD_URI",
-    "MLFLOW_CLOUD_USERNAME",
-    "MLFLOW_CLOUD_PASSWORD",
     "HF_TOKEN",
 ]
 
@@ -87,6 +80,7 @@ def check_skypilot() -> tuple[bool, str]:
         (ok, message): ok=True if all checks pass, message describes result.
     """
     # Version check via importlib.metadata (preferred over subprocess)
+    version_str = "unknown"
     try:
         version_str = importlib.metadata.version("skypilot")
         version = _parse_version(version_str)
@@ -129,42 +123,88 @@ def check_skypilot() -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
-# T0.3: MLflow health endpoint with basic auth
+# T0.3: Network Volume check (replaces MLflow health check)
 # ---------------------------------------------------------------------------
 
 
-def check_mlflow_health() -> tuple[bool, str]:
-    """Test MLflow /health endpoint with basic auth credentials from env.
+def check_network_volume(volume_name: str = "minivess-dev") -> tuple[bool, str]:
+    """Verify RunPod Network Volume exists via RunPod SDK.
 
     Returns:
-        (ok, message): ok=True if endpoint returns HTTP 200.
+        (ok, message): ok=True if volume found.
     """
-    uri = os.environ.get("MLFLOW_CLOUD_URI", "").rstrip("/")
-    if not uri:
-        return False, "MLFLOW_CLOUD_URI not set — cannot check MLflow health"
-
-    username = os.environ.get("MLFLOW_CLOUD_USERNAME", "")
-    password = os.environ.get("MLFLOW_CLOUD_PASSWORD", "")
+    api_key = os.environ.get("RUNPOD_API_KEY", "")
+    if not api_key:
+        return False, "RUNPOD_API_KEY not set — cannot check network volume"
 
     try:
-        req = urllib.request.Request(f"{uri}/health")
-        if username and password:
-            credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
-            req.add_header("Authorization", f"Basic {credentials}")
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            if resp.status == 200:
-                return True, f"MLflow at {uri} is healthy (HTTP 200)"
-            return False, f"MLflow returned HTTP {resp.status} (expected 200)"
-    except urllib.error.HTTPError as e:
-        return False, f"MLflow HTTP error: {e.code} {e.reason} — check auth credentials"
-    except urllib.error.URLError as e:
-        return False, f"MLflow unreachable: {e.reason} — is the UpCloud server running?"
+        import runpod
+        from runpod.api.ctl_commands import run_graphql_query
+
+        runpod.api_key = api_key
+        result = run_graphql_query(
+            "query { myself { networkVolumes { id name size dataCenterId } } }"
+        )
+        volumes = result.get("data", {}).get("myself", {}).get("networkVolumes", [])
+        for vol in volumes:
+            if volume_name in vol.get("name", ""):
+                dc = vol.get("dataCenterId", "unknown")
+                size = vol.get("size", 0)
+                return True, (
+                    f"Network volume '{vol['name']}' found ({size} GB in {dc})"
+                )
+        vol_names = [v.get("name", "") for v in volumes]
+        return False, (
+            f"Network volume '{volume_name}' not found. "
+            f"Existing volumes: {vol_names}. "
+            "Create: sky volumes apply deployment/skypilot/minivess-dev-volume.yaml"
+        )
+    except ImportError:
+        return False, "runpod SDK not installed — cannot check network volume"
     except Exception as e:  # noqa: BLE001
-        return False, f"MLflow health check failed: {e}"
+        return False, f"Network volume check failed: {e}"
 
 
 # ---------------------------------------------------------------------------
-# T0.4: DVC status check
+# T0.4: RunPod balance check
+# ---------------------------------------------------------------------------
+
+
+def check_runpod_balance(min_balance: float = 1.0) -> tuple[bool, str]:
+    """Verify RunPod account has sufficient balance.
+
+    Returns:
+        (ok, message): ok=True if balance >= min_balance.
+    """
+    api_key = os.environ.get("RUNPOD_API_KEY", "")
+    if not api_key:
+        return False, "RUNPOD_API_KEY not set — cannot check balance"
+
+    try:
+        import runpod
+        from runpod.api.ctl_commands import run_graphql_query
+
+        runpod.api_key = api_key
+        result = run_graphql_query(
+            "query { myself { clientBalance currentSpendPerHr } }"
+        )
+        myself = result.get("data", {}).get("myself", {})
+        balance = myself.get("clientBalance", 0)
+        spend = myself.get("currentSpendPerHr", 0)
+        if balance >= min_balance:
+            return True, f"RunPod balance: ${balance:.2f} (spend: ${spend:.2f}/hr)"
+        return False, (
+            f"RunPod balance ${balance:.2f} < ${min_balance:.2f} minimum. "
+            "Add credits at runpod.io"
+        )
+    except ImportError:
+        return False, "runpod SDK not installed — cannot check balance"
+    except Exception as e:  # noqa: BLE001
+        return False, f"Balance check failed: {e}"
+
+
+# ---------------------------------------------------------------------------
+# T0.5: DVC status check
 # ---------------------------------------------------------------------------
 
 
@@ -206,7 +246,7 @@ def check_dvc_status() -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
-# T0.5: .skyignore sync size + critical file inclusion
+# T0.6: .skyignore sync size + critical file inclusion
 # ---------------------------------------------------------------------------
 
 # Files that MUST be included in the rsync (not excluded by .skyignore)
@@ -311,60 +351,73 @@ def main() -> int:
     Returns 0 if all pass, 1 if any fail.
     """
     all_ok = True
-    print("=== RunPod Dev Environment Pre-Flight Checks ===\n")
-    print("Metalearning ML-4: checking infrastructure programmatically\n")
+    print("=== RunPod Dev Environment Pre-Flight Checks (v4.0) ===\n")
+    print("Architecture: Network Volume + file-based MLflow (no remote server)\n")
 
-    # T0.1: Env vars
+    # Check 1: Env vars (5 required, down from 9)
     missing = check_env_vars()
     if missing:
-        print(f"FAIL T0.1: Missing env vars: {', '.join(missing)}")
+        print(f"FAIL [env-vars]: Missing env vars: {', '.join(missing)}")
         print("  Add them to .env (see .env.example for all required vars)\n")
         all_ok = False
     else:
-        print("PASS T0.1: All 9 required env vars are present.\n")
+        print(
+            f"PASS [env-vars]: All {len(_REQUIRED_VARS)} required env vars present.\n"
+        )
 
-    # T0.2: SkyPilot
+    # Check 2: SkyPilot
     ok, msg = check_skypilot()
     if ok:
-        print(f"PASS T0.2: {msg}\n")
+        print(f"PASS [skypilot]: {msg}\n")
     else:
-        print(f"FAIL T0.2: {msg}\n")
+        print(f"FAIL [skypilot]: {msg}\n")
         all_ok = False
 
-    # T0.3: MLflow health
-    ok, msg = check_mlflow_health()
+    # Check 3: Network Volume (replaces MLflow health check)
+    ok, msg = check_network_volume()
     if ok:
-        print(f"PASS T0.3: {msg}\n")
+        print(f"PASS [volume]: {msg}\n")
     else:
-        print(f"FAIL T0.3: {msg}\n")
+        print(f"FAIL [volume]: {msg}\n")
         all_ok = False
 
-    # T0.4: DVC status
+    # Check 4: RunPod balance
+    ok, msg = check_runpod_balance()
+    if ok:
+        print(f"PASS [balance]: {msg}\n")
+    else:
+        print(f"FAIL [balance]: {msg}\n")
+        all_ok = False
+
+    # Check 5: DVC status
     ok, msg = check_dvc_status()
     if ok:
-        print(f"PASS T0.4: {msg}\n")
+        print(f"PASS [dvc]: {msg}\n")
     else:
-        print(f"FAIL T0.4: {msg}\n")
+        print(f"FAIL [dvc]: {msg}\n")
         all_ok = False
 
-    # T0.5: Sync size
+    # Check 6: Sync size
     size_bytes, missing_critical = check_sync_size(project_root=ROOT)
     size_mb = size_bytes / 1024 / 1024
     if size_mb > 100.0:
-        print(f"FAIL T0.5: Sync size {size_mb:.1f} MB exceeds 100 MB limit.")
+        print(f"FAIL [sync]: Sync size {size_mb:.1f} MB exceeds 100 MB limit.")
         print("  Check .skyignore for missing exclusions.\n")
         all_ok = False
     elif missing_critical:
-        print(f"FAIL T0.5: Critical files missing from sync: {missing_critical}\n")
+        print(f"FAIL [sync]: Critical files missing from sync: {missing_critical}\n")
         all_ok = False
     else:
         print(
-            f"PASS T0.5: Sync size {size_mb:.1f} MB (under 100 MB limit). Critical files included.\n"
+            f"PASS [sync]: Sync size {size_mb:.1f} MB (under 100 MB limit). "
+            "Critical files included.\n"
         )
 
     if all_ok:
         print("=== All pre-flight checks passed. Ready to launch RunPod dev job. ===")
-        print("  Next step: make dev-gpu MODEL=dynunet")
+        print(
+            "  sky launch deployment/skypilot/dev_runpod.yaml --env MODEL_FAMILY=sam3_vanilla"
+        )
         return 0
 
     print("=== Some checks failed. Fix issues above before launching. ===")

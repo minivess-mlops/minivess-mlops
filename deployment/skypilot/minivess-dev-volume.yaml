@@ -1,0 +1,16 @@
+# MinIVess Dev Network Volume on RunPod
+#
+# Persistent NVMe storage that survives pod termination.
+# Stores: DVC data, mlruns, checkpoints, HF/torch weight cache.
+#
+# Create:  sky volumes apply deployment/skypilot/minivess-dev-volume.yaml
+# Delete:  sky volumes delete minivess-dev
+# List:    sky volumes ls
+#
+# Cost: 50 GB × $0.07/GB/month = $3.50/month
+# Plan: docs/planning/runpod-dev-verification-plan-for-realz-maybe.xml
+
+name: minivess-dev
+type: runpod-network-volume
+infra: runpod/US/US-TX-3
+size: 50Gi
