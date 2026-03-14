@@ -1,41 +1,27 @@
 {
-  "plan_file": "docs/planning/runpod-dev-verification-plan.xml",
-  "plan_version": "3.1",
+  "plan_file": "docs/planning/gcp-spot-with-skypilot-and-pulumi-up-plan.xml",
+  "plan_version": "2.0",
   "execution_mode": "autonomous",
-  "current_task_id": "T1.1+T1.3",
-  "current_phase": "BLOCKED",
-  "inner_iteration": 1,
-  "session_task_count": 4,
-  "session_inner_iterations": 1,
-  "session_start": "2026-03-14T00:00:00Z",
-  "branch": "feat/skypilot-runpod-gpu-offloading",
-  "github_issues": {
-    "T0.1-T0.5": 694,
-    "T0.6": 695,
-    "T0.7": 696,
-    "T1.2": 697,
-    "T1.1+T1.3": 698,
-    "T2.1-T2.3": 699,
-    "T3.1-T3.3": 700,
-    "T4.1-T4.5": 701
-  },
+  "current_task_id": "P1.0",
+  "current_phase": "RED",
+  "inner_iteration": 0,
   "tasks": {
-    "T0.1-T0.5": {"status": "DONE", "iterations": 1, "name": "Create validate_runpod_dev_env.py preflight script", "issue": 694, "commit": "7e79bea"},
-    "T0.6": {"status": "DONE", "iterations": 1, "name": "Harden MLFLOW_TRACKING_URI guards in dev_runpod.yaml", "issue": 695, "commit": "7e79bea"},
-    "T0.7": {"status": "DONE", "iterations": 1, "name": "Fix bare python calls in dev_runpod.yaml setup block", "issue": 696, "commit": "7e79bea"},
-    "T1.2": {"status": "DONE", "iterations": 1, "name": "Fix verify_smoke_test.py for dev_* experiments + artifact size", "issue": 697, "commit": "7e79bea"},
-    "T1.1+T1.3": {"status": "BLOCKED", "iterations": 0, "name": "DynUNet E2E plumbing test on RunPod", "issue": 698, "blocked_reason": "requires RunPod credits + UpCloud MLflow"},
-    "T2.1-T2.3": {"status": "BLOCKED", "iterations": 0, "name": "sam3_hybrid verification on RunPod", "issue": 699, "blocked_reason": "requires RunPod credits + UpCloud MLflow"},
-    "T3.1-T3.3": {"status": "BLOCKED", "iterations": 0, "name": "VesselFM verification on RunPod", "issue": 700, "blocked_reason": "requires RunPod credits + UpCloud MLflow"},
-    "T4.1-T4.5": {"status": "BLOCKED", "iterations": 0, "name": "Post-verification docs + closure", "issue": 701, "blocked_reason": "depends on P1-P3 completion"}
+    "P1.0": {"status": "IN_PROGRESS", "title": "Add MLFLOW_SERVER_VERSION to .env.example"},
+    "P1.1": {"status": "NOT_STARTED", "title": "Create GCP Pulumi project structure"},
+    "P1.2": {"status": "NOT_STARTED", "title": "GCS Buckets"},
+    "P1.3": {"status": "NOT_STARTED", "title": "Cloud SQL PostgreSQL"},
+    "P1.4": {"status": "NOT_STARTED", "title": "Artifact Registry"},
+    "P1.4b": {"status": "NOT_STARTED", "title": "Build custom MLflow Docker image"},
+    "P1.5": {"status": "NOT_STARTED", "title": "Cloud Run MLflow"},
+    "P1.6": {"status": "NOT_STARTED", "title": "IAM Service Account"},
+    "P1.7": {"status": "NOT_STARTED", "title": "Update .env.example + verify"},
+    "P2.1": {"status": "NOT_STARTED", "title": "Update GCP SkyPilot YAML"},
+    "P2.2": {"status": "NOT_STARTED", "title": "Push Docker to GAR"},
+    "P2.3": {"status": "NOT_STARTED", "title": "Upload DVC data to GCS"},
+    "P2.4": {"status": "NOT_STARTED", "title": "Smoke test on GCP"}
   },
-  "convergence": {
-    "reached": false,
-    "tasks_done": 4,
-    "tasks_total": 8,
-    "tasks_stuck": 0,
-    "p0_complete": true,
-    "p0_commit": "7e79bea",
-    "blocked_reason": "P1-P3 require RunPod credits + UpCloud MLflow server running"
-  }
+  "convergence": {"reached": false, "tasks_done": 0, "tasks_total": 13, "tasks_stuck": 0},
+  "session_task_count": 0,
+  "session_inner_iterations": 0,
+  "session_start": "2026-03-14T23:30:00Z"
 }
