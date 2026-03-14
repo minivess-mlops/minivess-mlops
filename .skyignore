@@ -2,8 +2,9 @@
 # These directories are too large or unnecessary for remote execution.
 
 # Data (pulled via DVC on remote — 2.6 GB)
-data/
-data_cache/
+# IMPORTANT: use /data/ (root-anchored) to avoid excluding src/minivess/data/
+/data/
+/data_cache/
 
 # DVC (local cache 2.6 GB + config — re-initialized on remote)
 .dvc/
