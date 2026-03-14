@@ -5,9 +5,8 @@
 data/
 data_cache/
 
-# DVC cache (local cache of data files — 2.6 GB)
-.dvc/cache/
-.dvc/tmp/
+# DVC (local cache 2.6 GB + config — re-initialized on remote)
+.dvc/
 
 # Git objects (973 MB — not needed on remote)
 .git/

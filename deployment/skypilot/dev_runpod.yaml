@@ -111,7 +111,7 @@ setup: |
   uv sync --all-extras
 
   # Step 4: Configure DVC + pull training data
-  dvc init --no-scm
+  dvc init --no-scm -f
 
   dvc remote add upcloud s3://${DVC_S3_BUCKET}
   dvc remote modify upcloud endpointurl ${DVC_S3_ENDPOINT_URL}
