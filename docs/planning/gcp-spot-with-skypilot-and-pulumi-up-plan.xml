@@ -1,0 +1,379 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan name="GCP Spot Training with SkyPilot + Pulumi Infrastructure"
+      version="2.0"
+      created="2026-03-14"
+      updated="2026-03-14"
+      status="ready-for-execution"
+      reviewer="Plan agent — 15 actionable items incorporated"
+      priority="P0"
+      skills="ralph-loop,self-learning-iterative-coder">
+
+  <context>
+    <summary>
+      Deploy full GCP infrastructure (Cloud Run MLflow + Cloud SQL PostgreSQL + GCS +
+      Artifact Registry) via Pulumi, then run Docker-based GPU training via SkyPilot
+      with spot instance checkpointing and auto-resume. All same-region (europe-north1).
+    </summary>
+
+    <history>
+      <event date="2026-03-12" what="UpCloud MLflow + S3 deployed via Pulumi" status="working" />
+      <event date="2026-03-14" what="RunPod Docker failure diagnosed (pods=containers)" status="resolved" />
+      <event date="2026-03-14" what="Lambda Labs training verified (A100, 2x)" status="working" />
+      <event date="2026-03-14" what="MLflow artifact upload fails (v2.20 server vs v3.10 client)" status="fixed-on-server" />
+      <event date="2026-03-14" what="MLflow server upgraded to v3.10.0 + multipart" status="applied" />
+      <event date="2026-03-14" what="Lambda sold out, switched to GCP" status="in-progress" />
+      <event date="2026-03-14" what="GCP enabled, GPUS_ALL_REGIONS=0 quota requested" status="pending" />
+    </history>
+
+    <blocking>
+      <blocker id="B1" what="GPUS_ALL_REGIONS quota = 0"
+               status="APPROVED (2026-03-14 23:23 UTC)" resolved="true" />
+    </blocking>
+
+    <reviewer-feedback version="2.0" source="Plan agent review">
+      <item id="R1" severity="critical">Add MLFLOW_SERVER_VERSION to .env.example FIRST (P1.0, not P1.7)</item>
+      <item id="R2" severity="critical">Fix UpCloud Pulumi __main__.py line 235 to use MLFLOW_SERVER_VERSION var</item>
+      <item id="R3" severity="critical">NEW TASK: Build custom MLflow Docker image (psycopg2 + google-cloud-storage) for GAR</item>
+      <item id="R4" severity="critical">Use Cloud SQL Auth Proxy sidecar for Cloud Run (NOT public IP)</item>
+      <item id="R5" severity="high">Add roles/artifactregistry.reader to IAM service account</item>
+      <item id="R6" severity="high">Use pyproject.toml NOT requirements.txt (CLAUDE.md Rule 1: uv ONLY)</item>
+      <item id="R7" severity="high">Add atomic checkpoint writes (temp + rename) for spot safety</item>
+      <item id="R8" severity="high">Add checkpoint SHA256 integrity verification before torch.load()</item>
+      <item id="R9" severity="medium">Upgrade Cloud SQL to db-g1-small ($25/mo vs $15/mo for stability)</item>
+      <item id="R10" severity="medium">Verify GPU availability in europe-north1; add europe-west1 fallback</item>
+      <item id="R11" severity="medium">Change P2.1 from "create" to "update" — GCP YAML already exists</item>
+      <item id="R12" severity="medium">Address Optuna direct Cloud SQL access from SkyPilot VMs</item>
+      <item id="R13" severity="medium">Cloud Run min_instances=1 or accept cold starts; adjust cost estimate</item>
+      <item id="R14" severity="medium">Wire check_resume_state_task into train_flow (defined but never called)</item>
+      <item id="R15" severity="low">Reconcile region in existing smoke_test_gcp.yaml (us-central1 vs europe-north1)</item>
+    </reviewer-feedback>
+
+    <decisions source="docs/planning/cloud-architecture-decisions-2026-03-14.md">
+      <decision>GCP europe-north1 (Finland) as default region</decision>
+      <decision>Full Pulumi stack: GCS + Cloud SQL + Cloud Run MLflow + Artifact Registry</decision>
+      <decision>Spot instances with MOUNT_CACHED checkpointing from start</decision>
+      <decision>RunPod for dev (non-Docker), Lambda+GCP for staging+prod (Docker)</decision>
+      <decision>Zero hardcoding — all cloud config via Hydra groups overridable per lab/user</decision>
+      <decision>Ralph Loop skill for infra monitoring, TDD skill for code</decision>
+      <decision>MLflow version pinned to match client (3.10.0)</decision>
+    </decisions>
+
+    <architecture>
+      ```
+      GCP europe-north1 (all same region)
+      ├── Artifact Registry  → Docker images (minivess-base, same-region pulls)
+      ├── GCS Buckets        → mlflow-artifacts, dvc-data, checkpoints
+      ├── Cloud SQL          → PostgreSQL (MLflow backend + Optuna storage)
+      ├── Cloud Run          → MLflow 3.10.0 server (--artifacts-destination gs://)
+      └── Compute Engine     → SkyPilot spot VMs (T4/L4/A100, Docker containers)
+           └── MOUNT_CACHED  → Checkpoints → GCS (9.6x faster, async upload)
+      ```
+    </architecture>
+
+    <existing-infrastructure>
+      <component name="UpCloud MLflow" host="185.20.139.158:5000" version="3.10.0"
+                 role="KEEP as fallback until GCP MLflow verified" />
+      <component name="UpCloud S3" bucket="mlflow-artifacts + minivess-dvc-data"
+                 role="KEEP for DVC data until migrated to GCS" />
+      <component name="UpCloud PostgreSQL" role="MLflow backend, KEEP until GCP Cloud SQL up" />
+      <component name="GHCR Docker images" image="ghcr.io/petteriteikari/minivess-base:latest"
+                 role="KEEP as fallback, ADD GCP Artifact Registry as primary" />
+    </existing-infrastructure>
+
+    <cost-estimate>
+      <line item="Cloud Run (MLflow)" monthly="$15-25" notes="1 vCPU, 2 GB, always-on" />
+      <line item="Cloud SQL PostgreSQL" monthly="$10-15" notes="db-f1-micro, 10 GB" />
+      <line item="GCS (3 buckets)" monthly="$2-5" notes="~50 GB artifacts + DVC + checkpoints" />
+      <line item="Artifact Registry" monthly="$1-2" notes="~20 GB Docker images" />
+      <line item="GPU training (spot)" monthly="$5-50" notes="T4 $0.14/hr, L4 $0.22/hr" />
+      <line item="TOTAL" monthly="$33-97" />
+    </cost-estimate>
+  </context>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: GCP Infrastructure via Pulumi                             -->
+  <!-- ================================================================== -->
+  <phase id="P1" name="GCP Infrastructure (Pulumi)" skill="self-learning-iterative-coder">
+
+    <task id="P1.1" title="Create GCP Pulumi project structure" priority="P0">
+      <description>
+        Create deployment/pulumi/gcp/ directory with Pulumi Python project.
+        Use @pulumi/gcp provider. Reference .env.example for all config values.
+      </description>
+      <files>
+        <create>deployment/pulumi/gcp/__main__.py</create>
+        <create>deployment/pulumi/gcp/Pulumi.yaml</create>
+        <create>deployment/pulumi/gcp/requirements.txt</create>
+        <modify>.env.example — add GCP config section</modify>
+      </files>
+      <tests>tests/v2/unit/test_pulumi_gcp.py — verify Pulumi project structure</tests>
+    </task>
+
+    <task id="P1.2" title="GCS Buckets" depends="P1.1" priority="P0">
+      <description>
+        Create 3 GCS buckets in europe-north1:
+        - minivess-mlflow-artifacts (MLflow artifact store)
+        - minivess-dvc-data (DVC training data)
+        - minivess-checkpoints (SkyPilot MOUNT_CACHED spot recovery)
+        All with lifecycle rules (delete incomplete multipart uploads after 7 days).
+      </description>
+      <env-vars>
+        GCP_PROJECT=minivess-mlops
+        GCP_REGION=europe-north1
+        GCS_MLFLOW_BUCKET=minivess-mlflow-artifacts
+        GCS_DVC_BUCKET=minivess-dvc-data
+        GCS_CHECKPOINT_BUCKET=minivess-checkpoints
+      </env-vars>
+    </task>
+
+    <task id="P1.3" title="Cloud SQL PostgreSQL" depends="P1.1" priority="P0">
+      <description>
+        Create Cloud SQL PostgreSQL instance in europe-north1:
+        - Tier: db-f1-micro (0.6 GB RAM, shared vCPU) — cheapest
+        - Storage: 10 GB SSD
+        - Databases: mlflow, optuna
+        - Users: mlflow_user (password from .env)
+        - Public IP with authorized networks (SkyPilot VMs + local dev)
+      </description>
+      <env-vars>
+        GCP_SQL_TIER=db-f1-micro
+        GCP_SQL_PASSWORD=(generated, stored in .env)
+      </env-vars>
+    </task>
+
+    <task id="P1.4" title="Artifact Registry (Docker)" depends="P1.1" priority="P0">
+      <description>
+        Create Artifact Registry Docker repo in europe-north1:
+        - Repository: minivess
+        - Format: Docker
+        - Push minivess-base:latest image to GAR
+        - Update SkyPilot YAML to use GAR image_id (same-region = fast pulls)
+      </description>
+      <commands>
+        gcloud artifacts repositories create minivess --repository-format=docker --location=europe-north1
+        docker tag minivess-base:latest europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+        docker push europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+      </commands>
+    </task>
+
+    <task id="P1.5" title="Cloud Run MLflow Server" depends="P1.2,P1.3" priority="P0">
+      <description>
+        Deploy MLflow 3.10.0 on Cloud Run in europe-north1:
+        - Image: ghcr.io/mlflow/mlflow:v3.10.0 (with psycopg2-binary, boto3, google-cloud-storage)
+        - Backend: Cloud SQL PostgreSQL (via Cloud SQL Proxy or public IP)
+        - Artifacts: gs://minivess-mlflow-artifacts (GCS, NOT proxied)
+        - Auth: basic-auth (same as UpCloud)
+        - Env: MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD=true, MLFLOW_SERVER_ALLOWED_HOSTS=*
+        - CRITICAL: MLflow version pinned via MLFLOW_SERVER_VERSION in .env.example
+      </description>
+      <env-vars>
+        MLFLOW_SERVER_VERSION=3.10.0
+        MLFLOW_GCP_URI=(Cloud Run URL, output by Pulumi)
+        MLFLOW_GCP_USERNAME=admin
+        MLFLOW_GCP_PASSWORD=(generated)
+      </env-vars>
+      <validation>
+        curl -u admin:$PASS $MLFLOW_GCP_URI/health → OK
+        curl -u admin:$PASS $MLFLOW_GCP_URI/api/2.0/mlflow/experiments/search → JSON
+      </validation>
+    </task>
+
+    <task id="P1.6" title="IAM Service Account" depends="P1.1" priority="P0">
+      <description>
+        Create service account for SkyPilot VMs:
+        - Roles: Compute Instance Admin, Storage Object Admin, Cloud SQL Client
+        - Used by SkyPilot for VM provisioning + GCS access + Cloud SQL access
+      </description>
+    </task>
+
+    <task id="P1.7" title="Update .env.example" depends="P1.5" priority="P0">
+      <description>
+        Add GCP section to .env.example with all new variables.
+        Pin MLFLOW_SERVER_VERSION=3.10.0 as single source of truth.
+        Update SKYPILOT_DEFAULT_CLOUD from lambda to gcp.
+      </description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: SkyPilot GCP Spot Training                                -->
+  <!-- ================================================================== -->
+  <phase id="P2" name="SkyPilot GCP Spot Training" skill="ralph-loop" depends="P1,B1">
+
+    <task id="P2.1" title="Create GCP SkyPilot YAML" priority="P0">
+      <description>
+        Create deployment/skypilot/smoke_test_gcp.yaml targeting europe-north1:
+        - image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+        - accelerators: {T4: 1, L4: 1, A100: 1} (cheapest first)
+        - use_spot: true
+        - disk_tier: best (SSD for MOUNT_CACHED)
+        - MLflow URI: GCP Cloud Run URL (same-region)
+        - DVC: GCS bucket (same-region)
+      </description>
+      <files>
+        <modify>deployment/skypilot/smoke_test_gcp.yaml</modify>
+      </files>
+    </task>
+
+    <task id="P2.2" title="Push Docker image to GAR" depends="P1.4" priority="P0">
+      <description>
+        Tag and push minivess-base:latest to GCP Artifact Registry.
+        Verify same-region pull speed (should be 1-3 min for 20 GB vs 10-60 min from GHCR).
+      </description>
+      <commands>
+        gcloud auth configure-docker europe-north1-docker.pkg.dev
+        docker tag minivess-base:latest europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+        docker push europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+      </commands>
+    </task>
+
+    <task id="P2.3" title="Upload DVC data to GCS" priority="P1">
+      <description>
+        Copy MiniVess training data from UpCloud S3 to GCS:
+        - gsutil -m cp -r s3://minivess-dvc-data/* gs://minivess-dvc-data/
+        - Or: dvc push -r gcs (add GCS as DVC remote)
+        Same-region data access = faster DVC pulls during setup.
+      </description>
+    </task>
+
+    <task id="P2.4" title="Smoke test: sam3_vanilla on GCP T4 spot" depends="P2.1,P2.2" priority="P0">
+      <description>
+        Launch sam3_vanilla smoke test on GCP T4 spot in europe-north1.
+        Verify: Docker pull, DVC data, training, MLflow metrics + artifact upload.
+        This is THE critical test: does the 910 MB .pth upload to GCS via MLflow?
+      </description>
+      <success-criteria>
+        - Cluster provisions in europe-north1 with T4 spot
+        - Docker image pulled from GAR (same-region, fast)
+        - DVC data pulled (UpCloud S3 initially, then GCS)
+        - Training completes (2 epochs, 1 fold, 4 volumes)
+        - MLflow metrics logged to Cloud Run MLflow
+        - CRITICAL: 910 MB .pth artifact uploaded successfully (GCS backend)
+        - Zero HTTP 500 errors
+      </success-criteria>
+      <ralph-loop>
+        Activate /ralph-loop --model sam3_vanilla --cloud gcp
+        Monitor, diagnose failures, fix, relaunch.
+      </ralph-loop>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: Spot Preemption Recovery                                  -->
+  <!-- ================================================================== -->
+  <phase id="P3" name="Spot Preemption Recovery" skill="self-learning-iterative-coder" depends="P2">
+
+    <task id="P3.1" title="Add MOUNT_CACHED checkpointing to SkyPilot YAML" priority="P1">
+      <description>
+        Add GCS bucket mounting with MOUNT_CACHED for checkpoint persistence:
+        ```yaml
+        file_mounts:
+          /checkpoints:
+            name: minivess-checkpoints
+            mode: MOUNT_CACHED
+        ```
+        Checkpoints saved to local SSD → async upload to GCS (9.6x faster).
+      </description>
+    </task>
+
+    <task id="P3.2" title="Implement checkpoint resume in train_flow.py" priority="P1">
+      <description>
+        Modify training flow to load latest checkpoint on startup:
+        1. At fold start, check /checkpoints/ for existing .pth files
+        2. If found, load state dict and resume from saved epoch
+        3. Log resume event to MLflow (upstream_checkpoint tag)
+        4. Continue training from saved epoch (not restart from 0)
+      </description>
+      <tests>tests/v2/unit/test_checkpoint_resume.py</tests>
+    </task>
+
+    <task id="P3.3" title="Test spot preemption simulation" priority="P1">
+      <description>
+        Simulate spot preemption during training:
+        1. Launch training on GCP spot (longer run: 10 epochs)
+        2. After 5 epochs, simulate preemption:
+           gcloud compute instances simulate-maintenance-event INSTANCE --zone ZONE
+        3. Verify: SkyPilot detects preemption → provisions new VM → resumes from checkpoint
+        4. Verify: training continues from epoch 5, not epoch 0
+        5. Verify: final metrics are correct (not corrupted by resume)
+      </description>
+      <success-criteria>
+        - Preemption detected by SkyPilot
+        - New VM provisioned automatically
+        - Checkpoint loaded from GCS MOUNT_CACHED
+        - Training resumes from correct epoch
+        - Final model quality matches non-preempted baseline
+      </success-criteria>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: Multi-Provider Failover                                   -->
+  <!-- ================================================================== -->
+  <phase id="P4" name="Multi-Provider Failover" depends="P2,P3">
+
+    <task id="P4.1" title="Update train_production.yaml with GCP primary" priority="P1">
+      <description>
+        Update production SkyPilot YAML:
+        - Primary: GCP spot (europe-north1, T4/L4/A100)
+        - Fallback 1: Lambda on-demand (A10/A100, when available)
+        - Fallback 2: AWS spot (if configured by user)
+        All using Docker images from respective registries.
+      </description>
+    </task>
+
+    <task id="P4.2" title="Create Hydra cloud config groups" priority="P1">
+      <description>
+        Implement the configs/cloud/ + configs/lab/ + configs/user/ override system
+        from the hydra-config-verification-report.md plan.
+      </description>
+      <files>
+        <create>configs/cloud/gcp_spot.yaml</create>
+        <create>configs/cloud/lambda.yaml</create>
+        <create>configs/cloud/runpod_dev.yaml</create>
+        <create>configs/cloud/local.yaml</create>
+        <create>configs/lab/default.yaml</create>
+        <create>configs/lab/example_lab.yaml</create>
+        <create>configs/user/default.yaml</create>
+        <create>configs/user/example_user.yaml</create>
+        <modify>configs/base.yaml — add cloud, lab, user defaults</modify>
+      </files>
+    </task>
+
+    <task id="P4.3" title="AWS + Azure recipe YAMLs for academic labs" priority="P2">
+      <description>
+        Create ready-made SkyPilot YAMLs for labs with AWS/Azure credits.
+        Zero code changes needed — just set API keys in .env.
+      </description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- EXECUTION ORDER                                                    -->
+  <!-- ================================================================== -->
+  <execution-order updated="v2.0 — reviewer feedback incorporated">
+    <step>1. DONE: GPUS_ALL_REGIONS quota approved (Case 0eab7213)</step>
+    <step>2. P1.0: Add MLFLOW_SERVER_VERSION=3.10.0 to .env.example (R1, single source of truth)</step>
+    <step>3. P1.1: Create Pulumi GCP project (pyproject.toml NOT requirements.txt per R6)</step>
+    <step>4. P1.2+P1.3+P1.4+P1.6 in PARALLEL: GCS buckets, Cloud SQL (db-g1-small per R9), Artifact Registry, IAM (R5: add artifactregistry.reader)</step>
+    <step>5. P1.4b NEW: Build custom MLflow Docker image (psycopg2 + google-cloud-storage) → push to GAR (R3)</step>
+    <step>6. P1.5: Deploy Cloud Run MLflow (Cloud SQL Auth Proxy sidecar per R4, min_instances=1 per R13)</step>
+    <step>7. P1.7: Update .env.example + verify MLflow health</step>
+    <step>8. P2.1+P2.2 in PARALLEL: Update GCP SkyPilot YAML (R11, R15: europe-north1 default) + Push training Docker image to GAR</step>
+    <step>9. P2.3: Upload DVC data to GCS (add gcs DVC remote)</step>
+    <step>10. P2.4: Smoke test — EVERYTHING on GCP (GAR image, GCS data, Cloud Run MLflow) via /ralph-loop</step>
+    <step>11. P3.1: Add MOUNT_CACHED checkpointing with atomic writes (R7) + SHA256 verification (R8)</step>
+    <step>12. P3.2: Wire check_resume_state_task into train_flow (R14 — already defined, never called)</step>
+    <step>13. P3.3: Spot preemption simulation test</step>
+    <step>14. P4: Multi-provider failover + Hydra config groups</step>
+  </execution-order>
+
+  <cold-start-instructions>
+    <prerequisite>GCP project: minivess-mlops (615852151588)</prerequisite>
+    <prerequisite>gcloud CLI installed + authenticated (application-default)</prerequisite>
+    <prerequisite>GPUS_ALL_REGIONS quota >= 1 (check: gcloud compute project-info describe)</prerequisite>
+    <prerequisite>Pulumi CLI installed + authenticated (PULUMI_ACCESS_TOKEN in .env)</prerequisite>
+    <prerequisite>SkyPilot: sky check gcp → enabled</prerequisite>
+    <prerequisite>Docker: minivess-base:latest built locally</prerequisite>
+  </cold-start-instructions>
+</plan>
