@@ -64,6 +64,24 @@ class TestNoBareVmSkyPilotYamls:
             "(bare-VM approach is BANNED):\n  " + "\n  ".join(missing)
         )
 
+    def test_no_uv_run_in_setup_or_run(self) -> None:
+        """uv binary is NOT in the runner image — use python/dvc directly."""
+        violations: list[str] = []
+        for yaml_path in _all_skypilot_yamls():
+            config = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+            for section in ("setup", "run"):
+                content = config.get(section, "")
+                if "uv run " in content:
+                    violations.append(
+                        f"{yaml_path.name}: {section} contains 'uv run' "
+                        "(uv not in runner image — use python/dvc directly)"
+                    )
+
+        assert not violations, (
+            "SkyPilot YAMLs using 'uv run' (not available in Docker runner):\n  "
+            + "\n  ".join(violations)
+        )
+
     def test_no_deleted_bare_vm_yamls_exist(self) -> None:
         """train_generic.yaml and train_hpo_sweep.yaml must not exist."""
         for name in ("train_generic.yaml", "train_hpo_sweep.yaml"):

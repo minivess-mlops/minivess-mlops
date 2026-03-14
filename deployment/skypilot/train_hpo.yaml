@@ -60,9 +60,44 @@ setup: |
   set -ex
   cd /app
 
-  # Data pull only — all deps are in the Docker image
-  uv run python scripts/configure_dvc_remote.py
-  uv run dvc pull data/raw/minivess -r upcloud
+  # All deps are in the Docker image — setup is DATA ONLY.
+  # NOTE: uv, git, scripts/ are NOT in the runner image.
+  # Use python/dvc directly (.venv/bin is on PATH).
+
+  # Initialize DVC without git (container has no .git)
+  dvc init --no-scm
+
+  # Configure DVC upcloud remote with S3 credentials from env
+  dvc remote add upcloud s3://${DVC_S3_BUCKET}
+  dvc remote modify upcloud endpointurl ${DVC_S3_ENDPOINT_URL}
+  dvc remote modify --local upcloud access_key_id ${DVC_S3_ACCESS_KEY}
+  dvc remote modify --local upcloud secret_access_key ${DVC_S3_SECRET_KEY}
+
+  # Write minimal DVC pipeline for data pull.
+  cat > dvc.yaml << 'DVCEOF'
+  stages:
+    download:
+      cmd: "true"
+      outs:
+        - data/raw/minivess/
+      frozen: true
+  DVCEOF
+
+  cat > dvc.lock << 'LOCKEOF'
+  schema: '2.0'
+  stages:
+    download:
+      cmd: "true"
+      outs:
+      - path: data/raw/minivess/
+        hash: md5
+        md5: e712f8b23f377a4990b91bef0b1aef76.dir
+        size: 2749883382
+        nfiles: 350
+  LOCKEOF
+
+  # Pull full training data from UpCloud S3
+  dvc pull -r upcloud
 
   # Full splits for HPO
   cp configs/splits/3fold_seed42.json configs/splits/splits.json
@@ -71,7 +106,7 @@ setup: |
 
   # Pre-cache model weights
   if [ "${MODEL_FAMILY}" = "vesselfm" ]; then
-    uv run python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" || true
+    python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" || true
   fi
 
   echo "=== Pre-flight Check ==="
@@ -91,5 +126,5 @@ run: |
   echo "HPO config: ${HPO_CONFIG}"
   echo "MLflow: ${MLFLOW_TRACKING_URI}"
 
-  # Run HPO flow via Prefect deployment
-  uv run python scripts/run_hpo.py --config "${HPO_CONFIG}" --model-family "${MODEL_FAMILY}"
+  # Run HPO engine via module path (scripts/ not in Docker image)
+  python -m minivess.optimization.hpo_engine --config "${HPO_CONFIG}" --model-family "${MODEL_FAMILY}"
