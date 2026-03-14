@@ -204,14 +204,17 @@ class Sam3TopoLoraAdapter(ModelAdapter):
         -------
         SegmentationOutput with 2-class predictions.
         """
-        b, c, d, h, w = images.shape
+        # MONAI dimension order: (B, C, H, W, D) — depth is LAST
+        b, c, h, w, d = images.shape
         slice_logits: list[Tensor] = []
 
         for z_idx in range(d):
-            slice_2d = images[:, :, z_idx, :, :]  # (B, C, H, W)
+            slice_2d = images[:, :, :, :, z_idx]  # (B, C, H, W)
 
             # FPN features (LoRA adapters are trainable, rest is frozen)
             fpn_features = self.backbone.extract_fpn_features(slice_2d)
+            # Cast FP16 encoder output to FP32 for decoder (#680)
+            fpn_features = fpn_features.float()
 
             # Decode to binary mask
             binary_logits = self.decoder(fpn_features)

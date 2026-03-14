@@ -295,11 +295,19 @@ def train_one_fold_task(
     # Build DataConfig (dataset_name required, cache_rate passed to loaders)
     _is_sam3 = model_family_str.startswith("sam3_")
     _is_sam3_hybrid = model_family_str == "sam3_hybrid"
+    _is_vesselfm = model_family_str == "vesselfm"
     # SAM3: each z-slice goes through ViT-32L encoder at 1008×1008 — limit depth
     # to 3 slices and batch=1 to fit on 8 GB GPUs. MONAI's RandCropByPosNegLabeld
     # with num_samples=4 produces 4 crops, so effective batch is 4× — this is fine
     # with small patch depth.
-    default_patch = (64, 64, 3) if _is_sam3 else (64, 64, 16)
+    # VesselFM: 6-level DynUNet with 5 stride-2 downsamplings needs Z >= 2^5 = 32.
+    # Z=16 causes skip connection shape mismatch at level 4 (#711).
+    if _is_sam3:
+        default_patch = (64, 64, 3)
+    elif _is_vesselfm:
+        default_patch = (64, 64, 32)
+    else:
+        default_patch = (64, 64, 16)
     # patch_size=null in config means "use model-adaptive default" (set above).
     _patch_raw = config.get("patch_size")
     patch_size: tuple[int, int, int] = (  # type: ignore[assignment]
