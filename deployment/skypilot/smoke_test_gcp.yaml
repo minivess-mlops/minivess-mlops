@@ -1,0 +1,121 @@
+# MinIVess MLOps — GPU Smoke Test on GCP Spot via SkyPilot
+#
+# GCP provides VM-based instances with Docker preinstalled.
+# Spot instances: 60-91% cheaper than on-demand.
+# Same-region as GCS/Cloud SQL/MLflow (europe-north1, Finland).
+# ALL infrastructure on GCP — no cross-Atlantic artifact uploads.
+#
+# Launch:
+#   uv run python scripts/launch_smoke_test.py --model sam3_vanilla --cloud gcp
+#
+# Cost: T4 spot $0.14/hr, L4 spot $0.22/hr — cheapest Docker-compatible GPUs.
+#
+# Docker image: GAR (same-region, fast pulls). Setup: DVC data pull only.
+# BANNED: apt-get, uv sync, git clone in setup (Docker mandate).
+
+name: minivess-gcp-smoke-test
+
+resources:
+  # Docker image from GCP Artifact Registry (same-region = fast 1-3 min pulls)
+  # Fallback to GHCR if GAR image not yet pushed
+  image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+  # T4 (16 GB, $0.14/hr spot) = cheapest, fits all current models
+  # L4 (24 GB, $0.22/hr spot) = best price/perf, like RTX 4090
+  accelerators: {T4: 1, L4: 1, A100: 1}
+  cloud: gcp
+  region: europe-north1
+  use_spot: true
+  disk_size: 100
+  disk_tier: best
+
+envs:
+  MODEL_FAMILY: sam3_vanilla
+  # DVC data still from UpCloud S3 until migrated to GCS (P2.3)
+  DVC_S3_ENDPOINT_URL: ${DVC_S3_ENDPOINT_URL}
+  DVC_S3_ACCESS_KEY: ${DVC_S3_ACCESS_KEY}
+  DVC_S3_SECRET_KEY: ${DVC_S3_SECRET_KEY}
+  DVC_S3_BUCKET: ${DVC_S3_BUCKET:-minivess-dvc-data}
+  DVC_REMOTE: upcloud
+  AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
+  AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
+  # MLflow on GCP Cloud Run (same-region, no auth needed for Cloud Run public)
+  MLFLOW_TRACKING_URI: https://minivess-mlflow-615852151588.europe-north1.run.app
+  # Cloud Run MLflow has no auth for now (--allow-unauthenticated)
+  # TODO: add basic-auth via MLflow --app-name basic-auth
+  GIT_PYTHON_REFRESH: quiet
+  MINIVESS_ALLOW_HOST: "1"
+  PREFECT_DISABLED: "1"
+  SPLITS_DIR: /app/configs/splits
+  CHECKPOINT_DIR: /app/checkpoints
+  LOGS_DIR: /app/logs
+  PYTORCH_ALLOC_CONF: "expandable_segments:True"
+  HF_TOKEN: ${HF_TOKEN}
+
+setup: |
+  set -ex
+  cd /app
+
+  dvc init --no-scm
+  dvc remote add upcloud s3://${DVC_S3_BUCKET}
+  dvc remote modify upcloud endpointurl ${DVC_S3_ENDPOINT_URL}
+  dvc remote modify --local upcloud access_key_id ${DVC_S3_ACCESS_KEY}
+  dvc remote modify --local upcloud secret_access_key ${DVC_S3_SECRET_KEY}
+
+  cat > dvc.yaml << 'DVCEOF'
+  stages:
+    download:
+      cmd: "true"
+      outs:
+        - data/raw/minivess/
+      frozen: true
+  DVCEOF
+
+  cat > dvc.lock << 'LOCKEOF'
+  schema: '2.0'
+  stages:
+    download:
+      cmd: "true"
+      outs:
+      - path: data/raw/minivess/
+        hash: md5
+        md5: e712f8b23f377a4990b91bef0b1aef76.dir
+        size: 2749883382
+        nfiles: 350
+  LOCKEOF
+
+  dvc pull -r upcloud
+
+  cp configs/splits/smoke_test_1fold_4vol.json configs/splits/splits.json
+  mkdir -p /app/checkpoints /app/logs
+
+  if [ "${MODEL_FAMILY}" = "vesselfm" ]; then
+    python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" || true
+  fi
+
+  echo "=== Pre-flight Check ==="
+  nvidia-smi
+  python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}, GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"}')"
+  ls -la configs/splits/splits.json
+  ls data/raw/minivess/imagesTr/ | head -5 || echo "WARNING: No training data!"
+
+run: |
+  cd /app
+
+  if [ ! -f configs/splits/splits.json ]; then
+    echo "FATAL: splits.json missing — setup did not complete."
+    exit 1
+  fi
+  if [ ! -d data/raw/minivess/imagesTr ]; then
+    echo "FATAL: Training data missing — DVC pull failed in setup."
+    exit 1
+  fi
+
+  export EXPERIMENT="smoke_${MODEL_FAMILY}"
+  export EXPERIMENT_UUID=$(python -c "import uuid; print(uuid.uuid4().hex[:8])")
+  export HYDRA_OVERRIDES="experiment_name=smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
+
+  echo "=== MinIVess GPU Smoke Test (GCP Spot) ==="
+  echo "Model: ${MODEL_FAMILY}"
+  echo "MLflow server: ${MLFLOW_TRACKING_URI}"
+
+  python -m minivess.orchestration.flows.train_flow
