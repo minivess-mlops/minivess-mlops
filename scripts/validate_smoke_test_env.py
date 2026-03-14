@@ -51,13 +51,21 @@ def _check_mlflow_health() -> bool:
 
 def _check_skypilot() -> bool:
     """Check SkyPilot is installed and RunPod is configured."""
-    result = subprocess.run(
-        ["sky", "check", "--cloud", "runpod"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return result.returncode == 0
+    # Try 'sky' directly first (works in Docker/.venv on PATH),
+    # fall back to 'uv run sky' for local dev.
+    for cmd in [
+        ["sky", "check", "runpod"],
+        ["uv", "run", "sky", "check", "runpod"],
+    ]:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return True
+    return False
 
 
 def main() -> int:
