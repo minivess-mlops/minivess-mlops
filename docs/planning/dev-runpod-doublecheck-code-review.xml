@@ -130,25 +130,48 @@
       </tdd-spec>
     </task>
 
-    <task id="T0.4" name="Fix misleading dimension comments in SAM3 adapters"
-          priority="P2" estimated-iterations="1">
+    <task id="T0.4" name="Fix sam3_vanilla dimension ordering bug (dim=4 → dim=2)"
+          priority="P0" estimated-iterations="2">
       <description>
-        sam3_vanilla.py:117 comment says "(B, 2, H, W, D)" but torch.stack(dim=4)
-        from (B, 2, H, W) slices produces (B, 2, H, W, D). sam3_topolora.py:221
-        says output is "(B, C, H, W, D)" but torch.stack(dim=2) from (B, 2, H, W)
-        produces (B, 2, D, H, W). Fix all dimension comments to match actual output.
-        Verify test expectations match actual shapes.
+        CRITICAL BUG DISCOVERED: SegmentationOutput at base.py:19 specifies
+        logits shape as (B, C, D, H, W) — depth is THIRD spatial dim.
+        Standard MONAI and PyTorch 3D convention is also (B, C, D, H, W).
+
+        Actual adapter behavior:
+        - sam3_hybrid: torch.stack(dim=2) → (B, C, D, H, W) ← CORRECT
+        - sam3_topolora: torch.stack(dim=2) → (B, C, D, H, W) ← CORRECT
+        - sam3_vanilla: torch.stack(dim=4) → (B, C, H, W, D) ← WRONG
+
+        sam3_vanilla is the ONLY adapter that puts depth LAST. This likely
+        hasn't caused errors because the smoke test patch_size=(64,64,3) has
+        asymmetric spatial dims (H=W=64, D=3) and MONAI losses may handle
+        both orderings when shapes are distinguishable.
+
+        ALSO: adapters/CLAUDE.md incorrectly states "MONAI uses (B,C,H,W,D)
+        depth LAST". This is wrong — standard MONAI/PyTorch uses (B,C,D,H,W).
+        The CLAUDE.md documentation led to the sam3_vanilla bug.
+
+        Fix: Change sam3_vanilla.py:118 from dim=4 to dim=2.
+        Fix: Update adapters/CLAUDE.md dimension documentation.
+        Fix: Update root CLAUDE.md if it mentions (B,C,H,W,D).
+        Add: Shape assertion after torch.stack() in all SAM3 adapters.
       </description>
       <files>
         <file path="src/minivess/adapters/sam3_vanilla.py" action="edit" />
-        <file path="src/minivess/adapters/sam3_topolora.py" action="edit" />
-        <file path="src/minivess/adapters/sam3_hybrid.py" action="edit" />
+        <file path="src/minivess/adapters/CLAUDE.md" action="edit" />
+        <file path="tests/v2/unit/adapters/test_sam3_output_shape.py" action="create" />
       </files>
       <tdd-spec>
-        <red>No new tests — comment-only changes. Verify existing tests pass.</red>
+        <red>
+          Test that sam3_vanilla output has shape (B, C, D, H, W) with D in dim 2.
+          Test that sam3_topolora output has shape (B, C, D, H, W) with D in dim 2.
+          Test that sam3_hybrid output has shape (B, C, D, H, W) with D in dim 2.
+          Use asymmetric input (H=8, W=8, D=3) so dim mismatch is detectable.
+        </red>
         <green>
-          Fix all dimension order comments to accurately reflect actual tensor shapes.
-          Document FP16→FP32 casting rationale in sam3_backbone.py comment.
+          Change sam3_vanilla.py:118 from torch.stack(dim=4) to torch.stack(dim=2).
+          Update adapters/CLAUDE.md: (B,C,H,W,D) → (B,C,D,H,W).
+          Add assert logits_3d.shape[2] == d after stack in all SAM3 adapters.
         </green>
       </tdd-spec>
     </task>
