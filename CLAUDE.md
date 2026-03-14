@@ -193,8 +193,7 @@ It is NOT "a RunPod launcher." The SAME SkyPilot YAML must work on:
 - See: `.claude/metalearning/2026-03-14-skypilot-bare-vm-docker-violation.md`
 
 **Key Files:**
-- `deployment/skypilot/train_generic.yaml` — spot A100 training
-- `deployment/skypilot/train_hpo_sweep.yaml` — parallel HPO trials
+- `deployment/skypilot/smoke_test_gpu.yaml` — Docker-based GPU smoke tests on RunPod
 - `src/minivess/compute/skypilot_launcher.py` — Python SDK wrapper
 
 **Never suggest bypassing SkyPilot.** "SkyPilot is causing issues" → fix how you USE it.

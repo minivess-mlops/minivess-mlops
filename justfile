@@ -151,12 +151,12 @@ pipeline *ARGS:
 # SkyPilot (Cloud Compute)
 # ---------------------------------------------------------------------------
 
-# Launch SkyPilot training job
-sky-train CONFIG="deployment/skypilot/train_generic.yaml" *ARGS:
+# Launch SkyPilot production training (Docker image_id pattern)
+sky-train CONFIG="deployment/skypilot/train_production.yaml" *ARGS:
     sky jobs launch {{CONFIG}} {{ARGS}}
 
 # Launch SkyPilot HPO sweep
-sky-sweep CONFIG="deployment/skypilot/train_hpo_sweep.yaml" *ARGS:
+sky-hpo CONFIG="deployment/skypilot/train_hpo.yaml" *ARGS:
     sky jobs launch {{CONFIG}} {{ARGS}}
 
 # Show SkyPilot job status
