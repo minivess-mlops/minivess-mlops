@@ -78,9 +78,10 @@ def main() -> int:
     # Set model family env var
     task.update_envs({"MODEL_FAMILY": args.model})
 
-    # Load all env vars from .env file into the task
+    # Load all env vars from .env file into the task.
+    # Resolve ${VAR} references in values (SkyPilot doesn't resolve envs→envs refs).
     env_file = _ROOT / ".env"
-    env_vars = {}
+    env_vars: dict[str, str] = {}
     for line in env_file.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -90,6 +91,24 @@ def main() -> int:
             key = key.strip()
             value = value.strip().strip("'\"")
             env_vars[key] = value
+
+    # Resolve MLFLOW_TRACKING_*: the YAML uses ${MLFLOW_CLOUD_*} references, but
+    # SkyPilot doesn't resolve inter-env references. Set them to actual values.
+    mlflow_uri = env_vars.get(
+        "MLFLOW_CLOUD_URI", os.environ.get("MLFLOW_CLOUD_URI", "")
+    )
+    if mlflow_uri:
+        env_vars["MLFLOW_TRACKING_URI"] = mlflow_uri
+    mlflow_user = env_vars.get(
+        "MLFLOW_CLOUD_USERNAME", os.environ.get("MLFLOW_CLOUD_USERNAME", "admin")
+    )
+    env_vars["MLFLOW_TRACKING_USERNAME"] = mlflow_user
+    mlflow_pass = env_vars.get(
+        "MLFLOW_CLOUD_PASSWORD", os.environ.get("MLFLOW_CLOUD_PASSWORD", "")
+    )
+    if mlflow_pass:
+        env_vars["MLFLOW_TRACKING_PASSWORD"] = mlflow_pass
+
     task.update_envs(env_vars)
 
     # Set private GHCR registry credentials

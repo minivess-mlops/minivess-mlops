@@ -70,6 +70,9 @@ envs:
   MLFLOW_TRACKING_USERNAME: ${MLFLOW_CLOUD_USERNAME:-admin}
   MLFLOW_TRACKING_PASSWORD: ${MLFLOW_CLOUD_PASSWORD}
 
+  # Suppress git warning (runner image has no git — by design)
+  GIT_PYTHON_REFRESH: quiet
+
   # Cloud VM escape hatches (approved — same as pytest, RC12)
   MINIVESS_ALLOW_HOST: "1"
   PREFECT_DISABLED: "1"

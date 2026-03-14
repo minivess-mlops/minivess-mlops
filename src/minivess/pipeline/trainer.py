@@ -717,9 +717,17 @@ class SegmentationTrainer:
                         "Saved best checkpoint for '%s' to %s", metric_name, best_path
                     )
                     if self.tracker is not None:
-                        self.tracker.log_artifact(
-                            best_path, artifact_path="checkpoints"
-                        )
+                        try:
+                            self.tracker.log_artifact(
+                                best_path, artifact_path="checkpoints"
+                            )
+                        except Exception:
+                            logger.warning(
+                                "Failed to upload checkpoint artifact to MLflow "
+                                "(checkpoint saved locally at %s)",
+                                best_path,
+                                exc_info=True,
+                            )
 
             # Save last.pth if configured
             if checkpoint_dir is not None and ckpt_cfg.save_last:
@@ -806,10 +814,23 @@ class SegmentationTrainer:
         if self.tracker is not None and checkpoint_dir is not None:
             last_path = checkpoint_dir / "last.pth"
             if last_path.exists():
-                self.tracker.log_artifact(last_path, artifact_path="checkpoints")
+                try:
+                    self.tracker.log_artifact(last_path, artifact_path="checkpoints")
+                except Exception:
+                    logger.warning(
+                        "Failed to upload last.pth to MLflow (saved locally at %s)",
+                        last_path,
+                        exc_info=True,
+                    )
             history_path = checkpoint_dir / "metric_history.json"
             if history_path.exists():
-                self.tracker.log_artifact(history_path, artifact_path="history")
+                try:
+                    self.tracker.log_artifact(history_path, artifact_path="history")
+                except Exception:
+                    logger.warning(
+                        "Failed to upload metric_history.json to MLflow",
+                        exc_info=True,
+                    )
 
         # Backward-compatible best_val_loss: use primary tracker's best value
         # when primary metric is val_loss, otherwise fall back to best val_loss tracker
