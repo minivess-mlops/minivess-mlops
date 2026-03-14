@@ -133,12 +133,17 @@ Each of the 6 Prefect flows runs in its own Docker container:
 | **staging** | Docker Compose | Local GPU in container | Integration testing |
 | **prod** | Docker + SkyPilot | Cloud spot / on-prem K8s | Full pipeline |
 
-### SkyPilot as Default Compute Layer
+### SkyPilot as Default Compute Layer (DOCKER-ONLY — Non-Negotiable)
+- SkyPilot YAML MUST use `image_id: docker:<registry>/<image>:<tag>` — bare VM is BANNED
+- Docker image pushed to GHCR: `ghcr.io/petteriTeikari/minivess-base:latest`
 - `deployment/skypilot/train_generic.yaml` — spot A100 training
 - `deployment/skypilot/train_hpo_sweep.yaml` — parallel HPO trials
 - `src/minivess/compute/skypilot_launcher.py` — Python SDK wrapper
 - Multi-cloud failover: AWS → GCP → RunPod → Lambda
 - 3-6x cost savings via managed spot instances
+- **BANNED**: `apt-get install`, `uv sync`, `git clone` in SkyPilot setup scripts.
+  All deps belong in the Docker image. SkyPilot setup is ONLY for data pull + config.
+- See: `.claude/metalearning/2026-03-14-skypilot-bare-vm-docker-violation.md`
 
 ### Optuna + ASHA Hyperparameter Optimization
 - `src/minivess/optimization/hpo_engine.py` — HPOEngine with TPE/CmaES + HyperbandPruner
@@ -359,6 +364,11 @@ Each of the 6 Prefect flows runs in its own Docker container:
   in flow files — use `resolve_tracking_uri()` or fail loudly on missing env var.
 - Define `mlflow_tracking_uri` or any service URL in Dynaconf TOML files — they are read
   directly from env vars; TOML duplication creates a hidden second source of truth.
+- Write SkyPilot YAML with bare VM setup scripts (`apt-get install`, `uv sync`, `git clone`
+  in setup:). ALL cloud execution MUST use Docker images via `image_id:`. The Docker image
+  is pushed to GHCR and contains all deps. SkyPilot setup: is ONLY for data pull + config.
+  "But SkyPilot defaults to bare VM" is NOT an excuse — our repo mandate is Docker-only.
+  See: `.claude/metalearning/2026-03-14-skypilot-bare-vm-docker-violation.md`
 
 ## TDD Workflow (Non-Negotiable)
 

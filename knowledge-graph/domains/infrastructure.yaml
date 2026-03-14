@@ -34,6 +34,13 @@ decisions:
     implementation: [src/minivess/compute/skypilot_launcher.py, deployment/skypilot/]
     evidence: [docs/planning/skypilot-runpod-architecture-report.md]
     prd_node: knowledge-graph/decisions/L4-infrastructure/gpu_compute.yaml
+    constraint: "ALL cloud execution MUST use Docker images (image_id in SkyPilot). Bare VM setup scripts are BANNED. See metalearning/2026-03-14-skypilot-bare-vm-docker-violation.md"
+
+  docker_registry:
+    status: not_started
+    candidates: [ghcr_io, docker_hub, runpod_registry]
+    rationale: "Required for cloud GPU training — push minivess-base to registry, reference via image_id"
+    blocked_by: []
 
   secrets_management:
     status: resolved
@@ -48,6 +55,9 @@ decisions:
     prd_node: knowledge-graph/decisions/L4-infrastructure/air_gap_strategy.yaml
 
 metalearning:
+  - file: .claude/metalearning/2026-03-14-skypilot-bare-vm-docker-violation.md
+    applies_to: [deployment/skypilot/]
+    rule: "Cloud GPU execution MUST use Docker images via image_id. Bare VM setup scripts are BANNED."
   - file: .claude/metalearning/2026-03-09-dotenv-docker-compose-v2.md
     applies_to: [docker-compose.yml, docker-compose.flows.yml]
     rule: "Always use --env-file with docker compose"

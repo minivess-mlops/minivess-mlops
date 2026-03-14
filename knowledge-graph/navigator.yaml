@@ -62,10 +62,27 @@ domains:
     claude_md: [tests/CLAUDE.md]
     decisions: []
 
+invariants:
+  # HARD CONSTRAINTS — apply before any decision node is evaluated.
+  # These are non-negotiable architectural mandates that override all other guidance.
+  - id: docker_only
+    rule: "ALL execution (local, cloud, CI) MUST run inside Docker containers. Bare VM setup scripts are BANNED."
+    applies_to: [deployment/skypilot/, deployment/docker/, scripts/]
+    violation_doc: .claude/metalearning/2026-03-14-skypilot-bare-vm-docker-violation.md
+    claude_md_rules: [17, 18, 19]
+  - id: docker_registry_required
+    rule: "Cloud GPU training requires Docker images in a registry (GHCR/DockerHub). SkyPilot YAMLs MUST have image_id."
+    applies_to: [deployment/skypilot/]
+
 keywords:
   docker: infrastructure
+  registry: infrastructure
+  ghcr: infrastructure
   prefect: infrastructure
   skypilot: infrastructure
+  runpod: infrastructure
+  cloud: infrastructure
+  gpu_compute: infrastructure
   loss: training
   metric: training
   hpo: training
