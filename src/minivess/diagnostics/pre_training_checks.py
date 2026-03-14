@@ -84,8 +84,9 @@ def check_gradient_flow(
     if hasattr(output, "logits"):
         output = output.logits
 
-    # Simple backward with mean loss
-    loss = output.mean()
+    # Use squared mean to avoid zero gradients for symmetric outputs.
+    # VesselFM outputs cat([-x, x]): mean() cancels to 0, (x²).mean() does not.
+    loss = (output**2).mean()
     try:
         loss.backward()
     except RuntimeError:
@@ -129,7 +130,19 @@ def check_loss_sanity(
         output = model(images)
         if hasattr(output, "logits"):
             output = output.logits
-        loss = criterion(output, labels.squeeze(1))
+        # Squeeze singleton channel dim if criterion expects no channel dim
+        # (e.g., CrossEntropyLoss expects (B, D, H, W)).
+        # Keep channel dim for losses with to_onehot_y=True (e.g., DiceCELoss).
+        target = labels
+        if labels.shape[1] == 1:
+            try:
+                loss = criterion(output, target)
+            except (ValueError, RuntimeError):
+                # If that fails, try squeezing the channel dim
+                target = labels.squeeze(1)
+                loss = criterion(output, target)
+        else:
+            loss = criterion(output, target)
         loss_val = loss.item()
 
     if not torch.isfinite(torch.tensor(loss_val)):

@@ -47,8 +47,21 @@ def run_weightwatcher(
 
     watcher = ww.WeightWatcher(model=model)
 
-    # WeightWatcher analyzes all linear/conv layers by default
-    details = watcher.analyze()
+    # WeightWatcher analyzes all linear/conv layers by default.
+    # Some 3D conv layers (e.g., MONAI DynUNet residual blocks) have
+    # weight=None attributes that crash WeightWatcher. Catch and log.
+    try:
+        details = watcher.analyze()
+    except AttributeError:
+        logger.warning(
+            "WeightWatcher crashed on model layers (likely 3D conv with "
+            "weight=None). Returning NaN metrics."
+        )
+        return {
+            "diag_ww_alpha_mean": float("nan"),
+            "diag_ww_alpha_std": float("nan"),
+            "diag_ww_num_layers_analyzed": 0,
+        }
 
     if filter_frozen and "layer_id" in details.columns:
         # Filter to trainable layers only
