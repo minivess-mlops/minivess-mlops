@@ -91,11 +91,15 @@ setup: |
   # NOTE: uv, git, scripts/ are NOT in the runner image.
   # Use python/dvc directly (.venv/bin is on PATH).
   cd /app
+  TIMING_FILE="/app/timing_setup.txt"
 
-  # Initialize DVC without git (container has no .git)
+  # Infrastructure timing: record setup_start (issue #683)
+  echo "setup_start=$(date +%s.%N)" > "$TIMING_FILE"
+
+  # DVC configuration (Docker image has dvc pre-installed)
+  echo "dvc_config_start=$(date +%s.%N)" >> "$TIMING_FILE"
   dvc init --no-scm
 
-  # Configure DVC upcloud remote with S3 credentials from env
   dvc remote add upcloud s3://${DVC_S3_BUCKET}
   dvc remote modify upcloud endpointurl ${DVC_S3_ENDPOINT_URL}
   dvc remote modify --local upcloud access_key_id ${DVC_S3_ACCESS_KEY}
@@ -124,9 +128,12 @@ setup: |
         size: 2749883382
         nfiles: 350
   LOCKEOF
+  echo "dvc_config_end=$(date +%s.%N)" >> "$TIMING_FILE"
 
   # Pull training data from UpCloud S3
+  echo "dvc_pull_start=$(date +%s.%N)" >> "$TIMING_FILE"
   dvc pull -r upcloud
+  echo "dvc_pull_end=$(date +%s.%N)" >> "$TIMING_FILE"
 
   # H13: Use smoke test splits (4 volumes) instead of full 3-fold (70 volumes)
   cp configs/splits/smoke_test_1fold_4vol.json configs/splits/splits.json
@@ -135,16 +142,23 @@ setup: |
   mkdir -p /app/checkpoints /app/logs
 
   # Pre-cache VesselFM weights during setup (H20: don't burn GPU time on download)
+  echo "model_weights_start=$(date +%s.%N)" >> "$TIMING_FILE"
   if [ "${MODEL_FAMILY}" = "vesselfm" ]; then
     python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" || true
   fi
+  echo "model_weights_end=$(date +%s.%N)" >> "$TIMING_FILE"
 
   # Verify environment
+  echo "verification_start=$(date +%s.%N)" >> "$TIMING_FILE"
   echo "=== Pre-flight Check ==="
   nvidia-smi
   python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}, GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"}')"
   ls -la configs/splits/splits.json
   ls data/raw/minivess/imagesTr/ | head -5 || echo "WARNING: No training data!"
+  echo "verification_end=$(date +%s.%N)" >> "$TIMING_FILE"
+
+  echo "setup_end=$(date +%s.%N)" >> "$TIMING_FILE"
+  echo "=== Setup complete (timing written to $TIMING_FILE) ==="
 
 run: |
   cd /app
@@ -172,6 +186,12 @@ run: |
   echo "MLflow experiment: smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
   echo "MLflow server: ${MLFLOW_TRACKING_URI}"
   echo "Splits: $(cat configs/splits/splits.json | python -c 'import json,sys; d=json.load(sys.stdin); print(f"{len(d)} folds")')"
+
+  # Infrastructure timing: timing_setup.txt written by setup block (#683)
+  # train_flow.py reads it via infrastructure_timing.log_infrastructure_timing()
+  if [ -f "/app/timing_setup.txt" ]; then
+    echo "Infrastructure timing file found: $(wc -l < /app/timing_setup.txt) entries"
+  fi
 
   # Execute training flow (python is on PATH from .venv/bin)
   python -m minivess.orchestration.flows.train_flow
