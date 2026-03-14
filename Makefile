@@ -4,7 +4,9 @@
 
 .PHONY: init-volumes scan sbom seccomp-audit-train install-trivy help \
        test-staging test-prod test-gpu test-e2e \
-       build-base-gpu build-base-cpu build-base-light build-bases requirements-tiers
+       build-base-gpu build-base-cpu build-base-light build-bases requirements-tiers \
+       ghcr-login push-ghcr \
+       smoke-test-preflight smoke-test-gpu smoke-test-all verify-smoke-test
 
 help:
 	@echo "MinIVess MLOps Makefile"
@@ -21,6 +23,16 @@ help:
 	@echo "  build-base-light    Build minivess-base-light:latest (prefect/FastAPI)"
 	@echo "  build-bases         Build all 3 base images"
 	@echo "  requirements-tiers  Regenerate requirements-{cpu,light}.txt from uv.lock"
+	@echo ""
+	@echo "GHCR (Docker Registry):"
+	@echo "  ghcr-login          Login to GitHub Container Registry"
+	@echo "  push-ghcr           Tag + push minivess-base:latest to GHCR"
+	@echo ""
+	@echo "Cloud GPU Smoke Tests:"
+	@echo "  smoke-test-preflight  Validate env vars + connectivity"
+	@echo "  smoke-test-gpu        Launch GPU smoke test on RunPod (MODEL=sam3_vanilla)"
+	@echo "  smoke-test-all        Run all 3 GPU smoke tests (~\$$0.36)"
+	@echo "  verify-smoke-test     Verify smoke test results on cloud MLflow"
 	@echo ""
 	@echo "Infrastructure:"
 	@echo "  init-volumes        Fix Docker named volume ownership (run once after first up)"
@@ -92,6 +104,25 @@ smoke-test-all:  ## Run all 3 GPU smoke tests sequentially (cost: ~$0.36)
 
 verify-smoke-test:  ## Verify smoke test results on cloud MLflow
 	uv run python scripts/verify_smoke_test.py $(or $(MODEL),sam3_vanilla)
+
+# ---------------------------------------------------------------------------
+# GHCR (GitHub Container Registry) — push Docker images for SkyPilot
+# ---------------------------------------------------------------------------
+DOCKER_REGISTRY ?= ghcr.io/petteriteikari
+DOCKER_IMAGE_NAME ?= minivess-base
+DOCKER_IMAGE_TAG ?= latest
+DOCKER_IMAGE_FULL = $(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):$(DOCKER_IMAGE_TAG)
+
+ghcr-login:  ## Login to GHCR (requires GITHUB_TOKEN with write:packages)
+	@echo "Logging in to ghcr.io as $${GHCR_USERNAME:-petteriteikari}..."
+	@echo "$${GITHUB_TOKEN}" | docker login ghcr.io -u "$${GHCR_USERNAME:-petteriteikari}" --password-stdin
+
+push-ghcr: ghcr-login push-registry  ## Login to GHCR + push (convenience alias)
+
+push-registry:  ## Tag + push minivess-base to configured DOCKER_REGISTRY
+	docker tag minivess-base:latest $(DOCKER_IMAGE_FULL)
+	docker push $(DOCKER_IMAGE_FULL)
+	@echo "Pushed: $(DOCKER_IMAGE_FULL)"
 
 # ---------------------------------------------------------------------------
 # Docker base image builds (3-tier hierarchy)

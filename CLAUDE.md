@@ -29,6 +29,32 @@ harder than editing one YAML file is a design flaw. Escalate to user before impl
 
 ---
 
+## Overarching Principle (TOP-2): Zero Manual Work + Reproducibility
+
+> **Automate everything. Nobody should ever manually launch pods, VMs, or instances.
+> The highest priorities are excellent DevEx and reproducibility to combat the
+> reproducibility crisis in science and ML.**
+
+This is WHY every automation tool in this repo exists:
+- **Pulumi** — IaC so nobody manually provisions cloud infrastructure
+- **SkyPilot** — Intercloud broker so nobody manually launches GPU jobs
+- **Docker** — Containerization so nobody debugs "works on my machine"
+- **Prefect** — Orchestration so nobody manually sequences pipeline steps
+- **DVC** — Data versioning so nobody manually tracks dataset versions
+
+**Docker is NOT optional.** Docker is the execution model — the reproducibility guarantee.
+ALL training, ALL pipeline execution, ALL deployment goes through Docker containers.
+The only Docker-free path is `uv run pytest` for fast unit tests. Everything else is Docker.
+Suggesting bare-metal execution is suggesting to abandon reproducibility.
+
+**Cloud execution is NEVER manual.** `sky jobs launch task.yaml` — one command. The
+SkyPilot YAML + Docker image = fully reproducible cloud execution. No SSH, no manual
+setup, no "install these packages on the VM."
+
+See: `.claude/metalearning/2026-03-14-docker-resistance-anti-pattern.md`
+
+---
+
 ## Design Goal #1: EXCELLENT DevEx for PhD Researchers
 
 > **MLOps as a scaffold that frees PhD researchers from infrastructure wrangling.**
@@ -133,9 +159,18 @@ Each of the 6 Prefect flows runs in its own Docker container:
 | **staging** | Docker Compose | Local GPU in container | Integration testing |
 | **prod** | Docker + SkyPilot | Cloud spot / on-prem K8s | Full pipeline |
 
-### SkyPilot = Cloud-Agnostic Compute Orchestrator (Non-Negotiable)
-SkyPilot is to GPU compute what Pulumi is to cloud infrastructure — a **provider-agnostic
-abstraction layer**. It is NOT "a RunPod launcher." The SAME SkyPilot YAML must work on:
+### SkyPilot = Intercloud Broker for AI Workloads (Non-Negotiable)
+SkyPilot is an **intercloud broker** ([Yang et al., NSDI'23](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng))
+— a unified system that automatically places and manages AI jobs across heterogeneous
+infrastructure. You describe WHAT you need (GPU type, cost constraints), SkyPilot decides
+WHERE to run it (which cloud, region, instance type) with automatic spot recovery and
+cross-cloud failover. Think of it as **Slurm for the multi-cloud era**, not IaC.
+
+**SkyPilot is NOT Terraform/Pulumi.** IaC provisions specific resources ("create this VM
+on AWS us-east-1"). SkyPilot is a workload broker ("I need 1xA100, find the cheapest
+option anywhere and handle preemptions"). Different abstraction level entirely.
+
+It is NOT "a RunPod launcher." The SAME SkyPilot YAML must work on:
 
 | Provider | Use Case | SkyPilot Role |
 |----------|----------|---------------|
@@ -150,7 +185,9 @@ abstraction layer**. It is NOT "a RunPod launcher." The SAME SkyPilot YAML must 
 
 **Docker Execution (MANDATORY):**
 - SkyPilot YAML MUST use `image_id: docker:<registry>/<image>:<tag>` — bare VM is BANNED
-- Docker image pushed to GHCR: `ghcr.io/petteriTeikari/minivess-base:latest`
+- Docker image pushed to configurable registry (`$DOCKER_REGISTRY` in `.env.example`):
+  GHCR (default), Docker Hub, AWS ECR, GCP GAR, Azure ACR — any OCI-compliant registry
+- Push: `make push-registry` (or `make push-ghcr` for GHCR with auto-login)
 - **BANNED**: `apt-get install`, `uv sync`, `git clone` in SkyPilot setup scripts.
   All deps belong in the Docker image. SkyPilot setup is ONLY for data pull + config.
 - See: `.claude/metalearning/2026-03-14-skypilot-bare-vm-docker-violation.md`

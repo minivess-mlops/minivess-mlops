@@ -7,14 +7,22 @@
 #   sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
 #     --env-file .env --env MODEL_FAMILY=sam3_vanilla -y
 #
+# Or via Makefile (recommended):
+#   make smoke-test-gpu MODEL=sam3_vanilla
+#
 # WARNING: 'sky launch' does NOT recover from spot preemption.
 #          'sky exec' skips setup: entirely — guards in run: will catch this.
+#
+# Docker image: All deps (Python, PyTorch, MONAI, uv, project code) are baked
+# into the GHCR image. SkyPilot setup: only pulls data + copies config.
+# BANNED: apt-get, uv sync, git clone in setup (see metalearning 2026-03-14).
 #
 # Cost: ~$0.12/model (2 epochs, 1 fold, 4 volumes, RTX 4090 spot)
 # Total: ~$0.36 for all 3 models (sam3_vanilla, sam3_hybrid, vesselfm)
 #
 # Prerequisites:
 #   - RunPod API key configured: sky check runpod
+#   - Docker image pushed: make push-ghcr
 #   - UpCloud MLflow server running (Pulumi stack)
 #   - DVC data pushed to UpCloud S3: dvc push -r upcloud
 #   - .env populated with DVC_S3_*, MLFLOW_CLOUD_* variables
@@ -22,13 +30,18 @@
 name: minivess-smoke-test
 
 resources:
+  # Docker image from registry — all deps pre-installed, no bare VM setup.
+  # Change registry by updating $DOCKER_REGISTRY in .env.example.
+  # SkyPilot resources: block doesn't support ${} interpolation — update here directly.
+  # Supported registries: GHCR, Docker Hub, AWS ECR, GCP GAR, Azure ACR.
+  image_id: docker:ghcr.io/petteriteikari/minivess-base:latest
   accelerators: RTX4090:1
   cloud: runpod
   use_spot: true
   disk_size: 40
 
 envs:
-  # Model to test (override with -e MODEL_FAMILY=...)
+  # Model to test (override with --env MODEL_FAMILY=...)
   MODEL_FAMILY: sam3_vanilla
 
   # DVC data pull credentials (UpCloud S3)
@@ -62,28 +75,11 @@ envs:
   # HuggingFace token (required for VesselFM weight download)
   HF_TOKEN: ${HF_TOKEN}
 
-  # Git branch to checkout (default: main; override for feature branch testing)
-  GIT_BRANCH: ${GIT_BRANCH:-main}
-
 setup: |
   set -ex  # Fail fast, trace commands
 
-  # RC8: RunPod base images don't include uv
-  curl -sSf https://astral.sh/uv/install.sh | sh
-  source $HOME/.local/bin/env
-
-  # H14: RunPod may not have Python 3.13 (pyproject requires ==3.13.*)
-  uv python install 3.13
-
-  # Clone and install
-  git clone https://github.com/petteriTeikari/minivess-mlops.git /app
+  # All deps are in the Docker image — setup is DATA ONLY
   cd /app
-  git checkout ${GIT_BRANCH}
-
-  # H22: Install build deps for C extensions (gudhi, psycopg2)
-  apt-get update -qq && apt-get install -y -qq build-essential cmake python3-dev libboost-all-dev 2>/dev/null || true
-
-  uv sync --all-extras
 
   # Configure DVC remote and pull training data
   uv run python scripts/configure_dvc_remote.py
@@ -108,7 +104,6 @@ setup: |
   ls data/raw/minivess/imagesTr/ | head -5 || echo "WARNING: No training data!"
 
 run: |
-  source $HOME/.local/bin/env
   cd /app
 
   # Guard: verify setup completed (catches sky exec without setup)
@@ -121,10 +116,10 @@ run: |
     exit 1
   fi
 
-  # H23: Compute EXPERIMENT in shell (NOT in envs — SkyPilot can't resolve intra-envs ${})
+  # Compute EXPERIMENT in shell (NOT in envs — SkyPilot can't resolve intra-envs ${})
   export EXPERIMENT="smoke_${MODEL_FAMILY}"
 
-  # UUID isolation goes via HYDRA_OVERRIDES → experiment_name in resolved config
+  # UUID isolation via HYDRA_OVERRIDES → experiment_name in resolved config
   export EXPERIMENT_UUID=$(uv run python -c "import uuid; print(uuid.uuid4().hex[:8])")
   export HYDRA_OVERRIDES="experiment_name=smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
 
@@ -135,5 +130,5 @@ run: |
   echo "MLflow server: ${MLFLOW_TRACKING_URI}"
   echo "Splits: $(cat configs/splits/splits.json | uv run python -c 'import json,sys; d=json.load(sys.stdin); print(f\"{len(d)} folds\")')"
 
-  # Native execution on cloud VM (not Docker-in-Docker)
+  # Execute training flow inside Docker container (managed by SkyPilot)
   uv run python -m minivess.orchestration.flows.train_flow
