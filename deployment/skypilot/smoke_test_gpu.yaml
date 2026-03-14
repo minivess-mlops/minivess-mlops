@@ -35,6 +35,10 @@ envs:
   DVC_S3_BUCKET: ${DVC_S3_BUCKET:-minivess-dvc-data}
   DVC_REMOTE: upcloud
 
+  # boto3 CRC32C checksum workaround for UpCloud S3 (H17)
+  AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
+  AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
+
   # Remote MLflow tracking (UpCloud)
   MLFLOW_TRACKING_URI: ${MLFLOW_CLOUD_URI}
   MLFLOW_TRACKING_USERNAME: ${MLFLOW_CLOUD_USERNAME:-admin}
@@ -44,7 +48,12 @@ envs:
   MINIVESS_ALLOW_HOST: "1"
   PREFECT_DISABLED: "1"
 
-  # Experiment config
+  # train_flow.py env requirements (H15)
+  SPLITS_DIR: /app/configs/splits
+  CHECKPOINT_DIR: /app/checkpoints
+  LOGS_DIR: /app/logs
+
+  # Hydra experiment config name (maps to configs/experiment/smoke_*.yaml)
   EXPERIMENT: smoke_${MODEL_FAMILY}
 
   # PyTorch CUDA memory optimization
@@ -57,32 +66,62 @@ envs:
   GIT_BRANCH: ${GIT_BRANCH:-main}
 
 setup: |
+  set -ex  # Fail fast, trace commands
+
   # RC8: RunPod base images don't include uv
   curl -sSf https://astral.sh/uv/install.sh | sh
   source $HOME/.local/bin/env
+
+  # H14: RunPod may not have Python 3.13 (pyproject requires ==3.13.*)
+  uv python install 3.13
 
   # Clone and install
   git clone https://github.com/petteriTeikari/minivess-mlops.git /app
   cd /app
   git checkout ${GIT_BRANCH}
+
+  # H22: Install build deps for C extensions (gudhi, psycopg2)
+  apt-get update -qq && apt-get install -y -qq build-essential cmake python3-dev libboost-all-dev 2>/dev/null || true
+
   uv sync --all-extras
 
   # Configure DVC remote and pull training data
   uv run python scripts/configure_dvc_remote.py
   uv run dvc pull -r upcloud
 
+  # H13: Use smoke test splits (4 volumes) instead of full 3-fold (70 volumes)
+  cp configs/splits/smoke_test_1fold_4vol.json configs/splits/splits.json
+
+  # Create required directories (H15)
+  mkdir -p /app/checkpoints /app/logs
+
+  # Pre-cache VesselFM weights during setup (H20: don't burn GPU time on download)
+  if [ "${MODEL_FAMILY}" = "vesselfm" ]; then
+    uv run python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" || true
+  fi
+
+  # Verify environment
+  echo "=== Pre-flight Check ==="
+  nvidia-smi
+  uv run python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}, GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"}')"
+  ls -la configs/splits/splits.json
+  ls data/raw/minivess/imagesTr/ | head -5 || echo "WARNING: No training data!"
+
 run: |
   source $HOME/.local/bin/env
   cd /app
 
-  # UUID experiment isolation (RC9)
-  export EXPERIMENT_UUID=$(python3 -c "import uuid; print(uuid.uuid4().hex[:8])")
-  export EXPERIMENT="smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
+  # H23: EXPERIMENT stays as Hydra config name (smoke_vesselfm etc.)
+  # UUID isolation goes via HYDRA_OVERRIDES → experiment_name in resolved config
+  export EXPERIMENT_UUID=$(uv run python -c "import uuid; print(uuid.uuid4().hex[:8])")
+  export HYDRA_OVERRIDES="experiment_name=smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
 
   echo "=== MinIVess GPU Smoke Test ==="
   echo "Model: ${MODEL_FAMILY}"
-  echo "Experiment: ${EXPERIMENT}"
-  echo "MLflow: ${MLFLOW_TRACKING_URI}"
+  echo "Hydra config: ${EXPERIMENT}"
+  echo "MLflow experiment: smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
+  echo "MLflow server: ${MLFLOW_TRACKING_URI}"
+  echo "Splits: $(cat configs/splits/splits.json | uv run python -c 'import json,sys; d=json.load(sys.stdin); print(f\"{len(d)} folds\")')"
 
   # Native execution on cloud VM (not Docker-in-Docker)
-  EXPERIMENT=${EXPERIMENT} uv run python -m minivess.orchestration.flows.train_flow
+  uv run python -m minivess.orchestration.flows.train_flow
