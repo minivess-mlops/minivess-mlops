@@ -86,24 +86,38 @@ class LoRALinear(nn.Module):
         self.lora_dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         self._is_conv = isinstance(original, nn.Conv2d)
 
+    @property
+    def weight(self) -> Tensor:
+        """Expose original layer's weight for HF code that accesses .weight.dtype."""
+        return self.original.weight  # type: ignore[return-value]
+
+    @property
+    def bias(self) -> Tensor | None:
+        """Expose original layer's bias for HF code that accesses .bias."""
+        return self.original.bias  # type: ignore[return-value]
+
     def forward(self, x: Tensor) -> Tensor:
-        """Forward pass: original(x) + LoRA(x)."""
+        """Forward pass: original(x) + LoRA(x).
+
+        Handles FP16/FP32 dtype mismatch: SAM3 encoder runs in FP16
+        but LoRA params are initialized in FP32. Cast input to match
+        LoRA dtype for matmul, then cast result back to input dtype.
+        """
         original_out: Tensor = self.original(x)
+        input_dtype = x.dtype
 
         if self._is_conv:
-            # For Conv2d: use 1x1 conv via matrix multiply on output-spatial features
-            # Apply LoRA as a channel-mixing residual on the original output
             b, c_out, h_out, w_out = original_out.shape
-            # Global average pool input channels → project through LoRA
-            x_avg = x.mean(dim=(2, 3))  # (B, C_in)
+            x_avg = x.mean(dim=(2, 3)).to(self.lora_A.dtype)
             x_avg = self.lora_dropout(x_avg)
             lora_out = (x_avg @ self.lora_A.T @ self.lora_B.T) * self.scaling
-            lora_out = lora_out.unsqueeze(-1).unsqueeze(-1)  # (B, C_out, 1, 1)
+            lora_out = lora_out.to(input_dtype).unsqueeze(-1).unsqueeze(-1)
             result: Tensor = original_out + lora_out
             return result
         else:
-            x_dropped = self.lora_dropout(x)
+            x_dropped = self.lora_dropout(x).to(self.lora_A.dtype)
             lora_out = (x_dropped @ self.lora_A.T @ self.lora_B.T) * self.scaling
+            lora_out = lora_out.to(input_dtype)
 
         result_lin: Tensor = original_out + lora_out
         return result_lin
