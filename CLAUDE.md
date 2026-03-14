@@ -133,17 +133,35 @@ Each of the 6 Prefect flows runs in its own Docker container:
 | **staging** | Docker Compose | Local GPU in container | Integration testing |
 | **prod** | Docker + SkyPilot | Cloud spot / on-prem K8s | Full pipeline |
 
-### SkyPilot as Default Compute Layer (DOCKER-ONLY — Non-Negotiable)
+### SkyPilot = Cloud-Agnostic Compute Orchestrator (Non-Negotiable)
+SkyPilot is to GPU compute what Pulumi is to cloud infrastructure — a **provider-agnostic
+abstraction layer**. It is NOT "a RunPod launcher." The SAME SkyPilot YAML must work on:
+
+| Provider | Use Case | SkyPilot Role |
+|----------|----------|---------------|
+| RunPod | Cloud GPU (spot RTX 4090) | `cloud: runpod` |
+| Lambda Labs | Cloud GPU (A100) | `cloud: lambda` |
+| AWS | Cloud GPU (spot p4d) | `cloud: aws` |
+| GCP | Cloud GPU (preemptible) | `cloud: gcp` |
+| Intranet servers | On-prem GPU via SSH | SSH connector |
+| Local LAN | Multi-GPU via SSH | SSH connector |
+
+**SkyPilot is ALWAYS used for compute beyond the dev machine.** Never bypass it.
+
+**Docker Execution (MANDATORY):**
 - SkyPilot YAML MUST use `image_id: docker:<registry>/<image>:<tag>` — bare VM is BANNED
 - Docker image pushed to GHCR: `ghcr.io/petteriTeikari/minivess-base:latest`
-- `deployment/skypilot/train_generic.yaml` — spot A100 training
-- `deployment/skypilot/train_hpo_sweep.yaml` — parallel HPO trials
-- `src/minivess/compute/skypilot_launcher.py` — Python SDK wrapper
-- Multi-cloud failover: AWS → GCP → RunPod → Lambda
-- 3-6x cost savings via managed spot instances
 - **BANNED**: `apt-get install`, `uv sync`, `git clone` in SkyPilot setup scripts.
   All deps belong in the Docker image. SkyPilot setup is ONLY for data pull + config.
 - See: `.claude/metalearning/2026-03-14-skypilot-bare-vm-docker-violation.md`
+
+**Key Files:**
+- `deployment/skypilot/train_generic.yaml` — spot A100 training
+- `deployment/skypilot/train_hpo_sweep.yaml` — parallel HPO trials
+- `src/minivess/compute/skypilot_launcher.py` — Python SDK wrapper
+
+**Never suggest bypassing SkyPilot.** "SkyPilot is causing issues" → fix how you USE it.
+See: `.claude/metalearning/2026-03-14-skypilot-purpose-misunderstanding.md`
 
 ### Optuna + ASHA Hyperparameter Optimization
 - `src/minivess/optimization/hpo_engine.py` — HPOEngine with TPE/CmaES + HyperbandPruner

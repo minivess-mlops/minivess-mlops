@@ -73,6 +73,10 @@ invariants:
   - id: docker_registry_required
     rule: "Cloud GPU training requires Docker images in a registry (GHCR/DockerHub). SkyPilot YAMLs MUST have image_id."
     applies_to: [deployment/skypilot/]
+  - id: skypilot_always
+    rule: "SkyPilot = cloud-agnostic compute orchestrator (like Pulumi for IaC). ALWAYS use SkyPilot for compute beyond dev machine. NEVER bypass it. NEVER treat it as RunPod-specific."
+    violation_doc: .claude/metalearning/2026-03-14-skypilot-purpose-misunderstanding.md
+    applies_to: [deployment/skypilot/, src/minivess/compute/]
 
 keywords:
   docker: infrastructure
