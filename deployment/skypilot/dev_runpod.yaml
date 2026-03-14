@@ -119,6 +119,14 @@ setup: |
   export VIRTUAL_ENV="${WORKDIR}/.venv"
   export PATH="${WORKDIR}/.venv/bin:$HOME/.local/bin:$PATH"
   uv sync --all-extras
+  # T0.7: Verify python symlink exists in venv (reviewer C1 fix, #696)
+  # uv venv may create python3.13 but not python — bare `python` would use system Python
+  ls -la "${WORKDIR}/.venv/bin/python"* | head -5
+  if [ ! -e "${WORKDIR}/.venv/bin/python" ]; then
+    echo "WARNING: No python symlink in venv — creating one"
+    ln -sf "${WORKDIR}/.venv/bin/python3.13" "${WORKDIR}/.venv/bin/python"
+  fi
+  echo "Python in venv: $(${WORKDIR}/.venv/bin/python --version)"
   echo "uv_sync_end=$(date +%s.%N)" >> "$TIMING_FILE"
 
   # Step 4: Configure DVC + pull training data
@@ -165,21 +173,23 @@ setup: |
   mkdir -p checkpoints logs
 
   # Step 7: Pre-cache model weights during setup (don't burn GPU time)
+  # T0.7: Use explicit venv python — bare `python` may resolve to system Python (#696)
   echo "model_weights_start=$(date +%s.%N)" >> "$TIMING_FILE"
   if [ "${MODEL_FAMILY}" = "vesselfm" ]; then
-    python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" || true
+    "${WORKDIR}/.venv/bin/python" -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" || true
   fi
   if echo "${MODEL_FAMILY}" | grep -q "sam3"; then
-    python -c "from transformers import Sam3Model; Sam3Model.from_pretrained('facebook/sam3')" || true
+    "${WORKDIR}/.venv/bin/python" -c "from transformers import Sam3Model; Sam3Model.from_pretrained('facebook/sam3')" || true
   fi
   echo "model_weights_end=$(date +%s.%N)" >> "$TIMING_FILE"
 
   # Step 8: Verify environment
+  # T0.7: Use explicit venv python for all verification calls (#696)
   echo "verification_start=$(date +%s.%N)" >> "$TIMING_FILE"
   echo "=== Pre-flight Check ==="
   nvidia-smi
-  python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}, GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"}')"
-  python -c "import monai; print(f'MONAI: {monai.__version__}')"
+  "${WORKDIR}/.venv/bin/python" -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}, GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"}')"
+  "${WORKDIR}/.venv/bin/python" -c "import monai; print(f'MONAI: {monai.__version__}')"
   ls -la configs/splits/splits.json
   ls data/raw/minivess/imagesTr/ | head -5 || echo "WARNING: No training data!"
   echo "verification_end=$(date +%s.%N)" >> "$TIMING_FILE"
@@ -188,6 +198,7 @@ setup: |
   echo "=== Setup complete (timing written to $TIMING_FILE) ==="
 
 run: |
+  set -e  # Fail on any error
   # SkyPilot workdir: we're in ~/sky_workdir/
   WORKDIR=$(pwd)
   export PATH="${WORKDIR}/.venv/bin:$HOME/.local/bin:$PATH"
@@ -208,11 +219,42 @@ run: |
     exit 1
   fi
 
+  # T0.6: Guard MLFLOW_TRACKING_URI — three failure modes (plan v3.1 #695)
+  # Mode 1: empty string (MLFLOW_CLOUD_URI was empty in .env)
+  # Mode 2: literal "${MLFLOW_CLOUD_URI}" (SkyPilot didn't resolve env interpolation)
+  # Mode 3: "mlruns" (resolve_tracking_uri() silent local fallback)
+  # All three result in artifacts being lost when the pod terminates.
+  echo "MLflow URI resolved: ${MLFLOW_TRACKING_URI}"
+  echo "MLflow auth user:    ${MLFLOW_TRACKING_USERNAME}"
+  if [ -z "${MLFLOW_TRACKING_URI}" ] || \
+     [ "${MLFLOW_TRACKING_URI}" = "mlruns" ] || \
+     echo "${MLFLOW_TRACKING_URI}" | grep -qF '${'; then
+    echo "FATAL: MLFLOW_TRACKING_URI is empty, local-only, or unresolved."
+    echo "  Value: '${MLFLOW_TRACKING_URI}'"
+    echo "  Use scripts/launch_dev_runpod.py (not 'sky launch' directly)."
+    echo "  Ensure MLFLOW_CLOUD_URI is set in .env."
+    exit 1
+  fi
+  if [ -z "${MLFLOW_TRACKING_USERNAME}" ] || [ -z "${MLFLOW_TRACKING_PASSWORD}" ]; then
+    echo "FATAL: MLflow auth credentials missing (MLFLOW_TRACKING_USERNAME or PASSWORD)."
+    exit 1
+  fi
+  # Connectivity check from pod — warn only, don't abort (pod network may differ)
+  if command -v curl >/dev/null 2>&1; then
+    if ! curl -sf -u "${MLFLOW_TRACKING_USERNAME}:${MLFLOW_TRACKING_PASSWORD}" \
+         "${MLFLOW_TRACKING_URI}/health" > /dev/null 2>&1; then
+      echo "WARNING: Cannot reach MLflow from pod: ${MLFLOW_TRACKING_URI}"
+      echo "  Training will proceed but artifacts may not upload."
+    else
+      echo "MLflow connectivity from pod: OK"
+    fi
+  fi
+
   # Compute EXPERIMENT in shell (SkyPilot can't resolve intra-envs ${})
   export EXPERIMENT="smoke_${MODEL_FAMILY}"
 
   # UUID isolation via HYDRA_OVERRIDES
-  export EXPERIMENT_UUID=$(python -c "import uuid; print(uuid.uuid4().hex[:8])")
+  export EXPERIMENT_UUID=$(${WORKDIR}/.venv/bin/python -c "import uuid; print(uuid.uuid4().hex[:8])")
   export HYDRA_OVERRIDES="experiment_name=dev_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
 
   echo "=== MinIVess Dev GPU Run ==="
@@ -220,7 +262,7 @@ run: |
   echo "Hydra config: ${EXPERIMENT}"
   echo "MLflow experiment: dev_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
   echo "MLflow server: ${MLFLOW_TRACKING_URI}"
-  echo "Splits: $(cat configs/splits/splits.json | python -c 'import json,sys; d=json.load(sys.stdin); print(f"{len(d)} folds")')"
+  echo "Splits: $(cat configs/splits/splits.json | ${WORKDIR}/.venv/bin/python -c 'import json,sys; d=json.load(sys.stdin); print(f"{len(d)} folds")')"
 
   # Infrastructure timing: timing_setup.txt written by setup block (#683)
   # train_flow.py reads it via infrastructure_timing.log_infrastructure_timing()
@@ -229,4 +271,4 @@ run: |
   fi
 
   # Execute training flow
-  python -m minivess.orchestration.flows.train_flow
+  ${WORKDIR}/.venv/bin/python -m minivess.orchestration.flows.train_flow
