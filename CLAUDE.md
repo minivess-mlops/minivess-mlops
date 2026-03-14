@@ -424,6 +424,11 @@ See: `.claude/metalearning/2026-03-14-skypilot-purpose-misunderstanding.md`
   is pushed to GHCR and contains all deps. SkyPilot setup: is ONLY for data pull + config.
   "But SkyPilot defaults to bare VM" is NOT an excuse — our repo mandate is Docker-only.
   See: `.claude/metalearning/2026-03-14-skypilot-bare-vm-docker-violation.md`
+- Dump wall-of-text questions when the user asks for "interactive" input. ALWAYS use the
+  `AskUserQuestion` tool for interactive questions — clickable options, not markdown lists.
+  Maximum 4 questions per round; ask in iterative batches, not all at once. DevEx applies
+  to Claude-to-user interactions too, not just researcher-facing code.
+  See: `.claude/metalearning/2026-03-14-wall-of-text-bad-ux.md`
 
 ## TDD Workflow (Non-Negotiable)
 
