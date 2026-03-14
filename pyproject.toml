@@ -140,6 +140,11 @@ infra = [
     "pulumi-command>=1.0,<2.0",
     "skypilot-nightly[runpod]>=1.0.0.dev0",
 ]
+sky = [
+    "google-api-python-client>=2.192.0",
+    "google-auth>=2.48.0",
+    "google-cloud-storage>=3.9.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/petteriTeworworx/minivess-mlops"

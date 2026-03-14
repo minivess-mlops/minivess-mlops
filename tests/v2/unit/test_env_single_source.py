@@ -87,6 +87,50 @@ def test_env_example_has_dvc_s3_vars() -> None:
         assert var in vars_, f"{var} missing from .env.example"
 
 
+def test_env_example_has_mlflow_server_version() -> None:
+    """MLFLOW_SERVER_VERSION must be pinned in .env.example.
+
+    This prevents the v2.20 vs v3.10 mismatch that cost 8+ hours of debugging.
+    Both Pulumi stacks (UpCloud + GCP) must reference this variable instead of
+    hardcoding the MLflow Docker image version.
+    See: .claude/metalearning/2026-03-14-mlflow-version-mismatch-fuckup.md
+    """
+    vars_ = _env_example_vars()
+    assert "MLFLOW_SERVER_VERSION" in vars_, (
+        "MLFLOW_SERVER_VERSION missing from .env.example — this caused the v2.20 vs v3.10 "
+        "mismatch that broke artifact uploads. Pin it as single source of truth."
+    )
+
+
+def test_env_example_has_gcp_vars() -> None:
+    """GCP project and region must be defined in .env.example.
+
+    GCP is the primary cloud for staging+prod. All GCP config goes through
+    .env.example as single source of truth (CLAUDE.md Rule #22).
+    """
+    vars_ = _env_example_vars()
+    for var in (
+        "GCP_PROJECT",
+        "GCP_REGION",
+    ):
+        assert var in vars_, f"{var} missing from .env.example"
+
+
+def test_env_example_has_gcs_bucket_vars() -> None:
+    """GCS bucket names must be defined in .env.example.
+
+    Three buckets: MLflow artifacts, DVC data, checkpoints.
+    All in the same region for same-region artifact uploads.
+    """
+    vars_ = _env_example_vars()
+    for var in (
+        "GCS_MLFLOW_BUCKET",
+        "GCS_DVC_BUCKET",
+        "GCS_CHECKPOINT_BUCKET",
+    ):
+        assert var in vars_, f"{var} missing from .env.example"
+
+
 # ---------------------------------------------------------------------------
 # Dockerfiles: no ENV MLFLOW_TRACKING_URI
 # ---------------------------------------------------------------------------

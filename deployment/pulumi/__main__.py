@@ -231,8 +231,10 @@ deploy_mlflow = command.remote.Command(
             sudo chmod 600 /opt/mlflow/basic_auth.ini
 
             # Dockerfile — MLflow with psycopg2 + boto3 (for PostgreSQL + S3)
-            sudo tee /opt/mlflow/Dockerfile > /dev/null <<'DOCKEOF'
-            FROM ghcr.io/mlflow/mlflow:v2.20.3
+            # Version from MLFLOW_SERVER_VERSION in .env.example (single source of truth)
+            # See: .claude/metalearning/2026-03-14-mlflow-version-mismatch-fuckup.md
+            sudo tee /opt/mlflow/Dockerfile > /dev/null <<DOCKEOF
+            FROM ghcr.io/mlflow/mlflow:v3.10.0
             RUN pip install --no-cache-dir psycopg2-binary boto3 flask-wtf
             DOCKEOF
 
