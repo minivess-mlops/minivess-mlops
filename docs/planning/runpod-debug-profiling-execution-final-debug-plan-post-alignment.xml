@@ -1,0 +1,721 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MinIVess MLOps — Post-Alignment Execution Plan
+  ================================================
+
+  Created: 2026-03-14
+  Supersedes: All 9 previous planning docs (see <supersedes> section below)
+  Branch: feat/skypilot-runpod-gpu-offloading
+
+  PURPOSE: Unified plan to bring cloud GPU training to production-grade status.
+  Three work streams converge: (1) SkyPilot/RunPod smoke tests for ALL models,
+  (2) profiler/benchmarking infrastructure, (3) S3 test suite.
+
+  CRITICAL CORRECTIONS vs. previous plans:
+    - Docker image_id is THE execution model (bare VM is BANNED)
+    - SkyPilot = intercloud broker (NSDI'23), NOT IaC like Pulumi
+    - train_generic.yaml and train_hpo_sweep.yaml are DELETED (bare VM)
+    - Hypotheses H8, H14, H22, H27 are INVALIDATED by Docker approach
+    - Cost model no longer includes uv sync overhead
+
+  PRIORITIES (from knowledge graph + user directive):
+    P0: SAM3 (vanilla + hybrid) + VesselFM on RunPod — cannot finetune locally (>8GB VRAM)
+    P1: All other ModelAdapter implementations (DynUNet, SegResNet, etc.)
+    P1: Full profiler infrastructure (Phases 0-4)
+    P1: Full S3 test suite (Phases 1-6)
+
+  INFRASTRUCTURE STATUS (verified programmatically 2026-03-14):
+    UpCloud MLflow server:  RUNNING (HTTP 200 at 185.20.139.158:5000)
+    UpCloud S3 (DVC data):  SYNCED  (dvc status -r upcloud → in sync)
+    SkyPilot + RunPod:      ENABLED (sky check runpod → enabled)
+    GHCR login:             WORKS   (docker login ghcr.io → succeeded)
+    All env vars:           SET     (MLFLOW_CLOUD_*, DVC_S3_*, RUNPOD_API_KEY, HF_TOKEN)
+    Local Docker image:     EXISTS  (minivess-base:latest, 20.6GB, 2026-03-09)
+    Image on GHCR:          NOT PUSHED (docker manifest inspect → "manifest unknown")
+
+  BLOCKER: Docker image not pushed to GHCR. Everything else is ready.
+
+  ESCAPE HATCH DECISION:
+    MINIVESS_ALLOW_HOST=1 is CORRECT for SkyPilot cloud runs.
+    RunPod pods ARE Docker containers (from our image_id), but they are NOT
+    Docker Compose — so _require_docker_context() would fail. The escape hatch
+    is the approved pattern (same as pytest).
+
+  DOCKER BUILD DECISION:
+    Rebuild with git SHA tag before pushing (e.g., ghcr.io/.../minivess-base:70a2afe)
+    Code has changed since Mar 9 build.
+-->
+
+<plan xmlns="urn:minivess:tdd-plan:v1"
+      title="Post-Alignment Cloud GPU Training Execution Plan"
+      created="2026-03-14"
+      review_round="1">
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SUPERSEDED DOCUMENTS                                               -->
+  <!-- These plans contain bare-VM misunderstandings, now corrected here  -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <supersedes>
+    <doc path="docs/planning/runpod-debug-profiling-execution-final-debug-plan.xml"
+         status="COMPLETED" notes="6 systemic issues — all code-fixed, regression tests pass"/>
+    <doc path="docs/planning/runpod-debug-profiling-execution-final.xml"
+         status="PARTIALLY_INVALIDATED"
+         notes="29 hypotheses. H8 (git clone), H14 (Python 3.13), H22 (uv sync),
+                H27 (outdated MONAI) are IRRELEVANT with Docker image_id.
+                Valid: H13 (splits), H15 (env vars), H17 (boto3 CRC32C), H20 (VesselFM cache),
+                H23 (EXPERIMENT in envs)."/>
+    <doc path="docs/planning/runpod-debug-profiling.xml"
+         status="PARTIALLY_INVALIDATED"
+         notes="CONTAINS BANNED CONTENT: D2 chose 'Native execution (uv sync + direct training)'.
+                &lt;no_docker_registry_rationale&gt; section explicitly defends bare VM.
+                Cost model includes uv install overhead. ALL WRONG.
+                Valid: D1 (SkyPilot managed jobs), D3 (Hydra config), D4 (MLflow cloud)."/>
+    <doc path="docs/planning/upcloud-runpod-skypilot-mlflow-integration-testing.xml"
+         status="PARTIALLY_INVALIDATED"
+         notes="T1.1 describes bare VM setup (git clone + uv sync) — BANNED.
+                RC8 ('RunPod images lack uv') — IRRELEVANT with Docker.
+                RC12 (MINIVESS_ALLOW_HOST=1) — STILL CORRECT.
+                Test suite structure (L1-L4) — VALID, being implemented."/>
+    <doc path="docs/planning/mlflow-cloud-test-suite-initial-plan.md"
+         status="ACTIVE" notes="4-layer composable test suite — implementation in progress"/>
+    <doc path="docs/planning/profiler-benchmarking-plan-execution.xml"
+         status="ACTIVE" notes="Phase 0 done. Phases 1-4 included in this plan."/>
+    <doc path="docs/planning/profiler-benchmarking-plan.md"
+         status="ACTIVE" notes="Research report — architectural decisions still valid."/>
+    <doc path="docs/planning/s3-mounting-testing-and-simulation-plan.md"
+         status="ACTIVE" notes="6 decisions (D1-D6) — all phases included in this plan."/>
+    <doc path="docs/planning/pulumi-upcloud-managed-deployment.md"
+         status="COMPLETED" notes="Pulumi stack deployed, MLflow server running."/>
+  </supersedes>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- INVALIDATED HYPOTHESES (from previous plans)                       -->
+  <!-- Docker image_id eliminates these failure modes entirely            -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <invalidated_hypotheses>
+    <hypothesis id="H8" source="runpod-debug-profiling.xml"
+                title="Git clone fails on RunPod — wrong branch"
+                reason="No git clone needed — code baked into Docker image"/>
+    <hypothesis id="H14" source="runpod-debug-profiling.xml"
+                title="Python 3.13 not available on RunPod VM"
+                reason="Python version controlled by Docker image, not VM"/>
+    <hypothesis id="H22" source="runpod-debug-profiling.xml"
+                title="uv sync fails to compile C extensions on RunPod"
+                reason="All deps pre-compiled in Docker image build stage"/>
+    <hypothesis id="H27" source="runpod-debug-profiling.xml"
+                title="Outdated MONAI on RunPod base image"
+                reason="MONAI version controlled by Docker image, not VM"/>
+    <hypothesis id="RC8" source="upcloud-runpod-skypilot-mlflow-integration-testing.xml"
+                title="RunPod base images do NOT include uv"
+                reason="Our Docker image includes uv — RunPod base image is irrelevant"/>
+    <hypothesis id="T1.1-setup" source="upcloud-runpod-skypilot-mlflow-integration-testing.xml"
+                title="Setup: git clone, uv sync, install deps"
+                reason="Setup is DATA ONLY — DVC pull + config copy. No dep installation."/>
+  </invalidated_hypotheses>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- STREAM 1: CLOUD GPU TRAINING (P0)                                  -->
+  <!-- Get ALL models running on RunPod via SkyPilot + Docker             -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <stream id="1" name="Cloud GPU Training" priority="P0">
+
+    <phase id="S1.0" name="Docker Image Build + Push">
+      <description>
+        Rebuild minivess-base with latest code and push to GHCR with git SHA tag.
+        This is the ONLY blocker — everything else is ready.
+      </description>
+
+      <task id="S1.0.1"
+            issue_title="chore(docker): rebuild minivess-base + push to GHCR with git SHA tag"
+            priority="critical"
+            effort_hours="1">
+        <description>
+          1. Rebuild: make build-base-gpu (includes latest code changes)
+          2. Tag with git SHA: docker tag minivess-base:latest ghcr.io/petteriteikari/minivess-base:$(git rev-parse --short HEAD)
+          3. Push both :latest and :sha tags to GHCR
+          4. Verify: docker manifest inspect ghcr.io/petteriteikari/minivess-base:latest
+
+          The .env sourcing issue with GHCR_USERNAME needs fixing — grep-based extraction
+          works but `source .env` does not (variable ordering or export issue).
+        </description>
+        <tdd_spec>
+          <red>
+            - tests/v2/unit/test_smoke_test_yaml_vesselfm.py::test_docker_image_has_correct_registry
+              (already exists and passes)
+          </red>
+          <green>
+            - Run make build-base-gpu
+            - Run make push-ghcr (fix .env sourcing in Makefile if needed)
+            - Verify with docker manifest inspect
+          </green>
+        </tdd_spec>
+      </task>
+    </phase>
+
+    <phase id="S1.1" name="P0 Smoke Tests — SAM3 + VesselFM">
+      <description>
+        Launch smoke tests for SAM3 (vanilla + hybrid) and VesselFM on RunPod.
+        These are P0 because they CANNOT be finetuned locally (require >8GB VRAM).
+        Cost: ~$0.36 total for all 3 models.
+
+        SAM3 vanilla: 2.9 GB inference → fits RTX 4090 easily
+        SAM3 hybrid: 7.18 GiB at patch 64x64x3 → needs patch override on 8GB, fine on 24GB
+        VesselFM: ~6 GB inference, ~10 GB training → fits RTX 4090
+      </description>
+
+      <task id="S1.1.1"
+            issue_title="test(cloud): launch sam3_vanilla smoke test on RunPod"
+            priority="critical"
+            effort_hours="0.5">
+        <description>
+          make smoke-test-preflight  # Validate env vars
+          make smoke-test-gpu MODEL=sam3_vanilla  # Launch on RunPod (~$0.06, ~5 min)
+          make verify-smoke-test MODEL=sam3_vanilla  # Verify on cloud MLflow
+
+          Expected: 2 epochs, 1 fold, 4 volumes. Training completes, metrics logged to
+          UpCloud MLflow at 185.20.139.158:5000.
+        </description>
+      </task>
+
+      <task id="S1.1.2"
+            issue_title="test(cloud): launch sam3_hybrid smoke test on RunPod"
+            priority="critical"
+            effort_hours="0.5">
+        <description>
+          make smoke-test-gpu MODEL=sam3_hybrid
+
+          NOTE: sam3_hybrid on RTX 4090 (24GB) should work with default patch size (64,64,3).
+          The patch override to (32,32,3) was only needed for 8GB GPU (RTX 2070 Super).
+          If OOM occurs, add HYDRA_OVERRIDES with smaller patch size.
+        </description>
+      </task>
+
+      <task id="S1.1.3"
+            issue_title="test(cloud): launch vesselfm smoke test on RunPod"
+            priority="critical"
+            effort_hours="0.5">
+        <description>
+          make smoke-test-gpu MODEL=vesselfm
+
+          NOTE: VesselFM requires HF_TOKEN for weight download. The smoke_test_gpu.yaml
+          setup section pre-caches weights during setup (H20) to avoid burning GPU time.
+          HF_TOKEN is confirmed set in .env.
+        </description>
+      </task>
+
+      <task id="S1.1.4"
+            issue_title="test(cloud): verify all 3 smoke test results on cloud MLflow"
+            priority="critical"
+            effort_hours="0.5">
+        <description>
+          For each model: make verify-smoke-test MODEL={model}
+
+          Verify:
+          1. MLflow experiment exists on cloud server
+          2. Run status is FINISHED (not FAILED/KILLED)
+          3. Metrics logged (train_loss, val_loss if validation ran)
+          4. Tags: flow_name, MODEL_FAMILY, sys_gpu_model
+          5. Artifacts: hydra config, checkpoints
+        </description>
+      </task>
+    </phase>
+
+    <phase id="S1.2" name="Delete Bare-VM SkyPilot YAMLs">
+      <description>
+        train_generic.yaml and train_hpo_sweep.yaml use bare-VM setup (pip install uv,
+        uv sync). This violates the Docker mandate. Delete them.
+        They will be recreated from scratch when full training (not smoke tests) is needed,
+        using the Docker image_id pattern from smoke_test_gpu.yaml as template.
+      </description>
+
+      <task id="S1.2.1"
+            issue_title="chore(skypilot): delete bare-VM SkyPilot YAMLs"
+            priority="high"
+            effort_hours="0.5">
+        <description>
+          Delete:
+          - deployment/skypilot/train_generic.yaml (bare VM: pip install uv, uv sync)
+          - deployment/skypilot/train_hpo_sweep.yaml (bare VM: pip install uv, uv sync)
+
+          Update:
+          - Makefile: remove any references to these files
+          - CLAUDE.md: update SkyPilot section if it references these
+          - Tests: remove or update any tests that reference these files
+        </description>
+        <tdd_spec>
+          <red>
+            - tests/v2/unit/test_skypilot_bare_vm_ban.py::test_no_bare_vm_skypilot_yamls
+              → Glob deployment/skypilot/*.yaml, verify NONE contain "pip install" or "uv sync"
+              in setup: section
+          </red>
+          <green>
+            - Delete the two files
+            - Update references
+          </green>
+        </tdd_spec>
+      </task>
+    </phase>
+
+    <phase id="S1.3" name="P1 Model Expansion">
+      <description>
+        Extend smoke tests to ALL ModelAdapter implementations. These are P1 because
+        they CAN be finetuned locally (fit in 8GB VRAM).
+
+        Known adapters: DynUNet, SegResNet (from model_profiles/*.yaml)
+        Future adapters: CoMMA Mamba, U-Like Mamba (planned)
+
+        Each model needs a smoke test experiment config in configs/experiment/smoke_*.yaml
+        and must work with the existing smoke_test_gpu.yaml via MODEL_FAMILY env var.
+      </description>
+
+      <task id="S1.3.1"
+            issue_title="feat(skypilot): smoke test configs for all ModelAdapter models"
+            priority="high"
+            effort_hours="2">
+        <description>
+          For each registered ModelAdapter:
+          1. Ensure configs/experiment/smoke_{model}.yaml exists
+          2. Ensure model works with the smoke_test_gpu.yaml flow
+          3. Add to make smoke-test-all target
+          4. Document VRAM requirements and expected cost
+
+          Models to verify: dynunet, segresnet, and any other registered adapters.
+        </description>
+        <tdd_spec>
+          <red>
+            - tests/v2/unit/test_smoke_configs_complete.py::test_every_model_has_smoke_config
+              → For each model in model_profiles/*.yaml, verify matching smoke_*.yaml exists
+            - test_smoke_configs_reference_valid_models
+              → Each smoke config's model field matches a registered ModelAdapter
+          </red>
+          <green>
+            - Create missing smoke_*.yaml experiment configs
+            - Update Makefile smoke-test-all to include all models
+          </green>
+        </tdd_spec>
+      </task>
+
+      <task id="S1.3.2"
+            issue_title="test(cloud): launch P1 model smoke tests on RunPod"
+            priority="high"
+            effort_hours="1">
+        <description>
+          For each P1 model: make smoke-test-gpu MODEL={model}
+          Verify results: make verify-smoke-test MODEL={model}
+        </description>
+      </task>
+    </phase>
+
+    <phase id="S1.4" name="Production Training YAMLs (Replace Deleted)">
+      <description>
+        Create new SkyPilot YAMLs for full training and HPO using Docker image_id.
+        These replace the deleted bare-VM versions. They use the same Docker image
+        as smoke tests but with full training parameters (100 epochs, 3 folds, etc.).
+      </description>
+
+      <task id="S1.4.1"
+            issue_title="feat(skypilot): create Docker-based train_production.yaml"
+            priority="high"
+            effort_hours="2">
+        <description>
+          New SkyPilot YAML for production training:
+          - image_id: docker:ghcr.io/petteriteikari/minivess-base:latest
+          - Multi-cloud failover: RunPod → AWS → GCP → Lambda
+          - Spot with automatic recovery
+          - Full training: 100 epochs, 3 folds, cbdice_cldice loss
+          - Setup: DATA ONLY (same pattern as smoke_test_gpu.yaml)
+          - BANNED: apt-get, uv sync, git clone, pip install in setup
+        </description>
+        <tdd_spec>
+          <red>
+            - tests/v2/unit/test_skypilot_production.py::test_production_yaml_uses_docker_image
+            - test_production_yaml_has_no_banned_commands
+            - test_production_yaml_has_spot_recovery
+            - test_production_yaml_has_dvc_credentials
+            - test_production_yaml_has_mlflow_credentials
+          </red>
+          <green>
+            - Create deployment/skypilot/train_production.yaml
+            - Create deployment/skypilot/train_hpo.yaml
+          </green>
+        </tdd_spec>
+      </task>
+    </phase>
+  </stream>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- STREAM 2: PROFILER AND BENCHMARKING INFRASTRUCTURE (P1)           -->
+  <!-- Imported from profiler-benchmarking-plan-execution.xml             -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <stream id="2" name="Profiler and Benchmarking" priority="P1">
+    <description>
+      Full profiling infrastructure as core infrastructure (default ON).
+      Imported from profiler-benchmarking-plan-execution.xml (reviewed, round 2).
+      Phase 0 config is DONE. Phases 1-4 remain.
+
+      Architecture:
+        trainer.py ──record_function──> torch.profiler ──> MLflow artifacts
+        trainer.py ──epoch_summary──> system_monitor ──> MLflow metrics
+        train_flow.py ──post_training──> WeightWatcher ──> MLflow metrics
+        gpu_benchmark.py ──one_shot──> YAML cache ──> MLflow params
+
+      Metric Prefix Taxonomy:
+        prof_     — torch.profiler metrics
+        diag_ww_  — WeightWatcher diagnostics
+        diag_     — pre-training checks
+        sys_bench_— GPU benchmark cache params
+
+      Parent issue: #643
+      Sub-issues: #644 (DONE), #645, #646, #647, #648, #649, #650, #651
+      Total estimated effort: 28 hours (Phase 0 done = 3h saved)
+    </description>
+
+    <!-- Phase 0 (DONE): ProfilingConfig + Hydra YAML group — issue #644 -->
+
+    <phase id="S2.1" name="PyTorch Profiler Core (Phase 1)">
+      <description>
+        Integrate torch.profiler into trainer.py. 7 named regions in training,
+        4 in validation. Profiler runs for first N epochs via schedule().
+        Chrome traces exported as gzip-compressed MLflow artifacts.
+        Issues: #645, #646, #647. Effort: 10 hours.
+      </description>
+
+      <task id="S2.1.1" issue_ref="#645" priority="critical" effort_hours="2">
+        <description>record_function annotations in trainer.py (6 train + 4 val regions)</description>
+      </task>
+      <task id="S2.1.2" issue_ref="#646" priority="critical" effort_hours="4">
+        <description>torch.profiler.profile context in fit() + TraceHandler + ProfilingSummary</description>
+      </task>
+      <task id="S2.1.3" issue_ref="#647" priority="critical" effort_hours="4">
+        <description>MLflow profiling artifact logging + DuckDB exclusion for prof_* metrics</description>
+      </task>
+    </phase>
+
+    <phase id="S2.2" name="Pre/Post-Training Diagnostics (Phase 2)">
+      <description>
+        Pre-training sanity checks (6 checks) + WeightWatcher spectral analysis.
+        Diagnostics ALWAYS run regardless of ProfilingConfig.enabled.
+        Issues: #648, #649. Effort: 6 hours.
+      </description>
+
+      <task id="S2.2.1" issue_ref="#648" priority="high" effort_hours="3">
+        <description>Pre-training sanity checks module (output shape, gradient flow, loss sanity, etc.)</description>
+      </task>
+      <task id="S2.2.2" issue_ref="#649" priority="high" effort_hours="1">
+        <description>WeightWatcher post-training spectral analysis (diag_ww_ prefix)</description>
+      </task>
+      <task id="S2.2.3" priority="high" effort_hours="2">
+        <description>Wire pre/post checks into train_flow.py (diagnostics always run)</description>
+      </task>
+    </phase>
+
+    <phase id="S2.3" name="GPU Benchmark Container (Phase 3)">
+      <description>
+        Run-once GPU capability benchmarking. YAML cache with per-model throughput,
+        peak VRAM, and feasibility flags. Closes #564.
+        Issues: #650, #651. Effort: 8 hours.
+      </description>
+
+      <task id="S2.3.1" issue_ref="#650" priority="critical" effort_hours="4">
+        <description>GPU benchmark script + cache YAML (normalized GPU names, feasibility checks)</description>
+      </task>
+      <task id="S2.3.2" issue_ref="#651" priority="high" effort_hours="2">
+        <description>Dockerfile.benchmark + compose service</description>
+      </task>
+      <task id="S2.3.3" priority="high" effort_hours="2">
+        <description>Benchmark cache integration with training flow (sys_bench_ params)</description>
+      </task>
+    </phase>
+
+    <phase id="S2.4" name="Memory Stats + Regression Detection (Phase 4)">
+      <description>
+        Per-epoch CUDA memory statistics and performance regression detection.
+        Effort: 4 hours.
+      </description>
+
+      <task id="S2.4.1" priority="medium" effort_hours="2">
+        <description>CUDA memory stats per-epoch logging (prof_cuda_peak_allocated_mb, etc.)</description>
+      </task>
+      <task id="S2.4.2" priority="medium" effort_hours="2">
+        <description>Performance regression detection helpers (baseline comparison, GPU matching)</description>
+      </task>
+    </phase>
+  </stream>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- STREAM 3: S3 TEST SUITE (P1)                                      -->
+  <!-- Imported from s3-mounting-testing-and-simulation-plan.md           -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <stream id="3" name="S3 Test Suite" priority="P1">
+    <description>
+      Comprehensive S3 storage test suite across all 3 environments.
+      Imported from s3-mounting-testing-and-simulation-plan.md.
+
+      Decisions (all ACCEPTED from the plan):
+        D1: Pulumi ComponentResource per provider (UpCloudS3Stack)
+        D2: .env + Docker Compose env injection (maintain current pattern)
+        D3: MinIO in Docker + filesystem fallback
+        D4: Marker-based test gating (@requires_s3_cloud, @requires_s3_local)
+        D5: Shared credentials, separate buckets
+        D6: Implement UpCloud only, design for extension
+
+      Total estimated effort: 10-16 hours across 6 phases.
+    </description>
+
+    <phase id="S3.1" name="Pulumi ComponentResource Refactor (Phase 1)">
+      <description>
+        Extract UpCloud S3 resources into ComponentResource. Define S3StackOutputs
+        interface for multi-cloud extensibility.
+      </description>
+
+      <task id="S3.1.1" priority="high" effort_hours="3">
+        <description>
+          Create deployment/pulumi/providers/ with S3StackOutputs dataclass and
+          UpCloudS3Stack(ComponentResource). Refactor __main__.py to dispatch.
+          Verify: pulumi preview shows zero diff (output-preserving refactor).
+        </description>
+        <tdd_spec>
+          <red>
+            - test_s3_stack_outputs_has_required_fields
+            - test_upcloud_s3_component_returns_outputs
+            - test_pulumi_main_dispatches_to_upcloud
+          </red>
+        </tdd_spec>
+      </task>
+    </phase>
+
+    <phase id="S3.2" name="Credential Bridge (Phase 2)">
+      <description>
+        Unified S3_* env vars in .env.example + Pulumi-to-env bridge script.
+      </description>
+
+      <task id="S3.2.1" priority="high" effort_hours="2">
+        <description>
+          Add unified S3_ENDPOINT_URL, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY to .env.example.
+          Create scripts/pulumi_to_env.sh for automated credential population.
+          Maintain backward compat with DVC_S3_* aliases.
+        </description>
+        <tdd_spec>
+          <red>
+            - test_env_example_has_unified_s3_vars
+            - test_pulumi_to_env_writes_credentials
+          </red>
+        </tdd_spec>
+      </task>
+    </phase>
+
+    <phase id="S3.3" name="Test Markers + Fixtures (Phase 3)">
+      <description>
+        Add S3-specific test markers and conftest fixtures for environment detection.
+      </description>
+
+      <task id="S3.3.1" priority="high" effort_hours="3">
+        <description>
+          Add markers: @requires_s3_cloud, @requires_s3_local, @requires_s3_any
+          Implement _s3_cloud_available() and _s3_local_available() detection.
+          Auto-skip with descriptive messages.
+        </description>
+        <tdd_spec>
+          <red>
+            - test_marker_requires_s3_cloud_skips_without_creds
+            - test_marker_requires_s3_local_skips_without_minio
+            - test_s3_environment_detection_cloud
+            - test_s3_environment_detection_none
+          </red>
+        </tdd_spec>
+      </task>
+    </phase>
+
+    <phase id="S3.4" name="S3 Connectivity Test Suite (Phase 4)">
+      <description>
+        14 tests across 3 environments: cloud S3, local MinIO, filesystem fallback.
+        Tests: ListBuckets, HeadBucket, PutObject/GetObject, multipart upload,
+        MLflow artifact roundtrip, DVC push/pull, filesystem fallback.
+      </description>
+
+      <task id="S3.4.1" priority="high" effort_hours="4">
+        <description>
+          Create tests/v2/cloud/test_s3_connectivity.py (5 cloud tests)
+          Create tests/v2/integration/test_s3_local.py (5 MinIO tests)
+          Create tests/v2/unit/test_s3_filesystem_fallback.py (2 fallback tests)
+          Create tests/v2/unit/test_s3_env_validation.py (2 unit tests)
+        </description>
+      </task>
+    </phase>
+
+    <phase id="S3.5" name="DVC Remote Unification (Phase 5)">
+      <description>
+        Update configure_dvc_remote.py to use unified S3_* vars with DVC_S3_* fallback.
+      </description>
+
+      <task id="S3.5.1" priority="medium" effort_hours="2">
+        <description>
+          configure_dvc_remote.py reads S3_* with fallback to DVC_S3_*.
+          Update .dvc/config upcloud remote endpoint template.
+        </description>
+      </task>
+    </phase>
+
+    <phase id="S3.6" name="Documentation + Makefile (Phase 6)">
+      <description>
+        Add make test-s3-cloud, test-s3-local, test-s3-all targets.
+        Document S3 setup in cloud-tutorial.md.
+      </description>
+
+      <task id="S3.6.1" priority="medium" effort_hours="2">
+        <description>
+          Makefile: test-s3-cloud, test-s3-local, test-s3-all
+          deployment/pulumi/providers/README.md: adding new providers guide
+        </description>
+      </task>
+    </phase>
+  </stream>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- EXECUTION ORDER                                                    -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <execution_order>
+    <description>
+      Stream 1 (Cloud GPU Training) is P0 and executes FIRST.
+      Within Stream 1, the dependency chain is:
+        S1.0 (push image) → S1.1 (P0 smoke tests) → S1.2 (delete bare-VM) → S1.3 (P1 models)
+
+      Streams 2 and 3 are P1 and can execute in PARALLEL after S1.1 completes.
+      Within each stream, phases are sequential (each depends on the previous).
+
+      Critical path: S1.0.1 → S1.1.1 → S1.1.2 → S1.1.3 → S1.1.4
+      Total critical path time: ~2 hours (mostly waiting for RunPod jobs)
+    </description>
+
+    <!-- CRITICAL PATH (P0) -->
+    <step tasks="S1.0.1" parallel="false"
+          description="Build + push Docker image to GHCR (THE BLOCKER)"/>
+    <step tasks="S1.1.1" parallel="false"
+          description="sam3_vanilla smoke test on RunPod (~$0.06)"/>
+    <step tasks="S1.1.2,S1.1.3" parallel="true"
+          description="sam3_hybrid + vesselfm smoke tests (can run concurrently ~$0.21)"/>
+    <step tasks="S1.1.4" parallel="false"
+          description="Verify all 3 smoke test results on cloud MLflow"/>
+
+    <!-- P1 WORK (after P0 smoke tests pass) -->
+    <step tasks="S1.2.1" parallel="false"
+          description="Delete bare-VM SkyPilot YAMLs"/>
+    <step tasks="S1.3.1,S2.1.1,S3.1.1" parallel="true"
+          description="P1 model configs + profiler annotations + Pulumi refactor (parallel)"/>
+    <step tasks="S2.1.2,S3.2.1" parallel="true"
+          description="Profiler context + credential bridge (parallel)"/>
+    <step tasks="S2.1.3,S3.3.1" parallel="true"
+          description="MLflow profiling logging + S3 test markers (parallel)"/>
+    <step tasks="S2.2.1,S2.2.2,S3.4.1" parallel="true"
+          description="Diagnostics + S3 connectivity tests (parallel)"/>
+    <step tasks="S2.2.3,S3.5.1" parallel="true"
+          description="Wire diagnostics + DVC unification (parallel)"/>
+    <step tasks="S2.3.1" parallel="false"
+          description="GPU benchmark script"/>
+    <step tasks="S2.3.2,S2.3.3,S3.6.1" parallel="true"
+          description="Benchmark Docker + cache integration + S3 docs (parallel)"/>
+    <step tasks="S2.4.1,S2.4.2" parallel="true"
+          description="Memory stats + regression detection (parallel)"/>
+    <step tasks="S1.3.2,S1.4.1" parallel="true"
+          description="P1 smoke tests + production training YAMLs (parallel)"/>
+  </execution_order>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- COST MODEL                                                         -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <cost_model>
+    <description>
+      RunPod RTX 4090 spot pricing: ~$0.44/hr.
+      Docker image eliminates uv sync overhead (was ~4 min in old plans).
+      DVC pull is the only setup overhead: ~2-3 min for 4.5 GB dataset.
+    </description>
+
+    <model name="sam3_vanilla" vram="2.9 GB" duration_min="5" cost_usd="0.06"/>
+    <model name="sam3_hybrid" vram="7.5 GB" duration_min="8" cost_usd="0.09"/>
+    <model name="vesselfm" vram="6 GB" duration_min="10" cost_usd="0.12"/>
+    <model name="dynunet" vram="3.5 GB" duration_min="3" cost_usd="0.04"/>
+    <model name="segresnet" vram="3.5 GB" duration_min="3" cost_usd="0.04"/>
+    <total_p0 cost_usd="0.27" description="SAM3 vanilla + hybrid + VesselFM"/>
+    <total_all cost_usd="0.35" description="All 5 models"/>
+  </cost_model>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- EFFORT SUMMARY                                                     -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <effort_summary>
+    <stream id="1" hours="8" description="Cloud GPU Training (P0 smoke tests + P1 expansion + production YAMLs)"/>
+    <stream id="2" hours="28" description="Profiler and Benchmarking (Phases 1-4, Phase 0 done)"/>
+    <stream id="3" hours="16" description="S3 Test Suite (Phases 1-6)"/>
+    <total hours="52"/>
+    <note>P0 critical path (push image + 3 smoke tests + verify) = ~2 hours</note>
+  </effort_summary>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- RISKS                                                              -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <risks>
+    <risk id="R1" severity="high" title="Docker image too large for RunPod pull">
+      <mitigation>
+        minivess-base is 20.6 GB. RunPod has fast container pull but first launch
+        may take 5-10 min. Subsequent launches use cached layers. If problematic,
+        create a slimmer smoke-test-specific image.
+      </mitigation>
+    </risk>
+    <risk id="R2" severity="medium" title="UpCloud trial expiration during testing">
+      <mitigation>
+        UpCloud trial is EUR 250 / 30 days. Priority is to validate the cloud
+        pipeline (S1.0 + S1.1) immediately. S3 test suite (Stream 3) can be
+        completed after trial if needed — local MinIO covers dev testing.
+      </mitigation>
+    </risk>
+    <risk id="R3" severity="medium" title="GHCR rate limits for unauthenticated pulls">
+      <mitigation>
+        RunPod pulls from GHCR. Unauthenticated pulls have rate limits (100/6h).
+        SkyPilot may need GHCR credentials for private repos. Current image is
+        public — verify with: gh api user/packages/container/minivess-base/versions
+      </mitigation>
+    </risk>
+    <risk id="R4" severity="low" title=".env sourcing broken in Makefile">
+      <mitigation>
+        The `source .env` command doesn't properly export GHCR_USERNAME in all
+        contexts. The Makefile uses $${ } syntax which may need adjustment.
+        Fallback: use grep-based extraction (confirmed working).
+      </mitigation>
+    </risk>
+  </risks>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- METALEARNING CORRECTIONS APPLIED                                   -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <metalearning_corrections>
+    <correction doc=".claude/metalearning/2026-03-14-skypilot-purpose-misunderstanding.md">
+      SkyPilot = intercloud broker (NSDI'23), NOT IaC like Pulumi/Terraform.
+      All SkyPilot references in this plan use correct terminology.
+    </correction>
+    <correction doc=".claude/metalearning/2026-03-14-docker-resistance-anti-pattern.md">
+      Docker is THE execution model, not optional overhead.
+      All setup: sections are DATA ONLY — no apt-get, uv sync, git clone, pip install.
+    </correction>
+    <correction doc=".claude/metalearning/2026-03-14-lazy-reading-misunderstanding-propagation.md">
+      All 9 planning docs were read line-by-line before writing this plan.
+      Invalidated hypotheses are explicitly listed with reasons.
+    </correction>
+    <correction doc=".claude/metalearning/2026-03-14-wall-of-text-bad-ux.md">
+      Interactive questions use AskUserQuestion tool, not markdown text dumps.
+    </correction>
+    <correction doc=".claude/metalearning/2026-03-14-asking-instead-of-checking.md">
+      Infrastructure status verified programmatically, not by asking the user.
+    </correction>
+  </metalearning_corrections>
+
+</plan>
