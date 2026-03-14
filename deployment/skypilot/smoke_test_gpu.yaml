@@ -35,7 +35,10 @@ resources:
   # SkyPilot resources: block doesn't support ${} interpolation — update here directly.
   # Supported registries: GHCR, Docker Hub, AWS ECR, GCP GAR, Azure ACR.
   image_id: docker:ghcr.io/petteriteikari/minivess-base:latest
-  accelerators: RTX4090:1
+  # GPU fallback: SkyPilot tries cheapest available. All have ≥24 GB VRAM.
+  # sam3_vanilla needs 2.9 GB, sam3_hybrid ~7.5 GB, vesselfm ~10 GB — any works.
+  # If all spot instances sold out, SkyPilot queues and retries automatically.
+  accelerators: {RTX4090: 1, RTX3090: 1, A40: 1, L40S: 1, A100-80GB: 1}
   cloud: runpod
   use_spot: true
   disk_size: 40

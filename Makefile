@@ -6,7 +6,8 @@
        test-staging test-prod test-gpu test-e2e \
        build-base-gpu build-base-cpu build-base-light build-bases requirements-tiers \
        ghcr-login push-ghcr \
-       smoke-test-preflight smoke-test-gpu smoke-test-all verify-smoke-test
+       smoke-test-preflight smoke-test-gpu smoke-test-all verify-smoke-test \
+       monitor-smoke-test diagnose-last-smoke-test
 
 help:
 	@echo "MinIVess MLOps Makefile"
@@ -91,7 +92,7 @@ smoke-test-preflight:  ## Validate env vars + connectivity before GPU smoke test
 
 smoke-test-gpu:  ## Launch GPU smoke test on RunPod (MODEL=sam3_vanilla, BRANCH=main)
 	@echo "=== Launching GPU smoke test: $(MODEL) on RunPod RTX 4090 ==="
-	sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+	uv run sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
 	  --env-file .env \
 	  --env MODEL_FAMILY=$(or $(MODEL),sam3_vanilla) \
 	  --env GIT_BRANCH=$(or $(BRANCH),$(shell git rev-parse --abbrev-ref HEAD)) \
@@ -113,6 +114,12 @@ smoke-test-all:  ## Run all GPU smoke tests sequentially (P0 first, then P1)
 
 verify-smoke-test:  ## Verify smoke test results on cloud MLflow
 	uv run python scripts/verify_smoke_test.py $(or $(MODEL),sam3_vanilla)
+
+monitor-smoke-test:  ## Monitor latest RunPod smoke test (Ralph loop, 15s poll)
+	uv run python scripts/ralph_monitor.py --latest --poll-interval 15
+
+diagnose-last-smoke-test:  ## Diagnose the most recent failed smoke test
+	uv run python scripts/ralph_monitor.py --diagnose-last
 
 # ---------------------------------------------------------------------------
 # GHCR (GitHub Container Registry) — push Docker images for SkyPilot

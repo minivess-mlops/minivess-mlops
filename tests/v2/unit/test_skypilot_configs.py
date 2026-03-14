@@ -32,13 +32,14 @@ class TestSmokeTestGpuYaml:
         config = _load(_SMOKE_TEST_GPU)
         assert isinstance(config, dict)
 
-    def test_smoke_test_resources_specify_4090(self) -> None:
-        """Resources must request RTX 4090 GPU."""
+    def test_smoke_test_resources_include_gpu(self) -> None:
+        """Resources must include at least RTX 4090 in GPU fallback list."""
         config = _load(_SMOKE_TEST_GPU)
         resources = config.get("resources", {})
         accel = resources.get("accelerators", "")
-        assert "4090" in str(accel), (
-            f"smoke_test_gpu.yaml must request RTX 4090, got: {accel}"
+        accel_str = str(accel)
+        assert "RTX4090" in accel_str or "4090" in accel_str, (
+            f"smoke_test_gpu.yaml must include RTX4090 in accelerators, got: {accel}"
         )
 
     def test_smoke_test_resources_runpod_cloud(self) -> None:
