@@ -1,0 +1,41 @@
+# SkyPilot workdir sync exclusions
+# These directories are too large or unnecessary for remote execution.
+
+# Data (pulled via DVC on remote)
+data/
+data_cache/
+
+# MLflow runs (tracked on remote MLflow server)
+mlruns/
+
+# Build artifacts
+outputs/
+.git/objects/
+.git/lfs/
+*.duckdb
+
+# Python caches
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+
+# Virtual environments (rebuilt on remote)
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Docker (not needed on RunPod dev)
+deployment/docker/
+
+# Large docs/planning files
+docs/planning/*.pdf
+
+# OS
+.DS_Store
+Thumbs.db

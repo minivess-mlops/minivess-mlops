@@ -7,7 +7,8 @@
        build-base-gpu build-base-cpu build-base-light build-bases requirements-tiers \
        ghcr-login push-ghcr \
        smoke-test-preflight smoke-test-gpu smoke-test-all verify-smoke-test \
-       monitor-smoke-test diagnose-last-smoke-test
+       monitor-smoke-test diagnose-last-smoke-test \
+       dev-gpu dev-gpu-stop dev-gpu-ssh
 
 help:
 	@echo "MinIVess MLOps Makefile"
@@ -28,6 +29,11 @@ help:
 	@echo "GHCR (Docker Registry):"
 	@echo "  ghcr-login          Login to GitHub Container Registry"
 	@echo "  push-ghcr           Tag + push minivess-base:latest to GHCR"
+	@echo ""
+	@echo "Dev GPU (RunPod, no Docker):"
+	@echo "  dev-gpu               Launch dev GPU environment on RunPod (MODEL=dynunet)"
+	@echo "  dev-gpu-stop          Stop dev GPU pod (preserves state)"
+	@echo "  dev-gpu-ssh           SSH into dev GPU pod"
 	@echo ""
 	@echo "Cloud GPU Smoke Tests:"
 	@echo "  smoke-test-preflight  Validate env vars + connectivity"
@@ -120,6 +126,18 @@ monitor-smoke-test:  ## Monitor latest RunPod smoke test (Ralph loop, 15s poll)
 
 diagnose-last-smoke-test:  ## Diagnose the most recent failed smoke test
 	uv run python scripts/ralph_monitor.py --diagnose-last
+
+# ---------------------------------------------------------------------------
+# Dev GPU Environment (RunPod, no custom Docker image)
+# ---------------------------------------------------------------------------
+dev-gpu:  ## Launch dev GPU on RunPod (MODEL=dynunet, no Docker, deps via uv)
+	uv run python scripts/launch_dev_runpod.py --model $(or $(MODEL),dynunet)
+
+dev-gpu-stop:  ## Stop dev GPU pod (preserves state, restart with 'sky start minivess-dev')
+	sky stop minivess-dev
+
+dev-gpu-ssh:  ## SSH into dev GPU pod for interactive work
+	sky ssh minivess-dev
 
 # ---------------------------------------------------------------------------
 # GHCR (GitHub Container Registry) — push Docker images for SkyPilot
