@@ -80,8 +80,10 @@ smoke-test-preflight:  ## Validate env vars + connectivity before GPU smoke test
 smoke-test-gpu:  ## Launch GPU smoke test on RunPod (MODEL=sam3_vanilla, BRANCH=main)
 	@echo "=== Launching GPU smoke test: $(MODEL) on RunPod RTX 4090 ==="
 	sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
-	  -e MODEL_FAMILY=$(or $(MODEL),sam3_vanilla) \
-	  -e GIT_BRANCH=$(or $(BRANCH),$(shell git rev-parse --abbrev-ref HEAD)) -y
+	  --env-file .env \
+	  --env MODEL_FAMILY=$(or $(MODEL),sam3_vanilla) \
+	  --env GIT_BRANCH=$(or $(BRANCH),$(shell git rev-parse --abbrev-ref HEAD)) \
+	  -y
 
 smoke-test-all:  ## Run all 3 GPU smoke tests sequentially (cost: ~$0.36)
 	$(MAKE) smoke-test-gpu MODEL=sam3_vanilla

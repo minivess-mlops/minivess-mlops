@@ -3,9 +3,12 @@
 # Minimal training run to verify the cloud GPU pipeline works end-to-end:
 #   UpCloud S3 --DVC pull--> RunPod RTX 4090 --MLflow--> UpCloud MLflow
 #
-# Launch:
+# Launch (MUST use 'sky jobs launch' for spot recovery — NOT 'sky launch'):
 #   sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
-#     -e MODEL_FAMILY=sam3_vanilla
+#     --env-file .env --env MODEL_FAMILY=sam3_vanilla -y
+#
+# WARNING: 'sky launch' does NOT recover from spot preemption.
+#          'sky exec' skips setup: entirely — guards in run: will catch this.
 #
 # Cost: ~$0.12/model (2 epochs, 1 fold, 4 volumes, RTX 4090 spot)
 # Total: ~$0.36 for all 3 models (sam3_vanilla, sam3_hybrid, vesselfm)
@@ -52,9 +55,6 @@ envs:
   SPLITS_DIR: /app/configs/splits
   CHECKPOINT_DIR: /app/checkpoints
   LOGS_DIR: /app/logs
-
-  # Hydra experiment config name (maps to configs/experiment/smoke_*.yaml)
-  EXPERIMENT: smoke_${MODEL_FAMILY}
 
   # PyTorch CUDA memory optimization
   PYTORCH_ALLOC_CONF: "expandable_segments:True"
@@ -111,7 +111,19 @@ run: |
   source $HOME/.local/bin/env
   cd /app
 
-  # H23: EXPERIMENT stays as Hydra config name (smoke_vesselfm etc.)
+  # Guard: verify setup completed (catches sky exec without setup)
+  if [ ! -f configs/splits/splits.json ]; then
+    echo "FATAL: splits.json missing — setup did not complete. Use 'sky launch' not 'sky exec'."
+    exit 1
+  fi
+  if [ ! -d data/raw/minivess/imagesTr ]; then
+    echo "FATAL: Training data missing — DVC pull failed in setup."
+    exit 1
+  fi
+
+  # H23: Compute EXPERIMENT in shell (NOT in envs — SkyPilot can't resolve intra-envs ${})
+  export EXPERIMENT="smoke_${MODEL_FAMILY}"
+
   # UUID isolation goes via HYDRA_OVERRIDES → experiment_name in resolved config
   export EXPERIMENT_UUID=$(uv run python -c "import uuid; print(uuid.uuid4().hex[:8])")
   export HYDRA_OVERRIDES="experiment_name=smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
