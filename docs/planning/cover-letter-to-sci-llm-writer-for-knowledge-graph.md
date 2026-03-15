@@ -54,7 +54,10 @@ as a MONAI ecosystem extension — it does not fork MONAI, it extends it.
 **The paper argues**: This platform is what allows the next generation of SOTA biomedical
 segmentation papers to focus on science, not infrastructure. By proving the platform works
 (reproducibility proof, multi-model comparison, deployment pipeline), we give researchers
-a scaffold that today requires months of bespoke engineering.
+a scaffold that currently requires significant bespoke engineering per new project —
+each new dataset or model demands infrastructure work that ARBOR reduces to YAML configuration.
+[VERIFY: if submitting to Nature Protocols, quantify the engineering burden with a citation
+or a DevEx benchmark (R2) before using a specific time estimate like "months".]
 
 **Primary claim**: Any researcher can take ARBOR, swap in their YAML config (dataset +
 model), and run the full MLOps pipeline — training, evaluation, deployment, drift
@@ -103,7 +106,9 @@ exactly what is stated here.
 | **MONAI** (Cardoso et al. 2022) | Excellent PyTorch-based library for medical image transforms, augmentations, models | Zero workflow orchestration; zero reproducibility tooling; zero multi-cloud support; users must build their own training loops from scratch every project |
 | **CyclOps** (Krishnan et al. 2022) | MLOps platform for healthcare AI with recurring validation | Designed for clinical classification, not preclinical 3D segmentation; no multi-cloud; no model-agnostic adapter pattern; no spec-driven development |
 | **Cheimarios (2025)** | MLOps principles + NIST risk management for computational physics | Containerization and model registries only; no multi-cloud; no biomedical imaging; no spec-driven development |
-| **Current lab practice** | Bespoke scripts + Jupyter notebooks per lab | No standard; no replication across labs; months of bespoke engineering per new model/dataset; cannot be reproduced by external collaborators |
+| **DDeep3M** ([Wu et al. 2020, *J Neurosci Methods*](https://doi.org/10.1016/j.jneumeth.2020.108804)) | Docker-based 3D biomedical segmentation; lowers barrier to deep learning for biomedical researchers | No experiment tracking; no HPO; no multi-cloud; no model-agnostic adapter pattern; no drift detection; single-architecture, single-user tool. The Docker idea was right — ARBOR extends it to full MLOps. |
+| **NeuroCAAS** ([Abe et al. 2022, *Neuron*](https://doi.org/10.1016/j.neuron.2022.06.018)) | Cloud compute platform for neuroscience (AWS-based); automated job submission for labs without HPC access | No model training orchestration; no MONAI ecosystem; no reproducibility tooling; cloud selection is preconfigured per-tool (not model-agnostic). Demonstrates demand for cloud compute in academic bio. |
+| **Current lab practice** | Bespoke scripts + Jupyter notebooks per lab | No standard; no replication across labs; bespoke engineering per new model/dataset [VERIFY: time estimate for bespoke engineering; do not state a specific number without a citation]; cannot be reproduced by external collaborators |
 
 ### The specific gap ARBOR fills
 
@@ -131,6 +136,8 @@ introduction's "who needs this" framing.
 - `isensee_2021_nnunet` — nnU-Net
 - `cardoso_2022_monai` — MONAI
 - `krishnan_2022_cyclops` — CyclOps
+- `wu_2020_ddeep3m` — DDeep3M Docker platform **(new 2026-03-15)**
+- `abe_2022_neurocaas` — NeuroCAAS cloud neuroscience platform **(new 2026-03-15)**
 - `cheimarios_2025_mlops_physics` — scientific MLOps (physics)
 - `marcos_mercade_2026_mlops_eval` — empirical MLOps framework comparison
 - `poon_2023_minivess` — MiniVess dataset (primary training data)
@@ -148,10 +155,10 @@ the LSG contribution — it is appendix-grade.
 > We make three contributions:
 >
 > **(1) ARBOR platform (keystone):** A fully automated, model-agnostic MLOps platform for
-> 3D biomedical segmentation that achieves MLOps Maturity Level 4 in a single-researcher
-> academic setting. Any lab can adopt ARBOR by editing one YAML file — no infrastructure
-> code required. Validated end-to-end: 73/73 artifact checks pass, 35+ artifacts produced
-> in 8.26 seconds post-training.
+> 3D biomedical segmentation targeting MLOps Maturity Level 4 in a single-researcher
+> academic setting. Any lab can adopt ARBOR by editing 1–2 YAML files (experiment config +
+> optional lab override) — no infrastructure code required. Validated end-to-end:
+> 73/73 artifact checks pass, 35+ artifacts produced in 8.26 seconds post-training.
 >
 > **(2) Multi-model generalizability (experimental, partially pending):** We demonstrate
 > platform generalizability across four model families — DynUNet (MONAI-native), Mamba
@@ -247,16 +254,23 @@ the platform's model-agnostic architecture. One YAML profile + one ModelAdapter 
   - `dice_ce`: DSC=0.824±0.014 (best DSC), clDice=0.832±0.019
   - Topology gain cbdice_cldice vs dice_ce: +8.9% clDice, −5.3% DSC
 
-### 3.2 Mamba variants (State Space Models) — STATUS: PLANNED, KG GAP ⚠️
+### 3.2 Mamba variants (State Space Models) — STATUS: PLANNED, ADAPTER STUB IN KG
 - **Role**: State-space model family — long-range dependency modelling, linear complexity
 - **Example implementations**: SegMamba, U-Mamba, MambaSeg (MONAI-compatible)
-- **KG adapter**: **NOT YET IN adapters.yaml** — this is a known gap. Must be added before GPU runs.
-- **GPU requirement**: Similar to DynUNet (~8 GB)
-- **Results available**: NO — pending KG adapter implementation + GPU runs
+- **KG adapter**: `knowledge-graph/code-structure/adapters.yaml#mamba_variants` — entry
+  added 2026-03-15 with `status: planned`. Python adapter (`src/minivess/adapters/mamba.py`)
+  is **NOT YET IMPLEMENTED**. The KG captures intent but no code exists yet.
+- **Literature baseline**: [Chen et al. (2024). "MambaVesselNet: A Hybrid CNN-Mamba Architecture
+  for 3D Cerebrovascular Segmentation." *ACM MMasia*.](https://doi.org/10.1145/3696409.3700231)
+  — establishes Mamba as viable for TOF-MRA cerebrovascular; no 2PM microscopy, no reproducible
+  pipeline. ARBOR will be the first to benchmark Mamba for 2PM vascular in a full MLOps context.
+- **GPU requirement**: Similar to DynUNet (~8 GB, to be confirmed after implementation)
+- **Results available**: NO — pending Python adapter implementation + GPU runs
 - **⚠️ ACTION REQUIRED before manuscript submission**: Implement Mamba adapter
-  (implement `ModelAdapter` ABC: 3 methods + YAML profile). This is not yet in the repo.
-- **Paper role**: Represents the SSM model family; contrasts long-range context (Mamba)
-  vs sliding-window context (DynUNet) vs frozen ViT encoder (SAM3)
+  (implement `ModelAdapter` ABC: forward, get_eval_roi_size, get_adapter_config + YAML profile).
+  Choose between SegMamba and U-Mamba at implementation time; prefer active maintenance + BF16 support.
+- **Paper role**: Represents the SSM model family; contrasts long-range context (Mamba SSM)
+  vs sliding-window context (DynUNet CNN) vs frozen ViT encoder (SAM3 foundation model)
 - **⚠️ sci-llm-writer WRITING INSTRUCTION**: Until Mamba GPU runs are complete, ALL
   introduction and methods prose MUST refer to Mamba as "planned." The working title
   and abstract should say "three implemented model families (DynUNet, SAM3 variants,
@@ -404,7 +418,11 @@ Source: `knowledge-graph/manuscript/results.yaml`
 
 ### R3c — Foundation Model Comparison (VesselFM — external datasets only) 🚫 BLOCKED
 - Blocked by: VesselFM GPU runs on DeepVess/TubeNet (NOT MiniVess — data leakage)
-- **Must document the data leakage detection as a platform capability (the platform caught it)**
+- **⚠️ Framing**: The data leakage was identified through human literature review of
+  [Wittmann et al. (2024). "VesselFM."](https://arxiv.org/abs/2411.17386) — NOT by the platform.
+  Correct framing: "ARBOR's config-driven evaluation design makes re-routing to non-contaminated
+  datasets trivial (one YAML key change), demonstrating platform flexibility in the face of
+  real-world evaluation pitfalls." Do NOT write "the platform detected the leakage."
 
 ### R4 — Uncertainty Quantification
 - Conformal prediction coverage guarantees
@@ -714,3 +732,151 @@ iteration on `results-03-models.tex`** (mode: `refinement`, quality target: MINO
 - Paste/reference the updated cover letter as context
 - The council will fill in R3b/R3c subsections with the real numbers
 - Run verification against the updated results-ground-truth.json
+
+---
+
+## § 16 — Discussion Seeds and Novelty Arguments (for Co-Author Engagement)
+
+> **Purpose of this section**: This is the science marketing brief for co-authors seeing
+> this scaffold for the first time. The goal is to get them excited about the genuine
+> novelties — not with hype, but with specific literature gaps that this paper addresses
+> for the first time. Every claim below is anchored in a published paper or a verifiable
+> result. No marketing fuzz. Where a number is needed, write [VERIFY] if it is not yet
+> confirmed.
+
+---
+
+### 16.1 — What This Paper Does For the First Time (vs. Published Literature)
+
+**"First time" claims the paper can defensibly make — each anchored in §1.5 prior art:**
+
+1. **First full MLOps pipeline for 2PM vascular segmentation.**
+   [DDeep3M (Wu et al. 2020)](https://doi.org/10.1016/j.jneumeth.2020.108804) proved Docker
+   lowers the barrier for biomedical researchers. ARBOR extends that vision to a complete
+   5-flow orchestrated pipeline with experiment tracking, drift detection, champion tagging,
+   and one-command multi-cloud execution — none of which DDeep3M or NeuroCAAS provide.
+   *Cite hook for co-authors*: "The Docker approach was right in 2020; ARBOR is what it would
+   look like if you added five years of MLOps practice to that foundation."
+
+2. **First benchmarking of Mamba state-space models on 2PM microscopy vascular data.**
+   [MambaVesselNet (Chen et al. 2024, ACM MMasia)](https://doi.org/10.1145/3696409.3700231)
+   demonstrated Mamba for 3D cerebrovascular on TOF-MRA — but no 2PM microscopy and
+   no reproducible pipeline. When our Mamba adapter is complete, ARBOR will be the first
+   to benchmark SSM (Mamba) vs CNN (DynUNet) vs Foundation Model (SAM3) on 2PM data
+   in a fully reproducible, platform-integrated comparison.
+   *Why this excites co-authors*: The Mamba hypothesis is scientifically interesting —
+   vascular networks have long-range connectivity that sliding-window CNNs may miss.
+   SSM's linear complexity could be a real win for whole-volume inference.
+
+3. **First reproducible topology-aware benchmark for 2PM vascular segmentation.**
+   [Haft-Javaherian et al. (2020, CVPR-CVMI)](https://github.com/mhaft/DeepVess)
+   showed persistent homology improves topology in 2PM vascular segmentation.
+   [Shit et al. (2021, clDice)](https://doi.org/10.1109/CVPR46437.2021.01427) provided
+   the centerline metric. Our cbdice_cldice experiment directly extends this literature:
+   **+8.9% clDice at −5.3% DSC** is the first multi-fold, multi-loss topology ablation
+   with bootstrap CIs on the MiniVess dataset. The platform makes this reproducible.
+
+4. **First MLOps platform that captures its own development process as a machine-queryable
+   specification.** The 52-node Bayesian decision graph + CLAUDE.md behavioral constraints +
+   metalearning failure analyses constitute a "Living Specification Graph" —
+   [chatlatanagulchai et al. (2025)](https://arxiv.org/abs/2511.12884) found only 14.5%
+   of 2,303 AGENTS.md files contain safety/performance guidelines. ARBOR's multi-layer
+   KG is a qualitative advance over current practice, with a structural characterization
+   to match.
+
+---
+
+### 16.2 — Scientific Hooks That Should Excite Co-Authors
+
+**These are scaffold bullet points, not full prose. The sci-llm-writer will expand them.**
+
+**Hook A: The Mamba hypothesis for vascular topology**
+- CNNs (DynUNet) use sliding-window inference: patch sees local context only.
+- Mamba SSMs have selective state-space memory: long-range vessel continuity is a
+  natural fit for the SSM's ability to model sequences without quadratic attention cost.
+- Hypothesis (for R3b): Mamba will show better topology preservation (higher clDice)
+  at comparable DSC to DynUNet — testing the same question Haft-Javaherian asked
+  with persistent homology, now with a modern SSM architecture.
+- [PENDING EXPERIMENT] — write as hypothesis in Discussion once GPU results land.
+
+**Hook B: Foundation model zero-shot transfer to 2PM**
+- SAM3 (Meta, Nov 2025) was trained on 2D natural images with object segmentation.
+- Testing whether 648M frozen ViT-32L parameters transfer to 3D vascular structure
+  via slice-by-slice inference is scientifically interesting.
+- Framing: not "SAM3 beats DynUNet" — framing: "does large-scale 2D pre-training
+  provide useful inductive biases for 3D vessel topology, or does domain gap dominate?"
+- Prior work: [Ravi et al. (2025, SAM3)](https://ai.meta.com/research/publications/sam3/) —
+  shows strong 2D performance; 3D vascular transfer is genuinely open territory.
+
+**Hook C: Loss function design as a platform capability, not an architecture claim**
+- The cbdice_cldice ablation is NOT "we propose a new loss." It is:
+  "the platform makes rigorous multi-fold topology-aware loss ablation accessible to
+  any lab in [VERIFY: X] commands, without infrastructure work."
+- The topology result (+8.9% clDice, −5.3% DSC) is real and compelling to reviewers
+  in the vascular imaging community who care about connectivity metrics.
+- See: [Shit et al. (2021), clDice](https://doi.org/10.1109/CVPR46437.2021.01427) and
+  [Haft-Javaherian et al. (2020)](https://github.com/mhaft/DeepVess) for literature anchor.
+
+**Hook D: VesselFM pre-training leakage as a cautionary tale with a platform solution**
+- [Wittmann et al. (2024), VesselFM](https://arxiv.org/abs/2411.17386) pre-trained on MiniVess.
+- If a researcher naively evaluates VesselFM on MiniVess, they get inflated numbers.
+- ARBOR's config-driven evaluation makes routing to non-contaminated datasets
+  (DeepVess, TubeNet) a single YAML key change — demonstrating the platform's role in
+  preventing silent evaluation errors that would otherwise require infrastructure rewriting.
+- *Cautionary tale framing*: "the data leakage was found through literature review, not
+  automation — but ARBOR makes the fix effortless once identified."
+
+---
+
+### 16.3 — Anti-Marketing Mandate Audit (Nikola T Markov rules)
+
+**Every broad claim in the manuscript MUST pass this checklist before submission:**
+
+1. **No "transforms", "revolutionizes", "paradigm shift" without citations.**
+   The cover letter uses "transforms experiment definition from a programming task into a
+   YAML configuration task" — this is a functional description (verifiable via DevEx benchmark
+   R2), not a vague promise. Keep, but anchor with R2 result once available.
+
+2. **No bare time estimates without a source.**
+   The phrase "months of bespoke engineering" has been softened to "significant bespoke
+   engineering" with a [VERIFY] marker in §1. Before submission, either cite a study
+   that quantifies this, or replace with the ARBOR R2 DevEx benchmark result.
+
+3. **Every number has a source.**
+   - 73/73 checks → `outputs/pipeline/trigger_chain_results.json` ✅
+   - 8.26 seconds → same source ✅
+   - +8.9% clDice → `knowledge-graph/experiments/dynunet_loss_variation_v2.yaml` ✅
+   - 35+ artifacts → same source ✅
+   - 52-node KG → `knowledge-graph/_network.yaml` ✅
+   - 14.5% safety guidelines → `chatlatanagulchai_2025_agent_readmes` ✅
+   - "Level 4" → Microsoft Azure MLOps Maturity Model ✅ (cite URL in methods)
+
+4. **No bold unverified claims about efficiency, cost, or time savings.**
+   Do NOT write "3-6x cost savings" without a citation or a verified RunPod vs.
+   on-demand comparison. SkyPilot spot savings are real but need a number.
+   [VERIFY: compute cost comparison — add to §14 as a pending validation task]
+
+5. **No marketing language around the KG / agentic development story.**
+   Frame as STRUCTURAL CHARACTERIZATION: node counts, constraint counts, link counts —
+   all measurable from the files. Do NOT claim productivity gains without a controlled study.
+
+6. **The paper's contribution is the PLATFORM, not the models.**
+   Every result section must lead with platform capability, not model performance.
+   Template: "ARBOR enables [X] — demonstrated by [model result] which required
+   [infrastructure description] that is now automated."
+
+---
+
+### 16.4 — Bibliography Additions (for sci-llm-writer citation harness)
+
+Add these to the Zotero collection for `manuscripts/vasculature-mlops/`:
+
+| Citation key | Authors | Year | Venue | Relevance |
+|---|---|---|---|---|
+| `wu_2020_ddeep3m` | Wu et al. | 2020 | J Neurosci Methods | Prior platform — Docker-only, no MLOps |
+| `abe_2022_neurocaas` | Abe et al. | 2022 | Neuron | Prior cloud platform — no MONAI, no training |
+| `chen_2024_mambavesselnet` | Chen et al. | 2024 | ACM MMasia | Mamba for 3D cerebrovascular (TOF-MRA) |
+| `haft_javaherian_2020_topological` | Haft-Javaherian et al. | 2020 | CVPR-CVMI | Topology in 2PM vascular; DeepVess dataset |
+| `lakshminarayanan_2017_deep_ensembles` | Lakshminarayanan et al. | 2017 | NeurIPS | Deep Ensembles for R4 uncertainty |
+
+All entries are now in `knowledge-graph/bibliography.yaml` (added 2026-03-15).

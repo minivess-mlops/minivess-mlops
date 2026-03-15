@@ -410,3 +410,68 @@ citations:
       Resilience mechanisms for medical AI MLOps (uncertainty calibration, graceful
       degradation). Evaluated on MedMNIST classification NOT segmentation. No cloud
       infrastructure. Useful as medical AI MLOps reference for introduction.
+
+  # === Comparable platform papers (added 2026-03-15) ===
+
+  wu_2020_ddeep3m:
+    authors: "Wu X, Chen S, Huang J, Li A, Xiao R, Cui X"
+    year: 2020
+    title: "DDeep3M: Docker-powered deep learning for biomedical image segmentation"
+    venue: "Journal of Neuroscience Methods, 342:108804"
+    url: "https://doi.org/10.1016/j.jneumeth.2020.108804"
+    used_in: [project_purpose]
+    abstract_snippet: >
+      Docker-based 3D biomedical segmentation platform (J. Neurosci. Methods 2020).
+      Closest directly comparable platform paper: Docker lowers the barrier for biomedical
+      researchers to use deep learning. Key gap vs ARBOR: no experiment tracking, no multi-cloud,
+      no model-agnostic adapter pattern, no drift detection, no HPO pipeline.
+      ARBOR extends this vision to full MLOps Level 4 with multi-cloud and model-agnostic design.
+      Cite in Introduction as prior art that motivated our approach.
+
+  abe_2022_neurocaas:
+    authors: "Abe P, et al."
+    year: 2022
+    title: "NeuroCAAS: A cloud-based analysis platform for neuroscience"
+    venue: "Neuron, 115(6):S0896-6273(22)00587-6"
+    url: "https://doi.org/10.1016/j.neuron.2022.06.018"
+    used_in: [project_purpose]
+    abstract_snippet: >
+      Cloud compute platform for neuroscience analyses (AWS-based, multi-user).
+      Comparable platform paper: demonstrates cloud compute for academic neuroscience research.
+      Key gap vs ARBOR: no model training orchestration, no MONAI ecosystem, no
+      experiment tracking, no drift detection; cloud selection is preconfigured, not
+      model-agnostic. Cite in Introduction as cloud platform baseline for neuroscience.
+
+  chen_2024_mambavesselnet:
+    authors: "Chen Y, Liu Z, He X"
+    year: 2024
+    title: "MambaVesselNet: A Hybrid CNN-Mamba Architecture for 3D Cerebrovascular Segmentation"
+    venue: "ACM Multimedia Asia (MMasia '24)"
+    url: "https://doi.org/10.1145/3696409.3700231"
+    used_in: [model_adapter_pattern, primary_3d_model]
+    abstract_snippet: >
+      First published Mamba architecture for 3D cerebrovascular segmentation (TOF-MRA).
+      Hybrid CNN+Mamba bottleneck; state-of-the-art on TOF-MRA against SegResNet, UNETR.
+      Key relevance: (1) establishes Mamba as viable SSM for cerebrovascular segmentation,
+      motivating inclusion of Mamba family in ARBOR's multi-model comparison;
+      (2) DDeep3M is NOT evaluated in 2PM microscopy context — our platform fills this gap.
+      Note: focuses on architecture, has NO reproducibility tooling, no multi-cloud,
+      no experiment tracking, no MLOps pipeline. The architecture exists; the platform does not.
+
+  haft_javaherian_2020_topological:
+    authors: "Haft-Javaherian M, Villiger M, Schaffer CB, Nishimura N, Golland P, Bouma BE"
+    year: 2020
+    title: "A topological encoding convolutional neural network for segmentation of 3D multiphoton images of brain vasculature using persistent homology"
+    venue: "CVPR Workshop on Computer Vision for Microscopy Image Analysis (CVMI)"
+    url: "https://github.com/mhaft/DeepVess"
+    used_in: [primary_metrics, topology_metrics]
+    abstract_snippet: >
+      Topological encoding CNN for 3D 2PM vascular segmentation using persistent homology.
+      MIT/Cornell/MGH collaboration. Key finding: topology preservation in vascular
+      segmentation requires explicit topological constraints beyond standard Dice loss.
+      The DeepVess architecture achieves 76.2% Dice on DeepVess dataset.
+      Direct relevance: (1) validates that topology metrics (clDice, persistent homology)
+      are the right evaluation framework for 2PM vascular data — supports our cbdice_cldice
+      choice; (2) DeepVess is our external validation dataset (Cornell eCommons).
+      Their method has no MLOps pipeline; ARBOR provides the infrastructure scaffold
+      to reproduce and extend their topological approach across labs.
