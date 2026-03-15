@@ -292,18 +292,23 @@ def _launch_gcp(args) -> int:
         new_resources.add(new_r)
     task.set_resources(new_resources)
 
+    # Unique cluster name per model — prevents job stomping when running
+    # multiple models sequentially (each model gets its own GCP VM).
+    cluster_name = f"minivess-gcp-{args.model.replace('_', '-')}"
+
     print(f"=== Launching smoke test: {args.model} (GCP spot, europe-north1) ===")
+    print(f"Cluster: {cluster_name}")
     print(f"MLflow: {gcp_uri or '(not set — check MLFLOW_GCP_URI in .env)'}")
     print("Docker: GAR europe-north1 (public, no auth)")
 
     request_id = sky.launch(
         task,
-        cluster_name="minivess-gcp-smoke",
+        cluster_name=cluster_name,
         idle_minutes_to_autostop=5,
         down=True,
     )
     print(f"Cluster launched. Request ID: {request_id}")
-    print("Monitor: uv run sky logs minivess-gcp-smoke")
+    print(f"Monitor: uv run sky logs {cluster_name}")
     return 0
 
 
