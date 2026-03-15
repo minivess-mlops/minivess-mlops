@@ -474,6 +474,29 @@ Compare to datacenter GPUs:
 
 **Lambda Labs does NOT offer consumer GPUs** — they focus on datacenter cards only. RunPod, Vast.ai, and SaladCloud are the providers for consumer GPU cloud.
 
+### GCP Spot Pricing: T4 vs L4 Cost-Performance (Updated 2026-03-15)
+
+SkyPilot auto-selects the cheapest region for each GPU type. Verified pricing:
+
+| GPU | Region | Spot $/hr | FP16 TFLOPS | VRAM | $/TFLOPS·hr | Relative Speed |
+|-----|--------|-----------|-------------|------|-------------|----------------|
+| **T4** | me-west1-b | **$0.16** | 65 | 16 GB | $0.0025 | 1.0× |
+| **L4** | asia-northeast3-a | **$0.19** | 121 | 24 GB | $0.0016 | 1.86× |
+| **A100** | me-west1-a | **$1.39** | 312 | 40 GB | $0.0045 | 4.8× |
+
+**L4 wins on total cost per job.** For a 10-minute training job:
+- T4: 10 min × $0.16/hr = **$0.027**
+- L4: ~5.4 min × $0.19/hr = **$0.017** (37% cheaper)
+- A100: ~2.1 min × $1.39/hr = **$0.049** (82% more expensive)
+
+**Recommendation:** Default to L4 for GCP spot training. T4 only if L4 is unavailable.
+A100 only for models requiring >24 GB VRAM (sam3_topolora).
+
+**SkyPilot accelerator priority** (cheapest-first):
+```yaml
+accelerators: {L4: 1, T4: 1, A100: 1}  # L4 preferred over T4
+```
+
 ### Buy vs Rent: Break-Even Analysis
 
 #### Hardware Costs (March 2026)
