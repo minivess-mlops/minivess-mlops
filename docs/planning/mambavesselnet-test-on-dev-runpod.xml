@@ -92,63 +92,45 @@
       </failure-action>
     </task>
 
-    <task id="T0.2" name="Verify Network Volume exists on RunPod" priority="P0" estimated-iterations="1">
+    <task id="T0.2" name="Verify MLflow server health (UpCloud)" priority="P0" estimated-iterations="1">
       <description>
-        Auto-detect Network Volume via SkyPilot — DO NOT ask the user.
-        The smoke_test_mamba.yaml uses `volumes: /opt/vol: minivess-dev`.
-        If volume missing: create it first (sky volumes apply), then upload data (make dev-gpu-upload-data).
-        File-based MLflow on /opt/vol/mlruns — no remote server needed (UpCloud dropped 2026-03-16).
+        UpCloud MLflow must be reachable before training. If it's down, artifacts
+        are lost. Fix Pulumi stack first — do not proceed with downed MLflow.
       </description>
       <commands>
-        <cmd>sky storage ls 2>/dev/null | grep -E "NAME|minivess-dev"</cmd>
+        <cmd>source .env &amp;&amp; curl -s -u "${MLFLOW_CLOUD_USERNAME}:${MLFLOW_CLOUD_PASSWORD}" \
+          "${MLFLOW_CLOUD_URI}/api/2.0/mlflow/experiments/search" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'MLflow OK: {len(d[\"experiments\"])} experiments')"</cmd>
       </commands>
       <acceptance>
-        Output shows minivess-dev volume in the list.
-        If missing: `sky volumes apply deployment/skypilot/minivess-dev-volume.yaml` then
-        `make dev-gpu-upload-data` to seed it with training data.
-      </acceptance>
-      <failure-action>
-        Volume not found: sky volumes apply deployment/skypilot/minivess-dev-volume.yaml
-        Data not on volume: make dev-gpu-upload-data (rsync local data/raw/minivess/ → /opt/vol/data/raw/)
-        Fallback: DVC pull from AWS S3 (s3://minivessdataset, public, no credentials) — auto-handled in setup:
-      </failure-action>
-    </task>
-
-    <task id="T0.3" name="Verify AWS S3 fallback accessible (public bucket)" priority="P1" estimated-iterations="1">
-      <description>
-        If Network Volume has no data, smoke_test_mamba.yaml setup falls back to
-        DVC pull from s3://minivessdataset (AWS S3 public bucket, no credentials).
-        Verify the bucket is accessible as a connectivity check.
-        This is a non-blocking P1 check — Network Volume cache-first is preferred.
-      </description>
-      <commands>
-        <cmd>python3 -c "
-import urllib.request
-# HEAD request to check S3 bucket accessibility (public bucket)
-req = urllib.request.Request('https://minivessdataset.s3.eu-north-1.amazonaws.com/', method='HEAD')
-try:
-    with urllib.request.urlopen(req, timeout=5) as r:
-        print(f'AWS S3 bucket accessible: HTTP {r.status}')
-except Exception as e:
-    print(f'AWS S3 check: {e} (fallback may be slow — seed Network Volume instead)')
-"</cmd>
-      </commands>
-      <acceptance>
-        HTTP 200 or 403 (both mean bucket exists and is reachable).
-        If timeout: note that DVC fallback may be slow; prefer seeding Network Volume first.
+        MLflow OK: N experiments (N >= 0). Any error = BLOCKED. Fix UpCloud stack first.
       </acceptance>
     </task>
 
-    <task id="T0.4" name="Verify .env has required variables" priority="P0" estimated-iterations="1">
+    <task id="T0.3" name="Verify DVC data is pushed to UpCloud S3" priority="P0" estimated-iterations="1">
       <description>
-        The mamba smoke test YAML needs: RUNPOD_API_KEY, GITHUB_TOKEN (for private GHCR pull).
-        No DVC_S3_*, MLFLOW_CLOUD_* needed — UpCloud dropped 2026-03-16.
-        No HF_TOKEN needed — MambaVesselNet++ has no pretrained weights.
+        DVC pull in the RunPod setup stage needs data in UpCloud S3.
+        The md5 hash in smoke_test_mamba.yaml setup must match what's in the bucket.
+      </description>
+      <commands>
+        <cmd>source .env &amp;&amp; dvc status -r upcloud 2>&amp;1 | head -5</cmd>
+      </commands>
+      <acceptance>
+        "Data and pipelines are up to date." If stale: `dvc push -r upcloud` first.
+      </acceptance>
+    </task>
+
+    <task id="T0.4" name="Verify .env has all required variables" priority="P0" estimated-iterations="1">
+      <description>
+        The mamba smoke test YAML needs the same env vars as existing smoke tests
+        (DVC_S3_*, MLFLOW_CLOUD_*, RUNPOD_API_KEY) plus no HF_TOKEN needed
+        (mambavesselnet has no pretrained weights to download).
       </description>
       <commands>
         <cmd>python3 -c "
 from pathlib import Path
-required = ['RUNPOD_API_KEY', 'GITHUB_TOKEN']
+required = ['DVC_S3_ENDPOINT_URL','DVC_S3_ACCESS_KEY','DVC_S3_SECRET_KEY',
+            'DVC_S3_BUCKET','MLFLOW_CLOUD_URI','MLFLOW_CLOUD_USERNAME',
+            'MLFLOW_CLOUD_PASSWORD','RUNPOD_API_KEY','GITHUB_TOKEN']
 env = {}
 for line in Path('.env').read_text(encoding='utf-8').splitlines():
     if '=' in line and not line.startswith('#'):
@@ -159,8 +141,7 @@ print('Missing:', missing or 'NONE — all set')
 "</cmd>
       </commands>
       <acceptance>
-        Missing: NONE — all set. If GITHUB_TOKEN missing: generate PAT with packages:read scope.
-        If RUNPOD_API_KEY missing: get from RunPod console → Settings → API Keys.
+        Missing: NONE — all set. If any missing: populate .env before proceeding.
       </acceptance>
     </task>
 
@@ -492,17 +473,11 @@ print('AMP policy OK')
       </pattern>
 
       <pattern id="DVC_DATA_MISSING" log-signature="No training data" auto-fix="yes">
-        <description>
-          Data missing from both Network Volume and AWS S3 DVC pull.
-          Network Volume cache-first: if /opt/vol/data/raw/minivess/imagesTr has >10 files, DVC pull skipped.
-          Fallback: DVC pull from s3://minivessdataset (AWS S3 public bucket, no credentials).
-        </description>
+        <description>DVC pull failed silently. Training data missing in container.</description>
         <fix>
-          Step 1: Check if Network Volume has data: sky exec minivess-dev -- ls /opt/vol/data/raw/minivess/imagesTr/ | wc -l
-          If empty: make dev-gpu-upload-data (rsync from local) — fastest fix.
-          Step 2: Verify dvc.lock md5 hash (e712f8b23f377a4990b91bef0b1aef76.dir) matches S3 content.
-          Step 3: Test AWS S3 fallback: dvc status -r remote_storage (should not require credentials).
-          Then relaunch. DO NOT reference UpCloud (archived 2026-03-16).
+          Verify dvc.lock md5 hash matches UpCloud S3 content.
+          Run: `dvc push -r upcloud` locally to refresh.
+          Then relaunch.
         </fix>
       </pattern>
     </known-failure-patterns>
@@ -590,22 +565,18 @@ else:
       </acceptance>
     </task>
 
-    <task id="T5.3" name="Verify MLflow artifacts on Network Volume" priority="P0" estimated-iterations="1">
+    <task id="T5.3" name="Verify MLflow artifacts on UpCloud" priority="P0" estimated-iterations="1">
       <description>
-        Sync mlruns from Network Volume back to local, then verify the smoke test run
-        is present with expected metrics. File-based MLflow on /opt/vol/mlruns —
-        no remote server needed (UpCloud dropped 2026-03-16).
-        Pattern: make dev-gpu-sync → sky rsync down minivess-dev:/opt/vol/mlruns/ mlruns/
+        Verify the smoke test run is visible in UpCloud MLflow with expected metrics.
+        Pattern from existing verify-smoke-test Makefile target.
       </description>
       <commands>
-        <cmd>make dev-gpu-sync</cmd>
-        <cmd>python3 -c "
-import mlflow, math
-from pathlib import Path
-mlflow.set_tracking_uri(str(Path('mlruns')))
+        <cmd>source .env &amp;&amp; python3 -c "
+import mlflow, os
+mlflow.set_tracking_uri(os.environ['MLFLOW_CLOUD_URI'])
 client = mlflow.tracking.MlflowClient()
 expts = client.search_experiments(filter_string='name LIKE \"%mambavesselnet%\"')
-print(f'Found {len(expts)} mambavesselnet experiments in local mlruns/')
+print(f'Found {len(expts)} mambavesselnet experiments')
 if expts:
     runs = client.search_runs(expts[0].experiment_id, order_by=['start_time DESC'])
     if runs:
@@ -614,14 +585,14 @@ if expts:
         train_loss = r.data.metrics.get('train_loss', 'MISSING')
         print(f'Latest run: {r.info.run_id[:8]} status={r.info.status}')
         print(f'  val_loss={val_loss}, train_loss={train_loss}')
+        import math
         assert r.info.status == 'FINISHED', f'Run not FINISHED: {r.info.status}'
         assert isinstance(val_loss, float) and not math.isnan(val_loss), f'val_loss is NaN!'
         print('MLflow verification PASSED')
 "</cmd>
       </commands>
       <acceptance>
-        dev-gpu-sync completes without error.
-        1+ experiments with "mambavesselnet" in local mlruns/.
+        1+ experiments with "mambavesselnet" in name.
         Latest run: status=FINISHED, val_loss finite (not NaN), not MISSING.
       </acceptance>
     </task>
@@ -636,7 +607,7 @@ if expts:
         <cmd>git add configs/model_profiles/mambavesselnet.yaml</cmd>
         <cmd>git commit -m "feat(mambavesselnet): T09 — VRAM measured on RTX 4090, closes #744"</cmd>
         <cmd>gh issue close 744 --comment "T09 VRAM measured + T10 smoke test PASSED on RunPod RTX 4090.
-        MLflow: file-based on Network Volume /opt/vol/mlruns, synced to local mlruns/ via make dev-gpu-sync.
+        See MLflow run [run_id] on UpCloud.
         VRAM peak: [NNNN] MB @ patch=(64,64,64), batch=1.
         AMP: train=ON, val=OFF (D04, MONAI #4243). val_loss=finite. Branch: test/mambavesselnet"</cmd>
       </commands>
