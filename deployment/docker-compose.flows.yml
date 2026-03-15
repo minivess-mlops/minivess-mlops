@@ -449,6 +449,28 @@ services:
       - minivess
     <<: [*common-security, *default-logging, *light-resources, *common-labels]
 
+  # GPU Benchmark — run-once capability probing (T3.2, #651)
+  # Produces YAML cache with per-model VRAM, throughput, feasibility.
+  # Cache persists in benchmark_data volume, invalidated on driver/CUDA change.
+  gpu-benchmark:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.benchmark
+    image: minivess-benchmark:latest
+    container_name: minivess-gpu-benchmark
+    environment:
+      <<: *common-env
+      BENCHMARK_CACHE_DIR: /app/benchmark
+    volumes:
+      - benchmark_data:/app/benchmark
+      - ${MODEL_CACHE_HOST_PATH}:/model_cache
+    # CDI GPU access — benchmark needs GPU for VRAM/throughput probing
+    devices:
+      - "nvidia.com/gpu=all"
+    networks:
+      - minivess
+    <<: [*gpu-security, *default-logging, *gpu-resources, *common-labels]
+
 volumes:
   # Input data
   raw_data:
@@ -482,6 +504,9 @@ volumes:
     driver: local
   # Model serving store
   bentoml_store:
+    driver: local
+  # GPU benchmark cache
+  benchmark_data:
     driver: local
 
 networks:

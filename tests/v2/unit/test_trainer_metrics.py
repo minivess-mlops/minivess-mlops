@@ -160,8 +160,11 @@ class TestTrainerWithMetrics:
 
         trainer.fit(train_loader, val_loader)
 
-        # Tracker should have been called with metric values including train_dice, val_dice
-        assert tracker.log_epoch_metrics.call_count == 2
-        first_call_metrics = tracker.log_epoch_metrics.call_args_list[0][0][0]
-        assert "train_dice" in first_call_metrics
-        assert "val_dice" in first_call_metrics
+        # Tracker called per phase per epoch: 2 epochs × 2 phases (train+val) = 4
+        assert tracker.log_epoch_metrics.call_count == 4
+        # Aggregate all logged metric keys across calls
+        all_keys: set[str] = set()
+        for call in tracker.log_epoch_metrics.call_args_list:
+            all_keys.update(call[0][0].keys())
+        assert "train_dice" in all_keys
+        assert "val_dice" in all_keys

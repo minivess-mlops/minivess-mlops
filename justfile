@@ -151,12 +151,44 @@ pipeline *ARGS:
 # SkyPilot (Cloud Compute)
 # ---------------------------------------------------------------------------
 
-# Launch SkyPilot training job
-sky-train CONFIG="deployment/skypilot/train_generic.yaml" *ARGS:
+# Launch dev GPU on RunPod RTX 4090/5090 (MODEL=dynunet)
+dev-gpu MODEL="dynunet":
+    uv run python scripts/launch_dev_runpod.py --model {{MODEL}}
+
+# Train heavy models on RunPod (sam3_hybrid + vesselfm, need >8 GB VRAM)
+dev-gpu-heavy:
+    uv run python scripts/launch_dev_runpod.py --model sam3_hybrid
+    uv run python scripts/launch_dev_runpod.py --model vesselfm
+
+# Stop dev GPU pod
+dev-gpu-stop:
+    sky stop minivess-dev
+
+# SSH into dev GPU pod
+dev-gpu-ssh:
+    sky ssh minivess-dev
+
+# Smoke test preflight
+smoke-test-preflight:
+    uv run python scripts/validate_smoke_test_env.py
+
+# Launch smoke test on RunPod (MODEL=sam3_vanilla)
+smoke-test-gpu MODEL="sam3_vanilla":
+    uv run python scripts/launch_smoke_test.py --model {{MODEL}} --cloud runpod
+
+# Run all smoke tests sequentially
+smoke-test-all:
+    just smoke-test-gpu sam3_hybrid
+    just smoke-test-gpu vesselfm
+    just smoke-test-gpu sam3_vanilla
+    just smoke-test-gpu dynunet
+
+# Launch SkyPilot production training (Docker image_id pattern)
+sky-train CONFIG="deployment/skypilot/train_production.yaml" *ARGS:
     sky jobs launch {{CONFIG}} {{ARGS}}
 
 # Launch SkyPilot HPO sweep
-sky-sweep CONFIG="deployment/skypilot/train_hpo_sweep.yaml" *ARGS:
+sky-hpo CONFIG="deployment/skypilot/train_hpo.yaml" *ARGS:
     sky jobs launch {{CONFIG}} {{ARGS}}
 
 # Show SkyPilot job status

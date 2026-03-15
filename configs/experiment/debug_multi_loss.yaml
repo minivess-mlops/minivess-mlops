@@ -9,6 +9,7 @@
 #     -e EXPERIMENT=debug_multi_loss train
 defaults:
   - override /checkpoint: lightweight
+  - override /profiling: debug
 
 experiment_name: debug_multi_loss
 model: dynunet

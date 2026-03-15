@@ -1,0 +1,24 @@
+# GCP spot instances — cheapest Docker-compatible GPUs.
+# Same-region as GCS, Cloud SQL, Cloud Run MLflow (europe-north1).
+#
+# Override per-lab: configs/lab/<lab_name>.yaml
+# Override per-user: configs/user/<user_name>.yaml
+
+provider: gcp
+region: europe-north1
+use_spot: true
+disk_size: 100
+disk_tier: best
+
+# GPU priority: cheapest first. T4 ($0.14/hr spot), L4 ($0.22/hr spot).
+accelerators:
+  - T4:1
+  - L4:1
+  - A100:1
+
+# Docker image from GAR (same-region, fast pulls, public).
+docker_registry: gar
+docker_image: europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+
+# MLflow tracking via GCP Cloud Run (MLFLOW_GCP_URI in .env).
+mlflow_env_var: MLFLOW_GCP_URI

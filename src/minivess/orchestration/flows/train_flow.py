@@ -81,6 +81,67 @@ def _validate_training_env() -> None:
         )
 
 
+def prepare_training_data(
+    *,
+    data_dir: Path | None = None,
+    dvc_remote: str | None = None,
+) -> dict[str, Any]:
+    """Ensure training data is available, pulling from DVC if needed.
+
+    Checks if DATA_DIR has MiniVess data files. If empty, runs
+    ``dvc pull -r <remote>`` to fetch data from the configured remote.
+
+    Parameters
+    ----------
+    data_dir:
+        Data directory to check. Defaults to DATA_DIR env var.
+    dvc_remote:
+        DVC remote name. Defaults to DVC_REMOTE env var or "minio".
+
+    Returns
+    -------
+    Dict with keys: ``pulled`` (bool), ``remote`` (str), ``duration_s`` (float).
+    """
+    import subprocess
+    import time
+
+    if data_dir is None:
+        data_dir = Path(os.environ.get("DATA_DIR", "/app/data"))
+
+    remote = dvc_remote or os.environ.get("DVC_REMOTE", "minio")
+
+    # Check if data already exists (volume-mounted in Docker)
+    images_dir = data_dir / "raw" / "minivess" / "imagesTr"
+    if images_dir.exists() and any(images_dir.iterdir()):
+        logger.info("Training data found at %s — skipping DVC pull", images_dir)
+        return {"pulled": False, "remote": remote, "duration_s": 0.0}
+
+    # Data not found — pull from DVC
+    logger.info("Training data not found. Pulling from DVC remote '%s'...", remote)
+    t0 = time.monotonic()
+    cmd = ["dvc", "pull", "-r", remote]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    duration = time.monotonic() - t0
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"DVC pull failed (exit {result.returncode}):\n{result.stderr}\n"
+            f"Command: {' '.join(cmd)}\n"
+            "Check DVC_S3_* variables in .env and run: "
+            "uv run python scripts/configure_dvc_remote.py"
+        )
+
+    # Verify data was actually pulled
+    if not images_dir.exists() or not any(images_dir.iterdir()):
+        raise FileNotFoundError(
+            f"DVC pull completed but no data at {images_dir}. "
+            "Verify DVC tracking file (data/minivess.dvc) is correct."
+        )
+
+    logger.info("DVC pull complete in %.1fs from remote '%s'", duration, remote)
+    return {"pulled": True, "remote": remote, "duration_s": duration}
+
+
 @dataclass
 class TrainingFlowResult:
     """Result returned by training_flow().
@@ -215,6 +276,8 @@ def train_one_fold_task(
         TrainingConfig,
     )
     from minivess.data.loader import build_train_loader, build_val_loader
+    from minivess.diagnostics.pre_training_checks import run_pre_training_checks
+    from minivess.diagnostics.weight_diagnostics import run_weightwatcher
     from minivess.pipeline.loss_functions import build_loss_function
     from minivess.pipeline.metrics import SegmentationMetrics
     from minivess.pipeline.trainer import SegmentationTrainer
@@ -232,11 +295,19 @@ def train_one_fold_task(
     # Build DataConfig (dataset_name required, cache_rate passed to loaders)
     _is_sam3 = model_family_str.startswith("sam3_")
     _is_sam3_hybrid = model_family_str == "sam3_hybrid"
+    _is_vesselfm = model_family_str == "vesselfm"
     # SAM3: each z-slice goes through ViT-32L encoder at 1008×1008 — limit depth
     # to 3 slices and batch=1 to fit on 8 GB GPUs. MONAI's RandCropByPosNegLabeld
     # with num_samples=4 produces 4 crops, so effective batch is 4× — this is fine
     # with small patch depth.
-    default_patch = (64, 64, 3) if _is_sam3 else (64, 64, 16)
+    # VesselFM: 6-level DynUNet with 5 stride-2 downsamplings needs Z >= 2^5 = 32.
+    # Z=16 causes skip connection shape mismatch at level 4 (#711).
+    if _is_sam3:
+        default_patch = (64, 64, 3)
+    elif _is_vesselfm:
+        default_patch = (64, 64, 32)
+    else:
+        default_patch = (64, 64, 16)
     # patch_size=null in config means "use model-adaptive default" (set above).
     _patch_raw = config.get("patch_size")
     patch_size: tuple[int, int, int] = (  # type: ignore[assignment]
@@ -267,26 +338,32 @@ def train_one_fold_task(
 
     # Build TrainingConfig
     # Validation interval strategy:
-    # sam3_hybrid: 6.65 GiB model weights → <1 GiB VRAM free for inference.
-    #   SAM3 ViT-32L ALWAYS resizes any patch to 1008×1008, so every inference
-    #   forward pass needs ~5 GiB → OOM on 8 GB GPU. Skip validation in debug mode
-    #   by setting val_interval > training max_epochs (which is 1 in debug mode).
-    # sam3_vanilla: 2.9 GiB model → val_roi=(512,512,3) fits. Validate every 10
-    #   epochs in production (slow inference); every epoch in debug.
-    # Other models: validate every epoch always.
-    if _is_sam3_hybrid and debug:
+    # 1. If config explicitly sets val_interval, respect it (cloud smoke tests).
+    # 2. Otherwise, apply model-based heuristics:
+    #    sam3_hybrid debug: skip validation (OOM on 8 GB GPU).
+    #    sam3 production: validate every 10 epochs (slow inference).
+    #    Other models: validate every epoch.
+    _config_val_interval = config.get("val_interval")
+    if _config_val_interval is not None:
+        val_interval = int(_config_val_interval)
+    elif _is_sam3_hybrid and debug:
         val_interval = max_epochs + 1  # never validate: OOM on 8 GB GPU
     elif _is_sam3 and not debug:
         val_interval = 10  # sparse validation in production (slow inference)
     else:
         val_interval = 1
+    # mixed_precision: respect config if set, default True.
+    # MONAI maintainers confirm AMP + 3D ops can produce NaN
+    # (Project-MONAI/MONAI#4243) — allow disabling per experiment.
+    _mixed_precision = config.get("mixed_precision", True)
     training_config = TrainingConfig(
-        max_epochs=1 if debug else max_epochs,
+        max_epochs=max_epochs,
         num_folds=num_folds,
         batch_size=batch_size,
         warmup_epochs=0 if debug else 5,
         early_stopping_patience=1 if debug else 20,
         val_interval=val_interval,
+        mixed_precision=bool(_mixed_precision),
     )
 
     # Extract volume dicts from the fold split (FoldSplit dataclass or dict)
@@ -405,9 +482,58 @@ def train_one_fold_task(
         }
     ):
         tracker.log_hydra_config(config)
-        return trainer.fit(
-            train_loader, val_loader, checkpoint_dir=checkpoint_dir, fold_id=fold_id
+
+        # --- Pre-training diagnostics (RC17: always run, not gated by profiling) ---
+        sample_batch = next(iter(train_loader))
+        device = torch.device(device_str)
+        sample_on_device = {
+            k: v.to(device) if isinstance(v, torch.Tensor) else v
+            for k, v in sample_batch.items()
+        }
+        pre_check_results = run_pre_training_checks(
+            model=model,
+            sample_batch=sample_on_device,
+            criterion=criterion,
+            expected_channels=model_config.out_channels,
         )
+        errors = [
+            r for r in pre_check_results if not r.passed and r.severity == "error"
+        ]
+        if errors:
+            msg = "; ".join(f"{r.name}: {r.message}" for r in errors)
+            raise RuntimeError(f"Pre-training check failed: {msg}")
+
+        # --- Check for spot preemption resume ---
+        resume_state = check_resume_state_task(checkpoint_dir)
+        start_epoch = 0
+        if resume_state is not None:
+            resume_epoch = resume_state.get("epoch", 0)
+            epoch_pth = checkpoint_dir / "epoch_latest.pth"
+            if epoch_pth.exists():
+                logger.info(
+                    "Spot recovery: loading epoch_latest.pth (epoch %d)", resume_epoch
+                )
+                state_dict = torch.load(
+                    epoch_pth, map_location=device_str, weights_only=True
+                )
+                model.load_state_dict(state_dict)
+                start_epoch = resume_epoch + 1
+                logger.info("Resuming training from epoch %d", start_epoch)
+
+        # --- Training ---
+        fit_result = trainer.fit(
+            train_loader,
+            val_loader,
+            checkpoint_dir=checkpoint_dir,
+            fold_id=fold_id,
+            start_epoch=start_epoch,
+        )
+
+        # --- Post-training diagnostics (RC17: always run) ---
+        ww_summary = run_weightwatcher(model)
+        logger.info("WeightWatcher: %s", ww_summary)
+
+        return fit_result
 
 
 @task(name="log-fold-results")
@@ -647,6 +773,14 @@ def training_flow(
             mlflow.set_tag("parent_run_id", mlflow_run_id)
             logger.info("MLflow run opened: %s", mlflow_run_id)
 
+            # Log infrastructure timing from setup phase (#683)
+            from minivess.observability.infrastructure_timing import (
+                log_cost_analysis,
+                log_infrastructure_timing,
+            )
+
+            log_infrastructure_timing(timing_dir=Path.cwd())
+
             # Log fold results inside the run context
             for fold_id, fold_result in enumerate(fold_results):
                 log_fold_results_task(
@@ -657,6 +791,29 @@ def training_flow(
                 )
 
             mlflow.log_metric("n_folds_completed", float(len(fold_results)))
+
+            # Log cost analysis after training (#683)
+            _total_training_seconds = sum(
+                fr.get("training_time_seconds", 0.0)
+                for fr in fold_results
+                if isinstance(fr, dict)
+            )
+            _setup_seconds = 0.0
+            try:
+                from minivess.observability.infrastructure_timing import (
+                    parse_setup_timing,
+                )
+
+                _setup_durations = parse_setup_timing(Path.cwd() / "timing_setup.txt")
+                _setup_seconds = _setup_durations.get("setup_total", 0.0)
+            except Exception:
+                pass
+            if _total_training_seconds > 0 or _setup_seconds > 0:
+                log_cost_analysis(
+                    setup_seconds=_setup_seconds,
+                    training_seconds=_total_training_seconds,
+                    epoch_count=max_epochs * len(fold_results),
+                )
 
     except Exception:
         logger.warning("Failed to open/finalize MLflow run", exc_info=True)
