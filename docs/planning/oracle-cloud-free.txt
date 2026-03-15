@@ -1,0 +1,30 @@
+$ oci iam availability-domain list
+
+{
+  "data": [
+    {
+      "compartment-id": "ocid1.tenancy.oc1..aaaaaaaakhf2crjio72y5nlwy53trgkzjlztpxar7m4xaxeutdwwe3ejdpuq",
+      "id": "ocid1.availabilitydomain.oc1..aaaaaaaaa2artt5wizbqvwl3rgptylx2l7jqbnyv4dygcfvlrd3dphvi3mdq",
+      "name": "dCPK:EU-FRANKFURT-1-AD-1"
+    },
+    {
+      "compartment-id": "ocid1.tenancy.oc1..aaaaaaaakhf2crjio72y5nlwy53trgkzjlztpxar7m4xaxeutdwwe3ejdpuq",
+      "id": "ocid1.availabilitydomain.oc1..aaaaaaaalcdcbl7u6akbmkojxhrozpj2v7yavqqydkj3ytyjbt47lnoqnm2q",
+      "name": "dCPK:EU-FRANKFURT-1-AD-2"
+    },
+    {
+      "compartment-id": "ocid1.tenancy.oc1..aaaaaaaakhf2crjio72y5nlwy53trgkzjlztpxar7m4xaxeutdwwe3ejdpuq",
+      "id": "ocid1.availabilitydomain.oc1..aaaaaaaaiifj24st3w4j7cowuo3pmqcuqwjapjv435vtjmgh5j7q3flguwna",
+      "name": "dCPK:EU-FRANKFURT-1-AD-3"
+    }
+  ]
+}
+
+You can find out more about Cloud Shell, the CLI and the SDKs here:
+
+    *  Cloud Shell Overview: https://docs.oracle.com/en-us/iaas/Content/API/Concepts/cloudshellintro.htm
+    *  OCI CLI Overview: https://docs.oracle.com/iaas/Content/API/Concepts/cliconcepts.htm
+    *  OCI Interactive CLI Overview: https://docs.oracle.com/en-us/iaas/Content/API/SDKDocs/cliusing_topic-Using_Interactive_Mode.htm
+    *  OCI SDKs Guides: https://docs.oracle.com/en-us/iaas/Content/API/Concepts/sdks.htm
+    *  OCI SDKs Cloud Shell Quickstarts: https://docs.oracle.com/en-us/iaas/Content/API/Concepts/developerquickstarts.htm
+    *  Oracle Cloud Infrastructure CLI Command Reference: https://docs.oracle.com/en-us/iaas/tools/oci-cli/latest/oci_cli_docs/
