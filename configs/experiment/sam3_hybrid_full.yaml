@@ -1,0 +1,41 @@
+# @package _global_
+# SAM3 Hybrid Full-Dataset Training (≥24 GB GPU required)
+#
+# Tests H4: whether SAM3 hybrid converges with sufficient data.
+# Full MiniVess dataset: 47 train volumes, 3 folds, 50 epochs.
+# Conservative lr=1e-4 for frozen encoder (H5 mitigation).
+#
+# Run on cloud GPU (RTX 4090, A100, etc.) via SkyPilot:
+#   sky launch deployment/skypilot/dev_runpod.yaml --env MODEL_FAMILY=sam3_hybrid
+#   (then set EXPERIMENT=sam3_hybrid_full in the run block)
+defaults:
+  - override /model: sam3_hybrid
+  - override /checkpoint: lightweight
+
+experiment_name: sam3_hybrid_full
+model: sam3_hybrid
+model_family: sam3_hybrid
+losses:
+  - cbdice_cldice
+max_epochs: 50
+num_folds: 3
+debug: false
+
+# Validate every 5 epochs (balance cost vs insight)
+val_interval: 5
+
+# Conservative LR for frozen ViT-32L encoder (H5 mitigation)
+learning_rate: 0.0001
+
+# Full dataset (no subsetting)
+splits_file: configs/splits/3fold_seed42.json
+
+# DVC provenance
+data:
+  dvc_commit: HEAD
+
+architecture_params:
+  backbone: vit_32l
+  input_size: 1008
+  embed_dim: 1024
+  pretrained: false

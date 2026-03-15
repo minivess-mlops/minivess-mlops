@@ -44,9 +44,28 @@ SDPA avoids materializing the full attention matrix, reducing encoder peak from
 model = Sam3Model.from_pretrained(
     "facebook/sam3",
     attn_implementation="sdpa",  # CRITICAL for 8 GB GPUs
-    torch_dtype=torch.float16,
+    torch_dtype=torch.float16,   # TODO: switch to bfloat16 on Ampere+ (see below)
 )
 ```
+
+### BF16 vs FP16 Encoder Dtype (CRITICAL — 2026-03-15)
+
+**SAM3's official HuggingFace examples use `torch.bfloat16`, not `torch.float16`.**
+
+Current `sam3_backbone.py` uses FP16 because it was written for RTX 2070 Super
+(Turing, no BF16 support). On cloud GPUs (Ampere+: A100, RTX 3090/4090) we
+SHOULD use BF16 for better numerical stability:
+
+- FP16 max = 65504. BF16 range = same as FP32 (3.4e38)
+- FP16 overflow → Inf → NaN in downstream operations
+- Known pattern: models pretrained with BF16 → NaN when run in FP16
+
+**Fix** (TODO): Auto-detect and prefer BF16:
+```python
+torch_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+```
+
+See: `.claude/metalearning/2026-03-15-sam3-bf16-fp16-fuckup.md`
 
 ### MONAI Dimension Order (B, C, H, W, D) — NOT (B, C, D, H, W)
 

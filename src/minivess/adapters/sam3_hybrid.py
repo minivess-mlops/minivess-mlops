@@ -30,8 +30,6 @@ from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, Segmentation
 from minivess.adapters.sam3_backbone import SAM3_FPN_DIM, SAM3_INPUT_SIZE, Sam3Backbone
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from minivess.config.models import ModelConfig
 
 logger = logging.getLogger(__name__)
@@ -200,11 +198,34 @@ class Sam3HybridAdapter(ModelAdapter):
         with torch.no_grad():
             sam_features = self._extract_sam_volume_features(images)
 
+        # SAM3 encoder runs in FP16 (torch_dtype=float16 in from_pretrained).
+        # Cast to FP32 before passing to trainable FP32 modules (axial_proj, fusion).
+        sam_features = sam_features.float()
+
+        # NaN diagnostic: check SAM features after FP16→FP32 cast
+        if not torch.isfinite(sam_features).all():
+            logger.warning(
+                "NaN/Inf in SAM features after FP32 cast: shape=%s",
+                tuple(sam_features.shape),
+            )
+            sam_features = torch.nan_to_num(
+                sam_features, nan=0.0, posinf=0.0, neginf=0.0
+            )
+
         # Axial smoothing of stacked 2D features
         sam_features = self.axial_proj(sam_features)
 
         # DynUNet forward (full 3D, trainable)
         logits: Tensor = self.dynunet(images)
+
+        # NaN diagnostic: check DynUNet output separately
+        if not torch.isfinite(logits).all():
+            logger.warning(
+                "NaN/Inf in DynUNet logits: shape=%s, nan=%d, inf=%d",
+                tuple(logits.shape),
+                torch.isnan(logits).sum().item(),
+                torch.isinf(logits).sum().item(),
+            )
 
         # Fuse SAM features at the output level
         # Resize SAM features to match logits spatial dims
@@ -230,6 +251,16 @@ class Sam3HybridAdapter(ModelAdapter):
         gate = torch.sigmoid(self.fusion.gate_alpha)
         logits = logits + gate * sam_projected
 
+        # Final NaN guard on fused logits
+        if not torch.isfinite(logits).all():
+            logger.warning(
+                "NaN/Inf in fused logits (after gate): nan=%d, inf=%d / %d total",
+                torch.isnan(logits).sum().item(),
+                torch.isinf(logits).sum().item(),
+                logits.numel(),
+            )
+            logits = torch.nan_to_num(logits, nan=0.0, posinf=0.0, neginf=0.0)
+
         return self._build_output(logits, "sam3_hybrid")
 
     def get_config(self) -> AdapterConfigInfo:
@@ -240,53 +271,6 @@ class Sam3HybridAdapter(ModelAdapter):
             input_size=SAM3_INPUT_SIZE,
             fusion="gated_residual",
         )
-
-    def save_checkpoint(self, path: Path) -> None:
-        """Save adapter state dict (no self.net dependency)."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({"model_state_dict": self.state_dict()}, path)
-
-    def load_checkpoint(self, path: Path) -> None:
-        """Load adapter state dict (no self.net dependency)."""
-        payload = torch.load(path, map_location="cpu", weights_only=True)
-        if isinstance(payload, dict) and "model_state_dict" in payload:
-            self.load_state_dict(payload["model_state_dict"])
-        else:
-            self.load_state_dict(payload)
-
-    def export_onnx(self, path: Path, example_input: Tensor) -> None:
-        """Export adapter to ONNX (no self.net dependency).
-
-        Uses a thin wrapper to return raw logits tensor instead of
-        SegmentationOutput, which ONNX tracing cannot handle.
-        """
-        import warnings
-
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.eval()
-
-        class _LogitsWrapper(torch.nn.Module):
-            def __init__(self, adapter: Sam3HybridAdapter) -> None:
-                super().__init__()
-                self.adapter = adapter
-
-            def forward(self, x: Tensor) -> Tensor:
-                result: Tensor = self.adapter(x).logits
-                return result
-
-        wrapper = _LogitsWrapper(self)
-        wrapper.eval()
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            torch.onnx.export(
-                wrapper,
-                (example_input,),
-                str(path),
-                input_names=["images"],
-                output_names=["logits"],
-                opset_version=17,
-                dynamo=False,
-            )
 
     def trainable_parameters(self) -> int:
         """Count trainable parameters (DynUNet + fusion)."""

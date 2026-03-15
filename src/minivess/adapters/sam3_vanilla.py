@@ -34,8 +34,6 @@ from minivess.adapters.sam3_backbone import SAM3_INPUT_SIZE, Sam3Backbone
 from minivess.adapters.sam3_decoder import Sam3MaskDecoder
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from minivess.config.models import ModelConfig
 
 logger = logging.getLogger(__name__)
@@ -114,8 +112,8 @@ class Sam3VanillaAdapter(ModelAdapter):
             two_class = self.decoder.binary_to_2class(binary_logits)  # (B, 2, H, W)
             slice_logits.append(two_class)
 
-        # Stack along depth (last dim): (B, 2, H, W, D) — MONAI convention
-        logits_3d = torch.stack(slice_logits, dim=4)
+        # Stack along depth dim: (B, 2, D, H, W) — SegmentationOutput convention
+        logits_3d = torch.stack(slice_logits, dim=2)
 
         return self._build_output(logits_3d, "sam3_vanilla")
 
@@ -137,53 +135,6 @@ class Sam3VanillaAdapter(ModelAdapter):
             input_size=SAM3_INPUT_SIZE,
             encoder_frozen=True,
         )
-
-    def save_checkpoint(self, path: Path) -> None:
-        """Save adapter state dict (no self.net dependency)."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({"model_state_dict": self.state_dict()}, path)
-
-    def load_checkpoint(self, path: Path) -> None:
-        """Load adapter state dict (no self.net dependency)."""
-        payload = torch.load(path, map_location="cpu", weights_only=True)
-        if isinstance(payload, dict) and "model_state_dict" in payload:
-            self.load_state_dict(payload["model_state_dict"])
-        else:
-            self.load_state_dict(payload)
-
-    def export_onnx(self, path: Path, example_input: Tensor) -> None:
-        """Export adapter to ONNX (no self.net dependency).
-
-        Uses a thin wrapper to return raw logits tensor instead of
-        SegmentationOutput, which ONNX tracing cannot handle.
-        """
-        import warnings
-
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.eval()
-
-        class _LogitsWrapper(torch.nn.Module):
-            def __init__(self, adapter: Sam3VanillaAdapter) -> None:
-                super().__init__()
-                self.adapter = adapter
-
-            def forward(self, x: Tensor) -> Tensor:
-                result: Tensor = self.adapter(x).logits
-                return result
-
-        wrapper = _LogitsWrapper(self)
-        wrapper.eval()
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            torch.onnx.export(
-                wrapper,
-                (example_input,),
-                str(path),
-                input_names=["images"],
-                output_names=["logits"],
-                opset_version=17,
-                dynamo=False,
-            )
 
     def trainable_parameters(self) -> int:
         """Count trainable parameters (decoder only)."""
