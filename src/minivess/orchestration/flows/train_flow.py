@@ -497,9 +497,30 @@ def train_one_fold_task(
             msg = "; ".join(f"{r.name}: {r.message}" for r in errors)
             raise RuntimeError(f"Pre-training check failed: {msg}")
 
+        # --- Check for spot preemption resume ---
+        resume_state = check_resume_state_task(checkpoint_dir)
+        start_epoch = 0
+        if resume_state is not None:
+            resume_epoch = resume_state.get("epoch", 0)
+            epoch_pth = checkpoint_dir / "epoch_latest.pth"
+            if epoch_pth.exists():
+                logger.info(
+                    "Spot recovery: loading epoch_latest.pth (epoch %d)", resume_epoch
+                )
+                state_dict = torch.load(
+                    epoch_pth, map_location=device_str, weights_only=True
+                )
+                model.load_state_dict(state_dict)
+                start_epoch = resume_epoch + 1
+                logger.info("Resuming training from epoch %d", start_epoch)
+
         # --- Training ---
         fit_result = trainer.fit(
-            train_loader, val_loader, checkpoint_dir=checkpoint_dir, fold_id=fold_id
+            train_loader,
+            val_loader,
+            checkpoint_dir=checkpoint_dir,
+            fold_id=fold_id,
+            start_epoch=start_epoch,
         )
 
         # --- Post-training diagnostics (RC17: always run) ---

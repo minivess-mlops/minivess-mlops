@@ -41,3 +41,34 @@ def atomic_torch_save(obj: Any, path: Path) -> None:
         # Clean up partial tmp file on any failure
         tmp_path.unlink(missing_ok=True)
         raise
+
+
+def atomic_text_write(content: str, path: Path, encoding: str = "utf-8") -> None:
+    """Write text atomically using tmp + os.replace().
+
+    Parameters
+    ----------
+    content:
+        Text content to write.
+    path:
+        Destination file path.
+    encoding:
+        Text encoding (default utf-8).
+
+    Raises
+    ------
+    OSError
+        If the write fails. The original file (if any) is preserved.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with open(tmp_path, "w", encoding=encoding) as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise

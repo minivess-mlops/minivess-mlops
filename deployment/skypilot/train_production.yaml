@@ -38,6 +38,15 @@ resources:
     - cloud: lambda
       accelerators: A100:1
 
+# Checkpoint persistence via cloud storage MOUNT_CACHED
+# Writes go to local SSD cache, async-mirrored to cloud bucket in background.
+# On spot preemption: SkyPilot recovers → pulls checkpoint from bucket → resumes.
+# Bucket name: set GCS_CHECKPOINT_BUCKET in .env (default: minivess-mlops-checkpoints)
+file_mounts:
+  /app/checkpoints:
+    name: ${GCS_CHECKPOINT_BUCKET:-minivess-mlops-checkpoints}
+    mode: MOUNT
+
 envs:
   # Model to train (override with --env MODEL_FAMILY=...)
   MODEL_FAMILY: dynunet

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -21,6 +22,7 @@ from torch.optim import SGD, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.profiler import record_function
 
+from minivess.pipeline.checkpoint_utils import atomic_text_write, atomic_torch_save
 from minivess.pipeline.loss_functions import build_loss_function
 from minivess.pipeline.multi_metric_tracker import (
     MetricCheckpoint,
@@ -442,6 +444,20 @@ class SegmentationTrainer:
                         collected_labels.append(label_np)
 
         avg_loss = running_loss / max(num_batches, 1)
+
+        # NaN guard: FP16 encoder overflow or degenerate patches can produce
+        # NaN validation loss. Log a warning but don't crash — training should
+        # continue even if a single validation epoch produces NaN.
+        # Training NaN still hard-fails (see train_epoch). Issue #715.
+        if not math.isfinite(avg_loss):
+            logger.warning(
+                "Non-finite val_loss detected (%.4f over %d batches). "
+                "Possible FP16 overflow in encoder — see issue #715. "
+                "Logging NaN but continuing training.",
+                avg_loss,
+                num_batches,
+            )
+
         epoch_metrics: dict[str, float] = {}
         if self.metrics is not None:
             epoch_metrics = self.metrics.compute().to_dict()
@@ -509,6 +525,7 @@ class SegmentationTrainer:
         fold_id: int = 0,
         checkpoint_dir: Path | None = None,
         profiling_config: ProfilingConfig | None = None,
+        start_epoch: int = 0,
     ) -> dict[str, Any]:
         """Full training loop with multi-metric early stopping.
 
@@ -524,6 +541,9 @@ class SegmentationTrainer:
         checkpoint_dir:
             Directory for saving checkpoints. If ``None``, no checkpoints
             are saved (metric history will still be tracked in-memory).
+        start_epoch:
+            Epoch to resume from (default 0 = fresh start). Used for
+            spot preemption recovery with epoch_latest checkpoint.
 
         Returns
         -------
@@ -572,7 +592,10 @@ class SegmentationTrainer:
         _exit_stack = ExitStack()
         _prof = _exit_stack.enter_context(_prof_ctx)
 
-        for epoch in range(self.config.max_epochs):
+        if start_epoch > 0:
+            logger.info("Resuming training from epoch %d", start_epoch)
+
+        for epoch in range(start_epoch, self.config.max_epochs):
             t0 = time.perf_counter()
             train_result = self.train_epoch(train_loader)
 
@@ -797,12 +820,14 @@ class SegmentationTrainer:
                     "best_val_loss": _best_val_loss,
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
-                epoch_latest_path = checkpoint_dir / "epoch_latest.yaml"
-                epoch_latest_path.write_text(yaml.dump(_epoch_state), encoding="utf-8")
-                torch.save(
+                # Atomic write order: .pth first, then .yaml
+                # If preempted after .pth but before .yaml, resume detects stale yaml
+                atomic_torch_save(
                     self.model.state_dict(),
                     checkpoint_dir / "epoch_latest.pth",
                 )
+                epoch_latest_path = checkpoint_dir / "epoch_latest.yaml"
+                atomic_text_write(yaml.dump(_epoch_state), epoch_latest_path)
 
             # Step profiler (per-EPOCH, not per-batch — RC3)
             if _prof is not None:
