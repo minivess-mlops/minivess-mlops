@@ -49,11 +49,11 @@ sections:
     table: outputs/analysis/comparison_table.tex
 
   - id: R3b
-    title: "Multi-Model Comparison (DynUNet vs SAM3 variants)"
+    title: "Multi-Model Comparison (DynUNet vs Mamba vs SAM3 variants)"
     tex_file: results/results-03-models.tex
     status: BLOCKED
-    blocked_by: "SAM3 GPU runs pending (target 2026-03-20)"
-    note: "This is the critical path item for paper submission"
+    blocked_by: "SAM3 GPU runs pending (target 2026-03-20); Mamba adapter not yet implemented"
+    note: "Critical path item for paper submission. Covers all 4 model families: DynUNet (done), Mamba (planned), SAM3 Vanilla + Hybrid (GPU pending), VesselFM (R3c, external data only)"
 
   - id: R3c
     title: "Foundation Model Comparison (VesselFM — external datasets only)"

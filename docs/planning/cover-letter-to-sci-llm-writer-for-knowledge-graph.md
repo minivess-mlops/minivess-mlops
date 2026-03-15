@@ -82,7 +82,10 @@ detection, auto-retraining — without writing infrastructure code.
 > a fully automated, cloud-agnostic, model-agnostic MLOps platform that transforms
 > experiment definition from a programming task into a YAML configuration task.
 > We validate the platform on 3D vascular segmentation using four diverse model families
-> and demonstrate MLOps Maturity Level 4 in a single-researcher academic setting."
+> and demonstrate MLOps Maturity Level 4 architecture in a single-researcher academic setting."
+
+⚠️ The verbatim seed uses "Level 4 architecture." Do NOT simplify to "achieve Level 4"
+until the Evidently → Prefect retraining loop is verified end-to-end (§4, honest status: Level 3.5).
 
 ---
 
@@ -206,8 +209,12 @@ Write the introduction in this order. Target: 900–1200 words for Nature Protoc
 **Decision**: Hedge until R3b (SAM3) + R3c (VesselFM) + Mamba GPU runs are complete.
 The framing may shift based on those results.
 
-**Working title**: *ARBOR: An Agentic Reproducible Biomedical Operations Research Platform
-for Scalable 3D Segmentation with MLOps Maturity Level 4*
+**Working title (draft)**: *ARBOR: An Agentic Reproducible Biomedical Operations Research
+Platform for Scalable 3D Segmentation Targeting MLOps Maturity Level 4*
+
+⚠️ **Title note**: Do NOT say "achieving Level 4" in the title until the Evidently →
+Prefect auto-retraining loop is verified end-to-end (see §4). Use "targeting" or
+"with Level 4 architecture" until then.
 
 ### Section Word Count Budget (for sci-llm-writer)
 
@@ -284,8 +291,13 @@ the platform's model-agnostic architecture. One YAML profile + one ModelAdapter 
   **MUST evaluate on DeepVess (Cornell) and/or TubeNet 2PM (UCL) only.**
 - **Results available**: NO — pending GPU runs on external datasets only
 - **Blocks**: R3c (foundation model comparison section)
-- **Paper framing**: Limitation L1 — the platform correctly identifies and prevents
-  this evaluation error; frame as "the platform enables rigorous fair evaluation"
+- **Paper framing**: Limitation L1 — the leakage was identified through careful human
+  literature review of Wittmann et al. (2024), NOT by an automated platform mechanism.
+  ⚠️ Do NOT write "the platform detected the leakage" — that would be a false claim.
+  Correct framing: "We identified data leakage through literature review; ARBOR's
+  config-driven evaluation design makes it trivial to re-route evaluation to
+  non-contaminated datasets — demonstrating platform flexibility in the face of
+  real-world evaluation pitfalls."
 - **Citation keys for external datasets** (bibliography.yaml):
   - DeepVess: `kaufmann_2020_deepvess` (Cornell eCommons — verify author/year before submission)
   - TubeNet: `schauss_2021_tubenet` (UCL Figshare — verify author/year before submission)
@@ -357,7 +369,12 @@ Source: `knowledge-graph/manuscript/results.yaml`
 - 35+ artifacts produced by PipelineTriggerChain in 8.26 seconds
 - Timestamp: 2026-03-02T03:32:10Z
 - Source: `outputs/pipeline/trigger_chain_results.json`
-- **THIS IS THE KEYSTONE RESULT** — proves the platform actually works end-to-end
+- **THIS IS THE KEYSTONE RESULT** — proves the pipeline produces consistent artifacts
+- ⚠️ **Scope**: 73/73 is artifact INTEGRITY on one machine (author's workstation, one timestamp).
+  This is NOT cross-machine reproducibility. Cross-machine replication is L5 (planned, required
+  for Nature Protocols). Do NOT write R1 as "we demonstrate cross-machine reproducibility" —
+  write "we verify the pipeline produces 73 expected artifacts in 8.26 seconds; independent
+  replication is planned."
 
 ### R2 — Developer Experience Benchmark
 - Target metrics: time from git clone to first training run (<15 min), manual steps (0)
@@ -420,7 +437,7 @@ Source: `knowledge-graph/manuscript/methods.yaml` — full key_points for each s
 | M6 | Model Adapter Architecture | ModelAdapter ABC; 3 abstract methods; build_adapter() factory |
 | M7 | Training Pipeline | cbdice_cldice default; AMP ON train / OFF val; Optuna ASHA |
 | M8 | Evaluation and Analysis | DSC + clDice + MASD; bootstrap CIs; conformal prediction; DuckDB |
-| M9 | Observability Stack | MLflow + Evidently drift + Langfuse LLM tracing + Prometheus/Grafana |
+| M9 | Observability Stack | MLflow + Evidently drift + Prometheus/Grafana for model/infra; Langfuse for agentic dev tracing (separate concern — do NOT list Langfuse as production model observability in the methods section; it belongs in the M12 agentic appendix) |
 | M10 | Deployment and Serving | ONNX + BentoML + Gradio; NVIDIA MIG; champion tagging |
 | M11 | Configuration Architecture | Hydra-zen + Dynaconf; zero hardcoded values; .env.example as SSoT |
 | M12 | Agentic Development (Appendix) | 52-node probabilistic KG; TDD-first; metalearning docs; LSG novelty |
