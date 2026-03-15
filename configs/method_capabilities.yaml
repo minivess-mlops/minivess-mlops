@@ -68,3 +68,4 @@ not_implemented:
   - sam3_lora
   - multitask_dynunet
   - custom
+  - mambavesselnet  # planned — adapter in progress (feat/mambavesselnet #737)

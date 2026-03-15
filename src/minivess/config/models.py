@@ -23,6 +23,7 @@ class ModelFamily(StrEnum):
     SAM3_HYBRID = "sam3_hybrid"
     MULTITASK_DYNUNET = "multitask_dynunet"
     ULIKE_MAMBA = "ulike_mamba"
+    MAMBAVESSELNET = "mambavesselnet"
     CUSTOM = "custom"
 
 

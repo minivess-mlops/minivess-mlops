@@ -6,8 +6,8 @@
   "current_phase": null,
   "inner_iteration": 0,
   "tasks": {
-    "T00": {"status": "pending", "title": "Docker base image: mamba-ssm CUDA compilation strategy", "issue": 738},
-    "T01": {"status": "pending", "title": "ModelFamily enum + [mamba-ssm] optional group + availability gate", "issue": 739},
+    "T00": {"status": "DONE", "title": "Docker base image: mamba-ssm CUDA compilation strategy", "issue": 738, "commit": "399c24f"},
+    "T01": {"status": "IN_PROGRESS", "title": "ModelFamily enum + [mamba-ssm] optional group + availability gate", "issue": 739},
     "T02": {"status": "pending", "title": "MlpChannel (channel MLP, CPU, no mamba dependency)", "issue": 740},
     "T03": {"status": "pending", "title": "BidirectionalMambaLayer (CPU shape + GPU real)", "issue": 740},
     "T04": {"status": "pending", "title": "MambaBlock (pre-norm + BidirMamba + MlpChannel)", "issue": 740},
