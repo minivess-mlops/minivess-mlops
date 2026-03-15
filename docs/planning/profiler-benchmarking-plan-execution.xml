@@ -1,0 +1,885 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Profiler &amp; Benchmarking Execution Plan
+  ==========================================
+
+  Goal: Integrated profiling and benchmarking as DEFAULT infrastructure for every
+  training and fine-tuning run. "Better to profile too much than too little" — the
+  profiling audit trail enables regression debugging when performance drops due to
+  software updates, hardware changes, or cloud provider differences.
+
+  Architecture:
+    trainer.py ──record_function──> torch.profiler ──> MLflow artifacts
+    trainer.py ──epoch_summary──> system_monitor ──> MLflow metrics
+    train_flow.py ──post_training──> WeightWatcher ──> MLflow metrics
+    gpu_benchmark.py ──one_shot──> YAML cache ──> MLflow params
+
+  Design Principle:
+    Profiling is NOT optional overhead — it is core infrastructure. Every model run
+    generates profiling artifacts by default. The overhead budget is &lt;=10% per
+    individual profiled epoch, &lt;=5% amortized across full run.
+    The YAML config has an "enabled" switch for edge cases, but default is ON.
+
+  Metric Prefix Taxonomy:
+    prof_     — torch.profiler metrics (overhead, fractions, trace size)
+    diag_ww_  — WeightWatcher diagnostics (alpha, stable_rank)
+    diag_     — pre-training checks, other model diagnostics
+    sys_bench_— GPU benchmark cache params (measured hardware capabilities)
+    sys_gpu_  — existing per-epoch GPU utilization (from system_monitor.py)
+
+  Artifact Path Taxonomy:
+    profiling/     — torch.profiler outputs (traces, summaries)
+    diagnostics/   — pre-training checks, WeightWatcher, Cleanlab
+
+  Parent issue: #643 (closes #564 via Phase 3)
+  Sub-issues: #644, #645, #646, #647, #648, #649, #650, #651
+  Related P2 issues: #652 (CodSpeed alternatives), #653 (Grafana perf dashboard)
+  Created: 2026-03-13
+  Review round: 2
+
+  Reviewers (round 1):
+    1. Training Loop Reviewer — trainer.py hooks, overhead, correctness
+    2. Config Architecture Reviewer — Hydra groups, ProfilingConfig, base.yaml
+    3. MLflow Artifact Reviewer — artifact paths, metric naming, storage efficiency
+-->
+
+<plan xmlns="urn:minivess:tdd-plan:v1"
+      title="Profiler and Benchmarking Infrastructure"
+      parent_issue="https://github.com/petteriTeikari/minivess-mlops/issues/643"
+      created="2026-03-13"
+      review_round="2">
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- REVIEW CHANGELOG (round 1 → round 2)                              -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <review_changelog round="1">
+    <change id="RC1" severity="critical" reviewer="TrainingLoop" status="ACCEPTED">
+      FIXED: "data_loading" record_function wrapped device transfer (lines 293-296),
+      NOT the DataLoader iteration. Renamed to "data_to_device". DataLoader stall time
+      is captured automatically by torch.profiler CPU activity tracing between named
+      regions. Added "zero_grad" and "metrics_update" regions for completeness.
+    </change>
+    <change id="RC2" severity="high" reviewer="TrainingLoop" status="ACCEPTED">
+      FIXED: schedule(wait=0, warmup=1, active=N-1) produces 0 active steps when N=1.
+      Changed to schedule(wait=0, warmup=0, active=N). CUDA kernels are already JIT-compiled
+      by model instantiation, so warmup is unnecessary at epoch granularity. Config
+      validation changed from epochs&gt;=1 to epochs&gt;=1 only when enabled=True.
+    </change>
+    <change id="RC3" severity="high" reviewer="TrainingLoop" status="ACCEPTED">
+      ADDED: Explicit documentation that prof.step() is per-EPOCH (not per-batch).
+      Each profiled epoch's Chrome trace contains all batches. This is a design decision
+      for simpler schedule semantics and smaller trace file count.
+    </change>
+    <change id="RC4" severity="critical" reviewer="ConfigArch" status="ACCEPTED">
+      FIXED: ProfilingConfig is now STANDALONE — NOT a field on TrainingConfig.
+      Constructed from config_dict.get("profiling", {}) in train_one_fold_task()
+      and passed separately to build_profiler_context(). This avoids coupling
+      infrastructure instrumentation to scientific hyperparameters.
+    </change>
+    <change id="RC5" severity="high" reviewer="ConfigArch" status="ACCEPTED">
+      FIXED: ProfilingConfig defined in models.py (consistent with all other config
+      classes), NOT in separate profiling.py. Removed unnecessary file split.
+    </change>
+    <change id="RC6" severity="high" reviewer="ConfigArch" status="ACCEPTED">
+      ADDED: Update debug experiment configs to include
+      "- override /profiling: debug" in their defaults lists.
+    </change>
+    <change id="RC7" severity="high" reviewer="ConfigArch" status="ACCEPTED">
+      FIXED: train_one_fold_task() now explicitly constructs ProfilingConfig from
+      config_dict and passes it as separate argument to trainer.fit().
+    </change>
+    <change id="RC8" severity="high" reviewer="MLflow" status="ACCEPTED">
+      FIXED: Split metric prefixes: prof_ for profiler, diag_ww_ for WeightWatcher,
+      sys_bench_ for GPU benchmark cache. Avoids conflating three different concerns
+      under one prefix.
+    </change>
+    <change id="RC9" severity="high" reviewer="MLflow" status="ACCEPTED">
+      ADDED: Gzip compression for Chrome traces (.json.gz). Size gate: traces
+      exceeding 50 MB uncompressed skip upload and log warning + summary only.
+      Traces written to checkpoint_dir/profiling/ (volume-mounted), cleaned up
+      after MLflow upload.
+    </change>
+    <change id="RC10" severity="high" reviewer="MLflow" status="ACCEPTED">
+      ADDED: DuckDB extraction pipeline update — prof_* and diag_* metrics excluded
+      from training_metrics table via prefix filter. Added to T1.3 scope.
+    </change>
+    <change id="RC11" severity="high" reviewer="MLflow" status="ACCEPTED">
+      FIXED: log_profiling_artifacts() method receives pre-computed data (trace_paths,
+      key_averages_text, summary dict), NOT the profiler object. Keeps ExperimentTracker
+      decoupled from torch.profiler internals.
+    </change>
+    <change id="RC12" severity="medium" reviewer="MLflow" status="ACCEPTED">
+      FIXED: Artifact paths split — profiling/ for torch.profiler outputs,
+      diagnostics/ for pre-training checks and WeightWatcher.
+    </change>
+    <change id="RC13" severity="medium" reviewer="TrainingLoop" status="ACCEPTED">
+      ADDED: Additional validate_epoch record_function regions: val_data_to_device,
+      val_forward, val_extended_metrics. Covers both code paths (with/without val_roi_size).
+    </change>
+    <change id="RC14" severity="medium" reviewer="TrainingLoop" status="ACCEPTED">
+      ADDED: ProfilingSummary.validation_profiled bool field. Fraction metrics
+      documentation notes that validation time is excluded when _skip_all_val is True.
+    </change>
+    <change id="RC15" severity="medium" reviewer="TrainingLoop" status="ACCEPTED">
+      FIXED: total_profiled_epochs counted at runtime via on_trace_ready callback
+      counter, not derived from config. Handles early stopping correctly.
+    </change>
+    <change id="RC16" severity="medium" reviewer="MLflow" status="ACCEPTED">
+      FIXED: CUDA memory metrics renamed to prof_cuda_peak_allocated_mb and
+      prof_cuda_peak_reserved_mb. Disambiguates from nvidia-smi readings
+      (sys_gpu_memory_used_mb) and MLflow system metrics.
+    </change>
+    <change id="RC17" severity="medium" reviewer="ConfigArch" status="ACCEPTED">
+      RENAMED: T2.3 test from "test_diagnostics_skipped_when_profiling_disabled" to
+      "test_diagnostics_run_even_when_profiling_disabled". Diagnostics always run
+      (they are free); ProfilingConfig.enabled controls only torch.profiler.
+    </change>
+  </review_changelog>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 0: Config Infrastructure                                     -->
+  <!-- ProfilingConfig model + Hydra YAML group + base.yaml integration   -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <phase id="0" name="Config Infrastructure">
+    <description>
+      Create ProfilingConfig Pydantic model and Hydra config group. This is the
+      foundation — all other tasks read profiling settings from this config.
+      Default: profiling enabled, 5 profiled epochs for real runs, 2 for debug.
+
+      ARCHITECTURAL DECISION (RC4): ProfilingConfig is STANDALONE — not a field
+      on TrainingConfig. It is constructed from config_dict.get("profiling", {})
+      in train_one_fold_task() and passed separately to build_profiler_context().
+      Rationale: profiling is infrastructure instrumentation, not a scientific
+      hyperparameter. Coupling it to TrainingConfig pollutes the training contract.
+    </description>
+
+    <task id="T0.1"
+          issue_title="feat(config): add Hydra profiling config group + ProfilingConfig model"
+          issue_ref="https://github.com/petteriTeikari/minivess-mlops/issues/644"
+          priority="critical"
+          effort_hours="3">
+      <description>
+        Create ProfilingConfig Pydantic model in src/minivess/config/models.py
+        (after CheckpointConfig, BEFORE TrainingConfig — NOT as a field on
+        TrainingConfig). ProfilingConfig is standalone: constructed separately
+        from config_dict in train_one_fold_task().
+
+        Create configs/profiling/{default,debug,disabled}.yaml (NO @package
+        declaration — Hydra config group files default to their group name).
+
+        Update configs/base.yaml defaults list with "- profiling: default".
+
+        Update debug experiment configs to include "- override /profiling: debug".
+
+        Config fields:
+        - enabled: bool (default True — profiling is core infrastructure)
+        - epochs: int (default 5 — how many epochs to actively profile)
+        - activities: list[str] (default ["cpu", "cuda"])
+        - profile_memory: bool (default True)
+        - record_shapes: bool (default False — adds ~5-10% overhead)
+        - with_flops: bool (default True — low overhead, high value)
+        - with_stack: bool (default False — adds ~10-15% overhead)
+        - export_chrome_trace: bool (default True)
+        - compress_traces: bool (default True — gzip Chrome trace JSON)
+        - trace_size_limit_mb: int (default 50 — skip upload if larger)
+
+        Validation: epochs &gt;= 1 enforced only when enabled=True (via model_validator).
+        When enabled=False, epochs value is irrelevant.
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/test_profiling_config.py::TestProfilingConfig::test_defaults
+            → ProfilingConfig().enabled is True, epochs==5, activities==["cpu","cuda"]
+          - test_profiling_config_disabled
+            → ProfilingConfig(enabled=False, epochs=0) is valid (no validation error)
+          - test_profiling_config_enabled_epochs_ge_1
+            → ProfilingConfig(enabled=True, epochs=0) raises ValidationError
+          - test_profiling_config_is_not_on_training_config
+            → TrainingConfig has NO "profiling" attribute (standalone)
+          - test_profiling_config_compress_traces_default_true
+            → ProfilingConfig().compress_traces is True
+          - test_base_yaml_includes_profiling_default
+            → configs/base.yaml has "profiling: default" in defaults list
+          - test_debug_configs_override_profiling
+            → debug_single_model.yaml has "override /profiling: debug" in defaults
+          - test_profiling_debug_yaml_epochs_2
+            → configs/profiling/debug.yaml has epochs: 2
+          - test_profiling_disabled_yaml
+            → configs/profiling/disabled.yaml has enabled: false
+          - test_compose_experiment_resolves_profiling
+            → compose_experiment_config() result has "profiling" key
+        </red>
+        <green>
+          - Add ProfilingConfig to src/minivess/config/models.py (standalone class)
+          - Add ProfilingConfig to src/minivess/config/__init__.py exports
+          - Create configs/profiling/default.yaml (enabled: true, epochs: 5)
+          - Create configs/profiling/debug.yaml (enabled: true, epochs: 2)
+          - Create configs/profiling/disabled.yaml (enabled: false)
+          - Add "- profiling: default" to configs/base.yaml defaults list
+          - Add "- override /profiling: debug" to all debug experiment configs
+          - Modify train_one_fold_task() to extract ProfilingConfig from config_dict
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="src/minivess/config/models.py" action="modify"/>
+        <file path="src/minivess/config/__init__.py" action="modify"/>
+        <file path="configs/profiling/default.yaml" action="create"/>
+        <file path="configs/profiling/debug.yaml" action="create"/>
+        <file path="configs/profiling/disabled.yaml" action="create"/>
+        <file path="configs/base.yaml" action="modify"/>
+        <file path="configs/experiment/debug_single_model.yaml" action="modify"/>
+        <file path="configs/experiment/debug_all_models.yaml" action="modify"/>
+        <file path="configs/experiment/debug_full_pipeline.yaml" action="modify"/>
+        <file path="configs/experiment/debug_multi_loss.yaml" action="modify"/>
+        <file path="src/minivess/orchestration/flows/train_flow.py" action="modify"/>
+        <file path="tests/v2/unit/test_profiling_config.py" action="create"/>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 1: PyTorch Profiler Core Integration                        -->
+  <!-- record_function annotations + profile context + MLflow logging     -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <phase id="1" name="PyTorch Profiler Core">
+    <description>
+      Integrate torch.profiler into trainer.py training loop. Seven named regions
+      provide per-operation visibility in training, plus four in validation.
+      The profiler runs for the first N epochs via schedule(), then exports
+      gzip-compressed Chrome traces and summary tables to MLflow.
+
+      DESIGN DECISION (RC1, RC3): record_function regions label device transfer
+      as "data_to_device" (NOT "data_loading"). DataLoader I/O stall time is
+      captured automatically by torch.profiler CPU activity tracing between
+      named regions. prof.step() is called per-EPOCH, not per-batch.
+    </description>
+
+    <task id="T1.1"
+          issue_title="feat(profiling): add record_function annotations to trainer.py"
+          issue_ref="https://github.com/petteriTeikari/minivess-mlops/issues/645"
+          priority="critical"
+          effort_hours="2">
+      <description>
+        Add torch.profiler.record_function context managers to SegmentationTrainer.
+        record_function is a no-op when profiler is not active (zero overhead).
+
+        Training loop regions (train_epoch, 7 regions):
+        1. "zero_grad" — optimizer.zero_grad() (line 300)
+        2. "data_to_device" — batch dict .to(device) + key extraction (lines 293-298)
+        3. "forward" — self.model(images) inside autocast (line 305)
+        4. "loss_compute" — self._compute_loss() inside autocast (line 306)
+        5. "backward_optimizer" — scaler.backward + clip + step (lines 315-323)
+        6. "metrics_update" — self.metrics.update() under no_grad (lines 328-330)
+
+        NOTE: DataLoader stall time (actual I/O bottleneck) is NOT wrapped by
+        record_function. It appears automatically as CPU idle time between
+        "backward_optimizer" end and "data_to_device" start in the profiler trace.
+        This is the standard PyTorch profiler approach for detecting data starvation.
+
+        Validation loop regions (validate_epoch, 4 regions):
+        1. "val_data_to_device" — batch dict .to(device) (lines 368-373)
+        2. "val_forward" — sliding_window_inference OR direct model(images) (lines 384-409)
+        3. "val_loss_compute" — loss computation in validation
+        4. "val_extended_metrics" — extended metrics computation (lines 417-440)
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/test_profiler_annotations.py::test_train_epoch_has_record_function_regions
+            → AST-parse trainer.py, verify 6 record_function calls in train_epoch
+            (Use ast.walk, NOT regex — Rule #16)
+          - test_validate_epoch_has_record_function_regions
+            → AST-parse trainer.py, verify 4 record_function calls in validate_epoch
+          - test_record_function_region_names_train
+            → Names match {"zero_grad","data_to_device","forward","loss_compute",
+              "backward_optimizer","metrics_update"}
+          - test_record_function_region_names_val
+            → Names match {"val_data_to_device","val_forward","val_loss_compute",
+              "val_extended_metrics"}
+          - test_data_to_device_not_named_data_loading
+            → No record_function("data_loading") in trainer.py (banned name)
+        </red>
+        <green>
+          - Import record_function from torch.profiler at top of trainer.py
+          - Add 6 record_function wrappers in train_epoch()
+          - Add 4 record_function wrappers in validate_epoch()
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="src/minivess/pipeline/trainer.py" action="modify"/>
+        <file path="tests/v2/unit/test_profiler_annotations.py" action="create"/>
+      </files>
+    </task>
+
+    <task id="T1.2"
+          issue_title="feat(profiling): integrate torch.profiler.profile context in fit()"
+          issue_ref="https://github.com/petteriTeikari/minivess-mlops/issues/646"
+          priority="critical"
+          effort_hours="4">
+      <description>
+        Wrap the epoch loop in SegmentationTrainer.fit() with torch.profiler.profile
+        context manager. When profiling disabled, use contextlib.nullcontext().
+
+        Create src/minivess/pipeline/profiler_integration.py with:
+        - build_profiler_context(config: ProfilingConfig, output_dir: Path) → ctx mgr
+        - TraceHandler class — on_trace_ready callback that:
+          (a) Saves Chrome trace to output_dir/profiling/ (volume-mounted checkpoint dir)
+          (b) Applies gzip compression if config.compress_traces is True
+          (c) Enforces trace_size_limit_mb gate (skip if too large, log warning)
+          (d) Increments runtime epoch counter (for total_profiled_epochs)
+          (e) Cleans up uncompressed trace after compression
+        - ProfilingSummary dataclass with fields:
+          trace_paths: list[Path], overhead_pct: float, total_profiled_epochs: int,
+          validation_profiled: bool, key_averages_text: str, summary_dict: dict
+
+        SCHEDULE DESIGN (RC2): schedule(wait=0, warmup=0, active=N) — no warmup.
+        CUDA kernels are JIT-compiled during model instantiation, so epoch-level
+        warmup is unnecessary. prof.step() is called per-EPOCH (RC3).
+
+        fit() receives ProfilingConfig as separate parameter (RC4):
+          def fit(self, train_loader, val_loader, *, profiling_config=None, ...):
+              profiling_config = profiling_config or ProfilingConfig(enabled=False)
+              ctx = build_profiler_context(profiling_config, checkpoint_dir)
+              with ctx as prof:
+                  for epoch in range(self.config.max_epochs):
+                      ... existing code ...
+                      if prof is not None:
+                          prof.step()
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/test_profiler_integration.py::test_build_profiler_context_enabled
+            → Returns torch.profiler.profile instance when config.enabled=True
+          - test_build_profiler_context_disabled
+            → Returns contextlib.nullcontext when config.enabled=False
+          - test_trace_handler_saves_chrome_trace_gzipped
+            → TraceHandler writes .json.gz file to output_dir/profiling/
+          - test_trace_handler_skips_large_traces
+            → Trace exceeding trace_size_limit_mb → warning logged, file skipped
+          - test_trace_handler_counts_profiled_epochs
+            → After 3 on_trace_ready calls, handler.profiled_epoch_count == 3
+          - test_profiler_schedule_active_equals_config_epochs
+            → schedule(wait=0, warmup=0, active=N) matches config
+          - test_profiling_summary_has_validation_profiled_field
+            → ProfilingSummary.validation_profiled is bool
+          - test_fit_accepts_profiling_config_parameter
+            → fit() has profiling_config keyword argument
+          - test_early_stopping_produces_partial_profiling
+            → Early stop at epoch 3 with epochs=5 → total_profiled_epochs==3
+        </red>
+        <green>
+          - Create src/minivess/pipeline/profiler_integration.py
+          - Implement build_profiler_context() with schedule(wait=0, warmup=0, active=N)
+          - Implement TraceHandler with gzip + size gate + epoch counter
+          - Implement ProfilingSummary dataclass
+          - Modify fit() to accept profiling_config parameter
+          - Wrap epoch loop with profiler context
+          - Add prof.step() at end of each epoch iteration
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="src/minivess/pipeline/profiler_integration.py" action="create"/>
+        <file path="src/minivess/pipeline/trainer.py" action="modify"/>
+        <file path="tests/v2/unit/test_profiler_integration.py" action="create"/>
+      </files>
+    </task>
+
+    <task id="T1.3"
+          issue_title="feat(profiling): MLflow profiling artifact logging"
+          issue_ref="https://github.com/petteriTeikari/minivess-mlops/issues/647"
+          priority="critical"
+          effort_hours="4">
+      <description>
+        Add log_profiling_artifacts() method to ExperimentTracker in tracking.py.
+        Method receives PRE-COMPUTED data (RC11) — NOT the profiler object:
+
+          def log_profiling_artifacts(
+              self, *,
+              trace_paths: list[Path],          # .json.gz files on disk
+              key_averages_text: str,            # pre-formatted table string
+              summary: dict[str, object],        # serializable summary dict
+              memory_stats: dict[int, dict] | None = None,  # epoch → stats
+          ) → None
+
+        MLflow artifact structure:
+          profiling/                       (NOT diagnostics/ — see RC12)
+          ├── chrome_trace_epoch_{n}.json.gz  (gzipped per profiled epoch)
+          ├── key_averages.txt                (top-20 ops by CUDA time)
+          └── summary.json                    (wall times, overhead, trace sizes)
+
+        MLflow metrics (per-run summary, NOT per-epoch):
+          - prof_overhead_pct: (profiled_epoch_time - unprofiled_epoch_time) / unprofiled
+          - prof_trace_size_mb: total compressed trace file size
+          - prof_data_to_device_fraction: data_to_device time / total step time
+          - prof_forward_fraction: forward time / total step time
+          - prof_backward_fraction: backward_optimizer time / total step time
+          - prof_mixed_precision_enabled: bool (log for context, RC7-low)
+
+        MLflow params (profiling config, logged once per run):
+          - prof_cfg_enabled, prof_cfg_epochs, prof_cfg_profile_memory, etc.
+
+        DuckDB exclusion (RC10): Update duckdb_extraction.py metric routing to
+        exclude prof_* and diag_* prefixes from the training_metrics table.
+
+        Cleanup: After successful upload, remove trace files from checkpoint_dir/profiling/
+        to avoid wasting Docker volume storage (RC9).
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/test_profiling_mlflow.py::test_log_profiling_artifacts_creates_summary
+            → Mock MLflow client, verify log_artifact called with "profiling/summary.json"
+          - test_log_profiling_artifacts_logs_overhead_metric
+            → Verify mlflow.log_metric called with "prof_overhead_pct"
+          - test_log_profiling_artifacts_logs_fraction_metrics
+            → Verify prof_data_to_device_fraction, prof_forward_fraction logged
+          - test_profiling_summary_json_schema
+            → Summary JSON has required keys: wall_times, overhead_pct, trace_sizes,
+              validation_profiled, mixed_precision_enabled
+          - test_key_averages_table_logged_as_text
+            → Verify "profiling/key_averages.txt" artifact logged
+          - test_profiling_config_logged_as_params
+            → Verify prof_cfg_enabled, prof_cfg_epochs logged as params
+          - test_trace_files_cleaned_up_after_upload
+            → After log_profiling_artifacts(), trace files no longer on disk
+          - test_method_does_not_import_torch_profiler
+            → AST-parse tracking.py: no import of torch.profiler (decoupled)
+          - test_duckdb_extraction_excludes_prof_metrics
+            → duckdb_extraction.py metric routing skips prof_* and diag_* prefixes
+        </red>
+        <green>
+          - Add log_profiling_artifacts() to ExperimentTracker (pre-computed data signature)
+          - Implement compressed trace upload loop
+          - Implement key_averages text artifact logging
+          - Implement summary.json creation
+          - Log prof_cfg_* params from ProfilingConfig
+          - Log per-run fraction + overhead metrics
+          - Add cleanup step (unlink trace files after upload)
+          - Update duckdb_extraction.py: add prof_ and diag_ to exclusion filter
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="src/minivess/observability/tracking.py" action="modify"/>
+        <file path="src/minivess/pipeline/duckdb_extraction.py" action="modify"/>
+        <file path="tests/v2/unit/test_profiling_mlflow.py" action="create"/>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 2: Pre/Post-Training Diagnostics                            -->
+  <!-- Sanity checks + WeightWatcher (artifacts under diagnostics/)       -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <phase id="2" name="Pre/Post-Training Diagnostics">
+    <description>
+      Structured model diagnostics beyond loss curves. Pre-training sanity checks
+      catch broken models before wasting GPU hours. Post-training WeightWatcher
+      provides spectral health analysis. Diagnostics ALWAYS run regardless of
+      ProfilingConfig.enabled (they are free — RC17). Artifacts under diagnostics/.
+    </description>
+
+    <task id="T2.1"
+          issue_title="feat(diagnostics): pre-training sanity checks module"
+          issue_ref="https://github.com/petteriTeikari/minivess-mlops/issues/648"
+          priority="high"
+          effort_hours="3">
+      <description>
+        Create pre-training sanity checks module following torch-test patterns.
+        Run BEFORE training loop starts. Six checks:
+        1. Model output shape mismatch
+        2. Gradient flow (at least one param has .grad after backward)
+        3. Loss sanity (random init loss near expected value)
+        4. Data range (inputs in [0,1] or [-1,1])
+        5. Label integrity (valid class indices)
+        6. NaN/Inf check (no NaN or Inf in model output)
+
+        Artifact: diagnostics/pre_training_checks.json (NOT profiling/ — RC12).
+        Failures at severity="error" abort training with clear message.
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/test_pre_training_checks.py::test_output_shape_check_passes
+          - test_output_shape_check_fails_wrong_channels
+          - test_gradient_flow_check_passes
+          - test_gradient_flow_check_fails_frozen
+          - test_loss_sanity_check_passes
+          - test_nan_check_fails_on_nan_output
+          - test_run_all_checks_returns_list_of_results
+          - test_artifact_path_is_diagnostics_not_profiling
+            → Verify artifact logged to "diagnostics/pre_training_checks.json"
+        </red>
+        <green>
+          - Create src/minivess/diagnostics/__init__.py
+          - Create src/minivess/diagnostics/pre_training_checks.py
+          - Implement CheckResult dataclass + 6 checks + orchestrator
+          - Log artifact to diagnostics/ path
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="src/minivess/diagnostics/__init__.py" action="create"/>
+        <file path="src/minivess/diagnostics/pre_training_checks.py" action="create"/>
+        <file path="tests/v2/unit/test_pre_training_checks.py" action="create"/>
+      </files>
+    </task>
+
+    <task id="T2.2"
+          issue_title="feat(diagnostics): WeightWatcher post-training spectral analysis"
+          issue_ref="https://github.com/petteriTeikari/minivess-mlops/issues/649"
+          priority="high"
+          effort_hours="1">
+      <description>
+        Integrate WeightWatcher spectral analysis as post-training diagnostic.
+        Filter to trainable layers only (exclude frozen SAM3 ViT backbone).
+
+        Metrics (RC8 — diag_ww_ prefix, NOT prof_ww_):
+        - diag_ww_alpha_mean, diag_ww_alpha_std
+        - diag_ww_num_layers_analyzed
+
+        Artifact: diagnostics/weightwatcher_per_layer.json (NOT profiling/ — RC12).
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/test_weightwatcher_diagnostics.py::test_analyze_model_returns_summary
+          - test_analyze_filters_frozen_layers
+          - test_mlflow_metrics_logged_with_diag_prefix
+            → Verify diag_ww_alpha_mean metric logged (NOT prof_ww_)
+          - test_per_layer_artifact_under_diagnostics
+            → Verify diagnostics/weightwatcher_per_layer.json artifact logged
+        </red>
+        <green>
+          - Create src/minivess/diagnostics/weight_diagnostics.py
+          - Implement run_weightwatcher(model, tracker)
+          - Filter to trainable layers via requires_grad
+          - Log diag_ww_* metrics + diagnostics/ artifact
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="src/minivess/diagnostics/weight_diagnostics.py" action="create"/>
+        <file path="tests/v2/unit/test_weightwatcher_diagnostics.py" action="create"/>
+      </files>
+    </task>
+
+    <task id="T2.3"
+          issue_title="feat(diagnostics): integrate pre/post checks into train_flow.py"
+          priority="high"
+          effort_hours="2">
+      <description>
+        Wire pre-training checks and WeightWatcher into the training flow.
+        Diagnostics ALWAYS run regardless of ProfilingConfig.enabled (RC17).
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/test_train_flow_diagnostics.py::test_pre_checks_called_before_fit
+          - test_pre_check_error_aborts_flow
+          - test_weightwatcher_called_after_fit
+          - test_diagnostics_run_even_when_profiling_disabled (RC17)
+            → ProfilingConfig(enabled=False) → both diagnostics still run
+        </red>
+        <green>
+          - Add run_pre_training_checks() call after model build
+          - Add run_weightwatcher() call after fit()
+          - Both run unconditionally (not gated by ProfilingConfig.enabled)
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="src/minivess/orchestration/flows/train_flow.py" action="modify"/>
+        <file path="tests/v2/unit/test_train_flow_diagnostics.py" action="create"/>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 3: GPU Benchmark Container (closes #564)                     -->
+  <!-- One-shot GPU capability probing + YAML cache + Docker service      -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <phase id="3" name="GPU Benchmark Container">
+    <description>
+      Run-once GPU capability benchmarking. Produces YAML cache with per-model
+      throughput, peak VRAM, and feasibility flags. Cache invalidated on
+      driver/CUDA version change. Directly closes issue #564.
+      Benchmark params logged with sys_bench_ prefix (RC8).
+    </description>
+
+    <task id="T3.1"
+          issue_title="feat(benchmark): GPU benchmark script + cache YAML"
+          issue_ref="https://github.com/petteriTeikari/minivess-mlops/issues/650"
+          priority="critical"
+          effort_hours="4">
+      <description>
+        GPU benchmark module. Normalizes GPU model name to canonical form
+        (lowercase, strip "NVIDIA GeForce" prefix) for stable regression
+        detection filtering (RC11-MLflow-low).
+
+        YAML cache includes: schema_version, instance info, per-model benchmarks
+        (peak_vram, throughput, forward_ms), capabilities (binary feasibility),
+        max_batch_size estimates.
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/test_gpu_benchmark.py::test_benchmark_yaml_schema_version
+          - test_benchmark_yaml_has_instance_section
+          - test_benchmark_yaml_has_capabilities
+          - test_cache_invalidation_on_driver_change
+          - test_benchmark_result_dataclass
+          - test_feasibility_check_logic
+          - test_gpu_model_name_normalized
+            → "NVIDIA GeForce RTX 2070 SUPER" → "rtx_2070_super"
+        </red>
+        <green>
+          - Create src/minivess/compute/gpu_benchmark.py
+          - Implement probe_gpu_info() with name normalization
+          - Implement per-model micro-benchmarks
+          - Implement write_benchmark_yaml() + is_cache_valid()
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="src/minivess/compute/gpu_benchmark.py" action="create"/>
+        <file path="tests/v2/unit/test_gpu_benchmark.py" action="create"/>
+      </files>
+    </task>
+
+    <task id="T3.2"
+          issue_title="feat(benchmark): Dockerfile.benchmark + compose service"
+          issue_ref="https://github.com/petteriTeikari/minivess-mlops/issues/651"
+          priority="high"
+          effort_hours="2">
+      <description>
+        Dedicated benchmark Docker image and compose service.
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/deployment/test_benchmark_dockerfile.py::test_dockerfile_exists
+          - test_compose_has_benchmark_service
+          - test_benchmark_service_has_gpu_device
+          - test_benchmark_service_has_volume_mount
+        </red>
+        <green>
+          - Create deployment/docker/Dockerfile.benchmark
+          - Add gpu-benchmark service to docker-compose.flows.yml
+          - Add benchmark_data volume
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="deployment/docker/Dockerfile.benchmark" action="create"/>
+        <file path="deployment/docker-compose.flows.yml" action="modify"/>
+        <file path="tests/v2/unit/deployment/test_benchmark_dockerfile.py" action="create"/>
+      </files>
+    </task>
+
+    <task id="T3.3"
+          issue_title="feat(benchmark): benchmark cache integration with training flow"
+          priority="high"
+          effort_hours="2">
+      <description>
+        Training flow reads GPU benchmark cache. Params logged with sys_bench_
+        prefix (RC8), NOT prof_gpu_:
+        - sys_bench_gpu_model_normalized (canonical name for filtering)
+        - sys_bench_throughput_{model} (images/sec)
+        - sys_bench_vram_peak_{model} (peak MB)
+        - sys_bench_feasible_{model} (bool)
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/test_benchmark_cache_integration.py::test_valid_cache_logged_to_mlflow
+          - test_missing_cache_logs_warning
+          - test_invalid_cache_ignored
+          - test_benchmark_params_have_sys_bench_prefix
+            → All logged params start with "sys_bench_" (NOT "prof_gpu_")
+        </red>
+        <green>
+          - Create src/minivess/compute/gpu_profile.py
+          - Implement load_benchmark_cache() + log_benchmark_to_mlflow()
+          - Wire into train_flow.py before trainer.fit()
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="src/minivess/compute/gpu_profile.py" action="create"/>
+        <file path="src/minivess/orchestration/flows/train_flow.py" action="modify"/>
+        <file path="tests/v2/unit/test_benchmark_cache_integration.py" action="create"/>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 4: CUDA Memory Stats + Regression Audit Trail               -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <phase id="4" name="Memory Stats and Regression Audit Trail">
+    <description>
+      Per-epoch CUDA memory statistics and performance regression detection.
+      Every training run produces a performance fingerprint in MLflow for
+      root-cause analysis of performance drops.
+    </description>
+
+    <task id="T4.1"
+          issue_title="feat(profiling): CUDA memory stats per-epoch logging"
+          priority="medium"
+          effort_hours="2">
+      <description>
+        Log torch.cuda.memory_stats() at end of each profiled epoch.
+        Metrics use prof_cuda_ prefix (RC16) to disambiguate from nvidia-smi
+        readings (sys_gpu_memory_used_mb) and MLflow system metrics:
+        - prof_cuda_peak_allocated_mb (torch allocator peak)
+        - prof_cuda_peak_reserved_mb (torch allocator reserved)
+        - prof_cuda_alloc_retries (fragmentation indicator)
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/test_cuda_memory_logging.py::test_memory_stats_extracted
+          - test_memory_stats_logged_per_epoch
+            → Verify log_epoch_metrics with prof_cuda_peak_allocated_mb
+          - test_memory_stats_skipped_on_cpu
+          - test_fragmentation_warning
+        </red>
+        <green>
+          - Create src/minivess/diagnostics/cuda_memory.py
+          - Implement extract_memory_stats() → dict
+          - Integrate into trainer.py epoch loop
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="src/minivess/diagnostics/cuda_memory.py" action="create"/>
+        <file path="src/minivess/pipeline/trainer.py" action="modify"/>
+        <file path="tests/v2/unit/test_cuda_memory_logging.py" action="create"/>
+      </files>
+    </task>
+
+    <task id="T4.2"
+          issue_title="feat(profiling): performance regression detection helpers"
+          priority="medium"
+          effort_hours="2">
+      <description>
+        Utility functions for detecting performance regressions from MLflow
+        profiling history. Compares latest run against baseline (median of
+        last 5 runs on same GPU). Uses sys_bench_gpu_model_normalized for
+        GPU matching (avoids driver-version string variations).
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/test_regression_detection.py::test_no_regression_within_threshold
+          - test_regression_detected_above_threshold
+          - test_baseline_from_empty_history
+          - test_regression_report_format
+          - test_gpu_matching_uses_normalized_name
+            → get_profiling_baseline filters by sys_bench_gpu_model_normalized
+        </red>
+        <green>
+          - Create src/minivess/diagnostics/regression_detection.py
+          - Implement BaselineStats, RegressionResult dataclasses
+          - Implement get_profiling_baseline() with normalized GPU name filter
+          - Implement detect_regression() + format_regression_report()
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="src/minivess/diagnostics/regression_detection.py" action="create"/>
+        <file path="tests/v2/unit/test_regression_detection.py" action="create"/>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- IMPLEMENTATION ORDER                                               -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <implementation_order>
+    <step phase="0" tasks="T0.1" parallel="false"
+          description="Config infrastructure — all other tasks depend on this"/>
+    <step phase="1" tasks="T1.1" parallel="false"
+          description="record_function annotations (no profiler context yet)"/>
+    <step phase="1" tasks="T1.2" parallel="false"
+          description="Profiler context in fit() — depends on T0.1 + T1.1"/>
+    <step phase="1" tasks="T1.3" parallel="false"
+          description="MLflow artifact logging + DuckDB exclusion — depends on T1.2"/>
+    <step phase="2" tasks="T2.1,T2.2" parallel="true"
+          description="Pre-checks + WeightWatcher — independent, buildable in parallel"/>
+    <step phase="2" tasks="T2.3" parallel="false"
+          description="Wire diagnostics into train_flow — depends on T2.1+T2.2"/>
+    <step phase="3" tasks="T3.1" parallel="false"
+          description="GPU benchmark script — can start after Phase 0"/>
+    <step phase="3" tasks="T3.2,T3.3" parallel="true"
+          description="Dockerfile + cache integration — buildable in parallel"/>
+    <step phase="4" tasks="T4.1,T4.2" parallel="true"
+          description="Memory stats + regression detection — independent"/>
+  </implementation_order>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- DEPENDENCY GRAPH                                                   -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <dependency_graph><![CDATA[
+    T0.1 (config) ──> T1.1 (annotations) ──> T1.2 (profiler ctx) ──> T1.3 (MLflow+DuckDB)
+                 |                                   |
+                 |         T2.1 (pre-checks) ────────┤
+                 |         T2.2 (WeightWatcher) ─────┤
+                 |                                   v
+                 |                            T2.3 (wire into flow)
+                 |
+                 └──> T3.1 (benchmark) ──> T3.2 (Docker) ──┐
+                                           T3.3 (cache)  ──┘
+
+                 T4.1 (memory stats) ────── (after T1.2)
+                 T4.2 (regression)  ─────── (after T1.3)
+  ]]></dependency_graph>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- RISKS                                                              -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <risks>
+    <risk id="R1" severity="high" title="Profiler overhead exceeds budget">
+      <mitigation>
+        Budget: &lt;=10% per profiled epoch, &lt;=5% amortized. schedule() limits active
+        profiling to N epochs. Default with_stack=False and record_shapes=False.
+        Measure prof_overhead_pct metric. Emergency: profiling=disabled override.
+      </mitigation>
+    </risk>
+    <risk id="R2" severity="high" title="Chrome trace file size for large models">
+      <mitigation>
+        Gzip compression (RC9) achieves ~10x reduction. Size gate: traces exceeding
+        trace_size_limit_mb (default 50 MB uncompressed) skip upload. Traces written
+        to volume-mounted checkpoint_dir, cleaned up after MLflow upload.
+      </mitigation>
+    </risk>
+    <risk id="R3" severity="high" title="DuckDB pipeline pollution from prof_* metrics">
+      <mitigation>
+        Metric routing in duckdb_extraction.py excludes prof_* and diag_* prefixes
+        from training_metrics table (RC10). Added as explicit scope of T1.3.
+      </mitigation>
+    </risk>
+    <risk id="R4" severity="medium" title="WeightWatcher on frozen backbones">
+      <mitigation>
+        Filter to trainable layers via requires_grad check. Log
+        diag_ww_num_layers_analyzed vs total for transparency.
+      </mitigation>
+    </risk>
+    <risk id="R5" severity="low" title="GPU benchmark cache stale after driver update">
+      <mitigation>
+        Cache key includes driver_version and cuda_version. Automatic re-run on mismatch.
+        GPU model name normalized for stable comparison.
+      </mitigation>
+    </risk>
+    <risk id="R6" severity="low" title="ProfilingConfig breaks existing experiment configs">
+      <mitigation>
+        ProfilingConfig is standalone (not on TrainingConfig). All-defaults constructor.
+        Existing configs without profiling group get default (enabled=True, epochs=5).
+      </mitigation>
+    </risk>
+  </risks>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- EFFORT SUMMARY                                                     -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <effort_summary>
+    <phase id="0" hours="3" description="Config infrastructure (ProfilingConfig + YAML + debug overrides)"/>
+    <phase id="1" hours="10" description="PyTorch Profiler core (annotations + context + MLflow + DuckDB)"/>
+    <phase id="2" hours="6" description="Pre/post-training diagnostics"/>
+    <phase id="3" hours="8" description="GPU benchmark container (closes #564)"/>
+    <phase id="4" hours="4" description="Memory stats + regression detection"/>
+    <total hours="31"/>
+  </effort_summary>
+
+</plan>

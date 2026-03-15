@@ -1,0 +1,15 @@
+# MinIVess MLOps v2 — GPU Benchmark (T3.2, #651)
+# Run-once GPU capability probing with YAML cache output.
+#
+# Build: docker build -t minivess-benchmark:latest -f deployment/docker/Dockerfile.benchmark .
+
+FROM minivess-base:latest
+
+LABEL flow="gpu-benchmark"
+LABEL description="GPU capability benchmark — VRAM, throughput, feasibility cache"
+LABEL tier="A"
+
+# DG1.7: -W flags suppress non-actionable third-party warnings at interpreter level.
+CMD ["python", "-W", "ignore::SyntaxWarning", "-W", "ignore::FutureWarning", \
+     "-W", "ignore:Using a non-tuple:UserWarning", \
+     "-m", "minivess.compute.gpu_benchmark"]

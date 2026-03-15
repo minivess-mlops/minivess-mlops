@@ -1,0 +1,15 @@
+# Debug profiling config — fewer profiled epochs for fast iteration.
+# Used by debug_*.yaml experiment configs via `override /profiling: debug`.
+
+enabled: true
+epochs: 2
+activities:
+  - cpu
+  - cuda
+profile_memory: true
+record_shapes: false
+with_flops: true
+with_stack: false
+export_chrome_trace: true
+compress_traces: true
+trace_size_limit_mb: 50
