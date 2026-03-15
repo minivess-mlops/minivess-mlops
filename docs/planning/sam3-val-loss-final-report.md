@@ -3,7 +3,7 @@
 **Issue**: [#715](https://github.com/petteriTeikari/minivess-mlops/issues/715)
 **Date**: 2026-03-15
 **Severity**: P1-high (blocked cloud model validation for ~10 hours)
-**Status**: ROOT CAUSE IDENTIFIED — GCP runs used wrong experiment config (validation skipped). Pending Run 8 verification.
+**Status**: RESOLVED — Root cause confirmed and verified. val_loss=0.6786 (finite) on GCP L4.
 
 > **Important context**: Issue #715 was initially filed as "real validation bug, not
 > sentinel issue" based on early RunPod evidence (H1 rejected). The GCP investigation
@@ -224,9 +224,23 @@ local configs (validation skipped).
    config values) was correct for Run 2 but irrelevant when the SkyPilot YAML
    selected a different config file entirely.
 
-## 7. Open Items
+## 7. Verification: All Models on GCP L4 (Debug Mode)
 
-- **Run 8** (pending): Verify sam3_hybrid with `smoke_sam3_hybrid_cloud.yaml` on GCP L4
+| Model | GPU | val_loss | val_dice | train_loss | Status |
+|-------|-----|---------|---------|-----------|--------|
+| **sam3_vanilla** | T4 (me-west1) | **0.632** | 0.493 | 0.627 | PASS |
+| **dynunet** | T4 (me-west1) | **0.749** | 0.313 | 0.783 | PASS |
+| **sam3_hybrid** | **L4 (asia-ne3)** | **0.679** | 0.338 | 0.742 | **PASS** (Run 8) |
+| **vesselfm** | L4 (asia-ne3) | — | — | — | FAILED (SSH error, not code) |
+
+3/4 models verified with finite validation metrics on GCP spot. VesselFM failure
+was a transient SSH/network error (spot preemption or connectivity), not a code
+issue — the Z=32 patch fix is in the Docker image but the VM lost connectivity
+before training started.
+
+## 8. Open Items
+
+- **VesselFM**: Retry on GCP L4 (transient network error, not code bug)
 - **Run 9** (future): Test AMP ON with correct config → validates H2b preventive fix
 - **Log experiment config**: Add `EXPERIMENT` as MLflow param in train_flow.py
 
@@ -258,10 +272,11 @@ local configs (validation skipped).
 | 5 | ~07:40 | L4 (GCP asia-ne3) | smoke_sam3_hybrid | 3 | 2 | **NO** (sentinel) | NaN | 0.904 |
 | 6 | ~09:20 | L4 (GCP asia-ne3) | smoke_sam3_hybrid | 3 | 2 | **NO** (sentinel) | NaN | 0.904 |
 | 7 | ~10:00 | L4 (GCP asia-ne3) | smoke_sam3_hybrid | 3 | 2 | **NO** (sentinel) | NaN | — |
-| 8 | pending | L4 (GCP) | **smoke_sam3_hybrid_cloud** | **1** | **5** | **expected YES** | pending | — |
+| 8 | 2026-03-15 14:50 | **L4 (GCP asia-ne3)** | **smoke_sam3_hybrid_cloud** | **1** | **5** | **YES** | **0.6786** | 0.7424 |
 
-**Key observation**: Run 2 is the ONLY run where validation actually executed. All
-other runs (including all GCP runs) used configs that trigger the sentinel skip.
+**Key observation**: Run 2 (RunPod) and Run 8 (GCP L4) are the only runs where
+validation actually executed. Both produced finite val_loss. All other runs used
+configs that trigger the sentinel skip.
 
 ## Appendix B: Key Code Paths
 
