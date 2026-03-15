@@ -1,0 +1,860 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  UpCloud + RunPod + SkyPilot + MLflow Integration Testing Plan
+  =============================================================
+
+  Goal: End-to-end cloud GPU training pipeline that:
+  1. Pulls MiniVess data from UpCloud S3 via DVC
+  2. Fine-tunes heavy models (SAM3, VesselFM) on RunPod 4090 via SkyPilot
+  3. Logs metrics/artifacts to UpCloud-hosted MLflow
+  4. Runs as a manually-triggered test (not automatic) for cost control
+
+  Architecture:
+    UpCloud S3 ──DVC pull──> RunPod 4090 ──MLflow──> UpCloud MLflow Server
+    (data store)             (GPU compute)            (tracking + artifacts)
+
+  Budget constraints:
+    - RTX 4090 @ $0.69/hr (RunPod community)
+    - 2 epochs, 2 train vols, 2 val vols, 1 fold
+    - Target: <$1 per smoke test run
+
+  Review round: 2 (post-reviewer + user corrections)
+  Created: 2026-03-13
+  Last reviewed: 2026-03-13
+
+  Reviewers (round 1):
+    1. Cloud Infrastructure Reviewer — UpCloud S3 endpoints, cost model, security
+    2. MLOps/Training Flow Reviewer — data pipeline, model configs, Hydra, VRAM
+    3. Testing Architecture Reviewer — test isolation, markers, mocking, file naming
+-->
+
+<plan xmlns="urn:minivess:tdd-plan:v1"
+      title="UpCloud + RunPod + SkyPilot + MLflow Integration Testing"
+      parent_issue=""
+      created="2026-03-13"
+      review_round="2">
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- REVIEW CHANGELOG (round 0 → round 1)                              -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <review_changelog round="1">
+    <change id="RC1" severity="critical" reviewer="MLOps" status="REVERTED_R2">
+      REVERTED: Reviewer incorrectly "corrected" VesselFM VRAM from 10 GB → 6 GB
+      by confusing INFERENCE (6 GB) with FINE-TUNING (10 GB). The smoke test does
+      fine-tuning, so 10 GB is correct. Source: configs/model_profiles/vesselfm.yaml:18.
+      Both numbers are ESTIMATES — no measured data exists.
+      See: .claude/metalearning/2026-03-13-vram-estimate-inconsistency.md
+    </change>
+    <change id="RC2" severity="critical" reviewer="MLOps+Testing" status="REVERTED_R2">
+      REVERTED: User correctly pointed out that DVC commit must be a Hydra
+      config field (data.dvc_commit), NOT an env var. Reason: researchers need
+      to SWITCH between data versions and COMPARE runs with different DVC
+      commits. Hydra config fields can be swept via multirun, show up in MLflow
+      params (not just tags), and are part of the reproducible experiment spec.
+      Schema change to DataConfig is the correct approach.
+    </change>
+    <change id="RC3" severity="critical" reviewer="Testing">
+      Consolidated SkyPilot smoke test YAML validation into existing
+      test_skypilot_configs.py instead of creating new test_skypilot_smoke_test.py.
+      Avoids 4th overlapping SkyPilot test file.
+    </change>
+    <change id="RC4" severity="critical" reviewer="Testing">
+      DVC mock strategy: monkeypatch subprocess.run() instead of moto.
+      Avoids adding moto dependency. Unit tests verify DVC remote config
+      structure via YAML parsing; integration tests use real S3.
+    </change>
+    <change id="RC5" severity="high" reviewer="Infra">
+      RUNPOD_API_KEY naming: plan already correct. Added explicit note that
+      .env must use RUNPOD_API_KEY (not legacy RUNPOD_TOKEN).
+    </change>
+    <change id="RC6" severity="high" reviewer="Infra">
+      Added R7: HTTP-only MLflow (no TLS). Flagged as acceptable for smoke
+      tests, with new task T4.3 to document HTTPS upgrade path.
+    </change>
+    <change id="RC7" severity="medium" reviewer="Infra">
+      Cost model corrected: sequential with instance reuse = $0.43 (7 min
+      overhead once + 23 min training). Clarified assumption explicitly.
+    </change>
+    <change id="RC8" severity="medium" reviewer="Testing">
+      Added explicit uv installation step to SkyPilot setup phase (RunPod
+      base images don't include uv).
+    </change>
+    <change id="RC9" severity="medium" reviewer="Testing">
+      UUID-based experiment isolation: smoke tests use
+      f"smoke_test_{uuid[:8]}_{model}" experiment name on cloud MLflow.
+    </change>
+    <change id="RC10" severity="medium" reviewer="MLOps">
+      Added max_train_volumes=2, max_val_volumes=2 to smoke configs
+      for safety (belt-and-suspenders with 4-volume split file).
+    </change>
+    <change id="RC11" severity="medium" reviewer="Infra">
+      DVC_S3_ENDPOINT_URL example clarified: value comes from Pulumi output
+      (pulumi stack output s3_endpoint), not hardcoded.
+    </change>
+    <change id="RC12" severity="medium" reviewer="MLOps">
+      Documented that MINIVESS_ALLOW_HOST=1 and PREFECT_DISABLED=1 are
+      approved cloud-VM escape hatches (same as pytest), not Rule violations.
+      SkyPilot VMs = ephemeral compute, not production Docker Compose.
+    </change>
+    <change id="RC13" severity="low" reviewer="Infra">
+      Added pre-flight validation script (scripts/validate_smoke_test_env.py)
+      to T3.1. Checks all env vars, connectivity, and SkyPilot backend.
+    </change>
+    <change id="RC14" severity="low" reviewer="Testing">
+      Added skypilot-nightly[runpod] to pyproject.toml infra group.
+    </change>
+  </review_changelog>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 0: INFRASTRUCTURE — UpCloud S3 as DVC Remote                -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <phase id="0" name="UpCloud S3 Data Storage for DVC">
+    <description>
+      Configure UpCloud Managed Object Storage as a DVC remote so that
+      RunPod instances can pull MiniVess training data via `dvc pull`.
+      The existing UpCloud Object Storage (provisioned by Pulumi for MLflow
+      artifacts) gets a second bucket for DVC-tracked data.
+    </description>
+
+    <task id="T0.1" issue_title="feat(infra): add DVC data bucket to UpCloud Object Storage via Pulumi"
+          priority="critical" effort_hours="2">
+      <description>
+        Add a second ManagedObjectStorageBucket ("minivess-dvc-data") to the
+        Pulumi stack in deployment/pulumi/__main__.py. Reuse the existing
+        ManagedObjectStorage resource and S3 credentials. Export the bucket
+        name and endpoint as Pulumi outputs. Add DVC_S3_ENDPOINT_URL,
+        DVC_S3_ACCESS_KEY, DVC_S3_SECRET_KEY, DVC_S3_BUCKET to .env.example.
+
+        NOTE (RC11): DVC_S3_ENDPOINT_URL value comes from Pulumi output:
+          pulumi stack output s3_endpoint
+        The .env.example placeholder is just documentation. After `pulumi up`,
+        populate .env with the actual endpoint URL.
+
+        Also add skypilot-nightly[runpod] to pyproject.toml infra group (RC14).
+      </description>
+      <tdd_spec>
+        <red>
+          - test_pulumi_stack.py: assert "minivess-dvc-data" in main_content
+          - test_pulumi_stack.py: assert "dvc_bucket" in required_exports
+          - test_env_single_source.py: assert DVC_S3_* vars in .env.example
+        </red>
+        <green>
+          - Add ManagedObjectStorageBucket("dvc-data") to __main__.py
+          - Add pulumi.export("dvc_bucket", ...) and pulumi.export("dvc_s3_endpoint", ...)
+          - Add DVC_S3_* to .env.example
+          - Add skypilot-nightly[runpod] to pyproject.toml infra group
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="deployment/pulumi/__main__.py" action="modify"/>
+        <file path=".env.example" action="modify"/>
+        <file path="pyproject.toml" action="modify"/>
+        <file path="tests/v2/unit/test_pulumi_stack.py" action="modify"/>
+      </files>
+    </task>
+
+    <task id="T0.2" issue_title="feat(data): configure DVC remote for UpCloud S3"
+          priority="critical" effort_hours="2">
+      <description>
+        Add an "upcloud" DVC remote to .dvc/config.local (not committed) and
+        .dvc/config (template with env var references). Push the MiniVess
+        dataset to the UpCloud S3 bucket via `dvc push -r upcloud`. Create a
+        helper script scripts/configure_dvc_remote.py that reads DVC_S3_*
+        from .env and configures the remote automatically.
+
+        The script should also verify S3 connectivity: list bucket contents
+        to confirm credentials work before attempting push.
+      </description>
+      <tdd_spec>
+        <red>
+          - test: configure_dvc_remote.py creates correct .dvc/config.local
+          - test: DVC remote "upcloud" is S3-compatible with correct endpoint
+          - test: script validates S3 connectivity before configuring
+          - test: dvc status -r upcloud works (integration, @cloud_mlflow)
+        </red>
+        <green>
+          - Create scripts/configure_dvc_remote.py
+          - Run dvc push -r upcloud (one-time data upload)
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="scripts/configure_dvc_remote.py" action="create"/>
+        <file path=".dvc/config" action="modify"/>
+        <file path="tests/v2/unit/test_dvc_remote_config.py" action="create"/>
+      </files>
+    </task>
+
+    <task id="T0.3" issue_title="test(data): unit tests for DVC remote backend-agnostic pull"
+          priority="high" effort_hours="2">
+      <description>
+        Create tests that verify DVC configuration and pull protocol work
+        correctly with any S3-compatible backend. Unit tests use monkeypatch
+        on subprocess.run() to mock DVC commands (RC4 — no moto dependency).
+        Integration tests against real UpCloud S3 use @cloud_mlflow marker.
+
+        Unit tests verify:
+        - .dvc/config has upcloud remote with correct structure (YAML parsing)
+        - DVC remote config has required fields (endpointurl, access_key_id)
+        - DVC version pinning matches pyproject.toml
+
+        Integration tests verify:
+        - dvc pull -r upcloud retrieves expected files
+        - S3 bucket is accessible with configured credentials
+      </description>
+      <tdd_spec>
+        <red>
+          - TestDvcRemoteConfig: validate .dvc/config has upcloud remote
+          - TestDvcPullProtocol: monkeypatch subprocess.run, verify dvc pull args
+          - TestDvcVersionPinning: dvc version matches pyproject.toml
+          - TestDvcCloudPull (@cloud_mlflow): real pull from UpCloud S3
+        </red>
+        <green>Implement tests with monkeypatch (unit) + real S3 (cloud)</green>
+      </tdd_spec>
+      <files>
+        <file path="tests/v2/unit/test_dvc_remote_config.py" action="create"/>
+        <file path="tests/v2/cloud/test_dvc_cloud_pull.py" action="create"/>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 1: SKYPILOT YAML — Minimal GPU Smoke Test Config            -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <phase id="1" name="SkyPilot Minimal GPU Smoke Test YAML">
+    <description>
+      Create a lightweight SkyPilot task YAML specifically for smoke-testing
+      GPU training on RunPod. Configurable: 2 epochs, 2 train volumes,
+      2 val volumes, 1 fold, RTX 4090. Target cost: &lt;$1 per run.
+
+      Data flow: UpCloud S3 --DVC pull--> RunPod local filesystem
+      MLflow flow: RunPod --HTTP--> UpCloud MLflow server
+
+      NOTE (RC12): RunPod VMs use MINIVESS_ALLOW_HOST=1 and PREFECT_DISABLED=1.
+      These are the approved cloud-VM escape hatches (same as pytest). RunPod
+      is ephemeral compute, not a Docker Compose production environment.
+
+      NOTE (RC8): RunPod base images do NOT include uv. The SkyPilot setup
+      phase must install uv first: curl -sSf https://astral.sh/uv/install.sh | sh
+    </description>
+
+    <task id="T1.1" issue_title="feat(skypilot): add minimal GPU smoke test YAML for RunPod 4090"
+          priority="critical" effort_hours="3">
+      <description>
+        Create deployment/skypilot/smoke_test_gpu.yaml:
+        - Resources: RTX 4090:1, RunPod-only (no failover), spot=true
+        - Data: DVC pull from UpCloud S3 (not SkyPilot file_mounts — those
+          use AWS S3 buckets which we don't have)
+        - MLflow: MLFLOW_TRACKING_URI points to UpCloud MLflow server
+        - Training params: max_epochs=2, num_folds=1, subset volumes
+        - Setup:
+          1. Install uv: curl -sSf https://astral.sh/uv/install.sh | sh (RC8)
+          2. Clone repo, cd into it
+          3. uv sync --all-extras (REQUIRED — plain uv sync misses 126 tests)
+          4. Configure DVC remote (scripts/configure_dvc_remote.py)
+          5. dvc pull -r upcloud (fetch 4-volume smoke test subset)
+        - Env vars: DVC_S3_* for data pull, MLFLOW_CLOUD_* for tracking,
+          MINIVESS_ALLOW_HOST=1, PREFECT_DISABLED=1
+        - Run: EXPERIMENT=smoke_${MODEL_FAMILY} uv run python -m minivess.orchestration.flows.train_flow
+          (data.dvc_commit is set in the experiment YAML config, not as env var)
+
+        UUID experiment isolation (RC9): experiment name includes UUID prefix
+        f"smoke_test_{uuid[:8]}_{model_family}" to prevent cross-talk between
+        concurrent smoke test runs.
+
+        The smoke test is launched manually via:
+          sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+            -e MODEL_FAMILY=sam3_vanilla
+      </description>
+      <tdd_spec>
+        <red>
+          NOTE (RC3): Add tests to EXISTING test_skypilot_configs.py, NOT a
+          new file. Avoid creating a 4th SkyPilot test file.
+
+          - test_skypilot_configs.py::TestSmokeTestGpuYaml: YAML is valid
+          - test_skypilot_configs.py::TestSmokeTestGpuYaml: resources specify RTX 4090
+          - test_skypilot_configs.py::TestSmokeTestGpuYaml: envs has DVC_S3_* and MLFLOW_CLOUD_*
+          - test_skypilot_configs.py::TestSmokeTestGpuYaml: setup includes uv install + dvc pull
+          - test_skypilot_configs.py::TestSmokeTestGpuYaml: envs has MINIVESS_ALLOW_HOST=1
+        </red>
+        <green>
+          Create smoke_test_gpu.yaml with DVC-based data pull
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="deployment/skypilot/smoke_test_gpu.yaml" action="create"/>
+        <file path="tests/v2/unit/test_skypilot_configs.py" action="modify"/>
+      </files>
+    </task>
+
+    <task id="T1.2" issue_title="feat(config): add smoke test experiment configs (2 epoch, 2 vol, 1 fold)"
+          priority="high" effort_hours="2">
+      <description>
+        Create Hydra experiment configs for GPU smoke testing:
+        - configs/experiment/smoke_sam3_vanilla.yaml
+        - configs/experiment/smoke_sam3_hybrid.yaml
+        - configs/experiment/smoke_vesselfm.yaml
+
+        Each config:
+        - max_epochs=2, num_folds=1
+        - max_train_volumes=2, max_val_volumes=2 (RC10: explicit, belt-and-suspenders)
+        - splits_file=configs/splits/smoke_test_1fold_4vol.json
+        - val_interval=max_epochs+1 for sam3_hybrid (skip validation to avoid OOM)
+
+        The volume subset is specified via smoke_test_1fold_4vol.json
+        (named to clearly indicate 1-fold, 4-volume structure).
+
+        DVC commit provenance: The DVC commit hash is stored as a Hydra
+        config parameter (data.dvc_commit) so researchers can SWEEP over
+        different data versions and COMPARE training runs. This requires
+        adding a dvc_commit field to DataConfig. Logged to MLflow as
+        param "data_dvc_commit" (not just a tag — params are sweepable).
+
+        NOTE: These smoke tests are NOT scientifically valid — they verify
+        pipeline infrastructure only. 2 epochs with 4 volumes produces no
+        meaningful model. Document this in the config comments.
+      </description>
+      <tdd_spec>
+        <red>
+          - test: smoke configs exist and are valid YAML
+          - test: max_epochs == 2, num_folds == 1
+          - test: max_train_volumes == 2, max_val_volumes == 2
+          - test: splits file has exactly 4 volumes (2 train + 2 val)
+          - test: splits file name is "smoke_test_1fold_4vol.json"
+          - test: data.dvc_commit field exists in smoke configs
+        </red>
+        <green>
+          Create smoke test experiment configs + split file
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="configs/experiment/smoke_sam3_vanilla.yaml" action="create"/>
+        <file path="configs/experiment/smoke_sam3_hybrid.yaml" action="create"/>
+        <file path="configs/experiment/smoke_vesselfm.yaml" action="create"/>
+        <file path="configs/splits/smoke_test_1fold_4vol.json" action="create"/>
+        <file path="tests/v2/unit/test_smoke_test_configs.py" action="create"/>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 2: TRAINING FLOW — DVC Data Pull + Cloud MLflow             -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <phase id="2" name="Training Flow Cloud Integration">
+    <description>
+      Modify the training flow to support cloud execution:
+      1. DVC pull as a pre-training step (data not pre-mounted)
+      2. MLflow tracking to remote server (not Docker internal)
+      3. DVC commit hash as provenance tag (via DVC_COMMIT env var)
+
+      The flow must work identically in Docker Compose (local) and
+      SkyPilot (cloud). Environment variables control the behavior —
+      no code branches for "cloud mode".
+    </description>
+
+    <task id="T2.1" issue_title="feat(flow): add DVC data pull step to training flow"
+          priority="critical" effort_hours="4">
+      <description>
+        Add a pre-training data preparation function prepare_training_data()
+        to train_flow.py (public name, not _prepare_data — per reviewer):
+
+        1. Check if DATA_DIR has data (volume-mounted in Docker)
+        2. If empty, run `dvc pull -r ${DVC_REMOTE:-minio}` to fetch data
+        3. Verify pulled data directory is non-empty after pull
+        4. Read data.dvc_commit from Hydra config and log to MLflow param "data_dvc_commit"
+        5. Log DVC pull duration to MLflow metric "data_pull_duration_seconds"
+
+        The DVC remote name comes from DVC_REMOTE env var (default: minio
+        for local Docker, upcloud for SkyPilot). The DVC S3 credentials
+        come from DVC_S3_* env vars (already in .env.example from T0.1).
+
+        Order in training flow (RC12):
+          _require_docker_context()  →  prepare_training_data()  →  training loop
+
+        This is NOT a new flow — it's a pre-step in the existing training
+        flow. No Prefect task needed; it's a plain function call before
+        the training loop.
+      </description>
+      <tdd_spec>
+        <red>
+          - test: prepare_training_data() skips pull when data exists
+          - test: prepare_training_data() runs dvc pull when data missing
+          - test: data.dvc_commit from Hydra config logged to MLflow param "data_dvc_commit"
+          - test: DVC_REMOTE defaults to "minio"
+          - test: DVC pull duration logged to MLflow metric
+        </red>
+        <green>
+          Add prepare_training_data() to train_flow.py
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="src/minivess/orchestration/flows/train_flow.py" action="modify"/>
+        <file path="tests/v2/unit/test_train_flow_dvc_pull.py" action="create"/>
+      </files>
+    </task>
+
+    <task id="T2.2" issue_title="feat(flow): support remote MLflow tracking in SkyPilot mode"
+          priority="high" effort_hours="2">
+      <description>
+        Verify that resolve_tracking_uri() works correctly when
+        MLFLOW_TRACKING_URI points to a remote server with basic auth.
+        The URL-encoding fix (#628) already handles special chars.
+
+        Create integration test that:
+        1. Sets MLFLOW_TRACKING_URI to UpCloud MLflow
+        2. Sets MLFLOW_TRACKING_USERNAME/PASSWORD
+        3. Creates experiment, logs metrics, verifies persistence
+
+        This test is the L2 cloud test from test_cloud_mlflow.py but
+        run from the training flow's perspective (not raw client API).
+      </description>
+      <tdd_spec>
+        <red>
+          - test: resolve_tracking_uri() with cloud URI + auth returns valid URL
+          - test: ExperimentTracker can start_run against cloud MLflow
+        </red>
+        <green>
+          Tests should pass with existing code (verify only, no production changes)
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="tests/v2/cloud/test_training_flow_cloud_mlflow.py" action="create"/>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 3: END-TO-END SMOKE TEST — The Actual RunPod Launch         -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <phase id="3" name="End-to-End RunPod GPU Smoke Test">
+    <description>
+      The manually-triggered smoke test that launches actual GPU training
+      on RunPod via SkyPilot. This is NOT an automated pytest test — it's
+      a make target that a developer runs when they want to verify the
+      full pipeline works end-to-end.
+
+      Workflow:
+        make smoke-test-preflight       ← NEW: validates env + connectivity (RC13)
+        make smoke-test-gpu MODEL=sam3_vanilla
+        → sky jobs launch smoke_test_gpu.yaml -e MODEL_FAMILY=sam3_vanilla
+        → RunPod provisions 4090
+        → dvc pull from UpCloud S3 (MiniVess subset)
+        → train 2 epochs, 1 fold, 4 volumes
+        → MLflow logs to UpCloud server
+        → sky jobs status shows SUCCEEDED
+        → make verify-smoke-test verifies MLflow has the run
+
+      Cost: ~$0.43 total for all 3 models (instance reuse, single overhead)
+    </description>
+
+    <task id="T3.1" issue_title="feat(test): create make smoke-test-gpu target for manual RunPod testing"
+          priority="critical" effort_hours="4">
+      <description>
+        Add Makefile targets:
+        - `make smoke-test-preflight`: validates env vars + connectivity (RC13)
+        - `make smoke-test-gpu MODEL=sam3_vanilla`: launches SkyPilot job
+        - `make verify-smoke-test`: checks MLflow for the smoke test run
+        - `make smoke-test-all`: runs all 3 models sequentially
+
+        The Makefile targets:
+        1. Run smoke-test-preflight first (validates all prerequisites)
+        2. Launch SkyPilot job with the smoke test YAML
+        3. Wait for completion (sky jobs status --stream)
+        4. Verify MLflow run exists with expected params
+
+        Create scripts/validate_smoke_test_env.py (RC13, pre-flight):
+        - Verify all env vars present (DVC_S3_*, RUNPOD_API_KEY, MLFLOW_CLOUD_*)
+        - Test DVC connectivity to UpCloud S3 (dvc remote list -v)
+        - Test MLflow connectivity (curl health endpoint)
+        - Verify SkyPilot RunPod backend available (sky check)
+        - Check GPU availability on RunPod
+
+        NOTE (RC5): Use RUNPOD_API_KEY (not RUNPOD_TOKEN). The .env file
+        must be updated if it still uses the legacy RUNPOD_TOKEN name.
+
+        Also create scripts/verify_smoke_test.py that queries UpCloud
+        MLflow for the smoke test experiment and verifies:
+        - Run exists with status FINISHED
+        - Params match (model, epochs, folds)
+        - Metrics logged (at least loss)
+        - data_dvc_commit param present (Hydra config field, not just tag)
+      </description>
+      <tdd_spec>
+        <red>
+          - test: smoke_test_gpu.yaml is valid SkyPilot YAML
+          - test: validate_smoke_test_env.py exits 1 when env vars missing (mock)
+          - test: verify_smoke_test.py exits 0 when run exists (mock)
+          - test: verify_smoke_test.py exits 1 when run missing (mock)
+        </red>
+        <green>
+          Create Makefile targets, pre-flight script, and verification script
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="Makefile" action="modify"/>
+        <file path="scripts/validate_smoke_test_env.py" action="create"/>
+        <file path="scripts/verify_smoke_test.py" action="create"/>
+        <file path="tests/v2/unit/test_verify_smoke_test.py" action="create"/>
+      </files>
+    </task>
+
+    <task id="T3.2" issue_title="feat(test): add SkyPilot RunPod integration test (manually triggered)"
+          priority="high" effort_hours="3">
+      <description>
+        Create a pytest test in tests/gpu_instance/ (excluded from CI) that
+        can be run manually to verify the full RunPod pipeline:
+
+        tests/gpu_instance/test_runpod_smoke.py:
+        - @pytest.mark.gpu_heavy, @pytest.mark.slow, @pytest.mark.cloud_mlflow
+        - Launches SkyPilot job programmatically (sky.jobs.launch)
+        - Uses UUID-prefixed experiment name (RC9) to avoid cross-talk
+        - Waits for completion (timeout: 30 minutes)
+        - Queries MLflow for the smoke test run
+        - Asserts metrics, params, artifacts exist
+
+        SkyPilot import handling: Use try/except ImportError with
+        pytest.importorskip("sky") to handle cases where SkyPilot
+        is not installed (it's in the infra optional group).
+
+        This test is the "triggerable lightweight test" the user requested.
+        Run via: make test-gpu-cloud (new target)
+      </description>
+      <tdd_spec>
+        <red>
+          - test: RunPod smoke test file exists in gpu_instance/
+          - test: test has correct markers (gpu_heavy, slow, cloud_mlflow)
+          - test: SkyPilot YAML referenced in test exists
+        </red>
+        <green>
+          Create test_runpod_smoke.py with SkyPilot job launch
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="tests/gpu_instance/test_runpod_smoke.py" action="create"/>
+        <file path="Makefile" action="modify"/>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 4: VERIFICATION — Post-Run Assertions + Documentation       -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <phase id="4" name="Post-Run Verification Suite">
+    <description>
+      After a smoke test run completes, verify all artifacts and metrics
+      are correct. This runs locally (no GPU needed) against the UpCloud
+      MLflow server.
+    </description>
+
+    <task id="T4.1" issue_title="feat(test): MLflow artifact verification for cloud training runs"
+          priority="high" effort_hours="2">
+      <description>
+        Create tests/v2/cloud/test_cloud_training_artifacts.py:
+        - @pytest.mark.cloud_mlflow
+        - Queries MLflow for the latest smoke test experiment
+        - Verifies: checkpoint artifact exists, config artifact exists,
+          system info params logged, training metrics logged per epoch,
+          data_dvc_commit param present, model family correct
+
+        This is the "verify-smoke-test" step separated into individual
+        pytest assertions for better error reporting.
+      </description>
+      <tdd_spec>
+        <red>
+          - test: query latest smoke test run from MLflow
+          - test: checkpoint artifact exists
+          - test: resolved_config.yaml artifact exists
+          - test: data_dvc_commit param logged (Hydra field, searchable in MLflow)
+          - test: epoch metrics logged (step 0 and step 1)
+        </red>
+        <green>
+          Create test_cloud_training_artifacts.py
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="tests/v2/cloud/test_cloud_training_artifacts.py" action="create"/>
+      </files>
+    </task>
+
+    <task id="T4.2" issue_title="docs(test): document RunPod smoke test workflow"
+          priority="medium" effort_hours="1">
+      <description>
+        Update tests/CLAUDE.md and docs/planning/ with the smoke test
+        workflow documentation:
+        - Prerequisites (env vars, SkyPilot nightly installation, DVC data push)
+        - How to run: make smoke-test-preflight &amp;&amp; make smoke-test-gpu MODEL=sam3_vanilla
+        - How to verify: make verify-smoke-test
+        - Expected cost and duration per model
+        - Troubleshooting common failures
+        - Note: HTTPS upgrade path for MLflow (R7)
+
+        NOTE: Document that smoke test results are NOT scientifically valid —
+        infrastructure verification only. 2 epochs + 4 volumes = no
+        meaningful model.
+      </description>
+      <tdd_spec>
+        <red>N/A (documentation only)</red>
+        <green>Update docs</green>
+      </tdd_spec>
+      <files>
+        <file path="tests/CLAUDE.md" action="modify"/>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- COST MODEL                                                         -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <cost_model>
+    <gpu>RTX 4090</gpu>
+    <provider>RunPod (community)</provider>
+    <hourly_rate currency="USD">0.69</hourly_rate>
+
+    <per_model_estimates>
+      <!--
+        VRAM source: configs/model_profiles/*.yaml (SINGLE SOURCE OF TRUTH)
+        SAM3 vanilla/hybrid: MEASURED on RTX 2070 Super (2026-03-07/09)
+        VesselFM: ESTIMATED (~10 GB fine-tuning) — NO measured data
+        See: .claude/metalearning/2026-03-13-vram-estimate-inconsistency.md
+      -->
+      <model name="sam3_vanilla" vram_gb="2.9" vram_measured="true" epochs="2" est_minutes="5" est_cost_usd="0.06"/>
+      <model name="sam3_hybrid" vram_gb="7.5" vram_measured="partial" epochs="2" est_minutes="8" est_cost_usd="0.09"/>
+      <model name="vesselfm" vram_gb="10" vram_measured="false" epochs="2" est_minutes="10" est_cost_usd="0.12"/>
+    </per_model_estimates>
+
+    <overhead>
+      <item name="Instance startup" minutes="2"/>
+      <item name="uv install + uv sync --all-extras" minutes="4"/>
+      <item name="DVC pull (4 volumes, ~50 MB)" minutes="1"/>
+      <item name="Teardown" minutes="1"/>
+    </overhead>
+
+    <total_smoke_test_all_models>
+      <duration_minutes>31</duration_minutes>
+      <cost_usd>0.36</cost_usd>
+      <note>
+        <!-- RC7: Clarified cost model assumption -->
+        ASSUMPTION: Sequential execution with instance reuse. Overhead
+        (8 min) applies ONCE at startup. All 3 models train sequentially
+        on the same instance (5 + 8 + 10 = 23 min training).
+        Total: 8 + 23 = 31 min @ $0.69/hr = $0.36.
+
+        If models run as SEPARATE SkyPilot jobs (3x overhead):
+        Total: 3×8 + 23 = 47 min @ $0.69/hr = $0.54.
+
+        The smoke_test_gpu.yaml supports both modes:
+        - Single model: sky jobs launch ... -e MODEL_FAMILY=sam3_vanilla
+        - All models: make smoke-test-all (sequential, instance reuse preferred)
+      </note>
+    </total_smoke_test_all_models>
+  </cost_model>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- DATA FLOW ARCHITECTURE                                             -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <data_flow>
+    <ascii_diagram><![CDATA[
+    ┌─────────────────────┐
+    │ Developer Workstation│
+    │                      │
+    │  dvc push -r upcloud │ ──(one-time)──> ┌──────────────────┐
+    │  (984 MB MiniVess)   │                 │ UpCloud S3       │
+    │                      │                 │ minivess-dvc-data│
+    └──────────────────────┘                 └────────┬─────────┘
+                                                      │
+    ┌─────────────────────────────────────────────────┼──────────────────┐
+    │ RunPod RTX 4090 (SkyPilot-provisioned)          │                  │
+    │                                                  │                  │
+    │  ┌──────────┐    ┌──────────┐    ┌──────────────┤                  │
+    │  │ 1. Setup │───>│ 2. DVC   │───>│ 3. Train     │                  │
+    │  │ uv install│    │ pull     │    │ 2 epochs     │                  │
+    │  │ uv sync  │    │ -r upcloud│   │ 1 fold       │                  │
+    │  │ dvc init │    └──────────┘    │ 4 volumes    │                  │
+    │  └──────────┘                     └──────┬───────┘                  │
+    │                                          │ MLflow log_metric/param  │
+    │  Env: MINIVESS_ALLOW_HOST=1              │ MLflow log_artifact      │
+    │  Env: PREFECT_DISABLED=1                 │ MLflow log_param(dvc_commit)│
+    │  Hydra: data.dvc_commit=${commit_hash}   │                          │
+    └──────────────────────────────────────────┼──────────────────────────┘
+                                               │
+                                    ┌──────────▼──────────┐
+                                    │ UpCloud MLflow Server│
+                                    │ http://IP:5000 (R7)  │
+                                    │ PostgreSQL backend    │
+                                    │ S3 artifact store     │
+                                    └──────────────────────┘
+    ]]></ascii_diagram>
+
+    <critical_decision id="D1" title="DVC pull vs SkyPilot file_mounts">
+      <chosen>DVC pull in setup phase</chosen>
+      <rejected>SkyPilot file_mounts with s3:// source</rejected>
+      <rationale>
+        SkyPilot file_mounts require an AWS S3 bucket (or GCS).
+        UpCloud Object Storage is S3-compatible but NOT AWS S3.
+        DVC supports any S3-compatible endpoint via endpointurl config.
+        DVC also gives us data versioning and provenance tracking for free.
+        The 984 MB MiniVess dataset downloads in ~60 seconds on RunPod's
+        10 Gbps network — file_mounts overhead savings are negligible.
+      </rationale>
+    </critical_decision>
+
+    <critical_decision id="D2" title="Docker-in-Docker vs native execution on RunPod">
+      <chosen>Native execution (uv sync + direct training)</chosen>
+      <rejected>Docker-in-Docker (building flow images on RunPod)</rejected>
+      <rationale>
+        RunPod pods are already Docker containers. Running Docker inside
+        Docker adds complexity and startup time. The training flow's
+        _require_docker_context() gate is bypassed via MINIVESS_ALLOW_HOST=1
+        which is the approved escape hatch for cloud VMs and pytest.
+
+        RC12: This is NOT a violation of Rules #17/#19. MINIVESS_ALLOW_HOST=1
+        and PREFECT_DISABLED=1 are explicitly permitted escape hatches for:
+        (a) pytest test environments, (b) ephemeral cloud VMs (SkyPilot).
+        The SkyPilot setup phase installs all dependencies via
+        uv sync --all-extras, matching what Dockerfile.base does.
+      </rationale>
+    </critical_decision>
+
+    <critical_decision id="D3" title="Prefect orchestration on RunPod">
+      <chosen>Direct training function call (no Prefect server)</chosen>
+      <rejected>Prefect deployment run (requires accessible Prefect server)</rejected>
+      <rationale>
+        The UpCloud VPS runs MLflow only — no Prefect server. Deploying
+        Prefect server on UpCloud would double infrastructure cost and
+        complexity. With PREFECT_DISABLED=1, the @flow decorator becomes
+        a pass-through — the function still executes, but Prefect doesn't
+        orchestrate or track it. MLflow provides sufficient provenance
+        for smoke tests. Prefect orchestration is for the local Docker
+        Compose environment where all services co-exist.
+      </rationale>
+    </critical_decision>
+
+    <critical_decision id="D4" title="DVC commit as Hydra config field (not env var)">
+      <chosen>data.dvc_commit Hydra config field, logged as MLflow param</chosen>
+      <rejected>DVC_COMMIT env var, logged as MLflow tag</rejected>
+      <rationale>
+        R2-REVERT: User correctly requires data version as a SWEEPABLE parameter.
+        Researchers need to compare training runs across different DVC data
+        versions. Hydra config field enables:
+        1. Multirun sweep over data versions (Hydra --multirun data.dvc_commit=abc,def)
+        2. MLflow param logging (params are searchable/filterable, tags less so)
+        3. Full experiment reproducibility (YAML config = complete experiment spec)
+        4. Visible in MLflow UI param comparison
+
+        DataConfig schema change is the CORRECT approach — it's adding a
+        first-class data provenance field, not a hack. Default: empty string
+        (local training without DVC).
+      </rationale>
+    </critical_decision>
+  </data_flow>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- IMPLEMENTATION ORDER + DEPENDENCY GRAPH                            -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <implementation_order>
+    <step phase="0" tasks="T0.1,T0.2,T0.3" parallel="false" description="UpCloud S3 + DVC setup (serial — T0.2 needs T0.1 bucket)"/>
+    <step phase="1" tasks="T1.1,T1.2" parallel="true" description="SkyPilot YAML + smoke configs (independent)"/>
+    <step phase="2" tasks="T2.1,T2.2" parallel="false" description="Training flow modifications (T2.2 needs T2.1)"/>
+    <step phase="3" tasks="T3.1,T3.2" parallel="true" description="E2E launch + Makefile targets"/>
+    <step phase="4" tasks="T4.1,T4.2" parallel="true" description="Verification + docs"/>
+  </implementation_order>
+
+  <dependency_graph><![CDATA[
+    T0.1 ──> T0.2 ──> T0.3
+                │
+                ▼
+    T1.1 ──> T2.1 ──> T3.1
+    T1.2 ──────────> T3.1
+                │
+                ▼
+              T2.2 ──> T3.2
+                │
+                ▼
+              T4.1
+              T4.2
+  ]]></dependency_graph>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- ENVIRONMENT VARIABLES (new, to be added to .env.example)           -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <env_vars>
+    <!-- RC11: endpoint URL comes from `pulumi stack output s3_endpoint` -->
+    <var name="DVC_S3_ENDPOINT_URL" example="https://xxx.upcloudobjects.com" section="DVC Cloud Storage"
+         description="From Pulumi output: pulumi stack output s3_endpoint"/>
+    <var name="DVC_S3_ACCESS_KEY" example="" section="DVC Cloud Storage" secret="true"/>
+    <var name="DVC_S3_SECRET_KEY" example="" section="DVC Cloud Storage" secret="true"/>
+    <var name="DVC_S3_BUCKET" example="minivess-dvc-data" section="DVC Cloud Storage"/>
+    <var name="DVC_REMOTE" example="upcloud" section="DVC Cloud Storage" description="DVC remote name (minio for local, upcloud for cloud)"/>
+    <!-- DVC_COMMIT is a Hydra config field (data.dvc_commit), NOT an env var.
+         Set in configs/experiment/smoke_*.yaml, not in .env.example.
+         Researchers can sweep: multirun data.dvc_commit=abc123,def456 -->
+    <!-- RC5: RUNPOD_API_KEY is correct; legacy RUNPOD_TOKEN must be renamed -->
+    <var name="RUNPOD_API_KEY" example="" section="RunPod GPU Compute" secret="true" description="RunPod API key for SkyPilot (NOT RUNPOD_TOKEN)"/>
+    <var name="SMOKE_TEST_MODEL" example="sam3_vanilla" section="Smoke Test" description="Model for smoke test (sam3_vanilla, sam3_hybrid, vesselfm)"/>
+  </env_vars>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- RISK ASSESSMENT                                                     -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <risks>
+    <risk id="R1" severity="high" title="UpCloud S3 endpoint unreachable from RunPod">
+      <mitigation>Pre-flight script (scripts/validate_smoke_test_env.py) tests S3
+        connectivity before launching SkyPilot job. Fallback to AWS S3 readonly remote.</mitigation>
+    </risk>
+    <risk id="R2" severity="high" title="SkyPilot nightly required for RunPod (API instability)">
+      <mitigation>skypilot-nightly[runpod] added to pyproject.toml infra group (RC14).
+        Pin version in pyproject.toml. Pre-flight script verifies RunPod backend.</mitigation>
+    </risk>
+    <risk id="R3" severity="medium" title="RunPod community GPU availability varies">
+      <mitigation>SkyPilot auto-retries; smoke test has 30-min timeout; fallback to secure cloud</mitigation>
+    </risk>
+    <risk id="R4" severity="medium" title="DVC pull slow on large dataset">
+      <mitigation>Smoke test uses 4-volume subset (not full 70 volumes); ~50 MB after compression</mitigation>
+    </risk>
+    <risk id="R5" severity="low" title="MLflow auth token expires during training">
+      <mitigation>MLflow basic auth has no token expiry; password is static</mitigation>
+    </risk>
+    <risk id="R6" severity="medium" title="UpCloud free trial runs out during development">
+      <mitigation>S3 storage persists after trial; MLflow server needs upgrade or migration to Hetzner</mitigation>
+    </risk>
+    <!-- RC6: New risk added by infrastructure reviewer -->
+    <risk id="R7" severity="high" title="MLflow HTTP-only (no TLS) — credentials in cleartext">
+      <mitigation>
+        ACCEPTABLE for smoke tests (test environment, 1-2 hours of exposure).
+        NOT acceptable for production or multi-team sharing.
+        Post-trial upgrade path: nginx reverse proxy with Let's Encrypt cert,
+        or UpCloud managed certificate. Document in T4.2.
+        Current mitigation: basic auth + strong password + short-lived instances.
+      </mitigation>
+    </risk>
+    <risk id="R8" severity="medium" title="VesselFM checkpoint download may require HuggingFace approval">
+      <mitigation>Pre-flight script checks HF_TOKEN is set. VesselFM adapter handles
+        hf_hub_download with auth. If gated, user must accept model terms on HuggingFace
+        before running smoke test.</mitigation>
+    </risk>
+  </risks>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- TOTAL EFFORT ESTIMATE                                               -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <effort_summary>
+    <phase id="0" hours="6" description="UpCloud S3 + DVC configuration"/>
+    <phase id="1" hours="5" description="SkyPilot YAML + smoke configs"/>
+    <phase id="2" hours="6" description="Training flow cloud integration"/>
+    <phase id="3" hours="7" description="E2E launch + pre-flight + Makefile targets"/>
+    <phase id="4" hours="3" description="Post-run verification + docs"/>
+    <total hours="27"/>
+  </effort_summary>
+
+</plan>

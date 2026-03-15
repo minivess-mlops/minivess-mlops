@@ -165,8 +165,15 @@ Each of the 6 Prefect flows runs in its own Docker container:
 |----------|------|-----|-----------|--------|--------|
 | **RunPod** | Dev/prototyping | RTX 4090 (24 GB) | $0.44-0.69 | Container-native (no Docker-in-Docker) | US/EU |
 | **GCP** | Staging/prod | **L4**/A100 | $0.19-1.39 | VM + Docker image_id | auto (SkyPilot) |
-| **Lambda Labs** | Rejected | A10/A100 | $0.50-1.10 | VM + Docker | No EU availability |
-| **UpCloud** | MLflow server | CPU VPS | Fixed €5/mo | N/A | fi-hel1 (Helsinki) |
+| ~~Lambda Labs~~ | **Archived** | A10/A100 | — | — | No EU availability — DROPPED |
+| ~~UpCloud~~ | **Archived** | CPU VPS | — | — | fi-hel1 Helsinki — DROPPED 2026-03-16 |
+
+**UpCloud DROPPED (2026-03-16):** UpCloud VPS (MLflow server) and UpCloud S3 (DVC
+storage) are fully retired. Code archived to `deployment/archived/upcloud/`.
+**Replacement**: MLflow = RunPod Network Volume filesystem (`/opt/vol/mlruns`,
+`MLFLOW_TRACKING_URI=/opt/vol/mlruns`). DVC data = Network Volume cache-first,
+fallback to `s3://minivessdataset` (AWS S3, no custom credentials).
+**Sync back**: `make dev-gpu-sync` → `sky rsync down minivess-dev:/opt/vol/mlruns/ mlruns/`
 
 **T4 BANNED (Non-Negotiable):** T4 is Turing architecture — no BF16 support.
 SAM3's half-precision encoder overflows during validation (FP16 max = 65504 → NaN).
