@@ -1,10 +1,11 @@
 # knowledge-graph/manuscript/claims.yaml
-# Scientific claims for the ARBOR paper — each claim linked to evidence in KG
+# Scientific claims for the NEUROVEX paper — each claim linked to evidence in KG
 # These are the assertions that must be backed by code, experiments, or citations
+# Platform name: NEUROVEX (canonical — 2026-03-16). "ARBOR" was the working name; now retired.
 
 claims:
   - id: C1
-    claim: "ARBOR provides a complete, reproducible MLOps pipeline for 3D biomedical segmentation that requires only YAML configuration changes to run on any MONAI-compatible dataset or model"
+    claim: "NEUROVEX provides a complete, reproducible MLOps pipeline for 3D biomedical segmentation that requires only YAML configuration changes to run on any MONAI-compatible dataset or model"
     type: platform_capability
     evidence:
       - {type: code, ref: "src/minivess/adapters/base.py::ModelAdapter ABC"}
@@ -24,7 +25,7 @@ claims:
     status: supported
 
   - id: C3
-    claim: "The 5-flow architecture (data→train→analyze→deploy→dashboard) cleanly separates concerns into distinct Docker containers with MLflow as the only inter-flow contract"
+    claim: "The 10-flow Prefect-orchestrated architecture (Data Acquisition→Data Engineering→Modeling/Training→Post-training→Eval with ensembling→Biostatistics→Deploy, plus Dashboard, Data Annotation, and Prefect Orchestrators) cleanly separates concerns into distinct Docker containers with MLflow as the only inter-flow contract, enabling independent development of each flow"
     type: architectural_claim
     evidence:
       - {type: code, ref: "src/minivess/orchestration/trigger.py::PipelineTriggerChain"}
