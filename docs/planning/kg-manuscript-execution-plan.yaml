@@ -1,0 +1,213 @@
+# Knowledge Graph + Manuscript Scaffold Execution Plan
+# Generated: 2026-03-15
+# Source: docs/planning/repo-to-manuscript.md
+# Tracker: .claude/skills/self-learning-iterative-coder/state/tdd-state.json
+
+plan_version: "1.0"
+execution_mode: autonomous
+
+phases:
+  - id: P0
+    name: "KG Core Updates"
+    tasks:
+      - id: T01
+        name: "navigator.yaml — add manuscript: domain"
+        status: NOT_STARTED
+        type: yaml_edit
+        file: knowledge-graph/navigator.yaml
+        tdd: false
+
+      - id: T02
+        name: "_network.yaml — add propagation: section"
+        status: NOT_STARTED
+        type: yaml_edit
+        file: knowledge-graph/_network.yaml
+        tdd: false
+
+      - id: T03
+        name: "domains/manuscript.yaml — new domain file"
+        status: NOT_STARTED
+        type: yaml_create
+        file: knowledge-graph/domains/manuscript.yaml
+        tdd: false
+
+      - id: T04
+        name: "bibliography.yaml — add SAM3 + manuscript citations"
+        status: NOT_STARTED
+        type: yaml_edit
+        file: knowledge-graph/bibliography.yaml
+        tdd: false
+
+  - id: P1
+    name: "Context Layers — KG Bootstrap"
+    depends_on: [P0]
+    tasks:
+      - id: T05
+        name: "code-structure/flows.yaml — AST-bootstrapped flow graph"
+        status: NOT_STARTED
+        type: yaml_create
+        file: knowledge-graph/code-structure/flows.yaml
+        tdd: false
+
+      - id: T06
+        name: "code-structure/adapters.yaml — ModelAdapter implementations"
+        status: NOT_STARTED
+        type: yaml_create
+        file: knowledge-graph/code-structure/adapters.yaml
+        tdd: false
+
+      - id: T07
+        name: "code-structure/config-schema.yaml — Hydra config hierarchy"
+        status: NOT_STARTED
+        type: yaml_create
+        file: knowledge-graph/code-structure/config-schema.yaml
+        tdd: false
+
+      - id: T08
+        name: "code-structure/test-coverage.yaml — test tier map"
+        status: NOT_STARTED
+        type: yaml_create
+        file: knowledge-graph/code-structure/test-coverage.yaml
+        tdd: false
+
+      - id: T09
+        name: "experiments/dynunet_loss_variation_v2.yaml — real metrics"
+        status: NOT_STARTED
+        type: yaml_create
+        file: knowledge-graph/experiments/dynunet_loss_variation_v2.yaml
+        tdd: false
+
+      - id: T10
+        name: "experiments/current_best.yaml — champion per metric"
+        status: NOT_STARTED
+        type: yaml_create
+        file: knowledge-graph/experiments/current_best.yaml
+        tdd: false
+
+  - id: P2
+    name: "Narrative Layer — Manuscript YAML"
+    depends_on: [P1]
+    tasks:
+      - id: T11
+        name: "manuscript/claims.yaml — 12 scientific claims + evidence"
+        status: NOT_STARTED
+        type: yaml_create
+        file: knowledge-graph/manuscript/claims.yaml
+        tdd: false
+
+      - id: T12
+        name: "manuscript/methods.yaml — 13 section stubs M0-M12"
+        status: NOT_STARTED
+        type: yaml_create
+        file: knowledge-graph/manuscript/methods.yaml
+        tdd: false
+
+      - id: T13
+        name: "manuscript/results.yaml — 6 result stubs R0-R5"
+        status: NOT_STARTED
+        type: yaml_create
+        file: knowledge-graph/manuscript/results.yaml
+        tdd: false
+
+      - id: T14
+        name: "manuscript/limitations.yaml — 6 known limitations"
+        status: NOT_STARTED
+        type: yaml_create
+        file: knowledge-graph/manuscript/limitations.yaml
+        tdd: false
+
+      - id: T15
+        name: "manuscript/projections.yaml — KG→file dependency map"
+        status: NOT_STARTED
+        type: yaml_create
+        file: knowledge-graph/manuscript/projections.yaml
+        tdd: false
+
+  - id: P3
+    name: "Manuscript .tex Scaffold"
+    depends_on: [P2]
+    tasks:
+      - id: T16
+        name: "latent-methods-results/ directory scaffold (all subdirs + placeholder .tex)"
+        status: NOT_STARTED
+        type: dir_scaffold
+        output_dir: docs/manuscript/latent-methods-results/
+        tdd: false
+
+      - id: T17
+        name: "EXECUTIVE-SUMMARY.md — 1-page cold-resume for co-authors"
+        status: NOT_STARTED
+        type: doc_create
+        file: docs/manuscript/latent-methods-results/EXECUTIVE-SUMMARY.md
+        tdd: false
+
+      - id: T18
+        name: "methods-00 through methods-08 .tex — bullet+Mermaid stubs"
+        status: NOT_STARTED
+        type: tex_scaffold
+        output_dir: docs/manuscript/latent-methods-results/methods/
+        tdd: false
+
+      - id: T19
+        name: "results-01, results-03 .tex — from real experiment data"
+        status: NOT_STARTED
+        type: tex_scaffold
+        output_dir: docs/manuscript/latent-methods-results/results/
+        tdd: false
+
+  - id: P4
+    name: "kg-sync Skill + Jinja2 Templates"
+    depends_on: [P2]
+    tasks:
+      - id: T20
+        name: ".claude/skills/kg-sync/SKILL.md — 7-step kg-sync Skill"
+        status: NOT_STARTED
+        type: skill_create
+        file: .claude/skills/kg-sync/SKILL.md
+        tdd: false
+
+      - id: T21
+        name: "knowledge-graph/templates/*.j2 — Jinja2 .tex generation templates"
+        status: NOT_STARTED
+        type: template_create
+        output_dir: knowledge-graph/templates/
+        tdd: false
+
+  - id: P5
+    name: "Python Scripts with TDD"
+    depends_on: [P1]
+    tasks:
+      - id: T22
+        name: "scripts/scan_code_structure.py — ast.parse() → code-structure/*.yaml"
+        status: NOT_STARTED
+        type: python_tdd
+        impl_file: scripts/scan_code_structure.py
+        test_file: tests/v2/unit/scripts/test_scan_code_structure.py
+        tdd: true
+
+      - id: T23
+        name: "scripts/scan_experiments.py — DuckDB → experiments/*.yaml"
+        status: NOT_STARTED
+        type: python_tdd
+        impl_file: scripts/scan_experiments.py
+        test_file: tests/v2/unit/scripts/test_scan_experiments.py
+        tdd: true
+
+      - id: T24
+        name: "scripts/check_projection_staleness.py — projections.yaml staleness report"
+        status: NOT_STARTED
+        type: python_tdd
+        impl_file: scripts/check_projection_staleness.py
+        test_file: tests/v2/unit/scripts/test_check_projection_staleness.py
+        tdd: true
+
+  - id: P6
+    name: "Knowledge Reviewer QA"
+    depends_on: [P0, P1, P2, P3, P4, P5]
+    tasks:
+      - id: T25
+        name: "knowledge-reviewer — full KG + manuscript scaffold QA"
+        status: NOT_STARTED
+        type: skill_invocation
+        skill: knowledge-reviewer
+        tdd: false

@@ -1,0 +1,77 @@
+# knowledge-graph/manuscript/limitations.yaml
+# Known limitations — each with mitigation strategy for reviewers
+
+limitations:
+  - id: L1
+    title: "VesselFM data leakage on MiniVess"
+    severity: high
+    description: >
+      VesselFM (Wittmann et al. 2024) was pre-trained on MiniVess dataset.
+      Evaluating VesselFM on MiniVess = data leakage — invalid comparison.
+    mitigation: >
+      Evaluate VesselFM only on DeepVess (Cornell) and TubeNet (UCL) external datasets.
+      Frame as: "the platform enables fair evaluation once leakage is identified."
+    manuscript_section: [R3c, Discussion]
+    status: documented
+
+  - id: L2
+    title: "SAM3/VesselFM GPU results pending"
+    severity: high
+    description: >
+      As of 2026-03-15, only DynUNet results are available. Full multi-model comparison
+      (R3b) requires SAM3 Vanilla + SAM3 Hybrid + VesselFM runs on cloud GPU.
+    mitigation: >
+      GPU runs planned for RunPod RTX 4090, target 2026-03-20, cost ~$15.
+      Paper cannot be submitted without R3b.
+    manuscript_section: [R3b]
+    status: in_progress
+
+  - id: L3
+    title: "Agentic development metrics are self-reported"
+    severity: medium
+    description: >
+      Claims about development velocity improvement from spec-driven agentic coding
+      are self-reported by the primary author — not independently verified.
+    mitigation: >
+      Option A: Demote to appendix (paper stands without it).
+      Option B: Partner with science-of-science researcher for external validation.
+      Option C: Make it a companion paper with agentic-development slides.
+    manuscript_section: [M12, R5]
+    status: acknowledged
+
+  - id: L4
+    title: "cuDNN non-determinism (soft constraint)"
+    severity: low
+    description: >
+      PyTorch/cuDNN has non-deterministic operations. SHA256 identity across GPU runs
+      requires torch.use_deterministic_algorithms(True) which reduces performance.
+    mitigation: >
+      Statistical reproducibility (same distribution of outcomes) is demonstrated.
+      Bit-for-bit reproducibility requires deterministic mode (documented in methods).
+    manuscript_section: [R1, Methods M7]
+    status: documented
+
+  - id: L5
+    title: "No external replication yet"
+    severity: medium
+    description: >
+      Platform has been tested only in the author's lab. External replication
+      (collaborator running from scratch) not yet performed.
+    mitigation: >
+      Nature Protocols typically requires external replication proof.
+      Plan: ask one collaborator to run just experiment on their lab data.
+    manuscript_section: [R1, Discussion]
+    status: planned
+
+  - id: L6
+    title: "Single-dataset primary training (MiniVess)"
+    severity: medium
+    description: >
+      Primary training and ablation results are on MiniVess (rat cerebrovasculature, 70 volumes).
+      Generalizability to other imaging modalities or species not demonstrated.
+    mitigation: >
+      The ModelAdapter ABC and config system are explicitly designed for any MONAI dataset.
+      Include worked example of adding DeepVess via YAML config alone (no code changes).
+      Frame as platform generalizability demonstration, not SOTA on all datasets.
+    manuscript_section: [Discussion, R6]
+    status: addressed_in_design

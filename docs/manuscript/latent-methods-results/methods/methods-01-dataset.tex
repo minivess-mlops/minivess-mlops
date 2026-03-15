@@ -1,0 +1,16 @@
+%% HUMAN-AUTHORED: methods-01-dataset.tex
+%% Section: M1 -- Dataset: MiniVess
+%% KG: knowledge-graph/manuscript/methods.yaml#M1
+%% Last updated: 2026-03-15 (scaffold)
+
+\subsection{Dataset}
+\begin{itemize}
+  \item MiniVess: 70 volumes of rat cerebrovasculature, 2-photon fluorescence microscopy
+  \item Spatial resolution: XY=512$\times$512, Z=5--110 slices, pixel spacing 0.31--4.97~$\mu$m
+  \item Cross-validation: 3-fold, seed=42, 47 train / 23 val per fold
+  \item External test sets: DeepVess (Cornell), TubeNet 2PM (UCL), VesselNN
+  \item DVC-versioned: \texttt{data/minivess.dvc}
+  \item License: CC BY-NC-SA (Poon et al.\ 2023, Sci.\ Data)
+  \item Outlier: mv02 (4.97~$\mu$m spacing) handled via \texttt{voxel\_spacing=(0,0,0)} fix
+\end{itemize}
+% TODO co-author: add 2-3 sentences on why rat cerebrovasculature is a hard segmentation problem

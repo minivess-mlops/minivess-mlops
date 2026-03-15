@@ -1,0 +1,30 @@
+%% HUMAN-AUTHORED: methods-12-agentic.tex
+%% Section: M12 -- Agentic Development Methodology (Appendix Candidate)
+%% KG: knowledge-graph/manuscript/methods.yaml#M12
+%% Last updated: 2026-03-15 (scaffold)
+%% NOTE: Keep as appendix -- paper stands without this section.
+%%       Can become standalone companion paper on spec-driven agentic software engineering.
+
+\subsection{Agentic Development Methodology}
+\begin{itemize}
+  \item Claude Code + \texttt{CLAUDE.md} as living software design document (SDD-inspired)
+  \item 52-node probabilistic knowledge graph as Bayesian decision network
+  \item TDD-first workflow: self-learning-iterative-coder Skill
+        (red $\to$ green $\to$ verify $\to$ fix $\to$ checkpoint $\to$ converge)
+  \item Metalearning: \texttt{.claude/metalearning/} --- failure analyses persisted to files,
+        never discarded to terminal output
+  \item Intent expression: \texttt{CLAUDE.md} ban list + decision node \texttt{intent\_sources}
+  \item Phase 1 belief propagation: \texttt{requires\_review} flags trigger on spec change
+  \item Phase 2 (future): actual posterior updates when experimental results arrive
+\end{itemize}
+
+%% Figure stub -- replace with \includegraphics after mmdc rendering
+% \begin{figure}[h]
+%   \includegraphics[width=\linewidth]{figures/generated/fig-M12-agentic.pdf}
+%   \caption{Spec-driven agentic development loop. CLAUDE.md (spec) $\to$ KG (decisions)
+%            $\to$ Claude Code (implementation) $\to$ metalearning (correction) $\to$ spec update.}
+%   \label{fig:M12-agentic}
+% \end{figure}
+
+% TODO co-author: decide appendix vs companion paper before submission
+% TODO co-author: add Mermaid diagram showing the spec→code→metalearning→spec feedback loop

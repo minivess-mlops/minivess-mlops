@@ -1,0 +1,16 @@
+%% HUMAN-AUTHORED: methods-08-evaluation.tex
+%% Section: M8 -- Evaluation and Analysis
+%% KG: knowledge-graph/manuscript/methods.yaml#M8
+%% Last updated: 2026-03-15 (scaffold)
+
+\subsection{Evaluation and Analysis}
+\begin{itemize}
+  \item Primary metrics: DSC (voxel overlap), clDice (centerline/topology), MASD (Hausdorff-based surface distance)
+  \item Statistical uncertainty: bootstrap confidence intervals ($n$=1000, 95\% CI)
+  \item Coverage guarantees: conformal prediction (split conformal, calibrated on validation fold)
+  \item Cross-run analytics: DuckDB SQL queries over \texttt{mlruns/} filesystem
+  \item Output artifacts: \texttt{ComparisonTable} $\to$ \texttt{.tex} + \texttt{.md} (auto-generated)
+  \item Deepchecks Vision for image data + model validation checks
+  \item WeightWatcher spectral diagnostics for model health
+\end{itemize}
+% TODO co-author: add 1 sentence on why clDice is preferred over DSC for vascular connectivity

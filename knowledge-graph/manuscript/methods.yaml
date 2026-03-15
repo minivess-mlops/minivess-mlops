@@ -1,0 +1,172 @@
+# knowledge-graph/manuscript/methods.yaml
+# Methods section stubs M0-M12 — bullet+Mermaid format
+# Each section maps to a .tex file in docs/manuscript/latent-methods-results/methods/
+
+sections:
+  - id: M0
+    title: "Research Question and Scope"
+    tex_file: methods/methods-00-overview.tex
+    status: needs_content
+    key_points:
+      - "Not SOTA segmentation — PLATFORM for enabling next-gen SOTA"
+      - "MONAI ecosystem extension, not a fork"
+      - "Open-source (MIT), model-agnostic, cloud-agnostic"
+      - "Primary dataset: MiniVess (Poon et al. 2023, 70 volumes, 2-photon microscopy)"
+    decision_nodes: [project_purpose, impact_target, monai_alignment]
+    figures: []
+
+  - id: M1
+    title: "Dataset: MiniVess"
+    tex_file: methods/methods-01-dataset.tex
+    status: needs_content
+    key_points:
+      - "70 volumes rat cerebrovasculature, 2-photon fluorescence microscopy"
+      - "XY=512×512, Z=5-110 slices, spacing 0.31-4.97 μm"
+      - "3-fold cross-validation, seed=42, 47 train / 23 val per fold"
+      - "mv02 outlier (4.97 μm) → voxel_spacing=(0,0,0) fix"
+      - "External test: DeepVess (Cornell), TubeNet 2PM (UCL), VesselNN"
+      - "DVC-versioned: data/minivess.dvc"
+    decision_nodes: [data_versioning, data_validation_depth]
+    figures: []
+
+  - id: M2
+    title: "Data Engineering Flow"
+    tex_file: methods/methods-02-data-engineering.tex
+    status: needs_content
+    key_points:
+      - "Flow 1 of 5: validates, profiles, and stages data"
+      - "MONAI transforms + TorchIO augmentation"
+      - "Pandera + Great Expectations batch quality"
+      - "whylogs profiling — drift baseline at split time"
+      - "OpenLineage (Marquez) lineage tracking"
+    decision_nodes: [data_validation_depth, data_profiling, lineage_tracking]
+
+  - id: M3
+    title: "Platform Architecture"
+    tex_file: methods/methods-03-architecture.tex
+    status: needs_content
+    mermaid_figure: fig-M3-architecture
+    key_points:
+      - "5-flow Prefect DAG + Docker-per-flow isolation"
+      - "6 Docker containers (data, train, analyze, deploy, dashboard + base)"
+      - "MLflow as ONLY inter-flow contract — no shared filesystem"
+      - "Layer 0: Infrastructure (PostgreSQL, MinIO, MLflow, Prefect, Grafana)"
+      - "Layer 1: GPU Management (MIG for inference)"
+      - "Layer 2: Training (Optuna ASHA + DDP)"
+      - "Layer 3: Compute (SkyPilot multi-cloud spot)"
+      - "Layer 4: Orchestration (Prefect 3.x Server)"
+    decision_nodes: [container_strategy, gpu_compute, gitops_engine]
+
+  - id: M4
+    title: "Cloud Compute Strategy"
+    tex_file: methods/methods-04-compute.tex
+    status: needs_content
+    key_points:
+      - "SkyPilot = intercloud broker (Yang et al. NSDI'23) — not IaC"
+      - "sky jobs launch task.yaml — one command, any cloud"
+      - "RunPod: RTX 4090, $0.44–0.69/hr, container-native (no DinD)"
+      - "GCP: L4 (Ada Lovelace, BF16 support) — T4/Turing BANNED"
+      - "Docker image in GHCR — all deps pre-baked, SkyPilot setup ≤30 sec"
+      - "Spot recovery automatic — SkyPilot handles preemptions"
+    decision_nodes: [gpu_compute, container_strategy, iac_tool]
+
+  - id: M5
+    title: "Workflow Orchestration (5-Flow DAG)"
+    tex_file: methods/methods-05-orchestration.tex
+    status: needs_content
+    mermaid_figure: fig-M5-prefect-dag
+    key_points:
+      - "Prefect 3.x REQUIRED — not optional scaffolding"
+      - "Flow 1-5 personas: Data Engineer, ML Engineer, Statistician, MLOps, Researcher"
+      - "Flows 1-4 are core (stop on failure); Flow 5 (dashboard) is best-effort"
+      - "PipelineTriggerChain handles cascading + spot recovery"
+      - "Inter-flow contract: MLflow run tags (flow_name='training-flow')"
+    decision_nodes: [container_strategy, experiment_tracker]
+
+  - id: M6
+    title: "Model Adapter Architecture"
+    tex_file: methods/methods-06-model-adapters.tex
+    status: needs_content
+    mermaid_figure: fig-M6-model-adapter
+    key_points:
+      - "ModelAdapter ABC: forward(B,C,H,W,D) → SegmentationOutput"
+      - "3 abstract methods: forward, get_eval_roi_size, get_adapter_config"
+      - "build_adapter(config) factory — config-driven dispatch"
+      - "Current: DynUNet, SegResNet, SAM3 (V1/V2/V3), VesselFM, SwinUNETR, AttentionUNet"
+      - "Adding new model = implement 3 methods + YAML profile"
+    decision_nodes: [model_adapter_pattern, primary_3d_model, foundation_model]
+
+  - id: M7
+    title: "Training Pipeline"
+    tex_file: methods/methods-07-training.tex
+    status: needs_content
+    key_points:
+      - "Loss: cbdice_cldice (CbDiceClDiceLoss) — default, topology-optimized"
+      - "Trainer: vanilla PyTorch + MONAI (no Lightning — autolog incompatible)"
+      - "AMP: ON for training, OFF for validation (MONAI #4243 — 3D + autocast = NaN)"
+      - "val_interval > max_epochs = skip-validation sentinel (OOM guard for SAM3)"
+      - "Optuna + ASHA HyperbandPruner for HPO"
+    decision_nodes: [loss_function, hpo_engine, primary_metrics]
+
+  - id: M8
+    title: "Evaluation and Analysis"
+    tex_file: methods/methods-08-evaluation.tex
+    status: needs_content
+    key_points:
+      - "Primary: DSC, clDice (centerline), MASD (Hausdorff-based)"
+      - "Bootstrap CIs (n=1000) for statistical uncertainty"
+      - "Conformal prediction for coverage guarantees"
+      - "DuckDB analytics over MLflow for cross-run comparison"
+      - "ComparisonTable → .tex / .md auto-generated artifacts"
+    decision_nodes: [primary_metrics, topology_metrics, calibration_method]
+
+  - id: M9
+    title: "Observability Stack"
+    tex_file: methods/methods-09-observability.tex
+    status: needs_content
+    key_points:
+      - "MLflow: experiment tracker, model registry, inter-flow contract"
+      - "DuckDB: in-process SQL analytics over mlruns/"
+      - "Langfuse: LLM tracing for agentic development story"
+      - "Prometheus + Grafana: infrastructure metrics"
+      - "Evidently: data/model drift detection"
+      - "OpenLineage (Marquez): IEC 62304 data lineage"
+    decision_nodes: [experiment_tracker, llm_tracing, observability_depth]
+
+  - id: M10
+    title: "Deployment and Serving"
+    tex_file: methods/methods-10-deployment.tex
+    status: needs_content
+    key_points:
+      - "ONNX export via BentoML + ONNX Runtime"
+      - "Champion tagging in MLflow registry"
+      - "Gradio demo interface"
+      - "NVIDIA MIG for multi-model inference"
+    decision_nodes: [model_export_format, serving_architecture]
+
+  - id: M11
+    title: "Configuration Architecture"
+    tex_file: methods/methods-11-config.tex
+    status: needs_content
+    mermaid_figure: fig-M11-config
+    key_points:
+      - "Dual config: Hydra-zen (experiments) + Dynaconf (deployment)"
+      - ".env.example = single source of truth for ALL service URLs/ports/creds"
+      - "Zero hardcoded values — any lab overrides via configs/lab/lab_name.yaml"
+      - "Config hierarchy: repo → lab → user → experiment"
+    decision_nodes: [config_architecture, secrets_management]
+
+  - id: M12
+    title: "Agentic Development Methodology (Appendix Candidate)"
+    tex_file: methods/methods-12-agentic.tex
+    status: needs_content
+    mermaid_figure: fig-M12-agentic
+    key_points:
+      - "Claude Code + CLAUDE.md as living specification (SDD-inspired)"
+      - "52-node probabilistic KG as Bayesian decision network"
+      - "TDD-first: self-learning-iterative-coder Skill (red-green-verify-fix-checkpoint)"
+      - "Metalearning: .claude/metalearning/ — failure analysis persisted to files"
+      - "Intent expression: CLAUDE.md bans + decision node intent_sources"
+      - "Phase 1 belief propagation: requires_review flags on spec change"
+    note: "Keep as appendix — paper stands without this section. Can become companion paper."
+    decision_nodes: [agent_architecture, observability_depth]

@@ -1,0 +1,158 @@
+# knowledge-graph/code-structure/flows.yaml
+# Prefect flow graph — bootstrapped from src/minivess/orchestration/
+# Auto-regeneration: scripts/scan_code_structure.py (to be implemented)
+# Last manual update: 2026-03-15
+
+_meta:
+  generated_by: manual_bootstrap  # will change to: scripts/scan_code_structure.py
+  source_dirs: [src/minivess/orchestration/]
+  git_commit: "see _generated_at.yaml"
+  note: "Bootstrapped by hand until scan_code_structure.py is implemented"
+
+# 5 core flows (always run) + 1 best-effort (dashboard)
+# Source: src/minivess/orchestration/flows/
+# Orchestrator: src/minivess/orchestration/trigger.py PipelineTriggerChain
+
+flows:
+  - id: data_flow
+    name: "Data Engineering Flow"
+    file: src/minivess/orchestration/flows/data_flow.py
+    persona: "Data Engineer"
+    order: 1
+    type: core  # core flows stop pipeline on failure
+    inputs: []
+    outputs:
+      - type: mlflow_artifact
+        description: "Validated dataset splits, profiling reports"
+    decision_nodes: [data_versioning, data_validation_depth, data_profiling]
+    test_files: [tests/integration/orchestration/]
+
+  - id: train_flow
+    name: "Model Training Flow"
+    file: src/minivess/orchestration/flows/train_flow.py
+    persona: "ML Engineer"
+    order: 2
+    type: core
+    inputs:
+      - type: mlflow_artifact
+        from_flow: data_flow
+        discovery: "flow_contract.find_upstream_run(tags.flow_name='data-flow')"
+    outputs:
+      - type: checkpoint
+        paths: [best_val_loss.pth, last.pth, epoch_latest.pth]
+      - type: mlflow_run
+        tags: {flow_name: "training-flow"}
+    config_env_var: EXPERIMENT  # e.g., EXPERIMENT=debug_single_model
+    docker_service: train
+    decision_nodes: [loss_function, primary_metrics, hpo_engine, primary_3d_model, container_strategy]
+    invariants:
+      - "_require_docker_context() enforced at runtime"
+      - "PREFECT_DISABLED=1 is BANNED (STOP protocol step T)"
+      - "val_interval > max_epochs = skip-validation sentinel (OOM guard for large models)"
+    test_files: [tests/v2/unit/orchestration/, tests/integration/orchestration/]
+
+  - id: post_training_flow
+    name: "Post-Training Flow"
+    file: src/minivess/orchestration/flows/post_training_flow.py
+    persona: "ML Engineer"
+    order: 3
+    type: core
+    inputs:
+      - type: mlflow_run
+        from_flow: train_flow
+        tag_filter: "flow_name='training-flow'"
+    outputs:
+      - type: mlflow_artifact
+        description: "SWA weights, calibration params, conformal scores, model soup"
+    decision_nodes: [calibration_method, ensemble_strategy, model_diagnostics]
+
+  - id: analysis_flow
+    name: "Model Analysis Flow"
+    file: src/minivess/orchestration/flows/analysis_flow.py
+    persona: "Statistician"
+    order: 4
+    type: core
+    inputs:
+      - type: mlflow_run
+        from_flow: train_flow
+    outputs:
+      - type: mlflow_artifact
+        description: "ComparisonTable, bootstrap CIs, fold heatmaps, DSC/clDice/MASD tables"
+      - type: file
+        paths: [outputs/analysis/comparison_table.md, outputs/analysis/comparison_table.tex]
+    decision_nodes: [primary_metrics, topology_metrics, uncertainty_framework]
+    verified: true  # trigger_chain_results.json shows success 2026-03-02
+
+  - id: deploy_flow
+    name: "Deployment Flow"
+    file: src/minivess/orchestration/flows/deploy_flow.py
+    persona: "MLOps Engineer"
+    order: 5
+    type: core
+    inputs:
+      - type: mlflow_run
+        from_flow: analysis_flow
+    outputs:
+      - type: onnx_model
+        note: "Exported to MLflow model registry — NOT committed to git"
+      - type: champion_tag
+        description: "MLflow tag: champion=true on winning run_id"
+    decision_nodes: [model_export_format, serving_architecture, model_governance]
+    verified: true  # trigger_chain_results.json shows success 2026-03-02
+
+  - id: dashboard_flow
+    name: "Dashboard & Reporting Flow"
+    file: src/minivess/orchestration/flows/dashboard_flow.py
+    persona: "Researcher / PI"
+    order: 6
+    type: best_effort  # best-effort: failure does NOT block pipeline
+    inputs:
+      - type: mlflow_artifact
+        from_flow: analysis_flow
+    outputs:
+      - type: gradio_app
+        description: "Interactive model comparison dashboard"
+      - type: parquet
+        description: "DuckDB analytics export to outputs/duckdb/parquet/"
+      - type: drift_report
+        description: "Evidently drift reports"
+    decision_nodes: [dashboarding, drift_monitoring, observability_depth]
+    verified: true  # trigger_chain_results.json shows success 2026-03-02
+    note: "QA health checks merged into this flow (PR #567 — #342)"
+
+# Acquisition + annotation flows (research extensions, not core pipeline)
+flow_extensions:
+  - id: acquisition_flow
+    file: src/minivess/orchestration/flows/acquisition_flow.py
+    type: extension
+    description: "Data acquisition from lab instruments (future: automated push to DVC)"
+
+  - id: annotation_flow
+    file: src/minivess/orchestration/flows/annotation_flow.py
+    type: extension
+    description: "Label Studio annotation workflow for new volumes"
+
+  - id: hpo_flow
+    file: src/minivess/orchestration/flows/hpo_flow.py
+    type: extension
+    description: "Standalone HPO sweep orchestration (Optuna + ASHA)"
+
+  - id: biostatistics_flow
+    file: src/minivess/orchestration/flows/biostatistics_flow.py
+    type: extension
+    description: "Statistical analysis beyond model comparison"
+
+# Inter-flow contract
+inter_flow_contract:
+  mechanism: "MLflow artifacts + flow_name tag"
+  key_file: src/minivess/orchestration/flow_contract.py
+  constant_file: src/minivess/orchestration/constants.py
+  discovery: "find_upstream_run(tags.flow_name=FLOW_NAME_TRAIN)"
+  critical_rule: "MUST filter by tags.flow_name — not just most recent FINISHED run"
+
+# Verified pipeline run (2026-03-02)
+verified_run:
+  timestamp: "2026-03-02T03:32:10Z"
+  source: outputs/pipeline/trigger_chain_results.json
+  flows_succeeded: [analyze, deploy, dashboard]
+  total_duration_s: 8.26

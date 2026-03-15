@@ -1,0 +1,18 @@
+%% HUMAN-AUTHORED: methods-07-training.tex
+%% Section: M7 -- Training Pipeline
+%% KG: knowledge-graph/manuscript/methods.yaml#M7
+%% Last updated: 2026-03-15 (scaffold)
+
+\subsection{Training Pipeline}
+\begin{itemize}
+  \item Default loss: \texttt{cbdice\_cldice} (CbDiceClDiceLoss) --- topology-optimized for vasculature
+  \item Framework: vanilla PyTorch + MONAI (no PyTorch Lightning --- autolog incompatible)
+  \item AMP policy: ON for training, OFF for validation
+        (MONAI issue \#4243 --- 3D operations + autocast $\to$ NaN in validation)
+  \item Val-skip sentinel: \texttt{val\_interval > max\_epochs} disables validation
+        (OOM guard for large models, e.g.\ SAM3 Hybrid on 8~GB GPU)
+  \item HPO: Optuna with ASHA (HyperbandPruner), TPE/CmaES samplers
+  \item Checkpoint files: \texttt{best\_val\_loss.pth}, \texttt{last.pth}, \texttt{epoch\_latest.pth}
+  \item Reproducibility: seed=42, SHA-256 checksums on all artifacts
+\end{itemize}
+% TODO co-author: add 1-2 sentences motivating cbdice_cldice over standard Dice+CE for tubular structures

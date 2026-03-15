@@ -5,7 +5,7 @@
 # Validation: scripts/review_prd_integrity.py
 
 version: "1.0"
-last_updated: "2026-03-13"
+last_updated: "2026-03-15"
 
 citations:
   shit_2021_cldice:
@@ -169,3 +169,91 @@ citations:
     venue: "JAIR"
     url: "https://arxiv.org/abs/1911.00068"
     used_in: [label_quality_tool]
+
+  poon_2023_minivess:
+    authors: "Poon C, Teikari P, et al."
+    year: 2023
+    title: "A dataset of rodent cerebrovasculature from in vivo multiphoton fluorescence microscopy"
+    venue: "Scientific Data"
+    url: "https://doi.org/10.1038/s41597-023-02048-8"
+    used_in: [project_purpose, impact_target]
+    abstract_snippet: >
+      70 volumes of rat cerebrovasculature from 2-photon microscopy, CC BY-NC-SA license.
+      MiniVess = the primary training dataset for this MLOps platform.
+
+  wittmann_2024_vesselfm:
+    authors: "Wittmann B, et al."
+    year: 2024
+    title: "VesselFM: A Foundation Model for Universal 3D Blood Vessel Segmentation"
+    venue: "arXiv"
+    url: "https://arxiv.org/abs/2411.17386"
+    used_in: [foundation_model]
+    abstract_snippet: >
+      Foundation model pre-trained on multiple vascular datasets including MiniVess.
+      Data leakage concern: VesselFM must be evaluated on DeepVess/TubeNet, not MiniVess.
+
+  windhager_2023_nature_protocols:
+    authors: "Windhager J, et al."
+    year: 2023
+    title: "An end-to-end workflow for multiplexed image processing and analysis"
+    venue: "Nature Protocols"
+    url: "https://doi.org/10.1038/s41596-023-00876-x"
+    used_in: [project_purpose]
+    abstract_snippet: >
+      End-to-end workflow paper in Nature Protocols — comparable systems paper demonstrating
+      platform-as-contribution framing is accepted in this venue.
+
+  pachitariu_2022_cellpose:
+    authors: "Pachitariu M, Stringer C"
+    year: 2022
+    title: "Cellpose 2.0: how to train your own model"
+    venue: "Nature Methods"
+    url: "https://doi.org/10.1038/s41592-022-01663-4"
+    used_in: [project_purpose, impact_target]
+    abstract_snippet: >
+      Software platform paper in Nature Methods. Demonstrates model-as-platform framing.
+      Comparable to our paper: the platform enables downstream users to train models.
+
+  yang_2023_skypilot:
+    authors: "Yang Z, et al."
+    year: 2023
+    title: "SkyPilot: An Intercloud Broker for Sky Computing"
+    venue: "NSDI 2023"
+    url: "https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng"
+    used_in: [gpu_compute]
+    abstract_snippet: >
+      SkyPilot as intercloud broker for automatic workload placement across clouds.
+      Like Slurm for multi-cloud: describe WHAT you need, SkyPilot decides WHERE.
+
+  krishnan_2022_cyclops:
+    authors: "Krishnan R, et al."
+    year: 2022
+    title: "CyclOps: Cyclical development towards operationalizing ML models for health"
+    venue: "arXiv"
+    url: "https://arxiv.org/abs/2306.05103"
+    used_in: [project_purpose]
+    abstract_snippet: >
+      MLOps platform for healthcare AI with emphasis on recurring validation.
+      Comparable systems paper — CyclOps for clinical, our platform for preclinical imaging.
+
+  pujara_2016_pkg:
+    authors: "Pujara J"
+    year: 2016
+    title: "Probabilistic Models for Scalable Knowledge Graph Construction"
+    venue: "PhD Thesis, University of Southern California"
+    url: "https://usc-isi-i2.github.io/papers/pujara16-thesis.pdf"
+    used_in: []
+    abstract_snippet: >
+      Probabilistic Knowledge Graph construction at scale. Academic framing for our
+      Bayesian decision network as a PKG with belief propagation on spec change.
+
+  bellomarini_2022_prob_kg:
+    authors: "Bellomarini L, et al."
+    year: 2022
+    title: "Reasoning and Learning in Probabilistic Logic Programs"
+    venue: "arXiv"
+    url: "https://arxiv.org/abs/2205.01175"
+    used_in: []
+    abstract_snippet: >
+      Framework for probabilistic reasoning on KGs. Phase 2+ belief propagation citation
+      for the manuscript agentic story — framing PRD evolution as factor graph inference.

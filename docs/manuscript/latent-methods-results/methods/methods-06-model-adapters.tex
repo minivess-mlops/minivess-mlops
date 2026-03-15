@@ -1,0 +1,31 @@
+%% HUMAN-AUTHORED: methods-06-model-adapters.tex
+%% Section: M6 -- Model Adapter Architecture
+%% KG: knowledge-graph/manuscript/methods.yaml#M6
+%% Last updated: 2026-03-15 (scaffold)
+
+\subsection{Model Adapter Architecture}
+\begin{itemize}
+  \item \texttt{ModelAdapter} ABC: \texttt{forward(B,C,H,W,D) $\to$ SegmentationOutput}
+  \item Three abstract methods required per model:
+    \begin{enumerate}
+      \item \texttt{forward()} --- model-specific inference
+      \item \texttt{get\_eval\_roi\_size()} --- patch size for sliding window inference
+      \item \texttt{get\_adapter\_config()} --- hardware profile metadata
+    \end{enumerate}
+  \item \texttt{build\_adapter(config)} factory for config-driven dispatch
+  \item Current implementations: DynUNet, SegResNet, SAM3 Vanilla/Hybrid/TopoLoRA,
+        VesselFM, SwinUNETR, AttentionUNet
+  \item Adding a new model = implement 3 methods + 1 YAML profile
+        (\texttt{configs/model\_profiles/model\_name.yaml})
+\end{itemize}
+
+%% Figure stub -- replace with \includegraphics after mmdc rendering
+% \begin{figure}[h]
+%   \includegraphics[width=\linewidth]{figures/generated/fig-M6-model-adapter.pdf}
+%   \caption{ModelAdapter ABC class hierarchy. All models implement 3 abstract methods;
+%            the pipeline infrastructure never changes when a new model is added.}
+%   \label{fig:M6-model-adapter}
+% \end{figure}
+
+% TODO co-author: add Mermaid class diagram showing ModelAdapter ABC + concrete subclasses
+% TODO co-author: add 2 sentences on why ABC pattern enables model-agnostic benchmarking

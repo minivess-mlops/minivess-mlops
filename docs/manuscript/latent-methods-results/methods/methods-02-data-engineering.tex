@@ -1,0 +1,15 @@
+%% HUMAN-AUTHORED: methods-02-data-engineering.tex
+%% Section: M2 -- Data Engineering Flow
+%% KG: knowledge-graph/manuscript/methods.yaml#M2
+%% Last updated: 2026-03-15 (scaffold)
+
+\subsection{Data Engineering Flow}
+\begin{itemize}
+  \item Flow 1 of 5 (Prefect): validates, profiles, and stages data before training
+  \item MONAI transforms pipeline + TorchIO augmentation (intensity, spatial, noise)
+  \item Pandera schema validation + Great Expectations batch quality gates
+  \item whylogs profiling at split time --- establishes drift baseline for production monitoring
+  \item OpenLineage (Marquez) for IEC~62304-compliant data lineage tracking
+  \item DVC-versioned splits: \texttt{configs/splits/3fold\_seed42.json}
+\end{itemize}
+% TODO co-author: add 1 sentence on why lineage matters for SaMD/IEC 62304 compliance

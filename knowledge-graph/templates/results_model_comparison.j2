@@ -1,0 +1,30 @@
+{# results_model_comparison.j2 — generates results-03-models.tex (R3a section) #}
+%% AUTO-GENERATED from: knowledge-graph/experiments/dynunet_loss_variation_v2.yaml
+%% Template: knowledge-graph/templates/results_model_comparison.j2
+%% DO NOT HAND-EDIT
+
+\subsection{DynUNet Loss Ablation}
+
+We evaluated four loss functions on the MiniVess dataset
+({{ n_volumes | default(70) }} volumes, {{ n_folds | default(3) }}-fold cross-validation,
+{{ n_epochs | default(100) }} epochs per fold) using DynUNet as the base model.
+
+\begin{table}[h]
+\centering
+\input{artifacts/tab-loss-ablation}
+\caption{Loss function comparison on MiniVess validation set.
+  \textbf{Bold} = best per metric. DSC = Dice Similarity Coefficient,
+  clDice = centreline Dice (topology metric), MASD = Mean Average Surface Distance.}
+\label{tab:loss-ablation}
+\end{table}
+
+{% if winner %}
+\texttt{{ '{' }}{{ winner.id }}{{ '}' }} achieves the best topology preservation
+(clDice = {{ winner.metrics.centreline_dsc.mean }}~$\pm$~{{ winner.metrics.centreline_dsc.std }})
+with only a {{ topology_dsc_penalty }}~DSC penalty compared to the standard
+Dice+CE baseline.
+{% endif %}
+
+{% if pending_models %}
+\textit{Note: Multi-model comparison (SAM3 variants, VesselFM) pending GPU runs.}
+{% endif %}

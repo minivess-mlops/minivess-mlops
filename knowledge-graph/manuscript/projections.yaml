@@ -1,0 +1,83 @@
+# knowledge-graph/manuscript/projections.yaml
+# KG → downstream file dependency map
+# Used by: kg-sync Skill (step 4: STALENESS detection)
+# Pattern from: cv-repo/identity/projections.yaml
+
+projections:
+  # Methods .tex files
+  - id: methods_architecture
+    output: docs/manuscript/latent-methods-results/methods/methods-03-architecture.tex
+    type: tex_generated
+    depends_on:
+      decisions: [container_strategy, ci_cd_platform, gpu_compute]
+      code_structure: [flows.yaml, adapters.yaml]
+      manuscript: [methods.yaml#M3]
+    template: knowledge-graph/templates/methods_architecture.j2
+    status: scaffold_only
+
+  - id: methods_models
+    output: docs/manuscript/latent-methods-results/methods/methods-06-model-adapters.tex
+    type: tex_generated
+    depends_on:
+      decisions: [model_adapter_pattern, primary_3d_model, foundation_model]
+      code_structure: [adapters.yaml]
+      manuscript: [methods.yaml#M6]
+    template: knowledge-graph/templates/methods_models.j2
+    status: scaffold_only
+
+  - id: methods_training
+    output: docs/manuscript/latent-methods-results/methods/methods-07-training.tex
+    type: tex_generated
+    depends_on:
+      decisions: [loss_function, hpo_engine, primary_metrics]
+      experiments: [dynunet_loss_variation_v2.yaml]
+      manuscript: [methods.yaml#M7]
+    template: knowledge-graph/templates/methods_training.j2
+    status: scaffold_only
+
+  # Results .tex files
+  - id: results_reproducibility
+    output: docs/manuscript/latent-methods-results/results/results-01-reproducibility.tex
+    type: tex_generated
+    depends_on:
+      experiments: [current_best.yaml]
+      manuscript: [results.yaml#R1]
+    template: knowledge-graph/templates/results_reproducibility.j2
+    data_source: outputs/pipeline/trigger_chain_results.json
+    status: data_available
+
+  - id: results_loss_ablation
+    output: docs/manuscript/latent-methods-results/results/results-03-models.tex
+    type: tex_generated
+    depends_on:
+      experiments: [dynunet_loss_variation_v2.yaml, current_best.yaml]
+      manuscript: [results.yaml#R3a]
+    template: knowledge-graph/templates/results_model_comparison.j2
+    data_source: outputs/analysis/comparison_table.tex
+    status: data_available_partial  # R3a available, R3b+R3c blocked
+
+  # Export snapshot
+  - id: kg_snapshot
+    output: ../sci-llm-writer/manuscripts/vasculature-mlops/kg-snapshot/kg-snapshot.yaml
+    type: cross_repo_export
+    depends_on:
+      decisions: [ALL]
+      code_structure: [ALL]
+      experiments: [ALL]
+      manuscript: [ALL]
+    trigger: "/kg-sync --export-to sci-llm-writer"
+    gates:
+      - "pdflatex docs/manuscript/latent-methods-results/latent-methods-results.tex MUST compile"
+      - "Schema validation: all cited run_ids must exist in experiments/*.yaml"
+      - "Idempotency: running twice with same KG = identical output"
+    status: not_yet_generated
+
+  # README
+  - id: readme_architecture
+    output: README.md
+    type: doc_section
+    section_marker: "<!-- ARCHITECTURE -->"
+    depends_on:
+      code_structure: [flows.yaml]
+      decisions: [container_strategy, gpu_compute]
+    status: not_yet_generated

@@ -1,0 +1,20 @@
+%% HUMAN-AUTHORED: methods-09-observability.tex
+%% Section: M9 -- Observability Stack
+%% KG: knowledge-graph/manuscript/methods.yaml#M9
+%% Last updated: 2026-03-15 (scaffold)
+
+\subsection{Observability Stack}
+\begin{itemize}
+  \item MLflow: experiment tracker, model registry, and inter-flow contract
+  \item DuckDB: in-process SQL analytics over \texttt{mlruns/} (no server required)
+  \item Langfuse (self-hosted): LLM tracing and cost tracking for agentic dev story
+  \item Prometheus + Grafana: infrastructure metrics (GPU/CPU/memory/disk)
+  \item Evidently: data and model drift detection with Grafana export
+  \item OpenLineage (Marquez): IEC~62304-compliant data lineage tracking
+  \item Label Studio: multi-annotator workflows for ground truth quality
+  \item Cleanlab: label quality assessment and noisy label detection
+  \item whylogs: lightweight data profiling at pipeline entry
+\end{itemize}
+% NOTE: GitHub Actions CI is intentionally disabled (Rule 21) ---
+%       all validation runs locally via pre-commit + scripts/pr_readiness_check.sh
+% TODO co-author: add 1 sentence on why local-first observability matters for academic labs

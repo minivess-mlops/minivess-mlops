@@ -1,0 +1,16 @@
+%% HUMAN-AUTHORED: methods-04-compute.tex
+%% Section: M4 -- Cloud Compute Strategy
+%% KG: knowledge-graph/manuscript/methods.yaml#M4
+%% Last updated: 2026-03-15 (scaffold)
+
+\subsection{Cloud Compute Strategy}
+\begin{itemize}
+  \item SkyPilot = intercloud broker (Yang et al.\ NSDI'23) --- not IaC, not a VM launcher
+  \item Single command: \texttt{sky jobs launch task.yaml} on any cloud provider
+  \item RunPod: RTX 4090, \$0.44--0.69/hr, container-native (no Docker-in-Docker required)
+  \item GCP: L4 (Ada Lovelace, BF16 support) --- T4/Turing architecture BANNED for SAM3
+  \item Docker image pushed to GHCR --- all deps pre-baked, SkyPilot setup $\leq$30~sec
+  \item Spot recovery handled automatically by SkyPilot (preemption-transparent)
+  \item Hardware ban rationale: T4 lacks BF16 $\to$ FP16 overflow $\to$ NaN in SAM3 validation
+\end{itemize}
+% TODO co-author: add 1-2 sentences comparing to Slurm (on-prem HPC) for the biomedical audience

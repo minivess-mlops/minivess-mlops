@@ -1,0 +1,75 @@
+# knowledge-graph/experiments/dynunet_loss_variation_v2.yaml
+# Experiment summary from MLflow — bootstrapped from outputs/analysis/
+# Auto-regeneration: scripts/scan_experiments.py
+
+_meta:
+  generated_by: manual_bootstrap
+  source: [outputs/analysis/comparison_table.tex, outputs/analysis/comparison_table.md]
+  mlflow_experiment_name: dynunet_loss_variation_v2
+  note: "Run IDs not available from outputs/ alone — need mlruns/ for full detail"
+
+experiment:
+  id: dynunet_loss_variation_v2
+  model: DynUNet
+  design: "4 losses x 3 folds x 100 epochs"
+  dataset: MiniVess
+  volumes: 70
+  splits: "3-fold, seed=42, 47 train / 23 val"
+  split_file: configs/splits/3fold_seed42.json
+  completed: true
+  cloud: false  # ran on local RTX 2070 Super
+
+results:
+  # From outputs/analysis/comparison_table.tex (real measured values)
+  losses:
+    - id: cbdice_cldice
+      name: "CbDice + clDice (WINNER)"
+      metrics:
+        dsc: {mean: 0.7716, std: 0.0162}
+        centreline_dsc: {mean: 0.9060, std: 0.0075}  # Best topology
+        measured_masd: {mean: 1.7374, std: 0.5194}
+      verdict: WINNER
+      reason: "Best topology (0.906 clDice) with only -5.3% DSC penalty vs dice_ce"
+
+    - id: cbdice
+      name: "CbDice only"
+      metrics:
+        dsc: {mean: 0.7666, std: 0.0232}
+        centreline_dsc: {mean: 0.7992, std: 0.0202}
+        measured_masd: {mean: 2.1249, std: 0.6568}
+      verdict: SECOND
+      reason: "Good topology but lower than cbdice_cldice; highest MASD"
+
+    - id: dice_ce_cldice
+      name: "Dice + CE + clDice"
+      metrics:
+        dsc: {mean: 0.7362, std: 0.0161}
+        centreline_dsc: {mean: 0.9046, std: 0.0030}  # Near-best topology
+        measured_masd: {mean: 1.9600, std: 0.5320}
+      verdict: THIRD
+      reason: "Good topology but lowest DSC; three-term loss harder to balance"
+
+    - id: dice_ce
+      name: "Dice + CE (baseline)"
+      metrics:
+        dsc: {mean: 0.8242, std: 0.0136}  # Best DSC
+        centreline_dsc: {mean: 0.8317, std: 0.0188}
+        measured_masd: {mean: 1.6768, std: 0.4121}  # Best MASD
+      verdict: BASELINE
+      reason: "Highest DSC but significantly worse topology (0.832 vs 0.906 clDice)"
+
+key_finding: >
+  cbdice_cldice achieves best topology preservation (0.906 clDice) with only -5.3% DSC
+  penalty vs dice_ce (0.7716 vs 0.8242 DSC). For vascular segmentation where connectivity
+  matters more than voxel overlap, cbdice_cldice is the clear winner.
+
+figures:
+  - path: outputs/analysis/figures/loss_comparison.png
+    type: bar_comparison
+  - path: outputs/analysis/figures/fold_heatmap.png
+    type: per_fold_heatmap
+  - path: outputs/analysis/figures/sensitivity_heatmap.png
+    type: sensitivity_analysis
+
+paper_section: results/results-03-models.tex  # R3a (DynUNet loss ablation)
+decision_node: knowledge-graph/decisions/L3-technology/loss_function.yaml

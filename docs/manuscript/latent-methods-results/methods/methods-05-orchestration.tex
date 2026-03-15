@@ -1,0 +1,30 @@
+%% HUMAN-AUTHORED: methods-05-orchestration.tex
+%% Section: M5 -- Workflow Orchestration (5-Flow DAG)
+%% KG: knowledge-graph/manuscript/methods.yaml#M5
+%% Last updated: 2026-03-15 (scaffold)
+
+\subsection{Workflow Orchestration}
+\begin{itemize}
+  \item Prefect 3.x REQUIRED --- not optional scaffolding, enforced at runtime
+  \item Five flows mapping to researcher personas:
+    \begin{enumerate}
+      \item Data Engineering (Data Engineer persona) --- core, stops pipeline on failure
+      \item Model Training (ML Engineer persona) --- core, stops pipeline on failure
+      \item Model Analysis (Statistician persona) --- core, stops pipeline on failure
+      \item Deployment (MLOps persona) --- core, stops pipeline on failure
+      \item Dashboard \& Reporting (Researcher persona) --- best-effort, failure non-blocking
+    \end{enumerate}
+  \item \texttt{PipelineTriggerChain} handles cascading execution and spot recovery
+  \item Inter-flow contract: MLflow run tags (\texttt{flow\_name='training-flow'})
+  \item Flows communicate ONLY through MLflow artifacts --- no shared filesystem
+\end{itemize}
+
+%% Figure stub -- replace with \includegraphics after mmdc rendering
+% \begin{figure}[h]
+%   \includegraphics[width=\linewidth]{figures/generated/fig-M5-prefect-dag.pdf}
+%   \caption{ARBOR 5-flow Prefect DAG. Flows 1--4 are core (stop on failure);
+%            Flow 5 (Dashboard) is best-effort.}
+%   \label{fig:M5-prefect-dag}
+% \end{figure}
+
+% TODO co-author: add Mermaid flow diagram showing the 5-flow DAG with MLflow as contract

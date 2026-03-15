@@ -1,0 +1,73 @@
+# knowledge-graph/domains/manuscript.yaml
+# Narrative layer: scientific claims, methods stubs, results stubs, limitations
+# Consumer: sci-llm-writer via kg-sync Skill
+# NOT auto-generated — curated by the researcher/author
+
+domain: manuscript
+description: Scientific claims, methods stubs, results stubs, limitations, projections for publication
+last_reviewed: "2026-03-15"
+
+# These are the YAML files in knowledge-graph/manuscript/ (to be created)
+sections:
+  claims:
+    file: knowledge-graph/manuscript/claims.yaml
+    description: "12 scientific claims linked to KG decision nodes as evidence"
+    status: bootstrapped
+
+  methods:
+    file: knowledge-graph/manuscript/methods.yaml
+    description: "13 Methods section stubs (M0-M12) with Mermaid figure assignments"
+    status: bootstrapped
+
+  results:
+    file: knowledge-graph/manuscript/results.yaml
+    description: "6 Results section stubs (R0-R5) linked to experiment run_ids"
+    status: bootstrapped_partial  # R3b blocked: SAM3/VesselFM GPU runs pending
+
+  limitations:
+    file: knowledge-graph/manuscript/limitations.yaml
+    description: "6 known limitations with mitigation strategy per limitation"
+    status: bootstrapped
+
+  projections:
+    file: knowledge-graph/manuscript/projections.yaml
+    description: "KG→file dependency map for staleness detection and kg-sync"
+    status: bootstrapped
+
+downstream_artifacts:
+  - path: docs/manuscript/latent-methods-results/methods/
+    consumer: sci-llm-writer
+    generated_by: kg-sync
+    status: scaffold_only  # bullet+Mermaid placeholders, not yet filled
+
+  - path: docs/manuscript/latent-methods-results/results/
+    consumer: sci-llm-writer
+    generated_by: kg-sync
+    status: partial  # R1 and R3a filled, R3b blocked on GPU runs
+
+  - path: sci-llm-writer/manuscripts/vasculature-mlops/kg-snapshot.yaml
+    consumer: sci-llm-writer
+    generated_by: "/kg-sync --export-to sci-llm-writer"
+    status: not_yet_generated
+
+intent_sources:
+  - source: docs/planning/repo-to-manuscript.md
+    role: "Primary plan — paper framing, IMRAD structure, KG architecture"
+  - source: docs/planning/repo-to-manuscript-prompt.md
+    role: "Verbatim user prompts + synthesized LLM prompt for session resumption"
+  - source: CLAUDE.md
+    role: "Architectural invariants, design goals, DevEx principles (intent layer)"
+
+metalearning:
+  - file: .claude/metalearning/2026-03-02-sam3-implementation-fuckup.md
+    applies_to: [manuscript/results.yaml, manuscript/limitations.yaml]
+    rule: "SAM3 first impl used SAM2 architecture — document in paper as iteration/learning"
+  - file: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
+    applies_to: [manuscript/methods.yaml#section-M3, manuscript/limitations.yaml]
+    rule: "T4 hardware ban is a real constraint — must be stated in paper methods"
+
+open_issues:
+  - id: "pending"
+    title: "GPU runs for SAM3/VesselFM model comparison (R3b blocker)"
+    priority: critical
+    blocks: [manuscript/results.yaml#R3b, docs/manuscript/latent-methods-results/results/results-03-models.tex]
