@@ -1,0 +1,11 @@
+# MambaVesselNet++ model config group entry.
+# Architecture: Xu & Chen et al. 2025 (ACM TOMM).
+# Requires mamba-ssm CUDA compilation (INSTALL_MAMBA=1 Docker build arg).
+# CPU testing via mamba_cls=MockMamba injection — no mamba-ssm install needed.
+model: mambavesselnet
+model_family: mambavesselnet
+architecture_params:
+  feature_dims: [48, 96, 192, 384, 768]
+  d_state: 16
+  d_conv: 4
+  expand: 2

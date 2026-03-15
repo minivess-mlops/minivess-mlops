@@ -1,0 +1,40 @@
+# @package _global_
+# Cloud GPU Smoke Test: MambaVesselNet++ with VALIDATION enabled
+#
+# For cloud GPUs (≥16 GB VRAM, mamba-ssm compiled) where validation fits in memory.
+# Unlike smoke_mambavesselnet.yaml which targets RTX 4090 only,
+# this config enables validation to verify model predictions are valid.
+#
+# val_interval=1: validate every epoch
+# max_epochs=3: sufficient for smoke test (pipeline verification, not convergence)
+#
+# Requires mamba-ssm CUDA compilation:
+#   docker build --build-arg INSTALL_MAMBA=1 -f deployment/docker/Dockerfile.base .
+defaults:
+  - override /model: mambavesselnet
+  - override /checkpoint: lightweight
+
+experiment_name: smoke_mambavesselnet_cloud
+model: mambavesselnet
+model_family: mambavesselnet
+losses:
+  - dice_ce
+max_epochs: 3
+num_folds: 1
+debug: true
+
+# Validation ENABLED — cloud GPUs have sufficient VRAM
+val_interval: 1
+
+# AMP: train ON, val OFF (D04 — MONAI #4243)
+mixed_precision: true
+mixed_precision_val: false
+
+# Data subsetting
+max_train_volumes: 2
+max_val_volumes: 2
+splits_file: configs/splits/smoke_test_1fold_4vol.json
+
+# DVC provenance
+data:
+  dvc_commit: HEAD

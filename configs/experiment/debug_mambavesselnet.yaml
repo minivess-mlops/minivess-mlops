@@ -1,0 +1,36 @@
+# @package _global_
+# MambaVesselNet++ debug config: 1 fold, 1 epoch, 4 volumes.
+# Duration: N/A without mamba-ssm — CPU-only pipeline test.
+#
+# Requires mamba-ssm CUDA compilation:
+#   docker build --build-arg INSTALL_MAMBA=1 -f deployment/docker/Dockerfile.base .
+#
+# AMP policy: train ON, val OFF (D04 — MONAI #4243)
+#
+# Usage:
+#   docker compose -f deployment/docker-compose.flows.yml run --rm \
+#     -e EXPERIMENT=debug_mambavesselnet train
+defaults:
+  - override /model: mambavesselnet
+  - override /checkpoint: lightweight
+
+experiment_name: debug_mambavesselnet
+model: mambavesselnet
+model_family: mambavesselnet
+losses:
+  - cbdice_cldice
+max_epochs: 1
+debug: true
+
+# AMP: train ON, val OFF (D04 — mamba selective scan + MONAI #4243)
+mixed_precision: true
+mixed_precision_val: false
+
+# Data subsetting
+max_train_volumes: 2
+max_val_volumes: 2
+num_folds: 1
+
+# DVC provenance
+data:
+  dvc_commit: HEAD
