@@ -6,6 +6,10 @@ _meta:
   generated_by: manual_bootstrap
   source_dirs: [src/minivess/adapters/]
   note: "Intent fields sourced from CLAUDE.md, metalearning/, docs/planning/ — NOT from code"
+  scope_note: >
+    This file captures BOTH implemented adapters (status: production/experimental/available)
+    AND planned adapters (status: planned) that are in the paper's model comparison scope
+    but not yet implemented. Planned entries prevent KG scope blindness.
 
 base_contract:
   file: src/minivess/adapters/base.py
@@ -143,6 +147,42 @@ adapters:
     family: monai_native
     status: available
     source: "MONAI — attention gates"
+
+  # ============================================================
+  # PLANNED adapters — in paper scope but not yet implemented
+  # Added 2026-03-15 after KG scope blindness incident (see
+  # .claude/metalearning/2026-03-15-kg-mamba-missing-scope-blindness.md)
+  # ============================================================
+
+  - id: mamba_variants
+    name: "Mamba Variants (SegMamba / U-Mamba)"
+    file: src/minivess/adapters/mamba.py  # NOT YET CREATED
+    family: state_space_model
+    status: planned
+    gpu_requirement: "~8 GB VRAM (similar to DynUNet — to be measured)"
+    source: "SegMamba (github.com/ge-xing/SegMamba) or U-Mamba (github.com/bowang-lab/U-Mamba)"
+    intent:
+      why_chosen: >
+        Represents the State Space Model (SSM) family in the multi-model comparison.
+        Demonstrates platform generalizability across CNN (DynUNet), SSM (Mamba),
+        and Foundation Model (SAM3, VesselFM) architectures.
+        Hypothesis: selective state spaces may improve vascular topology continuity
+        vs sliding-window CNN attention in DynUNet.
+        Paper role: one of four model FAMILIES, NOT the paper's main contribution.
+        The point is that the platform supports it — not that Mamba wins.
+      intent_source: "User session 2026-03-15 — explicit paper scope statement"
+      critical_constraints:
+        - "Adapter not yet implemented — needed for R3b multi-model comparison"
+        - "Must implement ModelAdapter ABC: forward, get_eval_roi_size, get_adapter_config"
+        - "GPU runs needed before paper submission"
+    intent_banned_patterns:
+      - pattern: "hardcoding Mamba as the recommended model"
+        reason: "This is a platform paper — model comparison demonstrates generalizability, not superiority"
+    paper_section: [R3b, M6]
+    blocks: [R3b]
+    note: >
+      Choice between SegMamba and U-Mamba to be decided at implementation time.
+      Both are MONAI-compatible. Prefer the one with active maintenance and BF16 support.
 
 # Intent banished patterns (project-wide, not adapter-specific)
 intent_banned_patterns:

@@ -92,7 +92,9 @@ sections:
       - "ModelAdapter ABC: forward(B,C,H,W,D) → SegmentationOutput"
       - "3 abstract methods: forward, get_eval_roi_size, get_adapter_config"
       - "build_adapter(config) factory — config-driven dispatch"
-      - "Current: DynUNet, SegResNet, SAM3 (V1/V2/V3), VesselFM, SwinUNETR, AttentionUNet"
+      - "Implemented: DynUNet, SegResNet, SAM3 (V1/V2/V3), VesselFM, SwinUNETR, AttentionUNet"
+      - "Planned (paper scope): Mamba variants (SegMamba / U-Mamba) — adapter not yet written"
+      - "Paper comparison: DynUNet (CNN), Mamba (SSM), SAM3 (Foundation), VesselFM (Foundation)"
       - "Adding new model = implement 3 methods + YAML profile"
     decision_nodes: [model_adapter_pattern, primary_3d_model, foundation_model]
 
