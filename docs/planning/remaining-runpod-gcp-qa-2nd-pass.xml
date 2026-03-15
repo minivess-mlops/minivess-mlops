@@ -373,43 +373,51 @@ for e in d['experiments']:
   </phase>
 
   <!-- ══════════════════════════════════════════════════════════════════════
-       PHASE 4: ARTIFACT VERIFICATION + SYNC ($0, ~10 min)
+       PHASE 4: GCP ARTIFACT VERIFICATION VIA MLFLOW UI ($0, ~5 min)
+       NOTE: NO local mlruns sync — MLflow Cloud Run IS the interface.
+       Researchers use the Web UI, not local mlruns. See #735 for backup tooling.
        ══════════════════════════════════════════════════════════════════════ -->
-  <phase id="P4" name="Artifact Verification + Local Sync" cost="$0" effort="10min" blocked-by="P3">
-    <task id="T4.1" name="Verify GCS artifacts">
+  <phase id="P4" name="GCP Artifact Verification (MLflow UI Only)" cost="$0" effort="5min" blocked-by="P3">
+    <description>
+      GCP design: MLflow Cloud Run is ONLINE 24/7 for the research team.
+      Researchers access experiments via browser — NEVER download mlruns locally.
+      Local download is a backup/migration tool only (see issue #735).
+      This phase verifies artifacts exist IN MLflow, not on local disk.
+    </description>
+
+    <task id="T4.1" name="Verify all experiments visible in MLflow Web UI">
       <commands>
-        <cmd>gsutil ls gs://minivess-mlops-mlflow-artifacts/</cmd>
+        <cmd>MLFLOW_URL=$(grep MLFLOW_GCP_URI .env | cut -d= -f2)</cmd>
+        <cmd>echo "Open in browser: $MLFLOW_URL"</cmd>
+        <cmd># Programmatic verification:
+        curl -s "$MLFLOW_URL/api/2.0/mlflow/experiments/search" \
+          -H "Content-Type: application/json" -d '{"max_results": 20}' | \
+          python3 -c "import json,sys; d=json.load(sys.stdin); \
+          print(f'{len(d.get(\"experiments\",[]))} experiments visible in MLflow')"</cmd>
       </commands>
-      <acceptance>Checkpoint .pth files and config artifacts present.</acceptance>
+      <acceptance>All 4 model experiments visible in MLflow Web UI with finite val_loss.</acceptance>
     </task>
 
-    <task id="T4.2" name="Sync mlruns to local via CloudSyncer" blocked-by="T4.1">
-      <description>
-        Use existing CloudSyncer module (src/minivess/compute/mlruns_sync.py)
-        instead of raw gsutil. Excludes *.pth, *.onnx, *.ckpt by default.
-      </description>
+    <task id="T4.2" name="Verify GCS artifacts exist (read-only)" blocked-by="T4.1">
       <commands>
-        <cmd>uv run python -c "
-from pathlib import Path
-from minivess.compute.mlruns_sync import CloudSyncer
-syncer = CloudSyncer(provider='gcs')
-cmd = syncer.build_command('gs://minivess-mlops-mlflow-artifacts/', Path('mlruns/cloud'))
-import subprocess; subprocess.run(cmd, check=True)
-"</cmd>
-        <cmd>ls mlruns/cloud/</cmd>
+        <cmd>gsutil ls gs://minivess-mlops-mlflow-artifacts/ | head -10</cmd>
       </commands>
-      <acceptance>mlruns/cloud/ has experiment directories with metrics and params.</acceptance>
+      <acceptance>Checkpoint and config artifacts present in GCS bucket.</acceptance>
     </task>
   </phase>
 
   <!-- ══════════════════════════════════════════════════════════════════════
        PHASE 5: RUNPOD DEV WORKFLOW (SECONDARY, ~$1, ~30 min)
        ══════════════════════════════════════════════════════════════════════ -->
-  <phase id="P5" name="RunPod Dev Workflow" cost="~$1" effort="30min" blocked-by="P3">
+  <phase id="P5" name="RunPod Dev Workflow — Ephemeral Compute + Full Sync" cost="~$1" effort="30min" blocked-by="P3">
     <description>
-      SECONDARY priority. RunPod = dev environment for academic paper.
-      Tests: SkyPilot launch → DVC pull → train → filesystem mlruns → sync back.
-      Uses file-based MLflow (no Cloud Run needed).
+      SECONDARY priority. RunPod = ephemeral dev compute for academic paper.
+      Design: train on GPU → sync ALL artifacts (including .pth, .onnx) back to local.
+      File-based MLflow (no server). Network Volume with 7-day TTL.
+
+      KEY DIFFERENCE FROM GCP: RunPod syncs EVERYTHING back to local (including
+      large checkpoints). GCP researchers use MLflow Cloud Run UI directly —
+      they NEVER download mlruns.
     </description>
 
     <task id="T5.1" name="Verify SkyPilot RunPod enabled">
@@ -418,25 +426,52 @@ import subprocess; subprocess.run(cmd, check=True)
       </commands>
     </task>
 
-    <task id="T5.2" name="Launch + train sam3_vanilla on RunPod" blocked-by="T5.1">
+    <task id="T5.2" name="Train sam3_vanilla on RunPod via SkyPilot" blocked-by="T5.1">
+      <description>
+        SkyPilot run: block MUST include auto-sync at the end (before VM dies).
+        This ensures artifacts survive even if user forgets manual sync.
+        The auto-sync copies mlruns/ + checkpoints from Network Volume to
+        a location accessible via sky rsync.
+      </description>
       <commands>
         <cmd>make smoke-test-gpu MODEL=sam3_vanilla</cmd>
       </commands>
-      <acceptance>Training completes. mlruns/ on RunPod has experiment.</acceptance>
+      <acceptance>Training completes. mlruns/ + checkpoints on Network Volume.</acceptance>
     </task>
 
-    <task id="T5.3" name="Sync RunPod mlruns to local" blocked-by="T5.2">
+    <task id="T5.3" name="Manual sync — ALL artifacts including .pth and .onnx" blocked-by="T5.2">
+      <description>
+        Sync EVERYTHING from RunPod to local — including large files.
+        This is the standard RunPod dev workflow: train cloud → work local.
+        Uses CloudSyncer with NO excludes (all artifacts transferred).
+      </description>
       <commands>
-        <cmd>CLUSTER=$(uv run sky status --format json | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['name'])")</cmd>
-        <cmd>uv run sky rsync $CLUSTER:/opt/vol/mlruns/ ./mlruns/runpod/ --down</cmd>
+        <cmd>mkdir -p mlruns/runpod</cmd>
+        <cmd>uv run python -c "
+from pathlib import Path
+from minivess.compute.mlruns_sync import CloudSyncer
+syncer = CloudSyncer(provider='skypilot', excludes=[])  # NO excludes — sync everything
+cmd = syncer.build_command('minivess-dev:/opt/vol/mlruns', Path('mlruns/runpod'))
+import subprocess; subprocess.run(cmd, check=True)
+"</cmd>
+        <cmd>ls -la mlruns/runpod/</cmd>
+        <cmd>find mlruns/runpod/ -name "*.pth" | head -5</cmd>
       </commands>
-      <acceptance>mlruns/runpod/ has experiment from RunPod training.</acceptance>
+      <acceptance>
+        mlruns/runpod/ has experiment data INCLUDING .pth checkpoint files.
+        This is the COMPLETE training output, not just metadata.
+      </acceptance>
     </task>
 
-    <task id="T5.4" name="Destroy RunPod" blocked-by="T5.3">
+    <task id="T5.4" name="Destroy RunPod — ephemeral, no persistence needed" blocked-by="T5.3">
       <commands>
         <cmd>uv run sky down --all -y</cmd>
       </commands>
+      <note>
+        Network Volume has 7-day TTL. After 7 days idle, RunPod auto-deletes.
+        SAM3 weights (~1.8 GB) will be re-downloaded on next launch.
+        All training artifacts are already on local machine (T5.3).
+      </note>
     </task>
   </phase>
 
