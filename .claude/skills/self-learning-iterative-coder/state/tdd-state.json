@@ -2,20 +2,24 @@
   "plan_file": "docs/planning/remaining-runpod-gcp-qa.xml",
   "plan_version": "2.0",
   "execution_mode": "autonomous",
-  "current_task_id": null,
-  "current_phase": null,
-  "inner_iteration": 0,
+  "current_task_id": "T1.1",
+  "current_phase": "RED",
+  "inner_iteration": 5,
   "tasks": {
-    "T0.1": {"status": "NOT_STARTED", "title": "Rebuild Docker base image with latest main"},
-    "T0.2": {"status": "NOT_STARTED", "title": "Rerun VesselFM on GCP L4 spot"},
-    "T0.3": {"status": "NOT_STARTED", "title": "Rerun sam3_hybrid on GCP L4 spot (BF16)"},
-    "T1.1": {"status": "NOT_STARTED", "title": "Run sam3_hybrid with AMP OFF on L4 (conditional)"},
-    "T2.1": {"status": "NOT_STARTED", "title": "Add epoch-0 cost prediction"},
-    "T3.1": {"status": "NOT_STARTED", "title": "Implement cloud mlruns sync"},
-    "T4.1": {"status": "NOT_STARTED", "title": "Sequential 4-model smoke test on L4"}
+    "T0.1": {"status": "DONE", "title": "Rebuild Docker base image", "iterations": 1},
+    "T0.2": {"status": "FAILED", "title": "VesselFM on L4 — SSH network error (spot preemption?)", "iterations": 1, "failure": "ssh: Network is unreachable after Docker container started"},
+    "T0.3": {"status": "DONE", "title": "sam3_hybrid on L4 (BF16) — val_loss still NaN!", "iterations": 1, "finding": "BF16 confirmed active but val_loss=NaN persists → AMP is root cause, not dtype"},
+    "T1.1": {"status": "IN_PROGRESS", "title": "AMP-off for validation (CONFIRMED NEEDED)", "iterations": 0},
+    "T2.1": {"status": "DONE", "title": "Epoch-0 cost prediction", "iterations": 2},
+    "T3.1": {"status": "DONE", "title": "Cloud mlruns sync", "iterations": 1},
+    "T4.1": {"status": "NOT_STARTED", "title": "4-model final verification on L4"}
   },
-  "convergence": {"reached": false, "tasks_done": 0, "tasks_total": 7, "tasks_stuck": 0},
-  "session_task_count": 0,
-  "session_inner_iterations": 0,
-  "session_start": "2026-03-15T04:30:00Z"
+  "convergence": {"reached": false, "tasks_done": 4, "tasks_total": 7, "tasks_stuck": 0},
+  "session_task_count": 4,
+  "session_inner_iterations": 5,
+  "session_start": "2026-03-15T04:30:00Z",
+  "findings": {
+    "bf16_doesnt_fix_nan": "val_loss=NaN persists on L4 (BF16) with AMP=True. Root cause: AMP autocast + 3D sliding_window_inference, not encoder dtype.",
+    "vesselfm_ssh_error": "L4 asia-northeast3-a: SSH failed after container started. Spot preemption or network issue."
+  }
 }

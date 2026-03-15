@@ -240,6 +240,7 @@ class TrainingConfig(BaseModel):
     warmup_epochs: int = Field(default=5, ge=0)
     gradient_clip_val: float = Field(default=1.0, ge=0)
     mixed_precision: bool = True
+    mixed_precision_val: bool = False  # AMP OFF for validation — MONAI #4243
     gradient_checkpointing: bool = False
     seed: int = Field(default=42)
     num_folds: int = Field(default=5, ge=1)
