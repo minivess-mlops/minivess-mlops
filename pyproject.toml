@@ -257,6 +257,8 @@ module = [
     "nibabel.*",
     "sam2.*",
     "sam3.*",
+    "mamba_ssm.*",
+    "causal_conv1d.*",
     "transformers.*",
     "prefect.*",
     "pandas.*",
