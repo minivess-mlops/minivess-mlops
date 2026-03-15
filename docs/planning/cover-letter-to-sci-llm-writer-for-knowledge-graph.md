@@ -19,6 +19,30 @@ while the experiments and platform implementation are being completed.
 
 ---
 
+## ⚠️ PRIME DIRECTIVE — Read Before Any Writing Task
+
+> **This paper is NOT about which model achieves best DSC or clDice on MiniVess.**
+> **This paper is about the PLATFORM that lets any lab run those comparisons reproducibly.**
+
+Source (verbatim user prompt, `docs/planning/repo-to-manuscript-prompt.md`):
+> "we do not have results in traditional sense as we are not looking to show what is SOTA
+> in vasculature segmentation, but rather to show a system that facilitates the development
+> of next-gen vasculature SOTA segmentations."
+
+**What this means for every writing task:**
+- ✅ "The platform enables comparison of DynUNet, Mamba, SAM3, VesselFM"
+- ✅ "cbdice_cldice yields +8.9% clDice — informing the platform's default loss selection"
+- ✅ "MambaVesselNet (Chen et al. 2024) demonstrates Mamba is viable for cerebrovasculature,
+  motivating inclusion of the SSM family in ARBOR's generalizability demonstration"
+- ❌ "ARBOR surpasses / outperforms / beats MambaVesselNet or any prior method"
+- ❌ "We achieve state-of-the-art clDice/DSC on MiniVess"
+- ❌ Performance predictions about which model will win R3b/R3c
+
+The model comparison EXISTS to prove the ModelAdapter ABC works across diverse architectures.
+The models are demonstration vehicles, not competitors. The platform is the hero.
+
+---
+
 ## § 0 — VERBATIM USER PROMPT (preserved as-is)
 
 > Could you next create me some "cover letter" for all this knowledge work to
@@ -260,10 +284,11 @@ the platform's model-agnostic architecture. One YAML profile + one ModelAdapter 
 - **KG adapter**: `knowledge-graph/code-structure/adapters.yaml#mamba_variants` — entry
   added 2026-03-15 with `status: planned`. Python adapter (`src/minivess/adapters/mamba.py`)
   is **NOT YET IMPLEMENTED**. The KG captures intent but no code exists yet.
-- **Literature baseline**: [Chen et al. (2024). "MambaVesselNet: A Hybrid CNN-Mamba Architecture
+- **Literature context**: [Chen et al. (2024). "MambaVesselNet: A Hybrid CNN-Mamba Architecture
   for 3D Cerebrovascular Segmentation." *ACM MMasia*.](https://doi.org/10.1145/3696409.3700231)
-  — establishes Mamba as viable for TOF-MRA cerebrovascular; no 2PM microscopy, no reproducible
-  pipeline. ARBOR will be the first to benchmark Mamba for 2PM vascular in a full MLOps context.
+  — demonstrates Mamba architecture is scientifically motivated for cerebrovascular segmentation;
+  no 2PM microscopy, no reproducible pipeline. Cited to justify inclusion of the Mamba family
+  in ARBOR's model-agnostic generalizability demonstration — NOT as a target to beat.
 - **GPU requirement**: Similar to DynUNet (~8 GB, to be confirmed after implementation)
 - **Results available**: NO — pending Python adapter implementation + GPU runs
 - **⚠️ ACTION REQUIRED before manuscript submission**: Implement Mamba adapter
@@ -758,15 +783,16 @@ iteration on `results-03-models.tex`** (mode: `refinement`, quality target: MINO
    *Cite hook for co-authors*: "The Docker approach was right in 2020; ARBOR is what it would
    look like if you added five years of MLOps practice to that foundation."
 
-2. **First benchmarking of Mamba state-space models on 2PM microscopy vascular data.**
+2. **First reproducible multi-architecture benchmark on 2PM vascular data.**
    [MambaVesselNet (Chen et al. 2024, ACM MMasia)](https://doi.org/10.1145/3696409.3700231)
-   demonstrated Mamba for 3D cerebrovascular on TOF-MRA — but no 2PM microscopy and
-   no reproducible pipeline. When our Mamba adapter is complete, ARBOR will be the first
-   to benchmark SSM (Mamba) vs CNN (DynUNet) vs Foundation Model (SAM3) on 2PM data
-   in a fully reproducible, platform-integrated comparison.
-   *Why this excites co-authors*: The Mamba hypothesis is scientifically interesting —
-   vascular networks have long-range connectivity that sliding-window CNNs may miss.
-   SSM's linear complexity could be a real win for whole-volume inference.
+   demonstrated Mamba for 3D cerebrovascular on TOF-MRA — no 2PM microscopy, no
+   reproducible pipeline. ARBOR will be the first platform to enable a fully reproducible,
+   multi-cloud comparison of CNN (DynUNet) vs SSM (Mamba) vs Foundation Model (SAM3)
+   on 2PM vascular data — the platform capability is the contribution, not which model wins.
+   *Why this excites co-authors*: The long-range connectivity question is scientifically
+   open. SSM's linear complexity is interesting for whole-volume inference. The paper
+   doesn't answer "which model is best" — it provides the reproducible infrastructure
+   so any lab can answer that question on their own data.
 
 3. **First reproducible topology-aware benchmark for 2PM vascular segmentation.**
    [Haft-Javaherian et al. (2020, CVPR-CVMI)](https://github.com/mhaft/DeepVess)
@@ -790,14 +816,16 @@ iteration on `results-03-models.tex`** (mode: `refinement`, quality target: MINO
 
 **These are scaffold bullet points, not full prose. The sci-llm-writer will expand them.**
 
-**Hook A: The Mamba hypothesis for vascular topology**
-- CNNs (DynUNet) use sliding-window inference: patch sees local context only.
+**Hook A: The Mamba question for vascular topology**
+- CNNs (DynUNet) use sliding-window inference: each patch sees local context only.
 - Mamba SSMs have selective state-space memory: long-range vessel continuity is a
   natural fit for the SSM's ability to model sequences without quadratic attention cost.
-- Hypothesis (for R3b): Mamba will show better topology preservation (higher clDice)
-  at comparable DSC to DynUNet — testing the same question Haft-Javaherian asked
-  with persistent homology, now with a modern SSM architecture.
-- [PENDING EXPERIMENT] — write as hypothesis in Discussion once GPU results land.
+- Open question (for R3b): Does SSM architecture provide measurably different topology
+  preservation versus sliding-window CNN for 3D 2PM vascular data?
+- [PENDING EXPERIMENT] — write as an open scientific question, NOT a performance claim.
+  The platform ENABLES this comparison; the platform is the contribution, not the answer.
+- ⚠️ sci-llm-writer MUST NOT write "Mamba achieves better/worse X than DynUNet" until
+  GPU results are available AND the paper's framing is confirmed as platform-first.
 
 **Hook B: Foundation model zero-shot transfer to 2PM**
 - SAM3 (Meta, Nov 2025) was trained on 2D natural images with object segmentation.
