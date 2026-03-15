@@ -1,0 +1,684 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MambaVesselNet++ Cloud Smoke Test Plan — RunPod Dev Environment
+  Created:  2026-03-16
+  Branch:   test/mambavesselnet
+  Skills:   ralph-loop (monitoring) + self-learning-iterative-coder (code fixes)
+  Budget:   ~$0.10–$0.20 (RunPod RTX 4090 spot @ $0.44/hr, ~8–12 min per attempt)
+
+  Context:
+    MambaVesselNet++ CPU-only implementation is DONE (T00–T08, issues #738–#743, PR #745).
+    T09 (VRAM measurement) and T10 (cloud smoke test) are BLOCKED on GPU hardware with
+    mamba-ssm CUDA compilation (INSTALL_MAMBA=1 Docker build arg).
+    This plan resolves that blocker by:
+      1. Building a :mamba-latest Docker image with CUDA-compiled mamba-ssm
+      2. Creating a RunPod SkyPilot YAML referencing that image
+      3. Running the smoke test via Ralph Loop with automatic failure recovery
+      4. Capturing VRAM measurements to close T09 (#744)
+
+  Architecture constraint: RunPod = container-native (no Docker-in-Docker).
+    SkyPilot YAML must use image_id: docker:<registry>/<image>:<tag>.
+    Setup: block is DATA ONLY — no apt-get, uv sync, git clone (metalearning 2026-03-14).
+    MINIVESS_ALLOW_HOST=1 + PREFECT_DISABLED=1 escape hatches approved (same as existing tests).
+
+  AMP policy (D04): mixed_precision=true (train), mixed_precision_val=false (val OFF).
+    Rationale: MONAI #4243 — selective scan ops not safe under autocast in validation.
+    Config: configs/experiment/smoke_mambavesselnet_cloud.yaml already has mixed_precision_val=false.
+
+  Docker image decision:
+    New tag :mamba-latest (not :latest) isolates the mamba-ssm CUDA build from the
+    standard image. Labs without Mamba needs get unchanged :latest builds (INSTALL_MAMBA=0).
+    Tag: ghcr.io/petteriteikari/minivess-base:mamba-latest
+    Build arg: INSTALL_MAMBA=1 (Dockerfile.base Phase C, mamba-ssm==2.3.1)
+
+  Issue references:
+    Closes: #744 (T09 VRAM + T10 cloud smoke test)
+    Parent: #737 (MambaVesselNet++ tracking issue)
+    PR: #745 (feat/mambavesselnet → main)
+
+  Ralph Loop integration:
+    Phase 0: Pre-flight (credentials, image, data, MLflow health)
+    Phase 1: Docker build + push (one-time, ~30 min)
+    Phase 2: SkyPilot YAML + Makefile targets (one-time, ~5 min)
+    Phase 3: Launch + Monitor (Ralph Loop steps 2–3, poll 30s)
+    Phase 4: Diagnose + Fix (Ralph Loop steps 4–5, max 3 retries)
+    Phase 5: VRAM record + Report (Ralph Loop step 6, close #744)
+-->
+<plan version="2.0" name="mambavesselnet-test-on-dev-runpod">
+  <metadata>
+    <created>2026-03-16</created>
+    <branch>test/mambavesselnet</branch>
+    <issue>744</issue>
+    <parent-issue>737</parent-issue>
+    <skills>
+      <skill>ralph-loop</skill>
+      <skill>self-learning-iterative-coder</skill>
+    </skills>
+    <cost-budget>$0.50</cost-budget>
+    <context>
+      CPU implementation done (PR #745). Now need GPU validation with INSTALL_MAMBA=1
+      Docker image on RunPod RTX 4090. This plan covers the full end-to-end: Docker build,
+      SkyPilot YAML creation, smoke test execution, VRAM measurement, and #744 closure.
+    </context>
+  </metadata>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 0: Pre-Flight Checks (local, no cost, ~5 min)
+       Ralph Loop Step 1 — verify ALL gates before touching cloud resources
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P0" name="Pre-Flight Checks" environment="local" cost="$0.00" effort="5min">
+    <description>
+      Verify all prerequisites before building the Docker image or provisioning any
+      cloud resources. Every check must pass. No "probably fine" — run the commands.
+      Matches Ralph Loop Step 1 (PRE-FLIGHT CHECK).
+    </description>
+
+    <task id="T0.1" name="Verify cloud credentials and GPU availability" priority="P0" estimated-iterations="1">
+      <description>
+        RunPod must be enabled in SkyPilot and RTX 4090 must be available.
+        RunPod spot is often sold out (2026-03-14 metalearning) — on-demand is default.
+      </description>
+      <commands>
+        <cmd>sky check runpod</cmd>
+        <cmd>sky gpus --cloud runpod | grep -E "RTX4090|RTX5090|RTX3090"</cmd>
+      </commands>
+      <acceptance>
+        sky check runpod: ENABLED. At least one RTX4090/RTX5090/RTX3090 available.
+      </acceptance>
+      <failure-action>
+        If sky check fails: verify RUNPOD_API_KEY in .env.
+        If no GPUs: fall back to RTX 5090 or RTX 3090 (all ≥24 GB Ada, BF16 ✓).
+        RTX 5090 preferred if available (newer Ada Lovelace, faster).
+      </failure-action>
+    </task>
+
+    <task id="T0.2" name="Verify MLflow server health (UpCloud)" priority="P0" estimated-iterations="1">
+      <description>
+        UpCloud MLflow must be reachable before training. If it's down, artifacts
+        are lost. Fix Pulumi stack first — do not proceed with downed MLflow.
+      </description>
+      <commands>
+        <cmd>source .env &amp;&amp; curl -s -u "${MLFLOW_CLOUD_USERNAME}:${MLFLOW_CLOUD_PASSWORD}" \
+          "${MLFLOW_CLOUD_URI}/api/2.0/mlflow/experiments/search" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'MLflow OK: {len(d[\"experiments\"])} experiments')"</cmd>
+      </commands>
+      <acceptance>
+        MLflow OK: N experiments (N >= 0). Any error = BLOCKED. Fix UpCloud stack first.
+      </acceptance>
+    </task>
+
+    <task id="T0.3" name="Verify DVC data is pushed to UpCloud S3" priority="P0" estimated-iterations="1">
+      <description>
+        DVC pull in the RunPod setup stage needs data in UpCloud S3.
+        The md5 hash in smoke_test_mamba.yaml setup must match what's in the bucket.
+      </description>
+      <commands>
+        <cmd>source .env &amp;&amp; dvc status -r upcloud 2>&amp;1 | head -5</cmd>
+      </commands>
+      <acceptance>
+        "Data and pipelines are up to date." If stale: `dvc push -r upcloud` first.
+      </acceptance>
+    </task>
+
+    <task id="T0.4" name="Verify .env has all required variables" priority="P0" estimated-iterations="1">
+      <description>
+        The mamba smoke test YAML needs the same env vars as existing smoke tests
+        (DVC_S3_*, MLFLOW_CLOUD_*, RUNPOD_API_KEY) plus no HF_TOKEN needed
+        (mambavesselnet has no pretrained weights to download).
+      </description>
+      <commands>
+        <cmd>python3 -c "
+from pathlib import Path
+required = ['DVC_S3_ENDPOINT_URL','DVC_S3_ACCESS_KEY','DVC_S3_SECRET_KEY',
+            'DVC_S3_BUCKET','MLFLOW_CLOUD_URI','MLFLOW_CLOUD_USERNAME',
+            'MLFLOW_CLOUD_PASSWORD','RUNPOD_API_KEY','GITHUB_TOKEN']
+env = {}
+for line in Path('.env').read_text(encoding='utf-8').splitlines():
+    if '=' in line and not line.startswith('#'):
+        k, _, v = line.partition('=')
+        env[k.strip()] = v.strip()
+missing = [k for k in required if not env.get(k)]
+print('Missing:', missing or 'NONE — all set')
+"</cmd>
+      </commands>
+      <acceptance>
+        Missing: NONE — all set. If any missing: populate .env before proceeding.
+      </acceptance>
+    </task>
+
+    <task id="T0.5" name="Verify smoke_mambavesselnet_cloud.yaml has correct AMP policy" priority="P1" estimated-iterations="1">
+      <description>
+        D04 AMP policy: train=ON, val=OFF. Confirm the experiment config has
+        mixed_precision_val=false. This is a READ-ONLY check — do not modify.
+      </description>
+      <commands>
+        <cmd>python3 -c "
+import yaml
+from pathlib import Path
+cfg = yaml.safe_load(Path('configs/experiment/smoke_mambavesselnet_cloud.yaml').read_text(encoding='utf-8'))
+amp_train = cfg.get('mixed_precision', 'MISSING')
+amp_val   = cfg.get('mixed_precision_val', 'MISSING')
+print(f'mixed_precision={amp_train} (want True), mixed_precision_val={amp_val} (want False)')
+assert amp_train is True and amp_val is False, 'AMP policy violation!'
+print('AMP policy OK')
+"</cmd>
+      </commands>
+      <acceptance>
+        mixed_precision=True, mixed_precision_val=False. AMP policy OK.
+        If assertion fails: DO NOT proceed. Fix the config YAML first.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 1: Build + Push :mamba-latest Docker Image (local, ~30–45 min)
+       One-time. Subsequent test iterations reuse the same image.
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P1" name="Build + Push :mamba-latest Docker Image" environment="local" cost="$0.00" effort="30-45min">
+    <description>
+      Build Dockerfile.base with INSTALL_MAMBA=1, which compiles mamba-ssm==2.3.1
+      CUDA extensions (Phase C in Dockerfile.base). Tag as :mamba-latest to keep
+      the standard :latest image unchanged for labs without Mamba needs.
+      Push to GHCR so RunPod SkyPilot can pull it.
+
+      Requires: nvcc (CUDA toolkit) in the Docker builder stage — already present in
+      nvidia/cuda:12.6.3-devel-ubuntu24.04 (builder stage in Dockerfile.base).
+      Mamba-ssm compile time: ~15–20 min (JIT compilation of selective scan CUDA kernels).
+    </description>
+
+    <task id="T1.1" name="Add build-mamba Makefile target" priority="P0" estimated-iterations="1">
+      <description>
+        Add `make build-mamba` and `make push-mamba` targets to the Makefile.
+        Pattern follows existing `make build` and `make push-ghcr` targets.
+        Tag: ${DOCKER_REGISTRY:-ghcr.io/petteriteikari}/minivess-base:mamba-latest
+      </description>
+      <tdd-spec>
+        RED: test that `make build-mamba --dry-run` resolves to docker build with
+             INSTALL_MAMBA=1 and the :mamba-latest tag (Makefile dry-run check).
+        GREEN: add build-mamba + push-mamba targets to Makefile.
+        VERIFY: make test-staging passes, Makefile lint passes.
+      </tdd-spec>
+      <acceptance>
+        `make build-mamba` target exists with INSTALL_MAMBA=1 build arg.
+        `make push-mamba` target exists pointing to :mamba-latest tag.
+        Both targets print usage hint if DOCKER_REGISTRY not set.
+      </acceptance>
+    </task>
+
+    <task id="T1.2" name="Build minivess-base:mamba-latest" priority="P0" estimated-iterations="1">
+      <description>
+        Run docker build with INSTALL_MAMBA=1. This triggers Phase C in Dockerfile.base:
+        `uv sync --frozen --no-dev --extra mamba-ssm` which pip-installs mamba-ssm
+        from source and compiles the CUDA kernels with nvcc.
+
+        Expected build time: 30–45 min (CUDA kernel compilation dominates).
+        Expected image size: +2–4 GB over :latest (CUDA compiled objects).
+      </description>
+      <commands>
+        <cmd>DOCKER_BUILDKIT=1 docker build \
+          --build-arg INSTALL_MAMBA=1 \
+          --build-arg UID=$(id -u) \
+          --build-arg GID=$(id -g) \
+          -t ghcr.io/petteriteikari/minivess-base:mamba-latest \
+          -f deployment/docker/Dockerfile.base \
+          . 2>&amp;1 | tee /tmp/docker-build-mamba.log</cmd>
+      </commands>
+      <acceptance>
+        Build exits 0. No "CUDA compilation error" in log. Image exists locally.
+        Verify mamba-ssm installed: `docker run --rm ghcr.io/petteriteikari/minivess-base:mamba-latest
+          python -c "import mamba_ssm; print(mamba_ssm.__version__)"`
+        Should print: 2.3.1 (or similar). Must NOT raise ImportError.
+      </acceptance>
+      <failure-action>
+        MAMBA_COMPILE_FAIL: Check /tmp/docker-build-mamba.log for nvcc errors.
+        Common cause: CUDA version mismatch between PyTorch and nvcc.
+        Fix: check torch.version.cuda matches CUDA driver version in base image.
+        Self-learning TDD: If compile fails due to Python/config issue (not hardware),
+        trigger self-learning-iterative-coder to write a failing test and fix.
+      </failure-action>
+    </task>
+
+    <task id="T1.3" name="Push :mamba-latest to GHCR" priority="P0" estimated-iterations="1">
+      <description>
+        Push the built image to GHCR. RunPod SkyPilot pulls from GHCR during job launch.
+        Requires GITHUB_TOKEN with packages:write scope in .env.
+      </description>
+      <commands>
+        <cmd>echo "${GITHUB_TOKEN}" | docker login ghcr.io -u petteriteikari --password-stdin</cmd>
+        <cmd>docker push ghcr.io/petteriteikari/minivess-base:mamba-latest</cmd>
+        <cmd>docker manifest inspect ghcr.io/petteriteikari/minivess-base:mamba-latest | python3 -c "import json,sys; m=json.load(sys.stdin); print(f'GHCR push OK: {m[\"schemaVersion\"]=}, layers={len(m[\"layers\"])}')"</cmd>
+      </commands>
+      <acceptance>
+        docker manifest inspect returns valid manifest with multiple layers.
+        Timestamp on GHCR is within last 2 hours.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 2: Create smoke_test_mamba.yaml + Makefile Target (local, ~15 min)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P2" name="SkyPilot YAML + Makefile Target" environment="local" cost="$0.00" effort="15min">
+    <description>
+      Create deployment/skypilot/smoke_test_mamba.yaml for RunPod MambaVesselNet smoke test.
+      Pattern: extends smoke_test_gpu.yaml but uses :mamba-latest image, sets
+      MODEL_FAMILY=mambavesselnet, and adds mamba-ssm verification in setup.
+      Add make smoke-test-mamba target.
+
+      Key differences from smoke_test_gpu.yaml:
+        - image_id: docker:ghcr.io/petteriteikari/minivess-base:mamba-latest
+        - MODEL_FAMILY: mambavesselnet (not sam3_vanilla)
+        - No HF_TOKEN needed (no pretrained weights)
+        - Setup: python -c "import mamba_ssm" verification step
+        - Setup: VRAM baseline print before training
+        - Run: EXPERIMENT=smoke_mambavesselnet (uses smoke_mambavesselnet_cloud.yaml)
+    </description>
+
+    <task id="T2.1" name="Create deployment/skypilot/smoke_test_mamba.yaml" priority="P0" estimated-iterations="1">
+      <description>
+        New SkyPilot YAML for MambaVesselNet smoke test on RunPod. Must follow all
+        SkyPilot + Docker mandates from CLAUDE.md:
+          - image_id: docker:ghcr.io/petteriteikari/minivess-base:mamba-latest
+          - No apt-get/uv sync/git clone in setup (all deps in image)
+          - Setup is DATA ONLY (DVC pull + splits copy)
+          - MINIVESS_ALLOW_HOST=1 + PREFECT_DISABLED=1 (dev environment)
+          - sky jobs launch (NOT sky launch) for spot recovery
+        VRAM capture: after training, print VRAM via torch.cuda.max_memory_allocated()
+        to satisfy T09 VRAM measurement requirement.
+      </description>
+      <file>deployment/skypilot/smoke_test_mamba.yaml</file>
+      <template>
+        Base on: deployment/skypilot/smoke_test_gpu.yaml
+        Change image_id: docker:ghcr.io/petteriteikari/minivess-base:mamba-latest
+        Change accelerators: {RTX4090: 1, RTX5090: 1, RTX3090: 1}  (same — all ≥24 GB)
+        Remove HF_TOKEN env var (not needed for mambavesselnet)
+        Add to setup after nvidia-smi check:
+          python -c "import mamba_ssm; print(f'mamba_ssm {mamba_ssm.__version__} CUDA ready')"
+        Change run: EXPERIMENT=smoke_mambavesselnet
+        Add VRAM capture in run (after training exits 0):
+          python -c "
+          import torch
+          if torch.cuda.is_available():
+              vram_mb = torch.cuda.max_memory_allocated() // (1024*1024)
+              print(f'VRAM_PEAK_MB={vram_mb}')  # T09: captured by Ralph monitor
+          "
+      </template>
+      <acceptance>
+        File exists at deployment/skypilot/smoke_test_mamba.yaml.
+        `sky validate deployment/skypilot/smoke_test_mamba.yaml` passes (if sky validate exists).
+        image_id references :mamba-latest, MODEL_FAMILY=mambavesselnet.
+        No apt-get, uv sync, git clone in setup block.
+      </acceptance>
+    </task>
+
+    <task id="T2.2" name="Add make smoke-test-mamba target" priority="P1" estimated-iterations="1">
+      <description>
+        Add Makefile targets consistent with existing smoke-test-gpu pattern:
+          make smoke-test-mamba          — launch smoke test (on-demand, reliable)
+          make smoke-test-mamba-spot     — spot instance (cheaper, may be preempted)
+          make verify-smoke-test-mamba   — verify MLflow artifacts after test
+          make smoke-test-mamba-preflight — run P0 pre-flight checks only
+      </description>
+      <acceptance>
+        All four targets exist in Makefile.
+        `make smoke-test-mamba --dry-run` shows `sky jobs launch deployment/skypilot/smoke_test_mamba.yaml`.
+        Uses `--env-file .env` to load credentials.
+        References `MODEL_FAMILY=mambavesselnet`.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 3: Launch + Monitor (Ralph Loop Steps 2–3)
+       Budget: ~$0.10 per attempt (8 min × $0.74/hr = ~$0.10 RTX 4090 spot)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P3" name="Launch + Monitor" environment="cloud (RunPod)" cost="$0.10/attempt" effort="10-15min">
+    <description>
+      Execute the MambaVesselNet smoke test via Ralph Loop.
+      Launch → Monitor (30s poll) → collect VRAM and training results.
+      Target: smoke_mambavesselnet_cloud config (3 epochs, 1 fold, 4 volumes).
+      Expected training time on RTX 4090: ~6–10 min.
+      Expected val_loss: finite (no NaN — AMP val OFF per D04).
+    </description>
+
+    <task id="T3.1" name="Launch smoke test via SkyPilot" priority="P0" estimated-iterations="1">
+      <description>
+        MUST use `sky jobs launch` (not `sky launch`). This enables spot recovery.
+        `sky launch` creates a cluster — no automatic preemption recovery.
+        `sky jobs launch` treats the job as managed — SkyPilot recovers automatically.
+        Cost estimate: $0.10 per 10 min on RunPod RTX 4090 spot ($0.60/hr after spot discount).
+      </description>
+      <commands>
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_mamba.yaml \
+          --env-file .env \
+          --env MODEL_FAMILY=mambavesselnet \
+          -y 2>&amp;1 | tee /tmp/ralph-launch-mamba.log</cmd>
+      </commands>
+      <ralph-loop-step>LAUNCH</ralph-loop-step>
+      <acceptance>
+        Job ID returned and written to /tmp/ralph-launch-mamba.log.
+        `sky jobs status` shows job in PENDING or RUNNING state.
+      </acceptance>
+      <failure-action>
+        GPU_SOLD_OUT: Try RTX5090 or RTX3090 (all on accelerators list).
+        DOCKER_AUTH_FAIL: Re-run `make push-mamba` with fresh GITHUB_TOKEN.
+        DOCKER_PULL_FAIL: Make GHCR package public (GitHub → Packages → minivess-base → Settings).
+      </failure-action>
+    </task>
+
+    <task id="T3.2" name="Monitor job to completion (30s poll)" priority="P0" estimated-iterations="1">
+      <description>
+        Poll `sky jobs logs --sync` every 30s. Watch for:
+          - SUCCEEDED: normal exit → go to Phase 5
+          - FAILED: go to Phase 4 (diagnose)
+          - GPU_OOM: `CUDA out of memory` in logs → Phase 4 (OOM fix)
+          - NaN: `val_loss=nan` in MLflow logs → Phase 4 (AMP debug)
+          - MAMBA_COMPILE_FAIL: `mamba_ssm ImportError` → Phase 4 (Docker rebuild)
+        Ralph Loop poll logic: use `sky jobs logs <job_id> --sync 2>&amp;1 | tee /tmp/ralph-mamba-logs.txt`
+      </description>
+      <ralph-loop-step>MONITOR</ralph-loop-step>
+      <acceptance>
+        Job exits with SUCCEEDED status.
+        Logs contain: `mamba_ssm 2.3.1 CUDA ready` (Phase C compiled OK).
+        Logs contain: `VRAM_PEAK_MB=NNNN` (T09 capture line).
+        Logs contain: training loss sequence showing finite values.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 4: Diagnose + Fix (Ralph Loop Steps 4–5)
+       Only executed if Phase 3 fails. Max 3 retries total.
+       Self-learning TDD skill triggered for code-level fixes.
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P4" name="Diagnose + Fix" environment="local+cloud" cost="$0.10/retry" effort="variable">
+    <description>
+      Failure diagnosis and fix, following Ralph Loop Steps 4–5.
+      Known mambavesselnet-specific failure patterns listed below.
+      For code-level failures, delegate to self-learning-iterative-coder (TDD RED→GREEN→FIX).
+      For infrastructure failures, fix config/env and relaunch directly.
+      Max 3 retries. After 3: escalate to user with diagnosis report.
+    </description>
+
+    <known-failure-patterns>
+      <!-- Mamba-specific patterns in addition to the universal ralph-loop patterns -->
+      <pattern id="MAMBA_IMPORT_FAIL" log-signature="ImportError: libcuda.so" auto-fix="yes">
+        <description>
+          mamba_ssm CUDA extension can't find libcuda.so at runtime. Happens when the
+          runtime image lacks CUDA runtime libs (builder vs runner image mismatch).
+        </description>
+        <fix>
+          Verify Dockerfile.base runner stage copies mamba-ssm .so files along with .venv.
+          Check: `docker run --rm --gpus all minivess-base:mamba-latest python -c "import mamba_ssm"`.
+          If fails locally: the runner stage is missing CUDA runtime libs.
+          Add `libcuda.so` to runner stage COPY or switch runner to cuda:12.6.3-cudnn-runtime.
+          TDD: write test_mamba_runtime_import.py in tests/gpu_instance/, fix Dockerfile.
+        </fix>
+      </pattern>
+
+      <pattern id="MAMBA_VERSION_MISMATCH" log-signature="version mismatch: built with CUDA" auto-fix="yes">
+        <description>
+          mamba-ssm CUDA kernels compiled against a different CUDA version than the runtime driver.
+          Build: nvidia/cuda:12.6.3-devel. Runtime: nvidia/cuda:12.6.3-runtime.
+        </description>
+        <fix>
+          Ensure builder and runner base images use identical CUDA version tag.
+          Check ARG CUDA_VERSION in Dockerfile.base; must match between builder/runner.
+        </fix>
+      </pattern>
+
+      <pattern id="MAMBA_OOM" log-signature="CUDA out of memory" auto-fix="maybe">
+        <description>
+          MambaVesselNet bottleneck dim=768 with bidirectional SSM. Estimated VRAM: ~5–8 GB
+          for patch_size=(64,64,64), batch_size=1. RTX 4090 (24 GB) should not OOM.
+          If OOM: likely patch_size too large or batch_size > 1.
+        </description>
+        <fix>
+          Step 1: Check smoke_mambavesselnet_cloud.yaml for batch_size and patch_size.
+          Step 2: If batch_size > 1, set batch_size: 1 and relaunch.
+          Step 3: If patch_size is (96,96,96), reduce to (64,64,64) (D05 eval_roi_size).
+          Step 4: Check VRAM log from previous attempt: VRAM_PEAK_MB=NNNN.
+          Auto-fix: update config YAML and relaunch (no code change needed).
+          If still OOM at (64,64,64) batch=1: escalate — unexpected, needs investigation.
+        </fix>
+      </pattern>
+
+      <pattern id="MAMBA_NAN_VAL" log-signature="val_loss=nan" auto-fix="yes">
+        <description>
+          NaN in validation loss. D04 AMP policy: val OFF (mixed_precision_val=false).
+          If NaN: AMP policy violated — autocast is active during validation.
+          Verify: smoke_mambavesselnet_cloud.yaml has mixed_precision_val=false.
+        </description>
+        <fix>
+          Step 1: Check logs for `AMP: validation ON` message — should say OFF.
+          Step 2: Verify configs/experiment/smoke_mambavesselnet_cloud.yaml.
+          Step 3: If config correct, check train_flow.py applies val amp policy correctly.
+          TDD: write test for val AMP policy, fix train_flow.py. Ref: MONAI #4243.
+        </fix>
+      </pattern>
+
+      <pattern id="RESHAPE_ERROR" log-signature="shape" auto-fix="maybe">
+        <description>
+          BidirectionalMambaLayer reshape error: (B,C,D,H,W) → (B,L,C) → (B,C,D,H,W).
+          CPU tests pass (MockMamba), but real Mamba may expose edge cases.
+          Divisor constraint: all spatial dims must be divisible by divisor=16.
+        </description>
+        <fix>
+          Step 1: Extract exact shapes from error message (NEVER regex — use str.partition).
+          Step 2: Verify patch_size is divisible by 16 in all 3 dims (64/16=4 ✓).
+          Step 3: If not: fix patch_size in smoke_mambavesselnet_cloud.yaml.
+          Step 4: If patch is valid and reshape still fails: add TDD test for that shape
+            in tests/v2/unit/test_mambavesselnet_blocks.py, fix BidirectionalMambaLayer.
+          Self-learning TDD: RED (test for exact failing shape) → GREEN → CHECKPOINT → relaunch.
+        </fix>
+      </pattern>
+
+      <pattern id="DVC_DATA_MISSING" log-signature="No training data" auto-fix="yes">
+        <description>DVC pull failed silently. Training data missing in container.</description>
+        <fix>
+          Verify dvc.lock md5 hash matches UpCloud S3 content.
+          Run: `dvc push -r upcloud` locally to refresh.
+          Then relaunch.
+        </fix>
+      </pattern>
+    </known-failure-patterns>
+
+    <task id="T4.1" name="Classify failure and apply fix" priority="P0" estimated-iterations="3">
+      <description>
+        Parse /tmp/ralph-mamba-logs.txt using str.partition() and `in` checks (no regex).
+        Match against known-failure-patterns above + universal ralph-loop patterns.
+        Classify as auto-fixable or needs-user.
+        Write structured diagnosis to outputs/ralph_diagnoses.jsonl.
+        Apply fix and relaunch (max 3 attempts total across all retries).
+      </description>
+      <ralph-loop-step>DIAGNOSE + FIX + RELAUNCH</ralph-loop-step>
+      <self-learning-tdd-trigger>
+        Trigger self-learning-iterative-coder skill when:
+          - RESHAPE_ERROR and shape is valid → code bug in BidirectionalMambaLayer
+          - MAMBA_IMPORT_FAIL and image correct → code bug in import guard
+          - MAMBA_NAN_VAL and config correct → code bug in AMP policy application
+          - Any failure not in known-failure-patterns → investigate, write test, fix
+        TDD cycle: RED (write test reproducing cloud failure) → GREEN (fix code) →
+          VERIFY (make test-staging) → CHECKPOINT (git commit) → relaunch cloud job.
+      </self-learning-tdd-trigger>
+      <acceptance>
+        outputs/ralph_diagnoses.jsonl has entry for each attempt.
+        If auto-fixable: relaunched and completed. If needs-user: reported clearly.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 5: VRAM Measurement + Verification + Report (Ralph Loop Step 6)
+       Closes T09 (#744). ~10 min.
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P5" name="VRAM Record + Verification + Report" environment="local" cost="$0.00" effort="10min">
+    <description>
+      Post-success: extract VRAM measurement, verify MLflow artifacts, update
+      model profile YAML, close GitHub issue #744, write final report.
+      Ralph Loop Step 6 (REPORT).
+    </description>
+
+    <task id="T5.1" name="Extract VRAM measurement from logs" priority="P0" estimated-iterations="1">
+      <description>
+        Extract VRAM_PEAK_MB from training logs (printed in run: block of YAML).
+        This satisfies T09 (VRAM measurement on RTX 4090) from the implementation plan.
+        Expected peak VRAM for MambaVesselNet++ patch=(64,64,64), batch=1:
+          ~5–8 GB (bottleneck=768-dim, bidirMamba × 2 = 1536 channels, large but fits 24 GB).
+        If VRAM > 20 GB (close to limit): document as "needs A100 for production".
+      </description>
+      <commands>
+        <cmd>python3 -c "
+from pathlib import Path
+log = Path('/tmp/ralph-mamba-logs.txt').read_text(encoding='utf-8')
+for line in log.splitlines():
+    if 'VRAM_PEAK_MB' in line:
+        key, _, val = line.partition('=')
+        print(f'T09 VRAM measurement: {val.strip()} MB ({int(val.strip()) // 1024:.1f} GB)')
+        break
+else:
+    print('WARNING: VRAM_PEAK_MB not found in logs')
+"</cmd>
+      </commands>
+      <acceptance>
+        VRAM measurement printed with numeric value.
+        Value > 0 and value &lt; 24576 (24 GB RTX 4090 total).
+      </acceptance>
+    </task>
+
+    <task id="T5.2" name="Update model profile YAML with measured VRAM" priority="P0" estimated-iterations="1">
+      <description>
+        Write measured VRAM to configs/model_profiles/mambavesselnet.yaml.
+        Currently: `vram.measured: false` (T09 placeholder from T07).
+        After measurement: update with actual values.
+        Also update `notes` to reflect measured status.
+      </description>
+      <tdd-spec>
+        No new tests needed — existing test_mambavesselnet_configs.py validates the YAML
+        structure. After updating, re-run test to confirm schema is still valid.
+      </tdd-spec>
+      <acceptance>
+        configs/model_profiles/mambavesselnet.yaml:
+          vram.measured: true
+          vram.rtx4090_patch64: [measured value in MB]
+          vram.notes: "Measured 2026-03-16 on RunPod RTX 4090 (24 GB)"
+        make test-staging passes.
+      </acceptance>
+    </task>
+
+    <task id="T5.3" name="Verify MLflow artifacts on UpCloud" priority="P0" estimated-iterations="1">
+      <description>
+        Verify the smoke test run is visible in UpCloud MLflow with expected metrics.
+        Pattern from existing verify-smoke-test Makefile target.
+      </description>
+      <commands>
+        <cmd>source .env &amp;&amp; python3 -c "
+import mlflow, os
+mlflow.set_tracking_uri(os.environ['MLFLOW_CLOUD_URI'])
+client = mlflow.tracking.MlflowClient()
+expts = client.search_experiments(filter_string='name LIKE \"%mambavesselnet%\"')
+print(f'Found {len(expts)} mambavesselnet experiments')
+if expts:
+    runs = client.search_runs(expts[0].experiment_id, order_by=['start_time DESC'])
+    if runs:
+        r = runs[0]
+        val_loss = r.data.metrics.get('val_loss', 'MISSING')
+        train_loss = r.data.metrics.get('train_loss', 'MISSING')
+        print(f'Latest run: {r.info.run_id[:8]} status={r.info.status}')
+        print(f'  val_loss={val_loss}, train_loss={train_loss}')
+        import math
+        assert r.info.status == 'FINISHED', f'Run not FINISHED: {r.info.status}'
+        assert isinstance(val_loss, float) and not math.isnan(val_loss), f'val_loss is NaN!'
+        print('MLflow verification PASSED')
+"</cmd>
+      </commands>
+      <acceptance>
+        1+ experiments with "mambavesselnet" in name.
+        Latest run: status=FINISHED, val_loss finite (not NaN), not MISSING.
+      </acceptance>
+    </task>
+
+    <task id="T5.4" name="Commit VRAM update + close GitHub issue #744" priority="P0" estimated-iterations="1">
+      <description>
+        Commit the updated configs/model_profiles/mambavesselnet.yaml with measured VRAM.
+        Close GitHub issue #744 (T09 VRAM + T10 cloud smoke test) with verification summary.
+        Reference the MLflow run ID in the close comment.
+      </description>
+      <commands>
+        <cmd>git add configs/model_profiles/mambavesselnet.yaml</cmd>
+        <cmd>git commit -m "feat(mambavesselnet): T09 — VRAM measured on RTX 4090, closes #744"</cmd>
+        <cmd>gh issue close 744 --comment "T09 VRAM measured + T10 smoke test PASSED on RunPod RTX 4090.
+        See MLflow run [run_id] on UpCloud.
+        VRAM peak: [NNNN] MB @ patch=(64,64,64), batch=1.
+        AMP: train=ON, val=OFF (D04, MONAI #4243). val_loss=finite. Branch: test/mambavesselnet"</cmd>
+      </commands>
+      <acceptance>
+        Issue #744 closed on GitHub.
+        Commit appears on test/mambavesselnet branch.
+        All tdd-state.json T09+T10 statuses updated to DONE.
+      </acceptance>
+    </task>
+
+    <task id="T5.5" name="Update tdd-state.json and write final report" priority="P1" estimated-iterations="1">
+      <description>
+        Update .claude/skills/self-learning-iterative-coder/state/tdd-state.json:
+          T09.status: "DONE" (was: "blocked")
+          T10.status: "DONE" (was: "blocked")
+          convergence.reached: true (all 11 tasks DONE)
+        Write summary to outputs/ralph_diagnoses.jsonl (ralph loop report).
+        Append to LEARNINGS.md: mamba-ssm CUDA build gotchas observed.
+      </description>
+      <acceptance>
+        tdd-state.json: T09+T10 DONE, convergence.tasks_done=11, tasks_blocked=0.
+        outputs/ralph_diagnoses.jsonl has final report entry with total cost and duration.
+        LEARNINGS.md has a new entry for 2026-03-16 with any discoveries from the cloud run.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       COST SUMMARY + RALPH LOOP PARAMETERS
+       ══════════════════════════════════════════════════════════════════════ -->
+  <cost-model>
+    <provider>RunPod</provider>
+    <gpu>RTX 4090 (24 GB Ada Lovelace, BF16 ✓)</gpu>
+    <on-demand-rate>$0.74/hr</on-demand-rate>
+    <spot-rate>~$0.44/hr (often sold out — use on-demand for reliability)</spot-rate>
+    <estimated-duration-minutes>8-12</estimated-duration-minutes>
+    <cost-per-attempt-usd>~$0.10</cost-per-attempt-usd>
+    <max-retries>3</max-retries>
+    <max-total-cost-usd>$0.50</max-total-cost-usd>
+    <abort-if-exceeded>true</abort-if-exceeded>
+    <note>
+      Smoke test: 3 epochs, 1 fold, 4 volumes (smoke_test_1fold_4vol.json).
+      NOT scientifically valid — infrastructure + VRAM verification only.
+      Production training (100 epochs, 3 folds) on GCP L4 is a separate issue.
+    </note>
+  </cost-model>
+
+  <ralph-loop-parameters>
+    <poll-interval-seconds>30</poll-interval-seconds>
+    <max-retries>3</max-retries>
+    <cost-budget-usd>0.50</cost-budget-usd>
+    <log-file>outputs/ralph_diagnoses.jsonl</log-file>
+    <log-line-parser>str.partition() + `in` checks — NO regex (CLAUDE.md Rule #16)</log-line-parser>
+    <self-learning-tdd-trigger>
+      Activate self-learning-iterative-coder when failure is CODE-LEVEL:
+        - Pattern not in known-failure-patterns list
+        - Infrastructure checks pass but Python code raises exception
+        - Shape/type errors in model forward pass
+      Do NOT activate for infrastructure failures (GPU_SOLD_OUT, DOCKER_AUTH_FAIL, DVC_MISSING).
+    </self-learning-tdd-trigger>
+  </ralph-loop-parameters>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       ISSUES BLOCK (for issue-creator skill)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <issues>
+    <!-- T09+T10 are already tracked in #744 (created by issue-creator from the
+         mambavesselnet-implementation-plan.xml). No new issues needed for this plan.
+         This plan closes #744 when P5 completes. -->
+    <close number="744"
+           reason="T09 VRAM measured on RTX 4090 + T10 smoke test PASSED on RunPod (Phase 5 complete)"/>
+  </issues>
+
+</plan>
