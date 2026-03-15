@@ -329,25 +329,6 @@ class Sam3Backbone(nn.Module):
             )
             out = torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # NaN/Inf guard: FP16 encoder can overflow on certain inputs (boundary
-        # patches, extreme intensity values). Replace non-finite values with 0.0
-        # to prevent NaN from poisoning downstream loss computation.
-        # Zero features produce zero decoder output → valid (if uninformative) loss.
-        # See: docs/planning/sam3-nan-loss-fix.md, issue #715.
-        if not torch.isfinite(out).all():
-            nan_count = torch.isnan(out).sum().item()
-            inf_count = torch.isinf(out).sum().item()
-            total = out.numel()
-            logger.warning(
-                "NaN/Inf in SAM3 encoder output: %d NaN + %d Inf / %d total "
-                "(%.1f%%). Replacing with zeros to prevent loss poisoning.",
-                nan_count,
-                inf_count,
-                total,
-                100 * (nan_count + inf_count) / total,
-            )
-            out = torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
-
         result: Tensor = out.to(target_device)
         return result
 
