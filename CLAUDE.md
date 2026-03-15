@@ -159,6 +159,21 @@ Each of the 6 Prefect flows runs in its own Docker container:
 | **staging** | Docker Compose | Local GPU in container | Integration testing |
 | **prod** | Docker + SkyPilot | Cloud spot / on-prem K8s | Full pipeline |
 
+### Cloud GPU Strategy
+
+| Provider | Role | GPU | Spot $/hr | Docker | Region |
+|----------|------|-----|-----------|--------|--------|
+| **RunPod** | Dev/prototyping | RTX 4090 (24 GB) | $0.44-0.69 | Container-native (no Docker-in-Docker) | US/EU |
+| **GCP** | Staging/prod | T4/L4/A100 | $0.14-0.82 | VM + Docker image_id | europe-north1 (Finland) |
+| **Lambda Labs** | Rejected | A10/A100 | $0.50-1.10 | VM + Docker | No EU availability |
+| **UpCloud** | MLflow server | CPU VPS | Fixed €5/mo | N/A | fi-hel1 (Helsinki) |
+
+**Decision tree**: RunPod for quick experiments (cheapest, instant provisioning).
+GCP for production runs (same-region infra, spot recovery, Pulumi IaC).
+
+**Local hardware**: RTX 2070 Super (8 GB VRAM) — dev only. Fits DynUNet + SAM3 Vanilla.
+SAM3 Hybrid/TopoLoRA and VesselFM require cloud GPU (≥16 GB).
+
 ### Zero Hardcoding of Cloud/GPU Config (Non-Negotiable)
 This is an **open-source academic repo** used by heterogeneous research labs. NEVER
 hardcode cloud providers, GPU types, instance counts, regions, or Docker registries.
