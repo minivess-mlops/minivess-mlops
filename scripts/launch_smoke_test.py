@@ -1,15 +1,19 @@
 """Launch GPU smoke test on cloud GPU via SkyPilot Python API.
 
 Handles private GHCR registry authentication that the CLI YAML cannot.
-Supports Lambda Labs (VM-based, Docker works natively) and RunPod (container-based).
+Supports Lambda Labs, RunPod, and GCP cloud providers.
 
 Multi-region rotation (Lambda): automatically tries all 17 Lambda regions,
 starting from unpopular EU/Asia regions where capacity is more likely available.
 3 retries per region before moving to the next. Zero manual work required.
 
+GCP: Uses GAR (same-region as GCS/Cloud SQL/MLflow in europe-north1).
+No GHCR auth needed — GAR image is public.
+
 Usage:
     uv run python scripts/launch_smoke_test.py --model sam3_vanilla --cloud lambda
     uv run python scripts/launch_smoke_test.py --model sam3_vanilla --cloud runpod
+    uv run python scripts/launch_smoke_test.py --model sam3_vanilla --cloud gcp
     uv run python scripts/launch_smoke_test.py --model sam3_vanilla --cloud lambda --spot
 
 See: docs/runpod-vs-lambda-vs-rest-for-skypilot-with-docker.md
@@ -175,8 +179,8 @@ def main() -> int:
     parser.add_argument(
         "--cloud",
         default="lambda",
-        choices=["lambda", "runpod"],
-        help="Cloud provider (default: lambda — VM-based, Docker works natively)",
+        choices=["lambda", "runpod", "gcp"],
+        help="Cloud provider (default: lambda). GCP uses GAR image + spot T4/L4.",
     )
     parser.add_argument(
         "--spot", action="store_true", help="Use spot instances (cheaper)"
@@ -203,13 +207,18 @@ def main() -> int:
 
     _load_env()
 
-    # Validate required env vars
+    import sky
+
+    # GCP uses GAR (public, no GHCR auth needed)
+    if args.cloud == "gcp":
+        return _launch_gcp(args)
+
+    # GHCR-based clouds (Lambda, RunPod) need GitHub token
     github_token = os.environ.get("GITHUB_TOKEN")
     if not github_token:
         print("ERROR: GITHUB_TOKEN not set in .env (needed for GHCR pull)")
         return 1
 
-    import sky
     from sky.provision.docker_utils import DockerLoginConfig
 
     # Load the cloud-specific task YAML
@@ -254,6 +263,47 @@ def main() -> int:
     )
     print(f"Cluster launched. Request ID: {request_id}")
     print("Monitor: uv run sky logs minivess-smoke-test")
+    return 0
+
+
+def _launch_gcp(args) -> int:
+    """Launch smoke test on GCP spot instance.
+
+    GCP uses GAR (public Docker image in same region as Cloud SQL/GCS/MLflow).
+    No GHCR auth needed. Uses smoke_test_gcp.yaml directly.
+    """
+    import sky
+
+    yaml_path = str(_ROOT / "deployment" / "skypilot" / "smoke_test_gcp.yaml")
+    task = sky.Task.from_yaml(yaml_path)
+
+    # Load and resolve env vars (GCP MLflow uses MLFLOW_GCP_URI, not MLFLOW_CLOUD_URI)
+    env_vars = _load_env_vars()
+    gcp_uri = env_vars.get("MLFLOW_GCP_URI", os.environ.get("MLFLOW_GCP_URI", ""))
+    if gcp_uri:
+        env_vars["MLFLOW_TRACKING_URI"] = gcp_uri
+    env_vars["MODEL_FAMILY"] = args.model
+    task.update_envs(env_vars)
+
+    # GCP spot is always enabled in the YAML, but respect --spot flag
+    new_resources = set()
+    for r in task.resources:
+        new_r = r.copy(use_spot=True)
+        new_resources.add(new_r)
+    task.set_resources(new_resources)
+
+    print(f"=== Launching smoke test: {args.model} (GCP spot, europe-north1) ===")
+    print(f"MLflow: {gcp_uri or '(not set — check MLFLOW_GCP_URI in .env)'}")
+    print("Docker: GAR europe-north1 (public, no auth)")
+
+    request_id = sky.launch(
+        task,
+        cluster_name="minivess-gcp-smoke",
+        idle_minutes_to_autostop=5,
+        down=True,
+    )
+    print(f"Cluster launched. Request ID: {request_id}")
+    print("Monitor: uv run sky logs minivess-gcp-smoke")
     return 0
 
 
@@ -374,8 +424,8 @@ def _launch_lambda_multi_region(
     print(
         "  1. Run again later: uv run python scripts/launch_smoke_test.py --cloud lambda"
     )
-    print("  2. Use RunPod (no Docker): --cloud runpod")
-    print("  3. Set up Vast.ai: sky check vast")
+    print("  2. Use GCP (T4/L4 spot, same-region infra): --cloud gcp")
+    print("  3. Use RunPod (container-based): --cloud runpod")
     return 1
 
 
