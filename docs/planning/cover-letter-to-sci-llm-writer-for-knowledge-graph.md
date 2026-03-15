@@ -1,5 +1,5 @@
 ---
-title: "Cover Letter — ARBOR Manuscript Context for sci-llm-writer"
+title: "Cover Letter — NEUROVEX Manuscript Context for sci-llm-writer"
 purpose: "Zero-context session re-engagement brief for sci-llm-writer when starting manuscript writing from scratch"
 source_repo: /home/petteri/Dropbox/github-personal/minivess-mlops
 target_repo: /home/petteri/Dropbox/github-personal/sci-llm-writer
@@ -10,7 +10,7 @@ kg_commit: 9376e9f
 status: living_document  # update after GPU runs, after Mamba adapter, after Level 4 closure
 ---
 
-# ARBOR: Manuscript Context Brief for sci-llm-writer
+# NEUROVEX: Manuscript Context Brief for sci-llm-writer
 
 This document is the **single context handoff** from `minivess-mlops` to `sci-llm-writer`.
 Open a new sci-llm-writer session, paste or reference this file, and the LLM writer has
@@ -33,8 +33,8 @@ Source (verbatim user prompt, `docs/planning/repo-to-manuscript-prompt.md`):
 - ✅ "The platform enables comparison of DynUNet, Mamba, SAM3, VesselFM"
 - ✅ "cbdice_cldice yields +8.9% clDice — informing the platform's default loss selection"
 - ✅ "MambaVesselNet (Chen et al. 2024) demonstrates Mamba is viable for cerebrovasculature,
-  motivating inclusion of the SSM family in ARBOR's generalizability demonstration"
-- ❌ "ARBOR surpasses / outperforms / beats MambaVesselNet or any prior method"
+  motivating inclusion of the SSM family in NEUROVEX's generalizability demonstration"
+- ❌ "NEUROVEX surpasses / outperforms / beats MambaVesselNet or any prior method"
 - ❌ "We achieve state-of-the-art clDice/DSC on MiniVess"
 - ❌ Performance predictions about which model will win R3b/R3c
 
@@ -68,7 +68,7 @@ The models are demonstration vehicles, not competitors. The platform is the hero
 
 ### What it IS
 
-**ARBOR** (Agentic Reproducible Biomedical Operations Research) is a **platform paper**.
+**NEUROVEX** (NEURo-Vascular EXperiment operations platform) is a **platform paper**.
 The central contribution is a fully reproducible, cloud-agnostic MLOps platform for
 3D biomedical segmentation research that achieves **MLOps Maturity Level 4** (Microsoft
 definition: automated data pipeline, production metrics trigger retraining, CI/CD manages
@@ -79,11 +79,11 @@ as a MONAI ecosystem extension — it does not fork MONAI, it extends it.
 segmentation papers to focus on science, not infrastructure. By proving the platform works
 (reproducibility proof, multi-model comparison, deployment pipeline), we give researchers
 a scaffold that currently requires significant bespoke engineering per new project —
-each new dataset or model demands infrastructure work that ARBOR reduces to YAML configuration.
+each new dataset or model demands infrastructure work that NEUROVEX reduces to YAML configuration.
 [VERIFY: if submitting to Nature Protocols, quantify the engineering burden with a citation
 or a DevEx benchmark (R2) before using a specific time estimate like "months".]
 
-**Primary claim**: Any researcher can take ARBOR, swap in their YAML config (dataset +
+**Primary claim**: Any researcher can take NEUROVEX, swap in their YAML config (dataset +
 model), and run the full MLOps pipeline — training, evaluation, deployment, drift
 detection, auto-retraining — without writing infrastructure code.
 
@@ -105,7 +105,7 @@ detection, auto-retraining — without writing infrastructure code.
 ### The Central Narrative for Nature Protocols / Nature Methods
 
 > "The reproducibility crisis in biomedical ML is not a data problem or an algorithm
-> problem — it is an infrastructure problem. ARBOR is the infrastructure solution:
+> problem — it is an infrastructure problem. NEUROVEX is the infrastructure solution:
 > a fully automated, cloud-agnostic, model-agnostic MLOps platform that transforms
 > experiment definition from a programming task into a YAML configuration task.
 > We validate the platform on 3D vascular segmentation using four diverse model families
@@ -124,17 +124,17 @@ exactly what is stated here.
 
 ### What exists and what it lacks
 
-| System / Paper | What it provides | What it lacks (= the gap ARBOR fills) |
+| System / Paper | What it provides | What it lacks (= the gap NEUROVEX fills) |
 |----------------|-----------------|---------------------------------------|
 | **nnU-Net** (Isensee et al. 2021, *Nature Methods*) | Self-configuring 3D segmentation architecture; state-of-the-art DSC across benchmarks | No MLOps scaffolding; no experiment tracking; no cloud execution; no drift detection; no deployment pipeline; reproducibility = re-running the same script manually |
 | **MONAI** (Cardoso et al. 2022) | Excellent PyTorch-based library for medical image transforms, augmentations, models | Zero workflow orchestration; zero reproducibility tooling; zero multi-cloud support; users must build their own training loops from scratch every project |
 | **CyclOps** (Krishnan et al. 2022) | MLOps platform for healthcare AI with recurring validation | Designed for clinical classification, not preclinical 3D segmentation; no multi-cloud; no model-agnostic adapter pattern; no spec-driven development |
 | **Cheimarios (2025)** | MLOps principles + NIST risk management for computational physics | Containerization and model registries only; no multi-cloud; no biomedical imaging; no spec-driven development |
-| **DDeep3M** ([Wu et al. 2020, *J Neurosci Methods*](https://doi.org/10.1016/j.jneumeth.2020.108804)) | Docker-based 3D biomedical segmentation; lowers barrier to deep learning for biomedical researchers | No experiment tracking; no HPO; no multi-cloud; no model-agnostic adapter pattern; no drift detection; single-architecture, single-user tool. The Docker idea was right — ARBOR extends it to full MLOps. |
+| **DDeep3M** ([Wu et al. 2020, *J Neurosci Methods*](https://doi.org/10.1016/j.jneumeth.2020.108804)) | Docker-based 3D biomedical segmentation; lowers barrier to deep learning for biomedical researchers | No experiment tracking; no HPO; no multi-cloud; no model-agnostic adapter pattern; no drift detection; single-architecture, single-user tool. The Docker idea was right — NEUROVEX extends it to full MLOps. |
 | **NeuroCAAS** ([Abe et al. 2022, *Neuron*](https://doi.org/10.1016/j.neuron.2022.06.018)) | Cloud compute platform for neuroscience (AWS-based); automated job submission for labs without HPC access | No model training orchestration; no MONAI ecosystem; no reproducibility tooling; cloud selection is preconfigured per-tool (not model-agnostic). Demonstrates demand for cloud compute in academic bio. |
 | **Current lab practice** | Bespoke scripts + Jupyter notebooks per lab | No standard; no replication across labs; bespoke engineering per new model/dataset [VERIFY: time estimate for bespoke engineering; do not state a specific number without a citation]; cannot be reproduced by external collaborators |
 
-### The specific gap ARBOR fills
+### The specific gap NEUROVEX fills
 
 > No published platform combines: (1) model-agnostic adapter pattern for 3D biomedical
 > segmentation, (2) full 5-flow Docker-per-flow MLOps pipeline with MLflow as the sole
@@ -145,7 +145,7 @@ exactly what is stated here.
 
 ### Target researcher persona (for Nature Protocols framing)
 
-A typical ARBOR user is a computational neuroscience or biomedical imaging PhD lab with:
+A typical NEUROVEX user is a computational neuroscience or biomedical imaging PhD lab with:
 - 2–5 members, one first author who also maintains infrastructure
 - One GPU workstation (8–24 GB VRAM) + occasional cloud access
 - Scientific expertise in the imaging domain, zero ML engineering staff
@@ -178,9 +178,9 @@ the LSG contribution — it is appendix-grade.
 
 > We make three contributions:
 >
-> **(1) ARBOR platform (keystone):** A fully automated, model-agnostic MLOps platform for
+> **(1) NEUROVEX platform (keystone):** A fully automated, model-agnostic MLOps platform for
 > 3D biomedical segmentation targeting MLOps Maturity Level 4 in a single-researcher
-> academic setting. Any lab can adopt ARBOR by editing 1–2 YAML files (experiment config +
+> academic setting. Any lab can adopt NEUROVEX by editing 1–2 YAML files (experiment config +
 > optional lab override) — no infrastructure code required. Validated end-to-end:
 > 73/73 artifact checks pass, 35+ artifacts produced in 8.26 seconds post-training.
 >
@@ -210,7 +210,7 @@ Write the introduction in this order. Target: 900–1200 words for Nature Protoc
    Anchor with reproducibility crisis citations. Introduce the platform solution concept.
 2. **State of practice and its gap** (~200 words): nnU-Net + MONAI exist but lack MLOps.
    Use §1.5 prior art table. Conclude: "No existing platform provides [the gap]."
-3. **ARBOR overview** (~150 words): What ARBOR is. Use the central narrative verbatim seed
+3. **NEUROVEX overview** (~150 words): What NEUROVEX is. Use the central narrative verbatim seed
    from §1 ("The reproducibility crisis in biomedical ML is not a data problem...").
    Present the 5-flow architecture and Docker-per-flow isolation as one sentence each.
 4. **Model families + dataset** (~150 words): Four model families on MiniVess. Stress
@@ -222,7 +222,7 @@ Write the introduction in this order. Target: 900–1200 words for Nature Protoc
 **VERBATIM SEED — preserve this paragraph exactly in the introduction:**
 
 > "The reproducibility crisis in biomedical ML is not a data problem or an algorithm
-> problem — it is an infrastructure problem. ARBOR is the infrastructure solution:
+> problem — it is an infrastructure problem. NEUROVEX is the infrastructure solution:
 > a fully automated, cloud-agnostic, model-agnostic MLOps platform that transforms
 > experiment definition from a programming task into a YAML configuration task.
 > We validate the platform on 3D vascular segmentation using four diverse model families
@@ -240,8 +240,8 @@ Write the introduction in this order. Target: 900–1200 words for Nature Protoc
 **Decision**: Hedge until R3b (SAM3) + R3c (VesselFM) + Mamba GPU runs are complete.
 The framing may shift based on those results.
 
-**Working title (draft)**: *ARBOR: An Agentic Reproducible Biomedical Operations Research
-Platform for Scalable 3D Segmentation Targeting MLOps Maturity Level 4*
+**Working title (draft)**: *NEUROVEX: A Reproducible MLOps Platform for Scalable 3D
+Vascular Segmentation Targeting MLOps Maturity Level 4*
 
 ⚠️ **Title note**: Do NOT say "achieving Level 4" in the title until the Evidently →
 Prefect auto-retraining loop is verified end-to-end (see §4). Use "targeting" or
@@ -336,7 +336,7 @@ the platform's model-agnostic architecture. One YAML profile + one ModelAdapter 
 - **Paper framing**: Limitation L1 — the leakage was identified through careful human
   literature review of Wittmann et al. (2024), NOT by an automated platform mechanism.
   ⚠️ Do NOT write "the platform detected the leakage" — that would be a false claim.
-  Correct framing: "We identified data leakage through literature review; ARBOR's
+  Correct framing: "We identified data leakage through literature review; NEUROVEX's
   config-driven evaluation design makes it trivial to re-route evaluation to
   non-contaminated datasets — demonstrating platform flexibility in the face of
   real-world evaluation pitfalls."
@@ -356,7 +356,7 @@ Reference: [Microsoft Azure MLOps Maturity Model — Level 4](https://learn.micr
 being written now so co-authors can understand the vision and review the methods while
 the final Level 4 components are being implemented and verified.
 
-| Level 4 Component | Status in ARBOR | Evidence |
+| Level 4 Component | Status in NEUROVEX | Evidence |
 |-------------------|-----------------|---------|
 | Data pipeline automatically gathers data | ✅ DONE | Prefect Flow 1 (data engineering) + DVC + whylogs profiling |
 | Experiment results tracked | ✅ DONE | MLflow + DuckDB analytics, 73/73 artifact checks pass |
@@ -369,7 +369,7 @@ the final Level 4 components are being implemented and verified.
 | **CI/CD pipeline manages releases** | ⚠️ ADAPTED | GitHub Actions explicitly disabled (credits cost); equivalent: pre-commit + `scripts/pr_readiness_check.sh`. Document in paper as deliberate DevEx choice. |
 | Each model release includes unit and integration tests | ✅ DONE | ModelAdapter ABC testing + integration test tier |
 
-**Current honest status**: ARBOR is at Level 3.5 — fully automated training, evaluation,
+**Current honest status**: NEUROVEX is at Level 3.5 — fully automated training, evaluation,
 and deployment; drift detection wired but auto-retraining loop not yet verified end-to-end.
 Level 4 closure requires: Evidently → Prefect trigger loop tested with real drift scenario.
 
@@ -382,13 +382,13 @@ Source: `knowledge-graph/manuscript/claims.yaml`
 
 | ID | Claim | Status |
 |----|-------|--------|
-| C1 | ARBOR = complete reproducible MLOps pipeline, YAML-only changes for new dataset/model | **supported** |
+| C1 | NEUROVEX = complete reproducible MLOps pipeline, YAML-only changes for new dataset/model | **supported** |
 | C2 | cbdice_cldice achieves clDice=0.906±0.008 with only −5.3% DSC penalty vs dice+CE | **supported** |
 | C3 | 5-flow architecture separates concerns into Docker containers with MLflow as only inter-flow contract | **supported** |
 | C4 | ModelAdapter ABC: new model integration = 3 abstract methods + YAML, no infra changes | **supported** |
 | C5 | SAM3 can be adapted for 3D volumetric segmentation via slice-by-slice inference | **pending GPU runs** |
 | C6 | Single-command cloud execution (sky jobs launch) reproduces identical training env | **supported** |
-| C7 | ARBOR is first MLOps platform for multiphoton biomed segmentation with probabilistic KG as machine-queryable spec | **literature_validated** (2026-03-15 scan, 15 papers) |
+| C7 | NEUROVEX is first MLOps platform for multiphoton biomed segmentation with probabilistic KG as machine-queryable spec | **literature_validated** (2026-03-15 scan, 15 papers) |
 | C8 | Zero hardcoded values — any lab overrides via 1-2 YAML files | **supported** |
 | C9 | VesselFM evaluation on MiniVess = data leakage; fair eval requires DeepVess/TubeNet | **documented_limitation** |
 | C10 | Probabilistic KG (52 nodes with Bayesian priors) enables structured belief propagation | **partial** (Phase 1 only) |
@@ -448,7 +448,7 @@ Source: `knowledge-graph/manuscript/results.yaml`
 - Blocked by: VesselFM GPU runs on DeepVess/TubeNet (NOT MiniVess — data leakage)
 - **⚠️ Framing**: The data leakage was identified through human literature review of
   [Wittmann et al. (2024). "VesselFM."](https://arxiv.org/abs/2411.17386) — NOT by the platform.
-  Correct framing: "ARBOR's config-driven evaluation design makes re-routing to non-contaminated
+  Correct framing: "NEUROVEX's config-driven evaluation design makes re-routing to non-contaminated
   datasets trivial (one YAML key change), demonstrating platform flexibility in the face of
   real-world evaluation pitfalls." Do NOT write "the platform detected the leakage."
 
@@ -561,7 +561,7 @@ outputs/
 
 ## § 10 — sci-llm-writer Session Activation Checklist
 
-When opening a new session in `sci-llm-writer` for the ARBOR manuscript:
+When opening a new session in `sci-llm-writer` for the NEUROVEX manuscript:
 
 ```
 Manuscript:     sci-llm-writer/manuscripts/vasculature-mlops/
@@ -780,16 +780,16 @@ iteration on `results-03-models.tex`** (mode: `refinement`, quality target: MINO
 
 1. **First full MLOps pipeline for 2PM vascular segmentation.**
    [DDeep3M (Wu et al. 2020)](https://doi.org/10.1016/j.jneumeth.2020.108804) proved Docker
-   lowers the barrier for biomedical researchers. ARBOR extends that vision to a complete
+   lowers the barrier for biomedical researchers. NEUROVEX extends that vision to a complete
    5-flow orchestrated pipeline with experiment tracking, drift detection, champion tagging,
    and one-command multi-cloud execution — none of which DDeep3M or NeuroCAAS provide.
-   *Cite hook for co-authors*: "The Docker approach was right in 2020; ARBOR is what it would
+   *Cite hook for co-authors*: "The Docker approach was right in 2020; NEUROVEX is what it would
    look like if you added five years of MLOps practice to that foundation."
 
 2. **First reproducible multi-architecture benchmark on 2PM vascular data.**
    [MambaVesselNet (Chen et al. 2024, ACM MMasia)](https://doi.org/10.1145/3696409.3700231)
    demonstrated Mamba for 3D cerebrovascular on TOF-MRA — no 2PM microscopy, no
-   reproducible pipeline. ARBOR will be the first platform to enable a fully reproducible,
+   reproducible pipeline. NEUROVEX will be the first platform to enable a fully reproducible,
    multi-cloud comparison of CNN (DynUNet) vs SSM (Mamba) vs Foundation Model (SAM3)
    on 2PM vascular data — the platform capability is the contribution, not which model wins.
    *Why this excites co-authors*: The long-range connectivity question is scientifically
@@ -809,7 +809,7 @@ iteration on `results-03-models.tex`** (mode: `refinement`, quality target: MINO
    specification.** The 52-node Bayesian decision graph + CLAUDE.md behavioral constraints +
    metalearning failure analyses constitute a "Living Specification Graph" —
    [chatlatanagulchai et al. (2025)](https://arxiv.org/abs/2511.12884) found only 14.5%
-   of 2,303 AGENTS.md files contain safety/performance guidelines. ARBOR's multi-layer
+   of 2,303 AGENTS.md files contain safety/performance guidelines. NEUROVEX's multi-layer
    KG is a qualitative advance over current practice, with a structural characterization
    to match.
 
@@ -851,11 +851,11 @@ iteration on `results-03-models.tex`** (mode: `refinement`, quality target: MINO
 **Hook D: VesselFM pre-training leakage as a cautionary tale with a platform solution**
 - [Wittmann et al. (2024), VesselFM](https://arxiv.org/abs/2411.17386) pre-trained on MiniVess.
 - If a researcher naively evaluates VesselFM on MiniVess, they get inflated numbers.
-- ARBOR's config-driven evaluation makes routing to non-contaminated datasets
+- NEUROVEX's config-driven evaluation makes routing to non-contaminated datasets
   (DeepVess, TubeNet) a single YAML key change — demonstrating the platform's role in
   preventing silent evaluation errors that would otherwise require infrastructure rewriting.
 - *Cautionary tale framing*: "the data leakage was found through literature review, not
-  automation — but ARBOR makes the fix effortless once identified."
+  automation — but NEUROVEX makes the fix effortless once identified."
 
 ---
 
@@ -871,7 +871,7 @@ iteration on `results-03-models.tex`** (mode: `refinement`, quality target: MINO
 2. **No bare time estimates without a source.**
    The phrase "months of bespoke engineering" has been softened to "significant bespoke
    engineering" with a [VERIFY] marker in §1. Before submission, either cite a study
-   that quantifies this, or replace with the ARBOR R2 DevEx benchmark result.
+   that quantifies this, or replace with the NEUROVEX R2 DevEx benchmark result.
 
 3. **Every number has a source.**
    - 73/73 checks → `outputs/pipeline/trigger_chain_results.json` ✅
@@ -893,7 +893,7 @@ iteration on `results-03-models.tex`** (mode: `refinement`, quality target: MINO
 
 6. **The paper's contribution is the PLATFORM, not the models.**
    Every result section must lead with platform capability, not model performance.
-   Template: "ARBOR enables [X] — demonstrated by [model result] which required
+   Template: "NEUROVEX enables [X] — demonstrated by [model result] which required
    [infrastructure description] that is now automated."
 
 ---

@@ -267,10 +267,14 @@ def main() -> int:
 
 
 def _launch_gcp(args) -> int:
-    """Launch smoke test on GCP spot instance.
+    """Launch smoke test on GCP spot instance using managed jobs.
+
+    Uses sky.jobs.launch() (managed jobs) instead of sky.launch() to get
+    automatic spot recovery. sky.launch() with use_spot=True fails permanently
+    on first preemption — managed jobs re-provision automatically.
 
     GCP uses GAR (public Docker image in same region as Cloud SQL/GCS/MLflow).
-    No GHCR auth needed. Uses smoke_test_gcp.yaml directly.
+    No GHCR auth needed.
     """
     import sky
 
@@ -285,30 +289,29 @@ def _launch_gcp(args) -> int:
     env_vars["MODEL_FAMILY"] = args.model
     task.update_envs(env_vars)
 
-    # GCP spot is always enabled in the YAML, but respect --spot flag
+    # Managed jobs always use spot — auto-recovery handles preemptions
     new_resources = set()
     for r in task.resources:
         new_r = r.copy(use_spot=True)
         new_resources.add(new_r)
     task.set_resources(new_resources)
 
-    # Unique cluster name per model — prevents job stomping when running
-    # multiple models sequentially (each model gets its own GCP VM).
-    cluster_name = f"minivess-gcp-{args.model.replace('_', '-')}"
+    # Unique job name per model — managed jobs use job names, not cluster names
+    job_name = f"minivess-gcp-{args.model.replace('_', '-')}"
 
-    print(f"=== Launching smoke test: {args.model} (GCP spot) ===")
-    print(f"Cluster: {cluster_name}")
+    print(f"=== Launching smoke test: {args.model} (GCP managed spot) ===")
+    print(f"Job name: {job_name}")
     print(f"MLflow: {gcp_uri or '(not set — check MLFLOW_GCP_URI in .env)'}")
     print("Docker: GAR (public, no auth — SkyPilot picks cheapest region)")
+    print("Mode: Managed job (auto-recovery from spot preemptions)")
 
-    request_id = sky.launch(
+    request_id = sky.jobs.launch(
         task,
-        cluster_name=cluster_name,
-        idle_minutes_to_autostop=5,
-        down=True,
+        name=job_name,
     )
-    print(f"Cluster launched. Request ID: {request_id}")
-    print(f"Monitor: uv run sky logs {cluster_name}")
+    print(f"Managed job submitted. Request ID: {request_id}")
+    print(f"Monitor: uv run sky jobs logs {job_name}")
+    print("Status:  uv run sky jobs queue")
     return 0
 
 
