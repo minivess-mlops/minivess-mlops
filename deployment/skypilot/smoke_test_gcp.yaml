@@ -128,7 +128,14 @@ run: |
     exit 1
   fi
 
-  export EXPERIMENT="smoke_${MODEL_FAMILY}"
+  # Use cloud-specific experiment configs when available (validation enabled,
+  # AMP policy correct). Falls back to standard smoke config otherwise.
+  CLOUD_CONFIG="configs/experiment/smoke_${MODEL_FAMILY}_cloud.yaml"
+  if [ -f "${CLOUD_CONFIG}" ]; then
+    export EXPERIMENT="smoke_${MODEL_FAMILY}_cloud"
+  else
+    export EXPERIMENT="smoke_${MODEL_FAMILY}"
+  fi
   export EXPERIMENT_UUID=$(python -c "import uuid; print(uuid.uuid4().hex[:8])")
   export HYDRA_OVERRIDES="experiment_name=smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
 
