@@ -24,6 +24,11 @@ debug: true
 # Validation ENABLED — cloud GPUs have sufficient VRAM
 val_interval: 1
 
+# AMP disabled for diagnostic run: MONAI maintainers confirm "AMP does not
+# support very well with 3D operations" (Project-MONAI/MONAI#4243).
+# First verify val_loss is finite WITHOUT AMP, then re-enable to isolate.
+mixed_precision: false
+
 # Data subsetting (belt-and-suspenders with 4-vol split file, RC10)
 max_train_volumes: 2
 max_val_volumes: 2

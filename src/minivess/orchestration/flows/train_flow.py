@@ -338,26 +338,32 @@ def train_one_fold_task(
 
     # Build TrainingConfig
     # Validation interval strategy:
-    # sam3_hybrid: 6.65 GiB model weights → <1 GiB VRAM free for inference.
-    #   SAM3 ViT-32L ALWAYS resizes any patch to 1008×1008, so every inference
-    #   forward pass needs ~5 GiB → OOM on 8 GB GPU. Skip validation in debug mode
-    #   by setting val_interval > training max_epochs (which is 1 in debug mode).
-    # sam3_vanilla: 2.9 GiB model → val_roi=(512,512,3) fits. Validate every 10
-    #   epochs in production (slow inference); every epoch in debug.
-    # Other models: validate every epoch always.
-    if _is_sam3_hybrid and debug:
+    # 1. If config explicitly sets val_interval, respect it (cloud smoke tests).
+    # 2. Otherwise, apply model-based heuristics:
+    #    sam3_hybrid debug: skip validation (OOM on 8 GB GPU).
+    #    sam3 production: validate every 10 epochs (slow inference).
+    #    Other models: validate every epoch.
+    _config_val_interval = config.get("val_interval")
+    if _config_val_interval is not None:
+        val_interval = int(_config_val_interval)
+    elif _is_sam3_hybrid and debug:
         val_interval = max_epochs + 1  # never validate: OOM on 8 GB GPU
     elif _is_sam3 and not debug:
         val_interval = 10  # sparse validation in production (slow inference)
     else:
         val_interval = 1
+    # mixed_precision: respect config if set, default True.
+    # MONAI maintainers confirm AMP + 3D ops can produce NaN
+    # (Project-MONAI/MONAI#4243) — allow disabling per experiment.
+    _mixed_precision = config.get("mixed_precision", True)
     training_config = TrainingConfig(
-        max_epochs=1 if debug else max_epochs,
+        max_epochs=max_epochs,
         num_folds=num_folds,
         batch_size=batch_size,
         warmup_epochs=0 if debug else 5,
         early_stopping_patience=1 if debug else 20,
         val_interval=val_interval,
+        mixed_precision=bool(_mixed_precision),
     )
 
     # Extract volume dicts from the fold split (FoldSplit dataclass or dict)

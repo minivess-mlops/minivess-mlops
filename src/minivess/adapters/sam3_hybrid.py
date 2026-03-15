@@ -202,11 +202,30 @@ class Sam3HybridAdapter(ModelAdapter):
         # Cast to FP32 before passing to trainable FP32 modules (axial_proj, fusion).
         sam_features = sam_features.float()
 
+        # NaN diagnostic: check SAM features after FP16→FP32 cast
+        if not torch.isfinite(sam_features).all():
+            logger.warning(
+                "NaN/Inf in SAM features after FP32 cast: shape=%s",
+                tuple(sam_features.shape),
+            )
+            sam_features = torch.nan_to_num(
+                sam_features, nan=0.0, posinf=0.0, neginf=0.0
+            )
+
         # Axial smoothing of stacked 2D features
         sam_features = self.axial_proj(sam_features)
 
         # DynUNet forward (full 3D, trainable)
         logits: Tensor = self.dynunet(images)
+
+        # NaN diagnostic: check DynUNet output separately
+        if not torch.isfinite(logits).all():
+            logger.warning(
+                "NaN/Inf in DynUNet logits: shape=%s, nan=%d, inf=%d",
+                tuple(logits.shape),
+                torch.isnan(logits).sum().item(),
+                torch.isinf(logits).sum().item(),
+            )
 
         # Fuse SAM features at the output level
         # Resize SAM features to match logits spatial dims
@@ -231,6 +250,16 @@ class Sam3HybridAdapter(ModelAdapter):
 
         gate = torch.sigmoid(self.fusion.gate_alpha)
         logits = logits + gate * sam_projected
+
+        # Final NaN guard on fused logits
+        if not torch.isfinite(logits).all():
+            logger.warning(
+                "NaN/Inf in fused logits (after gate): nan=%d, inf=%d / %d total",
+                torch.isnan(logits).sum().item(),
+                torch.isinf(logits).sum().item(),
+                logits.numel(),
+            )
+            logits = torch.nan_to_num(logits, nan=0.0, posinf=0.0, neginf=0.0)
 
         return self._build_output(logits, "sam3_hybrid")
 

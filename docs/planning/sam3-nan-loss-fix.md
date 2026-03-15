@@ -8,9 +8,24 @@
 ## Symptom
 
 sam3_hybrid training on RunPod RTX 4090 produces valid training metrics
-(`loss=0.795`, `dice=0.377`) but **val_loss=NaN** on every validation epoch.
-This persists even with `val_interval=1` (every epoch), disproving hypothesis H1
-(sentinel skip).
+(`loss=0.661`, `dice=0.471`) but **val_loss=NaN** logged to MLflow.
+
+### Critical Discovery (2026-03-15, Ralph Loop Run 2)
+
+The val_loss=NaN was a **sentinel value, not an actual NaN from validation**:
+
+1. `debug: true` in config → `max_epochs=1` (code forced override, ignoring config's `max_epochs: 5`)
+2. `sam3_hybrid + debug` → `val_interval = max_epochs + 1 = 6` (skip validation sentinel)
+3. Since `val_interval(6) > max_epochs(1)` → `_skip_all_val = True`
+4. `val_result = EpochResult(loss=float("nan"))` — **default placeholder, not real NaN**
+5. Placeholder logged to MLflow as `val_loss: nan`
+
+**We never actually ran validation on sam3_hybrid** — not locally (OOM on 8 GB GPU),
+not on cloud (debug flag accidentally skipped it). The NaN was a phantom from the
+skip sentinel, not from sliding_window_inference or AMP.
+
+**Fix applied**: train_flow.py now reads `val_interval` and `max_epochs` from config
+when explicitly set, only falling back to model-based heuristics when not specified.
 
 ```
 # RTX 4090 run (T5.1, 2026-03-15)
@@ -62,8 +77,9 @@ sliding window inference with different input distributions than training patche
 
 | ID | Hypothesis | Likelihood | Evidence | Test | Fix Complexity |
 |----|-----------|------------|----------|------|----------------|
-| H1 | val_interval sentinel skip | **REJECTED** | NaN persists with val_interval=1 on RTX 4090 | Tested T5.1 | N/A |
-| H2 | FP16 overflow in encoder during validation | **HIGH** | Encoder runs `.half()`, val uses larger ROI (512,512,3) vs train patch (32,32,3) | Add `torch.isnan` check on encoder output | Low |
+| H1 | val_interval sentinel skip | **CONFIRMED** | `debug: true` forced `max_epochs=1`, `val_interval=6` → `_skip_all_val=True` → sentinel NaN logged. Validation never ran. | Fixed: config overrides code heuristics | Done |
+| H2 | FP16 overflow in encoder during validation | MEDIUM | Encoder NaN guard did NOT fire on RTX 4090 run (encoder output was clean). Still possible with different input distributions. | Rerun with actual validation enabled | Low |
+| H2b | AMP autocast + 3D DynUNet NaN | **HIGH** | MONAI maintainers confirm "AMP does not support very well with 3D operations" ([MONAI#4243](https://github.com/Project-MONAI/MONAI/discussions/4243)). sam3_hybrid fuses DynUNet-3D output under AMP. | Test with `mixed_precision: false` first | Low |
 | H3 | Sliding window edge patches produce degenerate inputs | MEDIUM | `sliding_window_inference` can produce small edge patches with near-zero/constant values | Log patch stats before encoder | Low |
 | H4 | AMP autocast + FP16 encoder interaction | MEDIUM | Training uses `autocast()`, encoder is already FP16; double-casting? | Test with `autocast(enabled=False)` during val | Low |
 | H5 | Decoder NaN from FP16→FP32 cast of extreme values | MEDIUM | FP16 max = 65504; encoder features could exceed this for some patches | Clamp encoder output before FP32 cast | Low |
@@ -105,82 +121,162 @@ FP16 overflow (max 65504) → NaN features → NaN loss.
 
 The SAM3 ViT-32L encoder may not handle these degenerate inputs gracefully in FP16.
 
-## Proposed Fix Strategy
+## Proposed Fix Strategy (Updated 2026-03-15)
 
-### Phase 1: Diagnostic (T5.4-D1) — Isolate the NaN Source
+### Phase 0: Config Fix — DONE
 
-Add targeted NaN detection in the validation forward pass:
+**Problem**: `debug: true` forced `max_epochs=1` and skipped validation entirely.
+**Fix**: `train_flow.py` now reads `val_interval` and `max_epochs` from experiment config
+when explicitly set, only falling back to model-based heuristics otherwise. Also reads
+`mixed_precision` from config.
+
+### Phase 1: Diagnostic — NaN Guard Instrumentation (DONE)
+
+NaN detection added at three levels:
+1. `sam3_backbone.py:extract_features()` — NaN guard after encoder output
+2. `sam3_hybrid.py:forward()` — NaN guards after SAM features (FP16→FP32), DynUNet logits,
+   and fused logits (post-gate)
+3. `trainer.py:validate_epoch()` — NaN warning on non-finite avg_loss
+
+### Phase 2: AMP Isolation (Run 3, IN PROGRESS)
+
+**Test**: `mixed_precision: false` in `smoke_sam3_hybrid_cloud.yaml`.
+If val_loss is finite → AMP (H2b) is the root cause.
+If val_loss is still NaN → issue is elsewhere (fusion, loss, data).
+
+### Phase 3: Systematic Dtype Test Matrix
+
+If Phase 2 confirms AMP as the cause, run systematic dtype tests to pinpoint exactly
+which component fails under AMP:
+
+| Test | Encoder dtype | DynUNet dtype | AMP | Expected | Purpose |
+|------|---------------|---------------|-----|----------|---------|
+| T1 | FP16 (frozen) | FP32 | OFF | Finite | Baseline — no AMP |
+| T2 | FP16 (frozen) | FP32 | ON | NaN? | Current config — AMP interaction |
+| T3 | FP16 (frozen) | FP16 | OFF | NaN? | Is FP16 DynUNet the issue? |
+| T4 | BF16 (frozen) | FP32 | OFF | Finite? | BF16 encoder (no overflow) |
+| T5 | BF16 (frozen) | FP32 | ON | Finite? | BF16 encoder + AMP DynUNet |
+| T6 | FP16 (frozen) | FP32 | ON (val OFF) | Finite? | AMP for train only |
+| T7 | FP32 (frozen) | FP32 | OFF | Finite | Full FP32 (gold standard) |
+
+**Key dtype questions**:
+- **FP16 encoder → autocast context**: Does autocast try to cast FP16 inputs to FP16 again
+  (no-op) or does it interact with the trainable FP32 modules receiving the output?
+- **Instance norm in FP16**: DynUNet uses `norm_name="instance"`. Instance norm with
+  batch_size=1 has high variance-to-mean ratio which can overflow in FP16.
+- **BF16 vs FP16**: BF16 has same exponent range as FP32 (no overflow at 65504), but lower
+  mantissa precision. SAM3 encoder's LayerNorm/softmax may benefit from BF16 range.
+
+### Phase 4: Validation Pipeline Hardening (DONE)
 
 ```python
-# In Sam3Backbone.forward() — temporary diagnostic
-features = self.encoder(x.half())
-if torch.isnan(features).any():
-    nan_count = torch.isnan(features).sum().item()
-    total = features.numel()
-    logger.warning(
-        "NaN in SAM3 encoder output: %d/%d elements (%.1f%%)",
-        nan_count, total, 100 * nan_count / total,
-    )
+# trainer.py validate_epoch() — NaN guard
+if not math.isfinite(avg_loss):
+    logger.warning("Non-finite val_loss detected...")
 ```
 
-### Phase 2: Fix (T5.4-F1) — FP16 Output Guard
+### Phase 5: Structural Fixes (conditional on Phase 2-3 results)
 
-If H2 is confirmed, add a NaN-safe FP16→FP32 conversion:
+If AMP is confirmed as the root cause:
 
+**Option A: Disable AMP for validation only**
 ```python
-# sam3_backbone.py — production fix
-features = self.encoder(x.half())
-features = features.float()  # FP16 → FP32
-# Replace NaN with zero (safe for downstream; zero features = no activation)
-if torch.isnan(features).any():
-    features = torch.nan_to_num(features, nan=0.0)
-    logger.warning("NaN in SAM3 encoder output — replaced with zeros")
+# trainer.py — separate AMP policy for train vs val
+with autocast(device_type=..., enabled=self.config.mixed_precision and self.training):
 ```
 
-### Phase 3: Structural Fix (T5.4-F2) — FP16 Clamp Before Overflow
+**Option B: Disable AMP for sam3_hybrid entirely**
+```yaml
+# smoke_sam3_hybrid_cloud.yaml
+mixed_precision: false  # MONAI/PyTorch AMP + 3D known issue
+```
 
-Prevent NaN at the source by clamping FP16 values to safe range:
-
+**Option C: Switch frozen encoder to BF16** (if GPU supports it)
 ```python
-# sam3_backbone.py — structural fix
-x_fp16 = x.half()
-# FP16 safe range: [-65504, 65504]. Clamp to 99% to prevent overflow in LayerNorm/GELU.
-x_fp16 = x_fp16.clamp(-60000, 60000)
-features = self.encoder(x_fp16)
+# sam3_backbone.py — BF16 instead of FP16 for encoder
+if torch.cuda.is_bf16_supported():
+    x = x.to(torch.bfloat16)
+else:
+    x = x.half()
 ```
 
-### Phase 4: Validation Pipeline Hardening
+## Audit Trail: Run Log
 
-```python
-# trainer.py validation loop — add NaN guard
-val_loss = loss_fn(val_pred, val_target)
-if not torch.isfinite(val_loss):
-    logger.warning(
-        "Non-finite val_loss detected (epoch %d). "
-        "Logging NaN but continuing training.",
-        epoch,
-    )
-    # Log NaN explicitly — don't skip the metric
-    # This preserves the NaN signal in MLflow for debugging
-```
+| Run | Date | Config Changes | Result | Diagnosis |
+|-----|------|---------------|--------|-----------|
+| 1 | 2026-03-15 01:59 | Original (debug=true) | val_loss=nan, train_loss=0.661 | Sentinel NaN — validation never ran (H1 CONFIRMED) |
+| 2 | 2026-03-15 | H1 fix: respect config val_interval/max_epochs, AMP OFF | PENDING | Phase 2 — AMP isolation |
+| 3 | (planned) | AMP ON if Run 2 succeeds | (planned) | Phase 3 — confirm AMP as root cause |
+| 4 | (planned) | BF16 encoder if Run 3 fails | (planned) | Phase 3 — dtype isolation |
 
-## Decision: Which Fix First?
+## Decision: Current Fix Order
 
-**Recommended order**:
+1. **Phase 0 (config fix)** — DONE. Config values respected.
+2. **Phase 2 (AMP isolation)** — IN PROGRESS. Run with `mixed_precision: false`.
+3. **Phase 3 (dtype test matrix)** — if Phase 2 succeeds, systematically re-enable AMP
+   with different dtype configurations.
+4. **Phase 5 (structural fix)** — permanent fix based on Phase 2-3 findings.
 
-1. **Phase 1 (diagnostic)** — 30 min. Run sam3_hybrid with NaN logging on RunPod.
-   Confirms whether NaN originates in encoder (H2) or downstream (H6/H7).
+## AMP + 3D Operations: Community Evidence
 
-2. **Phase 2 (nan_to_num guard)** — 15 min. If H2 confirmed, add `nan_to_num` guard.
-   This is safe and non-invasive. Zero features produce zero decoder output, which
-   produces valid (if uninformative) loss values.
+### MONAI Community
 
-3. **Phase 4 (val pipeline hardening)** — 30 min. Even if Phase 2 fixes the immediate
-   NaN, the validation loop should handle non-finite losses gracefully (log NaN, don't
-   crash). Training should never be killed by a validation-only NaN.
+**[Project-MONAI/MONAI#4243](https://github.com/Project-MONAI/MONAI/discussions/4243)** — MONAI
+maintainer (nourmagde00 reply): *"AMP does not support very well with 3D operations. Sometimes
+turning on AMP would return NaN loss values, especially for SegResNet."* Recommended fix: disable
+AMP or switch architecture. This is directly relevant since sam3_hybrid uses DynUNet-3D under AMP.
 
-4. **Phase 3 (FP16 clamp)** — only if Phase 2 shows systematic overflow, not sporadic
-   edge patches. Clamping is more aggressive and could affect model quality.
+**[Project-MONAI/MONAI#2637](https://github.com/Project-MONAI/MONAI/discussions/2637)** — NaN
+traced to input data containing NaN after normalization of border crops: *"NaNs errors only
+triggered when amp was on"* but *"input already contained NaNs"* from *"normalization with a
+division by zero"* at volume borders. Fix: `SignalFillEmptyd` transform to cast NaN inputs to 0.
+Also: learning rate `1e-3` was too high — `1e-5` recommended. Redundant `Spacingd` + `Resized`
+caused double-resampling, increasing errors.
+
+**[Project-MONAI/tutorials#1637](https://github.com/Project-MONAI/tutorials/discussions/1637)** —
+Explains sliding window inference rationale but no NaN-specific content.
+
+### PyTorch Community
+
+**[PyTorch Discuss: "Loss is calculated as NaN when using AMP autocast"](https://discuss.pytorch.org/t/loss-is-calculated-as-nan-when-using-amp-autocast/186272)** —
+Binary segmentation U-Net with AMP: NaN loss at the first batch, before gradient updates.
+Debugging approach: "narrow down where the first invalid value is created by checking the loss,
+calculation as well as the intermediates of your forward pass." NaN occurred during forward pass
+(inside autocast), not during backpropagation.
+
+**[PyTorch Discuss: "FP16 gives NaN loss when using pre-trained model"](https://discuss.pytorch.org/t/fp16-gives-nan-loss-when-using-pre-trained-model/94133)** —
+Critical for our case (frozen pre-trained SAM3 encoder + trainable decoder):
+- **Overflow in intermediate activations** when fine-tuning well-trained models (not training from scratch)
+- **Deep supervision**: some branches produce `-inf`/NaN while others remain valid → aggregated loss is NaN
+- **Batch normalization** with very low standard deviation values can overflow in FP16
+- Fix: register **forward hooks** on each module to identify which layer first produces invalid values
+
+**[PyTorch Discuss: "Why my train and validation loss is as NaN"](https://discuss.pytorch.org/t/why-my-train-and-validation-loss-is-as-nan/206578)** —
+Custom activation functions passing negative values to `torch.log()` produce NaN. Fix: clip inputs
+before log operations. Also: validate that new training data doesn't contain NaN/Inf values.
+
+### Synthesis: Root Cause Likelihood for sam3_hybrid
+
+Given the community evidence, the most likely NaN sources for sam3_hybrid validation (in order):
+
+1. **AMP + 3D DynUNet (H2b, HIGH)**: MONAI maintainers explicitly warn about this.
+   sam3_hybrid's DynUNet-3D runs under `autocast()` with instance norm + residual blocks.
+   Instance norm with small batch sizes can produce NaN in FP16.
+
+2. **Frozen encoder + AMP interaction**: Pre-trained FP16 encoder outputs fed into
+   trainable FP32 modules under AMP autocast → potential dtype mismatches or double-casts.
+
+3. **Border patches from sliding_window_inference (H3)**: Normalization of near-zero
+   border regions → NaN input → poisoned output. Could be exacerbated by AMP.
+
+### Diagnostic Strategy (Updated)
+
+1. **Run 3 (current)**: `mixed_precision: false` — test WITHOUT AMP. If val_loss is finite,
+   AMP is the root cause. If still NaN, the issue is elsewhere.
+2. **If AMP is the cause**: Add `autocast(enabled=False)` specifically for validation (keep
+   AMP for training where it's working). Or disable AMP entirely for sam3_hybrid.
+3. **If NOT AMP**: Add forward hooks to sam3_hybrid's DynUNet layers to find the first NaN
+   source.
 
 ## References
 
@@ -190,6 +286,12 @@ if not torch.isfinite(val_loss):
 - [IEEE 754-2019. "Standard for Floating-Point Arithmetic." *IEEE*.](https://standards.ieee.org/ieee/754/6210/)
 - MinIVess Issue [#715](https://github.com/petteriTeikari/minivess-mlops/issues/715) — sam3_hybrid val_loss=NaN tracking
 - MinIVess Issue [#710](https://github.com/petteriTeikari/minivess-mlops/issues/710) — Original sam3_hybrid investigation
+- [MONAI Discussion #4243. "AMP + 3D operations NaN." *Project-MONAI/MONAI*.](https://github.com/Project-MONAI/MONAI/discussions/4243)
+- [MONAI Discussion #2637. "NaN errors with AMP and border crops." *Project-MONAI/MONAI*.](https://github.com/Project-MONAI/MONAI/discussions/2637)
+- [MONAI Tutorials Discussion #1637. "sliding_window_inference." *Project-MONAI/tutorials*.](https://github.com/Project-MONAI/tutorials/discussions/1637)
+- [PyTorch Discuss. "Loss is calculated as NaN when using AMP autocast."](https://discuss.pytorch.org/t/loss-is-calculated-as-nan-when-using-amp-autocast/186272)
+- [PyTorch Discuss. "FP16 gives NaN loss when using pre-trained model."](https://discuss.pytorch.org/t/fp16-gives-nan-loss-when-using-pre-trained-model/94133)
+- [PyTorch Discuss. "Why my train and validation loss is as NaN."](https://discuss.pytorch.org/t/why-my-train-and-validation-loss-is-as-nan/206578)
 
 ## SAM3 Config Reference (from upstream YAML)
 
