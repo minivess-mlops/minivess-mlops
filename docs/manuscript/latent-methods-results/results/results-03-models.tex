@@ -1,0 +1,36 @@
+%% AUTO-GENERATED from: outputs/analysis/comparison_table.tex
+%% Section: R3a -- DynUNet Loss Ablation
+%% Section: R3b -- Multi-Model Comparison (PENDING)
+%% Section: R3c -- Foundation Model Comparison (PENDING)
+%% KG: knowledge-graph/manuscript/results.yaml#R3a, #R3b, #R3c
+%% Last regenerated: 2026-03-15 (manual)
+
+\subsection{Model Comparison}
+
+\subsubsection{DynUNet Loss Ablation (MiniVess, 3-fold, 100 epochs)}
+
+% From outputs/analysis/comparison_table.tex
+\input{artifacts/tab-loss-ablation}
+
+Key findings:
+\begin{itemize}
+  \item \textbf{cbdice\_cldice}: clDice = 0.906 $\pm$ 0.008 (best topology),
+        DSC = 0.772 $\pm$ 0.016
+  \item \textbf{dice\_ce}: DSC = 0.824 $\pm$ 0.014 (best voxel overlap),
+        clDice = 0.832 $\pm$ 0.019
+  \item \textbf{cbdice}: DSC = 0.767 $\pm$ 0.023, clDice = 0.799 $\pm$ 0.020
+  \item \textbf{dice\_ce\_cldice}: DSC = 0.736 $\pm$ 0.016, clDice = 0.905 $\pm$ 0.003
+  \item Topology gain of cbdice\_cldice over dice\_ce:
+        $+8.9\%$ clDice, $-5.3\%$ DSC
+  \item For vascular segmentation, connectivity (clDice) $>$ voxel overlap (DSC)
+\end{itemize}
+
+\subsubsection{Multi-Model Comparison (PENDING)}
+% TODO: Add after SAM3 Vanilla, SAM3 Hybrid GPU runs (target 2026-03-20)
+% SAM3 Vanilla: cbdice\_cldice loss, 3 folds $\times$ 100 epochs,
+%               RunPod RTX 4090, ~\$15 estimated cost
+
+\subsubsection{Foundation Model Comparison (PENDING --- external datasets only)}
+% TODO: VesselFM on DeepVess/TubeNet only
+%       (MiniVess = data leakage --- VesselFM was pre-trained on MiniVess)
+%       See: knowledge-graph/manuscript/limitations.yaml#L1

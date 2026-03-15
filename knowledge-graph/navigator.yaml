@@ -4,7 +4,7 @@
 # Pattern: McMillan 2026 domain-partitioned schema navigation.
 
 version: "1.0"
-last_updated: "2026-03-13"
+last_updated: "2026-03-15"
 
 domains:
   architecture:
@@ -62,6 +62,13 @@ domains:
     claude_md: [tests/CLAUDE.md]
     decisions: []
 
+  manuscript:
+    navigator: knowledge-graph/domains/manuscript.yaml
+    covers: [scientific claims, methods stubs, results stubs, limitations, projections, kg-sync]
+    claude_md: [docs/planning/repo-to-manuscript.md]
+    decisions: []
+    note: "Narrative layer for paper writing. Claims + section stubs derived from KG decisions + experiments."
+
 invariants:
   # HARD CONSTRAINTS — apply before any decision node is evaluated.
   # These are non-negotiable architectural mandates that override all other guidance.
@@ -110,3 +117,14 @@ keywords:
   xai: observability
   compliance: operations
   audit: operations
+  manuscript: manuscript
+  claims: manuscript
+  methods: manuscript
+  results: manuscript
+  limitations: manuscript
+  projections: manuscript
+  kg-sync: manuscript
+  latent: manuscript
+  intent: manuscript
+  spec: manuscript
+  sdd: manuscript

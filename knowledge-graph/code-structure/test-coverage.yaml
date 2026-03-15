@@ -1,0 +1,70 @@
+# knowledge-graph/code-structure/test-coverage.yaml
+# Test tier coverage map — bootstrapped from tests/
+# Auto-regeneration: scripts/scan_code_structure.py
+
+_meta:
+  generated_by: manual_bootstrap
+  source_dirs: [tests/]
+  total_test_files: 526
+
+test_tiers:
+  staging:
+    command: make test-staging
+    target_time_s: 180
+    excludes: [model_loading, slow, gpu_instance, integration]
+    purpose: "PR readiness — fast, no models"
+    gate: "Must be green before any PR merge"
+
+  prod:
+    command: make test-prod
+    target_time_s: 600
+    includes_over_staging: [model_loading, slow, integration]
+    excludes: [gpu_instance]
+    purpose: "Pre-merge — includes model loading + slow tests"
+
+  gpu:
+    command: make test-gpu
+    location: tests/gpu_instance/
+    purpose: "SAM3 + GPU-heavy tests — RunPod / intranet GPU only"
+    excluded_from_default_collection: true
+    never_run_on: [dev_machine, github_actions]
+
+test_markers:
+  - marker: model_loading
+    description: "Tests that instantiate PyTorch models"
+    tier_exclusion: staging
+
+  - marker: slow
+    description: "Tests taking >30s"
+    tier_exclusion: staging
+
+  - marker: gpu_instance
+    description: "Tests requiring physical GPU (SAM3 forward passes)"
+    tier_exclusion: [staging, prod]
+    location: tests/gpu_instance/
+
+  - marker: integration
+    description: "Tests requiring Docker services (MLflow, Prefect, PostgreSQL)"
+    tier_exclusion: staging
+
+key_test_files:
+  - file: tests/v2/unit/test_env_single_source.py
+    purpose: "Enforces .env.example as single source of truth (Rule #22)"
+    critical: true
+
+  - file: tests/v2/unit/orchestration/test_flow_contract.py
+    purpose: "Validates inter-flow contract (find_upstream_run tag filtering)"
+    critical: true
+
+  - file: tests/v2/unit/adapters/
+    purpose: "ModelAdapter ABC contract tests"
+
+  - file: tests/gpu_instance/
+    purpose: "SAM3 forward pass benchmarks — GPU only"
+    markers: [gpu_instance]
+
+ci_status:
+  github_actions: EXPLICITLY_DISABLED
+  reason: "CI consumes credits — CLAUDE.md Rule #21"
+  local_validation: scripts/pr_readiness_check.sh
+  pre_commit_hooks: enabled

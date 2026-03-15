@@ -172,28 +172,53 @@ db_connection_uri = pulumi.Output.all(db_instance.public_ip_address, db_password
     lambda args: f"postgresql://mlflow:{args[1]}@{args[0]}:5432/mlflow"
 )
 
-# NOTE: Cloud Run MLflow deployment is Phase 1.5 — requires custom Docker image
-# built and pushed to GAR first (with psycopg2 + google-cloud-storage baked in).
-# For now, deploy infrastructure (GCS + Cloud SQL + GAR + IAM) first.
-# Cloud Run will be added after the base image is ready.
-# TODO(P1.5): Uncomment and fix Cloud Run service after GAR image is pushed.
-_CLOUD_RUN_DEFERRED = True
+# Cloud Run MLflow — controlled via Pulumi config flag.
+# Default: False (requires GAR image to be built and pushed first).
+# Enable via: pulumi config set minivess-gcp:enable_cloud_run true
+# Phase 1.5: build Dockerfile.mlflow-gcp → push to GAR → set flag → pulumi up
+enable_cloud_run = config.get_bool("enable_cloud_run") or False
 
-if not _CLOUD_RUN_DEFERRED:
+if enable_cloud_run:
+    # Dedicated service account for Cloud Run MLflow
+    # Uses Workload Identity — no SA key needed, GCS auth is automatic
+    mlflow_cr_sa = gcp.serviceaccount.Account(
+        "mlflow-server-sa",
+        account_id="mlflow-server",
+        display_name="MLflow Cloud Run Service Account",
+        description="SA for Cloud Run MLflow — GCS artifact store access",
+    )
+
+    # Grant the Cloud Run SA objectAdmin on the mlflow artifacts bucket
+    gcp.storage.BucketIAMMember(
+        "mlflow-cr-sa-storage",
+        bucket=mlflow_artifacts_bucket.name,
+        role="roles/storage.objectAdmin",
+        member=mlflow_cr_sa.email.apply(lambda e: f"serviceAccount:{e}"),
+    )
+
+    # GAR image — built from Dockerfile.mlflow-gcp (psycopg2 + google-cloud-storage)
+    # Image MUST exist in GAR before enabling (pushed in Phase 1.5 before pulumi up)
+    mlflow_image = docker_repo.name.apply(
+        lambda n: f"{region}-docker.pkg.dev/{project}/{n}/mlflow:v{MLFLOW_SERVER_VERSION}"
+    )
+
     mlflow_service = gcp.cloudrunv2.Service(
         "mlflow-server",
         name="minivess-mlflow",
         location=region,
         ingress="INGRESS_TRAFFIC_ALL",
+        deletion_protection=False,  # Required: pulumi destroy would fail otherwise
         template={
+            "service_account": mlflow_cr_sa.email,
             "scaling": {
-                "min_instance_count": 1,  # R13: avoid cold starts
+                "min_instance_count": 1,  # Avoid cold starts for research team
                 "max_instance_count": 2,
             },
             "containers": [
                 {
-                    "image": f"ghcr.io/mlflow/mlflow:v{MLFLOW_SERVER_VERSION}",
-                    "ports": [{"container_port": 5000}],
+                    "image": mlflow_image,
+                    # Cloud Run v2: single port object (not a list)
+                    "ports": {"container_port": 5000, "name": "http1"},
                     "envs": [
                         {
                             "name": "MLFLOW_BACKEND_STORE_URI",
@@ -215,30 +240,20 @@ if not _CLOUD_RUN_DEFERRED:
                             "value": "1800",
                         },
                     ],
-                    "resources": {"limits": {"cpu": "1", "memory": "2Gi"}},
-                    "commands": ["sh"],
-                    "args": [
-                        "-c",
-                        (
-                            "pip install --no-cache-dir psycopg2-binary "
-                            "google-cloud-storage boto3 flask-wtf && "
-                            "mlflow server "
-                            "--host 0.0.0.0 "
-                            "--port 5000 "
-                            "--backend-store-uri $MLFLOW_BACKEND_STORE_URI "
-                            "--artifacts-destination $MLFLOW_ARTIFACTS_DESTINATION "
-                            "--serve-artifacts"
-                        ),
-                    ],
+                    "resources": {
+                        "cpu_idle": True,
+                        "limits": {"cpu": "1", "memory": "2Gi"},
+                        "startup_cpu_boost": True,
+                    },
                     "startup_probe": {
-                        "http_get": {"path": "/health", "port": 5000},
-                        "initial_delay_seconds": 30,
-                        "period_seconds": 10,
-                        "failure_threshold": 10,
+                        "failure_threshold": 1,
+                        "period_seconds": 240,
+                        "tcp_socket": {"port": 5000},
+                        "timeout_seconds": 240,
                     },
                 },
             ],
-            # Cloud SQL connection via Cloud SQL Auth Proxy sidecar (R4)
+            # Cloud SQL Auth Proxy — connects via Cloud SQL instance connection name
             "volumes": [
                 {
                     "name": "cloudsql",
@@ -250,7 +265,7 @@ if not _CLOUD_RUN_DEFERRED:
         },
     )
 
-    # Make Cloud Run service publicly accessible (with basic auth via MLflow)
+    # Make Cloud Run service publicly accessible (MLflow handles its own auth)
     mlflow_iam = gcp.cloudrunv2.ServiceIamMember(
         "mlflow-public-access",
         name=mlflow_service.name,
@@ -261,7 +276,7 @@ if not _CLOUD_RUN_DEFERRED:
 
 # ── Outputs ──────────────────────────────────────────────────────────────
 
-if not _CLOUD_RUN_DEFERRED:
+if enable_cloud_run:
     pulumi.export("mlflow_url", mlflow_service.uri)
 pulumi.export("mlflow_version", MLFLOW_SERVER_VERSION)
 pulumi.export("db_connection_name", db_instance.connection_name)

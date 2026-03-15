@@ -4,7 +4,7 @@
 # Each node references a YAML file in decisions/
 
 version: "1.0"
-last_updated: "2026-03-13"
+last_updated: "2026-03-15"
 
 nodes:
   # L1 — Research Goals (7 nodes, root layer)
@@ -412,3 +412,48 @@ edges:
     to: federated_learning
     strength: weak
     skip: true
+
+# Propagation edges for Phase 1 belief propagation (requires_review flags)
+# When a source node changes, targets get requires_review: true on next kg-sync run
+# Phase 2 (future): actual Bayesian posterior updates via propagation.weight
+propagation:
+  - source: container_strategy
+    target: ci_cd_platform
+    type: hard
+    rationale: "CI pipeline uses Docker build actions — must change with container runtime"
+  - source: container_strategy
+    target: gpu_compute
+    type: soft
+    rationale: "nvidia-container-toolkit is Docker-specific; review when switching runtimes"
+  - source: container_strategy
+    target: secrets_management
+    type: signal
+    rationale: "Secret injection pattern differs between Docker Compose and bare-metal"
+  - source: loss_function
+    target: primary_metrics
+    type: soft
+    rationale: "clDice loss → clDice metric is the natural primary metric; misalignment is a paper weakness"
+  - source: primary_3d_model
+    target: gpu_compute
+    type: hard
+    rationale: "SAM3 requires Ampere+ (BF16); T4/Turing BANNED — see metalearning/2026-03-15-t4-turing-fp16-nan-ban.md"
+  - source: primary_3d_model
+    target: model_export_format
+    type: soft
+    rationale: "SAM3 export requirements differ from DynUNet (custom ONNX opsets needed)"
+  - source: foundation_model
+    target: gpu_compute
+    type: hard
+    rationale: "VesselFM requires ≥16 GB VRAM; changes to foundation model may change GPU tier"
+  - source: monai_alignment
+    target: model_adapter_pattern
+    type: hard
+    rationale: "MONAI-first means ModelAdapter ABC must expose MONAI-compatible interface"
+  - source: reproducibility_level
+    target: container_strategy
+    type: hard
+    rationale: "Docker IS the reproducibility guarantee in this repo — switching breaks the core invariant"
+  - source: hpo_engine
+    target: experiment_tracker
+    type: soft
+    rationale: "Optuna study storage uses same PostgreSQL as MLflow — changing either affects both"

@@ -385,7 +385,7 @@ class SegmentationTrainer:
                 torch.no_grad(),
                 autocast(
                     device_type=self.device.type,
-                    enabled=self.config.mixed_precision,
+                    enabled=self.config.mixed_precision_val,
                 ),
             ):
                 with record_function("val_forward"):

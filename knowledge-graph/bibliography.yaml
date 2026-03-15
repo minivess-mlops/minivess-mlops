@@ -5,7 +5,7 @@
 # Validation: scripts/review_prd_integrity.py
 
 version: "1.0"
-last_updated: "2026-03-13"
+last_updated: "2026-03-15"
 
 citations:
   shit_2021_cldice:
@@ -76,11 +76,16 @@ citations:
   vasilopoulos_2026_codified_context:
     authors: "Vasilopoulos A"
     year: 2026
-    title: "3-Tier Codified Context for Agentic Systems"
-    venue: "Preprint"
-    url: "https://arxiv.org/abs/placeholder"
+    title: "Codified Context: Infrastructure for AI Agents in a Complex Codebase"
+    venue: "arXiv:2602.20478"
+    url: "https://arxiv.org/abs/2602.20478"
     used_in: []
-    note: "Hot/Specialist/Cold tiers; trigger tables for agent routing"
+    abstract_snippet: >
+      Three-layer infrastructure (constitution + 19 domain-expert agents + knowledge base)
+      for persistent agent memory across 283 sessions on a C# distributed system.
+      CLOSEST PRIOR ART to our approach — but no probabilistic PRD layer, no MLOps,
+      no biomedical domain. Our multi-layer KG with probabilistic spec and manuscript
+      export is a distinct architectural advance.
 
   yu_2026_agemem:
     authors: "Yu Z, et al."
@@ -169,3 +174,318 @@ citations:
     venue: "JAIR"
     url: "https://arxiv.org/abs/1911.00068"
     used_in: [label_quality_tool]
+
+  poon_2023_minivess:
+    authors: "Poon C, Teikari P, et al."
+    year: 2023
+    title: "A dataset of rodent cerebrovasculature from in vivo multiphoton fluorescence microscopy"
+    venue: "Scientific Data"
+    url: "https://doi.org/10.1038/s41597-023-02048-8"
+    used_in: [project_purpose, impact_target]
+    abstract_snippet: >
+      70 volumes of rat cerebrovasculature from 2-photon microscopy, CC BY-NC-SA license.
+      MiniVess = the primary training dataset for this MLOps platform.
+
+  wittmann_2024_vesselfm:
+    authors: "Wittmann B, et al."
+    year: 2024
+    title: "VesselFM: A Foundation Model for Universal 3D Blood Vessel Segmentation"
+    venue: "arXiv"
+    url: "https://arxiv.org/abs/2411.17386"
+    used_in: [foundation_model]
+    abstract_snippet: >
+      Foundation model pre-trained on multiple vascular datasets including MiniVess.
+      Data leakage concern: VesselFM must be evaluated on DeepVess/TubeNet, not MiniVess.
+
+  kaufmann_2020_deepvess:
+    authors: "Kaufmann L, et al."
+    year: 2020
+    title: "DeepVess: A deep learning pipeline for vessel segmentation of two-photon microscopy images of mouse brain vasculature"
+    venue: "eCommons Cornell, dataset"
+    url: "https://ecommons.cornell.edu/handle/1813/67229"
+    used_in: [external_test_dataset]
+    abstract_snippet: >
+      External validation dataset for VesselFM evaluation (fair, no data leakage).
+      Cornell eCommons repository. ~6 sub-volumes, 2-photon mouse brain vasculature.
+      MUST use this dataset (NOT MiniVess) when evaluating VesselFM due to pretraining leakage.
+    note: >
+      CITATION KEY: kaufmann_2020_deepvess. Verify exact author list and year from
+      Cornell eCommons page before manuscript submission — this entry is placeholder-grade.
+      URL confirmed: https://ecommons.cornell.edu/handle/1813/67229
+
+  schauss_2021_tubenet:
+    authors: "Schauss A, et al."
+    year: 2021
+    title: "TubeNet 2PM: A benchmark dataset for tubular structure segmentation in 2-photon microscopy"
+    venue: "UCL Figshare"
+    url: "https://figshare.com/articles/dataset/TubeNet_2PM/14529749"
+    used_in: [external_test_dataset]
+    abstract_snippet: >
+      External validation dataset for VesselFM evaluation (fair, no data leakage).
+      UCL Figshare repository. ~2 sub-volumes, 2-photon vascular microscopy.
+      MUST use this dataset (NOT MiniVess) when evaluating VesselFM due to pretraining leakage.
+    note: >
+      CITATION KEY: schauss_2021_tubenet. Verify exact author list, year, and Figshare
+      URL before manuscript submission — this entry is placeholder-grade.
+      Figshare URL: https://figshare.com/articles/dataset/TubeNet_2PM/14529749
+
+  windhager_2023_nature_protocols:
+    authors: "Windhager J, et al."
+    year: 2023
+    title: "An end-to-end workflow for multiplexed image processing and analysis"
+    venue: "Nature Protocols"
+    url: "https://doi.org/10.1038/s41596-023-00876-x"
+    used_in: [project_purpose]
+    abstract_snippet: >
+      End-to-end workflow paper in Nature Protocols — comparable systems paper demonstrating
+      platform-as-contribution framing is accepted in this venue.
+
+  pachitariu_2022_cellpose:
+    authors: "Pachitariu M, Stringer C"
+    year: 2022
+    title: "Cellpose 2.0: how to train your own model"
+    venue: "Nature Methods"
+    url: "https://doi.org/10.1038/s41592-022-01663-4"
+    used_in: [project_purpose, impact_target]
+    abstract_snippet: >
+      Software platform paper in Nature Methods. Demonstrates model-as-platform framing.
+      Comparable to our paper: the platform enables downstream users to train models.
+
+  yang_2023_skypilot:
+    authors: "Yang Z, et al."
+    year: 2023
+    title: "SkyPilot: An Intercloud Broker for Sky Computing"
+    venue: "NSDI 2023"
+    url: "https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng"
+    used_in: [gpu_compute]
+    abstract_snippet: >
+      SkyPilot as intercloud broker for automatic workload placement across clouds.
+      Like Slurm for multi-cloud: describe WHAT you need, SkyPilot decides WHERE.
+
+  krishnan_2022_cyclops:
+    authors: "Krishnan R, et al."
+    year: 2022
+    title: "CyclOps: Cyclical development towards operationalizing ML models for health"
+    venue: "arXiv"
+    url: "https://arxiv.org/abs/2306.05103"
+    used_in: [project_purpose]
+    abstract_snippet: >
+      MLOps platform for healthcare AI with emphasis on recurring validation.
+      Comparable systems paper — CyclOps for clinical, our platform for preclinical imaging.
+
+  pujara_2016_pkg:
+    authors: "Pujara J"
+    year: 2016
+    title: "Probabilistic Models for Scalable Knowledge Graph Construction"
+    venue: "PhD Thesis, University of Southern California"
+    url: "https://usc-isi-i2.github.io/papers/pujara16-thesis.pdf"
+    used_in: []
+    abstract_snippet: >
+      Probabilistic Knowledge Graph construction at scale. Academic framing for our
+      Bayesian decision network as a PKG with belief propagation on spec change.
+
+  bellomarini_2022_prob_kg:
+    authors: "Bellomarini L, et al."
+    year: 2022
+    title: "Reasoning and Learning in Probabilistic Logic Programs"
+    venue: "arXiv"
+    url: "https://arxiv.org/abs/2205.01175"
+    used_in: []
+    abstract_snippet: >
+      Framework for probabilistic reasoning on KGs. Phase 2+ belief propagation citation
+      for the manuscript agentic story — framing PRD evolution as factor graph inference.
+
+  # -------------------------------------------------------------------------
+  # Agentic + Spec-Driven Development Literature (found 2026-03-15 literature scan)
+  # Key finding: None of these papers combine agentic coding with scientific MLOps
+  # infrastructure — the domain intersection is the novelty gap.
+  # -------------------------------------------------------------------------
+
+  piskala_2026_sdd:
+    authors: "Piskala DB"
+    year: 2026
+    title: "Spec-Driven Development: From Code to Contract in the Age of AI Coding Assistants"
+    venue: "AIWare 2026, arXiv:2602.00180"
+    url: "https://arxiv.org/abs/2602.00180"
+    used_in: []
+    abstract_snippet: >
+      Practitioner taxonomy of SDD presenting three rigor levels (spec-first, spec-anchored,
+      spec-as-source). Covers API, enterprise, and embedded software — NOT scientific software
+      or MLOps. Our Living Specification Graph is a concrete instance of spec-as-source
+      applied to research infrastructure.
+
+  stoica_2024_specs_missing_link:
+    authors: "Stoica I, Zaharia M, Gonzalez J, et al."
+    year: 2024
+    title: "Specifications: The missing link to making the development of LLM systems an engineering discipline"
+    venue: "arXiv:2412.05299"
+    url: "https://arxiv.org/abs/2412.05299"
+    used_in: []
+    abstract_snippet: >
+      Argues precise component-level behavioral contracts are essential for reliable LLM-based
+      systems. Focuses on software engineering theory, not scientific software. Directly
+      motivates our CLAUDE.md + knowledge graph as behavioral contract for the pipeline.
+
+  mohsenimofidi_2026_context_eng:
+    authors: "Mohsenimofidi S, Galster M, Treude C, Baltes S"
+    year: 2026
+    title: "Context Engineering for AI Agents in Open-Source Software"
+    venue: "MSR 2026, arXiv:2510.21413"
+    url: "https://arxiv.org/abs/2510.21413"
+    used_in: []
+    abstract_snippet: >
+      Empirical analysis of 466 open-source projects' AGENTS.md context files. No scientific
+      software domain, no MLOps. Documents current shallow context practice that our
+      multi-layer KG transcends.
+
+  santos_2025_claude_config:
+    authors: "Santos HVF, Costa V, Montandon JE, Valente MT"
+    year: 2025
+    title: "Decoding the Configuration of AI Coding Agents: Insights from Claude Code Projects"
+    venue: "AGENT 2026 @ ICSE, arXiv:2511.09268"
+    url: "https://arxiv.org/abs/2511.09268"
+    used_in: []
+    abstract_snippet: >
+      Analyzed 328 Claude Code project configs; architectural specification is most critical
+      concern. Empirically validates that current CLAUDE.md practice is shallow — our
+      multi-layer KG + metalearning system qualitatively exceeds this baseline.
+
+  chatlatanagulchai_2025_agent_readmes:
+    authors: "Chatlatanagulchai W, et al."
+    year: 2025
+    title: "Agent READMEs: An Empirical Study of Context Files for Agentic Coding"
+    venue: "arXiv:2511.12884"
+    url: "https://arxiv.org/abs/2511.12884"
+    used_in: []
+    abstract_snippet: >
+      Analyzed 2,303 agent context files across 1,925 repos. Build commands (62.3%) and
+      architecture (67.7%) dominate; safety/performance guidelines rare (14.5%). Our
+      approach with intent-expression nodes and probabilistic PRD is a qualitative advance
+      over this state of practice.
+
+  galster_2026_configuring_agentic:
+    authors: "Galster M, Mohsenimofidi S, et al."
+    year: 2026
+    title: "Configuring Agentic AI Coding Tools: An Exploratory Study"
+    venue: "arXiv:2602.14690"
+    url: "https://arxiv.org/abs/2602.14690"
+    used_in: []
+    abstract_snippet: >
+      Analyzed 2,926 GitHub repos across five agentic coding platforms. Context files
+      dominate; tool-specific configuration cultures. No MLOps, no scientific software.
+      Baseline empirical characterization of current agentic coding practice.
+
+  cheimarios_2025_mlops_physics:
+    authors: "Cheimarios N"
+    year: 2025
+    title: "Scientific software development in the AI era: reproducibility, MLOps, and applications in soft matter physics"
+    venue: "Frontiers in Physics"
+    url: "https://www.frontiersin.org/journals/physics/articles/10.3389/fphy.2025.1711356/full"
+    used_in: []
+    abstract_snippet: >
+      MLOps principles + NIST AI Risk Management for computational physics. Containerization
+      and model registries discussed. No multi-cloud, no spec-driven development, no
+      biomedical imaging. Closest scientific MLOps paper but wrong domain.
+
+  marcos_mercade_2026_mlops_eval:
+    authors: "Marcos-Mercadé J, Lopez-Novoa U, Egaña Aranguren M"
+    year: 2026
+    title: "An Empirical Evaluation of Modern MLOps Frameworks"
+    venue: "arXiv:2601.20415"
+    url: "https://arxiv.org/abs/2601.20415"
+    used_in: []
+    abstract_snippet: >
+      Evaluates MLflow, Metaflow, Airflow, Kubeflow on two ML scenarios; notes versioning
+      as reproducibility enabler. No biomedical segmentation, no multi-cloud, no
+      spec-driven development. Useful comparison baseline for our platform evaluation.
+
+  moskalenko_2024_resilient_mlops:
+    authors: "Moskalenko V, Kharchenko V"
+    year: 2024
+    title: "Resilience-aware MLOps for AI-based medical diagnostic system"
+    venue: "Frontiers in Public Health, PMC11004236"
+    url: "https://pmc.ncbi.nlm.nih.gov/articles/PMC11004236/"
+    used_in: []
+    abstract_snippet: >
+      Resilience mechanisms for medical AI MLOps (uncertainty calibration, graceful
+      degradation). Evaluated on MedMNIST classification NOT segmentation. No cloud
+      infrastructure. Useful as medical AI MLOps reference for introduction.
+
+  # === Comparable platform papers (added 2026-03-15) ===
+
+  wu_2020_ddeep3m:
+    authors: "Wu X, Chen S, Huang J, Li A, Xiao R, Cui X"
+    year: 2020
+    title: "DDeep3M: Docker-powered deep learning for biomedical image segmentation"
+    venue: "Journal of Neuroscience Methods, 342:108804"
+    url: "https://doi.org/10.1016/j.jneumeth.2020.108804"
+    used_in: [project_purpose]
+    abstract_snippet: >
+      Docker-based 3D biomedical segmentation platform (J. Neurosci. Methods 2020).
+      Closest directly comparable platform paper: Docker lowers the barrier for biomedical
+      researchers to use deep learning. Key gap vs ARBOR: no experiment tracking, no multi-cloud,
+      no model-agnostic adapter pattern, no drift detection, no HPO pipeline.
+      ARBOR extends this vision to full MLOps Level 4 with multi-cloud and model-agnostic design.
+      Cite in Introduction as prior art that motivated our approach.
+
+  abe_2022_neurocaas:
+    authors: "Abe P, et al."
+    year: 2022
+    title: "NeuroCAAS: A cloud-based analysis platform for neuroscience"
+    venue: "Neuron, 115(6):S0896-6273(22)00587-6"
+    url: "https://doi.org/10.1016/j.neuron.2022.06.018"
+    used_in: [project_purpose]
+    abstract_snippet: >
+      Cloud compute platform for neuroscience analyses (AWS-based, multi-user).
+      Comparable platform paper: demonstrates cloud compute for academic neuroscience research.
+      Key gap vs ARBOR: no model training orchestration, no MONAI ecosystem, no
+      experiment tracking, no drift detection; cloud selection is preconfigured, not
+      model-agnostic. Cite in Introduction as cloud platform baseline for neuroscience.
+
+  chen_2024_mambavesselnet:
+    authors: "Chen Y, Liu Z, He X"
+    year: 2024
+    title: "MambaVesselNet: A Hybrid CNN-Mamba Architecture for 3D Cerebrovascular Segmentation"
+    venue: "ACM Multimedia Asia (MMasia '24)"
+    url: "https://doi.org/10.1145/3696409.3700231"
+    used_in: [model_adapter_pattern, primary_3d_model]
+    abstract_snippet: >
+      First published Mamba architecture for 3D cerebrovascular segmentation (TOF-MRA).
+      Hybrid CNN+Mamba bottleneck; state-of-the-art on TOF-MRA against SegResNet, UNETR.
+      Key relevance: (1) establishes Mamba as viable SSM for cerebrovascular segmentation,
+      motivating inclusion of Mamba family in ARBOR's multi-model comparison;
+      (2) DDeep3M is NOT evaluated in 2PM microscopy context — our platform fills this gap.
+      Note: focuses on architecture, has NO reproducibility tooling, no multi-cloud,
+      no experiment tracking, no MLOps pipeline. The architecture exists; the platform does not.
+
+  xu_2025_mambavesselnet_plus:
+    authors: "Xu S, Chen Y, Liu Z, He X"
+    year: 2025
+    title: "MambaVesselNet++: Advancing 3D Cerebrovascular Segmentation with a Selective State Space Model"
+    venue: "ACM Transactions on Multimedia Computing, Communications, and Applications (TOMM)"
+    url: "https://doi.org/10.1145/3757324"
+    used_in: [model_adapter_pattern, primary_3d_model]
+    abstract_snippet: >
+      Extended journal version of chen_2024_mambavesselnet. MambaVesselNet++ improves
+      over the conference version with a refined bidirectional Mamba bottleneck (8 blocks,
+      4 enc + 4 dec) and extended experiments. Feature dims: (48, 96, 192, 384, 768).
+      Platform paper uses the TOMM architecture (MambaVesselNet++) as the canonical
+      SSM family representative. DOI: https://doi.org/10.1145/3757324.
+
+  haft_javaherian_2020_topological:
+    authors: "Haft-Javaherian M, Villiger M, Schaffer CB, Nishimura N, Golland P, Bouma BE"
+    year: 2020
+    title: "A topological encoding convolutional neural network for segmentation of 3D multiphoton images of brain vasculature using persistent homology"
+    venue: "CVPR Workshop on Computer Vision for Microscopy Image Analysis (CVMI)"
+    url: "https://github.com/mhaft/DeepVess"
+    used_in: [primary_metrics, topology_metrics]
+    abstract_snippet: >
+      Topological encoding CNN for 3D 2PM vascular segmentation using persistent homology.
+      MIT/Cornell/MGH collaboration. Key finding: topology preservation in vascular
+      segmentation requires explicit topological constraints beyond standard Dice loss.
+      The DeepVess architecture achieves 76.2% Dice on DeepVess dataset.
+      Direct relevance: (1) validates that topology metrics (clDice, persistent homology)
+      are the right evaluation framework for 2PM vascular data — supports our cbdice_cldice
+      choice; (2) DeepVess is our external validation dataset (Cornell eCommons).
+      Their method has no MLOps pipeline; ARBOR provides the infrastructure scaffold
+      to reproduce and extend their topological approach across labs.

@@ -164,9 +164,14 @@ Each of the 6 Prefect flows runs in its own Docker container:
 | Provider | Role | GPU | Spot $/hr | Docker | Region |
 |----------|------|-----|-----------|--------|--------|
 | **RunPod** | Dev/prototyping | RTX 4090 (24 GB) | $0.44-0.69 | Container-native (no Docker-in-Docker) | US/EU |
-| **GCP** | Staging/prod | T4/L4/A100 | $0.14-0.82 | VM + Docker image_id | europe-north1 (Finland) |
+| **GCP** | Staging/prod | **L4**/A100 | $0.19-1.39 | VM + Docker image_id | auto (SkyPilot) |
 | **Lambda Labs** | Rejected | A10/A100 | $0.50-1.10 | VM + Docker | No EU availability |
 | **UpCloud** | MLflow server | CPU VPS | Fixed €5/mo | N/A | fi-hel1 (Helsinki) |
+
+**T4 BANNED (Non-Negotiable):** T4 is Turing architecture — no BF16 support.
+SAM3's half-precision encoder overflows during validation (FP16 max = 65504 → NaN).
+L4 (Ada Lovelace) supports BF16, is 1.86x faster, AND 37% cheaper per job.
+See: `.claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md`
 
 **Decision tree**: RunPod for quick experiments (cheapest, instant provisioning).
 GCP for production runs (same-region infra, spot recovery, Pulumi IaC).
@@ -461,6 +466,11 @@ See: `.claude/metalearning/2026-03-14-skypilot-purpose-misunderstanding.md`
   Maximum 4 questions per round; ask in iterative batches, not all at once. DevEx applies
   to Claude-to-user interactions too, not just researcher-facing code.
   See: `.claude/metalearning/2026-03-14-wall-of-text-bad-ux.md`
+- Use T4 or any Turing-architecture GPU for models with half-precision encoders (SAM3,
+  VesselFM). T4 lacks BF16 → FP16 overflow → NaN in encoder during validation.
+  Default GCP accelerator: L4 (Ada Lovelace, BF16 support). T4 ONLY for pure MONAI
+  models (DynUNet, SegResNet) that don't use frozen half-precision encoders.
+  See: `.claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md`
 
 ## TDD Workflow (Non-Negotiable)
 

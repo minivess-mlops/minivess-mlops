@@ -27,3 +27,7 @@ knowledge-graph/decisions/L3-technology/augmentation_library.yaml:generic-api-ke
 knowledge-graph/decisions/L3-technology/xai_voxel_tool.yaml:generic-api-key:12
 knowledge-graph/decisions/L3-technology/xai_meta_tool.yaml:generic-api-key:12
 knowledge-graph/decisions/L3-technology/xai_meta_tool.yaml:generic-api-key:15
+knowledge-graph/manuscript/claims.yaml:generic-api-key:60
+knowledge-graph/manuscript/claims.yaml:generic-api-key:88
+knowledge-graph/manuscript/claims.yaml:generic-api-key:98
+knowledge-graph/bibliography.yaml:generic-api-key:212

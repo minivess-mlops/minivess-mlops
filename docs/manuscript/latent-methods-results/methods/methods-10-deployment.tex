@@ -1,0 +1,16 @@
+%% HUMAN-AUTHORED: methods-10-deployment.tex
+%% Section: M10 -- Deployment and Serving
+%% KG: knowledge-graph/manuscript/methods.yaml#M10
+%% Last updated: 2026-03-15 (scaffold)
+
+\subsection{Deployment and Serving}
+\begin{itemize}
+  \item ONNX export via BentoML + ONNX Runtime (CPU and GPU inference paths)
+  \item Champion model tagging in MLflow registry (Flow 4 --- Deployment flow)
+  \item Gradio demo interface for interactive segmentation visualization
+  \item NVIDIA MIG partitioning for multi-model concurrent inference on single GPU
+  \item BentoML service definitions in \texttt{src/minivess/serving/}
+  \item Model registry follows ONNX-first policy --- \texttt{.onnx} files gitignored
+        (stored in MLflow/BentoML registries, not git)
+\end{itemize}
+% TODO co-author: add 1-2 sentences on BentoML vs TorchServe decision rationale

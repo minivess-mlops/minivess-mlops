@@ -237,6 +237,51 @@ def generate_timing_jsonl(
     return "\n".join(lines) + "\n"
 
 
+def estimate_cost_from_first_epoch(
+    epoch_seconds: float,
+    max_epochs: int,
+    num_folds: int,
+    hourly_rate_usd: float,
+    setup_minutes: float = 5.0,
+) -> dict[str, float]:
+    """Extrapolate total job cost from a single measured epoch time.
+
+    Called after epoch 0 completes to predict total cost before committing
+    to the full training run. Logged to MLflow as estimated_total_cost.
+
+    Parameters
+    ----------
+    epoch_seconds:
+        Wall time for a single epoch in seconds.
+    max_epochs:
+        Total epochs planned.
+    num_folds:
+        Number of cross-validation folds.
+    hourly_rate_usd:
+        Spot instance hourly cost in USD (0.0 for local runs).
+    setup_minutes:
+        Estimated setup overhead per job in minutes (Docker pull, DVC, etc.).
+
+    Returns
+    -------
+    Dict with estimated_total_cost, estimated_total_hours, cost_per_epoch,
+    epoch_seconds.
+    """
+    total_epoch_seconds = epoch_seconds * max_epochs * num_folds
+    setup_seconds = setup_minutes * 60.0
+    total_seconds = total_epoch_seconds + setup_seconds
+    total_hours = total_seconds / 3600.0
+    total_cost = total_hours * hourly_rate_usd
+    cost_per_epoch = (epoch_seconds / 3600.0) * hourly_rate_usd
+
+    return {
+        "estimated_total_cost": round(total_cost, 4),
+        "estimated_total_hours": round(total_hours, 4),
+        "cost_per_epoch": round(cost_per_epoch, 4),
+        "epoch_seconds": epoch_seconds,
+    }
+
+
 def get_hourly_rate_usd() -> float:
     """Read INSTANCE_HOURLY_USD from environment.
 

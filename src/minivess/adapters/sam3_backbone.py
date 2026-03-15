@@ -104,6 +104,20 @@ class Sam3Backbone(nn.Module):
         self.encoder: nn.Module
         self.fpn_neck: nn.Module
 
+        # Auto-detect BF16 on Ampere+ GPUs (L4, A100, RTX 3090+).
+        # BF16 has same exponent range as FP32 (max ~3.4e38) — prevents
+        # FP16 overflow (max 65504) that causes NaN in encoder validation.
+        # T4 (Turing) lacks BF16 → falls back to FP16 with NaN guard.
+        # See: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
+        self._encoder_dtype = (
+            torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        )
+        logger.info(
+            "SAM3 encoder dtype: %s (BF16 supported: %s)",
+            self._encoder_dtype,
+            torch.cuda.is_bf16_supported(),
+        )
+
         self.encoder, self.fpn_neck = self._load_sam3_encoder()
 
         # HF path: vision_encoder already includes FPN neck → output is 256-dim.
@@ -190,11 +204,11 @@ class Sam3Backbone(nn.Module):
             # Load with SDPA attention — avoids materializing 5184×5184 attention
             # matrices per head, reducing encoder peak VRAM from ~7 GB to ~1.1 GB.
             # This makes SAM3 training feasible on 8 GB consumer GPUs.
-            # FP16 for GPU (918 MB weights vs 1.8 GB FP32).
+            # BF16 on Ampere+ (L4, A100, RTX 3090+), FP16 on Turing (T4, RTX 2070).
             model = Sam3Model.from_pretrained(
                 SAM3_HF_MODEL_ID,
                 token=token,
-                torch_dtype=torch.float16,
+                torch_dtype=self._encoder_dtype,
                 device_map="cpu",
                 attn_implementation="sdpa",
             )
@@ -288,12 +302,11 @@ class Sam3Backbone(nn.Module):
         target_device = x.device
         x = self._preprocess(x)
         if self._frozen:
-            # Cast input to FP16 to match encoder weights (loaded with
-            # torch_dtype=float16 in from_pretrained).  This halves encoder
-            # VRAM from ~2.2 GB to ~1.1 GB on ViT-32L (648M params).
+            # Cast input to match encoder dtype (BF16 on Ampere+, FP16 on Turing).
+            # This halves encoder VRAM from ~2.2 GB to ~1.1 GB on ViT-32L (648M params).
             # Callers must cast the returned features back to FP32 before
             # passing them to trainable FP32 modules (decoder, fusion, LoRA).
-            x = x.half()
+            x = x.to(self._encoder_dtype)
             with torch.no_grad():
                 out = self.encoder(x)
         else:

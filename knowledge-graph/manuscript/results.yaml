@@ -1,0 +1,92 @@
+# knowledge-graph/manuscript/results.yaml
+# Results section stubs R0-R5
+# Status tracks whether data is available or blocked on GPU runs
+
+sections:
+  - id: R0
+    title: "Results Overview"
+    tex_file: results/results-00-overview.tex
+    status: needs_content
+    framing: >
+      Platform-as-contribution framing: results demonstrate the platform WORKS, not that
+      we claim SOTA. R1 (reproducibility) + R3 (model comparison) = Nature Protocols
+      protocol validation. R2 (DevEx) = secondary contribution.
+
+  - id: R1
+    title: "Platform Validation — Reproducibility Proof"
+    tex_file: results/results-01-reproducibility.tex
+    status: data_available
+    key_numbers:
+      - "73/73 artifact verification checks pass (scripts/verify_all_artifacts.py)"
+      - "35+ artifacts produced by PipelineTriggerChain"
+      - "Total pipeline duration (analyze+deploy+dashboard): 8.26 sec"
+      - "Timestamp: 2026-03-02T03:32:10Z"
+    data_source: outputs/pipeline/trigger_chain_results.json
+    figure_assignment: fig-R1-reproducibility
+
+  - id: R2
+    title: "Developer Experience Benchmark"
+    tex_file: results/results-02-devex.tex
+    status: needs_data
+    proposed_metrics:
+      - "Time from git clone to first training run (target: <15 min)"
+      - "Number of manual steps required (target: 0 — just experiment)"
+      - "Number of config values requiring cloud-specific changes (target: 0)"
+    note: "Needs external collaborator replication for credibility"
+
+  - id: R3a
+    title: "DynUNet Loss Ablation"
+    tex_file: results/results-03-models.tex  # shared file with R3b, R3c
+    status: data_available
+    key_numbers:
+      - "cbdice_cldice: DSC=0.772±0.016, clDice=0.906±0.008 (WINNER)"
+      - "dice_ce: DSC=0.824±0.014 (best DSC), clDice=0.832±0.019"
+      - "Topology gain cbdice_cldice vs dice_ce: +8.9% clDice, -5.3% DSC"
+    data_source: knowledge-graph/experiments/dynunet_loss_variation_v2.yaml
+    figures:
+      - outputs/analysis/figures/loss_comparison.png
+      - outputs/analysis/figures/fold_heatmap.png
+    table: outputs/analysis/comparison_table.tex
+
+  - id: R3b
+    title: "Multi-Model Comparison (DynUNet vs Mamba vs SAM3 variants)"
+    tex_file: results/results-03-models.tex
+    status: BLOCKED
+    blocked_by: "SAM3 GPU runs pending (target 2026-03-20); Mamba adapter not yet implemented"
+    note: "Critical path item for paper submission. Covers all 4 model families: DynUNet (done), Mamba (planned), SAM3 Vanilla + Hybrid (GPU pending), VesselFM (R3c, external data only)"
+
+  - id: R3c
+    title: "Foundation Model Comparison (VesselFM — external datasets only)"
+    tex_file: results/results-03-models.tex
+    status: BLOCKED
+    blocked_by: "VesselFM GPU runs on DeepVess/TubeNet pending"
+    note: "MUST use DeepVess/TubeNet only — MiniVess = data leakage (VesselFM pre-trained on it)"
+
+  - id: R4
+    title: "Uncertainty Quantification"
+    tex_file: results/results-04-ensemble.tex
+    status: partial
+    key_points:
+      - "Conformal prediction coverage guarantees"
+      - "Multi-model ensemble results (3-model DynUNet soup)"
+    note: "Initial results available; full conformal coverage curves need GPU runs for all models"
+
+  - id: R5
+    title: "Living Specification Graph — Structural Characterization (Appendix)"
+    tex_file: results/results-05-agentic.tex
+    status: partial
+    proposed_metrics:
+      - "KG nodes: 52 PRD decision nodes + manuscript layer (C1-C13, M0-M12, R0-R5)"
+      - "Intent nodes: count of adapters with why_chosen + intent_banned_patterns fields"
+      - "Metalearning documents: count of .claude/metalearning/*.md files"
+      - "CLAUDE.md rules: 24 explicit behavioral constraints"
+      - "TDD test suite: 49 scripts tests + ~4100 total tests"
+    comparison_baseline:
+      papers: ["chatlatanagulchai_2025_agent_readmes", "santos_2025_claude_config", "galster_2026_configuring_agentic"]
+      baseline_finding: "Current practice: shallow context (build commands 62.3%, arch 67.7%, safety 14.5%)"
+      our_advance: "Multi-layer KG + probabilistic PRD + intent-expression + metalearning"
+    note: >
+      Literature scan (2026-03-15) confirmed this is a genuinely novel architectural pattern.
+      Frame as structural characterization (measurable), not productivity claim (unverifiable).
+      The empirical AGENTS.md papers are the comparison baseline.
+      Productivity narrative is appendix-level or companion paper.

@@ -1,0 +1,67 @@
+# knowledge-graph/experiments/current_best.yaml
+# Champion model per metric — derived from completed experiments
+# Updated by: scripts/scan_experiments.py + pipeline/champion_tagger.py
+
+_meta:
+  generated_by: manual_bootstrap
+  last_updated: "2026-03-15"
+  note: "SAM3/VesselFM pending GPU runs — marked as PENDING below"
+
+status_summary:
+  dynunet_experiments: COMPLETE
+  sam3_vanilla_experiments: PENDING  # GPU runs needed
+  sam3_hybrid_experiments: PENDING   # GPU runs needed
+  vesselfm_experiments: PENDING      # data leakage concern — use DeepVess only
+
+champions_current:
+  # Only DynUNet results available as of 2026-03-15
+  best_topology:
+    model: DynUNet
+    loss: cbdice_cldice
+    metric: centreline_dsc
+    value: 0.906
+    std: 0.008
+    experiment: dynunet_loss_variation_v2
+    note: "Best available — SAM3 results pending"
+
+  best_dsc:
+    model: DynUNet
+    loss: dice_ce
+    metric: dsc
+    value: 0.824
+    std: 0.014
+    experiment: dynunet_loss_variation_v2
+    note: "Best available — not the recommended loss (topology worse)"
+
+  recommended_single_model:
+    model: DynUNet
+    loss: cbdice_cldice
+    rationale: "CLAUDE.md §Default Loss Function — topology-optimized for vascular segmentation"
+
+pending_experiments:
+  - experiment: sam3_vanilla_3fold
+    model: SAM3_Vanilla
+    loss: cbdice_cldice
+    target_date: "2026-03-20"
+    cost_estimate: "$15 on RunPod RTX 4090"
+    blocks: [results/results-03-models.tex, R3b paper section]
+
+  - experiment: sam3_hybrid_3fold
+    model: SAM3_Hybrid
+    loss: cbdice_cldice
+    target_date: "2026-03-20"
+    blocks: [results/results-03-models.tex]
+
+  - experiment: vesselfm_external_only
+    model: VesselFM
+    dataset: DeepVess  # NOT MiniVess (data leakage)
+    target_date: "2026-03-25"
+    note: "Must use DeepVess/TubeNet — VesselFM trained on MiniVess = data leakage"
+    blocks: [results/results-03-models.tex, R3c]
+
+reproducibility_verification:
+  timestamp: "2026-03-02T03:32:10Z"
+  source: outputs/pipeline/trigger_chain_results.json
+  artifacts_verified: 35
+  pipeline_checks: 73
+  result: ALL_PASS

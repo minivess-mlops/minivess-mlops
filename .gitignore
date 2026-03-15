@@ -80,3 +80,8 @@ deployment/pulumi/Pulumi.*.yaml
 
 # MLflow server artifacts (created by MLflow server backend tests)
 mlartifacts/
+
+# Manuscript generated figures (regenerable via mmdc/pdflatex)
+docs/manuscript/latent-methods-results/figures/generated/
+docs/MLOps - vesselops.md
+docs/figures/

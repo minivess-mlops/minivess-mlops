@@ -1,0 +1,20 @@
+%% AUTO-GENERATED from: outputs/pipeline/trigger_chain_results.json
+%% Section: R1 -- Platform Validation / Reproducibility
+%% KG: knowledge-graph/manuscript/results.yaml#R1
+%% Last regenerated: 2026-03-15 (manual)
+
+\subsection{Platform Validation and Reproducibility}
+
+\begin{itemize}
+  \item 73/73 artifact verification checks pass (\texttt{scripts/verify\_all\_artifacts.py})
+  \item 35+ artifacts produced by \texttt{PipelineTriggerChain}
+        (analyze $\to$ deploy $\to$ dashboard)
+  \item Total pipeline wall-clock time (post-training): 8.26~seconds
+  \item Pipeline run timestamp: 2026-03-02T03:32:10Z
+        (\texttt{outputs/pipeline/trigger\_chain\_results.json})
+  \item All 3 downstream flows (analyze, deploy, dashboard) succeed
+        with \texttt{all\_success: true}
+\end{itemize}
+
+% TODO: Add cross-machine replication result when available (cross-SHA256 comparison)
+% TODO: Add figure fig-R1-reproducibility showing the artifact verification dashboard

@@ -1,0 +1,58 @@
+# knowledge-graph/code-structure/config-schema.yaml
+# Hydra + Dynaconf configuration hierarchy — bootstrapped
+# Auto-regeneration: scripts/scan_code_structure.py
+
+_meta:
+  generated_by: manual_bootstrap
+  source_dirs: [configs/, src/minivess/config/]
+
+config_systems:
+  hydra_zen:
+    purpose: "Experiment configuration — training hyperparams, model selection, HPO"
+    entry_point: configs/base.yaml
+    composition: src/minivess/config/compose.py::compose_experiment_config()
+    env_var: EXPERIMENT
+    usage_example: "docker compose run -e EXPERIMENT=debug_single_model train"
+    single_source_of_truth: >
+      The MLflow artifact (config dict logged by log_hydra_config()) IS the record.
+      NOT the CLI args. NOT the env vars. The artifact is the reproducibility proof.
+
+  dynaconf:
+    purpose: "Deployment configuration — service URLs, ports, credentials"
+    entry_point: .env.example
+    rule: ".env.example = SINGLE SOURCE OF TRUTH for ALL configurable values"
+    banned_pattern: "os.environ.get('VAR', 'hardcoded_fallback') — use os.environ['VAR']"
+
+config_hierarchy:
+  - level: repo_defaults
+    file: configs/base.yaml
+    description: "Repo-wide defaults for all experiments"
+
+  - level: lab_overrides
+    dir: configs/lab/
+    description: "Per-lab overrides (GPU type, registry, cloud provider)"
+    example: configs/lab/lab_name.yaml
+
+  - level: user_overrides
+    dir: configs/user/
+    description: "Per-user overrides"
+
+  - level: experiment
+    dir: configs/experiments/
+    examples: [debug_single_model.yaml, debug_multi_loss.yaml, full_loss_sweep.yaml]
+    description: "Full experiment specification (model + loss + folds + epochs)"
+
+  - level: model_profiles
+    dir: configs/model_profiles/
+    description: "VRAM budgets + batch sizes per model — AUTHORITATIVE VRAM SOURCE"
+    key_rule: "NEVER estimate VRAM from architecture — read model_profiles/*.yaml"
+    files: [dynunet.yaml, sam3_vanilla.yaml, sam3_hybrid.yaml, sam3_topolora.yaml]
+
+  - level: cloud
+    dir: configs/cloud/
+    description: "Cloud provider configs (RunPod, GCP, AWS) — all via Hydra groups"
+    key_rule: "NEVER hardcode cloud providers in code — config only"
+
+  - level: registry
+    dir: configs/registry/
+    description: "Docker registry configs (GHCR, DockerHub, ECR, GAR)"

@@ -1,0 +1,25 @@
+{# methods_models.j2 — generates methods-06-model-adapters.tex #}
+%% AUTO-GENERATED from KG nodes: model_adapter_pattern, adapters.yaml
+%% Template: knowledge-graph/templates/methods_models.j2
+%% DO NOT HAND-EDIT
+
+\subsection{Model Adapter Architecture}
+
+The \texttt{ModelAdapter} abstract base class defines a universal interface for
+3D segmentation models. Any model implementing three abstract methods
+(\texttt{forward}, \texttt{get\_eval\_roi\_size}, \texttt{get\_adapter\_config})
+integrates automatically with the training and evaluation pipeline.
+
+\begin{itemize}
+{% for adapter in adapters %}
+  {% if adapter.status in ['production', 'experimental'] %}
+  \item \textbf{{ '{' }}{{ adapter.name }}{{ '}' }} ({{ adapter.status }}):
+    {% if adapter.vram_training_gb %}VRAM (training): {{ adapter.vram_training_gb }}~GB.{% endif %}
+    {% if adapter.intent.why_chosen %}{{ adapter.intent.why_chosen | truncate(120) }}{% endif %}
+  {% endif %}
+{% endfor %}
+\end{itemize}
+
+{% if has_pending_adapters %}
+\textit{Note: SAM3 Hybrid and VesselFM results pending cloud GPU runs.}
+{% endif %}

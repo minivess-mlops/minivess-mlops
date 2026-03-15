@@ -1,8 +1,9 @@
-encryptionsalt: v1:M4uUaLSotnQ=:v1:pwbQ+7cEHR57M4WH:FrbgZcCPAzE4vvFyHi28LnoDXka6mw==
 config:
-  minivess-gcp:mlflow_admin_password:
-    secure: v1:ge6AwxhF1KaTbRAZ:x/JXsufjsiuHB0mLIh3zrbGw5M0QV5uRAlmGUT1qoZIN/DynLLk=
-  minivess-gcp:db_password:
-    secure: v1:eyEMleM2eEaYCWPZ:euWNfSZs24EOZFG7wbfIemni1rHxqIb43v5Ef7tCeQS1kd4Usbg=
   gcp:project: minivess-mlops
   gcp:region: europe-north1
+  minivess-gcp:enable_cloud_run: "false"
+  minivess-gcp:mlflow_admin_password:
+    secure: v1:Y+wn3W6VZbWPXHjA:qWnW2SN+h+G080YSwFaKWGL8xmOptCgWLE3RzguxIihaCT3IudPyZg==
+  minivess-gcp:db_password:
+    secure: v1:wk+OQM+RLGG6gy4R:mr9S0sCnMsyPbu9XFbY1r7mZs2wLmxb2hIpXrIjir63H6yGvr8jI+Q==
+encryptionsalt: v1:WZ19UK9x23k=:v1:Tl//AwMWZc2EXorW:UFghkmPLToEO26JeY6ebiJggJqgAqg==

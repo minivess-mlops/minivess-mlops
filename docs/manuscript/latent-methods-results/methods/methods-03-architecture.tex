@@ -1,0 +1,25 @@
+%% HUMAN-AUTHORED: methods-03-architecture.tex
+%% Section: M3 -- Platform Architecture
+%% KG: knowledge-graph/manuscript/methods.yaml#M3
+%% Last updated: 2026-03-15 (scaffold)
+
+\subsection{Platform Architecture}
+\begin{itemize}
+  \item 5-flow Prefect DAG with Docker-per-flow isolation (6 containers total)
+  \item MLflow is the ONLY inter-flow contract --- no shared filesystem between flows
+  \item Layer 0 (Infrastructure): PostgreSQL, MinIO, MLflow, Prefect Server, Grafana
+  \item Layer 1 (GPU Management): NVIDIA MIG for multi-model inference partitioning
+  \item Layer 2 (Training Execution): Optuna ASHA + PyTorch DDP
+  \item Layer 3 (Compute Provisioning): SkyPilot multi-cloud spot instances
+  \item Layer 4 (Orchestration): Prefect 3.x Server with Docker workers
+\end{itemize}
+
+%% Figure stub -- replace with \includegraphics after mmdc rendering
+% \begin{figure}[h]
+%   \includegraphics[width=\linewidth]{figures/generated/fig-M3-architecture.pdf}
+%   \caption{ARBOR platform architecture showing the 5-layer stack and 5-flow DAG.}
+%   \label{fig:M3-architecture}
+% \end{figure}
+
+% TODO co-author: add Mermaid diagram showing the 5-layer stack (Layer 0-4)
+% TODO co-author: add 2 sentences on why Docker-per-flow (not monolithic) matters for reproducibility

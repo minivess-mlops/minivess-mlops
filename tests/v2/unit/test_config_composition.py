@@ -207,6 +207,45 @@ class TestComposeBridge:
         # Just verify the flag exists — actual fallback tested via mocking
         assert isinstance(_hydra_available(), bool)
 
+    def test_plus_prefix_override_applies_new_key(self) -> None:
+        """'+key=value' Hydra-style override: new key is applied correctly.
+
+        This is the GCP smoke test pattern: '+mixed_precision=false' adds a key
+        that doesn't exist in the base struct. The fallback manual merge must
+        strip the '+' prefix so the key is stored as 'mixed_precision', not
+        '+mixed_precision'. Regression test for the val_loss=NaN bug (2026-03-15).
+        """
+        from minivess.config.compose import compose_experiment_config
+
+        result = compose_experiment_config(
+            experiment_name="smoke_sam3_hybrid",
+            overrides=["+mixed_precision=false", "++val_interval=1"],
+        )
+        assert result.get("mixed_precision") is False, (
+            "+mixed_precision=false must set mixed_precision=False, not '+mixed_precision'"
+        )
+        assert result.get("val_interval") == 1, (
+            "++val_interval=1 must override val_interval (was 3 in smoke_sam3_hybrid.yaml)"
+        )
+
+    def test_double_plus_prefix_override_existing_key(self) -> None:
+        """'++key=value' Hydra force-override: works for both new and existing keys.
+
+        '+val_interval=1' fails if val_interval already exists in the config.
+        '++val_interval=1' works unconditionally. The manual merge fallback must
+        strip '++' prefix the same way it strips '+'.
+        """
+        from minivess.config.compose import compose_experiment_config
+
+        # val_interval=3 in smoke_sam3_hybrid.yaml — force override to 1
+        result = compose_experiment_config(
+            experiment_name="smoke_sam3_hybrid",
+            overrides=["++val_interval=1"],
+        )
+        assert result.get("val_interval") == 1, (
+            "++val_interval=1 must force-override val_interval=3 in smoke_sam3_hybrid"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Phase 7: Converted experiment configs

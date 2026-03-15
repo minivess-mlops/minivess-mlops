@@ -1,0 +1,218 @@
+# knowledge-graph/code-structure/adapters.yaml
+# ModelAdapter implementations — bootstrapped from src/minivess/adapters/
+# Auto-regeneration: scripts/scan_code_structure.py
+
+_meta:
+  generated_by: manual_bootstrap
+  source_dirs: [src/minivess/adapters/]
+  note: "Intent fields sourced from CLAUDE.md, metalearning/, docs/planning/ — NOT from code"
+  scope_note: >
+    This file captures BOTH implemented adapters (status: production/experimental/available)
+    AND planned adapters (status: planned) that are in the paper's model comparison scope
+    but not yet implemented. Planned entries prevent KG scope blindness.
+
+base_contract:
+  file: src/minivess/adapters/base.py
+  abstract_class: ModelAdapter
+  abstract_methods: [forward, get_eval_roi_size, get_adapter_config]
+  output_type: SegmentationOutput
+  output_shape: "(B, C, D, H, W) — depth LAST, MONAI convention"
+  factory: src/minivess/adapters/model_builder.py::build_adapter()
+
+adapters:
+  - id: dynunet
+    name: DynUNet
+    file: src/minivess/adapters/dynunet.py
+    family: monai_native
+    status: production
+    vram_inference_gb: 3.5
+    vram_training_gb: 3.5
+    source: "MONAI — zero custom code for architecture"
+    gpu_requirement: "Any CUDA GPU >= 8 GB"
+    measured_on: [RTX_2070_Super, RTX_4090]
+    intent:
+      why_chosen: "Primary MONAI 3D segmentation model — battle-tested, self-configuring, native BF16"
+      intent_source: "CLAUDE.md §Key Architecture Decisions"
+    test_markers: [model_loading]
+
+  - id: segresnet
+    name: SegResNet
+    file: src/minivess/adapters/segresnet.py
+    family: monai_native
+    status: production
+    vram_inference_gb: 3.5
+    vram_training_gb: 3.5
+    source: "MONAI — residual encoder-decoder"
+    gpu_requirement: "Any CUDA GPU >= 8 GB"
+    intent:
+      why_chosen: "Ablation baseline — simpler architecture than DynUNet for comparison"
+      intent_source: "knowledge-graph/decisions/L3-technology/primary_3d_model.yaml"
+
+  - id: sam3_vanilla
+    name: "SAM3 Vanilla (V1)"
+    file: src/minivess/adapters/sam3_vanilla.py
+    backbone_file: src/minivess/adapters/sam3_backbone.py
+    family: foundation_model
+    status: production
+    vram_inference_gb: 2.9
+    vram_training_gb: 3.5
+    source: "Meta SAM3 (github.com/facebookresearch/sam3, Nov 2025) — NOT SAM2"
+    gpu_requirement: "Any CUDA GPU >= 8 GB (SDPA mandatory)"
+    measured_on: [RTX_2070_Super, RTX_4090]
+    intent:
+      why_chosen: >
+        Frozen ViT-32L encoder (648M params) + lightweight Conv decoder. Cheapest SAM3
+        variant that tests zero-shot transfer from 2D natural images to 3D vascular data.
+      intent_source: "src/minivess/adapters/CLAUDE.md §SAM3 Variants"
+      critical_constraints:
+        - "attn_implementation='sdpa' MANDATORY — eager attention OOMs on 8 GB GPU"
+        - "BF16 required (not FP16) — FP16 overflows in frozen encoder (MONAI #4243)"
+        - "AMP OFF for validation — 3D sliding_window_inference + autocast causes NaN"
+        - "No _StubSam3Encoder — permanently removed 2026-03-07"
+        - "Real pretrained weights required: ViT-32L from HuggingFace"
+      intent_banned_patterns:
+        - pattern: "attn_implementation='eager'"
+          reason: "OOM on 8 GB GPU"
+        - pattern: "torch.float16"
+          reason: "FP16 overflow in frozen encoder -> NaN"
+        - pattern: "_StubSam3Encoder"
+          reason: "Cosmetic success — scientifically useless, banned 2026-03-07"
+    test_markers: [model_loading, gpu_instance]
+    metalearning:
+      - .claude/metalearning/2026-03-02-sam3-implementation-fuckup.md
+      - .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
+      - .claude/metalearning/amp-validation-nan-monai-4243.md
+
+  - id: sam3_hybrid
+    name: "SAM3 Hybrid (V3)"
+    file: src/minivess/adapters/sam3_hybrid.py
+    family: foundation_model
+    status: experimental
+    vram_inference_gb: 7.18
+    vram_training_gb: 7.18
+    source: "Custom: frozen ViT-32L + gated DynUNet fusion"
+    gpu_requirement: ">= 8 GB GPU (patch=(32,32,3) required for 8 GB; patch=(64,64,3) = OOM)"
+    measured_on: [RTX_2070_Super_OOM_at_64, RTX_4090]
+    intent:
+      why_chosen: >
+        Combines SAM3 semantic features with DynUNet spatial detail via learned gating.
+        Hypothesis: better topology preservation than SAM3 vanilla alone.
+      critical_constraints:
+        - "patch_size=(32,32,3) required on 8 GB GPU — (64,64,3) = 7.18 GiB OOM"
+        - "val_interval = max_epochs + 1 on 8 GB GPU (never validate to avoid OOM)"
+        - "Requires cloud GPU (RTX 4090 / L4) for standard patch=(64,64,3)"
+      intent_source: "src/minivess/adapters/CLAUDE.md"
+    test_markers: [model_loading, gpu_instance]
+
+  - id: sam3_topolora
+    name: "SAM3 TopoLoRA (V2)"
+    file: src/minivess/adapters/sam3_topolora.py
+    family: foundation_model
+    status: experimental
+    vram_training_gb: ">22.66 GB (OOM on RTX 4090)"
+    source: "SAM3 + LoRA on FFN layers + topology loss head"
+    gpu_requirement: "NOT VIABLE on RTX 4090 — requires A100 (>= 40 GB)"
+    intent:
+      why_chosen: "Parameter-efficient fine-tuning of SAM3 encoder with topology regularization"
+      status_note: "OOM even on RTX 4090 (24 GB) — deferred until A100 access"
+      intent_source: "src/minivess/adapters/CLAUDE.md"
+    test_markers: [gpu_instance]
+
+  - id: vesselfm
+    name: "VesselFM"
+    file: src/minivess/adapters/vesselfm.py
+    family: foundation_model
+    status: experimental
+    gpu_requirement: ">= 16 GB VRAM"
+    source: "Wittmann et al. 2024 (arXiv:2411.17386)"
+    intent:
+      why_chosen: "Foundation model pre-trained on vascular data including MiniVess"
+      critical_data_leakage_warning: >
+        VesselFM was pre-trained on MiniVess dataset. Evaluating on MiniVess = data leakage.
+        MUST evaluate on DeepVess or TubeNet only for fair comparison.
+        This is a known limitation — document in paper.
+      intent_source: "docs/planning/repo-to-manuscript.md §Reviewer Objections R3"
+    test_markers: [gpu_instance]
+
+  - id: swinunetr
+    name: "SwinUNETR"
+    file: src/minivess/adapters/swinunetr.py
+    family: monai_native
+    status: available
+    source: "MONAI — Swin Transformer UNETR"
+
+  - id: attentionunet
+    name: "AttentionUNet"
+    file: src/minivess/adapters/attentionunet.py
+    family: monai_native
+    status: available
+    source: "MONAI — attention gates"
+
+  # ============================================================
+  # PLANNED adapters — in paper scope but not yet implemented
+  # Added 2026-03-15 after KG scope blindness incident (see
+  # .claude/metalearning/2026-03-15-kg-mamba-missing-scope-blindness.md)
+  # ============================================================
+
+  # ARCHIVED — do not use. Replaced by mambavesselnet (see below).
+  - id: mamba_variants_archived
+    name: "Mamba Variants — ARCHIVED (SegMamba / U-Mamba)"
+    file: src/minivess/adapters/mamba.py  # NEVER CREATED — permanently retired
+    family: state_space_model
+    status: archived
+    archived_date: 2026-03-15
+    archived_reason: >
+      Replaced by MambaVesselNet (chen_2024_mambavesselnet) — a peer-reviewed published
+      architecture (ACM MMasia 2024) with an exact reference implementation at
+      github.com/CC0117/MambaVesselNet to adapt. SegMamba and U-Mamba were speculative
+      selections with no specific reference code committed to. Adapting a published, tested
+      architecture is the correct engineering choice. See GitHub issue #737.
+    source: "SegMamba (github.com/ge-xing/SegMamba) or U-Mamba (github.com/bowang-lab/U-Mamba)"
+    note: >
+      PERMANENTLY RETIRED. If these architectures are needed for a different future project,
+      un-archive then. For this paper they are off the table. Never use mamba_variants_archived
+      as a model_id in any config, test, or implementation.
+
+  - id: mambavesselnet
+    name: "MambaVesselNet++ (Xu & Chen et al. 2025)"
+    file: src/minivess/adapters/mambavesselnet.py
+    family: state_space_model
+    status: experimental
+    gpu_requirement: "TBD — measure on RTX 2070 Super + RTX 4090 (T09, requires mamba-ssm GPU build)"
+    source: "Xu & Chen et al. 2025, ACM TOMM — github.com/CC0117/MambaVesselNet"
+    citation: "xu_2025_mambavesselnet_plus"
+    intent:
+      why_chosen: >
+        Peer-reviewed, published hybrid CNN-Mamba architecture for 3D cerebrovascular
+        segmentation (ACM MMasia 2024). Chosen over speculative SegMamba/U-Mamba
+        because a published reference implementation exists to adapt correctly.
+        Represents the SSM (State Space Model) family in the platform's multi-architecture
+        generalizability demonstration. Demonstrates platform works across CNN (DynUNet),
+        SSM (MambaVesselNet), and Foundation Model (SAM3, VesselFM) families.
+        Paper role: one of four model FAMILIES demonstrating ModelAdapter ABC generalizability.
+        NOT a claim that MambaVesselNet is better or worse than DynUNet — that is not the paper's contribution.
+      intent_source: "User instruction 2026-03-15, GitHub issue #737"
+      critical_constraints:
+        - "Adapt CC0117/MambaVesselNet to MONAI output convention: (B,C,D,H,W) depth LAST"
+        - "Check BF16 compatibility — apply AMP-off-for-validation if needed (MONAI #4243)"
+        - "NEVER guess VRAM — measure on RTX 2070 Super + RTX 4090 and write to YAML profile"
+        - "Adapter not yet implemented — needed for R3b multi-model comparison"
+    intent_banned_patterns:
+      - pattern: "claiming MambaVesselNet outperforms or underperforms DynUNet"
+        reason: "Platform paper — model comparison demonstrates generalizability, not superiority"
+      - pattern: "reverting to SegMamba or U-Mamba"
+        reason: "Those variants are permanently archived (2026-03-15). MambaVesselNet is canonical."
+    paper_section: [R3b, M6]
+    blocks: [R3b]
+    github_issue: 737
+
+# Intent banished patterns (project-wide, not adapter-specific)
+intent_banned_patterns:
+  - pattern: "import re"
+    reason: "CLAUDE.md Rule #16 bans regex for structured data parsing"
+    scope: "ALL Python files in this repo"
+    intent_source: "CLAUDE.md Rule #16"
+    metalearning: ".claude/metalearning/2026-03-06-regex-ban.md"
+  - pattern: "datetime.now() without timezone"
+    reason: "CLAUDE.md Rule #7 — always use datetime.now(timezone.utc)"
+    scope: "ALL Python files"

@@ -1,0 +1,591 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DEFINITIVE System Verification Plan v2 — Reviewer-Hardened
+  Created: 2026-03-15
+  Reviewed: 16 issues found, ALL addressed (6 blockers, 4 high, 6 medium)
+  Branch: qa/remaining-runpod-qa
+  Skills: self-learning-iterative-coder + ralph-loop
+
+  REVIEWER BLOCKERS ADDRESSED:
+  B1: Cloud Run MLflow DEFERRED → Phase 1.5 added (build MLflow image, un-defer, redeploy)
+  B2: pulumi stack output mlflow_url missing → gated on Cloud Run un-deferral
+  B3: pulumi stack output gar_image_url missing → use docker_registry output
+  B4: Missing GCP API enablement → Phase 0.5 added
+  B5: Missing GPU quota → Phase 0.5 verification
+  B6: Missing gcloud auth configure-docker → Phase 2 prerequisite
+  B7: Missing Pulumi secret config → Phase 1 prerequisite
+  B8: Missing PULUMI_ACCESS_TOKEN → Phase 0.5 env check
+
+  HIGH ISSUES ADDRESSED:
+  H1: verify_smoke_test.py MLFLOW_CLOUD_URI mismatch → use curl directly
+  H2: Missing sky check gcp → Phase 0.5
+  H3: Missing DVC data verification → Phase 0.5
+  H4: Missing HF_TOKEN → Phase 0.5
+
+  MEDIUM ISSUES ADDRESSED:
+  M1: down=True destroys evidence → capture logs before destroy
+  M2: No budget alert → document manual check
+  M3: Cloud SQL 0.0.0.0/0 → document as acceptable for smoke test
+  M4: GCS FUSE checkpoint corruption → use CHECKPOINT_DIR=/app/checkpoints (local), not MOUNT
+  M5: Cloud SQL 7-day deletion delay → note in teardown
+  M6: RunPod on-demand not spot → acceptable for dev
+
+  USER DIRECTIVE (verbatim): "Kill everything, test from scratch. If anything
+  from this whole system fails, we have a failed system."
+-->
+<plan version="2.0" name="system-verification-from-scratch-reviewed">
+  <metadata>
+    <created>2026-03-15</created>
+    <branch>qa/remaining-runpod-qa</branch>
+    <skills>self-learning-iterative-coder, ralph-loop</skills>
+    <budget>GCP: ~$5-10 (infra + training). RunPod: ~$2-3.</budget>
+    <prerequisite-env-vars>
+      <!-- ALL of these must be in .env BEFORE starting -->
+      PULUMI_ACCESS_TOKEN, PULUMI_CONFIG_PASSPHRASE,
+      GCP_PROJECT (=minivess-mlops),
+      DVC_S3_ENDPOINT_URL, DVC_S3_ACCESS_KEY, DVC_S3_SECRET_KEY,
+      DVC_S3_BUCKET (=minivess-dvc-data),
+      HF_TOKEN,
+      RUNPOD_API_KEY (for Phase 5 only),
+      GITHUB_TOKEN (for GHCR push if needed)
+    </prerequisite-env-vars>
+  </metadata>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 0: DESTROY EVERYTHING ($0, ~10 min)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P0" name="Tear Down All Infrastructure" cost="$0" effort="10min">
+    <task id="T0.1" name="Destroy GCP Pulumi stack">
+      <commands>
+        <cmd>cd deployment/pulumi/gcp</cmd>
+        <cmd>export PULUMI_CONFIG_PASSPHRASE="..." # from .env</cmd>
+        <cmd>pulumi destroy -y 2>&amp;1 || echo "Destroy failed or no stack"</cmd>
+        <cmd>gcloud compute instances list --project=minivess-mlops</cmd>
+        <cmd>gcloud run services list --project=minivess-mlops --region=europe-north1</cmd>
+      </commands>
+      <on-failure>
+        If Cloud SQL stuck in PENDING_DELETE (up to 7 days):
+        - gcloud sql instances list --project=minivess-mlops
+        - Wait or use different instance name in Pulumi config
+        If Pulumi state corrupted:
+        - pulumi refresh -y (sync state with actual GCP)
+        - Then retry pulumi destroy -y
+      </on-failure>
+      <acceptance>0 instances, 0 Cloud Run services. GCS buckets may take time to delete.</acceptance>
+    </task>
+
+    <task id="T0.2" name="Destroy ALL SkyPilot clusters">
+      <commands>
+        <cmd>uv run sky down --all -y 2>&amp;1 || true</cmd>
+        <cmd>uv run sky status</cmd>
+      </commands>
+      <acceptance>0 clusters.</acceptance>
+    </task>
+
+    <task id="T0.3" name="Clean local Docker images">
+      <commands>
+        <cmd>docker rmi minivess-base:latest 2>/dev/null || true</cmd>
+        <cmd>docker rmi europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest 2>/dev/null || true</cmd>
+        <cmd>docker rmi minivess-mlflow:v3.10.0 2>/dev/null || true</cmd>
+      </commands>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 0.5: PREREQUISITES VERIFICATION ($0, ~10 min)
+       [Addresses B4, B5, B8, H2, H3, H4]
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P0.5" name="Prerequisites — Env Vars, APIs, Quota, Credentials" cost="$0" effort="10min" blocked-by="P0">
+    <task id="T0.5.1" name="Verify ALL required env vars are set">
+      <commands>
+        <cmd>for var in PULUMI_ACCESS_TOKEN PULUMI_CONFIG_PASSPHRASE \
+          DVC_S3_ENDPOINT_URL DVC_S3_ACCESS_KEY DVC_S3_SECRET_KEY HF_TOKEN; do
+          [ -z "${!var}" ] &amp;&amp; echo "MISSING: $var" || echo "OK: $var"
+        done</cmd>
+      </commands>
+      <acceptance>ALL vars show OK. Zero MISSING.</acceptance>
+    </task>
+
+    <task id="T0.5.2" name="Verify GCP APIs enabled (read-only check)">
+      <description>
+        API enablement is done BY PULUMI (gcp.projects.Service resources in __main__.py).
+        This task only VERIFIES, never creates. NEVER run gcloud services enable manually.
+      </description>
+      <commands>
+        <cmd>gcloud services list --enabled --project=minivess-mlops --format="value(name)" | \
+          grep -c -E "compute|storage|iam|run|sqladmin|artifactregistry|secretmanager" || \
+          echo "APIs will be enabled by pulumi up in Phase 1"</cmd>
+      </commands>
+      <acceptance>APIs will be enabled by Pulumi. This is a read-only verification.</acceptance>
+    </task>
+
+    <task id="T0.5.3" name="Verify GPU quota">
+      <commands>
+        <cmd>gcloud compute regions describe us-central1 --project=minivess-mlops \
+          --format="value(quotas[name=GPUS_ALL_REGIONS].limit)" 2>/dev/null || \
+          echo "Check GPU quota manually at https://console.cloud.google.com/iam-admin/quotas"</cmd>
+      </commands>
+      <on-failure>
+        Request GPU quota at: https://console.cloud.google.com/iam-admin/quotas?project=minivess-mlops
+        Filter: GPUS_ALL_REGIONS. Request >= 1. Approval takes 5-30 min.
+      </on-failure>
+      <acceptance>GPUS_ALL_REGIONS >= 1.</acceptance>
+    </task>
+
+    <task id="T0.5.4" name="Verify SkyPilot GCP enabled">
+      <commands>
+        <cmd>uv run sky check gcp</cmd>
+      </commands>
+      <acceptance>"GCP: enabled [compute, storage]"</acceptance>
+    </task>
+
+    <task id="T0.5.5" name="Verify DVC data exists in UpCloud S3">
+      <commands>
+        <cmd>uv run dvc status -r upcloud 2>&amp;1 || echo "DVC remote not configured — run: uv run python scripts/configure_dvc_remote.py"</cmd>
+      </commands>
+      <on-failure>
+        If DVC remote not configured: uv run python scripts/configure_dvc_remote.py
+        If data not pushed: dvc push -r upcloud
+      </on-failure>
+      <acceptance>DVC shows data is up to date on upcloud remote.</acceptance>
+    </task>
+
+    <task id="T0.5.6" name="Verify smoke test split file exists">
+      <commands>
+        <cmd>ls -la configs/splits/smoke_test_1fold_4vol.json</cmd>
+      </commands>
+      <acceptance>File exists with 4 volumes.</acceptance>
+    </task>
+
+    <task id="T0.5.7" name="Configure Docker auth for GAR">
+      <commands>
+        <cmd>gcloud auth configure-docker europe-north1-docker.pkg.dev --quiet</cmd>
+      </commands>
+      <acceptance>Docker configured for GAR.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 1: PULUMI UP — GCP INFRASTRUCTURE (~$2-5/day, ~15 min)
+       [Addresses B7, B8]
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P1" name="Pulumi Up — GCP Stack (WITHOUT Cloud Run)" cost="~$2-5/day" effort="15min" blocked-by="P0.5">
+    <description>
+      Deploy: Cloud SQL, 3 GCS buckets, GAR registry, IAM service accounts, Secret Manager.
+      Cloud Run MLflow is DEFERRED — deployed in Phase 1.5 after MLflow Docker image is built.
+    </description>
+
+    <task id="T1.1" name="Configure Pulumi secrets">
+      <commands>
+        <cmd>cd deployment/pulumi/gcp</cmd>
+        <cmd>pulumi config set minivess-gcp:mlflow_admin_password --secret "$(openssl rand -base64 16)"</cmd>
+        <cmd>pulumi config set minivess-gcp:db_password --secret "$(openssl rand -base64 16)"</cmd>
+      </commands>
+    </task>
+
+    <task id="T1.2" name="Deploy GCP infrastructure" blocked-by="T1.1">
+      <commands>
+        <cmd>pulumi up -y</cmd>
+        <cmd>pulumi stack output</cmd>
+      </commands>
+      <acceptance>
+        Outputs include: db_connection_name, db_public_ip, mlflow_artifacts_bucket,
+        dvc_data_bucket, checkpoints_bucket, docker_registry, region.
+        NOTE: mlflow_url will NOT appear yet (Cloud Run deferred).
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 1.5: CLOUD RUN MLFLOW (CRITICAL — addresses B1, B2)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P1.5" name="Build + Deploy Cloud Run MLflow" cost="included in P1" effort="20min" blocked-by="P1">
+    <description>
+      THE BLOCKER: Cloud Run MLflow is deferred in Pulumi because it needs a custom
+      Docker image with psycopg2-binary + google-cloud-storage. Build it, push to GAR,
+      then un-defer and redeploy.
+    </description>
+
+    <task id="T1.5.1" name="Build MLflow Docker image for Cloud Run">
+      <description>
+        Use EXISTING Dockerfile.mlflow-gcp (NOT Dockerfile.mlflow).
+        The GCP variant includes google-cloud-storage for GCS artifact signing.
+      </description>
+      <commands>
+        <cmd>docker build -t minivess-mlflow:v3.10.0 -f deployment/docker/Dockerfile.mlflow-gcp .</cmd>
+      </commands>
+      <acceptance>Image built with psycopg2 + google-cloud-storage + boto3.</acceptance>
+    </task>
+
+    <task id="T1.5.2" name="Push MLflow image to GAR" blocked-by="T1.5.1">
+      <commands>
+        <cmd>GAR_REPO=$(cd deployment/pulumi/gcp &amp;&amp; pulumi stack output docker_registry)</cmd>
+        <cmd>docker tag minivess-mlflow:v3.10.0 ${GAR_REPO}/mlflow:v3.10.0</cmd>
+        <cmd>docker push ${GAR_REPO}/mlflow:v3.10.0</cmd>
+      </commands>
+    </task>
+
+    <task id="T1.5.3" name="Enable Cloud Run via Pulumi config and redeploy" blocked-by="T1.5.2">
+      <description>
+        Enable Cloud Run MLflow via Pulumi config flag (NOT sed on Python source).
+        Also update __main__.py to use GAR image (not ghcr.io base + pip install).
+        NEVER use sed to modify Python source (CLAUDE.md Rule #16).
+      </description>
+      <commands>
+        <cmd>cd deployment/pulumi/gcp</cmd>
+        <cmd>pulumi config set minivess-gcp:enable_cloud_run true</cmd>
+        <cmd># Update __main__.py: replace _CLOUD_RUN_DEFERRED with config.get_bool()
+        # and update Cloud Run image to GAR mlflow image (not ghcr.io + pip install)</cmd>
+        <cmd>pulumi up -y</cmd>
+        <cmd>MLFLOW_URL=$(pulumi stack output mlflow_url)</cmd>
+        <cmd>curl -s "$MLFLOW_URL/health"</cmd>
+      </commands>
+      <acceptance>MLflow Cloud Run returns HTTP 200. pulumi stack output mlflow_url is non-empty.</acceptance>
+    </task>
+
+    <task id="T1.5.4" name="Update .env with MLflow URL" blocked-by="T1.5.3">
+      <commands>
+        <cmd>MLFLOW_URL=$(cd deployment/pulumi/gcp &amp;&amp; pulumi stack output mlflow_url)</cmd>
+        <cmd>echo "MLFLOW_GCP_URI=${MLFLOW_URL}" >> .env</cmd>
+      </commands>
+      <acceptance>.env has MLFLOW_GCP_URI set to Cloud Run URL.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 2: DOCKER BASE IMAGE BUILD + PUSH (~$0, ~25 min)
+       [Addresses B3, B6]
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P2" name="Docker Training Image Build + Push to GAR" cost="$0" effort="25min" blocked-by="P1.5">
+    <task id="T2.1" name="Build Docker base image (GPU)">
+      <commands>
+        <cmd>make build-base-gpu</cmd>
+      </commands>
+      <acceptance>docker images minivess-base:latest shows fresh timestamp.</acceptance>
+    </task>
+
+    <task id="T2.2" name="Verify Docker image contents" blocked-by="T2.1">
+      <commands>
+        <cmd>docker run --rm minivess-base:latest python -c "
+from minivess.config.models import TrainingConfig
+c = TrainingConfig()
+print(f'mixed_precision_val={c.mixed_precision_val}')
+import subprocess; subprocess.run(['dvc', 'version'], check=True)
+import mlflow; print(f'mlflow={mlflow.__version__}')
+import yaml
+cfg = yaml.safe_load(open('configs/splits/smoke_test_1fold_4vol.json').read() if False else '[]')
+print('configs accessible')
+"</cmd>
+      </commands>
+      <acceptance>mixed_precision_val=False, dvc available, mlflow importable, configs present.</acceptance>
+    </task>
+
+    <task id="T2.3" name="Tag and push to GAR" blocked-by="T2.2">
+      <commands>
+        <cmd>GAR_REPO=$(cd deployment/pulumi/gcp &amp;&amp; pulumi stack output docker_registry)</cmd>
+        <cmd>docker tag minivess-base:latest ${GAR_REPO}/base:latest</cmd>
+        <cmd>docker push ${GAR_REPO}/base:latest</cmd>
+        <cmd>gcloud artifacts docker images list ${GAR_REPO} --limit=2</cmd>
+      </commands>
+      <acceptance>GAR shows base:latest with fresh CREATE_TIME.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 3: GCP 4-MODEL TRAINING (~$1-2, ~90 min sequential)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P3" name="GCP 4-Model Training on L4 Spot" cost="~$1-2" effort="90min" blocked-by="P2">
+    <description>
+      Sequential launch: sam3_vanilla → dynunet → sam3_hybrid → vesselfm.
+      GPU quota = 1, so MUST be sequential.
+      BETWEEN EACH MODEL: verify previous model FINISHED with finite val_loss.
+      If ANY model fails → SYSTEM FAILURE → diagnose with ralph-loop → fix → retry.
+
+      CRITICAL CHECKS PER MODEL:
+      1. SkyPilot provisions L4 (not T4 — T4 banned)
+      2. Docker image pulled from GAR
+      3. DVC data pulled in setup
+      4. Training completes (FINISHED, not FAILED)
+      5. val_loss is FINITE (not NaN, not Inf)
+      6. Artifacts uploaded to GCS via MLflow multipart
+      7. VM auto-destroyed after completion
+    </description>
+
+    <task id="T3.1" name="Train sam3_vanilla" priority="P0">
+      <commands>
+        <cmd>gcloud compute instances list --project=minivess-mlops # verify 0 instances</cmd>
+        <cmd>make smoke-test-gcp MODEL=sam3_vanilla</cmd>
+      </commands>
+      <verification>
+        Wait for cluster to auto-destroy. Then:
+        curl MLflow /api/2.0/mlflow/experiments/search → new experiment.
+        curl MLflow /api/2.0/mlflow/runs/search → FINISHED, finite val_loss.
+      </verification>
+      <ralph-loop>Monitor. On failure: capture logs BEFORE auto-destroy, diagnose, fix, retry.</ralph-loop>
+    </task>
+
+    <task id="T3.2" name="Train dynunet" blocked-by="T3.1">
+      <commands>
+        <cmd>gcloud compute instances list --project=minivess-mlops # verify 0</cmd>
+        <cmd>make smoke-test-gcp MODEL=dynunet</cmd>
+      </commands>
+    </task>
+
+    <task id="T3.3" name="Train sam3_hybrid" blocked-by="T3.2">
+      <description>
+        CRITICAL: GCP YAML auto-selects smoke_sam3_hybrid_cloud.yaml (val_interval=1).
+        Verify in MLflow: max_epochs=2, mixed_precision=False. If val_loss=NaN,
+        CHECK which experiment config was used (the sentinel bug).
+      </description>
+      <commands>
+        <cmd>gcloud compute instances list --project=minivess-mlops</cmd>
+        <cmd>make smoke-test-gcp MODEL=sam3_hybrid</cmd>
+      </commands>
+    </task>
+
+    <task id="T3.4" name="Train vesselfm" blocked-by="T3.3">
+      <description>
+        VesselFM: patch Z≥32 required (5 stride-2 downsamplings). Fix is in Docker image.
+        Previous failure was SSH error (transient). This MUST pass on GCP.
+      </description>
+      <commands>
+        <cmd>gcloud compute instances list --project=minivess-mlops</cmd>
+        <cmd>make smoke-test-gcp MODEL=vesselfm</cmd>
+      </commands>
+    </task>
+
+    <task id="T3.5" name="Verify ALL 4 models in MLflow" blocked-by="T3.4">
+      <commands>
+        <cmd>MLFLOW_URL=$(grep MLFLOW_GCP_URI .env | cut -d= -f2)</cmd>
+        <cmd>curl -s "$MLFLOW_URL/api/2.0/mlflow/experiments/search" | python3 -c "
+import json, sys, math
+d = json.load(sys.stdin)
+for e in d['experiments']:
+    runs = ... # query runs for each experiment
+    # Verify: FINISHED + finite val_loss
+"</cmd>
+      </commands>
+      <acceptance>
+        4/4 models: FINISHED status, finite val_loss.
+        sam3_topolora excluded (needs A100, hardware limitation).
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 4: GCP ARTIFACT VERIFICATION VIA MLFLOW UI ($0, ~5 min)
+       NOTE: NO local mlruns sync — MLflow Cloud Run IS the interface.
+       Researchers use the Web UI, not local mlruns. See #735 for backup tooling.
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P4" name="GCP Artifact Verification (MLflow UI Only)" cost="$0" effort="5min" blocked-by="P3">
+    <description>
+      GCP design: MLflow Cloud Run is ONLINE 24/7 for the research team.
+      Researchers access experiments via browser — NEVER download mlruns locally.
+      Local download is a backup/migration tool only (see issue #735).
+      This phase verifies artifacts exist IN MLflow, not on local disk.
+    </description>
+
+    <task id="T4.1" name="Verify all experiments visible in MLflow Web UI">
+      <commands>
+        <cmd>MLFLOW_URL=$(grep MLFLOW_GCP_URI .env | cut -d= -f2)</cmd>
+        <cmd>echo "Open in browser: $MLFLOW_URL"</cmd>
+        <cmd># Programmatic verification:
+        curl -s "$MLFLOW_URL/api/2.0/mlflow/experiments/search" \
+          -H "Content-Type: application/json" -d '{"max_results": 20}' | \
+          python3 -c "import json,sys; d=json.load(sys.stdin); \
+          print(f'{len(d.get(\"experiments\",[]))} experiments visible in MLflow')"</cmd>
+      </commands>
+      <acceptance>All 4 model experiments visible in MLflow Web UI with finite val_loss.</acceptance>
+    </task>
+
+    <task id="T4.2" name="Verify GCS artifacts exist (read-only)" blocked-by="T4.1">
+      <commands>
+        <cmd>gsutil ls gs://minivess-mlops-mlflow-artifacts/ | head -10</cmd>
+      </commands>
+      <acceptance>Checkpoint and config artifacts present in GCS bucket.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 5: RUNPOD DEV WORKFLOW (SECONDARY, ~$1, ~30 min)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P5" name="RunPod Dev Workflow — Ephemeral Compute + Full Sync" cost="~$1" effort="30min" blocked-by="P3">
+    <description>
+      SECONDARY priority. RunPod = ephemeral dev compute for academic paper.
+      Design: train on GPU → sync ALL artifacts (including .pth, .onnx) back to local.
+      File-based MLflow (no server). Network Volume with 7-day TTL.
+
+      KEY DIFFERENCE FROM GCP: RunPod syncs EVERYTHING back to local (including
+      large checkpoints). GCP researchers use MLflow Cloud Run UI directly —
+      they NEVER download mlruns.
+    </description>
+
+    <task id="T5.1" name="Verify SkyPilot RunPod enabled">
+      <commands>
+        <cmd>uv run sky check runpod</cmd>
+      </commands>
+    </task>
+
+    <task id="T5.2" name="Train sam3_vanilla on RunPod via SkyPilot" blocked-by="T5.1">
+      <description>
+        SkyPilot run: block MUST include auto-sync at the end (before VM dies).
+        This ensures artifacts survive even if user forgets manual sync.
+        The auto-sync copies mlruns/ + checkpoints from Network Volume to
+        a location accessible via sky rsync.
+      </description>
+      <commands>
+        <cmd>make smoke-test-gpu MODEL=sam3_vanilla</cmd>
+      </commands>
+      <acceptance>Training completes. mlruns/ + checkpoints on Network Volume.</acceptance>
+    </task>
+
+    <task id="T5.3" name="Manual sync — ALL artifacts including .pth and .onnx" blocked-by="T5.2">
+      <description>
+        Sync EVERYTHING from RunPod to local — including large files.
+        This is the standard RunPod dev workflow: train cloud → work local.
+        Uses CloudSyncer with NO excludes (all artifacts transferred).
+      </description>
+      <commands>
+        <cmd>mkdir -p mlruns/runpod</cmd>
+        <cmd>uv run python -c "
+from pathlib import Path
+from minivess.compute.mlruns_sync import CloudSyncer
+syncer = CloudSyncer(provider='skypilot', excludes=[])  # NO excludes — sync everything
+cmd = syncer.build_command('minivess-dev:/opt/vol/mlruns', Path('mlruns/runpod'))
+import subprocess; subprocess.run(cmd, check=True)
+"</cmd>
+        <cmd>ls -la mlruns/runpod/</cmd>
+        <cmd>find mlruns/runpod/ -name "*.pth" | head -5</cmd>
+      </commands>
+      <acceptance>
+        mlruns/runpod/ has experiment data INCLUDING .pth checkpoint files.
+        This is the COMPLETE training output, not just metadata.
+      </acceptance>
+    </task>
+
+    <task id="T5.4" name="Destroy RunPod — ephemeral, no persistence needed" blocked-by="T5.3">
+      <commands>
+        <cmd>uv run sky down --all -y</cmd>
+      </commands>
+      <note>
+        Network Volume has 7-day TTL. After 7 days idle, RunPod auto-deletes.
+        SAM3 weights (~1.8 GB) will be re-downloaded on next launch.
+        All training artifacts are already on local machine (T5.3).
+      </note>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 6: INTEGRATION TESTS ($0, ~30 min)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P6" name="System Integration Tests" cost="$0" effort="30min" blocked-by="P4">
+    <task id="T6.1" name="Write E2E system verification tests (TDD)">
+      <files>
+        <file path="tests/v2/cloud/test_system_e2e.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          test_mlflow_cloud_run_health: curl MLFLOW_GCP_URI/health → 200
+          test_gar_image_exists: gcloud artifacts list → image present
+          test_dvc_remote_accessible: dvc status -r upcloud → up to date
+          test_gcs_buckets_exist: gsutil ls → 3 buckets
+          test_skypilot_gcp_enabled: sky check gcp → enabled
+          test_env_vars_complete: all required vars in .env
+        </red>
+      </tdd-spec>
+    </task>
+
+    <task id="T6.2" name="SkyPilot + Pulumi bypass enforcement (pre-commit + AST tests)">
+      <description>
+        Create guards that BLOCK any attempt to bypass SkyPilot or Pulumi.
+        These run in pre-commit and in the staging test suite.
+      </description>
+      <files>
+        <file path="tests/v2/unit/deployment/test_no_manual_infra.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          --- Pre-commit hook: "No manual gcloud resource creation" ---
+          Scan staged .py/.sh/.yaml files for banned patterns:
+            "gcloud sql instances create", "gcloud run deploy",
+            "gcloud compute instances create", "gsutil mb",
+            "gcloud artifacts repositories create"
+          Allow: gcloud read-only (list, describe, auth)
+
+          --- AST tests: SkyPilot is sole compute path ---
+          test_no_subprocess_ssh_to_cloud: AST scan all .py files for
+            subprocess.run(["ssh"...]) or os.system("ssh") outside of
+            SkyPilot modules → FAIL
+          test_no_direct_gcloud_compute_create: scan scripts/ for
+            "gcloud compute instances create" → FAIL
+          test_skypilot_yamls_have_image_id: all deployment/skypilot/*.yaml
+            MUST have image_id: docker:... (no bare VM)
+          test_pulumi_manages_all_gcp_services: verify __main__.py has
+            gcp.projects.Service for all required APIs
+          test_no_manual_bucket_creation: scan for "gsutil mb" → FAIL
+        </red>
+      </tdd-spec>
+    </task>
+
+    <task id="T6.3" name="Add environment priority to CLAUDE.md + pre-commit">
+      <description>
+        1. Add to root CLAUDE.md: "Environment Priority" section
+        2. Add to deployment/CLAUDE.md: reinforce GCP=PRIMARY, RunPod=SECONDARY
+        3. Add SkyPilot/Pulumi mandate to "What AI Must NEVER Do" section
+        4. Add pre-commit hook: "No manual gcloud resource creation"
+      </description>
+      <files>
+        <file path="CLAUDE.md" action="edit" />
+        <file path="deployment/CLAUDE.md" action="edit" />
+        <file path=".pre-commit-config.yaml" action="edit" />
+      </files>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 7: FINAL REPORT + TEARDOWN REMINDER ($0, ~10 min)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P7" name="Report + Cost Control" cost="$0" effort="10min" blocked-by="P6">
+    <task id="T7.1" name="Write system verification report">
+      <files>
+        <file path="docs/planning/system-verification-report-2026-03-15.md" action="create" />
+      </files>
+      <description>
+        Document: every component tested, every model trained, every artifact synced.
+        Include MLflow experiment IDs, GCS bucket contents, timing, costs.
+      </description>
+    </task>
+
+    <task id="T7.2" name="COST CONTROL — Destroy or keep infra">
+      <description>
+        Cloud SQL costs ~$0.80/day. Cloud Run MLflow costs ~$0.10/day (scale to zero).
+        DECIDE: keep running (for continued development) or pulumi destroy.
+        If keeping: set GCP budget alert at $20/month.
+      </description>
+    </task>
+  </phase>
+
+  <cost-summary>
+    <item phase="P0-P0.5" cost="$0">Destroy + prerequisites (local)</item>
+    <item phase="P1-P1.5" cost="~$2-5/day">GCP infrastructure (Cloud SQL dominant)</item>
+    <item phase="P2" cost="$0">Docker build + push (local bandwidth)</item>
+    <item phase="P3" cost="~$1-2">4 models × ~15 min on L4 spot ($0.19/hr)</item>
+    <item phase="P4" cost="$0">Artifact verification + sync (local)</item>
+    <item phase="P5" cost="~$1">RunPod dev (RTX 4090 $0.44/hr × ~30 min)</item>
+    <item phase="P6-P7" cost="$0">Tests + report (local)</item>
+    <total>~$5-10 first day, ~$2-5/day ongoing if infra kept running</total>
+  </cost-summary>
+
+  <execution-notes>
+    <note>Phase 1.5 (Cloud Run MLflow) is THE critical new addition — without it, nothing works.</note>
+    <note>GCP prod/staging is PRIMARY. RunPod dev is SECONDARY.</note>
+    <note>DESTROY EVERYTHING first — test as a new user would.</note>
+    <note>If ANY phase fails → SYSTEM FAILURE → fix before proceeding.</note>
+    <note>Sequential model launches on GCP (quota = 1 GPU).</note>
+    <note>BETWEEN each model: verify FINISHED + finite val_loss before launching next.</note>
+    <note>ralph-loop monitors all cloud phases autonomously.</note>
+    <note>self-learning-iterative-coder handles TDD tasks (Phase 6).</note>
+    <note>sam3_topolora excluded (needs A100 — hardware, not system bug).</note>
+    <note>After Phase 7: REMEMBER to pulumi destroy if not continuing development.</note>
+  </execution-notes>
+</plan>

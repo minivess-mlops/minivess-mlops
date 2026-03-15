@@ -1,0 +1,25 @@
+%% HUMAN-AUTHORED: methods-11-config.tex
+%% Section: M11 -- Configuration Architecture
+%% KG: knowledge-graph/manuscript/methods.yaml#M11
+%% Last updated: 2026-03-15 (scaffold)
+
+\subsection{Configuration Architecture}
+\begin{itemize}
+  \item Dual configuration system: Hydra-zen (experiment sweeps) + Dynaconf (deployment environments)
+  \item \texttt{.env.example} = single source of truth for ALL service URLs, ports, and credentials
+  \item Zero hardcoded values --- any lab overrides via \texttt{configs/lab/lab\_name.yaml}
+  \item Config hierarchy: repo defaults $\to$ lab override $\to$ user override $\to$ experiment
+  \item Config groups: \texttt{configs/cloud/}, \texttt{configs/registry/}, \texttt{configs/model\_profiles/}
+  \item New lab adoption: create \texttt{configs/lab/newlab.yaml} + \texttt{configs/user/user.yaml}
+        --- zero code changes required
+\end{itemize}
+
+%% Figure stub -- replace with \includegraphics after mmdc rendering
+% \begin{figure}[h]
+%   \includegraphics[width=\linewidth]{figures/generated/fig-M11-config.pdf}
+%   \caption{ARBOR configuration hierarchy. Repo defaults are overridden at lab and user level;
+%            no code changes are needed to adapt the platform to a new research group.}
+%   \label{fig:M11-config}
+% \end{figure}
+
+% TODO co-author: add Mermaid diagram showing the 4-level config override hierarchy

@@ -1,0 +1,45 @@
+%% ARBOR: Agentic Reproducible Biomedical Operations Research
+%% latent-methods-results.tex — Master file for Methods + Results
+%% Co-author orientation document — bullet+Mermaid format, no prose yet
+%% COLD-RESUME: Read EXECUTIVE-SUMMARY.md first, then this file.
+
+\documentclass[11pt]{article}
+\usepackage{hyperref, booktabs, graphicx, minted, geometry}
+\geometry{margin=1in}
+
+\title{ARBOR: Methods + Results Scaffold\\
+{\large Co-Author Orientation Document --- NOT Final Manuscript}}
+\author{Teikari P et al.}
+\date{2026-03-15 (scaffold)}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%% ========= METHODS =========
+\section{Methods}
+\input{methods/methods-00-overview}
+\input{methods/methods-01-dataset}
+\input{methods/methods-02-data-engineering}
+\input{methods/methods-03-architecture}
+\input{methods/methods-04-compute}
+\input{methods/methods-05-orchestration}
+\input{methods/methods-06-model-adapters}
+\input{methods/methods-07-training}
+\input{methods/methods-08-evaluation}
+\input{methods/methods-09-observability}
+\input{methods/methods-10-deployment}
+\input{methods/methods-11-config}
+\input{methods/methods-12-agentic}
+
+%% ========= RESULTS =========
+\section{Results}
+\input{results/results-00-overview}
+\input{results/results-01-reproducibility}
+\input{results/results-02-devex}
+\input{results/results-03-models}
+\input{results/results-04-ensemble}
+\input{results/results-05-agentic}
+
+\end{document}

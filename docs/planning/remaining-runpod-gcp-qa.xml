@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Remaining RunPod + GCP QA Plan
+  Updated: 2026-03-15
+  Branch: fix/gcp-runpod-qa
+  Skills: self-learning-iterative-coder + ralph-loop
+  Budget: $0.75–$1.50 (GCP L4 @ $0.19/hr + RunPod RTX 4090 @ $0.69/hr)
+
+  STATUS UPDATE (2026-03-15 session):
+  - P1 (BF16 auto-detect): DONE — committed 2da7460 on fix/gcp-runpod-qa
+  - T4 ban: DONE — smoke_test_gcp.yaml, CLAUDE.md, metalearning doc
+  - GCP smoke tests: sam3_vanilla ✓, dynunet ✓, sam3_hybrid NaN (T4, pre-BF16), vesselfm FAIL (stale Docker image)
+  - VesselFM root cause: GAR Docker image built before PR #723 merge (missing patch Z=32 fix)
+-->
+<plan version="2.0" name="remaining-runpod-gcp-qa">
+  <metadata>
+    <created>2026-03-15</created>
+    <updated>2026-03-15</updated>
+    <branch>fix/gcp-runpod-qa</branch>
+    <context>
+      Phase B-D from gcp-phase-b-d-cold-start.xml COMPLETE. BF16 auto-detect DONE.
+      T4 banned. Remaining: rebuild Docker image, rerun VesselFM + sam3_hybrid on L4,
+      AMP isolation, cost estimator, mlruns sync.
+
+      GCP smoke test results (2026-03-15):
+        sam3_vanilla: FINISHED, val_loss=0.632 (T4 me-west1)
+        dynunet:      FINISHED, val_loss=0.749 (T4 me-west1)
+        sam3_hybrid:  FINISHED, val_loss=NaN   (T4 me-west1 — FP16 overflow, pre-BF16 fix)
+        vesselfm:     FAILED, shape error       (T4 me-west1 — stale Docker image, missing Z=32)
+    </context>
+  </metadata>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 0: Rebuild Docker + Rerun Failed Models (GCP, ~$0.20, ~20 min)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P0" name="Rebuild Docker Image + Rerun Failed Models" environment="local+cloud" cost="$0.20" effort="30min">
+    <description>
+      Root cause of VesselFM failure: GAR Docker image (built 00:31 UTC) predates PR #723
+      merge (06:10 UTC) which added VesselFM patch_size=(64,64,32). sam3_hybrid NaN was
+      caused by T4 (Turing, no BF16). Both fixes are now in main. Rebuild image and rerun.
+    </description>
+
+    <task id="T0.1" name="Rebuild Docker base image with latest main" priority="P0" estimated-iterations="1">
+      <description>
+        Build minivess-base:latest from current main (includes BF16 auto-detect +
+        VesselFM Z=32 patch fix + atomic checkpoints + NaN guards).
+        Push to GAR (europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest).
+      </description>
+      <commands>
+        <cmd>DOCKER_BUILDKIT=1 docker build -t minivess-base:latest -f deployment/docker/Dockerfile.base .</cmd>
+        <cmd>docker tag minivess-base:latest europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest</cmd>
+        <cmd>docker push europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest</cmd>
+      </commands>
+      <acceptance>
+        GAR image updated with timestamp AFTER latest main merge.
+        Verify: gcloud artifacts docker images list ... shows new CREATE_TIME.
+      </acceptance>
+    </task>
+
+    <task id="T0.2" name="Rerun VesselFM on GCP L4 spot" priority="P0" estimated-iterations="1" blocked-by="T0.1">
+      <description>
+        Launch VesselFM smoke test on GCP L4 (NOT T4). New Docker image has Z=32 patch fix.
+        Expected: training completes, val_loss finite.
+      </description>
+      <commands>
+        <cmd>uv run python scripts/launch_smoke_test.py --model vesselfm --cloud gcp</cmd>
+      </commands>
+      <acceptance>
+        VesselFM training completes without shape error.
+        val_loss is finite in MLflow.
+      </acceptance>
+    </task>
+
+    <task id="T0.3" name="Rerun sam3_hybrid on GCP L4 spot (BF16)" priority="P0" estimated-iterations="1" blocked-by="T0.1">
+      <description>
+        Launch sam3_hybrid on GCP L4 (Ada Lovelace, BF16 supported). New Docker image has
+        BF16 auto-detect. Expected: encoder uses bfloat16, val_loss finite.
+        This is the critical verification that BF16 fixes the NaN.
+      </description>
+      <commands>
+        <cmd>uv run python scripts/launch_smoke_test.py --model sam3_hybrid --cloud gcp</cmd>
+      </commands>
+      <acceptance>
+        sam3_hybrid training completes with finite val_loss.
+        MLflow shows sys_encoder_dtype or log message confirming BF16.
+        NaN guard does NOT fire (no overflow with BF16).
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 1: AMP Isolation (GCP, ~$0.10, ralph-loop monitored)
+       CONDITIONAL: only if P0 T0.3 sam3_hybrid still shows NaN with BF16
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P1" name="AMP Isolation — Conditional" environment="cloud" cost="$0.10" effort="15min" conditional="P0.T0.3 val_loss=NaN">
+    <description>
+      If sam3_hybrid STILL produces NaN with BF16 on L4, the root cause is AMP autocast
+      + 3D operations (MONAI #4243), not FP16 overflow. Test with AMP disabled.
+    </description>
+
+    <task id="T1.1" name="Run sam3_hybrid with AMP OFF on L4" priority="P1" estimated-iterations="1">
+      <description>
+        Use smoke_sam3_hybrid_cloud.yaml (mixed_precision: false) on L4.
+        If finite → AMP is the problem. Implement separate train/val AMP policy.
+        If NaN → something else entirely. Escalate.
+      </description>
+      <acceptance>
+        Root cause confirmed: BF16 alone sufficient OR AMP policy needed.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 2: Cost Estimator (LOCAL, $0, ~4 TDD iterations)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P2" name="Dynamic GPU Cost Estimator" environment="local" cost="$0" effort="40min">
+    <description>
+      Build epoch-0 cost prediction into infrastructure_timing.py (issue #717).
+      After first epoch completes, extrapolate total job cost and log to MLflow.
+      LIBRARY-FIRST: extends existing compute_cost_analysis() in infrastructure_timing.py.
+    </description>
+
+    <task id="T2.1" name="Add epoch-0 cost prediction" priority="P1" estimated-iterations="2">
+      <files>
+        <file path="tests/v2/unit/observability/test_infrastructure_timing_prediction.py" action="create" />
+        <file path="src/minivess/observability/infrastructure_timing.py" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>
+          test_predict_cost: 22 min/epoch × 5 epochs × $0.19/hr = $0.35
+          test_predict_with_folds: 22 min × 5 epochs × 3 folds × $0.19/hr = $1.05
+          test_predict_zero_local: no cost for local runs
+          test_actual_vs_predicted: actual cost at end uses real elapsed time
+        </red>
+        <green>
+          estimate_cost_from_first_epoch(epoch_seconds, max_epochs, num_folds, hourly_rate)
+          Hook into trainer.py after epoch 0.
+        </green>
+      </tdd-spec>
+      <issue number="717" action="close" />
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 3: MLruns Sync (LOCAL, $0, ~4 TDD iterations)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P3" name="RunPod/GCP → Local mlruns Sync" environment="local" cost="$0" effort="45min">
+    <description>
+      Sync cloud MLflow artifacts to local for analysis (issue #716).
+      For GCP: use gsutil rsync from GCS bucket.
+      For RunPod: use sky cluster ssh + rsync.
+    </description>
+
+    <task id="T3.1" name="Implement cloud mlruns sync" priority="P1" estimated-iterations="2">
+      <files>
+        <file path="tests/v2/unit/compute/test_mlruns_sync.py" action="create" />
+        <file path="src/minivess/compute/mlruns_sync.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          test_gcs_sync_command: gsutil -m rsync -r gs://bucket/mlruns ./mlruns
+          test_runpod_sync_command: sky rsync cluster:/mlruns ./mlruns
+          test_excludes_checkpoints: exclude *.pth, *.onnx by default
+          test_dry_run: --dry-run flag
+        </red>
+        <green>
+          CloudSyncer class with sync(provider, source, dest, dry_run).
+          GCS path: gsutil rsync. RunPod: sky rsync.
+        </green>
+      </tdd-spec>
+      <issue number="716" action="close" />
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 4: Final Verification (GCP, ~$0.10, all 4 models)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P4" name="Final 4-Model GCP Verification" environment="cloud" cost="$0.40" effort="60min" blocked-by="P0">
+    <description>
+      Run all 4 models on GCP L4 spot with rebuilt Docker image.
+      Verify: all models produce finite val_loss, BF16 active for SAM3,
+      VesselFM uses Z=32 patches, atomic checkpoints + SHA256 sidecars written.
+      Sequential launches (GCP GPU quota = 1).
+    </description>
+
+    <task id="T4.1" name="Sequential 4-model smoke test on L4" priority="P1" estimated-iterations="1" blocked-by="T0.1">
+      <commands>
+        <cmd>make smoke-test-gcp MODEL=dynunet</cmd>
+        <cmd># wait for completion, then:</cmd>
+        <cmd>make smoke-test-gcp MODEL=sam3_vanilla</cmd>
+        <cmd>make smoke-test-gcp MODEL=sam3_hybrid</cmd>
+        <cmd>make smoke-test-gcp MODEL=vesselfm</cmd>
+      </commands>
+      <acceptance>
+        All 4 models: FINISHED status in MLflow with finite val_loss.
+        sam3_hybrid: BF16 confirmed (no NaN guard warnings in logs).
+        vesselfm: no shape error (Z=32 patch used).
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       COST SUMMARY
+       ══════════════════════════════════════════════════════════════════════ -->
+  <cost-summary>
+    <item phase="P0" cost="$0.20">Docker rebuild (local) + 2 reruns on L4 (~10 min each)</item>
+    <item phase="P1" cost="$0.10">AMP isolation (conditional, ~5 min L4)</item>
+    <item phase="P2" cost="$0.00">Cost estimator (local TDD)</item>
+    <item phase="P3" cost="$0.00">mlruns sync (local TDD)</item>
+    <item phase="P4" cost="$0.40">4-model verification (~10 min each on L4)</item>
+    <total>$0.70 (happy path) — $1.20 (with AMP isolation + retries)</total>
+  </cost-summary>
+
+  <execution-notes>
+    <note>ALREADY DONE: BF16 auto-detect (2da7460), T4 ban, atomic checkpoints, SHA256</note>
+    <note>BLOCKING: Docker image rebuild required before ANY cloud rerun</note>
+    <note>GCP GPU quota = 1: models must run sequentially, not in parallel</note>
+    <note>Use ralph-loop for autonomous monitoring of cloud phases</note>
+    <note>All cloud execution uses Docker images via image_id: — no bare VM</note>
+    <note>L4 is default GCP GPU ($0.19/hr spot, Ada Lovelace, BF16 support)</note>
+  </execution-notes>
+</plan>

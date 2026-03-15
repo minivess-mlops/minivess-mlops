@@ -140,6 +140,13 @@ infra = [
     "pulumi-command>=1.0,<2.0",
     "skypilot-nightly[runpod]>=1.0.0.dev0",
 ]
+# mamba-ssm: source-only wheel, requires nvcc + CUDA headers.
+# Install inside Docker builder stage (INSTALL_MAMBA=1 build-arg) or locally
+# with nvcc in PATH. Pinned exactly: causal-conv1d is version-coupled.
+"mamba-ssm" = [
+    "mamba-ssm==2.3.1",
+    "causal-conv1d>=1.4.0,<2.0.0",
+]
 sky = [
     "google-api-python-client>=2.192.0",
     "google-auth>=2.48.0",
@@ -257,6 +264,8 @@ module = [
     "nibabel.*",
     "sam2.*",
     "sam3.*",
+    "mamba_ssm.*",
+    "causal_conv1d.*",
     "transformers.*",
     "prefect.*",
     "pandas.*",

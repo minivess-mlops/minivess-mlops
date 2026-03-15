@@ -20,6 +20,7 @@ implemented_models:
   - sam3_vanilla
   - sam3_topolora
   - sam3_hybrid
+  - mambavesselnet
 
 # Loss exclusions: {loss_name: [model_families that CANNOT use this loss]}
 # Empty dict = all losses work with all models (current state)

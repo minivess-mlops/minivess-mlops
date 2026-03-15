@@ -1,0 +1,144 @@
+# knowledge-graph/manuscript/claims.yaml
+# Scientific claims for the NEUROVEX paper — each claim linked to evidence in KG
+# These are the assertions that must be backed by code, experiments, or citations
+# Platform name: NEUROVEX (canonical — 2026-03-16). "ARBOR" was the working name; now retired.
+
+claims:
+  - id: C1
+    claim: "NEUROVEX provides a complete, reproducible MLOps pipeline for 3D biomedical segmentation that requires only YAML configuration changes to run on any MONAI-compatible dataset or model"
+    type: platform_capability
+    evidence:
+      - {type: code, ref: "src/minivess/adapters/base.py::ModelAdapter ABC"}
+      - {type: code, ref: "configs/model_profiles/*.yaml"}
+      - {type: experiment, ref: "outputs/pipeline/trigger_chain_results.json — 73/73 checks pass"}
+    manuscript_section: [M3, R1]
+    status: supported
+
+  - id: C2
+    claim: "The cbdice_cldice loss achieves superior topology preservation (clDice=0.906±0.008) with only -5.3% DSC penalty compared to standard Dice+CE loss"
+    type: experimental_result
+    evidence:
+      - {type: experiment, ref: "knowledge-graph/experiments/dynunet_loss_variation_v2.yaml"}
+      - {type: code, ref: "src/minivess/pipeline/loss_functions.py"}
+      - {type: literature, citation_key: "shit_2021_cldice"}
+    manuscript_section: [R3a]
+    status: supported
+
+  - id: C3
+    claim: "The 10-flow Prefect-orchestrated architecture (Data Acquisition→Data Engineering→Modeling/Training→Post-training→Eval with ensembling→Biostatistics→Deploy, plus Dashboard, Data Annotation, and Prefect Orchestrators) cleanly separates concerns into distinct Docker containers with MLflow as the only inter-flow contract, enabling independent development of each flow"
+    type: architectural_claim
+    evidence:
+      - {type: code, ref: "src/minivess/orchestration/trigger.py::PipelineTriggerChain"}
+      - {type: code, ref: "src/minivess/orchestration/flow_contract.py"}
+      - {type: experiment, ref: "outputs/pipeline/trigger_chain_results.json"}
+    manuscript_section: [M5]
+    status: supported
+
+  - id: C4
+    claim: "The ModelAdapter ABC enables new model integration by implementing 3 abstract methods — no changes to pipeline infrastructure required"
+    type: architectural_claim
+    evidence:
+      - {type: code, ref: "src/minivess/adapters/base.py"}
+      - {type: code, ref: "src/minivess/adapters/dynunet.py, sam3_vanilla.py, segresnet.py"}
+    manuscript_section: [M6]
+    status: supported
+
+  - id: C5
+    claim: "SAM3 (Meta, Nov 2025) can be integrated as a 3D volumetric segmenter via slice-by-slice inference with frozen encoder + lightweight Conv decoder"
+    type: experimental_result
+    evidence:
+      - {type: code, ref: "src/minivess/adapters/sam3_backbone.py, sam3_vanilla.py"}
+      - {type: literature, citation_key: "ravi_2025_sam3"}
+    manuscript_section: [M3, R3b]
+    status: pending_gpu_runs
+
+  - id: C6
+    claim: "Single-command cloud execution (sky jobs launch) on any cloud provider (RunPod, GCP, Lambda) reproduces the identical training environment via Docker + SkyPilot"
+    type: platform_capability
+    evidence:
+      - {type: code, ref: "deployment/skypilot/smoke_test_gpu.yaml"}
+      - {type: code, ref: "src/minivess/compute/skypilot_launcher.py"}
+      - {type: literature, citation_key: "yang_2023_skypilot"}
+    manuscript_section: [M4, R1]
+    status: supported
+
+  - id: C7
+    claim: "This platform is the first MLOps infrastructure for multiphoton biomedical segmentation research to use a hierarchical probabilistic specification graph (Living Specification Graph) as the machine-queryable single source of truth for agentic development — a domain intersection with no prior published work"
+    type: novelty_claim
+    evidence:
+      - {type: code, ref: "knowledge-graph/navigator.yaml, knowledge-graph/decisions/ (52 nodes)"}
+      - {type: doc, ref: "docs/planning/repo-to-manuscript.md"}
+      - {type: literature, citation_key: "vasilopoulos_2026_codified_context", note: "Closest prior art — no probabilistic PRD, no MLOps, no biomedical domain"}
+      - {type: literature, citation_key: "piskala_2026_sdd", note: "SDD taxonomy covers API/enterprise/embedded — not scientific software"}
+      - {type: literature, citation_key: "chatlatanagulchai_2025_agent_readmes", note: "Current practice: shallow operational context files — our multi-layer KG transcends this"}
+    manuscript_section: [M12, R5]
+    status: literature_validated
+    note: >
+      2026-03-15 literature scan found no paper combining (agentic coding) + (scientific MLOps) + (probabilistic spec graph).
+      Three genuinely novel dimensions: (1) Living Specification Graph, (2) MONAI adapter pattern,
+      (3) multiphoton microscopy + full MLOps + spec-driven construction.
+      Self-reported productivity claims moved to R5 with appropriate caveats.
+    novelty_validated_by: "background literature scan 2026-03-15 (15 papers reviewed)"
+
+  - id: C8
+    claim: "The platform's Hydra-zen config system ensures zero hardcoded values — any lab can override cloud provider, GPU type, Docker registry, or dataset via 1-2 YAML files"
+    type: platform_capability
+    evidence:
+      - {type: code, ref: "configs/lab/, configs/user/, configs/cloud/, configs/registry/"}
+      - {type: doc, ref: "docs/planning/hydra-config-verification-report.md"}
+    manuscript_section: [M11]
+    status: supported
+
+  - id: C9
+    claim: "VesselFM evaluation on MiniVess is invalid due to data leakage (VesselFM pre-trained on MiniVess) — fair evaluation requires DeepVess or TubeNet datasets"
+    type: methodological_limitation
+    evidence:
+      - {type: literature, citation_key: "wittmann_2024_vesselfm"}
+      - {type: code, ref: "knowledge-graph/code-structure/adapters.yaml#vesselfm.critical_data_leakage_warning"}
+    manuscript_section: [R3c, Limitations]
+    status: documented_limitation
+
+  - id: C10
+    claim: "The probabilistic KG (52 decision nodes with Bayesian priors/posteriors) enables structured belief propagation when architectural decisions change"
+    type: methodological_contribution
+    evidence:
+      - {type: code, ref: "knowledge-graph/decisions/, knowledge-graph/_network.yaml"}
+      - {type: literature, citation_key: "pujara_2016_pkg"}
+    manuscript_section: [M12]
+    status: partial
+    note: "Phase 1 only: requires_review flags. Phase 2 (actual posteriors) is future work."
+
+  - id: C11
+    claim: "E2E pipeline produces 35+ verified artifacts in <9 seconds (analyze+deploy+dashboard flows) when training checkpoints exist"
+    type: experimental_result
+    evidence:
+      - {type: experiment, ref: "outputs/pipeline/trigger_chain_results.json — total_duration_s: 8.26"}
+      - {type: code, ref: "scripts/verify_all_artifacts.py — 73 checks"}
+    manuscript_section: [R1]
+    status: supported
+
+  - id: C12
+    claim: "GitHub Actions CI is intentionally disabled in this platform — all validation runs locally via pre-commit + pr_readiness_check.sh (no cloud CI credits consumed)"
+    type: devex_claim
+    evidence:
+      - {type: code, ref: ".github/workflows/ci-v2.yml — all jobs commented out"}
+      - {type: doc, ref: "CLAUDE.md Rule #21"}
+    manuscript_section: [M9_supplementary]
+    status: supported
+    note: "This is a deliberate design choice, not a limitation — include as DevEx discussion"
+
+  - id: C13
+    claim: "The CLAUDE.md + knowledge-graph + metalearning system constitutes a qualitative architectural advance over current state-of-practice agentic coding context files, which are dominated by shallow operational directives (build commands 62.3%, architecture 67.7%) with rare safety/performance guidelines (14.5%)"
+    type: novelty_claim
+    evidence:
+      - {type: literature, citation_key: "chatlatanagulchai_2025_agent_readmes", note: "State of practice baseline — 2,303 agent context files"}
+      - {type: literature, citation_key: "santos_2025_claude_config", note: "Architectural specification as most critical concern — our KG is the concrete realization"}
+      - {type: literature, citation_key: "galster_2026_configuring_agentic", note: "2,926 repos empirical study"}
+      - {type: code, ref: "CLAUDE.md (24 rules), .claude/metalearning/ (failure analysis), knowledge-graph/ (52 decision nodes + manuscript layer)"}
+    manuscript_section: [M12]
+    status: literature_validated
+    note: >
+      The empirical AGENTS.md/CLAUDE.md literature (2025-2026) documents what current
+      projects do — MinIVess's multi-layer system (CLAUDE.md + probabilistic PRD +
+      intent-expression nodes + metalearning) is a qualitative advance. Use these
+      papers as the baseline comparison in Introduction.

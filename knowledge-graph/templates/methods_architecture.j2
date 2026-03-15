@@ -1,0 +1,41 @@
+{# methods_architecture.j2 — generates methods-03-architecture.tex #}
+{# Input: decisions/container_strategy.yaml, code-structure/flows.yaml #}
+%% AUTO-GENERATED from KG nodes: container_strategy, flows.yaml
+%% Template: knowledge-graph/templates/methods_architecture.j2
+%% Run: /kg-sync to regenerate
+%% DO NOT HAND-EDIT — changes will be overwritten
+
+\subsection{Platform Architecture}
+
+{% if flows %}
+The ARBOR platform implements a {{ flows | length }}-flow architecture using Prefect 3.x
+orchestration, with Docker-per-flow isolation ensuring reproducibility.
+{% endif %}
+
+\begin{itemize}
+{% for flow in flows %}
+  {% if flow.type == 'core' %}
+  \item \textbf{{ '{' }}Flow {{ flow.order }}: {{ flow.name }}{{ '}' }} ---
+    {{ flow.persona }} persona. Core flow (stops pipeline on failure).
+  {% endif %}
+{% endfor %}
+{% for flow in flows %}
+  {% if flow.type == 'best_effort' %}
+  \item \textbf{{ '{' }}Flow {{ flow.order }}: {{ flow.name }}{{ '}' }} ---
+    {{ flow.persona }} persona. Best-effort (failure does not block pipeline).
+  {% endif %}
+{% endfor %}
+\end{itemize}
+
+{% if container_strategy %}
+All flows run in isolated Docker containers, communicating only through MLflow artifacts
+(no shared filesystem). This guarantees environment isolation and reproducibility
+across cloud providers.
+{% endif %}
+
+%% HUMAN-AUTHORED: Add architectural diagram reference below
+% \begin{figure}[h]
+%   \includegraphics[width=\linewidth]{figures/generated/fig-M3-architecture.pdf}
+%   \caption{ARBOR platform architecture showing 5-flow DAG with Docker-per-flow isolation.}
+%   \label{fig:architecture}
+% \end{figure}
