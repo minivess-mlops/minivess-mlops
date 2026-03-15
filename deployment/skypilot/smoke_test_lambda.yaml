@@ -98,7 +98,7 @@ setup: |
 
   # DVC configuration (Docker image has dvc pre-installed)
   echo "dvc_config_start=$(date +%s.%N)" >> "$TIMING_FILE"
-  dvc init --no-scm
+  dvc init --no-scm -f
 
   dvc remote add upcloud s3://${DVC_S3_BUCKET}
   dvc remote modify upcloud endpointurl ${DVC_S3_ENDPOINT_URL}

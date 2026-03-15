@@ -65,7 +65,7 @@ setup: |
   # Use python/dvc directly (.venv/bin is on PATH).
 
   # Initialize DVC without git (container has no .git)
-  dvc init --no-scm
+  dvc init --no-scm -f
 
   # Configure DVC upcloud remote with S3 credentials from env
   dvc remote add upcloud s3://${DVC_S3_BUCKET}
