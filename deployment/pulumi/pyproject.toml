@@ -1,0 +1,10 @@
+[project]
+name = "minivess-mlflow-infra"
+version = "0.1.0"
+description = "Pulumi IaC for MinIVess MLflow on UpCloud managed services"
+requires-python = ">=3.12"
+dependencies = [
+    "pulumi>=3.0,<4.0",
+    "pulumi-upcloud>=0.11,<1.0",
+    "pulumi-command>=1.0,<2.0",
+]

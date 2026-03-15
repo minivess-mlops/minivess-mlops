@@ -1,0 +1,19 @@
+name: minivess-mlflow
+runtime:
+  name: python
+  options:
+    toolchain: uv
+    virtualenv: .venv
+description: >
+  MinIVess MLOps — UpCloud Managed MLflow Stack.
+  Provisions Managed PostgreSQL, Managed Object Storage, and a small VPS
+  running MLflow with built-in basic auth. One command: pulumi up.
+config:
+  minivess-mlflow:zone:
+    default: fi-hel1
+    description: UpCloud zone (fi-hel1 = Helsinki)
+  minivess-mlflow:ssh_public_key:
+    description: SSH public key content for VPS access
+  minivess-mlflow:mlflow_admin_password:
+    secret: true
+    description: Password for MLflow basic auth admin user
