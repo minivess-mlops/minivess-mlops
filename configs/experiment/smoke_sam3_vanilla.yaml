@@ -29,6 +29,10 @@ splits_file: configs/splits/smoke_test_1fold_4vol.json
 data:
   dvc_commit: HEAD
 
+# AMP disabled: SAM3 ViT encoder + sliding_window_inference + autocast = NaN (MONAI #4243).
+# Architecture constraint — applies on ALL platforms (local, cloud, RunPod).
+mixed_precision: false
+
 # SAM3 Vanilla: ~2.9 GB VRAM (MEASURED — fits RTX 4090 easily)
 architecture_params:
   backbone: vit_32l

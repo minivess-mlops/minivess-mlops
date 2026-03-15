@@ -138,22 +138,22 @@ run: |
   fi
   export EXPERIMENT_UUID=$(python -c "import uuid; print(uuid.uuid4().hex[:8])")
 
-  # Cloud GPU safety overrides (belt-and-suspenders when cloud config is not
-  # in the Docker image — e.g. config added after last image rebuild).
-  # For SAM3 models: disable AMP (MONAI #4243 sliding_window + autocast = NaN),
-  # enable validation every epoch (L4/A100 have enough VRAM).
-  # Use Hydra "++" to force-override keys that may or may not exist in struct.
-  # "+" fails if key already exists (e.g. val_interval=3 in smoke_sam3_hybrid.yaml).
-  # "++" = upsert: adds if missing, overrides if present. Always safe.
+  # CLI-level Hydra overrides for cloud-specific training behavior.
+  # "+" = add new key not in struct. "++" = force-override existing key.
+  # mixed_precision: SAM3 model config constraint (MONAI #4243, AMP + sliding_window = NaN).
+  # val_interval: cloud GPUs (L4: 24 GB) should validate every epoch, unlike 8 GB RunPod sentinel.
+  # NOTE: cloud=gcp_spot group has val_interval:1 but experiment config (val_interval:3) wins
+  #   via @package _global_ ordering. Belt-and-suspenders CLI override is needed until
+  #   the config flattening is fixed (docs/planning/hydra-double-check.md Phase 3).
   CLOUD_OVERRIDES=""
   if echo "${MODEL_FAMILY}" | grep -q "sam3"; then
-    CLOUD_OVERRIDES="+mixed_precision=false,++val_interval=1"
+    CLOUD_OVERRIDES="++mixed_precision=false,++val_interval=1"
   fi
 
   if [ -n "${CLOUD_OVERRIDES}" ]; then
-    export HYDRA_OVERRIDES="experiment_name=smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY},${CLOUD_OVERRIDES}"
+    export HYDRA_OVERRIDES="experiment_name=smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY},cloud=gcp_spot,${CLOUD_OVERRIDES}"
   else
-    export HYDRA_OVERRIDES="experiment_name=smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
+    export HYDRA_OVERRIDES="experiment_name=smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY},cloud=gcp_spot"
   fi
 
   echo "=== MinIVess GPU Smoke Test (GCP Spot) ==="
