@@ -5,9 +5,9 @@
 # Unlike smoke_sam3_hybrid.yaml which skips validation (sentinel),
 # this config enables validation to verify model predictions are valid.
 #
-# val_interval=1: validate every epoch (5 epochs total)
-# max_epochs=5: enough to see convergence trend
-# Addresses #710: sam3_hybrid val_loss=NaN investigation
+# val_interval=1: validate every epoch
+# max_epochs=2: sufficient for smoke test (pipeline verification, not convergence)
+# Addresses #710, #715: sam3_hybrid val_loss=NaN — root cause was wrong config selection
 defaults:
   - override /model: sam3_hybrid
   - override /checkpoint: lightweight
@@ -17,7 +17,7 @@ model: sam3_hybrid
 model_family: sam3_hybrid
 losses:
   - dice_ce
-max_epochs: 5
+max_epochs: 2
 num_folds: 1
 debug: true
 
