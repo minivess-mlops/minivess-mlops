@@ -86,6 +86,116 @@ detection, auto-retraining — without writing infrastructure code.
 
 ---
 
+## § 1.5 — Prior Art Gap (for Introduction — mandatory context for sci-llm-writer)
+
+This section gives the LLM the specific prior-work characterizations needed to write the
+"state of practice and its gap" paragraph of the introduction. Do NOT invent these — use
+exactly what is stated here.
+
+### What exists and what it lacks
+
+| System / Paper | What it provides | What it lacks (= the gap ARBOR fills) |
+|----------------|-----------------|---------------------------------------|
+| **nnU-Net** (Isensee et al. 2021, *Nature Methods*) | Self-configuring 3D segmentation architecture; state-of-the-art DSC across benchmarks | No MLOps scaffolding; no experiment tracking; no cloud execution; no drift detection; no deployment pipeline; reproducibility = re-running the same script manually |
+| **MONAI** (Cardoso et al. 2022) | Excellent PyTorch-based library for medical image transforms, augmentations, models | Zero workflow orchestration; zero reproducibility tooling; zero multi-cloud support; users must build their own training loops from scratch every project |
+| **CyclOps** (Krishnan et al. 2022) | MLOps platform for healthcare AI with recurring validation | Designed for clinical classification, not preclinical 3D segmentation; no multi-cloud; no model-agnostic adapter pattern; no spec-driven development |
+| **Cheimarios (2025)** | MLOps principles + NIST risk management for computational physics | Containerization and model registries only; no multi-cloud; no biomedical imaging; no spec-driven development |
+| **Current lab practice** | Bespoke scripts + Jupyter notebooks per lab | No standard; no replication across labs; months of bespoke engineering per new model/dataset; cannot be reproduced by external collaborators |
+
+### The specific gap ARBOR fills
+
+> No published platform combines: (1) model-agnostic adapter pattern for 3D biomedical
+> segmentation, (2) full 5-flow Docker-per-flow MLOps pipeline with MLflow as the sole
+> inter-flow contract, (3) single-command multi-cloud execution via SkyPilot, and
+> (4) spec-driven agentic development via a hierarchical probabilistic knowledge graph —
+> in a single open-source academic tool deployable by a 2–5-person research lab
+> with no dedicated ML engineering staff.
+
+### Target researcher persona (for Nature Protocols framing)
+
+A typical ARBOR user is a computational neuroscience or biomedical imaging PhD lab with:
+- 2–5 members, one first author who also maintains infrastructure
+- One GPU workstation (8–24 GB VRAM) + occasional cloud access
+- Scientific expertise in the imaging domain, zero ML engineering staff
+- Need to run reproducible experiments for a peer-reviewed paper
+- Currently spending 30–50% of research time on infrastructure instead of science
+
+This persona directly motivates every DevEx choice in the platform and should anchor the
+introduction's "who needs this" framing.
+
+### Bibliography citation keys available for this section
+
+- `isensee_2021_nnunet` — nnU-Net
+- `cardoso_2022_monai` — MONAI
+- `krishnan_2022_cyclops` — CyclOps
+- `cheimarios_2025_mlops_physics` — scientific MLOps (physics)
+- `marcos_mercade_2026_mlops_eval` — empirical MLOps framework comparison
+- `poon_2023_minivess` — MiniVess dataset (primary training data)
+- `windhager_2023_nature_protocols` — comparable systems paper in Nature Protocols
+- `pachitariu_2022_cellpose` — comparable platform paper in Nature Methods
+
+---
+
+## § 1.6 — Three Contributions: Canonical Form (for introduction closing paragraph)
+
+**The sci-llm-writer MUST use this exact three-contribution structure** at the end of the
+introduction. Do not expand to four or five contributions. Do not reorder. Do not lead with
+the LSG contribution — it is appendix-grade.
+
+> We make three contributions:
+>
+> **(1) ARBOR platform (keystone):** A fully automated, model-agnostic MLOps platform for
+> 3D biomedical segmentation that achieves MLOps Maturity Level 4 in a single-researcher
+> academic setting. Any lab can adopt ARBOR by editing one YAML file — no infrastructure
+> code required. Validated end-to-end: 73/73 artifact checks pass, 35+ artifacts produced
+> in 8.26 seconds post-training.
+>
+> **(2) Multi-model generalizability (experimental, partially pending):** We demonstrate
+> platform generalizability across four model families — DynUNet (MONAI-native), Mamba
+> state-space models, SAM3 foundation model variants, and VesselFM — each integrated via
+> the ModelAdapter ABC with zero pipeline changes. DynUNet results are complete (4-loss
+> ablation, 3-fold, 100 epochs); SAM3 and VesselFM results are in preparation.
+> ⚠️ **WRITING INSTRUCTION**: Write Contribution 2 as "three implemented families with
+> Mamba as a planned extension" until R3b/R3c GPU results are available. Do NOT write
+> as if all four families have published quantitative results.
+>
+> **(3) Living Specification Graph (appendix or companion paper):** A 52-node probabilistic
+> decision graph as the machine-queryable single source of truth for agentic development —
+> the first application of spec-driven development to scientific MLOps infrastructure.
+> ⚠️ **WRITING INSTRUCTION**: Frame as appendix material. The paper stands without this
+> section. Do NOT let this contribution displace Contribution 1 as the lead claim.
+
+---
+
+## § 1.7 — Introduction Narrative Arc (6-paragraph skeleton)
+
+Write the introduction in this order. Target: 900–1200 words for Nature Protocols;
+600–800 words for Nature Methods.
+
+1. **Reproducibility crisis** (~150 words): The problem is infrastructure, not algorithms.
+   Anchor with reproducibility crisis citations. Introduce the platform solution concept.
+2. **State of practice and its gap** (~200 words): nnU-Net + MONAI exist but lack MLOps.
+   Use §1.5 prior art table. Conclude: "No existing platform provides [the gap]."
+3. **ARBOR overview** (~150 words): What ARBOR is. Use the central narrative verbatim seed
+   from §1 ("The reproducibility crisis in biomedical ML is not a data problem...").
+   Present the 5-flow architecture and Docker-per-flow isolation as one sentence each.
+4. **Model families + dataset** (~150 words): Four model families on MiniVess. Stress
+   the models are proof of generalizability, not an architecture race.
+5. **MLOps Maturity Level 4** (~100 words): Frame the platform's ambition level.
+   Be honest: "Level 4 architecture demonstrated; auto-retraining trigger loop in progress."
+6. **Three contributions** (~150 words): Use the canonical form from §1.6 verbatim.
+
+**VERBATIM SEED — preserve this paragraph exactly in the introduction:**
+
+> "The reproducibility crisis in biomedical ML is not a data problem or an algorithm
+> problem — it is an infrastructure problem. ARBOR is the infrastructure solution:
+> a fully automated, cloud-agnostic, model-agnostic MLOps platform that transforms
+> experiment definition from a programming task into a YAML configuration task.
+> We validate the platform on 3D vascular segmentation using four diverse model families
+> and demonstrate MLOps Maturity Level 4 in a single-researcher academic setting."
+
+---
+
 ## § 2 — Publication Target
 
 | Journal | IF | Framing | Decision |
@@ -98,6 +208,19 @@ The framing may shift based on those results.
 
 **Working title**: *ARBOR: An Agentic Reproducible Biomedical Operations Research Platform
 for Scalable 3D Segmentation with MLOps Maturity Level 4*
+
+### Section Word Count Budget (for sci-llm-writer)
+
+| Section | Nature Protocols target | Nature Methods target |
+|---------|------------------------|----------------------|
+| Introduction | 900–1200 words | 600–800 words |
+| Methods | 3000–5000 words (structured by subsection) | 2000–3000 words |
+| Results | 2000–3000 words | 1500–2000 words |
+| Discussion | 800–1200 words | 600–1000 words |
+| Abstract | 200–250 words | 150–200 words |
+
+Use the **Nature Protocols** budget until journal decision is made. Write concisely:
+prefer one concrete sentence over one abstract paragraph.
 
 ---
 
@@ -127,12 +250,19 @@ the platform's model-agnostic architecture. One YAML profile + one ModelAdapter 
   (implement `ModelAdapter` ABC: 3 methods + YAML profile). This is not yet in the repo.
 - **Paper role**: Represents the SSM model family; contrasts long-range context (Mamba)
   vs sliding-window context (DynUNet) vs frozen ViT encoder (SAM3)
+- **⚠️ sci-llm-writer WRITING INSTRUCTION**: Until Mamba GPU runs are complete, ALL
+  introduction and methods prose MUST refer to Mamba as "planned." The working title
+  and abstract should say "three implemented model families (DynUNet, SAM3 variants,
+  VesselFM) with Mamba state-space models as a planned extension." Do NOT write as if
+  four families have quantitative results available.
 
 ### 3.3 SAM3 variants (Foundation Model — Meta, Nov 2025) — STATUS: ADAPTERS READY, GPU PENDING
 - **Role**: Foundation model family — test whether 2D natural-image pre-training transfers
   to 3D vascular segmentation via slice-by-slice inference with frozen ViT-32L encoder
 - **SAM3 ≠ SAM2**: SAM3 is Meta's Nov 2025 release (github.com/facebookresearch/sam3),
-  ViT-32L, 648M params, 1008×1008, SDPA mandatory. SAM2 is a different (smaller) model.
+  ViT-32L, **848M total params** (perception encoder alone = 648M), 1008×1008, SDPA
+  mandatory. SAM2 is a different (earlier, smaller) model. Source: `sam3_backbone.py:11`
+  and `knowledge-graph/decisions/L3-technology/foundation_model.yaml`.
 - **Three variants**:
   - **SAM3 Vanilla (V1)**: Frozen ViT-32L + lightweight Conv decoder. Fits 8 GB GPU.
     KG: `adapters.yaml#sam3_vanilla`. GPU ≥ 8 GB (SDPA mandatory).
@@ -156,6 +286,11 @@ the platform's model-agnostic architecture. One YAML profile + one ModelAdapter 
 - **Blocks**: R3c (foundation model comparison section)
 - **Paper framing**: Limitation L1 — the platform correctly identifies and prevents
   this evaluation error; frame as "the platform enables rigorous fair evaluation"
+- **Citation keys for external datasets** (bibliography.yaml):
+  - DeepVess: `kaufmann_2020_deepvess` (Cornell eCommons — verify author/year before submission)
+  - TubeNet: `schauss_2021_tubenet` (UCL Figshare — verify author/year before submission)
+  - ⚠️ Both dataset entries are placeholder-grade — exact author lists and years must
+    be confirmed against the repository pages before `\cite{}` commands are finalized.
 
 ---
 
@@ -228,6 +363,15 @@ Source: `knowledge-graph/manuscript/results.yaml`
 - Target metrics: time from git clone to first training run (<15 min), manual steps (0)
 - Status: `needs_data` — requires external collaborator replication for credibility
 - Note: Required for Nature Protocols submission
+- **What satisfies R2**: One external collaborator (different machine, different OS or cloud)
+  runs `git clone → uv sync --all-extras → prefect deployment run 'train-flow/default'`
+  and produces verified training artifacts. Measure: wall-clock time, number of manual
+  interventions (target: 0), and cross-machine artifact SHA256 match with the primary
+  researcher's run.
+- **⚠️ sci-llm-writer WRITING INSTRUCTION**: Write R2 as a PLANNED validation, not a
+  completed one. Do NOT write "we demonstrate that a new user can reproduce results in
+  <15 minutes" — write "we designed the platform to achieve this; external replication
+  is planned as part of the Nature Protocols submission process."
 
 ### R3a — DynUNet Loss Ablation ✅ DATA AVAILABLE
 - cbdice_cldice: DSC=0.772±0.016, clDice=0.906±0.008 (WINNER — topology)
@@ -359,7 +503,11 @@ When opening a new session in `sci-llm-writer` for the ARBOR manuscript:
 ```
 Manuscript:     sci-llm-writer/manuscripts/vasculature-mlops/
 KG snapshot:    sci-llm-writer/manuscripts/vasculature-mlops/kg-snapshot/kg-snapshot.yaml
-                (export via: cd minivess-mlops && /kg-sync --export-to sci-llm-writer)
+                (export via: cd minivess-mlops && uv run python .claude/skills/kg-sync/kg_sync.py --export-to ../sci-llm-writer/manuscripts/vasculature-mlops/kg-snapshot/)
+                ⚠️ kg-sync skill is planned but not yet implemented. Until it exists,
+                manually copy the relevant knowledge-graph/ YAML files listed in §9
+                to the kg-snapshot/ directory. The cover letter itself IS the snapshot
+                for the first sci-llm-writer session — reference it directly.
 Zotero RDF:     sci-llm-writer/manuscripts/vasculature-mlops/vasculature-mlops.rdf
                 (export from Zotero — populate with entries from knowledge-graph/bibliography.yaml)
 Source .tex:    docs/manuscript/latent-methods-results/ (scaffold stubs)
@@ -374,8 +522,43 @@ Source .tex:    docs/manuscript/latent-methods-results/ (scaffold stubs)
 
 **Quality target**: MINOR_REVISION (standard journal submission)
 
-**Ground truth JSON**: `outputs/pipeline/trigger_chain_results.json` (R1 numbers)
-and `knowledge-graph/experiments/dynunet_loss_variation_v2.yaml` (R3a numbers)
+**Ground truth JSON**: The sci-llm-writer activation checklist (step 7) requires a
+single `results-ground-truth.json`. Create it at session activation time by consolidating
+the two source files:
+
+```json
+{
+  "R1_platform_validation": {
+    "status": "CONFIRMED",
+    "artifact_checks_pass": 73,
+    "artifact_checks_total": 73,
+    "artifacts_produced": 35,
+    "pipeline_wall_clock_seconds": 8.26,
+    "timestamp": "2026-03-02T03:32:10Z",
+    "source": "outputs/pipeline/trigger_chain_results.json"
+  },
+  "R3a_dynunet_loss_ablation": {
+    "status": "CONFIRMED",
+    "cbdice_cldice_dsc": "0.772 ± 0.016",
+    "cbdice_cldice_cldice": "0.906 ± 0.008",
+    "dice_ce_dsc": "0.824 ± 0.014",
+    "dice_ce_cldice": "0.832 ± 0.019",
+    "cbdice_dsc": "0.767 ± 0.023",
+    "cbdice_cldice_metric": "0.799 ± 0.020",
+    "dice_ce_cldice_dsc": "0.736 ± 0.016",
+    "dice_ce_cldice_cldice": "0.905 ± 0.003",
+    "topology_gain_percent_cldice": "+8.9%",
+    "dsc_penalty_percent": "-5.3%",
+    "source": "knowledge-graph/experiments/dynunet_loss_variation_v2.yaml"
+  },
+  "R3b_multi_model": {"status": "BLOCKED", "blocked_by": "SAM3 GPU runs pending (target 2026-03-20)"},
+  "R3c_foundation_model": {"status": "BLOCKED", "blocked_by": "VesselFM external dataset GPU runs pending"},
+  "R4_uncertainty": {"status": "BLOCKED", "blocked_by": "requires all model GPU runs for full ensemble"},
+  "R2_devex_benchmark": {"status": "NEEDS_DATA", "blocked_by": "requires external collaborator replication"}
+}
+```
+
+Save this as: `manuscripts/vasculature-mlops/results-ground-truth.json`
 
 ---
 
@@ -387,8 +570,9 @@ and `knowledge-graph/experiments/dynunet_loss_variation_v2.yaml` (R3a numbers)
    "planned" or "in implementation" — do not write it as if results are available.
 
 2. **SAM3 is NOT SAM2**. SAM3 = Meta's Segment Anything Model 3, November 2025,
-   github.com/facebookresearch/sam3, 648M params ViT-32L. SAM2 is a different (earlier,
-   smaller) model. Never conflate them.
+   github.com/facebookresearch/sam3, **848M total params** (ViT-32L perception encoder =
+   648M; full model including neck/decoder = 848M). SAM2 is a different (earlier, smaller)
+   model. Never conflate them. Source: `src/minivess/adapters/sam3_backbone.py:11`.
 
 3. **VesselFM MUST NOT be evaluated on MiniVess**. VesselFM was pre-trained on MiniVess.
    Use DeepVess (Cornell) and TubeNet 2PM (UCL) for fair evaluation only.
@@ -432,8 +616,10 @@ companion paper — main paper stands without this section.
 **Self-correcting TDD development approach** (same philosophy as iterated-llm-council in sci-llm-writer):
 - minivess-mlops: `self-learning-iterative-coder` Skill (RED→GREEN→VERIFY→FIX→CHECKPOINT→CONVERGE)
 - sci-llm-writer: `iterated-llm-council` Skill (L3 reviews → L2 synthesis → L1 verdict → L0 action plan → execute)
-- Same Ralph Wiggum loop philosophy: stochastic processes self-correct via iteration,
-  not by claiming correctness upfront
+- Same iterative self-correction philosophy ("Ralph Wiggum loop" — internal project
+  shorthand): LLMs are stochastic; correctness emerges from iterated review cycles,
+  not from claiming correctness in a single pass. Both skills implement this via
+  independent reviewer agents that catch what the primary LLM missed.
 
 ---
 
@@ -478,3 +664,36 @@ In priority order:
 
 6. **Zotero RDF population** — Export `knowledge-graph/bibliography.yaml` entries to
    Zotero, then export `.rdf` file for sci-llm-writer citation harness.
+
+7. **Verify DeepVess/TubeNet bibliography entries** — The `kaufmann_2020_deepvess`
+   and `schauss_2021_tubenet` entries in `knowledge-graph/bibliography.yaml` are
+   placeholder-grade. Verify exact author lists, years, and URLs against the Cornell
+   eCommons and UCL Figshare repository pages before any `\cite{}` commands are placed.
+
+---
+
+## § 15 — sci-llm-writer Update Protocol When GPU Results Land
+
+When R3b (SAM3) or R3c (VesselFM) GPU runs complete, update this document and the
+sci-llm-writer manuscript using this protocol:
+
+**Step 1 — Update source KG files:**
+- Add numbers to `knowledge-graph/experiments/` (new YAML file per experiment)
+- Update `knowledge-graph/experiments/current_best.yaml` champion table
+- Update `knowledge-graph/manuscript/results.yaml` R3b/R3c status from BLOCKED → confirmed
+
+**Step 2 — Update results-ground-truth.json:**
+- Add new result objects to `manuscripts/vasculature-mlops/results-ground-truth.json`
+- Change `"status": "BLOCKED"` to `"status": "CONFIRMED"` for the relevant result
+
+**Step 3 — Update the cover letter (this file):**
+- Update §3.3 (SAM3) or §3.4 (VesselFM) with confirmed numbers
+- Update §6 (R3b/R3c) status from `🚫 BLOCKED` to `✅ DATA AVAILABLE`
+- Update §14 to remove the corresponding blocker
+- Update the YAML front-matter `kg_commit` field
+
+**Step 4 — Open a new sci-llm-writer session and run a new iterated-llm-council
+iteration on `results-03-models.tex`** (mode: `refinement`, quality target: MINOR_REVISION)
+- Paste/reference the updated cover letter as context
+- The council will fill in R3b/R3c subsections with the real numbers
+- Run verification against the updated results-ground-truth.json

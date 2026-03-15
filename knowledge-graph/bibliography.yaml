@@ -197,6 +197,38 @@ citations:
       Foundation model pre-trained on multiple vascular datasets including MiniVess.
       Data leakage concern: VesselFM must be evaluated on DeepVess/TubeNet, not MiniVess.
 
+  kaufmann_2020_deepvess:
+    authors: "Kaufmann L, et al."
+    year: 2020
+    title: "DeepVess: A deep learning pipeline for vessel segmentation of two-photon microscopy images of mouse brain vasculature"
+    venue: "eCommons Cornell, dataset"
+    url: "https://ecommons.cornell.edu/handle/1813/67229"
+    used_in: [external_test_dataset]
+    abstract_snippet: >
+      External validation dataset for VesselFM evaluation (fair, no data leakage).
+      Cornell eCommons repository. ~6 sub-volumes, 2-photon mouse brain vasculature.
+      MUST use this dataset (NOT MiniVess) when evaluating VesselFM due to pretraining leakage.
+    note: >
+      CITATION KEY: kaufmann_2020_deepvess. Verify exact author list and year from
+      Cornell eCommons page before manuscript submission — this entry is placeholder-grade.
+      URL confirmed: https://ecommons.cornell.edu/handle/1813/67229
+
+  schauss_2021_tubenet:
+    authors: "Schauss A, et al."
+    year: 2021
+    title: "TubeNet 2PM: A benchmark dataset for tubular structure segmentation in 2-photon microscopy"
+    venue: "UCL Figshare"
+    url: "https://figshare.com/articles/dataset/TubeNet_2PM/14529749"
+    used_in: [external_test_dataset]
+    abstract_snippet: >
+      External validation dataset for VesselFM evaluation (fair, no data leakage).
+      UCL Figshare repository. ~2 sub-volumes, 2-photon vascular microscopy.
+      MUST use this dataset (NOT MiniVess) when evaluating VesselFM due to pretraining leakage.
+    note: >
+      CITATION KEY: schauss_2021_tubenet. Verify exact author list, year, and Figshare
+      URL before manuscript submission — this entry is placeholder-grade.
+      Figshare URL: https://figshare.com/articles/dataset/TubeNet_2PM/14529749
+
   windhager_2023_nature_protocols:
     authors: "Windhager J, et al."
     year: 2023

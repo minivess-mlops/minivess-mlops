@@ -1,9 +1,9 @@
 {
-  "plan_file": "docs/planning/kg-manuscript-execution-plan.yaml",
-  "plan_version": "1.0",
+  "plan_file": "docs/planning/cover-letter-to-sci-llm-writer-for-knowledge-graph.md",
+  "plan_version": "1.1",
   "execution_mode": "autonomous",
-  "current_task_id": "T25",
-  "current_phase": "P6",
+  "current_task_id": "cover-letter-review",
+  "current_phase": "DONE",
   "inner_iteration": 0,
   "tasks": {
     "T01": {"status": "DONE", "phase": "P0", "title": "navigator.yaml — add manuscript: domain", "issue": 725, "commit": "5f0b2bb"},
@@ -30,16 +30,34 @@
     "T22": {"status": "DONE", "phase": "P5", "title": "scripts/scan_code_structure.py (TDD)", "issue": 730, "commit": "575f808"},
     "T23": {"status": "DONE", "phase": "P5", "title": "scripts/scan_experiments.py (TDD)", "issue": 731, "commit": "575f808"},
     "T24": {"status": "DONE", "phase": "P5", "title": "scripts/check_projection_staleness.py (TDD)", "issue": 732, "commit": "575f808"},
-    "T25": {"status": "DONE", "phase": "P6", "title": "knowledge-reviewer QA", "issue": 733, "result": "0 errors, 18 warnings (all pre-existing MISSING file refs)"}
+    "T25": {"status": "DONE", "phase": "P6", "title": "knowledge-reviewer QA", "issue": 733, "result": "0 errors, 18 warnings (all pre-existing MISSING file refs)"},
+    "T26": {"status": "DONE", "phase": "P7", "title": "cover-letter review + 10-change hardening", "issue": null,
+      "changes_applied": [
+        "C1: Added §1.5 Prior Art Gap (prior work table + target researcher persona)",
+        "C2: Added §1.6 Three Contributions canonical form",
+        "C3: Fixed SAM3 param count 648M→848M total (encoder=648M) in §3.3 and §11",
+        "C4: Added kaufmann_2020_deepvess and schauss_2021_tubenet to bibliography.yaml",
+        "C5: Added results-ground-truth.json creation instructions + JSON template to §10",
+        "C6: Added §1.7 Introduction narrative arc skeleton + verbatim seed flag",
+        "C7: Added Mamba writing instruction to §3.2 (write as planned, not implemented)",
+        "C8: Added section word count budget table to §2",
+        "C9: Added §15 update protocol for when GPU results land",
+        "C10: Added DO-NOT-FILL-BLOCKED guard block to results-00-overview.tex",
+        "Minor: Clarified Ralph Wiggum reference in §12",
+        "Minor: Fixed kg-sync command with actual path + not-yet-implemented warning",
+        "Minor: Added R2 DevEx benchmark what-satisfies-R2 definition",
+        "Minor: Added citation keys for DeepVess/TubeNet to §3.4 with placeholder warning"
+      ]
+    }
   },
   "convergence": {
     "reached": true,
-    "tasks_done": 25,
-    "tasks_total": 25,
+    "tasks_done": 26,
+    "tasks_total": 26,
     "tasks_stuck": 0
   },
-  "session_task_count": 25,
-  "session_inner_iterations": 4,
+  "session_task_count": 1,
+  "session_inner_iterations": 1,
   "session_start": "2026-03-15T00:00:00Z",
   "session_end": "2026-03-15T00:00:00Z"
 }
