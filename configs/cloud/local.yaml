@@ -1,0 +1,17 @@
+# Local GPU — no cloud, no SkyPilot. Docker Compose only.
+# For development on workstations with NVIDIA GPUs.
+
+provider: local
+region: null
+use_spot: false
+disk_size: null
+
+# Use whatever GPU is available locally.
+accelerators: null
+
+# Local Docker image (built via `make build-base`).
+docker_registry: local
+docker_image: minivess-base:latest
+
+# MLflow tracking local (file-based mlruns/).
+mlflow_env_var: null

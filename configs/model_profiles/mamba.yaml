@@ -13,3 +13,13 @@ notes: >
   UlikeMamba architecture (Wang 2025). Pure-PyTorch SSM approximation
   (no mamba-ssm CUDA kernels required). Lightweight U-Net with Mamba
   blocks at each resolution. Good for quick iteration and baselines.
+vram:
+  inference_gb: 2.0
+  training_gb: 3.0
+  measured: false
+  measured_gpu: null
+  measured_date: null
+  measured_config:
+    patch_size: null
+    batch_size: null
+  notes: null

@@ -1,0 +1,60 @@
+# SkyPilot workdir sync exclusions
+# These directories are too large or unnecessary for remote execution.
+
+# Data (pulled via DVC on remote — 2.6 GB)
+# IMPORTANT: use /data/ (root-anchored) to avoid excluding src/minivess/data/
+/data/
+/data_cache/
+
+# DVC (local cache 2.6 GB + config — re-initialized on remote)
+.dvc/
+
+# Git objects (973 MB — not needed on remote)
+.git/
+
+# MLflow runs (tracked on remote MLflow server)
+mlruns/
+mlruns-docker/
+
+# Model checkpoints (7.8 GB — generated during training)
+checkpoints/
+
+# Dataset downloads (940 MB zip)
+dataset_local/
+
+# Pulumi venv
+deployment/pulumi/.venv/
+
+# Build artifacts
+outputs/
+*.duckdb
+*.onnx
+*.pth
+*.ckpt
+*.zip
+
+# Python caches
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+
+# Virtual environments (rebuilt on remote)
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Docker (not needed on RunPod dev)
+deployment/docker/
+
+# Large docs/planning files
+docs/planning/*.pdf
+
+# OS
+.DS_Store
+Thumbs.db

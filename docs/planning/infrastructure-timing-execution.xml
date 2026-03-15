@@ -1,0 +1,329 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Infrastructure Timing &amp; Cost Analysis Execution Plan
+  ======================================================
+
+  Implements Phases A-D from profiler-benchmarking-plan-double-check.md.
+  The existing profiler plan (Phases 0-3, issues #644-#651) covers
+  torch.profiler integration, which is ALREADY IMPLEMENTED:
+    - profiler_integration.py exists
+    - configs/profiling/{default,debug,disabled}.yaml exist
+    - record_function annotations in trainer.py exist
+
+  This plan adds the MISSING infrastructure layer:
+    - Shell-level timing in SkyPilot YAML setup: blocks
+    - Python timing parser + MLflow logging
+    - Cost computation (hourly rate, effective GPU rate, amortization)
+    - DuckDB extraction for timing/cost params
+
+  Parent issue: #683
+  Plan document: docs/planning/profiler-benchmarking-plan-double-check.md
+  Created: 2026-03-14
+-->
+
+<plan xmlns="urn:minivess:tdd-plan:v1"
+      title="Infrastructure Timing and Cost Analysis"
+      parent_issue="https://github.com/petteriTeikari/minivess-mlops/issues/683"
+      created="2026-03-14"
+      review_round="0">
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE A: Infrastructure Timing Module (Python)                     -->
+  <!-- Parse shell timestamps, compute durations, log to MLflow           -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <phase id="A" name="Infrastructure Timing Module">
+    <description>
+      Create the Python module that parses shell-generated timing data
+      (key=value timestamps from SkyPilot setup: blocks), computes
+      durations and cost analysis, and logs everything to MLflow.
+
+      This is implemented FIRST (before modifying SkyPilot YAMLs) because:
+      1. Tests can run locally without cloud GPU instances
+      2. The module can handle missing timing files gracefully
+      3. Once the module exists, YAML changes are a simple addition
+    </description>
+
+    <task id="T1"
+          issue_title="feat(observability): add infrastructure timing parser + cost analysis module"
+          issue_ref="https://github.com/petteriTeikari/minivess-mlops/issues/683"
+          priority="critical"
+          effort_hours="3">
+      <description>
+        Create src/minivess/observability/infrastructure_timing.py with:
+
+        1. parse_setup_timing(timing_file: Path) -> dict[str, float]
+           Reads key=value timestamp file (e.g., "python_install_start=1710412800.123")
+           and computes durations for each operation.
+
+        2. compute_cost_analysis(
+             setup_seconds: float,
+             training_seconds: float,
+             epoch_count: int,
+             hourly_rate_usd: float,
+           ) -> dict[str, float]
+           Computes: total_cost, setup_cost, training_cost, effective_gpu_rate,
+           setup_fraction, gpu_utilization_fraction, epochs_to_amortize_setup,
+           break_even_epochs.
+
+        3. log_infrastructure_timing(tracker: ExperimentTracker) -> None
+           Reads timing_setup.txt from cwd, parses it, logs all setup_* params
+           to MLflow. Also logs the timing file as a "timing" artifact.
+
+        4. log_cost_analysis(tracker: ExperimentTracker, ...) -> None
+           Computes cost analysis and logs cost_* metrics at step=0 to MLflow.
+           Reads INSTANCE_HOURLY_USD from env var (default 0.0 for local).
+
+        5. generate_timing_jsonl(
+             setup_durations: dict, training_seconds: float,
+             epoch_count: int, hourly_rate: float
+           ) -> str
+           Generates JSONL content for the timing artifact.
+
+        Design decisions (from reviewer feedback):
+        - Shell timing uses key=value format (no JSON in bash, no bc dependency)
+        - Cost values logged as MLflow metrics at step=0 (not params)
+        - Setup timing logged as MLflow params (one-time values)
+        - First/steady epoch timing uses prof_ prefix (not setup_)
+        - cost_instance_sku (not cost_instance_type) to avoid sys_gpu_model overlap
+        - Graceful no-op when timing file doesn't exist (local runs)
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/test_infrastructure_timing.py::test_parse_setup_timing_basic
+            -> Parse a sample timing file with 3 operations, verify durations correct
+          - test_parse_setup_timing_missing_end
+            -> Missing end timestamp for an operation -> duration is None, no crash
+          - test_parse_setup_timing_empty_file
+            -> Empty file -> empty dict, no crash
+          - test_parse_setup_timing_file_not_found
+            -> Non-existent file -> empty dict, no crash
+          - test_compute_cost_analysis_basic
+            -> 600s setup, 1750s training, 50 epochs, $0.40/hr
+               -> total_cost ~= 0.261, setup_fraction ~= 0.255, effective_gpu_rate ~= 0.537
+          - test_compute_cost_analysis_zero_training
+            -> 0s training -> effective_gpu_rate = -1.0 (sentinel), no ZeroDivisionError
+          - test_compute_cost_analysis_zero_hourly_rate
+            -> $0.0/hr (local) -> all costs = 0.0, no errors
+          - test_compute_cost_analysis_amortization
+            -> 600s setup, 30s/epoch: epochs_to_amortize = 181 (9*600/30 + 1)
+          - test_compute_cost_analysis_break_even
+            -> 600s setup, 35s/epoch: break_even = 18 (600/35 + 1)
+          - test_generate_timing_jsonl_format
+            -> Output is valid JSONL (each line parses as JSON)
+          - test_generate_timing_jsonl_has_cost_summary
+            -> Last line has "operation": "cost_summary" with all cost fields
+          - test_log_infrastructure_timing_no_file
+            -> log_infrastructure_timing() with no timing file -> no-op, no crash
+          - test_log_infrastructure_timing_logs_params
+            -> Mock ExperimentTracker, verify setup_* params logged
+          - test_log_cost_analysis_logs_metrics
+            -> Mock ExperimentTracker, verify cost_* metrics logged at step=0
+          - test_hourly_rate_from_env
+            -> INSTANCE_HOURLY_USD=0.40 in env -> hourly_rate = 0.40
+          - test_hourly_rate_default_zero
+            -> No INSTANCE_HOURLY_USD in env -> hourly_rate = 0.0
+        </red>
+        <green>
+          - Create src/minivess/observability/infrastructure_timing.py
+          - Implement parse_setup_timing()
+          - Implement compute_cost_analysis()
+          - Implement log_infrastructure_timing()
+          - Implement log_cost_analysis()
+          - Implement generate_timing_jsonl()
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="src/minivess/observability/infrastructure_timing.py" action="create"/>
+        <file path="tests/v2/unit/test_infrastructure_timing.py" action="create"/>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE B: SkyPilot YAML Timing Instrumentation                     -->
+  <!-- Add date +%s.%N timing to setup: blocks in all SkyPilot YAMLs     -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <phase id="B" name="SkyPilot YAML Timing">
+    <description>
+      Add shell-level timing (key=value timestamps via date +%s.%N) to all
+      SkyPilot YAML setup: blocks. The run: block reads the timing file
+      and calls log_infrastructure_timing() before starting training.
+
+      Also add INSTANCE_HOURLY_USD env var injection in launcher scripts.
+    </description>
+
+    <task id="T2"
+          issue_title="feat(cloud): add shell timing to SkyPilot YAML setup blocks"
+          issue_ref="https://github.com/petteriTeikari/minivess-mlops/issues/683"
+          priority="high"
+          effort_hours="2">
+      <description>
+        Modify dev_runpod.yaml and smoke_test_lambda.yaml setup: blocks to
+        emit key=value timestamps for every major operation:
+        - python_install (start/end)
+        - uv_install (start/end)
+        - uv_sync (start/end)
+        - dvc_config (start/end)
+        - dvc_pull (start/end)
+        - model_weights (start/end)
+        - verification (start/end)
+        - setup (start/end — overall)
+
+        Modify run: blocks to call the timing logger before training:
+        ```bash
+        python -c "
+        from minivess.observability.infrastructure_timing import log_infrastructure_timing_standalone
+        log_infrastructure_timing_standalone()
+        "
+        ```
+
+        Add INSTANCE_HOURLY_USD to .env.example (Rule #22).
+
+        Modify launcher scripts to inject INSTANCE_HOURLY_USD from SkyPilot
+        status after provisioning (best-effort — may not always be available).
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/test_skypilot_yaml_timing.py::test_dev_runpod_yaml_has_timing_start
+            -> Parse dev_runpod.yaml, verify setup: block contains "setup_start=$(date"
+          - test_dev_runpod_yaml_has_timing_end
+            -> Parse dev_runpod.yaml, verify setup: block contains "setup_end=$(date"
+          - test_dev_runpod_yaml_has_all_operations_timed
+            -> Verify all 7 operations have start/end timestamp lines
+          - test_smoke_test_lambda_yaml_has_timing
+            -> Parse smoke_test_lambda.yaml, verify timing lines present
+          - test_env_example_has_instance_hourly_usd
+            -> Parse .env.example, verify INSTANCE_HOURLY_USD is present
+          - test_run_block_calls_timing_logger
+            -> Parse dev_runpod.yaml run: block, verify timing logger call
+        </red>
+        <green>
+          - Modify deployment/skypilot/dev_runpod.yaml setup: block with timing
+          - Modify deployment/skypilot/smoke_test_lambda.yaml setup: block with timing
+          - Modify dev_runpod.yaml run: block to call timing logger
+          - Modify smoke_test_lambda.yaml run: block to call timing logger
+          - Add INSTANCE_HOURLY_USD to .env.example
+          - Modify scripts/launch_dev_runpod.py to inject hourly cost env var
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="deployment/skypilot/dev_runpod.yaml" action="modify"/>
+        <file path="deployment/skypilot/smoke_test_lambda.yaml" action="modify"/>
+        <file path=".env.example" action="modify"/>
+        <file path="scripts/launch_dev_runpod.py" action="modify"/>
+        <file path="tests/v2/unit/test_skypilot_yaml_timing.py" action="create"/>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE C: Train Flow Integration                                    -->
+  <!-- Wire infrastructure timing into the training flow                  -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <phase id="C" name="Train Flow Integration">
+    <description>
+      Integrate infrastructure timing into train_flow.py so that every
+      training run automatically logs setup timing and cost analysis.
+      Also add first/steady epoch timing to trainer.py.
+    </description>
+
+    <task id="T3"
+          issue_title="feat(training): integrate infrastructure timing into train_flow.py"
+          issue_ref="https://github.com/petteriTeikari/minivess-mlops/issues/683"
+          priority="high"
+          effort_hours="2">
+      <description>
+        Modify train_flow.py to:
+        1. Call log_infrastructure_timing(tracker) at the start of the run
+           (reads timing_setup.txt if it exists, no-op otherwise)
+        2. Call log_cost_analysis(tracker, ...) at the end of training
+           (after all folds complete, before run is finalized)
+
+        Modify trainer.py to:
+        1. Record prof_first_epoch_seconds (epoch 0 wall time)
+        2. Record prof_steady_epoch_seconds (epoch 1 wall time)
+        3. Log these as MLflow metrics at step=0 and step=1
+
+        These changes are minimal — just two function calls in train_flow.py
+        and two timing measurements in trainer.py.
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/test_train_flow_timing.py::test_train_flow_calls_infrastructure_timing
+            -> AST-parse train_flow.py (ast.walk, NOT regex — Rule #16), verify
+               log_infrastructure_timing is called
+          - test_train_flow_calls_cost_analysis
+            -> AST-parse train_flow.py, verify log_cost_analysis is called
+          - test_trainer_records_first_epoch_time
+            -> Verify trainer.py has prof_first_epoch_seconds timing
+          - test_trainer_records_steady_epoch_time
+            -> Verify trainer.py has prof_steady_epoch_seconds timing
+        </red>
+        <green>
+          - Add log_infrastructure_timing() call to train_flow.py
+          - Add log_cost_analysis() call to train_flow.py
+          - Add epoch 0/1 timing to trainer.py fit() method
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="src/minivess/orchestration/flows/train_flow.py" action="modify"/>
+        <file path="src/minivess/pipeline/trainer.py" action="modify"/>
+        <file path="tests/v2/unit/test_train_flow_timing.py" action="create"/>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE D: DuckDB Extraction + Reporting                            -->
+  <!-- Extract timing/cost data into queryable Parquet                    -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <phase id="D" name="DuckDB Extraction">
+    <description>
+      Extend the DuckDB extraction pipeline to include setup_* and cost_*
+      data in queryable Parquet tables. Add cost_* to the metric exclusion
+      list so they don't appear as training curves.
+    </description>
+
+    <task id="T4"
+          issue_title="feat(analytics): extract infrastructure timing + cost data to DuckDB/Parquet"
+          issue_ref="https://github.com/petteriTeikari/minivess-mlops/issues/683"
+          priority="medium"
+          effort_hours="2">
+      <description>
+        Modify duckdb_extraction.py to:
+        1. Add "setup_" and "cost_" to _EXCLUDED_METRIC_PREFIXES tuple
+           (prevents these from appearing in training_metrics table)
+        2. Add a new extraction function for infrastructure timing params
+           that pulls setup_* and cost_* into a dedicated table
+
+        This is a small change — the DuckDB extraction already handles
+        all params generically. We just need to ensure the new prefixes
+        don't pollute training curve data.
+      </description>
+      <tdd_spec>
+        <red>
+          - tests/v2/unit/test_duckdb_timing_extraction.py::test_excluded_metric_prefixes_include_setup
+            -> Verify _EXCLUDED_METRIC_PREFIXES contains "setup_"
+          - test_excluded_metric_prefixes_include_cost
+            -> Verify _EXCLUDED_METRIC_PREFIXES contains "cost_"
+          - test_timing_params_extractable
+            -> Create mock MLflow run with setup_* params, verify DuckDB extraction
+               includes them in params table
+        </red>
+        <green>
+          - Add "setup_" and "cost_" to _EXCLUDED_METRIC_PREFIXES
+          - Verify extraction works with new param prefixes
+        </green>
+      </tdd_spec>
+      <files>
+        <file path="src/minivess/pipeline/duckdb_extraction.py" action="modify"/>
+        <file path="tests/v2/unit/test_duckdb_timing_extraction.py" action="create"/>
+      </files>
+    </task>
+  </phase>
+
+</plan>

@@ -1,0 +1,40 @@
+# @package _global_
+# GPU Smoke Test: SAM3 TopoLoRA on RunPod RTX 4090 via SkyPilot
+#
+# NOT scientifically valid — verifies cloud GPU pipeline only.
+# 2 epochs, 1 fold, 4 volumes = ~10 min on RTX 4090 (~$0.08).
+#
+# SAM3 TopoLoRA: LoRA on ViT-32L FFN + trainable decoder.
+# Requires >= 16 GB VRAM (LoRA gradients flow through encoder).
+# Does NOT fit on 8 GB local GPU — requires cloud RTX 4090 (24 GB).
+defaults:
+  - override /model: sam3_topolora
+  - override /checkpoint: lightweight
+
+experiment_name: smoke_sam3_topolora
+model: sam3_topolora
+model_family: sam3_topolora
+losses:
+  - cbdice_cldice
+max_epochs: 2
+num_folds: 1
+debug: true
+
+# Data subsetting (belt-and-suspenders with 4-vol split file, RC10)
+max_train_volumes: 2
+max_val_volumes: 2
+splits_file: configs/splits/smoke_test_1fold_4vol.json
+
+# DVC provenance
+data:
+  dvc_commit: HEAD
+
+# SAM3 TopoLoRA: LoRA on all 32 ViT-32L blocks
+architecture_params:
+  backbone: vit_32l
+  input_size: 1008
+  embed_dim: 1024
+  pretrained: false
+  lora_rank: 16
+  lora_alpha: 32.0
+  lora_dropout: 0.0

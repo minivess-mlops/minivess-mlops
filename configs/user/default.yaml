@@ -1,0 +1,10 @@
+# Default user config — no user-specific overrides.
+# Copy this to configs/user/<your_name>.yaml and customize.
+#
+# Example: configs/user/petteri.yaml
+#   cloud: gcp_spot
+#   max_cost_per_hour: 2.00
+#   preferred_gpu: L4
+
+# No overrides — use base defaults
+{}

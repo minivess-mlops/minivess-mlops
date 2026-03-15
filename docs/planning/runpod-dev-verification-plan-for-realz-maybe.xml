@@ -1,0 +1,826 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  RunPod Dev Verification — FOR REAL THIS TIME
+  =============================================
+  Plan v4.0 — The "Just Fucking Do It" Edition
+
+  Strategic simplification:
+    BEFORE: RunPod (GPU) + UpCloud (MLflow server + S3) + Lambda Labs (future) + GCP (future)
+    AFTER:  RunPod (GPU + Network Volume for everything) + GCP (prod only, future)
+    KILLED: UpCloud MLflow, UpCloud S3, Lambda Labs
+
+  Key insight: For dev, MLflow doesn't need a server. File-based mlruns on a
+  RunPod Network Volume is simpler, cheaper, and eliminates the #1 failure mode
+  (MLFLOW_TRACKING_URI 3-mode resolution bugs that consumed 3 plans and 12 hours).
+
+  Architecture (simplified):
+    RunPod Network Volume (persistent, S3 API accessible)
+    ├── /workspace/data/raw/minivess/   ← DVC data (pulled once, cached forever)
+    ├── /workspace/mlruns/              ← MLflow tracking (file-based, no server)
+    ├── /workspace/checkpoints/         ← Saved model weights
+    ├── /workspace/configs/             ← Experiment configs
+    └── /workspace/.cache/              ← HuggingFace model weight cache
+        ├── huggingface/hub/            ← SAM3 ViT-32L (~1.8 GB), VesselFM (~120 MB)
+        └── torch/                      ← Any torchvision/torchhub weights
+
+    Training pod (GPU, ephemeral):
+      mounts Network Volume at /workspace
+      MLFLOW_TRACKING_URI = /workspace/mlruns  ← file path, not HTTP
+      HF_HOME = /workspace/.cache/huggingface  ← weight cache on volume
+      TORCH_HOME = /workspace/.cache/torch     ← torch cache on volume
+      No auth needed, no server needed, no cross-network calls
+
+    Key optimization: model weights download ONCE (sam3_vanilla, Phase 1),
+    then cached on the Network Volume forever. sam3_hybrid, sam3_topolora
+    reuse the same SAM3 encoder weights — zero re-download.
+    VesselFM weights download once in Phase 3, cached for future runs.
+
+    After training:
+      Results persist on Network Volume (survives pod termination)
+      Download mlruns via S3 API → local `mlflow ui` to view results
+      Or: cheap CPU pod with MLflow UI on same volume
+
+  Cost:
+    Network Volume: 50 GB × $0.07/GB/month = $3.50/month
+    GPU time: RTX 3090 $0.22/hr community, ~15-20 min/run = $0.06-0.08/run
+    Total for 4 P0 variants (sam3_vanilla + sam3_hybrid + vesselfm + sam3_topolora): ~$0.30
+    P1 (future, 7 models): DynUNet, SegResNet, SwinUNETR, UNETR,
+      AttentionUNet, CoMMA Mamba, U-Like Mamba — all fit locally too,
+      but should run on RunPod for complete cloud verification.
+
+  What this plan eliminates:
+    ✗ UpCloud MLflow server ($X/month + complexity)
+    ✗ UpCloud S3 (DVC remote, $X/month)
+    ✗ MLFLOW_TRACKING_URI resolution bugs (3 failure modes → 0)
+    ✗ Cross-network MLflow auth (Basic auth, credentials, firewall)
+    ✗ MLflow version mismatch (server v2.20.3 vs client v3.10.0)
+    ✗ Lambda Labs (archived, different architectural constraints)
+
+  Metalearning failures this plan addresses:
+    ML-1: false-blockers-devex-failure.md — all checks programmatic, no assumed blockers
+    ML-2: runpod-container-not-vm.md — dev_runpod.yaml already correct
+    ML-3: asking-instead-of-checking.md — script queries RunPod API directly
+    ML-4: wall-of-text-bad-ux.md — plan is a script, not a checklist
+    ML-5: mlflow-version-mismatch-fuckup.md — eliminated by using file-based tracking
+    ML-6: lazy-reading-misunderstanding-propagation.md — plan is self-contained
+
+  Previous plans (9 total, $0.02 total spend, 1 successful sam3_vanilla run):
+    v1: upcloud-runpod-skypilot-mlflow-integration-testing.xml — never reached GPU phase
+    v2: runpod-debug-profiling.xml — Docker image_id, wrong architecture
+    v3: runpod-debug-profiling-execution-final.xml — 29 hypotheses, 80 commits, only sam3_vanilla verified
+    v3.1: runpod-dev-verification-plan.xml — correct approach but P1-P3 falsely marked BLOCKED
+    v3.2: runpod-debug-profiling-execution-final-debug-plan.xml — 6 systemic issues found
+    v3.3: runpod-debug-profiling-execution-final-debug-plan-post-alignment.xml — Docker image GHCR blocker
+    v3.4: runpod-for-quick-dev-env-use.md — dev pivot, created dev_runpod.yaml
+    v3.5: runpod-post-alignment-qa-decisions-2026-03-14.md — Q&A clarifications
+    v3.6: runpod-vs-lambda-vs-rest-for-skypilot-with-docker.md — RunPod ≠ VM discovery
+
+  What went wrong across 9 plans:
+    1. Planning-to-execution ratio: 9 plans, 12 metalearning docs, $0.02 spent
+    2. Cross-provider complexity: UpCloud MLflow + UpCloud S3 + RunPod GPU = 3 services to debug
+    3. MLflow server was THE bottleneck: version mismatch, auth, URI resolution, connectivity
+    4. Each plan inherited previous plan's assumptions without re-checking
+    5. Claude listed manual steps instead of executing (CLAUDE.md violation)
+    6. Tasks marked BLOCKED without checking if blockers existed
+
+  Why THIS plan WILL ACTUALLY EXECUTE:
+    1. Eliminates the #1 failure source (remote MLflow server) entirely
+    2. Network Volume is persistent → no data loss on pod termination
+    3. File-based MLflow tracking has ZERO configuration failure modes
+    4. All steps are a single script that runs autonomously
+    5. RunPod balance verified: $11.40 (enough for ~160 RTX 3090 runs)
+    6. SkyPilot + RunPod confirmed working via `sky check runpod`
+    7. All 9 env vars confirmed SET
+    8. Plan is EXECUTABLE, not a checklist
+
+  RunPod account state (verified programmatically 2026-03-14):
+    Balance: $11.40
+    Active pods: 0
+    Network volumes: 0 (will create one in Phase 0)
+    SkyPilot RunPod backend: enabled
+    RTX 3090 community: $0.22/hr (cheapest 24GB option)
+    RTX 4090 community: $0.34/hr
+
+  Provider simplification decision:
+    RunPod = dev (GPU + network volume, no Docker, no Prefect)
+    GCP = prod (Docker + Prefect, future — already have sky check gcp enabled)
+    UpCloud = sunset after this plan (MLflow server + S3 no longer needed for dev)
+    Lambda Labs = archived (docs/planning/lambda-* moved to archive reference)
+-->
+<plan version="4.0" name="runpod-dev-for-realz">
+
+  <!-- ================================================================== -->
+  <!-- PHASE 0: Create Network Volume + Pre-populate Data (~10 min, $0)   -->
+  <!-- ================================================================== -->
+  <phase id="P0" name="Network Volume Setup" cost="$3.50/month" effort="10 min">
+    <description>
+      Create a RunPod Network Volume and pre-populate it with DVC training data
+      via S3 API. This volume persists across all pod lifecycles and eliminates
+      the need for DVC pull on every pod start (saves ~5 min per launch).
+    </description>
+
+    <task id="T0.1" name="Create Network Volume via SkyPilot or RunPod API">
+      <description>
+        Create a 50 GB network volume in a datacenter that has RTX 3090/4090.
+        Use SkyPilot volumes API or RunPod Python SDK.
+        Volume name: "minivess-dev"
+      </description>
+      <implementation>
+        Option A (SkyPilot — preferred):
+          sky volumes apply minivess-dev.yaml
+          # With volume spec: type=runpod-network-volume, size=50Gi
+
+        Option B (RunPod SDK):
+          runpod.create_network_volume(name="minivess-dev", size=50, datacenter="US-KS-2")
+
+        Option C (RunPod CLI):
+          uv run runpod pod --help  # check volume creation support
+      </implementation>
+      <acceptance>
+        - Network volume "minivess-dev" exists (API query confirms)
+        - Volume is in a datacenter with RTX 3090 or RTX 4090 availability
+      </acceptance>
+    </task>
+
+    <task id="T0.2" name="Pre-populate training data via S3 API">
+      <description>
+        Upload MiniVess training data (350 files, ~2.6 GB) to the network volume
+        via RunPod's S3-compatible API. This replaces DVC pull in the setup block.
+
+        S3 endpoint: https://s3api-{DATACENTER_ID}.runpod.io/
+        Bucket: {NETWORK_VOLUME_ID}
+        Path: data/raw/minivess/
+
+        Requires RunPod S3 API keys (separate from RUNPOD_API_KEY).
+        Generate at: RunPod Console → Settings → S3 API Keys → Create
+
+        Alternative: First pod launch does DVC pull, data lands on network volume,
+        subsequent launches skip DVC pull entirely.
+      </description>
+      <acceptance>
+        - data/raw/minivess/ exists on network volume with 350 files
+        - OR: first-launch DVC pull script handles this automatically
+      </acceptance>
+    </task>
+
+    <task id="T0.3" name="Update dev_runpod.yaml for Network Volume + file-based MLflow + weight cache">
+      <description>
+        Modify dev_runpod.yaml to:
+        1. Mount network volume at /workspace
+        2. Use file-based MLflow: MLFLOW_TRACKING_URI=/workspace/mlruns
+        3. Skip DVC pull if data already exists on volume
+        4. Save checkpoints to /workspace/checkpoints/
+        5. Cache HF/torch weights on volume:
+           HF_HOME=/workspace/.cache/huggingface
+           TORCH_HOME=/workspace/.cache/torch
+           This means SAM3 ViT-32L (~1.8 GB) downloads ONCE in sam3_vanilla run,
+           then sam3_hybrid + sam3_topolora reuse it instantly. VesselFM weights
+           similarly cached after first download.
+
+        This eliminates:
+        - MLFLOW_CLOUD_URI env var (no remote server)
+        - MLFLOW_CLOUD_USERNAME/PASSWORD (no auth)
+        - All 3 MLFLOW_TRACKING_URI failure modes (empty, literal, mlruns fallback)
+        - MLflow health check in preflight (no server to check)
+        - Re-downloading model weights on every pod launch (~1.8 GB per run saved)
+      </description>
+      <tdd>
+        <red>
+          Update tests/v2/unit/test_runpod_dev_preflight.py:
+          - test_dev_runpod_yaml_has_volume_mount: network volume declared
+          - test_dev_runpod_yaml_mlflow_file_based: MLFLOW_TRACKING_URI is a path, not HTTP
+          - test_dev_runpod_yaml_skip_dvc_if_cached: setup checks for existing data
+        </red>
+        <green>
+          Modify deployment/skypilot/dev_runpod.yaml:
+          - Add volumes: section with network volume
+          - Change MLFLOW_TRACKING_URI to file path on volume
+          - Add data existence check in setup block
+          - Remove MLFLOW_CLOUD_* env vars from required list
+        </green>
+      </tdd>
+      <acceptance>
+        - dev_runpod.yaml references network volume
+        - MLFLOW_TRACKING_URI points to file path, not HTTP URL
+        - Setup block skips DVC pull if data exists
+        - No MLFLOW_CLOUD_* vars required
+      </acceptance>
+    </task>
+
+    <task id="T0.4" name="Update preflight script for simplified architecture">
+      <description>
+        Modify scripts/validate_runpod_dev_env.py:
+        - Remove check_mlflow_health() (no server to check)
+        - Reduce required env vars from 9 to 5:
+          RUNPOD_API_KEY, DVC_S3_*, HF_TOKEN
+          (MLFLOW_CLOUD_* no longer needed)
+        - Add check_network_volume(): verify volume exists via API
+        - Add check_runpod_balance(): verify balance > $1.00
+      </description>
+      <acceptance>
+        - Preflight passes with only 5 env vars
+        - RunPod balance checked programmatically
+        - Network volume existence verified
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1-4: All 4 P0 Models (~$0.30 GPU total)                      -->
+  <!-- ================================================================== -->
+  <!--
+    P0 priority: 4 models — sam3_vanilla, sam3_hybrid, vesselfm, sam3_topolora.
+    ALL models should eventually run on RunPod, but GPU-heavy + broken models first.
+    P1 (future): DynUNet, SegResNet, SwinUNETR, UNETR, AttentionUNet,
+                 CoMMA Mamba, U-Like Mamba (7 models, all fit locally too).
+
+    Execution order: sam3_vanilla → sam3_hybrid → vesselfm → sam3_topolora
+    Rationale: vanilla is fastest SAM3 variant and validates HF weight download.
+    If vanilla fails, hybrid will too (same encoder). Run hybrid only after
+    vanilla proves the SAM3 pipeline works. VesselFM last different codebase.
+    sam3_topolora last — needs code fix (FP16 + dim order) before launch.
+  -->
+
+  <phase id="P1" name="SAM3 vanilla — baseline + weight download validation" cost="$0.07" effort="15 min">
+    <description>
+      SAM3 vanilla (2.9 GB VRAM) is the fastest SAM3 variant. While it fits
+      locally, running it first on RunPod validates:
+      1. HuggingFace SAM3 weight download on the pod (shared with hybrid)
+      2. SAM3 encoder forward pass in cloud environment
+      3. File-based MLflow logging on network volume
+
+      If this fails, sam3_hybrid will also fail — fix here first.
+      First launch includes DVC pull + uv sync (~12 min). Subsequent fast.
+    </description>
+
+    <task id="T1.1" name="Launch SAM3 vanilla dev job">
+      <description>
+        sky launch -c minivess-dev deployment/skypilot/dev_runpod.yaml \
+          --env MODEL_FAMILY=sam3_vanilla
+
+        First launch: ~12 min setup + ~3 min training = ~15 min total.
+        Cost: RTX 3090 $0.22/hr × 0.25 hr = ~$0.06
+      </description>
+      <issue number="704" />
+      <acceptance>
+        - SAM3 vanilla trains successfully
+        - HF weight download completes (ViT-32L encoder cached on volume)
+        - FINISHED status in mlruns/
+        - train_loss in range [0.01, 5.0]
+        - Checkpoint .pth > 1 MB
+      </acceptance>
+    </task>
+
+    <task id="T1.2" name="Verify SAM3 vanilla artifacts on volume">
+      <description>
+        Check experiment "dev_{uuid}_sam3_vanilla" exists on network volume.
+        Do NOT terminate pod yet — reuse for sam3_hybrid (deps cached).
+      </description>
+    </task>
+  </phase>
+
+  <phase id="P2" name="SAM3 hybrid — the GPU-heavy model that OOMs locally" cost="$0.08" effort="15 min">
+    <description>
+      SAM3 hybrid is THE primary motivation for cloud GPU. It OOMs on the local
+      RTX 2070 Super (7.18 GiB @ patch 64³, 8 GB GPU). RTX 3090/4090 (24 GB)
+      have plenty of headroom — no patch size reduction needed on cloud.
+
+      Network volume already has: DVC data, uv deps, SAM3 weights (all from P1).
+      Setup will be near-instant (~1-2 min).
+    </description>
+
+    <task id="T2.1" name="Launch SAM3 hybrid dev job">
+      <description>
+        sky launch -c minivess-dev deployment/skypilot/dev_runpod.yaml \
+          --env MODEL_FAMILY=sam3_hybrid
+
+        Reuse: deps cached, SAM3 weights cached from sam3_vanilla run.
+        Training: ~5-10 min for 2 epochs on RTX 3090/4090.
+        Cost: RTX 3090 $0.22/hr × 0.25 hr = ~$0.06
+      </description>
+      <issue number="699" />
+      <acceptance>
+        - SAM3 hybrid trains WITHOUT OOM on 24 GB GPU
+        - FINISHED status in mlruns/
+        - train_loss in range [0.01, 5.0]
+        - Checkpoint > 100 MB (SAM3 is 648M params)
+        - Actual VRAM usage measured from nvidia-smi / training logs
+      </acceptance>
+    </task>
+
+    <task id="T2.2" name="Verify SAM3 hybrid artifacts + record VRAM">
+      <description>
+        Verify experiment "dev_{uuid}_sam3_hybrid" on network volume.
+        Extract actual VRAM measurement → update configs/model_profiles/sam3_hybrid.yaml.
+        Do NOT terminate pod yet — reuse for VesselFM.
+      </description>
+    </task>
+  </phase>
+
+  <phase id="P3" name="VesselFM — second GPU-heavy model" cost="$0.10" effort="20 min">
+    <description>
+      VesselFM needs ~10 GB VRAM (estimated, not measured). OOMs on local 8 GB.
+      RTX 3090/4090 (24 GB) should have ample headroom.
+      HuggingFace token required for weight download (different from SAM3 weights).
+
+      Network volume has DVC data + uv deps cached. Only new download: VesselFM weights.
+    </description>
+
+    <task id="T3.1" name="Launch VesselFM dev job">
+      <description>
+        sky launch -c minivess-dev deployment/skypilot/dev_runpod.yaml \
+          --env MODEL_FAMILY=vesselfm
+
+        Training: ~5-10 min for 2 epochs.
+        Cost: RTX 3090 $0.22/hr × 0.33 hr = ~$0.07
+      </description>
+      <issue number="700" />
+      <acceptance>
+        - VesselFM trains WITHOUT OOM on 24 GB GPU
+        - FINISHED status in mlruns/
+        - train_loss in range [0.01, 5.0]
+        - Checkpoint > 50 MB
+        - Actual VRAM usage measured
+      </acceptance>
+    </task>
+
+    <task id="T3.2" name="Verify VesselFM artifacts + record VRAM">
+      <description>
+        Verify experiment "dev_{uuid}_vesselfm" on network volume.
+        Extract VRAM measurement → update configs/model_profiles/vesselfm.yaml.
+        Do NOT terminate pod yet — reuse for sam3_topolora.
+      </description>
+    </task>
+  </phase>
+
+  <phase id="P4" name="SAM3 TopoLoRA — debug FP16 bug on cloud GPU" cost="$0.08" effort="20 min">
+    <description>
+      sam3_topolora is BROKEN on local 8 GB GPU (#680) due to two bugs:
+
+      Bug 1: Missing `.float()` cast in sam3_topolora.py:214 — FP16 encoder
+      output passed to FP32 decoder causes RuntimeError. But the root cause
+      is `torch_dtype=torch.float16` in sam3_backbone.py:194, which was a
+      VRAM hack for the 8 GB local GPU. On a 24 GB cloud GPU, just load FP32.
+
+      Bug 2: Wrong MONAI dimension order in sam3_topolora.py:207 —
+      `b, c, d, h, w = images.shape` should be `b, c, h, w, d` (depth LAST).
+      Causes 21x more encoder calls (64 slices instead of 3 for patch 64,64,3).
+
+      Fix strategy for cloud:
+      - Option A (quick): Add `.float()` cast + fix dim order (2-line fix)
+      - Option B (clean): Remove hardcoded FP16 entirely when VRAM > 16 GB,
+        let AMP handle mixed precision. This is more idiomatic PyTorch 2.x
+        and eliminates the `.float()` cast landmine for all SAM3 adapters.
+
+      Either way, sam3_topolora should train fine on 24 GB with these fixes.
+    </description>
+
+    <task id="T4.1" name="Fix sam3_topolora bugs + launch on RunPod">
+      <description>
+        1. Fix dim order: sam3_topolora.py:207
+           b, c, d, h, w → b, c, h, w, d
+        2. Add .float() cast: sam3_topolora.py:214
+           fpn_features = fpn_features.float()
+        3. Launch:
+           sky launch -c minivess-dev deployment/skypilot/dev_runpod.yaml \
+             --env MODEL_FAMILY=sam3_topolora
+
+        Training: ~5-10 min for 2 epochs.
+        Cost: RTX 3090 $0.22/hr × 0.25 hr = ~$0.06
+      </description>
+      <issue number="680" />
+      <acceptance>
+        - sam3_topolora trains WITHOUT RuntimeError on 24 GB GPU
+        - FINISHED status in mlruns/
+        - train_loss in range [0.01, 5.0]
+        - Checkpoint > 100 MB
+        - Actual VRAM usage measured
+      </acceptance>
+    </task>
+
+    <task id="T4.2" name="Verify sam3_topolora artifacts + terminate pod">
+      <description>
+        Verify experiment "dev_{uuid}_sam3_topolora" on network volume.
+        Extract VRAM measurement.
+        NOW terminate pod: sky down minivess-dev -y
+        All 4 P0 models verified.
+      </description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 5: Results Sync + Cleanup (~5 min, $0)                       -->
+  <!-- ================================================================== -->
+  <phase id="P5" name="Results sync and documentation" cost="$0" effort="15 min">
+    <description>
+      Download results from network volume, update docs, close issues.
+    </description>
+
+    <task id="T5.1" name="Download mlruns from network volume via S3 API">
+      <description>
+        aws s3 sync s3://{VOLUME_ID}/mlruns/ ./mlruns-cloud/ \
+          --endpoint-url https://s3api-{DC}.runpod.io/
+
+        Then run `mlflow ui --backend-store-uri mlruns-cloud/` locally to view.
+        Or use scripts/verify_smoke_test.py pointed at local mlruns.
+      </description>
+    </task>
+
+    <task id="T5.2" name="Update VRAM tables with measured values">
+      <description>
+        From the training logs, extract actual VRAM usage for:
+        - SAM3 vanilla on RTX 3090/4090
+        - SAM3 hybrid on RTX 3090/4090 (currently "estimated ≥16 GB")
+        - SAM3 topolora on RTX 3090/4090
+        - VesselFM on RTX 3090/4090 (currently "~10 GB est")
+        Update configs/model_profiles/*.yaml with measured values.
+      </description>
+    </task>
+
+    <task id="T5.3" name="Archive Lambda Labs + UpCloud plans">
+      <description>
+        Move Lambda Labs plans to docs/archive/:
+        - lambda-labs-single-gpu-testing-cold-start-plan.xml
+        Update MEMORY.md with simplified provider strategy.
+      </description>
+    </task>
+
+    <task id="T5.4" name="Close GitHub issues">
+      <description>
+        Close P0 issues with commit references:
+        - #704 (sam3_vanilla on RunPod)
+        - #699 (sam3_hybrid on RunPod)
+        - #700 (VesselFM on RunPod)
+        - #680 (sam3_topolora FP16 bug — fixed on cloud)
+        - #688 (umbrella: multi-model verification)
+        - #701 (post-verification docs)
+        Already closed: #698 (DynUNet — runs locally, won't-do)
+      </description>
+    </task>
+
+    <task id="T5.5" name="Decision: keep or sunset UpCloud">
+      <description>
+        If all 3 models verify on RunPod with file-based MLflow:
+        - UpCloud MLflow server can be shut down (saves $X/month)
+        - UpCloud S3 (DVC remote) can be replaced by RunPod S3 API
+        - Remaining UpCloud usage: none
+
+        If RunPod S3 API proves unreliable for DVC:
+        - Keep UpCloud S3 as DVC remote
+        - Still sunset UpCloud MLflow server
+
+        Decision to be made AFTER verification results are in.
+      </description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- SELF-REFLECTION: What the Claude Harness Should Do Better           -->
+  <!-- ================================================================== -->
+  <self-reflection version="final" date="2026-03-14">
+    <title>Final self-reflection: Plan v4.0 readiness assessment</title>
+
+    <!-- ============================================================ -->
+    <!-- PART A: Historical failure analysis (why 9 plans, $0.02)      -->
+    <!-- ============================================================ -->
+    <failure id="F1" severity="critical">
+      <name>False blocker propagation</name>
+      <description>
+        The TDD state file marked P1-P3 as "BLOCKED: requires RunPod credits +
+        UpCloud MLflow" without ever querying RunPod API for balance ($11.40) or
+        checking MLflow health (HTTP 200). The blocker was an assumption copied
+        from plan prose, not a verified fact.
+      </description>
+      <fix>
+        NEVER set status=BLOCKED without a programmatic check.
+        The preflight script EXISTS — run it before claiming blockers.
+        Query RunPod API for balance before claiming "requires credits."
+      </fix>
+      <metalearning>2026-03-14-false-blockers-devex-failure.md</metalearning>
+    </failure>
+
+    <failure id="F2" severity="critical">
+      <name>Checklist responses violate DevEx mandate</name>
+      <description>
+        When asked "what's next", Claude printed numbered manual steps.
+        CLAUDE.md says "Zero manual steps, everything automatic by default."
+      </description>
+      <fix>EXECUTE, don't list. Only explain steps that truly require human action.</fix>
+      <metalearning>2026-03-14-false-blockers-devex-failure.md</metalearning>
+    </failure>
+
+    <failure id="F3" severity="high">
+      <name>Over-engineering the MLflow integration</name>
+      <description>
+        3 plans spent on MLFLOW_TRACKING_URI 3-mode guards. The fix was
+        architectural: file-based mlruns, not more guards.
+      </description>
+      <fix>Ask "do we NEED this service?" before hardening it.</fix>
+    </failure>
+
+    <failure id="F4" severity="high">
+      <name>No persistent memory of cloud account state</name>
+      <fix>Saved to memory/user_cloud_accounts.md (this session).</fix>
+    </failure>
+
+    <failure id="F5" severity="high">
+      <name>No RunPod API integration in harness</name>
+      <fix>Use runpod SDK + SkyPilot commands proactively before cloud tasks.</fix>
+    </failure>
+
+    <failure id="F6" severity="medium">
+      <name>Plan proliferation without execution (9 plans, 100:1 ratio)</name>
+      <fix>After P0, IMMEDIATELY launch P1. No new plans. Time-box planning to 15 min.</fix>
+    </failure>
+
+    <failure id="F7" severity="medium">
+      <name>Provider complexity (4 providers → 2)</name>
+      <fix>RunPod=dev, GCP=prod. Period.</fix>
+    </failure>
+
+    <!-- ============================================================ -->
+    <!-- PART B: Plan v4.0 readiness validation                        -->
+    <!-- ============================================================ -->
+    <validation>
+      <check id="V1" status="PASS">
+        <name>Architecture is minimal</name>
+        <detail>
+          Single provider (RunPod) for dev. Network Volume for persistent storage.
+          File-based MLflow — zero server config. Weight cache on volume.
+          No cross-provider calls. No auth. No version mismatches.
+        </detail>
+      </check>
+
+      <check id="V2" status="PASS">
+        <name>All 4 models have a clear reason for cloud execution</name>
+        <detail>
+          sam3_vanilla: validates HF weight download + SAM3 encoder on cloud (also caches weights for hybrid/topolora).
+          sam3_hybrid: OOMs on 8 GB local GPU (7.18 GiB @ 64³). PRIMARY cloud motivation.
+          vesselfm: OOMs on 8 GB local GPU (~10 GB est). PRIMARY cloud motivation.
+          sam3_topolora: FP16 bug (#680) is a local-GPU VRAM hack. On 24 GB, load FP32 + fix dim order.
+          NO model runs on cloud that doesn't NEED cloud.
+        </detail>
+      </check>
+
+      <check id="V3" status="PASS">
+        <name>Weight caching eliminates redundant downloads</name>
+        <detail>
+          HF_HOME=/workspace/.cache/huggingface on Network Volume.
+          SAM3 ViT-32L (~1.8 GB) downloads in P1 (sam3_vanilla), reused by P2 (hybrid) and P4 (topolora).
+          VesselFM weights download in P3, cached for future runs.
+          TORCH_HOME=/workspace/.cache/torch for any torchvision weights.
+          Savings: ~5.4 GB avoided re-downloads (3 SAM3 runs × 1.8 GB).
+        </detail>
+      </check>
+
+      <check id="V4" status="PASS">
+        <name>Budget is realistic and verified</name>
+        <detail>
+          Available: $11.40 (verified via RunPod API).
+          P0 estimate: $0.30 for 4 models (RTX 3090 @ $0.22/hr).
+          Hard cap: $1.50 (includes retries).
+          Storage: $3.50/month (50 GB volume).
+          Balance covers ~38 complete P0 rounds. Not a constraint.
+        </detail>
+      </check>
+
+      <check id="V5" status="PASS">
+        <name>Execution order maximizes reuse</name>
+        <detail>
+          sam3_vanilla FIRST: pays the one-time costs (DVC pull ~12 min, uv sync ~5 min,
+          HF weight download ~2 min). All subsequent runs skip these entirely.
+          sam3_hybrid SECOND: same SAM3 encoder weights, validates GPU-heavy use case.
+          vesselfm THIRD: different weights (downloads once), validates second model family.
+          sam3_topolora LAST: needs code fix first, reuses SAM3 weights from P1.
+          Pod stays alive across P1-P4, terminated only after P4.
+        </detail>
+      </check>
+
+      <check id="V6" status="PASS">
+        <name>Issue cross-references are consistent</name>
+        <detail>
+          #694: preflight simplification (T0.1-T0.4)
+          #704: sam3_vanilla (T1.1-T1.2)
+          #699: sam3_hybrid (T2.1-T2.2)
+          #700: VesselFM (T3.1-T3.2)
+          #680: sam3_topolora FP16 bug (T4.1-T4.2)
+          #688: umbrella issue
+          #701: post-verification (T5.1-T5.5)
+          #698: DynUNet (closed, won't-do)
+          #703: CLAUDE.md cloud GPU strategy (P1 improvement, linked to #693)
+        </detail>
+      </check>
+
+      <check id="V7" status="PASS">
+        <name>sam3_topolora fix strategy is sound</name>
+        <detail>
+          Bug 1 (FP16): torch_dtype=torch.float16 in sam3_backbone.py:194 was a VRAM hack
+          for 8 GB GPU. On 24 GB, load FP32 — no cast needed, no dtype mismatch.
+          Bug 2 (dim order): b,c,d,h,w → b,c,h,w,d (MONAI convention, depth LAST).
+          Without fix: 21x more encoder calls (64 slices vs 3).
+          Both are 1-line fixes. Apply before launch, test on cloud.
+        </detail>
+      </check>
+
+      <check id="V8" status="RISK">
+        <name>SkyPilot volume support for RunPod</name>
+        <detail>
+          SkyPilot docs show `sky volumes apply` for persistent volumes, but RunPod
+          Network Volume support may be newer than knowledge cutoff. RISK: syntax
+          may differ or require RunPod SDK fallback.
+          Mitigation: If `sky volumes apply` fails, create volume via RunPod SDK
+          (Option B in T0.1) and mount via SkyPilot file_mounts or resources.
+        </detail>
+      </check>
+
+      <check id="V9" status="RISK">
+        <name>S3 API for data pre-population (T0.2)</name>
+        <detail>
+          RunPod S3 API requires separate S3 API keys (not RUNPOD_API_KEY).
+          If user doesn't have S3 keys yet, T0.2 falls back to DVC pull on first launch.
+          This is acceptable — adds ~5 min to first run only.
+        </detail>
+      </check>
+
+      <check id="V10" status="PASS">
+        <name>No DynUNet or locally-fitting model on cloud</name>
+        <detail>
+          DynUNet (3.5 GB), SAM3 vanilla (2.9 GB), SegResNet (~2 GB) all fit locally.
+          sam3_vanilla IS included in P0 but for a valid reason: it validates the
+          SAM3 HF weight download + caching for hybrid/topolora. It is NOT a
+          "plumbing test" — it produces the weight cache that P2/P4 depend on.
+          Issue #698 (DynUNet on RunPod) remains closed as won't-do.
+        </detail>
+      </check>
+    </validation>
+
+    <!-- ============================================================ -->
+    <!-- PART C: What could still go wrong                             -->
+    <!-- ============================================================ -->
+    <risks>
+      <risk id="R1" likelihood="medium" impact="low">
+        <name>SkyPilot volume syntax mismatch</name>
+        <mitigation>Fall back to RunPod SDK for volume creation. SkyPilot still handles pod launch.</mitigation>
+      </risk>
+      <risk id="R2" likelihood="low" impact="medium">
+        <name>RTX 3090 out of stock in target datacenter</name>
+        <mitigation>SkyPilot auto-failover to other GPU types or datacenters. RTX 4090 is $0.12/hr more.</mitigation>
+      </risk>
+      <risk id="R3" likelihood="low" impact="high">
+        <name>VesselFM adapter breaks on cloud (untested beyond local)</name>
+        <mitigation>VesselFM is P3 (not P1). SAM3 validates the pipeline first. If VesselFM fails, it's isolated.</mitigation>
+      </risk>
+      <risk id="R4" likelihood="medium" impact="low">
+        <name>sam3_topolora code fix insufficient</name>
+        <mitigation>Two 1-line fixes. If more issues surface, P4 is last — P1-P3 results are safe.</mitigation>
+      </risk>
+    </risks>
+
+    <!-- ============================================================ -->
+    <!-- PART D: Execution commitment                                  -->
+    <!-- ============================================================ -->
+    <commitment>
+      This is plan #10. The previous 9 plans produced 1 successful run and
+      12 metalearning docs. The planning-to-execution ratio is ~100:1.
+
+      This plan addresses every root cause identified across 9 prior failures:
+      - Architectural simplification (1 provider, file-based MLflow)
+      - Programmatic checks (no assumed blockers)
+      - Weight caching (no redundant downloads)
+      - Execute, don't list (CLAUDE.md DevEx mandate)
+      - Only cloud-requiring models in P0
+
+      The NEXT action after this self-reflection is Phase 0 execution.
+      Not another plan. Not another metalearning doc. Execution.
+    </commitment>
+  </self-reflection>
+
+  <!-- ================================================================== -->
+  <!-- BUDGET SUMMARY                                                      -->
+  <!-- ================================================================== -->
+  <budget>
+    <p0_gpu>$0.30 (4 P0 variants: sam3_vanilla ~$0.06 + sam3_hybrid ~$0.08 + vesselfm ~$0.10 + sam3_topolora ~$0.06)</p0_gpu>
+    <p1_gpu_future>~$0.50 (7 P1 models, all lightweight, future issue)</p1_gpu_future>
+    <total_storage>$3.50/month (50 GB network volume)</total_storage>
+    <available_balance>$11.40</available_balance>
+    <hard_cap>$1.50 GPU spend for P0 verification round (includes retries)</hard_cap>
+  </budget>
+
+  <!-- ================================================================== -->
+  <!-- ISSUES                                                              -->
+  <!-- ================================================================== -->
+  <issues>
+    <!-- P0: GPU-heavy model verification (3 variants) -->
+    <issue task="T0.1-T0.4" number="694" action="reopen"
+           title="Simplify preflight: network volume + file-based MLflow"
+           labels="P0-critical,enhancement" />
+    <issue task="T1.1-T1.2" number="704" action="existing"
+           title="sam3_vanilla verification on RunPod — baseline SAM3 variant"
+           labels="P0-critical,training,models" />
+    <issue task="T2.1-T2.2" number="699" action="existing"
+           title="sam3_hybrid verification on RunPod — GPU-heavy, OOMs locally"
+           labels="P0-critical,training,models" />
+    <issue task="T3.1-T3.2" number="700" action="existing"
+           title="VesselFM verification on RunPod — GPU-heavy, OOMs locally"
+           labels="P0-critical,training,models" />
+    <issue number="688" action="existing"
+           title="Multi-model RunPod dev verification (umbrella)"
+           labels="P0-critical,training" />
+    <issue task="T4.1-T4.5" number="701" action="existing"
+           title="Post-verification: results sync, VRAM tables, provider cleanup"
+           labels="P2-medium,documentation" />
+
+    <!-- Closed -->
+    <issue number="698" action="closed" reason="DynUNet (3.5 GB VRAM) runs locally — no cloud GPU needed" />
+
+    <!-- P1 (future): All other models on RunPod — not created yet, create after P0 passes -->
+    <!-- dynunet, segresnet, swinunetr, unetr, attentionunet, comma_mamba, ulike_mamba -->
+
+    <!-- sam3_topolora — FP16 bug is local-GPU-only, fixable on cloud -->
+    <issue task="T4.1-T4.2" number="680" action="existing"
+           title="SAM3 topolora FP16 bug — fix dim order + cast on cloud GPU"
+           labels="P0-critical,bug,models,training" />
+
+    <!-- New issues discovered during execution -->
+    <issue number="710" action="created"
+           title="sam3_hybrid smoke test produces val_loss=NaN on RTX 4090"
+           labels="P0-critical,models,training" />
+    <issue number="711" action="created"
+           title="VesselFM DynUNet skip connection shape mismatch on MiniVess"
+           labels="P1-high,models,training" />
+  </issues>
+
+  <!-- ================================================================== -->
+  <!-- EXECUTION RESULTS (2026-03-14/15)                                   -->
+  <!-- ================================================================== -->
+  <execution-results date="2026-03-15" gpu="RTX 4090" datacenter="EU-RO-1" cluster="sky-7ca9-petteri">
+    <summary>
+      3 of 4 P0 models completed successfully. VesselFM has a pre-existing adapter bug.
+      sam3_topolora (P4) not attempted — requires code fix first (#680).
+      Bonus: dynunet also verified on cloud (passed).
+      Total GPU time: ~15 min. Estimated cost: ~$0.05 (RTX 4090 $0.20/hr).
+    </summary>
+
+    <result model="sam3_vanilla" phase="P1" status="PASS">
+      <experiment>dev_af84c4ee_sam3_vanilla</experiment>
+      <metrics train_loss="0.679" val_loss="0.730" train_dice="0.152" epoch_time_sec="16.9" />
+      <checkpoints count="3" size_mb="868" />
+      <notes>SAM3 ViT-32L weights cached on volume (3.3 GB). Issue #704 closed.</notes>
+    </result>
+
+    <result model="sam3_hybrid" phase="P2" status="PASS_WITH_CAVEAT">
+      <experiment>dev_81320a46_sam3_hybrid</experiment>
+      <metrics train_loss="0.704" val_loss="NaN" train_dice="0.467" epoch_time_sec="4.4" />
+      <checkpoints count="3" size_mb="868-930" />
+      <notes>
+        val_loss=NaN is intentional sentinel (val_interval=3 > max_epochs=2).
+        Filed #710 — should validate on 24 GB GPU. Issue #699 closed.
+      </notes>
+    </result>
+
+    <result model="vesselfm" phase="P3" status="FIXED_AND_PASSED">
+      <experiment>dev_5803ed0e_vesselfm</experiment>
+      <metrics train_loss="0.857" val_loss="0.896" train_dice="0.358" epoch_time_sec="9.3" />
+      <checkpoints count="3" />
+      <fix>Model-adaptive default_patch=(64,64,32) in train_flow.py. Z=16→Z=32 fixes skip connections.</fix>
+      <notes>First attempt failed (#711). Fixed in 627c9b9. Re-verified: PASS. #700 and #711 closed.</notes>
+    </result>
+
+    <result model="sam3_topolora" phase="P4" status="FIXED_BUT_OOM">
+      <experiment>N/A — OOM before training starts</experiment>
+      <error>torch.OutOfMemoryError: 22.66 GiB PyTorch allocated on RTX 4090 (24 GB)</error>
+      <fixes_applied>
+        1. Dim order: b,c,d,h,w → b,c,h,w,d (MONAI depth-last)
+        2. FP16 cast: fpn_features.float() after backbone
+        3. LoRA dtype: cast input to match LoRA param dtype
+        4. .weight proxy: LoRALinear exposes .weight/.bias for HF FPN code
+      </fixes_applied>
+      <root_cause>
+        LoRA with freeze=False computes full backward through 32 ViT-32L blocks.
+        Each block stores activations for 5184 spatial tokens → 22.66 GiB.
+        RTX 4090 (24 GB) has insufficient VRAM.
+      </root_cause>
+      <notes>Requires gradient checkpointing or A100 (40+ GB). #680 stays open.</notes>
+    </result>
+
+    <result model="dynunet" phase="bonus" status="PASS">
+      <experiment>dev_45636e93_dynunet</experiment>
+      <metrics train_loss="0.724" val_loss="0.740" train_dice="0.393" epoch_time_sec="7.0" />
+      <checkpoints count="3" size_mb="868-930" />
+      <notes>Bonus verification — dynunet runs fine on cloud too.</notes>
+    </result>
+
+    <learnings>
+      <learning id="L1">SkyPilot envs YAML does NOT resolve ${VAR} from local env — must use --env CLI flags</learning>
+      <learning id="L2">SkyPilot envs YAML does NOT support ${VAR:-default} syntax</learning>
+      <learning id="L3">RunPod does not support sky stop — must use sky down (full termination)</learning>
+      <learning id="L4">sky exec --env VAR (no =) passes local value automatically</learning>
+      <learning id="L5">Network volume data survives across sky exec runs — DVC pull cached correctly</learning>
+      <learning id="L6">HF weight cache on volume works — SAM3 weights downloaded once by sam3_vanilla, reused by sam3_hybrid</learning>
+      <learning id="L7">VesselFM 6-level DynUNet needs Z>=32 in patch — default Z=16 fails at level 4</learning>
+      <learning id="L8">sam3_topolora LoRA backward through ViT-32L uses 22.66 GiB — exceeds RTX 4090</learning>
+      <learning id="L9">LoRALinear must expose .weight/.bias properties — HF transformers accesses these directly</learning>
+    </learnings>
+  </execution-results>
+
+</plan>

@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan name="Lambda Labs Single-GPU Training E2E Verification"
+      version="1.0"
+      created="2026-03-14"
+      status="in-progress"
+      priority="P0">
+
+  <context>
+    <summary>
+      Verify end-to-end training pipeline on Lambda Labs with MLflow artifact upload.
+      Training itself WORKS (verified 2x on A100). The blocking issue was MLflow
+      artifact upload failing because server was v2.20.3 while client was v3.10.0.
+      Server has been upgraded to v3.10.0 + multipart upload enabled. Need ONE more
+      clean run to verify the 910 MB .pth checkpoint uploads successfully.
+    </summary>
+
+    <key-files>
+      <file path="deployment/skypilot/smoke_test_lambda.yaml" purpose="Lambda SkyPilot YAML with Docker image + DVC pull" />
+      <file path="scripts/launch_smoke_test.py" purpose="Multi-region launcher with retry (17 regions, EU first)" />
+      <file path="deployment/pulumi/__main__.py" purpose="Pulumi stack for UpCloud MLflow server (line 240-280)" />
+      <file path=".env" purpose="All credentials (Lambda API key, GHCR token, MLflow, DVC)" />
+      <file path="docs/runpod-vs-lambda-vs-rest-for-skypilot-with-docker.md" purpose="Provider comparison report" />
+      <file path="docs/planning/lambda-mlflow-failure-analysis.md" purpose="Root cause analysis of artifact failure" />
+      <file path="docs/planning/cloud-architecture-decisions-2026-03-14.md" purpose="User decisions (verbatim)" />
+      <file path=".claude/metalearning/2026-03-14-runpod-container-not-vm.md" purpose="Why RunPod doesn't work for Docker" />
+      <file path=".claude/metalearning/2026-03-14-mlflow-version-mismatch-fuckup.md" purpose="v2.20 vs v3.10 version mismatch" />
+    </key-files>
+
+    <infrastructure-state>
+      <component name="MLflow Server" host="185.20.139.158:5000" version="3.10.0" status="healthy">
+        <env-var name="MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD" value="true" />
+        <env-var name="MLFLOW_ARTIFACT_UPLOAD_DOWNLOAD_TIMEOUT" value="1800" />
+        <env-var name="MLFLOW_SERVER_ALLOWED_HOSTS" value="*" />
+        <backend>PostgreSQL (UpCloud Managed DB)</backend>
+        <artifact-store>s3://mlflow-artifacts (UpCloud S3)</artifact-store>
+      </component>
+      <component name="SkyPilot" status="enabled-lambda-runpod">
+        <credentials path="~/.lambda_cloud/lambda_keys" />
+      </component>
+      <component name="Docker Image" registry="ghcr.io/petteriteikari/minivess-base:latest" status="pushed" />
+      <component name="DVC Data" remote="UpCloud S3" bucket="minivess-dvc-data" status="pushed" />
+    </infrastructure-state>
+
+    <known-issues>
+      <issue id="681" title="Switch to Docker-compatible SkyPilot providers" status="in-progress" />
+      <issue id="684" title="Fix MLflow artifact upload — multipart" status="fixed-needs-verification" />
+      <issue id="685" title="Evaluate GCP all-in-one architecture" status="pending-gcp-account" />
+      <issue id="686" title="Implement spot checkpointing + auto-resume" status="planned" />
+      <issue id="687" title="Create GCP account + Pulumi stack" status="pending-user" />
+    </known-issues>
+
+    <lambda-gpu-availability>
+      Lambda single-GPU instances are frequently sold out across all 17 regions.
+      The multi-region launcher (scripts/launch_smoke_test.py) handles this with
+      retry_until_up=True. GPU types tried: A10 ($0.86) → A100 ($1.48) → GH200 ($1.99) → H100 ($2.86).
+      Capacity appears intermittently — the A100 was available twice during the session.
+    </lambda-gpu-availability>
+  </context>
+
+  <tasks>
+    <task id="L1" title="Launch smoke test on Lambda" status="in-progress" priority="P0">
+      <description>
+        Launch sam3_vanilla smoke test on Lambda with retry_until_up.
+        Wait for single-GPU capacity to appear.
+      </description>
+      <command>
+        uv run python scripts/launch_smoke_test.py --model sam3_vanilla --cloud lambda
+      </command>
+      <success-criteria>
+        - Cluster status transitions to UP
+        - Training flow starts (Prefect flow run appears in logs)
+        - SAM3 model weights load (1468/1468 params)
+        - MLflow experiment created on remote server
+      </success-criteria>
+    </task>
+
+    <task id="L2" title="Verify training completion" status="pending" depends="L1" priority="P0">
+      <description>
+        Monitor training for 2 epochs, 1 fold, 4 volumes on Lambda GPU.
+        Expected: ~10-15 min on A10, ~9 min on A100.
+      </description>
+      <commands>
+        <cmd>uv run sky status</cmd>
+        <cmd>ssh minivess-smoke-test "cat /app/checkpoints/fold_0/metric_history.json"</cmd>
+        <cmd>ssh minivess-smoke-test "ls -la /app/checkpoints/fold_0/"</cmd>
+      </commands>
+      <success-criteria>
+        - metric_history.json contains epoch 0 metrics
+        - best_val_loss.pth saved (~910 MB)
+        - epoch_latest.pth + last.pth saved
+        - train_loss and val_loss logged
+      </success-criteria>
+    </task>
+
+    <task id="L3" title="CRITICAL: Verify MLflow artifact upload" status="pending" depends="L2" priority="P0">
+      <description>
+        THE WHOLE POINT. Verify that the 910 MB .pth checkpoint uploads to MLflow
+        via the multipart upload proxy (server v3.10.0 + MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD=true).
+        Previous failures: HTTP 500 from server v2.20.3 (no multipart support).
+      </description>
+      <commands>
+        <cmd>ssh minivess-smoke-test "grep -E 'too many 500|Failed to upload|artifact' ~/sky_logs/*/run.log | tail -10"</cmd>
+        <cmd purpose="check MLflow for artifacts">
+          curl -s -u "admin:$MLFLOW_CLOUD_PASSWORD" "http://185.20.139.158:5000/api/2.0/mlflow-artifacts/artifacts/RUN_ID"
+        </cmd>
+      </commands>
+      <success-criteria>
+        - ZERO "too many 500 error" in logs
+        - ZERO "Failed to upload checkpoint artifact" in logs
+        - MLflow API shows artifacts for the run ID
+        - checkpoints/best_val_loss.pth appears in MLflow artifact store
+      </success-criteria>
+      <if-fails>
+        <diagnosis>
+          1. Check MLflow server logs: ssh deploy@185.20.139.158 "sudo docker logs minivess-mlflow --tail 50"
+          2. Check if multipart is actually being used (look for "multipart" in server logs)
+          3. Check UpCloud S3 bucket directly for uploaded chunks
+          4. Verify server version: sudo docker exec minivess-mlflow python3 -c "import mlflow; print(mlflow.__version__)"
+          5. Check MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD on server: grep MULTIPART /opt/mlflow/docker-compose.yml
+        </diagnosis>
+        <fallback>
+          If multipart upload still fails on UpCloud, the issue is the small VPS (2vCPU/4GB)
+          or UpCloud S3 compatibility. Next step: move to GCP (docs/planning/lambda-mlflow-failure-analysis.md).
+        </fallback>
+      </if-fails>
+    </task>
+
+    <task id="L4" title="Test all 3 models" status="pending" depends="L3" priority="P1">
+      <description>
+        After sam3_vanilla verified, test sam3_hybrid and vesselfm.
+      </description>
+      <commands>
+        <cmd>uv run python scripts/launch_smoke_test.py --model sam3_hybrid --cloud lambda</cmd>
+        <cmd>uv run python scripts/launch_smoke_test.py --model vesselfm --cloud lambda</cmd>
+      </commands>
+    </task>
+
+    <task id="L5" title="Update Pulumi template" status="pending" depends="L3" priority="P1">
+      <description>
+        Ensure deployment/pulumi/__main__.py has v3.10.0 + all env vars
+        so future Pulumi deployments are correct from the start.
+        Pin MLFLOW_SERVER_VERSION in .env.example as single source of truth.
+      </description>
+      <files>
+        <file>deployment/pulumi/__main__.py</file>
+        <file>.env.example</file>
+      </files>
+    </task>
+  </tasks>
+
+  <transition-to-gcp>
+    <when>After Lambda Labs E2E is verified (L3 passes), OR if Lambda capacity
+    remains unavailable and user creates GCP account.</when>
+    <plan-file>docs/planning/lambda-mlflow-failure-analysis.md (Section 6: GCP Deep Dive)</plan-file>
+    <issue>687</issue>
+    <steps>
+      1. User creates GCP account ($300 free credits)
+      2. gcloud auth login + sky check gcp
+      3. Create Pulumi stack: deployment/pulumi/gcp/__main__.py
+      4. Deploy: Cloud Run (MLflow) + Cloud SQL + GCS + Artifact Registry
+      5. Update SkyPilot YAML: cloud: gcp, use_spot: true, L4/T4/A100
+      6. Test with MOUNT_CACHED checkpointing for spot auto-resume
+      7. Simulate preemption: gcloud compute instances simulate-maintenance-event
+    </steps>
+  </transition-to-gcp>
+</plan>

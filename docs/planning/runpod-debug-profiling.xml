@@ -1,0 +1,974 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  RunPod Debug Profiling — End-to-End Integration Test Plan
+  ==========================================================
+  VesselFM fine-tuning on RunPod RTX 4090 via SkyPilot, with:
+  - UpCloud MLflow for experiment tracking + S3 artifact storage
+  - DVC data versioning from UpCloud Object Storage
+  - Profiling/benchmarking infrastructure from feat/skypilot-runpod-gpu-offloading branch
+
+  This is the PRODUCTION integration test suite — NOT a throwaway script.
+  Estimated cost: ~$0.12-$0.20 per run (RTX 4090 spot ≈ $0.44/hr, ~15-20 min).
+  Budget: $15 RunPod credits.
+
+  ZERO redundant code — reuses:
+  - deployment/skypilot/smoke_test_gpu.yaml
+  - configs/experiment/smoke_vesselfm.yaml
+  - scripts/validate_smoke_test_env.py
+  - scripts/verify_smoke_test.py
+  - tests/v2/cloud/ existing cloud test infrastructure
+-->
+<plan version="1.0" name="runpod-debug-profiling">
+
+  <metadata>
+    <created>2026-03-14</created>
+    <branch>feat/skypilot-runpod-gpu-offloading</branch>
+    <budget_usd>15.00</budget_usd>
+    <estimated_cost_per_run_usd>0.20</estimated_cost_per_run_usd>
+    <model>vesselfm</model>
+    <gpu>RTX 4090 (24 GB)</gpu>
+    <cloud_provider>RunPod (via SkyPilot)</cloud_provider>
+    <mlflow_host>UpCloud VPS</mlflow_host>
+    <data_source>UpCloud Object Storage (DVC)</data_source>
+    <training_config>2 epochs, 1 fold, 2 train + 2 val volumes</training_config>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       ARCHITECTURE OVERVIEW
+       ════════════════════════════════════════════════════════════════ -->
+  <architecture>
+    <description>
+      End-to-end data flow for cloud GPU training:
+
+      1. DATA:    UpCloud S3 bucket "minivess-dvc-data"
+                  → dvc pull -r upcloud (on RunPod VM)
+                  → /app/data/raw/minivess/
+
+      2. COMPUTE: SkyPilot launches RunPod RTX 4090 spot instance
+                  → Clones repo, uv sync --all-extras
+                  → Native Python execution (NO Docker on RunPod)
+                  → MINIVESS_ALLOW_HOST=1, PREFECT_DISABLED=1
+
+      3. TRAIN:   train_flow.py → train_one_fold_task()
+                  → Pre-training checks (T2.1 diagnostics)
+                  → SegmentationTrainer.fit() with profiling (T1.1-T1.3)
+                  → WeightWatcher post-training (T2.2 diagnostics)
+
+      4. TRACK:   MLflow → UpCloud VPS (http://IP:5000, basic auth)
+                  → PostgreSQL backend, S3 artifact storage
+                  → Resolved via resolve_tracking_uri() + MLFLOW_TRACKING_URI env
+
+      5. VERIFY:  Local machine queries UpCloud MLflow
+                  → Validate run status, params, metrics, artifacts
+                  → Verify profiling artifacts (Chrome traces, key_averages)
+                  → Verify diagnostics (pre-training checks, WeightWatcher)
+
+      No Docker registry needed. No Prefect server on cloud.
+      Pulumi infrastructure provisioning is out of scope (assumed pre-existing).
+    </description>
+
+    <no_docker_registry_rationale>
+      SkyPilot smoke tests use native Python execution on RunPod VMs:
+      - git clone the repo on the VM
+      - uv sync --all-extras for dependencies
+      - MINIVESS_ALLOW_HOST=1 bypasses _require_docker_context() guard
+      - PREFECT_DISABLED=1 skips Prefect server requirement
+      This is approved in CLAUDE.md for ephemeral cloud VMs (same as pytest).
+      Docker-in-Docker on RunPod is unnecessary overhead for smoke tests.
+    </no_docker_registry_rationale>
+  </architecture>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       MULTI-HYPOTHESIS FAILURE ANALYSIS
+       ════════════════════════════════════════════════════════════════ -->
+  <failure_hypotheses>
+    <hypothesis id="H1" severity="high" likelihood="medium">
+      <title>VesselFM HuggingFace weight download fails on RunPod</title>
+      <description>
+        VesselFM downloads vesselFM_base.pt from HF Hub (bwittmann/vesselFM).
+        RunPod VMs have internet but HF may rate-limit or require HF_TOKEN.
+        The model is public but large downloads can timeout on spot instances.
+      </description>
+      <mitigation>
+        1. Verify HF_TOKEN is set in .env (passed to SkyPilot as env var)
+        2. smoke_test_gpu.yaml already includes HF_TOKEN passthrough
+        3. Pre-flight test: check HF repo accessibility before launch
+        4. Fallback: pretrained=false (random init) for infra testing only
+      </mitigation>
+      <test>T0.5 — Verify HF repo accessibility from local machine</test>
+    </hypothesis>
+
+    <hypothesis id="H2" severity="critical" likelihood="medium">
+      <title>DVC pull fails — data not pushed to UpCloud S3</title>
+      <description>
+        DVC data must be PUSHED to UpCloud S3 before RunPod can pull it.
+        If data was never pushed, dvc pull -r upcloud fails with missing files.
+        Data is ~1 GB (211 files) — network transfer takes ~2 min.
+      </description>
+      <mitigation>
+        1. Pre-flight: dvc status -r upcloud (verifies files exist remotely)
+        2. If not pushed: dvc push -r upcloud from local machine first
+        3. Test: T1.1 verifies DVC remote has all required files
+      </mitigation>
+      <test>T0.3, T1.1</test>
+    </hypothesis>
+
+    <hypothesis id="H3" severity="critical" likelihood="low">
+      <title>UpCloud MLflow server unreachable from RunPod</title>
+      <description>
+        MLflow on UpCloud VPS must be reachable from RunPod's network.
+        Firewall rules, wrong port, or auth misconfiguration can block access.
+      </description>
+      <mitigation>
+        1. Pre-flight: GET /health on MLFLOW_CLOUD_URI (no auth required)
+        2. Pre-flight: authenticated API call to verify credentials
+        3. UpCloud firewall must allow port 5000 from any IP
+        4. Existing test: test_cloud_mlflow.py::TestCloudMLflowHealth
+      </mitigation>
+      <test>T0.2</test>
+    </hypothesis>
+
+    <hypothesis id="H4" severity="low" likelihood="very_low">
+      <title>VesselFM OOM on RTX 4090</title>
+      <description>
+        VesselFM estimated ~10 GB VRAM for fine-tuning (batch=1).
+        RTX 4090 has 24 GB — ample headroom. With profiling overhead,
+        total should be ~11-12 GB. Very unlikely to OOM.
+      </description>
+      <mitigation>
+        1. CUDA memory stats (T4.1 prof_cuda_peak_allocated_mb) will measure actual VRAM
+        2. If OOM: reduce patch_size or disable profiling as fallback
+        3. Post-run: update configs/model_profiles/vesselfm.yaml with measured values
+      </mitigation>
+      <test>T4.3 — Verify VRAM metrics logged</test>
+    </hypothesis>
+
+    <hypothesis id="H5" severity="high" likelihood="high">
+      <title>Pre-training checks crash with real VesselFM model</title>
+      <description>
+        Our new diagnostics (T2.1-T2.3) have only been tested with mock models.
+        VesselFM's binary-to-2-class conversion (cat[-logits, logits]) may confuse
+        pre-training checks that expect standard 2-channel output.
+        check_output_shape() expects model_config.out_channels=2, but VesselFM
+        internally produces 1 channel then converts.
+      </description>
+      <mitigation>
+        1. Local unit test with VesselFM adapter + pre-training checks (T2.1)
+        2. If check fails: adapt check to handle SegmentationOutput.logits
+        3. check_output_shape already handles hasattr(output, "logits")
+        4. Worst case: pre-check error aborts training → fix and re-run
+      </mitigation>
+      <test>T2.1 — Local VesselFM + pre-training check compatibility test</test>
+    </hypothesis>
+
+    <hypothesis id="H6" severity="medium" likelihood="medium">
+      <title>Hydra config composition fails with smoke_vesselfm</title>
+      <description>
+        smoke_vesselfm.yaml may reference config groups that don't exist,
+        or have incompatible overrides. compose_experiment_config() may fail
+        if the config structure doesn't match what train_flow.py expects.
+      </description>
+      <mitigation>
+        1. Local test: compose_experiment_config("smoke_vesselfm") succeeds
+        2. Verify all referenced config groups exist
+        3. Verify train_flow.py can consume the resolved config dict
+      </mitigation>
+      <test>T0.6</test>
+    </hypothesis>
+
+    <hypothesis id="H7" severity="high" likelihood="medium">
+      <title>SkyPilot RunPod launch fails — quota, API key, spot unavailable</title>
+      <description>
+        RunPod spot instances may be unavailable, API key may be invalid,
+        or $15 credit may be insufficient for the requested GPU.
+        RTX 4090 spot on RunPod ≈ $0.44/hr.
+      </description>
+      <mitigation>
+        1. Pre-flight: sky check runpod (validates API key + connectivity)
+        2. Pre-flight: check RunPod balance via API (if available)
+        3. Fallback: try RTX 3090 or A6000 (cheaper, still 24 GB)
+        4. Budget guard: max 3 attempts × $0.20 = $0.60 worst case
+      </mitigation>
+      <test>T0.4</test>
+    </hypothesis>
+
+    <hypothesis id="H8" severity="high" likelihood="medium">
+      <title>Git clone fails on RunPod — private repo or wrong branch</title>
+      <description>
+        The repo may be private (requiring GitHub token) and the current
+        branch feat/skypilot-runpod-gpu-offloading must be checked out
+        to test the profiling code from this branch.
+      </description>
+      <mitigation>
+        1. Verify repo is public OR GH_TOKEN is configured for SkyPilot
+        2. smoke_test_gpu.yaml must checkout the correct branch
+        3. Add git checkout feat/skypilot-runpod-gpu-offloading to setup
+        4. Or: push to main first, then test
+      </mitigation>
+      <test>T2.1 — Verify YAML setup section handles branch checkout</test>
+    </hypothesis>
+
+    <hypothesis id="H9" severity="medium" likelihood="medium">
+      <title>Profiling artifacts too large for MLflow upload</title>
+      <description>
+        Chrome traces can be 50+ MB. Gzip compression (T1.2) should reduce
+        to ~5 MB, but MLflow + S3 upload may still be slow or timeout.
+        The 50 MB size gate should prevent oversized uploads.
+      </description>
+      <mitigation>
+        1. TraceHandler has compress_traces=True and trace_size_limit_mb=50
+        2. Only 2 epochs profiled → small traces
+        3. Post-run: verify profiling/ artifact path has traces
+      </mitigation>
+      <test>T4.4 — Verify profiling artifacts exist in MLflow</test>
+    </hypothesis>
+
+    <hypothesis id="H10" severity="medium" likelihood="medium">
+      <title>WeightWatcher fails on VesselFM's DynUNet backbone</title>
+      <description>
+        WeightWatcher analyzes 2D conv + linear layers only (not 3D conv).
+        VesselFM uses MONAI DynUNet which has 3D convolutions.
+        WeightWatcher may return 0 layers analyzed.
+      </description>
+      <mitigation>
+        1. run_weightwatcher() already handles 0 layers (returns NaN alpha)
+        2. VesselFM DynUNet may have some 2D projection layers
+        3. Post-run: check diag_ww_num_layers_analyzed in MLflow metrics
+        4. If 0: this is expected behavior, not a bug — document it
+      </mitigation>
+      <test>T4.5 — Verify WeightWatcher metrics logged (even if NaN)</test>
+    </hypothesis>
+
+    <hypothesis id="H11" severity="medium" likelihood="low">
+      <title>Splits file smoke_test_1fold_4vol.json doesn't exist</title>
+      <description>
+        smoke_vesselfm.yaml references splits_file: configs/splits/smoke_test_1fold_4vol.json.
+        This file may not exist or may have wrong volume IDs.
+      </description>
+      <mitigation>
+        1. Pre-flight: verify file exists locally
+        2. If missing: create it with 2 train + 2 val volumes from MiniVess
+        3. Verify volume IDs match the data on UpCloud S3
+      </mitigation>
+      <test>T1.2</test>
+    </hypothesis>
+
+    <hypothesis id="H12" severity="low" likelihood="low">
+      <title>uv sync fails on RunPod due to CUDA mismatch</title>
+      <description>
+        RunPod RTX 4090 instances typically run CUDA 12.x.
+        PyTorch wheels must match the CUDA version on the VM.
+        uv sync may install CPU-only PyTorch if CUDA not detected.
+      </description>
+      <mitigation>
+        1. smoke_test_gpu.yaml setup section should verify nvidia-smi
+        2. PyTorch index URL may need --extra-index-url for CUDA wheels
+        3. Existing smoke tests have already validated this path
+      </mitigation>
+      <test>Verified by existing smoke test infrastructure</test>
+    </hypothesis>
+  </failure_hypotheses>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 0: PRE-FLIGHT VALIDATION (local, zero cost)
+       ════════════════════════════════════════════════════════════════ -->
+  <phase id="0" name="Pre-Flight Validation" cost="$0">
+    <description>
+      All checks run locally. Zero GPU cost. Must all pass before
+      spending RunPod credits. Reuses existing validate_smoke_test_env.py.
+    </description>
+
+    <task id="T0.1" priority="critical" effort="1h">
+      <title>Verify all required env vars are set</title>
+      <issue_title>test(cloud): pre-flight env var validation for VesselFM smoke test</issue_title>
+      <description>
+        Run scripts/validate_smoke_test_env.py to check:
+        - DVC_S3_ENDPOINT_URL, DVC_S3_ACCESS_KEY, DVC_S3_SECRET_KEY, DVC_S3_BUCKET
+        - RUNPOD_API_KEY
+        - MLFLOW_CLOUD_URI, MLFLOW_CLOUD_USERNAME, MLFLOW_CLOUD_PASSWORD
+        - HF_TOKEN (for VesselFM pretrained weight download)
+        Also verify .env file has these values (not just empty strings).
+      </description>
+      <files>
+        <file action="modify">scripts/validate_smoke_test_env.py</file>
+        <file action="create">tests/v2/cloud/test_preflight_validation.py</file>
+      </files>
+      <tdd_spec>
+        <red>
+          <test>test_all_required_env_vars_present</test>
+          <test>test_env_vars_not_empty_strings</test>
+          <test>test_hf_token_set_for_vesselfm</test>
+        </red>
+        <green>
+          Add HF_TOKEN to required vars list in validate_smoke_test_env.py.
+          Create test_preflight_validation.py wrapping the validate script.
+        </green>
+      </tdd_spec>
+      <addresses_hypothesis>H1, H7</addresses_hypothesis>
+    </task>
+
+    <task id="T0.2" priority="critical" effort="30m">
+      <title>Test MLflow cloud health + authentication</title>
+      <issue_title>test(cloud): verify MLflow cloud server health and auth</issue_title>
+      <description>
+        Verify UpCloud MLflow server is reachable and authenticates correctly.
+        Reuses existing tests/v2/cloud/test_cloud_mlflow.py::TestCloudMLflowHealth.
+        Run: make test-cloud-mlflow (subset: health tests only).
+      </description>
+      <files>
+        <file action="use_existing">tests/v2/cloud/test_cloud_mlflow.py</file>
+      </files>
+      <tdd_spec>
+        <red>Run existing health tests — they should pass if server is up.</red>
+        <green>No new code needed if existing tests pass.</green>
+      </tdd_spec>
+      <addresses_hypothesis>H3</addresses_hypothesis>
+    </task>
+
+    <task id="T0.3" priority="critical" effort="30m">
+      <title>Test DVC S3 connectivity to UpCloud</title>
+      <issue_title>test(cloud): verify DVC remote connectivity to UpCloud S3</issue_title>
+      <description>
+        Verify DVC can reach UpCloud Object Storage with configured credentials.
+        Reuses existing tests/v2/cloud/test_dvc_cloud_pull.py.
+        Also verify: dvc status -r upcloud shows files exist.
+      </description>
+      <files>
+        <file action="use_existing">tests/v2/cloud/test_dvc_cloud_pull.py</file>
+      </files>
+      <tdd_spec>
+        <red>Run existing DVC cloud tests.</red>
+        <green>No new code if tests pass. If data not pushed, go to T1.1.</green>
+      </tdd_spec>
+      <addresses_hypothesis>H2</addresses_hypothesis>
+    </task>
+
+    <task id="T0.4" priority="critical" effort="30m">
+      <title>Test SkyPilot RunPod backend availability</title>
+      <issue_title>test(cloud): verify SkyPilot RunPod provider is configured</issue_title>
+      <description>
+        Run: sky check runpod
+        Verify API key is valid and RunPod backend is available.
+        Check RTX 4090 spot availability and pricing.
+      </description>
+      <files>
+        <file action="use_existing">scripts/validate_smoke_test_env.py</file>
+      </files>
+      <tdd_spec>
+        <red>sky check runpod must return success.</red>
+        <green>No new code — existing validate script covers this.</green>
+      </tdd_spec>
+      <addresses_hypothesis>H7</addresses_hypothesis>
+    </task>
+
+    <task id="T0.5" priority="high" effort="30m">
+      <title>Verify HuggingFace repo accessibility</title>
+      <issue_title>test(cloud): verify VesselFM HF weight download path</issue_title>
+      <description>
+        Check that bwittmann/vesselFM is accessible from current machine.
+        Do NOT download the full weights — just verify repo exists via HF API.
+        Verify HF_TOKEN auth works if repo requires it.
+      </description>
+      <files>
+        <file action="create">tests/v2/cloud/test_hf_accessibility.py</file>
+      </files>
+      <tdd_spec>
+        <red>
+          <test>test_vesselfm_hf_repo_exists</test>
+          <test>test_vesselfm_weight_file_listed</test>
+        </red>
+        <green>
+          Use huggingface_hub.repo_info() to verify repo metadata.
+          Check "vesselFM_base.pt" is in the file list.
+        </green>
+      </tdd_spec>
+      <addresses_hypothesis>H1</addresses_hypothesis>
+    </task>
+
+    <task id="T0.6" priority="high" effort="1h">
+      <title>Verify Hydra config composition for smoke_vesselfm</title>
+      <issue_title>test(config): verify smoke_vesselfm experiment config composes</issue_title>
+      <description>
+        Test that compose_experiment_config("smoke_vesselfm") produces a valid
+        config dict with expected keys: model_family=vesselfm, max_epochs=2,
+        num_folds=1, debug=True, pretrained=True in architecture_params.
+        Also verify the resolved config can be consumed by train_flow.py.
+      </description>
+      <files>
+        <file action="create">tests/v2/unit/test_smoke_vesselfm_config.py</file>
+      </files>
+      <tdd_spec>
+        <red>
+          <test>test_smoke_vesselfm_composes_without_error</test>
+          <test>test_smoke_vesselfm_has_correct_model_family</test>
+          <test>test_smoke_vesselfm_has_correct_epochs_and_folds</test>
+          <test>test_smoke_vesselfm_has_pretrained_true</test>
+          <test>test_smoke_vesselfm_has_debug_flag</test>
+        </red>
+        <green>
+          Use compose_experiment_config("smoke_vesselfm") and assert on resolved dict.
+          Fix smoke_vesselfm.yaml if any fields are missing or wrong.
+        </green>
+      </tdd_spec>
+      <addresses_hypothesis>H6</addresses_hypothesis>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 1: DATA PREPARATION (one-time, no GPU cost)
+       ════════════════════════════════════════════════════════════════ -->
+  <phase id="1" name="Data Preparation" cost="$0">
+    <description>
+      Ensure MiniVess data is on UpCloud S3 and splits file exists.
+      One-time setup — subsequent runs skip this phase.
+    </description>
+
+    <task id="T1.1" priority="critical" effort="30m">
+      <title>Push MiniVess data to UpCloud S3 via DVC</title>
+      <issue_title>chore(data): ensure MiniVess data pushed to UpCloud S3</issue_title>
+      <description>
+        If dvc status -r upcloud shows missing files:
+        1. Run: uv run python scripts/configure_dvc_remote.py
+        2. Run: dvc push -r upcloud
+        3. Verify: dvc status -r upcloud shows "Data and calculation files are up to date"
+        This is a one-time operation (~1 GB upload).
+      </description>
+      <files>
+        <file action="use_existing">scripts/configure_dvc_remote.py</file>
+      </files>
+      <tdd_spec>
+        <red>dvc status -r upcloud shows missing files.</red>
+        <green>dvc push -r upcloud uploads all 211 files.</green>
+      </tdd_spec>
+      <addresses_hypothesis>H2</addresses_hypothesis>
+    </task>
+
+    <task id="T1.2" priority="high" effort="30m">
+      <title>Verify smoke test splits file exists</title>
+      <issue_title>test(config): verify smoke test 1-fold splits file</issue_title>
+      <description>
+        smoke_vesselfm.yaml references splits_file: configs/splits/smoke_test_1fold_4vol.json.
+        Verify this file exists, has 1 fold, 2 train + 2 val volumes,
+        and volume IDs match actual MiniVess data files.
+        If it doesn't exist: create it from the main 3-fold split.
+      </description>
+      <files>
+        <file action="verify_or_create">configs/splits/smoke_test_1fold_4vol.json</file>
+        <file action="create">tests/v2/unit/test_smoke_splits.py</file>
+      </files>
+      <tdd_spec>
+        <red>
+          <test>test_smoke_splits_file_exists</test>
+          <test>test_smoke_splits_has_one_fold</test>
+          <test>test_smoke_splits_has_correct_volume_counts</test>
+          <test>test_smoke_splits_volume_ids_valid</test>
+        </red>
+        <green>
+          Read the splits file, validate structure.
+          If missing: create with first 2 train + 2 val from fold 0.
+        </green>
+      </tdd_spec>
+      <addresses_hypothesis>H11</addresses_hypothesis>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 2: LOCAL COMPATIBILITY TESTS (no GPU cost)
+       ════════════════════════════════════════════════════════════════ -->
+  <phase id="2" name="Local Compatibility Tests" cost="$0">
+    <description>
+      Test that our new profiling/diagnostics code works with VesselFM
+      before spending GPU credits. Run on CPU with model_loading marker.
+    </description>
+
+    <task id="T2.1" priority="critical" effort="2h">
+      <title>VesselFM + diagnostics compatibility test</title>
+      <issue_title>test(diagnostics): verify pre-training checks work with VesselFM</issue_title>
+      <description>
+        Test that run_pre_training_checks() works with VesselFM adapter:
+        - check_output_shape: VesselFM binary→2-class conversion
+        - check_gradient_flow: at least one param has gradients
+        - check_nan_inf: no NaN/Inf in output
+        - check_loss_sanity: loss at init is finite
+
+        Also test run_weightwatcher() with VesselFM (may return 0 layers
+        since DynUNet uses 3D conv, which WeightWatcher doesn't analyze).
+
+        This catches H5 and H10 before spending GPU credits.
+      </description>
+      <files>
+        <file action="create">tests/v2/unit/test_vesselfm_diagnostics_compat.py</file>
+      </files>
+      <tdd_spec>
+        <red>
+          <test>test_pre_checks_pass_with_vesselfm — @pytest.mark.model_loading</test>
+          <test>test_output_shape_correct_with_vesselfm — 2 channels after conversion</test>
+          <test>test_gradient_flow_works_with_vesselfm — at least one grad</test>
+          <test>test_weightwatcher_runs_without_crash — may return 0 layers (OK)</test>
+        </red>
+        <green>
+          Build VesselFM adapter (pretrained=False for speed).
+          Create sample batch (1,1,64,64,16).
+          Run each diagnostic function and verify no crash.
+        </green>
+      </tdd_spec>
+      <addresses_hypothesis>H5, H10</addresses_hypothesis>
+    </task>
+
+    <task id="T2.2" priority="high" effort="1h">
+      <title>Verify SkyPilot YAML handles VesselFM + branch checkout</title>
+      <issue_title>test(skypilot): verify smoke_test_gpu.yaml supports VesselFM model</issue_title>
+      <description>
+        Verify smoke_test_gpu.yaml:
+        1. MODEL_FAMILY env var accepts "vesselfm"
+        2. Setup section clones correct branch (or main)
+        3. EXPERIMENT env var is set correctly for VesselFM
+        4. HF_TOKEN is passed to the VM environment
+        5. Profiling config is included (our new branch code)
+
+        Add branch checkout to setup if not present.
+      </description>
+      <files>
+        <file action="modify">deployment/skypilot/smoke_test_gpu.yaml</file>
+        <file action="create">tests/v2/unit/test_smoke_test_yaml_vesselfm.py</file>
+      </files>
+      <tdd_spec>
+        <red>
+          <test>test_yaml_has_hf_token_env — HF_TOKEN passed through</test>
+          <test>test_yaml_supports_vesselfm_experiment — EXPERIMENT references smoke_vesselfm</test>
+          <test>test_yaml_has_branch_checkout — git checkout for feature branch</test>
+          <test>test_yaml_has_profiling_env — profiling config not disabled</test>
+        </red>
+        <green>
+          Parse smoke_test_gpu.yaml and validate env vars + setup section.
+          Add branch checkout if missing. Add HF_TOKEN if missing.
+        </green>
+      </tdd_spec>
+      <addresses_hypothesis>H1, H8</addresses_hypothesis>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 3: GPU EXECUTION (RunPod, ~$0.20)
+       ════════════════════════════════════════════════════════════════ -->
+  <phase id="3" name="GPU Execution on RunPod" cost="~$0.20">
+    <description>
+      Launch VesselFM training on RunPod RTX 4090 via SkyPilot.
+      Monitor job status. This is the actual GPU spend.
+      Expected duration: 15-20 minutes (setup + 2 epochs + teardown).
+    </description>
+
+    <task id="T3.1" priority="critical" effort="30m">
+      <title>Launch SkyPilot VesselFM smoke test job</title>
+      <issue_title>feat(smoke-test): launch VesselFM training on RunPod via SkyPilot</issue_title>
+      <description>
+        Execute: make smoke-test-gpu MODEL=vesselfm
+        Which runs: sky jobs launch deployment/skypilot/smoke_test_gpu.yaml
+                    -e MODEL_FAMILY=vesselfm -y
+
+        Monitor with: sky jobs queue
+        Expected: RUNNING → SUCCEEDED in 15-20 min.
+        Cost: ~$0.20 (RTX 4090 spot × 20 min).
+      </description>
+      <files>
+        <file action="use_existing">deployment/skypilot/smoke_test_gpu.yaml</file>
+        <file action="use_existing">Makefile</file>
+      </files>
+      <tdd_spec>
+        <red>Job not launched yet.</red>
+        <green>sky jobs launch succeeds, job enters RUNNING state.</green>
+      </tdd_spec>
+      <addresses_hypothesis>H7, H8, H12</addresses_hypothesis>
+    </task>
+
+    <task id="T3.2" priority="high" effort="30m">
+      <title>Monitor job and collect logs</title>
+      <issue_title>chore(smoke-test): monitor SkyPilot job status</issue_title>
+      <description>
+        Poll job status with: sky jobs queue
+        Collect logs with: sky jobs logs JOB_ID
+        Expected terminal states: SUCCEEDED or FAILED.
+        If FAILED: read logs, diagnose, iterate.
+      </description>
+      <files>
+        <file action="use_existing">src/minivess/compute/prefect_sky_tasks.py</file>
+      </files>
+      <tdd_spec>
+        <red>Job is RUNNING.</red>
+        <green>Job reaches SUCCEEDED status.</green>
+      </tdd_spec>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 4: POST-RUN VERIFICATION (local, zero cost)
+       ════════════════════════════════════════════════════════════════ -->
+  <phase id="4" name="Post-Run Artifact Verification" cost="$0">
+    <description>
+      Query UpCloud MLflow from local machine to verify all artifacts,
+      metrics, params, and diagnostics were correctly logged.
+      This is the REAL integration test — validates the entire pipeline.
+      These tests become the permanent cloud test suite.
+    </description>
+
+    <task id="T4.1" priority="critical" effort="1h">
+      <title>Verify MLflow run exists with correct status</title>
+      <issue_title>test(cloud): verify VesselFM smoke test run on cloud MLflow</issue_title>
+      <description>
+        Query UpCloud MLflow for the smoke test experiment.
+        Verify:
+        - At least one FINISHED run exists
+        - Run has model_family=vesselfm tag
+        - Run has flow_name tag
+        - Run duration is reasonable (5-20 min)
+        Extends existing test_cloud_training_artifacts.py.
+      </description>
+      <files>
+        <file action="modify">tests/v2/cloud/test_cloud_training_artifacts.py</file>
+      </files>
+      <tdd_spec>
+        <red>
+          <test>test_vesselfm_smoke_run_exists</test>
+          <test>test_vesselfm_smoke_run_finished</test>
+          <test>test_vesselfm_smoke_run_has_model_family_tag</test>
+        </red>
+        <green>
+          Use _find_latest_smoke_run("vesselfm") to locate the run.
+          Assert FINISHED status and correct tags.
+        </green>
+      </tdd_spec>
+    </task>
+
+    <task id="T4.2" priority="critical" effort="1h">
+      <title>Verify training params and metrics logged</title>
+      <issue_title>test(cloud): verify VesselFM smoke test params and metrics</issue_title>
+      <description>
+        Verify the MLflow run has:
+        Params: loss_name, model_family, max_epochs, batch_size, arch_*
+        Metrics: train_loss (at epoch 0 and 1), val metrics (if validation ran)
+        System: sys_python_version, sys_gpu_model, sys_cuda_version
+      </description>
+      <files>
+        <file action="modify">tests/v2/cloud/test_cloud_training_artifacts.py</file>
+      </files>
+      <tdd_spec>
+        <red>
+          <test>test_vesselfm_has_training_params</test>
+          <test>test_vesselfm_has_loss_metrics</test>
+          <test>test_vesselfm_has_system_info</test>
+        </red>
+        <green>
+          Query run params and metrics via MlflowClient.
+          Assert expected keys are present with non-empty values.
+        </green>
+      </tdd_spec>
+    </task>
+
+    <task id="T4.3" priority="high" effort="1h">
+      <title>Verify profiling artifacts from this branch</title>
+      <issue_title>test(cloud): verify profiling artifacts (Chrome traces, key_averages)</issue_title>
+      <description>
+        Verify our new profiling code (T0.1-T1.3) produced artifacts:
+        - profiling/summary.json exists in MLflow artifacts
+        - profiling/key_averages.txt exists
+        - profiling/*.json.gz (Chrome traces) if export_chrome_trace=True
+        - prof_overhead_pct metric logged
+        - prof_trace_size_mb metric logged
+        - prof_cuda_peak_allocated_mb metric logged (T4.1 CUDA memory stats)
+      </description>
+      <files>
+        <file action="create">tests/v2/cloud/test_cloud_profiling_artifacts.py</file>
+      </files>
+      <tdd_spec>
+        <red>
+          <test>test_profiling_summary_artifact_exists</test>
+          <test>test_profiling_key_averages_exists</test>
+          <test>test_profiling_metrics_logged — prof_overhead_pct, prof_trace_size_mb</test>
+          <test>test_cuda_memory_metrics_logged — prof_cuda_peak_allocated_mb</test>
+        </red>
+        <green>
+          List artifacts at profiling/ path via MlflowClient.
+          Query prof_* metrics from run.
+        </green>
+      </tdd_spec>
+      <addresses_hypothesis>H9</addresses_hypothesis>
+    </task>
+
+    <task id="T4.4" priority="high" effort="1h">
+      <title>Verify diagnostics artifacts (pre-checks + WeightWatcher)</title>
+      <issue_title>test(cloud): verify diagnostics ran on cloud training</issue_title>
+      <description>
+        Verify our diagnostics (T2.1-T2.3) ran:
+        - Pre-training checks: all passed (no severity=error → training ran)
+        - WeightWatcher: diag_ww_* metrics logged (even if num_layers=0)
+        - Diagnostics ran unconditionally (RC17)
+      </description>
+      <files>
+        <file action="create">tests/v2/cloud/test_cloud_diagnostics_artifacts.py</file>
+      </files>
+      <tdd_spec>
+        <red>
+          <test>test_pre_training_checks_passed — training completed → checks passed</test>
+          <test>test_weightwatcher_metrics_logged — diag_ww_alpha_mean exists</test>
+          <test>test_weightwatcher_num_layers — diag_ww_num_layers_analyzed logged</test>
+        </red>
+        <green>
+          Query diag_ww_* metrics from the smoke test run.
+          If training completed, pre-checks must have passed (they abort on error).
+        </green>
+      </tdd_spec>
+      <addresses_hypothesis>H5, H10</addresses_hypothesis>
+    </task>
+
+    <task id="T4.5" priority="medium" effort="1h">
+      <title>Verify Hydra config artifact logged</title>
+      <issue_title>test(cloud): verify resolved Hydra config artifact on cloud MLflow</issue_title>
+      <description>
+        Verify config/resolved_config.yaml artifact exists and contains:
+        - model_family: vesselfm
+        - max_epochs: 2
+        - debug: true
+        - experiment_name matching smoke_vesselfm pattern
+
+        This verifies the Hydra-zen → MLflow artifact pipeline (CLAUDE.md Rule #23).
+      </description>
+      <files>
+        <file action="create">tests/v2/cloud/test_cloud_config_artifact.py</file>
+      </files>
+      <tdd_spec>
+        <red>
+          <test>test_resolved_config_artifact_exists</test>
+          <test>test_resolved_config_has_correct_model</test>
+          <test>test_resolved_config_has_correct_epochs</test>
+        </red>
+        <green>
+          Download config/resolved_config.yaml via MlflowClient.
+          Parse YAML and assert expected fields.
+        </green>
+      </tdd_spec>
+      <addresses_hypothesis>H6</addresses_hypothesis>
+    </task>
+
+    <task id="T4.6" priority="medium" effort="1h">
+      <title>Verify GPU benchmark cache integration</title>
+      <issue_title>test(cloud): verify sys_bench_* params from GPU benchmark</issue_title>
+      <description>
+        Verify our GPU benchmark cache (T3.1-T3.3) logged sys_bench_* params:
+        - sys_bench_gpu_model (normalized GPU name, e.g., "rtx_4090")
+        - sys_bench_total_vram_mb
+        - sys_bench_driver_version
+
+        Note: benchmark cache may not exist on RunPod (first run).
+        If missing: verify warning was logged but training continued (non-blocking).
+      </description>
+      <files>
+        <file action="modify">tests/v2/cloud/test_cloud_training_artifacts.py</file>
+      </files>
+      <tdd_spec>
+        <red>
+          <test>test_gpu_benchmark_params_or_warning — sys_bench_* present OR cache missing OK</test>
+        </red>
+        <green>
+          Query sys_bench_* params. If absent, verify training still completed.
+          GPU benchmark cache is non-blocking (warning, not error).
+        </green>
+      </tdd_spec>
+    </task>
+
+    <task id="T4.7" priority="high" effort="1h">
+      <title>Update VesselFM VRAM profile with measured values</title>
+      <issue_title>docs(model-profiles): update VesselFM VRAM with RTX 4090 measurements</issue_title>
+      <description>
+        Read prof_cuda_peak_allocated_mb from the smoke test run.
+        Update configs/model_profiles/vesselfm.yaml with MEASURED values
+        (replacing "~10 GB estimated" with actual numbers).
+        Update MEMORY.md VRAM table.
+      </description>
+      <files>
+        <file action="modify">configs/model_profiles/vesselfm.yaml</file>
+      </files>
+      <tdd_spec>
+        <red>VRAM values in profile are "estimated".</red>
+        <green>VRAM values updated with measured prof_cuda_peak_allocated_mb.</green>
+      </tdd_spec>
+      <addresses_hypothesis>H4</addresses_hypothesis>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PHASE 5: REGRESSION BASELINE (zero cost, post-verification)
+       ════════════════════════════════════════════════════════════════ -->
+  <phase id="5" name="Regression Baseline Establishment" cost="$0">
+    <description>
+      Use the verified smoke test run to establish the first performance
+      baseline for regression detection (T4.2). Future runs can compare
+      against this baseline using detect_regression().
+    </description>
+
+    <task id="T5.1" priority="medium" effort="1h">
+      <title>Record baseline metrics for regression detection</title>
+      <issue_title>feat(diagnostics): establish VesselFM RTX 4090 performance baseline</issue_title>
+      <description>
+        Extract from the successful smoke test run:
+        - prof_cuda_peak_allocated_mb (VRAM baseline)
+        - prof_overhead_pct (profiler overhead baseline)
+        - train_loss at final epoch (convergence baseline)
+        - Total training time (speed baseline)
+
+        Store as the first data point for get_profiling_baseline().
+        The sys_bench_gpu_model_normalized tag enables GPU-specific baselines.
+      </description>
+      <files>
+        <file action="use_existing">src/minivess/diagnostics/regression_detection.py</file>
+      </files>
+      <tdd_spec>
+        <red>No baseline exists yet (BaselineStats.count = 0).</red>
+        <green>First run provides baseline. count=1 after this run.</green>
+      </tdd_spec>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       COST BUDGET ANALYSIS
+       ════════════════════════════════════════════════════════════════ -->
+  <cost_analysis>
+    <budget_total>$15.00</budget_total>
+    <cost_per_run>
+      <gpu>RTX 4090</gpu>
+      <spot_rate>$0.44/hr</spot_rate>
+      <estimated_duration_min>20</estimated_duration_min>
+      <cost_per_run>$0.15</cost_per_run>
+    </cost_per_run>
+    <budget_for_iterations>
+      <max_runs>75</max_runs>
+      <comfortable_runs>50</comfortable_runs>
+      <note>
+        With $0.15-$0.20 per run, we can afford 75+ iterations.
+        Even with 5 failed attempts before success, total cost is ~$1.00.
+        Budget is extremely comfortable for this testing.
+      </note>
+    </budget_for_iterations>
+    <fallback_gpu>
+      <name>RTX 3090 (24 GB)</name>
+      <spot_rate>$0.30/hr</spot_rate>
+      <note>Cheaper alternative if RTX 4090 spot unavailable.</note>
+    </fallback_gpu>
+  </cost_analysis>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       EXISTING CODE REUSE MAP
+       ════════════════════════════════════════════════════════════════ -->
+  <reuse_map>
+    <description>
+      ZERO redundant code. Every component reuses existing infrastructure.
+    </description>
+    <existing_component use="as-is">
+      <name>deployment/skypilot/smoke_test_gpu.yaml</name>
+      <purpose>SkyPilot task for RunPod GPU training</purpose>
+      <modification>Minor: add HF_TOKEN, branch checkout if needed</modification>
+    </existing_component>
+    <existing_component use="as-is">
+      <name>configs/experiment/smoke_vesselfm.yaml</name>
+      <purpose>Hydra experiment config for VesselFM debug</purpose>
+    </existing_component>
+    <existing_component use="as-is">
+      <name>scripts/validate_smoke_test_env.py</name>
+      <purpose>Pre-flight env var validation</purpose>
+      <modification>Add HF_TOKEN to required vars</modification>
+    </existing_component>
+    <existing_component use="as-is">
+      <name>scripts/verify_smoke_test.py</name>
+      <purpose>Post-run MLflow verification</purpose>
+    </existing_component>
+    <existing_component use="as-is">
+      <name>tests/v2/cloud/conftest.py</name>
+      <purpose>Cloud test fixtures (connection, cleanup, S3 client)</purpose>
+    </existing_component>
+    <existing_component use="as-is">
+      <name>tests/v2/cloud/test_cloud_mlflow.py</name>
+      <purpose>MLflow health + tracking + artifact tests</purpose>
+    </existing_component>
+    <existing_component use="as-is">
+      <name>tests/v2/cloud/test_dvc_cloud_pull.py</name>
+      <purpose>DVC S3 connectivity test</purpose>
+    </existing_component>
+    <existing_component use="as-is">
+      <name>tests/v2/cloud/test_cloud_training_artifacts.py</name>
+      <purpose>Post-run artifact verification</purpose>
+      <modification>Extend with VesselFM-specific assertions</modification>
+    </existing_component>
+    <existing_component use="as-is">
+      <name>src/minivess/compute/skypilot_launcher.py</name>
+      <purpose>SkyPilot Python SDK wrapper</purpose>
+    </existing_component>
+    <existing_component use="as-is">
+      <name>Makefile targets: smoke-test-*</name>
+      <purpose>Automation commands for smoke tests</purpose>
+    </existing_component>
+    <new_files>
+      <file>tests/v2/cloud/test_preflight_validation.py</file>
+      <file>tests/v2/cloud/test_hf_accessibility.py</file>
+      <file>tests/v2/cloud/test_cloud_profiling_artifacts.py</file>
+      <file>tests/v2/cloud/test_cloud_diagnostics_artifacts.py</file>
+      <file>tests/v2/cloud/test_cloud_config_artifact.py</file>
+      <file>tests/v2/unit/test_smoke_vesselfm_config.py</file>
+      <file>tests/v2/unit/test_smoke_splits.py</file>
+      <file>tests/v2/unit/test_smoke_test_yaml_vesselfm.py</file>
+      <file>tests/v2/unit/test_vesselfm_diagnostics_compat.py</file>
+    </new_files>
+  </reuse_map>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       EXECUTION ORDER
+       ════════════════════════════════════════════════════════════════ -->
+  <execution_order>
+    <step order="1">Phase 0: Pre-flight validation (T0.1-T0.6) — ALL must pass</step>
+    <step order="2">Phase 1: Data preparation (T1.1-T1.2) — one-time setup</step>
+    <step order="3">Phase 2: Local compatibility (T2.1-T2.2) — catch bugs before GPU spend</step>
+    <step order="4">Phase 3: GPU execution (T3.1-T3.2) — THE actual RunPod run</step>
+    <step order="5">Phase 4: Post-run verification (T4.1-T4.7) — validate everything</step>
+    <step order="6">Phase 5: Baseline establishment (T5.1) — regression detection seed</step>
+  </execution_order>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       IMPLEMENTATION NOTES
+       ════════════════════════════════════════════════════════════════ -->
+  <implementation_notes>
+    <note id="1">
+      All test implementation follows the self-learning-iterative-coder TDD skill.
+      RED → GREEN → VERIFY → FIX → CHECKPOINT → CONVERGE for each task.
+    </note>
+    <note id="2">
+      Cloud tests (Phase 0, 4) auto-skip if MLFLOW_CLOUD_* env vars are not set.
+      This makes them safe to include in the standard test suite.
+    </note>
+    <note id="3">
+      Phase 3 (GPU execution) is manual — triggered by `make smoke-test-gpu MODEL=vesselfm`.
+      It is NOT automated in CI (CLAUDE.md: GitHub Actions CI EXPLICITLY DISABLED).
+    </note>
+    <note id="4">
+      The profiling code from this branch (T0.1-T4.2) has NEVER been tested with real
+      GPU training. This is the first real-data validation. Expect glitches.
+    </note>
+    <note id="5">
+      VesselFM was pre-trained on MiniVess → data leakage. This smoke test validates
+      INFRASTRUCTURE, not scientific quality. The data_leakage tag must be logged.
+    </note>
+    <note id="6">
+      The test suite is designed for production reuse: any model (sam3_vanilla,
+      dynunet, vesselfm) can be tested with: make smoke-test-gpu MODEL=&lt;name&gt;.
+      Verification tests are parameterizable by model family.
+    </note>
+  </implementation_notes>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       APPENDIX: VERBATIM USER PROMPT
+       ════════════════════════════════════════════════════════════════ -->
+  <appendix id="user-prompt">
+    <title>Verbatim User Prompt (2026-03-14)</title>
+    <content><![CDATA[
+So we can next create a plan for a script creation and running a the debug test (same as benchmarking/profiling the Runpod with 4090) to /home/petteri/Dropbox/github-personal/minivess-mlops/docs/planning/runpod-debug-profiling.xml which will finetune first vesselfm with our debug dataset (2 train, 2 validation volumes) for 2 epochs using the 1 fold. The test should demonstrate that artifacts go to the MLflow server on UpCloud, the training is handled via Skypilot, and that the data can be obtained from the DVC versioned dataset in some "S3 simulation" location. I have $15 credits on Runpod so this testing should not consume those all. You should obviously have then the readout from the MLflow and its artifact store to validate that the MLflow registry work, do not cheat at all here. This is the integration test for those. There should be ZERO redundant code created, do deep exploration what your config system via Hydra is, how the Prefect Flows work and the Dockers need to be pulled by the Runpod (do we need to implement Dockerhub registry?). Do deep analysis with multiple rounds of reviewer agents coming up with how to test all our created code implemented in this branch! We have not yet tested this with real data using our real production code so there are probably a lot of glitches. Try to do multi-hypothesis preparation for all sorts of problems that we might be encountering. Remember use existing code! This is not some separate test for "dev" branch, but this should be the actual test suite that we will be using also in production to test that the UpCloud MLflow - Skypilot - Runpod GPU and DVC data versioning work together, with or without Pulumi (this is probably outside of the scope as we assume that the UpCloud instance spinning is taken care by some other test then). Think the whole test suite needed around this to run this testing. Implementation of anything in the .xml plan obviously via our self-learning TDD Skill! Save first my prompt as verbatim to the appendix of the .xml and let's start this!
+    ]]></content>
+  </appendix>
+
+</plan>

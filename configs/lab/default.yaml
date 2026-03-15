@@ -1,0 +1,11 @@
+# Default lab config — no lab-specific overrides.
+# Copy this to configs/lab/<your_lab>.yaml and customize.
+#
+# Example: configs/lab/karolinska.yaml
+#   cloud: gcp_spot
+#   registry: gar
+#   accelerators: [A100:1]
+#   region: europe-north1
+
+# No overrides — use base defaults
+{}
