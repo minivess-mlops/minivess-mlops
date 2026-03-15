@@ -188,12 +188,13 @@ class ModelAdapter(ABC, nn.Module):
     def save_checkpoint(self, path: Path) -> None:
         """Save model weights to a checkpoint file.
 
-        Default implementation saves ``self.net`` state dict.
+        Saves the full adapter state dict wrapped in the standard
+        ``{"model_state_dict": ...}`` format. Works for both legacy
+        adapters (with ``self.net``) and SAM3-style adapters that
+        ARE the nn.Module.
         """
         path.parent.mkdir(parents=True, exist_ok=True)
-        net = self.net
-        assert isinstance(net, nn.Module)
-        torch.save(net.state_dict(), path)
+        torch.save({"model_state_dict": self.state_dict()}, path)
 
     def trainable_parameters(self) -> int:
         """Return the count of trainable parameters.
@@ -208,32 +209,34 @@ class ModelAdapter(ABC, nn.Module):
     def export_onnx(self, path: Path, example_input: Tensor) -> None:
         """Export the model to ONNX format.
 
-        Uses the dynamo-based exporter (PyTorch 2.5+) with fallback
-        to the legacy TorchScript exporter for compatibility.
-        Override for adapters that need special export logic.
+        Wraps the adapter in a thin module that returns raw logits tensor
+        instead of SegmentationOutput (which ONNX tracing cannot handle).
+        Uses legacy TorchScript exporter with opset 17.
         """
         path.parent.mkdir(parents=True, exist_ok=True)
-        net = self.net
-        assert isinstance(net, nn.Module)
-        net.eval()
+        self.eval()
 
+        adapter = self
+
+        class _LogitsWrapper(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.adapter = adapter
+
+            def forward(self, x: Tensor) -> Tensor:
+                result: Tensor = self.adapter(x).logits
+                return result
+
+        wrapper = _LogitsWrapper()
+        wrapper.eval()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            try:
-                onnx_program = torch.onnx.export(
-                    net,
-                    (example_input,),
-                    dynamo=True,
-                )
-                if onnx_program is not None:
-                    onnx_program.save(str(path))
-            except Exception:
-                torch.onnx.export(
-                    net,
-                    (example_input,),
-                    str(path),
-                    input_names=["images"],
-                    output_names=["logits"],
-                    opset_version=17,
-                    dynamo=False,
-                )
+            torch.onnx.export(
+                wrapper,
+                (example_input,),
+                str(path),
+                input_names=["images"],
+                output_names=["logits"],
+                opset_version=17,
+                dynamo=False,
+            )

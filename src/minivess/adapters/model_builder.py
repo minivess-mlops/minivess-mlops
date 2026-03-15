@@ -273,7 +273,14 @@ def build_adapter(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
         msg = f"Unsupported model family '{family}'. Available: {available}"
         raise ValueError(msg)
 
-    return builder(config, **kwargs)
+    adapter = builder(config, **kwargs)
+    logger.info(
+        "Built adapter: family=%s, name=%s, trainable=%d params",
+        family.value,
+        config.name,
+        adapter.trainable_parameters(),
+    )
+    return adapter
 
 
 def apply_wrappers(

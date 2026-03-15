@@ -280,7 +280,11 @@ class Sam3Backbone(nn.Module):
         target_device = x.device
         x = self._preprocess(x)
         if self._frozen:
-            # Cast input to FP16 to match encoder weights (loaded in FP16)
+            # Cast input to FP16 to match encoder weights (loaded with
+            # torch_dtype=float16 in from_pretrained).  This halves encoder
+            # VRAM from ~2.2 GB to ~1.1 GB on ViT-32L (648M params).
+            # Callers must cast the returned features back to FP32 before
+            # passing them to trainable FP32 modules (decoder, fusion, LoRA).
             x = x.half()
             with torch.no_grad():
                 out = self.encoder(x)
