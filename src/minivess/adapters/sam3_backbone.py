@@ -222,7 +222,20 @@ class Sam3Backbone(nn.Module):
         Handles grayscale→3ch expansion, resize to 1008×1008, and normalization.
         Converts MONAI MetaTensor to plain Tensor to avoid __torch_function__
         dispatch overhead inside the ViT encoder.
+
+        Raises
+        ------
+        ValueError
+            If input is not exactly 4D (B, C, H, W).
         """
+        if x.ndim != 4:
+            msg = (
+                f"Expected 4D input (B, C, H, W) for SAM3 preprocessing, "
+                f"got {x.ndim}D tensor with shape {tuple(x.shape)}. "
+                f"Slice 3D volumes before calling _preprocess()."
+            )
+            raise ValueError(msg)
+
         # Strip MONAI MetaTensor wrapper (saves memory + avoids dispatch overhead)
         if hasattr(x, "as_tensor"):
             x = x.as_tensor()

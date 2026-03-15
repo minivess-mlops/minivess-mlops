@@ -114,8 +114,8 @@ class Sam3VanillaAdapter(ModelAdapter):
             two_class = self.decoder.binary_to_2class(binary_logits)  # (B, 2, H, W)
             slice_logits.append(two_class)
 
-        # Stack along depth (last dim): (B, 2, H, W, D) — MONAI convention
-        logits_3d = torch.stack(slice_logits, dim=4)
+        # Stack along depth dim: (B, 2, D, H, W) — SegmentationOutput convention
+        logits_3d = torch.stack(slice_logits, dim=2)
 
         return self._build_output(logits_3d, "sam3_vanilla")
 

@@ -36,14 +36,16 @@ logger = logging.getLogger(__name__)
 
 
 class LoRALinear(nn.Module):
-    """Low-Rank Adaptation layer wrapping an existing linear/conv layer.
+    """Low-Rank Adaptation layer wrapping an existing nn.Linear layer.
 
     Adds a low-rank decomposition: output = original(x) + (B @ A)(x) * scaling.
+    SAM3 ViT-32L is pure Linear (no Conv2d in the transformer blocks), so only
+    nn.Linear is supported. Conv2d LoRA would require a different decomposition.
 
     Parameters
     ----------
     original:
-        The original layer to wrap (nn.Linear or nn.Conv2d).
+        The original nn.Linear layer to wrap.
     rank:
         Rank of the low-rank decomposition.
     alpha:
@@ -60,6 +62,13 @@ class LoRALinear(nn.Module):
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
+        if not isinstance(original, nn.Linear):
+            msg = (
+                f"LoRALinear only supports nn.Linear, got {type(original).__name__}. "
+                f"SAM3 ViT-32L uses only Linear layers in its transformer blocks."
+            )
+            raise TypeError(msg)
+
         self.original = original
         self.rank = rank
         self.scaling = alpha / rank
@@ -68,33 +77,22 @@ class LoRALinear(nn.Module):
         for param in original.parameters():
             param.requires_grad = False
 
-        # Determine dimensions from the original layer
-        if isinstance(original, nn.Linear):
-            in_features = original.in_features
-            out_features = original.out_features
-            self.lora_A = nn.Parameter(torch.randn(rank, in_features) * 0.01)
-            self.lora_B = nn.Parameter(torch.zeros(out_features, rank))
-        elif isinstance(original, nn.Conv2d):
-            in_channels = original.in_channels
-            out_channels = original.out_channels
-            self.lora_A = nn.Parameter(torch.randn(rank, in_channels) * 0.01)
-            self.lora_B = nn.Parameter(torch.zeros(out_channels, rank))
-        else:
-            msg = f"LoRALinear only supports Linear/Conv2d, got {type(original)}"
-            raise TypeError(msg)
+        in_features = original.in_features
+        out_features = original.out_features
+        self.lora_A = nn.Parameter(torch.randn(rank, in_features) * 0.01)
+        self.lora_B = nn.Parameter(torch.zeros(out_features, rank))
 
         self.lora_dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self._is_conv = isinstance(original, nn.Conv2d)
 
     @property
     def weight(self) -> Tensor:
         """Expose original layer's weight for HF code that accesses .weight.dtype."""
-        return self.original.weight  # type: ignore[return-value]
+        return self.original.weight
 
     @property
     def bias(self) -> Tensor | None:
         """Expose original layer's bias for HF code that accesses .bias."""
-        return self.original.bias  # type: ignore[return-value]
+        return self.original.bias
 
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass: original(x) + LoRA(x).
@@ -106,21 +104,12 @@ class LoRALinear(nn.Module):
         original_out: Tensor = self.original(x)
         input_dtype = x.dtype
 
-        if self._is_conv:
-            b, c_out, h_out, w_out = original_out.shape
-            x_avg = x.mean(dim=(2, 3)).to(self.lora_A.dtype)
-            x_avg = self.lora_dropout(x_avg)
-            lora_out = (x_avg @ self.lora_A.T @ self.lora_B.T) * self.scaling
-            lora_out = lora_out.to(input_dtype).unsqueeze(-1).unsqueeze(-1)
-            result: Tensor = original_out + lora_out
-            return result
-        else:
-            x_dropped = self.lora_dropout(x).to(self.lora_A.dtype)
-            lora_out = (x_dropped @ self.lora_A.T @ self.lora_B.T) * self.scaling
-            lora_out = lora_out.to(input_dtype)
+        x_dropped = self.lora_dropout(x).to(self.lora_A.dtype)
+        lora_out = (x_dropped @ self.lora_A.T @ self.lora_B.T) * self.scaling
+        lora_out = lora_out.to(input_dtype)
 
-        result_lin: Tensor = original_out + lora_out
-        return result_lin
+        result: Tensor = original_out + lora_out
+        return result
 
 
 def _apply_lora_to_encoder(

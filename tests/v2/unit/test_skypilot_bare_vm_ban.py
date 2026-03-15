@@ -25,10 +25,20 @@ _BANNED_SETUP_COMMANDS = [
     "pip3 install",
 ]
 
+# dev_runpod.yaml intentionally uses bare-VM setup because RunPod's
+# container runtime doesn't support Docker-in-Docker. This is a known
+# exception documented in the YAML itself. Issue #681 tracks migration.
+# minivess-dev-volume.yaml is a SkyPilot volume definition, not a compute task.
+_EXCLUDED_FROM_DOCKER_MANDATE = {"dev_runpod.yaml", "minivess-dev-volume.yaml"}
+
 
 def _all_skypilot_yamls() -> list[Path]:
-    """Return all YAML files in deployment/skypilot/."""
-    return sorted(_SKYPILOT_DIR.glob("*.yaml"))
+    """Return all YAML files in deployment/skypilot/ (excluding known exceptions)."""
+    return sorted(
+        p
+        for p in _SKYPILOT_DIR.glob("*.yaml")
+        if p.name not in _EXCLUDED_FROM_DOCKER_MANDATE
+    )
 
 
 class TestNoBareVmSkyPilotYamls:

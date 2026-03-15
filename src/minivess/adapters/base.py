@@ -164,7 +164,15 @@ class ModelAdapter(ABC, nn.Module):
         Default implementation loads into ``self.net`` (legacy) or into
         ``self`` (new format). Override for adapters that manage weights
         differently (e.g., LoRA, CommaAdapter).
+
+        Raises
+        ------
+        FileNotFoundError
+            If the checkpoint file does not exist.
         """
+        if not path.exists():
+            msg = f"No checkpoint found at {path}"
+            raise FileNotFoundError(msg)
         payload = torch.load(path, map_location="cpu", weights_only=True)
         if isinstance(payload, dict) and "model_state_dict" in payload:
             # New format: state_dict was produced by model.state_dict()

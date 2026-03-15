@@ -6,7 +6,7 @@
        test-staging test-prod test-gpu test-e2e \
        build-base-gpu build-base-cpu build-base-light build-bases requirements-tiers \
        ghcr-login push-ghcr \
-       smoke-test-preflight smoke-test-lambda smoke-test-lambda-all verify-smoke-test \
+       smoke-test-preflight smoke-test-gpu smoke-test-all smoke-test-lambda smoke-test-lambda-all verify-smoke-test \
        monitor-smoke-test diagnose-last-smoke-test \
        dev-gpu dev-gpu-heavy dev-gpu-stop dev-gpu-ssh
 
@@ -122,6 +122,17 @@ dev-gpu-ssh:  ## SSH into dev GPU pod for interactive work
 
 smoke-test-preflight:  ## Validate env vars + connectivity before GPU smoke test
 	uv run python scripts/validate_smoke_test_env.py
+
+smoke-test-gpu:  ## Launch smoke test on RunPod RTX 4090 (MODEL=sam3_vanilla)
+	uv run python scripts/launch_smoke_test.py --model $(or $(MODEL),sam3_vanilla) --cloud runpod
+
+smoke-test-all:  ## Run all smoke tests on RunPod sequentially
+	@echo "=== Heavy models (need >8 GB VRAM) ==="
+	$(MAKE) smoke-test-gpu MODEL=sam3_hybrid
+	$(MAKE) smoke-test-gpu MODEL=vesselfm
+	@echo "=== Standard models ==="
+	$(MAKE) smoke-test-gpu MODEL=sam3_vanilla
+	$(MAKE) smoke-test-gpu MODEL=dynunet
 
 smoke-test-lambda:  ## Launch smoke test on Lambda Labs A10 (MODEL=sam3_vanilla)
 	uv run python scripts/launch_smoke_test.py --model $(or $(MODEL),sam3_vanilla) --cloud lambda

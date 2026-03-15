@@ -25,6 +25,7 @@ _EXCLUDED = {
     "Dockerfile.base-cpu",
     "Dockerfile.base-light",
     "Dockerfile.mlflow",
+    "Dockerfile.mlflow-gcp",
     "Dockerfile.dashboard-ui",
 }
 

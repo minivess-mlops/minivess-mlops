@@ -187,7 +187,9 @@ setup: |
         nfiles: 350
   LOCKEOF
 
+    echo "dvc_pull_start=$(date +%s.%N)" >> "$TIMING_FILE"
     dvc pull -r upcloud
+    echo "dvc_pull_end=$(date +%s.%N)" >> "$TIMING_FILE"
     # Move data to persistent volume
     if [ -d data/raw/minivess ] && [ ! -d /opt/vol/data/raw/minivess/imagesTr ]; then
       cp -r data/raw/minivess /opt/vol/data/raw/
@@ -283,6 +285,7 @@ run: |
   echo "Splits: $(cat configs/splits/splits.json | ${WORKDIR}/.venv/bin/python -c 'import json,sys; d=json.load(sys.stdin); print(f"{len(d)} folds")')"
 
   # Infrastructure timing: timing_setup.txt written by setup block (#683)
+  # train_flow.py reads it via infrastructure_timing.log_infrastructure_timing()
   if [ -f "${WORKDIR}/timing_setup.txt" ]; then
     echo "Infrastructure timing file found: $(wc -l < ${WORKDIR}/timing_setup.txt) entries"
   fi
