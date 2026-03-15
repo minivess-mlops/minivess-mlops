@@ -1,59 +1,59 @@
-# AMP Validation NaN — 3D Operations + Autocast = NaN
+# AMP Validation NaN — 3D Operations + Autocast (Preventive, Not Confirmed)
 
 **Date:** 2026-03-15
-**Severity:** Critical — wasted 3 GCP runs + 1 full BF16 refactor before finding root cause
+**Severity:** Medium — preventive mitigation based on community evidence
 **Category:** Mixed precision + 3D operations incompatibility
+**Status:** PREVENTIVE FIX — not directly observed in our runs (see correction below)
 
-## What Happened
+## Correction (2026-03-15)
 
-sam3_hybrid val_loss=NaN on BOTH T4 (FP16) and L4 (BF16). Training loss was
-always finite. BF16 auto-detect was implemented as a fix but it wasn't sufficient.
+The original version of this doc claimed AMP was a **confirmed** root cause based
+on GCP T4 and L4 runs showing NaN. This was incorrect — all GCP runs used
+`smoke_sam3_hybrid.yaml` which has `val_interval: 3 > max_epochs: 2`, triggering the
+validation sentinel skip. **Validation never actually ran on any GCP run.** The NaN
+was the sentinel placeholder, not an AMP-induced numerical failure.
 
-## Root Cause
+The AMP + 3D NaN risk is real (documented by MONAI maintainers) but was not observed
+in our experiments. The mitigation (`mixed_precision_val=False`) is preventive.
 
-**AMP autocast + MONAI sliding_window_inference + 3D convolutions produces NaN**
-during validation, regardless of encoder dtype (FP16 or BF16).
+See: [wrong-config-chasing-phantoms.md](2026-03-15-wrong-config-chasing-phantoms.md)
+
+## Community Evidence (Real, Not Our Observation)
 
 MONAI maintainers acknowledge: "AMP does not support very well with 3D operations"
-(Project-MONAI/MONAI#4243).
+([Project-MONAI/MONAI#4243](https://github.com/Project-MONAI/MONAI/discussions/4243)).
 
-The specific failure path:
+The theoretical failure path:
 1. validate_epoch() wraps forward pass in `autocast(enabled=True)`
 2. sliding_window_inference creates overlapping 3D windows
 3. 3D convolutions in DynUNet run in reduced precision via autocast
-4. Overlap accumulation/blending produces intermediate values that overflow
+4. Overlap accumulation can produce intermediate values that overflow
 5. Loss receives NaN logits → val_loss=NaN
 
-Training works because:
-- Training uses small patches (64×64×3) — no sliding window
-- Forward + backward + gradient scaling keeps values in range
-- Smaller spatial extent = less accumulation risk
+## Our Evidence (Corrected)
 
-## Evidence
+| Run | GPU | Config | Validation ran? | val_loss | Interpretation |
+|-----|-----|--------|----------------|----------|----------------|
+| GCP T4 | T4 | smoke_sam3_hybrid | **NO** (sentinel) | NaN | NOT AMP-related |
+| GCP L4 | L4 | smoke_sam3_hybrid | **NO** (sentinel) | NaN | NOT AMP-related |
+| RunPod 4090 | RTX 4090 | smoke_sam3_hybrid_cloud | **YES** | 0.725 | Finite (AMP OFF) |
 
-| Run | GPU | Encoder dtype | AMP | val_loss | Result |
-|-----|-----|---------------|-----|----------|--------|
-| GCP T4 | T4 (Turing) | FP16 | ON | NaN | BF16 hypothesis formed |
-| GCP L4 | L4 (Ada) | BF16 | ON | NaN | BF16 NOT sufficient |
-| RunPod 4090 | RTX 4090 | FP16 | OFF | 0.725 | AMP OFF = finite |
+**Run 2 is the only run with actual validation.** It used AMP OFF, so it does not
+test whether AMP causes NaN. A future run with AMP ON + correct config (Run 9) is
+needed to test the AMP hypothesis.
 
-## Fix
-
-TrainingConfig.mixed_precision_val = False (default). Validation runs in FP32.
-Training keeps AMP ON for speed. This is the standard MONAI recommendation.
+## Preventive Fix (Applied)
 
 ```python
 # trainer.py validate_epoch()
-autocast(device_type=..., enabled=self.config.mixed_precision_val)  # False
-
-# trainer.py train_epoch()
-autocast(device_type=..., enabled=self.config.mixed_precision)       # True
+autocast(device_type=..., enabled=self.config.mixed_precision_val)  # False by default
 ```
+
+`TrainingConfig.mixed_precision_val = False` — validation runs in FP32 by default.
+This is the standard MONAI recommendation for 3D operations.
 
 ## Lesson
 
-Don't assume dtype is the root cause when NaN appears. Check the full compute path:
-- Encoder dtype (FP16 vs BF16) — necessary but not sufficient
-- AMP autocast scope — the actual root cause here
-- Spatial operations (sliding window, overlap) — amplify numerical errors
-- 3D vs 2D — 3D has more intermediate values and accumulation
+Don't present community-reported failure modes as confirmed root causes without
+direct experimental evidence. The MONAI AMP+3D risk is real and the mitigation is
+valuable, but it was never the cause of the NaN we observed.

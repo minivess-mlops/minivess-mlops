@@ -1,15 +1,17 @@
-# T4 (Turing) Banned — FP16-Only GPU Produces NaN in SAM3 Models
+# T4 (Turing) Banned — FP16-Only GPU, Preventive Ban for SAM3 Models
 
 **Date:** 2026-03-15
-**Severity:** Critical — wasted 3 GCP spot launches + debugging time
-**Category:** Hardware selection failure
+**Severity:** Medium — preventive ban based on theoretical FP16 overflow risk
+**Category:** Hardware selection, preventive measure
 
 ## What Happened
 
 Launched sam3_hybrid smoke test on GCP T4 spot (me-west1-b, $0.16/hr). Training
-completed but **val_loss=NaN** — every validation epoch produced non-finite values.
+completed but val_loss=NaN was logged. **Correction**: The NaN was later identified
+as the validation sentinel (wrong experiment config skipped validation entirely),
+NOT a T4-specific FP16 overflow. See: [wrong-config-chasing-phantoms.md](2026-03-15-wrong-config-chasing-phantoms.md).
 
-## Root Cause
+## Theoretical Risk (Not Observed)
 
 T4 is a **Turing architecture** GPU. Turing does NOT support BF16 (bfloat16).
 SAM3's ViT-32L encoder has 648M parameters loaded in half precision. On T4, this
