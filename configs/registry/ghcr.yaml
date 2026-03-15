@@ -1,0 +1,7 @@
+# GitHub Container Registry — default for open-source repos.
+# Requires GITHUB_TOKEN in .env for private repos.
+
+registry: ghcr
+server: ghcr.io
+image_prefix: ghcr.io/petteriteikari
+auth_env_var: GITHUB_TOKEN

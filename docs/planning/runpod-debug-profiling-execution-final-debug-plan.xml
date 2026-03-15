@@ -1,0 +1,350 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MinIVess MLOps — RunPod GPU Smoke Test: Root-Cause Debug Plan
+  Created: 2026-03-14
+
+  This plan addresses 6 systemic issues discovered during iterative SkyPilot/RunPod
+  launches. Each issue has been root-caused and assigned a production-grade fix with
+  TDD tests. No more whac-a-moling — every fix addresses the structural cause.
+
+  Reviewer agents validated each fix against:
+    R1 (Adversarial): "What else can break?"
+    R2 (Correctness): "Does this actually fix the root cause?"
+    R3 (Idempotency): "Is this safe to re-run?"
+-->
+
+<debug-plan version="2.0" created="2026-03-14">
+
+  <executive-summary>
+    Six systemic failures prevented end-to-end RunPod GPU smoke tests.
+    Three are P0 (launch blockers), two are P1 (runtime failures), one is P2 (reliability).
+    All six are structural — not one-off bugs. Each requires a targeted code/config change
+    plus a regression test to prevent recurrence.
+
+    Execution order: Issues 1→5→2→3→4→6 (dependency-ordered, not priority-ordered).
+    Estimated implementation: ~30 min code + tests, then live RunPod validation.
+  </executive-summary>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- ISSUE 1 (P0): SkyPilot Jobs Controller Disk Size                      -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <issue id="1" priority="P0" category="launch-blocker">
+    <title>SkyPilot jobs controller disk_size exceeds RunPod 40 GB max</title>
+
+    <root-cause>
+      sky jobs launch creates a controller VM on RunPod. SkyPilot's default controller
+      disk_size is 50 GB but RunPod rejects anything >40 GB. The task YAML's disk_size: 40
+      only affects the WORKER, not the controller. Without ~/.sky/config.yaml capping the
+      controller disk, sky jobs launch fails before the worker even starts.
+    </root-cause>
+
+    <evidence>
+      RunPod API rejected disk_size=50 during previous sky jobs launch attempt.
+      The smoke_test_gpu.yaml fix (disk_size: 40) only fixed the worker node.
+    </evidence>
+
+    <fix type="config">
+      <file>~/.sky/config.yaml</file>
+      <action>Create SkyPilot user config capping controller resources for RunPod</action>
+      <code><![CDATA[
+# ~/.sky/config.yaml — SkyPilot user-level config
+# Caps jobs controller disk to 40 GB (RunPod max)
+jobs:
+  controller:
+    resources:
+      disk_size: 40
+      cloud: runpod
+      ]]></code>
+    </fix>
+
+    <test>
+      <file>tests/v2/unit/test_smoke_test_yaml_vesselfm.py</file>
+      <assertion>Verify ~/.sky/config.yaml exists and caps controller disk ≤40</assertion>
+    </test>
+
+    <reviewer-notes>
+      <R1>What if user has existing ~/.sky/config.yaml? → Merge, don't overwrite.</R1>
+      <R2>SkyPilot reads this file on every launch. Controller resources key is documented.</R2>
+      <R3>Idempotent — creating same file twice is safe.</R3>
+    </reviewer-notes>
+  </issue>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- ISSUE 5 (P0): EXPERIMENT ${} Hydra/OmegaConf Conflict                 -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <issue id="5" priority="P0" category="launch-blocker">
+    <title>EXPERIMENT env var uses ${MODEL_FAMILY} — OmegaConf interprets as config interpolation</title>
+
+    <root-cause>
+      smoke_test_gpu.yaml has `EXPERIMENT: smoke_${MODEL_FAMILY}` in envs section.
+      SkyPilot envs resolves ${} from the API server environment, NOT from other envs keys.
+      MODEL_FAMILY is defined in the SAME envs block, so ${MODEL_FAMILY} is NOT resolved
+      by SkyPilot — the literal string "smoke_${MODEL_FAMILY}" is passed to the VM.
+
+      train_flow.py line 795 reads EXPERIMENT from os.environ, passes it to
+      compose_experiment_config(experiment_name=...). Hydra-zen/OmegaConf sees ${MODEL_FAMILY}
+      and throws ConfigCompositionException — it's not a valid OmegaConf interpolation key.
+
+      The argparse fallback (line 828) then runs with wrong config: no smoke experiment
+      config, wrong epochs, wrong splits = wasted GPU time.
+    </root-cause>
+
+    <evidence>
+      Previous RunPod run: ConfigCompositionException: "Error resolving interpolation
+      'smoke_${MODEL_FAMILY}'". Training continued on argparse fallback with wrong config.
+    </evidence>
+
+    <fix type="code">
+      <file>deployment/skypilot/smoke_test_gpu.yaml</file>
+      <action>
+        1. REMOVE EXPERIMENT from envs section entirely.
+        2. Compute EXPERIMENT in run: block using shell variable expansion (NOT ${}).
+        3. Export EXPERIMENT before calling train_flow.py.
+      </action>
+      <code><![CDATA[
+# In envs section: DELETE the EXPERIMENT line entirely.
+# EXPERIMENT must NOT be in envs — SkyPilot can't resolve intra-envs references.
+
+# In run section: compute EXPERIMENT from MODEL_FAMILY using shell
+run: |
+  source $HOME/.local/bin/env
+  cd /app
+
+  # Compute EXPERIMENT from MODEL_FAMILY (shell expansion, not SkyPilot ${})
+  export EXPERIMENT="smoke_${MODEL_FAMILY}"
+
+  # UUID isolation via HYDRA_OVERRIDES (separate from Hydra config name)
+  export EXPERIMENT_UUID=$(uv run python -c "import uuid; print(uuid.uuid4().hex[:8])")
+  export HYDRA_OVERRIDES="experiment_name=smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
+
+  echo "=== MinIVess GPU Smoke Test ==="
+  echo "Model: ${MODEL_FAMILY}"
+  echo "Hydra config: ${EXPERIMENT}"
+  echo "MLflow experiment: smoke_test_${EXPERIMENT_UUID}_${MODEL_FAMILY}"
+  echo "MLflow server: ${MLFLOW_TRACKING_URI}"
+
+  uv run python -m minivess.orchestration.flows.train_flow
+      ]]></code>
+    </fix>
+
+    <test>
+      <file>tests/v2/unit/test_smoke_test_yaml_vesselfm.py</file>
+      <assertion>
+        test_experiment_not_in_envs: EXPERIMENT must NOT appear in envs section.
+        test_experiment_computed_in_run: run block must contain 'export EXPERIMENT='.
+      </assertion>
+    </test>
+
+    <reviewer-notes>
+      <R1>What about GIT_BRANCH: ${GIT_BRANCH:-main}? → That's fine: GIT_BRANCH is
+          resolved from caller env (--env-file .env), not from intra-envs. The :-default
+          syntax is SkyPilot-supported for caller env vars.</R1>
+      <R2>Shell ${MODEL_FAMILY} in run: block works because SkyPilot sets MODEL_FAMILY
+          as a real shell env var before run: executes. This is the correct mechanism.</R2>
+      <R3>Re-running with different MODEL_FAMILY produces correct EXPERIMENT name.</R3>
+    </reviewer-notes>
+  </issue>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- ISSUE 2 (P0): SkyPilot --env-file Enforcement in Makefile             -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <issue id="2" priority="P0" category="launch-blocker">
+    <title>Makefile smoke-test-gpu uses -e (invalid flag) — must use --env</title>
+
+    <root-cause>
+      Makefile line 83-84 uses `-e MODEL_FAMILY=...` and `-e GIT_BRANCH=...`.
+      SkyPilot CLI uses `--env KEY=VALUE`, not `-e`. This was a Docker-ism.
+      Additionally, env vars like DVC_S3_* and MLFLOW_CLOUD_* from .env are NOT
+      passed to SkyPilot at all — they need --env-file .env or individual --env flags.
+
+      SkyPilot's envs section with ${VAR} resolves from the API server daemon's
+      environment — NOT the caller's shell. --env-file loads the caller's .env
+      into the SkyPilot API server's resolution context.
+    </root-cause>
+
+    <evidence>
+      Previous session: SkyPilot passed literal "${DVC_S3_ENDPOINT_URL}" to RunPod VM
+      because API server had no DVC_S3_ENDPOINT_URL in its environment.
+    </evidence>
+
+    <fix type="code">
+      <file>Makefile</file>
+      <action>
+        Fix smoke-test-gpu target:
+        1. Use --env (not -e) for MODEL_FAMILY and GIT_BRANCH
+        2. Add --env-file .env to pass DVC_S3_* and MLFLOW_CLOUD_* vars
+      </action>
+      <code><![CDATA[
+smoke-test-gpu:  ## Launch GPU smoke test on RunPod (MODEL=sam3_vanilla, BRANCH=main)
+	@echo "=== Launching GPU smoke test: $(MODEL) on RunPod RTX 4090 ==="
+	sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+	  --env-file .env \
+	  --env MODEL_FAMILY=$(or $(MODEL),sam3_vanilla) \
+	  --env GIT_BRANCH=$(or $(BRANCH),$(shell git rev-parse --abbrev-ref HEAD)) \
+	  -y
+      ]]></code>
+    </fix>
+
+    <test>
+      <file>tests/v2/unit/test_smoke_test_yaml_vesselfm.py</file>
+      <assertion>test_makefile_uses_env_file: Makefile smoke-test-gpu must contain --env-file</assertion>
+    </test>
+
+    <reviewer-notes>
+      <R1>Does sky jobs launch support --env-file? → Yes, documented in SkyPilot CLI.</R1>
+      <R2>--env-file .env loads ALL vars from .env into SkyPilot's resolution context.
+          ${DVC_S3_ENDPOINT_URL} in envs section will now resolve correctly.</R2>
+      <R3>Idempotent — Makefile is deterministic.</R3>
+    </reviewer-notes>
+  </issue>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- ISSUE 3 (P1): DVC Pull All-or-Nothing Fragility                       -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <issue id="3" priority="P1" category="runtime-failure">
+    <title>DVC preprocess stage not frozen — generic dvc pull fails</title>
+
+    <root-cause>
+      dvc.yaml has 3 stages: download (frozen), preprocess (NOT frozen), validate_data.
+      The preprocess stage depends on data/processed/minivess/ which has no cache on
+      the UpCloud S3 remote. A bare `dvc pull` tries ALL stages and exits non-zero
+      when the preprocess stage's outputs aren't cached.
+
+      The YAML already uses `dvc pull data/raw/minivess -r upcloud` (targeted pull),
+      but the preprocess stage should also be frozen to prevent accidental full-pull failures.
+    </root-cause>
+
+    <fix type="code">
+      <file>dvc.yaml</file>
+      <action>Freeze preprocess stage (it's not used in smoke tests)</action>
+    </fix>
+
+    <test>
+      <file>tests/v2/unit/test_smoke_test_yaml_vesselfm.py</file>
+      <assertion>test_dvc_preprocess_frozen: preprocess stage must be frozen</assertion>
+    </test>
+  </issue>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- ISSUE 4 (P1): Run Block Guards for Setup Completion                    -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <issue id="4" priority="P1" category="runtime-failure">
+    <title>Run block has no guards verifying setup completed successfully</title>
+
+    <root-cause>
+      If sky exec is used (which skips setup:), or if setup partially fails but
+      the run block still executes, critical prerequisites are missing:
+      - /app directory doesn't exist
+      - splits.json not copied
+      - DVC data not pulled
+      - uv not installed
+
+      The run block blindly proceeds and fails with cryptic errors.
+    </root-cause>
+
+    <fix type="code">
+      <file>deployment/skypilot/smoke_test_gpu.yaml</file>
+      <action>Add pre-flight guards at the top of run: block</action>
+      <code><![CDATA[
+run: |
+  source $HOME/.local/bin/env
+  cd /app
+
+  # Guard: verify setup completed (catches sky exec without setup)
+  if [ ! -f configs/splits/splits.json ]; then
+    echo "FATAL: splits.json missing — setup did not complete. Use 'sky launch' not 'sky exec'."
+    exit 1
+  fi
+  if [ ! -d data/raw/minivess/imagesTr ]; then
+    echo "FATAL: Training data missing — DVC pull failed in setup."
+    exit 1
+  fi
+      ]]></code>
+    </fix>
+
+    <test>
+      <file>tests/v2/unit/test_smoke_test_yaml_vesselfm.py</file>
+      <assertion>test_run_has_setup_guards: run block must check splits.json and training data</assertion>
+    </test>
+  </issue>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- ISSUE 6 (P2): Spot Preemption Recovery                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <issue id="6" priority="P2" category="reliability">
+    <title>Spot preemption kills training with no recovery</title>
+
+    <root-cause>
+      sky launch does NOT auto-recover from spot preemption. Only sky jobs launch
+      has built-in spot recovery (re-queues the job on a new instance).
+
+      The Makefile already uses sky jobs launch (correct), but the previous manual
+      debugging used sky launch (incorrect for spot). This is a documentation/workflow
+      issue — the launch comment in the YAML should be clearer.
+    </root-cause>
+
+    <fix type="docs">
+      <file>deployment/skypilot/smoke_test_gpu.yaml</file>
+      <action>
+        Update header comment to emphasize sky jobs launch (not sky launch).
+        Add WARNING comment about sky launch vs sky jobs launch.
+      </action>
+    </fix>
+
+    <test>
+      <file>tests/v2/unit/test_smoke_test_yaml_vesselfm.py</file>
+      <assertion>test_yaml_recommends_jobs_launch: Header must say "sky jobs launch"</assertion>
+    </test>
+  </issue>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- EXECUTION ORDER                                                        -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <execution-order>
+    <step seq="1" issue-ref="5">
+      Remove EXPERIMENT from envs, compute in run block.
+      This is the critical Hydra/OmegaConf fix that caused wrong config last time.
+    </step>
+    <step seq="2" issue-ref="4">
+      Add run-block guards (depends on step 1 since we're editing the same file).
+    </step>
+    <step seq="3" issue-ref="6">
+      Update YAML header comments for sky jobs launch.
+    </step>
+    <step seq="4" issue-ref="2">
+      Fix Makefile --env/--env-file flags.
+    </step>
+    <step seq="5" issue-ref="1">
+      Create ~/.sky/config.yaml for controller disk cap.
+    </step>
+    <step seq="6" issue-ref="3">
+      Freeze DVC preprocess stage.
+    </step>
+    <step seq="7">
+      Write regression tests for ALL 6 fixes.
+    </step>
+    <step seq="8">
+      Run make test-staging to verify all tests pass.
+    </step>
+    <step seq="9">
+      Run make smoke-test-preflight for live validation.
+    </step>
+    <step seq="10">
+      Launch: make smoke-test-gpu MODEL=sam3_vanilla
+    </step>
+  </execution-order>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- COST ANALYSIS                                                          -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <cost-analysis>
+    <item>RunPod RTX 4090 spot: $0.44/hr</item>
+    <item>Smoke test (2 epochs, 4 volumes): ~5 min per model</item>
+    <item>Setup overhead (clone, install, DVC pull): ~5 min</item>
+    <item>Total per model: ~10 min = ~$0.07</item>
+    <item>SkyPilot controller VM: ~$0.05/run (auto-terminated)</item>
+    <item>Total single-model validation: ~$0.12</item>
+    <item>Budget for debugging retries: 3 attempts max = ~$0.36</item>
+  </cost-analysis>
+
+</debug-plan>

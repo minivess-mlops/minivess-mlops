@@ -19,3 +19,13 @@ notes: >
   datasets needing long-range context. MONAI's SwinUNETR does not require img_size
   at construction — flexible for variable patch sizes. feature_size=48 -> ~62M params.
   Higher VRAM than DynUNet due to attention maps.
+vram:
+  inference_gb: 4.0
+  training_gb: 8.0
+  measured: false
+  measured_gpu: null
+  measured_date: null
+  measured_config:
+    patch_size: null
+    batch_size: null
+  notes: null

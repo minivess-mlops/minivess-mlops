@@ -1,0 +1,34 @@
+# @package _global_
+# GPU Smoke Test: SegResNet on RunPod RTX 4090 via SkyPilot
+#
+# NOT scientifically valid — verifies cloud GPU pipeline only.
+# 2 epochs, 1 fold, 4 volumes = ~3 min on RTX 4090 (~$0.04).
+#
+# Usage:
+#   sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+#     -e MODEL_FAMILY=segresnet
+defaults:
+  - override /model: segresnet
+  - override /checkpoint: lightweight
+
+experiment_name: smoke_segresnet
+model: segresnet
+model_family: segresnet
+losses:
+  - dice_ce
+max_epochs: 2
+num_folds: 1
+debug: true
+
+# Data subsetting
+max_train_volumes: 2
+max_val_volumes: 2
+splits_file: configs/splits/smoke_test_1fold_4vol.json
+
+# DVC provenance
+data:
+  dvc_commit: HEAD
+
+# SegResNet: ~2.1 GB VRAM (MEASURED on RTX 2070S — lightweight baseline)
+architecture_params:
+  init_filters: 16

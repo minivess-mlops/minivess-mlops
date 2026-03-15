@@ -18,3 +18,13 @@ notes: >
   No divisibility requirement (divisor=1). Good baseline for memory-constrained
   scenarios and ablation studies. init_filters doubles the size: 32 -> ~18.9M params.
   Measured on RTX 2070 Super: batch=4, patch=128x128x32 -> ~2.1 GB AMP.
+vram:
+  inference_gb: 2.1
+  training_gb: 2.1
+  measured: true
+  measured_gpu: "RTX 2070 Super"
+  measured_date: "2026-03-07"
+  measured_config:
+    patch_size: [128, 128, 32]
+    batch_size: 4
+  notes: null

@@ -60,6 +60,8 @@ outputs/logs/
 docs/
 wiki/
 *.md
+# Exception: README.md is needed by pyproject.toml (uv sync fails without it)
+!README.md
 
 # ── CI/CD ────────────────────────────────────────────────────────────────────
 .github/

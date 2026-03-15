@@ -16,3 +16,13 @@ notes: >
   (XY halved vs DynUNet 96, Z=24 matches DynUNet convention) on 8 GB GPUs
   (gpu_low) with batch=1. AMP required. clDice loss adds ~15% overhead from
   soft_skel max_pool3d ops. MONAI patch sampling handles volumes with Z<24.
+vram:
+  inference_gb: 2.5
+  training_gb: 4.0
+  measured: false
+  measured_gpu: null
+  measured_date: null
+  measured_config:
+    patch_size: null
+    batch_size: null
+  notes: null

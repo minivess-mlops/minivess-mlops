@@ -50,7 +50,7 @@ class SkyPilotLauncher:
         config: dict[str, Any],
         *,
         dry_run: bool = False,
-        task_yaml: str = "deployment/skypilot/train_generic.yaml",
+        task_yaml: str = "deployment/skypilot/smoke_test_gpu.yaml",
     ) -> dict[str, Any]:
         """Launch a single training job via SkyPilot.
 
@@ -166,13 +166,17 @@ class SkyPilotLauncher:
         try:
             import sky
 
-            statuses = sky.jobs.queue()
-            for job in statuses:
-                if str(job.get("job_id")) == str(job_id):
+            request_id = sky.jobs.queue(
+                refresh=False,
+                job_ids=[int(job_id)],
+            )
+            records = sky.get(request_id)
+            for record in records:
+                if str(record.job_id) == str(job_id):
                     return {
                         "job_id": job_id,
-                        "status": job.get("status", "unknown"),
-                        "cluster": job.get("cluster", "unknown"),
+                        "status": str(record.status) if record.status else "unknown",
+                        "cluster": record.infra or "unknown",
                     }
             return {"job_id": job_id, "status": "not_found"}
         except Exception:

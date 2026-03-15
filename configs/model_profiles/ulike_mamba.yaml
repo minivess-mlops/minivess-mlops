@@ -15,3 +15,13 @@ notes: >
   blocks at each resolution. Good for quick iteration and baselines.
   Lower memory footprint than SAM3 or COMMA Mamba — fits well on 8 GB GPUs
   with standard patch sizes. AMP recommended but not strictly required.
+vram:
+  inference_gb: 2.0
+  training_gb: 3.0
+  measured: false
+  measured_gpu: null
+  measured_date: null
+  measured_config:
+    patch_size: null
+    batch_size: null
+  notes: null

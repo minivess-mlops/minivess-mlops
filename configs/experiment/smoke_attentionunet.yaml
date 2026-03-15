@@ -1,0 +1,44 @@
+# @package _global_
+# GPU Smoke Test: AttentionUnet on RunPod RTX 4090 via SkyPilot
+#
+# NOT scientifically valid — verifies cloud GPU pipeline only.
+# 2 epochs, 1 fold, 4 volumes = ~3 min on RTX 4090 (~$0.04).
+#
+# Usage:
+#   sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+#     -e MODEL_FAMILY=attentionunet
+defaults:
+  - override /model: attentionunet
+  - override /checkpoint: lightweight
+
+experiment_name: smoke_attentionunet
+model: attentionunet
+model_family: attentionunet
+losses:
+  - dice_ce
+max_epochs: 2
+num_folds: 1
+debug: true
+
+# Data subsetting
+max_train_volumes: 2
+max_val_volumes: 2
+splits_file: configs/splits/smoke_test_1fold_4vol.json
+
+# DVC provenance
+data:
+  dvc_commit: HEAD
+
+# AttentionUnet: ~5.1M params — lightweight baseline
+architecture_params:
+  channels:
+    - 16
+    - 32
+    - 64
+    - 128
+    - 256
+  strides:
+    - 2
+    - 2
+    - 2
+    - 2

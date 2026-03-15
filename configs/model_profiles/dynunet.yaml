@@ -15,3 +15,13 @@ notes: >
   FP32 master weights for AMP (~200 MB), and Adam optimizer states (~400 MB).
   Empirically measured on RTX 2070 Super (8 GB): batch=2, patch=96x96x24
   -> ~3.5 GB peak VRAM with AMP (including activations and framework overhead).
+vram:
+  inference_gb: 3.5
+  training_gb: 3.5
+  measured: true
+  measured_gpu: "RTX 2070 Super + RTX 4090"
+  measured_date: "2026-03-07"
+  measured_config:
+    patch_size: [96, 96, 24]
+    batch_size: 2
+  notes: null

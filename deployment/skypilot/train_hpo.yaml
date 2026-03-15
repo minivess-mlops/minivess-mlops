@@ -1,0 +1,130 @@
+# MinIVess MLOps — HPO Training on Cloud GPU via SkyPilot
+#
+# Hyperparameter optimization using Optuna + ASHA (HyperbandPruner).
+# Uses Docker image with all deps pre-installed.
+#
+# Launch (MUST use 'sky jobs launch' for spot recovery):
+#   sky jobs launch deployment/skypilot/train_hpo.yaml \
+#     --env-file .env --env MODEL_FAMILY=dynunet \
+#     --env HPO_CONFIG=configs/hpo/dynunet_example.yaml -y
+#
+# Docker image: All deps (Python, PyTorch, MONAI, uv, project code) are baked
+# into the GHCR image. SkyPilot setup: only pulls data + copies config.
+# BANNED: apt-get, uv sync, git clone in setup (Docker mandate).
+
+name: minivess-hpo
+
+resources:
+  image_id: docker:ghcr.io/petteriteikari/minivess-base:latest
+  accelerators: RTX4090:1
+  cloud: runpod
+  use_spot: true
+  disk_size: 80
+
+envs:
+  MODEL_FAMILY: dynunet
+  HPO_CONFIG: configs/hpo/dynunet_example.yaml
+
+  # DVC data pull credentials (UpCloud S3)
+  DVC_S3_ENDPOINT_URL: ${DVC_S3_ENDPOINT_URL}
+  DVC_S3_ACCESS_KEY: ${DVC_S3_ACCESS_KEY}
+  DVC_S3_SECRET_KEY: ${DVC_S3_SECRET_KEY}
+  DVC_S3_BUCKET: ${DVC_S3_BUCKET:-minivess-dvc-data}
+  DVC_REMOTE: upcloud
+
+  # boto3 CRC32C checksum workaround for UpCloud S3 (H17)
+  AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
+  AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
+
+  # Remote MLflow tracking (UpCloud)
+  MLFLOW_TRACKING_URI: ${MLFLOW_CLOUD_URI}
+  MLFLOW_TRACKING_USERNAME: ${MLFLOW_CLOUD_USERNAME:-admin}
+  MLFLOW_TRACKING_PASSWORD: ${MLFLOW_CLOUD_PASSWORD}
+
+  # Cloud VM escape hatches
+  MINIVESS_ALLOW_HOST: "1"
+  PREFECT_DISABLED: "1"
+
+  # train_flow.py env requirements
+  SPLITS_DIR: /app/configs/splits
+  CHECKPOINT_DIR: /app/checkpoints
+  LOGS_DIR: /app/logs
+
+  # PyTorch CUDA memory optimization
+  PYTORCH_ALLOC_CONF: "expandable_segments:True"
+
+  # HuggingFace token
+  HF_TOKEN: ${HF_TOKEN}
+
+setup: |
+  set -ex
+  cd /app
+
+  # All deps are in the Docker image — setup is DATA ONLY.
+  # NOTE: uv, git, scripts/ are NOT in the runner image.
+  # Use python/dvc directly (.venv/bin is on PATH).
+
+  # Initialize DVC without git (container has no .git)
+  dvc init --no-scm -f
+
+  # Configure DVC upcloud remote with S3 credentials from env
+  dvc remote add upcloud s3://${DVC_S3_BUCKET}
+  dvc remote modify upcloud endpointurl ${DVC_S3_ENDPOINT_URL}
+  dvc remote modify --local upcloud access_key_id ${DVC_S3_ACCESS_KEY}
+  dvc remote modify --local upcloud secret_access_key ${DVC_S3_SECRET_KEY}
+
+  # Write minimal DVC pipeline for data pull.
+  cat > dvc.yaml << 'DVCEOF'
+  stages:
+    download:
+      cmd: "true"
+      outs:
+        - data/raw/minivess/
+      frozen: true
+  DVCEOF
+
+  cat > dvc.lock << 'LOCKEOF'
+  schema: '2.0'
+  stages:
+    download:
+      cmd: "true"
+      outs:
+      - path: data/raw/minivess/
+        hash: md5
+        md5: e712f8b23f377a4990b91bef0b1aef76.dir
+        size: 2749883382
+        nfiles: 350
+  LOCKEOF
+
+  # Pull full training data from UpCloud S3
+  dvc pull -r upcloud
+
+  # Full splits for HPO
+  cp configs/splits/3fold_seed42.json configs/splits/splits.json
+
+  mkdir -p /app/checkpoints /app/logs
+
+  # Pre-cache model weights
+  if [ "${MODEL_FAMILY}" = "vesselfm" ]; then
+    python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" || true
+  fi
+
+  echo "=== Pre-flight Check ==="
+  nvidia-smi
+  ls -la configs/splits/splits.json
+
+run: |
+  cd /app
+
+  if [ ! -f configs/splits/splits.json ]; then
+    echo "FATAL: splits.json missing"
+    exit 1
+  fi
+
+  echo "=== MinIVess HPO Sweep ==="
+  echo "Model: ${MODEL_FAMILY}"
+  echo "HPO config: ${HPO_CONFIG}"
+  echo "MLflow: ${MLFLOW_TRACKING_URI}"
+
+  # Run HPO engine via module path (scripts/ not in Docker image)
+  python -m minivess.optimization.hpo_engine --config "${HPO_CONFIG}" --model-family "${MODEL_FAMILY}"

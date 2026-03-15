@@ -1,0 +1,38 @@
+# @package _global_
+# GPU Smoke Test: SwinUNETR on RunPod RTX 4090 via SkyPilot
+#
+# NOT scientifically valid — verifies cloud GPU pipeline only.
+# 2 epochs, 1 fold, 4 volumes = ~5 min on RTX 4090 (~$0.06).
+#
+# Usage:
+#   sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+#     -e MODEL_FAMILY=swinunetr
+defaults:
+  - override /model: swinunetr
+  - override /checkpoint: lightweight
+
+experiment_name: smoke_swinunetr
+model: swinunetr
+model_family: swinunetr
+losses:
+  - dice_ce
+max_epochs: 2
+num_folds: 1
+debug: true
+
+# Data subsetting
+max_train_volumes: 2
+max_val_volumes: 2
+splits_file: configs/splits/smoke_test_1fold_4vol.json
+
+# DVC provenance
+data:
+  dvc_commit: HEAD
+
+# SwinUNETR: higher VRAM than DynUNet due to attention maps
+architecture_params:
+  feature_size: 24
+  img_size:
+    - 96
+    - 96
+    - 96

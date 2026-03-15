@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -12,6 +13,37 @@ logger = logging.getLogger(__name__)
 _DEFAULT_PROFILE_DIR = (
     Path(__file__).resolve().parent.parent.parent.parent / "configs" / "model_profiles"
 )
+
+
+@dataclass(frozen=True)
+class VramProfile:
+    """Structured VRAM measurement data (single source of truth).
+
+    Parameters
+    ----------
+    inference_gb:
+        Peak VRAM for inference in GB (null if unknown).
+    training_gb:
+        Peak VRAM for training in GB (null if unknown).
+    measured:
+        True if values are from real GPU benchmarks, False if estimated.
+    measured_gpu:
+        GPU model used for measurement (e.g., "RTX 2070 Super").
+    measured_date:
+        Date of measurement (YYYY-MM-DD).
+    measured_config:
+        Config used for measurement (patch_size, batch_size).
+    notes:
+        Additional context about the measurement.
+    """
+
+    inference_gb: float | None = None
+    training_gb: float | None = None
+    measured: bool = False
+    measured_gpu: str | None = None
+    measured_date: str | None = None
+    measured_config: dict[str, Any] | None = None
+    notes: str | None = None
 
 
 @dataclass(frozen=True)
@@ -36,6 +68,8 @@ class ModelProfile:
         Default XY patch dimension in voxels.
     notes:
         Free-text empirical notes about the profile.
+    vram:
+        Structured VRAM measurement data (single source of truth for VRAM).
     """
 
     name: str
@@ -46,6 +80,7 @@ class ModelProfile:
     max_batch_size: dict[str, int]
     default_patch_xy: int
     notes: str = ""
+    vram: VramProfile | None = None
 
 
 def load_model_profile(
@@ -81,7 +116,14 @@ def load_model_profile(
             logger.debug("Loading model profile %r from %s", name, yaml_path)
             with open(yaml_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
-            return ModelProfile(**data)
+            # Filter to known fields (profiles may have extra keys like
+            # model_name, architecture, monai_class, gpu8gb_debug_patch_xy)
+            known = {f.name for f in fields(ModelProfile)}
+            filtered = {k: v for k, v in data.items() if k in known}
+            # Parse vram dict into VramProfile dataclass
+            if "vram" in filtered and isinstance(filtered["vram"], dict):
+                filtered["vram"] = VramProfile(**filtered["vram"])
+            return ModelProfile(**filtered)
     raise FileNotFoundError(f"No profile found for model '{name}' in {dirs}")
 
 

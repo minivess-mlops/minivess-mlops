@@ -1,0 +1,5 @@
+# User-specific configs are gitignored (contain personal preferences).
+# Only default.yaml is tracked.
+*
+!default.yaml
+!.gitignore
