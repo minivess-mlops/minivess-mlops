@@ -25,7 +25,7 @@ BANNED: "outperforms / surpasses / beats DynUNet"
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.nn as nn
@@ -36,8 +36,15 @@ from monai.networks.blocks import (  # type: ignore[attr-defined]
 )
 from torch import Tensor
 
+from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
+
 # Re-export availability check for test imports (D08)
 from minivess.adapters.model_builder import _mamba_available as _mamba_available
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from minivess.config.models import ModelConfig
 
 __all__ = [
     "_mamba_available",
@@ -45,6 +52,7 @@ __all__ = [
     "BidirectionalMambaLayer",
     "MambaBlock",
     "MambaVesselNetBackbone",
+    "MambaVesselNetAdapter",
 ]
 
 # Default feature dimensions for MambaVesselNet++
@@ -373,3 +381,88 @@ class MambaVesselNetBackbone(nn.Module):
         x = self.dec_conv2(x, enc1)
         x = self.dec_conv1(x)
         return torch.as_tensor(self.out(x))  # (B, out_chans, H, W, D) raw logits
+
+
+# ── T06: ModelAdapter wrapper ─────────────────────────────────────────────────
+
+
+class MambaVesselNetAdapter(ModelAdapter):
+    """ModelAdapter for MambaVesselNet++.
+
+    Wraps ``MambaVesselNetBackbone`` to comply with the ModelAdapter ABC.
+    Requires mamba-ssm for real inference; CPU-testable via ``mamba_cls``.
+
+    Design decisions:
+    - D04: AMP conservative — train ON, val OFF (mirrors SAM3, MONAI #4243)
+    - D05: eval_roi_size = (64,64,64) — matches training patch divisor
+    - D10: ONNX export raises NotImplementedError (mamba selective scan not traceable)
+
+    Parameters
+    ----------
+    config:
+        ModelConfig with family=ModelFamily.MAMBAVESSELNET.
+    mamba_cls:
+        Optional Mamba class override for CPU testing (e.g., MockMamba).
+        If None, uses real mamba_ssm.Mamba (requires CUDA + mamba-ssm install).
+    """
+
+    def __init__(
+        self,
+        config: ModelConfig,
+        mamba_cls: type[nn.Module] | None = None,
+    ) -> None:
+        super().__init__()
+        self.config = config
+        arch = config.architecture_params
+
+        feature_dims: tuple[int, ...] = tuple(arch.get("feature_dims", _FEATURE_DIMS))
+        d_state: int = arch.get("d_state", 16)
+        d_conv: int = arch.get("d_conv", 4)
+        expand: int = arch.get("expand", 2)
+
+        self.net = MambaVesselNetBackbone(
+            in_chans=config.in_channels,
+            out_chans=config.out_channels,
+            feature_dims=feature_dims,
+            d_state=d_state,
+            d_conv=d_conv,
+            expand=expand,
+            mamba_cls=mamba_cls,
+        )
+
+    def forward(self, images: Tensor, **kwargs: Any) -> SegmentationOutput:
+        """Run MambaVesselNet++ inference.
+
+        Parameters
+        ----------
+        images:
+            Input tensor (B, C, H, W, D) — MONAI convention, depth LAST.
+
+        Returns
+        -------
+        SegmentationOutput with softmax predictions and raw logits.
+        """
+        logits = self.net(images)
+        return self._build_output(logits, "mambavesselnet")
+
+    def get_config(self) -> AdapterConfigInfo:
+        return self._build_config()
+
+    def get_eval_roi_size(self) -> tuple[int, int, int]:
+        """Return (64, 64, 64) — matches training patch divisor of 16 (D05)."""
+        return (64, 64, 64)
+
+    def export_onnx(self, path: Path, example_input: Tensor) -> None:
+        """ONNX export is not supported — Mamba selective scan is not traceable (D10).
+
+        Raises
+        ------
+        NotImplementedError
+            Always.  Use TorchScript or BentoML native serving instead.
+        """
+        msg = (
+            "MambaVesselNet ONNX export is not supported: the mamba_ssm selective scan "
+            "uses custom CUDA kernels that are not traceable by torch.onnx.export. "
+            "Use TorchScript (torch.jit.trace) or BentoML native serving instead."
+        )
+        raise NotImplementedError(msg)

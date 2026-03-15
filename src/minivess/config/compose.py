@@ -146,6 +146,10 @@ def _compose_with_manual_merge(
     for override in overrides:
         if "=" in override:
             key, value = override.split("=", 1)
+            # Strip Hydra prefix markers: "+key" (append) and "++key" (force override).
+            # The manual fallback applies all overrides unconditionally, so the
+            # distinction between "+" and "++" is irrelevant here.
+            key = key.lstrip("+")
             # Handle nested keys like "training.max_epochs=10"
             parts = key.split(".")
             if len(parts) == 1:

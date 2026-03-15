@@ -20,6 +20,7 @@ implemented_models:
   - sam3_vanilla
   - sam3_topolora
   - sam3_hybrid
+  - mambavesselnet
 
 # Loss exclusions: {loss_name: [model_families that CANNOT use this loss]}
 # Empty dict = all losses work with all models (current state)
@@ -68,4 +69,3 @@ not_implemented:
   - sam3_lora
   - multitask_dynunet
   - custom
-  - mambavesselnet  # planned — adapter in progress (feat/mambavesselnet #737)

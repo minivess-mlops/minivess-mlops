@@ -271,8 +271,11 @@ def _build_sam3_hybrid(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     return Sam3HybridAdapter(config)
 
 
-# Note: _build_mambavesselnet and its registry entry are added in T06
-# when MambaVesselNetAdapter is implemented (src/minivess/adapters/mambavesselnet.py).
+def _build_mambavesselnet(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
+    _require_mamba()
+    from minivess.adapters.mambavesselnet import MambaVesselNetAdapter
+
+    return MambaVesselNetAdapter(config)
 
 
 # Populate registry — order does not matter; dict lookup is O(1)
@@ -290,7 +293,7 @@ def _populate_registry() -> None:
     _MODEL_REGISTRY[ModelFamily.SAM3_VANILLA] = _build_sam3_vanilla
     _MODEL_REGISTRY[ModelFamily.SAM3_TOPOLORA] = _build_sam3_topolora
     _MODEL_REGISTRY[ModelFamily.SAM3_HYBRID] = _build_sam3_hybrid
-    # MAMBAVESSELNET registered in T06 when MambaVesselNetAdapter is implemented
+    _MODEL_REGISTRY[ModelFamily.MAMBAVESSELNET] = _build_mambavesselnet
 
 
 _populate_registry()
