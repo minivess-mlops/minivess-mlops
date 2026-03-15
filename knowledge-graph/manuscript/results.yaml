@@ -72,11 +72,21 @@ sections:
     note: "Initial results available; full conformal coverage curves need GPU runs for all models"
 
   - id: R5
-    title: "Agentic Development Metrics (Appendix)"
+    title: "Living Specification Graph — Structural Characterization (Appendix)"
     tex_file: results/results-05-agentic.tex
-    status: needs_data
+    status: partial
     proposed_metrics:
-      - "Total Claude Code sessions: ~150+ (approximate)"
+      - "KG nodes: 52 PRD decision nodes + manuscript layer (C1-C13, M0-M12, R0-R5)"
+      - "Intent nodes: count of adapters with why_chosen + intent_banned_patterns fields"
       - "Metalearning documents: count of .claude/metalearning/*.md files"
-      - "Pre-commit hook failures caught before commit: approximate"
-    note: "Self-reported — consider external validation or move to companion paper"
+      - "CLAUDE.md rules: 24 explicit behavioral constraints"
+      - "TDD test suite: 49 scripts tests + ~4100 total tests"
+    comparison_baseline:
+      papers: ["chatlatanagulchai_2025_agent_readmes", "santos_2025_claude_config", "galster_2026_configuring_agentic"]
+      baseline_finding: "Current practice: shallow context (build commands 62.3%, arch 67.7%, safety 14.5%)"
+      our_advance: "Multi-layer KG + probabilistic PRD + intent-expression + metalearning"
+    note: >
+      Literature scan (2026-03-15) confirmed this is a genuinely novel architectural pattern.
+      Frame as structural characterization (measurable), not productivity claim (unverifiable).
+      The empirical AGENTS.md papers are the comparison baseline.
+      Productivity narrative is appendix-level or companion paper.

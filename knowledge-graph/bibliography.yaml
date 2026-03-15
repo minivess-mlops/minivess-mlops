@@ -76,11 +76,16 @@ citations:
   vasilopoulos_2026_codified_context:
     authors: "Vasilopoulos A"
     year: 2026
-    title: "3-Tier Codified Context for Agentic Systems"
-    venue: "Preprint"
-    url: "https://arxiv.org/abs/placeholder"
+    title: "Codified Context: Infrastructure for AI Agents in a Complex Codebase"
+    venue: "arXiv:2602.20478"
+    url: "https://arxiv.org/abs/2602.20478"
     used_in: []
-    note: "Hot/Specialist/Cold tiers; trigger tables for agent routing"
+    abstract_snippet: >
+      Three-layer infrastructure (constitution + 19 domain-expert agents + knowledge base)
+      for persistent agent memory across 283 sessions on a C# distributed system.
+      CLOSEST PRIOR ART to our approach — but no probabilistic PRD layer, no MLOps,
+      no biomedical domain. Our multi-layer KG with probabilistic spec and manuscript
+      export is a distinct architectural advance.
 
   yu_2026_agemem:
     authors: "Yu Z, et al."
@@ -257,3 +262,119 @@ citations:
     abstract_snippet: >
       Framework for probabilistic reasoning on KGs. Phase 2+ belief propagation citation
       for the manuscript agentic story — framing PRD evolution as factor graph inference.
+
+  # -------------------------------------------------------------------------
+  # Agentic + Spec-Driven Development Literature (found 2026-03-15 literature scan)
+  # Key finding: None of these papers combine agentic coding with scientific MLOps
+  # infrastructure — the domain intersection is the novelty gap.
+  # -------------------------------------------------------------------------
+
+  piskala_2026_sdd:
+    authors: "Piskala DB"
+    year: 2026
+    title: "Spec-Driven Development: From Code to Contract in the Age of AI Coding Assistants"
+    venue: "AIWare 2026, arXiv:2602.00180"
+    url: "https://arxiv.org/abs/2602.00180"
+    used_in: []
+    abstract_snippet: >
+      Practitioner taxonomy of SDD presenting three rigor levels (spec-first, spec-anchored,
+      spec-as-source). Covers API, enterprise, and embedded software — NOT scientific software
+      or MLOps. Our Living Specification Graph is a concrete instance of spec-as-source
+      applied to research infrastructure.
+
+  stoica_2024_specs_missing_link:
+    authors: "Stoica I, Zaharia M, Gonzalez J, et al."
+    year: 2024
+    title: "Specifications: The missing link to making the development of LLM systems an engineering discipline"
+    venue: "arXiv:2412.05299"
+    url: "https://arxiv.org/abs/2412.05299"
+    used_in: []
+    abstract_snippet: >
+      Argues precise component-level behavioral contracts are essential for reliable LLM-based
+      systems. Focuses on software engineering theory, not scientific software. Directly
+      motivates our CLAUDE.md + knowledge graph as behavioral contract for the pipeline.
+
+  mohsenimofidi_2026_context_eng:
+    authors: "Mohsenimofidi S, Galster M, Treude C, Baltes S"
+    year: 2026
+    title: "Context Engineering for AI Agents in Open-Source Software"
+    venue: "MSR 2026, arXiv:2510.21413"
+    url: "https://arxiv.org/abs/2510.21413"
+    used_in: []
+    abstract_snippet: >
+      Empirical analysis of 466 open-source projects' AGENTS.md context files. No scientific
+      software domain, no MLOps. Documents current shallow context practice that our
+      multi-layer KG transcends.
+
+  santos_2025_claude_config:
+    authors: "Santos HVF, Costa V, Montandon JE, Valente MT"
+    year: 2025
+    title: "Decoding the Configuration of AI Coding Agents: Insights from Claude Code Projects"
+    venue: "AGENT 2026 @ ICSE, arXiv:2511.09268"
+    url: "https://arxiv.org/abs/2511.09268"
+    used_in: []
+    abstract_snippet: >
+      Analyzed 328 Claude Code project configs; architectural specification is most critical
+      concern. Empirically validates that current CLAUDE.md practice is shallow — our
+      multi-layer KG + metalearning system qualitatively exceeds this baseline.
+
+  chatlatanagulchai_2025_agent_readmes:
+    authors: "Chatlatanagulchai W, et al."
+    year: 2025
+    title: "Agent READMEs: An Empirical Study of Context Files for Agentic Coding"
+    venue: "arXiv:2511.12884"
+    url: "https://arxiv.org/abs/2511.12884"
+    used_in: []
+    abstract_snippet: >
+      Analyzed 2,303 agent context files across 1,925 repos. Build commands (62.3%) and
+      architecture (67.7%) dominate; safety/performance guidelines rare (14.5%). Our
+      approach with intent-expression nodes and probabilistic PRD is a qualitative advance
+      over this state of practice.
+
+  galster_2026_configuring_agentic:
+    authors: "Galster M, Mohsenimofidi S, et al."
+    year: 2026
+    title: "Configuring Agentic AI Coding Tools: An Exploratory Study"
+    venue: "arXiv:2602.14690"
+    url: "https://arxiv.org/abs/2602.14690"
+    used_in: []
+    abstract_snippet: >
+      Analyzed 2,926 GitHub repos across five agentic coding platforms. Context files
+      dominate; tool-specific configuration cultures. No MLOps, no scientific software.
+      Baseline empirical characterization of current agentic coding practice.
+
+  cheimarios_2025_mlops_physics:
+    authors: "Cheimarios N"
+    year: 2025
+    title: "Scientific software development in the AI era: reproducibility, MLOps, and applications in soft matter physics"
+    venue: "Frontiers in Physics"
+    url: "https://www.frontiersin.org/journals/physics/articles/10.3389/fphy.2025.1711356/full"
+    used_in: []
+    abstract_snippet: >
+      MLOps principles + NIST AI Risk Management for computational physics. Containerization
+      and model registries discussed. No multi-cloud, no spec-driven development, no
+      biomedical imaging. Closest scientific MLOps paper but wrong domain.
+
+  marcos_mercade_2026_mlops_eval:
+    authors: "Marcos-Mercadé J, Lopez-Novoa U, Egaña Aranguren M"
+    year: 2026
+    title: "An Empirical Evaluation of Modern MLOps Frameworks"
+    venue: "arXiv:2601.20415"
+    url: "https://arxiv.org/abs/2601.20415"
+    used_in: []
+    abstract_snippet: >
+      Evaluates MLflow, Metaflow, Airflow, Kubeflow on two ML scenarios; notes versioning
+      as reproducibility enabler. No biomedical segmentation, no multi-cloud, no
+      spec-driven development. Useful comparison baseline for our platform evaluation.
+
+  moskalenko_2024_resilient_mlops:
+    authors: "Moskalenko V, Kharchenko V"
+    year: 2024
+    title: "Resilience-aware MLOps for AI-based medical diagnostic system"
+    venue: "Frontiers in Public Health, PMC11004236"
+    url: "https://pmc.ncbi.nlm.nih.gov/articles/PMC11004236/"
+    used_in: []
+    abstract_snippet: >
+      Resilience mechanisms for medical AI MLOps (uncertainty calibration, graceful
+      degradation). Evaluated on MedMNIST classification NOT segmentation. No cloud
+      infrastructure. Useful as medical AI MLOps reference for introduction.
