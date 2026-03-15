@@ -29,20 +29,23 @@ class TestAdapterFloatCasts:
             f"{adapter_file} must cast FP16 encoder output to FP32 via .float()"
         )
 
-    def test_backbone_loads_fp16(self) -> None:
-        """sam3_backbone.py must load encoder with torch_dtype=torch.float16."""
+    def test_backbone_uses_half_precision_dtype(self) -> None:
+        """sam3_backbone.py must use auto-detected half-precision dtype."""
         src = Path("src/minivess/adapters/sam3_backbone.py")
         content = src.read_text(encoding="utf-8")
-        assert "torch.float16" in content or "float16" in content, (
-            "sam3_backbone.py must load encoder in FP16 for VRAM efficiency"
+        assert "_encoder_dtype" in content, (
+            "sam3_backbone.py must define _encoder_dtype for BF16/FP16 auto-detection"
+        )
+        assert "bfloat16" in content, (
+            "sam3_backbone.py must reference bfloat16 for Ampere+ GPU auto-detection"
         )
 
-    def test_backbone_has_half_cast(self) -> None:
-        """sam3_backbone.py must cast input to half() for frozen encoder."""
+    def test_backbone_casts_to_encoder_dtype(self) -> None:
+        """sam3_backbone.py must cast input to _encoder_dtype, not hardcoded .half()."""
         src = Path("src/minivess/adapters/sam3_backbone.py")
         content = src.read_text(encoding="utf-8")
-        assert ".half()" in content, (
-            "sam3_backbone.py must cast input to FP16 to match frozen encoder weights"
+        assert ".to(self._encoder_dtype)" in content, (
+            "sam3_backbone.py must use .to(self._encoder_dtype) not .half()"
         )
 
 

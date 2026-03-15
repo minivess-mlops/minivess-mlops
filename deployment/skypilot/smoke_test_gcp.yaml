@@ -19,10 +19,11 @@ resources:
   # Docker image from GCP Artifact Registry (same-region = fast 1-3 min pulls)
   # Fallback to GHCR if GAR image not yet pushed
   image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
-  # L4 preferred: 1.86x faster than T4, only 19% more $/hr → 37% cheaper per job.
-  # T4 fallback if L4 unavailable. A100 last resort.
-  # No region pin — SkyPilot picks cheapest available region.
-  accelerators: {L4: 1, T4: 1, A100: 1}
+  # L4 ONLY — T4 BANNED (Turing: no BF16 → FP16 overflow → NaN in SAM3 encoder).
+  # L4 is 1.86x faster AND 37% cheaper per job than T4.
+  # A100 fallback for models needing >24 GB VRAM (sam3_topolora).
+  # See: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
+  accelerators: {L4: 1, A100: 1}
   cloud: gcp
   use_spot: true
   disk_size: 100
