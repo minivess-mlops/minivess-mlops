@@ -20,3 +20,13 @@ notes: >
   Model-adaptive default in train_flow.py: patch=(64,64,32).
   RTX 4090 (24 GB): trains fine. Measured 9.3s/epoch, train_loss=0.857 (smoke test).
   Verified 2026-03-15 on RunPod RTX 4090 (EU-RO-1).
+vram:
+  inference_gb: 6.0
+  training_gb: 10.0
+  measured: true
+  measured_gpu: "RTX 4090"
+  measured_date: "2026-03-15"
+  measured_config:
+    patch_size: [64, 64, 32]
+    batch_size: 1
+  notes: null

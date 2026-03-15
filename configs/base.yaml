@@ -15,6 +15,10 @@ defaults:
   - training: default
   - checkpoint: standard
   - profiling: default
+  - cloud: local
+  - registry: ghcr
+  - lab: default
+  - user: default
   - _self_
 
 # Overridable at experiment level

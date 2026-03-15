@@ -1,0 +1,7 @@
+# Google Artifact Registry — same-region as GCP infrastructure.
+# Public repos don't require auth. Private repos use gcloud auth.
+
+registry: gar
+server: europe-north1-docker.pkg.dev
+image_prefix: europe-north1-docker.pkg.dev/minivess-mlops/minivess
+auth_env_var: null  # public GAR, no auth needed

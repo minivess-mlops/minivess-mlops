@@ -21,3 +21,13 @@ notes: >
   High VRAM: full attention over 3D patches. Divisor=16 from patch size 16.
   Recommended only on A100+ GPUs (40 GB). On 8 GB GPUs, use hidden_size=256
   and feature_size=8 to reduce to ~5M params. img_size must be divisible by 16.
+vram:
+  inference_gb: 8.0
+  training_gb: 16.0
+  measured: false
+  measured_gpu: null
+  measured_date: null
+  measured_config:
+    patch_size: null
+    batch_size: null
+  notes: null

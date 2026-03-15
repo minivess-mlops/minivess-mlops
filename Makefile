@@ -6,7 +6,7 @@
        test-staging test-prod test-gpu test-e2e \
        build-base-gpu build-base-cpu build-base-light build-bases requirements-tiers \
        ghcr-login push-ghcr \
-       smoke-test-preflight smoke-test-gpu smoke-test-all smoke-test-lambda smoke-test-lambda-all verify-smoke-test \
+       smoke-test-preflight smoke-test-gpu smoke-test-all smoke-test-lambda smoke-test-lambda-all smoke-test-gcp smoke-test-gcp-all verify-smoke-test \
        monitor-smoke-test diagnose-last-smoke-test \
        dev-gpu dev-gpu-heavy dev-gpu-stop dev-gpu-ssh
 
@@ -40,6 +40,8 @@ help:
 	@echo "  smoke-test-preflight  Validate env vars + connectivity"
 	@echo "  smoke-test-lambda     Launch smoke test on Lambda A10 (MODEL=sam3_vanilla)"
 	@echo "  smoke-test-lambda-all Run all smoke tests on Lambda"
+	@echo "  smoke-test-gcp        Launch smoke test on GCP spot T4/L4 (MODEL=sam3_vanilla)"
+	@echo "  smoke-test-gcp-all    Run all smoke tests on GCP spot"
 	@echo "  verify-smoke-test     Verify smoke test results on cloud MLflow"
 	@echo ""
 	@echo "Infrastructure:"
@@ -144,6 +146,17 @@ smoke-test-lambda-all:  ## Run all smoke tests on Lambda Labs sequentially
 	@echo "=== Standard models ==="
 	$(MAKE) smoke-test-lambda MODEL=sam3_vanilla
 	$(MAKE) smoke-test-lambda MODEL=dynunet
+
+smoke-test-gcp:  ## Launch smoke test on GCP spot T4/L4 (MODEL=sam3_vanilla)
+	uv run python scripts/launch_smoke_test.py --model $(or $(MODEL),sam3_vanilla) --cloud gcp
+
+smoke-test-gcp-all:  ## Run all smoke tests on GCP spot sequentially
+	@echo "=== Heavy models (need >8 GB VRAM) ==="
+	$(MAKE) smoke-test-gcp MODEL=sam3_hybrid
+	$(MAKE) smoke-test-gcp MODEL=vesselfm
+	@echo "=== Standard models ==="
+	$(MAKE) smoke-test-gcp MODEL=sam3_vanilla
+	$(MAKE) smoke-test-gcp MODEL=dynunet
 
 verify-smoke-test:  ## Verify smoke test results on cloud MLflow
 	uv run python scripts/verify_smoke_test.py $(or $(MODEL),sam3_vanilla)

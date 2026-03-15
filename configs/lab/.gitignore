@@ -1,0 +1,5 @@
+# Lab-specific configs are gitignored (contain site-specific values).
+# Only default.yaml is tracked.
+*
+!default.yaml
+!.gitignore

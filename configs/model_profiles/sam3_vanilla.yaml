@@ -16,3 +16,13 @@ notes: >
   Training on 8 GB GPU: patch=(64,64,3), batch=1, val_roi=(512,512,3),
   val_interval=10. Pretrained weights required (ViT-32L, 1008x1008).
   See src/minivess/adapters/CLAUDE.md and metalearning/2026-03-02-sam3.md.
+vram:
+  inference_gb: 2.9
+  training_gb: 3.5
+  measured: true
+  measured_gpu: "RTX 2070 Super + RTX 4090"
+  measured_date: "2026-03-07"
+  measured_config:
+    patch_size: [64, 64, 3]
+    batch_size: 1
+  notes: null

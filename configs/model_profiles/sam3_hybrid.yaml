@@ -26,3 +26,13 @@ notes: >
   val_interval sentinel skips validation on 8 GB — should validate on cloud (#710).
   Verified 2026-03-15 on RunPod RTX 4090 (EU-RO-1).
   See src/minivess/adapters/CLAUDE.md for VRAM enforcement (sam3_vram_check.py).
+vram:
+  inference_gb: 7.2
+  training_gb: 7.2
+  measured: true
+  measured_gpu: "RTX 2070 Super + RTX 4090"
+  measured_date: "2026-03-09"
+  measured_config:
+    patch_size: [64, 64, 3]
+    batch_size: 1
+  notes: "OOMs on 8GB at patch=(64,64,3). Use patch=(32,32,3) on 8GB."
