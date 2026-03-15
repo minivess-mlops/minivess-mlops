@@ -1,0 +1,381 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DEFINITIVE System Verification Plan — From Scratch to Working
+  Created: 2026-03-15
+  Branch: qa/remaining-runpod-qa
+  Skills: self-learning-iterative-coder + ralph-loop
+  Scope: DESTROY EVERYTHING → Pulumi up → Docker build → DVC pull → SkyPilot train → MLflow verify → Sync back
+
+  This plan tests the ENTIRE SYSTEM as a new user would experience it.
+  Infrastructure bugs are code bugs. No partial credit.
+
+  USER DIRECTIVES (verbatim from 2026-03-15 alignment session):
+
+  Q: "Is GCP MLflow still running?"
+  A: "Well kill everything, and test that everything runs from scratch as this is
+     also how new users would need to spin everything up when reading our repo and
+     testing themselves. Test know the whole infra so that we can spin everything
+     up with Pulumi, start executing with Skypilot then"
+
+  Q: "Is RunPod dev cluster still available?"
+  A: "Same as before, destroy everything exists, and test from scratch so that the
+     whole workflow works with Skypilot! We need to be able to run the heavy models
+     via Skypilot on Runpod with the Runpod storage for the filesystem-based mlruns
+     which need to be copied back, the runpod storage must have the DVC-versioned
+     data. If anything from this whole system fails, we have a failed system. We
+     cannot celebrate if you get the model running. Is this clear. If the Skypilot
+     with Runpod does not have a DevEx as we would run a local training with all
+     the mlflow registries copied to our local mlruns, we have a CRITICIAL FAILURE
+     which needs to fixed then with the Ralph Loop for infrastructure monitoring!
+     Is this crystal clear! This is a repo for a system of training, the whole
+     system must work, and improve the integration testing with our self-learning
+     TDD skill if needed to catch any regressions and bugs in this SYSTEM. Read
+     CLAUDE.md if this is unclear! System must work!"
+
+  Q: "VesselFM — RunPod pass sufficient or must also pass on GCP?"
+  A: "What the fuck again. GCP is way more important! Runpod is for 'dev'
+     environments that I don't personally use now even, so it is mostly a feature
+     for the academic paper if someone wants to develop in 'dev' rather than in
+     'prod', 'staging'. How can this fundamental vision for this repo still can be
+     so unclear to you? Plan how to improve our hierarchical CLAUDE.md system to
+     blast this everywhere. Preference for 'prod' and 'staging' env with bare
+     minimum for 'dev' as the Runpod."
+
+  ENVIRONMENT PRIORITY (NON-NEGOTIABLE):
+    1. GCP prod/staging = PRIMARY. Must work perfectly from scratch.
+    2. RunPod dev = SECONDARY. Bare minimum viable for academic paper feature.
+    NEVER prioritize RunPod over GCP. NEVER ask which env to test.
+-->
+<plan version="1.0" name="system-verification-from-scratch">
+  <metadata>
+    <created>2026-03-15</created>
+    <branch>qa/remaining-runpod-qa</branch>
+    <skills>self-learning-iterative-coder, ralph-loop</skills>
+    <budget>GCP: ~$5-10 (Pulumi infra + spot training). RunPod: ~$2-3.</budget>
+    <success-criteria>
+      ALL of these must pass or the system is BROKEN:
+      1. pulumi destroy + pulumi up creates all GCP infra from scratch
+      2. Docker image builds and pushes to GAR
+      3. DVC data pulls inside SkyPilot setup
+      4. 4 models train on GCP L4 spot with finite val_loss in MLflow
+      5. Artifacts (checkpoints, configs) uploaded to GCS via multipart
+      6. mlruns sync back to local machine works
+      7. RunPod dev workflow: launch → train → mlruns on network volume → sync back
+      If ANY component fails → SYSTEM FAILURE → fix with ralph-loop before proceeding
+    </success-criteria>
+  </metadata>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 0: DESTROY EVERYTHING (LOCAL, $0, ~5 min)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P0" name="Tear Down All Existing Infrastructure" cost="$0" effort="5min">
+    <task id="T0.1" name="Destroy GCP Pulumi stack" priority="P0">
+      <commands>
+        <cmd>cd deployment/pulumi/gcp &amp;&amp; pulumi destroy -y</cmd>
+        <cmd>gcloud compute instances list --project=minivess-mlops</cmd>
+        <cmd># Verify: 0 instances, 0 Cloud Run services, 0 GCS buckets</cmd>
+      </commands>
+      <acceptance>pulumi stack shows no resources. GCP console is empty.</acceptance>
+    </task>
+    <task id="T0.2" name="Destroy RunPod clusters" priority="P0">
+      <commands>
+        <cmd>uv run sky down --all -y</cmd>
+        <cmd>uv run sky status</cmd>
+        <cmd># Verify: 0 clusters</cmd>
+      </commands>
+      <acceptance>sky status shows no clusters.</acceptance>
+    </task>
+    <task id="T0.3" name="Clean local Docker images" priority="P0">
+      <commands>
+        <cmd>docker rmi minivess-base:latest europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest 2>/dev/null || true</cmd>
+      </commands>
+      <acceptance>No minivess images locally.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 1: PROVISION GCP FROM SCRATCH (LOCAL, ~$2-5/day, ~15 min)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P1" name="Pulumi Up — Full GCP Stack" cost="~$2-5/day" effort="15min" blocked-by="P0">
+    <task id="T1.1" name="Deploy GCP Pulumi stack" priority="P0">
+      <description>
+        Fresh pulumi up: Cloud SQL (PostgreSQL), 3 GCS buckets, GAR registry,
+        Cloud Run MLflow 3.10.0, IAM service accounts, Secret Manager (SA key).
+        This tests: can a new user provision all GCP infra with one command?
+      </description>
+      <commands>
+        <cmd>cd deployment/pulumi/gcp &amp;&amp; pulumi up -y</cmd>
+        <cmd>pulumi stack output</cmd>
+      </commands>
+      <acceptance>
+        All resources created. pulumi stack output shows:
+        - mlflow_url (Cloud Run URL)
+        - cloud_sql_ip
+        - gcs_bucket names
+        - gar_repository URL
+      </acceptance>
+    </task>
+    <task id="T1.2" name="Verify MLflow Cloud Run health" priority="P0" blocked-by="T1.1">
+      <commands>
+        <cmd>MLFLOW_URL=$(pulumi stack output mlflow_url) &amp;&amp; curl -s "$MLFLOW_URL/health"</cmd>
+      </commands>
+      <acceptance>HTTP 200 from MLflow health endpoint.</acceptance>
+    </task>
+    <task id="T1.3" name="Update .env with fresh Pulumi outputs" priority="P0" blocked-by="T1.1">
+      <description>
+        Write MLFLOW_GCP_URI and other Pulumi outputs to .env.
+        Rule #22: .env.example is single source of truth.
+      </description>
+      <acceptance>.env has MLFLOW_GCP_URI from pulumi stack output.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 2: BUILD + PUSH DOCKER IMAGE (~$0, ~20 min)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P2" name="Docker Build + Push to GAR" cost="$0" effort="20min" blocked-by="P1">
+    <task id="T2.1" name="Build Docker base image" priority="P0">
+      <commands>
+        <cmd>make build-base-gpu</cmd>
+      </commands>
+      <acceptance>docker images minivess-base:latest shows fresh image.</acceptance>
+    </task>
+    <task id="T2.2" name="Push to GAR" priority="P0" blocked-by="T2.1">
+      <commands>
+        <cmd>docker tag minivess-base:latest $(pulumi stack output gar_image_url):latest</cmd>
+        <cmd>docker push $(pulumi stack output gar_image_url):latest</cmd>
+        <cmd>gcloud artifacts docker images list $(pulumi stack output gar_repository)</cmd>
+      </commands>
+      <acceptance>GAR shows image with fresh CREATE_TIME.</acceptance>
+    </task>
+    <task id="T2.3" name="Verify Docker image contents" priority="P0" blocked-by="T2.1">
+      <commands>
+        <cmd>docker run --rm minivess-base:latest python -c "
+from minivess.config.models import TrainingConfig
+c = TrainingConfig()
+print(f'mixed_precision_val={c.mixed_precision_val}')
+from minivess.adapters.sam3_backbone import Sam3Backbone
+print('SAM3 backbone importable')
+from minivess.orchestration.flows.train_flow import training_flow
+print('Training flow importable')
+"</cmd>
+      </commands>
+      <acceptance>All imports succeed. mixed_precision_val=False.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 3: GCP PROD/STAGING — 4-MODEL TRAINING (GCP, ~$1-2, ~60 min)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P3" name="GCP 4-Model Training Verification" cost="~$1-2" effort="60min" blocked-by="P2">
+    <description>
+      Sequential launch of all 4 models on GCP L4 spot.
+      Each model: SkyPilot provisions VM → pulls Docker from GAR → DVC pull in setup →
+      trains 2 epochs → uploads metrics+artifacts to MLflow Cloud Run → auto-destroys.
+      GPU quota = 1, so sequential only.
+
+      PASS CRITERIA PER MODEL:
+      - MLflow experiment created with FINISHED status
+      - val_loss is FINITE (not NaN, not Inf)
+      - At least 1 checkpoint artifact uploaded to GCS
+      - Training completes without OOM or crash
+    </description>
+
+    <task id="T3.1" name="Train sam3_vanilla on GCP L4" priority="P0">
+      <commands>
+        <cmd>make smoke-test-gcp MODEL=sam3_vanilla</cmd>
+        <cmd># Wait for completion (~15 min)</cmd>
+        <cmd># Verify in MLflow: FINISHED + finite val_loss</cmd>
+      </commands>
+      <ralph-loop>Monitor via ralph-loop. On failure: diagnose + fix + retry.</ralph-loop>
+    </task>
+
+    <task id="T3.2" name="Train dynunet on GCP L4" priority="P0" blocked-by="T3.1">
+      <commands>
+        <cmd>make smoke-test-gcp MODEL=dynunet</cmd>
+      </commands>
+    </task>
+
+    <task id="T3.3" name="Train sam3_hybrid on GCP L4" priority="P0" blocked-by="T3.2">
+      <description>
+        CRITICAL: Must use smoke_sam3_hybrid_cloud.yaml (val_interval=1).
+        The GCP YAML auto-selects _cloud config when available.
+        If val_loss=NaN → check which config was used (sentinel bug).
+      </description>
+      <commands>
+        <cmd>make smoke-test-gcp MODEL=sam3_hybrid</cmd>
+      </commands>
+    </task>
+
+    <task id="T3.4" name="Train vesselfm on GCP L4" priority="P0" blocked-by="T3.3">
+      <description>
+        VesselFM requires patch Z≥32 (5 stride-2 downsamplings).
+        Docker image has the fix. Previous failure was SSH error (transient).
+      </description>
+      <commands>
+        <cmd>make smoke-test-gcp MODEL=vesselfm</cmd>
+      </commands>
+    </task>
+
+    <task id="T3.5" name="Verify ALL models in MLflow" priority="P0" blocked-by="T3.4">
+      <description>
+        Query MLflow Cloud Run for all 4 experiments. Every model must have
+        FINISHED status with finite val_loss. If ANY model has NaN or FAILED,
+        the SYSTEM IS BROKEN — do not proceed.
+      </description>
+      <commands>
+        <cmd>curl -s "$MLFLOW_GCP_URI/api/2.0/mlflow/experiments/search" | python3 -c "..."</cmd>
+      </commands>
+      <acceptance>
+        4/4 models: FINISHED with finite val_loss.
+        (sam3_topolora excluded — needs A100, hardware limitation not system bug)
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 4: ARTIFACT VERIFICATION (LOCAL, $0, ~10 min)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P4" name="Artifact + Sync Verification" cost="$0" effort="10min" blocked-by="P3">
+    <task id="T4.1" name="Verify GCS artifacts" priority="P0">
+      <commands>
+        <cmd>gsutil ls gs://minivess-mlops-mlflow-artifacts/</cmd>
+        <cmd># Verify: checkpoint .pth files, config artifacts, metric history</cmd>
+      </commands>
+      <acceptance>Artifacts exist in GCS for all 4 experiments.</acceptance>
+    </task>
+
+    <task id="T4.2" name="Sync mlruns to local" priority="P0" blocked-by="T4.1">
+      <description>
+        Test the researcher workflow: cloud training done → pull results local.
+        Use gsutil rsync to pull MLflow artifacts from GCS.
+      </description>
+      <commands>
+        <cmd>gsutil -m rsync -r gs://minivess-mlops-mlflow-artifacts/ mlruns/cloud/</cmd>
+        <cmd>ls mlruns/cloud/</cmd>
+      </commands>
+      <acceptance>Local mlruns/cloud/ has experiment data from all 4 models.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 5: RUNPOD DEV WORKFLOW (CLOUD, ~$1, ~30 min)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P5" name="RunPod Dev Workflow (Secondary)" cost="~$1" effort="30min" blocked-by="P3">
+    <description>
+      RunPod = dev environment for academic paper feature. SECONDARY priority.
+      Tests: SkyPilot launch → Network Volume → DVC pull → train → filesystem mlruns →
+      sync mlruns back to local.
+    </description>
+
+    <task id="T5.1" name="Launch RunPod dev instance with Network Volume" priority="P1">
+      <commands>
+        <cmd>make dev-gpu</cmd>
+        <cmd># SkyPilot launches RTX 4090 pod with /opt/vol network volume</cmd>
+      </commands>
+      <acceptance>Cluster UP, DVC data pulled, sam3_vanilla trains.</acceptance>
+    </task>
+
+    <task id="T5.2" name="Train sam3_vanilla on RunPod" priority="P1" blocked-by="T5.1">
+      <commands>
+        <cmd># Inside RunPod: training writes to /opt/vol/mlruns/</cmd>
+        <cmd>make smoke-test-gpu MODEL=sam3_vanilla</cmd>
+      </commands>
+      <acceptance>Training completes, mlruns/ on network volume has experiment.</acceptance>
+    </task>
+
+    <task id="T5.3" name="Sync RunPod mlruns to local" priority="P1" blocked-by="T5.2">
+      <commands>
+        <cmd>sky rsync minivess-dev:/opt/vol/mlruns/ ./mlruns/runpod/ --down</cmd>
+      </commands>
+      <acceptance>Local mlruns/runpod/ has experiment data.</acceptance>
+    </task>
+
+    <task id="T5.4" name="Destroy RunPod instance" priority="P1" blocked-by="T5.3">
+      <commands>
+        <cmd>uv run sky down minivess-dev -y</cmd>
+      </commands>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 6: INTEGRATION TESTS + REGRESSION GUARDS (LOCAL, $0)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P6" name="Integration Test Suite Hardening" cost="$0" effort="30min" blocked-by="P4">
+    <description>
+      Write integration tests that catch system regressions. These run in CI-like
+      mode (cloud credentials required) and verify the FULL pipeline works.
+    </description>
+
+    <task id="T6.1" name="Write E2E system verification tests" priority="P1">
+      <description>
+        TDD tests that verify the complete chain works:
+        - Pulumi stack is up (Cloud Run responds)
+        - GAR image exists and is recent
+        - DVC data is accessible
+        - SkyPilot can provision GCP instances
+        - MLflow accepts artifact uploads
+        These are NOT unit tests — they require real cloud credentials.
+      </description>
+      <files>
+        <file path="tests/v2/cloud/test_system_e2e.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          test_mlflow_cloud_run_health: curl MLflow URL → 200
+          test_gar_image_exists: gcloud artifacts list → image present
+          test_dvc_remote_accessible: dvc status -r upcloud → up to date
+          test_gcs_buckets_exist: gsutil ls → 3 buckets
+          test_skypilot_gcp_enabled: sky check gcp → enabled
+        </red>
+      </tdd-spec>
+    </task>
+
+    <task id="T6.2" name="Update CLAUDE.md with environment priority" priority="P1">
+      <description>
+        Blast the env priority everywhere so future sessions don't ask which env:
+        - Root CLAUDE.md: add "Environment Priority" section
+        - deployment/CLAUDE.md: reinforce
+        - .claude/metalearning/: add feedback doc
+      </description>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 7: FINAL REPORT (LOCAL, $0)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P7" name="Final System Verification Report" cost="$0" effort="10min" blocked-by="P6">
+    <task id="T7.1" name="Write system verification report" priority="P0">
+      <description>
+        Document: every component tested, every model trained, every artifact
+        synced. Include MLflow experiment IDs, GCS bucket contents, timing,
+        costs. This is the proof that the system works end-to-end.
+      </description>
+      <files>
+        <file path="docs/planning/system-verification-report-2026-03-15.md" action="create" />
+      </files>
+    </task>
+  </phase>
+
+  <cost-summary>
+    <item phase="P0" cost="$0">Destroy everything (local)</item>
+    <item phase="P1" cost="~$2-5/day">Pulumi GCP stack (Cloud SQL + Cloud Run)</item>
+    <item phase="P2" cost="$0">Docker build + GAR push (local)</item>
+    <item phase="P3" cost="~$1-2">4 models × ~10 min on L4 ($0.19/hr)</item>
+    <item phase="P4" cost="$0">Artifact verification + sync (local)</item>
+    <item phase="P5" cost="~$1">RunPod dev workflow (RTX 4090 $0.44/hr)</item>
+    <item phase="P6" cost="$0">Integration tests (local)</item>
+    <item phase="P7" cost="$0">Report (local)</item>
+    <total>~$5-10 total (dominated by GCP daily infra cost)</total>
+  </cost-summary>
+
+  <execution-notes>
+    <note>GCP prod/staging is PRIMARY. RunPod dev is SECONDARY.</note>
+    <note>DESTROY EVERYTHING first — test as a new user would.</note>
+    <note>If ANY phase fails → SYSTEM FAILURE → fix before proceeding.</note>
+    <note>ralph-loop monitors all cloud phases autonomously.</note>
+    <note>self-learning-iterative-coder handles TDD tasks (Phase 6).</note>
+    <note>Sequential model launches on GCP (quota = 1 GPU).</note>
+    <note>sam3_topolora excluded (needs A100 — hardware limitation, not system bug).</note>
+  </execution-notes>
+</plan>
