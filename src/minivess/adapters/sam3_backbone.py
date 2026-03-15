@@ -276,6 +276,14 @@ class Sam3Backbone(nn.Module):
         Feature tensor of shape (B, embed_dim, H_feat, W_feat).
         For the HF path the encoder includes the FPN neck, so the returned
         tensor is already at FPN dimension (256) rather than ViT dimension (1024).
+
+        Notes
+        -----
+        Includes a NaN/Inf guard on encoder output. The frozen encoder runs in
+        FP16 (half precision) for VRAM efficiency, which can produce NaN/Inf
+        via overflow in LayerNorm/softmax on certain input distributions
+        (e.g. boundary patches from sliding_window_inference during validation).
+        See docs/planning/sam3-nan-loss-fix.md (H2) and issue #715.
         """
         target_device = x.device
         x = self._preprocess(x)
@@ -301,6 +309,44 @@ class Sam3Backbone(nn.Module):
                 out = out.fpn_hidden_states[0]
             elif hasattr(out, "last_hidden_state"):
                 out = out.last_hidden_state
+
+        # NaN/Inf guard: FP16 encoder can overflow on certain inputs (boundary
+        # patches, extreme intensity values). Replace non-finite values with 0.0
+        # to prevent NaN from poisoning downstream loss computation.
+        # Zero features produce zero decoder output → valid (if uninformative) loss.
+        # See: docs/planning/sam3-nan-loss-fix.md, issue #715.
+        if not torch.isfinite(out).all():
+            nan_count = torch.isnan(out).sum().item()
+            inf_count = torch.isinf(out).sum().item()
+            total = out.numel()
+            logger.warning(
+                "NaN/Inf in SAM3 encoder output: %d NaN + %d Inf / %d total "
+                "(%.1f%%). Replacing with zeros to prevent loss poisoning.",
+                nan_count,
+                inf_count,
+                total,
+                100 * (nan_count + inf_count) / total,
+            )
+            out = torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # NaN/Inf guard: FP16 encoder can overflow on certain inputs (boundary
+        # patches, extreme intensity values). Replace non-finite values with 0.0
+        # to prevent NaN from poisoning downstream loss computation.
+        # Zero features produce zero decoder output → valid (if uninformative) loss.
+        # See: docs/planning/sam3-nan-loss-fix.md, issue #715.
+        if not torch.isfinite(out).all():
+            nan_count = torch.isnan(out).sum().item()
+            inf_count = torch.isinf(out).sum().item()
+            total = out.numel()
+            logger.warning(
+                "NaN/Inf in SAM3 encoder output: %d NaN + %d Inf / %d total "
+                "(%.1f%%). Replacing with zeros to prevent loss poisoning.",
+                nan_count,
+                inf_count,
+                total,
+                100 * (nan_count + inf_count) / total,
+            )
+            out = torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
 
         result: Tensor = out.to(target_device)
         return result
