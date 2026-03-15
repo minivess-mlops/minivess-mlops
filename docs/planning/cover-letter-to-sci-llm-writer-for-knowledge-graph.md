@@ -278,17 +278,20 @@ the platform's model-agnostic architecture. One YAML profile + one ModelAdapter 
   - `dice_ce`: DSC=0.824±0.014 (best DSC), clDice=0.832±0.019
   - Topology gain cbdice_cldice vs dice_ce: +8.9% clDice, −5.3% DSC
 
-### 3.2 Mamba variants (State Space Models) — STATUS: PLANNED, ADAPTER STUB IN KG
-- **Role**: State-space model family — long-range dependency modelling, linear complexity
-- **Example implementations**: SegMamba, U-Mamba, MambaSeg (MONAI-compatible)
-- **KG adapter**: `knowledge-graph/code-structure/adapters.yaml#mamba_variants` — entry
-  added 2026-03-15 with `status: planned`. Python adapter (`src/minivess/adapters/mamba.py`)
-  is **NOT YET IMPLEMENTED**. The KG captures intent but no code exists yet.
-- **Literature context**: [Chen et al. (2024). "MambaVesselNet: A Hybrid CNN-Mamba Architecture
-  for 3D Cerebrovascular Segmentation." *ACM MMasia*.](https://doi.org/10.1145/3696409.3700231)
-  — demonstrates Mamba architecture is scientifically motivated for cerebrovascular segmentation;
-  no 2PM microscopy, no reproducible pipeline. Cited to justify inclusion of the Mamba family
-  in ARBOR's model-agnostic generalizability demonstration — NOT as a target to beat.
+### 3.2 MambaVesselNet (State Space Model family) — STATUS: PLANNED, ISSUE #737
+- **Role**: State-space model family — represents SSM architecture in the platform's
+  multi-architecture generalizability demonstration
+- **Chosen architecture**: [MambaVesselNet (Chen et al. 2024, ACM MMasia)](https://doi.org/10.1145/3696409.3700231)
+  — peer-reviewed, published hybrid CNN-Mamba for 3D cerebrovascular segmentation.
+  Reference implementation: [github.com/CC0117/MambaVesselNet](https://github.com/CC0117/MambaVesselNet).
+  Chosen because an exact published codebase exists to adapt correctly.
+- **KG adapter**: `knowledge-graph/code-structure/adapters.yaml#mambavesselnet`
+  (`status: planned`). Python file `src/minivess/adapters/mambavesselnet.py` not yet created.
+- **ARCHIVED (permanently off-table)**: SegMamba and U-Mamba — speculative selections with
+  no reference code. Archived 2026-03-15 in KG (`status: archived`). See issue #737.
+- **NOT a performance comparison**: MambaVesselNet is cited to show the SSM family has
+  published peer-reviewed work for cerebrovasculature. The paper does NOT claim
+  MambaVesselNet is better or worse than DynUNet. Platform generalizability is the claim.
 - **GPU requirement**: Similar to DynUNet (~8 GB, to be confirmed after implementation)
 - **Results available**: NO — pending Python adapter implementation + GPU runs
 - **⚠️ ACTION REQUIRED before manuscript submission**: Implement Mamba adapter

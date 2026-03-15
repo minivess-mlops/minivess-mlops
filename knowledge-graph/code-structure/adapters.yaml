@@ -154,35 +154,57 @@ adapters:
   # .claude/metalearning/2026-03-15-kg-mamba-missing-scope-blindness.md)
   # ============================================================
 
-  - id: mamba_variants
-    name: "Mamba Variants (SegMamba / U-Mamba)"
-    file: src/minivess/adapters/mamba.py  # NOT YET CREATED
+  # ARCHIVED — do not use. Replaced by mambavesselnet (see below).
+  - id: mamba_variants_archived
+    name: "Mamba Variants — ARCHIVED (SegMamba / U-Mamba)"
+    file: src/minivess/adapters/mamba.py  # NEVER CREATED — permanently retired
+    family: state_space_model
+    status: archived
+    archived_date: 2026-03-15
+    archived_reason: >
+      Replaced by MambaVesselNet (chen_2024_mambavesselnet) — a peer-reviewed published
+      architecture (ACM MMasia 2024) with an exact reference implementation at
+      github.com/CC0117/MambaVesselNet to adapt. SegMamba and U-Mamba were speculative
+      selections with no specific reference code committed to. Adapting a published, tested
+      architecture is the correct engineering choice. See GitHub issue #737.
+    source: "SegMamba (github.com/ge-xing/SegMamba) or U-Mamba (github.com/bowang-lab/U-Mamba)"
+    note: >
+      PERMANENTLY RETIRED. If these architectures are needed for a different future project,
+      un-archive then. For this paper they are off the table. Never use mamba_variants_archived
+      as a model_id in any config, test, or implementation.
+
+  - id: mambavesselnet
+    name: "MambaVesselNet (Chen et al. 2024)"
+    file: src/minivess/adapters/mambavesselnet.py  # NOT YET CREATED — see issue #737
     family: state_space_model
     status: planned
-    gpu_requirement: "~8 GB VRAM (similar to DynUNet — to be measured)"
-    source: "SegMamba (github.com/ge-xing/SegMamba) or U-Mamba (github.com/bowang-lab/U-Mamba)"
+    gpu_requirement: "TBD — measure on RTX 2070 Super + RTX 4090 after implementation"
+    source: "Chen et al. 2024, ACM MMasia — github.com/CC0117/MambaVesselNet"
+    citation: "chen_2024_mambavesselnet"
     intent:
       why_chosen: >
-        Represents the State Space Model (SSM) family in the multi-model comparison.
-        Demonstrates platform generalizability across CNN (DynUNet), SSM (Mamba),
-        and Foundation Model (SAM3, VesselFM) architectures.
-        Hypothesis: selective state spaces may improve vascular topology continuity
-        vs sliding-window CNN attention in DynUNet.
-        Paper role: one of four model FAMILIES, NOT the paper's main contribution.
-        The point is that the platform supports it — not that Mamba wins.
-      intent_source: "User session 2026-03-15 — explicit paper scope statement"
+        Peer-reviewed, published hybrid CNN-Mamba architecture for 3D cerebrovascular
+        segmentation (ACM MMasia 2024). Chosen over speculative SegMamba/U-Mamba
+        because a published reference implementation exists to adapt correctly.
+        Represents the SSM (State Space Model) family in the platform's multi-architecture
+        generalizability demonstration. Demonstrates platform works across CNN (DynUNet),
+        SSM (MambaVesselNet), and Foundation Model (SAM3, VesselFM) families.
+        Paper role: one of four model FAMILIES demonstrating ModelAdapter ABC generalizability.
+        NOT a claim that MambaVesselNet is better or worse than DynUNet — that is not the paper's contribution.
+      intent_source: "User instruction 2026-03-15, GitHub issue #737"
       critical_constraints:
+        - "Adapt CC0117/MambaVesselNet to MONAI output convention: (B,C,D,H,W) depth LAST"
+        - "Check BF16 compatibility — apply AMP-off-for-validation if needed (MONAI #4243)"
+        - "NEVER guess VRAM — measure on RTX 2070 Super + RTX 4090 and write to YAML profile"
         - "Adapter not yet implemented — needed for R3b multi-model comparison"
-        - "Must implement ModelAdapter ABC: forward, get_eval_roi_size, get_adapter_config"
-        - "GPU runs needed before paper submission"
     intent_banned_patterns:
-      - pattern: "hardcoding Mamba as the recommended model"
-        reason: "This is a platform paper — model comparison demonstrates generalizability, not superiority"
+      - pattern: "claiming MambaVesselNet outperforms or underperforms DynUNet"
+        reason: "Platform paper — model comparison demonstrates generalizability, not superiority"
+      - pattern: "reverting to SegMamba or U-Mamba"
+        reason: "Those variants are permanently archived (2026-03-15). MambaVesselNet is canonical."
     paper_section: [R3b, M6]
     blocks: [R3b]
-    note: >
-      Choice between SegMamba and U-Mamba to be decided at implementation time.
-      Both are MONAI-compatible. Prefer the one with active maintenance and BF16 support.
+    github_issue: 737
 
 # Intent banished patterns (project-wide, not adapter-specific)
 intent_banned_patterns:
