@@ -271,7 +271,8 @@ run: |
   echo "Torch cache: ${TORCH_HOME}"
 
   # Compute EXPERIMENT in shell (SkyPilot can't resolve intra-envs ${})
-  export EXPERIMENT="smoke_${MODEL_FAMILY}"
+  # Respect --experiment override from launch_dev_runpod.py if set
+  export EXPERIMENT="${EXPERIMENT:-smoke_${MODEL_FAMILY}}"
 
   # UUID isolation via HYDRA_OVERRIDES
   export EXPERIMENT_UUID=$(${WORKDIR}/.venv/bin/python -c "import uuid; print(uuid.uuid4().hex[:8])")
