@@ -17,6 +17,7 @@ stages:
     params:
       - configs/deployment/settings.toml:
           - default.data_dir
+    frozen: true  # Frozen: no processed cache on UpCloud S3; prevents dvc pull failures
 
   validate_data:
     cmd: uv run python -m minivess.validation.run
