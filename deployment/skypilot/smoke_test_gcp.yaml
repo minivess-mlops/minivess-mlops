@@ -29,12 +29,12 @@ resources:
   disk_size: 100
   disk_tier: best
 
-# Checkpoint persistence via GCS MOUNT_CACHED (9.6x faster than MOUNT)
-# Writes go to local SSD cache, async-mirrored to GCS in background.
-# On spot preemption: SkyPilot recovers → pulls checkpoint from GCS → resumes.
+# Checkpoint persistence via GCS bucket mount.
+# The bucket must exist (created by Pulumi). Use 'source' to reference
+# an externally-created bucket rather than letting SkyPilot create one.
 file_mounts:
   /app/checkpoints:
-    name: minivess-mlops-checkpoints
+    source: gs://minivess-mlops-checkpoints
     mode: MOUNT
 
 envs:

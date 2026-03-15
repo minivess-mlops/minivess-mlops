@@ -38,13 +38,12 @@ resources:
     - cloud: lambda
       accelerators: A100:1
 
-# Checkpoint persistence via cloud storage MOUNT_CACHED
-# Writes go to local SSD cache, async-mirrored to cloud bucket in background.
-# On spot preemption: SkyPilot recovers → pulls checkpoint from bucket → resumes.
+# Checkpoint persistence via cloud storage bucket mount.
+# Bucket must exist (created by Pulumi or manually).
 # Bucket name: set GCS_CHECKPOINT_BUCKET in .env (default: minivess-mlops-checkpoints)
 file_mounts:
   /app/checkpoints:
-    name: ${GCS_CHECKPOINT_BUCKET:-minivess-mlops-checkpoints}
+    source: gs://${GCS_CHECKPOINT_BUCKET:-minivess-mlops-checkpoints}
     mode: MOUNT
 
 envs:

@@ -296,10 +296,10 @@ def _launch_gcp(args) -> int:
     # multiple models sequentially (each model gets its own GCP VM).
     cluster_name = f"minivess-gcp-{args.model.replace('_', '-')}"
 
-    print(f"=== Launching smoke test: {args.model} (GCP spot, europe-north1) ===")
+    print(f"=== Launching smoke test: {args.model} (GCP spot) ===")
     print(f"Cluster: {cluster_name}")
     print(f"MLflow: {gcp_uri or '(not set — check MLFLOW_GCP_URI in .env)'}")
-    print("Docker: GAR europe-north1 (public, no auth)")
+    print("Docker: GAR (public, no auth — SkyPilot picks cheapest region)")
 
     request_id = sky.launch(
         task,
