@@ -1,0 +1,16 @@
+# Profiling disabled — for edge cases where even the minimal overhead
+# of torch.profiler is unacceptable (e.g., final benchmark timing runs).
+#
+# Note: pre-training diagnostics and WeightWatcher still run even when
+# profiling is disabled — they are free and always valuable.
+
+enabled: false
+epochs: 0
+activities: []
+profile_memory: false
+record_shapes: false
+with_flops: false
+with_stack: false
+export_chrome_trace: false
+compress_traces: false
+trace_size_limit_mb: 50
