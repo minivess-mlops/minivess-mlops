@@ -1,0 +1,40 @@
+# @package _global_
+# Cloud GPU Smoke Test: SAM3 Hybrid with VALIDATION enabled
+#
+# For cloud GPUs (≥16 GB VRAM) where validation fits in memory.
+# Unlike smoke_sam3_hybrid.yaml which skips validation (sentinel),
+# this config enables validation to verify model predictions are valid.
+#
+# val_interval=1: validate every epoch (5 epochs total)
+# max_epochs=5: enough to see convergence trend
+# Addresses #710: sam3_hybrid val_loss=NaN investigation
+defaults:
+  - override /model: sam3_hybrid
+  - override /checkpoint: lightweight
+
+experiment_name: smoke_sam3_hybrid_cloud
+model: sam3_hybrid
+model_family: sam3_hybrid
+losses:
+  - dice_ce
+max_epochs: 5
+num_folds: 1
+debug: true
+
+# Validation ENABLED — cloud GPUs have sufficient VRAM
+val_interval: 1
+
+# Data subsetting (belt-and-suspenders with 4-vol split file, RC10)
+max_train_volumes: 2
+max_val_volumes: 2
+splits_file: configs/splits/smoke_test_1fold_4vol.json
+
+# DVC provenance
+data:
+  dvc_commit: HEAD
+
+architecture_params:
+  backbone: vit_32l
+  input_size: 1008
+  embed_dim: 1024
+  pretrained: false
