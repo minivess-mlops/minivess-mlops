@@ -106,19 +106,17 @@
       <acceptance>ALL vars show OK. Zero MISSING.</acceptance>
     </task>
 
-    <task id="T0.5.2" name="Enable GCP APIs (idempotent)">
+    <task id="T0.5.2" name="Verify GCP APIs enabled (read-only check)">
+      <description>
+        API enablement is done BY PULUMI (gcp.projects.Service resources in __main__.py).
+        This task only VERIFIES, never creates. NEVER run gcloud services enable manually.
+      </description>
       <commands>
-        <cmd>gcloud services enable \
-          compute.googleapis.com \
-          storage.googleapis.com \
-          iam.googleapis.com \
-          run.googleapis.com \
-          sqladmin.googleapis.com \
-          artifactregistry.googleapis.com \
-          secretmanager.googleapis.com \
-          --project=minivess-mlops</cmd>
+        <cmd>gcloud services list --enabled --project=minivess-mlops --format="value(name)" | \
+          grep -c -E "compute|storage|iam|run|sqladmin|artifactregistry|secretmanager" || \
+          echo "APIs will be enabled by pulumi up in Phase 1"</cmd>
       </commands>
-      <acceptance>All APIs enabled (idempotent — safe to run multiple times).</acceptance>
+      <acceptance>APIs will be enabled by Pulumi. This is a read-only verification.</acceptance>
     </task>
 
     <task id="T0.5.3" name="Verify GPU quota">
@@ -209,31 +207,36 @@
     </description>
 
     <task id="T1.5.1" name="Build MLflow Docker image for Cloud Run">
+      <description>
+        Use EXISTING Dockerfile.mlflow-gcp (NOT Dockerfile.mlflow).
+        The GCP variant includes google-cloud-storage for GCS artifact signing.
+      </description>
       <commands>
-        <cmd>docker build -t minivess-mlflow:v3.10.0 -f deployment/docker/Dockerfile.mlflow .</cmd>
-        <cmd># If Dockerfile.mlflow doesn't exist, create it:
-        # FROM ghcr.io/mlflow/mlflow:v3.10.0
-        # RUN pip install psycopg2-binary google-cloud-storage boto3</cmd>
+        <cmd>docker build -t minivess-mlflow:v3.10.0 -f deployment/docker/Dockerfile.mlflow-gcp .</cmd>
       </commands>
-      <acceptance>Image built with psycopg2 + GCS support.</acceptance>
+      <acceptance>Image built with psycopg2 + google-cloud-storage + boto3.</acceptance>
     </task>
 
     <task id="T1.5.2" name="Push MLflow image to GAR" blocked-by="T1.5.1">
       <commands>
-        <cmd>GAR_REPO=$(pulumi stack output docker_registry)</cmd>
+        <cmd>GAR_REPO=$(cd deployment/pulumi/gcp &amp;&amp; pulumi stack output docker_registry)</cmd>
         <cmd>docker tag minivess-mlflow:v3.10.0 ${GAR_REPO}/mlflow:v3.10.0</cmd>
         <cmd>docker push ${GAR_REPO}/mlflow:v3.10.0</cmd>
       </commands>
     </task>
 
-    <task id="T1.5.3" name="Un-defer Cloud Run in Pulumi and redeploy" blocked-by="T1.5.2">
+    <task id="T1.5.3" name="Enable Cloud Run via Pulumi config and redeploy" blocked-by="T1.5.2">
       <description>
-        Set _CLOUD_RUN_DEFERRED = False in __main__.py.
-        Then pulumi up to deploy Cloud Run MLflow with the GAR image.
+        Enable Cloud Run MLflow via Pulumi config flag (NOT sed on Python source).
+        Also update __main__.py to use GAR image (not ghcr.io base + pip install).
+        NEVER use sed to modify Python source (CLAUDE.md Rule #16).
       </description>
       <commands>
-        <cmd>sed -i 's/_CLOUD_RUN_DEFERRED = True/_CLOUD_RUN_DEFERRED = False/' deployment/pulumi/gcp/__main__.py</cmd>
-        <cmd>cd deployment/pulumi/gcp &amp;&amp; pulumi up -y</cmd>
+        <cmd>cd deployment/pulumi/gcp</cmd>
+        <cmd>pulumi config set minivess-gcp:enable_cloud_run true</cmd>
+        <cmd># Update __main__.py: replace _CLOUD_RUN_DEFERRED with config.get_bool()
+        # and update Cloud Run image to GAR mlflow image (not ghcr.io + pip install)</cmd>
+        <cmd>pulumi up -y</cmd>
         <cmd>MLFLOW_URL=$(pulumi stack output mlflow_url)</cmd>
         <cmd>curl -s "$MLFLOW_URL/health"</cmd>
       </commands>
@@ -380,18 +383,21 @@ for e in d['experiments']:
       <acceptance>Checkpoint .pth files and config artifacts present.</acceptance>
     </task>
 
-    <task id="T4.2" name="Sync mlruns to local" blocked-by="T4.1">
+    <task id="T4.2" name="Sync mlruns to local via CloudSyncer" blocked-by="T4.1">
+      <description>
+        Use existing CloudSyncer module (src/minivess/compute/mlruns_sync.py)
+        instead of raw gsutil. Excludes *.pth, *.onnx, *.ckpt by default.
+      </description>
       <commands>
-        <cmd>mkdir -p mlruns/cloud</cmd>
-        <cmd>gsutil -m rsync -r -x ".*\.pth$|.*\.onnx$" gs://minivess-mlops-mlflow-artifacts/ mlruns/cloud/</cmd>
+        <cmd>uv run python -c "
+from pathlib import Path
+from minivess.compute.mlruns_sync import CloudSyncer
+syncer = CloudSyncer(provider='gcs')
+cmd = syncer.build_command('gs://minivess-mlops-mlflow-artifacts/', Path('mlruns/cloud'))
+import subprocess; subprocess.run(cmd, check=True)
+"</cmd>
         <cmd>ls mlruns/cloud/</cmd>
       </commands>
-      <note>
-        Excludes large .pth and .onnx files to keep sync fast.
-        Full checkpoint sync: remove -x flag.
-        MLflow directory structure from Cloud Run artifact proxy may differ from
-        local mlruns/ structure — verify compatibility.
-      </note>
       <acceptance>mlruns/cloud/ has experiment directories with metrics and params.</acceptance>
     </task>
   </phase>
@@ -454,12 +460,50 @@ for e in d['experiments']:
       </tdd-spec>
     </task>
 
-    <task id="T6.2" name="Add environment priority to CLAUDE.md">
+    <task id="T6.2" name="SkyPilot + Pulumi bypass enforcement (pre-commit + AST tests)">
       <description>
-        Add to root CLAUDE.md and deployment/CLAUDE.md:
-        "Environment Priority: GCP prod/staging = PRIMARY. RunPod dev = SECONDARY.
-        NEVER prioritize RunPod over GCP. NEVER ask which env to test."
+        Create guards that BLOCK any attempt to bypass SkyPilot or Pulumi.
+        These run in pre-commit and in the staging test suite.
       </description>
+      <files>
+        <file path="tests/v2/unit/deployment/test_no_manual_infra.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          --- Pre-commit hook: "No manual gcloud resource creation" ---
+          Scan staged .py/.sh/.yaml files for banned patterns:
+            "gcloud sql instances create", "gcloud run deploy",
+            "gcloud compute instances create", "gsutil mb",
+            "gcloud artifacts repositories create"
+          Allow: gcloud read-only (list, describe, auth)
+
+          --- AST tests: SkyPilot is sole compute path ---
+          test_no_subprocess_ssh_to_cloud: AST scan all .py files for
+            subprocess.run(["ssh"...]) or os.system("ssh") outside of
+            SkyPilot modules → FAIL
+          test_no_direct_gcloud_compute_create: scan scripts/ for
+            "gcloud compute instances create" → FAIL
+          test_skypilot_yamls_have_image_id: all deployment/skypilot/*.yaml
+            MUST have image_id: docker:... (no bare VM)
+          test_pulumi_manages_all_gcp_services: verify __main__.py has
+            gcp.projects.Service for all required APIs
+          test_no_manual_bucket_creation: scan for "gsutil mb" → FAIL
+        </red>
+      </tdd-spec>
+    </task>
+
+    <task id="T6.3" name="Add environment priority to CLAUDE.md + pre-commit">
+      <description>
+        1. Add to root CLAUDE.md: "Environment Priority" section
+        2. Add to deployment/CLAUDE.md: reinforce GCP=PRIMARY, RunPod=SECONDARY
+        3. Add SkyPilot/Pulumi mandate to "What AI Must NEVER Do" section
+        4. Add pre-commit hook: "No manual gcloud resource creation"
+      </description>
+      <files>
+        <file path="CLAUDE.md" action="edit" />
+        <file path="deployment/CLAUDE.md" action="edit" />
+        <file path=".pre-commit-config.yaml" action="edit" />
+      </files>
     </task>
   </phase>
 
