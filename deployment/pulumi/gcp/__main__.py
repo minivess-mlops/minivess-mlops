@@ -217,7 +217,8 @@ if enable_cloud_run:
             "containers": [
                 {
                     "image": mlflow_image,
-                    "ports": [{"container_port": 5000, "name": "http1"}],
+                    # Cloud Run v2: single port object (not a list)
+                    "ports": {"container_port": 5000, "name": "http1"},
                     "envs": [
                         {
                             "name": "MLFLOW_BACKEND_STORE_URI",
@@ -240,14 +241,14 @@ if enable_cloud_run:
                         },
                     ],
                     "resources": {
-                        "limits": {"cpu": "1", "memory": "2Gi"},
                         "cpu_idle": True,
+                        "limits": {"cpu": "1", "memory": "2Gi"},
                         "startup_cpu_boost": True,
                     },
                     "startup_probe": {
-                        "tcp_socket": {"port": 5000},
                         "failure_threshold": 1,
                         "period_seconds": 240,
+                        "tcp_socket": {"port": 5000},
                         "timeout_seconds": 240,
                     },
                 },
