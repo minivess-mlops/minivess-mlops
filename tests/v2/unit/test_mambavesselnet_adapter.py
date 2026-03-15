@@ -7,20 +7,8 @@ without mamba-ssm installed. GPU tests are in tests/gpu_instance/.
 from __future__ import annotations
 
 import torch
-import torch.nn as nn
 
-
-class MockMamba(nn.Module):
-    """CPU stub for mamba_ssm.Mamba — reused from test_mambavesselnet_blocks."""
-
-    def __init__(
-        self, d_model: int, d_state: int = 16, d_conv: int = 4, expand: int = 2
-    ) -> None:
-        super().__init__()
-        self.proj = nn.Linear(d_model, d_model)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.proj(x)
+from tests.v2.unit.conftest import MockMamba
 
 
 class TestMambaVesselNetAdapterInterface:
@@ -86,8 +74,7 @@ class TestMambaVesselNetAdapterInterface:
 class TestMambaVesselNetAdapterForward:
     """T06: forward() must return SegmentationOutput with correct shapes."""
 
-    def test_forward_output_shape(self) -> None:
-        from minivess.adapters.base import SegmentationOutput
+    def _make_adapter(self) -> object:
         from minivess.adapters.mambavesselnet import MambaVesselNetAdapter
         from minivess.config.models import ModelConfig, ModelFamily
 
@@ -97,27 +84,23 @@ class TestMambaVesselNetAdapterForward:
             in_channels=1,
             out_channels=2,
         )
-        adapter = MambaVesselNetAdapter(config, mamba_cls=MockMamba)
+        return MambaVesselNetAdapter(config, mamba_cls=MockMamba)
+
+    def test_forward_output_shape(self) -> None:
+        from minivess.adapters.base import SegmentationOutput
+
+        adapter = self._make_adapter()
         x = torch.randn(1, 1, 32, 32, 32)
-        out = adapter(x)
+        out = adapter(x)  # type: ignore[operator]
         assert isinstance(out, SegmentationOutput)
         assert out.logits.shape == (1, 2, 32, 32, 32)
         assert out.prediction.shape == (1, 2, 32, 32, 32)
 
     def test_forward_prediction_sums_to_one(self) -> None:
         """Softmax predictions must sum to 1 over channel dim."""
-        from minivess.adapters.mambavesselnet import MambaVesselNetAdapter
-        from minivess.config.models import ModelConfig, ModelFamily
-
-        config = ModelConfig(
-            family=ModelFamily.MAMBAVESSELNET,
-            name="mambavesselnet_test",
-            in_channels=1,
-            out_channels=2,
-        )
-        adapter = MambaVesselNetAdapter(config, mamba_cls=MockMamba)
+        adapter = self._make_adapter()
         x = torch.randn(1, 1, 32, 32, 32)
-        out = adapter(x)
+        out = adapter(x)  # type: ignore[operator]
         prob_sum = out.prediction.sum(dim=1)  # sum over class dim → should be ~1
         assert torch.allclose(prob_sum, torch.ones_like(prob_sum), atol=1e-5)
 

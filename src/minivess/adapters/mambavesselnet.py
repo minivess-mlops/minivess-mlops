@@ -415,18 +415,20 @@ class MambaVesselNetAdapter(ModelAdapter):
         self.config = config
         arch = config.architecture_params
 
-        feature_dims: tuple[int, ...] = tuple(arch.get("feature_dims", _FEATURE_DIMS))
-        d_state: int = arch.get("d_state", 16)
-        d_conv: int = arch.get("d_conv", 4)
-        expand: int = arch.get("expand", 2)
+        self._feature_dims: tuple[int, ...] = tuple(
+            arch.get("feature_dims", _FEATURE_DIMS)
+        )
+        self._d_state: int = arch.get("d_state", 16)
+        self._d_conv: int = arch.get("d_conv", 4)
+        self._expand: int = arch.get("expand", 2)
 
         self.net = MambaVesselNetBackbone(
             in_chans=config.in_channels,
             out_chans=config.out_channels,
-            feature_dims=feature_dims,
-            d_state=d_state,
-            d_conv=d_conv,
-            expand=expand,
+            feature_dims=self._feature_dims,
+            d_state=self._d_state,
+            d_conv=self._d_conv,
+            expand=self._expand,
             mamba_cls=mamba_cls,
         )
 
@@ -446,7 +448,12 @@ class MambaVesselNetAdapter(ModelAdapter):
         return self._build_output(logits, "mambavesselnet")
 
     def get_config(self) -> AdapterConfigInfo:
-        return self._build_config()
+        return self._build_config(
+            feature_dims=list(self._feature_dims),
+            d_state=self._d_state,
+            d_conv=self._d_conv,
+            expand=self._expand,
+        )
 
     def get_eval_roi_size(self) -> tuple[int, int, int]:
         """Return (64, 64, 64) — matches training patch divisor of 16 (D05)."""
