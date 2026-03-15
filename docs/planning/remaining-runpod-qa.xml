@@ -1,0 +1,547 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Remaining RunPod QA Plan — SAM3 AMP isolation, BF16 dtype, cloud sync, cost estimation
+  Created: 2026-03-15
+  Branch: qa/remaining-runpod-qa
+  Skill: self-learning-iterative-coder + ralph-loop
+  Budget: $0.75–$1.50 (RunPod RTX 4090 @ $0.69/hr)
+  Session budget: ~19 TDD iterations across 2 sessions
+-->
+<plan version="1.0" name="remaining-runpod-qa">
+  <metadata>
+    <created>2026-03-15</created>
+    <branch>qa/remaining-runpod-qa</branch>
+    <prerequisite-issues>
+      <issue number="712" title="Make SAM3 encoder dtype configurable" priority="P3" />
+      <issue number="716" title="RunPod Network Volume → local mlruns sync" priority="P1" />
+      <issue number="717" title="Dynamic GPU cost estimator" priority="P1" />
+      <issue number="686" title="SkyPilot spot checkpointing with MOUNT_CACHED" priority="P1" />
+      <issue number="683" title="Infrastructure timing + cost analysis pipeline" priority="P1" status="T3.1 extends existing infrastructure_timing.py" />
+      <issue number="690" title="Makefile/Justfile RunPod dev targets" priority="P2" status="T4.2 adds sync-mlruns target" />
+    </prerequisite-issues>
+    <reviewer-agents>
+      <agent name="dtype-safety" scope="src/minivess/adapters/" focus="BF16/FP16 dtype correctness, torch.cuda.is_bf16_supported() usage, no hardcoded torch.float16" />
+      <agent name="cloud-config" scope="configs/ deployment/skypilot/" focus="Zero hardcoded cloud/GPU/registry values, all config via Hydra groups" />
+      <agent name="test-coverage" scope="tests/" focus="No ghost completions, all assertions meaningful, proper pytest markers" />
+    </reviewer-agents>
+    <context>
+      SAM3 NaN investigation H1 CONFIRMED: val_loss=NaN was a sentinel (validation never ran).
+      Run 2 (AMP OFF) produced all-finite metrics: val_loss=0.7254, train_loss=0.725, val_dice=0.301.
+      Run 2 was 3/5 epochs at last check (2026-03-15 03:20 UTC). Should be finished.
+      Next: Phase 3 (re-enable AMP) to confirm AMP is the root cause, then BF16 dtype fix.
+    </context>
+  </metadata>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 0: Collect Run 2 Results + Pre-flight (LOCAL, $0, ~15 min)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P0" name="Collect Run 2 Results and Pre-flight" environment="local" cost="$0" effort="15min">
+    <description>
+      Collect Run 2 results from cloud MLflow (sam3_hybrid, AMP OFF, RTX 4090).
+      Run 2 started at 02:14 UTC, 22 min/epoch × 5 epochs = ~110 min.
+      Expected completion: ~04:04 UTC. Should be done by now.
+      Update audit trail in sam3-nan-loss-fix.md with final metrics.
+    </description>
+
+    <task id="T0.1" name="Collect Run 2 final metrics from cloud MLflow" priority="P0" estimated-iterations="1">
+      <description>
+        Query cloud MLflow for the sam3_hybrid_cloud Run 2 results.
+        Expected: 5 epochs all finite, val_loss decreasing, val_dice improving.
+        Update docs/planning/sam3-nan-loss-fix.md audit trail table.
+      </description>
+      <files>
+        <file path="docs/planning/sam3-nan-loss-fix.md" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>No tests — this is data collection and documentation update.</red>
+        <green>
+          Query MLflow via ralph_monitor or direct API.
+          Record: final train_loss, val_loss, val_dice for all 5 epochs.
+          Update Run 2 row in audit trail. Add Run 3 planned row.
+        </green>
+      </tdd-spec>
+      <acceptance>
+        Run 2 audit trail row has all 5 epoch metrics.
+        Run 3 row exists as planned with AMP ON config.
+      </acceptance>
+    </task>
+
+    <task id="T0.2" name="Verify cloud credentials and RunPod balance" priority="P0" estimated-iterations="1">
+      <description>
+        Pre-flight check before launching Run 3:
+        - sky check runpod → enabled
+        - RunPod API balance check (user has $11.40)
+        - MLflow health check
+        - Docker image exists in registry
+      </description>
+      <files>
+        <file path="scripts/validate_smoke_test_env.py" action="review" />
+      </files>
+      <tdd-spec>
+        <red>No tests — pre-flight validation script already exists.</red>
+        <green>Run validate_smoke_test_env.py. Fix any failures.</green>
+      </tdd-spec>
+      <acceptance>
+        All pre-flight checks pass. RunPod balance sufficient for 3+ runs.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 1: SAM3 BF16 Dtype Fix (LOCAL, $0, ~5 TDD iterations)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P1" name="SAM3 BF16 Dtype Auto-Detection" environment="local" cost="$0" effort="45min">
+    <description>
+      Implement auto-detection of BF16 support per the feedback memory and metalearning doc.
+      SAM3 HuggingFace uses torch.bfloat16; our code hardcodes torch.float16 (written for
+      RTX 2070 Super / Turing which lacks BF16). On Ampere+ GPUs (A100, RTX 3090/4090),
+      BF16 is strictly better: same exponent range as FP32, no 65504 overflow risk.
+      This is issue #712.
+    </description>
+
+    <task id="T1.1" name="Write BF16 auto-detection tests" priority="P1" estimated-iterations="2">
+      <description>
+        Test that sam3_backbone.py selects BF16 on Ampere+ GPUs and falls back to FP16 on Turing.
+        Mock torch.cuda.is_bf16_supported() for both paths.
+      </description>
+      <files>
+        <file path="tests/v2/unit/adapters/test_sam3_dtype_selection.py" action="create" />
+        <file path="src/minivess/adapters/sam3_backbone.py" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>
+          test_bf16_selected_when_supported: mock is_bf16_supported()=True → torch.bfloat16
+          test_fp16_fallback_when_bf16_unsupported: mock is_bf16_supported()=False → torch.float16
+          test_dtype_logged_to_mlflow: verify dtype choice is logged as a param
+          test_encoder_output_dtype_matches: encoder output dtype matches selected dtype
+        </red>
+        <green>
+          Add _select_encoder_dtype() function to sam3_backbone.py.
+          Replace hardcoded torch.float16 with _select_encoder_dtype() call.
+          Log selected dtype. Apply to Sam3Model.from_pretrained(torch_dtype=...).
+        </green>
+      </tdd-spec>
+      <acceptance>
+        sam3_backbone.py uses torch.bfloat16 when torch.cuda.is_bf16_supported() is True.
+        FP16 is fallback only. Dtype selection logged to MLflow.
+        All 4 tests pass. Pre-commit hooks pass.
+      </acceptance>
+      <issue number="712" action="close" reason="BF16 auto-detection implemented with Turing fallback" />
+    </task>
+
+    <task id="T1.2" name="Update smoke test configs for BF16" priority="P2" estimated-iterations="1" blocked-by="T1.1">
+      <description>
+        Update cloud smoke test configs to explicitly set encoder_dtype: auto (default).
+        Add encoder_dtype field to model_profiles YAML for documentation.
+        Update adapters/CLAUDE.md TODO to mark as DONE.
+      </description>
+      <files>
+        <file path="configs/experiment/smoke_sam3_hybrid_cloud.yaml" action="edit" />
+        <file path="configs/model_profiles/sam3_hybrid.yaml" action="edit" />
+        <file path="src/minivess/adapters/CLAUDE.md" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>No new tests — config + documentation updates.</red>
+        <green>
+          Add encoder_dtype: auto to smoke configs.
+          Update CLAUDE.md BF16 section: mark TODO as DONE, add verification date.
+        </green>
+      </tdd-spec>
+      <acceptance>
+        CLAUDE.md BF16 TODO marked as DONE with implementation date.
+        Config files reference encoder_dtype: auto.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 2: AMP Isolation — Run 3 (CLOUD, ~$0.25, 1 ralph-loop iteration)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P2" name="AMP Isolation — Run 3 on RunPod" environment="cloud" cost="$0.25" effort="30min">
+    <description>
+      Re-enable AMP (mixed_precision: true) with the BF16 dtype fix from P1.
+      If val_loss is finite → AMP works with BF16 encoder (FP16 was the problem).
+      If val_loss is NaN → AMP + 3D operations is the root cause (MONAI #4243).
+      This is the systematic Phase 3 from sam3-nan-loss-fix.md.
+      Use ralph-loop for autonomous monitoring.
+    </description>
+
+    <task id="T2.1" name="Create AMP+BF16 smoke test config" priority="P0" estimated-iterations="1" blocked-by="T1.1">
+      <description>
+        Create smoke_sam3_hybrid_amp_bf16.yaml: same as smoke_sam3_hybrid_cloud.yaml
+        but with mixed_precision: true. The BF16 dtype fix from T1.1 will be active.
+        This is Run 3 in the audit trail.
+      </description>
+      <files>
+        <file path="configs/experiment/smoke_sam3_hybrid_amp_bf16.yaml" action="create" />
+      </files>
+      <tdd-spec>
+        <red>No tests — config file creation.</red>
+        <green>
+          Copy smoke_sam3_hybrid_cloud.yaml → smoke_sam3_hybrid_amp_bf16.yaml.
+          Change mixed_precision: true. Add comment explaining Phase 3 test.
+          Keep val_interval: 1, max_epochs: 5.
+        </green>
+      </tdd-spec>
+      <acceptance>
+        Config file exists with mixed_precision: true and clear comments.
+      </acceptance>
+    </task>
+
+    <task id="T2.2" name="Launch Run 3 via ralph-loop and monitor" priority="P0" estimated-iterations="1" blocked-by="T2.1">
+      <description>
+        Launch sam3_hybrid with AMP+BF16 on RunPod RTX 4090 using ralph-loop.
+        Monitor: val_loss finite? NaN guard fires? VRAM usage?
+        Expected: ~22 min/epoch × 5 = ~110 min, ~$1.25.
+        Record results in audit trail.
+      </description>
+      <files>
+        <file path="docs/planning/sam3-nan-loss-fix.md" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>No unit tests — cloud execution + monitoring.</red>
+        <green>
+          Use ralph-loop: /ralph-loop --model sam3_hybrid --cloud runpod
+          Monitor every 30s. On completion, record all 5 epoch metrics.
+          Update Run 3 row in audit trail table.
+          Decision tree:
+            val_loss finite → AMP works with BF16 → close investigation
+            val_loss NaN → AMP + 3D is root cause → proceed to T2.3
+        </green>
+      </tdd-spec>
+      <acceptance>
+        Run 3 completed. Audit trail updated with all metrics.
+        Root cause determination: AMP+BF16 works OR AMP+3D confirmed broken.
+      </acceptance>
+    </task>
+
+    <task id="T2.3" name="Implement AMP-off-for-validation if AMP fails" priority="P1" estimated-iterations="2" blocked-by="T2.2">
+      <description>
+        CONDITIONAL: Only if Run 3 shows val_loss=NaN (AMP + 3D confirmed broken).
+        Implement separate AMP policy: AMP ON for training, AMP OFF for validation.
+        This is Phase 5 Option A from sam3-nan-loss-fix.md.
+      </description>
+      <files>
+        <file path="tests/v2/unit/pipeline/test_trainer_amp_policy.py" action="create" />
+        <file path="src/minivess/pipeline/trainer.py" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>
+          test_amp_disabled_during_validation: verify autocast disabled in validate_epoch
+          test_amp_enabled_during_training: verify autocast enabled in train_epoch
+          test_amp_policy_configurable: verify mixed_precision_val config key
+        </red>
+        <green>
+          Add mixed_precision_val: bool to TrainingConfig (default: False for SAM3 models).
+          In trainer.py validate_epoch(): use autocast(enabled=self.config.mixed_precision_val).
+          In trainer.py train_epoch(): unchanged (uses self.config.mixed_precision).
+        </green>
+      </tdd-spec>
+      <acceptance>
+        Validation runs without AMP even when training uses AMP.
+        All tests pass. sam3_hybrid configs set mixed_precision_val: false.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 3: Dynamic Cost Estimator (LOCAL, $0, ~4 TDD iterations)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P3" name="Dynamic GPU Cost Estimator" environment="local" cost="$0" effort="40min">
+    <description>
+      Build a cost estimator that uses measured epoch times from MLflow to predict
+      total job cost. This addresses #717 and feeds into the FinOps pipeline (#683).
+      Inputs: epoch_time_seconds (from MLflow), gpu_hourly_rate (from model_profiles),
+      max_epochs, num_folds. Output: estimated_total_cost, cost_per_epoch.
+    </description>
+
+    <task id="T3.1" name="Add epoch-0 cost prediction to infrastructure_timing" priority="P1" estimated-iterations="2">
+      <description>
+        LIBRARY-FIRST: infrastructure_timing.py already has compute_cost_analysis(),
+        log_cost_analysis(), and get_hourly_rate_usd(). Do NOT create a new module.
+        Add estimate_cost_from_first_epoch() to the existing module: after epoch 0
+        completes, extrapolate total cost from measured epoch time.
+        Hook into trainer.py to call after epoch 0 and at training end.
+      </description>
+      <files>
+        <file path="tests/v2/unit/observability/test_infrastructure_timing_prediction.py" action="create" />
+        <file path="src/minivess/observability/infrastructure_timing.py" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>
+          test_predict_cost_from_epoch_time: 22 min/epoch × 5 epochs × $0.69/hr = $1.27
+          test_predict_cost_with_folds: 22 min × 5 epochs × 3 folds × $0.69/hr = $3.80
+          test_predict_includes_setup_overhead: add 5 min setup overhead per job
+          test_predict_zero_when_local: no cost for local runs (hourly_rate=0)
+          test_actual_cost_at_end: uses real elapsed time, not prediction
+        </red>
+        <green>
+          Add estimate_cost_from_first_epoch(epoch_seconds, max_epochs, num_folds,
+            hourly_rate, setup_minutes=5) to infrastructure_timing.py.
+          Add log_predicted_cost() that calls existing log_cost_analysis() pattern.
+          Hook into trainer.py after epoch 0 and at training end.
+        </green>
+      </tdd-spec>
+      <acceptance>
+        Cost prediction correct to 2 decimal places.
+        Uses existing infrastructure_timing.py — no new module created.
+        estimated_total_cost logged to MLflow after epoch 0.
+        actual_total_cost logged at training completion.
+        All 5 tests pass.
+      </acceptance>
+      <issue number="717" action="close" reason="Dynamic cost prediction added to infrastructure_timing.py" />
+      <issue number="683" action="relates" />
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 4: MLruns Sync Workflow (LOCAL, $0, ~4 TDD iterations)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P4" name="RunPod Network Volume → Local mlruns Sync" environment="local" cost="$0" effort="45min">
+    <description>
+      Build a sync workflow to pull cloud MLflow run data (mlruns/) from RunPod
+      Network Volume to local machine for analysis. This addresses #716.
+      Uses rsync over SSH (SkyPilot provides SSH access to running clusters).
+    </description>
+
+    <task id="T4.1" name="Implement mlruns sync script" priority="P1" estimated-iterations="2">
+      <description>
+        Create a sync script that pulls mlruns/ from a running or stopped SkyPilot
+        cluster to the local machine. Uses sky cluster ssh + rsync.
+        Must handle: running cluster (direct rsync), stopped cluster (sky start first),
+        network volume (mount path from SkyPilot YAML).
+      </description>
+      <files>
+        <file path="tests/v2/unit/compute/test_mlruns_sync.py" action="create" />
+        <file path="src/minivess/compute/mlruns_sync.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          test_sync_command_generation: verify rsync command is correct
+          test_sync_excludes_large_artifacts: exclude .onnx, checkpoints by default
+          test_sync_creates_local_dir: target dir created if missing
+          test_sync_dry_run: --dry-run flag shows what would be transferred
+          test_sync_incremental: only new/changed files transferred
+        </red>
+        <green>
+          Create MLrunsSyncer class.
+          sync(cluster_name, remote_mlruns_path, local_mlruns_path, dry_run=False).
+          Uses subprocess to call rsync via sky cluster ssh.
+          Exclude patterns: *.onnx, *.pth, *.ckpt (configurable).
+        </green>
+      </tdd-spec>
+      <acceptance>
+        Sync command generates correct rsync invocation.
+        Excludes large artifacts by default.
+        Dry-run mode works without transferring data.
+      </acceptance>
+      <issue number="716" action="close" reason="mlruns sync workflow implemented" />
+    </task>
+
+    <task id="T4.2" name="Add Makefile/Justfile sync targets + .env.example vars" priority="P2" estimated-iterations="1" blocked-by="T4.1">
+      <description>
+        Add make sync-mlruns and just sync-mlruns targets.
+        Usage: make sync-mlruns CLUSTER=minivess-smoke-test
+        Rule #22: Add SKYPILOT_CLUSTER and MLFLOW_ARTIFACT_ROOT to .env.example FIRST.
+      </description>
+      <files>
+        <file path=".env.example" action="edit" />
+        <file path="Makefile" action="edit" />
+        <file path="justfile" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>No unit tests — Makefile targets + env var registration.</red>
+        <green>
+          Add to .env.example (Rule #22 — single source of truth):
+            SKYPILOT_CLUSTER=minivess-smoke-test
+            MLFLOW_ARTIFACT_ROOT=/checkpoints
+          Add sync-mlruns target to both Makefile and justfile.
+          Default CLUSTER from ${SKYPILOT_CLUSTER:-minivess-smoke-test}.
+          Default remote path from ${MLFLOW_ARTIFACT_ROOT:-/checkpoints}.
+        </green>
+      </tdd-spec>
+      <acceptance>
+        SKYPILOT_CLUSTER and MLFLOW_ARTIFACT_ROOT in .env.example.
+        make sync-mlruns CLUSTER=name works.
+        just sync-mlruns name works.
+      </acceptance>
+      <issue number="690" action="relates" />
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 5: Spot Checkpointing with MOUNT_CACHED (LOCAL, $0, ~4 TDD iterations)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P5" name="SkyPilot Spot Checkpointing" environment="local" cost="$0" effort="45min">
+    <description>
+      Implement SkyPilot MOUNT_CACHED for automatic checkpoint persistence across
+      spot preemptions. When a spot instance is preempted, checkpoints on the mounted
+      volume survive. On restart, training resumes from the latest checkpoint.
+      This addresses #686.
+    </description>
+
+    <task id="T5.1" name="Implement checkpoint resume logic" priority="P1" estimated-iterations="2">
+      <description>
+        Add checkpoint discovery and resume logic to train_flow.py.
+        On startup, check if a checkpoint exists at the mounted path.
+        If yes, load it and resume training from that epoch.
+        Integrates with the atomic checkpoint writes already in checkpoint_utils.py.
+      </description>
+      <files>
+        <file path="tests/v2/unit/pipeline/test_checkpoint_resume.py" action="create" />
+        <file path="src/minivess/pipeline/checkpoint_utils.py" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>
+          test_resume_from_checkpoint: finds latest checkpoint, returns epoch number
+          test_no_checkpoint_starts_fresh: no checkpoint → epoch 0
+          test_resume_loads_model_state: model weights restored from checkpoint
+          test_resume_loads_optimizer_state: optimizer state restored
+          test_resume_integrity_check: SHA256 verified before loading
+        </red>
+        <green>
+          Add find_latest_checkpoint(checkpoint_dir) → (path, epoch) or None.
+          Add resume_from_checkpoint(model, optimizer, checkpoint_path) → epoch.
+          Verify SHA256 integrity before loading (uses existing atomic checkpoint infra).
+          Integrate into train_flow.py training loop.
+        </green>
+      </tdd-spec>
+      <acceptance>
+        Training resumes from latest valid checkpoint.
+        Corrupted checkpoints (bad SHA256) are skipped with warning.
+        Fresh start when no checkpoint exists.
+      </acceptance>
+      <issue number="686" action="close" reason="Spot checkpoint resume implemented with SHA256 integrity" />
+    </task>
+
+    <task id="T5.2" name="Add MOUNT_CACHED to all training SkyPilot YAMLs" priority="P1" estimated-iterations="1" blocked-by="T5.1">
+      <description>
+        Update ALL SkyPilot training YAMLs to use file_mounts with MOUNT_CACHED mode
+        for the checkpoint directory. This persists checkpoints across preemptions.
+        Applies to every YAML that runs training (including HPO).
+      </description>
+      <files>
+        <file path="deployment/skypilot/smoke_test_gpu.yaml" action="edit" />
+        <file path="deployment/skypilot/smoke_test_lambda.yaml" action="edit" />
+        <file path="deployment/skypilot/smoke_test_gcp.yaml" action="edit" />
+        <file path="deployment/skypilot/train_production.yaml" action="edit" />
+        <file path="deployment/skypilot/train_hpo.yaml" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>No unit tests — YAML config changes.</red>
+        <green>
+          Add file_mounts section with MOUNT_CACHED for /checkpoints.
+          Add run: section logic to check for existing checkpoint on startup.
+        </green>
+      </tdd-spec>
+      <acceptance>
+        SkyPilot YAML includes MOUNT_CACHED for checkpoint dir.
+        run: script checks for existing checkpoint before training.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 6: Cloud Verification Run (CLOUD, ~$0.50, ralph-loop monitored)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P6" name="Verification Run — Full Stack on RunPod" environment="cloud" cost="$0.50" effort="30min" blocked-by="P1,P2,P3,P5">
+    <description>
+      Final verification run with all fixes integrated:
+      - BF16 auto-detection (P1)
+      - Cost estimation logged (P3)
+      - Spot checkpoint resume (P5)
+      Run sam3_hybrid with AMP ON + BF16 encoder on RunPod RTX 4090.
+      Monitored via ralph-loop.
+    </description>
+
+    <task id="T6.1" name="Launch verification run via ralph-loop" priority="P1" estimated-iterations="1" blocked-by="T5.2,T3.1">
+      <description>
+        Launch sam3_hybrid with full stack on RunPod.
+        Verify: BF16 dtype selected, cost estimate logged after epoch 0,
+        checkpoint written atomically, val_loss finite.
+      </description>
+      <files>
+        <file path="docs/planning/sam3-nan-loss-fix.md" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>No unit tests — cloud verification via ralph-loop.</red>
+        <green>
+          /ralph-loop --model sam3_hybrid --cloud runpod
+          Verify in MLflow:
+            - sys_encoder_dtype = "torch.bfloat16"
+            - estimated_total_cost param exists after epoch 0
+            - checkpoint files have .sha256 sidecar
+            - val_loss finite for all epochs
+          Update audit trail with Run 4 (or Run 3 if AMP test succeeded).
+        </green>
+      </tdd-spec>
+      <acceptance>
+        All verification criteria pass. Audit trail complete.
+        Investigation closed with confirmed root cause and fix.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       ISSUES
+       ══════════════════════════════════════════════════════════════════════ -->
+  <issues>
+    <!-- Issues to close when tasks complete -->
+    <close number="712" reason="T1.1: BF16 auto-detection implemented with Turing fallback" />
+    <close number="716" reason="T4.1: mlruns sync workflow implemented" />
+    <close number="717" reason="T3.1: Dynamic GPU cost estimator implemented" />
+    <close number="686" reason="T5.1: Spot checkpoint resume with SHA256 integrity" />
+
+    <!-- New issues to create if needed -->
+    <issue task="T2.3"
+           title="P1: Separate AMP policy for train vs validation (conditional)"
+           labels="training, P1-high, models"
+           condition="Only if Run 3 val_loss=NaN (AMP + 3D confirmed broken)" />
+  </issues>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       COST SUMMARY
+       ══════════════════════════════════════════════════════════════════════ -->
+  <cost-summary>
+    <item phase="P0" cost="$0.00">Collect Run 2 results (local)</item>
+    <item phase="P1" cost="$0.00">BF16 dtype fix (local TDD)</item>
+    <item phase="P2" cost="$0.25">AMP isolation Run 3 (~20 min RTX 4090)</item>
+    <item phase="P3" cost="$0.00">Cost estimator (local TDD)</item>
+    <item phase="P4" cost="$0.00">mlruns sync (local TDD)</item>
+    <item phase="P5" cost="$0.00">Spot checkpointing (local TDD)</item>
+    <item phase="P6" cost="$0.50">Verification run (~45 min RTX 4090)</item>
+    <total>$0.75 (happy path) — $1.50 (with retries)</total>
+  </cost-summary>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       EXECUTION NOTES
+       ══════════════════════════════════════════════════════════════════════ -->
+  <execution-notes>
+    <note>Session 1 (local): P0 + P1 + P3 + P4 + P5 (~14 TDD iterations)</note>
+    <note>Session 2 (cloud): P2 + P6 (~5 iterations + ralph-loop monitoring)</note>
+    <note>Total: ~19 iterations (within 20/session budget)</note>
+    <note>P2 is conditional: if Run 2 already proves AMP+FP16 works, skip to P6</note>
+    <note>T2.3 is conditional: only if Run 3 val_loss=NaN. If Run 3 succeeds, mark T2.3 NOT_APPLICABLE</note>
+    <note>Ralph-loop monitors cloud phases autonomously — user can be offline</note>
+    <note>All cloud execution uses Docker images via image_id: — no bare VM</note>
+    <note>BF16 fix (P1) should be committed and Docker image rebuilt before P2</note>
+  </execution-notes>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       RISKS
+       ══════════════════════════════════════════════════════════════════════ -->
+  <risks>
+    <risk id="R1" severity="MEDIUM" name="RunPod RTX 4090 sold out">
+      <description>RTX 4090 may not be available in preferred region.</description>
+      <mitigation>launch_smoke_test.py rotates through 17 regions. Fallback: A100 ($1.29/hr).</mitigation>
+    </risk>
+    <risk id="R2" severity="LOW" name="BF16 causes different numerical behavior">
+      <description>BF16 has lower mantissa precision than FP16 (7 vs 10 bits). Model may behave differently.</description>
+      <mitigation>Compare Run 2 (FP16, AMP OFF) vs Run 4 (BF16). Metrics should be similar within 5%.</mitigation>
+    </risk>
+    <risk id="R3" severity="MEDIUM" name="AMP + BF16 still produces NaN">
+      <description>Even with BF16 encoder, AMP autocast on 3D DynUNet may overflow.</description>
+      <mitigation>T2.3 implements separate AMP policy (train=ON, val=OFF) as fallback.</mitigation>
+    </risk>
+  </risks>
+</plan>
