@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan name="Production/Staging GCP Double-Check &amp; Code Review"
+      version="1.0"
+      created="2026-03-15"
+      status="ready-for-execution"
+      priority="P0"
+      skills="self-learning-iterative-coder,ralph-loop,simplify"
+      branch="feat/skypilot-runpod-gpu-offloading">
+
+  <context>
+    <summary>
+      Final polishing of GCP infrastructure + SkyPilot training pipeline.
+      Verify all models train on GCP spot, artifact upload works with multipart,
+      spot preemption recovery works, and code is production-grade.
+      ALL tasks in this plan must be completed in this PR — no deferrals.
+    </summary>
+
+    <open-issues>
+      <!-- P0 — Must close in this PR -->
+      <issue id="702" title="Pulumi GCP stack" status="DEPLOYED (GCS+CloudSQL+GAR+CloudRun)" />
+      <issue id="687" title="Create GCP account + Pulumi stack" status="DONE" />
+      <issue id="684" title="Fix MLflow artifact upload — multipart" status="IN PROGRESS (testing signing SA)" />
+      <issue id="681" title="Switch to Docker-compatible SkyPilot providers" status="IN PROGRESS" />
+      <issue id="680" title="SAM3 FP16 dtype RuntimeError" status="OPEN — must fix for sam3_topolora" />
+
+      <!-- P1 — Should close in this PR -->
+      <issue id="707" title="Atomic checkpoint writes for spot safety" status="OPEN" />
+      <issue id="686" title="Spot checkpointing MOUNT_CACHED + auto-resume" status="OPEN" />
+      <issue id="685" title="Evaluate GCP all-in-one architecture" status="DONE (chosen GCP)" />
+      <issue id="689" title="Fix MLflow env var on RunPod pods" status="OPEN" />
+      <issue id="710" title="sam3_hybrid val_loss=NaN on RTX 4090" status="OPEN" />
+
+      <!-- P2 — Create issues, implement if time permits -->
+      <issue id="708" title="Hydra cloud config groups" status="OPEN" />
+      <issue id="709" title="AWS + Azure recipe YAMLs" status="OPEN — skip for now" />
+    </open-issues>
+
+    <gcp-infrastructure deployed="2026-03-15">
+      <component name="GCS Buckets" status="DEPLOYED">
+        minivess-mlops-mlflow-artifacts, minivess-mlops-dvc-data, minivess-mlops-checkpoints
+      </component>
+      <component name="Cloud SQL" status="DEPLOYED" ip="35.228.142.81" tier="db-g1-small" />
+      <component name="Artifact Registry" status="DEPLOYED"
+                 url="europe-north1-docker.pkg.dev/minivess-mlops/minivess" public="true" />
+      <component name="Cloud Run MLflow" status="DEPLOYED"
+                 url="https://minivess-mlflow-615852151588.europe-north1.run.app"
+                 sa="mlflow-server@minivess-mlops.iam.gserviceaccount.com"
+                 version="3.10.0" />
+      <component name="IAM" status="DEPLOYED"
+                 sa="skypilot-training@minivess-mlops.iam.gserviceaccount.com" />
+      <component name="GPU Quota" status="APPROVED" gpus_all_regions="1" />
+    </gcp-infrastructure>
+
+    <gpu-pricing-analysis>
+      <!-- Absolute cost per training job (DynUNet 3-fold x 100 epochs, MiniVess 70 volumes) -->
+      <!-- Baseline: ~24 hrs on RTX 2070 Super (local GPU) -->
+      <gpu name="T4" vram="16 GB" spot_rate="$0.14/hr" speedup_vs_2070="~1.0x"
+           wall_time="~24 hr" total_cost="$3.36" notes="Cheapest, same speed as 2070S" />
+      <gpu name="L4" vram="24 GB" spot_rate="$0.22/hr" speedup_vs_2070="~1.5x"
+           wall_time="~16 hr" total_cost="$3.52" notes="Ada Lovelace arch, 50% faster, only $0.16 more" />
+      <gpu name="A100-40GB" vram="40 GB" spot_rate="$1.15/hr" speedup_vs_2070="~2.5x"
+           wall_time="~10 hr" total_cost="$11.50" notes="3.4x more expensive for 2.4x faster" />
+      <gpu name="H100" vram="80 GB" spot_rate="$2.25/hr" speedup_vs_2070="~4.0x"
+           wall_time="~6 hr" total_cost="$13.50" notes="4x more expensive for 4x faster" />
+
+      <!-- For SAM3 smoke tests (2 epochs, 1 fold, 4 volumes) -->
+      <gpu name="T4" smoke_time="~4 min" smoke_cost="$0.01" />
+      <gpu name="L4" smoke_time="~2.5 min" smoke_cost="$0.01" />
+      <gpu name="A100" smoke_time="~1.5 min" smoke_cost="$0.03" />
+
+      <!-- L4 is the sweet spot: 50% faster than T4 for only 57% more $/hr -->
+      <!-- Total cost is nearly identical ($3.52 vs $3.36) due to shorter wall time -->
+    </gpu-pricing-analysis>
+  </context>
+
+  <!-- ================================================================== -->
+  <!-- PHASE A: Verify E2E Pipeline Works (CRITICAL)                      -->
+  <!-- ================================================================== -->
+  <phase id="A" name="E2E Pipeline Verification" skill="ralph-loop">
+
+    <task id="A1" title="Verify MLflow artifact upload with GCS multipart" priority="P0">
+      <description>
+        THE critical test: 910 MB .pth checkpoint must upload successfully via
+        multipart upload through Cloud Run MLflow to GCS.
+        Cloud Run SA: mlflow-server@ with serviceAccountTokenCreator (signing).
+        Client: MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD=true.
+      </description>
+      <success-criteria>
+        - Zero 413 errors (Cloud Run body size limit)
+        - Zero 500 errors (signing/GCS issues)
+        - Zero "Failed to upload" warnings
+        - Checkpoint visible in GCS bucket via gsutil
+        - MLflow UI shows artifacts for the run
+      </success-criteria>
+    </task>
+
+    <task id="A2" title="Train sam3_vanilla on GCP T4 spot E2E" depends="A1" priority="P0">
+      <description>Full E2E: GAR image pull → DVC data → train → MLflow metrics + artifacts</description>
+    </task>
+
+    <task id="A3" title="Train sam3_hybrid on GCP L4 spot" depends="A2" priority="P0">
+      <description>
+        sam3_hybrid needs ~7.5 GB VRAM → fits L4 (24 GB). Tests larger model.
+        Fixes #710 (val_loss=NaN) if it's a platform issue.
+      </description>
+    </task>
+
+    <task id="A4" title="Train dynunet on GCP T4 spot" depends="A2" priority="P1">
+      <description>DynUNet is the simplest model. Baseline for cost/time comparison.</description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE B: Spot Preemption Recovery                                  -->
+  <!-- ================================================================== -->
+  <phase id="B" name="Spot Preemption Recovery" skill="self-learning-iterative-coder" depends="A">
+
+    <task id="B1" title="Atomic checkpoint writes (R7)" priority="P0" issue="707">
+      <description>
+        trainer.py:802 does direct torch.save() — non-atomic. If spot preempted
+        during write, checkpoint is corrupt.
+        Fix: Write to temp file, then os.rename() to final path.
+      </description>
+      <files>src/minivess/pipeline/trainer.py</files>
+      <tests>tests/v2/unit/test_atomic_checkpoint.py</tests>
+    </task>
+
+    <task id="B2" title="Checkpoint SHA256 verification (R8)" depends="B1" priority="P0">
+      <description>
+        Write SHA256 hash after checkpoint save. Verify before torch.load() on resume.
+        Prevents loading corrupt partial checkpoints after spot preemption.
+      </description>
+      <files>src/minivess/pipeline/trainer.py, src/minivess/pipeline/checkpoint_integrity.py</files>
+      <tests>tests/v2/unit/test_checkpoint_integrity.py</tests>
+    </task>
+
+    <task id="B3" title="Wire check_resume_state_task into train_flow (R14)" depends="B2" priority="P0" issue="686">
+      <description>
+        check_resume_state_task at train_flow.py:169 is DEFINED but NEVER CALLED.
+        Wire it into the flow so training resumes from last checkpoint on spot recovery.
+      </description>
+      <files>src/minivess/orchestration/flows/train_flow.py</files>
+      <tests>tests/v2/unit/test_checkpoint_resume.py</tests>
+    </task>
+
+    <task id="B4" title="Add MOUNT_CACHED to SkyPilot YAML" depends="B3" priority="P0" issue="686">
+      <description>
+        Add GCS bucket mounting with MOUNT_CACHED for checkpoint persistence:
+        file_mounts: /checkpoints: name: minivess-checkpoints, mode: MOUNT_CACHED
+      </description>
+      <files>deployment/skypilot/smoke_test_gcp.yaml, deployment/skypilot/train_production.yaml</files>
+    </task>
+
+    <task id="B5" title="Spot preemption simulation test" depends="B4" priority="P1">
+      <description>
+        1. Launch 10-epoch training on GCP spot
+        2. After ~5 epochs: gcloud compute instances simulate-maintenance-event
+        3. Verify: SkyPilot recovers → checkpoint loaded → training resumes from epoch 5
+      </description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE C: Code Review + Simplification                              -->
+  <!-- ================================================================== -->
+  <phase id="C" name="Code Review + Production Polish" skill="simplify" depends="A">
+
+    <task id="C1" title="Review + simplify launch_smoke_test.py" priority="P1">
+      <description>
+        Multi-region launcher is 270 lines with duplicated env var loading.
+        Use /simplify to reduce complexity. Support --cloud gcp natively.
+      </description>
+      <files>scripts/launch_smoke_test.py</files>
+    </task>
+
+    <task id="C2" title="Deduplicate SkyPilot YAML setup/run blocks" priority="P1">
+      <description>
+        5 SkyPilot YAMLs have copy-pasted DVC pull + pre-flight check.
+        Extract to scripts/cloud_setup.sh and scripts/cloud_run.sh.
+      </description>
+    </task>
+
+    <task id="C3" title="Update .env.example with all GCP outputs" priority="P0">
+      <description>
+        Add MLFLOW_GCP_URI, complete GCS bucket vars, document Cloud Run URL.
+        Ensure all Pulumi outputs are documented.
+      </description>
+    </task>
+
+    <task id="C4" title="Close resolved GitHub issues" priority="P0">
+      <description>
+        Close: #702 (Pulumi GCP), #687 (GCP account), #685 (evaluate GCP), #681 (Docker providers).
+        Update: #684 (MLflow multipart — based on E2E test result).
+      </description>
+    </task>
+
+    <task id="C5" title="Update CLAUDE.md SkyPilot section for GCP" priority="P1">
+      <description>
+        Update SkyPilot provider table, add GCP as primary.
+        Document europe-west1 for T4/L4, europe-north1 for MLflow/GCS.
+        Add GPU pricing table.
+      </description>
+    </task>
+
+    <task id="C6" title="Pulumi GCP stack: fix Cloud Run in Pulumi code" priority="P1">
+      <description>
+        Cloud Run was deployed via gcloud CLI due to Pulumi API issues.
+        Fix the Pulumi code to use dict-based template properly so
+        `pulumi up` handles Cloud Run deployment, not manual gcloud.
+      </description>
+      <files>deployment/pulumi/gcp/__main__.py</files>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE D: Multi-Model Verification                                  -->
+  <!-- ================================================================== -->
+  <phase id="D" name="Multi-Model GCP Training" skill="ralph-loop" depends="A,B">
+
+    <task id="D1" title="Fix SAM3 FP16 dtype issue (#680)" priority="P0" issue="680">
+      <description>
+        sam3_topolora broken by hardcoded FP16 dtype. Fix the adapter to
+        handle mixed precision correctly.
+      </description>
+    </task>
+
+    <task id="D2" title="Train all 5 models on GCP spot" depends="D1" priority="P1">
+      <description>
+        Verify: dynunet, sam3_vanilla, sam3_hybrid, sam3_topolora, vesselfm
+        all train successfully on GCP spot with artifact uploads.
+        Each model uses appropriate GPU (T4 for small, L4 for medium).
+      </description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- EXECUTION ORDER                                                    -->
+  <!-- ================================================================== -->
+  <execution-order>
+    <step>1. A1: Wait for definitive E2E test result (running now)</step>
+    <step>2. A2-A4: If A1 passes, run remaining models</step>
+    <step>3. B1-B2: Atomic checkpoint + SHA256 (TDD: test first)</step>
+    <step>4. B3-B4: Wire resume task + MOUNT_CACHED</step>
+    <step>5. C1-C3: Code review + simplification + .env update</step>
+    <step>6. C4-C6: Close issues + CLAUDE.md + Pulumi fix</step>
+    <step>7. D1-D2: Multi-model verification (if time permits)</step>
+    <step>8. B5: Spot preemption simulation (final validation)</step>
+    <step>9. Commit everything in semantically coherent chunks</step>
+  </execution-order>
+
+  <commit-plan>
+    <commit id="1" message="feat(infra): GCP Pulumi stack — GCS + Cloud SQL + GAR + Cloud Run MLflow">
+      <files>deployment/pulumi/gcp/*, deployment/docker/Dockerfile.mlflow-gcp</files>
+    </commit>
+    <commit id="2" message="feat(config): add MLFLOW_SERVER_VERSION, GCP vars to .env.example + tests">
+      <files>.env.example, tests/v2/unit/test_env_single_source.py, configs/cloud/gcp_quotas.yaml</files>
+    </commit>
+    <commit id="3" message="feat(skypilot): GCP spot training YAML + DVC init fix + multipart upload">
+      <files>deployment/skypilot/smoke_test_gcp.yaml, deployment/skypilot/*.yaml (dvc -f fix)</files>
+    </commit>
+    <commit id="4" message="feat(checkpoint): atomic writes + SHA256 verification for spot recovery">
+      <files>src/minivess/pipeline/trainer.py, src/minivess/pipeline/checkpoint_integrity.py, tests/*</files>
+    </commit>
+    <commit id="5" message="feat(training): wire check_resume_state_task + MOUNT_CACHED checkpointing">
+      <files>src/minivess/orchestration/flows/train_flow.py, deployment/skypilot/*.yaml</files>
+    </commit>
+    <commit id="6" message="docs(planning): GCP architecture plans, tutorials, metalearning">
+      <files>docs/planning/*.md, docs/planning/*.xml, .claude/metalearning/*.md</files>
+    </commit>
+    <commit id="7" message="refactor(launch): simplify launch_smoke_test.py + deduplicate YAML setup">
+      <files>scripts/launch_smoke_test.py, scripts/cloud_setup.sh</files>
+    </commit>
+  </commit-plan>
+</plan>

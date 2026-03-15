@@ -222,7 +222,20 @@ class Sam3Backbone(nn.Module):
         Handles grayscale→3ch expansion, resize to 1008×1008, and normalization.
         Converts MONAI MetaTensor to plain Tensor to avoid __torch_function__
         dispatch overhead inside the ViT encoder.
+
+        Raises
+        ------
+        ValueError
+            If input is not exactly 4D (B, C, H, W).
         """
+        if x.ndim != 4:
+            msg = (
+                f"Expected 4D input (B, C, H, W) for SAM3 preprocessing, "
+                f"got {x.ndim}D tensor with shape {tuple(x.shape)}. "
+                f"Slice 3D volumes before calling _preprocess()."
+            )
+            raise ValueError(msg)
+
         # Strip MONAI MetaTensor wrapper (saves memory + avoids dispatch overhead)
         if hasattr(x, "as_tensor"):
             x = x.as_tensor()
@@ -263,11 +276,23 @@ class Sam3Backbone(nn.Module):
         Feature tensor of shape (B, embed_dim, H_feat, W_feat).
         For the HF path the encoder includes the FPN neck, so the returned
         tensor is already at FPN dimension (256) rather than ViT dimension (1024).
+
+        Notes
+        -----
+        Includes a NaN/Inf guard on encoder output. The frozen encoder runs in
+        FP16 (half precision) for VRAM efficiency, which can produce NaN/Inf
+        via overflow in LayerNorm/softmax on certain input distributions
+        (e.g. boundary patches from sliding_window_inference during validation).
+        See docs/planning/sam3-nan-loss-fix.md (H2) and issue #715.
         """
         target_device = x.device
         x = self._preprocess(x)
         if self._frozen:
-            # Cast input to FP16 to match encoder weights (loaded in FP16)
+            # Cast input to FP16 to match encoder weights (loaded with
+            # torch_dtype=float16 in from_pretrained).  This halves encoder
+            # VRAM from ~2.2 GB to ~1.1 GB on ViT-32L (648M params).
+            # Callers must cast the returned features back to FP32 before
+            # passing them to trainable FP32 modules (decoder, fusion, LoRA).
             x = x.half()
             with torch.no_grad():
                 out = self.encoder(x)
@@ -284,6 +309,25 @@ class Sam3Backbone(nn.Module):
                 out = out.fpn_hidden_states[0]
             elif hasattr(out, "last_hidden_state"):
                 out = out.last_hidden_state
+
+        # NaN/Inf guard: FP16 encoder can overflow on certain inputs (boundary
+        # patches, extreme intensity values). Replace non-finite values with 0.0
+        # to prevent NaN from poisoning downstream loss computation.
+        # Zero features produce zero decoder output → valid (if uninformative) loss.
+        # See: docs/planning/sam3-nan-loss-fix.md, issue #715.
+        if not torch.isfinite(out).all():
+            nan_count = torch.isnan(out).sum().item()
+            inf_count = torch.isinf(out).sum().item()
+            total = out.numel()
+            logger.warning(
+                "NaN/Inf in SAM3 encoder output: %d NaN + %d Inf / %d total "
+                "(%.1f%%). Replacing with zeros to prevent loss poisoning.",
+                nan_count,
+                inf_count,
+                total,
+                100 * (nan_count + inf_count) / total,
+            )
+            out = torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
 
         result: Tensor = out.to(target_device)
         return result

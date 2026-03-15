@@ -28,22 +28,22 @@ from minivess.adapters.sam3_backbone import SAM3_INPUT_SIZE, Sam3Backbone
 from minivess.adapters.sam3_decoder import Sam3MaskDecoder
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from minivess.config.models import ModelConfig
 
 logger = logging.getLogger(__name__)
 
 
 class LoRALinear(nn.Module):
-    """Low-Rank Adaptation layer wrapping an existing linear/conv layer.
+    """Low-Rank Adaptation layer wrapping an existing nn.Linear layer.
 
     Adds a low-rank decomposition: output = original(x) + (B @ A)(x) * scaling.
+    SAM3 ViT-32L is pure Linear (no Conv2d in the transformer blocks), so only
+    nn.Linear is supported. Conv2d LoRA would require a different decomposition.
 
     Parameters
     ----------
     original:
-        The original layer to wrap (nn.Linear or nn.Conv2d).
+        The original nn.Linear layer to wrap.
     rank:
         Rank of the low-rank decomposition.
     alpha:
@@ -60,6 +60,13 @@ class LoRALinear(nn.Module):
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
+        if not isinstance(original, nn.Linear):
+            msg = (
+                f"LoRALinear only supports nn.Linear, got {type(original).__name__}. "
+                f"SAM3 ViT-32L uses only Linear layers in its transformer blocks."
+            )
+            raise TypeError(msg)
+
         self.original = original
         self.rank = rank
         self.scaling = alpha / rank
@@ -68,45 +75,39 @@ class LoRALinear(nn.Module):
         for param in original.parameters():
             param.requires_grad = False
 
-        # Determine dimensions from the original layer
-        if isinstance(original, nn.Linear):
-            in_features = original.in_features
-            out_features = original.out_features
-            self.lora_A = nn.Parameter(torch.randn(rank, in_features) * 0.01)
-            self.lora_B = nn.Parameter(torch.zeros(out_features, rank))
-        elif isinstance(original, nn.Conv2d):
-            in_channels = original.in_channels
-            out_channels = original.out_channels
-            self.lora_A = nn.Parameter(torch.randn(rank, in_channels) * 0.01)
-            self.lora_B = nn.Parameter(torch.zeros(out_channels, rank))
-        else:
-            msg = f"LoRALinear only supports Linear/Conv2d, got {type(original)}"
-            raise TypeError(msg)
+        in_features = original.in_features
+        out_features = original.out_features
+        self.lora_A = nn.Parameter(torch.randn(rank, in_features) * 0.01)
+        self.lora_B = nn.Parameter(torch.zeros(out_features, rank))
 
         self.lora_dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self._is_conv = isinstance(original, nn.Conv2d)
+
+    @property
+    def weight(self) -> Tensor:
+        """Expose original layer's weight for HF code that accesses .weight.dtype."""
+        return self.original.weight
+
+    @property
+    def bias(self) -> Tensor | None:
+        """Expose original layer's bias for HF code that accesses .bias."""
+        return self.original.bias
 
     def forward(self, x: Tensor) -> Tensor:
-        """Forward pass: original(x) + LoRA(x)."""
+        """Forward pass: original(x) + LoRA(x).
+
+        Handles FP16/FP32 dtype mismatch: SAM3 encoder runs in FP16
+        but LoRA params are initialized in FP32. Cast input to match
+        LoRA dtype for matmul, then cast result back to input dtype.
+        """
         original_out: Tensor = self.original(x)
+        input_dtype = x.dtype
 
-        if self._is_conv:
-            # For Conv2d: use 1x1 conv via matrix multiply on output-spatial features
-            # Apply LoRA as a channel-mixing residual on the original output
-            b, c_out, h_out, w_out = original_out.shape
-            # Global average pool input channels → project through LoRA
-            x_avg = x.mean(dim=(2, 3))  # (B, C_in)
-            x_avg = self.lora_dropout(x_avg)
-            lora_out = (x_avg @ self.lora_A.T @ self.lora_B.T) * self.scaling
-            lora_out = lora_out.unsqueeze(-1).unsqueeze(-1)  # (B, C_out, 1, 1)
-            result: Tensor = original_out + lora_out
-            return result
-        else:
-            x_dropped = self.lora_dropout(x)
-            lora_out = (x_dropped @ self.lora_A.T @ self.lora_B.T) * self.scaling
+        x_dropped = self.lora_dropout(x).to(self.lora_A.dtype)
+        lora_out = (x_dropped @ self.lora_A.T @ self.lora_B.T) * self.scaling
+        lora_out = lora_out.to(input_dtype)
 
-        result_lin: Tensor = original_out + lora_out
-        return result_lin
+        result: Tensor = original_out + lora_out
+        return result
 
 
 def _apply_lora_to_encoder(
@@ -204,14 +205,17 @@ class Sam3TopoLoraAdapter(ModelAdapter):
         -------
         SegmentationOutput with 2-class predictions.
         """
-        b, c, d, h, w = images.shape
+        # MONAI dimension order: (B, C, H, W, D) — depth is LAST
+        b, c, h, w, d = images.shape
         slice_logits: list[Tensor] = []
 
         for z_idx in range(d):
-            slice_2d = images[:, :, z_idx, :, :]  # (B, C, H, W)
+            slice_2d = images[:, :, :, :, z_idx]  # (B, C, H, W)
 
             # FPN features (LoRA adapters are trainable, rest is frozen)
             fpn_features = self.backbone.extract_fpn_features(slice_2d)
+            # Cast FP16 encoder output to FP32 for decoder (#680)
+            fpn_features = fpn_features.float()
 
             # Decode to binary mask
             binary_logits = self.decoder(fpn_features)
@@ -240,53 +244,6 @@ class Sam3TopoLoraAdapter(ModelAdapter):
             lora_rank=self._lora_rank,
             lora_alpha=self._lora_alpha,
         )
-
-    def save_checkpoint(self, path: Path) -> None:
-        """Save adapter state dict (no self.net dependency)."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({"model_state_dict": self.state_dict()}, path)
-
-    def load_checkpoint(self, path: Path) -> None:
-        """Load adapter state dict (no self.net dependency)."""
-        payload = torch.load(path, map_location="cpu", weights_only=True)
-        if isinstance(payload, dict) and "model_state_dict" in payload:
-            self.load_state_dict(payload["model_state_dict"])
-        else:
-            self.load_state_dict(payload)
-
-    def export_onnx(self, path: Path, example_input: Tensor) -> None:
-        """Export adapter to ONNX (no self.net dependency).
-
-        Uses a thin wrapper to return raw logits tensor instead of
-        SegmentationOutput, which ONNX tracing cannot handle.
-        """
-        import warnings
-
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.eval()
-
-        class _LogitsWrapper(torch.nn.Module):
-            def __init__(self, adapter: Sam3TopoLoraAdapter) -> None:
-                super().__init__()
-                self.adapter = adapter
-
-            def forward(self, x: Tensor) -> Tensor:
-                result: Tensor = self.adapter(x).logits
-                return result
-
-        wrapper = _LogitsWrapper(self)
-        wrapper.eval()
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            torch.onnx.export(
-                wrapper,
-                (example_input,),
-                str(path),
-                input_names=["images"],
-                output_names=["logits"],
-                opset_version=17,
-                dynamo=False,
-            )
 
     def trainable_parameters(self) -> int:
         """Count trainable parameters (LoRA + decoder)."""

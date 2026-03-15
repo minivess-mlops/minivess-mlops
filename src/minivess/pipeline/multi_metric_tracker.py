@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
+from minivess.pipeline.checkpoint_integrity import write_sha256_sidecar
+from minivess.pipeline.checkpoint_utils import atomic_torch_save
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -267,7 +270,8 @@ def save_metric_checkpoint(
     }
     if scaler_state_dict is not None:
         payload["scaler_state_dict"] = scaler_state_dict
-    torch.save(payload, path)
+    atomic_torch_save(payload, path)
+    write_sha256_sidecar(path)
 
 
 def load_metric_checkpoint(
