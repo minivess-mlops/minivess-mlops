@@ -106,21 +106,14 @@ def main() -> int:
             value = value.strip().strip("'\"")
             env_updates[key] = value
 
-    # Resolve MLFLOW_TRACKING_* (SkyPilot doesn't resolve inter-env refs)
-    mlflow_uri = env_updates.get(
-        "MLFLOW_CLOUD_URI", os.environ.get("MLFLOW_CLOUD_URI", "")
-    )
-    if mlflow_uri:
-        env_updates["MLFLOW_TRACKING_URI"] = mlflow_uri
-    mlflow_user = env_updates.get(
-        "MLFLOW_CLOUD_USERNAME", os.environ.get("MLFLOW_CLOUD_USERNAME", "admin")
-    )
-    env_updates["MLFLOW_TRACKING_USERNAME"] = mlflow_user
-    mlflow_pass = env_updates.get(
-        "MLFLOW_CLOUD_PASSWORD", os.environ.get("MLFLOW_CLOUD_PASSWORD", "")
-    )
-    if mlflow_pass:
-        env_updates["MLFLOW_TRACKING_PASSWORD"] = mlflow_pass
+    # dev_runpod.yaml uses file-based MLflow on the Network Volume
+    # (/opt/vol/mlruns). Do NOT override MLFLOW_TRACKING_URI with the
+    # cloud URI — that causes checkpoint upload retries to block training
+    # if the remote server is unreachable.
+    # Remove any MLFLOW_TRACKING_* from env_updates that came from .env
+    for key in list(env_updates):
+        if key.startswith("MLFLOW_TRACKING_") or key == "MLFLOW_CLOUD_URI":
+            del env_updates[key]
 
     task.update_envs(env_updates)
 
