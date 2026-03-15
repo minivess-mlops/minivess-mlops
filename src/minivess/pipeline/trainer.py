@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path  # Used at runtime in fit() for fallback profiler output_dir
 from typing import TYPE_CHECKING, Any
 
 # system_monitor.py is in scripts/ (not in the package).
@@ -18,7 +20,9 @@ from monai.inferers import sliding_window_inference  # type: ignore[attr-defined
 from torch.amp import GradScaler, autocast  # type: ignore[attr-defined]
 from torch.optim import SGD, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
+from torch.profiler import record_function
 
+from minivess.pipeline.checkpoint_utils import atomic_text_write, atomic_torch_save
 from minivess.pipeline.loss_functions import build_loss_function
 from minivess.pipeline.multi_metric_tracker import (
     MetricCheckpoint,
@@ -31,12 +35,10 @@ from minivess.pipeline.multi_metric_tracker import (
 from minivess.pipeline.validation_metrics import compute_compound_masd_cldice
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from torch import nn
 
     from minivess.adapters.base import ModelAdapter
-    from minivess.config.models import TrainingConfig
+    from minivess.config.models import ProfilingConfig, TrainingConfig
     from minivess.observability.tracking import ExperimentTracker
     from minivess.pipeline.metrics import SegmentationMetrics
 
@@ -290,20 +292,25 @@ class SegmentationTrainer:
 
         for batch in loader:
             # Move all tensor values to device (supports multi-task GT keys)
-            batch = {
-                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
-                for k, v in batch.items()
-            }
-            images = batch["image"]
-            labels = batch["label"]
+            with record_function("data_to_device"):
+                batch = {
+                    k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                    for k, v in batch.items()
+                }
+                images = batch["image"]
+                labels = batch["label"]
 
-            self.optimizer.zero_grad()
+            with record_function("zero_grad"):
+                self.optimizer.zero_grad()
+
             with autocast(
                 device_type=self.device.type,
                 enabled=self.config.mixed_precision,
             ):
-                output = self.model(images)
-                loss = self._compute_loss(output, batch, labels)
+                with record_function("forward"):
+                    output = self.model(images)
+                with record_function("loss_compute"):
+                    loss = self._compute_loss(output, batch, labels)
 
             if not torch.isfinite(loss):
                 msg = (
@@ -312,21 +319,22 @@ class SegmentationTrainer:
                 )
                 raise ValueError(msg)
 
-            self.scaler.scale(loss).backward()  # type: ignore[no-untyped-call]
-            if self.config.gradient_clip_val > 0:
-                self.scaler.unscale_(self.optimizer)
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(),
-                    self.config.gradient_clip_val,
-                )
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
+            with record_function("backward_optimizer"):
+                self.scaler.scale(loss).backward()  # type: ignore[no-untyped-call]
+                if self.config.gradient_clip_val > 0:
+                    self.scaler.unscale_(self.optimizer)
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(),
+                        self.config.gradient_clip_val,
+                    )
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
 
             running_loss += loss.item()
             num_batches += 1
 
             if self.metrics is not None:
-                with torch.no_grad():
+                with record_function("metrics_update"), torch.no_grad():
                     self.metrics.update(output.logits, labels)
 
         avg_loss = running_loss / max(num_batches, 1)
@@ -365,12 +373,13 @@ class SegmentationTrainer:
         collected_labels: list[np.ndarray] = []
 
         for batch in loader:
-            batch = {
-                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
-                for k, v in batch.items()
-            }
-            images = batch["image"]
-            labels = batch["label"]
+            with record_function("val_data_to_device"):
+                batch = {
+                    k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                    for k, v in batch.items()
+                }
+                images = batch["image"]
+                labels = batch["label"]
 
             with (
                 torch.no_grad(),
@@ -379,34 +388,39 @@ class SegmentationTrainer:
                     enabled=self.config.mixed_precision,
                 ),
             ):
-                # Use sliding window inference when val_roi_size is set,
-                # needed because full 512x512xZ volumes exceed GPU memory.
-                if self.val_roi_size is not None:
+                with record_function("val_forward"):
+                    # Use sliding window inference when val_roi_size is set,
+                    # needed because full 512x512xZ volumes exceed GPU memory.
+                    if self.val_roi_size is not None:
 
-                    def _model_fn(x: torch.Tensor) -> torch.Tensor:
-                        result: torch.Tensor = self.model(x).logits
-                        return result
+                        def _model_fn(x: torch.Tensor) -> torch.Tensor:
+                            result: torch.Tensor = self.model(x).logits
+                            return result
 
-                    logits_raw = sliding_window_inference(
-                        images,
-                        roi_size=self.val_roi_size,
-                        sw_batch_size=self.sw_batch_size,
-                        predictor=_model_fn,
-                        overlap=0.25,
-                    )
-                    assert isinstance(logits_raw, torch.Tensor)  # noqa: S101
-                    logits = logits_raw
-                    # Sliding window: standard loss only (no multi-task aux)
-                    from minivess.pipeline.multitask_loss import MultiTaskLoss
-
-                    if isinstance(self.criterion, MultiTaskLoss):
-                        loss = self.criterion.seg_criterion(logits, labels)
+                        logits_raw = sliding_window_inference(
+                            images,
+                            roi_size=self.val_roi_size,
+                            sw_batch_size=self.sw_batch_size,
+                            predictor=_model_fn,
+                            overlap=0.25,
+                        )
+                        assert isinstance(logits_raw, torch.Tensor)  # noqa: S101
+                        logits = logits_raw
                     else:
-                        loss = self.criterion(logits, labels)
-                else:
-                    output = self.model(images)
-                    logits = output.logits
-                    loss = self._compute_loss(output, batch, labels)
+                        output = self.model(images)
+                        logits = output.logits
+
+                with record_function("val_loss_compute"):
+                    if self.val_roi_size is not None:
+                        # Sliding window: standard loss only (no multi-task aux)
+                        from minivess.pipeline.multitask_loss import MultiTaskLoss
+
+                        if isinstance(self.criterion, MultiTaskLoss):
+                            loss = self.criterion.seg_criterion(logits, labels)
+                        else:
+                            loss = self.criterion(logits, labels)
+                    else:
+                        loss = self._compute_loss(output, batch, labels)
 
             running_loss += loss.item()
             num_batches += 1
@@ -415,20 +429,35 @@ class SegmentationTrainer:
                 self.metrics.update(logits, labels)
 
             if compute_extended:
-                # Move to CPU and convert to binary predictions
-                pred_probs = torch.softmax(logits, dim=1)
-                pred_binary = (
-                    pred_probs[:, 1:].argmax(dim=1)
-                    if logits.shape[1] > 2
-                    else (pred_probs[:, 1] > 0.5).long()
-                )
-                for b in range(images.shape[0]):
-                    pred_np = pred_binary[b].cpu().numpy().astype(np.uint8)
-                    label_np = labels[b, 0].cpu().numpy().astype(np.uint8)
-                    collected_preds.append(pred_np)
-                    collected_labels.append(label_np)
+                with record_function("val_extended_metrics"):
+                    # Move to CPU and convert to binary predictions
+                    pred_probs = torch.softmax(logits, dim=1)
+                    pred_binary = (
+                        pred_probs[:, 1:].argmax(dim=1)
+                        if logits.shape[1] > 2
+                        else (pred_probs[:, 1] > 0.5).long()
+                    )
+                    for b in range(images.shape[0]):
+                        pred_np = pred_binary[b].cpu().numpy().astype(np.uint8)
+                        label_np = labels[b, 0].cpu().numpy().astype(np.uint8)
+                        collected_preds.append(pred_np)
+                        collected_labels.append(label_np)
 
         avg_loss = running_loss / max(num_batches, 1)
+
+        # NaN guard: FP16 encoder overflow or degenerate patches can produce
+        # NaN validation loss. Log a warning but don't crash — training should
+        # continue even if a single validation epoch produces NaN.
+        # Training NaN still hard-fails (see train_epoch). Issue #715.
+        if not math.isfinite(avg_loss):
+            logger.warning(
+                "Non-finite val_loss detected (%.4f over %d batches). "
+                "Possible FP16 overflow in encoder — see issue #715. "
+                "Logging NaN but continuing training.",
+                avg_loss,
+                num_batches,
+            )
+
         epoch_metrics: dict[str, float] = {}
         if self.metrics is not None:
             epoch_metrics = self.metrics.compute().to_dict()
@@ -495,6 +524,8 @@ class SegmentationTrainer:
         *,
         fold_id: int = 0,
         checkpoint_dir: Path | None = None,
+        profiling_config: ProfilingConfig | None = None,
+        start_epoch: int = 0,
     ) -> dict[str, Any]:
         """Full training loop with multi-metric early stopping.
 
@@ -510,6 +541,9 @@ class SegmentationTrainer:
         checkpoint_dir:
             Directory for saving checkpoints. If ``None``, no checkpoints
             are saved (metric history will still be tracked in-memory).
+        start_epoch:
+            Epoch to resume from (default 0 = fresh start). Used for
+            spot preemption recovery with epoch_latest checkpoint.
 
         Returns
         -------
@@ -542,7 +576,26 @@ class SegmentationTrainer:
         val_interval = self.config.val_interval
         _last_val_result: EpochResult | None = None
 
-        for epoch in range(self.config.max_epochs):
+        # Build profiler context — nullcontext when disabled (zero overhead).
+        # Use ExitStack to avoid re-indenting the entire epoch loop body.
+        from contextlib import ExitStack
+
+        from minivess.pipeline.profiler_integration import build_profiler_context
+
+        _prof_config = profiling_config
+        if _prof_config is None:
+            from minivess.config.models import ProfilingConfig as _PC
+
+            _prof_config = _PC(enabled=False)
+        _prof_output_dir = checkpoint_dir if checkpoint_dir is not None else Path(".")
+        _prof_ctx = build_profiler_context(_prof_config, output_dir=_prof_output_dir)
+        _exit_stack = ExitStack()
+        _prof = _exit_stack.enter_context(_prof_ctx)
+
+        if start_epoch > 0:
+            logger.info("Resuming training from epoch %d", start_epoch)
+
+        for epoch in range(start_epoch, self.config.max_epochs):
             t0 = time.perf_counter()
             train_result = self.train_epoch(train_loader)
 
@@ -570,6 +623,16 @@ class SegmentationTrainer:
 
             self.scheduler.step()
             epoch_wall_time = time.perf_counter() - t0
+
+            # Log first/steady epoch wall time for profiling (#683)
+            if epoch == 0 and self.tracker is not None:
+                self.tracker.log_epoch_metrics(
+                    {"prof_first_epoch_seconds": epoch_wall_time}, step=0
+                )
+            elif epoch == 1 and self.tracker is not None:
+                self.tracker.log_epoch_metrics(
+                    {"prof_steady_epoch_seconds": epoch_wall_time}, step=1
+                )
 
             history["train_loss"].append(train_result.loss)
             history["val_loss"].append(val_result.loss)
@@ -687,9 +750,17 @@ class SegmentationTrainer:
                         "Saved best checkpoint for '%s' to %s", metric_name, best_path
                     )
                     if self.tracker is not None:
-                        self.tracker.log_artifact(
-                            best_path, artifact_path="checkpoints"
-                        )
+                        try:
+                            self.tracker.log_artifact(
+                                best_path, artifact_path="checkpoints"
+                            )
+                        except Exception:
+                            logger.warning(
+                                "Failed to upload checkpoint artifact to MLflow "
+                                "(checkpoint saved locally at %s)",
+                                best_path,
+                                exc_info=True,
+                            )
 
             # Save last.pth if configured
             if checkpoint_dir is not None and ckpt_cfg.save_last:
@@ -749,12 +820,18 @@ class SegmentationTrainer:
                     "best_val_loss": _best_val_loss,
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
-                epoch_latest_path = checkpoint_dir / "epoch_latest.yaml"
-                epoch_latest_path.write_text(yaml.dump(_epoch_state), encoding="utf-8")
-                torch.save(
+                # Atomic write order: .pth first, then .yaml
+                # If preempted after .pth but before .yaml, resume detects stale yaml
+                atomic_torch_save(
                     self.model.state_dict(),
                     checkpoint_dir / "epoch_latest.pth",
                 )
+                epoch_latest_path = checkpoint_dir / "epoch_latest.yaml"
+                atomic_text_write(yaml.dump(_epoch_state), epoch_latest_path)
+
+            # Step profiler (per-EPOCH, not per-batch — RC3)
+            if _prof is not None:
+                _prof.step()
 
             # Early stopping decision via MultiMetricTracker
             if self._multi_tracker.should_stop(epoch):
@@ -765,14 +842,30 @@ class SegmentationTrainer:
                 )
                 break
 
+        # Close profiler context (ExitStack cleanup)
+        _exit_stack.close()
+
         # Upload last.pth and metric_history.json to MLflow
         if self.tracker is not None and checkpoint_dir is not None:
             last_path = checkpoint_dir / "last.pth"
             if last_path.exists():
-                self.tracker.log_artifact(last_path, artifact_path="checkpoints")
+                try:
+                    self.tracker.log_artifact(last_path, artifact_path="checkpoints")
+                except Exception:
+                    logger.warning(
+                        "Failed to upload last.pth to MLflow (saved locally at %s)",
+                        last_path,
+                        exc_info=True,
+                    )
             history_path = checkpoint_dir / "metric_history.json"
             if history_path.exists():
-                self.tracker.log_artifact(history_path, artifact_path="history")
+                try:
+                    self.tracker.log_artifact(history_path, artifact_path="history")
+                except Exception:
+                    logger.warning(
+                        "Failed to upload metric_history.json to MLflow",
+                        exc_info=True,
+                    )
 
         # Backward-compatible best_val_loss: use primary tracker's best value
         # when primary metric is val_loss, otherwise fall back to best val_loss tracker

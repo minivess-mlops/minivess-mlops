@@ -28,9 +28,15 @@
 # Contains uv, git, curl — NEVER copied to final image.
 FROM nvidia/cuda:12.6.3-devel-ubuntu24.04 AS builder
 
+# Ubuntu 24.04 ships Python 3.12; project requires 3.13 (pyproject.toml).
+# Install Python 3.13 from deadsnakes PPA.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    python3-venv \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    python3.13 \
+    python3.13-venv \
+    python3.13-dev \
     git \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -39,10 +45,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # uv env: compile bytecodes, copy-link mode (required for cache mounts),
-# never auto-download Python, never install dev deps.
+# use system Python 3.13, never install dev deps.
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never \
+    UV_PYTHON=python3.13 \
     UV_NO_DEV=1
 
 WORKDIR /app
@@ -56,7 +63,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-dev --no-install-project
 
-# Phase B: copy source and install project
+# Phase B: copy source, project files, and install project.
+# pyproject.toml and uv.lock are needed here (bind mounts from Phase A don't persist).
+COPY pyproject.toml uv.lock README.md ./
 COPY src/ src/
 COPY configs/ configs/
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -85,15 +94,33 @@ LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.licenses="CC-BY-NC-SA-4.0"
 LABEL org.opencontainers.image.base.name="nvidia/cuda:12.6.3-runtime-ubuntu24.04"
 
-# Minimal runtime Python only — no pip, no build tools
+# Minimal runtime: Python 3.13 + SkyPilot/RunPod requirements.
+# SkyPilot's setup_cmd needs: openssh-server, rsync, curl, patch, sudo.
+# RunPod connects via SSH as root to run setup/run commands inside the container.
+# Without these packages, the SkyPilot setup_cmd fails and the container crash-loops.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    python3-venv \
-    && rm -rf /var/lib/apt/lists/*
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    python3.13 \
+    python3.13-venv \
+    openssh-server \
+    rsync \
+    curl \
+    patch \
+    sudo \
+    && apt-get purge -y software-properties-common \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /run/sshd
 
 # Non-root user with configurable UID/GID (matches host user for bind mounts)
+# Passwordless sudo: SkyPilot setup_cmd uses sudo when container runs as non-root.
+# Ubuntu 24.04 base has 'ubuntu' user at UID 1000 — grant sudo to BOTH users.
 RUN groupadd -g $GID minivess 2>/dev/null || true && \
-    useradd --create-home --shell /bin/bash -u $UID -g $GID -o minivess
+    useradd --create-home --shell /bin/bash -u $UID -g $GID -o minivess && \
+    echo 'minivess ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers && \
+    echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 WORKDIR /app
 
@@ -106,7 +133,13 @@ COPY --from=builder --chown=minivess:minivess /app/configs /app/configs
 # Group-readable venv (not world-readable — limit to minivess group)
 RUN chmod -R g+rX /app/.venv
 
-USER minivess
+# NOTE: USER minivess is intentionally NOT set here.
+# SkyPilot/RunPod requires root: the setup_cmd installs packages and configures
+# SSH as root, and SkyPilot SSHes as root. Setting USER to non-root causes the
+# SSH key to be placed in the wrong home directory, preventing SSH auth.
+# For local Docker Compose, use docker-compose.yml user: directive or
+# --user flag to run as non-root when needed.
+# USER minivess  # DISABLED — breaks SkyPilot SSH auth (see metalearning 2026-03-14)
 
 # Python environment
 ENV PATH=/app/.venv/bin:$PATH
@@ -119,4 +152,4 @@ RUN echo 'umask 0002' >> /home/minivess/.bashrc
 
 # HEALTHCHECK: verify Python interpreter works
 HEALTHCHECK --interval=60s --timeout=10s --retries=3 --start-period=120s \
-    CMD python3 -c "import sys; sys.exit(0)" || exit 1
+    CMD python3.13 -c "import sys; sys.exit(0)" || exit 1

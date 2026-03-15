@@ -14,6 +14,7 @@ from minivess.config.models import (
     ExperimentConfig,
     ModelConfig,
     ModelFamily,
+    ProfilingConfig,
     ServingConfig,
     TrainingConfig,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "MetricDirection",
     "ModelConfig",
     "ModelFamily",
+    "ProfilingConfig",
     "ServingConfig",
     "TrainingConfig",
 ]

@@ -29,6 +29,32 @@ harder than editing one YAML file is a design flaw. Escalate to user before impl
 
 ---
 
+## Overarching Principle (TOP-2): Zero Manual Work + Reproducibility
+
+> **Automate everything. Nobody should ever manually launch pods, VMs, or instances.
+> The highest priorities are excellent DevEx and reproducibility to combat the
+> reproducibility crisis in science and ML.**
+
+This is WHY every automation tool in this repo exists:
+- **Pulumi** — IaC so nobody manually provisions cloud infrastructure
+- **SkyPilot** — Intercloud broker so nobody manually launches GPU jobs
+- **Docker** — Containerization so nobody debugs "works on my machine"
+- **Prefect** — Orchestration so nobody manually sequences pipeline steps
+- **DVC** — Data versioning so nobody manually tracks dataset versions
+
+**Docker is NOT optional.** Docker is the execution model — the reproducibility guarantee.
+ALL training, ALL pipeline execution, ALL deployment goes through Docker containers.
+The only Docker-free path is `uv run pytest` for fast unit tests. Everything else is Docker.
+Suggesting bare-metal execution is suggesting to abandon reproducibility.
+
+**Cloud execution is NEVER manual.** `sky jobs launch task.yaml` — one command. The
+SkyPilot YAML + Docker image = fully reproducible cloud execution. No SSH, no manual
+setup, no "install these packages on the VM."
+
+See: `.claude/metalearning/2026-03-14-docker-resistance-anti-pattern.md`
+
+---
+
 ## Design Goal #1: EXCELLENT DevEx for PhD Researchers
 
 > **MLOps as a scaffold that frees PhD researchers from infrastructure wrangling.**
@@ -133,12 +159,73 @@ Each of the 6 Prefect flows runs in its own Docker container:
 | **staging** | Docker Compose | Local GPU in container | Integration testing |
 | **prod** | Docker + SkyPilot | Cloud spot / on-prem K8s | Full pipeline |
 
-### SkyPilot as Default Compute Layer
-- `deployment/skypilot/train_generic.yaml` — spot A100 training
-- `deployment/skypilot/train_hpo_sweep.yaml` — parallel HPO trials
+### Cloud GPU Strategy
+
+| Provider | Role | GPU | Spot $/hr | Docker | Region |
+|----------|------|-----|-----------|--------|--------|
+| **RunPod** | Dev/prototyping | RTX 4090 (24 GB) | $0.44-0.69 | Container-native (no Docker-in-Docker) | US/EU |
+| **GCP** | Staging/prod | T4/L4/A100 | $0.14-0.82 | VM + Docker image_id | europe-north1 (Finland) |
+| **Lambda Labs** | Rejected | A10/A100 | $0.50-1.10 | VM + Docker | No EU availability |
+| **UpCloud** | MLflow server | CPU VPS | Fixed €5/mo | N/A | fi-hel1 (Helsinki) |
+
+**Decision tree**: RunPod for quick experiments (cheapest, instant provisioning).
+GCP for production runs (same-region infra, spot recovery, Pulumi IaC).
+
+**Local hardware**: RTX 2070 Super (8 GB VRAM) — dev only. Fits DynUNet + SAM3 Vanilla.
+SAM3 Hybrid/TopoLoRA and VesselFM require cloud GPU (≥16 GB).
+
+### Zero Hardcoding of Cloud/GPU Config (Non-Negotiable)
+This is an **open-source academic repo** used by heterogeneous research labs. NEVER
+hardcode cloud providers, GPU types, instance counts, regions, or Docker registries.
+
+- **One lab** may want 1x RTX 4090 on RunPod. **Another** may want 8x A100 on AWS.
+- All cloud config must flow through **Hydra config groups** (`configs/cloud/`,
+  `configs/registry/`) so labs override via `configs/lab/lab_name.yaml` and users
+  override via `configs/user/user_name.yaml` — without touching repo defaults.
+- SkyPilot accelerator lists, region priorities, spot preferences, and disk sizes
+  are config, not code. A lab with AWS credits should need ZERO code changes.
+- Docker registry (GHCR, GAR, ECR, DockerHub) is a config choice, not hardcoded.
+- See: `docs/planning/hydra-config-verification-report.md` for the full audit.
+
+### SkyPilot = Intercloud Broker for AI Workloads (Non-Negotiable)
+SkyPilot is an **intercloud broker** ([Yang et al., NSDI'23](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng))
+— a unified system that automatically places and manages AI jobs across heterogeneous
+infrastructure. You describe WHAT you need (GPU type, cost constraints), SkyPilot decides
+WHERE to run it (which cloud, region, instance type) with automatic spot recovery and
+cross-cloud failover. Think of it as **Slurm for the multi-cloud era**, not IaC.
+
+**SkyPilot is NOT Terraform/Pulumi.** IaC provisions specific resources ("create this VM
+on AWS us-east-1"). SkyPilot is a workload broker ("I need 1xA100, find the cheapest
+option anywhere and handle preemptions"). Different abstraction level entirely.
+
+It is NOT "a RunPod launcher." The SAME SkyPilot YAML must work on:
+
+| Provider | Use Case | SkyPilot Role |
+|----------|----------|---------------|
+| RunPod | Cloud GPU (spot RTX 4090) | `cloud: runpod` |
+| Lambda Labs | Cloud GPU (A100) | `cloud: lambda` |
+| AWS | Cloud GPU (spot p4d) | `cloud: aws` |
+| GCP | Cloud GPU (preemptible) | `cloud: gcp` |
+| Intranet servers | On-prem GPU via SSH | SSH connector |
+| Local LAN | Multi-GPU via SSH | SSH connector |
+
+**SkyPilot is ALWAYS used for compute beyond the dev machine.** Never bypass it.
+
+**Docker Execution (MANDATORY):**
+- SkyPilot YAML MUST use `image_id: docker:<registry>/<image>:<tag>` — bare VM is BANNED
+- Docker image pushed to configurable registry (`$DOCKER_REGISTRY` in `.env.example`):
+  GHCR (default), Docker Hub, AWS ECR, GCP GAR, Azure ACR — any OCI-compliant registry
+- Push: `make push-registry` (or `make push-ghcr` for GHCR with auto-login)
+- **BANNED**: `apt-get install`, `uv sync`, `git clone` in SkyPilot setup scripts.
+  All deps belong in the Docker image. SkyPilot setup is ONLY for data pull + config.
+- See: `.claude/metalearning/2026-03-14-skypilot-bare-vm-docker-violation.md`
+
+**Key Files:**
+- `deployment/skypilot/smoke_test_gpu.yaml` — Docker-based GPU smoke tests on RunPod
 - `src/minivess/compute/skypilot_launcher.py` — Python SDK wrapper
-- Multi-cloud failover: AWS → GCP → RunPod → Lambda
-- 3-6x cost savings via managed spot instances
+
+**Never suggest bypassing SkyPilot.** "SkyPilot is causing issues" → fix how you USE it.
+See: `.claude/metalearning/2026-03-14-skypilot-purpose-misunderstanding.md`
 
 ### Optuna + ASHA Hyperparameter Optimization
 - `src/minivess/optimization/hpo_engine.py` — HPOEngine with TPE/CmaES + HyperbandPruner
@@ -338,6 +425,11 @@ Each of the 6 Prefect flows runs in its own Docker container:
 - Ignore user-provided URLs (arXiv, GitHub) — always fetch them for context
 - Hardcode specific task names (SDF, centerline, etc.) into multi-task infrastructure —
   use config-driven registries. This is an MLOps platform for ALL segmentation research.
+- Hardcode cloud providers, GPU types, instance counts, regions, or Docker registries
+  in SkyPilot YAMLs or Python code. ALL cloud config must be in Hydra config groups
+  (`configs/cloud/`, `configs/registry/`) overridable per lab and per user. One lab
+  wants 1x RTX 4090 on RunPod, another wants 8x A100 on AWS — both must work via
+  config, not code changes. This is an open-source academic repo for heterogeneous labs.
 - Use `import re` or regex patterns for parsing structured data (Python, YAML, JSON,
   log lines, metric names). Use proper parsers. "Regex is sufficient" is banned.
 - Suggest `python scripts/*.py` as a training or pipeline run command — use Prefect flows.
@@ -359,6 +451,16 @@ Each of the 6 Prefect flows runs in its own Docker container:
   in flow files — use `resolve_tracking_uri()` or fail loudly on missing env var.
 - Define `mlflow_tracking_uri` or any service URL in Dynaconf TOML files — they are read
   directly from env vars; TOML duplication creates a hidden second source of truth.
+- Write SkyPilot YAML with bare VM setup scripts (`apt-get install`, `uv sync`, `git clone`
+  in setup:). ALL cloud execution MUST use Docker images via `image_id:`. The Docker image
+  is pushed to GHCR and contains all deps. SkyPilot setup: is ONLY for data pull + config.
+  "But SkyPilot defaults to bare VM" is NOT an excuse — our repo mandate is Docker-only.
+  See: `.claude/metalearning/2026-03-14-skypilot-bare-vm-docker-violation.md`
+- Dump wall-of-text questions when the user asks for "interactive" input. ALWAYS use the
+  `AskUserQuestion` tool for interactive questions — clickable options, not markdown lists.
+  Maximum 4 questions per round; ask in iterative batches, not all at once. DevEx applies
+  to Claude-to-user interactions too, not just researcher-facing code.
+  See: `.claude/metalearning/2026-03-14-wall-of-text-bad-ux.md`
 
 ## TDD Workflow (Non-Negotiable)
 

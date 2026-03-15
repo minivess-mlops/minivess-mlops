@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan name="GCP Phase B-D Cold Start (Continue from Phase A Success)"
+      version="1.0"
+      created="2026-03-15"
+      status="ready-for-execution"
+      skills="self-learning-iterative-coder,ralph-loop">
+
+  <context>
+    <summary>
+      Phase A COMPLETE: GCP E2E pipeline verified. 910 MB artifacts in GCS.
+      Continue with Phase B (spot recovery), C (code polish), D (multi-model).
+    </summary>
+
+    <phase-a-results verified="2026-03-15T00:47:00Z">
+      <result>Training: sam3_vanilla on GCP T4 spot (europe-west1-b) — COMPLETED</result>
+      <result>Artifacts: best_val_loss.pth + last.pth in gs://minivess-mlops-mlflow-artifacts — UPLOADED</result>
+      <result>MLflow: Cloud Run europe-north1 with SA key signing — WORKING</result>
+      <result>Config + metrics artifacts also uploaded — VERIFIED</result>
+      <result>MLflow run URL: https://minivess-mlflow-615852151588.europe-north1.run.app/#/experiments/4</result>
+    </phase-a-results>
+
+    <gcp-infrastructure>
+      <cloud-run url="https://minivess-mlflow-615852151588.europe-north1.run.app" version="3.10.0" />
+      <cloud-sql ip="35.228.142.81" db="mlflow,optuna" />
+      <gcs-buckets>minivess-mlops-mlflow-artifacts, minivess-mlops-dvc-data, minivess-mlops-checkpoints</gcs-buckets>
+      <gar>europe-north1-docker.pkg.dev/minivess-mlops/minivess (public)</gar>
+      <sa>mlflow-server@ (signing), skypilot-training@ (compute)</sa>
+      <secret>mlflow-sa-key (mounted at /app/sa-key.json in Cloud Run)</secret>
+    </gcp-infrastructure>
+
+    <open-issues>
+      <issue id="714" title="Atomic checkpoint writes" phase="B1" />
+      <issue id="707" title="Atomic checkpoint + SHA256" phase="B1-B2" />
+      <issue id="686" title="Spot checkpointing MOUNT_CACHED + auto-resume" phase="B3-B5" />
+      <issue id="710" title="sam3_hybrid val_loss=NaN" phase="D" />
+      <issue id="680" title="SAM3 FP16 dtype RuntimeError" phase="D1" />
+      <issue id="708" title="Hydra cloud config groups" phase="C" />
+    </open-issues>
+  </context>
+
+  <tasks>
+    <task id="B1" title="Atomic checkpoint writes" issue="714" priority="P0">
+      <files>
+        src/minivess/pipeline/trainer.py (line 802)
+        src/minivess/pipeline/multi_metric_tracker.py (line 270)
+      </files>
+      <tests>tests/v2/unit/test_atomic_checkpoint.py</tests>
+    </task>
+
+    <task id="B2" title="SHA256 checkpoint verification" priority="P0">
+      <files>src/minivess/pipeline/checkpoint_integrity.py (NEW)</files>
+      <tests>tests/v2/unit/test_checkpoint_integrity.py</tests>
+    </task>
+
+    <task id="B3" title="Wire check_resume_state_task" issue="686" priority="P0">
+      <files>src/minivess/orchestration/flows/train_flow.py (line 169 — defined, never called)</files>
+      <tests>tests/v2/unit/test_checkpoint_resume.py</tests>
+    </task>
+
+    <task id="B4" title="Add MOUNT_CACHED to SkyPilot YAML" priority="P0">
+      <files>deployment/skypilot/smoke_test_gcp.yaml, deployment/skypilot/train_production.yaml</files>
+    </task>
+
+    <task id="B5" title="Spot preemption simulation" priority="P1">
+      <command>gcloud compute instances simulate-maintenance-event INSTANCE --zone ZONE</command>
+    </task>
+
+    <task id="C1" title="Add --cloud gcp to launch_smoke_test.py" priority="P1">
+      <files>scripts/launch_smoke_test.py</files>
+    </task>
+
+    <task id="C2" title="Close issues + update CLAUDE.md" priority="P0" />
+    <task id="C3" title="Commit all changes in coherent chunks" priority="P0" />
+
+    <task id="D1" title="Fix SAM3 FP16 dtype (#680)" issue="680" priority="P0" />
+    <task id="D2" title="Train all models on GCP spot" priority="P1" />
+  </tasks>
+</plan>

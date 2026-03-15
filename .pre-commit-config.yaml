@@ -17,6 +17,8 @@ repos:
         # mirrors-mypy ran in an isolated venv without torch/monai/pandera,
         # causing false "Class cannot subclass Any" [misc] errors (#225).
         pass_filenames: true
+        # Exclude Pulumi IaC files — they use a separate venv with pulumi SDK
+        exclude: ^deployment/pulumi/
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0

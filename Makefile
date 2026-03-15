@@ -4,7 +4,11 @@
 
 .PHONY: init-volumes scan sbom seccomp-audit-train install-trivy help \
        test-staging test-prod test-gpu test-e2e \
-       build-base-gpu build-base-cpu build-base-light build-bases requirements-tiers
+       build-base-gpu build-base-cpu build-base-light build-bases requirements-tiers \
+       ghcr-login push-ghcr \
+       smoke-test-preflight smoke-test-gpu smoke-test-all smoke-test-lambda smoke-test-lambda-all smoke-test-gcp smoke-test-gcp-all verify-smoke-test \
+       monitor-smoke-test diagnose-last-smoke-test \
+       dev-gpu dev-gpu-heavy dev-gpu-stop dev-gpu-ssh
 
 help:
 	@echo "MinIVess MLOps Makefile"
@@ -22,6 +26,24 @@ help:
 	@echo "  build-bases         Build all 3 base images"
 	@echo "  requirements-tiers  Regenerate requirements-{cpu,light}.txt from uv.lock"
 	@echo ""
+	@echo "GHCR (Docker Registry):"
+	@echo "  ghcr-login          Login to GitHub Container Registry"
+	@echo "  push-ghcr           Tag + push minivess-base:latest to GHCR"
+	@echo ""
+	@echo "RunPod Dev GPU (no Docker, RTX 4090/5090):"
+	@echo "  dev-gpu               Launch dev GPU on RunPod (MODEL=dynunet)"
+	@echo "  dev-gpu-heavy         Train sam3_hybrid + vesselfm (need >8 GB VRAM)"
+	@echo "  dev-gpu-stop          Stop dev GPU pod (preserves state)"
+	@echo "  dev-gpu-ssh           SSH into dev GPU pod"
+	@echo ""
+	@echo "Lambda Labs Smoke Tests (Docker, staging/prod):"
+	@echo "  smoke-test-preflight  Validate env vars + connectivity"
+	@echo "  smoke-test-lambda     Launch smoke test on Lambda A10 (MODEL=sam3_vanilla)"
+	@echo "  smoke-test-lambda-all Run all smoke tests on Lambda"
+	@echo "  smoke-test-gcp        Launch smoke test on GCP spot T4/L4 (MODEL=sam3_vanilla)"
+	@echo "  smoke-test-gcp-all    Run all smoke tests on GCP spot"
+	@echo "  verify-smoke-test     Verify smoke test results on cloud MLflow"
+	@echo ""
 	@echo "Infrastructure:"
 	@echo "  init-volumes        Fix Docker named volume ownership (run once after first up)"
 	@echo "  scan                Trivy vulnerability scan on all minivess-* images"
@@ -36,8 +58,9 @@ help:
 # Staging: no model loading, no integration, no slow tests. Target: <3 min.
 test-staging:
 	MINIVESS_ALLOW_HOST=1 uv run pytest tests/ -x -q \
-	  -m "not model_loading and not slow and not integration" \
+	  -m "not model_loading and not slow and not integration and not cloud_mlflow and not skypilot_cloud" \
 	  --ignore=tests/v2/quasi_e2e/ \
+	  --ignore=tests/v2/cloud/ \
 	  --timeout=60
 
 # Prod: everything except GPU instance tests. Includes slow + model loading.
@@ -63,6 +86,105 @@ test-gpu:
 	MINIVESS_ALLOW_HOST=1 uv run pytest tests/gpu_instance/ -x -q \
 	  -o "collect_ignore_glob=" \
 	  --timeout=600
+
+test-cloud-mlflow:  ## Run cloud MLflow tests (requires MLFLOW_CLOUD_* env vars)
+	uv run pytest tests/v2/cloud/ -m "cloud_mlflow or skypilot_cloud" -v
+
+test-pulumi:  ## Run Pulumi IaC validation tests
+	uv run pytest tests/v2/unit/test_pulumi_stack.py -v
+
+# ---------------------------------------------------------------------------
+# RunPod Dev GPU (no Docker, deps via uv, RTX 4090/5090)
+# ---------------------------------------------------------------------------
+# RunPod pods ARE containers — Docker-in-Docker is impossible.
+# This is the "dev" environment: direct uv execution, no Prefect.
+# For staging/prod (Docker mandatory): use Lambda Labs targets below.
+
+dev-gpu:  ## Launch dev GPU on RunPod RTX 4090/5090 (MODEL=dynunet)
+	uv run python scripts/launch_dev_runpod.py --model $(or $(MODEL),dynunet)
+
+dev-gpu-heavy:  ## Train heavy models on RunPod (sam3_hybrid + vesselfm, need >8 GB VRAM)
+	@echo "=== Heavy models that CANNOT train on local 8 GB GPU ==="
+	@echo "--- sam3_hybrid (~7.5 GB VRAM) ---"
+	uv run python scripts/launch_dev_runpod.py --model sam3_hybrid
+	@echo "--- vesselfm (~10 GB VRAM) ---"
+	uv run python scripts/launch_dev_runpod.py --model vesselfm
+
+dev-gpu-stop:  ## Stop dev GPU pod (preserves state, restart with 'sky start minivess-dev')
+	sky stop minivess-dev
+
+dev-gpu-ssh:  ## SSH into dev GPU pod for interactive work
+	sky ssh minivess-dev
+
+# ---------------------------------------------------------------------------
+# Lambda Labs Smoke Tests (Docker, staging/prod, A10/A100)
+# ---------------------------------------------------------------------------
+# Lambda provides real VMs — Docker works natively via SkyPilot image_id.
+# Use scripts/launch_smoke_test.py for private GHCR auth + multi-region rotation.
+
+smoke-test-preflight:  ## Validate env vars + connectivity before GPU smoke test
+	uv run python scripts/validate_smoke_test_env.py
+
+smoke-test-gpu:  ## Launch smoke test on RunPod RTX 4090 (MODEL=sam3_vanilla)
+	uv run python scripts/launch_smoke_test.py --model $(or $(MODEL),sam3_vanilla) --cloud runpod
+
+smoke-test-all:  ## Run all smoke tests on RunPod sequentially
+	@echo "=== Heavy models (need >8 GB VRAM) ==="
+	$(MAKE) smoke-test-gpu MODEL=sam3_hybrid
+	$(MAKE) smoke-test-gpu MODEL=vesselfm
+	@echo "=== Standard models ==="
+	$(MAKE) smoke-test-gpu MODEL=sam3_vanilla
+	$(MAKE) smoke-test-gpu MODEL=dynunet
+
+smoke-test-lambda:  ## Launch smoke test on Lambda Labs A10 (MODEL=sam3_vanilla)
+	uv run python scripts/launch_smoke_test.py --model $(or $(MODEL),sam3_vanilla) --cloud lambda
+
+smoke-test-lambda-all:  ## Run all smoke tests on Lambda Labs sequentially
+	@echo "=== Heavy models (need >8 GB VRAM) ==="
+	$(MAKE) smoke-test-lambda MODEL=sam3_hybrid
+	$(MAKE) smoke-test-lambda MODEL=vesselfm
+	@echo "=== Standard models ==="
+	$(MAKE) smoke-test-lambda MODEL=sam3_vanilla
+	$(MAKE) smoke-test-lambda MODEL=dynunet
+
+smoke-test-gcp:  ## Launch smoke test on GCP spot T4/L4 (MODEL=sam3_vanilla)
+	uv run python scripts/launch_smoke_test.py --model $(or $(MODEL),sam3_vanilla) --cloud gcp
+
+smoke-test-gcp-all:  ## Run all smoke tests on GCP spot sequentially
+	@echo "=== Heavy models (need >8 GB VRAM) ==="
+	$(MAKE) smoke-test-gcp MODEL=sam3_hybrid
+	$(MAKE) smoke-test-gcp MODEL=vesselfm
+	@echo "=== Standard models ==="
+	$(MAKE) smoke-test-gcp MODEL=sam3_vanilla
+	$(MAKE) smoke-test-gcp MODEL=dynunet
+
+verify-smoke-test:  ## Verify smoke test results on cloud MLflow
+	uv run python scripts/verify_smoke_test.py $(or $(MODEL),sam3_vanilla)
+
+monitor-smoke-test:  ## Monitor latest smoke test (Ralph loop, 15s poll)
+	uv run python scripts/ralph_monitor.py --latest --poll-interval 15
+
+diagnose-last-smoke-test:  ## Diagnose the most recent failed smoke test
+	uv run python scripts/ralph_monitor.py --diagnose-last
+
+# ---------------------------------------------------------------------------
+# GHCR (GitHub Container Registry) — push Docker images for SkyPilot
+# ---------------------------------------------------------------------------
+DOCKER_REGISTRY ?= ghcr.io/petteriteikari
+DOCKER_IMAGE_NAME ?= minivess-base
+DOCKER_IMAGE_TAG ?= latest
+DOCKER_IMAGE_FULL = $(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):$(DOCKER_IMAGE_TAG)
+
+ghcr-login:  ## Login to GHCR (requires GITHUB_TOKEN with write:packages)
+	@echo "Logging in to ghcr.io as $${GHCR_USERNAME:-petteriteikari}..."
+	@echo "$${GITHUB_TOKEN}" | docker login ghcr.io -u "$${GHCR_USERNAME:-petteriteikari}" --password-stdin
+
+push-ghcr: ghcr-login push-registry  ## Login to GHCR + push (convenience alias)
+
+push-registry:  ## Tag + push minivess-base to configured DOCKER_REGISTRY
+	docker tag minivess-base:latest $(DOCKER_IMAGE_FULL)
+	docker push $(DOCKER_IMAGE_FULL)
+	@echo "Pushed: $(DOCKER_IMAGE_FULL)"
 
 # ---------------------------------------------------------------------------
 # Docker base image builds (3-tier hierarchy)

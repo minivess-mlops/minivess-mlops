@@ -1,0 +1,18 @@
+# MLflow server for GCP Cloud Run
+# Includes psycopg2 (Cloud SQL) + google-cloud-storage (GCS artifacts)
+# Version pinned via MLFLOW_SERVER_VERSION in .env.example
+FROM ghcr.io/mlflow/mlflow:v3.10.0
+
+RUN pip install --no-cache-dir \
+    psycopg2-binary \
+    boto3 \
+    google-cloud-storage \
+    flask-wtf
+
+EXPOSE 5000
+
+# Entrypoint set by Cloud Run env vars (MLFLOW_BACKEND_STORE_URI, etc.)
+ENTRYPOINT ["mlflow", "server", \
+    "--host", "0.0.0.0", \
+    "--port", "5000", \
+    "--serve-artifacts"]

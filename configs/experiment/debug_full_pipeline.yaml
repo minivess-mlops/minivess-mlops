@@ -8,6 +8,7 @@
 #     -e EXPERIMENT=debug_full_pipeline train
 defaults:
   - override /checkpoint: lightweight
+  - override /profiling: debug
 
 experiment_name: debug_full_pipeline
 model: dynunet

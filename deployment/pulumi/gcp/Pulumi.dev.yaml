@@ -1,0 +1,8 @@
+encryptionsalt: v1:M4uUaLSotnQ=:v1:pwbQ+7cEHR57M4WH:FrbgZcCPAzE4vvFyHi28LnoDXka6mw==
+config:
+  minivess-gcp:mlflow_admin_password:
+    secure: v1:ge6AwxhF1KaTbRAZ:x/JXsufjsiuHB0mLIh3zrbGw5M0QV5uRAlmGUT1qoZIN/DynLLk=
+  minivess-gcp:db_password:
+    secure: v1:eyEMleM2eEaYCWPZ:euWNfSZs24EOZFG7wbfIemni1rHxqIb43v5Ef7tCeQS1kd4Usbg=
+  gcp:project: minivess-mlops
+  gcp:region: europe-north1
