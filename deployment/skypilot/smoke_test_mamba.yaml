@@ -181,18 +181,10 @@ run: |
   echo "Splits: $(cat configs/splits/splits.json | python -c 'import json,sys; d=json.load(sys.stdin); print(f"{len(d)} folds")')"
   echo "AMP policy: train=ON, val=OFF (D04, MONAI #4243)"
 
-  # Reset VRAM peak stats before training for accurate T09 measurement
-  python -c "import torch; torch.cuda.reset_peak_memory_stats(); print('VRAM peak stats reset')"
-
   # Execute training flow (python is on PATH from .venv/bin)
+  # T09: VRAM_PEAK_MB is printed by train_flow.py (in-process measurement).
+  # Previous separate-process capture always returned 0 (different CUDA context).
+  # Ralph Loop parses "VRAM_PEAK_MB=NNNN" from the training process stdout.
   python -m minivess.orchestration.flows.train_flow
-
-  # T09: Capture peak VRAM after training completes (closes #744)
-  VRAM_MB=$(python -c "import torch; print(torch.cuda.max_memory_allocated() // (1024 * 1024) if torch.cuda.is_available() else 0)")
-  VRAM_GB=$(python -c "import torch; mb = torch.cuda.max_memory_allocated() // (1024 * 1024) if torch.cuda.is_available() else 0; print(f'{mb / 1024:.2f}')")
-  GPU_NAME=$(python -c "import torch; print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')")
-  echo "VRAM_PEAK_MB=${VRAM_MB}"
-  echo "VRAM_PEAK_GB=${VRAM_GB}"
-  echo "T09 VRAM measurement: ${VRAM_MB} MB (${VRAM_GB} GB) on ${GPU_NAME}"
 
   echo "=== Smoke test complete. Sync back: make dev-gpu-sync ==="

@@ -555,6 +555,10 @@ class SegmentationTrainer:
         if checkpoint_dir is not None:
             validate_checkpoint_path(checkpoint_dir)
 
+        # T09: Reset peak VRAM stats so measurement captures training only (#744)
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+
         history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
         final_epoch = 0
         ckpt_cfg = self.config.checkpoint
@@ -883,6 +887,13 @@ class SegmentationTrainer:
                 else primary_tracker.best_value
             )
 
+        # T09: Capture peak VRAM from the training process's CUDA context (#744)
+        vram_peak_mb = 0
+        vram_peak_gb = 0.0
+        if torch.cuda.is_available():
+            vram_peak_mb = int(torch.cuda.max_memory_allocated() // (1024 * 1024))
+            vram_peak_gb = round(vram_peak_mb / 1024, 2)
+
         return {
             "best_val_loss": best_val_loss,
             "final_epoch": final_epoch,
@@ -892,4 +903,6 @@ class SegmentationTrainer:
                 for tracker in self._multi_tracker.trackers
             },
             "mlflow_run_id": _active_run_id,
+            "vram_peak_mb": vram_peak_mb,
+            "vram_peak_gb": vram_peak_gb,
         }
