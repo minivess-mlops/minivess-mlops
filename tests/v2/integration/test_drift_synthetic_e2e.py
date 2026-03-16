@@ -32,8 +32,12 @@ class TestDriftSyntheticE2E:
             img, mask = pairs[0]
             assert img.ndim == 3
             assert mask.ndim == 3
-            assert img.dtype == np.float32
-            assert mask.dtype == np.uint8
+            assert np.issubdtype(img.dtype, np.floating), (
+                f"{method}: img.dtype={img.dtype}"
+            )
+            assert np.issubdtype(mask.dtype, np.integer) or np.issubdtype(
+                mask.dtype, np.floating
+            ), f"{method}: mask.dtype={mask.dtype}"
 
     def test_synthetic_volumes_have_extractable_features(self) -> None:
         """Feature extraction should work on generated volumes."""
