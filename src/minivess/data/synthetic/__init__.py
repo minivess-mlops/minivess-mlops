@@ -21,6 +21,10 @@ from minivess.data.synthetic.base import SyntheticGeneratorAdapter
 if TYPE_CHECKING:
     import numpy as np
 from minivess.data.synthetic.debug_generator import DebugTubeGenerator
+from minivess.data.synthetic.monai_vqvae import MONAIVQVAEGenerator
+from minivess.data.synthetic.vamos import VaMosGenerator
+from minivess.data.synthetic.vascusynth import VascuSynthGenerator
+from minivess.data.synthetic.vesselfm_drand import VesselFMDrandGenerator
 
 # ---------------------------------------------------------------------------
 # Registry — maps method names to SyntheticGeneratorAdapter *classes*
@@ -28,6 +32,10 @@ from minivess.data.synthetic.debug_generator import DebugTubeGenerator
 # ---------------------------------------------------------------------------
 SYNTHETIC_GENERATORS: dict[str, type[SyntheticGeneratorAdapter]] = {
     "debug": DebugTubeGenerator,
+    "vesselFM_drand": VesselFMDrandGenerator,
+    "monai_vqvae": MONAIVQVAEGenerator,
+    "vamos": VaMosGenerator,
+    "vascusynth": VascuSynthGenerator,
 }
 
 
