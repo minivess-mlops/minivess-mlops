@@ -27,6 +27,7 @@ sources — plans and implementations are secondary derivatives.
 | P8 | `profiler-benchmarking-user-prompt.md` | 2026-03-13 | PyTorch profiling for GPU/CPU, MLflow logging, default ON, 17 reference links |
 | P9 | `s3-mounting-testing-user-prompt.md` | 2026-03-13 | Pulumi-based S3 provisioning, multi-cloud abstraction, access tests |
 | P10 | `repo-to-manuscript-prompt.md` | 2026-03-15 | Manuscript scaffold, KG bridge, OpenSpec alignment, intent expression principle |
+| P11 | `drift-detection-grafana-evidently-vesselnn-synthetic-generator-deploy-monitoring-plan.md` §0 | 2026-03-16 | Drift detection e2e: Grafana+Evidently+VesselNN+synthetic generators+deploy monitoring, Level 4 gate |
 
 ## Cross-Reference: Prompt → Plan → Implementation
 
@@ -38,10 +39,11 @@ sources — plans and implementations are secondary derivatives.
 | P4 | `advanced-segmentation-double-check.md` | SAM3 adapter, VesselFM adapter, Mamba adapter |
 | P5 | `e2e-testing-phase-*.xml` (3 phases) | `PipelineTriggerChain`, 73 validation checks |
 | P6 | `final-methods-quasi-e2e-testing-plan.xml` | `capability_discovery.py`, `quasi_e2e_runner.py` |
-| P7 | `synthetic-data-drift-detection-plan.xml` | Evidently, whylogs integration (partial) |
+| P7 | `synthetic-data-drift-detection-plan.xml` | Evidently, whylogs integration (partial, superseded by P11) |
 | P8 | `profiler-benchmarking-plan.xml` | Profiler module (partial) |
 | P9 | `s3-mounting-testing-plan.xml` | Pulumi DVC bucket (archived with UpCloud) |
 | P10 | `knowledge-management-upgrade.md` | KG navigator, domains, manuscript scaffold |
+| P11 | `drift-detection-grafana-evidently-vesselnn-synthetic-generator-deploy-monitoring-plan.md` | Full Level 4 drift monitoring: 6th+7th Prefect flows, 4 synthetic generators, Evidently Docker service, Alertmanager, Grafana timeline dashboard, whylogs continuous profiling, VesselNN DVC batching, multi-family champion evaluation |
 
 ## Intent Themes (Synthesized from P1-P10)
 
@@ -79,8 +81,8 @@ These files contain embedded user direction without a full verbatim prompt secti
 
 | Metric | Count |
 |--------|-------|
-| Explicit verbatim prompts | 10 |
+| Explicit verbatim prompts | 11 |
 | Files with contextual guidance | 8+ |
 | Total planning docs (.md + .xml) | 207 |
 | Plans with XML execution format | 64 |
-| Date range | 2026-02-23 to 2026-03-15 |
+| Date range | 2026-02-23 to 2026-03-16 |
