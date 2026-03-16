@@ -47,6 +47,14 @@ metalearning: []
 planning_docs:
   - file: docs/planning/drift-monitoring-implementation-plan.xml
     status: implemented
+  - file: docs/planning/complops-plan.md
+    status: planned
+  - file: docs/planning/eu-ai-act-plan.md
+    status: planned
+  - file: docs/planning/iec62304-framework-plan.md
+    status: planned
+  - file: docs/planning/federated-learning-plan.md
+    status: planned
 
 open_issues:
   - number: 610

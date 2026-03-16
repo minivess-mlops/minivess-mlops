@@ -21,7 +21,14 @@ metalearning:
   - file: .claude/metalearning/2026-03-07-silent-existing-failures.md
     applies_to: [tests/]
     rule: "Every test failure needs immediate action"
+  - file: .claude/metalearning/2026-03-10-silent-test-skips-optional-deps.md
+    applies_to: [tests/, pyproject.toml]
+    rule: "uv sync --all-extras required — plain uv sync silently skips 126 tests"
 
-planning_docs: []
+planning_docs:
+  - file: docs/planning/e2e-testing-1st-pass.xml
+    status: planned
+  - file: docs/planning/final-methods-quasi-e2e-testing-plan.xml
+    status: implemented
 
 open_issues: []

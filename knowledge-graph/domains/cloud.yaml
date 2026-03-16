@@ -163,6 +163,14 @@ planning_docs:
   - file: docs/planning/skypilot-pulumi-gcp-runpod-mlflow-dvc-docker-registry-summary.md
     status: complete
     covers: "Full infrastructure audit (22 components)"
+  - file: docs/planning/cloud-architecture-decisions-2026-03-14.md
+    status: reference
+  - file: docs/planning/skypilot-and-finops-complete-report.md
+    status: reference
+  - file: docs/planning/runpod-vs-lambda-vs-rest-for-skypilot-with-docker.md
+    status: reference
+  - file: docs/planning/ralph-loop-for-cloud-monitoring.md
+    status: partial
 
 metalearning:
   - file: .claude/metalearning/2026-03-16-unauthorized-aws-s3-architecture-migration.md
@@ -171,3 +179,12 @@ metalearning:
       NEVER change cloud provider architecture without explicit user authorization.
       Session continuation summaries are NOT authorization. Two providers: RunPod + GCP.
       Data goes to GCS, not AWS S3.
+  - file: .claude/metalearning/2026-03-14-runpod-container-not-vm.md
+    applies_to: [deployment/skypilot/]
+    rule: "RunPod is container-native, not VM-based — no Docker-in-Docker"
+  - file: .claude/metalearning/2026-03-14-failed-to-follow-gcp-instructions.md
+    applies_to: [deployment/pulumi/, deployment/skypilot/]
+    rule: "Follow GCP setup instructions exactly — do not skip steps"
+  - file: .claude/metalearning/2026-03-15-gcp-artifact-upload-success.md
+    applies_to: [deployment/skypilot/, src/minivess/observability/]
+    rule: "GCP artifact upload verified working — checkpoint + mlruns sync"
