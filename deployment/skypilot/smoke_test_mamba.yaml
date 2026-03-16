@@ -51,8 +51,9 @@ resources:
   # Build: DOCKER_BUILDKIT=1 docker build --build-arg INSTALL_MAMBA=1 ...
   # Push: make push-mamba (requires GITHUB_TOKEN with write:packages)
   image_id: docker:ghcr.io/petteriteikari/minivess-base:mamba-latest
-  # All RTX in this list are Ada Lovelace or Blackwell — BF16 ✓, VRAM ≥24 GB
-  # MambaVesselNet++ estimated VRAM: ~5–8 GB @ patch=(64,64,64), batch=1
+  # RTX 4090 = Ada Lovelace, RTX 5090 = Blackwell, RTX 3090 = Ampere — all BF16 ✓, ≥24 GB
+  # MambaVesselNet++ has no half-precision encoder → safe on all three (unlike SAM3)
+  # Estimated VRAM: ~5–8 GB @ patch=(64,64,64), batch=1
   accelerators: {RTX4090: 1, RTX5090: 1, RTX3090: 1}
   cloud: runpod
   # On-demand for reliability (spot often sold out on RunPod, 2026-03-14)

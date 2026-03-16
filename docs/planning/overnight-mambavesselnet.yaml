@@ -1,0 +1,32 @@
+# Overnight batch config for MambaVesselNet++ smoke test
+# Usage: /overnight-runner --config docs/planning/overnight-mambavesselnet.yaml
+#
+# What this does:
+#   1. Builds :mamba-latest Docker image (~30-45 min)
+#   2. Pushes to GHCR
+#   3. Runs smoke test on RunPod RTX 4090 via SkyPilot
+#   4. Captures VRAM measurement (T09)
+#   5. On success: commits, closes #744, creates PR
+#   6. On failure: creates GitHub issue with diagnosis
+#
+# Budget: $2.00 authorized. RunPod balance: $8.18.
+# Expected cost: $0.12-0.87 depending on retries.
+
+name: "MambaVesselNet T09/T10 Overnight Smoke Test"
+log_dir: /tmp/minivess-overnight-mamba
+timeout_sec: 7200  # 2 hours (Docker build ~45 min + smoke test ~15 min + retries)
+base_branch: test/mambavesselnet
+
+children:
+  - num: 1
+    plan: docs/planning/mambavesselnet-test-on-dev-runpod-followup.xml
+    label: "MambaVesselNet++ T09 VRAM + T10 Smoke Test on RunPod RTX 4090"
+    issues: [744]
+    branch: test/mambavesselnet
+    budget_usd: 2.00
+    on_success:
+      - "Close #744 with VRAM measurement"
+      - "Create PR test/mambavesselnet → main"
+    on_failure:
+      - "Create GitHub issue with diagnosis"
+      - "Do NOT hang — exit cleanly"
