@@ -1,6 +1,6 @@
 # Metalearning: Asking Humans What CLI Tools Can Answer (2026-03-16)
 
-## Severity: P0 — RECURRING failure (at least 3rd occurrence)
+## Severity: P0 — RECURRING failure (at least 4th occurrence)
 
 ## What Happened
 
@@ -52,9 +52,31 @@ Queryable state (use CLI, not AskUserQuestion):
 
 AskUserQuestion is for DECISIONS, not STATE QUERIES.
 
+## 4th Occurrence (2026-03-16) — Compound Error
+
+When asked to build an overnight plan for a **RunPod-only branch** (`qa/gcp-runpod-3rd-pass`
+on top of `test/mambavesselnet`), Claude asked 4 questions via AskUserQuestion including:
+- "What is the current state of GCP infrastructure?" — **WRONG context** (RunPod-only branch)
+- "What is the state of RunPod Network Volume?" — **CLI-queryable** (`sky storage ls`)
+- "What is the overnight budget cap?" — **should default to authorized $2 budget from plan**
+- "What TDD tasks?" — **specified in the existing plan** (`mambavesselnet-test-on-dev-runpod-followup.xml`)
+
+Double fuckup: (1) asked about CLI-queryable state, AND (2) asked about GCP when the branch
+and plan context is clearly RunPod-only. Read the branch name and the plan file first.
+
+## What Should Have Happened
+
+Before building an overnight plan for "the follow-up":
+1. `git branch --show-current` → `qa/gcp-runpod-3rd-pass` → based on `test/mambavesselnet`
+2. Read `docs/planning/mambavesselnet-test-on-dev-runpod-followup.xml` to understand scope
+3. `sky storage ls` to verify Network Volume state
+4. `docker manifest inspect ghcr.io/petteriteikari/minivess-base:mamba-latest` for image
+5. THEN build the plan — no questions needed
+
 ## Cross-References
 
 - `.claude/metalearning/2026-03-14-asking-instead-of-checking.md` — SAME failure, 2 days ago
 - `.claude/metalearning/2026-03-16-asking-humans-what-tools-should-detect.md` — related
 - `.claude/rules/no-unauthorized-infra.md` — ask for DECISIONS, not STATE
 - CLAUDE.md Design Goal #1: "EXCELLENT DevEx — zero manual work"
+- GitHub Issue #750 — P0 tracking issue for this recurring failure

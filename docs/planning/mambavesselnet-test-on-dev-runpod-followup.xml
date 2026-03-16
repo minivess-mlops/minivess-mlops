@@ -154,7 +154,7 @@ print('YAML pre-flight: ALL CHECKS PASSED')
         <cmd>python3 -c "
 import yaml
 from pathlib import Path
-p = Path('configs/experiment/smoke_mambavesselnet_cloud.yaml')
+p = Path('configs/experiment/smoke_mambavesselnet.yaml')
 if p.exists():
     cfg = yaml.safe_load(p.read_text(encoding='utf-8'))
     assert cfg.get('mixed_precision') is True, 'train AMP must be ON'
