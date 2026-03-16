@@ -25,9 +25,8 @@
 # Prerequisites:
 #   - RunPod API key configured: sky check runpod
 #   - Docker image pushed: make push-ghcr
-#   - UpCloud MLflow server running (Pulumi stack)
-#   - DVC data pushed to UpCloud S3: dvc push -r upcloud
-#   - .env populated with DVC_S3_*, MLFLOW_CLOUD_* variables
+#   - Data uploaded to Network Volume: make dev-gpu-upload-data LOCAL_DATA=data/raw/minivess
+#   - .env populated with RUNPOD_API_KEY, HF_TOKEN
 
 name: minivess-smoke-test
 
@@ -49,6 +48,12 @@ resources:
   # Switch to use_spot: true for production training to save 50-70%.
   use_spot: false
   disk_size: 40
+
+# RunPod Network Volume — persistent storage that survives pod termination.
+# Created via: sky volumes apply deployment/skypilot/minivess-dev-volume.yaml
+# Contains: data/raw/minivess (training data), mlruns/ (MLflow), checkpoints/
+volumes:
+  /opt/vol: minivess-dev
 
 envs:
   # Model to test (override with --env MODEL_FAMILY=...)
@@ -88,6 +93,14 @@ setup: |
   # NOTE: uv, git, scripts/ are NOT in the runner image.
   # Use python/dvc directly (.venv/bin is on PATH).
   cd /app
+
+  # HuggingFace login for gated models (SAM3, VesselFM).
+  if [ -n "${HF_TOKEN}" ]; then
+    huggingface-cli login --token "${HF_TOKEN}" --add-to-git-credential 2>/dev/null || true
+    echo "HF_TOKEN: logged in"
+  else
+    echo "WARNING: HF_TOKEN not set — gated models (SAM3) will fail"
+  fi
 
   # Data: Network Volume ONLY. Researcher uploads from local disk before launching.
   # Upload command (run ONCE from your local machine before first job):

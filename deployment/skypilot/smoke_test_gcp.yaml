@@ -87,6 +87,15 @@ setup: |
   # Parsed by scripts/infra_timing.py — plain key=value format (no regex needed).
   echo "TIMING: phase=docker_ready ts=$(date +%s)"
 
+  # HuggingFace login for gated models (SAM3, VesselFM).
+  # HF_TOKEN is passed via SkyPilot envs: block from the launching machine.
+  if [ -n "${HF_TOKEN}" ]; then
+    huggingface-cli login --token "${HF_TOKEN}" --add-to-git-credential 2>/dev/null || true
+    echo "HF_TOKEN: logged in"
+  else
+    echo "WARNING: HF_TOKEN not set — gated models (SAM3) will fail"
+  fi
+
   # Data: GCS bucket via DVC using Application Default Credentials (ADC).
   # GCP VMs authenticate automatically via service account — no key files needed.
   # NEVER use UpCloud S3 for GCP (wrong architecture — caused 8+ failed jobs 2026-03-16).
