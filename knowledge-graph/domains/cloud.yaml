@@ -1,0 +1,190 @@
+domain: cloud
+description: >
+  Cloud provider architecture, data storage, DVC remotes, environment mapping.
+  TWO providers: RunPod (env/dev) + GCP (staging/prod). No others without explicit user authorization.
+last_reviewed: "2026-03-16"
+
+# ─── HARD CONSTRAINT ──────────────────────────────────────────────────────────
+# The repo has EXACTLY two cloud compute providers. Adding a third (AWS, Azure,
+# Lambda Labs, etc.) requires EXPLICIT user authorization. This constraint exists
+# because the project is an open-source academic MLOps platform — labs override
+# cloud config via Hydra groups, they don't change the code.
+#
+# Metalearning: .claude/metalearning/2026-03-16-unauthorized-aws-s3-architecture-migration.md
+# ───────────────────────────────────────────────────────────────────────────────
+
+providers:
+  runpod:
+    environment: env
+    role: "Dev/prototyping — hacky, optional. For researchers who prefer RunPod."
+    status: active
+    compute: "SkyPilot (cloud: runpod)"
+    storage: "Network Volume (data uploaded from local disk)"
+    mlflow: "File-based on Network Volume (/opt/vol/mlruns)"
+    data_flow: "Local disk → sky rsync up → Network Volume"
+    sync_back: "make dev-gpu-sync (sky rsync down /opt/vol/mlruns/ → local mlruns/)"
+    assumption: "Cannot assume ANY GCP infrastructure exists. Standalone."
+    skypilot_yamls:
+      - deployment/skypilot/dev_runpod.yaml
+      - deployment/skypilot/smoke_test_gpu.yaml
+      - deployment/skypilot/smoke_test_mamba.yaml
+    hydra_config: configs/cloud/runpod_dev.yaml
+
+  gcp:
+    environment: "staging + prod"
+    role: "Production-grade. Full managed cloud stack. All infrastructure via Pulumi IaC."
+    status: active
+    project: minivess-mlops
+    region: europe-north1  # Finland — closest to Helsinki
+    compute: "SkyPilot (cloud: gcp), L4 spot preferred"
+    storage: "GCS (Google Cloud Storage)"
+    mlflow: "Cloud Run MLflow server (optional, enable_cloud_run config)"
+    iac: "Pulumi (deployment/pulumi/gcp/)"
+    data_flow: "Local disk → gsutil cp → GCS bucket, or DVC push to GCS"
+    env_file_section: ".env.example lines 381-407"
+    skypilot_yamls:
+      - deployment/skypilot/smoke_test_gcp.yaml
+      - deployment/skypilot/train_production.yaml
+      - deployment/skypilot/train_hpo.yaml
+    hydra_config: configs/cloud/gcp_spot.yaml
+
+    # GCS Buckets (created by Pulumi IaC)
+    gcs_buckets:
+      mlflow_artifacts: minivess-mlops-mlflow-artifacts
+      dvc_data: minivess-mlops-dvc-data
+      checkpoints: minivess-mlops-checkpoints
+
+    # Docker registry (Artifact Registry)
+    docker_registry:
+      type: gar  # Google Artifact Registry
+      url: europe-north1-docker.pkg.dev/minivess-mlops/minivess
+      config: configs/registry/gar.yaml
+
+    # Cloud SQL
+    database:
+      type: postgres_15
+      instance: db-g1-small
+      databases: [mlflow, optuna]
+
+    # Service accounts
+    service_accounts:
+      training: skypilot-training
+      mlflow: mlflow-server  # Only when Cloud Run enabled
+
+archived_providers:
+  upcloud:
+    status: "sunsetting (conditional — see user_cloud_accounts.md)"
+    was_used_for: "MLflow server VPS, DVC S3 storage"
+    replacement: "GCS for data, Cloud Run MLflow for tracking"
+    code: deployment/archived/upcloud/
+
+  lambda_labs:
+    status: archived
+    reason: "No EU availability"
+    code: deployment/archived/lambda/
+
+# ─── DVC REMOTE STRATEGY ──────────────────────────────────────────────────────
+# Each environment uses a different DVC remote for data access.
+# See: .dvc/config for currently configured remotes
+dvc_remotes:
+  minio:
+    url: "s3://dvc-data"
+    purpose: "Local Docker Compose development (default remote)"
+    credentials: "minioadmin/minioadmin (Docker Compose stack)"
+    environment: local
+
+  gcs:
+    url: "gs://minivess-mlops-dvc-data"
+    purpose: "GCP staging/prod — canonical cloud data store"
+    credentials: "GCP service account (Application Default Credentials)"
+    environment: "staging, prod"
+    env_var: "DVC_REMOTE=gcs"
+    config_template: configs/dvc/remotes.yaml
+
+  remote_storage:
+    url: "s3://minivessdataset"
+    purpose: "READ-ONLY public data source (original dataset upload)"
+    credentials: "None (public bucket)"
+    environment: "any (fallback for initial data download)"
+    note: "This is the DATA ORIGIN, not a production backend. Use for first-time data download only."
+
+  runpod_network_volume:
+    purpose: "Data cache on RunPod Network Volume (/opt/vol/data/)"
+    data_flow: "Upload from local: make dev-gpu-upload-data"
+    environment: env
+    note: "Not a DVC remote — direct file copy via sky rsync"
+
+# ─── ENVIRONMENT MAPPING ──────────────────────────────────────────────────────
+# Maps the three-environment model to actual execution targets
+environments:
+  local:
+    docker: "Docker-free or Docker Compose"
+    compute: "Local GPU (RTX 2070 Super, 8 GB)"
+    mlflow: "mlruns/ (local filesystem)"
+    dvc_remote: minio
+    purpose: "Fast iteration, uv run pytest"
+
+  env:
+    docker: "Docker image via SkyPilot image_id"
+    compute: "RunPod spot/on-demand (RTX 4090, 24 GB)"
+    mlflow: "File-based on Network Volume"
+    dvc_remote: "None (data uploaded from local via sky rsync)"
+    purpose: "Quick GPU experiments, hacky, standalone"
+    assumption: "No GCP infrastructure required"
+
+  staging:
+    docker: "Docker image via SkyPilot image_id"
+    compute: "GCP L4 spot"
+    mlflow: "Cloud Run MLflow (GCS artifacts)"
+    dvc_remote: gcs
+    purpose: "Pre-production validation"
+
+  prod:
+    docker: "Docker image via SkyPilot image_id"
+    compute: "GCP L4/A100 spot"
+    mlflow: "Cloud Run MLflow (GCS artifacts)"
+    dvc_remote: gcs
+    purpose: "Final training runs, paper results"
+
+# ─── PLANNING DOCS ────────────────────────────────────────────────────────────
+planning_docs:
+  - file: docs/planning/gcp-setup-tutorial.md
+    status: implemented
+    covers: "Step-by-step GCP setup for researchers"
+  - file: docs/planning/gcp-spot-with-skypilot-and-pulumi-up-plan.xml
+    status: implemented
+    covers: "GCP architecture plan with SkyPilot + Pulumi"
+  - file: docs/planning/gcp-vs-lambda-availability.md
+    status: complete
+    covers: "Why GCP over Lambda Labs (availability)"
+  - file: docs/planning/gcp-phase-b-d-cold-start.xml
+    status: implemented
+    covers: "Checkpoint/resume strategy for spot instances"
+  - file: docs/planning/skypilot-pulumi-gcp-runpod-mlflow-dvc-docker-registry-summary.md
+    status: complete
+    covers: "Full infrastructure audit (22 components)"
+  - file: docs/planning/cloud-architecture-decisions-2026-03-14.md
+    status: reference
+  - file: docs/planning/skypilot-and-finops-complete-report.md
+    status: reference
+  - file: docs/planning/runpod-vs-lambda-vs-rest-for-skypilot-with-docker.md
+    status: reference
+  - file: docs/planning/ralph-loop-for-cloud-monitoring.md
+    status: partial
+
+metalearning:
+  - file: .claude/metalearning/2026-03-16-unauthorized-aws-s3-architecture-migration.md
+    applies_to: [deployment/skypilot/, scripts/configure_dvc_remote.py, .dvc/config]
+    rule: >
+      NEVER change cloud provider architecture without explicit user authorization.
+      Session continuation summaries are NOT authorization. Two providers: RunPod + GCP.
+      Data goes to GCS, not AWS S3.
+  - file: .claude/metalearning/2026-03-14-runpod-container-not-vm.md
+    applies_to: [deployment/skypilot/]
+    rule: "RunPod is container-native, not VM-based — no Docker-in-Docker"
+  - file: .claude/metalearning/2026-03-14-failed-to-follow-gcp-instructions.md
+    applies_to: [deployment/pulumi/, deployment/skypilot/]
+    rule: "Follow GCP setup instructions exactly — do not skip steps"
+  - file: .claude/metalearning/2026-03-15-gcp-artifact-upload-success.md
+    applies_to: [deployment/skypilot/, src/minivess/observability/]
+    rule: "GCP artifact upload verified working — checkpoint + mlruns sync"

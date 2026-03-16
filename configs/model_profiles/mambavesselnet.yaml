@@ -1,0 +1,29 @@
+name: mambavesselnet
+divisor: 16
+model_overhead_mb: 1400
+bytes_per_voxel_amp: 8
+bytes_per_voxel_fp32: 16
+max_batch_size:
+  cpu: 1
+  gpu_low: 1
+  gpu_high: 2
+  gpu_extreme: 4
+default_patch_xy: 64
+notes: >
+  MambaVesselNet++ (Xu & Chen et al. 2025, ACM TOMM).
+  5-level UNet with UnetrBasicBlock encoder + stride-2 Conv3d downsampling,
+  8 BidirMamba blocks at 768 channels (bottleneck), UnetrUpBlock decoder.
+  Divisor = 2^4 = 16 (4 downsampling levels). Default patch = 64x64x64.
+  mamba-ssm requires CUDA compilation (INSTALL_MAMBA=1 Docker build arg).
+  AMP policy: conservative — train ON, val OFF (MONAI #4243, D04).
+  VRAM not yet measured (T09 — requires GPU hardware with mamba-ssm compiled).
+vram:
+  inference_gb: null
+  training_gb: null
+  measured: false
+  measured_gpu: null
+  measured_date: null
+  measured_config:
+    patch_size: [64, 64, 64]
+    batch_size: 1
+  notes: "T09 pending — requires GPU with mamba-ssm CUDA compilation (INSTALL_MAMBA=1)"

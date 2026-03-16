@@ -17,7 +17,7 @@ model: sam3_hybrid
 model_family: sam3_hybrid
 losses:
   - dice_ce
-max_epochs: 2
+max_epochs: 3
 num_folds: 1
 debug: true
 

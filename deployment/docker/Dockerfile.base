@@ -71,6 +71,21 @@ COPY configs/ configs/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
+# Phase C (optional): compile mamba-ssm CUDA extensions.
+# mamba-ssm==2.3.1 ships source-only — no pre-built wheels. Requires nvcc which
+# is available in the devel builder stage but NOT in the runtime runner stage.
+# Compiled .so files land in /app/.venv and are COPY'd to runner at line ~129.
+#
+# Gate: ARG INSTALL_MAMBA=0 keeps default build time unchanged for labs without
+# Mamba needs. Set INSTALL_MAMBA=1 only for GPU images that run MambaVesselNet.
+#
+# Usage: docker build --build-arg INSTALL_MAMBA=1 -f deployment/docker/Dockerfile.base .
+ARG INSTALL_MAMBA=0
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if [ "$INSTALL_MAMBA" = "1" ]; then \
+        uv sync --frozen --no-dev --extra mamba-ssm; \
+    fi
+
 # ── Stage 2: Runner ───────────────────────────────────────────────────────────
 # Minimal runtime — NO uv, NO git, NO curl, NO pip, NO CUDA headers.
 # PyTorch wheels bundle their own CUDA math libs (cublas, cufft, etc.)

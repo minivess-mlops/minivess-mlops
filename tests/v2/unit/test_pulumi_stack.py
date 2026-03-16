@@ -1,7 +1,11 @@
 """L3 Pulumi IaC validation tests (#623).
 
-Validates the UpCloud MLflow Pulumi stack using plain string checks
-and YAML/INI parsing. No cloud credentials required — runs in staging.
+Validates Pulumi stacks using plain string checks and YAML/INI parsing.
+No cloud credentials required — runs in staging.
+
+UpCloud stack archived 2026-03-16: __main__.py moved to deployment/archived/upcloud/pulumi/
+Active GCP stack: deployment/pulumi/gcp/__main__.py
+Shared Pulumi.yaml/pyproject.toml: deployment/pulumi/ (still present)
 
 Approach: read raw file content and check for required substrings.
 Matches existing pattern in test_dockerfile_mlflow.py (reviewer consensus).
@@ -15,6 +19,8 @@ import pytest
 import yaml
 
 PULUMI_DIR = Path("deployment/pulumi")
+# UpCloud __main__.py archived 2026-03-16 — still testable in archived location
+PULUMI_UPCLOUD_DIR = Path("deployment/archived/upcloud/pulumi")
 
 
 @pytest.mark.pulumi
@@ -57,11 +63,12 @@ class TestPulumiYamlConfig:
 
     def test_pyproject_uses_uv(self) -> None:
         """pyproject.toml exists (uv toolchain) with required deps."""
+        # UpCloud pyproject.toml still in deployment/pulumi/ (shared Pulumi root)
         pyproject = PULUMI_DIR / "pyproject.toml"
         assert pyproject.exists(), "Pulumi stack must use pyproject.toml (uv)"
         content = pyproject.read_text(encoding="utf-8")
         assert "pulumi" in content
-        assert "pulumi-upcloud" in content
+        assert "pulumi-upcloud" in content  # archived stack deps still in pyproject
         assert "pulumi-command" in content
 
 
@@ -76,7 +83,7 @@ class TestPulumiMainModuleTemplates:
 
     @pytest.fixture()
     def main_content(self) -> str:
-        return (PULUMI_DIR / "__main__.py").read_text(encoding="utf-8")
+        return (PULUMI_UPCLOUD_DIR / "__main__.py").read_text(encoding="utf-8")
 
     def test_docker_compose_has_required_env_vars(self, main_content: str) -> None:
         """Deploy template includes all required env vars."""
@@ -149,7 +156,7 @@ class TestPulumiResourceTypes:
 
     def test_required_resource_types_in_source(self) -> None:
         """Source code references all required UpCloud resource types."""
-        content = (PULUMI_DIR / "__main__.py").read_text(encoding="utf-8")
+        content = (PULUMI_UPCLOUD_DIR / "__main__.py").read_text(encoding="utf-8")
         required_types = [
             "ManagedDatabasePostgresql",
             "ManagedObjectStorage",
@@ -163,14 +170,14 @@ class TestPulumiResourceTypes:
 
     def test_remote_command_provisioning(self) -> None:
         """Source code uses pulumi-command for remote provisioning."""
-        content = (PULUMI_DIR / "__main__.py").read_text(encoding="utf-8")
+        content = (PULUMI_UPCLOUD_DIR / "__main__.py").read_text(encoding="utf-8")
         assert "command.remote.Command" in content
         assert "install-docker" in content
         assert "deploy-mlflow" in content
 
     def test_required_outputs_exported(self) -> None:
         """Stack exports required output values."""
-        content = (PULUMI_DIR / "__main__.py").read_text(encoding="utf-8")
+        content = (PULUMI_UPCLOUD_DIR / "__main__.py").read_text(encoding="utf-8")
         required_exports = [
             "server_ip",
             "mlflow_url",
@@ -190,7 +197,7 @@ class TestPulumiResourceTypes:
 
     def test_depends_on_ordering(self) -> None:
         """Remote commands have explicit depends_on for ordering."""
-        content = (PULUMI_DIR / "__main__.py").read_text(encoding="utf-8")
+        content = (PULUMI_UPCLOUD_DIR / "__main__.py").read_text(encoding="utf-8")
         assert "depends_on=[server]" in content
         assert "depends_on=[provision_docker]" in content
 
@@ -201,7 +208,7 @@ class TestPulumiDvcBucket:
 
     @pytest.fixture()
     def main_content(self) -> str:
-        return (PULUMI_DIR / "__main__.py").read_text(encoding="utf-8")
+        return (PULUMI_UPCLOUD_DIR / "__main__.py").read_text(encoding="utf-8")
 
     def test_dvc_data_bucket_exists(self, main_content: str) -> None:
         """Pulumi stack creates a 'minivess-dvc-data' bucket."""

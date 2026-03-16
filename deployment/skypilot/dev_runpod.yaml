@@ -4,33 +4,46 @@
 # Uses SkyPilot's default RunPod image + installs deps via uv in setup.
 # All persistent data lives on RunPod Network Volume "minivess-dev".
 #
-# Architecture (plan v4.0):
+# Architecture (plan v5.0 — UpCloud dropped 2026-03-16):
 #   RunPod Network Volume (persistent NVMe, $3.50/month for 50 GB):
-#     /opt/vol/data/raw/minivess/   ← DVC data (pulled once, cached forever)
+#     /opt/vol/data/raw/minivess/   ← training data (loaded once, cached forever)
 #     /opt/vol/mlruns/              ← MLflow tracking (file-based, no server)
 #     /opt/vol/checkpoints/         ← Saved model weights
 #     /opt/vol/.cache/huggingface/  ← SAM3 ViT-32L (~1.8 GB), VesselFM (~120 MB)
 #     /opt/vol/.cache/torch/        ← torchvision/torchhub weights
 #
-#   Key optimization: model weights download ONCE (sam3_vanilla first run),
-#   then cached on the Network Volume forever. sam3_hybrid, sam3_topolora
-#   reuse the same SAM3 encoder weights — zero re-download.
+#   Data loading strategy (UpCloud DROPPED):
+#     1. If data already on Network Volume → SKIP (zero cost, instant)
+#     2. If not → rsync from local machine first (one-time, run before launch):
+#        make dev-gpu-upload-data
+#        (runs: sky rsync up data/raw/minivess/ minivess-dev:/opt/vol/data/raw/)
+#     3. Fallback: DVC pull from AWS S3 (s3://minivessdataset, no custom credentials)
+#
+#   MLflow sync back to local (closes #716):
+#     make dev-gpu-sync
+#     (runs: sky rsync down minivess-dev:/opt/vol/mlruns/ mlruns/)
 #
 # Launch:
+#   sky launch deployment/skypilot/dev_runpod.yaml --env MODEL_FAMILY=dynunet
 #   sky launch deployment/skypilot/dev_runpod.yaml --env MODEL_FAMILY=sam3_vanilla
-#   sky launch deployment/skypilot/dev_runpod.yaml --env MODEL_FAMILY=sam3_hybrid
-#   sky launch deployment/skypilot/dev_runpod.yaml --env MODEL_FAMILY=vesselfm
+#   make dev-gpu-launch MODEL=dynunet
 #
-# Volume setup (one-time):
-#   sky volumes apply deployment/skypilot/minivess-dev-volume.yaml
+# Volume setup (one-time, auto-detected in pre-flight):
+#   sky storage apply deployment/skypilot/minivess-dev-volume.yaml
+#   make dev-gpu-upload-data    # rsync local data/ to Network Volume
 #
-# Cost: RTX 3090 $0.22/hr (community), ~15-20 min/run = ~$0.06-0.08/run
+# Post-run sync:
+#   make dev-gpu-sync           # pull /opt/vol/mlruns/ back to local mlruns/
+#   make dev-gpu-cleanup        # optional: clear volume checkpoints/logs
+#
+# Cost: RTX 4090 $0.74/hr (on-demand), ~15-20 min/run = ~$0.20/run
+#       RTX 3090 $0.34/hr (community), ~15-20 min/run = ~$0.09/run
 #
 # Prerequisites:
-#   - RunPod API key configured: sky check runpod
-#   - Network volume "minivess-dev" exists: sky volumes ls
-#   - DVC data pushed to UpCloud S3: dvc push -r upcloud
-#   - .env populated with DVC_S3_*, HF_TOKEN
+#   - RunPod API key: sky check runpod
+#   - Network volume exists: sky storage ls | grep minivess-dev (auto-checked)
+#   - Local data populated: ls data/raw/minivess/imagesTr/ | wc -l → should be 47
+#   - .env populated with HF_TOKEN (for SAM3/VesselFM)
 
 name: minivess-dev
 
@@ -57,16 +70,10 @@ envs:
   # Model to train (override with --env MODEL_FAMILY=...)
   MODEL_FAMILY: dynunet
 
-  # DVC data pull credentials (UpCloud S3)
-  DVC_S3_ENDPOINT_URL: ${DVC_S3_ENDPOINT_URL}
-  DVC_S3_ACCESS_KEY: ${DVC_S3_ACCESS_KEY}
-  DVC_S3_SECRET_KEY: ${DVC_S3_SECRET_KEY}
-  DVC_S3_BUCKET: ${DVC_S3_BUCKET}
-  DVC_REMOTE: upcloud
-
-  # boto3 CRC32C checksum workaround for UpCloud S3 (H17)
-  AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
-  AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
+  # Data source: Network Volume cache-first. No UpCloud (dropped 2026-03-16).
+  # If data missing on volume, setup falls back to AWS S3 (no custom credentials).
+  # For first-time data load: run `make dev-gpu-upload-data` from local machine.
+  DVC_REMOTE: remote_storage
 
   # File-based MLflow on Network Volume — NO remote server needed
   MLFLOW_TRACKING_URI: /opt/vol/mlruns
@@ -156,13 +163,13 @@ setup: |
      [ "$(ls /opt/vol/data/raw/minivess/imagesTr/ 2>/dev/null | wc -l)" -gt 10 ]; then
     echo "Training data already cached on Network Volume — skipping DVC pull"
   else
-    echo "First run: pulling training data via DVC (~2.6 GB, ~5 min)"
+    echo "First run: pulling training data via DVC from AWS S3 (~2.6 GB, ~5 min)"
+    echo "  (UpCloud dropped 2026-03-16. Data source: s3://minivessdataset)"
+    echo "  TIP: Run 'make dev-gpu-upload-data' from local machine for faster first-time load."
     dvc init --no-scm -f
 
-    dvc remote add upcloud s3://${DVC_S3_BUCKET}
-    dvc remote modify upcloud endpointurl ${DVC_S3_ENDPOINT_URL}
-    dvc remote modify --local upcloud access_key_id ${DVC_S3_ACCESS_KEY}
-    dvc remote modify --local upcloud secret_access_key ${DVC_S3_SECRET_KEY}
+    # Use remote_storage (AWS S3, no custom credentials required)
+    dvc remote add remote_storage s3://minivessdataset
 
     # Write minimal DVC pipeline for data pull
     cat > dvc.yaml << 'DVCEOF'
@@ -188,7 +195,7 @@ setup: |
   LOCKEOF
 
     echo "dvc_pull_start=$(date +%s.%N)" >> "$TIMING_FILE"
-    dvc pull -r upcloud
+    dvc pull -r remote_storage
     echo "dvc_pull_end=$(date +%s.%N)" >> "$TIMING_FILE"
     # Move data to persistent volume
     if [ -d data/raw/minivess ] && [ ! -d /opt/vol/data/raw/minivess/imagesTr ]; then

@@ -136,6 +136,64 @@ def _require_sam3(config: ModelConfig, *, encoder_frozen: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# MambaVesselNet helpers
+# ---------------------------------------------------------------------------
+
+
+def _mamba_available() -> bool:
+    """Check if mamba-ssm is installed (source-only, requires CUDA compilation).
+
+    Returns
+    -------
+    bool
+        True if ``mamba_ssm`` can be imported, False otherwise.
+    """
+    try:
+        import mamba_ssm  # noqa: F401
+
+        return True
+    except (ImportError, AttributeError):
+        logger.debug("mamba-ssm not installed (source-only, requires CUDA compilation)")
+        return False
+
+
+_MAMBA_INSTALL_INSTRUCTIONS = """
+════════════════════════════════════════════════════════════════
+ MAMBA-SSM IS NOT INSTALLED — requires CUDA compilation
+════════════════════════════════════════════════════════════════
+
+ mamba-ssm ships source-only (no pre-built wheels).
+ It requires nvcc and CUDA headers to compile.
+
+ Option 1: Build Docker image with INSTALL_MAMBA=1 (recommended):
+   docker build --build-arg INSTALL_MAMBA=1 \\
+     -f deployment/docker/Dockerfile.base .
+
+ Option 2: Install locally (requires nvcc in PATH):
+   uv sync --extra mamba-ssm
+
+════════════════════════════════════════════════════════════════
+"""
+
+
+def _require_mamba() -> None:
+    """Validate mamba-ssm availability; raise loudly if not installed.
+
+    Raises
+    ------
+    RuntimeError
+        When mamba-ssm package is not installed.
+    """
+    if not _mamba_available():
+        logger.error(_MAMBA_INSTALL_INSTRUCTIONS)
+        msg = (
+            "mamba-ssm not installed. "
+            "See installation instructions logged above (ERROR level)."
+        )
+        raise RuntimeError(msg)
+
+
+# ---------------------------------------------------------------------------
 # MONAI adapter registrations
 # ---------------------------------------------------------------------------
 
@@ -213,6 +271,13 @@ def _build_sam3_hybrid(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     return Sam3HybridAdapter(config)
 
 
+def _build_mambavesselnet(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
+    _require_mamba()
+    from minivess.adapters.mambavesselnet import MambaVesselNetAdapter
+
+    return MambaVesselNetAdapter(config)
+
+
 # Populate registry — order does not matter; dict lookup is O(1)
 def _populate_registry() -> None:
     from minivess.config.models import ModelFamily
@@ -228,6 +293,7 @@ def _populate_registry() -> None:
     _MODEL_REGISTRY[ModelFamily.SAM3_VANILLA] = _build_sam3_vanilla
     _MODEL_REGISTRY[ModelFamily.SAM3_TOPOLORA] = _build_sam3_topolora
     _MODEL_REGISTRY[ModelFamily.SAM3_HYBRID] = _build_sam3_hybrid
+    _MODEL_REGISTRY[ModelFamily.MAMBAVESSELNET] = _build_mambavesselnet
 
 
 _populate_registry()

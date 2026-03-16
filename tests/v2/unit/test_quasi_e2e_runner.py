@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from torch import nn
 
-from minivess.adapters.model_builder import _sam3_package_available
+from minivess.adapters.model_builder import _mamba_available, _sam3_package_available
 from minivess.testing.capability_discovery import (
     build_practical_combinations,
     discover_all_losses,
@@ -25,6 +25,8 @@ from minivess.testing.quasi_e2e_runner import (
 _SAM3_FAMILIES = frozenset({"sam3_vanilla", "sam3_topolora", "sam3_hybrid"})
 # SAM3 families that require ≥16 GB VRAM for training (VRAM check raises at build time)
 _SAM3_HIGH_VRAM = frozenset({"sam3_topolora"})
+# Mamba families require CUDA-compiled mamba-ssm (INSTALL_MAMBA=1 Docker build)
+_MAMBA_FAMILIES = frozenset({"mambavesselnet", "comma_mamba", "ulike_mamba"})
 
 
 def _gpu_vram_gb() -> float:
@@ -70,7 +72,7 @@ class TestBuildModelForTest:
         assert isinstance(model, nn.Module)
 
     def test_all_implemented_models_build(self) -> None:
-        """Every discovered model can be instantiated (SAM3 skipped when not installed)."""
+        """Every discovered model can be instantiated (SAM3/Mamba skipped when not installed)."""
         vram_gb = _gpu_vram_gb()
         models = discover_implemented_models()
         for model_name in models:
@@ -78,6 +80,8 @@ class TestBuildModelForTest:
                 continue  # SAM3 requires real pretrained weights — skip when not installed
             if model_name in _SAM3_HIGH_VRAM and vram_gb < 16.0:
                 continue  # SAM3 LoRA requires ≥16 GB VRAM — skip on insufficient hardware
+            if model_name in _MAMBA_FAMILIES and not _mamba_available():
+                continue  # Mamba requires CUDA-compiled mamba-ssm (INSTALL_MAMBA=1)
             model = build_model_for_test(model_name)
             assert isinstance(model, nn.Module), f"Failed to build {model_name}"
 

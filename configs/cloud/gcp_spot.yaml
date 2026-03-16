@@ -22,3 +22,9 @@ docker_image: europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
 
 # MLflow tracking via GCP Cloud Run (MLFLOW_GCP_URI in .env).
 mlflow_env_var: MLFLOW_GCP_URI
+
+# Training behavior on cloud GPUs (L4: 24 GB, A100: 40-80 GB).
+# Cloud GPUs have enough VRAM to validate every epoch — no sentinel needed.
+# Overrides the OOM-sentinel (val_interval=max_epochs+1) used on 8 GB GPUs.
+# See: docs/planning/hydra-double-check.md
+val_interval: 1

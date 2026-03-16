@@ -458,6 +458,20 @@ citations:
       Note: focuses on architecture, has NO reproducibility tooling, no multi-cloud,
       no experiment tracking, no MLOps pipeline. The architecture exists; the platform does not.
 
+  xu_2025_mambavesselnet_plus:
+    authors: "Xu S, Chen Y, Liu Z, He X"
+    year: 2025
+    title: "MambaVesselNet++: Advancing 3D Cerebrovascular Segmentation with a Selective State Space Model"
+    venue: "ACM Transactions on Multimedia Computing, Communications, and Applications (TOMM)"
+    url: "https://doi.org/10.1145/3757324"
+    used_in: [model_adapter_pattern, primary_3d_model]
+    abstract_snippet: >
+      Extended journal version of chen_2024_mambavesselnet. MambaVesselNet++ improves
+      over the conference version with a refined bidirectional Mamba bottleneck (8 blocks,
+      4 enc + 4 dec) and extended experiments. Feature dims: (48, 96, 192, 384, 768).
+      Platform paper uses the TOMM architecture (MambaVesselNet++) as the canonical
+      SSM family representative. DOI: https://doi.org/10.1145/3757324.
+
   haft_javaherian_2020_topological:
     authors: "Haft-Javaherian M, Villiger M, Schaffer CB, Nishimura N, Golland P, Bouma BE"
     year: 2020

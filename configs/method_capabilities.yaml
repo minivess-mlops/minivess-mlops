@@ -20,6 +20,7 @@ implemented_models:
   - sam3_vanilla
   - sam3_topolora
   - sam3_hybrid
+  - mambavesselnet
 
 # Loss exclusions: {loss_name: [model_families that CANNOT use this loss]}
 # Empty dict = all losses work with all models (current state)
@@ -51,6 +52,7 @@ model_default_loss:
   sam3_vanilla: dice_ce
   sam3_topolora: cbdice_cldice
   sam3_hybrid: cbdice_cldice
+  mambavesselnet: cbdice_cldice
 
 # Per-model additional losses to test (beyond default)
 model_extra_losses:

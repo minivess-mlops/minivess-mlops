@@ -1,0 +1,934 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MambaVesselNet Adapter Implementation Plan — v2 (post-review)
+  Branch: feat/mambavesselnet   GitHub Issue: #737   Created: 2026-03-15
+  Review round 1: 2 reviewer agents — all ERRORs + WARNINGs incorporated.
+
+  Architecture: Chen et al. 2024 ACM MM (original MambaVesselNet) +
+                Xu & Chen et al. 2025 ACM TOMM (MambaVesselNet++ — what the repo implements)
+  Reference:    https://github.com/CC0117/MambaVesselNet  (MIT license)
+  DOI MM2024:   https://doi.org/10.1145/3696409.3700231
+  DOI TOMM2025: https://doi.org/10.1145/3757324
+
+  REVIEW CHANGES vs v1:
+  [ERROR-1]  norm_name added to all MONAI block calls in T05
+  [ERROR-2]  BidirectionalMambaLayer unflatten step added to pseudocode
+  [ERROR-3]  LayerNorm placement pinned: inside BidirMamba, NOT in MambaBlock
+  [ERROR-4]  amp_validation test fixed: use yaml.safe_load not ModelProfile attr
+  [ERROR-5]  T09 MINIVESS_ALLOW_HOST=1 removed; Docker path used
+  [ARCH-E01] Dockerfile.base CUDA compilation → new T00 task
+  [ARCH-E02] _mamba_available() location: model_builder.py, re-exported from mambavesselnet.py
+  [ARCH-E03] mamba_ssm mypy overrides added to T01
+  [ARCH-E04] GPU tests moved to tests/gpu_instance/ (not tests/v2/unit/)
+  [ARCH-W1]  self.config + self.net requirement made explicit in T06
+  [ARCH-W2]  depth clarified: depth=1 per MambaBlock; 8 blocks = 8 BidirMamba layers
+  [ARCH-W3]  Docstring notation fixed to MONAI (B,C,H,W,D)
+  [ARCH-W4]  load_model_profile() test added to T07
+  [ARCH-W5]  Divisor comment corrected: 4 levels, 2^4=16
+  [ARCH-W6]  ONNX not-supported test added to T06
+  [ARCH-W7]  sliding_window_inference test added to T06
+  [TDD-W1]   sliding_window test (duplicate of ARCH-W7) — addressed
+  [TDD-W2]   AMP behavior tests added to T06
+  [TDD-W3]   val_interval sentinel note added to T07
+  [TDD-W4]   checkpoint_roundtrip: numerically close (allclose) specified
+  [TDD-W5]   T08 explicit dependency on T06 added
+  [TDD-W6]   [mamba] renamed to [mamba-ssm] group
+  [TDD-W7]   GPU test class structure fixed (class-level marks)
+  [TDD-W8]   B>1 batch test added to T05
+  [TDD-W9]   encoding='utf-8' added throughout
+  [TDD-W10]  adapters.yaml mamba.py comment correction noted in T08
+  [SUGG-01]  smoke_mambavesselnet.yaml + cloud variant added to T07
+  [SUGG-04]  ONNX export documented-limitation test added
+  [SUGG-06]  capability-schema-check hook noted in T01
+  [SUGG-07]  T09 commands use Docker (STOP Protocol compliant)
+-->
+<plan id="mambavesselnet-implementation"
+      version="2.0"
+      created="2026-03-15"
+      branch="feat/mambavesselnet"
+      skill="self-learning-iterative-coder"
+      github-issue="737">
+
+  <metadata>
+    <title>MambaVesselNet++ Adapter: ModelAdapter ABC Integration (v2)</title>
+    <target-file>src/minivess/adapters/mambavesselnet.py</target-file>
+    <test-dirs>
+      <unit>tests/v2/unit/</unit>         <!-- CPU tests + availability tests -->
+      <gpu>tests/gpu_instance/</gpu>      <!-- GPU tests: backbone + adapter + sliding_window -->
+    </test-dirs>
+    <plan-state-file>.claude/skills/self-learning-iterative-coder/state/tdd-state.json</plan-state-file>
+    <kg-adapter>knowledge-graph/code-structure/adapters.yaml#mambavesselnet</kg-adapter>
+  </metadata>
+
+  <prime-directive>
+    PLATFORM PAPER — NOT SOTA RACE.
+    MambaVesselNet is ONE of FOUR families demonstrating ModelAdapter ABC generalizability.
+    BANNED: "MambaVesselNet outperforms / surpasses / beats DynUNet"
+    CORRECT: "MambaVesselNet demonstrates the SSM family integrates via ModelAdapter ABC"
+    Source: .claude/metalearning/2026-03-15-sota-framing-violation-platform-not-race.md
+  </prime-directive>
+
+  <!-- ================================================================
+       ARCHITECTURE SUMMARY (verified from reference code + paper)
+       ================================================================ -->
+  <architecture-summary>
+    MambaVesselNet++ (model class: mvnNet, file: model_mvn/mvn.py, MIT license)
+
+    ENCODER (Hi-Encoder) — MONAI UnetrBasicBlock + stride-2 Conv3d:
+      enc_conv1: UnetrBasicBlock(3, 1,   48,  kernel=3, stride=1, norm_name="instance")
+      down1:     nn.Conv3d(48,  48,  kernel_size=2, stride=2)
+      enc_conv2: UnetrBasicBlock(3, 48,  96,  kernel=3, stride=1, norm_name="instance")
+      down2:     nn.Conv3d(96,  96,  kernel_size=2, stride=2)
+      enc_conv3: UnetrBasicBlock(3, 96,  192, kernel=3, stride=1, norm_name="instance")
+      down3:     nn.Conv3d(192, 192, kernel_size=2, stride=2)
+      enc_conv4: UnetrBasicBlock(3, 192, 384, kernel=3, stride=1, norm_name="instance")
+      down4:     nn.Conv3d(384, 384, kernel_size=2, stride=2)
+      enc_conv5: UnetrBasicBlock(3, 384, 768, kernel=3, stride=1, norm_name="instance")
+      Total downsampling: 4 levels → divisor = 2^4 = 16
+
+    BOTTLENECK — 8 MambaBlocks at 768 channels (4 enc + 4 dec):
+      Each MambaBlock (depth=1):
+        x = x + BidirectionalMambaLayer(x)  [LN INSIDE BidirMamba, NOT here]
+        x = x + MlpChannel(LN(x))           [LN only for MLP branch]
+      BidirectionalMambaLayer: flatten (B,C,H,W,D)→(B,H*W*D,C), LN, fwd Mamba +
+        reverse Mamba, sum, unflatten back to (B,C,H,W,D), residual.
+      MlpChannel: Conv3d(768, 3072, 1) → GELU → Conv3d(3072, 768, 1)
+
+    DECODER — MONAI UnetrUpBlock + skip connections:
+      dec_conv5: UnetrUpBlock(3, 768, 384, kernel=3, upsample_kernel=2, norm="instance")
+                 forward(bottleneck_out, enc4)   # skip=enc4 (384ch) ✓
+      dec_conv4: UnetrUpBlock(3, 384, 192, ...)  forward(x, enc3)  # skip=enc3 (192ch) ✓
+      dec_conv3: UnetrUpBlock(3, 192, 96,  ...)  forward(x, enc2)  # skip=enc2 (96ch)  ✓
+      dec_conv2: UnetrUpBlock(3, 96,  48,  ...)  forward(x, enc1)  # skip=enc1 (48ch)  ✓
+      dec_conv1: UnetrBasicBlock(3, 48, 48, kernel=3, stride=1, norm_name="instance")
+      out:       UnetOutBlock(3, 48, out_chans)  → raw logits, no softmax
+
+    NOTE on UnetrUpBlock skip channels: MONAI's UnetrUpBlock.conv_block is initialized
+    with in_channels = out_channels + out_channels (cat of upsampled + skip). This
+    requires skip.channels == out_channels. The above routing satisfies this.
+
+    OUTPUT: (B, out_chans, H, W, D) raw logits — softmax applied by _build_output().
+    DIMENSION ORDER: (B, C, H, W, D) throughout — MONAI convention, depth LAST.
+    No permutation at adapter boundary (3D conv + Mamba scan are spatially symmetric).
+
+    PAPER MEASUREMENTS (Chen et al., A5000 GPU):
+      Training VRAM: 6.9 GB at batch=2, patch=64³
+      Our hardware: MUST MEASURE on RTX 2070 Super (8GB) + RTX 4090 (24GB) in T09.
+  </architecture-summary>
+
+  <!-- ================================================================
+       KEY DESIGN DECISIONS
+       ================================================================ -->
+  <decisions>
+    <decision id="D01" topic="Architecture source">
+      INLINE: Copy only necessary classes (MlpChannel, BidirectionalMambaLayer,
+      MambaBlock, MambaVesselNetBackbone) into mambavesselnet.py. MIT license permits.
+      Re-read CC0117/MambaVesselNet/model_mvn/mvn.py before T05 to verify exact args.
+    </decision>
+
+    <decision id="D02" topic="Mamba SSM dependency">
+      PyPI mamba-ssm==2.3.1 (latest stable; source-only, requires CUDA compilation).
+      Add to pyproject.toml optional group [mamba-ssm] (NOT [mamba] — see [TDD-W6]).
+      BidirectionalMambaLayer = two standard Mamba modules: fwd(x) + bwd(x.flip(1)).flip(1).
+      This is equivalent to bimamba_type="v2" without the vendored fork.
+      NOTE: mamba-ssm ships source-only — Docker build strategy required (T00).
+    </decision>
+
+    <decision id="D03" topic="Dimension order">
+      NO PERMUTATION. Adapter receives (B,C,H,W,D) [MONAI convention, depth LAST],
+      passes directly to backbone, returns (B,C,H,W,D).
+      3D convolutions are spatially symmetric; Mamba scan flattens H*W*D regardless.
+      NOTE: Docstrings must use (B,C,H,W,D) notation consistently — not (B,C,D,H,W).
+    </decision>
+
+    <decision id="D04" topic="AMP policy">
+      CONSERVATIVE: AMP ON for training, AMP OFF for validation (mixed_precision_val=False).
+      Mirrors SAM3 policy — Mamba CUDA kernels have unknown BF16/FP16 behavior under
+      3D sliding_window_inference. Relax only after T06 AMP tests confirm no NaN.
+    </decision>
+
+    <decision id="D05" topic="eval_roi_size">
+      Override get_eval_roi_size() → (64, 64, 64). Matches training patch size.
+    </decision>
+
+    <decision id="D06" topic="MONAI blocks">
+      REUSE: UnetrBasicBlock, UnetrUpBlock, UnetOutBlock from MONAI directly.
+      ALL constructor calls MUST include norm_name="instance" — it has no default.
+    </decision>
+
+    <decision id="D07" topic="LayerNorm placement (CRITICAL)">
+      LayerNorm lives INSIDE BidirectionalMambaLayer only (applied to flattened sequence).
+      MambaBlock does NOT add LayerNorm before calling BidirMamba.
+      MambaBlock DOES add LayerNorm before calling MlpChannel.
+      This prevents double-LN (BidirMamba-internal LN + MambaBlock pre-norm).
+    </decision>
+
+    <decision id="D08" topic="_mamba_available() placement">
+      Lives in src/minivess/adapters/model_builder.py (consistent with _sam3_package_available).
+      Re-exported from src/minivess/adapters/mambavesselnet.py for test imports.
+      Test files import: from minivess.adapters.mambavesselnet import _mamba_available
+    </decision>
+
+    <decision id="D09" topic="Test file location">
+      CPU tests (no mamba-ssm): tests/v2/unit/test_mambavesselnet_*.py
+      GPU tests (require mamba-ssm + CUDA): tests/gpu_instance/test_mambavesselnet_gpu.py
+      This mirrors SAM3 pattern and avoids breaking the Test Collection Gate pre-commit hook.
+    </decision>
+
+    <decision id="D10" topic="ONNX export">
+      mamba-ssm selective scan CUDA kernels are not ONNX-traceable.
+      MambaVesselNetAdapter.export_onnx() raises NotImplementedError with clear message.
+      Document in model profile YAML: onnx_supported: false.
+    </decision>
+  </decisions>
+
+  <!-- ================================================================
+       TASKS
+       ================================================================ -->
+  <tasks>
+
+    <!-- ============================================================
+         T00: DOCKER — prerequisite for all GPU work
+         ============================================================ -->
+    <task id="T00"
+          title="Docker base image: mamba-ssm CUDA compilation strategy"
+          status="pending"
+          phase="0-infra"
+          estimated-iterations="1"
+          requires-gpu="false"
+          requires-mamba="false">
+      <description>
+        mamba-ssm==2.3.1 ships source-only (no wheels). Requires nvcc + CUDA headers.
+        Dockerfile.base multi-stage build: builder=devel (has nvcc), runner=runtime (no nvcc).
+        Strategy: compile mamba-ssm in builder stage, copy compiled site-packages to runner.
+
+        Changes required in deployment/docker/Dockerfile.base builder stage:
+          # After torch install, compile mamba-ssm:
+          RUN uv sync --extra mamba-ssm || true  # compile in builder; wheels land in .venv
+
+        The builder-stage .venv is already copied to runner via COPY --from=builder.
+        Verify the CUDA-compiled .so files survive the COPY.
+
+        Also required:
+          - Add mamba_ssm and causal_conv1d to [tool.mypy.overrides] ignore_missing_imports
+          - Rebuild and re-push Docker image before T09/T10 cloud runs
+
+        NOTE: DO NOT enable mamba-ssm compilation by default in the base image.
+        Gate it behind a build-arg: ARG INSTALL_MAMBA=0 / RUN if [ "$INSTALL_MAMBA" = "1" ]...
+        This keeps default build time fast for labs without GPU/Mamba needs.
+      </description>
+      <tdd-spec>
+        No new tests (Docker build correctness is integration-tested via smoke test).
+        Acceptance test: docker run --rm minivess-base:mamba python -c
+          "import mamba_ssm; print(mamba_ssm.__version__)" succeeds.
+      </tdd-spec>
+      <files-to-modify>
+        deployment/docker/Dockerfile.base
+        pyproject.toml  (mypy overrides for mamba_ssm.*, causal_conv1d.*)
+      </files-to-modify>
+      <acceptance-criteria>
+        - [ ] docker build --build-arg INSTALL_MAMBA=1 succeeds
+        - [ ] mamba_ssm importable in runner container
+        - [ ] Default build (INSTALL_MAMBA=0) unchanged — no extra build time
+        - [ ] mypy overrides: mamba_ssm.* and causal_conv1d.* ignore_missing_imports=true
+      </acceptance-criteria>
+    </task>
+
+    <!-- ============================================================
+         PHASE 1: FOUNDATION — no GPU, no mamba-ssm
+         ============================================================ -->
+    <task id="T01"
+          title="ModelFamily enum + [mamba-ssm] optional group + availability gate"
+          status="pending"
+          phase="1-foundation"
+          estimated-iterations="1"
+          requires-gpu="false"
+          requires-mamba="false">
+      <description>
+        1. Add MAMBAVESSELNET = "mambavesselnet" to ModelFamily enum (config/models.py)
+        2. Add [mamba-ssm] optional group to pyproject.toml:
+             mamba-ssm==2.3.1          (exact pin — source-only, version-coupled with causal-conv1d)
+             causal-conv1d>=1.4.0,less than 2.0.0
+        3. Add _mamba_available() to model_builder.py (mirrors _sam3_package_available())
+        4. Re-export _mamba_available from mambavesselnet.py for test imports (D08)
+        5. Add mamba_ssm.* + causal_conv1d.* to [tool.mypy.overrides] ignore_missing_imports
+        6. CHECK: capability-schema-check pre-commit hook fires on config/models.py changes.
+           Read minivess/testing/capability_discovery.py — update any hardcoded family lists.
+      </description>
+      <tdd-spec>
+        NEW FILE: tests/v2/unit/test_mambavesselnet_availability.py
+
+        class TestModelFamilyEnum:
+          test_mambavesselnet_in_enum: ModelFamily.MAMBAVESSELNET exists
+          test_mambavesselnet_value: ModelFamily.MAMBAVESSELNET == "mambavesselnet"
+          test_no_duplicate_values: all ModelFamily values are unique
+
+        class TestMambaAvailability:
+          test_returns_bool: _mamba_available() returns bool, no exception
+          test_graceful_on_missing:
+            monkeypatch sys.modules["mamba_ssm"] = None
+            _mamba_available() returns False, no exception
+          test_import_path: from minivess.adapters.mambavesselnet import _mamba_available
+
+        class TestModelConfigWithMamba:
+          test_parses: ModelConfig(family=ModelFamily.MAMBAVESSELNET,
+            name="t", in_channels=1, out_channels=2) — no exception
+      </tdd-spec>
+      <files-to-create>
+        tests/v2/unit/test_mambavesselnet_availability.py
+      </files-to-create>
+      <files-to-modify>
+        src/minivess/config/models.py
+        src/minivess/adapters/model_builder.py
+        src/minivess/adapters/mambavesselnet.py  (create with _mamba_available re-export)
+        pyproject.toml  (group + mypy overrides)
+      </files-to-modify>
+      <acceptance-criteria>
+        - [ ] ModelFamily.MAMBAVESSELNET = "mambavesselnet"
+        - [ ] pyproject.toml [mamba-ssm] group present
+        - [ ] mypy overrides: mamba_ssm.* + causal_conv1d.* ignore_missing_imports=true
+        - [ ] capability-schema-check passes after models.py change
+        - [ ] All 7 unit tests pass (staging tier, CPU only)
+        - [ ] uv run mypy src/ passes (no mamba_ssm import errors)
+      </acceptance-criteria>
+    </task>
+
+    <!-- ============================================================
+         PHASE 2: CORE ARCHITECTURE (inline)
+         CPU tests: tests/v2/unit/ with MockMamba
+         GPU tests: tests/gpu_instance/
+         ============================================================ -->
+    <task id="T02"
+          title="MlpChannel (channel MLP, CPU, no mamba dependency)"
+          status="pending"
+          phase="2-architecture"
+          estimated-iterations="1"
+          requires-gpu="false"
+          requires-mamba="false">
+      <description>
+        Implement MlpChannel in src/minivess/adapters/mambavesselnet.py.
+        Architecture: Conv3d(dim, dim*4, 1) → GELU → Conv3d(dim*4, dim, 1)
+        Pure PyTorch — no mamba-ssm needed. Runs on CPU.
+      </description>
+      <tdd-spec>
+        NEW FILE: tests/v2/unit/test_mambavesselnet_blocks.py
+
+        class TestMlpChannel:
+          test_output_shape_small: (2,48,4,4,4) → (2,48,4,4,4)
+          test_output_shape_bottleneck: (1,768,2,2,2) → (1,768,2,2,2)
+          test_inner_expansion_4x: mlp.fc1.out_channels == 4 * dim
+          test_spatial_dims_unchanged: out.shape[2:] == inp.shape[2:]
+          test_nonlinear: output.sum() != 0.0 and output != input (some transformation)
+      </tdd-spec>
+      <files-to-create>
+        tests/v2/unit/test_mambavesselnet_blocks.py
+      </files-to-create>
+      <files-to-modify>
+        src/minivess/adapters/mambavesselnet.py  [add MlpChannel]
+      </files-to-modify>
+    </task>
+
+    <task id="T03"
+          title="BidirectionalMambaLayer (CPU shape + GPU real)"
+          status="pending"
+          phase="2-architecture"
+          estimated-iterations="2"
+          requires-gpu="true-for-real-tests"
+          requires-mamba="true-for-real-tests">
+      <description>
+        Implement BidirectionalMambaLayer.
+
+        ARCHITECTURE (D07 — LN INSIDE this class only):
+          class BidirectionalMambaLayer(nn.Module):
+            self.norm = nn.LayerNorm(dim)
+            self.fwd  = Mamba(d_model=dim, d_state=d_state, d_conv=d_conv, expand=expand)
+            self.bwd  = Mamba(d_model=dim, d_state=d_state, d_conv=d_conv, expand=expand)
+
+            def forward(self, x: Tensor) -> Tensor:  # x: (B,C,H,W,D) — MONAI convention
+              B, C, *spatial = x.shape
+              L = math.prod(spatial)
+              x_seq = x.reshape(B, C, L).permute(0, 2, 1)  # (B, L, C)
+              x_n   = self.norm(x_seq)                       # (B, L, C)
+              fwd   = self.fwd(x_n)                          # (B, L, C)
+              bwd   = self.bwd(x_n.flip(1)).flip(1)          # (B, L, C)
+              out   = (fwd + bwd).permute(0, 2, 1)           # (B, C, L)
+              out   = out.reshape(B, C, *spatial)             # (B, C, H, W, D)
+              return x + out                                  # residual
+
+        CPU MOCK STRATEGY (D09):
+        tests/v2/unit/conftest.py adds MockMamba fixture:
+          class MockMamba(nn.Module):
+            def __init__(self, d_model, d_state, d_conv, expand):
+              self.proj = nn.Linear(d_model, d_model)
+            def forward(self, x): return self.proj(x)  # (B,L,C)→(B,L,C)
+        CPU tests inject MockMamba via constructor arg or monkeypatch.
+      </description>
+      <tdd-spec>
+        ADD TO: tests/v2/unit/test_mambavesselnet_blocks.py
+
+        class TestBidirMambaLayerShape:
+          [CPU — MockMamba injected]
+          test_output_shape_standard: (2,768,4,4,4) → same shape
+          test_output_shape_asymmetric: (1,768,3,5,7) → same shape  [tests non-cube]
+          test_residual_applied: output != input (transformation applied)
+          test_has_fwd_bwd_submodules: hasattr(layer, "fwd") and hasattr(layer, "bwd")
+
+        GPU tests → tests/gpu_instance/test_mambavesselnet_gpu.py:
+        @pytest.mark.model_loading
+        @pytest.mark.skipif(not _mamba_available(), reason="mamba-ssm not installed")
+        class TestBidirMambaLayerGPU:
+          test_real_forward_shape: (1,768,4,4,4) on CUDA → same shape
+          test_bidirectional_differs_unidirectional: bidi != single Mamba
+          test_gradient_flows: loss.backward(), no NaN grads
+          test_bfloat16_no_nan: autocast(bfloat16): output.isnan().any() == False
+      </tdd-spec>
+      <files-to-modify>
+        src/minivess/adapters/mambavesselnet.py  [add BidirectionalMambaLayer]
+        tests/v2/unit/test_mambavesselnet_blocks.py
+        tests/v2/unit/conftest.py or tests/gpu_instance/conftest.py  [MockMamba fixture]
+        tests/gpu_instance/test_mambavesselnet_gpu.py  [CREATE — GPU tests]
+      </files-to-modify>
+    </task>
+
+    <task id="T04"
+          title="MambaBlock (pre-norm + BidirMamba + MlpChannel)"
+          status="pending"
+          phase="2-architecture"
+          estimated-iterations="1"
+          requires-gpu="true-for-real-tests"
+          requires-mamba="true-for-real-tests">
+      <description>
+        Implement MambaBlock. depth=1 (one BidirMamba + one Mlp pair per block).
+        The 8 bottleneck blocks each have depth=1; parameter inflation risk addressed.
+
+        class MambaBlock(nn.Module):
+          def __init__(self, dim, depth=1, d_state=16, d_conv=4, expand=2):
+            self.layers = nn.ModuleList([
+              BidirectionalMambaLayer(dim, d_state, d_conv, expand)
+              for _ in range(depth)
+            ])
+            self.mlp_norms = nn.ModuleList([nn.LayerNorm(dim) for _ in range(depth)])
+            self.mlps      = nn.ModuleList([MlpChannel(dim) for _ in range(depth)])
+
+          def forward(self, x):  # x: (B,C,H,W,D)
+            for bidir, ln, mlp in zip(self.layers, self.mlp_norms, self.mlps):
+              x = bidir(x)                              # LN inside BidirMamba
+              # MlpChannel needs (B,C,H,W,D); LN needs last dim = C
+              B,C,*sp = x.shape; L = math.prod(sp)
+              x_seq = x.reshape(B,C,L).permute(0,2,1)  # (B,L,C)
+              x = x + mlp(ln(x_seq).permute(0,2,1).reshape(B,C,*sp))
+            return x
+      </description>
+      <tdd-spec>
+        ADD TO: tests/v2/unit/test_mambavesselnet_blocks.py
+
+        class TestMambaBlockShape:
+          [CPU — MockMamba]
+          test_depth1_shape: (2,48,4,4,4) → same
+          test_depth2_shape: (2,48,4,4,4) → same  [verify stacking works]
+          test_bottleneck_dim: (1,768,2,2,2) → same
+          test_transform_applied: output != input
+
+        GPU tests added to tests/gpu_instance/test_mambavesselnet_gpu.py:
+        @pytest.mark.model_loading
+        @pytest.mark.skipif(not _mamba_available(), ...)
+        class TestMambaBlockGPU:
+          test_gradient_flows: backward() no error, grads not None
+      </tdd-spec>
+      <files-to-modify>
+        src/minivess/adapters/mambavesselnet.py  [add MambaBlock]
+        tests/v2/unit/test_mambavesselnet_blocks.py
+        tests/gpu_instance/test_mambavesselnet_gpu.py
+      </files-to-modify>
+    </task>
+
+    <task id="T05"
+          title="MambaVesselNetBackbone (full mvnNet equivalent)"
+          status="pending"
+          phase="2-architecture"
+          estimated-iterations="2"
+          requires-gpu="true"
+          requires-mamba="true">
+      <description>
+        Implement MambaVesselNetBackbone. All MONAI block calls MUST include norm_name.
+        BEFORE IMPLEMENTING: re-read CC0117/MambaVesselNet/model_mvn/mvn.py for exact args.
+
+        Constructor (all norms="instance", all res_block=True):
+          enc_conv1: UnetrBasicBlock(3, in_chans, f[0], kernel_size=3, stride=1,
+                                     norm_name="instance", res_block=True)
+          down1: nn.Conv3d(f[0], f[0], kernel_size=2, stride=2)
+          enc_conv2: UnetrBasicBlock(3, f[0], f[1], ..., norm_name="instance")
+          down2: nn.Conv3d(f[1], f[1], 2, 2)
+          ... (enc_conv3/down3, enc_conv4/down4 follow same pattern)
+          enc_conv5: UnetrBasicBlock(3, f[3], f[4], ..., norm_name="instance")
+          enc_mamba[1-4]: nn.ModuleList([MambaBlock(f[4], depth=1) for _ in range(4)])
+          dec_mamba[1-4]: nn.ModuleList([MambaBlock(f[4], depth=1) for _ in range(4)])
+          dec_conv5: UnetrUpBlock(3, f[4], f[3], kernel_size=3, upsample_kernel_size=2,
+                                   norm_name="instance", res_block=True)
+          dec_conv4: UnetrUpBlock(3, f[3], f[2], ..., norm_name="instance")
+          dec_conv3: UnetrUpBlock(3, f[2], f[1], ..., norm_name="instance")
+          dec_conv2: UnetrUpBlock(3, f[1], f[0], ..., norm_name="instance")
+          dec_conv1: UnetrBasicBlock(3, f[0], f[0], ..., norm_name="instance")
+          out: UnetOutBlock(3, f[0], out_chans)
+
+          where f = feature_dims = [48, 96, 192, 384, 768]
+
+        forward(x):  # x: (B,C,H,W,D) — MONAI convention, depth LAST
+          enc1 = self.enc_conv1(x);      x = self.down1(enc1)
+          enc2 = self.enc_conv2(x);      x = self.down2(enc2)
+          enc3 = self.enc_conv3(x);      x = self.down3(enc3)
+          enc4 = self.enc_conv4(x);      x = self.down4(enc4)
+          z    = self.enc_conv5(x)
+          for m in self.enc_mamba: z = m(z)
+          for m in self.dec_mamba: z = m(z)
+          x = self.dec_conv5(z,   enc4)
+          x = self.dec_conv4(x,   enc3)
+          x = self.dec_conv3(x,   enc2)
+          x = self.dec_conv2(x,   enc1)
+          x = self.dec_conv1(x)
+          return self.out(x)   # (B, out_chans, H, W, D) raw logits
+
+        NOTE: UnetrUpBlock.forward(inp, skip) requires skip.channels == out_channels.
+        Verify enc* output channels match dec* out_channels at each level (see routing above).
+      </description>
+      <tdd-spec>
+        NEW FILE: tests/gpu_instance/test_mambavesselnet_gpu.py (append to existing)
+
+        @pytest.mark.model_loading
+        @pytest.mark.skipif(not _mamba_available(), reason="mamba-ssm not installed")
+        class TestMambaVesselNetBackbone:
+          test_shape_32: (1,1,32,32,32) → (1,2,32,32,32)  [smallest feasible]
+          test_shape_64: (1,1,64,64,64) → (1,2,64,64,64)  [paper patch size]
+          test_batch2:   (2,1,32,32,32) → (2,2,32,32,32)  [B>1 coverage, WARN-08]
+          test_out_is_logits: values outside [0,1] (no softmax applied)
+          test_3class:   out_chans=3: (1,1,32,32,32) → (1,3,32,32,32)
+          test_param_count: verify 30M &lt; params &lt; 70M (tighten after first run)
+          test_skip_grads: grads flow through enc1..enc4 parameters
+          test_backward_no_nan: loss.backward(), grads.isnan().any() == False
+
+        NOTE on test_param_count: range 30M-70M is provisional.
+        After first passing run, measure exact count and tighten to ±5%.
+      </tdd-spec>
+      <files-to-create>
+        tests/gpu_instance/test_mambavesselnet_gpu.py  [or append if exists]
+      </files-to-create>
+      <files-to-modify>
+        src/minivess/adapters/mambavesselnet.py  [add MambaVesselNetBackbone]
+      </files-to-modify>
+      <risk>
+        MEDIUM: UnetrUpBlock skip-channel mismatch is a common bug. If test_shape_32 fails
+        with shape error, print enc* shapes in forward() to diagnose. Compare with reference
+        mvn.py channel routing.
+      </risk>
+    </task>
+
+    <!-- ============================================================
+         PHASE 3: ADAPTER LAYER
+         ============================================================ -->
+    <task id="T06"
+          title="MambaVesselNetAdapter + model_builder registration"
+          status="pending"
+          phase="3-adapter"
+          estimated-iterations="2"
+          requires-gpu="true"
+          requires-mamba="true">
+      <description>
+        Implement MambaVesselNetAdapter(ModelAdapter).
+
+        REQUIRED PATTERN (WARN-1 fix — must use self.config + self.net):
+          class MambaVesselNetAdapter(ModelAdapter):
+            def __init__(self, config: ModelConfig):
+              super().__init__()
+              self.config = config          # NOT self._config — base needs self.config
+              self.net = MambaVesselNetBackbone(
+                in_chans=config.in_channels,
+                out_chans=config.out_channels,
+                **config.architecture_params,
+              )  # NOT any other attribute name — base class uses self.net for
+                 # trainable_parameters(), load_checkpoint(), save_checkpoint()
+
+            def forward(self, images, **kwargs):
+              logits = self.net(images)
+              return self._build_output(logits, "mambavesselnet")
+
+            def get_eval_roi_size(self): return (64, 64, 64)
+
+            def get_config(self): return self._build_config()
+
+            def export_onnx(self, path, example_input):
+              raise NotImplementedError(
+                "MambaVesselNet: mamba-ssm selective scan is not ONNX-traceable. "
+                "Use TorchScript or contact maintainer for ONNX custom op registry."
+              )  # D10
+
+        Register in model_builder._populate_registry():
+          _MODEL_REGISTRY[ModelFamily.MAMBAVESSELNET] = _build_mambavesselnet
+
+        Add _require_mamba(config) gate:
+          if not _mamba_available(): raise RuntimeError("mamba-ssm not installed...")
+      </description>
+      <tdd-spec>
+        CPU tests in tests/v2/unit/test_mambavesselnet_adapter.py:
+
+        class TestMambaAdapterRegistry:
+          [CPU — no model instantiation]
+          test_mambavesselnet_in_registry: ModelFamily.MAMBAVESSELNET in _MODEL_REGISTRY
+          test_require_mamba_raises: _require_mamba(config) raises RuntimeError
+            when monkeypatched _mamba_available() returns False
+          test_error_message_has_install_instructions:
+            RuntimeError message contains "mamba-ssm" and "pip install" or "uv add"
+
+        GPU tests in tests/gpu_instance/test_mambavesselnet_gpu.py:
+
+        @pytest.mark.model_loading
+        @pytest.mark.skipif(not _mamba_available(), reason="mamba-ssm not installed")
+        class TestMambaVesselNetAdapter:
+          test_output_type: output is SegmentationOutput
+          test_prediction_sums_to_one: prediction.sum(dim=1) allclose 1.0 everywhere
+          test_logits_raw: logits has some values outside [0,1]
+          test_shapes_match: prediction.shape == logits.shape == (1,2,64,64,64)
+          test_eval_roi_size: get_eval_roi_size() == (64, 64, 64)
+          test_config_family: get_config().family == "mambavesselnet"
+          test_config_params: get_config().trainable_params > 1_000_000
+          test_checkpoint_roundtrip:
+            adapter1.forward(x).prediction allclose adapter2.forward(x).prediction
+            after: save adapter1, load into adapter2 (numerically close — not just same shape)
+          test_onnx_raises_not_implemented: export_onnx() raises NotImplementedError
+          test_registry_dispatch: build_adapter(ModelConfig(MAMBAVESSELNET,...)) returns
+            MambaVesselNetAdapter instance
+
+        @pytest.mark.model_loading
+        @pytest.mark.skipif(not _mamba_available(), ...)
+        class TestSlidingWindowCompatibility:
+          [WARN-7, ARCH-W7, TDD-W1 fix]
+          test_sliding_window_roi64:
+            sliding_window_inference((1,1,128,128,128), roi_size=(64,64,64),
+            sw_batch_size=1, predictor=lambda x: adapter(x).logits)
+            → output shape (1,2,128,128,128), no exception, finite values
+          test_sliding_window_asymmetric:
+            input (1,1,80,64,96) → (1,2,80,64,96)
+          test_sliding_window_prediction_sums_1:
+            softmax over prediction sums ≈ 1.0 after sliding window
+
+        @pytest.mark.model_loading
+        @pytest.mark.skipif(not _mamba_available(), ...)
+        class TestAMPBehavior:
+          [TDD-W2, ARCH-W6 fix]
+          test_bfloat16_forward_no_nan:
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+              output = adapter(x); assert not output.logits.isnan().any()
+          test_amp_off_validation_no_nan:
+            with torch.autocast("cuda", enabled=False):
+              logits = sliding_window_inference(...); assert not logits.isnan().any()
+          test_debug_config_amp_val_off:
+            TrainingConfig from debug_mambavesselnet.yaml has mixed_precision_val=False
+      </tdd-spec>
+      <files-to-create>
+        tests/v2/unit/test_mambavesselnet_adapter.py  [CPU registry tests]
+      </files-to-create>
+      <files-to-modify>
+        src/minivess/adapters/mambavesselnet.py   [add MambaVesselNetAdapter]
+        src/minivess/adapters/model_builder.py    [_build_mambavesselnet + registry]
+        tests/gpu_instance/test_mambavesselnet_gpu.py  [add GPU adapter tests]
+      </files-to-modify>
+      <acceptance-criteria>
+        - [ ] All CPU registry tests pass (staging tier)
+        - [ ] All GPU adapter tests pass on RTX 4090
+        - [ ] sliding_window_inference tests pass
+        - [ ] AMP tests pass — no NaN in BF16 or AMP-OFF
+        - [ ] export_onnx raises NotImplementedError with clear message
+        - [ ] Lazy import: importing model_builder does NOT import mamba-ssm
+        - [ ] build_adapter(MAMBAVESSELNET config) returns correct adapter
+      </acceptance-criteria>
+    </task>
+
+    <!-- ============================================================
+         PHASE 4: CONFIG, PROFILE, KG (can start after T01 — parallel with T02-T05)
+         ============================================================ -->
+    <task id="T07"
+          title="Model profile YAML + experiment configs"
+          status="pending"
+          phase="4-config"
+          estimated-iterations="1"
+          requires-gpu="false"
+          requires-mamba="false">
+      <description>
+        Create configs/model_profiles/mambavesselnet.yaml
+          Required fields (ALL must be present — see ModelProfile dataclass):
+            name, divisor, model_overhead_mb, bytes_per_voxel_amp, bytes_per_voxel_fp32,
+            max_batch_size, default_patch_xy, vram, amp_validation
+          divisor: 16   [CORRECT: 4 downsampling levels, 2^4=16 — NOT 32]
+          vram.measured: false  (populate after T09)
+          amp_validation: false  (conservative; update after T06 AMP tests)
+          onnx_supported: false  (Mamba selective scan not ONNX-traceable)
+
+        Create configs/experiment/debug_mambavesselnet.yaml
+          model.family: mambavesselnet
+          max_epochs: 2, batch_size: 1, patch_size: [64,64,64]
+          loss: cbdice_cldice
+          mixed_precision_val: false  (AMP policy)
+          val_interval: 3  [WARN-3: conservative for 8GB — verify does not OOM]
+
+        Create configs/experiment/smoke_mambavesselnet.yaml
+          Same as debug but max_epochs: 10, intended for SkyPilot smoke test
+
+        Create configs/experiment/smoke_mambavesselnet_cloud.yaml
+          Cloud-specific overrides (batch_size: 2, mixed_precision: true, etc.)
+          Follow pattern from configs/experiment/smoke_sam3_hybrid_cloud.yaml
+      </description>
+      <tdd-spec>
+        ADD TO: tests/v2/unit/test_model_profiles.py
+
+        class TestMambaVesselNetProfile:
+          test_profile_file_exists: Path("configs/model_profiles/mambavesselnet.yaml").exists()
+          test_load_model_profile_succeeds:
+            from minivess.config.model_profiles import load_model_profile
+            p = load_model_profile("mambavesselnet")
+            assert isinstance(p, ModelProfile)   [validates ALL required fields — WARN-4 fix]
+          test_divisor_is_16: p.divisor == 16
+          test_vram_measured_false: p.vram.measured == False
+          test_amp_val_false:
+            raw = yaml.safe_load(Path(...).read_text(encoding='utf-8'))
+            assert raw.get("amp_validation") is False  [ERROR-4 fix]
+          test_onnx_supported_false:
+            raw = yaml.safe_load(...)
+            assert raw.get("onnx_supported") is False
+
+        class TestDebugMambaConfig:
+          test_debug_config_exists
+          test_debug_config_parses: yaml.safe_load(Path(...).read_text(encoding='utf-8'))
+          test_model_family: cfg["model"]["family"] == "mambavesselnet"
+          test_amp_val_off: cfg.get("mixed_precision_val") is False
+          test_val_interval_set: "val_interval" in cfg  [WARN-3 fix]
+      </tdd-spec>
+      <files-to-create>
+        configs/model_profiles/mambavesselnet.yaml
+        configs/experiment/debug_mambavesselnet.yaml
+        configs/experiment/smoke_mambavesselnet.yaml
+        configs/experiment/smoke_mambavesselnet_cloud.yaml
+      </files-to-create>
+      <dependency>T01 (ModelFamily enum must exist for config validation)</dependency>
+      <acceptance-criteria>
+        - [ ] load_model_profile("mambavesselnet") succeeds (validates all required fields)
+        - [ ] All 9 profile/config tests pass (staging tier)
+        - [ ] vram.measured=false documented — NEVER guess VRAM
+        - [ ] val_interval set in debug config to prevent 8GB OOM
+      </acceptance-criteria>
+    </task>
+
+    <task id="T08"
+          title="KG update: adapters.yaml + bibliography.yaml"
+          status="pending"
+          phase="4-config"
+          estimated-iterations="1"
+          requires-gpu="false"
+          requires-mamba="false">
+      <description>
+        Update knowledge-graph/code-structure/adapters.yaml:
+          mambavesselnet entry: status → experimental (from planned)
+          file: src/minivess/adapters/mambavesselnet.py  (now exists after T06)
+          Add critical_constraints from architecture summary
+          ALSO FIX (WARN-10): The mamba_variants_archived entry says
+            "file: src/minivess/adapters/mamba.py  # NEVER CREATED — permanently retired"
+            but mamba.py DOES exist (UlikeMamba adapter). Fix the comment to:
+            "# NOTE: mamba.py exists but implements UlikeMamba (different model).
+             # This archived entry refers to SegMamba/U-Mamba — never implemented here."
+
+        Add to knowledge-graph/bibliography.yaml:
+          xu_2025_mambavesselnet_plus:
+            title: MambaVesselNet++: A Hybrid CNN-Mamba Architecture for Medical Image Segmentation
+            doi: https://doi.org/10.1145/3757324
+            venue: ACM TOMM 2025
+            note: Extended journal version of chen_2024_mambavesselnet (ACM MM 2024)
+          NOTE: chen_2024_mambavesselnet already present — verify, don't duplicate.
+
+        Run: uv run python scripts/review_knowledge_links.py --quick
+        Expected: 0 ERRORs.
+      </description>
+      <tdd-spec>
+        Pre-commit knowledge-links hook is the test (fires on commit).
+        RED phase: Add mambavesselnet entry pointing to file BEFORE T06 creates it
+          → hook should FAIL (file not found). This gates T08 commit on T06 completion.
+        GREEN phase: After T06, file exists → hook passes.
+      </tdd-spec>
+      <files-to-modify>
+        knowledge-graph/code-structure/adapters.yaml
+        knowledge-graph/bibliography.yaml
+        .gitleaksignore  (if new citation keys trigger false positives)
+      </files-to-modify>
+      <dependency>T06 (adapter file must exist before committing this YAML)</dependency>
+      <acceptance-criteria>
+        - [ ] mambavesselnet entry: status=experimental, file path resolves
+        - [ ] mamba_variants_archived comment corrected
+        - [ ] xu_2025_mambavesselnet_plus added to bibliography
+        - [ ] knowledge-links hook passes on commit
+      </acceptance-criteria>
+    </task>
+
+    <!-- ============================================================
+         PHASE 5: GPU VERIFICATION (cloud hardware)
+         ============================================================ -->
+    <task id="T09"
+          title="VRAM measurement on RTX 2070 Super + RTX 4090"
+          status="pending"
+          phase="5-gpu-verification"
+          estimated-iterations="1"
+          requires-gpu="true"
+          requires-mamba="true"
+          blocking="vram-profile">
+      <description>
+        Measure peak VRAM at training + inference time.
+        Configurations: batch=1 patch=64³ (RTX 2070S), batch=2 patch=64³ (RTX 4090).
+        Record in configs/model_profiles/mambavesselnet.yaml.
+
+        NOTE [STOP Protocol compliant — ERROR-5 + SUGG-07 fix]:
+        NEVER use MINIVESS_ALLOW_HOST=1 for VRAM measurement.
+        ALL execution via Docker + Prefect.
+      </description>
+      <commands>
+        # Local RTX 2070 Super (8 GB) — Docker + Prefect:
+        docker compose --env-file .env \
+          -f deployment/docker-compose.flows.yml run --rm --shm-size 8g \
+          -e EXPERIMENT=debug_mambavesselnet \
+          -e BATCH_SIZE=1 \
+          train
+
+        # RunPod RTX 4090 — SkyPilot managed job (auto spot-recovery):
+        sky jobs launch deployment/skypilot/smoke_test_gcp.yaml \
+          -e MODEL_FAMILY=mambavesselnet \
+          -e EXPERIMENT=smoke_mambavesselnet \
+          --name minivess-mamba-vram
+      </commands>
+      <acceptance-criteria>
+        - [ ] vram.inference_gb populated (measured)
+        - [ ] vram.training_gb populated (measured)
+        - [ ] vram.measured=true, measured_gpu, measured_date filled
+        - [ ] If OOM on RTX 2070 Super → cloud_only=true + min_vram_gb documented
+      </acceptance-criteria>
+      <dependency>T00 (Docker with mamba-ssm), T06 (adapter), T07 (configs)</dependency>
+    </task>
+
+    <task id="T10"
+          title="End-to-end smoke test: 10 epochs on RunPod RTX 4090"
+          status="pending"
+          phase="5-gpu-verification"
+          estimated-iterations="1"
+          requires-gpu="true"
+          requires-mamba="true">
+      <description>
+        Run 10-epoch smoke test on MiniVess subset (4 training volumes).
+        Verify: training loop completes, val_loss finite, MLflow artifacts written.
+        Test both AMP policies:
+          Run 1: mixed_precision_val=false (default) → confirm no NaN
+          Run 2: mixed_precision_val=true           → check for NaN
+        If Run 2 also clean → update debug/smoke YAML and model profile: amp_validation=true.
+        Record result in knowledge-graph/experiments/mambavesselnet_smoke.yaml.
+        Update cover letter §3 table: MambaVesselNet row.
+      </description>
+      <commands>
+        sky jobs launch deployment/skypilot/smoke_test_gcp.yaml \
+          -e MODEL_FAMILY=mambavesselnet \
+          -e EXPERIMENT=smoke_mambavesselnet_cloud \
+          -e LOSS=cbdice_cldice \
+          --name minivess-mamba-smoke
+      </commands>
+      <acceptance-criteria>
+        - [ ] Run STATUS=FINISHED
+        - [ ] val_loss finite (not NaN, not inf)
+        - [ ] MLflow run_id recorded
+        - [ ] No CUDA OOM
+        - [ ] AMP policy decision documented in model profile
+        - [ ] knowledge-graph/experiments/mambavesselnet_smoke.yaml created
+        - [ ] Cover letter §3 verification table updated
+      </acceptance-criteria>
+      <dependency>T09 (VRAM profile), T00 (Docker)</dependency>
+    </task>
+
+  </tasks>
+
+  <!-- ================================================================
+       TASK DEPENDENCY GRAPH (optimized — T07/T08 parallel with T02-T05)
+       ================================================================ -->
+  <dependency-graph>
+    T00 (Docker)
+      → T03 GPU tests, T04 GPU tests, T05, T06, T09, T10
+
+    T01 (enum + availability)
+      → T02, T03, T04, T05, T06
+      → T07 (parallel with T02-T05, needs enum only)
+      → T08 (parallel with T02-T05, needs enum only — BUT commit after T06)
+
+    T02 → T03 → T04 → T05 → T06
+    T06 → T08 (file must exist for KG link check)
+    T07 → T09
+    T06 + T07 + T00 → T09 → T10
+
+    Parallelizable: T07 + T08 can start after T01 while T02-T05 proceed.
+  </dependency-graph>
+
+  <!-- ================================================================
+       ISSUES TO CREATE
+       ================================================================ -->
+  <issues>
+    <issue task="T00"
+           title="infra: Docker base image CUDA compilation strategy for mamba-ssm"
+           labels="dependencies,ci-cd"
+           priority="P1" />
+    <issue task="T01"
+           title="feat: add [mamba-ssm] optional dependency group + ModelFamily enum"
+           labels="dependencies,models"
+           priority="P2" />
+    <issue task="T02,T03,T04,T05"
+           title="feat: MambaVesselNet++ backbone inline implementation (MIT)"
+           labels="models,tdd,research"
+           priority="P1"
+           github-issue-group="backbone" />
+    <issue task="T06"
+           title="feat: MambaVesselNetAdapter — ModelAdapter ABC integration"
+           labels="models,tdd"
+           priority="P1" />
+    <issue task="T09,T10"
+           title="gpu: MambaVesselNet VRAM measurement + smoke test on RTX 4090"
+           labels="gpu-runs,manuscript,models"
+           priority="P1" />
+  </issues>
+
+  <!-- ================================================================
+       BANNED PATTERNS
+       ================================================================ -->
+  <banned-patterns>
+    <ban pattern="bimamba_type='v2'"
+         reason="Vendored fork only — not in PyPI mamba-ssm. Use BidirectionalMambaLayer." />
+    <ban pattern="MambaVesselNet outperforms / surpasses / beats DynUNet"
+         reason="SOTA race framing — platform paper. See metalearning 2026-03-15." />
+    <ban pattern="self._config"
+         reason="ModelAdapter._build_config() and base methods use self.config (no underscore)." />
+    <ban pattern="MINIVESS_ALLOW_HOST=1 in scripts"
+         reason="CLAUDE.md Rule #19 — escape hatch for pytest ONLY, never in scripts." />
+    <ban pattern="norm_name omitted from UnetrBasicBlock / UnetrUpBlock calls"
+         reason="MONAI blocks have no default for norm_name — TypeError at construction." />
+    <ban pattern="LayerNorm in MambaBlock before calling BidirMamba"
+         reason="Double-LN bug. LN lives INSIDE BidirectionalMambaLayer only." />
+    <ban pattern="import re"
+         reason="CLAUDE.md Rule #16" />
+    <ban pattern="datetime.now() without timezone"
+         reason="CLAUDE.md Rule #7" />
+    <ban pattern="open(...) without encoding='utf-8'"
+         reason="CLAUDE.md Rule #5" />
+    <ban pattern="guessing VRAM from architecture"
+         reason="NEVER guess. Measure and write to YAML profile." />
+  </banned-patterns>
+
+  <!-- ================================================================
+       REVIEW HISTORY
+       ================================================================ -->
+  <review-history>
+    <round id="1" date="2026-03-15" status="incorporated">
+      Reviewer 1 (Architecture): 5 ERRORS, 7 WARNINGS, 5 SUGGESTIONS
+      Reviewer 2 (TDD+Integration): 4 ERRORS, 10 WARNINGS, 8 SUGGESTIONS
+      All ERRORs incorporated. All WARNINGs incorporated. Key SUGGESTIONs incorporated.
+      Plan v2 ready for implementation via self-learning-iterative-coder skill.
+    </round>
+  </review-history>
+
+</plan>

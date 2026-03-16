@@ -230,8 +230,8 @@ class TestLogAnalysis:
         """Extract failure category from full setup log output."""
         from minivess.compute.ralph_monitor import analyze_logs
 
-        logs = """(setup pid=1915) + dvc pull -r upcloud
-(setup pid=1915) ERROR: failed to connect to s3 (minivess-dvc-data/files/md5) - Invalid endpoint: ${DVC_S3_ENDPOINT_URL}
+        logs = """(setup pid=1915) + dvc pull -r remote_storage
+(setup pid=1915) ERROR: failed to connect to s3 (minivessdataset/files/md5) - Invalid endpoint: ${DVC_S3_ENDPOINT_URL}
 (setup pid=1915) ERROR: failed to pull data from the cloud - 1 files failed to download
 ERROR: Job 1's setup failed."""
         result = analyze_logs(logs, status="FAILED_SETUP")
