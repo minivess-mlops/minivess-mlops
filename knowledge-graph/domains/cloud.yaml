@@ -2,6 +2,8 @@ domain: cloud
 description: >
   Cloud provider architecture, data storage, DVC remotes, environment mapping.
   TWO providers: RunPod (env/dev) + GCP (staging/prod). No others without explicit user authorization.
+  Each Prefect flow has an INDEPENDENTLY configurable compute target — no flow is hardcoded to any
+  provider. Researchers decide where each flow runs via Prefect deployment config.
 last_reviewed: "2026-03-16"
 
 # ─── HARD CONSTRAINT ──────────────────────────────────────────────────────────
@@ -16,14 +18,29 @@ last_reviewed: "2026-03-16"
 providers:
   runpod:
     environment: env
-    role: "Dev/prototyping — hacky, optional. For researchers who prefer RunPod."
+    role: |
+      Primary "dev" path for GPU-constrained researchers and paper readers.
+      A researcher with only a thin-client laptop (no GPU) can train in one command.
+      The repo owner uses it to bypass 8 GB VRAM limit for large models (SAM3 Hybrid, VesselFM ≥16 GB).
+      FULLY STANDALONE — no GCP account, no Pulumi, no GCS, no Cloud SQL needed.
+      This is the ENTRY POINT for new researchers discovering the paper.
     status: active
     compute: "SkyPilot (cloud: runpod)"
-    storage: "Network Volume (data uploaded from local disk)"
+    storage: "Network Volume — data comes from researcher's LOCAL DISK only"
     mlflow: "File-based on Network Volume (/opt/vol/mlruns)"
-    data_flow: "Local disk → sky rsync up → Network Volume"
-    sync_back: "make dev-gpu-sync (sky rsync down /opt/vol/mlruns/ → local mlruns/)"
-    assumption: "Cannot assume ANY GCP infrastructure exists. Standalone."
+    data_source: |
+      Researcher's local disk ONLY. Two paths:
+        A) Their own dataset: rsync from local → /opt/vol/data/raw/
+        B) Known datasets (e.g. MiniVess): downloaded from EBRAINS via Acquisition Flow,
+           DVC-versioned locally, then rsynced to Network Volume.
+      NO S3. NO GCS. NO external cloud storage. Any s3:// reference is a BUG.
+    data_flow: "Local disk → make dev-gpu-upload-data → /opt/vol/data/raw/"
+    sync_back: |
+      MANDATORY: make dev-gpu-sync (sky rsync down /opt/vol/mlruns/ → local mlruns/).
+      Without sync-back, MLflow runs are invisible locally — the entire RunPod path
+      has zero scientific value. Sync MUST happen after every training job.
+    assumption: "Cannot assume ANY GCP infrastructure exists. Fully standalone."
+    banned: "ANY s3:// URL. s3://minivessdataset was removed 2026-03-16 (unauthorized)."
     skypilot_yamls:
       - deployment/skypilot/dev_runpod.yaml
       - deployment/skypilot/smoke_test_gpu.yaml
@@ -83,15 +100,87 @@ archived_providers:
     reason: "No EU availability"
     code: deployment/archived/lambda/
 
+# ─── PER-FLOW COMPUTE ROUTING ─────────────────────────────────────────────────
+# The entire point of Prefect flows is that COMPUTE CAN BE DIFFERENT PER FLOW.
+# A researcher on a train trip can run ALL flows from their laptop:
+#
+#   Flow 1: Data Engineering   → researcher decides (laptop, Docker Compose, cloud instance)
+#   Flow 2: Model Training     → researcher decides (local GPU, RunPod, GCP, on-prem)
+#   Flow 3: Model Analysis     → researcher decides (laptop, or cloud GPU for large-scale eval)
+#   Flow 4: Deployment         → researcher decides (laptop, server, CI runner)
+#   Flow 5: Dashboard          → researcher decides (laptop, Vercel, Render, static host)
+#
+# These are EXAMPLES of one typical setup, NOT a default mapping.
+# A researcher may run Analysis on GPU (sliding window eval), Dashboard on Vercel,
+# Biostatistics overnight on a low-power machine — all valid configurations.
+#
+# The inter-flow contract is MLflow (local mlruns/).
+# After any remote flow (e.g. Train on RunPod/GCP), mlruns are synced back to local.
+# Then subsequent flows pick up from local mlruns/ — seamlessly.
+#
+# Researcher journey (one example — not a requirement):
+#   1. DVC-versioned dataset on laptop (downloaded from EBRAINS or own data)
+#   2. Run Train Flow remotely: `prefect deployment run 'train-flow/runpod'`
+#      → SkyPilot uploads data (file_mounts or pre-loaded volume) → trains → syncs mlruns back
+#   3. Continue with Analysis/Deploy/Dashboard wherever the researcher chooses
+#
+# RunPod is a COMPUTE TARGET — it is NOT a "second environment" and NOT restricted
+# to any specific flow. The laptop is ALWAYS the control plane and MLflow home.
+per_flow_compute:
+  # PRINCIPLE: Each Prefect flow has an INDEPENDENTLY configurable compute target.
+  # This is defined in the Prefect deployment config, NEVER in flow code.
+  # The platform provides flows; the user decides where each flow runs.
+  # Do NOT hardcode any flow → compute mapping anywhere.
+  #
+  # Realistic examples (not exhaustive, not defaults):
+  #   Train Flow    → RunPod RTX 4090 or GCP L4 (needs GPU — most common cloud use case)
+  #   Analysis Flow → Could also need GPU (large-scale sliding window eval)
+  #   Dashboard     → Could be served on Vercel, Render, or any static/app host
+  #   Biostatistics → Could run overnight on a Raspberry Pi (low-power, CPU)
+  #   Data Eng      → Could run on a large-memory cloud instance (huge datasets)
+  #
+  # In-scope compute targets (currently supported):
+  #   - local Docker Compose (any flow)
+  #   - SkyPilot → RunPod (any flow, typically Train + Analysis)
+  #   - SkyPilot → GCP (any flow, typically Train + Analysis)
+  #   - Vercel/Render (Dashboard only — static/serverless)
+  #
+  # Out of scope (not planned):
+  #   - ARM/Raspberry Pi, ESP32, WebAssembly
+  #   - AWS, Azure, Lambda Labs (not authorized cloud providers for this repo's defaults)
+  #
+  # The ONLY thing we can say about a flow's compute: it has a configurable
+  # Prefect deployment config. Users override it. We provide sensible defaults.
+  rule: "NEVER hardcode compute target for any flow in platform code or KG. It is a deployment config."
+
+# ─── DATA PROVENANCE — RunPod vs GCP ──────────────────────────────────────────
+# This is the critical distinction for paper readers and new researchers.
+#
+# RunPod "env" path:
+#   Data source = researcher's LOCAL DISK (their own dataset OR a known dataset
+#   downloaded from EBRAINS via Acquisition Flow, then DVC-versioned locally).
+#   DVC tracks files locally (no S3/GCS remote needed for RunPod).
+#   Upload to Network Volume once: make dev-gpu-upload-data LOCAL_DATA=data/raw/
+#   There is NO DVC remote for RunPod — it's a direct rsync, not a DVC pull.
+#
+# GCP "staging/prod" path:
+#   Data source = GCS bucket (gs://minivess-mlops-dvc-data).
+#   DVC push from local: dvc push -r gcs (one-time per dataset version).
+#   GCP VMs pull via ADC (service account) — no credentials in YAML.
+#
+# Known datasets (e.g. MiniVess):
+#   Available on EBRAINS (NOT on S3 — s3://minivessdataset is removed).
+#   Acquisition Flow (Flow 1) can auto-download from EBRAINS and DVC-version locally.
+#   Planned: --dataset minivess flag triggers auto-download + DVC + upload in one command.
+#
 # ─── DVC REMOTE STRATEGY ──────────────────────────────────────────────────────
-# Each environment uses a different DVC remote for data access.
-# See: .dvc/config for currently configured remotes
 dvc_remotes:
   minio:
     url: "s3://dvc-data"
-    purpose: "Local Docker Compose development (default remote)"
-    credentials: "minioadmin/minioadmin (Docker Compose stack)"
+    purpose: "Local Docker Compose development (default remote for local stack)"
+    credentials: "minioadmin/minioadmin (Docker Compose stack — local MinIO, NOT AWS)"
     environment: local
+    note: "This is LOCAL MinIO (S3-compatible API) running in Docker Compose. Not AWS."
 
   gcs:
     url: "gs://minivess-mlops-dvc-data"
@@ -101,18 +190,14 @@ dvc_remotes:
     env_var: "DVC_REMOTE=gcs"
     config_template: configs/dvc/remotes.yaml
 
-  remote_storage:
-    url: "s3://minivessdataset"
-    purpose: "READ-ONLY public data source (original dataset upload)"
-    credentials: "None (public bucket)"
-    environment: "any (fallback for initial data download)"
-    note: "This is the DATA ORIGIN, not a production backend. Use for first-time data download only."
-
   runpod_network_volume:
-    purpose: "Data cache on RunPod Network Volume (/opt/vol/data/)"
-    data_flow: "Upload from local: make dev-gpu-upload-data"
+    purpose: "Data on RunPod Network Volume — NOT a DVC remote, direct rsync"
+    data_flow: "make dev-gpu-upload-data LOCAL_DATA=data/raw/ → /opt/vol/data/raw/"
     environment: env
-    note: "Not a DVC remote — direct file copy via sky rsync"
+    note: "rsync, not dvc pull. Data is DVC-versioned locally; RunPod gets a copy via rsync."
+
+  banned:
+    remote_storage_s3: "s3://minivessdataset — REMOVED 2026-03-16, was unauthorized AWS third provider"
 
 # ─── ENVIRONMENT MAPPING ──────────────────────────────────────────────────────
 # Maps the three-environment model to actual execution targets
@@ -122,15 +207,26 @@ environments:
     compute: "Local GPU (RTX 2070 Super, 8 GB)"
     mlflow: "mlruns/ (local filesystem)"
     dvc_remote: minio
-    purpose: "Fast iteration, uv run pytest"
+    purpose: "Fast iteration, uv run pytest, quick debugging"
 
   env:
     docker: "Docker image via SkyPilot image_id"
-    compute: "RunPod spot/on-demand (RTX 4090, 24 GB)"
-    mlflow: "File-based on Network Volume"
-    dvc_remote: "None (data uploaded from local via sky rsync)"
-    purpose: "Quick GPU experiments, hacky, standalone"
-    assumption: "No GCP infrastructure required"
+    compute: "RunPod spot/on-demand (RTX 4090, 24 GB) — any flow that needs cloud GPU"
+    mlflow: "Synced back to local mlruns/ after remote job (mandatory — subsequent flows read from there)"
+    dvc_remote: "None — data comes from local DVC working copy, not a cloud remote"
+    data_source: |
+      Researcher's local DVC-versioned dataset. Two transfer modes:
+        Mode A: Pre-loaded Network Volume (rsync once, reuse many times)
+        Mode B: SkyPilot file_mounts (copy at launch, no persistent storage — NOT YET IMPLEMENTED)
+    purpose: |
+      Compute target for any flow that needs cloud GPU but no full GCP stack.
+      Researcher controls all flows from their laptop. Typically Train Flow runs on RunPod
+      (most common GPU consumer), but Analysis Flow (large-scale sliding window eval) or
+      other GPU-heavy flows may also dispatch here — it's the researcher's choice.
+      After each remote job, mlruns sync back to laptop. Full pipeline = laptop orchestration
+      + RunPod compute for GPU-intensive flows.
+    assumption: "No GCP infrastructure. No S3. Laptop is the control plane and MLflow home."
+    post_train_sync: "make dev-gpu-sync → sky rsync down minivess-dev:/opt/vol/mlruns/ mlruns/"
 
   staging:
     docker: "Docker image via SkyPilot image_id"

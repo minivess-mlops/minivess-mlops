@@ -20,12 +20,60 @@ resolution_evidence:
   - type: decision
     source: "CLAUDE.md Cloud GPU Strategy table"
     finding: "RunPod=dev, GCP=prod, Lambda=archived, UpCloud=archived (2026-03-16)"
+runpod_purpose:
+  # Why RunPod exists in this repo:
+  # 1. Repo owner (8 GB VRAM local) needs >16 GB for SAM3 Hybrid / VesselFM
+  # 2. Paper readers / thin-client researchers can train with one command
+  # 3. ZERO cloud infra setup — just a RunPod account + Docker image
+  # No GCP account, no Pulumi, no GCS, no Cloud SQL. Fully standalone.
+  #
+  # CRITICAL: RunPod is a COMPUTE TARGET, not a full environment.
+  # The per-flow compute target is defined in Prefect deployment config — not hardcoded.
+  # Train Flow is the MOST COMMON RunPod/GCP use case (needs GPU). But ANY flow
+  # can be dispatched to RunPod, GCP, a Raspberry Pi, Vercel, or anywhere.
+  # Example: Analysis Flow might also need cloud GPU for large-scale model eval.
+  # The platform NEVER prescribes which flows go where — that's the user's choice.
+  #
+  # Typical researcher journey (not a rule — just one example):
+  #   DVC-versioned data on laptop → Prefect dispatches Train to RunPod via SkyPilot
+  #   → mlruns sync back to laptop → remaining flows wherever the user chooses
+  primary_audience: "Researchers with thin client / no GPU — one-command remote training"
+  secondary_audience: "Repo owner bypassing local 8 GB VRAM limit for large models"
+  data_contract: |
+    Researcher's LOCAL DVC-versioned dataset is the data source.
+    NO shared S3. NO GCS. NO external cloud storage of any kind.
+    s3://minivessdataset is BANNED from all RunPod YAMLs.
+    Data transfer to pod: Mode A = Network Volume (rsync), Mode B = file_mounts (planned).
+  mode_a_network_volume:
+    status: implemented
+    data_flow: "Local disk → make dev-gpu-upload-data → /opt/vol/data/raw/"
+    mlruns_flow: "/opt/vol/mlruns/ → make dev-gpu-sync → local mlruns/"
+    cost: "$3.50/month per 50 GB volume (persistent)"
+    use_case: "Repeated experiments on same dataset (upload once)"
+  mode_b_file_mounts:
+    status: "NOT YET IMPLEMENTED — design needed"
+    data_flow: "Local disk → SkyPilot file_mounts (ephemeral, copied at launch)"
+    mlruns_flow: "SkyPilot file_mounts output → auto-synced to local at job end"
+    cost: "No persistent storage cost"
+    use_case: "One-off training, thin client, no Network Volume setup"
+mlruns_sync_critical:
+  rule: "MLflow runs MUST come back to local mlruns/ after every RunPod job. Without sync, the entire RunPod path has zero scientific value — runs are invisible locally."
+  mechanism_a: "make dev-gpu-sync (manual, post-job)"
+  mechanism_b: "Auto-sync on job completion (not yet implemented — design in mode_b)"
 mlflow_strategy:
   dev: "File-based on RunPod Network Volume (/opt/vol/mlruns). No server needed."
-  sync: "sky rsync down minivess-dev:/opt/vol/mlruns/ mlruns/ (make dev-gpu-sync)"
-  prod: "GCP Cloud Run MLflow (separate issue)"
+  sync_back: "MANDATORY: sky rsync down → local mlruns/ (make dev-gpu-sync)"
+  prod: "GCP Cloud Run MLflow (GCS artifacts)"
+gcp_purpose:
+  self_service: true
+  note: "Paper readers can set up their own GCP project and run pulumi up. Fully documented."
+  pulumi_stack: deployment/pulumi/gcp/
+  researcher_docs: docs/planning/gcp-setup-tutorial.md
 dvc_strategy:
-  storage: "Network Volume cache-first → AWS S3 fallback (s3://minivessdataset)"
+  runpod: "NO DVC remote. Data uploaded via rsync only (make dev-gpu-upload-data)."
+  gcp: "GCS gs://minivess-mlops-dvc-data via Application Default Credentials"
+  local: "MinIO (Docker Compose)"
+  banned: "s3://minivessdataset — removed 2026-03-16 (unauthorized AWS third provider)"
   archived: "UpCloud S3 (dropped 2026-03-16, code in deployment/archived/upcloud/)"
 implementation:
   files: [src/minivess/compute/skypilot_launcher.py, deployment/skypilot/dev_runpod.yaml,

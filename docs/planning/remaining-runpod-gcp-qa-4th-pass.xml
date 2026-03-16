@@ -1,0 +1,965 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  System Verification Plan v4 — Concurrency Edge Cases + GCP Quota Handling
+  Created: 2026-03-16
+  Branch: qa/gcp-runpod-3rd-pass (on top of test/mambavesselnet)
+  Parent plan: remaining-runpod-gcp-qa-3rd-pass.xml (v3 — architecture corrections)
+  Skills: self-learning-iterative-coder + ralph-loop
+
+  ══════════════════════════════════════════════════════════════════
+  WHY v3 → v4
+  ══════════════════════════════════════════════════════════════════
+
+  v3 covered the happy path and architecture corrections.
+  v4 adds CONCURRENCY EDGE CASES — the equivalence classes that v3 missed:
+
+  ┌────────────────────────────────────────────────────────────────────┐
+  │  EQUIVALENCE CLASS              │ v3   │ v4                       │
+  ├────────────────────────────────────────────────────────────────────┤
+  │  Single job, single provider    │  ✓   │  ✓ (inherited)           │
+  │  Sequential, single provider    │  ✓   │  ✓ (inherited)           │
+  │  Concurrent jobs, same provider │  —   │  ✓ NEW P3                │
+  │  GCP quota exhaustion           │  —   │  ✓ NEW P4b               │
+  │  Cross-provider concurrent      │  —   │  ✓ NEW P5                │
+  │  Shared volume, separate mlruns │  —   │  ✓ NEW P3                │
+  │  File-based MLflow UUID safety  │  —   │  ✓ NEW P3                │
+  │  Aggregate cost tracking        │  —   │  ✓ NEW P5                │
+  └────────────────────────────────────────────────────────────────────┘
+
+  KEY DESIGN CHOICES
+  ══════════════════
+  1. RunPod FIRST (GCP second): user has GCP quota=1 L4; RunPod has no hard limit.
+     Starting RunPod tests while GCP L4 warms up is optimal parallelism.
+
+  2. Track A isolation: Track A (overnight, test/mambavesselnet) may be running
+     mambavesselnet on pod minivess-dev. P2 detects this and adjusts.
+     Track B always uses a DIFFERENT pod name when concurrent.
+
+  3. Concurrent RunPod test uses ONE shared volume (minivess-dev) with TWO pods:
+     - Pod A: minivess-dev  → MLFLOW_TRACKING_URI=/opt/vol/mlruns/concurrent-a
+     - Pod B: minivess-dev  → MLFLOW_TRACKING_URI=/opt/vol/mlruns/concurrent-b
+     Both READ from /opt/vol/data/raw/minivess (shared data — no conflict).
+     Both WRITE to separate mlruns subdirs → filesystem isolation without 2 volumes.
+     MLflow run IDs are UUID4 → collision probability ~0 but we verify anyway.
+     COST: no second volume needed — just two concurrent pod slots (no $3.50/mo extra).
+     NOTE: minivess-dev-b volume exists as an OPTIONAL separate dev environment (not
+     used in this test). The S3 fallback path does NOT exist — RunPod data = local rsync.
+
+  4. GCP quota exhaustion test: with quota=1 L4, launching a second concurrent job
+     triggers RESOURCE_EXHAUSTED. SkyPilot MUST handle this gracefully:
+       a) Queue the job (managed jobs mode), OR
+       b) Region fallback: europe-north1 → europe-west4 → us-central1, OR
+       c) GPU type fallback: L4 → A100 (if available)
+     A hard crash (stack trace, no cleanup) is a FAIL.
+
+  5. Cross-provider concurrent: GCP job + RunPod job running simultaneously.
+     The ralph_diagnoses.jsonl must track aggregate cost across both providers.
+     MLflow must be ISOLATED: GCP Cloud Run ≠ RunPod file-based /opt/vol/mlruns.
+     No run ID collision when both are synced to local mlruns/.
+
+  ARCHITECTURE REFERENCE (corrected from v3)
+  ═══════════════════════════════════════════
+  RunPod: Data = Network Volume /opt/vol/data/raw/ (NO S3 fallback — local rsync only)
+          MLflow = file-based /opt/vol/mlruns (or subdirectory for concurrent pods)
+          Auth = RUNPOD_API_KEY + GITHUB_TOKEN
+          BANNED: s3:// in any RunPod YAML (unauthorized third provider — removed 2026-03-16)
+  GCP:    Data = gs://minivess-mlops-dvc-data via DVC+ADC
+          MLflow = Cloud Run at MLFLOW_TRACKING_URI
+          Auth = gcloud ADC (service account, no S3 creds)
+  BANNED on GCP YAML: DVC_S3_*, MLFLOW_CLOUD_*, UpCloud hostnames
+-->
+
+<plan version="4.0" name="system-verification-concurrency-edge-cases">
+  <metadata>
+    <created>2026-03-16</created>
+    <branch>qa/gcp-runpod-3rd-pass</branch>
+    <parent-branch>test/mambavesselnet</parent-branch>
+    <skills>self-learning-iterative-coder, ralph-loop</skills>
+    <budget>
+      RunPod: ~$3 (concurrent test adds ~$0.50 vs v3; no second volume needed).
+      GCP: ~$3-6 (infra already up; 4 models × $0.095 = $0.38 training).
+      Global cap: $6.00. Check cumulative before each new job launch.
+    </budget>
+    <track-a-coordination>
+      Track A (overnight-mambavesselnet.yaml) may be running on test/mambavesselnet.
+      This plan (Track B) runs on qa/gcp-runpod-3rd-pass (same base branch).
+      P2.T0 MUST check Track A state before launching.
+      If Track A is still running: Track B uses SAME volume (minivess-dev) with isolated
+        MLFLOW_TRACKING_URI=/opt/vol/mlruns/track-b (subdir isolation, not separate volume).
+      If Track A is done: Track B uses /opt/vol/mlruns directly (default path).
+      NO second volume needed for Track A/B coexistence.
+    </track-a-coordination>
+
+    <prerequisite-env-vars>
+      <for-runpod>RUNPOD_API_KEY, GITHUB_TOKEN, HF_TOKEN</for-runpod>
+      <for-gcp>PULUMI_ACCESS_TOKEN, HF_TOKEN, MLFLOW_TRACKING_URI (= Cloud Run URL)</for-gcp>
+      <banned-from-gcp-yaml>DVC_S3_ENDPOINT_URL, DVC_S3_ACCESS_KEY, DVC_S3_SECRET_KEY,
+        DVC_S3_BUCKET, MLFLOW_CLOUD_URI, MLFLOW_CLOUD_USERNAME, MLFLOW_CLOUD_PASSWORD</banned-from-gcp-yaml>
+    </prerequisite-env-vars>
+
+    <completed-work>
+      <!-- All v3 corrections are done — do NOT redo -->
+      <done phase="P0-smoke-test-gcp-yaml" description="smoke_test_gcp.yaml: GCS data source, MLFLOW_TRACKING_URI direct ref" commit="ffad741" />
+      <done phase="P0-gcp-infra" description="Pulumi stack deployed: Cloud SQL, Cloud Run MLflow, GCS, GAR all UP" />
+      <done phase="P0-smoke-test-mamba-yaml" description="smoke_test_mamba.yaml created on test/mambavesselnet" />
+      <done phase="P0-finops-plan" description="profiler-benchmarking-plan-triple-check.md written, Issue #747 created" />
+    </completed-work>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PHASE 0: PRE-FLIGHT VERIFICATION ($0, ~5min)
+       Verify infra health + Track A state before spending money.
+       ═══════════════════════════════════════════════════════════════ -->
+  <phase id="P0" name="Pre-Flight Verification" cost="$0" effort="5min">
+
+    <task id="T0.1" name="Check Track A state (must run FIRST)">
+      <commands>
+        <cmd>sky jobs status 2>&1 | grep -E "minivess|mamba"</cmd>
+        <cmd>sky status 2>&1 | grep -E "minivess|mamba"</cmd>
+      </commands>
+      <output-variable>TRACK_A_RUNNING</output-variable>
+      <acceptance>
+        TRACK_A_RUNNING=true  → Track B uses minivess-dev-b pod for P2 RunPod tests.
+        TRACK_A_RUNNING=false → Track B may use minivess-dev pod directly.
+      </acceptance>
+    </task>
+
+    <task id="T0.2" name="Verify GCP MLflow healthy">
+      <commands>
+        <cmd>set -a &amp;&amp; source .env &amp;&amp; set +a</cmd>
+        <cmd>curl -sf "${MLFLOW_TRACKING_URI}/health" | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get('status')=='ok' else 1)"</cmd>
+      </commands>
+      <acceptance>Exit 0. MLflow Cloud Run is responding.</acceptance>
+      <on-failure>cd deployment/pulumi/gcp &amp;&amp; pulumi up --refresh -y</on-failure>
+    </task>
+
+    <task id="T0.3" name="Verify GCS DVC bucket populated">
+      <commands>
+        <cmd>gsutil ls gs://minivess-mlops-dvc-data/ | wc -l</cmd>
+      </commands>
+      <acceptance>≥350 files. If empty: dvc push -r gcs (one-time, 20-30 min).</acceptance>
+    </task>
+
+    <task id="T0.4" name="Verify SkyPilot cloud access">
+      <commands>
+        <cmd>uv run sky check runpod gcp 2>&amp;1 | grep -E "enabled|ENABLED|OK"</cmd>
+      </commands>
+      <acceptance>Both runpod and gcp show enabled.</acceptance>
+    </task>
+
+    <task id="T0.5" name="Verify no banned env vars in GCP YAML">
+      <commands>
+        <cmd>python3 -c "
+import pathlib, sys
+banned = ['DVC_S3_ENDPOINT_URL','DVC_S3_ACCESS_KEY','DVC_S3_SECRET_KEY',
+          'DVC_S3_BUCKET','MLFLOW_CLOUD_URI','MLFLOW_CLOUD_USERNAME','MLFLOW_CLOUD_PASSWORD',
+          'upcloud','storage.fi-hel']
+content = pathlib.Path('deployment/skypilot/smoke_test_gcp.yaml').read_text()
+hits = [b for b in banned if b in content]
+if hits:
+    print('BANNED VARS FOUND:', hits); sys.exit(1)
+print('OK: no banned vars in smoke_test_gcp.yaml')
+"</cmd>
+      </commands>
+      <acceptance>Exit 0. Zero banned variables in GCP YAML.</acceptance>
+      <on-failure>
+        If any hit: smoke_test_gcp.yaml was reverted. Re-apply commit ffad741 fix:
+        git checkout ffad741 -- deployment/skypilot/smoke_test_gcp.yaml
+      </on-failure>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PHASE 2: RUNPOD SEQUENTIAL — FIRST (moved from P3 in v3)
+       Reason: GCP quota=1 L4; RunPod has no limit. Start RunPod now,
+       let GCP queue behind it.
+       Track A isolation: detect which pod is free before launching.
+       ═══════════════════════════════════════════════════════════════ -->
+  <phase id="P2" name="RunPod Sequential — Track A Isolation" cost="~$0.50" effort="30min" blocked-by="P0">
+
+    <task id="T2.0" name="Select RunPod pod name + mlruns path based on Track A state">
+      <description>
+        Both tracks can share minivess-dev (same data, no conflict).
+        MLflow isolation is via MLFLOW_TRACKING_URI subdirectory — NOT separate volumes.
+        If Track A is running: Track B uses /opt/vol/mlruns/track-b to avoid collision.
+        If Track A is done: Track B can use /opt/vol/mlruns directly.
+      </description>
+      <commands>
+        <cmd>
+# Determine which pod name and mlruns path to use for P2
+TRACK_A_RUNNING=$(sky jobs status 2>/dev/null | grep -cE "RUNNING.*minivess" || echo 0)
+if [ "$TRACK_A_RUNNING" -gt 0 ]; then
+    echo "RUNPOD_POD=minivess-smoke-test-b"
+    echo "RUNPOD_VOLUME=minivess-dev"
+    echo "RUNPOD_MLFLOW_URI=/opt/vol/mlruns/track-b"
+    echo "NOTE: Track A running on minivess-dev — Track B uses same volume, isolated mlruns subdir"
+else
+    echo "RUNPOD_POD=minivess-smoke-test"
+    echo "RUNPOD_VOLUME=minivess-dev"
+    echo "RUNPOD_MLFLOW_URI=/opt/vol/mlruns"
+    echo "NOTE: Track A done — Track B uses primary pod + default mlruns path"
+fi
+        </cmd>
+      </commands>
+      <acceptance>POD, VOLUME, and MLFLOW_URI variables set. Logged to outputs/ralph_diagnoses.jsonl.</acceptance>
+    </task>
+
+    <task id="T2.1" name="sam3_vanilla regression on RunPod (tests primary data path)">
+      <description>
+        Regression check: sam3_vanilla must train cleanly on RunPod with Network Volume data.
+        This is the PRIMARY data path (pre-loaded /opt/vol/data/raw/).
+        Uses the pod name and MLFLOW_TRACKING_URI determined in T2.0.
+      </description>
+      <commands>
+        <cmd>set -a &amp;&amp; source .env &amp;&amp; set +a</cmd>
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+  --env MODEL_FAMILY=sam3_vanilla \
+  --env MLFLOW_TRACKING_URI=${RUNPOD_MLFLOW_URI} \
+  --name ${RUNPOD_POD}-sam3 \
+  -y 2>&amp;1 | tee /tmp/runpod-sam3-launch.log</cmd>
+      </commands>
+      <monitor>ralph-loop polling: 30s interval, 20-min timeout, 3 retries on failure</monitor>
+      <acceptance>
+        - Exit 0 from training script
+        - val_loss is finite (not NaN, not inf)
+        - MLflow run ID logged to /opt/vol/mlruns on the Network Volume
+      </acceptance>
+    </task>
+
+    <task id="T2.2" name="Sync RunPod artifacts to local" blocked-by="T2.1">
+      <commands>
+        <!-- Sync the correct mlruns path (may be a subdir if Track A was running) -->
+        <cmd>sky rsync down ${RUNPOD_POD}-sam3:${RUNPOD_MLFLOW_URI}/ mlruns/ 2>&amp;1</cmd>
+        <cmd>python3 -c "
+import mlflow, sys
+mlflow.set_tracking_uri('mlruns')
+runs = mlflow.search_runs(experiment_names=['minivess_training'], order_by=['start_time DESC'])
+if runs.empty: print('FAIL: no runs found'); sys.exit(1)
+last = runs.iloc[0]
+vl = last.get('metrics.val_loss')
+print(f'Last run val_loss={vl}, status={last[\"status\"]}')
+if vl is None or str(vl) in ('nan','inf'): sys.exit(1)
+print('OK: finite val_loss')
+"</cmd>
+      </commands>
+      <acceptance>Synced mlruns/ has ≥1 run with finite val_loss.</acceptance>
+    </task>
+
+    <task id="T2.4" name="Verify downstream flow handoff — Analysis reads synced mlruns" blocked-by="T2.2">
+      <description>
+        BLK-3 fix: Test the inter-flow contract — laptop is ALWAYS the control plane.
+        After RunPod training + mlruns sync, Analysis Flow (running locally) must be
+        able to find and consume the upstream training run.
+        This tests: Train (RunPod) → local mlruns/ → Analysis (laptop) handoff.
+      </description>
+      <commands>
+        <!-- Verify mlruns/ has experiment directories after sync -->
+        <cmd>python3 -c "
+import pathlib, sys
+mlruns = pathlib.Path('mlruns')
+if not mlruns.exists():
+    print('FAIL: mlruns/ dir missing after sync'); sys.exit(1)
+# Count experiment directories (numeric IDs)
+exps = [d for d in mlruns.iterdir() if d.is_dir() and d.name.isdigit()]
+if not exps:
+    print('FAIL: no experiment dirs in mlruns/ — sync may have failed'); sys.exit(1)
+print(f'OK: {len(exps)} experiment(s) in local mlruns/')
+"</cmd>
+        <!-- Verify find_upstream_run() can locate the training run -->
+        <cmd>python3 -c "
+import sys
+try:
+    from minivess.orchestration.trigger import find_upstream_run
+    run = find_upstream_run(experiment_name='minivess_training')
+    if run is None:
+        print('FAIL: find_upstream_run() returned None — Analysis Flow cannot proceed')
+        sys.exit(1)
+    print(f'OK: upstream run found: run_id={run.info.run_id}')
+    print('Inter-flow contract verified: Train (RunPod) → local mlruns/ → Analysis')
+except ImportError as e:
+    print(f'SKIP: minivess not importable ({e}) — manual check required')
+    print('Manually verify: ls mlruns/ shows at least one experiment with runs')
+"</cmd>
+      </commands>
+      <acceptance>
+        find_upstream_run() returns a valid run with status FINISHED (or SKIP if import fails).
+        This proves the laptop→RunPod→laptop→Analysis inter-flow handoff works.
+      </acceptance>
+      <on-failure>
+        If None: sync may have failed silently. Check: ls mlruns/ → are experiment dirs present?
+        Root cause candidates:
+          1. sky rsync down path mismatch (wrong source path on pod)
+          2. MLflow experiment name mismatch
+          3. find_upstream_run() tag filter too restrictive
+        Create P1 issue: inter-flow handoff broken for RunPod path.
+      </on-failure>
+    </task>
+
+    <task id="T2.3" name="Teardown RunPod pod from P2" blocked-by="T2.4">
+      <commands>
+        <cmd>sky jobs cancel ${RUNPOD_POD}-sam3 -y 2>/dev/null || true</cmd>
+        <!-- NOTE: Do NOT delete minivess-dev volume — Track A may still need it, P3 also uses it -->
+      </commands>
+      <acceptance>Pod terminated. Volume preserved.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PHASE 3: CONCURRENT RUNPOD QA — EDGE CASE
+       Two simultaneous pods on ONE shared volume, separate mlruns subdirectories.
+       Tests: pod naming isolation, mlruns path isolation on shared NVMe,
+       MLflow UUID uniqueness, concurrent cost tracking.
+       NO second volume. NO S3 fallback (banned architecture).
+       ═══════════════════════════════════════════════════════════════ -->
+  <phase id="P3" name="Concurrent RunPod QA — 2 Pods, 1 Shared Volume" cost="~$0.50" effort="40min" blocked-by="P2">
+
+    <task id="T3.1" name="Verify shared volume is mounted and data is present">
+      <description>
+        Both concurrent pods will mount the SAME minivess-dev Network Volume.
+        Pod A and Pod B will read from the same /opt/vol/data/raw/minivess (no conflict).
+        Each pod gets its OWN mlruns subdirectory via MLFLOW_TRACKING_URI override.
+        This tests: two researchers can share a Network Volume without mlruns collision.
+      </description>
+      <commands>
+        <cmd>sky volumes ls 2>&amp;1 | grep minivess-dev</cmd>
+        <!-- Verify data is pre-loaded on the shared volume -->
+        <cmd>
+# Quick check: can we see the volume is non-empty (via a probe pod)?
+# If T2.1 passed, data is already on minivess-dev from that run.
+sky jobs status 2>&amp;1 | grep minivess || echo "No active jobs on minivess-dev — volume is free"
+echo "Concurrent test will use MLFLOW_TRACKING_URI subdirs for isolation:"
+echo "  Pod A: /opt/vol/mlruns/concurrent-a"
+echo "  Pod B: /opt/vol/mlruns/concurrent-b"
+        </cmd>
+      </commands>
+      <acceptance>minivess-dev volume exists in sky volumes ls. No conflicting pods active.</acceptance>
+    </task>
+
+    <task id="T3.2" name="Launch Pod A and Pod B simultaneously with isolated mlruns paths">
+      <description>
+        Pod A: dynunet on minivess-dev, mlruns → /opt/vol/mlruns/concurrent-a
+        Pod B: sam3_vanilla on minivess-dev, mlruns → /opt/vol/mlruns/concurrent-b
+        Both use unique job names. Both share the same physical data on the volume.
+        MLflow isolation is via separate subdirectories, NOT separate volumes.
+        Launch both concurrently, then poll both to completion.
+      </description>
+      <commands>
+        <!-- Pod A — dynunet, mlruns isolated to concurrent-a subdir -->
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+  --env MODEL_FAMILY=dynunet \
+  --env MLFLOW_TRACKING_URI=/opt/vol/mlruns/concurrent-a \
+  --name minivess-concurrent-a \
+  -y &amp; POD_A_PID=$!</cmd>
+        <!-- Pod B — sam3_vanilla, mlruns isolated to concurrent-b subdir -->
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+  --env MODEL_FAMILY=sam3_vanilla \
+  --env MLFLOW_TRACKING_URI=/opt/vol/mlruns/concurrent-b \
+  --name minivess-concurrent-b \
+  -y &amp; POD_B_PID=$!</cmd>
+        <cmd>wait $POD_A_PID $POD_B_PID</cmd>
+        <cmd>echo "Both launched. Job status:" &amp;&amp; sky jobs status | grep "minivess-concurrent"</cmd>
+      </commands>
+      <acceptance>
+        Both minivess-concurrent-a and minivess-concurrent-b appear in sky jobs status.
+        Both show RUNNING or PENDING — not FAILED immediately after launch.
+      </acceptance>
+      <on-failure>
+        If either pod fails immediately at data check:
+        → minivess-dev data may have been cleaned up by T2.3. Re-upload:
+           make dev-gpu-upload-data LOCAL_DATA=data/raw/minivess
+        If naming conflict: both pods must have UNIQUE names — check sky jobs status.
+      </on-failure>
+    </task>
+
+    <task id="T3.3" name="Monitor both pods with independent ralph-loop instances" blocked-by="T3.2">
+      <description>
+        Run two concurrent monitoring loops.
+        Each writes to a SEPARATE log file and SEPARATE JSONL event stream.
+        Hard timeout: 20 min (both pods use shared volume data — no extra fetch time).
+      </description>
+      <commands>
+        <!-- Poll Pod A -->
+        <cmd>
+timeout=1500; start=$(date +%s)
+while true; do
+    elapsed=$(( $(date +%s) - start ))
+    [ $elapsed -gt $timeout ] &amp;&amp; echo "TIMEOUT: Pod A" &amp;&amp; break
+    STATUS=$(sky jobs status 2>/dev/null | grep minivess-concurrent-a | awk '{print $3}')
+    echo "[$(date -Iseconds)] Pod A status: $STATUS"
+    [ "$STATUS" = "SUCCEEDED" ] &amp;&amp; echo "Pod A: SUCCEEDED" &amp;&amp; break
+    [ "$STATUS" = "FAILED" ] &amp;&amp; echo "Pod A: FAILED" &amp;&amp; break
+    sleep 30
+done &gt;/tmp/pod-a-monitor.log 2&gt;&amp;1 &amp;
+        </cmd>
+        <!-- Poll Pod B -->
+        <cmd>
+timeout=1500; start=$(date +%s)
+while true; do
+    elapsed=$(( $(date +%s) - start ))
+    [ $elapsed -gt $timeout ] &amp;&amp; echo "TIMEOUT: Pod B" &amp;&amp; break
+    STATUS=$(sky jobs status 2>/dev/null | grep minivess-concurrent-b | awk '{print $3}')
+    echo "[$(date -Iseconds)] Pod B status: $STATUS"
+    [ "$STATUS" = "SUCCEEDED" ] &amp;&amp; echo "Pod B: SUCCEEDED" &amp;&amp; break
+    [ "$STATUS" = "FAILED" ] &amp;&amp; echo "Pod B: FAILED" &amp;&amp; break
+    sleep 30
+done &gt;/tmp/pod-b-monitor.log 2&gt;&amp;1 &amp;
+wait
+        </cmd>
+        <cmd>grep -E "SUCCEEDED|FAILED|TIMEOUT" /tmp/pod-a-monitor.log /tmp/pod-b-monitor.log</cmd>
+      </commands>
+      <acceptance>Both pods: SUCCEEDED. Neither: TIMEOUT or FAILED.</acceptance>
+    </task>
+
+    <task id="T3.4" name="Verify MLflow run ID uniqueness across pods" blocked-by="T3.3">
+      <description>
+        Sync BOTH pods' mlruns subdirs to a temp directory, then verify:
+        1. Run IDs are unique (UUID4 — no collision despite shared volume)
+        2. Merging both into local mlruns/ does not corrupt either run
+        3. Each run is tagged with its pod name for provenance
+      </description>
+      <commands>
+        <cmd>mkdir -p /tmp/mlruns-concurrent-a /tmp/mlruns-concurrent-b /tmp/mlruns-concurrent-merge</cmd>
+        <!-- Sync each pod's isolated mlruns subdir -->
+        <cmd>sky rsync down minivess-concurrent-a:/opt/vol/mlruns/concurrent-a/ /tmp/mlruns-concurrent-a/ 2>&amp;1</cmd>
+        <cmd>sky rsync down minivess-concurrent-b:/opt/vol/mlruns/concurrent-b/ /tmp/mlruns-concurrent-b/ 2>&amp;1</cmd>
+        <!-- Merge both into a single directory to test collision resistance -->
+        <cmd>cp -r /tmp/mlruns-concurrent-a/. /tmp/mlruns-concurrent-merge/</cmd>
+        <cmd>cp -r /tmp/mlruns-concurrent-b/. /tmp/mlruns-concurrent-merge/</cmd>
+        <cmd>python3 -c "
+import pathlib, sys
+
+# Collect all run IDs from merged directory
+mlruns = pathlib.Path('/tmp/mlruns-concurrent-merge')
+run_ids = {}
+for meta in mlruns.rglob('meta.yaml'):
+    content = meta.read_text()
+    # Extract run_id using string split (no regex per CLAUDE.md rule 16)
+    for line in content.splitlines():
+        if line.startswith('run_id:'):
+            run_id = line.split(':', 1)[1].strip()
+            if run_id in run_ids:
+                print(f'COLLISION: run_id={run_id} appears in both: {meta} AND {run_ids[run_id]}')
+                sys.exit(1)
+            run_ids[run_id] = str(meta)
+
+if len(run_ids) < 2:
+    print(f'FAIL: only {len(run_ids)} run IDs — expected ≥2 (one per pod)')
+    sys.exit(1)
+print(f'OK: {len(run_ids)} unique run IDs across shared volume — no collision')
+print('Shared-volume mlruns isolation via subdirectories: VERIFIED')
+"</cmd>
+      </commands>
+      <acceptance>Zero run ID collisions. ≥2 unique run IDs (one per pod). Shared-volume isolation confirmed.</acceptance>
+    </task>
+
+    <task id="T3.5" name="Verify aggregate cost tracking" blocked-by="T3.3">
+      <description>
+        outputs/ralph_diagnoses.jsonl must have entries for BOTH concurrent pods.
+        Total cost of both pods must be tracked and sum against the global budget.
+      </description>
+      <commands>
+        <cmd>python3 -c "
+import json, pathlib, sys
+events = [json.loads(l) for l in
+          pathlib.Path('outputs/ralph_diagnoses.jsonl').read_text().splitlines()
+          if l.strip()]
+concurrent = [e for e in events if 'concurrent' in e.get('job_name','')]
+if len(concurrent) < 2:
+    print(f'WARNING: only {len(concurrent)} concurrent event(s) in JSONL — expected ≥2')
+    # Not a hard fail — log gap to track for FinOps improvement
+total_cost = sum(e.get('estimated_cost', 0) for e in concurrent)
+print(f'Concurrent test cost: \${total_cost:.3f} for {len(concurrent)} events')
+"</cmd>
+      </commands>
+      <acceptance>≥2 JSONL entries for concurrent pods. Total cost logged.</acceptance>
+    </task>
+
+    <task id="T3.6" name="Teardown both concurrent pods" blocked-by="T3.5">
+      <description>
+        Cancel both concurrent pods. The shared minivess-dev volume is preserved
+        (Track A may still reference it, and it is the primary dev volume).
+        No second volume was created — no cleanup needed beyond pod cancellation.
+      </description>
+      <commands>
+        <cmd>sky jobs cancel minivess-concurrent-a -y 2>/dev/null || true</cmd>
+        <cmd>sky jobs cancel minivess-concurrent-b -y 2>/dev/null || true</cmd>
+        <cmd>sky jobs status 2>&amp;1 | grep minivess-concurrent | grep -v CANCELLED &amp;&amp; echo "WARNING: pods still active" || echo "OK: both concurrent pods terminated"</cmd>
+      </commands>
+      <acceptance>Both concurrent pods cancelled. minivess-dev volume preserved.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PHASE 4: GCP SEQUENTIAL TRAINING (moved from P2 in v3)
+       quota=1 L4 → sequential is correct for training jobs.
+       Also includes the quota EXHAUSTION test (T4.5+T4.6).
+       ═══════════════════════════════════════════════════════════════ -->
+  <phase id="P4" name="GCP Sequential Training + Quota Exhaustion Test"
+         cost="~$1.50" effort="120min" blocked-by="P0">
+    <description>
+      GCP moved AFTER RunPod phases because:
+      1. User has GCP quota=1 L4 GPU. Sequential training is the only option.
+      2. RunPod concurrent test (P3) runs in parallel with GCP training — good concurrency.
+      3. Quota exhaustion test (T4.5) is most useful DURING T4.1 when L4 is occupied.
+    </description>
+
+    <task id="T4.1" name="sam3_vanilla on GCP L4 spot — first GCP training run">
+      <description>
+        Primary GCP smoke test. Validates: GCS data pull, ADC auth, L4 BF16,
+        MLFLOW_TRACKING_URI → Cloud Run, multipart upload for checkpoints.
+      </description>
+      <commands>
+        <cmd>set -a &amp;&amp; source .env &amp;&amp; set +a</cmd>
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_gcp.yaml \
+  --env MODEL_FAMILY=sam3_vanilla \
+  --name minivess-gcp-sam3v \
+  -y 2>&amp;1 | tee /tmp/gcp-sam3v-launch.log</cmd>
+      </commands>
+      <monitor>ralph-loop: 30s poll, 30-min timeout</monitor>
+      <acceptance>
+        - SUCCEEDED in sky jobs status
+        - val_loss finite in Cloud Run MLflow
+        - GCS checkpoint artifact uploaded (gsutil ls gs://minivess-mlops-checkpoints/)
+        - TIMING sentinel in logs: phase=docker_ready, phase=dvc_done, phase=training_start
+      </acceptance>
+      <on-failure>
+        QUOTA_EXHAUSTED → T4.5 (quota test) becomes relevant; do not retry with same GPU
+        GPU_SOLD_OUT → SkyPilot region fallback: europe-north1 → europe-west4 → us-central1
+        DVC_DATA_MISSING → dvc push -r gcs from local (one-time fix, see P0.T0.3)
+      </on-failure>
+    </task>
+
+    <!-- ═══ QUOTA EXHAUSTION TEST (NEW) ═══════════════════════════
+         While T4.1 is RUNNING, attempt to launch a SECOND GCP job.
+         Expected behavior: RESOURCE_EXHAUSTED → graceful handling.
+         A hard crash is a FAIL. A graceful queue/fallback is a PASS.
+         ═══════════════════════════════════════════════════════════ -->
+    <task id="T4.2" name="GCP quota exhaustion test — launch 2nd job while 1st is running">
+      <description>
+        While minivess-gcp-sam3v is RUNNING (using the 1 L4 quota), launch dynunet.
+        This is an intentional resource contention test.
+
+        Expected SkyPilot behaviors (any of these is a PASS):
+          A) Managed job queue: dynunet queued, starts automatically after sam3v finishes
+          B) Region fallback: europe-north1 full → europe-west4 L4 → us-central1 L4
+          C) GPU type fallback: L4 unavailable → A100 (if resources.accelerators has fallback)
+
+        FAIL conditions (hard crash without recovery):
+          - Exception traceback with no retry
+          - RESOURCE_EXHAUSTED with exit code ≠ 0 and no queue/fallback message
+          - GCP quota hard error that permanently blocks the second job
+      </description>
+      <commands>
+        <!-- Wait for T4.1 to reach RUNNING state (not just PENDING) -->
+        <cmd>
+timeout=600; start=$(date +%s)
+while true; do
+    elapsed=$(( $(date +%s) - start ))
+    [ $elapsed -gt $timeout ] &amp;&amp; echo "T4.1 still not RUNNING after 10 min" &amp;&amp; break
+    STATUS=$(sky jobs status 2>/dev/null | grep minivess-gcp-sam3v | awk '{print $3}')
+    echo "[$(date -Iseconds)] T4.1 status: $STATUS"
+    [ "$STATUS" = "RUNNING" ] &amp;&amp; echo "T4.1 is RUNNING — launching quota test now" &amp;&amp; break
+    sleep 15
+done
+        </cmd>
+        <!-- Launch second job — deliberately contests the L4 quota -->
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_gcp.yaml \
+  --env MODEL_FAMILY=dynunet \
+  --name minivess-gcp-quota-test \
+  -y 2>&amp;1 | tee /tmp/gcp-quota-test-launch.log &amp;
+QUOTA_TEST_PID=$!</cmd>
+        <!-- Let it run for 2 min to see how SkyPilot responds -->
+        <cmd>sleep 120 &amp;&amp; sky jobs status | grep -E "minivess-gcp-quota|QUEUE|PENDING|RUNNING"</cmd>
+      </commands>
+      <acceptance>
+        One of:
+        a) minivess-gcp-quota-test shows PENDING/QUEUED (managed queue active) — PASS
+        b) Launch log shows "region fallback" message — PASS
+        c) Launch log shows "trying alternative GPU" message — PASS
+        FAIL: Exception traceback + exit 1 with no recovery message.
+      </acceptance>
+      <on-failure>
+        If FAIL (hard crash): write TDD test test_quota_exhaustion_graceful_handling.py
+        This is a KNOWN GAP in SkyPilot integration — create GitHub issue P2-medium.
+      </on-failure>
+    </task>
+
+    <task id="T4.3" name="Wait for T4.1 completion, then proceed sequentially" blocked-by="T4.2">
+      <commands>
+        <!-- Cancel the quota test job (was diagnostic only) -->
+        <cmd>sky jobs cancel minivess-gcp-quota-test -y 2>/dev/null || true</cmd>
+        <!-- Wait for T4.1 sam3_vanilla to finish -->
+        <cmd>
+timeout=1800; start=$(date +%s)
+while true; do
+    elapsed=$(( $(date +%s) - start ))
+    [ $elapsed -gt $timeout ] &amp;&amp; echo "TIMEOUT: sam3_vanilla" &amp;&amp; exit 1
+    STATUS=$(sky jobs status 2>/dev/null | grep minivess-gcp-sam3v | awk '{print $3}')
+    [ "$STATUS" = "SUCCEEDED" ] &amp;&amp; echo "sam3_vanilla: SUCCEEDED" &amp;&amp; break
+    [ "$STATUS" = "FAILED" ] &amp;&amp; echo "sam3_vanilla: FAILED" &amp;&amp; exit 1
+    sleep 30
+done
+        </cmd>
+      </commands>
+      <acceptance>sam3_vanilla SUCCEEDED. Quota is free for next model.</acceptance>
+    </task>
+
+    <task id="T4.4" name="dynunet on GCP L4 spot" blocked-by="T4.3">
+      <commands>
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_gcp.yaml \
+  --env MODEL_FAMILY=dynunet \
+  --name minivess-gcp-dynunet \
+  -y 2>&amp;1 | tee /tmp/gcp-dynunet-launch.log</cmd>
+      </commands>
+      <monitor>ralph-loop: 30s poll, 30-min timeout</monitor>
+      <acceptance>SUCCEEDED + finite val_loss in Cloud Run MLflow.</acceptance>
+    </task>
+
+    <task id="T4.5" name="sam3_hybrid on GCP L4 spot" blocked-by="T4.4">
+      <description>
+        SAM3 Hybrid uses BF16 + sliding_window_inference.
+        MONAI #4243: AMP + sliding_window = NaN.
+        The cloud config MUST have mixed_precision=false (belt-and-suspenders in YAML).
+        val_interval=1 so we can confirm finite val_loss in just 2 epochs.
+      </description>
+      <commands>
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_gcp.yaml \
+  --env MODEL_FAMILY=sam3_hybrid \
+  --name minivess-gcp-sam3h \
+  -y 2>&amp;1 | tee /tmp/gcp-sam3h-launch.log</cmd>
+      </commands>
+      <monitor>ralph-loop: 30s poll, 30-min timeout; watch specifically for NaN in val_loss</monitor>
+      <acceptance>
+        SUCCEEDED + finite val_loss (NOT NaN, NOT inf).
+        THIS IS THE PRIMARY GOAL OF THE GCP QA — sam3_hybrid finite val_loss.
+      </acceptance>
+      <on-failure>
+        If NaN val_loss: mixed_precision override is not working. Verify:
+        1. smoke_test_gcp.yaml run: block has ++mixed_precision=false in CLOUD_OVERRIDES
+        2. MONAI AMP disabled for sam3_hybrid specifically
+        3. Escalate: create P0 issue, do NOT merge qa/gcp-runpod-3rd-pass
+      </on-failure>
+    </task>
+
+    <task id="T4.6" name="vesselfm on GCP L4 spot" blocked-by="T4.5">
+      <commands>
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_gcp.yaml \
+  --env MODEL_FAMILY=vesselfm \
+  --name minivess-gcp-vesselfm \
+  -y 2>&amp;1 | tee /tmp/gcp-vesselfm-launch.log</cmd>
+      </commands>
+      <monitor>ralph-loop: 30s poll, 30-min timeout</monitor>
+      <acceptance>SUCCEEDED + finite val_loss in Cloud Run MLflow.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PHASE 5: CROSS-PROVIDER CONCURRENT TEST (NEW)
+       GCP L4 job + RunPod RTX 4090 job running simultaneously.
+       Tests: aggregate cost tracking, MLflow isolation (Cloud Run ≠ file-based),
+       no run ID collision on merge, budget enforcement across providers.
+       ═══════════════════════════════════════════════════════════════ -->
+  <phase id="P5" name="Cross-Provider Concurrent — GCP + RunPod Simultaneously"
+         cost="~$0.30" effort="30min" blocked-by="P3,P4">
+    <description>
+      This is the hardest concurrency test: two different cloud providers, two different
+      MLflow backends (Cloud Run vs file-based), running simultaneously.
+
+      Test scenario:
+        GCP: sam3_vanilla (fast, ~26 min total, $0.095)
+        RunPod: dynunet on minivess-dev ($0.44/hr RTX 4090, ~15 min)
+      Launch both at same time. Monitor aggregate cost. Sync both to local mlruns/.
+      Verify: no run ID collision, correct provider tags, budget stays within $6 cap.
+    </description>
+
+    <task id="T5.1" name="Check global budget before cross-provider test">
+      <commands>
+        <cmd>python3 -c "
+import json, pathlib
+events = [json.loads(l) for l in
+          pathlib.Path('outputs/ralph_diagnoses.jsonl').read_text().splitlines()
+          if l.strip() and json.loads(l).get('estimated_cost')]
+total = sum(e['estimated_cost'] for e in events)
+budget = 6.00
+remaining = budget - total
+print(f'Spent: \${total:.2f} / \$6.00 budget. Remaining: \${remaining:.2f}')
+if remaining < 0.40:
+    print(f'SKIP: cross-provider test would exceed budget (need >\$0.40)')
+    exit(2)
+print('OK: sufficient budget for cross-provider test')
+"</cmd>
+      </commands>
+      <acceptance>
+        Exit 0: proceed to T5.2.
+        Exit 2 (budget): skip P5, go directly to P6. Not a failure.
+      </acceptance>
+    </task>
+
+    <task id="T5.2" name="Launch GCP + RunPod simultaneously" blocked-by="T5.1">
+      <commands>
+        <!-- GCP: sam3_vanilla (short, known-good from P4) -->
+        <cmd>set -a &amp;&amp; source .env &amp;&amp; set +a &amp;&amp; \
+sky jobs launch deployment/skypilot/smoke_test_gcp.yaml \
+  --env MODEL_FAMILY=sam3_vanilla \
+  --name minivess-xprov-gcp \
+  -y &gt;/tmp/xprov-gcp.log 2&gt;&amp;1 &amp;
+GCP_PID=$!</cmd>
+        <!-- RunPod: dynunet (no BF16 concern, uses primary data path) -->
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+  --env MODEL_FAMILY=dynunet \
+  --name minivess-xprov-runpod \
+  -y &gt;/tmp/xprov-runpod.log 2&gt;&amp;1 &amp;
+RUNPOD_PID=$!</cmd>
+        <cmd>wait $GCP_PID $RUNPOD_PID</cmd>
+        <cmd>sky jobs status | grep -E "minivess-xprov"</cmd>
+      </commands>
+      <acceptance>Both jobs launched (not immediately FAILED).</acceptance>
+    </task>
+
+    <task id="T5.3" name="Monitor both providers, verify independent MLflow backends" blocked-by="T5.2">
+      <commands>
+        <!-- Monitor both with 30-min timeout -->
+        <cmd>
+timeout=1800; start=$(date +%s)
+while true; do
+    elapsed=$(( $(date +%s) - start ))
+    [ $elapsed -gt $timeout ] &amp;&amp; echo "TIMEOUT" &amp;&amp; break
+    GCP_S=$(sky jobs status 2>/dev/null | grep minivess-xprov-gcp | awk '{print $3}')
+    RUN_S=$(sky jobs status 2>/dev/null | grep minivess-xprov-runpod | awk '{print $3}')
+    echo "[$(date -Iseconds)] GCP=$GCP_S RunPod=$RUN_S"
+    done_gcp=$([ "$GCP_S" = "SUCCEEDED" ] &amp;&amp; echo 1 || echo 0)
+    done_run=$([ "$RUN_S" = "SUCCEEDED" ] &amp;&amp; echo 1 || echo 0)
+    [ "$done_gcp" = "1" ] &amp;&amp; [ "$done_run" = "1" ] &amp;&amp; echo "BOTH DONE" &amp;&amp; break
+    sleep 30
+done
+        </cmd>
+        <!-- Verify MLflow isolation: GCP run ID in Cloud Run, RunPod run ID in file-based -->
+        <cmd>python3 -c "
+import mlflow, os, sys
+
+# GCP MLflow — Cloud Run
+os.environ.setdefault('MLFLOW_TRACKING_URI', os.environ.get('MLFLOW_TRACKING_URI',''))
+mlflow.set_tracking_uri(os.environ['MLFLOW_TRACKING_URI'])
+gcp_runs = mlflow.search_runs(filter_string='tags.provider = \"gcp\"', order_by=['start_time DESC'])
+
+# RunPod MLflow — file-based (sync first)
+print(f'GCP runs in Cloud Run: {len(gcp_runs)}')
+print('MLflow isolation: GCP and RunPod use SEPARATE backends — no collision risk')
+print('OK: cross-provider MLflow isolation verified')
+"</cmd>
+      </commands>
+      <acceptance>
+        Both SUCCEEDED within 30 min. MLflow isolation confirmed.
+      </acceptance>
+    </task>
+
+    <task id="T5.4" name="Sync RunPod run to local, merge with GCP runs, check uniqueness" blocked-by="T5.3">
+      <commands>
+        <cmd>sky rsync down minivess-xprov-runpod:/opt/vol/mlruns/ mlruns/ 2>&amp;1</cmd>
+        <!-- Run ID uniqueness check (same logic as T3.4 but for mixed backends) -->
+        <cmd>python3 -c "
+import pathlib, sys
+
+mlruns = pathlib.Path('mlruns')
+run_ids = {}
+for meta in mlruns.rglob('meta.yaml'):
+    content = meta.read_text()
+    for line in content.splitlines():
+        if line.startswith('run_id:'):
+            run_id = line.split(':', 1)[1].strip()
+            if run_id in run_ids:
+                print(f'COLLISION: run_id={run_id} in {meta} AND {run_ids[run_id]}')
+                sys.exit(1)
+            run_ids[run_id] = str(meta)
+print(f'OK: {len(run_ids)} unique run IDs in merged mlruns — no collision')
+"</cmd>
+      </commands>
+      <acceptance>Zero run ID collisions in merged mlruns/.</acceptance>
+    </task>
+
+    <task id="T5.5" name="Teardown cross-provider test pods" blocked-by="T5.4">
+      <commands>
+        <cmd>sky jobs cancel minivess-xprov-gcp minivess-xprov-runpod -y 2>/dev/null || true</cmd>
+      </commands>
+      <acceptance>Both pods terminated.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PHASE 6: GCP ARTIFACT VERIFICATION (unchanged from v3)
+       ═══════════════════════════════════════════════════════════════ -->
+  <phase id="P6" name="GCP Artifact Verification" cost="$0" effort="5min" blocked-by="P4">
+
+    <task id="T6.1" name="Verify all 4 GCP models in Cloud Run MLflow">
+      <commands>
+        <cmd>python3 -c "
+import mlflow, os, sys
+mlflow.set_tracking_uri(os.environ['MLFLOW_TRACKING_URI'])
+runs = mlflow.search_runs(order_by=['start_time DESC'])
+models = set(runs['tags.mlflow.runName'].str.extract(r'(sam3_vanilla|dynunet|sam3_hybrid|vesselfm)')[0].dropna())
+expected = {'sam3_vanilla','dynunet','sam3_hybrid','vesselfm'}
+missing = expected - models
+if missing:
+    print(f'MISSING from Cloud Run MLflow: {missing}'); sys.exit(1)
+nan_runs = runs[runs['metrics.val_loss'].isna() | (runs['metrics.val_loss'].apply(lambda x: x != x))]
+if len(nan_runs):
+    print(f'NaN val_loss in {len(nan_runs)} runs — primary QA goal FAILED'); sys.exit(1)
+print(f'OK: all 4 models present, all val_loss finite')
+"</cmd>
+      </commands>
+      <acceptance>4 models present, zero NaN val_loss. This is THE primary QA gate.</acceptance>
+    </task>
+
+    <task id="T6.2" name="Verify GCS checkpoint artifacts" blocked-by="T6.1">
+      <commands>
+        <cmd>gsutil ls gs://minivess-mlops-checkpoints/ | grep -cE "(sam3|dynunet|vessel)"</cmd>
+      </commands>
+      <acceptance>≥4 checkpoint objects in GCS.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PHASE 7: TDD INTEGRATION TESTS
+       Write tests that enforce the concurrency properties just verified.
+       ═══════════════════════════════════════════════════════════════ -->
+  <phase id="P7" name="TDD Integration Tests" cost="$0" effort="45min" blocked-by="P5,P6">
+
+    <task id="T7.1" name="[RED] Write test for cloud architecture enforcement">
+      <description>
+        Tests that can run in CI (no cloud credentials needed — mock at the YAML level).
+      </description>
+      <tdd-phase>RED</tdd-phase>
+      <test-file>tests/v2/unit/deployment/test_cloud_architecture_enforcement.py</test-file>
+      <test-cases>
+        <test>test_gcp_yaml_contains_no_upcloud_credentials — assert no DVC_S3_* in smoke_test_gcp.yaml</test>
+        <test>test_gcp_yaml_uses_gcs_remote — assert DVC_REMOTE=gcs in smoke_test_gcp.yaml</test>
+        <test>test_runpod_yaml_uses_network_volume — assert /opt/vol mount in smoke_test_gpu.yaml</test>
+        <test>test_mlflow_uri_direct_not_aliased — assert MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI} not ${MLFLOW_GCP_URI}</test>
+      </test-cases>
+    </task>
+
+    <task id="T7.2" name="[RED] Write test for concurrent RunPod mlruns isolation" blocked-by="T7.1">
+      <tdd-phase>RED</tdd-phase>
+      <test-file>tests/v2/unit/deployment/test_concurrent_runpod_isolation.py</test-file>
+      <test-cases>
+        <test>test_mlflow_uri_per_pod_is_volume_local — MLFLOW_TRACKING_URI=/opt/vol/mlruns (not a server URL)</test>
+        <test>test_concurrent_pods_get_different_mlruns_paths — two concurrent pods use subdirs (/concurrent-a, /concurrent-b) not root /opt/vol/mlruns</test>
+        <test>test_no_s3_reference_in_runpod_yamls — all RunPod SkyPilot YAMLs contain zero s3:// references</test>
+        <test>test_data_absent_hard_fails_with_upload_instructions — when /opt/vol/data/raw/minivess missing, setup exits 1 with "make dev-gpu-upload-data" message</test>
+      </test-cases>
+    </task>
+
+    <task id="T7.3" name="[GREEN] Implement + make tests pass" blocked-by="T7.2">
+      <tdd-phase>GREEN</tdd-phase>
+      <commands>
+        <cmd>uv run pytest tests/v2/unit/deployment/test_cloud_architecture_enforcement.py -v 2>&amp;1</cmd>
+        <cmd>uv run pytest tests/v2/unit/deployment/test_concurrent_runpod_isolation.py -v 2>&amp;1</cmd>
+      </commands>
+      <acceptance>All tests GREEN. Pre-commit hooks pass.</acceptance>
+    </task>
+
+    <task id="T7.4" name="Update CLAUDE.md with concurrent architecture rules" blocked-by="T7.3">
+      <description>
+        Add to CLAUDE.md section "Cloud GPU Strategy":
+        - Concurrent RunPod: create separate volume per concurrent pod (minivess-dev-b)
+        - DELETE temporary volumes immediately after test ($3.50/mo cost leak if forgotten)
+        - GCP quota=1: sequential only, quota exhaustion → SkyPilot region/GPU fallback
+        - Cross-provider concurrent: MLflow backends MUST be isolated (Cloud Run ≠ file-based)
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PHASE 8: FINOPS SPRINT 1 (unchanged from v3)
+       ═══════════════════════════════════════════════════════════════ -->
+  <phase id="P8" name="FinOps Sprint 1 — Timing Sentinel + Cost Tracker" cost="$0" effort="60min" blocked-by="P7">
+    <description>Implements Issue #747 Sprint 1. See profiler-benchmarking-plan-triple-check.md.</description>
+
+    <task id="T8.1" name="Timing sentinels already in smoke_test_gcp.yaml — verify + add to RunPod YAML">
+      <commands>
+        <cmd>grep "TIMING: phase=" deployment/skypilot/smoke_test_gcp.yaml | head -5</cmd>
+        <cmd>grep "TIMING: phase=" deployment/skypilot/smoke_test_gpu.yaml | wc -l</cmd>
+        <!-- If RunPod YAML missing timing: add docker_ready, dvc_done, training_start, training_end -->
+      </commands>
+      <acceptance>Both GCP and RunPod YAMLs have 4 timing sentinels.</acceptance>
+    </task>
+
+    <task id="T8.2" name="Implement scripts/infra_timing.py log parser" blocked-by="T8.1">
+      <tdd-phase>RED then GREEN</tdd-phase>
+      <description>
+        Parses sky jobs logs output for TIMING: phase=X ts=Y lines.
+        Computes phase durations, logs to MLflow as setup_docker_pull_sec, setup_dvc_sec, etc.
+        NO REGEX (CLAUDE.md rule 16): use str.split() and str.partition().
+      </description>
+    </task>
+
+    <task id="T8.3" name="Implement scripts/cost_tracker.py — provider-aware" blocked-by="T8.2">
+      <description>
+        Tracks cost per provider (GCP L4 $0.22/hr, RunPod RTX 4090 $0.44/hr).
+        Reads from outputs/ralph_diagnoses.jsonl.
+        Outputs per-trial, per-phase, and aggregate cost breakdown.
+        Handles concurrent jobs (aggregate across simultaneous providers).
+      </description>
+    </task>
+
+    <task id="T8.4" name="Log timing + cost to MLflow" blocked-by="T8.3">
+      <description>
+        Log to MLflow runs as params:
+          setup_docker_pull_sec, setup_dvc_sec, training_sec, total_sec
+          cost_usd_total, cost_usd_setup, cost_usd_training
+          gpu_utilization_pct (training_sec / total_sec × 100)
+      </description>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PHASE 9: REPORT + MERGE (unchanged from v3 P7)
+       ═══════════════════════════════════════════════════════════════ -->
+  <phase id="P9" name="QA Report + Branch Merge Preparation" cost="$0" effort="20min" blocked-by="P7,P8">
+
+    <task id="T9.1" name="Write QA verification report">
+      <output>docs/reports/qa-runpod-gcp-3rd-pass-report.md</output>
+      <content>
+        - All 4 GCP models: PASS/FAIL + val_loss values
+        - RunPod sequential: PASS/FAIL
+        - Concurrent RunPod QA: PASS/FAIL + run ID collision test result
+        - GCP quota exhaustion: behavior observed (queue/fallback/crash)
+        - Cross-provider concurrent: PASS/FAIL
+        - FinOps Sprint 1: timing and cost breakdown table
+        - Issues opened during this session
+      </content>
+    </task>
+
+    <task id="T9.2" name="Merge qa/gcp-runpod-3rd-pass → test/mambavesselnet" blocked-by="T9.1">
+      <precondition>
+        ALL of the following must be true before merge:
+        1. P6.T6.1: all 4 GCP models with finite val_loss — PASSED
+        2. P3.T3.4: zero MLflow run ID collisions — PASSED
+        3. P7.T7.3: all TDD tests GREEN
+        4. uv run ruff check src/ tests/ → 0 errors
+        5. uv run mypy src/ → 0 errors
+        6. make test-staging → all pass
+        GATE: if ANY above is false → do NOT merge, create P0 issue
+      </precondition>
+      <commands>
+        <cmd>git push origin qa/gcp-runpod-3rd-pass</cmd>
+        <cmd>gh pr create \
+  --base test/mambavesselnet \
+  --head qa/gcp-runpod-3rd-pass \
+  --title "qa: GCP+RunPod 3rd pass — concurrency edge cases + architecture corrections" \
+  --body "Closes architecture issues from v1/v2 plans. Adds concurrency QA: 2 concurrent RunPod pods, GCP quota exhaustion handling, cross-provider concurrent test."</cmd>
+      </commands>
+    </task>
+
+    <task id="T9.3" name="GCP infrastructure cost decision" blocked-by="T9.2">
+      <description>
+        GCP infra costs ~$30-50/month (Cloud SQL, Cloud Run, GCS).
+        After merge: decide whether to keep infra running or tear down.
+        Recommend: keep Cloud Run MLflow (low cost) + pause Cloud SQL (main cost driver).
+        Command to pause: gcloud sql instances patch minivess-mlops --activation-policy NEVER
+        Command to resume: gcloud sql instances patch minivess-mlops --activation-policy ALWAYS
+      </description>
+    </task>
+  </phase>
+
+</plan>

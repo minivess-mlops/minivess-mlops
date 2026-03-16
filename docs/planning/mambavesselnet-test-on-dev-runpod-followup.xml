@@ -1,0 +1,364 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MambaVesselNet++ Overnight Autonomous Smoke Test — OPTIMIZED
+  Created:    2026-03-16
+  Branch:     test/mambavesselnet
+  Supersedes: docs/planning/mambavesselnet-test-on-dev-runpod.xml (wrong UpCloud assumptions)
+
+  ARCHITECTURE (corrected 2026-03-16):
+    - RunPod = "env" (dev). File-based MLflow on Network Volume. Data from NV or S3 fallback.
+    - GCP = staging + prod. GCS for data. Cloud Run MLflow (optional).
+    - NO UpCloud, NO AWS as infrastructure providers.
+    - See: knowledge-graph/domains/cloud.yaml, .claude/rules/two-providers-only.md
+
+  PROGRAMMATICALLY VERIFIED STATE:
+    - Network Volume: minivess-dev (50 GB, EU-RO-1) — EXISTS on RunPod dashboard
+    - Docker :mamba-latest: NOT BUILT (docker manifest inspect → "manifest unknown")
+    - SkyPilot: RunPod enabled, jobs controller running (EU-CZ-1, $0.17/hr)
+    - RunPod balance: $8.18
+    - smoke_test_mamba.yaml: EXISTS (verified by 4792 passing staging tests)
+    - Makefile targets: build-mamba, push-mamba, smoke-test-mamba — ALL EXIST
+
+  BUDGET: $2.00 authorized. Breakdown:
+    - Controller idle during Docker build (~45 min × $0.17/hr) = $0.13
+    - 1 successful attempt (10 min × $0.74/hr) = $0.12
+    - Up to 5 failed retries (10 min × $0.74/hr × 5) = $0.62
+    - Controller idle post-completion (auto-stop) = $0.00
+    - Total worst case: $0.87. Well within $2.00.
+
+  ON SUCCESS: auto-create PR test/mambavesselnet → main, close #744.
+
+  OVERNIGHT AUTONOMY DESIGN:
+    - ALL state queries use CLI tools (never ask user) — .claude/rules/no-state-questions.md
+    - Pre-flight is PROGRAMMATIC (sky storage ls, docker manifest inspect, etc.)
+    - Ralph Loop handles retry/diagnosis/cost-gate autonomously
+    - Self-learning TDD handles code-level fixes (max 1 Docker rebuild per session)
+    - On unrecoverable failure: create GitHub issue + stop (never hang)
+-->
+<plan version="3.1" name="mambavesselnet-overnight-smoke-test">
+  <metadata>
+    <created>2026-03-16</created>
+    <supersedes>docs/planning/mambavesselnet-test-on-dev-runpod.xml</supersedes>
+    <branch>test/mambavesselnet</branch>
+    <issue>744</issue>
+    <parent-issue>737</parent-issue>
+    <skills>
+      <skill>ralph-loop</skill>
+      <skill>self-learning-iterative-coder</skill>
+      <skill>overnight-runner</skill>
+    </skills>
+    <cost-budget>$2.00</cost-budget>
+    <on-success>
+      <action>Commit VRAM update to configs/model_profiles/mambavesselnet.yaml</action>
+      <action>Close GitHub issue #744 with VRAM measurement + run summary</action>
+      <action>Create PR test/mambavesselnet → main via gh pr create</action>
+    </on-success>
+    <on-failure>
+      <action>Create GitHub issue with diagnosis from outputs/ralph_diagnoses.jsonl</action>
+      <action>DO NOT hang — exit cleanly with structured error report</action>
+    </on-failure>
+  </metadata>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 1: Docker Build + Push (local, ~30-45 min, $0)
+       GATE: This phase MUST succeed before any cloud spending.
+       If build fails: STOP ENTIRE PLAN. Do not proceed to P2.
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P1" name="Docker Build + Push" environment="local" cost="$0.00" effort="30-45min"
+         gate="hard" on-fail="STOP">
+    <description>
+      Build Dockerfile.base with INSTALL_MAMBA=1 (CUDA-compiled mamba-ssm==2.3.1).
+      This is the single most time-consuming step. If it fails, the entire plan stops
+      cleanly — no cloud resources wasted.
+    </description>
+
+    <task id="T1.1" name="Build :mamba-latest image" priority="P0">
+      <commands>
+        <cmd>make build-mamba 2>&amp;1 | tee /tmp/docker-build-mamba.log</cmd>
+      </commands>
+      <acceptance>
+        Build exits 0.
+        Verify: docker run --rm ghcr.io/petteriteikari/minivess-base:mamba-latest \
+          python -c "import mamba_ssm; print(f'mamba_ssm {mamba_ssm.__version__} OK')"
+        Must print: mamba_ssm 2.3.1 OK (or similar). Must NOT raise ImportError.
+      </acceptance>
+      <failure-action>
+        STOP ENTIRE PLAN. Write error to /tmp/ralph-mamba-build-error.txt.
+        Common causes: CUDA version mismatch, disk full, OOM during nvcc compilation.
+        DO NOT attempt cloud launch without a valid image.
+      </failure-action>
+    </task>
+
+    <task id="T1.2" name="Push to GHCR" priority="P0">
+      <precondition>T1.1 succeeded AND GITHUB_TOKEN is set in .env</precondition>
+      <commands>
+        <cmd>make push-mamba 2>&amp;1 | tee /tmp/docker-push-mamba.log</cmd>
+      </commands>
+      <acceptance>
+        docker manifest inspect ghcr.io/petteriteikari/minivess-base:mamba-latest
+        returns valid JSON manifest. Push timestamp within last 2 hours.
+      </acceptance>
+      <failure-action>
+        STOP ENTIRE PLAN. Likely cause: GITHUB_TOKEN missing or expired.
+        Check: grep GITHUB_TOKEN .env | head -1
+      </failure-action>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 2: Programmatic Pre-Flight (local, ~2 min, $0)
+       ALL checks use CLI tools — NEVER ask the user.
+       See: .claude/rules/no-state-questions.md
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P2" name="Programmatic Pre-Flight" environment="local" cost="$0.00" effort="2min"
+         gate="hard" on-fail="STOP">
+
+    <task id="T2.1" name="Verify RunPod enabled + GPU available" priority="P0">
+      <commands>
+        <cmd>uv run sky check runpod 2>&amp;1 | grep -i enabled</cmd>
+        <cmd>uv run sky gpus --cloud runpod 2>&amp;1 | grep -E "RTX.?4090|RTX.?5090|RTX.?3090" | head -3</cmd>
+      </commands>
+      <acceptance>RunPod: enabled. At least one GPU type available.</acceptance>
+    </task>
+
+    <task id="T2.2" name="Verify Docker image in registry" priority="P0">
+      <commands>
+        <cmd>docker manifest inspect ghcr.io/petteriteikari/minivess-base:mamba-latest 2>&amp;1 | head -3</cmd>
+      </commands>
+      <acceptance>Returns JSON manifest (not "manifest unknown").</acceptance>
+      <failure-action>Image not pushed. Go back to P1.T1.2.</failure-action>
+    </task>
+
+    <task id="T2.3" name="Verify smoke_test_mamba.yaml correctness" priority="P0">
+      <commands>
+        <cmd>python3 -c "
+import yaml
+from pathlib import Path
+cfg = yaml.safe_load(Path('deployment/skypilot/smoke_test_mamba.yaml').read_text(encoding='utf-8'))
+envs = cfg.get('envs', {})
+assert envs.get('MLFLOW_TRACKING_URI') == '/opt/vol/mlruns', 'MLflow must be file-based on NV'
+assert 'DVC_S3_ENDPOINT_URL' not in envs, 'UpCloud vars must NOT be present'
+assert 'MLFLOW_TRACKING_USERNAME' not in envs, 'UpCloud MLflow auth must NOT be present'
+vols = cfg.get('volumes', {})
+assert '/opt/vol' in vols, 'Network Volume must be at /opt/vol'
+res = cfg.get('resources', {})
+assert 'docker:' in str(res.get('image_id', '')), 'Must use Docker image_id'
+print('YAML pre-flight: ALL CHECKS PASSED')
+"</cmd>
+      </commands>
+      <acceptance>ALL CHECKS PASSED. No UpCloud references.</acceptance>
+    </task>
+
+    <task id="T2.4" name="Verify AMP policy (D04)" priority="P1">
+      <commands>
+        <cmd>python3 -c "
+import yaml
+from pathlib import Path
+p = Path('configs/experiment/smoke_mambavesselnet.yaml')
+if p.exists():
+    cfg = yaml.safe_load(p.read_text(encoding='utf-8'))
+    assert cfg.get('mixed_precision') is True, 'train AMP must be ON'
+    assert cfg.get('mixed_precision_val') is False, 'val AMP must be OFF (MONAI #4243)'
+    print('AMP policy OK: train=ON, val=OFF')
+else:
+    print('WARNING: smoke config not found — will use Hydra defaults')
+"</cmd>
+      </commands>
+      <acceptance>AMP policy OK or config missing (Hydra defaults apply).</acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 3: Launch + Monitor (RunPod, ~$0.10-0.20/attempt)
+       Ralph Loop Steps 2-3: LAUNCH → MONITOR (30s poll)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P3" name="Launch + Monitor" environment="cloud (RunPod)" cost="$0.10-0.20/attempt" effort="10-15min">
+
+    <task id="T3.1" name="Launch smoke test" priority="P0">
+      <description>
+        Uses make smoke-test-mamba which runs:
+        sky jobs launch deployment/skypilot/smoke_test_mamba.yaml --env-file .env -y
+
+        Network Volume data strategy (handled in smoke_test_mamba.yaml setup block):
+        1. Check /opt/vol/data/raw/minivess/imagesTr/ — if populated, symlink
+        2. If empty: dvc pull from s3://minivessdataset (public, no credentials)
+        3. Cache pulled data on volume for future runs
+
+        No user intervention needed. The YAML handles both cases autonomously.
+      </description>
+      <commands>
+        <cmd>make smoke-test-mamba 2>&amp;1 | tee /tmp/ralph-launch-mamba.log</cmd>
+      </commands>
+      <acceptance>Job ID returned. sky jobs queue shows PENDING or RUNNING.</acceptance>
+    </task>
+
+    <task id="T3.2" name="Monitor to completion (30s poll)" priority="P0">
+      <description>
+        Watch for:
+        - "mamba_ssm X.X.X CUDA ready" — CUDA extension loaded
+        - "VRAM_PEAK_MB=NNNN" — T09 measurement captured
+        - Finite train_loss/val_loss values — training succeeded
+        - Job status SUCCEEDED — clean exit
+      </description>
+      <commands>
+        <cmd>JOB_ID=$(uv run sky jobs queue 2>&amp;1 | grep mamba | head -1 | awk '{print $1}')
+uv run sky jobs logs $JOB_ID --no-follow 2>&amp;1 | tee /tmp/ralph-mamba-logs.txt</cmd>
+      </commands>
+      <acceptance>
+        Job SUCCEEDED. Logs contain VRAM_PEAK_MB. Training losses finite.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 4: Diagnose + Fix (max 3 retries, max 1 Docker rebuild)
+       Ralph Loop Steps 4-5
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P4" name="Diagnose + Fix" environment="local+cloud" cost="$0.10-0.20/retry" effort="variable">
+    <description>
+      On failure: classify, fix, relaunch. Max 3 cloud retries.
+      CRITICAL: Max 1 Docker rebuild per session. If a second rebuild is needed,
+      the issue is too complex for autonomous resolution — create GitHub issue and STOP.
+    </description>
+
+    <known-failure-patterns>
+      <pattern id="MAMBA_IMPORT_FAIL" log-signature="ImportError" auto-fix="maybe">
+        <fix>Check Dockerfile.base runner stage. Requires 1 Docker rebuild (45 min).</fix>
+      </pattern>
+      <pattern id="MAMBA_OOM" log-signature="CUDA out of memory" auto-fix="yes">
+        <fix>Reduce batch_size to 1 in experiment config. No rebuild needed.</fix>
+      </pattern>
+      <pattern id="MAMBA_NAN_VAL" log-signature="val_loss=nan" auto-fix="yes">
+        <fix>Verify mixed_precision_val=false in config. No rebuild needed.</fix>
+      </pattern>
+      <pattern id="RESHAPE_ERROR" log-signature="shape" auto-fix="maybe">
+        <fix>TDD: write test for failing shape, fix BidirectionalMambaLayer. Requires rebuild.</fix>
+      </pattern>
+      <pattern id="DATA_MISSING" log-signature="No training data" auto-fix="yes">
+        <fix>
+          smoke_test_mamba.yaml setup already handles this:
+          1. Check Network Volume → symlink if present
+          2. If empty → dvc pull from s3://minivessdataset (public, no creds)
+          If both fail: create GitHub issue (network/bucket problem).
+        </fix>
+      </pattern>
+      <pattern id="GPU_SOLD_OUT" log-signature="insufficient-capacity" auto-fix="yes">
+        <fix>SkyPilot auto-tries RTX4090 → RTX5090 → RTX3090 across regions.</fix>
+      </pattern>
+      <pattern id="DOCKER_PULL_FAIL" log-signature="unauthorized" auto-fix="maybe">
+        <fix>Make GHCR package public: GitHub → Packages → minivess-base → Settings → Public.</fix>
+      </pattern>
+    </known-failure-patterns>
+
+    <constraints>
+      <max-cloud-retries>3</max-cloud-retries>
+      <max-docker-rebuilds>1</max-docker-rebuilds>
+      <cost-gate>$2.00</cost-gate>
+      <on-budget-exceeded>STOP, create GitHub issue with diagnosis, exit cleanly</on-budget-exceeded>
+      <on-unknown-failure>Create GitHub issue, attach logs, exit cleanly</on-unknown-failure>
+    </constraints>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 5: VRAM Capture + Commit + PR (local, ~5 min, $0)
+       On success: close #744, create PR, report
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P5" name="VRAM Capture + PR" environment="local" cost="$0.00" effort="5min">
+
+    <task id="T5.1" name="Extract VRAM from logs" priority="P0">
+      <description>
+        VRAM_PEAK_MB is printed by the run: block in smoke_test_mamba.yaml.
+        Extract from /tmp/ralph-mamba-logs.txt using str.partition (no regex).
+      </description>
+      <commands>
+        <cmd>python3 -c "
+from pathlib import Path
+log = Path('/tmp/ralph-mamba-logs.txt').read_text(encoding='utf-8')
+for line in log.splitlines():
+    if 'VRAM_PEAK_MB=' in line:
+        _, _, val = line.partition('VRAM_PEAK_MB=')
+        mb = int(val.strip().split()[0])
+        print(f'T09 VRAM: {mb} MB ({mb / 1024:.1f} GB)')
+        break
+else:
+    print('WARNING: VRAM_PEAK_MB not found — check logs manually')
+"</cmd>
+      </commands>
+    </task>
+
+    <task id="T5.2" name="Update model profile YAML" priority="P0">
+      <description>
+        Write measured VRAM to configs/model_profiles/mambavesselnet.yaml.
+        Update vram.measured: true, add rtx4090_patch64 value.
+      </description>
+      <acceptance>make test-staging passes after update (or at minimum the mamba config tests).</acceptance>
+    </task>
+
+    <task id="T5.3" name="Commit + close #744 + create PR" priority="P0">
+      <description>
+        NOTE on MLflow sync: After sky jobs launch, worker pod is destroyed.
+        MLflow artifacts are on Network Volume but inaccessible until next pod launch.
+        For closing #744, VRAM measurement from logs is SUFFICIENT.
+        MLflow sync (make dev-gpu-sync) can be done manually later.
+      </description>
+      <commands>
+        <cmd>git add configs/model_profiles/mambavesselnet.yaml</cmd>
+        <cmd>git commit -m "feat(mambavesselnet): T09 VRAM measured on RTX 4090, closes #744
+
+VRAM peak: [NNNN] MB @ patch=(64,64,64), batch=1
+AMP: train=ON, val=OFF (D04, MONAI #4243)
+MLflow: file-based on Network Volume, sync later via make dev-gpu-sync
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;"</cmd>
+        <cmd>gh issue close 744 --comment "T09 VRAM measured + T10 smoke test PASSED on RunPod RTX 4090.
+VRAM peak: [NNNN] MB @ patch=(64,64,64), batch=1.
+MLflow: /opt/vol/mlruns (Network Volume). Sync: make dev-gpu-sync.
+Branch: test/mambavesselnet"</cmd>
+        <cmd>git push -u origin test/mambavesselnet</cmd>
+        <cmd>gh pr create --title "feat(mambavesselnet): T09-T10 VRAM measured + smoke test on RunPod" \
+          --body "## Summary
+- T09: VRAM peak measured on RTX 4090 @ patch=(64,64,64), batch=1
+- T10: MambaVesselNet++ smoke test passed on RunPod (2 epochs, 1 fold, 4 vols)
+- MLflow: file-based on Network Volume, sync via make dev-gpu-sync
+- Closes #744
+
+## Test plan
+- [x] Smoke test SUCCEEDED on RunPod RTX 4090
+- [x] VRAM_PEAK_MB captured in logs
+- [x] val_loss finite (AMP val OFF, D04)
+
+Generated with Claude Code (overnight autonomous run)"</cmd>
+      </commands>
+      <acceptance>
+        Issue #744 closed. PR created. Branch pushed to origin.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       COST MODEL + RALPH LOOP PARAMETERS
+       ══════════════════════════════════════════════════════════════════════ -->
+  <cost-model>
+    <provider>RunPod</provider>
+    <gpu>RTX 4090 / RTX 5090 / RTX 3090 (all ≥24 GB, BF16 ✓)</gpu>
+    <on-demand-rate>$0.74/hr</on-demand-rate>
+    <controller-rate>$0.17/hr (sky-jobs-controller, already running)</controller-rate>
+    <budget>$2.00</budget>
+    <estimated-total>$0.87 worst case (controller idle + 6 attempts)</estimated-total>
+    <runpod-balance>$8.18 (verified 2026-03-16)</runpod-balance>
+  </cost-model>
+
+  <ralph-loop-parameters>
+    <poll-interval-seconds>30</poll-interval-seconds>
+    <max-cloud-retries>3</max-cloud-retries>
+    <max-docker-rebuilds>1</max-docker-rebuilds>
+    <cost-budget-usd>2.00</cost-budget-usd>
+    <log-file>outputs/ralph_diagnoses.jsonl</log-file>
+    <on-unrecoverable>Create GitHub issue with diagnosis, attach logs, exit cleanly</on-unrecoverable>
+  </ralph-loop-parameters>
+
+  <issues>
+    <close number="744"
+           reason="T09 VRAM measured + T10 smoke test PASSED on RunPod (Phase 5)"/>
+  </issues>
+</plan>

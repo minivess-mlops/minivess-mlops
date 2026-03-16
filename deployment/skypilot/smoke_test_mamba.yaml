@@ -51,8 +51,9 @@ resources:
   # Build: DOCKER_BUILDKIT=1 docker build --build-arg INSTALL_MAMBA=1 ...
   # Push: make push-mamba (requires GITHUB_TOKEN with write:packages)
   image_id: docker:ghcr.io/petteriteikari/minivess-base:mamba-latest
-  # All RTX in this list are Ada Lovelace or Blackwell — BF16 ✓, VRAM ≥24 GB
-  # MambaVesselNet++ estimated VRAM: ~5–8 GB @ patch=(64,64,64), batch=1
+  # RTX 4090 = Ada Lovelace, RTX 5090 = Blackwell, RTX 3090 = Ampere — all BF16 ✓, ≥24 GB
+  # MambaVesselNet++ has no half-precision encoder → safe on all three (unlike SAM3)
+  # Estimated VRAM: ~5–8 GB @ patch=(64,64,64), batch=1
   accelerators: {RTX4090: 1, RTX5090: 1, RTX3090: 1}
   cloud: runpod
   # On-demand for reliability (spot often sold out on RunPod, 2026-03-14)
@@ -69,9 +70,9 @@ envs:
   # MambaVesselNet++ model
   MODEL_FAMILY: mambavesselnet
 
-  # DVC data: Network Volume cache-first (UpCloud dropped 2026-03-16)
-  # Fallback: AWS S3 public bucket (s3://minivessdataset, no credentials needed)
-  DVC_REMOTE: remote_storage
+  # Data: Network Volume ONLY. Upload from local disk before first launch.
+  # make dev-gpu-upload-data LOCAL_DATA=data/raw/minivess
+  # NO S3 fallback — empty volume → FATAL with clear upload instructions.
 
   # File-based MLflow on Network Volume — NO remote server needed
   # Sync back after run: make dev-gpu-sync
@@ -118,53 +119,33 @@ setup: |
   # Create MLflow and checkpoint dirs on volume (idempotent)
   mkdir -p /opt/vol/mlruns /opt/vol/checkpoints /opt/vol/logs
 
-  # Data: Network Volume cache-first. If data not on volume, pull from AWS S3.
-  # (UpCloud dropped 2026-03-16. No UpCloud credentials needed.)
-  # First-time setup: run `make dev-gpu-upload-data` to rsync local data to volume.
-  if [ -d /opt/vol/data/raw/minivess/imagesTr ] && \
-     [ "$(ls /opt/vol/data/raw/minivess/imagesTr/ 2>/dev/null | wc -l)" -gt 10 ]; then
-    echo "Training data already on Network Volume — skipping DVC pull"
+  # Data: Network Volume ONLY. No S3 fallback.
+  # Upload from local before first launch: make dev-gpu-upload-data LOCAL_DATA=data/raw/minivess
+  DATA_DIR=/opt/vol/data/raw/minivess/imagesTr
+  if [ -d "${DATA_DIR}" ] && [ "$(ls "${DATA_DIR}" 2>/dev/null | wc -l)" -gt 10 ]; then
+    echo "Training data found on Network Volume ($(ls ${DATA_DIR} | wc -l) files)"
     mkdir -p data/raw
     ln -sf /opt/vol/data/raw/minivess data/raw/minivess
   else
-    echo "Pulling training data from AWS S3 (s3://minivessdataset)..."
-    # Initialize DVC without git (container has no .git)
-    dvc init --no-scm -f
+    echo "FATAL: Training data not found at /opt/vol/data/raw/minivess/imagesTr/"
+    echo "Upload your dataset first: make dev-gpu-upload-data LOCAL_DATA=data/raw/minivess"
+    echo "For MiniVess from EBRAINS: run Acquisition Flow first, then upload."
+    exit 1
+  fi
 
-    # Use remote_storage (AWS S3 public dataset bucket, no credentials)
-    dvc remote add remote_storage s3://minivessdataset
-
-    # Write minimal DVC pipeline for data pull
-    cat > dvc.yaml << 'DVCEOF'
-  stages:
-    download:
-      cmd: "true"
-      outs:
-        - data/raw/minivess/
+  # DEAD CODE PRESERVED FOR REFERENCE (remove after v4 plan QA passes):
+  # stages:
+  #   download:
+  #     cmd: "true"
+  #     outs:
+  #       - data/raw/minivess/
       frozen: true
   DVCEOF
 
     cat > dvc.lock << 'LOCKEOF'
   schema: '2.0'
   stages:
-    download:
-      cmd: "true"
-      outs:
-      - path: data/raw/minivess/
-        hash: md5
-        md5: e712f8b23f377a4990b91bef0b1aef76.dir
-        size: 2749883382
-        nfiles: 350
-  LOCKEOF
-
-    dvc pull -r remote_storage
-
-    # Cache pulled data on volume for next run
-    if [ -d data/raw/minivess ] && [ ! -d /opt/vol/data/raw/minivess/imagesTr ]; then
-      mkdir -p /opt/vol/data/raw
-      cp -r data/raw/minivess /opt/vol/data/raw/
-    fi
-  fi
+    # (end of removed dead code block)
 
   # H13: Use smoke test splits (4 volumes) instead of full 3-fold (70 volumes)
   cp configs/splits/smoke_test_1fold_4vol.json configs/splits/splits.json

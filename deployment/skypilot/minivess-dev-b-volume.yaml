@@ -1,0 +1,26 @@
+# MinIVess Dev-B Network Volume on RunPod — Second Isolated Dev Environment
+#
+# Use cases:
+#   1. Concurrent RunPod QA (P3 in remaining-runpod-gcp-qa-4th-pass.xml):
+#      Both pods mount the primary minivess-dev volume (shared data, separate mlruns).
+#      This volume (dev-b) is used if a researcher needs a FULLY ISOLATED environment
+#      (e.g., different dataset entirely, separate from the shared dev volume).
+#   2. Two researchers working independently on the same RunPod account.
+#
+# IMPORTANT: Data must be uploaded before use:
+#   make dev-gpu-upload-data LOCAL_DATA=/path/to/dataset VOLUME=minivess-dev-b
+# NO S3 fallback. Empty volume → FATAL in setup script.
+#
+# Cost: 50 GB × $0.07/GB/month = $3.50/month
+#       DELETE when no longer needed: sky volumes delete minivess-dev-b
+#
+# Create:  sky volumes apply deployment/skypilot/minivess-dev-b-volume.yaml
+# Delete:  sky volumes delete minivess-dev-b
+# List:    sky volumes ls
+#
+# Plan: docs/planning/remaining-runpod-gcp-qa-4th-pass.xml (P3)
+
+name: minivess-dev-b
+type: runpod-network-volume
+infra: runpod/RO/EU-RO-1
+size: 50Gi
