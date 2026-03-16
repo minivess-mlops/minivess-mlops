@@ -1,6 +1,7 @@
 domain: infrastructure
-description: Docker, Prefect, CI/CD, GPU compute, SkyPilot, IaC, security
-last_reviewed: "2026-03-13"
+description: Docker, Prefect, CI/CD, security. For cloud providers/GPU/SkyPilot/IaC/DVC see cloud domain.
+last_reviewed: "2026-03-16"
+see_also: knowledge-graph/domains/cloud.yaml
 
 decisions:
   container_strategy:
@@ -19,8 +20,10 @@ decisions:
     prd_node: knowledge-graph/decisions/L4-infrastructure/ci_cd_platform.yaml
 
   iac_tool:
-    status: not_started
-    candidates: [pulumi_python, terraform, helm_charts]
+    status: resolved
+    winner: pulumi_python
+    rationale: "Pulumi Python SDK for GCP IaC. Stack: deployment/pulumi/gcp/"
+    implementation: [deployment/pulumi/gcp/__main__.py]
     prd_node: knowledge-graph/decisions/L4-infrastructure/iac_tool.yaml
 
   gitops_engine:
@@ -29,18 +32,20 @@ decisions:
     prd_node: knowledge-graph/decisions/L4-infrastructure/gitops_engine.yaml
 
   gpu_compute:
-    status: partial
-    candidates: [local_gpu, cloud_spot_instances, lambda_labs]
+    status: resolved
+    winner: skypilot_two_providers
+    rationale: "RunPod (env/dev) + GCP (staging/prod). Both via SkyPilot. See cloud domain for details."
     implementation: [src/minivess/compute/skypilot_launcher.py, deployment/skypilot/]
     evidence: [docs/planning/skypilot-runpod-architecture-report.md]
     prd_node: knowledge-graph/decisions/L4-infrastructure/gpu_compute.yaml
-    constraint: "ALL cloud execution MUST use Docker images (image_id in SkyPilot). Bare VM setup scripts are BANNED. See metalearning/2026-03-14-skypilot-bare-vm-docker-violation.md"
+    constraint: "ALL cloud execution MUST use Docker images (image_id in SkyPilot). Bare VM setup scripts are BANNED."
+    see_also: knowledge-graph/domains/cloud.yaml
 
   docker_registry:
-    status: not_started
-    candidates: [ghcr_io, docker_hub, runpod_registry]
-    rationale: "Required for cloud GPU training — push minivess-base to registry, reference via image_id"
-    blocked_by: []
+    status: resolved
+    winner: ghcr_and_gar
+    rationale: "GHCR for RunPod (env), GAR for GCP (staging/prod). Configurable via configs/registry/"
+    implementation: [configs/registry/ghcr.yaml, configs/registry/gar.yaml]
 
   secrets_management:
     status: resolved
@@ -67,6 +72,9 @@ metalearning:
   - file: .claude/metalearning/2026-03-06-standalone-script-antipattern.md
     applies_to: [scripts/]
     rule: "Training goes through Prefect flows in Docker, not standalone scripts"
+  - file: .claude/metalearning/2026-03-16-unauthorized-aws-s3-architecture-migration.md
+    applies_to: [deployment/skypilot/, .dvc/, scripts/configure_dvc_remote.py]
+    rule: "NEVER change cloud providers without user authorization. Two providers: RunPod + GCP. Data on GCS."
 
 planning_docs:
   - file: docs/planning/docker-security-hardening-mlsecops-report.md
@@ -75,6 +83,7 @@ planning_docs:
     status: partial
   - file: docs/planning/prefect-docker-optimization-and-monai-consolidation.md
     status: partial
+  # GCP + cloud planning docs indexed in cloud domain (knowledge-graph/domains/cloud.yaml)
 
 open_issues:
   - number: 564

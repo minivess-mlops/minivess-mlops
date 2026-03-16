@@ -52,6 +52,7 @@ model_default_loss:
   sam3_vanilla: dice_ce
   sam3_topolora: cbdice_cldice
   sam3_hybrid: cbdice_cldice
+  mambavesselnet: cbdice_cldice
 
 # Per-model additional losses to test (beyond default)
 model_extra_losses:

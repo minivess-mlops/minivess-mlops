@@ -5,10 +5,13 @@
 .PHONY: init-volumes scan sbom seccomp-audit-train install-trivy help \
        test-staging test-prod test-gpu test-e2e \
        build-base-gpu build-base-cpu build-base-light build-bases requirements-tiers \
+       build-mamba push-mamba \
        ghcr-login push-ghcr \
-       smoke-test-preflight smoke-test-gpu smoke-test-all smoke-test-lambda smoke-test-lambda-all smoke-test-gcp smoke-test-gcp-all verify-smoke-test \
+       smoke-test-preflight smoke-test-gpu smoke-test-all smoke-test-gcp smoke-test-gcp-all \
+       smoke-test-mamba smoke-test-mamba-spot smoke-test-mamba-preflight verify-smoke-test \
        monitor-smoke-test diagnose-last-smoke-test \
-       dev-gpu dev-gpu-heavy dev-gpu-stop dev-gpu-ssh
+       dev-gpu dev-gpu-heavy dev-gpu-stop dev-gpu-ssh \
+       dev-gpu-sync dev-gpu-upload-data dev-gpu-cleanup dev-gpu-status
 
 help:
 	@echo "MinIVess MLOps Makefile"
@@ -30,19 +33,29 @@ help:
 	@echo "  ghcr-login          Login to GitHub Container Registry"
 	@echo "  push-ghcr           Tag + push minivess-base:latest to GHCR"
 	@echo ""
-	@echo "RunPod Dev GPU (no Docker, RTX 4090/5090):"
+	@echo "RunPod Dev GPU (Network Volume, file-based MLflow):"
 	@echo "  dev-gpu               Launch dev GPU on RunPod (MODEL=dynunet)"
 	@echo "  dev-gpu-heavy         Train sam3_hybrid + vesselfm (need >8 GB VRAM)"
 	@echo "  dev-gpu-stop          Stop dev GPU pod (preserves state)"
 	@echo "  dev-gpu-ssh           SSH into dev GPU pod"
+	@echo "  dev-gpu-sync          Pull /opt/vol/mlruns/ back to local mlruns/"
+	@echo "  dev-gpu-upload-data   Rsync local data/raw/minivess/ to Network Volume"
+	@echo "  dev-gpu-cleanup       Clear volume checkpoints/logs (keeps data+mlruns)"
+	@echo "  dev-gpu-status        Show Network Volume usage + pod status"
 	@echo ""
-	@echo "Lambda Labs Smoke Tests (Docker, staging/prod):"
+	@echo "Docker Images (Mamba variant):"
+	@echo "  build-mamba           Build minivess-base:mamba-latest (INSTALL_MAMBA=1, ~30-45 min)"
+	@echo "  push-mamba            Push :mamba-latest to GHCR (requires GITHUB_TOKEN)"
+	@echo ""
+	@echo "RunPod Smoke Tests (Docker, uses :mamba-latest or :latest):"
 	@echo "  smoke-test-preflight  Validate env vars + connectivity"
-	@echo "  smoke-test-lambda     Launch smoke test on Lambda A10 (MODEL=sam3_vanilla)"
-	@echo "  smoke-test-lambda-all Run all smoke tests on Lambda"
-	@echo "  smoke-test-gcp        Launch smoke test on GCP spot T4/L4 (MODEL=sam3_vanilla)"
+	@echo "  smoke-test-gpu        Launch smoke test on RunPod RTX 4090 (MODEL=sam3_vanilla)"
+	@echo "  smoke-test-all        Run all smoke tests on RunPod sequentially"
+	@echo "  smoke-test-mamba      Launch MambaVesselNet++ smoke test on RunPod (T10, closes #744)"
+	@echo "  smoke-test-mamba-spot Same but spot instance (cheaper, may preempt)"
+	@echo "  smoke-test-gcp        Launch smoke test on GCP spot L4 (MODEL=sam3_vanilla)"
 	@echo "  smoke-test-gcp-all    Run all smoke tests on GCP spot"
-	@echo "  verify-smoke-test     Verify smoke test results on cloud MLflow"
+	@echo "  verify-smoke-test     Verify smoke test results (file-based MLflow)"
 	@echo ""
 	@echo "Infrastructure:"
 	@echo "  init-volumes        Fix Docker named volume ownership (run once after first up)"
@@ -116,11 +129,53 @@ dev-gpu-stop:  ## Stop dev GPU pod (preserves state, restart with 'sky start min
 dev-gpu-ssh:  ## SSH into dev GPU pod for interactive work
 	sky ssh minivess-dev
 
+dev-gpu-sync:  ## Pull /opt/vol/mlruns/ back to local mlruns/ (closes #716)
+	sky rsync down minivess-dev:/opt/vol/mlruns/ mlruns/
+	@echo "MLflow runs synced to mlruns/"
+
+dev-gpu-upload-data:  ## Rsync local data/raw/minivess/ to Network Volume (first-time setup)
+	sky rsync up data/raw/minivess/ minivess-dev:/opt/vol/data/raw/
+	@echo "Data uploaded to Network Volume at /opt/vol/data/raw/minivess/"
+
+dev-gpu-cleanup:  ## Clear volume checkpoints/logs (keeps data+mlruns)
+	sky exec minivess-dev -- "rm -rf /opt/vol/checkpoints/* /opt/vol/logs/*"
+	@echo "Checkpoints and logs cleared from Network Volume"
+
+dev-gpu-status:  ## Show Network Volume disk usage + pod status
+	@echo "=== SkyPilot cluster status ==="
+	sky status minivess-dev 2>/dev/null || echo "  (no active pod)"
+	@echo "=== Network Volume disk usage ==="
+	sky exec minivess-dev -- "df -h /opt/vol && echo '---' && du -sh /opt/vol/*/ 2>/dev/null" 2>/dev/null || \
+	  (echo "  Pod not running — start first: sky start minivess-dev")
+
 # ---------------------------------------------------------------------------
-# Lambda Labs Smoke Tests (Docker, staging/prod, A10/A100)
+# Docker Images — Mamba variant (INSTALL_MAMBA=1)
 # ---------------------------------------------------------------------------
-# Lambda provides real VMs — Docker works natively via SkyPilot image_id.
-# Use scripts/launch_smoke_test.py for private GHCR auth + multi-region rotation.
+# Standard :latest image has no mamba-ssm (CUDA compilation is optional).
+# :mamba-latest = :latest + mamba-ssm==2.3.1 CUDA extensions (~+2-4 GB image).
+# Build once, reuse across all RunPod mamba smoke tests.
+
+build-mamba:  ## Build minivess-base:mamba-latest (INSTALL_MAMBA=1, ~30-45 min)
+	DOCKER_BUILDKIT=1 docker build \
+	  --build-arg INSTALL_MAMBA=1 \
+	  --build-arg GIT_COMMIT=$$(git rev-parse HEAD) \
+	  --build-arg BUILD_DATE=$$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+	  -t $(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):mamba-latest \
+	  -f deployment/docker/Dockerfile.base . \
+	  2>&1 | tee /tmp/docker-build-mamba.log
+	@echo "=== Verify mamba_ssm import ==="
+	docker run --rm $(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):mamba-latest \
+	  python -c "import mamba_ssm; print(f'mamba_ssm {mamba_ssm.__version__} OK')"
+
+push-mamba: ghcr-login  ## Push :mamba-latest to GHCR (requires GITHUB_TOKEN with write:packages)
+	docker push $(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):mamba-latest
+	@echo "Pushed: $(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):mamba-latest"
+
+# ---------------------------------------------------------------------------
+# RunPod Smoke Tests (Docker, uses :latest or :mamba-latest)
+# ---------------------------------------------------------------------------
+# SkyPilot smoke tests using Docker images via image_id: (CLAUDE.md mandate).
+# Network Volume provides data cache + file-based MLflow tracking.
 
 smoke-test-preflight:  ## Validate env vars + connectivity before GPU smoke test
 	uv run python scripts/validate_smoke_test_env.py
@@ -136,16 +191,26 @@ smoke-test-all:  ## Run all smoke tests on RunPod sequentially
 	$(MAKE) smoke-test-gpu MODEL=sam3_vanilla
 	$(MAKE) smoke-test-gpu MODEL=dynunet
 
-smoke-test-lambda:  ## Launch smoke test on Lambda Labs A10 (MODEL=sam3_vanilla)
-	uv run python scripts/launch_smoke_test.py --model $(or $(MODEL),sam3_vanilla) --cloud lambda
+smoke-test-mamba:  ## Launch MambaVesselNet++ smoke test on RunPod (T10, closes #744)
+	sky jobs launch deployment/skypilot/smoke_test_mamba.yaml \
+	  --env-file .env \
+	  -y 2>&1 | tee /tmp/ralph-launch-mamba.log
 
-smoke-test-lambda-all:  ## Run all smoke tests on Lambda Labs sequentially
-	@echo "=== Heavy models (need >8 GB VRAM) ==="
-	$(MAKE) smoke-test-lambda MODEL=sam3_hybrid
-	$(MAKE) smoke-test-lambda MODEL=vesselfm
-	@echo "=== Standard models ==="
-	$(MAKE) smoke-test-lambda MODEL=sam3_vanilla
-	$(MAKE) smoke-test-lambda MODEL=dynunet
+smoke-test-mamba-spot:  ## Same but spot instance (cheaper, may be preempted)
+	sky jobs launch deployment/skypilot/smoke_test_mamba.yaml \
+	  --env-file .env \
+	  --env USE_SPOT=true \
+	  -y 2>&1 | tee /tmp/ralph-launch-mamba-spot.log
+
+smoke-test-mamba-preflight:  ## P0 pre-flight checks for mamba smoke test
+	@echo "=== Checking SkyPilot RunPod access ==="
+	sky check runpod
+	@echo "=== Checking Network Volume ==="
+	sky storage ls 2>/dev/null | grep -E "minivess-dev|NAME" || echo "WARNING: minivess-dev volume not found"
+	@echo "=== Checking :mamba-latest image ==="
+	docker manifest inspect $(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):mamba-latest 2>/dev/null | \
+	  python3 -c "import json,sys; m=json.load(sys.stdin); print(f'Image OK: {len(m[\"layers\"])} layers')" || \
+	  echo "WARNING: mamba-latest not pushed — run: make build-mamba push-mamba"
 
 smoke-test-gcp:  ## Launch smoke test on GCP spot T4/L4 (MODEL=sam3_vanilla)
 	uv run python scripts/launch_smoke_test.py --model $(or $(MODEL),sam3_vanilla) --cloud gcp

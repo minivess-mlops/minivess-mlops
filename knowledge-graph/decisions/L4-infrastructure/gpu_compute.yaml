@@ -1,25 +1,42 @@
 decision_id: gpu_compute
 title: "GPU Compute Strategy"
 level: L4-infrastructure
-status: partial
+status: resolved
+resolved_option: runpod_dev_gcp_prod
+last_updated: "2026-03-16"
 options:
-  - {id: local_gpu, name: "Local GPU", prior_probability: 0.35, posterior_probability: 0.50}
-  - {id: cloud_spot_instances, name: "Cloud Spot Instances (SkyPilot)", prior_probability: 0.25, posterior_probability: 0.25}
-  - {id: lambda_labs, name: "Lambda Labs", prior_probability: 0.15, posterior_probability: 0.10}
-  - {id: colab_pro, name: "Colab Pro", prior_probability: 0.15, posterior_probability: 0.10}
-  - {id: cpu_only, name: "CPU Only", prior_probability: 0.10, posterior_probability: 0.05}
+  - {id: local_gpu, name: "Local GPU (RTX 2070 Super)", prior_probability: 0.35, posterior_probability: 0.30}
+  - {id: runpod_dev, name: "RunPod Dev (RTX 4090, $0.74/hr)", prior_probability: 0.20, posterior_probability: 0.45}
+  - {id: gcp_prod, name: "GCP L4 Spot ($0.19/hr)", prior_probability: 0.15, posterior_probability: 0.20}
+  - {id: lambda_labs, name: "Lambda Labs (ARCHIVED)", prior_probability: 0.15, posterior_probability: 0.00, archived: true, archived_reason: "No EU availability", archived_date: "2026-03-16"}
+  - {id: colab_pro, name: "Colab Pro", prior_probability: 0.15, posterior_probability: 0.05}
 resolution_evidence:
   - type: implementation
-    source: "src/minivess/compute/skypilot_launcher.py"
-    finding: "SkyPilot launcher implemented; local GPU primary for development"
+    source: "deployment/skypilot/dev_runpod.yaml"
+    finding: "RunPod dev environment with Network Volume, file-based MLflow — primary dev loop"
+  - type: implementation
+    source: "deployment/skypilot/smoke_test_gcp.yaml"
+    finding: "GCP L4 smoke tests for staging/production runs"
+  - type: decision
+    source: "CLAUDE.md Cloud GPU Strategy table"
+    finding: "RunPod=dev, GCP=prod, Lambda=archived, UpCloud=archived (2026-03-16)"
+mlflow_strategy:
+  dev: "File-based on RunPod Network Volume (/opt/vol/mlruns). No server needed."
+  sync: "sky rsync down minivess-dev:/opt/vol/mlruns/ mlruns/ (make dev-gpu-sync)"
+  prod: "GCP Cloud Run MLflow (separate issue)"
+dvc_strategy:
+  storage: "Network Volume cache-first → AWS S3 fallback (s3://minivessdataset)"
+  archived: "UpCloud S3 (dropped 2026-03-16, code in deployment/archived/upcloud/)"
 implementation:
-  files: [src/minivess/compute/skypilot_launcher.py, deployment/skypilot/]
+  files: [src/minivess/compute/skypilot_launcher.py, deployment/skypilot/dev_runpod.yaml,
+          deployment/skypilot/smoke_test_gcp.yaml, deployment/skypilot/minivess-dev-volume.yaml]
+  archived: [deployment/archived/upcloud/, deployment/archived/lambda/]
   tests: []
 conditional_on:
   - {parent_decision_id: primary_3d_model, influence_strength: strong}
   - {parent_decision_id: foundation_model, influence_strength: strong}
   - {parent_decision_id: hpo_engine, influence_strength: moderate}
 volatility:
-  classification: evolving
-  next_review: "2026-04-13"
-  rationale: "Local GPU primary; cloud for SAM3 and HPO sweeps"
+  classification: stable
+  next_review: "2026-06-01"
+  rationale: "RunPod dev + GCP prod pattern is settled. UpCloud/Lambda archived."

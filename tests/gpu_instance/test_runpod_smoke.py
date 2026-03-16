@@ -1,7 +1,11 @@
 """RunPod GPU smoke test — manually triggered (#638, T3.2).
 
 Launches a SkyPilot job on RunPod and verifies the full training pipeline:
-  UpCloud S3 --DVC pull--> RunPod RTX 4090 --MLflow--> UpCloud MLflow
+  Network Volume (cache-first) / AWS S3 fallback --DVC pull--> RunPod RTX 4090
+  --MLflow (file-based)--> /opt/vol/mlruns --rsync--> local mlruns/
+
+UpCloud archived 2026-03-16. File-based MLflow on Network Volume replaces remote server.
+Post-run sync: make dev-gpu-sync (sky rsync down minivess-dev:/opt/vol/mlruns/ mlruns/)
 
 This test is EXCLUDED from default pytest collection (lives in gpu_instance/).
 Run manually via: make test-gpu-cloud
@@ -9,13 +13,13 @@ Run manually via: make test-gpu-cloud
 Markers:
   @gpu_heavy — requires CUDA GPU (RunPod RTX 4090)
   @slow — takes 15-30 minutes
-  @cloud_mlflow — requires MLFLOW_CLOUD_* env vars
+  @cloud_mlflow — skippable (file-based MLflow needs no server)
 
 Prerequisites:
   - RunPod API key configured: sky check runpod
-  - UpCloud MLflow server running
-  - DVC data pushed to UpCloud S3
-  - All MLFLOW_CLOUD_* and DVC_S3_* env vars set
+  - Network Volume: sky storage ls | grep minivess-dev
+  - Data on volume: make dev-gpu-upload-data (first time)
+  - No MLFLOW_CLOUD_* env vars needed (file-based MLflow)
 """
 
 from __future__ import annotations

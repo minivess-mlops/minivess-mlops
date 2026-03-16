@@ -45,11 +45,22 @@ decisions:
     evidence: [docs/planning/drift-monitoring-implementation-plan.xml]
     prd_node: knowledge-graph/decisions/L5-operations/drift_monitoring.yaml
 
-metalearning: []
+metalearning:
+  - file: .claude/metalearning/2026-03-08-sqlite-fallback-bias.md
+    applies_to: [src/minivess/data/, deployment/docker-compose.yml]
+    rule: "PostgreSQL is the ONLY database — never fall back to SQLite"
 
 planning_docs:
   - file: docs/planning/drift-monitoring-implementation-plan.xml
     status: implemented
+  - file: docs/planning/dataset-use-plan.md
+    status: implemented
+  - file: docs/planning/data-engineering-quality-etl-report.md
+    status: reference
+  - file: docs/planning/drift-monitoring-plan.md
+    status: planned
+  - file: docs/planning/synthetic-data-qa-engineering-drifts-knowledge-agentic-systems-report.md
+    status: reference
 
 open_issues:
   - number: 602

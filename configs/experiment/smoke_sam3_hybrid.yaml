@@ -20,8 +20,13 @@ max_epochs: 2
 num_folds: 1
 debug: true
 
-# Skip validation (val_interval > max_epochs sentinel)
+# Skip validation on local 8 GB GPU (val_interval > max_epochs sentinel).
+# Cloud override (smoke_test_gcp.yaml): ++val_interval=1 to enable validation.
 val_interval: 3
+
+# AMP disabled: SAM3 ViT encoder + sliding_window_inference + autocast = NaN (MONAI #4243).
+# Architecture constraint — applies on ALL platforms (local, cloud, RunPod).
+mixed_precision: false
 
 # Data subsetting (belt-and-suspenders with 4-vol split file, RC10)
 max_train_volumes: 2

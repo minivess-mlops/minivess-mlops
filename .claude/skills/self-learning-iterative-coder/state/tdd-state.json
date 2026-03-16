@@ -7,24 +7,26 @@
   "inner_iteration": 0,
   "tasks": {
     "T00": {"status": "DONE", "title": "Docker base image: mamba-ssm CUDA compilation strategy", "issue": 738, "commit": "399c24f"},
-    "T01": {"status": "IN_PROGRESS", "title": "ModelFamily enum + [mamba-ssm] optional group + availability gate", "issue": 739},
-    "T02": {"status": "pending", "title": "MlpChannel (channel MLP, CPU, no mamba dependency)", "issue": 740},
-    "T03": {"status": "pending", "title": "BidirectionalMambaLayer (CPU shape + GPU real)", "issue": 740},
-    "T04": {"status": "pending", "title": "MambaBlock (pre-norm + BidirMamba + MlpChannel)", "issue": 740},
-    "T05": {"status": "pending", "title": "MambaVesselNetBackbone (full mvnNet equivalent)", "issue": 740},
-    "T06": {"status": "pending", "title": "MambaVesselNetAdapter + model_builder registration", "issue": 741},
-    "T07": {"status": "pending", "title": "Model profile YAML + experiment configs", "issue": 742},
-    "T08": {"status": "pending", "title": "KG update: adapters.yaml + bibliography.yaml", "issue": 743},
-    "T09": {"status": "blocked", "title": "VRAM measurement on RTX 2070 Super + RTX 4090", "issue": 744, "blocked_reason": "requires GPU hardware"},
-    "T10": {"status": "blocked", "title": "Cloud smoke test (RunPod / GCP)", "issue": 744, "blocked_reason": "requires GPU hardware"}
+    "T01": {"status": "DONE", "title": "ModelFamily enum + [mamba-ssm] optional group + availability gate", "issue": 739, "commit": "prev-session"},
+    "T02": {"status": "DONE", "title": "MlpChannel (channel MLP, CPU, no mamba dependency)", "issue": 740, "commit": "e3eaef4"},
+    "T03": {"status": "DONE", "title": "BidirectionalMambaLayer (CPU shape + GPU real)", "issue": 740, "commit": "e3eaef4"},
+    "T04": {"status": "DONE", "title": "MambaBlock (pre-norm + BidirMamba + MlpChannel)", "issue": 740, "commit": "e3eaef4"},
+    "T05": {"status": "DONE", "title": "MambaVesselNetBackbone (full mvnNet equivalent)", "issue": 740, "commit": "e3eaef4"},
+    "T06": {"status": "DONE", "title": "MambaVesselNetAdapter + model_builder registration", "issue": 741, "commit": "233412b"},
+    "T07": {"status": "DONE", "title": "Model profile YAML + experiment configs", "issue": 742, "commit": "a03b5a8"},
+    "T08": {"status": "DONE", "title": "KG update: adapters.yaml + bibliography.yaml", "issue": 743, "commit": "1d4ba39"},
+    "T09": {"status": "blocked", "title": "VRAM measurement on RTX 2070 Super + RTX 4090", "issue": 744, "blocked_reason": "requires GPU hardware with mamba-ssm CUDA compilation"},
+    "T10": {"status": "blocked", "title": "Cloud smoke test (RunPod / GCP)", "issue": 744, "blocked_reason": "requires GPU hardware with mamba-ssm CUDA compilation"}
   },
   "convergence": {
-    "reached": false,
-    "tasks_done": 0,
+    "reached": true,
+    "tasks_done": 9,
     "tasks_total": 11,
-    "tasks_stuck": 0
+    "tasks_stuck": 0,
+    "tasks_blocked": 2,
+    "note": "T09+T10 require GPU with mamba-ssm CUDA build (INSTALL_MAMBA=1)"
   },
-  "session_task_count": 0,
-  "session_inner_iterations": 0,
+  "session_task_count": 9,
+  "session_inner_iterations": 9,
   "session_start": "2026-03-15T00:00:00Z"
 }

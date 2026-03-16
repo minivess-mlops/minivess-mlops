@@ -104,13 +104,17 @@ class TestPrepareTrainingData:
             r_idx = call.index("-r")
             assert call[r_idx + 1] == "minio"
 
-    def test_uses_upcloud_remote_when_env_set(
+    def test_uses_remote_storage_when_env_set(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """When DVC_REMOTE=upcloud, uses upcloud remote."""
+        """When DVC_REMOTE=remote_storage, uses remote_storage remote (AWS S3 fallback).
+
+        UpCloud archived 2026-03-16 — remote_storage (s3://minivessdataset) is the
+        cloud fallback when Network Volume has no data.
+        """
         data_dir = tmp_path / "data"
         data_dir.mkdir(parents=True)
-        monkeypatch.setenv("DVC_REMOTE", "upcloud")
+        monkeypatch.setenv("DVC_REMOTE", "remote_storage")
         monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
         monkeypatch.setenv("PREFECT_DISABLED", "1")
 
@@ -138,4 +142,4 @@ class TestPrepareTrainingData:
         assert pull_calls
         for call in pull_calls:
             r_idx = call.index("-r")
-            assert call[r_idx + 1] == "upcloud"
+            assert call[r_idx + 1] == "remote_storage"

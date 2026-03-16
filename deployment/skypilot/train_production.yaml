@@ -16,8 +16,15 @@
 # into the GHCR image. SkyPilot setup: only pulls data + copies config.
 # BANNED: apt-get, uv sync, git clone in setup (Docker mandate).
 #
-# Multi-cloud failover: RunPod → AWS → GCP → Lambda
-# Cost: ~$0.44/hr on RTX 4090 spot
+# Multi-cloud failover: RunPod → GCP → AWS (Lambda archived 2026-03-16)
+# Cost: ~$0.44/hr on RTX 4090 spot (RunPod), ~$0.19/hr L4 spot (GCP)
+#
+# Data strategy (UpCloud dropped 2026-03-16):
+#   AWS S3 public bucket (s3://minivessdataset, no credentials needed)
+# MLflow strategy:
+#   File-based on GCS checkpoint bucket mount (mounted at /app/checkpoints/../mlruns)
+#   OR file-based on RunPod Network Volume (/opt/vol/mlruns) for RunPod jobs
+#   Post-run sync: make dev-gpu-sync (RunPod) or gsutil rsync (GCP)
 
 name: minivess-train
 
@@ -35,8 +42,7 @@ resources:
       accelerators: A100:1
     - cloud: gcp
       accelerators: A100:1
-    - cloud: lambda
-      accelerators: A100:1
+    # Lambda Labs archived 2026-03-16 (no EU availability — code in deployment/archived/lambda/)
 
 # Checkpoint persistence via cloud storage bucket mount.
 # Bucket must exist (created by Pulumi or manually).
@@ -54,21 +60,15 @@ envs:
   # Override with --env EXPERIMENT=custom_experiment_name
   # EXPERIMENT is computed in run: block, NOT here (SkyPilot can't resolve intra-envs ${})
 
-  # DVC data pull credentials (UpCloud S3)
-  DVC_S3_ENDPOINT_URL: ${DVC_S3_ENDPOINT_URL}
-  DVC_S3_ACCESS_KEY: ${DVC_S3_ACCESS_KEY}
-  DVC_S3_SECRET_KEY: ${DVC_S3_SECRET_KEY}
-  DVC_S3_BUCKET: ${DVC_S3_BUCKET:-minivess-dvc-data}
-  DVC_REMOTE: upcloud
+  # DVC data: AWS S3 public bucket (UpCloud dropped 2026-03-16)
+  # s3://minivessdataset is public — no credentials needed
+  DVC_REMOTE: remote_storage
 
-  # boto3 CRC32C checksum workaround for UpCloud S3 (H17)
-  AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
-  AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
-
-  # Remote MLflow tracking (UpCloud)
-  MLFLOW_TRACKING_URI: ${MLFLOW_CLOUD_URI}
-  MLFLOW_TRACKING_USERNAME: ${MLFLOW_CLOUD_USERNAME:-admin}
-  MLFLOW_TRACKING_PASSWORD: ${MLFLOW_CLOUD_PASSWORD}
+  # File-based MLflow on mounted GCS bucket (GCP) or Network Volume (RunPod)
+  # GCP: mounted at /app/mlruns via file_mounts (add mlruns bucket to file_mounts if needed)
+  # RunPod: use Network Volume pattern from dev_runpod.yaml (MLFLOW_TRACKING_URI=/opt/vol/mlruns)
+  # For now: default to file-based in workdir (sync back manually post-run)
+  MLFLOW_TRACKING_URI: /app/mlruns
 
   # Cloud VM escape hatches (approved — same as pytest, RC12)
   MINIVESS_ALLOW_HOST: "1"
@@ -96,11 +96,9 @@ setup: |
   # Initialize DVC without git (container has no .git)
   dvc init --no-scm -f
 
-  # Configure DVC upcloud remote with S3 credentials from env
-  dvc remote add upcloud s3://${DVC_S3_BUCKET}
-  dvc remote modify upcloud endpointurl ${DVC_S3_ENDPOINT_URL}
-  dvc remote modify --local upcloud access_key_id ${DVC_S3_ACCESS_KEY}
-  dvc remote modify --local upcloud secret_access_key ${DVC_S3_SECRET_KEY}
+  # Configure DVC remote_storage (AWS S3 public bucket — no credentials needed)
+  # UpCloud S3 dropped 2026-03-16 — replaced by public AWS S3 fallback
+  dvc remote add remote_storage s3://minivessdataset
 
   # Write minimal DVC pipeline for data pull.
   # MD5 hash from committed dvc.lock — stable unless data changes.
@@ -126,8 +124,8 @@ setup: |
         nfiles: 350
   LOCKEOF
 
-  # Pull FULL training data from UpCloud S3
-  dvc pull -r upcloud
+  # Pull FULL training data from AWS S3 public bucket
+  dvc pull -r remote_storage
 
   # Use full 3-fold splits (70 volumes, seed=42)
   cp configs/splits/3fold_seed42.json configs/splits/splits.json

@@ -27,6 +27,12 @@ metalearning:
   - file: .claude/metalearning/2026-03-07-silent-existing-failures.md
     applies_to: [adapters/]
     rule: "Every test failure needs immediate action — no silent pre-existing failures"
+  - file: .claude/metalearning/2026-03-15-amp-validation-nan-3d.md
+    applies_to: [src/minivess/pipeline/trainer.py, src/minivess/adapters/]
+    rule: "AMP autocast causes NaN in 3D validation — separate AMP policy for train vs val"
+  - file: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
+    applies_to: [deployment/skypilot/, configs/cloud/]
+    rule: "T4 banned for half-precision models — Turing lacks BF16, use L4 (Ada Lovelace)"
 
 planning_docs:
   - file: docs/planning/sam3-integration-research-report.md
@@ -35,6 +41,16 @@ planning_docs:
     status: partial
   - file: docs/planning/comma-mamba-integration-research-report.md
     status: not_started
+  - file: docs/planning/sam3-literature-research-report.md
+    status: reference
+  - file: docs/planning/mambavesselnet-implementation-plan.xml
+    status: planned
+  - file: docs/planning/vesselfm-plan.md
+    status: planned
+  - file: docs/planning/foundation-model-finetuning-plan.md
+    status: planned
+  - file: docs/planning/advanced-segmentation-double-check-plan.md
+    status: reference
 
 open_issues:
   - number: 366
