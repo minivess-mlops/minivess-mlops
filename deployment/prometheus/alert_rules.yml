@@ -1,0 +1,52 @@
+# Prometheus alert rules for MinIVess drift monitoring
+# Scraped from Evidently /metrics and BentoML /metrics endpoints
+
+groups:
+  - name: drift_alerts
+    rules:
+      - alert: DataDriftDetected
+        expr: evidently_drift_detected == 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Data drift detected by Evidently"
+          description: "{{ $value }} features have drifted. Check Grafana drift dashboard."
+
+      - alert: HighDriftScore
+        expr: evidently_dataset_drift_score > 0.5
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High drift score ({{ $value }})"
+          description: "More than 50% of features have drifted. Immediate investigation required."
+
+      - alert: FeatureDriftPValue
+        expr: evidently_feature_drift_pvalue < 0.01
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Individual feature drift detected"
+          description: "Feature {{ $labels.feature }} has p-value {{ $value }} (< 0.01 threshold)."
+
+  - name: performance_alerts
+    rules:
+      - alert: ChampionDiceDrop
+        expr: minivess_champion_dice < 0.70
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Champion model Dice below threshold"
+          description: "Champion Dice score is {{ $value }}, below the 0.70 threshold."
+
+      - alert: HighUncertainty
+        expr: minivess_mean_uncertainty > 0.3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High model uncertainty on incoming data"
+          description: "Mean MC Dropout uncertainty is {{ $value }}, above 0.3 threshold."

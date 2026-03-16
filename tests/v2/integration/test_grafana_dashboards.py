@@ -38,6 +38,7 @@ EXPECTED_DASHBOARDS = [
     "inference-latency",
     "data-drift",
     "bentoml-requests",
+    "drift-monitoring-timeline",
 ]
 
 

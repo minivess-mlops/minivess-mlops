@@ -1,9 +1,19 @@
 # Prometheus configuration for MinIVess MLOps
-# Scrapes BentoML serving metrics for Grafana dashboards.
+# Scrapes BentoML + Evidently metrics for Grafana drift monitoring dashboards.
 
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+
+# Alert rules for drift detection + performance monitoring
+rule_files:
+  - "/etc/prometheus/alert_rules.yml"
+
+# Alertmanager target
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["minivess-alertmanager:9093"]
 
 scrape_configs:
   # Prometheus self-monitoring
@@ -17,6 +27,13 @@ scrape_configs:
       - targets: ["minivess-bento:3000"]
     metrics_path: "/metrics"
     scrape_interval: 10s
+
+  # Evidently drift monitoring metrics
+  - job_name: "evidently"
+    static_configs:
+      - targets: ["minivess-evidently:8000"]
+    metrics_path: "/metrics"
+    scrape_interval: 15s
 
   # Node exporter (if available)
   - job_name: "node"
