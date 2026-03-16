@@ -71,19 +71,38 @@ class TestDevRunpodYamlTiming:
 
 
 class TestSmokeTestLambdaYamlTiming:
-    """Tests for timing instrumentation in smoke_test_lambda.yaml."""
+    """Lambda Labs archived 2026-03-16 — smoke_test_lambda.yaml moved to deployment/archived/lambda/.
 
-    def test_smoke_test_lambda_yaml_has_timing(self) -> None:
-        """setup: block contains setup_start and setup_end timestamps."""
-        setup = _load_yaml_setup(_SKYPILOT_DIR / "smoke_test_lambda.yaml")
-        assert "setup_start=" in setup or "setup_start=$(" in setup
-        assert "setup_end=" in setup or "setup_end=$(" in setup
+    Tests now validate the archived file location and verify the mamba YAML has equivalent timing.
+    """
 
-    def test_smoke_test_lambda_yaml_has_dvc_timing(self) -> None:
-        """setup: block has dvc_pull timing (the main operation in Lambda)."""
-        setup = _load_yaml_setup(_SKYPILOT_DIR / "smoke_test_lambda.yaml")
-        assert "dvc_pull_start=" in setup or "dvc_pull_start=$(" in setup
-        assert "dvc_pull_end=" in setup or "dvc_pull_end=$(" in setup
+    def test_lambda_yaml_archived(self) -> None:
+        """smoke_test_lambda.yaml must NOT be in skypilot/ — archived 2026-03-16."""
+        assert not (_SKYPILOT_DIR / "smoke_test_lambda.yaml").exists(), (
+            "smoke_test_lambda.yaml exists but Lambda Labs was archived 2026-03-16. "
+            "It belongs in deployment/archived/lambda/skypilot/"
+        )
+
+    def test_lambda_yaml_in_archive(self) -> None:
+        """Archived lambda YAML must exist at the expected archived location."""
+        archived = (
+            _REPO_ROOT
+            / "deployment"
+            / "archived"
+            / "lambda"
+            / "skypilot"
+            / "smoke_test_lambda.yaml"
+        )
+        assert archived.exists(), (
+            "smoke_test_lambda.yaml should be in deployment/archived/lambda/skypilot/ — "
+            "move it there for archival"
+        )
+
+    def test_smoke_test_mamba_yaml_has_timing_guards(self) -> None:
+        """smoke_test_mamba.yaml (Lambda replacement) has fail-fast guards in setup."""
+        setup = _load_yaml_setup(_SKYPILOT_DIR / "smoke_test_mamba.yaml")
+        assert "set -ex" in setup, "setup: must use set -ex for fail-fast"
+        assert "nvidia-smi" in setup, "setup: must verify GPU"
 
 
 class TestRunBlockTimingLogger:
@@ -92,11 +111,6 @@ class TestRunBlockTimingLogger:
     def test_dev_runpod_run_calls_timing_logger(self) -> None:
         """run: block calls log_infrastructure_timing before training."""
         run_block = _load_yaml_run(_SKYPILOT_DIR / "dev_runpod.yaml")
-        assert "infrastructure_timing" in run_block
-
-    def test_smoke_test_lambda_run_calls_timing_logger(self) -> None:
-        """run: block calls log_infrastructure_timing before training."""
-        run_block = _load_yaml_run(_SKYPILOT_DIR / "smoke_test_lambda.yaml")
         assert "infrastructure_timing" in run_block
 
 

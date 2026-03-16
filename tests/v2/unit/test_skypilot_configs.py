@@ -51,12 +51,27 @@ class TestSmokeTestGpuYaml:
             f"smoke_test_gpu.yaml must target runpod, got: {cloud}"
         )
 
-    def test_smoke_test_envs_has_dvc_vars(self) -> None:
-        """Envs must include DVC_S3_* variables for data pull."""
+    def test_smoke_test_envs_has_dvc_remote(self) -> None:
+        """Envs must include DVC_REMOTE pointing to remote_storage (AWS S3 public).
+
+        UpCloud S3 dropped 2026-03-16. No DVC_S3_* credentials needed for public bucket.
+        """
         config = _load(_SMOKE_TEST_GPU)
         envs = config.get("envs", {})
-        for var in ("DVC_S3_ENDPOINT_URL", "DVC_S3_ACCESS_KEY", "DVC_S3_SECRET_KEY"):
-            assert var in envs, f"smoke_test_gpu.yaml missing {var} in envs"
+        assert "DVC_REMOTE" in envs, "smoke_test_gpu.yaml missing DVC_REMOTE in envs"
+        assert envs["DVC_REMOTE"] == "remote_storage", (
+            f"DVC_REMOTE should be 'remote_storage' (AWS S3 public), got: {envs['DVC_REMOTE']}"
+        )
+        # UpCloud credentials must NOT be present (provider archived)
+        for stale_var in (
+            "DVC_S3_ENDPOINT_URL",
+            "DVC_S3_ACCESS_KEY",
+            "DVC_S3_SECRET_KEY",
+        ):
+            assert stale_var not in envs, (
+                f"smoke_test_gpu.yaml has stale UpCloud credential {stale_var} — "
+                "UpCloud archived 2026-03-16, remove it"
+            )
 
     def test_smoke_test_envs_has_mlflow_cloud_uri(self) -> None:
         """Envs must include MLFLOW_TRACKING_URI for remote tracking."""
@@ -88,5 +103,6 @@ class TestSmokeTestGpuYaml:
         config = _load(_SMOKE_TEST_GPU)
         setup = config.get("setup", "")
         assert "dvc pull" in setup, (
-            "smoke_test_gpu.yaml setup must include 'dvc pull -r upcloud'"
+            "smoke_test_gpu.yaml setup must include 'dvc pull -r remote_storage' "
+            "(AWS S3 fallback — UpCloud dropped 2026-03-16)"
         )

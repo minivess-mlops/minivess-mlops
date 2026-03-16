@@ -46,5 +46,15 @@ planning_docs:
     status: implemented
   - file: docs/planning/script-consolidation.xml
     status: partial
+  - file: docs/planning/bentoml-and-ui-demo-plan.md
+    status: planned
+  - file: docs/planning/hydra-config-verification-report.md
+    status: reference
+  - file: docs/planning/conformal-uq-segmentation-report.md
+    status: reference
+  - file: docs/planning/evaluation-and-ensemble-execution-plan.xml
+    status: planned
+  - file: docs/planning/advanced-ensembling-bootstrapping-report.md
+    status: reference
 
 open_issues: []

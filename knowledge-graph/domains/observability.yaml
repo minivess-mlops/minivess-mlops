@@ -57,10 +57,21 @@ decisions:
     implementation: src/minivess/agents/
     prd_node: knowledge-graph/decisions/L2-architecture/agent_architecture.yaml
 
-metalearning: []
+metalearning:
+  - file: .claude/metalearning/2026-03-14-mlflow-version-mismatch-fuckup.md
+    applies_to: [src/minivess/observability/tracking.py, deployment/docker/]
+    rule: "MLflow version must match between client and server — pin in pyproject.toml"
 
 planning_docs:
   - file: docs/planning/langfuse-braintrust-integration-report.md
     status: implemented
+  - file: docs/planning/mlflow-tracking-plan.md
+    status: implemented
+  - file: docs/planning/monitoring-research-report.md
+    status: reference
+  - file: docs/planning/langgraph-agents-plan.md
+    status: planned
+  - file: docs/planning/profiler-benchmarking-plan.md
+    status: planned
 
 open_issues: []

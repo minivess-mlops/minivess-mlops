@@ -48,6 +48,9 @@ metalearning:
   - file: .claude/metalearning/2026-03-06-regex-ban.md
     applies_to: [loss_functions.py, metrics.py]
     rule: "No regex for metric name parsing — use str.split()"
+  - file: .claude/metalearning/2026-03-15-hydra-override-plus-prefix-bug.md
+    applies_to: [configs/]
+    rule: "Hydra override plus prefix bug — verify config composition"
 
 planning_docs:
   - file: docs/planning/loss-function-topology-research.md
@@ -58,6 +61,18 @@ planning_docs:
     status: partial
   - file: docs/planning/calibration-conformal-prediction-plan.md
     status: partial
+  - file: docs/planning/compound-loss-implementation-plan.md
+    status: implemented
+  - file: docs/planning/topology-loss-plan.md
+    status: implemented
+  - file: docs/planning/dynunet-ablation-plan.md
+    status: implemented
+  - file: docs/planning/post-training-plugins-and-swa-planning.md
+    status: implemented
+  - file: docs/planning/optuna-hpo-plan.md
+    status: planned
+  - file: docs/planning/calibration-shift-plan.md
+    status: planned
 
 open_issues:
   - number: 611

@@ -57,23 +57,31 @@ class TestProductionTrainingYaml:
             "Must use spot instances for cost savings"
         )
 
-    def test_production_yaml_has_dvc_credentials(self) -> None:
-        """Envs must include DVC S3 credentials."""
+    def test_production_yaml_has_dvc_remote(self) -> None:
+        """Envs must use remote_storage DVC remote (AWS S3 public — UpCloud archived 2026-03-16)."""
         config = _load(_PRODUCTION_YAML)
         envs = config.get("envs", {})
-        for var in ("DVC_S3_ENDPOINT_URL", "DVC_S3_ACCESS_KEY", "DVC_S3_SECRET_KEY"):
-            assert var in envs, f"Missing {var} in envs"
+        assert "DVC_REMOTE" in envs, "Missing DVC_REMOTE in envs"
+        assert envs["DVC_REMOTE"] == "remote_storage", (
+            f"DVC_REMOTE should be 'remote_storage', got: {envs['DVC_REMOTE']}"
+        )
+        # Stale UpCloud credentials must be absent
+        for stale in ("DVC_S3_ENDPOINT_URL", "DVC_S3_ACCESS_KEY", "DVC_S3_SECRET_KEY"):
+            assert stale not in envs, (
+                f"Stale UpCloud var {stale} in production YAML — UpCloud archived 2026-03-16"
+            )
 
-    def test_production_yaml_has_mlflow_credentials(self) -> None:
-        """Envs must include MLflow tracking credentials."""
+    def test_production_yaml_has_mlflow_tracking_uri(self) -> None:
+        """Envs must include MLflow tracking URI (file-based — UpCloud server archived 2026-03-16)."""
         config = _load(_PRODUCTION_YAML)
         envs = config.get("envs", {})
-        for var in (
-            "MLFLOW_TRACKING_URI",
-            "MLFLOW_TRACKING_USERNAME",
-            "MLFLOW_TRACKING_PASSWORD",
-        ):
-            assert var in envs, f"Missing {var} in envs"
+        assert "MLFLOW_TRACKING_URI" in envs, "Missing MLFLOW_TRACKING_URI in envs"
+        # UpCloud remote server credentials no longer needed
+        for stale in ("MLFLOW_TRACKING_USERNAME", "MLFLOW_TRACKING_PASSWORD"):
+            assert stale not in envs, (
+                f"Stale UpCloud MLflow credential {stale} in production YAML — "
+                "UpCloud archived 2026-03-16, file-based MLflow needs no auth"
+            )
 
     def test_production_yaml_has_full_training_params(self) -> None:
         """Envs must support full training (not just smoke test)."""

@@ -5,9 +5,8 @@
     endpointurl = http://localhost:9000
     access_key_id = minioadmin
     secret_access_key = minioadmin
-['remote "upcloud"']
-    url = s3://minivess-dvc-data
-    endpointurl = https://pgopc.upcloudobjects.com
+# upcloud remote archived 2026-03-16 — provider dropped
+# was: url = s3://minivess-dvc-data, endpointurl = https://pgopc.upcloudobjects.com
 ['remote "remote_storage"']
     url = s3://minivessdataset
 ['remote "remote_readonly"']

@@ -73,23 +73,41 @@ class TestSmokeTestYamlVesselFM:
                 "All deps must be in Docker image. Setup is DATA ONLY."
             )
 
-    def test_yaml_has_dvc_credentials(self) -> None:
-        """DVC S3 credentials must be passed for data pull."""
-        config = self._load_yaml()
-        envs = config.get("envs", {})
-        for var in ["DVC_S3_ENDPOINT_URL", "DVC_S3_ACCESS_KEY", "DVC_S3_SECRET_KEY"]:
-            assert var in envs, f"{var} not in smoke_test_gpu.yaml envs"
+    def test_yaml_has_dvc_remote(self) -> None:
+        """DVC_REMOTE must point to remote_storage (AWS S3 public — no credentials needed).
 
-    def test_yaml_has_mlflow_credentials(self) -> None:
-        """MLflow tracking credentials must be passed for experiment logging."""
+        UpCloud S3 dropped 2026-03-16. No DVC_S3_* credentials needed for public bucket.
+        Data strategy: Network Volume cache-first → AWS S3 fallback (no creds).
+        """
         config = self._load_yaml()
         envs = config.get("envs", {})
-        for var in [
-            "MLFLOW_TRACKING_URI",
-            "MLFLOW_TRACKING_USERNAME",
-            "MLFLOW_TRACKING_PASSWORD",
-        ]:
-            assert var in envs, f"{var} not in smoke_test_gpu.yaml envs"
+        assert "DVC_REMOTE" in envs, "DVC_REMOTE not in smoke_test_gpu.yaml envs"
+        assert envs["DVC_REMOTE"] == "remote_storage", (
+            f"DVC_REMOTE should be 'remote_storage', got: {envs['DVC_REMOTE']}"
+        )
+        # Stale UpCloud vars must be absent
+        for stale in ["DVC_S3_ENDPOINT_URL", "DVC_S3_ACCESS_KEY", "DVC_S3_SECRET_KEY"]:
+            assert stale not in envs, (
+                f"Stale UpCloud var {stale} in smoke_test_gpu.yaml — UpCloud archived 2026-03-16"
+            )
+
+    def test_yaml_has_mlflow_tracking_uri(self) -> None:
+        """MLflow tracking URI must be set for experiment logging.
+
+        File-based MLflow on Network Volume (/opt/vol/mlruns) — no server credentials needed.
+        UpCloud MLflow server dropped 2026-03-16.
+        """
+        config = self._load_yaml()
+        envs = config.get("envs", {})
+        assert "MLFLOW_TRACKING_URI" in envs, (
+            "MLFLOW_TRACKING_URI not in smoke_test_gpu.yaml envs"
+        )
+        # Remote server credentials are no longer needed (file-based MLflow)
+        for stale in ["MLFLOW_TRACKING_USERNAME", "MLFLOW_TRACKING_PASSWORD"]:
+            assert stale not in envs, (
+                f"Stale UpCloud MLflow credential {stale} in smoke_test_gpu.yaml — "
+                "UpCloud archived 2026-03-16, file-based MLflow needs no auth"
+            )
 
     def test_yaml_has_host_escape_hatches(self) -> None:
         """MINIVESS_ALLOW_HOST and PREFECT_DISABLED must be set for cloud VMs."""
@@ -127,12 +145,19 @@ class TestSmokeTestYamlCriticalFixes:
         assert "SPLITS_DIR" in envs, "SPLITS_DIR not in envs (H15)"
         assert "CHECKPOINT_DIR" in envs, "CHECKPOINT_DIR not in envs (H15)"
 
-    def test_h17_boto3_checksum_workaround(self) -> None:
-        """H17: AWS_REQUEST_CHECKSUM_CALCULATION must be set for UpCloud S3."""
+    def test_h17_boto3_checksum_not_needed_for_public_s3(self) -> None:
+        """H17: AWS_REQUEST_CHECKSUM_CALCULATION workaround was for UpCloud S3.
+
+        UpCloud dropped 2026-03-16. AWS S3 public bucket (remote_storage) does not
+        need the checksum workaround. This test verifies the env var is absent to
+        avoid unnecessary overhead on public S3 requests.
+        """
         config = self._load_yaml()
         envs = config.get("envs", {})
-        assert envs.get("AWS_REQUEST_CHECKSUM_CALCULATION") == "WHEN_REQUIRED", (
-            "Missing AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED (H17)"
+        # UpCloud is dropped — checksum workaround no longer needed
+        assert "AWS_REQUEST_CHECKSUM_CALCULATION" not in envs, (
+            "AWS_REQUEST_CHECKSUM_CALCULATION was a workaround for UpCloud S3. "
+            "UpCloud is archived (2026-03-16) — remove this env var."
         )
 
     def test_h13_smoke_splits_copy(self) -> None:
@@ -261,7 +286,7 @@ class TestSmokeTestRootCauseRegressions:
         preprocess = dvc_config.get("stages", {}).get("preprocess", {})
         assert preprocess.get("frozen") is True, (
             "DVC preprocess stage must be frozen — its outputs have no cache on "
-            "UpCloud S3, causing 'dvc pull' to fail"
+            "AWS S3 public bucket (remote_storage), causing 'dvc pull' to fail"
         )
 
     def test_issue1_sky_config_exists(self) -> None:

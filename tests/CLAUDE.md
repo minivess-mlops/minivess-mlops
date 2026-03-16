@@ -67,7 +67,7 @@ make test-cloud-mlflow   # Run all cloud tests
 |-----------|---------|--------|
 | `test_cloud_mlflow.py` | L2 provider-agnostic MLflow tests | `@cloud_mlflow` |
 | `test_skypilot_mlflow.py` | SkyPilot-specific MLflow tests | `@cloud_mlflow` |
-| `test_dvc_cloud_pull.py` | DVC pull from UpCloud S3 | `@cloud_mlflow` |
+| `test_dvc_cloud_pull.py` | DVC pull from AWS S3 (remote_storage, public) | `@cloud_mlflow` |
 | `test_training_flow_cloud_mlflow.py` | Training flow against remote MLflow | `@cloud_mlflow` |
 | `test_cloud_training_artifacts.py` | Post-run artifact verification | `@cloud_mlflow` |
 
@@ -80,8 +80,8 @@ Manually-triggered end-to-end tests that train on RunPod RTX 4090 via SkyPilot.
 
 1. Set env vars in `.env`: `DVC_S3_*`, `RUNPOD_API_KEY`, `MLFLOW_CLOUD_*`
 2. Install SkyPilot: `uv sync --extra infra && sky check runpod`
-3. Push data to UpCloud S3: `uv run python scripts/configure_dvc_remote.py && dvc push -r upcloud`
-4. UpCloud MLflow server running (`pulumi up` in `deployment/pulumi/`)
+3. Ensure data is on Network Volume or AWS S3 public bucket (remote_storage): `make dev-gpu-upload-data`
+4. No MLflow server needed — file-based on RunPod Network Volume (/opt/vol/mlruns)
 
 ### How to Run
 
