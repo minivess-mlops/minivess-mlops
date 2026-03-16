@@ -3,8 +3,8 @@
   MambaVesselNet++ Autonomous Overnight Plan — REVIEWER-OPTIMIZED v4.0
   Created:    2026-03-16
   Supersedes: docs/planning/mambavesselnet-test-on-dev-runpod-followup.xml (v3.1)
-  Branch:     test/mambavesselnet → qa/gcp-runpod-3rd-pass
-  Skills:     ralph-loop + self-learning-iterative-coder + overnight-runner
+  Branch:     test/mambavesselnet (rebased on main after PR #756 merge)
+  Skills:     ralph-loop + self-learning-iterative-coder
 
   ══════════════════════════════════════════════════════════════════
   REVIEWER CORRECTIONS APPLIED (v3.1 → v4.0)
@@ -87,7 +87,6 @@
     <skills>
       <skill>ralph-loop</skill>
       <skill>self-learning-iterative-coder</skill>
-      <skill>overnight-runner</skill>
     </skills>
     <cost-budget>$2.00</cost-budget>
     <ralph-loop-parameters>
@@ -217,7 +216,10 @@ for p in pkgs if isinstance(pkgs, list) else []:
       <commands>
         <cmd>if [ "${IMAGE_EXISTS:-false}" = "false" ]; then
           echo "Stopping jobs controller to save $0.13 during build..."
-          uv run sky down sky-jobs-controller-aec1627c -y 2>&amp;1 || true
+          CTRL_NAME=$(uv run sky status 2>&amp;1 | grep sky-jobs-controller | awk '{print $1}')
+          if [ -n "$CTRL_NAME" ]; then
+            uv run sky down "$CTRL_NAME" -y 2>&amp;1 || true
+          fi
         else
           echo "Image already exists — keeping controller, skipping build"
         fi</cmd>
@@ -815,7 +817,7 @@ MLflow: /opt/vol/mlruns (Network Volume, sync via make dev-gpu-sync)
 Tests: test_mambavesselnet_vram_profile.py (RED→GREEN TDD)
 Branch: test/mambavesselnet
 
-Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
 EOF
 )"</cmd>
         <cmd># FIX FOR H6: push MUST succeed before PR creation
@@ -976,9 +978,8 @@ PYEOF</cmd>
       <check>Make GHCR package public if not already (see P0.T0.2)</check>
     </before-launching>
     <overnight-command>
-      # The overnight-runner skill invokes this plan:
-      /overnight-runner --config docs/planning/overnight-mambavesselnet-v2.yaml
-      # Which runs: python3 scripts/overnight_runner.py docs/planning/mambavesselnet-overnight-optimized.xml
+      # Run directly — no wrapper scripts (banned: metalearning/2026-03-16-overnight-runner-script-freeze-v2.md)
+      claude -p "Read and execute the plan at: docs/planning/mambavesselnet-overnight-optimized.xml" --dangerously-skip-permissions
     </overnight-command>
     <wake-up-check>
       cat outputs/ralph_diagnoses.jsonl | python3 -c "import json,sys; [print(json.dumps(json.loads(l))) for l in sys.stdin if l.strip()]" | tail -5

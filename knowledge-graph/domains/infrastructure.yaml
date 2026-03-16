@@ -43,9 +43,16 @@ decisions:
 
   docker_registry:
     status: resolved
-    winner: ghcr_and_gar
-    rationale: "GHCR for RunPod (env), GAR for GCP (staging/prod). Configurable via configs/registry/"
-    implementation: [configs/registry/ghcr.yaml, configs/registry/gar.yaml]
+    winner: dockerhub_and_gar
+    rationale: >
+      Docker Hub for RunPod (env) — public by default, zero-auth pull. GHCR was private
+      and caused 40+ min STARTING hangs on RunPod (2026-03-16). GAR for GCP (staging/prod)
+      — same-region as GCS/Cloud Run, ADC auth. GHCR reserved for GitHub Actions CI only.
+    implementation: [configs/registry/dockerhub.yaml, configs/registry/gar.yaml, configs/registry/ghcr.yaml]
+    per_environment:
+      runpod_dev: dockerhub
+      gcp_staging_prod: gar
+      github_actions_ci: ghcr
 
   secrets_management:
     status: resolved

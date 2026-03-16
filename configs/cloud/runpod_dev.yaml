@@ -15,9 +15,10 @@ accelerators:
   - RTX5090:1
   - RTX3090:1
 
-# Docker image from GHCR (requires GITHUB_TOKEN for private repos).
-docker_registry: ghcr
-docker_image: ghcr.io/petteriteikari/minivess-base:latest
+# Docker Hub: public by default — RunPod pulls without auth.
+# GHCR was private → 40+ min STARTING hangs (metalearning 2026-03-16).
+docker_registry: dockerhub
+docker_image: petteriteikari/minivess-base:latest
 
-# MLflow tracking via UpCloud (MLFLOW_CLOUD_URI in .env).
-mlflow_env_var: MLFLOW_CLOUD_URI
+# MLflow: file-based on Network Volume (UpCloud dropped 2026-03-16).
+mlflow_env_var: MLFLOW_TRACKING_URI

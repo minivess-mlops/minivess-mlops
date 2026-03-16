@@ -241,6 +241,7 @@ services:
       - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=30d"
@@ -278,9 +279,36 @@ services:
     restart: unless-stopped
     <<: *common-labels
 
-  # NOTE: Evidently is a Python library, not a Docker service.
-  # Drift monitoring is run within the pipeline code and reports are
-  # exported to Grafana. See modernization plan Section 16.1 C4.
+  # Evidently 0.7+ monitoring service — drift metrics for Grafana
+  evidently:
+    image: python:3.13-slim
+    container_name: minivess-evidently
+    profiles: ["monitoring", "full"]
+    ports:
+      - "${EVIDENTLY_PORT:-8085}:8000"
+    volumes:
+      - ./evidently:/app/evidently:ro
+      - evidently_data:/app/workspace
+    environment:
+      EVIDENTLY_WORKSPACE: /app/workspace
+    command: ["python", "-c", "import http.server; http.server.HTTPServer(('', 8000), http.server.SimpleHTTPRequestHandler).serve_forever()"]
+    restart: unless-stopped
+    <<: *common-labels
+
+  # Prometheus Alertmanager — webhook + JSONL drift alerts
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: minivess-alertmanager
+    profiles: ["monitoring", "full"]
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    restart: unless-stopped
+    <<: *common-labels
 
   # ===========================================================================
   # Profile: full — Complete platform (+6 services, ~16 GB RAM total)
@@ -393,6 +421,8 @@ volumes:
   grafana_data:
     driver: local
   label_studio_data:
+    driver: local
+  evidently_data:
     driver: local
   ollama_data:
     driver: local

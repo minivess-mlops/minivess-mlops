@@ -1,0 +1,245 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "MinIVess MLOps Level 4 — Drift Detection Monitoring Timeline",
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "iteration": 1710601200000,
+  "links": [],
+  "panels": [
+    {
+      "title": "Drift Detection Status",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "evidently_drift_detected",
+          "legendFormat": "Drift Detected"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "No Drift", "color": "green" } } },
+            { "type": "value", "options": { "1": { "text": "DRIFT DETECTED", "color": "red" } } }
+          ],
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Dataset Drift Score",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "expr": "evidently_dataset_drift_score",
+          "legendFormat": "Drift Score"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.3 },
+              { "color": "red", "value": 0.5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Number of Drifted Features",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "evidently_n_drifted_features",
+          "legendFormat": "Drifted Features"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 2 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Champion Model Dice Score",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "expr": "minivess_champion_dice",
+          "legendFormat": "Champion Dice"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.6 },
+              { "color": "green", "value": 0.8 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Drift Score Timeline",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "expr": "evidently_dataset_drift_score",
+          "legendFormat": "Dataset Drift Score"
+        },
+        {
+          "expr": "evidently_drift_detected",
+          "legendFormat": "Drift Detected (binary)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        }
+      }
+    },
+    {
+      "title": "Champion Performance Degradation",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "expr": "minivess_champion_dice",
+          "legendFormat": "Dice Score"
+        },
+        {
+          "expr": "minivess_mean_uncertainty",
+          "legendFormat": "Mean Uncertainty"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        }
+      }
+    },
+    {
+      "title": "Per-Feature Drift P-Values",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "expr": "evidently_feature_drift_pvalue",
+          "legendFormat": "{{ feature }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "scaleDistribution": { "type": "log", "log": 10 }
+          },
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0.05 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Active Alerts",
+      "type": "alertlist",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 20 },
+      "options": {
+        "showOptions": "current",
+        "sortOrder": 1,
+        "stateFilter": {
+          "firing": true,
+          "pending": true,
+          "noData": false,
+          "normal": false,
+          "error": true
+        }
+      }
+    },
+    {
+      "title": "Batch Simulation Progress",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        {
+          "expr": "evidently_dataset_drift_score",
+          "legendFormat": "Drift Score",
+          "format": "table",
+          "instant": true
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["drift", "monitoring", "level-4", "minivess"],
+  "templating": {
+    "list": [
+      {
+        "name": "model_family",
+        "type": "custom",
+        "current": { "text": "All", "value": "$__all" },
+        "options": [
+          { "text": "All", "value": "$__all", "selected": true },
+          { "text": "CNN", "value": "cnn", "selected": false },
+          { "text": "Foundation", "value": "foundation", "selected": false },
+          { "text": "Mamba", "value": "mamba", "selected": false }
+        ]
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "utc",
+  "title": "Drift Monitoring Timeline",
+  "uid": "drift-monitoring-timeline",
+  "version": 1
+}

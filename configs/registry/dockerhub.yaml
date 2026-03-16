@@ -1,0 +1,8 @@
+# Docker Hub — public by default, no auth needed for pulls.
+# Used by RunPod (env) where simplicity and zero-config pull is critical.
+# GHCR was private and caused 40+ min STARTING hangs on RunPod (2026-03-16).
+
+registry: dockerhub
+server: docker.io
+image_prefix: petteriteikari
+auth_env_var: DOCKERHUB_TOKEN  # only needed for push, not pull

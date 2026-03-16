@@ -26,4 +26,4 @@ vram:
   measured_config:
     patch_size: [64, 64, 64]
     batch_size: 1
-  notes: "T09 pending — requires GPU with mamba-ssm CUDA compilation (INSTALL_MAMBA=1)"
+  notes: "T09 in-process measurement ready (trainer.fit() return dict). Next smoke test captures real VRAM_PEAK_MB."

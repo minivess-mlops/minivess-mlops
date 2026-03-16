@@ -533,6 +533,15 @@ def train_one_fold_task(
         ww_summary = run_weightwatcher(model)
         logger.info("WeightWatcher: %s", ww_summary)
 
+        # T09: Print VRAM sentinel for Ralph Loop log parsing (#744)
+        # Multi-fold: Ralph Loop takes max across all sentinels.
+        _vram_mb = fit_result.get("vram_peak_mb", 0)
+        _vram_gb = fit_result.get("vram_peak_gb", 0.0)
+        if _vram_mb > 0:
+            print(f"VRAM_PEAK_MB={_vram_mb}")  # noqa: T201
+            print(f"VRAM_PEAK_GB={_vram_gb}")  # noqa: T201
+            logger.info("T09 VRAM: %d MB (%.2f GB) peak allocated", _vram_mb, _vram_gb)
+
         return fit_result
 
 
@@ -581,6 +590,11 @@ def log_fold_results_task(
         if result.get("history", {}).get("val_loss"):
             for epoch, val_loss in enumerate(result["history"]["val_loss"], start=1):
                 client.log_metric(mlflow_run_id, "val_loss", val_loss, step=epoch)
+        # T09: Log VRAM peak to MLflow (#744)
+        _vram_mb = result.get("vram_peak_mb", 0)
+        if _vram_mb > 0:
+            client.log_metric(mlflow_run_id, "vram_peak_mb", float(_vram_mb))
+
         # Tag checkpoint_dir so post-training flow can discover it via FlowContract
         if checkpoint_dir is not None:
             client.set_tag(
