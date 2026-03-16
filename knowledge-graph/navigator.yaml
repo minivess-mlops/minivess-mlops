@@ -21,9 +21,18 @@ domains:
     decisions: [loss_function, primary_metrics, topology_metrics, hpo_engine,
                 augmentation_library, calibration_method]
 
+  cloud:
+    navigator: knowledge-graph/domains/cloud.yaml
+    covers: [cloud providers, GCP, RunPod, GCS, DVC remotes, data flow, environment mapping, Pulumi IaC]
+    claude_md: [deployment/pulumi/gcp/CLAUDE.md]
+    decisions: []
+    note: >
+      TWO providers only: RunPod (env/dev) + GCP (staging/prod). GCP project=minivess-mlops,
+      region=europe-north1. Data on GCS. NEVER add providers without user authorization.
+
   infrastructure:
     navigator: knowledge-graph/domains/infrastructure.yaml
-    covers: [Docker, Prefect, CI/CD, GPU compute, SkyPilot, IaC, security]
+    covers: [Docker, Prefect, CI/CD, GPU compute, SkyPilot, security]
     claude_md: [deployment/CLAUDE.md, src/minivess/orchestration/CLAUDE.md]
     decisions: [container_strategy, ci_cd_platform, iac_tool, gitops_engine,
                 gpu_compute, secrets_management, air_gap_strategy]
@@ -87,16 +96,28 @@ invariants:
     rule: "SkyPilot = intercloud broker (NSDI'23) — automatic workload placement across clouds/K8s/Slurm/SSH. Like Slurm for multi-cloud, NOT IaC. ALWAYS use for compute beyond dev machine. NEVER bypass. NEVER treat as RunPod-specific."
     violation_doc: .claude/metalearning/2026-03-14-skypilot-purpose-misunderstanding.md
     applies_to: [deployment/skypilot/, src/minivess/compute/]
+  - id: two_providers_only
+    rule: >
+      EXACTLY two cloud providers: RunPod (env/dev) + GCP (staging/prod).
+      GCP project=minivess-mlops, region=europe-north1. Data on GCS (gs://minivess-mlops-dvc-data).
+      NEVER add a third cloud provider (AWS, Azure, etc.) without explicit user authorization.
+      Session continuation summaries are NOT authorization for infrastructure changes.
+    violation_doc: .claude/metalearning/2026-03-16-unauthorized-aws-s3-architecture-migration.md
+    applies_to: [deployment/, configs/cloud/, .dvc/, scripts/configure_dvc_remote.py]
 
 keywords:
   docker: infrastructure
   registry: infrastructure
   ghcr: infrastructure
   prefect: infrastructure
-  skypilot: infrastructure
-  runpod: infrastructure
-  cloud: infrastructure
-  gpu_compute: infrastructure
+  skypilot: cloud
+  runpod: cloud
+  cloud: cloud
+  gcp: cloud
+  gcs: cloud
+  pulumi: cloud
+  dvc_remote: cloud
+  gpu_compute: cloud
   loss: training
   metric: training
   hpo: training

@@ -152,28 +152,40 @@ Each of the 6 Prefect flows runs in its own Docker container:
 - Flows communicate ONLY through MLflow artifacts + Prefect artifacts (no shared filesystem)
 - GPU reservation for training flow via Docker Compose device requests
 
+### Two-Provider Cloud Architecture (Non-Negotiable)
+
+**EXACTLY two cloud providers.** Adding a third requires explicit user authorization.
+
+| Provider | Environment | Role | Data Storage | MLflow |
+|----------|------------|------|--------------|--------|
+| **RunPod** | env (dev) | Hacky, optional — for researchers who like RunPod | Data uploaded from local disk to Network Volume | File-based on Network Volume |
+| **GCP** | staging + prod | Production-grade, full managed cloud stack | **GCS** (`gs://minivess-mlops-dvc-data`) | Cloud Run (optional) |
+| ~~Lambda Labs~~ | archived | No EU availability | — | — |
+| ~~UpCloud~~ | sunsetting | Trial period, being replaced by GCP | — | — |
+
+**GCP Project Details** (see `deployment/pulumi/gcp/CLAUDE.md` for full reference):
+- **Project**: `minivess-mlops`
+- **Region**: `europe-north1` (Finland)
+- **GCS Buckets**: `minivess-mlops-dvc-data`, `minivess-mlops-mlflow-artifacts`, `minivess-mlops-checkpoints`
+- **Docker Registry**: GAR (`europe-north1-docker.pkg.dev/minivess-mlops/minivess`)
+- **IaC**: Pulumi (`deployment/pulumi/gcp/`)
+- **Setup guide**: `docs/planning/gcp-setup-tutorial.md`
+
+**RunPod "env" key assumption**: Cannot assume ANY GCP infrastructure exists. Standalone.
+Data comes from local disk upload (`make dev-gpu-upload-data`), not from GCS.
+
+**Data flow**:
+- **Local → RunPod**: `sky rsync up data/raw/minivess/ → Network Volume`
+- **Local → GCP**: `gsutil cp` or `dvc push -r gcs` to GCS bucket
+- **RunPod → Local**: `make dev-gpu-sync` (pulls mlruns back)
+- **Public data origin**: `s3://minivessdataset` (read-only initial download, NOT a production backend)
+
 ### Three-Environment Model
-| Environment | Docker | Compute | Purpose |
-|-------------|--------|---------|---------|
-| **dev** | Docker-free | Local GPU | Fast iteration, `uv run pytest` |
-| **staging** | Docker Compose | Local GPU in container | Integration testing |
-| **prod** | Docker + SkyPilot | Cloud spot / on-prem K8s | Full pipeline |
-
-### Cloud GPU Strategy
-
-| Provider | Role | GPU | Spot $/hr | Docker | Region |
-|----------|------|-----|-----------|--------|--------|
-| **RunPod** | Dev/prototyping | RTX 4090 (24 GB) | $0.44-0.69 | Container-native (no Docker-in-Docker) | US/EU |
-| **GCP** | Staging/prod | **L4**/A100 | $0.19-1.39 | VM + Docker image_id | auto (SkyPilot) |
-| ~~Lambda Labs~~ | **Archived** | A10/A100 | — | — | No EU availability — DROPPED |
-| ~~UpCloud~~ | **Archived** | CPU VPS | — | — | fi-hel1 Helsinki — DROPPED 2026-03-16 |
-
-**UpCloud DROPPED (2026-03-16):** UpCloud VPS (MLflow server) and UpCloud S3 (DVC
-storage) are fully retired. Code archived to `deployment/archived/upcloud/`.
-**Replacement**: MLflow = RunPod Network Volume filesystem (`/opt/vol/mlruns`,
-`MLFLOW_TRACKING_URI=/opt/vol/mlruns`). DVC data = Network Volume cache-first,
-fallback to `s3://minivessdataset` (AWS S3, no custom credentials).
-**Sync back**: `make dev-gpu-sync` → `sky rsync down minivess-dev:/opt/vol/mlruns/ mlruns/`
+| Environment | Docker | Compute | Data | Purpose |
+|-------------|--------|---------|------|---------|
+| **local** | Docker-free or Docker Compose | Local GPU (RTX 2070 Super, 8 GB) | MinIO (local) | Fast iteration, `uv run pytest` |
+| **env** (RunPod) | Docker image via SkyPilot | RunPod RTX 4090 (24 GB) | Network Volume (upload from local) | Quick GPU experiments |
+| **staging/prod** (GCP) | Docker image via SkyPilot | GCP L4/A100 spot | GCS buckets | Production runs, paper results |
 
 **T4 BANNED (Non-Negotiable):** T4 is Turing architecture — no BF16 support.
 SAM3's half-precision encoder overflows during validation (FP16 max = 65504 → NaN).
