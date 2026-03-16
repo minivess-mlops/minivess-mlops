@@ -302,22 +302,116 @@ s3://minivessdataset is READ-ONLY public data origin, not a production backend.
 - Every doc in `docs/planning/` is indexed in at least one domain YAML
 - Navigator keyword routing covers all major terms in the repo
 
-#### T5: OpenSpec Readiness (P2 — future)
+#### T5: OpenSpec Installation + SDD Integration (P0 — MANDATORY)
 
-**Goal**: Prepare for OpenSpec adoption without requiring it now.
+**Goal**: Install OpenSpec and integrate Spec-Driven Development (SDD) into the
+existing KG + CLAUDE.md system. This is a scientific novelty for the manuscript —
+demonstrating SDD with agentic development in an academic MLOps platform.
 
-[OpenSpec](https://github.com/Fission-AI/OpenSpec) is complementary to CLAUDE.md:
-- CLAUDE.md = project-level persistent instructions
-- OpenSpec = per-change specification (proposal → specs → design → tasks)
+> OpenSpec is MANDATORY per user directive. It is NOT optional or future work.
+> The evaluation of SDD as a development methodology is a key contribution
+> to the NEUROVEX manuscript.
 
-**Alignment steps**:
-- Create `openspec/` directory structure
-- Map existing XML plans to OpenSpec format (proposal/specs/design/tasks)
-- Add `/opsx:propose` workflow to Skill system
-- Ensure KG navigator can route to `openspec/changes/` artifacts
+**What is OpenSpec**: A spec-driven development framework (30.8k stars, MIT, v1.2.0)
+by Fission AI. It adds a per-change specification layer between the human and the
+AI coding agent. Three phases: Propose → Apply → Archive.
 
-**Not needed now** — the current planning system (XML + YAML) works. OpenSpec is for
-when the repo needs cross-team change management.
+**Why it matters for the manuscript**: SDD is an emerging practice (2025-2026) with
+Thoughtworks Technology Radar recognition but limited academic evaluation. Only one
+arXiv paper exists ([Piskala, 2026. arXiv:2602.00180](https://arxiv.org/abs/2602.00180)).
+Demonstrating SDD in a real academic biomedical MLOps platform is novel.
+
+**Evidence**:
+- [Piskala (2026). "Spec-Driven Development." *arXiv:2602.00180*](https://arxiv.org/abs/2602.00180) — three rigor levels, "error reductions up to 50%"
+- [Hashrocket comparison](https://hashrocket.com/blog/posts/openspec-vs-spec-kit) — 250 lines vs 800 (Spec Kit), 327/328 tests passing
+- [Darren Taylor](https://darrenonthe.net/2026/01/01/open-spec-a-lighter-approach-to-specification-driven-development/) — 54-file, 5,409-line feature in one session
+- [Thoughtworks](https://www.thoughtworks.com/en-us/insights/blog/agile-engineering-practices/spec-driven-development-unpacking-2025-new-engineering-practices) — SDD as "key 2025 engineering practice"
+- [Fowler/Boeckeler](https://martinfowler.com/articles/exploring-gen-ai/sdd-3-tools.html) — SDD tool evaluation
+
+**SDD rigor levels** (Piskala 2026):
+1. **Spec-first** — specs guide initial dev, may drift post-implementation
+2. **Spec-anchored** — living documentation, automated tests enforce alignment (our target)
+3. **Spec-as-source** — humans edit only specs, machines generate all code (future)
+
+**How OpenSpec maps to our existing system**:
+
+| OpenSpec Component | Our Existing Equivalent | Integration |
+|-------------------|------------------------|-------------|
+| `openspec/project.md` | Root CLAUDE.md | Keep both — CLAUDE.md = constraints, project.md = context |
+| `openspec/AGENTS.md` | Root CLAUDE.md | Let OpenSpec generate/maintain its own AGENTS.md |
+| `openspec/specs/` | `knowledge-graph/domains/*.yaml` | Specs supplement KG, not replace it |
+| `openspec/changes/<name>/proposal.md` | `docs/planning/*.md` plans | New features go through OpenSpec propose |
+| `openspec/changes/<name>/tasks.md` | XML execution plans | OpenSpec tasks replace XML plans for new work |
+| `openspec/archive/` | Git history + completed plans | Archive provides institutional memory |
+
+**Installation steps**:
+```bash
+npm install -g @fission-ai/openspec@latest  # Requires Node.js 20.19+
+cd /path/to/minivess-mlops
+openspec init                                # Select Claude Code, generates openspec/
+```
+
+**What `openspec init` creates**:
+```
+openspec/
+├── project.md          # Global context (tech stack, architecture)
+├── AGENTS.md           # AI behavioral guidelines (auto-maintained)
+├── specs/              # Living system specification (source of truth)
+│   └── (empty initially — populated during first propose/archive cycle)
+├── changes/            # Active feature proposals
+│   └── (empty initially)
+└── archive/            # Completed features with timestamps
+    └── (empty initially)
+```
+
+**Integration with KG navigator**:
+```yaml
+# Addition to navigator.yaml
+openspec:
+  navigator: openspec/project.md
+  covers: [active changes, system specs, archived features, SDD workflow]
+  note: "Per-change specifications. Use /opsx:propose for new features."
+```
+
+**Workflow for new features** (replaces XML plan creation):
+```
+1. User describes feature intent
+2. /opsx:propose "feature name" → generates proposal.md, specs/, design.md, tasks.md
+3. Review with user → iterate on spec
+4. /opsx:apply → implement tasks (uses self-learning-iterative-coder Skill for TDD)
+5. /opsx:archive → merge delta specs into openspec/specs/, archive change
+```
+
+**What stays unchanged**:
+- Root CLAUDE.md (constraints) — OpenSpec does not replace this
+- KG navigator + domain YAMLs — these are decision-tracking, not feature specs
+- `.claude/rules/*.md` — path-scoped rules independent of OpenSpec
+- `.claude/skills/` — OpenSpec adds slash commands, Skills remain
+- `docs/planning/` — existing plans preserved, new work uses OpenSpec
+
+**What changes**:
+- New features use `/opsx:propose` instead of manually writing XML plans
+- `openspec/specs/` becomes the living system specification
+- `openspec/archive/` provides audit trail for the manuscript
+- AGENTS.md is auto-maintained by OpenSpec (separate from CLAUDE.md)
+
+**Context Hub integration** (T7):
+- Custom chub registry (`docs/chub-registry/`) provides upstream library docs
+- OpenSpec specs reference chub content IDs for API-level detail
+- The fetch-docs Skill provides library context during `/opsx:apply`
+
+**Manuscript relevance**:
+- Document the SDD evaluation in the Methods section
+- Compare spec-anchored (our approach) vs spec-first (no enforcement)
+- Report metrics: spec-to-code alignment, feature completion rate, error rate
+- Cross-reference `openspec/archive/` as evidence of the SDD workflow
+
+**Acceptance criteria**:
+- `openspec/` directory exists with `project.md`, `AGENTS.md`, `specs/`
+- `openspec init` completed successfully with Claude Code target
+- Navigator.yaml updated with openspec routing
+- At least one feature goes through the full propose → apply → archive cycle
+- `openspec/project.md` references the KG navigator for domain routing
 
 #### T6: Memory Architecture Formalization (P2)
 
@@ -357,18 +451,21 @@ T0 (intent capture)         ← THIS DOCUMENT (done)
   │
   ├── T1 (CLAUDE.md shrink) ← P0, most impactful, no deps
   │     │
-  │     └── T2 (auto-context + rules) ← P0, depends on T1
+  │     └── T2 (scoped rules) ← P0, depends on T1
   │
-  ├── T3 (Skills evals) ← P1, independent of T1/T2
+  ├── T5 (OpenSpec install) ← P0, MANDATORY, independent
+  │
+  ├── T3 (Skills evals) ← P1, independent
   │
   ├── T4 (navigator audit) ← P1, independent
   │
-  ├── T5 (OpenSpec) ← P2, after T1-T4 stable
+  ├── T7 (Context Hub) ← P1, after T5
   │
-  └── T6 (memory formalization) ← P2, after T1-T4 stable
+  └── T6 (memory formalization) ← P2, after T1-T5 stable
 ```
 
-**Estimated effort**: T1 (2h), T2 (30min), T3 (4h), T4 (3-4h), T5 (future), T6 (future)
+**Estimated effort**: T1 (2h), T2 (30min), T5 (1h install + first propose cycle),
+T3 (4h), T4 (3-4h), T7 (2h), T6 (future)
 
 > **Reviewer note**: T4 is much larger than initially scoped. 195 of 208
 > planning docs (94%) and 40 of 49 metalearning docs (82%) are unindexed.
@@ -377,10 +474,41 @@ T0 (intent capture)         ← THIS DOCUMENT (done)
 
 ---
 
+#### T7: Context Hub Integration (P1)
+
+**Goal**: Install Context Hub for upstream library doc access. Context7 rejected
+(cloud-only, no custom docs, no offline). See `docs/planning/context7-vs-context-hub.md`.
+
+**Installation**: `npm install -g @aisuite/chub`
+
+**Custom registry** for our stack:
+```
+docs/chub-registry/
+  monai/losses/DOC.md           # MONAI losses + our custom CbDiceClDiceLoss
+  monai/transforms/DOC.md       # MONAI transforms we use
+  skypilot/yaml/DOC.md          # SkyPilot YAML patterns with Docker image_id
+  minivess/adapters/DOC.md      # ModelAdapter ABC, SAM3 VRAM tables
+```
+
+**Skill**: `.claude/skills/fetch-docs/SKILL.md` — instructs agent to use `chub get`
+before implementing with any upstream library. Demand-invoked only (not auto-triggered).
+
+**Acceptance criteria**:
+- `chub` CLI installed and available
+- Custom registry built via `chub build docs/chub-registry/`
+- At least MONAI losses and SkyPilot YAML docs authored
+- Skill file exists and follows the two-gate verification protocol (fetch + web-search)
+
+---
+
 ## References
 
 - [Gloaguen et al. (2026). "Evaluating AGENTS.md: Are Repository-Level Context Files Helpful for Coding Agents?" *arXiv:2602.11988*](https://arxiv.org/abs/2602.11988)
 - [Chatlatanagulchai et al. (2025). "Agent READMEs: An Empirical Study of Context Files for Agentic Coding." *arXiv:2511.12884*](https://arxiv.org/abs/2511.12884)
 - [Lulla et al. (2026). "On the Impact of AGENTS.md Files on the Efficiency of AI Coding Agents." *arXiv:2601.20404*](https://arxiv.org/abs/2601.20404)
+- [Piskala (2026). "Spec-Driven Development: From Code to Contract in the Age of AI Coding Assistants." *arXiv:2602.00180*](https://arxiv.org/abs/2602.00180)
 - [OpenSpec. Fission-AI. Spec-driven development framework.](https://github.com/Fission-AI/OpenSpec)
+- [Context Hub. Andrew Ng / aisuite. Curated API documentation for coding agents.](https://github.com/andrewyng/context-hub)
+- [Thoughtworks (2025). "SDD: Unpacking 2025's New Engineering Practices."](https://www.thoughtworks.com/en-us/insights/blog/agile-engineering-practices/spec-driven-development-unpacking-2025-new-engineering-practices)
+- [Fowler & Boeckeler (2026). "SDD: Three tools evaluated."](https://martinfowler.com/articles/exploring-gen-ai/sdd-3-tools.html)
 - [McMillan (2026). "Information Architecture for AI Agent Context." *arXiv:2602.05447*](https://arxiv.org/abs/2602.05447)
