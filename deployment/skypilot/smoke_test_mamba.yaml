@@ -49,8 +49,8 @@ name: minivess-mamba-smoke-test
 resources:
   # :mamba-latest = standard :latest + CUDA-compiled mamba-ssm==2.3.1
   # Build: DOCKER_BUILDKIT=1 docker build --build-arg INSTALL_MAMBA=1 ...
-  # Push: make push-mamba (requires GITHUB_TOKEN with write:packages)
-  image_id: docker:ghcr.io/petteriteikari/minivess-base:mamba-latest
+  # Push: docker push petteriteikari/minivess-base:mamba-latest (Docker Hub, public)
+  image_id: docker:petteriteikari/minivess-base:mamba-latest
   # RTX 4090 = Ada Lovelace, RTX 5090 = Blackwell, RTX 3090 = Ampere — all BF16 ✓, ≥24 GB
   # MambaVesselNet++ has no half-precision encoder → safe on all three (unlike SAM3)
   # Estimated VRAM: ~5–8 GB @ patch=(64,64,64), batch=1

@@ -35,10 +35,10 @@ resources:
   # Change registry by updating $DOCKER_REGISTRY in .env.example.
   # SkyPilot resources: block doesn't support ${} interpolation — update here directly.
   # Supported registries: GHCR, Docker Hub, AWS ECR, GCP GAR, Azure ACR.
-  image_id: docker:ghcr.io/petteriteikari/minivess-base:latest
-  # GHCR is private — RunPod needs Docker credentials to pull.
-  # Use scripts/launch_smoke_test.py (SkyPilot Python API) for private registry auth.
-  # Or make the GHCR package public: GitHub → Packages → minivess-base → Settings → Public.
+  image_id: docker:petteriteikari/minivess-base:latest
+  # Docker Hub: public by default — RunPod pulls without auth.
+  # GHCR was private and caused 40+ min STARTING hangs (see metalearning 2026-03-16).
+  # GCP staging/prod uses GAR instead (same-region, ADC auth).
   # Default GPU list for smoke tests: consumer RTX with ≥24 GB VRAM.
   # sam3_vanilla 2.9 GB, sam3_hybrid ~7.5 GB, vesselfm ~10 GB — all fit 24 GB.
   # Override this list freely for your lab/budget (e.g. add A4000, A40, L40S).
