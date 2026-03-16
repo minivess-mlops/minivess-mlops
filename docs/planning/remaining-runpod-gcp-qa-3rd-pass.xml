@@ -1,0 +1,1111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DEFINITIVE System Verification Plan v3 — Architecture Corrections Applied
+  Created: 2026-03-16
+  Branch: qa/gcp-runpod-3rd-pass (on top of test/mambavesselnet)
+  Parent plans: remaining-runpod-gcp-qa-2nd-pass.xml, mambavesselnet-test-on-dev-runpod-followup.xml
+  Skills: self-learning-iterative-coder + ralph-loop
+
+  ══════════════════════════════════════════════════════════════════
+  CRITICAL ARCHITECTURE CORRECTIONS (v2 → v3)
+  ══════════════════════════════════════════════════════════════════
+
+  The v1 and v2 plans contained fundamental architecture errors.
+  ALL assumptions have been re-verified against:
+    - Real GCP L4 spot run data (2026-03-16, 5 jobs)
+    - User corrections delivered during QA session
+    - smoke_test_gpu.yaml (RunPod, correct)
+    - mambavesselnet-test-on-dev-runpod-followup.xml (architecture corrections)
+    - .claude/metalearning/2026-03-16-gcp-uses-gcs-not-upcloud-s3.md
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │               WRONG ASSUMPTION → CORRECTION                     │
+  ├─────────────────────────────────────────────────────────────────┤
+  │ T0.2: "Verify MLflow server health (UpCloud)"                   │
+  │   → RunPod uses FILE-BASED MLflow on Network Volume             │
+  │     (/opt/vol/mlruns). No UpCloud MLflow server.                │
+  │     GCP uses Cloud Run MLflow (already running).                │
+  ├─────────────────────────────────────────────────────────────────┤
+  │ T0.3: "DVC data pushed to UpCloud S3"                           │
+  │   → RunPod uses Network Volume. Data loaded via                 │
+  │     make dev-gpu-upload-data (rsync local → /opt/vol/data/).    │
+  │     Fallback: s3://minivessdataset (AWS public, read-only).     │
+  │     GCP uses GCS (gs://minivess-mlops-dvc-data) via ADC.        │
+  │     UpCloud S3 is NEVER used for cloud training data.           │
+  ├─────────────────────────────────────────────────────────────────┤
+  │ T0.4: Required vars included DVC_S3_*, MLFLOW_CLOUD_*           │
+  │   → RunPod: only RUNPOD_API_KEY + GITHUB_TOKEN needed.          │
+  │     GCP: HF_TOKEN + gcloud ADC + MLFLOW_TRACKING_URI.           │
+  │     No DVC S3 credentials for either cloud provider.            │
+  ├─────────────────────────────────────────────────────────────────┤
+  │ T5.3: "Verify MLflow artifacts on UpCloud"                      │
+  │   → Verify via make dev-gpu-sync → local mlruns/ query.         │
+  │     No UpCloud MLflow. RunPod sync = sky rsync down.            │
+  ├─────────────────────────────────────────────────────────────────┤
+  │ T5.4: "MLflow run on UpCloud"                                   │
+  │   → MLflow run stored on Network Volume (/opt/vol/mlruns).      │
+  │     Sync back to local: make dev-gpu-sync.                      │
+  ├─────────────────────────────────────────────────────────────────┤
+  │ DVC_DATA_MISSING fix: "dvc push -r upcloud"                     │
+  │   → Use Network Volume or s3://minivessdataset (public).        │
+  │     Never push to UpCloud from cloud GPU instances.             │
+  ├─────────────────────────────────────────────────────────────────┤
+  │ Phases P0-P2 (build, YAML, Makefile) treated as TODO            │
+  │   → ALREADY DONE for mamba: smoke_test_mamba.yaml exists,       │
+  │     smoke_mambavesselnet config exists, Makefile targets exist.  │
+  ├─────────────────────────────────────────────────────────────────┤
+  │ EXPERIMENT computed in envs: block via ${MODEL_FAMILY}          │
+  │   → EXPERIMENT computed in run: block only (SkyPilot cannot      │
+  │     resolve intra-envs ${} references).                          │
+  └─────────────────────────────────────────────────────────────────┘
+
+  ══════════════════════════════════════════════════════════════════
+  GCP-SPECIFIC CORRECTIONS (from 2026-03-16 QA session)
+  ══════════════════════════════════════════════════════════════════
+
+  GC1: smoke_test_gcp.yaml MUST use GCS not UpCloud S3
+    - BANNED: DVC_S3_ENDPOINT_URL, DVC_S3_ACCESS_KEY, DVC_S3_SECRET_KEY in GCP YAML
+    - CORRECT: dvc remote add gcs gs://minivess-mlops-dvc-data && dvc pull -r gcs
+    - GCP VMs auth via ADC (service account roles/storage.objectViewer)
+    - Metalearning: .claude/metalearning/2026-03-16-gcp-uses-gcs-not-upcloud-s3.md
+
+  GC2: MLFLOW_TRACKING_URI must be set DIRECTLY (not via alias)
+    - BANNED: MLFLOW_TRACKING_URI: ${MLFLOW_GCP_URI} (SkyPilot can't chain vars)
+    - CORRECT: MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI} (set in .env)
+
+  GC3: SkyPilot env var expansion: ONLY ${VAR}, NO ${VAR:-default}
+    - SkyPilot uses os.path.expandvars() — bash fallback syntax unsupported
+    - All vars must be explicitly set in .env before launch
+
+  GC4: .env sourcing for SkyPilot launch MUST use set -a
+    - CORRECT: set -a && source .env && set +a && sky jobs launch ...
+    - WITHOUT set -a: env vars not exported to subprocess
+
+  GC5: GCS DVC bucket must be populated ONE-TIME before any GCP run
+    - One-time: dvc push -r gcs (from local, after ADC auth)
+    - Prerequisite: gcs DVC remote configured in local .dvc/config
+
+  ══════════════════════════════════════════════════════════════════
+  INFRASTRUCTURE TIMING REALITY (2026-03-16 measured data)
+  ══════════════════════════════════════════════════════════════════
+
+  GCP L4 spot ($0.22/hr) — from 5 real runs:
+    VM provisioning + Docker pull (GAR):  ~15 min  (58% of total cost)
+    DVC data pull (GCS):                  ~2 min
+    Training (2 epochs, 4 volumes):       ~9 min
+    Total per smoke test:                 ~26 min = $0.095
+
+  FinOps impact:
+    - Setup overhead: $0.055/trial for 2-epoch smoke (62% pure overhead for HPO)
+    - GPU utilization: 34% wall-clock for smoke tests
+    - ASHA min_resource=3 (default): 62% setup overhead per trial (UNACCEPTABLE)
+    - ASHA min_resource=13 (recommended): <25% setup overhead
+    - 100-epoch production: <3% setup overhead (acceptable)
+
+  See: docs/planning/profiler-benchmarking-plan-triple-check.md
+  Issue: #747 (P1 FinOps + infrastructure timing benchmarking)
+-->
+<plan version="3.0" name="system-verification-architecture-corrected">
+  <metadata>
+    <created>2026-03-16</created>
+    <branch>qa/gcp-runpod-3rd-pass</branch>
+    <parent-branch>test/mambavesselnet</parent-branch>
+    <skills>self-learning-iterative-coder, ralph-loop</skills>
+    <budget>GCP: ~$3-6 (infra already up + training). RunPod: ~$2.</budget>
+
+    <!-- ═══════════════════════════════════════════════════
+         CORRECTED PREREQUISITE ENV VARS (v2 had wrong list)
+         ═══════════════════════════════════════════════════ -->
+    <prerequisite-env-vars>
+      <for-gcp>
+        <!-- GCP auth via Application Default Credentials (ADC) — NO S3 keys -->
+        PULUMI_ACCESS_TOKEN, PULUMI_CONFIG_PASSPHRASE,
+        HF_TOKEN,
+        MLFLOW_TRACKING_URI (= MLFLOW_GCP_URI = Cloud Run URL),
+        MLFLOW_GCP_URI (= Cloud Run URL from Pulumi output),
+        MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD=true,
+        MLFLOW_MULTIPART_UPLOAD_CHUNK_SIZE=10485760
+      </for-gcp>
+      <for-runpod>
+        <!-- Network Volume data — NO UpCloud credentials needed -->
+        RUNPOD_API_KEY,
+        GITHUB_TOKEN (for GHCR private image pull),
+        HF_TOKEN (for VesselFM weights only)
+      </for-runpod>
+      <explicitly-banned-from-gcp-yaml>
+        <!-- These caused 8+ failed jobs in the 2026-03-16 QA session -->
+        DVC_S3_ENDPOINT_URL,
+        DVC_S3_ACCESS_KEY,
+        DVC_S3_SECRET_KEY,
+        DVC_S3_BUCKET,
+        MLFLOW_CLOUD_URI,
+        MLFLOW_CLOUD_USERNAME,
+        MLFLOW_CLOUD_PASSWORD
+      </explicitly-banned-from-gcp-yaml>
+    </prerequisite-env-vars>
+
+    <completed-work>
+      <!-- These phases are DONE — do NOT redo -->
+      <done phase="P0-mamba" description="smoke_test_mamba.yaml created (test/mambavesselnet branch)" />
+      <done phase="P0-gcp-docker" description="Docker image built + pushed to GAR" />
+      <done phase="P0-gcp-infra" description="Pulumi stack deployed — Cloud SQL, Cloud Run MLflow, GCS, GAR all UP" />
+      <done phase="P0-gcp-mlflow" description="Cloud Run MLflow responding at MLFLOW_GCP_URI" />
+      <done phase="P0-metalearning" description=".claude/metalearning/2026-03-16-gcp-uses-gcs-not-upcloud-s3.md written" />
+      <done phase="P0-finops-plan" description="docs/planning/profiler-benchmarking-plan-triple-check.md written" />
+      <done phase="P0-issue-747" description="GitHub Issue #747 created (P1 FinOps timing)" />
+    </completed-work>
+  </metadata>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 0: PRE-FLIGHT VERIFICATION ($0, ~5 min)
+       Verify existing infrastructure is healthy before launching jobs.
+       (Do NOT destroy — infra already up from previous session.)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P0" name="Pre-Flight Verification" cost="$0" effort="5min">
+
+    <task id="T0.1" name="Verify GCP Cloud Run MLflow is healthy">
+      <commands>
+        <cmd>source .env 2>/dev/null || true</cmd>
+        <cmd>curl -s "${MLFLOW_GCP_URI}/health" | python3 -c "import sys,json; d=json.load(sys.stdin); print('MLflow OK:', d)"</cmd>
+      </commands>
+      <acceptance>HTTP 200 with status OK from Cloud Run MLflow.</acceptance>
+      <on-failure>
+        If Cloud Run is down: cd deployment/pulumi/gcp &amp;&amp; pulumi up -y
+        If URL is wrong: export MLFLOW_GCP_URI=$(cd deployment/pulumi/gcp &amp;&amp; pulumi stack output mlflow_url)
+      </on-failure>
+    </task>
+
+    <task id="T0.2" name="Verify GCS DVC bucket is populated">
+      <description>
+        CORRECTED from v2 T0.5.5 (which checked UpCloud S3 — WRONG for GCP).
+        GCP data source = GCS bucket gs://minivess-mlops-dvc-data via ADC.
+        DVC must be configured with gcs remote pointing to this bucket.
+      </description>
+      <commands>
+        <cmd>gsutil ls gs://minivess-mlops-dvc-data/ | wc -l</cmd>
+        <cmd># Expected: at least 350 files (minivess dataset)
+        # If bucket is EMPTY, run one-time data push from local:
+        #   dvc push -r gcs
+        # Requires local gcs DVC remote: dvc remote add gcs gs://minivess-mlops-dvc-data
+        # Requires ADC: gcloud auth application-default login</cmd>
+      </commands>
+      <acceptance>gsutil ls shows ≥350 objects. Bucket is non-empty.</acceptance>
+      <on-failure>
+        If bucket empty:
+        1. gcloud auth application-default login  # ADC for local machine
+        2. dvc remote add gcs gs://minivess-mlops-dvc-data  # in .dvc/config
+        3. dvc push -r gcs  # one-time push (may take 20-30 min for 2.7 GB)
+        Note: This is a ONE-TIME operation. Never needed again after initial push.
+      </on-failure>
+    </task>
+
+    <task id="T0.3" name="Verify GAR image exists">
+      <commands>
+        <cmd>GAR_REPO=$(cd deployment/pulumi/gcp &amp;&amp; pulumi stack output docker_registry 2>/dev/null || echo "europe-north1-docker.pkg.dev/minivess-mlops/minivess")</cmd>
+        <cmd>gcloud artifacts docker images list ${GAR_REPO} --limit=3 2>/dev/null | grep base || \
+          docker manifest inspect ${GAR_REPO}/base:latest 2>/dev/null | python3 -c "import json,sys; print('GAR image OK')" || \
+          echo "WARNING: GAR image not found — run make push-gar to push"</cmd>
+      </commands>
+      <acceptance>GAR shows base:latest image exists.</acceptance>
+    </task>
+
+    <task id="T0.4" name="Verify SkyPilot GCP and RunPod enabled">
+      <commands>
+        <cmd>uv run sky check gcp 2>&amp;1 | grep -E "(GCP|enabled|disabled)"</cmd>
+        <cmd>uv run sky check runpod 2>&amp;1 | grep -E "(RunPod|enabled|disabled)"</cmd>
+        <cmd>uv run sky status 2>&amp;1 | head -10  # Should show no running clusters</cmd>
+      </commands>
+      <acceptance>GCP: enabled. RunPod: enabled. No orphan clusters.</acceptance>
+    </task>
+
+    <task id="T0.5" name="Verify .env contains correct vars (no banned vars in use)">
+      <commands>
+        <cmd>python3 - &lt;&lt;'PYEOF'
+import os
+from pathlib import Path
+
+env_content = Path(".env").read_text(encoding="utf-8")
+
+required_gcp = ["MLFLOW_GCP_URI", "MLFLOW_TRACKING_URI", "HF_TOKEN"]
+required_runpod = ["RUNPOD_API_KEY", "GITHUB_TOKEN"]
+banned_for_cloud = []  # These should NOT be passed to GCP/RunPod SkyPilot YAMLs
+
+print("=== Required GCP vars ===")
+for var in required_gcp:
+    val = os.environ.get(var, "")
+    status = "OK" if val else "MISSING"
+    print(f"  {status}: {var}")
+
+print("=== Required RunPod vars ===")
+for var in required_runpod:
+    val = os.environ.get(var, "")
+    status = "OK" if val else "MISSING"
+    print(f"  {status}: {var}")
+
+# Verify smoke_test_gcp.yaml does NOT reference banned S3 vars
+gcp_yaml = Path("deployment/skypilot/smoke_test_gcp.yaml").read_text(encoding="utf-8")
+banned = ["DVC_S3_ENDPOINT_URL", "DVC_S3_ACCESS_KEY", "DVC_S3_SECRET_KEY", "MLFLOW_CLOUD_URI"]
+print("=== GCP YAML sanity check ===")
+for b in banned:
+    if b in gcp_yaml:
+        print(f"  FAIL: {b} found in smoke_test_gcp.yaml — MUST be removed!")
+    else:
+        print(f"  OK: {b} absent from smoke_test_gcp.yaml")
+PYEOF</cmd>
+      </commands>
+      <acceptance>All required vars OK. Zero FAIL lines from YAML sanity check.</acceptance>
+      <on-failure>
+        If smoke_test_gcp.yaml still has DVC_S3_* vars: apply fix from Phase 1 (T1.1).
+        If MLFLOW_TRACKING_URI missing from .env: it should equal MLFLOW_GCP_URI value.
+      </on-failure>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 1: FIX smoke_test_gcp.yaml ($0, ~10 min)
+       Replace UpCloud S3 DVC with GCS. This is the root cause of all failed jobs.
+       NOTE: File may have been reverted to UpCloud version — verify first.
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P1" name="Fix smoke_test_gcp.yaml — GCS Data Source" cost="$0" effort="10min" blocked-by="P0">
+    <description>
+      The smoke_test_gcp.yaml was reverted to the old UpCloud S3 version during the QA session.
+      This phase applies the correct GCS architecture. The fix was previously committed as
+      part of the session but may need re-applying on this branch.
+
+      ARCHITECTURE (GCP):
+        Data:   GCS bucket gs://minivess-mlops-dvc-data via ADC (NO S3 credentials)
+        MLflow: Cloud Run at ${MLFLOW_TRACKING_URI} (must equal MLFLOW_GCP_URI)
+        Image:  GAR europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+        GPU:    L4 only (T4 BANNED — no BF16, NaN in SAM3 encoder)
+
+      ARCHITECTURE (RunPod — smoke_test_gpu.yaml, ALREADY CORRECT):
+        Data:   Network Volume /opt/vol/data/raw/ → symlink to /app/data/raw/minivess
+                Fallback: s3://minivessdataset (AWS public, no credentials)
+        MLflow: File-based /opt/vol/mlruns (NO remote server)
+        Image:  GHCR ghcr.io/petteriteikari/minivess-base:latest
+        GPU:    RTX4090/RTX5090/RTX3090
+    </description>
+
+    <task id="T1.1" name="Verify and fix smoke_test_gcp.yaml content">
+      <description>
+        Read the file and check if DVC_S3_* vars are present.
+        If yes: replace with GCS setup. If already correct: skip.
+        NEVER use sed/awk (CLAUDE.md Rule #16).
+        Use Python pathlib + str.replace() for targeted edits.
+      </description>
+      <expected-envs-block>
+        <!-- The envs: block in smoke_test_gcp.yaml MUST contain ONLY these data-related vars: -->
+        MODEL_FAMILY: sam3_vanilla
+        DVC_REMOTE: gcs
+        MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+        MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD: "true"
+        MLFLOW_MULTIPART_UPLOAD_CHUNK_SIZE: "10485760"
+        GIT_PYTHON_REFRESH: quiet
+        MINIVESS_ALLOW_HOST: "1"
+        PREFECT_DISABLED: "1"
+        SPLITS_DIR: /app/configs/splits
+        CHECKPOINT_DIR: /app/checkpoints
+        LOGS_DIR: /app/logs
+        PYTORCH_ALLOC_CONF: "expandable_segments:True"
+        HF_TOKEN: ${HF_TOKEN}
+        <!-- BANNED (will cause failure if present):
+             DVC_S3_ENDPOINT_URL, DVC_S3_ACCESS_KEY, DVC_S3_SECRET_KEY, DVC_S3_BUCKET
+             MLFLOW_CLOUD_URI, MLFLOW_CLOUD_USERNAME, MLFLOW_CLOUD_PASSWORD
+             MLFLOW_GCP_URI (SkyPilot can't chain this to MLFLOW_TRACKING_URI)
+        -->
+      </expected-envs-block>
+      <expected-setup-block>
+        <!-- The setup: block in smoke_test_gcp.yaml MUST use GCS DVC remote -->
+        dvc init --no-scm -f
+        dvc remote add gcs gs://minivess-mlops-dvc-data
+        # ADC via service account (GCP VM gets this automatically — no key files needed)
+        dvc pull -r gcs
+        <!-- BANNED in setup (will cause failure):
+             dvc remote add upcloud s3://${DVC_S3_BUCKET}
+             dvc remote modify upcloud endpointurl ...
+             dvc remote modify upcloud access_key_id ...
+        -->
+      </expected-setup-block>
+      <acceptance>
+        smoke_test_gcp.yaml has:
+        - DVC_REMOTE: gcs (not upcloud)
+        - MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI} (not ${MLFLOW_GCP_URI})
+        - setup: uses "dvc remote add gcs gs://minivess-mlops-dvc-data"
+        - NO DVC_S3_* vars anywhere in the file
+      </acceptance>
+    </task>
+
+    <task id="T1.2" name="Verify smoke_test_mamba.yaml (already on test/mambavesselnet)" blocked-by="T1.1">
+      <description>
+        smoke_test_mamba.yaml was created on test/mambavesselnet branch.
+        Verify it is correctly merged/available on this branch (qa/gcp-runpod-3rd-pass).
+        It should use RunPod architecture (Network Volume, file-based MLflow).
+      </description>
+      <commands>
+        <cmd>ls -la deployment/skypilot/smoke_test_mamba.yaml</cmd>
+        <cmd>python3 -c "
+from pathlib import Path
+import yaml  # SkyPilot YAMLs are valid YAML
+content = Path('deployment/skypilot/smoke_test_mamba.yaml').read_text(encoding='utf-8')
+# Verify RunPod architecture (no UpCloud)
+banned = ['DVC_S3_ENDPOINT_URL', 'upcloud', 'MLFLOW_CLOUD_URI']
+for b in banned:
+    if b in content:
+        print(f'FAIL: {b} found in smoke_test_mamba.yaml')
+    else:
+        print(f'OK: {b} absent from smoke_test_mamba.yaml')
+# Verify Network Volume data source
+assert '/opt/vol' in content, 'FAIL: /opt/vol missing from mamba YAML'
+print('OK: Network Volume architecture confirmed')
+print('OK: smoke_test_mamba.yaml looks correct')
+"</cmd>
+      </commands>
+      <acceptance>smoke_test_mamba.yaml exists, has Network Volume data, no UpCloud refs.</acceptance>
+    </task>
+
+    <task id="T1.3" name="Commit YAML fixes to qa/gcp-runpod-3rd-pass branch" blocked-by="T1.2">
+      <commands>
+        <cmd>git add deployment/skypilot/smoke_test_gcp.yaml</cmd>
+        <cmd>git status --short</cmd>
+        <cmd>git commit -m "fix(gcp): use GCS DVC remote, direct MLFLOW_TRACKING_URI — remove UpCloud S3
+
+Root cause of all GCP job failures (jobs 6-14 in 2026-03-16 QA session).
+GCP VMs authenticate to GCS via ADC (service account), not S3 keys.
+
+Changes:
+- Remove DVC_S3_ENDPOINT_URL, DVC_S3_ACCESS_KEY, DVC_S3_SECRET_KEY, DVC_S3_BUCKET
+- Add DVC_REMOTE: gcs
+- setup: dvc remote add gcs gs://minivess-mlops-dvc-data + dvc pull -r gcs
+- Use MLFLOW_TRACKING_URI: \${MLFLOW_TRACKING_URI} (not \${MLFLOW_GCP_URI} alias)
+
+Metalearning: .claude/metalearning/2026-03-16-gcp-uses-gcs-not-upcloud-s3.md
+Issue: #747
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;"</cmd>
+      </commands>
+      <acceptance>git log shows commit with correct message. No DVC_S3_* in YAML.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 2: GCP TRAINING — 4 MODELS ($1-2, ~90 min sequential)
+       Prerequisites: P0 (all green) + P1 (YAML fixed)
+       SEQUENTIAL: GPU quota = 1 — must verify FINISHED before next launch
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P2" name="GCP 4-Model Training on L4 Spot" cost="~$1-2" effort="90min" blocked-by="P1">
+    <description>
+      CORRECTED LAUNCH PATTERN (v2 had missing set -a):
+
+        set -a &amp;&amp; source .env &amp;&amp; set +a
+        sky jobs launch deployment/skypilot/smoke_test_gcp.yaml \
+          --env MODEL_FAMILY=sam3_vanilla -y
+
+      OR via Makefile:
+        make smoke-test-gcp MODEL=sam3_vanilla
+
+      TIMING EXPECTATIONS (from 2026-03-16 real data):
+        VM provisioning + Docker pull: ~15 min (dominates cost)
+        DVC pull from GCS:             ~2 min
+        2-epoch training:              ~9 min
+        Total:                         ~26 min = $0.095 at $0.22/hr L4 spot
+
+      BETWEEN EACH MODEL: verify FINISHED + finite val_loss before launching next.
+      IF val_loss = NaN for SAM3: check mixed_precision=False was applied.
+    </description>
+
+    <task id="T2.1" name="Train sam3_vanilla on GCP L4 spot" priority="P0">
+      <commands>
+        <cmd>gcloud compute instances list --project=minivess-mlops  # verify 0 instances</cmd>
+        <cmd>set -a &amp;&amp; source .env &amp;&amp; set +a</cmd>
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_gcp.yaml \
+          --env MODEL_FAMILY=sam3_vanilla -y</cmd>
+      </commands>
+      <verification>
+        Monitor with: sky jobs logs &lt;job-id&gt;
+        Look for: "Training completed", finite val_loss in MLflow
+        Check MLflow: curl ${MLFLOW_GCP_URI}/api/2.0/mlflow/runs/search
+      </verification>
+      <critical-checks>
+        1. Instance type = L4 (NOT T4 — T4 banned for SAM3)
+        2. Docker image pulled from GAR (not GHCR — same-region = fast)
+        3. DVC data pulled from GCS (NOT UpCloud S3)
+        4. Training FINISHED (not FAILED)
+        5. val_loss is finite (not NaN, not Inf)
+        6. MLflow run created in Cloud Run server
+        7. VM auto-destroyed after completion
+      </critical-checks>
+      <ralph-loop>Monitor. On failure: capture logs BEFORE auto-destroy, diagnose, fix, retry.</ralph-loop>
+    </task>
+
+    <task id="T2.2" name="Train dynunet on GCP L4 spot" blocked-by="T2.1">
+      <description>
+        DynUNet: pure MONAI model, no frozen encoder, no BF16 constraint.
+        Should run cleanly. val_interval=1 for cloud runs.
+      </description>
+      <commands>
+        <cmd>gcloud compute instances list --project=minivess-mlops  # verify 0</cmd>
+        <cmd>set -a &amp;&amp; source .env &amp;&amp; set +a</cmd>
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_gcp.yaml \
+          --env MODEL_FAMILY=dynunet -y</cmd>
+      </commands>
+    </task>
+
+    <task id="T2.3" name="Train sam3_hybrid on GCP L4 spot" blocked-by="T2.2">
+      <description>
+        CRITICAL: sam3_hybrid is the model that historically produced NaN val_loss.
+        Root causes (both fixed in smoke_test_gcp.yaml):
+          1. mixed_precision must be False (AMP + sliding_window = NaN, MONAI #4243)
+          2. val_interval must be 1 (validate every epoch, not sentinel)
+
+        The GCP YAML run: block applies ++mixed_precision=false,++val_interval=1
+        for all sam3 models via CLOUD_OVERRIDES.
+
+        Verify in MLflow after run:
+          - mixed_precision param = False
+          - val_loss column has finite values (not NaN)
+          - max_epochs = 2, val_interval = 1
+      </description>
+      <commands>
+        <cmd>gcloud compute instances list --project=minivess-mlops</cmd>
+        <cmd>set -a &amp;&amp; source .env &amp;&amp; set +a</cmd>
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_gcp.yaml \
+          --env MODEL_FAMILY=sam3_hybrid -y</cmd>
+      </commands>
+      <acceptance>val_loss is finite. This is THE validation target of this entire QA effort.</acceptance>
+    </task>
+
+    <task id="T2.4" name="Train vesselfm on GCP L4 spot" blocked-by="T2.3">
+      <description>
+        VesselFM: requires patch Z≥32 (5 stride-2 downsamplings).
+        L4 has 24 GB VRAM — sufficient for VesselFM (~10 GB VRAM).
+        HF_TOKEN required for weight download (set in envs block).
+        Previous failure was SSH error (transient) — this MUST pass on GCP.
+      </description>
+      <commands>
+        <cmd>gcloud compute instances list --project=minivess-mlops</cmd>
+        <cmd>set -a &amp;&amp; source .env &amp;&amp; set +a</cmd>
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_gcp.yaml \
+          --env MODEL_FAMILY=vesselfm -y</cmd>
+      </commands>
+    </task>
+
+    <task id="T2.5" name="Verify ALL 4 GCP models in Cloud Run MLflow" blocked-by="T2.4">
+      <commands>
+        <cmd>python3 - &lt;&lt;'PYEOF'
+import json, sys, os, urllib.request
+
+mlflow_url = os.environ["MLFLOW_GCP_URI"].rstrip("/")
+
+# Search all experiments
+req = urllib.request.Request(
+    f"{mlflow_url}/api/2.0/mlflow/experiments/search",
+    data=json.dumps({"max_results": 50}).encode(),
+    headers={"Content-Type": "application/json"},
+    method="POST"
+)
+with urllib.request.urlopen(req) as r:
+    exps = json.loads(r.read())
+
+print(f"Found {len(exps.get('experiments', []))} experiments")
+
+failures = []
+for exp in exps.get("experiments", []):
+    if "smoke_test" not in exp["name"]:
+        continue
+    # Search runs in this experiment
+    runs_req = urllib.request.Request(
+        f"{mlflow_url}/api/2.0/mlflow/runs/search",
+        data=json.dumps({"experiment_ids": [exp["experiment_id"]]}).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    with urllib.request.urlopen(runs_req) as r:
+        runs_data = json.loads(r.read())
+    for run in runs_data.get("runs", []):
+        info = run["info"]
+        metrics = {m["key"]: m["value"] for m in run.get("data", {}).get("metrics", [])}
+        status = info.get("status", "UNKNOWN")
+        val_loss = metrics.get("val_loss", float("nan"))
+        import math
+        if status != "FINISHED" or math.isnan(val_loss) or math.isinf(val_loss):
+            failures.append(f"FAIL: exp={exp['name']} run={info['run_id'][:8]} status={status} val_loss={val_loss}")
+        else:
+            print(f"  OK: {exp['name']} val_loss={val_loss:.4f}")
+
+if failures:
+    print("FAILURES:")
+    for f in failures:
+        print(f"  {f}")
+    sys.exit(1)
+else:
+    print("ALL models PASSED: FINISHED + finite val_loss")
+PYEOF</cmd>
+      </commands>
+      <acceptance>
+        4/4 models: FINISHED status, finite val_loss, visible in Cloud Run MLflow.
+        sam3_topolora excluded (needs A100 — hardware limitation, not a system bug).
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 3: RUNPOD DEV WORKFLOW — MambaVesselNet + sam3 models (~$1, ~45 min)
+       CORRECTED from v2 Phase 5 (which referenced UpCloud MLflow)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P3" name="RunPod Dev Workflow — Network Volume + File-based MLflow" cost="~$1" effort="45min" blocked-by="P2">
+    <description>
+      CORRECTED ARCHITECTURE (v2 had wrong UpCloud references):
+
+      RunPod = EPHEMERAL DEV COMPUTE for academic paper.
+      Design:
+        - Data from Network Volume /opt/vol/data/raw/ (pre-loaded via make dev-gpu-upload-data)
+        - MLflow file-based at /opt/vol/mlruns (NO remote server)
+        - Post-run sync: sky rsync down minivess-dev:/opt/vol/mlruns/ mlruns/
+        - Makefile target: make dev-gpu-sync
+
+      KEY DIFFERENCE FROM GCP:
+        - RunPod syncs EVERYTHING to local (checkpoints + mlruns + .onnx)
+        - GCP researchers use Cloud Run MLflow UI directly (never download locally)
+
+      REQUIRED ENV VARS FOR RUNPOD:
+        - RUNPOD_API_KEY (SkyPilot auth)
+        - GITHUB_TOKEN (GHCR private image pull)
+        - HF_TOKEN (VesselFM weights only)
+        - NO DVC_S3_* vars (not needed — Network Volume data)
+        - NO MLFLOW_CLOUD_* vars (not needed — file-based MLflow)
+
+      MODELS TO TEST:
+        1. mambavesselnet (NEW — smoke_test_mamba.yaml from test/mambavesselnet)
+        2. sam3_vanilla (regression check)
+    </description>
+
+    <task id="T3.1" name="Verify RunPod Network Volume has training data">
+      <description>
+        CORRECTED: v2 checked UpCloud S3. RunPod uses Network Volume.
+        If data not on volume: make dev-gpu-upload-data (rsync local data/ → /opt/vol/data/).
+        This is a ONE-TIME setup. Network Volume has 7-day TTL.
+      </description>
+      <commands>
+        <cmd>uv run sky check runpod</cmd>
+        <cmd># Check if dev cluster is running (from previous session)
+        uv run sky status 2>&amp;1 | grep -E "(minivess-dev|UP|DOWN|INIT)"</cmd>
+        <cmd># If dev cluster UP: verify data on volume
+        uv run sky exec minivess-dev -- \
+          "ls /opt/vol/data/raw/minivess/imagesTr/ 2>/dev/null | wc -l" \
+          2>/dev/null || echo "Dev cluster not running — will be verified post-launch"</cmd>
+      </commands>
+      <on-failure>
+        If Network Volume has no data:
+          make dev-gpu-upload-data  # rsync local data/ → /opt/vol/data/
+          # This requires dev cluster to be running (sky launch smoke_test_gpu.yaml)
+      </on-failure>
+    </task>
+
+    <task id="T3.2" name="Train mambavesselnet on RunPod (NEW model QA)" blocked-by="T3.1">
+      <description>
+        MambaVesselNet is the new model added in test/mambavesselnet branch.
+        smoke_test_mamba.yaml uses Network Volume + file-based MLflow (CORRECT).
+        EXPERIMENT computed in run: block (NOT envs: — SkyPilot intra-envs limitation).
+      </description>
+      <commands>
+        <cmd>set -a &amp;&amp; source .env &amp;&amp; set +a</cmd>
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_mamba.yaml \
+          --env MODEL_FAMILY=mambavesselnet -y</cmd>
+      </commands>
+      <verification>
+        Monitor: sky jobs logs &lt;job-id&gt;
+        Verify Network Volume data used (not DVC pull from external)
+        Verify MLflow stored at /opt/vol/mlruns (not remote server)
+        Verify FINISHED + finite val_loss
+      </verification>
+      <ralph-loop>Monitor. Diagnose if FAILED_SETUP (likely data missing from volume).</ralph-loop>
+    </task>
+
+    <task id="T3.3" name="Train sam3_vanilla on RunPod (regression check)" blocked-by="T3.2">
+      <commands>
+        <cmd>set -a &amp;&amp; source .env &amp;&amp; set +a</cmd>
+        <cmd>sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+          --env MODEL_FAMILY=sam3_vanilla -y</cmd>
+      </commands>
+    </task>
+
+    <task id="T3.4" name="Sync RunPod artifacts to local machine" blocked-by="T3.3">
+      <description>
+        CORRECTED from v2 T5.3 (which referenced UpCloud artifacts).
+        RunPod artifacts live on Network Volume. Sync back to local using:
+          make dev-gpu-sync  (= sky rsync down minivess-dev:/opt/vol/mlruns/ mlruns/)
+        ALL artifacts including .pth checkpoints — no excludes.
+      </description>
+      <commands>
+        <cmd>mkdir -p mlruns/runpod</cmd>
+        <cmd>make dev-gpu-sync  # or: sky rsync down minivess-dev:/opt/vol/mlruns/ mlruns/runpod/</cmd>
+        <cmd>ls -la mlruns/runpod/</cmd>
+        <cmd>find mlruns/runpod/ -name "*.pth" | head -5</cmd>
+        <cmd>find mlruns/runpod/ -name "meta.yaml" | wc -l  # count completed runs</cmd>
+      </commands>
+      <acceptance>
+        mlruns/runpod/ has experiment data INCLUDING .pth checkpoint files.
+        At least 2 runs (mambavesselnet + sam3_vanilla) with FINISHED status.
+      </acceptance>
+    </task>
+
+    <task id="T3.5" name="Verify RunPod MLflow runs locally" blocked-by="T3.4">
+      <description>
+        CORRECTED from v2 T5.4 (which checked UpCloud MLflow).
+        After sync, query the synced local mlruns directly.
+      </description>
+      <commands>
+        <cmd>MLFLOW_TRACKING_URI=mlruns/runpod uv run python3 - &lt;&lt;'PYEOF'
+import mlflow
+import math
+
+client = mlflow.MlflowClient(tracking_uri="mlruns/runpod")
+experiments = client.search_experiments()
+print(f"Found {len(experiments)} experiments in synced RunPod mlruns")
+
+failures = []
+for exp in experiments:
+    runs = client.search_runs([exp.experiment_id])
+    for run in runs:
+        status = run.info.status
+        val_loss = run.data.metrics.get("val_loss", float("nan"))
+        if status != "FINISHED" or math.isnan(val_loss):
+            failures.append(f"FAIL: {exp.name} run={run.info.run_id[:8]} status={status} val_loss={val_loss}")
+        else:
+            print(f"  OK: {exp.name} val_loss={val_loss:.4f}")
+
+if failures:
+    for f in failures:
+        print(f)
+    raise SystemExit(1)
+print("All RunPod runs: FINISHED + finite val_loss")
+PYEOF</cmd>
+      </commands>
+      <acceptance>All synced RunPod runs: FINISHED + finite val_loss.</acceptance>
+    </task>
+
+    <task id="T3.6" name="Teardown RunPod ephemeral compute" blocked-by="T3.5">
+      <description>
+        RunPod = ephemeral. Network Volume persists 7 days idle.
+        After sync, destroy the VM to stop billing.
+        DO NOT destroy the Network Volume — reuse on next launch.
+      </description>
+      <commands>
+        <cmd>uv run sky down --all -y</cmd>
+        <cmd>uv run sky status  # verify 0 clusters</cmd>
+      </commands>
+      <note>
+        Network Volume with training data + mlruns persists for 7 days idle.
+        SAM3/MambaVesselNet weights on volume will be re-used on next launch.
+        Training artifacts are already on local machine (T3.4 sync).
+      </note>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 4: GCP ARTIFACT VERIFICATION ($0, ~5 min)
+       CORRECTED: No local mlruns sync for GCP — Cloud Run IS the interface
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P4" name="GCP Artifact Verification (Cloud Run MLflow Only)" cost="$0" effort="5min" blocked-by="P2">
+    <description>
+      GCP design: MLflow Cloud Run is ONLINE 24/7 for the research team.
+      Researchers access experiments via browser — NEVER download mlruns locally.
+      Local download is a backup/migration tool only (see issue #735).
+
+      CORRECTED from v2: v2 mentioned "UpCloud MLflow artifacts" — WRONG.
+      GCP artifacts live in GCS (gs://minivess-mlops-mlflow-artifacts/).
+      MLflow Cloud Run serves them via signed GCS URLs.
+    </description>
+
+    <task id="T4.1" name="Verify all experiments visible in MLflow Web UI">
+      <commands>
+        <cmd>echo "Open in browser: ${MLFLOW_GCP_URI}"</cmd>
+        <cmd>python3 -c "
+import json, os, urllib.request
+mlflow_url = os.environ['MLFLOW_GCP_URI'].rstrip('/')
+req = urllib.request.Request(
+    mlflow_url + '/api/2.0/mlflow/experiments/search',
+    data=json.dumps({'max_results': 50}).encode(),
+    headers={'Content-Type': 'application/json'},
+    method='POST'
+)
+with urllib.request.urlopen(req) as r:
+    d = json.loads(r.read())
+exps = d.get('experiments', [])
+print(f'{len(exps)} experiments in Cloud Run MLflow:')
+for e in exps:
+    print(f'  {e[\"name\"]}')
+"</cmd>
+      </commands>
+      <acceptance>All 4 GCP model experiments (sam3_vanilla, dynunet, sam3_hybrid, vesselfm) visible.</acceptance>
+    </task>
+
+    <task id="T4.2" name="Verify GCS artifacts (checkpoints + configs)" blocked-by="T4.1">
+      <commands>
+        <cmd>gsutil ls gs://minivess-mlops-mlflow-artifacts/ | head -20</cmd>
+        <cmd>gsutil ls gs://minivess-mlops-checkpoints/ | head -10 || \
+          echo "Note: checkpoints may be in mlflow-artifacts bucket"</cmd>
+      </commands>
+      <acceptance>GCS shows checkpoint and config artifacts from all 4 model runs.</acceptance>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 5: INTEGRATION TESTS ($0, ~30 min)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P5" name="System Integration Tests (TDD)" cost="$0" effort="30min" blocked-by="P3,P4">
+    <task id="T5.1" name="Write cloud architecture enforcement tests">
+      <description>
+        Tests that verify the correct data source and MLflow per provider.
+        These run in staging tier (fast, no GPU, no actual cloud launch).
+      </description>
+      <files>
+        <file path="tests/v2/unit/deployment/test_cloud_architecture.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          test_gcp_yaml_has_no_upcloud_s3_vars:
+            Parse smoke_test_gcp.yaml with yaml.safe_load().
+            Assert no DVC_S3_ENDPOINT_URL, DVC_S3_ACCESS_KEY, DVC_S3_SECRET_KEY in envs.
+            Assert DVC_REMOTE == "gcs".
+            Assert "gs://minivess-mlops-dvc-data" in setup block.
+
+          test_runpod_yaml_has_no_upcloud_refs:
+            Parse smoke_test_gpu.yaml with yaml.safe_load().
+            Assert MLFLOW_TRACKING_URI starts with "/opt/vol".
+            Assert "/opt/vol/data/raw" in setup block.
+            Assert "s3://minivessdataset" in setup block (public fallback).
+            Assert no MLFLOW_CLOUD_URI or MLFLOW_CLOUD_PASSWORD in envs.
+
+          test_gcp_yaml_has_no_skypilot_intra_envs_resolution:
+            Parse smoke_test_gcp.yaml with yaml.safe_load().
+            envs = parsed["envs"]
+            Assert envs["MLFLOW_TRACKING_URI"] == "${MLFLOW_TRACKING_URI}"
+            (NOT "${MLFLOW_GCP_URI}" — can't chain refs in SkyPilot envs block)
+
+          test_experiment_computed_in_run_not_envs:
+            For all smoke_test_*.yaml:
+              envs block must NOT contain EXPERIMENT key.
+              run block must contain "EXPERIMENT=" shell assignment.
+
+          test_all_skypilot_yamls_have_image_id_docker:
+            All deployment/skypilot/*.yaml MUST have image_id: docker:*
+            (no bare VM).
+
+          test_gcp_yaml_uses_l4_not_t4:
+            Parse smoke_test_gcp.yaml.
+            accelerators dict must contain L4.
+            accelerators dict must NOT contain T4 (banned — no BF16).
+        </red>
+      </tdd-spec>
+    </task>
+
+    <task id="T5.2" name="Write MLflow post-run verification tests" blocked-by="T5.1">
+      <files>
+        <file path="tests/v2/cloud/test_gcp_mlflow_verification.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          test_gcp_mlflow_health:
+            requests.get(MLFLOW_GCP_URI + "/health") → 200.
+            Mark with @pytest.mark.integration (requires live Cloud Run).
+
+          test_gcp_smoke_runs_finished_with_finite_metrics:
+            Query Cloud Run MLflow for smoke_test_* experiments.
+            For each FINISHED run: val_loss must not be NaN or Inf.
+            Mark with @pytest.mark.integration.
+
+          test_runpod_synced_runs_have_checkpoints:
+            If mlruns/runpod/ exists: verify .pth files present.
+            Mark with @pytest.mark.integration.
+        </red>
+      </tdd-spec>
+    </task>
+
+    <task id="T5.3" name="Update CLAUDE.md with corrected architecture summary" blocked-by="T5.2">
+      <description>
+        Add explicit data source and MLflow section to Cloud GPU Strategy table.
+        Ensure T4 ban, GCS-for-GCP, Network-Volume-for-RunPod are documented there.
+        (Complements memory/feedback_gcp_data_source.md which is already written.)
+      </description>
+      <files>
+        <file path="CLAUDE.md" action="edit" />
+      </files>
+      <note>
+        Add to Cloud GPU Strategy table a "Data Source" and "MLflow" column.
+        RunPod: Data=Network Volume /opt/vol, MLflow=file-based /opt/vol/mlruns
+        GCP: Data=GCS gs://minivess-mlops-dvc-data (ADC), MLflow=Cloud Run
+      </note>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 6: FINOPS BENCHMARKING SPRINT 1 ($0, ~60 min)
+       Cross-reference: docs/planning/profiler-benchmarking-plan-triple-check.md
+       Issue: #747 (P1 FinOps + infrastructure timing)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P6" name="FinOps Sprint 1 — Timing Sentinel + Cost Tracker" cost="$0" effort="60min" blocked-by="P5">
+    <description>
+      From 2026-03-16 real GCP data:
+        - Docker pull from GAR dominates: ~15 min (58% of smoke-test cost)
+        - At $0.22/hr L4 spot: setup costs $0.055/trial
+        - ASHA min_resource=3 → 62% overhead per HPO trial
+        - Recommended: ASHA min_resource=13 for GCP HPO
+
+      Sprint 1 implements MEASUREMENT (not optimization).
+      Optimization (image size reduction, cached machine images) is Sprint 2-3.
+      Full plan: docs/planning/profiler-benchmarking-plan-triple-check.md
+    </description>
+
+    <task id="T6.1" name="Add timing sentinel to SkyPilot YAML setup/run blocks" priority="P1">
+      <description>
+        Add echo statements capturing phase timestamps in smoke_test_gcp.yaml and
+        smoke_test_gpu.yaml. These stdout lines will be parsed by infra_timing.py.
+        Format: "TIMING: phase=&lt;name&gt; ts=&lt;unix_timestamp&gt;"
+        Phases: vm_ready, docker_ready, dvc_done, training_start, training_end
+        NEVER use regex to parse (CLAUDE.md Rule #16) — emit as key=value pairs.
+      </description>
+      <files>
+        <file path="deployment/skypilot/smoke_test_gcp.yaml" action="edit" />
+        <file path="deployment/skypilot/smoke_test_gpu.yaml" action="edit" />
+      </files>
+      <tdd-spec>
+        <red>
+          test_gcp_yaml_has_timing_sentinels:
+            Parse smoke_test_gcp.yaml. setup block must contain:
+            "TIMING: phase=docker_ready ts=" (captures when container is running)
+            "TIMING: phase=dvc_done ts=" (captures after dvc pull -r gcs)
+            run block must contain:
+            "TIMING: phase=training_start ts="
+            "TIMING: phase=training_end ts="
+        </red>
+      </tdd-spec>
+    </task>
+
+    <task id="T6.2" name="Implement infra_timing.py log parser" blocked-by="T6.1">
+      <files>
+        <file path="scripts/infra_timing.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          test_parse_timing_sentinels_from_log_lines:
+            Lines = ["TIMING: phase=docker_ready ts=1742000000",
+                     "TIMING: phase=dvc_done ts=1742000900",
+                     "TIMING: phase=training_start ts=1742001020",
+                     "TIMING: phase=training_end ts=1742001560"]
+            result = parse_timing_lines(lines)
+            # result["docker_pull_seconds"] == 900 (dvc_done - docker_ready assumed = pull time)
+            # result["dvc_pull_seconds"] == 120
+            # result["training_seconds"] == 540
+            NO REGEX — use str.split() and str.partition() only.
+        </red>
+      </tdd-spec>
+    </task>
+
+    <task id="T6.3" name="Implement cost_tracker.py" blocked-by="T6.2">
+      <files>
+        <file path="scripts/cost_tracker.py" action="create" />
+      </files>
+      <tdd-spec>
+        <red>
+          test_compute_job_cost:
+            timing = {
+              "docker_pull_seconds": 900,
+              "dvc_pull_seconds": 120,
+              "training_seconds": 540,
+              "total_wall_seconds": 1560,
+            }
+            rates = {"gcp_l4_spot": 0.22}
+            result = compute_job_cost(timing, "gcp_l4_spot", rates)
+            assert abs(result["total_cost_usd"] - 0.22 * (1560/3600)) &lt; 0.001
+            assert abs(result["setup_overhead_fraction"] - (1020/1560)) &lt; 0.01
+            assert result["gpu_utilization"] == training_seconds / total_wall_seconds
+        </red>
+      </tdd-spec>
+    </task>
+
+    <task id="T6.4" name="Log timing + cost to MLflow as setup_* / cost_* params" blocked-by="T6.3">
+      <description>
+        Integrate infra_timing.py + cost_tracker.py into train_flow.py.
+        Log as MLflow params (not metrics) so they appear in comparison tables.
+        Prefix: setup_* (timing), cost_* (financial).
+        Examples: setup_docker_pull_s, setup_dvc_pull_s, setup_training_s,
+                  cost_total_usd, cost_setup_overhead_fraction, cost_gpu_utilization
+      </description>
+      <files>
+        <file path="src/minivess/orchestration/flows/train_flow.py" action="edit" />
+      </files>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 7: REPORT + MERGE PREP ($0, ~20 min)
+       ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="P7" name="Report + Branch Merge Preparation" cost="$0" effort="20min" blocked-by="P5,P6">
+
+    <task id="T7.1" name="Write QA verification report">
+      <files>
+        <file path="docs/planning/system-verification-report-2026-03-16.md" action="create" />
+      </files>
+      <description>
+        Document: every model trained, every artifact verified, every YAML corrected.
+        Include: MLflow experiment IDs, GCS bucket contents, timing data (real values),
+        costs (calculated from timing), corrections made from v1/v2 plans.
+        Cross-reference issue #747 for FinOps follow-up.
+      </description>
+    </task>
+
+    <task id="T7.2" name="Merge qa/gcp-runpod-3rd-pass to test/mambavesselnet" blocked-by="T7.1">
+      <commands>
+        <cmd>git checkout test/mambavesselnet</cmd>
+        <cmd>git merge --no-ff qa/gcp-runpod-3rd-pass -m "feat: GCP GCS data source fix + RunPod architecture corrections + FinOps Sprint 1
+
+Corrections applied:
+- smoke_test_gcp.yaml: GCS DVC remote (not UpCloud S3)
+- smoke_test_gcp.yaml: MLFLOW_TRACKING_URI direct (not alias)
+- Cloud architecture enforcement tests added
+- FinOps timing sentinel + cost_tracker.py (Sprint 1)
+
+Architecture now correct:
+- GCP: GCS data (ADC auth) + Cloud Run MLflow
+- RunPod: Network Volume data + file-based MLflow on /opt/vol/mlruns
+
+See: docs/planning/remaining-runpod-gcp-qa-3rd-pass.xml
+     .claude/metalearning/2026-03-16-gcp-uses-gcs-not-upcloud-s3.md
+     Issue #747
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;"</cmd>
+      </commands>
+    </task>
+
+    <task id="T7.3" name="Cost control — GCP infrastructure decision" blocked-by="T7.2">
+      <description>
+        Cloud SQL costs ~$0.80/day. Cloud Run MLflow costs ~$0.10/day (scale to zero).
+        DECIDE: keep running (for continued development) or pulumi destroy.
+        If keeping: confirm GCP budget alert is set at $20/month.
+        Run: gcloud billing budgets list --billing-account=ACCOUNT
+      </description>
+      <note>
+        RunPod: already destroyed in P3.6. Network Volume auto-deletes after 7 days idle.
+        GCP: Cloud SQL is the main ongoing cost driver.
+      </note>
+    </task>
+  </phase>
+
+  <cost-summary>
+    <item phase="P0" cost="$0">Pre-flight verification (local, ~5 min)</item>
+    <item phase="P1" cost="$0">YAML fix + commit (local, ~10 min)</item>
+    <item phase="P2" cost="~$0.40">4 GCP models × $0.095 each on L4 spot ($0.22/hr)</item>
+    <item phase="P3" cost="~$0.60">RunPod mamba + sam3_vanilla on RTX 4090 ($0.44/hr × ~1.5 hr)</item>
+    <item phase="P4" cost="$0">GCP artifact verification via Cloud Run API</item>
+    <item phase="P5" cost="$0">Integration tests + CLAUDE.md update (local)</item>
+    <item phase="P6" cost="$0">FinOps Sprint 1 implementation (local)</item>
+    <item phase="P7" cost="$0">Report + merge (local)</item>
+    <total>~$1-2 training costs + ongoing GCP infra ~$0.90/day if not destroyed</total>
+    <note>
+      v2 estimate was $5-10 because it included Pulumi rebuild ($2-5/day).
+      v3 is MUCH CHEAPER because GCP infra is ALREADY UP from previous session.
+    </note>
+  </cost-summary>
+
+  <failure-patterns>
+    <pattern id="FP1" name="FAILED_SETUP: dvc pull fails on GCP">
+      <symptom>DVC pull error, no credentials for GCS</symptom>
+      <root-cause>ADC not configured for GCP VM service account</root-cause>
+      <fix>
+        1. Verify Pulumi IAM: service account has roles/storage.objectViewer on GCS bucket
+        2. Verify GCS bucket is populated: gsutil ls gs://minivess-mlops-dvc-data/ | wc -l
+        3. If empty: dvc push -r gcs from local (one-time)
+      </fix>
+    </pattern>
+    <pattern id="FP2" name="FAILED: val_loss=NaN for SAM3 on GCP">
+      <symptom>val_loss is NaN in MLflow after training completes</symptom>
+      <root-cause>
+        Either: mixed_precision=True (AMP + sliding_window = NaN, MONAI #4243)
+        Or: val_interval sentinel applied (validation skipped, then NaN logged)
+      </root-cause>
+      <fix>
+        Verify in MLflow params: mixed_precision=false, val_interval=1
+        Check CLOUD_OVERRIDES in smoke_test_gcp.yaml run: block
+        Expected HYDRA_OVERRIDES: "...++mixed_precision=false,++val_interval=1"
+      </fix>
+    </pattern>
+    <pattern id="FP3" name="FAILED_SETUP: SkyPilot env var is literal ${VAR}">
+      <symptom>DVC_S3_BUCKET=${DVC_S3_BUCKET} in job logs (not expanded)</symptom>
+      <root-cause>Missing "set -a" before source .env, OR var not in .env</root-cause>
+      <fix>
+        Launch command: set -a &amp;&amp; source .env &amp;&amp; set +a &amp;&amp; sky jobs launch ...
+        Verify var is in .env: grep MLFLOW_TRACKING_URI .env
+      </fix>
+    </pattern>
+    <pattern id="FP4" name="FAILED_SETUP: Network Volume data missing (RunPod)">
+      <symptom>Training data missing — DVC pull failed in setup</symptom>
+      <root-cause>Network Volume not populated (first use after 7-day TTL expiry)</root-cause>
+      <fix>
+        make dev-gpu-upload-data  # rsync local data/ to /opt/vol/data/
+        # Or: dvc pull -r remote_storage (from AWS S3 public fallback)
+      </fix>
+    </pattern>
+    <pattern id="FP5" name="FAILED: Docker image pull timeout">
+      <symptom>Setup hangs at "Pulling from GHCR/GAR..."</symptom>
+      <root-cause>
+        GHCR: private package, GITHUB_TOKEN not set or invalid
+        GAR: gcloud auth configure-docker not done for RunPod
+        Both: 9 GB image takes 15-20 min on first pull (normal — not a failure)
+      </root-cause>
+      <fix>
+        GCP (GAR): same-region pull — fast. If fail: gcloud auth configure-docker europe-north1-docker.pkg.dev
+        RunPod (GHCR): make the GHCR package public, OR set GITHUB_TOKEN in .env
+        Image size reduction: see Sprint 2 in profiler-benchmarking-plan-triple-check.md
+      </fix>
+    </pattern>
+  </failure-patterns>
+
+  <architecture-reference>
+    <provider name="GCP" role="staging/prod">
+      <data>GCS gs://minivess-mlops-dvc-data via DVC (ADC auth — no S3 keys)</data>
+      <mlflow>Cloud Run https://minivess-mlflow-a7w6hliydq-lz.a.run.app (24/7)</mlflow>
+      <image>GAR europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest</image>
+      <gpu>L4 (Ada Lovelace, BF16) — T4 BANNED (no BF16, NaN in SAM3)</gpu>
+      <artifacts>GCS gs://minivess-mlops-mlflow-artifacts/ (via MLflow multipart upload)</artifacts>
+      <yaml>deployment/skypilot/smoke_test_gcp.yaml</yaml>
+    </provider>
+    <provider name="RunPod" role="dev/prototyping">
+      <data>Network Volume /opt/vol/data/raw/ (pre-loaded) → symlink to /app/data/raw/minivess</data>
+      <data-fallback>AWS S3 s3://minivessdataset (public, no credentials)</data-fallback>
+      <mlflow>File-based /opt/vol/mlruns (NO remote server)</mlflow>
+      <mlflow-sync>make dev-gpu-sync (= sky rsync down minivess-dev:/opt/vol/mlruns/ mlruns/)</mlflow-sync>
+      <image>GHCR ghcr.io/petteriteikari/minivess-base:latest</image>
+      <gpu>RTX4090/RTX5090/RTX3090 (consumer Ampere — BF16 supported)</gpu>
+      <yaml>deployment/skypilot/smoke_test_gpu.yaml, smoke_test_mamba.yaml</yaml>
+    </provider>
+  </architecture-reference>
+
+  <execution-notes>
+    <note>P0 is verification only — DO NOT destroy working GCP infrastructure.</note>
+    <note>P1 YAML fix is the critical prerequisite for ALL GCP training (P2).</note>
+    <note>GCP models MUST run sequentially (quota = 1 GPU).</note>
+    <note>RunPod and GCP phases can run in parallel (different cloud providers).</note>
+    <note>sam3_topolora excluded from smoke tests (needs A100 — hardware, not system bug).</note>
+    <note>val_loss=NaN for sam3_hybrid is THE acceptance criterion of this entire QA effort.</note>
+    <note>FinOps Sprint 1 (P6) = measurement only. Do NOT optimize yet (Sprint 2-3 in separate issue).</note>
+    <note>After P7: DECIDE to keep or destroy GCP Cloud SQL (~$0.80/day ongoing cost).</note>
+    <note>
+      SOURCING PATTERN (required for SkyPilot launches):
+      set -a &amp;&amp; source .env &amp;&amp; set +a &amp;&amp; sky jobs launch ...
+      WITHOUT set -a: vars not exported → SkyPilot sees literal "${VAR}" strings.
+    </note>
+    <note>
+      SkyPilot YAML env var syntax: ONLY ${VAR} supported.
+      BANNED: ${VAR:-default} (bash fallback not supported by os.path.expandvars()).
+    </note>
+    <note>
+      Cross-references:
+        - docs/planning/profiler-benchmarking-plan-triple-check.md (FinOps timing plan)
+        - .claude/metalearning/2026-03-16-gcp-uses-gcs-not-upcloud-s3.md (architecture fix)
+        - memory/feedback_gcp_data_source.md (per-cloud data source mandate)
+        - GitHub Issue #747 (P1 FinOps tracking)
+        - deployment/skypilot/smoke_test_gpu.yaml (correct RunPod reference implementation)
+    </note>
+  </execution-notes>
+</plan>

@@ -6,21 +6,33 @@
 # ALL infrastructure on GCP — no cross-Atlantic artifact uploads.
 #
 # Launch:
-#   uv run python scripts/launch_smoke_test.py --model sam3_vanilla --cloud gcp
+#   set -a && source .env && set +a
+#   sky jobs launch deployment/skypilot/smoke_test_gcp.yaml --env MODEL_FAMILY=sam3_vanilla -y
 #
-# Cost: T4 spot $0.14/hr, L4 spot $0.22/hr — cheapest Docker-compatible GPUs.
+# Or via Makefile (recommended):
+#   make smoke-test-gcp MODEL=sam3_vanilla
 #
-# Docker image: GAR (same-region, fast pulls). Setup: DVC data pull only.
+# Cost: L4 spot $0.22/hr — cheapest BF16-capable Docker-compatible GPU.
+# T4 BANNED: Turing architecture, no BF16 → FP16 overflow → NaN in SAM3 encoder.
+# See: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
+#
+# Data source: GCS bucket gs://minivess-mlops-dvc-data via ADC (Application Default Credentials).
+# GCP VMs authenticate to GCS via service account — NO S3 credentials needed.
+# BANNED: DVC_S3_ENDPOINT_URL, DVC_S3_ACCESS_KEY, DVC_S3_SECRET_KEY in this file.
+# See: .claude/metalearning/2026-03-16-gcp-uses-gcs-not-upcloud-s3.md
+#
+# MLflow: Cloud Run at ${MLFLOW_TRACKING_URI} (must equal MLFLOW_GCP_URI in .env).
+# Docker image: GAR (same-region, ~15 min pull — dominates provisioning time).
 # BANNED: apt-get, uv sync, git clone in setup (Docker mandate).
+# Setup: DVC data pull from GCS only.
 
 name: minivess-gcp-smoke-test
 
 resources:
-  # Docker image from GCP Artifact Registry (same-region = fast 1-3 min pulls)
-  # Fallback to GHCR if GAR image not yet pushed
+  # Docker image from GCP Artifact Registry (same-region = fastest pulls, ~15 min for 9 GB)
   image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
   # L4 ONLY — T4 BANNED (Turing: no BF16 → FP16 overflow → NaN in SAM3 encoder).
-  # L4 is 1.86x faster AND 37% cheaper per job than T4.
+  # L4 (Ada Lovelace) is 1.86x faster AND 37% cheaper per job than T4.
   # A100 fallback for models needing >24 GB VRAM (sam3_topolora).
   # See: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
   accelerators: {L4: 1, A100: 1}
@@ -39,24 +51,20 @@ file_mounts:
 
 envs:
   MODEL_FAMILY: sam3_vanilla
-  # DVC data still from UpCloud S3 until migrated to GCS (P2.3)
-  DVC_S3_ENDPOINT_URL: ${DVC_S3_ENDPOINT_URL}
-  DVC_S3_ACCESS_KEY: ${DVC_S3_ACCESS_KEY}
-  DVC_S3_SECRET_KEY: ${DVC_S3_SECRET_KEY}
-  # Note: SkyPilot only supports ${VAR} expansion (not ${VAR:-default}).
-  # DVC_S3_BUCKET must be set in .env or exported before launch.
-  DVC_S3_BUCKET: ${DVC_S3_BUCKET}
-  DVC_REMOTE: upcloud
-  AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
-  AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
-  # MLflow on GCP Cloud Run (same-region, no auth needed for Cloud Run public)
-  # URI from .env: MLFLOW_GCP_URI (set by Pulumi output or manually)
-  MLFLOW_TRACKING_URI: ${MLFLOW_GCP_URI}
-  # Cloud Run MLflow has no auth for now (--allow-unauthenticated)
-  # TODO: add basic-auth via MLflow --app-name basic-auth
 
-  # CRITICAL: Enable multipart upload on CLIENT side
-  # Cloud Run has 32 MB request limit — 910 MB checkpoints must use chunked upload
+  # GCP data source: GCS bucket via DVC (ADC auth — NO S3 keys needed).
+  # GCP VMs get ADC automatically via service account (Pulumi-provisioned).
+  # Prerequisite: gs://minivess-mlops-dvc-data must be populated (one-time: dvc push -r gcs).
+  DVC_REMOTE: gcs
+
+  # MLflow on GCP Cloud Run (same-region, no auth needed for Cloud Run public).
+  # CRITICAL: Use ${MLFLOW_TRACKING_URI} directly — SkyPilot cannot chain envs (${MLFLOW_GCP_URI} fails).
+  # Must be set in .env before launch: MLFLOW_TRACKING_URI=<Cloud Run URL>
+  # Note: SkyPilot only supports ${VAR} expansion (not ${VAR:-default}).
+  MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+
+  # CRITICAL: Enable multipart upload on CLIENT side.
+  # Cloud Run has 32 MB request limit — 910 MB checkpoints must use chunked upload.
   # With multipart enabled, MLflow generates presigned GCS URLs and client
   # uploads chunks directly to GCS, bypassing the 32 MB Cloud Run limit.
   MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD: "true"
@@ -75,11 +83,15 @@ setup: |
   set -ex
   cd /app
 
+  # TIMING: Capture phase timestamps for FinOps benchmarking (Issue #747).
+  # Parsed by scripts/infra_timing.py — plain key=value format (no regex needed).
+  echo "TIMING: phase=docker_ready ts=$(date +%s)"
+
+  # Data: GCS bucket via DVC using Application Default Credentials (ADC).
+  # GCP VMs authenticate automatically via service account — no key files needed.
+  # NEVER use UpCloud S3 for GCP (wrong architecture — caused 8+ failed jobs 2026-03-16).
   dvc init --no-scm -f
-  dvc remote add upcloud s3://${DVC_S3_BUCKET}
-  dvc remote modify upcloud endpointurl ${DVC_S3_ENDPOINT_URL}
-  dvc remote modify --local upcloud access_key_id ${DVC_S3_ACCESS_KEY}
-  dvc remote modify --local upcloud secret_access_key ${DVC_S3_SECRET_KEY}
+  dvc remote add gcs gs://minivess-mlops-dvc-data
 
   cat > dvc.yaml << 'DVCEOF'
   stages:
@@ -103,7 +115,8 @@ setup: |
         nfiles: 350
   LOCKEOF
 
-  dvc pull -r upcloud
+  dvc pull -r gcs
+  echo "TIMING: phase=dvc_done ts=$(date +%s)"
 
   cp configs/splits/smoke_test_1fold_4vol.json configs/splits/splits.json
   mkdir -p /app/checkpoints /app/logs
@@ -121,17 +134,20 @@ setup: |
 run: |
   cd /app
 
+  echo "TIMING: phase=training_start ts=$(date +%s)"
+
   if [ ! -f configs/splits/splits.json ]; then
     echo "FATAL: splits.json missing — setup did not complete."
     exit 1
   fi
   if [ ! -d data/raw/minivess/imagesTr ]; then
-    echo "FATAL: Training data missing — DVC pull failed in setup."
+    echo "FATAL: Training data missing — DVC pull from GCS failed in setup."
     exit 1
   fi
 
-  # Use cloud-specific experiment configs when available (validation enabled,
-  # AMP policy correct). Falls back to standard smoke config otherwise.
+  # Compute EXPERIMENT in shell (NOT in envs — SkyPilot can't resolve intra-envs ${}).
+  # Use cloud-specific experiment configs when available (validation enabled, AMP correct).
+  # Falls back to standard smoke config otherwise.
   CLOUD_CONFIG="configs/experiment/smoke_${MODEL_FAMILY}_cloud.yaml"
   if [ -f "${CLOUD_CONFIG}" ]; then
     export EXPERIMENT="smoke_${MODEL_FAMILY}_cloud"
@@ -163,3 +179,5 @@ run: |
   echo "MLflow server: ${MLFLOW_TRACKING_URI}"
 
   python -m minivess.orchestration.flows.train_flow
+
+  echo "TIMING: phase=training_end ts=$(date +%s)"
