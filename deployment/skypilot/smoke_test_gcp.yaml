@@ -50,8 +50,12 @@ envs:
   AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
   AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
   # MLflow on GCP Cloud Run (same-region, no auth needed for Cloud Run public)
-  # URI from .env: MLFLOW_GCP_URI (set by Pulumi output or manually)
-  MLFLOW_TRACKING_URI: ${MLFLOW_GCP_URI}
+  # SkyPilot ONLY expands ${VAR} from the launch shell's os.environ.
+  # ${MLFLOW_GCP_URI} and ${MLFLOW_TRACKING_URI} must BOTH be set in .env
+  # (or passed via --env at launch time). MLFLOW_TRACKING_URI is the one
+  # the training code reads; MLFLOW_GCP_URI is the Pulumi output alias.
+  # Pass BOTH explicitly to sky jobs launch --env.
+  MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
   # Cloud Run MLflow has no auth for now (--allow-unauthenticated)
   # TODO: add basic-auth via MLflow --app-name basic-auth
 
