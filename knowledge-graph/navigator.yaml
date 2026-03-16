@@ -71,6 +71,15 @@ domains:
     claude_md: [tests/CLAUDE.md]
     decisions: []
 
+  openspec:
+    location: openspec/
+    covers: [active changes, system specs, archived features, SDD workflow]
+    config: openspec/config.yaml
+    note: >
+      Spec-driven development. Use /opsx:propose for new features.
+      Specs supplement the KG (decisions + evidence), not replace it.
+      SDD rigor target: spec-anchored (Piskala 2026, arXiv:2602.00180).
+
   manuscript:
     navigator: knowledge-graph/domains/manuscript.yaml
     covers: [scientific claims, methods stubs, results stubs, limitations, projections, kg-sync]
@@ -147,5 +156,7 @@ keywords:
   kg-sync: manuscript
   latent: manuscript
   intent: manuscript
-  spec: manuscript
-  sdd: manuscript
+  spec: openspec
+  sdd: openspec
+  openspec: openspec
+  propose: openspec
