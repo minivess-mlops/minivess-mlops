@@ -140,6 +140,17 @@ docker_repo = gcp.artifactregistry.Repository(
     description="MinIVess MLOps Docker images (same-region as training VMs)",
 )
 
+# Make GAR repository public so SkyPilot VMs can pull without auth.
+# GCP VMs use the default Compute Engine SA — not our skypilot-training SA —
+# so explicit public access is required for unauthenticated Docker pulls.
+# Open-source project: images are intentionally public (same as GHCR).
+gcp.artifactregistry.RepositoryIamMember(
+    "gar-public-read",
+    repository=docker_repo.id,
+    role="roles/artifactregistry.reader",
+    member="allUsers",
+)
+
 # ── IAM Service Account ─────────────────────────────────────────────────
 
 skypilot_sa = gcp.serviceaccount.Account(
@@ -196,10 +207,26 @@ if enable_cloud_run:
         member=mlflow_cr_sa.email.apply(lambda e: f"serviceAccount:{e}"),
     )
 
+    # Grant the Cloud Run SA permission to sign blobs (required for GCS signed URLs).
+    # Without this, MLflow multipart upload (MPU) fails with:
+    #   "you need a private key to sign credentials" — because Workload Identity
+    #   tokens from the metadata server have no private key.
+    # roles/iam.serviceAccountTokenCreator allows the SA to call iam.signBlob()
+    # on itself, enabling GCS presigned URLs without a JSON key file.
+    # Ref: https://cloud.google.com/storage/docs/access-control/signed-urls#signing-compute
+    gcp.projects.IAMMember(
+        "mlflow-cr-sa-sign-blobs",
+        project=project,
+        role="roles/iam.serviceAccountTokenCreator",
+        member=mlflow_cr_sa.email.apply(lambda e: f"serviceAccount:{e}"),
+    )
+
     # GAR image — built from Dockerfile.mlflow-gcp (psycopg2 + google-cloud-storage)
     # Image MUST exist in GAR before enabling (pushed in Phase 1.5 before pulumi up)
     mlflow_image = docker_repo.name.apply(
-        lambda n: f"{region}-docker.pkg.dev/{project}/{n}/mlflow:v{MLFLOW_SERVER_VERSION}"
+        lambda n: (
+            f"{region}-docker.pkg.dev/{project}/{n}/mlflow:v{MLFLOW_SERVER_VERSION}"
+        )
     )
 
     mlflow_service = gcp.cloudrunv2.Service(

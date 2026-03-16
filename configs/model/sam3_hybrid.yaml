@@ -1,6 +1,10 @@
 # SAM3 Hybrid Fusion model config group entry.
 model: sam3_hybrid
 model_family: sam3_hybrid
+# AMP disabled: SAM3's half-precision ViT encoder + sliding_window_inference + autocast = NaN.
+# This is an architecture constraint, not cloud-specific — disable on ALL platforms.
+# See: MONAI #4243, .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
+mixed_precision: false
 architecture_params:
   backbone: vit_32l
   input_size: 1008

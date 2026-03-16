@@ -30,16 +30,20 @@ Source (verbatim user prompt, `docs/planning/repo-to-manuscript-prompt.md`):
 > of next-gen vasculature SOTA segmentations."
 
 **What this means for every writing task:**
-- ✅ "The platform enables comparison of DynUNet, Mamba, SAM3, VesselFM"
-- ✅ "cbdice_cldice yields +8.9% clDice — informing the platform's default loss selection"
-- ✅ "MambaVesselNet (Chen et al. 2024) demonstrates Mamba is viable for cerebrovasculature,
-  motivating inclusion of the SSM family in NEUROVEX's generalizability demonstration"
+- ✅ "Priority 1 of the paper: "Help the reproducibility crisis in Research with a MLOps platform"
+- ✅ "Priority 2 of the paper: "Providing excellent DevEX / UX and letting research focus on the research, and not on infra"
+- ✅ See 'CLAUDE.md'
+- ✅ "The platform is demoed using a comparison of different segmentor model families: DynUNet, Mamba, SAM3, VesselFM"
+- ✅ "Hypothesis is that the foundation models generalize better for external test sets than classical deep nets DynUNet and Mamba which are only trained on minivess with the validation set performance not offering a good proxy for generalization"
+- ✅ "cbdice_cldice is the default loss selection, and the platform enables easy experiment creation to test different losses, different model architectures, and all"
 - ❌ "NEUROVEX surpasses / outperforms / beats MambaVesselNet or any prior method"
 - ❌ "We achieve state-of-the-art clDice/DSC on MiniVess"
 - ❌ Performance predictions about which model will win R3b/R3c
 
 The model comparison EXISTS to prove the ModelAdapter ABC works across diverse architectures.
+The ModelAdapter ABC exists to make integration to MONAI ecosystem easy, and this is not a separate MLOps platform but an integration to MONAI ecosystem
 The models are demonstration vehicles, not competitors. The platform is the hero.
+
 
 ---
 
@@ -137,8 +141,9 @@ exactly what is stated here.
 ### The specific gap NEUROVEX fills
 
 > No published platform combines: (1) model-agnostic adapter pattern for 3D biomedical
-> segmentation, (2) full 5-flow Docker-per-flow MLOps pipeline with MLflow as the sole
-> inter-flow contract, (3) single-command multi-cloud execution via SkyPilot, and
+> segmentation, (2) full 10-flow Prefect-orchestrated pipeline (6 core/best-effort flows +
+> 4 extension flows, each Docker-isolated) with MLflow as the sole inter-flow contract,
+> (3) single-command multi-cloud execution via SkyPilot, and
 > (4) spec-driven agentic development via a hierarchical probabilistic knowledge graph —
 > in a single open-source academic tool deployable by a 2–5-person research lab
 > with no dedicated ML engineering staff.
@@ -212,7 +217,9 @@ Write the introduction in this order. Target: 900–1200 words for Nature Protoc
    Use §1.5 prior art table. Conclude: "No existing platform provides [the gap]."
 3. **NEUROVEX overview** (~150 words): What NEUROVEX is. Use the central narrative verbatim seed
    from §1 ("The reproducibility crisis in biomedical ML is not a data problem...").
-   Present the 5-flow architecture and Docker-per-flow isolation as one sentence each.
+   Present the 10-flow Prefect architecture and Docker-per-flow isolation as one sentence each.
+   Emphasise the division-of-labour principle: each flow can have its own developer or agent,
+   reducing merge conflicts through decoupling.
 4. **Model families + dataset** (~150 words): Four model families on MiniVess. Stress
    the models are proof of generalizability, not an architecture race.
 5. **MLOps Maturity Level 4** (~100 words): Frame the platform's ambition level.
@@ -268,7 +275,21 @@ The four model families are NOT compared to find a winner — they are compared 
 the platform's model-agnostic architecture. One YAML profile + one ModelAdapter subclass
 = new model integrated with zero infrastructure changes.
 
-### 3.1 DynUNet (MONAI native) — STATUS: COMPLETE
+### End-to-End Verification Status (updated 2026-03-15)
+
+| Model | RunPod RTX 4090 (`env`) | GCP L4 spot (`staging/prod`) | val_loss (smoke) | Notes |
+|-------|------------------------|------------------------------|-----------------|-------|
+| **DynUNet** | ⬜ pending | ✅ VERIFIED 2026-03-15 | 0.642 | FINISHED, finite |
+| **SAM3 Vanilla** | ⬜ pending | ✅ VERIFIED 2026-03-15 | 0.705 | FINISHED, finite, BF16 OK |
+| **SAM3 Hybrid** | ⬜ pending | 🔄 in progress (2026-03-15) | TBD | |
+| **VesselFM** | ⬜ pending | ⬜ pending | TBD | Must use DeepVess/TubeNet only |
+| **MambaVesselNet** | ⬜ pending | ⬜ pending (adapter not yet impl.) | TBD | Issue #737 |
+
+GCP smoke test = SkyPilot managed job on L4 spot (asia-northeast3-a), Docker from GAR,
+MLflow on Cloud Run, checkpoints on GCS. 2 epochs, 4 volumes, `cbdice_cldice` loss.
+RunPod smoke test = SkyPilot Docker on RTX 4090, same YAML, MLflow on UpCloud.
+
+### 3.1 DynUNet (MONAI native) — STATUS: ✅ COMPLETE + GCP VERIFIED
 - **Role**: Battle-tested baseline, MONAI-native, self-configuring architecture
 - **KG adapter**: `knowledge-graph/code-structure/adapters.yaml#dynunet`
 - **GPU requirement**: Any CUDA GPU ≥ 8 GB, BF16 native
@@ -277,6 +298,7 @@ the platform's model-agnostic architecture. One YAML profile + one ModelAdapter 
   - `cbdice_cldice`: DSC=0.772±0.016, clDice=0.906±0.008 (**WINNER — best topology**)
   - `dice_ce`: DSC=0.824±0.014 (best DSC), clDice=0.832±0.019
   - Topology gain cbdice_cldice vs dice_ce: +8.9% clDice, −5.3% DSC
+- **GCP smoke test**: ✅ PASSED 2026-03-15 — val_loss=0.642, Status=FINISHED
 
 ### 3.2 MambaVesselNet (State Space Model family) — STATUS: PLANNED, ISSUE #737
 - **Role**: State-space model family — represents SSM architecture in the platform's
@@ -288,24 +310,24 @@ the platform's model-agnostic architecture. One YAML profile + one ModelAdapter 
 - **KG adapter**: `knowledge-graph/code-structure/adapters.yaml#mambavesselnet`
   (`status: planned`). Python file `src/minivess/adapters/mambavesselnet.py` not yet created.
 - **ARCHIVED (permanently off-table)**: SegMamba and U-Mamba — speculative selections with
-  no reference code. Archived 2026-03-15 in KG (`status: archived`). See issue #737.
+  no reference code. Archived 2026-03-15 in KG (`status: archived`). See [issue #737](https://github.com/petteriTeikari/minivess-mlops/issues/737).
 - **NOT a performance comparison**: MambaVesselNet is cited to show the SSM family has
   published peer-reviewed work for cerebrovasculature. The paper does NOT claim
   MambaVesselNet is better or worse than DynUNet. Platform generalizability is the claim.
 - **GPU requirement**: Similar to DynUNet (~8 GB, to be confirmed after implementation)
 - **Results available**: NO — pending Python adapter implementation + GPU runs
-- **⚠️ ACTION REQUIRED before manuscript submission**: Implement Mamba adapter
+- **⚠️ ACTION REQUIRED before manuscript submission**: Implement MambaVesselNet adapter
   (implement `ModelAdapter` ABC: forward, get_eval_roi_size, get_adapter_config + YAML profile).
-  Choose between SegMamba and U-Mamba at implementation time; prefer active maintenance + BF16 support.
+  [Issue #737](https://github.com/petteriTeikari/minivess-mlops/issues/737) tracks this.
 - **Paper role**: Represents the SSM model family; contrasts long-range context (Mamba SSM)
   vs sliding-window context (DynUNet CNN) vs frozen ViT encoder (SAM3 foundation model)
-- **⚠️ sci-llm-writer WRITING INSTRUCTION**: Until Mamba GPU runs are complete, ALL
+- **⚠️ sci-llm-writer WRITING INSTRUCTION**: Until MambaVesselNet GPU runs are complete, ALL
   introduction and methods prose MUST refer to Mamba as "planned." The working title
   and abstract should say "three implemented model families (DynUNet, SAM3 variants,
-  VesselFM) with Mamba state-space models as a planned extension." Do NOT write as if
+  VesselFM) with MambaVesselNet (SSM family) as a planned extension." Do NOT write as if
   four families have quantitative results available.
 
-### 3.3 SAM3 variants (Foundation Model — Meta, Nov 2025) — STATUS: ADAPTERS READY, GPU PENDING
+### 3.3 SAM3 variants (Foundation Model — Meta, Nov 2025) — STATUS: ✅ VANILLA GCP VERIFIED, HYBRID IN PROGRESS
 - **Role**: Foundation model family — test whether 2D natural-image pre-training transfers
   to 3D vascular segmentation via slice-by-slice inference with frozen ViT-32L encoder
 - **SAM3 ≠ SAM2**: SAM3 is Meta's Nov 2025 release (github.com/facebookresearch/sam3),
@@ -315,15 +337,17 @@ the platform's model-agnostic architecture. One YAML profile + one ModelAdapter 
 - **Three variants**:
   - **SAM3 Vanilla (V1)**: Frozen ViT-32L + lightweight Conv decoder. Fits 8 GB GPU.
     KG: `adapters.yaml#sam3_vanilla`. GPU ≥ 8 GB (SDPA mandatory).
+    ✅ GCP VERIFIED 2026-03-15 — val_loss=0.705, BF16 OK on L4 (no NaN).
   - **SAM3 Hybrid (V3)**: Frozen ViT-32L + gated DynUNet fusion. 7.18 GiB VRAM.
     KG: `adapters.yaml#sam3_hybrid`. Needs cloud GPU (RTX 4090 / L4) for patch=(64,64,3).
+    🔄 GCP smoke test in progress (2026-03-15).
   - **SAM3 TopoLoRA (V2)**: SAM3 + LoRA + topology loss head. >22.66 GiB — **OOM on RTX 4090**.
     Requires A100 ≥ 40 GB. Status: deferred.
 - **Critical constraint**: BF16 required (NOT FP16). FP16 overflows in frozen encoder → NaN.
   T4 GPU is BANNED (Turing arch, no BF16). Use L4 (Ada Lovelace) on GCP.
   AMP must be OFF for validation (MONAI #4243 — 3D sliding_window_inference + autocast = NaN).
-- **Results available**: NO — pending RunPod RTX 4090 GPU runs (~$15, target 2026-03-20)
-- **Blocks**: R3b (multi-model comparison section)
+- **Full results**: Pending (2-epoch smoke tests passed; full 100-epoch runs still needed)
+- **Blocks**: R3b (multi-model comparison section) — needs full runs, not just smoke tests
 
 ### 3.4 VesselFM (Foundation Model — Wittmann et al. 2024) — STATUS: ADAPTER READY, DATA LEAKAGE WARNING
 - **Role**: Vessel-specific foundation model pre-trained on diverse vascular datasets
@@ -384,7 +408,7 @@ Source: `knowledge-graph/manuscript/claims.yaml`
 |----|-------|--------|
 | C1 | NEUROVEX = complete reproducible MLOps pipeline, YAML-only changes for new dataset/model | **supported** |
 | C2 | cbdice_cldice achieves clDice=0.906±0.008 with only −5.3% DSC penalty vs dice+CE | **supported** |
-| C3 | 5-flow architecture separates concerns into Docker containers with MLflow as only inter-flow contract | **supported** |
+| C3 | 10-flow Prefect-orchestrated architecture (6 core/best-effort + 4 extension flows) separates concerns into Docker containers with MLflow as only inter-flow contract | **supported** |
 | C4 | ModelAdapter ABC: new model integration = 3 abstract methods + YAML, no infra changes | **supported** |
 | C5 | SAM3 can be adapted for 3D volumetric segmentation via slice-by-slice inference | **pending GPU runs** |
 | C6 | Single-command cloud execution (sky jobs launch) reproduces identical training env | **supported** |
@@ -468,6 +492,37 @@ Source: `knowledge-graph/manuscript/results.yaml`
 
 ---
 
+## § 6.5 — CANONICAL FLOW ARCHITECTURE (Golden Explanation — verbatim from user, 2026-03-16)
+
+> "We have 1) Data Acquisition -> 2) Data Engineering -> 3) Modeling/Training -> 4) Post-training ->
+> 5) Eval with ensembling -> 6) Biostatistics -> 7) Deploy with *) separate Flow on our custom
+> Dashboard, **) data annotation module, ***) separate Prefect Orchestrators for all the Flows,
+> so we have 10 flows"
+
+**Mapping to flows.yaml:**
+
+| # | User name | flows.yaml id | type |
+|---|-----------|---------------|------|
+| 1 | Data Acquisition | `acquisition_flow` | extension |
+| 2 | Data Engineering | `data_flow` | core |
+| 3 | Modeling/Training | `train_flow` | core |
+| 4 | Post-training | `post_training_flow` | core |
+| 5 | Eval with ensembling | `analysis_flow` | core |
+| 6 | Biostatistics | `biostatistics_flow` | extension |
+| 7 | Deploy | `deploy_flow` | core |
+| * | Dashboard | `dashboard_flow` | best_effort |
+| ** | Data annotation | `annotation_flow` | extension |
+| *** | Prefect Orchestrators | `PipelineTriggerChain` + per-flow orchestrators | infrastructure |
+
+**⚠️ `hpo_flow`** in flows.yaml is **still-undecided** — whether HPO runs inside `train_flow`
+or as a standalone extension flow is an open architectural question. Do NOT list it as a
+confirmed flow in manuscript text.
+
+**Key narrative**: Each flow is independently developable — different developers or parallel
+agents can own different flows with minimal merge conflicts (decoupled via MLflow artifacts).
+
+---
+
 ## § 7 — Methods Overview (13 Sections)
 
 Source: `knowledge-graph/manuscript/methods.yaml` — full key_points for each section.
@@ -476,8 +531,8 @@ Source: `knowledge-graph/manuscript/methods.yaml` — full key_points for each s
 |---------|-------|--------------------------|
 | M0 | Research Question & Scope | Platform-as-contribution framing; not SOTA, not fork |
 | M1 | Dataset: MiniVess | 70 volumes, 2-photon, 3-fold CV, DVC-versioned |
-| M2 | Data Engineering Flow | Flow 1 of 5; Pandera + Great Expectations; OpenLineage |
-| M3 | Platform Architecture | 5-flow Prefect DAG + Docker-per-flow; MLflow as sole inter-flow contract |
+| M2 | Data Engineering Flow | Core flow 2 of 10 (after Data Acquisition); Pandera + Great Expectations; OpenLineage |
+| M3 | Platform Architecture | 10-flow Prefect DAG (6 core/best-effort + 4 extension flows), Docker-per-flow; MLflow as sole inter-flow contract; division-of-labour: each flow independently developable |
 | M4 | Cloud Compute Strategy | SkyPilot intercloud broker; one command any cloud; T4 BANNED |
 | M5 | Workflow Orchestration | Prefect 3.x required; 5 personas; PipelineTriggerChain |
 | M6 | Model Adapter Architecture | ModelAdapter ABC; 3 abstract methods; build_adapter() factory |
@@ -781,7 +836,7 @@ iteration on `results-03-models.tex`** (mode: `refinement`, quality target: MINO
 1. **First full MLOps pipeline for 2PM vascular segmentation.**
    [DDeep3M (Wu et al. 2020)](https://doi.org/10.1016/j.jneumeth.2020.108804) proved Docker
    lowers the barrier for biomedical researchers. NEUROVEX extends that vision to a complete
-   5-flow orchestrated pipeline with experiment tracking, drift detection, champion tagging,
+   10-flow Prefect-orchestrated pipeline with experiment tracking, drift detection, champion tagging,
    and one-command multi-cloud execution — none of which DDeep3M or NeuroCAAS provide.
    *Cite hook for co-authors*: "The Docker approach was right in 2020; NEUROVEX is what it would
    look like if you added five years of MLOps practice to that foundation."

@@ -9,7 +9,10 @@ _meta:
   git_commit: "see _generated_at.yaml"
   note: "Bootstrapped by hand until scan_code_structure.py is implemented"
 
-# 5 core flows (always run) + 1 best-effort (dashboard)
+# 10 flows total: 5 core + 1 best-effort + 4 extension (see § 6.5 in cover letter for canonical names)
+# Core (stop pipeline on failure): data, train, post_training, analysis, deploy
+# Best-effort: dashboard
+# Extension: acquisition, annotation, biostatistics, hpo(still_undecided)
 # Source: src/minivess/orchestration/flows/
 # Orchestrator: src/minivess/orchestration/trigger.py PipelineTriggerChain
 
@@ -135,7 +138,8 @@ flow_extensions:
   - id: hpo_flow
     file: src/minivess/orchestration/flows/hpo_flow.py
     type: extension
-    description: "Standalone HPO sweep orchestration (Optuna + ASHA)"
+    status: still_undecided  # OPEN QUESTION: HPO inside train_flow or standalone? Do NOT list in manuscript.
+    description: "Standalone HPO sweep orchestration (Optuna + ASHA) — architectural decision pending"
 
   - id: biostatistics_flow
     file: src/minivess/orchestration/flows/biostatistics_flow.py

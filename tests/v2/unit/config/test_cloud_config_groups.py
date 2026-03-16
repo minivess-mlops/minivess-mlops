@@ -22,26 +22,40 @@ class TestCloudConfigGroupsExist:
 
     @pytest.mark.parametrize(
         "filename",
-        ["gcp_spot.yaml", "lambda.yaml", "runpod_dev.yaml", "local.yaml"],
+        ["gcp_spot.yaml", "runpod_dev.yaml", "local.yaml"],
     )
     def test_cloud_config_exists(self, filename: str) -> None:
+        # lambda.yaml archived 2026-03-16 (no EU availability) — see deployment/archived/lambda/
         path = CONFIGS_ROOT / "cloud" / filename
         assert path.exists(), f"Missing cloud config: {path}"
 
+    def test_lambda_config_archived(self) -> None:
+        """lambda.yaml must NOT be in configs/cloud/ — archived 2026-03-16."""
+        path = CONFIGS_ROOT / "cloud" / "lambda.yaml"
+        assert not path.exists(), (
+            "configs/cloud/lambda.yaml exists but Lambda Labs was archived 2026-03-16. "
+            "It belongs in deployment/archived/lambda/configs/lambda.yaml"
+        )
+        archived = Path("deployment/archived/lambda/configs/lambda.yaml")
+        assert archived.exists(), (
+            "lambda.yaml should be in deployment/archived/lambda/configs/ — "
+            "move it there for archival"
+        )
+
     @pytest.mark.parametrize(
-        "filename", ["gcp_spot.yaml", "lambda.yaml", "runpod_dev.yaml", "local.yaml"]
+        "filename", ["gcp_spot.yaml", "runpod_dev.yaml", "local.yaml"]
     )
     def test_cloud_config_valid_yaml(self, filename: str) -> None:
+        # lambda.yaml archived 2026-03-16 — excluded from active config validation
         path = CONFIGS_ROOT / "cloud" / filename
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         assert isinstance(data, dict), f"{filename} must be a valid YAML dict"
         assert "provider" in data, f"{filename} must have a 'provider' key"
 
-    @pytest.mark.parametrize(
-        "filename", ["gcp_spot.yaml", "lambda.yaml", "runpod_dev.yaml"]
-    )
+    @pytest.mark.parametrize("filename", ["gcp_spot.yaml", "runpod_dev.yaml"])
     def test_cloud_config_has_accelerators(self, filename: str) -> None:
         """Non-local cloud configs must specify accelerators."""
+        # lambda.yaml archived 2026-03-16 — excluded
         path = CONFIGS_ROOT / "cloud" / filename
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         assert "accelerators" in data, f"{filename} must have 'accelerators' key"
