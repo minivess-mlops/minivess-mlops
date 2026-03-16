@@ -133,20 +133,6 @@ setup: |
     exit 1
   fi
 
-  # DEAD CODE PRESERVED FOR REFERENCE (remove after v4 plan QA passes):
-  # stages:
-  #   download:
-  #     cmd: "true"
-  #     outs:
-  #       - data/raw/minivess/
-      frozen: true
-  DVCEOF
-
-    cat > dvc.lock << 'LOCKEOF'
-  schema: '2.0'
-  stages:
-    # (end of removed dead code block)
-
   # H13: Use smoke test splits (4 volumes) instead of full 3-fold (70 volumes)
   cp configs/splits/smoke_test_1fold_4vol.json configs/splits/splits.json
 
