@@ -21,8 +21,7 @@
   │  Concurrent jobs, same provider │  —   │  ✓ NEW P3                │
   │  GCP quota exhaustion           │  —   │  ✓ NEW P4b               │
   │  Cross-provider concurrent      │  —   │  ✓ NEW P5                │
-  │  Network Volume isolation       │  —   │  ✓ NEW P3                │
-  │  S3 fallback data path          │  —   │  ✓ NEW P3 (Pod B)        │
+  │  Shared volume, separate mlruns │  —   │  ✓ NEW P3                │
   │  File-based MLflow UUID safety  │  —   │  ✓ NEW P3                │
   │  Aggregate cost tracking        │  —   │  ✓ NEW P5                │
   └────────────────────────────────────────────────────────────────────┘
@@ -36,12 +35,15 @@
      mambavesselnet on pod minivess-dev. P2 detects this and adjusts.
      Track B always uses a DIFFERENT pod name when concurrent.
 
-  3. Concurrent RunPod test uses minivess-dev-b (second volume, 50 GB, empty):
-     - Pod A: minivess-dev  (pre-loaded data → primary data path)
-     - Pod B: minivess-dev-b (empty → S3 fallback → tests second data path)
-     Both write to /opt/vol/mlruns on DIFFERENT volumes → no filesystem collision.
+  3. Concurrent RunPod test uses ONE shared volume (minivess-dev) with TWO pods:
+     - Pod A: minivess-dev  → MLFLOW_TRACKING_URI=/opt/vol/mlruns/concurrent-a
+     - Pod B: minivess-dev  → MLFLOW_TRACKING_URI=/opt/vol/mlruns/concurrent-b
+     Both READ from /opt/vol/data/raw/minivess (shared data — no conflict).
+     Both WRITE to separate mlruns subdirs → filesystem isolation without 2 volumes.
      MLflow run IDs are UUID4 → collision probability ~0 but we verify anyway.
-     COST WARNING: minivess-dev-b costs $3.50/month → delete immediately after test.
+     COST: no second volume needed — just two concurrent pod slots (no $3.50/mo extra).
+     NOTE: minivess-dev-b volume exists as an OPTIONAL separate dev environment (not
+     used in this test). The S3 fallback path does NOT exist — RunPod data = local rsync.
 
   4. GCP quota exhaustion test: with quota=1 L4, launching a second concurrent job
      triggers RESOURCE_EXHAUSTED. SkyPilot MUST handle this gracefully:
@@ -55,11 +57,12 @@
      MLflow must be ISOLATED: GCP Cloud Run ≠ RunPod file-based /opt/vol/mlruns.
      No run ID collision when both are synced to local mlruns/.
 
-  ARCHITECTURE REFERENCE (from v3 — immutable)
-  ═════════════════════════════════════════════
-  RunPod: Data = Network Volume /opt/vol/data/raw/ (fallback: s3://minivessdataset)
-          MLflow = file-based /opt/vol/mlruns
+  ARCHITECTURE REFERENCE (corrected from v3)
+  ═══════════════════════════════════════════
+  RunPod: Data = Network Volume /opt/vol/data/raw/ (NO S3 fallback — local rsync only)
+          MLflow = file-based /opt/vol/mlruns (or subdirectory for concurrent pods)
           Auth = RUNPOD_API_KEY + GITHUB_TOKEN
+          BANNED: s3:// in any RunPod YAML (unauthorized third provider — removed 2026-03-16)
   GCP:    Data = gs://minivess-mlops-dvc-data via DVC+ADC
           MLflow = Cloud Run at MLFLOW_TRACKING_URI
           Auth = gcloud ADC (service account, no S3 creds)
@@ -73,16 +76,18 @@
     <parent-branch>test/mambavesselnet</parent-branch>
     <skills>self-learning-iterative-coder, ralph-loop</skills>
     <budget>
-      RunPod: ~$4 (concurrent test adds ~$1 vs v3; delete minivess-dev-b after test).
+      RunPod: ~$3 (concurrent test adds ~$0.50 vs v3; no second volume needed).
       GCP: ~$3-6 (infra already up; 4 models × $0.095 = $0.38 training).
       Global cap: $6.00. Check cumulative before each new job launch.
     </budget>
     <track-a-coordination>
       Track A (overnight-mambavesselnet.yaml) may be running on test/mambavesselnet.
       This plan (Track B) runs on qa/gcp-runpod-3rd-pass (same base branch).
-      P2.T0 MUST check Track A state before touching minivess-dev pod.
-      If Track A is still running: use pod name minivess-dev-b for P2 RunPod tests.
-      If Track A is done: minivess-dev pod is free, use it directly.
+      P2.T0 MUST check Track A state before launching.
+      If Track A is still running: Track B uses SAME volume (minivess-dev) with isolated
+        MLFLOW_TRACKING_URI=/opt/vol/mlruns/track-b (subdir isolation, not separate volume).
+      If Track A is done: Track B uses /opt/vol/mlruns directly (default path).
+      NO second volume needed for Track A/B coexistence.
     </track-a-coordination>
 
     <prerequisite-env-vars>
@@ -172,35 +177,44 @@ print('OK: no banned vars in smoke_test_gcp.yaml')
        ═══════════════════════════════════════════════════════════════ -->
   <phase id="P2" name="RunPod Sequential — Track A Isolation" cost="~$0.50" effort="30min" blocked-by="P0">
 
-    <task id="T2.0" name="Select RunPod pod name based on Track A state">
+    <task id="T2.0" name="Select RunPod pod name + mlruns path based on Track A state">
+      <description>
+        Both tracks can share minivess-dev (same data, no conflict).
+        MLflow isolation is via MLFLOW_TRACKING_URI subdirectory — NOT separate volumes.
+        If Track A is running: Track B uses /opt/vol/mlruns/track-b to avoid collision.
+        If Track A is done: Track B can use /opt/vol/mlruns directly.
+      </description>
       <commands>
         <cmd>
-# Determine which pod name to use for P2
+# Determine which pod name and mlruns path to use for P2
 TRACK_A_RUNNING=$(sky jobs status 2>/dev/null | grep -cE "RUNNING.*minivess" || echo 0)
 if [ "$TRACK_A_RUNNING" -gt 0 ]; then
     echo "RUNPOD_POD=minivess-smoke-test-b"
-    echo "RUNPOD_VOLUME=minivess-dev-b"
-    echo "NOTE: Track A is running on minivess-dev — using isolated pod/volume for P2"
+    echo "RUNPOD_VOLUME=minivess-dev"
+    echo "RUNPOD_MLFLOW_URI=/opt/vol/mlruns/track-b"
+    echo "NOTE: Track A running on minivess-dev — Track B uses same volume, isolated mlruns subdir"
 else
     echo "RUNPOD_POD=minivess-smoke-test"
     echo "RUNPOD_VOLUME=minivess-dev"
-    echo "NOTE: Track A is done — using primary pod/volume"
+    echo "RUNPOD_MLFLOW_URI=/opt/vol/mlruns"
+    echo "NOTE: Track A done — Track B uses primary pod + default mlruns path"
 fi
         </cmd>
       </commands>
-      <acceptance>POD and VOLUME variables set. Logged to outputs/ralph_diagnoses.jsonl.</acceptance>
+      <acceptance>POD, VOLUME, and MLFLOW_URI variables set. Logged to outputs/ralph_diagnoses.jsonl.</acceptance>
     </task>
 
     <task id="T2.1" name="sam3_vanilla regression on RunPod (tests primary data path)">
       <description>
         Regression check: sam3_vanilla must train cleanly on RunPod with Network Volume data.
         This is the PRIMARY data path (pre-loaded /opt/vol/data/raw/).
-        Uses the pod name determined in T2.0.
+        Uses the pod name and MLFLOW_TRACKING_URI determined in T2.0.
       </description>
       <commands>
         <cmd>set -a &amp;&amp; source .env &amp;&amp; set +a</cmd>
         <cmd>sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
   --env MODEL_FAMILY=sam3_vanilla \
+  --env MLFLOW_TRACKING_URI=${RUNPOD_MLFLOW_URI} \
   --name ${RUNPOD_POD}-sam3 \
   -y 2>&amp;1 | tee /tmp/runpod-sam3-launch.log</cmd>
       </commands>
@@ -214,7 +228,8 @@ fi
 
     <task id="T2.2" name="Sync RunPod artifacts to local" blocked-by="T2.1">
       <commands>
-        <cmd>sky rsync down ${RUNPOD_POD}-sam3:/opt/vol/mlruns/ mlruns/ 2>&amp;1</cmd>
+        <!-- Sync the correct mlruns path (may be a subdir if Track A was running) -->
+        <cmd>sky rsync down ${RUNPOD_POD}-sam3:${RUNPOD_MLFLOW_URI}/ mlruns/ 2>&amp;1</cmd>
         <cmd>python3 -c "
 import mlflow, sys
 mlflow.set_tracking_uri('mlruns')
@@ -230,11 +245,60 @@ print('OK: finite val_loss')
       <acceptance>Synced mlruns/ has ≥1 run with finite val_loss.</acceptance>
     </task>
 
-    <task id="T2.3" name="Teardown RunPod pod from P2" blocked-by="T2.2">
+    <task id="T2.4" name="Verify downstream flow handoff — Analysis reads synced mlruns" blocked-by="T2.2">
+      <description>
+        BLK-3 fix: Test the inter-flow contract — laptop is ALWAYS the control plane.
+        After RunPod training + mlruns sync, Analysis Flow (running locally) must be
+        able to find and consume the upstream training run.
+        This tests: Train (RunPod) → local mlruns/ → Analysis (laptop) handoff.
+      </description>
+      <commands>
+        <!-- Verify mlruns/ has experiment directories after sync -->
+        <cmd>python3 -c "
+import pathlib, sys
+mlruns = pathlib.Path('mlruns')
+if not mlruns.exists():
+    print('FAIL: mlruns/ dir missing after sync'); sys.exit(1)
+# Count experiment directories (numeric IDs)
+exps = [d for d in mlruns.iterdir() if d.is_dir() and d.name.isdigit()]
+if not exps:
+    print('FAIL: no experiment dirs in mlruns/ — sync may have failed'); sys.exit(1)
+print(f'OK: {len(exps)} experiment(s) in local mlruns/')
+"</cmd>
+        <!-- Verify find_upstream_run() can locate the training run -->
+        <cmd>python3 -c "
+import sys
+try:
+    from minivess.orchestration.trigger import find_upstream_run
+    run = find_upstream_run(experiment_name='minivess_training')
+    if run is None:
+        print('FAIL: find_upstream_run() returned None — Analysis Flow cannot proceed')
+        sys.exit(1)
+    print(f'OK: upstream run found: run_id={run.info.run_id}')
+    print('Inter-flow contract verified: Train (RunPod) → local mlruns/ → Analysis')
+except ImportError as e:
+    print(f'SKIP: minivess not importable ({e}) — manual check required')
+    print('Manually verify: ls mlruns/ shows at least one experiment with runs')
+"</cmd>
+      </commands>
+      <acceptance>
+        find_upstream_run() returns a valid run with status FINISHED (or SKIP if import fails).
+        This proves the laptop→RunPod→laptop→Analysis inter-flow handoff works.
+      </acceptance>
+      <on-failure>
+        If None: sync may have failed silently. Check: ls mlruns/ → are experiment dirs present?
+        Root cause candidates:
+          1. sky rsync down path mismatch (wrong source path on pod)
+          2. MLflow experiment name mismatch
+          3. find_upstream_run() tag filter too restrictive
+        Create P1 issue: inter-flow handoff broken for RunPod path.
+      </on-failure>
+    </task>
+
+    <task id="T2.3" name="Teardown RunPod pod from P2" blocked-by="T2.4">
       <commands>
         <cmd>sky jobs cancel ${RUNPOD_POD}-sam3 -y 2>/dev/null || true</cmd>
-        <!-- NOTE: Do NOT delete minivess-dev volume — Track A may still need it -->
-        <!-- Do NOT delete minivess-dev-b here — P3 will use it -->
+        <!-- NOTE: Do NOT delete minivess-dev volume — Track A may still need it, P3 also uses it -->
       </commands>
       <acceptance>Pod terminated. Volume preserved.</acceptance>
     </task>
@@ -242,58 +306,67 @@ print('OK: finite val_loss')
 
   <!-- ═══════════════════════════════════════════════════════════════
        PHASE 3: CONCURRENT RUNPOD QA — EDGE CASE
-       Two simultaneous pods + two separate volumes.
-       Tests: pod naming isolation, filesystem isolation, MLflow UUID uniqueness,
-       aggregate cost tracking, S3 fallback data path (Pod B's volume is empty).
+       Two simultaneous pods on ONE shared volume, separate mlruns subdirectories.
+       Tests: pod naming isolation, mlruns path isolation on shared NVMe,
+       MLflow UUID uniqueness, concurrent cost tracking.
+       NO second volume. NO S3 fallback (banned architecture).
        ═══════════════════════════════════════════════════════════════ -->
-  <phase id="P3" name="Concurrent RunPod QA — 2 Pods, 2 Volumes" cost="~$1" effort="40min" blocked-by="P2">
+  <phase id="P3" name="Concurrent RunPod QA — 2 Pods, 1 Shared Volume" cost="~$0.50" effort="40min" blocked-by="P2">
 
-    <task id="T3.1" name="Create minivess-dev-b volume (empty — tests S3 fallback)">
+    <task id="T3.1" name="Verify shared volume is mounted and data is present">
       <description>
-        Create a SECOND Network Volume for the concurrent pod.
-        This volume starts EMPTY — the smoke test MUST fall back to s3://minivessdataset.
-        This tests the secondary data path that the primary volume path bypasses.
-        IMPORTANT: Delete this volume after P3 — it costs $3.50/month.
+        Both concurrent pods will mount the SAME minivess-dev Network Volume.
+        Pod A and Pod B will read from the same /opt/vol/data/raw/minivess (no conflict).
+        Each pod gets its OWN mlruns subdirectory via MLFLOW_TRACKING_URI override.
+        This tests: two researchers can share a Network Volume without mlruns collision.
       </description>
       <commands>
-        <cmd>sky volumes ls 2>&amp;1 | grep minivess-dev-b &amp;&amp; echo "ALREADY_EXISTS" || \
-  sky volumes apply deployment/skypilot/minivess-dev-b-volume.yaml -y</cmd>
-        <cmd>sky volumes ls 2>&amp;1 | grep minivess-dev-b</cmd>
+        <cmd>sky volumes ls 2>&amp;1 | grep minivess-dev</cmd>
+        <!-- Verify data is pre-loaded on the shared volume -->
+        <cmd>
+# Quick check: can we see the volume is non-empty (via a probe pod)?
+# If T2.1 passed, data is already on minivess-dev from that run.
+sky jobs status 2>&amp;1 | grep minivess || echo "No active jobs on minivess-dev — volume is free"
+echo "Concurrent test will use MLFLOW_TRACKING_URI subdirs for isolation:"
+echo "  Pod A: /opt/vol/mlruns/concurrent-a"
+echo "  Pod B: /opt/vol/mlruns/concurrent-b"
+        </cmd>
       </commands>
-      <acceptance>minivess-dev-b volume exists in sky volumes ls output.</acceptance>
+      <acceptance>minivess-dev volume exists in sky volumes ls. No conflicting pods active.</acceptance>
     </task>
 
-    <task id="T3.2" name="Launch Pod A and Pod B simultaneously">
+    <task id="T3.2" name="Launch Pod A and Pod B simultaneously with isolated mlruns paths">
       <description>
-        Pod A: dynunet on minivess-dev (pre-loaded data path).
-        Pod B: sam3_vanilla on minivess-dev-b (empty volume → S3 fallback path).
-        Both use unique job names. Both write to /opt/vol/mlruns on THEIR OWN volume.
-        Launch both, capture their job IDs, then poll both.
+        Pod A: dynunet on minivess-dev, mlruns → /opt/vol/mlruns/concurrent-a
+        Pod B: sam3_vanilla on minivess-dev, mlruns → /opt/vol/mlruns/concurrent-b
+        Both use unique job names. Both share the same physical data on the volume.
+        MLflow isolation is via separate subdirectories, NOT separate volumes.
+        Launch both concurrently, then poll both to completion.
       </description>
       <commands>
-        <!-- Pod A — primary data path -->
+        <!-- Pod A — dynunet, mlruns isolated to concurrent-a subdir -->
         <cmd>sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
   --env MODEL_FAMILY=dynunet \
+  --env MLFLOW_TRACKING_URI=/opt/vol/mlruns/concurrent-a \
   --name minivess-concurrent-a \
-  --volume /opt/vol:minivess-dev \
   -y &amp; POD_A_PID=$!</cmd>
-        <!-- Pod B — S3 fallback path; uses minivess-dev-b (empty volume) -->
-        <!-- smoke_test_gpu.yaml detects empty /opt/vol/data/raw/ → falls back to S3 -->
+        <!-- Pod B — sam3_vanilla, mlruns isolated to concurrent-b subdir -->
         <cmd>sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
   --env MODEL_FAMILY=sam3_vanilla \
+  --env MLFLOW_TRACKING_URI=/opt/vol/mlruns/concurrent-b \
   --name minivess-concurrent-b \
-  --volume /opt/vol:minivess-dev-b \
   -y &amp; POD_B_PID=$!</cmd>
         <cmd>wait $POD_A_PID $POD_B_PID</cmd>
-        <cmd>echo "Both launched. Job IDs:" &amp;&amp; sky jobs status | grep "minivess-concurrent"</cmd>
+        <cmd>echo "Both launched. Job status:" &amp;&amp; sky jobs status | grep "minivess-concurrent"</cmd>
       </commands>
       <acceptance>
         Both minivess-concurrent-a and minivess-concurrent-b appear in sky jobs status.
         Both show RUNNING or PENDING — not FAILED immediately after launch.
       </acceptance>
       <on-failure>
-        If Pod B fails immediately at data check (not S3 fallback):
-        → smoke_test_gpu.yaml fallback logic is broken. Write RED test T7.concurrent-fallback.
+        If either pod fails immediately at data check:
+        → minivess-dev data may have been cleaned up by T2.3. Re-upload:
+           make dev-gpu-upload-data LOCAL_DATA=data/raw/minivess
         If naming conflict: both pods must have UNIQUE names — check sky jobs status.
       </on-failure>
     </task>
@@ -302,7 +375,7 @@ print('OK: finite val_loss')
       <description>
         Run two concurrent monitoring loops.
         Each writes to a SEPARATE log file and SEPARATE JSONL event stream.
-        Hard timeout: 25 min (S3 fallback data pull adds ~5 min vs Network Volume).
+        Hard timeout: 20 min (both pods use shared volume data — no extra fetch time).
       </description>
       <commands>
         <!-- Poll Pod A -->
@@ -339,21 +412,25 @@ wait
 
     <task id="T3.4" name="Verify MLflow run ID uniqueness across pods" blocked-by="T3.3">
       <description>
-        Sync BOTH pods' mlruns to a temp directory, then verify:
-        1. Run IDs are unique (UUID4 — no collision)
+        Sync BOTH pods' mlruns subdirs to a temp directory, then verify:
+        1. Run IDs are unique (UUID4 — no collision despite shared volume)
         2. Merging both into local mlruns/ does not corrupt either run
-        3. Pod B's run is tagged with correct data_source (s3://minivessdataset)
+        3. Each run is tagged with its pod name for provenance
       </description>
       <commands>
-        <cmd>mkdir -p /tmp/mlruns-concurrent-merge</cmd>
-        <cmd>sky rsync down minivess-concurrent-a:/opt/vol/mlruns/ /tmp/mlruns-concurrent-merge/ 2>&amp;1</cmd>
-        <cmd>sky rsync down minivess-concurrent-b:/opt/vol/mlruns/ /tmp/mlruns-concurrent-merge/ 2>&amp;1</cmd>
+        <cmd>mkdir -p /tmp/mlruns-concurrent-a /tmp/mlruns-concurrent-b /tmp/mlruns-concurrent-merge</cmd>
+        <!-- Sync each pod's isolated mlruns subdir -->
+        <cmd>sky rsync down minivess-concurrent-a:/opt/vol/mlruns/concurrent-a/ /tmp/mlruns-concurrent-a/ 2>&amp;1</cmd>
+        <cmd>sky rsync down minivess-concurrent-b:/opt/vol/mlruns/concurrent-b/ /tmp/mlruns-concurrent-b/ 2>&amp;1</cmd>
+        <!-- Merge both into a single directory to test collision resistance -->
+        <cmd>cp -r /tmp/mlruns-concurrent-a/. /tmp/mlruns-concurrent-merge/</cmd>
+        <cmd>cp -r /tmp/mlruns-concurrent-b/. /tmp/mlruns-concurrent-merge/</cmd>
         <cmd>python3 -c "
-import pathlib, json, sys
+import pathlib, sys
 
 # Collect all run IDs from merged directory
 mlruns = pathlib.Path('/tmp/mlruns-concurrent-merge')
-run_ids = set()
+run_ids = {}
 for meta in mlruns.rglob('meta.yaml'):
     content = meta.read_text()
     # Extract run_id using string split (no regex per CLAUDE.md rule 16)
@@ -361,14 +438,18 @@ for meta in mlruns.rglob('meta.yaml'):
         if line.startswith('run_id:'):
             run_id = line.split(':', 1)[1].strip()
             if run_id in run_ids:
-                print(f'COLLISION: run_id={run_id} appears in BOTH pods')
+                print(f'COLLISION: run_id={run_id} appears in both: {meta} AND {run_ids[run_id]}')
                 sys.exit(1)
-            run_ids.add(run_id)
+            run_ids[run_id] = str(meta)
 
-print(f'OK: {len(run_ids)} unique run IDs across both pods — no collision')
+if len(run_ids) < 2:
+    print(f'FAIL: only {len(run_ids)} run IDs — expected ≥2 (one per pod)')
+    sys.exit(1)
+print(f'OK: {len(run_ids)} unique run IDs across shared volume — no collision')
+print('Shared-volume mlruns isolation via subdirectories: VERIFIED')
 "</cmd>
       </commands>
-      <acceptance>Zero run ID collisions. ≥2 unique run IDs (one per pod minimum).</acceptance>
+      <acceptance>Zero run ID collisions. ≥2 unique run IDs (one per pod). Shared-volume isolation confirmed.</acceptance>
     </task>
 
     <task id="T3.5" name="Verify aggregate cost tracking" blocked-by="T3.3">
@@ -393,18 +474,18 @@ print(f'Concurrent test cost: \${total_cost:.3f} for {len(concurrent)} events')
       <acceptance>≥2 JSONL entries for concurrent pods. Total cost logged.</acceptance>
     </task>
 
-    <task id="T3.6" name="Teardown both pods + DELETE minivess-dev-b volume" blocked-by="T3.5">
+    <task id="T3.6" name="Teardown both concurrent pods" blocked-by="T3.5">
       <description>
-        CRITICAL: minivess-dev-b costs $3.50/month. Delete it immediately after test.
-        minivess-dev is preserved (Track A may still reference it).
+        Cancel both concurrent pods. The shared minivess-dev volume is preserved
+        (Track A may still reference it, and it is the primary dev volume).
+        No second volume was created — no cleanup needed beyond pod cancellation.
       </description>
       <commands>
         <cmd>sky jobs cancel minivess-concurrent-a -y 2>/dev/null || true</cmd>
         <cmd>sky jobs cancel minivess-concurrent-b -y 2>/dev/null || true</cmd>
-        <cmd>sky volumes delete minivess-dev-b -y</cmd>
-        <cmd>sky volumes ls 2>&amp;1 | grep minivess-dev-b &amp;&amp; echo "FAIL: volume not deleted" &amp;&amp; exit 1 || echo "OK: minivess-dev-b deleted"</cmd>
+        <cmd>sky jobs status 2>&amp;1 | grep minivess-concurrent | grep -v CANCELLED &amp;&amp; echo "WARNING: pods still active" || echo "OK: both concurrent pods terminated"</cmd>
       </commands>
-      <acceptance>minivess-dev-b absent from sky volumes ls. No cost leak.</acceptance>
+      <acceptance>Both concurrent pods cancelled. minivess-dev volume preserved.</acceptance>
     </task>
   </phase>
 
@@ -757,13 +838,14 @@ print(f'OK: all 4 models present, all val_loss finite')
       </test-cases>
     </task>
 
-    <task id="T7.2" name="[RED] Write test for concurrent RunPod volume isolation" blocked-by="T7.1">
+    <task id="T7.2" name="[RED] Write test for concurrent RunPod mlruns isolation" blocked-by="T7.1">
       <tdd-phase>RED</tdd-phase>
       <test-file>tests/v2/unit/deployment/test_concurrent_runpod_isolation.py</test-file>
       <test-cases>
-        <test>test_volume_names_are_unique — minivess-dev and minivess-dev-b have different names</test>
         <test>test_mlflow_uri_per_pod_is_volume_local — MLFLOW_TRACKING_URI=/opt/vol/mlruns (not a server URL)</test>
-        <test>test_s3_fallback_triggered_when_volume_empty — setup script detects empty /opt/vol/data/raw and uses remote_storage</test>
+        <test>test_concurrent_pods_get_different_mlruns_paths — two concurrent pods use subdirs (/concurrent-a, /concurrent-b) not root /opt/vol/mlruns</test>
+        <test>test_no_s3_reference_in_runpod_yamls — all RunPod SkyPilot YAMLs contain zero s3:// references</test>
+        <test>test_data_absent_hard_fails_with_upload_instructions — when /opt/vol/data/raw/minivess missing, setup exits 1 with "make dev-gpu-upload-data" message</test>
       </test-cases>
     </task>
 

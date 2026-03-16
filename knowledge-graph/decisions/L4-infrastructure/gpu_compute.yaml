@@ -27,17 +27,16 @@ runpod_purpose:
   # 3. ZERO cloud infra setup — just a RunPod account + Docker image
   # No GCP account, no Pulumi, no GCS, no Cloud SQL. Fully standalone.
   #
-  # CRITICAL: RunPod is a COMPUTE TARGET for Train Flow, not a full environment.
-  # The researcher's laptop is always the control plane. Only Flow 2 (Train) runs
-  # on RunPod. All other flows (Data, Analysis, Deploy, Dashboard) run locally.
-  # MLflow contract: mlruns live on the laptop. RunPod syncs back after training.
+  # CRITICAL: RunPod is a COMPUTE TARGET, not a full environment.
+  # The per-flow compute target is defined in Prefect deployment config — not hardcoded.
+  # Train Flow is the MOST COMMON RunPod/GCP use case (needs GPU). But ANY flow
+  # can be dispatched to RunPod, GCP, a Raspberry Pi, Vercel, or anywhere.
+  # Example: Analysis Flow might also need cloud GPU for large-scale model eval.
+  # The platform NEVER prescribes which flows go where — that's the user's choice.
   #
-  # Full journey (researcher on a train trip):
-  #   Flow 1 (Data Engineering):  laptop   — data already DVC-versioned locally
-  #   Flow 2 (Train):             RunPod   — GPU needed, Prefect dispatches via SkyPilot
-  #   Flow 3 (Analysis):          laptop   — reads from local mlruns/ post-sync
-  #   Flow 4 (Deploy):            laptop
-  #   Flow 5 (Dashboard):         laptop
+  # Typical researcher journey (not a rule — just one example):
+  #   DVC-versioned data on laptop → Prefect dispatches Train to RunPod via SkyPilot
+  #   → mlruns sync back to laptop → remaining flows wherever the user chooses
   primary_audience: "Researchers with thin client / no GPU — one-command remote training"
   secondary_audience: "Repo owner bypassing local 8 GB VRAM limit for large models"
   data_contract: |

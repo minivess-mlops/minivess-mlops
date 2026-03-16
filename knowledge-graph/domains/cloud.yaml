@@ -2,8 +2,8 @@ domain: cloud
 description: >
   Cloud provider architecture, data storage, DVC remotes, environment mapping.
   TWO providers: RunPod (env/dev) + GCP (staging/prod). No others without explicit user authorization.
-  CRITICAL: Cloud compute is used for Train Flow ONLY. All other flows run locally or in Docker Compose.
-  Prefect flows have per-flow compute definitions — Train Flow is the only GPU consumer.
+  Each Prefect flow has an INDEPENDENTLY configurable compute target — no flow is hardcoded to any
+  provider. Researchers decide where each flow runs via Prefect deployment config.
 last_reviewed: "2026-03-16"
 
 # ─── HARD CONSTRAINT ──────────────────────────────────────────────────────────
@@ -104,32 +104,54 @@ archived_providers:
 # The entire point of Prefect flows is that COMPUTE CAN BE DIFFERENT PER FLOW.
 # A researcher on a train trip can run ALL flows from their laptop:
 #
-#   Flow 1: Data Engineering   → local Docker Compose  (CPU)
-#   Flow 2: Model Training     → SkyPilot → RunPod or GCP  ← THE ONLY GPU CONSUMER
-#   Flow 3: Model Analysis     → local Docker Compose  (CPU)
-#   Flow 4: Deployment         → local Docker Compose  (CPU)
-#   Flow 5: Dashboard          → local Docker Compose  (CPU)
+#   Flow 1: Data Engineering   → researcher decides (laptop, Docker Compose, cloud instance)
+#   Flow 2: Model Training     → researcher decides (local GPU, RunPod, GCP, on-prem)
+#   Flow 3: Model Analysis     → researcher decides (laptop, or cloud GPU for large-scale eval)
+#   Flow 4: Deployment         → researcher decides (laptop, server, CI runner)
+#   Flow 5: Dashboard          → researcher decides (laptop, Vercel, Render, static host)
+#
+# These are EXAMPLES of one typical setup, NOT a default mapping.
+# A researcher may run Analysis on GPU (sliding window eval), Dashboard on Vercel,
+# Biostatistics overnight on a low-power machine — all valid configurations.
 #
 # The inter-flow contract is MLflow (local mlruns/).
-# After Train Flow finishes on RunPod/GCP, mlruns are synced back to local.
-# Then Analysis Flow (running locally) picks up from local mlruns/ — seamlessly.
+# After any remote flow (e.g. Train on RunPod/GCP), mlruns are synced back to local.
+# Then subsequent flows pick up from local mlruns/ — seamlessly.
 #
-# Researcher journey:
+# Researcher journey (one example — not a requirement):
 #   1. DVC-versioned dataset on laptop (downloaded from EBRAINS or own data)
 #   2. Run Train Flow remotely: `prefect deployment run 'train-flow/runpod'`
 #      → SkyPilot uploads data (file_mounts or pre-loaded volume) → trains → syncs mlruns back
-#   3. Continue with Analysis/Deploy/Dashboard on laptop (no GPU needed)
+#   3. Continue with Analysis/Deploy/Dashboard wherever the researcher chooses
 #
-# This means RunPod is NOT a "second environment" — it's a compute target for ONE flow.
-# The laptop is ALWAYS the control plane and MLflow home.
+# RunPod is a COMPUTE TARGET — it is NOT a "second environment" and NOT restricted
+# to any specific flow. The laptop is ALWAYS the control plane and MLflow home.
 per_flow_compute:
-  flow_1_data_engineering: local
-  flow_2_train: "SkyPilot → RunPod (env) or GCP (staging/prod)"
-  flow_3_analysis: local
-  flow_4_deploy: local
-  flow_5_dashboard: local
-  gpu_flows: [flow_2_train]
-  note: "compute target is a Prefect deployment config, not hardcoded in flow code"
+  # PRINCIPLE: Each Prefect flow has an INDEPENDENTLY configurable compute target.
+  # This is defined in the Prefect deployment config, NEVER in flow code.
+  # The platform provides flows; the user decides where each flow runs.
+  # Do NOT hardcode any flow → compute mapping anywhere.
+  #
+  # Realistic examples (not exhaustive, not defaults):
+  #   Train Flow    → RunPod RTX 4090 or GCP L4 (needs GPU — most common cloud use case)
+  #   Analysis Flow → Could also need GPU (large-scale sliding window eval)
+  #   Dashboard     → Could be served on Vercel, Render, or any static/app host
+  #   Biostatistics → Could run overnight on a Raspberry Pi (low-power, CPU)
+  #   Data Eng      → Could run on a large-memory cloud instance (huge datasets)
+  #
+  # In-scope compute targets (currently supported):
+  #   - local Docker Compose (any flow)
+  #   - SkyPilot → RunPod (any flow, typically Train + Analysis)
+  #   - SkyPilot → GCP (any flow, typically Train + Analysis)
+  #   - Vercel/Render (Dashboard only — static/serverless)
+  #
+  # Out of scope (not planned):
+  #   - ARM/Raspberry Pi, ESP32, WebAssembly
+  #   - AWS, Azure, Lambda Labs (not authorized cloud providers for this repo's defaults)
+  #
+  # The ONLY thing we can say about a flow's compute: it has a configurable
+  # Prefect deployment config. Users override it. We provide sensible defaults.
+  rule: "NEVER hardcode compute target for any flow in platform code or KG. It is a deployment config."
 
 # ─── DATA PROVENANCE — RunPod vs GCP ──────────────────────────────────────────
 # This is the critical distinction for paper readers and new researchers.
@@ -189,18 +211,20 @@ environments:
 
   env:
     docker: "Docker image via SkyPilot image_id"
-    compute: "RunPod spot/on-demand (RTX 4090, 24 GB) — for Train Flow ONLY"
-    mlflow: "Synced back to local mlruns/ after training (mandatory — Analysis Flow reads from there)"
+    compute: "RunPod spot/on-demand (RTX 4090, 24 GB) — any flow that needs cloud GPU"
+    mlflow: "Synced back to local mlruns/ after remote job (mandatory — subsequent flows read from there)"
     dvc_remote: "None — data comes from local DVC working copy, not a cloud remote"
     data_source: |
       Researcher's local DVC-versioned dataset. Two transfer modes:
         Mode A: Pre-loaded Network Volume (rsync once, reuse many times)
         Mode B: SkyPilot file_mounts (copy at launch, no persistent storage — NOT YET IMPLEMENTED)
     purpose: |
-      Compute target for Train Flow when local GPU is insufficient.
-      Researcher controls all flows from their laptop. Only training runs on RunPod.
-      After training, mlruns sync back and remaining flows (Analysis, Deploy, Dashboard)
-      continue on the laptop. Full pipeline = laptop orchestration + RunPod compute.
+      Compute target for any flow that needs cloud GPU but no full GCP stack.
+      Researcher controls all flows from their laptop. Typically Train Flow runs on RunPod
+      (most common GPU consumer), but Analysis Flow (large-scale sliding window eval) or
+      other GPU-heavy flows may also dispatch here — it's the researcher's choice.
+      After each remote job, mlruns sync back to laptop. Full pipeline = laptop orchestration
+      + RunPod compute for GPU-intensive flows.
     assumption: "No GCP infrastructure. No S3. Laptop is the control plane and MLflow home."
     post_train_sync: "make dev-gpu-sync → sky rsync down minivess-dev:/opt/vol/mlruns/ mlruns/"
 
