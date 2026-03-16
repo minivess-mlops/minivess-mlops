@@ -40,10 +40,35 @@ Source (verbatim user prompt, `docs/planning/repo-to-manuscript-prompt.md`):
 - ❌ "We achieve state-of-the-art clDice/DSC on MiniVess"
 - ❌ Performance predictions about which model will win R3b/R3c
 
-The model comparison EXISTS to prove the ModelAdapter ABC works across diverse architectures.
-The ModelAdapter ABC exists to make integration to MONAI ecosystem easy, and this is not a separate MLOps platform but an integration to MONAI ecosystem
+The model comparison EXISTS to prove the platform's model-agnostic design works across diverse architectures.
+**NEUROVEX is designed as a MONAI ecosystem extension** — not a fork, not a competing platform. Any MONAI-compatible model integrates with zero changes to the pipeline infrastructure. The whole MONAI community can benefit from this without changes to their codebases.
 The models are demonstration vehicles, not competitors. The platform is the hero.
 
+⚠️ **ModelAdapter ABC framing**: The `ModelAdapter` abstract base class is the **implementation detail** that enables model-agnostic design. It belongs in **appendix / repo documentation**, NOT as a named section in the manuscript body. The scientifically interesting claim is "MONAI ecosystem integration" and "model-agnostic architecture", not "we wrote an ABC with 3 methods." In the co-author teaser, mention "plug in any MONAI-compatible model via a YAML config change" — do NOT dedicate a subsection to the ABC pattern.
+
+
+---
+
+## ⚠️ ANTI-PATTERN: What Sonnet 4.6 Got Wrong (2026-03-16)
+
+> **The co-author teaser is NOT a GitHub Issues page.** It is NOT a developer status report.
+> It is a 2-3 page document that gets imaging scientists excited about a Nature Protocols paper.
+
+**BANNED from the co-author teaser PDF:**
+- GPU model names (RTX 4090, T4, L4, A100) — say "cloud GPU" or "requires modern GPU"
+- VRAM specs (">22.66 GiB") — say "requires high-VRAM GPU" if relevant
+- Raw training losses (val_loss=0.705) — say "smoke test passed"
+- Exact timing (8.26s, 15 min) — say "fast" or "under 15 minutes"
+- Developer footnotes (T4 BANNED, AMP asymmetry, MONAI issue #4243) — these belong in repo docs
+- Implementation flags (PREFECT_DISABLED=1, seed=42) — not for co-authors
+- ModelAdapter ABC as a named section — say "model-agnostic MONAI integration" instead
+- Exact timestamps (2026-03-02T03:32:10Z)
+
+**Audience test**: "Would Charissa Poon understand WHY this paper matters scientifically after page 1?" If no → rewrite.
+
+**See meta-learnings:**
+- `sci-llm-writer/.claude/docs/meta-learnings/scientific-framing-failure-2026-03-16.md`
+- `sci-llm-writer/.claude/docs/meta-learnings/scaffold-preamble-citation-failure-2026-03-16.md`
 
 ---
 
@@ -96,7 +121,7 @@ detection, auto-retraining — without writing infrastructure code.
 - **NOT an architecture comparison paper.** We compare DynUNet, Mamba variants, SAM3,
   and VesselFM to DEMONSTRATE the platform's model-agnostic generalizability — not to
   claim that Mamba beats DynUNet or that SAM3 is the best vascular segmenter. The model
-  diversity is proof of the ModelAdapter ABC (one YAML + 3 Python methods = new model).
+  diversity is proof of the platform's model-agnostic MONAI ecosystem integration (one YAML config change = new model).
 
 - **NOT a SOTA vascular segmentation paper.** We are benchmarking on MiniVess (70 volumes,
   rat cerebrovasculature, 2-photon) for consistency, not to claim SoTA DSC or clDice
@@ -184,16 +209,18 @@ the LSG contribution — it is appendix-grade.
 > We make three contributions:
 >
 > **(1) NEUROVEX platform (keystone):** A fully automated, model-agnostic MLOps platform for
-> 3D biomedical segmentation targeting MLOps Maturity Level 4 in a single-researcher
-> academic setting. Any lab can adopt NEUROVEX by editing 1–2 YAML files (experiment config +
-> optional lab override) — no infrastructure code required. Validated end-to-end:
-> 73/73 artifact checks pass, 35+ artifacts produced in 8.26 seconds post-training.
+> 3D biomedical segmentation, designed as a MONAI ecosystem extension, targeting MLOps
+> Maturity Level 4. Any lab can adopt NEUROVEX by editing 1–2 YAML files (experiment config +
+> optional lab override) — no infrastructure code required. Validated end-to-end: complete
+> pipeline integrity verified on a single machine; independent cross-machine replication planned.
 >
-> **(2) Multi-model generalizability (experimental, partially pending):** We demonstrate
-> platform generalizability across four model families — DynUNet (MONAI-native), Mamba
-> state-space models, SAM3 foundation model variants, and VesselFM — each integrated via
-> the ModelAdapter ABC with zero pipeline changes. DynUNet results are complete (4-loss
-> ablation, 3-fold, 100 epochs); SAM3 and VesselFM results are in preparation.
+> **(2) MONAI ecosystem integration and multi-model generalizability (experimental, partially pending):**
+> NEUROVEX extends the MONAI ecosystem so any MONAI-compatible model integrates with zero
+> changes to pipeline infrastructure — a YAML configuration change is the only experiment-specific
+> artefact. We demonstrate this across four model families — DynUNet (MONAI-native CNN), Mamba
+> state-space models, SAM3 foundation model variants, and VesselFM — with zero pipeline changes.
+> DynUNet results are complete (4-loss ablation, 3-fold, 100 epochs); SAM3 and VesselFM results
+> are in preparation.
 > ⚠️ **WRITING INSTRUCTION**: Write Contribution 2 as "three implemented families with
 > Mamba as a planned extension" until R3b/R3c GPU results are available. Do NOT write
 > as if all four families have published quantitative results.
@@ -272,33 +299,32 @@ prefer one concrete sentence over one abstract paragraph.
 ## § 3 — Model Families (4 Families, Diverse by Design)
 
 The four model families are NOT compared to find a winner — they are compared to prove
-the platform's model-agnostic architecture. One YAML profile + one ModelAdapter subclass
+the platform's model-agnostic MONAI ecosystem integration. One YAML configuration change
 = new model integrated with zero infrastructure changes.
 
 ### End-to-End Verification Status (updated 2026-03-15)
 
-| Model | RunPod RTX 4090 (`env`) | GCP L4 spot (`staging/prod`) | val_loss (smoke) | Notes |
-|-------|------------------------|------------------------------|-----------------|-------|
-| **DynUNet** | ⬜ pending | ✅ VERIFIED 2026-03-15 | 0.642 | FINISHED, finite |
-| **SAM3 Vanilla** | ⬜ pending | ✅ VERIFIED 2026-03-15 | 0.705 | FINISHED, finite, BF16 OK |
-| **SAM3 Hybrid** | ⬜ pending | 🔄 in progress (2026-03-15) | TBD | |
-| **VesselFM** | ⬜ pending | ⬜ pending | TBD | Must use DeepVess/TubeNet only |
-| **MambaVesselNet** | ⬜ pending | ⬜ pending (adapter not yet impl.) | TBD | Issue #737 |
+| Model | Cloud verified | Status | Notes |
+|-------|---------------|--------|-------|
+| **DynUNet** | ✅ | Complete — full 4-loss ablation done | Primary benchmark |
+| **SAM3 Vanilla** | ✅ | Smoke-tested — full training pending | Foundation model family |
+| **SAM3 Hybrid** | 🔄 | In progress | Gated fusion variant |
+| **VesselFM** | ⬜ | Pending — external datasets only | Data leakage on MiniVess |
+| **MambaVesselNet** | ⬜ | Adapter not yet implemented | SSM family |
 
-GCP smoke test = SkyPilot managed job on L4 spot (asia-northeast3-a), Docker from GAR,
-MLflow on Cloud Run, checkpoints on GCS. 2 epochs, 4 volumes, `cbdice_cldice` loss.
-RunPod smoke test = SkyPilot Docker on RTX 4090, same YAML, MLflow on UpCloud.
+⚠️ **WRITER CONTEXT (NOT FOR PDF)**: Cloud verification uses SkyPilot managed jobs
+(GCP spot instances, Docker from GAR, MLflow on Cloud Run). For the scaffold, say
+"cloud GPU deployment verified" — do NOT name specific GPU models or cloud instance types.
 
-### 3.1 DynUNet (MONAI native) — STATUS: ✅ COMPLETE + GCP VERIFIED
+### 3.1 DynUNet (MONAI native) — STATUS: ✅ COMPLETE
 - **Role**: Battle-tested baseline, MONAI-native, self-configuring architecture
 - **KG adapter**: `knowledge-graph/code-structure/adapters.yaml#dynunet`
-- **GPU requirement**: Any CUDA GPU ≥ 8 GB, BF16 native
-- **Results available**: YES — full 4-loss ablation, 3-fold, 100 epochs on RTX 2070 Super
+- **Results available**: YES — full 4-loss ablation, 3-fold CV, 100 epochs
 - **Key results** (`knowledge-graph/experiments/dynunet_loss_variation_v2.yaml`):
   - `cbdice_cldice`: DSC=0.772±0.016, clDice=0.906±0.008 (**WINNER — best topology**)
   - `dice_ce`: DSC=0.824±0.014 (best DSC), clDice=0.832±0.019
   - Topology gain cbdice_cldice vs dice_ce: +8.9% clDice, −5.3% DSC
-- **GCP smoke test**: ✅ PASSED 2026-03-15 — val_loss=0.642, Status=FINISHED
+- **Cloud deployment**: ✅ verified via SkyPilot
 
 ### 3.2 MambaVesselNet (State Space Model family) — STATUS: PLANNED, ISSUE #737
 - **Role**: State-space model family — represents SSM architecture in the platform's
@@ -317,7 +343,7 @@ RunPod smoke test = SkyPilot Docker on RTX 4090, same YAML, MLflow on UpCloud.
 - **GPU requirement**: Similar to DynUNet (~8 GB, to be confirmed after implementation)
 - **Results available**: NO — pending Python adapter implementation + GPU runs
 - **⚠️ ACTION REQUIRED before manuscript submission**: Implement MambaVesselNet adapter
-  (implement `ModelAdapter` ABC: forward, get_eval_roi_size, get_adapter_config + YAML profile).
+  (implement the model adapter interface + YAML profile).
   [Issue #737](https://github.com/petteriTeikari/minivess-mlops/issues/737) tracks this.
 - **Paper role**: Represents the SSM model family; contrasts long-range context (Mamba SSM)
   vs sliding-window context (DynUNet CNN) vs frozen ViT encoder (SAM3 foundation model)
@@ -327,27 +353,24 @@ RunPod smoke test = SkyPilot Docker on RTX 4090, same YAML, MLflow on UpCloud.
   VesselFM) with MambaVesselNet (SSM family) as a planned extension." Do NOT write as if
   four families have quantitative results available.
 
-### 3.3 SAM3 variants (Foundation Model — Meta, Nov 2025) — STATUS: ✅ VANILLA GCP VERIFIED, HYBRID IN PROGRESS
-- **Role**: Foundation model family — test whether 2D natural-image pre-training transfers
-  to 3D vascular segmentation via slice-by-slice inference with frozen ViT-32L encoder
-- **SAM3 ≠ SAM2**: SAM3 is Meta's Nov 2025 release (github.com/facebookresearch/sam3),
-  ViT-32L, **848M total params** (perception encoder alone = 648M), 1008×1008, SDPA
-  mandatory. SAM2 is a different (earlier, smaller) model. Source: `sam3_backbone.py:11`
-  and `knowledge-graph/decisions/L3-technology/foundation_model.yaml`.
+### 3.3 SAM3 variants (Foundation Model — Meta, Nov 2025) — STATUS: ✅ VANILLA VERIFIED, HYBRID IN PROGRESS
+- **Role**: Foundation model family — test whether large-scale 2D natural-image pre-training
+  transfers to 3D vascular segmentation via slice-by-slice inference with frozen encoder
+- **SAM3 ≠ SAM2**: SAM3 is Meta's Nov 2025 release (github.com/facebookresearch/sam3).
+  SAM2 is a different (earlier, smaller) model. Do NOT conflate them.
+- **Scientific question**: Does large-scale 2D pre-training provide useful inductive biases
+  for 3D vessel topology, or does the domain gap dominate?
 - **Three variants**:
-  - **SAM3 Vanilla (V1)**: Frozen ViT-32L + lightweight Conv decoder. Fits 8 GB GPU.
-    KG: `adapters.yaml#sam3_vanilla`. GPU ≥ 8 GB (SDPA mandatory).
-    ✅ GCP VERIFIED 2026-03-15 — val_loss=0.705, BF16 OK on L4 (no NaN).
-  - **SAM3 Hybrid (V3)**: Frozen ViT-32L + gated DynUNet fusion. 7.18 GiB VRAM.
-    KG: `adapters.yaml#sam3_hybrid`. Needs cloud GPU (RTX 4090 / L4) for patch=(64,64,3).
-    🔄 GCP smoke test in progress (2026-03-15).
-  - **SAM3 TopoLoRA (V2)**: SAM3 + LoRA + topology loss head. >22.66 GiB — **OOM on RTX 4090**.
-    Requires A100 ≥ 40 GB. Status: deferred.
-- **Critical constraint**: BF16 required (NOT FP16). FP16 overflows in frozen encoder → NaN.
-  T4 GPU is BANNED (Turing arch, no BF16). Use L4 (Ada Lovelace) on GCP.
-  AMP must be OFF for validation (MONAI #4243 — 3D sliding_window_inference + autocast = NaN).
-- **Full results**: Pending (2-epoch smoke tests passed; full 100-epoch runs still needed)
+  - **SAM3 Vanilla**: Frozen encoder + lightweight decoder. ✅ Cloud-verified, smoke test passed.
+  - **SAM3 Hybrid**: Frozen encoder + gated DynUNet fusion. 🔄 In progress.
+  - **SAM3 TopoLoRA**: LoRA fine-tuning + topology loss. Status: deferred (requires high-VRAM GPU).
+- **Full results**: Pending (smoke tests passed; full 100-epoch runs still needed)
 - **Blocks**: R3b (multi-model comparison section) — needs full runs, not just smoke tests
+
+⚠️ **WRITER CONTEXT (NOT FOR PDF)**: SAM3 has 848M params (ViT-32L encoder = 648M).
+BF16 required (FP16 overflows → NaN). T4 GPU banned (no BF16). AMP OFF for validation
+(MONAI #4243). These are developer constraints — say "requires modern GPU with BF16 support"
+in the manuscript, NOT specific GPU model names or VRAM specs.
 
 ### 3.4 VesselFM (Foundation Model — Wittmann et al. 2024) — STATUS: ADAPTER READY, DATA LEAKAGE WARNING
 - **Role**: Vessel-specific foundation model pre-trained on diverse vascular datasets
@@ -387,11 +410,11 @@ the final Level 4 components are being implemented and verified.
 | Training code + models version controlled | ✅ DONE | DVC (data), MLflow model registry (models), git (code) |
 | Compute is managed | ✅ DONE | SkyPilot intercloud broker (one command, any cloud) |
 | Release process automatic | ✅ DONE | BentoML + ONNX export, champion tagging, deploy flow |
-| Scoring script version controlled with tests | ✅ DONE | 4100+ tests (staging/prod/gpu tiers), pre-commit gates |
-| Application code has unit and integration tests | ✅ DONE | 49 scripts tests + TDD-first development |
+| Scoring script version controlled with tests | ✅ DONE | Multi-tier test suite (staging/prod/gpu), pre-commit gates |
+| Application code has unit and integration tests | ✅ DONE | Script tests + TDD-first development |
 | **Production metrics trigger retraining** | ⚠️ IN PROGRESS | Evidently drift detection is wired; Prefect trigger loop needs closure |
 | **CI/CD pipeline manages releases** | ⚠️ ADAPTED | GitHub Actions explicitly disabled (credits cost); equivalent: pre-commit + `scripts/pr_readiness_check.sh`. Document in paper as deliberate DevEx choice. |
-| Each model release includes unit and integration tests | ✅ DONE | ModelAdapter ABC testing + integration test tier |
+| Each model release includes unit and integration tests | ✅ DONE | Model adapter testing + integration test tier |
 
 **Current honest status**: NEUROVEX is at Level 3.5 — fully automated training, evaluation,
 and deployment; drift detection wired but auto-retraining loop not yet verified end-to-end.
@@ -409,7 +432,7 @@ Source: `knowledge-graph/manuscript/claims.yaml`
 | C1 | NEUROVEX = complete reproducible MLOps pipeline, YAML-only changes for new dataset/model | **supported** |
 | C2 | cbdice_cldice achieves clDice=0.906±0.008 with only −5.3% DSC penalty vs dice+CE | **supported** |
 | C3 | 10-flow Prefect-orchestrated architecture (6 core/best-effort + 4 extension flows) separates concerns into Docker containers with MLflow as only inter-flow contract | **supported** |
-| C4 | ModelAdapter ABC: new model integration = 3 abstract methods + YAML, no infra changes | **supported** |
+| C4 | Model-agnostic MONAI integration: new model = YAML config change, zero pipeline changes | **supported** |
 | C5 | SAM3 can be adapted for 3D volumetric segmentation via slice-by-slice inference | **pending GPU runs** |
 | C6 | Single-command cloud execution (sky jobs launch) reproduces identical training env | **supported** |
 | C7 | NEUROVEX is first MLOps platform for multiphoton biomed segmentation with probabilistic KG as machine-queryable spec | **literature_validated** (2026-03-15 scan, 15 papers) |
@@ -431,16 +454,17 @@ Source: `knowledge-graph/manuscript/results.yaml`
 - Status: `needs_content`
 
 ### R1 — Platform Validation: Reproducibility Proof ✅ DATA AVAILABLE
-- 73/73 artifact verification checks pass (`scripts/verify_all_artifacts.py`)
-- 35+ artifacts produced by PipelineTriggerChain in 8.26 seconds
-- Timestamp: 2026-03-02T03:32:10Z
+- All artifact integrity checks pass (`scripts/verify_all_artifacts.py`)
 - Source: `outputs/pipeline/trigger_chain_results.json`
 - **THIS IS THE KEYSTONE RESULT** — proves the pipeline produces consistent artifacts
-- ⚠️ **Scope**: 73/73 is artifact INTEGRITY on one machine (author's workstation, one timestamp).
+- ⚠️ **Scope**: Artifact integrity verified on one machine only.
   This is NOT cross-machine reproducibility. Cross-machine replication is L5 (planned, required
   for Nature Protocols). Do NOT write R1 as "we demonstrate cross-machine reproducibility" —
-  write "we verify the pipeline produces 73 expected artifacts in 8.26 seconds; independent
-  replication is planned."
+  write "pipeline integrity verified on a single machine; independent replication is planned."
+
+⚠️ **WRITER CONTEXT (NOT FOR PDF)**: Exact numbers for Results section: 73/73 checks pass,
+35+ artifacts, 8.26s wall-clock for analyze+deploy+dashboard flows. Timestamp: 2026-03-02.
+Use these in the Results table but NOT in the co-author teaser summary box — say "all checks pass" there.
 
 ### R2 — Developer Experience Benchmark
 - Target metrics: time from git clone to first training run (<15 min), manual steps (0)
@@ -535,7 +559,7 @@ Source: `knowledge-graph/manuscript/methods.yaml` — full key_points for each s
 | M3 | Platform Architecture | 10-flow Prefect DAG (6 core/best-effort + 4 extension flows), Docker-per-flow; MLflow as sole inter-flow contract; division-of-labour: each flow independently developable |
 | M4 | Cloud Compute Strategy | SkyPilot intercloud broker; one command any cloud; T4 BANNED |
 | M5 | Workflow Orchestration | Prefect 3.x required; 5 personas; PipelineTriggerChain |
-| M6 | Model Adapter Architecture | ModelAdapter ABC; 3 abstract methods; build_adapter() factory |
+| M6 | Model-Agnostic Architecture | MONAI ecosystem integration; any compatible model integrates via YAML config (implementation detail: adapter ABC in appendix) |
 | M7 | Training Pipeline | cbdice_cldice default; AMP ON train / OFF val; Optuna ASHA |
 | M8 | Evaluation and Analysis | DSC + clDice + MASD; bootstrap CIs; conformal prediction; DuckDB |
 | M9 | Observability Stack | MLflow + Evidently drift + Prometheus/Grafana for model/infra; Langfuse for agentic dev tracing (separate concern — do NOT list Langfuse as production model observability in the methods section; it belongs in the M12 agentic appendix) |
@@ -567,7 +591,7 @@ Source: `knowledge-graph/manuscript/limitations.yaml`
    Plan: ask one collaborator to run on their lab data. DeepVess worked example planned.
 
 6. **L6 — Single-dataset primary training** (MEDIUM): All DynUNet ablation on MiniVess only.
-   Mitigated by: ModelAdapter + YAML-only generalization demo with DeepVess as worked example.
+   Mitigated by: YAML-only generalization demo with DeepVess as worked example (model-agnostic config).
 
 ---
 
@@ -583,7 +607,7 @@ knowledge-graph/
 ├── domains/manuscript.yaml     ← Manuscript domain + manuscript: section in navigator
 ├── code-structure/
 │   ├── flows.yaml              ← 5 Prefect flows (AST-bootstrapped)
-│   ├── adapters.yaml           ← ModelAdapter implementations (DynUNet, SAM3, VesselFM, ...)
+│   ├── adapters.yaml           ← Model adapter implementations (DynUNet, SAM3, VesselFM, ...)
 │   │                             ⚠️ MAMBA ADAPTER NOT YET HERE — needs implementation
 │   ├── config-schema.yaml      ← Hydra config hierarchy
 │   └── test-coverage.yaml      ← Test tier map (staging/prod/gpu)
@@ -688,9 +712,10 @@ Save this as: `manuscripts/vasculature-mlops/results-ground-truth.json`
    "planned" or "in implementation" — do not write it as if results are available.
 
 2. **SAM3 is NOT SAM2**. SAM3 = Meta's Segment Anything Model 3, November 2025,
-   github.com/facebookresearch/sam3, **848M total params** (ViT-32L perception encoder =
-   648M; full model including neck/decoder = 848M). SAM2 is a different (earlier, smaller)
-   model. Never conflate them. Source: `src/minivess/adapters/sam3_backbone.py:11`.
+   github.com/facebookresearch/sam3. SAM2 is a different (earlier, smaller) model.
+   Never conflate them. Source: `src/minivess/adapters/sam3_backbone.py:11`.
+   ⚠️ Do NOT put param counts (848M, 648M) in the co-author teaser — say "large-scale
+   foundation model" instead.
 
 3. **VesselFM MUST NOT be evaluated on MiniVess**. VesselFM was pre-trained on MiniVess.
    Use DeepVess (Cornell) and TubeNet 2PM (UCL) for fair evaluation only.
@@ -717,7 +742,7 @@ This section provides context for the appendix on the Living Specification Graph
 genuinely novel dimensions:
 1. Living Specification Graph — 52-node Bayesian decision network as machine-queryable
    single source of truth for agentic development
-2. MONAI adapter pattern — model-agnostic ABC for 3D segmentation in open-source research
+2. MONAI ecosystem integration — model-agnostic design for 3D segmentation that extends MONAI without forking it
 3. Multiphoton microscopy + full MLOps + spec-driven construction — domain intersection
    with no prior published work
 
@@ -766,10 +791,10 @@ This is what makes the platform publishable as a Nature Protocols / Nature Metho
 
 In priority order:
 
-1. **Mamba adapter implementation** — SegMamba or U-Mamba via ModelAdapter ABC.
+1. **Mamba adapter implementation** — MambaVesselNet (Chen et al. 2024) via model adapter interface.
    No GPU results possible until this exists.
 
-2. **SAM3 GPU runs** — RunPod RTX 4090, target 2026-03-20, ~$15. Blocks R3b.
+2. **SAM3 full training runs** — cloud GPU, target 2026-03-20. Blocks R3b.
 
 3. **VesselFM GPU runs on external data** — DeepVess + TubeNet (NOT MiniVess).
    Target 2026-03-25. Blocks R3c.
