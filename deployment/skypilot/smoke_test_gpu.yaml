@@ -54,10 +54,10 @@ envs:
   # Model to test (override with --env MODEL_FAMILY=...)
   MODEL_FAMILY: sam3_vanilla
 
-  # DVC data: uses Network Volume cache-first (UpCloud dropped 2026-03-16).
-  # Fallback: AWS S3 public bucket (s3://minivessdataset, no credentials needed).
-  # First-time data load: run `make dev-gpu-upload-data` from local machine.
-  DVC_REMOTE: remote_storage
+  # Data: Network Volume ONLY. Researcher uploads from local disk before launching.
+  # First-time setup: make dev-gpu-upload-data LOCAL_DATA=data/raw/
+  # NO S3 fallback — RunPod path has zero external cloud storage dependency.
+  # If volume is empty, the setup block will FAIL FAST with clear instructions.
 
   # MLflow: file-based on Network Volume (UpCloud server dropped 2026-03-16)
   # Post-run sync: make dev-gpu-sync (sky rsync down minivess-dev:/opt/vol/mlruns/)
@@ -89,46 +89,29 @@ setup: |
   # Use python/dvc directly (.venv/bin is on PATH).
   cd /app
 
-  # Data: Network Volume cache-first. If data not on volume, pull from AWS S3.
-  # (UpCloud dropped 2026-03-16. No UpCloud credentials needed.)
-  # First-time setup: run `make dev-gpu-upload-data` to rsync local data to volume.
-  if [ -d /opt/vol/data/raw/minivess/imagesTr ] && \
-     [ "$(ls /opt/vol/data/raw/minivess/imagesTr/ 2>/dev/null | wc -l)" -gt 10 ]; then
-    echo "Training data already on Network Volume — skipping DVC pull"
+  # Data: Network Volume ONLY. Researcher uploads from local disk before launching.
+  # Upload command (run ONCE from your local machine before first job):
+  #   make dev-gpu-upload-data LOCAL_DATA=data/raw/minivess
+  # For MiniVess: download from EBRAINS via Acquisition Flow first, then upload.
+  # NO S3 fallback — this is the dev path, data comes from local disk.
+  DATA_DIR=/opt/vol/data/raw/minivess/imagesTr
+  if [ -d "${DATA_DIR}" ] && [ "$(ls "${DATA_DIR}" 2>/dev/null | wc -l)" -gt 10 ]; then
+    echo "Training data found on Network Volume ($(ls ${DATA_DIR} | wc -l) files)"
     mkdir -p data/raw
     ln -sf /opt/vol/data/raw/minivess data/raw/minivess
   else
-    echo "Pulling training data from AWS S3 (s3://minivessdataset)..."
-    # Initialize DVC without git (container has no .git)
-    dvc init --no-scm -f
-
-    # Use remote_storage (AWS S3 public dataset bucket, no credentials)
-    dvc remote add remote_storage s3://minivessdataset
-
-    # Write minimal DVC pipeline for data pull
-    cat > dvc.yaml << 'DVCEOF'
-  stages:
-    download:
-      cmd: "true"
-      outs:
-        - data/raw/minivess/
-      frozen: true
-  DVCEOF
-
-    cat > dvc.lock << 'LOCKEOF'
-  schema: '2.0'
-  stages:
-    download:
-      cmd: "true"
-      outs:
-      - path: data/raw/minivess/
-        hash: md5
-        md5: e712f8b23f377a4990b91bef0b1aef76.dir
-        size: 2749883382
-        nfiles: 350
-  LOCKEOF
-
-    dvc pull -r remote_storage
+    echo "FATAL: Training data not found at /opt/vol/data/raw/minivess/imagesTr/"
+    echo ""
+    echo "The RunPod 'dev' path requires data uploaded to the Network Volume first."
+    echo "Upload your dataset from your local machine:"
+    echo "  make dev-gpu-upload-data LOCAL_DATA=/path/to/your/dataset"
+    echo ""
+    echo "For the MiniVess dataset (EBRAINS):"
+    echo "  1. Download via Acquisition Flow: prefect deployment run 'acquisition-flow/default'"
+    echo "  2. Upload to volume: make dev-gpu-upload-data LOCAL_DATA=data/raw/minivess"
+    echo ""
+    echo "There is NO automatic S3 fallback — RunPod uses your data, not a shared bucket."
+    exit 1
   fi
 
   # H13: Use smoke test splits (4 volumes) instead of full 3-fold (70 volumes)

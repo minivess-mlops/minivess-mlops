@@ -16,14 +16,29 @@ last_reviewed: "2026-03-16"
 providers:
   runpod:
     environment: env
-    role: "Dev/prototyping — hacky, optional. For researchers who prefer RunPod."
+    role: |
+      Primary "dev" path for GPU-constrained researchers and paper readers.
+      A researcher with only a thin-client laptop (no GPU) can train in one command.
+      The repo owner uses it to bypass 8 GB VRAM limit for large models (SAM3 Hybrid, VesselFM ≥16 GB).
+      FULLY STANDALONE — no GCP account, no Pulumi, no GCS, no Cloud SQL needed.
+      This is the ENTRY POINT for new researchers discovering the paper.
     status: active
     compute: "SkyPilot (cloud: runpod)"
-    storage: "Network Volume (data uploaded from local disk)"
+    storage: "Network Volume — data comes from researcher's LOCAL DISK only"
     mlflow: "File-based on Network Volume (/opt/vol/mlruns)"
-    data_flow: "Local disk → sky rsync up → Network Volume"
-    sync_back: "make dev-gpu-sync (sky rsync down /opt/vol/mlruns/ → local mlruns/)"
-    assumption: "Cannot assume ANY GCP infrastructure exists. Standalone."
+    data_source: |
+      Researcher's local disk ONLY. Two paths:
+        A) Their own dataset: rsync from local → /opt/vol/data/raw/
+        B) Known datasets (e.g. MiniVess): downloaded from EBRAINS via Acquisition Flow,
+           DVC-versioned locally, then rsynced to Network Volume.
+      NO S3. NO GCS. NO external cloud storage. Any s3:// reference is a BUG.
+    data_flow: "Local disk → make dev-gpu-upload-data → /opt/vol/data/raw/"
+    sync_back: |
+      MANDATORY: make dev-gpu-sync (sky rsync down /opt/vol/mlruns/ → local mlruns/).
+      Without sync-back, MLflow runs are invisible locally — the entire RunPod path
+      has zero scientific value. Sync MUST happen after every training job.
+    assumption: "Cannot assume ANY GCP infrastructure exists. Fully standalone."
+    banned: "ANY s3:// URL. s3://minivessdataset was removed 2026-03-16 (unauthorized)."
     skypilot_yamls:
       - deployment/skypilot/dev_runpod.yaml
       - deployment/skypilot/smoke_test_gpu.yaml
@@ -83,15 +98,34 @@ archived_providers:
     reason: "No EU availability"
     code: deployment/archived/lambda/
 
+# ─── DATA PROVENANCE — RunPod vs GCP ──────────────────────────────────────────
+# This is the critical distinction for paper readers and new researchers.
+#
+# RunPod "env" path:
+#   Data source = researcher's LOCAL DISK (their own dataset OR a known dataset
+#   downloaded from EBRAINS via Acquisition Flow, then DVC-versioned locally).
+#   DVC tracks files locally (no S3/GCS remote needed for RunPod).
+#   Upload to Network Volume once: make dev-gpu-upload-data LOCAL_DATA=data/raw/
+#   There is NO DVC remote for RunPod — it's a direct rsync, not a DVC pull.
+#
+# GCP "staging/prod" path:
+#   Data source = GCS bucket (gs://minivess-mlops-dvc-data).
+#   DVC push from local: dvc push -r gcs (one-time per dataset version).
+#   GCP VMs pull via ADC (service account) — no credentials in YAML.
+#
+# Known datasets (e.g. MiniVess):
+#   Available on EBRAINS (NOT on S3 — s3://minivessdataset is removed).
+#   Acquisition Flow (Flow 1) can auto-download from EBRAINS and DVC-version locally.
+#   Planned: --dataset minivess flag triggers auto-download + DVC + upload in one command.
+#
 # ─── DVC REMOTE STRATEGY ──────────────────────────────────────────────────────
-# Each environment uses a different DVC remote for data access.
-# See: .dvc/config for currently configured remotes
 dvc_remotes:
   minio:
     url: "s3://dvc-data"
-    purpose: "Local Docker Compose development (default remote)"
-    credentials: "minioadmin/minioadmin (Docker Compose stack)"
+    purpose: "Local Docker Compose development (default remote for local stack)"
+    credentials: "minioadmin/minioadmin (Docker Compose stack — local MinIO, NOT AWS)"
     environment: local
+    note: "This is LOCAL MinIO (S3-compatible API) running in Docker Compose. Not AWS."
 
   gcs:
     url: "gs://minivess-mlops-dvc-data"
@@ -101,18 +135,14 @@ dvc_remotes:
     env_var: "DVC_REMOTE=gcs"
     config_template: configs/dvc/remotes.yaml
 
-  remote_storage:
-    url: "s3://minivessdataset"
-    purpose: "READ-ONLY public data source (original dataset upload)"
-    credentials: "None (public bucket)"
-    environment: "any (fallback for initial data download)"
-    note: "This is the DATA ORIGIN, not a production backend. Use for first-time data download only."
-
   runpod_network_volume:
-    purpose: "Data cache on RunPod Network Volume (/opt/vol/data/)"
-    data_flow: "Upload from local: make dev-gpu-upload-data"
+    purpose: "Data on RunPod Network Volume — NOT a DVC remote, direct rsync"
+    data_flow: "make dev-gpu-upload-data LOCAL_DATA=data/raw/ → /opt/vol/data/raw/"
     environment: env
-    note: "Not a DVC remote — direct file copy via sky rsync"
+    note: "rsync, not dvc pull. Data is DVC-versioned locally; RunPod gets a copy via rsync."
+
+  banned:
+    remote_storage_s3: "s3://minivessdataset — REMOVED 2026-03-16, was unauthorized AWS third provider"
 
 # ─── ENVIRONMENT MAPPING ──────────────────────────────────────────────────────
 # Maps the three-environment model to actual execution targets
@@ -122,15 +152,19 @@ environments:
     compute: "Local GPU (RTX 2070 Super, 8 GB)"
     mlflow: "mlruns/ (local filesystem)"
     dvc_remote: minio
-    purpose: "Fast iteration, uv run pytest"
+    purpose: "Fast iteration, uv run pytest, quick debugging"
 
   env:
     docker: "Docker image via SkyPilot image_id"
     compute: "RunPod spot/on-demand (RTX 4090, 24 GB)"
-    mlflow: "File-based on Network Volume"
-    dvc_remote: "None (data uploaded from local via sky rsync)"
-    purpose: "Quick GPU experiments, hacky, standalone"
-    assumption: "No GCP infrastructure required"
+    mlflow: "File-based on Network Volume (/opt/vol/mlruns) — MUST sync back to local"
+    dvc_remote: "None — data is rsynced from local, not pulled via DVC"
+    data_source: "Local disk (own dataset or EBRAINS download via Acquisition Flow)"
+    purpose: |
+      GPU access for VRAM-limited researchers and thin-client users.
+      Entry path for paper readers wanting to try the system.
+      No GCP infrastructure required — standalone.
+    assumption: "No GCP infrastructure. No S3. Researcher brings their own data."
 
   staging:
     docker: "Docker image via SkyPilot image_id"

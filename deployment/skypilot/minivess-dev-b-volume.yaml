@@ -1,16 +1,18 @@
-# MinIVess Dev-B Network Volume on RunPod — Concurrency QA / Isolation Test
+# MinIVess Dev-B Network Volume on RunPod — Second Isolated Dev Environment
 #
-# Intentionally SEPARATE from minivess-dev.
-# Used in concurrent RunPod QA (P3 in remaining-runpod-gcp-qa-4th-pass.xml):
-#   - Pod A: minivess-dev (pre-loaded data, primary path)
-#   - Pod B: minivess-dev-b (EMPTY volume → falls back to s3://minivessdataset)
+# Use cases:
+#   1. Concurrent RunPod QA (P3 in remaining-runpod-gcp-qa-4th-pass.xml):
+#      Both pods mount the primary minivess-dev volume (shared data, separate mlruns).
+#      This volume (dev-b) is used if a researcher needs a FULLY ISOLATED environment
+#      (e.g., different dataset entirely, separate from the shared dev volume).
+#   2. Two researchers working independently on the same RunPod account.
 #
-# This tests two things simultaneously:
-#   1. Concurrent pod isolation — no filesystem collision, unique MLflow run IDs
-#   2. S3 fallback data path — verifies the public bucket fallback works
+# IMPORTANT: Data must be uploaded before use:
+#   make dev-gpu-upload-data LOCAL_DATA=/path/to/dataset VOLUME=minivess-dev-b
+# NO S3 fallback. Empty volume → FATAL in setup script.
 #
 # Cost: 50 GB × $0.07/GB/month = $3.50/month
-#       IMPORTANT: DELETE after concurrency test (sky volumes delete minivess-dev-b)
+#       DELETE when no longer needed: sky volumes delete minivess-dev-b
 #
 # Create:  sky volumes apply deployment/skypilot/minivess-dev-b-volume.yaml
 # Delete:  sky volumes delete minivess-dev-b

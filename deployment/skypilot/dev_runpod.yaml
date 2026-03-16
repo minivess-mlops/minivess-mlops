@@ -157,50 +157,25 @@ setup: |
   echo "Python in venv: $(${WORKDIR}/.venv/bin/python --version)"
   echo "uv_sync_end=$(date +%s.%N)" >> "$TIMING_FILE"
 
-  # Step 4: Pull training data to Network Volume (skip if already cached)
+  # Step 4: Verify training data is on Network Volume (NO S3 fallback)
+  # Upload your data BEFORE launching: make dev-gpu-upload-data LOCAL_DATA=data/raw/
+  # For MiniVess from EBRAINS: run Acquisition Flow locally first, then upload.
   echo "dvc_config_start=$(date +%s.%N)" >> "$TIMING_FILE"
-  if [ -d /opt/vol/data/raw/minivess/imagesTr ] && \
-     [ "$(ls /opt/vol/data/raw/minivess/imagesTr/ 2>/dev/null | wc -l)" -gt 10 ]; then
-    echo "Training data already cached on Network Volume — skipping DVC pull"
+  DATA_DIR=/opt/vol/data/raw/minivess/imagesTr
+  if [ -d "${DATA_DIR}" ] && [ "$(ls "${DATA_DIR}" 2>/dev/null | wc -l)" -gt 10 ]; then
+    echo "Training data found on Network Volume ($(ls ${DATA_DIR} | wc -l) files)"
   else
-    echo "First run: pulling training data via DVC from AWS S3 (~2.6 GB, ~5 min)"
-    echo "  (UpCloud dropped 2026-03-16. Data source: s3://minivessdataset)"
-    echo "  TIP: Run 'make dev-gpu-upload-data' from local machine for faster first-time load."
-    dvc init --no-scm -f
-
-    # Use remote_storage (AWS S3, no custom credentials required)
-    dvc remote add remote_storage s3://minivessdataset
-
-    # Write minimal DVC pipeline for data pull
-    cat > dvc.yaml << 'DVCEOF'
-  stages:
-    download:
-      cmd: "true"
-      outs:
-        - data/raw/minivess/
-      frozen: true
-  DVCEOF
-
-    cat > dvc.lock << 'LOCKEOF'
-  schema: '2.0'
-  stages:
-    download:
-      cmd: "true"
-      outs:
-      - path: data/raw/minivess/
-        hash: md5
-        md5: e712f8b23f377a4990b91bef0b1aef76.dir
-        size: 2749883382
-        nfiles: 350
-  LOCKEOF
-
-    echo "dvc_pull_start=$(date +%s.%N)" >> "$TIMING_FILE"
-    dvc pull -r remote_storage
-    echo "dvc_pull_end=$(date +%s.%N)" >> "$TIMING_FILE"
-    # Move data to persistent volume
-    if [ -d data/raw/minivess ] && [ ! -d /opt/vol/data/raw/minivess/imagesTr ]; then
-      cp -r data/raw/minivess /opt/vol/data/raw/
-    fi
+    echo "FATAL: Training data not found at /opt/vol/data/raw/minivess/imagesTr/"
+    echo ""
+    echo "The RunPod 'dev' path requires data uploaded from your local machine first."
+    echo "  make dev-gpu-upload-data LOCAL_DATA=/path/to/your/dataset"
+    echo ""
+    echo "For MiniVess (EBRAINS dataset):"
+    echo "  1. prefect deployment run 'acquisition-flow/default'  # download from EBRAINS"
+    echo "  2. make dev-gpu-upload-data LOCAL_DATA=data/raw/minivess"
+    echo ""
+    echo "There is NO automatic S3 fallback. RunPod uses YOUR data, not a shared bucket."
+    exit 1
   fi
   echo "dvc_config_end=$(date +%s.%N)" >> "$TIMING_FILE"
 
