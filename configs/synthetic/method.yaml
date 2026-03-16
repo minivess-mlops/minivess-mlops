@@ -1,0 +1,36 @@
+# Synthetic generator method selection
+# Usage: generate_stack(method=<method>, n_volumes=<n>)
+# Each method maps to a SyntheticGeneratorAdapter subclass in the registry.
+
+# Default method for drift simulation
+default_method: debug
+
+# Available methods and their default configs
+methods:
+  debug:
+    description: "Random-walk tubes for smoke tests (CPU, no training)"
+    shape: [64, 64, 64]
+    n_tubes: 5
+    tube_radius: 2
+    noise_std: 0.05
+
+  vesselFM_drand:
+    description: "vesselFM domain randomization (CVPR 2025, CPU, GPL-3.0)"
+    patch_size: [128, 128, 128]
+    # See: https://github.com/bwittmann/vesselFM
+
+  monai_vqvae:
+    description: "MONAI VQ-VAE trained on MiniVess patches (GPU, Apache-2.0)"
+    patch_size: [64, 64, 64]
+    codebook_size: 512
+    embedding_dim: 64
+    # Requires training step before generation
+
+  vamos:
+    description: "VaMos procedural spline arteries (CPU, Nader et al. 2024)"
+    # See: https://gitlab.univ-nantes.fr/autrusseau-f/vamos/
+
+  vascusynth:
+    description: "VascuSynth procedural tree growth (CPU, C++ binary, Apache-2.0)"
+    # See: https://github.com/sfu-mial/VascuSynth
+    # Requires compiled binary
