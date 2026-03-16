@@ -2,6 +2,8 @@ domain: cloud
 description: >
   Cloud provider architecture, data storage, DVC remotes, environment mapping.
   TWO providers: RunPod (env/dev) + GCP (staging/prod). No others without explicit user authorization.
+  CRITICAL: Cloud compute is used for Train Flow ONLY. All other flows run locally or in Docker Compose.
+  Prefect flows have per-flow compute definitions — Train Flow is the only GPU consumer.
 last_reviewed: "2026-03-16"
 
 # ─── HARD CONSTRAINT ──────────────────────────────────────────────────────────
@@ -98,6 +100,37 @@ archived_providers:
     reason: "No EU availability"
     code: deployment/archived/lambda/
 
+# ─── PER-FLOW COMPUTE ROUTING ─────────────────────────────────────────────────
+# The entire point of Prefect flows is that COMPUTE CAN BE DIFFERENT PER FLOW.
+# A researcher on a train trip can run ALL flows from their laptop:
+#
+#   Flow 1: Data Engineering   → local Docker Compose  (CPU)
+#   Flow 2: Model Training     → SkyPilot → RunPod or GCP  ← THE ONLY GPU CONSUMER
+#   Flow 3: Model Analysis     → local Docker Compose  (CPU)
+#   Flow 4: Deployment         → local Docker Compose  (CPU)
+#   Flow 5: Dashboard          → local Docker Compose  (CPU)
+#
+# The inter-flow contract is MLflow (local mlruns/).
+# After Train Flow finishes on RunPod/GCP, mlruns are synced back to local.
+# Then Analysis Flow (running locally) picks up from local mlruns/ — seamlessly.
+#
+# Researcher journey:
+#   1. DVC-versioned dataset on laptop (downloaded from EBRAINS or own data)
+#   2. Run Train Flow remotely: `prefect deployment run 'train-flow/runpod'`
+#      → SkyPilot uploads data (file_mounts or pre-loaded volume) → trains → syncs mlruns back
+#   3. Continue with Analysis/Deploy/Dashboard on laptop (no GPU needed)
+#
+# This means RunPod is NOT a "second environment" — it's a compute target for ONE flow.
+# The laptop is ALWAYS the control plane and MLflow home.
+per_flow_compute:
+  flow_1_data_engineering: local
+  flow_2_train: "SkyPilot → RunPod (env) or GCP (staging/prod)"
+  flow_3_analysis: local
+  flow_4_deploy: local
+  flow_5_dashboard: local
+  gpu_flows: [flow_2_train]
+  note: "compute target is a Prefect deployment config, not hardcoded in flow code"
+
 # ─── DATA PROVENANCE — RunPod vs GCP ──────────────────────────────────────────
 # This is the critical distinction for paper readers and new researchers.
 #
@@ -156,15 +189,20 @@ environments:
 
   env:
     docker: "Docker image via SkyPilot image_id"
-    compute: "RunPod spot/on-demand (RTX 4090, 24 GB)"
-    mlflow: "File-based on Network Volume (/opt/vol/mlruns) — MUST sync back to local"
-    dvc_remote: "None — data is rsynced from local, not pulled via DVC"
-    data_source: "Local disk (own dataset or EBRAINS download via Acquisition Flow)"
+    compute: "RunPod spot/on-demand (RTX 4090, 24 GB) — for Train Flow ONLY"
+    mlflow: "Synced back to local mlruns/ after training (mandatory — Analysis Flow reads from there)"
+    dvc_remote: "None — data comes from local DVC working copy, not a cloud remote"
+    data_source: |
+      Researcher's local DVC-versioned dataset. Two transfer modes:
+        Mode A: Pre-loaded Network Volume (rsync once, reuse many times)
+        Mode B: SkyPilot file_mounts (copy at launch, no persistent storage — NOT YET IMPLEMENTED)
     purpose: |
-      GPU access for VRAM-limited researchers and thin-client users.
-      Entry path for paper readers wanting to try the system.
-      No GCP infrastructure required — standalone.
-    assumption: "No GCP infrastructure. No S3. Researcher brings their own data."
+      Compute target for Train Flow when local GPU is insufficient.
+      Researcher controls all flows from their laptop. Only training runs on RunPod.
+      After training, mlruns sync back and remaining flows (Analysis, Deploy, Dashboard)
+      continue on the laptop. Full pipeline = laptop orchestration + RunPod compute.
+    assumption: "No GCP infrastructure. No S3. Laptop is the control plane and MLflow home."
+    post_train_sync: "make dev-gpu-sync → sky rsync down minivess-dev:/opt/vol/mlruns/ mlruns/"
 
   staging:
     docker: "Docker image via SkyPilot image_id"

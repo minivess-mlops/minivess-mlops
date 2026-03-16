@@ -23,15 +23,28 @@ resolution_evidence:
 runpod_purpose:
   # Why RunPod exists in this repo:
   # 1. Repo owner (8 GB VRAM local) needs >16 GB for SAM3 Hybrid / VesselFM
-  # 2. Paper readers with thin-client / no-GPU can train in one command
-  # 3. ZERO cloud infra setup required — just a RunPod account + Docker image
+  # 2. Paper readers / thin-client researchers can train with one command
+  # 3. ZERO cloud infra setup — just a RunPod account + Docker image
   # No GCP account, no Pulumi, no GCS, no Cloud SQL. Fully standalone.
-  primary_audience: "Researchers with thin client / no GPU — one-command cloud training"
-  secondary_audience: "Repo owner bypassing local 8 GB VRAM limit"
+  #
+  # CRITICAL: RunPod is a COMPUTE TARGET for Train Flow, not a full environment.
+  # The researcher's laptop is always the control plane. Only Flow 2 (Train) runs
+  # on RunPod. All other flows (Data, Analysis, Deploy, Dashboard) run locally.
+  # MLflow contract: mlruns live on the laptop. RunPod syncs back after training.
+  #
+  # Full journey (researcher on a train trip):
+  #   Flow 1 (Data Engineering):  laptop   — data already DVC-versioned locally
+  #   Flow 2 (Train):             RunPod   — GPU needed, Prefect dispatches via SkyPilot
+  #   Flow 3 (Analysis):          laptop   — reads from local mlruns/ post-sync
+  #   Flow 4 (Deploy):            laptop
+  #   Flow 5 (Dashboard):         laptop
+  primary_audience: "Researchers with thin client / no GPU — one-command remote training"
+  secondary_audience: "Repo owner bypassing local 8 GB VRAM limit for large models"
   data_contract: |
-    Researcher uploads THEIR OWN dataset from local disk.
+    Researcher's LOCAL DVC-versioned dataset is the data source.
     NO shared S3. NO GCS. NO external cloud storage of any kind.
     s3://minivessdataset is BANNED from all RunPod YAMLs.
+    Data transfer to pod: Mode A = Network Volume (rsync), Mode B = file_mounts (planned).
   mode_a_network_volume:
     status: implemented
     data_flow: "Local disk → make dev-gpu-upload-data → /opt/vol/data/raw/"
