@@ -47,12 +47,13 @@ decisions:
     rationale: >
       Docker Hub for RunPod (env) — public by default, zero-auth pull. GHCR was private
       and caused 40+ min STARTING hangs on RunPod (2026-03-16). GAR for GCP (staging/prod)
-      — same-region as GCS/Cloud Run, ADC auth. GHCR reserved for GitHub Actions CI only.
+      — same-region as GCS/Cloud Run, ADC auth. GHCR reserved for GitHub Actions CI only
+      (internal build artifacts, not deployment images).
     implementation: [configs/registry/dockerhub.yaml, configs/registry/gar.yaml, configs/registry/ghcr.yaml]
     per_environment:
-      runpod_dev: dockerhub
-      gcp_staging_prod: gar
-      github_actions_ci: ghcr
+      runpod_dev: dockerhub  # petteriteikari/minivess-base:latest (public, no auth for pull)
+      gcp_staging_prod: gar  # europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+      github_actions_ci: ghcr  # ghcr.io/petteriteikari/minivess-base:latest (internal CI only)
 
   secrets_management:
     status: resolved
