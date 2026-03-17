@@ -106,10 +106,13 @@ domains:
 
   manuscript:
     navigator: knowledge-graph/domains/manuscript.yaml
-    covers: [scientific claims, methods stubs, results stubs, limitations, projections, kg-sync]
+    covers: [scientific claims, methods stubs, results stubs, limitations, projections, kg-sync,
+             TRIPOD compliance, reporting guidelines, cost transparency]
     claude_md: [docs/planning/repo-to-manuscript.md]
-    decisions: [publication_target]
-    note: "Narrative layer for paper writing. Claims + section stubs derived from KG decisions + experiments."
+    decisions: [publication_target, tripod_compliance]
+    note: >
+      Narrative layer for paper writing. Claims + section stubs derived from KG decisions + experiments.
+      TRIPOD+AI/LLM/Code compliance matrix at docs/planning/tripod-compliance-matrix.md.
 
 # Cross-layer references — how to navigate between layers
 layers:
@@ -216,6 +219,11 @@ keywords:
   kg-sync: manuscript
   latent: manuscript
   intent: manuscript
+  tripod: manuscript
+  reporting_guideline: manuscript
+  tripod_ai: manuscript
+  tripod_llm: manuscript
+  tripod_code: manuscript
   spec: openspec
   sdd: openspec
   openspec: openspec

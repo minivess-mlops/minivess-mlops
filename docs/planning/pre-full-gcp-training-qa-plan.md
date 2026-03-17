@@ -177,3 +177,63 @@ CC BY 4.0. https://github.com/cai4cai/Average-Calibration-Losses
 | Biostatistics (local CPU) | — | 0 | $0 |
 | Buffer (preemption) | — | ~50 | ~$11 |
 | **Total** | | **~448** | **~$98** |
+
+### Round 2 Answers
+
+**Q4: ANOVA library?** Both — pingouin for main report, statsmodels for supplementary interactions.
+
+**Q5: Deploy Flow (4th plan)?** Verify full MLflow Model Registry → BentoML fetch chain.
+
+**Q6: mL1-ACE timing?** Implement BEFORE debug. All 24 conditions in one run.
+
+**Q7: Debug execution?** One-by-one with checkpoints. Verify MLflow artifacts between flows.
+
+**Additional user requirement**: Read TRIPOD papers and ensure adherence:
+- Collins (2025) TRIPOD+CODE reporting guideline
+- Collins (2024) TRIPOD+AI reporting guidelines
+- Gallifant (2025) TRIPOD-LLM reporting guideline
+
+---
+
+## 4 XML Plans Needed
+
+| PR | Flow | Key Gaps | Est. Tasks |
+|----|------|----------|------------|
+| PR-A: Biostatistics | Flow 5 | ANOVA, calibration metrics, DCA, Riley plot | ~8 |
+| PR-B: Evals/Analysis | Flow 3 | Hierarchical ensemble, UQ logging, consistency | ~10 |
+| PR-C: Post-Training | Flow 2.5 | mL1-ACE loss, SWA factorial config | ~6 |
+| PR-D: Deploy | Flow 6 | MLflow Registry → BentoML chain verification | ~4 |
+
+## Biostatistics: Existing (85%) vs Missing (15%)
+
+Already: BCa bootstrap, Wilcoxon+Holm, Bayesian signed-rank+ROPE, Friedman+Nemenyi,
+ICC, Cohen's d/Cliff's delta/VDA, spec curve, ECE, temp scaling, 4 conformal variants,
+calibration curves, DuckDB, 11 figures, 5 LaTeX tables, TRIPOD lineage.
+
+Missing: Two-way ANOVA (η²/ω²), calibration slope/O:E/Brier/IPA, DCA, Riley plot,
+interaction plots.
+
+### User Clarification #4 (verbatim — cost transparency)
+
+> And we should report in the appendix (at least) of the financial cost (debug vs real
+> training) that it took to develop this repo and run the results, and if it does not
+> sound like an advertisement to Skypilot, also talk how much money was saved using
+> Skypilot and the use of spots instead of on-demand instances, and compared to Runpod
+> pay-as-you-go instances for the "dev". Update the plan and kg accordingly, and create
+> a P1 reporting Issue on this for the academic manuscript, and ideally this information
+> would be saved to MLflow as well (if we can programmatically get the instance cost at
+> the time of the execution and the time it took to run the instance, then we could
+> simple sum all the costs together from the MLflow artifact storage with some filters
+> for debug and real runs)
+
+**Issue created**: #795 (P1: Financial cost reporting for manuscript appendix)
+
+**MLflow integration**: `cost/total_usd` already logged per run (slash-prefix from PR #793).
+Need to add: `cost/instance_type` param, `cost/spot_vs_ondemand_savings_pct` metric.
+Biostatistics flow generates cost appendix table by querying MLflow.
+
+### 5th Plan Added: Cost Reporting
+
+| PR | Flow | Key Work |
+|----|------|----------|
+| PR-E: Cost Reporting | Biostatistics + manuscript | Cost appendix table, spot vs on-demand analysis, SkyPilot savings |
