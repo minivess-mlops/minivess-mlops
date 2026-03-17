@@ -254,6 +254,94 @@ def validate_data_task(
     return report
 
 
+@task(name="extract-nifti-metadata")
+def extract_nifti_metadata_task(
+    pairs: list[dict[str, str]],
+) -> pd.DataFrame:
+    """Read NIfTI headers and produce NiftiMetadataSchema-compatible DataFrame.
+
+    Parameters
+    ----------
+    pairs:
+        Image/label pairs with ``image`` and ``label`` path strings.
+
+    Returns
+    -------
+    DataFrame with columns matching NiftiMetadataSchema.
+    """
+    import nibabel as nib
+    import numpy as np
+    import pandas as pd
+
+    columns = [
+        "file_path",
+        "shape_x",
+        "shape_y",
+        "shape_z",
+        "voxel_spacing_x",
+        "voxel_spacing_y",
+        "voxel_spacing_z",
+        "intensity_min",
+        "intensity_max",
+        "num_foreground_voxels",
+        "has_valid_affine",
+    ]
+
+    if not pairs:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, object]] = []
+    for pair in pairs:
+        image_path = pair["image"]
+        label_path = pair.get("label", "")
+
+        try:
+            img = nib.load(image_path)
+            img_data = np.asarray(img.dataobj)  # type: ignore[attr-defined]
+            affine = img.affine  # type: ignore[attr-defined]
+            shape = img_data.shape
+
+            # Extract voxel spacing from affine diagonal
+            voxel_spacing = np.abs(np.diag(affine)[:3])
+
+            # Check affine validity (non-zero diagonal, finite values)
+            has_valid_affine = bool(
+                np.all(np.isfinite(affine)) and np.all(voxel_spacing > 0)
+            )
+
+            # Count foreground voxels from label
+            num_foreground = 0
+            if label_path:
+                try:
+                    lbl = nib.load(label_path)
+                    lbl_data = np.asarray(lbl.dataobj)  # type: ignore[attr-defined]
+                    num_foreground = int(np.count_nonzero(lbl_data))
+                except Exception:
+                    logger.warning("Failed to load label: %s", label_path)
+
+            rows.append(
+                {
+                    "file_path": image_path,
+                    "shape_x": int(shape[0]),
+                    "shape_y": int(shape[1]),
+                    "shape_z": int(shape[2]) if len(shape) > 2 else 1,
+                    "voxel_spacing_x": float(voxel_spacing[0]),
+                    "voxel_spacing_y": float(voxel_spacing[1]),
+                    "voxel_spacing_z": float(voxel_spacing[2]),
+                    "intensity_min": float(np.min(img_data)),
+                    "intensity_max": float(np.max(img_data)),
+                    "num_foreground_voxels": num_foreground,
+                    "has_valid_affine": has_valid_affine,
+                }
+            )
+        except Exception:
+            logger.warning(
+                "Failed to extract metadata from %s", image_path, exc_info=True
+            )
+
+    return pd.DataFrame(rows, columns=columns)
+
+
 @task(name="data-quality-gate")
 def data_quality_gate(report: DataValidationReport) -> bool:
     """Check whether data passes quality gate.
