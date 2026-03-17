@@ -147,7 +147,9 @@ setup: |
   uv venv --python python3.13 .venv
   export VIRTUAL_ENV="${WORKDIR}/.venv"
   export PATH="${WORKDIR}/.venv/bin:$HOME/.local/bin:$PATH"
-  uv sync --all-extras
+  # --all-extras includes mamba-ssm which needs nvcc (not available on RunPod default image).
+  # Install all extras EXCEPT mamba-ssm. mamba-ssm is only built in Docker builder stage.
+  uv sync --extra eval --extra quality --extra dev --extra agents --extra sam --extra serving --extra hydra --extra ci --extra infra --extra sky
   # T0.7: Verify python symlink exists in venv (reviewer C1 fix, #696)
   ls -la "${WORKDIR}/.venv/bin/python"* | head -5
   if [ ! -e "${WORKDIR}/.venv/bin/python" ]; then
