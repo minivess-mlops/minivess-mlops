@@ -30,6 +30,14 @@ except ImportError:
     pass
 
 try:  # noqa: SIM105
+    from minivess.validation.deepchecks_3d_adapter import (
+        build_deepchecks_dataset,
+        extract_representative_slices,
+    )
+except ImportError:
+    pass
+
+try:  # noqa: SIM105
     from minivess.validation.deepchecks_vision import (
         ValidationReport,
         build_data_integrity_suite,
@@ -105,6 +113,8 @@ __all__ = [
     "DriftReport",
     "GateAction",
     "GateResult",
+    "build_deepchecks_dataset",
+    "extract_representative_slices",
     "NiftiMetadataSchema",
     "QualityDimension",
     "ProfileDriftReport",
