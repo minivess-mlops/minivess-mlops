@@ -53,6 +53,15 @@ setup, no "install these packages on the VM."
 
 See: `.claude/metalearning/2026-03-14-docker-resistance-anti-pattern.md`
 
+**Three-tier multi-stage Docker builds are MANDATORY.** All base images use 2-stage
+builder→runner pattern. See `deployment/CLAUDE.md` for the full hierarchy:
+- **Tier A** (GPU): `nvidia/cuda → minivess-base:latest` — 10 flows
+- **Tier B** (CPU): `python:3.13 → minivess-base-cpu:latest` — biostatistics
+- **Tier C** (Light): `python:3.13 → minivess-base-light:latest` — dashboard, pipeline
+Flow Dockerfiles are THIN (only `COPY`, `ENV`, `CMD`) — never `apt-get` or `uv`.
+Dockerfile changes MUST preserve the multi-stage builder→runner separation.
+See: `docs/planning/docker-base-improvement-plan.md` (status: implemented)
+
 ---
 
 ## Design Goal #1: EXCELLENT DevEx for PhD Researchers

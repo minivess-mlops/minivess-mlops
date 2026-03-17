@@ -12,6 +12,14 @@ decisions:
     evidence: [docs/planning/docker-security-hardening-mlsecops-report.md]
     prd_node: knowledge-graph/decisions/L4-infrastructure/container_strategy.yaml
 
+  docker_architecture:
+    status: resolved
+    winner: three_tier_multistage
+    rationale: "Three base images (GPU/CPU/Light), each 2-stage builder→runner. Flow Dockerfiles are thin (COPY + CMD only)."
+    implementation: [deployment/docker/Dockerfile.base, deployment/docker/Dockerfile.base-cpu, deployment/docker/Dockerfile.base-light]
+    evidence: [docs/planning/docker-base-improvement-plan.md, docs/planning/docker-security-hardening-mlsecops-report.md]
+    prd_node: knowledge-graph/decisions/L2-architecture/docker_architecture.yaml
+
   ci_cd_platform:
     status: resolved
     winner: github_actions_cml

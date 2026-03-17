@@ -1,0 +1,102 @@
+decision_id: docker_architecture
+title: "Docker as Execution Model — Three-Tier Multi-Stage Architecture"
+level: L2
+status: resolved
+description: >
+  Docker containers ARE the execution model for all training, pipeline execution,
+  and deployment. Each Prefect flow runs in an isolated container. The image
+  hierarchy uses a three-tier multi-stage build pattern to minimize image size
+  while ensuring reproducibility.
+
+resolved_option: three_tier_multistage
+
+options:
+  - option_id: three_tier_multistage
+    prior_probability: 0.90
+    description: >
+      Three base images (GPU/CPU/Light), each using 2-stage builder-runner
+      pattern. Flow Dockerfiles are thin (COPY + CMD only). Layer caching via
+      BuildKit uv cache mounts. Implemented March 2026.
+  - option_id: single_base_all_flows
+    prior_probability: 0.05
+    description: >
+      One CUDA base for all flows. CPU-only flows carry unused CUDA runtime.
+      Rejected: wastes 1.2 GB for non-GPU flows.
+  - option_id: no_docker
+    prior_probability: 0.05
+    description: >
+      Bare-metal execution with uv run. BANNED: destroys reproducibility.
+
+resolution_evidence:
+  - docs/planning/docker-base-improvement-plan.md
+  - docs/planning/docker-security-hardening-mlsecops-report.md
+  - deployment/CLAUDE.md
+
+implementation:
+  files:
+    - deployment/docker/Dockerfile.base
+    - deployment/docker/Dockerfile.base-cpu
+    - deployment/docker/Dockerfile.base-light
+    - deployment/docker-compose.yml
+    - deployment/docker/docker-compose.flows.yml
+  tests:
+    - tests/v2/unit/deployment/test_dockerfile_flows.py
+
+three_tier_hierarchy:
+  tier_a_gpu:
+    base: "nvidia/cuda:12.6.3-runtime-ubuntu24.04"
+    image: "minivess-base:latest"
+    stages: 2
+    builder: "nvidia/cuda:12.6.3-devel-ubuntu24.04"
+    runner: "nvidia/cuda:12.6.3-runtime-ubuntu24.04"
+    approx_size_gb: 8-12
+    flows: [train, hpo, post_training, analyze, deploy, data, annotation, monailabel, acquisition, benchmark]
+    optimizations: [uv_cache_mount, bind_mount_lockfile, no_dev_deps, buildkit_syntax]
+  tier_b_cpu:
+    base: "python:3.13-slim-bookworm"
+    image: "minivess-base-cpu:latest"
+    stages: 2
+    approx_size_gb: 1.5-2.5
+    flows: [biostatistics]
+    optimizations: [pinned_requirements, uv_cache_mount]
+  tier_c_light:
+    base: "python:3.13-slim-bookworm"
+    image: "minivess-base-light:latest"
+    stages: 2
+    approx_size_gb: 1.0-1.5
+    flows: [dashboard, dashboard_api, pipeline]
+    optimizations: [pinned_requirements, uv_cache_mount]
+
+flow_dockerfile_rules:
+  - "FROM minivess-base-{tier}:latest (NEVER from upstream directly)"
+  - "NEVER apt-get, uv, pip — all deps in base"
+  - "Only COPY scripts/, ENV, CMD"
+  - "LABEL flow, description, tier for auditability"
+
+volume_mount_rules:
+  required: [/data, /mlruns, /checkpoints, /logs, /configs]
+  banned: [/tmp, tempfile.mkdtemp]
+  enforcement: "CLAUDE.md Rule #18"
+
+registries:
+  runpod_dev: "docker.io/petteriteikari/minivess-base"
+  gcp_staging: "europe-north1-docker.pkg.dev/minivess-mlops/minivess/base"
+  config_driven: true
+  env_var: DOCKER_REGISTRY
+
+conditional_on:
+  - parent_decision_id: project_purpose
+    strength: strong
+    rationale: "Reproducibility mandate requires containerized execution"
+  - parent_decision_id: compute_orchestration
+    strength: strong
+    rationale: "SkyPilot uses image_id: docker:... for all cloud execution"
+
+volatility:
+  classification: stable
+  last_assessed: "2026-03-17"
+  next_review: "2026-09-17"
+  change_drivers:
+    - "Docker BuildKit feature additions (zstd compression, OCI artifacts)"
+    - "GKE Image Streaming adoption (lazy pull)"
+    - "NVIDIA container toolkit updates"
