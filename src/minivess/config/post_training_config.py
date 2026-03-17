@@ -8,8 +8,30 @@ FP control plugins. Each plugin has an independent ``enabled`` toggle.
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+# Valid factorial post-training methods
+FactorialMethod = Literal["none", "swa", "multi_swa"]
+VALID_FACTORIAL_METHODS: frozenset[str] = frozenset({"none", "swa", "multi_swa"})
+
+
+def factorial_checkpoint_name(run_id: str, method: str) -> str:
+    """Generate deterministic checkpoint filename for a factorial variant.
+
+    Parameters
+    ----------
+    run_id:
+        MLflow run ID or checkpoint identifier.
+    method:
+        Post-training method name (none, swa, multi_swa).
+
+    Returns
+    -------
+    Checkpoint filename like ``"abc123_swa.pt"``.
+    """
+    return f"{run_id}_{method}.pt"
 
 
 class MergeMethod(StrEnum):
@@ -180,6 +202,31 @@ class PostTrainingConfig(BaseModel):
         default="minivess_post_training",
         description="MLflow experiment name for post-training runs",
     )
+
+    factorial_methods: list[FactorialMethod] = Field(
+        default_factory=list,
+        description=(
+            "Post-training methods to apply in factorial design. "
+            "Valid values: none, swa, multi_swa. "
+            "Empty list = use plugin-by-plugin config (backward compatible)."
+        ),
+    )
+
+    @field_validator("factorial_methods")
+    @classmethod
+    def _validate_factorial_methods(
+        cls,
+        v: list[str],
+    ) -> list[str]:
+        """Ensure all factorial methods are valid."""
+        for method in v:
+            if method not in VALID_FACTORIAL_METHODS:
+                msg = (
+                    f"Invalid factorial method '{method}'. "
+                    f"Valid methods: {sorted(VALID_FACTORIAL_METHODS)}"
+                )
+                raise ValueError(msg)
+        return v
 
     swa: SWAPluginConfig = Field(
         default_factory=SWAPluginConfig,
