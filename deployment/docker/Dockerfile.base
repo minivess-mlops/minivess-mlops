@@ -141,12 +141,11 @@ WORKDIR /app
 
 # Copy only the built venv and application code from builder.
 # NEVER copy: uv binary, git history, build caches, devel headers.
-COPY --from=builder --chown=minivess:minivess /app/.venv /app/.venv
-COPY --from=builder --chown=minivess:minivess /app/src /app/src
-COPY --from=builder --chown=minivess:minivess /app/configs /app/configs
-
-# Group-readable venv (not world-readable — limit to minivess group)
-RUN chmod -R g+rX /app/.venv
+# --chmod=755: group+world readable — avoids a separate RUN chmod layer
+# that would duplicate the 9+ GB venv (Docker layers are copy-on-write).
+COPY --from=builder --chown=minivess:minivess --chmod=755 /app/.venv /app/.venv
+COPY --from=builder --chown=minivess:minivess --chmod=755 /app/src /app/src
+COPY --from=builder --chown=minivess:minivess --chmod=755 /app/configs /app/configs
 
 # NOTE: USER minivess is intentionally NOT set here.
 # SkyPilot/RunPod requires root: the setup_cmd installs packages and configures

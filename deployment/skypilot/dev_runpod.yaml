@@ -165,7 +165,7 @@ setup: |
   echo "dvc_config_start=$(date +%s.%N)" >> "$TIMING_FILE"
   DATA_DIR=/opt/vol/data/raw/minivess/imagesTr
   if [ -d "${DATA_DIR}" ] && [ "$(ls "${DATA_DIR}" 2>/dev/null | wc -l)" -gt 10 ]; then
-    echo "Training data found on Network Volume ($(ls ${DATA_DIR} | wc -l) files)"
+    echo "Training data already cached on Network Volume — skipping DVC pull ($(ls ${DATA_DIR} | wc -l) files)"
   else
     echo "FATAL: Training data not found at /opt/vol/data/raw/minivess/imagesTr/"
     echo ""
