@@ -3,23 +3,44 @@ title: "Audit Trail Implementation"
 level: L5-operations
 status: resolved
 options:
-  - {id: structured_json_otel, name: "Structured JSON + OpenTelemetry", prior_probability: 0.50, posterior_probability: 0.80}
-  - {id: openlineage_marquez, name: "OpenLineage + Marquez", prior_probability: 0.25, posterior_probability: 0.10}
-  - {id: mlflow_tags_only, name: "MLflow Tags Only", prior_probability: 0.15, posterior_probability: 0.08}
+  - {id: structured_json_otel, name: "Structured JSON + OpenTelemetry + OpenLineage", prior_probability: 0.50, posterior_probability: 0.85}
+  - {id: openlineage_only, name: "OpenLineage + Marquez Only", prior_probability: 0.25, posterior_probability: 0.08}
+  - {id: mlflow_tags_only, name: "MLflow Tags Only", prior_probability: 0.15, posterior_probability: 0.05}
   - {id: none, name: "None", prior_probability: 0.10, posterior_probability: 0.02}
 resolved_option: structured_json_otel
 resolution_evidence:
   - type: implementation
-    source: "src/minivess/compliance/"
-    finding: "Structured audit trails for SaMD-principled compliance"
+    source: "src/minivess/compliance/audit.py"
+    finding: "AuditTrail class (127 LOC) with log_data_access(), log_test_evaluation(), log_model_training(), log_model_deployment(). SHA-256 data hashing for integrity."
+  - type: implementation
+    source: "src/minivess/compliance/iec62304.py"
+    finding: "TraceabilityMatrix, PCCPTemplate, SoftwareSafetyClass enum. Coverage report generation."
+  - type: implementation
+    source: "src/minivess/compliance/regulatory_docs.py"
+    finding: "RegulatoryDocGenerator: auto-generates DHF, Risk Analysis, SRS, Validation Summary from audit events."
+  - type: implementation
+    source: "src/minivess/compliance/complops.py"
+    finding: "FDA 510(k) summary templates, EU MDR technical file templates, compliance gap assessment."
+  - type: gap_analysis
+    source: "docs/planning/regops-fda-regulation-reporting-qms-samd-iec62304-mlops-report.md"
+    finding: >
+      CRITICAL GAP: All compliance infrastructure exists but is NOT WIRED to Prefect flows.
+      AuditTrail.log_test_evaluation() is never called from actual eval runs.
+      No test set firewall per FDA 2022 CADe guidance. No cumulative test set use counter.
+      This is the $100k+ mistake Giese (2024, Innolitics) warns about.
 implementation:
-  files: [src/minivess/compliance/]
-  tests: []
+  files: [src/minivess/compliance/audit.py, src/minivess/compliance/iec62304.py, src/minivess/compliance/regulatory_docs.py, src/minivess/compliance/complops.py, src/minivess/compliance/model_card.py, src/minivess/compliance/fairness.py, src/minivess/compliance/eu_ai_act.py, src/minivess/compliance/regops.py]
+  tests: [tests/v2/unit/test_compliance.py, tests/v2/unit/test_iec62304.py, tests/v2/unit/test_regulatory_docs.py]
+  gap: "Compliance classes exist but no Prefect flow calls them — wiring needed (Issue #821)"
 conditional_on:
   - {parent_decision_id: container_strategy, influence_strength: weak}
   - {parent_decision_id: secrets_management, influence_strength: moderate}
-  - {parent_decision_id: compliance_posture, influence_strength: strong}
+  - {parent_decision_id: lineage_tracking, influence_strength: strong}
 volatility:
-  classification: stable
-  next_review: "2026-06-13"
-  rationale: "Audit trail supports SaMD-principled compliance posture"
+  classification: evolving
+  next_review: "2026-04-17"
+  rationale: >
+    Audit trail infrastructure is comprehensive but unwired. Triple regulatory convergence
+    (FDA QMSR Feb 2026, EU AI Act Aug 2026, IEC 62304 Ed 2 Aug 2026) makes wiring urgent.
+    Day-1 audit principle: missed audit periods cannot be retroactively filled.
+    FDA Jan 2025 draft guidance explicitly requires data catalogs and dataset version traceability.
