@@ -1,0 +1,53 @@
+decision_id: compute_orchestration
+title: "Compute Orchestration Broker"
+level: L4-infrastructure
+status: resolved
+
+options:
+  - id: skypilot_broker
+    name: "SkyPilot Intercloud Broker"
+    prior_probability: 0.40
+    posterior_probability: 0.92
+    description: "Intercloud broker (Yang et al., NSDI'23) -- Slurm for multi-cloud"
+  - id: manual_cloud_cli
+    name: "Manual Cloud CLI (gcloud, runpodctl)"
+    prior_probability: 0.25
+    posterior_probability: 0.03
+  - id: kubernetes_operators
+    name: "Kubernetes Operators"
+    prior_probability: 0.20
+    posterior_probability: 0.03
+  - id: ray_cluster
+    name: "Ray Cluster"
+    prior_probability: 0.15
+    posterior_probability: 0.02
+
+resolved_option: skypilot_broker
+
+resolution_evidence:
+  - type: literature
+    source: "https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng"
+    finding: "SkyPilot enables automatic workload placement across clouds/K8s/Slurm/SSH"
+    citation_key: yang_2023_skypilot
+  - type: implementation
+    source: "deployment/skypilot/"
+    finding: "SkyPilot YAML configs for RunPod and GCP with Docker image_id"
+
+implementation:
+  files:
+    - src/minivess/compute/skypilot_launcher.py
+    - deployment/skypilot/dev_runpod.yaml
+    - deployment/skypilot/smoke_test_gpu.yaml
+    - deployment/skypilot/smoke_test_gcp.yaml
+  tests: []
+
+conditional_on:
+  - parent_decision_id: container_strategy
+    influence_strength: strong
+  - parent_decision_id: gpu_compute
+    influence_strength: strong
+
+volatility:
+  classification: stable
+  next_review: "2026-06-17"
+  rationale: "SkyPilot is the non-negotiable intercloud broker per CLAUDE.md invariant"

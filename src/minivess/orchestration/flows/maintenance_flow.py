@@ -1,0 +1,122 @@
+"""Maintenance Prefect flow — periodic cleanup of stale MLflow runs.
+
+Flow 6: Runs as a scheduled maintenance task. Finds and cleans up
+ghost runs (RUNNING runs that are likely orphaned from crashed containers
+or preempted spot instances).
+
+Issue: #683
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from pathlib import Path
+from typing import Any
+
+from mlflow.tracking import MlflowClient
+from prefect import flow, task
+
+from minivess.observability.ghost_cleanup import cleanup_ghost_runs, find_ghost_runs
+from minivess.observability.tracking import resolve_tracking_uri
+from minivess.orchestration.constants import FLOW_NAME_MAINTENANCE
+
+logger = logging.getLogger(__name__)
+
+
+def _require_docker_context() -> None:
+    """Raise RuntimeError if not running inside a Docker container.
+
+    Escape hatch: MINIVESS_ALLOW_HOST=1 for pytest only.
+    """
+    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
+        return
+    if os.environ.get("DOCKER_CONTAINER"):
+        return
+    if Path("/.dockerenv").exists():
+        return
+    raise RuntimeError(
+        "Maintenance flow must run inside a Docker container.\n"
+        "Escape hatch (pytest ONLY): export MINIVESS_ALLOW_HOST=1"
+    )
+
+
+@task(name="cleanup-stale-runs")
+def cleanup_stale_runs_task(
+    *,
+    experiment_name: str = "minivess_training",
+    max_age_hours: float = 24.0,
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    """Find and clean up stale RUNNING MLflow runs.
+
+    Parameters
+    ----------
+    experiment_name:
+        MLflow experiment to search for ghost runs.
+    max_age_hours:
+        Maximum age for a run to be considered potentially active.
+    dry_run:
+        If True, only report what would be cleaned.
+
+    Returns
+    -------
+    Dict with cleanup results (cleaned/would_clean/errors counts).
+    """
+    tracking_uri = resolve_tracking_uri()
+    client = MlflowClient(tracking_uri=tracking_uri)
+
+    experiment = client.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        logger.warning("Experiment '%s' not found — skipping cleanup", experiment_name)
+        return {"would_clean": 0, "cleaned": 0, "errors": 0, "skipped": True}
+
+    ghost_runs = find_ghost_runs(
+        client,
+        experiment_ids=[experiment.experiment_id],
+        max_age_hours=max_age_hours,
+    )
+
+    if not ghost_runs:
+        logger.info("No ghost runs found in experiment '%s'", experiment_name)
+        return {"would_clean": 0, "cleaned": 0, "errors": 0}
+
+    result = cleanup_ghost_runs(
+        client,
+        ghost_runs=ghost_runs,
+        dry_run=dry_run,
+    )
+
+    logger.info(
+        "Cleanup result for '%s': %s (dry_run=%s)",
+        experiment_name,
+        result,
+        dry_run,
+    )
+    return result
+
+
+@flow(name=FLOW_NAME_MAINTENANCE)
+def maintenance_flow(
+    *,
+    experiment_name: str = "minivess_training",
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    """Maintenance flow — periodic MLflow cleanup.
+
+    Designed for Prefect scheduling (e.g., daily at 03:00 UTC).
+    """
+    _require_docker_context()
+    logger.info("Maintenance flow started (dry_run=%s)", dry_run)
+
+    result = cleanup_stale_runs_task(
+        experiment_name=experiment_name,
+        dry_run=dry_run,
+    )
+
+    logger.info("Maintenance flow complete: %s", result)
+    return result
+
+
+if __name__ == "__main__":
+    maintenance_flow(dry_run=True)

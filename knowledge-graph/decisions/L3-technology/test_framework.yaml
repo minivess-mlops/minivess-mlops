@@ -1,0 +1,51 @@
+decision_id: test_framework
+title: "Test Framework"
+level: L3-technology
+status: resolved
+
+options:
+  - id: pytest_hypothesis
+    name: "pytest + Hypothesis"
+    prior_probability: 0.50
+    posterior_probability: 0.92
+    description: "pytest for unit/integration, Hypothesis for property-based testing"
+  - id: unittest_stdlib
+    name: "unittest (stdlib)"
+    prior_probability: 0.20
+    posterior_probability: 0.03
+  - id: nox_tox
+    name: "nox/tox Multi-Environment"
+    prior_probability: 0.20
+    posterior_probability: 0.03
+  - id: robot_framework
+    name: "Robot Framework"
+    prior_probability: 0.10
+    posterior_probability: 0.02
+
+resolved_option: pytest_hypothesis
+
+resolution_evidence:
+  - type: implementation
+    source: "pyproject.toml"
+    finding: "pytest as test runner, hypothesis for property-based tests"
+  - type: implementation
+    source: "pytest-staging.ini"
+    finding: "pytest configuration with tier-specific markers"
+
+implementation:
+  files:
+    - pyproject.toml
+    - pytest-staging.ini
+    - tests/v2/unit/conftest.py
+  tests: []
+
+conditional_on:
+  - parent_decision_id: config_architecture
+    influence_strength: weak
+  - parent_decision_id: reproducibility_level
+    influence_strength: moderate
+
+volatility:
+  classification: stable
+  next_review: "2026-09-17"
+  rationale: "pytest is the de facto Python test framework; no reason to change"

@@ -75,6 +75,9 @@ FLOW_NAME_BIOSTATISTICS: str = "biostatistics-flow"
 FLOW_NAME_PIPELINE: str = "pipeline-flow"
 """Prefect flow name for the meta-pipeline orchestrator flow."""
 
+FLOW_NAME_MAINTENANCE: str = "maintenance-flow"
+"""Prefect flow name for the maintenance/cleanup flow (Flow 6)."""
+
 
 # ---------------------------------------------------------------------------
 # Experiment name resolution (debug suffix support)

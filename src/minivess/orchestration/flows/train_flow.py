@@ -20,9 +20,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import mlflow
 import yaml
 from prefect import flow, task
 
+from minivess.observability.infrastructure_timing import (
+    estimate_cost_from_first_epoch,
+    generate_timing_jsonl,
+    get_hourly_rate_usd,
+)
+from minivess.observability.prometheus_metrics import update_estimated_cost_gauges
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_TRAIN
 from minivess.orchestration.mlflow_helpers import (
@@ -36,6 +43,90 @@ from minivess.pipeline.resume_discovery import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def log_epoch0_cost_estimate(
+    *,
+    training_time_seconds: float,
+    max_epochs: int,
+    num_folds: int,
+    hourly_rate_usd: float,
+) -> None:
+    """Log epoch-0 cost estimate to MLflow and update Prometheus gauges.
+
+    Skipped when max_epochs <= 1 (no point predicting from the only epoch)
+    or when training_time_seconds <= 0 (no timing data).
+
+    Parameters
+    ----------
+    training_time_seconds:
+        Total training time in seconds so far.
+    max_epochs:
+        Total planned epochs.
+    num_folds:
+        Number of cross-validation folds.
+    hourly_rate_usd:
+        Instance hourly cost in USD.
+    """
+    if max_epochs <= 1:
+        return
+    if training_time_seconds <= 0:
+        return
+
+    # Derive per-epoch time from total training time / max_epochs
+    epoch_seconds = training_time_seconds / max_epochs
+
+    estimate = estimate_cost_from_first_epoch(
+        epoch_seconds=epoch_seconds,
+        max_epochs=max_epochs,
+        num_folds=num_folds,
+        hourly_rate_usd=hourly_rate_usd,
+    )
+
+    mlflow.log_metrics(estimate, step=0)
+    update_estimated_cost_gauges(estimate)
+    logger.info(
+        "Epoch-0 cost estimate: $%.4f total, %.2fh, $%.4f/epoch",
+        estimate["estimated_total_cost"],
+        estimate["estimated_total_hours"],
+        estimate["cost_per_epoch"],
+    )
+
+
+def log_timing_jsonl_artifact(
+    *,
+    setup_durations: dict[str, float],
+    training_seconds: float,
+    epoch_count: int,
+    hourly_rate_usd: float,
+) -> None:
+    """Generate timing JSONL and log it as an MLflow artifact.
+
+    No-op when there is no timing data (setup_durations empty AND
+    training_seconds <= 0).
+
+    Parameters
+    ----------
+    setup_durations:
+        Operation name -> duration in seconds (from parse_setup_timing).
+    training_seconds:
+        Total training time in seconds.
+    epoch_count:
+        Number of epochs completed.
+    hourly_rate_usd:
+        Instance hourly cost in USD.
+    """
+    if not setup_durations and training_seconds <= 0:
+        return
+
+    timing_jsonl = generate_timing_jsonl(
+        setup_durations=setup_durations,
+        training_seconds=training_seconds,
+        epoch_count=epoch_count,
+        hourly_rate_usd=hourly_rate_usd,
+    )
+    mlflow.log_text(timing_jsonl, "timing/timing_report.jsonl")
+    logger.info("Logged timing JSONL artifact (%d bytes)", len(timing_jsonl))
 
 
 def _require_docker_context() -> None:
@@ -764,8 +855,6 @@ def training_flow(
     # Open MLflow run, log everything, then close cleanly
     mlflow_run_id: str | None = None
     try:
-        import mlflow
-
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment(experiment_name)
         # MLflow tags: flow_name is inline so AST checks in test_flow_name_tags.py pass.
@@ -813,6 +902,7 @@ def training_flow(
                 if isinstance(fr, dict)
             )
             _setup_seconds = 0.0
+            _setup_durations: dict[str, float] = {}
             try:
                 from minivess.observability.infrastructure_timing import (
                     parse_setup_timing,
@@ -828,6 +918,23 @@ def training_flow(
                     training_seconds=_total_training_seconds,
                     epoch_count=max_epochs * len(fold_results),
                 )
+
+            # Log epoch-0 cost estimate (#717 — wire dead code)
+            if _total_training_seconds > 0:
+                log_epoch0_cost_estimate(
+                    training_time_seconds=_total_training_seconds,
+                    max_epochs=max_epochs,
+                    num_folds=num_folds,
+                    hourly_rate_usd=get_hourly_rate_usd(),
+                )
+
+            # Log timing JSONL artifact (#683 — wire dead code)
+            log_timing_jsonl_artifact(
+                setup_durations=_setup_durations,
+                training_seconds=_total_training_seconds,
+                epoch_count=max_epochs * len(fold_results),
+                hourly_rate_usd=get_hourly_rate_usd(),
+            )
 
     except Exception:
         logger.warning("Failed to open/finalize MLflow run", exc_info=True)

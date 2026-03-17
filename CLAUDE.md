@@ -344,7 +344,15 @@ Full registry: `docs/datasets/README.md` + `src/minivess/data/external_datasets.
 
 ## Knowledge Graph
 
-Read [`knowledge-graph/navigator.yaml`](knowledge-graph/navigator.yaml) FIRST → route to domain → load on demand.
-5 layers: rules (L0) → CLAUDE.md (L1) → domain CLAUDE.md (L2) → KG decisions (L3) → planning docs (L4).
-52 PRD decision nodes. PRD Skill: `.claude/skills/prd-update/SKILL.md`.
-OpenSpec: `openspec/` — spec-driven development via `/opsx:propose`.
+Read [`knowledge-graph/navigator.yaml`](knowledge-graph/navigator.yaml) FIRST -> route to domain -> load on demand.
+
+6-layer architecture ([docs/planning/prd-kg-openspec-architecture.md](docs/planning/prd-kg-openspec-architecture.md)):
+- **L0**: `.claude/rules/` + `CLAUDE.md` (Constitution -- invariant rules)
+- **L1**: `docs/planning/` + `MEMORY.md` (Hot Context -- current work)
+- **L2**: `knowledge-graph/navigator.yaml` (Navigator -- domain routing)
+- **L3**: `knowledge-graph/decisions/*.yaml` + `domains/*.yaml` (Evidence -- 65 Bayesian decision nodes)
+- **L4**: `openspec/specs/` (Specifications -- GIVEN/WHEN/THEN testable scenarios)
+- **L5**: `src/` + `tests/` (Implementation -- actual code)
+
+65 PRD decision nodes across 11 domains. PRD Skill: `.claude/skills/prd-update/SKILL.md`.
+OpenSpec: `openspec/` -- spec-driven development via `/opsx:propose`.

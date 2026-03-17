@@ -4,7 +4,29 @@ description: >
   TWO providers: RunPod (env/dev) + GCP (staging/prod). No others without explicit user authorization.
   Each Prefect flow has an INDEPENDENTLY configurable compute target — no flow is hardcoded to any
   provider. Researchers decide where each flow runs via Prefect deployment config.
-last_reviewed: "2026-03-16"
+last_reviewed: "2026-03-17"
+
+decisions:
+  cloud_provider_selection:
+    status: resolved
+    winner: runpod_gcp_dual
+    rationale: "TWO providers: RunPod (env/dev) + GCP (staging/prod). Explicit ban on third provider."
+    implementation: [configs/cloud/runpod_dev.yaml, configs/cloud/gcp_spot.yaml]
+    prd_node: knowledge-graph/decisions/L4-infrastructure/cloud_provider_selection.yaml
+
+  dvc_remote_strategy:
+    status: resolved
+    winner: minio_local_gcs_cloud
+    rationale: "MinIO for local Docker Compose dev, GCS for staging/prod. No AWS S3."
+    implementation: [.dvc/config]
+    prd_node: knowledge-graph/decisions/L3-technology/dvc_remote_strategy.yaml
+
+  compute_orchestration:
+    status: resolved
+    winner: skypilot_broker
+    rationale: "SkyPilot intercloud broker (Yang et al., NSDI'23) for all cloud compute"
+    implementation: [src/minivess/compute/skypilot_launcher.py, deployment/skypilot/]
+    prd_node: knowledge-graph/decisions/L4-infrastructure/compute_orchestration.yaml
 
 # ─── HARD CONSTRAINT ──────────────────────────────────────────────────────────
 # The repo has EXACTLY two cloud compute providers. Adding a third (AWS, Azure,

@@ -1,8 +1,21 @@
 domain: testing
-description: Test tiers, markers, fixtures, CI, QA
-last_reviewed: "2026-03-13"
+description: Test tiers, markers, fixtures, CI, QA, frameworks
+last_reviewed: "2026-03-17"
 
-decisions: {}
+decisions:
+  test_framework:
+    status: resolved
+    winner: pytest_hypothesis
+    rationale: "pytest for unit/integration, Hypothesis for property-based testing"
+    implementation: [pyproject.toml, pytest-staging.ini]
+    prd_node: knowledge-graph/decisions/L3-technology/test_framework.yaml
+
+  test_tier_strategy:
+    status: resolved
+    winner: three_tier_staging_prod_gpu
+    rationale: "Staging (<3min, no models), Prod (5-10min, all except GPU), GPU (external instances)"
+    implementation: [Makefile, pytest-staging.ini]
+    prd_node: knowledge-graph/decisions/L3-technology/test_tier_strategy.yaml
 
 tiers:
   staging:

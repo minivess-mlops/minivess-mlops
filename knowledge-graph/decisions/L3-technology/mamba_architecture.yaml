@@ -1,0 +1,53 @@
+decision_id: mamba_architecture
+title: "Mamba/SSM Architecture for Vessel Segmentation"
+level: L3-technology
+status: resolved
+
+options:
+  - id: mambavesselnet_pp
+    name: "MambaVesselNet++ (Hybrid CNN-SSM)"
+    prior_probability: 0.35
+    posterior_probability: 0.85
+    description: "3D U-shaped hybrid with VSS blocks, multi-scale feature fusion, and optional topology loss"
+  - id: umamba_enc
+    name: "U-Mamba Encoder"
+    prior_probability: 0.25
+    posterior_probability: 0.05
+  - id: vim_3d
+    name: "Vision Mamba 3D"
+    prior_probability: 0.20
+    posterior_probability: 0.05
+  - id: no_mamba
+    name: "No Mamba Architecture"
+    prior_probability: 0.20
+    posterior_probability: 0.05
+
+resolved_option: mambavesselnet_pp
+
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/adapters/mamba_adapter.py"
+    finding: "MambaVesselNet++ adapter with VSS blocks, multi-scale fusion"
+  - type: experiment
+    source: "docs/planning/mambavesselnet-implementation-plan.xml"
+    finding: "T00-T10 implementation plan executed; adapter passes smoke tests"
+
+implementation:
+  files:
+    - src/minivess/adapters/mamba_adapter.py
+    - src/minivess/adapters/mamba/backbone.py
+    - src/minivess/adapters/mamba/vss_block.py
+  tests:
+    - tests/v2/unit/adapters/test_mamba_adapter.py
+    - tests/v2/unit/adapters/test_mamba_backbone.py
+
+conditional_on:
+  - parent_decision_id: model_adapter_pattern
+    influence_strength: strong
+  - parent_decision_id: primary_3d_model
+    influence_strength: moderate
+
+volatility:
+  classification: evolving
+  next_review: "2026-06-17"
+  rationale: "Mamba/SSM landscape rapidly evolving; new architectures emerging"

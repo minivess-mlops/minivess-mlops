@@ -1,0 +1,48 @@
+decision_id: publication_target
+title: "Publication Target"
+level: L1-research-goals
+status: resolved
+
+options:
+  - id: nature_protocols
+    name: "Nature Protocols"
+    prior_probability: 0.35
+    posterior_probability: 0.85
+    description: "Protocol paper documenting the MLOps platform for biomedical imaging"
+  - id: jmlr_mlsys
+    name: "JMLR / MLSys"
+    prior_probability: 0.25
+    posterior_probability: 0.05
+  - id: miccai_workshop
+    name: "MICCAI Workshop Paper"
+    prior_probability: 0.20
+    posterior_probability: 0.05
+  - id: arxiv_preprint
+    name: "arXiv Preprint Only"
+    prior_probability: 0.15
+    posterior_probability: 0.03
+  - id: no_publication
+    name: "No Publication"
+    prior_probability: 0.05
+    posterior_probability: 0.02
+
+resolved_option: nature_protocols
+
+resolution_evidence:
+  - type: discussion
+    source: "docs/planning/repo-to-manuscript.md"
+    finding: "Paper target: Nature Protocols; working name: NEUROVEX"
+
+implementation:
+  files:
+    - knowledge-graph/manuscript/claims.yaml
+    - knowledge-graph/manuscript/methods.yaml
+    - knowledge-graph/manuscript/results.yaml
+  tests: []
+
+conditional_on: []
+
+volatility:
+  classification: stable
+  next_review: "2026-09-17"
+  rationale: "Nature Protocols is the stated target; paper structure already scaffolded"

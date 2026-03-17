@@ -1,0 +1,51 @@
+decision_id: dataset_strategy
+title: "Dataset Strategy"
+level: L3-technology
+status: resolved
+
+options:
+  - id: minivess_primary_external_test
+    name: "MiniVess Primary + External Test Datasets"
+    prior_probability: 0.40
+    posterior_probability: 0.88
+    description: "MiniVess (70 vols) primary; DeepVess/TubeNet/VesselNN for external validation"
+  - id: multi_dataset_equal
+    name: "Multiple Datasets (Equal Weight)"
+    prior_probability: 0.25
+    posterior_probability: 0.05
+  - id: synthetic_primary
+    name: "Synthetic Data Primary"
+    prior_probability: 0.20
+    posterior_probability: 0.05
+  - id: minivess_only
+    name: "MiniVess Only"
+    prior_probability: 0.15
+    posterior_probability: 0.02
+
+resolved_option: minivess_primary_external_test
+
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/data/external_datasets.py"
+    finding: "External dataset registry with DeepVess, TubeNet, VesselNN"
+  - type: implementation
+    source: "configs/splits/3fold_seed42.json"
+    finding: "3-fold cross-validation with seed=42 (47 train / 23 val)"
+
+implementation:
+  files:
+    - src/minivess/data/external_datasets.py
+    - configs/splits/3fold_seed42.json
+    - data/minivess.dvc
+  tests: []
+
+conditional_on:
+  - parent_decision_id: data_validation_depth
+    influence_strength: moderate
+  - parent_decision_id: data_versioning
+    influence_strength: strong
+
+volatility:
+  classification: stable
+  next_review: "2026-06-17"
+  rationale: "MiniVess is the canonical dataset; external datasets add generalization evidence"

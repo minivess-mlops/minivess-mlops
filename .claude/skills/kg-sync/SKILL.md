@@ -1,7 +1,28 @@
+---
+name: kg-sync
+version: 2.0.0
+description: >
+  Keep Knowledge Graph synchronized with live repo state.
+  Scan code (AST), scan experiments (DuckDB), propagate belief changes,
+  detect staleness, generate downstream artifacts, export to sci-llm-writer.
+last_updated: 2026-03-17
+activation: manual
+invocation: /kg-sync
+revision_notes: >
+  v2.0.0: Skills 2.0 format. Added 6-layer architecture awareness.
+  Materialization protocol links PRD decisions to KG domain entries.
+  v1.0.0: Initial 7-step workflow.
+---
+
 # kg-sync Skill
 
 A reproducible Skill for keeping the Knowledge Graph synchronized with the live repo state
 and exporting a snapshot to sci-llm-writer for manuscript generation.
+
+## 6-Layer Architecture Context
+
+This skill operates at Layer 3 (Evidence) and generates Layer 5 artifacts.
+See `docs/planning/prd-kg-openspec-architecture.md` for the full architecture.
 
 ## When to Use
 

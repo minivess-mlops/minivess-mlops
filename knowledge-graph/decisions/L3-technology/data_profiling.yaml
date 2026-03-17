@@ -3,20 +3,25 @@ title: "Data Profiling Tool"
 level: L3-technology
 status: config_only
 options:
-  - {id: whylogs, name: "whylogs", prior_probability: 0.45, posterior_probability: 0.55}
-  - {id: great_expectations, name: "Great Expectations", prior_probability: 0.30, posterior_probability: 0.25}
+  - {id: whylogs, name: "whylogs", prior_probability: 0.45, posterior_probability: 0.60}
+  - {id: great_expectations, name: "Great Expectations", prior_probability: 0.30, posterior_probability: 0.20}
   - {id: pandera_only, name: "Pandera Only", prior_probability: 0.20, posterior_probability: 0.15}
   - {id: none, name: "None", prior_probability: 0.05, posterior_probability: 0.05}
 resolution_evidence:
   - type: implementation
     source: "pyproject.toml"
-    finding: "whylogs in optional dependencies"
+    finding: "whylogs in optional dependencies (extras: monitoring)"
+  - type: discussion
+    source: "docs/planning/data-engineering-quality-etl-report.md"
+    finding: "whylogs for lightweight data profiling; Great Expectations for deep validation"
 implementation:
-  files: []
+  files:
+    - pyproject.toml
   tests: []
 conditional_on:
   - {parent_decision_id: data_validation_depth, influence_strength: moderate}
+  - {parent_decision_id: drift_monitoring, influence_strength: weak}
 volatility:
   classification: evolving
-  next_review: "2026-04-13"
-  rationale: "whylogs selected but integration minimal"
+  next_review: "2026-06-17"
+  rationale: "whylogs selected and installed but deep integration pending"

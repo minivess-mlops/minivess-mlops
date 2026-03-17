@@ -95,13 +95,50 @@ When a PRD update reveals new implementation work:
 - Author et al. (Year). "Title." DOI/arXiv
 ```
 
+## PRD -> KG Materialization Protocol
+
+When a PRD decision node is resolved (posterior >= 0.80 for the winner), it must
+be materialized into the Knowledge Graph domain files. This is the connection
+between probabilistic reasoning (PRD) and deterministic implementation (KG).
+
+See: `docs/planning/prd-kg-openspec-architecture.md` for the full architecture.
+
+### Materialization Steps
+
+1. **Check resolution threshold**: `status: resolved` AND winner's `posterior_probability >= 0.80`
+2. **Update KG domain file**: Add/update the decision entry in the appropriate
+   `knowledge-graph/domains/*.yaml` with `winner:`, `rationale:`, `implementation:`, `prd_node:`
+3. **Update _network.yaml**: Ensure node and edges exist in `knowledge-graph/_network.yaml`
+4. **Update navigator.yaml**: Ensure the decision ID appears in the domain's `decisions:` list
+5. **Create OpenSpec spec** (optional): If the decision is implementation-ready,
+   create a GIVEN/WHEN/THEN spec in `openspec/specs/` via `/opsx:propose`
+6. **Propagation check**: Check `_network.yaml propagation:` section for downstream
+   nodes that need `requires_review: true` flags
+
+### Status -> KG Mapping
+
+| PRD Status | KG Representation | OpenSpec? |
+|-----------|-------------------|-----------|
+| `resolved` (posterior >= 0.80) | `winner:` field in domain YAML | Yes |
+| `partial` (no clear winner) | `candidates:` list in domain YAML | No |
+| `config_only` (tool selected, not integrated) | `winner:` with note | Optional |
+| `not_started` (unexplored) | `candidates:` or omitted | No |
+
+### Invariant: KG-PRD Consistency
+
+After materialization, these MUST hold:
+- Every `prd_node:` in domain YAML points to an existing decision file
+- Every resolved decision in `_network.yaml` has a corresponding `winner:` in its domain
+- The `decisions:` list in `navigator.yaml` includes all decision IDs for each domain
+
 ## Workflow
 1. Run the operation's protocol
 2. Run `validate` protocol to check ALL invariants (including citation integrity)
 3. Update `_network.yaml` if nodes/edges changed
 4. Update `bibliography.yaml` if new references were cited
-5. Create GitHub issues for implementation work revealed by the update
-6. Commit changes with descriptive message
+5. **Materialize to KG** if decision status changed to resolved (see protocol above)
+6. Create GitHub issues for implementation work revealed by the update
+7. Commit changes with descriptive message
 
 ## Reviewer Agent Checklist
 When reviewing PRD changes (manually or via CI), verify:
