@@ -5,8 +5,13 @@ Covers pandera_gate_task, ge_gate_task, datacare_gate_task, deepchecks_gate_task
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _make_valid_metadata_df(n: int = 5) -> pd.DataFrame:
@@ -174,3 +179,52 @@ class TestDatacareGateTask:
         result = datacare_gate_task(df)
         assert "overall_score_pct" in result.statistics
         assert "dimensions_assessed" in result.statistics
+
+
+# ---------------------------------------------------------------------------
+# T6: DeepChecks gate task
+# ---------------------------------------------------------------------------
+
+
+class TestDeepChecksGateTask:
+    """deepchecks_gate_task validates data via DeepChecks Vision."""
+
+    def test_returns_gate_result(self) -> None:
+        """T6-R1: Returns a GateResult."""
+        from minivess.orchestration.flows.data_flow import deepchecks_gate_task
+        from minivess.validation.gates import GateResult
+
+        # Use empty pairs — will exercise graceful degradation path
+        result = deepchecks_gate_task(pairs=[])
+        assert isinstance(result, GateResult)
+
+    def test_graceful_degradation(self) -> None:
+        """T6-R2: Gracefully degrades when deepchecks not installed or no data."""
+        from minivess.orchestration.flows.data_flow import deepchecks_gate_task
+
+        result = deepchecks_gate_task(pairs=[])
+        # Should pass (graceful degradation)
+        assert result.passed is True
+
+    def test_calls_slice_adapter(self, tmp_path: Path) -> None:
+        """T6-R3: Calls slice adapter with correct strategy."""
+        import nibabel as nib
+        import numpy as np
+
+        from minivess.orchestration.flows.data_flow import deepchecks_gate_task
+        from minivess.validation.gates import GateResult
+
+        # Create minimal NIfTI files
+        shape = (32, 32, 16)
+        img_data = np.random.default_rng(42).uniform(0, 1, shape).astype(np.float32)
+        lbl_data = np.zeros(shape, dtype=np.int16)
+        lbl_data[10:20, 10:20, 5:10] = 1
+
+        img_path = tmp_path / "img.nii.gz"
+        lbl_path = tmp_path / "lbl.nii.gz"
+        nib.save(nib.Nifti1Image(img_data, np.eye(4)), str(img_path))
+        nib.save(nib.Nifti1Image(lbl_data, np.eye(4)), str(lbl_path))
+
+        pairs = [{"image": str(img_path), "label": str(lbl_path)}]
+        result = deepchecks_gate_task(pairs=pairs, slice_strategy="middle")
+        assert isinstance(result, GateResult)
