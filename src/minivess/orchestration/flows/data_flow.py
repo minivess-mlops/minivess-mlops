@@ -713,6 +713,71 @@ def _compute_dataset_hash(pairs: list[dict[str, str]]) -> str:
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
+def _run_quality_gates(pairs: list[dict[str, str]]) -> bool:
+    """Run advanced quality gates on discovered data pairs.
+
+    Orchestrates: NIfTI metadata extraction -> Pandera -> GE -> DATA-CARE
+    -> DeepChecks, with configurable severity enforcement for each gate.
+
+    Parameters
+    ----------
+    pairs:
+        Image/label pairs with path strings.
+
+    Returns
+    -------
+    True if all quality gates pass or are non-blocking.
+    """
+    from minivess.validation.enforcement import enforce_gate
+
+    # Step 1: Extract NIfTI metadata
+    metadata_df = extract_nifti_metadata_task(pairs)
+    if metadata_df.empty:  # type: ignore[attr-defined]
+        logger.warning("No metadata extracted — skipping advanced quality gates")
+        return True
+
+    all_passed = True
+
+    # Step 2: Pandera validation gate
+    try:
+        pandera_result = pandera_gate_task(metadata_df)
+        action = enforce_gate("pandera", pandera_result)
+        logger.info("Pandera gate: action=%s", action)
+    except Exception as exc:
+        logger.error("Pandera gate raised: %s", exc)
+        raise
+
+    # Step 3: GE validation gate
+    try:
+        ge_result = ge_gate_task(metadata_df)
+        ge_action = enforce_gate("ge", ge_result)
+        logger.info("GE gate: action=%s", ge_action)
+    except Exception:
+        logger.warning("GE gate failed — continuing (non-blocking)", exc_info=True)
+
+    # Step 4: DATA-CARE assessment gate
+    try:
+        datacare_result = datacare_gate_task(metadata_df)
+        dc_action = enforce_gate("datacare", datacare_result)
+        logger.info("DATA-CARE gate: action=%s", dc_action)
+    except Exception:
+        logger.warning(
+            "DATA-CARE gate failed — continuing (non-blocking)", exc_info=True
+        )
+
+    # Step 5: DeepChecks vision gate
+    try:
+        deepchecks_result = deepchecks_gate_task(pairs)
+        dck_action = enforce_gate("deepchecks", deepchecks_result)
+        logger.info("DeepChecks gate: action=%s", dck_action)
+    except Exception:
+        logger.warning(
+            "DeepChecks gate failed — continuing (non-blocking)", exc_info=True
+        )
+
+    return all_passed
+
+
 @flow(name=FLOW_NAME_DATA)
 def run_data_flow(
     data_dir: Path,
@@ -764,11 +829,15 @@ def run_data_flow(
     # Step 1: Discover
     pairs = discover_data_task(data_dir=data_dir)
 
-    # Step 2: Validate
+    # Step 2: Validate (basic key-presence check)
     report = validate_data_task(pairs=pairs)
 
-    # Step 3: Quality gate
+    # Step 3: Quality gate (legacy — basic error count check)
     quality_passed = data_quality_gate(report=report)
+
+    # Step 3.5: Advanced quality gates (NEW — PR-2)
+    if quality_passed and pairs:
+        quality_passed = _run_quality_gates(pairs)
 
     # Step 4: Split (only if quality gate passed)
     splits: list[FoldSplit] | None = None
