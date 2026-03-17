@@ -1,7 +1,7 @@
 decision_id: vlm_calibration
 title: "VLM/Foundation Model Calibration Strategy"
 level: L3-technology
-status: planned
+status: not_started
 description: >
   Calibration approaches specific to Vision-Language Models and foundation models
   (SAM3, VesselFM). Standard calibration methods (temperature scaling, isotonic

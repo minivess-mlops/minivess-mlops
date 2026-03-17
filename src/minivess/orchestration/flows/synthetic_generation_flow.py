@@ -20,8 +20,23 @@ import numpy as np
 from prefect import flow, task
 
 from minivess.data.synthetic import generate_stack, list_generators
+from minivess.orchestration.constants import FLOW_NAME_SYNTHETIC_GENERATION
 
 logger = logging.getLogger(__name__)
+
+
+def _require_docker_context() -> None:
+    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
+    import os
+
+    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
+        return
+    if not Path("/.dockerenv").exists():
+        msg = (
+            "Synthetic generation flow must run inside Docker. "
+            "Set MINIVESS_ALLOW_HOST=1 for pytest only."
+        )
+        raise RuntimeError(msg)
 
 
 @task(name="generate-synthetic-volumes")
@@ -77,7 +92,7 @@ def generate_volumes_task(
     }
 
 
-@flow(name="synthetic-generation")
+@flow(name=FLOW_NAME_SYNTHETIC_GENERATION)
 def synthetic_generation_flow(
     method: str = "debug",
     n_volumes: int = 10,
@@ -101,6 +116,8 @@ def synthetic_generation_flow(
     -------
     Dict with status, results per method, and summary.
     """
+    _require_docker_context()
+
     results: list[dict[str, Any]] = []
 
     methods = list_generators() if method == "all" else [method]
@@ -129,3 +146,7 @@ def synthetic_generation_flow(
         "results": results,
         "timestamp": datetime.now(UTC).isoformat(),
     }
+
+
+if __name__ == "__main__":
+    synthetic_generation_flow()

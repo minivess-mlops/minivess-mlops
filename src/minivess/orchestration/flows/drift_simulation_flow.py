@@ -25,8 +25,23 @@ from prefect import flow, task
 
 from minivess.data.feature_extraction import extract_batch_features
 from minivess.observability.drift import FeatureDriftDetector
+from minivess.orchestration.constants import FLOW_NAME_DRIFT_SIMULATION
 
 logger = logging.getLogger(__name__)
+
+
+def _require_docker_context() -> None:
+    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
+    import os
+
+    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
+        return
+    if not Path("/.dockerenv").exists():
+        msg = (
+            "Drift simulation flow must run inside Docker. "
+            "Set MINIVESS_ALLOW_HOST=1 for pytest only."
+        )
+        raise RuntimeError(msg)
 
 
 @task(name="extract-reference-features")
@@ -138,7 +153,7 @@ def save_drift_summary_task(
     return str(summary_path)
 
 
-@flow(name="drift-simulation")
+@flow(name=FLOW_NAME_DRIFT_SIMULATION)
 def drift_simulation_flow(
     reference_volumes: list[np.ndarray] | None = None,
     batches: list[list[np.ndarray]] | None = None,
@@ -162,6 +177,8 @@ def drift_simulation_flow(
     -------
     Dict with status, n_batches, batch_results, and summary path.
     """
+    _require_docker_context()
+
     if reference_volumes is None or batches is None:
         logger.warning("No data provided — returning empty result")
         return {
@@ -201,3 +218,7 @@ def drift_simulation_flow(
         "batch_results": batch_results,
         "summary_path": summary_path,
     }
+
+
+if __name__ == "__main__":
+    drift_simulation_flow()

@@ -136,8 +136,8 @@ class TestLogFoldResultsTaskCheckpointTag:
         client = MlflowClient(tracking_uri=tracking_uri)
         run_data = client.get_run(run_id)
         metrics = run_data.data.metrics
-        assert "fold_0_best_val_loss" in metrics
-        assert metrics["fold_0_best_val_loss"] == pytest.approx(0.5)
+        assert "fold/0/best_val_loss" in metrics
+        assert metrics["fold/0/best_val_loss"] == pytest.approx(0.5)
 
 
 class TestParentRunIdTag:
