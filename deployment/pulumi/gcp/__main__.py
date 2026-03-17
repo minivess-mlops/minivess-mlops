@@ -230,10 +230,6 @@ if enable_cloud_run:
                                 lambda n: f"gs://{n}"
                             ),
                         },
-                        {
-                            "name": "MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD",
-                            "value": "true",
-                        },
                         {"name": "MLFLOW_SERVER_ALLOWED_HOSTS", "value": "*"},
                         {
                             "name": "MLFLOW_ARTIFACT_UPLOAD_DOWNLOAD_TIMEOUT",

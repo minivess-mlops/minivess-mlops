@@ -63,12 +63,9 @@ envs:
   # Note: SkyPilot only supports ${VAR} expansion (not ${VAR:-default}).
   MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
 
-  # CRITICAL: Enable multipart upload on CLIENT side.
-  # Cloud Run has 32 MB request limit — 910 MB checkpoints must use chunked upload.
-  # With multipart enabled, MLflow generates presigned GCS URLs and client
-  # uploads chunks directly to GCS, bypassing the 32 MB Cloud Run limit.
-  MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD: "true"
-  MLFLOW_MULTIPART_UPLOAD_CHUNK_SIZE: "10485760"
+  # MLflow server uses --no-serve-artifacts: client uploads directly to GCS.
+  # No proxy multipart needed — google-cloud-storage handles resumable upload.
+  # See: .claude/metalearning/2026-03-17-docker-research-report-false-premise.md
 
   GIT_PYTHON_REFRESH: quiet
   MINIVESS_ALLOW_HOST: "1"
