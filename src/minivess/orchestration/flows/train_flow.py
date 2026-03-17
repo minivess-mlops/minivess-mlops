@@ -666,25 +666,25 @@ def log_fold_results_task(
         client = MlflowClient()
         best_val_loss = result.get("best_val_loss", float("nan"))
         final_epoch = result.get("final_epoch", 0)
-        client.log_metric(mlflow_run_id, f"fold_{fold_id}_best_val_loss", best_val_loss)
+        client.log_metric(mlflow_run_id, f"fold/{fold_id}/best_val_loss", best_val_loss)
         client.log_metric(
-            mlflow_run_id, f"fold_{fold_id}_final_epoch", float(final_epoch)
+            mlflow_run_id, f"fold/{fold_id}/final_epoch", float(final_epoch)
         )
         # Log per-epoch val_loss history for the fold
         for epoch, val_loss in enumerate(
             result.get("history", {}).get("val_loss", []), start=1
         ):
             client.log_metric(
-                mlflow_run_id, f"fold_{fold_id}_val_loss", val_loss, step=epoch
+                mlflow_run_id, f"fold/{fold_id}/val_loss", val_loss, step=epoch
             )
-        # Also log val_loss (without fold prefix) for cross-fold visibility
+        # Also log val/loss (without fold prefix) for cross-fold visibility
         if result.get("history", {}).get("val_loss"):
             for epoch, val_loss in enumerate(result["history"]["val_loss"], start=1):
-                client.log_metric(mlflow_run_id, "val_loss", val_loss, step=epoch)
+                client.log_metric(mlflow_run_id, "val/loss", val_loss, step=epoch)
         # T09: Log VRAM peak to MLflow (#744)
         _vram_mb = result.get("vram_peak_mb", 0)
         if _vram_mb > 0:
-            client.log_metric(mlflow_run_id, "vram_peak_mb", float(_vram_mb))
+            client.log_metric(mlflow_run_id, "vram/peak_mb", float(_vram_mb))
 
         # Tag checkpoint_dir so post-training flow can discover it via FlowContract
         if checkpoint_dir is not None:
@@ -893,7 +893,7 @@ def training_flow(
                     checkpoint_dir=fold_checkpoint_dirs.get(fold_id),
                 )
 
-            mlflow.log_metric("n_folds_completed", float(len(fold_results)))
+            mlflow.log_metric("fold/n_completed", float(len(fold_results)))
 
             # Log cost analysis after training (#683)
             _total_training_seconds = sum(
