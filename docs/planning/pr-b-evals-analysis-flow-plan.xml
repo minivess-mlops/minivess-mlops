@@ -536,6 +536,34 @@
       </files_to_modify>
       <estimated_iterations>2</estimated_iterations>
     </task>
+
+    <task id="T11" status="NOT_STARTED" priority="P1" issue="799">
+      <name>OpenLineage event emission for analysis flow</name>
+      <description>
+        Wire LineageEmitter.pipeline_run() to analysis_flow.py.
+        Inputs: checkpoints, evaluation_config
+        Outputs: evaluation_metrics, ensemble_models, per_volume_scores
+      </description>
+      <tdd_spec>
+        <tests>
+          test_analysis_flow_emits_lineage
+          test_analysis_flow_lineage_ensemble_datasets
+        </tests>
+        <file>tests/v2/unit/test_flow_lineage_emission.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/analysis_flow.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - OpenLineage events emitted for analysis flow
+        - Ensemble member datasets recorded as inputs
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/analysis_flow.py
+        tests/v2/unit/test_flow_lineage_emission.py
+      </files_to_modify>
+      <estimated_iterations>1</estimated_iterations>
+    </task>
   </phase>
 
 </plan>

@@ -207,6 +207,39 @@
       </files_to_modify>
       <estimated_iterations>2</estimated_iterations>
     </task>
+
+    <task id="T5" status="NOT_STARTED" priority="P1" issue="799">
+      <name>OpenLineage event emission for deploy flow</name>
+      <description>
+        Wire LineageEmitter.pipeline_run() to deploy_flow.py.
+        Inputs: champion_model, mlflow_registry
+        Outputs: onnx_export, bentoml_model, deployment_artifacts
+
+        The deploy flow lineage is especially important for clinical pathway:
+        it documents which model version was deployed, when, and with what
+        configuration — directly satisfying IEC 62304 Clause 8.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_deploy_flow_emits_lineage
+          test_deploy_flow_lineage_champion_metadata
+        </tests>
+        <file>tests/v2/unit/test_flow_lineage_emission.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/deploy_flow.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - OpenLineage events emitted for deploy flow
+        - Champion model metadata captured in event
+        - Deployment artifacts recorded as output datasets
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/deploy_flow.py
+        tests/v2/unit/test_flow_lineage_emission.py
+      </files_to_modify>
+      <estimated_iterations>1</estimated_iterations>
+    </task>
   </phase>
 
 </plan>

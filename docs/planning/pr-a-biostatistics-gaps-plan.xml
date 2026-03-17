@@ -411,6 +411,38 @@
       </files_to_modify>
       <estimated_iterations>3</estimated_iterations>
     </task>
+
+    <task id="T9" status="NOT_STARTED" priority="P1" issue="799">
+      <name>OpenLineage event emission for biostatistics flow</name>
+      <description>
+        Wire LineageEmitter.pipeline_run() to biostatistics_flow.py. The biostatistics
+        flow already has its own lineage manifest (biostatistics_lineage.py) — this task
+        connects it to the OpenLineage standard so events are interoperable.
+
+        Inputs: mlflow_runs, duckdb
+        Outputs: figures, tables, lineage_manifest, duckdb_analytics
+      </description>
+      <tdd_spec>
+        <tests>
+          test_biostatistics_flow_emits_lineage
+          test_biostatistics_lineage_openlineage_bridge
+        </tests>
+        <file>tests/v2/unit/test_flow_lineage_emission.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/biostatistics_flow.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - OpenLineage events emitted alongside existing lineage manifest
+        - Input datasets reference upstream MLflow experiments
+        - Output datasets list generated artifacts
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/biostatistics_flow.py
+        tests/v2/unit/test_flow_lineage_emission.py
+      </files_to_modify>
+      <estimated_iterations>1</estimated_iterations>
+    </task>
   </phase>
 
 </plan>

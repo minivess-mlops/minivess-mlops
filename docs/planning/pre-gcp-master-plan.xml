@@ -19,7 +19,7 @@
 
   <master-plan>
     <metadata>
-      <total-issues>5 PRs, ~31 TDD tasks</total-issues>
+      <total-issues>5 PRs, ~36 TDD tasks (incl. OpenLineage wiring per Issue #799)</total-issues>
       <total-branches>5</total-branches>
       <estimated-duration>8-12 hours of coding (across multiple sessions)</estimated-duration>
     </metadata>

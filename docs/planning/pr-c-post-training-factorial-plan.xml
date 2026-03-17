@@ -318,6 +318,49 @@
       </files_to_modify>
       <estimated_iterations>1</estimated_iterations>
     </task>
+
+    <task id="T7" status="NOT_STARTED" priority="P1" issue="799">
+      <name>OpenLineage event emission for post-training + train flows</name>
+      <description>
+        Wire LineageEmitter.pipeline_run() context manager to post_training_flow.py
+        and verify train_flow.py also emits OpenLineage events.
+
+        Each flow wraps its main execution with:
+          with emitter.pipeline_run(job_name="post-training-flow",
+            inputs=[{"namespace": "minivess", "name": "checkpoints"}],
+            outputs=[{"namespace": "minivess", "name": "swa_checkpoints"}]):
+            ... existing flow code ...
+
+        Events stored locally (always) + sent to Marquez (if configured).
+        Zero DevEx impact — invisible to researchers.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_post_training_flow_emits_lineage_start
+          test_post_training_flow_emits_lineage_complete
+          test_post_training_flow_lineage_datasets
+          test_train_flow_emits_lineage
+        </tests>
+        <file>tests/v2/unit/test_flow_lineage_emission.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/post_training_flow.py
+          src/minivess/orchestration/flows/train_flow.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - START event emitted at flow entry
+        - COMPLETE event emitted at flow success
+        - FAIL event emitted on exception
+        - Input/output datasets recorded
+        - Events accessible via emitter.get_events_for_job()
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/post_training_flow.py
+        src/minivess/orchestration/flows/train_flow.py
+        tests/v2/unit/test_flow_lineage_emission.py (new)
+      </files_to_modify>
+      <estimated_iterations>1</estimated_iterations>
+    </task>
   </phase>
 
 </plan>
