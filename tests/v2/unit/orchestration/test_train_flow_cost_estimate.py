@@ -18,10 +18,10 @@ class TestEpoch0CostLoggedToMLflow:
         from minivess.orchestration.flows.train_flow import log_epoch0_cost_estimate
 
         mock_estimate = {
-            "estimated_total_cost": 1.50,
-            "estimated_total_hours": 2.0,
-            "cost_per_epoch": 0.03,
-            "epoch_seconds": 120.0,
+            "est/total_cost": 1.50,
+            "est/total_hours": 2.0,
+            "est/cost_per_epoch": 0.03,
+            "est/epoch_seconds": 120.0,
         }
 
         with (
@@ -42,9 +42,9 @@ class TestEpoch0CostLoggedToMLflow:
             )
             mock_mlflow.log_metrics.assert_called_once()
             logged_dict = mock_mlflow.log_metrics.call_args[0][0]
-            assert "estimated_total_cost" in logged_dict
-            assert "estimated_total_hours" in logged_dict
-            assert "cost_per_epoch" in logged_dict
+            assert "est/total_cost" in logged_dict
+            assert "est/total_hours" in logged_dict
+            assert "est/cost_per_epoch" in logged_dict
 
     def test_epoch0_cost_skipped_for_single_epoch(self) -> None:
         """When max_epochs == 1, cost estimate should not be logged."""
@@ -70,10 +70,10 @@ class TestEpoch0CostLoggedToMLflow:
         from minivess.orchestration.flows.train_flow import log_epoch0_cost_estimate
 
         mock_estimate = {
-            "estimated_total_cost": 2.50,
-            "estimated_total_hours": 1.5,
-            "cost_per_epoch": 0.05,
-            "epoch_seconds": 120.0,
+            "est/total_cost": 2.50,
+            "est/total_hours": 1.5,
+            "est/cost_per_epoch": 0.05,
+            "est/epoch_seconds": 120.0,
         }
 
         with (
@@ -127,10 +127,5 @@ class TestEpoch0CostLoggedToMLflow:
                 hourly_rate_usd=hourly_rate,
             )
             logged_dict = mock_mlflow.log_metrics.call_args[0][0]
-            assert (
-                logged_dict["estimated_total_cost"] == expected["estimated_total_cost"]
-            )
-            assert (
-                logged_dict["estimated_total_hours"]
-                == expected["estimated_total_hours"]
-            )
+            assert logged_dict["est/total_cost"] == expected["est/total_cost"]
+            assert logged_dict["est/total_hours"] == expected["est/total_hours"]
