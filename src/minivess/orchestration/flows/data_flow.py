@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from minivess.data.splits import FoldSplit
+    from minivess.validation.gates import GateResult
 
 logger = logging.getLogger(__name__)
 
@@ -340,6 +341,42 @@ def extract_nifti_metadata_task(
             )
 
     return pd.DataFrame(rows, columns=columns)
+
+
+@task(name="pandera-validation-gate")
+def pandera_gate_task(metadata_df: pd.DataFrame) -> GateResult:
+    """Run Pandera NiftiMetadataSchema validation.
+
+    Parameters
+    ----------
+    metadata_df:
+        NIfTI metadata DataFrame.
+
+    Returns
+    -------
+    GateResult with pass/fail and error details.
+    """
+    from minivess.validation.gates import validate_nifti_metadata
+
+    return validate_nifti_metadata(metadata_df)
+
+
+@task(name="ge-validation-gate")
+def ge_gate_task(metadata_df: pd.DataFrame) -> GateResult:
+    """Run Great Expectations nifti_metadata_suite validation.
+
+    Parameters
+    ----------
+    metadata_df:
+        NIfTI metadata DataFrame.
+
+    Returns
+    -------
+    GateResult with pass/fail and error details.
+    """
+    from minivess.validation.ge_runner import validate_nifti_batch
+
+    return validate_nifti_batch(metadata_df)
 
 
 @task(name="data-quality-gate")
