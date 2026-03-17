@@ -14,6 +14,33 @@ decisions:
     rationale: "Nature Protocols; working name: NEUROVEX"
     prd_node: knowledge-graph/decisions/L1-research-goals/publication_target.yaml
 
+  tripod_compliance:
+    status: in_progress
+    winner: tripod_ai_plus_code_plus_llm
+    rationale: >
+      Three TRIPOD variants apply: TRIPOD+AI (27 items, primary), TRIPOD-LLM (19 items,
+      for Pydantic AI micro-orchestration), TRIPOD-Code (protocol stage, proactive).
+      Compliance matrix: docs/planning/tripod-compliance-matrix.md
+    references:
+      - citation_key: collins_2024_tripod_ai
+        citation: "Collins et al. (2024). TRIPOD+AI statement. BMJ 385:e078378."
+        url: https://doi.org/10.1136/bmj-2023-078378
+      - citation_key: gallifant_2025_tripod_llm
+        citation: "Gallifant et al. (2025). TRIPOD-LLM reporting guideline. Nat Med 31:60-69."
+        url: https://doi.org/10.1038/s41591-024-03425-5
+      - citation_key: pollard_2026_tripod_code
+        citation: "Pollard et al. (2026). Protocol for TRIPOD-Code. Diagn Progn Res 10:4."
+        url: https://doi.org/10.1186/s41512-025-00217-4
+    implementation:
+      - src/minivess/pipeline/biostatistics_lineage.py  # existing lineage manifest
+      - docs/planning/tripod-compliance-matrix.md        # compliance matrix
+    priority_gaps:
+      - "Sample size justification (TRIPOD+AI 9a)"
+      - "Participant flow diagram (TRIPOD+AI 6, 20a)"
+      - "Fairness statement (TRIPOD+AI 3c, 12f, 26)"
+      - "Cost transparency (TRIPOD-LLM 12)"
+      - "Zenodo archival (TRIPOD-Code)"
+
 # These are the YAML files in knowledge-graph/manuscript/ (to be created)
 sections:
   claims:
@@ -56,6 +83,15 @@ downstream_artifacts:
     consumer: sci-llm-writer
     generated_by: "/kg-sync --export-to sci-llm-writer"
     status: not_yet_generated
+
+reporting_guidelines:
+  tripod_ai:
+    file: docs/planning/tripod-compliance-matrix.md
+    description: "TRIPOD+AI/LLM/Code compliance matrix — 27+19 items mapped to implementation"
+    status: created
+    items_covered: 15  # of 27 TRIPOD+AI items fully/partially addressed
+    items_missing: 4   # fairness, PPI, registration, abstract
+    segmentation_adaptations: true  # prediction -> voxel segmentation probability
 
 intent_sources:
   - source: docs/planning/repo-to-manuscript.md
