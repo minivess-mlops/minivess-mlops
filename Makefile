@@ -40,6 +40,7 @@ help:
 	@echo "  dev-gpu-ssh           SSH into dev GPU pod"
 	@echo "  dev-gpu-sync          Pull /opt/vol/mlruns/ back to local mlruns/"
 	@echo "  dev-gpu-upload-data   Rsync local data/raw/minivess/ to Network Volume"
+	@echo "  dataset-setup         Download + DVC version + RunPod upload (DATASET=minivess)"
 	@echo "  dev-gpu-cleanup       Clear volume checkpoints/logs (keeps data+mlruns)"
 	@echo "  dev-gpu-status        Show Network Volume usage + pod status"
 	@echo ""
@@ -136,6 +137,23 @@ dev-gpu-sync:  ## Pull /opt/vol/mlruns/ back to local mlruns/ (closes #716)
 dev-gpu-upload-data:  ## Rsync local data/raw/minivess/ to Network Volume (first-time setup)
 	sky rsync up data/raw/minivess/ minivess-dev:/opt/vol/data/raw/
 	@echo "Data uploaded to Network Volume at /opt/vol/data/raw/minivess/"
+
+dataset-setup:  ## One-command dataset workflow: download → DVC version → RunPod upload (DATASET=minivess)
+	@echo "=== Dataset Setup: $(or $(DATASET),minivess) ==="
+	@echo "Step 1/3: Verify local data exists..."
+	@test -d "data/raw/$(or $(DATASET),minivess)/imagesTr" || \
+	  (echo "FATAL: data/raw/$(or $(DATASET),minivess)/imagesTr/ not found." && \
+	   echo "Download first: uv run python scripts/download_minivess.py" && exit 1)
+	@echo "  Found $$(ls data/raw/$(or $(DATASET),minivess)/imagesTr/ | wc -l) files"
+	@echo ""
+	@echo "Step 2/3: DVC tracking..."
+	dvc add data/raw/$(or $(DATASET),minivess)
+	@echo "  DVC file: data/raw/$(or $(DATASET),minivess).dvc"
+	@echo ""
+	@echo "Step 3/3: Upload to RunPod Network Volume..."
+	sky rsync up data/raw/$(or $(DATASET),minivess)/ minivess-dev:/opt/vol/data/raw/$(or $(DATASET),minivess)/
+	@echo ""
+	@echo "=== Dataset $(or $(DATASET),minivess) ready on RunPod ==="
 
 dev-gpu-cleanup:  ## Clear volume checkpoints/logs (keeps data+mlruns)
 	sky exec minivess-dev -- "rm -rf /opt/vol/checkpoints/* /opt/vol/logs/*"
