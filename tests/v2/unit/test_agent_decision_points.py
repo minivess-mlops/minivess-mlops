@@ -5,7 +5,10 @@ All tests use pydantic_ai.models.test.TestModel — zero real LLM API calls.
 
 from __future__ import annotations
 
-from pydantic_ai.models.test import TestModel
+import pytest
+
+pydantic_ai = pytest.importorskip("pydantic_ai", reason="pydantic_ai not installed")
+from pydantic_ai.models.test import TestModel  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # T-1.2: Experiment summarizer agent
