@@ -595,7 +595,7 @@ class SegmentationTrainer:
 
         # Determine if extended metrics (MetricsReloaded) are needed
         # by checking if any tracked metric requires them
-        _extended_metric_names = {"val_cldice", "val_masd", "val_compound_masd_cldice"}
+        _extended_metric_names = {"val/cldice", "val/masd", "val/compound_masd_cldice"}
         _tracked_names = {m.name for m in ckpt_cfg.tracked_metrics}
         needs_extended = bool(_tracked_names & _extended_metric_names)
         # MetricsReloaded (skeleton + surface distance) is expensive on full volumes.
