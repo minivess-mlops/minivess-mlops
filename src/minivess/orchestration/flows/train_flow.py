@@ -26,6 +26,7 @@ from prefect import flow, task
 
 from minivess.observability.infrastructure_timing import (
     estimate_cost_from_first_epoch,
+    generate_timing_jsonl,
     get_hourly_rate_usd,
 )
 from minivess.observability.prometheus_metrics import update_estimated_cost_gauges
@@ -90,6 +91,42 @@ def log_epoch0_cost_estimate(
         estimate["estimated_total_hours"],
         estimate["cost_per_epoch"],
     )
+
+
+def log_timing_jsonl_artifact(
+    *,
+    setup_durations: dict[str, float],
+    training_seconds: float,
+    epoch_count: int,
+    hourly_rate_usd: float,
+) -> None:
+    """Generate timing JSONL and log it as an MLflow artifact.
+
+    No-op when there is no timing data (setup_durations empty AND
+    training_seconds <= 0).
+
+    Parameters
+    ----------
+    setup_durations:
+        Operation name -> duration in seconds (from parse_setup_timing).
+    training_seconds:
+        Total training time in seconds.
+    epoch_count:
+        Number of epochs completed.
+    hourly_rate_usd:
+        Instance hourly cost in USD.
+    """
+    if not setup_durations and training_seconds <= 0:
+        return
+
+    timing_jsonl = generate_timing_jsonl(
+        setup_durations=setup_durations,
+        training_seconds=training_seconds,
+        epoch_count=epoch_count,
+        hourly_rate_usd=hourly_rate_usd,
+    )
+    mlflow.log_text(timing_jsonl, "timing/timing_report.jsonl")
+    logger.info("Logged timing JSONL artifact (%d bytes)", len(timing_jsonl))
 
 
 def _require_docker_context() -> None:
@@ -865,6 +902,7 @@ def training_flow(
                 if isinstance(fr, dict)
             )
             _setup_seconds = 0.0
+            _setup_durations: dict[str, float] = {}
             try:
                 from minivess.observability.infrastructure_timing import (
                     parse_setup_timing,
@@ -889,6 +927,14 @@ def training_flow(
                     num_folds=num_folds,
                     hourly_rate_usd=get_hourly_rate_usd(),
                 )
+
+            # Log timing JSONL artifact (#683 — wire dead code)
+            log_timing_jsonl_artifact(
+                setup_durations=_setup_durations,
+                training_seconds=_total_training_seconds,
+                epoch_count=max_epochs * len(fold_results),
+                hourly_rate_usd=get_hourly_rate_usd(),
+            )
 
     except Exception:
         logger.warning("Failed to open/finalize MLflow run", exc_info=True)
