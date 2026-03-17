@@ -123,6 +123,31 @@ class TableArtifact:
 
 
 @dataclass
+class FactorialAnovaResult:
+    """Result of two-way factorial ANOVA for one metric."""
+
+    metric: str
+    n_models: int
+    n_losses: int
+    f_values: dict[str, float]
+    p_values: dict[str, float]
+    eta_squared_partial: dict[str, float]
+    omega_squared: dict[str, float]
+    engine_pingouin: dict[str, object] | None = None
+    engine_statsmodels: dict[str, object] | None = None
+
+
+@dataclass
+class CalibrationMetricsResult:
+    """Result of calibration metrics for one set of predictions."""
+
+    brier_score: float
+    oe_ratio: float
+    ipa: float
+    calibration_slope: float
+
+
+@dataclass
 class BiostatisticsResult:
     """Complete result of the biostatistics flow."""
 
