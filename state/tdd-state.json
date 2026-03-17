@@ -1,36 +1,24 @@
 {
-  "plan_file": "docs/planning/pr1-finops-infrastructure-timing-plan.md",
+  "plan_file": "docs/planning/docker-pull-runpod-provisioning-mlflow-cloud-run-multipart-upload-report.md",
   "plan_version": "1.0",
   "execution_mode": "autonomous",
-  "current_task_id": null,
-  "current_phase": "CONVERGED",
-  "inner_iteration": 6,
+  "current_task_id": "T1-mlflow-no-serve-artifacts",
+  "current_phase": "RED",
+  "inner_iteration": 0,
   "tasks": {
-    "T1": { "status": "DONE", "phase": "CONVERGED", "iterations": 1, "issue_ref": "#747" },
-    "T2": { "status": "DONE", "phase": "CONVERGED", "iterations": 1, "issue_ref": "#717" },
-    "T3": { "status": "DONE", "phase": "CONVERGED", "iterations": 1, "issue_ref": "#747" },
-    "T4": { "status": "DONE", "phase": "CONVERGED", "iterations": 1, "issue_ref": "#735" },
-    "T5": { "status": "DONE", "phase": "CONVERGED", "iterations": 1, "issue_ref": "#683" },
-    "T6": { "status": "DONE", "phase": "CONVERGED", "iterations": 1, "issue_ref": "#683" }
+    "T1-mlflow-no-serve-artifacts": { "status": "NOT_STARTED", "phase": null, "iterations": 0, "issue_ref": "#755" },
+    "T2-dockerfile-incremental-cleanup": { "status": "NOT_STARTED", "phase": null, "iterations": 0, "issue_ref": "#751" },
+    "T3-zstd-compression": { "status": "NOT_STARTED", "phase": null, "iterations": 0, "issue_ref": "#751" },
+    "T4-runpod-entrypoint-verify": { "status": "NOT_STARTED", "phase": null, "iterations": 0, "issue_ref": "#754" },
+    "T5-skypilot-eager-region": { "status": "NOT_STARTED", "phase": null, "iterations": 0, "issue_ref": "#754" },
+    "T6-ralph-loop-cloud-verify": { "status": "NOT_STARTED", "phase": null, "iterations": 0, "issue_ref": "#754,#755" }
   },
   "convergence": {
-    "reached": true,
-    "tasks_done": 6,
+    "reached": false,
+    "tasks_done": 0,
     "tasks_total": 6,
     "tasks_stuck": 0
   },
-  "session_inner_iterations": 6,
-  "session_start": "2026-03-17T02:25:00Z",
-  "session_log": {
-    "total_inner_iterations": 6,
-    "total_tasks_completed": 6,
-    "new_tests_passing": 28,
-    "existing_tests_passing": 21,
-    "total_tests_in_pr": 49,
-    "staging_suite_status": "1608 passed, 10 skipped (excluding pre-existing pydantic_ai failures)",
-    "pre_existing_failures": [
-      "pydantic_ai not installed — affects test_agent_*.py, test_api_consistency.py, test_config_defaults.py",
-      "evidently SyntaxError on Python 3.13 — affects test_dashboard_drift_panels.py"
-    ]
-  }
+  "session_inner_iterations": 0,
+  "session_start": "2026-03-17T01:30:00Z"
 }
