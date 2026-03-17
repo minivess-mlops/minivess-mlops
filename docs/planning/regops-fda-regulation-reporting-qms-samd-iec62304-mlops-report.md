@@ -1,8 +1,10 @@
 # RegOps FDA Regulation Reporting: QMS, SaMD, IEC 62304, and MLOps
 
 **Created**: 2026-03-17
-**Status**: Draft — linked to [Issue #821](https://github.com/petteriTeikari/minivess-mlops/issues/821) (P1)
+**Updated**: 2026-03-18 (cross-linked with second-pass report)
+**Status**: Active — linked to [Issue #821](https://github.com/petteriTeikari/minivess-mlops/issues/821) (P1)
 **Companion doc**: `docs/planning/openlineage-marquez-iec62304-report.md`
+**Second-pass report**: [`docs/planning/fda-insights-second-pass.md`](fda-insights-second-pass.md) — SBOM, SecOps, QMSR, PCCP, MLOps maturity
 **Related issue**: [#799](https://github.com/petteriTeikari/minivess-mlops/issues/799) (OpenLineage/Marquez integration)
 
 ---
@@ -67,6 +69,16 @@ Three major regulatory milestones converge in 2026, making this planning documen
 | **IEC 62304 Edition 2.0 publication** | **~August 12, 2026** | Replaces A/B/C with two rigor levels (I/II); adds AI Development Lifecycle (AIDL) phase |
 
 This triple convergence means that any medical device software manufacturer must simultaneously prepare for updated QMS requirements, AI-specific regulations, and a revised software lifecycle standard. Our architecture should anticipate all three.
+
+**Additional 2025-2026 regulatory signals**:
+
+- **Sept 30, 2025**: FDA issued Request for Public Comment on real-world monitoring of AI devices — explicitly names data drift, concept drift, model drift as safety threats. Our drift simulation flow is a direct regulatory asset ([FDA, 2025](https://www.fda.gov/medical-devices/medical-device-regulatory-science-research-programs-conducted-osel/methods-and-tools-effective-postmarket-monitoring-artificial-intelligence-ai-enabled-medical-devices))
+- **Oct 2025**: Harrison.ai petitioned for partial 510(k) exemption for radiology AI (CADx/CADe product codes). If granted, manufacturers with one clearance could skip 510(k) for similar devices with postmarket monitoring. Precedent-setting for other imaging modalities ([STAT News, 2026](https://www.statnews.com/2026/02/23/harrisonai-fda-petition-exempt-ai-devices-premarket-review/))
+- **Feb 2026**: FDA cybersecurity guidance reissued for QMSR alignment — CI/CD explicitly recognized as production controls; SBOMs mandatory under Section 524B ([RAPS, 2026](https://www.raps.org/news-and-articles/news-articles/2026/2/fda-reissues-cybersecurity-guidance-to-align-with))
+- **Feb 2026**: EU AI Omnibus Proposal — AI Act requirements for medical AI applied within existing conformity assessment, not separate certification ([Arnold & Porter, 2026](https://www.arnoldporter.com/en/perspectives/advisories/2026/02/eu-digital-omnibus-what-the-proposed-reforms-mean-for-pharma-and-medtech))
+- **Feb 2026**: Senate HELP Committee calls FDA's AI/ML Action Plan "already too outdated" — recommends risk-adjusted, internationally harmonized approach ([Buchanan Ingersoll, 2026](https://www.bipc.com/senate-help-committee-releases-fda-modernization-report-))
+
+See [`fda-insights-second-pass.md`](fda-insights-second-pass.md) for comprehensive analysis of these developments with 60+ citations.
 
 ### 2.0.1 FDA January 2025 Draft Guidance: Lifecycle Management for AI-Enabled Devices
 

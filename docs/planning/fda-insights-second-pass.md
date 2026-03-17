@@ -1,7 +1,8 @@
 # FDA Readiness Second Pass: Innolitics Trends, SBOM, SecOps, QMSR, PCCP & MLOps Maturity
 
 **Created**: 2026-03-17
-**Status**: Draft — extends [first-pass report](regops-fda-regulation-reporting-qms-samd-iec62304-mlops-report.md)
+**Updated**: 2026-03-18 (enriched with post-June 2025 academic/industry sources)
+**Status**: Active — extends [first-pass report](regops-fda-regulation-reporting-qms-samd-iec62304-mlops-report.md)
 **Seed document**: `docs/planning/fda-insights-innolitics-trends-seed-from-linkedin.md`
 **Issue**: [#821](https://github.com/petteriTeikari/minivess-mlops/issues/821) (P1)
 
@@ -46,6 +47,14 @@ Six practices for strong SBOM submissions:
 6. **Periodically review vulnerabilities for patient safety impact** — not just logging
 
 **August 2024 change**: FDA pushed back on email-only SBOM distribution. SBOMs must be readily available to end users at all times as part of device labeling.
+
+### 1.1.1 Post-June 2025 Regulatory Developments
+
+SBOMs are now **mandatory** for medical devices under **Section 524B of the FD&C Act**. The Feb 2026 cybersecurity guidance reissue confirmed SBOM requirements are woven into QMSR-aligned processes ([RAPS, 2026](https://www.raps.org/news-and-articles/news-articles/2026/2/fda-reissues-cybersecurity-guidance-to-align-with); [DLA Piper, 2026](https://www.dlapiper.com/en-us/insights/publications/2026/02/fda-issues-revised-cybersecurity-premarket-submission-guidance)).
+
+- **CycloneDX** is security-focused with native vulnerability tracking (VEX); **SPDX** is compliance-focused with deep license documentation. FDA accepts both formats plus SWID tags ([Sbomify, 2026](https://sbomify.com/2026/01/15/sbom-formats-cyclonedx-vs-spdx/); [Blue Goat Cyber, 2025](https://bluegoatcyber.com/blog/navigating-the-fdas-sbom-requirements-for-medical-device-manufacturing-spdx-cdx-and-more/))
+- **CycloneDX v7.2.2** now natively supports `uv` virtual environments, producing near Level-2 OWASP SCVS-compliant SBOMs ([Sbomify Python guide, 2026](https://sbomify.com/guides/python/))
+- NTIA Minimum Elements remain the baseline: supplier name, component name, version, unique identifier, relationship, plus FDA additions (level of support, end-of-support date)
 
 ### 1.2 Our Current State
 
@@ -129,6 +138,14 @@ From Innolitics' analysis of real AINN (Additional Information) letters:
 
 ### 2.4 MLSecOps: AI-Specific Security
 
+Three frameworks now anchor medical AI security assessment (post-June 2025):
+
+- **MITRE ATLAS** (Adversarial Threat Landscape for AI Systems) — threat taxonomy mapping AI-specific attacks to defensive controls. Updated continuously; provides the vocabulary for FDA cybersecurity threat modeling ([Practical DevSecOps, 2026](https://www.practical-devsecops.com/mitre-atlas-framework-guide-securing-ai-systems/))
+- **OWASP Top 10 for LLMs/GenAI (2025 edition)** — though primarily for LLM applications, the taxonomy of prompt injection, training data poisoning, and model denial of service applies to our BentoML serving endpoint
+- **NIST AI-RMF** — risk management framework that provides the process scaffolding for medical AI security assessment
+
+A recent medRxiv preprint introduces a taxonomy of **8 adversarial attack categories with 24 sub-strategies** for medical AI red-teaming ([medRxiv, 2026](https://www.medrxiv.org/content/10.64898/2026.02.26.26347212v1)). Research confirms that multimodal models show enhanced adversarial resilience vs single-modality counterparts ([Frontiers in Medicine, 2025](https://pmc.ncbi.nlm.nih.gov/articles/PMC12328349/); [Springer AI Review, 2024](https://link.springer.com/article/10.1007/s10462-024-11005-9)).
+
 Beyond traditional cybersecurity, ML models have unique attack surfaces:
 
 | Threat | MinIVess Relevance | Mitigation |
@@ -164,7 +181,15 @@ From the SOC2 strategy research: the principles are **converging** with medical 
 
 ### 3.1 What Changed (February 2, 2026)
 
-The QMSR replaced 21 CFR Part 820 by incorporating ISO 13485:2016 into federal law. From the Innolitics analysis:
+The QMSR replaced 21 CFR Part 820 by incorporating ISO 13485:2016 into federal law ([ComplianceQuest, 2026](https://www.compliancequest.com/blog/fda-quality-management-system-regulation-qmsr-2026/); [WQS, 2026](https://us.wqs.de/fda-qmsr-2026/)). The Feb 2026 cybersecurity guidance reissue ([RAPS, 2026](https://www.raps.org/news-and-articles/news-articles/2026/2/fda-reissues-cybersecurity-guidance-to-align-with)) confirmed:
+
+- All CFR 820 references replaced with QMSR citations
+- Tool validation now under **QMSR 4.1.6** (our pre-commit hooks, Docker build system, Prefect orchestrator)
+- **CI/CD explicitly recognized as production controls** — software deployments are production events requiring build/commit approvals, environment snapshots, acceptance evidence, rollback plans, and SBOM documentation ([RookQS, 2026](https://rookqs.com/blog-rqs/2026-fda-guidance-critical-impacts-of-qmsr-alignment))
+- SBOMs required for all cyber devices under Section 524B(b)(3)
+- Cybersecurity controls integrated into design controls, validated through testing, maintained through CAPA
+
+From the Innolitics analysis:
 
 > "FDA is auditing your project management discipline, even if they don't call it that. Inspectors use the manufacturer's own risk management documentation to focus the inspection — and review it throughout, not just at one checkpoint." — [Giese (2026), Innolitics](https://innolitics.com)
 
@@ -226,6 +251,13 @@ From the Innolitics 510(k) Analyzer figures, K252366 shows an exemplary PCCP for
 
 **This is exactly our architecture**: factorial model variants validated against sequestered test data with pre-specified acceptance criteria, deployed via BentoML without requiring re-submission for each variant.
 
+### 4.2.1 PCCP Regulatory Timeline (Post-June 2025)
+
+- **December 2024**: FDA finalized PCCP guidance, expanding scope from ML-only to **all AI-enabled devices** ([McDermott+, 2024](https://www.mcdermottplus.com/insights/fda-issues-final-guidance-on-predetermined-change-control-plans-for-ai-enabled-devices/))
+- **August 2025**: FDA, Health Canada, and MHRA jointly issued **five guiding principles**: PCCPs must be Focused, Risk-based, Evidence-based, Transparent, and subject to Lifecycle oversight ([Ballard Spahr, 2025](https://www.ballardspahr.com/insights/alerts-and-articles/2025/08/fda-issues-guidance-on-ai-for-medical-devices))
+- **October 2025**: Harrison.ai (via Rubrum Advising) submitted a **34-page petition** to FDA requesting **partial 510(k) exemption** for radiology AI devices (CADx, CADt, CADe/x product codes POK, MYN, QAS, QFM, QDQ). If granted, manufacturers with one existing clearance could launch similar devices without new 510(k)s, provided they maintain postmarket monitoring ([STAT News, 2026](https://www.statnews.com/2026/02/23/harrisonai-fda-petition-exempt-ai-devices-premarket-review/); [Federal Register, 2025](https://www.federalregister.gov/documents/2025/12/29/2025-23901/medical-devices-exemption-from-premarket-notification-radiology-computer-aided-detection-andor)). Comment period closed Feb 27, 2026 — if FDA doesn't deny by mid-April, the exemption takes effect
+- **Implication**: If this exemption passes for radiology, it could set precedent for other imaging modalities. Building robust postmarket monitoring NOW positions MinIVess for either pathway
+
 ### 4.3 Neurology-Specific PCCP Considerations
 
 From the Innolitics neurology post: "Unlike radiology (where FDA reviewers see high volumes of AI/ML submissions), neurology panels see fewer AI/ML devices." Only 2 of 6 recent AI/ML neurology devices included a PCCP.
@@ -246,6 +278,19 @@ From the Innolitics neurology post: "Unlike radiology (where FDA reviewers see h
 | **3** | CI/CD for ML | **Approaching** — Docker + pre-commit, but no automated model registry gates |
 | **4** | Continuous training & monitoring | **Not yet** — drift detection exists but no automated retraining trigger |
 | **5** | Full ML automation with feedback loops | **Target** — requires postmarket surveillance |
+
+### 5.1.1 The MedMLOps Framework (Post-June 2025)
+
+The **MedMLOps framework** ([de Almeida et al. (2025). "Medical machine learning operations: a framework to facilitate clinical AI development and deployment in radiology." *European Radiology*.](https://link.springer.com/article/10.1007/s00330-025-11654-6)) defines four pillars specific to medical imaging:
+
+1. **Availability** — reproducible model training and serving infrastructure
+2. **Continuous monitoring/validation/(re)training** — drift detection, performance degradation alerts
+3. **Patient privacy/data protection** — federated learning, anonymization, access controls
+4. **Ease of use** — DevEx for researchers, minimal friction for clinical adoption
+
+A JMIR scoping review ([2025](https://www.jmir.org/2025/1/e66559)) maps MLOps maturity along two dimensions: **operational excellence** and **regulatory compliance** — both must advance together for medical AI platforms.
+
+An empirical MLOps guide ([ScienceDirect, 2025](https://www.sciencedirect.com/science/article/pii/S0950584925000643)) and a 2026 maturity model ([Flexiana, 2026](https://flexiana.com/machine-learning-architecture/mlops-maturity-model-2026-4-stages-to-resilient-risk-free-machine-learning)) both emphasize that Level 4 requires **governance and compliance embedded** in automated pipelines, not bolted on afterward.
 
 ### 5.2 What's Needed for Level 4
 
@@ -275,12 +320,24 @@ This maps directly to [Carvalho et al. (2025)](https://pmc.ncbi.nlm.nih.gov/arti
 
 ## 6. Postmarket Surveillance and Multi-Site Data Collection
 
-### 6.1 522 Postmarket Surveillance Studies
+### 6.1 522 Postmarket Surveillance Studies & FDA Real-World Monitoring
 
 From Innolitics: FDA guidance now recognizes 522 studies as appropriate for Real-World Data (RWD) and Real-World Evidence (RWE). "They no longer need to be fully prospective, site-intensive, or trial-like."
 
-The Senate "FDA of the Future" report (Feb 17, 2026) signals:
+**Critical Sept 2025 development**: On **September 30, 2025**, the FDA issued a **Request for Public Comment** on practical approaches to measuring real-world performance of AI-enabled medical devices, focusing on systematic performance monitoring across the total product lifecycle ([FDA, 2025](https://www.fda.gov/medical-devices/medical-device-regulatory-science-research-programs-conducted-osel/methods-and-tools-effective-postmarket-monitoring-artificial-intelligence-ai-enabled-medical-devices); [Covington, 2025](https://www.covingtondigitalhealth.com/2025/10/fda-requests-public-comment-on-real-world-evaluation-of-ai-enabled-medical-devices/); [Hogan Lovells, 2025](https://www.hoganlovells.com/en/publications/fda-seeks-public-comment-on-monitoring-strategies)).
+
+FDA explicitly names **data drift, concept drift, and model drift** as threats to device safety and reliability. Teams must demonstrate:
+- How they **detect** performance drift
+- How they handle **cybersecurity incidents** related to drift
+- **Escalation paths** and decision-making authority for emerging risks
+- Intake processes for safety signals from the field
+
+**Our existing drift simulation flow (`src/minivess/pipeline/drift_detection.py`) and Evidently DataDriftPreset integration are DIRECT regulatory assets** that demonstrate postmarket monitoring capability.
+
+The Senate "FDA of the Future" report (Feb 17, 2026; [Buchanan Ingersoll & Rooney, 2026](https://www.bipc.com/senate-help-committee-releases-fda-modernization-report-); [InsideHealthPolicy, 2026](https://insidehealthpolicy.com/daily-news/cassidy-report-calls-fda-ai-strategy-outdated-urges-bias-monitoring)) signals:
 > "Post-market surveillance is shifting from stick to carrot. Companies that build real-world evidence infrastructure into their product — 'as core architecture, not afterthought' — should get reduced pre-market burden."
+
+The report calls FDA's AI/ML Action Plan **"already too outdated"** and recommends: broadly applicable FDA guidance for consistent AI treatment across review divisions, international harmonization, expanded internal AI expertise, and a fresh risk-adjusted regulatory approach through interagency collaboration.
 
 ### 6.2 The NEUROVEX Multi-Site Opt-In Architecture
 
@@ -335,14 +392,24 @@ For a preclinical neuroscience platform deployed across multiple research labs, 
 
 ### 6.3 Monitoring Tool Stack
 
-| Tool | Purpose | SaMD Relevance | Preclinical Use |
-|------|---------|---------------|-----------------|
-| **PostHog** | Product analytics, session replay | UX issue tracking for annotation tool | Opt-in telemetry from labs |
-| **Sentry** | Error tracking, performance monitoring | Crash reporting, latency anomalies | Stack traces from deployed flows |
-| **Grafana + Prometheus** | Infrastructure monitoring | Drift dashboards, model performance | Already configured |
-| **OpenLineage/Marquez** | Data lineage | IEC 62304 traceability | Already implemented (needs wiring) |
-| **Evidently** | ML drift detection | Postmarket surveillance input | Already implemented |
-| **Intercom/Crisp** | User communication | Support channel for annotation users | Optional for research labs |
+| Tool | Purpose | SaMD Relevance | Preclinical Use | Compliance |
+|------|---------|---------------|-----------------|------------|
+| **PostHog** | Product analytics, session replay | UX issue tracking for annotation tool | Opt-in telemetry from labs | **SOC 2 Type II certified** (May 2025), **HIPAA-ready** with BAA, **GDPR-compliant** with EU-U.S. DPF, supports **self-hosted Docker deployment** ([PostHog HIPAA docs, 2025](https://posthog.com/docs/privacy/hipaa-compliance)) |
+| **Sentry** | Error tracking, performance monitoring | Crash reporting, latency anomalies | Stack traces from deployed flows | SOC 2 certified, BAA available |
+| **Grafana + Prometheus** | Infrastructure monitoring | Drift dashboards, model performance | Already configured | Self-hosted, no data leaves infra |
+| **OpenLineage/Marquez** | Data lineage | IEC 62304 traceability | Already implemented (needs wiring) | LF AI & Data Foundation standard; IBM adopted for explainable AI ([IBM, 2025](https://www.ibm.com/new/announcements/openlineage-for-a-unified-lineage-view)); Debezium added native integration ([Debezium, 2025](https://debezium.io/blog/2025/06/13/openlineage-integration/)) |
+| **Evidently** | ML drift detection | Postmarket surveillance input | Already implemented | Directly maps to FDA Sept 2025 RfC on drift monitoring |
+| **Intercom/Crisp** | User communication | Support channel for annotation users | Optional for research labs | — |
+
+**PostHog self-hosted note**: PostHog's Docker Compose deployment aligns with our Docker-per-flow architecture. Product analytics (researcher usage patterns, error rates, flow completion times) could be volume-mounted alongside MLflow artifacts — a unified observability layer satisfying both UX monitoring and regulatory audit.
+
+### 6.3.1 Federated Learning: NVIDIA FLARE for Multi-Site Training
+
+**NVIDIA FLARE v2.7.0** remains the dominant open-source FL framework for medical imaging, with real-world deployments at Mass General (brain aneurysm detection) and NCI (pancreatic cancer screening via Rhino Health) ([NVIDIA GTC 2025, Session S73112](https://www.nvidia.com/en-us/on-demand/session/gtc25-s73112/); [PubMed, 2025](https://pubmed.ncbi.nlm.nih.gov/39895208/)).
+
+Key insight: only **5.2% of FL publications have resulted in real clinical deployment** — a significant gap. Blockchain-based FL (BCFL) is emerging for tamper-resistant audit trails ([JMIR, 2026](https://www.jmir.org/2026/1/e79052)). A 2025 Frontiers paper proposes FL as a mechanism for **regulatory agencies themselves** to collaborate on model training without sharing data ([Frontiers in Drug Safety, 2025](https://www.frontiersin.org/journals/drug-safety-and-regulation/articles/10.3389/fdsfr.2025.1579922/full)).
+
+**For MinIVess**: NVIDIA FLARE integration via the existing `ModelAdapter` ABC would enable multi-site training for multiphoton imaging data while keeping raw vascular data at each institution — particularly relevant for EBRAINS data sharing scenarios. The Flower framework (already in our library recommendations) is the lighter-weight alternative.
 
 ### 6.4 AG-UI / A2UI: Agentic Generative UI
 
@@ -365,13 +432,19 @@ From the Innolitics posts on agentic AI in regulated development:
 
 **The convergence pattern**: SOC2 → ISO 27001 → ISO/IEC 42001 (AI) → IEC 62304 (medical) → FDA QMSR. Each layer adds specificity but the fundamentals are identical: version control, CI/CD, testing, audit trails, vulnerability management.
 
-### 7.2 EU Digital Product Passport (DPP)
+### 7.2 EU Digital Product Passport (DPP) and AI Omnibus
 
-The EU Digital Product Passport Regulation (2024/1781) requires **machine-readable lifecycle documentation** for products sold in the EU. While not directly applicable to software, the DPP infrastructure (data carriers, digital twins, lifecycle tracking) is converging with SaMD requirements:
+The EU Digital Product Passport Regulation (ESPR) is rolling out with a **central registry by July 2026** and first mandatory DPPs for batteries by February 2027 ([Fiegenbaum Solutions, 2026](https://www.fiegenbaum.solutions/en/blog/digital-product-passport-from-european-regulation-to-global-standard)). While not directly applicable to software, the DPP infrastructure is converging with SaMD requirements:
 
 - **DPP data carrier** = our SBOM + OpenLineage lineage manifest
 - **DPP lifecycle tracking** = our MLflow + AuditTrail
 - **DPP sustainability reporting** = our cost/carbon tracking (TRIPOD cost appendix)
+
+**EU AI Omnibus Proposal (February 2026)**: Clarifies that AI Act requirements for high-risk AI systems that are also regulated medical products should be applied **within existing conformity assessment procedures** rather than through separate certification ([Arnold & Porter, 2026](https://www.arnoldporter.com/en/perspectives/advisories/2026/02/eu-digital-omnibus-what-the-proposed-reforms-mean-for-pharma-and-medtech); [Petrie-Flom Center, Harvard Law, 2026](https://petrieflom.law.harvard.edu/2026/03/05/simplification-or-back-to-square-one-the-future-of-eu-medical-ai-regulation/)).
+
+**December 2025 proposed MDR/IVDR revision**: Sharpens software classification rules, extends "well-established technology" to digital products, and integrates cybersecurity into General Safety and Performance Requirements. A Nature npj paper maps standards gaps for data-driven devices under EU MDR ([Nature, 2026](https://www.nature.com/articles/s44401-026-00075-2)).
+
+**Implication for MinIVess**: A unified metadata/provenance layer (OpenLineage + MLflow + SBOM) satisfies multiple jurisdictions simultaneously — FDA Section 524B, EU MDR/IVDR, EU AI Act, and DPP transparency mandates.
 
 ### 7.3 USA UAD 3.6 (Real Estate)
 
@@ -505,11 +578,58 @@ The figure from Innolitics shows three layers of risk: **Technical Debt** → **
 - [Giese (2025). "Harrison.ai 510(k) Partial Exemption Petition." *Innolitics*.](https://innolitics.com)
 - [Giese (2026). "FDA CDS Guidance 2026 Analysis." *Innolitics*.](https://innolitics.com)
 
-### Regulatory
-- [FDA (2026). "Premarket Cybersecurity Guidance" (Feb 2026 update).](https://www.fda.gov)
-- [Senate HELP Committee (2026). "Patients and Families First: Building the FDA of the Future."](https://www.help.senate.gov)
+### Regulatory & Standards (Post-June 2025 Sources)
+
+- [FDA (2026). "Premarket Cybersecurity Guidance" (Feb 2026 QMSR update).](https://www.fda.gov) — [RAPS analysis](https://www.raps.org/news-and-articles/news-articles/2026/2/fda-reissues-cybersecurity-guidance-to-align-with); [DLA Piper analysis](https://www.dlapiper.com/en-us/insights/publications/2026/02/fda-issues-revised-cybersecurity-premarket-submission-guidance); [Hattrick IT analysis](https://www.hattrick-it.com/blog/cybersecurityguidanceupdate/); [BIOT-MED analysis](https://www.biot-med.com/resources/fda-cybersecurity-requirements-connected-medical-devices-2026)
+- [FDA (2025). "Methods and Tools for Effective Postmarket Monitoring of AI-Enabled Medical Devices." *Request for Public Comment* (Sept 30, 2025).](https://www.fda.gov/medical-devices/medical-device-regulatory-science-research-programs-conducted-osel/methods-and-tools-effective-postmarket-monitoring-artificial-intelligence-ai-enabled-medical-devices) — [Covington](https://www.covingtondigitalhealth.com/2025/10/fda-requests-public-comment-on-real-world-evaluation-of-ai-enabled-medical-devices/); [Hogan Lovells](https://www.hoganlovells.com/en/publications/fda-seeks-public-comment-on-monitoring-strategies)
+- [Senate HELP Committee (2026). "Patients and Families First: Building the FDA of the Future."](https://www.help.senate.gov) — [Buchanan Ingersoll](https://www.bipc.com/senate-help-committee-releases-fda-modernization-report-); [InsideHealthPolicy](https://insidehealthpolicy.com/daily-news/cassidy-report-calls-fda-ai-strategy-outdated-urges-bias-monitoring)
 - [Carvalho et al. (2025). "Predetermined Change Control Plans: Guiding Principles." *JMIR AI*.](https://pmc.ncbi.nlm.nih.gov/articles/PMC12577744/)
-- [IEC 62304 Edition 2 (expected Aug 2026). AI Development Lifecycle additions.](https://www.iso.org)
+- [FDA PCCP Final Guidance (Dec 2024).](https://www.fda.gov/media/166704/download) — [McDermott+](https://www.mcdermottplus.com/insights/fda-issues-final-guidance-on-predetermined-change-control-plans-for-ai-enabled-devices/); [Ballard Spahr](https://www.ballardspahr.com/insights/alerts-and-articles/2025/08/fda-issues-guidance-on-ai-for-medical-devices); [Intertek](https://www.intertek.com/blog/2025/03-25-fdas-pccp-framework-and-ai-enabled-medical-devices/)
+- [Harrison.ai / Rubrum Advising (2025). "510(k) Partial Exemption Petition."](https://www.federalregister.gov/documents/2025/12/29/2025-23901/medical-devices-exemption-from-premarket-notification-radiology-computer-aided-detection-andor) — [STAT News](https://www.statnews.com/2026/02/23/harrisonai-fda-petition-exempt-ai-devices-premarket-review/); [AuntMinnie](https://www.auntminnie.com/imaging-informatics/artificial-intelligence/article/15775081/petition-to-us-fda-proposes-alternative-pathway-for-radiology-ai)
+- [ComplianceQuest (2026). "FDA QMSR 2026."](https://www.compliancequest.com/blog/fda-quality-management-system-regulation-qmsr-2026/); [WQS (2026)](https://us.wqs.de/fda-qmsr-2026/); [RookQS (2026)](https://rookqs.com/blog-rqs/2026-fda-guidance-critical-impacts-of-qmsr-alignment)
+- [IEC 62304 Edition 2 (expected Aug 2026).](https://www.iso.org) — [LFH Regulatory](https://lfhregulatory.co.uk/iec-62304-update-2026/); [8fold Governance](https://8foldgovernance.com/iec-62304-edition-2-big-changes-in-samd-requirements/); [NSF Prosystem](https://www.nsf-prosystem.org/en/news/detail/iec-62304-2-ausgabe-optimierte-sicherheitsklassen-erweiterter-anwendungsbereich-fuer-gesundheitssoftware-und-ki/); [IEC SC62A Change Rationales](https://assets.iec.ch/public/sc62a/N0166_IEC62304_ED2_ChangeRationales_CoverLetter.pdf)
+
+### SBOM & Supply Chain
+- [Sbomify (2026). "FDA Medical Device SBOM Requirements."](https://sbomify.com/2026/01/09/fda-medical-device-sbom-requirements/)
+- [Sbomify (2026). "SBOM Formats Compared: CycloneDX vs SPDX."](https://sbomify.com/2026/01/15/sbom-formats-cyclonedx-vs-spdx/)
+- [Sbomify (2026). "SBOM Generation Guide for Python — UV, Poetry, Pipenv."](https://sbomify.com/guides/python/)
+- [Blue Goat Cyber (2025). "Navigating FDA SBOM Requirements: SPDX, CDX."](https://bluegoatcyber.com/blog/navigating-the-fdas-sbom-requirements-for-medical-device-manufacturing-spdx-cdx-and-more/)
+
+### MLSecOps & Adversarial Robustness
+- [Frontiers in Medicine (2025). "Assessing adversarial robustness of multimodal medical AI."](https://pmc.ncbi.nlm.nih.gov/articles/PMC12328349/)
+- [arXiv (2025). "A Practical Framework for Evaluating Medical AI Security."](https://arxiv.org/pdf/2512.08185)
+- [medRxiv (2026). "Red-Teaming Medical AI: Systematic Adversarial Evaluation."](https://www.medrxiv.org/content/10.64898/2026.02.26.26347212v1)
+- [Practical DevSecOps (2026). "MITRE ATLAS Framework 2026."](https://www.practical-devsecops.com/mitre-atlas-framework-guide-securing-ai-systems/)
+- [Springer AI Review (2024). "Robustness in deep learning models for medical diagnostics."](https://link.springer.com/article/10.1007/s10462-024-11005-9)
+
+### MLOps Maturity & MedMLOps
+- [de Almeida et al. (2025). "Medical machine learning operations: a framework for radiology." *European Radiology*.](https://link.springer.com/article/10.1007/s00330-025-11654-6)
+- [JMIR (2025). "Maturity Framework for Operationalizing ML in Health Care."](https://www.jmir.org/2025/1/e66559)
+- [ScienceDirect (2025). "An empirical guide to MLOps adoption."](https://www.sciencedirect.com/science/article/pii/S0950584925000643)
+- [Flexiana (2026). "MLOps Maturity Model 2026."](https://flexiana.com/machine-learning-architecture/mlops-maturity-model-2026-4-stages-to-resilient-risk-free-machine-learning)
+- [IntuitionLabs (2025). "AI Post-Market Surveillance: Locked vs. Continuous Learning."](https://intuitionlabs.ai/articles/post-market-surveillance-ai-locked-continuous-learning)
+
+### EU Regulatory Convergence
+- [Fiegenbaum Solutions (2026). "Digital Product Passport 2026."](https://www.fiegenbaum.solutions/en/blog/digital-product-passport-from-european-regulation-to-global-standard)
+- [Arnold & Porter (2026). "EU Digital Omnibus: Pharma and MedTech Reforms."](https://www.arnoldporter.com/en/perspectives/advisories/2026/02/eu-digital-omnibus-what-the-proposed-reforms-mean-for-pharma-and-medtech)
+- [Petrie-Flom Center, Harvard Law (2026). "The Future of EU Medical AI Regulation."](https://petrieflom.law.harvard.edu/2026/03/05/simplification-or-back-to-square-one-the-future-of-eu-medical-ai-regulation/)
+- [Nature npj Health Systems (2026). "Data-driven medical devices and the EU MDR."](https://www.nature.com/articles/s44401-026-00075-2)
+- [Osborne Clarke (2025). "Revised EU medtech regulations: software and cybersecurity."](https://www.osborneclarke.com/insights/revised-eu-medtech-regulations-proposal-sharpens-software-and-cybersecurity-rules-digital)
+
+### Federated Learning & Multi-Site
+- [NVIDIA GTC 2025, Session S73112. "Federated Learning in Medical Imaging."](https://www.nvidia.com/en-us/on-demand/session/gtc25-s73112/)
+- [PubMed (2025). "Real-world applications of federated learning with NVIDIA FLARE."](https://pubmed.ncbi.nlm.nih.gov/39895208/)
+- [JMIR (2026). "Securing Federated Learning With Blockchain in Medical Field."](https://www.jmir.org/2026/1/e79052)
+- [Frontiers in Drug Safety (2025). "Federated learning: privacy-preserving regulatory cooperation."](https://www.frontiersin.org/journals/drug-safety-and-regulation/articles/10.3389/fdsfr.2025.1579922/full)
+
+### Product Analytics in Regulated Software
+- [PostHog (2025). "PostHog & HIPAA compliance."](https://posthog.com/docs/privacy/hipaa-compliance)
+- [PostHog (2025). "The 7 best HIPAA-compliant analytics tools."](https://posthog.com/blog/best-hipaa-compliant-analytics-tools)
+
+### Agentic UI
+- [CopilotKit (2025). "AG-UI and A2UI: Understanding the Differences."](https://www.copilotkit.ai/ag-ui-and-a2ui)
+- [Google Developers (2025). "Introducing A2UI: agent-driven interfaces."](https://developers.googleblog.com/introducing-a2ui-an-open-project-for-agent-driven-interfaces/)
+- [ScienceDirect (2025). "Next-generation agentic AI for transforming healthcare."](https://www.sciencedirect.com/science/article/pii/S2949953425000141)
 
 ### First-Pass Report
 - [`docs/planning/regops-fda-regulation-reporting-qms-samd-iec62304-mlops-report.md`](regops-fda-regulation-reporting-qms-samd-iec62304-mlops-report.md)
