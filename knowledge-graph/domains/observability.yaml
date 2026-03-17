@@ -6,9 +6,25 @@ decisions:
   experiment_tracker:
     status: resolved
     winner: mlflow_local
-    rationale: "MLflow local filesystem backend + DuckDB analytics"
-    implementation: [src/minivess/observability/tracking.py, src/minivess/observability/analytics.py]
+    rationale: "MLflow local filesystem backend + DuckDB analytics.
+      Metric keys use slash-prefix convention (MLflow 2.11+)."
+    conventions:
+      metric_prefix: "slash (e.g. val/dice, sys/gpu_model)"
+      ci_suffix: "/ci95_lo, /ci95_hi"
+      fold_encoding: "fold/{id}/best_val_loss"
+    implementation: [src/minivess/observability/tracking.py, src/minivess/observability/analytics.py, src/minivess/observability/metric_keys.py]
     prd_node: knowledge-graph/decisions/L3-technology/experiment_tracker.yaml
+
+  metric_naming_convention:
+    status: resolved
+    winner: slash_prefix
+    rationale: "MLflow 2.11+ auto-groups metrics by slash prefix in UI.
+      Migrating from underscore to slash for semantic grouping. Issue #790."
+    implementation:
+      - src/minivess/observability/metric_keys.py
+      - src/minivess/observability/tracking.py
+    planning_docs:
+      - docs/planning/mlflow-metrics-and-params-double-check-before-large-scale-gcp-work.md
 
   llm_tracing:
     status: resolved

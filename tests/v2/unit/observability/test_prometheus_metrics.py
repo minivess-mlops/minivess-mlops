@@ -44,15 +44,15 @@ class TestUpdateCostGauges:
         )
 
         cost_dict = {
-            "cost_total_usd": 1.23,
-            "cost_effective_gpu_rate": 0.45,
-            "cost_gpu_utilization_fraction": 0.89,
-            "cost_setup_fraction": 0.11,
-            "cost_total_wall_seconds": 3600.0,
-            "cost_setup_usd": 0.13,
-            "cost_training_usd": 1.10,
-            "cost_epochs_to_amortize_setup": 5,
-            "cost_break_even_epochs": 3,
+            "cost/total_usd": 1.23,
+            "cost/effective_gpu_rate": 0.45,
+            "cost/gpu_utilization_fraction": 0.89,
+            "cost/setup_fraction": 0.11,
+            "cost/total_wall_seconds": 3600.0,
+            "cost/setup_usd": 0.13,
+            "cost/training_usd": 1.10,
+            "cost/epochs_to_amortize_setup": 5,
+            "cost/break_even_epochs": 3,
         }
         update_cost_gauges(cost_dict)
 
@@ -70,7 +70,7 @@ class TestUpdateCostGauges:
         GAUGES["minivess_training_cost_total_usd"].set(99.0)
 
         # Pass incomplete dict — should not raise, gauge retains previous value
-        update_cost_gauges({"cost_setup_fraction": 0.5})
+        update_cost_gauges({"cost/setup_fraction": 0.5})
 
         # The gauge for cost_total_usd should retain its previous value
         assert GAUGES["minivess_training_cost_total_usd"]._value.get() == 99.0
@@ -86,10 +86,10 @@ class TestUpdateEstimatedCostGauges:
         )
 
         estimate_dict = {
-            "estimated_total_cost": 2.50,
-            "estimated_total_hours": 1.5,
-            "cost_per_epoch": 0.05,
-            "epoch_seconds": 120.0,
+            "est/total_cost": 2.50,
+            "est/total_hours": 1.5,
+            "est/cost_per_epoch": 0.05,
+            "est/epoch_seconds": 120.0,
         }
         update_estimated_cost_gauges(estimate_dict)
 
@@ -103,7 +103,7 @@ class TestGenerateLatest:
     def test_generate_latest_contains_metrics(self) -> None:
         from minivess.observability.prometheus_metrics import GAUGES, update_cost_gauges
 
-        update_cost_gauges({"cost_total_usd": 1.0})
+        update_cost_gauges({"cost/total_usd": 1.0})
         output = prometheus_client.generate_latest().decode("utf-8")
 
         for name in GAUGES:

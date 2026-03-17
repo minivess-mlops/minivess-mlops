@@ -11,9 +11,9 @@ Shell timing format (generated in SkyPilot YAML setup: blocks)::
     ...
     setup_end = 1710413130.700
 
-Metric prefix taxonomy:
-    setup_  — infrastructure timing (one-time MLflow params)
-    cost_   — cost analysis (MLflow metrics at step=0)
+Metric prefix taxonomy (slash-prefix, #790):
+    setup/  — infrastructure timing (one-time MLflow params)
+    cost/   — cost analysis (MLflow metrics at step=0)
 
 Issue: #683
 See: docs/planning/profiler-benchmarking-plan-double-check.md
@@ -161,15 +161,15 @@ def compute_cost_analysis(
         break_even = 0
 
     return {
-        "cost_total_wall_seconds": round(total_seconds, 1),
-        "cost_total_usd": round(total_cost, 4),
-        "cost_setup_usd": round(setup_cost, 4),
-        "cost_training_usd": round(training_cost, 4),
-        "cost_effective_gpu_rate": round(effective_rate, 4),
-        "cost_setup_fraction": round(setup_fraction, 4),
-        "cost_gpu_utilization_fraction": round(gpu_utilization, 4),
-        "cost_epochs_to_amortize_setup": epochs_to_amortize,
-        "cost_break_even_epochs": break_even,
+        "cost/total_wall_seconds": round(total_seconds, 1),
+        "cost/total_usd": round(total_cost, 4),
+        "cost/setup_usd": round(setup_cost, 4),
+        "cost/training_usd": round(training_cost, 4),
+        "cost/effective_gpu_rate": round(effective_rate, 4),
+        "cost/setup_fraction": round(setup_fraction, 4),
+        "cost/gpu_utilization_fraction": round(gpu_utilization, 4),
+        "cost/epochs_to_amortize_setup": epochs_to_amortize,
+        "cost/break_even_epochs": break_even,
     }
 
 
@@ -225,11 +225,11 @@ def generate_timing_jsonl(
         "phase": "cost",
         "operation": "cost_summary",
         "timestamp_utc": now_str,
-        "total_cost_usd": cost["cost_total_usd"],
-        "setup_cost_usd": cost["cost_setup_usd"],
-        "training_cost_usd": cost["cost_training_usd"],
-        "effective_gpu_rate_usd": cost["cost_effective_gpu_rate"],
-        "setup_fraction": cost["cost_setup_fraction"],
+        "total_cost_usd": cost["cost/total_usd"],
+        "setup_cost_usd": cost["cost/setup_usd"],
+        "training_cost_usd": cost["cost/training_usd"],
+        "effective_gpu_rate_usd": cost["cost/effective_gpu_rate"],
+        "setup_fraction": cost["cost/setup_fraction"],
         "hourly_rate_usd": hourly_rate_usd,
     }
     lines.append(json.dumps(summary, separators=(",", ":")))
@@ -275,10 +275,10 @@ def estimate_cost_from_first_epoch(
     cost_per_epoch = (epoch_seconds / 3600.0) * hourly_rate_usd
 
     return {
-        "estimated_total_cost": round(total_cost, 4),
-        "estimated_total_hours": round(total_hours, 4),
-        "cost_per_epoch": round(cost_per_epoch, 4),
-        "epoch_seconds": epoch_seconds,
+        "est/total_cost": round(total_cost, 4),
+        "est/total_hours": round(total_hours, 4),
+        "est/cost_per_epoch": round(cost_per_epoch, 4),
+        "est/epoch_seconds": epoch_seconds,
     }
 
 
@@ -325,11 +325,11 @@ def log_infrastructure_timing(
     if not durations:
         return
 
-    # Log each duration as an MLflow param
+    # Log each duration as an MLflow param (slash-prefix, #790)
     params = {}
     for op, duration in durations.items():
         param_name = (
-            f"setup_{op}_seconds" if op != "setup_total" else "setup_total_seconds"
+            f"setup/{op}_seconds" if op != "setup_total" else "setup/total_seconds"
         )
         params[param_name] = round(duration, 1)
     mlflow.log_params(params)

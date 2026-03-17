@@ -38,7 +38,7 @@ class TestExcludedMetricPrefixes:
         """cost_total_usd is excluded from training metrics."""
         from minivess.pipeline.duckdb_extraction import _should_include_training_metric
 
-        assert not _should_include_training_metric("cost_total_usd")
+        assert not _should_include_training_metric("cost/total_usd")
 
     def test_should_include_training_metric(self) -> None:
         """train_loss is still included in training metrics."""

@@ -25,22 +25,22 @@ def get_system_params() -> dict[str, str]:
     3. ``"unknown"``
     """
     params: dict[str, str] = {
-        "sys_python_version": platform.python_version(),
-        "sys_os": platform.system(),
-        "sys_os_kernel": platform.release(),
-        "sys_hostname": platform.node() or "unknown",
+        "sys/python_version": platform.python_version(),
+        "sys/os": platform.system(),
+        "sys/os_kernel": platform.release(),
+        "sys/hostname": platform.node() or "unknown",
     }
 
     # RAM via psutil
     try:
         import psutil
 
-        params["sys_total_ram_gb"] = f"{psutil.virtual_memory().total / (1024**3):.1f}"
+        params["sys/total_ram_gb"] = f"{psutil.virtual_memory().total / (1024**3):.1f}"
     except ImportError:
-        params["sys_total_ram_gb"] = "unknown"
+        params["sys/total_ram_gb"] = "unknown"
 
     # CPU model
-    params["sys_cpu_model"] = _get_cpu_model()
+    params["sys/cpu_model"] = _get_cpu_model()
 
     return params
 
@@ -76,51 +76,51 @@ def get_library_versions() -> dict[str, str]:
     try:
         import torch
 
-        versions["sys_torch_version"] = torch.__version__
+        versions["sys/torch_version"] = torch.__version__
     except ImportError:
-        versions["sys_torch_version"] = "not_installed"
+        versions["sys/torch_version"] = "not_installed"
 
     # CUDA + cuDNN (via PyTorch)
     try:
         import torch
 
         if torch.cuda.is_available():
-            versions["sys_cuda_version"] = torch.version.cuda or "N/A"
+            versions["sys/cuda_version"] = torch.version.cuda or "N/A"
             try:
                 cudnn_ver = torch.backends.cudnn.version()  # type: ignore[no-untyped-call]
-                versions["sys_cudnn_version"] = str(cudnn_ver) if cudnn_ver else "N/A"
+                versions["sys/cudnn_version"] = str(cudnn_ver) if cudnn_ver else "N/A"
             except (AttributeError, RuntimeError):
-                versions["sys_cudnn_version"] = "N/A"
+                versions["sys/cudnn_version"] = "N/A"
         else:
-            versions["sys_cuda_version"] = "N/A"
-            versions["sys_cudnn_version"] = "N/A"
+            versions["sys/cuda_version"] = "N/A"
+            versions["sys/cudnn_version"] = "N/A"
     except ImportError:
-        versions["sys_cuda_version"] = "not_installed"
-        versions["sys_cudnn_version"] = "not_installed"
+        versions["sys/cuda_version"] = "not_installed"
+        versions["sys/cudnn_version"] = "not_installed"
 
     # MONAI
     try:
         import monai
 
-        versions["sys_monai_version"] = monai.__version__
+        versions["sys/monai_version"] = monai.__version__
     except ImportError:
-        versions["sys_monai_version"] = "not_installed"
+        versions["sys/monai_version"] = "not_installed"
 
     # MLflow
     try:
         import mlflow
 
-        versions["sys_mlflow_version"] = mlflow.__version__
+        versions["sys/mlflow_version"] = mlflow.__version__
     except ImportError:
-        versions["sys_mlflow_version"] = "not_installed"
+        versions["sys/mlflow_version"] = "not_installed"
 
     # NumPy
     try:
         import numpy
 
-        versions["sys_numpy_version"] = numpy.__version__
+        versions["sys/numpy_version"] = numpy.__version__
     except ImportError:
-        versions["sys_numpy_version"] = "not_installed"
+        versions["sys/numpy_version"] = "not_installed"
 
     return versions
 
@@ -136,9 +136,9 @@ def get_gpu_info() -> dict[str, str]:
 
         if not torch.cuda.is_available():
             return {
-                "sys_gpu_count": "0",
-                "sys_gpu_model": "N/A",
-                "sys_gpu_vram_mb": "0",
+                "sys/gpu_count": "0",
+                "sys/gpu_model": "N/A",
+                "sys/gpu_vram_mb": "0",
             }
 
         count = torch.cuda.device_count()
@@ -146,15 +146,15 @@ def get_gpu_info() -> dict[str, str]:
         vram = torch.cuda.get_device_properties(0).total_memory // (1024 * 1024)
 
         return {
-            "sys_gpu_count": str(count),
-            "sys_gpu_model": model,
-            "sys_gpu_vram_mb": str(vram),
+            "sys/gpu_count": str(count),
+            "sys/gpu_model": model,
+            "sys/gpu_vram_mb": str(vram),
         }
     except (ImportError, RuntimeError):
         return {
-            "sys_gpu_count": "0",
-            "sys_gpu_model": "N/A",
-            "sys_gpu_vram_mb": "0",
+            "sys/gpu_count": "0",
+            "sys/gpu_model": "N/A",
+            "sys/gpu_vram_mb": "0",
         }
 
 
@@ -165,10 +165,10 @@ def get_git_info() -> dict[str, str]:
     Returns ``"unknown"`` for all fields if git is unavailable.
     """
     unknown = {
-        "sys_git_commit": "unknown",
-        "sys_git_commit_short": "unknown",
-        "sys_git_branch": "unknown",
-        "sys_git_dirty": "unknown",
+        "sys/git_commit": "unknown",
+        "sys/git_commit_short": "unknown",
+        "sys/git_branch": "unknown",
+        "sys/git_dirty": "unknown",
     }
 
     try:
@@ -214,10 +214,10 @@ def get_git_info() -> dict[str, str]:
         dirty = "true" if dirty_result.returncode != 0 else "false"
 
         return {
-            "sys_git_commit": commit,
-            "sys_git_commit_short": commit_short,
-            "sys_git_branch": branch,
-            "sys_git_dirty": dirty,
+            "sys/git_commit": commit,
+            "sys/git_commit_short": commit_short,
+            "sys/git_branch": branch,
+            "sys/git_dirty": dirty,
         }
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return unknown
@@ -236,9 +236,9 @@ def get_dvc_info() -> dict[str, str]:
     try:
         import dvc
 
-        info["sys_dvc_version"] = dvc.__version__
+        info["sys/dvc_version"] = dvc.__version__
     except (ImportError, AttributeError):
-        info["sys_dvc_version"] = "not_installed"
+        info["sys/dvc_version"] = "not_installed"
 
     return info
 
@@ -246,7 +246,7 @@ def get_dvc_info() -> dict[str, str]:
 def get_all_system_info() -> dict[str, str]:
     """Combine all system info into a single dict.
 
-    All keys are prefixed with ``sys_``.  All values are strings.
+    All keys are prefixed with ``sys/``.  All values are strings.
     """
     info: dict[str, str] = {}
     info.update(get_system_params())
