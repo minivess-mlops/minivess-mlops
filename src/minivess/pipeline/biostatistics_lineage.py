@@ -88,3 +88,35 @@ def _get_git_commit() -> str:
 def _get_source_experiments(manifest: SourceRunManifest) -> list[str]:
     """Extract unique experiment names from the manifest."""
     return sorted({r.experiment_name for r in manifest.runs})
+
+
+def build_lineage_manifest_with_cost(
+    manifest: SourceRunManifest,
+    figures: list[FigureArtifact],
+    tables: list[TableArtifact],
+    cost_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build lineage manifest with optional cost summary.
+
+    Extends :func:`build_lineage_manifest` with a ``cost_summary``
+    field for the manuscript cost appendix (TRIPOD-12).
+
+    Parameters
+    ----------
+    manifest:
+        Source run manifest with fingerprint.
+    figures:
+        Generated figures.
+    tables:
+        Generated tables.
+    cost_summary:
+        Optional cost summary dict from :class:`CostSummary`.
+
+    Returns
+    -------
+    JSON-serializable dict with lineage and cost information.
+    """
+    lineage = build_lineage_manifest(manifest, figures, tables)
+    if cost_summary is not None:
+        lineage["cost_summary"] = cost_summary
+    return lineage
