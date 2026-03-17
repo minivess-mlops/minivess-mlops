@@ -226,4 +226,10 @@ This is a ~30-line change across 5 files that:
 - Provides manuscript supplementary content (lineage graph figure)
 - Prepares for clinical pathway without premature complexity
 
-**Recommendation**: Implement H1 (emit-only) during the 5 PR execution. Implement H2 (Marquez) after the factorial experiment, before manuscript submission.
+**Recommendation** (UPDATED after user feedback):
+- Implement **H1+H2** together during PR execution: emit OpenLineage events AND wire Marquez + PostgreSQL in docker-compose.
+- Docker services are NOT "complexity" — they ARE the execution model (CLAUDE.md TOP-2).
+- Local PostgreSQL for local runs, GCP Cloud SQL for remote runs. Manual "Sync Flow" to replicate lineage data.
+- See metalearning: `.claude/metalearning/2026-03-17-openlineage-dev-prod-confusion.md`
+
+**License note**: The repo currently lists MIT in pyproject.toml but has no LICENSE file. User has indicated the repo is academic and may use non-commercial licensed dependencies (e.g., cai4cai CC BY 4.0). License should be updated to a non-commercial compatible license (e.g., CC BY-NC-SA 4.0 or Apache-2.0 with additional restrictions). This is a separate decision to be resolved before public release.
