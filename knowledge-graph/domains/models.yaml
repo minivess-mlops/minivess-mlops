@@ -24,9 +24,17 @@ decisions:
     status: resolved
     winner: mambavesselnet_pp
     rationale: "MambaVesselNet++ hybrid CNN-SSM with VSS blocks and multi-scale fusion"
-    implementation: [src/minivess/adapters/mamba_adapter.py, src/minivess/adapters/mamba/]
+    implementation: [src/minivess/adapters/mambavesselnet.py, src/minivess/adapters/mamba/]
+    adapter_status: complete  # PR #748 — code exists, GPU benchmark runs pending
     evidence: [docs/planning/mambavesselnet-implementation-plan.xml]
     prd_node: knowledge-graph/decisions/L3-technology/mamba_architecture.yaml
+
+  paper_model_comparison:
+    status: planned
+    rationale: "6-model lineup for Nature Protocols paper: DynUNet, MambaVesselNet++, SAM3 Vanilla, SAM3 TopoLoRA, SAM3 Hybrid, VesselFM"
+    implementation: []  # GPU benchmark runs pending on GCP L4 spot
+    evidence: [.claude/metalearning/2026-03-17-model-lineup-ignorance-massive-fuckup.md]
+    prd_node: knowledge-graph/decisions/L3-technology/paper_model_comparison.yaml
 
 metalearning:
   - file: .claude/metalearning/2026-03-02-sam3-implementation-fuckup.md
@@ -41,6 +49,9 @@ metalearning:
   - file: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
     applies_to: [deployment/skypilot/, configs/cloud/]
     rule: "T4 banned for half-precision models — Turing lacks BF16, use L4 (Ada Lovelace)"
+  - file: .claude/metalearning/2026-03-17-model-lineup-ignorance-massive-fuckup.md
+    applies_to: [knowledge-graph/decisions/L3-technology/paper_model_comparison.yaml]
+    rule: "Claude could not name the 6-model paper lineup from memory — paper_model_comparison.yaml is the SINGLE SOURCE OF TRUTH"
 
 planning_docs:
   - file: docs/planning/sam3-integration-research-report.md

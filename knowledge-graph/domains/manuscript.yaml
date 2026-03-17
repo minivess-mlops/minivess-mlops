@@ -29,7 +29,7 @@ sections:
   results:
     file: knowledge-graph/manuscript/results.yaml
     description: "6 Results section stubs (R0-R5) linked to experiment run_ids"
-    status: bootstrapped_partial  # R3b blocked: SAM3/VesselFM GPU runs pending
+    status: bootstrapped_partial  # R3b blocked: GPU benchmark runs pending (DynUNet + MambaVesselNet++ adapters COMPLETE, SAM3 variants + VesselFM need GPU)
 
   limitations:
     file: knowledge-graph/manuscript/limitations.yaml
@@ -75,6 +75,6 @@ metalearning:
 
 open_issues:
   - id: "pending"
-    title: "GPU runs for SAM3/VesselFM model comparison (R3b blocker)"
+    title: "GPU benchmark runs for 6-model paper comparison (R3b blocker) — DynUNet + Mamba adapters complete, SAM3 + VesselFM need GCP L4 spot"
     priority: critical
     blocks: [manuscript/results.yaml#R3b, docs/manuscript/latent-methods-results/results/results-03-models.tex]

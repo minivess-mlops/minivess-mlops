@@ -153,6 +153,9 @@ nodes:
   - id: lineage_tracking
     level: L3
     file: decisions/L3-technology/lineage_tracking.yaml
+  - id: paper_model_comparison
+    level: L3
+    file: decisions/L3-technology/paper_model_comparison.yaml
 
   # L4 — Infrastructure (11 nodes)
   - id: container_strategy
@@ -387,6 +390,17 @@ edges:
   - from: primary_3d_model
     to: mamba_architecture
     strength: moderate
+
+  # paper_model_comparison edges (aggregates all model families for the paper)
+  - from: paper_model_comparison
+    to: primary_3d_model
+    strength: strong
+  - from: paper_model_comparison
+    to: foundation_model
+    strength: strong
+  - from: paper_model_comparison
+    to: mamba_architecture
+    strength: strong
 
   # L2 → L4 (docker_architecture edges)
   - from: docker_architecture

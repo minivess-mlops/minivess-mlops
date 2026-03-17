@@ -1,0 +1,155 @@
+decision_id: paper_model_comparison
+title: "Nature Protocols Paper Model Comparison Lineup"
+level: L3
+status: resolved
+description: >
+  The 6 models compared in the NEUROVEX Nature Protocols manuscript.
+  This is the AUTHORITATIVE source for which models appear in the paper,
+  their training strategy, data constraints, and GPU requirements.
+
+  Paper sections: R3a (loss ablation), R3b (multi-model comparison),
+  R3c (foundation model external evaluation).
+
+resolved_option: six_model_comparison
+
+models:
+  - model_id: dynunet
+    adapter: src/minivess/adapters/dynunet.py
+    family: CNN_baseline
+    paper_section: R3a, R3b
+    training_strategy: full_training
+    description: >
+      MONAI DynUNet (nnU-Net-style). Baseline CNN with configurable filters.
+      Loss ablation study (R3a) compares dice_ce, cbdice, cbdice_cldice.
+      Winner: cbdice_cldice (DSC=0.772, clDice=0.906).
+    status: COMPLETE
+    epochs: 100
+    folds: 3
+    dataset: minivess
+    vram_gb: 3.5
+    results_available: true
+    evidence: knowledge-graph/experiments/dynunet_loss_variation_v2.yaml
+
+  - model_id: mambavesselnet_pp
+    adapter: src/minivess/adapters/mambavesselnet.py
+    family: SSM_hybrid
+    paper_section: R3b
+    training_strategy: full_training
+    description: >
+      MambaVesselNet++ hybrid CNN-SSM with bidirectional Mamba blocks.
+      Demonstrates ModelAdapter ABC supports non-CNN architectures.
+      Platform demonstration, NOT SOTA claim.
+    status: CODE_COMPLETE_GPU_PENDING
+    epochs: TBD
+    folds: 3
+    dataset: minivess
+    vram_gb: TBD
+    results_available: false
+    reference: "Chen et al. (2024, ACM MM) / Xu & Chen et al. (2025, ACM TOMM)"
+
+  - model_id: sam3_vanilla
+    adapter: src/minivess/adapters/sam3_vanilla.py
+    family: foundation_model_frozen
+    paper_section: R3b
+    training_strategy: zero_shot_OR_decoder_finetune
+    description: >
+      Frozen SAM3 ViT-32L encoder + trainable lightweight decoder.
+      Slice-by-slice 2D inference. ZERO-SHOT evaluation is a VALID
+      baseline showing domain gap (natural images → microvasculature).
+      Optional: fine-tune decoder only for comparison.
+    status: GPU_PENDING
+    epochs: 0 (zero-shot) or 50-100 (fine-tune)
+    folds: 3
+    dataset: minivess
+    vram_gb: 2.9
+    results_available: false
+    zero_shot_valid: true
+    expected_dsc: 0.05-0.55
+    reference: "Ravi et al. (2025). SAM 3. arXiv:2511.16719"
+
+  - model_id: sam3_topolora
+    adapter: src/minivess/adapters/sam3_topolora.py
+    family: foundation_model_lora
+    paper_section: R3b
+    training_strategy: lora_finetune
+    description: >
+      SAM3 ViT-32L with LoRA adapters on FFN layers (rank=16, alpha=32)
+      + spatial adapter + topology-aware loss (cbdice_cldice).
+      Tests whether lightweight fine-tuning improves vessel segmentation.
+    status: GPU_PENDING
+    epochs: 50
+    folds: 3
+    dataset: minivess
+    vram_gb: 16
+    results_available: false
+    expected_dsc: 0.30-0.50
+    reference: "Xiang et al. (2025). TopoLoRA-SAM. arXiv:2601.02273"
+
+  - model_id: sam3_hybrid
+    adapter: src/minivess/adapters/sam3_hybrid.py
+    family: foundation_model_fusion
+    paper_section: R3b
+    training_strategy: dynunet_with_sam3_features
+    description: >
+      Frozen SAM3 features (2D per-slice) fused with trainable DynUNet (3D)
+      via gated cross-attention. Gate initialized at 0.0 (pure DynUNet baseline).
+      Tests if SAM3 features add complementary signal to 3D context.
+    status: PARTIALLY_VALIDATED
+    epochs: 50
+    folds: 3
+    dataset: minivess
+    vram_gb: 6
+    results_available: false
+    debug_run: "val_loss=0.6786 on GCP L4 (2026-03-15)"
+    expected_dsc: 0.50-0.70
+    reference: "Li et al. (2025). nnSAM. Medical Physics"
+
+  - model_id: vesselfm
+    adapter: src/minivess/adapters/vesselfm.py
+    family: foundation_model_pretrained
+    paper_section: R3c
+    training_strategy: zero_shot_AND_finetuned
+    description: >
+      Pre-trained DynUNet foundation model for vessel segmentation.
+      CRITICAL: Trained on 17 datasets INCLUDING MiniVess → data leakage.
+      MUST evaluate on DeepVess/TubeNet ONLY (NOT MiniVess).
+      Both zero-shot and fine-tuned results on external data.
+    status: GPU_PENDING
+    epochs: 0 (zero-shot) + variable (fine-tune)
+    folds: 3
+    dataset: deepvess_and_tubenet_ONLY
+    data_leakage_warning: >
+      VesselFM was pre-trained on MiniVess. Evaluating on MiniVess
+      measures memorization, not generalization. This is documented
+      in manuscript/claims.yaml C9 and manuscript/limitations.yaml L1.
+    vram_gb: TBD
+    results_available: false
+    reference: "Wittmann et al. (2024). vesselFM. CVPR 2025. arXiv:2411.17386"
+
+execution_target:
+  cloud: GCP
+  environment: staging
+  gpu: L4 (Ada Lovelace, BF16-capable)
+  rationale: >
+    GCP is staging+prod. Paper results MUST run on GCP infrastructure
+    (the architecture the paper describes). RunPod is dev-only.
+    L4 supports BF16 (required for SAM3), is cheaper than T4 per job,
+    and has same-region GAR for fast Docker pulls.
+  t4_banned: true
+  reason_t4_banned: "Turing architecture, no BF16, FP16 overflow risk for SAM3"
+
+conditional_on:
+  - parent_decision_id: primary_3d_model
+    strength: strong
+  - parent_decision_id: foundation_model
+    strength: strong
+  - parent_decision_id: mamba_architecture
+    strength: moderate
+
+volatility:
+  classification: stable
+  last_assessed: "2026-03-17"
+  next_review: "2026-06-17"
+  change_drivers:
+    - "Paper review feedback may request additional models"
+    - "SAM3 zero-shot results may change fine-tuning strategy"
