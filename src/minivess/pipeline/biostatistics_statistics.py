@@ -549,3 +549,97 @@ def compute_factorial_anova(
         engine_pingouin=engine_pg,
         engine_statsmodels=engine_sm,
     )
+
+
+# ---------------------------------------------------------------------------
+# Riley Bootstrap Instability (PR-A)
+# ---------------------------------------------------------------------------
+
+
+def compute_riley_instability(
+    per_volume_data: PerVolumeData,
+    metric_name: str,
+    n_bootstrap: int = 1000,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Compute bootstrap ranking instability analysis.
+
+    Resamples validation volumes with replacement and re-ranks all models
+    on each bootstrap sample to assess ranking stability.
+
+    Parameters
+    ----------
+    per_volume_data:
+        ``{condition: {fold_id: np.ndarray}}``.
+    metric_name:
+        Name of the metric (for labelling).
+    n_bootstrap:
+        Number of bootstrap resamples.
+    seed:
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    Dict with keys:
+        - rank_matrix: np.ndarray of shape (n_bootstrap, n_models)
+        - model_names: list[str]
+        - stability_fractions: dict[str, float]
+        - metric_name: str
+
+    References
+    ----------
+    Riley et al. (2021). "Minimum sample size for developing a multivariable
+    prediction model." Stat Med.
+    """
+    rng = np.random.default_rng(seed)
+
+    model_names = sorted(per_volume_data.keys())
+    n_models = len(model_names)
+
+    # Pool scores across folds for each model
+    pooled: dict[str, np.ndarray] = {}
+    for model in model_names:
+        pooled[model] = _pool_scores(per_volume_data[model])
+
+    # Align to minimum length
+    min_n = min(len(v) for v in pooled.values())
+    aligned = {model: pooled[model][:min_n] for model in model_names}
+
+    # Bootstrap ranking
+    rank_matrix = np.zeros((n_bootstrap, n_models), dtype=int)
+
+    for b in range(n_bootstrap):
+        # Resample volume indices with replacement
+        indices = rng.integers(0, min_n, size=min_n)
+
+        # Compute mean for each model on the resampled set
+        boot_means = []
+        for model in model_names:
+            boot_means.append(float(np.mean(aligned[model][indices])))
+
+        # Rank models (higher mean = rank 1 for metrics like Dice)
+        # scipy.stats.rankdata returns ranks where 1 = smallest,
+        # so we negate to get rank 1 = highest
+        from scipy.stats import rankdata
+
+        ranks = rankdata([-m for m in boot_means], method="min")
+        rank_matrix[b, :] = ranks
+
+    # Compute stability fractions: fraction of bootstraps where model keeps rank 1
+    # More generally: fraction where model keeps its most frequent rank
+    stability_fractions: dict[str, float] = {}
+    for model_idx, model in enumerate(model_names):
+        ranks_for_model = rank_matrix[:, model_idx]
+        # Most frequent rank
+        unique_ranks, counts = np.unique(ranks_for_model, return_counts=True)
+        most_frequent_rank = unique_ranks[np.argmax(counts)]
+        stability_fractions[model] = float(
+            np.sum(ranks_for_model == most_frequent_rank) / n_bootstrap
+        )
+
+    return {
+        "rank_matrix": rank_matrix,
+        "model_names": model_names,
+        "stability_fractions": stability_fractions,
+        "metric_name": metric_name,
+    }
