@@ -472,6 +472,51 @@ citations:
       Platform paper uses the TOMM architecture (MambaVesselNet++) as the canonical
       SSM family representative. DOI: https://doi.org/10.1145/3757324.
 
+  # === VLM Calibration + Evidential Deep Learning (added 2026-03-17) ===
+
+  sae_2026_vlm_calibration:
+    authors: "TBD (CVPR 2026 — authors not yet confirmed)"
+    year: 2026
+    title: "Similarity-as-Evidence: Calibrating Overconfident VLMs for Interpretable and Label-Efficient Medical Active Learning"
+    venue: "CVPR 2026"
+    url: "TBD"
+    used_in: [vlm_calibration]
+    abstract_snippet: >
+      Introduces Similarity Evidence Head (SEH) that reinterprets VLM text-image
+      similarity vectors as evidence for a Dirichlet distribution. Decomposes
+      uncertainty into vacuity (knowledge gap) and dissonance (conflicting evidence).
+      82.57% accuracy on 10 medical imaging datasets with 20% label budget.
+      Directly relevant to SAM3 zero-shot calibration on microvasculature.
+    note: >
+      CITATION KEY: sae_2026_vlm_calibration. CVPR 2026 accepted paper — arXiv
+      preprint not yet found. Verify authors, URL, and arXiv ID before manuscript
+      submission. See Issue #798.
+
+  barfoot_2025_average_calibration_losses:
+    authors: "Barfoot T, Garcia-Peraza-Herrera LC, Akcay S, Glocker B, Vercauteren T"
+    year: 2025
+    title: "Average Calibration Losses for Reliable Uncertainty in Medical Image Segmentation"
+    venue: "IEEE TMI, arXiv:2506.03942"
+    url: "https://arxiv.org/abs/2506.03942"
+    used_in: [calibration_method, vlm_calibration]
+    abstract_snippet: >
+      Differentiable mL1-ACE (marginal L1 Average Calibration Error) as auxiliary
+      loss. Tested on ACDC, AMOS, KiTS, BraTS. Hard-binned hL1-ACE variant used
+      in our factorial design (c=2 factor). CC BY 4.0 from cai4cai/Average-Calibration-Losses.
+
+  basu_2025_calibprompt:
+    authors: "Basu A, Shamshad F, Sharifdeen A, Nandakumar K, Khan MH"
+    year: 2025
+    title: "Calibration-Aware Prompt Learning for Medical Vision-Language Models"
+    venue: "BMVC 2025, arXiv:2509.15226"
+    url: "https://arxiv.org/abs/2509.15226"
+    used_in: [vlm_calibration]
+    abstract_snippet: >
+      CalibPrompt: learnable prompts with smoothed accuracy alignment and angular
+      separation loss for medical VLM calibration. Tested on 4 Med-VLMs across
+      5 datasets. Complementary to SaE — addresses calibration through prompt
+      engineering rather than evidence estimation.
+
   haft_javaherian_2020_topological:
     authors: "Haft-Javaherian M, Villiger M, Schaffer CB, Nishimura N, Golland P, Bouma BE"
     year: 2020

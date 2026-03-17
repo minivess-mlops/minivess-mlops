@@ -40,7 +40,7 @@ domains:
     covers: [loss functions, metrics, augmentation, HPO, calibration]
     claude_md: [src/minivess/pipeline/CLAUDE.md]
     decisions: [loss_function, primary_metrics, topology_metrics, hpo_engine,
-                augmentation_library, calibration_method]
+                augmentation_library, calibration_method, vlm_calibration]
 
   cloud:
     navigator: knowledge-graph/domains/cloud.yaml
@@ -204,6 +204,9 @@ keywords:
   onnx: architecture
   bentoml: architecture
   calibration: training
+  vlm_calibration: training
+  dirichlet: training
+  evidential: training
   ensemble: architecture
   xai: observability
   compliance: operations

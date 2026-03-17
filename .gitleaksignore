@@ -33,3 +33,7 @@ knowledge-graph/manuscript/claims.yaml:generic-api-key:98
 knowledge-graph/bibliography.yaml:generic-api-key:212
 knowledge-graph/decisions/L4-infrastructure/compute_orchestration.yaml:generic-api-key:31
 knowledge-graph/domains/manuscript.yaml:generic-api-key:25
+knowledge-graph/bibliography.yaml:generic-api-key:491
+knowledge-graph/decisions/L3-technology/vlm_calibration.yaml:generic-api-key:104
+knowledge-graph/decisions/L3-technology/vlm_calibration.yaml:generic-api-key:108
+knowledge-graph/decisions/L3-technology/vlm_calibration.yaml:generic-api-key:112
