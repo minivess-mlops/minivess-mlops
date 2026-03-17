@@ -149,6 +149,22 @@ dev-gpu-status:  ## Show Network Volume disk usage + pod status
 	  (echo "  Pod not running — start first: sky start minivess-dev")
 
 # ---------------------------------------------------------------------------
+# Docker Images — zstd-compressed builds (20-30% faster pull)
+# ---------------------------------------------------------------------------
+# zstd decompression is 3-5x faster than gzip (Docker default).
+# Requires BuildKit + containerd 1.5+ on target. GAR supports OCI zstd.
+# See: docs/planning/docker-pull-runpod-provisioning-mlflow-cloud-run-multipart-upload-report.md
+
+build-base-zstd:  ## Build minivess-base with zstd compression (faster pull)
+	docker buildx build \
+	  --output type=image,compression=zstd,compression-level=3,oci-mediatypes=true \
+	  --build-arg GIT_COMMIT=$$(git rev-parse HEAD) \
+	  --build-arg BUILD_DATE=$$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+	  -t $(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):latest \
+	  -f deployment/docker/Dockerfile.base . \
+	  2>&1 | tee /tmp/docker-build-zstd.log
+
+# ---------------------------------------------------------------------------
 # Docker Images — Mamba variant (INSTALL_MAMBA=1)
 # ---------------------------------------------------------------------------
 # Standard :latest image has no mamba-ssm (CUDA compilation is optional).
