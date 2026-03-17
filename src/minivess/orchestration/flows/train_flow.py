@@ -20,9 +20,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import mlflow
 import yaml
 from prefect import flow, task
 
+from minivess.observability.infrastructure_timing import (
+    estimate_cost_from_first_epoch,
+    get_hourly_rate_usd,
+)
+from minivess.observability.prometheus_metrics import update_estimated_cost_gauges
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_TRAIN
 from minivess.orchestration.mlflow_helpers import (
@@ -36,6 +42,54 @@ from minivess.pipeline.resume_discovery import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def log_epoch0_cost_estimate(
+    *,
+    training_time_seconds: float,
+    max_epochs: int,
+    num_folds: int,
+    hourly_rate_usd: float,
+) -> None:
+    """Log epoch-0 cost estimate to MLflow and update Prometheus gauges.
+
+    Skipped when max_epochs <= 1 (no point predicting from the only epoch)
+    or when training_time_seconds <= 0 (no timing data).
+
+    Parameters
+    ----------
+    training_time_seconds:
+        Total training time in seconds so far.
+    max_epochs:
+        Total planned epochs.
+    num_folds:
+        Number of cross-validation folds.
+    hourly_rate_usd:
+        Instance hourly cost in USD.
+    """
+    if max_epochs <= 1:
+        return
+    if training_time_seconds <= 0:
+        return
+
+    # Derive per-epoch time from total training time / max_epochs
+    epoch_seconds = training_time_seconds / max_epochs
+
+    estimate = estimate_cost_from_first_epoch(
+        epoch_seconds=epoch_seconds,
+        max_epochs=max_epochs,
+        num_folds=num_folds,
+        hourly_rate_usd=hourly_rate_usd,
+    )
+
+    mlflow.log_metrics(estimate, step=0)
+    update_estimated_cost_gauges(estimate)
+    logger.info(
+        "Epoch-0 cost estimate: $%.4f total, %.2fh, $%.4f/epoch",
+        estimate["estimated_total_cost"],
+        estimate["estimated_total_hours"],
+        estimate["cost_per_epoch"],
+    )
 
 
 def _require_docker_context() -> None:
@@ -764,8 +818,6 @@ def training_flow(
     # Open MLflow run, log everything, then close cleanly
     mlflow_run_id: str | None = None
     try:
-        import mlflow
-
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment(experiment_name)
         # MLflow tags: flow_name is inline so AST checks in test_flow_name_tags.py pass.
@@ -827,6 +879,15 @@ def training_flow(
                     setup_seconds=_setup_seconds,
                     training_seconds=_total_training_seconds,
                     epoch_count=max_epochs * len(fold_results),
+                )
+
+            # Log epoch-0 cost estimate (#717 — wire dead code)
+            if _total_training_seconds > 0:
+                log_epoch0_cost_estimate(
+                    training_time_seconds=_total_training_seconds,
+                    max_epochs=max_epochs,
+                    num_folds=num_folds,
+                    hourly_rate_usd=get_hourly_rate_usd(),
                 )
 
     except Exception:
