@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan version="1.0" name="pr-e-cost-reporting">
+
+  <metadata>
+    <created>2026-03-17</created>
+    <branch>feat/cost-reporting</branch>
+    <pr_label>PR-E</pr_label>
+    <execution_order>5 of 5</execution_order>
+    <literature_report>docs/planning/pre-full-gcp-training-qa-plan.md</literature_report>
+    <issue>795</issue>
+    <description>
+      Financial cost transparency for the manuscript appendix. Addresses
+      TRIPOD-LLM Item 12 (computational cost reporting) and GitHub Issue #795.
+      Adds instance type param logging, spot vs on-demand savings computation,
+      and cost appendix LaTeX table in the biostatistics flow.
+    </description>
+    <references>
+      <ref>Gallifant et al. (2025). "TRIPOD-LLM." Nat Med.</ref>
+      <ref>SkyPilot spot pricing: deployment/skypilot/*.yaml</ref>
+    </references>
+    <existing_infrastructure>
+      metric_keys.py: cost/ prefix defined (cost/total_usd, cost/gpu_hourly_rate)
+      infrastructure_timing.py: SkyPilot setup timing parser
+      analytics.py: DuckDB in-process SQL over mlruns
+    </existing_infrastructure>
+  </metadata>
+
+  <!-- Phase 0: Cost Metric Logging -->
+  <phase id="0" name="Cost Metric Logging">
+
+    <task id="T1" status="NOT_STARTED" priority="P0">
+      <name>Instance type and cost param logging</name>
+      <description>
+        Extend MLflow param logging to include cloud instance metadata:
+
+        - cost/instance_type: e.g., "g2-standard-4" (GCP L4)
+        - cost/gpu_type: e.g., "L4" (from SkyPilot env or NVIDIA driver)
+        - cost/spot_enabled: true/false
+        - cost/spot_hourly_rate: $/hr for spot instance
+        - cost/ondemand_hourly_rate: $/hr for on-demand (for savings calc)
+        - cost/region: e.g., "europe-north1"
+        - cost/provider: e.g., "gcp"
+
+        These are logged at training start from SkyPilot environment variables
+        (SKYPILOT_TASK_ID, etc.) or from a cost_config.yaml.
+
+        IMPORTANT: Do NOT hardcode rates. Read from config or SkyPilot metadata.
+        Different labs use different providers and instance types.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_cost_params_logged_to_mlflow
+          test_cost_params_from_skypilot_env
+          test_cost_params_from_config_yaml
+          test_cost_params_no_hardcoded_rates
+          test_cost_params_all_fields_present
+        </tests>
+        <file>tests/v2/unit/test_cost_param_logging.py</file>
+        <impl_files>
+          src/minivess/observability/cost_logging.py
+          src/minivess/observability/metric_keys.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - All cost params logged to MLflow at step=0
+        - Params read from environment or config (no hardcoding)
+        - Missing env vars produce "unknown" (not error)
+        - Slash-prefix convention (cost/instance_type)
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/observability/cost_logging.py (new)
+        src/minivess/observability/metric_keys.py
+        tests/v2/unit/test_cost_param_logging.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T2" status="NOT_STARTED" priority="P0">
+      <name>Spot vs on-demand savings computation</name>
+      <description>
+        Add compute_spot_savings() that aggregates cost data from MLflow runs
+        and computes:
+
+        1. Total spot cost: sum(cost/total_usd) across all factorial runs
+        2. Hypothetical on-demand cost: sum(hours × ondemand_hourly_rate)
+        3. Spot savings: (on_demand - spot) / on_demand × 100%
+        4. Debug vs production cost breakdown
+        5. Per-model-family cost breakdown
+
+        Output: CostSummary dataclass with all fields for the appendix table.
+
+        Uses DuckDB to aggregate from the biostatistics database.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_spot_savings_computation
+          test_spot_savings_percentage
+          test_cost_breakdown_by_phase
+          test_cost_breakdown_by_model
+          test_cost_summary_dataclass
+          test_cost_summary_from_duckdb
+        </tests>
+        <file>tests/v2/unit/test_cost_savings.py</file>
+        <impl_files>
+          src/minivess/observability/cost_logging.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T1</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - Savings percentage is correct (verified with known inputs)
+        - Debug vs production phases separated
+        - Per-model breakdown sums to total
+        - DuckDB query returns correct aggregations
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/observability/cost_logging.py
+        tests/v2/unit/test_cost_savings.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T3" status="NOT_STARTED" priority="P0">
+      <name>Cost appendix integration into biostatistics flow</name>
+      <description>
+        Wire the cost reporting into the biostatistics flow as an additional
+        output artifact. The biostatistics flow already generates LaTeX tables —
+        add the cost appendix table as Table T6 (alongside existing T1-T5).
+
+        The cost table (from PR-A T6) receives data from this PR's CostSummary.
+
+        Also generate a cost figure: stacked bar chart showing cost breakdown
+        by model family (X) with stacked segments for training/post-training/eval.
+
+        Integration points:
+        - biostatistics_flow.py: add task_compute_costs() task
+        - biostatistics_tables.py: cost table generation (from PR-A)
+        - biostatistics_figures.py: cost breakdown figure
+        - biostatistics_lineage.py: add cost_summary to lineage manifest
+      </description>
+      <tdd_spec>
+        <tests>
+          test_cost_task_in_flow
+          test_cost_figure_generates_file
+          test_cost_figure_stacked_bars
+          test_cost_lineage_field
+          test_cost_flow_integration
+        </tests>
+        <file>tests/v2/unit/test_cost_flow_integration.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/biostatistics_flow.py
+          src/minivess/pipeline/biostatistics_figures.py
+          src/minivess/pipeline/biostatistics_lineage.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T2</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - Cost task added to biostatistics flow DAG
+        - Cost figure saved as PNG + JSON sidecar
+        - Lineage manifest includes cost_summary field
+        - Flow still passes with zero-cost data (local runs)
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/biostatistics_flow.py
+        src/minivess/pipeline/biostatistics_figures.py
+        src/minivess/pipeline/biostatistics_lineage.py
+        tests/v2/unit/test_cost_flow_integration.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+  </phase>
+
+</plan>

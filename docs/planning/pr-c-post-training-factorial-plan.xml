@@ -1,0 +1,323 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan version="1.0" name="pr-c-post-training-factorial">
+
+  <metadata>
+    <created>2026-03-17</created>
+    <branch>feat/post-training-factorial</branch>
+    <pr_label>PR-C</pr_label>
+    <execution_order>1 of 5</execution_order>
+    <literature_report>docs/planning/pre-full-gcp-training-qa-plan.md</literature_report>
+    <description>
+      Add mL1-ACE auxiliary calibration loss (training-time factor c=2) and integrate
+      SWA/Multi-SWA into the factorial config structure. This PR creates the training-time
+      infrastructure needed for the 24-condition debug run (4 models x 3 losses x 2 aux_calib).
+    </description>
+    <references>
+      <ref>Barfoot et al. (2025). "Average Calibration Losses." IEEE TMI. arXiv:2506.03942</ref>
+      <ref>github.com/cai4cai/Average-Calibration-Losses (CC BY 4.0)</ref>
+      <ref>Izmailov et al. (2018). "Averaging Weights Leads to Wider Optima." UAI.</ref>
+    </references>
+  </metadata>
+
+  <blockers>
+    <blocker id="B1" severity="medium">
+      <title>mL1-ACE reference implementation uses SegResNet, not our ModelAdapter</title>
+      <description>
+        The cai4cai repo implements mL1-ACE with MONAI SegResNet. We need to adapt it to work
+        with the ModelAdapter ABC (forward returns SegmentationOutput with logits).
+      </description>
+      <fix>Extract only the loss computation (hard-binned L1-ACE), not the model code.
+        The loss takes (logits, labels) tensors, which is model-agnostic.</fix>
+    </blocker>
+  </blockers>
+
+  <!-- Phase 0: mL1-ACE Auxiliary Calibration Loss -->
+  <phase id="0" name="mL1-ACE Auxiliary Loss">
+    <description>
+      Port the hard-binned L1-ACE (hL1-ACE) auxiliary calibration loss from the
+      Average-Calibration-Losses repo. This is a TRAINING-TIME loss added alongside the
+      segmentation loss, not a post-training method.
+
+      hL1-ACE = L1 distance between bin-level confidence and accuracy, using hard binning.
+      It encourages the model to produce well-calibrated softmax outputs during training.
+
+      Formula: hL1-ACE = (1/B) * sum_{b=1}^{B} |acc(b) - conf(b)|
+      where B=15 bins, acc(b) = mean(y_true) in bin b, conf(b) = mean(p_max) in bin b.
+    </description>
+
+    <task id="T1" status="NOT_STARTED" priority="P0">
+      <name>Implement hL1-ACE loss function</name>
+      <description>
+        Port the hard-binned L1-ACE calibration loss from cai4cai/Average-Calibration-Losses.
+        This loss is differentiable through soft assignment (straight-through estimator for
+        bin boundaries). Takes (logits, labels) and returns scalar loss.
+
+        Key design: The loss operates on the softmax probabilities, not raw logits.
+        It bins predictions by confidence level and penalizes miscalibration per bin.
+
+        IMPORTANT: Use CC BY 4.0 attribution. Only port the loss computation, not the
+        model or training loop code.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_hl1ace_loss_returns_scalar
+          test_hl1ace_loss_gradient_flows
+          test_hl1ace_loss_perfect_calibration_near_zero
+          test_hl1ace_loss_overconfident_positive
+          test_hl1ace_loss_n_bins_configurable
+          test_hl1ace_loss_batch_independence
+          test_hl1ace_loss_binary_segmentation
+        </tests>
+        <file>tests/v2/unit/test_hl1ace_loss.py</file>
+        <impl_files>
+          src/minivess/pipeline/calibration_losses.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - Loss returns finite scalar for random inputs
+        - Gradient flows through the loss (backward does not error)
+        - Near-perfectly calibrated predictions produce near-zero loss
+        - Overconfident predictions produce positive loss
+        - Works with binary segmentation (C=2 channels)
+        - Default n_bins=15 matches Barfoot et al.
+        - CC BY 4.0 attribution in module docstring
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/calibration_losses.py (new)
+        tests/v2/unit/test_hl1ace_loss.py (new)
+      </files_to_modify>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+
+    <task id="T2" status="NOT_STARTED" priority="P0">
+      <name>Integrate hL1-ACE into compound loss factory</name>
+      <description>
+        Add a binary flag `with_aux_calib` to the loss factory that wraps any segmentation
+        loss with hL1-ACE as an auxiliary term:
+
+          total_loss = seg_loss(logits, labels) + lambda_calib * hL1_ACE(logits, labels)
+
+        The lambda_calib weight defaults to 1.0 (equal weighting, as in Barfoot et al.).
+        This creates the c=2 factor: {None, hL1-ACE} for each segmentation loss.
+
+        Register in the loss factory so Hydra config can enable it:
+          loss_name: cbdice_cldice
+          with_aux_calib: true
+          aux_calib_weight: 1.0
+      </description>
+      <tdd_spec>
+        <tests>
+          test_compound_loss_without_aux_calib
+          test_compound_loss_with_aux_calib
+          test_compound_loss_aux_calib_weight
+          test_compound_loss_aux_calib_gradient
+          test_loss_factory_aux_calib_flag
+          test_loss_factory_all_losses_with_aux_calib
+        </tests>
+        <file>tests/v2/unit/test_compound_loss_aux_calib.py</file>
+        <impl_files>
+          src/minivess/pipeline/loss_functions.py
+          src/minivess/pipeline/calibration_losses.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T1</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - with_aux_calib=False produces identical loss to baseline
+        - with_aux_calib=True adds hL1-ACE term
+        - aux_calib_weight scales the auxiliary term
+        - All 3 segmentation losses work with aux_calib: dice_ce, cbdice_cldice, dice_ce_cldice
+        - Loss factory creates correct compound loss from Hydra config
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/loss_functions.py
+        tests/v2/unit/test_compound_loss_aux_calib.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- Phase 1: SWA/Multi-SWA Factorial Config -->
+  <phase id="1" name="SWA/Multi-SWA Factorial Config">
+    <description>
+      Integrate SWA and Multi-SWA as factorial levels (k=3: None, SWA, Multi-SWA)
+      into the post-training config. The plugins already exist — this phase makes
+      them configurable via Hydra for the factorial experiment.
+    </description>
+
+    <task id="T3" status="NOT_STARTED" priority="P0">
+      <name>Factorial post-training config schema</name>
+      <description>
+        Extend PostTrainingConfig to support factorial experiment specification.
+        Add a `factorial_methods` field that lists which post-training methods to
+        apply systematically (as opposed to the current plugin-by-plugin config).
+
+        The factorial design requires:
+        - k=3 levels: [none, swa, multi_swa]
+        - Each level produces a distinct checkpoint variant
+        - Output naming: {run_id}_{method}.pt (e.g., abc123_swa.pt, abc123_multi_swa.pt)
+        - The "none" variant is the original checkpoint (identity operation)
+
+        This is config-level work — the actual SWA/Multi-SWA execution already works.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_factorial_post_training_config_default
+          test_factorial_post_training_config_methods
+          test_factorial_post_training_config_validates_methods
+          test_factorial_checkpoint_naming
+          test_factorial_config_from_yaml
+        </tests>
+        <file>tests/v2/unit/test_post_training_factorial_config.py</file>
+        <impl_files>
+          src/minivess/config/post_training_config.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - Config accepts factorial_methods: [none, swa, multi_swa]
+        - Invalid methods raise ValidationError
+        - Checkpoint naming convention is deterministic
+        - Config serializes to/from YAML
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/config/post_training_config.py
+        tests/v2/unit/test_post_training_factorial_config.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T4" status="NOT_STARTED" priority="P0">
+      <name>Factorial post-training execution loop</name>
+      <description>
+        Add a `run_factorial_post_training()` function that systematically applies
+        each post-training method to each training checkpoint, producing the full
+        k=3 checkpoint matrix.
+
+        Input: 72 training checkpoints (24 conditions x 3 folds)
+        Output: 216 checkpoints (72 x 3 post-training methods)
+
+        The function iterates over (checkpoint, method) pairs and logs each variant
+        to MLflow with tags: post_training_method={none|swa|multi_swa}.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_factorial_execution_none_passthrough
+          test_factorial_execution_swa
+          test_factorial_execution_multi_swa
+          test_factorial_execution_all_methods
+          test_factorial_execution_mlflow_tags
+          test_factorial_execution_checkpoint_naming
+        </tests>
+        <file>tests/v2/unit/test_post_training_factorial_execution.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/post_training_flow.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T3</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - "none" method returns checkpoint unchanged
+        - SWA averages across folds of same condition
+        - Multi-SWA produces n_models independent averages
+        - Each variant is tagged in MLflow
+        - Checkpoint file sizes are logged as metrics
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/post_training_flow.py
+        tests/v2/unit/test_post_training_factorial_execution.py (new)
+      </files_to_modify>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- Phase 2: Training Config for Factorial -->
+  <phase id="2" name="Training Config Extensions">
+    <description>
+      Add the with_aux_calib flag to the Hydra training config and create the
+      factorial experiment base config.
+    </description>
+
+    <task id="T5" status="NOT_STARTED" priority="P0">
+      <name>Hydra config for aux_calib factor</name>
+      <description>
+        Add with_aux_calib and aux_calib_weight to the Hydra training config groups.
+        Create configs/experiment/factorial_base.yaml that can be overridden:
+
+          python -m minivess.train \
+            experiment=factorial_base \
+            model=dynunet \
+            loss_name=cbdice_cldice \
+            with_aux_calib=true \
+            fold_id=0
+
+        This enables the full factorial sweep via Hydra CLI overrides.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_hydra_config_aux_calib_default_false
+          test_hydra_config_aux_calib_true
+          test_hydra_config_aux_calib_weight
+          test_factorial_base_config_loads
+          test_factorial_base_config_override
+        </tests>
+        <file>tests/v2/unit/test_factorial_hydra_config.py</file>
+        <impl_files>
+          configs/experiment/factorial_base.yaml
+          configs/loss/default.yaml
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T2</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - with_aux_calib defaults to false (backward compatible)
+        - Hydra override with_aux_calib=true works
+        - factorial_base.yaml sets max_epochs=50, experiment tag
+        - All 4 model configs work with factorial_base
+      </acceptance_criteria>
+      <files_to_modify>
+        configs/experiment/factorial_base.yaml (new)
+        configs/loss/default.yaml
+        tests/v2/unit/test_factorial_hydra_config.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T6" status="NOT_STARTED" priority="P1">
+      <name>Checkpoint size tracking</name>
+      <description>
+        Log checkpoint file sizes as MLflow metrics for the cost appendix.
+        The factorial design produces 216 checkpoints — tracking sizes helps
+        estimate storage costs and identify unexpectedly large checkpoints.
+
+        Log: checkpoint/size_mb, checkpoint/format (pth/onnx), checkpoint/n_params
+      </description>
+      <tdd_spec>
+        <tests>
+          test_checkpoint_size_logging
+          test_checkpoint_size_format_tag
+          test_checkpoint_size_n_params
+        </tests>
+        <file>tests/v2/unit/test_checkpoint_tracking.py</file>
+        <impl_files>
+          src/minivess/observability/metric_keys.py
+          src/minivess/orchestration/flows/train_flow.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - Checkpoint size in MB logged to MLflow
+        - Format (pth) tagged
+        - Parameter count logged
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/observability/metric_keys.py
+        src/minivess/orchestration/flows/train_flow.py
+        tests/v2/unit/test_checkpoint_tracking.py (new)
+      </files_to_modify>
+      <estimated_iterations>1</estimated_iterations>
+    </task>
+  </phase>
+
+</plan>

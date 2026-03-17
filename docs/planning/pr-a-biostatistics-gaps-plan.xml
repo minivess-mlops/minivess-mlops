@@ -1,0 +1,416 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan version="1.0" name="pr-a-biostatistics-gaps">
+
+  <metadata>
+    <created>2026-03-17</created>
+    <branch>feat/biostatistics-factorial-gaps</branch>
+    <pr_label>PR-A</pr_label>
+    <execution_order>2 of 5</execution_order>
+    <literature_report>docs/planning/pre-full-gcp-training-qa-plan.md</literature_report>
+    <description>
+      Fill the 5 biostatistics flow gaps needed for factorial ANOVA analysis:
+      two-way ANOVA (eta-squared/omega-squared), calibration metrics suite,
+      Decision Curve Analysis, Riley bootstrap instability, and interaction plots.
+      Also adds cost appendix table generation and TRIPOD compliance verification.
+    </description>
+    <references>
+      <ref>Lakens (2013). "Calculating and reporting effect sizes." Frontiers in Psychology.</ref>
+      <ref>Van Calster et al. (2016). "A calibration hierarchy for risk models." Stat Med.</ref>
+      <ref>Riley et al. (2021). "Minimum sample size for developing a multivariable prediction model." Stat Med.</ref>
+      <ref>Maier-Hein et al. (2024). "Metrics Reloaded." Nature Methods.</ref>
+    </references>
+    <existing_infrastructure>
+      biostatistics_flow.py: 9 tasks, fully orchestrated
+      biostatistics_statistics.py: pairwise, Bayesian, Friedman+ICC
+      biostatistics_figures.py: 3 figures (effect size heatmap, forest plot, distribution)
+      biostatistics_tables.py: 4 tables (main comparison, effect size, variance, ranking)
+      biostatistics_rankings.py: multi-metric ranking + Nemenyi CD
+    </existing_infrastructure>
+  </metadata>
+
+  <!-- Phase 0: Two-Way Factorial ANOVA -->
+  <phase id="0" name="Two-Way Factorial ANOVA">
+    <description>
+      The core statistical gap. Implements Model x Loss two-way ANOVA with
+      eta-squared (partial) and omega-squared (bias-corrected) effect sizes.
+      Uses pingouin for primary analysis, statsmodels for supplementary interaction.
+    </description>
+
+    <task id="T1" status="NOT_STARTED" priority="P0">
+      <name>Two-way ANOVA with effect sizes</name>
+      <description>
+        Add compute_factorial_anova() to biostatistics_statistics.py.
+
+        Input: per_volume_data dict with structure:
+          {metric_name: {condition_key: {fold_id: np.ndarray}}}
+          where condition_key encodes model and loss (e.g., "dynunet__dice_ce")
+
+        The function must:
+        1. Parse condition_key into model and loss factors
+        2. Build a long-format DataFrame (columns: volume_id, model, loss, fold, metric_value)
+        3. Run pingouin.anova() for two-way ANOVA with Model, Loss, Model:Loss interaction
+        4. Extract partial eta-squared from pingouin output
+        5. Compute omega-squared (bias-corrected) per Lakens (2013):
+           omega_sq = (SS_effect - df_effect * MS_error) / (SS_total + MS_error)
+        6. Run statsmodels Type III ANOVA as supplementary (handles unbalanced designs)
+        7. Return FactorialAnovaResult dataclass
+
+        IMPORTANT: Use pingouin (already installed). Do NOT use import re to parse
+        condition keys — use str.split("__") or similar.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_factorial_anova_returns_result
+          test_factorial_anova_eta_squared_range
+          test_factorial_anova_omega_squared_range
+          test_factorial_anova_interaction_term
+          test_factorial_anova_significant_model_effect
+          test_factorial_anova_no_loss_effect_when_identical
+          test_factorial_anova_condition_key_parsing
+          test_factorial_anova_statsmodels_agreement
+        </tests>
+        <file>tests/v2/unit/test_factorial_anova.py</file>
+        <impl_files>
+          src/minivess/pipeline/biostatistics_statistics.py
+          src/minivess/pipeline/biostatistics_types.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - eta-squared values in [0, 1] for all factors
+        - omega-squared values in [-inf, 1] (can be negative for negligible effects)
+        - Interaction term present in output
+        - Synthetic data with known model effect produces significant F-test
+        - Synthetic data with identical losses produces non-significant loss effect
+        - condition_key parsing uses str.split, NOT regex
+        - pingouin and statsmodels results are logged for cross-validation
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/biostatistics_statistics.py
+        src/minivess/pipeline/biostatistics_types.py
+        tests/v2/unit/test_factorial_anova.py (new)
+      </files_to_modify>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+
+    <task id="T2" status="NOT_STARTED" priority="P0">
+      <name>Interaction plots (Model x Loss)</name>
+      <description>
+        Add _generate_interaction_plot() to biostatistics_figures.py.
+
+        Layout: 2-panel figure (left: clDice, right: MASD)
+        X-axis: Loss function (3 levels)
+        Y-axis: Mean metric value with 95% bootstrap CI
+        Lines: One per model (4 lines), color-coded with Okabe-Ito palette
+        Non-parallel lines = significant interaction (loss effect depends on model)
+
+        Also add _generate_variance_lollipop() for eta-squared visualization:
+        Horizontal lollipop chart with factors on Y-axis and partial eta-squared on X-axis.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_interaction_plot_generates_file
+          test_interaction_plot_two_panels
+          test_interaction_plot_sidecar_json
+          test_interaction_plot_okabe_ito_colors
+          test_variance_lollipop_generates_file
+          test_variance_lollipop_all_factors
+          test_variance_lollipop_sidecar_json
+        </tests>
+        <file>tests/v2/unit/test_factorial_figures.py</file>
+        <impl_files>
+          src/minivess/pipeline/biostatistics_figures.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T1</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - Interaction plot saved as PNG with JSON sidecar
+        - Two panels (one per trusted metric)
+        - 4 lines per panel (one per model)
+        - Okabe-Ito colorblind-safe palette
+        - Variance lollipop shows all 5 factors (Model, Loss, Interaction, Fold, Residual)
+        - All figures have JSON sidecar with data for reproducibility
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/biostatistics_figures.py
+        tests/v2/unit/test_factorial_figures.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T3" status="NOT_STARTED" priority="P0">
+      <name>ANOVA summary LaTeX table</name>
+      <description>
+        Add _generate_anova_table() to biostatistics_tables.py.
+
+        Columns: Factor | df | SS | MS | F | p | eta_sq_partial | omega_sq
+        Rows: Model, Loss, Model x Loss, Fold (random), Residual
+        Separate table per metric (clDice, MASD, DSC)
+
+        Uses booktabs format (no vertical lines, three horizontal rules).
+        Significance stars: * p&lt;0.05, ** p&lt;0.01, *** p&lt;0.001
+      </description>
+      <tdd_spec>
+        <tests>
+          test_anova_table_latex_output
+          test_anova_table_all_factors
+          test_anova_table_significance_stars
+          test_anova_table_booktabs_format
+        </tests>
+        <file>tests/v2/unit/test_factorial_tables.py</file>
+        <impl_files>
+          src/minivess/pipeline/biostatistics_tables.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T1</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - Valid LaTeX with booktabs
+        - All factors present in rows
+        - Significance stars match p-values
+        - One table per metric
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/biostatistics_tables.py
+        tests/v2/unit/test_factorial_tables.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- Phase 1: Calibration Metrics Suite -->
+  <phase id="1" name="Calibration Metrics">
+    <description>
+      Add modern calibration assessment metrics beyond ECE/MCE.
+      These are evaluation-time metrics logged to MLflow, not training losses.
+    </description>
+
+    <task id="T4" status="NOT_STARTED" priority="P0">
+      <name>Calibration metrics: Brier, O:E, IPA, slope</name>
+      <description>
+        Add compute_calibration_metrics() returning:
+        - Brier score (mean squared error of probabilities vs labels)
+        - O:E ratio (observed/expected event rate per bin)
+        - IPA (Integrated Probability Accuracy = 1 - Brier/Brier_null)
+        - Calibration slope (logistic regression of outcome on log-odds)
+
+        These are voxel-level metrics for binary segmentation. For computational
+        feasibility, subsample voxels (e.g., 100K random voxels per volume).
+
+        Use sklearn.metrics.brier_score_loss for Brier.
+        Use sklearn.linear_model.LogisticRegression for slope.
+        O:E = sum(y_true) / sum(p_pred) (with CI via bootstrap).
+      </description>
+      <tdd_spec>
+        <tests>
+          test_brier_score_perfect_predictions
+          test_brier_score_random_predictions
+          test_oe_ratio_calibrated
+          test_oe_ratio_overconfident
+          test_ipa_positive_for_good_model
+          test_ipa_zero_for_null_model
+          test_calibration_slope_perfect
+          test_calibration_slope_overconfident
+          test_calibration_metrics_voxel_subsampling
+        </tests>
+        <file>tests/v2/unit/test_calibration_metrics.py</file>
+        <impl_files>
+          src/minivess/pipeline/calibration_metrics.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - Brier score in [0, 1], 0 = perfect
+        - O:E = 1.0 for calibrated predictions (within tolerance)
+        - IPA in [-inf, 1], positive = better than null
+        - Calibration slope = 1.0 for perfectly calibrated (within tolerance)
+        - Voxel subsampling reduces compute without changing expected values
+        - All metrics work with binary segmentation (foreground class)
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/calibration_metrics.py (new)
+        tests/v2/unit/test_calibration_metrics.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T5" status="NOT_STARTED" priority="P1">
+      <name>Riley bootstrap instability plot</name>
+      <description>
+        Add compute_riley_instability() and _generate_instability_plot().
+
+        Bootstrap resampling of model rankings to assess stability:
+        1. Resample validation volumes with replacement (B=1000)
+        2. Re-rank all models on each bootstrap sample
+        3. Plot: X = bootstrap iteration, Y = rank, one line per model
+        4. Compute rank stability: fraction of bootstraps where model keeps its rank
+
+        This directly answers: "Would the model ranking change with a different
+        validation set?" — critical for N=70 small-sample studies.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_riley_instability_rank_shape
+          test_riley_instability_deterministic_seed
+          test_riley_instability_stable_model_high_fraction
+          test_riley_instability_plot_generates_file
+          test_riley_instability_plot_sidecar
+        </tests>
+        <file>tests/v2/unit/test_riley_instability.py</file>
+        <impl_files>
+          src/minivess/pipeline/biostatistics_statistics.py
+          src/minivess/pipeline/biostatistics_figures.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - Bootstrap rank matrix shape: (n_bootstrap, n_models)
+        - Deterministic with seed
+        - Model with clearly best scores has high rank stability
+        - Plot saved with JSON sidecar
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/biostatistics_statistics.py
+        src/minivess/pipeline/biostatistics_figures.py
+        tests/v2/unit/test_riley_instability.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- Phase 2: Cost Appendix + TRIPOD -->
+  <phase id="2" name="Cost Appendix and TRIPOD">
+    <description>
+      Add cost transparency artifacts for the manuscript appendix.
+      Also add TRIPOD compliance verification test.
+    </description>
+
+    <task id="T6" status="NOT_STARTED" priority="P1">
+      <name>Cost appendix LaTeX table generation</name>
+      <description>
+        Add _generate_cost_appendix_table() to biostatistics_tables.py.
+
+        Reads cost/total_usd and cost/gpu_hourly_rate from MLflow runs.
+        Generates a LaTeX table with:
+        - Columns: Model | Loss | Aux Calib | Fold | GPU Hours | Cost ($) | Spot Savings
+        - Summary row: Total cost, debug vs production breakdown
+        - Footer: GPU type (L4), spot rate, region (europe-north1)
+
+        This addresses TRIPOD-LLM Item 12 (cost transparency) and Issue #795.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_cost_table_latex_output
+          test_cost_table_total_row
+          test_cost_table_spot_savings
+          test_cost_table_from_mock_mlflow_data
+        </tests>
+        <file>tests/v2/unit/test_cost_appendix.py</file>
+        <impl_files>
+          src/minivess/pipeline/biostatistics_tables.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - Valid LaTeX with booktabs
+        - Total cost row sums individual costs
+        - Spot savings computed as (on-demand - spot) / on-demand
+        - Works with mock MLflow data for testing
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/biostatistics_tables.py
+        tests/v2/unit/test_cost_appendix.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T7" status="NOT_STARTED" priority="P1">
+      <name>TRIPOD compliance verification test</name>
+      <description>
+        Add a test that verifies the biostatistics flow output includes all
+        TRIPOD+AI required artifacts. This is a meta-test that checks the
+        lineage manifest against the TRIPOD compliance matrix.
+
+        Checks:
+        - All P0 items from tripod-compliance-matrix.md are either present
+          or explicitly marked as "manuscript-only" (not code-verifiable)
+        - Statistical methods list includes all planned analyses
+        - Figure catalog includes all planned figures
+        - Table catalog includes all planned tables
+      </description>
+      <tdd_spec>
+        <tests>
+          test_tripod_statistical_methods_coverage
+          test_tripod_figure_catalog_coverage
+          test_tripod_table_catalog_coverage
+          test_tripod_lineage_manifest_fields
+        </tests>
+        <file>tests/v2/unit/test_tripod_compliance.py</file>
+        <impl_files>
+          src/minivess/pipeline/biostatistics_lineage.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - Test verifies presence of ANOVA, Bayesian, Friedman, ICC methods
+        - Test verifies interaction plot, specification curve, CD diagram in figures
+        - Test verifies ANOVA table, cost table, ranking table in tables
+        - Lineage manifest has all required fields
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/biostatistics_lineage.py
+        tests/v2/unit/test_tripod_compliance.py (new)
+      </files_to_modify>
+      <estimated_iterations>1</estimated_iterations>
+    </task>
+
+    <task id="T8" status="NOT_STARTED" priority="P0">
+      <name>Integration test with synthetic factorial data</name>
+      <description>
+        End-to-end integration test that creates synthetic per-volume data
+        matching the factorial design (4 models x 3 losses x 3 folds x 23 volumes)
+        and runs the full biostatistics pipeline.
+
+        The synthetic data should have:
+        - Known model effect (model A is better than model D)
+        - Known loss effect (loss 2 is better than loss 1)
+        - Known interaction (model B benefits more from loss 2 than model A)
+        - Realistic metric ranges (clDice 0.5-0.95, MASD 0.1-5.0, DSC 0.6-0.9)
+
+        This test validates the entire pipeline from DuckDB construction through
+        figure and table generation.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_factorial_integration_synthetic_data
+          test_factorial_integration_duckdb_schema
+          test_factorial_integration_anova_output
+          test_factorial_integration_figures_generated
+          test_factorial_integration_tables_generated
+          test_factorial_integration_lineage_complete
+        </tests>
+        <file>tests/v2/integration/test_biostatistics_factorial_integration.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/biostatistics_flow.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T1</dep>
+        <dep>T2</dep>
+        <dep>T3</dep>
+        <dep>T4</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - Full pipeline runs without error on synthetic data
+        - DuckDB has correct table schema
+        - ANOVA detects the planted model and loss effects
+        - All figures and tables generated
+        - Lineage manifest is complete
+        - Test runs in &lt;60 seconds (no GPU needed)
+      </acceptance_criteria>
+      <files_to_modify>
+        tests/v2/integration/test_biostatistics_factorial_integration.py (new)
+      </files_to_modify>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+  </phase>
+
+</plan>

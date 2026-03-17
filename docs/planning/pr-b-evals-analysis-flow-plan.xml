@@ -1,0 +1,541 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan version="1.0" name="pr-b-evals-analysis-flow">
+
+  <metadata>
+    <created>2026-03-17</created>
+    <branch>feat/evals-factorial-ensembles</branch>
+    <pr_label>PR-B</pr_label>
+    <execution_order>3 of 5</execution_order>
+    <literature_report>docs/planning/pre-full-gcp-training-qa-plan.md</literature_report>
+    <description>
+      Build the evaluation/analysis flow infrastructure for the factorial design:
+      CV-average MLflow pyfunc, factorial ensemble strategies (within-family,
+      cross-family, all-trainable, all+zero-shot), hierarchical evaluation with
+      UQ metrics, and cross-fold consistency checks.
+
+      This PR creates the l=5 ensemble factor and f=2 fold strategy factor.
+    </description>
+    <references>
+      <ref>Lakshminarayanan et al. (2017). "Simple and Scalable Predictive Uncertainty." NeurIPS.</ref>
+      <ref>Wortsman et al. (2022). "Model soups." ICML.</ref>
+      <ref>docs/planning/advanced-ensembling-bootstrapping-report.md</ref>
+      <ref>docs/planning/evaluation-and-ensemble-execution-plan.xml</ref>
+    </references>
+    <existing_infrastructure>
+      analysis_flow.py: 4 ensemble strategies (per_loss_single_best, etc.)
+      mlflow_wrapper.py: MiniVessSegModel + MiniVessEnsembleModel pyfunc
+      ensemble/builder.py: EnsembleBuilder with checkpoint discovery
+      ensemble/strategies.py: EnsemblePredictor (mean, majority_vote, weighted)
+      ensemble/deep_ensembles.py: DeepEnsemblePredictor with UQ decomposition
+      evaluation_runner.py: UnifiedEvaluationRunner with hierarchical dataloaders
+    </existing_infrastructure>
+  </metadata>
+
+  <!-- Phase 0: CV-Average MLflow Pyfunc -->
+  <phase id="0" name="CV-Average Fold Prediction Averaging">
+    <description>
+      CV-average is NOT an ensemble — it is the standard 3-fold cross-validation
+      inference mode. For a single condition (model+loss+aux_calib), it loads the
+      3 fold-specific checkpoints, runs inference on each, and averages the softmax
+      predictions. This requires a custom MLflow pyfunc class.
+    </description>
+
+    <task id="T1" status="NOT_STARTED" priority="P0">
+      <name>CV-average MLflow pyfunc class</name>
+      <description>
+        Create MiniVessCVAverageModel(mlflow.pyfunc.PythonModel) that:
+        1. Loads 3 fold-specific checkpoints from a single MLflow parent run
+        2. Runs inference on each fold's model
+        3. Averages softmax predictions across folds
+        4. Returns averaged prediction + fold-level disagreement as UQ signal
+
+        The class is registered in MLflow Model Registry for serving via BentoML.
+
+        Input: (B, 1, D, H, W) volume
+        Output: {
+          "prediction": (B, 2, D, H, W) mean softmax,
+          "fold_disagreement": (B, 1, D, H, W) std across folds
+        }
+
+        CRITICAL: This is model-agnostic — it wraps any ModelAdapter via config.
+        The fold checkpoints are discovered from MLflow tags (checkpoint_dir_fold_N).
+      </description>
+      <tdd_spec>
+        <tests>
+          test_cv_average_pyfunc_three_folds
+          test_cv_average_pyfunc_prediction_shape
+          test_cv_average_pyfunc_fold_disagreement
+          test_cv_average_pyfunc_identical_models_zero_disagreement
+          test_cv_average_pyfunc_mlflow_signature
+          test_cv_average_pyfunc_load_context
+          test_cv_average_pyfunc_single_fold_fallback
+        </tests>
+        <file>tests/v2/unit/test_cv_average_pyfunc.py</file>
+        <impl_files>
+          src/minivess/serving/mlflow_wrapper.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - 3 forward passes produce averaged prediction
+        - Identical fold models produce zero disagreement
+        - Different fold models produce nonzero disagreement
+        - MLflow ModelSignature matches MiniVessEnsembleModel
+        - Single-fold graceful fallback (no error, just uses that fold)
+        - Model-agnostic via config (works with DynUNet, Mamba++, SAM3)
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/serving/mlflow_wrapper.py
+        tests/v2/unit/test_cv_average_pyfunc.py (new)
+      </files_to_modify>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+
+    <task id="T2" status="NOT_STARTED" priority="P0">
+      <name>Fold strategy: single-best-fold selection</name>
+      <description>
+        Implement select_best_fold() that picks the fold with the best compound
+        metric for a given condition. The compound metric is:
+
+          compound = 0.5 * clDice + 0.5 * normalize(MASD)
+
+        where normalize(MASD) = 1 - (MASD - MASD_min) / (MASD_max - MASD_min)
+        to convert MASD (lower=better) to [0,1] (higher=better).
+
+        This is the f=2 fold strategy factor:
+        - single-best-fold: use this function
+        - cv-average: use MiniVessCVAverageModel (T1)
+
+        Returns the fold_id with the best compound score.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_select_best_fold_returns_fold_id
+          test_select_best_fold_compound_metric
+          test_select_best_fold_masd_normalization
+          test_select_best_fold_ties_deterministic
+          test_select_best_fold_from_mlflow_data
+        </tests>
+        <file>tests/v2/unit/test_fold_selection.py</file>
+        <impl_files>
+          src/minivess/pipeline/fold_selection.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T1</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - Returns integer fold_id (0, 1, or 2)
+        - Compound metric is 0.5*clDice + 0.5*(1 - normalized_MASD)
+        - MASD normalization uses min/max across folds
+        - Ties broken deterministically (lower fold_id wins)
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/fold_selection.py (new)
+        tests/v2/unit/test_fold_selection.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- Phase 1: Factorial Ensemble Strategies -->
+  <phase id="1" name="Factorial Ensemble Strategies">
+    <description>
+      Implement the l=5 ensemble factor. The existing EnsembleBuilder has 4
+      strategies but they don't match the factorial design. We need:
+      l=0: None (single model, no ensembling)
+      l=1: Within-family (same model, different losses)
+      l=2: Cross-family (different models, same loss)
+      l=3: All-trainable (4 models x 3 losses)
+      l=4: All+zero-shot (all trainable + SAM3 Vanilla + VesselFM)
+
+      Each ensemble operates ON TOP of the fold strategy (single-best or cv-average).
+    </description>
+
+    <task id="T3" status="NOT_STARTED" priority="P0">
+      <name>Factorial ensemble builder</name>
+      <description>
+        Create FactorialEnsembleBuilder that produces ensemble specifications
+        for all l=5 levels. Unlike the existing EnsembleBuilder (which groups by
+        loss), this builder understands the factorial structure.
+
+        within_family_ensemble(model="dynunet", fold_strategy="cv_average"):
+          → DynUNet×dice_ce + DynUNet×cbdice_cldice + DynUNet×dice_ce_cldice
+          → 3 member models (or 9 if single-fold × 3 folds)
+
+        cross_family_ensemble(loss="cbdice_cldice", fold_strategy="single_best"):
+          → DynUNet + Mamba++ + SAM3_TopoLoRA + SAM3_Hybrid, all with cbdice_cldice
+          → 4 member models
+
+        all_trainable_ensemble(fold_strategy="cv_average"):
+          → All 12 condition models (4 models × 3 losses)
+          → 12 member models (each is CV-average of 3 folds)
+
+        all_plus_zeroshot(fold_strategy="cv_average"):
+          → All 12 + SAM3 Vanilla + VesselFM
+          → 14 member models
+      </description>
+      <tdd_spec>
+        <tests>
+          test_within_family_ensemble_member_count
+          test_within_family_ensemble_same_model
+          test_cross_family_ensemble_member_count
+          test_cross_family_ensemble_same_loss
+          test_all_trainable_ensemble_count
+          test_all_plus_zeroshot_ensemble_count
+          test_none_strategy_single_model
+          test_ensemble_with_cv_average_fold_strategy
+          test_ensemble_with_single_best_fold_strategy
+          test_ensemble_spec_names
+        </tests>
+        <file>tests/v2/unit/test_factorial_ensemble_builder.py</file>
+        <impl_files>
+          src/minivess/ensemble/factorial_builder.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T1</dep>
+        <dep>T2</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - Within-family: 3 members (1 model × 3 losses)
+        - Cross-family: 4 members (4 models × 1 loss)
+        - All-trainable: 12 members (4 × 3)
+        - All+zero-shot: 14 members (12 + 2)
+        - None: 1 member (single model)
+        - Each ensemble has descriptive name for MLflow tagging
+        - Works with both fold strategies
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/ensemble/factorial_builder.py (new)
+        tests/v2/unit/test_factorial_ensemble_builder.py (new)
+      </files_to_modify>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+
+    <task id="T4" status="NOT_STARTED" priority="P0">
+      <name>Hierarchical ensemble MLflow pyfunc</name>
+      <description>
+        Create MiniVessHierarchicalEnsembleModel that wraps multiple CV-average
+        models into a single ensemble. This is "2 MLflow ensembles in succession"
+        as the user described:
+
+        Level 1: Each member is a MiniVessCVAverageModel (3-fold average)
+        Level 2: Ensemble averages across Level 1 members
+
+        Example: within-family ensemble of DynUNet with cv-average fold strategy
+        = average(
+            cv_avg(DynUNet×dice_ce, 3 folds),
+            cv_avg(DynUNet×cbdice_cldice, 3 folds),
+            cv_avg(DynUNet×dice_ce_cldice, 3 folds)
+          )
+
+        Output includes full UQ decomposition:
+        - total_uncertainty: entropy of mean prediction
+        - aleatoric: mean per-member entropy
+        - epistemic: mutual information (total - aleatoric)
+      </description>
+      <tdd_spec>
+        <tests>
+          test_hierarchical_ensemble_two_levels
+          test_hierarchical_ensemble_uq_decomposition
+          test_hierarchical_ensemble_prediction_shape
+          test_hierarchical_ensemble_mlflow_signature
+          test_hierarchical_ensemble_member_count
+          test_hierarchical_ensemble_single_member_degenerates
+        </tests>
+        <file>tests/v2/unit/test_hierarchical_ensemble_pyfunc.py</file>
+        <impl_files>
+          src/minivess/serving/mlflow_wrapper.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T1</dep>
+        <dep>T3</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - Two-level hierarchy works (CV-avg members → ensemble average)
+        - UQ decomposition matches Lakshminarayanan et al. formulas
+        - Single member degenerates to CV-average (no ensemble overhead)
+        - Prediction shape matches (B, 2, D, H, W)
+        - MLflow signature compatible with serving
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/serving/mlflow_wrapper.py
+        tests/v2/unit/test_hierarchical_ensemble_pyfunc.py (new)
+      </files_to_modify>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+  </phase>
+
+  <!-- Phase 2: Evaluation Pipeline Extensions -->
+  <phase id="2" name="Evaluation Pipeline Extensions">
+    <description>
+      Extend the evaluation runner to handle the full factorial evaluation matrix:
+      216 checkpoints × 2 fold strategies × 2 recalibration × 5 ensemble = 4,320 points.
+    </description>
+
+    <task id="T5" status="NOT_STARTED" priority="P0">
+      <name>Factorial evaluation orchestrator</name>
+      <description>
+        Create run_factorial_evaluation() that systematically evaluates all
+        combinations in the factorial design. Iterates over:
+
+        for checkpoint in 216_checkpoints:
+          for fold_strategy in [single_best, cv_average]:
+            for recalibration in [none, temperature_scaling]:
+              for ensemble in [none, within_family, cross_family, all_trainable, all_zeroshot]:
+                evaluate_and_log(...)
+
+        Each evaluation point logs per-volume metrics to MLflow with tags:
+        - model, loss, aux_calib, post_training_method
+        - fold_strategy, recalibration, ensemble_strategy
+        - experiment_name="factorial_evaluation_v1"
+
+        Skips invalid combinations (e.g., within_family ensemble needs >=2 losses).
+      </description>
+      <tdd_spec>
+        <tests>
+          test_factorial_eval_condition_enumeration
+          test_factorial_eval_skip_invalid_combos
+          test_factorial_eval_mlflow_tags
+          test_factorial_eval_metric_logging
+          test_factorial_eval_resume_from_checkpoint
+          test_factorial_eval_total_count
+        </tests>
+        <file>tests/v2/unit/test_factorial_evaluation.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/analysis_flow.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T3</dep>
+        <dep>T4</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - Correct total: 4,320 evaluation points (with some invalid combos skipped)
+        - Each point tagged with all factorial factors
+        - Resume capability (skip already-evaluated points)
+        - Per-volume metrics logged (not just aggregates)
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/analysis_flow.py
+        tests/v2/unit/test_factorial_evaluation.py (new)
+      </files_to_modify>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+
+    <task id="T6" status="NOT_STARTED" priority="P0">
+      <name>UQ metric logging per volume</name>
+      <description>
+        Extend evaluation to log per-volume uncertainty quantification metrics
+        alongside segmentation metrics. For each volume, log:
+
+        - uq/total_uncertainty: H[p_mean] (entropy of mean prediction)
+        - uq/aleatoric: E[H[p_m]] (mean per-member entropy, ensemble only)
+        - uq/epistemic: MI = total - aleatoric (ensemble only)
+        - uq/fold_disagreement: std across fold predictions (cv-average only)
+        - uq/calibration_ece: per-volume ECE (from calibration.py)
+
+        These metrics feed into the biostatistics flow for UQ analysis.
+        For single models (no ensemble), only total_uncertainty and ECE are logged.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_uq_metrics_single_model
+          test_uq_metrics_ensemble
+          test_uq_metrics_cv_average
+          test_uq_metrics_shape
+          test_uq_metrics_mlflow_logging
+        </tests>
+        <file>tests/v2/unit/test_uq_metric_logging.py</file>
+        <impl_files>
+          src/minivess/pipeline/evaluation_runner.py
+          src/minivess/observability/metric_keys.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T4</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - Single model: total_uncertainty + ECE logged
+        - Ensemble: all 5 UQ metrics logged
+        - CV-average: fold_disagreement logged
+        - Metric keys use slash-prefix (uq/total_uncertainty)
+        - Per-volume values (not just mean)
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/evaluation_runner.py
+        src/minivess/observability/metric_keys.py
+        tests/v2/unit/test_uq_metric_logging.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T7" status="NOT_STARTED" priority="P1">
+      <name>Cross-fold consistency checks</name>
+      <description>
+        Add compute_cross_fold_consistency() that validates fold-level results
+        are consistent. Checks:
+
+        1. No fold is a dramatic outlier (fold metric > 3*std from mean)
+        2. Fold rankings are stable (Kendall's W across folds)
+        3. ICC(2,1) > 0.5 for each metric (already in variance decomposition)
+
+        Flags inconsistent conditions for manual review before publication.
+        This catches training bugs (e.g., a fold that diverged) early.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_cross_fold_consistency_stable
+          test_cross_fold_consistency_outlier_detected
+          test_cross_fold_consistency_kendall_w
+          test_cross_fold_consistency_report_format
+        </tests>
+        <file>tests/v2/unit/test_cross_fold_consistency.py</file>
+        <impl_files>
+          src/minivess/pipeline/biostatistics_statistics.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - Stable folds pass all checks
+        - Outlier fold is flagged
+        - Kendall's W computed correctly (W=1 for perfect agreement)
+        - Report format suitable for logging to MLflow
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/biostatistics_statistics.py
+        tests/v2/unit/test_cross_fold_consistency.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T8" status="NOT_STARTED" priority="P0">
+      <name>Post-hoc recalibration factor (p=2)</name>
+      <description>
+        Integrate temperature scaling as a factorial evaluation factor.
+        For each checkpoint, the evaluation pipeline optionally applies
+        temperature scaling before computing metrics.
+
+        Temperature scaling:
+        1. Find optimal T on calibration split (held-out from validation)
+        2. Apply: calibrated_probs = softmax(logits / T)
+        3. Re-compute all metrics on calibrated probabilities
+
+        The calibration split is the first 20% of validation volumes per fold.
+        This is a simple split, not a separate fold.
+
+        p=2 factor: {none, temperature_scaling}
+      </description>
+      <tdd_spec>
+        <tests>
+          test_recalibration_none_identity
+          test_recalibration_temperature_scaling
+          test_recalibration_optimal_t_search
+          test_recalibration_calibration_split
+          test_recalibration_metrics_differ
+          test_recalibration_mlflow_tag
+        </tests>
+        <file>tests/v2/unit/test_recalibration_factor.py</file>
+        <impl_files>
+          src/minivess/pipeline/evaluation_runner.py
+          src/minivess/ensemble/calibration.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - None: metrics unchanged
+        - Temperature scaling: optimal T found via NLL minimization
+        - Calibration split: first 20% of validation volumes
+        - Metrics recomputed on calibrated probabilities
+        - MLflow tag: recalibration={none|temperature_scaling}
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/evaluation_runner.py
+        src/minivess/ensemble/calibration.py
+        tests/v2/unit/test_recalibration_factor.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T9" status="NOT_STARTED" priority="P0">
+      <name>Specification curve figure</name>
+      <description>
+        Add _generate_specification_curve() to biostatistics_figures.py.
+
+        The specification curve (Simmons et al. 2011, Steegen et al. 2016) shows
+        all conditions ranked by primary metric with binary indicator matrix below.
+
+        Layout:
+        - Top panel: Y = clDice with 95% BCa bootstrap CI, X = rank (descending)
+        - Bottom panel: Binary indicator matrix (rows = factors, columns = conditions)
+          Rows: model (4), loss (3), aux_calib (2), post_training (3), recalibration (2), ensemble (5)
+        - Color: highlight trusted metric; gray overlay for foil metric (DSC)
+
+        This is the most impactful single figure in the paper — shows at a glance
+        which factor combinations drive performance.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_specification_curve_generates_file
+          test_specification_curve_ranking_order
+          test_specification_curve_indicator_matrix
+          test_specification_curve_ci_bands
+          test_specification_curve_sidecar_json
+          test_specification_curve_factor_rows
+        </tests>
+        <file>tests/v2/unit/test_specification_curve.py</file>
+        <impl_files>
+          src/minivess/pipeline/biostatistics_figures.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - Figure saved as PNG + JSON sidecar
+        - Conditions ranked by descending clDice
+        - CI bands from BCa bootstrap
+        - Indicator matrix has one row per factorial factor
+        - Factor levels clearly labeled
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/biostatistics_figures.py
+        tests/v2/unit/test_specification_curve.py (new)
+      </files_to_modify>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+
+    <task id="T10" status="NOT_STARTED" priority="P1">
+      <name>Rank discrepancy table (Dice-as-foil)</name>
+      <description>
+        Add _generate_rank_discrepancy_table() to biostatistics_tables.py.
+
+        Columns: Model | Config | DSC | DSC Rank | clDice | clDice Rank | MASD | MASD Rank | Delta(DSC-clDice)
+        Highlight: Red cells where |DSC rank - clDice rank| >= 2
+
+        This is the "smoking gun" for Analysis C (Dice-as-foil):
+        Shows how Dice rankings diverge from topology-aware rankings.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_rank_discrepancy_table_latex
+          test_rank_discrepancy_table_delta_column
+          test_rank_discrepancy_table_highlight_large_deltas
+          test_rank_discrepancy_table_all_models
+        </tests>
+        <file>tests/v2/unit/test_rank_discrepancy_table.py</file>
+        <impl_files>
+          src/minivess/pipeline/biostatistics_tables.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - Valid LaTeX with booktabs
+        - Delta column = DSC_rank - clDice_rank
+        - Large deltas (|delta| >= 2) highlighted with color command
+        - All 6 models included (4 trainable + 2 zero-shot)
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/pipeline/biostatistics_tables.py
+        tests/v2/unit/test_rank_discrepancy_table.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+  </phase>
+
+</plan>

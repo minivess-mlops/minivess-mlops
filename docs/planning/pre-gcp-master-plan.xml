@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan version="1.0" name="pre-gcp-master-plan">
+
+  <metadata>
+    <created>2026-03-17</created>
+    <description>
+      Master execution plan for all 5 PRs needed before the full GCP factorial
+      experiment runs. Execution order is dependency-driven: PR-C first (creates
+      training infrastructure), then PR-A (biostatistics gaps), PR-B (evaluation
+      pipeline), PR-D (deployment), PR-E (cost reporting).
+
+      After all 5 PRs merge: 2-epoch GCP debug run (24 conditions × fold-0),
+      then full 72-run production experiment.
+    </description>
+    <source_doc>docs/planning/pre-full-gcp-training-qa-plan.md</source_doc>
+    <factorial_design>4 models × 3 losses × 2 aux_calib × 3 post-training × 2 recalibration × 5 ensemble</factorial_design>
+    <total_budget>$98 estimated ($150+ authorized)</total_budget>
+  </metadata>
+
+  <master-plan>
+    <metadata>
+      <total-issues>5 PRs, ~31 TDD tasks</total-issues>
+      <total-branches>5</total-branches>
+      <estimated-duration>8-12 hours of coding (across multiple sessions)</estimated-duration>
+    </metadata>
+
+    <branch id="1" name="feat/post-training-factorial">
+      <plan-file>docs/planning/pr-c-post-training-factorial-plan.xml</plan-file>
+      <pr-label>PR-C</pr-label>
+      <priority>P0</priority>
+      <estimated-duration>2-3 hours</estimated-duration>
+      <summary>
+        mL1-ACE auxiliary calibration loss + SWA/Multi-SWA factorial config.
+        Creates the c=2 and k=3 training factors. Must complete first because
+        the 2-epoch debug run depends on the aux_calib flag.
+      </summary>
+      <tasks>
+        <task>T1: Implement hL1-ACE loss function (from cai4cai repo, CC BY 4.0)</task>
+        <task>T2: Integrate hL1-ACE into compound loss factory (with_aux_calib flag)</task>
+        <task>T3: Factorial post-training config schema</task>
+        <task>T4: Factorial post-training execution loop</task>
+        <task>T5: Hydra config for aux_calib factor</task>
+        <task>T6: Checkpoint size tracking</task>
+      </tasks>
+      <risk>MEDIUM (mL1-ACE gradient flow through hard binning needs verification)</risk>
+      <guardrails>
+        - CC BY 4.0 attribution in module docstring
+        - with_aux_calib=false must be backward-compatible
+        - No import re for parsing
+        - All tests pass make test-staging
+      </guardrails>
+    </branch>
+
+    <branch id="2" name="feat/biostatistics-factorial-gaps">
+      <plan-file>docs/planning/pr-a-biostatistics-gaps-plan.xml</plan-file>
+      <pr-label>PR-A</pr-label>
+      <priority>P0</priority>
+      <estimated-duration>2-3 hours</estimated-duration>
+      <summary>
+        Fill 5 biostatistics gaps: two-way ANOVA (eta-squared/omega-squared),
+        calibration metrics (Brier/O:E/IPA/slope), Riley instability,
+        interaction plots, cost appendix table, TRIPOD verification.
+      </summary>
+      <tasks>
+        <task>T1: Two-way ANOVA with effect sizes (pingouin + statsmodels)</task>
+        <task>T2: Interaction plots (Model × Loss for clDice/MASD)</task>
+        <task>T3: ANOVA summary LaTeX table</task>
+        <task>T4: Calibration metrics: Brier, O:E, IPA, slope</task>
+        <task>T5: Riley bootstrap instability plot</task>
+        <task>T6: Cost appendix LaTeX table generation</task>
+        <task>T7: TRIPOD compliance verification test</task>
+        <task>T8: Integration test with synthetic factorial data</task>
+      </tasks>
+      <risk>LOW (all statistical methods well-understood, libraries available)</risk>
+      <guardrails>
+        - Use pingouin for ANOVA (already installed)
+        - Use sklearn for calibration metrics
+        - No regex for condition key parsing
+        - JSON sidecars for all figures
+      </guardrails>
+    </branch>
+
+    <branch id="3" name="feat/evals-factorial-ensembles">
+      <plan-file>docs/planning/pr-b-evals-analysis-flow-plan.xml</plan-file>
+      <pr-label>PR-B</pr-label>
+      <priority>P0</priority>
+      <estimated-duration>3-4 hours</estimated-duration>
+      <summary>
+        CV-average MLflow pyfunc, factorial ensemble strategies (5 levels),
+        hierarchical ensemble pyfunc, factorial evaluation orchestrator,
+        UQ metric logging, specification curve figure, rank discrepancy table.
+      </summary>
+      <tasks>
+        <task>T1: CV-average MLflow pyfunc class</task>
+        <task>T2: Fold strategy: single-best-fold selection</task>
+        <task>T3: Factorial ensemble builder (5 strategies)</task>
+        <task>T4: Hierarchical ensemble MLflow pyfunc (2-level)</task>
+        <task>T5: Factorial evaluation orchestrator</task>
+        <task>T6: UQ metric logging per volume</task>
+        <task>T7: Cross-fold consistency checks</task>
+        <task>T8: Post-hoc recalibration factor (p=2)</task>
+        <task>T9: Specification curve figure</task>
+        <task>T10: Rank discrepancy table (Dice-as-foil)</task>
+      </tasks>
+      <risk>MEDIUM (hierarchical ensemble MLflow pyfunc is novel architecture)</risk>
+      <guardrails>
+        - CV-average is NOT an ensemble (distinct class)
+        - Ensemble operates ON TOP of fold strategy
+        - Model-agnostic via ModelAdapter ABC
+        - UQ uses Lakshminarayanan et al. decomposition
+        - Specification curve follows Simmons et al. format
+      </guardrails>
+    </branch>
+
+    <branch id="4" name="feat/deploy-flow-factorial">
+      <plan-file>docs/planning/pr-d-deploy-flow-plan.xml</plan-file>
+      <pr-label>PR-D</pr-label>
+      <priority>P1</priority>
+      <estimated-duration>1-2 hours</estimated-duration>
+      <summary>
+        Champion model selection from factorial results, BentoML import chain
+        verification, serving health check, champion metadata logging.
+      </summary>
+      <tasks>
+        <task>T1: Champion model selection from factorial results</task>
+        <task>T2: BentoML import chain verification</task>
+        <task>T3: Serving endpoint health check</task>
+        <task>T4: Champion metadata logging for manuscript</task>
+      </tasks>
+      <risk>LOW (deploy flow already implemented, this extends it)</risk>
+      <guardrails>
+        - ONNX opset 17
+        - BENTOML_HOME on mounted volume
+        - Champion metadata includes TRIPOD fields
+      </guardrails>
+    </branch>
+
+    <branch id="5" name="feat/cost-reporting">
+      <plan-file>docs/planning/pr-e-cost-reporting-plan.xml</plan-file>
+      <pr-label>PR-E</pr-label>
+      <closes-issues>#795</closes-issues>
+      <priority>P1</priority>
+      <estimated-duration>1-2 hours</estimated-duration>
+      <summary>
+        Cost transparency for TRIPOD-LLM Item 12: instance type logging,
+        spot vs on-demand savings computation, cost appendix integration
+        into biostatistics flow.
+      </summary>
+      <tasks>
+        <task>T1: Instance type and cost param logging</task>
+        <task>T2: Spot vs on-demand savings computation</task>
+        <task>T3: Cost appendix integration into biostatistics flow</task>
+      </tasks>
+      <risk>LOW (extends existing cost/ metric prefix infrastructure)</risk>
+      <guardrails>
+        - No hardcoded cloud rates
+        - Read from SkyPilot env or config
+        - Slash-prefix convention (cost/)
+        - Works with zero-cost local runs
+      </guardrails>
+    </branch>
+  </master-plan>
+
+  <!-- Execution sequence after all PRs merge -->
+  <post-merge-execution>
+    <step id="1" name="2-Epoch GCP Debug Run">
+      <description>
+        24 conditions (4 models × 3 losses × 2 aux_calib) × fold-0 × 2 epochs.
+        One-by-one with MLflow verification between each run.
+        Estimated cost: ~$6-8 on GCP L4 spot.
+      </description>
+      <go_no_go>All 24 runs produce finite metrics (clDice > 0.01, MASD &lt; 100)</go_no_go>
+    </step>
+
+    <step id="2" name="Post-Training Debug">
+      <description>
+        Apply SWA and Multi-SWA to all 24 debug checkpoints (k=3 → 72 variants).
+        Verify checkpoint sizes and MLflow tagging.
+      </description>
+    </step>
+
+    <step id="3" name="Evaluation Debug">
+      <description>
+        Run factorial evaluation on debug checkpoints (72 × 2 fold strategies ×
+        2 recalibration × 5 ensemble = subset). Verify metric logging and UQ.
+      </description>
+    </step>
+
+    <step id="4" name="Biostatistics Debug">
+      <description>
+        Run biostatistics flow on debug results. Verify ANOVA, figures, tables.
+        This is the end-to-end validation before committing to full runs.
+      </description>
+    </step>
+
+    <step id="5" name="Full Production Runs (~$98)">
+      <description>
+        72 training runs (24 conditions × 3 folds) × 50 epochs on GCP L4 spot.
+        Sequential by model family for weight caching.
+        SkyPilot spot recovery enabled.
+      </description>
+    </step>
+
+    <step id="6" name="Full Pipeline Execution">
+      <description>
+        Post-training → Evaluation → Biostatistics → Deploy → Cost Report.
+        Each flow verifies before proceeding to the next.
+      </description>
+    </step>
+  </post-merge-execution>
+
+</plan>
