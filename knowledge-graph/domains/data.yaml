@@ -1,6 +1,6 @@
 domain: data
 description: Datasets, validation, profiling, versioning, lineage, drift
-last_reviewed: "2026-03-13"
+last_reviewed: "2026-03-17"
 
 decisions:
   data_versioning:
@@ -44,6 +44,27 @@ decisions:
     implementation: [src/minivess/pipeline/drift_detection.py, src/minivess/pipeline/embedding_drift.py]
     evidence: [docs/planning/drift-monitoring-implementation-plan.xml]
     prd_node: knowledge-graph/decisions/L5-operations/drift_monitoring.yaml
+
+  dataset_strategy:
+    status: resolved
+    winner: minivess_primary_external_test
+    rationale: "MiniVess (70 vols) primary; DeepVess/TubeNet/VesselNN for external validation"
+    implementation: [src/minivess/data/external_datasets.py, configs/splits/3fold_seed42.json]
+    prd_node: knowledge-graph/decisions/L3-technology/dataset_strategy.yaml
+
+  database_backend:
+    status: resolved
+    winner: postgresql_only
+    rationale: "PostgreSQL for MLflow + Optuna; DuckDB for analytics. SQLite BANNED."
+    implementation: [deployment/docker-compose.yml]
+    prd_node: knowledge-graph/decisions/L3-technology/database_backend.yaml
+
+  dvc_remote_strategy:
+    status: resolved
+    winner: minio_local_gcs_cloud
+    rationale: "MinIO for local dev, GCS for staging/prod"
+    implementation: [.dvc/config]
+    prd_node: knowledge-graph/decisions/L3-technology/dvc_remote_strategy.yaml
 
 metalearning:
   - file: .claude/metalearning/2026-03-08-sqlite-fallback-bias.md

@@ -1,6 +1,6 @@
 domain: architecture
 description: Model adapters, ensemble strategies, config systems, serving, API
-last_reviewed: "2026-03-13"
+last_reviewed: "2026-03-17"
 
 decisions:
   model_adapter_pattern:
@@ -38,6 +38,13 @@ decisions:
     status: config_only
     candidates: [rest_grpc_dual, rest_only]
     prd_node: knowledge-graph/decisions/L2-architecture/api_protocol.yaml
+
+  flow_topology:
+    status: resolved
+    winner: five_flow_architecture
+    rationale: "5 Prefect flows: acquisition, train, analysis, deploy, dashboard (best-effort)"
+    implementation: src/minivess/orchestration/flows/
+    prd_node: knowledge-graph/decisions/L2-architecture/flow_topology.yaml
 
 metalearning: []
 

@@ -5,7 +5,14 @@
 
 domain: manuscript
 description: Scientific claims, methods stubs, results stubs, limitations, projections for publication
-last_reviewed: "2026-03-15"
+last_reviewed: "2026-03-17"
+
+decisions:
+  publication_target:
+    status: resolved
+    winner: nature_protocols
+    rationale: "Nature Protocols; working name: NEUROVEX"
+    prd_node: knowledge-graph/decisions/L1-research-goals/publication_target.yaml
 
 # These are the YAML files in knowledge-graph/manuscript/ (to be created)
 sections:

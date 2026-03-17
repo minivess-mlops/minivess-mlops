@@ -1,19 +1,30 @@
 decision_id: iac_tool
 title: "Infrastructure as Code"
 level: L4-infrastructure
-status: not_started
+status: resolved
 options:
-  - {id: pulumi_python, name: "Pulumi (Python)", prior_probability: 0.40, posterior_probability: 0.40}
-  - {id: terraform, name: "Terraform", prior_probability: 0.25, posterior_probability: 0.25}
-  - {id: helm_charts, name: "Helm Charts", prior_probability: 0.20, posterior_probability: 0.20}
-  - {id: kustomize_only, name: "Kustomize Only", prior_probability: 0.10, posterior_probability: 0.10}
-  - {id: none, name: "None", prior_probability: 0.05, posterior_probability: 0.05}
-resolution_evidence: []
+  - {id: pulumi_python, name: "Pulumi (Python)", prior_probability: 0.40, posterior_probability: 0.90}
+  - {id: terraform, name: "Terraform", prior_probability: 0.25, posterior_probability: 0.04}
+  - {id: helm_charts, name: "Helm Charts", prior_probability: 0.20, posterior_probability: 0.03}
+  - {id: kustomize_only, name: "Kustomize Only", prior_probability: 0.10, posterior_probability: 0.02}
+  - {id: none, name: "None", prior_probability: 0.05, posterior_probability: 0.01}
+resolved_option: pulumi_python
+resolution_evidence:
+  - type: implementation
+    source: "deployment/pulumi/gcp/__main__.py"
+    finding: "Pulumi Python SDK provisions GCP resources: GCS buckets, Cloud SQL, GAR, service accounts"
+  - type: discussion
+    source: "docs/planning/pulumi-iac-implementation-guide.md"
+    finding: "Pulumi chosen for Python-native IaC; GCP project=minivess-mlops, region=europe-north1"
 implementation:
-  files: []
+  files:
+    - deployment/pulumi/gcp/__main__.py
+    - deployment/pulumi/gcp/Pulumi.yaml
   tests: []
-conditional_on: []
+conditional_on:
+  - {parent_decision_id: container_strategy, influence_strength: moderate}
+  - {parent_decision_id: cloud_provider_selection, influence_strength: strong}
 volatility:
-  classification: evolving
-  next_review: "2026-04-13"
-  rationale: "Not yet needed for solo researcher workflow"
+  classification: stable
+  next_review: "2026-06-17"
+  rationale: "Pulumi GCP stack is deployed and working; IaC decision is settled"

@@ -1,0 +1,51 @@
+decision_id: docker_registry
+title: "Docker Image Registry"
+level: L4-infrastructure
+status: resolved
+
+options:
+  - id: dockerhub_and_gar
+    name: "Docker Hub (RunPod) + GAR (GCP)"
+    prior_probability: 0.30
+    posterior_probability: 0.90
+  - id: ghcr_only
+    name: "GitHub Container Registry Only"
+    prior_probability: 0.35
+    posterior_probability: 0.05
+    description: "GHCR private images caused 40+ min STARTING hangs on RunPod (2026-03-16)"
+  - id: dockerhub_only
+    name: "Docker Hub Only"
+    prior_probability: 0.20
+    posterior_probability: 0.03
+  - id: gar_only
+    name: "Google Artifact Registry Only"
+    prior_probability: 0.15
+    posterior_probability: 0.02
+
+resolved_option: dockerhub_and_gar
+
+resolution_evidence:
+  - type: experiment
+    source: ".claude/metalearning/2026-03-16-unauthorized-aws-s3-architecture-migration.md"
+    finding: "GHCR private images caused 40+ min hangs on RunPod; Docker Hub public=zero-auth pull"
+  - type: implementation
+    source: "configs/registry/"
+    finding: "Per-environment registry selection: dockerhub.yaml, gar.yaml, ghcr.yaml"
+
+implementation:
+  files:
+    - configs/registry/dockerhub.yaml
+    - configs/registry/gar.yaml
+    - configs/registry/ghcr.yaml
+  tests: []
+
+conditional_on:
+  - parent_decision_id: container_strategy
+    influence_strength: strong
+  - parent_decision_id: gpu_compute
+    influence_strength: moderate
+
+volatility:
+  classification: stable
+  next_review: "2026-06-17"
+  rationale: "Docker Hub+GAR split validated empirically; unlikely to change"
