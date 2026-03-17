@@ -122,6 +122,75 @@ class RunAnalytics:
         """
         return self.conn.execute(sql).fetchdf()
 
+    def cost_by_model_family(self, runs_df: pd.DataFrame) -> pd.DataFrame:
+        """Aggregate cost metrics by model family.
+
+        Returns DataFrame with mean/std of cost_total_usd and effective_gpu_rate
+        grouped by param_model_family.
+
+        Returns empty DataFrame if input is empty.
+        """
+        if runs_df.empty:
+            return pd.DataFrame()
+
+        self.register_dataframe("cost_runs", runs_df)
+        sql = """
+            SELECT
+                param_model_family AS model_family,
+                AVG(CAST(metric_cost_total_usd AS DOUBLE)) AS total_cost_usd_mean,
+                STDDEV(CAST(metric_cost_total_usd AS DOUBLE)) AS total_cost_usd_std,
+                AVG(CAST(metric_cost_effective_gpu_rate AS DOUBLE)) AS effective_rate_mean
+            FROM cost_runs
+            WHERE param_model_family IS NOT NULL
+            GROUP BY param_model_family
+            ORDER BY total_cost_usd_mean DESC
+        """
+        return self.conn.execute(sql).fetchdf()
+
+    def cost_trends(self, runs_df: pd.DataFrame) -> pd.DataFrame:
+        """Compute cumulative cost trend over time.
+
+        Returns DataFrame ordered by start_time with cumulative_cost_usd column.
+        """
+        if runs_df.empty:
+            return pd.DataFrame()
+
+        self.register_dataframe("trend_runs", runs_df)
+        sql = """
+            SELECT
+                run_id,
+                start_time,
+                metric_cost_total_usd,
+                SUM(CAST(metric_cost_total_usd AS DOUBLE))
+                    OVER (ORDER BY start_time) AS cumulative_cost_usd
+            FROM trend_runs
+            WHERE metric_cost_total_usd IS NOT NULL
+            ORDER BY start_time
+        """
+        return self.conn.execute(sql).fetchdf()
+
+    def break_even_analysis(self, runs_df: pd.DataFrame) -> pd.DataFrame:
+        """Aggregate break-even and amortization metrics by model family.
+
+        Returns DataFrame with avg_break_even_epochs and avg_epochs_to_amortize
+        grouped by param_model_family.
+        """
+        if runs_df.empty:
+            return pd.DataFrame()
+
+        self.register_dataframe("be_runs", runs_df)
+        sql = """
+            SELECT
+                param_model_family AS model_family,
+                AVG(CAST(metric_cost_break_even_epochs AS DOUBLE)) AS avg_break_even_epochs,
+                AVG(CAST(metric_cost_epochs_to_amortize_setup AS DOUBLE)) AS avg_epochs_to_amortize
+            FROM be_runs
+            WHERE param_model_family IS NOT NULL
+            GROUP BY param_model_family
+            ORDER BY avg_break_even_epochs
+        """
+        return self.conn.execute(sql).fetchdf()
+
     def close(self) -> None:
         """Close the DuckDB connection."""
         self.conn.close()

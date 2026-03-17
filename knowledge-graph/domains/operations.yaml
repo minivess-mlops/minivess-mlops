@@ -37,6 +37,13 @@ decisions:
     candidates: [syft_uv_lock, cyclonedx]
     prd_node: knowledge-graph/decisions/L5-operations/sbom_generation.yaml
 
+  cost_tracking_strategy:
+    status: accepted
+    winner: prometheus_bentoml_custom_metrics
+    rationale: "Prometheus export via BentoML /metrics, shared Gauges module, DuckDB analytics"
+    implementation: [src/minivess/observability/prometheus_metrics.py, src/minivess/observability/analytics.py]
+    prd_node: knowledge-graph/decisions/L5-operations/cost-tracking-strategy.yaml
+
   federated_learning:
     status: not_started
     candidates: [monai_fl, flower_framework, not_applicable]
