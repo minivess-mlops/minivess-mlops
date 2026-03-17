@@ -78,6 +78,12 @@ FLOW_NAME_PIPELINE: str = "pipeline-flow"
 FLOW_NAME_MAINTENANCE: str = "maintenance-flow"
 """Prefect flow name for the maintenance/cleanup flow (Flow 6)."""
 
+FLOW_NAME_DRIFT_SIMULATION: str = "drift-simulation"
+"""Prefect flow name for the drift simulation flow."""
+
+FLOW_NAME_SYNTHETIC_GENERATION: str = "synthetic-generation"
+"""Prefect flow name for the synthetic volume generation flow."""
+
 
 # ---------------------------------------------------------------------------
 # Experiment name resolution (debug suffix support)

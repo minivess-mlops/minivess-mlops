@@ -1,0 +1,23 @@
+# @package _global_
+#
+# Base experiment config for the 6-factor factorial debug run.
+# 4 models × 3 losses × 2 aux_calib × 3 folds = 72 training conditions.
+#
+# Usage:
+#   compose_experiment_config(experiment_name="factorial_base")
+#   compose_experiment_config(
+#       experiment_name="factorial_base",
+#       overrides=["model=sam3_vanilla", "with_aux_calib=true"],
+#   )
+
+experiment_name: factorial_base
+max_epochs: 50
+debug: false
+
+# Default factorial values (overridden per-condition):
+with_aux_calib: false
+aux_calib_weight: 1.0
+
+# Losses to sweep (overridden per-condition via loss_name CLI):
+losses:
+  - cbdice_cldice

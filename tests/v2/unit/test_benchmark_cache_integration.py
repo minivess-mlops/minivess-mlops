@@ -56,8 +56,8 @@ class TestValidCacheLogged:
 
         tracker.log_params.assert_called_once()
         params = tracker.log_params.call_args[0][0]
-        assert "sys_bench_gpu_model" in params
-        assert params["sys_bench_gpu_model"] == "rtx_2070_super"
+        assert "bench/gpu_model" in params
+        assert params["bench/gpu_model"] == "rtx_2070_super"
 
 
 class TestMissingCache:
@@ -93,9 +93,9 @@ class TestInvalidCache:
 
 
 class TestSysBenchPrefix:
-    """All benchmark params use sys_bench_ prefix (RC8)."""
+    """All benchmark params use bench/ slash-prefix (RC8, updated for MLflow migration)."""
 
-    def test_benchmark_params_have_sys_bench_prefix(self, tmp_path: Path) -> None:
+    def test_benchmark_params_have_bench_prefix(self, tmp_path: Path) -> None:
         from minivess.compute.gpu_profile import load_benchmark_params
 
         cache_path = tmp_path / "gpu_benchmark.yaml"
@@ -105,6 +105,6 @@ class TestSysBenchPrefix:
 
         assert len(params) > 0, "Should return at least one param"
         for key in params:
-            assert key.startswith("sys_bench_"), (
-                f"Key '{key}' must start with 'sys_bench_' (RC8)"
+            assert key.startswith("bench/"), (
+                f"Key '{key}' must start with 'bench/' (slash-prefix convention)"
             )

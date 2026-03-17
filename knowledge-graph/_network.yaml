@@ -61,6 +61,9 @@ nodes:
   - id: data_validation_depth
     level: L2
     file: decisions/L2-architecture/data_validation_depth.yaml
+  - id: data_quality_orchestration
+    level: L2
+    file: decisions/L2-architecture/data_quality_orchestration.yaml
   - id: agent_architecture
     level: L2
     file: decisions/L2-architecture/agent_architecture.yaml
@@ -114,6 +117,9 @@ nodes:
   - id: calibration_method
     level: L3
     file: decisions/L3-technology/calibration_method.yaml
+  - id: vlm_calibration
+    level: L3
+    file: decisions/L3-technology/vlm_calibration.yaml
   - id: label_quality_tool
     level: L3
     file: decisions/L3-technology/label_quality_tool.yaml
@@ -220,6 +226,9 @@ nodes:
   - id: cost_optimization
     level: L5
     file: decisions/L5-operations/cost_optimization.yaml
+  - id: cost_tracking_strategy
+    level: L5
+    file: decisions/L5-operations/cost-tracking-strategy.yaml
 
 edges:
   # L1 → L2 (strategy to architecture) — ~18 edges
