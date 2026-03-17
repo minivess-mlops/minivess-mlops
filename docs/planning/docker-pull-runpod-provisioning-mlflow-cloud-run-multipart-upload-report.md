@@ -9,7 +9,15 @@
 
 ## Abstract
 
-Three infrastructure bottlenecks --- 15-minute Docker image pulls from Google Artifact Registry (GAR), 40+ minute RunPod provisioning failures, and HTTP 500 errors on 900 MB MLflow checkpoint uploads through Cloud Run --- collectively consume 58% of GPU smoke test wall time and block the critical path for the MinIVess MLOps platform (#734). This report surveys the academic literature on container image distribution, GPU cold-start optimization, and cloud artifact management, then constructs multi-hypothesis design matrices for each issue. We identify 12 hypotheses for Docker pull optimization, 7 for RunPod provisioning, and 4 for MLflow upload, ranked by expected impact, implementation effort, and compatibility with the existing SkyPilot + GAR + GCP architecture. The recommended execution order follows a ralph-loop-friendly cheapest-first strategy: fix the MLflow `--serve-artifacts` flag (5 minutes), optimize the Dockerfile multi-stage build (2 hours), then evaluate GKE Image Streaming and eStargz for deeper gains.
+Three infrastructure bottlenecks --- 15-minute Docker image pulls from Google Artifact Registry (GAR), 40+ minute RunPod provisioning failures, and HTTP 500 errors on 900 MB MLflow checkpoint uploads through Cloud Run --- collectively consume 58% of GPU smoke test wall time and block the critical path for the MinIVess MLOps platform (#734). This report surveys the academic literature on container image distribution, GPU cold-start optimization, and cloud artifact management, then constructs multi-hypothesis design matrices for each issue. We identify 12 hypotheses for Docker pull optimization, 7 for RunPod provisioning, and 4 for MLflow upload, ranked by expected impact, implementation effort, and compatibility with the existing SkyPilot + GAR + GCP architecture. The recommended execution order follows a ralph-loop-friendly cheapest-first strategy: fix the MLflow `--serve-artifacts` flag (5 minutes), add zstd compression to the already-optimized multi-stage Docker builds (1 hour), then evaluate GKE Image Streaming and eStargz for deeper gains.
+
+> **Correction (2026-03-17)**: The 3-tier multi-stage Docker architecture (GPU/CPU/Light
+> bases, 2-stage builder→runner, uv cache mounts, optimized layer ordering) is **already
+> fully implemented** per `docker-base-improvement-plan.md`. The 9 GB image size is the
+> irreducible floor after multi-stage optimization (CUDA runtime + PyTorch + MONAI + deps).
+> H1 below targets incremental cleanup (strip `__pycache__`, unused extras), not the
+> initial multi-stage implementation which was completed in March 2026.
+> See: `.claude/metalearning/2026-03-17-docker-research-report-false-premise.md`
 
 ---
 
