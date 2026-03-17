@@ -2,14 +2,20 @@
 
 ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
 ![uv](https://img.shields.io/badge/package%20manager-uv-blueviolet)
+![Docker](https://img.shields.io/badge/execution-Docker-2496ED?logo=docker)
+![MONAI](https://img.shields.io/badge/framework-MONAI-00A86B)
 ![tests](https://img.shields.io/badge/tests-pytest-brightgreen)
 ![ruff](https://img.shields.io/badge/linter-ruff-orange)
 ![mypy](https://img.shields.io/badge/type%20checker-mypy-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-**Model-agnostic biomedical segmentation MLOps platform.** A production-grade scaffold
-that frees PhD researchers from infrastructure wrangling — everything automatic by
-default, everything tweakable by choice.
+**Model-agnostic biomedical segmentation MLOps platform extending the MONAI ecosystem.**
+MinIVess MLOps v2 is a production-grade scaffold that frees PhD researchers from
+infrastructure wrangling -- everything automatic by default, everything tweakable by
+choice. It provides Docker-per-flow isolation, SkyPilot intercloud compute, Prefect
+orchestration, and a config-driven architecture where adding a new model, dataset, or
+flow requires editing one YAML file. The companion paper (working title: **NEUROVEX**)
+targets *Nature Protocols*.
 
 Built on the dataset published in: Charissa Poon, Petteri Teikari *et al.* (2023),
 "A dataset of rodent cerebrovasculature from in vivo multiphoton fluorescence
@@ -18,94 +24,104 @@ doi: [10.1038/s41597-023-02048-8](https://doi.org/10.1038/s41597-023-02048-8)
 
 ---
 
-## What Is This?
+## Key Features
 
-MinIVess MLOps v2 is a **complete rewrite** of [v0.1-alpha](https://github.com/petteriTeikari/minivess_mlops/wiki),
-designed as a **portfolio-grade reference implementation** of an end-to-end ML pipeline for
-3D biomedical image segmentation. It demonstrates:
-
-1. **Model-agnostic architecture** -- 9 model families (DynUNet, SAM3, VesselFM,
-   COMMA/Mamba, TFFM, ...) behind a single `ModelAdapter` ABC
-2. **18 loss functions** -- from standard (Dice+CE) to topology-aware (clDice, CAPE,
-   Betti matching, skeleton recall) to graph-constrained (compound graph topology)
-3. **Conformal uncertainty quantification** -- 5 methods (split conformal, morphological,
-   distance transform, risk-controlling, MAPIE)
-4. **Post-training plugin architecture** -- 6 configurable post-hoc plugins (SWA,
-   Multi-SWA, model merging, calibration, CRC conformal, ConSeCo FP control)
-5. **6 Prefect flows** -- persona-based orchestration (data, train, post-training,
-   analyze, deploy, dashboard; QA merged into dashboard health adapter)
-6. **Reproducible experiments** -- all flows verified end-to-end with real data
-   (70 volumes, 4 losses, 3 folds, 100 epochs)
-7. **SaMD-principled** -- IEC 62304 lifecycle mapping, audit trails, model cards
-
-The platform is an **academic software project** -- the PRD system (78 Bayesian decision
-nodes across 5 levels) serves as the evidence base for a peer-reviewed article.
-
----
-
-## Key Results
-
-### DynUNet Baseline (4 losses x 3 folds x 100 epochs)
-
-| Loss | DSC | clDice | HD95 | NSD |
-|------|-----|--------|------|-----|
-| `dice_ce` | **0.824** | 0.832 | 3.46 | 0.891 |
-| `cbdice_cldice` | 0.779 | **0.906** | 4.12 | 0.847 |
-| `dice_ce_cldice` | 0.802 | 0.868 | 3.67 | 0.872 |
-| `focal` | 0.788 | 0.841 | 3.89 | 0.859 |
-
-**Default loss: `cbdice_cldice`** -- best topology preservation (0.906 clDice) with
-only -5.3% DSC penalty. Full results in
-[`docs/results/dynunet_loss_variation_v2_report.md`](docs/results/dynunet_loss_variation_v2_report.md).
-
-### SAM3 Variants (In Progress)
-
-Three SAM3 (Segment Anything Model 3) variants to quantify foundation model limitations
-on 3D microvessel segmentation:
-
-| Variant | Architecture | Loss | Expected DSC | Status |
-|---------|-------------|------|-------------|--------|
-| **Vanilla** | Frozen SAM3 ViT-32L + trainable decoder | `dice_ce` | 0.35-0.55 | Training |
-| **TopoLoRA** | + LoRA on FFN (mlp.lin1/lin2) | `cbdice_cldice` | +10-20% clDice | Pending |
-| **Hybrid** | SAM3 features + DynUNet 3D decoder | `cbdice_cldice` | Best SAM variant | Planned |
-
-See [ADR-0006](docs/adr/0006-sam3-variant-architecture.md) for architecture decisions.
+- **6 model families** behind a single `ModelAdapter` ABC: DynUNet (CNN baseline), MambaVesselNet++ (SSM hybrid), SAM3 Vanilla/TopoLoRA/Hybrid (foundation model variants), VesselFM (vessel-specific foundation model)
+- **18 loss functions** -- from standard (Dice+CE) to topology-aware (clDice, CAPE, Betti matching, skeleton recall) to graph-constrained (compound graph topology)
+- **5 core Prefect flows** with Docker-per-flow isolation, plus additional auxiliary flows (biostatistics, drift simulation, synthetic generation, HPO)
+- **SkyPilot intercloud broker** ([Yang et al., NSDI'23](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng)) -- one command to launch GPU jobs on RunPod or GCP
+- **Evidently drift detection** + **whylogs profiling** + Prometheus/Grafana monitoring stack
+- **BentoML + ONNX Runtime serving** with champion model discovery and Gradio demo UI
+- **MetricsReloaded evaluation** -- clDice (trusted), MASD (trusted), DSC (foil) per [Maier-Hein et al. (2024)](https://doi.org/10.1038/s41592-023-02151-z)
+- **3-fold cross-validation** (seed=42) with bootstrap confidence intervals and paired statistical tests
+- **Conformal uncertainty quantification** -- 5 methods (split conformal, morphological, distance transform, risk-controlling, MAPIE)
+- **Post-training plugins** -- 6 config-driven enhancements (SWA, Multi-SWA, model merging, calibration, CRC conformal, ConSeCo FP control)
+- **Knowledge graph** -- 69 Bayesian decision nodes across 6 layers, driving spec-driven development
 
 ---
 
 ## Architecture Overview
 
-### Pipeline
+### Three-Environment Model
+
+| Environment | Docker | Compute | Data | Purpose |
+|-------------|--------|---------|------|---------|
+| **local** | Docker Compose | Local GPU (e.g., RTX 2070 Super 8 GB) | MinIO (local) | Fast iteration, `uv run pytest` |
+| **env** (RunPod) | Docker image via SkyPilot | RunPod RTX 4090 (24 GB) | Network Volume (upload from local) | Quick GPU experiments |
+| **staging/prod** (GCP) | Docker image via SkyPilot | GCP L4/A100 spot | GCS buckets | Production runs, paper results |
+
+The laptop is always the control plane. After any remote training job, MLflow runs are
+synced back to the local `mlruns/` directory. Subsequent flows (analysis, deploy,
+dashboard) consume local MLflow data seamlessly.
+
+### Pipeline Architecture
 
 ```
-                        Prefect Orchestration (7 flows)
-                        ============================
+                     Prefect Orchestration (Docker-per-flow)
+                     =======================================
 
-Flow 1: Data Engineering     Flow 2: Training       Flow 2.5: Post-Training
-  DVC + NIfTI                  Hydra-zen configs      6 post-hoc plugins
-  TorchIO augmentation         Mixed precision         SWA + Multi-SWA
-  Pydantic validation          Grad checkpointing     Model merging (slerp)
-  Pandera schemas              18 loss functions       Calibration (temp/Platt)
-  Dataset profiling            12 model families       CRC conformal + ConSeCo
-          |                          |                        |
-          v                          v                        v
-        MLflow <=================  MLflow  ===============> MLflow
-          |                          |                        |
-          v                          v                        v
-Flow 3: Analysis             Flow 4: Deployment     Flow 5: Dashboard
-  8-metric evaluation          Champion discovery      Paper figures (PNG+SVG)
-  Bootstrap CIs                ONNX export + validate  Parquet + DuckDB export
-  Ensemble strategies          BentoML model store     Comparison tables (MD+TEX)
-  Conformal UQ                 Gradio demo             Drift reports
-  Graph topology               MONAI Deploy MAP
-  Post-training discovery      DEV -> STAGING -> PROD
-                                                     (QA merged into dashboard
-                                                      health adapter, PR #567)
+Flow 1: Data Eng.        Flow 2: Training         Flow 2.5: Post-Training
+  DVC + NIfTI              Hydra-zen configs        6 post-hoc plugins
+  TorchIO augmentation     Mixed precision           SWA + Multi-SWA
+  Pandera validation       18 loss functions          Model merging (slerp)
+  whylogs profiling        6 model families           Calibration (temp/Platt)
+        |                        |                    CRC conformal + ConSeCo
+        v                        v                           |
+      MLflow  <=============== MLflow ===================> MLflow
+        |                        |                           |
+        v                        v                           v
+Flow 3: Analysis          Flow 4: Deployment        Flow 5: Dashboard
+  MetricsReloaded eval      Champion discovery        Paper figures (PNG+SVG)
+  Bootstrap CIs             ONNX export + validate    DuckDB analytics
+  Conformal UQ              BentoML model store       Drift reports
+  Ensemble strategies       Gradio demo               Comparison tables
 ```
 
-### ModelAdapter Pattern
+### Inter-Flow Contract
 
-Every segmentation model implements 6 methods:
+All flows communicate through **MLflow** as the shared state layer. The
+`find_upstream_run()` utility discovers upstream artifacts (checkpoints, metrics,
+configs) by experiment name and run tags. Checkpoint formats use a standardized
+envelope (`checkpoint_format.yaml`) so any downstream consumer can load any
+upstream model.
+
+### Docker Three-Tier Hierarchy
+
+```
+Tier A (GPU):   nvidia/cuda:12.6.3 --> minivess-base:latest       (~8-12 GB)
+Tier B (CPU):   python:3.13-slim   --> minivess-base-cpu:latest    (~1.5-2.5 GB)
+Tier C (Light): python:3.13-slim   --> minivess-base-light:latest  (~1.0-1.5 GB)
+```
+
+Each tier uses a **two-stage builder-runner** pattern (BuildKit). Flow Dockerfiles
+are thin -- only `COPY`, `ENV`, `CMD` -- they never run `apt-get` or `uv`.
+
+| Tier | Base Image | Flows |
+|------|-----------|-------|
+| A (GPU) | `minivess-base:latest` | train, hpo, post_training, analyze, deploy, data, annotation, monailabel, acquisition, benchmark |
+| B (CPU) | `minivess-base-cpu:latest` | biostatistics |
+| C (Light) | `minivess-base-light:latest` | dashboard, dashboard-api, pipeline |
+
+There are 20 Dockerfiles in `deployment/docker/` serving infrastructure services and
+per-flow containers.
+
+---
+
+## Model Families
+
+Six model families for the Nature Protocols paper comparison (see
+`knowledge-graph/decisions/L3-technology/paper_model_comparison.yaml`):
+
+| Model | Family | Adapter | Training Strategy | VRAM | Status |
+|-------|--------|---------|-------------------|------|--------|
+| **DynUNet** | CNN baseline | `adapters/dynunet.py` | Full training (100 epochs, 3 folds) | ~3.5 GB | Results available |
+| **MambaVesselNet++** | SSM hybrid | `adapters/mambavesselnet.py` | Full training | TBD | Code complete, GPU runs pending |
+| **SAM3 Vanilla** | Foundation (frozen) | `adapters/sam3_vanilla.py` | Zero-shot or decoder fine-tune | ~2.9 GB | GPU runs pending |
+| **SAM3 TopoLoRA** | Foundation (LoRA) | `adapters/sam3_topolora.py` | LoRA fine-tune (rank=16, alpha=32) | ~16 GB | GPU runs pending |
+| **SAM3 Hybrid** | Foundation (fusion) | `adapters/sam3_hybrid.py` | SAM3 features + DynUNet 3D decoder | ~6 GB | Partially validated |
+| **VesselFM** | Foundation (pretrained) | `adapters/vesselfm.py` | Zero-shot + fine-tune on external data | TBD | GPU runs pending |
+
+Every model implements the `ModelAdapter` ABC:
 
 ```python
 class ModelAdapter(ABC):
@@ -117,90 +133,381 @@ class ModelAdapter(ABC):
     def export_onnx(path, example_input)           # ONNX export
 ```
 
-The training engine, ensemble module, evaluation pipeline, serving layer, and ONNX
-export all program against this interface. Adding a new model = one new file.
+Adding a new model = one new file implementing this interface + one YAML config.
 
-### Model Families (9)
+### Key Results: DynUNet Baseline (4 losses x 3 folds x 100 epochs)
 
-| Family | Module | Description |
-|--------|--------|-------------|
-| `dynunet` | `adapters/dynunet.py` | MONAI DynUNet -- primary 3D baseline |
-| `vesselfm` | `adapters/vesselfm.py` | VesselFM foundation model |
-| `comma_mamba` | `adapters/comma.py` | COMMA Mamba state-space model |
-| `sam3_vanilla` | `adapters/sam3_vanilla.py` | SAM3 frozen encoder + decoder |
-| `sam3_topolora` | `adapters/sam3_topolora.py` | SAM3 + LoRA + topology loss |
-| `sam3_hybrid` | `adapters/sam3_hybrid.py` | SAM3 features + DynUNet 3D decoder |
-| `sam3_lora` | `adapters/lora.py` | Generic LoRA adapter |
-| `multitask_dynunet` | `adapters/multitask_adapter.py` | Multi-task with auxiliary heads |
-| `custom` | user-defined | Bring your own adapter |
+| Loss | DSC | clDice | HD95 | NSD |
+|------|-----|--------|------|-----|
+| `dice_ce` | **0.824** | 0.832 | 3.46 | 0.891 |
+| `cbdice_cldice` | 0.779 | **0.906** | 4.12 | 0.847 |
+| `dice_ce_cldice` | 0.802 | 0.868 | 3.67 | 0.872 |
+| `focal` | 0.788 | 0.841 | 3.89 | 0.859 |
 
-Model dispatch is handled by `build_adapter(config)` in `adapters/model_builder.py`.
+**Default loss: `cbdice_cldice`** -- best topology preservation (0.906 clDice) with
+only -5.3% DSC penalty.
 
-### Loss Functions (18)
+---
 
-| Loss | Type | Source |
-|------|------|--------|
+## Prefect Flows
+
+All pipeline execution goes through Prefect flows running in Docker containers.
+Each flow has an independently configurable compute target via deployment config.
+
+| Flow | File | Docker Tier | Purpose |
+|------|------|-------------|---------|
+| **Data Engineering** | `data_flow.py` | GPU (A) | DVC, NIfTI loading, validation, profiling |
+| **Training** | `train_flow.py` | GPU (A) | Model training with Hydra-zen config |
+| **Post-Training** | `post_training_flow.py` | GPU (A) | SWA, merging, calibration, conformal |
+| **Analysis** | `analysis_flow.py` | GPU (A) | MetricsReloaded evaluation, bootstrap CIs |
+| **Deployment** | `deploy_flow.py` | GPU (A) | Champion discovery, ONNX export, BentoML |
+| **Dashboard** | `dashboard_flow.py` | Light (C) | Paper figures, tables, drift reports |
+| **HPO** | `hpo_flow.py` | GPU (A) | Optuna + ASHA hyperparameter optimization |
+| **Biostatistics** | `biostatistics_flow.py` | CPU (B) | Statistical analysis, DuckDB exports |
+| **Drift Simulation** | `drift_simulation_flow.py` | GPU (A) | Synthetic drift experiments |
+| **Synthetic Generation** | `synthetic_generation_flow.py` | GPU (A) | Synthetic data generation |
+| **Acquisition** | `acquisition_flow.py` | GPU (A) | Dataset download and DVC versioning |
+| **Annotation** | `annotation_flow.py` | GPU (A) | Label Studio integration |
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.12+ and [uv](https://docs.astral.sh/uv/) (the **only** supported package manager)
+- Docker (for pipeline execution) and Docker Compose V2
+- NVIDIA GPU with CUDA (optional for local development; required for training)
+
+### Install and Verify
+
+```bash
+# Clone the repository
+git clone https://github.com/petteriTeikari/minivess_mlops.git
+cd minivess_mlops
+
+# Install dependencies (--all-extras is REQUIRED for development)
+uv sync --all-extras
+
+# Run the staging test suite (fast, no model loading, <3 min)
+make test-staging
+
+# Lint + format + typecheck (three-gate verification)
+uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/ && uv run mypy src/
+```
+
+### Docker Compose Infrastructure
+
+```bash
+# Copy environment config
+cp .env.example .env
+# Edit .env to set MODEL_CACHE_HOST_PATH and other values
+
+# Create the shared network
+docker network create minivess-network
+
+# Core infrastructure (PostgreSQL, MinIO, MLflow, Prefect)
+docker compose -f deployment/docker-compose.yml --profile dev up -d
+
+# Initialize volume ownership (one-time)
+make init-volumes
+
+# Run a training flow
+docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm \
+  --shm-size 8g -e EXPERIMENT=dynunet_e2e_debug train
+```
+
+### Docker Compose Profiles
+
+| Profile | Services | Approx. RAM |
+|---------|----------|-------------|
+| `dev` | PostgreSQL, MinIO, MLflow, BentoML | ~4 GB |
+| `monitoring` | + Prometheus, Grafana, OpenTelemetry | ~8 GB |
+| `full` | + Langfuse, Marquez, Label Studio, Ollama | ~16 GB |
+
+---
+
+## Cloud Execution
+
+### SkyPilot Intercloud Broker
+
+All cloud compute is managed through [SkyPilot](https://skypilot.readthedocs.io/) --
+an intercloud broker that works like Slurm for multi-cloud. SkyPilot YAML files specify
+Docker images (bare VM setup is banned for reproducibility).
+
+```bash
+# RunPod: quick GPU experiments
+sky jobs launch deployment/skypilot/dev_runpod.yaml
+
+# GCP: production runs with spot instances
+sky jobs launch deployment/skypilot/train_production.yaml
+
+# Sync MLflow results back to local after RunPod training
+make dev-gpu-sync
+```
+
+### Two-Provider Architecture
+
+| Provider | Environment | Role | Data Storage |
+|----------|------------|------|--------------|
+| **RunPod** | env (dev) | Quick GPU experiments, instant provisioning | Network Volume (data from local disk) |
+| **GCP** | staging + prod | Production runs, paper results, Pulumi IaC | GCS (`gs://minivess-mlops-dvc-data`) |
+
+- **RunPod** is fully standalone -- no GCP account required. Data is uploaded from the
+  researcher's local disk. Ideal for paper readers getting started.
+- **GCP** (`europe-north1`) provides the full managed stack: GCS buckets, Artifact
+  Registry, Cloud SQL (PostgreSQL), spot instance recovery via SkyPilot.
+- Cloud config flows through **Hydra config groups** (`configs/cloud/`, `configs/registry/`).
+  Labs with different providers override via `configs/lab/lab_name.yaml` -- zero code changes.
+
+### Per-Flow Compute Routing
+
+Each Prefect flow has an independently configurable compute target. The platform provides
+flows; the researcher decides where each runs:
+
+```
+Flow 1: Data Eng.    --> local Docker, or cloud instance for large datasets
+Flow 2: Training     --> RunPod RTX 4090, or GCP L4 spot, or local GPU
+Flow 3: Analysis     --> local, or cloud GPU for large-scale sliding window eval
+Flow 4: Deployment   --> local, or CI runner, or cloud
+Flow 5: Dashboard    --> local, or Vercel/Render for static hosting
+```
+
+---
+
+## Dataset
+
+### Primary: MiniVess
+
+70 volumes of rodent cerebrovasculature from *in vivo* multiphoton fluorescence
+microscopy. 3D NIfTI format.
+
+- **Splits**: 3-fold cross-validation, seed=42 (`configs/splits/3fold_seed42.json`) -- 47 train / 23 val
+- **Origin**: [EBRAINS](https://ebrains.eu/) repository
+- **Versioning**: DVC (MinIO local, GCS cloud)
+
+### External Test Sets
+
+| Dataset | Volumes | Use | Reference |
+|---------|---------|-----|-----------|
+| DeepVess | -- | External validation | Haft-Javaherian et al. (2019) |
+| TubeNet | -- | External validation | -- |
+| VesselNN | -- | External validation | -- |
+
+**VesselFM data leakage warning**: VesselFM was pre-trained on 17 datasets *including*
+MiniVess. Evaluation of VesselFM uses DeepVess/TubeNet only -- never MiniVess.
+
+---
+
+## Loss Functions
+
+18 loss functions organized by provenance:
+
+| Loss | Type | Source/Reference |
+|------|------|-----------------|
 | `dice_ce` | LIBRARY | MONAI `DiceCELoss` |
 | `dice` | LIBRARY | MONAI `DiceLoss` |
 | `focal` | LIBRARY | MONAI `FocalLoss` |
 | `cb_dice` | LIBRARY | Class-balanced Dice |
-| `cldice` | HYBRID | clDice (soft skeleton) |
-| `dice_ce_cldice` | LIBRARY-COMPOUND | 0.5 DiceCE + 0.5 clDice |
-| `cbdice_cldice` | LIBRARY-COMPOUND | 0.5 cbDice + 0.5 dice_ce_cldice |
-| `centerline_ce` | HYBRID | Centerline-weighted CE |
-| `skeleton_recall` | EXPERIMENTAL | Kirchhoff (ECCV 2024) |
-| `cape` | EXPERIMENTAL | CAPE (MICCAI 2025) |
-| `betti_matching` | EXPERIMENTAL | Betti matching (persistent homology) |
+| `cbdice` | LIBRARY | Class-balanced Dice (standalone) |
+| `cldice` | HYBRID | clDice -- soft skeleton ([Shit et al., CVPR 2021](https://arxiv.org/abs/2003.07311)) |
+| `dice_ce_cldice` | COMPOUND | 0.5 DiceCE + 0.5 clDice |
+| `cbdice_cldice` | COMPOUND | 0.5 cbDice + 0.5 dice_ce_cldice (**default/champion**) |
+| `centerline_ce` | HYBRID | Centerline-weighted cross-entropy |
+| `skeleton_recall` | EXPERIMENTAL | [Kirchhoff et al. (ECCV 2024)](https://arxiv.org/abs/2404.09404) |
+| `cape` | EXPERIMENTAL | [CAPE (MICCAI 2025)] |
+| `betti_matching` | EXPERIMENTAL | Persistent homology Betti matching |
 | `toposeg` | EXPERIMENTAL | TopoSegNet critical points |
 | `topo` | EXPERIMENTAL | Topological loss |
 | `warp` | EXPERIMENTAL | Warping-based loss |
 | `betti` | EXPERIMENTAL | Betti number error |
 | `full_topo` | EXPERIMENTAL | Compound topology |
 | `graph_topology` | EXPERIMENTAL | Graph-constrained topology |
-| `cbdice` | LIBRARY | Class-balanced Dice (standalone) |
 
-### Evaluation Metrics (13+)
+**Top 3 for vessel segmentation**:
+1. **`cbdice_cldice`** (champion) -- best topology preservation (0.906 clDice)
+2. **`dice_ce_cldice`** -- balanced overlap + topology (0.868 clDice)
+3. **`dice_ce`** -- best volumetric overlap (0.824 DSC)
 
-**Main paper metrics (8):** DSC, HD95, ASSD, NSD, clDice, Betti-0 error, Betti-1 error, Junction F1
+---
 
-**Graph topology metrics:** ccDice, APLS, skeleton recall, BDR, Murray's law compliance,
-persistence distance
+## Metrics
 
-All topology metrics in `pipeline/topology_metrics.py`. MONAI built-ins used where available.
+Metric selection follows the [MetricsReloaded](https://doi.org/10.1038/s41592-023-02151-z)
+framework (Maier-Hein et al., *Nature Methods* 2024) for 3D vascular segmentation.
 
-### Conformal Uncertainty Quantification (5 methods)
+### Trusted Metrics (Primary)
 
-| Method | Class | Reference |
-|--------|-------|-----------|
-| Split conformal | `ConformalPredictor` | Vovk et al. (2005) |
-| Morphological bands | `MorphologicalConformalPredictor` | ConSeMa-inspired |
-| Distance transform | `DistanceTransformConformalPredictor` | CLS / FNR control via EDT |
-| Risk-controlling | `RiskControllingPredictor` | LTT framework |
-| MAPIE integration | `MapieConformalSegmentation` | MAPIE library wrapper |
+| Metric | What It Measures | Why Trusted |
+|--------|-----------------|-------------|
+| **clDice** | Vessel topology preservation (centerline connectivity) | MetricsReloaded recommends topology-aware metrics for tubular structures |
+| **MASD** | Mean average surface distance | More robust than HD95 to single-voxel outliers |
 
-Additional UQ: `MCDropoutPredictor`, `DeepEnsemblePredictor`, `CalibrationShiftAnalyzer`.
+### Foil Metric (Included Deliberately)
 
-### Ensemble Strategies (7)
+| Metric | What It Measures | Why Foil |
+|--------|-----------------|----------|
+| **DSC** | Volumetric overlap (Dice coefficient) | Volume-biased: high Dice possible while missing all thin branches. Included to demonstrate misleading rankings |
 
-Mean, majority vote, weighted, greedy soup, SWAG, TIES-DARE, learned stacking --
-configured via `EnsembleStrategy` enum.
+### Optional Metrics (Supplementary)
 
-### Post-Training Plugins (6)
+HD95, ASSD, NSD, Betti-0 error, Betti-1 error, Junction F1
 
-Config-driven post-hoc enhancement plugins (Flow 2.5, best-effort between train and analyze):
+---
 
-| Plugin | Wraps | Cal Data? |
-|--------|-------|-----------|
-| **SWA** | `model_soup.uniform_swa()` | No |
-| **Multi-SWA** | M independent SWA models (subsampled) | No |
-| **Model Merging** | `linear_merge()`, `slerp_merge()`, `layer_wise_merge()` | No |
-| **Calibration** | Temperature scaling, isotonic regression, spatial Platt | Yes |
-| **CRC Conformal** | `CRCPredictor` + `varisco_heatmap()` | Yes |
-| **ConSeCo FP Control** | Threshold/erosion shrinking with conformal guarantees | Yes |
+## Knowledge Graph
 
-Each plugin implements `PostTrainingPlugin` protocol. Enable/disable via
-`configs/post_training/default.yaml`. See
-[`docs/planning/post-training-plugins-and-swa-planning.md`](docs/planning/post-training-plugins-and-swa-planning.md).
+The project uses a **6-layer knowledge architecture** with 69 Bayesian decision nodes
+across 11 domains:
+
+```
+L0: .claude/rules/ + CLAUDE.md            -- Constitution (invariant rules)
+L1: docs/planning/ + MEMORY.md            -- Hot Context (current work)
+L2: knowledge-graph/navigator.yaml        -- Navigator (domain routing)
+L3: knowledge-graph/decisions/*.yaml       -- Evidence (69 decision nodes)
+    knowledge-graph/domains/*.yaml         -- Materialized winners
+L4: openspec/specs/                        -- Specifications (GIVEN/WHEN/THEN)
+L5: src/ + tests/                          -- Implementation (actual code)
+```
+
+**Information flow**: PRD decisions propagate downward through KG materialization to
+OpenSpec specifications to code. Experiment results propagate upward through KG
+posterior updates to PRD belief propagation.
+
+Decision nodes span 5 levels:
+
+| Level | Scope | Examples |
+|-------|-------|---------|
+| L1 | Research goals | Publication target, reproducibility level, project purpose |
+| L2 | Architecture | Model adapter pattern, flow topology, Docker architecture, ensemble strategy |
+| L3 | Technology | Loss functions, metrics, HPO engine, dataset strategy, model comparison |
+| L4 | Infrastructure | Cloud providers, container strategy, CI/CD, Docker registry, IaC |
+| L5 | Operations | Drift monitoring, dashboarding, cost optimization, audit trail |
+
+Entry point: [`knowledge-graph/navigator.yaml`](knowledge-graph/navigator.yaml)
+
+---
+
+## Observability
+
+### MLflow Experiment Tracking
+
+- Local filesystem backend (`mlruns/`) for development
+- Cloud Run MLflow server with GCS artifact storage for production
+- DuckDB analytics for SQL queries over experiment data
+- PostgreSQL for MLflow metadata + Optuna HPO storage (SQLite is banned)
+
+### Prometheus + Grafana Monitoring
+
+```bash
+# Start monitoring stack
+docker compose -f deployment/docker-compose.yml --profile monitoring up -d
+```
+
+- Prometheus scrapes MLflow, BentoML, and custom flow metrics
+- Grafana dashboards for training progress, drift alerts, and cost tracking
+- AlertManager for drift and performance alerts
+
+### Evidently Drift Detection
+
+- `DataDriftPreset` with KS test and PSI for feature drift
+- Kernel MMD for embedding drift monitoring
+- Drift alerting via JSONL log, webhook, and Prometheus export
+
+### whylogs Data Profiling
+
+Lightweight statistical profiling of input data distributions, integrated into the
+data engineering flow.
+
+### Additional Observability
+
+- **Langfuse** (self-hosted) for LLM tracing and cost tracking
+- **Braintrust** for LLM evaluation and offline evals
+- **OpenLineage** (Marquez) for IEC 62304 data lineage traceability
+- **Captum** (3D) + **SHAP** + **Quantus** for explainability (XAI)
+
+---
+
+## Docker Architecture
+
+### Three-Tier Multi-Stage Builds
+
+All execution (training, evaluation, serving, deployment) runs inside Docker containers.
+Docker is the execution model -- the reproducibility guarantee.
+
+```
+                          Builder Stage              Runner Stage
+                     +-------------------+     +-------------------+
+Tier A (GPU):        | nvidia/cuda:12.6  |     | nvidia/cuda:12.6  |
+                     | devel + uv + deps | --> | runtime + .venv   |
+                     +-------------------+     +-------------------+
+
+Tier B (CPU):        | python:3.13-slim  |     | python:3.13-slim  |
+                     | uv + scipy/pandas | --> | .venv only        |
+                     +-------------------+     +-------------------+
+
+Tier C (Light):      | python:3.13-slim  |     | python:3.13-slim  |
+                     | uv + prefect/API  | --> | .venv only        |
+                     +-------------------+     +-------------------+
+```
+
+### Volume Mount Rules
+
+Every artifact that must survive the container is explicitly volume-mounted:
+
+| Mount | Purpose |
+|-------|---------|
+| `/data` | Input datasets |
+| `/mlruns` | MLflow tracking |
+| `/checkpoints` | Model weights |
+| `/logs` | Training JSONL/CSV logs |
+| `/configs` | YAML configs + split definitions |
+
+### Docker Registry Strategy
+
+| Environment | Registry | Rationale |
+|-------------|----------|-----------|
+| RunPod (dev) | Docker Hub | Public, zero-auth pull |
+| GCP (staging/prod) | Google Artifact Registry | Same-region as GCS, ADC auth |
+| GitHub Actions CI | GHCR | Internal build artifacts only |
+
+Registry choice is config-driven (`configs/registry/`), not hardcoded.
+
+---
+
+## Testing
+
+### Three-Tier Strategy
+
+| Tier | Command | What Runs | Target Time |
+|------|---------|-----------|-------------|
+| **Staging** | `make test-staging` | No model loading, no slow, no integration | < 3 min |
+| **Prod** | `make test-prod` | Everything except GPU instance tests | 5-10 min |
+| **GPU** | `make test-gpu` | SAM3 + GPU-heavy tests (external GPU only) | GPU instance |
+
+```bash
+make test-staging    # PR readiness -- fast, no models
+make test-prod       # Pre-merge -- includes model loading + slow
+make test-gpu        # RunPod / intranet GPU -- SAM3 forward passes
+```
+
+### Test Infrastructure
+
+- **535 test files** across unit, integration, and E2E suites
+- **pytest** + **Hypothesis** (property-based testing)
+- Markers: `@pytest.mark.model_loading`, `@pytest.mark.slow`, `@pytest.mark.gpu_heavy`
+- `tests/gpu_instance/` excluded from default pytest collection -- zero noise in CI
+- Three-gate quality check: tests + lint (ruff) + types (mypy)
+
+### Quality Gates
+
+Every change must pass:
+1. **Tests** -- `make test-staging` (fast) or `make test-prod` (thorough)
+2. **Lint** -- `uv run ruff check src/ tests/` (no violations)
+3. **Types** -- `uv run mypy src/` (no type errors)
+
+Pre-commit hooks enforce formatting, trailing whitespace, YAML validation, and
+bibliography integrity.
 
 ---
 
@@ -208,128 +515,65 @@ Each plugin implements `PostTrainingPlugin` protocol. Enable/disable via
 
 | Layer | Tool | Role |
 |-------|------|------|
-| **Language** | Python 3.12+ | Runtime |
-| **Package Manager** | uv | Dependency management (only -- never pip/conda) |
-| **ML Framework** | PyTorch 2.5+ / MONAI 1.4+ / TorchIO / TorchMetrics | Training and inference |
-| **Orchestration** | Prefect 3.x | 7 persona-based flows (required, not optional) |
-| **Config (train)** | Hydra-zen | Experiment configs with Pydantic v2 validation |
-| **Config (deploy)** | Dynaconf | Environment-layered deployment settings |
-| **Data Validation** | Pydantic v2 + Pandera + Great Expectations | Schema, DataFrame, batch quality |
-| **Model Validation** | Deepchecks Vision + WeightWatcher | Data integrity, spectral diagnostics |
-| **Experiment Tracking** | MLflow 3.10 + DuckDB | Run tracking, model registry, SQL analytics |
-| **Serving** | BentoML + ONNX Runtime + Gradio | Model serving and demo UI |
-| **Calibration** | MAPIE + netcal + conformal methods | Conformal prediction, temperature scaling |
-| **XAI** | Captum (3D) + SHAP + Quantus | Explainability and meta-evaluation |
-| **Drift Detection** | Evidently AI | KS test, PSI-based drift monitoring |
-| **Data Profiling** | whylogs | Lightweight statistical profiling |
-| **LLM Observability** | Langfuse (self-hosted) + Braintrust | Tracing, cost tracking, offline evals |
-| **Agent Orchestration** | LangGraph + LiteLLM | Multi-step workflows, provider flexibility |
-| **Data Lineage** | OpenLineage (Marquez) | IEC 62304 traceability |
-| **Label Quality** | Cleanlab + Label Studio | Annotation QA, multi-annotator workflows |
-| **CI/CD** | GitHub Actions (6 workflows) + CML | Lint, typecheck, test, ML-specific PR comments |
-| **Linter/Formatter** | ruff | Linting and formatting |
-| **Type Checker** | mypy | Static type analysis |
-| **Test Framework** | pytest + Hypothesis | Unit, integration, property-based, E2E |
-| **Infrastructure** | Docker Compose + Pulumi | Local dev stack, cloud-agnostic IaC |
-| **Topology** | gudhi + networkx + scipy | Persistent homology, graph analysis |
+| Language | Python 3.12+ | Runtime |
+| Package Manager | uv | Dependency management (exclusively) |
+| ML Framework | PyTorch + MONAI + TorchIO | Training, augmentation, inference |
+| Orchestration | Prefect 3.x | Persona-based flow orchestration |
+| Config (train) | Hydra-zen | Experiment configs with Pydantic v2 validation |
+| Config (deploy) | Dynaconf | Environment-layered deployment settings |
+| Data Validation | Pydantic v2 + Pandera + Great Expectations | Schema, DataFrame, batch quality |
+| Experiment Tracking | MLflow + DuckDB | Run tracking, model registry, SQL analytics |
+| HPO | Optuna + ASHA | Multi-objective hyperparameter optimization |
+| Serving | BentoML + ONNX Runtime + Gradio | Model serving and demo UI |
+| Drift Detection | Evidently AI | KS test, PSI, kernel MMD |
+| Data Profiling | whylogs | Lightweight statistical profiling |
+| Monitoring | Prometheus + Grafana + AlertManager | Dashboards, alerting |
+| Compute | SkyPilot | Intercloud broker (RunPod + GCP) |
+| Infrastructure | Docker Compose + Pulumi | Local dev stack, GCP IaC |
+| CI/CD | GitHub Actions + CML | Manual-trigger workflows (credits-aware) |
+| Linter/Formatter | ruff | Linting and formatting |
+| Type Checker | mypy | Static type analysis |
+| Tests | pytest + Hypothesis | Unit, integration, property-based, E2E |
+| Topology | gudhi + networkx + scipy | Persistent homology, graph analysis |
+| XAI | Captum + SHAP + Quantus | Explainability and meta-evaluation |
+| LLM Observability | Langfuse + Braintrust + LiteLLM | Tracing, evals, provider flexibility |
+| Lineage | OpenLineage (Marquez) | IEC 62304 traceability |
 
 ---
 
-## Quick Start
+## Ensemble Strategies and Uncertainty Quantification
 
-```bash
-# Clone the repository
-git clone https://github.com/petteriTeikari/minivess_mlops.git
-cd minivess_mlops
+### Ensemble Strategies (7)
 
-# Install dependencies (uv only -- never use pip/conda/poetry)
-uv sync
+Mean, majority vote, weighted, greedy soup, SWAG, TIES-DARE, learned stacking --
+configured via `EnsembleStrategy` enum in `ensemble/ensemble_builder.py`.
 
-# Run the full test suite
-uv run pytest tests/v2/ -x -q
+### Conformal Uncertainty Quantification (5 methods)
 
-# Lint + format + typecheck (three-gate verification)
-uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/ && uv run mypy src/
+| Method | Class | Reference |
+|--------|-------|-----------|
+| Split conformal | `ConformalPredictor` | Vovk et al. (2005) |
+| Morphological bands | `MorphologicalConformalPredictor` | ConSeMa-inspired |
+| Distance transform | `DistanceTransformConformalPredictor` | CLS/FNR control via EDT |
+| Risk-controlling | `RiskControllingPredictor` | LTT framework |
+| MAPIE integration | `MapieConformalSegmentation` | MAPIE library wrapper |
 
-# Run a debug training experiment (DynUNet, 1 epoch, 2 folds)
-uv run python scripts/run_experiment.py --experiment dynunet_e2e_debug
+Additional UQ: MC Dropout, Deep Ensembles, Calibration Shift Analysis.
 
-# Run the full reproducibility pipeline (all 7 flows)
-uv run python scripts/run_full_pipeline.py
-```
+### Post-Training Plugins (6)
 
-### Docker Compose Profiles
+Config-driven post-hoc enhancements (Flow 2.5, between train and analysis):
 
-```bash
-# Core infrastructure (4 services, ~4 GB RAM)
-# PostgreSQL, MinIO, MLflow, BentoML
-docker compose -f deployment/docker-compose.yml --profile dev up
+| Plugin | Method | Calibration Data? |
+|--------|--------|-------------------|
+| SWA | Uniform checkpoint averaging | No |
+| Multi-SWA | M independent SWA models | No |
+| Model Merging | Linear, SLERP, layer-wise merge | No |
+| Calibration | Temperature scaling, isotonic, Platt | Yes |
+| CRC Conformal | Conformal prediction + heatmaps | Yes |
+| ConSeCo FP Control | Threshold/erosion shrinking | Yes |
 
-# Observability stack (7 services, ~8 GB RAM)
-# Adds: Prometheus, Grafana, OpenTelemetry Collector
-docker compose -f deployment/docker-compose.yml --profile monitoring up
-
-# Full platform (12 services, ~16 GB RAM)
-# Adds: Langfuse, Marquez, Label Studio, MONAI Label, Ollama
-docker compose -f deployment/docker-compose.yml --profile full up
-```
-
-Copy `.env.example` to `.env` and adjust values before starting services.
-
----
-
-## For Reviewers: Pipeline-to-Code Mapping
-
-| Pipeline Stage | Entry Point | Key Source Files |
-|---------------|------------|-----------------|
-| **Data ingestion** | `scripts/download_minivess.py` | `data/profiler.py`, `data/validation.py` |
-| **Training** | `scripts/train_monitored.py` | `adapters/model_builder.py`, `pipeline/loss_functions.py` |
-| **Experiment runner** | `scripts/run_experiment.py` | `config/adaptive_profiles.py`, `config/model_profiles.py` |
-| **Evaluation** | `scripts/compare_experiments.py` | `pipeline/comparison.py`, `pipeline/topology_metrics.py` |
-| **Champion selection** | `scripts/tag_champions.py` | `pipeline/champion_tagger.py`, `pipeline/deploy_champion_discovery.py` |
-| **ONNX export** | `scripts/register_models.py` | `pipeline/deploy_onnx_export.py` |
-| **Serving** | `serving/onnx_service.py` | `serving/bento_model_import.py`, `serving/deploy_artifacts.py` |
-| **Dashboard** | `scripts/run_dashboard_real.py` | `orchestration/flows/dashboard_flow.py` |
-| **Full pipeline** | `scripts/run_full_pipeline.py` | `orchestration/trigger.py` (PipelineTriggerChain) |
-| **Artifact verification** | `scripts/verify_all_artifacts.py` | 73 validation checks |
-| **Paper figures** | `scripts/assemble_paper_artifacts.py` | 25 paper-ready artifacts |
-
-### Quality Gates
-
-Every commit must pass three gates:
-
-1. **Tests** -- `uv run pytest tests/v2/ -x -q` (unit, integration, E2E)
-2. **Lint** -- `uv run ruff check src/ tests/` (no violations)
-3. **Types** -- `uv run mypy src/` (no type errors)
-
-Pre-commit hooks enforce ruff formatting, trailing whitespace, YAML validation, and
-PRD citation integrity (append-only bibliography).
-
----
-
-## Experiment Configurations (19)
-
-| Config | Model | Purpose |
-|--------|-------|---------|
-| `dynunet_losses.yaml` | DynUNet | 4 losses x 3 folds x 100 epochs (main baseline) |
-| `dynunet_half_width.yaml` | DynUNet | Width ablation (filters/2) |
-| `dynunet_topology.yaml` | DynUNet | Topology-aware losses |
-| `dynunet_topology_all_approaches.yaml` | DynUNet | All topology approaches |
-| `dynunet_graph_topology.yaml` | DynUNet | Graph-constrained topology |
-| `dynunet_multitask_ablation.yaml` | DynUNet | Multi-task auxiliary heads |
-| `dynunet_tffm_ablation.yaml` | DynUNet+TFFM | Dense GAT ablation |
-| `dynunet_d2c_ablation.yaml` | DynUNet | Domain-to-class ablation |
-| `dynunet_all_losses_debug.yaml` | DynUNet | All 18 losses smoke test |
-| `dynunet_e2e_debug.yaml` | DynUNet | Quick E2E debug |
-| `sam3_vanilla_baseline.yaml` | SAM3 Vanilla | Frozen encoder + decoder |
-| `sam3_topolora_topology.yaml` | SAM3 TopoLoRA | + LoRA + topology loss |
-| `sam3_hybrid_fusion.yaml` | SAM3 Hybrid | SAM3 + DynUNet fusion |
-| `sam3_vanilla_debug.yaml` | SAM3 Vanilla | Debug (6 epochs, 3 folds) |
-| `sam3_topolora_debug.yaml` | SAM3 TopoLoRA | Debug (6 epochs, 3 folds) |
-| `sam3_hybrid_debug.yaml` | SAM3 Hybrid | Debug (6 epochs, 3 folds) |
-| `sam3_all_debug.yaml` | All SAM3 | Smoke test all variants |
-| `dynunet_graph_topology_debug.yaml` | DynUNet | Graph topology debug |
-| `dynunet_topology_all_approaches_debug.yaml` | DynUNet | All topology debug |
+Enable/disable via `configs/post_training/default.yaml`.
 
 ---
 
@@ -337,112 +581,69 @@ PRD citation integrity (append-only bibliography).
 
 ```
 minivess-mlops/
-|-- src/minivess/                  Main package (207 Python files, 39K LOC)
-|   |-- adapters/                  ModelAdapter ABC + 12 families (27 files)
-|   |   |-- base.py                ModelAdapter ABC, SegmentationOutput
-|   |   |-- model_builder.py       build_adapter() factory dispatch
-|   |   |-- dynunet.py             MONAI DynUNet (primary 3D baseline)
-|   |   |-- sam3_backbone.py       SAM3 ViT-32L encoder wrapper
-|   |   |-- sam3_vanilla.py        SAM3 frozen encoder + decoder
-|   |   |-- sam3_topolora.py       SAM3 + LoRA on FFN layers
-|   |   |-- sam3_hybrid.py         SAM3 features + DynUNet 3D fusion
-|   |   |-- multitask_adapter.py   Generic multi-task (config-driven heads)
-|   |   |-- tffm_wrapper.py        TFFM dense GAT wrapper
-|   |   +-- ...                    vesselfm, comma, mamba
+|-- src/minivess/                  Main package (340 Python files)
+|   |-- adapters/                  ModelAdapter ABC + 6 families
 |   |-- pipeline/                  Training, evaluation, metrics, losses
-|   |   |-- loss_functions.py      18 loss functions with build_loss_function()
-|   |   |-- comparison.py          Cross-loss comparison + paired bootstrap
-|   |   |-- topology_metrics.py    13+ topology/graph metrics
-|   |   |-- deploy_onnx_export.py  ONNX export + validation
-|   |   |-- deploy_champion_discovery.py  Champion model selection
-|   |   +-- ...                    train engine, inference, checkpoints
 |   |-- ensemble/                  Ensembling, UQ, calibration
-|   |   |-- strategies.py          7 ensemble strategies
-|   |   |-- conformal.py           Split conformal prediction
-|   |   |-- morphological_conformal.py   Morphological bands (ConSeMa)
-|   |   |-- distance_conformal.py  Distance transform conformal (CLS)
-|   |   |-- risk_control.py        Risk-controlling prediction (LTT)
-|   |   |-- mapie_conformal.py     MAPIE library integration
-|   |   |-- mc_dropout.py          MC Dropout UQ
-|   |   |-- deep_ensembles.py      Deep ensemble UQ
-|   |   +-- calibration.py         Temperature scaling, ECE/MCE
-|   |-- orchestration/             Prefect 3.x flows
-|   |   |-- flows/data_flow.py     Flow 1: Data Engineering
-|   |   |-- flows/post_training_flow.py  Flow 2.5: Post-Training Plugins
-|   |   |-- flows/analysis_flow.py Flow 3: Model Analysis
-|   |   |-- flows/annotation_flow.py  Label Studio integration
-|   |   |-- flows/dashboard_flow.py   Flow 5: Dashboard (best-effort)
-|   |   |-- deploy_flow.py         Flow 4: Deployment
-|   |   |-- trigger.py             PipelineTriggerChain (7 flows)
-|   |   +-- _prefect_compat.py     Graceful degradation for CI
-|   |-- pipeline/post_training_plugins/  6 post-hoc plugin implementations
-|   |   |-- swa.py                 SWA plugin (checkpoint averaging)
-|   |   |-- multi_swa.py           Multi-SWA plugin (M independent models)
-|   |   |-- model_merging.py       Linear/SLERP/layer-wise merging
-|   |   |-- calibration.py         Temperature scaling, isotonic, Platt
-|   |   |-- crc_conformal.py       CRC conformal prediction
-|   |   +-- conseco_fp_control.py  ConSeCo FP rate control
+|   |-- orchestration/flows/       12+ Prefect 3.x flows
 |   |-- config/                    Pydantic v2 config models
-|   |   |-- models.py              ModelFamily, ModelConfig, DataConfig
-|   |   |-- adaptive_profiles.py   HardwareBudget, auto compute detection
-|   |   |-- model_profiles.py      Per-model YAML profiles
-|   |   |-- deploy_config.py       DeployConfig, ChampionCategory
-|   |   +-- post_training_config.py  PostTrainingConfig + plugin sub-configs
-|   |-- data/                      Data loading, profiling, DVC integration
-|   |-- serving/                   BentoML, ONNX inference, Gradio demo
+|   |-- data/                      Data loading, profiling, DVC
+|   |-- serving/                   BentoML, ONNX, Gradio
 |   |-- observability/             MLflow tracking, DuckDB analytics
 |   |-- agents/                    LangGraph agent definitions
-|   |-- compliance/                SaMD audit trail, model cards
-|   +-- validation/                Pandera, Great Expectations, Deepchecks
+|   |-- compliance/                IEC 62304 audit trail, model cards
+|   +-- validation/                Pandera, Great Expectations
 |
-|-- tests/                         238 test files, 53K LOC, 3214 tests
+|-- tests/                         535 test files
 |   |-- v2/unit/                   Fast isolated unit tests
 |   |-- v2/integration/            Service integration tests
-|   +-- v2/e2e/                    End-to-end pipeline tests
+|   |-- v2/e2e/                    End-to-end pipeline tests
+|   +-- gpu_instance/              SAM3 + GPU-heavy (excluded from default collection)
 |
 |-- configs/
-|   |-- experiments/               19 experiment YAML configs
-|   |-- post_training/             Post-training plugin config (default.yaml)
+|   |-- experiments/               Experiment YAML configs
 |   |-- model_profiles/            Per-model VRAM/compute profiles
-|   +-- splits/                    Cross-validation fold definitions
-|
-|-- scripts/                       26 operational scripts
-|   |-- train_monitored.py         Crash-resistant training with checkpoints
-|   |-- run_experiment.py          YAML-driven experiment runner
-|   |-- run_full_pipeline.py       Full 7-flow pipeline trigger
-|   |-- verify_all_artifacts.py    73 artifact validation checks
-|   |-- assemble_paper_artifacts.py  25 paper-ready figures/tables
-|   +-- ...                        analysis, export, monitoring scripts
+|   |-- splits/                    Cross-validation fold definitions
+|   |-- cloud/                     Cloud provider configs (Hydra groups)
+|   +-- registry/                  Docker registry configs
 |
 |-- deployment/
-|   |-- docker-compose.yml         Profile-based (dev/monitoring/full)
-|   |-- docker-compose.flows.yml   Per-flow Docker services (7 flows)
-|   |-- docker/Dockerfile.post_training  Post-training flow container
-|   +-- Dockerfile                 Multi-stage build
+|   |-- docker/                    20 Dockerfiles (3 base + flow + infra)
+|   |-- docker-compose.yml         Infrastructure services (profiles: dev/monitoring/full)
+|   |-- docker-compose.flows.yml   Per-flow Docker services
+|   |-- skypilot/                  SkyPilot YAML configs (RunPod + GCP)
+|   |-- pulumi/gcp/                GCP infrastructure as code
+|   |-- grafana/                   Dashboard configs
+|   |-- prometheus/                Scrape configs
+|   +-- seccomp/                   Per-flow seccomp profiles
+|
+|-- knowledge-graph/
+|   |-- navigator.yaml             Entry point -- domain routing
+|   |-- domains/                   11 materialized domain files
+|   |-- decisions/                 69 Bayesian decision nodes (L1-L5)
+|   +-- manuscript/                Scientific claims + section stubs
 |
 |-- docs/
-|   |-- adr/                       6 Architecture Decision Records
-|   |-- planning/prd/              78 Bayesian decision nodes (5 levels)
-|   |-- results/                   Experiment reports and figures
-|   +-- planning/                  Implementation plans and research
+|   |-- adr/                       Architecture Decision Records
+|   |-- planning/                  Implementation plans, research reports
+|   +-- results/                   Experiment reports and figures
 |
-|-- outputs/                       Verified pipeline artifacts
-|   |-- analysis/                  Figures (PNG+SVG), tables (MD+TEX)
-|   |-- paper_artifacts/           Paper-ready assembled artifacts
-|   +-- duckdb/parquet/            Parquet exports (DuckDB gitignored)
-|
-|-- .claude/                       Claude Code configuration
-|   |-- skills/                    TDD skill, PRD update skill
-|   +-- metalearning/              Cross-session corrective insights
-|
-|-- pyproject.toml                 uv + PEP 621 project definition
-|-- CLAUDE.md                      AI development rules and quick reference
-+-- LEARNINGS.md                   Cross-session accumulated discoveries
++-- openspec/                      Spec-driven development (GIVEN/WHEN/THEN)
 ```
 
 ---
 
-## Architecture Decision Records
+## Contributing
+
+1. **uv only** -- never use pip, conda, or poetry. Install with `uv sync --all-extras`.
+2. **TDD mandatory** -- write failing tests first, then implement. RED-GREEN-VERIFY cycle.
+3. **Pre-commit hooks** -- all changes must pass before commit (ruff, mypy, YAML validation, bibliography integrity).
+4. **Three-gate verification** -- `make test-staging && uv run ruff check src/ tests/ && uv run mypy src/`
+5. **Library-first** -- search for existing implementations before writing custom code. Use MONAI, PyTorch, scipy, etc.
+6. **Docker is the execution model** -- all pipeline execution goes through Prefect flows in Docker containers.
+7. **Config-driven** -- specific tasks, models, losses, and metrics are YAML config instantiations, not code branches.
+
+### Architecture Decision Records
 
 | ADR | Decision |
 |-----|----------|
@@ -455,64 +656,17 @@ minivess-mlops/
 
 ---
 
-## PRD System
+## Citation
 
-The project uses a **hierarchical probabilistic PRD** (Bayesian decision network) with
-78 decision nodes across 5 levels:
+If you use this platform, please cite the underlying dataset:
 
-- **L1** -- Strategic direction (overall objectives)
-- **L2** -- Architecture choices (pipeline structure, data flow)
-- **L3** -- Technology selection (specific tools and libraries)
-- **L4** -- Deployment decisions (serving, promotion, monitoring)
-- **L5** -- Implementation details (loss functions, metrics, augmentation)
+> Charissa Poon, Petteri Teikari *et al.* (2023). "A dataset of rodent
+> cerebrovasculature from in vivo multiphoton fluorescence microscopy imaging."
+> *Scientific Data* 10, 141. doi: [10.1038/s41597-023-02048-8](https://doi.org/10.1038/s41597-023-02048-8)
 
-Each node carries prior/posterior probabilities and evidence. The PRD serves as the
-structured evidence base for a future peer-reviewed article. See
-[`docs/planning/prd/README.md`](docs/planning/prd/README.md).
-
----
-
-## Codebase Statistics
-
-| Metric | Count |
-|--------|-------|
-| Model families | 12 |
-| Loss functions | 18 |
-| Post-training plugins | 6 |
-| Experiment configs | 19 |
-| Conformal/UQ methods | 7 |
-| Ensemble strategies | 7 |
-| Topology metrics | 13+ |
-| PRD decision nodes | 78 |
-| ADRs | 6 |
-| CI workflows | 6 |
-| Prefect flows | 7 |
-
----
-
-## Development Workflow
-
-This project enforces **strict TDD** (test-driven development). Every change follows the
-RED-GREEN-VERIFY-FIX-CHECKPOINT-CONVERGE cycle defined in the
-[self-learning-iterative-coder skill](.claude/skills/self-learning-iterative-coder/SKILL.md).
-
-### Multi-Environment Compute
-
-Everything works identically on:
-- **Local workstation** -- single GPU, limited RAM (tested on RTX 2070 Super 8GB)
-- **Intranet servers** -- multi-GPU, team access
-- **Cloud instances** -- Docker, mounted drives
-- **CI runners** -- CPU-only, automated (GitHub Actions)
-
-Hardware auto-detection selects batch size, patch size, and cache rate via
-`AdaptiveComputeProfile` in `config/adaptive_profiles.py`.
-
-### Task-Agnostic Architecture
-
-This is an **MLOps platform**, not a single-use-case repo. Multi-task adapters, losses,
-metrics, and data pipelines are GENERIC and config-driven. Specific tasks (SDF edge
-detection, centerline extraction, artery/vein classification, etc.) are YAML config
-instantiations, not code. See CLAUDE.md Core Principle #8.
+All internal citations follow the **author-year format** ("Surname et al. (Year)")
+with hyperlinks. The central bibliography is maintained in `bibliography.yaml` with
+an append-only policy enforced by pre-commit hooks.
 
 ---
 
@@ -520,43 +674,45 @@ instantiations, not code. See CLAUDE.md Core Principle #8.
 
 ### Completed
 
-- [x] Foundation (uv, Docker, configs, CI, pre-commit)
-- [x] Core ML pipeline (12 model families, 18 losses, training engine)
-- [x] Evaluation (8-metric suite, bootstrap CIs, paired tests)
-- [x] Ensembling (7 strategies, greedy soup, calibration)
-- [x] Conformal UQ (5 methods + MC Dropout + deep ensembles)
-- [x] Graph topology (13+ metrics, TFFM, centreline head)
-- [x] Serving (BentoML, ONNX Runtime, Gradio)
-- [x] Deployment flow (champion discovery, ONNX export, promotion)
-- [x] Observability (MLflow, DuckDB, OpenLineage, Langfuse)
-- [x] Real-data E2E pipeline verification (all flows)
-- [x] SAM3 integration: backbone, decoder, 3 adapter variants, 153 tests
-- [x] Post-training plugin architecture (6 plugins, 96 tests, Flow 2.5)
+- Foundation (uv, Docker, configs, pre-commit)
+- Core ML pipeline (6 model families, 18 losses, training engine)
+- DynUNet baseline results (4 losses x 3 folds x 100 epochs)
+- Evaluation (MetricsReloaded suite, bootstrap CIs, paired tests)
+- Ensembling (7 strategies, greedy soup, calibration)
+- Conformal UQ (5 methods + MC Dropout + deep ensembles)
+- Serving (BentoML, ONNX Runtime, Gradio)
+- Deployment flow (champion discovery, ONNX export, promotion)
+- Observability (MLflow, DuckDB, Prometheus, Grafana, Evidently, whylogs)
+- Post-training plugin architecture (6 plugins, Flow 2.5)
+- SAM3 integration (3 adapter variants, VRAM checks, SDPA enforcement)
+- MambaVesselNet++ adapter (hybrid CNN-SSM)
+- Knowledge graph (69 decision nodes, 11 domains, 6 layers)
+- Docker three-tier hierarchy (20 Dockerfiles)
 
 ### In Progress
 
-- [ ] SAM3 debug training (vanilla/topolora/hybrid, 6 epochs x 3 folds)
-- [ ] SAM3 vs DynUNet comparison report
+- 6-model GPU benchmark runs on GCP L4 spot
+- SAM3 variant training (Vanilla, TopoLoRA, Hybrid)
+- Nature Protocols manuscript assembly (NEUROVEX)
 
 ### Planned
 
-- [ ] SAM3 full training (50 epochs, production configs)
-- [ ] VesselFM integration (`feat/vesselfm` branch)
-- [ ] Advanced conformal methods (SACP, RW-CP, TUNE++, Generative CP)
-- [ ] Topograph post-processing, learned reconnection
-- [ ] Paper manuscript assembly
+- VesselFM integration and external-data evaluation
+- Full HPO sweep (Optuna + ASHA)
+- Advanced conformal methods
+- Federated learning (MONAI FL)
+- SBOM generation and EU AI Act compliance
 
 ---
 
 ## Further Reading
 
-- [Full Modernization Plan](docs/modernize-minivess-mlops-plan.md) -- architecture, tool rationale, phased roadmap
-- [Claude Code Patterns](docs/claude-code-patterns.md) -- TDD patterns demonstrated during v2 development
-- [SAM3 Literature Report](docs/planning/sam3-literature-research-report.md) -- 80+ paper survey on SAM for segmentation
-- [Post-Training Plugins Plan](docs/planning/post-training-plugins-and-swa-planning.md) -- Plugin architecture, SWA vs SWAG distinction, 6 plugins
-- [Graph Topology Analysis](docs/planning/graph-connectivity-analysis.md) -- 80+ paper survey on topology metrics
+- [Knowledge Graph Navigator](knowledge-graph/navigator.yaml) -- entry point for all architecture decisions
+- [MetricsReloaded Report](docs/MetricsReloaded.html) -- metric selection rationale
+- [SAM3 Literature Report](docs/planning/sam3-literature-research-report.md) -- foundation model survey
 - [Loss Variation Results](docs/results/dynunet_loss_variation_v2_report.md) -- DynUNet baseline analysis
-- [PRD Overview](docs/planning/prd/README.md) -- Bayesian decision network navigation
+- [Docker Base Improvement Plan](docs/planning/docker-base-improvement-plan.md) -- three-tier Docker architecture
+- [GCP Setup Tutorial](docs/planning/gcp-setup-tutorial.md) -- step-by-step cloud setup
 - [Legacy Wiki](https://github.com/petteriTeikari/minivess_mlops/wiki) -- background from v0.1-alpha
 
 ---
