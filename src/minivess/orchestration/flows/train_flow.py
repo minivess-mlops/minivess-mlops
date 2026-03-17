@@ -87,9 +87,9 @@ def log_epoch0_cost_estimate(
     update_estimated_cost_gauges(estimate)
     logger.info(
         "Epoch-0 cost estimate: $%.4f total, %.2fh, $%.4f/epoch",
-        estimate["estimated_total_cost"],
-        estimate["estimated_total_hours"],
-        estimate["cost_per_epoch"],
+        estimate["est/total_cost"],
+        estimate["est/total_hours"],
+        estimate["est/cost_per_epoch"],
     )
 
 

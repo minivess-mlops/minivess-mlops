@@ -1,7 +1,7 @@
 """GPU benchmark cache integration — read cache, log to MLflow.
 
 Reads benchmark YAML cache from gpu_benchmark module and logs
-params with sys_bench_ prefix (RC8) to MLflow via ExperimentTracker.
+params with bench/ prefix (#790) to MLflow via ExperimentTracker.
 
 Non-blocking: missing or invalid cache logs a warning, never crashes.
 """
@@ -44,13 +44,13 @@ def load_benchmark_params(cache_path: Path) -> dict[str, Any]:
     instance = data.get("instance_info", {})
     if isinstance(instance, dict):
         if "gpu_model" in instance:
-            params["sys_bench_gpu_model"] = instance["gpu_model"]
+            params["bench/gpu_model"] = instance["gpu_model"]
         if "total_vram_mb" in instance:
-            params["sys_bench_total_vram_mb"] = instance["total_vram_mb"]
+            params["bench/total_vram_mb"] = instance["total_vram_mb"]
         if "driver_version" in instance:
-            params["sys_bench_driver_version"] = instance["driver_version"]
+            params["bench/driver_version"] = instance["driver_version"]
         if "cuda_version" in instance:
-            params["sys_bench_cuda_version"] = instance["cuda_version"]
+            params["bench/cuda_version"] = instance["cuda_version"]
 
     # Per-model benchmarks
     benchmarks = data.get("benchmarks", {})
@@ -58,20 +58,20 @@ def load_benchmark_params(cache_path: Path) -> dict[str, Any]:
         for model_name, bench in benchmarks.items():
             if not isinstance(bench, dict):
                 continue
-            prefix = f"sys_bench_{model_name}"
+            prefix = f"bench/{model_name}"
             if "peak_vram_mb" in bench:
-                params[f"{prefix}_vram_peak_mb"] = bench["peak_vram_mb"]
+                params[f"{prefix}/vram_peak_mb"] = bench["peak_vram_mb"]
             if "throughput_img_per_sec" in bench:
-                params[f"{prefix}_throughput"] = bench["throughput_img_per_sec"]
+                params[f"{prefix}/throughput"] = bench["throughput_img_per_sec"]
             if "forward_ms" in bench:
-                params[f"{prefix}_forward_ms"] = bench["forward_ms"]
+                params[f"{prefix}/forward_ms"] = bench["forward_ms"]
 
     # Capabilities (feasibility flags)
     capabilities = data.get("capabilities", {})
     if isinstance(capabilities, dict):
         for model_name, cap in capabilities.items():
             if isinstance(cap, dict) and "feasible" in cap:
-                params[f"sys_bench_{model_name}_feasible"] = cap["feasible"]
+                params[f"bench/{model_name}/feasible"] = cap["feasible"]
 
     return params
 

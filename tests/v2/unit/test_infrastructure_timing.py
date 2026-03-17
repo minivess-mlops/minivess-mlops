@@ -97,11 +97,11 @@ class TestComputeCostAnalysis:
         )
 
         # total = (600 + 1750) / 3600 * 0.40 = 2350/3600 * 0.40 = 0.2611
-        assert abs(result["cost_total_usd"] - 0.2611) < 0.01
+        assert abs(result["cost/total_usd"] - 0.2611) < 0.01
         # setup_fraction = 600 / 2350 = 0.2553
-        assert abs(result["cost_setup_fraction"] - 0.2553) < 0.01
+        assert abs(result["cost/setup_fraction"] - 0.2553) < 0.01
         # effective = 0.2611 / (1750/3600) = 0.2611 / 0.4861 = 0.5371
-        assert abs(result["cost_effective_gpu_rate"] - 0.537) < 0.01
+        assert abs(result["cost/effective_gpu_rate"] - 0.537) < 0.01
 
     def test_compute_cost_analysis_zero_training(self) -> None:
         """0s training -> effective_gpu_rate = -1.0 (sentinel), no ZeroDivisionError."""
@@ -114,8 +114,8 @@ class TestComputeCostAnalysis:
             hourly_rate_usd=0.40,
         )
 
-        assert result["cost_effective_gpu_rate"] == -1.0
-        assert result["cost_total_usd"] > 0
+        assert result["cost/effective_gpu_rate"] == -1.0
+        assert result["cost/total_usd"] > 0
 
     def test_compute_cost_analysis_zero_hourly_rate(self) -> None:
         """$0.0/hr (local) -> all costs = 0.0, no errors."""
@@ -128,9 +128,9 @@ class TestComputeCostAnalysis:
             hourly_rate_usd=0.0,
         )
 
-        assert result["cost_total_usd"] == 0.0
-        assert result["cost_setup_usd"] == 0.0
-        assert result["cost_training_usd"] == 0.0
+        assert result["cost/total_usd"] == 0.0
+        assert result["cost/setup_usd"] == 0.0
+        assert result["cost/training_usd"] == 0.0
 
     def test_compute_cost_analysis_amortization(self) -> None:
         """600s setup, 30s/epoch: epochs_to_amortize = 181 (9*600/30 + 1)."""
@@ -143,7 +143,7 @@ class TestComputeCostAnalysis:
             hourly_rate_usd=0.40,
         )
 
-        assert result["cost_epochs_to_amortize_setup"] == 181
+        assert result["cost/epochs_to_amortize_setup"] == 181
 
     def test_compute_cost_analysis_break_even(self) -> None:
         """600s setup, 35s/epoch: break_even = 18 (600/35 + 1)."""
@@ -156,7 +156,7 @@ class TestComputeCostAnalysis:
             hourly_rate_usd=0.40,
         )
 
-        assert result["cost_break_even_epochs"] == 18
+        assert result["cost/break_even_epochs"] == 18
 
 
 class TestGenerateTimingJsonl:
@@ -241,8 +241,8 @@ class TestMlflowIntegration:
         # Verify mlflow.log_params was called with setup_* keys
         mock_mlflow.log_params.assert_called_once()
         logged_params = mock_mlflow.log_params.call_args.args[0]
-        assert "setup_uv_sync_seconds" in logged_params
-        assert abs(logged_params["setup_uv_sync_seconds"] - 288.0) < 0.01
+        assert "setup/uv_sync_seconds" in logged_params
+        assert abs(logged_params["setup/uv_sync_seconds"] - 288.0) < 0.01
 
     @patch("minivess.observability.infrastructure_timing.mlflow")
     def test_log_cost_analysis_logs_metrics(self, mock_mlflow: MagicMock) -> None:
@@ -262,9 +262,9 @@ class TestMlflowIntegration:
         metric_calls = {
             call.args[0]: call.args[1] for call in mock_mlflow.log_metric.call_args_list
         }
-        assert "cost_total_usd" in metric_calls
-        assert "cost_effective_gpu_rate" in metric_calls
-        assert "cost_setup_fraction" in metric_calls
+        assert "cost/total_usd" in metric_calls
+        assert "cost/effective_gpu_rate" in metric_calls
+        assert "cost/setup_fraction" in metric_calls
 
 
 class TestHourlyRateFromEnv:

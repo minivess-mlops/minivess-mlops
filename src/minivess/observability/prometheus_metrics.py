@@ -43,10 +43,10 @@ for _name, _doc in _GAUGE_DEFS.items():
 # ---------------------------------------------------------------------------
 
 _COST_KEY_TO_GAUGE: dict[str, str] = {
-    "cost_total_usd": "minivess_training_cost_total_usd",
-    "cost_effective_gpu_rate": "minivess_training_effective_gpu_rate_usd",
-    "cost_gpu_utilization_fraction": "minivess_training_gpu_utilization",
-    "cost_setup_fraction": "minivess_training_setup_fraction",
+    "cost/total_usd": "minivess_training_cost_total_usd",
+    "cost/effective_gpu_rate": "minivess_training_effective_gpu_rate_usd",
+    "cost/gpu_utilization_fraction": "minivess_training_gpu_utilization",
+    "cost/setup_fraction": "minivess_training_setup_fraction",
 }
 
 # ---------------------------------------------------------------------------
@@ -54,8 +54,8 @@ _COST_KEY_TO_GAUGE: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 _ESTIMATE_KEY_TO_GAUGE: dict[str, str] = {
-    "estimated_total_cost": "minivess_training_estimated_total_cost_usd",
-    "cost_per_epoch": "minivess_training_cost_per_epoch_usd",
+    "est/total_cost": "minivess_training_estimated_total_cost_usd",
+    "est/cost_per_epoch": "minivess_training_cost_per_epoch_usd",
 }
 
 

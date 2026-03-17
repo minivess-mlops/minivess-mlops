@@ -24,7 +24,7 @@ class TestEstimateCostFromFirstEpoch:
             setup_minutes=0,  # exclude setup for clean calculation
         )
         # 22*60*5 = 6600s = 1.833h × $0.19 = $0.3483
-        assert abs(result["estimated_total_cost"] - 0.3483) < 0.01
+        assert abs(result["est/total_cost"] - 0.3483) < 0.01
 
     def test_predict_with_folds(self) -> None:
         """22 min × 5 epochs × 3 folds × $0.19/hr (no setup) = $1.045."""
@@ -39,7 +39,7 @@ class TestEstimateCostFromFirstEpoch:
             hourly_rate_usd=0.19,
             setup_minutes=0,
         )
-        assert abs(result["estimated_total_cost"] - 1.045) < 0.01
+        assert abs(result["est/total_cost"] - 1.045) < 0.01
 
     def test_predict_includes_setup_overhead(self) -> None:
         """Setup overhead adds to total cost."""
@@ -61,10 +61,7 @@ class TestEstimateCostFromFirstEpoch:
             hourly_rate_usd=1.0,
             setup_minutes=5,
         )
-        assert (
-            result_with_setup["estimated_total_cost"]
-            > result_no_setup["estimated_total_cost"]
-        )
+        assert result_with_setup["est/total_cost"] > result_no_setup["est/total_cost"]
 
     def test_predict_zero_for_local(self) -> None:
         """Local runs (hourly_rate=0) have zero cost."""
@@ -78,7 +75,7 @@ class TestEstimateCostFromFirstEpoch:
             num_folds=3,
             hourly_rate_usd=0.0,
         )
-        assert result["estimated_total_cost"] == 0.0
+        assert result["est/total_cost"] == 0.0
 
     def test_result_has_required_keys(self) -> None:
         """Result must include cost, duration, and per-epoch estimates."""
@@ -93,9 +90,9 @@ class TestEstimateCostFromFirstEpoch:
             hourly_rate_usd=0.19,
         )
         for key in (
-            "estimated_total_cost",
-            "estimated_total_hours",
-            "cost_per_epoch",
-            "epoch_seconds",
+            "est/total_cost",
+            "est/total_hours",
+            "est/cost_per_epoch",
+            "est/epoch_seconds",
         ):
             assert key in result, f"Missing key: {key}"

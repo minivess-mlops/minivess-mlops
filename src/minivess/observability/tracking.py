@@ -181,32 +181,42 @@ class ExperimentTracker:
 
         Logs ALL ``TrainingConfig`` fields (not a hardcoded subset).
         Architecture-specific parameters from ``ModelConfig.architecture_params``
-        are logged with an ``arch_`` prefix (e.g. ``arch_filters``).
+        are logged with an ``arch/`` prefix (e.g. ``arch/filters``).
+
+        Uses slash-prefix convention (MLflow 2.11+ auto-grouping, #790).
         """
         params: dict[str, str | int | float | bool] = {
-            "model_family": self.config.model.family.value,
-            "model_name": self.config.model.name,
-            "in_channels": self.config.model.in_channels,
-            "out_channels": self.config.model.out_channels,
-            "batch_size": self.config.training.batch_size,
-            "learning_rate": self.config.training.learning_rate,
-            "max_epochs": self.config.training.max_epochs,
-            "optimizer": self.config.training.optimizer,
-            "scheduler": self.config.training.scheduler,
-            "seed": self.config.training.seed,
-            "num_folds": self.config.training.num_folds,
-            "mixed_precision": self.config.training.mixed_precision,
-            # Previously missing TrainingConfig fields:
-            "weight_decay": self.config.training.weight_decay,
-            "warmup_epochs": self.config.training.warmup_epochs,
-            "gradient_clip_val": self.config.training.gradient_clip_val,
-            "gradient_checkpointing": self.config.training.gradient_checkpointing,
-            "early_stopping_patience": self.config.training.early_stopping_patience,
+            "model/family": self.config.model.family.value,
+            "model/name": self.config.model.name,
+            "model/in_channels": self.config.model.in_channels,
+            "model/out_channels": self.config.model.out_channels,
+            "train/batch_size": self.config.training.batch_size,
+            "train/learning_rate": self.config.training.learning_rate,
+            "train/max_epochs": self.config.training.max_epochs,
+            "train/optimizer": self.config.training.optimizer,
+            "train/scheduler": self.config.training.scheduler,
+            "train/seed": self.config.training.seed,
+            "train/num_folds": self.config.training.num_folds,
+            "train/mixed_precision": self.config.training.mixed_precision,
+            "train/weight_decay": self.config.training.weight_decay,
+            "train/warmup_epochs": self.config.training.warmup_epochs,
+            "train/gradient_clip_val": self.config.training.gradient_clip_val,
+            "train/gradient_checkpointing": self.config.training.gradient_checkpointing,
+            "train/early_stopping_patience": self.config.training.early_stopping_patience,
         }
 
-        # Log architecture-specific params with arch_ prefix
+        # Log architecture-specific params with arch/ prefix (#790)
         for key, value in self.config.model.architecture_params.items():
-            params[f"arch_{key}"] = str(value)
+            params[f"arch/{key}"] = str(value)
+
+        # T5: Log data augmentation pipeline description (#790)
+        if hasattr(self.config, "data") and self.config.data is not None:
+            patch_size = getattr(self.config.data, "patch_size", None)
+            if patch_size is not None:
+                params["data/augmentation_pipeline"] = (
+                    f"RandCropByPosNegLabeld(spatial_size={patch_size})"
+                    "+RandFlipd+RandRotate90d+NormalizeIntensityd"
+                )
 
         mlflow.log_params(params)
 
@@ -249,19 +259,19 @@ class ExperimentTracker:
         ``trainable_parameters`` as both param (filterable) and metric
         (visible in UI).
         """
-        # Keys already logged by _log_config
+        # Keys already logged by _log_config (slash-prefix, #790)
         existing_keys = {
-            "model_family",
-            "model_name",
-            "model_in_channels",
-            "model_out_channels",
+            "model/family",
+            "model/name",
+            "model/in_channels",
+            "model/out_channels",
         }
 
         model_config = model.get_config().to_dict()
         new_params = {
-            f"model_{k}": str(v)
+            f"model/{k}": str(v)
             for k, v in model_config.items()
-            if f"model_{k}" not in existing_keys
+            if f"model/{k}" not in existing_keys
         }
         if new_params:
             mlflow.log_params(dict(sorted(new_params.items())))
@@ -269,8 +279,8 @@ class ExperimentTracker:
         n_params = model.trainable_parameters()
         # Log as param (filterable in dashboard) AND metric (visible in UI)
         with contextlib.suppress(Exception):
-            mlflow.log_param("trainable_parameters", n_params)
-        mlflow.log_metric("trainable_parameters", n_params)
+            mlflow.log_param("model/trainable_params", n_params)
+        mlflow.log_metric("model/trainable_params", n_params)
 
     def log_artifact(self, local_path: Path, *, artifact_path: str = "") -> None:
         """Log a file as an MLflow artifact."""
@@ -326,16 +336,16 @@ class ExperimentTracker:
         mlflow.log_artifact(str(summary_path), artifact_path="profiling")
         summary_path.unlink(missing_ok=True)
 
-        # 4. Log summary metrics with prof_ prefix
+        # 4. Log summary metrics with prof/ prefix (#790)
         if "overhead_pct" in summary_dict:
             mlflow.log_metric(
-                "prof_overhead_pct", float(str(summary_dict["overhead_pct"]))
+                "prof/overhead_pct", float(str(summary_dict["overhead_pct"]))
             )
         if "trace_sizes_mb" in summary_dict:
             sizes = summary_dict["trace_sizes_mb"]
             if isinstance(sizes, list) and sizes:
                 mlflow.log_metric(
-                    "prof_trace_size_mb", sum(float(str(s)) for s in sizes)
+                    "prof/trace_size_mb", sum(float(str(s)) for s in sizes)
                 )
 
         # 5. Log fraction metrics from summary
@@ -345,13 +355,13 @@ class ExperimentTracker:
             "backward_fraction",
         ):
             if key in summary_dict:
-                mlflow.log_metric(f"prof_{key}", float(str(summary_dict[key])))
+                mlflow.log_metric(f"prof/{key}", float(str(summary_dict[key])))
 
-        # 6. Log profiling config as params (prof_cfg_ prefix)
+        # 6. Log profiling config as params (prof/cfg/ prefix, #790)
         if profiling_config_dict:
             for key, value in profiling_config_dict.items():
                 with contextlib.suppress(Exception):
-                    mlflow.log_param(f"prof_cfg_{key}", value)
+                    mlflow.log_param(f"prof/cfg/{key}", value)
 
         # 7. Clean up trace files from checkpoint_dir after upload
         for trace_path in trace_paths:
@@ -521,7 +531,7 @@ class ExperimentTracker:
             for key in cfg_keys:
                 value = getattr(settings, key.upper(), None)
                 if value is not None:
-                    cfg_params[f"cfg_{key}"] = str(value)
+                    cfg_params[f"cfg/{key}"] = str(value)
 
             if cfg_params:
                 mlflow.log_params(cfg_params)
@@ -557,7 +567,7 @@ class ExperimentTracker:
             cfg_params: dict[str, str] = {}
             for key in cfg_keys:
                 if key in default:
-                    cfg_params[f"cfg_{key}"] = str(default[key])
+                    cfg_params[f"cfg/{key}"] = str(default[key])
 
             if cfg_params:
                 mlflow.log_params(cfg_params)
@@ -662,8 +672,8 @@ class ExperimentTracker:
         split_mode:
             How splits were determined: ``"file"`` (hardcoded) or ``"random"``.
         """
-        # Log split mode as param
-        mlflow.log_param("split_mode", split_mode)
+        # Log split mode as param (slash-prefix, #790)
+        mlflow.log_param("data/split_mode", split_mode)
 
         # Log splits file as artifact and tag
         if splits_file is not None:
@@ -703,7 +713,7 @@ class ExperimentTracker:
         """
         flat_metrics: dict[str, float] = {}
         for metric_name, ci in fold_result.aggregated.items():
-            prefix = f"eval_fold{fold_id}_{metric_name}"
+            prefix = f"eval/fold{fold_id}/{metric_name}"
             flat_metrics.update(ci.to_dict(prefix))
 
         mlflow.log_metrics(dict(sorted(flat_metrics.items())))
