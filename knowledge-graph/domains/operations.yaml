@@ -1,6 +1,6 @@
 domain: operations
 description: Monitoring, governance, retraining, SBOM, compliance, audit, federated learning
-last_reviewed: "2026-03-13"
+last_reviewed: "2026-03-17"
 
 decisions:
   drift_monitoring:
@@ -48,6 +48,20 @@ decisions:
     status: not_started
     candidates: [monai_fl, flower_framework, not_applicable]
     prd_node: knowledge-graph/decisions/L5-operations/federated_learning.yaml
+
+  dashboard_framework:
+    status: resolved
+    winner: grafana_prometheus
+    rationale: "Grafana + Prometheus + AlertManager for monitoring dashboards"
+    implementation: [deployment/docker-compose.yml, deployment/grafana/, deployment/prometheus/]
+    prd_node: knowledge-graph/decisions/L5-operations/dashboard_framework.yaml
+
+  cost_optimization:
+    status: resolved
+    winner: skypilot_spot_finops
+    rationale: "Spot instances via SkyPilot, checkpoint/resume for preemption"
+    implementation: [deployment/skypilot/]
+    prd_node: knowledge-graph/decisions/L5-operations/cost_optimization.yaml
 
 metalearning: []
 

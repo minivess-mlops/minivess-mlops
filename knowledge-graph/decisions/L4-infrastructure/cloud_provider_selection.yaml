@@ -1,0 +1,55 @@
+decision_id: cloud_provider_selection
+title: "Cloud Provider Selection"
+level: L4-infrastructure
+status: resolved
+
+options:
+  - id: runpod_gcp_dual
+    name: "RunPod (env) + GCP (staging/prod)"
+    prior_probability: 0.30
+    posterior_probability: 0.95
+  - id: gcp_only
+    name: "GCP Only"
+    prior_probability: 0.25
+    posterior_probability: 0.02
+  - id: aws_gcp
+    name: "AWS + GCP"
+    prior_probability: 0.20
+    posterior_probability: 0.01
+  - id: lambda_labs
+    name: "Lambda Labs"
+    prior_probability: 0.15
+    posterior_probability: 0.01
+    description: "Archived -- no EU availability"
+  - id: multi_cloud_3plus
+    name: "3+ Providers"
+    prior_probability: 0.10
+    posterior_probability: 0.01
+
+resolved_option: runpod_gcp_dual
+
+resolution_evidence:
+  - type: discussion
+    source: "docs/planning/cloud-architecture-decisions-2026-03-14.md"
+    finding: "TWO providers only: RunPod=cheap instant provisioning, GCP=production IaC"
+  - type: discussion
+    source: ".claude/metalearning/2026-03-16-unauthorized-aws-s3-architecture-migration.md"
+    finding: "Third provider (AWS) unauthorized -- session summaries are not authorization"
+
+implementation:
+  files:
+    - configs/cloud/runpod_dev.yaml
+    - configs/cloud/gcp_spot.yaml
+    - deployment/pulumi/gcp/__main__.py
+  tests: []
+
+conditional_on:
+  - parent_decision_id: reproducibility_level
+    influence_strength: moderate
+  - parent_decision_id: gpu_compute
+    influence_strength: strong
+
+volatility:
+  classification: stable
+  next_review: "2026-09-17"
+  rationale: "TWO providers is a hard constraint; adding a third requires explicit user authorization"

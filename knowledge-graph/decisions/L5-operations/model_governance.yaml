@@ -3,21 +3,26 @@ title: "Model Governance Approach"
 level: L5-operations
 status: partial
 options:
-  - {id: mlflow_registry_gates, name: "MLflow Registry Gates", prior_probability: 0.40, posterior_probability: 0.50}
+  - {id: mlflow_registry_gates, name: "MLflow Registry Gates", prior_probability: 0.40, posterior_probability: 0.55}
   - {id: custom_approval_flow, name: "Custom Approval Flow", prior_probability: 0.25, posterior_probability: 0.20}
-  - {id: weightwatcher_gate, name: "WeightWatcher Gate", prior_probability: 0.20, posterior_probability: 0.20}
+  - {id: weightwatcher_gate, name: "WeightWatcher Gate", prior_probability: 0.20, posterior_probability: 0.15}
   - {id: none, name: "None", prior_probability: 0.15, posterior_probability: 0.10}
 resolution_evidence:
   - type: implementation
     source: "src/minivess/pipeline/champion_tagger.py"
-    finding: "Champion model tagging via MLflow tags"
+    finding: "Champion model tagging via MLflow tags; dual-mode evaluator (supervised + unsupervised)"
+  - type: implementation
+    source: "src/minivess/pipeline/champion_evaluator.py"
+    finding: "Champion evaluator with supervised and unsupervised evaluation modes"
 implementation:
-  files: [src/minivess/pipeline/champion_tagger.py]
+  files:
+    - src/minivess/pipeline/champion_tagger.py
+    - src/minivess/pipeline/champion_evaluator.py
   tests: []
 conditional_on:
   - {parent_decision_id: model_export_format, influence_strength: moderate}
   - {parent_decision_id: compliance_posture, influence_strength: strong}
 volatility:
   classification: evolving
-  next_review: "2026-04-13"
-  rationale: "Champion tagging exists; full governance pipeline planned"
+  next_review: "2026-06-17"
+  rationale: "Champion tagging + evaluator exist; full governance pipeline (approval flow) planned"

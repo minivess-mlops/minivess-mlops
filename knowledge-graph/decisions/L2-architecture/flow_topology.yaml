@@ -1,0 +1,55 @@
+decision_id: flow_topology
+title: "Prefect Flow Topology"
+level: L2-architecture
+status: resolved
+
+options:
+  - id: five_flow_architecture
+    name: "5 Prefect Flows (4 core + 1 best-effort)"
+    prior_probability: 0.40
+    posterior_probability: 0.90
+    description: "Data Eng, Train, Analysis, Deploy + Dashboard (best-effort)"
+  - id: monolithic_pipeline
+    name: "Single Monolithic Pipeline"
+    prior_probability: 0.25
+    posterior_probability: 0.04
+  - id: microservice_flows
+    name: "Microservice-per-Task Flows"
+    prior_probability: 0.20
+    posterior_probability: 0.03
+  - id: dag_engine
+    name: "Custom DAG Engine"
+    prior_probability: 0.15
+    posterior_probability: 0.03
+
+resolved_option: five_flow_architecture
+
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/orchestration/"
+    finding: "5 Prefect flows implemented: acquisition, train, analysis, deploy, dashboard"
+  - type: discussion
+    source: "CLAUDE.md"
+    finding: "5 Prefect flows required (4 core + 1 best-effort dashboard)"
+
+implementation:
+  files:
+    - src/minivess/orchestration/flows/acquisition_flow.py
+    - src/minivess/orchestration/flows/train_flow.py
+    - src/minivess/orchestration/flows/analysis_flow.py
+    - src/minivess/orchestration/flows/deploy_flow.py
+    - src/minivess/orchestration/flows/dashboard_flow.py
+  tests:
+    - tests/v2/unit/test_acquisition_flow.py
+    - tests/v2/unit/test_analysis_flow_contract.py
+
+conditional_on:
+  - parent_decision_id: project_purpose
+    influence_strength: strong
+  - parent_decision_id: reproducibility_level
+    influence_strength: moderate
+
+volatility:
+  classification: stable
+  next_review: "2026-09-17"
+  rationale: "5-flow architecture is a settled design decision; new flows add to it, not replace"

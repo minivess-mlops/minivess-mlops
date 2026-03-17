@@ -1,13 +1,16 @@
 # knowledge-graph/_network.yaml
-# Bayesian decision network: 52 nodes, ~80 edges
+# Bayesian decision network: 65 nodes, ~100 edges
 # Validation: acyclic, referentially complete, level-ordered
 # Each node references a YAML file in decisions/
+#
+# Architecture: docs/planning/prd-kg-openspec-architecture.md
+# Schema: knowledge-graph/_schema.yaml
 
-version: "1.0"
-last_updated: "2026-03-15"
+version: "1.1"
+last_updated: "2026-03-17"
 
 nodes:
-  # L1 — Research Goals (7 nodes, root layer)
+  # L1 — Research Goals (8 nodes, root layer)
   - id: project_purpose
     level: L1
     file: decisions/L1-research-goals/project_purpose.yaml
@@ -29,8 +32,11 @@ nodes:
   - id: portfolio_role_target
     level: L1
     file: decisions/L1-research-goals/portfolio_role_target.yaml
+  - id: publication_target
+    level: L1
+    file: decisions/L1-research-goals/publication_target.yaml
 
-  # L2 — Architecture (10 nodes)
+  # L2 — Architecture (11 nodes)
   - id: model_adapter_pattern
     level: L2
     file: decisions/L2-architecture/model_adapter_pattern.yaml
@@ -61,14 +67,20 @@ nodes:
   - id: api_protocol
     level: L2
     file: decisions/L2-architecture/api_protocol.yaml
+  - id: flow_topology
+    level: L2
+    file: decisions/L2-architecture/flow_topology.yaml
 
-  # L3 — Technology (20 nodes)
+  # L3 — Technology (26 nodes)
   - id: primary_3d_model
     level: L3
     file: decisions/L3-technology/primary_3d_model.yaml
   - id: foundation_model
     level: L3
     file: decisions/L3-technology/foundation_model.yaml
+  - id: mamba_architecture
+    level: L3
+    file: decisions/L3-technology/mamba_architecture.yaml
   - id: loss_function
     level: L3
     file: decisions/L3-technology/loss_function.yaml
@@ -87,6 +99,12 @@ nodes:
   - id: data_versioning
     level: L3
     file: decisions/L3-technology/data_versioning.yaml
+  - id: dvc_remote_strategy
+    level: L3
+    file: decisions/L3-technology/dvc_remote_strategy.yaml
+  - id: database_backend
+    level: L3
+    file: decisions/L3-technology/database_backend.yaml
   - id: augmentation_library
     level: L3
     file: decisions/L3-technology/augmentation_library.yaml
@@ -99,9 +117,18 @@ nodes:
   - id: data_profiling
     level: L3
     file: decisions/L3-technology/data_profiling.yaml
+  - id: dataset_strategy
+    level: L3
+    file: decisions/L3-technology/dataset_strategy.yaml
   - id: model_diagnostics
     level: L3
     file: decisions/L3-technology/model_diagnostics.yaml
+  - id: test_framework
+    level: L3
+    file: decisions/L3-technology/test_framework.yaml
+  - id: test_tier_strategy
+    level: L3
+    file: decisions/L3-technology/test_tier_strategy.yaml
   - id: xai_voxel_tool
     level: L3
     file: decisions/L3-technology/xai_voxel_tool.yaml
@@ -124,7 +151,7 @@ nodes:
     level: L3
     file: decisions/L3-technology/lineage_tracking.yaml
 
-  # L4 — Infrastructure (8 nodes)
+  # L4 — Infrastructure (11 nodes)
   - id: container_strategy
     level: L4
     file: decisions/L4-infrastructure/container_strategy.yaml
@@ -149,14 +176,26 @@ nodes:
   - id: air_gap_strategy
     level: L4
     file: decisions/L4-infrastructure/air_gap_strategy.yaml
+  - id: docker_registry
+    level: L4
+    file: decisions/L4-infrastructure/docker_registry.yaml
+  - id: cloud_provider_selection
+    level: L4
+    file: decisions/L4-infrastructure/cloud_provider_selection.yaml
+  - id: compute_orchestration
+    level: L4
+    file: decisions/L4-infrastructure/compute_orchestration.yaml
 
-  # L5 — Operations (7 nodes)
+  # L5 — Operations (9 nodes)
   - id: drift_monitoring
     level: L5
     file: decisions/L5-operations/drift_monitoring.yaml
   - id: dashboarding
     level: L5
     file: decisions/L5-operations/dashboarding.yaml
+  - id: dashboard_framework
+    level: L5
+    file: decisions/L5-operations/dashboard_framework.yaml
   - id: retraining_trigger
     level: L5
     file: decisions/L5-operations/retraining_trigger.yaml
@@ -172,15 +211,21 @@ nodes:
   - id: federated_learning
     level: L5
     file: decisions/L5-operations/federated_learning.yaml
+  - id: cost_optimization
+    level: L5
+    file: decisions/L5-operations/cost_optimization.yaml
 
 edges:
-  # L1 → L2 (strategy to architecture) — ~15 edges
+  # L1 → L2 (strategy to architecture) — ~18 edges
   - from: project_purpose
     to: observability_depth
     strength: moderate
   - from: project_purpose
     to: agent_architecture
     strength: weak
+  - from: project_purpose
+    to: flow_topology
+    strength: strong
   - from: monai_alignment
     to: model_adapter_pattern
     strength: strong
@@ -214,20 +259,29 @@ edges:
   - from: reproducibility_level
     to: data_validation_depth
     strength: moderate
+  - from: reproducibility_level
+    to: flow_topology
+    strength: moderate
   - from: portfolio_role_target
     to: api_protocol
     strength: weak
   - from: portfolio_role_target
     to: agent_architecture
     strength: moderate
+  - from: publication_target
+    to: flow_topology
+    strength: weak
 
-  # L2 → L3 (architecture to technology) — ~30 edges
+  # L2 → L3 (architecture to technology) — ~38 edges
   - from: model_adapter_pattern
     to: primary_3d_model
     strength: strong
   - from: model_adapter_pattern
     to: foundation_model
     strength: moderate
+  - from: model_adapter_pattern
+    to: mamba_architecture
+    strength: strong
   - from: ensemble_strategy
     to: calibration_method
     strength: moderate
@@ -243,6 +297,9 @@ edges:
   - from: config_architecture
     to: hpo_engine
     strength: moderate
+  - from: config_architecture
+    to: test_framework
+    strength: weak
   - from: serving_architecture
     to: primary_3d_model
     strength: weak
@@ -267,6 +324,12 @@ edges:
   - from: data_validation_depth
     to: lineage_tracking
     strength: moderate
+  - from: data_validation_depth
+    to: dataset_strategy
+    strength: moderate
+  - from: data_validation_depth
+    to: topology_metrics
+    strength: weak
   - from: agent_architecture
     to: llm_tracing
     strength: strong
@@ -300,11 +363,29 @@ edges:
   - from: config_architecture
     to: augmentation_library
     strength: weak
-  - from: data_validation_depth
-    to: topology_metrics
+  - from: flow_topology
+    to: experiment_tracker
+    strength: moderate
+  - from: flow_topology
+    to: test_tier_strategy
     strength: weak
+  - from: data_versioning
+    to: dvc_remote_strategy
+    strength: strong
+  - from: experiment_tracker
+    to: database_backend
+    strength: strong
+  - from: hpo_engine
+    to: database_backend
+    strength: moderate
+  - from: test_framework
+    to: test_tier_strategy
+    strength: strong
+  - from: primary_3d_model
+    to: mamba_architecture
+    strength: moderate
 
-  # L3 → L4 (technology to infrastructure) — ~15 edges
+  # L3 → L4 (technology to infrastructure) — ~20 edges
   - from: experiment_tracker
     to: container_strategy
     strength: moderate
@@ -317,6 +398,9 @@ edges:
   - from: foundation_model
     to: gpu_compute
     strength: strong
+  - from: mamba_architecture
+    to: gpu_compute
+    strength: moderate
   - from: hpo_engine
     to: gpu_compute
     strength: moderate
@@ -338,8 +422,26 @@ edges:
   - from: llm_provider_strategy
     to: secrets_management
     strength: moderate
+  - from: dvc_remote_strategy
+    to: cloud_provider_selection
+    strength: strong
+  - from: database_backend
+    to: container_strategy
+    strength: moderate
+  - from: container_strategy
+    to: docker_registry
+    strength: strong
+  - from: gpu_compute
+    to: compute_orchestration
+    strength: strong
+  - from: gpu_compute
+    to: cloud_provider_selection
+    strength: strong
+  - from: cloud_provider_selection
+    to: iac_tool
+    strength: strong
 
-  # L4 → L5 (infrastructure to operations) — ~10 edges
+  # L4 → L5 (infrastructure to operations) — ~14 edges
   - from: container_strategy
     to: drift_monitoring
     strength: moderate
@@ -370,8 +472,20 @@ edges:
   - from: gpu_compute
     to: federated_learning
     strength: moderate
+  - from: dashboarding
+    to: dashboard_framework
+    strength: strong
+  - from: compute_orchestration
+    to: cost_optimization
+    strength: strong
+  - from: gpu_compute
+    to: cost_optimization
+    strength: strong
+  - from: cloud_provider_selection
+    to: cost_optimization
+    strength: moderate
 
-  # Skip connections (L1 → L3/L4/L5) — ~10 edges
+  # Skip connections (L1 → L3/L4/L5) — ~12 edges
   - from: monai_alignment
     to: model_export_format
     strength: strong
@@ -412,6 +526,14 @@ edges:
     to: federated_learning
     strength: weak
     skip: true
+  - from: model_philosophy
+    to: mamba_architecture
+    strength: moderate
+    skip: true
+  - from: reproducibility_level
+    to: container_strategy
+    strength: strong
+    skip: true
 
 # Propagation edges for Phase 1 belief propagation (requires_review flags)
 # When a source node changes, targets get requires_review: true on next kg-sync run
@@ -429,6 +551,10 @@ propagation:
     target: secrets_management
     type: signal
     rationale: "Secret injection pattern differs between Docker Compose and bare-metal"
+  - source: container_strategy
+    target: docker_registry
+    type: hard
+    rationale: "Registry strategy depends on container runtime (Docker Hub/GAR/GHCR)"
   - source: loss_function
     target: primary_metrics
     type: soft
@@ -457,3 +583,15 @@ propagation:
     target: experiment_tracker
     type: soft
     rationale: "Optuna study storage uses same PostgreSQL as MLflow — changing either affects both"
+  - source: cloud_provider_selection
+    target: dvc_remote_strategy
+    type: hard
+    rationale: "DVC remote strategy depends on which cloud providers are available"
+  - source: gpu_compute
+    target: compute_orchestration
+    type: hard
+    rationale: "SkyPilot is the mandatory compute broker — changing GPU strategy requires compute review"
+  - source: model_adapter_pattern
+    target: mamba_architecture
+    type: soft
+    rationale: "MambaVesselNet++ adapter must implement ModelAdapter ABC"
