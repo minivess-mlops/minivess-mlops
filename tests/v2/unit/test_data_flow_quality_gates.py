@@ -116,3 +116,61 @@ class TestGEGateTask:
         result = ge_gate_task(df)
         assert result.passed is False
         assert len(result.errors) > 0
+
+
+# ---------------------------------------------------------------------------
+# T4: DATA-CARE gate task
+# ---------------------------------------------------------------------------
+
+
+class TestDatacareGateTask:
+    """datacare_gate_task validates metadata via DATA-CARE assessment."""
+
+    def test_returns_gate_result(self) -> None:
+        """T4-R1: Returns a GateResult."""
+        from minivess.orchestration.flows.data_flow import datacare_gate_task
+        from minivess.validation.gates import GateResult
+
+        df = _make_valid_metadata_df()
+        result = datacare_gate_task(df)
+        assert isinstance(result, GateResult)
+
+    def test_clean_data_passes(self) -> None:
+        """T4-R2: Clean data returns passed=True."""
+        from minivess.orchestration.flows.data_flow import datacare_gate_task
+
+        df = _make_valid_metadata_df()
+        result = datacare_gate_task(df)
+        assert result.passed is True
+
+    def test_corrupted_data_fails(self) -> None:
+        """T4-R3: Corrupted data (all nulls) returns passed=False."""
+        from minivess.orchestration.flows.data_flow import datacare_gate_task
+
+        # DataFrame with all NaN values for critical columns
+        df = pd.DataFrame(
+            {
+                "file_path": [None, None, None],
+                "shape_x": [None, None, None],
+                "shape_y": [None, None, None],
+                "shape_z": [None, None, None],
+                "voxel_spacing_x": [None, None, None],
+                "voxel_spacing_y": [None, None, None],
+                "voxel_spacing_z": [None, None, None],
+                "intensity_min": [None, None, None],
+                "intensity_max": [None, None, None],
+                "has_valid_affine": [False, False, False],
+                "num_foreground_voxels": [0, 0, 0],
+            }
+        )
+        result = datacare_gate_task(df)
+        assert result.passed is False
+
+    def test_includes_statistics(self) -> None:
+        """T4-R4: Result includes DATA-CARE statistics."""
+        from minivess.orchestration.flows.data_flow import datacare_gate_task
+
+        df = _make_valid_metadata_df()
+        result = datacare_gate_task(df)
+        assert "overall_score_pct" in result.statistics
+        assert "dimensions_assessed" in result.statistics

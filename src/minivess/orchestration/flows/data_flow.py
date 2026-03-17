@@ -379,6 +379,25 @@ def ge_gate_task(metadata_df: pd.DataFrame) -> GateResult:
     return validate_nifti_batch(metadata_df)
 
 
+@task(name="datacare-validation-gate")
+def datacare_gate_task(metadata_df: pd.DataFrame) -> GateResult:
+    """Run DATA-CARE quality assessment on NIfTI metadata.
+
+    Parameters
+    ----------
+    metadata_df:
+        NIfTI metadata DataFrame.
+
+    Returns
+    -------
+    GateResult with pass/fail, errors, and DATA-CARE statistics.
+    """
+    from minivess.validation.data_care import assess_nifti_quality, quality_gate
+
+    report = assess_nifti_quality(metadata_df)
+    return quality_gate(report)
+
+
 @task(name="data-quality-gate")
 def data_quality_gate(report: DataValidationReport) -> bool:
     """Check whether data passes quality gate.
