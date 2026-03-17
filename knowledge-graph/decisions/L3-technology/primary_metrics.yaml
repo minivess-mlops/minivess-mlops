@@ -1,5 +1,5 @@
 decision_id: primary_metrics
-title: "Primary Evaluation Metrics"
+title: "Primary Evaluation Metrics — MetricsReloaded Ground Truth"
 level: L3-technology
 status: resolved
 options:
@@ -8,17 +8,87 @@ options:
   - {id: cldice_nsd_hd95, name: "clDice + NSD + HD95", prior_probability: 0.15, posterior_probability: 0.05}
   - {id: dice_only, name: "Dice Only", prior_probability: 0.05, posterior_probability: 0.02}
 resolved_option: metricsreloaded_full
+
+# ==========================================================================
+# METRIC SELECTION RATIONALE (from docs/MetricsReloaded.html)
+# ==========================================================================
+# The MetricsReloaded questionnaire (Maier-Hein et al., Nature Methods 2024)
+# is the GROUND TRUTH for metric selection in this project.
+# Report: docs/MetricsReloaded.html
+#
+# For 3D vascular segmentation with thin tubular structures:
+# - Overlap alone (Dice) is MISLEADING for vessels because a model can
+#   achieve high Dice by segmenting thick vessel segments while missing
+#   thin branches entirely.
+# - Topology preservation (clDice) captures vessel CONNECTIVITY.
+# - Surface distance (MASD) captures boundary ACCURACY.
+# ==========================================================================
+
+metric_hierarchy:
+  trusted:
+    description: >
+      Recommended by MetricsReloaded for 3D vascular segmentation.
+      These are the PRIMARY metrics for all model comparisons.
+    metrics:
+      - name: clDice
+        full_name: "centerline Dice (Soft Skeleton Dice)"
+        what_it_measures: "Vessel topology preservation — connectivity of centerlines"
+        reference: "Shit et al. (2021). 'clDice.' CVPR."
+        why_trusted: >
+          MetricsReloaded recommends topology-aware metrics for tubular structures.
+          A model with high Dice but low clDice segments vessel blobs, not trees.
+      - name: MASD
+        full_name: "Mean Average Surface Distance"
+        what_it_measures: "Average distance between predicted and ground-truth surfaces"
+        reference: "Maier-Hein et al. (2024). 'Metrics Reloaded.' Nature Methods."
+        why_trusted: >
+          Hausdorff-family metrics capture boundary accuracy. MASD is more robust
+          than HD95 to single-voxel outliers.
+
+  foil:
+    description: >
+      Commonly used in medical image segmentation but POTENTIALLY MISLEADING
+      for vascular structures. Included to demonstrate how wrong metric choice
+      can lead to wrong model rankings.
+    metrics:
+      - name: DSC
+        full_name: "Dice Similarity Coefficient (F1 Score)"
+        what_it_measures: "Volumetric overlap between prediction and ground truth"
+        why_foil: >
+          Dice is volume-biased: a model segmenting 80% of vessel volume
+          but missing ALL thin branches scores well on Dice but terribly on
+          clDice. Including Dice alongside clDice in the paper DEMONSTRATES
+          how misleading it can be for tubular structures.
+
+  optional:
+    description: >
+      Available in the biostatistics flow but NOT primary for the paper.
+      May appear in supplementary material.
+    metrics:
+      - {name: HD95, full_name: "95th percentile Hausdorff Distance"}
+      - {name: ASSD, full_name: "Average Symmetric Surface Distance"}
+      - {name: NSD, full_name: "Normalized Surface Dice"}
+      - {name: BE_0, full_name: "Betti Error β₀ (connected components)"}
+      - {name: BE_1, full_name: "Betti Error β₁ (loops/tunnels)"}
+      - {name: junction_F1, full_name: "Junction F1 Score"}
+
 resolution_evidence:
   - type: literature
     citation_key: maier_hein_2024_metrics_reloaded
     source: "https://doi.org/10.1038/s41592-023-02151-z"
+  - type: report
+    file: docs/MetricsReloaded.html
+    description: "MetricsReloaded questionnaire output for 3D vascular segmentation"
+
 implementation:
   files: [src/minivess/pipeline/metrics.py]
   tests: [tests/v2/unit/test_metrics.py]
+
 conditional_on:
   - {parent_decision_id: model_adapter_pattern, influence_strength: weak}
   - {parent_decision_id: uncertainty_framework, influence_strength: weak}
+
 volatility:
   classification: stable
   next_review: "2026-06-13"
-  rationale: "Metrics Reloaded is the Nature Methods standard"
+  rationale: "Metrics Reloaded is the Nature Methods standard; metric set is fixed for publication"
