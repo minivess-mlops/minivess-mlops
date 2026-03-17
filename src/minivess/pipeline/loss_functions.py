@@ -431,12 +431,51 @@ class GraphTopologyLoss(nn.Module):
         return loss
 
 
+class AuxCalibCompoundLoss(nn.Module):
+    """Wraps a segmentation loss with an auxiliary hL1-ACE calibration term.
+
+    total_loss = seg_loss(logits, labels) + lambda_calib * hL1_ACE(logits, labels)
+
+    Parameters
+    ----------
+    seg_loss:
+        Base segmentation loss module.
+    aux_calib_weight:
+        Weight for the hL1-ACE auxiliary term.
+    n_bins:
+        Number of calibration bins for hL1-ACE.
+    """
+
+    def __init__(
+        self,
+        seg_loss: nn.Module,
+        aux_calib_weight: float = 1.0,
+        n_bins: int = 15,
+    ) -> None:
+        super().__init__()
+        self.seg_loss = seg_loss
+        self.aux_calib_weight = aux_calib_weight
+
+        from minivess.pipeline.calibration_losses import HL1ACELoss
+
+        self.aux_calib = HL1ACELoss(n_bins=n_bins)
+
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        """Compute seg_loss + weighted hL1-ACE."""
+        seg_val = self.seg_loss(logits, labels)
+        calib_val = self.aux_calib(logits, labels)
+        result: torch.Tensor = seg_val + self.aux_calib_weight * calib_val
+        return result
+
+
 def build_loss_function(
     loss_name: str = "cbdice_cldice",
     *,
     num_classes: int = 2,
     softmax: bool = True,
     to_onehot_y: bool = True,
+    with_aux_calib: bool = False,
+    aux_calib_weight: float = 1.0,
 ) -> nn.Module:
     """Factory for segmentation loss functions.
 
@@ -568,6 +607,13 @@ def build_loss_function(
     # Emit one-time warning for non-LIBRARY losses
     if loss_name not in _LIBRARY_LOSSES:
         _emit_loss_warning(loss_name)
+
+    # Optionally wrap with auxiliary calibration loss
+    if with_aux_calib:
+        loss_fn = AuxCalibCompoundLoss(
+            seg_loss=loss_fn,
+            aux_calib_weight=aux_calib_weight,
+        )
 
     return loss_fn
 
