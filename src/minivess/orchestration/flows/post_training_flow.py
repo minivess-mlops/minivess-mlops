@@ -410,6 +410,137 @@ def post_training_flow(
     )
 
 
+def run_factorial_post_training(
+    *,
+    checkpoint_paths: list[Path],
+    methods: list[str],
+    output_dir: Path,
+    n_multi_swa_models: int = 3,
+    subsample_fraction: float = 0.7,
+    seed: int = 42,
+) -> list[dict[str, Any]]:
+    """Systematically apply post-training methods to checkpoints.
+
+    For each method in ``methods``, produces one output checkpoint
+    (or ensemble) and returns metadata for MLflow tagging.
+
+    Parameters
+    ----------
+    checkpoint_paths:
+        List of training checkpoint file paths.
+    methods:
+        Factorial methods to apply: ``["none", "swa", "multi_swa"]``.
+    output_dir:
+        Directory for output checkpoint files.
+    n_multi_swa_models:
+        Number of independent SWA models for multi_swa.
+    subsample_fraction:
+        Fraction of checkpoints per multi_swa model.
+    seed:
+        Random seed for multi_swa subsampling.
+
+    Returns
+    -------
+    List of result dicts, one per method. Each dict contains:
+        method, output_path, post_training_method, checkpoint_size_mb.
+    """
+    import shutil
+
+    results: list[dict[str, Any]] = []
+
+    for method in methods:
+        method_dir = output_dir / method
+        method_dir.mkdir(parents=True, exist_ok=True)
+
+        if method == "none":
+            # Identity: copy the first checkpoint unchanged
+            src = checkpoint_paths[0]
+            dst = method_dir / f"{src.stem}_none.pt"
+            shutil.copy2(src, dst)
+            results.append(_factorial_result(method, dst))
+
+        elif method == "swa":
+            dst = method_dir / "swa_averaged.pt"
+            _average_checkpoints(checkpoint_paths, dst)
+            results.append(_factorial_result(method, dst))
+
+        elif method == "multi_swa":
+            import random
+
+            rng = random.Random(seed)
+            # Multi-SWA: subsample + average multiple times
+            n_ckpts = max(1, int(len(checkpoint_paths) * subsample_fraction))
+            ensemble_paths: list[Path] = []
+            for i in range(n_multi_swa_models):
+                subset = rng.sample(
+                    list(checkpoint_paths), min(n_ckpts, len(checkpoint_paths))
+                )
+                dst = method_dir / f"multi_swa_{i}.pt"
+                _average_checkpoints(subset, dst)
+                ensemble_paths.append(dst)
+            # Return the first model path as representative
+            results.append(_factorial_result(method, ensemble_paths[0]))
+
+        else:
+            logger.warning("Unknown factorial method: %s — skipping", method)
+
+    return results
+
+
+def _factorial_result(method: str, output_path: Path) -> dict[str, Any]:
+    """Build result dict for a factorial post-training variant."""
+    size_mb = (
+        output_path.stat().st_size / (1024 * 1024) if output_path.exists() else 0.0
+    )
+    return {
+        "method": method,
+        "output_path": str(output_path),
+        "post_training_method": method,
+        "checkpoint_size_mb": round(size_mb, 2),
+    }
+
+
+def _average_checkpoints(checkpoint_paths: list[Path], output_path: Path) -> None:
+    """Average model state_dicts from multiple checkpoint files.
+
+    Parameters
+    ----------
+    checkpoint_paths:
+        Paths to checkpoint files (each must contain ``model_state_dict``).
+    output_path:
+        Path to write the averaged checkpoint.
+    """
+    import torch
+
+    if not checkpoint_paths:
+        return
+
+    # Load first checkpoint as base
+    avg_state = torch.load(checkpoint_paths[0], weights_only=True)
+    state_dict = avg_state.get("model_state_dict", avg_state)
+
+    # Accumulate remaining checkpoints
+    for ckpt_path in checkpoint_paths[1:]:
+        loaded = torch.load(ckpt_path, weights_only=True)
+        other_state = loaded.get("model_state_dict", loaded)
+        for key in state_dict:
+            if key in other_state:
+                state_dict[key] = state_dict[key] + other_state[key]
+
+    # Average
+    n = len(checkpoint_paths)
+    if n > 1:
+        for key in state_dict:
+            state_dict[key] = state_dict[key] / n
+
+    # Save
+    if "model_state_dict" in avg_state:
+        avg_state["model_state_dict"] = state_dict
+    else:
+        avg_state = state_dict
+    torch.save(avg_state, output_path)
+
+
 if __name__ == "__main__":
     # Docker entry point.  UPSTREAM_EXPERIMENT and EXPERIMENT are read inside
     # the flow function body — no need to pass them as arguments here.
