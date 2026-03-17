@@ -1,0 +1,24 @@
+id: cost_tracking_strategy
+title: "Cost Tracking Strategy"
+domain: operations
+status: accepted
+date: 2026-03-17
+context: >
+  Cloud GPU training incurs per-hour costs. Need visibility into
+  setup overhead fraction, effective GPU rate, break-even epochs,
+  and per-model-family cost trends.
+decision: >
+  Prometheus export via BentoML custom metrics (training-time counter).
+  Shared metrics module at src/minivess/observability/prometheus_metrics.py.
+  Cost computed in train_flow -> logged to MLflow -> exposed via prometheus_client
+  Gauges -> Prometheus scrapes BentoML /metrics -> Grafana dashboards.
+  DuckDB analytics for multi-run cost aggregation.
+alternatives_rejected:
+  - "MLflow-native Prometheus exporter (mlflow-export-import) — adds external dependency, less control"
+  - "Standalone finops.py module — cost methods belong on RunAnalytics, not a separate class"
+  - "Standalone cleanup script — cleanup belongs as Prefect maintenance task"
+references:
+  - "#683: Infrastructure timing"
+  - "#747: Prometheus metrics for training cost"
+  - "#717: Epoch-0 cost prediction"
+  - "#735: Cost aggregation analytics"

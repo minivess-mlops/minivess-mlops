@@ -112,3 +112,51 @@ class TestNavigatorDomainRoutingEval:
         domains = set(nav.get("domains", {}).keys())
         # The issue-creator Skill uses domain: field — all values must be valid
         assert len(domains) >= 8, f"Navigator must have >=8 domains, got {len(domains)}"
+
+    def test_navigator_has_layer_architecture(self) -> None:
+        """Navigator must document the 6-layer architecture."""
+        nav = yaml.safe_load(
+            (REPO_ROOT / "knowledge-graph" / "navigator.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        layers = nav.get("layers", {})
+        expected_layers = [
+            "L0_constitution",
+            "L1_hot_context",
+            "L2_navigator",
+            "L3_evidence",
+            "L4_specifications",
+            "L5_implementation",
+        ]
+        for layer in expected_layers:
+            assert layer in layers, f"Navigator missing layer: {layer}"
+
+
+class TestPRDDecisionCoverageEval:
+    """Eval: PRD decisions referenced in issues can be resolved."""
+
+    def test_network_node_count(self) -> None:
+        """_network.yaml must have at least 60 decision nodes."""
+        net = yaml.safe_load(
+            (REPO_ROOT / "knowledge-graph" / "_network.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        count = len(net.get("nodes", []))
+        assert count >= 60, f"Expected >=60 nodes, got {count}"
+
+    def test_all_domains_have_decisions(self) -> None:
+        """Every domain (except openspec) must list decision IDs."""
+        nav = yaml.safe_load(
+            (REPO_ROOT / "knowledge-graph" / "navigator.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        for domain_name, domain_data in nav.get("domains", {}).items():
+            if domain_name == "openspec":
+                continue
+            decisions = domain_data.get("decisions", [])
+            assert decisions, (
+                f"Domain '{domain_name}' has no decision IDs in navigator.yaml"
+            )

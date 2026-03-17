@@ -1,0 +1,55 @@
+decision_id: dvc_remote_strategy
+title: "DVC Remote Storage Strategy"
+level: L3-technology
+status: resolved
+
+options:
+  - id: minio_local_gcs_cloud
+    name: "MinIO (local) + GCS (cloud)"
+    prior_probability: 0.30
+    posterior_probability: 0.90
+  - id: gcs_only
+    name: "GCS Only"
+    prior_probability: 0.25
+    posterior_probability: 0.05
+  - id: aws_s3
+    name: "AWS S3"
+    prior_probability: 0.20
+    posterior_probability: 0.01
+    description: "BANNED -- unauthorized third cloud provider"
+  - id: local_only
+    name: "Local Filesystem Only"
+    prior_probability: 0.15
+    posterior_probability: 0.03
+  - id: azure_blob
+    name: "Azure Blob Storage"
+    prior_probability: 0.10
+    posterior_probability: 0.01
+
+resolved_option: minio_local_gcs_cloud
+
+resolution_evidence:
+  - type: implementation
+    source: ".dvc/config"
+    finding: "MinIO for local Docker Compose, GCS for staging/prod"
+  - type: discussion
+    source: "docs/planning/cloud-architecture-decisions-2026-03-14.md"
+    finding: "Data on GCS (gs://minivess-mlops-dvc-data), local MinIO for dev"
+
+implementation:
+  files:
+    - .dvc/config
+    - data/minivess.dvc
+    - scripts/download_minivess.py
+  tests: []
+
+conditional_on:
+  - parent_decision_id: data_versioning
+    influence_strength: strong
+  - parent_decision_id: cloud_provider_selection
+    influence_strength: strong
+
+volatility:
+  classification: stable
+  next_review: "2026-06-17"
+  rationale: "MinIO+GCS validated; AWS S3 explicitly banned"

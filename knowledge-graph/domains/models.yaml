@@ -1,6 +1,6 @@
 domain: models
 description: DynUNet, SAM3, SegResNet, UNETR, SwinUNETR, VesselFM, Mamba, foundation models
-last_reviewed: "2026-03-13"
+last_reviewed: "2026-03-17"
 
 decisions:
   primary_3d_model:
@@ -19,6 +19,14 @@ decisions:
       - docs/planning/sam3-integration-research-report.md
       - .claude/metalearning/2026-03-02-sam3-implementation-fuckup.md
     prd_node: knowledge-graph/decisions/L3-technology/foundation_model.yaml
+
+  mamba_architecture:
+    status: resolved
+    winner: mambavesselnet_pp
+    rationale: "MambaVesselNet++ hybrid CNN-SSM with VSS blocks and multi-scale fusion"
+    implementation: [src/minivess/adapters/mamba_adapter.py, src/minivess/adapters/mamba/]
+    evidence: [docs/planning/mambavesselnet-implementation-plan.xml]
+    prd_node: knowledge-graph/decisions/L3-technology/mamba_architecture.yaml
 
 metalearning:
   - file: .claude/metalearning/2026-03-02-sam3-implementation-fuckup.md

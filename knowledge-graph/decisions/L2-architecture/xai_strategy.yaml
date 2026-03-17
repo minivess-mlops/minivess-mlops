@@ -25,16 +25,23 @@ resolution_evidence:
   - type: discussion
     source: "docs/modernize-minivess-mlops-plan.md"
     finding: "Multi-layer XAI strategy: Captum for 3D voxel, SHAP for tabular, Quantus for meta-eval"
+  - type: implementation
+    source: "pyproject.toml"
+    finding: "captum, shap, quantus in optional dependencies (extras: xai)"
 
 implementation:
-  files: []
+  files:
+    - pyproject.toml
   tests: []
+  openspec: ""
 
 conditional_on:
   - parent_decision_id: impact_target
     influence_strength: moderate
+  - parent_decision_id: observability_depth
+    influence_strength: weak
 
 volatility:
   classification: evolving
-  next_review: "2026-04-13"
-  rationale: "XAI implementation not yet started; tool landscape evolving"
+  next_review: "2026-06-17"
+  rationale: "XAI tools selected but integration not yet started; tool landscape evolving"

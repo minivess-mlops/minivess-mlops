@@ -1,6 +1,6 @@
 domain: infrastructure
 description: Docker, Prefect, CI/CD, security. For cloud providers/GPU/SkyPilot/IaC/DVC see cloud domain.
-last_reviewed: "2026-03-16"
+last_reviewed: "2026-03-17"
 see_also: knowledge-graph/domains/cloud.yaml
 
 decisions:
@@ -66,6 +66,22 @@ decisions:
     status: not_started
     candidates: [offline_docker_bundle, helm_oci_vendored]
     prd_node: knowledge-graph/decisions/L4-infrastructure/air_gap_strategy.yaml
+
+  cloud_provider_selection:
+    status: resolved
+    winner: runpod_gcp_dual
+    rationale: "RunPod (env) + GCP (staging/prod). Third provider requires explicit authorization."
+    implementation: [configs/cloud/runpod_dev.yaml, configs/cloud/gcp_spot.yaml]
+    prd_node: knowledge-graph/decisions/L4-infrastructure/cloud_provider_selection.yaml
+    see_also: knowledge-graph/domains/cloud.yaml
+
+  compute_orchestration:
+    status: resolved
+    winner: skypilot_broker
+    rationale: "SkyPilot intercloud broker (NSDI'23) for all cloud GPU compute"
+    implementation: [src/minivess/compute/skypilot_launcher.py, deployment/skypilot/]
+    prd_node: knowledge-graph/decisions/L4-infrastructure/compute_orchestration.yaml
+    see_also: knowledge-graph/domains/cloud.yaml
 
 metalearning:
   - file: .claude/metalearning/2026-03-14-skypilot-purpose-misunderstanding.md

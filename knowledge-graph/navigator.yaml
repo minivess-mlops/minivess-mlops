@@ -2,17 +2,38 @@
 # PURPOSE: Entry point for all knowledge queries.
 # An agent reads THIS FIRST, then loads only the relevant domain file(s).
 # Pattern: McMillan 2026 domain-partitioned schema navigation.
+#
+# 6-LAYER KNOWLEDGE ARCHITECTURE:
+#
+#   L0: .claude/rules/ + CLAUDE.md         — Constitution (invariant rules, non-negotiable)
+#   L1: docs/planning/ + MEMORY.md         — Hot Context (current work, session state)
+#   L2: knowledge-graph/navigator.yaml     — Navigator (THIS FILE — domain routing)
+#   L3: knowledge-graph/decisions/*.yaml   — Evidence (Bayesian decision nodes, 65 total)
+#       knowledge-graph/domains/*.yaml     — Materialized winners (deterministic KG)
+#   L4: openspec/specs/                    — Specifications (GIVEN/WHEN/THEN testable)
+#   L5: src/ + tests/                      — Implementation (actual code)
+#
+# INFORMATION FLOW:
+#   Downward: PRD decisions → KG materialization → OpenSpec specs → Code
+#   Upward:   Experiments → KG posterior updates → PRD belief propagation
+#
+# MATERIALIZATION RULE:
+#   When a PRD node reaches status=resolved with posterior>=0.80 for the winner,
+#   the KG domain file records the deterministic winner. The KG is "the deterministic
+#   winner probability" — it stores decisions that have been MADE, not speculation.
+#
+# Full architecture doc: docs/planning/prd-kg-openspec-architecture.md
 
-version: "1.0"
-last_updated: "2026-03-15"
+version: "1.1"
+last_updated: "2026-03-17"
 
 domains:
   architecture:
     navigator: knowledge-graph/domains/architecture.yaml
-    covers: [model adapters, ensemble strategies, config systems, serving, API]
+    covers: [model adapters, ensemble strategies, config systems, serving, API, flow topology]
     claude_md: [src/minivess/adapters/CLAUDE.md, src/minivess/config/CLAUDE.md]
     decisions: [model_adapter_pattern, ensemble_strategy, config_architecture,
-                serving_architecture, api_protocol]
+                serving_architecture, api_protocol, flow_topology]
 
   training:
     navigator: knowledge-graph/domains/training.yaml
@@ -25,30 +46,32 @@ domains:
     navigator: knowledge-graph/domains/cloud.yaml
     covers: [cloud providers, GCP, RunPod, GCS, DVC remotes, data flow, environment mapping, Pulumi IaC]
     claude_md: [deployment/pulumi/gcp/CLAUDE.md]
-    decisions: []
+    decisions: [cloud_provider_selection, dvc_remote_strategy, compute_orchestration]
     note: >
       TWO providers only: RunPod (env/dev) + GCP (staging/prod). GCP project=minivess-mlops,
       region=europe-north1. Data on GCS. NEVER add providers without user authorization.
 
   infrastructure:
     navigator: knowledge-graph/domains/infrastructure.yaml
-    covers: [Docker, Prefect, CI/CD, GPU compute, SkyPilot, security]
+    covers: [Docker, Prefect, CI/CD, GPU compute, SkyPilot, security, registries]
     claude_md: [deployment/CLAUDE.md, src/minivess/orchestration/CLAUDE.md]
     decisions: [container_strategy, ci_cd_platform, iac_tool, gitops_engine,
-                gpu_compute, secrets_management, air_gap_strategy]
+                gpu_compute, secrets_management, air_gap_strategy, docker_registry,
+                cloud_provider_selection, compute_orchestration]
 
   data:
     navigator: knowledge-graph/domains/data.yaml
     covers: [datasets, validation, profiling, versioning, lineage, drift]
     claude_md: [src/minivess/data/CLAUDE.md]
     decisions: [data_versioning, data_validation_depth, dataframe_validation,
-                data_profiling, label_quality_tool, lineage_tracking, drift_monitoring]
+                data_profiling, label_quality_tool, lineage_tracking, drift_monitoring,
+                dvc_remote_strategy, dataset_strategy, database_backend]
 
   models:
     navigator: knowledge-graph/domains/models.yaml
     covers: [DynUNet, SAM3, SegResNet, UNETR, SwinUNETR, VesselFM, Mamba, foundation]
     claude_md: [src/minivess/adapters/CLAUDE.md]
-    decisions: [primary_3d_model, foundation_model]
+    decisions: [primary_3d_model, foundation_model, mamba_architecture]
 
   observability:
     navigator: knowledge-graph/domains/observability.yaml
@@ -60,16 +83,17 @@ domains:
 
   operations:
     navigator: knowledge-graph/domains/operations.yaml
-    covers: [monitoring, governance, retraining, SBOM, compliance, audit, federated]
+    covers: [monitoring, governance, retraining, SBOM, compliance, audit, federated, cost]
     claude_md: []
     decisions: [dashboarding, retraining_trigger, model_governance,
-                audit_trail, sbom_generation, federated_learning]
+                audit_trail, sbom_generation, federated_learning,
+                dashboard_framework, cost_optimization]
 
   testing:
     navigator: knowledge-graph/domains/testing.yaml
-    covers: [test tiers, markers, fixtures, CI, QA]
+    covers: [test tiers, markers, fixtures, CI, QA, frameworks]
     claude_md: [tests/CLAUDE.md]
-    decisions: []
+    decisions: [test_framework, test_tier_strategy]
 
   openspec:
     location: openspec/
@@ -77,15 +101,49 @@ domains:
     config: openspec/config.yaml
     note: >
       Spec-driven development. Use /opsx:propose for new features.
-      Specs supplement the KG (decisions + evidence), not replace it.
-      SDD rigor target: spec-anchored (Piskala 2026, arXiv:2602.00180).
+      Specs are Layer 4 evidence — they operationalize KG decisions
+      into GIVEN/WHEN/THEN testable scenarios.
 
   manuscript:
     navigator: knowledge-graph/domains/manuscript.yaml
     covers: [scientific claims, methods stubs, results stubs, limitations, projections, kg-sync]
     claude_md: [docs/planning/repo-to-manuscript.md]
-    decisions: []
+    decisions: [publication_target]
     note: "Narrative layer for paper writing. Claims + section stubs derived from KG decisions + experiments."
+
+# Cross-layer references — how to navigate between layers
+layers:
+  L0_constitution:
+    files: [CLAUDE.md, .claude/rules/*.md]
+    purpose: "Invariant rules that constrain all other layers"
+    read_when: "Always loaded by default (system context)"
+
+  L1_hot_context:
+    files: [docs/planning/*.md, .claude/worktrees/*/MEMORY.md]
+    purpose: "Current session state, active plans, memory"
+    read_when: "Starting a new task or resuming a session"
+
+  L2_navigator:
+    files: [knowledge-graph/navigator.yaml]
+    purpose: "THIS FILE — routes queries to the right domain"
+    read_when: "First step for any knowledge query"
+
+  L3_evidence:
+    files: [knowledge-graph/decisions/L*/*.yaml, knowledge-graph/domains/*.yaml,
+            knowledge-graph/_network.yaml, knowledge-graph/_schema.yaml]
+    purpose: "Bayesian decision nodes (65 total) + materialized winners"
+    read_when: "Understanding why a decision was made, what alternatives exist"
+    architecture_doc: docs/planning/prd-kg-openspec-architecture.md
+
+  L4_specifications:
+    files: [openspec/specs/*/*.yaml]
+    purpose: "GIVEN/WHEN/THEN testable scenarios operationalizing L3 decisions"
+    read_when: "Creating tests, verifying implementation matches spec"
+
+  L5_implementation:
+    files: [src/minivess/**, tests/**]
+    purpose: "Actual code and test implementations"
+    read_when: "Implementing changes, debugging, code review"
 
 invariants:
   # HARD CONSTRAINTS — apply before any decision node is evaluated.
@@ -147,6 +205,8 @@ keywords:
   xai: observability
   compliance: operations
   audit: operations
+  cost: operations
+  finops: operations
   manuscript: manuscript
   claims: manuscript
   methods: manuscript
@@ -160,3 +220,12 @@ keywords:
   sdd: openspec
   openspec: openspec
   propose: openspec
+  test: testing
+  pytest: testing
+  hypothesis: testing
+  staging: testing
+  tier: testing
+  flow: architecture
+  prefect_flow: architecture
+  database: data
+  postgresql: data

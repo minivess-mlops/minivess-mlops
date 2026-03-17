@@ -1,0 +1,51 @@
+decision_id: dashboard_framework
+title: "Dashboard and Visualization Framework"
+level: L5-operations
+status: resolved
+
+options:
+  - id: grafana_prometheus
+    name: "Grafana + Prometheus"
+    prior_probability: 0.35
+    posterior_probability: 0.85
+    description: "Grafana for dashboards, Prometheus for metrics scraping, AlertManager for alerts"
+  - id: mlflow_ui_only
+    name: "MLflow UI Only"
+    prior_probability: 0.25
+    posterior_probability: 0.05
+  - id: streamlit_custom
+    name: "Streamlit Custom Dashboard"
+    prior_probability: 0.20
+    posterior_probability: 0.05
+  - id: wandb_hosted
+    name: "Weights & Biases"
+    prior_probability: 0.20
+    posterior_probability: 0.05
+
+resolved_option: grafana_prometheus
+
+resolution_evidence:
+  - type: implementation
+    source: "deployment/docker-compose.yml"
+    finding: "Grafana, Prometheus, AlertManager services in Docker Compose stack"
+  - type: implementation
+    source: "deployment/grafana/"
+    finding: "Grafana dashboards for drift monitoring and training metrics"
+
+implementation:
+  files:
+    - deployment/docker-compose.yml
+    - deployment/grafana/
+    - deployment/prometheus/
+  tests: []
+
+conditional_on:
+  - parent_decision_id: dashboarding
+    influence_strength: strong
+  - parent_decision_id: container_strategy
+    influence_strength: moderate
+
+volatility:
+  classification: stable
+  next_review: "2026-06-17"
+  rationale: "Grafana+Prometheus is the standard observability stack; deployed and working"

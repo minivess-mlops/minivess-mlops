@@ -1,0 +1,51 @@
+decision_id: database_backend
+title: "Database Backend"
+level: L3-technology
+status: resolved
+
+options:
+  - id: postgresql_only
+    name: "PostgreSQL Only"
+    prior_probability: 0.40
+    posterior_probability: 0.92
+  - id: sqlite_fallback
+    name: "SQLite with PostgreSQL Upgrade Path"
+    prior_probability: 0.30
+    posterior_probability: 0.03
+    description: "BANNED -- SQLite fallback bias documented as anti-pattern"
+  - id: duckdb_primary
+    name: "DuckDB as Primary"
+    prior_probability: 0.15
+    posterior_probability: 0.03
+    description: "DuckDB is for analytics only, not operational data"
+  - id: mysql
+    name: "MySQL/MariaDB"
+    prior_probability: 0.15
+    posterior_probability: 0.02
+
+resolved_option: postgresql_only
+
+resolution_evidence:
+  - type: implementation
+    source: "deployment/docker-compose.yml"
+    finding: "PostgreSQL service for MLflow + Optuna; DuckDB for analytics queries"
+  - type: discussion
+    source: ".claude/metalearning/2026-03-08-sqlite-fallback-bias.md"
+    finding: "PostgreSQL is the ONLY database -- never fall back to SQLite"
+
+implementation:
+  files:
+    - deployment/docker-compose.yml
+    - src/minivess/observability/analytics.py
+  tests: []
+
+conditional_on:
+  - parent_decision_id: experiment_tracker
+    influence_strength: strong
+  - parent_decision_id: hpo_engine
+    influence_strength: moderate
+
+volatility:
+  classification: stable
+  next_review: "2026-09-17"
+  rationale: "PostgreSQL-only is a hard constraint; SQLite fallback banned"

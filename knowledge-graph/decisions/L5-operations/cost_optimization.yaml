@@ -1,0 +1,50 @@
+decision_id: cost_optimization
+title: "Cloud Cost Optimization Strategy"
+level: L5-operations
+status: resolved
+
+options:
+  - id: skypilot_spot_finops
+    name: "SkyPilot Spot + FinOps Monitoring"
+    prior_probability: 0.35
+    posterior_probability: 0.85
+    description: "Spot instances via SkyPilot, cost tracking, checkpoint/resume for preemption"
+  - id: reserved_instances
+    name: "Reserved Instances"
+    prior_probability: 0.25
+    posterior_probability: 0.05
+  - id: manual_cost_tracking
+    name: "Manual Cost Tracking"
+    prior_probability: 0.25
+    posterior_probability: 0.05
+  - id: no_optimization
+    name: "No Cost Optimization"
+    prior_probability: 0.15
+    posterior_probability: 0.05
+
+resolved_option: skypilot_spot_finops
+
+resolution_evidence:
+  - type: implementation
+    source: "deployment/skypilot/"
+    finding: "SkyPilot YAMLs use spot instances; checkpoint/resume for preemption recovery"
+  - type: discussion
+    source: "docs/planning/skypilot-and-finops-complete-report.md"
+    finding: "FinOps strategy: spot instances, SkyPilot cost estimation, job-level cost tracking"
+
+implementation:
+  files:
+    - deployment/skypilot/train_production.yaml
+    - deployment/skypilot/dev_runpod.yaml
+  tests: []
+
+conditional_on:
+  - parent_decision_id: gpu_compute
+    influence_strength: strong
+  - parent_decision_id: compute_orchestration
+    influence_strength: strong
+
+volatility:
+  classification: evolving
+  next_review: "2026-06-17"
+  rationale: "Cloud pricing changes frequently; spot vs on-demand decisions may shift"

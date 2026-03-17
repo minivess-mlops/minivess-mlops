@@ -1,0 +1,30 @@
+decision: data_quality_orchestration
+domain: data
+status: resolved
+winner: prefect_gate_wiring
+description: >
+  Wire standalone data quality modules (Pandera, GE, DATA-CARE, DeepChecks)
+  into the Prefect data_flow.py as configurable quality gates.
+  Each gate produces a GateResult. Gate severity is configurable per-gate
+  via Dynaconf settings.toml: 'error' halts, 'warning' tags MLflow, 'info' logs.
+
+rationale: >
+  The validation modules existed as standalone tested components (~60 tests)
+  but the data flow only performed key-presence validation. Wiring them into
+  the orchestration layer closes the 30% integration gap and makes quality
+  gates enforceable at pipeline boundaries.
+
+implementation:
+  - src/minivess/validation/enforcement.py
+  - src/minivess/validation/deepchecks_3d_adapter.py
+  - src/minivess/orchestration/flows/data_flow.py
+  - configs/deployment/settings.toml
+
+evidence:
+  - docs/planning/pr2-data-quality-pipeline-plan.md
+
+constraints:
+  - Gate severity configurable per-gate via Dynaconf (error/warning/info)
+  - MINIVESS_SKIP_QUALITY_GATE=1 escape hatch for pytest only
+  - DeepChecks gracefully degrades when not installed
+  - Backwards-compatible: metadata_df defaults to None in existing API

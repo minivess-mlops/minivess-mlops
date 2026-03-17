@@ -7,13 +7,20 @@ options:
   - {id: skeleton_precision_recall, name: "Skeleton Precision/Recall", prior_probability: 0.30, posterior_probability: 0.30}
   - {id: cldice_as_metric, name: "clDice as Metric", prior_probability: 0.25, posterior_probability: 0.25}
   - {id: none, name: "No Topology Metrics", prior_probability: 0.10, posterior_probability: 0.10}
-resolution_evidence: []
+resolution_evidence:
+  - type: literature
+    source: "docs/planning/GRAPH-TOPOLOGY-METRICS-INDEX.md"
+    finding: "Survey of topology metrics: Betti, skeleton P/R, clDice, VGG, persistent homology"
+  - type: literature
+    source: "docs/planning/graph-topology-metrics-survey.md"
+    finding: "Comprehensive survey of graph topology approaches for vessel segmentation"
 implementation:
   files: []
   tests: []
 conditional_on:
   - {parent_decision_id: data_validation_depth, influence_strength: weak}
+  - {parent_decision_id: loss_function, influence_strength: moderate}
 volatility:
   classification: evolving
-  next_review: "2026-04-13"
-  rationale: "Active research area; GUDHI integration planned"
+  next_review: "2026-06-17"
+  rationale: "Active research area; GUDHI integration planned per graph-topology-p0-tdd-plan.xml"

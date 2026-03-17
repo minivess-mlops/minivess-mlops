@@ -1,0 +1,114 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "minivess-infrastructure-cost",
+    "title": "Infrastructure Cost",
+    "tags": ["minivess", "finops"],
+    "timezone": "utc",
+    "schemaVersion": 39,
+    "version": 1,
+    "panels": [
+      {
+        "id": 1,
+        "title": "Total Training Cost (USD)",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "minivess_training_cost_total_usd",
+            "legendFormat": "total cost"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Estimated Total Cost (USD)",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+        "targets": [
+          {
+            "expr": "minivess_training_estimated_total_cost_usd",
+            "legendFormat": "estimated cost"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Effective GPU Rate (USD/hr)",
+        "type": "gauge",
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "minivess_training_effective_gpu_rate_usd",
+            "legendFormat": "effective rate"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Cost Per Epoch (USD)",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+        "targets": [
+          {
+            "expr": "minivess_training_cost_per_epoch_usd",
+            "legendFormat": "cost/epoch"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "GPU Utilization",
+        "type": "gauge",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 4},
+        "targets": [
+          {
+            "expr": "minivess_training_gpu_utilization",
+            "legendFormat": "GPU utilization"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Setup Overhead Fraction",
+        "type": "gauge",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 4},
+        "targets": [
+          {
+            "expr": "minivess_training_setup_fraction",
+            "legendFormat": "setup fraction"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Cost Over Time Trend",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 10},
+        "targets": [
+          {
+            "expr": "minivess_training_cost_total_usd",
+            "legendFormat": "total cost"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Estimated vs Actual Cost",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 18},
+        "targets": [
+          {
+            "expr": "minivess_training_cost_total_usd",
+            "legendFormat": "actual cost"
+          },
+          {
+            "expr": "minivess_training_estimated_total_cost_usd",
+            "legendFormat": "estimated cost"
+          }
+        ]
+      }
+    ]
+  },
+  "overwrite": true
+}

@@ -11,8 +11,10 @@ resolution_evidence: []
 implementation:
   files: []
   tests: []
-conditional_on: []
+conditional_on:
+  - {parent_decision_id: container_strategy, influence_strength: strong}
+  - {parent_decision_id: ci_cd_platform, influence_strength: moderate}
 volatility:
   classification: evolving
-  next_review: "2026-04-13"
-  rationale: "Requires K8s; not needed for Docker Compose deployment"
+  next_review: "2026-06-17"
+  rationale: "Requires K8s adoption; not needed for current Docker Compose deployment"

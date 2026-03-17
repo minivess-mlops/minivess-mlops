@@ -7,14 +7,21 @@ options:
   - {id: local_temperature_scaling, name: "Local Temperature Scaling", prior_probability: 0.25, posterior_probability: 0.25}
   - {id: mondrian_conformal_mapie, name: "Mondrian Conformal (MAPIE)", prior_probability: 0.25, posterior_probability: 0.25}
   - {id: isotonic_netcal, name: "Isotonic Regression (netcal)", prior_probability: 0.15, posterior_probability: 0.15}
-resolution_evidence: []
+resolution_evidence:
+  - type: literature
+    source: "docs/planning/conformal-uq-segmentation-report.md"
+    finding: "MAPIE + Mondrian CP for conformal prediction; netcal for temperature scaling"
+  - type: literature
+    source: "docs/planning/calibration-shift-plan.md"
+    finding: "Calibration under distribution shift planned; depends on ensemble completion"
 implementation:
-  files: []
+  files:
+    - pyproject.toml
   tests: []
 conditional_on:
   - {parent_decision_id: ensemble_strategy, influence_strength: moderate}
   - {parent_decision_id: uncertainty_framework, influence_strength: strong}
 volatility:
   classification: evolving
-  next_review: "2026-04-13"
-  rationale: "Implementation not yet started; depends on ensemble completion"
+  next_review: "2026-06-17"
+  rationale: "Implementation blocked by ensemble and uncertainty framework completion"
