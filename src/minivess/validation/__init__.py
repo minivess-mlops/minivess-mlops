@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 # Core validation modules (always available)
+from minivess.validation.enforcement import (
+    DataQualityError,
+    GateAction,
+    enforce_gate,
+    get_gate_severity,
+)
 from minivess.validation.gates import (
     GateResult,
     validate_nifti_metadata,
@@ -91,11 +97,13 @@ except ImportError:
 __all__ = [
     "AnnotationQualitySchema",
     "CurationFlag",
+    "DataQualityError",
     "DataQualityReport",
     "DimensionScore",
     "CurationReport",
     "DatasetProfileView",
     "DriftReport",
+    "GateAction",
     "GateResult",
     "NiftiMetadataSchema",
     "QualityDimension",
@@ -117,6 +125,8 @@ __all__ = [
     "quality_gate",
     "rank_samples_by_uncertainty",
     "run_expectation_suite",
+    "enforce_gate",
+    "get_gate_severity",
     "validate_metrics_batch",
     "validate_nifti_batch",
     "validate_nifti_metadata",
