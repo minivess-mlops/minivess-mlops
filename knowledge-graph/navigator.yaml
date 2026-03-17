@@ -71,7 +71,7 @@ domains:
     navigator: knowledge-graph/domains/models.yaml
     covers: [DynUNet, SAM3, SegResNet, UNETR, SwinUNETR, VesselFM, Mamba, foundation]
     claude_md: [src/minivess/adapters/CLAUDE.md]
-    decisions: [primary_3d_model, foundation_model, mamba_architecture]
+    decisions: [primary_3d_model, foundation_model, mamba_architecture, paper_model_comparison]
 
   observability:
     navigator: knowledge-graph/domains/observability.yaml
