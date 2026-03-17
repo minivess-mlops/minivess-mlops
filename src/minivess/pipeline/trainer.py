@@ -289,6 +289,9 @@ class SegmentationTrainer:
         self.model.train()
         running_loss = 0.0
         num_batches = 0
+        # T3: Gradient norm tracking (#790)
+        grad_norms: list[float] = []
+        grad_clip_count = 0
 
         for batch in loader:
             # Move all tensor values to device (supports multi-task GT keys)
@@ -323,10 +326,15 @@ class SegmentationTrainer:
                 self.scaler.scale(loss).backward()  # type: ignore[no-untyped-call]
                 if self.config.gradient_clip_val > 0:
                     self.scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(
+                    # T3: Capture return of clip_grad_norm_ for gradient monitoring
+                    total_norm = torch.nn.utils.clip_grad_norm_(
                         self.model.parameters(),
                         self.config.gradient_clip_val,
                     )
+                    norm_val = float(total_norm)
+                    grad_norms.append(norm_val)
+                    if norm_val > self.config.gradient_clip_val:
+                        grad_clip_count += 1
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
 
@@ -342,6 +350,13 @@ class SegmentationTrainer:
         if self.metrics is not None:
             epoch_metrics = self.metrics.compute().to_dict()
             self.metrics.reset()
+
+        # T3: Add gradient norm stats to epoch metrics (#790)
+        if grad_norms:
+            epoch_metrics["grad/norm_mean"] = sum(grad_norms) / len(grad_norms)
+            epoch_metrics["grad/norm_max"] = max(grad_norms)
+        epoch_metrics["grad/clip_count"] = float(grad_clip_count)
+
         return EpochResult(loss=avg_loss, metrics=epoch_metrics)
 
     @torch.no_grad()
@@ -367,6 +382,8 @@ class SegmentationTrainer:
         self.model.eval()
         running_loss = 0.0
         num_batches = 0
+        num_volumes = 0  # T4: Count volumes for latency calculation
+        val_start_time = time.perf_counter()  # T4: Time the validation loop
 
         # Collect full-volume predictions for MetricsReloaded (CPU numpy)
         collected_preds: list[np.ndarray] = []
@@ -424,6 +441,7 @@ class SegmentationTrainer:
 
             running_loss += loss.item()
             num_batches += 1
+            num_volumes += images.shape[0]  # T4: Count volumes in batch
 
             if self.metrics is not None:
                 self.metrics.update(logits, labels)
@@ -467,6 +485,12 @@ class SegmentationTrainer:
         if compute_extended and collected_preds:
             extended = self._compute_extended_metrics(collected_preds, collected_labels)
             epoch_metrics.update(extended)
+
+        # T4: Compute inference latency (#790)
+        val_elapsed = time.perf_counter() - val_start_time
+        if num_volumes > 0:
+            latency_ms = (val_elapsed / num_volumes) * 1000.0
+            epoch_metrics["infer/latency_ms_per_volume"] = latency_ms
 
         return EpochResult(loss=avg_loss, metrics=epoch_metrics)
 
@@ -560,6 +584,7 @@ class SegmentationTrainer:
             torch.cuda.reset_peak_memory_stats()
 
         history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
+        stopped_early = False
         final_epoch = 0
         ckpt_cfg = self.config.checkpoint
         # Capture MLflow run ID from tracker (if active) for return dict
@@ -601,7 +626,10 @@ class SegmentationTrainer:
 
         for epoch in range(start_epoch, self.config.max_epochs):
             t0 = time.perf_counter()
+            # T6: Time train epoch separately (#790)
+            t_train_start = time.perf_counter()
             train_result = self.train_epoch(train_loader)
+            train_epoch_seconds = time.perf_counter() - t_train_start
 
             # Validate every val_interval epochs + first + last epoch.
             # val_interval > max_epochs is a sentinel for "never validate"
@@ -612,7 +640,10 @@ class SegmentationTrainer:
                 epoch % val_interval == 0 or epoch == 0 or is_last
             )
 
+            val_epoch_seconds = 0.0
             if run_val:
+                # T6: Time validation epoch separately (#790)
+                t_val_start = time.perf_counter()
                 # Compute extended metrics every N epochs + first + last
                 compute_ext_this_epoch = needs_extended and (
                     epoch % extended_frequency == 0 or is_last
@@ -620,6 +651,7 @@ class SegmentationTrainer:
                 val_result = self.validate_epoch(
                     val_loader, compute_extended=compute_ext_this_epoch
                 )
+                val_epoch_seconds = time.perf_counter() - t_val_start
                 _last_val_result = val_result
             else:
                 # Reuse last validation result for logging (no new validation)
@@ -631,26 +663,33 @@ class SegmentationTrainer:
             # Log first/steady epoch wall time for profiling (#683)
             if epoch == 0 and self.tracker is not None:
                 self.tracker.log_epoch_metrics(
-                    {"prof_first_epoch_seconds": epoch_wall_time}, step=0
+                    {"prof/first_epoch_seconds": epoch_wall_time}, step=0
                 )
             elif epoch == 1 and self.tracker is not None:
                 self.tracker.log_epoch_metrics(
-                    {"prof_steady_epoch_seconds": epoch_wall_time}, step=1
+                    {"prof/steady_epoch_seconds": epoch_wall_time}, step=1
                 )
 
             history["train_loss"].append(train_result.loss)
             history["val_loss"].append(val_result.loss)
             final_epoch = epoch + 1
 
-            # Build full metric dict for this epoch
+            # Build full metric dict for this epoch (slash-prefix, #790)
             all_metrics: dict[str, float] = {
-                "train_loss": train_result.loss,
-                "val_loss": val_result.loss,
+                "train/loss": train_result.loss,
+                "val/loss": val_result.loss,
             }
             for k, v in train_result.metrics.items():
-                all_metrics[f"train_{k}"] = v
+                # Keys from train_epoch already use slash (e.g. grad/norm_mean)
+                if "/" in k:
+                    all_metrics[k] = v
+                else:
+                    all_metrics[f"train/{k}"] = v
             for k, v in val_result.metrics.items():
-                all_metrics[f"val_{k}"] = v
+                if "/" in k:
+                    all_metrics[k] = v
+                else:
+                    all_metrics[f"val/{k}"] = v
 
             current_lr = self.optimizer.param_groups[0]["lr"]
             logger.info(
@@ -706,17 +745,35 @@ class SegmentationTrainer:
             # Log to MLflow / experiment tracker if present
             if self.tracker is not None:
                 epoch_log: dict[str, float] = {
-                    "train_loss": train_result.loss,
-                    "val_loss": val_result.loss,
-                    "learning_rate": current_lr,
+                    "train/loss": train_result.loss,
+                    "val/loss": val_result.loss,
+                    "optim/lr": current_lr,
+                    # T6: Train/val epoch timing (#790)
+                    "prof/train_seconds": train_epoch_seconds,
                 }
+                if run_val:
+                    epoch_log["prof/val_seconds"] = val_epoch_seconds
+                # T6: AMP scaler grad scale (#790)
+                if self.config.mixed_precision:
+                    epoch_log["optim/grad_scale"] = float(self.scaler.get_scale())
                 for k, v in train_result.metrics.items():
-                    epoch_log[f"train_{k}"] = v
+                    if "/" in k:
+                        epoch_log[k] = v
+                    else:
+                        epoch_log[f"train/{k}"] = v
                 for k, v in val_result.metrics.items():
-                    epoch_log[f"val_{k}"] = v
-                # T5: GPU epoch summary → MLflow (prefixed with sys_gpu_)
+                    if "/" in k:
+                        epoch_log[k] = v
+                    else:
+                        epoch_log[f"val/{k}"] = v
+                # GPU epoch summary → MLflow (slash-prefix gpu/)
                 for k, v in gpu_metrics.items():
-                    epoch_log[f"sys_gpu_{k}"] = v
+                    epoch_log[f"gpu/{k}"] = v
+                # T6: Early stopping patience counter (#790)
+                primary_tracker_obj = self._multi_tracker.get_primary_tracker()
+                epoch_log["train/patience_counter"] = float(
+                    primary_tracker_obj.patience_counter
+                )
                 self.tracker.log_epoch_metrics(epoch_log, step=epoch + 1)
 
             # Update multi-metric tracker and save per-metric best checkpoints
@@ -753,6 +810,12 @@ class SegmentationTrainer:
                     logger.info(
                         "Saved best checkpoint for '%s' to %s", metric_name, best_path
                     )
+                    # T7: Log checkpoint size (#790)
+                    if self.tracker is not None and best_path.exists():
+                        ckpt_size_mb = best_path.stat().st_size / (1024 * 1024)
+                        self.tracker.log_epoch_metrics(
+                            {"checkpoint/size_mb": ckpt_size_mb}, step=epoch + 1
+                        )
                     if self.tracker is not None:
                         try:
                             self.tracker.log_artifact(
@@ -839,6 +902,7 @@ class SegmentationTrainer:
 
             # Early stopping decision via MultiMetricTracker
             if self._multi_tracker.should_stop(epoch):
+                stopped_early = True
                 logger.info(
                     "Early stopping at epoch %d (strategy=%s)",
                     epoch + 1,
@@ -905,4 +969,5 @@ class SegmentationTrainer:
             "mlflow_run_id": _active_run_id,
             "vram_peak_mb": vram_peak_mb,
             "vram_peak_gb": vram_peak_gb,
+            "stopped_early": stopped_early,
         }
