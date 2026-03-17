@@ -49,6 +49,21 @@ decisions:
     candidates: [monai_fl, flower_framework, not_applicable]
     prd_node: knowledge-graph/decisions/L5-operations/federated_learning.yaml
 
+  fda_readiness:
+    status: accepted
+    winner: preclinical_fda_ready
+    rationale: "Preclinical platform with FDA-ready architecture. Continuous audit from Day 1. Phased approach: H1 now, H2 after factorial, H3 Q3 2026, H4 clinical projects."
+    implementation: [src/minivess/compliance/, docs/planning/regops-fda-regulation-reporting-qms-samd-iec62304-mlops-report.md]
+    prd_node: knowledge-graph/decisions/L5-operations/fda_readiness.yaml
+
+  test_set_firewall:
+    status: accepted
+    winner: audit_log_with_counter
+    rationale: "AuditTrail.log_test_evaluation() + cumulative MLflow counter + OpenLineage InputDataset events. Compensates for DVC lacking DataLad inherent action logging."
+    implementation: [src/minivess/compliance/audit.py]
+    prd_node: knowledge-graph/decisions/L5-operations/test_set_firewall.yaml
+    gap: "Methods exist but are never called from Prefect flows. Issue #821."
+
   dashboard_framework:
     status: resolved
     winner: grafana_prometheus
@@ -76,7 +91,24 @@ planning_docs:
     status: planned
   - file: docs/planning/federated-learning-plan.md
     status: planned
+  - file: docs/planning/openlineage-marquez-iec62304-report.md
+    status: planning_complete
+  - file: docs/planning/regops-fda-regulation-reporting-qms-samd-iec62304-mlops-report.md
+    status: planning_complete
+    description: >
+      Comprehensive FDA readiness analysis with multi-hypothesis design matrix.
+      30+ academic citations, 5 hypotheses x 5 factors, phased implementation roadmap.
+      Covers: test set firewall, OpenLineage wiring, PCCP, model cards, DHF auto-generation.
 
 open_issues:
   - number: 610
     title: "Model governance pipeline"
+  - number: 799
+    title: "OpenLineage/Marquez integration: automated IEC 62304 lineage for all Prefect flows"
+    priority: P1
+  - number: 821
+    title: "FDA-ready test set use documentation & lineage tracking for SaMD compliance"
+    priority: P1
+    description: >
+      Test set access not logged. DVC lacks DataLad-style action logging.
+      AuditTrail.log_test_evaluation() exists but never called. $100k+ FDA risk.

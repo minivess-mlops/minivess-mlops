@@ -83,11 +83,12 @@ domains:
 
   operations:
     navigator: knowledge-graph/domains/operations.yaml
-    covers: [monitoring, governance, retraining, SBOM, compliance, audit, federated, cost]
+    covers: [monitoring, governance, retraining, SBOM, compliance, audit, federated, cost, FDA readiness, test set firewall]
     claude_md: []
     decisions: [dashboarding, retraining_trigger, model_governance,
                 audit_trail, sbom_generation, federated_learning,
-                dashboard_framework, cost_optimization]
+                dashboard_framework, cost_optimization, fda_readiness,
+                test_set_firewall]
 
   testing:
     navigator: knowledge-graph/domains/testing.yaml

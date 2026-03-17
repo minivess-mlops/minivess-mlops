@@ -1,0 +1,72 @@
+decision_id: fda_readiness
+title: "FDA SaMD Readiness Posture"
+level: L5-operations
+status: accepted
+options:
+  - id: preclinical_fda_ready
+    name: "Preclinical platform with FDA-ready architecture"
+    prior_probability: 0.60
+    posterior_probability: 0.80
+    description: >
+      Primary use is preclinical research, but architecture supports future clinical
+      pathway without retrofitting. Continuous automated audit trail from Day 1.
+      Compliance classes exist and are wired to flows. OpenLineage lineage tracking.
+      Model cards. Test set firewall. PCCP-compatible factorial design.
+  - id: preclinical_only
+    name: "Preclinical only, no regulatory considerations"
+    prior_probability: 0.30
+    posterior_probability: 0.12
+    description: >
+      Ignore regulatory requirements entirely. Treat as pure research platform.
+      Risk: costly retrofit if clinical pathway is ever pursued.
+  - id: full_clinical_compliance
+    name: "Full FDA/MDR compliance stack"
+    prior_probability: 0.10
+    posterior_probability: 0.08
+    description: >
+      Implement full IEC 62304 + ISO 13485 + 21 CFR Part 11 + ISO 14971.
+      Premature for preclinical use. Defer to clinical projects.
+resolved_option: preclinical_fda_ready
+resolution_evidence:
+  - type: user_decision
+    source: "User prompt 2026-03-17"
+    finding: >
+      Repo should scale to clinical MLOps platform as needed. Not specifically
+      for regulated use yet, but should prepare for clinical pathway.
+  - type: analysis
+    source: "docs/planning/regops-fda-regulation-reporting-qms-samd-iec62304-mlops-report.md"
+    finding: >
+      Multi-hypothesis analysis (5 hypotheses x 5 factors) recommends phased approach:
+      H1 (minimum viable, NOW) → H2 (after factorial) → H3 (Q3 2026) → H4 (clinical).
+  - type: literature
+    source: "Lähteenmäki et al. 2023 (AHMED, VTT-R-01079-22)"
+    finding: >
+      Documentation takes 70% of effort when manual. Traceability 20-25% of project effort.
+      Automated compliance from Day 1 is orders of magnitude cheaper than retrofit.
+  - type: regulatory
+    source: "FDA Jan 2025 draft guidance + PCCP Dec 2024 + IEC 62304 Ed 2 Aug 2026"
+    finding: >
+      Triple regulatory convergence in 2026. FDA QMSR (Feb 2), EU AI Act (Aug 2),
+      IEC 62304 Edition 2 (Aug 12). Our factorial design maps to PCCP framework.
+implementation:
+  files:
+    - docs/planning/regops-fda-regulation-reporting-qms-samd-iec62304-mlops-report.md
+    - docs/planning/openlineage-marquez-iec62304-report.md
+    - src/minivess/compliance/
+    - src/minivess/observability/lineage.py
+  tests: [tests/v2/unit/test_compliance.py, tests/v2/unit/test_iec62304.py]
+  gap: >
+    Phase 1 (H1) not yet implemented: flows don't emit OpenLineage events,
+    test set access not logged, no model cards generated.
+    Issue #821: P1 for test set documentation and lineage wiring.
+    Issue #799: P1 for OpenLineage flow integration.
+conditional_on:
+  - {parent_decision_id: audit_trail, influence_strength: strong}
+  - {parent_decision_id: lineage_tracking, influence_strength: strong}
+  - {parent_decision_id: container_strategy, influence_strength: moderate}
+volatility:
+  classification: evolving
+  next_review: "2026-04-17"
+  rationale: >
+    Posture established. Implementation pending during PR-C through PR-E.
+    Must be reviewed after IEC 62304 Edition 2 publication (Aug 2026).

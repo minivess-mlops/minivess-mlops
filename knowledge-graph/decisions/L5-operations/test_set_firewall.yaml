@@ -1,0 +1,84 @@
+decision_id: test_set_firewall
+title: "Test Dataset Access Control & Audit Logging"
+level: L5-operations
+status: accepted
+options:
+  - id: audit_log_with_counter
+    name: "AuditTrail logging + cumulative MLflow counter"
+    prior_probability: 0.50
+    posterior_probability: 0.70
+    description: >
+      Every test set evaluation logged via AuditTrail.log_test_evaluation()
+      and AuditTrail.log_data_access(). Cumulative eval/test_set_access_count
+      MLflow metric. OpenLineage InputDataset event for test splits.
+      Sufficient for preclinical; meets FDA test data reuse documentation.
+  - id: role_based_access
+    name: "Role-based access control with notification"
+    prior_probability: 0.25
+    posterior_probability: 0.20
+    description: >
+      Full firewall: only eval_flow can access test data. Human viewing of
+      test results requires regulatory team approval. Webhook notification.
+      Required for Class II/III clinical devices.
+  - id: datalad_inherent
+    name: "Switch to DataLad for inherent action logging"
+    prior_probability: 0.15
+    posterior_probability: 0.05
+    description: >
+      Replace DVC with DataLad. Inherent logging via datalad run.
+      Would lose DVC pipeline management. Not recommended (AHMED comparison).
+  - id: none
+    name: "No test set access control"
+    prior_probability: 0.10
+    posterior_probability: 0.05
+    description: >
+      Status quo. Anyone can view test metrics at any time without logging.
+      FDA $100k+ risk per Giese (2024, Innolitics).
+resolved_option: audit_log_with_counter
+resolution_evidence:
+  - type: literature
+    source: "FDA 2022 CADe guidance"
+    finding: >
+      "You should control the access of your staff to performance results for
+      the test subpopulations and individual cases. Set up a firewall to ensure
+      those outside the regulatory assessment team are insulated from test data."
+  - type: literature
+    source: "Giese 2024, Innolitics"
+    finding: >
+      "FDA could ask about your test data reuse. Worst case: collect new test
+      dataset. For many AI/ML teams, this is a $100k, $200k, or $500k problem."
+  - type: literature
+    source: "Lähteenmäki et al. 2023 (AHMED, VTT), Section 6.2.6"
+    finding: >
+      DataLad inherently logs every action via datalad run, recording each
+      action in Git history. DVC requires manual Git commands separately.
+      Our DVC + OpenLineage + AuditTrail compensatory stack is equivalent.
+  - type: analysis
+    source: "docs/planning/regops-fda-regulation-reporting-qms-samd-iec62304-mlops-report.md"
+    finding: >
+      MinIVess has 2 test contexts: internal 3-fold CV split + 3 external
+      datasets (DeepVess, TubeNet, VesselNN). Neither has access logging.
+      AuditTrail.log_test_evaluation() exists but is never invoked.
+implementation:
+  files:
+    - src/minivess/compliance/audit.py  # log_test_evaluation(), log_data_access()
+    - src/minivess/orchestration/flows/analysis_flow.py  # WHERE TO WIRE
+    - src/minivess/data/test_datasets.py  # DatasetRegistry
+    - src/minivess/data/external_datasets.py  # External dataset discovery
+  tests: [tests/v2/unit/test_compliance.py]
+  gap: >
+    AuditTrail methods exist but are NEVER called from analysis_flow.py.
+    No cumulative counter. No OpenLineage event for test dataset access.
+    Issue #821: P1 — wire during PR-B (evals-factorial-ensembles).
+conditional_on:
+  - {parent_decision_id: audit_trail, influence_strength: strong}
+  - {parent_decision_id: fda_readiness, influence_strength: strong}
+  - {parent_decision_id: lineage_tracking, influence_strength: moderate}
+volatility:
+  classification: evolving
+  next_review: "2026-04-17"
+  rationale: >
+    Must implement during PR-B (eval flow). FDA Jan 2025 draft guidance
+    explicitly requires dataset version traceability and data catalogs.
+    PCCP framework (finalized Dec 2024) requires test set documentation
+    for model update submissions.
