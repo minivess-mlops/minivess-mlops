@@ -5,11 +5,12 @@ status: resolved
 resolved_option: runpod_dev_gcp_prod
 last_updated: "2026-03-16"
 options:
-  - {id: local_gpu, name: "Local GPU (RTX 2070 Super)", prior_probability: 0.35, posterior_probability: 0.30}
-  - {id: runpod_dev, name: "RunPod Dev (RTX 4090, $0.74/hr)", prior_probability: 0.20, posterior_probability: 0.45}
-  - {id: gcp_prod, name: "GCP L4 Spot ($0.19/hr)", prior_probability: 0.15, posterior_probability: 0.20}
+  - {id: runpod_dev_gcp_prod, name: "RunPod Dev + GCP Prod (dual-provider)", prior_probability: 0.25, posterior_probability: 0.65}
+  - {id: local_gpu, name: "Local GPU (RTX 2070 Super)", prior_probability: 0.25, posterior_probability: 0.25}
+  - {id: gcp_only, name: "GCP Only", prior_probability: 0.15, posterior_probability: 0.05}
   - {id: lambda_labs, name: "Lambda Labs (ARCHIVED)", prior_probability: 0.15, posterior_probability: 0.00, archived: true, archived_reason: "No EU availability", archived_date: "2026-03-16"}
-  - {id: colab_pro, name: "Colab Pro", prior_probability: 0.15, posterior_probability: 0.05}
+  - {id: runpod_only, name: "RunPod Only", prior_probability: 0.10, posterior_probability: 0.03}
+  - {id: colab_pro, name: "Colab Pro", prior_probability: 0.10, posterior_probability: 0.02}
 resolution_evidence:
   - type: implementation
     source: "deployment/skypilot/dev_runpod.yaml"
