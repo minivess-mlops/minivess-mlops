@@ -231,3 +231,21 @@ def normalize_metric_key(key: str) -> str:
     if "/" in key:
         return key
     return MIGRATION_MAP.get(key, key)
+
+
+def normalize_metric_dict(metrics: dict[str, object]) -> dict[str, object]:
+    """Normalize all keys in a metric/param dict from old to new convention.
+
+    Useful when reading legacy MLflow runs that use underscore-convention
+    keys. Values are preserved unchanged.
+
+    Parameters
+    ----------
+    metrics:
+        Dictionary with potentially old-convention keys.
+
+    Returns
+    -------
+    New dictionary with all keys normalized to slash-prefix convention.
+    """
+    return {normalize_metric_key(k): v for k, v in metrics.items()}
