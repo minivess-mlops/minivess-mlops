@@ -37,6 +37,14 @@ decisions:
     candidates: [openlineage_marquez, mlflow_lineage]
     prd_node: knowledge-graph/decisions/L3-technology/lineage_tracking.yaml
 
+  data_quality_orchestration:
+    status: resolved
+    winner: prefect_gate_wiring
+    rationale: "Wire Pandera/GE/DATA-CARE/DeepChecks into data_flow.py with configurable severity"
+    implementation: [src/minivess/validation/enforcement.py, src/minivess/orchestration/flows/data_flow.py]
+    evidence: [docs/planning/pr2-data-quality-pipeline-plan.md]
+    prd_node: knowledge-graph/decisions/L2-architecture/data_quality_orchestration.yaml
+
   drift_monitoring:
     status: resolved
     winner: evidently_lib

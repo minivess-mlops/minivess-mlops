@@ -43,5 +43,12 @@ drift_report_dir = "reports/drift"
 dvc_remote = "minio"
 data_dir = "data"
 
+# Data Quality Gates (PR-2)
+# Severity levels: 'error' = halt pipeline, 'warning' = tag MLflow + continue, 'info' = log only
+data_quality_gate_pandera = "error"
+data_quality_gate_ge = "warning"
+data_quality_gate_datacare = "warning"
+data_quality_gate_deepchecks = "info"
+
 # Testing
 test_markers = "unit"
