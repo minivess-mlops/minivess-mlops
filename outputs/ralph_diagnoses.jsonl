@@ -30,3 +30,7 @@
 {"event":"cluster_up","timestamp":"2026-03-14T20:08:05Z","cloud":"lambda"}
 {"event":"cluster_up","timestamp":"2026-03-14T20:09:16Z","cloud":"lambda"}
 {"ts": "2026-03-16T16:42:42.381730Z", "phase": "P3.DIAGNOSE", "job_id": 1, "job_status": "STARTING_HANG", "category": "DOCKER_AUTH_FAIL", "diagnosis": "GHCR package is private \u2014 RunPod cannot pull without credentials", "duration_minutes": 40, "fix": "Make GHCR package public OR pass docker-login to SkyPilot", "cumulative_cost_usd": 0.11, "attempt": 1}
+{"event":"verification_launch","timestamp":"2026-03-17T02:30:06Z","cloud":"runpod","region":"EU-RO-1","gpu":"RTX4090","issue":"#754","status":"SETUP_FAILED","diagnosis":"mamba-ssm build error on Python 3.13 (bare_metal_version undefined)","cost_usd":0.02}
+{"event":"fix_applied","timestamp":"2026-03-17T02:34:07Z","fix":"Replace --all-extras with explicit --extra list excluding mamba-ssm","file":"deployment/skypilot/dev_runpod.yaml"}
+{"event":"verification_relaunch","timestamp":"2026-03-17T02:34:35Z","cloud":"runpod","region":"EU-RO-1","gpu":"RTX4090","issue":"#754"}
+{"event":"verification_succeeded","timestamp":"2026-03-17T02:37:00Z","cloud":"runpod","region":"EU-RO-1","gpu":"RTX4090","provisioning_seconds":60,"setup_seconds":90,"training_seconds":25,"total_seconds":175,"cost_usd":0.04,"model":"dynunet","vram_peak_mb":1370,"mlflow_tracking":"file-based","infra_timing_entries":14}
