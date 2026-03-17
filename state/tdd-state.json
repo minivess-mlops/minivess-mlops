@@ -1,27 +1,23 @@
 {
-  "plan_file": "docs/planning/pr-a-biostatistics-gaps-plan.xml",
+  "plan_file": "docs/planning/pr-d-deploy-flow-plan.xml",
   "plan_version": "1.0",
   "execution_mode": "autonomous",
-  "current_task_id": null,
-  "current_phase": null,
+  "current_task_id": "T1",
+  "current_phase": "RED",
   "inner_iteration": 0,
   "tasks": {
-    "T1": { "status": "DONE", "phase": "CONVERGED", "iterations": 2, "issue_ref": "#808" },
-    "T2": { "status": "DONE", "phase": "CONVERGED", "iterations": 1, "issue_ref": "#809" },
-    "T3": { "status": "DONE", "phase": "CONVERGED", "iterations": 1, "issue_ref": "#810" },
-    "T4": { "status": "DONE", "phase": "CONVERGED", "iterations": 2, "issue_ref": "#811" },
-    "T5": { "status": "DONE", "phase": "CONVERGED", "iterations": 1, "issue_ref": "#812" },
-    "T6": { "status": "DONE", "phase": "CONVERGED", "iterations": 1, "issue_ref": "#813" },
-    "T7": { "status": "DONE", "phase": "CONVERGED", "iterations": 1, "issue_ref": "#814" },
-    "T8": { "status": "NOT_STARTED", "phase": null, "iterations": 0, "issue_ref": "#815" },
-    "T9": { "status": "DONE", "phase": "CONVERGED", "iterations": 1, "issue_ref": "#816" }
+    "T1": { "status": "IN_PROGRESS", "phase": "RED", "iterations": 0, "issue_ref": "#825" },
+    "T2": { "status": "NOT_STARTED", "phase": null, "iterations": 0, "issue_ref": "#826" },
+    "T3": { "status": "NOT_STARTED", "phase": null, "iterations": 0, "issue_ref": "#827" },
+    "T4": { "status": "NOT_STARTED", "phase": null, "iterations": 0, "issue_ref": "#828" },
+    "T5": { "status": "NOT_STARTED", "phase": null, "iterations": 0, "issue_ref": "#829" }
   },
   "convergence": {
     "reached": false,
-    "tasks_done": 8,
-    "tasks_total": 9,
+    "tasks_done": 0,
+    "tasks_total": 5,
     "tasks_stuck": 0
   },
-  "session_inner_iterations": 12,
-  "session_start": "2026-03-17T10:00:00Z"
+  "session_inner_iterations": 0,
+  "session_start": "2026-03-17T12:00:00Z"
 }
