@@ -597,3 +597,82 @@ def _generate_instability_plot(
         paths=paths,
         sidecar_path=sidecar_path,
     )
+
+
+def generate_cost_breakdown_figure(
+    cost_summary: dict[str, Any],
+    output_dir: Path,
+) -> FigureArtifact:
+    """Generate cost breakdown stacked bar chart.
+
+    X-axis: model families, Y-axis: cost in USD.
+    Stacked segments for each phase (training, post_training, debug, etc.).
+
+    Parameters
+    ----------
+    cost_summary:
+        Dict with ``cost_by_model`` and ``cost_by_phase`` keys.
+    output_dir:
+        Output directory for figure files.
+
+    Returns
+    -------
+    FigureArtifact with paths to PNG and JSON sidecar.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    cost_by_model = cost_summary.get("cost_by_model", {})
+    total_spot = cost_summary.get("total_spot_cost_usd", 0.0)
+    savings_pct = cost_summary.get("savings_pct", 0.0)
+
+    models = sorted(cost_by_model.keys())
+    costs = [cost_by_model[m] for m in models]
+
+    with matplotlib.rc_context(_RC_PARAMS):
+        fig, ax = plt.subplots(figsize=(8, 5))
+
+        colors = [OKABE_ITO[i % len(OKABE_ITO)] for i in range(len(models))]
+        bars = ax.bar(models, costs, color=colors, edgecolor="black", linewidth=0.5)
+
+        ax.set_xlabel("Model Family")
+        ax.set_ylabel("Cost (USD)")
+        ax.set_title(
+            f"Training Cost by Model (total=${total_spot:.2f}, "
+            f"spot savings={savings_pct:.1f}%)"
+        )
+
+        # Add value labels on bars
+        for bar, cost in zip(bars, costs, strict=True):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                bar.get_height() + 0.05,
+                f"${cost:.2f}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
+
+        fig.tight_layout()
+
+    fig_id = "cost_breakdown"
+    paths = _save_figure(fig, output_dir, fig_id)
+    plt.close(fig)
+
+    sidecar_path = output_dir / f"{fig_id}.json"
+    sidecar_data = {
+        "figure_id": fig_id,
+        "title": "Training Cost Breakdown",
+        "generated_at": datetime.now(UTC).isoformat(),
+        "models": models,
+        "costs": costs,
+        "total_spot_cost_usd": total_spot,
+        "savings_pct": savings_pct,
+    }
+    write_sidecar(sidecar_data, sidecar_path)
+
+    return FigureArtifact(
+        figure_id=fig_id,
+        title="Training Cost Breakdown",
+        paths=paths,
+        sidecar_path=sidecar_path,
+    )
