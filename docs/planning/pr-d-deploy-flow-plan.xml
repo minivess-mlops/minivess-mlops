@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan version="1.0" name="pr-d-deploy-flow">
+
+  <metadata>
+    <created>2026-03-17</created>
+    <branch>feat/deploy-flow-factorial</branch>
+    <pr_label>PR-D</pr_label>
+    <execution_order>4 of 5</execution_order>
+    <literature_report>docs/planning/pre-full-gcp-training-qa-plan.md</literature_report>
+    <description>
+      Verify and extend the deploy flow for factorial experiment champion models.
+      The deploy flow already has 5 tasks (discover, export, import, generate, promote).
+      This PR adds verification of the full pipeline from MLflow to BentoML serving,
+      and extends champion metadata logging for the factorial context.
+    </description>
+    <existing_infrastructure>
+      deploy_flow.py: 5 tasks, ONNX export, BentoML import, champion promotion
+      mlflow_wrapper.py: MiniVessSegModel + MiniVessEnsembleModel pyfunc
+      bento_model_import.py: BentoML model import utilities
+      deploy_artifacts.py: bentofile, docker-compose, README generation
+    </existing_infrastructure>
+  </metadata>
+
+  <!-- Phase 0: MLflow Model Registry Verification -->
+  <phase id="0" name="Model Registry Verification">
+
+    <task id="T1" status="NOT_STARTED" priority="P0">
+      <name>Champion model selection from factorial results</name>
+      <description>
+        Extend the champion discovery logic to select the best model from the
+        factorial experiment results. The champion is selected by:
+
+        1. Query all evaluation runs with experiment_name="factorial_evaluation_v1"
+        2. Rank by compound metric: 0.5*clDice + 0.5*normalize(MASD)
+        3. Apply fold_strategy=cv_average (standard inference mode)
+        4. Select the best ensemble configuration
+
+        The champion must be a single deployable artifact — either:
+        - A single checkpoint (best single model, no ensemble)
+        - A CV-average pyfunc (3 fold checkpoints)
+        - A hierarchical ensemble pyfunc (multiple models)
+
+        Tag the champion in MLflow Model Registry with:
+        - champion/model, champion/loss, champion/aux_calib
+        - champion/post_training, champion/fold_strategy, champion/ensemble
+        - champion/cldice, champion/masd, champion/dsc
+        - champion/compound_metric
+      </description>
+      <tdd_spec>
+        <tests>
+          test_champion_selection_from_factorial
+          test_champion_selection_compound_metric
+          test_champion_selection_cv_average_preferred
+          test_champion_metadata_tags
+          test_champion_registry_promotion
+        </tests>
+        <file>tests/v2/unit/test_champion_factorial_selection.py</file>
+        <impl_files>
+          src/minivess/serving/champion_evaluator.py
+          src/minivess/orchestration/flows/deploy_flow.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - Selects model with best compound metric
+        - Champion tagged with all factorial factors
+        - Champion promoted to MLflow Model Registry
+        - Works with all 3 artifact types (single, cv-avg, ensemble)
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/serving/champion_evaluator.py
+        src/minivess/orchestration/flows/deploy_flow.py
+        tests/v2/unit/test_champion_factorial_selection.py (new)
+      </files_to_modify>
+      <estimated_iterations>3</estimated_iterations>
+    </task>
+
+    <task id="T2" status="NOT_STARTED" priority="P0">
+      <name>BentoML import chain verification</name>
+      <description>
+        End-to-end test of the MLflow → ONNX → BentoML import chain.
+        Uses a mock model to verify:
+
+        1. Champion checkpoint loads from MLflow artifact store
+        2. ONNX export succeeds (opset 17)
+        3. ONNX model validates (onnxruntime inference produces correct shape)
+        4. BentoML model store import succeeds
+        5. BentoML tag is retrievable
+
+        This is a pre-deployment verification gate — if this test fails,
+        the deploy flow should NOT proceed to serving.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_onnx_export_shape
+          test_onnx_runtime_inference
+          test_bentoml_import_from_onnx
+          test_bentoml_model_retrievable
+          test_import_chain_end_to_end
+        </tests>
+        <file>tests/v2/integration/test_deploy_import_chain.py</file>
+        <impl_files>
+          src/minivess/serving/bento_model_import.py
+          src/minivess/orchestration/flows/deploy_flow.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T1</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - ONNX export produces valid .onnx file
+        - ORT inference matches PyTorch output (within tolerance)
+        - BentoML import creates model in store
+        - Model tag follows naming convention
+        - End-to-end chain completes without error
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/serving/bento_model_import.py
+        tests/v2/integration/test_deploy_import_chain.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T3" status="NOT_STARTED" priority="P1">
+      <name>Serving endpoint health check</name>
+      <description>
+        Add a health check task to the deploy flow that verifies the BentoML
+        serving endpoint is responsive after deployment.
+
+        1. Start BentoML server (or verify it's already running)
+        2. Send health check request to /healthz endpoint
+        3. Send inference request with synthetic volume
+        4. Verify response shape matches (B, 2, D, H, W)
+        5. Log health check result to MLflow
+
+        This is a smoke test, not a full evaluation — just verifies the
+        serving pipeline is functional.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_health_check_endpoint
+          test_health_check_inference
+          test_health_check_response_shape
+          test_health_check_mlflow_logging
+        </tests>
+        <file>tests/v2/unit/test_deploy_health_check.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/deploy_flow.py
+          src/minivess/dashboard/adapters/bentoml_adapter.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T2</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - Health endpoint returns 200
+        - Inference returns correct shape
+        - Result logged to MLflow
+        - Graceful failure if server not running (logs warning, does not crash)
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/deploy_flow.py
+        tests/v2/unit/test_deploy_health_check.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T4" status="NOT_STARTED" priority="P1">
+      <name>Champion metadata logging for manuscript</name>
+      <description>
+        Log comprehensive champion metadata to MLflow for the manuscript:
+
+        - Model architecture details (param count, VRAM, FLOPs estimate)
+        - Training details (loss, epochs, aux_calib, fold strategy)
+        - Performance (all metrics with CIs on validation set)
+        - Post-training details (SWA method, recalibration)
+        - Ensemble details (strategy, n_members)
+        - TRIPOD compliance status (link to compliance matrix)
+        - Deployment details (ONNX opset, BentoML tag, Docker image)
+
+        This metadata feeds into the biostatistics flow's lineage manifest
+        and the manuscript's model specification section (TRIPOD 22).
+      </description>
+      <tdd_spec>
+        <tests>
+          test_champion_metadata_complete
+          test_champion_metadata_architecture_fields
+          test_champion_metadata_performance_fields
+          test_champion_metadata_tripod_link
+        </tests>
+        <file>tests/v2/unit/test_champion_metadata.py</file>
+        <impl_files>
+          src/minivess/serving/champion_evaluator.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>
+        <dep>T1</dep>
+      </dependencies>
+      <acceptance_criteria>
+        - All metadata fields present and non-null
+        - Architecture fields include param_count and vram_gb
+        - Performance fields include all 3 primary metrics with CIs
+        - TRIPOD compliance link points to compliance matrix
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/serving/champion_evaluator.py
+        tests/v2/unit/test_champion_metadata.py (new)
+      </files_to_modify>
+      <estimated_iterations>2</estimated_iterations>
+    </task>
+
+    <task id="T5" status="NOT_STARTED" priority="P1" issue="799">
+      <name>OpenLineage event emission for deploy flow</name>
+      <description>
+        Wire LineageEmitter.pipeline_run() to deploy_flow.py.
+        Inputs: champion_model, mlflow_registry
+        Outputs: onnx_export, bentoml_model, deployment_artifacts
+
+        The deploy flow lineage is especially important for clinical pathway:
+        it documents which model version was deployed, when, and with what
+        configuration — directly satisfying IEC 62304 Clause 8.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_deploy_flow_emits_lineage
+          test_deploy_flow_lineage_champion_metadata
+        </tests>
+        <file>tests/v2/unit/test_flow_lineage_emission.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/deploy_flow.py
+        </impl_files>
+      </tdd_spec>
+      <acceptance_criteria>
+        - OpenLineage events emitted for deploy flow
+        - Champion model metadata captured in event
+        - Deployment artifacts recorded as output datasets
+      </acceptance_criteria>
+      <files_to_modify>
+        src/minivess/orchestration/flows/deploy_flow.py
+        tests/v2/unit/test_flow_lineage_emission.py
+      </files_to_modify>
+      <estimated_iterations>1</estimated_iterations>
+    </task>
+  </phase>
+
+</plan>

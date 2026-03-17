@@ -1,0 +1,137 @@
+decision_id: vlm_calibration
+title: "VLM/Foundation Model Calibration Strategy"
+level: L3-technology
+status: planned
+description: >
+  Calibration approaches specific to Vision-Language Models and foundation models
+  (SAM3, VesselFM). Standard calibration methods (temperature scaling, isotonic
+  regression) treat softmax outputs as if all predictions carry equal evidence.
+  VLM-specific approaches (SaE, CalibPrompt) recognize that similarity/attention
+  scores from pre-trained encoders may be weak or conflicting evidence for
+  domain-specific tasks like microvasculature segmentation.
+
+  This is FUTURE WORK — not part of the current factorial design.
+  The factorial design uses:
+  - c=2 factor: hL1-ACE auxiliary loss (training-time, all models)
+  - p=2 factor: temperature scaling (post-hoc, all models)
+
+  VLM-specific calibration would be an additional layer for SAM3/VesselFM only.
+
+options:
+  - id: sae_dirichlet
+    name: "SaE: Similarity-as-Evidence (Dirichlet)"
+    prior_probability: 0.40
+    posterior_probability: 0.40
+    description: >
+      Similarity Evidence Head (SEH) reinterprets similarity vectors as evidence
+      for a Dirichlet distribution. Decomposes into vacuity (knowledge gap) and
+      dissonance (conflicting evidence). Designed for CLIP-style VLMs.
+      Adaptation needed for SAM3's prompt encoder (not text-image similarity).
+    reference: sae_2026_vlm_calibration
+
+  - id: calibprompt
+    name: "CalibPrompt: Calibration-Aware Prompt Learning"
+    prior_probability: 0.25
+    posterior_probability: 0.25
+    description: >
+      Learnable prompts with smoothed accuracy alignment and angular separation
+      loss. Addresses calibration through prompt engineering.
+    reference: basu_2025_calibprompt
+
+  - id: evidential_deep_learning
+    name: "Evidential Deep Learning (general)"
+    prior_probability: 0.20
+    posterior_probability: 0.20
+    description: >
+      General Dirichlet-based uncertainty for any DNN (not VLM-specific).
+      Places Dirichlet prior on softmax outputs. Could apply to both
+      VLM and non-VLM models (DynUNet, MambaVesselNet++).
+    reference: "Sensoy et al. (2018). Evidential Deep Learning. NeurIPS."
+
+  - id: standard_only
+    name: "Standard calibration only (temperature + conformal)"
+    prior_probability: 0.15
+    posterior_probability: 0.15
+    description: >
+      No VLM-specific calibration. Use temperature scaling and conformal
+      prediction as in the factorial design (c=2, p=2 factors).
+
+applicability:
+  sam3_vanilla_zeroshot:
+    relevance: high
+    rationale: >
+      Most directly applicable. SAM3's prompt-image attention scores are
+      analogous to CLIP text-image similarities. SaE could quantify the
+      domain gap (natural images → microvasculature) as high vacuity.
+  sam3_topolora_finetuned:
+    relevance: moderate
+    rationale: >
+      Finetuning changes feature space, but Dirichlet UQ could still
+      improve over temperature scaling during early training stages.
+  sam3_hybrid_finetuned:
+    relevance: moderate
+    rationale: >
+      Hybrid uses frozen SAM3 features + trainable DynUNet. The frozen
+      SAM3 component still has VLM overconfidence characteristics.
+  vesselfm_zeroshot:
+    relevance: low
+    rationale: >
+      VesselFM is DynUNet-based (NOT a VLM). No text encoder, no
+      text-image similarities. Evidential deep learning could apply
+      but SaE specifically does not.
+  vesselfm_finetuned:
+    relevance: low
+    rationale: Same as zero-shot — VesselFM is not a VLM architecture.
+  dynunet:
+    relevance: none
+    rationale: Not a VLM. Standard calibration (c=2, p=2) is sufficient.
+  mambavesselnet:
+    relevance: none
+    rationale: Not a VLM. Standard calibration (c=2, p=2) is sufficient.
+
+manuscript_placement:
+  section: Discussion
+  subsection: "Calibration of Vision-Language Foundation Models"
+  purpose: >
+    Future work discussion. Contrast standard calibration (our factorial factors
+    c=2, p=2) with VLM-specific approaches. Argue that as foundation models
+    become more prevalent in biomedical segmentation, domain-specific calibration
+    becomes critical. SaE's vacuity/dissonance decomposition is more interpretable
+    than scalar ECE for understanding model limitations.
+
+resolution_evidence:
+  - type: literature
+    citation_key: sae_2026_vlm_calibration
+    source: "CVPR 2026 (arXiv TBD)"
+    finding: "Dirichlet-based evidence estimation outperforms temperature scaling for VLM calibration"
+  - type: literature
+    citation_key: barfoot_2025_average_calibration_losses
+    source: "https://arxiv.org/abs/2506.03942"
+    finding: "mL1-ACE auxiliary loss improves segmentation calibration at training time"
+  - type: literature
+    citation_key: basu_2025_calibprompt
+    source: "https://arxiv.org/abs/2509.15226"
+    finding: "Prompt learning can improve medical VLM calibration without architectural changes"
+  - type: internal
+    source: "docs/figures/sae-vlm-calibration-framework.jpeg"
+    finding: "SaE framework diagram showing SEH + Dirichlet decomposition"
+
+implementation:
+  files: []
+  tests: []
+  github_issue: 798
+
+conditional_on:
+  - {parent_decision_id: calibration_method, influence_strength: strong}
+  - {parent_decision_id: uncertainty_framework, influence_strength: strong}
+  - {parent_decision_id: foundation_model, influence_strength: moderate}
+
+volatility:
+  classification: speculative
+  last_assessed: "2026-03-17"
+  next_review: "2026-06-17"
+  change_drivers:
+    - "SaE paper arXiv preprint availability"
+    - "CVPR 2026 proceedings release"
+    - "SAM3 zero-shot calibration results from factorial experiment"
+    - "Community adoption of evidential deep learning for segmentation"
