@@ -1,10 +1,10 @@
 # Biomedical Agentic AI: From MLOps Platform Extensions to Autonomous Scientific Discovery
 
-**Status**: Complete (v1.0)
+**Status**: Complete (v1.1 — updated with full agent research results)
 **Date**: 2026-03-18
 **Branch**: fix/fda-readiness-improvement-xml
 **Audience**: NEUROVEX manuscript discussion, repo README, KG updates, GitHub issues
-**Paper count**: 62 papers (27 seeds + 35 web-discovered)
+**Paper count**: 70 papers (27 seeds + 43 web-discovered)
 
 ---
 
@@ -136,7 +136,13 @@ NEUROVEX's two-tier architecture (Prefect deterministic + Pydantic AI optional) 
 
 No surveyed medical agentic system uses a Bayesian probabilistic knowledge graph as agent memory. This is NEUROVEX's potential contribution to the field: demonstrating that decision nodes with posterior probabilities, conditioned on experimental evidence, can serve as a principled substrate for agent decision-making. When the drift triage agent queries the KG node for `loss_function` (posterior: 0.85 for `cbdice_cldice`), it receives not just a recommendation but a calibrated confidence score grounded in factorial experimental results. This is fundamentally different from prompting an LLM with "what loss function should I use?" and hoping for a reasonable answer.
 
-### 6.3 Manuscript Discussion — Future Work Directions
+### 6.3 Critical Cautionary Finding: LLM Agents May Not Respond to Experimental Feedback
+
+[EMNLP Findings (2025). "LLMs for Bayesian Optimization in Scientific Domains: Are We There Yet?"](https://aclanthology.org/2025.findings-emnlp.838/) reveals that LLM agents show **no sensitivity to experimental feedback** — random labels have no impact on their suggestions. This is a critical finding for any platform considering LLM-driven experiment design. The correct architecture is: use LLMs for priors and warmstarting (as in LLAMBO, Liu et al. 2024, ICLR), but rely on proper Bayesian optimization for the actual search loop. This validates NEUROVEX's Optuna+ASHA approach over pure LLM-driven HPO.
+
+[Lopes et al. (2026). "Engineering AI Agents for Clinical Workflows." *IEEE/ACM CAIN '26*.](https://arxiv.org/abs/2602.00751) reports that 80% of engineering effort in their production clinical AI system ("Maria") was data engineering, stakeholder alignment, and governance — not model development. This finding reinforces NEUROVEX's emphasis on infrastructure (Docker, Prefect, MLflow, OpenLineage) over model sophistication.
+
+### 6.4 Manuscript Discussion — Future Work Directions
 
 For the NEUROVEX Nature Protocols manuscript discussion section, we propose the following future research directions:
 
@@ -245,6 +251,14 @@ For the NEUROVEX Nature Protocols manuscript discussion section, we propose the 
 60. [Wang, Z. et al. (2025). "MedAgent-Pro: Evidence-based Multi-modal Medical Diagnosis." *arXiv:2503.18968*.](https://arxiv.org/abs/2503.18968)
 61. [Yang, C. et al. (2025). "LungNoduleAgent: Collaborative Multi-Agent System." *AAAI 2026, arXiv:2511.21042*.](https://arxiv.org/abs/2511.21042)
 62. [Zheng, T. et al. (2025). "From Automation to Autonomy: LLMs in Scientific Discovery." *EMNLP 2025*.](https://aclanthology.org/2025.emnlp-main.895/)
+63. [Lopes, C.L.V. et al. (2026). "Engineering AI Agents for Clinical Workflows: Architecture, MLOps, and Governance." *IEEE/ACM CAIN '26, arXiv:2602.00751*.](https://arxiv.org/abs/2602.00751)
+64. [Qu, Y. et al. (2025). "CRISPR-GPT for agentic automation of gene-editing experiments." *Nature Biomedical Engineering*.](https://www.nature.com/articles/s41551-025-01463-z)
+65. [MedSAM3 (2025). "Delving into Segment Anything with Medical Concepts." *arXiv:2511.19046*.](https://arxiv.org/abs/2511.19046)
+66. [Hickman, R.J. et al. (2025). "Atlas: a brain for self-driving laboratories." *Digital Discovery*, RSC.](https://pubs.rsc.org/en/content/articlehtml/2025/dd/d4dd00115j)
+67. [Nouri, N. et al. (2026). "CellAtria: Agentic AI framework for scRNA-seq data analysis." *npj AI*.](https://www.nature.com/articles/s44387-025-00064-0)
+68. [MITRE (2025). "SAFE-AI: A Framework for Securing AI-Enabled Systems." *MITRE MP250397*.](https://atlas.mitre.org/pdf-files/SAFEAI_Full_Report.pdf)
+69. [EMNLP Findings (2025). "LLMs for Bayesian Optimization in Scientific Domains: Are We There Yet?"](https://aclanthology.org/2025.findings-emnlp.838/)
+70. [Roohani, Y. et al. (2024). "BioDiscoveryAgent: AI Agent for Designing Genetic Perturbation Experiments." *arXiv:2405.17631*.](https://arxiv.org/abs/2405.17631)
 
 ---
 
