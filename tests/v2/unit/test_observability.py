@@ -239,14 +239,14 @@ class TestExperimentTrackerLocalBackend:
         )
         with tracker.start_run() as run_id:
             tracker.log_epoch_metrics(
-                {"train_loss": 0.5, "val_loss": 0.3},
+                {"train/loss": 0.5, "val/loss": 0.3},
                 step=1,
             )
 
         client = MlflowClient(tracking_uri=local_tracking_uri)
         run = client.get_run(run_id)
-        assert float(run.data.metrics["train_loss"]) == pytest.approx(0.5)
-        assert float(run.data.metrics["val_loss"]) == pytest.approx(0.3)
+        assert float(run.data.metrics["train/loss"]) == pytest.approx(0.5)
+        assert float(run.data.metrics["val/loss"]) == pytest.approx(0.3)
 
     def test_log_model_info(
         self,
@@ -396,7 +396,7 @@ class TestExperimentTrackerLocalBackend:
         client = MlflowClient(tracking_uri=local_tracking_uri)
         run = client.get_run(run_id)
         arch_params = {
-            k: v for k, v in run.data.params.items() if k.startswith("arch_")
+            k: v for k, v in run.data.params.items() if k.startswith("arch/")
         }
         assert arch_params == {}
 
@@ -416,12 +416,12 @@ class TestExperimentTrackerLocalBackend:
 
         client = MlflowClient(tracking_uri=local_tracking_uri)
         run = client.get_run(run_id)
-        # These fields were missing in v1
-        assert "weight_decay" in run.data.params
-        assert "warmup_epochs" in run.data.params
-        assert "gradient_clip_val" in run.data.params
-        assert "gradient_checkpointing" in run.data.params
-        assert "early_stopping_patience" in run.data.params
+        # These fields use slash-prefix per #790
+        assert "train/weight_decay" in run.data.params
+        assert "train/warmup_epochs" in run.data.params
+        assert "train/gradient_clip_val" in run.data.params
+        assert "train/gradient_checkpointing" in run.data.params
+        assert "train/early_stopping_patience" in run.data.params
 
     def test_run_failure_sets_failed_status(
         self,
@@ -480,9 +480,9 @@ class TestExperimentTrackerLocalBackend:
 
         client = MlflowClient(tracking_uri=local_tracking_uri)
         run = client.get_run(run_id)
-        assert "sys_python_version" in run.data.params
-        assert "sys_torch_version" in run.data.params
-        assert "sys_git_commit" in run.data.params
+        assert "sys/python_version" in run.data.params
+        assert "sys/torch_version" in run.data.params
+        assert "sys/git_commit" in run.data.params
 
     def test_git_hash_auto_logged_as_tag(
         self,
@@ -565,11 +565,11 @@ class TestExperimentTrackerLocalBackend:
 
         client = MlflowClient(tracking_uri=local_tracking_uri)
         run = client.get_run(run_id)
-        assert run.data.params["data_n_volumes"] == "3"
-        assert run.data.params["data_total_size_gb"] == "4.19"
-        assert "data_min_shape" in run.data.params
-        assert "data_max_shape" in run.data.params
-        assert "data_median_spacing" in run.data.params
+        assert run.data.params["data/n_volumes"] == "3"
+        assert run.data.params["data/total_size_gb"] == "4.19"
+        assert "data/min_shape" in run.data.params
+        assert "data/max_shape" in run.data.params
+        assert "data/median_spacing" in run.data.params
 
     def test_log_dataset_profile_artifact(
         self,
@@ -650,8 +650,8 @@ class TestExperimentTrackerLocalBackend:
 
         client = MlflowClient(tracking_uri=local_tracking_uri)
         run = client.get_run(run_id)
-        assert run.data.params["cfg_project_name"] == "minivess-mlops-v2"
-        assert run.data.params["cfg_dvc_remote"] == "minio"
+        assert run.data.params["cfg/project_name"] == "minivess-mlops-v2"
+        assert run.data.params["cfg/dvc_remote"] == "minio"
 
     def test_log_dynaconf_config_logs_environment_tag(
         self,
@@ -659,7 +659,7 @@ class TestExperimentTrackerLocalBackend:
         local_tracking_uri: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """log_dynaconf_config should log cfg_environment tag."""
+        """log_dynaconf_config should log cfg/environment tag."""
         from mlflow.tracking import MlflowClient
 
         from minivess.config.settings import clear_settings_cache
@@ -682,10 +682,10 @@ class TestExperimentTrackerLocalBackend:
         local_tracking_uri: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """log_dynaconf_config should log cfg_project_name and cfg_data_dir.
+        """log_dynaconf_config should log cfg/project_name and cfg/data_dir.
 
         Rule #22: mlflow_tracking_uri is NOT in Dynaconf settings.toml,
-        so cfg_mlflow_tracking_uri will NOT appear in logged params.
+        so cfg/mlflow_tracking_uri will NOT appear in logged params.
         Only keys present in the Dynaconf singleton are logged.
         """
         from mlflow.tracking import MlflowClient
@@ -702,8 +702,8 @@ class TestExperimentTrackerLocalBackend:
 
         client = MlflowClient(tracking_uri=local_tracking_uri)
         run = client.get_run(run_id)
-        assert "cfg_mlflow_tracking_uri" not in run.data.params
-        assert "cfg_project_name" in run.data.params
+        assert "cfg/mlflow_tracking_uri" not in run.data.params
+        assert "cfg/project_name" in run.data.params
 
     def test_log_dynaconf_config_backwards_compat_path(
         self,
@@ -963,7 +963,10 @@ class TestExperimentTrackerLocalBackend:
 
         client = MlflowClient(tracking_uri=local_tracking_uri)
         run = client.get_run(run_id)
-        assert run.data.params["split_mode"] == "file"
+        assert (
+            run.data.params.get("split_mode", run.data.params.get("data/split_mode"))
+            == "file"
+        )
 
     def test_log_fold_splits_logs_splits_file_tag(
         self,
@@ -1145,8 +1148,8 @@ class TestTrainerMLflowIntegration:
         # Verify metrics logged
         client = MlflowClient(tracking_uri=local_tracking_uri)
         run = client.get_run(run_id)
-        assert "train_loss" in run.data.metrics
-        assert "val_loss" in run.data.metrics
+        assert "train/loss" in run.data.metrics
+        assert "val/loss" in run.data.metrics
         assert summary["final_epoch"] == 2
 
     def test_trainer_logs_learning_rate(

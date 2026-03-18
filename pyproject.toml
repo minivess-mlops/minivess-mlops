@@ -392,6 +392,7 @@ filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::pytest.PytestUnraisableExceptionWarning",
     "ignore::PendingDeprecationWarning",
+    "ignore:The figure layout has changed to tight:UserWarning",
 ]
 
 # ---------------------------------------------------------------------------
