@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<literature-report-plan version="1.0" name="R4-regulatory-postmarket">
+
+  <metadata>
+    <theme-id>R4</theme-id>
+    <title>Regulatory Compliance and Post-Market Surveillance for MLOps-Driven Medical AI</title>
+    <output-path>docs/planning/lit-report-regulatory-postmarket.md</output-path>
+    <parent-plan>docs/planning/batch-literature-research-report.xml</parent-plan>
+    <skill>create-literature-report v2.1.0</skill>
+    <target-paper-count>35</target-paper-count>
+    <quality-target>MINOR_REVISION</quality-target>
+  </metadata>
+
+  <invocation-prompt>
+    create literature report on "Regulatory Compliance and Post-Market Surveillance for MLOps-Driven Medical AI"
+
+    Focus: QMSR (Feb 2026) + PCCP + IEC 62304 + TRIPOD+AI mapped to MLOps
+    pipelines. OpenLineage as IEC 62304 Clause 8 audit trail. SBOM (CycloneDX)
+    as FDA requirement. Post-market surveillance via drift detection + automated
+    retraining triggers. How our factorial design IS a PCCP template (K252366
+    as blueprint). The locked→adaptive model lifecycle. CI/CD as production
+    controls under QMSR. MedMLOps four pillars alignment.
+
+    Context: This repo already has OpenLineage wired into 5 flows, CycloneDX
+    SBOM generation, and drift detection via Evidently. The fda-insights-second-pass.md
+    covers the landscape but not the implementation mapping. This report should
+    bridge the gap between regulatory requirements and our actual codebase.
+
+    EXCLUDED topics:
+    - Agentic AI governance (covered in report 5 §5)
+    - Post-training method selection (report R1)
+    - Ensemble evaluation methodology (report R2)
+    - Multi-site data architecture (report R3, except privacy aspects)
+
+    Repo context: /home/petteri/Dropbox/github-personal/minivess-mlops
+    KG domains to update: operations, infrastructure, testing
+    Manuscript section: Discussion: Regulatory-Native MLOps (future work)
+  </invocation-prompt>
+
+  <seed-papers>
+    <paper>Collins et al. (2024). "TRIPOD+AI: An updated reporting guideline for clinical prediction model studies." BMJ 385, e078378. https://doi.org/10.1136/bmj-2023-078378</paper>
+    <paper>Gallifant et al. (2025). "TRIPOD-LLM: Reporting guideline for studies using LLMs." Nature Medicine. https://doi.org/10.1038/s41591-024-03425-5</paper>
+    <paper>FDA (2021). "Artificial Intelligence/Machine Learning (AI/ML)-Based Software as a Medical Device (SaMD) Action Plan." https://www.fda.gov/media/145022/download</paper>
+    <paper>de Almeida et al. (2025). "Medical machine learning operations." European Radiology. https://link.springer.com/article/10.1007/s00330-025-11654-6</paper>
+    <paper>Vokinger et al. (2021). "Mitigating bias in machine learning for medicine." Communications Medicine 1, 25. https://doi.org/10.1038/s43856-021-00028-w</paper>
+    <paper>Muehlematter et al. (2021). "Approval of AI-based medical devices in the USA and Europe." Lancet Digital Health 3(3), e195-e203. https://doi.org/10.1016/S2589-7500(20)30292-2</paper>
+    <paper>Pianykh et al. (2020). "Continuous Learning AI in Radiology." Radiology 297(1), 6-14. https://doi.org/10.1148/radiol.2020200038</paper>
+    <paper>Feng et al. (2022). "Clinical AI Quality Improvement." Nature Medicine 28, 1423-1428. https://doi.org/10.1038/s41591-022-01895-z</paper>
+  </seed-papers>
+
+  <search-domains>
+    <domain>QMSR 2026 medical device software quality management</domain>
+    <domain>PCCP predetermined change control plan FDA AI ML 2025 2026</domain>
+    <domain>IEC 62304 MLOps traceability audit trail 2024 2025</domain>
+    <domain>SBOM CycloneDX medical device software 2025</domain>
+    <domain>post-market surveillance AI drift detection retraining 2024 2025</domain>
+    <domain>TRIPOD AI reporting guideline validation clinical prediction 2025</domain>
+  </search-domains>
+
+</literature-report-plan>

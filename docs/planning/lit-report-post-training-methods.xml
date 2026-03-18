@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<literature-report-plan version="1.0" name="R1-post-training-methods">
+
+  <metadata>
+    <theme-id>R1</theme-id>
+    <title>Post-Training Methodologies for Medical Segmentation</title>
+    <output-path>docs/planning/lit-report-post-training-methods.md</output-path>
+    <parent-plan>docs/planning/batch-literature-research-report.xml</parent-plan>
+    <skill>create-literature-report v2.1.0</skill>
+    <target-paper-count>40</target-paper-count>
+    <quality-target>MINOR_REVISION</quality-target>
+  </metadata>
+
+  <invocation-prompt>
+    create literature report on "Post-Training Methodologies for Medical Segmentation"
+
+    Focus: SWA variants, model soup, temperature scaling, Platt scaling,
+    isotonic regression, conformal calibration on SMALL datasets (70 volumes)
+    with 3D medical segmentation. How post-training transforms interact with
+    loss function choice. What the factorial design should measure.
+
+    Context: This report informs the NEUROVEX manuscript's post-training pipeline
+    section and the factorial experiment design. The platform already has
+    SWA, temperature scaling, and conformal prediction stubs. We need to know
+    what ELSE to implement and how to evaluate it.
+
+    EXCLUDED topics (covered in other reports):
+    - Agentic AI (report 5)
+    - Ensemble methods beyond model averaging (report R2)
+    - Federated learning (report R3)
+    - Regulatory compliance (report R4)
+
+    Repo context: /home/petteri/Dropbox/github-personal/minivess-mlops
+    KG domains to update: training, models
+    Manuscript section: Methods: Post-Training Pipeline (R2b)
+  </invocation-prompt>
+
+  <seed-papers>
+    <paper>Izmailov et al. (2018). "Averaging Weights Leads to Wider Optima and Better Generalization." UAI. https://arxiv.org/abs/1803.05407</paper>
+    <paper>Wortsman et al. (2022). "Model Soups: Averaging Weights of Multiple Fine-tuned Models Improves Accuracy without Increasing Inference Time." ICML. https://arxiv.org/abs/2203.05482</paper>
+    <paper>Guo et al. (2017). "On Calibration of Modern Neural Networks." ICML. https://arxiv.org/abs/1706.04599</paper>
+    <paper>Mehrtash et al. (2020). "Confidence Calibration and Predictive Uncertainty Estimation for Deep Medical Image Segmentation." IEEE TMI. https://doi.org/10.1109/TMI.2020.3006437</paper>
+    <paper>Angelopoulos et al. (2022). "Conformal Risk Control." ICLR 2024. https://arxiv.org/abs/2208.02814</paper>
+    <paper>Kofler et al. (2023). "Are we using appropriate segmentation metrics?" arXiv. https://arxiv.org/abs/2304.07396</paper>
+    <paper>Mukhoti et al. (2023). "Deep Deterministic Uncertainty." ICML. https://arxiv.org/abs/2102.11582</paper>
+    <paper>Cha et al. (2021). "SWAD: Domain Generalization by Seeking Flat Minima." NeurIPS. https://arxiv.org/abs/2102.08604</paper>
+    <paper>Maddox et al. (2019). "A Simple Baseline for Bayesian Inference in Deep Learning." NeurIPS. https://arxiv.org/abs/1902.02476</paper>
+    <paper>Nishi et al. (2024). "Temperature Scaling for Medical Image Segmentation." arXiv. https://arxiv.org/abs/2304.12024</paper>
+  </seed-papers>
+
+  <search-domains>
+    <domain>post-training calibration 3D medical segmentation</domain>
+    <domain>stochastic weight averaging medical imaging small dataset</domain>
+    <domain>model soup segmentation fine-tuning weight averaging</domain>
+    <domain>conformal prediction segmentation volumetric</domain>
+    <domain>temperature scaling deep learning calibration 2024 2025</domain>
+  </search-domains>
+
+</literature-report-plan>

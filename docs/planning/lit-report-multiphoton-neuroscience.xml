@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<literature-report-plan version="1.0" name="R4-multiphoton-neuroscience">
+
+  <metadata>
+    <theme-id>R4</theme-id>
+    <title>Multiphoton Microscopy for Neuroscience: Smart Acquisition and Closed-Loop Feedback</title>
+    <output-path>docs/planning/lit-report-multiphoton-neuroscience.md</output-path>
+    <parent-plan>docs/planning/batch-literature-research-report.xml</parent-plan>
+    <user-plan-ref>docs/planning/research-reports-general-plan-for-manuscript-writing.md (Theme 4)</user-plan-ref>
+    <skill>create-literature-report v2.1.0</skill>
+    <target-paper-count>35</target-paper-count>
+    <quality-target>MINOR_REVISION</quality-target>
+  </metadata>
+
+  <invocation-prompt>
+    create literature report on "Multiphoton Microscopy for Neuroscience: Smart Acquisition and Closed-Loop Feedback"
+
+    Focus: Recent trends in fundamental neuroSCIENCE (NOT clinical applications)
+    related to our data acquisition flow:
+
+    A) SMART ACQUISITION: Real-time algorithms for 2-photon microscopy. Adaptive
+    scanning strategies. How to decide "when enough data has been collected."
+    Dose reduction via intelligent field selection (Ye et al. 16x reduction).
+
+    B) CLOSED-LOOP FEEDBACK: Papers using closed-loop neural feedback with
+    in vivo studies in mice and rats. Real-time decoding during acquisition.
+    Neurofeedback modulation. How segmentation quality feeds back into
+    acquisition decisions.
+
+    C) DATA INFRASTRUCTURE: Cloud-based neuroscience data analysis. OME-Zarr
+    for large volumetric data. Compression strategies for electrophysiology
+    and imaging. Reproducible analysis pipelines (SpikeInterface, Suite2p).
+
+    Context: Our repo has a data acquisition flow (Flow 0) that currently
+    just downloads datasets. The future vision (Flow 0b) is an active
+    acquisition agent that guides 2-photon microscope operators based on
+    segmentation uncertainty. This report provides the neuroscience context.
+
+    Key existing ref: docs/planning/flow-data-acquisition-plan.md
+
+    EXCLUDED topics:
+    - Clinical medical imaging (report R2/R3)
+    - MLOps infrastructure (report R2)
+    - Computational reproducibility (report R1)
+    - Agentic AI architecture (report 5)
+
+    Repo context: /home/petteri/Dropbox/github-personal/minivess-mlops
+    KG domains to update: data, models
+    Manuscript section: Discussion (smart acquisition, future of 2-PM + ML integration)
+  </invocation-prompt>
+
+  <seed-papers>
+    <paper>Coulter et al. (2025). "Closed-Loop Modulation of Remote Hippocampal Representations with Neurofeedback." Neuron 113(6). https://doi.org/10.1016/j.neuron.2024.12.023</paper>
+    <paper>Fang et al. (2025). "Advancements in Neural Closed-Loop Manipulations in Awake, Behaving Animals." Current Opinion in Behavioral Sciences 66. https://doi.org/10.1016/j.cobeha.2025.101597</paper>
+    <paper>Chu et al. (2025). "RealtimeDecoder: Fast Software Module for Online Clusterless Decoding." eNeuro 12(12). https://doi.org/10.1523/ENEURO.0252-24.2025</paper>
+    <paper>Bright et al. (2026). "AQuA2-Cloud: A Web Platform for Fluorescence Bioimaging Activity Analysis." bioRxiv. https://doi.org/10.64898/2026.03.06.709938</paper>
+    <paper>Buccino et al. (2025). "Efficient and Reproducible Pipelines for Spike Sorting." bioRxiv. https://doi.org/10.1101/2025.11.12.687966</paper>
+    <paper>Lee et al. (2025). "Compression Benchmarking of Holotomography Data Using OME-Zarr." arXiv. https://doi.org/10.48550/arXiv.2503.18037</paper>
+    <paper>Yamane et al. (2025). "Optical Neuroimage Studio (OptiNiSt)." PLOS Computational Biology. https://doi.org/10.1371/journal.pcbi.1013087</paper>
+    <paper>Kim et al. (2025). "The Future of Neurotechnology." Neuron 113(6). https://doi.org/10.1016/j.neuron.2025.02.019</paper>
+    <paper>Poon et al. (2023). "A dataset of rodent cerebrovasculature." Scientific Data 10, 141. https://doi.org/10.1038/s41597-023-02048-8</paper>
+    <paper>Evangelou et al. (2025). "EthoPy: Reproducible Behavioral Neuroscience Made Simple." bioRxiv. https://doi.org/10.1101/2025.09.08.673974</paper>
+    <paper>Lakunina et al. (2025). "Neuropixels Opto." bioRxiv. https://doi.org/10.1101/2025.02.04.636286</paper>
+  </seed-papers>
+
+  <search-domains>
+    <domain>two-photon microscopy adaptive scanning real-time 2024 2025</domain>
+    <domain>closed-loop neurofeedback mouse rat in vivo 2024 2025</domain>
+    <domain>smart microscopy acquisition feedback segmentation 2024 2025</domain>
+    <domain>OME-Zarr volumetric neuroscience data compression 2024 2025</domain>
+    <domain>multiphoton imaging vascular neuroscience analysis pipeline 2024</domain>
+    <domain>online decoding calcium imaging real-time processing 2025</domain>
+  </search-domains>
+
+</literature-report-plan>

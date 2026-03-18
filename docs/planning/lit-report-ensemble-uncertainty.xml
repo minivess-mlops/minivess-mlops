@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<literature-report-plan version="1.0" name="R2-ensemble-uncertainty">
+
+  <metadata>
+    <theme-id>R2</theme-id>
+    <title>Ensemble Strategies and Uncertainty Quantification for Biomedical Segmentation</title>
+    <output-path>docs/planning/lit-report-ensemble-uncertainty.md</output-path>
+    <parent-plan>docs/planning/batch-literature-research-report.xml</parent-plan>
+    <skill>create-literature-report v2.1.0</skill>
+    <target-paper-count>40</target-paper-count>
+    <quality-target>MINOR_REVISION</quality-target>
+  </metadata>
+
+  <invocation-prompt>
+    create literature report on "Ensemble Strategies and Uncertainty Quantification for Biomedical Segmentation"
+
+    Focus: Deep ensembles vs model merging vs model soup for 3D segmentation.
+    MC Dropout vs conformal prediction vs evidential deep learning. Calibration
+    metrics (Brier score, ECE, reliability diagrams, IPA). How to select the
+    champion model from a factorial design. Ensemble diversity vs accuracy
+    tradeoff on small medical datasets (70 volumes, 3-fold CV).
+
+    Context: This report informs the NEUROVEX manuscript's evaluation pipeline
+    and the champion selection logic in the deploy flow. The platform has
+    5 ensemble strategies implemented (per_loss_single_best, all_loss_single_best,
+    per_loss_all_best, all_loss_all_best, cv_average). We need to know which
+    strategies are scientifically justified and how to report them.
+
+    EXCLUDED topics:
+    - SWA and post-training calibration details (report R1)
+    - Agentic AI (report 5)
+    - Multi-site/federated aspects (report R3)
+    - Regulatory compliance (report R4)
+
+    Repo context: /home/petteri/Dropbox/github-personal/minivess-mlops
+    KG domains to update: training, architecture
+    Manuscript sections: Methods: Evaluation Pipeline (R2c), Results: Multi-Model Comparison (R3b)
+  </invocation-prompt>
+
+  <seed-papers>
+    <paper>Lakshminarayanan et al. (2017). "Simple and Scalable Predictive Uncertainty Estimation using Deep Ensembles." NeurIPS. https://arxiv.org/abs/1612.01474</paper>
+    <paper>Fort et al. (2019). "Deep Ensembles: A Loss Landscape Perspective." arXiv. https://arxiv.org/abs/1912.02757</paper>
+    <paper>Jungo &amp; Reyes (2019). "Assessing Reliability and Challenges of Uncertainty Estimations for Medical Image Segmentation." MICCAI. https://doi.org/10.1007/978-3-030-32245-8_6</paper>
+    <paper>Mehrtash et al. (2020). "Confidence Calibration and Predictive Uncertainty Estimation for Deep Medical Image Segmentation." IEEE TMI. https://doi.org/10.1109/TMI.2020.3006437</paper>
+    <paper>Maier-Hein et al. (2024). "Metrics Reloaded: Recommendations for image analysis validation." Nature Methods 21, 195-212. https://doi.org/10.1038/s41592-023-02151-z</paper>
+    <paper>Riley et al. (2021). "Stability of Random Forest Importance Measures." Briefings in Bioinformatics 22(4). https://doi.org/10.1093/bib/bbaa148</paper>
+    <paper>Ovadia et al. (2019). "Can You Trust Your Model's Uncertainty?" NeurIPS. https://arxiv.org/abs/1906.02530</paper>
+    <paper>Naeini et al. (2015). "Obtaining Well Calibrated Probabilities Using Bayesian Binning." AAAI. https://doi.org/10.1609/aaai.v29i1.9602</paper>
+    <paper>Rahaman &amp; Thiery (2021). "Uncertainty Quantification and Deep Ensembles." NeurIPS. https://arxiv.org/abs/2007.08792</paper>
+    <paper>Abe et al. (2022). "Deep Ensembles Work, But Are They Necessary?" NeurIPS. https://arxiv.org/abs/2202.06985</paper>
+  </seed-papers>
+
+  <search-domains>
+    <domain>deep ensemble medical image segmentation uncertainty 2024 2025</domain>
+    <domain>model merging weight averaging segmentation diversity</domain>
+    <domain>conformal prediction volumetric segmentation coverage guarantee</domain>
+    <domain>calibration metrics Brier ECE medical imaging 2024</domain>
+    <domain>champion model selection factorial experiment segmentation</domain>
+  </search-domains>
+
+</literature-report-plan>

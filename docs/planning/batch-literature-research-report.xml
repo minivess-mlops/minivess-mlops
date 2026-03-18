@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan version="1.0" name="batch-literature-research">
+
+  <metadata>
+    <created>2026-03-18</created>
+    <branch>doc/literature-research-reports</branch>
+    <description>
+      Batch execution of 8 literature research reports using the
+      create-literature-report skill v2.1.0.
+
+      PRIMARY (R1-R4): User's 4 themes from research-reports-general-plan-for-manuscript-writing.md
+      SUPPLEMENTARY (R5-R8): Additional themes identified during session analysis
+
+      Each report targets a distinct theme with NO overlap with the existing
+      9th report (biomedical-agentic-ai-research-report.md).
+
+      DUAL MANDATE:
+      1. Inform CODE development (KG updates, OpenSpec specs, GitHub issues)
+      2. Inform MANUSCRIPT writing (neurovex-discussion.tex future work sections)
+
+      The knowledge graph is the GROUND TRUTH. Code and .tex manuscripts
+      are downstream projections from the KG.
+    </description>
+    <skill>create-literature-report v2.1.0</skill>
+    <existing-report>docs/planning/biomedical-agentic-ai-research-report.md</existing-report>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- THEME DEFINITIONS (4 non-overlapping themes)                       -->
+  <!-- ================================================================== -->
+
+  <!-- PRIMARY THEMES (from user's research-reports-general-plan-for-manuscript-writing.md) -->
+
+  <themes>
+    <theme id="R1" name="computational-reproducibility">
+      <title>Computational Reproducibility in Science and Biomedical ML</title>
+      <output>docs/planning/lit-report-computational-reproducibility.md</output>
+      <child-plan>docs/planning/lit-report-computational-reproducibility.xml</child-plan>
+      <unique-angle>Reproducibility crisis, Jupyter failures, Docker vulnerabilities,
+        pinned deps, DVC, MLflow, code smells. Position NEUROVEX as a solution.</unique-angle>
+      <kg-domains>infrastructure, testing, operations</kg-domains>
+      <manuscript-section>Introduction + Methods (platform architecture)</manuscript-section>
+    </theme>
+
+    <theme id="R2" name="medical-mlops">
+      <title>Medical MLOps: From Preclinical Research to Clinical Regulated Deployment</title>
+      <output>docs/planning/lit-report-medical-mlops.md</output>
+      <child-plan>docs/planning/lit-report-medical-mlops.xml</child-plan>
+      <unique-angle>Full MLOps maturity spectrum, QMSR, PCCP, SaMD, IEC 62304,
+        OpenLineage audit trails, SBOM, post-market surveillance, MedMLOps 4 pillars.</unique-angle>
+      <kg-domains>operations, infrastructure, testing</kg-domains>
+      <manuscript-section>Methods (MLOps Architecture) + Discussion (Regulatory-Native)</manuscript-section>
+    </theme>
+
+    <theme id="R3" name="biomedical-segmentation">
+      <title>Biomedical Segmentation: Tubular Structures, Foundation Models, and Statistical Evaluation</title>
+      <output>docs/planning/lit-report-biomedical-segmentation.md</output>
+      <child-plan>docs/planning/lit-report-biomedical-segmentation.xml</child-plan>
+      <unique-angle>Tubular segmentation + MONAI, SAM3/VesselFM foundation models,
+        calibration/UQ, TRIPOD+AI/PROBAST+AI, factorial design in imaging, sample size.</unique-angle>
+      <kg-domains>training, models, architecture</kg-domains>
+      <manuscript-section>Methods (all of R2) + Results (R3a, R3b)</manuscript-section>
+    </theme>
+
+    <theme id="R4" name="multiphoton-neuroscience">
+      <title>Multiphoton Microscopy for Neuroscience: Smart Acquisition and Closed-Loop Feedback</title>
+      <output>docs/planning/lit-report-multiphoton-neuroscience.md</output>
+      <child-plan>docs/planning/lit-report-multiphoton-neuroscience.xml</child-plan>
+      <unique-angle>2-photon smart acquisition, closed-loop neural feedback in vivo,
+        OME-Zarr data infrastructure, real-time decoding, dose reduction.</unique-angle>
+      <kg-domains>data, models</kg-domains>
+      <manuscript-section>Discussion (smart acquisition, future of 2-PM + ML)</manuscript-section>
+    </theme>
+
+  <!-- SUPPLEMENTARY THEMES (from session analysis — additional gaps) -->
+
+    <theme id="R5" name="post-training-methods">
+      <title>Post-Training Methodologies for Medical Segmentation</title>
+      <output>docs/planning/lit-report-post-training-methods.md</output>
+      <child-plan>docs/planning/lit-report-post-training-methods.xml</child-plan>
+      <unique-angle>
+        SWA variants, model soup theory, temperature scaling, Platt scaling,
+        isotonic regression, conformal calibration — specifically on SMALL
+        datasets (70 volumes) with 3D medical segmentation. How post-training
+        transforms interact with loss function choice (cbdice_cldice vs dice_ce).
+        What the factorial design should measure for post-training factors.
+      </unique-angle>
+      <excluded-from>
+        Agentic AI (covered in report 5). Ensemble methods (covered in R2).
+        Federated learning (covered in R3). Regulatory (covered in R4).
+      </excluded-from>
+      <kg-domains>training, models</kg-domains>
+      <manuscript-section>Methods: Post-Training Pipeline (R2b)</manuscript-section>
+    </theme>
+
+    <theme id="R6" name="ensemble-uncertainty">
+      <title>Ensemble Strategies and Uncertainty Quantification for Biomedical Segmentation</title>
+      <output>docs/planning/lit-report-ensemble-uncertainty.md</output>
+      <child-plan>docs/planning/lit-report-ensemble-uncertainty.xml</child-plan>
+      <unique-angle>
+        Deep ensembles vs model merging vs model soup. MC Dropout vs
+        conformal prediction vs evidential deep learning. Calibration
+        metrics (Brier, ECE, reliability diagrams). How to select the
+        champion model from a factorial design. Ensemble diversity vs
+        accuracy tradeoff on small medical datasets.
+      </unique-angle>
+      <excluded-from>
+        Post-training methods like SWA (covered in R1). Agentic AI (report 5).
+        Federated learning (R3). Regulatory compliance (R4).
+      </excluded-from>
+      <kg-domains>training, architecture</kg-domains>
+      <manuscript-section>Methods: Evaluation Pipeline (R2c), Results: Multi-Model Comparison (R3b)</manuscript-section>
+    </theme>
+
+    <theme id="R7" name="federated-multisite">
+      <title>Federated Learning and Multi-Site Data Architecture for Preclinical Neurovascular Imaging</title>
+      <output>docs/planning/lit-report-federated-multisite.md</output>
+      <child-plan>docs/planning/lit-report-federated-multisite.xml</child-plan>
+      <unique-angle>
+        MONAI FL vs NVIDIA FLARE. Privacy-preserving multi-institutional
+        training for 2-photon microscopy data. Domain shift between imaging
+        sites (different microscopes, staining, species). Opt-in data pooling
+        architecture. How federated learning changes the factorial design
+        (site as an additional factor). Preclinical vs clinical FL differences.
+      </unique-angle>
+      <excluded-from>
+        Single-site training methods (R1, R2). Agentic AI (report 5).
+        Regulatory compliance details (R4). FDA post-market (R4).
+      </excluded-from>
+      <kg-domains>data, operations, cloud</kg-domains>
+      <manuscript-section>Discussion: Multi-Site Generalization (future work)</manuscript-section>
+    </theme>
+
+    <theme id="R8" name="regulatory-postmarket">
+      <title>Regulatory Compliance and Post-Market Surveillance for MLOps-Driven Medical AI</title>
+      <output>docs/planning/lit-report-regulatory-postmarket.md</output>
+      <child-plan>docs/planning/lit-report-regulatory-postmarket.xml</child-plan>
+      <unique-angle>
+        QMSR (Feb 2026) + PCCP + IEC 62304 + TRIPOD+AI mapped to MLOps
+        pipelines. OpenLineage as IEC 62304 Clause 8 audit trail. SBOM
+        (CycloneDX) as FDA requirement. Post-market surveillance via drift
+        detection + retraining triggers. How our factorial design IS a PCCP
+        template. The locked→adaptive model lifecycle.
+      </unique-angle>
+      <excluded-from>
+        Agentic AI governance (report 5 §5). Post-training methods (R1).
+        Ensemble selection (R2). Multi-site data (R3).
+      </excluded-from>
+      <kg-domains>operations, infrastructure, testing</kg-domains>
+      <manuscript-section>Discussion: Regulatory-Native MLOps (future work)</manuscript-section>
+    </theme>
+  </themes>
+
+  <!-- ================================================================== -->
+  <!-- CROSS-REPORT COORDINATION                                          -->
+  <!-- ================================================================== -->
+
+  <coordination>
+    <dedup-rule>
+      Before writing each report, read ALL previously completed reports
+      (including biomedical-agentic-ai-research-report.md). If a paper
+      appears in a previous report, do NOT include it again — reference
+      it as "see Report N" instead. Each report must contribute UNIQUE
+      papers not cited elsewhere.
+    </dedup-rule>
+
+    <kg-update-protocol>
+      After each report, identify:
+      1. NEW decision nodes needed (create YAML files)
+      2. EXISTING nodes that need posterior updates (cite new evidence)
+      3. NEW edges between nodes revealed by the research
+      4. STALE nodes that the research contradicts
+
+      Write updates to workspace/kg-updates-{theme_id}.yaml for review.
+    </kg-update-protocol>
+
+    <manuscript-integration>
+      Each report's §6 (Discussion/Future Work) feeds directly into
+      neurovex-discussion.tex. The discussion section should reference
+      specific KG decision nodes and their posteriors as evidence.
+    </manuscript-integration>
+
+    <openspec-integration>
+      Each report's §7 (Recommended Issues) should map to OpenSpec
+      change proposals where appropriate. P0/P1 issues that affect
+      the factorial experiment should be flagged as BLOCKING.
+    </openspec-integration>
+  </coordination>
+
+  <!-- ================================================================== -->
+  <!-- EXECUTION PLAN                                                     -->
+  <!-- ================================================================== -->
+
+  <execution>
+    <order>R1 → R2 → R3 → R4 (primary) then optionally R5 → R6 → R7 → R8 (supplementary)</order>
+    <rationale>
+      PRIMARY (user's themes):
+      R1 (reproducibility) provides the "why" for the entire platform.
+      R2 (medical MLOps) builds on R1 with regulatory specifics.
+      R3 (biomedical segmentation) covers the core science and methods.
+      R4 (multiphoton neuroscience) provides domain-specific context.
+
+      SUPPLEMENTARY (session-identified gaps):
+      R5 (post-training) deepens R3's post-training section.
+      R6 (ensemble) deepens R3's evaluation section.
+      R7 (federated) deepens R2's multi-site aspects.
+      R8 (regulatory) deepens R2's FDA compliance specifics.
+    </rationale>
+
+    <per-report-steps>
+      For each report Rn:
+      1. Open new Claude Code session (fresh context)
+      2. Paste: "create literature report on {theme.title}"
+      3. Provide seed papers from {child-plan}
+      4. Skill executes: CAPTURE → GATHER → SYNTHESIZE → VERIFY → DELIVER
+      5. Review output, commit, push
+      6. Update KG with findings
+    </per-report-steps>
+
+    <time-budget>
+      Per report: ~60 minutes (skill pipeline)
+      Total: ~4 hours for all 4 reports
+      KG updates: ~30 minutes after all reports
+    </time-budget>
+  </execution>
+
+  <!-- ================================================================== -->
+  <!-- OPTIONAL: Sequential Runner Script                                 -->
+  <!-- ================================================================== -->
+
+  <runner-script>
+    <description>
+      Simple sequential .sh script. NO screen, NO tmux, NO background
+      processes. Each report runs as a separate `claude -p` invocation
+      that blocks until complete. Output logged to individual .log files.
+
+      WARNING: These scripts have historically frozen (metalearning
+      2026-03-09, 2026-03-16). The RECOMMENDED approach is manual
+      execution of each report in a fresh Claude Code session.
+    </description>
+    <file>scripts/run_literature_reports.sh</file>
+  </runner-script>
+
+</plan>
