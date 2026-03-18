@@ -5,10 +5,13 @@ status: resolved
 
 options:
   - id: five_flow_architecture
-    name: "5 Prefect Flows (4 core + 1 best-effort)"
+    name: "5+ Prefect Flows (core + auxiliary)"
     prior_probability: 0.40
     posterior_probability: 0.90
-    description: "Data Eng, Train, Analysis, Deploy + Dashboard (best-effort)"
+    description: >
+      Core flows: Acquisition (0), Data Eng (1), Train (2), Post-Training (2.5),
+      Analysis (3), Deploy (4), Dashboard (5, best-effort).
+      Auxiliary: Biostatistics, Drift Simulation, Synthetic Generation, HPO, Annotation.
   - id: monolithic_pipeline
     name: "Single Monolithic Pipeline"
     prior_probability: 0.25
@@ -26,30 +29,56 @@ resolved_option: five_flow_architecture
 
 resolution_evidence:
   - type: implementation
-    source: "src/minivess/orchestration/"
-    finding: "5 Prefect flows implemented: acquisition, train, analysis, deploy, dashboard"
-  - type: discussion
-    source: "CLAUDE.md"
-    finding: "5 Prefect flows required (4 core + 1 best-effort dashboard)"
+    source: "src/minivess/orchestration/flows/"
+    finding: >
+      12+ Prefect flows implemented. Core 5: acquisition, train, analysis, deploy,
+      dashboard. Auxiliary: biostatistics, drift_simulation, synthetic_generation,
+      hpo, annotation, post_training, data, maintenance, pipeline, qa.
+  - type: design
+    source: "docs/planning/flow-data-acquisition-plan.md"
+    finding: >
+      Acquisition Flow (Flow 0) is currently a deterministic downloader.
+      Architecture anticipates split into two flows:
+      - Flow 0a (Batch Downloader): deterministic, PhD-student onboarding
+      - Flow 0b (Active Acquisition Agent): Pydantic AI agent guiding real-time
+        2-photon microscopy data collection via conformal bandit for field
+        selection based on segmentation uncertainty from edge inference.
+      This split exemplifies the two-tier orchestration pattern: Prefect
+      (macro, deterministic) + Pydantic AI (micro, intelligent).
+  - type: literature
+    source: "Seedat et al. (2025). Data Savvy Agents. ICLR DATA-FM Workshop."
+    finding: >
+      Four data-savvy agent capabilities map to existing flows:
+      (1) Proactive data acquisition → acquisition_flow
+      (2) Sophisticated data processing → data_flow
+      (3) Interactive evaluation → analysis_flow
+      (4) Continual adaptation → drift_simulation_flow
+      Each flow currently deterministic; Pydantic AI agents progressively
+      add intelligence within the Prefect flow boundary.
 
 implementation:
   files:
     - src/minivess/orchestration/flows/acquisition_flow.py
     - src/minivess/orchestration/flows/train_flow.py
+    - src/minivess/orchestration/flows/post_training_flow.py
     - src/minivess/orchestration/flows/analysis_flow.py
     - src/minivess/orchestration/flows/deploy_flow.py
     - src/minivess/orchestration/flows/dashboard_flow.py
+    - src/minivess/orchestration/flows/biostatistics_flow.py
+    - src/minivess/orchestration/flows/drift_simulation_flow.py
   tests:
     - tests/v2/unit/test_acquisition_flow.py
     - tests/v2/unit/test_analysis_flow_contract.py
 
 conditional_on:
-  - parent_decision_id: project_purpose
-    influence_strength: strong
-  - parent_decision_id: reproducibility_level
-    influence_strength: moderate
+  - {parent_decision_id: project_purpose, influence_strength: strong}
+  - {parent_decision_id: reproducibility_level, influence_strength: moderate}
+  - {parent_decision_id: agent_architecture, influence_strength: moderate}
 
 volatility:
   classification: stable
   next_review: "2026-09-17"
-  rationale: "5-flow architecture is a settled design decision; new flows add to it, not replace"
+  rationale: >
+    Core flow topology is settled. New flows add to it, not replace.
+    The acquisition flow split (0a/0b) is a future enhancement dependent
+    on the agent_architecture decision and real-time microscopy integration.

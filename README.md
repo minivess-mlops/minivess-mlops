@@ -77,23 +77,45 @@ choosing Pydantic AI over LangGraph.
 **The path to "more agentic."** The two-tier architecture is explicitly designed
 to grow. Current agents (experiment summariser, drift triage, figure narrator) are
 read-only -- they observe flow outputs and produce text. Future agents can take
-increasingly autonomous actions while remaining within the Prefect flow boundary:
+increasingly autonomous actions while remaining within the Prefect flow boundary.
 
-| Capability | Current | Near-term (planned) | Future |
-|------------|---------|---------------------|--------|
-| **Proactive data acquisition** | DVC pull (deterministic) | Agent identifies missing external datasets and suggests downloads | Agent autonomously acquires new training data from EBRAINS |
-| **Sophisticated data processing** | Pandera validation (deterministic) | Agent diagnoses data quality issues and suggests fixes | Agent curates training data, flags annotation anomalies |
-| **Interactive evaluation** | MetricsReloaded (deterministic) | Agent generates natural-language performance summaries | Agent proposes new evaluation criteria based on failure analysis |
-| **Continual adaptation** | Drift detection → alert (deterministic) | Agent triages drift alerts and recommends action | Agent triggers PCCP-compliant retraining when drift exceeds threshold |
+**Concrete example: the Data Acquisition Flow.** The platform already includes
+`acquisition_flow.py` (Flow 0) -- currently a deterministic downloader that checks
+dataset availability, fetches files (VesselNN via git clone; MiniVess/DeepVess/TubeNet
+via manual download), converts OME-TIFF to NIfTI, and logs provenance to MLflow.
+This is deliberately "dumb" -- it executes a fixed acquisition plan without
+intelligence. The architecture anticipates splitting this into two complementary
+flows as the platform matures:
 
-This progression follows the **data-savvy agent** framework
+| Flow | Intelligence | What It Does |
+|------|-------------|-------------|
+| **Flow 0a: Batch Downloader** (current) | None (deterministic) | Downloads known datasets, converts formats, verifies checksums, logs provenance. The "PhD student onboarding" path. |
+| **Flow 0b: Active Acquisition Agent** (future) | Pydantic AI agent | Real-time adaptive data acquisition *during* 2-photon microscopy experiments. Conformal bandit selects next imaging field based on segmentation uncertainty from edge inference. Decides when "enough data has been collected" for a given vascular morphology class. |
+
+Flow 0b represents the research frontier: intelligent agents that understand when
+the current dataset is insufficient, what types of vessels are under-represented,
+and how to guide the microscope operator to collect the most informative next
+sample. This is a natural evolution of the two-tier architecture -- Prefect
+orchestrates the acquisition session, while a Pydantic AI agent reasons about
+data sufficiency and acquisition strategy within the flow.
+
+The four data-savvy agent capabilities
 ([Seedat et al. (2025). "What's the Next Frontier for Data-Centric AI? Data Savvy Agents!"
-*ICLR DATA-FM Workshop*.](https://openreview.net/)), which argues that agentic
-systems must develop four capabilities: proactive data acquisition, sophisticated
-data processing, interactive test data synthesis, and continual adaptation. Our
-two-tier architecture provides the scaffold for each -- Prefect ensures the
-deterministic backbone, while Pydantic AI agents can progressively assume
-responsibility for each capability as the research matures.
+*ICLR DATA-FM Workshop*.](https://openreview.net/)) map directly to existing flows
+and planned extensions:
+
+| Capability | Current Flow | Current State | Future Agentic Extension |
+|------------|-------------|---------------|--------------------------|
+| **Proactive data acquisition** | `acquisition_flow.py` | Deterministic downloader + format conversion | Active acquisition agent guiding 2-PM microscopy, conformal bandit for field selection |
+| **Sophisticated data processing** | `data_flow.py` | Pandera validation, whylogs profiling, TorchIO augmentation | Agent diagnoses data quality issues, flags annotation anomalies, suggests re-annotation |
+| **Interactive evaluation** | `analysis_flow.py` | MetricsReloaded with bootstrap CIs | Agent generates natural-language summaries, proposes new eval criteria from failure modes |
+| **Continual adaptation** | `drift_simulation_flow.py` | Evidently drift detection + Prometheus alerts | Agent triages drift, recommends PCCP-compliant retraining, adjusts monitoring thresholds |
+
+Prefect ensures the deterministic backbone required for reproducibility and
+regulatory compliance, while Pydantic AI agents can progressively assume
+responsibility for each capability. The macro/micro boundary means every agentic
+enhancement is *opt-in* -- a lab without LLM access runs the same pipeline with
+the same results; they simply lack the AI-generated summaries and recommendations.
 
 **Planned agentic UI**: CopilotKit (AG-UI protocol) + WebMCP for agentic dashboard
 and annotation interfaces, enabling interactive researcher-AI collaboration where
