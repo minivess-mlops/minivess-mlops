@@ -35,6 +35,9 @@ nodes:
   - id: publication_target
     level: L1
     file: decisions/L1-research-goals/publication_target.yaml
+  - id: tripod_compliance
+    level: L1
+    file: decisions/L1-research-goals/tripod_compliance.yaml
 
   # L2 — Architecture (12 nodes)
   - id: docker_architecture
