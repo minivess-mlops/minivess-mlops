@@ -8,6 +8,17 @@ pytest.importorskip("pydantic_ai", reason="pydantic_ai not installed")
 
 from pydantic import ValidationError  # noqa: E402
 
+try:
+    import pydantic_ai  # noqa: F401
+
+    _HAS_PYDANTIC_AI = True
+except ImportError:
+    _HAS_PYDANTIC_AI = False
+
+pytestmark = pytest.mark.skipif(
+    not _HAS_PYDANTIC_AI, reason="pydantic_ai not installed"
+)
+
 
 class TestExperimentSummary:
     """T-1.1: ExperimentSummary output model."""

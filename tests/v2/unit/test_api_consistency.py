@@ -8,6 +8,19 @@ from __future__ import annotations
 
 import importlib
 
+import pytest
+
+try:
+    import pydantic_ai  # noqa: F401
+
+    _HAS_PYDANTIC_AI = True
+except ImportError:
+    _HAS_PYDANTIC_AI = False
+
+pytestmark = pytest.mark.skipif(
+    not _HAS_PYDANTIC_AI, reason="pydantic_ai not installed"
+)
+
 # ---------------------------------------------------------------------------
 # T1: Factory functions use build_* naming
 # ---------------------------------------------------------------------------

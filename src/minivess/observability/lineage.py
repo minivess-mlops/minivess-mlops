@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 from typing import TYPE_CHECKING
 
 from openlineage.client.event_v2 import (
@@ -68,6 +69,27 @@ class LineageEmitter:
                     "Could not connect to Marquez at %s; operating in local-only mode",
                     url,
                 )
+
+    @classmethod
+    def from_env(cls, namespace: str = "minivess") -> LineageEmitter:
+        """Construct a LineageEmitter from the MARQUEZ_URL environment variable.
+
+        Reads ``MARQUEZ_URL`` from the environment. If set and non-empty,
+        configures HttpTransport to send events to Marquez. Otherwise,
+        operates in local-only mode (events collected in memory).
+
+        Parameters
+        ----------
+        namespace:
+            OpenLineage namespace (default: ``"minivess"``).
+
+        Returns
+        -------
+        LineageEmitter
+            Configured emitter.
+        """
+        url = os.environ.get("MARQUEZ_URL") or None
+        return cls(namespace=namespace, url=url)
 
     def _now_iso(self) -> str:
         """Return current UTC time in ISO format."""
