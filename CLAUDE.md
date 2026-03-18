@@ -333,19 +333,41 @@ uv run mypy src/
 make test-staging && uv run ruff check src/ tests/ && uv run mypy src/
 ```
 
+## Branch Model (Non-Negotiable)
+
+Two protected branches. Both require PRs — no direct pushes.
+
+| Branch | Role | Default? | Test gate | Merge frequency |
+|--------|------|----------|-----------|-----------------|
+| **`main`** | Staging — daily work | Yes (default) | `make test-staging` (~3 min) | Every PR |
+| **`prod`** | Production — verified releases | No | `make test-prod` (~10 min) | Occasional promotion |
+
+**Workflow:**
+```
+feature-branch → PR → main (staging, fast tests)
+                       ↓ (when ready to promote)
+                  main → PR → prod (full test suite)
+```
+
+- **Feature PRs** always target `main`. Run `make test-staging` before merge.
+- **Promotion PRs** (`main → prod`) run `make test-prod`. Only create these when
+  you are willing to wait for the full suite. The user decides when to promote.
+- **NEVER** create feature PRs targeting `prod` directly.
+- See #304 for the original staging/prod split rationale.
+
 ## Test Tiers (Non-Negotiable)
 
 Three tiers, invoked via Makefile. **NEVER run SAM3 model tests in standard CI.**
 
-| Tier | Command | What runs | Target time |
-|------|---------|-----------|-------------|
-| **Staging** | `make test-staging` | No model loading, no slow, no integration | <3 min |
-| **Prod** | `make test-prod` | Everything except GPU instance tests | ~5-10 min |
-| **GPU** | `make test-gpu` | SAM3 + GPU-heavy tests in `tests/gpu_instance/` | GPU instance only |
+| Tier | Command | What runs | Target time | Branch gate |
+|------|---------|-----------|-------------|-------------|
+| **Staging** | `make test-staging` | No model loading, no slow, no integration | <3 min | `main` (every PR) |
+| **Prod** | `make test-prod` | Everything except GPU instance tests | ~5-10 min | `prod` (promotion PRs) |
+| **GPU** | `make test-gpu` | SAM3 + GPU-heavy tests in `tests/gpu_instance/` | GPU instance only | RunPod only |
 
 ```bash
-make test-staging    # PR readiness — fast, no models
-make test-prod       # Pre-merge — includes model loading + slow tests
+make test-staging    # PR readiness — fast, no models (gate for main)
+make test-prod       # Full suite — includes model loading + slow (gate for prod)
 make test-gpu        # RunPod / intranet GPU — SAM3 forward passes
 ```
 
