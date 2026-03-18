@@ -167,5 +167,5 @@ class TestTrainerWithMetrics:
         all_keys: set[str] = set()
         for call in tracker.log_epoch_metrics.call_args_list:
             all_keys.update(call[0][0].keys())
-        assert "train_dice" in all_keys
-        assert "val_dice" in all_keys
+        assert "train/dice" in all_keys
+        assert "val/dice" in all_keys

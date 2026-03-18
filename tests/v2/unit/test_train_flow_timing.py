@@ -60,11 +60,11 @@ class TestTrainerEpochTiming:
     """Tests for first/steady epoch timing in trainer.py."""
 
     def test_trainer_records_first_epoch_time(self) -> None:
-        """trainer.py has prof_first_epoch_seconds metric."""
+        """trainer.py has prof/first_epoch_seconds metric."""
         strings = _get_all_string_literals(_TRAINER)
-        assert "prof_first_epoch_seconds" in strings
+        assert "prof/first_epoch_seconds" in strings
 
     def test_trainer_records_steady_epoch_time(self) -> None:
-        """trainer.py has prof_steady_epoch_seconds metric."""
+        """trainer.py has prof/steady_epoch_seconds metric."""
         strings = _get_all_string_literals(_TRAINER)
-        assert "prof_steady_epoch_seconds" in strings
+        assert "prof/steady_epoch_seconds" in strings

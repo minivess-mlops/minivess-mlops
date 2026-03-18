@@ -72,9 +72,9 @@ class TestLogEvaluationResults:
 
         mock_log_metrics.assert_called_once()
         logged = mock_log_metrics.call_args[0][0]
-        assert "eval_fold0_dsc" in logged
-        assert "eval_fold0_dsc_ci_lower" in logged
-        assert "eval_fold0_centreline_dsc" in logged
+        assert "eval/fold0/dsc" in logged
+        assert "eval/fold0/dsc_ci_lower" in logged
+        assert "eval/fold0/centreline_dsc" in logged
 
     @patch("mlflow.log_metrics")
     def test_log_evaluation_results_metric_values(
@@ -99,6 +99,6 @@ class TestLogEvaluationResults:
         tracker.log_evaluation_results(fold_result, fold_id=1, loss_name="cbdice")
 
         logged = mock_log_metrics.call_args[0][0]
-        assert logged["eval_fold1_dsc"] == pytest.approx(0.85)
-        assert logged["eval_fold1_dsc_ci_lower"] == pytest.approx(0.79)
-        assert logged["eval_fold1_dsc_ci_upper"] == pytest.approx(0.91)
+        assert logged["eval/fold1/dsc"] == pytest.approx(0.85)
+        assert logged["eval/fold1/dsc_ci_lower"] == pytest.approx(0.79)
+        assert logged["eval/fold1/dsc_ci_upper"] == pytest.approx(0.91)

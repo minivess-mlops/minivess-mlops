@@ -16,13 +16,13 @@ import yaml
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SKYPILOT_DIR = _REPO_ROOT / "deployment" / "skypilot"
 
-# All operations that must have timing start/end in setup blocks
+# All operations that must have timing start/end in setup blocks.
+# dev_runpod.yaml uses Network Volume (no DVC pull step — data uploaded beforehand).
 _TIMED_OPERATIONS = (
     "python_install",
     "uv_install",
     "uv_sync",
     "dvc_config",
-    "dvc_pull",
     "model_weights",
     "verification",
 )
@@ -54,7 +54,7 @@ class TestDevRunpodYamlTiming:
         assert "setup_end=" in setup or "setup_end=$(" in setup
 
     def test_dev_runpod_yaml_has_all_operations_timed(self) -> None:
-        """All 7 operations have start/end timestamp lines in setup: block."""
+        """All 6 operations have start/end timestamp lines in setup: block."""
         setup = _load_yaml_setup(_SKYPILOT_DIR / "dev_runpod.yaml")
         for op in _TIMED_OPERATIONS:
             start_marker = f"{op}_start="

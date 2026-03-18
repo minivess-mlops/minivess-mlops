@@ -82,9 +82,6 @@ nodes:
   - id: flow_topology
     level: L2
     file: decisions/L2-architecture/flow_topology.yaml
-  - id: code_quality_philosophy
-    level: L2
-    file: decisions/L2-architecture/code_quality_philosophy.yaml
 
   # L3 — Technology (26 nodes)
   - id: primary_3d_model

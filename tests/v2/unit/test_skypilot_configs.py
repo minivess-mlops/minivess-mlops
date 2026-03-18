@@ -51,26 +51,24 @@ class TestSmokeTestGpuYaml:
             f"smoke_test_gpu.yaml must target runpod, got: {cloud}"
         )
 
-    def test_smoke_test_envs_has_dvc_remote(self) -> None:
-        """Envs must include DVC_REMOTE pointing to remote_storage (AWS S3 public).
+    def test_smoke_test_envs_no_stale_dvc_credentials(self) -> None:
+        """RunPod path uses Network Volume — no DVC credentials should be present.
 
-        UpCloud S3 dropped 2026-03-16. No DVC_S3_* credentials needed for public bucket.
+        Data flow: researcher uploads from local disk to Network Volume.
+        DVC_REMOTE and DVC_S3_* are stale (UpCloud archived 2026-03-16).
         """
         config = _load(_SMOKE_TEST_GPU)
         envs = config.get("envs", {})
-        assert "DVC_REMOTE" in envs, "smoke_test_gpu.yaml missing DVC_REMOTE in envs"
-        assert envs["DVC_REMOTE"] == "remote_storage", (
-            f"DVC_REMOTE should be 'remote_storage' (AWS S3 public), got: {envs['DVC_REMOTE']}"
-        )
-        # UpCloud credentials must NOT be present (provider archived)
+        # RunPod smoke test uses Network Volume, not DVC
         for stale_var in (
+            "DVC_REMOTE",
             "DVC_S3_ENDPOINT_URL",
             "DVC_S3_ACCESS_KEY",
             "DVC_S3_SECRET_KEY",
         ):
             assert stale_var not in envs, (
-                f"smoke_test_gpu.yaml has stale UpCloud credential {stale_var} — "
-                "UpCloud archived 2026-03-16, remove it"
+                f"smoke_test_gpu.yaml has stale DVC/UpCloud var {stale_var} — "
+                "RunPod uses Network Volume, not DVC"
             )
 
     def test_smoke_test_envs_has_mlflow_cloud_uri(self) -> None:
@@ -98,11 +96,15 @@ class TestSmokeTestGpuYaml:
             f"smoke_test_gpu.yaml must use Docker image_id, got: {image_id}"
         )
 
-    def test_smoke_test_setup_has_dvc_pull(self) -> None:
-        """Setup must include DVC pull step."""
+    def test_smoke_test_setup_uses_network_volume(self) -> None:
+        """Setup must use Network Volume symlink, not DVC pull.
+
+        RunPod dev path: data lives on Network Volume (/opt/vol/data/raw/minivess).
+        Setup symlinks it into /app/data/raw/. No DVC pull needed.
+        """
         config = _load(_SMOKE_TEST_GPU)
         setup = config.get("setup", "")
-        assert "dvc pull" in setup, (
-            "smoke_test_gpu.yaml setup must include 'dvc pull -r remote_storage' "
-            "(AWS S3 fallback — UpCloud dropped 2026-03-16)"
+        assert "ln -sf /opt/vol" in setup, (
+            "smoke_test_gpu.yaml setup must symlink Network Volume data "
+            "(RunPod uses Network Volume, not DVC)"
         )
