@@ -1,0 +1,378 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan version="1.0" name="fda-readiness-executable">
+
+  <metadata>
+    <created>2026-03-18</created>
+    <description>
+      Executable TDD plan for FDA readiness improvements derived from three
+      research reports. Focus: (1) wire OpenLineage into Prefect flows for real,
+      (2) CycloneDX SBOM + Grype, (3) KG updates for MedMLOps/agentic/SBOM,
+      (4) GitHub issues for deferred work (UX monitoring, federated learning,
+      commercial compliance). Uses self-learning-iterative-coder skill.
+    </description>
+    <source_docs>
+      <doc>docs/planning/fda-insights-second-pass.md</doc>
+      <doc>docs/planning/regops-fda-regulation-reporting-qms-samd-iec62304-mlops-report.md</doc>
+      <doc>docs/planning/openlineage-marquez-iec62304-report.md</doc>
+    </source_docs>
+    <prompt_doc>docs/planning/fda-insights-second-pass-prompt-to-xml.md</prompt_doc>
+    <related_issues>
+      <issue number="821" priority="P1">FDA-ready test set documentation and lineage tracking</issue>
+      <issue number="799" priority="P1">OpenLineage/Marquez integration for all Prefect flows</issue>
+    </related_issues>
+  </metadata>
+
+  <master-plan>
+    <metadata>
+      <total-issues>7 new GitHub issues + existing #821 + #799</total-issues>
+      <total-tdd-tasks>16</total-tdd-tasks>
+      <estimated-duration>6-10 hours across multiple sessions</estimated-duration>
+    </metadata>
+
+    <!-- ================================================================== -->
+    <!-- PHASE 1: P0 — Wire OpenLineage into Prefect Flows (Issue #799)     -->
+    <!-- ================================================================== -->
+    <phase id="1" name="openlineage-flow-wiring" priority="P0">
+      <closes-issues>#799</closes-issues>
+      <branch>feat/openlineage-flow-wiring</branch>
+      <estimated-duration>2-3 hours</estimated-duration>
+      <summary>
+        Wire LineageEmitter.pipeline_run() into all 5 core Prefect flows.
+        Currently LineageEmitter exists (271 LOC) with full OpenLineage v2 event
+        model but ZERO flows call it. Tests exist for isolated emission but not
+        for flow-level integration.
+
+        ALSO: Wire AuditTrail.log_test_evaluation() into analysis_flow (eval)
+        and add cumulative eval/test_set_access_count MLflow metric.
+        This is the $100k+ FDA test-set-reuse gap from Issue #821.
+      </summary>
+
+      <task id="T1" type="RED">
+        <title>Test: train_flow emits OpenLineage START/COMPLETE events</title>
+        <file>tests/v2/unit/test_flow_lineage_emission.py</file>
+        <description>
+          Add test class TestTrainFlowEmitsLineageInFlow that patches
+          LineageEmitter and asserts train_flow calls pipeline_run() with
+          correct job_name="train-flow" and input/output datasets.
+          Current test file tests emission in isolation — this tests the WIRING.
+        </description>
+        <acceptance>Test fails because train_flow.py does not import LineageEmitter.</acceptance>
+      </task>
+
+      <task id="T2" type="GREEN">
+        <title>Wire LineageEmitter into train_flow.py</title>
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <description>
+          Import LineageEmitter. Wrap the flow body with:
+          emitter = LineageEmitter(namespace="minivess")
+          with emitter.pipeline_run("train-flow",
+            inputs=[{"namespace": "minivess", "name": "raw_volumes"}],
+            outputs=[{"namespace": "minivess", "name": "checkpoints"}]):
+              # existing flow body
+          ~5-10 lines added. Zero DevEx impact.
+        </description>
+        <acceptance>T1 test passes. No existing tests broken.</acceptance>
+      </task>
+
+      <task id="T3" type="RED-GREEN">
+        <title>Wire LineageEmitter into post_training_flow.py</title>
+        <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+        <description>
+          Same pattern as T2. job_name="post-training-flow",
+          inputs=checkpoints, outputs=swa_checkpoints.
+          Add test in test_flow_lineage_emission.py.
+        </description>
+        <acceptance>Lineage events emitted on flow run.</acceptance>
+      </task>
+
+      <task id="T4" type="RED-GREEN">
+        <title>Wire LineageEmitter into analysis_flow.py (eval flow)</title>
+        <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+        <description>
+          Same pattern. job_name="analysis-flow",
+          inputs=checkpoints+test_datasets, outputs=metrics+ensemble_models.
+          CRITICAL: Also wire AuditTrail.log_test_evaluation() when test
+          split is evaluated. Add cumulative eval/test_set_access_count
+          MLflow metric. This addresses Issue #821 test-set firewall.
+        </description>
+        <acceptance>
+          Lineage events emitted. AuditTrail.log_test_evaluation() called
+          for each test dataset evaluation. MLflow metric logged.
+        </acceptance>
+      </task>
+
+      <task id="T5" type="RED-GREEN">
+        <title>Wire LineageEmitter into biostatistics_flow.py</title>
+        <file>src/minivess/orchestration/flows/biostatistics_flow.py</file>
+        <description>
+          Same pattern. job_name="biostatistics-flow",
+          inputs=mlflow_runs, outputs=figures+tables+lineage_manifest.
+          Note: biostatistics_flow already has its own lineage manifest
+          (biostatistics_lineage.py) — OpenLineage events are ADDITIONAL,
+          wrapping the entire flow execution.
+        </description>
+        <acceptance>OpenLineage events emitted alongside existing lineage manifest.</acceptance>
+      </task>
+
+      <task id="T6" type="RED-GREEN">
+        <title>Wire LineageEmitter into deploy_flow.py</title>
+        <file>src/minivess/orchestration/flows/deploy_flow.py</file>
+        <description>
+          Same pattern. job_name="deploy-flow",
+          inputs=champion_checkpoint, outputs=bentoml_model+onnx_export.
+          deploy_flow already has audit_trails list — wire AuditTrail class
+          (from compliance/audit.py) to replace ad-hoc dicts.
+        </description>
+        <acceptance>OpenLineage events emitted. AuditTrail.log_model_deployment() called.</acceptance>
+      </task>
+
+      <task id="T7" type="VERIFY">
+        <title>Run make test-staging — all lineage tests pass</title>
+        <command>make test-staging</command>
+        <acceptance>Zero failures. All new + existing lineage tests green.</acceptance>
+      </task>
+
+      <guardrails>
+        - LineageEmitter import at top of each flow file
+        - pipeline_run() wraps entire flow body as context manager
+        - No existing flow logic modified — only wrapping added
+        - AuditTrail.log_test_evaluation() ONLY in analysis_flow for test splits
+        - eval/test_set_access_count is cumulative MLflow metric
+      </guardrails>
+    </phase>
+
+    <!-- ================================================================== -->
+    <!-- PHASE 2: P1 — CycloneDX SBOM + Grype Vulnerability Scanning       -->
+    <!-- ================================================================== -->
+    <phase id="2" name="sbom-cyclonedx-grype" priority="P1">
+      <new-issue>
+        <title>CycloneDX SBOM generation + Grype vulnerability scanning</title>
+        <labels>P1-high,compliance,infrastructure</labels>
+      </new-issue>
+      <branch>feat/sbom-cyclonedx-grype</branch>
+      <estimated-duration>1-2 hours</estimated-duration>
+      <summary>
+        Add Python-level SBOM generation via cyclonedx-bom (reads uv.lock
+        natively in v7.2.2) alongside existing Docker-level Trivy SBOM.
+        Add Grype for vulnerability scanning of the generated SBOM.
+        Update Makefile with new targets. Resolve KG sbom_generation node.
+      </summary>
+
+      <task id="T8" type="RED">
+        <title>Test: make sbom-python generates CycloneDX JSON from uv environment</title>
+        <file>tests/v2/unit/test_sbom_generation.py</file>
+        <description>
+          Test that cyclonedx-py can be invoked and produces valid CycloneDX
+          JSON with expected fields (bomFormat, specVersion, components).
+          Test fails because cyclonedx-bom not yet installed.
+        </description>
+        <acceptance>Test imports cyclonedx and validates JSON schema.</acceptance>
+      </task>
+
+      <task id="T9" type="GREEN">
+        <title>Add cyclonedx-bom dependency + Makefile targets</title>
+        <files>
+          <file>pyproject.toml</file>
+          <file>Makefile</file>
+        </files>
+        <description>
+          1. uv add --group compliance cyclonedx-bom
+          2. Add Makefile targets:
+             sbom-python: generates sbom/python-sbom.json via cyclonedx-py
+             sbom-scan: runs grype on sbom/python-sbom.json
+             sbom-all: sbom + sbom-python (Docker + Python)
+          3. Note: grype is a binary (not pip), install instruction in Makefile
+        </description>
+        <acceptance>make sbom-python produces valid CycloneDX JSON. T8 passes.</acceptance>
+      </task>
+
+      <task id="T10" type="KG">
+        <title>Resolve sbom_generation KG node to cyclonedx_plus_grype</title>
+        <file>knowledge-graph/decisions/L5-operations/sbom_generation.yaml</file>
+        <description>
+          Update status: not_started → resolved.
+          resolved_option: cyclonedx_plus_grype.
+          Add resolution_evidence pointing to Makefile targets and
+          FDA Section 524B mandate. Update posteriors.
+        </description>
+      </task>
+
+      <guardrails>
+        - cyclonedx-bom in [compliance] optional group, not core deps
+        - SBOM output to sbom/ directory (gitignored, generated artifact)
+        - Existing make sbom (Trivy/Docker) unchanged
+        - grype is external binary, not Python package
+      </guardrails>
+    </phase>
+
+    <!-- ================================================================== -->
+    <!-- PHASE 3: P1 — KG Updates for MedMLOps + Agentic + SBOM            -->
+    <!-- ================================================================== -->
+    <phase id="3" name="kg-updates" priority="P1">
+      <branch>Same branch as Phase 1 or 2</branch>
+      <estimated-duration>1 hour</estimated-duration>
+      <summary>
+        Update knowledge graph with MedMLOps 4-pillar framework, agentic
+        stack decisions, and SBOM resolution. These are documentation-only
+        changes that inform future implementation decisions.
+      </summary>
+
+      <task id="T11" type="KG">
+        <title>Add MedMLOps 4-pillar framework to manuscript domain</title>
+        <file>knowledge-graph/domains/manuscript.yaml</file>
+        <description>
+          Add MedMLOps framework (de Almeida et al. 2025, European Radiology)
+          as a key reference. Map our flows to the 4 pillars:
+          1. Availability → Docker + SkyPilot + Prefect
+          2. Continuous monitoring → Evidently + drift flow + OpenLineage
+          3. Privacy/data protection → DVC + opt-in architecture + federated (future)
+          4. Ease of use → Hydra config + zero-manual-work principle
+
+          This is manuscript novelty: we demonstrate all 4 pillars in a
+          preclinical neuroscience MLOps platform.
+        </description>
+      </task>
+
+      <task id="T12" type="KG">
+        <title>Add agentic stack decision node</title>
+        <file>knowledge-graph/decisions/L3-technology/agentic_orchestration.yaml</file>
+        <description>
+          NEW decision node. Status: partial.
+          Options: pydantic_ai (current), langgraph (planned), copilotkit_ag_ui (planned).
+          Document existing Pydantic AI stubs in pyproject.toml.
+          Note CopilotKit/AG-UI + WebMCP for dashboard/annotation agentic UI.
+          Update architecture domain to include agentic_orchestration.
+          Update navigator.yaml decisions list for architecture domain.
+        </description>
+      </task>
+
+      <task id="T13" type="KG">
+        <title>Update operations domain with CISO/compliance tooling</title>
+        <file>knowledge-graph/domains/operations.yaml</file>
+        <description>
+          Add ciso_assistant decision stub (not_started).
+          Update sbom_generation to reference resolved cyclonedx_plus_grype.
+          Add MedMLOps reference to the domain description.
+        </description>
+      </task>
+    </phase>
+
+    <!-- ================================================================== -->
+    <!-- PHASE 4: GitHub Issues for Deferred Work                           -->
+    <!-- ================================================================== -->
+    <phase id="4" name="github-issues" priority="P1-P2">
+      <estimated-duration>30 minutes</estimated-duration>
+      <summary>
+        Create GitHub issues for work that is planned but deferred.
+        Each issue has clear scope, acceptance criteria, and priority.
+      </summary>
+
+      <task id="T14" type="ISSUE">
+        <title>Create P1 issue: Agentic stack — CopilotKit/AG-UI + WebMCP + Pydantic AI for dashboard</title>
+        <labels>P1-high,enhancement,observability</labels>
+        <body>
+          Install CopilotKit (AG-UI protocol) + WebMCP on dashboard/annotation
+          module. Integrate with existing Pydantic AI micro-orchestration stubs.
+          Add A2UI (Google) for declarative generative UI.
+          References: docs/planning/langgraph-agents-plan.md,
+          music-attribution-scaffold repo for AG-UI patterns.
+          KG: knowledge-graph/decisions/L3-technology/agentic_orchestration.yaml
+        </body>
+      </task>
+
+      <task id="T15" type="ISSUE">
+        <title>Create P2 issue: UX monitoring stubs — Sentry + PostHog (opt-in telemetry)</title>
+        <labels>P2-medium,enhancement,observability</labels>
+        <body>
+          Bare minimum stubs for:
+          - sentry-sdk: error tracking for all Python entry points
+          - posthog-python: product analytics for dashboard (opt-in only)
+          PostHog is SOC 2 Type II + HIPAA-ready with BAA (May 2025).
+          Self-hosted Docker deployment aligns with our Docker-per-flow arch.
+          Both tools behind OPT_IN_TELEMETRY env var (default: disabled).
+        </body>
+      </task>
+
+      <task id="T16" type="ISSUE">
+        <title>Create P2 issue: Federated learning — NVIDIA FLARE vs MONAI FL comparison</title>
+        <labels>P2-medium,research,enhancement</labels>
+        <body>
+          Compare federated learning frameworks for multi-site neurovascular
+          imaging data pooling:
+          - NVIDIA FLARE v2.7.0 (dominant, Mass General/NCI deployments)
+          - MONAI FL (https://monai.readthedocs.io/en/1.3.2/fl.html)
+            — MONAI-native, better fit for our MONAI-first principle
+          - Flower: general-purpose, likely NOT suitable for medical imaging
+          Integration point: ModelAdapter ABC for site-local training.
+          Not on publication gate pathway — research exploration only.
+        </body>
+      </task>
+
+      <task id="T17" type="ISSUE">
+        <title>Create P2 issue: CISO Assistant Community for compliance CI</title>
+        <labels>P2-medium,compliance,ci-cd</labels>
+        <body>
+          Evaluate https://github.com/intuitem/ciso-assistant-community for
+          automated compliance checking in CI. Compare with CycloneDX+Grype
+          (which we're implementing in Phase 2):
+          - CISO Assistant: GRC framework (SOC2, ISO 27001, NIST) — policy-level
+          - CycloneDX+Grype: SBOM+vuln scanning — dependency-level
+          They are complementary, not alternatives.
+          Note: GitHub Actions CI is DISABLED (credits). Would need workflow_dispatch.
+          Academic project — commercial compliance (Oneleet/Vanta) is deferred
+          until commercial use case emerges.
+        </body>
+      </task>
+
+      <task id="T18" type="ISSUE">
+        <title>Create P2 issue: Commercial compliance pathway (Oneleet over Vanta)</title>
+        <labels>P2-medium,compliance</labels>
+        <body>
+          For future commercial deployment: evaluate Oneleet ($25-40k/yr)
+          over Vanta ($7.5-20k/yr) for genuine security vs "compliance theater"
+          (Oneleet: OSCP-certified pen testing, vCISO, real security controls).
+          NOT needed for academic project. Create and close immediately as
+          documentation of the decision to defer.
+          Reference: docs/planning/fda-insights-second-pass.md Section 2.5.
+        </body>
+        <action>create-and-close</action>
+      </task>
+    </phase>
+  </master-plan>
+
+  <!-- Execution sequence -->
+  <execution-sequence>
+    <step id="1" phase="1" description="Wire OpenLineage into all 5 Prefect flows (P0)">
+      <skill>self-learning-iterative-coder</skill>
+      <monitoring>None needed — straightforward wiring</monitoring>
+    </step>
+    <step id="2" phase="2" description="CycloneDX SBOM + Grype (P1)">
+      <skill>self-learning-iterative-coder</skill>
+      <monitoring>None needed — library addition + Makefile</monitoring>
+    </step>
+    <step id="3" phase="3" description="KG updates (P1)">
+      <skill>kg-sync</skill>
+      <monitoring>None needed — documentation-only</monitoring>
+    </step>
+    <step id="4" phase="4" description="Create GitHub issues for deferred work">
+      <skill>issue-creator</skill>
+      <monitoring>None needed</monitoring>
+    </step>
+  </execution-sequence>
+
+  <!-- What is NOT in this plan (explicitly deferred) -->
+  <out-of-scope>
+    <item>Marquez PostgreSQL wiring — deferred to after factorial experiment</item>
+    <item>PCCP YAML template — deferred to after factorial experiment</item>
+    <item>Sentry/PostHog implementation — P2 issue only, stubs deferred</item>
+    <item>Federated learning — P2 research issue only</item>
+    <item>CopilotKit/AG-UI implementation — P1 issue only, code deferred</item>
+    <item>CISO Assistant CI — P2 issue only</item>
+    <item>ISO 14971 risk management — deferred to clinical transition</item>
+    <item>21 CFR Part 11 electronic signatures — deferred to clinical transition</item>
+    <item>Threat model document — deferred to after factorial experiment</item>
+    <item>QMSR production controls documentation — deferred, simple .md file</item>
+    <item>Ralph Loop monitoring — NOT needed for this plan (straightforward tasks)</item>
+  </out-of-scope>
+
+</plan>
