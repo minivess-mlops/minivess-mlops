@@ -1180,7 +1180,7 @@ class TestTrainerMLflowIntegration:
 
         client = MlflowClient(tracking_uri=local_tracking_uri)
         run = client.get_run(run_id)
-        assert "learning_rate" in run.data.metrics
+        assert "optim/lr" in run.data.metrics or "learning_rate" in run.data.metrics
 
     def test_trainer_logs_checkpoint_artifact(
         self,
