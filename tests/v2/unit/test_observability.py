@@ -342,9 +342,11 @@ class TestExperimentTrackerLocalBackend:
 
         client = MlflowClient(tracking_uri=local_tracking_uri)
         run = client.get_run(run_id)
-        assert run.data.params["model_name"] == "test-model"
-        assert run.data.params["learning_rate"] == "0.001"
-        assert run.data.params["max_epochs"] == "2"
+        # Params use slash-prefix convention per #790
+        params = run.data.params
+        assert params.get("model/name") == "test-model"
+        assert params.get("train/learning_rate") == "0.001"
+        assert params.get("train/max_epochs") == "2"
 
     def test_log_config_includes_architecture_params(
         self,
@@ -373,9 +375,9 @@ class TestExperimentTrackerLocalBackend:
 
         client = MlflowClient(tracking_uri=local_tracking_uri)
         run = client.get_run(run_id)
-        # Architecture params must be logged with "arch_" prefix
-        assert "arch_filters" in run.data.params
-        assert run.data.params["arch_filters"] == "[16, 32, 64, 128]"
+        # Architecture params logged with "arch/" prefix per #790
+        assert "arch/filters" in run.data.params
+        assert run.data.params["arch/filters"] == "[16, 32, 64, 128]"
 
     def test_log_config_empty_architecture_params_omitted(
         self,
