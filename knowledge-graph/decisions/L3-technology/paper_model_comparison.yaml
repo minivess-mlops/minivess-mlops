@@ -12,6 +12,11 @@ description: >
 
 resolved_option: six_model_comparison
 
+options:
+  - {id: six_model_comparison, name: "6-model comparison (DynUNet, MambaVesselNet++, SAM3x3, VesselFM)", prior_probability: 0.80, posterior_probability: 0.95}
+  - {id: four_model_comparison, name: "4-model comparison (subset)", prior_probability: 0.15, posterior_probability: 0.04}
+  - {id: single_model, name: "Single model only", prior_probability: 0.05, posterior_probability: 0.01}
+
 models:
   - model_id: dynunet
     adapter: src/minivess/adapters/dynunet.py

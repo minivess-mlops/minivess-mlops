@@ -11,18 +11,18 @@ description: >
 resolved_option: three_tier_multistage
 
 options:
-  - option_id: three_tier_multistage
+  - id: three_tier_multistage
     prior_probability: 0.90
     description: >
       Three base images (GPU/CPU/Light), each using 2-stage builder-runner
       pattern. Flow Dockerfiles are thin (COPY + CMD only). Layer caching via
       BuildKit uv cache mounts. Implemented March 2026.
-  - option_id: single_base_all_flows
+  - id: single_base_all_flows
     prior_probability: 0.05
     description: >
       One CUDA base for all flows. CPU-only flows carry unused CUDA runtime.
       Rejected: wastes 1.2 GB for non-GPU flows.
-  - option_id: no_docker
+  - id: no_docker
     prior_probability: 0.05
     description: >
       Bare-metal execution with uv run. BANNED: destroys reproducibility.
