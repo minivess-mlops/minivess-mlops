@@ -1,0 +1,498 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan version="2.0" name="pre-full-gcp-housekeeping-and-qa">
+
+  <metadata>
+    <created>2026-03-18</created>
+    <revised>2026-03-18</revised>
+    <description>
+      6 PRs closing GitHub issues before the GCP factorial study. PRs 1-3 are
+      pre-factorial blockers; PRs 4-6 run parallel with the 8-day factorial.
+      Each PR uses self-learning-iterative-coder TDD (RED-GREEN-VERIFY-FIX-CHECKPOINT-CONVERGE).
+    </description>
+    <source_docs>
+      <doc>docs/planning/pre-full-gcp-training-qa-plan.md</doc>
+      <doc>docs/planning/fda-insights-second-pass-executable.xml</doc>
+      <doc>docs/planning/hpo-implementation-background-research-report.md</doc>
+      <doc>docs/planning/docker-pull-runpod-provisioning-mlflow-cloud-run-multipart-upload-report.md</doc>
+    </source_docs>
+    <related_issues>
+      <issue number="857" priority="P0">HPO grid partitioning</issue>
+      <issue number="751" priority="P1">Docker pull optimization (GAR remote repo)</issue>
+      <issue number="799" priority="P1">OpenLineage Phase 2 emission</issue>
+      <issue number="821" priority="P1">FDA audit trail + ModelCard</issue>
+      <issue number="841" priority="P2">Sentry/PostHog stubs</issue>
+      <issue number="848" priority="P2">KG agent_architecture fix</issue>
+      <issue number="843" priority="P2">CISO Assistant KG note</issue>
+      <issue number="840" priority="P1">Agentic dashboard</issue>
+      <issue number="849" priority="P1">KG-enrichment agent</issue>
+      <issue number="851" priority="P2">Conformal bandit agent</issue>
+      <issue number="853" priority="P2">Annotation agent</issue>
+      <issue number="854" priority="P2">Self-evolving agent</issue>
+      <issue number="789" priority="P0">Factorial GPU runs (unblocked by PR-1)</issue>
+    </related_issues>
+    <cost-summary>
+      <pr-cost>PRs 1-6: $0 GPU cost (staging-tier tests only)</pr-cost>
+      <factorial-cost>Factorial (unblocked by PR-1): ~$353 spot / $783 on-demand</factorial-cost>
+    </cost-summary>
+  </metadata>
+
+  <dependency-graph>
+    <parallelism group="A">PR-1, PR-2, PR-3 (ALL truly parallel, start simultaneously)</parallelism>
+    <parallelism group="B">PR-4, PR-5 (after Group A)</parallelism>
+    <sequential>PR-6 (after Group B)</sequential>
+  </dependency-graph>
+
+  <cold-start>
+    <step order="1">git checkout main &amp;&amp; git pull</step>
+    <step order="2">Read this XML plan + CLAUDE.md (Rules #2, #17, #19)</step>
+    <step order="3">Group A: PR-1, PR-2, PR-3 ALL in parallel</step>
+    <step order="4">Group B: PR-4 + PR-5 in parallel</step>
+    <step order="5">PR-6 after Group B</step>
+    <step order="6">Each PR: branch, TDD, make test-staging, commit, push, PR</step>
+    <step order="7">After all merged: make test-prod</step>
+  </cold-start>
+
+  <!-- PR-1: HPO Grid Partitioning + Docker Pull Optimization -->
+  <pr id="1" name="HPO Grid Partitioning + Docker Pull Optimization" branch="feat/hpo-grid-docker-pull">
+    <closes-issue>857 (partial: grid partitioning only)</closes-issue>
+    <closes-issue>751</closes-issue>
+    <unblocks>789</unblocks>
+    <timing>pre-factorial-blocker</timing>
+    <priority>P0</priority>
+    <effort>S-M (2-3 days)</effort>
+    <dependencies>None</dependencies>
+    <test-gate>make test-staging</test-gate>
+
+    <task id="T1.1" type="RED">
+      <title>Test: PARALLEL allocation returns disjoint trial partitions</title>
+      <file>tests/v2/unit/test_hpo_parallel_allocation.py</file>
+      <description>
+        allocate(strategy="PARALLEL", total_cells=128, worker_id=0, total_workers=4)
+        returns 32 cells with no overlap across workers.
+      </description>
+      <acceptance>Fails with NotImplementedError.</acceptance>
+    </task>
+
+    <task id="T1.2" type="GREEN">
+      <title>Implement grid partitioning in hpo_flow.py</title>
+      <file>src/minivess/orchestration/flows/hpo_flow.py</file>
+      <description>
+        Modular arithmetic: cell_index % total_workers == worker_id. Grid worker
+        invokes train flow via Prefect run_deployment() or hpo_flow with
+        sampler="grid" (Optuna GridSampler). NOT a standalone script (Rule #17).
+      </description>
+      <acceptance>T1.1 passes.</acceptance>
+    </task>
+
+    <task id="T1.3" type="RED">
+      <title>Test: factorial config defines 128 cells</title>
+      <file>tests/v2/unit/test_hpo_factorial_config.py</file>
+      <description>Load configs/hpo/paper_factorial.yaml, assert 128 cells.</description>
+      <acceptance>Fails because paper_factorial.yaml does not exist.</acceptance>
+    </task>
+
+    <task id="T1.4" type="GREEN">
+      <title>Create factorial YAML + SkyPilot task YAML</title>
+      <files>
+        <file>configs/hpo/paper_factorial.yaml</file>
+        <file>deployment/skypilot/hpo_grid_worker.yaml</file>
+      </files>
+      <description>
+        128-cell factorial config (Hydra sweep). SkyPilot YAML with image_id: docker:...
+        and run: python -m minivess.orchestration.flows.hpo_flow (Prefect module).
+      </description>
+      <acceptance>T1.3 passes. SkyPilot uses Docker image_id.</acceptance>
+    </task>
+
+    <task id="T1.5" type="RED-GREEN">
+      <title>MLflow provenance tags (grid_config_hash, git_sha, docker_image_digest)</title>
+      <file>src/minivess/orchestration/flows/train_flow.py</file>
+      <acceptance>Tags present in mock MLflow client.</acceptance>
+    </task>
+
+    <task id="T1.6" type="RED">
+      <title>Test: GAR remote repository config is valid</title>
+      <file>tests/v2/unit/test_docker_pull_optimization.py</file>
+      <description>
+        Validate Pulumi GAR remote repo in europe-north1. Validate SkyPilot
+        file_mounts with mode: MOUNT_CACHED.
+      </description>
+      <acceptance>Fails because GAR remote repo config does not exist.</acceptance>
+    </task>
+
+    <task id="T1.7" type="GREEN">
+      <title>Add GAR remote repo cache + SkyPilot MOUNT_CACHED</title>
+      <files>
+        <file>deployment/pulumi/gcp/__main__.py</file>
+        <file>deployment/skypilot/hpo_grid_worker.yaml</file>
+      </files>
+      <description>
+        Pulumi GAR remote repo caching nvidia base layers. SkyPilot MOUNT_CACHED
+        for data (avoids re-download on spot preemption).
+      </description>
+      <acceptance>T1.6 passes. Pulumi preview succeeds.</acceptance>
+    </task>
+
+    <task id="T1.8" type="KG">
+      <title>Update KG hpo_engine node to grid partitioning resolved</title>
+      <file>knowledge-graph/decisions/L3-technology/hpo_engine.yaml</file>
+    </task>
+
+    <task id="T1.9" type="VERIFY">
+      <title>make test-staging</title>
+      <acceptance>Zero failures.</acceptance>
+    </task>
+
+    <guardrails>
+      - Grid worker uses Prefect flow module, NOT standalone script (Rule #17)
+      - SkyPilot uses image_id: docker:... (bare VM BANNED)
+      - No Optuna ask-tell or PostgreSQL trials (deferred to PR-1b)
+      - GAR remote repo in europe-north1
+    </guardrails>
+  </pr>
+
+  <!-- PR-2: Compliance and Regulatory (FDA Audit Trail) -->
+  <pr id="2" name="Compliance and Regulatory" branch="feat/compliance-audit-trail">
+    <closes-issue>799</closes-issue>
+    <closes-issue>821</closes-issue>
+    <timing>pre-factorial-blocker</timing>
+    <priority>P1</priority>
+    <effort>M (3-4 days)</effort>
+    <dependencies>None (parallel with PR-1, PR-3)</dependencies>
+    <test-gate>make test-staging</test-gate>
+
+    <task id="T2.1" type="RED">
+      <title>Test: train flow calls log_data_access(dataset_name, file_paths)</title>
+      <file>tests/v2/unit/test_audit_trail_wiring.py</file>
+      <description>
+        Patch AuditTrail. Assert log_data_access() called with dataset_name: str
+        and file_paths: list[str] (NOT split names).
+      </description>
+      <acceptance>Fails because train_flow does not call log_data_access().</acceptance>
+    </task>
+
+    <task id="T2.2" type="GREEN">
+      <title>Wire log_data_access() into train flow</title>
+      <file>src/minivess/orchestration/flows/train_flow.py</file>
+      <description>
+        Call log_data_access(dataset_name=..., file_paths=[...]) after each
+        split loads. Signature: (dataset_name: str, file_paths: list[str], *, actor: str).
+      </description>
+      <acceptance>T2.1 passes.</acceptance>
+    </task>
+
+    <task id="T2.3" type="RED">
+      <title>Test: ModelCard generates valid HuggingFace YAML</title>
+      <file>tests/v2/unit/test_model_card.py</file>
+      <acceptance>Fails because ModelCard class does not exist.</acceptance>
+    </task>
+
+    <task id="T2.4" type="GREEN">
+      <title>Implement ModelCard generator</title>
+      <file>src/minivess/compliance/model_card.py</file>
+      <description>Reads MLflow run, generates YAML front matter + Markdown body.</description>
+      <acceptance>T2.3 passes.</acceptance>
+    </task>
+
+    <task id="T2.5" type="RED">
+      <title>Test: LineageEmitter sends valid OpenLineage events</title>
+      <file>tests/v2/unit/test_openlineage_emission.py</file>
+      <description>Mock Marquez HTTP API. Validate OpenLineage v2 schema.</description>
+      <acceptance>Fails because Marquez transport not configured.</acceptance>
+    </task>
+
+    <task id="T2.6" type="GREEN">
+      <title>Configure HttpTransport + update IEC 62304 matrix</title>
+      <files>
+        <file>src/minivess/compliance/lineage.py</file>
+        <file>docs/compliance/iec62304-traceability.md</file>
+        <file>.env.example</file>
+      </files>
+      <description>
+        HttpTransport to MARQUEZ_URL env var. Add MARQUEZ_URL to .env.example.
+        Update IEC 62304 traceability matrix.
+      </description>
+      <acceptance>T2.5 passes.</acceptance>
+    </task>
+
+    <task id="T2.7" type="VERIFY">
+      <title>make test-staging</title>
+      <acceptance>Zero failures.</acceptance>
+    </task>
+
+    <guardrails>
+      - log_data_access() takes (dataset_name: str, file_paths: list[str]), NOT split names
+      - Marquez emission is mock-tested only (full deployment deferred)
+      - MARQUEZ_URL in .env.example
+    </guardrails>
+  </pr>
+
+  <!-- PR-3: Observability Stubs + KG Fix -->
+  <pr id="3" name="Observability Stubs and KG Fix" branch="feat/observability-stubs">
+    <closes-issue>841</closes-issue>
+    <closes-issue>848</closes-issue>
+    <closes-issue>843</closes-issue>
+    <timing>pre-factorial-blocker</timing>
+    <priority>P2</priority>
+    <effort>S (1-2 days)</effort>
+    <dependencies>None (parallel with PR-1, PR-2)</dependencies>
+    <test-gate>make test-staging</test-gate>
+
+    <task id="T3.1" type="RED">
+      <title>Test: Sentry/PostHog init when env vars set, no-op otherwise</title>
+      <file>tests/v2/unit/test_observability_stubs.py</file>
+      <acceptance>Fails because init_sentry()/init_posthog() do not exist.</acceptance>
+    </task>
+
+    <task id="T3.2" type="GREEN">
+      <title>Implement stubs + .env.example vars</title>
+      <files>
+        <file>src/minivess/observability/monitoring.py</file>
+        <file>.env.example</file>
+      </files>
+      <description>
+        Lazy imports (optional deps). SENTRY_DSN= and POSTHOG_KEY= in .env.example.
+      </description>
+      <acceptance>T3.1 passes.</acceptance>
+    </task>
+
+    <task id="T3.3" type="KG">
+      <title>Fix agent_architecture.yaml: LangGraph to Pydantic AI</title>
+      <file>knowledge-graph/decisions/L3-technology/agent_architecture.yaml</file>
+    </task>
+
+    <task id="T3.4" type="KG">
+      <title>Add CISO Assistant note to compliance_posture</title>
+      <file>knowledge-graph/domains/operations.yaml</file>
+    </task>
+
+    <task id="T3.5" type="RED-GREEN">
+      <title>Test: updated KG YAML files parse correctly</title>
+      <file>tests/v2/unit/test_kg_consistency.py</file>
+      <acceptance>KG YAML files parse. Required keys present.</acceptance>
+    </task>
+
+    <task id="T3.6" type="VERIFY">
+      <title>make test-staging</title>
+      <acceptance>Zero failures.</acceptance>
+    </task>
+
+    <guardrails>
+      - Sentry/PostHog are optional deps (lazy import, no ImportError)
+      - Both disabled by default (empty env vars = no-op)
+    </guardrails>
+  </pr>
+
+  <!-- PR-4: Agentic Dashboard (CopilotKit + AG-UI) -->
+  <pr id="4" name="Agentic Dashboard" branch="feat/agentic-dashboard">
+    <closes-issue>840</closes-issue>
+    <timing>parallel-with-factorial</timing>
+    <priority>P1</priority>
+    <effort>L (5-7 days)</effort>
+    <dependencies>PR-2, PR-3</dependencies>
+    <test-gate>make test-staging</test-gate>
+
+    <task id="T4.1" type="RED">
+      <title>Test: CopilotKit docker-compose service config valid</title>
+      <file>tests/v2/unit/test_copilotkit_service.py</file>
+      <acceptance>Fails because copilotkit service not in docker-compose.</acceptance>
+    </task>
+
+    <task id="T4.2" type="GREEN">
+      <title>Add CopilotKit server to docker-compose</title>
+      <files>
+        <file>deployment/docker-compose.yml</file>
+        <file>deployment/copilotkit/Dockerfile</file>
+      </files>
+      <acceptance>T4.1 passes. docker-compose validates.</acceptance>
+    </task>
+
+    <task id="T4.3" type="RED">
+      <title>Test: AG-UI adapter translates WebMCP messages</title>
+      <file>tests/v2/unit/test_ag_ui_adapter.py</file>
+      <acceptance>Fails because adapter does not exist.</acceptance>
+    </task>
+
+    <task id="T4.4" type="GREEN">
+      <title>Implement AG-UI protocol adapter</title>
+      <file>src/minivess/dashboard/ag_ui_adapter.py</file>
+      <acceptance>T4.3 passes.</acceptance>
+    </task>
+
+    <task id="T4.5" type="RED-GREEN">
+      <title>Pydantic AI dashboard agent + Flow 5 wiring</title>
+      <files>
+        <file>tests/v2/unit/test_dashboard_agent.py</file>
+        <file>src/minivess/dashboard/agent.py</file>
+        <file>src/minivess/orchestration/flows/dashboard_flow.py</file>
+      </files>
+      <description>
+        Agent with MLflow query, DuckDB aggregation, OpenLineage retrieval tools.
+      </description>
+      <acceptance>Dashboard agent responds to MLflow queries in mock tests.</acceptance>
+    </task>
+
+    <task id="T4.6" type="VERIFY">
+      <title>make test-staging</title>
+      <acceptance>Zero failures.</acceptance>
+    </task>
+
+    <guardrails>
+      - CopilotKit is a Docker service, not standalone Node.js
+      - Dashboard agent uses Pydantic AI (NOT LangGraph)
+      - Lineage display is read-only
+    </guardrails>
+  </pr>
+
+  <!-- PR-5: KG-Enrichment Agent -->
+  <pr id="5" name="KG-Enrichment Agent" branch="feat/kg-enrichment-agent">
+    <closes-issue>849</closes-issue>
+    <timing>parallel-with-factorial</timing>
+    <priority>P1</priority>
+    <effort>M (3-4 days)</effort>
+    <dependencies>PR-3</dependencies>
+    <test-gate>make test-staging</test-gate>
+
+    <task id="T5.1" type="RED">
+      <title>Test: PubMed search returns structured metadata</title>
+      <file>tests/v2/unit/test_kg_enrichment_agent.py</file>
+      <acceptance>Fails because search_pubmed() does not exist.</acceptance>
+    </task>
+
+    <task id="T5.2" type="GREEN">
+      <title>Implement PubMed search (NCBI E-utilities, 3 req/s)</title>
+      <file>src/minivess/agents/kg_enrichment/pubmed_search.py</file>
+      <acceptance>T5.1 passes.</acceptance>
+    </task>
+
+    <task id="T5.3" type="RED-GREEN">
+      <title>Entity extraction from abstracts (Pydantic AI structured output)</title>
+      <files>
+        <file>tests/v2/unit/test_kg_enrichment_agent.py</file>
+        <file>src/minivess/agents/kg_enrichment/entity_extraction.py</file>
+      </files>
+      <acceptance>Extracts model_family, loss, metrics from sample abstracts.</acceptance>
+    </task>
+
+    <task id="T5.4" type="RED">
+      <title>Test: contradiction detector flags KG conflicts</title>
+      <file>tests/v2/unit/test_kg_enrichment_agent.py</file>
+      <description>Mock KG: "T4 banned for SAM3". Propose T4. Assert flagged.</description>
+      <acceptance>Fails because contradiction detector does not exist.</acceptance>
+    </task>
+
+    <task id="T5.5" type="GREEN">
+      <title>KG update proposals + contradiction detection</title>
+      <files>
+        <file>src/minivess/agents/kg_enrichment/update_proposal.py</file>
+        <file>src/minivess/agents/kg_enrichment/contradiction_detector.py</file>
+      </files>
+      <description>Human review gate: proposals saved for manual approval.</description>
+      <acceptance>T5.4 passes.</acceptance>
+    </task>
+
+    <task id="T5.6" type="VERIFY">
+      <title>make test-staging</title>
+      <acceptance>Zero failures.</acceptance>
+    </task>
+
+    <guardrails>
+      - PubMed rate limit: 3 req/s (NCBI policy)
+      - Entity extraction uses Pydantic AI, not regex
+      - KG updates NEVER auto-applied
+    </guardrails>
+  </pr>
+
+  <!-- PR-6: Research Agents -->
+  <pr id="6" name="Research Agents" branch="feat/research-agents">
+    <closes-issue>851</closes-issue>
+    <closes-issue>853</closes-issue>
+    <closes-issue>854</closes-issue>
+    <timing>parallel-with-factorial</timing>
+    <priority>P2</priority>
+    <effort>XL (7-10 days)</effort>
+    <dependencies>PR-1, PR-2, PR-4, PR-5</dependencies>
+    <test-gate>make test-staging</test-gate>
+
+    <task id="T6.1" type="RED-GREEN">
+      <title>Conformal bandit acquisition agent</title>
+      <files>
+        <file>tests/v2/unit/test_acquisition_agent.py</file>
+        <file>src/minivess/agents/acquisition/conformal_bandit.py</file>
+      </files>
+      <description>
+        Conformal prediction uncertainty. Thompson sampling. PCCP budget constraint.
+      </description>
+      <acceptance>Selects high-uncertainty volumes in mock tests.</acceptance>
+    </task>
+
+    <task id="T6.2" type="RED-GREEN">
+      <title>Active learning annotation agent</title>
+      <files>
+        <file>tests/v2/unit/test_annotation_agent.py</file>
+        <file>src/minivess/agents/annotation/active_learning.py</file>
+      </files>
+      <acceptance>Ranks volumes by disagreement in mock tests.</acceptance>
+    </task>
+
+    <task id="T6.3" type="RED-GREEN">
+      <title>Self-evolving segmentation agent (TissueLab pattern)</title>
+      <files>
+        <file>tests/v2/unit/test_self_evolving_agent.py</file>
+        <file>src/minivess/agents/evolution/self_evolving.py</file>
+      </files>
+      <description>Monitors drift, triggers retraining via Prefect deployment.</description>
+      <acceptance>Triggers retraining on drift detection.</acceptance>
+    </task>
+
+    <task id="T6.4" type="RED-GREEN">
+      <title>PCCP constraint enforcement layer</title>
+      <files>
+        <file>tests/v2/unit/test_pccp_enforcement.py</file>
+        <file>src/minivess/agents/constraints/pccp.py</file>
+      </files>
+      <acceptance>Rejects actions below confidence threshold.</acceptance>
+    </task>
+
+    <task id="T6.5" type="VERIFY">
+      <title>make test-staging</title>
+      <acceptance>Zero failures.</acceptance>
+    </task>
+
+    <guardrails>
+      - All agents use Pydantic AI (NOT LangGraph)
+      - PCCP enforcement mandatory for ALL agent actions
+      - Agents NEVER modify data/models without human approval
+      - Self-evolving uses Prefect deployments (Rule #17)
+    </guardrails>
+  </pr>
+
+  <success-criteria>
+    <criterion id="SC-1">Issues closed: #857 (partial), #751, #799, #821, #841, #848, #843, #840, #849, #851, #853, #854</criterion>
+    <criterion id="SC-2">make test-staging passes after each PR merge</criterion>
+    <criterion id="SC-3">make test-prod passes after all 6 PRs merged</criterion>
+    <criterion id="SC-4">Grid partitioning produces disjoint cell sets (unit tested)</criterion>
+    <criterion id="SC-5">GAR remote repo cache in europe-north1 (Pulumi preview succeeds)</criterion>
+    <criterion id="SC-6">GCP factorial study (#789) unblocked</criterion>
+  </success-criteria>
+
+  <deferred>
+    <item id="D-1" target="PR-1b (post-factorial)">
+      Optuna PARALLEL ask-tell API + PostgreSQL distributed trials (HPO Phase 2).
+    </item>
+    <item id="D-2" target="separate-pr">
+      Full Marquez deployment with PostgreSQL. PR-2 does mock-tested emission only.
+    </item>
+    <item id="D-3" target="PR-1c (post-factorial)">
+      Syne Tune integration (HPO Phase 3). Requires D-1 complete.
+    </item>
+  </deferred>
+
+  <out-of-scope>
+    <item>GCP factorial GPU runs (#789, after PR-1)</item>
+    <item>CopilotKit production frontend</item>
+    <item>SAM3 model testing (GPU instance only)</item>
+    <item>GitHub Actions CI (EXPLICITLY DISABLED)</item>
+  </out-of-scope>
+
+</plan>
