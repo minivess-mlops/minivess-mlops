@@ -1,7 +1,7 @@
 decision_id: test_set_firewall
 title: "Test Dataset Access Control & Audit Logging"
 level: L5-operations
-status: accepted
+status: resolved
 options:
   - id: audit_log_with_counter
     name: "AuditTrail logging + cumulative MLflow counter"

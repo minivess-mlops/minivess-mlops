@@ -38,7 +38,14 @@ make lint && echo "LINT: OK" || echo "LINT: FAILING"
 make typecheck && echo "TYPES: OK" || echo "TYPES: FAILING"
 ```
 
-**If baseline is not green:** Fix existing issues first. The iterative loop assumes a green baseline — it detects regressions, not pre-existing problems.
+**If baseline is NOT green:** Do NOT skip failures. Run the Failure Triage Protocol
+(`protocols/failure-triage.md`) to GATHER all failures with `--maxfail=200`,
+CATEGORIZE by root cause, and FIX them before entering the TDD loop. Every failure
+you ignore now will cost 10x more to fix later.
+
+The phrase "fix existing issues first" does NOT mean "ignore them and move on."
+It means: create issues, fix what you can, document the rest. "Pre-existing" is
+NOT a valid classification — every failure in this repo was co-authored by Claude Code.
 
 ## 3. Dependencies
 

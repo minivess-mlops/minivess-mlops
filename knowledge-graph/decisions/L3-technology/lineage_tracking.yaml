@@ -1,7 +1,7 @@
 decision_id: lineage_tracking
 title: "Data Lineage Tool"
 level: L3-technology
-status: accepted
+status: resolved
 options:
   - {id: openlineage_marquez, name: "OpenLineage + Marquez", prior_probability: 0.45, posterior_probability: 0.75}
   - {id: mlflow_lineage, name: "MLflow Lineage", prior_probability: 0.30, posterior_probability: 0.15}

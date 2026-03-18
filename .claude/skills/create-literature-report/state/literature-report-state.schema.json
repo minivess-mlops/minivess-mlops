@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LiteratureReportState",
+  "description": "State file for create-literature-report skill. Enables crash recovery at sub-step granularity.",
+  "type": "object",
+  "required": ["skill_version", "topic", "topic_slug", "output_path", "phase", "substep"],
+  "properties": {
+    "skill_version": { "type": "string", "const": "2.0.0" },
+    "topic": { "type": "string", "description": "Research topic" },
+    "topic_slug": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "URL-safe slug for file naming" },
+    "output_path": { "type": "string", "description": "Path to the report .md file" },
+    "phase": {
+      "type": "string",
+      "enum": ["CAPTURE", "GATHER", "SYNTHESIZE", "VERIFY", "REVIEW", "DELIVER", "COMPLETE"],
+      "description": "Current pipeline phase"
+    },
+    "substep": {
+      "type": "string",
+      "description": "Current sub-step within phase (e.g., 'alignment_confirmed', 'agent_a_complete')"
+    },
+    "seed_count": { "type": "integer", "minimum": 0 },
+    "discovered_count": { "type": "integer", "minimum": 0 },
+    "verified_count": { "type": "integer", "minimum": 0 },
+    "hallucinated_count": { "type": "integer", "minimum": 0 },
+    "corrections_applied": { "type": "integer", "minimum": 0 },
+    "iteration": { "type": "integer", "minimum": 0, "description": "Phase 4 review iteration" },
+    "quality_verdict": {
+      "type": ["string", "null"],
+      "enum": ["MAJOR_REVISION", "MINOR_REVISION", "ACCEPT", null]
+    },
+    "force_stopped": { "type": "boolean", "default": false },
+    "force_stop_reason": { "type": ["string", "null"] },
+    "issues_created": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "GitHub issue URLs created in Phase 5"
+    },
+    "agents_completed": {
+      "type": "object",
+      "description": "Per-agent completion status for parallel phases",
+      "properties": {
+        "gather_local": { "type": "boolean", "default": false },
+        "gather_web_a": { "type": "boolean", "default": false },
+        "gather_web_b": { "type": "boolean", "default": false },
+        "verify_batch_1": { "type": "boolean", "default": false },
+        "verify_batch_2": { "type": "boolean", "default": false },
+        "verify_batch_3": { "type": "boolean", "default": false }
+      }
+    },
+    "started_at": { "type": "string", "format": "date-time" },
+    "last_checkpoint": { "type": "string", "format": "date-time" }
+  }
+}

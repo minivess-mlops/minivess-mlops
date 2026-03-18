@@ -73,22 +73,23 @@ class TestSmokeTestYamlVesselFM:
                 "All deps must be in Docker image. Setup is DATA ONLY."
             )
 
-    def test_yaml_has_dvc_remote(self) -> None:
-        """DVC_REMOTE must point to remote_storage (AWS S3 public — no credentials needed).
+    def test_yaml_no_stale_dvc_credentials(self) -> None:
+        """RunPod path uses Network Volume — no DVC credentials should be present.
 
-        UpCloud S3 dropped 2026-03-16. No DVC_S3_* credentials needed for public bucket.
-        Data strategy: Network Volume cache-first → AWS S3 fallback (no creds).
+        Data flow: researcher uploads from local disk to Network Volume.
+        DVC_REMOTE and DVC_S3_* are stale (UpCloud archived 2026-03-16).
         """
         config = self._load_yaml()
         envs = config.get("envs", {})
-        assert "DVC_REMOTE" in envs, "DVC_REMOTE not in smoke_test_gpu.yaml envs"
-        assert envs["DVC_REMOTE"] == "remote_storage", (
-            f"DVC_REMOTE should be 'remote_storage', got: {envs['DVC_REMOTE']}"
-        )
-        # Stale UpCloud vars must be absent
-        for stale in ["DVC_S3_ENDPOINT_URL", "DVC_S3_ACCESS_KEY", "DVC_S3_SECRET_KEY"]:
+        for stale in [
+            "DVC_REMOTE",
+            "DVC_S3_ENDPOINT_URL",
+            "DVC_S3_ACCESS_KEY",
+            "DVC_S3_SECRET_KEY",
+        ]:
             assert stale not in envs, (
-                f"Stale UpCloud var {stale} in smoke_test_gpu.yaml — UpCloud archived 2026-03-16"
+                f"smoke_test_gpu.yaml has stale DVC/UpCloud var {stale} — "
+                "RunPod uses Network Volume, not DVC"
             )
 
     def test_yaml_has_mlflow_tracking_uri(self) -> None:

@@ -1,0 +1,24 @@
+decision_id: tripod_compliance
+title: "TRIPOD+AI/LLM/Code Reporting Guideline Compliance"
+level: L1-research-goals
+status: resolved
+options:
+  - {id: full_tripod_ai, name: "Full TRIPOD+AI compliance", prior_probability: 0.70, posterior_probability: 0.85}
+  - {id: partial_tripod, name: "Partial TRIPOD only", prior_probability: 0.20, posterior_probability: 0.10}
+  - {id: no_reporting_guideline, name: "No reporting guideline", prior_probability: 0.10, posterior_probability: 0.05}
+resolved_option: full_tripod_ai
+resolution_evidence:
+  - type: implementation
+    source: "docs/planning/tripod-compliance-matrix.md"
+    finding: "Full TRIPOD+AI/LLM/Code compliance matrix with item-by-item mapping"
+implementation:
+  files:
+    - docs/planning/tripod-compliance-matrix.md
+  tests:
+    - tests/v2/unit/test_tripod_compliance.py
+conditional_on:
+  - {parent_decision_id: publication_target, influence_strength: strong}
+volatility:
+  classification: stable
+  next_review: "2026-09-18"
+  rationale: "TRIPOD+AI is the accepted reporting guideline for clinical prediction models"

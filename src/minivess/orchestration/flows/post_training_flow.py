@@ -24,6 +24,7 @@ from typing import Any
 from prefect import flow, get_run_logger, task
 
 from minivess.config.post_training_config import PostTrainingConfig
+from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_POST_TRAINING, FLOW_NAME_TRAIN
 from minivess.orchestration.mlflow_helpers import (
@@ -394,6 +395,18 @@ def post_training_flow(
         tracking_uri=tracking_uri,
         run_id=mlflow_run_id,
     )
+
+    # OpenLineage lineage emission (Issue #799 — IEC 62304 §8 traceability)
+    try:
+        _emitter = LineageEmitter(namespace="minivess")
+        emit_flow_lineage(
+            emitter=_emitter,
+            job_name="post-training-flow",
+            inputs=[{"namespace": "minivess", "name": "checkpoints"}],
+            outputs=[{"namespace": "minivess", "name": "swa_checkpoints"}],
+        )
+    except Exception:
+        logger.warning("OpenLineage emission failed (non-blocking)", exc_info=True)
 
     swa_ran = any(k in plugin_results for k in ("swa", "multi_swa"))
     calibration_ran = "calibration" in plugin_results

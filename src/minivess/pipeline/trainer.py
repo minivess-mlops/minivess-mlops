@@ -111,6 +111,27 @@ class EpochResult:
     metrics: dict[str, float] = field(default_factory=dict)
 
 
+def _normalize_metric_name(name: str) -> str:
+    """Normalize underscore-format metric names to slash-prefix format.
+
+    Config files use underscore (``val_loss``, ``train_dice``) for YAML
+    compatibility, but the trainer's ``all_metrics`` dict uses slash-prefix
+    format (``val/loss``, ``train/dice``) per the #790 migration.
+
+    Handles known prefixes: ``val_``, ``train_``, ``eval_``, ``prof_``,
+    ``gpu_``, ``optim_``. Names already containing ``/`` are returned as-is.
+    """
+    if "/" in name:
+        return name
+    _PREFIXES = ("val_", "train_", "eval_", "prof_", "gpu_", "optim_")
+    for prefix in _PREFIXES:
+        if name.startswith(prefix):
+            phase = prefix.rstrip("_")
+            remainder = name[len(prefix) :]
+            return f"{phase}/{remainder}"
+    return name
+
+
 def _build_multi_tracker(config: TrainingConfig) -> MultiMetricTracker:
     """Build a :class:`MultiMetricTracker` from :class:`TrainingConfig`.
 
@@ -134,7 +155,7 @@ def _build_multi_tracker(config: TrainingConfig) -> MultiMetricTracker:
         )
         trackers.append(
             MetricTracker(
-                name=m.name,
+                name=_normalize_metric_name(m.name),
                 direction=direction,
                 patience=m.patience,
                 min_delta=ckpt_cfg.min_delta,
@@ -142,7 +163,7 @@ def _build_multi_tracker(config: TrainingConfig) -> MultiMetricTracker:
         )
     return MultiMetricTracker(
         trackers=trackers,
-        primary_metric=ckpt_cfg.primary_metric,
+        primary_metric=_normalize_metric_name(ckpt_cfg.primary_metric),
         early_stopping_strategy=ckpt_cfg.early_stopping_strategy,
         min_epochs=ckpt_cfg.min_epochs,
     )
@@ -936,14 +957,14 @@ class SegmentationTrainer:
                     )
 
         # Backward-compatible best_val_loss: use primary tracker's best value
-        # when primary metric is val_loss, otherwise fall back to best val_loss tracker
+        # when primary metric is val/loss, otherwise fall back to val/loss tracker
         primary_tracker = self._multi_tracker.get_primary_tracker()
-        if primary_tracker.name == "val_loss":
+        if primary_tracker.name == "val/loss":
             best_val_loss = primary_tracker.best_value
         else:
-            # Try to find a val_loss tracker
+            # Try to find a val/loss tracker
             val_loss_trackers = [
-                t for t in self._multi_tracker.trackers if t.name == "val_loss"
+                t for t in self._multi_tracker.trackers if t.name == "val/loss"
             ]
             best_val_loss = (
                 val_loss_trackers[0].best_value

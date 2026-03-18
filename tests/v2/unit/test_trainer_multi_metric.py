@@ -259,7 +259,8 @@ class TestTrainerBuildsMultiTracker:
             criterion=DiceCELoss(softmax=True, to_onehot_y=True),
         )
         tracker_names = {t.name for t in trainer._multi_tracker.trackers}
-        assert tracker_names == {"val_loss", "val_dice"}
+        # _build_multi_tracker normalizes underscore→slash (#790)
+        assert tracker_names == {"val/loss", "val/dice"}
 
 
 # ---------------------------------------------------------------------------
@@ -554,7 +555,8 @@ class TestFitBackwardCompatReturns:
         result = trainer.fit(_make_loader(), _make_loader())
 
         assert "best_metrics" in result
-        assert "val_loss" in result["best_metrics"]
+        # Tracker names are normalized to slash-prefix (#790)
+        assert "val/loss" in result["best_metrics"]
 
 
 # ---------------------------------------------------------------------------
@@ -587,7 +589,7 @@ class TestCheckpointFilesAreSelfContained:
         )
         meta = payload["checkpoint_metadata"]
         assert "metrics" in meta, "checkpoint_metadata must contain 'metrics' dict"
-        assert "val_loss" in meta["metrics"], "metrics dict must contain 'val_loss'"
+        assert "val/loss" in meta["metrics"], "metrics dict must contain 'val/loss'"
 
     def test_checkpoint_has_model_state_dict(self, tmp_path: Path) -> None:
         """best_val_loss.pth should contain 'model_state_dict'."""

@@ -268,3 +268,32 @@ class LineageEmitter:
         List of matching RunEvents.
         """
         return [e for e in self.events if e.job.name == job_name]
+
+
+def emit_flow_lineage(
+    *,
+    emitter: LineageEmitter,
+    job_name: str,
+    inputs: list[dict[str, str]] | None = None,
+    outputs: list[dict[str, str]] | None = None,
+) -> None:
+    """Emit START + COMPLETE lineage events for a completed flow.
+
+    Convenience function for flows that run synchronously and want to
+    record lineage after successful completion without using the context
+    manager pattern (which requires wrapping the entire flow body).
+
+    Parameters
+    ----------
+    emitter:
+        The LineageEmitter instance.
+    job_name:
+        Name of the pipeline flow.
+    inputs:
+        Input datasets as ``[{"namespace": ..., "name": ...}]``.
+    outputs:
+        Output datasets as ``[{"namespace": ..., "name": ...}]``.
+    """
+    start_event = emitter.emit_start(job_name, inputs=inputs)
+    run_id = start_event.run.runId
+    emitter.emit_complete(job_name, run_id=run_id, outputs=outputs)

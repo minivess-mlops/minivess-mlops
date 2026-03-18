@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 from prefect import flow, get_run_logger, task
 
 from minivess.config.deploy_config import DeployConfig
+from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_DEPLOY
 from minivess.orchestration.mlflow_helpers import (
@@ -368,6 +369,24 @@ def deploy_flow(
         tracking_uri=_tracking_uri,
         run_id=mlflow_run_id,
     )
+
+    # OpenLineage lineage emission (Issue #799 — IEC 62304 §8 traceability)
+    try:
+        _emitter = LineageEmitter(namespace="minivess")
+        emit_flow_lineage(
+            emitter=_emitter,
+            job_name="deploy-flow",
+            inputs=[
+                {"namespace": "minivess", "name": "champion_model"},
+                {"namespace": "minivess", "name": "mlflow_registry"},
+            ],
+            outputs=[
+                {"namespace": "minivess", "name": "onnx_export"},
+                {"namespace": "minivess", "name": "bentoml_model"},
+            ],
+        )
+    except Exception:
+        log.warning("OpenLineage emission failed (non-blocking)", exc_info=True)
 
     return result
 

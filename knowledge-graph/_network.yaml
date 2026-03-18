@@ -35,8 +35,11 @@ nodes:
   - id: publication_target
     level: L1
     file: decisions/L1-research-goals/publication_target.yaml
+  - id: tripod_compliance
+    level: L1
+    file: decisions/L1-research-goals/tripod_compliance.yaml
 
-  # L2 — Architecture (12 nodes)
+  # L2 — Architecture (13 nodes)
   - id: docker_architecture
     level: L2
     file: decisions/L2-architecture/docker_architecture.yaml
@@ -52,6 +55,9 @@ nodes:
   - id: config_architecture
     level: L2
     file: decisions/L2-architecture/config_architecture.yaml
+  - id: code_quality_philosophy
+    level: L2
+    file: decisions/L2-architecture/code_quality_philosophy.yaml
   - id: serving_architecture
     level: L2
     file: decisions/L2-architecture/serving_architecture.yaml
@@ -229,6 +235,12 @@ nodes:
   - id: cost_tracking_strategy
     level: L5
     file: decisions/L5-operations/cost-tracking-strategy.yaml
+  - id: fda_readiness
+    level: L5
+    file: decisions/L5-operations/fda_readiness.yaml
+  - id: test_set_firewall
+    level: L5
+    file: decisions/L5-operations/test_set_firewall.yaml
 
 edges:
   # L1 → L2 (strategy to architecture) — ~18 edges

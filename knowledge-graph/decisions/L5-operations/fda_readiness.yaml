@@ -1,7 +1,7 @@
 decision_id: fda_readiness
 title: "FDA SaMD Readiness Posture"
 level: L5-operations
-status: accepted
+status: resolved
 options:
   - id: preclinical_fda_ready
     name: "Preclinical platform with FDA-ready architecture"

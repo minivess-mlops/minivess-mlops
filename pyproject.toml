@@ -116,6 +116,9 @@ agents = [
     # langgraph removed — replaced by pydantic-ai (ADR-0007)
     "litellm>=1.70,<2.0",
 ]
+compliance = [
+    "cyclonedx-bom>=7.2,<8.0",
+]
 sam = [
     "sam2>=1.0,<2.0",
 ]
@@ -389,6 +392,7 @@ filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::pytest.PytestUnraisableExceptionWarning",
     "ignore::PendingDeprecationWarning",
+    "ignore:The figure layout has changed to tight:UserWarning",
 ]
 
 # ---------------------------------------------------------------------------

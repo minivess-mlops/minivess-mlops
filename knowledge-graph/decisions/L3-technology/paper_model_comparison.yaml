@@ -1,6 +1,6 @@
 decision_id: paper_model_comparison
 title: "Nature Protocols Paper Model Comparison Lineup"
-level: L3
+level: L3-technology
 status: resolved
 description: >
   The 6 models compared in the NEUROVEX Nature Protocols manuscript.
@@ -11,6 +11,11 @@ description: >
   R3c (foundation model external evaluation).
 
 resolved_option: six_model_comparison
+
+options:
+  - {id: six_model_comparison, name: "6-model comparison (DynUNet, MambaVesselNet++, SAM3x3, VesselFM)", prior_probability: 0.80, posterior_probability: 0.95}
+  - {id: four_model_comparison, name: "4-model comparison (subset)", prior_probability: 0.15, posterior_probability: 0.04}
+  - {id: single_model, name: "Single model only", prior_probability: 0.05, posterior_probability: 0.01}
 
 models:
   - model_id: dynunet

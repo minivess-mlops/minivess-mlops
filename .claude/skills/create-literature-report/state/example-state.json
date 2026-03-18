@@ -1,0 +1,28 @@
+{
+  "skill_version": "2.0.0",
+  "topic": "Biomedical Agentic AI",
+  "topic_slug": "biomedical-agentic-ai",
+  "output_path": "docs/planning/biomedical-agentic-ai-research-report.md",
+  "phase": "VERIFY",
+  "substep": "corrections_applied",
+  "seed_count": 27,
+  "discovered_count": 43,
+  "verified_count": 64,
+  "hallucinated_count": 3,
+  "corrections_applied": 6,
+  "iteration": 0,
+  "quality_verdict": null,
+  "force_stopped": false,
+  "force_stop_reason": null,
+  "issues_created": [],
+  "agents_completed": {
+    "gather_local": true,
+    "gather_web_a": true,
+    "gather_web_b": true,
+    "verify_batch_1": true,
+    "verify_batch_2": true,
+    "verify_batch_3": true
+  },
+  "started_at": "2026-03-18T22:00:00Z",
+  "last_checkpoint": "2026-03-18T23:30:00Z"
+}

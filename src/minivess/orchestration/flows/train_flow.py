@@ -29,6 +29,7 @@ from minivess.observability.infrastructure_timing import (
     generate_timing_jsonl,
     get_hourly_rate_usd,
 )
+from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.prometheus_metrics import update_estimated_cost_gauges
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_TRAIN
@@ -945,6 +946,21 @@ def training_flow(
         tracking_uri=tracking_uri,
         run_id=mlflow_run_id,
     )
+
+    # OpenLineage lineage emission (Issue #799 — IEC 62304 §8 traceability)
+    try:
+        _emitter = LineageEmitter(namespace="minivess")
+        emit_flow_lineage(
+            emitter=_emitter,
+            job_name="train-flow",
+            inputs=[{"namespace": "minivess", "name": "raw_volumes"}],
+            outputs=[
+                {"namespace": "minivess", "name": "checkpoints"},
+                {"namespace": "minivess", "name": "mlflow_metrics"},
+            ],
+        )
+    except Exception:
+        logger.warning("OpenLineage emission failed (non-blocking)", exc_info=True)
 
     result = TrainingFlowResult(
         flow_name="train",

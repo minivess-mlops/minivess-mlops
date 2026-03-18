@@ -1,11 +1,20 @@
 ---
 name: self-learning-iterative-coder
-version: 2.1.0
-description: Self-correcting TDD loop for plan-driven code implementation
-last_updated: 2026-02-23
+version: 3.0.0
+description: >
+  Production-grade TDD loop for plan-driven code implementation. Self-correcting
+  RED→GREEN→VERIFY→FIX cycle with zero-tolerance failure triage, batch error
+  resolution, and "tokens upfront" quality philosophy. Use when implementing from
+  executable plans (XML/YAML/JSON), writing tests first, fixing code iteratively,
+  or when ANY implementation task benefits from structured test-driven development.
+last_updated: 2026-03-18
 activation: manual
 invocation: /tdd-iterate
 revision_notes: >
+  v3.0.0: Production-grade upgrade. Added failure-triage protocol
+  (BUG-1 + BUG-2 prevention). Rules #9 (zero tolerance), #10 (triage
+  before fixing), #11 (tokens upfront). 27 skill evals. CLAUDE.md
+  Rule #24. KG code_quality_philosophy node. Skills 2.0 compatible.
   v2.1.0: Ralph Wiggum best-practices audit. Added accumulated learnings
   file (LEARNINGS.md), placeholder prevention rule, and FORCE_STOP
   escape hatch with structured next-steps output.
@@ -101,6 +110,21 @@ Maintain a `LEARNINGS.md` file in the project root. After each FORCE_STOP, STUCK
 - **Resolution**: How it was resolved (or why it was deferred)
 ```
 
+### 9. ZERO TOLERANCE FOR OBSERVED FAILURES
+Every test failure seen during a session MUST result in: fixed, issue created, or reported to user. "Pre-existing" is NOT a classification. "Not related to current changes" is BANNED. "Separate issue" without creating the issue in the SAME response is a lie. Every failure in this repo was co-authored by Claude Code and is therefore Claude Code's responsibility. See: `.claude/metalearning/2026-03-07-silent-existing-failures.md`
+
+### 10. FAILURE TRIAGE BEFORE FIXING
+When the VERIFY phase reveals multiple failures, STOP. Do NOT fix one at a time. Invoke the Failure Triage Protocol (`protocols/failure-triage.md`) to GATHER all failures with `--maxfail=200`, CATEGORIZE by root cause, PLAN batch fixes, then FIX. One root cause often explains 50+ failures. Serial fixing wastes 25+ minutes on what should be 10 minutes. See: `.claude/metalearning/2026-03-18-whac-a-mole-serial-failure-fixing.md`
+
+### 11. TOKENS UPFRONT — QUALITY OVER SPEED
+Spend more tokens reading and understanding before writing code. The cost of sloppy initial code is always higher than the cost of careful initial code:
+- **30% reading / 70% implementing** (not 5% / 95%)
+- Read ALL relevant source files before writing tests
+- Read ALL existing tests before writing new ones
+- Understand the full interface before implementing
+- "I'll just try this and see" without reading context is BANNED
+- One careful implementation pass is cheaper than three sloppy-then-fix passes
+
 ## Activation
 
 Before starting, run through the [ACTIVATION-CHECKLIST.md](ACTIVATION-CHECKLIST.md).
@@ -115,6 +139,7 @@ Before starting, run through the [ACTIVATION-CHECKLIST.md](ACTIVATION-CHECKLIST.
 | Green Phase | Implement minimum code to pass tests | [protocols/green-phase.md](protocols/green-phase.md) |
 | Verify Phase | Run tests + lint + typecheck | [protocols/verify-phase.md](protocols/verify-phase.md) |
 | Fix Phase | Analyze failures, apply targeted fixes | [protocols/fix-phase.md](protocols/fix-phase.md) |
+| **Failure Triage** | **Handle multiple failures systematically** | [protocols/failure-triage.md](protocols/failure-triage.md) |
 | Checkpoint | Git commit + state update | [protocols/checkpoint.md](protocols/checkpoint.md) |
 | Convergence | Per-task and per-plan stop conditions | [protocols/convergence.md](protocols/convergence.md) |
 
@@ -142,6 +167,9 @@ See [prompts/self-correction-principles.md](prompts/self-correction-principles.m
 | Convention ignorance | Using pip instead of uv, strings instead of Path | Read CLAUDE.md before starting |
 | Placeholder code | Writing `pass`, `TODO`, `NotImplementedError` | Full implementations only |
 | Knowledge amnesia | Re-discovering the same issues across sessions | Append to LEARNINGS.md |
+| **Silent dismissal** | Classifying failures as "pre-existing" and moving on | Zero tolerance — fix, issue, or report (Rule #9) |
+| **Whac-a-mole** | Fixing one test at a time with `-x` in a loop | Failure Triage Protocol — batch fix by root cause (Rule #10) |
+| **Skim-and-code** | Writing code without reading existing implementation | Read 30%, implement 70% — tokens upfront (Rule #11) |
 
 ## Session Budget
 

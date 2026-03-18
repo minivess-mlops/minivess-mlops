@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 import torch
 
 from minivess.testing.quasi_e2e_runner import (
@@ -26,6 +27,9 @@ from minivess.testing.quasi_e2e_runner import (
 
 if TYPE_CHECKING:
     from minivess.testing.capability_discovery import TestCombination
+
+# These tests instantiate PyTorch models — exclude from staging tier
+pytestmark = pytest.mark.model_loading
 
 
 class TestModelLossForwardBackward:

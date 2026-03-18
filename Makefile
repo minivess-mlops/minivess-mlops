@@ -348,6 +348,23 @@ sbom:
 	  minivess-base:latest
 	@echo "SBOM written to sbom/minivess-base-sbom.json"
 
+sbom-python:
+	@echo "Generating Python-level CycloneDX SBOM from uv environment..."
+	@mkdir -p sbom/
+	uv run cyclonedx-py environment --output-format json -o sbom/python-sbom.json
+	@echo "Python SBOM written to sbom/python-sbom.json"
+	uv run cyclonedx-py environment --output-format xml -o sbom/python-sbom.xml
+	@echo "Python SBOM (XML) written to sbom/python-sbom.xml"
+
+sbom-scan:
+	@echo "Scanning Python SBOM for known vulnerabilities..."
+	@which grype || (echo "Install Grype: curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin" && exit 1)
+	grype sbom:sbom/python-sbom.json --output table
+	@echo "Scan complete."
+
+sbom-all: sbom sbom-python
+	@echo "All SBOMs generated (Docker + Python)."
+
 seccomp-audit-train:
 	@echo "Running train flow with seccomp audit profile (syscall discovery)..."
 	@echo "NOTE: Requires auditd running on host to capture SCMP_ACT_LOG events."

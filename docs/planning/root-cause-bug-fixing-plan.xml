@@ -1,0 +1,429 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan version="1.0" name="root-cause-bug-fixing">
+
+  <metadata>
+    <created>2026-03-18</created>
+    <description>
+      Batch-fix 15 remaining test failures on fix/fda-readiness-improvement-xml
+      using proper GATHER→CATEGORIZE→PLAN→FIX→VERIFY methodology (Rule #23).
+      Also: improve self-learning-iterative-coder skill to prevent whac-a-mole.
+
+      METALEARNING REFERENCE:
+      .claude/metalearning/2026-03-18-whac-a-mole-serial-failure-fixing.md
+      CLAUDE.md Rule #23: NEVER Fix Failures Serially
+    </description>
+    <branch>fix/fda-readiness-improvement-xml</branch>
+    <prior-work>
+      Phase 1-4 of fda-insights-second-pass-executable.xml COMPLETE.
+      OpenLineage wired into 5 flows, CycloneDX SBOM added, KG updated,
+      5 GitHub issues created. 4614 tests pass, 15 remain.
+    </prior-work>
+    <cold-start-instructions>
+      1. git checkout fix/fda-readiness-improvement-xml
+      2. git pull
+      3. Read this XML plan
+      4. Execute Phase 1 (batch fix), then Phase 2 (skill improvement)
+      5. Run make test-staging — must be ZERO failures
+      6. git push
+      7. Wait for user command before creating PR
+    </cold-start-instructions>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- GATHERED FAILURES (from --maxfail=200 run, 2026-03-18)             -->
+  <!-- ================================================================== -->
+  <failure-inventory>
+    <total-failures>15</total-failures>
+    <total-passed>4614</total-passed>
+    <root-causes>3</root-causes>
+
+    <root-cause id="RC1" name="slash-prefix-metric-keys" count="5">
+      <description>
+        MLflow slash-prefix migration (#790) changed metric/param key format
+        from underscore (eval_fold0_dsc) to slash (eval/fold0/dsc). Tests
+        still assert old underscore keys. This is the SAME root cause that
+        affected test_system_info.py (19 tests) and test_observability.py
+        (10+ tests) — already fixed in earlier commits on this branch.
+      </description>
+      <files>
+        <file name="tests/v2/unit/test_tracker_evaluation.py" failures="2">
+          <failure>eval_fold0_dsc → eval/fold0/dsc</failure>
+          <failure>eval_fold1_dsc → eval/fold1/dsc (KeyError)</failure>
+        </file>
+        <file name="tests/v2/unit/test_train_flow_timing.py" failures="2">
+          <failure>prof_first_epoch_seconds → prof/first_epoch_seconds</failure>
+          <failure>prof_steady_epoch_seconds → prof/steady_epoch_seconds</failure>
+        </file>
+        <file name="tests/v2/unit/test_trainer_metrics.py" failures="1">
+          <failure>train_dice → train/dice in logged metrics set</failure>
+        </file>
+      </files>
+      <fix-strategy>
+        Batch sed-like replacement of underscore keys to slash keys in all 3
+        test files. Use ast.parse to verify syntax after replacement. Do NOT
+        replace function names or variable names — only string literals used
+        as dict keys or assertion targets.
+      </fix-strategy>
+    </root-cause>
+
+    <root-cause id="RC2" name="checkpoint-naming-changed" count="6">
+      <description>
+        Trainer refactor changed checkpoint naming from best_val_loss.pth to
+        a different convention. 6 tests in test_trainer_multi_metric.py expect
+        the old best_*.pth pattern. The trainer now uses a different naming
+        scheme for checkpoints (possibly metric-based subdirectories or
+        different filename patterns).
+      </description>
+      <files>
+        <file name="tests/v2/unit/test_trainer_multi_metric.py" failures="6">
+          <failure>test_saves_best_val_loss_checkpoint: No best_*.pth found</failure>
+          <failure>test_checkpoint_named_for_metric: Expected best_val_loss.pth</failure>
+          <failure>test_multi_metric_saves_separate_files: assert False</failure>
+          <failure>test_early_stop_triggered: Expected early stop before epoch 20</failure>
+          <failure>test_checkpoint_has_metadata: assert False</failure>
+          <failure>test_checkpoint_has_model_state_dict: FileNotFoundError best_val_loss.pth</failure>
+        </file>
+      </files>
+      <fix-strategy>
+        1. Read the actual Trainer.fit() code to understand current checkpoint
+           naming convention
+        2. Update ALL 6 tests to match the actual convention
+        3. For early_stop_triggered: check if early stopping logic changed
+        4. Single commit for all 6 fixes
+      </fix-strategy>
+    </root-cause>
+
+    <root-cause id="RC3" name="skypilot-yaml-restructured" count="4">
+      <description>
+        SkyPilot YAML files were restructured (DVC remote strategy change,
+        timing instrumentation). Tests expect DVC_REMOTE env var and dvc_pull
+        timing markers that may have been moved or renamed.
+      </description>
+      <files>
+        <file name="tests/v2/unit/test_skypilot_configs.py" failures="2">
+          <failure>smoke_test_gpu.yaml missing DVC_REMOTE in envs</failure>
+          <failure>smoke_test_gpu.yaml setup must include dvc pull -r remote_storage</failure>
+        </file>
+        <file name="tests/v2/unit/test_smoke_test_yaml_vesselfm.py" failures="1">
+          <failure>DVC_REMOTE not in smoke_test_gpu.yaml envs</failure>
+        </file>
+        <file name="tests/v2/unit/test_skypilot_yaml_timing.py" failures="1">
+          <failure>Missing dvc_pull_start= in dev_runpod.yaml setup</failure>
+        </file>
+      </files>
+      <fix-strategy>
+        1. Read the actual SkyPilot YAML files to see current structure
+        2. Update tests to match actual YAML content
+        3. If DVC_REMOTE was intentionally removed, update test expectations
+        4. Single commit for all 4 fixes
+      </fix-strategy>
+    </root-cause>
+  </failure-inventory>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Batch Fix All 15 Failures (3 commits, one per root cause) -->
+  <!-- ================================================================== -->
+  <phase id="1" name="batch-fix-remaining-failures">
+    <estimated-duration>30-45 minutes</estimated-duration>
+    <methodology>Rule #23 — GATHER → CATEGORIZE → PLAN → FIX → VERIFY</methodology>
+
+    <step id="1.0" name="GATHER">
+      <command>
+        MINIVESS_ALLOW_HOST=1 PREFECT_DISABLED=1 uv run pytest tests/ \
+          -m "not model_loading and not slow and not integration and not gpu and not gpu_heavy" \
+          --ignore=tests/gpu_instance --ignore=tests/v2/cloud \
+          -q --tb=line --maxfail=200 -p no:warnings 2>&amp;1 | grep "FAILED"
+      </command>
+      <acceptance>Exactly 15 failures matching the inventory above.</acceptance>
+    </step>
+
+    <step id="1.1" name="FIX-RC1: Slash-prefix metric keys (5 tests)">
+      <files>
+        <file>tests/v2/unit/test_tracker_evaluation.py</file>
+        <file>tests/v2/unit/test_train_flow_timing.py</file>
+        <file>tests/v2/unit/test_trainer_metrics.py</file>
+      </files>
+      <approach>
+        For each file:
+        1. Read the file
+        2. Identify ALL string literals that are dict keys with underscore format
+           (eval_fold0_dsc, prof_first_epoch_seconds, train_dice, etc.)
+        3. Map each to the slash-prefix equivalent using the MetricKeys class
+           in src/minivess/observability/metric_keys.py as the source of truth
+        4. Replace ALL at once (not one-by-one)
+        5. Verify syntax with ast.parse()
+        6. Run the specific test file to confirm GREEN
+      </approach>
+      <commit-message>
+        fix: batch slash-prefix migration for tracker_evaluation, timing, trainer_metrics (#790)
+      </commit-message>
+    </step>
+
+    <step id="1.2" name="FIX-RC2: Checkpoint naming (6 tests)">
+      <files>
+        <file>tests/v2/unit/test_trainer_multi_metric.py</file>
+        <file>src/minivess/pipeline/trainer.py</file>
+      </files>
+      <approach>
+        1. Read src/minivess/pipeline/trainer.py to find the ACTUAL checkpoint
+           saving code — what filename pattern does it use?
+        2. Read all 6 failing test methods to understand what they expect
+        3. Update ALL 6 tests to match the actual trainer behavior
+        4. For early_stop_triggered: check if patience/threshold changed
+        5. Run test_trainer_multi_metric.py to confirm all 6 GREEN
+      </approach>
+      <commit-message>
+        fix: update checkpoint naming assertions to match refactored trainer
+      </commit-message>
+    </step>
+
+    <step id="1.3" name="FIX-RC3: SkyPilot YAML content (4 tests)">
+      <files>
+        <file>tests/v2/unit/test_skypilot_configs.py</file>
+        <file>tests/v2/unit/test_smoke_test_yaml_vesselfm.py</file>
+        <file>tests/v2/unit/test_skypilot_yaml_timing.py</file>
+        <file>deployment/skypilot/smoke_test_gpu.yaml</file>
+        <file>deployment/skypilot/dev_runpod.yaml</file>
+      </files>
+      <approach>
+        1. Read the actual SkyPilot YAML files
+        2. Check if DVC_REMOTE env var exists or was renamed/removed
+        3. Check if dvc_pull timing markers exist
+        4. Update tests to match reality OR add missing YAML content
+        5. Run all 3 test files to confirm GREEN
+      </approach>
+      <commit-message>
+        fix: align SkyPilot YAML tests with current deployment configs
+      </commit-message>
+    </step>
+
+    <step id="1.4" name="VERIFY: Full staging suite">
+      <command>MINIVESS_ALLOW_HOST=1 PREFECT_DISABLED=1 make test-staging</command>
+      <acceptance>ZERO failures. All tests pass.</acceptance>
+    </step>
+
+    <step id="1.5" name="PUSH">
+      <command>git push</command>
+      <note>Do NOT create PR — wait for user command.</note>
+    </step>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: Improve Self-Learning TDD Skill                           -->
+  <!-- Addresses TWO systemic failures:                                    -->
+  <!--   BUG-1: Silent dismissal of pre-existing failures (2026-03-07)    -->
+  <!--   BUG-2: Whac-a-mole serial failure fixing (2026-03-18)           -->
+  <!-- ================================================================== -->
+  <phase id="2" name="improve-tdd-skill" priority="P0">
+    <estimated-duration>30 minutes</estimated-duration>
+    <issue>P0 — must be done on this branch before PR</issue>
+    <description>
+      Two compounding systemic failures keep recurring in this project:
+
+      BUG-1 (SILENT DISMISSAL): Claude Code encounters a test failure, classifies
+      it as "pre-existing" or "not related to current changes", and moves on.
+      The failure persists across sessions. Nobody creates an issue. Nobody fixes it.
+      8 documented instances in metalearning/2026-03-07-silent-existing-failures.md.
+      The phrase "not related to current changes" is BANNED per CLAUDE.md Rule #20.
+
+      BUG-2 (WHAC-A-MOLE): When multiple test failures exist, Claude Code fixes
+      them one at a time — run tests, fix one failure, run tests, fix next failure.
+      This takes 25+ minutes for what should be a 10-minute batch operation.
+      Documented in metalearning/2026-03-18-whac-a-mole-serial-failure-fixing.md.
+      BANNED per CLAUDE.md Rule #23.
+
+      Both bugs must be prevented by encoding the correct behavior INTO the
+      self-learning-iterative-coder skill protocols so they are automatically
+      followed in every future session, without the user having to remind.
+
+      The skill improvement is the COMPOUNDING fix — it prevents both bugs
+      from ever recurring, making every future session more efficient.
+    </description>
+    <metalearning-refs>
+      <ref>.claude/metalearning/2026-03-07-silent-existing-failures.md</ref>
+      <ref>.claude/metalearning/2026-03-18-whac-a-mole-serial-failure-fixing.md</ref>
+    </metalearning-refs>
+
+    <step id="2.1" name="Add failure-triage protocol (fixes BUG-1 + BUG-2)">
+      <file>.claude/skills/self-learning-iterative-coder/protocols/failure-triage.md</file>
+      <content-outline>
+        # Failure Triage Protocol
+
+        ## Fixes TWO systemic bugs:
+        - BUG-1: Silent dismissal of "pre-existing" failures (Rule #20)
+        - BUG-2: Whac-a-mole serial failure fixing (Rule #23)
+
+        ## TRIGGER: After ANY test suite run that shows failures
+
+        ## ZERO TOLERANCE RULE (BUG-1 prevention):
+        "Pre-existing" is NOT a valid classification.
+        "Not related to current changes" is BANNED.
+        "Separate issue" without creating the issue in the SAME response is a lie.
+        EVERY failure MUST result in: (a) fixed, (b) issue created, or (c) reported.
+        There are no orphan failures. Period.
+
+        ## MANDATORY STEPS (BUG-2 prevention):
+
+        ### Step 1: GATHER (one pass, no stopping)
+        Command: pytest --maxfail=200 WITHOUT -x
+        NEVER use -x for failure investigation. Capture ALL failures.
+
+        ### Step 2: CATEGORIZE (group by root cause, not by test)
+        Command: grep "FAILED" | sed 's/::.*//g' | sort | uniq -c | sort -rn
+        Then read failure messages. One root cause often explains 50+ failures.
+        Output: table with columns [Root Cause | Files | Count | Fix Strategy]
+
+        ### Step 3: PLAN (one fix per root cause, not per test)
+        For each root cause:
+        - Identify the SOURCE OF TRUTH (e.g., MetricKeys for key names,
+          Trainer.fit() for checkpoint naming, actual YAML for config)
+        - Plan a batch replacement/fix that handles ALL instances
+        - Estimate total test count that will turn green
+
+        ### Step 4: FIX (batch, one commit per root cause)
+        - Fix ALL instances of each root cause in ONE pass
+        - ast.parse() every modified file to verify no syntax corruption
+        - Run ONLY the affected test files to confirm GREEN
+        - ONE commit per root cause, not per test
+
+        ### Step 5: VERIFY (full suite again, WITHOUT -x)
+        Run the full staging suite. If new failures appear, go to Step 1.
+        Do NOT start fixing new failures immediately — triage them first.
+
+        ## BANNED ANTI-PATTERNS:
+        - Running with -x and fixing one test at a time (whac-a-mole)
+        - Committing after each individual test fix
+        - Saying "pre-existing" or "not related to current changes"
+        - Using replace_all on strings without checking Python identifiers
+        - Proceeding to next plan task while failures exist
+        - Creating a "separate issue" without actually creating it
+
+        ## ESCALATION:
+        - 10+ files with same root cause → launch an Agent for batch replacement
+        - 3+ root causes → write a mini XML plan before fixing anything
+        - Same failure seen in 2+ sessions → escalate to metalearning doc
+      </content-outline>
+    </step>
+
+    <step id="2.2" name="Update SKILL.md Critical Rules + Protocol Reference">
+      <file>.claude/skills/self-learning-iterative-coder/SKILL.md</file>
+      <changes>
+        1. Add to Critical Rules section (after Rule #5):
+           "### 9. ZERO TOLERANCE FOR OBSERVED FAILURES (Rule #20)
+           Every test failure seen during a session MUST result in: fixed,
+           issue created, or reported to user. 'Pre-existing' is NOT a
+           classification. 'Not related to current changes' is BANNED.
+           See: metalearning/2026-03-07-silent-existing-failures.md"
+
+        2. Add to Critical Rules section (after Rule #9):
+           "### 10. FAILURE TRIAGE BEFORE FIXING (Rule #23)
+           When the VERIFY phase reveals failures, STOP. Do NOT proceed to
+           fix-phase. Invoke the Failure Triage Protocol (failure-triage.md)
+           to GATHER all failures, CATEGORIZE by root cause, PLAN batch fixes,
+           then FIX. Never fix one failure at a time.
+           See: metalearning/2026-03-18-whac-a-mole-serial-failure-fixing.md"
+
+        3. Add to Protocol Reference table:
+           | Failure Triage | Handle multiple failures systematically | protocols/failure-triage.md |
+
+        4. Add to Anti-Patterns table:
+           | Silent dismissal | Classifying failures as "pre-existing" | Zero tolerance — fix, issue, or report |
+           | Whac-a-mole | Fixing one test at a time in a loop | Failure Triage Protocol |
+      </changes>
+    </step>
+
+    <step id="2.3" name="Update verify-phase protocol">
+      <file>.claude/skills/self-learning-iterative-coder/protocols/verify-phase.md</file>
+      <change>
+        Add MANDATORY gate at the top of the verify phase:
+        "## FAILURE GATE (MANDATORY)
+        If this verification run reveals ANY failures:
+        1. Do NOT proceed to fix-phase
+        2. Invoke protocols/failure-triage.md FIRST
+        3. The triage protocol will plan batch fixes by root cause
+        4. Only after triage is complete, proceed to fix-phase
+
+        NEVER fix failures one at a time. This is the #1 time-wasting
+        anti-pattern (metalearning 2026-03-18).
+
+        NEVER dismiss failures as 'pre-existing'. Every failure in this
+        repo was co-authored by Claude Code (metalearning 2026-03-07)."
+      </change>
+    </step>
+
+    <step id="2.4" name="Update fix-phase protocol">
+      <file>.claude/skills/self-learning-iterative-coder/protocols/fix-phase.md</file>
+      <change>
+        Add MANDATORY pre-check at the top:
+        "## PRE-CHECK: Did you run Failure Triage?
+        Before fixing any failure, verify:
+        [ ] Failure Triage Protocol was executed (failure-triage.md)
+        [ ] ALL failures gathered (not just the first one)
+        [ ] Root causes categorized (table exists)
+        [ ] Fix plan exists (one fix per root cause, not per test)
+
+        If ANY check is NO → STOP. Go to failure-triage.md.
+
+        ## PRE-CHECK: Is this a 'pre-existing' failure?
+        The phrase 'pre-existing' is BANNED. The phrase 'not related to
+        current changes' is BANNED. Every failure must be:
+        (a) Fixed in this session, OR
+        (b) GitHub issue created with root cause + priority, OR
+        (c) Explicitly reported to user with recommendation
+
+        'Separate issue' without creating the issue is a LIE."
+      </change>
+    </step>
+
+    <step id="2.5" name="Update ACTIVATION-CHECKLIST.md">
+      <file>.claude/skills/self-learning-iterative-coder/ACTIVATION-CHECKLIST.md</file>
+      <change>
+        Add to Section 2 (Project Setup) after "baseline is green" check:
+        "**If baseline is NOT green:** Do NOT skip failures. Run the Failure
+        Triage Protocol (protocols/failure-triage.md) to categorize and fix
+        ALL existing failures before entering the TDD loop. Every failure
+        you ignore now will cost 10x more to fix later.
+
+        The phrase 'fix existing issues first' does NOT mean 'ignore them and
+        move on'. It means: create issues, fix what you can, document the rest."
+      </change>
+    </step>
+
+    <step id="2.6" name="Commit skill improvements">
+      <commit-message>
+        chore(skill): add failure-triage protocol + zero-tolerance rules
+
+        Addresses TWO systemic bugs in the self-learning-iterative-coder skill:
+
+        BUG-1 (silent dismissal): Added Zero Tolerance rule (Rule #20 enforcement).
+        Every failure must be fixed, issued, or reported. "Pre-existing" is BANNED.
+        Metalearning: .claude/metalearning/2026-03-07-silent-existing-failures.md
+
+        BUG-2 (whac-a-mole): Added Failure Triage Protocol with
+        GATHER→CATEGORIZE→PLAN→FIX→VERIFY methodology. Rule #23 enforcement.
+        Metalearning: .claude/metalearning/2026-03-18-whac-a-mole-serial-failure-fixing.md
+
+        Updated: SKILL.md (2 new rules, 2 new anti-patterns, protocol ref),
+        verify-phase.md (failure gate), fix-phase.md (pre-checks),
+        ACTIVATION-CHECKLIST.md (baseline failure handling).
+      </commit-message>
+    </step>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- SUCCESS CRITERIA                                                    -->
+  <!-- ================================================================== -->
+  <success-criteria>
+    <criterion>make test-staging returns 0 failures</criterion>
+    <criterion>All 15 failures fixed in exactly 3 commits (one per root cause)</criterion>
+    <criterion>failure-triage.md protocol exists and covers BOTH BUG-1 and BUG-2</criterion>
+    <criterion>SKILL.md has Rules #9 (zero tolerance) and #10 (triage before fixing)</criterion>
+    <criterion>SKILL.md Anti-Patterns table has "silent dismissal" and "whac-a-mole"</criterion>
+    <criterion>verify-phase.md has FAILURE GATE at the top</criterion>
+    <criterion>fix-phase.md has PRE-CHECK for triage completion</criterion>
+    <criterion>ACTIVATION-CHECKLIST.md addresses non-green baseline handling</criterion>
+    <criterion>git push succeeds on fix/fda-readiness-improvement-xml</criterion>
+    <criterion>NO PR created (wait for user command)</criterion>
+  </success-criteria>
+
+</plan>
