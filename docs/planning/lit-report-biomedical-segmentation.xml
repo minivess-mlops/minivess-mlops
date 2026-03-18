@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<literature-report-plan version="1.0" name="R3-biomedical-segmentation">
+
+  <metadata>
+    <theme-id>R3</theme-id>
+    <title>Biomedical Segmentation: Tubular Structures, Foundation Models, and Statistical Evaluation</title>
+    <output-path>docs/planning/lit-report-biomedical-segmentation.md</output-path>
+    <parent-plan>docs/planning/batch-literature-research-report.xml</parent-plan>
+    <user-plan-ref>docs/planning/research-reports-general-plan-for-manuscript-writing.md (Theme 3)</user-plan-ref>
+    <skill>create-literature-report v2.1.0</skill>
+    <target-paper-count>50</target-paper-count>
+    <quality-target>MINOR_REVISION</quality-target>
+  </metadata>
+
+  <invocation-prompt>
+    create literature report on "Biomedical Segmentation: Tubular Structures, Foundation Models, and Statistical Evaluation"
+
+    Focus: THREE interleaved threads:
+
+    A) TUBULAR SEGMENTATION: Vessel/tubular structure segmentation methods.
+    clDice, centerline dice, topology-aware losses (cbDice, boundary losses).
+    MONAI's role and what could be contributed TO MONAI. Current SOTA for
+    vessel segmentation in microscopy and clinical imaging.
+
+    B) FOUNDATION MODELS: How SAM3, VesselFM, and medical VLMs/MLLMs are
+    changing segmentation. Calibration/UQ for foundation models specifically.
+    Zero-shot vs fine-tuned performance gaps. LoRA/adapter approaches.
+
+    C) BIOSTATISTICAL EVALUATION: What methods are researchers using to compare
+    segmentation models? Can you find factorial design papers in medical imaging?
+    Sample size issues when voxels are not independent observations. TRIPOD+AI,
+    PROBAST+AI, STARD-AI reporting guidelines. Riley et al. prediction model
+    evaluation framework. Multiverse analysis for segmentation.
+
+    Context: Our repo runs a 4-model × 3-loss factorial design with 3-fold CV
+    on 70 volumes. We need to justify this statistically and compare with
+    what the field is doing.
+
+    EXCLUDED topics:
+    - MLOps infrastructure details (report R2)
+    - Reproducibility crisis background (report R1)
+    - Microscopy hardware acquisition (report R4)
+    - Agentic AI (report 5)
+
+    Repo context: /home/petteri/Dropbox/github-personal/minivess-mlops
+    KG domains to update: training, models, architecture
+    Manuscript section: Methods (all of R2), Results (R3a loss ablation, R3b multi-model)
+  </invocation-prompt>
+
+  <seed-papers>
+    <paper>Maier-Hein et al. (2024). "Metrics Reloaded." Nature Methods 21, 195-212. https://doi.org/10.1038/s41592-023-02151-z</paper>
+    <paper>Collins et al. (2024). "TRIPOD+AI Statement." BMJ 385. https://doi.org/10.1136/bmj-2023-078378</paper>
+    <paper>Gallifant et al. (2025). "TRIPOD-LLM." Nature Medicine 31(1). https://doi.org/10.1038/s41591-024-03425-5</paper>
+    <paper>Moons et al. (2025). "PROBAST+AI." BMJ 388. https://doi.org/10.1136/bmj-2024-082505</paper>
+    <paper>Sounderajah et al. (2025). "STARD-AI." Nature Medicine 31(10). https://doi.org/10.1038/s41591-025-03953-8</paper>
+    <paper>Lekadir et al. (2025). "FUTURE-AI." BMJ 388. https://doi.org/10.1136/bmj-2024-081554</paper>
+    <paper>Riley et al. (2024). "Evaluation of Clinical Prediction Models (Part 1)." BMJ 384. https://doi.org/10.1136/bmj-2023-074819</paper>
+    <paper>Riley &amp; Collins (2023). "Stability of Clinical Prediction Models." Biometrical Journal. https://doi.org/10.1002/bimj.202200302</paper>
+    <paper>Riley et al. (2023). "Clinical Prediction Models and the Multiverse of Madness." BMC Medicine 21, 502. https://doi.org/10.1186/s12916-023-03212-y</paper>
+    <paper>Van Calster et al. (2025). "Performance Measures in Predictive AI." Lancet Digital Health. https://doi.org/10.1016/j.landig.2025.100916</paper>
+    <paper>Kofler et al. (2023). "Are we using appropriate segmentation metrics?" arXiv. https://arxiv.org/abs/2304.07396</paper>
+    <paper>Shit et al. (2021). "clDice - a Novel Topology-Preserving Loss Function." CVPR. https://arxiv.org/abs/2003.07311</paper>
+    <paper>Poon et al. (2023). "A dataset of rodent cerebrovasculature." Scientific Data 10, 141. https://doi.org/10.1038/s41597-023-02048-8</paper>
+    <paper>Pollard et al. (2026). "TRIPOD-Code." Diagnostic and Prognostic Research 10. https://doi.org/10.1186/s41512-025-00217-4</paper>
+    <paper>Legha et al. (2026). "Sequential Sample Size Calculations." JCE 191. https://doi.org/10.1016/j.jclinepi.2025.112117</paper>
+  </seed-papers>
+
+  <search-domains>
+    <domain>tubular vessel segmentation topology-aware loss 2024 2025</domain>
+    <domain>SAM3 medical segmentation foundation model fine-tuning 2025</domain>
+    <domain>VesselFM vessel segmentation pretrained model 2024 2025</domain>
+    <domain>calibration uncertainty quantification foundation model segmentation</domain>
+    <domain>factorial design medical image segmentation comparison 2024</domain>
+    <domain>sample size segmentation study voxel-level non-independent 2024</domain>
+    <domain>MONAI segmentation contribution open source medical 2025</domain>
+    <domain>clDice centerline topology loss 3D vessel 2024 2025</domain>
+  </search-domains>
+
+</literature-report-plan>

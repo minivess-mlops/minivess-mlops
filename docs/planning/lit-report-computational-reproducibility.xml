@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<literature-report-plan version="1.0" name="R1-computational-reproducibility">
+
+  <metadata>
+    <theme-id>R1</theme-id>
+    <title>Computational Reproducibility in Science and Biomedical ML</title>
+    <output-path>docs/planning/lit-report-computational-reproducibility.md</output-path>
+    <parent-plan>docs/planning/batch-literature-research-report.xml</parent-plan>
+    <user-plan-ref>docs/planning/research-reports-general-plan-for-manuscript-writing.md (Theme 1)</user-plan-ref>
+    <skill>create-literature-report v2.1.0</skill>
+    <target-paper-count>45</target-paper-count>
+    <quality-target>MINOR_REVISION</quality-target>
+  </metadata>
+
+  <invocation-prompt>
+    create literature report on "Computational Reproducibility in Science and Biomedical ML"
+
+    Focus: The reproducibility crisis in scientific computing, with emphasis on
+    biomedical/ML code. Issues: Jupyter notebook reproducibility failures,
+    Docker vulnerabilities, unpinned dependencies, lack of experiment tracking
+    (MLflow, W&amp;B), data versioning (DVC), code smells, cybersecurity issues.
+    How our repo addresses these with: uv lock files, Docker-per-flow isolation,
+    MLflow experiment tracking, DVC data versioning, pre-commit hooks, Prefect
+    orchestration. Position NEUROVEX as a solution to the reproducibility crisis.
+
+    Context: Our repo is a clean-rewrite MLOps platform that explicitly addresses
+    reproducibility. Docker IS the execution model. uv is the ONLY package manager.
+    Every run is tracked in MLflow. This report provides the "why" — the crisis
+    that motivates our architecture.
+
+    Key existing refs to read first:
+    - docs/planning/mlflow-robustifying-plan-and-report-for-reproducibility.md
+    - docs/planning/mlops-practices-report.md
+
+    EXCLUDED topics (covered in other reports):
+    - Agentic AI (report 5)
+    - FDA/regulatory compliance details (report R2-medical-mlops)
+    - Specific segmentation methods (report R3)
+    - Microscopy acquisition (report R4)
+
+    Repo context: /home/petteri/Dropbox/github-personal/minivess-mlops
+    KG domains to update: infrastructure, testing, operations
+    Manuscript section: Introduction (reproducibility motivation), Methods (platform architecture)
+  </invocation-prompt>
+
+  <seed-papers>
+    <paper>Pimentel et al. (2019/2021). "A Large-scale Study About Quality and Reproducibility of Jupyter Notebooks." MSR. https://arxiv.org/abs/2308.07333</paper>
+    <paper>Heil et al. (2021). "Reproducibility standards for machine learning in the life sciences." Nature Methods 18, 1132-1135. https://doi.org/10.1038/s41592-021-01256-7</paper>
+    <paper>McDougal et al. (2023). "Five pillars of reproducible computational research." Briefings in Bioinformatics. https://doi.org/10.1093/bib/bbad375</paper>
+    <paper>Rodriguez-Sanchez et al. (2025). "Reproducible computational experiments with a conversational tool." arXiv. https://arxiv.org/html/2504.10134v1</paper>
+    <paper>Pineau et al. (2021). "Improving Reproducibility in Machine Learning Research." JMLR 22(164):1-20. https://jmlr.org/papers/v22/20-303.html</paper>
+    <paper>Haibe-Kains et al. (2020). "Transparency and reproducibility in artificial intelligence." Nature 586, E14-E16. https://doi.org/10.1038/s41586-020-2766-y</paper>
+    <paper>Beam et al. (2020). "Challenges to the Reproducibility of Machine Learning Models in Health Care." JAMA 323(4):305-306. https://doi.org/10.1001/jama.2019.20866</paper>
+    <paper>Kapoor &amp; Narayanan (2023). "Leakage and the Reproducibility Crisis in ML-based Science." Patterns. https://doi.org/10.1016/j.patter.2023.100804</paper>
+    <paper>Botvinik-Nezer et al. (2020). "Variability in the analysis of a single neuroimaging dataset by many teams." Nature 582, 84-88. https://doi.org/10.1038/s41586-020-2314-9</paper>
+    <paper>Gundersen &amp; Kjensmo (2018). "State of the Art: Reproducibility in Artificial Intelligence." AAAI. https://doi.org/10.1609/aaai.v32i1.11503</paper>
+    <paper>Vogt (2022). "Neuroscience Data Analysis in the Cloud." Nature Methods 19, 1034. https://doi.org/10.1038/s41592-022-01613-0</paper>
+    <paper>Reprohackathons: promoting reproducibility in bioinformatics through training. https://doi.org/10.12688/f1000research.155524.1</paper>
+  </seed-papers>
+
+  <search-domains>
+    <domain>computational reproducibility crisis machine learning 2024 2025</domain>
+    <domain>Jupyter notebook reproducibility failure rate scientific computing</domain>
+    <domain>Docker container vulnerability scientific software 2024</domain>
+    <domain>MLOps reproducibility experiment tracking versioning 2024 2025</domain>
+    <domain>biomedical research code quality software engineering practices</domain>
+    <domain>data versioning DVC scientific reproducibility</domain>
+  </search-domains>
+
+</literature-report-plan>

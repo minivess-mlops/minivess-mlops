@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<literature-report-plan version="1.0" name="R2-medical-mlops">
+
+  <metadata>
+    <theme-id>R2</theme-id>
+    <title>Medical MLOps: From Preclinical Research to Clinical Regulated Deployment</title>
+    <output-path>docs/planning/lit-report-medical-mlops.md</output-path>
+    <parent-plan>docs/planning/batch-literature-research-report.xml</parent-plan>
+    <user-plan-ref>docs/planning/research-reports-general-plan-for-manuscript-writing.md (Theme 2)</user-plan-ref>
+    <skill>create-literature-report v2.1.0</skill>
+    <target-paper-count>45</target-paper-count>
+    <quality-target>MINOR_REVISION</quality-target>
+  </metadata>
+
+  <invocation-prompt>
+    create literature report on "Medical MLOps: From Preclinical Research to Clinical Regulated Deployment"
+
+    Focus: The full spectrum from preclinical biomedical research MLOps to
+    clinical regulated SaMD. MLOps maturity models for medical AI. Continuous
+    documentation and auditing for FDA regulation. QMSR, PCCP, SaMD guidelines.
+    How CI/CD pipelines become "production controls" under QMSR. IEC 62304
+    traceability via OpenLineage. SBOM via CycloneDX. Post-market surveillance
+    via drift detection. The locked→adaptive model lifecycle. MedMLOps four
+    pillars (availability, monitoring, privacy, ease of use).
+
+    Context: This repo has OpenLineage wired into 5 flows, CycloneDX SBOM,
+    Evidently drift detection, TRIPOD compliance matrix, and a factorial
+    experiment design that IS a PCCP template. The report should map the
+    literature to our ACTUAL codebase capabilities.
+
+    Key existing refs to read first:
+    - docs/planning/regops-fda-regulation-reporting-qms-samd-iec62304-mlops-report.md
+    - docs/planning/fda-insights-second-pass.md
+    - docs/planning/openlineage-marquez-iec62304-report.md
+    - docs/planning/tripod-compliance-matrix.md
+
+    EXCLUDED topics:
+    - Agentic AI (report 5)
+    - Computational reproducibility fundamentals (report R1)
+    - Specific segmentation models/methods (report R3)
+    - Microscopy hardware (report R4)
+
+    Repo context: /home/petteri/Dropbox/github-personal/minivess-mlops
+    KG domains to update: operations, infrastructure, testing
+    Manuscript section: Methods (MLOps Architecture), Discussion (Regulatory-Native MLOps)
+  </invocation-prompt>
+
+  <seed-papers>
+    <paper>Kreuzberger et al. (2023). "Machine Learning Operations (MLOps): Overview, Definition, and Architecture." IEEE Access. https://doi.org/10.1109/ACCESS.2023.3262138</paper>
+    <paper>de Almeida et al. (2025). "Medical machine learning operations." European Radiology. https://link.springer.com/article/10.1007/s00330-025-11654-6</paper>
+    <paper>Pianykh et al. (2020). "Continuous Learning AI in Radiology." Radiology 297(1). https://doi.org/10.1148/radiol.2020200038</paper>
+    <paper>Google Cloud MLOps. https://cloud.google.com/architecture/mlops-continuous-delivery-and-automation-pipelines-in-machine-learning</paper>
+    <paper>Microsoft MLOps Maturity Model. https://learn.microsoft.com/en-us/azure/architecture/example-scenario/mlops/mlops-maturity-model</paper>
+    <paper>Vokinger et al. (2021). "Mitigating bias in machine learning for medicine." Communications Medicine 1, 25. https://doi.org/10.1038/s43856-021-00028-w</paper>
+    <paper>Feng et al. (2022). "Clinical AI Quality Improvement." Nature Medicine 28. https://doi.org/10.1038/s41591-022-01895-z</paper>
+    <paper>FDA (2021). "AI/ML-Based SaMD Action Plan." https://www.fda.gov/media/145022/download</paper>
+    <paper>Collins et al. (2024). "TRIPOD+AI Statement." BMJ 385. https://doi.org/10.1136/bmj-2023-078378</paper>
+    <paper>Muehlematter et al. (2021). "Approval of AI-based medical devices." Lancet Digital Health 3(3). https://doi.org/10.1016/S2589-7500(20)30292-2</paper>
+  </seed-papers>
+
+  <search-domains>
+    <domain>medical MLOps maturity model clinical AI deployment 2024 2025</domain>
+    <domain>QMSR 2026 quality management system regulation medical device software</domain>
+    <domain>PCCP predetermined change control plan FDA AI ML 2025 2026</domain>
+    <domain>IEC 62304 software lifecycle traceability MLOps 2024 2025</domain>
+    <domain>post-market surveillance AI drift detection clinical 2024 2025</domain>
+    <domain>SBOM CycloneDX medical device software bill of materials 2025</domain>
+  </search-domains>
+
+</literature-report-plan>
