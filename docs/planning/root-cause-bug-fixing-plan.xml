@@ -210,97 +210,202 @@
 
   <!-- ================================================================== -->
   <!-- PHASE 2: Improve Self-Learning TDD Skill                           -->
+  <!-- Addresses TWO systemic failures:                                    -->
+  <!--   BUG-1: Silent dismissal of pre-existing failures (2026-03-07)    -->
+  <!--   BUG-2: Whac-a-mole serial failure fixing (2026-03-18)           -->
   <!-- ================================================================== -->
-  <phase id="2" name="improve-tdd-skill">
-    <estimated-duration>20 minutes</estimated-duration>
+  <phase id="2" name="improve-tdd-skill" priority="P0">
+    <estimated-duration>30 minutes</estimated-duration>
+    <issue>P0 — must be done on this branch before PR</issue>
     <description>
-      Add a MANDATORY "Failure Triage Protocol" to the self-learning-iterative-coder
-      skill so that future test-fix cycles NEVER use the whac-a-mole pattern.
-      This compounds the metalearning from this session into the skill itself.
-    </description>
+      Two compounding systemic failures keep recurring in this project:
 
-    <step id="2.1" name="Add failure-triage protocol">
+      BUG-1 (SILENT DISMISSAL): Claude Code encounters a test failure, classifies
+      it as "pre-existing" or "not related to current changes", and moves on.
+      The failure persists across sessions. Nobody creates an issue. Nobody fixes it.
+      8 documented instances in metalearning/2026-03-07-silent-existing-failures.md.
+      The phrase "not related to current changes" is BANNED per CLAUDE.md Rule #20.
+
+      BUG-2 (WHAC-A-MOLE): When multiple test failures exist, Claude Code fixes
+      them one at a time — run tests, fix one failure, run tests, fix next failure.
+      This takes 25+ minutes for what should be a 10-minute batch operation.
+      Documented in metalearning/2026-03-18-whac-a-mole-serial-failure-fixing.md.
+      BANNED per CLAUDE.md Rule #23.
+
+      Both bugs must be prevented by encoding the correct behavior INTO the
+      self-learning-iterative-coder skill protocols so they are automatically
+      followed in every future session, without the user having to remind.
+
+      The skill improvement is the COMPOUNDING fix — it prevents both bugs
+      from ever recurring, making every future session more efficient.
+    </description>
+    <metalearning-refs>
+      <ref>.claude/metalearning/2026-03-07-silent-existing-failures.md</ref>
+      <ref>.claude/metalearning/2026-03-18-whac-a-mole-serial-failure-fixing.md</ref>
+    </metalearning-refs>
+
+    <step id="2.1" name="Add failure-triage protocol (fixes BUG-1 + BUG-2)">
       <file>.claude/skills/self-learning-iterative-coder/protocols/failure-triage.md</file>
       <content-outline>
-        # Failure Triage Protocol (Rule #23 Enforcement)
+        # Failure Triage Protocol
 
-        ## WHEN: After any test suite run with failures
+        ## Fixes TWO systemic bugs:
+        - BUG-1: Silent dismissal of "pre-existing" failures (Rule #20)
+        - BUG-2: Whac-a-mole serial failure fixing (Rule #23)
 
-        ## MANDATORY STEPS:
+        ## TRIGGER: After ANY test suite run that shows failures
+
+        ## ZERO TOLERANCE RULE (BUG-1 prevention):
+        "Pre-existing" is NOT a valid classification.
+        "Not related to current changes" is BANNED.
+        "Separate issue" without creating the issue in the SAME response is a lie.
+        EVERY failure MUST result in: (a) fixed, (b) issue created, or (c) reported.
+        There are no orphan failures. Period.
+
+        ## MANDATORY STEPS (BUG-2 prevention):
 
         ### Step 1: GATHER (one pass, no stopping)
-        Run: pytest --maxfail=200 WITHOUT -x
-        Capture ALL failures, not just the first one.
+        Command: pytest --maxfail=200 WITHOUT -x
+        NEVER use -x for failure investigation. Capture ALL failures.
 
-        ### Step 2: CATEGORIZE (group by root cause)
+        ### Step 2: CATEGORIZE (group by root cause, not by test)
         Command: grep "FAILED" | sed 's/::.*//g' | sort | uniq -c | sort -rn
-        Then: Read failure messages to identify root causes.
-        Output: Table of root causes with file counts.
+        Then read failure messages. One root cause often explains 50+ failures.
+        Output: table with columns [Root Cause | Files | Count | Fix Strategy]
 
         ### Step 3: PLAN (one fix per root cause, not per test)
         For each root cause:
-        - Identify the SOURCE OF TRUTH (e.g., MetricKeys class for key names)
-        - Plan a batch replacement/fix
-        - Estimate affected test count
+        - Identify the SOURCE OF TRUTH (e.g., MetricKeys for key names,
+          Trainer.fit() for checkpoint naming, actual YAML for config)
+        - Plan a batch replacement/fix that handles ALL instances
+        - Estimate total test count that will turn green
 
         ### Step 4: FIX (batch, one commit per root cause)
-        - Fix ALL instances of each root cause in one pass
-        - Verify syntax with ast.parse() after text replacements
-        - Run only the affected test files to confirm GREEN
+        - Fix ALL instances of each root cause in ONE pass
+        - ast.parse() every modified file to verify no syntax corruption
+        - Run ONLY the affected test files to confirm GREEN
+        - ONE commit per root cause, not per test
 
-        ### Step 5: VERIFY (full suite, no -x)
-        Run the full suite again to confirm no regressions.
+        ### Step 5: VERIFY (full suite again, WITHOUT -x)
+        Run the full staging suite. If new failures appear, go to Step 1.
+        Do NOT start fixing new failures immediately — triage them first.
 
-        ## ANTI-PATTERNS (BANNED):
-        - Running with -x and fixing one test at a time
+        ## BANNED ANTI-PATTERNS:
+        - Running with -x and fixing one test at a time (whac-a-mole)
         - Committing after each individual test fix
-        - Not reading the source of truth before fixing tests
-        - Replacing strings without checking for function name corruption
-        - Using replace_all without verifying no Python identifiers are affected
+        - Saying "pre-existing" or "not related to current changes"
+        - Using replace_all on strings without checking Python identifiers
+        - Proceeding to next plan task while failures exist
+        - Creating a "separate issue" without actually creating it
 
         ## ESCALATION:
-        If the same root cause appears in 10+ files, create an agent to do
-        the batch replacement rather than doing it manually.
+        - 10+ files with same root cause → launch an Agent for batch replacement
+        - 3+ root causes → write a mini XML plan before fixing anything
+        - Same failure seen in 2+ sessions → escalate to metalearning doc
       </content-outline>
     </step>
 
-    <step id="2.2" name="Update SKILL.md to reference failure-triage">
+    <step id="2.2" name="Update SKILL.md Critical Rules + Protocol Reference">
       <file>.claude/skills/self-learning-iterative-coder/SKILL.md</file>
-      <change>
-        Add failure-triage.md to the Protocol Reference table.
-        Add "FAILURE TRIAGE MANDATORY" to Critical Rules section.
-        Reference CLAUDE.md Rule #23 and the metalearning doc.
-      </change>
+      <changes>
+        1. Add to Critical Rules section (after Rule #5):
+           "### 9. ZERO TOLERANCE FOR OBSERVED FAILURES (Rule #20)
+           Every test failure seen during a session MUST result in: fixed,
+           issue created, or reported to user. 'Pre-existing' is NOT a
+           classification. 'Not related to current changes' is BANNED.
+           See: metalearning/2026-03-07-silent-existing-failures.md"
+
+        2. Add to Critical Rules section (after Rule #9):
+           "### 10. FAILURE TRIAGE BEFORE FIXING (Rule #23)
+           When the VERIFY phase reveals failures, STOP. Do NOT proceed to
+           fix-phase. Invoke the Failure Triage Protocol (failure-triage.md)
+           to GATHER all failures, CATEGORIZE by root cause, PLAN batch fixes,
+           then FIX. Never fix one failure at a time.
+           See: metalearning/2026-03-18-whac-a-mole-serial-failure-fixing.md"
+
+        3. Add to Protocol Reference table:
+           | Failure Triage | Handle multiple failures systematically | protocols/failure-triage.md |
+
+        4. Add to Anti-Patterns table:
+           | Silent dismissal | Classifying failures as "pre-existing" | Zero tolerance — fix, issue, or report |
+           | Whac-a-mole | Fixing one test at a time in a loop | Failure Triage Protocol |
+      </changes>
     </step>
 
     <step id="2.3" name="Update verify-phase protocol">
       <file>.claude/skills/self-learning-iterative-coder/protocols/verify-phase.md</file>
       <change>
-        Add: "If verification reveals failures, STOP. Do not proceed to fix-phase.
-        Instead, invoke the Failure Triage Protocol (failure-triage.md) to gather
-        ALL failures before fixing ANY of them."
+        Add MANDATORY gate at the top of the verify phase:
+        "## FAILURE GATE (MANDATORY)
+        If this verification run reveals ANY failures:
+        1. Do NOT proceed to fix-phase
+        2. Invoke protocols/failure-triage.md FIRST
+        3. The triage protocol will plan batch fixes by root cause
+        4. Only after triage is complete, proceed to fix-phase
+
+        NEVER fix failures one at a time. This is the #1 time-wasting
+        anti-pattern (metalearning 2026-03-18).
+
+        NEVER dismiss failures as 'pre-existing'. Every failure in this
+        repo was co-authored by Claude Code (metalearning 2026-03-07)."
       </change>
     </step>
 
     <step id="2.4" name="Update fix-phase protocol">
       <file>.claude/skills/self-learning-iterative-coder/protocols/fix-phase.md</file>
       <change>
-        Add: "Before fixing any test failure, check if this is the ONLY failure.
-        If there are multiple failures, you MUST run the Failure Triage Protocol
-        first. Fixing one failure at a time is the #1 time-wasting anti-pattern
-        in this project (see metalearning 2026-03-18)."
+        Add MANDATORY pre-check at the top:
+        "## PRE-CHECK: Did you run Failure Triage?
+        Before fixing any failure, verify:
+        [ ] Failure Triage Protocol was executed (failure-triage.md)
+        [ ] ALL failures gathered (not just the first one)
+        [ ] Root causes categorized (table exists)
+        [ ] Fix plan exists (one fix per root cause, not per test)
+
+        If ANY check is NO → STOP. Go to failure-triage.md.
+
+        ## PRE-CHECK: Is this a 'pre-existing' failure?
+        The phrase 'pre-existing' is BANNED. The phrase 'not related to
+        current changes' is BANNED. Every failure must be:
+        (a) Fixed in this session, OR
+        (b) GitHub issue created with root cause + priority, OR
+        (c) Explicitly reported to user with recommendation
+
+        'Separate issue' without creating the issue is a LIE."
       </change>
     </step>
 
-    <step id="2.5" name="Commit skill improvements">
+    <step id="2.5" name="Update ACTIVATION-CHECKLIST.md">
+      <file>.claude/skills/self-learning-iterative-coder/ACTIVATION-CHECKLIST.md</file>
+      <change>
+        Add to Section 2 (Project Setup) after "baseline is green" check:
+        "**If baseline is NOT green:** Do NOT skip failures. Run the Failure
+        Triage Protocol (protocols/failure-triage.md) to categorize and fix
+        ALL existing failures before entering the TDD loop. Every failure
+        you ignore now will cost 10x more to fix later.
+
+        The phrase 'fix existing issues first' does NOT mean 'ignore them and
+        move on'. It means: create issues, fix what you can, document the rest."
+      </change>
+    </step>
+
+    <step id="2.6" name="Commit skill improvements">
       <commit-message>
-        chore(skill): add failure-triage protocol to self-learning-iterative-coder
+        chore(skill): add failure-triage protocol + zero-tolerance rules
 
-        Enforces CLAUDE.md Rule #23: GATHER→CATEGORIZE→PLAN→FIX→VERIFY.
-        Prevents whac-a-mole serial failure fixing that wastes 25+ minutes
-        on what should be a 10-minute batch operation.
+        Addresses TWO systemic bugs in the self-learning-iterative-coder skill:
 
+        BUG-1 (silent dismissal): Added Zero Tolerance rule (Rule #20 enforcement).
+        Every failure must be fixed, issued, or reported. "Pre-existing" is BANNED.
+        Metalearning: .claude/metalearning/2026-03-07-silent-existing-failures.md
+
+        BUG-2 (whac-a-mole): Added Failure Triage Protocol with
+        GATHER→CATEGORIZE→PLAN→FIX→VERIFY methodology. Rule #23 enforcement.
         Metalearning: .claude/metalearning/2026-03-18-whac-a-mole-serial-failure-fixing.md
+
+        Updated: SKILL.md (2 new rules, 2 new anti-patterns, protocol ref),
+        verify-phase.md (failure gate), fix-phase.md (pre-checks),
+        ACTIVATION-CHECKLIST.md (baseline failure handling).
       </commit-message>
     </step>
   </phase>
@@ -311,9 +416,12 @@
   <success-criteria>
     <criterion>make test-staging returns 0 failures</criterion>
     <criterion>All 15 failures fixed in exactly 3 commits (one per root cause)</criterion>
-    <criterion>failure-triage.md protocol exists in skill directory</criterion>
-    <criterion>SKILL.md references failure-triage protocol</criterion>
-    <criterion>verify-phase.md and fix-phase.md updated with triage gate</criterion>
+    <criterion>failure-triage.md protocol exists and covers BOTH BUG-1 and BUG-2</criterion>
+    <criterion>SKILL.md has Rules #9 (zero tolerance) and #10 (triage before fixing)</criterion>
+    <criterion>SKILL.md Anti-Patterns table has "silent dismissal" and "whac-a-mole"</criterion>
+    <criterion>verify-phase.md has FAILURE GATE at the top</criterion>
+    <criterion>fix-phase.md has PRE-CHECK for triage completion</criterion>
+    <criterion>ACTIVATION-CHECKLIST.md addresses non-green baseline handling</criterion>
     <criterion>git push succeeds on fix/fda-readiness-improvement-xml</criterion>
     <criterion>NO PR created (wait for user command)</criterion>
   </success-criteria>
