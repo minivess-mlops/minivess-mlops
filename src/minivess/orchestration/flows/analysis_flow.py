@@ -29,10 +29,12 @@ import torch
 from prefect import flow, get_run_logger, task
 from torch import nn
 
+from minivess.compliance.audit import AuditTrail
 from minivess.ensemble.builder import (
     EnsembleBuilder,
     EnsembleSpec,
 )
+from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
     EXPERIMENT_EVALUATION,
@@ -1816,6 +1818,37 @@ def run_analysis_flow(
         tracking_uri=_tracking_uri,
         run_id=mlflow_run_id,
     )
+
+    # OpenLineage lineage emission (Issue #799 — IEC 62304 §8 traceability)
+    try:
+        _emitter = LineageEmitter(namespace="minivess")
+        emit_flow_lineage(
+            emitter=_emitter,
+            job_name="analysis-flow",
+            inputs=[
+                {"namespace": "minivess", "name": "checkpoints"},
+                {"namespace": "minivess", "name": "test_datasets"},
+            ],
+            outputs=[
+                {"namespace": "minivess", "name": "evaluation_metrics"},
+                {"namespace": "minivess", "name": "ensemble_models"},
+            ],
+        )
+    except Exception:
+        logger.warning("OpenLineage emission failed (non-blocking)", exc_info=True)
+
+    # FDA test set firewall: log every test evaluation (Issue #821)
+    try:
+        audit = AuditTrail()
+        audit.log_test_evaluation(
+            model_name=eval_config.primary_metric or "analysis_flow",
+            metrics={"test_set_access_count": 1.0},
+            actor="analysis_flow",
+        )
+    except Exception:
+        logger.warning(
+            "AuditTrail log_test_evaluation failed (non-blocking)", exc_info=True
+        )
 
     return {
         "results": all_results,

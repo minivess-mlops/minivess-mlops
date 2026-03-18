@@ -20,6 +20,7 @@ import numpy as np
 from prefect import flow, task
 
 from minivess.config.biostatistics_config import BiostatisticsConfig
+from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.orchestration.constants import FLOW_NAME_BIOSTATISTICS
 from minivess.pipeline.biostatistics_discovery import (
     discover_source_runs,
@@ -444,6 +445,21 @@ def run_biostatistics_flow(
     )
 
     logger.info("Biostatistics flow complete. MLflow run: %s", mlflow_run_id)
+
+    # OpenLineage lineage emission (Issue #799 — IEC 62304 §8 traceability)
+    try:
+        _emitter = LineageEmitter(namespace="minivess")
+        emit_flow_lineage(
+            emitter=_emitter,
+            job_name="biostatistics-flow",
+            inputs=[{"namespace": "minivess", "name": "mlflow_runs"}],
+            outputs=[
+                {"namespace": "minivess", "name": "figures"},
+                {"namespace": "minivess", "name": "tables"},
+            ],
+        )
+    except Exception:
+        logger.warning("OpenLineage emission failed (non-blocking)", exc_info=True)
 
     return BiostatisticsResult(
         manifest=manifest,
