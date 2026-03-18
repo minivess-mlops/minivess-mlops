@@ -271,6 +271,17 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
     One root cause often explains 50+ failures. Serial fixing wastes 25+ minutes
     on what should be a 10-minute batch operation.
     See: `.claude/metalearning/2026-03-18-whac-a-mole-serial-failure-fixing.md`
+24. **Tokens Upfront — Scientific Production-Grade Code (Non-Negotiable)** —
+    Spend more tokens reading and understanding BEFORE writing code. The cost of
+    sloppy initial code is always higher than the cost of careful initial code:
+    - **30% reading / 70% implementing** (not 5% / 95%)
+    - Read ALL relevant source files before writing tests
+    - Read ALL existing tests before writing new ones
+    - Understand the full interface before implementing
+    - "I'll just try this and see" without reading context is BANNED
+    - One careful implementation pass is cheaper than three sloppy-then-fix passes
+    This is a scientific platform — correctness and reproducibility outweigh speed.
+    See: `.claude/skills/self-learning-iterative-coder/SKILL.md` Rule #11
 22. **Single-Source Config via `.env.example` (Non-Negotiable)** — ALL configurable
    values MUST be in `.env.example` FIRST. BANNED: hardcoded URLs in Dockerfiles,
    `os.environ.get("VAR", "fallback")` in flow files (use `resolve_tracking_uri()`

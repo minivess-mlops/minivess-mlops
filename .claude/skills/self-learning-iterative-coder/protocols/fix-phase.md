@@ -1,5 +1,24 @@
 # Protocol: Fix Phase (Analyze & Fix Failures)
 
+## PRE-CHECK: Did You Run Failure Triage?
+
+Before fixing any failure, verify:
+
+- [ ] If multiple failures exist: Failure Triage Protocol was executed (`failure-triage.md`)
+- [ ] ALL failures gathered (not just the first one — `--maxfail=200`, NOT `-x`)
+- [ ] Root causes categorized (table with: root cause → files → count → strategy)
+- [ ] Fix plan exists (one fix per root cause, not per test)
+
+**If ANY check is NO and there are multiple failures → STOP. Go to `protocols/failure-triage.md`.**
+
+## PRE-CHECK: Is This a "Pre-existing" Failure?
+
+The phrase "pre-existing" is BANNED. The phrase "not related to current changes" is BANNED.
+Every failure must be: (a) Fixed, (b) GitHub issue created, or (c) Reported to user.
+"Separate issue" without creating the issue is a LIE.
+
+---
+
 ## Purpose
 
 Analyze failures from the VERIFY phase and apply targeted, reasoned fixes. This is where self-correction happens — the core of the Ralph Wiggum philosophy.

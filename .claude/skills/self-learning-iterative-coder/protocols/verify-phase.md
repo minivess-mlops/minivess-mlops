@@ -1,5 +1,25 @@
 # Protocol: Verify Phase (Run Full Verification Suite)
 
+## FAILURE GATE (MANDATORY — Read Before Proceeding)
+
+If this verification run reveals ANY failures:
+
+1. **Do NOT proceed to fix-phase for individual fixes**
+2. **If multiple failures (>1):** Invoke `protocols/failure-triage.md` FIRST
+   - GATHER all failures with `--maxfail=200` (NOT `-x`)
+   - CATEGORIZE by root cause
+   - PLAN batch fixes (one commit per root cause)
+   - FIX all instances at once
+3. **If single failure:** Standard fix-phase.md applies
+
+**NEVER fix failures one at a time.** This is the #1 time-wasting anti-pattern.
+Metalearning: `.claude/metalearning/2026-03-18-whac-a-mole-serial-failure-fixing.md`
+
+**NEVER dismiss failures as "pre-existing".** Every failure in this repo was
+co-authored by Claude Code. Metalearning: `.claude/metalearning/2026-03-07-silent-existing-failures.md`
+
+---
+
 ## Purpose
 
 Run the complete verification suite — tests, linter, and type checker — to assess whether the implementation satisfies all quality gates. This is the "reviewer" that replaces human code review.

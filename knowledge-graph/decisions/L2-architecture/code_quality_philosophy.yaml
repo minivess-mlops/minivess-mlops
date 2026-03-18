@@ -1,0 +1,55 @@
+decision_id: code_quality_philosophy
+title: "Scientific Production-Grade Code Philosophy"
+level: L2-architecture
+status: resolved
+description: >
+  How to balance development speed against code quality in a scientific
+  MLOps platform. The platform serves both PhD researchers (who need
+  rapid iteration) and regulatory compliance (which demands correctness).
+
+resolved_option: tokens_upfront
+
+options:
+  - id: tokens_upfront
+    prior_probability: 0.80
+    description: >
+      Spend more tokens reading and understanding before writing code.
+      30% reading / 70% implementing. Read all relevant files before
+      editing. One careful pass is cheaper than three sloppy-then-fix
+      passes. Correctness and reproducibility outweigh speed.
+  - id: move_fast_break_things
+    prior_probability: 0.10
+    description: >
+      Optimize for speed of initial implementation. Fix issues as they
+      come up. Rejected: metalearning shows this approach costs 2-3x
+      more tokens due to BUG-1 (silent dismissal) and BUG-2 (whac-a-mole).
+  - id: perfect_first_pass
+    prior_probability: 0.10
+    description: >
+      Attempt perfect code on first pass with extensive planning.
+      Rejected: LLMs are stochastic — perfection on first pass is
+      unrealistic. TDD iteration is the correct approach.
+
+resolution_evidence:
+  - type: metalearning
+    source: ".claude/metalearning/2026-03-07-silent-existing-failures.md"
+    finding: "8 instances of silent failure dismissal. Each cost hours to fix later."
+  - type: metalearning
+    source: ".claude/metalearning/2026-03-18-whac-a-mole-serial-failure-fixing.md"
+    finding: "Serial fixing took 45 min for what should have been 10 min."
+  - type: skill
+    source: ".claude/skills/self-learning-iterative-coder/SKILL.md"
+    finding: "v3.0.0 Rule #11: Tokens Upfront. 70% of tasks complete in 1 iteration with careful reading."
+
+conditional_on:
+  - parent_decision_id: project_purpose
+    strength: strong
+    rationale: "Scientific reproducibility requires correctness over speed"
+
+volatility:
+  classification: stable
+  last_assessed: "2026-03-18"
+  next_review: "2026-09-18"
+  change_drivers:
+    - "LLM capability improvements may shift the optimal read/write ratio"
+    - "Context window increases reduce the cost of reading more"
