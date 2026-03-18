@@ -4,41 +4,68 @@ level: L2-architecture
 status: resolved
 
 options:
+  - id: pydantic_ai_prefect
+    name: "Pydantic AI + PrefectAgent"
+    prior_probability: 0.30
+    posterior_probability: 0.85
   - id: langgraph_stateful
-    name: "LangGraph Stateful Agents"
+    name: "LangGraph Stateful Agents (deprecated)"
     prior_probability: 0.55
-    posterior_probability: 0.80
-  - id: langchain_sequential
-    name: "LangChain Sequential"
-    prior_probability: 0.20
     posterior_probability: 0.05
   - id: custom_state_machine
     name: "Custom State Machine"
     prior_probability: 0.15
-    posterior_probability: 0.10
+    posterior_probability: 0.08
   - id: no_agents
     name: "No Agents"
     prior_probability: 0.10
-    posterior_probability: 0.05
+    posterior_probability: 0.02
 
-resolved_option: langgraph_stateful
+resolved_option: pydantic_ai_prefect
 resolution_evidence:
+  - type: adr
+    source: "docs/adr/0007-pydantic-ai-over-langgraph.md"
+    finding: >
+      LangGraph replaced by Pydantic AI. LangGraph code moved to _deprecated/.
+      Pydantic AI provides type-safe structured outputs, Prefect integration via
+      PrefectAgent, and smaller dependency footprint (no fastmcp conflict).
   - type: implementation
     source: "src/minivess/agents/"
-    finding: "Pydantic AI + PrefectAgent wrappers per ADR 0007"
+    finding: >
+      15 agent modules: experiment_summarizer, drift_triage, figure_narrator,
+      factory, tracing, config, models, evaluation. All use Pydantic AI.
+      LangGraph remnants in _deprecated/ only.
+  - type: planned
+    source: "docs/planning/fda-insights-second-pass-executable.xml"
+    finding: >
+      P1 issue planned for CopilotKit/AG-UI + WebMCP integration on dashboard
+      and annotation flows. This adds agentic UI layer on top of Pydantic AI
+      micro-orchestration within Prefect macro-orchestration.
 
 implementation:
   files:
-    - src/minivess/agents/
-  tests: []
+    - src/minivess/agents/experiment_summarizer.py
+    - src/minivess/agents/drift_triage.py
+    - src/minivess/agents/figure_narrator.py
+    - src/minivess/agents/factory.py
+    - src/minivess/agents/tracing.py
+  tests:
+    - tests/v2/unit/test_agent_decision_points.py
+    - tests/v2/unit/test_agent_flow_wiring.py
+    - tests/v2/unit/test_agent_infra.py
+  deprecated:
+    - src/minivess/agents/_deprecated/  # LangGraph code, not imported at runtime
 
 conditional_on:
-  - parent_decision_id: project_purpose
-    influence_strength: weak
-  - parent_decision_id: portfolio_role_target
-    influence_strength: moderate
+  - {parent_decision_id: project_purpose, influence_strength: weak}
+  - {parent_decision_id: portfolio_role_target, influence_strength: moderate}
 
 volatility:
   classification: evolving
-  next_review: "2026-04-13"
-  rationale: "Agent framework landscape rapidly evolving"
+  next_review: "2026-04-18"
+  rationale: >
+    Pydantic AI resolved. CopilotKit/AG-UI + WebMCP planned for agentic
+    dashboard UI (P1 issue). LangGraph dependency removed from pyproject.toml.
+    Two-tier architecture: Prefect (macro-orchestration, deterministic ML
+    pipeline) + Pydantic AI (micro-orchestration, LLM-assisted tasks within
+    flows like result summarization, drift triage, figure narration).

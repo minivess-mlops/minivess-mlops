@@ -68,8 +68,8 @@ decisions:
 
   agent_architecture:
     status: resolved
-    winner: langgraph_stateful
-    rationale: "Pydantic AI + PrefectAgent wrappers (ADR 0007)"
+    winner: pydantic_ai_prefect
+    rationale: "Pydantic AI + PrefectAgent (ADR 0007). LangGraph deprecated and removed from deps."
     implementation: src/minivess/agents/
     prd_node: knowledge-graph/decisions/L2-architecture/agent_architecture.yaml
 
@@ -86,7 +86,8 @@ planning_docs:
   - file: docs/planning/monitoring-research-report.md
     status: reference
   - file: docs/planning/langgraph-agents-plan.md
-    status: planned
+    status: superseded
+    note: "Superseded by ADR-0007 (Pydantic AI over LangGraph)"
   - file: docs/planning/profiler-benchmarking-plan.md
     status: planned
 
