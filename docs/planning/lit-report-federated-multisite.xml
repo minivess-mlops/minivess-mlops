@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<literature-report-plan version="1.0" name="R3-federated-multisite">
+
+  <metadata>
+    <theme-id>R3</theme-id>
+    <title>Federated Learning and Multi-Site Data Architecture for Preclinical Neurovascular Imaging</title>
+    <output-path>docs/planning/lit-report-federated-multisite.md</output-path>
+    <parent-plan>docs/planning/batch-literature-research-report.xml</parent-plan>
+    <skill>create-literature-report v2.1.0</skill>
+    <target-paper-count>35</target-paper-count>
+    <quality-target>MINOR_REVISION</quality-target>
+  </metadata>
+
+  <invocation-prompt>
+    create literature report on "Federated Learning and Multi-Site Data Architecture for Preclinical Neurovascular Imaging"
+
+    Focus: MONAI FL vs NVIDIA FLARE for 3D segmentation. Privacy-preserving
+    multi-institutional training for 2-photon microscopy data. Domain shift
+    between imaging sites (different microscopes, staining protocols, species).
+    Opt-in data pooling architecture with anonymization gates. How federated
+    learning changes the factorial design (site as additional factor).
+    Preclinical vs clinical FL differences. Flower vs MONAI FL comparison.
+
+    Context: This repo uses MONAI as its ecosystem (TOP-1 principle). MONAI FL
+    is the natural fit. The dataset is MiniVess (70 rat cortical vasculature
+    volumes from a single site). Future work needs multi-site generalization.
+
+    EXCLUDED topics:
+    - Single-site post-training methods (report R1)
+    - Single-site ensemble selection (report R2)
+    - Agentic AI (report 5)
+    - FDA/regulatory details beyond privacy (report R4)
+
+    Repo context: /home/petteri/Dropbox/github-personal/minivess-mlops
+    KG domains to update: data, operations, cloud
+    Manuscript section: Discussion: Multi-Site Generalization (future work)
+  </invocation-prompt>
+
+  <seed-papers>
+    <paper>Pati et al. (2022). "Federated learning enables big data for rare cancer boundary detection." Nature Communications 13, 7346. https://doi.org/10.1038/s41467-022-33407-5</paper>
+    <paper>Li et al. (2020). "Federated Optimization in Heterogeneous Networks." MLSys. https://arxiv.org/abs/1812.06127</paper>
+    <paper>Sheller et al. (2020). "Federated learning in medicine: facilitating multi-institutional collaborations without sharing patient data." Scientific Reports 10, 12598. https://doi.org/10.1038/s41598-020-69250-1</paper>
+    <paper>Beutel et al. (2020). "Flower: A Friendly Federated Learning Framework." arXiv. https://arxiv.org/abs/2007.14390</paper>
+    <paper>Roth et al. (2020). "NVIDIA FLARE: Federated Learning from Simulation to Real-World." arXiv. https://arxiv.org/abs/2210.13291</paper>
+    <paper>Poon et al. (2023). "A dataset of rodent cerebrovasculature." Scientific Data 10, 141. https://doi.org/10.1038/s41597-023-02048-8</paper>
+    <paper>Guan &amp; Liu (2021). "Domain Adaptation for Medical Image Analysis." IEEE RBME 15, 103-115. https://doi.org/10.1109/RBME.2021.3098890</paper>
+    <paper>Kairouz et al. (2021). "Advances and Open Problems in Federated Learning." Foundations and Trends in ML 14(1-2). https://arxiv.org/abs/1912.04977</paper>
+  </seed-papers>
+
+  <search-domains>
+    <domain>MONAI federated learning segmentation 3D 2024 2025</domain>
+    <domain>NVIDIA FLARE medical imaging multi-institutional</domain>
+    <domain>domain shift microscopy imaging federated training</domain>
+    <domain>privacy preserving neuroscience imaging collaboration</domain>
+    <domain>preclinical imaging multi-site harmonization 2024 2025</domain>
+  </search-domains>
+
+</literature-report-plan>
