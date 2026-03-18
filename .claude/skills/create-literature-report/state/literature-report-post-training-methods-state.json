@@ -1,0 +1,28 @@
+{
+  "skill_version": "2.0.0",
+  "topic": "Post-Training Methodologies for Medical Segmentation",
+  "topic_slug": "post-training-methods",
+  "output_path": "docs/planning/lit-report-post-training-methods.md",
+  "phase": "CAPTURE",
+  "substep": "state_initialized",
+  "seed_count": 10,
+  "discovered_count": 0,
+  "verified_count": 0,
+  "hallucinated_count": 0,
+  "corrections_applied": 0,
+  "iteration": 0,
+  "quality_verdict": null,
+  "force_stopped": false,
+  "force_stop_reason": null,
+  "issues_created": [],
+  "agents_completed": {
+    "gather_local": false,
+    "gather_web_a": false,
+    "gather_web_b": false,
+    "verify_batch_1": false,
+    "verify_batch_2": false,
+    "verify_batch_3": false
+  },
+  "started_at": "2026-03-18T12:00:00Z",
+  "last_checkpoint": "2026-03-18T12:00:00Z"
+}
