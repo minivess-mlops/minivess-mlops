@@ -8,7 +8,7 @@
 #   L0: .claude/rules/ + CLAUDE.md         — Constitution (invariant rules, non-negotiable)
 #   L1: docs/planning/ + MEMORY.md         — Hot Context (current work, session state)
 #   L2: knowledge-graph/navigator.yaml     — Navigator (THIS FILE — domain routing)
-#   L3: knowledge-graph/decisions/*.yaml   — Evidence (Bayesian decision nodes, 65 total)
+#   L3: knowledge-graph/decisions/*.yaml   — Evidence (Bayesian decision nodes, 75 total)
 #       knowledge-graph/domains/*.yaml     — Materialized winners (deterministic KG)
 #   L4: openspec/specs/                    — Specifications (GIVEN/WHEN/THEN testable)
 #   L5: src/ + tests/                      — Implementation (actual code)
@@ -83,12 +83,12 @@ domains:
 
   operations:
     navigator: knowledge-graph/domains/operations.yaml
-    covers: [monitoring, governance, retraining, SBOM, compliance, audit, federated, cost, FDA readiness, test set firewall]
+    covers: [monitoring, governance, retraining, SBOM, compliance, audit, federated, cost, FDA readiness, test set firewall, documentation cards]
     claude_md: []
     decisions: [dashboarding, retraining_trigger, model_governance,
                 audit_trail, sbom_generation, federated_learning,
                 dashboard_framework, cost_optimization, fda_readiness,
-                test_set_firewall]
+                test_set_firewall, documentation_cards]
 
   testing:
     navigator: knowledge-graph/domains/testing.yaml
@@ -214,6 +214,12 @@ keywords:
   audit: operations
   cost: operations
   finops: operations
+  model_card: operations
+  data_card: operations
+  documentation_card: operations
+  environment_card: operations
+  system_card: operations
+  carbon_card: operations
   manuscript: manuscript
   claims: manuscript
   methods: manuscript

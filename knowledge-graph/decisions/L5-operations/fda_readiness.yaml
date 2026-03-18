@@ -60,10 +60,15 @@ implementation:
     test set access not logged, no model cards generated.
     Issue #821: P1 for test set documentation and lineage wiring.
     Issue #799: P1 for OpenLineage flow integration.
+    DOCUMENTATION GAP: Only Model Cards exist (src/minivess/compliance/model_card.py).
+    No Data Cards for dataset provenance/version traceability — FDA Jan 2025 draft
+    guidance explicitly requires data catalogs. No Environment Cards for Docker SHA
+    and dependency pinning. See documentation_cards decision node for card type strategy.
 conditional_on:
   - {parent_decision_id: audit_trail, influence_strength: strong}
   - {parent_decision_id: lineage_tracking, influence_strength: strong}
   - {parent_decision_id: container_strategy, influence_strength: moderate}
+  - {parent_decision_id: documentation_cards, influence_strength: strong}
 volatility:
   classification: evolving
   next_review: "2026-04-17"

@@ -1,5 +1,5 @@
 # knowledge-graph/_network.yaml
-# Bayesian decision network: 65 nodes, ~100 edges
+# Bayesian decision network: 75 nodes, ~100 edges
 # Validation: acyclic, referentially complete, level-ordered
 # Each node references a YAML file in decisions/
 #
@@ -10,7 +10,7 @@ version: "1.1"
 last_updated: "2026-03-17"
 
 nodes:
-  # L1 — Research Goals (8 nodes, root layer)
+  # L1 — Research Goals (9 nodes, root layer)
   - id: project_purpose
     level: L1
     file: decisions/L1-research-goals/project_purpose.yaml
@@ -39,7 +39,7 @@ nodes:
     level: L1
     file: decisions/L1-research-goals/tripod_compliance.yaml
 
-  # L2 — Architecture (13 nodes)
+  # L2 — Architecture (14 nodes)
   - id: docker_architecture
     level: L2
     file: decisions/L2-architecture/docker_architecture.yaml
@@ -83,7 +83,7 @@ nodes:
     level: L2
     file: decisions/L2-architecture/flow_topology.yaml
 
-  # L3 — Technology (26 nodes)
+  # L3 — Technology (28 nodes)
   - id: primary_3d_model
     level: L3
     file: decisions/L3-technology/primary_3d_model.yaml
@@ -204,7 +204,7 @@ nodes:
     level: L4
     file: decisions/L4-infrastructure/compute_orchestration.yaml
 
-  # L5 — Operations (9 nodes)
+  # L5 — Operations (13 nodes)
   - id: drift_monitoring
     level: L5
     file: decisions/L5-operations/drift_monitoring.yaml
@@ -241,6 +241,9 @@ nodes:
   - id: test_set_firewall
     level: L5
     file: decisions/L5-operations/test_set_firewall.yaml
+  - id: documentation_cards
+    level: L5
+    file: decisions/L5-operations/documentation_cards.yaml
 
 edges:
   # L1 → L2 (strategy to architecture) — ~18 edges
@@ -534,7 +537,18 @@ edges:
     to: cost_optimization
     strength: moderate
 
-  # Skip connections (L1 → L3/L4/L5) — ~12 edges
+  # L5 intra-level edges (documentation_cards dependencies)
+  - from: fda_readiness
+    to: documentation_cards
+    strength: strong
+  - from: audit_trail
+    to: documentation_cards
+    strength: strong
+  - from: model_governance
+    to: documentation_cards
+    strength: moderate
+
+  # Skip connections (L1 → L3/L4/L5) — ~15 edges
   - from: monai_alignment
     to: model_export_format
     strength: strong
@@ -582,6 +596,18 @@ edges:
   - from: reproducibility_level
     to: container_strategy
     strength: strong
+    skip: true
+  - from: compliance_posture
+    to: documentation_cards
+    strength: strong
+    skip: true
+  - from: tripod_compliance
+    to: documentation_cards
+    strength: moderate
+    skip: true
+  - from: lineage_tracking
+    to: documentation_cards
+    strength: moderate
     skip: true
 
 # Propagation edges for Phase 1 belief propagation (requires_review flags)
@@ -644,3 +670,11 @@ propagation:
     target: mamba_architecture
     type: soft
     rationale: "MambaVesselNet++ adapter must implement ModelAdapter ABC"
+  - source: fda_readiness
+    target: documentation_cards
+    type: hard
+    rationale: "FDA readiness posture determines which card types are required — preclinical needs Data Cards, clinical needs full regulatory stack"
+  - source: compliance_posture
+    target: documentation_cards
+    type: hard
+    rationale: "SaMD-principled posture requires at least scientific reproducibility card stack; full compliance would require regulatory stack"

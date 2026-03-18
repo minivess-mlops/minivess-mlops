@@ -64,6 +64,14 @@ decisions:
     prd_node: knowledge-graph/decisions/L5-operations/test_set_firewall.yaml
     gap: "Methods exist but are never called from Prefect flows. Issue #821."
 
+  documentation_cards:
+    status: active
+    candidates: [minimal_model_card_only, scientific_reproducibility_stack, full_regulatory_stack]
+    rationale: "Which card types to implement: Model Cards only (current), +Data/Environment/Lineage Cards (Nature Protocols), or full regulatory stack (FDA SaMD)."
+    implementation: [src/minivess/compliance/model_card.py]
+    prd_node: knowledge-graph/decisions/L5-operations/documentation_cards.yaml
+    gap: "Only Model Cards exist. Data Cards are highest-priority gap for both Nature Protocols and FDA readiness. Environment Cards second priority."
+
   dashboard_framework:
     status: resolved
     winner: grafana_prometheus

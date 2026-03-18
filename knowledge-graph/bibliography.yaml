@@ -517,6 +517,59 @@ citations:
       5 datasets. Complementary to SaE — addresses calibration through prompt
       engineering rather than evidence estimation.
 
+  # === Documentation Cards Literature (added 2026-03-19) ===
+
+  mitchell_2019_model_cards:
+    authors: "Mitchell M, Wu S, Zaldivar A, Barnes P, Vasserman L, Hutchinson B, Spitzer E, Raji ID, Gebru T"
+    year: 2019
+    title: "Model Cards for Model Reporting"
+    venue: "FAT* 2019"
+    url: "https://arxiv.org/abs/1810.03993"
+    used_in: [documentation_cards]
+    abstract_snippet: >
+      Introduces Model Cards as short documents accompanying trained ML models
+      providing benchmarked evaluation across conditions. Currently the only
+      card type implemented in the platform (src/minivess/compliance/model_card.py).
+
+  pushkarna_2022_data_cards:
+    authors: "Pushkarna M, Zaldivar A, Kjartansson O"
+    year: 2022
+    title: "Data Cards: Purposeful and Transparent Dataset Documentation for Responsible AI"
+    venue: "FAccT 2022"
+    url: "https://arxiv.org/abs/2204.01075"
+    used_in: [documentation_cards]
+    abstract_snippet: >
+      Google Research framework for structured dataset documentation covering
+      provenance, collection methodology, known biases, and intended use.
+      Adopted by HuggingFace, TensorFlow Datasets, and Kaggle. Highest-priority
+      gap for MiniVess: no Data Cards for the MiniVess dataset or external
+      validation datasets (DeepVess, TubeNet, VesselNN).
+
+  procope_2022_system_cards:
+    authors: "Procope C, Qadri R, Pinnock B, Givoni J, Carbune V, Aroyo L, Diaz M"
+    year: 2022
+    title: "System-Level Transparency of Machine Learning"
+    venue: "arXiv:2207.13243"
+    url: "https://arxiv.org/abs/2207.13243"
+    used_in: [documentation_cards]
+    abstract_snippet: >
+      Extends Model Cards to System Cards documenting end-to-end AI system
+      behavior, human-AI interaction, failure modes, and deployment context.
+      Maps to IEC 62304 software system documentation requirements.
+      Required for full regulatory stack option.
+
+  lacoste_2019_carbon_emissions:
+    authors: "Lacoste A, Luccioni A, Schmidt V, Dandres T"
+    year: 2019
+    title: "Quantifying the Carbon Emissions of Machine Learning"
+    venue: "NeurIPS 2019 Workshop on Tackling Climate Change with ML"
+    url: "https://arxiv.org/abs/1910.09700"
+    used_in: [documentation_cards]
+    abstract_snippet: >
+      Introduces ML CO2 Impact calculator for estimating carbon footprint
+      of ML training runs. Basis for Carbon Cards concept tracking GPU-hours,
+      electricity source, and CO2 equivalent per experiment.
+
   haft_javaherian_2020_topological:
     authors: "Haft-Javaherian M, Villiger M, Schaffer CB, Nishimura N, Golland P, Bouma BE"
     year: 2020

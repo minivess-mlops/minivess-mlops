@@ -1,0 +1,129 @@
+decision_id: documentation_cards
+title: "AI Documentation Card Types for Platform Transparency"
+level: L5-operations
+status: active
+options:
+  - id: minimal_model_card_only
+    name: "Model Cards only (current state)"
+    prior_probability: 0.30
+    posterior_probability: 0.30
+    description: >
+      Only Model Cards per Mitchell et al. (2019). Current implementation:
+      src/minivess/compliance/model_card.py generates markdown model cards
+      with model name, version, intended use, and performance metrics.
+      Sufficient for basic transparency but misses data provenance, environment
+      reproducibility, and regulatory traceability gaps identified in FDA
+      readiness analysis.
+  - id: scientific_reproducibility_stack
+    name: "Model Cards + Data Cards + Environment Cards + Lineage Cards"
+    prior_probability: 0.45
+    posterior_probability: 0.45
+    description: >
+      Four-card stack targeting Nature Protocols reproducibility bar:
+      (1) Model Cards — architecture, training config, performance (Mitchell et al., 2019).
+      (2) Data Cards — dataset provenance, splits, preprocessing, known biases (Pushkarna et al., 2022).
+      (3) Environment Cards — Docker image SHA, GPU type, CUDA version, uv.lock hash, MONAI version.
+      (4) Lineage Cards — OpenLineage-derived DAG showing data→model→prediction provenance.
+      Addresses TRIPOD+AI items 4a (data source), 5a (eligibility), 7a (preprocessing),
+      and the reproducibility_level KG node. Data Cards fill the critical gap identified
+      in fda_readiness where dataset version traceability is missing.
+  - id: full_regulatory_stack
+    name: "All above + System Cards + Audit Cards + Carbon Cards + PCCP"
+    prior_probability: 0.25
+    posterior_probability: 0.25
+    description: >
+      Seven-card stack for FDA SaMD regulatory pathway:
+      (1-4) All cards from scientific_reproducibility_stack.
+      (5) System Cards — end-to-end system behavior, failure modes, human-AI interaction
+          (Procope et al., 2022). Maps to IEC 62304 software system documentation.
+      (6) Audit Cards — per-run compliance snapshot with SHA-256 hashes, test set access
+          count, approval chain. Maps to 21 CFR Part 11 electronic records.
+      (7) Carbon Cards — compute cost, GPU-hours, CO2 estimates per training run
+          (Lacoste et al., 2019). Emerging requirement for responsible AI reporting.
+      Plus PCCP (Predetermined Change Control Plan) documentation linking factorial
+      design to pre-approved model update boundaries.
+      Premature for preclinical use. Defer to clinical projects.
+resolution_evidence:
+  - type: implementation
+    source: "src/minivess/compliance/model_card.py"
+    finding: >
+      ModelCard class exists (Mitchell et al., 2019 format). Generates markdown
+      with model name, version, intended use, performance metrics, and limitations.
+      No other card types are implemented.
+  - type: gap_analysis
+    source: "docs/planning/regops-fda-regulation-reporting-qms-samd-iec62304-mlops-report.md"
+    finding: >
+      CRITICAL GAP: No Data Cards. FDA Jan 2025 draft guidance explicitly requires
+      dataset version traceability and data catalogs. Current model cards do not
+      document data provenance, split rationale, or known dataset biases. The
+      scientific_reproducibility_stack option addresses this gap.
+  - type: literature
+    source: "Mitchell et al. (2019)"
+    finding: >
+      Model Cards for Model Reporting. Established framework for ML model
+      transparency. Currently the only card type implemented in the platform.
+    citation_key: mitchell_2019_model_cards
+  - type: literature
+    source: "Pushkarna et al. (2022)"
+    finding: >
+      Data Cards: Purposeful and Transparent Dataset Documentation for
+      Responsible AI. Google Research framework adopted by HuggingFace,
+      TensorFlow Datasets, and Kaggle. Covers dataset provenance, collection
+      methodology, known biases, and intended use. Directly applicable to
+      MiniVess dataset documentation for Nature Protocols.
+    citation_key: pushkarna_2022_data_cards
+  - type: literature
+    source: "Procope et al. (2022)"
+    finding: >
+      System Cards for AI-Based Decision-Making. Meta framework for documenting
+      end-to-end AI system behavior including human-AI interaction patterns and
+      failure modes. Required for full regulatory stack.
+    citation_key: procope_2022_system_cards
+  - type: literature
+    source: "Lacoste et al. (2019)"
+    finding: >
+      Quantifying the Carbon Emissions of Machine Learning. Introduces
+      ML CO2 Impact calculator and Carbon Cards concept. Emerging requirement
+      for responsible AI reporting in academic publications.
+    citation_ref: lacoste_2019_carbon
+  - type: regulatory
+    source: "FDA Jan 2025 draft guidance + PCCP Dec 2024"
+    finding: >
+      FDA draft guidance requires dataset documentation including version
+      traceability, demographics, and known limitations. PCCP requires
+      predetermined change boundaries documented before deployment. Data Cards
+      and Lineage Cards directly address these requirements.
+  - type: analysis
+    source: "TRIPOD+AI compliance matrix"
+    finding: >
+      TRIPOD+AI items 4a (data source description), 5a (eligibility criteria),
+      7a (data preprocessing), and 13a (model specification) all require
+      structured documentation that maps naturally to Data Cards and Model Cards.
+      Environment Cards address TRIPOD+AI item 14a (model development details).
+implementation:
+  files:
+    - src/minivess/compliance/model_card.py
+    - src/minivess/compliance/__init__.py
+  tests: [tests/v2/unit/test_compliance.py]
+  gap: >
+    Only Model Cards implemented. Data Cards, Environment Cards, Lineage Cards,
+    System Cards, Audit Cards, and Carbon Cards are not yet implemented.
+    Data Cards are the highest-priority gap for both Nature Protocols submission
+    and FDA readiness. Environment Cards are second priority (Docker SHA +
+    uv.lock hash already available in the platform but not structured as cards).
+conditional_on:
+  - {parent_decision_id: fda_readiness, influence_strength: strong}
+  - {parent_decision_id: audit_trail, influence_strength: strong}
+  - {parent_decision_id: compliance_posture, influence_strength: strong}
+  - {parent_decision_id: tripod_compliance, influence_strength: moderate}
+  - {parent_decision_id: lineage_tracking, influence_strength: moderate}
+  - {parent_decision_id: model_governance, influence_strength: moderate}
+volatility:
+  classification: evolving
+  next_review: "2026-04-19"
+  rationale: >
+    Decision needed before Nature Protocols submission. The scientific_reproducibility_stack
+    option is the likely winner for preclinical use, but depends on user decision about
+    regulatory ambition level. Data Cards are the most urgent gap regardless of which
+    option is chosen. Must be reviewed after IEC 62304 Edition 2 (Aug 2026) for
+    potential upgrade to full_regulatory_stack.
