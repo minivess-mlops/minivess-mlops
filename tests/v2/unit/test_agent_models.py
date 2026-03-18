@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
+
+pytest.importorskip("pydantic_ai", reason="pydantic_ai not installed")
+
+from pydantic import ValidationError  # noqa: E402
 
 
 class TestExperimentSummary:

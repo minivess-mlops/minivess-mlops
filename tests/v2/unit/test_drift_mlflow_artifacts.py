@@ -10,9 +10,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import mlflow
-import numpy as np
-import pandas as pd
+import pytest
+
+pytest.importorskip("evidently", reason="evidently not installed")
+
+import mlflow  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 
 
 def _make_reference_features(*, n_samples: int = 50, seed: int = 42) -> pd.DataFrame:

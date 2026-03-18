@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+pytest.importorskip("evidently", reason="evidently not installed")
+
 
 @pytest.fixture
 def reference_features() -> pd.DataFrame:

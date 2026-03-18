@@ -12,15 +12,44 @@ resolution_evidence:
   - type: implementation
     source: "src/minivess/optimization/hpo_engine.py"
     finding: "HPOEngine with TPE/CmaES + HyperbandPruner"
+  - type: implementation
+    source: "src/minivess/optimization/grid_partitioning.py"
+    finding: "Grid partitioning via modular arithmetic for parallel factorial studies (Phase 1)"
+  - type: implementation
+    source: "configs/hpo/paper_factorial.yaml"
+    finding: "24-cell factorial config (4 models x 3 losses x 2 aux_calibration)"
+  - type: implementation
+    source: "deployment/skypilot/hpo_grid_worker.yaml"
+    finding: "SkyPilot grid worker YAML for GCP L4 spot instances"
   - type: literature
     citation_key: akiba_2019_optuna
     source: "https://arxiv.org/abs/1907.10902"
 implementation:
-  files: [src/minivess/optimization/hpo_engine.py, src/minivess/optimization/search_space.py]
-  tests: [tests/v2/unit/test_hpo.py]
+  files:
+    - src/minivess/optimization/hpo_engine.py
+    - src/minivess/optimization/search_space.py
+    - src/minivess/optimization/grid_partitioning.py
+    - configs/hpo/paper_factorial.yaml
+    - deployment/skypilot/hpo_grid_worker.yaml
+  tests:
+    - tests/v2/unit/test_hpo.py
+    - tests/v2/unit/test_hpo_parallel_allocation.py
+    - tests/v2/unit/test_hpo_factorial_config.py
+    - tests/v2/unit/test_hpo_provenance_tags.py
+    - tests/v2/unit/test_docker_pull_optimization.py
+phases:
+  - id: phase1
+    status: implemented
+    description: "Grid partitioning + factorial YAML + SkyPilot worker + provenance tags"
+  - id: phase2
+    status: deferred
+    description: "Optuna ask-tell API + PostgreSQL distributed trials (#859)"
+  - id: phase3
+    status: deferred
+    description: "Syne Tune integration (requires Phase 2)"
 conditional_on:
   - {parent_decision_id: config_architecture, influence_strength: moderate}
 volatility:
   classification: stable
   next_review: "2026-06-13"
-  rationale: "Optuna well-integrated with PostgreSQL storage"
+  rationale: "Phase 1 grid partitioning implemented. Phase 2 Optuna distributed deferred to #859."

@@ -8,9 +8,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import mlflow
-import numpy as np
-import pandas as pd
+import pytest
+
+pytest.importorskip("evidently", reason="evidently not installed")
+
+import mlflow  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 
 
 def _setup_mlflow_with_drift(tmp_path: Path) -> str:

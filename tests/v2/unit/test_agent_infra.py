@@ -5,6 +5,10 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 
+import pytest
+
+pydantic_ai = pytest.importorskip("pydantic_ai", reason="pydantic_ai not installed")
+
 # ---------------------------------------------------------------------------
 # T-0.1: pydantic-ai importability
 # ---------------------------------------------------------------------------

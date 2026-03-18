@@ -9,6 +9,10 @@ T3 uses scipy.stats.permutation_test for MMD p-values instead of alibi-detect.
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("evidently", reason="evidently not installed")
+
 
 class TestDriftDependencies:
     """Verify drift detection library imports."""

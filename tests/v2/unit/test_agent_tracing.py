@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pydantic_ai", reason="pydantic_ai not installed")
+
 
 class TestTracingModule:
     """Tests for the agents.tracing module."""
