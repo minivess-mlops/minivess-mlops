@@ -1,10 +1,10 @@
 # Multiphoton Microscopy for Neuroscience: Smart Acquisition and Closed-Loop Feedback
 
-**Status**: Complete (v1.0 — seed-based, web enrichment pending from background agent)
+**Status**: Complete (v2.0 — enriched with 25 web-verified papers)
 **Date**: 2026-03-18
 **Theme**: R4 (from research-reports-general-plan-for-manuscript-writing.md)
 **Audience**: NEUROVEX manuscript Discussion section (future work: smart acquisition)
-**Paper count**: 20 (11 seeds + 9 from prior context)
+**Paper count**: 36 (11 seeds + 25 web-discovered)
 
 ---
 
@@ -109,13 +109,30 @@ Smart acquisition is also a data quality mechanism. If the acquisition agent ens
 10. [Evangelou et al. (2025). "EthoPy." *bioRxiv*.](https://doi.org/10.1101/2025.09.08.673974)
 11. [Lakunina et al. (2025). "Neuropixels Opto." *bioRxiv*.](https://doi.org/10.1101/2025.02.04.636286)
 
-### Additional (from prior context)
-12–20. [Papers from web research agent — pending compilation. Agent completed 444KB of search data with 50+ queries. Enrichment pass recommended.]
+### Web-Discovered (25 — verified via WebFetch)
 
----
-
-## Appendix: Enrichment Note
-
-Web research agent completed extensive searching (444KB, 50+ queries) but
-did not compile final results before session context. A follow-up enrichment
-pass is recommended to bring paper count to 30+.
+12. [Li, Y. et al. (2024). "High-speed two-photon microscopy with adaptive line-excitation." *Optica* 11(8).](https://opg.optica.org/optica/fulltext.cfm?uri=optica-11-8-1138)
+13. [Rates, A. et al. (2026). "Smart microscopy: adaptive microscope control." *npj Imaging* 4, 14.](https://www.nature.com/articles/s44303-026-00145-y)
+14. [Morgado, L. et al. (2024). "The rise of data-driven microscopy." *J Microscopy* 295(2).](https://onlinelibrary.wiley.com/doi/full/10.1111/jmi.13282)
+15. [Passmore, J. et al. (2026). "Closed-loop optogenetic control: outcome-driven microscopy." *Nature Comms* 17, 1087.](https://www.nature.com/articles/s41467-025-67848-5)
+16. [Meirovitch, Y. et al. (2026). "SmartEM: machine learning-guided electron microscopy." *Nature Methods* 23(1).](https://www.nature.com/articles/s41592-025-02929-3)
+17. [Bilodeau, A. et al. (2024). "AI-assisted microscopy frameworks with pySTED." *Nature Machine Intelligence* 6(10).](https://www.nature.com/articles/s42256-024-00903-w)
+18. [Oatman, H. et al. (2025). "PyCLM: closed-loop microscopy." *bioRxiv*.](https://www.biorxiv.org/content/10.1101/2025.08.29.673155v1)
+19. [Draelos, A. et al. (2025). "improv: real-time adaptive neuroscience experiments." *Nature Comms* 16, 9909.](https://www.nature.com/articles/s41467-025-64856-3)
+20. [Gupta, P. & Murphy, T. (2025). "CLoPy: closed-loop feedback for mesoscale cortical signal." *eLife*.](https://elifesciences.org/reviewed-preprints/105070)
+21. [Bowen, Z. et al. (2024). "NeuroART: Real-time analysis and targeting." *eNeuro* 11(10).](https://www.eneuro.org/content/11/10/ENEURO.0079-24.2024)
+22. [Chen, Z. et al. (2023). "DeCalciOn: FPGA-based real-time calcium decoding." *eLife* 12.](https://elifesciences.org/articles/78344)
+23. [Dmitrieva, I. et al. (2024). "realSEUDO for real-time calcium imaging." *NeurIPS 2024*.](https://arxiv.org/abs/2405.15701)
+24. [Rozak, M. et al. (2024). "Deep learning pipeline for neurovascular coupling." *eLife*.](https://elifesciences.org/reviewed-preprints/95525v2)
+25. [Zhou, A. et al. (2024). "Deep learning for two-photon vascular imaging speeds." *Bioengineering* 11(2).](https://www.mdpi.com/2306-5354/11/2/111)
+26. [Mihelic, S. et al. (2021). "SLAVV: Segmentation-less vascular vectorization." *PLoS Comp Bio* 17(10).](https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1009451)
+27. [Qiao, C. et al. (2024). "ZS-DeconvNet: zero-shot denoising + super-resolution." *Nature Comms* 15, 4540.](https://www.nature.com/articles/s41467-024-48575-9)
+28. [Wang, Y. et al. (2025). "FAST: real-time self-supervised denoising >1000fps." *Nature Comms* 16, 9396.](https://www.nature.com/articles/s41467-025-64681-8)
+29. [Schubert, M. et al. (2024). "Deep3P: deep intravital brain tumor imaging." *Nature Comms* 15, 7383.](https://www.nature.com/articles/s41467-024-51432-4)
+30. [Xu, C. et al. (2024). "Multiphoton fluorescence microscopy for in vivo imaging." *Cell* 187(17).](https://www.cell.com/cell/fulltext/S0092-8674(24)00830-4)
+31. [Prevedel, R. et al. (2025). "Three-photon microscopy: deep intravital brain imaging." *Nature Reviews Neuroscience* 26(9).](https://www.nature.com/articles/s41583-025-00937-y)
+32. [Howe, C. et al. (2025). "Light-field deep learning: high-throughput calcium imaging." *PNAS* 122(48).](https://www.pnas.org/doi/10.1073/pnas.2510337122)
+33. [Li, R. et al. (2024). "Physics-informed DDPM for microscopy reconstruction." *Comms Engineering* 3, 186.](https://www.nature.com/articles/s44172-024-00331-z)
+34. [Moore, J. et al. (2023). "OME-Zarr: cloud-optimized bioimaging file format." *Histochem Cell Bio* 160.](https://link.springer.com/article/10.1007/s00418-023-02209-1)
+35. [Morita, H. et al. (2024). "TENET: unsupervised blur-free super-resolution for 2-photon." *bioRxiv*.](https://www.biorxiv.org/content/10.1101/2024.04.30.591870v1)
+36. [Li et al. (2024). "UNet-Att: self-supervised denoising for two-photon microscopy." *Complex & Intelligent Systems* 11.](https://link.springer.com/article/10.1007/s40747-024-01633-7)
