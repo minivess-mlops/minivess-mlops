@@ -10,8 +10,14 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from minivess.pipeline.biostatistics_types import FactorialAnovaResult
+
+# Suppress matplotlib tight_layout cosmetic warnings for all tests in this module
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:The figure layout has changed to tight:UserWarning"
+)
 
 
 def _make_mock_anova_result() -> FactorialAnovaResult:
