@@ -116,6 +116,12 @@ agents = [
     # langgraph removed — replaced by pydantic-ai (ADR-0007)
     "litellm>=1.70,<2.0",
 ]
+monitoring = [
+    # Optional: error tracking + product analytics stubs.
+    # Both are no-op when env vars (SENTRY_DSN, POSTHOG_KEY) are empty.
+    "sentry-sdk>=2.0,<3.0",
+    "posthog>=3.0,<4.0",
+]
 compliance = [
     "cyclonedx-bom>=7.2,<8.0",
 ]
@@ -281,6 +287,8 @@ module = [
     "skan.*",
     "sky.*",
     "tomli.*",
+    "sentry_sdk.*",
+    "posthog.*",
     "opentelemetry.*",
     "google.*",
     "grpc.*",
