@@ -1,6 +1,6 @@
 decision_id: docker_architecture
 title: "Docker as Execution Model — Three-Tier Multi-Stage Architecture"
-level: L2
+level: L2-architecture
 status: resolved
 description: >
   Docker containers ARE the execution model for all training, pipeline execution,

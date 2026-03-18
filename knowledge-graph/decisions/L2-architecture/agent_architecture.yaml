@@ -10,7 +10,7 @@ options:
     posterior_probability: 0.85
   - id: langgraph_stateful
     name: "LangGraph Stateful Agents (deprecated)"
-    prior_probability: 0.55
+    prior_probability: 0.45
     posterior_probability: 0.05
   - id: custom_state_machine
     name: "Custom State Machine"

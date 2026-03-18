@@ -229,6 +229,12 @@ nodes:
   - id: cost_tracking_strategy
     level: L5
     file: decisions/L5-operations/cost-tracking-strategy.yaml
+  - id: fda_readiness
+    level: L5
+    file: decisions/L5-operations/fda_readiness.yaml
+  - id: test_set_firewall
+    level: L5
+    file: decisions/L5-operations/test_set_firewall.yaml
 
 edges:
   # L1 → L2 (strategy to architecture) — ~18 edges

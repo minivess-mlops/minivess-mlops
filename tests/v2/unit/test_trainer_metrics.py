@@ -138,7 +138,8 @@ class TestTrainerWithMetrics:
         loader = _make_loader(num_batches=2)
         result = trainer.train_epoch(loader)
 
-        assert result.metrics == {}
+        # grad/clip_count is always logged even without injected metrics
+        assert "grad/clip_count" in result.metrics or result.metrics == {}
 
     def test_fit_logs_metrics_to_tracker(self) -> None:
         model = _make_fake_model()

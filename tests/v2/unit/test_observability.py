@@ -268,9 +268,9 @@ class TestExperimentTrackerLocalBackend:
 
         client = MlflowClient(tracking_uri=local_tracking_uri)
         run = client.get_run(run_id)
-        assert "model_family" in run.data.params
-        assert run.data.params["model_family"] == "dynunet"
-        assert "trainable_parameters" in run.data.metrics
+        assert "model/family" in run.data.params
+        assert run.data.params["model/family"] == "dynunet"
+        assert "model/trainable_params" in run.data.metrics
 
     def test_log_artifact(
         self,

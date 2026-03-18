@@ -27,12 +27,12 @@ class TestGetSystemParams:
 
         result = get_system_params()
         expected_keys = {
-            "sys_python_version",
-            "sys_os",
-            "sys_os_kernel",
-            "sys_hostname",
-            "sys_total_ram_gb",
-            "sys_cpu_model",
+            "sys/python_version",
+            "sys/os",
+            "sys/os_kernel",
+            "sys/hostname",
+            "sys/total_ram_gb",
+            "sys/cpu_model",
         }
         assert expected_keys.issubset(result.keys())
 
@@ -47,14 +47,14 @@ class TestGetSystemParams:
         from minivess.observability.system_info import get_system_params
 
         result = get_system_params()
-        assert result["sys_python_version"]
-        assert "." in result["sys_python_version"]  # e.g. "3.13.2"
+        assert result["sys/python_version"]
+        assert "." in result["sys/python_version"]  # e.g. "3.13.2"
 
     def test_ram_is_numeric_string(self) -> None:
         from minivess.observability.system_info import get_system_params
 
         result = get_system_params()
-        ram_str = result["sys_total_ram_gb"]
+        ram_str = result["sys/total_ram_gb"]
         # Should be parseable as float, e.g. "62.7"
         assert float(ram_str) > 0
 
@@ -78,12 +78,12 @@ class TestGetLibraryVersions:
 
         result = get_library_versions()
         expected_keys = {
-            "sys_torch_version",
-            "sys_monai_version",
-            "sys_cuda_version",
-            "sys_cudnn_version",
-            "sys_mlflow_version",
-            "sys_numpy_version",
+            "sys/torch_version",
+            "sys/monai_version",
+            "sys/cuda_version",
+            "sys/cudnn_version",
+            "sys/mlflow_version",
+            "sys/numpy_version",
         }
         assert expected_keys.issubset(result.keys())
 
@@ -98,7 +98,7 @@ class TestGetLibraryVersions:
         from minivess.observability.system_info import get_library_versions
 
         result = get_library_versions()
-        assert result["sys_torch_version"] != "not_installed"
+        assert result["sys/torch_version"] != "not_installed"
 
     def test_graceful_degradation_when_library_missing(self) -> None:
         """When a library can't be imported, return 'not_installed'."""
@@ -106,12 +106,12 @@ class TestGetLibraryVersions:
 
         # Normal case: monai should be present
         normal = get_library_versions()
-        assert normal["sys_monai_version"] != "not_installed"
+        assert normal["sys/monai_version"] != "not_installed"
 
         # When monai is not importable, should return "not_installed"
         with patch.dict("sys.modules", {"monai": None}):
             degraded = get_library_versions()
-        assert degraded["sys_monai_version"] == "not_installed"
+        assert degraded["sys/monai_version"] == "not_installed"
 
 
 class TestGetGpuInfo:
@@ -121,9 +121,9 @@ class TestGetGpuInfo:
         from minivess.observability.system_info import get_gpu_info
 
         result = get_gpu_info()
-        assert "sys_gpu_count" in result
-        assert "sys_gpu_model" in result
-        assert "sys_gpu_vram_mb" in result
+        assert "sys/gpu_count" in result
+        assert "sys/gpu_model" in result
+        assert "sys/gpu_vram_mb" in result
 
     def test_all_values_are_strings(self) -> None:
         from minivess.observability.system_info import get_gpu_info
@@ -137,8 +137,8 @@ class TestGetGpuInfo:
 
         with patch("torch.cuda.is_available", return_value=False):
             result = get_gpu_info()
-        assert result["sys_gpu_count"] == "0"
-        assert result["sys_gpu_model"] == "N/A"
+        assert result["sys/gpu_count"] == "0"
+        assert result["sys/gpu_model"] == "N/A"
 
     @pytest.mark.skipif(
         not _gpu_available(),
@@ -148,9 +148,9 @@ class TestGetGpuInfo:
         from minivess.observability.system_info import get_gpu_info
 
         result = get_gpu_info()
-        assert result["sys_gpu_count"] != "0"
-        assert result["sys_gpu_model"] != "N/A"
-        assert int(result["sys_gpu_vram_mb"]) > 0
+        assert result["sys/gpu_count"] != "0"
+        assert result["sys/gpu_model"] != "N/A"
+        assert int(result["sys/gpu_vram_mb"]) > 0
 
 
 class TestGetGitInfo:
@@ -161,10 +161,10 @@ class TestGetGitInfo:
 
         result = get_git_info()
         expected_keys = {
-            "sys_git_commit",
-            "sys_git_commit_short",
-            "sys_git_branch",
-            "sys_git_dirty",
+            "sys/git_commit",
+            "sys/git_commit_short",
+            "sys/git_branch",
+            "sys/git_dirty",
         }
         assert expected_keys == set(result.keys())
 
@@ -179,7 +179,7 @@ class TestGetGitInfo:
         from minivess.observability.system_info import get_git_info
 
         result = get_git_info()
-        commit = result["sys_git_commit"]
+        commit = result["sys/git_commit"]
         if commit != "unknown":
             assert len(commit) == 40
             assert all(c in "0123456789abcdef" for c in commit)
@@ -188,14 +188,14 @@ class TestGetGitInfo:
         from minivess.observability.system_info import get_git_info
 
         result = get_git_info()
-        if result["sys_git_commit"] != "unknown":
-            assert result["sys_git_commit"].startswith(result["sys_git_commit_short"])
+        if result["sys/git_commit"] != "unknown":
+            assert result["sys/git_commit"].startswith(result["sys/git_commit_short"])
 
     def test_dirty_is_boolean_string(self) -> None:
         from minivess.observability.system_info import get_git_info
 
         result = get_git_info()
-        assert result["sys_git_dirty"] in ("true", "false", "unknown")
+        assert result["sys/git_dirty"] in ("true", "false", "unknown")
 
     def test_no_git_returns_unknown(self) -> None:
         from minivess.observability.system_info import get_git_info
@@ -205,8 +205,8 @@ class TestGetGitInfo:
             side_effect=FileNotFoundError("git not found"),
         ):
             result = get_git_info()
-        assert result["sys_git_commit"] == "unknown"
-        assert result["sys_git_branch"] == "unknown"
+        assert result["sys/git_commit"] == "unknown"
+        assert result["sys/git_branch"] == "unknown"
 
     def test_detached_head_returns_descriptive_branch(self) -> None:
         """In detached HEAD state, branch should not be just 'HEAD'."""
@@ -232,8 +232,8 @@ class TestGetGitInfo:
             result = get_git_info()
         # Should include commit info, not just "HEAD"
         assert (
-            "detached" in result["sys_git_branch"].lower()
-            or "abc1234" in result["sys_git_branch"]
+            "detached" in result["sys/git_branch"].lower()
+            or "abc1234" in result["sys/git_branch"]
         )
 
 
@@ -241,7 +241,7 @@ class TestGetDvcInfo:
     """Tests for get_dvc_info()."""
 
     def test_returns_only_version_key(self) -> None:
-        """get_dvc_info() should return ONLY sys_dvc_version.
+        """get_dvc_info() should return ONLY sys/dvc_version.
 
         DVC data hash and nfiles are identifiers, not hyperparameters.
         They belong in MLflow tags (via log_dvc_provenance), not params.
@@ -250,13 +250,13 @@ class TestGetDvcInfo:
         from minivess.observability.system_info import get_dvc_info
 
         result = get_dvc_info()
-        assert "sys_dvc_version" in result
-        assert "sys_dvc_data_hash" not in result, (
-            "sys_dvc_data_hash should not be in get_dvc_info() — "
+        assert "sys/dvc_version" in result
+        assert "sys/dvc_data_hash" not in result, (
+            "sys/dvc_data_hash should not be in get_dvc_info() — "
             "it's an identifier, not a hyperparameter (#108)"
         )
-        assert "sys_dvc_data_nfiles" not in result, (
-            "sys_dvc_data_nfiles should not be in get_dvc_info() — "
+        assert "sys/dvc_data_nfiles" not in result, (
+            "sys/dvc_data_nfiles should not be in get_dvc_info() — "
             "it's an identifier, not a hyperparameter (#108)"
         )
 
@@ -272,7 +272,7 @@ class TestGetDvcInfo:
         from minivess.observability.system_info import get_dvc_info
 
         result = get_dvc_info()
-        assert result["sys_dvc_version"] != "not_installed"
+        assert result["sys/dvc_version"] != "not_installed"
 
     def test_get_all_system_info_excludes_dvc_hash(self) -> None:
         """get_all_system_info() must not contain DVC hash/nfiles.
@@ -283,8 +283,8 @@ class TestGetDvcInfo:
         from minivess.observability.system_info import get_all_system_info
 
         result = get_all_system_info()
-        assert "sys_dvc_data_hash" not in result
-        assert "sys_dvc_data_nfiles" not in result
+        assert "sys/dvc_data_hash" not in result
+        assert "sys/dvc_data_nfiles" not in result
 
 
 class TestGetAllSystemInfo:
@@ -295,11 +295,11 @@ class TestGetAllSystemInfo:
 
         result = get_all_system_info()
         # Should have keys from all four functions
-        assert "sys_python_version" in result  # from get_system_params
-        assert "sys_torch_version" in result  # from get_library_versions
-        assert "sys_gpu_count" in result  # from get_gpu_info
-        assert "sys_git_commit" in result  # from get_git_info
-        assert "sys_dvc_version" in result  # from get_dvc_info
+        assert "sys/python_version" in result  # from get_system_params
+        assert "sys/torch_version" in result  # from get_library_versions
+        assert "sys/gpu_count" in result  # from get_gpu_info
+        assert "sys/git_commit" in result  # from get_git_info
+        assert "sys/dvc_version" in result  # from get_dvc_info
 
     def test_all_values_are_strings(self) -> None:
         from minivess.observability.system_info import get_all_system_info
@@ -313,7 +313,7 @@ class TestGetAllSystemInfo:
 
         result = get_all_system_info()
         for key in result:
-            assert key.startswith("sys_"), f"Key {key} missing sys_ prefix"
+            assert key.startswith("sys/"), f"Key {key} missing sys/ prefix"
 
     def test_no_empty_values(self) -> None:
         from minivess.observability.system_info import get_all_system_info
