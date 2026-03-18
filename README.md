@@ -51,26 +51,53 @@ doi: [10.1038/s41597-023-02048-8](https://doi.org/10.1038/s41597-023-02048-8)
 
 ## Architecture Overview
 
-### Two-Tier Orchestration
+### Two-Tier Orchestration: Deterministic Pipeline + Agentic Intelligence
 
-The platform employs a **two-tier orchestration architecture** separating concerns between deterministic pipeline execution and LLM-assisted reasoning:
+The platform employs a **two-tier orchestration architecture** that cleanly
+separates deterministic pipeline execution from LLM-assisted reasoning. This
+design ensures that the core ML pipeline remains fully reproducible while
+providing a natural extension point for agentic capabilities as the field matures.
 
-| Tier | Framework | Scope | Examples |
-|------|-----------|-------|---------|
-| **Macro-orchestration** | Prefect 3.x | Deterministic ML pipeline flows | Train, Eval, Deploy, Biostatistics |
-| **Micro-orchestration** | Pydantic AI | LLM-assisted tasks within flows | Result summarisation, drift triage, figure narration |
+| Tier | Framework | Scope | Determinism | Examples |
+|------|-----------|-------|-------------|---------|
+| **Macro-orchestration** | Prefect 3.x | Pipeline flows (DAG) | Fully deterministic | Train, Eval, Deploy, Biostatistics |
+| **Micro-orchestration** | Pydantic AI | Tasks within flows | LLM-assisted, optional | Result summarisation, drift triage, figure narration |
 
-Prefect flows execute the deterministic ML pipeline (data engineering, training,
-evaluation, deployment). Within individual flows, **Pydantic AI agents** provide
-LLM-assisted capabilities -- for example, summarising experiment results,
-triaging drift alerts, or generating figure narratives for the manuscript. This
-separation ensures that the core pipeline remains fully reproducible and
-deterministic, while LLM capabilities are additive, optional, and auditable
-via Langfuse tracing. See [ADR-0007](docs/adr/0007-pydantic-ai-over-langgraph.md)
-for the architectural rationale.
+**Why this separation matters.** Prefect flows execute the deterministic ML
+pipeline: data engineering, training, post-training, evaluation, deployment,
+biostatistics. Every run produces identical outputs given identical inputs --
+the reproducibility guarantee essential for both scientific publication and
+regulatory compliance. Within individual flows, **Pydantic AI agents** provide
+LLM-assisted capabilities that are *additive, optional, and auditable* via
+Langfuse tracing. If the LLM is unavailable, the flow runs to completion; only
+the LLM-generated summaries are missing. See
+[ADR-0007](docs/adr/0007-pydantic-ai-over-langgraph.md) for the rationale behind
+choosing Pydantic AI over LangGraph.
 
-**Planned**: CopilotKit (AG-UI protocol) + WebMCP for agentic dashboard and
-annotation interfaces, enabling interactive researcher-AI collaboration.
+**The path to "more agentic."** The two-tier architecture is explicitly designed
+to grow. Current agents (experiment summariser, drift triage, figure narrator) are
+read-only -- they observe flow outputs and produce text. Future agents can take
+increasingly autonomous actions while remaining within the Prefect flow boundary:
+
+| Capability | Current | Near-term (planned) | Future |
+|------------|---------|---------------------|--------|
+| **Proactive data acquisition** | DVC pull (deterministic) | Agent identifies missing external datasets and suggests downloads | Agent autonomously acquires new training data from EBRAINS |
+| **Sophisticated data processing** | Pandera validation (deterministic) | Agent diagnoses data quality issues and suggests fixes | Agent curates training data, flags annotation anomalies |
+| **Interactive evaluation** | MetricsReloaded (deterministic) | Agent generates natural-language performance summaries | Agent proposes new evaluation criteria based on failure analysis |
+| **Continual adaptation** | Drift detection → alert (deterministic) | Agent triages drift alerts and recommends action | Agent triggers PCCP-compliant retraining when drift exceeds threshold |
+
+This progression follows the **data-savvy agent** framework
+([Seedat et al. (2025). "What's the Next Frontier for Data-Centric AI? Data Savvy Agents!"
+*ICLR DATA-FM Workshop*.](https://openreview.net/)), which argues that agentic
+systems must develop four capabilities: proactive data acquisition, sophisticated
+data processing, interactive test data synthesis, and continual adaptation. Our
+two-tier architecture provides the scaffold for each -- Prefect ensures the
+deterministic backbone, while Pydantic AI agents can progressively assume
+responsibility for each capability as the research matures.
+
+**Planned agentic UI**: CopilotKit (AG-UI protocol) + WebMCP for agentic dashboard
+and annotation interfaces, enabling interactive researcher-AI collaboration where
+the interface itself adapts to the researcher's workflow.
 
 ### Three-Environment Model
 
