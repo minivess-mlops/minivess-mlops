@@ -60,9 +60,16 @@ class TestNoBareVmSkyPilotYamls:
         )
 
     def test_all_yamls_use_docker_image_id(self) -> None:
-        """Every SkyPilot YAML must specify image_id: docker:... in resources."""
+        """Every SkyPilot YAML must specify image_id: docker:... in resources.
+
+        Exception: Mode B (file_mounts) dev configs that intentionally skip Docker.
+        """
+        # Mode B dev configs that use file_mounts instead of Docker
+        _mode_b_exclusions = {"minivess-dev-b-volume.yaml"}
         missing: list[str] = []
         for yaml_path in _all_skypilot_yamls():
+            if yaml_path.name in _mode_b_exclusions:
+                continue
             config = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
             resources = config.get("resources", {})
             image_id = resources.get("image_id", "")
