@@ -11,6 +11,10 @@ last_updated: 2026-03-18
 activation: manual
 invocation: /tdd-iterate
 revision_notes: >
+  v3.0.0: Production-grade upgrade. Added failure-triage protocol
+  (BUG-1 + BUG-2 prevention). Rules #9 (zero tolerance), #10 (triage
+  before fixing), #11 (tokens upfront). 27 skill evals. CLAUDE.md
+  Rule #24. KG code_quality_philosophy node. Skills 2.0 compatible.
   v2.1.0: Ralph Wiggum best-practices audit. Added accumulated learnings
   file (LEARNINGS.md), placeholder prevention rule, and FORCE_STOP
   escape hatch with structured next-steps output.

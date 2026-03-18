@@ -39,7 +39,7 @@ nodes:
     level: L1
     file: decisions/L1-research-goals/tripod_compliance.yaml
 
-  # L2 — Architecture (12 nodes)
+  # L2 — Architecture (13 nodes)
   - id: docker_architecture
     level: L2
     file: decisions/L2-architecture/docker_architecture.yaml
@@ -55,6 +55,9 @@ nodes:
   - id: config_architecture
     level: L2
     file: decisions/L2-architecture/config_architecture.yaml
+  - id: code_quality_philosophy
+    level: L2
+    file: decisions/L2-architecture/code_quality_philosophy.yaml
   - id: serving_architecture
     level: L2
     file: decisions/L2-architecture/serving_architecture.yaml
@@ -79,6 +82,9 @@ nodes:
   - id: flow_topology
     level: L2
     file: decisions/L2-architecture/flow_topology.yaml
+  - id: code_quality_philosophy
+    level: L2
+    file: decisions/L2-architecture/code_quality_philosophy.yaml
 
   # L3 — Technology (26 nodes)
   - id: primary_3d_model
