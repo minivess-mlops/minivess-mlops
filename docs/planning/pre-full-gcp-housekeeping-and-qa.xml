@@ -6,7 +6,7 @@
     <revised>2026-03-18</revised>
     <description>
       6 PRs closing GitHub issues before the GCP factorial study. PRs 1-3 are
-      pre-factorial blockers; PRs 4-6 run parallel with the 8-day factorial.
+      pre-factorial blockers; PRs 4-6 run parallel with the ~1.5-day factorial.
       Each PR uses self-learning-iterative-coder TDD (RED-GREEN-VERIFY-FIX-CHECKPOINT-CONVERGE).
     </description>
     <source_docs>
@@ -32,7 +32,7 @@
     </related_issues>
     <cost-summary>
       <pr-cost>PRs 1-6: $0 GPU cost (staging-tier tests only)</pr-cost>
-      <factorial-cost>Factorial (unblocked by PR-1): ~$353 spot / $783 on-demand</factorial-cost>
+      <factorial-cost>Factorial (unblocked by PR-1): ~$65 spot (72 training runs on GCP L4; post-training + eval + biostatistics run locally on RTX 2070 Super 8GB — all models fit for inference)</factorial-cost>
     </cost-summary>
   </metadata>
 
@@ -67,8 +67,8 @@
       <title>Test: PARALLEL allocation returns disjoint trial partitions</title>
       <file>tests/v2/unit/test_hpo_parallel_allocation.py</file>
       <description>
-        allocate(strategy="PARALLEL", total_cells=128, worker_id=0, total_workers=4)
-        returns 32 cells with no overlap across workers.
+        allocate(strategy="PARALLEL", total_cells=24, worker_id=0, total_workers=4)
+        returns 6 cells with no overlap across workers.
       </description>
       <acceptance>Fails with NotImplementedError.</acceptance>
     </task>
@@ -85,9 +85,9 @@
     </task>
 
     <task id="T1.3" type="RED">
-      <title>Test: factorial config defines 128 cells</title>
+      <title>Test: factorial config defines 24 cells</title>
       <file>tests/v2/unit/test_hpo_factorial_config.py</file>
-      <description>Load configs/hpo/paper_factorial.yaml, assert 128 cells.</description>
+      <description>Load configs/hpo/paper_factorial.yaml, assert 24 cells.</description>
       <acceptance>Fails because paper_factorial.yaml does not exist.</acceptance>
     </task>
 
@@ -98,7 +98,7 @@
         <file>deployment/skypilot/hpo_grid_worker.yaml</file>
       </files>
       <description>
-        128-cell factorial config (Hydra sweep). SkyPilot YAML with image_id: docker:...
+        24-cell factorial config (Hydra sweep). SkyPilot YAML with image_id: docker:...
         and run: python -m minivess.orchestration.flows.hpo_flow (Prefect module).
       </description>
       <acceptance>T1.3 passes. SkyPilot uses Docker image_id.</acceptance>

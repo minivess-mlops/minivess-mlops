@@ -65,7 +65,7 @@ A shell script that reads YAML grid configs, generates the Cartesian product, an
 
 Grid search evaluates every point in the Cartesian product of discrete hyperparameter sets. It provides complete coverage and is deterministic given a fixed config, making it ideal for reproducible factorial experiments in publications. [Bischl et al. (2023)](https://arxiv.org/abs/2107.05847) note that grid search remains the standard for small factorial designs (fewer than ~200 combinations) where full coverage is required for statistical analysis.
 
-The MinIVess paper factorial (e.g., 4 losses x 4 learning rates x 2 batch sizes x 4 models = 128 cells, each with 3-fold CV = 384 training runs) falls squarely in this regime. Grid search is the correct tool here because the goal is not optimization but systematic comparison — every cell must complete.
+The MinIVess paper factorial (4 models x 3 seg_losses x 2 aux_calib_losses = 24 training cells, each with 3-fold CV = 72 training runs) falls squarely in this regime. Learning rate and batch size are NOT factorial factors — they are fixed per condition or HPO-tuned separately. Grid search is the correct tool here because the goal is not optimization but systematic comparison — every cell must complete.
 
 ### 2.2 Bayesian Optimization (Model-Based)
 
@@ -120,7 +120,7 @@ Option B (Syne Tune) is the strongest candidate for Phase 3, when advanced algor
 
 ## 5. Decision Matrix: H3 — Compute Schematics
 
-This is the most consequential decision for the paper factorial. With 128 grid cells (or 384 with 3-fold CV) and a GCP quota of 5 GPUs across all regions, the compute topology directly determines wall-clock time and cost.
+This is the most consequential decision for the paper factorial. With 24 training cells (or 72 with 3-fold CV) and a GCP quota of 5 GPUs across all regions, the compute topology directly determines wall-clock time and cost.
 
 ### 5.1 GCP GPU Quota Context
 
@@ -135,7 +135,7 @@ The verified GCP quota is **5 GPUs total across all regions** (not per-region). 
 
 | Option | Description | Pros | Cons | Effort | Risk | Citations |
 |--------|-------------|------|------|--------|------|-----------|
-| **A: 5x single-GPU (SkyPilot managed jobs)** | 5 independent SkyPilot managed jobs, each running one trial at a time. Sequential within each instance, parallel across instances. 384/5 = ~77 runs per instance. | Fits GCP 5-GPU quota exactly; SkyPilot spot recovery; independent failure domains; simple scheduling; no inter-node communication needed for grid search | 5x setup overhead (Docker pull + data); spot preemption risk (mitigated by SkyPilot); no ASHA coordination across instances | Low | Low — SkyPilot handles spot | [Yang et al. (2023)](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng), [SkyPilot managed jobs docs](https://docs.skypilot.co/en/latest/examples/managed-jobs.html) |
+| **A: 5x single-GPU (SkyPilot managed jobs)** | 5 independent SkyPilot managed jobs, each running one trial at a time. Sequential within each instance, parallel across instances. 72/5 = ~15 runs per instance. | Fits GCP 5-GPU quota exactly; SkyPilot spot recovery; independent failure domains; simple scheduling; no inter-node communication needed for grid search | 5x setup overhead (Docker pull + data); spot preemption risk (mitigated by SkyPilot); no ASHA coordination across instances | Low | Low — SkyPilot handles spot | [Yang et al. (2023)](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng), [SkyPilot managed jobs docs](https://docs.skypilot.co/en/latest/examples/managed-jobs.html) |
 | **B: 1x multi-GPU (single instance)** | One instance with multiple GPUs. HYBRID allocation strategy with `CUDA_VISIBLE_DEVICES` per trial. | Single setup cost; shared filesystem; easy ASHA communication (shared memory/PostgreSQL on localhost); no inter-node networking | Exceeds 5-GPU quota for >5 GPUs; single point of failure; spot preemption kills ALL trials; underutilizes GPUs during ramp-up/down | N/A (quota-blocked for >5) | High — single failure domain | [Li et al. (2020)](https://arxiv.org/abs/1810.05934) |
 | **C: Hybrid orchestrator + workers** | One CPU orchestrator (HPO flow) + N GPU workers. Orchestrator manages Optuna study; workers pull trials via PostgreSQL. | Clean separation; orchestrator survives worker preemption; scales to arbitrary worker count; ASHA coordination via PostgreSQL | Requires persistent orchestrator instance; PostgreSQL must be network-accessible; added latency for trial assignment | Medium | Medium — networking complexity | [Optuna distributed docs](https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/004_distributed.html), [SkyPilot many-jobs docs](https://docs.skypilot.co/en/latest/running-jobs/many-jobs.html) |
 | **D: SkyPilot multi-node cluster** | Single SkyPilot cluster with multiple nodes. `SKYPILOT_NODE_RANK` and `SKYPILOT_NODE_IPS` for coordination. | Built-in node discovery; shared setup (sort of); single `sky launch` command | All nodes must launch together (no elastic scaling); spot preemption kills the cluster; multi-node is designed for distributed training (data-parallel), not independent trials | Medium | High — wrong abstraction for HPO | [SkyPilot distributed jobs docs](https://docs.skypilot.co/en/latest/running-jobs/distributed-jobs.html) |
@@ -222,12 +222,12 @@ Option B (Optuna GridSampler) is a valid alternative that unifies the grid searc
 
 ### Phase 1: Paper Factorial (Grid Search, Minimal Infrastructure)
 
-**Goal**: Execute the 128-cell factorial (4 losses x 4 learning rates x 2 batch sizes x 4 model variants, each with 3-fold CV = 384 runs) for the Nature Protocols paper.
+**Goal**: Execute the 24-cell factorial (4 models x 3 seg_losses x 2 aux_calib_losses, each with 3-fold CV = 72 training runs) for the Nature Protocols paper. Learning rate and batch size are fixed per condition, not factorial factors.
 
 **Architecture**:
-- Use the existing grid search path (`train_all_hyperparam_combos.sh` + `configs/hpo/dynunet_grid.yaml`) extended to the full 128-cell grid
+- Use the existing grid search path (`train_all_hyperparam_combos.sh` + `configs/hpo/dynunet_grid.yaml`) extended to the full 24-cell grid
 - Execute as 5 concurrent SkyPilot managed jobs on GCP L4 spot instances (`europe-north1`)
-- Each managed job runs a partition of the grid (e.g., jobs 0-4 each handle ~77 of 384 runs)
+- Each managed job runs a partition of the grid (e.g., jobs 0-4 each handle ~15 of 72 runs)
 - Data from GCS via SkyPilot `file_mounts` with `MOUNT_CACHED`
 - Checkpoints and MLflow artifacts to GCS buckets
 - No inter-job communication needed (grid search is embarrassingly parallel)
@@ -265,7 +265,7 @@ run: |
 **What needs to be built**:
 1. Extend `train_all_hyperparam_combos.sh` (or replace with Python) to support `--partition` / `--total-workers` for grid partitioning
 2. Add MLflow tags for `grid_config_hash`, `git_sha`, `docker_image_digest`, `dvc_data_hash`
-3. Create the full 128-cell paper factorial YAML config
+3. Create the full 24-cell paper factorial YAML config
 4. Create the SkyPilot task YAML for grid workers
 5. Test the partitioned grid execution locally with smoke_test config
 
@@ -324,36 +324,51 @@ if strategy == AllocationStrategy.PARALLEL:
 
 ## 9. FinOps Analysis
 
-### 9.1 Paper Factorial Cost Estimate (128 cells, 3-fold CV, GCP L4 spot)
+### 9.1 Paper Factorial Cost Estimate (24 cells, 3-fold CV, GCP L4 spot)
+
+> **Note**: Learning rate and batch size are NOT factorial factors — they are fixed per
+> condition or HPO-tuned separately. The actual training-flow factors are:
+> model(4) x seg_loss(3) x aux_calib_loss(2) = **24 cells**.
 
 **Assumptions**:
-- 384 total training runs (128 cells x 3 folds)
+- 72 training runs (24 cells x 3 folds)
 - Average training time per run: 2.5 hours (100 epochs, DynUNet, MiniVess 70 volumes)
 - L4 spot price in `europe-north1`: ~$0.30/hr (GPU) + ~$0.05/hr (CPU/mem) = ~$0.35/hr total
-- L4 on-demand price: ~$0.80/hr total
 - 5 concurrent instances (GCP quota)
 
-| Cost Component | Calculation | Spot Cost | On-Demand Cost |
-|----------------|-------------|-----------|----------------|
-| GPU compute (384 runs x 2.5 hr) | 960 GPU-hours | $336 | $768 |
-| Setup overhead (5 instances x ~5 min cold start) | ~0.4 hr per instance | $0.70 | $1.60 |
-| Spot preemption re-setup (~15% preemption rate, SkyPilot auto-recovery) | ~144 additional setup events x 2 min warm | ~$2.50 | N/A |
-| Cloud SQL PostgreSQL (db-f1-micro, 1 month) | Flat | $10 | $10 |
-| GCS storage (25 GiB data + ~50 GiB checkpoints + ~10 GiB MLflow) | ~85 GiB x $0.020/GiB | $1.70 | $1.70 |
-| GCS operations (downloads, uploads) | ~$0.005/1000 ops | ~$2 | ~$2 |
-| **Total** | | **~$353** | **~$783** |
+| Cost Component | Calculation | Spot Cost |
+|----------------|-------------|-----------|
+| Training GPU compute (72 runs x 2.5 hr) | ~180 GPU-hours | ~$44 |
+| Post-training (SWA, ~144 runs, short) | **LOCAL** (RTX 2070 Super) | **$0** |
+| Evaluation (inference, ~4,320 points) | **LOCAL** (RTX 2070 Super) | **$0** |
+| Biostatistics (CPU only) | **LOCAL** | **$0** |
+| Setup overhead (5 instances x ~5 min cold start) | ~0.4 hr per instance | ~$0.70 |
+| Spot preemption re-setup (~15% rate) | ~11 additional setup events x 2 min warm | ~$0.25 |
+| Cloud SQL PostgreSQL (db-f1-micro, 1 month) | Flat | $10 |
+| GCS storage + operations | ~85 GiB | ~$4 |
+| Buffer | | ~$6 |
+| **Total** | | **~$65** |
 
-**Wall-clock time**: 384 runs / 5 parallel = ~77 sequential runs per instance. At 2.5 hr each = ~192 hours = **~8 days** of continuous execution.
+> **Why post-training and evaluation are local:** All models fit on RTX 2070 Super
+> (8 GB) for inference. SAM3 Vanilla/Hybrid use frozen encoders (~4-6 GB BF16),
+> VesselFM inference is ~6 GB, DynUNet is ~1 GB. Post-training (SWA) operates on
+> checkpoint weight averaging, not GPU-heavy forward passes. Only the Training flow
+> requires cloud GPUs (L4 spot on GCP). See `docs/planning/sam3-installation-issues-and-synthesis.md`
+> for verified VRAM benchmarks.
+
+**Wall-clock time (GCP training only)**: 72 runs / 5 parallel = ~15 sequential runs per instance. At 2.5 hr each = ~38 hours = **~1.5 days** of continuous GCP execution.
+
+**Wall-clock time (local post-processing)**: Post-training + evaluation + biostatistics run locally on RTX 2070 Super. Inference is fast (~minutes per model). Total local time: ~1-2 days depending on ensemble count.
 
 ### 9.2 Setup Amortization Comparison
 
 | Topology | Instances | Cold starts | Total setup time | Setup as % of compute | Notes |
 |----------|-----------|-------------|------------------|----------------------|-------|
-| 5x single-GPU, long-lived | 5 | 5 | ~25 min | 0.04% | Each instance runs ~77 trials sequentially. Best amortization. |
-| 5x single-GPU, per-trial | 384 | 384 | ~32 hr | 3.3% | Worst case — new instance per trial. Avoid. |
+| 5x single-GPU, long-lived | 5 | 5 | ~25 min | 0.2% | Each instance runs ~15 trials sequentially. Best amortization. |
+| 5x single-GPU, per-trial | 72 | 72 | ~6 hr | 3.3% | Worst case — new instance per trial. Avoid. |
 | 1x 5-GPU instance | 1 | 1 | ~5 min | 0.008% | Single setup, but single failure domain. Feasible within 5-GPU quota. |
 
-**Recommendation**: Use 5 long-lived SkyPilot managed jobs. Each job runs its partition of the grid serially (77 runs), writing checkpoints to GCS after each run. If preempted, SkyPilot recovers the job and the grid launcher skips completed runs (MLflow fingerprinting). This achieves near-optimal amortization while maintaining independent failure domains.
+**Recommendation**: Use 5 long-lived SkyPilot managed jobs. Each job runs its partition of the grid serially (~15 runs), writing checkpoints to GCS after each run. If preempted, SkyPilot recovers the job and the grid launcher skips completed runs (MLflow fingerprinting). This achieves near-optimal amortization while maintaining independent failure domains.
 
 A single 5-GPU instance (Option B in H3) is technically feasible within the 5-GPU quota and offers marginally better amortization. However, it creates a single failure domain — one spot preemption kills all 5 concurrent trials. With 5 independent managed jobs, a preemption affects only 1 of 5 streams.
 
