@@ -1,20 +1,48 @@
 decision_id: sbom_generation
 title: "SBOM and Supply Chain"
 level: L5-operations
-status: not_started
+status: resolved
 options:
-  - {id: syft_uv_lock, name: "Syft + uv.lock", prior_probability: 0.45, posterior_probability: 0.45}
-  - {id: cyclonedx, name: "CycloneDX", prior_probability: 0.25, posterior_probability: 0.25}
-  - {id: manual_lockfile, name: "Manual Lockfile", prior_probability: 0.20, posterior_probability: 0.20}
-  - {id: none, name: "None", prior_probability: 0.10, posterior_probability: 0.10}
-resolution_evidence: []
+  - id: cyclonedx_plus_grype
+    name: "CycloneDX + Grype + Trivy"
+    prior_probability: 0.25
+    posterior_probability: 0.85
+  - id: syft_uv_lock
+    name: "Syft + uv.lock"
+    prior_probability: 0.45
+    posterior_probability: 0.08
+  - id: manual_lockfile
+    name: "Manual Lockfile"
+    prior_probability: 0.20
+    posterior_probability: 0.05
+  - id: none
+    name: "None"
+    prior_probability: 0.10
+    posterior_probability: 0.02
+resolved_option: cyclonedx_plus_grype
+resolution_evidence:
+  - type: implementation
+    source: "pyproject.toml [compliance] group + Makefile"
+    finding: >
+      cyclonedx-bom>=7.2 (native uv environment support) generates Python-level
+      CycloneDX JSON/XML SBOMs. Trivy generates Docker-level SBOMs. Grype scans
+      for known vulnerabilities. Makefile targets: sbom-python, sbom-scan, sbom-all.
+  - type: regulatory
+    source: "FDA Section 524B + Feb 2026 cybersecurity guidance"
+    finding: >
+      SBOMs mandatory in premarket submissions since 2023. NTIA minimum elements
+      required plus FDA additions (level of support, end-of-support date).
+      CycloneDX preferred for security-focused SBOM with VEX support.
 implementation:
-  files: []
-  tests: []
+  files:
+    - pyproject.toml
+    - Makefile
+  tests:
+    - tests/v2/unit/test_sbom_generation.py
 conditional_on:
   - {parent_decision_id: ci_cd_platform, influence_strength: moderate}
-  - {parent_decision_id: compliance_posture, influence_strength: moderate}
+  - {parent_decision_id: compliance_posture, influence_strength: strong}
 volatility:
-  classification: evolving
-  next_review: "2026-04-13"
-  rationale: "SBOM not yet generated; Trivy scan available via Makefile"
+  classification: stable
+  next_review: "2026-09-18"
+  rationale: "CycloneDX + Grype resolved. Trivy for Docker images. Three-level SBOM coverage."
