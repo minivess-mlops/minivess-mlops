@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<literature-report-plan version="1.0" name="R9-platform-engineering-paas">
+
+  <metadata>
+    <theme-id>R9</theme-id>
+    <title>Platform Engineering and PaaS for Scientific ML: From Infrastructure-as-Code to Infrastructure-as-Platform</title>
+    <output-path>docs/planning/lit-report-platform-engineering-paas.md</output-path>
+    <parent-plan>docs/planning/batch-literature-research-report.xml</parent-plan>
+    <skill>create-literature-report v2.1.0</skill>
+    <target-paper-count>35</target-paper-count>
+    <quality-target>MINOR_REVISION</quality-target>
+    <priority>P2 — long-term vision (1-2 years), not publication gate</priority>
+  </metadata>
+
+  <invocation-prompt>
+    create literature report on "Platform Engineering and PaaS for Scientific ML: From Infrastructure-as-Code to Infrastructure-as-Platform"
+
+    Focus: How to build a highly flexible MLOps platform on top of MONAI
+    that is easy to use by researchers who want to do science without
+    understanding infrastructure provisioning. The "infrastructure-as-platform"
+    vision wrapping SkyPilot, Pulumi, Docker, Prefect into a self-service
+    experience.
+
+    THREE converging threads:
+
+    A) PLATFORM ENGINEERING FOR ML: Internal developer platforms (IDPs) for
+    ML teams. Self-service infrastructure. The maturity from "scripts" to
+    "platform." Infrastructure Platform Engineering (IPE) vs developer-focused
+    platform engineering. Why infrastructure must come first.
+
+    B) SCIENTIFIC PAAS: Platform-as-a-Service specifically for scientific
+    computing. Research compute platforms. Galaxy, Nextflow, Snakemake as
+    precedents. How clinical/biomedical research differs from general-purpose
+    cloud. Privacy, reproducibility, audit trail requirements.
+
+    C) AI-NATIVE PLATFORMS: The emerging pattern of AI-native PaaS where
+    the LLM IS the interface. Natural language → infrastructure provisioning.
+    Anthropic's Antspace/Baku pattern (environment-manager, Firecracker VMs,
+    full vertical integration from model to runtime). How this changes the
+    DevEx equation for researchers. CopilotKit/AG-UI as the researcher-facing
+    layer.
+
+    Context: NEUROVEX already wraps SkyPilot (compute), Pulumi (IaC), Docker
+    (execution), Prefect (orchestration), MLflow (tracking). The question is:
+    how to make this stack invisible to the researcher while maintaining
+    the reproducibility and audit guarantees? This is a P2 vision report,
+    not an immediate implementation plan.
+
+    EXCLUDED topics:
+    - Agentic AI details (report 5)
+    - Computational reproducibility fundamentals (R1)
+    - FDA/regulatory compliance details (R2)
+    - Segmentation methods (R3)
+    - Microscopy hardware (R4)
+
+    Repo context: /home/petteri/Dropbox/github-personal/minivess-mlops
+    KG domains to update: infrastructure, cloud, architecture
+    Manuscript section: Discussion (future: platform vision)
+  </invocation-prompt>
+
+  <seed-papers>
+    <paper>Gentele (2025). "Platform Engineering Is Failing — Here's Why Infrastructure Comes First." TheNewStack. https://thenewstack.io/platform-engineering-is-failing-heres-why-infrastructure-comes-first/</paper>
+    <paper>Bianchessi (2025). "Platform Engineering's True Value Is in Application Development." TheNewStack. https://thenewstack.io/platform-engineerings-true-value-is-in-application-development/</paper>
+    <paper>Kreuzberger et al. (2023). "MLOps: Overview, Definition, and Architecture." IEEE Access. https://doi.org/10.1109/ACCESS.2023.3262138</paper>
+    <paper>Vieira et al. (2024). "An intelligent framework for managing healthcare big data." Computers in Biology and Medicine. https://www.sciencedirect.com/science/article/pii/S0010482524017335</paper>
+    <paper>Barrak et al. (2026). "An empirical guide to MLOps adoption." Information and Software Technology. https://www.sciencedirect.com/science/article/pii/S0950584926000315</paper>
+    <paper>Ren et al. (2025). "A Survey of LLM-based Scientific Agents." arXiv:2506.21072. https://arxiv.org/abs/2506.21072</paper>
+    <paper>Huang et al. (2025). "MLXOps4Medic." IEEE Access. https://ieeexplore.ieee.org/abstract/document/11126113</paper>
+    <paper>Afgan et al. (2018). "The Galaxy platform for accessible, reproducible and collaborative biomedical analyses." Nucleic Acids Research. https://pmc.ncbi.nlm.nih.gov/articles/PMC6002019/</paper>
+    <paper>Di Tommaso et al. (2017). "Nextflow enables reproducible computational workflows." Nature Biotechnology 35, 316-319. https://doi.org/10.1038/nbt.3820</paper>
+    <paper>Goecks et al. (2010). "Galaxy: a comprehensive approach for supporting accessible, reproducible computational research." Genome Biology. https://pmc.ncbi.nlm.nih.gov/articles/PMC3832998/</paper>
+    <paper>Moore et al. (2023). "OME-Zarr." Histochemistry and Cell Biology. https://link.springer.com/article/10.1007/s00418-023-02209-1</paper>
+    <paper>Glatard et al. (2013). "Reproducibility of neuroimaging analyses across operating systems." IEEE eScience. https://www.computer.org/csdl/proceedings-article/e-science/2013/06683911/12OmNvzJGci</paper>
+    <paper>Gruening et al. (2018). "Practical computational reproducibility in life sciences." Cell Systems. https://doi.org/10.1016/j.cels.2018.03.014</paper>
+    <paper>Wolstencroft et al. (2013). "The Taverna workflow suite." Nucleic Acids Research. https://doi.org/10.1093/nar/gkt328</paper>
+  </seed-papers>
+
+  <search-domains>
+    <domain>platform engineering internal developer platform ML 2024 2025 2026</domain>
+    <domain>infrastructure platform engineering IPE Kubernetes ML workloads</domain>
+    <domain>scientific computing PaaS biomedical research platform 2024 2025</domain>
+    <domain>"AI-native" platform deployment natural language infrastructure 2025 2026</domain>
+    <domain>self-service ML infrastructure researcher DevEx 2024 2025</domain>
+    <domain>MONAI platform deployment clinical research 2024 2025</domain>
+    <domain>SkyPilot Pulumi self-service GPU compute 2024 2025</domain>
+    <domain>Firecracker microVM serverless ML inference 2024 2025</domain>
+  </search-domains>
+
+  <antspace-context>
+    Anthropic's internal "Antspace" platform (discovered via reverse engineering
+    of Claude Code's environment-manager binary by @AprilNEA, March 2026):
+    - Go binary (27MB, unstripped) at github.com/anthropics/anthropic/api-go/environment-manager
+    - Firecracker microVM-based execution (KVM hypervisor)
+    - Full deployment protocol: create → upload dist.tar.gz → stream NDJSON status
+    - Powers "Baku" — claude.ai web app builder
+    - Natural language → Claude builds app → deploys to Antspace
+    - AI-native PaaS with vertical integration from LLM to runtime
+
+    This is the emerging pattern that NEUROVEX could adopt: researcher describes
+    experiment in natural language → platform provisions GPU compute, configures
+    training, deploys model — all invisible to the researcher.
+  </antspace-context>
+
+</literature-report-plan>
