@@ -261,6 +261,16 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
     changes" is BANNED — every failure in this repo was co-authored by Claude Code
     and is therefore Claude Code's responsibility.
     See: `.claude/metalearning/2026-03-07-silent-existing-failures.md`
+23. **NEVER Fix Failures Serially (Non-Negotiable)** — When `make test-staging`
+    fails, NEVER fix one test, re-run, fix next (whac-a-mole). Instead:
+    (1) **GATHER**: Run `--maxfail=200` WITHOUT `-x` to see ALL failures
+    (2) **CATEGORIZE**: Group by file, then by root cause (`| uniq -c | sort -rn`)
+    (3) **PLAN**: Determine fix strategy per root cause (batch replace, schema fix, etc.)
+    (4) **FIX**: All instances of each root cause in one commit
+    (5) **VERIFY**: Full suite again without `-x`
+    One root cause often explains 50+ failures. Serial fixing wastes 25+ minutes
+    on what should be a 10-minute batch operation.
+    See: `.claude/metalearning/2026-03-18-whac-a-mole-serial-failure-fixing.md`
 22. **Single-Source Config via `.env.example` (Non-Negotiable)** — ALL configurable
    values MUST be in `.env.example` FIRST. BANNED: hardcoded URLs in Dockerfiles,
    `os.environ.get("VAR", "fallback")` in flow files (use `resolve_tracking_uri()`
