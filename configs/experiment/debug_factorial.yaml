@@ -28,22 +28,49 @@ defaults:
   - override /profiling: debug
 
 experiment_name: debug_factorial
-max_epochs: 2
-num_folds: 1
 debug: true
 
-# Half dataset (from full ~47 train / ~23 val per fold)
-max_train_volumes: 23
-max_val_volumes: 12
+# Factorial factors — IDENTICAL to paper_factorial.yaml
+# Debug = production minus epochs/data/folds ONLY (CLAUDE.md Rule 27)
+factors:
+  model_family:
+    - dynunet
+    - mambavesselnet
+    - sam3_topolora
+    - sam3_hybrid
+  loss_name:
+    - cbdice_cldice
+    - dice_ce
+    - dice_ce_cldice
+  aux_calibration:
+    - true
+    - false
+
+# Zero-shot baselines — same as production
+zero_shot_baselines:
+  - model: sam3_vanilla
+    strategy: frozen_encoder_eval
+    folds: 1
+    dataset: minivess
+  - model: vesselfm
+    strategy: zero_shot_only
+    folds: 1
+    dataset: deepvess
+
+# ONLY these 3 things differ from production:
+fixed:
+  max_epochs: 2           # Production: 50
+  num_folds: 1            # Production: 3
+  max_train_volumes: 23   # Production: 0 (full ~47)
+  max_val_volumes: 12     # Production: 0 (full ~23)
+  compute: auto
+  learning_rate: 1.0e-3
+  batch_size: 2
 
 # Split file: fold-0 only, half volumes
 splits_file: configs/splits/debug_half_1fold.json
 
-# Default loss (overridden per-condition by run_factorial.sh)
-losses:
-  - cbdice_cldice
-
-# Auxiliary calibration (overridden per-condition)
+# Auxiliary calibration default (overridden per-condition by run_factorial.sh)
 with_aux_calib: false
 aux_calib_weight: 1.0
 
