@@ -1,10 +1,31 @@
+---
+name: overnight-runner
+version: 1.1.0
+description: >
+  Observable, resumable batch execution of XML plan files via Claude headless sessions.
+  Use when executing 2+ XML plans sequentially, running plans unattended, or needing
+  crash recovery with heartbeat and stall detection.
+  Do NOT use for: single plan execution, interactive sessions, or factorial experiment
+  monitoring (use factorial-monitor).
+last_updated: 2026-03-19
+activation: manual
+invocation: /overnight-runner
+metadata:
+  category: operations
+  tags: [batch, automation, headless, observability, crash-recovery]
+  relations:
+    compose_with:
+      - self-learning-iterative-coder
+      - ralph-loop
+      - issue-creator
+    depend_on: []
+    similar_to: []
+    belong_to: []
+---
+
 # Skill: overnight-runner
 
-**Version:** 1.0.0
-**Invocation:** `/overnight-runner`
-**Purpose:** Observable, resumable batch execution of XML plan files via Claude headless sessions.
-
----
+> Observable, resumable batch execution of XML plan files via Claude headless sessions.
 
 ## When to Use This Skill
 

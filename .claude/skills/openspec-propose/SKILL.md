@@ -7,6 +7,15 @@ metadata:
   author: openspec
   version: "1.0"
   generatedBy: "1.2.0"
+  category: orchestration
+  tags: [spec-driven, proposal, design, planning]
+  relations:
+    compose_with:
+      - openspec-apply-change
+      - openspec-archive-change
+    depend_on: []
+    similar_to: []
+    belong_to: []
 ---
 
 Propose a new change - create the change and generate all artifacts in one step.

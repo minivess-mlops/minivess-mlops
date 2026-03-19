@@ -1,3 +1,26 @@
+---
+name: sync-roadmap
+version: 1.1.0
+description: >
+  Synchronize GitHub Project Roadmap timeline fields (Start date, Target date, Size,
+  Estimate) on project items. Use when new issues need timeline fields, issues are
+  closed, or running periodic sync to backfill missing data.
+  Do NOT use for: creating issues (use issue-creator) or sprint planning
+  (use planning-backlog).
+last_updated: 2026-03-19
+activation: manual
+invocation: /sync-roadmap
+metadata:
+  category: operations
+  tags: [github-projects, roadmap, timeline, automation]
+  relations:
+    compose_with:
+      - planning-backlog
+    depend_on: []
+    similar_to: []
+    belong_to: []
+---
+
 # Sync Roadmap Skill
 
 ## Purpose

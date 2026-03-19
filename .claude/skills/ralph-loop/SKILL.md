@@ -1,11 +1,32 @@
+---
+name: ralph-loop
+version: 1.1.0
+description: >
+  Autonomous cloud GPU job monitoring, diagnosis, and recovery loop for SkyPilot jobs.
+  Use when launching SkyPilot training jobs, diagnosing cloud failures (OOM, preemption,
+  Docker pull, DVC), or monitoring cloud training autonomously.
+  Do NOT use for: local Docker training, unit tests, factorial multi-job monitoring
+  (use factorial-monitor), or infrastructure provisioning (use Pulumi).
+last_updated: 2026-03-19
+activation: manual
+invocation: /ralph-loop
+metadata:
+  category: operations
+  tags: [skypilot, monitoring, cloud, gpu, diagnosis, recovery]
+  relations:
+    compose_with:
+      - issue-creator
+      - self-learning-iterative-coder
+    depend_on: []
+    similar_to: []
+    belong_to:
+      - overnight-runner
+---
+
 # Skill: ralph-loop
 
-**Version:** 1.0.0
-**Invocation:** `/ralph-loop`
-**Purpose:** Autonomous cloud GPU job monitoring, diagnosis, and recovery loop.
-Named after Ralph — the monitor that watches your cloud training while you sleep.
-
----
+> Autonomous cloud GPU job monitoring, diagnosis, and recovery loop.
+> Named after Ralph — the monitor that watches your cloud training while you sleep.
 
 ## When to Use This Skill
 
@@ -104,25 +125,8 @@ Use `ralph-loop` whenever you need to:
 
 ## Failure Categories (Known Patterns)
 
-The skill matches log lines against known failure patterns.
-**No regex** — uses `str.partition()` and `in` checks per CLAUDE.md Rule #16.
-
-| Category | Pattern in Logs | Auto-fix? | Fix Action |
-|----------|----------------|-----------|------------|
-| `GPU_SOLD_OUT` | `insufficient-capacity` | Yes | Try next region/GPU |
-| `DOCKER_PULL_FAIL` | `failed to pull image` | Maybe | Check auth, try public |
-| `DOCKER_AUTH_FAIL` | `unauthorized` in pull | Yes | Refresh DockerLoginConfig |
-| `DVC_NO_GIT` | `not a git repository` | Yes | `dvc init --no-scm` |
-| `ENV_VAR_LITERAL` | `${VAR}` in error | Yes | Inline vars in Python API |
-| `MLFLOW_ARTIFACT_500` | `too many 500 error` | Yes | Enable multipart upload |
-| `MLFLOW_AUTH_FAIL` | `401 Unauthorized` | No | Check credentials |
-| `OOM_CUDA` | `CUDA out of memory` | Maybe | Reduce patch/batch size |
-| `OOM_CPU` | `Cannot allocate memory` | Maybe | Increase disk/shm |
-| `TORCH_SAVE_IO` | `inline_container.cc` | Yes | Atomic save |
-| `SPOT_PREEMPTION` | `preempted` | Yes | SkyPilot auto-recovery |
-| `DATA_MISSING` | `No training data` | No | `dvc push` first |
-| `DISK_FULL` | `No space left` | Yes | Increase disk_size |
-| `TIMEOUT` | `timed out` | Maybe | Increase timeout |
+14 failure categories with symptoms, auto-fix logic, and resolution steps.
+For the full pattern table and detailed resolution steps, see [instructions/failure-patterns.md](instructions/failure-patterns.md).
 
 ---
 
@@ -157,25 +161,8 @@ Before launching, verify ALL of these:
 
 ## Cost Tracking
 
-Each Ralph Loop iteration tracks:
-
-```json
-{
-  "attempt": 1,
-  "cloud": "lambda",
-  "region": "us-east-1",
-  "gpu": "A100",
-  "hourly_rate": 1.48,
-  "start_time": "2026-03-14T16:00:00Z",
-  "end_time": "2026-03-14T16:11:00Z",
-  "duration_minutes": 11,
-  "estimated_cost": 0.27,
-  "status": "PARTIAL_SUCCESS",
-  "training_ok": true,
-  "artifact_upload_ok": false,
-  "diagnosis": "MLFLOW_ARTIFACT_500"
-}
-```
+JSONL event format, hourly rates, and cost budget rules.
+For the full cost tracking specification, see [instructions/cost-tracking.md](instructions/cost-tracking.md).
 
 ---
 
@@ -209,3 +196,9 @@ Each Ralph Loop iteration tracks:
 
 6. **Multi-region rotation**: For GPU_SOLD_OUT, rotate through 17 Lambda regions
    starting from unpopular EU/Asia regions (implemented in `launch_smoke_test.py`).
+
+---
+
+## Quality Evaluation
+
+For quality checks and pass/fail criteria, see [eval/checklist.md](eval/checklist.md).

@@ -9,6 +9,17 @@ description: >
 model: sonnet
 allowed-tools: Read, Grep, Glob, Bash(gh:*), Bash(git:*)
 argument-hint: [plan-file-or-description]
+metadata:
+  category: development
+  tags: [github, issues, tracking, metadata, batch-operations]
+  relations:
+    compose_with:
+      - self-learning-iterative-coder
+      - planning-backlog
+      - sync-roadmap
+    depend_on: []
+    similar_to: []
+    belong_to: []
 ---
 
 # Issue Creator Skill

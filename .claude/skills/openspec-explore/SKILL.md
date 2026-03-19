@@ -7,6 +7,14 @@ metadata:
   author: openspec
   version: "1.0"
   generatedBy: "1.2.0"
+  category: orchestration
+  tags: [exploration, thinking-partner, discovery, visualization]
+  relations:
+    compose_with:
+      - openspec-propose
+    depend_on: []
+    similar_to: []
+    belong_to: []
 ---
 
 Enter explore mode. Think deeply. Visualize freely. Follow the conversation wherever it goes.

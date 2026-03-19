@@ -5,13 +5,24 @@ description: >
   Keep Knowledge Graph synchronized with live repo state.
   Scan code (AST), scan experiments (DuckDB), propagate belief changes,
   detect staleness, generate downstream artifacts, export to sci-llm-writer.
-last_updated: 2026-03-17
+last_updated: 2026-03-19
 activation: manual
 invocation: /kg-sync
 revision_notes: >
   v2.0.0: Skills 2.0 format. Added 6-layer architecture awareness.
   Materialization protocol links PRD decisions to KG domain entries.
   v1.0.0: Initial 7-step workflow.
+metadata:
+  category: knowledge
+  tags: [knowledge-graph, synchronization, duckdb, staleness, latex]
+  relations:
+    compose_with:
+      - prd-update
+      - knowledge-reviewer
+    depend_on:
+      - knowledge-reviewer
+    similar_to: []
+    belong_to: []
 ---
 
 # kg-sync Skill
