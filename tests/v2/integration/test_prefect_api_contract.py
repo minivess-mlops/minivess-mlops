@@ -87,12 +87,19 @@ class TestPrefectApiContract:
         assert len(completed_names) > 0, "No COMPLETED flow runs found"
 
     def test_no_failed_flow_runs(self) -> None:
-        """Verify zero FAILED or CRASHED flow runs."""
+        """Verify zero recent FAILED or CRASHED flow runs.
+
+        Only checks flow runs created within the last 2 hours to avoid
+        flagging stale historical failures from previous sessions.
+        Skips entirely when no recent runs are found (indicating no active
+        E2E session).
+        """
         if not _prefect_api_reachable():
             pytest.skip(_REQUIRES_PREFECT)
 
         import json
         import urllib.request
+        from datetime import UTC, datetime, timedelta
 
         req = urllib.request.Request(
             "http://localhost:4200/api/flow_runs/filter",
@@ -103,9 +110,31 @@ class TestPrefectApiContract:
         with urllib.request.urlopen(req, timeout=10) as resp:
             flow_runs = json.loads(resp.read().decode("utf-8"))
 
-        failed = [r for r in flow_runs if r.get("state_type") in ("FAILED", "CRASHED")]
+        if not flow_runs:
+            pytest.skip("No flow runs found in Prefect")
+
+        # Filter to recent runs only (created within last 2 hours)
+        cutoff = datetime.now(UTC) - timedelta(hours=2)
+        recent_runs = []
+        for run in flow_runs:
+            created = run.get("created")
+            if created:
+                created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                if created_dt >= cutoff:
+                    recent_runs.append(run)
+
+        if not recent_runs:
+            pytest.skip(
+                "No recent flow runs in Prefect (within last 2 hours). "
+                "Only recent E2E sessions are validated — historical "
+                "failures are not actionable."
+            )
+
+        failed = [
+            r for r in recent_runs if r.get("state_type") in ("FAILED", "CRASHED")
+        ]
         assert not failed, (
-            f"Found {len(failed)} failed/crashed flow runs: "
+            f"Found {len(failed)} recent failed/crashed flow runs: "
             f"{[r.get('name') for r in failed]}"
         )
 

@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>Staging/Prod/Remote Test Suite Tier Redesign</title>
+    <branch>fix/pre-debug-qa-verification</branch>
+    <date>2026-03-19</date>
+    <status>planning</status>
+    <priority>P1 — test architecture clarity</priority>
+    <rationale>
+      The current 3-tier test system (staging/prod/gpu) does not account for tests
+      that require running Docker Compose services (MLflow, MinIO, Prefect, Dashboard,
+      MONAILabel) or remote cloud infrastructure. These tests currently FAIL with
+      confusing errors instead of being cleanly separated into their own tier.
+
+      Additionally, SAM3 model loading tests were incorrectly placed in
+      tests/v2/integration/ instead of tests/gpu_instance/, wasting 45+ minutes
+      per prod test run on OOM/timeout failures.
+    </rationale>
+    <metalearning>
+      .claude/metalearning/2026-03-19-sam3-tests-in-ci-ban.md
+    </metalearning>
+  </metadata>
+
+  <current-state>
+    <description>
+      Current test tiers do not cleanly separate by infrastructure requirements.
+      Tests that need Docker Compose services are mixed with unit tests in
+      tests/v2/integration/, causing failures when services aren't running.
+    </description>
+
+    <tiers>
+      <tier id="staging" command="make test-staging" gate="main PRs">
+        Excludes: model_loading, slow, integration markers.
+        Target: &lt;3 min. Works well.
+      </tier>
+      <tier id="prod" command="make test-prod" gate="prod promotion">
+        Includes: everything except gpu_instance/.
+        Problem: includes Docker Compose service tests that fail without stack.
+        Target: ~5-10 min. Currently 10+ min with many failures.
+      </tier>
+      <tier id="gpu" command="make test-gpu" gate="GPU instance validation">
+        Only: tests/gpu_instance/. Works well.
+      </tier>
+    </tiers>
+
+    <problem-tests>
+      <category name="Docker Compose services required">
+        <file>tests/integration/deployment/test_network_connectivity.py</file>
+        <file>tests/integration/orchestration/test_docker_training_smoke.py</file>
+        <file>tests/v2/integration/test_mlflow_minio_contract.py</file>
+        <file>tests/v2/integration/test_prefect_api_contract.py</file>
+        <file>tests/v2/integration/annotation/test_monailabel_health.py</file>
+        <file>tests/v2/integration/dashboard/test_dashboard_smoke.py</file>
+        <file>tests/v2/integration/e2e/test_full_pipeline_e2e.py</file>
+        <description>
+          These tests need running Docker Compose services (MLflow, MinIO, Prefect,
+          Dashboard, MONAILabel). They are infrastructure validation tests, not code
+          regression tests. They should run when the developer has the stack up
+          (docker compose up), not during make test-prod.
+        </description>
+      </category>
+
+      <category name="Real mlruns data required">
+        <file>tests/v2/integration/test_mlruns_integrity.py</file>
+        <file>tests/v2/integration/test_checkpoint_loadability.py</file>
+        <file>tests/v2/integration/test_pyfunc_registration.py</file>
+        <file>tests/v2/unit/test_duckdb_extraction.py (TestIntegrationRealMlruns)</file>
+        <description>
+          These tests need actual training results in mlruns/. They validate the
+          MLflow-as-contract between flows. They should run after a training run
+          completes, not during make test-prod.
+        </description>
+      </category>
+
+      <category name="Cloud/remote infrastructure">
+        <file>tests/v2/cloud/test_cloud_mlflow.py</file>
+        <file>tests/v2/cloud/test_skypilot_mlflow.py</file>
+        <file>tests/v2/cloud/test_dvc_cloud_pull.py</file>
+        <description>
+          Already separated into tests/v2/cloud/ with auto-skip. Works well.
+        </description>
+      </category>
+
+      <category name="GPU instance validation (SAM3)">
+        <file>tests/gpu_instance/test_sam3_training_integration.py</file>
+        <file>tests/gpu_instance/test_onnx_export_sam3.py</file>
+        <file>tests/gpu_instance/test_monai_deploy_sam3.py</file>
+        <file>tests/gpu_instance/test_bentoml_serving_sam3.py</file>
+        <file>tests/gpu_instance/test_mlflow_serving_sam3.py</file>
+        <description>
+          SAM3 model loading tests MOVED from tests/v2/integration/ to tests/gpu_instance/.
+          Run once per new GPU instance type (L4, A100) via make test-gpu.
+          NEVER in staging or prod tiers. BANNED from CI.
+        </description>
+      </category>
+    </problem-tests>
+  </current-state>
+
+  <proposed-tiers>
+    <description>
+      5-tier test architecture that cleanly separates by infrastructure requirements.
+      Each tier has a clear "when to run" and "what you need" contract.
+    </description>
+
+    <tier id="staging" command="make test-staging" gate="main PRs" needs="nothing">
+      Pure unit tests + config validation. No models, no services, no data.
+      Target: &lt;3 min. Already works.
+      Marker exclusions: not model_loading, not slow, not integration
+    </tier>
+
+    <tier id="prod" command="make test-prod" gate="prod promotion" needs="nothing">
+      All code tests including model_loading (DynUNet, MambaVesselNet) but
+      EXCLUDING tests that need Docker Compose services or real mlruns data.
+      Target: ~5 min.
+      New marker exclusion: not requires_services, not requires_mlruns
+    </tier>
+
+    <tier id="stack" command="make test-stack" gate="after docker compose up" needs="Docker Compose stack">
+      Tests that validate Docker Compose service health, inter-service contracts,
+      and the full e2e pipeline. Run when developer has the stack up.
+      Marker: @pytest.mark.requires_services
+      New Makefile target.
+    </tier>
+
+    <tier id="post-training" command="make test-post-training" gate="after training run" needs="mlruns/ with results">
+      Tests that validate MLflow artifacts, checkpoints, metric integrity.
+      Run after a training run completes (debug or production).
+      Marker: @pytest.mark.requires_mlruns
+      New Makefile target.
+    </tier>
+
+    <tier id="gpu" command="make test-gpu" gate="GPU instance validation" needs="GPU with 16+ GB VRAM">
+      SAM3 model loading, forward passes, ONNX export.
+      Run once per new GPU instance type.
+      Already works via tests/gpu_instance/.
+    </tier>
+  </proposed-tiers>
+
+  <implementation-tasks>
+    <task id="T1">Add @pytest.mark.requires_services to all Docker Compose service tests</task>
+    <task id="T2">Add @pytest.mark.requires_mlruns to all real mlruns data tests</task>
+    <task id="T3">Update make test-prod to exclude requires_services and requires_mlruns</task>
+    <task id="T4">Add make test-stack target that runs only requires_services tests</task>
+    <task id="T5">Add make test-post-training target that runs only requires_mlruns tests</task>
+    <task id="T6">Register new markers in pyproject.toml</task>
+    <task id="T7">Update tests/CLAUDE.md with new tier documentation</task>
+    <task id="T8">Remove VRAM guard skip logic from moved SAM3 tests (not needed in gpu_instance/)</task>
+  </implementation-tasks>
+
+  <immediate-actions>
+    <action>SAM3 tests MOVED to tests/gpu_instance/ (done 2026-03-19)</action>
+    <action>Docker Compose service tests have skip guards for now (temporary — proper tier split is T1-T7)</action>
+    <action>Real mlruns tests have skip guards for now (temporary — proper tier split is T2-T7)</action>
+  </immediate-actions>
+</plan>

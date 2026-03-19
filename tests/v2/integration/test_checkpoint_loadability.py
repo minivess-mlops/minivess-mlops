@@ -135,6 +135,12 @@ class TestCheckpointLoadability:
         Walks every production run's ``artifacts/checkpoints/`` directory and
         asserts that the union of found files matches the expected 28 total.
         """
+        if not _PRODUCTION_RUNS:
+            pytest.skip(
+                "No production runs found in mlruns. "
+                "Production runs require eval/2/ metrics (slash-prefix format)."
+            )
+
         total_found: int = 0
         missing_by_run: dict[str, list[str]] = {}
 
