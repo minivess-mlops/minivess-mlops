@@ -265,11 +265,11 @@ class UnifiedEvaluationRunner:
             flat_metrics: dict[str, float] = {}
             for ds_name, subset_results in results.items():
                 for subset_name, eval_result in subset_results.items():
-                    prefix = f"eval_{ds_name}_{subset_name}_"
+                    prefix = f"eval/{ds_name}/{subset_name}/"
                     for metric_name, ci in eval_result.fold_result.aggregated.items():
                         flat_metrics[f"{prefix}{metric_name}"] = ci.point_estimate
-                        flat_metrics[f"{prefix}{metric_name}_ci_lower"] = ci.lower
-                        flat_metrics[f"{prefix}{metric_name}_ci_upper"] = ci.upper
+                        flat_metrics[f"{prefix}{metric_name}_ci95_lo"] = ci.lower
+                        flat_metrics[f"{prefix}{metric_name}_ci95_hi"] = ci.upper
 
                     # Compute and log compound metric
                     masd_ci = eval_result.fold_result.aggregated.get("measured_masd")

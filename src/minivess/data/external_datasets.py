@@ -247,11 +247,19 @@ def discover_external_test_pairs(
     Returns
     -------
     List of dicts with ``"image"`` and ``"label"`` paths as strings.
-    Returns empty list if directory is missing or has no pairs.
+
+    Raises
+    ------
+    FileNotFoundError
+        If data directory does not exist (CLAUDE.md Rule 25: loud failures).
     """
     if not data_dir.is_dir():
-        logger.warning("Data directory does not exist: %s", data_dir)
-        return []
+        msg = (
+            f"External dataset directory does not exist: {data_dir}\n"
+            f"Download {dataset_name} and place in {data_dir}.\n"
+            f"See: docs/datasets/README.md for download instructions."
+        )
+        raise FileNotFoundError(msg)
 
     # Support both standard (images/labels) and Medical Decathlon (imagesTr/labelsTr)
     images_dir = data_dir / "images"

@@ -199,11 +199,13 @@ class TestDiscoverExternalTestPairs:
         pairs = discover_external_test_pairs(data_dir, "deepvess")
         assert len(pairs) == 0
 
-    def test_missing_directory_returns_empty(self, tmp_path: Path) -> None:
-        """Missing directory returns empty list (not error)."""
+    def test_missing_directory_raises_file_not_found(self, tmp_path: Path) -> None:
+        """Missing directory raises FileNotFoundError (CLAUDE.md Rule 25)."""
+        import pytest as _pytest
+
         data_dir = tmp_path / "nonexistent"
-        pairs = discover_external_test_pairs(data_dir, "deepvess")
-        assert len(pairs) == 0
+        with _pytest.raises(FileNotFoundError, match="does not exist"):
+            discover_external_test_pairs(data_dir, "deepvess")
 
     def test_tiff_pairs(self, tmp_path: Path) -> None:
         """Discovers TIFF image/label pairs."""

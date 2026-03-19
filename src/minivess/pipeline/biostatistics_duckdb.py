@@ -114,7 +114,7 @@ _ALL_DDL = [
 ]
 
 # CI variant suffixes — skip these as standalone metrics
-_CI_SUFFIXES = ("_ci_level", "_ci_lower", "_ci_upper")
+_CI_SUFFIXES = ("_ci_level", "_ci95_lo", "_ci95_hi")
 
 
 # ---------------------------------------------------------------------------
