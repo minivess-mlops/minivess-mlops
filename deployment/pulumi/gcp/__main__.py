@@ -140,6 +140,25 @@ docker_repo = gcp.artifactregistry.Repository(
     description="MinIVess MLOps Docker images (same-region as training VMs)",
 )
 
+# GAR remote repository cache — pulls nvidia/cuda base layers from Docker Hub
+# and caches them in europe-north1 (same-region as training VMs).
+# Cuts Docker pull from ~10 min to <30s on subsequent SkyPilot launches.
+# See: docs/planning/docker-pull-runpod-provisioning-mlflow-cloud-run-multipart-upload-report.md
+docker_remote_repo = gcp.artifactregistry.Repository(
+    "docker-remote-repo",
+    repository_id="docker-hub-cache",
+    location=region,
+    format="DOCKER",
+    mode="REMOTE_REPOSITORY",
+    description="Docker Hub remote repo cache (nvidia base layers, same-region)",
+    remote_repository_config=gcp.artifactregistry.RepositoryRemoteRepositoryConfigArgs(
+        description="Caches Docker Hub pulls in europe-north1",
+        docker_repository=gcp.artifactregistry.RepositoryRemoteRepositoryConfigDockerRepositoryArgs(
+            public_repository="DOCKER_HUB",
+        ),
+    ),
+)
+
 # ── IAM Service Account ─────────────────────────────────────────────────
 
 skypilot_sa = gcp.serviceaccount.Account(

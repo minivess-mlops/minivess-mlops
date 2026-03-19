@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 import torch
+
+# evidently has unescaped regex in docstrings (e.g. \d in text_match.py) that
+# causes SyntaxError when beartype's import hook processes Python 3.13+ code.
+try:
+    import evidently.descriptors.text_match  # noqa: F401
+except SyntaxError:
+    pytest.skip(
+        "evidently SyntaxError (invalid escape sequences on Python "
+        f"{sys.version_info.major}.{sys.version_info.minor})",
+        allow_module_level=True,
+    )
 
 if TYPE_CHECKING:
     from pathlib import Path

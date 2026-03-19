@@ -385,6 +385,34 @@ services:
     <<: *common-labels
 
   # ---------------------------------------------------------------------------
+  # CopilotKit — AG-UI protocol bridge for agentic dashboard
+  #
+  # Self-hosted CopilotKit runtime connects the React dashboard frontend
+  # to Pydantic AI agents via the AG-UI streaming protocol. The runtime
+  # proxies AG-UI events between the frontend and the dashboard agent
+  # FastAPI endpoint (dashboard-api service).
+  #
+  # Activate: docker compose --profile full up copilotkit
+  # AG-UI spec: https://docs.ag-ui.com/introduction
+  # ---------------------------------------------------------------------------
+  copilotkit:
+    build:
+      context: ..
+      dockerfile: deployment/copilotkit/Dockerfile
+    image: minivess-copilotkit:latest
+    container_name: minivess-copilotkit
+    profiles: ["full"]
+    ports:
+      - "${COPILOTKIT_PORT:-4111}:4111"
+    environment:
+      COPILOTKIT_PORT: ${COPILOTKIT_PORT:-4111}
+      DASHBOARD_API_URL: http://${DASHBOARD_API_DOCKER_HOST:-dashboard-api}:${DASHBOARD_API_PORT:-8090}
+    networks:
+      - minivess
+    restart: unless-stopped
+    <<: *common-labels
+
+  # ---------------------------------------------------------------------------
   # Falco — eBPF runtime security monitoring (profile: security)
   #
   # Falco REQUIRES privileged: true for eBPF kernel module access.

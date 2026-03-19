@@ -11,7 +11,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-pandera = pytest.importorskip("pandera", reason="pandera not installed")
+pytest.importorskip("pandera", reason="pandera not installed")
+pytest.importorskip("great_expectations", reason="great_expectations not installed")
 
 if TYPE_CHECKING:
     from pathlib import Path

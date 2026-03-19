@@ -6,25 +6,15 @@ for the dashboard JSON output.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
-# evidently has unescaped regex in docstrings that causes SyntaxError on Python 3.13+.
-# The import is triggered transitively via minivess.observability.drift.
-try:
-    import evidently  # noqa: F401
-except SyntaxError:
-    pytest.skip(
-        "evidently SyntaxError (invalid escape sequences on Python "
-        f"{sys.version_info.major}.{sys.version_info.minor})",
-        allow_module_level=True,
-    )
+pytest.importorskip("evidently", reason="evidently not installed")
 
-import mlflow
-import numpy as np
-import pandas as pd
+import mlflow  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 
 
 def _setup_mlflow_with_drift(tmp_path: Path) -> str:

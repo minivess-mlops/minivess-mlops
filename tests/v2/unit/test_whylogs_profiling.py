@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-whylogs = pytest.importorskip("whylogs", reason="whylogs not installed")
+pytest.importorskip("whylogs", reason="whylogs not installed")
 
 if TYPE_CHECKING:
     from pathlib import Path

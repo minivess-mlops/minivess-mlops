@@ -11,7 +11,7 @@ import subprocess
 
 import pytest
 
-cyclonedx = pytest.importorskip("cyclonedx", reason="cyclonedx-bom not installed")
+pytest.importorskip("cyclonedx", reason="cyclonedx not installed")
 
 
 class TestCycloneDXInstalled:

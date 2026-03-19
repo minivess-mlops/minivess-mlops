@@ -1,0 +1,128 @@
+# MinIVess MLOps — HPO Grid Worker on GCP via SkyPilot
+#
+# Runs a partition of the paper factorial study (24 cells total).
+# Each worker gets cells via modular arithmetic: cell % TOTAL_WORKERS == WORKER_ID.
+#
+# Launch 4 workers (6 cells each, ~$16/worker on L4 spot):
+#   for i in 0 1 2 3; do
+#     sky jobs launch deployment/skypilot/hpo_grid_worker.yaml \
+#       --env WORKER_ID=$i --env TOTAL_WORKERS=4 \
+#       --env-file .env -y
+#   done
+#
+# Total: 72 training runs (24 cells x 3 folds), ~$65 on L4 spot.
+# Post-training (eval, biostatistics) runs locally on RTX 2070 Super 8 GB.
+#
+# Docker image: All deps pre-installed. Setup only pulls data + copies config.
+# BANNED: apt-get, uv sync, git clone in setup (CLAUDE.md).
+#
+# Closes: #857 (grid partitioning), #751 (Docker pull optimization)
+
+name: minivess-grid-worker
+
+resources:
+  # GAR image — same-region as training VMs (europe-north1).
+  # Falls back to Docker Hub if GAR is not configured.
+  # Override via: --env DOCKER_IMAGE=your-registry/minivess-base:latest
+  image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+  # L4 preferred (Ada Lovelace, BF16, 24 GB, cheapest).
+  # A100 fallback for SAM3 Hybrid / VesselFM if L4 OOM.
+  # T4 BANNED (Turing, no BF16 → FP16 overflow → NaN).
+  accelerators: {L4: 1, A100-80GB: 1}
+  cloud: gcp
+  # Spot: 60-91% cheaper. SkyPilot handles preemption recovery.
+  use_spot: true
+  disk_size: 100
+  region: europe-north1
+
+envs:
+  # Grid partitioning — override per worker
+  WORKER_ID: "0"
+  TOTAL_WORKERS: "4"
+
+  # Config path (relative to /app)
+  FACTORIAL_CONFIG: configs/hpo/paper_factorial.yaml
+
+  # MLflow: Cloud SQL PostgreSQL via Cloud Run (or file-based fallback)
+  # Set MLFLOW_TRACKING_URI in .env for your environment.
+  MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+
+  # Suppress git warning (runner image has no git)
+  GIT_PYTHON_REFRESH: quiet
+
+  # Cloud VM escape hatches (approved — same as smoke test)
+  MINIVESS_ALLOW_HOST: "1"
+  PREFECT_DISABLED: "1"
+
+  # train_flow.py env requirements
+  SPLITS_DIR: /app/configs/splits
+  CHECKPOINT_DIR: /app/checkpoints
+  LOGS_DIR: /app/logs
+
+  # PyTorch CUDA memory optimization
+  PYTORCH_ALLOC_CONF: "expandable_segments:True"
+
+  # HuggingFace token (required for SAM3/VesselFM weight download)
+  HF_TOKEN: ${HF_TOKEN}
+
+setup: |
+  set -ex
+
+  # All deps are in the Docker image — setup is DATA ONLY.
+  cd /app
+
+  # HuggingFace login for gated models (SAM3, VesselFM)
+  if [ -n "${HF_TOKEN}" ]; then
+    huggingface-cli login --token "${HF_TOKEN}" --add-to-git-credential 2>/dev/null || true
+    echo "HF_TOKEN: logged in"
+  else
+    echo "WARNING: HF_TOKEN not set — gated models (SAM3) will fail"
+  fi
+
+  # Data: pull from GCS via DVC (GCP production path)
+  # Auth: ADC (Application Default Credentials) — SkyPilot configures this automatically.
+  if [ -d "data/raw/minivess/imagesTr" ] && [ "$(ls data/raw/minivess/imagesTr 2>/dev/null | wc -l)" -gt 10 ]; then
+    echo "Training data already present ($(ls data/raw/minivess/imagesTr | wc -l) files)"
+  else
+    echo "Pulling training data from GCS via DVC..."
+    dvc pull -r gcs || {
+      echo "FATAL: DVC pull from GCS failed."
+      echo "Ensure: gcloud auth application-default login"
+      echo "And: dvc remote add gcs gs://minivess-mlops-dvc-data"
+      exit 1
+    }
+  fi
+
+  # Use canonical 3-fold splits
+  cp configs/splits/3fold_seed42.json configs/splits/splits.json
+
+  # Create required directories
+  mkdir -p /app/checkpoints /app/logs
+
+  # Pre-cache VesselFM weights during setup (don't burn GPU time on download)
+  python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" 2>/dev/null || true
+
+  # Verify environment
+  echo "=== Pre-flight Check ==="
+  nvidia-smi
+  python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
+
+run: |
+  cd /app
+
+  # Guard: verify setup completed
+  if [ ! -f configs/splits/splits.json ]; then
+    echo "FATAL: splits.json missing — setup did not complete."
+    exit 1
+  fi
+
+  echo "=== MinIVess Grid Worker ==="
+  echo "Worker: ${WORKER_ID} / ${TOTAL_WORKERS}"
+  echo "Config: ${FACTORIAL_CONFIG}"
+
+  # Execute HPO grid worker via Prefect flow module (Rule #17)
+  python -m minivess.orchestration.flows.hpo_flow \
+    --mode grid \
+    --worker-id "${WORKER_ID}" \
+    --total-workers "${TOTAL_WORKERS}" \
+    --config "${FACTORIAL_CONFIG}"

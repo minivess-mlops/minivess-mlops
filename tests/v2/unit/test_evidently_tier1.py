@@ -7,22 +7,14 @@ scipy-based KS implementation with rich HTML reports and JSON export.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
 import pytest
 
-# evidently has unescaped regex in docstrings that causes SyntaxError on Python 3.13+.
-try:
-    import evidently  # noqa: F401
-except SyntaxError:
-    pytest.skip(
-        "evidently SyntaxError (invalid escape sequences on Python "
-        f"{sys.version_info.major}.{sys.version_info.minor})",
-        allow_module_level=True,
-    )
+pytest.importorskip("evidently", reason="evidently not installed")
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 
 
 def _make_reference_features(*, n_samples: int = 50, seed: int = 42) -> pd.DataFrame:

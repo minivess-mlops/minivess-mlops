@@ -50,6 +50,12 @@ class TestBackwardsCompatibility:
         assert _DEFAULT_BATCH_SIZE == 2
 
     def test_default_model_importable_from_config(self) -> None:
+        import pytest
+
+        try:
+            import pydantic_ai  # noqa: F401
+        except ImportError:
+            pytest.skip("pydantic_ai not installed")
         from minivess.agents.config import AgentConfig
 
         assert AgentConfig().model == "anthropic:claude-sonnet-4-6"
