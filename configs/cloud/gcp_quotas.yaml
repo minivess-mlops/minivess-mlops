@@ -8,15 +8,14 @@ global:
   CPUS_ALL_REGIONS: 32
   NETWORKS: 5
 
-# Per-region GPU quotas (us-central1 has T4 preemptible approved)
+# Per-region GPU quotas
+# T4 BANNED — Turing has no BF16 → FP16 overflow → NaN in SAM3 encoder.
+# See: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
 regions:
   us-central1:
-    NVIDIA_T4_GPUS: 1
-    PREEMPTIBLE_NVIDIA_T4_GPUS: 1
+    # T4 quotas exist but T4 is BANNED for this project (no BF16)
     NVIDIA_L4_GPUS: 1
     PREEMPTIBLE_NVIDIA_L4_GPUS: 1
-    NVIDIA_V100_GPUS: 1
-    PREEMPTIBLE_NVIDIA_V100_GPUS: 1
     NVIDIA_A100_GPUS: 0          # Need to request if needed
     PREEMPTIBLE_NVIDIA_A100_GPUS: 0
     IN_USE_ADDRESSES: 8
@@ -26,15 +25,14 @@ regions:
     # Default region (Finland, closest to Helsinki)
     # GPU quotas need to be requested per-region
     # Request at: https://console.cloud.google.com/iam-admin/quotas?project=minivess-mlops
-    NVIDIA_T4_GPUS: 1            # Check — may need request
-    PREEMPTIBLE_NVIDIA_T4_GPUS: 1
     NVIDIA_L4_GPUS: 1
     PREEMPTIBLE_NVIDIA_L4_GPUS: 1
 
 # Notes:
 # - GPUS_ALL_REGIONS is the GLOBAL limit across all regions
-# - Per-region quotas are ALSO required (default 1 for T4/L4 in most regions)
+# - Per-region quotas are ALSO required (default 1 for L4 in most regions)
 # - A100/H100 quotas must be requested separately
 # - Preemptible (spot) quotas are separate from on-demand
+# - T4 is BANNED for this project — never request T4 quota
 # - Request more quota via CLI: gcloud compute regions describe REGION --format=json
 # - Or GUI: https://console.cloud.google.com/iam-admin/quotas?project=minivess-mlops

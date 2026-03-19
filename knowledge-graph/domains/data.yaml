@@ -56,7 +56,18 @@ decisions:
   dataset_strategy:
     status: resolved
     winner: minivess_primary_external_test
-    rationale: "MiniVess (70 vols) primary; DeepVess/TubeNet/VesselNN for external validation"
+    rationale: >
+      MiniVess (70 vols) primary training/validation. External TEST sets:
+      DeepVess (1 vol, Cornell) + TubeNet (1 vol, UCL) for generalization evaluation.
+      VesselNN (12 vols) is NOT a test set — reserved for DRIFT DETECTION SIMULATION
+      only (introducing known distribution shifts, data leakage to MiniVess from same PI).
+    datasets:
+      minivess: {role: train_val, n_volumes: 70, splits: 3fold_seed42}
+      deepvess: {role: external_test, n_volumes: 7, note: "1 training + 6 independent test volumes, ALL multiphoton mouse brain cortex. Verify exact count after download. Same organ as MiniVess."}
+      # TubeNet REMOVED from repo (2026-03-19): Only 1 two-photon volume (mouse olfactory
+      # bulb — different organ from MiniVess cortex). Other 7 volumes are HREM/CT/RSOM/OCT-A.
+      # NEVER re-add. See CLAUDE.md Datasets section.
+      vesselnn: {role: drift_detection_only, n_volumes: 12, reason: "data leakage to MiniVess (same PI), reserved for drift simulation with synthetic stack generation"}
     implementation: [src/minivess/data/external_datasets.py, configs/splits/3fold_seed42.json]
     prd_node: knowledge-graph/decisions/L3-technology/dataset_strategy.yaml
 

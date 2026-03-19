@@ -10,9 +10,10 @@ use_spot: true
 disk_size: 100
 disk_tier: best
 
-# GPU priority: cheapest first. T4 ($0.14/hr spot), L4 ($0.22/hr spot).
+# GPU priority: cheapest BF16-capable first.
+# T4 BANNED — Turing architecture has no BF16 support → FP16 overflow → NaN.
+# See: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
 accelerators:
-  - T4:1
   - L4:1
   - A100:1
 
