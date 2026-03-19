@@ -101,7 +101,7 @@ test-gpu:
 	  -o "collect_ignore_glob=" \
 	  --timeout=600
 
-test-cloud-mlflow:  ## Run cloud MLflow tests (requires MLFLOW_CLOUD_* env vars)
+test-cloud-mlflow:  ## Run cloud MLflow tests (requires MLFLOW_TRACKING_URI set to remote URL)
 	uv run pytest tests/v2/cloud/ -m "cloud_mlflow or skypilot_cloud" -v
 
 test-pulumi:  ## Run Pulumi IaC validation tests

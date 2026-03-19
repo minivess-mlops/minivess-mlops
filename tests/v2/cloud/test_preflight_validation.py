@@ -5,7 +5,7 @@ Validates:
 - Env vars are non-empty strings
 - HF_TOKEN specifically required for VesselFM fine-tuning
 
-Auto-skips when MLFLOW_CLOUD_URI not set (same pattern as other cloud tests).
+Auto-skips when MLFLOW_TRACKING_URI is not a remote HTTP URL.
 """
 
 from __future__ import annotations
@@ -13,6 +13,12 @@ from __future__ import annotations
 import os
 
 import pytest
+
+
+def _is_remote_mlflow() -> bool:
+    """Check if MLFLOW_TRACKING_URI points to a remote server (not localhost)."""
+    uri = os.environ.get("MLFLOW_TRACKING_URI", "")
+    return bool(uri) and uri.startswith("http") and "localhost" not in uri
 
 
 @pytest.mark.cloud_mlflow
@@ -25,32 +31,36 @@ class TestPreflightEnvVars:
         "DVC_S3_SECRET_KEY",
         "DVC_S3_BUCKET",
         "RUNPOD_API_KEY",
-        "MLFLOW_CLOUD_URI",
-        "MLFLOW_CLOUD_USERNAME",
-        "MLFLOW_CLOUD_PASSWORD",
+        "MLFLOW_TRACKING_URI",
         "HF_TOKEN",
     ]
 
     def test_all_required_env_vars_present(self) -> None:
         """Every required env var must exist in the environment."""
-        if not os.environ.get("MLFLOW_CLOUD_URI"):
-            pytest.skip("MLFLOW_CLOUD_URI not set — skipping cloud tests")
+        if not _is_remote_mlflow():
+            pytest.skip(
+                "MLFLOW_TRACKING_URI not set to remote URL — skipping cloud tests"
+            )
 
         missing = [v for v in self.REQUIRED_VARS if v not in os.environ]
         assert not missing, f"Missing env vars: {', '.join(missing)}"
 
     def test_env_vars_not_empty_strings(self) -> None:
         """Env vars must have non-empty values (not just '')."""
-        if not os.environ.get("MLFLOW_CLOUD_URI"):
-            pytest.skip("MLFLOW_CLOUD_URI not set — skipping cloud tests")
+        if not _is_remote_mlflow():
+            pytest.skip(
+                "MLFLOW_TRACKING_URI not set to remote URL — skipping cloud tests"
+            )
 
         empty = [v for v in self.REQUIRED_VARS if os.environ.get(v, "") == ""]
         assert not empty, f"Empty env vars: {', '.join(empty)}"
 
     def test_hf_token_set_for_vesselfm(self) -> None:
         """HF_TOKEN must be set for VesselFM pretrained weight download."""
-        if not os.environ.get("MLFLOW_CLOUD_URI"):
-            pytest.skip("MLFLOW_CLOUD_URI not set — skipping cloud tests")
+        if not _is_remote_mlflow():
+            pytest.skip(
+                "MLFLOW_TRACKING_URI not set to remote URL — skipping cloud tests"
+            )
 
         hf_token = os.environ.get("HF_TOKEN", "")
         assert hf_token, (

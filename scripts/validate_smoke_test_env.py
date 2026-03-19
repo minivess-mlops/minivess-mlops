@@ -1,7 +1,7 @@
 """Pre-flight validation for RunPod GPU smoke tests (#637, T3.1, RC13).
 
 Checks all prerequisites before spending money on cloud GPU instances:
-1. Required env vars (DVC_S3_*, RUNPOD_API_KEY, MLFLOW_CLOUD_*)
+1. Required env vars (DVC_S3_*, RUNPOD_API_KEY, MLFLOW_TRACKING_URI)
 2. DVC connectivity to UpCloud S3
 3. MLflow health endpoint
 4. SkyPilot RunPod backend availability
@@ -27,9 +27,7 @@ def _check_env_vars() -> list[str]:
         "DVC_S3_SECRET_KEY",
         "DVC_S3_BUCKET",
         "RUNPOD_API_KEY",
-        "MLFLOW_CLOUD_URI",
-        "MLFLOW_CLOUD_USERNAME",
-        "MLFLOW_CLOUD_PASSWORD",
+        "MLFLOW_TRACKING_URI",
         "HF_TOKEN",
     ]
     return [v for v in required if not os.environ.get(v)]
@@ -37,8 +35,8 @@ def _check_env_vars() -> list[str]:
 
 def _check_mlflow_health() -> bool:
     """Test MLflow health endpoint."""
-    uri = os.environ.get("MLFLOW_CLOUD_URI", "")
-    if not uri:
+    uri = os.environ.get("MLFLOW_TRACKING_URI", "")
+    if not uri or not uri.startswith("http"):
         return False
     try:
         req = urllib.request.Request(f"{uri}/health")
@@ -84,14 +82,15 @@ def main() -> int:
         print("PASS: All required env vars are set.\n")
 
     # 2. MLflow
-    if os.environ.get("MLFLOW_CLOUD_URI"):
+    mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI", "")
+    if mlflow_uri and mlflow_uri.startswith("http"):
         if _check_mlflow_health():
-            print(f"PASS: MLflow at {os.environ['MLFLOW_CLOUD_URI']} is healthy.\n")
+            print(f"PASS: MLflow at {mlflow_uri} is healthy.\n")
         else:
             print("FAIL: MLflow health check failed.\n")
             all_ok = False
     else:
-        print("SKIP: MLFLOW_CLOUD_URI not set — cannot check MLflow.\n")
+        print("SKIP: MLFLOW_TRACKING_URI not set to HTTP URL — cannot check MLflow.\n")
 
     # 3. SkyPilot
     if _check_skypilot():

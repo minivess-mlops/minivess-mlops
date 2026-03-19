@@ -1,7 +1,8 @@
 """L2 cloud MLflow tests (#622).
 
-Verify MLflow works against a live cloud deployment (UpCloud, Scaleway, etc.).
-Requires MLFLOW_CLOUD_* env vars set. Skipped automatically without credentials.
+Verify MLflow works against a live cloud deployment (GCP Cloud Run, etc.).
+Requires MLFLOW_TRACKING_URI set to a remote URL + MLFLOW_TRACKING_PASSWORD.
+Skipped automatically when MLFLOW_TRACKING_URI is localhost or file-based.
 
 Run with: ``make test-cloud-mlflow``
 """

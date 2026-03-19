@@ -47,7 +47,7 @@ pulumi up
 
 After provisioning, populate `.env` with outputs:
 ```bash
-pulumi stack output mlflow_url       # → MLFLOW_GCP_URI
+pulumi stack output mlflow_url       # → MLFLOW_TRACKING_URI (set in .env)
 pulumi stack output dvc_data_bucket  # → GCS_DVC_BUCKET
 ```
 

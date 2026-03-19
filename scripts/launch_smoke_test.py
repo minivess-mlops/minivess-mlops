@@ -113,18 +113,23 @@ def _load_env_vars() -> dict[str, str]:
 
 
 def _resolve_mlflow_env(env_vars: dict[str, str]) -> dict[str, str]:
-    """Resolve MLflow env vars (SkyPilot can't resolve inter-env refs)."""
+    """Resolve MLflow env vars (SkyPilot can't resolve inter-env refs).
+
+    Uses single MLFLOW_TRACKING_URI from .env (set to Cloud Run URL for GCP,
+    file path for RunPod, or localhost for local dev).
+    """
     mlflow_uri = env_vars.get(
-        "MLFLOW_CLOUD_URI", os.environ.get("MLFLOW_CLOUD_URI", "")
+        "MLFLOW_TRACKING_URI", os.environ.get("MLFLOW_TRACKING_URI", "")
     )
     if mlflow_uri:
         env_vars["MLFLOW_TRACKING_URI"] = mlflow_uri
     mlflow_user = env_vars.get(
-        "MLFLOW_CLOUD_USERNAME", os.environ.get("MLFLOW_CLOUD_USERNAME", "admin")
+        "MLFLOW_TRACKING_USERNAME", os.environ.get("MLFLOW_TRACKING_USERNAME", "")
     )
-    env_vars["MLFLOW_TRACKING_USERNAME"] = mlflow_user
+    if mlflow_user:
+        env_vars["MLFLOW_TRACKING_USERNAME"] = mlflow_user
     mlflow_pass = env_vars.get(
-        "MLFLOW_CLOUD_PASSWORD", os.environ.get("MLFLOW_CLOUD_PASSWORD", "")
+        "MLFLOW_TRACKING_PASSWORD", os.environ.get("MLFLOW_TRACKING_PASSWORD", "")
     )
     if mlflow_pass:
         env_vars["MLFLOW_TRACKING_PASSWORD"] = mlflow_pass
@@ -281,11 +286,9 @@ def _launch_gcp(args) -> int:
     yaml_path = str(_ROOT / "deployment" / "skypilot" / "smoke_test_gcp.yaml")
     task = sky.Task.from_yaml(yaml_path)
 
-    # Load and resolve env vars (GCP MLflow uses MLFLOW_GCP_URI, not MLFLOW_CLOUD_URI)
+    # Load and resolve env vars — MLFLOW_TRACKING_URI from .env is the single source
     env_vars = _load_env_vars()
-    gcp_uri = env_vars.get("MLFLOW_GCP_URI", os.environ.get("MLFLOW_GCP_URI", ""))
-    if gcp_uri:
-        env_vars["MLFLOW_TRACKING_URI"] = gcp_uri
+    env_vars = _resolve_mlflow_env(env_vars)
     env_vars["MODEL_FAMILY"] = args.model
     task.update_envs(env_vars)
 
@@ -301,7 +304,8 @@ def _launch_gcp(args) -> int:
 
     print(f"=== Launching smoke test: {args.model} (GCP managed spot) ===")
     print(f"Job name: {job_name}")
-    print(f"MLflow: {gcp_uri or '(not set — check MLFLOW_GCP_URI in .env)'}")
+    mlflow_uri = env_vars.get("MLFLOW_TRACKING_URI", "")
+    print(f"MLflow: {mlflow_uri or '(not set — check MLFLOW_TRACKING_URI in .env)'}")
     print("Docker: GAR (public, no auth — SkyPilot picks cheapest region)")
     print("Mode: Managed job (auto-recovery from spot preemptions)")
 

@@ -63,7 +63,7 @@ def test_validate_runpod_dev_env_importable() -> None:
 def test_check_env_vars_detects_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """check_env_vars returns missing var names (5 required, no MLFLOW_CLOUD_*)."""
+    """check_env_vars returns missing var names (5 required)."""
     required = [
         "RUNPOD_API_KEY",
         "DVC_S3_ENDPOINT_URL",
@@ -73,11 +73,8 @@ def test_check_env_vars_detects_missing(
     ]
     for var in required:
         monkeypatch.delenv(var, raising=False)
-    # Also clear old vars to ensure they're NOT required
+    # Also clear other vars to ensure they're NOT required
     for var in [
-        "MLFLOW_CLOUD_URI",
-        "MLFLOW_CLOUD_USERNAME",
-        "MLFLOW_CLOUD_PASSWORD",
         "DVC_S3_BUCKET",
     ]:
         monkeypatch.delenv(var, raising=False)
@@ -87,10 +84,6 @@ def test_check_env_vars_detects_missing(
     assert isinstance(missing, list), "check_env_vars() must return a list"
     for var in required:
         assert var in missing, f"Expected {var} in missing list, got: {missing}"
-    # MLFLOW_CLOUD_* must NOT be required (file-based MLflow, no server)
-    assert "MLFLOW_CLOUD_URI" not in missing, (
-        "MLFLOW_CLOUD_URI should NOT be required — using file-based MLflow"
-    )
 
 
 def test_check_env_vars_all_present(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,13 +104,13 @@ def test_check_env_vars_all_present(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_no_mlflow_cloud_vars_required(monkeypatch: pytest.MonkeyPatch) -> None:
-    """MLFLOW_CLOUD_* vars must NOT be in the required list (plan v4.0)."""
+    """Legacy MLFLOW_CLOUD_* vars must NOT be in the required list."""
     mod = _load_preflight_module()
     required_vars = mod._REQUIRED_VARS
     banned = ["MLFLOW_CLOUD_URI", "MLFLOW_CLOUD_USERNAME", "MLFLOW_CLOUD_PASSWORD"]
     for var in banned:
         assert var not in required_vars, (
-            f"{var} is still required — remove it, file-based MLflow needs no server"
+            f"{var} is still required — removed in single-MLFLOW_TRACKING_URI simplification"
         )
 
 

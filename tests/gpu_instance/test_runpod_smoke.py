@@ -19,7 +19,7 @@ Prerequisites:
   - RunPod API key configured: sky check runpod
   - Network Volume: sky storage ls | grep minivess-dev
   - Data on volume: make dev-gpu-upload-data (first time)
-  - No MLFLOW_CLOUD_* env vars needed (file-based MLflow)
+  - No remote MLflow env vars needed (file-based MLflow on Network Volume)
 """
 
 from __future__ import annotations
@@ -53,10 +53,9 @@ class TestRunPodSmokeTest:
             "https://www.runpod.io/console/user/settings"
         )
 
-    def test_mlflow_cloud_credentials_set(self) -> None:
-        """MLFLOW_CLOUD_* credentials must be configured."""
-        for var in ("MLFLOW_CLOUD_URI", "MLFLOW_CLOUD_PASSWORD"):
-            assert os.environ.get(var), f"{var} not set"
+    def test_mlflow_tracking_uri_set(self) -> None:
+        """MLFLOW_TRACKING_URI must be configured (file-based or remote)."""
+        assert os.environ.get("MLFLOW_TRACKING_URI"), "MLFLOW_TRACKING_URI not set"
 
     def test_dvc_s3_credentials_set(self) -> None:
         """DVC_S3_* credentials must be configured."""

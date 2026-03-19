@@ -41,9 +41,8 @@ class TestValidateSmokeTestEnv:
             "DVC_S3_SECRET_KEY",
             "DVC_S3_BUCKET",
             "RUNPOD_API_KEY",
-            "MLFLOW_CLOUD_URI",
-            "MLFLOW_CLOUD_USERNAME",
-            "MLFLOW_CLOUD_PASSWORD",
+            "MLFLOW_TRACKING_URI",
+            "HF_TOKEN",
         ):
             monkeypatch.delenv(var, raising=False)
 

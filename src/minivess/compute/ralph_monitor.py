@@ -59,7 +59,7 @@ _FAILURE_PATTERNS: list[tuple[str, str, bool, str]] = [
         "401 Unauthorized",
         "MLFLOW_AUTH",
         False,
-        "MLflow credentials invalid — check MLFLOW_CLOUD_USERNAME/PASSWORD",
+        "MLflow credentials invalid — check MLFLOW_TRACKING_USERNAME/PASSWORD",
     ),
     (
         "No space left on device",

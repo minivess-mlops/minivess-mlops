@@ -384,7 +384,7 @@ markers = [
     "requires_train_image: Tests requiring minivess-train Docker image built",
     "gpu_required: Tests requiring a physical CUDA GPU",
     "security_audit: Security posture checks (warnings, not hard failures)",
-    "cloud_mlflow: Requires live cloud MLflow deployment (MLFLOW_CLOUD_* env vars)",
+    "cloud_mlflow: Requires MLFLOW_TRACKING_URI set to a remote URL + MLFLOW_TRACKING_PASSWORD",
     "pulumi: Pulumi IaC validation (no cloud credentials needed)",
     "skypilot_cloud: SkyPilot to remote MLflow integration (cloud + SkyPilot creds)",
 ]

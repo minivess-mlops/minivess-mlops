@@ -3,7 +3,7 @@
 Verifies that resolve_tracking_uri() and ExperimentTracker work correctly
 when MLFLOW_TRACKING_URI points to a remote server with basic auth.
 
-Auto-skips when MLFLOW_CLOUD_URI is not set (no cloud credentials).
+Auto-skips when MLFLOW_TRACKING_URI is not a remote URL (no cloud credentials).
 
 Run: uv run pytest tests/v2/cloud/test_training_flow_cloud_mlflow.py -v
 """

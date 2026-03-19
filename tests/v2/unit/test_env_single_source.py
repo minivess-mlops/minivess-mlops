@@ -48,18 +48,47 @@ def test_env_example_has_mlflow_tracking_uri() -> None:
 
 
 def test_env_example_has_docker_service_vars() -> None:
-    """Docker-internal service name vars must be in .env.example."""
+    """Docker-internal service name vars must be in .env.example.
+
+    MLFLOW_DOCKER_HOST and MLFLOW_SKYPILOT_HOST were removed in the
+    single-MLFLOW_TRACKING_URI simplification. Docker Compose hardcodes
+    the MLflow service name; SkyPilot YAMLs set MLFLOW_TRACKING_URI directly.
+    """
     vars_ = _env_example_vars()
     for var in (
-        "MLFLOW_DOCKER_HOST",
         "MLFLOW_PORT",
-        "MLFLOW_SKYPILOT_HOST",
         "PREFECT_DOCKER_HOST",
         "PREFECT_PORT",
         "MINIO_DOCKER_HOST",
         "POSTGRES_DOCKER_HOST",
     ):
         assert var in vars_, f"{var} missing from .env.example"
+
+
+def test_env_example_removed_mlflow_docker_host() -> None:
+    """MLFLOW_DOCKER_HOST must NOT be in .env.example.
+
+    Removed in single-MLFLOW_TRACKING_URI simplification. Docker Compose
+    hardcodes the service name 'minivess-mlflow' directly.
+    """
+    vars_ = _env_example_vars()
+    assert "MLFLOW_DOCKER_HOST" not in vars_, (
+        "MLFLOW_DOCKER_HOST should be removed from .env.example — "
+        "Docker Compose hardcodes 'minivess-mlflow' service name directly."
+    )
+
+
+def test_env_example_removed_mlflow_skypilot_host() -> None:
+    """MLFLOW_SKYPILOT_HOST must NOT be in .env.example.
+
+    Removed in single-MLFLOW_TRACKING_URI simplification. SkyPilot YAMLs
+    set MLFLOW_TRACKING_URI directly (file-based for RunPod, Cloud Run for GCP).
+    """
+    vars_ = _env_example_vars()
+    assert "MLFLOW_SKYPILOT_HOST" not in vars_, (
+        "MLFLOW_SKYPILOT_HOST should be removed from .env.example — "
+        "SkyPilot YAMLs set MLFLOW_TRACKING_URI directly."
+    )
 
 
 def test_env_example_has_per_service_db_names() -> None:
@@ -154,7 +183,7 @@ def test_dockerfiles_do_not_hardcode_mlflow_tracking_uri() -> None:
                 stripped.startswith("ENV") and "MLFLOW_TRACKING_URI" in stripped
             ), (
                 f"{df.name} line '{stripped}': MLFLOW_TRACKING_URI must not be in a Dockerfile ENV. "
-                "Set it in docker-compose.flows.yml x-common-env using ${MLFLOW_DOCKER_HOST}."
+                "Set it in docker-compose.flows.yml x-common-env."
             )
 
 
@@ -191,14 +220,19 @@ def test_dynaconf_tomls_do_not_define_mlflow_tracking_uri() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_flows_compose_mlflow_uri_uses_substitution() -> None:
-    """docker-compose.flows.yml MLFLOW_TRACKING_URI must use ${MLFLOW_DOCKER_HOST}."""
+def test_flows_compose_mlflow_uri_uses_hardcoded_service_name() -> None:
+    """docker-compose.flows.yml MLFLOW_TRACKING_URI must use minivess-mlflow service name.
+
+    After the single-MLFLOW_TRACKING_URI simplification, Docker Compose hardcodes
+    the service name directly: http://minivess-mlflow:${MLFLOW_PORT:-5000}.
+    No need for ${MLFLOW_DOCKER_HOST} indirection.
+    """
     compose = _read(ROOT / "deployment" / "docker-compose.flows.yml")
     for line in compose.splitlines():
         if "MLFLOW_TRACKING_URI" in line and not line.strip().startswith("#"):
-            assert "${MLFLOW_DOCKER_HOST" in line or "${MLFLOW_TRACKING_URI}" in line, (
-                f"Hardcoded MLFLOW_TRACKING_URI in docker-compose.flows.yml: '{line.strip()}'. "
-                "Must use ${MLFLOW_DOCKER_HOST:-minivess-mlflow}:${MLFLOW_PORT:-5000}."
+            assert "minivess-mlflow" in line, (
+                f"MLFLOW_TRACKING_URI in docker-compose.flows.yml: '{line.strip()}'. "
+                "Must use hardcoded service name: http://minivess-mlflow:${MLFLOW_PORT:-5000}."
             )
 
 
