@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>E2E Wiring Verification — Double-Check ALL Pipeline Components</title>
+    <branch>fix/pre-debug-qa-verification</branch>
+    <date>2026-03-19</date>
+    <status>verified</status>
+    <priority>P0 — blocks debug AND production run</priority>
+    <rationale>
+      The external test dataset wiring failure (analysis_flow._build_dataloaders_from_config
+      returns {}) revealed a systemic pattern: infrastructure code exists but is never wired
+      into the pipeline. This plan systematically audits EVERY component in the e2e chain.
+    </rationale>
+    <metalearning>
+      .claude/metalearning/2026-03-07-silent-existing-failures.md
+      .claude/metalearning/2026-03-19-external-test-datasets-never-wired-silent-failure.md
+    </metalearning>
+  </metadata>
+
+  <user-prompt-verbatim>
+create a critical P0 task to double-check that EVERY FUCKING PLANNED component needed on
+this debug and full production run are actually wired and not just planned as some stub!
+(the actual stubs that can stay as stubs such as Posthog and Sentry for example obviously
+can stay stubs)
+  </user-prompt-verbatim>
+
+  <audit-results>
+    <summary>
+      Audited all 5 flows + trainer + evaluation_runner + biostatistics DuckDB + metric keys.
+      Found 6 P0 blockers, 4 P1 issues, and confirmed 3 acceptable stubs.
+    </summary>
+
+    <p0-blockers count="6">
+      <blocker id="B1" component="analysis_flow._build_dataloaders_from_config" line="1922">
+        STUB returning {}. External test datasets NEVER evaluated. Silent failure.
+        Status: Will be fixed by test-sets plan Phase 3 (T-J3a).
+      </blocker>
+      <blocker id="B2" component="analysis_flow: external test evaluation path">
+        NOT_IMPLEMENTED. No code wires data_flow external discovery → DataLoaders → analysis.
+        Status: Will be fixed by test-sets plan Phase 3 (T-J3a/b/c).
+      </blocker>
+      <blocker id="B3" component="evaluation_runner.log_results_to_mlflow" line="268">
+        Uses underscore prefix: eval_{ds}_{subset}_{metric}. Should be eval/{ds}/{subset}/{metric}.
+        Status: Will be fixed by GROUP C (T-C1) — MLflow migration agent running.
+      </blocker>
+      <blocker id="B4" component="biostatistics_duckdb parsers" lines="333-385">
+        Hardcoded to underscore format. Will break when writers migrate to slash-prefix.
+        Status: Will be fixed by GROUP C (T-C2) — MLflow migration agent running.
+      </blocker>
+      <blocker id="B5" component="biostatistics_flow: no split={trainval,test}">
+        All metrics pooled. No concept of trainval vs test separation.
+        Status: Will be fixed by test-sets plan Phase 6 (T-J6a/b/c/d).
+      </blocker>
+      <blocker id="B6" component="biostatistics DuckDB: no test_metrics table">
+        No table for test/ prefix metrics. No test/ prefix recognition in parsers.
+        Status: Will be fixed by test-sets plan Phase 5 (T-J5a/b/c).
+      </blocker>
+    </p0-blockers>
+
+    <p1-issues count="4">
+      <issue id="I1" component="trainer: stopped_early not logged to MLflow">
+        Value computed and returned but never logged via mlflow.log_metric.
+        Status: Will be fixed by GROUP D (T-D2) — MLflow migration agent running.
+      </issue>
+      <issue id="I2" component="post_training: calibration_data never populated">
+        CalibrationPlugin, CRCConformal, ConSeCo all need calibration_data but it's never
+        passed by any caller. Plugins report validation_failed (LOUD — acceptable for debug).
+        Status: Deferred to post-debug. Not blocking for 2-epoch debug run.
+      </issue>
+      <issue id="I3" component="deploy_flow: hardcoded experiment name">
+        Uses "minivess_training" instead of resolving from upstream analysis flow.
+        Status: Will be fixed as part of GROUP E integration tests.
+      </issue>
+      <issue id="I4" component="post_training metric keys use underscore">
+        post_{plugin}_{metric} instead of post/{plugin}/{metric}.
+        Status: Will be fixed by GROUP C slash-prefix migration.
+      </issue>
+    </p1-issues>
+
+    <acceptable-stubs count="3">
+      <stub id="S1" component="PostHog analytics">Not integrated. Optional observability.</stub>
+      <stub id="S2" component="Sentry error tracking">Not integrated. Optional observability.</stub>
+      <stub id="S3" component="OpenLineage">Best-effort with try/except. Acceptable.</stub>
+    </acceptable-stubs>
+
+    <wired-components count="35">
+      <!-- All components verified as WIRED are listed in the full audit report.
+           Key ones: Hydra composition, model build, loss build (with aux_calib),
+           training loop, per-epoch logging, fold results, cost estimation,
+           checkpoint resume, data subsetting, ensemble building, champion tagging,
+           ONNX export, BentoML import, deployment artifacts, promotion. -->
+    </wired-components>
+  </audit-results>
+
+  <phases>
+    <phase id="1" name="Metric Key Convention Migration" status="IN_PROGRESS">
+      <description>Agent a3e61ee running: migrate eval writers + DuckDB readers to slash-prefix</description>
+      <covers>B3, B4, I4</covers>
+    </phase>
+
+    <phase id="2" name="External Test Dataset Wiring" status="PLANNED">
+      <description>Covered by test-sets plan (T-J2, T-J3)</description>
+      <covers>B1, B2</covers>
+    </phase>
+
+    <phase id="3" name="Biostatistics Split Dimension" status="PLANNED">
+      <description>Covered by test-sets plan (T-J5, T-J6)</description>
+      <covers>B5, B6</covers>
+    </phase>
+
+    <phase id="4" name="Logging Gaps" status="IN_PROGRESS">
+      <description>Agent a3e61ee running: stopped_early + inference latency</description>
+      <covers>I1</covers>
+    </phase>
+
+    <phase id="5" name="Deploy Flow Experiment Name Fix" status="PLANNED">
+      <description>Fix hardcoded "minivess_training" in deploy_flow.py</description>
+      <covers>I3</covers>
+    </phase>
+
+    <phase id="6" name="Integration Tests" status="PLANNED">
+      <description>E2E contract tests for all 5 flow pairs</description>
+      <covers>All blockers verified end-to-end</covers>
+    </phase>
+  </phases>
+
+  <cross-reference>
+    <plan file="docs/planning/pre-debug-qa-verification-plan.md" groups="A,B,C,D,E,F,G,H,K"/>
+    <plan file="docs/planning/test-sets-external-validation-deepvess-tubenet-analysis-flow-for-biostatistics.xml" phases="0-8"/>
+  </cross-reference>
+</plan>

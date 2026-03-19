@@ -19,7 +19,7 @@ import pytest
 # Synthetic data generator
 # ---------------------------------------------------------------------------
 
-_MODELS = ["dynunet", "segresnet", "sam3_vanilla", "unetr"]
+_MODELS = ["dynunet", "vesselfm", "sam3_vanilla", "mambavesselnet"]
 _LOSSES = ["cbdice_cldice", "dice_ce", "focal"]
 _N_FOLDS = 3
 _N_VOLUMES = 23
@@ -32,9 +32,9 @@ def _generate_synthetic_per_volume_data() -> dict[
     """Generate synthetic per-volume metric data with planted effects.
 
     Effects:
-    - Model: dynunet > unetr (mean delta ~0.15 in clDice)
+    - Model: dynunet > mambavesselnet (mean delta ~0.15 in clDice)
     - Loss: cbdice_cldice > focal (mean delta ~0.05)
-    - Interaction: segresnet benefits more from cbdice_cldice than dynunet
+    - Interaction: vesselfm benefits more from cbdice_cldice than dynunet
 
     Returns dict: {metric: {condition_key: {fold_id: np.ndarray of shape (N_VOLUMES,)}}}
     condition_key format: "model__loss" (double underscore)
@@ -44,9 +44,9 @@ def _generate_synthetic_per_volume_data() -> dict[
     # Model base effects (clDice)
     model_effects = {
         "dynunet": 0.80,
-        "segresnet": 0.75,
+        "vesselfm": 0.75,
         "sam3_vanilla": 0.72,
-        "unetr": 0.65,
+        "mambavesselnet": 0.65,
     }
 
     # Loss effects (additive, clDice)
@@ -56,8 +56,8 @@ def _generate_synthetic_per_volume_data() -> dict[
         "focal": -0.03,
     }
 
-    # Interaction: segresnet + cbdice_cldice gets extra boost
-    interaction = {("segresnet", "cbdice_cldice"): 0.08}
+    # Interaction: vesselfm + cbdice_cldice gets extra boost
+    interaction = {("vesselfm", "cbdice_cldice"): 0.08}
 
     per_volume_data: dict[str, dict[str, dict[int, np.ndarray]]] = {
         "cldice": {},
@@ -173,7 +173,7 @@ class TestFactorialIntegrationFiguresGenerated:
             "total_ondemand_cost_usd": 8.40,
             "savings_pct": 33.33,
             "total_gpu_hours": 7.0,
-            "cost_by_model": {"dynunet": 2.80, "segresnet": 2.80},
+            "cost_by_model": {"dynunet": 2.80, "vesselfm": 2.80},
             "cost_by_phase": {"training": 5.20, "debug": 0.40},
         }
 

@@ -21,7 +21,7 @@
 # BANNED: DVC_S3_ENDPOINT_URL, DVC_S3_ACCESS_KEY, DVC_S3_SECRET_KEY in this file.
 # See: .claude/metalearning/2026-03-16-gcp-uses-gcs-not-upcloud-s3.md
 #
-# MLflow: Cloud Run at ${MLFLOW_TRACKING_URI} (must equal MLFLOW_GCP_URI in .env).
+# MLflow: Cloud Run at ${MLFLOW_TRACKING_URI} (set in .env before launch).
 # Docker image: GAR (same-region, ~15 min pull — dominates provisioning time).
 # BANNED: apt-get, uv sync, git clone in setup (Docker mandate).
 # Setup: DVC data pull from GCS only.
@@ -58,7 +58,7 @@ envs:
   DVC_REMOTE: gcs
 
   # MLflow on GCP Cloud Run (same-region, no auth needed for Cloud Run public).
-  # CRITICAL: Use ${MLFLOW_TRACKING_URI} directly — SkyPilot cannot chain envs (${MLFLOW_GCP_URI} fails).
+  # CRITICAL: Use ${MLFLOW_TRACKING_URI} directly — SkyPilot cannot chain env var refs.
   # Must be set in .env before launch: MLFLOW_TRACKING_URI=<Cloud Run URL>
   # Note: SkyPilot only supports ${VAR} expansion (not ${VAR:-default}).
   MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}

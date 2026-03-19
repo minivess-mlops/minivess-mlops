@@ -26,9 +26,10 @@ resolution_evidence:
 implementation:
   files:
     - src/minivess/adapters/base.py
-    - src/minivess/adapters/dynunet_adapter.py
-    - src/minivess/adapters/segresnet_adapter.py
-    - src/minivess/adapters/sam3_adapter.py
+    - src/minivess/adapters/dynunet.py
+    - src/minivess/adapters/sam3_vanilla.py
+    - src/minivess/adapters/vesselfm.py
+    - src/minivess/adapters/mambavesselnet.py
   tests:
     - tests/v2/unit/test_model_adapters.py
 

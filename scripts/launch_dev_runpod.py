@@ -112,7 +112,7 @@ def main() -> int:
     # if the remote server is unreachable.
     # Remove any MLFLOW_TRACKING_* from env_updates that came from .env
     for key in list(env_updates):
-        if key.startswith("MLFLOW_TRACKING_") or key == "MLFLOW_CLOUD_URI":
+        if key.startswith("MLFLOW_TRACKING_"):
             del env_updates[key]
 
     task.update_envs(env_updates)

@@ -38,7 +38,7 @@ class ExternalDatasetConfig:
     Attributes
     ----------
     name:
-        Short identifier (e.g. ``"deepvess"``, ``"tubenet_2pm"``).
+        Short identifier (e.g. ``"deepvess"``, ``"vesselnn"``).
     source_url:
         Download URL for the dataset.
     modality:
@@ -66,6 +66,7 @@ class ExternalDatasetConfig:
     n_volumes: int
     license: str
     cite_ref: str
+    role: str = "external_test"
     license_verified: bool = True
 
 
@@ -89,22 +90,11 @@ EXTERNAL_DATASETS: dict[str, ExternalDatasetConfig] = {
         cite_ref="haft_javaherian_2019_deepvess",
         license_verified=False,
     ),
-    "tubenet_2pm": ExternalDatasetConfig(
-        name="tubenet_2pm",
-        source_url=(
-            "https://rdr.ucl.ac.uk/articles/dataset/"
-            "3D_Microvascular_Image_Data_and_Labels_"
-            "for_Machine_Learning/25715604"
-        ),
-        modality="two-photon microscopy",
-        organ="brain",
-        species="mouse",
-        resolution_um=(0.20, 0.46, 5.20),
-        n_volumes=1,
-        license="CC-BY-4.0",
-        cite_ref="holroyd_2025_tubenet",
-        license_verified=True,
-    ),
+    # TubeNet EXCLUDED from test evaluation (2026-03-19):
+    # Only 1 two-photon volume (mouse olfactory bulb — different organ from MiniVess cortex).
+    # Other 7 volumes are HREM/CT/RSOM/OCT-A (non-multiphoton modalities).
+    # See: docs/planning/cold-start-prompt-pre-debug-qa-verification.md Q31.
+    # See: CLAUDE.md Datasets section.
     "vesselnn": ExternalDatasetConfig(
         name="vesselnn",
         source_url="https://github.com/petteriTeikari/vesselNN",
@@ -115,6 +105,7 @@ EXTERNAL_DATASETS: dict[str, ExternalDatasetConfig] = {
         n_volumes=12,
         license="MIT",
         cite_ref="teikari_2016_vesselnn",
+        role="drift_detection_only",
         license_verified=True,
     ),
 }
@@ -153,11 +144,7 @@ DVC_CONFIGS: dict[str, DatasetDVCConfig] = {
         dvc_path="data/external/deepvess.dvc",
         git_tag_format="data/deepvess/v{version}",
     ),
-    "tubenet_2pm": DatasetDVCConfig(
-        name="tubenet_2pm",
-        dvc_path="data/external/tubenet_2pm.dvc",
-        git_tag_format="data/tubenet_2pm/v{version}",
-    ),
+    # TubeNet REMOVED: olfactory bulb (different organ), 1 2PM volume only. See CLAUDE.md.
     "vesselnn": DatasetDVCConfig(
         name="vesselnn",
         dvc_path="data/external/vesselnn.dvc",
@@ -262,11 +249,19 @@ def discover_external_test_pairs(
     Returns
     -------
     List of dicts with ``"image"`` and ``"label"`` paths as strings.
-    Returns empty list if directory is missing or has no pairs.
+
+    Raises
+    ------
+    FileNotFoundError
+        If data directory does not exist (CLAUDE.md Rule 25: loud failures).
     """
     if not data_dir.is_dir():
-        logger.warning("Data directory does not exist: %s", data_dir)
-        return []
+        msg = (
+            f"External dataset directory does not exist: {data_dir}\n"
+            f"Download {dataset_name} and place in {data_dir}.\n"
+            f"See: docs/datasets/README.md for download instructions."
+        )
+        raise FileNotFoundError(msg)
 
     # Support both standard (images/labels) and Medical Decathlon (imagesTr/labelsTr)
     images_dir = data_dir / "images"

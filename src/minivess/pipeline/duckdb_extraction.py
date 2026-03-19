@@ -69,7 +69,7 @@ _DDL_CHAMPION_TAGS = """
 """
 
 # Suffixes that indicate a CI variant of an eval metric (not a point estimate)
-_CI_SUFFIXES = ("_ci_level", "_ci_lower", "_ci_upper")
+_CI_SUFFIXES = ("_ci_level", "_ci95_lo", "_ci95_hi")
 
 # Prefixes excluded from the training_metrics table (RC10).
 # prof_* = torch.profiler metrics, diag_* = diagnostics (WeightWatcher, pre-checks).
@@ -196,7 +196,8 @@ def extract_runs_to_duckdb(
         # --- metric rows ---
         metrics_set = set(metrics_list)
         for metric_name in metrics_list:
-            if metric_name.startswith("eval_fold"):
+            parsed_check = parse_eval_fold_metric(metric_name)
+            if parsed_check is not None:
                 # Delegate to the fold-aware inserter
                 _parse_and_insert_eval_metric(
                     db,
@@ -207,7 +208,7 @@ def extract_runs_to_duckdb(
                     metrics_set,
                 )
             elif not metric_name.startswith(
-                "eval_"
+                "eval/"
             ) and _should_include_training_metric(metric_name):
                 # Non-eval metric: training / validation epoch curve last value
                 try:
@@ -356,28 +357,26 @@ def query_champion_runs(db: Any) -> list[tuple[Any, ...]]:
 
 
 def parse_eval_fold_metric(metric_name: str) -> tuple[int, str] | None:
-    """Parse an ``eval_fold{i}_{name}`` metric name into ``(fold_id, base_metric)``.
+    """Parse an ``eval/{fold_id}/{metric}`` name into ``(fold_id, base_metric)``.
 
-    Uses ``str.partition()`` — NOT regex (CLAUDE.md Rule #16 ban).
+    Uses ``str.split("/")`` -- NOT regex (CLAUDE.md Rule #16 ban).
 
     Parameters
     ----------
     metric_name:
-        E.g. ``"eval_fold0_val_dice"`` or ``"eval_fold12_compound_masd"``.
+        E.g. ``"eval/0/dsc"`` or ``"eval/12/compound_masd_cldice"``.
 
     Returns
     -------
-    ``(fold_id, base_metric)`` if metric_name matches ``eval_fold{i}_{name}``,
+    ``(fold_id, base_metric)`` if metric_name matches ``eval/{fold}/{metric}``,
     or ``None`` if it does not match the pattern.
     """
-    prefix = "eval_fold"
-    if not metric_name.startswith(prefix):
+    parts = metric_name.split("/")
+    if len(parts) < 3 or parts[0] != "eval":
         return None
-    rest = metric_name[len(prefix) :]  # e.g. "0_val_dice"
-    fold_str, sep, base_metric = rest.partition("_")
-    if not sep or not fold_str.isdigit():
+    if not parts[1].isdigit():
         return None
-    return int(fold_str), base_metric
+    return int(parts[1]), parts[2]
 
 
 def _parse_and_insert_eval_metric(
@@ -388,9 +387,9 @@ def _parse_and_insert_eval_metric(
     metric_name: str,
     all_metrics: set[str],
 ) -> None:
-    """Parse an ``eval_fold{i}_{name}`` metric file and insert into DuckDB.
+    """Parse an ``eval/{fold}/{metric}`` file and insert into DuckDB.
 
-    CI variant metrics (``_ci_lower``, ``_ci_upper``, ``_ci_level``) are
+    CI variant metrics (``_ci95_lo``, ``_ci95_hi``, ``_ci_level``) are
     skipped here — they are read as side-effects when the corresponding point
     estimate metric is processed.
 
@@ -405,24 +404,24 @@ def _parse_and_insert_eval_metric(
     run_id:
         32-character hexadecimal run ID.
     metric_name:
-        Full metric name to process (e.g. ``"eval_fold0_dsc"``).
+        Full metric name to process (e.g. ``"eval/0/dsc"``).
     all_metrics:
         Set of all metric names present for this run (used for CI lookup).
     """
     from minivess.pipeline.mlruns_inspector import read_metric_last_value
 
-    # Pattern: eval_fold{i}_{base_metric} — parsed with str.partition (no regex)
+    # Pattern: eval/{fold}/{metric} -- parsed with str.split("/") (no regex)
     parsed = parse_eval_fold_metric(metric_name)
     if parsed is None:
         logger.debug(
-            "Metric %r does not match eval_fold pattern — skipping", metric_name
+            "Metric %r does not match eval/{fold}/{metric} pattern", metric_name
         )
         return
 
     fold_id, base_metric = parsed
 
     # Skip CI variant metrics — handled when their point estimate is processed
-    if base_metric.endswith(_CI_SUFFIXES):
+    if any(metric_name.endswith(s) for s in _CI_SUFFIXES):
         return
 
     try:
@@ -437,12 +436,12 @@ def _parse_and_insert_eval_metric(
     ci_lower = ci_upper = ci_level = float("nan")
 
     _ci_map = {
-        "_ci_lower": "ci_lower",
-        "_ci_upper": "ci_upper",
+        "_ci95_lo": "ci_lower",
+        "_ci95_hi": "ci_upper",
         "_ci_level": "ci_level",
     }
     for suffix, target_name in _ci_map.items():
-        ci_metric = f"eval_fold{fold_id}_{base_metric}{suffix}"
+        ci_metric = f"eval/{fold_id}/{base_metric}{suffix}"
         if ci_metric in all_metrics:
             try:
                 val = read_metric_last_value(

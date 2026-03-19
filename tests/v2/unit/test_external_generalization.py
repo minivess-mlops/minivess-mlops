@@ -22,7 +22,8 @@ def _make_external_df() -> pd.DataFrame:
 
     rng = np.random.default_rng(42)
     rows = []
-    datasets = ["deepvess", "tubenet_2pm"]
+    # tubenet_2pm excluded: olfactory bulb, different organ, only 1 2PM volume
+    datasets = ["deepvess"]
     losses = ["dice_ce", "cbdice", "dice_ce_cldice", "cbdice_cldice"]
     metrics = ["dsc", "centreline_dsc", "measured_masd"]
 

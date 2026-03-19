@@ -163,7 +163,7 @@ class ModelAdapter(ABC, nn.Module):
 
         Default implementation loads into ``self.net`` (legacy) or into
         ``self`` (new format). Override for adapters that manage weights
-        differently (e.g., LoRA, CommaAdapter).
+        differently (e.g., LoRA).
 
         Raises
         ------

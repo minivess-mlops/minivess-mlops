@@ -21,7 +21,7 @@ def _make_cost_summary() -> dict[str, Any]:
         "total_gpu_hours": 15.0,
         "cost_by_model": {
             "dynunet": 4.50,
-            "segresnet": 3.80,
+            "vesselfm": 3.80,
             "sam3_vanilla": 4.20,
         },
         "cost_by_phase": {
@@ -69,7 +69,7 @@ class TestCostFigureStackedBars:
 
         sidecar = json.loads(artifact.sidecar_path.read_text(encoding="utf-8"))
         assert "models" in sidecar
-        assert set(sidecar["models"]) == {"dynunet", "segresnet", "sam3_vanilla"}
+        assert set(sidecar["models"]) == {"dynunet", "vesselfm", "sam3_vanilla"}
 
 
 class TestCostLineageField:

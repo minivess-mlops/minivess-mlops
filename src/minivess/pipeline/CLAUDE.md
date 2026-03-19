@@ -29,6 +29,6 @@ Used by Analysis Flow for ensemble evaluation.
 ## Key Rules
 
 - NO `import re` for metric name parsing — use `str.split()` (see regex ban)
-- All metric names follow `{phase}_{fold}_{metric}` convention parsed by `str.split("_")`
+- All metric names follow slash-prefix convention: `eval/{fold}/{metric}` parsed by `str.split("/")`
 - Loss functions are GENERIC — config-driven, never task-specific
 - Trainer val_interval sentinel: `val_interval > max_epochs` = "never validate"

@@ -45,7 +45,7 @@ class TestHydraAcquisitionConfig:
         )
         datasets = acq["external_datasets"]
         assert isinstance(datasets, list)
-        assert len(datasets) == 3  # deepvess, tubenet_2pm, vesselnn
+        assert len(datasets) == 2  # deepvess, vesselnn (tubenet_2pm excluded)
 
     def test_acquisition_yaml_has_force_download(self) -> None:
         content = _ACQUISITION_YAML.read_text(encoding="utf-8")

@@ -105,7 +105,7 @@ class TestGridCellExpansion:
         from minivess.optimization.grid_partitioning import expand_grid_cell
 
         factors = {
-            "model_family": ["dynunet", "segresnet"],
+            "model_family": ["dynunet", "mambavesselnet"],
             "loss_name": ["dice_ce", "cbdice_cldice"],
         }
         params = expand_grid_cell(cell_index=0, factors=factors)
@@ -118,7 +118,7 @@ class TestGridCellExpansion:
         from minivess.optimization.grid_partitioning import expand_grid_cell
 
         factors = {
-            "model_family": ["dynunet", "segresnet", "sam3_vanilla", "vesselfm"],
+            "model_family": ["dynunet", "mambavesselnet", "sam3_vanilla", "vesselfm"],
             "loss_name": ["cbdice_cldice", "dice_ce", "dice_ce_cldice"],
             "aux_calibration": [True, False],
         }

@@ -282,6 +282,39 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
     - One careful implementation pass is cheaper than three sloppy-then-fix passes
     This is a scientific platform — correctness and reproducibility outweigh speed.
     See: `.claude/skills/self-learning-iterative-coder/SKILL.md` Rule #11
+25. **Loud Failures, Never Silent Discards (Non-Negotiable)** — Pipeline functions
+    MUST raise exceptions or `logger.error()` on invalid/empty input. NEVER silently
+    return empty results (`return {}`, `return []`, `return None`). A function that
+    receives empty dataloaders must RAISE, not silently skip evaluation.
+    - **Critical pipeline functions**: `raise ValueError("dataloaders_dict is empty")`
+    - **Optional integrations (Sentry, PostHog)**: `logger.warning("PostHog not configured")`
+    - **Stubs awaiting implementation**: `raise NotImplementedError("VesselFM fine-tuning not implemented")`
+    - **BANNED**: `if not data: return {}` — this hides broken pipelines for months.
+    Every failure point must use `try/except` with `logger.error()` so both humans
+    reading logs AND Claude Code monitoring runs understand what is happening.
+    See: `.claude/metalearning/2026-03-19-external-test-datasets-never-wired-silent-failure.md`
+26. **Greenfield Project — No Legacy (Non-Negotiable)** — This is a greenfield project
+    with zero production users and zero legacy data. NEVER maintain backward compatibility.
+    NEVER create migration/normalization layers. NEVER offer "keep both formats." When
+    changing conventions (metric keys, config formats, API schemas), DELETE the old
+    convention entirely. Clean slate always.
+    See: `.claude/metalearning/2026-03-19-backward-compat-resistance-greenfield-project.md`
+27. **Debug Run = Full Production (Non-Negotiable)** — A debug run is the FULL production
+    experiment with ONLY 3 differences: (1) fewer epochs, (2) less data, (3) fewer folds.
+    EVERYTHING else is identical — all factorial factors, all flows, all zero-shot baselines,
+    all logging, all compliance. NEVER propose reducing debug scope without explicit user
+    authorization. "Debug" means "run fast to catch bugs" — NOT "run less to avoid bugs."
+    See: `.claude/metalearning/2026-03-19-debug-run-is-full-production-no-shortcuts.md`
+28. **Zero Silent Skips (Non-Negotiable)** — Every SKIPPED test is a bug hiding as a
+    skip. When reporting test results, ALWAYS report the skip count AND the skip reasons.
+    "5362 passed, 5 skipped" is NOT "all green" — it is 5 bugs. For each skip:
+    - **Module not installed** → install it (uv sync --all-extras) or delete the test if deprecated
+    - **Hardware-specific** (CTK, GPU) → acceptable skip, but document WHY in test
+    - **Cloud credentials** → auto-skip with clear message, acceptable for local dev
+    - **Deprecated library** (langgraph) → DELETE the test, don't skip it
+    NEVER silently accept skips. ALWAYS inform the user of skip count and reasons.
+    The same applies to warnings — suppress cosmetic warnings at entry point, but
+    NEVER suppress warnings that indicate bugs or configuration problems.
 22. **Single-Source Config via `.env.example` (Non-Negotiable)** — ALL configurable
    values MUST be in `.env.example` FIRST. BANNED: hardcoded URLs in Dockerfiles,
    `os.environ.get("VAR", "fallback")` in flow files (use `resolve_tracking_uri()`
@@ -382,10 +415,35 @@ make test-gpu        # RunPod / intranet GPU — SAM3 forward passes
 
 ## Datasets
 
-MiniVess (70 vols, primary), DeepVess/TubeNet/VesselNN (external test only).
+| Dataset | Role | Volumes | Organ | Modality |
+|---------|------|---------|-------|----------|
+| **MiniVess** | Train/Val (primary) | 70 | Mouse brain cortex | Multiphoton |
+| **DeepVess** | External TEST | ~7 | Mouse brain cortex | Multiphoton |
+| **VesselNN** | Drift detection ONLY | 12 | Mouse brain | Two-photon |
+
 Splits: 3-fold seed=42, `configs/splits/3fold_seed42.json` (47 train / 23 val).
 Default loss: `cbdice_cldice` (CbDiceClDiceLoss).
 Full registry: `docs/datasets/README.md` + `src/minivess/data/external_datasets.py`.
+KG source of truth: `knowledge-graph/domains/data.yaml::dataset_strategy`.
+
+**TubeNet EXCLUDED (Non-Negotiable)** — Only 1 two-photon volume (mouse olfactory bulb,
+different organ from MiniVess cortex). Other 7 TubeNet volumes are HREM/CT/RSOM/OCT-A
+(non-multiphoton modalities). Not useful for microvasculature generalization testing.
+NEVER re-add TubeNet to test evaluation scope. See: `docs/planning/cold-start-prompt-pre-debug-qa-verification.md` Q31.
+
+**VesselNN is NOT a test dataset** — Reserved for drift detection simulation ONLY.
+Data leakage to MiniVess (same PI). Used with synthetic stack generation to test
+how distribution shifts are detected. NEVER use for test evaluation.
+
+**Test metric prefix**: `test/deepvess/{metric}` (extensible — adding a new test
+dataset = `test/{newdataset}/{metric}`, no code changes needed).
+
+**PLATFORM FRAMING (Non-Negotiable)**: This is a **platform paper** (Nature Protocols),
+NOT a SOTA segmentation paper. External test evaluation demonstrates the PLATFORM'S
+ability to handle arbitrary test datasets with subgroup analysis and automated
+train/test comparison. The actual numbers on DeepVess are standard practice, not a
+key finding. The platform capability IS the contribution. NEVER frame scientific
+results as the main contribution. See: `.claude/metalearning/2026-03-19-platform-paper-not-sota-science-recurring.md`
 
 ## Citation Rules (NON-NEGOTIABLE)
 

@@ -1,6 +1,9 @@
 domain: models
-description: DynUNet, SAM3, SegResNet, UNETR, SwinUNETR, VesselFM, Mamba, foundation models
-last_reviewed: "2026-03-17"
+description: >
+  Paper model lineup (6 models): DynUNet, MambaVesselNet++, SAM3 Vanilla,
+  SAM3 TopoLoRA, SAM3 Hybrid, VesselFM. Non-paper models (SegResNet, SwinUNETR,
+  UNETR, AttentionUNet, COMMA-Mamba, ULike-Mamba) REMOVED 2026-03-19.
+last_reviewed: "2026-03-19"
 
 decisions:
   primary_3d_model:

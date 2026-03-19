@@ -16,7 +16,8 @@ class TestAcquisitionConfig:
 
         config = AcquisitionConfig()
         assert isinstance(config.datasets, list)
-        assert len(config.datasets) == 4
+        # 3 datasets: minivess, deepvess, vesselnn (tubenet excluded)
+        assert len(config.datasets) == 3
         assert config.skip_existing is True
         assert config.convert_formats is True
         assert config.verify_checksums is True

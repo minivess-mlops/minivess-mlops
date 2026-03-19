@@ -96,9 +96,9 @@ setup: |
   # Initialize DVC without git (container has no .git)
   dvc init --no-scm -f
 
-  # Configure DVC remote_storage (AWS S3 public bucket — no credentials needed)
-  # UpCloud S3 dropped 2026-03-16 — replaced by public AWS S3 fallback
-  dvc remote add remote_storage s3://minivessdataset
+  # Configure DVC remote — GCS (same-region as compute, ADC auth)
+  # AWS S3 (s3://minivessdataset) REMOVED — BANNED provider. See CLAUDE.md.
+  dvc remote add gcs gs://minivess-mlops-dvc-data
 
   # Write minimal DVC pipeline for data pull.
   # MD5 hash from committed dvc.lock — stable unless data changes.

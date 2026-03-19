@@ -10,9 +10,10 @@ use_spot: true
 disk_size: 100
 disk_tier: best
 
-# GPU priority: cheapest first. T4 ($0.14/hr spot), L4 ($0.22/hr spot).
+# GPU priority: cheapest BF16-capable first.
+# T4 BANNED — Turing architecture has no BF16 support → FP16 overflow → NaN.
+# See: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
 accelerators:
-  - T4:1
   - L4:1
   - A100:1
 
@@ -20,8 +21,8 @@ accelerators:
 docker_registry: gar
 docker_image: europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
 
-# MLflow tracking via GCP Cloud Run (MLFLOW_GCP_URI in .env).
-mlflow_env_var: MLFLOW_GCP_URI
+# MLflow tracking via GCP Cloud Run — set MLFLOW_TRACKING_URI in .env.
+mlflow_env_var: MLFLOW_TRACKING_URI
 
 # Training behavior on cloud GPUs (L4: 24 GB, A100: 40-80 GB).
 # Cloud GPUs have enough VRAM to validate every epoch — no sentinel needed.

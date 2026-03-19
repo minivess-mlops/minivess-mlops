@@ -21,13 +21,9 @@ _EXPERIMENTS_DIR = Path("configs/experiment")
 # - example_custom: template, not a real model
 # - sam3_topolora: requires ≥16 GB training VRAM, no separate smoke test
 #   (tested via sam3_vanilla with LoRA wrapper)
-# - comma_mamba / comma: duplicate profiles (comma is alias)
-# - ulike_mamba / mamba: duplicate profiles (mamba is alias)
 _EXCLUDED_PROFILES = {
     "example_custom",
     "sam3_topolora",
-    "comma",  # alias for comma_mamba
-    "mamba",  # alias for ulike_mamba
 }
 
 

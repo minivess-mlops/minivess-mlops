@@ -1,7 +1,8 @@
 """L2 cloud MLflow tests (#622).
 
-Verify MLflow works against a live cloud deployment (UpCloud, Scaleway, etc.).
-Requires MLFLOW_CLOUD_* env vars set. Skipped automatically without credentials.
+Verify MLflow works against a live cloud deployment (GCP Cloud Run, etc.).
+Requires MLFLOW_TRACKING_URI set to a remote URL + MLFLOW_TRACKING_PASSWORD.
+Skipped automatically when MLFLOW_TRACKING_URI is localhost or file-based.
 
 Run with: ``make test-cloud-mlflow``
 """
@@ -120,7 +121,7 @@ class TestCloudMLflowTracking:
         exp_id = cloud_mlflow_client.create_experiment(exp_name)
 
         # Create two runs with different params
-        for model, dsc in [("dynunet", 0.82), ("segresnet", 0.78)]:
+        for model, dsc in [("dynunet", 0.82), ("vesselfm", 0.78)]:
             run = cloud_mlflow_client.create_run(exp_id)
             cloud_mlflow_client.log_param(run.info.run_id, "model", model)
             cloud_mlflow_client.log_metric(run.info.run_id, "dsc", dsc)

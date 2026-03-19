@@ -53,7 +53,7 @@ def _make_run(
         mlruns_dir: Root mock mlruns directory.
         experiment_id: Experiment ID subdirectory.
         run_id: Run ID subdirectory.
-        fold2_metric: When True, creates an ``eval_fold2_dsc`` metric file
+        fold2_metric: When True, creates an ``eval/2/dsc`` metric file
             (marking this as a production/complete run).
         loss_function: Value to write to ``tags/loss_function``.  Pass
             ``None`` to omit the tag entirely.
@@ -69,14 +69,14 @@ def _make_run(
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
     if fold2_metric:
-        (metrics_dir / "eval_fold2_dsc").write_text(
-            "1700000000 0.85 99\n", encoding="utf-8"
-        )
+        eval2_dir = metrics_dir / "eval" / "2"
+        eval2_dir.mkdir(parents=True, exist_ok=True)
+        (eval2_dir / "dsc").write_text("1700000000 0.85 99\n", encoding="utf-8")
     else:
         # Only fold0/fold1 present (incomplete run)
-        (metrics_dir / "eval_fold0_dsc").write_text(
-            "1700000000 0.80 49\n", encoding="utf-8"
-        )
+        eval0_dir = metrics_dir / "eval" / "0"
+        eval0_dir.mkdir(parents=True, exist_ok=True)
+        (eval0_dir / "dsc").write_text("1700000000 0.80 49\n", encoding="utf-8")
 
     if loss_function is not None:
         (tags_dir / "loss_function").write_text(loss_function, encoding="utf-8")
@@ -126,7 +126,7 @@ class TestIdentifyProductionRuns:
         assert len(result) == 4
 
     def test_identify_production_runs_excludes_incomplete(self, tmp_path: Path) -> None:
-        """Runs without eval_fold2_* metrics are excluded from results."""
+        """Runs without eval/2/ metrics are excluded from results."""
         mlruns_dir = _mlruns(tmp_path)
         _make_run(mlruns_dir, _EXPERIMENT_ID, "complete_run", fold2_metric=True)
         _make_run(mlruns_dir, _EXPERIMENT_ID, "incomplete_run", fold2_metric=False)

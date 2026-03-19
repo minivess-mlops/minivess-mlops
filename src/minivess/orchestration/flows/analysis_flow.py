@@ -1920,14 +1920,101 @@ def _build_model_config_from_dict(config_dict: dict[str, Any]) -> dict[str, Any]
 
 
 def _build_dataloaders_from_config(config_dict: dict[str, Any]) -> dict[str, Any]:
-    """Build minimal dataloaders dict from config for Docker entry point.
+    """Build external test dataloaders from EXTERNAL_DATA_DIR env var.
 
-    Returns an empty dict — the analysis flow accepts empty dataloaders and
-    builds loaders internally when running in full pipeline mode.
-    In Docker entry point mode the flow discovers checkpoints via MLflow,
-    not via pre-built dataloaders.
+    Discovers DeepVess (and any future external_test datasets) from the
+    directory pointed to by EXTERNAL_DATA_DIR and builds a
+    HierarchicalDataLoaderDict for evaluation.
+
+    Parameters
+    ----------
+    config_dict:
+        Resolved experiment configuration (currently unused but kept for
+        future data_config extraction).
+
+    Returns
+    -------
+    ``{dataset_name: {"all": DataLoader, ...}}``
+
+    Raises
+    ------
+    FileNotFoundError
+        If EXTERNAL_DATA_DIR is not set or does not exist (Rule 25: loud failures).
     """
-    return {}
+    external_data_dir_str = os.environ.get("EXTERNAL_DATA_DIR")
+    if not external_data_dir_str:
+        raise FileNotFoundError(
+            "EXTERNAL_DATA_DIR environment variable is not set.\n"
+            "Set it to the directory containing external test datasets:\n"
+            "  export EXTERNAL_DATA_DIR=data/external\n"
+            "See: .env.example and docs/datasets/README.md"
+        )
+
+    external_data_dir = Path(external_data_dir_str)
+    if not external_data_dir.is_dir():
+        raise FileNotFoundError(
+            f"EXTERNAL_DATA_DIR does not exist: {external_data_dir}\n"
+            "Download external test datasets first.\n"
+            "See: docs/datasets/README.md for download instructions."
+        )
+
+    from minivess.data.external_datasets import (
+        EXTERNAL_DATASETS,
+        discover_external_test_pairs,
+    )
+
+    result: dict[str, Any] = {}
+
+    for ds_name, ds_config in EXTERNAL_DATASETS.items():
+        # Only include datasets with role="external_test"
+        # VesselNN is drift_detection_only — must be excluded
+        role = getattr(ds_config, "role", "external_test")
+        if role != "external_test":
+            logger.debug(
+                "Skipping dataset '%s' (role=%s, not external_test)",
+                ds_name,
+                role,
+            )
+            continue
+
+        ds_dir = external_data_dir / ds_name
+        if not ds_dir.is_dir():
+            logger.warning(
+                "External dataset directory not found: %s — skipping %s",
+                ds_dir,
+                ds_name,
+            )
+            continue
+
+        pairs = discover_external_test_pairs(ds_dir, ds_name)
+        if not pairs:
+            logger.warning(
+                "No image/label pairs found for dataset '%s' in %s",
+                ds_name,
+                ds_dir,
+            )
+            continue
+
+        # Build a simple dict-based "loader" structure
+        # The actual DataLoader construction requires DataConfig which may not
+        # be available in Docker entry point mode. We return the pairs dict
+        # so that the analysis flow can build DataLoaders when needed.
+        result[ds_name] = {"all": pairs}
+        logger.info(
+            "Discovered %d pairs for external test dataset '%s'",
+            len(pairs),
+            ds_name,
+        )
+
+    if not result:
+        logger.warning(
+            "No external test datasets found in %s. "
+            "Download DeepVess and place in %s/deepvess/",
+            external_data_dir,
+            external_data_dir,
+        )
+
+    return result
 
 
 def _entry_point_from_env() -> dict[str, Any]:

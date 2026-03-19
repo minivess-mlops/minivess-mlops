@@ -18,9 +18,7 @@ Key functions:
 
 Single source of truth for ALL MLflow key names. Issue #790.
 - `MetricKeys` class: canonical slash-prefix key constants
-- `MIGRATION_MAP`: old underscore keys -> new slash-prefix keys
-- `normalize_metric_key()`: backward compat for reading legacy runs
-- `normalize_metric_dict()`: bulk normalize a dict of keys
+- Greenfield: MIGRATION_MAP and normalize functions deleted (no legacy runs)
 
 ## Slash-Prefix Convention (MLflow 2.11+)
 
@@ -69,4 +67,4 @@ Braintrust AutoEvals for agent quality gates.
 - NEVER use `os.environ.get("MLFLOW_TRACKING_URI", "mlruns")` -- use `resolve_tracking_uri()`
 - ALL metric/param keys MUST use slash-prefix convention (see table above)
 - Import key names from `metric_keys.MetricKeys` -- never hardcode strings
-- Use `normalize_metric_key()` when reading legacy MLflow runs with old underscore keys
+- Greenfield project: no backward compat layer needed

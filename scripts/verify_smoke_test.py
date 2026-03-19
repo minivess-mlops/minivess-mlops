@@ -41,16 +41,14 @@ def _get_client():  # noqa: ANN202
     """Get authenticated MLflow client for cloud server."""
     import mlflow
 
-    uri = os.environ.get("MLFLOW_CLOUD_URI")
+    uri = os.environ.get("MLFLOW_TRACKING_URI")
     if not uri:
-        print("ERROR: MLFLOW_CLOUD_URI not set")
+        print("ERROR: MLFLOW_TRACKING_URI not set")
         sys.exit(1)
 
-    os.environ.setdefault("MLFLOW_TRACKING_USERNAME", "admin")
-    password = os.environ.get("MLFLOW_CLOUD_PASSWORD")
+    password = os.environ.get("MLFLOW_TRACKING_PASSWORD")
     if not password:
-        print("ERROR: MLFLOW_CLOUD_PASSWORD not set")
-        sys.exit(1)
+        print("WARNING: MLFLOW_TRACKING_PASSWORD not set — auth may fail")
 
     return mlflow.MlflowClient(tracking_uri=uri)
 

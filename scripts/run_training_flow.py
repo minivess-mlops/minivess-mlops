@@ -30,8 +30,8 @@ def _parse_args() -> argparse.Namespace:
 Examples:
   %(prog)s --model-family dynunet
   %(prog)s --model-family sam3_vanilla --compute gpu_low --max-epochs 50
-  %(prog)s --model-family comma_mamba --debug
-  %(prog)s --model-family mamba_vanilla --num-folds 2 --loss-name dice_ce
+  %(prog)s --model-family vesselfm --debug
+  %(prog)s --model-family mambavesselnet --num-folds 2 --loss-name dice_ce
 """,
     )
     p.add_argument(

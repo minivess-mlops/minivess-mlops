@@ -505,7 +505,15 @@ def train_one_fold_task(
     )
 
     model = build_adapter(model_config)
-    criterion = build_loss_function(loss_name)
+
+    # Auxiliary calibration loss (hL1-ACE) — factorial factor c=2
+    with_aux_calib: bool = config.get("with_aux_calib", False)
+    aux_calib_weight: float = config.get("aux_calib_weight", 1.0)
+    criterion = build_loss_function(
+        loss_name,
+        with_aux_calib=with_aux_calib,
+        aux_calib_weight=aux_calib_weight,
+    )
     metrics = SegmentationMetrics(
         num_classes=model_config.out_channels,
         device=device_str,

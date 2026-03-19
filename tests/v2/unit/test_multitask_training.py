@@ -7,7 +7,6 @@ import torch
 
 from minivess.adapters.base import AdapterConfigInfo, SegmentationOutput
 from minivess.adapters.multitask_adapter import AuxHeadConfig, MultiTaskAdapter
-from minivess.config.models import ModelFamily
 from minivess.pipeline.multitask_loss import AuxHeadLossConfig, MultiTaskLoss
 from minivess.pipeline.multitask_metrics import compute_per_head_metrics
 
@@ -321,11 +320,6 @@ class TestPerHeadMetrics:
 
 class TestModelFamilyRegistration:
     """Tests for ModelFamily registration and wrapper config (T9c — #236)."""
-
-    def test_multitask_model_family_registered(self) -> None:
-        """MULTITASK_DYNUNET in ModelFamily."""
-        assert hasattr(ModelFamily, "MULTITASK_DYNUNET")
-        assert ModelFamily.MULTITASK_DYNUNET.value == "multitask_dynunet"
 
     def test_wrapper_config_applies_tffm(self) -> None:
         """Wrappers list with type=tffm wraps model."""

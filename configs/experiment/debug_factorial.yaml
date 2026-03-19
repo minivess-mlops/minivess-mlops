@@ -1,0 +1,88 @@
+# @package _global_
+#
+# Debug factorial: FULL production experiment with reduced epochs/data/folds.
+# 4 models x 3 losses x 2 aux_calib = 24 conditions on fold-0, 2 epochs, half data.
+# Plus 2 zero-shot baselines (SAM3 Vanilla, VesselFM on DeepVess).
+#
+# This is NOT a "minimal test." It is the REAL EXPERIMENT with ONLY 3 differences:
+# 1. Epochs: 2 (not 50)
+# 2. Data: half (~23 train / ~12 val, not ~47 / ~23)
+# 3. Folds: 1 (fold-0, not 3)
+# EVERYTHING else is IDENTICAL to production (paper_factorial.yaml).
+#
+# Usage:
+#   ./scripts/run_factorial.sh configs/experiment/debug_factorial.yaml
+#
+# Or single condition via Docker:
+#   docker compose -f deployment/docker-compose.flows.yml run --rm \
+#     -e EXPERIMENT=debug_factorial \
+#     -e HYDRA_OVERRIDES="model=sam3_topolora,losses=[dice_ce],with_aux_calib=true" \
+#     train
+#
+# Source of truth: knowledge-graph/decisions/L3-technology/paper_model_comparison.yaml
+# See: docs/planning/pre-debug-qa-verification-plan.md
+# See: .claude/metalearning/2026-03-19-debug-run-is-full-production-no-shortcuts.md
+
+defaults:
+  - override /checkpoint: lightweight
+  - override /profiling: debug
+
+experiment_name: debug_factorial
+debug: true
+
+# Factorial factors — IDENTICAL to paper_factorial.yaml
+# Debug = production minus epochs/data/folds ONLY (CLAUDE.md Rule 27)
+factors:
+  model_family:
+    - dynunet
+    - mambavesselnet
+    - sam3_topolora
+    - sam3_hybrid
+  loss_name:
+    - cbdice_cldice
+    - dice_ce
+    - dice_ce_cldice
+  aux_calibration:
+    - true
+    - false
+
+# Zero-shot baselines — same as production
+zero_shot_baselines:
+  - model: sam3_vanilla
+    strategy: frozen_encoder_eval
+    folds: 1
+    dataset: minivess
+  - model: vesselfm
+    strategy: zero_shot_only
+    folds: 1
+    dataset: deepvess
+
+# ONLY these 3 things differ from production:
+fixed:
+  max_epochs: 2           # Production: 50
+  num_folds: 1            # Production: 3
+  max_train_volumes: 23   # Production: 0 (full ~47)
+  max_val_volumes: 12     # Production: 0 (full ~23)
+  compute: auto
+  learning_rate: 1.0e-3
+  batch_size: 2
+
+# Split file: fold-0 only, half volumes
+splits_file: configs/splits/debug_half_1fold.json
+
+# Auxiliary calibration default (overridden per-condition by run_factorial.sh)
+with_aux_calib: false
+aux_calib_weight: 1.0
+
+# E2E flow chain — ALL flows tested (debug = production, no shortcuts)
+flows:
+  - train
+  - post_training
+  - analyze
+  - biostatistics
+  - deploy
+
+post_training:
+  plugins:
+    - swa
+    - calibration

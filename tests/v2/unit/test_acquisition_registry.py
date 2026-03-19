@@ -49,20 +49,20 @@ class TestDatasetAcquisitionEntry:
 
 
 class TestAcquisitionRegistry:
-    """ACQUISITION_REGISTRY covers all 4 datasets."""
+    """ACQUISITION_REGISTRY covers all 3 datasets (tubenet_2pm excluded)."""
 
     def test_registry_has_all_datasets(self) -> None:
         from minivess.data.acquisition_registry import ACQUISITION_REGISTRY
 
         assert "minivess" in ACQUISITION_REGISTRY
         assert "deepvess" in ACQUISITION_REGISTRY
-        assert "tubenet_2pm" in ACQUISITION_REGISTRY
+        # tubenet_2pm excluded: olfactory bulb, different organ, only 1 2PM volume
         assert "vesselnn" in ACQUISITION_REGISTRY
 
     def test_registry_length(self) -> None:
         from minivess.data.acquisition_registry import ACQUISITION_REGISTRY
 
-        assert len(ACQUISITION_REGISTRY) == 4
+        assert len(ACQUISITION_REGISTRY) == 3
 
     def test_vesselnn_is_git_clone(self) -> None:
         from minivess.data.acquisition_registry import ACQUISITION_REGISTRY

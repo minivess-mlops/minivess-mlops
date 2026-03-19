@@ -20,7 +20,7 @@ import pytest
 
 
 def _minio_reachable() -> bool:
-    """Check if MinIO is reachable."""
+    """Check if MinIO is reachable via health endpoint."""
     try:
         import urllib.request
 
@@ -29,6 +29,29 @@ def _minio_reachable() -> bool:
         )
         with urllib.request.urlopen(req, timeout=5):
             return True
+    except Exception:
+        return False
+
+
+def _minio_auth_works() -> bool:
+    """Check if MinIO is reachable AND credentials work for bucket listing.
+
+    The health endpoint may be reachable while credentials are wrong or
+    the mlflow-artifacts bucket doesn't exist.
+    """
+    if not _minio_reachable():
+        return False
+    try:
+        import boto3
+
+        s3 = boto3.client(
+            "s3",
+            endpoint_url="http://localhost:9000",
+            aws_access_key_id="minioadmin",
+            aws_secret_access_key="minioadmin",
+        )
+        s3.list_buckets()
+        return True
     except Exception:
         return False
 
@@ -44,7 +67,9 @@ def _mlflow_server_reachable() -> bool:
         return False
 
 
-_REQUIRES_INFRA = "requires Docker infrastructure (MinIO + MLflow server)"
+_REQUIRES_INFRA = (
+    "requires Docker infrastructure (MinIO with valid credentials + MLflow server)"
+)
 
 
 @pytest.mark.integration
@@ -53,7 +78,7 @@ class TestMlflowMinioContract:
 
     def test_training_artifacts_in_minio(self) -> None:
         """boto3 list_objects on mlflow-artifacts bucket returns training checkpoint keys."""
-        if not _minio_reachable():
+        if not _minio_auth_works():
             pytest.skip(_REQUIRES_INFRA)
 
         import boto3
@@ -83,7 +108,7 @@ class TestMlflowMinioContract:
 
     def test_mlflow_download_matches_upload(self, tmp_path: Path) -> None:
         """Download checkpoint via MLflow API, verify SHA256 matches original."""
-        if not _mlflow_server_reachable():
+        if not _mlflow_server_reachable() or not _minio_auth_works():
             pytest.skip(_REQUIRES_INFRA)
 
         import mlflow
@@ -121,7 +146,7 @@ class TestMlflowMinioContract:
 
     def test_experiment_names_have_debug_suffix(self) -> None:
         """All experiments created during e2e use _DEBUG suffix."""
-        if not _mlflow_server_reachable():
+        if not _mlflow_server_reachable() or not _minio_auth_works():
             pytest.skip(_REQUIRES_INFRA)
 
         import mlflow
@@ -145,7 +170,7 @@ class TestMlflowMinioContract:
 
     def test_all_runs_finished_status(self) -> None:
         """Query MLflow for all runs, verify none have status RUNNING or FAILED."""
-        if not _mlflow_server_reachable():
+        if not _mlflow_server_reachable() or not _minio_auth_works():
             pytest.skip(_REQUIRES_INFRA)
 
         import mlflow
@@ -167,7 +192,7 @@ class TestMlflowMinioContract:
 
     def test_config_artifact_round_trip(self, tmp_path: Path) -> None:
         """Upload resolved_config.yaml, download, verify YAML content matches."""
-        if not _mlflow_server_reachable():
+        if not _mlflow_server_reachable() or not _minio_auth_works():
             pytest.skip(_REQUIRES_INFRA)
 
         import mlflow

@@ -46,7 +46,7 @@ def _make_mock_cost_data() -> list[dict[str, Any]]:
             "gpu_type": "L4",
         },
         {
-            "model": "segresnet",
+            "model": "vesselfm",
             "loss": "dice_ce",
             "fold": 0,
             "gpu_hours": 3.1,
@@ -55,7 +55,7 @@ def _make_mock_cost_data() -> list[dict[str, Any]]:
             "gpu_type": "L4",
         },
         {
-            "model": "segresnet",
+            "model": "vesselfm",
             "loss": "cbdice_cldice",
             "fold": 0,
             "gpu_hours": 3.3,
@@ -141,4 +141,4 @@ class TestCostTableFromMockMlflowData:
 
         # Verify individual model names appear
         assert "dynunet" in content
-        assert "segresnet" in content
+        assert "vesselfm" in content

@@ -1,7 +1,7 @@
 # Cold-Start Prompts for Pre-GCP Housekeeping PRs
 
 **Plan**: `docs/planning/pre-full-gcp-housekeeping-and-qa.xml`
-**Date**: 2026-03-18
+**Date**: 2026-03-18 (updated 2026-03-19)
 **Total**: 6 PRs closing 12 issues
 
 ## Execution Strategy
@@ -35,6 +35,39 @@ PRs 4-6 can execute WHILE the factorial runs on GCP.
 
 **All PRs fit in a single 1M context session.** PR-4 and PR-6 are the largest but
 still well within limits. No PR requires session splitting.
+
+### Group A Execution Results (2026-03-19)
+
+| PR | Wall Time | Tests Pass | Skip | New Tests | PR # | Tokens | Tool Uses |
+|----|-----------|------------|------|-----------|------|--------|-----------|
+| PR-1 | **25 min** | 5115 | 37 | 35 | [#865](https://github.com/petteriTeikari/minivess-mlops/pull/865) | 170K | 148 |
+| PR-2 | **52 min** | 5070 | 125 | 24 | [#866](https://github.com/petteriTeikari/minivess-mlops/pull/866) | 179K | 176 |
+| PR-3 | **54 min** | 5159 | 14 | 17 | [#867](https://github.com/petteriTeikari/minivess-mlops/pull/867) | 122K | 125 |
+| **Total** | **54 min** (parallel) | — | — | **76** | — | **471K** | **449** |
+
+**Strategy**: 3 parallel worktree agents in single Claude Code session.
+All 3 ran simultaneously; effective wall time = longest agent (54 min).
+
+### Group B Execution Results (2026-03-19)
+
+| PR | Wall Time | Tests Pass | Skip | New Tests | PR # | Tokens | Tool Uses |
+|----|-----------|------------|------|-----------|------|--------|-----------|
+| PR-4 | **48 min** | 5245 | 5 | 24 | [#869](https://github.com/petteriTeikari/minivess-mlops/pull/869) | 153K | 140 |
+| PR-5 | **46 min** | 5111 | 36 | 14 | [#868](https://github.com/petteriTeikari/minivess-mlops/pull/868) | 123K | 110 |
+| **Total** | **48 min** (parallel) | — | — | **38** | — | **276K** | **250** |
+
+**Strategy**: 2 parallel worktree agents in single Claude Code session.
+Both ran simultaneously; effective wall time = longest agent (48 min).
+
+### Cumulative (Groups A + B)
+
+| Metric | Value |
+|--------|-------|
+| PRs completed | 5 of 6 |
+| Total wall time | **102 min** (54 + 48, sequential groups) |
+| New tests added | **114** |
+| Total tokens | **747K** |
+| Total tool uses | **699** |
 
 ### Which PRs Need ralph-loop?
 
@@ -339,10 +372,51 @@ session. Each prompt is self-contained with all context references.
 2. Open terminal 1 → `claude` → paste PR-4 cold-start prompt
 3. Open terminal 2 → `claude` → paste PR-5 cold-start prompt
 
-### Sequential (after Group B PRs merged):
+### Sequential (after Group B PRs merged — single session, 1 agent):
 
-1. `git checkout main && git pull`
-2. `claude` → paste PR-6 cold-start prompt
+Use the cold-start prompt below. Copy-paste into a fresh `claude` session.
+
+```
+I have this planning done for pre-GCP housekeeping PRs. Groups A and B are COMPLETE:
+- Group A: PRs #865, #866, #867 (merged to main)
+- Group B: PRs #868, #869 (review/merge pending)
+
+Now execute PR-6 (Research Agents) — the final PR, sequential.
+
+PLAN: Read docs/planning/pre-full-gcp-housekeeping-and-qa.xml — PR id="6"
+PRIOR RESULTS: Read the <execution-history> section in the XML for Groups A+B actuals.
+
+EXECUTION MODEL:
+- Single agent (PR-6 is XL, most ambitious — full context budget)
+- Read context → TDD (RED-GREEN-VERIFY-FIX) → make test-staging → commit → push → create PR
+- Track wall time
+- After complete: update XML plan <execution-audit> block with actual wall time + test counts
+
+PR-6: Research Agents (Acquisition + Annotation + Self-Evolving)
+  Branch: feat/research-agents
+  Issues: #851, #853, #854
+  Depends on: PR-1 (MERGED), PR-2 (MERGED), PR-4 (MERGED), PR-5 (MERGED)
+  Cold-start context from XML plan PR id="6"
+  Research: docs/planning/biomedical-agentic-ai-research-report.md — TissueLab, conformal bandit
+  Research: docs/planning/conformal-uq-segmentation-report.md — conformal prediction
+  Research: docs/planning/interactive-segmentation-report.md — annotation context
+
+GUARDRAILS:
+- from __future__ import annotations at top of every Python file
+- Use pathlib.Path, encoding='utf-8', datetime.now(timezone.utc)
+- No import re for structured data (Rule #16)
+- All agents use Pydantic AI (NOT LangGraph)
+- PCCP enforcement mandatory for ALL agent actions
+- Agents NEVER modify data/models without human approval gate
+- Self-evolving agent uses Prefect deployments (Rule #17) — no standalone scripts
+- Retraining triggers via run_deployment(), not direct training calls
+- uv run pytest for tests, make test-staging for final verification
+- Do NOT enable GitHub Actions CI triggers
+- Consider splitting into 3 sub-PRs if context gets large
+
+After PR completes and results logged: stop and report.
+I will review, merge to main, then promote main → prod.
+```
 
 ### After all PRs merged — promote to prod:
 

@@ -100,6 +100,13 @@ class BiostatisticsConfig(BaseModel):
         default=42,
         description="Random seed for reproducibility.",
     )
+    splits: list[str] = Field(
+        default_factory=lambda: ["trainval", "test"],
+        description=(
+            "Evaluation splits to analyze. 'trainval' = MiniVess cross-validated "
+            "metrics (eval/ prefix). 'test' = external test set metrics (test/ prefix)."
+        ),
+    )
 
     # ------------------------------------------------------------------
     # Validators

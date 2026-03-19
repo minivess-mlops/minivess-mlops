@@ -22,19 +22,12 @@ class TestLicenseVerification:
         cfg = EXTERNAL_DATASETS["deepvess"]
         assert cfg.license != "TBD", "DeepVess license should be updated from TBD"
 
-    def test_tubenet_license_is_cc_by_4(self) -> None:
-        cfg = EXTERNAL_DATASETS["tubenet_2pm"]
-        assert cfg.license == "CC-BY-4.0"
+    # tubenet_2pm license tests removed: olfactory bulb, different organ, only 1 2PM volume
 
     def test_deepvess_has_license_verified_flag(self) -> None:
         cfg = EXTERNAL_DATASETS["deepvess"]
         assert hasattr(cfg, "license_verified")
         assert cfg.license_verified is False, "DeepVess needs author confirmation"
-
-    def test_tubenet_has_license_verified_flag(self) -> None:
-        cfg = EXTERNAL_DATASETS["tubenet_2pm"]
-        assert hasattr(cfg, "license_verified")
-        assert cfg.license_verified is True
 
     def test_all_configs_have_cite_ref(self) -> None:
         for name, cfg in EXTERNAL_DATASETS.items():

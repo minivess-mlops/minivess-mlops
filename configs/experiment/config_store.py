@@ -27,10 +27,10 @@ DynUNetConf = builds(
     populate_full_signature=True,
 )
 
-Sam3LoraConf = builds(
+Sam3TopoLoraConf = builds(
     ModelConfig,
-    family=ModelFamily.SAM3_LORA,
-    name="sam3_lora",
+    family=ModelFamily.SAM3_TOPOLORA,
+    name="sam3_topolora",
     in_channels=1,
     out_channels=2,
     lora_rank=16,
@@ -97,7 +97,7 @@ cs(ExperimentConf, name="default")
 
 model_store = store(group="experiment/model")
 model_store(DynUNetConf, name="dynunet")
-model_store(Sam3LoraConf, name="sam3_lora")
+model_store(Sam3TopoLoraConf, name="sam3_topolora")
 
 training_store = store(group="experiment/training")
 training_store(DefaultTrainConf, name="default")

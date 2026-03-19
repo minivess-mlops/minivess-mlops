@@ -8,7 +8,7 @@ Steps:
   2. Replace YOURMODEL with your MONAI class (e.g., SegResNet, SwinUNETR)
   3. Add a ModelFamily enum entry in src/minivess/config/models.py
   4. Register in src/minivess/adapters/model_builder.py (_populate_registry)
-  5. Write tests in tests/v2/unit/test_YOURMODEL_adapter.py (see test_segresnet_adapter.py)
+  5. Write tests in tests/v2/unit/test_YOURMODEL_adapter.py (see test_vesselfm_adapter.py)
 """
 
 from __future__ import annotations

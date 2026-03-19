@@ -71,10 +71,7 @@ def _make_trainer(
     mixed_precision: bool = False,
 ) -> SegmentationTrainer:
     """Create a SegmentationTrainer with injected criterion."""
-    import os
-
-    os.environ.setdefault("MINIVESS_ALLOW_HOST", "1")
-    os.environ.setdefault("PREFECT_DISABLED", "1")
+    # MINIVESS_ALLOW_HOST is set by session-level fixture in conftest.py
 
     config = TrainingConfig(
         max_epochs=2,

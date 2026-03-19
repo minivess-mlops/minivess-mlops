@@ -39,7 +39,7 @@ claims:
     type: architectural_claim
     evidence:
       - {type: code, ref: "src/minivess/adapters/base.py"}
-      - {type: code, ref: "src/minivess/adapters/dynunet.py, sam3_vanilla.py, segresnet.py"}
+      - {type: code, ref: "src/minivess/adapters/dynunet.py, sam3_vanilla.py, vesselfm.py, mambavesselnet.py"}
     manuscript_section: [M6]
     status: supported
 

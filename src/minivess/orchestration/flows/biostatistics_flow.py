@@ -495,12 +495,31 @@ def _load_config(config_path: str) -> BiostatisticsConfig:
 def _build_per_volume_data(
     manifest: Any,
     mlruns_dir: Path,
+    split: str = "trainval",
 ) -> dict[str, dict[str, dict[int, np.ndarray]]]:
     """Build per-volume data structure from mlruns.
 
-    Returns {metric_name: {condition: {fold_id: scores_array}}}.
+    Parameters
+    ----------
+    manifest:
+        SourceRunManifest with discovered runs.
+    mlruns_dir:
+        Path to the mlruns directory.
+    split:
+        Which split to extract: ``"trainval"`` reads eval/ prefix metrics
+        (MiniVess cross-validated), ``"test"`` reads test/ prefix metrics
+        (external test datasets like DeepVess).
+
+    Returns
+    -------
+    ``{metric_name: {condition: {fold_id: scores_array}}}``
     """
-    from minivess.pipeline.biostatistics_duckdb import _read_metrics
+    from minivess.pipeline.biostatistics_duckdb import (
+        _is_test_metric,
+        _parse_per_volume_metric,
+        _parse_test_metric,
+        _read_metrics,
+    )
 
     data: dict[str, dict[str, dict[int, list[float]]]] = {}
 
@@ -509,17 +528,37 @@ def _build_per_volume_data(
         metrics = _read_metrics(run_dir)
 
         for metric_name, value in metrics.items():
-            # Look for per-volume metrics: eval_fold{i}_vol_{id}_{metric}
-            if "eval_fold" in metric_name and "_vol_" in metric_name:
-                from minivess.pipeline.biostatistics_duckdb import (
-                    _parse_per_volume_metric,
+            if split == "test":
+                # For test split, look for test/{dataset}/vol_{id}/{metric}
+                # or test/{dataset}/{subset}/{metric}
+                if not _is_test_metric(metric_name):
+                    continue
+                dataset_name, subset_or_vol, base_metric = _parse_test_metric(
+                    metric_name,
                 )
-
-                fold_id, volume_id, base_metric = _parse_per_volume_metric(metric_name)
-                if fold_id is not None:
+                # Per-volume test metrics: test/{dataset}/vol_{id}/{metric}
+                if subset_or_vol.startswith("vol_"):
+                    # Use fold_id=0 for test sets (no folds)
                     data.setdefault(base_metric, {}).setdefault(
                         run.loss_function, {}
-                    ).setdefault(fold_id, []).append(value)
+                    ).setdefault(0, []).append(value)
+                # Aggregate or subset-level: store as summary
+                elif subset_or_vol in ("all", ""):
+                    data.setdefault(base_metric, {}).setdefault(
+                        run.loss_function, {}
+                    ).setdefault(0, []).append(value)
+            else:
+                # For trainval split, use eval/ prefix per-volume metrics
+                # Look for per-volume metrics: eval/{fold}/vol/{id}/{metric}
+                parts = metric_name.split("/")
+                if len(parts) >= 5 and parts[0] == "eval" and parts[2] == "vol":
+                    fold_id, volume_id, base_metric = _parse_per_volume_metric(
+                        metric_name,
+                    )
+                    if fold_id is not None:
+                        data.setdefault(base_metric, {}).setdefault(
+                            run.loss_function, {}
+                        ).setdefault(fold_id, []).append(value)
 
     # Convert lists to numpy arrays
     result: dict[str, dict[str, dict[int, np.ndarray]]] = {}

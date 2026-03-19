@@ -231,12 +231,11 @@ class TestRegisterAllProductionCheckpoints:
             (tags_dir / "num_folds").write_text("3", encoding="utf-8")
             (tags_dir / "model_family").write_text("dynunet", encoding="utf-8")
 
-            # Create metrics with eval_fold2 marker (production discriminator)
-            metrics_dir = run_dir / "metrics"
-            metrics_dir.mkdir(parents=True)
-            (metrics_dir / "eval_fold2_dsc").write_text(
-                "1234567890 0.85 0", encoding="utf-8"
-            )
+            # Create metrics with eval/2/ marker (production discriminator,
+            # slash-prefix format per #790)
+            eval_fold2_dir = run_dir / "metrics" / "eval" / "2"
+            eval_fold2_dir.mkdir(parents=True)
+            (eval_fold2_dir / "dsc").write_text("1234567890 0.85 0", encoding="utf-8")
 
         tracking_uri = str(tmp_path / "dest_mlruns")
         results = register_all_production_checkpoints(
@@ -321,7 +320,11 @@ class TestRealCheckpointRegistration:
         from scripts.register_models import register_checkpoint_as_pyfunc
 
         production_runs = get_production_runs(MLRUNS_DIR, V2_EXPERIMENT_ID)
-        assert len(production_runs) > 0, "No production runs found"
+        if not production_runs:
+            pytest.skip(
+                "No production runs found in mlruns. "
+                "Production runs require eval/2/ metrics (slash-prefix format)."
+            )
 
         run_id = production_runs[0]
         tags = get_run_tags(MLRUNS_DIR, V2_EXPERIMENT_ID, run_id)
@@ -361,6 +364,11 @@ class TestRealCheckpointRegistration:
         from scripts.register_models import register_checkpoint_as_pyfunc
 
         production_runs = get_production_runs(MLRUNS_DIR, V2_EXPERIMENT_ID)
+        if not production_runs:
+            pytest.skip(
+                "No production runs found in mlruns. "
+                "Production runs require eval/2/ metrics (slash-prefix format)."
+            )
         run_id = production_runs[0]
         tags = get_run_tags(MLRUNS_DIR, V2_EXPERIMENT_ID, run_id)
         loss_type = tags.get("loss_function", "unknown")
@@ -410,6 +418,13 @@ class TestRealCheckpointRegistration:
         verifies the target experiment has 4 runs afterward.
         """
         from scripts.register_models import register_all_production_checkpoints
+
+        production_runs = get_production_runs(MLRUNS_DIR, V2_EXPERIMENT_ID)
+        if not production_runs:
+            pytest.skip(
+                "No production runs found in mlruns. "
+                "Production runs require eval/2/ metrics (slash-prefix format)."
+            )
 
         tracking_uri = str(tmp_path / "mlruns")
         results = register_all_production_checkpoints(

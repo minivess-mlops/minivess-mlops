@@ -4,7 +4,7 @@ Unit tests for SkyPilot YAML configuration and tracking URI resolution.
 Cloud tests simulate SkyPilot VM logging to remote MLflow.
 
 Unit tests (no creds): run in staging tier.
-Cloud tests (@pytest.mark.skypilot_cloud): require MLFLOW_CLOUD_* env vars.
+Cloud tests (@pytest.mark.skypilot_cloud): require MLFLOW_TRACKING_URI set to remote URL.
 
 Note: train_generic.yaml and train_hpo_sweep.yaml were deleted (bare-VM, Docker mandate).
 All SkyPilot YAMLs now use Docker image_id pattern (see smoke_test_gpu.yaml).
@@ -97,7 +97,7 @@ class TestSmokeTestYamlConfiguration:
 class TestSkyPilotRemoteLogging:
     """Simulate SkyPilot environment logging to remote MLflow.
 
-    Requires MLFLOW_CLOUD_* credentials.
+    Requires MLFLOW_TRACKING_URI set to remote URL + MLFLOW_TRACKING_PASSWORD.
     """
 
     def test_simulated_spot_vm_logs_run(

@@ -25,6 +25,7 @@ BIOSTATISTICS_TABLES = [
     "champion_tags",
     "per_volume_metrics",
     "ensemble_members",
+    "test_metrics",
 ]
 
 # ---------------------------------------------------------------------------
@@ -103,6 +104,19 @@ _DDL_ENSEMBLE_MEMBERS = """
     )
 """
 
+_DDL_TEST_METRICS = """
+    CREATE TABLE IF NOT EXISTS test_metrics (
+        run_id VARCHAR,
+        dataset_name VARCHAR,
+        subset_name VARCHAR,
+        metric_name VARCHAR,
+        point_estimate DOUBLE,
+        ci_lower DOUBLE,
+        ci_upper DOUBLE,
+        PRIMARY KEY (run_id, dataset_name, subset_name, metric_name)
+    )
+"""
+
 _ALL_DDL = [
     _DDL_RUNS,
     _DDL_PARAMS,
@@ -111,10 +125,11 @@ _ALL_DDL = [
     _DDL_CHAMPION_TAGS,
     _DDL_PER_VOLUME_METRICS,
     _DDL_ENSEMBLE_MEMBERS,
+    _DDL_TEST_METRICS,
 ]
 
 # CI variant suffixes — skip these as standalone metrics
-_CI_SUFFIXES = ("_ci_level", "_ci_lower", "_ci_upper")
+_CI_SUFFIXES = ("_ci_level", "_ci95_lo", "_ci95_hi")
 
 
 # ---------------------------------------------------------------------------
@@ -246,8 +261,24 @@ def _insert_run(conn: Any, run: Any, mlruns_dir: Path) -> None:
     # Insert metrics
     metrics = _read_metrics(run_dir)
     for metric_name, value in metrics.items():
-        # Classify the metric
-        if _is_per_volume_metric(metric_name):
+        # Classify the metric — test/ prefix first (most specific)
+        if _is_test_metric(metric_name):
+            dataset_name, subset_name, base_metric = _parse_test_metric(metric_name)
+            # Skip CI variant metrics
+            if not any(base_metric.endswith(s) for s in _CI_SUFFIXES):
+                conn.execute(
+                    "INSERT INTO test_metrics VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        run.run_id,
+                        dataset_name,
+                        subset_name,
+                        base_metric,
+                        value,
+                        None,
+                        None,
+                    ],
+                )
+        elif _is_per_volume_metric(metric_name):
             fold_id, volume_id, base_metric = _parse_per_volume_metric(metric_name)
             if fold_id is not None:
                 conn.execute(
@@ -314,7 +345,7 @@ def _read_metrics(run_dir: Path) -> dict[str, float]:
     if not metrics_dir.is_dir():
         return {}
     result: dict[str, float] = {}
-    for metric_file in metrics_dir.iterdir():
+    for metric_file in metrics_dir.rglob("*"):
         if not metric_file.is_file():
             continue
         try:
@@ -324,62 +355,93 @@ def _read_metrics(run_dir: Path) -> dict[str, float]:
             last_line = content.splitlines()[-1]
             parts = last_line.split()
             if len(parts) >= 2:
-                result[metric_file.name] = float(parts[1])
+                rel = metric_file.relative_to(metrics_dir)
+                metric_key = "/".join(rel.parts)
+                result[metric_key] = float(parts[1])
         except (ValueError, IndexError, OSError):
             logger.debug("Could not read metric %s", metric_file.name)
     return result
 
 
 def _is_per_volume_metric(metric_name: str) -> bool:
-    """Check if metric name matches eval_fold{i}_vol_{id}_{metric} pattern."""
-    return metric_name.startswith("eval_fold") and "_vol_" in metric_name
+    """Check if metric name matches eval/{fold}/vol/{id}/{metric} pattern."""
+    parts = metric_name.split("/")
+    return len(parts) >= 5 and parts[0] == "eval" and parts[2] == "vol"
 
 
 def _is_eval_fold_metric(metric_name: str) -> bool:
-    """Check if metric name matches eval_fold{i}_{metric} pattern (not per-volume)."""
-    return metric_name.startswith("eval_fold") and "_vol_" not in metric_name
+    """Check if metric name matches eval/{fold}/{metric} pattern (not per-volume)."""
+    parts = metric_name.split("/")
+    if len(parts) < 3 or parts[0] != "eval":
+        return False
+    if not parts[1].isdigit():
+        return False
+    return not (len(parts) >= 4 and parts[2] == "vol")
 
 
 def _parse_per_volume_metric(metric_name: str) -> tuple[int | None, str, str]:
-    """Parse eval_fold{i}_vol_{id}_{metric} into (fold_id, volume_id, base_metric).
-
-    Uses str methods — no regex (CLAUDE.md Rule #16).
-    """
-    prefix = "eval_fold"
-    rest = metric_name[len(prefix) :]  # e.g. "0_vol_vol_003_dice"
-    fold_str, sep, after_fold = rest.partition("_")
-    if not sep or not fold_str.isdigit():
+    """Parse eval/{fold}/vol/{id}/{metric} into (fold_id, volume_id, base_metric)."""
+    parts = metric_name.split("/")
+    if len(parts) < 5 or parts[0] != "eval" or parts[2] != "vol":
         return None, "", ""
-
-    fold_id = int(fold_str)
-
-    # Find _vol_ in after_fold
-    vol_prefix = "vol_"
-    if not after_fold.startswith(vol_prefix):
+    if not parts[1].isdigit():
         return None, "", ""
-
-    after_vol = after_fold[len(vol_prefix) :]  # e.g. "vol_003_dice"
-    # The volume_id is everything up to the last underscore, and the metric is after
-    last_underscore = after_vol.rfind("_")
-    if last_underscore == -1:
-        return None, "", ""
-
-    volume_id = after_vol[:last_underscore]
-    base_metric = after_vol[last_underscore + 1 :]
-
-    return fold_id, volume_id, base_metric
+    return int(parts[1]), parts[3], parts[4]
 
 
 def _parse_eval_fold_metric(metric_name: str) -> tuple[int, str] | None:
-    """Parse eval_fold{i}_{metric} into (fold_id, base_metric).
+    """Parse eval/{fold}/{metric} into (fold_id, base_metric)."""
+    parts = metric_name.split("/")
+    if len(parts) < 3 or parts[0] != "eval":
+        return None
+    if not parts[1].isdigit():
+        return None
+    return int(parts[1]), parts[2]
 
-    Uses str.partition — no regex (CLAUDE.md Rule #16).
+
+def _is_test_metric(metric_name: str) -> bool:
+    """Check if metric name matches test/{dataset}/{metric} or test/{dataset}/{subset}/{metric}.
+
+    Uses str.split("/") — no regex (CLAUDE.md Rule 16).
+
+    Parameters
+    ----------
+    metric_name:
+        Slash-separated metric key.
+
+    Returns
+    -------
+    True if the metric has a test/ prefix.
     """
-    prefix = "eval_fold"
-    if not metric_name.startswith(prefix):
-        return None
-    rest = metric_name[len(prefix) :]
-    fold_str, sep, base_metric = rest.partition("_")
-    if not sep or not fold_str.isdigit():
-        return None
-    return int(fold_str), base_metric
+    parts = metric_name.split("/")
+    return len(parts) >= 3 and parts[0] == "test"
+
+
+def _parse_test_metric(metric_name: str) -> tuple[str, str, str]:
+    """Parse test/ prefix metrics into (dataset_name, subset_name, base_metric).
+
+    Handles two formats:
+    - ``test/{dataset}/{subset}/{metric}`` -> (dataset, subset, metric)
+    - ``test/{dataset}/{metric}``          -> (dataset, "", metric)
+
+    Uses str.split("/") — no regex (CLAUDE.md Rule 16).
+
+    Parameters
+    ----------
+    metric_name:
+        Slash-separated metric key starting with ``test/``.
+
+    Returns
+    -------
+    Tuple of (dataset_name, subset_name, base_metric).
+    """
+    parts = metric_name.split("/")
+    # parts[0] is always "test"
+    if len(parts) >= 4:
+        # test/deepvess/all/dsc -> ("deepvess", "all", "dsc")
+        return parts[1], parts[2], parts[3]
+    if len(parts) == 3:
+        # test/aggregate/dsc -> ("aggregate", "", "dsc")
+        return parts[1], "", parts[2]
+    # Shouldn't happen if _is_test_metric was checked first
+    return "", "", metric_name

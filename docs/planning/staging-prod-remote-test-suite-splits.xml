@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>Test Suite Tier Redesign: Staging / Prod / Remote</title>
+    <branch>fix/pre-debug-qa-verification</branch>
+    <date>2026-03-19</date>
+    <status>planning</status>
+    <priority>P1 — test architecture clarity</priority>
+    <issue>https://github.com/petteriTeikari/minivess-mlops/issues/875</issue>
+    <rationale>
+      The current test tiers conflate "code tests" with "infrastructure tests" with
+      "GPU instance validation." This causes confusing failures and wasted time.
+
+      Key decisions from user:
+      - "staging" means Docker Compose services running exactly as they would in prod
+      - "dev" (bare metal, no Docker) is intentionally unsupported for now
+      - SAM3 model loading is BANNED from CI — it belongs in gpu_instance/ only
+      - Docker Compose services MUST be running for prod tests
+      - Need separate "remote" tier for cloud/intranet infrastructure validation
+    </rationale>
+    <metalearning>
+      .claude/metalearning/2026-03-19-sam3-tests-in-ci-ban.md
+    </metalearning>
+  </metadata>
+
+  <user-context>
+    User's vision (verbatim):
+    - "staging environment means I have the Dockers running as they would be on prod"
+    - "dev would be left for future use — scenarios when someone wants to run with scissors"
+    - "test-prod that enforces stack is up"
+    - "test-prod-remote that could work with intranet on-prem deployment, and Pulumi-based cloud stack on GCP"
+    - SAM3 model loading tests are NEVER in any CI tier — they validate new instance types only
+  </user-context>
+
+  <current-state>
+    <tier id="staging" command="make test-staging" time="&lt;4 min" status="working">
+      Code-only tests. No models, no services. Fast PR gate for main.
+      5404 passed, 2 skipped. Clean.
+    </tier>
+    <tier id="prod" command="make test-prod" time="~10-17 min" status="partially broken">
+      Includes Docker Compose service tests that fail without stack running.
+      Also included SAM3 model loading tests (now MOVED to gpu_instance/).
+      After SAM3 removal: 5989 passed, 3 failed (Docker training smoke), 161 skipped.
+    </tier>
+    <tier id="gpu" command="make test-gpu" time="varies" status="working">
+      tests/gpu_instance/ only. SAM3 forward passes, large model training.
+      Run on RunPod RTX 4090 or GCP L4. Never in standard CI.
+    </tier>
+  </current-state>
+
+  <proposed-tiers>
+    <description>
+      5-tier architecture that cleanly separates by infrastructure requirements.
+      Each tier builds on the previous: staging ⊂ prod ⊂ prod-remote.
+    </description>
+
+    <tier id="staging" command="make test-staging" gate="main PRs" needs="nothing">
+      <what>Pure unit tests + config validation. No models, no services, no data.</what>
+      <target-time>&lt;4 min</target-time>
+      <marker-exclusions>not model_loading, not slow, not integration, not requires_services</marker-exclusions>
+      <when-to-run>Every PR targeting main. Must pass before merge.</when-to-run>
+      <status>Already works — no changes needed.</status>
+    </tier>
+
+    <tier id="prod" command="make test-prod" gate="prod promotion" needs="Docker Compose stack running">
+      <what>
+        All code tests INCLUDING service integration tests.
+        Docker Compose stack MUST be running (MLflow, MinIO, Prefect, PostgreSQL).
+        This validates the full local environment matches production behavior.
+      </what>
+      <target-time>~10 min</target-time>
+      <prerequisite>docker compose -f deployment/docker-compose.yml up -d</prerequisite>
+      <pre-check>
+        Before running tests, verify services are healthy:
+        - MLflow at localhost:5000
+        - MinIO at localhost:9000
+        - Prefect at localhost:4200
+        - PostgreSQL at localhost:5432
+        If ANY service is unreachable, FAIL FAST with instructions (not silently skip).
+      </pre-check>
+      <marker-exclusions>not gpu_heavy, not requires_remote</marker-exclusions>
+      <when-to-run>Before promoting main → prod. After major changes.</when-to-run>
+      <includes>
+        - All staging tests
+        - Docker Compose service health tests (MLflow, MinIO, Prefect)
+        - Inter-service contract tests (MLflow-MinIO artifact round-trip)
+        - Docker training smoke tests (debug run in container)
+        - Dashboard smoke tests (API + UI)
+        - E2E pipeline tests (full flow chain)
+        - Biostatistics flow integration tests
+        - ONNX export tests (DynUNet/MambaVesselNet, NOT SAM3)
+      </includes>
+      <excludes>
+        - SAM3 model loading (BANNED from CI — tests/gpu_instance/ only)
+        - Cloud/remote infrastructure tests (requires_remote marker)
+        - tests/v2/quasi_e2e/ (parametrized model×loss, too slow)
+      </excludes>
+    </tier>
+
+    <tier id="prod-remote" command="make test-prod-remote" gate="cloud/intranet validation" needs="remote infrastructure">
+      <what>
+        Tests that validate cloud or intranet on-prem infrastructure.
+        Requires either GCP Pulumi stack or intranet deployment.
+      </what>
+      <target-time>~5 min (mostly network latency)</target-time>
+      <prerequisite>
+        For GCP: gcloud auth, Pulumi stack healthy, GCS buckets accessible
+        For intranet: VPN connected, on-prem MLflow reachable
+      </prerequisite>
+      <marker>@pytest.mark.requires_remote</marker>
+      <when-to-run>
+        - After Pulumi infrastructure changes
+        - After cloud provider configuration changes
+        - Validating new intranet deployment
+        - NOT part of routine PR/promotion workflow
+      </when-to-run>
+      <includes>
+        - Cloud MLflow connectivity (tests/v2/cloud/)
+        - SkyPilot GCP access verification
+        - DVC GCS remote accessibility
+        - GAR Docker image availability
+        - Pulumi stack health queries
+        - Remote MLflow artifact round-trip
+      </includes>
+    </tier>
+
+    <tier id="post-training" command="make test-post-training" gate="after training run" needs="mlruns/ with results">
+      <what>
+        Tests that validate MLflow artifacts, checkpoints, metric integrity
+        after a training run completes. Validates the MLflow-as-contract guarantee.
+      </what>
+      <target-time>~2 min</target-time>
+      <prerequisite>mlruns/ contains completed training runs with slash-prefix metrics</prerequisite>
+      <marker>@pytest.mark.requires_mlruns</marker>
+      <when-to-run>
+        - After debug factorial run completes
+        - After production factorial run completes
+        - Validating that all MLflow artifacts are correct before biostatistics
+      </when-to-run>
+      <includes>
+        - mlruns integrity tests (production runs identified, metrics present)
+        - Checkpoint loadability (all checkpoints exist and load)
+        - DuckDB extraction from real mlruns
+        - Pyfunc registration from real checkpoints
+        - Per-volume metric verification
+      </includes>
+    </tier>
+
+    <tier id="gpu" command="make test-gpu" gate="GPU instance validation" needs="GPU with 16+ GB VRAM">
+      <what>
+        SAM3 model loading, forward passes, ONNX export, BentoML serving.
+        Run once per new GPU instance type (L4, A100, RTX 4090).
+        NEVER in any CI tier. NEVER on dev machine (8 GB VRAM).
+      </what>
+      <target-time>~5-15 min per model</target-time>
+      <prerequisite>GPU with &gt;=16 GB VRAM, SAM3 weights downloaded</prerequisite>
+      <when-to-run>
+        - Validating new GPU instance type works with SAM3
+        - After SAM3 adapter code changes
+        - After ONNX export changes
+        - On RunPod RTX 4090 or GCP L4 only
+      </when-to-run>
+      <includes>
+        - tests/gpu_instance/ ONLY
+        - SAM3 Vanilla/TopoLoRA/Hybrid forward + backward passes
+        - SAM3 ONNX export + onnxruntime validation
+        - MONAI Deploy SAM3 operator tests
+        - BentoML SAM3 import tests
+        - MLflow SAM3 pyfunc serving tests
+      </includes>
+    </tier>
+  </proposed-tiers>
+
+  <implementation-tasks>
+    <phase id="1" name="Marker Registration">
+      <task id="T1">Register new markers in pyproject.toml: requires_services, requires_remote, requires_mlruns</task>
+      <task id="T2">Add @pytest.mark.requires_services to all Docker Compose service tests</task>
+      <task id="T3">Add @pytest.mark.requires_remote to all cloud/intranet tests</task>
+      <task id="T4">Add @pytest.mark.requires_mlruns to all real mlruns data tests</task>
+    </phase>
+
+    <phase id="2" name="Makefile Targets">
+      <task id="T5">Update make test-prod: add service health pre-check (fail fast if stack not up)</task>
+      <task id="T6">Add make test-prod-remote target with cloud/intranet prerequisites</task>
+      <task id="T7">Add make test-post-training target for mlruns validation</task>
+      <task id="T8">Update make test-staging to explicitly exclude requires_services</task>
+    </phase>
+
+    <phase id="3" name="Documentation">
+      <task id="T9">Update tests/CLAUDE.md with 5-tier documentation</task>
+      <task id="T10">Update CLAUDE.md Test Tiers table with 5 tiers</task>
+      <task id="T11">Remove temporary skip guards once proper tier separation is in place</task>
+    </phase>
+
+    <phase id="4" name="SAM3 Cleanup (DONE)">
+      <task id="T12" status="done">Move SAM3 tests from tests/v2/integration/ → tests/gpu_instance/</task>
+      <task id="T13" status="done">Add metalearning doc for SAM3-in-CI ban</task>
+      <task id="T14">Remove VRAM guard code from moved tests (not needed in gpu_instance/)</task>
+    </phase>
+  </implementation-tasks>
+
+  <makefile-examples>
+    <example name="test-prod (proposed)">
+      test-prod:
+        @echo "Checking Docker Compose services..."
+        @python3 -c "import socket; s=socket.create_connection(('localhost',5000),2); s.close()" 2>/dev/null \
+          || (echo "ERROR: MLflow not running. Run: docker compose up -d"; exit 1)
+        @python3 -c "import socket; s=socket.create_connection(('localhost',9000),2); s.close()" 2>/dev/null \
+          || (echo "ERROR: MinIO not running. Run: docker compose up -d"; exit 1)
+        MINIVESS_ALLOW_HOST=1 uv run pytest tests/ -x -q \
+          -m "not gpu_heavy and not requires_remote" \
+          --ignore=tests/v2/quasi_e2e/ --ignore=tests/gpu_instance/ \
+          --timeout=120
+    </example>
+
+    <example name="test-prod-remote (proposed)">
+      test-prod-remote:
+        @echo "Checking remote infrastructure..."
+        @sky check gcp || (echo "ERROR: SkyPilot GCP not configured"; exit 1)
+        MINIVESS_ALLOW_HOST=1 uv run pytest tests/v2/cloud/ tests/ -x -q \
+          -m "requires_remote" \
+          --timeout=120
+    </example>
+
+    <example name="test-post-training (proposed)">
+      test-post-training:
+        @echo "Checking mlruns/ for training results..."
+        @test -d mlruns/ || (echo "ERROR: No mlruns/ directory. Run training first."; exit 1)
+        MINIVESS_ALLOW_HOST=1 uv run pytest tests/ -x -q \
+          -m "requires_mlruns" \
+          --timeout=120
+    </example>
+  </makefile-examples>
+</plan>

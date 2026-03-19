@@ -329,12 +329,10 @@ class TestInvalidModelFamily:
         valid_families = [
             "dynunet",
             "vesselfm",
-            "comma_mamba",
-            "sam3_lora",
             "sam3_vanilla",
             "sam3_topolora",
             "sam3_hybrid",
-            "multitask_dynunet",
+            "mambavesselnet",
             "custom",
         ]
         profile = _minimal_profile()

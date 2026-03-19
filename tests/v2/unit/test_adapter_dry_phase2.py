@@ -2,7 +2,6 @@
 
 R5.3: _build_output() helper on ModelAdapter base class
 R5.5: _build_config() helper on ModelAdapter base class
-R5.28: Standardize comma.py parameter names
 """
 
 from __future__ import annotations
@@ -134,72 +133,3 @@ class TestBuildConfig:
         cfg = adapter.get_config()
         assert cfg.family == "dynunet"
         assert cfg.extras["custom_key"] == "custom_val"
-
-
-# =========================================================================
-# R5.28: Standardize comma.py parameter names
-# =========================================================================
-
-
-class TestCommaParameterStandardization:
-    """Test that comma.py internal blocks use standardized parameter names."""
-
-    def test_encoder_block_uses_full_names(self) -> None:
-        """_CommaEncoderBlock should accept in_channels, out_channels."""
-        import inspect
-
-        from minivess.adapters.comma import _CommaEncoderBlock
-
-        sig = inspect.signature(_CommaEncoderBlock.__init__)
-        params = list(sig.parameters.keys())
-        assert "in_channels" in params, f"Expected 'in_channels', got {params}"
-        assert "out_channels" in params, f"Expected 'out_channels', got {params}"
-
-    def test_decoder_block_uses_full_names(self) -> None:
-        """_CommaDecoderBlock should accept in_channels, skip_channels, out_channels."""
-        import inspect
-
-        from minivess.adapters.comma import _CommaDecoderBlock
-
-        sig = inspect.signature(_CommaDecoderBlock.__init__)
-        params = list(sig.parameters.keys())
-        assert "in_channels" in params, f"Expected 'in_channels', got {params}"
-        assert "out_channels" in params, f"Expected 'out_channels', got {params}"
-        assert "skip_channels" in params, f"Expected 'skip_channels', got {params}"
-
-    def test_encoder_block_functional(self) -> None:
-        """_CommaEncoderBlock should still work with standardized names."""
-        from minivess.adapters.comma import _CommaEncoderBlock
-
-        block = _CommaEncoderBlock(in_channels=1, out_channels=16, d_state=8)
-        x = torch.randn(1, 1, 8, 8, 8)
-        down, skip = block(x)
-        assert skip.shape[1] == 16  # out_channels
-        assert down.shape[1] == 16
-
-    def test_decoder_block_functional(self) -> None:
-        """_CommaDecoderBlock should still work with standardized names."""
-        from minivess.adapters.comma import _CommaDecoderBlock
-
-        block = _CommaDecoderBlock(in_channels=32, skip_channels=16, out_channels=16)
-        x = torch.randn(1, 32, 4, 4, 4)
-        skip = torch.randn(1, 16, 8, 8, 8)
-        out = block(x, skip)
-        assert out.shape[1] == 16  # out_channels
-
-    def test_comma_adapter_still_functional(self) -> None:
-        """CommaAdapter should still work end-to-end after renaming."""
-        from minivess.adapters.comma import CommaAdapter
-
-        config = ModelConfig(
-            family=ModelFamily.COMMA_MAMBA,
-            name="test-comma",
-            in_channels=1,
-            out_channels=2,
-        )
-        adapter = CommaAdapter(config)
-        x = torch.randn(1, 1, 32, 32, 16)
-        output = adapter(x)
-        assert isinstance(output, SegmentationOutput)
-        assert output.prediction.shape == (1, 2, 32, 32, 16)
-        assert output.metadata["architecture"] == "comma_mamba"

@@ -1,0 +1,333 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>Debug Factorial Experiment — GCP Cloud Run with Claude Monitoring</title>
+    <branch>debug/gcp-factorial-run</branch>
+    <prerequisite-branch>fix/pre-debug-qa-verification (must be merged to main first)</prerequisite-branch>
+    <date>2026-03-19</date>
+    <status>planned</status>
+    <priority>P0 — validates entire pipeline before $65 production run</priority>
+    <estimated-cost>~$6-10 on GCP L4 spot (24 trainable + 2 zero-shot, 2 epochs each)</estimated-cost>
+  </metadata>
+
+  <architecture>
+    <description>
+      Two-layer execution model:
+
+      Layer 1 (Deterministic): scripts/run_factorial.sh
+        - Pure sky jobs launch calls in a loop
+        - Reads configs/experiment/debug_factorial.yaml
+        - Launches 24 trainable + 2 zero-shot = 26 conditions on GCP L4
+        - ANY researcher can run this without Claude Code or any LLM
+        - NO claude -p, NO screen, NO nohup, NO pipe chains
+        - Rate-limited (sleep 5 between launches) to avoid quota issues
+        - Job IDs captured to outputs/{timestamp}_factorial_job_ids.txt
+        - --dry-run flag for validation without launching
+        - Per-condition error handling (one failure does not abort others)
+        - Named jobs (--name model-loss-calibX-fY) for easy identification
+
+      Layer 2 (Monitoring): Claude Code with /factorial-monitor Skill
+        - The "Claude Harness" around the deterministic .sh script
+        - Monitors SkyPilot job status via `sky jobs queue`
+        - Watches for: FAILED, CANCELLED, FAILED_SETUP, STARTING timeout
+        - On failure: diagnoses root cause, plans fix with reviewer agents
+        - On success: verifies MLflow artifacts, metrics, params are complete
+        - After all training: triggers post-training → analysis → biostatistics → deploy
+        - If code changes needed: implements via self-learning TDD skill
+        - Tracks cumulative cloud cost from SkyPilot job metadata
+
+      CRITICAL SEPARATION:
+        - run_factorial.sh is the PRODUCT (deterministic, reproducible, LLM-free)
+        - Claude monitoring is the DEVELOPER TOOL (catches bugs, plans fixes)
+        - The production run uses ONLY run_factorial.sh (no Claude needed)
+        - The whole purpose of this debug run is to double-check that everything
+          works perfectly so the user can run the .sh deterministically for production
+    </description>
+
+    <how-to-run>
+      # Step 1: Dry-run validation (no cloud cost)
+      ./scripts/run_factorial.sh --dry-run configs/experiment/debug_factorial.yaml
+
+      # Step 2: Launch all 26 conditions
+      ./scripts/run_factorial.sh configs/experiment/debug_factorial.yaml
+
+      # Step 3: Monitor (manual or with Claude /factorial-monitor)
+      sky jobs queue           # Check all job statuses
+      sky jobs logs JOB_ID     # View specific job logs
+      cat outputs/*_factorial_job_ids.txt  # Review launch log
+
+      # Step 4: After all training completes, run downstream flows locally:
+      docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm post_training
+      docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm analyze
+      docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm biostatistics
+      docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm deploy
+    </how-to-run>
+
+    <banned>
+      - claude -p wrapping run_factorial.sh (metalearning 2026-03-09, 2026-03-16)
+      - screen -dmS for Claude sessions
+      - nohup for any subprocess
+      - --output-format stream-json | jq pipe chains
+      - ANY bash wrapper around claude -p
+      - Complex shell scripting beyond the sky jobs launch loop
+    </banned>
+  </architecture>
+
+  <prerequisites>
+    <prereq id="P1">fix/pre-debug-qa-verification PR merged to main</prereq>
+    <prereq id="P2">make test-prod passes on main (0 failures)</prereq>
+    <prereq id="P3">GCP infrastructure verified:
+      - Pulumi stack healthy: pulumi stack output
+      - GAR image pushed: docker manifest inspect europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+      - DVC data on GCS: dvc status -r gcs
+      - SkyPilot GCP check: sky check gcp
+    </prereq>
+    <prereq id="P4">.env configured with:
+      - HF_TOKEN (SAM3 weights)
+      - GCP credentials (Application Default Credentials)
+      - MLFLOW_TRACKING_URI (local mlruns/ or Cloud Run URL)
+    </prereq>
+    <prereq id="P5">Docker base image rebuilt with latest code:
+      make build-base-gpu and make push-gar
+    </prereq>
+    <prereq id="P6">DeepVess external test data downloaded and DVC-versioned:
+      data/external/deepvess/ exists with image/label pairs
+    </prereq>
+    <prereq id="P7">train_factorial.yaml exists and validates:
+      deployment/skypilot/train_factorial.yaml (created in pre-debug-qa branch)
+    </prereq>
+    <prereq id="P8">Dry-run passes:
+      ./scripts/run_factorial.sh --dry-run configs/experiment/debug_factorial.yaml
+    </prereq>
+  </prerequisites>
+
+  <phases>
+    <phase id="0" name="Pre-Flight Verification">
+      <description>Verify ALL prerequisites before spending cloud credits.
+        Use CLI tools to check state — never ask the user (metalearning 2026-03-16).</description>
+      <tasks>
+        <task id="T0.1">Run: sky check gcp → verify GCP access</task>
+        <task id="T0.2">Run: docker manifest inspect europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest → verify image exists</task>
+        <task id="T0.3">Run: pulumi stack output → verify GCP resources (GCS buckets, GAR, Cloud SQL)</task>
+        <task id="T0.4">Run: make test-staging → verify code is clean</task>
+        <task id="T0.5">Verify .env has all required variables (HF_TOKEN, MLFLOW_TRACKING_URI, GCP ADC)</task>
+        <task id="T0.6">Verify debug_factorial.yaml parses correctly:
+          python3 -c "import yaml; print(yaml.safe_load(open('configs/experiment/debug_factorial.yaml', encoding='utf-8')))"</task>
+        <task id="T0.7">Verify train_factorial.yaml exists and passes tests:
+          uv run pytest tests/v2/unit/test_train_factorial_yaml.py -v</task>
+        <task id="T0.8">Dry-run the launch script:
+          ./scripts/run_factorial.sh --dry-run configs/experiment/debug_factorial.yaml</task>
+        <task id="T0.9">Verify DeepVess data available (for VesselFM zero-shot):
+          ls data/external/deepvess/images/ (or check DVC status)</task>
+        <task id="T0.10">Verify MLFLOW_TRACKING_URI is set and reachable:
+          python3 -c "import mlflow; mlflow.set_tracking_uri('${MLFLOW_TRACKING_URI}'); print('OK')"</task>
+      </tasks>
+      <gate>ALL tasks must pass. If ANY fails, STOP and fix before proceeding.</gate>
+    </phase>
+
+    <phase id="1" name="Launch Training Conditions">
+      <description>Execute run_factorial.sh for all 26 debug conditions</description>
+      <tasks>
+        <task id="T1.1">Launch: ./scripts/run_factorial.sh configs/experiment/debug_factorial.yaml
+          Script handles: rate limiting (sleep 5), named jobs, job ID logging, per-condition error handling</task>
+        <task id="T1.2">/factorial-monitor monitors: sky jobs queue (every 2 minutes)
+          Watch for: FAILED, CANCELLED, FAILED_SETUP states
+          On failure: capture sky jobs logs JOB_ID and diagnose</task>
+        <task id="T1.3">Track progress: N/26 conditions completed
+          Expected: ~5-10 min per condition on L4 (2 epochs, half data)</task>
+      </tasks>
+      <monitoring>
+        <check interval="2m">sky jobs queue — count RUNNING, SUCCEEDED, FAILED</check>
+        <check interval="5m">sky jobs logs LATEST_JOB — check for NaN, OOM, errors</check>
+        <check interval="15m">STARTING state timeout — if any job stuck in STARTING >15 min,
+          likely Docker pull or quota issue. Check: sky jobs logs JOB_ID for error details</check>
+        <cost-tracking>After each batch of jobs completes, check cumulative cost:
+          sky jobs queue shows per-job duration. L4 spot = ~$0.22/hr.
+          Track: sum(duration_hours) * 0.22 = estimated cost so far.</cost-tracking>
+        <on-failure>
+          1. Capture full job log: sky jobs logs JOB_ID
+          2. Categorize: OOM / NaN / config error / infrastructure / transient
+          3. If transient (spot preemption): SkyPilot auto-recovers, no action
+          4. If OOM: check model VRAM profile, adjust patch_size or batch_size
+          5. If NaN: check BF16/FP16 dtype, loss function, learning rate
+          6. If config error: fix config, rebuild Docker, re-launch failed conditions
+          7. Plan fix with reviewer agents before implementing
+        </on-failure>
+        <on-relaunch>
+          For failed conditions: extract from job log, re-launch individually:
+          sky jobs launch deployment/skypilot/train_factorial.yaml \
+            --name MODEL-LOSS-calibX-fY \
+            --env MODEL_FAMILY=... --env LOSS_NAME=... \
+            --env-file .env -y
+        </on-relaunch>
+      </monitoring>
+      <gate>All 26 conditions SUCCEEDED. If any FAILED after retry, diagnose and fix.</gate>
+    </phase>
+
+    <phase id="2" name="Verify Training Artifacts">
+      <description>Check that MLflow contains ALL expected data from training</description>
+      <tasks>
+        <task id="T2.1">Sync mlruns from GCP: gsutil rsync or cloud MLflow UI</task>
+        <task id="T2.2">For each of 24 trainable conditions, verify:
+          - MLflow run exists with status=FINISHED
+          - Params logged: model/family, train/loss_name, train/max_epochs, with_aux_calib
+          - Metrics logged: train/loss, val/loss, val/dice (per epoch)
+          - Metrics logged: grad/norm_mean, prof/train_seconds, vram/peak_mb
+          - Artifacts: config/resolved_config.yaml, checkpoints/best_*.pth
+          - Tags: flow_name, loss_function, fold_id, config_fingerprint
+        </task>
+        <task id="T2.3">For each of 2 zero-shot conditions, verify:
+          - SAM3 Vanilla: eval metrics on MiniVess fold-0
+          - VesselFM: test/deepvess/* metrics on DeepVess
+        </task>
+        <task id="T2.4">Verify aux_calib factor actually differs:
+          - Compare loss values for with_aux_calib=true vs false (same model+loss)
+          - If identical → aux_calib is still dead code somewhere</task>
+      </tasks>
+      <gate>ALL artifacts present for ALL conditions. No empty/missing values.</gate>
+    </phase>
+
+    <phase id="3" name="Post-Training Flow (Local Docker)">
+      <description>Run post-training plugins on all training checkpoints.
+        Runs locally via Docker Compose — NOT SkyPilot (CPU-only, no GPU needed).</description>
+      <execution>
+        docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm post_training
+      </execution>
+      <tasks>
+        <task id="T3.1">Run post-training flow:
+          - SWA on all 24 trainable checkpoints
+          - Calibration (if calibration_data available — may be deferred for debug)
+          - Verify post/{plugin}/{metric} logged to MLflow</task>
+      </tasks>
+      <gate>Post-training artifacts exist for all applicable conditions.</gate>
+    </phase>
+
+    <phase id="4" name="Analysis (Evals) Flow (Local Docker)">
+      <description>Evaluate all models on MiniVess + DeepVess external test.
+        Runs locally via Docker Compose — GPU needed for sliding window inference.</description>
+      <execution>
+        docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm --shm-size 8g analyze
+      </execution>
+      <tasks>
+        <task id="T4.1">Run analysis flow:
+          - Ensemble building from training + post-training checkpoints
+          - Evaluation on MiniVess validation fold-0 (eval/ prefix metrics)
+          - Evaluation on DeepVess external test (test/deepvess/ prefix metrics)
+          - Champion model selection and tagging
+          - Comparison table generation (markdown + LaTeX)</task>
+        <task id="T4.2">Verify:
+          - eval/{model}/{subset}/{metric} metrics exist for all models
+          - test/deepvess/{metric} metrics exist for all models
+          - Champion tags written to MLflow
+          - Comparison table includes both trainval and test columns</task>
+      </tasks>
+      <gate>All evaluation metrics present. Champion models tagged.</gate>
+    </phase>
+
+    <phase id="5" name="Biostatistics Flow (Local Docker)">
+      <description>Compute ALL statistical analyses for trainval AND test splits.
+        Runs locally via Docker Compose — CPU-only.</description>
+      <execution>
+        docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm biostatistics
+      </execution>
+      <tasks>
+        <task id="T5.1">Run biostatistics flow:
+          - DuckDB materialization of all MLflow runs
+          - split=trainval: ANOVA, pairwise, effect sizes, specification curve
+          - split=test: same analyses on test/deepvess/* metrics
+          - Figures: specification curve, interaction plot, CD diagram, box plots
+          - Tables: ANOVA summary, rank discrepancy, pairwise comparisons</task>
+        <task id="T5.2">Verify:
+          - DuckDB has both eval_metrics and test_metrics tables populated
+          - Biostatistics output has both trainval and test splits
+          - All expected figures generated (PNG/PDF)
+          - All expected tables generated (CSV/LaTeX)
+          - Per-volume metrics available for both splits</task>
+      </tasks>
+      <gate>Complete statistical output for both splits. All figures render.</gate>
+    </phase>
+
+    <phase id="6" name="Deploy Flow (Local Docker)">
+      <description>Test champion model deployment chain.
+        Runs locally via Docker Compose — no cloud deploy for debug run.</description>
+      <execution>
+        docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm deploy
+      </execution>
+      <tasks>
+        <task id="T6.1">Run deploy flow:
+          - Champion discovery from MLflow tags
+          - ONNX export (opset 17)
+          - BentoML model store import
+          - Deployment artifact generation (bentofile, docker-compose, README)
+          - Model promotion (DEVELOPMENT → STAGING)</task>
+        <task id="T6.2">Verify:
+          - ONNX model files exist and are valid
+          - BentoML model store has imported models
+          - bentofile.yaml generated correctly
+          - Promotion audit trail logged</task>
+      </tasks>
+      <gate>Full deploy pipeline completes without errors.</gate>
+    </phase>
+
+    <phase id="7" name="Debug Run Report">
+      <description>Summarize findings and plan production run</description>
+      <tasks>
+        <task id="T7.1">Generate debug run report:
+          - Total cost (from SkyPilot job logs — sum duration * $0.22/hr)
+          - Wall-clock time per condition
+          - Any failures encountered and how they were fixed
+          - MLflow artifact completeness checklist
+          - Biostatistics output quality assessment
+          - Production run cost estimate (extrapolate from debug timing)</task>
+        <task id="T7.2">If ANY issues found:
+          - Create GitHub issues with root cause
+          - Fix in the debug/gcp-factorial-run branch
+          - Re-run affected conditions
+          - Verify fix resolved the issue</task>
+        <task id="T7.3">Production readiness decision:
+          - All 26 debug conditions succeeded? → READY
+          - All MLflow artifacts complete? → READY
+          - Biostatistics produces valid output? → READY
+          - Deploy flow works end-to-end? → READY
+          - If ALL READY → authorize production run</task>
+      </tasks>
+      <gate>Debug run report approved. Production run authorized.</gate>
+    </phase>
+  </phases>
+
+  <production-run>
+    <description>
+      After debug run succeeds, the production run uses the SAME script:
+      ./scripts/run_factorial.sh configs/hpo/paper_factorial.yaml
+
+      72 trainable + 6 zero-shot = 78 conditions, 50 epochs, full data, 3 folds.
+      Estimated cost: ~$65 on GCP L4 spot.
+      Estimated time: ~7-10 hours GPU (with spot preemption recovery).
+
+      The production run can optionally be monitored by /factorial-monitor,
+      but it MUST be runnable without any Claude Code involvement.
+      The deterministic .sh script is the product; Claude is a developer tool.
+    </description>
+  </production-run>
+
+  <skills-used>
+    <skill name="factorial-monitor" role="Multi-job monitoring, aggregated diagnosis,
+      and selective re-launch for SkyPilot jobs. Polls sky jobs queue, detects failures,
+      categorizes root causes, and re-launches only failed conditions."/>
+    <skill name="ralph-loop" role="Infrastructure monitoring during cloud execution.
+      Polls sky jobs queue, detects failures, captures logs. Used if factorial-monitor
+      is not available."/>
+    <skill name="self-learning-iterative-coder" role="If code bugs are found during
+      the debug run, implements fixes via TDD loop."/>
+  </skills-used>
+
+  <cross-reference>
+    <plan file="docs/planning/pre-debug-qa-verification-plan.md" relation="prerequisite"/>
+    <plan file="docs/planning/test-sets-external-validation-deepvess-tubenet-analysis-flow-for-biostatistics.xml" relation="prerequisite"/>
+    <plan file="docs/planning/double-check-all-wiring.xml" relation="prerequisite"/>
+    <script file="scripts/run_factorial.sh" relation="primary-executable"/>
+    <skypilot file="deployment/skypilot/train_factorial.yaml" relation="per-condition-task"/>
+    <config file="configs/experiment/debug_factorial.yaml" relation="debug-config"/>
+    <config file="configs/hpo/paper_factorial.yaml" relation="production-config"/>
+  </cross-reference>
+</plan>

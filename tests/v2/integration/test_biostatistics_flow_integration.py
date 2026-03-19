@@ -51,17 +51,20 @@ _EXPERIMENT_NAME = "dynunet_loss_variation_v2"
 def _create_synthetic_mlruns(base: Path) -> Path:
     """Create a synthetic mlruns directory with realistic structure.
 
-    Layout:
+    Layout matches the slash-separated metric key convention that
+    ``_read_metrics`` produces via ``pathlib.Path.relative_to``:
+
         mlruns/
-          1/                          # experiment ID
-            meta.yaml                 # experiment metadata
-            run_{cond}_{fold}/        # run directories
-              meta.yaml              # run metadata (status=FINISHED)
+          1/                                # experiment ID
+            meta.yaml                       # experiment metadata
+            run_{cond}_{fold}/              # run directories
+              meta.yaml                     # run metadata (status=FINISHED)
               params/
-                loss_name             # condition (loss function)
-                fold_id               # fold number
+                loss_name                   # condition (loss function)
+                fold_id                     # fold number
               metrics/
-                eval_fold{f}_vol_{v}_{metric}  # per-volume metrics
+                eval/{fold}/vol/{v}/{metric}  # per-volume metrics (nested dirs)
+                val_dice                      # summary metric (flat file)
     """
     mlruns = base / "mlruns"
     exp_dir = mlruns / "1"
@@ -88,7 +91,10 @@ def _create_synthetic_mlruns(base: Path) -> Path:
             (params_dir / "loss_name").write_text(cond, encoding="utf-8")
             (params_dir / "fold_id").write_text(str(fold), encoding="utf-8")
 
-            # Per-volume metrics
+            # Per-volume metrics using nested directory structure:
+            # metrics/eval/{fold}/vol/{vol_id}/{metric_name}
+            # This matches the slash-separated key format that
+            # _parse_per_volume_metric expects: "eval/{fold}/vol/{id}/{metric}"
             metrics_dir = run_dir / "metrics"
             metrics_dir.mkdir()
             for metric in _METRICS:
@@ -97,11 +103,12 @@ def _create_synthetic_mlruns(base: Path) -> Path:
                     mean -= 0.02  # slightly lower
                 for vol in range(_N_VOLUMES):
                     score = float(rng.normal(mean, 0.04))
-                    metric_key = f"eval_fold{fold}_vol_{vol}_{metric}"
-                    # MLflow metric format: "timestamp value step"
-                    (metrics_dir / metric_key).write_text(
-                        f"1700000000000 {score} 0", encoding="utf-8"
+                    metric_path = (
+                        metrics_dir / "eval" / str(fold) / "vol" / str(vol) / metric
                     )
+                    metric_path.parent.mkdir(parents=True, exist_ok=True)
+                    # MLflow metric format: "timestamp value step"
+                    metric_path.write_text(f"1700000000000 {score} 0", encoding="utf-8")
 
             # Also add a summary metric (non per-volume)
             (metrics_dir / "val_dice").write_text(
@@ -118,6 +125,7 @@ def _build_per_volume_data_from_mlruns(
 ) -> dict[str, dict[str, dict[int, np.ndarray]]]:
     """Build per-volume data from synthetic mlruns (same logic as flow)."""
     from minivess.pipeline.biostatistics_duckdb import (
+        _is_per_volume_metric,
         _parse_per_volume_metric,
         _read_metrics,
     )
@@ -127,7 +135,7 @@ def _build_per_volume_data_from_mlruns(
         run_dir = mlruns_dir / run.experiment_id / run.run_id
         metrics = _read_metrics(run_dir)
         for metric_name, value in metrics.items():
-            if "eval_fold" in metric_name and "_vol_" in metric_name:
+            if _is_per_volume_metric(metric_name):
                 fold_id, _volume_id, base_metric = _parse_per_volume_metric(metric_name)
                 if fold_id is not None:
                     data.setdefault(base_metric, {}).setdefault(

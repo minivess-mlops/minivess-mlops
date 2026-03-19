@@ -4,7 +4,7 @@ Confirms deterministic reproducibility by comparing training-logged metrics
 against freshly computed inference metrics on the same validation volumes.
 
 MLflow metric file format: ``<timestamp> <value> <step>`` per line.
-Fold metrics are stored as ``eval_fold{N}_{metric_name}``.
+Fold metrics are stored as ``eval/{N}/{metric_name} (slash-prefix, #790)``.
 """
 
 from __future__ import annotations
@@ -121,7 +121,7 @@ def read_training_metric_for_fold(
 ) -> float:
     """Read a training-logged fold metric from the MLflow filesystem.
 
-    Reads ``eval_fold{fold_id}_{metric_name}`` and returns the last-logged
+    Reads ``eval/{fold_id}/{metric_name}`` and returns the last-logged
     value (last line, second field).
 
     Parameters
@@ -135,7 +135,7 @@ def read_training_metric_for_fold(
     fold_id:
         Cross-validation fold index.
     metric_name:
-        Base metric name (without the ``eval_fold{N}_`` prefix).
+        Base metric name (without the ``eval/{N}/`` prefix).
 
     Returns
     -------
@@ -151,7 +151,7 @@ def read_training_metric_for_fold(
         msg = f"Run directory does not exist: {run_dir}"
         raise FileNotFoundError(msg)
 
-    metric_file = run_dir / "metrics" / f"eval_fold{fold_id}_{metric_name}"
+    metric_file = run_dir / "metrics" / "eval" / str(fold_id) / metric_name
     if not metric_file.is_file():
         msg = f"Metric file does not exist: {metric_file}"
         raise FileNotFoundError(msg)

@@ -5,10 +5,19 @@ status: resolved
 
 options:
   - id: minivess_primary_external_test
-    name: "MiniVess Primary + External Test Datasets"
+    name: "MiniVess Primary + DeepVess External Test"
     prior_probability: 0.40
     posterior_probability: 0.88
-    description: "MiniVess (70 vols) primary; DeepVess/TubeNet/VesselNN for external validation"
+    description: >
+      MiniVess (70 vols) primary training/validation via 3-fold CV.
+      CRITICAL: MiniVess has NO held-out test set — ALL MiniVess evaluation is cross-validated.
+      DeepVess (~7 multiphoton vols, mouse brain cortex) is the ONLY true external test set.
+      TubeNet EXCLUDED (olfactory bulb, different organ, 1 2PM volume only).
+      VesselNN is drift detection ONLY (data leakage to MiniVess, same PI).
+      PLATFORM FRAMING: External test evaluation demonstrates the platform's ability to
+      handle arbitrary test datasets with extensible test/{dataset}/{metric} prefix,
+      subgroup analysis, and automated train/test comparison. The actual generalization
+      numbers are standard practice, NOT a key finding — the platform capability is.
   - id: multi_dataset_equal
     name: "Multiple Datasets (Equal Weight)"
     prior_probability: 0.25

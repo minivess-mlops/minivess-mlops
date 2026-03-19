@@ -25,7 +25,7 @@ def _make_synthetic_factorial_data(
     """
     rng = np.random.default_rng(seed)
 
-    models = ["dynunet", "segresnet", "sam3_vanilla", "vesselfm"]
+    models = ["dynunet", "mambavesselnet", "sam3_vanilla", "vesselfm"]
     losses = ["dice_ce", "cbdice_cldice", "dice_ce_cldice"]
 
     data: dict[str, dict[str, dict[int, np.ndarray]]] = {"cldice": {}}

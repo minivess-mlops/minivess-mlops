@@ -159,10 +159,3 @@ class TestSpecialAdaptersOverride:
 
         assert "save_checkpoint" in LoraModelAdapter.__dict__
         assert "load_checkpoint" in LoraModelAdapter.__dict__
-
-    def test_comma_overrides_checkpoint(self) -> None:
-        """CommaAdapter saves self (not self.net) — must keep override."""
-        from minivess.adapters.comma import CommaAdapter
-
-        assert "save_checkpoint" in CommaAdapter.__dict__
-        assert "load_checkpoint" in CommaAdapter.__dict__

@@ -1,0 +1,425 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>External Test Set Validation: DeepVess Integration into Analysis Flow for Biostatistics</title>
+    <branch>fix/pre-debug-qa-verification</branch>
+    <date>2026-03-19</date>
+    <status>planning</status>
+    <priority>P0 — PUBLICATION BLOCKER</priority>
+    <rationale>
+      MiniVess metrics are train/val metrics, NOT test metrics. The generalization gap
+      (train/val cross-validated vs. external test) is the TRUE metric for the manuscript.
+      Without external test evaluation, the Biostatistics Flow has no test data to analyze,
+      and the paper cannot make generalization claims. This is a TOTAL BLOCKER.
+    </rationale>
+    <source>knowledge-graph/decisions/L3-technology/paper_model_comparison.yaml</source>
+    <metalearning-pattern>.claude/metalearning/2026-03-07-silent-existing-failures.md — external
+      test datasets have code (external_datasets.py) but are NEVER wired into Analysis Flow.
+      Classic "silent existing failure" pattern.</metalearning-pattern>
+  </metadata>
+
+  <user-prompt-verbatim>
+And to be clear, is the current Analysis Flow evaluating those test datasets for all the factorial cells? Like 4 volumes from both datasets to speed up things in this debug run? What is the implementation status of those external test sets! Are they actualy ever be run anywhere yet! Plan comprehensively how to implement them fully as part of the whole pipeline, this is now OBLIGATORY, no deferring or being lazy! And update the kg accordingly if it is clear what those datasets are used for! and create subsets that are DVC versioned with the 4 volumes in the Test Dataset/Dataloader (remember that no TRAIN or VAL splits exists for these datasets). And the metrics from these datasets are TOTAL BLOCKERS for the publication as the minivess metrics are train/val metrics, not the test (and the generalization gap is measured between train/val cross-validated and the test). Design also how the prefixes work for test sets, as for the same train/val set we can have test/deepvess/metric and test/tubenet/metric for subpopulation analysis as the characteristic of each dataset can be quite different and we want the granular metrics in addition to test/aggregate/metric which aggregates all the used test sets together. Is there this /home/petteri/Dropbox/github-personal/minivess-mlops/.claude/metalearning/2026-03-07-silent-existing-failures.md happening now for test datasets as you never bothered to actually impelement and wire them to the Analysis Flow as this is a blocker for Biostatistics obviously. The Biostatistic module should compute stats and all metrics for 1) train/val and 2) test separately (e.g. for split in [train, test]:) and save the results for example to a dict with the dict[split] type of structure? And then it is easy to compare how different train and test perform, even though you probably and hopefully realize that the test performance is the "true" (or as "true" we can be) that we are analyzing then on the manuscript, and what should matter to any research lab or startup working on these things! This is quite massive task itself so let's launch a separate /home/petteri/Dropbox/github-personal/minivess-mlops/docs/planning/test-sets-external-validation-deepvess-tubenet-analysis-flow-for-biostatistics.xml plan that this is implemented as production-grade test evaluation with reviewer agents working on to optimize this .xml plan until converging into an excellent plan that we implement then with our self-learning TDD skill now in this branch, and after the implementation update docs/planning/cold-start-prompt-pre-debug-qa-verification.md and kg accordingly from the insights of this major plan! The same approach for interactive questionnaire. Rather ask me too many questions than too little to make 100% sure that we are on the same page about the goals of this work!
+  </user-prompt-verbatim>
+
+  <questions-and-answers>
+    <round number="1">
+      <qa id="Q1">
+        <question>VesselNN has 12 volumes. DeepVess has 1, TubeNet has 1. Which external datasets to use for test evaluation?</question>
+        <answer>DeepVess and TubeNet ONLY. VesselNN is NOT a test dataset — it is RESERVED for drift detection simulation only (introducing VesselNN volumes to see how drifts happen and how they are detected). VesselNN has data leakage to MiniVess (same PI). KG must be updated to clarify this.</answer>
+        <user-verbatim>Update the fucking kg again if this is so unclear. I was talking in my prompt about DeepVess and TubeNet. You assumed the VesselNN to be one too which has some data leakage to minivess, and is only RESERVED for the drift detection simulation</user-verbatim>
+        <kg-update>Update external_datasets.py, data/CLAUDE.md, KG domains/data.yaml: VesselNN role = drift_detection_only, NOT test evaluation</kg-update>
+      </qa>
+      <qa id="Q2">
+        <question>Aggregate metric weighting: simple mean or volume-weighted?</question>
+        <answer>Volume-weighted aggregate</answer>
+      </qa>
+      <qa id="Q3">
+        <question>Should ALL biostatistics analyses be computed separately for trainval and test?</question>
+        <answer>ALL analyses for both splits — full ANOVA + pairwise + effect sizes + specification curve for both trainval AND test</answer>
+      </qa>
+      <qa id="Q4">
+        <question>VesselNN bias concerns?</question>
+        <answer>VesselNN exists ONLY for drift detection purposes along with the synthetic stack generation. Not used for test evaluation at all.</answer>
+        <user-verbatim>See my previous answer. And save these answers to the test dataset planning and OBLIGATORY to plan how to update the kg now that this ambiguity is resolved. VesselNN exists ONLY for drift detection purposes along with the synthetic stack generation!</user-verbatim>
+      </qa>
+      <qa id="Q5">
+        <question>P0 task: audit ALL planned components for stub vs wired status</question>
+        <answer>User mandated (verbatim): "create a critical P0 task to double-check that EVERY FUCKING PLANNED component needed on this debug and full production run are actually wired and not just planned as some stub! (the actual stubs that can stay as stubs such as Posthog and Sentry for example obviously can stay stubs)"</answer>
+      </qa>
+      <qa id="Q6">
+        <question>Loud failures vs silent discards</question>
+        <answer>User mandated (verbatim): "put to CLAUDE.md, we need LOUD FAILURES always instead of silent discards or failures.. this is fucking annoying that the clear errors are brushed aside and it's horrible DevEx!"</answer>
+        <action>Add CLAUDE.md rule: all pipeline functions must RAISE exceptions on invalid/empty input, never silently return empty results</action>
+      </qa>
+    </round>
+  </questions-and-answers>
+
+  <context>
+    <datasets>
+      <dataset id="deepvess">
+        <role>External test set — generalization evaluation</role>
+        <source>Cornell eCommons (https://ecommons.cornell.edu/items/a79bb6d8-77cf-4917-8e26-f2716a6ac2a3)</source>
+        <paper>Haft-Javaherian et al. (2019). PLOS ONE. PMC6415838</paper>
+        <modality>Multi-photon microscopy</modality>
+        <species>Mouse brain (Alzheimer's disease models + wild-type)</species>
+        <resolution_um>1.0, 1.0, 1.7</resolution_um>
+        <n_volumes>WRONG IN CODE — external_datasets.py says 1, but paper has:
+          - 1 training volume (256x256x200 voxels, split 50/25/25 train/val/test)
+          - 6 independent test volumes (different mice, different voxel sizes)
+          - 24 application volumes (6 WT + 6 AD × 2 ages)
+          MUST BE VERIFIED after download. At least 7 labeled volumes available.</n_volumes>
+        <license>eCommons-educational</license>
+        <splits>NONE for our use — ALL volumes are test-only (we never train on DeepVess)</splits>
+        <debug_subset>4 volumes from the independent test set (DVC-versioned)</debug_subset>
+        <production_subset>ALL available labeled volumes</production_subset>
+        <registered_in>src/minivess/data/external_datasets.py::EXTERNAL_DATASETS["deepvess"]</registered_in>
+        <downloaded_locally>NO — data/external/ directory does not exist</downloaded_locally>
+        <bug>n_volumes=1 in external_datasets.py is WRONG — Claude confabulation when registry was created</bug>
+      </dataset>
+      <dataset id="tubenet_2pm">
+        <role>External test set — generalization evaluation</role>
+        <source>UCL Figshare (https://rdr.ucl.ac.uk/articles/dataset/3D_Microvascular_Image_Data_and_Labels_for_Machine_Learning/25715604)</source>
+        <paper>Holroyd et al. (2025). Biology Methods and Protocols. PMC12679403</paper>
+        <modality>Multiple: HREM, CT, RSOM, OCT-A (4 modalities)</modality>
+        <species>Mouse (liver, tumor), human (retina), porcine (liver)</species>
+        <resolution_um>Varies by modality — 0.20, 0.46, 5.20 is one example</resolution_um>
+        <n_volumes>WRONG IN CODE — external_datasets.py says 1, but paper has:
+          - 4 training volumes (liver HREM, 2x tumor CT, retina OCT-A)
+          - 1 test volume (porcine liver)
+          - 3 validation volumes
+          MUST BE VERIFIED after download. At least 8 labeled volumes available.
+          NOTE: Only 2PM-compatible modalities relevant for our microvasculature comparison.</n_volumes>
+        <license>CC-BY-4.0</license>
+        <splits>NONE for our use — ALL volumes are test-only (we never train on TubeNet)</splits>
+        <debug_subset>4 volumes (2PM-compatible subset, DVC-versioned)</debug_subset>
+        <production_subset>ALL 2PM-compatible labeled volumes</production_subset>
+        <registered_in>src/minivess/data/external_datasets.py::EXTERNAL_DATASETS["tubenet_2pm"]</registered_in>
+        <downloaded_locally>NO</downloaded_locally>
+        <bug>n_volumes=1 in external_datasets.py is WRONG — Claude confabulation when registry was created</bug>
+      </dataset>
+      <dataset id="vesselnn">
+        <role>DRIFT DETECTION ONLY — NOT a test dataset (data leakage to MiniVess from same PI)</role>
+        <source>GitHub (https://github.com/petteriTeikari/vesselNN)</source>
+        <modality>Two-photon microscopy</modality>
+        <species>Mouse brain</species>
+        <resolution_um>0.50, 0.50, 1.0</resolution_um>
+        <n_volumes>12</n_volumes>
+        <license>MIT</license>
+        <purpose>Reserved for drift detection simulation with synthetic stack generation.
+          Introducing VesselNN volumes to see how distribution shifts are detected.
+          NEVER used for test evaluation — data leakage concern (same PI as MiniVess).</purpose>
+        <registered_in>src/minivess/data/external_datasets.py::EXTERNAL_DATASETS["vesselnn"]</registered_in>
+        <downloaded_locally>NO</downloaded_locally>
+      </dataset>
+    </datasets>
+
+    <metric-prefix-design>
+      <description>
+        MLflow metric key design for test set evaluation.
+        Follows slash-prefix convention (MLflow 2.11+).
+        Separate from train/val metrics which use val/ prefix.
+        Extensible: adding a new test dataset = adding test/{newdataset}/{metric}.
+      </description>
+      <current-test-datasets>DeepVess only (7 multiphoton volumes, mouse brain cortex)</current-test-datasets>
+      <excluded>TubeNet (olfactory bulb — different organ, 1 volume only)</excluded>
+      <prefixes>
+        <prefix pattern="test/deepvess/{metric}">DeepVess test metric (e.g., test/deepvess/cldice)</prefix>
+        <prefix pattern="test/deepvess/{metric}/ci95_lo">DeepVess CI lower bound</prefix>
+        <prefix pattern="test/deepvess/{metric}/ci95_hi">DeepVess CI upper bound</prefix>
+        <prefix pattern="test/aggregate/{metric}">Aggregated across all test datasets (currently = DeepVess)</prefix>
+        <prefix pattern="test/aggregate/{metric}/ci95_lo">Aggregated CI lower bound</prefix>
+        <prefix pattern="test/aggregate/{metric}/ci95_hi">Aggregated CI upper bound</prefix>
+      </prefixes>
+      <extensibility>
+        Adding a new test dataset requires ONLY:
+        1. Register in external_datasets.py
+        2. Download + DVC-version data
+        3. Metrics auto-logged as test/{new_dataset}/{metric}
+        4. Aggregate auto-updated (volume-weighted across all test/ datasets)
+        No code changes to evaluation_runner, biostatistics, or dashboard.
+      </extensibility>
+    </metric-prefix-design>
+
+    <biostatistics-split-design>
+      <description>
+        Biostatistics module must compute ALL statistics separately for train/val and test.
+        Results stored in dict[split] structure for easy comparison.
+        CRITICAL: MiniVess has NO held-out test set. ALL MiniVess evaluation is 3-fold CV.
+        DeepVess is the ONLY true external test set.
+      </description>
+      <splits>
+        <split id="trainval">Cross-validated MiniVess train/val metrics (3-fold CV, 23 val volumes per fold)</split>
+        <split id="test">External test set metrics (DeepVess ONLY — ~7 multiphoton volumes, mouse brain cortex)</split>
+      </splits>
+      <excluded-datasets>
+        <dataset id="tubenet">EXCLUDED — olfactory bulb (different organ), 1 2PM volume. See CLAUDE.md.</dataset>
+        <dataset id="vesselnn">DRIFT DETECTION ONLY — data leakage to MiniVess (same PI). Never for test eval.</dataset>
+      </excluded-datasets>
+      <structure>
+        results = {
+          "trainval": { ANOVA tables, pairwise comparisons, effect sizes, spec curve, ... },
+          "test": { same structure, computed on test/deepvess/* metrics },
+        }
+      </structure>
+      <all-analyses-both-splits>
+        ALL statistical analyses run for BOTH splits:
+        - Factorial ANOVA (eta-squared, omega-squared per factor)
+        - Mixed-effects model (fold as random factor for trainval; N/A for test)
+        - Pairwise comparisons (Wilcoxon, Bayesian signed-rank, Holm correction)
+        - Effect sizes (Cohen's d, Cliff's delta, VDA)
+        - Specification curve (all conditions ranked by clDice)
+        - Critical Difference diagrams (Nemenyi post-hoc)
+        - ICC for cross-fold reproducibility (trainval only)
+      </all-analyses-both-splits>
+      <manuscript-role>
+        This is a PLATFORM paper, not a SOTA science paper. External test evaluation
+        demonstrates the PLATFORM CAPABILITY to:
+        1. Evaluate on arbitrary external datasets automatically
+        2. Use extensible test/{dataset}/{metric} prefix for subgroup analysis
+        3. Compute train/test differences automatically
+        4. Enable researchers to add their own test datasets via YAML config (zero code changes)
+        The actual generalization numbers on 7 DeepVess volumes are standard practice,
+        NOT a key finding. The platform's ability to do this automatically IS the contribution.
+        See: .claude/metalearning/2026-03-19-platform-paper-not-sota-science-recurring.md
+      </manuscript-role>
+    </biostatistics-split-design>
+  </context>
+
+  <implementation-status>
+    <summary>Infrastructure EXISTS but bridge is MISSING. Classic silent failure pattern.</summary>
+
+    <component id="registry" status="COMPLETE">
+      external_datasets.py: 3 datasets registered (DeepVess, TubeNet, VesselNN).
+      ExternalDatasetConfig dataclass, validate_external_config(), discover_external_test_pairs().
+      NOTE: VesselNN role must be updated to drift_detection_only (KG FIXED 2026-03-19).
+    </component>
+
+    <component id="dataloaders" status="COMPLETE">
+      test_datasets.py: DatasetRegistry, DatasetEntry, DatasetSubset, build_hierarchical_dataloaders().
+      HierarchicalDataLoaderDict type alias. Works with any dataset layout.
+    </component>
+
+    <component id="data_flow_discovery" status="COMPLETE">
+      data_flow.py: validate_external_data_task(), DataFlowResult.external_datasets field.
+      External datasets discovered and returned — but results are SILENTLY DISCARDED downstream.
+    </component>
+
+    <component id="evaluation_runner" status="COMPLETE_BUT_UNUSED">
+      evaluation_runner.py: UnifiedEvaluationRunner accepts arbitrary HierarchicalDataLoaderDict.
+      Metric naming: eval_{ds_name}_{subset_name}_{metric}. Would work if external data was passed.
+      PROBLEM: No test/ prefix convention — external test metrics use same prefix as train/val eval.
+    </component>
+
+    <component id="analysis_flow_wiring" status="BROKEN">
+      analysis_flow.py: Accepts dataloaders_dict parameter (line 1663).
+      BUT _build_dataloaders_from_config() returns {} (ALWAYS EMPTY).
+      Docker entry point passes empty dict — external datasets NEVER evaluated.
+      THIS IS THE ROOT CAUSE OF THE ENTIRE GAP.
+    </component>
+
+    <component id="metric_prefix" status="MISSING">
+      No test/ prefix convention exists. External test metrics would use eval_ prefix,
+      mixing with train/val eval metrics. Need: test/deepvess/{metric}, test/tubenet/{metric},
+      test/aggregate/{metric} (volume-weighted).
+    </component>
+
+    <component id="duckdb_readers" status="BROKEN_FOR_EXTERNAL">
+      biostatistics_duckdb.py: Only recognizes eval_fold{i}_{metric} prefix.
+      External test metrics (eval_deepvess_all_dsc) don't match — fall into training_metrics table.
+      Corrupts statistical analysis.
+    </component>
+
+    <component id="biostatistics_split" status="MISSING">
+      No train/val vs test separation. biostatistics_flow assumes CV folds only.
+      Need: results = {trainval: {ANOVA, pairwise, ...}, test: {same structure}}.
+      ALL statistical analyses must run for BOTH splits.
+    </component>
+
+    <component id="visualization" status="COMPLETE_BUT_NO_DATA">
+      external_generalization.py: plot_domain_gap(), plot_per_volume_scatter() ready.
+      No DataFrame builder to feed them — nobody builds the data source.
+    </component>
+
+    <component id="data_download" status="NOT_DONE">
+      data/external/ directory does not exist. DeepVess and TubeNet not downloaded.
+      download_external_dataset() exists but creates placeholder — manual download needed.
+      DVC versioning not set up for external datasets.
+    </component>
+
+    <component id="loud_failures" status="MISSING">
+      _build_dataloaders_from_config() silently returns {}. No logger.error(), no raise.
+      CLAUDE.md Rule 25 (added 2026-03-19): LOUD FAILURES mandatory.
+      All pipeline functions must raise on empty/invalid input.
+    </component>
+  </implementation-status>
+
+  <phases>
+    <phase id="0" name="Prerequisites" blocking="true">
+      <description>Fix pre-existing failures and add missing infrastructure config</description>
+      <tasks>
+        <task id="T-J0a">Remove all tubenet_2pm references from ~26 files (tests, configs, KG)</task>
+        <task id="T-J0b">Add EXTERNAL_DATA_DIR to .env.example (Rule 22)</task>
+        <task id="T-J0c">Add Docker volume mount for data/external/ in docker-compose.flows.yml (Rule 18)</task>
+        <task id="T-J0d">Fix data/CLAUDE.md: VesselNN role = drift_detection_only (not "External test only")</task>
+        <task id="T-J0e">Add MetricKeys constants: TEST_PREFIX, TEST_DEEPVESS_PREFIX, TEST_AGGREGATE_PREFIX</task>
+      </tasks>
+    </phase>
+
+    <phase id="1" name="Data Foundation" blocking="true">
+      <description>Download DeepVess, verify volumes, DVC-version, fix registry</description>
+      <tasks>
+        <task id="T-J1a">Download DeepVess from Cornell eCommons, create data/external/deepvess/{images,labels}/</task>
+        <task id="T-J1b">Verify volume count (expected 7), update n_volumes in external_datasets.py</task>
+        <task id="T-J1c">Add role field to ExternalDatasetConfig: "external_test" or "drift_detection_only"</task>
+        <task id="T-J1d">dvc add data/external/deepvess + push to GCS</task>
+      </tasks>
+      <tdd>
+        <test>Assert EXTERNAL_DATASETS has exactly 2 entries (deepvess, vesselnn), no tubenet</test>
+        <test>Assert deepvess.n_volumes matches actual downloaded count</test>
+        <test>Assert deepvess.role == "external_test", vesselnn.role == "drift_detection_only"</test>
+        <test>Assert discover_external_test_pairs() finds image/label pairs in downloaded data</test>
+      </tdd>
+    </phase>
+
+    <phase id="2" name="Loud Failure Enforcement" blocking="true">
+      <description>Convert all silent discards to loud failures per CLAUDE.md Rule 25</description>
+      <tasks>
+        <task id="T-J2a">discover_external_test_pairs(): raise FileNotFoundError instead of return []</task>
+        <task id="T-J2b">_build_dataloaders_from_config(): raise instead of return {}, fix misleading docstring</task>
+        <task id="T-J2c">Audit all @flow and @task entry points for empty-input silent discards</task>
+      </tasks>
+      <tdd>
+        <test>discover_external_test_pairs(nonexistent_path) raises FileNotFoundError</test>
+        <test>_build_dataloaders_from_config() with no EXTERNAL_DATA_DIR raises ValueError</test>
+        <test>All critical pipeline functions raise on empty input (parametrized audit test)</test>
+      </tdd>
+    </phase>
+
+    <phase id="3" name="Analysis Flow Wiring" blocking="true">
+      <description>Fix the broken bridge: data_flow discovery → analysis_flow evaluation</description>
+      <tasks>
+        <task id="T-J3a">Rewrite _build_dataloaders_from_config() to:
+          1. Read EXTERNAL_DATA_DIR from env (fail loudly if missing)
+          2. For each EXTERNAL_DATASETS entry with role=="external_test", discover pairs
+          3. Build DatasetRegistry, call build_hierarchical_dataloaders()
+          4. Return populated HierarchicalDataLoaderDict</task>
+        <task id="T-J3b">Update _entry_point_from_env() to pass non-empty dataloaders_dict</task>
+        <task id="T-J3c">Distinguish eval vs test dataloaders in analysis flow
+          (train/val dataloaders use eval/ prefix, external test use test/ prefix)</task>
+      </tasks>
+      <tdd>
+        <test>_build_dataloaders_from_config() returns non-empty dict with "deepvess" key</test>
+        <test>Integration: data_flow → analysis_flow produces non-empty loaders</test>
+        <test>External datasets are evaluated with test/ prefix, not eval/</test>
+      </tdd>
+    </phase>
+
+    <phase id="4" name="Test Metric Prefix Convention" blocking="true">
+      <description>Implement test/{dataset}/{metric} prefix in evaluation_runner</description>
+      <dependency>GROUP C slash-prefix migration should be complete first</dependency>
+      <tasks>
+        <task id="T-J4a">Add metric_prefix_style parameter to log_results_to_mlflow()
+          (is_external_test: bool → test/{ds}/{subset}/{metric} vs eval/{ds}/{subset}/{metric})</task>
+        <task id="T-J4b">Add aggregate metric computation: test/aggregate/{metric} as
+          volume-weighted mean across all test datasets (currently = DeepVess only)</task>
+        <task id="T-J4c">Log per-volume test metrics: test/{dataset}/vol_{id}/{metric}</task>
+      </tasks>
+      <tdd>
+        <test>External dataset "deepvess" logs as test/deepvess/all/dsc (not eval_deepvess_all_dsc)</test>
+        <test>CI keys are test/deepvess/all/dsc/ci95_lo and ci95_hi</test>
+        <test>test/aggregate/dsc equals test/deepvess/all/dsc (single dataset case)</test>
+      </tdd>
+    </phase>
+
+    <phase id="5" name="DuckDB Schema Extension" blocking="true">
+      <description>Add test_metrics table and test/ prefix parser</description>
+      <dependency>Phase 4 must complete (test/ prefix defined)</dependency>
+      <tasks>
+        <task id="T-J5a">Add test_metrics DDL table (run_id, dataset_name, subset_name,
+          metric_name, point_estimate, ci_lower, ci_upper)</task>
+        <task id="T-J5b">Add test/ prefix parser using str.split("/") (NOT regex — Rule 16)</task>
+        <task id="T-J5c">Update _insert_run() to route test/ metrics to test_metrics table</task>
+      </tasks>
+      <tdd>
+        <test>test/deepvess/all/dsc metric lands in test_metrics table, not eval_metrics</test>
+        <test>eval/fold0/dsc metric still lands in eval_metrics table (no regression)</test>
+      </tdd>
+    </phase>
+
+    <phase id="6" name="Biostatistics Split Support" blocking="true">
+      <description>Compute ALL analyses separately for trainval and test splits</description>
+      <dependency>Phase 5 must complete (test_metrics table populated)</dependency>
+      <tasks>
+        <task id="T-J6a">Add splits field to BiostatisticsConfig (default: ["trainval", "test"])</task>
+        <task id="T-J6b">Refactor run_biostatistics_flow() to iterate: for split in config.splits</task>
+        <task id="T-J6c">Refactor _build_per_volume_data() to handle test/{dataset}/vol_{j}/{metric} format</task>
+        <task id="T-J6d">Extend BiostatisticsResult with split-level structure: results[split]</task>
+      </tasks>
+      <tdd>
+        <test>Biostatistics output has keys ["trainval", "test"]</test>
+        <test>Both splits have identical structure (pairwise, variance, rankings, figures)</test>
+        <test>ALL analyses run for both: ANOVA, pairwise, effect sizes, specification curve</test>
+      </tdd>
+    </phase>
+
+    <phase id="7" name="Visualization + KG" parallel-safe="true">
+      <description>Wire visualization DataFrames and update knowledge graph</description>
+      <tasks>
+        <task id="T-J7a">Build DataFrame constructor from DuckDB test_metrics for plot_domain_gap()</task>
+        <task id="T-J7b">Wire to plot_per_volume_scatter() for test set per-volume analysis</task>
+        <task id="T-J7c">Update manuscript/results.yaml with test set requirements for R3b</task>
+      </tasks>
+      <tdd>
+        <test>DataFrame columns match plot_domain_gap() signature</test>
+        <test>Viz functions produce non-empty output with test_metrics data</test>
+      </tdd>
+    </phase>
+
+    <phase id="8" name="E2E Integration Test" blocking="true">
+      <description>Comprehensive end-to-end chain verification</description>
+      <dependency>ALL previous phases must complete</dependency>
+      <tasks>
+        <task id="T-J8">Create tests/v2/integration/test_external_evaluation_e2e.py:
+          1. Mock training artifacts in MLflow (synthetic checkpoints)
+          2. Create synthetic DeepVess data (2 volumes, small NIfTI)
+          3. Run analysis flow → verify test/deepvess/all/dsc metric logged
+          4. Run biostatistics flow → verify split-level results exist
+          5. Verify visualization DataFrames are non-empty
+          Mark @pytest.mark.slow</task>
+      </tasks>
+      <tdd>
+        <test>Full chain: mock training → external eval → biostatistics split → viz</test>
+        <test>test/deepvess/* metrics exist in MLflow after analysis flow</test>
+        <test>Biostatistics results["test"] has correct statistical output structure</test>
+      </tdd>
+    </phase>
+  </phases>
+
+  <effort-estimate>
+    <total>~18-22 hours across 8 phases + prerequisites</total>
+    <breakdown>
+      <phase id="0">1-2 hours (cleanup, env vars, constants)</phase>
+      <phase id="1">2-3 hours (download, verify, DVC, registry fixes)</phase>
+      <phase id="2">1 hour (loud failure audit)</phase>
+      <phase id="3">3-4 hours (core wiring — the hardest task)</phase>
+      <phase id="4">2 hours (metric prefix parameterization)</phase>
+      <phase id="5">2-3 hours (DuckDB schema + parsers)</phase>
+      <phase id="6">3-4 hours (biostatistics split refactor)</phase>
+      <phase id="7">1-2 hours (viz + KG)</phase>
+      <phase id="8">2-3 hours (e2e integration test)</phase>
+    </breakdown>
+  </effort-estimate>
+
+  <dependency-chain>
+    Phase 0 (prerequisites)
+      → Phase 1 (data download)
+      → Phase 2 (loud failures)
+      → Phase 3 (analysis flow wiring)
+      → Phase 4 (test/ prefix) [DEPENDENCY: GROUP C slash-prefix migration]
+      → Phase 5 (DuckDB schema)
+      → Phase 6 (biostatistics split)
+      → Phase 7 (viz + KG) [parallel-safe with Phase 6]
+      → Phase 8 (e2e integration test) [LAST — depends on all]
+  </dependency-chain>
+</plan>

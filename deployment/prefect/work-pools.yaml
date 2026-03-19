@@ -19,7 +19,7 @@ work_pools:
           - minivess-network
         # Values from .env.example — fallbacks match .env.example defaults.
         environment:
-          MLFLOW_TRACKING_URI: "http://${MLFLOW_DOCKER_HOST:-minivess-mlflow}:${MLFLOW_PORT:-5000}"
+          MLFLOW_TRACKING_URI: "http://minivess-mlflow:${MLFLOW_PORT:-5000}"
           PREFECT_API_URL: "http://${PREFECT_DOCKER_HOST:-minivess-prefect}:${PREFECT_PORT:-4200}/api"
     concurrency_limit: 4
 
@@ -38,7 +38,7 @@ work_pools:
             capabilities:
               - - gpu
         environment:
-          MLFLOW_TRACKING_URI: "http://${MLFLOW_DOCKER_HOST:-minivess-mlflow}:${MLFLOW_PORT:-5000}"
+          MLFLOW_TRACKING_URI: "http://minivess-mlflow:${MLFLOW_PORT:-5000}"
           PREFECT_API_URL: "http://${PREFECT_DOCKER_HOST:-minivess-prefect}:${PREFECT_PORT:-4200}/api"
           NVIDIA_VISIBLE_DEVICES: all
     concurrency_limit: 1
@@ -50,6 +50,7 @@ work_pools:
       variables:
         working_dir: "."
         env:
-          # SkyPilot uses a different DNS from Docker Compose (see .env.example MLFLOW_SKYPILOT_HOST)
-          MLFLOW_TRACKING_URI: "http://${MLFLOW_SKYPILOT_HOST:-mlflow}:${MLFLOW_PORT:-5000}"
+          # SkyPilot jobs set MLFLOW_TRACKING_URI directly in their YAML envs block.
+          # This fallback uses ${MLFLOW_TRACKING_URI} from .env (whatever the user configured).
+          MLFLOW_TRACKING_URI: "${MLFLOW_TRACKING_URI}"
     concurrency_limit: 8

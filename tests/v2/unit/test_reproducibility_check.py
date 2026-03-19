@@ -45,7 +45,11 @@ def _make_mlruns_run(
 
     if metrics:
         for name, lines in metrics.items():
-            (metrics_dir / name).write_text("\n".join(lines) + "\n", encoding="utf-8")
+            # Support slash-prefix paths (e.g. "eval/0/dsc") by creating
+            # intermediate directories as needed.
+            metric_file = metrics_dir / name
+            metric_file.parent.mkdir(parents=True, exist_ok=True)
+            metric_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     if tags:
         for key, value in tags.items():
@@ -187,15 +191,15 @@ class TestReadTrainingMetricForFold:
     """Tests for read_training_metric_for_fold()."""
 
     def test_reads_eval_fold_metric(self, tmp_path: Path) -> None:
-        """Reads the last value from eval_fold{N}_{metric} file."""
+        """Reads the last value from eval/{N}/{metric} file (slash-prefix, #790)."""
         mlruns = tmp_path / "mlruns"
         _make_mlruns_run(
             mlruns,
             "exp1",
             "run1",
             metrics={
-                "eval_fold0_dsc": ["1700000000 0.8500 99"],
-                "eval_fold1_dsc": ["1700000000 0.8700 99"],
+                "eval/0/dsc": ["1700000000 0.8500 99"],
+                "eval/1/dsc": ["1700000000 0.8700 99"],
             },
         )
         val = read_training_metric_for_fold(
@@ -204,16 +208,16 @@ class TestReadTrainingMetricForFold:
         assert val == pytest.approx(0.85)
 
     def test_reads_different_fold(self, tmp_path: Path) -> None:
-        """Reads correct fold when multiple exist."""
+        """Reads correct fold when multiple exist (slash-prefix, #790)."""
         mlruns = tmp_path / "mlruns"
         _make_mlruns_run(
             mlruns,
             "exp1",
             "run1",
             metrics={
-                "eval_fold0_dsc": ["1700000000 0.8500 99"],
-                "eval_fold1_dsc": ["1700000000 0.8700 99"],
-                "eval_fold2_dsc": ["1700000000 0.9000 99"],
+                "eval/0/dsc": ["1700000000 0.8500 99"],
+                "eval/1/dsc": ["1700000000 0.8700 99"],
+                "eval/2/dsc": ["1700000000 0.9000 99"],
             },
         )
         val = read_training_metric_for_fold(

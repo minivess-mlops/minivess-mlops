@@ -5,7 +5,7 @@ Validates:
 - vesselFM_base.pt weight file is listed in the repo
 - HF_TOKEN auth works (repo may require authentication)
 
-Auto-skips without MLFLOW_CLOUD_URI (same pattern as other cloud tests).
+Auto-skips when MLFLOW_TRACKING_URI is not a remote URL (same pattern as other cloud tests).
 """
 
 from __future__ import annotations
@@ -21,8 +21,11 @@ class TestHuggingFaceAccessibility:
 
     def test_vesselfm_hf_repo_exists(self) -> None:
         """bwittmann/vesselFM repo exists and is accessible."""
-        if not os.environ.get("MLFLOW_CLOUD_URI"):
-            pytest.skip("MLFLOW_CLOUD_URI not set — skipping cloud tests")
+        uri = os.environ.get("MLFLOW_TRACKING_URI", "")
+        if not uri or "localhost" in uri or not uri.startswith("http"):
+            pytest.skip(
+                "MLFLOW_TRACKING_URI not set to remote URL — skipping cloud tests"
+            )
 
         from huggingface_hub import repo_info
 
@@ -32,8 +35,11 @@ class TestHuggingFaceAccessibility:
 
     def test_vesselfm_weight_file_listed(self) -> None:
         """vesselFM_base.pt exists in the repo file listing."""
-        if not os.environ.get("MLFLOW_CLOUD_URI"):
-            pytest.skip("MLFLOW_CLOUD_URI not set — skipping cloud tests")
+        uri = os.environ.get("MLFLOW_TRACKING_URI", "")
+        if not uri or "localhost" in uri or not uri.startswith("http"):
+            pytest.skip(
+                "MLFLOW_TRACKING_URI not set to remote URL — skipping cloud tests"
+            )
 
         from huggingface_hub import list_repo_files
 

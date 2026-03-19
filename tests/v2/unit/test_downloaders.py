@@ -74,7 +74,7 @@ class TestGetDownloader:
 
         assert get_downloader("minivess") is None
         assert get_downloader("deepvess") is None
-        assert get_downloader("tubenet_2pm") is None
+        # tubenet_2pm excluded from project
 
     def test_unknown_dataset_returns_none(self) -> None:
         from minivess.data.downloaders import get_downloader

@@ -62,7 +62,8 @@ class TestAdapterFactoryRegistry:
         from minivess.adapters.model_builder import _MODEL_REGISTRY, build_adapter
 
         # SAM3 families require real weights + GPU; skip them here
-        skip_prefixes = {"sam3", "vessel", "comma", "mamba", "ulike", "multitask"}
+        # VesselFM and MambaVesselNet require special deps; skip them too
+        skip_prefixes = {"sam3", "vessel", "mamba"}
 
         monai_families = [
             f

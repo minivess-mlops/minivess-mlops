@@ -32,7 +32,7 @@ def _make_cost_records() -> list[dict[str, float | str]]:
         },
         {
             "run_id": "run_3",
-            "model": "segresnet",
+            "model": "vesselfm",
             "phase": "training",
             "gpu_hours": 3.0,
             "spot_cost_usd": 2.40,
@@ -40,7 +40,7 @@ def _make_cost_records() -> list[dict[str, float | str]]:
         },
         {
             "run_id": "run_4",
-            "model": "segresnet",
+            "model": "vesselfm",
             "phase": "debug",
             "gpu_hours": 0.5,
             "spot_cost_usd": 0.40,
@@ -131,11 +131,11 @@ class TestCostBreakdownByModel:
         summary = compute_spot_savings(records)
 
         assert "dynunet" in summary.cost_by_model
-        assert "segresnet" in summary.cost_by_model
+        assert "vesselfm" in summary.cost_by_model
         # dynunet: 1.60 + 1.20 = 2.80
         assert summary.cost_by_model["dynunet"] == pytest.approx(2.80, abs=0.01)
-        # segresnet: 2.40 + 0.40 = 2.80
-        assert summary.cost_by_model["segresnet"] == pytest.approx(2.80, abs=0.01)
+        # vesselfm: 2.40 + 0.40 = 2.80
+        assert summary.cost_by_model["vesselfm"] == pytest.approx(2.80, abs=0.01)
 
     def test_cost_by_model_sums_to_total(self) -> None:
         """Per-model costs sum to total spot cost."""
@@ -160,7 +160,7 @@ class TestCostSummaryDataclass:
             total_ondemand_cost_usd=8.40,
             savings_pct=33.33,
             cost_by_phase={"training": 5.20, "debug": 0.40},
-            cost_by_model={"dynunet": 2.80, "segresnet": 2.80},
+            cost_by_model={"dynunet": 2.80, "vesselfm": 2.80},
             total_gpu_hours=7.0,
         )
 

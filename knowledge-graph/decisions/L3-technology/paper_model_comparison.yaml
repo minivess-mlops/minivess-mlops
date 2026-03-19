@@ -113,16 +113,16 @@ models:
     adapter: src/minivess/adapters/vesselfm.py
     family: foundation_model_pretrained
     paper_section: R3c
-    training_strategy: zero_shot_AND_finetuned
+    training_strategy: zero_shot_only
     description: >
       Pre-trained DynUNet foundation model for vessel segmentation.
       CRITICAL: Trained on 17 datasets INCLUDING MiniVess → data leakage.
       MUST evaluate on DeepVess/TubeNet ONLY (NOT MiniVess).
-      Both zero-shot and fine-tuned results on external data.
+      Zero-shot evaluation only — NO fine-tuning.
     status: GPU_PENDING
-    epochs: 0 (zero-shot) + variable (fine-tune)
+    epochs: 0 (zero-shot only)
     folds: 3
-    dataset: deepvess_and_tubenet_ONLY
+    dataset: deepvess_ONLY  # TubeNet excluded (olfactory bulb, different organ). See CLAUDE.md.
     data_leakage_warning: >
       VesselFM was pre-trained on MiniVess. Evaluating on MiniVess
       measures memorization, not generalization. This is documented

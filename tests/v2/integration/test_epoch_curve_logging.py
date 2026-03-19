@@ -151,11 +151,11 @@ class TestEpochCurveLogging:
 
             mlflow.set_tracking_uri(tracking_uri)
             client = MlflowClient(tracking_uri=tracking_uri)
-            history = client.get_metric_history(run_id, "val_loss")
+            history = client.get_metric_history(run_id, "val/loss")
 
             assert len(history) >= 3, (
-                f"Expected ≥3 val_loss entries, got {len(history)}. "
-                "Trainer must log val_loss at every epoch via tracker.log_epoch_metrics()."
+                f"Expected ≥3 val/loss entries, got {len(history)}. "
+                "Trainer must log val/loss at every epoch via tracker.log_epoch_metrics()."
             )
 
     def test_epoch_steps_are_sequential(self) -> None:
@@ -194,7 +194,7 @@ class TestEpochCurveLogging:
             run_id = result["mlflow_run_id"]
             mlflow.set_tracking_uri(tracking_uri)
             client = MlflowClient(tracking_uri=tracking_uri)
-            history = client.get_metric_history(run_id, "val_loss")
+            history = client.get_metric_history(run_id, "val/loss")
 
             steps = [h.step for h in history]
             assert steps == list(range(1, len(steps) + 1)), (
@@ -237,11 +237,11 @@ class TestEpochCurveLogging:
             run_id = result["mlflow_run_id"]
             mlflow.set_tracking_uri(tracking_uri)
             client = MlflowClient(tracking_uri=tracking_uri)
-            history = client.get_metric_history(run_id, "train_loss")
+            history = client.get_metric_history(run_id, "train/loss")
 
             assert len(history) >= 2, (
-                f"Expected ≥2 train_loss entries, got {len(history)}. "
-                "train_loss must be logged at every epoch."
+                f"Expected ≥2 train/loss entries, got {len(history)}. "
+                "train/loss must be logged at every epoch."
             )
 
     def test_learning_rate_logged(self) -> None:
@@ -281,11 +281,10 @@ class TestEpochCurveLogging:
             mlflow.set_tracking_uri(tracking_uri)
             client = MlflowClient(tracking_uri=tracking_uri)
             all_metrics = client.get_run(run_id).data.metrics
-            # Check learning_rate is in any logged metric
-            lr_logged = any("learning_rate" in k or "lr" in k for k in all_metrics)
-            assert lr_logged, (
-                f"learning_rate not found in MLflow metrics: {list(all_metrics.keys())}. "
-                "Trainer must log learning_rate each epoch via tracker.log_epoch_metrics()."
+            # Trainer logs as optim/lr (slash-prefix convention, #790)
+            assert "optim/lr" in all_metrics, (
+                f"optim/lr not found in MLflow metrics: {list(all_metrics.keys())}. "
+                "Trainer must log optim/lr each epoch via tracker.log_epoch_metrics()."
             )
 
 

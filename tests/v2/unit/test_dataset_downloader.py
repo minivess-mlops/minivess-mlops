@@ -37,7 +37,7 @@ class TestDatasetDownloader:
         available = downloader.available_datasets()
         assert "vesselnn" in available
         assert "deepvess" in available
-        assert "tubenet_2pm" in available
+        # tubenet_2pm excluded: olfactory bulb, different organ, only 1 2PM volume
 
     def test_get_dataset_info(self) -> None:
         """Should return config for a known dataset."""

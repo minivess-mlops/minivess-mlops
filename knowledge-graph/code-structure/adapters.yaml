@@ -35,19 +35,6 @@ adapters:
       intent_source: "CLAUDE.md §Key Architecture Decisions"
     test_markers: [model_loading]
 
-  - id: segresnet
-    name: SegResNet
-    file: src/minivess/adapters/segresnet.py
-    family: monai_native
-    status: production
-    vram_inference_gb: 3.5
-    vram_training_gb: 3.5
-    source: "MONAI — residual encoder-decoder"
-    gpu_requirement: "Any CUDA GPU >= 8 GB"
-    intent:
-      why_chosen: "Ablation baseline — simpler architecture than DynUNet for comparison"
-      intent_source: "knowledge-graph/decisions/L3-technology/primary_3d_model.yaml"
-
   - id: sam3_vanilla
     name: "SAM3 Vanilla (V1)"
     file: src/minivess/adapters/sam3_vanilla.py
@@ -133,20 +120,6 @@ adapters:
         This is a known limitation — document in paper.
       intent_source: "docs/planning/repo-to-manuscript.md §Reviewer Objections R3"
     test_markers: [gpu_instance]
-
-  - id: swinunetr
-    name: "SwinUNETR"
-    file: src/minivess/adapters/swinunetr.py
-    family: monai_native
-    status: available
-    source: "MONAI — Swin Transformer UNETR"
-
-  - id: attentionunet
-    name: "AttentionUNet"
-    file: src/minivess/adapters/attentionunet.py
-    family: monai_native
-    status: available
-    source: "MONAI — attention gates"
 
   # ============================================================
   # PLANNED adapters — in paper scope but not yet implemented

@@ -95,7 +95,7 @@ class TestModelConfigNegative:
         """lora_rank=0 should be rejected (ge=1)."""
         with pytest.raises(ValidationError):
             ModelConfig(
-                family=ModelFamily.SAM3_LORA,
+                family=ModelFamily.SAM3_TOPOLORA,
                 name="test",
                 lora_rank=0,
             )

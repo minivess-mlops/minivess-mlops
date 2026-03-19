@@ -260,18 +260,29 @@ class TestVolumeDeclarations:
         for svc_name, svc_config in compose["services"].items():
             for vol_entry in svc_config.get("volumes", []):
                 vol_name = str(vol_entry).split(":")[0]
-                # Skip bind mounts (start with . or /)
-                if vol_name.startswith((".", "/")):
+                # Skip bind mounts:
+                # - relative paths (start with .)
+                # - absolute paths (start with /)
+                # - env var references like ${MODEL_CACHE_HOST_PATH} (bind mounts
+                #   whose host path comes from .env — not named volumes)
+                if vol_name.startswith((".", "/", "$")):
                     continue
                 assert vol_name in declared_volumes, (
                     f"Service '{svc_name}' references volume '{vol_name}' "
                     f"but it is not declared in the top-level volumes: section"
                 )
 
+    # Services that legitimately have no volume mounts (e.g. static asset servers).
+    # dashboard-ui is an nginx container serving pre-built React/Vite assets —
+    # it produces no artifacts and needs no persistent storage.
+    _VOLUME_EXEMPT_SERVICES: frozenset[str] = frozenset({"dashboard-ui"})
+
     def test_no_service_has_zero_volumes(self) -> None:
         compose = _load_compose()
         zero_volume_services = []
         for svc_name, svc_config in compose["services"].items():
+            if svc_name in self._VOLUME_EXEMPT_SERVICES:
+                continue
             vols = svc_config.get("volumes", [])
             if len(vols) == 0:
                 zero_volume_services.append(svc_name)

@@ -59,11 +59,11 @@ def runs_df() -> pd.DataFrame:
             },
             {
                 "run_id": "r4",
-                "run_name": "fold_0_segresnet",
+                "run_name": "fold_0_vesselfm",
                 "status": "FINISHED",
                 "start_time": now.timestamp() - 500,
                 "end_time": now.timestamp(),
-                "param_model_family": "segresnet",
+                "param_model_family": "vesselfm",
                 "metric_cost_total_usd": 0.80,
                 "metric_cost_effective_gpu_rate": 0.30,
                 "metric_cost_setup_fraction": 0.10,
@@ -102,7 +102,7 @@ class TestCostByModelFamily:
         assert "total_cost_usd_mean" in result.columns
         assert "total_cost_usd_std" in result.columns
         assert "effective_rate_mean" in result.columns
-        # dynunet has 2 runs, sam3_vanilla 1, segresnet 1 -> 3 families
+        # dynunet has 2 runs, sam3_vanilla 1, vesselfm 1 -> 3 families
         assert len(result) == 3
 
     def test_cost_by_model_family_empty(self, analytics: object) -> None:
@@ -115,7 +115,7 @@ class TestCostByModelFamily:
     ) -> None:
         result = analytics.cost_by_model_family(runs_df)  # type: ignore[attr-defined]
         families = set(result["model_family"].tolist())
-        assert families == {"dynunet", "sam3_vanilla", "segresnet"}
+        assert families == {"dynunet", "sam3_vanilla", "vesselfm"}
 
 
 class TestCostTrends:

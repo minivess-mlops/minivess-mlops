@@ -12,9 +12,9 @@
 
 acquisition:
   force_download: false
+  # TubeNet excluded — olfactory bulb, different organ, only 1 2PM volume. See CLAUDE.md.
   external_datasets:
     - deepvess
-    - tubenet_2pm
     - vesselnn
   dvc_auto_commit: true
   ometiff_input_dir: null  # set to path when converting real microscope data

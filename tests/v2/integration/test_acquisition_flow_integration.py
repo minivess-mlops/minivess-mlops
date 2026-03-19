@@ -93,8 +93,9 @@ class TestAcquisitionFlowIntegration:
             run_acquisition_flow,
         )
 
+        # tubenet_2pm excluded: olfactory bulb, different organ, only 1 2PM volume
         config = AcquisitionConfig(
-            datasets=["deepvess", "tubenet_2pm"],
+            datasets=["deepvess"],
             output_dir=tmp_path,
             convert_formats=False,
         )
@@ -103,10 +104,6 @@ class TestAcquisitionFlowIntegration:
         assert isinstance(result, AcquisitionResult)
         assert (
             result.datasets_acquired["deepvess"]
-            == DatasetAcquisitionStatus.MANUAL_REQUIRED
-        )
-        assert (
-            result.datasets_acquired["tubenet_2pm"]
             == DatasetAcquisitionStatus.MANUAL_REQUIRED
         )
 

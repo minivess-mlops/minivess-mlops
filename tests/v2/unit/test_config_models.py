@@ -137,7 +137,7 @@ class TestValidation:
     def test_lora_dropout_above_one_rejected(self) -> None:
         with pytest.raises(ValidationError):
             ModelConfig(
-                family=ModelFamily.SAM3_LORA,
+                family=ModelFamily.SAM3_TOPOLORA,
                 name="sam3",
                 lora_dropout=1.5,
             )

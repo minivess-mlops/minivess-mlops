@@ -204,47 +204,11 @@ def _build_dynunet(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     return DynUNetAdapter(config)
 
 
-def _build_segresnet(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
-    from minivess.adapters.segresnet import SegResNetAdapter
-
-    return SegResNetAdapter(config)
-
-
-def _build_swinunetr(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
-    from minivess.adapters.swinunetr import SwinUNETRAdapter
-
-    return SwinUNETRAdapter(config)
-
-
-def _build_unetr(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
-    from minivess.adapters.unetr import UNETRAdapter
-
-    return UNETRAdapter(config)
-
-
-def _build_attentionunet(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
-    from minivess.adapters.attentionunet import AttentionUnetAdapter
-
-    return AttentionUnetAdapter(config)
-
-
 def _build_vesselfm(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
     from minivess.adapters.vesselfm import VesselFMAdapter
 
     pretrained = config.architecture_params.get("pretrained", False)
     return VesselFMAdapter(config, pretrained=pretrained)
-
-
-def _build_comma(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
-    from minivess.adapters.comma import CommaAdapter
-
-    return CommaAdapter(config)
-
-
-def _build_mamba(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
-    from minivess.adapters.mamba import MambaAdapter
-
-    return MambaAdapter(config)
 
 
 def _build_sam3_vanilla(config: ModelConfig, **kwargs: Any) -> ModelAdapter:
@@ -283,13 +247,7 @@ def _populate_registry() -> None:
     from minivess.config.models import ModelFamily
 
     _MODEL_REGISTRY[ModelFamily.MONAI_DYNUNET] = _build_dynunet
-    _MODEL_REGISTRY[ModelFamily.MONAI_SEGRESNET] = _build_segresnet
-    _MODEL_REGISTRY[ModelFamily.MONAI_SWINUNETR] = _build_swinunetr
-    _MODEL_REGISTRY[ModelFamily.MONAI_UNETR] = _build_unetr
-    _MODEL_REGISTRY[ModelFamily.MONAI_ATTENTIONUNET] = _build_attentionunet
     _MODEL_REGISTRY[ModelFamily.VESSEL_FM] = _build_vesselfm
-    _MODEL_REGISTRY[ModelFamily.COMMA_MAMBA] = _build_comma
-    _MODEL_REGISTRY[ModelFamily.ULIKE_MAMBA] = _build_mamba
     _MODEL_REGISTRY[ModelFamily.SAM3_VANILLA] = _build_sam3_vanilla
     _MODEL_REGISTRY[ModelFamily.SAM3_TOPOLORA] = _build_sam3_topolora
     _MODEL_REGISTRY[ModelFamily.SAM3_HYBRID] = _build_sam3_hybrid

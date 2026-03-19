@@ -18,33 +18,29 @@ Run with::
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
-
-# Ensure Prefect is disabled before any minivess imports
-os.environ["PREFECT_DISABLED"] = "1"
 
 import pytest
 import torch
 from torch import nn
 
-from minivess.config.evaluation_config import (  # noqa: E402
+from minivess.config.evaluation_config import (
     EnsembleStrategyName,
     EvaluationConfig,
     MetricDirection,
 )
-from minivess.ensemble.builder import (  # noqa: E402
+from minivess.ensemble.builder import (
     EnsembleBuilder,
     EnsembleMember,
     EnsembleSpec,
     expand_runs_to_per_fold,
 )
-from minivess.pipeline.ci import ConfidenceInterval  # noqa: E402
-from minivess.pipeline.evaluation import FoldResult  # noqa: E402
-from minivess.pipeline.evaluation_runner import EvaluationResult  # noqa: E402
-from minivess.pipeline.mlruns_inspector import get_production_runs  # noqa: E402
+from minivess.pipeline.ci import ConfidenceInterval
+from minivess.pipeline.evaluation import FoldResult
+from minivess.pipeline.evaluation_runner import EvaluationResult
+from minivess.pipeline.mlruns_inspector import get_production_runs
 
 # ---------------------------------------------------------------------------
 # Constants

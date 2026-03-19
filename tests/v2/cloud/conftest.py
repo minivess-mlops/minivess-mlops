@@ -1,7 +1,8 @@
 """Cloud MLflow test fixtures (#625).
 
 Provides provider-agnostic fixtures for testing against live cloud
-MLflow deployments. All credentials come from MLFLOW_CLOUD_* env vars.
+MLflow deployments. Credentials come from MLFLOW_TRACKING_URI +
+MLFLOW_TRACKING_USERNAME/PASSWORD env vars.
 
 Secret fields use ``field(repr=False)`` to prevent credential leaks
 in pytest failure output (reviewer finding: all 3 flagged this).
@@ -51,23 +52,26 @@ def test_run_id() -> str:
 def cloud_mlflow_connection() -> CloudMLflowConnection:
     """Read cloud MLflow connection from env vars.
 
-    Skips entire session if credentials not available.
+    Skips entire session if MLFLOW_TRACKING_URI is not a remote HTTP URL
+    (i.e., localhost or file-based URIs are treated as non-cloud).
     """
-    uri = os.environ.get("MLFLOW_CLOUD_URI")
-    if not uri:
-        pytest.skip("MLFLOW_CLOUD_URI not set — skipping cloud tests")
-    password = os.environ.get("MLFLOW_CLOUD_PASSWORD")
+    uri = os.environ.get("MLFLOW_TRACKING_URI", "")
+    if not uri or "localhost" in uri or not uri.startswith("http"):
+        pytest.skip(
+            "MLFLOW_TRACKING_URI not set to a remote URL — skipping cloud tests"
+        )
+    password = os.environ.get("MLFLOW_TRACKING_PASSWORD", "")
     if not password:
-        pytest.skip("MLFLOW_CLOUD_PASSWORD not set — skipping cloud tests")
+        pytest.skip("MLFLOW_TRACKING_PASSWORD not set — skipping cloud tests")
     return CloudMLflowConnection(
         tracking_uri=uri,
-        username=os.environ.get("MLFLOW_CLOUD_USERNAME", "admin"),
+        username=os.environ.get("MLFLOW_TRACKING_USERNAME", "admin"),
         password=password,
-        s3_endpoint=os.environ.get("MLFLOW_CLOUD_S3_ENDPOINT", ""),
-        s3_access_key=os.environ.get("MLFLOW_CLOUD_S3_ACCESS_KEY", ""),
-        s3_secret_key=os.environ.get("MLFLOW_CLOUD_S3_SECRET_KEY", ""),
-        s3_bucket=os.environ.get("MLFLOW_CLOUD_S3_BUCKET", "mlflow-artifacts"),
-        provider_name=os.environ.get("MLFLOW_CLOUD_PROVIDER", "unknown"),
+        s3_endpoint=os.environ.get("MLFLOW_S3_ENDPOINT_URL", ""),
+        s3_access_key=os.environ.get("AWS_ACCESS_KEY_ID", ""),
+        s3_secret_key=os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
+        s3_bucket=os.environ.get("MLFLOW_ARTIFACT_BUCKET", "mlflow-artifacts"),
+        provider_name=os.environ.get("CLOUD_PROVIDER", "unknown"),
     )
 
 
@@ -109,7 +113,7 @@ def cloud_s3_client(cloud_mlflow_connection: CloudMLflowConnection):
     import boto3
 
     if not cloud_mlflow_connection.s3_endpoint:
-        pytest.skip("MLFLOW_CLOUD_S3_ENDPOINT not set — skipping S3 tests")
+        pytest.skip("MLFLOW_S3_ENDPOINT_URL not set — skipping S3 tests")
     return boto3.client(
         "s3",
         endpoint_url=cloud_mlflow_connection.s3_endpoint,
@@ -125,8 +129,8 @@ def cleanup_test_experiments(request: pytest.FixtureRequest):
     Handles crash recovery (reviewer finding: yield-only misses SIGKILL).
     Only runs when cloud credentials are available (otherwise no-op).
     """
-    uri = os.environ.get("MLFLOW_CLOUD_URI")
-    if not uri:
+    uri = os.environ.get("MLFLOW_TRACKING_URI", "")
+    if not uri or "localhost" in uri or not uri.startswith("http"):
         yield
         return
 

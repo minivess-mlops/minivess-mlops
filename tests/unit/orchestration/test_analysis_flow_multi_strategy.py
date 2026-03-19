@@ -140,7 +140,7 @@ class TestAnalysisFlowGuard:
         from pathlib import Path
 
         _BANNED_FAMILIES = frozenset(
-            {"sam3", "dynunet", "mamba", "vesselfm", "unetr", "segresnet"}
+            {"sam3", "dynunet", "mamba", "vesselfm", "mambavesselnet"}
         )
 
         source = (

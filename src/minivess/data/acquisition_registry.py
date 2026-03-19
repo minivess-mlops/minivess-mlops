@@ -1,7 +1,8 @@
 """Dataset acquisition registry — metadata and availability checking.
 
-Central registry of all 4 datasets with download methods, authentication
+Central registry of all 3 datasets with download methods, authentication
 requirements, source formats, and human-readable download instructions.
+# TubeNet excluded — olfactory bulb, different organ, only 1 2PM volume. See CLAUDE.md.
 """
 
 from __future__ import annotations
@@ -91,24 +92,7 @@ ACQUISITION_REGISTRY: dict[str, DatasetAcquisitionEntry] = {
         ),
         expected_checksums=None,
     ),
-    "tubenet_2pm": DatasetAcquisitionEntry(
-        name="tubenet_2pm",
-        source_url=(
-            "https://rdr.ucl.ac.uk/articles/dataset/"
-            "3D_Microvascular_Image_Data_and_Labels_"
-            "for_Machine_Learning/25715604"
-        ),
-        download_method="manual",
-        requires_auth=False,
-        source_format="tiff",
-        manual_instructions=(
-            "1. Go to the UCL Research Data Repository (link in source_url)\n"
-            "2. Download the TIFF data files from the Figshare page\n"
-            "3. Place in data/raw/tubenet_2pm/images/ and data/raw/tubenet_2pm/labels/\n"
-            "4. Flow 0 will convert TIFF → NIfTI automatically"
-        ),
-        expected_checksums=None,
-    ),
+    # TubeNet excluded — olfactory bulb, different organ, only 1 2PM volume. See CLAUDE.md.
     "vesselnn": DatasetAcquisitionEntry(
         name="vesselnn",
         source_url="https://github.com/petteriTeikari/vesselNN",

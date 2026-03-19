@@ -28,11 +28,11 @@ def identify_production_runs(
     mlruns_dir: Path,
     experiment_id: str,
 ) -> list[str]:
-    """Identify production runs by presence of eval_fold2 metrics.
+    """Identify production runs by presence of eval/2/ metrics.
 
     A run is classified as *production* when it has evaluation metrics for
     **all three folds** (fold0, fold1, and fold2), indicated by the presence
-    of at least one metric file whose name starts with ``eval_fold2``.
+    of at least one metric file whose name is in ``eval/2/`` subdirectory (slash-prefix, #790).
 
     Incomplete runs (e.g. those interrupted after fold0/fold1 only) are
     excluded.
@@ -56,11 +56,8 @@ def identify_production_runs(
         if not metrics_dir.is_dir():
             continue
         # Production discriminator: all 3 folds complete (fold2 present)
-        has_fold2 = any(
-            metric_file.name.startswith("eval_fold2")
-            for metric_file in metrics_dir.iterdir()
-            if metric_file.is_file()
-        )
+        eval_fold2_dir = metrics_dir / "eval" / "2"
+        has_fold2 = eval_fold2_dir.is_dir() and any(eval_fold2_dir.iterdir())
         if has_fold2:
             production_runs.append(run_dir.name)
 
