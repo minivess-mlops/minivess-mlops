@@ -10,10 +10,14 @@ Split definitions: `configs/splits/3fold_seed42.json`
 
 | Dataset | Role | Volumes | Modality | Spacing (μm) | License |
 |---------|------|---------|----------|--------------|---------|
-| **MiniVess** | Primary training | 70 | 2PM mouse brain vasculature | 0.31–4.97 (XY~1.0, Z~1.5) | CC BY-NC-SA |
-| **DeepVess** | External test | ~6 sub-vols | Multi-photon mouse brain | 1.00×1.00×1.70 | eCommons-educational |
-| **TubeNet 2PM** | External test | ~2 sub-vols | Two-photon mouse brain | 0.20×0.46×5.20 | CC-BY-4.0 ✓ |
-| **VesselNN** | External test | 12 | Two-photon mouse brain | 0.50×0.50×1.00 | MIT ✓ |
+| **MiniVess** | Primary training/val | 70 | 2PM mouse brain vasculature | 0.31–4.97 (XY~1.0, Z~1.5) | CC BY-NC-SA |
+| **DeepVess** | External TEST | ~7 labeled | Multi-photon mouse brain cortex | 1.00×1.00×1.70 | eCommons-educational |
+| ~~TubeNet 2PM~~ | **EXCLUDED** | — | — | — | — |
+| **VesselNN** | Drift detection ONLY | 12 | Two-photon mouse brain | 0.50×0.50×1.00 | MIT ✓ |
+
+> **TubeNet excluded** (2026-03-19): Only 1 two-photon volume (mouse olfactory bulb — different organ from MiniVess cortex). Other 7 volumes are HREM/CT/RSOM/OCT-A (non-multiphoton). See CLAUDE.md Datasets section.
+>
+> **VesselNN is NOT a test dataset** — reserved for drift detection simulation only (data leakage to MiniVess from same PI).
 
 ---
 
@@ -94,24 +98,16 @@ download_external_dataset("deepvess", output_dir=Path("data/external/deepvess"))
 
 ---
 
-## 3. TubeNet 2PM (External Test Dataset)
+## 3. ~~TubeNet 2PM~~ (EXCLUDED)
 
-**Citation**: Holroyd et al. (2025). "tUbeNet: a deep learning tool for 3D vessel
-segmentation." *Biology Methods and Protocols* 10(1): bpaf009.
-DOI: [10.1093/biomethods/bpaf009](https://doi.org/10.1093/biomethods/bpaf009)
-
-**Source URL**: https://rdr.ucl.ac.uk/articles/dataset/3D_Microvascular_Image_Data_and_Labels_for_Machine_Learning/25715604
-**License**: CC-BY-4.0 ✓ (verified)
-
-### Properties
-- **Volumes**: 1 large volume → decomposed into ~2 sub-volumes
-- **Anatomy**: Mouse brain microvasculature (two-photon)
-- **Voxel spacing**: 0.20 × 0.46 × 5.20 μm (highly anisotropic Z)
-- **Purpose**: External generalization test — never used in training
+> **EXCLUDED** (2026-03-19): Only 1 two-photon volume available (mouse olfactory bulb —
+> different organ from MiniVess cortex). Other 7 volumes are HREM/CT/RSOM/OCT-A
+> (non-multiphoton modalities). Not useful for microvasculature generalization testing.
+> NEVER re-add to test evaluation scope. See CLAUDE.md Datasets section.
 
 ---
 
-## 4. VesselNN (External Test Dataset)
+## 4. VesselNN (Drift Detection ONLY — NOT a Test Dataset)
 
 **Citation**: Teikari et al. (2016). "Deep learning convolutional networks for multiphoton
 microscopy vasculature segmentation." arXiv:1606.02382.
