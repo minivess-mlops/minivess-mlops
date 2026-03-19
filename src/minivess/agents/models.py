@@ -68,3 +68,47 @@ class FigureCaption(BaseModel):
         default=None,
         description="Statistical test details if applicable",
     )
+
+
+class AcquisitionDecision(BaseModel):
+    """Structured acquisition decision from the conformal bandit agent.
+
+    Used by the acquisition agent in acquisition_flow.
+    """
+
+    selected_volumes: list[str] = Field(
+        description="Volume IDs selected for acquisition",
+        default_factory=list,
+    )
+    reasoning: str = Field(description="Justification for the selection")
+    uncertainty_summary: str = Field(
+        description="Summary of uncertainty landscape",
+        default="",
+    )
+    budget_used: float = Field(
+        ge=0.0,
+        description="Budget consumed by this acquisition round",
+        default=0.0,
+    )
+
+
+class AnnotationPriority(BaseModel):
+    """Structured annotation priority recommendation.
+
+    Used by the active learning annotation agent.
+    """
+
+    recommended_volumes: list[str] = Field(
+        description="Volume IDs recommended for annotation (priority order)",
+        default_factory=list,
+    )
+    reasoning: str = Field(description="Justification for the ranking")
+    expected_improvement: str = Field(
+        description="Estimated impact on model performance",
+        default="",
+    )
+    top_disagreement_score: float = Field(
+        ge=0.0,
+        description="Highest disagreement score in the ranking",
+        default=0.0,
+    )
