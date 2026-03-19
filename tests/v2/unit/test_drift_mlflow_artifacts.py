@@ -8,11 +8,23 @@ the drift_reports/ artifact path convention.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import mlflow
 import numpy as np
 import pandas as pd
+import pytest
+
+# evidently has unescaped regex in docstrings that causes SyntaxError on Python 3.13+.
+try:
+    import evidently  # noqa: F401
+except SyntaxError:
+    pytest.skip(
+        "evidently SyntaxError (invalid escape sequences on Python "
+        f"{sys.version_info.major}.{sys.version_info.minor})",
+        allow_module_level=True,
+    )
 
 
 def _make_reference_features(*, n_samples: int = 50, seed: int = 42) -> pd.DataFrame:

@@ -9,6 +9,10 @@ from __future__ import annotations
 import json
 import subprocess
 
+import pytest
+
+cyclonedx = pytest.importorskip("cyclonedx", reason="cyclonedx-bom not installed")
+
 
 class TestCycloneDXInstalled:
     """CycloneDX SBOM generator must be importable."""

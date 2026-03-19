@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
+import pytest
+
+pandera = pytest.importorskip("pandera", reason="pandera not installed")
 
 if TYPE_CHECKING:
     from pathlib import Path

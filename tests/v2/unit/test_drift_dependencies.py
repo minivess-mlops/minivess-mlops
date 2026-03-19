@@ -9,6 +9,20 @@ T3 uses scipy.stats.permutation_test for MMD p-values instead of alibi-detect.
 
 from __future__ import annotations
 
+import sys
+
+import pytest
+
+# evidently has unescaped regex in docstrings that causes SyntaxError on Python 3.13+.
+try:
+    import evidently as _evidently  # noqa: F401
+except SyntaxError:
+    pytest.skip(
+        "evidently SyntaxError (invalid escape sequences on Python "
+        f"{sys.version_info.major}.{sys.version_info.minor})",
+        allow_module_level=True,
+    )
+
 
 class TestDriftDependencies:
     """Verify drift detection library imports."""

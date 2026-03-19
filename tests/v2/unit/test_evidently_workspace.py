@@ -5,11 +5,22 @@ TDD RED phase for Task T-B1 (Issue #762).
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
+
+# evidently has unescaped regex in docstrings that causes SyntaxError on Python 3.13+.
+try:
+    import evidently  # noqa: F401
+except SyntaxError:
+    pytest.skip(
+        "evidently SyntaxError (invalid escape sequences on Python "
+        f"{sys.version_info.major}.{sys.version_info.minor})",
+        allow_module_level=True,
+    )
 
 
 @pytest.fixture
