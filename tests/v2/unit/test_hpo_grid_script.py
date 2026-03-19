@@ -120,8 +120,8 @@ def test_hpo_grid_configs_have_required_keys() -> None:
     """Grid-sweep HPO configs must have: experiment_name, model_family, hyperparameters, fixed.
 
     Only checks configs that use the grid schema (contain ``hyperparameters`` key).
-    Optuna-style configs (``search_space`` key) have a different schema and are
-    validated separately.
+    Optuna-style configs (``search_space`` key) and factorial configs (``factors``
+    key) have different schemas and are validated separately.
     """
     required_keys = {"experiment_name", "model_family", "hyperparameters", "fixed"}
     grid_configs_found = False
@@ -130,6 +130,9 @@ def test_hpo_grid_configs_have_required_keys() -> None:
         parsed = yaml.safe_load(content)
         # Skip Optuna-style configs (they use search_space, not hyperparameters)
         if "search_space" in parsed:
+            continue
+        # Skip factorial configs (they use factors, not hyperparameters)
+        if "factors" in parsed:
             continue
         grid_configs_found = True
         missing = required_keys - set(parsed.keys())

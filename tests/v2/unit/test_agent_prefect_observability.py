@@ -6,6 +6,10 @@ and have descriptive names visible in the Prefect dashboard.
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pydantic_ai", reason="pydantic_ai not installed")
+
 
 class TestAgentTasksHavePrefectNames:
     """All agent decision point tasks have Prefect task names."""

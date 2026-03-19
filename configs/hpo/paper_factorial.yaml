@@ -1,0 +1,48 @@
+# Paper factorial study — 24-cell grid (4 models x 3 losses x 2 aux_calibration).
+#
+# This is the canonical factorial design for the Nature Protocols manuscript.
+# 72 total training runs = 24 cells x 3 folds (seed=42).
+#
+# GUARDRAIL: 24 cells, NOT 128. LR and batch_size are NOT factors —
+# they are fixed at model-adaptive defaults. Adding them would 5x the cost
+# without scientific value (the paper's research question is about
+# model x loss x calibration interactions, not hyperparameter tuning).
+#
+# Estimated GCP cost: ~$65 on L4 spot (72 runs x ~$0.90/run)
+# Post-training (eval, biostatistics) runs locally on RTX 2070 Super (8 GB).
+#
+# Launch via SkyPilot (4 workers, 6 cells each):
+#   for i in 0 1 2 3; do
+#     sky jobs launch deployment/skypilot/hpo_grid_worker.yaml \
+#       --env WORKER_ID=$i --env TOTAL_WORKERS=4 -y
+#   done
+#
+# Closes: #857 (partial: grid partitioning), #789 (unblocks)
+
+experiment_name: paper_factorial
+description: "Nature Protocols 24-cell factorial: model x loss x calibration"
+
+# Factorial factors — Cartesian product = 4 x 3 x 2 = 24 cells
+factors:
+  model_family:
+    - dynunet
+    - segresnet
+    - sam3_vanilla
+    - vesselfm
+  loss_name:
+    - cbdice_cldice
+    - dice_ce
+    - dice_ce_cldice
+  aux_calibration:
+    - true
+    - false
+
+# Fixed parameters applied to every cell (NOT swept)
+fixed:
+  max_epochs: 100
+  num_folds: 3
+  compute: auto
+  learning_rate: 1.0e-3
+  batch_size: 2
+
+mlflow_experiment: minivess_paper_factorial
