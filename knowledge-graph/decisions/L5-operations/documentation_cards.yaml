@@ -1,7 +1,7 @@
 decision_id: documentation_cards
 title: "AI Documentation Card Types for Platform Transparency"
 level: L5-operations
-status: active
+status: partial
 options:
   - id: minimal_model_card_only
     name: "Model Cards only (current state)"
