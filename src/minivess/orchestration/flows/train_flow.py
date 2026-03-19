@@ -24,6 +24,7 @@ import mlflow
 import yaml
 from prefect import flow, task
 
+from minivess.compliance.audit import AuditTrail
 from minivess.observability.infrastructure_timing import (
     estimate_cost_from_first_epoch,
     generate_timing_jsonl,
@@ -803,6 +804,39 @@ def training_flow(
     # Load fold splits (outside MLflow run — no side effects)
     splits = load_fold_splits_task(splits_dir)
     folds_to_run = splits[:num_folds]
+
+    # FDA audit trail: log data access (Issue #821 — IEC 62304 traceability)
+    dataset_name = (
+        config_dict.get("dataset_name", "minivess") if config_dict else "minivess"
+    )
+    file_paths: list[str] = []
+    for fold_split in folds_to_run:
+        # fold_split is FoldSplit dataclass (has .train/.val attrs) or dict
+        _train = (
+            fold_split.get("train", [])
+            if isinstance(fold_split, dict)
+            else getattr(fold_split, "train", [])
+        )
+        _val = (
+            fold_split.get("val", [])
+            if isinstance(fold_split, dict)
+            else getattr(fold_split, "val", [])
+        )
+        for entry in _train:
+            if isinstance(entry, dict) and "image" in entry:
+                file_paths.append(entry["image"])
+        for entry in _val:
+            if isinstance(entry, dict) and "image" in entry:
+                file_paths.append(entry["image"])
+    audit = AuditTrail()
+    audit.log_data_access(
+        dataset_name=dataset_name,
+        file_paths=file_paths,
+        actor="train-flow",
+    )
+    logger.info(
+        "Audit: logged data access for %s (%d files)", dataset_name, len(file_paths)
+    )
 
     # Build per-fold config dict
     config: dict[str, Any] = {
