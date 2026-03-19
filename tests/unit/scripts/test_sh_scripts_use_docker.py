@@ -91,7 +91,8 @@ class TestTrainingScriptsInvokeDocker:
                 continue
             has_docker = "docker compose" in content or "docker run" in content
             has_prefect = "prefect deployment run" in content
-            if not has_docker and not has_prefect:
+            has_skypilot = "sky jobs launch" in content  # SkyPilot uses Docker image_id
+            if not has_docker and not has_prefect and not has_skypilot:
                 violations.append(name)
         assert not violations, (
             f"Training scripts without Docker or Prefect invocation: {violations}"
