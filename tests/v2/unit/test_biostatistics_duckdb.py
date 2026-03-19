@@ -97,7 +97,7 @@ def _create_mock_mlruns_with_metrics(
 
 
 class TestBuildBiostatisticsDuckdb:
-    def test_schema_has_7_tables(self, tmp_path: Path) -> None:
+    def test_schema_has_all_tables(self, tmp_path: Path) -> None:
         mlruns = _create_mock_mlruns_with_metrics(
             tmp_path, ["dice_ce", "tversky"], n_folds=2
         )
@@ -118,7 +118,7 @@ class TestBuildBiostatisticsDuckdb:
         ]
         conn.close()
 
-        assert len(tables) == 7
+        assert len(tables) == len(BIOSTATISTICS_TABLES)
         for expected in BIOSTATISTICS_TABLES:
             assert expected in tables
 
@@ -209,4 +209,4 @@ class TestBuildBiostatisticsDuckdb:
         export_parquet(db_path, parquet_dir)
 
         parquet_files = list(parquet_dir.glob("*.parquet"))
-        assert len(parquet_files) == 7  # One per table
+        assert len(parquet_files) == len(BIOSTATISTICS_TABLES)  # One per table

@@ -66,6 +66,7 @@ class ExternalDatasetConfig:
     n_volumes: int
     license: str
     cite_ref: str
+    role: str = "external_test"
     license_verified: bool = True
 
 
@@ -104,6 +105,7 @@ EXTERNAL_DATASETS: dict[str, ExternalDatasetConfig] = {
         n_volumes=12,
         license="MIT",
         cite_ref="teikari_2016_vesselnn",
+        role="drift_detection_only",
         license_verified=True,
     ),
 }

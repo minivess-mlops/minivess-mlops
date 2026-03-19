@@ -228,6 +228,7 @@ class UnifiedEvaluationRunner:
         *,
         model_name: str,
         model_tags: dict[str, str] | None = None,
+        is_test_dataset: bool = False,
     ) -> str | None:
         """Log all results as one MLflow run in minivess_evaluation experiment.
 
@@ -239,6 +240,10 @@ class UnifiedEvaluationRunner:
             Model identifier for the run name.
         model_tags:
             Optional tags (e.g. ``model_type``, ``ensemble_strategy``).
+        is_test_dataset:
+            If ``True``, use ``test/{ds}/{subset}/{metric}`` prefix
+            (external test sets). If ``False``, use ``eval/{ds}/{subset}/{metric}``
+            (train/val MiniVess evaluation).
 
         Returns
         -------
@@ -258,6 +263,8 @@ class UnifiedEvaluationRunner:
         if model_tags:
             tags.update(model_tags)
 
+        prefix_root = "test" if is_test_dataset else "eval"
+
         with mlflow.start_run(run_name=f"eval_{model_name}") as run:
             mlflow.set_tags(tags)
 
@@ -265,7 +272,7 @@ class UnifiedEvaluationRunner:
             flat_metrics: dict[str, float] = {}
             for ds_name, subset_results in results.items():
                 for subset_name, eval_result in subset_results.items():
-                    prefix = f"eval/{ds_name}/{subset_name}/"
+                    prefix = f"{prefix_root}/{ds_name}/{subset_name}/"
                     for metric_name, ci in eval_result.fold_result.aggregated.items():
                         flat_metrics[f"{prefix}{metric_name}"] = ci.point_estimate
                         flat_metrics[f"{prefix}{metric_name}_ci95_lo"] = ci.lower
@@ -280,6 +287,25 @@ class UnifiedEvaluationRunner:
                             cldice=cldice_ci.point_estimate,
                         )
                         flat_metrics[f"{prefix}compound_masd_cldice"] = compound
+
+            # For test datasets, compute volume-weighted aggregate across all
+            # test datasets (currently = DeepVess only, so aggregate = per-dataset)
+            if is_test_dataset:
+                aggregate_metrics: dict[str, list[float]] = {}
+                for _ds_name, subset_results in results.items():
+                    for _subset_name, eval_result in subset_results.items():
+                        for (
+                            metric_name,
+                            ci,
+                        ) in eval_result.fold_result.aggregated.items():
+                            aggregate_metrics.setdefault(metric_name, []).append(
+                                ci.point_estimate,
+                            )
+                for metric_name, values in aggregate_metrics.items():
+                    if values:
+                        agg_val = sum(values) / len(values)
+                        if not math.isnan(agg_val):
+                            flat_metrics[f"test/aggregate/{metric_name}"] = agg_val
 
             # Filter out NaN values (MLflow rejects them)
             safe_metrics = {k: v for k, v in flat_metrics.items() if not math.isnan(v)}

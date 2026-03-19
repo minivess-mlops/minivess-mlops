@@ -25,6 +25,7 @@ BIOSTATISTICS_TABLES = [
     "champion_tags",
     "per_volume_metrics",
     "ensemble_members",
+    "test_metrics",
 ]
 
 # ---------------------------------------------------------------------------
@@ -103,6 +104,19 @@ _DDL_ENSEMBLE_MEMBERS = """
     )
 """
 
+_DDL_TEST_METRICS = """
+    CREATE TABLE IF NOT EXISTS test_metrics (
+        run_id VARCHAR,
+        dataset_name VARCHAR,
+        subset_name VARCHAR,
+        metric_name VARCHAR,
+        point_estimate DOUBLE,
+        ci_lower DOUBLE,
+        ci_upper DOUBLE,
+        PRIMARY KEY (run_id, dataset_name, subset_name, metric_name)
+    )
+"""
+
 _ALL_DDL = [
     _DDL_RUNS,
     _DDL_PARAMS,
@@ -111,6 +125,7 @@ _ALL_DDL = [
     _DDL_CHAMPION_TAGS,
     _DDL_PER_VOLUME_METRICS,
     _DDL_ENSEMBLE_MEMBERS,
+    _DDL_TEST_METRICS,
 ]
 
 # CI variant suffixes — skip these as standalone metrics
@@ -246,8 +261,24 @@ def _insert_run(conn: Any, run: Any, mlruns_dir: Path) -> None:
     # Insert metrics
     metrics = _read_metrics(run_dir)
     for metric_name, value in metrics.items():
-        # Classify the metric
-        if _is_per_volume_metric(metric_name):
+        # Classify the metric — test/ prefix first (most specific)
+        if _is_test_metric(metric_name):
+            dataset_name, subset_name, base_metric = _parse_test_metric(metric_name)
+            # Skip CI variant metrics
+            if not any(base_metric.endswith(s) for s in _CI_SUFFIXES):
+                conn.execute(
+                    "INSERT INTO test_metrics VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        run.run_id,
+                        dataset_name,
+                        subset_name,
+                        base_metric,
+                        value,
+                        None,
+                        None,
+                    ],
+                )
+        elif _is_per_volume_metric(metric_name):
             fold_id, volume_id, base_metric = _parse_per_volume_metric(metric_name)
             if fold_id is not None:
                 conn.execute(
@@ -366,3 +397,51 @@ def _parse_eval_fold_metric(metric_name: str) -> tuple[int, str] | None:
     if not parts[1].isdigit():
         return None
     return int(parts[1]), parts[2]
+
+
+def _is_test_metric(metric_name: str) -> bool:
+    """Check if metric name matches test/{dataset}/{metric} or test/{dataset}/{subset}/{metric}.
+
+    Uses str.split("/") — no regex (CLAUDE.md Rule 16).
+
+    Parameters
+    ----------
+    metric_name:
+        Slash-separated metric key.
+
+    Returns
+    -------
+    True if the metric has a test/ prefix.
+    """
+    parts = metric_name.split("/")
+    return len(parts) >= 3 and parts[0] == "test"
+
+
+def _parse_test_metric(metric_name: str) -> tuple[str, str, str]:
+    """Parse test/ prefix metrics into (dataset_name, subset_name, base_metric).
+
+    Handles two formats:
+    - ``test/{dataset}/{subset}/{metric}`` -> (dataset, subset, metric)
+    - ``test/{dataset}/{metric}``          -> (dataset, "", metric)
+
+    Uses str.split("/") — no regex (CLAUDE.md Rule 16).
+
+    Parameters
+    ----------
+    metric_name:
+        Slash-separated metric key starting with ``test/``.
+
+    Returns
+    -------
+    Tuple of (dataset_name, subset_name, base_metric).
+    """
+    parts = metric_name.split("/")
+    # parts[0] is always "test"
+    if len(parts) >= 4:
+        # test/deepvess/all/dsc -> ("deepvess", "all", "dsc")
+        return parts[1], parts[2], parts[3]
+    if len(parts) == 3:
+        # test/aggregate/dsc -> ("aggregate", "", "dsc")
+        return parts[1], "", parts[2]
+    # Shouldn't happen if _is_test_metric was checked first
+    return "", "", metric_name
