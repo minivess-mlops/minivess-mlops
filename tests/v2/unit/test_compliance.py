@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -89,24 +87,7 @@ class TestModelCard:
         assert "Test" in md
 
 
-@pytest.mark.skipif(
-    not pytest.importorskip("langgraph", reason="langgraph not installed"),
-    reason="langgraph not installed",
-)
-class TestAgentGraph:
-    def test_training_graph_compiles(self) -> None:
-        from minivess.agents._deprecated.graph import build_training_graph
-
-        graph = build_training_graph()
-        assert hasattr(graph, "invoke")
-
-    def test_training_state_has_expected_keys(self) -> None:
-        from minivess.agents._deprecated.graph import TrainingState
-
-        annotations = TrainingState.__annotations__
-        assert "model_name" in annotations
-        assert "status" in annotations
-        assert "results" in annotations
+# LangGraph tests REMOVED — deprecated per ADR-0007 (Pydantic AI replaces LangGraph).
 
 
 class TestEvalSuite:
