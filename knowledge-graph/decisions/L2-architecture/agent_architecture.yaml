@@ -7,15 +7,15 @@ options:
   - id: pydantic_ai_prefect
     name: "Pydantic AI + PrefectAgent"
     prior_probability: 0.30
-    posterior_probability: 0.85
+    posterior_probability: 0.90
   - id: langgraph_stateful
     name: "LangGraph Stateful Agents (deprecated)"
     prior_probability: 0.45
-    posterior_probability: 0.05
+    posterior_probability: 0.04
   - id: custom_state_machine
     name: "Custom State Machine"
     prior_probability: 0.15
-    posterior_probability: 0.08
+    posterior_probability: 0.04
   - id: no_agents
     name: "No Agents"
     prior_probability: 0.10
