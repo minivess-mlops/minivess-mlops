@@ -19,12 +19,24 @@ from minivess.adapters.model_builder import _sam3_package_available
 if TYPE_CHECKING:
     from pathlib import Path
 
+
+def _insufficient_vram() -> bool:
+    """Check if GPU VRAM is too small for SAM3 (needs >= 16 GB)."""
+    if not torch.cuda.is_available():
+        return True
+    return torch.cuda.get_device_properties(0).total_memory < 16 * 1024**3
+
+
 _sam3_skip = pytest.mark.skipif(
     not _sam3_package_available(), reason="SAM3 not installed"
+)
+_vram_skip = pytest.mark.skipif(
+    _insufficient_vram(), reason="SAM3 requires >= 16 GB VRAM"
 )
 
 
 @_sam3_skip
+@_vram_skip
 @pytest.mark.slow
 class TestBentoImportSam3:
     """Test BentoML model import with SAM3 ONNX files."""

@@ -145,13 +145,13 @@ class TestDataToDashboardIntegration:
             (data_dir / "images" / f"vol_{i:03d}.nii.gz").write_bytes(b"fake")
             (data_dir / "labels" / f"vol_{i:03d}.nii.gz").write_bytes(b"fake")
 
-        # Point SPLITS_DIR to tmp_path so run_data_flow() doesn't write to /app
+        # Point SPLITS_OUTPUT_DIR to tmp_path so run_data_flow() doesn't write to /app
         splits_dir = tmp_path / "splits"
-        os.environ["SPLITS_DIR"] = str(splits_dir)
+        os.environ["SPLITS_OUTPUT_DIR"] = str(splits_dir)
         try:
             data_result = run_data_flow(data_dir=data_dir, n_folds=2, seed=42)
         finally:
-            os.environ.pop("SPLITS_DIR", None)
+            os.environ.pop("SPLITS_OUTPUT_DIR", None)
 
         # Feed into everything dashboard
         output_dir = tmp_path / "dashboard"

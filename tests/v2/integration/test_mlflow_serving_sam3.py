@@ -21,8 +21,23 @@ from minivess.adapters.model_builder import _sam3_package_available
 if TYPE_CHECKING:
     from pathlib import Path
 
+
+def _insufficient_vram() -> bool:
+    """Check if GPU VRAM is too small for SAM3 (needs >= 16 GB)."""
+    try:
+        import torch
+    except ImportError:
+        return True
+    if not torch.cuda.is_available():
+        return True
+    return torch.cuda.get_device_properties(0).total_memory < 16 * 1024**3
+
+
 _sam3_skip = pytest.mark.skipif(
     not _sam3_package_available(), reason="SAM3 not installed"
+)
+_vram_skip = pytest.mark.skipif(
+    _insufficient_vram(), reason="SAM3 requires >= 16 GB VRAM"
 )
 
 
@@ -30,6 +45,7 @@ class TestBuildNetFromConfig:
     """Test _build_net_from_config model-agnostic dispatch."""
 
     @_sam3_skip
+    @_vram_skip
     def test_build_sam3_vanilla_net(self) -> None:
         from minivess.serving.mlflow_wrapper import _build_net_from_config, _SimpleNet
 
@@ -44,6 +60,7 @@ class TestBuildNetFromConfig:
         assert not isinstance(net, _SimpleNet), "Expected SAM3 adapter, got _SimpleNet"
 
     @_sam3_skip
+    @_vram_skip
     def test_build_sam3_topolora_net(self) -> None:
         from minivess.serving.mlflow_wrapper import _build_net_from_config, _SimpleNet
 
@@ -58,6 +75,7 @@ class TestBuildNetFromConfig:
         assert not isinstance(net, _SimpleNet)
 
     @_sam3_skip
+    @_vram_skip
     def test_build_sam3_hybrid_net(self) -> None:
         from minivess.serving.mlflow_wrapper import _build_net_from_config, _SimpleNet
 
@@ -93,6 +111,7 @@ class TestBuildNetFromConfig:
 
 
 @_sam3_skip
+@_vram_skip
 class TestMlflowServingSam3:
     """Test MiniVessSegModel with SAM3 adapter checkpoints."""
 

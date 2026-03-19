@@ -87,12 +87,12 @@ def build_deepchecks_dataset(
 
     for pair in pairs:
         try:
-            img = nib.load(pair["image"])
+            img = nib.load(pair["image"])  # type: ignore[attr-defined]
             img_data = np.asarray(img.dataobj)  # type: ignore[attr-defined]
 
             lbl_data: np.ndarray | None = None
             if pair.get("label"):
-                lbl = nib.load(pair["label"])
+                lbl = nib.load(pair["label"])  # type: ignore[attr-defined]
                 lbl_data = np.asarray(lbl.dataobj)  # type: ignore[attr-defined]
 
             img_slices = extract_representative_slices(
