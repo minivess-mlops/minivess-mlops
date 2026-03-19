@@ -120,7 +120,7 @@ class TestCloudMLflowTracking:
         exp_id = cloud_mlflow_client.create_experiment(exp_name)
 
         # Create two runs with different params
-        for model, dsc in [("dynunet", 0.82), ("segresnet", 0.78)]:
+        for model, dsc in [("dynunet", 0.82), ("vesselfm", 0.78)]:
             run = cloud_mlflow_client.create_run(exp_id)
             cloud_mlflow_client.log_param(run.info.run_id, "model", model)
             cloud_mlflow_client.log_metric(run.info.run_id, "dsc", dsc)

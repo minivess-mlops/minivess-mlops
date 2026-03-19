@@ -13,9 +13,8 @@ from pathlib import Path
 from typing import Any
 
 # Known dataset identifiers — matches acquisition_registry.py
-KNOWN_DATASETS: frozenset[str] = frozenset(
-    {"minivess", "deepvess", "tubenet_2pm", "vesselnn"}
-)
+# TubeNet excluded — olfactory bulb, different organ, only 1 2PM volume. See CLAUDE.md.
+KNOWN_DATASETS: frozenset[str] = frozenset({"minivess", "deepvess", "vesselnn"})
 
 _DEFAULT_DATASETS: list[str] = sorted(KNOWN_DATASETS)
 
@@ -36,7 +35,7 @@ class AcquisitionConfig:
     Attributes
     ----------
     datasets:
-        Which datasets to acquire (default: all 4).
+        Which datasets to acquire (default: all 3).
     output_dir:
         Where to write acquired/converted NIfTI files.
     skip_existing:

@@ -35,7 +35,7 @@ class Sam3Adapter(ModelAdapter):
     Parameters
     ----------
     config:
-        ModelConfig with SAM3_LORA family and LoRA fields.
+        ModelConfig with SAM3_TOPOLORA family and LoRA fields.
     """
 
     def __init__(self, config: ModelConfig) -> None:

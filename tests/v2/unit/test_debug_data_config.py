@@ -82,23 +82,13 @@ class TestQuasiE2EConfigValidation:
 class TestExternalTestConfig:
     """External test dataset config has correct defaults."""
 
-    def test_tubenet_enabled_by_default(self) -> None:
-        config = QuasiE2EConfig()
-        assert "tubenet_2pm" in config.external_test_datasets
-        tubenet = config.external_test_datasets["tubenet_2pm"]
-        assert tubenet.enabled is True
+    # tubenet_2pm tests removed: olfactory bulb, different organ, only 1 2PM volume
 
     def test_vesselnn_enabled_by_default(self) -> None:
         config = QuasiE2EConfig()
         assert "vesselnn" in config.external_test_datasets
         vesselnn = config.external_test_datasets["vesselnn"]
         assert vesselnn.enabled is True
-
-    def test_tubenet_max_volumes_is_one(self) -> None:
-        """tubenet_2pm has only 1 volume, so max is 1."""
-        config = QuasiE2EConfig()
-        tubenet = config.external_test_datasets["tubenet_2pm"]
-        assert tubenet.max_volumes == 1
 
     def test_vesselnn_subset(self) -> None:
         """vesselnn has 12 volumes, we use 2 in debug mode."""

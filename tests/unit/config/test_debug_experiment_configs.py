@@ -149,9 +149,8 @@ class TestAllDebugConfigs:
 class TestModelConfigs:
     """Verify that every model listed in debug_all_models.yaml has YAML configs.
 
-    T-1.5 RED: these tests FAIL when comma_mamba.yaml / ulike_mamba.yaml /
-    sam3_vanilla.yaml (model_profiles) / sam3_hybrid.yaml (model_profiles) are absent.
-    T-1.5 GREEN: create the 4 missing files.
+    T-1.5 RED: these tests FAIL when model profile YAMLs are absent for
+    models listed in debug_all_models.yaml.
     """
 
     def _models_to_test(self) -> list[str]:

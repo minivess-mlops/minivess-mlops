@@ -9,15 +9,17 @@ Dataset summary is also in top-level `CLAUDE.md` under "Datasets".
 | Name | Role | Key file |
 |------|------|----------|
 | MiniVess | Primary training (70 vols) | `scripts/download_minivess.py` |
-| DeepVess | External test only | `external_datasets.py::EXTERNAL_DATASETS["deepvess"]` |
-| TubeNet 2PM | External test only | `external_datasets.py::EXTERNAL_DATASETS["tubenet_2pm"]` |
-| VesselNN | External test only | `external_datasets.py::EXTERNAL_DATASETS["vesselnn"]` |
+| DeepVess | External TEST (~7 multiphoton vols, mouse brain cortex) | `external_datasets.py::EXTERNAL_DATASETS["deepvess"]` |
+| VesselNN | Drift detection ONLY (NOT test — data leakage, same PI) | `external_datasets.py::EXTERNAL_DATASETS["vesselnn"]` |
+
+TubeNet EXCLUDED — olfactory bulb (different organ), only 1 2PM volume. See top-level CLAUDE.md.
+VesselNN is NOT a test dataset — reserved for drift detection simulation with synthetic stack generation.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `external_datasets.py` | **Authoritative registry** for DeepVess/TubeNet/VesselNN. `EXTERNAL_DATASETS` dict + download helpers |
+| `external_datasets.py` | **Authoritative registry** for DeepVess/VesselNN. `EXTERNAL_DATASETS` dict + download helpers |
 | `loader.py` | `discover_nifti_pairs()` — supports EBRAINS layout (raw/seg) and Medical Decathlon (imagesTr/labelsTr) |
 | `test_datasets.py` | `DatasetRegistry`, `DatasetEntry`, `DatasetSubset` for hierarchical evaluation |
 | `debug_dataset.py` | Synthetic NIfTI generator for fast unit tests (no real data required) |

@@ -26,7 +26,7 @@ _SAM3_FAMILIES = frozenset({"sam3_vanilla", "sam3_topolora", "sam3_hybrid"})
 # SAM3 families that require ≥16 GB VRAM for training (VRAM check raises at build time)
 _SAM3_HIGH_VRAM = frozenset({"sam3_topolora"})
 # Mamba families require CUDA-compiled mamba-ssm (INSTALL_MAMBA=1 Docker build)
-_MAMBA_FAMILIES = frozenset({"mambavesselnet", "comma_mamba", "ulike_mamba"})
+_MAMBA_FAMILIES = frozenset({"mambavesselnet"})
 
 
 def _gpu_vram_gb() -> float:

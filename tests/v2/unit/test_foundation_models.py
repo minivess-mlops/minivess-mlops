@@ -168,17 +168,13 @@ class TestSam3Adapter:
         from minivess.adapters.sam3 import Sam3Adapter
 
         config = ModelConfig(
-            family=ModelFamily.SAM3_LORA,
+            family=ModelFamily.SAM3_TOPOLORA,
             name="test_sam3",
             in_channels=1,
             out_channels=2,
         )
         with pytest.raises((ImportError, RuntimeError), match="deprecated|Sam3"):
             Sam3Adapter(config)
-
-    def test_sam3_config_exists_in_enum(self) -> None:
-        """SAM3_LORA should exist in ModelFamily enum."""
-        assert ModelFamily.SAM3_LORA.value == "sam3_lora"
 
 
 # ---------------------------------------------------------------------------

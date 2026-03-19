@@ -94,24 +94,6 @@ class TestAdaptersReturnConfigInfo:
         assert isinstance(cfg, AdapterConfigInfo)
         assert cfg.extras["filters"] == [32, 64, 128, 256]
 
-    def test_comma_returns_config_info(self) -> None:
-        """CommaAdapter.get_config() should return AdapterConfigInfo."""
-        from minivess.adapters.base import AdapterConfigInfo
-        from minivess.adapters.comma import CommaAdapter
-        from minivess.config.models import ModelConfig, ModelFamily
-
-        model = CommaAdapter(
-            ModelConfig(
-                family=ModelFamily.COMMA_MAMBA,
-                name="test",
-                in_channels=1,
-                out_channels=2,
-            )
-        )
-        cfg = model.get_config()
-        assert isinstance(cfg, AdapterConfigInfo)
-        assert cfg.extras["d_state"] == 16
-
     def test_lora_returns_config_info_with_lora_fields(self) -> None:
         """LoraModelAdapter.get_config() should include LoRA extras."""
         from minivess.adapters.base import AdapterConfigInfo

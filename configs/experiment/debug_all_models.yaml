@@ -1,6 +1,6 @@
 # @package _global_
-# All 8GB-compatible models with minimal training.
-# Duration: ~30 min (5 models × 3 folds × 2 epochs).
+# All 6 paper models with minimal training.
+# Duration: ~30 min (6 models × 3 folds × 2 epochs).
 #
 # Usage:
 #   docker compose -f deployment/docker-compose.flows.yml run --rm \
@@ -29,8 +29,9 @@ models_to_test:
   - dynunet
   - sam3_vanilla
   - sam3_hybrid
-  - comma_mamba
-  - ulike_mamba
+  - sam3_topolora
+  - vesselfm
+  - mambavesselnet
 
 # Quasi-E2E: train all models, then run post_training + analyze once.
 flows:

@@ -24,8 +24,10 @@ class MemoryBudgetError(ValueError):
 _MODEL_VRAM_OVERHEAD_MB: dict[str, int] = {
     "dynunet": 300,
     "vesselfm": 400,
-    "comma_mamba": 400,
-    "sam3_lora": 400,
+    "sam3_vanilla": 400,
+    "sam3_topolora": 400,
+    "sam3_hybrid": 400,
+    "mambavesselnet": 400,
 }
 _DEFAULT_MODEL_VRAM_OVERHEAD_MB = 400
 

@@ -109,8 +109,9 @@ class TestFullPipelineE2E:
             "dynunet",
             "sam3_vanilla",
             "sam3_hybrid",
-            "comma_mamba",
-            "ulike_mamba",
+            "sam3_topolora",
+            "vesselfm",
+            "mambavesselnet",
         }
         missing = expected - model_families
         assert not missing, (

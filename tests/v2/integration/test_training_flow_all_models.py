@@ -1,13 +1,13 @@
-"""Integration tests for training flow with all 5 local-GPU models.
+"""Integration tests for training flow with all 6 paper models.
 
-E2E Plan Phase 1, Task T1.4: Training flow: all 5 models x 2 epochs x 3 folds.
+E2E Plan Phase 1, Task T1.4: Training flow: all 6 models x 2 epochs x 3 folds.
 
 These tests require Docker infrastructure + GPU. They verify:
 - Checkpoint files exist after each fold (non-empty .pt files)
 - MLflow tags: checkpoint_dir_fold_N, parent_run_id, flow_status=FLOW_COMPLETE
 - Metrics logged: train_loss, val_dice per epoch
 
-Models: dynunet, sam3_vanilla, sam3_hybrid, comma_mamba, ulike_mamba
+Models: dynunet, sam3_vanilla, sam3_hybrid, sam3_topolora, vesselfm, mambavesselnet
 Config: configs/experiment/debug_all_models.yaml (2 epochs, 3 folds)
 
 Marked @integration @slow — excluded from staging and prod suites.
@@ -21,13 +21,14 @@ from pathlib import Path
 
 import pytest
 
-# All models that run on local GPU (8 GB)
+# All 6 paper models
 LOCAL_GPU_MODELS = [
     "dynunet",
     "sam3_vanilla",
     "sam3_hybrid",
-    "comma_mamba",
-    "ulike_mamba",
+    "sam3_topolora",
+    "vesselfm",
+    "mambavesselnet",
 ]
 
 # Skip reason for non-Docker environments
@@ -77,7 +78,7 @@ def _mlflow_training_results_exist(tracking_uri: str, experiment_name: str) -> b
 @pytest.mark.integration
 @pytest.mark.slow
 class TestTrainingFlowAllModels:
-    """Verify training flow produces correct artifacts for all 5 models.
+    """Verify training flow produces correct artifacts for all 6 paper models.
 
     Requires: Docker stack running, GPU available, MiniVess data downloaded.
     These tests run AFTER `docker compose run train` completes for each model.

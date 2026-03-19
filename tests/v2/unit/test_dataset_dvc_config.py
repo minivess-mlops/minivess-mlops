@@ -20,10 +20,7 @@ class TestDatasetDVCConfig:
         cfg = DVC_CONFIGS["deepvess"]
         assert isinstance(cfg, DatasetDVCConfig)
 
-    def test_dvc_config_exists_for_tubenet(self) -> None:
-        assert "tubenet_2pm" in DVC_CONFIGS
-        cfg = DVC_CONFIGS["tubenet_2pm"]
-        assert isinstance(cfg, DatasetDVCConfig)
+    # tubenet_2pm DVC config test removed: olfactory bulb, different organ, only 1 2PM volume
 
     def test_dvc_config_has_git_tag_format(self) -> None:
         for name, cfg in DVC_CONFIGS.items():
@@ -45,4 +42,4 @@ class TestDatasetDVCConfig:
         assert isinstance(result, list)
         assert len(result) >= 2
         assert "deepvess" in result
-        assert "tubenet_2pm" in result
+        # tubenet_2pm excluded from project

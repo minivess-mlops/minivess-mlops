@@ -69,9 +69,9 @@ class QuasiE2EConfig(BaseModel):
     )
 
     # External test datasets
+    # TubeNet excluded — olfactory bulb, different organ, only 1 2PM volume. See CLAUDE.md.
     external_test_datasets: dict[str, ExternalTestConfig] = Field(
         default_factory=lambda: {
-            "tubenet_2pm": ExternalTestConfig(enabled=True, max_volumes=1),
             "vesselnn": ExternalTestConfig(enabled=True, max_volumes=2),
             "deepvess": ExternalTestConfig(enabled=False, max_volumes=1),
         },

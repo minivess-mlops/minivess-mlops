@@ -51,7 +51,7 @@ class TestDataDashboardSection:
             n_external_datasets=2,
             quality_gate_passed=True,
             drift_summary={},
-            external_datasets={"deepvess": 1, "tubenet_2pm": 1},
+            external_datasets={"deepvess": 1, "vesselnn": 1},
         )
         assert section.n_external_datasets == 2
         assert "deepvess" in section.external_datasets

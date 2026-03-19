@@ -5,7 +5,7 @@
 #                 + SAM3 Vanilla, VesselFM (zero-shot baselines, NOT in factorial grid)
 #
 # Factorial grid: 4 trainable models x 3 losses x 2 aux_calib = 24 cells x 3 folds = 72 runs
-# Zero-shot eval: SAM3 Vanilla (3 folds), VesselFM (DeepVess/TubeNet only)
+# Zero-shot eval: SAM3 Vanilla (3 folds), VesselFM (DeepVess only)
 #
 # GUARDRAIL: 24 cells, NOT 128. LR and batch_size are NOT factors —
 # they are fixed at model-adaptive defaults. Adding them would 5x the cost

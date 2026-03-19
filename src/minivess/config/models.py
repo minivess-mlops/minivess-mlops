@@ -8,21 +8,13 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ModelFamily(StrEnum):
-    """Supported model families."""
+    """Supported model families (paper lineup only)."""
 
     MONAI_DYNUNET = "dynunet"
-    MONAI_SEGRESNET = "segresnet"
-    MONAI_SWINUNETR = "swinunetr"
-    MONAI_UNETR = "unetr"
-    MONAI_ATTENTIONUNET = "attentionunet"
     VESSEL_FM = "vesselfm"
-    COMMA_MAMBA = "comma_mamba"
-    SAM3_LORA = "sam3_lora"
     SAM3_VANILLA = "sam3_vanilla"
     SAM3_TOPOLORA = "sam3_topolora"
     SAM3_HYBRID = "sam3_hybrid"
-    MULTITASK_DYNUNET = "multitask_dynunet"
-    ULIKE_MAMBA = "ulike_mamba"
     MAMBAVESSELNET = "mambavesselnet"
     CUSTOM = "custom"
 

@@ -38,7 +38,8 @@ class TestDiscoverImplementedModels:
 
     def test_returns_nonempty_list(self) -> None:
         models = discover_implemented_models()
-        assert len(models) >= 7
+        # 6 paper models (non-paper models removed)
+        assert len(models) >= 6
 
     def test_contains_dynunet(self) -> None:
         models = discover_implemented_models()
@@ -51,7 +52,7 @@ class TestDiscoverImplementedModels:
 
     def test_excludes_not_implemented(self) -> None:
         models = discover_implemented_models()
-        for excluded in ("sam3_lora", "multitask_dynunet", "custom"):
+        for excluded in ("custom",):
             assert excluded not in models
 
 
@@ -149,7 +150,8 @@ class TestLoadCapabilitySchema:
 
     def test_schema_has_implemented_models(self) -> None:
         schema = load_capability_schema()
-        assert len(schema.implemented_models) >= 7
+        # 6 paper models (non-paper models removed)
+        assert len(schema.implemented_models) >= 6
 
     def test_schema_not_implemented_separate(self) -> None:
         schema = load_capability_schema()

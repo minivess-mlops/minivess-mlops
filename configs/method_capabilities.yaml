@@ -10,13 +10,7 @@ version: "1.0"
 # Models that are implemented and testable via build_adapter()
 implemented_models:
   - dynunet
-  - segresnet
-  - swinunetr
-  - unetr
-  - attentionunet
   - vesselfm
-  - comma_mamba
-  - ulike_mamba
   - sam3_vanilla
   - sam3_topolora
   - sam3_hybrid
@@ -42,13 +36,7 @@ deployment_exclusions:
 # Per-model default loss (for practical variant — one loss per model)
 model_default_loss:
   dynunet: cbdice_cldice
-  segresnet: cbdice_cldice
-  swinunetr: cbdice_cldice
-  unetr: cbdice_cldice
-  attentionunet: cbdice_cldice
   vesselfm: cbdice_cldice
-  comma_mamba: cbdice_cldice
-  ulike_mamba: cbdice_cldice
   sam3_vanilla: dice_ce
   sam3_topolora: cbdice_cldice
   sam3_hybrid: cbdice_cldice
@@ -67,6 +55,4 @@ model_extra_losses:
 
 # Models excluded from quasi-e2e (not implemented in build_adapter)
 not_implemented:
-  - sam3_lora
-  - multitask_dynunet
   - custom

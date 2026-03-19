@@ -26,10 +26,8 @@ val_volume_ids:
   - mv07
 
 # External test datasets
+# TubeNet excluded — olfactory bulb, different organ, only 1 2PM volume. See CLAUDE.md.
 external_test_datasets:
-  tubenet_2pm:
-    enabled: true
-    max_volumes: 1
   vesselnn:
     enabled: true
     max_volumes: 2

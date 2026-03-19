@@ -1,7 +1,8 @@
 """Tests for external test dataset configuration and discovery.
 
-External datasets: DeepVess (multi-photon) and tUbeNet 2PM (two-photon).
+External datasets: DeepVess (multi-photon) and VesselNN (drift detection).
 Only multiphoton/two-photon microscopy datasets — no light-sheet, EM, etc.
+TubeNet 2PM excluded: olfactory bulb, different organ, only 1 2PM volume.
 """
 
 from __future__ import annotations
@@ -32,10 +33,6 @@ class TestExternalDatasetConfig:
     def test_deepvess_config_exists(self) -> None:
         """DeepVess config is registered."""
         assert "deepvess" in EXTERNAL_DATASETS
-
-    def test_tubenet_config_exists(self) -> None:
-        """tUbeNet 2PM config is registered."""
-        assert "tubenet_2pm" in EXTERNAL_DATASETS
 
     def test_only_multiphoton_datasets(self) -> None:
         """All registered datasets use multiphoton or two-photon modality."""
@@ -210,7 +207,8 @@ class TestDiscoverExternalTestPairs:
 
     def test_tiff_pairs(self, tmp_path: Path) -> None:
         """Discovers TIFF image/label pairs."""
-        data_dir = tmp_path / "tubenet_2pm"
+        # Using deepvess as the TIFF dataset (tubenet_2pm excluded from project)
+        data_dir = tmp_path / "deepvess"
         images = data_dir / "images"
         labels = data_dir / "labels"
         images.mkdir(parents=True)
@@ -219,5 +217,5 @@ class TestDiscoverExternalTestPairs:
         (images / "stack_001.tif").write_bytes(b"fake")
         (labels / "stack_001.tif").write_bytes(b"fake")
 
-        pairs = discover_external_test_pairs(data_dir, "tubenet_2pm")
+        pairs = discover_external_test_pairs(data_dir, "deepvess")
         assert len(pairs) == 1

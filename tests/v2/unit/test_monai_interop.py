@@ -21,32 +21,24 @@ from minivess.config.models import ModelConfig, ModelFamily
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Only DynUNet remains as a MONAI model in the paper lineup.
+# SegResNet, SwinUNETR, UNETR, AttentionUNet removed (not in paper).
 _MONAI_FAMILIES = [
     ModelFamily.MONAI_DYNUNET,
-    ModelFamily.MONAI_SEGRESNET,
-    ModelFamily.MONAI_SWINUNETR,
-    ModelFamily.MONAI_UNETR,
-    ModelFamily.MONAI_ATTENTIONUNET,
 ]
 
-# Must be divisible by 32 (SwinUNETR 2^5 constraint) and 16 (UNETR patch size)
 _TEST_SPATIAL = (64, 64, 32)
 
 
 def _build_adapter(family: ModelFamily) -> object:
     from minivess.adapters.model_builder import build_adapter
 
-    arch: dict[str, object] = {}
-    if family == ModelFamily.MONAI_UNETR:
-        arch["img_size"] = _TEST_SPATIAL
-        arch["hidden_size"] = 192  # small ViT for fast test
-        arch["feature_size"] = 8
     config = ModelConfig(
         family=family,
         name=f"test-{family.value}",
         in_channels=1,
         out_channels=2,
-        architecture_params=arch,
+        architecture_params={},
     )
     return build_adapter(config)
 
@@ -99,19 +91,13 @@ class TestMonaiSlidingWindowInferer:
         """SlidingWindowInferer produces correct output shape."""
         from monai.inferers import SlidingWindowInferer  # type: ignore[import-untyped]
 
-        # ROI must also satisfy per-model constraints
         roi_size = _TEST_SPATIAL
-        arch: dict[str, object] = {}
-        if family == ModelFamily.MONAI_UNETR:
-            arch["img_size"] = roi_size
-            arch["hidden_size"] = 192
-            arch["feature_size"] = 8
         config = ModelConfig(
             family=family,
             name=f"sw-{family.value}",
             in_channels=1,
             out_channels=2,
-            architecture_params=arch,
+            architecture_params={},
         )
         from minivess.adapters.model_builder import build_adapter
 

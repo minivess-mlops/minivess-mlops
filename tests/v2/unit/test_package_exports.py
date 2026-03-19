@@ -22,7 +22,6 @@ _PACKAGES = [
             "AtlasConfig",
             "AtlasRegistrationMethod",
             "AtlasRegistrationResult",
-            "CommaAdapter",
             "DynUNetAdapter",
             "FeasibilityReport",
             "LoraModelAdapter",

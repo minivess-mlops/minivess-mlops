@@ -32,14 +32,8 @@ _PATCH_MAP: dict[str, tuple[int, int, int]] = {
     "sam3_hybrid": (16, 32, 32),
     # VesselFM: 6 encoder levels → needs >= 64 per dim (divisor=32)
     "vesselfm": (64, 64, 64),
-    # SwinUNETR: 5 stride-2 levels → divisor=32; InstanceNorm needs spatial>1
-    # at bottleneck, so all dims must be > 32 (use 64)
-    "swinunetr": (64, 64, 64),
-    # divisor=16 models: 4 stride-2 levels → D >= 16
-    "attentionunet": (32, 32, 16),
-    "unetr": (32, 32, 16),
-    "mamba": (32, 32, 16),
-    "ulike_mamba": (32, 32, 16),
+    # MambaVesselNet: 4 stride-2 levels → D >= 16
+    "mambavesselnet": (32, 32, 16),
 }
 _DEFAULT_PATCH: tuple[int, int, int] = (32, 32, 8)
 

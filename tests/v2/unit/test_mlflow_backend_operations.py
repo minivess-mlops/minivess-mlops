@@ -84,7 +84,7 @@ class TestBackendOperations:
             mlflow.log_param("model", "dynunet")
             mlflow.log_metric("dsc", 0.82)
         with mlflow.start_run():
-            mlflow.log_param("model", "segresnet")
+            mlflow.log_param("model", "vesselfm")
             mlflow.log_metric("dsc", 0.78)
 
         # Search for dynunet runs only

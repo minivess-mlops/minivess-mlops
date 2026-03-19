@@ -13,7 +13,7 @@ resolution_evidence:
     source: "src/minivess/adapters/"
     finding: "DynUNet as production model; VISTA-3D as MONAI-native primary"
 implementation:
-  files: [src/minivess/adapters/dynunet_adapter.py, src/minivess/adapters/segresnet_adapter.py]
+  files: [src/minivess/adapters/dynunet.py, src/minivess/adapters/vesselfm.py]
   tests: [tests/v2/unit/test_model_adapters.py]
 conditional_on:
   - {parent_decision_id: model_adapter_pattern, influence_strength: strong}
