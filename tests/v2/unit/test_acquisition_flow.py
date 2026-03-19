@@ -1,20 +1,15 @@
 """Tests for Prefect Data Acquisition Flow (Flow 0).
 
-Phase 4, Tasks 4.1–4.3 of flow-data-acquisition-plan.md.
+Phase 4, Tasks 4.1-4.3 of flow-data-acquisition-plan.md.
 
-All tests run with PREFECT_DISABLED=1 so the @flow/@task decorators are no-ops,
-exercising the pure-Python logic without a Prefect server.
+Tests exercise the pure-Python logic. The session-level prefect_test_harness()
+in conftest.py provides an ephemeral Prefect server.
 """
 
 from __future__ import annotations
 
-import os
-
-# Ensure Prefect is disabled before any minivess imports
-os.environ["PREFECT_DISABLED"] = "1"
-
-from typing import TYPE_CHECKING  # noqa: E402
-from unittest.mock import patch  # noqa: E402
+from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 if TYPE_CHECKING:
     from pathlib import Path

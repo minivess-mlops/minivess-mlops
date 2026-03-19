@@ -1,28 +1,24 @@
 """Tests for the Analysis Prefect Flow (Flow 3).
 
-All tests run with PREFECT_DISABLED=1 so the @flow/@task decorators are no-ops,
-exercising the pure-Python orchestration logic without a Prefect server.
+Tests exercise the pure-Python orchestration logic. The session-level
+prefect_test_harness() in conftest.py provides an ephemeral Prefect server.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-# Ensure Prefect is disabled before any minivess imports
-os.environ["PREFECT_DISABLED"] = "1"
-
-from minivess.config.evaluation_config import (  # noqa: E402
+from minivess.config.evaluation_config import (
     EnsembleStrategyName,
     EvaluationConfig,
     MetricDirection,
 )
-from minivess.ensemble.builder import EnsembleMember, EnsembleSpec  # noqa: E402
-from minivess.pipeline.ci import ConfidenceInterval  # noqa: E402
-from minivess.pipeline.evaluation import FoldResult  # noqa: E402
-from minivess.pipeline.evaluation_runner import EvaluationResult  # noqa: E402
+from minivess.ensemble.builder import EnsembleMember, EnsembleSpec
+from minivess.pipeline.ci import ConfidenceInterval
+from minivess.pipeline.evaluation import FoldResult
+from minivess.pipeline.evaluation_runner import EvaluationResult
 
 # ---------------------------------------------------------------------------
 # Helpers: build lightweight mock data structures
