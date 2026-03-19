@@ -727,6 +727,213 @@ For the 3 strongly autoresearchable skills (issue-creator, planning-backlog, syn
 
 ---
 
+## 13. New Skill: `factorial-monitor` (Separate Effort)
+
+### 13.1 Why a New Skill (Not an Upgrade)
+
+The reviewers are unanimous: **Ralph Loop is a single-job lifecycle manager. Factorial
+monitoring is a multi-job orchestrator.** These are different levels of abstraction.
+
+| Concern | Ralph Loop | factorial-monitor |
+|---------|-----------|-------------------|
+| Scope | One SkyPilot job | N concurrent SkyPilot jobs |
+| Diagnosis | Per-job log analysis | Cross-job aggregation by root cause |
+| Fix strategy | Auto-fix + retry (3 max) | Batch fix + selective re-launch (2 max) |
+| State tracking | JSONL event log | Factorial manifest (job → condition mapping) |
+| Relationship | Inner loop | Outer loop (composes WITH Ralph) |
+
+Ralph Loop's diagnostic functions (`analyze_logs()`) are **reused** by factorial-monitor.
+The TDD skill's failure triage protocol (GATHER → CATEGORIZE → PLAN → FIX → VERIFY)
+provides the **philosophy**, adapted from local tests to cloud jobs.
+
+### 13.2 Five Non-Negotiable Rules (Anti-Pattern Prevention)
+
+These rules prevent every known anti-pattern from the metalearning history:
+
+**Rule F1: WAIT-FOR-TERMINAL — No Diagnosis Until All Jobs Are Done**
+
+No error diagnosis, no code fixes, no re-launches until ALL factorial jobs have
+reached terminal state (`SUCCEEDED`/`FAILED`/`FAILED_SETUP`/`CANCELLED`).
+
+The ONLY permitted intervention during execution is `sky jobs cancel <id>` for
+a job provably wasting money (infinite loop, disk full). "This job looks like
+it will fail" is NOT grounds for cancellation — let it fail and capture the
+full error.
+
+**Kill-switch exception**: If 3+ jobs fail with the IDENTICAL error within 5
+minutes AND remaining running jobs haven't passed the failure point → cancel
+remaining jobs with the same configuration, begin batch diagnosis. Jobs with
+different configurations continue.
+
+Prevents: Panic Fixing (Anti-Pattern 3), premature whac-a-mole (Anti-Pattern 2).
+
+**Rule F2: AGGREGATE-BEFORE-FIX — Batch Error Analysis Is Mandatory**
+
+After all jobs reach terminal state, collect ALL failure logs and categorize
+by root cause BEFORE writing any fix.
+
+Output format:
+```json
+{
+  "root_cause_id": {
+    "description": "DVC_NO_GIT — .dvc not initialized in container",
+    "affected_jobs": [3, 7, 11],
+    "fix_strategy": "Add dvc init to Docker entrypoint",
+    "affected_files": ["deployment/Dockerfile.train"],
+    "confidence": "high"
+  }
+}
+```
+
+BANNED: Fixing the first failure you see. Re-launching without a written root
+cause. "Probably transient" without evidence (spot preemption exit code or
+identical job succeeded on zero-code-change retry).
+
+Prevents: Silent Dismissal (Anti-Pattern 1), Whac-a-Mole (Anti-Pattern 2).
+
+**Rule F3: REBUILD-BEFORE-RELAUNCH — Full Pipeline On Every Fix Cycle**
+
+Every fix-relaunch cycle MUST execute this exact sequence:
+1. Code fix with tests
+2. `make test-staging` passes
+3. Docker image rebuild + push with new tag
+4. Update SkyPilot YAML to reference new image tag/digest
+5. Re-launch ONLY the failed jobs
+
+Skipping any step is BANNED. Re-launching with a stale Docker image is the
+most expensive possible mistake — it wastes the full GPU cost of every
+re-launched job.
+
+Prevents: Docker Image Staleness (Anti-Pattern 9).
+
+**Rule F4: MAX-TWO-CYCLES — Hard Stop After Two Fix-Relaunch Iterations**
+
+A factorial run permits at most 2 fix-relaunch cycles (initial launch + 2
+retries). If jobs still fail after the second cycle, STOP and present a full
+diagnostic report to the user.
+
+The report must include: all root causes found, all fixes attempted, cost
+incurred so far, and a recommendation (redesign experiment, fix upstream
+dependency, or authorize additional cycles with budget cap).
+
+Prevents: Fix-Relaunch Infinite Loop (Anti-Pattern 6), Cost Overrun (Anti-Pattern 8).
+
+**Rule F5: FACTORIAL-MANIFEST — Single Source of Truth for All Jobs**
+
+Before launch, create `factorial_manifest.json` that records: experiment_id,
+all factorial factors and their levels, the full job list with parameters,
+and expected outputs.
+
+During execution, update with: job_id, status, start/end time, cost,
+MLflow run_id, failure category, relaunch_batch (0=original, 1=first retry,
+2=second retry). This manifest is the SOLE authority on experiment state.
+Re-launched jobs are linked to the original entry, not added as new entries.
+
+Prevents: Partial Factorial Amnesia (Anti-Pattern 5).
+
+### 13.3 Workflow
+
+```
+User: /factorial-monitor --config configs/experiment/debug_factorial.yaml
+
+1. LAUNCH PHASE
+   - Calls run_factorial.sh (or assumes already launched)
+   - Records job_id → condition mapping in factorial_manifest.json
+   - READ-ONLY from this point: no code changes while jobs run
+
+2. MONITOR PHASE (polling loop, 60s interval)
+   - sky jobs queue → parse all job statuses
+   - Print live status table: | condition | status | duration |
+   - For each newly-terminal failure: ralph_monitor.analyze_logs()
+   - Continue until ALL jobs are terminal (Rule F1)
+
+3. DIAGNOSE PHASE (all jobs terminal)
+   - Group failures by root cause category (Rule F2)
+   - Present single aggregated report with reviewer agents
+   - If 0 failures → skip to REPORT
+
+4. FIX PHASE (with reviewer agents)
+   - For EACH root cause: reviewer agents plan batch fix strategy
+   - If code fix needed → TDD loop (compose_with: self-learning-iterative-coder)
+   - If config fix → edit YAML/env directly
+   - make test-staging → Docker rebuild → push (Rule F3)
+   - Commit all fixes in ONE batch commit
+
+5. RELAUNCH PHASE (max 2 cycles, Rule F4)
+   - Generate filtered re-launch command (only failed conditions)
+   - Execute and return to MONITOR PHASE
+   - Update manifest with relaunch_batch number
+
+6. REPORT (when all SUCCEEDED or retry budget exhausted)
+   - Summary: X succeeded, Y failed (root causes: A, B, C)
+   - Cost: total $ across all cycles
+   - If unrecoverable failures remain → compose_with: issue-creator
+   - Save to outputs/factorial_run_<experiment_id>.jsonl
+```
+
+### 13.4 SkillNet Relations
+
+```yaml
+metadata:
+  category: operations
+  tags: [skypilot, monitoring, factorial, cloud, batch]
+  relations:
+    compose_with:
+      - ralph-loop                      # Per-job diagnosis via analyze_logs()
+      - self-learning-iterative-coder   # TDD loop when fix requires code changes
+      - issue-creator                   # Unrecoverable failures become GitHub issues
+    depend_on:
+      - ralph-loop                      # Cannot diagnose without failure pattern library
+    similar_to: []
+    belong_to:
+      - overnight-runner                # Factorial runs are a type of batch execution
+```
+
+### 13.5 Binary Eval Criteria
+
+1. **All-jobs-tracked**: Every condition in the factorial grid has a corresponding
+   job_id in the manifest. YES/NO.
+2. **Failures-aggregated-not-serial**: Multiple failures → ONE aggregated report
+   grouped by root cause (not separate per-job reports). YES/NO.
+3. **No-silent-dismiss**: Every failed job resulted in (a) fixed + relaunched,
+   (b) GitHub issue created, or (c) explicitly reported to user. YES/NO.
+4. **Selective-relaunch**: Re-launch command launches ONLY failed conditions,
+   not the entire grid. YES/NO.
+5. **Cost-logged**: Total estimated cost recorded in manifest. YES/NO.
+
+### 13.6 Implementation Plan
+
+**Separate feature branch** (`feat/factorial-monitor`), **not** part of the
+skills-upgrade work. Created "born upgraded" using the canonical folder structure
+from Section 4.1:
+
+```
+factorial-monitor/
+  SKILL.md                    # Orchestrator: 5-step workflow + file pointers
+  instructions/
+    rules.md                  # Rules F1-F5 (non-negotiable)
+    anti-patterns.md          # 9 anti-patterns from reviewer analysis
+  protocols/
+    launch.md                 # Launch + manifest creation
+    monitor.md                # Polling loop + status table
+    diagnose.md               # Aggregation + categorization
+    fix.md                    # Reviewer-backed batch fix strategy
+    relaunch.md               # Selective re-launch protocol
+    report.md                 # Final report generation
+  eval/
+    checklist.md              # 5 binary criteria above
+  templates/
+    factorial-manifest.json   # Schema for experiment state tracking
+```
+
+**MVP artifacts** (minimum for first debug run):
+1. `factorial-monitor/SKILL.md` (~100 lines, orchestrator)
+2. `factorial-monitor/instructions/rules.md` (Rules F1-F5)
+3. `scripts/monitor_factorial.py` (~150 lines, polling + aggregation)
+4. `--relaunch-failed` mode added to `run_factorial.sh`
+
+---
+
 ## Appendix A: User's Original Prompt (Verbatim)
 
 > While I have full prod tests running on another session, could we branch from main fix/skills-upgrade which will make sure that all Skills are optimized for the latest guide from Anthropic on how to best structure Skills, see e.g. /home/petteri/Dropbox/github-personal/sci-llm-writer/manuscripts/agentic-development/resources/anthropic-2025-building-skills-claude.md (https://resources.anthropic.com/hubfs/The-Complete-Guide-to-Building-Skill-for-Claude.pdf) https://x.com/JJEnglert/status/2034329261960475086 : "I just finished restructuring all my skills based on
@@ -1025,9 +1232,22 @@ Score progression chart, per-eval breakdown, experiment table with green/red/blu
 > Go run it
 > Pick your worst-performing skill. Start the autoresearch. Come back to something that actually works." -> https://github.com/olelehmann100kMRR/autoresearch-skill . Reflect on this with reviewer agents then!
 
-### B.6 Current Repo Skill Audit (2026-03-19)
+### B.6 User's Third Prompt — Factorial Monitor (Verbatim)
 
-**Scope**: All 15 skills in `.claude/skills/`
+> And make sure that the two Skills mentioned here [...] are suited for these types
+> of jobs or do we need to create a new meta-Skill now /monitor-skypilot-run that knows
+> how to use the Ralph Loop for infrastructure monitoring and self-learning TDD Skill
+> when running the experiments with Skypilot [...] So that Claude Code knows what to do
+> when there is a bug. As in it should never silently kick can down the road
+> (.claude/metalearning/2026-03-07-silent-existing-failures.md) and Claude should never
+> do panic-fixing (.claude/metalearning/2026-03-18-whac-a-mole-serial-failure-fixing.md)
+> but rather let the tests aggregate all the errors and address them in batch by creating
+> a plan with reviewer agents on how to address ALL the emerged issues as a whole leading
+> to better quality fixes and shorter debugging times!
+
+### B.7 Current Repo Skill Audit (2026-03-19)
+
+**Scope**: All 15 skills in `.claude/skills/` (+ 1 planned: factorial-monitor)
 **Totals**: 106 files, 2,505 SKILL.md lines
 **Distribution**: 7 monolithic (single SKILL.md), 8 folder-based
 **Gold standard**: self-learning-iterative-coder (17 files, v3.0.0)

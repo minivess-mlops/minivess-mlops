@@ -305,6 +305,16 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
     all logging, all compliance. NEVER propose reducing debug scope without explicit user
     authorization. "Debug" means "run fast to catch bugs" — NOT "run less to avoid bugs."
     See: `.claude/metalearning/2026-03-19-debug-run-is-full-production-no-shortcuts.md`
+28. **Zero Silent Skips (Non-Negotiable)** — Every SKIPPED test is a bug hiding as a
+    skip. When reporting test results, ALWAYS report the skip count AND the skip reasons.
+    "5362 passed, 5 skipped" is NOT "all green" — it is 5 bugs. For each skip:
+    - **Module not installed** → install it (uv sync --all-extras) or delete the test if deprecated
+    - **Hardware-specific** (CTK, GPU) → acceptable skip, but document WHY in test
+    - **Cloud credentials** → auto-skip with clear message, acceptable for local dev
+    - **Deprecated library** (langgraph) → DELETE the test, don't skip it
+    NEVER silently accept skips. ALWAYS inform the user of skip count and reasons.
+    The same applies to warnings — suppress cosmetic warnings at entry point, but
+    NEVER suppress warnings that indicate bugs or configuration problems.
 22. **Single-Source Config via `.env.example` (Non-Negotiable)** — ALL configurable
    values MUST be in `.env.example` FIRST. BANNED: hardcoded URLs in Dockerfiles,
    `os.environ.get("VAR", "fallback")` in flow files (use `resolve_tracking_uri()`
