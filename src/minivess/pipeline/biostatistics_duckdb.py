@@ -314,7 +314,7 @@ def _read_metrics(run_dir: Path) -> dict[str, float]:
     if not metrics_dir.is_dir():
         return {}
     result: dict[str, float] = {}
-    for metric_file in metrics_dir.iterdir():
+    for metric_file in metrics_dir.rglob("*"):
         if not metric_file.is_file():
             continue
         try:
@@ -324,62 +324,45 @@ def _read_metrics(run_dir: Path) -> dict[str, float]:
             last_line = content.splitlines()[-1]
             parts = last_line.split()
             if len(parts) >= 2:
-                result[metric_file.name] = float(parts[1])
+                rel = metric_file.relative_to(metrics_dir)
+                metric_key = "/".join(rel.parts)
+                result[metric_key] = float(parts[1])
         except (ValueError, IndexError, OSError):
             logger.debug("Could not read metric %s", metric_file.name)
     return result
 
 
 def _is_per_volume_metric(metric_name: str) -> bool:
-    """Check if metric name matches eval_fold{i}_vol_{id}_{metric} pattern."""
-    return metric_name.startswith("eval_fold") and "_vol_" in metric_name
+    """Check if metric name matches eval/{fold}/vol/{id}/{metric} pattern."""
+    parts = metric_name.split("/")
+    return len(parts) >= 5 and parts[0] == "eval" and parts[2] == "vol"
 
 
 def _is_eval_fold_metric(metric_name: str) -> bool:
-    """Check if metric name matches eval_fold{i}_{metric} pattern (not per-volume)."""
-    return metric_name.startswith("eval_fold") and "_vol_" not in metric_name
+    """Check if metric name matches eval/{fold}/{metric} pattern (not per-volume)."""
+    parts = metric_name.split("/")
+    if len(parts) < 3 or parts[0] != "eval":
+        return False
+    if not parts[1].isdigit():
+        return False
+    return not (len(parts) >= 4 and parts[2] == "vol")
 
 
 def _parse_per_volume_metric(metric_name: str) -> tuple[int | None, str, str]:
-    """Parse eval_fold{i}_vol_{id}_{metric} into (fold_id, volume_id, base_metric).
-
-    Uses str methods — no regex (CLAUDE.md Rule #16).
-    """
-    prefix = "eval_fold"
-    rest = metric_name[len(prefix) :]  # e.g. "0_vol_vol_003_dice"
-    fold_str, sep, after_fold = rest.partition("_")
-    if not sep or not fold_str.isdigit():
+    """Parse eval/{fold}/vol/{id}/{metric} into (fold_id, volume_id, base_metric)."""
+    parts = metric_name.split("/")
+    if len(parts) < 5 or parts[0] != "eval" or parts[2] != "vol":
         return None, "", ""
-
-    fold_id = int(fold_str)
-
-    # Find _vol_ in after_fold
-    vol_prefix = "vol_"
-    if not after_fold.startswith(vol_prefix):
+    if not parts[1].isdigit():
         return None, "", ""
-
-    after_vol = after_fold[len(vol_prefix) :]  # e.g. "vol_003_dice"
-    # The volume_id is everything up to the last underscore, and the metric is after
-    last_underscore = after_vol.rfind("_")
-    if last_underscore == -1:
-        return None, "", ""
-
-    volume_id = after_vol[:last_underscore]
-    base_metric = after_vol[last_underscore + 1 :]
-
-    return fold_id, volume_id, base_metric
+    return int(parts[1]), parts[3], parts[4]
 
 
 def _parse_eval_fold_metric(metric_name: str) -> tuple[int, str] | None:
-    """Parse eval_fold{i}_{metric} into (fold_id, base_metric).
-
-    Uses str.partition — no regex (CLAUDE.md Rule #16).
-    """
-    prefix = "eval_fold"
-    if not metric_name.startswith(prefix):
+    """Parse eval/{fold}/{metric} into (fold_id, base_metric)."""
+    parts = metric_name.split("/")
+    if len(parts) < 3 or parts[0] != "eval":
         return None
-    rest = metric_name[len(prefix) :]
-    fold_str, sep, base_metric = rest.partition("_")
-    if not sep or not fold_str.isdigit():
+    if not parts[1].isdigit():
         return None
-    return int(fold_str), base_metric
+    return int(parts[1]), parts[2]

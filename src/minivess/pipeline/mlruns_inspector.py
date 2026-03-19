@@ -32,7 +32,7 @@ def get_production_runs(mlruns_dir: Path, experiment_id: str) -> list[str]:
 
     A run is classified as *production* when it has evaluation metrics for
     **all three folds** (fold0, fold1, and fold2), indicated by the presence
-    of at least one metric file whose name starts with ``eval_fold2``.
+    of an ``eval/2/`` subdirectory under ``metrics/`` (slash-prefix, #790).
 
     Incomplete runs (e.g. those interrupted after fold0/fold1 only) are
     excluded.  This mirrors the real data: 4 production runs out of 9 total
@@ -59,10 +59,9 @@ def get_production_runs(mlruns_dir: Path, experiment_id: str) -> list[str]:
         if not metrics_dir.is_dir():
             continue
         # Production discriminator: all 3 folds complete (fold2 present)
-        has_fold2 = any(
-            metric_file.name.startswith("eval_fold2")
-            for metric_file in metrics_dir.iterdir()
-        )
+        # Slash-prefix (#790): eval/2/ directory under metrics/
+        eval_fold2_dir = metrics_dir / "eval" / "2"
+        has_fold2 = eval_fold2_dir.is_dir() and any(eval_fold2_dir.iterdir())
         if has_fold2:
             production.append(run_dir.name)
 
@@ -121,11 +120,13 @@ def get_run_metrics_list(
     if not metrics_dir.is_dir():
         return []
 
-    return sorted(
-        metric_file.name
-        for metric_file in metrics_dir.iterdir()
-        if metric_file.is_file()
-    )
+    result: list[str] = []
+    for item in metrics_dir.rglob("*"):
+        if item.is_file():
+            rel = item.relative_to(metrics_dir)
+            metric_key = "/".join(rel.parts)
+            result.append(metric_key)
+    return sorted(result)
 
 
 def get_run_params(
@@ -181,7 +182,11 @@ def read_metric_last_value(
         FileNotFoundError: If the metric file does not exist.
         ValueError: If the file cannot be parsed as expected.
     """
-    metric_file = mlruns_dir / experiment_id / run_id / "metrics" / metric_name
+    from pathlib import Path as _Path
+
+    metric_file = _Path(mlruns_dir / experiment_id / run_id / "metrics") / _Path(
+        *metric_name.split("/")
+    )
     content = metric_file.read_text(encoding="utf-8").strip()
     last_line = content.splitlines()[-1]
     # Format: "<timestamp> <value> <step>"

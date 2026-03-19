@@ -104,15 +104,16 @@ class TestFactorialMatchesKG:
 class TestDebugEqualsProduction:
     """Debug config must have same factors as production — only epochs/data/folds differ."""
 
-    def test_debug_has_same_loss_default(self) -> None:
+    def test_debug_has_correct_reduced_params(self) -> None:
         debug_path = REPO_ROOT / "configs" / "experiment" / "debug_factorial.yaml"
         with debug_path.open(encoding="utf-8") as f:
             debug = yaml.safe_load(f)
 
-        assert debug["max_epochs"] == 2
-        assert debug["num_folds"] == 1
-        assert debug["max_train_volumes"] == 23
-        assert debug["max_val_volumes"] == 12
+        fixed = debug.get("fixed", debug)  # factorial format uses 'fixed' key
+        assert fixed["max_epochs"] == 2
+        assert fixed["num_folds"] == 1
+        assert fixed["max_train_volumes"] == 23
+        assert fixed["max_val_volumes"] == 12
 
     def test_debug_has_aux_calib_field(self) -> None:
         debug_path = REPO_ROOT / "configs" / "experiment" / "debug_factorial.yaml"

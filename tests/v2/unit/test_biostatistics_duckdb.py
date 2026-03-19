@@ -59,26 +59,34 @@ def _create_mock_mlruns_with_metrics(
             metrics_dir = run_dir / "metrics"
             metrics_dir.mkdir()
 
-            # Eval metrics per fold
-            (metrics_dir / f"eval_fold{fold}_val_dice").write_text(
+            # Eval metrics per fold (slash-prefix, #790)
+            eval_fold_dir = metrics_dir / "eval" / str(fold)
+            eval_fold_dir.mkdir(parents=True, exist_ok=True)
+            (eval_fold_dir / "val_dice").write_text(
                 f"1000 {0.8 + run_idx * 0.01} 100", encoding="utf-8"
             )
-            (metrics_dir / f"eval_fold{fold}_val_cldice").write_text(
+            (eval_fold_dir / "val_cldice").write_text(
                 f"1000 {0.7 + run_idx * 0.01} 100", encoding="utf-8"
             )
 
-            # Training metrics
-            (metrics_dir / "train_loss").write_text(
+            # Training metrics (slash-prefix, #790)
+            train_dir = metrics_dir / "train"
+            train_dir.mkdir(parents=True, exist_ok=True)
+            (train_dir / "loss").write_text(
                 f"1000 {0.3 - run_idx * 0.01} 100", encoding="utf-8"
             )
-            (metrics_dir / "val_dice").write_text(
+            val_dir = metrics_dir / "val"
+            val_dir.mkdir(parents=True, exist_ok=True)
+            (val_dir / "dice").write_text(
                 f"1000 {0.8 + run_idx * 0.01} 100", encoding="utf-8"
             )
 
-            # Per-volume metrics (eval_fold{i}_vol_{j}_{metric})
+            # Per-volume metrics (eval/{fold}/vol/{id}/{metric}, slash-prefix #790)
             for vol_idx in range(n_volumes):
                 vol_id = f"vol_{vol_idx:03d}"
-                (metrics_dir / f"eval_fold{fold}_vol_{vol_id}_dice").write_text(
+                vol_dir = metrics_dir / "eval" / str(fold) / "vol" / vol_id
+                vol_dir.mkdir(parents=True, exist_ok=True)
+                (vol_dir / "dice").write_text(
                     f"1000 {0.75 + vol_idx * 0.02 + run_idx * 0.005} 100",
                     encoding="utf-8",
                 )

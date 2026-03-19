@@ -91,8 +91,6 @@ _OLD_PREFIXES = (
 # Strings that are allowed even though they match old patterns
 # (e.g., in docstrings, comments, MIGRATION_MAP keys, tag names)
 _ALLOWED_CONTEXTS = {
-    # MIGRATION_MAP keys in metric_keys.py are old by design
-    "metric_keys.py",
     # CLAUDE.md references are documentation
     "CLAUDE.md",
 }
@@ -210,24 +208,8 @@ def test_no_old_underscore_keys_in_gpu_profile() -> None:
     assert not old_keys, f"gpu_profile.py still has old underscore keys: {old_keys}"
 
 
-def test_metric_keys_migration_map_covers_all_old_prefixes() -> None:
-    """MIGRATION_MAP should cover all the common old prefix patterns."""
-    from minivess.observability.metric_keys import MIGRATION_MAP
+def test_migration_map_deleted_greenfield() -> None:
+    """Greenfield: MIGRATION_MAP must not exist (no legacy runs to support)."""
+    import minivess.observability.metric_keys as mk
 
-    # Verify key categories are represented
-    categories = {
-        "train_": False,
-        "val_": False,
-        "sys_": False,
-        "cost_": False,
-        "setup_": False,
-        "data_": False,
-        "prof_": False,
-    }
-    for old_key in MIGRATION_MAP:
-        for prefix in categories:
-            if old_key.startswith(prefix):
-                categories[prefix] = True
-
-    missing = [p for p, found in categories.items() if not found]
-    assert not missing, f"MIGRATION_MAP missing keys for prefixes: {missing}"
+    assert not hasattr(mk, "MIGRATION_MAP")
