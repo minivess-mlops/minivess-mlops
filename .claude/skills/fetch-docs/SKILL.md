@@ -1,8 +1,27 @@
+---
+name: fetch-docs
+version: 1.1.0
+description: >
+  Fetch upstream library documentation via Context Hub (chub CLI) before implementing
+  with beyond-cutoff libraries. Use when unsure about function signatures, API behavior,
+  or parameter names for libraries near or beyond training knowledge cutoff.
+  Do NOT use for: project-specific patterns in domain CLAUDE.md files or well-known stdlib.
+last_updated: 2026-03-19
+activation: demand
+invocation: /fetch-docs
+metadata:
+  category: research
+  tags: [documentation, libraries, web-search, context-hub]
+  relations:
+    compose_with: []
+    depend_on: []
+    similar_to: []
+    belong_to: []
+---
+
 # Fetch Docs Skill
 
-**Version:** 1.0.0
-**Invocation:** `/fetch-docs <library> [topic]`
-**Purpose:** Fetch upstream library documentation via Context Hub before implementing.
+> Fetch upstream library documentation via Context Hub before implementing.
 
 ## When to Use
 

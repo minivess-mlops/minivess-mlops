@@ -7,6 +7,13 @@ metadata:
   author: openspec
   version: "1.0"
   generatedBy: "1.2.0"
+  category: orchestration
+  tags: [spec-driven, archive, workflow]
+  relations:
+    compose_with: []
+    depend_on: []
+    similar_to: []
+    belong_to: []
 ---
 
 Archive a completed change in the experimental workflow.

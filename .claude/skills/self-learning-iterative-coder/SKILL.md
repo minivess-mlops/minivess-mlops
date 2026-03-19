@@ -1,29 +1,35 @@
 ---
 name: self-learning-iterative-coder
-version: 3.0.0
+version: 3.1.0
 description: >
   Production-grade TDD loop for plan-driven code implementation. Self-correcting
   RED→GREEN→VERIFY→FIX cycle with zero-tolerance failure triage, batch error
   resolution, and "tokens upfront" quality philosophy. Use when implementing from
   executable plans (XML/YAML/JSON), writing tests first, fixing code iteratively,
   or when ANY implementation task benefits from structured test-driven development.
-last_updated: 2026-03-18
+  Do NOT use for: literature reports (use create-literature-report), cloud job
+  monitoring (use ralph-loop), or knowledge graph sync (use kg-sync).
+last_updated: 2026-03-19
 activation: manual
 invocation: /tdd-iterate
+metadata:
+  category: development
+  tags: [tdd, testing, git, implementation, code-quality]
+  relations:
+    compose_with:
+      - issue-creator       # FORCE_STOP triggers issue creation
+      - ralph-loop          # RED→GREEN cycle on cloud failures
+    depend_on:
+      - fetch-docs          # Beyond-cutoff library verification
+    similar_to: []
+    belong_to: []
 revision_notes: >
+  v3.1.0: SkillNet relations, negative triggers, eval/checklist.md,
+  instructions/anti-patterns.md extracted. Skills upgrade March 2026.
   v3.0.0: Production-grade upgrade. Added failure-triage protocol
-  (BUG-1 + BUG-2 prevention). Rules #9 (zero tolerance), #10 (triage
-  before fixing), #11 (tokens upfront). 27 skill evals. CLAUDE.md
-  Rule #24. KG code_quality_philosophy node. Skills 2.0 compatible.
-  v2.1.0: Ralph Wiggum best-practices audit. Added accumulated learnings
-  file (LEARNINGS.md), placeholder prevention rule, and FORCE_STOP
-  escape hatch with structured next-steps output.
+  (BUG-1 + BUG-2 prevention). Rules #9-#11. Skills 2.0 compatible.
+  v2.1.0: Ralph Wiggum best-practices audit. FORCE_STOP escape hatch.
   v2.0.0: Post-execution retrospective after 27 tasks (163 tests).
-  Replaced task-count budget with inner-iteration budget.
-  Added spec-adaptation protocol. Made RED commit optional.
-  Expanded dependency management. Scoped typecheck per-task.
-  Simplified state updates and convergence reports.
-  Added empirical data to self-correction principles.
 ---
 
 # Self-Learning Iterative Coder

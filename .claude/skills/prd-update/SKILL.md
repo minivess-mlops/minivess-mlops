@@ -1,3 +1,29 @@
+---
+name: prd-update
+version: 2.1.0
+description: >
+  Maintain the hierarchical probabilistic PRD at docs/planning/prd/. Structured operations
+  for adding decisions, updating probabilities, ingesting research papers, and validating
+  the Bayesian decision network. Use when new evidence affects technology decisions,
+  probabilities need updating, or the PRD needs validation.
+  Do NOT use for: knowledge graph sync (use kg-sync) or literature reports
+  (use create-literature-report).
+last_updated: 2026-03-19
+activation: manual
+invocation: /prd-update
+metadata:
+  category: knowledge
+  tags: [prd, bayesian, decisions, citations, validation]
+  relations:
+    compose_with:
+      - kg-sync
+      - issue-creator
+      - knowledge-reviewer
+    depend_on: []
+    similar_to: []
+    belong_to: []
+---
+
 # PRD-Update Skill
 
 ## Purpose

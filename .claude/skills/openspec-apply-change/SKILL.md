@@ -7,6 +7,15 @@ metadata:
   author: openspec
   version: "1.0"
   generatedBy: "1.2.0"
+  category: orchestration
+  tags: [spec-driven, implementation, tasks, workflow]
+  relations:
+    compose_with:
+      - openspec-archive-change
+      - self-learning-iterative-coder
+    depend_on: []
+    similar_to: []
+    belong_to: []
 ---
 
 Implement tasks from an OpenSpec change.

@@ -1,3 +1,28 @@
+---
+name: planning-backlog
+version: 1.1.0
+description: >
+  Manage the MinIVess MLOps v2 implementation backlog — triaging research into
+  prioritized GitHub issues, tracking progress, and connecting PRD decisions to
+  implementation work. Use when planning sprints, triaging papers, reviewing the
+  project board, or creating implementation plans from PRD selections.
+  Do NOT use for: creating individual issues (use issue-creator) or syncing
+  timeline fields (use sync-roadmap).
+last_updated: 2026-03-19
+activation: manual
+invocation: /planning-backlog
+metadata:
+  category: planning
+  tags: [github-projects, backlog, prioritization, sprint-planning]
+  relations:
+    compose_with:
+      - issue-creator
+      - sync-roadmap
+    depend_on: []
+    similar_to: []
+    belong_to: []
+---
+
 # Planning & Backlog Skill
 
 ## Purpose

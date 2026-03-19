@@ -5,7 +5,7 @@ description: >
   Reproducible scientific literature research report with citation-verified,
   hallucination-free synthesis. 6-phase pipeline composing Markov novelty
   writing, parallel web research, and zero-tolerance citation verification.
-last_updated: 2026-03-18
+last_updated: 2026-03-19
 activation: See ACTIVATION-CHECKLIST.md
 invocation:
   - "create literature report on [topic]"
@@ -16,6 +16,17 @@ revision_notes: >
   Added ACTIVATION-CHECKLIST, agent prompt templates, WebFetch failure
   handling, deduplication algorithm, FORCE_STOP protocol, workspace
   structure. Addresses 19 architectural gaps from 3-reviewer audit.
+metadata:
+  category: research
+  tags: [literature, citations, web-search, synthesis, hallucination-free]
+  relations:
+    compose_with:
+      - prd-update
+      - kg-sync
+    depend_on:
+      - fetch-docs
+    similar_to: []
+    belong_to: []
 ---
 
 # create-literature-report v2.0.0

@@ -1,10 +1,31 @@
+---
+name: knowledge-reviewer
+version: 1.1.0
+description: >
+  Validate knowledge-graph integrity, PRD consistency, legacy cleanup, and staleness
+  after any knowledge artifact change. Use when modifying knowledge-graph/, docs/planning/,
+  CLAUDE.md, or MEMORY.md. Runs automatically via knowledge-links pre-commit hook (quick mode).
+  Do NOT use for: code implementation (use self-learning-iterative-coder) or
+  literature research (use create-literature-report).
+last_updated: 2026-03-19
+activation: manual
+invocation: /knowledge-reviewer
+metadata:
+  category: knowledge
+  tags: [knowledge-graph, validation, prd, pre-commit, staleness]
+  relations:
+    compose_with:
+      - kg-sync
+      - prd-update
+    depend_on: []
+    similar_to: []
+    belong_to: []
+---
+
 # Knowledge Reviewer Skill
 
-**Version:** 1.0.0
-**Invocation:** `/knowledge-reviewer`
-**Purpose:** Validate knowledge-graph integrity, PRD consistency, legacy cleanup, and staleness after any knowledge artifact change.
-
----
+> Validate knowledge-graph integrity, PRD consistency, legacy cleanup, and staleness
+> after any knowledge artifact change.
 
 ## When to Use This Skill
 
