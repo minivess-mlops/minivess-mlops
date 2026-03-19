@@ -3,7 +3,7 @@
 
   <metadata>
     <created>2026-03-18</created>
-    <revised>2026-03-18</revised>
+    <revised>2026-03-19</revised>
     <description>
       6 PRs closing GitHub issues before the GCP factorial study. PRs 1-3 are
       pre-factorial blockers; PRs 4-6 run parallel with the ~1.5-day factorial.
@@ -36,6 +36,27 @@
     </cost-summary>
   </metadata>
 
+  <execution-history>
+    <group-a date="2026-03-19" strategy="3 parallel worktree agents in single session">
+      <total-wall-time-minutes>54</total-wall-time-minutes>
+      <note>All 3 PRs ran simultaneously; wall time = longest agent (PR-3: 54 min)</note>
+      <pr ref="1" pr-number="865" wall-minutes="25" passed="5115" skipped="37" failed="0" new-tests="35" />
+      <pr ref="2" pr-number="866" wall-minutes="52" passed="5070" skipped="125" failed="0" new-tests="24" />
+      <pr ref="3" pr-number="867" wall-minutes="54" passed="5159" skipped="14" failed="0" new-tests="17" />
+    </group-a>
+    <group-b date="2026-03-19" strategy="2 parallel worktree agents in single session">
+      <total-wall-time-minutes>48</total-wall-time-minutes>
+      <note>Both PRs ran simultaneously; wall time = longest agent (PR-4: 48 min)</note>
+      <pr ref="4" pr-number="869" wall-minutes="48" passed="5245" skipped="5" failed="0" new-tests="24" />
+      <pr ref="5" pr-number="868" wall-minutes="46" passed="5111" skipped="36" failed="0" new-tests="14" />
+    </group-b>
+    <group-c date="2026-03-19" strategy="sequential single agent">
+      <total-wall-time-minutes>18</total-wall-time-minutes>
+      <note>Final PR — all dependencies merged. 4 agent modules + PCCP gate.</note>
+      <pr ref="6" pr-number="TBD" wall-minutes="18" passed="5432" skipped="7" failed="0" new-tests="43" />
+    </group-c>
+  </execution-history>
+
   <dependency-graph>
     <parallelism group="A">PR-1, PR-2, PR-3 (ALL truly parallel, start simultaneously)</parallelism>
     <parallelism group="B">PR-4, PR-5 (after Group A)</parallelism>
@@ -62,6 +83,17 @@
     <effort>S-M (2-3 days)</effort>
     <dependencies>None</dependencies>
     <test-gate>make test-staging</test-gate>
+
+    <execution-audit date="2026-03-19">
+      <status>COMPLETE</status>
+      <pr-number>865</pr-number>
+      <wall-time-minutes>25</wall-time-minutes>
+      <tool-uses>148</tool-uses>
+      <total-tokens>170930</total-tokens>
+      <test-results passed="5115" skipped="37" failed="0" />
+      <new-tests>35 across 4 test files</new-tests>
+      <bonus-fixes>13 test files fixed with pytest.importorskip() for optional dep failures</bonus-fixes>
+    </execution-audit>
 
     <task id="T1.1" type="RED">
       <title>Test: PARALLEL allocation returns disjoint trial partitions</title>
@@ -161,6 +193,17 @@
     <dependencies>None (parallel with PR-1, PR-3)</dependencies>
     <test-gate>make test-staging</test-gate>
 
+    <execution-audit date="2026-03-19">
+      <status>COMPLETE</status>
+      <pr-number>866</pr-number>
+      <wall-time-minutes>52</wall-time-minutes>
+      <tool-uses>176</tool-uses>
+      <total-tokens>178558</total-tokens>
+      <test-results passed="5070" skipped="125" failed="0" />
+      <new-tests>24 across 3 test files</new-tests>
+      <bonus-fixes>69 pre-existing test failures fixed across 13 test files (optional dep skip markers)</bonus-fixes>
+    </execution-audit>
+
     <task id="T2.1" type="RED">
       <title>Test: train flow calls log_data_access(dataset_name, file_paths)</title>
       <file>tests/v2/unit/test_audit_trail_wiring.py</file>
@@ -238,6 +281,17 @@
     <dependencies>None (parallel with PR-1, PR-2)</dependencies>
     <test-gate>make test-staging</test-gate>
 
+    <execution-audit date="2026-03-19">
+      <status>COMPLETE</status>
+      <pr-number>867</pr-number>
+      <wall-time-minutes>54</wall-time-minutes>
+      <tool-uses>125</tool-uses>
+      <total-tokens>122060</total-tokens>
+      <test-results passed="5159" skipped="14" failed="0" />
+      <new-tests>17 across 2 test files</new-tests>
+      <bonus-fixes>Filed #863 (evidently Python 3.13 SyntaxError). Fixed 8 test files with skip guards.</bonus-fixes>
+    </execution-audit>
+
     <task id="T3.1" type="RED">
       <title>Test: Sentry/PostHog init when env vars set, no-op otherwise</title>
       <file>tests/v2/unit/test_observability_stubs.py</file>
@@ -291,6 +345,17 @@
     <effort>L (5-7 days)</effort>
     <dependencies>PR-2, PR-3</dependencies>
     <test-gate>make test-staging</test-gate>
+
+    <execution-audit date="2026-03-19">
+      <status>COMPLETE</status>
+      <pr-number>869</pr-number>
+      <wall-time-minutes>48</wall-time-minutes>
+      <tool-uses>140</tool-uses>
+      <total-tokens>152789</total-tokens>
+      <test-results passed="5245" skipped="5" failed="0" />
+      <new-tests>24 across 3 test files</new-tests>
+      <bonus-fixes>Fixed documentation_cards KG node invalid status (active → partial)</bonus-fixes>
+    </execution-audit>
 
     <task id="T4.1" type="RED">
       <title>Test: CopilotKit docker-compose service config valid</title>
@@ -353,6 +418,17 @@
     <dependencies>PR-3</dependencies>
     <test-gate>make test-staging</test-gate>
 
+    <execution-audit date="2026-03-19">
+      <status>COMPLETE</status>
+      <pr-number>868</pr-number>
+      <wall-time-minutes>46</wall-time-minutes>
+      <tool-uses>110</tool-uses>
+      <total-tokens>122848</total-tokens>
+      <test-results passed="5111" skipped="36" failed="0" />
+      <new-tests>14 in 1 test file</new-tests>
+      <bonus-fixes>8 pre-existing test failures (evidently skip guards, optional dep guards, KG node fix)</bonus-fixes>
+    </execution-audit>
+
     <task id="T5.1" type="RED">
       <title>Test: PubMed search returns structured metadata</title>
       <file>tests/v2/unit/test_kg_enrichment_agent.py</file>
@@ -413,6 +489,28 @@
     <effort>XL (7-10 days)</effort>
     <dependencies>PR-1, PR-2, PR-4, PR-5</dependencies>
     <test-gate>make test-staging</test-gate>
+
+    <execution-audit date="2026-03-19">
+      <status>COMPLETE</status>
+      <pr-number>TBD</pr-number>
+      <wall-time-minutes>18</wall-time-minutes>
+      <test-results passed="5432" skipped="7" failed="0" />
+      <new-tests>43 across 4 test files</new-tests>
+      <files-created>
+        src/minivess/agents/constraints/__init__.py,
+        src/minivess/agents/constraints/pccp.py,
+        src/minivess/agents/acquisition/__init__.py,
+        src/minivess/agents/acquisition/conformal_bandit.py,
+        src/minivess/agents/annotation/__init__.py,
+        src/minivess/agents/annotation/active_learning.py,
+        src/minivess/agents/evolution/__init__.py,
+        src/minivess/agents/evolution/self_evolving.py,
+        tests/v2/unit/test_pccp_enforcement.py,
+        tests/v2/unit/test_acquisition_agent.py,
+        tests/v2/unit/test_annotation_agent.py,
+        tests/v2/unit/test_self_evolving_agent.py
+      </files-created>
+    </execution-audit>
 
     <task id="T6.1" type="RED-GREEN">
       <title>Conformal bandit acquisition agent</title>
