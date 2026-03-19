@@ -111,6 +111,7 @@ dev = [
 ]
 agents = [
     "pydantic-ai-slim[prefect,anthropic,openai]>=1.60,<2.0",
+    "ag-ui-protocol>=0.1,<1.0",
     "langfuse>=2.56,<3.0",
     "braintrust>=0.0.180,<1.0",
     # langgraph removed — replaced by pydantic-ai (ADR-0007)
