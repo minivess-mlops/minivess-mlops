@@ -377,13 +377,62 @@
   </issue-status>
 
   <execution-order>
-    Part A: A1 → A2 → A3 → A4 → A5 (checkpoint rearchitecture, ~6 hours)
-    Part B: B1 → B2 → B3 → B4 (TopoLoRA fidelity, ~5 hours)
+    Part A: A1(no-op) → A2 → A3 → A4 → A5(verify existing) (checkpoint, ~4 hours)
+    Part B: B1 → B2 → B2.5(LoRA filter) → B3 → B4 (TopoLoRA, ~5 hours)
     Part C: C1 → C2 (verification, ~1 hour)
-    Total: ~10-12 hours
+    Total: ~8-10 hours
 
     Parts A and B can run in PARALLEL (different files, no conflicts).
   </execution-order>
+
+  <reviewer-corrections applied="2026-03-21">
+    <correction id="R1" phase="A1" severity="no-op">
+      train_factorial.yaml ALREADY uses ${MLFLOW_TRACKING_URI} (line 54).
+      Phase A1 is a no-op. Just verify it's correct, don't change.
+      NOTE: train_production.yaml still hardcodes /app/mlruns — fix that too.
+    </correction>
+    <correction id="R2" phase="A2" severity="valid">
+      file_mounts for GCS checkpoints NOT yet in train_factorial.yaml.
+      Port from smoke_test_gcp.yaml. Plan is correct.
+    </correction>
+    <correction id="R3" phase="A5" severity="mostly-done">
+      check_resume_state_task() ALREADY EXISTS at train_flow.py:262-302.
+      Resume wiring ALREADY EXISTS at train_flow.py:607-622.
+      Plan should say "verify E2E" not "implement from scratch."
+    </correction>
+    <correction id="R4" phase="B2" severity="wrong-call-chain">
+      Spatial Adapter goes between extract_fpn_features() and decoder,
+      NOT between raw encoder output and decoder. Operates on 256-ch
+      FPN output. Plan pseudocode is wrong.
+      CORRECT: fpn_features = backbone.extract_fpn_features(x)
+               fpn_features = spatial_adapter(fpn_features)  # INSERT HERE
+               logits = decoder(fpn_features)
+    </correction>
+    <correction id="R5" phase="B2" severity="new-gap">
+      CRITICAL: Current _apply_lora_to_encoder() targets ALL nn.Linear
+      layers (attention Q/K/V + FFN). Paper targets FFN ONLY.
+      Must add target_keywords filter: ["mlp", "lin1", "lin2", "fc1", "fc2"]
+      to match SegLab's config. ADD NEW TASK B2.5 for LoRA target filtering.
+    </correction>
+    <correction id="R6" severity="gcp-blocker" phase="MISSING">
+      train_factorial.yaml MISSING DVC initialization in setup block:
+        dvc init --no-scm -f
+        dvc remote add gcs gs://minivess-mlops-dvc-data
+        inline dvc.yaml + dvc.lock generation
+      Without this, dvc pull -r gcs fails on fresh GCP VM.
+      Port DVC setup from smoke_test_gcp.yaml.
+      ADD TO Phase C2 as a MANDATORY task, not just a checklist item.
+    </correction>
+    <correction id="R7" severity="possible-issue" phase="C2">
+      SAM3 HF repo name in pre-cache (facebook/sam3-hiera-large) may not
+      match repo used by Sam3Model.from_pretrained(). Verify before GCP.
+    </correction>
+    <correction id="R8" severity="rule-violation" phase="NOTED">
+      train_factorial.yaml sets PREFECT_DISABLED=1 and MINIVESS_ALLOW_HOST=1.
+      Rule #19 STOP Protocol says these are "pytest ONLY." Acknowledged as
+      intentional for SkyPilot VM execution (no Prefect server on VM).
+    </correction>
+  </reviewer-corrections>
 
   <cross-reference>
     <paper url="https://arxiv.org/html/2601.02273v1" relation="TopoLoRA-SAM architecture"/>
