@@ -16,7 +16,9 @@ class TestPostTrainingConfigDefaults:
         from minivess.config.post_training_config import PostTrainingConfig
 
         cfg = PostTrainingConfig()
-        assert cfg.mlflow_experiment == "minivess_post_training"
+        # Synthesis Part 2.3: SAME experiment as training so Analysis Flow
+        # discovers all variants in one query
+        assert cfg.mlflow_experiment == "minivess_training"
 
     def test_swa_defaults(self) -> None:
         from minivess.config.post_training_config import PostTrainingConfig

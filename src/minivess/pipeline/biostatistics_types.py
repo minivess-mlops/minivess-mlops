@@ -24,6 +24,13 @@ class SourceRun:
     loss_function: str
     fold_id: int
     status: str
+    model_family: str = "unknown"
+    with_aux_calib: bool = False
+    # Layer B+C factorial fields (Phase 1, #889)
+    post_training_method: str = "none"
+    recalibration: str = "none"
+    ensemble_strategy: str = "none"
+    is_zero_shot: bool = False
 
 
 @dataclass
@@ -124,17 +131,29 @@ class TableArtifact:
 
 @dataclass
 class FactorialAnovaResult:
-    """Result of two-way factorial ANOVA for one metric."""
+    """Result of N-way factorial ANOVA for one metric.
+
+    Generic: works for 2-way (model × loss), 3-way (model × loss × calib),
+    or any N factors derived from the experiment YAML.
+    """
 
     metric: str
-    n_models: int
-    n_losses: int
+    n_models: int  # Kept for backward compat
+    n_losses: int  # Kept for backward compat
     f_values: dict[str, float]
     p_values: dict[str, float]
     eta_squared_partial: dict[str, float]
     omega_squared: dict[str, float]
     engine_pingouin: dict[str, object] | None = None
     engine_statsmodels: dict[str, object] | None = None
+    # N-way extensions
+    factor_names: list[str] = field(default_factory=list)
+    factor_levels: dict[str, int] = field(default_factory=dict)
+    # K=1 debug fallback tracking
+    n_folds: int = 1
+    replication_method: str = (
+        "per_volume"  # "per_volume" (K=1) or "fold_random_effect" (K>1)
+    )
 
 
 @dataclass

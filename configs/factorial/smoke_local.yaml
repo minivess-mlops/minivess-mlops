@@ -1,0 +1,52 @@
+# Local smoke test: 1 model × 2 losses × 1 fold.
+#
+# Uses existing DynUNet artifacts from dynunet_loss_variation_v2 experiment.
+# 1×2×1×2×1×2 = 8 conditions — validates full 3-flow pipeline in minutes.
+#
+# Usage:
+#   MINIVESS_ALLOW_HOST=1 uv run pytest tests/v2/unit/test_smoke_local_integration.py -v
+
+experiment_name: smoke_local
+description: "Local smoke test: 8 conditions using existing DynUNet artifacts"
+debug: true
+
+factors:
+  training:
+    model_family:
+      - dynunet
+    loss_name:
+      - cbdice_cldice
+      - dice_ce
+    aux_calibration:
+      - false
+
+  post_training:
+    method:
+      - none
+      - swa
+    recalibration:
+      - none
+
+  analysis:
+    ensemble_strategy:
+      - per_loss_single_best
+      - all_loss_all_best
+
+zero_shot_baselines: []
+
+fixed:
+  max_epochs: 100
+  num_folds: 1
+  compute: auto
+
+mlflow:
+  training_experiment: dynunet_loss_variation_v2
+  evaluation_experiment: smoke_local_evaluation
+  biostatistics_experiment: smoke_local_biostatistics
+
+biostatistics:
+  anova_strategy: layered
+  alpha: 0.05
+  co_primary_metrics:
+    - cldice
+    - masd

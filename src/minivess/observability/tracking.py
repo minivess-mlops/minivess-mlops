@@ -52,6 +52,47 @@ def extract_volume_ids(data_dicts: list[dict[str, str]]) -> list[str]:
     return sorted(ids)
 
 
+def _ensure_absolute_file_uri(uri: str) -> str:
+    """Ensure file-based MLflow URIs use absolute paths.
+
+    Prevents MLflow from creating directories relative to CWD (e.g., creating
+    a ``file:`` or ``mlruns`` directory in the repo root). HTTP/HTTPS URIs
+    are returned unchanged.
+
+    Examples:
+        "mlruns"              → "/absolute/path/mlruns"  (made absolute)
+        "file:///tmp/mlruns"  → "file:///tmp/mlruns"     (already absolute)
+        "file://tmp/foo"      → "file:///absolute/tmp/foo" (fixed)
+        "http://server:5000"  → "http://server:5000"     (unchanged)
+        "/app/mlruns"         → "/app/mlruns"             (already absolute)
+    """
+    # HTTP/HTTPS URIs are fine as-is
+    if uri.startswith(("http://", "https://")):
+        return uri
+
+    # Strip file:// prefix to get the path, then ensure it's absolute
+    if uri.startswith("file:///"):
+        return uri  # Already absolute file URI
+    if uri.startswith("file://"):
+        path = uri[len("file://") :]
+        return f"file://{Path(path).resolve()}"
+    if uri.startswith("file:"):
+        path = uri[len("file:") :]
+        return f"file://{Path(path).resolve()}"
+
+    # Plain path — make absolute
+    uri_path = Path(uri)
+    if not uri_path.is_absolute():
+        resolved = uri_path.resolve()
+        logger.debug(
+            "MLflow tracking URI '%s' is relative — resolved to '%s'",
+            uri,
+            resolved,
+        )
+        return str(resolved)
+    return uri
+
+
 def resolve_tracking_uri(
     *,
     tracking_uri: str | None = None,
@@ -78,7 +119,7 @@ def resolve_tracking_uri(
     Resolved tracking URI string.
     """
     if tracking_uri is not None:
-        return tracking_uri
+        return _ensure_absolute_file_uri(tracking_uri)
     env_uri = os.environ.get("MLFLOW_TRACKING_URI")
     if env_uri:
         username = os.environ.get("MLFLOW_TRACKING_USERNAME", "")
@@ -93,17 +134,17 @@ def resolve_tracking_uri(
                 else f"{enc_user}:{enc_pass}@{parsed.hostname}"
             )
             return urlunparse(authed)
-        return env_uri
+        return _ensure_absolute_file_uri(env_uri)
     if use_dynaconf:
         try:
             from minivess.config.settings import get_settings
 
             dynaconf_uri = getattr(get_settings(), "MLFLOW_TRACKING_URI", None)
             if dynaconf_uri:
-                return str(dynaconf_uri)
+                return _ensure_absolute_file_uri(str(dynaconf_uri))
         except Exception:
             logger.debug("Dynaconf unavailable, falling back to default")
-    return str(_DEFAULT_TRACKING_URI)
+    return _ensure_absolute_file_uri(str(_DEFAULT_TRACKING_URI))
 
 
 class ExperimentTracker:

@@ -26,8 +26,13 @@ EXPERIMENT_DATA: str = "minivess_data"
 EXPERIMENT_EVALUATION: str = "minivess_evaluation"
 """Model evaluation experiment (ensemble metrics, bootstrap CIs)."""
 
-EXPERIMENT_POST_TRAINING: str = "minivess_post_training"
-"""Post-training experiment (SWA, calibration, conformal UQ)."""
+EXPERIMENT_POST_TRAINING: str = "minivess_training"
+"""Post-training experiment — SAME as training (synthesis Part 2.3).
+
+Post-training runs log to the same experiment as training so that
+Analysis Flow discovers all variants (training + post-training) in
+one query. Distinguished by ``flow_name`` and ``post_training_method`` tags.
+"""
 
 EXPERIMENT_DEPLOYMENT: str = "minivess_deployment"
 """Deployment experiment (ONNX export, BentoML, promotion)."""

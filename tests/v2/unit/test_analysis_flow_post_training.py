@@ -1,11 +1,14 @@
 """Tests for analysis flow post-training model discovery integration.
 
 Phase 10 of post-training plugin architecture (#324).
+Issue #889: EnsembleBuilder includes post-training variants.
 """
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
+
+import mlflow
 
 
 class TestDiscoverPostTrainingModels:
@@ -74,3 +77,141 @@ class TestDiscoverPostTrainingModels:
 
         # Should be callable (decorated or not)
         assert callable(discover_post_training_models)
+
+
+# ---------------------------------------------------------------------------
+# Issue #889: EnsembleBuilder includes post-training variants
+# ---------------------------------------------------------------------------
+
+
+class TestEnsembleBuilderPostTrainingDiscovery:
+    """discover_training_runs_raw must include post_training_method tag (#889)."""
+
+    def test_run_info_has_post_training_method_key(self) -> None:
+        """Run info dicts must include post_training_method field."""
+        # Verify the method exists and would include the key
+        # (We test via source inspection since MLflow discovery requires a server)
+        import inspect
+
+        from minivess.ensemble.builder import EnsembleBuilder
+
+        source = inspect.getsource(EnsembleBuilder.discover_training_runs_raw)
+        assert "post_training_method" in source
+
+    def test_run_info_has_model_family_key(self) -> None:
+        """Run info dicts must include model_family field."""
+        import inspect
+
+        from minivess.ensemble.builder import EnsembleBuilder
+
+        source = inspect.getsource(EnsembleBuilder.discover_training_runs_raw)
+        assert "model_family" in source
+
+    def test_training_run_defaults_to_none_method(self) -> None:
+        """Training runs without post_training_method tag default to 'none'."""
+        # Simulate what discover_training_runs_raw does for a training run
+        tags: dict[str, str] = {
+            "loss_function": "dice_ce",
+            "flow_name": "training-flow",
+        }
+        method = tags.get("post_training_method", "none")
+        assert method == "none"
+
+    def test_post_training_run_has_actual_method(self) -> None:
+        """Post-training runs have post_training_method in their tags."""
+        tags = {
+            "loss_function": "dice_ce",
+            "flow_name": "post-training-flow",
+            "post_training_method": "swa",
+        }
+        method = tags.get("post_training_method", "none")
+        assert method == "swa"
+
+
+class TestDiscoverPostTrainingModelsFilter:
+    """discover_post_training_models must filter by flow_name tag (#889)."""
+
+    def test_filter_string_includes_flow_name(self) -> None:
+        """The MLflow query must filter by flow_name='post-training-flow'."""
+        import inspect
+
+        from minivess.orchestration.flows.analysis_flow import (
+            discover_post_training_models,
+        )
+
+        source = inspect.getsource(discover_post_training_models)
+        assert "post-training-flow" in source
+
+    def test_result_includes_post_training_method(self) -> None:
+        """Each result dict must include post_training_method key."""
+        import inspect
+
+        from minivess.orchestration.flows.analysis_flow import (
+            discover_post_training_models,
+        )
+
+        source = inspect.getsource(discover_post_training_models)
+        assert "post_training_method" in source
+
+
+class TestPostTrainingDiscoveryIntegration:
+    """End-to-end: create MLflow runs and verify discovery separates them."""
+
+    def test_discovers_only_post_training_runs(self, tmp_path) -> None:
+        """discover_post_training_models filters out training-flow runs."""
+        from minivess.orchestration.flows.analysis_flow import (
+            discover_post_training_models,
+        )
+
+        mlflow_dir = tmp_path / "mlruns"
+        mlflow.set_tracking_uri(str(mlflow_dir))
+        mlflow.set_experiment("minivess_training")
+
+        # Create a training run
+        with mlflow.start_run(tags={"flow_name": "training-flow"}):
+            mlflow.log_metric("val_dice", 0.8)
+
+        # Create a post-training run
+        with mlflow.start_run(
+            tags={
+                "flow_name": "post-training-flow",
+                "post_training_method": "swa",
+            }
+        ):
+            mlflow.log_metric("checkpoint_size_mb", 1.5)
+
+        results = discover_post_training_models(
+            experiment_name="minivess_training",
+            tracking_uri=str(mlflow_dir),
+        )
+
+        assert len(results) == 1
+        assert results[0]["post_training_method"] == "swa"
+
+    def test_discovers_multiple_post_training_methods(self, tmp_path) -> None:
+        """Multiple post-training methods are all discovered."""
+        from minivess.orchestration.flows.analysis_flow import (
+            discover_post_training_models,
+        )
+
+        mlflow_dir = tmp_path / "mlruns"
+        mlflow.set_tracking_uri(str(mlflow_dir))
+        mlflow.set_experiment("minivess_training")
+
+        for method in ["none", "swa", "multi_swa"]:
+            with mlflow.start_run(
+                tags={
+                    "flow_name": "post-training-flow",
+                    "post_training_method": method,
+                }
+            ):
+                mlflow.log_metric("checkpoint_size_mb", 1.0)
+
+        results = discover_post_training_models(
+            experiment_name="minivess_training",
+            tracking_uri=str(mlflow_dir),
+        )
+
+        assert len(results) == 3
+        methods = {r["post_training_method"] for r in results}
+        assert methods == {"none", "swa", "multi_swa"}

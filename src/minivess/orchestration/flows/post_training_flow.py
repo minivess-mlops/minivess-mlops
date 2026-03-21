@@ -431,11 +431,19 @@ def run_factorial_post_training(
     n_multi_swa_models: int = 3,
     subsample_fraction: float = 0.7,
     seed: int = 42,
+    tracking_uri: str | None = None,
+    experiment_name: str | None = None,
+    upstream_run_id: str | None = None,
+    upstream_tags: dict[str, str] | None = None,
+    recalibration: str = "none",
 ) -> list[dict[str, Any]]:
     """Systematically apply post-training methods to checkpoints.
 
     For each method in ``methods``, produces one output checkpoint
-    (or ensemble) and returns metadata for MLflow tagging.
+    (or ensemble) and returns metadata for MLflow tagging. When
+    ``tracking_uri`` is provided, creates one MLflow run per method
+    with inherited upstream tags (Issue #885 — per-method factorial
+    discovery for Biostatistics).
 
     Parameters
     ----------
@@ -451,11 +459,21 @@ def run_factorial_post_training(
         Fraction of checkpoints per multi_swa model.
     seed:
         Random seed for multi_swa subsampling.
+    tracking_uri:
+        MLflow tracking URI. When None, no MLflow runs are created.
+    experiment_name:
+        MLflow experiment name (e.g. ``"minivess_training"``).
+    upstream_run_id:
+        MLflow run ID of the upstream training run for tag inheritance.
+    upstream_tags:
+        Tags from the upstream training run to inherit (model_family,
+        loss_function, fold_id, with_aux_calib).
 
     Returns
     -------
     List of result dicts, one per method. Each dict contains:
-        method, output_path, post_training_method, checkpoint_size_mb.
+        method, output_path, post_training_method, checkpoint_size_mb,
+        mlflow_run_id (None when tracking_uri is not provided).
     """
     import shutil
 
@@ -470,12 +488,12 @@ def run_factorial_post_training(
             src = checkpoint_paths[0]
             dst = method_dir / f"{src.stem}_none.pt"
             shutil.copy2(src, dst)
-            results.append(_factorial_result(method, dst))
+            result = _factorial_result(method, dst)
 
         elif method == "swa":
             dst = method_dir / "swa_averaged.pt"
             _average_checkpoints(checkpoint_paths, dst)
-            results.append(_factorial_result(method, dst))
+            result = _factorial_result(method, dst)
 
         elif method == "multi_swa":
             import random
@@ -492,12 +510,98 @@ def run_factorial_post_training(
                 _average_checkpoints(subset, dst)
                 ensemble_paths.append(dst)
             # Return the first model path as representative
-            results.append(_factorial_result(method, ensemble_paths[0]))
+            result = _factorial_result(method, ensemble_paths[0])
 
         else:
             logger.warning("Unknown factorial method: %s — skipping", method)
+            continue
+
+        # Create per-method MLflow run (Issue #885)
+        mlflow_run_id = _create_factorial_mlflow_run(
+            method=method,
+            result=result,
+            tracking_uri=tracking_uri,
+            experiment_name=experiment_name,
+            upstream_run_id=upstream_run_id,
+            upstream_tags=upstream_tags,
+            recalibration=recalibration,
+        )
+        result["mlflow_run_id"] = mlflow_run_id
+        results.append(result)
 
     return results
+
+
+def _create_factorial_mlflow_run(
+    *,
+    method: str,
+    result: dict[str, Any],
+    tracking_uri: str | None,
+    experiment_name: str | None,
+    upstream_run_id: str | None,
+    upstream_tags: dict[str, str] | None,
+    recalibration: str = "none",
+) -> str | None:
+    """Create an MLflow run for a single factorial post-training variant.
+
+    Returns the MLflow run_id, or None if tracking_uri is not provided.
+
+    Run naming convention: ``{model}__{loss}__{fold}__{method}``
+    Tag schema (synthesis Part 2.4):
+        - flow_name: "post-training-flow"
+        - post_training_method: {method}
+        - upstream_training_run_id: {upstream_run_id}
+        - Inherited: model_family, loss_function, fold_id, with_aux_calib
+    """
+    if tracking_uri is None:
+        return None
+
+    try:
+        import mlflow
+
+        mlflow.set_tracking_uri(tracking_uri)
+        if experiment_name:
+            mlflow.set_experiment(experiment_name)
+
+        # Build tags: inherit upstream + add post-training-specific
+        tags: dict[str, str] = {}
+        if upstream_tags:
+            # Inherit factorial-relevant tags from upstream training run
+            for key in (
+                "model_family",
+                "loss_function",
+                "fold_id",
+                "with_aux_calib",
+            ):
+                if key in upstream_tags:
+                    tags[key] = upstream_tags[key]
+
+        tags["flow_name"] = FLOW_NAME_POST_TRAINING
+        tags["post_training_method"] = method
+        tags["recalibration"] = recalibration
+        if upstream_run_id is not None:
+            tags["upstream_training_run_id"] = upstream_run_id
+
+        # Build run_name: {model}__{loss}__{fold}__{method}
+        model = tags.get("model_family", "unknown")
+        loss = tags.get("loss_function", "unknown")
+        fold = tags.get("fold_id", "x")
+        run_name = f"{model}__{loss}__fold{fold}__{method}"
+
+        with mlflow.start_run(run_name=run_name, tags=tags) as active_run:
+            # Log checkpoint size as metric
+            checkpoint_size = result.get("checkpoint_size_mb", 0.0)
+            mlflow.log_metric("checkpoint_size_mb", float(checkpoint_size))
+            run_id: str = active_run.info.run_id
+            return run_id
+
+    except Exception:
+        logger.warning(
+            "Failed to create MLflow run for factorial method %s",
+            method,
+            exc_info=True,
+        )
+        return None
 
 
 def _factorial_result(method: str, output_path: Path) -> dict[str, Any]:
@@ -510,6 +614,7 @@ def _factorial_result(method: str, output_path: Path) -> dict[str, Any]:
         "output_path": str(output_path),
         "post_training_method": method,
         "checkpoint_size_mb": round(size_mb, 2),
+        "mlflow_run_id": None,
     }
 
 

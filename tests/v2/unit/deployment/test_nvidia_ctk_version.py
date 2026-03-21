@@ -72,19 +72,61 @@ def test_nvidia_ctk_version_is_safe() -> None:
     )
 
 
+def _parse_ctk_config_hook_disabled(cfg: dict) -> bool:
+    """Check if CUDA compat hook is disabled in CTK config.
+
+    Extracted for testability without requiring /etc/nvidia-container-toolkit.
+    """
+    return bool(
+        cfg.get("nvidia-container-cli", {}).get("disable-cuda-compat-lib-hook", False)
+    )
+
+
+_CTK_CONFIG_PATHS = [
+    Path("/etc/nvidia-container-toolkit/config.toml"),
+    Path("/etc/nvidia-container-runtime/config.toml"),
+]
+
+
+def _find_ctk_config() -> Path | None:
+    """Find CTK config file on this machine."""
+    for p in _CTK_CONFIG_PATHS:
+        if p.exists():
+            return p
+    return None
+
+
 def test_cuda_compat_hook_not_disabled_by_config() -> None:
-    """If CTK config exists, compat hook must not be disabled."""
-    config_path = Path("/etc/nvidia-container-toolkit/config.toml")
-    if not config_path.exists():
-        pytest.skip("CTK config.toml not found — skipping hook check")
+    """If CTK config exists on this machine, compat hook must not be disabled."""
+    config_path = _find_ctk_config()
+    if config_path is None:
+        pytest.skip("CTK config.toml not found at any known path")
 
     with config_path.open("rb") as f:
         cfg = tomllib.load(f)
 
-    hook_disabled = cfg.get("nvidia-container-cli", {}).get(
-        "disable-cuda-compat-lib-hook", False
-    )
-    assert not hook_disabled, (
-        "disable-cuda-compat-lib-hook = true in CTK config.toml. "
+    assert not _parse_ctk_config_hook_disabled(cfg), (
+        f"disable-cuda-compat-lib-hook = true in {config_path}. "
         "This disables the compatibility hook — set to false or remove the key."
     )
+
+
+def test_hook_check_logic_detects_disabled() -> None:
+    """Parser must detect when cuda-compat-lib-hook is disabled."""
+    cfg_disabled = {"nvidia-container-cli": {"disable-cuda-compat-lib-hook": True}}
+    assert _parse_ctk_config_hook_disabled(cfg_disabled) is True
+
+
+def test_hook_check_logic_accepts_enabled() -> None:
+    """Parser must accept when hook is not disabled (default or explicit)."""
+    cfg_enabled = {"nvidia-container-cli": {"disable-cuda-compat-lib-hook": False}}
+    assert _parse_ctk_config_hook_disabled(cfg_enabled) is False
+
+
+def test_hook_check_logic_accepts_missing_key() -> None:
+    """Missing key means hook is enabled (default behavior)."""
+    cfg_minimal: dict[str, dict[str, bool]] = {}
+    assert _parse_ctk_config_hook_disabled(cfg_minimal) is False
+
+    cfg_no_key: dict[str, dict[str, bool]] = {"nvidia-container-cli": {}}
+    assert _parse_ctk_config_hook_disabled(cfg_no_key) is False

@@ -726,6 +726,13 @@ def training_flow(
     batch_size: int = 2,
     upstream_data_run_id: str | None = None,
     config_dict: dict[str, Any] | None = None,
+    # Factorial experiment parameters
+    fold_id: int | None = None,
+    with_aux_calib: bool = False,
+    max_train_volumes: int = 0,
+    max_val_volumes: int = 0,
+    zero_shot: bool = False,
+    eval_dataset: str = "minivess",
     **kwargs: Any,
 ) -> TrainingFlowResult:
     """Training Prefect flow — orchestrates model training.
@@ -809,9 +816,33 @@ def training_flow(
     if upstream_data_run_id:
         logger.info("Upstream data run: %s", upstream_data_run_id)
 
+    # Zero-shot early return: skip training, just log that evaluation is needed.
+    # The actual zero-shot evaluation will be done by the analysis flow.
+    if zero_shot and max_epochs == 0:
+        logger.info(
+            "Zero-shot mode: model=%s, eval_dataset=%s — skipping training loop. "
+            "Evaluation will be handled by the analysis flow.",
+            model_family,
+            eval_dataset,
+        )
+        return TrainingFlowResult(
+            status="ZERO_SHOT",
+            fold_results=[],
+            loss_name=loss_name,
+            model_family=model_family,
+            mlflow_run_id=None,
+        )
+
     # Load fold splits (outside MLflow run — no side effects)
     splits = load_fold_splits_task(splits_dir)
-    folds_to_run = splits[:num_folds]
+    if fold_id is not None:
+        # Specific fold requested (e.g., --fold 2 → run only fold 2)
+        if fold_id >= len(splits):
+            msg = f"Requested fold_id={fold_id} but only {len(splits)} folds in splits file"
+            raise ValueError(msg)
+        folds_to_run = [splits[fold_id]]
+    else:
+        folds_to_run = splits[:num_folds]
 
     # FDA audit trail: log data access (Issue #821 — IEC 62304 traceability)
     dataset_name = (
@@ -857,6 +888,12 @@ def training_flow(
         "batch_size": batch_size,
         "experiment_name": experiment_name,
         "tracking_uri": tracking_uri,
+        # Factorial experiment parameters (Glitch #8/#9/#10/#12 fix)
+        "with_aux_calib": with_aux_calib,
+        "max_train_volumes": max_train_volumes if max_train_volumes > 0 else None,
+        "max_val_volumes": max_val_volumes if max_val_volumes > 0 else None,
+        "zero_shot": zero_shot,
+        "eval_dataset": eval_dataset,
     }
 
     # Merge full Hydra config so train_one_fold_task can log it and use all keys
@@ -868,14 +905,17 @@ def training_flow(
     # Train each fold, skipping already-completed configs (auto-resume)
     fold_results: list[dict[str, Any]] = []
     fold_checkpoint_dirs: dict[int, Path] = {}
-    for fold_id, fold_split in enumerate(folds_to_run):
+    for fold_idx, fold_split in enumerate(folds_to_run):
+        # Actual fold ID: if a specific fold was requested, use it; otherwise enumerate
+        actual_fold_id = fold_id if fold_id is not None else fold_idx
         # Check for already-completed run with matching config fingerprint
         fingerprint = compute_config_fingerprint(
             loss_name=loss_name,
             model_family=model_family,
-            fold_id=fold_id,
+            fold_id=actual_fold_id,
             max_epochs=max_epochs,
             batch_size=batch_size,
+            with_aux_calib=with_aux_calib,
         )
         existing_run_id = find_completed_config(
             tracking_uri=tracking_uri,
@@ -884,15 +924,19 @@ def training_flow(
         )
         if existing_run_id is not None:
             logger.info(
-                "Fold %d: resuming from completed run %s", fold_id, existing_run_id
+                "Fold %d: resuming from completed run %s",
+                actual_fold_id,
+                existing_run_id,
             )
             fold_result = load_fold_result_from_mlflow(tracking_uri, existing_run_id)
             fold_results.append(fold_result)
             continue
 
-        checkpoint_dir = checkpoint_base / f"fold_{fold_id}"
-        fold_checkpoint_dirs[fold_id] = checkpoint_dir
-        fold_result = train_one_fold_task(fold_id, fold_split, config, checkpoint_dir)
+        checkpoint_dir = checkpoint_base / f"fold_{actual_fold_id}"
+        fold_checkpoint_dirs[actual_fold_id] = checkpoint_dir
+        fold_result = train_one_fold_task(
+            actual_fold_id, fold_split, config, checkpoint_dir
+        )
         fold_results.append(fold_result)
 
     # Open MLflow run, log everything, then close cleanly
@@ -927,13 +971,20 @@ def training_flow(
 
             log_infrastructure_timing(timing_dir=Path.cwd())
 
-            # Log fold results inside the run context
-            for fold_id, fold_result in enumerate(fold_results):
+            # Log fold results inside the run context.
+            # Use fold_checkpoint_dirs keys (actual fold IDs) not enumerate indices.
+            logged_fold_ids = sorted(fold_checkpoint_dirs.keys())
+            for log_idx, fold_result in enumerate(fold_results):
+                log_fold_id = (
+                    logged_fold_ids[log_idx]
+                    if log_idx < len(logged_fold_ids)
+                    else log_idx
+                )
                 log_fold_results_task(
-                    fold_id,
+                    log_fold_id,
                     fold_result,
                     mlflow_run_id,
-                    checkpoint_dir=fold_checkpoint_dirs.get(fold_id),
+                    checkpoint_dir=fold_checkpoint_dirs.get(log_fold_id),
                 )
 
             mlflow.log_metric("fold/n_completed", float(len(fold_results)))
@@ -1098,14 +1149,57 @@ if __name__ == "__main__":
         parser.add_argument(
             "--debug", action="store_true", default=os.environ.get("DEBUG", "") == "1"
         )
+        # Factorial experiment parameters (set by run_factorial.sh via SkyPilot env vars)
+        parser.add_argument(
+            "--fold",
+            type=int,
+            default=int(os.environ.get("FOLD_ID", "-1")),
+            help="Specific fold ID to run (-1 = all folds via num_folds)",
+        )
+        parser.add_argument(
+            "--with-aux-calib",
+            default=os.environ.get("WITH_AUX_CALIB", "false"),
+            help="Enable auxiliary calibration loss (true/false)",
+        )
+        parser.add_argument(
+            "--max-train-volumes",
+            type=int,
+            default=int(os.environ.get("MAX_TRAIN_VOLUMES", "0")),
+            help="Max training volumes (0 = full dataset)",
+        )
+        parser.add_argument(
+            "--max-val-volumes",
+            type=int,
+            default=int(os.environ.get("MAX_VAL_VOLUMES", "0")),
+            help="Max validation volumes (0 = full dataset)",
+        )
+        parser.add_argument(
+            "--zero-shot",
+            default=os.environ.get("ZERO_SHOT", "false"),
+            help="Zero-shot evaluation only (true/false)",
+        )
+        parser.add_argument(
+            "--eval-dataset",
+            default=os.environ.get("EVAL_DATASET", "minivess"),
+            help="Evaluation dataset (minivess/deepvess)",
+        )
         args = parser.parse_args()
+
+        # If a specific fold is requested, override num_folds to 1
+        fold_id = args.fold if args.fold >= 0 else None
 
         training_flow(
             model_family=args.model_family,
             loss_name=args.loss_name,
             max_epochs=args.max_epochs,
-            num_folds=args.num_folds,
+            num_folds=1 if fold_id is not None else args.num_folds,
             batch_size=args.batch_size,
             experiment_name=args.experiment_name,
             debug=args.debug,
+            fold_id=fold_id,
+            with_aux_calib=args.with_aux_calib.lower() == "true",
+            max_train_volumes=args.max_train_volumes,
+            max_val_volumes=args.max_val_volumes,
+            zero_shot=args.zero_shot.lower() == "true",
+            eval_dataset=args.eval_dataset,
         )

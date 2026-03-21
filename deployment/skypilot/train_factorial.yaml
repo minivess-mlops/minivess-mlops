@@ -34,7 +34,7 @@ resources:
   # Spot: 60-91% cheaper. SkyPilot handles preemption recovery.
   use_spot: true
   disk_size: 100
-  region: europe-north1
+  # region removed — L4 not available in all regions. SkyPilot auto-selects.
 
 envs:
   # Per-condition parameters — set by run_factorial.sh

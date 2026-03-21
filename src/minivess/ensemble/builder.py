@@ -259,6 +259,9 @@ class EnsembleBuilder:
                     "artifact_dir": artifact_uri,
                     "metrics": metrics,
                     "num_folds": num_folds,
+                    # Factorial tags for Biostatistics discovery (#889)
+                    "post_training_method": tags.get("post_training_method", "none"),
+                    "model_family": tags.get("model_family", "unknown"),
                 }
             )
 

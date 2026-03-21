@@ -1,0 +1,93 @@
+# Full factorial design for Nature Protocols publication gate.
+#
+# 6-factor design: 4 models × 3 losses × 2 aux_calib × 3 post-training × 2 recalib × 5 ensemble
+# = 720 conditions × 3 folds = 2160 evaluations
+#
+# Source of truth: docs/planning/pre-gcp-master-plan.xml line 16
+# Synthesis: docs/planning/intermedia-plan-synthesis-pre-debug-run.md Part 1.3-1.4
+#
+# Cost breakdown:
+#   Layer A (training, GPU on GCP L4 spot): 24 cells × 3 folds = 72 runs (~$65)
+#   Layer B (post-training, local CPU): 72 × 3 methods × 2 recalib = 432 variants (FREE)
+#   Layer C (analysis, local CPU): 432 × 5 ensemble strategies = 2160 evals (FREE)
+#   Layer D (biostatistics, local CPU): analytical choices on all above (FREE)
+#
+# Usage:
+#   ./scripts/run_factorial.sh configs/factorial/paper_full.yaml
+#
+# Zero-shot baselines evaluated separately (NOT part of Cartesian product):
+#   sam3_vanilla: frozen encoder, eval on MiniVess + DeepVess
+#   vesselfm: zero-shot only, eval on DeepVess ONLY (data leakage on MiniVess)
+
+experiment_name: paper_factorial
+description: "Nature Protocols 720-condition full factorial: training × post-training × ensemble"
+
+# ── Layer A: Training factors (GPU, cloud via SkyPilot) ──────────────
+factors:
+  training:
+    model_family:
+      - dynunet
+      - mambavesselnet
+      - sam3_topolora
+      - sam3_hybrid
+    loss_name:
+      - cbdice_cldice
+      - dice_ce
+      - dice_ce_cldice
+    aux_calibration:
+      - true
+      - false
+
+  # ── Layer B: Post-training factors (CPU, local) ──────────────────────
+  post_training:
+    method:
+      - none
+      - swa
+      - multi_swa
+    recalibration:
+      - none
+      - temperature_scaling
+
+  # ── Layer C: Analysis factors (CPU/GPU, local) ───────────────────────
+  analysis:
+    ensemble_strategy:
+      - none
+      - per_loss_single_best
+      - all_loss_single_best
+      - per_loss_all_best
+      - all_loss_all_best
+
+# ── Zero-shot baselines (separate from factorial grid) ──────────────
+zero_shot_baselines:
+  - model: sam3_vanilla
+    strategy: frozen_encoder_eval
+    folds: 3
+    dataset: minivess
+  - model: vesselfm
+    strategy: zero_shot_only
+    folds: 3
+    dataset: deepvess
+
+# ── Fixed parameters (NOT swept) ────────────────────────────────────
+fixed:
+  max_epochs: 50
+  num_folds: 3
+  compute: auto
+  learning_rate: 1.0e-3
+  batch_size: 2
+
+# ── MLflow experiment names ─────────────────────────────────────────
+mlflow:
+  training_experiment: minivess_paper_factorial
+  evaluation_experiment: minivess_paper_factorial_evaluation
+  biostatistics_experiment: minivess_paper_factorial_biostatistics
+
+# ── Biostatistics configuration ─────────────────────────────────────
+biostatistics:
+  anova_strategy: layered  # core 3-way → extended 5-way → ensemble analysis
+  alpha: 0.05  # Read from BiostatisticsConfig, not hardcoded in code
+  co_primary_metrics:
+    - cldice
+    - masd
+  foil_metrics:
+    - dsc

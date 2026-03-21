@@ -199,8 +199,12 @@ class PostTrainingConfig(BaseModel):
     """
 
     mlflow_experiment: str = Field(
-        default="minivess_post_training",
-        description="MLflow experiment name for post-training runs",
+        default="minivess_training",
+        description=(
+            "MLflow experiment name for post-training runs. "
+            "MUST be same as training (synthesis Part 2.3) so Analysis Flow "
+            "discovers all variants in one query."
+        ),
     )
 
     factorial_methods: list[FactorialMethod] = Field(

@@ -55,6 +55,21 @@ class BiostatisticsConfig(BaseModel):
         default_factory=lambda: Path("outputs/biostatistics"),
         description="Directory for generated artifacts (figures, tables, DuckDB).",
     )
+    factorial_yaml: Path | None = Field(
+        default=None,
+        description=(
+            "Path to the composable factorial YAML (configs/factorial/*.yaml). "
+            "If provided, factor names are auto-derived from this YAML. "
+            "If None, factor_names must be provided explicitly."
+        ),
+    )
+    factor_names: list[str] = Field(
+        default_factory=lambda: ["model_family", "loss_name", "aux_calibration"],
+        description=(
+            "Factor names for ANOVA. Auto-derived from factorial_yaml if provided. "
+            "Default is Layer A training factors only (backward compat)."
+        ),
+    )
 
     # ------------------------------------------------------------------
     # Metrics
@@ -65,7 +80,22 @@ class BiostatisticsConfig(BaseModel):
     )
     primary_metric: str = Field(
         default="cldice",
-        description="Pre-registered primary metric for Holm-Bonferroni correction.",
+        description="Legacy single primary metric. Use co_primary_metrics instead.",
+    )
+    co_primary_metrics: list[str] = Field(
+        default_factory=lambda: ["cldice", "masd"],
+        description=(
+            "Co-primary metrics (MetricsReloaded-driven). Both get Holm-Bonferroni "
+            "correction. DSC is a FOIL metric (BH-FDR). The rank inversion between "
+            "DSC and clDice IS a paper finding."
+        ),
+    )
+    foil_metrics: list[str] = Field(
+        default_factory=lambda: ["dsc"],
+        description=(
+            "FOIL metrics included to demonstrate misleading rankings for tubular "
+            "structures. Get BH-FDR correction (secondary tier)."
+        ),
     )
 
     # ------------------------------------------------------------------

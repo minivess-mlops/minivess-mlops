@@ -77,6 +77,11 @@ def pytest_configure(config: pytest.Config) -> None:
         "requires_mlflow_server: Tests requiring a running MLflow server"
         " (auto-skipped if unhealthy)",
     )
+    config.addinivalue_line(
+        "markers",
+        "model_construction: Tests model adapter construction, LoRA application,"
+        " config validation. Fast (CPU-only, <5s). Run via: make test-models",
+    )
 
 
 def _docker_daemon_available() -> bool:

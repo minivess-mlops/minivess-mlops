@@ -62,7 +62,9 @@ class SWAPlugin:
             by_loss: dict[str, list[dict[str, torch.Tensor]]] = defaultdict(list)
             for ckpt, meta in ckpt_data:
                 loss_type = meta.get("loss_type", "unknown")
-                by_loss[loss_type].append(ckpt["state_dict"])
+                by_loss[loss_type].append(
+                    ckpt.get("model_state_dict", ckpt.get("state_dict", ckpt))
+                )
 
             for loss_type, state_dicts in sorted(by_loss.items()):
                 averaged = uniform_swa(state_dicts)
@@ -75,7 +77,10 @@ class SWAPlugin:
                 )
 
         if cross_loss:
-            all_sds = [ckpt["state_dict"] for ckpt, _ in ckpt_data]
+            all_sds = [
+                ckpt.get("model_state_dict", ckpt.get("state_dict", ckpt))
+                for ckpt, _ in ckpt_data
+            ]
             averaged = uniform_swa(all_sds)
             out_path = output_dir / "swa_cross_loss.pt"
             torch.save(averaged, out_path)

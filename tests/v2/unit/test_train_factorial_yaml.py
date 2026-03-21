@@ -76,11 +76,17 @@ class TestTrainFactorialYaml:
         resources = config.get("resources", {})
         assert resources.get("cloud") == "gcp"
 
-    def test_targets_europe_north1(self) -> None:
-        """Must target europe-north1 (Finland, same-region as GAR)."""
+    def test_no_hardcoded_region(self) -> None:
+        """Region must NOT be hardcoded — L4 not in europe-north1.
+
+        SkyPilot auto-selects cheapest region with L4 availability.
+        GAR image (europe-north1) is pullable from any GCP region.
+        """
         config = _load(_TRAIN_FACTORIAL)
         resources = config.get("resources", {})
-        assert resources.get("region") == "europe-north1"
+        assert "region" not in resources, (
+            "region must not be hardcoded — L4 not available in europe-north1"
+        )
 
     def test_has_required_env_vars(self) -> None:
         """Must have all per-condition env vars."""

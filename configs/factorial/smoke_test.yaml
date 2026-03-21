@@ -1,0 +1,62 @@
+# Smoke test factorial: minimal 1×1×1 design for CI/pipeline validation.
+#
+# 1 model × 1 loss × 1 calib × 1 post-training × 1 recalib × 1 ensemble
+# = 1 condition × 1 fold = 1 evaluation
+#
+# Purpose: Verify the pipeline runs end-to-end without errors.
+# NOT for scientific results — use debug.yaml or paper_full.yaml.
+#
+# Cost: ~$0.10 on GCP L4 spot (1 run, 2 epochs)
+#
+# Usage:
+#   ./scripts/run_factorial.sh configs/factorial/smoke_test.yaml
+
+experiment_name: smoke_test_factorial
+description: "Smoke test: 1-condition pipeline validation"
+debug: true
+
+factors:
+  training:
+    model_family:
+      - dynunet
+    loss_name:
+      - cbdice_cldice
+    aux_calibration:
+      - false
+
+  post_training:
+    method:
+      - none
+    recalibration:
+      - none
+
+  analysis:
+    ensemble_strategy:
+      - per_loss_single_best
+
+zero_shot_baselines: []
+
+fixed:
+  max_epochs: 2
+  num_folds: 1
+  max_train_volumes: 10
+  max_val_volumes: 5
+  compute: auto
+  learning_rate: 1.0e-3
+  batch_size: 2
+
+splits_file: configs/splits/debug_half_1fold.json
+
+mlflow:
+  training_experiment: minivess_smoke_test
+  evaluation_experiment: minivess_smoke_test_evaluation
+  biostatistics_experiment: minivess_smoke_test_biostatistics
+
+biostatistics:
+  anova_strategy: layered
+  alpha: 0.05
+  co_primary_metrics:
+    - cldice
+    - masd
+  foil_metrics:
+    - dsc

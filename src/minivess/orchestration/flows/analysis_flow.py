@@ -38,6 +38,7 @@ from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
     EXPERIMENT_EVALUATION,
+    EXPERIMENT_POST_TRAINING,
     EXPERIMENT_TRAINING,
     FLOW_NAME_ANALYSIS,
     FLOW_NAME_TRAIN,
@@ -478,14 +479,14 @@ def load_training_artifacts(
 @task(name="discover-post-training-models")
 def discover_post_training_models(
     *,
-    experiment_name: str = "minivess_post_training",
+    experiment_name: str = EXPERIMENT_POST_TRAINING,
     tracking_uri: str | None = None,
 ) -> list[dict[str, Any]]:
     """Discover models produced by the post-training flow.
 
-    Queries the ``minivess_post_training`` MLflow experiment for models
-    produced by SWA, merging, calibration, etc. Returns empty list if
-    the experiment doesn't exist or has no runs.
+    Queries the training experiment (SAME as training, per synthesis Part 2.3)
+    for runs tagged with ``flow_name='post-training-flow'``.
+    Returns empty list if the experiment doesn't exist or has no runs.
 
     Parameters
     ----------
@@ -516,17 +517,136 @@ def discover_post_training_models(
 
         runs = mlflow.search_runs(
             experiment_ids=[experiment.experiment_id],
-            filter_string="attributes.status = 'FINISHED'",
+            filter_string=(
+                "attributes.status = 'FINISHED'"
+                " AND tags.flow_name = 'post-training-flow'"
+            ),
             output_format="list",
         )
         log.info("Found %d post-training model(s)", len(runs))
-        return [{"run_id": r.info.run_id, "tags": dict(r.data.tags)} for r in runs]
+        return [
+            {
+                "run_id": r.info.run_id,
+                "tags": dict(r.data.tags),
+                "post_training_method": r.data.tags.get("post_training_method", "none"),
+            }
+            for r in runs
+        ]
     except ImportError:
         log.info("MLflow not available — skipping post-training discovery")
         return []
     except Exception:
         log.warning("Post-training model discovery failed", exc_info=True)
         return []
+
+
+@task(name="discover-zero-shot-baselines")
+def discover_zero_shot_baselines(
+    *,
+    factorial_yaml: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Discover zero-shot baseline models from the factorial YAML (#888).
+
+    Zero-shot baselines (SAM3 Vanilla, VesselFM) are evaluated but NOT
+    trained in the factorial grid. Each baseline gets ``is_zero_shot=true``
+    tag in MLflow for Biostatistics to exclude from ANOVA.
+
+    VesselFM is constrained to DeepVess-only (data leakage with MiniVess).
+
+    Parameters
+    ----------
+    factorial_yaml:
+        Path to factorial YAML (e.g., ``configs/factorial/debug.yaml``).
+        Returns empty list if None.
+
+    Returns
+    -------
+    List of zero-shot baseline dicts with model, strategy, dataset, and tags.
+    """
+    log = get_run_logger()
+
+    if factorial_yaml is None:
+        log.info("No factorial YAML provided — no zero-shot baselines")
+        return []
+
+    try:
+        from minivess.config.factorial_config import parse_factorial_yaml
+
+        design = parse_factorial_yaml(factorial_yaml)
+    except (FileNotFoundError, ValueError):
+        log.warning(
+            "Failed to parse factorial YAML %s for zero-shot baselines",
+            factorial_yaml,
+            exc_info=True,
+        )
+        return []
+
+    baselines: list[dict[str, Any]] = []
+    for entry in design.zero_shot_baselines:
+        model = entry.get("model", "unknown")
+        strategy = entry.get("strategy", "unknown")
+        dataset = entry.get("dataset", "minivess")
+        folds = entry.get("folds", 1)
+
+        baseline = {
+            "model": model,
+            "strategy": strategy,
+            "dataset": dataset,
+            "folds": folds,
+            "is_zero_shot": True,
+            "tags": {
+                "is_zero_shot": "true",
+                "model_family": model,
+                "zero_shot_strategy": strategy,
+                "zero_shot_dataset": dataset,
+            },
+        }
+        baselines.append(baseline)
+
+    log.info("Discovered %d zero-shot baseline(s) from factorial YAML", len(baselines))
+    return baselines
+
+
+@task(name="predict-with-uncertainty")
+def predict_with_uncertainty(
+    *,
+    models: list[nn.Module],
+    images: torch.Tensor,
+) -> dict[str, Any]:
+    """Run deep ensemble inference with uncertainty decomposition (#886).
+
+    Wraps :class:`DeepEnsemblePredictor` for use as a Prefect task in the
+    analysis flow. Produces entropy/MI decomposition per Lakshminarayanan
+    et al. (2017).
+
+    Parameters
+    ----------
+    models:
+        List of independently trained models (ensemble members).
+    images:
+        Input tensor (B, C_in, D, H, W).
+
+    Returns
+    -------
+    Dict with keys: prediction, uncertainty_map, total_uncertainty,
+    aleatoric_uncertainty, epistemic_uncertainty, n_members.
+    """
+    log = get_run_logger()
+    log.info("Running deep ensemble UQ with %d member(s)", len(models))
+
+    from minivess.ensemble.deep_ensembles import DeepEnsemblePredictor
+
+    predictor = DeepEnsemblePredictor(models)
+    result = predictor.predict(images)
+
+    return {
+        "prediction": result.prediction,
+        "uncertainty_map": result.uncertainty_map,
+        "total_uncertainty": result.metadata["total_uncertainty"],
+        "aleatoric_uncertainty": result.metadata["aleatoric_uncertainty"],
+        "epistemic_uncertainty": result.metadata["epistemic_uncertainty"],
+        "n_members": result.metadata["n_members"],
+    }
 
 
 @task(name="build-ensembles")
@@ -2061,6 +2181,48 @@ def _entry_point_from_env() -> dict[str, Any]:
         "upstream_training_run_id": upstream["run_id"],
         "tracking_uri": tracking_uri,
     }
+
+
+def _resolve_ensemble_strategies(
+    *,
+    factorial_yaml: Path | None = None,
+) -> list[str] | None:
+    """Resolve ensemble strategies from factorial YAML if provided.
+
+    If ``factorial_yaml`` is set, reads ``factors.analysis.ensemble_strategy``
+    to auto-derive the strategy list. This enables composable factorial designs
+    where different labs define their own strategy sets.
+
+    Returns ``None`` when no YAML is provided or parsing fails — the caller
+    should fall back to ``eval_config.ensemble_strategies`` defaults.
+
+    References: XML plan T1.7, synthesis Part 1.2 Layer C.
+    """
+    if factorial_yaml is None:
+        return None
+
+    try:
+        from minivess.config.factorial_config import parse_factorial_yaml
+
+        design = parse_factorial_yaml(factorial_yaml)
+        levels = design.factor_levels()
+        strategies = levels.get("ensemble_strategy")
+        if strategies:
+            logger.info(
+                "Auto-derived %d ensemble strategies from %s: %s",
+                len(strategies),
+                factorial_yaml,
+                strategies,
+            )
+            return strategies
+    except Exception:
+        logger.warning(
+            "Failed to parse factorial YAML %s for ensemble strategies, "
+            "using config defaults",
+            factorial_yaml,
+            exc_info=True,
+        )
+    return None
 
 
 if __name__ == "__main__":

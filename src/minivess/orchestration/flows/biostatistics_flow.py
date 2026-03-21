@@ -33,9 +33,18 @@ from minivess.pipeline.biostatistics_duckdb import (
 from minivess.pipeline.biostatistics_figures import generate_figures
 from minivess.pipeline.biostatistics_lineage import build_lineage_manifest
 from minivess.pipeline.biostatistics_mlflow import log_biostatistics_run
+from minivess.pipeline.biostatistics_rank_stability import (
+    RankConcordanceResult,
+    compute_rank_concordance,
+)
 from minivess.pipeline.biostatistics_rankings import compute_rankings
+from minivess.pipeline.biostatistics_specification_curve import (
+    SpecificationCurveResult,
+    compute_specification_curve,
+)
 from minivess.pipeline.biostatistics_statistics import (
     compute_bayesian_comparisons,
+    compute_factorial_anova,
     compute_pairwise_comparisons,
     compute_variance_decomposition,
 )
@@ -108,6 +117,24 @@ def task_build_duckdb(
     parquet_dir = Path(output_dir) / "parquet"
     export_parquet(db_path, parquet_dir)
     return db_path
+
+
+@task(name="compute-factorial-anova")
+def task_compute_factorial_anova(
+    per_volume_data: dict[str, dict[str, dict[int, Any]]],
+    metric_name: str,
+    factor_names: list[str],
+) -> Any:
+    """Compute N-way factorial ANOVA for one metric.
+
+    Wraps compute_factorial_anova() for Prefect task tracking.
+    Returns FactorialAnovaResult with F-values, p-values, effect sizes.
+    """
+    return compute_factorial_anova(
+        per_volume_data=per_volume_data,
+        metric_name=metric_name,
+        factor_names=factor_names,
+    )
 
 
 @task(name="compute-pairwise")
@@ -227,6 +254,40 @@ def task_log_mlflow(
         figures=figures,
         tables=tables,
         db_path=db_path,
+    )
+
+
+@task(name="compute-rank-concordance")
+def task_compute_rank_concordance(
+    per_volume_data: dict[str, dict[str, dict[int, Any]]],
+    metric_names: list[str],
+    higher_is_better: dict[str, bool],
+) -> RankConcordanceResult:
+    """Compute Kendall's tau rank concordance between metrics."""
+    return compute_rank_concordance(
+        per_volume_data=per_volume_data,
+        metric_names=metric_names,
+        higher_is_better=higher_is_better,
+    )
+
+
+@task(name="compute-specification-curve")
+def task_compute_specification_curve(
+    per_volume_data: dict[str, dict[str, dict[int, Any]]],
+    factor_names: list[str],
+    metric_names: list[str],
+    higher_is_better: dict[str, bool],
+    n_permutations: int = 500,
+    seed: int = 42,
+) -> SpecificationCurveResult:
+    """Compute specification curve across all researcher degrees of freedom."""
+    return compute_specification_curve(
+        per_volume_data=per_volume_data,
+        factor_names=factor_names,
+        metric_names=metric_names,
+        higher_is_better=higher_is_better,
+        n_permutations=n_permutations,
+        seed=seed,
     )
 
 
@@ -379,9 +440,29 @@ def run_biostatistics_flow(
     for m in config.metrics:
         higher_is_better[m] = m not in ("hd95", "assd", "be_0", "be_1")
 
-    # Phase 3: Statistical engine
+    # Phase 3: Statistical engine — layered ANOVA + pairwise + Bayesian
     all_pairwise: list[Any] = []
     all_variance: list[Any] = []
+    all_anova: list[Any] = []
+
+    # Layered factorial ANOVA (3-way → 5-way → 6-way)
+    all_factor_names = config.factor_names
+    for metric in config.metrics:
+        if metric in per_volume_data:
+            try:
+                anova_result = task_compute_factorial_anova(
+                    per_volume_data=per_volume_data,
+                    metric_name=metric,
+                    factor_names=all_factor_names,
+                )
+                all_anova.append(anova_result)
+            except Exception:
+                logger.warning(
+                    "Factorial ANOVA failed for metric %s — continuing",
+                    metric,
+                    exc_info=True,
+                )
+
     for metric in config.metrics:
         if metric in per_volume_data:
             pairwise = task_compute_pairwise(
@@ -406,7 +487,39 @@ def run_biostatistics_flow(
             )
             all_variance.extend(variance)
 
-    # Phase 4: Rankings
+    # Phase 3b: Specification curve analysis
+    # Factor names auto-derived from factorial YAML or config (Rule #29)
+    _factor_names = _resolve_factor_names(config)
+    spec_curve = task_compute_specification_curve(
+        per_volume_data=per_volume_data,
+        factor_names=_factor_names,
+        metric_names=config.metrics,
+        higher_is_better=higher_is_better,
+        n_permutations=config.n_bootstrap // 20,  # Scale with bootstrap
+        seed=config.seed,
+    )
+    logger.info(
+        "Specification curve: %d specs, median effect=%.3f, %.1f%% significant",
+        len(spec_curve.specifications),
+        spec_curve.median_effect,
+        spec_curve.fraction_significant * 100,
+    )
+
+    # Phase 4a: Rank concordance (Kendall's tau between metrics)
+    rank_concordance = task_compute_rank_concordance(
+        per_volume_data=per_volume_data,
+        metric_names=config.metrics,
+        higher_is_better=higher_is_better,
+    )
+    if rank_concordance.n_inversions > 0:
+        logger.info(
+            "Rank inversions detected: %d/%d metric pairs (DSC vs clDice inversion "
+            "IS a paper finding)",
+            rank_concordance.n_inversions,
+            rank_concordance.n_pairs,
+        )
+
+    # Phase 4b: Rankings
     rankings = task_compute_rankings(
         per_volume_data=per_volume_data,
         metric_names=config.metrics,
@@ -478,6 +591,34 @@ def run_biostatistics_flow(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_factor_names(config: BiostatisticsConfig) -> list[str]:
+    """Resolve factor names from factorial YAML or config defaults.
+
+    If ``config.factorial_yaml`` is set, auto-derives all factor names from
+    the composable YAML. Otherwise falls back to ``config.factor_names``.
+    """
+    if config.factorial_yaml is not None:
+        try:
+            from minivess.config.factorial_config import parse_factorial_yaml
+
+            design = parse_factorial_yaml(config.factorial_yaml)
+            names = design.factor_names()
+            logger.info(
+                "Auto-derived %d factor names from %s: %s",
+                len(names),
+                config.factorial_yaml,
+                names,
+            )
+            return names
+        except Exception:
+            logger.warning(
+                "Failed to parse factorial YAML %s, using config.factor_names",
+                config.factorial_yaml,
+                exc_info=True,
+            )
+    return config.factor_names
+
+
 def _load_config(config_path: str) -> BiostatisticsConfig:
     """Load BiostatisticsConfig from YAML file or return defaults."""
     import yaml
@@ -490,6 +631,29 @@ def _load_config(config_path: str) -> BiostatisticsConfig:
         return BiostatisticsConfig(**raw)
     logger.warning("Config file %s not found, using defaults", config_path)
     return BiostatisticsConfig()
+
+
+def _compose_condition_key(run: Any) -> str:
+    """Compose a 6-factor condition key from SourceRun fields.
+
+    The key has 6 ``__``-separated parts matching the factorial factor order:
+    model_family, loss_function, with_aux_calib, post_training_method,
+    recalibration, ensemble_strategy.
+
+    This key is used as the condition identifier in compute_factorial_anova()
+    and compute_specification_curve(). The order MUST match the factor_names
+    list passed to those functions.
+    """
+    return "__".join(
+        [
+            getattr(run, "model_family", "unknown"),
+            getattr(run, "loss_function", "unknown"),
+            str(getattr(run, "with_aux_calib", False)).lower(),
+            getattr(run, "post_training_method", "none"),
+            getattr(run, "recalibration", "none"),
+            getattr(run, "ensemble_strategy", "none"),
+        ]
+    )
 
 
 def _build_per_volume_data(
@@ -539,13 +703,15 @@ def _build_per_volume_data(
                 # Per-volume test metrics: test/{dataset}/vol_{id}/{metric}
                 if subset_or_vol.startswith("vol_"):
                     # Use fold_id=0 for test sets (no folds)
+                    condition_key = _compose_condition_key(run)
                     data.setdefault(base_metric, {}).setdefault(
-                        run.loss_function, {}
+                        condition_key, {}
                     ).setdefault(0, []).append(value)
                 # Aggregate or subset-level: store as summary
                 elif subset_or_vol in ("all", ""):
+                    condition_key = _compose_condition_key(run)
                     data.setdefault(base_metric, {}).setdefault(
-                        run.loss_function, {}
+                        condition_key, {}
                     ).setdefault(0, []).append(value)
             else:
                 # For trainval split, use eval/ prefix per-volume metrics
@@ -556,8 +722,9 @@ def _build_per_volume_data(
                         metric_name,
                     )
                     if fold_id is not None:
+                        condition_key = _compose_condition_key(run)
                         data.setdefault(base_metric, {}).setdefault(
-                            run.loss_function, {}
+                            condition_key, {}
                         ).setdefault(fold_id, []).append(value)
 
     # Convert lists to numpy arrays
