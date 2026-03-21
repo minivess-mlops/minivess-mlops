@@ -12,14 +12,64 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import torch
-from torch.optim.swa_utils import SWALR, update_bn
+from torch.optim.swa_utils import SWALR
 
 from minivess.ensemble.swag import SWAGModel
 from minivess.pipeline.post_training_plugin import PluginInput, PluginOutput
 
 logger = logging.getLogger(__name__)
+
+
+@torch.no_grad()
+def _update_bn_with_dict_loader(
+    loader: Any,
+    model: torch.nn.Module,
+    *,
+    device: torch.device | str | None = None,
+) -> None:
+    """Like ``torch.optim.swa_utils.update_bn`` but handles dict-based loaders.
+
+    MONAI's ``ThreadDataLoader`` yields ``dict[str, Tensor]`` with an ``"image"``
+    key, whereas PyTorch's ``update_bn`` expects plain tensor batches.
+    """
+    from torch.nn.modules.batchnorm import _BatchNorm
+
+    momenta: dict[_BatchNorm, float | None] = {}
+    for module in model.modules():
+        if isinstance(module, _BatchNorm):
+            if module.running_mean is not None:
+                module.running_mean = torch.zeros_like(module.running_mean)
+            if module.running_var is not None:
+                module.running_var = torch.ones_like(module.running_var)
+            momenta[module] = module.momentum
+
+    if not momenta:
+        return
+
+    was_training = model.training
+    model.train()
+    for module in momenta:
+        module.momentum = None  # cumulative moving average
+        if module.num_batches_tracked is not None:
+            module.num_batches_tracked.zero_()
+
+    for batch in loader:
+        if isinstance(batch, dict):
+            inp = batch["image"]
+        elif isinstance(batch, list | tuple):
+            inp = batch[0]
+        else:
+            inp = batch
+        if device is not None:
+            inp = inp.to(device)
+        model(inp)  # output ignored — only updating BN running stats
+
+    for module, momentum in momenta.items():
+        module.momentum = momentum
+    model.train(was_training)
 
 
 class SWAGPlugin:
@@ -111,12 +161,35 @@ class SWAGPlugin:
                     raise TypeError(f"Unexpected batch type: {type(batch)}")
 
                 optimizer.zero_grad()
-                outputs = base_model(inputs)
-
-                # Use simple binary cross-entropy for SWAG training
-                loss = torch.nn.functional.binary_cross_entropy_with_logits(
-                    outputs, targets.float()
+                raw_outputs = base_model(inputs)
+                # ModelAdapter returns SegmentationOutput; extract logits
+                outputs = (
+                    raw_outputs.logits
+                    if hasattr(raw_outputs, "logits")
+                    else raw_outputs
                 )
+
+                # Handle multi-class (out_channels>1) vs binary output
+                if outputs.shape == targets.shape:
+                    # Same shape (e.g. both (B, C, D, H, W)) → BCE
+                    loss = torch.nn.functional.binary_cross_entropy_with_logits(
+                        outputs, targets.float()
+                    )
+                elif outputs.ndim >= 3 and outputs.shape[1] > 1:
+                    # Multi-class logits vs integer labels → cross_entropy
+                    if targets.ndim == outputs.ndim:
+                        targets_ce = targets.squeeze(1).long()
+                    else:
+                        targets_ce = targets.long()
+                    loss = torch.nn.functional.cross_entropy(outputs, targets_ce)
+                else:
+                    # Binary logits (B, 1, ...) → BCE with float labels
+                    loss = torch.nn.functional.binary_cross_entropy_with_logits(
+                        outputs.squeeze(1) if outputs.ndim > targets.ndim else outputs,
+                        targets.squeeze(1).float()
+                        if targets.ndim > 1
+                        else targets.float(),
+                    )
                 loss.backward()  # type: ignore[no-untyped-call]
                 optimizer.step()
 
@@ -140,7 +213,9 @@ class SWAGPlugin:
         # Update BatchNorm statistics
         if do_update_bn:
             swag._load_mean()  # Load mean weights first
-            update_bn(train_loader, base_model, device=device)
+            # PyTorch's update_bn expects (tensor,) batches, but MONAI loaders
+            # yield dicts.  Wrap with an adapter that extracts the "image" key.
+            _update_bn_with_dict_loader(train_loader, base_model, device=device)
             logger.info("SWAG: BatchNorm statistics updated")
 
         # Save SWAG model
