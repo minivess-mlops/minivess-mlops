@@ -122,10 +122,10 @@ class TestEnsembleBuilderPostTrainingDiscovery:
         tags = {
             "loss_function": "dice_ce",
             "flow_name": "post-training-flow",
-            "post_training_method": "swa",
+            "post_training_method": "checkpoint_averaging",
         }
         method = tags.get("post_training_method", "none")
-        assert method == "swa"
+        assert method == "checkpoint_averaging"
 
 
 class TestDiscoverPostTrainingModelsFilter:
@@ -175,7 +175,7 @@ class TestPostTrainingDiscoveryIntegration:
         with mlflow.start_run(
             tags={
                 "flow_name": "post-training-flow",
-                "post_training_method": "swa",
+                "post_training_method": "checkpoint_averaging",
             }
         ):
             mlflow.log_metric("checkpoint_size_mb", 1.5)
@@ -186,7 +186,7 @@ class TestPostTrainingDiscoveryIntegration:
         )
 
         assert len(results) == 1
-        assert results[0]["post_training_method"] == "swa"
+        assert results[0]["post_training_method"] == "checkpoint_averaging"
 
     def test_discovers_multiple_post_training_methods(self, tmp_path) -> None:
         """Multiple post-training methods are all discovered."""
@@ -198,7 +198,7 @@ class TestPostTrainingDiscoveryIntegration:
         mlflow.set_tracking_uri(str(mlflow_dir))
         mlflow.set_experiment("minivess_training")
 
-        for method in ["none", "swa", "multi_swa"]:
+        for method in ["none", "checkpoint_averaging", "subsampled_ensemble"]:
             with mlflow.start_run(
                 tags={
                     "flow_name": "post-training-flow",
@@ -214,4 +214,4 @@ class TestPostTrainingDiscoveryIntegration:
 
         assert len(results) == 3
         methods = {r["post_training_method"] for r in results}
-        assert methods == {"none", "swa", "multi_swa"}
+        assert methods == {"none", "checkpoint_averaging", "subsampled_ensemble"}

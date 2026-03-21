@@ -8,12 +8,12 @@ mlflow_experiment: minivess_training
 
 # --- Weight-based plugins (no calibration data needed) ---
 
-swa:
+checkpoint_averaging:
   enabled: true
   per_loss: true
   cross_loss: false
 
-multi_swa:
+subsampled_ensemble:
   enabled: false
   n_models: 3
   subsample_fraction: 0.7

@@ -135,11 +135,11 @@ class TestPostTrainingFlowContract:
 
         assert callable(resolve_checkpoint_paths_from_contract)
 
-    def test_swa_is_in_weight_plugins(self) -> None:
-        """SWA is in the weight plugins set."""
+    def test_checkpoint_averaging_is_in_weight_plugins(self) -> None:
+        """Checkpoint averaging is in the weight plugins set."""
         from minivess.orchestration.flows.post_training_flow import _WEIGHT_PLUGINS
 
-        assert "swa" in _WEIGHT_PLUGINS
+        assert "checkpoint_averaging" in _WEIGHT_PLUGINS
 
 
 class TestAnalysisFlowContract:

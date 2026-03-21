@@ -1,10 +1,10 @@
-"""Integration tests for post-training flow: SWA + calibration + conformal.
+"""Integration tests for post-training flow: checkpoint averaging + calibration + conformal.
 
 E2E Plan Phase 1, Task T1.5: Post-training flow consuming checkpoints from training.
 
 Verifies:
 - FlowContract.find_fold_checkpoints() discovers upstream checkpoints
-- SWA plugin creates sibling __swa run in MLflow
+- Checkpoint averaging plugin creates sibling __checkpoint_averaging run in MLflow
 - Calibration plugin creates __calibrated sibling run with temperature param
 - Each sibling run has appropriate artifacts
 - Plugins skip gracefully (warning, not exception) when no checkpoint found
@@ -61,7 +61,7 @@ class TestPostTrainingFlowE2E:
     """Verify post-training flow produces correct artifacts.
 
     Requires: Docker stack running, training flow already completed.
-    These tests verify SWA, calibration, and conformal plugins.
+    These tests verify checkpoint averaging, calibration, and conformal plugins.
     """
 
     @pytest.fixture(scope="class")
@@ -109,10 +109,10 @@ class TestPostTrainingFlowE2E:
             "Post-training flow cannot find upstream checkpoints."
         )
 
-    def test_swa_sibling_run_created(
+    def test_checkpoint_averaging_sibling_run_created(
         self, tracking_uri: str, experiment_name: str
     ) -> None:
-        """Verify MLflow run with __swa suffix exists after post-training."""
+        """Verify MLflow run with __checkpoint_averaging suffix exists after post-training."""
         if not _mlflow_post_training_exists(tracking_uri, experiment_name):
             pytest.skip(_MLFLOW_SKIP)
 
@@ -126,11 +126,11 @@ class TestPostTrainingFlowE2E:
 
         runs = client.search_runs(
             experiment_ids=[experiment.experiment_id],
-            filter_string="tags.plugin_type = 'swa'",
+            filter_string="tags.plugin_type = 'checkpoint_averaging'",
         )
         assert len(runs) > 0, (
-            "No SWA sibling runs found. Post-training SWA plugin "
-            "must create a run tagged with plugin_type=swa."
+            "No checkpoint averaging sibling runs found. Post-training checkpoint averaging plugin "
+            "must create a run tagged with plugin_type=checkpoint_averaging."
         )
 
     def test_calibration_sibling_run_created(
@@ -187,10 +187,10 @@ class TestPostTrainingFlowE2E:
                 f"Available params: {list(params.keys())}"
             )
 
-    def test_swa_checkpoint_artifact_exists(
+    def test_checkpoint_averaging_artifact_exists(
         self, tracking_uri: str, experiment_name: str
     ) -> None:
-        """Verify SWA averaged checkpoint file in MLflow artifacts."""
+        """Verify checkpoint averaged checkpoint file in MLflow artifacts."""
         if not _mlflow_post_training_exists(tracking_uri, experiment_name):
             pytest.skip(_MLFLOW_SKIP)
 
@@ -204,20 +204,22 @@ class TestPostTrainingFlowE2E:
 
         runs = client.search_runs(
             experiment_ids=[experiment.experiment_id],
-            filter_string="tags.plugin_type = 'swa'",
+            filter_string="tags.plugin_type = 'checkpoint_averaging'",
         )
         if not runs:
-            pytest.skip("No SWA runs found")
+            pytest.skip("No checkpoint averaging runs found")
 
         for run in runs:
             artifacts = client.list_artifacts(run.info.run_id)
             artifact_paths = [a.path for a in artifacts]
-            # SWA should produce a checkpoint artifact
+            # Checkpoint averaging should produce a checkpoint artifact
             checkpoint_artifacts = [
-                p for p in artifact_paths if "swa" in p.lower() or p.endswith(".pt")
+                p
+                for p in artifact_paths
+                if "avg" in p.lower() or "checkpoint" in p.lower() or p.endswith(".pt")
             ]
             assert checkpoint_artifacts, (
-                f"SWA run {run.info.run_id} has no checkpoint artifact. "
+                f"Checkpoint averaging run {run.info.run_id} has no checkpoint artifact. "
                 f"Available artifacts: {artifact_paths}"
             )
 

@@ -41,5 +41,5 @@ flows:
 
 post_training:
   plugins:
-    - swa
+    - checkpoint_averaging
     - calibration

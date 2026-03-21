@@ -1,13 +1,13 @@
 """Post-training Prefect flow (Flow 2.5).
 
 Sits between train(2) and analyze(3) in the pipeline. Orchestrates
-post-hoc plugins (SWA, Multi-SWA, merging, calibration, conformal)
-based on config. Each plugin is best-effort: failure does not block
-other plugins or the downstream analyze flow.
+post-hoc plugins (checkpoint averaging, subsampled ensemble, merging,
+calibration, conformal) based on config. Each plugin is best-effort:
+failure does not block other plugins or the downstream analyze flow.
 
 Task DAG:
     Weight-based plugins (parallel, no calibration data):
-        - SWA, Multi-SWA, model merging
+        - checkpoint averaging, subsampled ensemble, model merging
     Data-dependent plugins (parallel, need calibration data):
         - Calibration, CRC conformal, ConSeCo FP control
     Aggregate results → log summary
@@ -129,10 +129,10 @@ def _require_docker_context() -> None:
 
 
 # Weight-based plugins (no calibration data needed)
-_WEIGHT_PLUGINS = {"swa", "multi_swa", "model_merging"}
+_WEIGHT_PLUGINS = {"checkpoint_averaging", "subsampled_ensemble", "model_merging"}
 
 # Data-dependent plugins (need calibration data)
-_DATA_PLUGINS = {"calibration", "crc_conformal", "conseco_fp_control"}
+_DATA_PLUGINS = {"swag", "calibration", "crc_conformal", "conseco_fp_control"}
 
 
 def _build_registry() -> PluginRegistry:
@@ -140,15 +140,21 @@ def _build_registry() -> PluginRegistry:
     registry = PluginRegistry()
 
     from minivess.pipeline.post_training_plugins.calibration import CalibrationPlugin
+    from minivess.pipeline.post_training_plugins.checkpoint_averaging import (
+        CheckpointAveragingPlugin,
+    )
     from minivess.pipeline.post_training_plugins.conseco_fp_control import ConSeCoPlugin
     from minivess.pipeline.post_training_plugins.crc_conformal import CRCConformalPlugin
     from minivess.pipeline.post_training_plugins.model_merging import ModelMergingPlugin
-    from minivess.pipeline.post_training_plugins.multi_swa import MultiSWAPlugin
-    from minivess.pipeline.post_training_plugins.swa import SWAPlugin
+    from minivess.pipeline.post_training_plugins.subsampled_ensemble import (
+        SubsampledEnsemblePlugin,
+    )
+    from minivess.pipeline.post_training_plugins.swag import SWAGPlugin
 
     for plugin_cls in (
-        SWAPlugin,
-        MultiSWAPlugin,
+        CheckpointAveragingPlugin,
+        SubsampledEnsemblePlugin,
+        SWAGPlugin,
         ModelMergingPlugin,
         CalibrationPlugin,
         CRCConformalPlugin,
@@ -222,7 +228,7 @@ class PostTrainingFlowResult:
     status: str = "completed"
     mlflow_run_id: str | None = None
     upstream_training_run_id: str | None = None
-    swa_completed: bool = False
+    checkpoint_averaging_completed: bool = False
     calibration_completed: bool = False
     conformal_completed: bool = False
     failed_operations: list[str] = field(default_factory=list)
@@ -403,20 +409,22 @@ def post_training_flow(
             emitter=_emitter,
             job_name="post-training-flow",
             inputs=[{"namespace": "minivess", "name": "checkpoints"}],
-            outputs=[{"namespace": "minivess", "name": "swa_checkpoints"}],
+            outputs=[{"namespace": "minivess", "name": "averaged_checkpoints"}],
         )
     except Exception:
         logger.warning("OpenLineage emission failed (non-blocking)", exc_info=True)
 
-    swa_ran = any(k in plugin_results for k in ("swa", "multi_swa"))
+    avg_ran = any(
+        k in plugin_results for k in ("checkpoint_averaging", "subsampled_ensemble")
+    )
     calibration_ran = "calibration" in plugin_results
     conformal_ran = any(k in plugin_results for k in ("crc_conformal", "conseco_fp"))
     return PostTrainingFlowResult(
         status="completed",
         mlflow_run_id=mlflow_run_id,
         upstream_training_run_id=upstream_training_run_id,
-        swa_completed=swa_ran
-        and plugin_results.get("swa", {}).get("status") == "success",
+        checkpoint_averaging_completed=avg_ran
+        and plugin_results.get("checkpoint_averaging", {}).get("status") == "success",
         calibration_completed=calibration_ran
         and plugin_results.get("calibration", {}).get("status") == "success",
         conformal_completed=conformal_ran,
@@ -428,7 +436,7 @@ def run_factorial_post_training(
     checkpoint_paths: list[Path],
     methods: list[str],
     output_dir: Path,
-    n_multi_swa_models: int = 3,
+    n_subsampled_ensemble_models: int = 3,
     subsample_fraction: float = 0.7,
     seed: int = 42,
     tracking_uri: str | None = None,
@@ -450,15 +458,15 @@ def run_factorial_post_training(
     checkpoint_paths:
         List of training checkpoint file paths.
     methods:
-        Factorial methods to apply: ``["none", "swa", "multi_swa"]``.
+        Factorial methods to apply: ``["none", "checkpoint_averaging", "subsampled_ensemble"]``.
     output_dir:
         Directory for output checkpoint files.
-    n_multi_swa_models:
-        Number of independent SWA models for multi_swa.
+    n_subsampled_ensemble_models:
+        Number of independent averaged models for subsampled_ensemble.
     subsample_fraction:
-        Fraction of checkpoints per multi_swa model.
+        Fraction of checkpoints per subsampled_ensemble model.
     seed:
-        Random seed for multi_swa subsampling.
+        Random seed for subsampled_ensemble subsampling.
     tracking_uri:
         MLflow tracking URI. When None, no MLflow runs are created.
     experiment_name:
@@ -490,27 +498,37 @@ def run_factorial_post_training(
             shutil.copy2(src, dst)
             result = _factorial_result(method, dst)
 
-        elif method == "swa":
-            dst = method_dir / "swa_averaged.pt"
+        elif method == "checkpoint_averaging":
+            dst = method_dir / "checkpoint_averaged.pt"
             _average_checkpoints(checkpoint_paths, dst)
             result = _factorial_result(method, dst)
 
-        elif method == "multi_swa":
+        elif method == "subsampled_ensemble":
             import random
 
             rng = random.Random(seed)
-            # Multi-SWA: subsample + average multiple times
+            # Subsampled ensemble: subsample + average multiple times
             n_ckpts = max(1, int(len(checkpoint_paths) * subsample_fraction))
             ensemble_paths: list[Path] = []
-            for i in range(n_multi_swa_models):
+            for i in range(n_subsampled_ensemble_models):
                 subset = rng.sample(
                     list(checkpoint_paths), min(n_ckpts, len(checkpoint_paths))
                 )
-                dst = method_dir / f"multi_swa_{i}.pt"
+                dst = method_dir / f"subsampled_ensemble_{i}.pt"
                 _average_checkpoints(subset, dst)
                 ensemble_paths.append(dst)
             # Return the first model path as representative
             result = _factorial_result(method, ensemble_paths[0])
+
+        elif method == "swag":
+            # SWAG requires resumed training (DataLoaders + optimizer).
+            # It cannot be applied purely post-hoc in the factorial function.
+            # Use the SWAGPlugin via the plugin system instead.
+            logger.warning(
+                "SWAG method requires DataLoaders — use SWAGPlugin via "
+                "post_training_flow() instead of run_factorial_post_training()"
+            )
+            continue
 
         else:
             logger.warning("Unknown factorial method: %s — skipping", method)

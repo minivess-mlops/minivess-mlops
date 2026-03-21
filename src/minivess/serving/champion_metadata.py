@@ -21,7 +21,7 @@ def build_champion_metadata(champion: dict[str, Any]) -> dict[str, Any]:
     - ``architecture``: param count, VRAM, FLOPs
     - ``training``: loss, epochs, optimizer, scheduler
     - ``performance``: metrics with CIs
-    - ``post_training``: SWA, recalibration
+    - ``post_training``: checkpoint averaging, recalibration
     - ``deployment``: ONNX opset, BentoML tag
     - ``factorial``: factorial factor values
     - ``tripod_compliance``: TRIPOD item references

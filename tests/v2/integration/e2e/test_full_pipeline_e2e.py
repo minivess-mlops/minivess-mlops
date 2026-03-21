@@ -167,7 +167,7 @@ class TestFullPipelineE2E:
         mlflow_client: object,
         wait_for_services: None,
     ) -> None:
-        """Verify SWA + calibration sibling runs exist."""
+        """Verify checkpoint averaging + calibration sibling runs exist."""
         if not _docker_available():
             pytest.skip(_REQUIRES_DOCKER)
 
@@ -180,7 +180,7 @@ class TestFullPipelineE2E:
             experiment_ids=[training_exps[0].experiment_id],
         )
         plugin_types = {run.data.tags.get("plugin_type", "") for run in runs} - {""}
-        # At least SWA and calibration should be present
-        assert "swa" in plugin_types or "calibration" in plugin_types, (
-            f"No post-training plugins found. Plugin types: {plugin_types}"
-        )
+        # At least checkpoint averaging and calibration should be present
+        assert (
+            "checkpoint_averaging" in plugin_types or "calibration" in plugin_types
+        ), f"No post-training plugins found. Plugin types: {plugin_types}"

@@ -99,8 +99,8 @@ class TestDiscoverPostTrainingPlugins:
     def test_contains_expected_plugins(self) -> None:
         plugins = discover_post_training_plugins()
         expected = {
-            "swa",
-            "multi_swa",
+            "checkpoint_averaging",
+            "subsampled_ensemble",
             "model_merging",
             "calibration",
             "crc_conformal",

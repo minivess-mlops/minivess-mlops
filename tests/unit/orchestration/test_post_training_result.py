@@ -28,7 +28,7 @@ class TestPostTrainingFlowResult:
             "status",
             "mlflow_run_id",
             "upstream_training_run_id",
-            "swa_completed",
+            "checkpoint_averaging_completed",
             "calibration_completed",
             "conformal_completed",
             "failed_operations",
@@ -46,7 +46,7 @@ class TestPostTrainingFlowResult:
         assert result.status == "completed"
         assert result.mlflow_run_id is None
         assert result.upstream_training_run_id is None
-        assert result.swa_completed is False
+        assert result.checkpoint_averaging_completed is False
         assert result.calibration_completed is False
         assert result.conformal_completed is False
         assert result.failed_operations == []

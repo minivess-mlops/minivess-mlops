@@ -39,8 +39,8 @@ class TestPostTrainingFlow:
         from minivess.orchestration.flows.post_training_flow import post_training_flow
 
         config = PostTrainingConfig(
-            swa={"enabled": False},  # type: ignore[arg-type]
-            multi_swa={"enabled": False},  # type: ignore[arg-type]
+            checkpoint_averaging={"enabled": False},  # type: ignore[arg-type]
+            subsampled_ensemble={"enabled": False},  # type: ignore[arg-type]
             model_merging={"enabled": False},  # type: ignore[arg-type]
             calibration={"enabled": False},  # type: ignore[arg-type]
             crc_conformal={"enabled": False},  # type: ignore[arg-type]
@@ -52,10 +52,10 @@ class TestPostTrainingFlow:
             output_dir=tmp_path,
         )
         assert result.status == "completed"
-        assert not result.swa_completed
+        assert not result.checkpoint_averaging_completed
         assert not result.calibration_completed
 
-    def test_swa_plugin_executes(self, tmp_path: Path) -> None:
+    def test_checkpoint_averaging_plugin_executes(self, tmp_path: Path) -> None:
         from minivess.config.post_training_config import PostTrainingConfig
         from minivess.orchestration.flows.post_training_flow import post_training_flow
 
@@ -63,7 +63,7 @@ class TestPostTrainingFlow:
         ckpt2 = _write_checkpoint(tmp_path / "ckpt2.pt", seed=2)
 
         config = PostTrainingConfig(
-            multi_swa={"enabled": False},  # type: ignore[arg-type]
+            subsampled_ensemble={"enabled": False},  # type: ignore[arg-type]
             model_merging={"enabled": False},  # type: ignore[arg-type]
             calibration={"enabled": False},  # type: ignore[arg-type]
             crc_conformal={"enabled": False},  # type: ignore[arg-type]
@@ -79,16 +79,16 @@ class TestPostTrainingFlow:
             output_dir=tmp_path,
         )
         assert result.status == "completed"
-        assert result.swa_completed
+        assert result.checkpoint_averaging_completed
 
     def test_plugin_failure_isolation(self, tmp_path: Path) -> None:
         """A failing plugin should not block other plugins."""
         from minivess.config.post_training_config import PostTrainingConfig
         from minivess.orchestration.flows.post_training_flow import post_training_flow
 
-        # SWA will fail with empty checkpoints, but we still get a result
+        # Checkpoint averaging will fail with empty checkpoints, but we still get a result
         config = PostTrainingConfig(
-            multi_swa={"enabled": False},  # type: ignore[arg-type]
+            subsampled_ensemble={"enabled": False},  # type: ignore[arg-type]
             model_merging={"enabled": False},  # type: ignore[arg-type]
             calibration={"enabled": False},  # type: ignore[arg-type]
             crc_conformal={"enabled": False},  # type: ignore[arg-type]
@@ -96,7 +96,7 @@ class TestPostTrainingFlow:
         )
         result = post_training_flow(
             config=config,
-            checkpoint_paths=[],  # Empty → SWA will handle gracefully
+            checkpoint_paths=[],  # Empty → checkpoint averaging will handle gracefully
             output_dir=tmp_path,
         )
         # Flow should still return success overall (best-effort per plugin)
@@ -109,8 +109,12 @@ class TestPostTrainingFlow:
         ckpts = [_write_checkpoint(tmp_path / f"ckpt{i}.pt", seed=i) for i in range(4)]
 
         config = PostTrainingConfig(
-            swa={"enabled": True, "per_loss": True, "cross_loss": True},  # type: ignore[arg-type]
-            multi_swa={"enabled": False},  # type: ignore[arg-type]
+            checkpoint_averaging={
+                "enabled": True,
+                "per_loss": True,
+                "cross_loss": True,
+            },  # type: ignore[arg-type]
+            subsampled_ensemble={"enabled": False},  # type: ignore[arg-type]
             model_merging={"enabled": False},  # type: ignore[arg-type]
             calibration={"enabled": False},  # type: ignore[arg-type]
             crc_conformal={"enabled": False},  # type: ignore[arg-type]
@@ -127,15 +131,15 @@ class TestPostTrainingFlow:
             ],
             output_dir=tmp_path,
         )
-        assert result.swa_completed
+        assert result.checkpoint_averaging_completed
 
     def test_trigger_source_propagated(self, tmp_path: Path) -> None:
         from minivess.config.post_training_config import PostTrainingConfig
         from minivess.orchestration.flows.post_training_flow import post_training_flow
 
         config = PostTrainingConfig(
-            swa={"enabled": False},  # type: ignore[arg-type]
-            multi_swa={"enabled": False},  # type: ignore[arg-type]
+            checkpoint_averaging={"enabled": False},  # type: ignore[arg-type]
+            subsampled_ensemble={"enabled": False},  # type: ignore[arg-type]
             model_merging={"enabled": False},  # type: ignore[arg-type]
             calibration={"enabled": False},  # type: ignore[arg-type]
             crc_conformal={"enabled": False},  # type: ignore[arg-type]
@@ -168,8 +172,12 @@ class TestPostTrainingFlow:
         labels = rng.integers(0, c, size=(n, d, h, w)).astype(np.int64)
 
         config = PostTrainingConfig(
-            swa={"enabled": True, "per_loss": True, "cross_loss": False},  # type: ignore[arg-type]
-            multi_swa={"enabled": False},  # type: ignore[arg-type]
+            checkpoint_averaging={
+                "enabled": True,
+                "per_loss": True,
+                "cross_loss": False,
+            },  # type: ignore[arg-type]
+            subsampled_ensemble={"enabled": False},  # type: ignore[arg-type]
             model_merging={"enabled": False},  # type: ignore[arg-type]
             calibration={"enabled": False},  # type: ignore[arg-type]
             crc_conformal={"enabled": True},  # type: ignore[arg-type]
@@ -186,5 +194,5 @@ class TestPostTrainingFlow:
             calibration_data={"scores": scores, "labels": labels},
         )
         assert result.status == "completed"
-        assert result.swa_completed
+        assert result.checkpoint_averaging_completed
         assert result.conformal_completed

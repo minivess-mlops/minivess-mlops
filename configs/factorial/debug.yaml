@@ -10,7 +10,7 @@
 #   1. Epochs: 2 (not 50)
 #   2. Data: half volumes (~23 train / ~12 val)
 #   3. Folds: 1 (fold-0 only)
-#   4. Post-training levels: 2 (not 3) — {none, swa}
+#   4. Post-training levels: 2 (not 3) — {none, checkpoint_averaging}
 #   5. Ensemble levels: 4 (not 5) — drop "none"
 #
 # Cost:
@@ -44,7 +44,7 @@ factors:
   post_training:
     method:
       - none
-      - swa
+      - checkpoint_averaging
     recalibration:
       - none
       - temperature_scaling
@@ -100,7 +100,7 @@ biostatistics:
 # ── Post-training plugins ───────────────────────────────────────────
 post_training:
   plugins:
-    - swa
+    - checkpoint_averaging
     - calibration
 
 # ── E2E flow chain ──────────────────────────────────────────────────
