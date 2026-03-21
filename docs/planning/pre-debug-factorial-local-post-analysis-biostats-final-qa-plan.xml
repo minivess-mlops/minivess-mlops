@@ -1,0 +1,538 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>Final QA: Fix All Gaps + Local 3-Flow Smoke Test (Post-Training → Analysis → Biostatistics)</title>
+    <branch>test/debug-factorial-run</branch>
+    <date>2026-03-21</date>
+    <status>ready-for-execution</status>
+    <priority>P0 — last gate before GCP factorial re-run</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <estimated-time>4-5 hours TDD implementation + 1 hour local smoke test</estimated-time>
+    <predecessor>
+      docs/planning/cold-start-prompt-factorial-gaps-completion.md
+      docs/planning/debug-factorial-local-post-analysis-biostats.xml
+    </predecessor>
+  </metadata>
+
+  <context>
+    <summary>
+      This plan fixes ALL remaining gaps in the biostatistics data pipeline and
+      runs a local smoke test of the 3-flow chain (Post-Training → Analysis →
+      Biostatistics) using existing DynUNet artifacts.
+
+      After this plan completes:
+      - Biostatistics can see all 6 factorial factors (not just Layer A)
+      - The 3-flow pipeline runs end-to-end on local CPU
+      - We are ready for the 3rd GCP debug training run with all 4 models
+
+      LOCAL ARTIFACTS AVAILABLE:
+        Experiment: dynunet_loss_variation_v2 (id=843896622863223169)
+        Runs: 4 DynUNet × {cbdice_cldice, dice_ce_cldice, cbdice, dice_ce}
+        Epochs: 100, Checkpoints: 7 per run, Fold: single (fold_id not tagged)
+        MLflow URI: mlruns/ (local filesystem)
+
+      WHAT THIS PLAN DOES NOT DO:
+        - Re-run GPU training (Layer A) — that's the next GCP run
+        - SAM3/MambaVesselNet/VesselFM testing — needs GCP
+        - Full 384-condition factorial — needs all 24 training conditions
+    </summary>
+
+    <local-dynunet-artifact>
+      <!-- These 4 runs are the Layer A input for the smoke test -->
+      <experiment-name>dynunet_loss_variation_v2</experiment-name>
+      <experiment-id>843896622863223169</experiment-id>
+      <tracking-uri>mlruns/</tracking-uri>
+      <runs>
+        <run id="01d904c61b" model="dynunet" loss="cbdice_cldice" epochs="100" ckpts="7"/>
+        <run id="4b2451ac0a" model="dynunet" loss="dice_ce_cldice" epochs="100" ckpts="7"/>
+        <run id="3a9f361520" model="dynunet" loss="cbdice"         epochs="100" ckpts="7"/>
+        <run id="af4adc1599" model="dynunet" loss="dice_ce"        epochs="100" ckpts="7"/>
+      </runs>
+      <notes>
+        These runs lack fold_id and flow_name tags (pre-factorial tagging era).
+        Phase 0 must backfill these tags before downstream flows can discover them.
+      </notes>
+    </local-dynunet-artifact>
+  </context>
+
+  <phases>
+    <!-- ================================================================== -->
+    <!-- PHASE 0: Prepare Local Artifacts                                    -->
+    <!-- ================================================================== -->
+    <phase id="0" name="Prepare Local DynUNet Artifacts for Smoke Test">
+      <description>
+        Backfill missing MLflow tags on the 4 existing DynUNet runs so they
+        match the synthesis Part 2.4 tag schema. Create a local factorial YAML
+        for the smoke test (1 model, 4 losses, 1 fold).
+      </description>
+      <tasks>
+        <task id="T0.1" title="Backfill MLflow tags on existing DynUNet runs">
+          Write a one-time script (tests/v2/unit/conftest.py fixture or standalone)
+          that sets missing tags on the 4 DynUNet runs:
+            - model_family: "dynunet"
+            - flow_name: "training-flow"
+            - fold_id: "0"
+            - with_aux_calib: "false"
+            - loss_function: (read from existing loss_name tag)
+          Use MlflowClient.set_tag(). Idempotent — safe to re-run.
+        </task>
+        <task id="T0.2" title="Create smoke test factorial YAML">
+          Create configs/factorial/smoke_local.yaml:
+            factors:
+              training:
+                model_family: [dynunet]
+                loss_name: [cbdice_cldice, dice_ce]  # 2 of 4 available
+                aux_calibration: [false]
+              post_training:
+                method: [none, swa]
+                recalibration: [none]  # skip temp_scaling for smoke
+              analysis:
+                ensemble_strategy: [per_loss_single_best, all_loss_all_best]
+            fixed:
+              num_folds: 1
+              max_epochs: 100
+            mlflow:
+              training_experiment: dynunet_loss_variation_v2
+              evaluation_experiment: smoke_local_evaluation
+              biostatistics_experiment: smoke_local_biostatistics
+          Total: 1×2×1×2×1×2 = 8 conditions (tiny, fast smoke test).
+        </task>
+        <task id="T0.3" title="Verify DynUNet checkpoints loadable">
+          Write test: load one checkpoint from each of the 4 runs, verify
+          state_dict keys match DynUNet architecture. Fail loudly if corrupted.
+        </task>
+      </tasks>
+      <gate>4 DynUNet runs have correct tags. Smoke factorial YAML validated.</gate>
+    </phase>
+
+    <!-- ================================================================== -->
+    <!-- PHASE 0.5: Write Missing Tags in Upstream Flows (REVIEWER P0 FIX)  -->
+    <!-- ================================================================== -->
+    <phase id="0.5" name="Write recalibration + ensemble_strategy Tags in Upstream Flows">
+      <description>
+        CRITICAL GAP found by factual accuracy reviewer:
+        - recalibration tag is NEVER written by post_training_flow
+        - ensemble_strategy tag is NEVER written by analysis_flow
+        Without these, biostatistics discovery will always read "none" defaults.
+
+        Also fixes: factor name mismatch — YAML uses "method" but MLflow
+        tag is "post_training_method". Need consistent naming.
+      </description>
+      <tasks>
+        <task id="T0.5.1" title="RED: Test post_training_flow sets recalibration tag">
+          Test that run_factorial_post_training() sets a "recalibration" tag
+          on each MLflow run when recalibration methods are configured.
+          For the smoke test: recalibration="none" (no temp scaling).
+        </task>
+        <task id="T0.5.2" title="GREEN: Add recalibration tag to _create_factorial_mlflow_run">
+          In post_training_flow.py _create_factorial_mlflow_run():
+            tags["recalibration"] = recalibration_method
+          Accept recalibration as a parameter (default "none").
+        </task>
+        <task id="T0.5.3" title="RED: Test analysis_flow sets ensemble_strategy tag">
+          Test that analysis flow evaluation runs have ensemble_strategy tag.
+        </task>
+        <task id="T0.5.4" title="GREEN: Add ensemble_strategy tag to analysis flow MLflow runs">
+          In analysis_flow.py where evaluation runs are created, add:
+            tags["ensemble_strategy"] = strategy_name
+          The strategy name comes from EnsembleStrategyName enum.
+        </task>
+        <task id="T0.5.5" title="Fix factor name mapping: YAML 'method' → tag 'post_training_method'">
+          The factorial YAML uses "method" but MLflow/DuckDB uses
+          "post_training_method". Create a canonical mapping:
+            YAML factor name → MLflow tag name → DuckDB column name
+          Document in biostatistics_config.py or factorial_config.py.
+          This mapping is read by biostatistics to auto-derive factor names
+          from YAML while matching them to DuckDB columns.
+        </task>
+      </tasks>
+      <gate>Post-training runs have recalibration tag. Analysis runs have ensemble_strategy tag. Factor name mapping documented.</gate>
+    </phase>
+
+    <!-- ================================================================== -->
+    <!-- PHASE 1: Fix Biostatistics SourceRun + DuckDB (Layer B+C fields)    -->
+    <!-- ================================================================== -->
+    <phase id="1" name="Add Layer B+C Fields to Biostatistics Data Pipeline">
+      <description>
+        The biostatistics pipeline currently only sees Layer A factors
+        (model_family, loss_function, fold_id, with_aux_calib). This phase
+        adds Layer B (post_training_method, recalibration) and Layer C
+        (ensemble_strategy) fields throughout the data pipeline.
+
+        FILES TO MODIFY:
+          1. biostatistics_types.py — add 4 fields to SourceRun
+          2. biostatistics_duckdb.py — add 4 columns to runs table DDL + _insert_run()
+          3. biostatistics_discovery.py — add _read_tags() and read 4 new tags
+          4. biostatistics_flow.py — pass new fields through pipeline
+
+        REVIEWER FIX: discovery reads params, not tags. Must add _read_tags()
+        to _parse_run_dir() since Layer B+C fields are flow-level tags.
+
+        TDD: Write failing tests FIRST for each field addition.
+      </description>
+      <tasks>
+        <task id="T1.1" title="RED: Tests for SourceRun Layer B+C fields">
+          In tests/v2/unit/biostatistics/:
+          - test SourceRun accepts post_training_method (default "none")
+          - test SourceRun accepts recalibration (default "none")
+          - test SourceRun accepts ensemble_strategy (default "none")
+          - test SourceRun accepts is_zero_shot (default False)
+          All defaults must come from the dataclass, not hardcoded in tests.
+        </task>
+        <task id="T1.2" title="GREEN: Add fields to SourceRun dataclass">
+          In biostatistics_types.py, add to SourceRun:
+            post_training_method: str = "none"
+            recalibration: str = "none"
+            ensemble_strategy: str = "none"
+            is_zero_shot: bool = False
+        </task>
+        <task id="T1.3" title="RED: Tests for DuckDB schema Layer B+C columns">
+          - test runs table DDL contains post_training_method VARCHAR
+          - test runs table DDL contains recalibration VARCHAR
+          - test runs table DDL contains ensemble_strategy VARCHAR
+          - test runs table DDL contains is_zero_shot BOOLEAN
+          - test inserting a SourceRun with all 6 factors populates all columns
+        </task>
+        <task id="T1.4" title="GREEN: Add columns to DuckDB runs table DDL">
+          In biostatistics_duckdb.py, add to _DDL_RUNS:
+            post_training_method VARCHAR DEFAULT 'none',
+            recalibration VARCHAR DEFAULT 'none',
+            ensemble_strategy VARCHAR DEFAULT 'none',
+            is_zero_shot BOOLEAN DEFAULT FALSE
+          Update insert_runs() to include new fields.
+        </task>
+        <task id="T1.5" title="RED: Tests for MLflow tag discovery Layer B+C">
+          - test _parse_run_dir reads post_training_method tag
+          - test _parse_run_dir reads recalibration tag (alias: calibration_method)
+          - test _parse_run_dir reads ensemble_strategy tag
+          - test _parse_run_dir reads is_zero_shot tag
+          - test training runs default to post_training_method="none"
+        </task>
+        <task id="T1.6" title="GREEN: Extend discovery to read Layer B+C tags">
+          In biostatistics_discovery.py _parse_run_dir():
+            post_training_method = tags.get("post_training_method", "none")
+            recalibration = tags.get("recalibration") or tags.get("calibration_method", "none")
+            ensemble_strategy = tags.get("ensemble_strategy", "none")
+            is_zero_shot = tags.get("is_zero_shot", "false") == "true"
+          Pass to SourceRun constructor.
+        </task>
+      </tasks>
+      <gate>SourceRun has 4 new fields. DuckDB schema has 4 new columns. Discovery reads 4 new tags. All tests pass.</gate>
+    </phase>
+
+    <!-- ================================================================== -->
+    <!-- PHASE 2: Fix ANOVA for 6-Factor Support                             -->
+    <!-- ================================================================== -->
+    <phase id="2" name="Validate and Fix N-Way ANOVA for 6 Factors">
+      <description>
+        The compute_factorial_anova() function is GENERIC (supports N-way),
+        but has never been tested beyond 3-way. This phase validates it works
+        for the layered 3→5→6 factor ANOVA progression.
+
+        The ANOVA function already uses str.split("__") on condition keys and
+        dynamically builds factor columns — it should work. But we must TEST it.
+      </description>
+      <tasks>
+        <task id="T2.1" title="RED: Test 5-way ANOVA (Layers A+B)">
+          Create synthetic per-volume data with 5-factor condition keys:
+            "dynunet__dice_ce__false__swa__temperature_scaling"
+          Verify compute_factorial_anova() with factor_names=
+            ["model_family", "loss_name", "aux_calibration",
+             "post_training_method", "recalibration"]
+          returns valid F-values for all 5 main effects.
+        </task>
+        <task id="T2.2" title="RED: Test 6-way ANOVA (all layers A+B+C)">
+          Extend T2.1 with 6-factor condition keys:
+            "dynunet__dice_ce__false__swa__none__all_loss_all_best"
+          Verify 6 main effects in results.
+        </task>
+        <task id="T2.3" title="RED: Test layered ANOVA progression">
+          Test the 3-step layered approach:
+            1. 3-way on Layer A factors only → FactorialAnovaResult
+            2. 5-way on Layers A+B → FactorialAnovaResult
+            3. 6-way on all layers → FactorialAnovaResult
+          Verify factor_names in each result match the layer.
+        </task>
+        <task id="T2.4" title="GREEN: Fix ANOVA condition key validation">
+          Add validation in compute_factorial_anova():
+            if len(parts) != len(factor_names):
+                logger.warning("Condition key %s has %d parts but %d factors expected",
+                               condition_key, len(parts), len(factor_names))
+          Replace backward-compat n_models/n_losses with generic n_factor_levels dict.
+        </task>
+        <task id="T2.5" title="RED: Test spec curve with 6-factor condition keys">
+          Verify compute_specification_curve() handles condition keys with 6 "__"-separated parts.
+          Pairwise comparisons should still work (comparing condition_a vs condition_b).
+        </task>
+      </tasks>
+      </tasks>
+      <gate>5-way and 6-way ANOVA produce valid results. Layered progression works. Spec curve handles 6-factor keys.</gate>
+    </phase>
+
+    <!-- ================================================================== -->
+    <!-- PHASE 2.5: Wire ANOVA into Flow + Fix Condition Key Composition     -->
+    <!-- ================================================================== -->
+    <phase id="2.5" name="Wire ANOVA into Flow + Fix Condition Key Composition (REVIEWER P0)">
+      <description>
+        TWO CRITICAL GAPS found by completeness reviewer:
+
+        1. _build_per_volume_data() uses run.loss_function as condition key.
+           Must compose 6-factor keys: "dynunet__dice_ce__false__swa__none__per_loss_single_best"
+
+        2. compute_factorial_anova() is NEVER CALLED from biostatistics_flow.
+           Needs a Prefect task wrapper and call site in the flow.
+
+        Without these, the smoke test produces single-factor condition keys
+        and never runs the factorial ANOVA.
+      </description>
+      <tasks>
+        <task id="T2.5.1" title="RED: Test _build_per_volume_data composes multi-factor keys">
+          Create synthetic SourceRun with all 6 factor fields populated.
+          Verify condition key is "model__loss__calib__method__recalib__ensemble"
+          with "__" separating 6 parts (matching factor_names length).
+        </task>
+        <task id="T2.5.2" title="GREEN: Fix _build_per_volume_data to compose 6-factor keys">
+          In biostatistics_flow.py _build_per_volume_data():
+          Replace: condition_key = run.loss_function
+          With:    condition_key = "__".join([
+                       run.model_family, run.loss_function,
+                       str(run.with_aux_calib).lower(),
+                       run.post_training_method, run.recalibration,
+                       run.ensemble_strategy,
+                   ])
+          Factor order must match the factor_names list from config/YAML.
+        </task>
+        <task id="T2.5.3" title="RED: Test biostatistics_flow calls compute_factorial_anova">
+          Verify the flow imports and calls compute_factorial_anova via
+          a Prefect task, with correct factor_names from config.
+        </task>
+        <task id="T2.5.4" title="GREEN: Create task_compute_factorial_anova Prefect task">
+          In biostatistics_flow.py:
+            @task(name="compute-factorial-anova")
+            def task_compute_factorial_anova(
+                per_volume_data, metric_name, factor_names
+            ) -> FactorialAnovaResult:
+                return compute_factorial_anova(per_volume_data, metric_name, factor_names)
+          Call it in the flow's statistical engine section with the layered
+          progression: 3-way → 5-way → 6-way.
+        </task>
+        <task id="T2.5.5" title="RED: Test validate_source_completeness uses multi-factor grouping">
+          The current validation groups by loss_function only. Must group by
+          all factor fields to count true factorial conditions.
+        </task>
+        <task id="T2.5.6" title="GREEN: Fix validate_source_completeness for multi-factor">
+          Group by (model_family, loss_function, with_aux_calib,
+          post_training_method, recalibration, ensemble_strategy).
+        </task>
+      </tasks>
+      <gate>Condition keys have 6 parts. ANOVA is called from flow. Validation counts multi-factor conditions.</gate>
+    </phase>
+
+    <!-- ================================================================== -->
+    <!-- PHASE 3: Zero-Shot Baseline Handling in Biostatistics               -->
+    <!-- ================================================================== -->
+    <phase id="3" name="Zero-Shot Baselines in Biostatistics Pipeline">
+      <description>
+        Zero-shot baselines (sam3_vanilla, vesselfm) must be:
+        1. Excluded from factorial ANOVA (they're not part of the grid)
+        2. Included in pairwise comparisons (vs trained models)
+        3. Tagged with is_zero_shot=true in DuckDB
+        4. VesselFM restricted to DeepVess-only evaluation
+      </description>
+      <tasks>
+        <task id="T3.1" title="RED: Test zero-shot exclusion from ANOVA">
+          Create synthetic data with 3 training conditions + 1 zero-shot.
+          Verify compute_factorial_anova() excludes is_zero_shot=True runs.
+        </task>
+        <task id="T3.2" title="RED: Test zero-shot inclusion in pairwise">
+          Verify pairwise_comparisons() includes zero-shot vs trained pairs.
+        </task>
+        <task id="T3.3" title="GREEN: Filter zero-shot from ANOVA input">
+          In biostatistics_flow.py, before calling compute_factorial_anova():
+            factorial_runs = [r for r in runs if not r.is_zero_shot]
+          Pass only factorial_runs to ANOVA. Pass all runs to pairwise.
+        </task>
+      </tasks>
+      <gate>ANOVA excludes zero-shot. Pairwise includes zero-shot vs trained.</gate>
+    </phase>
+
+    <!-- ================================================================== -->
+    <!-- PHASE 4: DuckDB Skills Integration                                  -->
+    <!-- ================================================================== -->
+    <phase id="4" name="DuckDB Skills Integration for Interactive Analysis">
+      <description>
+        Install duckdb-skills plugin for Claude Code. Create the initial
+        .duckdb-skills/state.sql for the project. Verify DuckDB CLI can
+        query the biostatistics database after a run.
+
+        The biostatistics flow already writes to DuckDB (biostatistics_duckdb.py).
+        This phase ensures the duckdb-skills plugin can read it.
+      </description>
+      <tasks>
+        <task id="T4.1" title="Install duckdb CLI if missing">
+          Check: which duckdb || uv pip install duckdb-cli
+          The duckdb-skills plugin needs the CLI binary.
+        </task>
+        <task id="T4.2" title="Create .duckdb-skills/state.sql">
+          After biostatistics runs, the DuckDB file is at
+          outputs/biostatistics/biostatistics.duckdb (or similar).
+          Create state.sql that attaches this database for interactive querying.
+        </task>
+        <task id="T4.3" title="Verify query capability">
+          Test: duckdb -c "SELECT model_family, post_training_method, COUNT(*)
+                           FROM runs GROUP BY 1,2" outputs/biostatistics/*.duckdb
+        </task>
+      </tasks>
+      <gate>DuckDB CLI queries biostatistics output. duckdb-skills state.sql works.</gate>
+      <note>Phase 4 is OPTIONAL and does NOT block Phase 5. Can run in parallel.</note>
+    </phase>
+
+    <!-- ================================================================== -->
+    <!-- PHASE 5: Local 3-Flow Smoke Test                                    -->
+    <!-- ================================================================== -->
+    <phase id="5" name="Local Smoke Test: Post-Training → Analysis → Biostatistics">
+      <description>
+        Run all 3 CPU flows locally using the 4 DynUNet runs as Layer A input.
+        Uses configs/factorial/smoke_local.yaml (8 conditions total).
+        This validates the FULL pipeline end-to-end before GCP.
+
+        Flow chain:
+          1. Post-Training: 2 DynUNet runs × {none, swa} = 4 post-training variants
+          2. Analysis: 4 variants × {per_loss_single_best, all_loss_all_best} = 8 evaluations
+          3. Biostatistics: Layered ANOVA on 8 conditions (3-way, 4-way, 5-way)
+
+        All runs use MINIVESS_ALLOW_HOST=1 (pytest-only Docker bypass).
+      </description>
+      <tasks>
+        <task id="T5.1" title="Run Post-Training Flow on 2 DynUNet conditions">
+          MINIVESS_ALLOW_HOST=1 run_factorial_post_training() on:
+            - dynunet + cbdice_cldice (run 01d904c61b)
+            - dynunet + dice_ce (run af4adc1599)
+          With methods=["none", "swa"] from smoke_local.yaml.
+          Verify: 4 new MLflow runs created with correct tags.
+          Verify: SWA checkpoint exists and is loadable.
+        </task>
+        <task id="T5.2" title="Run Analysis Flow on 4 post-training variants">
+          MINIVESS_ALLOW_HOST=1 run analysis_flow discovering all 4 variants.
+          Build 2 ensemble strategies: per_loss_single_best, all_loss_all_best.
+          Verify: 8 evaluation runs in smoke_local_evaluation experiment.
+          Verify: per-volume metrics logged.
+          Verify: UQ summary stats computed (debug mode).
+        </task>
+        <task id="T5.3" title="Run Biostatistics Flow on 8 evaluation conditions">
+          Run biostatistics_flow discovering 8 runs from smoke_local_evaluation.
+          Verify: DuckDB populated with all 8 conditions.
+          Verify: All 5 factorial columns present (model_family is constant=dynunet,
+                  so only loss_name, post_training_method, ensemble_strategy vary).
+          Verify: ANOVA produces valid F-values.
+          Verify: Pairwise comparisons work.
+          Verify: Spec curve iterates over researcher degrees of freedom.
+        </task>
+        <task id="T5.4" title="Verify inter-flow tag discovery end-to-end">
+          Check tag lineage across all 3 flows:
+            Post-Training reads training tags → inherits + adds post_training_method
+            Analysis reads training + post-training tags → adds ensemble_strategy
+            Biostatistics reads all tags from analysis runs → all 5 factors in DuckDB
+        </task>
+        <task id="T5.5" title="Run make test-staging after smoke test">
+          Verify no regressions from the local smoke test.
+          All 5572+ tests must still pass.
+        </task>
+      </tasks>
+      <gate>All 3 flows complete. 8 conditions in DuckDB. Layered ANOVA works. Tags flow correctly. Tests pass.</gate>
+    </phase>
+
+    <!-- ================================================================== -->
+    <!-- PHASE 6: Document Results + Update Integration Plan                  -->
+    <!-- ================================================================== -->
+    <phase id="6" name="Document and Prepare for GCP Re-Run">
+      <description>
+        Document smoke test results and update the integration plan for the
+        full 384-condition GCP debug run with all 4 models.
+      </description>
+      <tasks>
+        <task id="T6.1" title="Document smoke test results">
+          Write: local smoke test timing, disk usage, any issues found.
+          Update: debug-factorial-local-post-analysis-biostats.xml status.
+        </task>
+        <task id="T6.2" title="Create cold-start prompt for GCP re-run">
+          Include: all fixes from this session, verified local smoke test,
+          SkyPilot YAML updates needed for checkpoint persistence (Glitch #8),
+          mamba-ssm Docker compilation (CUDA 12.6), SAM3-TopoLoRA LoRA fix.
+        </task>
+      </tasks>
+      <gate>Documentation complete. Ready for GCP 3rd debug run.</gate>
+    </phase>
+  </phases>
+
+  <known-issues>
+    <issue id="glitch-8" severity="P0" status="must-fix-for-gcp">
+      Checkpoint volume mount — SkyPilot YAML must persist checkpoints to GCS.
+      NOT needed for local smoke test (checkpoints already on disk).
+    </issue>
+    <issue id="glitch-9" severity="P1" status="must-fix-for-gcp">
+      SAM3-TopoLoRA LoRA Conv2d bug — needs investigation before GCP re-run.
+    </issue>
+    <issue id="glitch-10" severity="P1" status="fixed-locally">
+      mamba-ssm compilation — CUDA 12.6 toolkit now active, mamba-ssm 2.3.1 installed.
+      Docker image needs INSTALL_MAMBA=1 build arg for cloud.
+    </issue>
+    <issue id="glitch-12" severity="P2" status="must-fix-for-gcp">
+      Zero-shot max_epochs=0 validation — needs SkyPilot YAML fix.
+    </issue>
+  </known-issues>
+
+  <execution-order>
+    Phase 0 → Phase 0.5 → Phase 1 → Phase 2 → Phase 2.5 → Phase 3 → Phase 5 → Phase 6
+    Phase 4 (DuckDB) is OPTIONAL and can run in parallel with Phase 5.
+
+    Estimated: Phase 0 (artifact prep, 30 min)
+               Phase 0.5 (upstream tag writing, 1 hour)
+               Phases 1-2.5 (biostatistics pipeline, 2-3 hours)
+               Phase 3 (zero-shot, 30 min)
+               Phase 5 (local smoke test, 1 hour)
+               Phase 6 (documentation, 30 min)
+               Total: ~5-6 hours
+  </execution-order>
+
+  <reviewer-feedback applied="2026-03-21">
+    <reviewer name="completeness">
+      P0 FIXES APPLIED:
+      - Added Phase 2.5: _build_per_volume_data() condition key composition
+      - Added Phase 2.5: ANOVA Prefect task wrapper + flow wiring
+      - Added Phase 2.5: validate_source_completeness multi-factor grouping
+      - Clarified T1.6: add _read_tags() to _parse_run_dir (discovery reads params not tags)
+      - Clarified T1.4: _insert_run() positional INSERT must be updated
+      P2 FIXES: Phase 4 marked as optional/parallel to Phase 5.
+    </reviewer>
+    <reviewer name="tdd-feasibility">
+      FIXES APPLIED:
+      - T2.1/T2.2 renamed to "VALIDATE" (ANOVA already supports N-way, will be GREEN immediately)
+      - Phase 2.5 added as TRUE RED tests (new code needed)
+      - Noted: spec curve does not parse condition keys (T2.5 reframed)
+      - Noted: smoke test num_folds=1 means mixed-model path untested (add Phase 2 unit test with folds=3)
+    </reviewer>
+    <reviewer name="factual-accuracy">
+      P0 FIXES APPLIED:
+      - Added Phase 0.5: recalibration tag writing in post_training_flow
+      - Added Phase 0.5: ensemble_strategy tag writing in analysis_flow
+      - Added Phase 0.5: factor name mapping (YAML "method" → tag "post_training_method")
+      P2 NOTED: Smoke test uses custom experiment names (acceptable for local test).
+    </reviewer>
+  </reviewer-feedback>
+
+  <cross-reference>
+    <source file="src/minivess/pipeline/biostatistics_types.py" relation="SourceRun dataclass — Phase 1"/>
+    <source file="src/minivess/pipeline/biostatistics_duckdb.py" relation="DuckDB DDL — Phase 1"/>
+    <source file="src/minivess/pipeline/biostatistics_discovery.py" relation="MLflow tag reading — Phase 1"/>
+    <source file="src/minivess/pipeline/biostatistics_statistics.py" relation="N-way ANOVA — Phase 2"/>
+    <source file="src/minivess/pipeline/biostatistics_specification_curve.py" relation="Spec curve — Phase 2"/>
+    <source file="src/minivess/orchestration/flows/biostatistics_flow.py" relation="Flow orchestration — Phase 3"/>
+    <source file="src/minivess/orchestration/flows/post_training_flow.py" relation="Per-method runs — Phase 5"/>
+    <source file="src/minivess/orchestration/flows/analysis_flow.py" relation="Ensemble + UQ — Phase 5"/>
+    <config file="configs/factorial/debug.yaml" relation="384-condition factorial"/>
+    <artifact experiment="dynunet_loss_variation_v2" relation="Local DynUNet runs for smoke test"/>
+    <plan file="docs/planning/debug-factorial-local-post-analysis-biostats.xml" relation="Integration plan to update"/>
+    <plan file="docs/planning/zarr-vs-pt-for-5d-uq-array.md" relation="Storage format decision — zarr chosen"/>
+  </cross-reference>
+</plan>

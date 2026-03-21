@@ -1,0 +1,464 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>Post-Training Flow Debug Double-Check — 6-Factor Factorial Integration</title>
+    <branch>test/debug-factorial-run</branch>
+    <date>2026-03-20</date>
+    <updated>2026-03-20</updated>
+    <status>planned</status>
+    <priority>P0 — validates post-training pipeline produces correct MLflow artifacts for downstream flows</priority>
+    <predecessor>docs/planning/biostatistic-flow-debug-double-check.xml</predecessor>
+    <synthesis>docs/planning/intermedia-plan-synthesis-pre-debug-run.md</synthesis>
+    <estimated-time>4-6 hours</estimated-time>
+  </metadata>
+
+  <context>
+    <summary>
+      Verify and complete the Post-Training Flow (Flow 2.5) for the factorial experiment.
+      Post-Training operates model-agnostically on trained checkpoints, applying weight-based
+      and data-dependent post-processing techniques. It sits BETWEEN Model Training (Flow 2)
+      and Analysis (Flow 3).
+
+      Key principle: Post-Training Flow only applies techniques that do NOT require
+      end-to-end gradient flow (no differentiable pipeline). Techniques like joint
+      denoising+segmentation or differentiable mesh creation are TRAINING concerns,
+      not post-training. See DiffML (Schlosser et al., 2023) for the research vision
+      of truly end-to-end differentiable ML pipelines — we are NOT there yet.
+
+      Post-Training creates NEW MLflow runs in the SAME experiment as training
+      (synthesis Part 2.3, Part 3.1). Each new run is tagged with post_training_method,
+      enabling Biostatistics Flow to treat post-training method as a factorial factor
+      (synthesis Part 1.2 Layer B). Post-training method is a NEW factor that EXPANDS
+      the factorial grid — it does NOT replace original runs.
+
+      Critical naming convention:
+        Training run: dynunet__cbdice_cldice__calibFalse__fold0
+        Post-training: dynunet__cbdice_cldice__calibFalse__fold0__swa
+        Post-training: dynunet__cbdice_cldice__calibFalse__fold0__multi_swa
+    </summary>
+
+    <synthesis-reference>
+      This plan is subordinate to the Pre-Debug Run Synthesis:
+        docs/planning/intermedia-plan-synthesis-pre-debug-run.md
+
+      Key synthesis sections governing this plan:
+      - Part 1.2 Layer B: Post-Training Factors (post_training_method, recalibration)
+      - Part 1.3: MVRD defines debug scope: {none, swa} x {none, temperature_scaling} = 4 variants/condition
+      - Part 2.1: Flow execution order (Post-Training is Flow 2.5)
+      - Part 2.3: MLflow experiment names (post-training logs to minivess_training)
+      - Part 2.4: MLflow tag schema (post_training_method, upstream_training_run_id)
+      - Part 3.1: Post-Training Flow detailed operations
+      - Part 7.1: Complete 6-factor table (factors #4 and #5 are post-training)
+      - Part 8 Q1: RESOLVED — same experiment as training (recommendation accepted)
+    </synthesis-reference>
+
+    <full-factorial-context>
+      <!-- Source of truth: pre-gcp-master-plan.xml line 16 -->
+      <!-- The FULL factorial is 4×3×2×3×2×5 = 720 conditions (NOT 24). -->
+      <!-- 24 is only the training Layer A grid. Post-training and analysis layers EXPAND it. -->
+
+      The complete 6-factor design (from pre-gcp-master-plan.xml):
+        4 models × 3 losses × 2 aux_calib × 3 post-training × 2 recalibration × 5 ensemble = 720
+
+      The factorial YAML is COMPOSABLE via Hydra config groups (configs/factorial/*.yaml).
+      Users create their own configs. The YAML structure is sectioned by layer:
+
+        factors:
+          training:        # Layer A (GPU, cloud)
+            model_family: [dynunet, mambavesselnet, sam3_topolora, sam3_hybrid]  # 4
+            loss_name: [cbdice_cldice, dice_ce, dice_ce_cldice]                  # 3
+            aux_calibration: [true, false]                                        # 2
+          post_training:   # Layer B (CPU, local) — THIS FLOW
+            method: [none, swa, multi_swa]                                        # 3
+            recalibration: [none, temperature_scaling]                            # 2
+          analysis:        # Layer C (CPU/GPU)
+            ensemble_strategy: [none, per_loss_single_best, all_loss_single_best,
+                                per_loss_all_best, all_loss_all_best]             # 5
+
+      ALL factors are auto-derived from whichever factorial YAML was used. Zero hardcoded
+      factor names in infrastructure code.
+    </full-factorial-context>
+
+    <flow-positioning>
+      <!-- Post-Training is non-differentiable post-processing -->
+      <upstream>Model Training Flow (Flow 2) — produces checkpoints via Docker+SkyPilot on GPU</upstream>
+      <downstream>Analysis Flow (Flow 3) — discovers post-training artifacts, builds ensembles</downstream>
+      <compute>CPU-capable — does NOT require GPU (weight averaging, calibration, conformal)</compute>
+      <cost>ZERO — runs entirely on local CPU. Only Layer A (training) costs money on GPU.</cost>
+      <non-differentiable-boundary>
+        Prefect flows are NOT differentiable. Gradients do NOT flow across flow boundaries.
+        Post-Training applies model-agnostic weight-space techniques:
+        - SWA (Stochastic Weight Averaging) — Izmailov et al. (2018)
+        - Multi-SWA — multiple independent SWA models
+        - Model Soups — Wortsman et al. (2022) — weight interpolation
+        - Temperature Scaling — Guo et al. (2017) — post-hoc calibration
+        - Conformal Prediction — Vovk et al. (2005) — distribution-free coverage
+        End-to-end differentiable techniques (DiffML) are FUTURE research.
+      </non-differentiable-boundary>
+    </flow-positioning>
+
+    <factorial-factors>
+      <!-- Post-Training contributes factors #4 and #5 from the 6-factor table (synthesis Part 7.1) -->
+      <!-- These are defined in the factorial YAML under factors.post_training -->
+      <factor number="4" name="post_training_method" layer="B (Post-Training)" levels="3 (full) / 2 (debug)"
+              values="none, swa, multi_swa"
+              config-source="configs/factorial/*.yaml::factors.post_training.method"
+              debug-levels="none, swa"/>
+      <factor number="5" name="recalibration" layer="B (Post-Training)" levels="2"
+              values="none, temperature_scaling"
+              config-source="configs/factorial/*.yaml::factors.post_training.recalibration"
+              debug-levels="none, temperature_scaling"/>
+      <expansion>
+        Post-Training EXPANDS the training grid by multiplying with its own factors:
+
+        FULL PRODUCTION:
+          Layer A: 4×3×2 = 24 training cells × 3 folds = 72 training runs
+          Layer B: 72 runs × (3 methods × 2 recalibration) = 72 × 6 = 432 post-training variants
+          (24 cells × 6 variants per cell = 144 conditions, × 3 folds = 432)
+
+        DEBUG:
+          Layer A: 4×3×2 = 24 training cells × 1 fold = 24 training runs
+          Layer B: 24 runs × (2 methods × 2 recalibration) = 24 × 4 = 96 post-training variants
+
+        Cost: ZERO — all post-training runs on local CPU.
+        ONLY Layer A (72 training runs, ~$65 on GCP L4 spot) costs money.
+      </expansion>
+    </factorial-factors>
+
+    <mlflow-naming-convention>
+      <!-- RESOLVED (synthesis Part 2.3 + Part 8 Q1):
+           Post-training logs to the SAME experiment as training.
+           This enables Analysis Flow to discover all variants in one query. -->
+      <experiment-name>minivess_training (SAME as training — synthesis Part 2.3)</experiment-name>
+      <run-naming>
+        Training: {model}__{loss}__{calib}__{fold}
+        Post-training: {model}__{loss}__{calib}__{fold}__{method}
+        where method in {swa, multi_swa, model_soup, calibrated}
+        This creates new factorial conditions for Biostatistics Flow.
+      </run-naming>
+      <tags>
+        <!-- Tag schema from synthesis Part 2.4 -->
+        flow_name: "post-training-flow"
+        upstream_training_run_id: {original_run_id}
+        post_training_method: {method_name} — "none", "swa", "multi_swa", "calibrated"
+        model_family: {inherited from upstream}
+        loss_function: {inherited from upstream}
+        fold_id: {inherited from upstream}
+        with_aux_calib: {inherited from upstream}
+      </tags>
+    </mlflow-naming-convention>
+
+    <debug-scope>
+      <!-- Synthesis Part 1.3 + CLAUDE.md Rule #27: Debug = full production minus ONLY epochs/data/folds -->
+      <!-- + fewer levels for post-training methods and ensemble strategies -->
+      Debug scope reductions (ONLY these allowed):
+      1. Epochs: 2 (not 50)
+      2. Data: half volumes (~23 train / ~12 val)
+      3. Folds: 1 (fold-0 only)
+      4. Post-training method levels: 2 (not 3) — {none, swa} instead of {none, swa, multi_swa}
+      5. Ensemble levels: 4 (not 5) — drop "none" for debug
+
+      Post-training in debug: {none, swa} x {none, temperature_scaling}
+      = 4 variants per training condition.
+      24 training runs × 4 variants = 96 post-training variants.
+      Downstream: 96 variants × 4 ensemble strategies = 384 evaluation conditions (debug total).
+    </debug-scope>
+
+    <layered-anova-context>
+      <!-- The biostatistics ANOVA is LAYERED, not flat -->
+      The ANOVA structure mirrors the layered factorial design:
+
+      1. Core 3-way ANOVA: model_family × loss_name × aux_calibration (Layer A factors only)
+         — Answers: "Which training factor matters most?"
+
+      2. Extended 5-way ANOVA: + post_training_method × recalibration (Layers A+B)
+         — Answers: "Does post-training improve over raw checkpoints?"
+         — Post-Training factors are THIS FLOW's contribution to the ANOVA.
+
+      3. Ensemble analysis: + ensemble_strategy (all 6 factors)
+         — Answers: "What is the optimal ensemble strategy?"
+
+      All factors are auto-derived from the factorial YAML that was used.
+      Zero hardcoded factor names in the ANOVA code.
+      All statistical parameters from BiostatisticsConfig (Rule #29).
+    </layered-anova-context>
+  </context>
+
+  <phases>
+    <!-- ================================================================== -->
+    <phase id="0" name="Verify Upstream Artifact Discovery">
+      <description>
+        Ensure post_training_flow can discover checkpoints from training runs
+        and extract all factorial metadata (model_family, loss, fold, calib).
+      </description>
+      <tasks>
+        <task id="T0.1" skill="self-learning-iterative-coder">
+          Write test: post-training discovers upstream training run by experiment name.
+          Verify find_upstream_safely() returns correct run_id.
+          Verify all factorial tags are present (model_family, loss_function, fold_id, with_aux_calib).
+          Tag schema must match synthesis Part 2.4.
+        </task>
+        <task id="T0.2">
+          Write test: checkpoint resolution finds best_val_compound_masd_cldice.pth.
+          Test fallback chain: best.ckpt -> last.pth -> epoch_latest.pth.
+        </task>
+        <task id="T0.3">
+          Write test: multi-fold checkpoint discovery across 3 folds.
+          Verify checkpoint_dir_fold_0/1/2 tags resolve to actual paths.
+        </task>
+      </tasks>
+      <gate>Upstream discovery tests pass with synthetic mlruns.</gate>
+    </phase>
+
+    <!-- ================================================================== -->
+    <phase id="1" name="MLflow Run Naming for Factorial">
+      <description>
+        Implement the naming convention that creates distinguishable MLflow runs
+        for each post-training method, enabling factorial Biostatistics analysis.
+        Post-training method is factor #4 in the 6-factor table (synthesis Part 7.1).
+        Recalibration is factor #5 in the 6-factor table.
+      </description>
+      <tasks>
+        <task id="T1.1">
+          Write test: SWA post-training creates a NEW MLflow run with suffix __swa.
+          Verify the run_name includes all factorial factors + method.
+          Verify tags include post_training_method="swa".
+          Verify the run is in the SAME experiment (minivess_training).
+        </task>
+        <task id="T1.2">
+          Write test: Multi-SWA creates N new MLflow runs (one per sub-model).
+          Verify naming: {base}__multi_swa_{i}.
+        </task>
+        <task id="T1.3">
+          Write test: all upstream tags (model_family, loss_function, fold_id, with_aux_calib)
+          are inherited by post-training runs. Tags match synthesis Part 2.4 schema.
+          Biostatistics can discover them as additional factorial conditions.
+        </task>
+        <task id="T1.4">
+          Implement: Update post_training_flow.py to create correctly named runs.
+          Use SAME experiment as training (minivess_training) so Analysis Flow finds
+          all variants in one query. Reference: synthesis Part 2.3 + Part 8 Q1.
+        </task>
+        <task id="T1.5">
+          Write test: post-training factors are read from the factorial YAML
+          (configs/factorial/*.yaml::factors.post_training), not hardcoded.
+          The flow discovers which methods to apply from the composable config.
+        </task>
+      </tasks>
+      <gate>Post-training runs visible in same MLflow experiment with correct naming.</gate>
+    </phase>
+
+    <!-- ================================================================== -->
+    <phase id="2" name="SWA Plugin Verification">
+      <description>
+        Verify SWA produces valid averaged weights from training checkpoints.
+        SWA is the primary post_training_method (factor #4) after "none".
+      </description>
+      <tasks>
+        <task id="T2.1">
+          Write test: SWA averages 3 fold checkpoints into single model.
+          Verify output checkpoint is valid (loadable, same architecture).
+        </task>
+        <task id="T2.2">
+          Write test: SWA with BN update step (if batch norm present).
+          DynUNet uses InstanceNorm (no BN update needed).
+          SAM3 uses LayerNorm (no BN update needed).
+          Document: BN update is a NO-OP for current model lineup.
+        </task>
+      </tasks>
+    </phase>
+
+    <!-- ================================================================== -->
+    <phase id="3" name="Recalibration Plugin Verification">
+      <description>
+        Verify temperature scaling recalibration works on post-hoc predictions.
+        Recalibration is factor #5 in the 6-factor table (synthesis Part 7.1).
+        Note: this is DISTINCT from aux_calibration (factor #3, a training-time factor).
+        aux_calibration is an auxiliary loss during training; recalibration is
+        post-hoc recalibration of softmax outputs.
+
+        The recalibration factor is defined in the factorial YAML under
+        factors.post_training.recalibration — NOT hardcoded.
+      </description>
+      <tasks>
+        <task id="T3.1">
+          Write test: temperature scaling learns a temperature parameter T.
+          Verify T > 0 (always positive).
+          Verify calibrated softmax has lower ECE than uncalibrated.
+          All calibration thresholds/params from BiostatisticsConfig, not hardcoded.
+        </task>
+        <task id="T3.2">
+          Write test: calibration creates a new MLflow run tagged __calibrated.
+          Verify calibration parameters logged as artifact.
+          Verify post_training_method="calibrated" tag is set (synthesis Part 2.4).
+        </task>
+      </tasks>
+    </phase>
+
+    <!-- ================================================================== -->
+    <phase id="4" name="Integration with Analysis Flow">
+      <description>
+        Verify Analysis Flow can discover and use post-training artifacts.
+        Analysis discovers training + post-training from the SAME experiment
+        (minivess_training), then creates evaluation runs in a SEPARATE experiment
+        (minivess_evaluation). Reference: synthesis Part 2.3.
+
+        Post-training expands the factorial grid:
+          24 training runs → 96 post-training variants (debug)
+          72 training runs → 432 post-training variants (full)
+        Analysis then further expands by ensemble strategies:
+          96 → 384 evaluations (debug)
+          432 → 2160 evaluations (full)
+      </description>
+      <tasks>
+        <task id="T4.1">
+          Write test: Analysis Flow Step 0 discovers post-training models.
+          Verify discover_post_training_models() finds SWA and calibrated runs
+          in minivess_training (same experiment as training runs).
+        </task>
+        <task id="T4.2">
+          Write test: post-training checkpoints are loadable by EnsembleBuilder.
+          Verify SWA checkpoint has same architecture as original.
+        </task>
+        <task id="T4.3">
+          Write test: post-training runs are treated as additional factorial conditions
+          by downstream Biostatistics Flow. The post_training_method tag enables
+          the extended 5-way ANOVA (Layers A+B) to include post-training as factors.
+          The ANOVA is layered: core 3-way (Layer A) → extended 5-way (Layers A+B)
+          → full 6-factor ensemble analysis (all layers).
+        </task>
+      </tasks>
+      <gate>Analysis Flow successfully discovers and loads post-training checkpoints.</gate>
+    </phase>
+
+    <!-- ================================================================== -->
+    <phase id="5" name="Local Debug Run Verification">
+      <description>
+        Run the complete Post-Training Flow locally on DynUNet checkpoints
+        downloaded from cloud MLflow. CPU-only, no GPU required. Cost: ZERO.
+
+        Debug scope:
+          24 training runs × {none, swa} × {none, temperature_scaling} = 96 post-training variants.
+          Downstream (Analysis): 96 × 4 ensemble strategies = 384 evaluation conditions.
+          Total debug factorial: 4×3×2×2×2×4 = 384 conditions.
+      </description>
+      <tasks>
+        <task id="T5.1">
+          Create make sync-cloud-artifacts target (Issue #882).
+          Downloads mlruns/ from cloud MLflow to local disk.
+        </task>
+        <task id="T5.2">
+          Run post_training_flow locally on downloaded DynUNet artifacts.
+          Verify SWA, calibration, and conformal plugins complete.
+          Expected output: 24 training runs × 4 post-training variants = up to 96 new runs.
+          These 96 variants feed into Analysis Flow (Layer C).
+        </task>
+        <task id="T5.3">
+          Verify new MLflow runs are created with correct factorial naming.
+          Check with: mlflow ui --backend-store-uri ./mlruns
+          Verify all runs in minivess_training experiment (not separate).
+        </task>
+        <task id="T5.4">
+          Verify post-training factors are read from the debug factorial YAML
+          (configs/factorial/debug.yaml::factors.post_training), NOT hardcoded.
+          A different lab could use configs/factorial/my_lab.yaml with different
+          post-training factor levels.
+        </task>
+      </tasks>
+      <gate>Post-training completes locally, producing correctly named MLflow artifacts for all 96 variants.</gate>
+    </phase>
+  </phases>
+
+  <questions-for-user>
+    <!-- RESOLVED QUESTIONS (removed per synthesis) -->
+    <!-- Q1 RESOLVED: Synthesis Part 2.3 + Part 8 Q1 — Post-training logs to SAME experiment
+         as training (minivess_training). Analysis Flow discovers all variants in one query.
+         Each post-training run distinguished by post_training_method tag. -->
+    <!-- Q2 RESOLVED: Synthesis Part 1.2 Layer B — Post-training method is a NEW factor
+         that EXPANDS the factorial grid (24 training x M post-training methods x N recalibrations).
+         It does NOT replace original runs. Post-training variants are additional
+         factorial conditions for Biostatistics N-way ANOVA. -->
+
+    <!-- REMAINING QUESTIONS (genuinely need user input): -->
+    <question id="Q3">
+      Multi-SWA produces N sub-models. Should these be N separate MLflow runs
+      (one per sub-model) or a single run with an ensemble artifact?
+      Recommendation: N separate runs, each tagged multi_swa_{i}, so Biostatistics
+      can analyze sub-model variance.
+    </question>
+    <question id="Q4">
+      Model soups (weight interpolation) — should we sweep interpolation coefficients
+      (alpha=0.0, 0.25, 0.5, 0.75, 1.0) or only use the optimal alpha from validation?
+      Recommendation: sweep in production, optimal-only in debug (MVRD).
+    </question>
+  </questions-for-user>
+
+  <appendix id="factor-table-reference">
+    <title>Complete 6-Factor Table (synthesis Part 7.1)</title>
+    <content>
+      Post-Training Flow contributes factors #4 and #5:
+
+      | # | Factor                  | Layer              | Full Levels | Debug Levels | Compute     | Config Section         |
+      |---|-------------------------|--------------------|-------------|-------------|-------------|------------------------|
+      | 1 | model_family            | A (Training)       | 4           | 4           | GPU (GCP)   | factors.training       |
+      | 2 | loss_name               | A (Training)       | 3           | 3           | GPU (GCP)   | factors.training       |
+      | 3 | aux_calibration         | A (Training)       | 2           | 2           | GPU (GCP)   | factors.training       |
+      | 4 | post_training_method    | B (Post-Training)  | 3           | 2           | CPU (local) | factors.post_training  |
+      | 5 | recalibration           | B (Post-Training)  | 2           | 2           | CPU (local) | factors.post_training  |
+      | 6 | ensemble_strategy       | C (Analysis)       | 5           | 4           | CPU (local) | factors.analysis       |
+
+      Full product: 4 × 3 × 2 × 3 × 2 × 5 = 720 conditions × 3 folds = 2160 evaluations
+      Debug product: 4 × 3 × 2 × 2 × 2 × 4 = 384 conditions × 1 fold = 384 evaluations
+
+      Cost: ONLY Layer A runs on GPU (~$65 for 72 runs). Layers B+C run on local CPU (free).
+
+      Analytical factors (#7-#13) are researcher degrees of freedom for specification curve
+      (Layer D: Biostatistics). See synthesis Part 7.1 for the full 13-factor table.
+    </content>
+  </appendix>
+
+  <appendix id="composable-yaml-design">
+    <title>Composable Factorial YAML Design</title>
+    <content>
+      The factorial YAML is NOT hardcoded — it is COMPOSABLE via Hydra config groups.
+      Users create their own configs/factorial/*.yaml files.
+
+      Example configs:
+        configs/factorial/paper_full.yaml    — 720 conditions (Nature Protocols)
+        configs/factorial/debug.yaml         — 384 conditions (pipeline validation)
+        configs/factorial/my_lab.yaml        — custom (user-defined)
+
+      Post-Training reads its factor levels from factors.post_training in the YAML:
+        factors:
+          post_training:
+            method: [none, swa, multi_swa]         # Factor #4
+            recalibration: [none, temperature_scaling]  # Factor #5
+
+      The flow code iterates over these lists — it NEVER hardcodes factor values.
+      A lab that only wants SWA and no recalibration creates:
+        factors:
+          post_training:
+            method: [none, swa]
+            recalibration: [none]
+    </content>
+  </appendix>
+
+  <cross-reference>
+    <synthesis file="docs/planning/intermedia-plan-synthesis-pre-debug-run.md" relation="authoritative synthesis — this plan is subordinate"/>
+    <factorial-source file="docs/planning/pre-gcp-master-plan.xml" line="16" relation="canonical 6-factor definition: 4×3×2×3×2×5=720"/>
+    <source file="src/minivess/orchestration/flows/post_training_flow.py" relation="current implementation"/>
+    <source file="src/minivess/config/post_training_config.py" relation="plugin config"/>
+    <source file="src/minivess/config/biostatistics_config.py" relation="all statistical params (Rule #29)"/>
+    <kg file="knowledge-graph/domains/training.yaml" relation="post-training architecture"/>
+    <kg file="knowledge-graph/decisions/L2-architecture/ensemble_strategy.yaml" relation="ensemble design"/>
+    <kg file="knowledge-graph/decisions/L3-technology/calibration_method.yaml" relation="recalibration factor #5"/>
+    <plan file="docs/planning/biostatistic-flow-debug-double-check.xml" relation="downstream consumer"/>
+    <plan file="docs/planning/analysis-flow-debug-double-check.xml" relation="downstream consumer"/>
+    <plan file="docs/planning/debug-factorial-local-post-analysis-biostats.xml" relation="integration test"/>
+    <plan file="docs/planning/run-debug-factorial-experiment-report.md" relation="1st pass results"/>
+    <config file="configs/factorial/paper_full.yaml" relation="production factorial config (720 conditions)"/>
+    <config file="configs/factorial/debug.yaml" relation="debug factorial config (384 conditions)"/>
+    <config file="configs/hpo/paper_factorial.yaml" relation="legacy Layer A-only config"/>
+    <issue number="882" relation="cloud artifact sync"/>
+  </cross-reference>
+</plan>

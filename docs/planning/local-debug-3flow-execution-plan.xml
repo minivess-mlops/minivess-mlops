@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>Local Debug 3-Flow Execution: Post-Training → Analysis → Biostatistics</title>
+    <branch>test/debug-factorial-run</branch>
+    <date>2026-03-21</date>
+    <status>ready-for-execution</status>
+    <priority>P0 — validates pipeline before GCP spend</priority>
+    <skill>factorial-monitor</skill>
+    <monitoring>factorial-monitor skill for flow tracking + timing</monitoring>
+    <report-output>docs/planning/run-debug-factorial-experiment-report-2nd-pass-local.md</report-output>
+    <estimated-time>2-3 hours (DynUNet on local RTX 2070 Super for inference)</estimated-time>
+  </metadata>
+
+  <context>
+    <summary>
+      Run all 3 CPU-capable flows locally using DynUNet artifacts from
+      dynunet_loss_variation_v2 experiment. This is the REAL test — not synthetic
+      data, not mocks. Real checkpoints, real MiniVess volumes, real inference.
+
+      Purpose: Find and fix ALL emerging issues before spending $65+ on GCP.
+
+      Hardware: RTX 2070 Super (8 GB VRAM), 64 GB RAM, CUDA 12.6
+      Data: 70 MiniVess volumes locally at data/raw/minivess/
+      Checkpoints: 4 DynUNet runs × 7 checkpoints each (100 epochs)
+    </summary>
+
+    <verified-facts>
+      <!-- Verified 2026-03-21 by reading actual files -->
+      <fact>Checkpoint format: dict with model_state_dict key (44 tensors, DynUNet)</fact>
+      <fact>MiniVess data: 70 imagesTr + 70 labelsTr .nii.gz files available</fact>
+      <fact>_average_checkpoints uses model_state_dict key — MATCHES checkpoint format</fact>
+      <fact>SWA plugin (swa.py:65) uses state_dict key — MISMATCH, needs investigation</fact>
+      <fact>Tags backfilled: model_family, flow_name, fold_id, with_aux_calib, loss_function</fact>
+      <fact>Post-training smoke test passed: 4 runs created with correct tags</fact>
+    </verified-facts>
+
+    <env-vars-required>
+      <!-- All must be set before running any flow -->
+      MINIVESS_ALLOW_HOST=1
+      MLFLOW_TRACKING_URI=mlruns
+      POST_TRAINING_OUTPUT_DIR=outputs/post_training
+      ANALYSIS_OUTPUT_DIR=outputs/analysis
+      PREFECT_DISABLED=1
+    </env-vars-required>
+
+    <scope>
+      Flow 1: Post-Training — 2 losses × {none, swa} = 4 post-training variants
+      Flow 2: Analysis — 4 variants evaluated on MiniVess validation (real inference!)
+      Flow 3: Biostatistics — ANOVA on evaluation results
+
+      NOT in scope: DeepVess external test, zero-shot baselines, multi-fold,
+      full 384 conditions. Those need 24 training conditions from GCP.
+    </scope>
+  </context>
+
+  <phases>
+    <phase id="0" name="Pre-Flight Verification">
+      <description>
+        Verify all prerequisites before running flows. Every check is a
+        CLI command — no guessing, no assuming (CLAUDE.md Rule: query state
+        programmatically).
+      </description>
+      <tasks>
+        <task id="T0.1" title="Verify checkpoint loadability with correct key">
+          Load ONE checkpoint, verify model_state_dict is loadable as DynUNet.
+          Also check: does SWA plugin (swa.py) use state_dict or model_state_dict?
+          If mismatch: fix SWA plugin OR _average_checkpoints to use consistent key.
+          Time: record time to load one checkpoint.
+        </task>
+        <task id="T0.2" title="Verify MiniVess data loadable">
+          Load ONE volume from data/raw/minivess/imagesTr/, verify shape and dtype.
+          Time: record time to load one volume.
+        </task>
+        <task id="T0.3" title="Verify splits file exists">
+          Check configs/splits/ for fold definitions. The evaluation needs
+          train/val split assignments to know which volumes are validation.
+        </task>
+        <task id="T0.4" title="Set environment variables">
+          Export all required env vars. Verify with echo.
+        </task>
+        <task id="T0.5" title="Clean previous smoke test MLflow runs">
+          Delete smoke_local_post_training experiment if it exists from
+          the earlier test. Fresh start.
+        </task>
+      </tasks>
+      <gate>All prerequisites verified. No guessing.</gate>
+      <timing>Record: checkpoint load time, volume load time</timing>
+    </phase>
+
+    <phase id="1" name="Post-Training Flow (Layer B)">
+      <description>
+        Run post-training on 2 DynUNet conditions (cbdice_cldice, dice_ce)
+        with methods {none, swa}. Creates 4 MLflow runs.
+
+        This phase uses run_factorial_post_training() which we already
+        smoke-tested. Now we verify the FULL flow including:
+        - SWA checkpoint averaging with REAL weights (not synthetic)
+        - MLflow run creation with all tags
+        - Checkpoint file validity (loadable after averaging)
+      </description>
+      <tasks>
+        <task id="T1.1" title="Run post-training flow on 2 conditions">
+          Execute run_factorial_post_training() for each of:
+            1. dynunet + cbdice_cldice + {none, swa}
+            2. dynunet + dice_ce + {none, swa}
+          Total: 4 new MLflow runs in smoke_local_post_training experiment.
+          Time: record wall-clock for each method.
+        </task>
+        <task id="T1.2" title="Verify SWA checkpoint is valid">
+          Load the SWA-averaged checkpoint. Verify:
+          - Same number of parameters as original (44 tensors)
+          - No NaN/Inf values in any tensor
+          - File size is reasonable (~same as original)
+        </task>
+        <task id="T1.3" title="Verify MLflow tags">
+          Query all 4 runs. Verify tags:
+          - post_training_method: {none, swa}
+          - recalibration: none
+          - model_family: dynunet
+          - loss_function: {cbdice_cldice, dice_ce}
+          - upstream_training_run_id: set
+        </task>
+      </tasks>
+      <gate>4 post-training runs with valid checkpoints and correct tags.</gate>
+      <timing>Record: total post-training time, per-method breakdown</timing>
+    </phase>
+
+    <phase id="2" name="Analysis Flow (Layer C) — Real Inference">
+      <description>
+        THIS IS THE CRITICAL PHASE. Runs actual DynUNet inference on
+        MiniVess validation volumes using the RTX 2070 Super GPU.
+
+        The analysis flow must:
+        1. Discover the 4 post-training runs
+        2. Load DynUNet weights from checkpoints
+        3. Run sliding-window inference on validation volumes
+        4. Compute per-volume segmentation metrics
+        5. Log results to MLflow
+
+        Expected issues:
+        - require_eval_metrics gate (pass False for these runs)
+        - Data path configuration (Docker vs local paths)
+        - Memory usage during inference
+        - Inference speed (DynUNet on RTX 2070 Super ~few sec/volume)
+      </description>
+      <tasks>
+        <task id="T2.1" title="Run analysis flow with require_eval_metrics=False">
+          Call run_analysis_flow() pointing to smoke_local_post_training.
+          Must pass require_eval_metrics=False since these are not
+          "production-complete" runs with eval_fold2_dsc.
+
+          Build 2 ensemble strategies: per_loss_single_best, all_loss_all_best.
+          Time: record total analysis time, per-volume inference time.
+        </task>
+        <task id="T2.2" title="Verify per-volume metrics logged">
+          Query MLflow for eval/{fold}/vol/{vol_id}/{metric} metrics.
+          Must have at least: dsc, cldice for each validation volume.
+          Time: log metric count and logging time.
+        </task>
+        <task id="T2.3" title="Verify ensemble predictions">
+          Check that ensemble averaging produces different predictions
+          than individual models (logit-level averaging, not metric-level).
+        </task>
+        <task id="T2.4" title="Handle any emerging issues">
+          Fix issues as they emerge. Document each one in the report.
+          Use failure triage protocol if multiple failures.
+        </task>
+      </tasks>
+      <gate>Analysis runs created with per-volume metrics. Ensembles evaluated.</gate>
+      <timing>Record: total analysis time, per-volume inference time, ensemble build time</timing>
+    </phase>
+
+    <phase id="3" name="Biostatistics Flow (Layer D)">
+      <description>
+        Run biostatistics on the analysis results. This exercises the
+        NEWLY ADDED 6-factor pipeline code from today's session.
+
+        Must verify:
+        - _compose_condition_key produces 6-part keys
+        - _build_per_volume_data uses composite keys
+        - task_compute_factorial_anova runs on real data
+        - DuckDB populated with all columns
+      </description>
+      <tasks>
+        <task id="T3.1" title="Run biostatistics flow on analysis results">
+          Call run_biostatistics_flow() pointing to smoke_local_evaluation.
+          Use BiostatisticsConfig from the smoke_local.yaml.
+          Time: record total biostatistics time.
+        </task>
+        <task id="T3.2" title="Verify DuckDB has all 6 factorial columns">
+          Query DuckDB: SELECT model_family, loss_function, with_aux_calib,
+          post_training_method, recalibration, ensemble_strategy FROM runs.
+          All 6 columns must have non-null values.
+        </task>
+        <task id="T3.3" title="Verify factorial ANOVA ran">
+          Check that FactorialAnovaResult was produced.
+          At minimum: p_values for loss_name factor (the only one varying
+          with more than 1 level in this test).
+        </task>
+        <task id="T3.4" title="Verify pairwise comparisons">
+          Check PairwiseResult objects were produced for all condition pairs.
+        </task>
+      </tasks>
+      <gate>DuckDB has 6-factor data. ANOVA produced results. Pipeline end-to-end verified.</gate>
+      <timing>Record: total biostatistics time, ANOVA time, DuckDB build time</timing>
+    </phase>
+
+    <phase id="4" name="Report + Fix Cycle">
+      <description>
+        Document all findings in the report. Fix any issues found.
+        Run make test-staging to verify no regressions.
+      </description>
+      <tasks>
+        <task id="T4.1" title="Write experiment report">
+          Write to docs/planning/run-debug-factorial-experiment-report-2nd-pass-local.md
+          following the format of the 1st pass report.
+          Include: timing, issues found, fixes applied, recommendations.
+        </task>
+        <task id="T4.2" title="Run make test-staging">
+          Verify all tests still pass after the local run.
+        </task>
+        <task id="T4.3" title="Commit all fixes and report">
+          Single commit with all fixes found during execution.
+        </task>
+      </tasks>
+      <gate>Report written. All tests pass. Ready for GCP.</gate>
+    </phase>
+  </phases>
+
+  <execution-notes>
+    <note>Use /factorial-monitor for tracking flow execution status</note>
+    <note>Time every phase with Python time.perf_counter() or shell time command</note>
+    <note>MLflow should log fine-grained timing via mlflow.log_metric("phase_X_seconds", ...)</note>
+    <note>All flows run with MINIVESS_ALLOW_HOST=1 (local, no Docker)</note>
+    <note>DynUNet inference on RTX 2070 Super: expect ~2-5 sec per 3D volume</note>
+    <note>Total data: ~23 validation volumes × 4 models = ~92 inference runs</note>
+  </execution-notes>
+</plan>
