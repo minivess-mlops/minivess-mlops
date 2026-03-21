@@ -99,7 +99,7 @@ class VesselCompoundLoss(nn.Module):
         )
         self.cldice = SoftclDiceLoss(
             smooth=1e-5,
-            iter_=3,
+            iter_=10,  # Match SegLab/paper default (MONAI defaults to 3)
         )
 
     def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
@@ -144,9 +144,11 @@ class _WrappedSoftclDiceLoss(nn.Module):
     _labels_to_onehot(). The standalone cldice path needs the same treatment.
     """
 
-    def __init__(self, **kwargs: object) -> None:
+    def __init__(self, iter_: int = 10, **kwargs: object) -> None:
         super().__init__()
-        self.cldice = SoftclDiceLoss(**kwargs)  # type: ignore[arg-type]
+        # Default iter_=10 matches SegLab (Khazem 2025) and original clDice paper.
+        # MONAI defaults to iter_=3 which produces thicker soft skeletons.
+        self.cldice = SoftclDiceLoss(iter_=iter_, **kwargs)  # type: ignore[arg-type]
 
     def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         """Apply softmax + one-hot, then delegate to SoftclDiceLoss."""
@@ -313,7 +315,7 @@ class TopologyCompoundLoss(nn.Module):
             lambda_ce=0.5,
             lambda_dice=0.5,
         )
-        self.cldice = SoftclDiceLoss(smooth=1e-5, iter_=3)
+        self.cldice = SoftclDiceLoss(smooth=1e-5, iter_=10)  # Match paper
         self.betti = BettiLoss()
 
     def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
@@ -520,7 +522,7 @@ def build_loss_function(
             to_onehot_y=to_onehot_y,
         )
     elif loss_name == "cldice":
-        loss_fn = _WrappedSoftclDiceLoss(smooth=1e-5, iter_=3)
+        loss_fn = _WrappedSoftclDiceLoss(smooth=1e-5, iter_=10)
     elif loss_name == "hausdorff_dt":
         loss_fn = HausdorffDTLoss(
             alpha=2.0,
