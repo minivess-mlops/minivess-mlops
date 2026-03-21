@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>3rd Pass Local Debug: SWAG + Calibration Metrics Validation</title>
+    <branch>feat/swag-and-calibration-metrics</branch>
+    <date>2026-03-21</date>
+    <status>blocked-by-implementation</status>
+    <priority>P0 — validates SWAG + calibration before GCP spend</priority>
+    <skill>factorial-monitor</skill>
+    <monitoring>factorial-monitor skill for flow tracking + timing</monitoring>
+    <report-output>docs/planning/run-debug-factorial-experiment-report-3rd-pass-local.md</report-output>
+    <prerequisite>calibration-and-swag-implementation-plan.xml must be COMPLETE first</prerequisite>
+    <estimated-time>30-45 min (DynUNet 2 epochs + SWAG 5 epochs + inference + biostatistics)</estimated-time>
+  </metadata>
+
+  <context>
+    <summary>
+      Local validation of the NEW pipeline components before GCP:
+      1. Train DynUNet for 2 epochs (1 fold, 1 loss) — verify training loop with calibration metrics
+      2. Run SWAG for 5 additional epochs — verify SWAG produces diverse posterior samples
+      3. Run Analysis Flow with ALL 20 calibration metrics — verify metric computation
+      4. Run Biostatistics Flow — verify calibration metrics in ANOVA
+
+      This is the MINIMAL validation. One model, one fold, one loss. The purpose is to
+      verify that the new code WORKS, not to evaluate segmentation quality.
+
+      Hardware: RTX 2070 Super (8 GB VRAM), 64 GB RAM, CUDA 12.6
+      Data: 70 MiniVess volumes locally at data/raw/minivess/
+    </summary>
+
+    <scope>
+      Training: 1 model (dynunet) × 1 loss (cbdice_cldice) × 1 fold (fold-0) × 2 epochs
+      SWAG: 5 additional epochs with SWALR, 30 posterior samples
+      Analysis: Evaluate on MiniVess validation (24 volumes), ALL calibration metrics
+      Biostatistics: ANOVA on 2 conditions (none vs swag) with calibration response variables
+
+      Key calibration response variables for ANOVA:
+      - ECE (global calibration — standard baseline)
+      - pECE (false-positive overconfidence — vessel-specific)
+      - BA-ECE (boundary calibration — spatial)
+    </scope>
+
+    <three-key-calibration-metrics>
+      <!-- Co-primary calibration metrics for the factorial ANOVA -->
+      <metric name="ECE" type="global" why="Standard baseline, comparable to all literature"/>
+      <metric name="pECE" type="class-aware" why="Vessel-specific FP overconfidence penalty"/>
+      <metric name="BA-ECE" type="spatial" why="Calibration WHERE it matters — vessel boundaries"/>
+    </three-key-calibration-metrics>
+  </context>
+
+  <phases>
+    <phase id="0" name="Pre-Flight Verification">
+      <description>
+        Verify ALL new components are implemented before running.
+        This phase validates the output of calibration-and-swag-implementation-plan.xml.
+      </description>
+      <tasks>
+        <task id="T0.1" title="Verify SWA→checkpoint_averaging rename complete">
+          grep -r "SWAPlugin\|MultiSWAPlugin\|uniform_swa" src/ → must return 0 hits.
+        </task>
+        <task id="T0.2" title="Verify SWAG plugin exists and imports">
+          uv run python -c "from minivess.pipeline.post_training_plugins.swag import SWAGPlugin"
+        </task>
+        <task id="T0.3" title="Verify calibration metrics module exists">
+          uv run python -c "from minivess.pipeline.calibration_metrics import compute_all_calibration_metrics"
+        </task>
+        <task id="T0.4" title="Verify all tests pass">
+          make test-staging → 0 failures
+        </task>
+        <task id="T0.5" title="Verify training loop computes Tier 1 calibration metrics">
+          Check that SegmentationMetrics.compute() returns ECE, MCE, Brier, NLL, BUC.
+        </task>
+      </tasks>
+      <gate>All new components verified. No guessing.</gate>
+    </phase>
+
+    <phase id="1" name="Train DynUNet (2 Epochs)">
+      <description>
+        Train a DynUNet model for 2 epochs on fold-0 with cbdice_cldice loss.
+        This is MINIMAL — just enough to verify the training loop computes
+        calibration metrics during validation.
+
+        Key verification: val_ece, val_mce, val_brier logged to MLflow.
+      </description>
+      <tasks>
+        <task id="T1.1" title="Train DynUNet with calibration metrics in val loop">
+          MINIVESS_ALLOW_HOST=1 uv run python scripts/run_local_debug_3flow.py
+          (modified to train 2 epochs instead of using existing checkpoints)
+
+          Verify: MLflow run has val_ece, val_mce, val_brier metrics.
+        </task>
+        <task id="T1.2" title="Verify checkpoint saved with metadata">
+          Check: best_val_loss.pth exists, checkpoint_metadata.json exists,
+          all 6+ best-metric checkpoints saved.
+        </task>
+      </tasks>
+      <gate>Training produces checkpoint with calibration metrics logged.</gate>
+      <timing>Expected: ~5 min (2 epochs × ~2.5 min/epoch on RTX 2070 Super)</timing>
+    </phase>
+
+    <phase id="2" name="SWAG Post-Training (5 Epochs)">
+      <description>
+        Run SWAG for 5 additional epochs starting from the 2-epoch checkpoint.
+        Uses SWALR schedule, collects weight statistics, recalibrates BN.
+
+        This is the REAL test of the SWAG implementation. Must verify:
+        - SWALR schedule is applied
+        - Weight mean and covariance are tracked
+        - update_bn() recalibrates batch normalization
+        - K=30 posterior samples are diverse (different predictions)
+      </description>
+      <tasks>
+        <task id="T2.1" title="Run SWAG plugin on the trained checkpoint">
+          Execute SWAGPlugin with:
+          - swa_lr=0.01 (from config)
+          - swa_epochs=5
+          - max_rank=10 (low rank for debug)
+          - n_samples=30
+
+          Verify: SWAG model file saved, metrics logged.
+        </task>
+        <task id="T2.2" title="Verify posterior sample diversity">
+          Load SWAG model, sample 5 models, compute predictions on 1 volume.
+          Verify: predictions are DIFFERENT (not identical — this catches the
+          "checkpoint averaging masquerading as SWAG" anti-pattern).
+        </task>
+        <task id="T2.3" title="Verify BN recalibration">
+          Compare BN running_mean/running_var before and after update_bn().
+          They MUST change — if they don't, BN update is broken.
+        </task>
+      </tasks>
+      <gate>SWAG produces diverse posterior samples. BN recalibrated.</gate>
+      <timing>Expected: ~7 min (5 epochs × ~1.5 min/epoch, no full validation)</timing>
+    </phase>
+
+    <phase id="3" name="Analysis Flow with ALL Calibration Metrics">
+      <description>
+        Evaluate the trained model (none) and SWAG model on MiniVess validation.
+        Compute ALL 20 calibration metrics for each model.
+
+        This is the critical validation that ALL calibration metrics produce
+        non-trivial values on real data.
+      </description>
+      <tasks>
+        <task id="T3.1" title="Evaluate baseline (none) model with all calibration metrics">
+          Load the 2-epoch checkpoint, run sliding-window inference on 24 val volumes.
+          Compute ALL Tier 1 + Tier 2 calibration metrics per volume.
+          Log to MLflow: eval/fold_0/vol/{id}/{metric} for each metric.
+        </task>
+        <task id="T3.2" title="Evaluate SWAG model with all calibration metrics">
+          Load SWAG model, sample 30 posterior models, average predictions.
+          Compute ALL calibration metrics on the ensemble prediction.
+          Also compute: epistemic uncertainty (mutual information), aleatoric uncertainty.
+        </task>
+        <task id="T3.3" title="Verify ALL 20 calibration metrics are non-zero">
+          Check that ECE, MCE, ACE, pECE, CECE, TACE, SCE, BA-ECE, SPACE,
+          BUC, Brier, NLL, CRPS, RMSCE, D-ECE, OE, smECE, Uncertainty-Dice-AUC
+          all produce non-trivial values. Zero or NaN = bug.
+        </task>
+        <task id="T3.4" title="Verify spatial maps saved">
+          Check: Brier map (.npz), NLL map (.npz) saved as MLflow artifacts.
+          Check: Reliability diagram (.png) generated.
+        </task>
+      </tasks>
+      <gate>ALL 20 calibration metrics computed. No zeros, no NaNs.</gate>
+      <timing>Expected: ~15 min (2 conditions × 24 volumes × ~20s/vol)</timing>
+    </phase>
+
+    <phase id="4" name="Biostatistics Flow with Calibration ANOVA">
+      <description>
+        Run biostatistics on the analysis results. Verify that calibration
+        metrics are included in the factorial ANOVA alongside DSC/clDice.
+      </description>
+      <tasks>
+        <task id="T4.1" title="Run biostatistics flow">
+          Use configs/biostatistics/smoke_local.yaml updated with calibration metrics.
+          Verify: ANOVA includes ECE, pECE, BA-ECE as response variables.
+        </task>
+        <task id="T4.2" title="Verify DuckDB has calibration metric columns">
+          Query DuckDB for eval_metrics table — must include all calibration metrics.
+        </task>
+        <task id="T4.3" title="Verify pairwise comparisons on calibration metrics">
+          Check: none vs swag compared on ECE, pECE, BA-ECE.
+          Expected: SWAG should have lower ECE than none (better calibrated).
+        </task>
+      </tasks>
+      <gate>Biostatistics ANOVA includes calibration metrics.</gate>
+      <timing>Expected: ~1 min</timing>
+    </phase>
+
+    <phase id="5" name="Report + Test Suite">
+      <tasks>
+        <task id="T5.1" title="Write 3rd pass report">
+          docs/planning/run-debug-factorial-experiment-report-3rd-pass-local.md
+          Include: ALL calibration metric values for both conditions,
+          SWAG diversity verification, timing breakdown, issues found.
+        </task>
+        <task id="T5.2" title="Run make test-staging">
+          All tests pass. 0 new failures from SWAG + calibration implementation.
+        </task>
+      </tasks>
+      <gate>Report written. Tests pass. Ready for GCP.</gate>
+    </phase>
+  </phases>
+
+  <execution-script>
+    <description>
+      Deterministic execution script for the 3rd pass debug.
+      NO screen, NO tmux, NO nohup. Direct execution.
+    </description>
+    <file>scripts/run_local_debug_3rd_pass.sh</file>
+    <steps>
+      <step>Set all env vars (MINIVESS_ALLOW_HOST=1, MLFLOW_TRACKING_URI=mlruns, etc.)</step>
+      <step>Phase 1: Train DynUNet 2 epochs (uv run via Prefect test harness)</step>
+      <step>Phase 2: Run SWAG 5 epochs on checkpoint</step>
+      <step>Phase 3: Evaluate both models with ALL calibration metrics</step>
+      <step>Phase 4: Run biostatistics</step>
+      <step>Phase 5: Report timing</step>
+    </steps>
+    <total-estimated-time>30-45 min</total-estimated-time>
+  </execution-script>
+
+  <monitoring>
+    <note>Use /factorial-monitor for flow tracking</note>
+    <note>Time every phase with time.perf_counter()</note>
+    <note>Monitor GPU VRAM during SWAG (DynUNet is lightweight, expect ~3 GB)</note>
+    <note>Monitor calibration metric computation time (Tier 1 vs Tier 2)</note>
+  </monitoring>
+</plan>

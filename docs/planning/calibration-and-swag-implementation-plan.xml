@@ -1,0 +1,467 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>SWAG Post-Training + Comprehensive Calibration Metrics Implementation</title>
+    <branch>feat/swag-and-calibration-metrics</branch>
+    <date>2026-03-21</date>
+    <status>ready-for-execution</status>
+    <priority>P0 — publication gate for Nature Protocols manuscript</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <report-references>
+      <ref>docs/planning/swa-swag-multi-swa-swag-pswa-lawa-model-soup-checkpoint-averaging-report.md</ref>
+      <ref>docs/planning/segmentation-calibration-metrics-and-losses-sdc-pece-ace-mce-ece-etc.md</ref>
+      <ref>.claude/metalearning/2026-03-21-fake-swa-checkpoint-averaging-mislabeled.md</ref>
+    </report-references>
+  </metadata>
+
+  <context>
+    <summary>
+      Two-phase implementation:
+      Phase A: SWAG as THE post-training factor for publication factorial design
+      Phase B: ALL calibration metrics in the Analysis Flow (+ fast subset in Train flow)
+
+      SWAG (Maddox et al. 2019) replaces the mislabeled "SWA" checkpoint averaging.
+      Calibration metrics validate the with_aux_calib factorial factor.
+
+      Both phases use self-learning-iterative-coder TDD skill.
+    </summary>
+
+    <existing-infrastructure>
+      <!-- Already implemented (from codebase audit) -->
+      <fact>PostTrainingConfig has 6 plugin configs with enabled toggles</fact>
+      <fact>CalibrationPlugin already does global temperature, isotonic, spatial Platt</fact>
+      <fact>ensemble/calibration.py has expected_calibration_error(confidences, accuracies, n_bins) returning (ECE, MCE)</fact>
+      <fact>pipeline/calibration.py has MetaTemperatureNetwork for per-pixel temperature</fact>
+      <fact>MultiMetricTracker tracks 6 best-metric checkpoints per run</fact>
+      <fact>SegmentationMetrics computes only Dice + F1 (no calibration metrics)</fact>
+      <fact>EvaluationRunner computes per-volume metrics via FoldResult</fact>
+      <fact>CRCConformalPlugin computes conformal prediction sets</fact>
+      <fact>torch.optim.swa_utils provides AveragedModel, SWALR, update_bn</fact>
+    </existing-infrastructure>
+
+    <libraries>
+      <!-- Library-first: use existing implementations (CLAUDE.md Rule #3) -->
+      <lib name="torch.optim.swa_utils" use="SWAG core: AveragedModel, SWALR, update_bn"/>
+      <lib name="torchmetrics" use="ECE, MCE, RMSCE via BinaryCalibrationError"/>
+      <lib name="SDC-Loss repo" use="pECE, CECE implementations (metrics.py)" url="https://github.com/EagleAdelaide/SDC-Loss"/>
+      <lib name="Average-Calibration-Losses repo" use="ACE, hL1-ACE loss+metric" url="https://github.com/cai4cai/Average-Calibration-Losses"/>
+      <lib name="scipy.ndimage" use="distance_transform_edt for BA-ECE"/>
+      <lib name="properscoring" use="CRPS computation"/>
+      <lib name="netcal" use="TACE, SCE, debiased ECE"/>
+    </libraries>
+  </context>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE A: SWAG Post-Training (Publication Gate)                -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phases>
+    <phase id="A0" name="Rename SWA → Checkpoint Averaging">
+      <description>
+        Rename all mislabeled "SWA" references to "checkpoint averaging".
+        ~18 files affected. Pure renaming — no logic changes.
+        See: .claude/metalearning/2026-03-21-fake-swa-checkpoint-averaging-mislabeled.md
+      </description>
+      <tasks>
+        <task id="A0.1" title="Rename SWAPlugin → CheckpointAveragingPlugin">
+          Files:
+          - src/minivess/pipeline/post_training_plugins/swa.py → checkpoint_averaging.py
+          - Class SWAPlugin → CheckpointAveragingPlugin
+          - Property name → "checkpoint_averaging"
+        </task>
+        <task id="A0.2" title="Rename MultiSWAPlugin → SubsampledEnsemblePlugin">
+          Files:
+          - src/minivess/pipeline/post_training_plugins/multi_swa.py → subsampled_ensemble.py
+          - Class MultiSWAPlugin → SubsampledEnsemblePlugin
+          - Property name → "subsampled_ensemble"
+        </task>
+        <task id="A0.3" title="Rename utility functions">
+          Files:
+          - src/minivess/ensemble/model_soup.py: uniform_swa → uniform_checkpoint_average
+          - src/minivess/ensemble/model_soup.py: swa_from_checkpoints → average_checkpoints
+        </task>
+        <task id="A0.4" title="Update PostTrainingConfig fields">
+          Files:
+          - src/minivess/config/post_training_config.py: swa → checkpoint_averaging, multi_swa → subsampled_ensemble
+          - Update FactorialMethod enum values
+        </task>
+        <task id="A0.5" title="Update orchestration references">
+          Files:
+          - src/minivess/orchestration/flows/post_training_flow.py: _WEIGHT_PLUGINS, imports, swa_completed field
+          - Update run_factorial_post_training method names
+        </task>
+        <task id="A0.6" title="Update configs and tests">
+          Files:
+          - configs/factorial/*.yaml: method levels
+          - configs/post_training/default.yaml: config keys
+          - tests/v2/unit/test_swa_plugin.py → test_checkpoint_averaging_plugin.py
+          - tests/v2/unit/test_multi_swa_plugin.py → test_subsampled_ensemble_plugin.py
+          - tests/v2/unit/test_model_soup_swa.py → test_model_soup_averaging.py
+        </task>
+      </tasks>
+      <gate>All tests pass after rename. grep -r "SWAPlugin\|MultiSWAPlugin\|uniform_swa" src/ returns 0 hits.</gate>
+    </phase>
+
+    <phase id="A1" name="Implement SWAG Post-Training Plugin">
+      <description>
+        Implement real SWAG (Maddox et al. 2019) as a post-training plugin.
+        Uses torch.optim.swa_utils for the SWA phase + custom second-moment tracking.
+
+        SWAG requires RESUMED TRAINING — this is the key difference from checkpoint
+        averaging. The plugin loads a trained model + training DataLoaders, then:
+        1. Resumes training with SWALR for N additional epochs
+        2. Tracks first moments (running mean via AveragedModel)
+        3. Tracks second moments (running squared mean + low-rank deviations)
+        4. Recalibrates batch normalization via update_bn()
+        5. Saves SWAG model (mean + covariance parameters)
+
+        Reference implementation: github.com/wjmaddox/swa_gaussian
+        PyTorch utils: torch.optim.swa_utils.AveragedModel, SWALR, update_bn
+      </description>
+      <tasks>
+        <task id="A1.1" title="Write SWAGConfig pydantic model">
+          File: src/minivess/config/post_training_config.py
+
+          class SWAGConfig(BaseModel):
+              enabled: bool = False
+              swa_lr: float = 0.01  # From config, NOT hardcoded
+              swa_epochs: int = 10  # Additional epochs after training
+              max_rank: int = 20    # Low-rank covariance approximation rank
+              n_samples: int = 30   # Number of posterior samples at inference
+              update_bn: bool = True
+              seed: int (from parent config)
+
+          Add to PostTrainingConfig.swag field.
+        </task>
+        <task id="A1.2" title="Write SWAG model wrapper">
+          File: src/minivess/ensemble/swag.py
+
+          class SWAGModel:
+              """SWAG posterior approximation (Maddox et al. 2019).
+
+              Wraps torch.optim.swa_utils.AveragedModel with additional
+              second-moment tracking for Gaussian posterior approximation.
+              """
+              def __init__(self, base_model: nn.Module, max_rank: int = 20)
+              def collect_model(self, model: nn.Module) -> None
+                  # Track mean, sq_mean, and low-rank deviations
+              def sample(self, scale: float = 1.0, seed: int | None = None) -> None
+                  # Sample from Gaussian posterior: w ~ N(mean, (1/2) * Sigma_diag + (1/2K) * D @ D.T)
+              def forward(self, x: Tensor) -> Tensor
+              def save(self, path: Path) -> None
+              def load(cls, path: Path, base_model: nn.Module) -> SWAGModel
+
+          Use torch.optim.swa_utils.AveragedModel for the mean tracking.
+          Custom tracking for sq_mean and deviation vectors.
+          Reference: wjmaddox/swa_gaussian/swag/posteriors/swag.py
+        </task>
+        <task id="A1.3" title="Write SWAG post-training plugin">
+          File: src/minivess/pipeline/post_training_plugins/swag.py
+
+          class SWAGPlugin(PostTrainingPlugin):
+              name = "swag"
+              requires_calibration_data = True  # Needs training DataLoaders
+
+              def validate_inputs(self, plugin_input: PluginInput) -> list[str]:
+                  # Requires: checkpoint_paths, calibration_data (DataLoaders)
+                  # calibration_data must have 'train_loader' key
+
+              def execute(self, plugin_input: PluginInput) -> PluginOutput:
+                  # 1. Load base model from checkpoint
+                  # 2. Create optimizer with SWALR schedule
+                  # 3. Resume training for swa_epochs
+                  # 4. Collect SWAG statistics each epoch
+                  # 5. update_bn(train_loader, swag_model)
+                  # 6. Save SWAG model (mean + covariance)
+                  # Return: model_paths=[swag_model_path], metrics={swag_epochs, swag_lr}
+        </task>
+        <task id="A1.4" title="Register SWAG plugin in post_training_flow.py">
+          Add SWAGPlugin to _build_registry().
+          Add "swag" to _WEIGHT_PLUGINS (it needs calibration_data but is weight-based).
+          Actually: SWAG needs DataLoaders → _DATA_PLUGINS.
+          Update _DATA_PLUGINS = {"swag", "calibration", "crc_conformal", "conseco_fp_control"}.
+        </task>
+        <task id="A1.5" title="Write SWAG inference integration for Analysis Flow">
+          The Analysis Flow needs to know how to load a SWAG model and sample from it.
+          Modify _extract_single_models_as_modules or create _extract_swag_models
+          that loads the SWAG model, samples K models, wraps in _EnsembleInferenceWrapper.
+
+          File: src/minivess/orchestration/flows/analysis_flow.py
+        </task>
+        <task id="A1.6" title="Update factorial configs">
+          configs/factorial/smoke_local.yaml: method: [none, swag]
+          configs/factorial/debug.yaml: method: [none, swag]
+          configs/factorial/paper_full.yaml: method: [none, swag]
+        </task>
+      </tasks>
+      <gate>
+        SWAG plugin creates valid SWAG model from DynUNet checkpoint.
+        SWAG model produces K diverse posterior samples.
+        update_bn recalibrates batch normalization.
+        All existing tests pass.
+      </gate>
+    </phase>
+
+    <phase id="A2" name="SWAG Tests">
+      <description>TDD — write tests FIRST (RED), then implement (GREEN).</description>
+      <tasks>
+        <task id="A2.1" title="Unit tests for SWAGModel">
+          tests/v2/unit/test_swag_model.py:
+          - test_swag_collect_updates_mean_and_sq_mean
+          - test_swag_sample_produces_different_weights
+          - test_swag_save_load_roundtrip
+          - test_swag_low_rank_covariance_shape
+          - test_swag_bn_update_changes_running_stats
+        </task>
+        <task id="A2.2" title="Unit tests for SWAGPlugin">
+          tests/v2/unit/test_swag_plugin.py:
+          - test_swag_plugin_validate_requires_calibration_data
+          - test_swag_plugin_execute_produces_model_file
+          - test_swag_plugin_metrics_logged
+        </task>
+        <task id="A2.3" title="Integration test for SWAG in factorial pipeline">
+          tests/v2/integration/test_swag_factorial.py:
+          - test_factorial_with_swag_method (uses debug DynUNet, 1 epoch SWAG)
+        </task>
+      </tasks>
+      <gate>All SWAG tests pass. make test-staging green.</gate>
+    </phase>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- PHASE B: Calibration Metrics (ALL metrics, Analysis + Train)  -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+
+    <phase id="B0" name="Calibration Metrics Module">
+      <description>
+        Create comprehensive calibration metrics module with ALL metrics from the
+        literature report. Organized into FAST (training loop) and COMPREHENSIVE
+        (analysis flow) tiers.
+
+        Library-first: use torchmetrics, SDC-Loss repo, netcal, properscoring
+        wherever possible. Custom implementation only for spatial metrics (BA-ECE,
+        SPACE, BUC) and pECE (not in standard libraries for segmentation).
+
+        ALL metrics. No subset. No resistance.
+      </description>
+      <tasks>
+        <task id="B0.1" title="Create calibration_metrics.py with ALL metrics">
+          File: src/minivess/pipeline/calibration_metrics.py
+
+          ## Tier 1: FAST metrics (O(N), suitable for training val loop)
+          def compute_ece(probs, labels, n_bins=15) -> float
+          def compute_mce(probs, labels, n_bins=15) -> float
+          def compute_rmsce(probs, labels, n_bins=15) -> float
+          def compute_brier_score(probs, labels) -> float
+          def compute_nll(probs, labels) -> float  # Binary CE
+          def compute_buc(probs, labels, boundary_width=3) -> float
+          def compute_cece(probs, labels, n_bins=10) -> float  # C=2 for binary
+          def compute_overconfidence_error(probs, labels, n_bins=15) -> float  # OE
+          def compute_debiased_ece(probs, labels, n_bins=15) -> float  # D-ECE (Kumar 2019)
+          def compute_smooth_ece(probs, labels) -> float  # smECE (Blasiok 2024)
+
+          ## Tier 2: COMPREHENSIVE metrics (analysis flow only)
+          def compute_pece(probs, labels, n_bins=10, w_fp=1.0) -> float
+              # Pixel-wise ECE with FP penalty (Li et al. 2025, SDC-Loss)
+          def compute_ace(probs, labels, n_bins=20) -> float
+              # Average Calibration Error — adaptive equal-count bins (Nixon et al. 2019)
+          def compute_tace(probs, labels, n_bins=20, threshold=0.01) -> float
+              # Thresholded Adaptive CE (Nixon et al. 2019)
+          def compute_sce(probs, labels, n_bins=15) -> float
+              # Static Calibration Error — full confidence vector (Nixon et al. 2019)
+          def compute_ba_ece(probs, labels, n_bands=10) -> float
+              # Boundary-Aware ECE (Zeevi et al. 2025)
+              # Uses scipy.ndimage.distance_transform_edt
+          def compute_space(probs, labels, sigma=3.0) -> float
+              # Spatially-Aware Calibration Error (Zeevi et al. 2025)
+              # Uses Gaussian convolution
+          def compute_crps(probs, labels) -> float
+              # Continuous Ranked Probability Score (CURVAS challenge metric)
+          def compute_uncertainty_dice_auc(probs, labels, thresholds=None) -> float
+              # QU-BraTS style: DSC after removing top-K% uncertain voxels
+
+          ## Spatial maps (return per-voxel arrays, not scalars)
+          def compute_brier_map(probs, labels) -> NDArray
+          def compute_nll_map(probs, labels) -> NDArray
+
+          ## Convenience: compute ALL at once
+          def compute_all_calibration_metrics(
+              probs: Tensor,
+              labels: Tensor,
+              *,
+              tier: Literal["fast", "comprehensive"] = "comprehensive",
+          ) -> dict[str, float]
+        </task>
+        <task id="B0.2" title="Write tests for ALL calibration metrics (RED phase)">
+          File: tests/v2/unit/test_calibration_metrics.py
+
+          For EACH metric:
+          - test_perfect_calibration (probs=labels → metric≈0 or ≈1 for BUC)
+          - test_worst_calibration (probs=1-labels → metric≈max)
+          - test_known_values (synthetic data with known ECE)
+          - test_output_range (0 ≤ metric ≤ 1 or appropriate range)
+          - test_batch_independence (result same regardless of batch split)
+
+          For spatial metrics additionally:
+          - test_boundary_aware (BA-ECE higher at boundaries)
+          - test_spatial_correlation (SPACE detects spatial patterns)
+        </task>
+      </tasks>
+      <gate>All calibration metric tests pass. Each metric produces correct values on synthetic data.</gate>
+    </phase>
+
+    <phase id="B1" name="Integrate Calibration Metrics into Training Validation">
+      <description>
+        Add Tier 1 (FAST) calibration metrics to the training validation loop.
+        Computed every val_interval epochs alongside existing Dice + F1.
+        Must NOT slow down validation by more than 10%.
+      </description>
+      <tasks>
+        <task id="B1.1" title="Add fast calibration metrics to SegmentationMetrics">
+          File: src/minivess/pipeline/metrics.py
+
+          Extend SegmentationMetrics.compute() to include:
+          - ECE (via torchmetrics.BinaryCalibrationError, GPU)
+          - MCE (via torchmetrics.BinaryCalibrationError(norm='max'), GPU)
+          - Brier Score (simple MSE, GPU)
+          - NLL (already computed as CE loss — log it)
+          - BUC (requires distance transform — compute on CPU after GPU metrics)
+
+          All metrics logged to MLflow as val_ece, val_mce, val_brier, val_nll, val_buc.
+        </task>
+        <task id="B1.2" title="Add calibration metrics to MultiMetricTracker">
+          File: src/minivess/pipeline/multi_metric_tracker.py
+
+          Add trackers for val_ece (MINIMIZE), val_brier (MINIMIZE).
+          Do NOT save additional checkpoints for calibration metrics (keep 7 existing).
+          Just track for logging and early stopping awareness.
+        </task>
+        <task id="B1.3" title="Test training-loop calibration metrics">
+          tests/v2/unit/test_metrics_calibration.py:
+          - test_ece_computed_during_validation
+          - test_brier_computed_during_validation
+          - test_calibration_metrics_logged_to_mlflow
+          - test_calibration_metrics_do_not_slow_validation (benchmark)
+        </task>
+      </tasks>
+      <gate>
+        Training validation loop computes 5 calibration metrics.
+        Validation time increase &lt; 10%.
+        Metrics logged to MLflow.
+      </gate>
+    </phase>
+
+    <phase id="B2" name="Integrate ALL Calibration Metrics into Analysis Flow">
+      <description>
+        Add ALL calibration metrics (Tier 1 + Tier 2) to the Analysis Flow evaluation.
+        These are computed once per model on the full validation/test set.
+        Computational cost is acceptable since this runs once, not every epoch.
+
+        Also compute calibration metrics on BOTH MiniVess (in-distribution) and
+        DeepVess (out-of-distribution) to measure calibration shift.
+      </description>
+      <tasks>
+        <task id="B2.1" title="Add calibration metrics to UnifiedEvaluationRunner">
+          File: src/minivess/pipeline/evaluation_runner.py
+
+          After computing segmentation predictions, also compute:
+          - ALL Tier 1 metrics: ECE, MCE, RMSCE, Brier, NLL, BUC
+          - ALL Tier 2 metrics: pECE, ACE, CECE, TACE, BA-ECE, SPACE, CRPS, Uncertainty-Dice AUC
+          - Spatial maps: Brier map, NLL map (saved as .npz artifacts)
+
+          Log to MLflow with prefix: eval/{fold}/{metric} (e.g., eval/fold_0/ece)
+          For external test: test/{dataset}/{metric} (e.g., test/deepvess/ece)
+        </task>
+        <task id="B2.2" title="Add calibration shift computation">
+          After computing calibration metrics on both MiniVess and DeepVess,
+          compute delta metrics:
+          - delta_ece = ece_deepvess - ece_minivess
+          - delta_brier = brier_deepvess - brier_minivess
+          - etc.
+
+          Log as: calibration_shift/{metric} (e.g., calibration_shift/ece)
+        </task>
+        <task id="B2.3" title="Add reliability diagrams">
+          Generate per-model reliability diagrams (accuracy vs confidence, 15 bins)
+          using the Average-Calibration-Losses repo's ReliabilityDiagramMetric.
+
+          Save as MLflow artifacts: figures/reliability_diagram_{model_name}.png
+        </task>
+        <task id="B2.4" title="Test analysis flow calibration metrics">
+          tests/v2/unit/test_analysis_calibration.py:
+          - test_all_calibration_metrics_computed_in_analysis
+          - test_calibration_shift_computed
+          - test_reliability_diagram_generated
+          - test_brier_map_shape_matches_volume
+        </task>
+      </tasks>
+      <gate>
+        Analysis flow computes ALL calibration metrics for each model.
+        Calibration shift computed between MiniVess and DeepVess.
+        Reliability diagrams saved as artifacts.
+      </gate>
+    </phase>
+
+    <phase id="B3" name="Biostatistics Integration">
+      <description>
+        Add calibration metrics to the biostatistics factorial ANOVA.
+        The with_aux_calib factor can now be tested against calibration metrics,
+        not just DSC/clDice.
+      </description>
+      <tasks>
+        <task id="B3.1" title="Update BiostatisticsConfig with calibration metrics">
+          File: src/minivess/config/biostatistics_config.py
+
+          Add calibration metrics to default metrics list:
+          metrics: [dsc, cldice, hd95, assd, nsd, be_0, be_1, junction_f1,
+                    ece, mce, brier, pece, ace, ba_ece]
+        </task>
+        <task id="B3.2" title="Verify ANOVA on with_aux_calib × calibration metrics">
+          The factorial ANOVA should test:
+          - H1: with_aux_calib=true reduces ECE (primary calibration hypothesis)
+          - H2: with_aux_calib=true reduces pECE (false-positive calibration)
+          - H3: with_aux_calib=true reduces BA-ECE (boundary calibration)
+          - H4: DSC/clDice trade-off (accuracy may decrease slightly)
+        </task>
+      </tasks>
+      <gate>Biostatistics ANOVA includes calibration metrics. Test suite passes.</gate>
+    </phase>
+
+    <phase id="B4" name="Final Verification">
+      <tasks>
+        <task id="B4.1" title="Run make test-staging">
+          All 5598+ tests must pass. 0 new skips.
+        </task>
+        <task id="B4.2" title="Local 3-flow smoke test with SWAG + calibration">
+          Run scripts/run_local_debug_3flow.py with updated factorial design.
+          Verify SWAG produces K posterior samples.
+          Verify calibration metrics computed and logged.
+        </task>
+        <task id="B4.3" title="Commit and PR">
+          Single PR to main with all Phase A + Phase B changes.
+        </task>
+      </tasks>
+      <gate>make test-staging passes. Local smoke test validates full pipeline.</gate>
+    </phase>
+  </phases>
+
+  <execution-notes>
+    <note>Use /self-learning-iterative-coder for ALL implementation</note>
+    <note>Library-first: torchmetrics, SDC-Loss repo, netcal, properscoring before custom code</note>
+    <note>Fetch SDC-Loss and Average-Calibration-Losses repos before implementing their metrics</note>
+    <note>SWAG needs DataLoaders — update plugin contract for data-dependent plugins</note>
+    <note>ALL calibration metrics means ALL — no subset, no resistance</note>
+    <note>Computational slowness is ONLY a concern for Tier 1 (training loop), NOT Tier 2 (analysis)</note>
+    <note>BUC and BA-ECE need distance transform — already available from clDice/MASD computation</note>
+  </execution-notes>
+
+  <issues>
+    <planned-issues>
+      <issue title="feat: implement SWAG post-training plugin (Maddox 2019)" label="P0-critical,post-training" size="L"/>
+      <issue title="feat: rename SWA→checkpoint averaging (~18 files)" label="P1-high,refactor" size="M"/>
+      <issue title="feat: implement comprehensive calibration metrics module" label="P0-critical,metrics" size="L"/>
+      <issue title="feat: add fast calibration metrics (ECE, Brier) to training val loop" label="P1-high,metrics" size="M"/>
+      <issue title="feat: add ALL calibration metrics to Analysis Flow" label="P0-critical,analysis" size="L"/>
+      <issue title="feat: calibration shift computation (MiniVess vs DeepVess)" label="P1-high,analysis" size="S"/>
+    </planned-issues>
+  </issues>
+</plan>

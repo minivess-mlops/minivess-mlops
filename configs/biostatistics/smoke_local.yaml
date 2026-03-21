@@ -1,0 +1,32 @@
+# Biostatistics config for local 3-flow debug
+# Reads results from smoke_local_evaluation experiment
+# Uses factorial YAML to auto-derive 6 factor names
+
+experiment_names:
+  - smoke_local_evaluation
+
+mlruns_dir: mlruns
+output_dir: outputs/biostatistics_smoke_local
+
+# Auto-derive factor names from the composable factorial YAML
+factorial_yaml: configs/factorial/smoke_local.yaml
+
+# Reduced metric set for local smoke test (fast)
+metrics:
+  - dsc
+  - cldice
+
+primary_metric: cldice
+
+# Statistical testing parameters (from config, not hardcoded)
+alpha: 0.05
+n_bootstrap: 500
+seed: 42
+
+rope_values:
+  dsc: 0.01
+  cldice: 0.01
+
+# Relaxed requirements for local debug (1 fold, 2 conditions minimum)
+min_folds_per_condition: 1
+min_conditions: 2
