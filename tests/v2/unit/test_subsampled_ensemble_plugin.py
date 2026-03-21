@@ -1,4 +1,4 @@
-"""Tests for Multi-SWA post-training plugin.
+"""Tests for subsampled ensemble post-training plugin.
 
 Phase 3 of post-training plugin architecture (#317).
 """
@@ -29,21 +29,27 @@ def _write_checkpoint(path: Path, seed: int = 0) -> Path:
     return path
 
 
-class TestMultiSWAPlugin:
-    """Multi-SWA plugin should produce M independent SWA models."""
+class TestSubsampledEnsemblePlugin:
+    """Subsampled ensemble plugin should produce M independent averaged models."""
 
     def test_implements_protocol(self) -> None:
-        from minivess.pipeline.post_training_plugins.multi_swa import MultiSWAPlugin
+        from minivess.pipeline.post_training_plugins.subsampled_ensemble import (
+            SubsampledEnsemblePlugin,
+        )
 
-        assert isinstance(MultiSWAPlugin(), PostTrainingPlugin)
+        assert isinstance(SubsampledEnsemblePlugin(), PostTrainingPlugin)
 
     def test_name_property(self) -> None:
-        from minivess.pipeline.post_training_plugins.multi_swa import MultiSWAPlugin
+        from minivess.pipeline.post_training_plugins.subsampled_ensemble import (
+            SubsampledEnsemblePlugin,
+        )
 
-        assert MultiSWAPlugin().name == "multi_swa"
+        assert SubsampledEnsemblePlugin().name == "subsampled_ensemble"
 
     def test_produces_n_models(self, tmp_path: Path) -> None:
-        from minivess.pipeline.post_training_plugins.multi_swa import MultiSWAPlugin
+        from minivess.pipeline.post_training_plugins.subsampled_ensemble import (
+            SubsampledEnsemblePlugin,
+        )
 
         # Create 6 checkpoints
         ckpts = [_write_checkpoint(tmp_path / f"ckpt{i}.pt", seed=i) for i in range(6)]
@@ -57,11 +63,13 @@ class TestMultiSWAPlugin:
                 "output_dir": str(tmp_path),
             },
         )
-        result = MultiSWAPlugin().execute(pi)
+        result = SubsampledEnsemblePlugin().execute(pi)
         assert len(result.model_paths) == 3
 
     def test_different_seeds_different_subsets(self, tmp_path: Path) -> None:
-        from minivess.pipeline.post_training_plugins.multi_swa import MultiSWAPlugin
+        from minivess.pipeline.post_training_plugins.subsampled_ensemble import (
+            SubsampledEnsemblePlugin,
+        )
 
         ckpts = [_write_checkpoint(tmp_path / f"ckpt{i}.pt", seed=i) for i in range(10)]
 
@@ -83,8 +91,8 @@ class TestMultiSWAPlugin:
                 "output_dir": str(tmp_path / "run2"),
             },
         )
-        r1 = MultiSWAPlugin().execute(pi1)
-        r2 = MultiSWAPlugin().execute(pi2)
+        r1 = SubsampledEnsemblePlugin().execute(pi1)
+        r2 = SubsampledEnsemblePlugin().execute(pi2)
 
         # Different seeds should produce different averaged state dicts
         sd1 = torch.load(r1.model_paths[0], weights_only=True)
@@ -96,7 +104,9 @@ class TestMultiSWAPlugin:
         assert any_diff
 
     def test_reproducible_with_same_seed(self, tmp_path: Path) -> None:
-        from minivess.pipeline.post_training_plugins.multi_swa import MultiSWAPlugin
+        from minivess.pipeline.post_training_plugins.subsampled_ensemble import (
+            SubsampledEnsemblePlugin,
+        )
 
         ckpts = [_write_checkpoint(tmp_path / f"ckpt{i}.pt", seed=i) for i in range(6)]
 
@@ -111,8 +121,8 @@ class TestMultiSWAPlugin:
             config={**common_config, "output_dir": str(tmp_path / "r2")},
         )
 
-        r1 = MultiSWAPlugin().execute(pi1)
-        r2 = MultiSWAPlugin().execute(pi2)
+        r1 = SubsampledEnsemblePlugin().execute(pi1)
+        r2 = SubsampledEnsemblePlugin().execute(pi2)
 
         for p1, p2 in zip(r1.model_paths, r2.model_paths, strict=True):
             sd1 = torch.load(p1, weights_only=True)
@@ -120,8 +130,10 @@ class TestMultiSWAPlugin:
             for k in sd1:
                 assert torch.equal(sd1[k], sd2[k])
 
-    def test_subsample_fraction_1_equals_single_swa(self, tmp_path: Path) -> None:
-        from minivess.pipeline.post_training_plugins.multi_swa import MultiSWAPlugin
+    def test_subsample_fraction_1_equals_single_average(self, tmp_path: Path) -> None:
+        from minivess.pipeline.post_training_plugins.subsampled_ensemble import (
+            SubsampledEnsemblePlugin,
+        )
 
         ckpts = [_write_checkpoint(tmp_path / f"ckpt{i}.pt", seed=i) for i in range(4)]
 
@@ -134,19 +146,21 @@ class TestMultiSWAPlugin:
                 "output_dir": str(tmp_path),
             },
         )
-        result = MultiSWAPlugin().execute(pi)
-        # With fraction=1.0, all models use all checkpoints → all identical
+        result = SubsampledEnsemblePlugin().execute(pi)
+        # With fraction=1.0, all models use all checkpoints -> all identical
         sd0 = torch.load(result.model_paths[0], weights_only=True)
         sd1 = torch.load(result.model_paths[1], weights_only=True)
         for k in sd0:
             assert torch.equal(sd0[k], sd1[k])
 
     def test_validate_inputs_too_few_checkpoints(self) -> None:
-        from minivess.pipeline.post_training_plugins.multi_swa import MultiSWAPlugin
+        from minivess.pipeline.post_training_plugins.subsampled_ensemble import (
+            SubsampledEnsemblePlugin,
+        )
 
         pi = PluginInput(
             checkpoint_paths=[Path("/tmp/single.pt")],
             config={"n_models": 3, "subsample_fraction": 0.5},
         )
-        errors = MultiSWAPlugin().validate_inputs(pi)
+        errors = SubsampledEnsemblePlugin().validate_inputs(pi)
         assert len(errors) > 0

@@ -181,7 +181,21 @@ def _parse_run_dir(
         return None
 
     meta = yaml.safe_load(meta_file.read_text(encoding="utf-8"))
-    status = meta.get("status", "UNKNOWN")
+    raw_status = meta.get("status", "UNKNOWN")
+    # MLflow file-based tracking stores status as integer:
+    # 1=RUNNING, 2=SCHEDULED, 3=FINISHED, 4=FAILED, 5=KILLED
+    _STATUS_MAP = {
+        1: "RUNNING",
+        2: "SCHEDULED",
+        3: "FINISHED",
+        4: "FAILED",
+        5: "KILLED",
+    }
+    status = (
+        _STATUS_MAP.get(raw_status, str(raw_status))
+        if isinstance(raw_status, int)
+        else str(raw_status)
+    )
 
     # Extract loss_function and fold_id from params
     params = _read_params(run_dir)

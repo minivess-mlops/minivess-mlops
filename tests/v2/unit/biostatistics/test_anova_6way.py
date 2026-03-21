@@ -57,7 +57,7 @@ class TestAnovaFiveWay:
             ["dynunet", "sam3"],
             ["dice_ce", "cbdice"],
             ["false", "true"],
-            ["none", "swa"],
+            ["none", "checkpoint_averaging"],
             ["none", "temp_scaling"],
         ]
         data = _make_synthetic_data(factor_names, levels)
@@ -94,7 +94,7 @@ class TestAnovaSixWay:
             ["dynunet", "sam3"],
             ["dice_ce", "cbdice"],
             ["false", "true"],
-            ["none", "swa"],
+            ["none", "checkpoint_averaging"],
             ["none", "temp_scaling"],
             ["per_loss_single_best", "all_loss_all_best"],
         ]
@@ -131,7 +131,7 @@ class TestLayeredAnovaProgression:
             ["dynunet", "sam3"],
             ["dice_ce", "cbdice"],
             ["false", "true"],
-            ["none", "swa"],
+            ["none", "checkpoint_averaging"],
             ["none", "temp_scaling"],
             ["per_loss", "all_loss"],
         ]
@@ -190,7 +190,7 @@ class TestBuildPerVolumeDataConditionKeys:
             status="FINISHED",
             model_family="dynunet",
             with_aux_calib=False,
-            post_training_method="swa",
+            post_training_method="checkpoint_averaging",
             recalibration="none",
             ensemble_strategy="all_loss_all_best",
         )
@@ -199,7 +199,7 @@ class TestBuildPerVolumeDataConditionKeys:
         assert len(parts) == 6, f"Expected 6 parts, got {len(parts)}: {parts}"
         assert parts[0] == "dynunet"
         assert parts[1] == "dice_ce"
-        assert parts[3] == "swa"
+        assert parts[3] == "checkpoint_averaging"
         assert parts[5] == "all_loss_all_best"
 
 

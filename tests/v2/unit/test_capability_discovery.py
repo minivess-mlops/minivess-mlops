@@ -92,15 +92,16 @@ class TestDiscoverMetrics:
 class TestDiscoverPostTrainingPlugins:
     """discover_post_training_plugins returns all registered plugin names."""
 
-    def test_returns_six_plugins(self) -> None:
+    def test_returns_seven_plugins(self) -> None:
         plugins = discover_post_training_plugins()
-        assert len(plugins) == 6
+        assert len(plugins) == 7
 
     def test_contains_expected_plugins(self) -> None:
         plugins = discover_post_training_plugins()
         expected = {
-            "swa",
-            "multi_swa",
+            "checkpoint_averaging",
+            "subsampled_ensemble",
+            "swag",
             "model_merging",
             "calibration",
             "crc_conformal",

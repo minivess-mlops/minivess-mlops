@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 import mlflow
 import numpy as np
 
+from minivess.pipeline.calibration_metrics import compute_all_calibration_metrics
 from minivess.pipeline.evaluation import EvaluationRunner, FoldResult
 from minivess.pipeline.prediction_store import save_volume_prediction
 from minivess.pipeline.validation_metrics import compute_compound_masd_cldice
@@ -192,9 +193,11 @@ class UnifiedEvaluationRunner:
         -------
         :class:`EvaluationResult`
         """
-        # Step 1: Inference
-        predictions, labels = self.inference_runner.infer_dataset(
-            model, loader, device="cpu"
+        # Step 1: Inference (with soft probabilities for calibration)
+        predictions, labels, probabilities = (
+            self.inference_runner.infer_dataset_with_probabilities(
+                model, loader, device="cpu"
+            )
         )
 
         # Step 2: Save predictions if output_dir given
@@ -202,16 +205,36 @@ class UnifiedEvaluationRunner:
         if output_dir is not None:
             predictions_dir = output_dir
             predictions_dir.mkdir(parents=True, exist_ok=True)
-            for idx, pred in enumerate(predictions):
+            for idx, (pred, prob) in enumerate(
+                zip(predictions, probabilities, strict=True)
+            ):
                 save_volume_prediction(
                     output_dir=predictions_dir,
                     volume_name=f"vol_{idx:04d}",
                     hard_pred=pred,
-                    soft_pred=pred.astype(np.float32),
+                    soft_pred=prob.astype(np.float32),
                 )
 
         # Step 3: MetricsReloaded evaluation
         fold_result = self._run_evaluation(predictions, labels)
+
+        # Step 4: Calibration metrics (comprehensive, non-blocking)
+        try:
+            cal_metrics = self._compute_calibration_metrics_for_volumes(
+                probabilities, labels
+            )
+            from minivess.pipeline.ci import ConfidenceInterval
+
+            for name, val in cal_metrics.items():
+                fold_result.aggregated[f"cal_{name}"] = ConfidenceInterval(
+                    point_estimate=val,
+                    lower=val,
+                    upper=val,
+                    confidence_level=0.95,
+                    method="point_estimate_only",
+                )
+        except Exception:
+            logger.warning("Calibration metrics failed (non-blocking)", exc_info=True)
 
         return EvaluationResult(
             model_name=model_name,
@@ -381,6 +404,38 @@ class UnifiedEvaluationRunner:
     # ------------------------------------------------------------------
     # Internal helpers (public for mocking in tests)
     # ------------------------------------------------------------------
+
+    def _compute_calibration_metrics_for_volumes(
+        self,
+        probabilities: list[np.ndarray],
+        labels: list[np.ndarray],
+    ) -> dict[str, float]:
+        """Compute calibration metrics across all volumes.
+
+        Concatenates all voxels from all volumes and computes
+        comprehensive calibration metrics on the full dataset.
+
+        Parameters
+        ----------
+        probabilities:
+            List of soft prediction arrays ``(D, H, W)`` with foreground
+            class probabilities in ``[0, 1]``.
+        labels:
+            List of binary ground truth arrays ``(D, H, W)``.
+
+        Returns
+        -------
+        Dict mapping calibration metric names to float values.
+        """
+        all_probs = np.concatenate([p.ravel() for p in probabilities])
+        all_labels = np.concatenate([lbl.ravel() for lbl in labels])
+
+        # Clip to valid probability range
+        all_probs = np.clip(all_probs, 0.0, 1.0)
+
+        return compute_all_calibration_metrics(
+            all_probs, all_labels, tier="comprehensive"
+        )
 
     def _run_evaluation(
         self,

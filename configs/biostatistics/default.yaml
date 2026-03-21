@@ -7,7 +7,7 @@ experiment_names:
 mlruns_dir: mlruns
 output_dir: outputs/biostatistics
 
-# 8 metrics per Metrics Reloaded recommendations
+# 8 segmentation + 6 calibration metrics per Metrics Reloaded recommendations
 metrics:
   - dsc
   - hd95
@@ -17,6 +17,13 @@ metrics:
   - be_0
   - be_1
   - junction_f1
+  # Calibration metrics (Phase B3)
+  - cal_ece
+  - cal_mce
+  - cal_brier
+  - cal_nll
+  - cal_ace
+  - cal_ba_ece
 
 # Pre-registered primary metric (Holm-Bonferroni correction)
 primary_metric: cldice
@@ -32,6 +39,15 @@ rope_values:
   cldice: 0.01
   hd95: 0.5
   nsd: 0.01
+  # Calibration metrics ROPE (Phase B3)
+  cal_ece: 0.02
+  cal_brier: 0.01
+  cal_ba_ece: 0.02
+
+# Calibration co-primary metrics (Phase B3)
+calibration_co_primary_metrics:
+  - cal_ece
+  - cal_ba_ece
 
 # Minimum data requirements
 min_folds_per_condition: 3

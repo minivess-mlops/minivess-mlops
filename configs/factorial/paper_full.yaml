@@ -42,8 +42,8 @@ factors:
   post_training:
     method:
       - none
-      - swa
-      - multi_swa
+      - checkpoint_averaging
+      - swag
     recalibration:
       - none
       - temperature_scaling

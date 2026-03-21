@@ -214,7 +214,7 @@ class TestPostTrainingUpstreamExperimentBehavioural:
         from minivess.orchestration.flows.post_training_flow import post_training_flow
 
         def _one_plugin_enabled(self: PostTrainingConfig) -> list[str]:
-            return ["swa"]
+            return ["checkpoint_averaging"]
 
         monkeypatch.setattr(
             PostTrainingConfig, "enabled_plugin_names", _one_plugin_enabled
@@ -265,7 +265,7 @@ class TestPostTrainingUpstreamExperimentBehavioural:
 
 
 class _StubPlugin:
-    name = "swa"
+    name = "checkpoint_averaging"
 
     def validate_inputs(self, pi: object) -> list[str]:
         return []

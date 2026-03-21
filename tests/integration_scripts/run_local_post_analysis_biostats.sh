@@ -66,7 +66,7 @@ echo "  Found ~${N_RUNS} MLflow runs in ${MLRUNS_DIR}"
 if [ "$DRY_RUN" = "true" ]; then
     echo ""
     echo "=== DRY RUN — would execute the following flows ==="
-    echo "  1. Post-Training Flow (SWA + calibration on 24 conditions)"
+    echo "  1. Post-Training Flow (checkpoint averaging + calibration on 24 conditions)"
     echo "  2. Analysis Flow (4 ensemble strategies, MiniVess + DeepVess eval)"
     echo "  3. Biostatistics Flow (N-way ANOVA, spec curve, rank stability)"
     echo ""
@@ -99,7 +99,7 @@ echo ""
 # ---------------------------------------------------------------------------
 if [ "$SKIP_POST_TRAINING" = "false" ]; then
     echo "=== Phase 1: Post-Training Flow ==="
-    echo "  Applying SWA + calibration to training checkpoints..."
+    echo "  Applying checkpoint averaging + calibration to training checkpoints..."
 
     uv run python -c "
 from minivess.orchestration.flows.post_training_flow import post_training_flow
@@ -113,7 +113,7 @@ result = post_training_flow(
     trigger_source='local_integration_test',
 )
 print(f'Post-Training completed: status={result.status}')
-print(f'  SWA: {result.swa_completed}')
+print(f'  Checkpoint averaging: {result.checkpoint_averaging_completed}')
 print(f'  Calibration: {result.calibration_completed}')
 print(f'  Failed: {result.failed_operations}')
 " 2>&1 | tee "${OUTPUT_DIR}/post_training.log"

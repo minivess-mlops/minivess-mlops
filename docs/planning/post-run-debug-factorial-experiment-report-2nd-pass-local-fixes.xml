@@ -1,0 +1,450 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>Pre-GCP Fixes: Checkpoint Rearchitecture (#878) + TopoLoRA Paper Fidelity (#879)</title>
+    <branch>test/local-debug-3flow-execution</branch>
+    <date>2026-03-21</date>
+    <status>ready-for-review</status>
+    <priority>P0 — last fixes before GCP factorial re-run</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <estimated-time>10-12 hours total</estimated-time>
+    <predecessor>
+      docs/planning/run-debug-factorial-experiment-report-2nd-pass-local.md
+    </predecessor>
+  </metadata>
+
+  <context>
+    <summary>
+      Two issues block the GCP factorial re-run:
+
+      1. #878 (P0): Checkpoints lost on ephemeral spot VMs — need GCS persistence
+         + atomic writes + SHA256 verification + spot resume wiring
+
+      2. #879 (REFRAMED): TopoLoRA-SAM implementation deviates from Khazem et al.
+         (2025). The REAL gap is a missing Spatial Adapter, NOT LoRAConv2d.
+         Issue #879 should be relabeled. Loss must be config-driven for factorial.
+
+      After this plan: checkpoints persist to GCS, TopoLoRA matches the paper,
+      and we can run the full 24-condition factorial on GCP.
+    </summary>
+
+    <paper-reference>
+      <!-- TopoLoRA-SAM: Khazem et al. (2025) -->
+      <title>TopoLoRA-SAM: Topology-Aware Low-Rank Adaptation for Retinal Vessel Segmentation</title>
+      <url>https://arxiv.org/html/2601.02273v1</url>
+      <repo>https://github.com/salimkhazem/Seglab</repo>
+      <key-architecture>
+        1. Frozen SAM ViT encoder (paper: ViT-B; ours: ViT-32L SAM3)
+        2. Trainable LoRA on FFN layers ONLY (mlp.lin1, mlp.lin2) — NOT Conv2d
+        3. Trainable Spatial Adapter: Conv_DW(3x3) + Conv(1x1) + residual (~66K params)
+        4. Trainable Mask Decoder
+        5. Loss: BCE + Dice + 0.5*clDice (topology-aware, config-driven)
+      </key-architecture>
+      <our-adaptation>
+        We adapt the technique to SAM3 ViT-32L (648M params) instead of SAM1 ViT-B (93.7M).
+        The LoRA + Spatial Adapter + topology-aware loss architecture is identical.
+        The loss function is CONFIGURABLE — all 3 factorial losses can be used.
+        This is a PLATFORM paper (Nature Protocols), not a SOTA paper. The contribution
+        is showing that the MLOps platform handles any model/loss/adapter combination.
+      </our-adaptation>
+    </paper-reference>
+
+    <local-debug-results>
+      <!-- From run-debug-factorial-experiment-report-2nd-pass-local.md -->
+      Local 3-flow debug PASSED: 4/4 conditions, 7 bugs found and fixed.
+      DynUNet inference: 7.6s/vol, total 12.5 min for 96 inferences.
+      Key finding: DSC vs clDice rank inversion (cbdice_cldice wins clDice,
+      dice_ce wins DSC). This IS a paper finding.
+    </local-debug-results>
+  </context>
+
+  <!-- ================================================================== -->
+  <!-- PART A: CHECKPOINT REARCHITECTURE (#878)                            -->
+  <!-- ================================================================== -->
+
+  <phases>
+    <phase id="A1" name="H1: Direct GCS Artifact Upload (15 min)">
+      <description>
+        Switch train_factorial.yaml from file-based /app/mlruns to the Cloud Run
+        MLflow URI with --no-serve-artifacts. Clients upload directly to GCS,
+        bypassing the 32MB Cloud Run limit.
+
+        ALREADY DONE:
+        - Dockerfile.mlflow-gcp has --no-serve-artifacts ✓
+        - smoke_test_gcp.yaml uses ${MLFLOW_TRACKING_URI} ✓
+        - google-cloud-storage in Docker image ✓
+        - GCP VMs get ADC automatically via SkyPilot ✓
+
+        REMAINING:
+        - train_factorial.yaml: switch MLFLOW_TRACKING_URI from /app/mlruns
+          to ${MLFLOW_TRACKING_URI} (the Cloud Run URL)
+      </description>
+      <tasks>
+        <task id="TA1.1" title="Switch train_factorial.yaml MLFLOW_TRACKING_URI">
+          Change from: MLFLOW_TRACKING_URI: /app/mlruns
+          To: MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+          This makes it read from the .env file (Cloud Run URL for GCP,
+          file-based for local).
+        </task>
+        <task id="TA1.2" title="Test: verify train_factorial.yaml uses env var">
+          Add test in test_train_factorial_yaml.py:
+            assert "MLFLOW_TRACKING_URI" value is "${MLFLOW_TRACKING_URI}"
+            assert it does NOT hardcode "/app/mlruns"
+        </task>
+      </tasks>
+      <gate>train_factorial.yaml uses ${MLFLOW_TRACKING_URI} from env.</gate>
+    </phase>
+
+    <phase id="A2" name="H6: GCS Bucket Mount for Checkpoints (1 hour)">
+      <description>
+        Mount gs://minivess-mlops-checkpoints as a file_mount in SkyPilot YAML.
+        Checkpoints written to /checkpoints/ are automatically synced to GCS.
+        Already done in smoke_test_gcp.yaml — port to train_factorial.yaml.
+      </description>
+      <tasks>
+        <task id="TA2.1" title="Add file_mounts for checkpoints bucket">
+          In train_factorial.yaml:
+            file_mounts:
+              /checkpoints:
+                source: gs://minivess-mlops-checkpoints
+                mode: MOUNT
+        </task>
+        <task id="TA2.2" title="Update train_flow.py checkpoint save path">
+          Ensure checkpoint_dir reads from CHECKPOINT_DIR env var
+          (default /checkpoints/ in Docker, outputs/checkpoints locally).
+        </task>
+        <task id="TA2.3" title="Test: verify checkpoint_dir is configurable">
+          Test that train_flow reads CHECKPOINT_DIR from env, not hardcoded.
+        </task>
+      </tasks>
+      <gate>Checkpoints written to GCS-mounted /checkpoints/ directory.</gate>
+    </phase>
+
+    <phase id="A3" name="Atomic Checkpoint Writes (#714, 1.5 hours)">
+      <description>
+        Prevent corrupted checkpoints from interrupted writes (spot preemption,
+        OOM, SIGTERM). Use sync→rename atomic pattern.
+      </description>
+      <tasks>
+        <task id="TA3.1" title="RED: Test checkpoint write is atomic">
+          Test that save_checkpoint writes to .tmp then renames.
+          Verify: incomplete write never produces a valid checkpoint filename.
+        </task>
+        <task id="TA3.2" title="GREEN: Implement atomic save in trainer">
+          In trainer checkpoint save:
+            tmp_path = checkpoint_path.with_suffix(".tmp")
+            torch.save(state_dict, tmp_path)
+            os.fsync(tmp_path.open().fileno())
+            tmp_path.rename(checkpoint_path)
+        </task>
+      </tasks>
+      <gate>Checkpoints use atomic write pattern. No partial files.</gate>
+    </phase>
+
+    <phase id="A4" name="SHA256 Checkpoint Verification (#707, 1 hour)">
+      <description>
+        Compute SHA256 hash after save, store as sidecar .sha256 file.
+        Verify on load. Catches silent corruption from GCS sync issues.
+      </description>
+      <tasks>
+        <task id="TA4.1" title="RED: Test checkpoint SHA256 sidecar">
+          After saving, .sha256 file must exist alongside checkpoint.
+          On load, verify hash matches.
+        </task>
+        <task id="TA4.2" title="GREEN: Implement SHA256 save/verify">
+          save: compute hashlib.sha256, write to {ckpt}.sha256
+          load: read sidecar, compute hash of loaded file, compare
+          Mismatch: raise CheckpointCorruptionError (not silent)
+        </task>
+      </tasks>
+      <gate>Every checkpoint has SHA256 sidecar. Load verifies integrity.</gate>
+    </phase>
+
+    <phase id="A5" name="Spot Preemption Resumption (2 hours)">
+      <description>
+        Wire the existing check_resume_state_task() to actually work.
+        On spot preemption recovery, SkyPilot relaunches the job.
+        The flow must detect the last checkpoint and resume from that epoch.
+      </description>
+      <tasks>
+        <task id="TA5.1" title="RED: Test resume detects last checkpoint">
+          Given a checkpoint dir with epoch_5.pth and epoch_10.pth,
+          check_resume_state() returns epoch=10 and the path.
+        </task>
+        <task id="TA5.2" title="GREEN: Implement check_resume_state">
+          Scan checkpoint_dir for epoch_*.pth files.
+          Return latest epoch number and path.
+          If no checkpoints: return epoch=0 (start fresh).
+        </task>
+        <task id="TA5.3" title="Wire resume into train_flow.py">
+          At flow start: call check_resume_state()
+          If resume: load checkpoint, set start_epoch
+          If fresh: start from epoch 0
+        </task>
+        <task id="TA5.4" title="Test: end-to-end resume simulation">
+          Save a checkpoint at epoch 5, call train_flow with resume=True,
+          verify it starts from epoch 5.
+        </task>
+      </tasks>
+      <gate>Train flow resumes from last checkpoint after spot preemption.</gate>
+    </phase>
+
+    <!-- ================================================================== -->
+    <!-- PART B: TOPOLORA PAPER FIDELITY (#879 REFRAMED)                    -->
+    <!-- ================================================================== -->
+
+    <phase id="B1" name="Relabel #879 + Document Paper Architecture (30 min)">
+      <description>
+        Issue #879 says "Implement LoRAConv2d" but the paper does NOT LoRA Conv2d.
+        The real gap is the missing Spatial Adapter. Relabel the issue, update
+        CLAUDE.md, KG, and everywhere with the correct architecture.
+      </description>
+      <tasks>
+        <task id="TB1.1" title="Relabel issue #879">
+          Change title from "P2: Implement LoRAConv2d for Conv2d layers"
+          to "Implement Spatial Adapter + verify TopoLoRA paper fidelity"
+          Update body with the paper reference and diagram.
+        </task>
+        <task id="TB1.2" title="Update CLAUDE.md with TopoLoRA architecture">
+          Add to CLAUDE.md or adapters CLAUDE.md:
+          - TopoLoRA-SAM reference (Khazem et al., 2025)
+          - Architecture: frozen encoder + LoRA FFN + Spatial Adapter + decoder
+          - LoRA targets: FFN (mlp.lin1/lin2) ONLY, not Conv2d or attention
+          - Spatial Adapter: Conv_DW(3x3) + Conv(1x1) + residual
+          - Our adaptation: SAM3 ViT-32L instead of SAM1 ViT-B
+        </task>
+        <task id="TB1.3" title="Update knowledge-graph with paper reference">
+          Add to knowledge-graph/bibliography.yaml and
+          decisions/L3-technology/paper_model_comparison.yaml.
+        </task>
+      </tasks>
+      <gate>Issue relabeled. Architecture documented everywhere.</gate>
+    </phase>
+
+    <phase id="B2" name="Implement Spatial Adapter (2 hours)">
+      <description>
+        Add the Spatial Adapter (Conv_DW 3x3 + Conv 1x1 + BN + GELU + residual)
+        between the SAM3 encoder output and the mask decoder input.
+
+        From the paper/SegLab code:
+          class ConvAdapter(nn.Module):
+              dw = Conv2d(ch, ch, 3, groups=ch)   # depthwise
+              pw1 = Conv2d(ch, hidden, 1)          # pointwise
+              pw2 = Conv2d(hidden, ch, 1)          # pointwise (back to ch)
+              norm = BatchNorm2d(hidden)
+              forward: x + pw2(gelu(norm(pw1(dw(x)))))  # residual
+
+        This adds ~66K trainable params (for 256-ch SAM3 embeddings).
+      </description>
+      <tasks>
+        <task id="TB2.1" title="RED: Test Spatial Adapter exists and runs">
+          Test SpatialConvAdapter:
+          - Accepts (B, 256, H/16, W/16) input
+          - Returns same shape output
+          - ~66K trainable params
+          - Has residual connection
+        </task>
+        <task id="TB2.2" title="GREEN: Implement SpatialConvAdapter">
+          In sam3_topolora.py (or a new spatial_adapter.py):
+          class SpatialConvAdapter(nn.Module):
+              dw_conv: Conv2d(ch, ch, 3, padding=1, groups=ch)
+              pw1: Conv2d(ch, hidden_dim, 1)
+              norm: BatchNorm2d(hidden_dim)
+              pw2: Conv2d(hidden_dim, ch, 1)
+              forward: x + pw2(gelu(norm(pw1(dw_conv(x)))))
+        </task>
+        <task id="TB2.3" title="Wire Spatial Adapter into Sam3TopoLoraAdapter">
+          In the forward pass, between encoder output and decoder:
+            encoder_features = self.backbone(slice_2d)
+            if self.spatial_adapter:
+                encoder_features = self.spatial_adapter(encoder_features)
+            logits = self.decoder(encoder_features)
+        </task>
+        <task id="TB2.4" title="Test: end-to-end forward with Spatial Adapter">
+          Full forward pass with random input. Verify output shape correct
+          and spatial adapter contributes to gradients.
+        </task>
+      </tasks>
+      <gate>Spatial Adapter matches paper. Forward pass works. ~66K params.</gate>
+    </phase>
+
+    <phase id="B3" name="Loss Function Flexibility for Factorial (1.5 hours)">
+      <description>
+        The user wants ALL 3 factorial losses (cbdice_cldice, dice_ce,
+        dice_ce_cldice) usable with TopoLoRA — plus any future MONAI loss.
+        The loss registry already exists. Verify TopoLoRA uses it correctly.
+
+        The paper's default loss (BCE+Dice+0.5*clDice) maps to our existing
+        dice_ce_cldice compound loss. Verify this equivalence.
+
+        Also check: does SegLab use any exotic loss we don't have?
+        Answer from research: No — they use BCE+Dice+clDice which maps to our
+        existing losses. The boundary loss (weight=0) is disabled by default.
+      </description>
+      <tasks>
+        <task id="TB3.1" title="Verify TopoLoRA uses loss registry">
+          Check sam3_topolora.py uses the standard loss_name config parameter.
+          The adapter should NOT hardcode any loss — it receives loss from config.
+        </task>
+        <task id="TB3.2" title="Verify dice_ce_cldice ≈ paper's BCE+Dice+clDice">
+          Compare our VesselCompoundLoss (dice_ce + clDice) with the paper's
+          BCE + Dice + 0.5*clDice. Document any weight differences.
+        </task>
+        <task id="TB3.3" title="Add paper's default loss as a named config">
+          If our dice_ce_cldice doesn't exactly match BCE+Dice+0.5*clDice,
+          add a topolora_default loss to the registry with correct weights.
+        </task>
+      </tasks>
+      <gate>All factorial losses work with TopoLoRA. Paper default documented.</gate>
+    </phase>
+
+    <phase id="B4" name="Verify clDice Implementation (1 hour)">
+      <description>
+        The paper uses differentiable soft skeletonization via iterated
+        min/max pooling (10 iterations). Our clDice uses MONAI's SoftclDiceLoss.
+        Verify these are equivalent or document differences.
+      </description>
+      <tasks>
+        <task id="TB4.1" title="Compare MONAI SoftclDiceLoss with SegLab clDice">
+          Read MONAI source for SoftclDiceLoss.
+          Read SegLab topo_losses.py for soft_skel + soft_cldice.
+          Document: same algorithm? Same number of iterations?
+        </task>
+        <task id="TB4.2" title="Test: clDice produces non-zero gradients">
+          Verify MONAI SoftclDiceLoss produces gradients that flow back to
+          the encoder. If not, the topology loss has no effect on LoRA params.
+        </task>
+      </tasks>
+      <gate>clDice verified as differentiable. Equivalence documented.</gate>
+    </phase>
+
+    <!-- ================================================================== -->
+    <!-- PART C: FINAL VERIFICATION                                         -->
+    <!-- ================================================================== -->
+
+    <phase id="C1" name="Integration Tests + Staging Gate (1 hour)">
+      <tasks>
+        <task id="TC1.1" title="Run make test-staging">
+          All tests must pass. Fix any regressions from Parts A+B.
+        </task>
+        <task id="TC1.2" title="Run make test-prod">
+          Full prod suite including model_loading tests.
+          SAM3 TopoLoRA construction test should verify Spatial Adapter.
+        </task>
+        <task id="TC1.3" title="Commit and create PR">
+          Single PR with all Part A + Part B changes.
+        </task>
+      </tasks>
+      <gate>All tests pass. PR ready for merge.</gate>
+    </phase>
+
+    <phase id="C2" name="GCP Pre-Flight Checklist">
+      <description>
+        Verify everything needed for the GCP run is ready.
+        This is a checklist, not implementation.
+      </description>
+      <tasks>
+        <task id="TC2.1" title="Verify Docker image needs rebuild">
+          Check if Dockerfile.base needs changes for:
+          - INSTALL_MAMBA=1 (mamba-ssm for MambaVesselNet)
+          - Spatial Adapter (no new deps, just code)
+        </task>
+        <task id="TC2.2" title="Verify SkyPilot YAML is correct">
+          train_factorial.yaml:
+          - MLFLOW_TRACKING_URI from env
+          - file_mounts for checkpoints
+          - No hardcoded region
+          - docker image_id correct
+        </task>
+        <task id="TC2.3" title="Create cold-start prompt for GCP session">
+          Everything the next session needs to launch the GCP run.
+        </task>
+      </tasks>
+      <gate>Ready to run sky jobs launch train_factorial.yaml</gate>
+    </phase>
+  </phases>
+
+  <issue-status>
+    <issue number="878" title="MLflow checkpoint upload 413" action="CLOSE after Part A">
+      Root cause: train_factorial.yaml hardcodes /app/mlruns instead of Cloud Run URI.
+      Fix: H1 (URI switch) + H6 (GCS mount) + atomic + SHA256 + spot resume.
+    </issue>
+    <issue number="879" title="LoRAConv2d (RELABEL)" action="RELABEL + CLOSE after Part B">
+      WRONG: LoRAConv2d — paper does NOT LoRA Conv2d layers.
+      RIGHT: Missing Spatial Adapter (Conv_DW 3x3 + Conv 1x1).
+      Relabel to: "Implement Spatial Adapter + verify TopoLoRA paper fidelity"
+    </issue>
+  </issue-status>
+
+  <execution-order>
+    Part A: A1(no-op) → A2 → A3 → A4 → A5(verify existing) (checkpoint, ~4 hours)
+    Part B: B1 → B2 → B2.5(LoRA filter) → B3 → B4 (TopoLoRA, ~5 hours)
+    Part C: C1 → C2 (verification, ~1 hour)
+    Total: ~8-10 hours
+
+    Parts A and B can run in PARALLEL (different files, no conflicts).
+  </execution-order>
+
+  <reviewer-corrections applied="2026-03-21">
+    <correction id="R1" phase="A1" severity="no-op">
+      train_factorial.yaml ALREADY uses ${MLFLOW_TRACKING_URI} (line 54).
+      Phase A1 is a no-op. Just verify it's correct, don't change.
+      NOTE: train_production.yaml still hardcodes /app/mlruns — fix that too.
+    </correction>
+    <correction id="R2" phase="A2" severity="valid">
+      file_mounts for GCS checkpoints NOT yet in train_factorial.yaml.
+      Port from smoke_test_gcp.yaml. Plan is correct.
+    </correction>
+    <correction id="R3" phase="A5" severity="mostly-done">
+      check_resume_state_task() ALREADY EXISTS at train_flow.py:262-302.
+      Resume wiring ALREADY EXISTS at train_flow.py:607-622.
+      Plan should say "verify E2E" not "implement from scratch."
+    </correction>
+    <correction id="R4" phase="B2" severity="wrong-call-chain">
+      Spatial Adapter goes between extract_fpn_features() and decoder,
+      NOT between raw encoder output and decoder. Operates on 256-ch
+      FPN output. Plan pseudocode is wrong.
+      CORRECT: fpn_features = backbone.extract_fpn_features(x)
+               fpn_features = spatial_adapter(fpn_features)  # INSERT HERE
+               logits = decoder(fpn_features)
+    </correction>
+    <correction id="R5" phase="B2" severity="new-gap">
+      CRITICAL: Current _apply_lora_to_encoder() targets ALL nn.Linear
+      layers (attention Q/K/V + FFN). Paper targets FFN ONLY.
+      Must add target_keywords filter: ["mlp", "lin1", "lin2", "fc1", "fc2"]
+      to match SegLab's config. ADD NEW TASK B2.5 for LoRA target filtering.
+    </correction>
+    <correction id="R6" severity="gcp-blocker" phase="MISSING">
+      train_factorial.yaml MISSING DVC initialization in setup block:
+        dvc init --no-scm -f
+        dvc remote add gcs gs://minivess-mlops-dvc-data
+        inline dvc.yaml + dvc.lock generation
+      Without this, dvc pull -r gcs fails on fresh GCP VM.
+      Port DVC setup from smoke_test_gcp.yaml.
+      ADD TO Phase C2 as a MANDATORY task, not just a checklist item.
+    </correction>
+    <correction id="R7" severity="possible-issue" phase="C2">
+      SAM3 HF repo name in pre-cache (facebook/sam3-hiera-large) may not
+      match repo used by Sam3Model.from_pretrained(). Verify before GCP.
+    </correction>
+    <correction id="R8" severity="rule-violation" phase="NOTED">
+      train_factorial.yaml sets PREFECT_DISABLED=1 and MINIVESS_ALLOW_HOST=1.
+      Rule #19 STOP Protocol says these are "pytest ONLY." Acknowledged as
+      intentional for SkyPilot VM execution (no Prefect server on VM).
+    </correction>
+  </reviewer-corrections>
+
+  <cross-reference>
+    <paper url="https://arxiv.org/html/2601.02273v1" relation="TopoLoRA-SAM architecture"/>
+    <repo url="https://github.com/salimkhazem/Seglab" relation="Reference implementation"/>
+    <source file="src/minivess/adapters/sam3_topolora.py" relation="Our TopoLoRA adapter"/>
+    <source file="src/minivess/pipeline/loss_functions.py" relation="Loss registry"/>
+    <source file="deployment/skypilot/train_factorial.yaml" relation="SkyPilot YAML"/>
+    <source file="src/minivess/orchestration/flows/train_flow.py" relation="Training flow"/>
+    <report file="docs/planning/run-debug-factorial-experiment-report-2nd-pass-local.md" relation="Local debug results"/>
+    <issue number="878" relation="Checkpoint persistence P0"/>
+    <issue number="879" relation="TopoLoRA Spatial Adapter (reframed)"/>
+    <issue number="714" relation="Atomic checkpoint writes"/>
+    <issue number="707" relation="SHA256 checkpoint verification"/>
+  </cross-reference>
+</plan>

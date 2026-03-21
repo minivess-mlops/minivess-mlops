@@ -28,9 +28,13 @@ class TestFactorialPostTrainingConfigMethods:
         from minivess.config.post_training_config import PostTrainingConfig
 
         config = PostTrainingConfig(
-            factorial_methods=["none", "swa", "multi_swa"],
+            factorial_methods=["none", "checkpoint_averaging", "subsampled_ensemble"],
         )
-        assert config.factorial_methods == ["none", "swa", "multi_swa"]
+        assert config.factorial_methods == [
+            "none",
+            "checkpoint_averaging",
+            "subsampled_ensemble",
+        ]
 
 
 class TestFactorialPostTrainingConfigValidation:
@@ -54,8 +58,14 @@ class TestFactorialCheckpointNaming:
         )
 
         assert factorial_checkpoint_name("abc123", "none") == "abc123_none.pt"
-        assert factorial_checkpoint_name("abc123", "swa") == "abc123_swa.pt"
-        assert factorial_checkpoint_name("abc123", "multi_swa") == "abc123_multi_swa.pt"
+        assert (
+            factorial_checkpoint_name("abc123", "checkpoint_averaging")
+            == "abc123_checkpoint_averaging.pt"
+        )
+        assert (
+            factorial_checkpoint_name("abc123", "subsampled_ensemble")
+            == "abc123_subsampled_ensemble.pt"
+        )
 
 
 class TestFactorialConfigFromYaml:
@@ -65,11 +75,15 @@ class TestFactorialConfigFromYaml:
         from minivess.config.post_training_config import PostTrainingConfig
 
         config = PostTrainingConfig(
-            factorial_methods=["none", "swa", "multi_swa"],
+            factorial_methods=["none", "checkpoint_averaging", "subsampled_ensemble"],
         )
 
         # Round-trip through dict (simulates YAML load)
         config_dict = config.model_dump()
         restored = PostTrainingConfig(**config_dict)
 
-        assert restored.factorial_methods == ["none", "swa", "multi_swa"]
+        assert restored.factorial_methods == [
+            "none",
+            "checkpoint_averaging",
+            "subsampled_ensemble",
+        ]

@@ -1,12 +1,13 @@
-"""Stochastic Weight Averaging (SWA) utilities for model soup.
+"""Checkpoint averaging utilities for model soup.
 
-Uniform SWA averages state dicts across fold checkpoints to produce
-a single model with lower generalization error and zero inference overhead.
+Uniform checkpoint averaging averages state dicts across fold checkpoints
+to produce a single model with lower generalization error and zero
+inference overhead.
 
 References:
+    - Wortsman et al. (2022), "Model Soups"
     - Izmailov et al. (2018), "Averaging Weights Leads to Wider Optima
       and Better Generalization"
-    - Wortsman et al. (2022), "Model Soups"
 """
 
 from __future__ import annotations
@@ -20,7 +21,9 @@ from torch import Tensor
 logger = logging.getLogger(__name__)
 
 
-def uniform_swa(state_dicts: list[dict[str, Tensor]]) -> dict[str, Tensor]:
+def uniform_checkpoint_average(
+    state_dicts: list[dict[str, Tensor]],
+) -> dict[str, Tensor]:
     """Uniform (equal-weight) averaging of multiple state dicts.
 
     Parameters
@@ -39,7 +42,7 @@ def uniform_swa(state_dicts: list[dict[str, Tensor]]) -> dict[str, Tensor]:
         If the list is empty.
     """
     if not state_dicts:
-        msg = "Need at least one state dict for SWA"
+        msg = "Need at least one state dict for checkpoint averaging"
         raise ValueError(msg)
 
     if len(state_dicts) == 1:
@@ -57,11 +60,15 @@ def uniform_swa(state_dicts: list[dict[str, Tensor]]) -> dict[str, Tensor]:
             # Non-floating (e.g., BatchNorm num_batches_tracked): take from first
             averaged[key] = ref.clone()
 
-    logger.info("SWA: averaged %d state dicts (%d parameters)", n, len(averaged))
+    logger.info(
+        "Checkpoint averaging: averaged %d state dicts (%d parameters)",
+        n,
+        len(averaged),
+    )
     return averaged
 
 
-def swa_from_checkpoints(
+def average_from_checkpoints(
     checkpoints: list[dict[str, Any]],
     *,
     state_dict_key: str = "state_dict",
@@ -81,4 +88,4 @@ def swa_from_checkpoints(
     Averaged state dict.
     """
     state_dicts = [ckpt[state_dict_key] for ckpt in checkpoints]
-    return uniform_swa(state_dicts)
+    return uniform_checkpoint_average(state_dicts)

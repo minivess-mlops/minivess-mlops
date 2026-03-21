@@ -1,16 +1,14 @@
-"""Multi-SWA post-training plugin.
+"""Subsampled ensemble post-training plugin.
 
-Produces M independent SWA models by subsampling checkpoints.
+Produces M independent averaged models by subsampling checkpoints.
 Each model averages a different random subset, then predictions
 are ensembled across basins at inference time.
 
 This is purely post-hoc — no training-time modifications needed.
-NOT Multi-SWAG (which requires training-time second-moment collection).
 
 References:
-    - Wilson & Izmailov (2020), "Bayesian Deep Learning and a Probabilistic
-      Perspective of Generalization"
-    - Izmailov et al. (2018), "Averaging Weights Leads to Wider Optima"
+    - Wortsman et al. (2022), "Model Soups: Averaging Weights of Multiple
+      Fine-tuned Models Improves Accuracy without Increasing Inference Time"
 """
 
 from __future__ import annotations
@@ -22,18 +20,18 @@ from pathlib import Path
 
 import torch
 
-from minivess.ensemble.model_soup import uniform_swa
+from minivess.ensemble.model_soup import uniform_checkpoint_average
 from minivess.pipeline.post_training_plugin import PluginInput, PluginOutput
 
 logger = logging.getLogger(__name__)
 
 
-class MultiSWAPlugin:
-    """Multi-SWA plugin — M independent SWA models from checkpoint subsets."""
+class SubsampledEnsemblePlugin:
+    """Subsampled ensemble plugin — M independent averaged models from checkpoint subsets."""
 
     @property
     def name(self) -> str:
-        return "multi_swa"
+        return "subsampled_ensemble"
 
     @property
     def requires_calibration_data(self) -> bool:
@@ -46,7 +44,9 @@ class MultiSWAPlugin:
         subset_size = max(1, math.floor(n_ckpts * fraction))
 
         if n_ckpts < 2:
-            errors.append(f"Multi-SWA needs at least 2 checkpoints, got {n_ckpts}")
+            errors.append(
+                f"Subsampled ensemble needs at least 2 checkpoints, got {n_ckpts}"
+            )
         if n_ckpts > 0 and subset_size < 1:
             errors.append(
                 f"Subsample fraction {fraction} with {n_ckpts} checkpoints "
@@ -66,7 +66,7 @@ class MultiSWAPlugin:
         all_sds = []
         for ckpt_path in plugin_input.checkpoint_paths:
             ckpt = torch.load(ckpt_path, weights_only=False)
-            all_sds.append(ckpt["state_dict"])
+            all_sds.append(ckpt.get("model_state_dict", ckpt.get("state_dict", ckpt)))
 
         n_total = len(all_sds)
         subset_size = max(1, math.floor(n_total * fraction))
@@ -83,14 +83,14 @@ class MultiSWAPlugin:
                 indices = sorted(rng.sample(range(n_total), subset_size))
 
             subset_sds = [all_sds[j] for j in indices]
-            averaged = uniform_swa(subset_sds)
+            averaged = uniform_checkpoint_average(subset_sds)
 
-            out_path = output_dir / f"multi_swa_model_{i}.pt"
+            out_path = output_dir / f"subsampled_ensemble_model_{i}.pt"
             torch.save(averaged, out_path)
             model_paths.append(out_path)
-            metrics[f"multi_swa_{i}_n_checkpoints"] = float(len(subset_sds))
+            metrics[f"subsampled_ensemble_{i}_n_checkpoints"] = float(len(subset_sds))
             logger.info(
-                "Multi-SWA model %d/%d: averaged %d/%d checkpoints (indices=%s)",
+                "Subsampled ensemble model %d/%d: averaged %d/%d checkpoints (indices=%s)",
                 i + 1,
                 n_models,
                 len(subset_sds),
@@ -98,9 +98,9 @@ class MultiSWAPlugin:
                 indices,
             )
 
-        metrics["multi_swa_n_models"] = float(n_models)
+        metrics["subsampled_ensemble_n_models"] = float(n_models)
         return PluginOutput(
-            artifacts={"method": "multi_swa"},
+            artifacts={"method": "subsampled_ensemble"},
             metrics=metrics,
             model_paths=model_paths,
         )

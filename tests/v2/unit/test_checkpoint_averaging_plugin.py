@@ -1,4 +1,4 @@
-"""Tests for SWA post-training plugin.
+"""Tests for checkpoint averaging post-training plugin.
 
 Phase 2 of post-training plugin architecture (#316).
 """
@@ -36,36 +36,46 @@ def _write_checkpoint(path: Path, seed: int = 0) -> Path:
     return path
 
 
-class TestSWAPlugin:
-    """SWA plugin should wrap model_soup.uniform_swa()."""
+class TestCheckpointAveragingPlugin:
+    """Checkpoint averaging plugin should wrap model_soup.uniform_checkpoint_average()."""
 
     def test_implements_protocol(self) -> None:
-        from minivess.pipeline.post_training_plugins.swa import SWAPlugin
+        from minivess.pipeline.post_training_plugins.checkpoint_averaging import (
+            CheckpointAveragingPlugin,
+        )
 
-        plugin = SWAPlugin()
+        plugin = CheckpointAveragingPlugin()
         assert isinstance(plugin, PostTrainingPlugin)
 
     def test_name_property(self) -> None:
-        from minivess.pipeline.post_training_plugins.swa import SWAPlugin
+        from minivess.pipeline.post_training_plugins.checkpoint_averaging import (
+            CheckpointAveragingPlugin,
+        )
 
-        assert SWAPlugin().name == "swa"
+        assert CheckpointAveragingPlugin().name == "checkpoint_averaging"
 
     def test_does_not_require_calibration_data(self) -> None:
-        from minivess.pipeline.post_training_plugins.swa import SWAPlugin
+        from minivess.pipeline.post_training_plugins.checkpoint_averaging import (
+            CheckpointAveragingPlugin,
+        )
 
-        assert SWAPlugin().requires_calibration_data is False
+        assert CheckpointAveragingPlugin().requires_calibration_data is False
 
     def test_validate_inputs_empty_checkpoints(self) -> None:
-        from minivess.pipeline.post_training_plugins.swa import SWAPlugin
+        from minivess.pipeline.post_training_plugins.checkpoint_averaging import (
+            CheckpointAveragingPlugin,
+        )
 
-        plugin = SWAPlugin()
+        plugin = CheckpointAveragingPlugin()
         pi = PluginInput(checkpoint_paths=[], config={"per_loss": True})
         errors = plugin.validate_inputs(pi)
         assert len(errors) > 0
         assert "checkpoint" in errors[0].lower()
 
-    def test_per_loss_swa(self, tmp_path: Path) -> None:
-        from minivess.pipeline.post_training_plugins.swa import SWAPlugin
+    def test_per_loss_averaging(self, tmp_path: Path) -> None:
+        from minivess.pipeline.post_training_plugins.checkpoint_averaging import (
+            CheckpointAveragingPlugin,
+        )
 
         # Create checkpoints with metadata
         ckpt1 = _write_checkpoint(tmp_path / "ckpt1.pt", seed=1)
@@ -82,14 +92,16 @@ class TestSWAPlugin:
             ],
         )
 
-        plugin = SWAPlugin()
+        plugin = CheckpointAveragingPlugin()
         result = plugin.execute(pi)
         assert isinstance(result, PluginOutput)
         # Should produce one model per loss type
         assert len(result.model_paths) == 2  # dice_ce + cbdice
 
-    def test_cross_loss_swa(self, tmp_path: Path) -> None:
-        from minivess.pipeline.post_training_plugins.swa import SWAPlugin
+    def test_cross_loss_averaging(self, tmp_path: Path) -> None:
+        from minivess.pipeline.post_training_plugins.checkpoint_averaging import (
+            CheckpointAveragingPlugin,
+        )
 
         ckpt1 = _write_checkpoint(tmp_path / "ckpt1.pt", seed=1)
         ckpt2 = _write_checkpoint(tmp_path / "ckpt2.pt", seed=2)
@@ -103,14 +115,16 @@ class TestSWAPlugin:
             ],
         )
 
-        plugin = SWAPlugin()
+        plugin = CheckpointAveragingPlugin()
         result = plugin.execute(pi)
         assert isinstance(result, PluginOutput)
-        # Single cross-loss SWA model
+        # Single cross-loss averaged model
         assert len(result.model_paths) == 1
 
     def test_single_checkpoint_passthrough(self, tmp_path: Path) -> None:
-        from minivess.pipeline.post_training_plugins.swa import SWAPlugin
+        from minivess.pipeline.post_training_plugins.checkpoint_averaging import (
+            CheckpointAveragingPlugin,
+        )
 
         ckpt = _write_checkpoint(tmp_path / "ckpt.pt", seed=1)
 
@@ -120,6 +134,6 @@ class TestSWAPlugin:
             run_metadata=[{"loss_type": "dice_ce", "fold_id": 0}],
         )
 
-        plugin = SWAPlugin()
+        plugin = CheckpointAveragingPlugin()
         result = plugin.execute(pi)
         assert len(result.model_paths) == 1

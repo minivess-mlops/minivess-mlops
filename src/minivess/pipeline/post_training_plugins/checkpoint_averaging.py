@@ -1,7 +1,11 @@
-"""SWA post-training plugin.
+"""Checkpoint averaging post-training plugin.
 
-Wraps ``minivess.ensemble.model_soup.uniform_swa()`` for per-loss
+Wraps ``minivess.ensemble.model_soup.uniform_checkpoint_average()`` for per-loss
 and cross-loss weight averaging of training checkpoints.
+
+References:
+    - Wortsman et al. (2022), "Model Soups: Averaging Weights of Multiple
+      Fine-tuned Models Improves Accuracy without Increasing Inference Time"
 """
 
 from __future__ import annotations
@@ -13,18 +17,18 @@ from typing import Any
 
 import torch
 
-from minivess.ensemble.model_soup import uniform_swa
+from minivess.ensemble.model_soup import uniform_checkpoint_average
 from minivess.pipeline.post_training_plugin import PluginInput, PluginOutput
 
 logger = logging.getLogger(__name__)
 
 
-class SWAPlugin:
-    """SWA plugin — uniform weight averaging of checkpoints."""
+class CheckpointAveragingPlugin:
+    """Checkpoint averaging plugin — uniform weight averaging of checkpoints."""
 
     @property
     def name(self) -> str:
-        return "swa"
+        return "checkpoint_averaging"
 
     @property
     def requires_calibration_data(self) -> bool:
@@ -67,13 +71,15 @@ class SWAPlugin:
                 )
 
             for loss_type, state_dicts in sorted(by_loss.items()):
-                averaged = uniform_swa(state_dicts)
-                out_path = output_dir / f"swa_{loss_type}.pt"
+                averaged = uniform_checkpoint_average(state_dicts)
+                out_path = output_dir / f"avg_{loss_type}.pt"
                 torch.save(averaged, out_path)
                 model_paths.append(out_path)
-                metrics[f"swa_{loss_type}_n_checkpoints"] = float(len(state_dicts))
+                metrics[f"avg_{loss_type}_n_checkpoints"] = float(len(state_dicts))
                 logger.info(
-                    "SWA per-loss: %s (%d checkpoints)", loss_type, len(state_dicts)
+                    "Checkpoint averaging per-loss: %s (%d checkpoints)",
+                    loss_type,
+                    len(state_dicts),
                 )
 
         if cross_loss:
@@ -81,15 +87,15 @@ class SWAPlugin:
                 ckpt.get("model_state_dict", ckpt.get("state_dict", ckpt))
                 for ckpt, _ in ckpt_data
             ]
-            averaged = uniform_swa(all_sds)
-            out_path = output_dir / "swa_cross_loss.pt"
+            averaged = uniform_checkpoint_average(all_sds)
+            out_path = output_dir / "avg_cross_loss.pt"
             torch.save(averaged, out_path)
             model_paths.append(out_path)
-            metrics["swa_cross_loss_n_checkpoints"] = float(len(all_sds))
-            logger.info("SWA cross-loss: %d checkpoints", len(all_sds))
+            metrics["avg_cross_loss_n_checkpoints"] = float(len(all_sds))
+            logger.info("Checkpoint averaging cross-loss: %d checkpoints", len(all_sds))
 
         return PluginOutput(
-            artifacts={"method": "swa"},
+            artifacts={"method": "checkpoint_averaging"},
             metrics=metrics,
             model_paths=model_paths,
         )

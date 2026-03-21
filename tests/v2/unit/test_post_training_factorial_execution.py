@@ -51,15 +51,15 @@ class TestFactorialExecutionNonePassthrough:
             )
 
 
-class TestFactorialExecutionSWA:
-    """T4: SWA method averages weights."""
+class TestFactorialExecutionCheckpointAveraging:
+    """T4: Checkpoint averaging method averages weights."""
 
-    def test_factorial_execution_swa(self, tmp_path: Path) -> None:
+    def test_factorial_execution_checkpoint_averaging(self, tmp_path: Path) -> None:
         from minivess.orchestration.flows.post_training_flow import (
             run_factorial_post_training,
         )
 
-        # Need at least 2 checkpoints for SWA to average
+        # Need at least 2 checkpoints for checkpoint averaging to average
         ckpt1 = _make_temp_checkpoint(tmp_path, "ckpt1.pt")
         ckpt2 = _make_temp_checkpoint(tmp_path, "ckpt2.pt")
         output_dir = tmp_path / "output"
@@ -67,20 +67,20 @@ class TestFactorialExecutionSWA:
 
         results = run_factorial_post_training(
             checkpoint_paths=[ckpt1, ckpt2],
-            methods=["swa"],
+            methods=["checkpoint_averaging"],
             output_dir=output_dir,
         )
 
         assert len(results) == 1
         result = results[0]
-        assert result["method"] == "swa"
+        assert result["method"] == "checkpoint_averaging"
         assert Path(result["output_path"]).exists()
 
 
-class TestFactorialExecutionMultiSWA:
-    """T4: Multi-SWA produces n_models variants."""
+class TestFactorialExecutionSubsampledEnsemble:
+    """T4: Subsampled ensemble produces n_models variants."""
 
-    def test_factorial_execution_multi_swa(self, tmp_path: Path) -> None:
+    def test_factorial_execution_subsampled_ensemble(self, tmp_path: Path) -> None:
         from minivess.orchestration.flows.post_training_flow import (
             run_factorial_post_training,
         )
@@ -91,14 +91,14 @@ class TestFactorialExecutionMultiSWA:
 
         results = run_factorial_post_training(
             checkpoint_paths=ckpts,
-            methods=["multi_swa"],
+            methods=["subsampled_ensemble"],
             output_dir=output_dir,
-            n_multi_swa_models=2,
+            n_subsampled_ensemble_models=2,
         )
 
         assert len(results) == 1
         result = results[0]
-        assert result["method"] == "multi_swa"
+        assert result["method"] == "subsampled_ensemble"
         assert Path(result["output_path"]).exists()
 
 
@@ -116,13 +116,13 @@ class TestFactorialExecutionAllMethods:
 
         results = run_factorial_post_training(
             checkpoint_paths=ckpts,
-            methods=["none", "swa", "multi_swa"],
+            methods=["none", "checkpoint_averaging", "subsampled_ensemble"],
             output_dir=output_dir,
         )
 
         assert len(results) == 3
         methods = {r["method"] for r in results}
-        assert methods == {"none", "swa", "multi_swa"}
+        assert methods == {"none", "checkpoint_averaging", "subsampled_ensemble"}
 
 
 class TestFactorialExecutionMlflowTags:
@@ -139,13 +139,13 @@ class TestFactorialExecutionMlflowTags:
 
         results = run_factorial_post_training(
             checkpoint_paths=[ckpt],
-            methods=["none", "swa"],
+            methods=["none", "checkpoint_averaging"],
             output_dir=output_dir,
         )
 
         for result in results:
             assert "post_training_method" in result
-            assert result["post_training_method"] in {"none", "swa"}
+            assert result["post_training_method"] in {"none", "checkpoint_averaging"}
 
 
 class TestFactorialExecutionCheckpointNaming:

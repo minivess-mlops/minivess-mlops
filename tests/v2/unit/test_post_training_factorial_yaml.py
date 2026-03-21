@@ -27,7 +27,7 @@ class TestFactorialYamlPostTrainingFactors:
         assert "recalibration" in post_training_names
 
     def test_debug_yaml_post_training_method_levels(self) -> None:
-        """Debug YAML must have {none, swa} as post_training method levels."""
+        """Debug YAML must have {none, checkpoint_averaging} as post_training method levels."""
         from minivess.config.factorial_config import parse_factorial_yaml
 
         yaml_path = Path("configs/factorial/debug.yaml")
@@ -36,8 +36,8 @@ class TestFactorialYamlPostTrainingFactors:
         assert "method" in levels, (
             f"'method' not in factor levels: {list(levels.keys())}"
         )
-        assert set(levels["method"]) == {"none", "swa"}, (
-            f"Expected {{none, swa}} for debug, got {levels['method']}"
+        assert set(levels["method"]) == {"none", "checkpoint_averaging"}, (
+            f"Expected {{none, checkpoint_averaging}} for debug, got {levels['method']}"
         )
 
     def test_debug_yaml_recalibration_levels(self) -> None:
@@ -58,8 +58,12 @@ class TestFactorialYamlPostTrainingFactors:
         design = parse_factorial_yaml(yaml_path)
         levels = design.factor_levels()
         assert "method" in levels
-        assert set(levels["method"]) == {"none", "swa", "multi_swa"}, (
-            f"Expected {{none, swa, multi_swa}} for production, got {levels['method']}"
+        assert set(levels["method"]) == {
+            "none",
+            "checkpoint_averaging",
+            "swag",
+        }, (
+            f"Expected {{none, checkpoint_averaging, swag}} for production, got {levels['method']}"
         )
 
     def test_factor_names_auto_derived_not_hardcoded(self) -> None:

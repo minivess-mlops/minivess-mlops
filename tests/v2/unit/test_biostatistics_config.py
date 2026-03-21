@@ -29,12 +29,12 @@ class TestBiostatisticsConfigDefaults:
         assert "cldice" in config.metrics
         assert config.primary_metric == "cldice"
 
-    def test_default_has_8_metrics(self) -> None:
-        """Default config has 8 metrics per plan."""
+    def test_default_has_14_metrics(self) -> None:
+        """Default config has 8 segmentation + 6 calibration = 14 metrics."""
         from minivess.config.biostatistics_config import BiostatisticsConfig
 
         config = BiostatisticsConfig()
-        assert len(config.metrics) == 8
+        assert len(config.metrics) == 14
 
 
 class TestBiostatisticsConfigCustom:
@@ -146,8 +146,8 @@ class TestBiostatisticsConfigYaml:
         assert config.primary_metric == "cldice"
         assert config.alpha == 0.05
 
-    def test_default_yaml_has_all_8_metrics(self) -> None:
-        """YAML config has all 8 default metrics."""
+    def test_default_yaml_has_all_14_metrics(self) -> None:
+        """YAML config has 8 segmentation + 6 calibration = 14 default metrics."""
         from pathlib import Path
 
         import yaml
@@ -158,9 +158,11 @@ class TestBiostatisticsConfigYaml:
         with yaml_path.open(encoding="utf-8") as f:
             data = yaml.safe_load(f)
         config = BiostatisticsConfig(**data)
-        assert len(config.metrics) == 8
+        assert len(config.metrics) == 14
         assert "cldice" in config.metrics
         assert "dsc" in config.metrics
+        assert "cal_ece" in config.metrics
+        assert "cal_ba_ece" in config.metrics
 
 
 class TestBiostatisticsConfigSerialization:

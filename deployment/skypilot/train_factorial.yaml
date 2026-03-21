@@ -34,7 +34,23 @@ resources:
   # Spot: 60-91% cheaper. SkyPilot handles preemption recovery.
   use_spot: true
   disk_size: 100
+  disk_tier: best  # SSD for faster checkpoint I/O
   # region removed — L4 not available in all regions. SkyPilot auto-selects.
+
+# Spot preemption recovery — SkyPilot controller reprovisiones in another zone.
+# FAILOVER: try other regions/clouds. Max 3 recovery attempts on errors.
+job_recovery:
+  strategy: FAILOVER
+  max_restarts_on_errors: 3
+
+# Checkpoint persistence via GCS bucket mount (#878).
+# MOUNT_CACHED: async upload (non-blocking writes). Previous checkpoint survives
+# preemption even if last write is interrupted. Our check_resume_state_task()
+# detects the latest valid checkpoint on recovery.
+file_mounts:
+  /app/checkpoints:
+    source: gs://minivess-mlops-checkpoints
+    mode: MOUNT_CACHED
 
 envs:
   # Per-condition parameters — set by run_factorial.sh
@@ -87,6 +103,11 @@ setup: |
 
   # Data: pull from GCS via DVC (GCP production path)
   # Auth: ADC (Application Default Credentials) — SkyPilot configures this automatically.
+  # DVC init required on fresh GCP VM — Docker container has no pre-configured remote.
+  echo "Initializing DVC for GCS data pull..."
+  dvc init --no-scm -f 2>/dev/null || true
+  dvc remote add -f gcs gs://minivess-mlops-dvc-data
+
   if [ -d "data/raw/minivess/imagesTr" ] && [ "$(ls data/raw/minivess/imagesTr 2>/dev/null | wc -l)" -gt 10 ]; then
     echo "Training data already present ($(ls data/raw/minivess/imagesTr | wc -l) files)"
   else
@@ -94,7 +115,6 @@ setup: |
     dvc pull -r gcs || {
       echo "FATAL: DVC pull from GCS failed."
       echo "Ensure: gcloud auth application-default login"
-      echo "And: dvc remote add gcs gs://minivess-mlops-dvc-data"
       exit 1
     }
   fi

@@ -158,7 +158,7 @@ class TestPostTrainingTagSchema:
 
         results = run_factorial_post_training(
             checkpoint_paths=[ckpt],
-            methods=["none", "swa"],
+            methods=["none", "checkpoint_averaging"],
             output_dir=output_dir,
         )
 
@@ -166,7 +166,7 @@ class TestPostTrainingTagSchema:
             assert "post_training_method" in result, (
                 f"Missing post_training_method tag in result: {result}"
             )
-            assert result["post_training_method"] in {"none", "swa"}
+            assert result["post_training_method"] in {"none", "checkpoint_averaging"}
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +209,7 @@ class TestFactorialPerMethodMlflowRuns:
 
         mlflow_dir = tmp_path / "mlruns"
         ckpt = _make_checkpoint(tmp_path)
-        methods = ["none", "swa"]
+        methods = ["none", "checkpoint_averaging"]
 
         results = run_factorial_post_training(
             checkpoint_paths=[ckpt],
@@ -251,7 +251,7 @@ class TestFactorialPerMethodMlflowRuns:
 
         run_factorial_post_training(
             checkpoint_paths=[ckpt],
-            methods=["none", "swa"],
+            methods=["none", "checkpoint_averaging"],
             output_dir=tmp_path / "output",
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
@@ -268,7 +268,7 @@ class TestFactorialPerMethodMlflowRuns:
         run_names = {r.info.run_name for r in runs}
 
         assert "dynunet__cbdice_cldice__fold0__none" in run_names
-        assert "dynunet__cbdice_cldice__fold0__swa" in run_names
+        assert "dynunet__cbdice_cldice__fold0__checkpoint_averaging" in run_names
 
     def test_inherits_upstream_tags(self, tmp_path) -> None:
         """Each per-method run must inherit model_family, loss_function,
@@ -282,7 +282,7 @@ class TestFactorialPerMethodMlflowRuns:
 
         run_factorial_post_training(
             checkpoint_paths=[ckpt],
-            methods=["swa"],
+            methods=["checkpoint_averaging"],
             output_dir=tmp_path / "output",
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
@@ -316,7 +316,7 @@ class TestFactorialPerMethodMlflowRuns:
 
         run_factorial_post_training(
             checkpoint_paths=[ckpt],
-            methods=["none", "swa"],
+            methods=["none", "checkpoint_averaging"],
             output_dir=tmp_path / "output",
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
@@ -332,7 +332,7 @@ class TestFactorialPerMethodMlflowRuns:
         )
 
         method_tags = {_get_run_tags(r)["post_training_method"] for r in runs}
-        assert method_tags == {"none", "swa"}
+        assert method_tags == {"none", "checkpoint_averaging"}
 
     def test_sets_flow_name_tag(self, tmp_path) -> None:
         """Each per-method run must have flow_name = 'post-training-flow'."""
@@ -345,7 +345,7 @@ class TestFactorialPerMethodMlflowRuns:
 
         run_factorial_post_training(
             checkpoint_paths=[ckpt],
-            methods=["swa"],
+            methods=["checkpoint_averaging"],
             output_dir=tmp_path / "output",
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
@@ -401,7 +401,7 @@ class TestFactorialPerMethodMlflowRuns:
 
         results = run_factorial_post_training(
             checkpoint_paths=[ckpt],
-            methods=["none", "swa"],
+            methods=["none", "checkpoint_averaging"],
             output_dir=tmp_path / "output",
         )
 
@@ -440,7 +440,7 @@ class TestFactorialPerMethodMlflowRuns:
         assert metrics["checkpoint_size_mb"] >= 0
 
     def test_three_methods_create_three_runs(self, tmp_path) -> None:
-        """multi_swa method should also create its own MLflow run."""
+        """subsampled_ensemble method should also create its own MLflow run."""
         from minivess.orchestration.flows.post_training_flow import (
             run_factorial_post_training,
         )
@@ -451,7 +451,7 @@ class TestFactorialPerMethodMlflowRuns:
 
         results = run_factorial_post_training(
             checkpoint_paths=[ckpt1, ckpt2],
-            methods=["none", "swa", "multi_swa"],
+            methods=["none", "checkpoint_averaging", "subsampled_ensemble"],
             output_dir=tmp_path / "output",
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",

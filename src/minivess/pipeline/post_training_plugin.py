@@ -1,6 +1,6 @@
 """Post-training plugin protocol and dataclasses.
 
-Defines the contract for post-hoc processing plugins (SWA, merging,
+Defines the contract for post-hoc processing plugins (checkpoint averaging, merging,
 calibration, conformal) and a registry for name-based lookup.
 """
 
@@ -59,7 +59,7 @@ class PluginOutput:
 class PostTrainingPlugin(Protocol):
     """Protocol for post-training plugins.
 
-    Each plugin wraps a post-hoc method (SWA, merging, calibration, etc.)
+    Each plugin wraps a post-hoc method (checkpoint averaging, merging, calibration, etc.)
     and integrates with the post-training Prefect flow via a uniform interface.
     """
 

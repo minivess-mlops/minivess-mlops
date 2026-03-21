@@ -599,15 +599,21 @@ def _resolve_factor_names(config: BiostatisticsConfig) -> list[str]:
     """
     if config.factorial_yaml is not None:
         try:
-            from minivess.config.factorial_config import parse_factorial_yaml
+            from minivess.config.factorial_config import (
+                FACTOR_NAME_MAPPING,
+                parse_factorial_yaml,
+            )
 
             design = parse_factorial_yaml(config.factorial_yaml)
-            names = design.factor_names()
+            raw_names = design.factor_names()
+            # Map YAML factor names → MLflow tag names used in condition keys
+            names = [FACTOR_NAME_MAPPING.get(n, n) for n in raw_names]
             logger.info(
-                "Auto-derived %d factor names from %s: %s",
+                "Auto-derived %d factor names from %s: %s (mapped from %s)",
                 len(names),
                 config.factorial_yaml,
                 names,
+                raw_names,
             )
             return names
         except Exception:

@@ -17,18 +17,25 @@ from minivess.adapters.sam3_topolora import LoRALinear, _apply_lora_to_encoder
 class TestApplyLoraToEncoder:
     """_apply_lora_to_encoder must only target nn.Linear layers."""
 
-    def test_lora_only_targets_linear(self) -> None:
-        """LoRA must NOT wrap Conv2d layers (Glitch #9)."""
+    def test_lora_only_targets_ffn_linear(self) -> None:
+        """LoRA targets FFN Linear layers only, not Conv2d or attention (paper fidelity)."""
 
         class MockEncoder(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.linear = nn.Linear(64, 64)
-                self.conv = nn.Conv2d(64, 64, 3)
+                self.mlp = nn.Module()
+                self.mlp.lin1 = nn.Linear(64, 256)  # FFN — should get LoRA
+                self.mlp.lin2 = nn.Linear(256, 64)  # FFN — should get LoRA
+                self.attn_qkv = nn.Linear(64, 192)  # attention — should NOT
+                self.conv = nn.Conv2d(64, 64, 3)  # Conv2d — should NOT
 
         encoder = MockEncoder()
         targets = _apply_lora_to_encoder(encoder, rank=8, alpha=16.0, dropout=0.0)
-        assert "linear" in targets, f"Expected 'linear' in targets, got {targets}"
+        assert "mlp.lin1" in targets, f"Expected 'mlp.lin1' in targets, got {targets}"
+        assert "mlp.lin2" in targets, f"Expected 'mlp.lin2' in targets, got {targets}"
+        assert "attn_qkv" not in targets, (
+            f"Attention should NOT be targeted, got {targets}"
+        )
         assert "conv" not in targets, f"Conv2d should NOT be targeted, got {targets}"
 
     def test_lora_skips_small_linear_layers(self) -> None:
@@ -37,13 +44,14 @@ class TestApplyLoraToEncoder:
         class TinyEncoder(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.tiny = nn.Linear(4, 4)
-                self.big = nn.Linear(64, 64)
+                self.mlp = nn.Module()
+                self.mlp.lin1 = nn.Linear(4, 4)  # too small (4 < rank=8)
+                self.mlp.lin2 = nn.Linear(64, 64)  # big enough
 
         encoder = TinyEncoder()
         targets = _apply_lora_to_encoder(encoder, rank=8, alpha=16.0, dropout=0.0)
-        assert "tiny" not in targets, "Tiny layer should be skipped"
-        assert "big" in targets, "Big layer should be targeted"
+        assert "mlp.lin1" not in targets, "Tiny layer (4 < rank=8) should be skipped"
+        assert "mlp.lin2" in targets, "Big enough layer should be targeted"
 
     def test_lora_replaces_with_lora_linear(self) -> None:
         """Targeted modules are replaced with LoRALinear instances."""
@@ -51,33 +59,34 @@ class TestApplyLoraToEncoder:
         class SimpleEncoder(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.fc = nn.Linear(64, 32)
+                self.mlp = nn.Module()
+                self.mlp.fc1 = nn.Linear(64, 32)
 
         encoder = SimpleEncoder()
         _apply_lora_to_encoder(encoder, rank=8, alpha=16.0, dropout=0.0)
-        assert isinstance(encoder.fc, LoRALinear), (
-            f"Expected LoRALinear, got {type(encoder.fc).__name__}"
+        assert isinstance(encoder.mlp.fc1, LoRALinear), (
+            f"Expected LoRALinear, got {type(encoder.mlp.fc1).__name__}"
         )
 
     def test_nested_modules_targeted(self) -> None:
-        """LoRA finds Linear layers inside nested Sequential blocks."""
+        """LoRA finds FFN Linear layers inside nested modules."""
 
         class NestedEncoder(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.block = nn.Sequential(
+                self.mlp = nn.Sequential(
                     nn.Linear(64, 64),
                     nn.ReLU(),
                     nn.Linear(64, 32),
                 )
+                self.attn = nn.Linear(64, 64)  # attention — should NOT
                 self.conv = nn.Conv2d(64, 64, 3)
 
         encoder = NestedEncoder()
         targets = _apply_lora_to_encoder(encoder, rank=8, alpha=16.0, dropout=0.0)
-        # Should find the two Linear layers inside block
+        # Should find the two Linear layers inside mlp (FFN keyword match)
         assert len(targets) == 2, f"Expected 2 targets, got {len(targets)}: {targets}"
-        # Conv2d should NOT be targeted
-        assert all("conv" not in t for t in targets), f"Conv2d targeted: {targets}"
+        assert all("mlp" in t for t in targets), f"Non-mlp targeted: {targets}"
 
 
 @pytest.mark.model_construction

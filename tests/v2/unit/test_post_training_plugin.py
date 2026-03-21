@@ -87,7 +87,7 @@ class TestPluginDataclasses:
         po = PluginOutput(
             artifacts={"heatmap": "/tmp/heat.png"},
             metrics={"ece": 0.05},
-            model_paths=[Path("/tmp/swa.pt")],
+            model_paths=[Path("/tmp/averaged.pt")],
         )
         assert po.artifacts["heatmap"] == "/tmp/heat.png"
         assert po.metrics["ece"] == pytest.approx(0.05)

@@ -1,8 +1,9 @@
 """Post-training flow configuration for plugin-based post-hoc methods.
 
 Defines the configuration schema for Flow 2.5 (Post-Training), including
-SWA, Multi-SWA, model merging, calibration, CRC conformal, and ConSeCo
-FP control plugins. Each plugin has an independent ``enabled`` toggle.
+checkpoint averaging, subsampled ensemble, SWAG, model merging, calibration,
+CRC conformal, and ConSeCo FP control plugins. Each plugin has an
+independent ``enabled`` toggle.
 """
 
 from __future__ import annotations
@@ -13,8 +14,10 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 # Valid factorial post-training methods
-FactorialMethod = Literal["none", "swa", "multi_swa"]
-VALID_FACTORIAL_METHODS: frozenset[str] = frozenset({"none", "swa", "multi_swa"})
+FactorialMethod = Literal["none", "checkpoint_averaging", "subsampled_ensemble", "swag"]
+VALID_FACTORIAL_METHODS: frozenset[str] = frozenset(
+    {"none", "checkpoint_averaging", "subsampled_ensemble", "swag"}
+)
 
 
 def factorial_checkpoint_name(run_id: str, method: str) -> str:
@@ -25,7 +28,7 @@ def factorial_checkpoint_name(run_id: str, method: str) -> str:
     run_id:
         MLflow run ID or checkpoint identifier.
     method:
-        Post-training method name (none, swa, multi_swa).
+        Post-training method name (none, checkpoint_averaging, subsampled_ensemble).
 
     Returns
     -------
@@ -57,46 +60,84 @@ class ShrinkMethod(StrEnum):
     EROSION = "erosion"
 
 
-class SWAPluginConfig(BaseModel):
-    """Configuration for the SWA plugin."""
+class CheckpointAveragingPluginConfig(BaseModel):
+    """Configuration for the checkpoint averaging plugin."""
 
-    enabled: bool = Field(default=True, description="Enable SWA weight averaging")
+    enabled: bool = Field(default=True, description="Enable checkpoint averaging")
     per_loss: bool = Field(
         default=True,
-        description="Produce one SWA model per loss type",
+        description="Produce one checkpoint-averaged model per loss type",
     )
     cross_loss: bool = Field(
         default=False,
-        description="Produce one SWA model across all losses",
+        description="Produce one checkpoint-averaged model across all losses",
     )
 
 
-class MultiSWAPluginConfig(BaseModel):
-    """Configuration for the Multi-SWA plugin.
+class SubsampledEnsemblePluginConfig(BaseModel):
+    """Configuration for the subsampled ensemble plugin.
 
-    Multi-SWA produces M independent SWA models by subsampling checkpoints.
-    This is purely post-hoc — no training-time modifications needed.
+    Subsampled ensemble produces M independent checkpoint-averaged models
+    by subsampling checkpoints. This is purely post-hoc — no training-time
+    modifications needed.
     NOT Multi-SWAG (which requires training-time second-moment collection).
     """
 
     enabled: bool = Field(
         default=False,
-        description="Enable Multi-SWA ensemble",
+        description="Enable subsampled ensemble",
     )
     n_models: int = Field(
         default=3,
         ge=2,
-        description="Number of independent SWA models to produce",
+        description="Number of independent checkpoint-averaged models to produce",
     )
     subsample_fraction: float = Field(
         default=0.7,
         gt=0.0,
         le=1.0,
-        description="Fraction of checkpoints to include in each SWA model",
+        description="Fraction of checkpoints to include in each averaged model",
     )
     seed: int = Field(
         default=42,
         description="Random seed for reproducible subsampling",
+    )
+
+
+class SWAGPluginConfig(BaseModel):
+    """Configuration for the SWAG plugin (Maddox et al. 2019).
+
+    SWAG approximates the posterior over weights using a low-rank-plus-diagonal
+    Gaussian. Requires resumed training to collect first and second moments.
+
+    Reference: Maddox et al. (2019), "A Simple Baseline for Bayesian Inference
+    in Deep Learning" (https://arxiv.org/abs/1902.02476)
+    """
+
+    enabled: bool = Field(default=False, description="Enable SWAG post-training")
+    swa_lr: float = Field(
+        default=0.01,
+        gt=0.0,
+        description="Learning rate for SWA phase (constant or cyclic max)",
+    )
+    swa_epochs: int = Field(
+        default=10,
+        ge=1,
+        description="Number of additional training epochs for SWAG collection",
+    )
+    max_rank: int = Field(
+        default=20,
+        ge=1,
+        description="Low-rank covariance approximation rank (K in SWAG paper)",
+    )
+    n_samples: int = Field(
+        default=30,
+        ge=1,
+        description="Number of posterior samples at inference time",
+    )
+    update_bn: bool = Field(
+        default=True,
+        description="Recalibrate BatchNorm stats after weight sampling",
     )
 
 
@@ -211,7 +252,7 @@ class PostTrainingConfig(BaseModel):
         default_factory=list,
         description=(
             "Post-training methods to apply in factorial design. "
-            "Valid values: none, swa, multi_swa. "
+            "Valid values: none, checkpoint_averaging, subsampled_ensemble. "
             "Empty list = use plugin-by-plugin config (backward compatible)."
         ),
     )
@@ -232,13 +273,17 @@ class PostTrainingConfig(BaseModel):
                 raise ValueError(msg)
         return v
 
-    swa: SWAPluginConfig = Field(
-        default_factory=SWAPluginConfig,
-        description="SWA weight averaging plugin config",
+    checkpoint_averaging: CheckpointAveragingPluginConfig = Field(
+        default_factory=CheckpointAveragingPluginConfig,
+        description="Checkpoint averaging plugin config",
     )
-    multi_swa: MultiSWAPluginConfig = Field(
-        default_factory=MultiSWAPluginConfig,
-        description="Multi-SWA ensemble plugin config",
+    subsampled_ensemble: SubsampledEnsemblePluginConfig = Field(
+        default_factory=SubsampledEnsemblePluginConfig,
+        description="Subsampled ensemble plugin config",
+    )
+    swag: SWAGPluginConfig = Field(
+        default_factory=SWAGPluginConfig,
+        description="SWAG posterior approximation plugin config (Maddox et al. 2019)",
     )
     model_merging: ModelMergingPluginConfig = Field(
         default_factory=ModelMergingPluginConfig,
@@ -260,8 +305,9 @@ class PostTrainingConfig(BaseModel):
     def enabled_plugin_names(self) -> list[str]:
         """Return names of all enabled plugins."""
         plugins = {
-            "swa": self.swa.enabled,
-            "multi_swa": self.multi_swa.enabled,
+            "checkpoint_averaging": self.checkpoint_averaging.enabled,
+            "subsampled_ensemble": self.subsampled_ensemble.enabled,
+            "swag": self.swag.enabled,
             "model_merging": self.model_merging.enabled,
             "calibration": self.calibration.enabled,
             "crc_conformal": self.crc_conformal.enabled,

@@ -1,8 +1,11 @@
-# Cold-Start Prompt: Branch Split + Local 3-Flow Debug Execution
+# Cold-Start Prompt: Local 3-Flow Debug Execution
 
 **Date**: 2026-03-21
-**Current branch**: `test/debug-factorial-run` (39 commits ahead of `main`)
-**Session goal**: Split into PRs, merge to main, then run local 3-flow debug
+**Current branch**: `test/local-debug-3flow-execution` (fresh from `main`)
+**Session goal**: Run local 3-flow debug (Post-Training → Analysis → Biostatistics)
+
+**STATUS**: Branch split DONE (PR #890 code + PR #891 docs merged to main).
+All stale branches deleted. 5909 prod tests pass. Clean state.
 
 ---
 
@@ -15,46 +18,7 @@ claude -p "Read and execute the plan at:
 
 ---
 
-## Part 1: Branch Split into Semantic PRs
-
-The `test/debug-factorial-run` branch has 39 commits that need splitting into
-coherent PRs targeting `main`. Suggested PR structure:
-
-### PR 1: RAM crash fix + memory safety
-Commits: 2bdb8a4 (RAM crash fix, MemoryMonitor, memory cap, missing mocks)
-Files: conftest.py, biostatistics_flow.py, memory_monitor.py, metalearning
-
-### PR 2: Per-method MLflow runs + EnsembleBuilder (#885, #889)
-Commits: 69c29f4, 341cc57
-Files: post_training_flow.py, builder.py, analysis_flow.py, test_post_training_mlflow.py
-
-### PR 3: Zero-shot, UQ, storage policy, CTK (#888, #886, #887, #884)
-Commits: 31d5640, aea2475
-Files: analysis_flow.py (zero-shot + UQ), storage_policy.py, test_nvidia_ctk_version.py
-
-### PR 4: Biostatistics 6-factor pipeline (Phases 0-3)
-Commits: f1cfdf8, de2226c
-Files: biostatistics_types.py, biostatistics_duckdb.py, biostatistics_discovery.py,
-       biostatistics_flow.py, factorial_config.py, swa.py
-
-### PR 5: Infrastructure fixes + docs
-Commits: 41a0b6a, 8b592cf, acc3180, 6d34982, a11d630, (earlier doc commits)
-Files: .env.example, CLAUDE.md, metalearning/, docs/planning/, README.md,
-       .duckdb-skills/, configs/factorial/smoke_local.yaml
-
-### Execution Steps:
-1. For each PR: create feature branch from main, cherry-pick commits, push, create PR
-2. After ALL PRs created: merge them to main in order (PR1 first)
-3. Before the LAST PR merge: run `make test-prod` (full production suite)
-4. Fix any emerging issues with proper triage (gather all, categorize, batch fix)
-5. After all merged: `git remote prune origin`, delete stale local branches
-6. Create fresh branch: `git checkout -b test/local-debug-3flow-execution main`
-
----
-
-## Part 2: Local 3-Flow Debug Execution
-
-After branch split and merge to main, execute the local debug plan:
+## Part 1: Local 3-Flow Debug Execution (READY)
 
 ### Plan file:
 `docs/planning/local-debug-3flow-execution-plan.xml`
