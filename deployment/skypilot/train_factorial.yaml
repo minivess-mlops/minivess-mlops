@@ -34,15 +34,23 @@ resources:
   # Spot: 60-91% cheaper. SkyPilot handles preemption recovery.
   use_spot: true
   disk_size: 100
+  disk_tier: best  # SSD for faster checkpoint I/O
   # region removed — L4 not available in all regions. SkyPilot auto-selects.
 
+# Spot preemption recovery — SkyPilot controller reprovisiones in another zone.
+# FAILOVER: try other regions/clouds. Max 3 recovery attempts on errors.
+job_recovery:
+  strategy: FAILOVER
+  max_restarts_on_errors: 3
+
 # Checkpoint persistence via GCS bucket mount (#878).
-# Checkpoints written to /app/checkpoints are synced to GCS automatically.
-# The bucket must exist (created by Pulumi).
+# MOUNT_CACHED: async upload (non-blocking writes). Previous checkpoint survives
+# preemption even if last write is interrupted. Our check_resume_state_task()
+# detects the latest valid checkpoint on recovery.
 file_mounts:
   /app/checkpoints:
     source: gs://minivess-mlops-checkpoints
-    mode: MOUNT
+    mode: MOUNT_CACHED
 
 envs:
   # Per-condition parameters — set by run_factorial.sh
