@@ -12,7 +12,7 @@ from pathlib import (
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-# Default 8 metrics per CLAUDE.md and biostatistics plan
+# Default 8 segmentation + 6 calibration metrics per CLAUDE.md and biostatistics plan
 _DEFAULT_METRICS: list[str] = [
     "dsc",
     "hd95",
@@ -22,14 +22,26 @@ _DEFAULT_METRICS: list[str] = [
     "be_0",
     "be_1",
     "junction_f1",
+    # Calibration metrics (Phase B3)
+    "cal_ece",
+    "cal_mce",
+    "cal_brier",
+    "cal_nll",
+    "cal_ace",
+    "cal_ba_ece",
 ]
 
 # ROPE values per reviewer findings: DSC ±0.01, clDice ±0.01, HD95 ±0.5, NSD ±0.01
+# Calibration ROPE: ECE ±0.02, Brier ±0.01, BA-ECE ±0.02
 _DEFAULT_ROPE_VALUES: dict[str, float] = {
     "dsc": 0.01,
     "cldice": 0.01,
     "hd95": 0.5,
     "nsd": 0.01,
+    # Calibration metrics ROPE (Phase B3)
+    "cal_ece": 0.02,
+    "cal_brier": 0.01,
+    "cal_ba_ece": 0.02,
 }
 
 
@@ -95,6 +107,14 @@ class BiostatisticsConfig(BaseModel):
         description=(
             "FOIL metrics included to demonstrate misleading rankings for tubular "
             "structures. Get BH-FDR correction (secondary tier)."
+        ),
+    )
+    calibration_co_primary_metrics: list[str] = Field(
+        default_factory=lambda: ["cal_ece", "cal_ba_ece"],
+        description=(
+            "Co-primary calibration metrics for the factorial ANOVA. "
+            "ECE (global) + BA-ECE (spatial/boundary). "
+            "Both get Holm-Bonferroni correction alongside segmentation co-primaries."
         ),
     )
 

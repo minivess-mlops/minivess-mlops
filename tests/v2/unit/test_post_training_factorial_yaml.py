@@ -61,9 +61,9 @@ class TestFactorialYamlPostTrainingFactors:
         assert set(levels["method"]) == {
             "none",
             "checkpoint_averaging",
-            "subsampled_ensemble",
+            "swag",
         }, (
-            f"Expected {{none, checkpoint_averaging, subsampled_ensemble}} for production, got {levels['method']}"
+            f"Expected {{none, checkpoint_averaging, swag}} for production, got {levels['method']}"
         )
 
     def test_factor_names_auto_derived_not_hardcoded(self) -> None:

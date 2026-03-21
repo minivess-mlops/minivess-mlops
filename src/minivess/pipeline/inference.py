@@ -104,6 +104,60 @@ class SlidingWindowInferenceRunner:
         pred = logits.argmax(dim=1).squeeze(0).cpu().numpy().astype(np.int64)
         return pred
 
+    def predict_volume_with_probabilities(
+        self,
+        model: torch.nn.Module,
+        image: torch.Tensor,
+        *,
+        device: str | torch.device = "cpu",
+    ) -> tuple[NDArray[np.integer], NDArray[np.floating]]:
+        """Run inference and return both hard predictions and soft probabilities.
+
+        Parameters
+        ----------
+        model:
+            Trained segmentation model.
+        image:
+            Input tensor of shape ``(1, C, D, H, W)``.
+        device:
+            Device to run inference on.
+
+        Returns
+        -------
+        tuple
+            ``(hard_pred, soft_prob)`` — hard_pred is integer ``(D, H, W)``,
+            soft_prob is float ``(D, H, W)`` with foreground class probability.
+        """
+        device = torch.device(device)
+        model.eval()
+        model.to(device)
+        image = image.to(device)
+
+        def _forward(x: torch.Tensor) -> torch.Tensor:
+            with torch.no_grad():
+                output = model(x)
+            if isinstance(output, SegmentationOutput):
+                return output.logits
+            return output  # type: ignore[no-any-return]
+
+        with torch.no_grad():
+            logits = sliding_window_inference(
+                inputs=image,
+                roi_size=self.roi_size,
+                sw_batch_size=self.sw_batch_size,
+                predictor=_forward,
+                overlap=self.overlap,
+                mode=self.mode,
+            )
+
+        assert isinstance(logits, torch.Tensor)
+        # Hard predictions: argmax
+        hard_pred = logits.argmax(dim=1).squeeze(0).cpu().numpy().astype(np.int64)
+        # Soft predictions: softmax → foreground class probability (class 1)
+        probs = torch.softmax(logits, dim=1)
+        soft_prob = probs[0, 1].cpu().numpy().astype(np.float64)
+        return hard_pred, soft_prob
+
     def infer_dataset(
         self,
         model: torch.nn.Module,
@@ -155,3 +209,62 @@ class SlidingWindowInferenceRunner:
             )
 
         return predictions, labels
+
+    def infer_dataset_with_probabilities(
+        self,
+        model: torch.nn.Module,
+        loader: Any,
+        *,
+        device: str | torch.device = "cpu",
+    ) -> tuple[
+        list[NDArray[np.integer]],
+        list[NDArray[np.integer]],
+        list[NDArray[np.floating]],
+    ]:
+        """Run inference on all volumes, returning hard preds, labels, AND probabilities.
+
+        Parameters
+        ----------
+        model:
+            Trained segmentation model.
+        loader:
+            Validation DataLoader yielding batches with ``"image"``
+            and ``"label"`` keys.
+        device:
+            Device to run inference on.
+
+        Returns
+        -------
+        tuple
+            ``(predictions, labels, probabilities)`` — parallel lists of numpy
+            arrays. predictions and labels are integer ``(D, H, W)``,
+            probabilities are float ``(D, H, W)`` with foreground class probability.
+        """
+        predictions: list[NDArray[np.integer]] = []
+        labels: list[NDArray[np.integer]] = []
+        probabilities: list[NDArray[np.floating]] = []
+
+        for batch in loader:
+            image = batch["image"]
+            label = batch["label"]
+
+            if image.ndim == 4:
+                image = image.unsqueeze(0)
+
+            hard_pred, soft_prob = self.predict_volume_with_probabilities(
+                model, image, device=device
+            )
+            predictions.append(hard_pred)
+            probabilities.append(soft_prob)
+
+            label_np = label.squeeze().cpu().numpy().astype(np.int64)
+            labels.append(label_np)
+
+            logger.debug(
+                "Inferred volume: pred shape=%s, prob shape=%s, label shape=%s",
+                hard_pred.shape,
+                soft_prob.shape,
+                label_np.shape,
+            )
+
+        return predictions, labels, probabilities

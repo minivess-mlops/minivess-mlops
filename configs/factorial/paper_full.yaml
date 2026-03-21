@@ -43,7 +43,7 @@ factors:
     method:
       - none
       - checkpoint_averaging
-      - subsampled_ensemble
+      - swag
     recalibration:
       - none
       - temperature_scaling

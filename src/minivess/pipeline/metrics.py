@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -8,6 +9,8 @@ from torch import Tensor
 from torchmetrics import MetricCollection
 from torchmetrics.classification import BinaryF1Score
 from torchmetrics.segmentation import DiceScore
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -24,7 +27,8 @@ class SegmentationMetrics:
     """GPU-accelerated segmentation metrics using TorchMetrics.
 
     Tracks Dice score and F1 score (for binary segmentation).
-    Additional metrics (clDice, NSD) can be added as custom TorchMetrics.
+    Additionally accumulates foreground probabilities for Tier 1 calibration
+    metrics (ECE, Brier, NLL, etc.) when soft predictions are provided.
     """
 
     def __init__(
@@ -52,6 +56,11 @@ class SegmentationMetrics:
 
         self.metrics = MetricCollection(metrics).to(self.device)
 
+        # Calibration accumulators — probabilities + labels for Tier 1 metrics.
+        # Only populated when soft predictions (B, C, D, H, W) are provided.
+        self._cal_probs: list[Tensor] = []
+        self._cal_labels: list[Tensor] = []
+
     def update(self, prediction: Tensor, target: Tensor) -> None:
         """Update metrics with a batch of predictions and targets.
 
@@ -63,18 +72,27 @@ class SegmentationMetrics:
         target:
             ``(B, D, H, W)`` integer class labels or ``(B, 1, D, H, W)``.
         """
-        # Convert probabilities to class indices if needed
-        if prediction.ndim == 5 and prediction.shape[1] > 1:
-            pred_indices = prediction.argmax(dim=1)
-        elif prediction.ndim == 5 and prediction.shape[1] == 1:
-            pred_indices = (prediction.squeeze(1) > 0.5).long()
-        else:
-            pred_indices = prediction
-
         # Squeeze channel dim from target if present
         if target.ndim == 5:
             target = target.squeeze(1)
         target = target.long()
+
+        # Extract foreground probabilities BEFORE argmax (for calibration)
+        if prediction.ndim == 5 and prediction.shape[1] > 1:
+            # (B, C, D, H, W) with C >= 2: foreground = channel 1
+            fg_probs = prediction[:, 1, ...].detach().cpu()
+            self._cal_probs.append(fg_probs)
+            self._cal_labels.append(target.detach().cpu())
+            pred_indices = prediction.argmax(dim=1)
+        elif prediction.ndim == 5 and prediction.shape[1] == 1:
+            # (B, 1, D, H, W): single-channel sigmoid output
+            fg_probs = prediction.squeeze(1).detach().cpu()
+            self._cal_probs.append(fg_probs)
+            self._cal_labels.append(target.detach().cpu())
+            pred_indices = (prediction.squeeze(1) > 0.5).long()
+        else:
+            # (B, D, H, W) hard indices — no probabilities available
+            pred_indices = prediction
 
         pred_indices = pred_indices.to(self.device)
         target = target.to(self.device)
@@ -89,13 +107,34 @@ class SegmentationMetrics:
             self.metrics["f1_foreground"].update(fg_pred, fg_target)
 
     def compute(self) -> MetricResult:
-        """Compute aggregated metrics."""
+        """Compute aggregated metrics including Tier 1 calibration metrics."""
         computed = self.metrics.compute()
-        values = {
+        values: dict[str, float] = {
             k: v.item() if isinstance(v, Tensor) else v for k, v in computed.items()
         }
+
+        # Tier 1 calibration metrics from accumulated probabilities
+        if self._cal_probs:
+            try:
+                from minivess.pipeline.calibration_metrics import (
+                    compute_all_calibration_metrics,
+                )
+
+                all_probs = torch.cat(self._cal_probs).numpy().ravel()
+                all_labels = torch.cat(self._cal_labels).numpy().ravel()
+
+                cal_metrics = compute_all_calibration_metrics(
+                    all_probs, all_labels, tier="fast"
+                )
+                for name, val in cal_metrics.items():
+                    values[f"val_{name}"] = val
+            except Exception:
+                logger.warning("Failed to compute calibration metrics", exc_info=True)
+
         return MetricResult(values=values)
 
     def reset(self) -> None:
         """Reset all metrics for next epoch."""
         self.metrics.reset()
+        self._cal_probs.clear()
+        self._cal_labels.clear()

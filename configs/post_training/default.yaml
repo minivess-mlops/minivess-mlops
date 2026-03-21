@@ -46,6 +46,12 @@ conseco_fp_control:
   tolerance: 0.05
   shrink_method: erosion
 
-# NOT SUPPORTED (requires training-time changes):
-# swag: { reason: "Requires second-moment collection during training" }
-# multi_swag: { reason: "Requires M independent SWAG training runs" }
+# --- SWAG (requires resumed training with DataLoaders) ---
+
+swag:
+  enabled: false
+  swa_lr: 0.01
+  swa_epochs: 10
+  max_rank: 20
+  n_samples: 30
+  update_bn: true
