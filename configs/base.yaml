@@ -14,6 +14,7 @@ defaults:
   - model: dynunet
   - training: default
   - checkpoint: standard
+  - post_training: none
   - profiling: default
   - cloud: local
   - registry: ghcr

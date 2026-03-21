@@ -1,0 +1,3 @@
+# No post-training method (identity — training result is final).
+# Used as the factorial "none" condition.
+method: none
