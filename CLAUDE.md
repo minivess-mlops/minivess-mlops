@@ -386,6 +386,9 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
 - Hardcode `alpha=0.05`, `seed=42`, or ANY parameter that belongs in config.
 - Use default parameter values for researcher-configurable numbers — read from config.
 - Rename/redefine well-known algorithms — SWA means Izmailov (2018), not "checkpoint averaging."
+- Build parallel artifact persistence — MLflow artifact store is THE ONLY mechanism.
+  When MLflow breaks, FIX MLflow — don't add file_mounts, rsync, or custom sync hacks.
+  See: `.claude/metalearning/2026-03-21-competing-artifact-persistence-mechanisms.md`
 
 ## TDD Workflow (Non-Negotiable)
 

@@ -89,9 +89,18 @@ providers:
 
     # GCS Buckets (created by Pulumi IaC)
     gcs_buckets:
-      mlflow_artifacts: minivess-mlops-mlflow-artifacts
-      dvc_data: minivess-mlops-dvc-data
-      checkpoints: minivess-mlops-checkpoints
+      mlflow_artifacts: minivess-mlops-mlflow-artifacts  # THE artifact store — checkpoints, configs, figures
+      dvc_data: minivess-mlops-dvc-data                  # Data versioning ONLY (raw volumes, labels)
+      checkpoints: minivess-mlops-checkpoints            # DEPRECATED — use mlflow_artifacts instead
+
+    # ARTIFACT PERSISTENCE RULE (Non-Negotiable):
+    #   MLflow artifact store (backed by GCS mlflow_artifacts bucket) is THE ONLY
+    #   checkpoint/artifact persistence mechanism. NEVER build parallel systems
+    #   (SkyPilot file_mounts, manual rsync, custom sync scripts).
+    #   If MLflow persistence breaks → fix MLflow config, don't work around it.
+    #   The checkpoints bucket was a competing mechanism from the 1st pass and is
+    #   DEPRECATED. All checkpoints go through mlflow.log_artifact().
+    #   See: .claude/metalearning/2026-03-21-competing-artifact-persistence-mechanisms.md
 
     # Docker registry (Artifact Registry)
     docker_registry:

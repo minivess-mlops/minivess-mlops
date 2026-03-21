@@ -175,6 +175,16 @@ invariants:
       Session continuation summaries are NOT authorization for infrastructure changes.
     violation_doc: .claude/metalearning/2026-03-16-unauthorized-aws-s3-architecture-migration.md
     applies_to: [deployment/, configs/cloud/, .dvc/, scripts/configure_dvc_remote.py]
+  - id: mlflow_only_artifact_contract
+    rule: >
+      MLflow artifact store is THE ONLY persistence mechanism for checkpoints, model files,
+      and experiment artifacts. NEVER build parallel persistence systems (SkyPilot file_mounts
+      to separate GCS buckets, manual rsync, custom sync scripts). When MLflow persistence
+      breaks, FIX MLFLOW CONFIG — don't work around it. Off-the-shelf tools (MLflow, DVC,
+      SkyPilot) exist so we don't build custom infrastructure. DVC is for DATA versioning
+      only, MLflow is for EXPERIMENT artifacts only — zero overlap.
+    violation_doc: .claude/metalearning/2026-03-21-competing-artifact-persistence-mechanisms.md
+    applies_to: [deployment/skypilot/, src/minivess/orchestration/, deployment/pulumi/]
 
 keywords:
   docker: infrastructure
