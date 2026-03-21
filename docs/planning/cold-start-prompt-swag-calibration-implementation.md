@@ -15,7 +15,14 @@ claude -p "Read and execute the plan at:
 
 ---
 
-## STATUS: Ready for Phase A0 Execution
+## STATUS: Phases A0-A1 ALREADY DONE — Start at Phase A2
+
+**Discovery**: A prior session on this branch already implemented:
+- Phase A0: SWA → checkpoint averaging rename (all ~18 files)
+- Phase A1: SWAG plugin (swag.py + swag plugin + config + registration)
+Pre-commit hooks caught lint/mypy issues in the SWAG code — fixed and pushed.
+
+**Start execution at Phase A2 (SWAG tests) then Phase B0 (calibration metrics).**
 
 Previous session completed:
 - 2nd pass local 3-flow debug (7 bugs found/fixed, all flows passed)
