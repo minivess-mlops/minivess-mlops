@@ -1,17 +1,20 @@
-"""Sam3TopoLoraAdapter — SAM3 + LoRA on FFN + topology-aware loss.
+"""Sam3TopoLoraAdapter — SAM3 + LoRA on FFN + Spatial Adapter + topology-aware loss.
 
-V2 of the SAM3 variants. Tests whether topology-aware loss (cbdice_cldice)
-combined with LoRA fine-tuning improves SAM3 on microvessel segmentation.
+Adapts the TopoLoRA-SAM architecture (Khazem et al., 2025, arXiv:2601.02273)
+to SAM3 ViT-32L. Architecture matches the paper:
 
-Architecture:
-    - SAM3 ViT-32L encoder with LoRA adapters on FFN (mlp.lin1, mlp.lin2)
-    - Trainable mask decoder
-    - LoRA: low-rank adaptation (r=16, alpha=32 default)
-    - Loss: cbdice_cldice (topology-aware)
+    1. Frozen SAM3 ViT-32L encoder
+    2. Trainable LoRA on FFN layers ONLY (mlp/lin1/lin2) — NOT attention Q/K/V
+    3. Trainable Spatial Adapter: Conv_DW(3x3) + Conv(1x1) + BN + GELU + residual
+    4. Trainable mask decoder
+    5. Loss: config-driven (factorial design varies loss as experimental factor)
 
-Based on: TopoLoRA-SAM (Khazem, 2026, arXiv:2601.02273)
-Expected: +10-20% clDice over V1 (vanilla)
-Go/No-Go Gate G2: clDice improvement >= 2% over V1.
+Our adaptation: SAM3 ViT-32L (648M) instead of SAM1 ViT-B (93.7M).
+Spatial Adapter operates on post-FPN 256-ch features (paper: raw ViT output).
+
+References:
+    Paper: https://arxiv.org/html/2601.02273v1
+    Code: https://github.com/salimkhazem/Seglab
 """
 
 from __future__ import annotations
@@ -110,41 +113,120 @@ class LoRALinear(nn.Module):
         return result
 
 
+# Default LoRA target keywords — paper targets FFN layers ONLY.
+# SegLab config: target_keywords: ["mlp", "fc1", "fc2"]
+# Our SAM3 uses "mlp", "lin1", "lin2" naming.
+LORA_FFN_KEYWORDS: tuple[str, ...] = ("mlp", "lin1", "lin2", "fc1", "fc2")
+
+
 def _apply_lora_to_encoder(
     encoder: nn.Module,
     rank: int,
     alpha: float,
     dropout: float,
+    target_keywords: tuple[str, ...] = LORA_FFN_KEYWORDS,
 ) -> list[str]:
-    """Apply LoRA adapters to Linear layers in the encoder.
+    """Apply LoRA adapters to FFN Linear layers in the encoder.
 
-    SAM3 ViT-32L transformer blocks use only nn.Linear (no Conv2d in FFN).
-    Conv2d layers (e.g., patch embedding) are skipped — LoRALinear only
-    supports nn.Linear. See P2 issue for future LoRAConv2d implementation.
+    Per TopoLoRA-SAM (Khazem et al., 2025): LoRA targets FFN layers ONLY
+    (mlp.lin1/lin2). Attention Q/K/V projections are frozen — the paper
+    argues they encode "more transferable relational patterns."
+
+    Parameters
+    ----------
+    encoder:
+        The SAM3 ViT encoder module.
+    rank:
+        LoRA rank (paper optimal: 16).
+    alpha:
+        LoRA scaling factor.
+    dropout:
+        LoRA dropout probability.
+    target_keywords:
+        Layer name substrings to match. Only nn.Linear layers whose
+        full dotted name contains ANY of these keywords receive LoRA.
+        Default: FFN-related keywords per the paper.
 
     Returns list of module names that received LoRA.
     """
     lora_targets: list[str] = []
 
     for name, module in list(encoder.named_modules()):
-        # Target only nn.Linear layers — Conv2d is skipped (Glitch #9 fix).
-        # LoRALinear raises TypeError on Conv2d; LoRAConv2d is a future P2 item.
-        if isinstance(module, nn.Linear):
-            # Skip very small layers (< rank features)
-            if module.in_features < rank:
-                continue
+        if not isinstance(module, nn.Linear):
+            continue
 
-            lora_layer = LoRALinear(module, rank=rank, alpha=alpha, dropout=dropout)
+        # Filter: only target layers matching keywords (paper: FFN only)
+        if not any(kw in name for kw in target_keywords):
+            continue
 
-            # Replace the module in the parent
-            parts = name.split(".")
-            parent = encoder
-            for part in parts[:-1]:
-                parent = getattr(parent, part)
-            setattr(parent, parts[-1], lora_layer)
-            lora_targets.append(name)
+        # Skip very small layers (< rank features)
+        if module.in_features < rank:
+            continue
+
+        lora_layer = LoRALinear(module, rank=rank, alpha=alpha, dropout=dropout)
+
+        # Replace the module in the parent
+        parts = name.split(".")
+        parent = encoder
+        for part in parts[:-1]:
+            parent = getattr(parent, part)
+        setattr(parent, parts[-1], lora_layer)
+        lora_targets.append(name)
 
     return lora_targets
+
+
+class SpatialConvAdapter(nn.Module):
+    """Spatial Adapter from TopoLoRA-SAM (Khazem et al., 2025).
+
+    Lightweight depthwise-separable convolutional adapter applied to
+    the image embedding tensor between encoder and decoder.
+
+    Architecture (matching SegLab ConvAdapter):
+        x → DW_Conv(3x3) → PW_Conv(1x1) → BN → GELU → PW_Conv(1x1) → + x (residual)
+
+    Parameters
+    ----------
+    channels:
+        Number of input/output channels (256 for SAM3 FPN output).
+    hidden_dim:
+        Hidden dimension for the pointwise bottleneck.
+    kernel_size:
+        Kernel size for depthwise convolution (default 3).
+    """
+
+    def __init__(
+        self,
+        channels: int = 256,
+        hidden_dim: int = 256,
+        kernel_size: int = 3,
+    ) -> None:
+        super().__init__()
+        pad = kernel_size // 2
+        self.dw_conv = nn.Conv2d(
+            channels,
+            channels,
+            kernel_size,
+            padding=pad,
+            groups=channels,
+            bias=False,
+        )
+        self.pw1 = nn.Conv2d(channels, hidden_dim, 1, bias=False)
+        self.norm = nn.BatchNorm2d(hidden_dim)
+        self.pw2 = nn.Conv2d(hidden_dim, channels, 1, bias=False)
+
+        # Zero-init pw2 so residual dominates at initialization
+        nn.init.zeros_(self.pw2.weight)
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Forward with residual: x + pw2(gelu(norm(pw1(dw_conv(x)))))."""
+        y = self.dw_conv(x)
+        y = self.pw1(y)
+        y = self.norm(y)
+        y = F.gelu(y)
+        y = self.pw2(y)
+        result: Tensor = x + y
+        return result
 
 
 class Sam3TopoLoraAdapter(ModelAdapter):
@@ -181,6 +263,10 @@ class Sam3TopoLoraAdapter(ModelAdapter):
         for param in self.backbone.fpn_neck.parameters():
             param.requires_grad = False
 
+        # Spatial Adapter (Khazem 2025): Conv_DW(3x3) + Conv(1x1) + residual
+        # Operates on 256-ch FPN output (our adaptation: post-FPN, not raw encoder)
+        self.spatial_adapter = SpatialConvAdapter(channels=256)
+
         # Trainable mask decoder
         self.decoder = Sam3MaskDecoder(config=config)
 
@@ -216,6 +302,9 @@ class Sam3TopoLoraAdapter(ModelAdapter):
             fpn_features = self.backbone.extract_fpn_features(slice_2d)
             # Cast FP16 encoder output to FP32 for decoder (#680)
             fpn_features = fpn_features.float()
+
+            # Spatial Adapter (Khazem 2025): refine spatial features
+            fpn_features = self.spatial_adapter(fpn_features)
 
             # Decode to binary mask
             binary_logits = self.decoder(fpn_features)

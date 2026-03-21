@@ -78,7 +78,9 @@ class ModelMergingPlugin:
                 )
                 cat = meta.get("champion_category", f"unknown_{i}")
                 ckpt = torch.load(ckpt_path, weights_only=False)
-                category_to_sd[cat] = ckpt["state_dict"]
+                category_to_sd[cat] = ckpt.get(
+                    "model_state_dict", ckpt.get("state_dict", ckpt)
+                )
 
             for pair in merge_pairs:
                 cat1, cat2 = pair[0], pair[1]
@@ -102,9 +104,9 @@ class ModelMergingPlugin:
             # Simple: merge first two checkpoints
             ckpt1 = torch.load(plugin_input.checkpoint_paths[0], weights_only=False)
             ckpt2 = torch.load(plugin_input.checkpoint_paths[1], weights_only=False)
-            merged = _do_merge(
-                ckpt1["state_dict"], ckpt2["state_dict"], method=method, t=t
-            )
+            sd1 = ckpt1.get("model_state_dict", ckpt1.get("state_dict", ckpt1))
+            sd2 = ckpt2.get("model_state_dict", ckpt2.get("state_dict", ckpt2))
+            merged = _do_merge(sd1, sd2, method=method, t=t)
             out_path = output_dir / f"merged_{method}.pt"
             torch.save(merged, out_path)
             model_paths.append(out_path)

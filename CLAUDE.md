@@ -360,6 +360,17 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
     All validation runs LOCALLY via pre-commit hooks and
     `scripts/pr_readiness_check.sh`. Only the user can lift this ban.
 
+30. **Algorithms Must Match Their Literature Definition (Non-Negotiable)** — Every
+    algorithm, loss function, metric, or method MUST be implemented EXACTLY as defined
+    in the paper it claims to be. NEVER invent custom definitions for well-known terms.
+    - **SWA** means Izmailov et al. (2018) — cyclic LR + `torch.optim.swa_utils.AveragedModel`
+      + `update_bn()`. Post-hoc checkpoint averaging is NOT SWA — call it "checkpoint averaging."
+    - **SWAG** means Maddox et al. (2019) — requires training-time second-moment collection.
+    - **LoRA** means Hu et al. (2021) — must match the paper's layer targeting strategy.
+    - If you don't know the exact algorithm, **web-search the paper and read it** before
+      naming anything. Giving a well-known algorithm name to a different implementation
+      is scientific fraud. See: `.claude/metalearning/2026-03-21-fake-swa-checkpoint-averaging-mislabeled.md`
+
 ## What AI Must NEVER Do
 
 - Confabulate — web-search instead. Hardcode task names, cloud providers, GPU types.
@@ -374,6 +385,7 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
 - Dump wall-of-text questions — use `AskUserQuestion` tool, max 4 per round.
 - Hardcode `alpha=0.05`, `seed=42`, or ANY parameter that belongs in config.
 - Use default parameter values for researcher-configurable numbers — read from config.
+- Rename/redefine well-known algorithms — SWA means Izmailov (2018), not "checkpoint averaging."
 
 ## TDD Workflow (Non-Negotiable)
 

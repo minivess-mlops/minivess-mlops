@@ -173,6 +173,22 @@ class ModelAdapter(ABC, nn.Module):
         if not path.exists():
             msg = f"No checkpoint found at {path}"
             raise FileNotFoundError(msg)
+
+        # SHA256 verification if sidecar exists (#707)
+        sha256_path = path.with_suffix(path.suffix + ".sha256")
+        if sha256_path.exists():
+            import hashlib
+
+            expected = sha256_path.read_text(encoding="utf-8").strip()
+            actual = hashlib.sha256(path.read_bytes()).hexdigest()
+            if expected != actual:
+                msg = (
+                    f"Checkpoint integrity check FAILED for {path}. "
+                    f"Expected SHA256: {expected[:16]}..., got: {actual[:16]}... "
+                    f"File may be corrupted (incomplete GCS sync, spot preemption)."
+                )
+                raise RuntimeError(msg)
+
         payload = torch.load(path, map_location="cpu", weights_only=True)
         if isinstance(payload, dict) and "model_state_dict" in payload:
             # New format: state_dict was produced by model.state_dict()
@@ -186,15 +202,35 @@ class ModelAdapter(ABC, nn.Module):
             net.load_state_dict(payload)
 
     def save_checkpoint(self, path: Path) -> None:
-        """Save model weights to a checkpoint file.
+        """Save model weights atomically with SHA256 integrity sidecar.
 
-        Saves the full adapter state dict wrapped in the standard
-        ``{"model_state_dict": ...}`` format. Works for both legacy
-        adapters (with ``self.net``) and SAM3-style adapters that
-        ARE the nn.Module.
+        Uses sync→rename pattern to prevent corrupted checkpoints from
+        interrupted writes (spot preemption, OOM, SIGTERM). Also creates
+        a ``.sha256`` sidecar file for integrity verification on load.
+
+        Atomic write (#714): write to .tmp, fsync, rename.
+        SHA256 sidecar (#707): compute hash, write to {path}.sha256.
         """
+        import hashlib
+        import os
+
         path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({"model_state_dict": self.state_dict()}, path)
+        tmp_path = path.with_suffix(".tmp")
+
+        # Atomic write: save to temp file first
+        torch.save({"model_state_dict": self.state_dict()}, tmp_path)
+
+        # fsync to ensure data reaches disk before rename
+        with tmp_path.open("rb") as f:
+            os.fsync(f.fileno())
+
+        # Atomic rename (same filesystem = atomic on POSIX)
+        tmp_path.rename(path)
+
+        # SHA256 sidecar for integrity verification
+        sha256_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        sha256_path = path.with_suffix(path.suffix + ".sha256")
+        sha256_path.write_text(sha256_hash, encoding="utf-8")
 
     def trainable_parameters(self) -> int:
         """Return the count of trainable parameters.

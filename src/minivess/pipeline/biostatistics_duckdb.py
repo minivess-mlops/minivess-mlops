@@ -401,24 +401,42 @@ def _is_eval_fold_metric(metric_name: str) -> bool:
     return not (len(parts) >= 4 and parts[2] == "vol")
 
 
+def _extract_fold_id(fold_str: str) -> int | None:
+    """Extract integer fold ID from ``"0"`` or ``"fold_0"`` convention."""
+    if fold_str.isdigit():
+        return int(fold_str)
+    if fold_str.startswith("fold_") and fold_str[5:].isdigit():
+        return int(fold_str[5:])
+    return None
+
+
 def _parse_per_volume_metric(metric_name: str) -> tuple[int | None, str, str]:
-    """Parse eval/{fold}/vol/{id}/{metric} into (fold_id, volume_id, base_metric)."""
+    """Parse eval/{fold}/vol/{id}/{metric} into (fold_id, volume_id, base_metric).
+
+    Handles both ``eval/0/vol/3/dsc`` (integer fold) and ``eval/fold_0/vol/3/dsc``
+    (prefixed fold) conventions.
+    """
     parts = metric_name.split("/")
     if len(parts) < 5 or parts[0] != "eval" or parts[2] != "vol":
         return None, "", ""
-    if not parts[1].isdigit():
+    fold_id = _extract_fold_id(parts[1])
+    if fold_id is None:
         return None, "", ""
-    return int(parts[1]), parts[3], parts[4]
+    return fold_id, parts[3], parts[4]
 
 
 def _parse_eval_fold_metric(metric_name: str) -> tuple[int, str] | None:
-    """Parse eval/{fold}/{metric} into (fold_id, base_metric)."""
+    """Parse eval/{fold}/{metric} into (fold_id, base_metric).
+
+    Handles both ``eval/0/dsc`` and ``eval/fold_0/dsc`` conventions.
+    """
     parts = metric_name.split("/")
     if len(parts) < 3 or parts[0] != "eval":
         return None
-    if not parts[1].isdigit():
+    fold_id = _extract_fold_id(parts[1])
+    if fold_id is None:
         return None
-    return int(parts[1]), parts[2]
+    return fold_id, parts[2]
 
 
 def _is_test_metric(metric_name: str) -> bool:

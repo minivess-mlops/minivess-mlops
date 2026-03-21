@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 FACTOR_NAME_MAPPING: dict[str, str] = {
     "method": "post_training_method",
     "aux_calibration": "with_aux_calib",
+    "loss_name": "loss_function",
 }
 
 

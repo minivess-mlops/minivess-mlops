@@ -66,7 +66,7 @@ class MultiSWAPlugin:
         all_sds = []
         for ckpt_path in plugin_input.checkpoint_paths:
             ckpt = torch.load(ckpt_path, weights_only=False)
-            all_sds.append(ckpt["state_dict"])
+            all_sds.append(ckpt.get("model_state_dict", ckpt.get("state_dict", ckpt)))
 
         n_total = len(all_sds)
         subset_size = max(1, math.floor(n_total * fraction))
