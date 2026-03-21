@@ -140,23 +140,27 @@ class TestFactorialIntegrationAnovaOutput:
     """ANOVA detects planted effects."""
 
     def test_factorial_integration_anova_output(self) -> None:
-        """ANOVA detects planted model effect (p < 0.05 for Model)."""
+        """ANOVA detects planted model effect (p < alpha from config)."""
+        from minivess.config.biostatistics_config import BiostatisticsConfig
         from minivess.pipeline.biostatistics_statistics import (
             compute_factorial_anova,
         )
 
+        cfg = BiostatisticsConfig()
         data = _generate_synthetic_per_volume_data()
         result = compute_factorial_anova(data, "cldice")
 
         # Model effect should be significant (planted ~0.15 difference)
-        assert "Model" in result.p_values
-        assert result.p_values["Model"] < 0.05
+        # pingouin uses lowercase factor names from the DataFrame columns
+        model_key = "Model" if "Model" in result.p_values else "model"
+        assert model_key in result.p_values
+        assert result.p_values[model_key] < cfg.alpha
 
         # F-values should be positive
-        assert result.f_values["Model"] > 0
+        assert result.f_values[model_key] > 0
 
         # Eta-squared partial should be positive for Model
-        assert result.eta_squared_partial["Model"] > 0
+        assert result.eta_squared_partial[model_key] > 0
 
 
 class TestFactorialIntegrationFiguresGenerated:
@@ -275,3 +279,115 @@ class TestFactorialIntegrationDataShape:
                 for _fold_id, values in folds.items():
                     # 23 volumes each
                     assert len(values) == _N_VOLUMES
+
+
+# ---------------------------------------------------------------------------
+# Phase 6: New integration tests for spec curve + rank stability
+# ---------------------------------------------------------------------------
+
+
+class TestFactorialIntegrationSpecCurve:
+    """Specification curve works on full synthetic factorial data."""
+
+    def test_spec_curve_on_factorial_data(self) -> None:
+        """Spec curve produces valid output on 12-condition synthetic data."""
+        from minivess.pipeline.biostatistics_specification_curve import (
+            compute_specification_curve,
+        )
+
+        data = _generate_synthetic_per_volume_data()
+        result = compute_specification_curve(
+            per_volume_data=data,
+            factor_names=["model", "loss"],
+            metric_names=["cldice", "dsc"],
+            higher_is_better={"cldice": True, "dsc": True},
+            n_permutations=50,
+            seed=42,
+        )
+        # 12 conditions → C(12,2) = 66 pairs × 2 metrics × 2 aggregations = 264
+        assert len(result.specifications) >= 66
+        assert result.permutation_p is not None
+        assert 0.0 <= result.fraction_significant <= 1.0
+
+    def test_spec_curve_median_effect_reasonable(self) -> None:
+        """Median effect size should be non-zero with planted effects."""
+        from minivess.pipeline.biostatistics_specification_curve import (
+            compute_specification_curve,
+        )
+
+        data = _generate_synthetic_per_volume_data()
+        result = compute_specification_curve(
+            per_volume_data=data,
+            factor_names=["model", "loss"],
+            metric_names=["cldice"],
+            higher_is_better={"cldice": True},
+        )
+        # With planted model effects, median should be non-zero
+        assert result.median_effect != 0.0
+
+
+class TestFactorialIntegrationRankStability:
+    """Rank stability analysis on full synthetic factorial data."""
+
+    def test_rank_concordance_on_factorial_data(self) -> None:
+        """Rank concordance computes for all metric pairs."""
+        from minivess.pipeline.biostatistics_rank_stability import (
+            compute_rank_concordance,
+        )
+
+        data = _generate_synthetic_per_volume_data()
+        result = compute_rank_concordance(
+            per_volume_data=data,
+            metric_names=["cldice", "masd", "dsc"],
+            higher_is_better={"cldice": True, "masd": False, "dsc": True},
+        )
+        # C(3,2) = 3 metric pairs
+        assert len(result.tau_matrix) == 3
+        # All 3 metrics should have rankings
+        assert len(result.condition_ranks) == 3
+
+    def test_cldice_dsc_concordance_positive(self) -> None:
+        """clDice and DSC should agree (positive tau) in this synthetic data.
+
+        Note: In REAL data from the factorial experiment, we expect rank
+        INVERSION between DSC and clDice for tubular structures — that IS
+        a paper finding. This synthetic data is correlated, not inverted.
+        """
+        from minivess.pipeline.biostatistics_rank_stability import (
+            compute_rank_concordance,
+        )
+
+        data = _generate_synthetic_per_volume_data()
+        result = compute_rank_concordance(
+            per_volume_data=data,
+            metric_names=["cldice", "dsc"],
+            higher_is_better={"cldice": True, "dsc": True},
+        )
+        # In this synthetic data, clDice and DSC are correlated
+        assert result.tau_matrix[0].tau > 0
+
+
+class TestFactorialIntegrationK1Fallback:
+    """K=1 fallback ANOVA works on synthetic data."""
+
+    def test_k1_anova_on_factorial_data(self) -> None:
+        """ANOVA with K=1 fold uses per-volume replication."""
+        from minivess.pipeline.biostatistics_statistics import compute_factorial_anova
+
+        # Modify data to have only 1 fold
+        data = _generate_synthetic_per_volume_data()
+        k1_data: dict[str, dict[str, dict[int, np.ndarray]]] = {}
+        for metric, conditions in data.items():
+            k1_data[metric] = {}
+            for cond, folds in conditions.items():
+                k1_data[metric][cond] = {0: folds[0]}  # Keep only fold 0
+
+        result = compute_factorial_anova(k1_data, "cldice")
+        assert result.n_folds == 1
+        assert result.replication_method == "per_volume"
+        # Should still detect the planted model effect
+        model_p = result.p_values.get("Model") or result.p_values.get("model")
+        assert model_p is not None
+        from minivess.config.biostatistics_config import BiostatisticsConfig
+
+        assert model_p < BiostatisticsConfig().alpha

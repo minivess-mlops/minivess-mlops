@@ -4,7 +4,7 @@ When running a sweep (e.g., 128 configs), the training flow checks MLflow
 for existing FINISHED runs with matching config fingerprints and skips them.
 
 Config fingerprint = deterministic hash of:
-  loss_name, model_family, fold_id, max_epochs, batch_size, patch_size
+  loss_name, model_family, fold_id, max_epochs, batch_size, patch_size, with_aux_calib
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ def compute_config_fingerprint(
     max_epochs: int,
     batch_size: int,
     patch_size: tuple[int, ...] | None = None,
+    with_aux_calib: bool = False,
 ) -> str:
     """Compute a deterministic fingerprint for a training configuration.
 
@@ -53,6 +54,7 @@ def compute_config_fingerprint(
         "max_epochs": max_epochs,
         "batch_size": batch_size,
         "patch_size": list(patch_size) if patch_size else None,
+        "with_aux_calib": with_aux_calib,
     }
     content = json.dumps(config_dict, sort_keys=True)
     return hashlib.sha256(content.encode()).hexdigest()[:16]

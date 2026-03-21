@@ -40,8 +40,13 @@ _DDL_RUNS = """
         loss_function VARCHAR,
         fold_id INTEGER,
         model_family VARCHAR,
+        with_aux_calib BOOLEAN,
         status VARCHAR,
-        start_time VARCHAR
+        start_time VARCHAR,
+        post_training_method VARCHAR DEFAULT 'none',
+        recalibration VARCHAR DEFAULT 'none',
+        ensemble_strategy VARCHAR DEFAULT 'none',
+        is_zero_shot BOOLEAN DEFAULT FALSE
     )
 """
 
@@ -234,10 +239,22 @@ def _insert_run(conn: Any, run: Any, mlruns_dir: Path) -> None:
     tags = _read_tags(run_dir)
     model_family = tags.get("model_family", "unknown")
     start_time = tags.get("started_at", "")
+    # Layer B+C tags
+    post_training_method = tags.get(
+        "post_training_method", getattr(run, "post_training_method", "none")
+    )
+    recalibration = tags.get("recalibration", getattr(run, "recalibration", "none"))
+    ensemble_strategy = tags.get(
+        "ensemble_strategy", getattr(run, "ensemble_strategy", "none")
+    )
+    is_zero_shot_str = tags.get("is_zero_shot", "false")
+    is_zero_shot = is_zero_shot_str.lower() in ("true", "1") or getattr(
+        run, "is_zero_shot", False
+    )
 
     # Insert into runs table
     conn.execute(
-        "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             run.run_id,
             run.experiment_id,
@@ -245,8 +262,13 @@ def _insert_run(conn: Any, run: Any, mlruns_dir: Path) -> None:
             run.loss_function,
             run.fold_id,
             model_family,
+            run.with_aux_calib,
             run.status,
             start_time,
+            post_training_method,
+            recalibration,
+            ensemble_strategy,
+            is_zero_shot,
         ],
     )
 

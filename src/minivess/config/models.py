@@ -224,7 +224,7 @@ class ProfilingConfig(BaseModel):
 class TrainingConfig(BaseModel):
     """Configuration for training loop."""
 
-    max_epochs: int = Field(default=100, ge=1)
+    max_epochs: int = Field(default=100, ge=0)  # 0 = zero-shot evaluation only
     batch_size: int = Field(default=2, ge=1)
     learning_rate: float = Field(default=1e-4, gt=0)
     weight_decay: float = Field(default=1e-5, ge=0)

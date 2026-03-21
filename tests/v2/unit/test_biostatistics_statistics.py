@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import numpy as np
 
+from minivess.config.biostatistics_config import BiostatisticsConfig
 from minivess.pipeline.biostatistics_statistics import (
     compute_bayesian_comparisons,
     compute_pairwise_comparisons,
     compute_variance_decomposition,
 )
+
+# Single source of truth for ALL statistical params — never hardcode
+# alpha, seed, n_bootstrap, etc. See CLAUDE.md Rule #29 and Issue #881.
+_CFG = BiostatisticsConfig()
 
 
 def _build_synthetic_per_volume_data() -> dict[str, dict[int, np.ndarray]]:
@@ -16,7 +21,7 @@ def _build_synthetic_per_volume_data() -> dict[str, dict[int, np.ndarray]]:
 
     Returns data for 3 conditions x 3 folds x 20 volumes each.
     """
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(_CFG.seed)
     data: dict[str, dict[int, np.ndarray]] = {}
     means = {"dice_ce": 0.82, "tversky": 0.78, "cbdice_cldice": 0.85}
     for condition, mean in means.items():
@@ -33,10 +38,10 @@ class TestComputePairwiseComparisons:
         results = compute_pairwise_comparisons(
             per_volume_data=data,
             metric_name="val_dice",
-            alpha=0.05,
+            alpha=_CFG.alpha,
             primary_metric="val_dice",
-            n_bootstrap=500,
-            seed=42,
+            n_bootstrap=_CFG.n_bootstrap,
+            seed=_CFG.seed,
         )
         assert len(results) == 3
 
@@ -45,10 +50,10 @@ class TestComputePairwiseComparisons:
         results = compute_pairwise_comparisons(
             per_volume_data=data,
             metric_name="val_dice",
-            alpha=0.05,
+            alpha=_CFG.alpha,
             primary_metric="val_dice",
-            n_bootstrap=500,
-            seed=42,
+            n_bootstrap=_CFG.n_bootstrap,
+            seed=_CFG.seed,
         )
         assert all(r.correction_method == "holm" for r in results)
 
@@ -57,10 +62,10 @@ class TestComputePairwiseComparisons:
         results = compute_pairwise_comparisons(
             per_volume_data=data,
             metric_name="val_dice",
-            alpha=0.05,
+            alpha=_CFG.alpha,
             primary_metric="val_cldice",  # Different from metric_name
-            n_bootstrap=500,
-            seed=42,
+            n_bootstrap=_CFG.n_bootstrap,
+            seed=_CFG.seed,
         )
         assert all(r.correction_method == "bh_fdr" for r in results)
 
@@ -69,10 +74,10 @@ class TestComputePairwiseComparisons:
         results = compute_pairwise_comparisons(
             per_volume_data=data,
             metric_name="val_dice",
-            alpha=0.05,
+            alpha=_CFG.alpha,
             primary_metric="val_dice",
-            n_bootstrap=500,
-            seed=42,
+            n_bootstrap=_CFG.n_bootstrap,
+            seed=_CFG.seed,
         )
         for r in results:
             assert isinstance(r.cohens_d, float)
@@ -84,10 +89,10 @@ class TestComputePairwiseComparisons:
         results = compute_pairwise_comparisons(
             per_volume_data=data,
             metric_name="val_dice",
-            alpha=0.05,
+            alpha=_CFG.alpha,
             primary_metric="val_dice",
-            n_bootstrap=500,
-            seed=42,
+            n_bootstrap=_CFG.n_bootstrap,
+            seed=_CFG.seed,
         )
         for r in results:
             assert 0.0 <= r.p_value <= 1.0
@@ -98,10 +103,10 @@ class TestComputePairwiseComparisons:
         results = compute_pairwise_comparisons(
             per_volume_data=data,
             metric_name="val_dice",
-            alpha=0.05,
+            alpha=_CFG.alpha,
             primary_metric="val_dice",
-            n_bootstrap=500,
-            seed=42,
+            n_bootstrap=_CFG.n_bootstrap,
+            seed=_CFG.seed,
         )
         pairs = {(r.condition_a, r.condition_b) for r in results}
         # No (b, a) if (a, b) exists
@@ -123,7 +128,7 @@ class TestComputeBayesianComparisons:
                 assert abs(total - 1.0) < 0.01
 
     def test_identical_data_concentrates_on_rope(self) -> None:
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(_CFG.seed)
         scores = rng.normal(0.8, 0.05, size=20)
         data = {
             "a": {0: scores.copy(), 1: scores.copy(), 2: scores.copy()},
@@ -142,7 +147,7 @@ class TestComputeBayesianComparisons:
             assert r.bayesian_rope > r.bayesian_right
 
     def test_separated_data_favors_direction(self) -> None:
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(_CFG.seed)
         data = {
             "good": {
                 0: rng.normal(0.9, 0.02, 20),
@@ -187,10 +192,10 @@ class TestComputeVarianceDecomposition:
         results = compute_variance_decomposition(
             per_volume_data=data,
             metric_name="val_dice",
-            friedman_alpha=0.05,
+            friedman_alpha=_CFG.alpha,
         )
         r = results[0]
-        if r.friedman_p > 0.05:
+        if r.friedman_p > _CFG.alpha:
             assert r.nemenyi_matrix is None
         else:
             assert r.nemenyi_matrix is not None

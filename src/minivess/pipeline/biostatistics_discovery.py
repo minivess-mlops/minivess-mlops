@@ -192,6 +192,32 @@ def _parse_run_dir(
     except (ValueError, TypeError):
         fold_id = 0
 
+    model_family = params.get("model_family", params.get("model/family", "unknown"))
+    aux_calib_str = params.get("with_aux_calib", params.get("aux_calib", "false"))
+    with_aux_calib = aux_calib_str.lower() in ("true", "1", "yes")
+
+    # Read tags directory for Layer B+C fields (tags override params)
+    tags = _read_tags(run_dir)
+
+    # Layer A overrides from tags (tags may be more up-to-date than params)
+    if "model_family" in tags:
+        model_family = tags["model_family"]
+    if "loss_function" in tags:
+        loss_function = tags["loss_function"]
+    if "fold_id" in tags:
+        import contextlib
+
+        with contextlib.suppress(ValueError, TypeError):
+            fold_id = int(tags["fold_id"])
+    if "with_aux_calib" in tags:
+        with_aux_calib = tags["with_aux_calib"].lower() in ("true", "1", "yes")
+
+    # Layer B+C fields (from tags only — not in params)
+    post_training_method = tags.get("post_training_method", "none")
+    recalibration = tags.get("recalibration", tags.get("calibration_method", "none"))
+    ensemble_strategy = tags.get("ensemble_strategy", "none")
+    is_zero_shot = tags.get("is_zero_shot", "false").lower() in ("true", "1")
+
     return SourceRun(
         run_id=run_dir.name,
         experiment_id=experiment_id,
@@ -199,6 +225,12 @@ def _parse_run_dir(
         loss_function=loss_function,
         fold_id=fold_id,
         status=status,
+        model_family=model_family,
+        with_aux_calib=with_aux_calib,
+        post_training_method=post_training_method,
+        recalibration=recalibration,
+        ensemble_strategy=ensemble_strategy,
+        is_zero_shot=is_zero_shot,
     )
 
 
@@ -211,4 +243,20 @@ def _read_params(run_dir: Path) -> dict[str, Any]:
     for param_file in params_dir.iterdir():
         if param_file.is_file():
             result[param_file.name] = param_file.read_text(encoding="utf-8").strip()
+    return result
+
+
+def _read_tags(run_dir: Path) -> dict[str, str]:
+    """Read MLflow run tags from the tags directory.
+
+    Layer B+C fields (post_training_method, recalibration, ensemble_strategy,
+    is_zero_shot) are stored as tags, not params. This function reads them.
+    """
+    tags_dir = run_dir / "tags"
+    if not tags_dir.is_dir():
+        return {}
+    result: dict[str, str] = {}
+    for tag_file in tags_dir.iterdir():
+        if tag_file.is_file() and not tag_file.name.startswith("mlflow."):
+            result[tag_file.name] = tag_file.read_text(encoding="utf-8").strip()
     return result

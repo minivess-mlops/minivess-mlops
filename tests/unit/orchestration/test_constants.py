@@ -31,7 +31,13 @@ class TestExperimentNameConstants:
             assert isinstance(const, str), f"Expected str, got {type(const)}"
             assert len(const) > 0, "Constant must be non-empty"
 
-    def test_no_duplicate_values(self) -> None:
+    def test_no_unexpected_duplicate_values(self) -> None:
+        """Experiment names must be unique EXCEPT intentional sharing.
+
+        EXPERIMENT_POST_TRAINING == EXPERIMENT_TRAINING per synthesis Part 2.3:
+        post-training logs to the SAME experiment so Analysis Flow discovers
+        all variants (training + post-training) in one query.
+        """
         from minivess.orchestration.constants import (
             EXPERIMENT_DASHBOARD,
             EXPERIMENT_DATA,
@@ -42,16 +48,21 @@ class TestExperimentNameConstants:
             EXPERIMENT_TRAINING,
         )
 
-        values = [
+        # Post-training intentionally shares with training (synthesis Part 2.3)
+        assert EXPERIMENT_POST_TRAINING == EXPERIMENT_TRAINING
+
+        # All OTHER experiment names must be unique
+        non_shared = [
             EXPERIMENT_TRAINING,
             EXPERIMENT_DATA,
             EXPERIMENT_EVALUATION,
-            EXPERIMENT_POST_TRAINING,
             EXPERIMENT_DEPLOYMENT,
             EXPERIMENT_DASHBOARD,
             EXPERIMENT_HPO,
         ]
-        assert len(values) == len(set(values)), "All experiment names must be unique"
+        assert len(non_shared) == len(set(non_shared)), (
+            "Non-shared experiment names must be unique"
+        )
 
 
 class TestFlowNameConstants:

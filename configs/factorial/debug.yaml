@@ -1,0 +1,112 @@
+# Debug factorial: ALL 6 dimensions with fewer levels.
+#
+# 4 models × 3 losses × 2 aux_calib × 2 post-training × 2 recalib × 4 ensemble
+# = 384 conditions × 1 fold = 384 evaluations
+#
+# This is NOT a "minimal test." It exercises the FULL 6-factor pipeline topology
+# with reduced levels per factor and reduced epochs/data/folds.
+#
+# Debug scope reductions (ONLY these allowed — CLAUDE.md Rule #27):
+#   1. Epochs: 2 (not 50)
+#   2. Data: half volumes (~23 train / ~12 val)
+#   3. Folds: 1 (fold-0 only)
+#   4. Post-training levels: 2 (not 3) — {none, swa}
+#   5. Ensemble levels: 4 (not 5) — drop "none"
+#
+# Cost:
+#   Layer A (training): 24 cells × 1 fold = 24 runs (~$5-10 on GCP L4 spot)
+#   Layer B+C+D: local CPU (FREE)
+#
+# Usage:
+#   ./scripts/run_factorial.sh configs/factorial/debug.yaml
+
+experiment_name: debug_factorial
+description: "Debug 384-condition factorial: all 6 dimensions, fewer levels, 1 fold"
+debug: true
+
+# ── Layer A: Training factors (GPU, cloud) ───────────────────────────
+factors:
+  training:
+    model_family:
+      - dynunet
+      - mambavesselnet
+      - sam3_topolora
+      - sam3_hybrid
+    loss_name:
+      - cbdice_cldice
+      - dice_ce
+      - dice_ce_cldice
+    aux_calibration:
+      - true
+      - false
+
+  # ── Layer B: Post-training factors (CPU, local) ──────────────────────
+  post_training:
+    method:
+      - none
+      - swa
+    recalibration:
+      - none
+      - temperature_scaling
+
+  # ── Layer C: Analysis factors (CPU/GPU, local) ───────────────────────
+  analysis:
+    ensemble_strategy:
+      - per_loss_single_best
+      - all_loss_single_best
+      - per_loss_all_best
+      - all_loss_all_best
+
+# ── Zero-shot baselines ─────────────────────────────────────────────
+zero_shot_baselines:
+  - model: sam3_vanilla
+    strategy: frozen_encoder_eval
+    folds: 1
+    dataset: minivess
+  - model: vesselfm
+    strategy: zero_shot_only
+    folds: 1
+    dataset: deepvess
+
+# ── Fixed parameters (debug reductions) ─────────────────────────────
+fixed:
+  max_epochs: 2
+  num_folds: 1
+  max_train_volumes: 23
+  max_val_volumes: 12
+  compute: auto
+  learning_rate: 1.0e-3
+  batch_size: 2
+
+# ── Data splits ─────────────────────────────────────────────────────
+splits_file: configs/splits/debug_half_1fold.json
+
+# ── MLflow experiment names ─────────────────────────────────────────
+mlflow:
+  training_experiment: minivess_debug_factorial
+  evaluation_experiment: minivess_debug_factorial_evaluation
+  biostatistics_experiment: minivess_debug_factorial_biostatistics
+
+# ── Biostatistics configuration ─────────────────────────────────────
+biostatistics:
+  anova_strategy: layered
+  alpha: 0.05
+  co_primary_metrics:
+    - cldice
+    - masd
+  foil_metrics:
+    - dsc
+
+# ── Post-training plugins ───────────────────────────────────────────
+post_training:
+  plugins:
+    - swa
+    - calibration
+
+# ── E2E flow chain ──────────────────────────────────────────────────
+flows:
+  - train
+  - post_training
+  - analyze
+  - biostatistics
+  - deploy

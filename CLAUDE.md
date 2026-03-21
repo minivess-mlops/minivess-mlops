@@ -315,10 +315,39 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
     NEVER silently accept skips. ALWAYS inform the user of skip count and reasons.
     The same applies to warnings — suppress cosmetic warnings at entry point, but
     NEVER suppress warnings that indicate bugs or configuration problems.
+    **MANDATORY Skip Investigation Protocol** — Before classifying ANY skip as
+    "acceptable" or "hardware-gated", Claude MUST run diagnostic commands:
+    (1) `which <tool>` or `dpkg -l | grep <pkg>` — is the tool/package installed?
+    (2) `<tool> --version` — is it the right version?
+    (3) `find /etc -name <config>` — is the config at a different path?
+    (4) If tool IS installed but wrong version → report as FIXABLE, not "acceptable"
+    (5) If tool is NOT installed → ask user if we should install it
+    Classifying a skip without running diagnostics is the same as confabulating.
+    See: `.claude/metalearning/2026-03-21-silent-skip-acceptance-ctk-config-path.md`,
+    `.claude/metalearning/2026-03-21-mamba-ssm-silent-skip-cuda-mismatch.md`
 22. **Single-Source Config via `.env.example` (Non-Negotiable)** — ALL configurable
    values MUST be in `.env.example` FIRST. BANNED: hardcoded URLs in Dockerfiles,
    `os.environ.get("VAR", "fallback")` in flow files (use `resolve_tracking_uri()`
    or fail loudly), service URLs in Dynaconf TOML. See `tests/v2/unit/test_env_single_source.py`.
+29. **ZERO Hardcoded Parameters — Config Is the Only Source (Non-Negotiable)** —
+    EVERY numeric parameter that a researcher might want to change MUST come from
+    the Hydra-zen / Dynaconf config chain, NEVER from Python defaults. This includes:
+    - **Statistical thresholds**: `alpha`, `rope`, `n_bootstrap`, `n_permutations`
+    - **Random seeds**: `seed` — ALWAYS from config, never `seed=42` in code
+    - **Training hyperparameters**: `learning_rate`, `batch_size`, `max_epochs`
+    - **Infrastructure values**: ports, timeouts, retry counts
+    The config YAML is the single source of truth. Functions receive these values
+    as parameters from the caller (which reads them from config). Default parameter
+    values in function signatures are BANNED for any value a researcher might change.
+    **Tests**: Must read defaults from the config class (e.g., `BiostatisticsConfig().alpha`),
+    NEVER hardcode `0.05` or `42` in assertions. A researcher who changes alpha to 0.01
+    in their YAML must not have tests assert against a stale 0.05.
+    **Why Claude Code gets this wrong**: LLM training data is full of `alpha=0.05` and
+    `seed=42` as "obvious defaults." This is the most insidious anti-pattern because it
+    LOOKS correct and WORKS initially — the bug only manifests when a researcher changes
+    the config and discovers that code/tests silently ignore their choice.
+    See: `.claude/metalearning/2026-03-20-hardcoded-significance-level-antipattern.md`
+    Guard: `tests/v2/unit/biostatistics/test_no_hardcoded_alpha.py` (Issue #881)
 
 21. **GitHub Actions CI EXPLICITLY DISABLED (Non-Negotiable)** — The user has
     explicitly forbidden automatic GitHub Actions CI. Actions consume credits.
@@ -343,6 +372,8 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
 - Enable GitHub Actions triggers — CI is EXPLICITLY DISABLED (credits).
 - Use `os.environ.get("VAR", "fallback")` — fail loudly or use `resolve_*()`.
 - Dump wall-of-text questions — use `AskUserQuestion` tool, max 4 per round.
+- Hardcode `alpha=0.05`, `seed=42`, or ANY parameter that belongs in config.
+- Use default parameter values for researcher-configurable numbers — read from config.
 
 ## TDD Workflow (Non-Negotiable)
 

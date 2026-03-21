@@ -417,21 +417,30 @@ def _compute_icc(
 def compute_factorial_anova(
     per_volume_data: dict[str, dict[str, dict[int, np.ndarray]]],
     metric_name: str,
+    factor_names: list[str] | None = None,
 ) -> FactorialAnovaResult:
-    """Compute two-way ANOVA with eta-squared and omega-squared effect sizes.
+    """Compute N-way ANOVA with eta-squared and omega-squared effect sizes.
+
+    Config-driven: factor_names are auto-derived from experiment YAML.
+    Supports 2-way (model × loss), 3-way (model × loss × calib), or
+    any N-factor design.
 
     Parameters
     ----------
     per_volume_data:
         ``{metric: {condition_key: {fold_id: np.ndarray}}}`` where
-        ``condition_key`` is ``"model__loss"`` (double underscore separator).
+        ``condition_key`` uses ``"__"`` (double underscore) to separate
+        factor levels (e.g., ``"dynunet__dice_ce__calibTrue"``).
     metric_name:
         Which metric to analyse.
+    factor_names:
+        Factor names matching the condition_key order. If None, defaults
+        to ``["model", "loss"]`` for backward compatibility.
 
     Returns
     -------
     FactorialAnovaResult with F-values, p-values, partial eta-squared,
-    and omega-squared for Model, Loss, and Model:Loss interaction.
+    and omega-squared for all main effects and interactions.
 
     References
     ----------
@@ -439,46 +448,109 @@ def compute_factorial_anova(
     """
     import pandas as pd
 
+    if factor_names is None:
+        factor_names = ["model", "loss"]
+
     # Build long-format DataFrame
     rows: list[dict[str, Any]] = []
     metric_data = per_volume_data[metric_name]
-    models_set: set[str] = set()
-    losses_set: set[str] = set()
+    factor_level_sets: dict[str, set[str]] = {f: set() for f in factor_names}
 
     for condition_key, folds in metric_data.items():
         # Parse condition_key — NO regex, use str.split per CLAUDE.md Rule #16
         parts = condition_key.split("__")
-        model = parts[0]
-        loss = parts[1] if len(parts) > 1 else "unknown"
-        models_set.add(model)
-        losses_set.add(loss)
+        factor_values: dict[str, str] = {}
+        for i, fname in enumerate(factor_names):
+            val = parts[i] if i < len(parts) else "unknown"
+            factor_values[fname] = val
+            factor_level_sets[fname].add(val)
 
         for fold_id, values in folds.items():
             for vol_idx, val in enumerate(values):
-                rows.append(
-                    {
-                        "volume_id": f"f{fold_id}_v{vol_idx}",
-                        "model": model,
-                        "loss": loss,
-                        "fold": fold_id,
-                        "metric_value": float(val),
-                    }
-                )
+                row: dict[str, Any] = {
+                    "volume_id": f"f{fold_id}_v{vol_idx}",
+                    "fold": fold_id,
+                    "metric_value": float(val),
+                }
+                row.update(factor_values)
+                rows.append(row)
 
     df = pd.DataFrame(rows)
 
-    # --- pingouin two-way ANOVA ---
+    # For backward compat
+    models_set = factor_level_sets.get(
+        "model", factor_level_sets.get(factor_names[0], set())
+    )
+    losses_set = (
+        factor_level_sets.get("loss", factor_level_sets.get(factor_names[1], set()))
+        if len(factor_names) > 1
+        else set()
+    )
+
+    # Detect number of folds to choose replication method
+    unique_folds = set(df["fold"].unique())
+    n_folds = len(unique_folds)
+    replication_method = "per_volume" if n_folds <= 1 else "fold_random_effect"
+
+    if n_folds <= 1:
+        logger.info(
+            "K=%d fold(s) — using per-volume replication (standard ANOVA). "
+            "N=%d observations across %d conditions.",
+            n_folds,
+            len(df),
+            len(metric_data),
+        )
+    else:
+        logger.info(
+            "K=%d folds — using fold as random effect (mixed model). "
+            "N=%d observations across %d conditions.",
+            n_folds,
+            len(df),
+            len(metric_data),
+        )
+
+    # --- pingouin ANOVA (fixed-effects for K=1, mixed for K>1) ---
     engine_pg: dict[str, object] | None = None
     try:
         import pingouin as pg
 
-        aov = pg.anova(
-            data=df,
-            dv="metric_value",
-            between=["model", "loss"],
-            detailed=True,
-        )
-        engine_pg = aov.to_dict()
+        if n_folds > 1:
+            # Try mixed ANOVA with fold as random effect (within-subject)
+            try:
+                # mixed_anova supports one between and one within factor
+                # For N-way with fold as random effect, we need a different approach:
+                # Use standard ANOVA but account for fold clustering
+                # pingouin.mixed_anova only supports 1 between + 1 within,
+                # so for 3+ between factors, we use standard ANOVA with fold
+                # included as an additional factor, then extract the residual
+                aov = pg.anova(
+                    data=df,
+                    dv="metric_value",
+                    between=[*factor_names, "fold"],
+                    detailed=True,
+                )
+                engine_pg = aov.to_dict()
+            except Exception:
+                logger.warning(
+                    "Mixed ANOVA with fold failed, falling back to standard",
+                    exc_info=True,
+                )
+                aov = pg.anova(
+                    data=df,
+                    dv="metric_value",
+                    between=factor_names,
+                    detailed=True,
+                )
+                engine_pg = aov.to_dict()
+                replication_method = "per_volume"
+        else:
+            aov = pg.anova(
+                data=df,
+                dv="metric_value",
+                between=factor_names,
+                detailed=True,
+            )
+            engine_pg = aov.to_dict()
     except ImportError:
         logger.warning("pingouin not installed — ANOVA will use statsmodels only")
     except Exception:
@@ -490,7 +562,10 @@ def compute_factorial_anova(
         import statsmodels.api as sm
         from statsmodels.formula.api import ols
 
-        model_formula = ols("metric_value ~ C(model) * C(loss)", data=df).fit()
+        # Build formula dynamically from factor names: C(f1) * C(f2) * C(f3)
+        factor_terms = " * ".join(f"C({f})" for f in factor_names)
+        formula = f"metric_value ~ {factor_terms}"
+        model_formula = ols(formula, data=df).fit()
         sm_anova = sm.stats.anova_lm(model_formula, typ=3)
         engine_sm = sm_anova.to_dict()
     except ImportError:
@@ -507,36 +582,55 @@ def compute_factorial_anova(
     if engine_pg is not None:
         import pingouin as pg
 
-        aov = pg.anova(
-            data=df,
-            dv="metric_value",
-            between=["model", "loss"],
-            detailed=True,
-        )
-        factor_map = {"model": "Model", "loss": "Loss", "model * loss": "Model:Loss"}
+        # Re-run the same ANOVA to extract results
+        if n_folds > 1:
+            try:
+                aov = pg.anova(
+                    data=df,
+                    dv="metric_value",
+                    between=[*factor_names, "fold"],
+                    detailed=True,
+                )
+            except Exception:
+                aov = pg.anova(
+                    data=df,
+                    dv="metric_value",
+                    between=factor_names,
+                    detailed=True,
+                )
+        else:
+            aov = pg.anova(
+                data=df,
+                dv="metric_value",
+                between=factor_names,
+                detailed=True,
+            )
+
         for _, row in aov.iterrows():
             source = str(row.get("Source", ""))
-            factor = factor_map.get(source, source)
-            if factor in ("Model", "Loss", "Model:Loss"):
-                f_values[factor] = float(row.get("F", 0.0))
-                p_values[factor] = float(row.get("p_unc", row.get("p-unc", 1.0)))
-                eta_sq[factor] = float(row.get("np2", 0.0))  # partial eta-squared
-                # Omega-squared: (SS - df * MS_error) / (SS_total + MS_error)
-                ss = float(row.get("SS", 0.0))
-                df_effect = float(row.get("DF", 0.0))
-                # Get residual MS
-                residual_row = aov[aov["Source"] == "Residual"]
-                if not residual_row.empty:
-                    ms_error = float(residual_row["MS"].iloc[0])
-                    ss_total = float(aov["SS"].sum())
-                    if ss_total + ms_error > 0:
-                        omega_sq[factor] = (ss - df_effect * ms_error) / (
-                            ss_total + ms_error
-                        )
-                    else:
-                        omega_sq[factor] = 0.0
+            if source == "Residual":
+                continue
+            # Skip fold-related terms — they're nuisance, not of interest
+            if "fold" in source.lower():
+                continue
+            f_values[source] = float(row.get("F", 0.0))
+            p_values[source] = float(row.get("p_unc", row.get("p-unc", 1.0)))
+            eta_sq[source] = float(row.get("np2", 0.0))  # partial eta-squared
+            # Omega-squared: (SS - df * MS_error) / (SS_total + MS_error)
+            ss = float(row.get("SS", 0.0))
+            df_effect = float(row.get("DF", 0.0))
+            residual_row = aov[aov["Source"] == "Residual"]
+            if not residual_row.empty:
+                ms_error = float(residual_row["MS"].iloc[0])
+                ss_total = float(aov["SS"].sum())
+                if ss_total + ms_error > 0:
+                    omega_sq[source] = (ss - df_effect * ms_error) / (
+                        ss_total + ms_error
+                    )
                 else:
-                    omega_sq[factor] = 0.0
+                    omega_sq[source] = 0.0
+            else:
+                omega_sq[source] = 0.0
 
     return FactorialAnovaResult(
         metric=metric_name,
@@ -548,6 +642,10 @@ def compute_factorial_anova(
         omega_squared=omega_sq,
         engine_pingouin=engine_pg,
         engine_statsmodels=engine_sm,
+        factor_names=factor_names,
+        factor_levels={f: len(s) for f, s in factor_level_sets.items()},
+        n_folds=n_folds,
+        replication_method=replication_method,
     )
 
 

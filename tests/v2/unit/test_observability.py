@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 import torch
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 from minivess.adapters.dynunet import DynUNetAdapter
 from minivess.config.models import (
@@ -83,7 +80,7 @@ class TestResolveTrackingUri:
         env_backup = os.environ.pop("MLFLOW_TRACKING_URI", None)
         try:
             uri = resolve_tracking_uri(use_dynaconf=False)
-            assert uri == "mlruns"
+            assert Path(uri).is_absolute() and uri.endswith("mlruns")
         finally:
             if env_backup is not None:
                 os.environ["MLFLOW_TRACKING_URI"] = env_backup
@@ -126,7 +123,7 @@ class TestResolveTrackingUri:
         monkeypatch.delenv("ENV_FOR_DYNACONF", raising=False)
         clear_settings_cache()
         uri = resolve_tracking_uri()
-        assert uri == "mlruns"
+        assert Path(uri).is_absolute() and uri.endswith("mlruns")
 
     def test_env_var_overrides_dynaconf(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """MLFLOW_TRACKING_URI env var should still override Dynaconf."""
@@ -159,7 +156,7 @@ class TestResolveTrackingUri:
 
         monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
         uri = resolve_tracking_uri(use_dynaconf=False)
-        assert uri == "mlruns"
+        assert Path(uri).is_absolute() and uri.endswith("mlruns")
 
     def test_dynaconf_import_failure_graceful(
         self, monkeypatch: pytest.MonkeyPatch
@@ -175,7 +172,7 @@ class TestResolveTrackingUri:
         sys.modules["minivess.config.settings"] = None  # type: ignore[assignment]
         try:
             uri = resolve_tracking_uri()
-            assert uri == "mlruns"
+            assert Path(uri).is_absolute() and uri.endswith("mlruns")
         finally:
             if original is not None:
                 sys.modules["minivess.config.settings"] = original

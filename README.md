@@ -1,4 +1,4 @@
-# MinIVess MLOps v2
+# NEUROVEX -> to de replaced with something more vascular like VascExFlow or something more elegant :P
 
 ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
 ![uv](https://img.shields.io/badge/package%20manager-uv-blueviolet)
@@ -386,6 +386,14 @@ minivess-mlops/
 5. **Library-first** -- search for existing implementations before writing custom code.
 6. **Docker is the execution model** -- all pipeline execution goes through Prefect flows in Docker containers.
 7. **Config-driven** -- specific tasks, models, losses, and metrics are YAML config instantiations, not code branches.
+
+### Recommended Developer Tools (not required to run the pipeline)
+
+- **[duckdb-skills](https://github.com/duckdb/duckdb-skills)** -- Claude Code plugin for interactive DuckDB queries on biostatistics output:
+  ```
+  /plugin marketplace add duckdb/duckdb-skills
+  /plugin install duckdb-skills@duckdb-skills
+  ```
 
 ### Architecture Decision Records
 

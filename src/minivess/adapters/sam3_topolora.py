@@ -116,22 +116,22 @@ def _apply_lora_to_encoder(
     alpha: float,
     dropout: float,
 ) -> list[str]:
-    """Apply LoRA adapters to Conv2d layers in the encoder.
+    """Apply LoRA adapters to Linear layers in the encoder.
 
-    For the stub encoder, targets the proj Conv2d.
-    For real SAM3, would target mlp.lin1 and mlp.lin2 in each block.
+    SAM3 ViT-32L transformer blocks use only nn.Linear (no Conv2d in FFN).
+    Conv2d layers (e.g., patch embedding) are skipped — LoRALinear only
+    supports nn.Linear. See P2 issue for future LoRAConv2d implementation.
 
     Returns list of module names that received LoRA.
     """
     lora_targets: list[str] = []
 
     for name, module in list(encoder.named_modules()):
-        # Target Conv2d and Linear layers (excluding tiny layers)
-        if isinstance(module, nn.Linear | nn.Conv2d):
+        # Target only nn.Linear layers — Conv2d is skipped (Glitch #9 fix).
+        # LoRALinear raises TypeError on Conv2d; LoRAConv2d is a future P2 item.
+        if isinstance(module, nn.Linear):
             # Skip very small layers (< rank features)
-            if isinstance(module, nn.Linear) and module.in_features < rank:
-                continue
-            if isinstance(module, nn.Conv2d) and module.in_channels < rank:
+            if module.in_features < rank:
                 continue
 
             lora_layer = LoRALinear(module, rank=rank, alpha=alpha, dropout=dropout)
@@ -199,7 +199,7 @@ class Sam3TopoLoraAdapter(ModelAdapter):
         Parameters
         ----------
         images:
-            Input 3D volume of shape (B, C, D, H, W).
+            Input 3D volume of shape (B, C, H, W, D) — MONAI dimension order.
 
         Returns
         -------

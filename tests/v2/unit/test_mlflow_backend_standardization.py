@@ -36,11 +36,15 @@ class TestResolveTrackingUri:
         assert result == "http://env-mlflow:5000"
 
     def test_default_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from pathlib import Path
+
         from minivess.observability.tracking import resolve_tracking_uri
 
         monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
         result = resolve_tracking_uri(tracking_uri=None, use_dynaconf=False)
-        assert result == "mlruns"
+        # Default "mlruns" is now resolved to absolute by _ensure_absolute_file_uri
+        assert Path(result).is_absolute(), f"Expected absolute, got: {result}"
+        assert result.endswith("mlruns")
 
     def test_explicit_overrides_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from minivess.observability.tracking import resolve_tracking_uri
