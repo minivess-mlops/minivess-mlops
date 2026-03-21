@@ -1,0 +1,1249 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>Biostatistics Flow Debug Double-Check — Full Implementation (v3)</title>
+    <branch>test/debug-factorial-run</branch>
+    <date>2026-03-20</date>
+    <status>planned</status>
+    <priority>P0 — validates complete biostatistics pipeline before production run</priority>
+    <predecessor>docs/planning/run-debug-factorial-experiment-report-2nd-pass-fix-plan.xml</predecessor>
+    <supersedes>biostatistic-flow-debug-double-check.xml (v2, same date)</supersedes>
+    <estimated-time>12-16 hours (data verification + implementation + testing)</estimated-time>
+    <synthesis-reference>docs/planning/intermedia-plan-synthesis-pre-debug-run.md</synthesis-reference>
+    <version-note>
+      v3 corrects the factorial arithmetic to match the synthesis:
+      - Full factorial: 4x3x2x3x2x5 = 720 conditions (NOT 24)
+      - 24 is ONLY the training layer (Layer A). Post-training (Layer B: x3x2) and ensemble (Layer C: x5) multiply it.
+      - Debug factorial: 4x3x2x2x2x4 = 384 conditions x 1 fold
+      - ONLY Layer A runs on GPU (~$65). Layers B+C on local CPU (free).
+      - Factorial YAML is COMPOSABLE via Hydra config groups.
+      - ANOVA is LAYERED: core 3-way -> extended 5-way -> ensemble analysis separately.
+      - Biostatistics auto-derives ALL factors from whichever factorial YAML was used (zero hardcoded factor names).
+    </version-note>
+  </metadata>
+
+  <context>
+    <summary>
+      Verify and complete the biostatistics pipeline for the FULL 6-factor factorial
+      experiment across 4 compute layers. The synthesis document
+      (intermedia-plan-synthesis-pre-debug-run.md) defines the COMPLETE factorial as:
+
+        4 models x 3 losses x 2 aux_calib x 3 post-training x 2 recalibration x 5 ensemble
+        = 720 CONDITIONS (production) or 384 conditions (debug)
+
+      Source of truth: docs/planning/pre-gcp-master-plan.xml line 16.
+
+      The 24-cell number that appears throughout earlier documents is ONLY Layer A
+      (training). The full factorial multiplies Layer A x Layer B x Layer C:
+        Layer A (Training, GPU):     4 x 3 x 2 = 24 cells [x fold_id]     ~$65 cloud
+        Layer B (Post-Training, CPU): x 3 post-training x 2 recalibration   FREE (local)
+        Layer C (Analysis, CPU):      x 5 ensemble strategies               FREE (local)
+        Layer D (Biostatistics):      analytical choices (spec curve)        FREE (local)
+
+      COST MODEL: Only Layer A costs money on GPU (~$65 for 72 production runs on
+      GCP L4 spot). Layers B and C run on the researcher's local CPU for free.
+      This is a critical architectural advantage — the factorial explodes in conditions
+      (720) but NOT in cloud cost.
+
+      The factorial YAML is COMPOSABLE via Hydra config groups. paper_full.yaml and
+      debug.yaml are just TWO EXAMPLE named configs in configs/factorial/. A different
+      lab could create my_lab.yaml with 2 models x 1 loss x 1 calib x 1 post-training
+      x 1 recalib x 2 ensemble. The biostatistics flow must auto-derive ALL factors
+      from whichever factorial YAML was used — zero hardcoded factor names.
+
+      The YAML structure is sectioned by layer:
+        factors.training:       model_family, loss_name, aux_calibration
+        factors.post_training:  method, recalibration
+        factors.analysis:       ensemble_strategy
+        fixed:                  max_epochs, num_folds
+
+      Pipeline topology:
+        Training (Flow 2) --> Post-Training (Flow 2.5) --> Analysis (Flow 3) --> Biostatistics (Flow 5b)
+
+      Key constraints:
+      1. Auto-derive ALL factors from factorial YAML (not hardcoded — zero factor names in code)
+      2. Query MLflow for all runs across training + post-training + evaluation experiments
+      3. Extract PER-VOLUME metrics (N=23 per fold = unit of analysis), not fold aggregates
+      4. ANOVA is LAYERED: core 3-way (model x loss x calib) -> extended 5-way (+post_training x recalib) -> ensemble analysis separately
+      5. K=1 debug uses per-volume replication; K=3 production uses fold as random effect
+      6. All statistical params from BiostatisticsConfig (CLAUDE.md Rule #29)
+      7. Specification curve iterates ALL Layer D analytical choices
+      8. Ensemble strategies ARE factorial factors for biostatistics (RESOLVED, not a question)
+      9. Platform paper (Nature Protocols) — demonstrate platform capability, not SOTA
+    </summary>
+
+    <factorial-design>
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <!-- COMPOSABLE FACTORIAL YAML (Hydra Config Groups)                -->
+      <!-- Source: configs/factorial/*.yaml — user-extensible              -->
+      <!-- paper_full.yaml and debug.yaml are EXAMPLE named configs       -->
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <composable-yaml>
+        <description>
+          The factorial design is COMPOSABLE via Hydra config groups. Users define
+          their own factorial YAML in configs/factorial/. The platform provides
+          paper_full.yaml and debug.yaml as examples. A different lab can create
+          my_lab.yaml with any subset of factor levels.
+
+          The YAML structure is sectioned by layer:
+            factors:
+              training:        # Layer A (GPU, cloud)
+                model_family: [dynunet, mambavesselnet, sam3_topolora, sam3_hybrid]
+                loss_name: [cbdice_cldice, dice_ce, dice_ce_cldice]
+                aux_calibration: [true, false]
+              post_training:   # Layer B (CPU, local)
+                method: [none, swa, multi_swa]
+                recalibration: [none, temperature_scaling]
+              analysis:        # Layer C (CPU/GPU)
+                ensemble_strategy: [none, per_loss_single_best, all_loss_single_best,
+                                    per_loss_all_best, all_loss_all_best]
+            fixed:
+              max_epochs: 50
+              num_folds: 3
+
+          The biostatistics flow reads whichever factorial YAML was used and
+          auto-derives ALL factor names and levels. Zero hardcoded factor names.
+        </description>
+        <named-configs>
+          <config name="paper_full.yaml" path="configs/factorial/paper_full.yaml">
+            Full: 4x3x2x3x2x5 = 720 conditions x 3 folds = 2160 evaluations
+          </config>
+          <config name="debug.yaml" path="configs/factorial/debug.yaml">
+            Debug: 4x3x2x2x2x4 = 384 conditions x 1 fold = 384 evaluations
+          </config>
+        </named-configs>
+      </composable-yaml>
+
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <!-- LAYER A: Training Factors (GPU, cloud-only)                    -->
+      <!-- Source of truth: configs/factorial/*.yaml::factors.training     -->
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <layer id="A" name="Training Factors" compute="GPU" location="cloud" cost="~$65 GCP L4 spot">
+        <factors>
+          <factor name="model_family" levels="4" config-key="factors.training.model_family">dynunet, mambavesselnet, sam3_topolora, sam3_hybrid</factor>
+          <factor name="loss_name" levels="3" config-key="factors.training.loss_name">cbdice_cldice, dice_ce, dice_ce_cldice</factor>
+          <factor name="aux_calibration" levels="2" config-key="factors.training.aux_calibration">true, false</factor>
+        </factors>
+        <random-effects>
+          <effect name="fold_id" levels="3" debug-levels="1">0, 1, 2 (seed from BiostatisticsConfig.seed)</effect>
+        </random-effects>
+        <zero-shot-baselines note="Evaluated but NOT trained in factorial grid">
+          <baseline name="sam3_vanilla" dataset="minivess,deepvess" strategy="frozen_encoder_eval"/>
+          <baseline name="vesselfm" dataset="deepvess" strategy="zero_shot_only" note="Data leakage on MiniVess"/>
+        </zero-shot-baselines>
+        <design-size>
+          <trainable-cells>24 (4 x 3 x 2)</trainable-cells>
+          <production-runs>72 (24 x 3 folds)</production-runs>
+          <debug-runs>24 (24 x 1 fold)</debug-runs>
+        </design-size>
+      </layer>
+
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <!-- LAYER B: Post-Training Factors (CPU, local-capable, FREE)      -->
+      <!-- Source of truth: configs/factorial/*.yaml::factors.post_training -->
+      <!--                  src/minivess/config/post_training_config.py    -->
+      <!--                  knowledge-graph/decisions/L3-technology/calibration_method.yaml -->
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <layer id="B" name="Post-Training Factors" compute="CPU" location="local-capable" cost="FREE (local CPU)">
+        <description>
+          Applied to each trained checkpoint AFTER training. These are model-agnostic
+          weight-space operations. No gradients flow. Each training run can produce
+          MULTIPLE post-training variants.
+
+          Production: {none, swa, multi_swa} x {none, temperature_scaling} = 6 variants per training cell
+          Debug: {none, swa} x {none, temperature_scaling} = 4 variants per training cell
+
+          This is WHERE the factorial explodes beyond 24 — but at ZERO additional cloud cost.
+        </description>
+        <factors>
+          <factor name="post_training_method" full-levels="3" debug-levels="2" config-key="factors.post_training.method">
+            Full: none, swa, multi_swa (3 levels)
+            Debug: none, swa (2 levels — multi_swa dropped for debug)
+          </factor>
+          <factor name="recalibration" full-levels="2" debug-levels="2" config-key="factors.post_training.recalibration">
+            Full: none, temperature_scaling (2 levels)
+            Debug: none, temperature_scaling (2 levels — same as full)
+          </factor>
+        </factors>
+        <expansion-rule>
+          Each Layer A training run produces (post_training_method levels) x
+          (recalibration levels) post-training variants:
+          - Production: 72 training runs x 6 = 432 post-training variants
+          - Debug: 24 training runs x 4 = 96 post-training variants
+          These are NEW MLflow runs tagged with the method, inheriting all upstream Layer A tags.
+        </expansion-rule>
+        <mlflow-tags>
+          <tag name="post_training_method">none, swa, multi_swa</tag>
+          <tag name="recalibration">none, temperature_scaling</tag>
+          <tag name="upstream_training_run_id">MLflow run_id of parent training run</tag>
+        </mlflow-tags>
+      </layer>
+
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <!-- LAYER C: Analysis Factors (CPU for DynUNet, GPU for SAM3)      -->
+      <!-- Source of truth: configs/factorial/*.yaml::factors.analysis     -->
+      <!--                  src/minivess/ensemble/builder.py::EnsembleStrategyName -->
+      <!--                  src/minivess/config/evaluation_config.py       -->
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <layer id="C" name="Analysis Factors" compute="CPU/GPU" location="local-capable" cost="FREE (local CPU for DynUNet)">
+        <description>
+          Ensemble predictions built from all training + post-training runs. Each
+          ensemble strategy is a NEW factorial condition for Biostatistics. Ensemble
+          averaging happens at the LOGIT level (average probability maps, then threshold,
+          then compute metrics). NOT: compute per-member metrics, then average.
+
+          Production: 5 ensemble strategies (none + 4)
+          Debug: 4 ensemble strategies (drop 'none' for debug)
+        </description>
+        <factors>
+          <factor name="ensemble_strategy" full-levels="5" debug-levels="4" config-key="factors.analysis.ensemble_strategy">
+            Full: none, per_loss_single_best, all_loss_single_best, per_loss_all_best, all_loss_all_best (5 levels)
+            Debug: per_loss_single_best, all_loss_single_best, per_loss_all_best, all_loss_all_best (4 levels — 'none' dropped)
+          </factor>
+        </factors>
+        <mlflow-experiment>minivess_evaluation (separate from training experiment)</mlflow-experiment>
+        <mlflow-tags>
+          <tag name="ensemble_strategy">per_loss_single_best, etc.</tag>
+          <tag name="upstream_training_run_id">MLflow run_id(s) of ensemble members</tag>
+        </mlflow-tags>
+      </layer>
+
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <!-- LAYER D: Biostatistics Analytical Choices (NOT experimental)   -->
+      <!-- These are researcher degrees of freedom, NOT factorial factors  -->
+      <!-- The specification curve iterates over ALL of these              -->
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <layer id="D" name="Biostatistics Analytical Choices" compute="CPU" location="local" cost="FREE">
+        <description>
+          These are NOT experimental factors — they are analytical choices (researcher
+          degrees of freedom). The specification curve analysis systematically varies
+          them to demonstrate how conclusions change (Simonsohn et al., 2020).
+        </description>
+        <analytical-choices>
+          <choice name="metric" levels="8+">clDice, MASD, DSC, HD95, ASSD, NSD, BE_0, BE_1</choice>
+          <choice name="aggregation" levels="2">mean, median</choice>
+          <choice name="MCC_method" levels="2">holm_bonferroni (co-primary), bh_fdr (secondary)</choice>
+          <choice name="alpha" levels="configurable">from BiostatisticsConfig.alpha (default 0.05)</choice>
+          <choice name="rope" levels="per-metric">from BiostatisticsConfig.rope_values</choice>
+          <choice name="fold_subset" levels="varies">all folds, leave-one-out, single fold</choice>
+          <choice name="test_type" levels="4+">wilcoxon, friedman, bayesian_signed_rank, bootstrap</choice>
+          <choice name="effect_size" levels="3">cohens_d, cliffs_delta, vda</choice>
+        </analytical-choices>
+      </layer>
+
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <!-- FULL FACTORIAL TOTALS (All 6 Experimental Factors)             -->
+      <!-- Source: pre-gcp-master-plan.xml line 16                        -->
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <full-factorial-totals>
+        <production>
+          <formula>4 x 3 x 2 x 3 x 2 x 5 = 720 conditions x 3 folds = 2160 evaluations</formula>
+          <layer-a>4 x 3 x 2 = 24 training cells x 3 folds = 72 GPU runs (~$65)</layer-a>
+          <layer-b>72 x 3 x 2 = 432 post-training variants (FREE, local CPU)</layer-b>
+          <layer-c>432 x 5 = 2160 evaluation runs (FREE, local CPU for DynUNet)</layer-c>
+          <zero-shot>+ 2 baselines x 3 folds = 6 additional evaluations</zero-shot>
+        </production>
+        <debug>
+          <formula>4 x 3 x 2 x 2 x 2 x 4 = 384 conditions x 1 fold = 384 evaluations</formula>
+          <layer-a>4 x 3 x 2 = 24 training cells x 1 fold = 24 GPU runs (~$5-10)</layer-a>
+          <layer-b>24 x 2 x 2 = 96 post-training variants (FREE, local CPU)</layer-b>
+          <layer-c>96 x 4 = 384 evaluation runs (FREE, local CPU for DynUNet)</layer-c>
+          <zero-shot>+ 2 baselines x 1 fold = 2 additional evaluations</zero-shot>
+        </debug>
+        <cost-model>
+          ONLY Layer A runs on GPU (cloud). Layers B + C run on local CPU (FREE).
+          The factorial explodes in conditions (720 production / 384 debug) but
+          NOT in cloud cost (~$65 production / ~$5-10 debug).
+        </cost-model>
+      </full-factorial-totals>
+    </factorial-design>
+
+    <unit-of-analysis>
+      <!-- CRITICAL: per-volume data is the unit of analysis -->
+      <description>
+        Per-volume metrics are the unit of analysis (N=23 per fold for MiniVess val).
+        This enables paired statistical tests (Wilcoxon signed-rank), per-volume
+        specification curve analysis, and bootstrap confidence intervals.
+      </description>
+      <debug-mode>
+        K=1 fold: per-volume replication (N=23 volumes) provides the replication
+        units for ANOVA and pairwise tests. No fold random effect needed.
+      </debug-mode>
+      <production-mode>
+        K=3 folds: fold as random effect in mixed model. Per-volume scores nested
+        within folds. N = 23 volumes x 3 folds = 69 observations per condition.
+      </production-mode>
+      <metric-prefix>eval/{fold_id}/vol/{volume_id}/{metric_name}</metric-prefix>
+      <external-test-prefix>test/deepvess/vol/{volume_id}/{metric_name}</external-test-prefix>
+    </unit-of-analysis>
+
+    <metric-hierarchy>
+      <!-- Source: knowledge-graph/decisions/L3-technology/primary_metrics.yaml + MetricsReloaded -->
+      <co-primary correction="holm-bonferroni">
+        <metric name="clDice" mlflow-key="val/cldice" rationale="Centerline topology preservation for tubular structures"/>
+        <metric name="MASD" mlflow-key="val/masd" rationale="Mean Average Surface Distance — boundary accuracy"/>
+      </co-primary>
+      <foil correction="bh-fdr" rationale="Included to demonstrate misleading ranking for tubular structures — rank inversion IS a finding">
+        <metric name="DSC" mlflow-key="val/dice"/>
+      </foil>
+      <secondary correction="bh-fdr">
+        <metric name="HD95" mlflow-key="val/hd95"/>
+        <metric name="ASSD" mlflow-key="val/assd"/>
+        <metric name="NSD" mlflow-key="val/nsd"/>
+        <metric name="BE_0" mlflow-key="val/betti_error_0"/>
+        <metric name="BE_1" mlflow-key="val/betti_error_1"/>
+      </secondary>
+      <compound>
+        <metric name="compound_masd_cldice" rationale="Champion selection metric (combines MASD + clDice)"/>
+      </compound>
+      <test-split>
+        <metric name="test/deepvess/clDice" prefix="test/deepvess/cldice"/>
+        <metric name="test/deepvess/MASD" prefix="test/deepvess/masd"/>
+        <metric name="test/deepvess/DSC" prefix="test/deepvess/dice"/>
+      </test-split>
+    </metric-hierarchy>
+
+    <mvrd-scope note="Minimum Viable Research Design — debug pipeline validation">
+      <!-- Source: synthesis Part 1.3 + Part 1.4 debug.yaml -->
+      <full-factorial>
+        720 conditions x 3 folds = 2160 evaluations (production)
+        384 conditions x 1 fold = 384 evaluations (debug)
+      </full-factorial>
+      <training>4 models x 3 losses x 2 calibrations x 1 fold x 2 epochs = 24 GPU runs</training>
+      <post-training>24 runs x {none, swa} x {none, temperature_scaling} = 96 variants (local CPU, FREE)</post-training>
+      <analysis>96 variants x 4 ensemble strategies = 384 evaluations + 2 zero-shot baselines (local CPU, FREE)</analysis>
+      <biostatistics>Layered ANOVA on ALL 6 factors from Layers A+B+C + spec curve + rank stability + calibration metrics</biostatistics>
+      <scope-reductions note="ONLY these reductions allowed (Rule #27) — ALL 6 factorial dimensions present, fewer levels">
+        <reduction>Epochs: 2 (not 50)</reduction>
+        <reduction>Data: half volumes (~23 train / ~12 val)</reduction>
+        <reduction>Folds: 1 (fold-0 only, not 3-fold CV)</reduction>
+        <reduction>Post-training levels: 2 (not 3) — {none, swa} instead of {none, swa, multi_swa}</reduction>
+        <reduction>Ensemble levels: 4 (not 5) — drop 'none' for debug</reduction>
+      </scope-reductions>
+      <everything-else-identical>
+        All 4 models, all 3 losses, both calibration levels, recalibration (2 levels),
+        all remaining ensemble strategies (4), all zero-shot baselines, all statistical
+        tests, all analytical choices. Debug = full production with less training and
+        fewer factor levels, NOT less testing.
+      </everything-else-identical>
+    </mvrd-scope>
+  </context>
+
+  <phases>
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="0" name="Data Availability Verification (All 4 Layers, All 6 Factors)">
+      <description>
+        Verify that the biostatistics flow can access ALL required data from MLflow
+        across ALL four layers and ALL 6 experimental factors. Test both Cloud Run
+        API path and local mlruns path. Write tests FIRST (TDD RED), then fix any gaps.
+
+        Key point: the biostatistics flow must auto-derive factor names from the
+        factorial YAML (configs/factorial/*.yaml), NOT from hardcoded lists.
+        The factor structure is:
+          factors.training:      model_family, loss_name, aux_calibration
+          factors.post_training: method, recalibration
+          factors.analysis:      ensemble_strategy
+      </description>
+      <tasks>
+        <task id="T0.1" skill="self-learning-iterative-coder">
+          Write test: MLflow run discovery finds all Layer A factorial conditions.
+          File: tests/v2/unit/biostatistics/test_data_availability.py
+
+          Test that discover_source_runs() can find N runs (where N matches
+          the factorial design: model_family x loss_name x aux_calibration x folds).
+
+          Must verify:
+          - Each run has model_family tag
+          - Each run has with_aux_calib tag
+          - Each run has fold_id
+          - Each run has loss_function tag (note: tag mismatch B3 — training logs
+            loss_name but ensemble builder reads loss_function)
+          - Completeness: all 24 cells x K folds present
+        </task>
+
+        <task id="T0.2" skill="self-learning-iterative-coder">
+          Write test: MLflow run discovery finds all Layer B post-training variants.
+
+          Test that discover_source_runs() also finds post-training runs tagged with:
+          - post_training_method (none, swa, multi_swa)
+          - recalibration (none, temperature_scaling)
+          - upstream_training_run_id (links back to parent Layer A run)
+          - ALL inherited Layer A tags (model_family, loss_name, fold_id, with_aux_calib)
+
+          For debug: 24 training x 4 variants = 96 post-training runs expected.
+          For production: 72 training x 6 variants = 432 post-training runs expected.
+        </task>
+
+        <task id="T0.3" skill="self-learning-iterative-coder">
+          Write test: MLflow run discovery finds all Layer C analysis/ensemble runs.
+
+          Test that discover_source_runs() finds runs in minivess_evaluation with:
+          - ensemble_strategy tag (per_loss_single_best, etc.)
+          - Inherited model_family (or "ensemble" for multi-model ensembles)
+          - Per-volume metrics at: eval/{fold_id}/vol/{volume_id}/{metric}
+
+          For debug: 96 post-training x 4 ensemble strategies = 384 evaluation runs.
+          For production: 432 post-training x 5 ensemble strategies = 2160 evaluation runs.
+        </task>
+
+        <task id="T0.4" skill="self-learning-iterative-coder">
+          Write test: DuckDB schema has ALL 6 factorial columns (Layers A+B+C).
+          Verify the runs table includes:
+          - Layer A: model_family, loss_name, with_aux_calib, fold_id
+          - Layer B: post_training_method, recalibration
+          - Layer C: ensemble_strategy
+          Verify eval_metrics has per-volume rows (not just aggregates).
+          Verify test_metrics has DeepVess rows.
+        </task>
+
+        <task id="T0.5" skill="self-learning-iterative-coder">
+          Write test: per-volume metrics are queryable from DuckDB.
+          For each condition (across all 6 factors from all layers), can we get
+          individual volume scores for clDice, MASD, DSC? These are needed for
+          Wilcoxon and spec curve.
+          Unit of analysis = per-volume (N=23 per fold), NOT per-fold aggregates.
+        </task>
+
+        <task id="T0.6">
+          Write test: factorial config auto-parsing from composable YAML.
+          Parse configs/factorial/debug.yaml -> extract factors dict with 3 sections:
+            factors.training -> {model_family: [...], loss_name: [...], aux_calibration: [...]}
+            factors.post_training -> {method: [...], recalibration: [...]}
+            factors.analysis -> {ensemble_strategy: [...]}
+          Verify the total product = 384 (debug) or 720 (paper_full).
+          Verify that factor names are AUTO-DERIVED from YAML keys, not hardcoded.
+          Also verify: a hypothetical my_lab.yaml with 2x1x1x1x1x2 = 4 conditions works.
+        </task>
+
+        <task id="T0.7">
+          Write test: zero-shot baselines (sam3_vanilla, vesselfm) are discoverable.
+          These are NOT part of the training factorial grid but must be included
+          in the biostatistics analysis. Verify they can be queried from MLflow
+          and distinguished from trained models via tags.
+        </task>
+
+        <task id="T0.8">
+          Write test: all statistical parameters come from BiostatisticsConfig.
+          Verify NO hardcoded alpha, seed, ROPE values, or metric names in
+          biostatistics_statistics.py, biostatistics_specification_curve.py,
+          or biostatistics_flow.py. All must read from config objects.
+        </task>
+      </tasks>
+      <gate>All data availability tests written. Identify which FAIL across all 4 layers and all 6 factors.</gate>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="1" name="Fix Data Pipeline Gaps (All 4 Layers, All 6 Factors)">
+      <description>
+        Fix all data gaps identified in Phase 0. Ensure all 6 factorial factor
+        tags (from Layers A, B, and C) are discoverable and stored in DuckDB.
+        Ensure per-volume metrics are the unit of analysis.
+      </description>
+      <tasks>
+        <task id="T1.1">
+          Add ALL 6 factorial columns to SourceRun and DuckDB schema.
+
+          File: src/minivess/pipeline/biostatistics_types.py
+          ADD to SourceRun:
+          - model_family: str (Layer A, factor 1)
+          - with_aux_calib: bool (Layer A, factor 3)
+          - post_training_method: str | None (Layer B, factor 4)
+          - recalibration: str | None (Layer B, factor 5)
+          - ensemble_strategy: str | None (Layer C, factor 6)
+
+          File: src/minivess/pipeline/biostatistics_duckdb.py
+          ADD to _DDL_RUNS:
+          - model_family VARCHAR
+          - with_aux_calib BOOLEAN
+          - post_training_method VARCHAR DEFAULT 'none'
+          - recalibration VARCHAR DEFAULT 'none'
+          - ensemble_strategy VARCHAR DEFAULT NULL
+        </task>
+
+        <task id="T1.2">
+          Update discovery to read ALL 6 factor tags from MLflow.
+
+          File: src/minivess/pipeline/biostatistics_discovery.py
+          In discover_source_runs():
+          - Extract model_family from run tags (Layer A, factor 1)
+          - Extract loss_name from run tags (Layer A, factor 2)
+          - Extract with_aux_calib from run tags (Layer A, factor 3)
+          - Extract post_training_method from run tags (Layer B, factor 4, default "none")
+          - Extract recalibration from run tags (Layer B, factor 5, default "none")
+          - Extract ensemble_strategy from run tags (Layer C, factor 6, default None)
+          - Handle tag mismatch B3: fallback chain for loss_name vs loss_function
+
+          Discovery must query MULTIPLE MLflow experiments:
+          - minivess_training (Layer A runs)
+          - minivess_post_training (Layer B runs)
+          - minivess_evaluation (Layer C runs)
+        </task>
+
+        <task id="T1.3">
+          Add auto-parsing of factorial config from composable YAML.
+
+          File: src/minivess/config/biostatistics_config.py
+          Add: parse_factorial_design(yaml_path) -> FactorialDesign dataclass
+          with:
+          - training_factors: dict (from factors.training section)
+          - post_training_factors: dict (from factors.post_training section)
+          - analysis_factors: dict (from factors.analysis section)
+          - all_factor_names: list[str] (auto-derived from all 3 sections)
+          - expected_conditions: int (product of ALL factor levels across all layers)
+          - layer_a_conditions: int (product of training factors only — this is what costs GPU)
+          - metric_hierarchy: MetricHierarchy (co-primary, foil, secondary)
+
+          This must work for ANY factorial YAML, not just paper_full or debug.
+          A lab creating my_lab.yaml with 2x1x1x1x1x2 = 4 conditions must work.
+        </task>
+
+        <task id="T1.4">
+          Verify per-volume metrics are logged by analysis_flow.
+          Check that eval_metrics DuckDB table contains individual volume
+          scores (eval/{fold_id}/vol/{volume_id}/{metric}), not just
+          fold-level aggregates. This is the unit of analysis.
+        </task>
+
+        <task id="T1.5">
+          Add zero-shot baseline handling to discovery.
+          sam3_vanilla and vesselfm are evaluated but not trained in the factorial
+          grid. They must be discoverable and tagged as is_zero_shot=true so
+          biostatistics can:
+          (a) include them in overall ranking analysis
+          (b) exclude them from factorial ANOVA (they have no loss/calib/post-training factors)
+          (c) include them in pairwise comparisons against trained models
+          (d) include them in specification curve as additional conditions
+        </task>
+
+        <task id="T1.6">
+          Add external test set (DeepVess) discovery.
+          Biostatistics must analyze BOTH trainval (MiniVess CV) and test (DeepVess)
+          splits separately, as decided in QA round 4. The discovery must find
+          test/deepvess/* metrics and store them in a separate DuckDB table or
+          with a split column.
+        </task>
+      </tasks>
+      <gate>All Phase 0 tests GREEN across all 4 layers and all 6 factors.</gate>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="2" name="Implement Layered N-Way Factorial ANOVA">
+      <description>
+        Implement the LAYERED ANOVA structure that matches the 4-layer factorial:
+
+        ANOVA Phase 1 — Core 3-way (Layer A factors only):
+          model_family x loss_name x aux_calibration
+          Available immediately after Training Flow completes.
+          Answers: "Which model/loss/calibration combination is best?"
+
+        ANOVA Phase 2 — Extended 5-way (Layer A + B factors):
+          model_family x loss_name x aux_calibration x post_training_method x recalibration
+          Available after Post-Training Flow completes.
+          Answers: "Does SWA/temperature scaling improve results? Interaction with model choice?"
+
+        ANOVA Phase 3 — Ensemble analysis (Layer C factor, analyzed separately):
+          ensemble_strategy analyzed separately because ensemble conditions are NOT
+          independent of training conditions (ensembles are COMPOSED FROM training runs).
+          Answers: "Which ensemble strategy performs best? Does it interact with model family?"
+
+        The factor list is auto-derived from the factorial YAML — NOT hardcoded to 3 or 5 or 6.
+        The layered structure matches the progressive availability of upstream flow results.
+
+        K=1 debug: per-volume replication (N=23). K=3 production: fold as random effect.
+      </description>
+      <tasks>
+        <task id="T2.1" skill="self-learning-iterative-coder">
+          Write test: Layered ANOVA produces correct results at each phase.
+
+          ANOVA Phase 1 — Core 3-way (Layer A: model x loss x calib):
+          - 3 main effects: model_family, loss_name, aux_calibration
+          - 3 two-way interactions: model*loss, model*calib, loss*calib
+          - 1 three-way interaction: model*loss*calib
+          - Partial eta-squared and omega-squared for each
+
+          ANOVA Phase 2 — Extended 5-way (Layer A+B: +post_training x recalib):
+          - 5 main effects
+          - 10 two-way interactions
+          - 10 three-way interactions
+          - All effect sizes computed
+
+          ANOVA Phase 3 — Ensemble analysis (Layer C):
+          - ensemble_strategy main effect
+          - ensemble_strategy x model_family interaction
+          - Separate from Phases 1-2 because ensembles are composed from training runs
+
+          All parameters from BiostatisticsConfig (alpha, seed, etc.).
+          Factor names auto-derived from factorial YAML, not hardcoded.
+        </task>
+
+        <task id="T2.2">
+          Verify compute_factorial_anova() handles the layered approach.
+
+          File: src/minivess/pipeline/biostatistics_statistics.py
+          The implementation must accept factor_names: list[str] derived from config
+          and build the formula dynamically. Verify it works for:
+          - Phase 1: 3 factors (Layer A only) — core ANOVA, always available
+          - Phase 2: 5 factors (Layers A + B) — extended after post-training
+          - Phase 3: ensemble_strategy analyzed separately with selected covariates
+          Ensure factor_names comes from parsed factorial YAML, never hardcoded.
+        </task>
+
+        <task id="T2.3">
+          For debug run (K=1 fold): verify per-volume replication works.
+          When num_folds=1, per-volume scores (N=23) are the replication units.
+          Verify the existing K=1 fallback in compute_factorial_anova()
+          correctly uses standard ANOVA with per-volume data, not mixed model.
+          Must work for all 3 ANOVA phases (3-way, 5-way, ensemble).
+        </task>
+
+        <task id="T2.4">
+          For production run (K=3 folds): verify fold as random effect.
+          When num_folds=3, fold is a random effect (mixed model).
+          Verify pingouin/statsmodels handles N-way with fold as random effect.
+          Note: pingouin.mixed_anova only supports 1 between + 1 within, so
+          for 3+ between factors, document the statistical approach taken.
+          Must work for all 3 ANOVA phases.
+        </task>
+      </tasks>
+      <gate>Layered ANOVA returns correct structure for synthetic test data at all 3 phases (3-way, 5-way, ensemble).</gate>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="3" name="Implement Specification Curve Analysis (All Layer D Choices)">
+      <description>
+        Full specification curve across ALL Layer D researcher degrees of freedom:
+        metric choice, aggregation method, test_type, effect_size measure,
+        MCC_method, fold_subset, ROPE width, alpha level.
+
+        The specification curve iterates ALL analytical choices from BiostatisticsConfig
+        to demonstrate how conclusions change across researcher degrees of freedom
+        (Simonsohn et al., 2020).
+      </description>
+      <tasks>
+        <task id="T3.1" skill="self-learning-iterative-coder">
+          Write test: specification curve iterates ALL Layer D choices.
+          For the debug factorial design (384 conditions), the specification space should include:
+          - 8 metrics x 2 aggregation x 4 test_types x 3 effect_sizes = 192 base
+          - With condition pairs: 192 x C(n_conditions, 2) total specifications
+          All parameters from BiostatisticsConfig.
+        </task>
+
+        <task id="T3.2">
+          Verify specification curve engine handles expanded Layer D choices.
+
+          File: src/minivess/pipeline/biostatistics_specification_curve.py
+          The current implementation iterates metric x aggregation x condition_pair.
+          Extend to also iterate:
+          - test_type: wilcoxon, friedman, bayesian_signed_rank, bootstrap
+          - effect_size: cohens_d, cliffs_delta, vda
+          - MCC_method: holm_bonferroni, bh_fdr
+          - fold_subset: all, leave-one-out (production only, skip for K=1)
+
+          All choice levels read from BiostatisticsConfig, not hardcoded.
+        </task>
+
+        <task id="T3.3">
+          Wire expanded specification curve into biostatistics_flow.py.
+          Verify it is wired as a Prefect task after pairwise comparisons.
+          Verify Layer D choices are passed from BiostatisticsConfig.
+        </task>
+
+        <task id="T3.4">
+          Specification curve for external test set (DeepVess).
+          Run a separate specification curve for test/deepvess metrics.
+          This demonstrates the platform handles arbitrary test datasets.
+        </task>
+      </tasks>
+      <gate>Specification curve generates correct figure with synthetic data, iterating all Layer D choices.</gate>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="4" name="Implement Rank Stability + Calibration + Derived Metrics">
+      <description>
+        Compute rank stability index (does metric choice change model ranking?),
+        calibration assessment, and other derived metrics. All must handle
+        ALL 6 factorial factors from Layers A+B+C, not just Layer A alone.
+      </description>
+      <tasks>
+        <task id="T4.1">
+          Implement rank stability analysis across all 720/384 conditions.
+          For each pair of metrics (clDice vs DSC, MASD vs DSC, etc.):
+          - Compute Kendall's tau between model rankings
+          - Test significance of rank agreement
+          - The clDice vs DSC rank inversion IS a paper finding
+
+          Rankings must be computed across ALL Layer A+B+C conditions (not just
+          model_family alone). A post-training method that improves DSC ranking
+          but not clDice ranking is a finding. An ensemble strategy that changes
+          rank order is a finding.
+        </task>
+
+        <task id="T4.2">
+          Implement calibration metrics (Brier score, O/E ratio, IPA).
+          Read from post-training flow calibration artifacts (Layer B).
+          Compare calibrated vs uncalibrated variants (recalibration factor).
+          Already partially implemented — verify and extend.
+        </task>
+
+        <task id="T4.3">
+          Implement Bayesian analysis upgrades.
+          Use baycomp for Bayesian signed-rank with ROPE.
+          ROPE values from BiostatisticsConfig.rope_values (not hardcoded).
+          Already partially implemented — verify and extend.
+        </task>
+
+        <task id="T4.4">
+          Bootstrap ranking instability (Riley et al.) across all conditions.
+          Verify compute_riley_instability() handles conditions from all 6 factors.
+          Use n_bootstrap from BiostatisticsConfig.n_bootstrap.
+        </task>
+      </tasks>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="5" name="Layer B + C Factor Integration into Layered ANOVA">
+      <description>
+        Ensure that post-training (Layer B) and ensemble (Layer C) factors are
+        treated as first-class ANOVA factors in the layered structure. The synthesis
+        explicitly states: "Ensemble strategies are factorial factors for biostatistics
+        (NOT a question — resolved)"
+
+        The layered ANOVA from Phase 2 progressively includes these factors as
+        upstream flows complete. This phase tests the integration end-to-end.
+      </description>
+      <tasks>
+        <task id="T5.1" skill="self-learning-iterative-coder">
+          Write test: ANOVA Phase 2 includes Layer B factors.
+          Create synthetic data with conditions spanning all 5 factors:
+          e.g., dynunet__dice_ce__calibTrue__swa__temp_scaling
+          Verify that compute_factorial_anova() with factor_names auto-derived from
+          factors.training + factors.post_training sections produces:
+          - 5 main effects
+          - 10 two-way interactions
+          - All effect sizes computed
+        </task>
+
+        <task id="T5.2" skill="self-learning-iterative-coder">
+          Write test: ANOVA Phase 3 includes Layer C ensemble_strategy.
+          Ensemble is analyzed separately because ensembles are composed from
+          training runs (not independent). Verify that conditions like:
+          dynunet__dice_ce__calibTrue__swa__none__per_loss_single_best
+          produce valid separate ANOVA results with ensemble_strategy as a factor
+          cross-tabulated with selected Layer A covariates.
+        </task>
+
+        <task id="T5.3">
+          Implement progressive factor inclusion (matches layered ANOVA structure).
+          The biostatistics flow should support running ANOVA in stages:
+          1. Phase 1: Layer A only (3-way — always available after training)
+          2. Phase 2: Layer A + B (5-way — after post-training flow runs)
+          3. Phase 3: Layer C separately (ensemble analysis — after analysis flow)
+
+          The factor_names list is auto-derived from the factorial YAML's section
+          structure (factors.training, factors.post_training, factors.analysis).
+          Which phases run is determined by which upstream data is available.
+        </task>
+
+        <task id="T5.4">
+          Handle unbalanced designs gracefully.
+          When Layer B or C factors create unbalanced cells (e.g., some models
+          have SWA variants, others don't), the ANOVA must:
+          - Use Type III sum of squares (already implemented via statsmodels)
+          - Log a warning about unbalanced cells
+          - Still produce valid results
+        </task>
+      </tasks>
+      <gate>Layered ANOVA produces correct results for Phase 1 (3-way), Phase 2 (5-way), and Phase 3 (ensemble).</gate>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="6" name="Zero-Shot Baseline Analysis">
+      <description>
+        Handle sam3_vanilla and vesselfm zero-shot baselines in
+        the biostatistics pipeline. These models are NOT part of the 6-factor
+        factorial grid but must be included in ranking and pairwise analysis.
+      </description>
+      <tasks>
+        <task id="T6.1" skill="self-learning-iterative-coder">
+          Write test: zero-shot baselines are included in pairwise comparisons.
+          sam3_vanilla vs each trained model on MiniVess metrics.
+          vesselfm vs each trained model on DeepVess metrics ONLY.
+        </task>
+
+        <task id="T6.2">
+          Implement zero-shot baseline analysis.
+          - Exclude zero-shot models from factorial ANOVA (they lack loss/calib/post-training factors)
+          - Include in overall model ranking (rank stability, bootstrap)
+          - Include in pairwise Wilcoxon comparisons vs trained models
+          - Include in specification curve as additional conditions
+          - Flag vesselfm as DeepVess-only (MiniVess evaluation = data leakage)
+        </task>
+
+        <task id="T6.3">
+          Add is_zero_shot tag handling in SourceRun and DuckDB schema.
+          SourceRun gains: is_zero_shot: bool = False
+          DuckDB runs table gains: is_zero_shot BOOLEAN DEFAULT FALSE
+        </task>
+      </tasks>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="7" name="TRIPOD+AI Preregistration Mapping">
+      <description>
+        Map each statistical test to TRIPOD+AI checklist items.
+        Creates a de facto preregistration document.
+      </description>
+      <tasks>
+        <task id="T7.1">
+          Create preregistration mapping document.
+          File: docs/planning/preregistration-tripod-mapping.md
+
+          Map:
+          - TRIPOD 3 (Study design) -> 6-factor layered factorial design YAML (720 conditions)
+          - TRIPOD 6 (Sample size) -> 70 volumes, 3-fold, power analysis, N=23 per fold
+          - TRIPOD 7 (Outcome) -> clDice + MASD (MetricsReloaded) as co-primary
+          - TRIPOD 10 (Statistical methods) -> Layered ANOVA (3-way core -> 5-way extended -> ensemble), Wilcoxon, spec curve
+          - TRIPOD 16 (Model performance) -> per-volume + per-fold + external test + ensemble
+          - TRIPOD-AI items -> calibration (Layer B recalibration factor), uncertainty (Layer C ensembles), fairness
+
+          Must cover ALL 4 layers and ALL 6 experimental factors.
+        </task>
+
+        <task id="T7.2">
+          Wire TRIPOD mapping into biostatistics_flow output.
+          The flow should produce a TRIPOD compliance checklist as a LaTeX table
+          or structured artifact, not just a planning doc.
+        </task>
+      </tasks>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="8" name="External Test Set (DeepVess) Analysis">
+      <description>
+        Run biostatistics analysis on external test set separately.
+        The synthesis specifies both trainval AND test splits (QA round 4).
+        This demonstrates the PLATFORM'S ability to handle arbitrary test datasets.
+      </description>
+      <tasks>
+        <task id="T8.1" skill="self-learning-iterative-coder">
+          Write test: biostatistics flow produces separate analysis for DeepVess.
+          Verify that the flow runs layered ANOVA, pairwise, spec curve, and rank
+          stability on test/deepvess/* metrics independently from trainval metrics.
+        </task>
+
+        <task id="T8.2">
+          Implement split-aware analysis.
+          BiostatisticsConfig.splits = ["trainval", "test"] (already configured).
+          For each split:
+          - Discover runs with metrics for that split
+          - Run full statistical analysis pipeline (all 3 ANOVA phases)
+          - Generate separate figures and tables
+          - Compare trainval vs test rankings (generalization analysis)
+        </task>
+
+        <task id="T8.3">
+          Train/test comparison analysis.
+          Compare model rankings on trainval (MiniVess) vs test (DeepVess).
+          Kendall's tau between trainval and test rankings indicates how well
+          cross-validated performance predicts external test performance.
+          This is a key platform capability demonstration.
+        </task>
+      </tasks>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="9" name="Integration Test with Synthetic Data (Full 6-Factor, 4-Layer)">
+      <description>
+        Run the complete biostatistics pipeline with synthetic MLflow data
+        that mimics the FULL 6-factor, 4-layer factorial design output.
+        Verify end-to-end.
+
+        Synthetic data must include ALL layers:
+        - Layer A: 24 training conditions x 1 fold
+        - Layer B: 24 x {none, swa} x {none, temp_scaling} = 96 post-training variants
+        - Layer C: 96 x 4 ensemble strategies = 384 evaluation conditions
+        - Zero-shot: 2 baselines
+        Total: 384 + 2 = 386 conditions with per-volume metrics
+      </description>
+      <tasks>
+        <task id="T9.1">
+          Create synthetic MLflow fixture covering all 6 factors across 4 layers.
+
+          Layer A: 24 conditions x 1 fold with random per-volume metrics
+          Layer B: 24 x {none, swa} x {none, temp_scaling} = 96 post-training variants
+          Layer C: 96 x 4 ensemble strategies = 384 evaluation conditions
+          Zero-shot: 2 baselines (sam3_vanilla on minivess, vesselfm on deepvess)
+
+          Write to a tmp mlruns directory. Per-volume metrics for clDice, MASD, DSC
+          at minimum. Include test/deepvess/* metrics for external test analysis.
+
+          Factor columns in synthetic data must match the factorial YAML structure:
+          factors.training keys + factors.post_training keys + factors.analysis keys.
+        </task>
+
+        <task id="T9.2">
+          Run biostatistics_flow() against full synthetic data.
+          Verify:
+          - DuckDB populated with ALL 6 factorial columns from Layers A+B+C
+          - Layered ANOVA computed:
+            * Phase 1: 3-way (model x loss x calib)
+            * Phase 2: 5-way (+post_training x recalib)
+            * Phase 3: ensemble analysis separately
+          - Pairwise comparisons done (Wilcoxon + 3 effect sizes + 2-tier MCC)
+          - Specification curve generated (ALL Layer D choices iterated)
+          - Rank stability computed (Kendall's tau across metric pairs)
+          - Calibration metrics computed (Brier, O/E, IPA)
+          - Bayesian ROPE analysis completed
+          - TRIPOD mapping produced
+          - Figures created (ANOVA, spec curve, rank stability, calibration)
+          - LaTeX tables exported
+          - Zero-shot baselines analyzed separately
+          - DeepVess test metrics analyzed separately
+          - DuckDB queryable for all 384 + 2 conditions
+        </task>
+
+        <task id="T9.3">
+          Run make test-staging to verify no regressions.
+        </task>
+
+        <task id="T9.4">
+          Verify all statistical parameters come from BiostatisticsConfig.
+          Grep for hardcoded alpha=0.05, seed=42, or metric names in:
+          - biostatistics_statistics.py
+          - biostatistics_specification_curve.py
+          - biostatistics_calibration.py
+          - biostatistics_flow.py
+          All must read from config objects.
+        </task>
+      </tasks>
+      <gate>Full biostatistics pipeline produces correct output on 6-factor, 4-layer synthetic data (384 conditions).</gate>
+    </phase>
+  </phases>
+
+  <skills-used>
+    <skill name="self-learning-iterative-coder" role="TDD loop for all implementation"/>
+    <skill name="knowledge-reviewer" role="Verify KG consistency after changes"/>
+  </skills-used>
+
+  <cross-reference>
+    <report file="docs/planning/intermedia-plan-synthesis-pre-debug-run.md" relation="authoritative synthesis — this XML must be consistent with it"/>
+    <report file="docs/planning/pre-gcp-master-plan.xml" relation="source of full factorial: line 16 = 4x3x2x3x2x5 = 720"/>
+    <report file="docs/planning/biostatistics-prefect-flow.md" relation="original design"/>
+    <report file="docs/planning/biostatistics-prefect-flow-plan.xml" relation="initial implementation plan"/>
+    <report file="docs/planning/pr-a-biostatistics-gaps-plan.xml" relation="gaps analysis"/>
+    <report file="docs/planning/test-sets-external-validation-deepvess-tubenet-analysis-flow-for-biostatistics.xml" relation="external test plan"/>
+    <report file="docs/planning/lit-report-biomedical-segmentation.md" relation="literature context"/>
+    <kg file="knowledge-graph/decisions/L3-technology/primary_metrics.yaml" relation="metric hierarchy"/>
+    <kg file="knowledge-graph/decisions/L3-technology/paper_model_comparison.yaml" relation="6-model lineup"/>
+    <kg file="knowledge-graph/decisions/L3-technology/dataset_strategy.yaml" relation="data splits"/>
+    <kg file="knowledge-graph/decisions/L3-technology/calibration_method.yaml" relation="Layer B calibration"/>
+    <kg file="knowledge-graph/decisions/L2-architecture/ensemble_strategy.yaml" relation="Layer C ensemble strategies"/>
+    <config file="configs/factorial/paper_full.yaml" relation="production factorial config (ALL 6 factors, 720 conditions)"/>
+    <config file="configs/factorial/debug.yaml" relation="debug factorial config (ALL 6 factors, 384 conditions)"/>
+    <config file="src/minivess/config/post_training_config.py" relation="Layer B factor source"/>
+    <config file="src/minivess/config/biostatistics_config.py" relation="Layer D choices + all statistical params"/>
+    <config file="src/minivess/ensemble/builder.py" relation="Layer C EnsembleStrategyName enum"/>
+  </cross-reference>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <appendix id="factorial-arithmetic">
+    <title>Factorial Arithmetic — Why 720, Not 24</title>
+    <description>
+      The number "24" has been repeatedly confused with the FULL factorial across
+      6+ sessions. This appendix makes the arithmetic unambiguous.
+
+      See: .claude/metalearning/2026-03-20-full-factorial-is-not-24-cells.md
+    </description>
+
+    <breakdown>
+      <layer-a label="Training (GPU, cloud)">
+        4 models x 3 losses x 2 aux_calib = 24 TRAINING cells
+        x 3 folds (production) = 72 GPU runs
+        x 1 fold (debug) = 24 GPU runs
+        COST: ~$65 production, ~$5-10 debug
+      </layer-a>
+      <layer-b label="Post-Training (CPU, local, FREE)">
+        Production: 72 x {none, swa, multi_swa} x {none, temp_scaling} = 72 x 6 = 432 variants
+        Debug: 24 x {none, swa} x {none, temp_scaling} = 24 x 4 = 96 variants
+        COST: $0 (local CPU)
+      </layer-b>
+      <layer-c label="Analysis (CPU, local, FREE)">
+        Production: 432 x {none, per_loss_single_best, all_loss_single_best, per_loss_all_best, all_loss_all_best} = 432 x 5 = 2160 evals
+        Debug: 96 x {per_loss_single_best, all_loss_single_best, per_loss_all_best, all_loss_all_best} = 96 x 4 = 384 evals
+        COST: $0 (local CPU for DynUNet; GPU for SAM3 inference but reuses existing weights)
+      </layer-c>
+      <totals>
+        FULL FACTORIAL (production): 4 x 3 x 2 x 3 x 2 x 5 = 720 conditions x 3 folds = 2160 evaluations
+        DEBUG FACTORIAL:             4 x 3 x 2 x 2 x 2 x 4 = 384 conditions x 1 fold = 384 evaluations
+        CLOUD COST:                  Only Layer A (72/24 GPU runs). Everything else is FREE on local CPU.
+      </totals>
+    </breakdown>
+
+    <common-confusion>
+      "24 conditions" = Layer A training cells ONLY.
+      "720 conditions" = FULL factorial across all 6 experimental factors.
+      "384 conditions" = DEBUG factorial (all 6 dimensions, fewer levels per dimension).
+      The confusion arises because only Layer A costs GPU money. But for ANOVA and
+      biostatistics, the full 720/384 conditions are what matter — every post-training
+      variant and every ensemble strategy is a separate condition with its own per-volume
+      metrics.
+    </common-confusion>
+  </appendix>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <appendix id="layered-anova">
+    <title>Layered ANOVA Structure</title>
+    <description>
+      The ANOVA is NOT a single 6-way analysis. It is LAYERED to match the
+      progressive availability of upstream flow results and the non-independence
+      of ensemble conditions.
+    </description>
+
+    <phase id="anova-1" name="Core 3-way ANOVA (Layer A)">
+      <factors>model_family, loss_name, aux_calibration</factors>
+      <available-after>Training Flow (Flow 2) completes</available-after>
+      <question>Which model/loss/calibration combination is best?</question>
+      <interactions>3 main + 3 two-way + 1 three-way = 7 terms</interactions>
+    </phase>
+
+    <phase id="anova-2" name="Extended 5-way ANOVA (Layer A + B)">
+      <factors>model_family, loss_name, aux_calibration, post_training_method, recalibration</factors>
+      <available-after>Post-Training Flow (Flow 2.5) completes</available-after>
+      <question>Does SWA/temperature scaling improve results? Interaction with model choice?</question>
+      <interactions>5 main + 10 two-way + 10 three-way + ... = 31 terms</interactions>
+    </phase>
+
+    <phase id="anova-3" name="Ensemble analysis (Layer C, separate)">
+      <factors>ensemble_strategy (analyzed separately, crossed with selected Layer A covariates)</factors>
+      <available-after>Analysis Flow (Flow 3) completes</available-after>
+      <question>Which ensemble strategy performs best? Does it interact with model family?</question>
+      <note>
+        Analyzed SEPARATELY because ensemble conditions are NOT independent of
+        training conditions — ensembles are COMPOSED FROM training runs. A full
+        6-way ANOVA would violate independence assumptions. Instead, ensemble
+        strategies are analyzed with selected Layer A factors as covariates.
+      </note>
+    </phase>
+  </appendix>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <appendix id="cross-reference-findings">
+    <title>Cross-Reference Analysis: Synthesis vs XML Versions</title>
+    <description>
+      Systematic comparison of intermedia-plan-synthesis-pre-debug-run.md against
+      XML versions. v3 corrects the full factorial arithmetic and layered ANOVA.
+    </description>
+
+    <finding id="F1" severity="critical" category="wrong-arithmetic">
+      <title>Full factorial is 720 conditions, NOT 24</title>
+      <synthesis-ref>Part 1.3: "4 x 3 x 2 x 3 x 2 x 5 = 720 conditions"</synthesis-ref>
+      <synthesis-ref>Part 7.1: Full product = 720, Debug product = 384</synthesis-ref>
+      <source-ref>pre-gcp-master-plan.xml line 16</source-ref>
+      <xml-v2-state>v2 had 4-layer structure but did not state the 720 total or 384 debug total clearly</xml-v2-state>
+      <resolution>v3 adds full-factorial-totals section, factorial-arithmetic appendix, and corrects all references</resolution>
+    </finding>
+
+    <finding id="F2" severity="critical" category="missing-concept">
+      <title>Composable Hydra factorial YAML not described</title>
+      <synthesis-ref>Part 1.3: "The factorial design is COMPOSABLE via Hydra config groups"</synthesis-ref>
+      <xml-v2-state>No mention of composable YAML or that paper_full/debug are just example named configs</xml-v2-state>
+      <resolution>v3 adds composable-yaml section with YAML structure and named-configs</resolution>
+    </finding>
+
+    <finding id="F3" severity="critical" category="wrong-structure">
+      <title>ANOVA described as "N-way expandable" but not LAYERED</title>
+      <synthesis-ref>Part 1.4: "ANOVA: Layered — core 3-way -> extended 5-way -> ensemble analysis"</synthesis-ref>
+      <xml-v2-state>Phase 2 says "N-Way Expandable" but treats it as a single growing ANOVA, not 3 layered phases</xml-v2-state>
+      <resolution>v3 restructures to 3 ANOVA phases matching progressive upstream availability + independence constraints</resolution>
+    </finding>
+
+    <finding id="F4" severity="critical" category="missing-concept">
+      <title>Cost model not stated — only Layer A costs GPU money</title>
+      <synthesis-ref>Part 1.3: "ONLY Layer A runs on GPU (72 cloud runs ~$65). Layers B+C run on local CPU (free)"</synthesis-ref>
+      <synthesis-ref>Part 7.1: "Cost: ONLY Layer A runs on GPU"</synthesis-ref>
+      <xml-v2-state>No cost annotations on layers</xml-v2-state>
+      <resolution>v3 adds cost attributes to each layer and cost-model section in full-factorial-totals</resolution>
+    </finding>
+
+    <finding id="F5" severity="high" category="missing-concept">
+      <title>Auto-derive factor names from factorial YAML (zero hardcoded)</title>
+      <synthesis-ref>Part 1.3: "Users define their own factorial YAML" + Part 5 Pattern 2</synthesis-ref>
+      <xml-v2-state>Tasks mention "not hardcoded" but don't describe the YAML section structure</xml-v2-state>
+      <resolution>v3 adds factors.training / factors.post_training / factors.analysis YAML structure throughout</resolution>
+    </finding>
+
+    <finding id="F6" severity="high" category="incomplete-scope">
+      <title>Debug scope reductions incomplete — missing level reductions</title>
+      <synthesis-ref>Part 1.4: "Post-training levels: 2 (not 3)" and "Ensemble levels: 4 (not 5)"</synthesis-ref>
+      <xml-v2-state>scope-reductions only listed 3 items (epochs, data, folds) — missing level reductions</xml-v2-state>
+      <resolution>v3 adds 2 more scope-reductions: post-training levels and ensemble levels</resolution>
+    </finding>
+
+    <finding id="F7" severity="high" category="naming">
+      <title>Layer B factor naming: calibration_method vs recalibration</title>
+      <synthesis-ref>Part 7.1 row 5: "recalibration" with config section "factors.post_training"</synthesis-ref>
+      <xml-v2-state>Used "calibration_method" which conflicts with Layer A "aux_calibration"</xml-v2-state>
+      <resolution>v3 uses "recalibration" consistently for Layer B, "aux_calibration" for Layer A</resolution>
+    </finding>
+
+    <finding id="F8" severity="high" category="ambiguity-resolved">
+      <title>Ensemble analyzed SEPARATELY due to non-independence</title>
+      <synthesis-ref>Part 1.4: "ensemble analysis separately" (not part of 5-way ANOVA)</synthesis-ref>
+      <xml-v2-state>Phase 5 suggested adding ensemble as a 6th ANOVA factor alongside Layers A+B</xml-v2-state>
+      <resolution>v3 makes ensemble a separate ANOVA phase (Phase 3) because ensembles are composed from training runs</resolution>
+    </finding>
+
+    <!-- Retained from v2 -->
+    <finding id="F9" severity="high" category="ambiguity-resolved">
+      <title>Per-volume is unit of analysis (N=23), not fold aggregates</title>
+      <synthesis-ref>Part 1.2 LAYER A: "3-fold CV seed=42, 47 train / 23 val per fold"</synthesis-ref>
+      <synthesis-ref>Part 3.2: "Per-volume metrics: Essential for Biostatistics"</synthesis-ref>
+      <xml-v1-state>Mentioned in tasks but not structurally enforced</xml-v1-state>
+      <resolution>Added explicit unit-of-analysis section, reinforced in T0.5, T2.3</resolution>
+    </finding>
+
+    <finding id="F10" severity="high" category="missing-phase">
+      <title>Zero-shot baseline analysis missing from v1</title>
+      <synthesis-ref>Part 1.2: sam3_vanilla (MiniVess+DeepVess), vesselfm (DeepVess ONLY)</synthesis-ref>
+      <resolution>Phase 6 (Zero-Shot Baseline Analysis) with T6.1-T6.3</resolution>
+    </finding>
+
+    <finding id="F11" severity="high" category="missing-phase">
+      <title>External test set (DeepVess) analysis as separate split missing from v1</title>
+      <synthesis-ref>Part 2.1: "External test: test/deepvess/all/{metric}"</synthesis-ref>
+      <resolution>Phase 8 (External Test Set Analysis) with T8.1-T8.3</resolution>
+    </finding>
+
+    <finding id="F12" severity="medium" category="ambiguity-resolved">
+      <title>K=1 debug replication method confirmed</title>
+      <synthesis-ref>Part 1.2: "fold_id: 3 (prod) / 1 (debug)"</synthesis-ref>
+      <resolution>unit-of-analysis section with debug-mode and production-mode subsections</resolution>
+    </finding>
+
+    <finding id="F13" severity="medium" category="missing-task">
+      <title>BiostatisticsConfig parameter compliance test</title>
+      <synthesis-ref>Part 3.3: "All statistical parameters read from BiostatisticsConfig"</synthesis-ref>
+      <resolution>T0.8 (config compliance test) and T9.4 (hardcoded parameter grep)</resolution>
+    </finding>
+  </appendix>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <appendix id="decision-record">
+    <title>Decision-Making Record (verbatim Q&amp;A, retained from v1+v2)</title>
+
+    <user-prompt>
+      After the push, let's double-check that our Biostatistic Flow gets all the data
+      that it needs to do all the tests needed for our factorial design experiment.
+      We can this in broader sense as well as we have not preregistered this study at all,
+      and explore more statistical tests than we so much implemented. Focus on testing
+      the pipeline mechanics to make sure that the biostatistic flow gets the data that
+      it needs to compute whatever needs. Test the availability of the data to implement
+      new statistical test for all possible stats that you can think of to make sure that
+      you would have the data from MLflow on GCP from Evals!
+    </user-prompt>
+
+    <qa-round id="1">
+      <question>ANOVA design: 3-way factorial or 2-way + separate AuxCalib?</question>
+      <answer>We have a lot more factors in our design! You really need to read the
+      sources better - the kg should tell you the factor design! Your options are so bad
+      that I feel that you did not bother to read the sources at all?</answer>
+      <lesson>ALWAYS read the full KG line-by-line before asking questions about the
+      experimental design. The factors are defined in configs/hpo/paper_factorial.yaml
+      and the KG decisions, not in assumptions.</lesson>
+    </qa-round>
+
+    <qa-round id="2">
+      <question>DuckDB schema gaps: add model_family and with_aux_calib?</question>
+      <answer>This factorial design should be automatic, and the factors should be
+      configured on the experiment-specific YAML which is only place where this is defined
+      which then defines the downstream artifact generation! We are developing this repo
+      for a platform/MLOps manuscript instead of SOTA science.</answer>
+      <lesson>The biostatistics flow must be GENERIC and config-driven. Factors come from
+      the experiment YAML, not hardcoded column names. The platform IS the contribution.</lesson>
+    </qa-round>
+
+    <qa-round id="3">
+      <question>Primary metrics: val/dice?</question>
+      <answer>clDice and MASD are the ground truth metrics, both at equal weight.
+      Where did you get Dice as primary metric? You need to read the whole
+      knowledge-graph line-by-line!</answer>
+      <lesson>Primary metrics are clDice + MASD (co-primary, MetricsReloaded-driven).
+      DSC is a FOIL metric. The rank inversion between DSC and clDice IS a finding.</lesson>
+    </qa-round>
+
+    <qa-round id="4">
+      <question>Separate analyses for trainval AND test splits?</question>
+      <answer>Both splits (Recommended)</answer>
+    </qa-round>
+
+    <qa-round id="5">
+      <question>Data source: Cloud Run API or local sync?</question>
+      <answer>Both paths (config-driven)</answer>
+    </qa-round>
+
+    <qa-round id="6">
+      <question>Debug K=1 fold: per-volume replication?</question>
+      <answer>Per-volume replication (Recommended)</answer>
+    </qa-round>
+
+    <qa-round id="7">
+      <question>TRIPOD+AI preregistration mapping?</question>
+      <answer>Include checklist</answer>
+    </qa-round>
+
+    <qa-round id="8">
+      <question>XML scope: verification only or full implementation?</question>
+      <answer>Full implementation now</answer>
+    </qa-round>
+
+    <qa-round id="9">
+      <question>Specification curve dimensions?</question>
+      <answer>All researcher degrees of freedom</answer>
+    </qa-round>
+
+    <qa-round id="10">
+      <question>Derived metrics scope?</question>
+      <answer>All in biostats — rank stability, spec curve p-values, calibration assessment</answer>
+    </qa-round>
+
+    <v2-decisions note="Decisions resolved by synthesis document (no user Q/A needed)">
+      <decision id="D1">
+        Ensemble strategies ARE factorial factors for biostatistics.
+        Source: synthesis Part 1.2 LAYER C. NOT a question — resolved.
+      </decision>
+      <decision id="D2">
+        Per-volume data is the unit of analysis (N=23 per fold).
+        Source: synthesis Part 3.2 + QA round 6. NOT fold aggregates.
+      </decision>
+      <decision id="D3">
+        K=1 debug uses per-volume replication. K=3 production uses fold as random effect.
+        Source: synthesis Part 1.2 LAYER A + QA round 6.
+      </decision>
+      <decision id="D4">
+        Layer B post_training_method and recalibration are ANOVA factors.
+        Source: synthesis Part 1.2 LAYER B. New MLflow runs inherit upstream tags.
+      </decision>
+      <decision id="D5">
+        Zero-shot baselines excluded from factorial ANOVA but included in pairwise comparisons.
+        Source: synthesis Part 1.2 zero-shot baselines section.
+      </decision>
+      <decision id="D6">
+        ANOVA is LAYERED (not flat N-way): core 3-way -> extended 5-way -> ensemble separately.
+        Source: synthesis Part 1.4 + Part 7.1. Ensemble analyzed separately due to non-independence.
+      </decision>
+      <decision id="D7">
+        Full factorial is 720 conditions (production), 384 conditions (debug). NOT 24.
+        Source: pre-gcp-master-plan.xml line 16 + synthesis Part 1.3 + Part 7.1.
+      </decision>
+      <decision id="D8">
+        Factorial YAML is COMPOSABLE via Hydra config groups. paper_full.yaml and
+        debug.yaml are example named configs. Factor names auto-derived from YAML.
+        Source: synthesis Part 1.3.
+      </decision>
+      <decision id="D9">
+        Only Layer A costs GPU money (~$65). Layers B+C run on local CPU (free).
+        Source: synthesis Part 1.3 + Part 7.1.
+      </decision>
+    </v2-decisions>
+  </appendix>
+</plan>

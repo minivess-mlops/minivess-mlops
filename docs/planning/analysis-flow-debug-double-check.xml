@@ -1,0 +1,480 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>Analysis Flow Debug Double-Check — 6-Factor Factorial: Ensemble Evaluation + UQ</title>
+    <branch>test/debug-factorial-run</branch>
+    <date>2026-03-20</date>
+    <updated>2026-03-20</updated>
+    <status>planned</status>
+    <priority>P0 — validates ensemble evaluation pipeline for factorial experiment</priority>
+    <predecessor>docs/planning/post-training-flow-debug-double-check.xml</predecessor>
+    <synthesis>docs/planning/intermedia-plan-synthesis-pre-debug-run.md</synthesis>
+    <estimated-time>8-12 hours</estimated-time>
+  </metadata>
+
+  <context>
+    <summary>
+      Verify and complete the Analysis Flow (Flow 3) for the factorial experiment.
+      Analysis Flow discovers ALL training + post-training runs from the upstream
+      experiment (minivess_training), builds ensemble permutations, evaluates on
+      MiniVess (trainval) and DeepVess (test), computes per-volume metrics with
+      bootstrap CIs, and creates NEW MLflow runs in a SEPARATE experiment
+      (minivess_evaluation) for each ensemble strategy.
+
+      The Analysis Flow contributes factor #6 (ensemble_strategy) to the 6-factor
+      factorial design. It is defined in the factorial YAML under factors.analysis.
+
+      The Analysis Flow output is the PRIMARY INPUT to Biostatistics Flow.
+      Each ensemble strategy (including "none" = no ensemble) is a factorial condition.
+
+      Zero-shot baselines (sam3_vanilla, vesselfm) are separate from the factorial
+      grid — they are evaluated as standalone conditions (synthesis Part 1.2).
+    </summary>
+
+    <synthesis-reference>
+      This plan is subordinate to the Pre-Debug Run Synthesis:
+        docs/planning/intermedia-plan-synthesis-pre-debug-run.md
+
+      Key synthesis sections governing this plan:
+      - Part 1.2 Layer C: Analysis Factors (ensemble_strategy)
+      - Part 1.3: MVRD scope — ALL ensemble strategies run in debug (Rule #27)
+      - Part 2.1: Flow execution order (Analysis is Flow 3)
+      - Part 2.3: MLflow experiment names (analysis logs to minivess_evaluation, SEPARATE)
+      - Part 2.4: MLflow tag schema (ensemble_strategy, upstream_training_run_id)
+      - Part 3.2: Analysis Flow 10-step pipeline
+      - Part 7.1: Complete 6-factor table (factor #6 is ensemble_strategy)
+      - Part 8 Q2: RESOLVED — summary stats for debug, full maps for production
+      - Part 8 Q3: RESOLVED — skip soft predictions for debug, store for production
+    </synthesis-reference>
+
+    <full-factorial-context>
+      <!-- Source of truth: pre-gcp-master-plan.xml line 16 -->
+      <!-- The FULL factorial is 4×3×2×3×2×5 = 720 conditions (NOT 24). -->
+      <!-- 24 is only the training Layer A grid. Post-training and analysis layers EXPAND it. -->
+
+      The complete 6-factor design (from pre-gcp-master-plan.xml):
+        4 models × 3 losses × 2 aux_calib × 3 post-training × 2 recalibration × 5 ensemble = 720
+
+      Analysis Flow contributes the FINAL factor (#6: ensemble_strategy) that completes
+      the full factorial. It takes upstream output from Layers A+B (training + post-training)
+      and multiplies by ensemble_strategy levels.
+
+      The factorial YAML is COMPOSABLE via Hydra config groups (configs/factorial/*.yaml).
+      Analysis reads its factor levels from factors.analysis in the YAML:
+
+        factors:
+          analysis:
+            ensemble_strategy: [none, per_loss_single_best, all_loss_single_best,
+                                per_loss_all_best, all_loss_all_best]  # 5
+
+      ALL factors are auto-derived from whichever factorial YAML was used. Zero hardcoded
+      factor names in infrastructure code.
+    </full-factorial-context>
+
+    <factorial-factors>
+      <!-- Analysis contributes factor #6 from the 6-factor table (synthesis Part 7.1) -->
+      <!-- Defined in the factorial YAML under factors.analysis -->
+      <factor number="6" name="ensemble_strategy" layer="C (Analysis)" levels="5 (full) / 4 (debug)"
+              values="none, per_loss_single_best, all_loss_single_best, per_loss_all_best, all_loss_all_best"
+              config-source="configs/factorial/*.yaml::factors.analysis.ensemble_strategy"
+              debug-levels="per_loss_single_best, all_loss_single_best, per_loss_all_best, all_loss_all_best"/>
+      <expansion>
+        Analysis is the FINAL multiplicative layer of the full factorial:
+
+        FULL PRODUCTION:
+          Layer A (Training): 4×3×2 = 24 cells × 3 folds = 72 training runs
+          Layer B (Post-Training): 72 × (3 methods × 2 recalib) = 432 post-training variants
+          Layer C (Analysis): 432 × 5 ensemble strategies = 2160 evaluation conditions
+          + zero-shot baselines (sam3_vanilla, vesselfm)
+
+        DEBUG:
+          Layer A: 4×3×2 = 24 × 1 fold = 24 training runs
+          Layer B: 24 × (2 × 2) = 96 post-training variants
+          Layer C: 96 × 4 ensemble strategies = 384 evaluation conditions
+          + zero-shot baselines
+
+        Full factorial: 4×3×2×3×2×5 = 720 conditions
+        Debug factorial: 4×3×2×2×2×4 = 384 conditions
+
+        Cost: ZERO for DynUNet (CPU inference). GPU needed only for SAM3 inference.
+        ONLY Layer A (training, 72 runs ~$65) costs money on GPU.
+      </expansion>
+    </factorial-factors>
+
+    <ensemble-permutations>
+      <!-- Source: knowledge-graph/decisions/L2-architecture/ensemble_strategy.yaml -->
+      <!-- Resolved winner: heterogeneous_multi_model (posterior=0.80) -->
+      <!-- Factor #6 in the factorial YAML: factors.analysis.ensemble_strategy -->
+      <strategy name="none" description="No ensemble — single-model evaluation">
+        Each individual training/post-training model evaluated independently.
+        Included in full factorial (5 levels) but dropped in debug (4 levels).
+      </strategy>
+      <strategy name="per_loss_single_best" description="Best fold per loss (1 checkpoint per fold x K folds)">
+        Per loss function, select the single best checkpoint (by primary metric)
+        from each fold. Creates 3 ensembles (one per loss): cbdice_cldice, dice_ce, dice_ce_cldice.
+      </strategy>
+      <strategy name="all_loss_single_best" description="Single best model across all losses">
+        Select the single best checkpoint from each fold across ALL losses.
+        Creates 1 ensemble.
+      </strategy>
+      <strategy name="per_loss_all_best" description="All metric checkpoints per loss per fold">
+        For each loss, load ALL 6 tracked metric checkpoints per fold.
+        Maximum diversity within one loss. Creates 3 ensembles.
+      </strategy>
+      <strategy name="all_loss_all_best" description="Full deep ensemble — maximum diversity">
+        All losses x all folds x all metric checkpoints.
+        Maximum ensemble diversity for epistemic uncertainty estimation.
+        Creates 1 ensemble.
+      </strategy>
+      <mlflow-convention>
+        Each ensemble strategy creates its OWN MLflow run in minivess_evaluation
+        (RESOLVED — separate runs per strategy for cleaner Biostatistics discovery).
+        Each run is tagged with ensemble_strategy so Biostatistics can treat it as
+        a factorial factor (#6).
+      </mlflow-convention>
+    </ensemble-permutations>
+
+    <mlflow-experiment-design>
+      <!-- Synthesis Part 2.3 — SEPARATE experiment for analysis -->
+      <training-experiment>minivess_training (upstream — training + post-training runs)</training-experiment>
+      <analysis-experiment>minivess_evaluation (SEPARATE — analysis creates new runs here)</analysis-experiment>
+      <rationale>
+        The Analysis Flow creates MANY more runs than training (up to 2160 in production).
+        Keeping them in the same experiment would pollute training metrics.
+        Biostatistics discovers analysis runs from minivess_evaluation.
+      </rationale>
+    </mlflow-experiment-design>
+
+    <per-volume-averaging>
+      <!-- Synthesis Part 1.2 Layer C — LOGIT-level averaging, NOT metric-level -->
+      <correct>Average voxel-level probability maps (logits) across ensemble members -> threshold -> compute metrics</correct>
+      <wrong>Compute per-member metrics -> average the metrics (WRONG for segmentation)</wrong>
+      <implementation>_EnsembleInferenceWrapper: torch.stack(outputs).mean(dim=0)</implementation>
+      <rationale>
+        Metric-level averaging loses spatial information. A model that predicts vessel A
+        correctly and misses vessel B, when averaged with a model that does the opposite,
+        would show 50% accuracy at metric level but potentially 100% at logit level.
+      </rationale>
+    </per-volume-averaging>
+
+    <uq-from-deep-ensembles>
+      <!-- Lakshminarayanan et al. (2017) decomposition -->
+      <total-uncertainty>H[p-bar] = entropy of mean ensemble prediction</total-uncertainty>
+      <aleatoric>E[H[p]] = average per-member entropy (irreducible noise)</aleatoric>
+      <epistemic>MI = H[p-bar] - E[H[p]] = mutual information (model disagreement)</epistemic>
+      <implementation>MiniVessEnsembleModel.predict_with_uncertainty()</implementation>
+      <storage-policy>
+        Debug MVRD: summary statistics only (mean epistemic per volume) as MLflow metrics
+        Production: full 5D uncertainty maps as MLflow artifacts (~50MB per volume)
+        Reference: synthesis Part 8 Q2 (RESOLVED)
+      </storage-policy>
+    </uq-from-deep-ensembles>
+
+    <zero-shot-baselines>
+      <!-- Synthesis Part 1.2: Zero-shot baselines are SEPARATE from factorial grid -->
+      <baseline name="sam3_vanilla" dataset="minivess,deepvess"
+                description="Frozen SAM3 encoder, zero-shot eval"/>
+      <baseline name="vesselfm" dataset="deepvess"
+                description="Foundation model, zero-shot eval. DeepVess ONLY (data leakage on MiniVess)"/>
+      <convention>
+        Zero-shot baselines are evaluated as standalone conditions in minivess_evaluation.
+        They are NOT part of the factorial Cartesian product (not multiplied by 720 or 384).
+        Tagged with: model_family={name}, ensemble_strategy="none", is_zero_shot="true"
+      </convention>
+    </zero-shot-baselines>
+
+    <debug-scope>
+      <!-- Synthesis Part 1.3 + CLAUDE.md Rule #27: Debug = full production minus ONLY epochs/data/folds -->
+      <!-- + fewer levels for post-training methods and ensemble strategies -->
+      ALL 4 ensemble strategies run in debug (the "none" strategy is dropped for debug).
+      ALL evaluations on DeepVess. Debug means fewer epochs/data/folds and fewer
+      factor LEVELS, NOT fewer evaluations.
+      Inference strategy: standard_patch only (fast_patch is best-effort).
+
+      Debug total: 4×3×2×2×2×4 = 384 conditions × 1 fold = 384 evaluations.
+      + zero-shot baselines.
+    </debug-scope>
+
+    <layered-anova-context>
+      <!-- The biostatistics ANOVA is LAYERED, not flat -->
+      Analysis Flow's contribution (factor #6: ensemble_strategy) enables the FULL
+      6-factor ANOVA. The layered structure:
+
+      1. Core 3-way ANOVA: model_family × loss_name × aux_calibration (Layer A)
+      2. Extended 5-way ANOVA: + post_training_method × recalibration (Layers A+B)
+      3. Full ensemble analysis: + ensemble_strategy (all 6 factors, Layers A+B+C)
+
+      All factors auto-derived from the factorial YAML. Zero hardcoded factor names.
+      All statistical parameters from BiostatisticsConfig (Rule #29).
+    </layered-anova-context>
+  </context>
+
+  <phases>
+    <phase id="0" name="Data Availability — Can Analysis Find All Upstream Runs?">
+      <description>
+        Analysis must discover ALL training + post-training runs from minivess_training.
+        In debug: 24 training + up to 96 post-training = up to 120 upstream runs.
+        In production: 72 training + up to 432 post-training = up to 504 upstream runs.
+      </description>
+      <tasks>
+        <task id="T0.1">
+          Write test: Analysis discovers all training conditions from debug factorial.
+          Debug: 24 training conditions (4 models × 3 losses × 2 calibration × 1 fold).
+          Verify discover_training_runs_raw() finds runs tagged with model_family, loss_function.
+          Also discovers post-training variants (tagged with post_training_method).
+          All runs in minivess_training experiment (synthesis Part 2.3).
+          Test both: local mlruns path AND Cloud Run MLflow API.
+        </task>
+        <task id="T0.2">
+          Write test: expand_runs_to_per_fold() creates correct per-fold entries.
+          For K=1 debug: 24 entries. For K=3 production: 72 entries.
+          Post-training variants expand this further (up to 96 in debug, 432 in production).
+        </task>
+        <task id="T0.3">
+          Write test: Debug mode relaxes eval_fold2_dsc requirement.
+          When UPSTREAM_EXPERIMENT starts with "debug_", require_eval_metrics=False.
+        </task>
+        <task id="T0.4">
+          Write test: zero-shot baselines (sam3_vanilla, vesselfm) are discovered
+          separately from factorial grid. They are standalone conditions.
+        </task>
+      </tasks>
+    </phase>
+
+    <phase id="1" name="Ensemble Building — All Strategies from Factorial YAML">
+      <description>
+        Each ensemble strategy is factor #6 in the 6-factor table (synthesis Part 7.1).
+        Each strategy creates its OWN MLflow run in minivess_evaluation.
+        The ensemble strategies are READ from the factorial YAML
+        (configs/factorial/*.yaml::factors.analysis.ensemble_strategy) — NOT hardcoded.
+      </description>
+      <tasks>
+        <task id="T1.1">Write test: per_loss_single_best creates 3 ensembles (one per loss).</task>
+        <task id="T1.2">Write test: all_loss_single_best creates 1 ensemble with L x K members.</task>
+        <task id="T1.3">Write test: per_loss_all_best creates 3 ensembles with K x 6 members each.</task>
+        <task id="T1.4">Write test: all_loss_all_best creates 1 full deep ensemble.</task>
+        <task id="T1.5">
+          Write test: Each ensemble strategy creates a SEPARATE MLflow run in
+          minivess_evaluation, tagged with ensemble_strategy={name}.
+          This is the mechanism by which Biostatistics treats ensemble_strategy
+          as factorial factor #6.
+        </task>
+        <task id="T1.6">
+          Write test: post-training variants (SWA, calibrated) are included as
+          candidate members for ensemble building. EnsembleBuilder queries
+          minivess_training (which contains both training and post-training runs).
+        </task>
+        <task id="T1.7">
+          Write test: ensemble strategies are read from the factorial YAML
+          (factors.analysis.ensemble_strategy), not hardcoded in the flow code.
+          A different lab could define a custom set of strategies.
+        </task>
+      </tasks>
+    </phase>
+
+    <phase id="2" name="Per-Volume Evaluation — Correct Averaging">
+      <description>
+        Per-volume metrics are ESSENTIAL for Biostatistics Flow. They enable
+        Wilcoxon signed-rank tests and specification curve analysis.
+        Averaging must happen at LOGIT level, not metric level (synthesis Part 1.2 Layer C).
+      </description>
+      <tasks>
+        <task id="T2.1">Write test: Ensemble predictions average LOGITS, not metrics. Verify _EnsembleInferenceWrapper.</task>
+        <task id="T2.2">Write test: per-volume metrics logged to MLflow (eval/{fold}/vol/{vol_id}/{metric}).</task>
+        <task id="T2.3">Write test: External test evaluation on DeepVess (test/deepvess/all/{metric}).</task>
+        <task id="T2.4">Write test: Bootstrap CIs computed for all metrics. CI parameters from BiostatisticsConfig (not hardcoded).</task>
+      </tasks>
+    </phase>
+
+    <phase id="3" name="Uncertainty Quantification from Deep Ensembles">
+      <description>
+        UQ from deep ensembles (Lakshminarayanan et al., 2017).
+        Debug: summary statistics only. Production: full maps.
+        Reference: synthesis Part 8 Q2 (RESOLVED).
+      </description>
+      <tasks>
+        <task id="T3.1">Write test: predict_with_uncertainty() returns total, aleatoric, epistemic maps.</task>
+        <task id="T3.2">Write test: epistemic = total - aleatoric (clamped >= 0).</task>
+        <task id="T3.3">
+          Write test: uncertainty summaries logged as MLflow metrics.
+          Debug: summary stats only (mean, std, max per volume).
+          Production: full 5D maps stored as artifacts.
+        </task>
+      </tasks>
+    </phase>
+
+    <phase id="4" name="MLflow Run Creation — Separate Experiment">
+      <description>
+        Analysis creates runs in minivess_evaluation (SEPARATE from training).
+        Reference: synthesis Part 2.3. Each ensemble strategy = one run.
+        Debug: up to 384 evaluation runs. Production: up to 2160 evaluation runs.
+      </description>
+      <tasks>
+        <task id="T4.1">
+          Write test: Analysis creates runs in minivess_evaluation (not minivess_training).
+          Verify experiment name matches synthesis Part 2.3.
+        </task>
+        <task id="T4.2">
+          Write test: Each run tagged with flow_name="analysis-flow",
+          ensemble_strategy={name}, upstream metadata (model_family, loss_function, etc.).
+          Tag schema matches synthesis Part 2.4.
+          All 6 experimental factors discoverable from tags for layered ANOVA.
+        </task>
+        <task id="T4.3">
+          Write test: Run naming enables Biostatistics discovery.
+          Biostatistics queries minivess_evaluation to find all analysis runs.
+          The layered ANOVA (3-way → 5-way → 6-factor) can extract all factor
+          columns from the tags.
+        </task>
+        <task id="T4.4">
+          Write test: zero-shot baseline evaluation runs are tagged with
+          is_zero_shot="true" and ensemble_strategy="none".
+        </task>
+      </tasks>
+    </phase>
+
+    <phase id="5" name="Champion Selection + Model Registry">
+      <tasks>
+        <task id="T5.1">
+          Write test: Champion uses compound_masd_cldice as primary metric.
+          Champion selection metric from config, not hardcoded (Rule #29).
+        </task>
+        <task id="T5.2">Write test: Champion tags written to mlruns/ filesystem.</task>
+      </tasks>
+    </phase>
+
+    <phase id="6" name="Soft Predictions Storage Policy">
+      <description>
+        Per-volume soft predictions (probability maps) storage policy.
+        Reference: synthesis Part 8 Q3 (RESOLVED).
+      </description>
+      <tasks>
+        <task id="T6.1">
+          Write test: Debug MVRD does NOT store per-volume probability maps.
+          Only binary masks + threshold metadata are stored.
+        </task>
+        <task id="T6.2">
+          Write test: Production mode stores per-volume probability maps as
+          MLflow artifacts for post-hoc threshold sweeps.
+        </task>
+      </tasks>
+    </phase>
+
+    <phase id="7" name="Local Integration Test">
+      <tasks>
+        <task id="T7.1">
+          Run Analysis Flow locally on downloaded DynUNet artifacts (CPU-only).
+          Expected: 96 post-training variants × 4 ensemble strategies = 384 evaluation runs.
+          Cost: ZERO (CPU inference for DynUNet).
+        </task>
+        <task id="T7.2">
+          Verify Biostatistics Flow discovers Analysis Flow outputs from minivess_evaluation.
+          All 6 factorial factors (model_family, loss_name, aux_calibration,
+          post_training_method, recalibration, ensemble_strategy) discoverable via tags.
+          Layered ANOVA can extract all factor columns.
+        </task>
+      </tasks>
+    </phase>
+  </phases>
+
+  <questions-for-user>
+    <!-- ALL QUESTIONS RESOLVED — none remaining -->
+
+    <!-- Q1 RESOLVED: Each ensemble strategy creates its OWN MLflow run in minivess_evaluation.
+         This enables Biostatistics to discover them as separate factorial conditions.
+         Reference: ensemble strategies are factor #6, synthesis Part 7.1. -->
+
+    <!-- Q2 REMOVED PREVIOUSLY: Ensemble permutations are OBVIOUSLY additional factors for Biostatistics
+         per user instruction AND knowledge-graph/decisions/L2-architecture/ensemble_strategy.yaml.
+         The factorial expands: training (4×3×2=24) × post-training (3×2) × analysis (5) = 720.
+         See metalearning: 2026-03-20-factorial-design-context-amnesia.md -->
+
+    <!-- Q3 RESOLVED PREVIOUSLY: MIG parallel inference is P2 issue, sequential for now. -->
+
+    <!-- Q4 RESOLVED by synthesis Part 8 Q2: Summary stats only for debug; full maps for production. -->
+
+    <!-- Q5 RESOLVED PREVIOUSLY: resolve_experiment_name() handles debug suffix. -->
+
+    <!-- Q6 RESOLVED PREVIOUSLY: Per CLAUDE.md Rule #27 "Debug Run = Full Production".
+         ALL permutations on DeepVess. Debug means fewer epochs/data/folds, NOT fewer evaluations. -->
+
+    <!-- Q7 RESOLVED PREVIOUSLY: compound_masd_cldice is the primary selection metric. -->
+
+    <!-- Q8 RESOLVED PREVIOUSLY: Zero-shot baselines are separate from factorial grid. -->
+
+    <!-- Q9 RESOLVED by synthesis Part 8 Q3: Skip soft predictions for debug, store for production. -->
+  </questions-for-user>
+
+  <appendix id="factor-table-reference">
+    <title>Complete 6-Factor Table (synthesis Part 7.1)</title>
+    <content>
+      Analysis Flow contributes factor #6 — the FINAL experimental factor:
+
+      | # | Factor                  | Layer              | Full Levels | Debug Levels | Compute     | Config Section         |
+      |---|-------------------------|--------------------|-------------|-------------|-------------|------------------------|
+      | 1 | model_family            | A (Training)       | 4           | 4           | GPU (GCP)   | factors.training       |
+      | 2 | loss_name               | A (Training)       | 3           | 3           | GPU (GCP)   | factors.training       |
+      | 3 | aux_calibration         | A (Training)       | 2           | 2           | GPU (GCP)   | factors.training       |
+      | 4 | post_training_method    | B (Post-Training)  | 3           | 2           | CPU (local) | factors.post_training  |
+      | 5 | recalibration           | B (Post-Training)  | 2           | 2           | CPU (local) | factors.post_training  |
+      | 6 | ensemble_strategy       | C (Analysis)       | 5           | 4           | CPU (local) | factors.analysis       |
+
+      Full product: 4 × 3 × 2 × 3 × 2 × 5 = 720 conditions × 3 folds = 2160 evaluations
+      Debug product: 4 × 3 × 2 × 2 × 2 × 4 = 384 conditions × 1 fold = 384 evaluations
+
+      Cost: ONLY Layer A runs on GPU (~$65 for 72 runs). Layers B+C run on local CPU (free).
+      Analysis Flow (Layer C) is the final multiplier that completes the full factorial.
+
+      Analytical factors (#7-#13) are researcher degrees of freedom for specification curve
+      (Layer D: Biostatistics). See synthesis Part 7.1 for the full 13-factor table.
+    </content>
+  </appendix>
+
+  <appendix id="expansion-math">
+    <title>Factorial Expansion Math — How 24 Training Runs Become 384 Debug Evaluations</title>
+    <content>
+      Layer A (Training, GPU):
+        4 models × 3 losses × 2 aux_calib = 24 cells × 1 fold (debug) = 24 training runs
+
+      Layer B (Post-Training, CPU):
+        24 runs × {none, swa} × {none, temperature_scaling} = 24 × 2 × 2 = 96 variants
+
+      Layer C (Analysis, CPU):
+        96 variants × 4 ensemble strategies = 384 evaluation conditions
+
+      Full debug factorial: 4 × 3 × 2 × 2 × 2 × 4 = 384
+      + zero-shot baselines (sam3_vanilla, vesselfm) evaluated separately
+
+      For PRODUCTION:
+        Layer A: 24 × 3 folds = 72 runs
+        Layer B: 72 × 3 × 2 = 432 variants
+        Layer C: 432 × 5 = 2160 evaluations
+        Full factorial: 4 × 3 × 2 × 3 × 2 × 5 = 720 × 3 folds = 2160
+    </content>
+  </appendix>
+
+  <appendix id="user-prompt">
+    <title>Original User Request (verbatim)</title>
+    <content>See docs/planning/user-prompt-post-analysis-biostats-local-debug.md</content>
+  </appendix>
+
+  <cross-reference>
+    <synthesis file="docs/planning/intermedia-plan-synthesis-pre-debug-run.md" relation="authoritative synthesis — this plan is subordinate"/>
+    <factorial-source file="docs/planning/pre-gcp-master-plan.xml" line="16" relation="canonical 6-factor definition: 4×3×2×3×2×5=720"/>
+    <source file="src/minivess/orchestration/flows/analysis_flow.py" relation="current implementation (66.4K — largest flow)"/>
+    <source file="src/minivess/ensemble/builder.py" relation="EnsembleBuilder + EnsembleStrategyName"/>
+    <source file="src/minivess/config/evaluation_config.py" relation="inference strategy config"/>
+    <source file="src/minivess/config/biostatistics_config.py" relation="all statistical params (Rule #29)"/>
+    <kg file="knowledge-graph/decisions/L2-architecture/ensemble_strategy.yaml" relation="ensemble design (factor #6)"/>
+    <kg file="knowledge-graph/decisions/L3-technology/primary_metrics.yaml" relation="metric hierarchy"/>
+    <kg file="knowledge-graph/decisions/L3-technology/paper_model_comparison.yaml" relation="6-model lineup + zero-shot baselines"/>
+    <plan file="docs/planning/post-training-flow-debug-double-check.xml" relation="upstream flow (contributes factors #4, #5)"/>
+    <plan file="docs/planning/biostatistic-flow-debug-double-check.xml" relation="downstream consumer (layered ANOVA on all 6 factors)"/>
+    <plan file="docs/planning/debug-factorial-local-post-analysis-biostats.xml" relation="integration test (all 6 factors end-to-end)"/>
+    <plan file="docs/planning/run-debug-factorial-experiment-report.md" relation="1st pass results"/>
+    <config file="configs/factorial/paper_full.yaml" relation="production factorial config (720 conditions)"/>
+    <config file="configs/factorial/debug.yaml" relation="debug factorial config (384 conditions)"/>
+    <config file="configs/hpo/paper_factorial.yaml" relation="legacy Layer A-only config"/>
+    <issue number="882" relation="cloud artifact sync"/>
+  </cross-reference>
+</plan>

@@ -1,0 +1,556 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>Local Integration Test: 6-Factor Factorial — Post-Training + Analysis + Biostatistics</title>
+    <branch>test/debug-factorial-run</branch>
+    <date>2026-03-20</date>
+    <updated>2026-03-20</updated>
+    <status>planned — depends on post-training and analysis XML plans</status>
+    <priority>P0 — validates 3-flow pipeline locally before cloud GPU run</priority>
+    <predecessor>
+      docs/planning/post-training-flow-debug-double-check.xml
+      docs/planning/analysis-flow-debug-double-check.xml
+      docs/planning/biostatistic-flow-debug-double-check.xml
+    </predecessor>
+    <synthesis>docs/planning/intermedia-plan-synthesis-pre-debug-run.md</synthesis>
+    <estimated-time>3-4 hours (after artifact download)</estimated-time>
+  </metadata>
+
+  <context>
+    <summary>
+      Local integration test exercising the COMPLETE 6-factor factorial design
+      (4×3×2×2×2×4 = 384 conditions) on CPU-only hardware. The expensive GPU
+      Model Training Flow (Flow 2, Layer A) ran on GCP; its artifacts are
+      downloaded to local disk via make sync-cloud-artifacts.
+
+      This test exercises ALL 6 factor dimensions:
+        Layer A factors (#1-#3): model_family, loss_name, aux_calibration (from cloud)
+        Layer B factors (#4-#5): post_training_method, recalibration (run locally)
+        Layer C factor (#6): ensemble_strategy (run locally)
+        Layer D analytical factors (#7-#13): specification curve (run locally)
+
+      Layers B+C+D run on local CPU — cost is ZERO. Only Layer A cost money (~$65 on GCP).
+
+      This validates the "decoupling" feature: GPU training on cloud, CPU
+      post-processing on researcher's laptop/desktop. The full factorial is NOT
+      just the 24 training conditions — it is 384 conditions (debug) or 720
+      conditions (production) across all 6 experimental factors.
+
+      Prerequisites:
+      1. GCP debug factorial run completed (24 conditions × 1 fold, Layer A)
+      2. Artifacts synced to local disk via make sync-cloud-artifacts (Issue #882)
+      3. Local mlruns/ populated with all training run artifacts
+
+      The test uses the LOCAL factorial-monitor skill for orchestration.
+    </summary>
+
+    <synthesis-reference>
+      This plan is subordinate to the Pre-Debug Run Synthesis:
+        docs/planning/intermedia-plan-synthesis-pre-debug-run.md
+
+      Key synthesis sections governing this plan:
+      - Part 1.2: All 4 layers of the factorial design
+      - Part 1.3: MVRD scope — 384 debug conditions across all 6 factors
+      - Part 2.1: Flow execution order (Post-Training → Analysis → Biostatistics)
+      - Part 2.2: Inter-flow discovery via MLflow tags (not filesystem paths)
+      - Part 2.3: MLflow experiment names (4 experiments)
+      - Part 2.4: MLflow tag schema
+      - Part 4.3: What needs to happen next (local validation)
+      - Part 7.1: Complete 6+7 factor table (6 experimental + 7 analytical)
+    </synthesis-reference>
+
+    <full-factorial-context>
+      <!-- Source of truth: pre-gcp-master-plan.xml line 16 -->
+      <!-- The FULL factorial is 4×3×2×3×2×5 = 720 conditions (NOT 24). -->
+      <!-- 24 is only the training Layer A grid. -->
+
+      The complete 6-factor design (from pre-gcp-master-plan.xml):
+        4 models × 3 losses × 2 aux_calib × 3 post-training × 2 recalibration × 5 ensemble = 720
+
+      The factorial YAML is COMPOSABLE via Hydra config groups (configs/factorial/*.yaml).
+      Users create their own configs — paper_full.yaml and debug.yaml are just examples.
+
+      The YAML structure is sectioned by layer:
+        factors:
+          training:        # Layer A (GPU, cloud) — factors #1-#3
+            model_family: [dynunet, mambavesselnet, sam3_topolora, sam3_hybrid]
+            loss_name: [cbdice_cldice, dice_ce, dice_ce_cldice]
+            aux_calibration: [true, false]
+          post_training:   # Layer B (CPU, local) — factors #4-#5
+            method: [none, swa, multi_swa]
+            recalibration: [none, temperature_scaling]
+          analysis:        # Layer C (CPU/GPU) — factor #6
+            ensemble_strategy: [none, per_loss_single_best, all_loss_single_best,
+                                per_loss_all_best, all_loss_all_best]
+
+      ALL factors are auto-derived from whichever factorial YAML was used.
+      Zero hardcoded factor names in infrastructure code.
+    </full-factorial-context>
+
+    <factorial-context>
+      <!-- Complete 6-factor table reference (synthesis Part 7.1) -->
+      This integration test exercises ALL 6 experimental factor dimensions:
+
+      Layer A (Training, already complete on cloud — cost: ~$65):
+        #1 model_family (4): dynunet, mambavesselnet, sam3_topolora, sam3_hybrid
+        #2 loss_name (3): cbdice_cldice, dice_ce, dice_ce_cldice
+        #3 aux_calibration (2): true, false
+        Subtotal: 4×3×2 = 24 training cells × 1 fold = 24 runs
+
+      Layer B (Post-Training, exercised locally — cost: ZERO):
+        #4 post_training_method (2 debug / 3 full): none, swa [, multi_swa]
+        #5 recalibration (2): none, temperature_scaling
+        Subtotal: 24 × 2 × 2 = 96 post-training variants
+
+      Layer C (Analysis, exercised locally — cost: ZERO for DynUNet):
+        #6 ensemble_strategy (4 debug / 5 full): per_loss_single_best, all_loss_single_best,
+           per_loss_all_best, all_loss_all_best [, none]
+        Subtotal: 96 × 4 = 384 evaluation conditions
+
+      Layer D (Biostatistics, exercised locally — cost: ZERO):
+        #7-#13: analytical choices (metric, aggregation, mcc_method, alpha, rope, test_type, effect_size)
+        All parameters from BiostatisticsConfig (Rule #29), never hardcoded.
+        Layered ANOVA: core 3-way → extended 5-way → full 6-factor ensemble analysis.
+
+      TOTAL DEBUG: 4×3×2×2×2×4 = 384 conditions × 1 fold = 384 evaluations
+      TOTAL PRODUCTION: 4×3×2×3×2×5 = 720 conditions × 3 folds = 2160 evaluations
+    </factorial-context>
+
+    <mlflow-experiments>
+      <!-- Synthesis Part 2.3 — experiment names used in this integration test -->
+      <experiment name="minivess_training" used-by="Post-Training reads, Post-Training writes">
+        Contains: 24 training runs + up to 96 post-training variants.
+        Post-training logs to SAME experiment as training (synthesis Part 8 Q1).
+      </experiment>
+      <experiment name="minivess_evaluation" used-by="Analysis writes, Biostatistics reads">
+        Contains: up to 384 analysis evaluations (debug) + zero-shot baselines.
+        Analysis creates runs in SEPARATE experiment (synthesis Part 2.3).
+      </experiment>
+      <experiment name="minivess_biostatistics" used-by="Biostatistics writes">
+        Contains: statistical analysis artifacts (DuckDB, Parquet, figures, LaTeX).
+      </experiment>
+    </mlflow-experiments>
+
+    <decoupling-architecture>
+      <!-- GPU flows run on cloud, CPU flows run locally -->
+      <cloud-gpu cost="~$65 on GCP L4 spot">
+        Model Training Flow (Flow 2) — SkyPilot + Docker + GCP L4 spot
+        Produces: checkpoints, per-fold metrics, resolved_config.yaml
+        THIS IS THE ONLY LAYER THAT COSTS MONEY.
+      </cloud-gpu>
+      <local-cpu cost="ZERO">
+        Post-Training Flow (Flow 2.5) — SWA, calibration, conformal (CPU-only)
+          Expands 24 training runs → 96 post-training variants
+        Analysis Flow (Flow 3) — ensemble building, evaluation, UQ (CPU-only for DynUNet)
+          Expands 96 variants → 384 evaluation conditions
+        Biostatistics Flow (Flow 5b) — statistical analysis (pure CPU)
+          Layered ANOVA on all 6 factors
+      </local-cpu>
+      <artifact-sync>
+        make sync-cloud-artifacts — downloads mlruns/ from cloud MLflow
+        Requires: MLFLOW_CLOUD_TRACKING_URI or GCS bucket access
+        Manual at this point (P2 issue #882 for advanced sync)
+      </artifact-sync>
+    </decoupling-architecture>
+
+    <execution-order>
+      1. Download Layer A artifacts from cloud → local mlruns/ (make sync-cloud-artifacts)
+         Input: 24 training runs from GCP
+      2. Post-Training Flow (Layer B) on ALL 24 training conditions (CPU)
+         → Creates 96 post-training variants in minivess_training
+         → Applies factors #4 (post_training_method) and #5 (recalibration)
+      3. Analysis Flow (Layer C): build ensembles, evaluate, compute UQ (CPU)
+         → Creates 384 evaluation runs in minivess_evaluation
+         → Applies factor #6 (ensemble_strategy)
+      4. Biostatistics Flow (Layer D): layered ANOVA, spec curve, rank stability (CPU)
+         → Creates statistical artifacts in minivess_biostatistics
+         → Analyzes all 6 factors with layered ANOVA structure
+      5. Verify: all statistical outputs correct, all figures generated, all 384 conditions covered
+    </execution-order>
+
+    <inter-flow-discovery>
+      <!-- Synthesis Part 2.2: All flows discover upstream via MLflow tags -->
+      Post-Training discovers Training:
+        find_upstream_safely(experiment_name="minivess_training", upstream_flow="training-flow")
+      Analysis discovers Training + Post-Training:
+        EnsembleBuilder.discover_training_runs() queries minivess_training
+      Biostatistics discovers Analysis:
+        discover_source_runs(experiment_names=["minivess_evaluation"])
+    </inter-flow-discovery>
+
+    <layered-anova-structure>
+      <!-- The biostatistics ANOVA is LAYERED, not flat -->
+      <!-- Mirrors the layered factorial design -->
+      The ANOVA progression:
+
+      1. Core 3-way ANOVA (Layer A factors only):
+         model_family × loss_name × aux_calibration
+         Answers: "Which training factor matters most for segmentation quality?"
+
+      2. Extended 5-way ANOVA (Layers A+B):
+         + post_training_method × recalibration
+         Answers: "Does post-training (SWA, temperature scaling) improve over raw checkpoints?"
+
+      3. Full 6-factor ensemble analysis (all layers A+B+C):
+         + ensemble_strategy
+         Answers: "What is the optimal ensemble strategy? Does ensembling help?"
+
+      All factors auto-derived from the factorial YAML that was used.
+      Zero hardcoded factor names in ANOVA code.
+      All statistical parameters from BiostatisticsConfig (Rule #29).
+    </layered-anova-structure>
+  </context>
+
+  <phases>
+    <phase id="0" name="Artifact Download + Verification">
+      <description>
+        Download Layer A results from GCP cloud and verify all 24 training conditions
+        are present. These 24 runs are the INPUT to the local Layers B+C+D pipeline.
+      </description>
+      <tasks>
+        <task id="T0.1">
+          Implement make sync-cloud-artifacts Makefile target.
+          Downloads mlruns/ from cloud (GCS or RunPod) to local disk.
+          Uses gsutil rsync or mlflow artifacts download.
+        </task>
+        <task id="T0.2">
+          Verify: all 24 training conditions present in local mlruns/.
+          Check: each run has checkpoints, metrics, tags.
+          Tags must match synthesis Part 2.4 schema (model_family, loss_function,
+          fold_id, with_aux_calib, flow_name).
+          These 24 runs are the Layer A grid: 4 models × 3 losses × 2 calibrations.
+        </task>
+        <task id="T0.3">
+          Verify: DVC data available locally for evaluation.
+          MiniVess validation volumes + DeepVess test volumes.
+        </task>
+      </tasks>
+      <gate>All 24 Layer A training conditions discoverable from local mlruns/.</gate>
+    </phase>
+
+    <phase id="1" name="Post-Training Flow — Layer B (Local CPU, Cost: ZERO)">
+      <description>
+        Applies Layer B factors:
+          #4 post_training_method: {none, swa} (2 debug levels)
+          #5 recalibration: {none, temperature_scaling} (2 levels)
+        to all 24 training conditions. Creates new runs in minivess_training
+        (SAME experiment — synthesis Part 2.3 + Part 8 Q1).
+
+        Expansion: 24 training runs × 2 × 2 = 96 post-training variants.
+        Factor levels read from configs/factorial/debug.yaml::factors.post_training.
+      </description>
+      <tasks>
+        <task id="T1.1">
+          Run post_training_flow on each of 24 training conditions.
+          Apply SWA plugin (average across checkpoints within each condition).
+          Apply temperature_scaling on conditions with_aux_calib=True.
+          Use MINIVESS_ALLOW_HOST=1 for local Docker bypass (pytest only).
+          Debug scope: {none, swa} × {none, temperature_scaling} = 4 variants per condition.
+          Total: 24 × 4 = 96 post-training variants.
+        </task>
+        <task id="T1.2">
+          Verify: new MLflow runs created in minivess_training with correct tags.
+          Tags: post_training_method={method}, upstream_training_run_id={id}.
+          All upstream tags inherited (model_family, loss_function, fold_id, with_aux_calib).
+          Factor values from factorial YAML, not hardcoded.
+        </task>
+        <task id="T1.3">
+          Verify: SWA checkpoints are valid (loadable, same architecture as original).
+          Verify: calibration parameters stored as artifacts.
+        </task>
+      </tasks>
+      <gate>Post-training creates 96 new MLflow runs (24 × {none, swa} × {none, temp_scaling}).</gate>
+    </phase>
+
+    <phase id="2" name="Analysis Flow — Layer C (Local CPU, Cost: ZERO for DynUNet)">
+      <description>
+        Applies Layer C factor:
+          #6 ensemble_strategy: 4 debug levels (per_loss_single_best, all_loss_single_best,
+                                                per_loss_all_best, all_loss_all_best)
+        to all 96 training + post-training variants. Creates evaluation runs in
+        minivess_evaluation (SEPARATE experiment — synthesis Part 2.3).
+
+        Expansion: 96 variants × 4 ensemble strategies = 384 evaluation conditions.
+        This completes the full debug factorial: 4×3×2×2×2×4 = 384.
+        Factor levels read from configs/factorial/debug.yaml::factors.analysis.
+      </description>
+      <tasks>
+        <task id="T2.1">
+          Run analysis_flow discovering all 24 training + 96 post-training runs from
+          minivess_training. Build all 4 ensemble strategies.
+          Include post-training variants as ensemble members.
+          Use MINIVESS_ALLOW_HOST=1 for local Docker bypass.
+          Total evaluations: 384 conditions + zero-shot baselines.
+        </task>
+        <task id="T2.2">
+          Verify: per-volume metrics logged for MiniVess validation.
+          Check eval/{fold}/vol/{vol_id}/{metric} entries in MLflow.
+          Per-volume metrics are ESSENTIAL for Biostatistics (Wilcoxon, spec curve).
+        </task>
+        <task id="T2.3">
+          Verify: DeepVess external test evaluation completes.
+          Check test/deepvess/all/{metric} entries.
+          ALL ensemble strategies evaluated on DeepVess (Rule #27 — no debug scope reduction).
+        </task>
+        <task id="T2.4">
+          Verify: UQ from deep ensembles computed (for all_loss_all_best).
+          Debug: summary statistics only (mean epistemic per volume).
+          Production: full 5D maps stored as artifacts (synthesis Part 8 Q2).
+        </task>
+        <task id="T2.5">
+          Verify: champion selection using compound_masd_cldice metric.
+          Champion metric from config (BiostatisticsConfig), not hardcoded.
+        </task>
+        <task id="T2.6">
+          Verify: zero-shot baselines (sam3_vanilla, vesselfm) evaluated as
+          standalone conditions, tagged with is_zero_shot="true".
+        </task>
+        <task id="T2.7">
+          Verify: ensemble logit-level averaging (NOT metric-level).
+          _EnsembleInferenceWrapper: torch.stack(outputs).mean(dim=0).
+        </task>
+      </tasks>
+      <gate>Analysis creates 384 correctly tagged evaluation runs in minivess_evaluation.</gate>
+    </phase>
+
+    <phase id="3" name="Biostatistics Flow — Layer D (Local CPU, Cost: ZERO)">
+      <description>
+        Applies Layer D analytical choices (#7-#13) to all 384 analysis runs.
+        All statistical parameters from BiostatisticsConfig (Rule #29).
+        Creates artifacts in minivess_biostatistics.
+
+        The ANOVA is LAYERED to match the factorial design layers:
+          1. Core 3-way ANOVA: factors #1-#3 (model_family × loss_name × aux_calibration)
+          2. Extended 5-way ANOVA: + factors #4-#5 (post_training_method × recalibration)
+          3. Full 6-factor ensemble analysis: + factor #6 (ensemble_strategy)
+
+        All 6 factor names are auto-derived from the factorial YAML — zero hardcoded names.
+      </description>
+      <tasks>
+        <task id="T3.1">
+          Run biostatistics_flow discovering all 384 analysis runs from minivess_evaluation.
+          Compute LAYERED ANOVA:
+            1. Core 3-way: model_family × loss_name × aux_calibration (Layer A factors)
+            2. Extended 5-way: + post_training_method × recalibration (Layers A+B)
+            3. Full 6-factor: + ensemble_strategy (all layers A+B+C)
+          K=1 debug → per-volume replication (synthesis Part 1.3 MVRD).
+          Fold treated as random effect when K>1 (production).
+          All factor names auto-derived from factorial YAML, not hardcoded.
+        </task>
+        <task id="T3.2">
+          Verify: specification curve analysis completes.
+          Iterates over ALL researcher degrees of freedom (Layer D factors #7-#13).
+          Check: permutation p-value computed.
+          All parameters from BiostatisticsConfig (alpha, rope_values, etc.).
+        </task>
+        <task id="T3.3">
+          Verify: rank stability analysis completes.
+          Check: Kendall's tau matrix for all metric pairs.
+          The clDice vs DSC rank inversion IS a paper finding (synthesis Part 1.4).
+        </task>
+        <task id="T3.4">
+          Verify: calibration metrics computed (Brier, O/E, IPA).
+          Reads calibration artifacts from post-training runs.
+        </task>
+        <task id="T3.5">
+          Verify: DuckDB populated with all 384 conditions.
+          Schema includes all 6 factorial columns from layers A+B+C.
+          The 6 columns: model_family, loss_name, aux_calibration,
+          post_training_method, recalibration, ensemble_strategy.
+          Export Parquet files for reproducibility.
+        </task>
+        <task id="T3.6">
+          Verify: figures and tables generated (LaTeX, Markdown).
+          TRIPOD+AI mapping complete.
+        </task>
+        <task id="T3.7">
+          Verify: pairwise comparisons with two-tier MCC.
+          Co-primary (clDice, MASD): Holm-Bonferroni correction.
+          Secondary (DSC, HD95, etc.): BH-FDR correction.
+          MCC method configurable via BiostatisticsConfig.co_primary_metrics.
+        </task>
+        <task id="T3.8">
+          Verify: Bayesian signed-rank with ROPE (baycomp).
+          ROPE values from BiostatisticsConfig.rope_values (per-metric), not hardcoded.
+        </task>
+      </tasks>
+      <gate>Complete layered statistical analysis produced from all 384 local conditions.</gate>
+    </phase>
+
+    <phase id="4" name="End-to-End Verification — All 6 Factors">
+      <description>
+        Verify the full 6-factor factorial pipeline ran correctly from cloud
+        artifacts through local Layers B+C+D. Total: 384 debug conditions.
+      </description>
+      <tasks>
+        <task id="T4.1">
+          Verify: factorial-monitor skill tracks all 3 local flows.
+          Check: all flows reported as SUCCEEDED.
+          Check: total condition count = 384 (4×3×2×2×2×4).
+        </task>
+        <task id="T4.2">
+          Run make test-staging to verify no regressions from local run.
+        </task>
+        <task id="T4.3">
+          Verify: inter-flow tag discovery works end-to-end across all 6 factors.
+          Post-Training reads training tags from minivess_training (factors #1-#3).
+          Analysis reads training + post-training tags (factors #1-#5).
+          Biostatistics reads analysis tags (all 6 factors #1-#6).
+          All tag names match synthesis Part 2.4 schema.
+          All factor names auto-derived from factorial YAML.
+        </task>
+        <task id="T4.4">
+          Verify: the layered ANOVA correctly partitions variance across all 6 factors.
+          Core 3-way answers: "Which training factor matters most?"
+          Extended 5-way answers: "Does post-training improve over raw checkpoints?"
+          Full 6-factor answers: "What is the optimal ensemble strategy?"
+        </task>
+        <task id="T4.5">
+          Document: local run time, disk space used, any issues found.
+          This feeds into the cold-start prompt for the full 4-flow GCP debug run.
+        </task>
+        <task id="T4.6">
+          Verify: a different lab could run the same pipeline with a custom
+          configs/factorial/my_lab.yaml containing different factor levels.
+          The infrastructure code never hardcodes factor names or level counts.
+        </task>
+      </tasks>
+      <gate>All 384 conditions verified. All 3 local flows complete. Ready for full GCP production run (720 conditions × 3 folds = 2160 evaluations).</gate>
+    </phase>
+  </phases>
+
+  <known-blockers>
+    <!-- From synthesis Part 5 -->
+    <blocker id="B1" name="Config Pipeline Gap">
+      train_flow.py bypasses Hydra-zen. Uses argparse + 9-key dict instead of
+      compose_experiment_config(). MLflow runs lack config/resolved_config.yaml.
+      Workaround: factorial SkyPilot YAML passes all args explicitly.
+    </blocker>
+    <blocker id="B3" name="Tag Mismatch">
+      Training logs loss_name but ensemble builder reads loss_function.
+      Fallback chain exists in builder.py:229-234 but is fragile.
+    </blocker>
+    <blocker id="B7" name="Post-Training Volume Mount">
+      post_training_out volume missing from docker-compose.flows.yml.
+      Impact: post-training artifacts lost on container exit.
+    </blocker>
+    <blocker id="Issue882" name="Cloud Artifact Sync">
+      No standardized mechanism to download MLflow artifacts from cloud to local disk.
+      make sync-cloud-artifacts target needs implementation (Phase 0).
+    </blocker>
+  </known-blockers>
+
+  <deterministic-script>
+    <description>
+      The .sh script that orchestrates this local integration test.
+      Uses LOCAL factorial-monitor skill for tracking.
+      Must invoke Prefect flows (Rule #17 — never standalone scripts).
+    </description>
+    <path>scripts/run_local_post_analysis_biostats.sh</path>
+  </deterministic-script>
+
+  <appendix id="factor-table-reference">
+    <title>Complete Factor Table (synthesis Part 7.1)</title>
+    <content>
+      This integration test exercises ALL factors across all 4 layers:
+
+      EXPERIMENTAL FACTORS (6 — define the 720-condition / 384-debug grid):
+
+      | # | Factor                  | Layer              | Full Levels | Debug Levels | Compute     | Config Section         |
+      |---|-------------------------|--------------------|-------------|-------------|-------------|------------------------|
+      | 1 | model_family            | A (Training)       | 4           | 4           | GPU (GCP)   | factors.training       |
+      | 2 | loss_name               | A (Training)       | 3           | 3           | GPU (GCP)   | factors.training       |
+      | 3 | aux_calibration         | A (Training)       | 2           | 2           | GPU (GCP)   | factors.training       |
+      | 4 | post_training_method    | B (Post-Training)  | 3           | 2           | CPU (local) | factors.post_training  |
+      | 5 | recalibration           | B (Post-Training)  | 2           | 2           | CPU (local) | factors.post_training  |
+      | 6 | ensemble_strategy       | C (Analysis)       | 5           | 4           | CPU (local) | factors.analysis       |
+
+      Full product: 4 × 3 × 2 × 3 × 2 × 5 = 720 conditions × 3 folds = 2160 evaluations
+      Debug product: 4 × 3 × 2 × 2 × 2 × 4 = 384 conditions × 1 fold = 384 evaluations
+
+      Cost: ONLY Layer A runs on GPU (~$65 for 72 runs). Layers B+C+D run on local CPU (free).
+
+      ANALYTICAL FACTORS (7 — researcher degrees of freedom, Layer D):
+
+      | # | Factor       | Levels       | Config Source                          |
+      |---|-------------|-------------|----------------------------------------|
+      | 7 | metric       | 8+          | BiostatisticsConfig.metrics            |
+      | 8 | aggregation  | 2           | spec curve engine                      |
+      | 9 | mcc_method   | 2           | BiostatisticsConfig.co_primary_metrics |
+      | 10| alpha        | configurable | BiostatisticsConfig.alpha              |
+      | 11| rope         | per-metric  | BiostatisticsConfig.rope_values        |
+      | 12| test_type    | 4+          | spec curve engine                      |
+      | 13| effect_size  | 3           | biostatistics_statistics.py            |
+    </content>
+  </appendix>
+
+  <appendix id="expansion-math">
+    <title>Factorial Expansion Math — From 24 Training Runs to 384 Debug Evaluations</title>
+    <content>
+      Layer A (Training, GPU cloud, ~$65):
+        4 models × 3 losses × 2 aux_calib = 24 cells × 1 fold (debug) = 24 training runs
+
+      Layer B (Post-Training, local CPU, ZERO cost):
+        24 runs × {none, swa} × {none, temperature_scaling} = 24 × 2 × 2 = 96 variants
+
+      Layer C (Analysis, local CPU, ZERO cost for DynUNet):
+        96 variants × 4 ensemble strategies = 384 evaluation conditions
+
+      Layer D (Biostatistics, local CPU, ZERO cost):
+        Layered ANOVA on all 384 conditions across all 6 factors
+
+      Debug total: 4 × 3 × 2 × 2 × 2 × 4 = 384 conditions
+      + zero-shot baselines (sam3_vanilla, vesselfm) evaluated separately
+
+      For PRODUCTION:
+        Layer A: 24 × 3 folds = 72 runs (~$65)
+        Layer B: 72 × 3 × 2 = 432 variants (free)
+        Layer C: 432 × 5 = 2160 evaluations (free for DynUNet)
+        Full factorial: 4 × 3 × 2 × 3 × 2 × 5 = 720 × 3 folds = 2160
+    </content>
+  </appendix>
+
+  <appendix id="composable-yaml-design">
+    <title>Composable Factorial YAML — Why Factor Names Are Never Hardcoded</title>
+    <content>
+      The factorial YAML is COMPOSABLE via Hydra config groups. Users create their own
+      configs/factorial/*.yaml files. The platform provides named examples:
+
+        configs/factorial/paper_full.yaml    — 720 conditions (Nature Protocols)
+        configs/factorial/debug.yaml         — 384 conditions (pipeline validation)
+
+      A different lab creates configs/factorial/my_lab.yaml:
+        factors:
+          training:
+            model_family: [dynunet, sam3_hybrid]    # 2 models only
+            loss_name: [dice_ce]                     # 1 loss only
+            aux_calibration: [false]                 # no calibration
+          post_training:
+            method: [none]                           # no post-training
+            recalibration: [none]                    # no recalibration
+          analysis:
+            ensemble_strategy: [per_loss_single_best, all_loss_all_best]  # 2 strategies
+
+      Result: 2×1×1×1×1×2 = 4 conditions — runs in minutes on a laptop.
+      All infrastructure code (flows, ANOVA, spec curve) works unchanged.
+    </content>
+  </appendix>
+
+  <cross-reference>
+    <synthesis file="docs/planning/intermedia-plan-synthesis-pre-debug-run.md" relation="authoritative synthesis — this plan is subordinate"/>
+    <factorial-source file="docs/planning/pre-gcp-master-plan.xml" line="16" relation="canonical 6-factor definition: 4×3×2×3×2×5=720"/>
+    <plan file="docs/planning/post-training-flow-debug-double-check.xml" relation="upstream: post-training plan (Layer B, factors #4-#5)"/>
+    <plan file="docs/planning/analysis-flow-debug-double-check.xml" relation="upstream: analysis plan (Layer C, factor #6)"/>
+    <plan file="docs/planning/biostatistic-flow-debug-double-check.xml" relation="upstream: biostatistics plan (Layer D, factors #7-#13)"/>
+    <plan file="docs/planning/run-debug-factorial-experiment-2nd-pass.md" relation="2nd pass cloud run (Layer A)"/>
+    <source file="src/minivess/config/biostatistics_config.py" relation="all statistical params (Rule #29)"/>
+    <source file="src/minivess/config/post_training_config.py" relation="post-training plugin config"/>
+    <source file="src/minivess/config/evaluation_config.py" relation="inference strategy config"/>
+    <source file="src/minivess/ensemble/builder.py" relation="EnsembleBuilder + EnsembleStrategyName"/>
+    <config file="configs/factorial/paper_full.yaml" relation="production factorial config (720 conditions)"/>
+    <config file="configs/factorial/debug.yaml" relation="debug factorial config (384 conditions)"/>
+    <config file="configs/hpo/paper_factorial.yaml" relation="legacy Layer A-only config"/>
+    <skill file=".claude/skills/factorial-monitor" relation="orchestration tracking"/>
+    <issue number="882" relation="cloud artifact sync"/>
+  </cross-reference>
+</plan>

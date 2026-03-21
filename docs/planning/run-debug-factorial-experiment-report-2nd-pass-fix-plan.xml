@@ -1,0 +1,441 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>Debug Factorial 2nd Pass — Fix Plan for 4 Open Glitches</title>
+    <branch>test/debug-factorial-run</branch>
+    <date>2026-03-20</date>
+    <status>planned</status>
+    <priority>P0 — unblocks 14/26 failed debug conditions + checkpoint persistence</priority>
+    <predecessor>docs/planning/run-debug-factorial-experiment-report.md</predecessor>
+    <successor>scripts/run_factorial_2nd_pass.sh (15 re-run conditions)</successor>
+    <estimated-time>4-6 hours (fixes + tests + Docker rebuild + verification)</estimated-time>
+  </metadata>
+
+  <context>
+    <summary>
+      The 1st debug factorial run (2026-03-20) found 12 glitches. 8 were fixed during
+      the run. 4 remain open. This plan fixes all 4, adds model-specific tests to catch
+      them locally, then re-runs the 15 failed+probe conditions.
+
+      After the 2nd pass succeeds, a 3rd pass runs all 26 conditions as final validation
+      before the ~$65 production run.
+    </summary>
+    <open-glitches>
+      <glitch id="8" severity="P0" issue="878">MLflow checkpoint 413 on Cloud Run</glitch>
+      <glitch id="9" severity="HIGH">sam3_topolora LoRA applied to Conv2d</glitch>
+      <glitch id="10" severity="HIGH">mamba-ssm not compiled in Docker image</glitch>
+      <glitch id="12" severity="HIGH">Zero-shot max_epochs=0 Pydantic validation</glitch>
+    </open-glitches>
+  </context>
+
+  <phases>
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="0" name="Local Model-Specific Tests (TDD RED)">
+      <description>
+        Write failing tests FIRST that would have caught Glitches #9, #10, #12 locally.
+        These tests run on the local RTX 2070 Super (8 GB VRAM) and belong in a new
+        test group `@pytest.mark.model_construction` that is:
+        - Included in `make test-staging` (fast, no GPU needed for most)
+        - Conditionally triggered by changes to `src/minivess/adapters/`
+        - Manually runnable via `make test-models`
+      </description>
+      <tasks>
+        <task id="T0.1" skill="self-learning-iterative-coder">
+          Write test: sam3_topolora adapter constructs without Conv2d TypeError.
+          File: tests/v2/unit/adapters/test_sam3_topolora_construction.py
+
+          ```python
+          def test_topolora_lora_only_targets_linear():
+              """LoRA must only wrap nn.Linear layers, not Conv2d (Glitch #9)."""
+              from minivess.adapters.sam3_topolora import _apply_lora_to_encoder
+              import torch.nn as nn
+
+              # Create a mock encoder with both Linear and Conv2d
+              class MockEncoder(nn.Module):
+                  def __init__(self):
+                      super().__init__()
+                      self.linear = nn.Linear(64, 64)
+                      self.conv = nn.Conv2d(64, 64, 3)
+              encoder = MockEncoder()
+              targets = _apply_lora_to_encoder(encoder, rank=8, alpha=16.0, dropout=0.0)
+              # LoRA should only wrap linear, not conv
+              assert "linear" in targets
+              assert "conv" not in targets
+          ```
+          Expected: FAILS (current code wraps Conv2d → TypeError)
+        </task>
+
+        <task id="T0.2" skill="self-learning-iterative-coder">
+          Write test: mamba-ssm availability check gives clear error.
+          File: tests/v2/unit/adapters/test_mambavesselnet_construction.py
+
+          ```python
+          def test_mamba_availability_check():
+              """_require_mamba() raises RuntimeError when mamba-ssm not installed."""
+              from minivess.adapters.model_builder import _mamba_available
+              # This test documents the expected behavior:
+              # If mamba-ssm is not installed, _mamba_available returns False
+              available = _mamba_available()
+              # On local dev (no nvcc), mamba-ssm is not available
+              if not available:
+                  from minivess.adapters.model_builder import _require_mamba
+                  with pytest.raises(RuntimeError, match="mamba-ssm not installed"):
+                      _require_mamba()
+          ```
+        </task>
+
+        <task id="T0.3" skill="self-learning-iterative-coder">
+          Write test: TrainingConfig accepts max_epochs=0 for zero-shot.
+          File: tests/v2/unit/config/test_training_config_zero_shot.py
+
+          ```python
+          def test_training_config_allows_zero_epochs():
+              """max_epochs=0 must be valid for zero-shot evaluation (Glitch #12)."""
+              from minivess.config.models import TrainingConfig
+              config = TrainingConfig(max_epochs=0)
+              assert config.max_epochs == 0
+
+          def test_training_config_rejects_negative_epochs():
+              """max_epochs must be >= 0."""
+              from minivess.config.models import TrainingConfig
+              with pytest.raises(ValidationError):
+                  TrainingConfig(max_epochs=-1)
+          ```
+          Expected: FAILS (current ge=1 rejects 0)
+        </task>
+
+        <task id="T0.4" skill="self-learning-iterative-coder">
+          Write test: checkpoint artifact upload handles 413 gracefully.
+          File: tests/v2/unit/observability/test_checkpoint_persistence.py
+
+          ```python
+          def test_checkpoint_upload_413_handled_gracefully(tmp_path):
+              """Trainer must not crash on 413 — checkpoint saved locally."""
+              # Mock MLflow to raise 413
+              # Verify checkpoint exists at local path after training
+          ```
+        </task>
+        <task id="T0.5" skill="self-learning-iterative-coder">
+          Write test: LoRA zero-init equivalence (from TorchTune best practices).
+          File: tests/v2/unit/adapters/test_lora_application.py
+
+          ```python
+          def test_lora_zero_init_equivalence():
+              """At init, LoRA output must equal base model (LoRA_B is zero-init)."""
+              import torch
+              original = nn.Linear(64, 32)
+              lora = LoRALinear(original, rank=8, alpha=16.0, dropout=0.0)
+              x = torch.randn(2, 64)
+              with torch.no_grad():
+                  base_out = original(x)
+                  lora_out = lora(x)
+              torch.testing.assert_close(base_out, lora_out, rtol=1e-5, atol=1e-5)
+          ```
+          Source: TorchTune LoRA test patterns, docs/planning/pytorch-model-testing-best-practices-report.md
+        </task>
+
+        <task id="T0.6" skill="self-learning-iterative-coder">
+          Write test: all factorial config models exist in adapter registry.
+          File: tests/v2/unit/adapters/test_adapter_construction.py
+
+          ```python
+          def test_all_factorial_models_registered():
+              """All models in debug_factorial.yaml must be in the adapter registry."""
+              import yaml
+              from pathlib import Path
+              from minivess.adapters.model_builder import ADAPTER_REGISTRY
+              config = yaml.safe_load(
+                  Path("configs/experiment/debug_factorial.yaml").read_text(encoding="utf-8")
+              )
+              for model in config["factors"]["model_family"]:
+                  assert model in ADAPTER_REGISTRY, f"{model} not registered"
+          ```
+        </task>
+      </tasks>
+      <gate>All 6 tests written. All FAIL (RED phase of TDD).</gate>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="1" name="Fix Glitch #8 — MLflow Checkpoint Persistence (P0)">
+      <description>
+        Implement H1 (--no-serve-artifacts + direct GCS upload) + H6 (GCS bucket mount).
+        This is 90% done — see smoke_test_gcp.yaml for the working reference pattern.
+      </description>
+      <tasks>
+        <task id="T1.1">
+          Change train_factorial.yaml MLFLOW_TRACKING_URI:
+
+          File: deployment/skypilot/train_factorial.yaml line 57
+          BEFORE: MLFLOW_TRACKING_URI: /app/mlruns
+          AFTER:  MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+        </task>
+
+        <task id="T1.2">
+          Add file_mounts for checkpoint persistence:
+
+          File: deployment/skypilot/train_factorial.yaml (after resources section)
+          ADD:
+          ```yaml
+          file_mounts:
+            /app/checkpoints:
+              source: gs://minivess-mlops-checkpoints
+              mode: MOUNT
+          ```
+        </task>
+
+        <task id="T1.3">
+          Remove --env MLFLOW_TRACKING_URI=/app/mlruns override:
+
+          File: scripts/run_factorial.sh line 193
+          REMOVE: --env MLFLOW_TRACKING_URI=/app/mlruns \
+
+          File: scripts/run_factorial_2nd_pass.sh
+          VERIFY: no MLFLOW_TRACKING_URI override exists
+        </task>
+
+        <task id="T1.4">
+          Verify MLflow Cloud Run has --no-serve-artifacts:
+          File: deployment/docker/Dockerfile.mlflow-gcp
+          VERIFY: ENTRYPOINT contains --no-serve-artifacts (already present)
+        </task>
+      </tasks>
+      <gate>T0.4 test passes (checkpoint persistence verified locally).</gate>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="2" name="Fix Glitch #9 — sam3_topolora LoRA Conv2d">
+      <description>
+        Skip Conv2d layers in _apply_lora_to_encoder(). Create P2 issue for
+        future LoRAConv2d implementation.
+      </description>
+      <tasks>
+        <task id="T2.1">
+          Fix _apply_lora_to_encoder to skip Conv2d:
+
+          File: src/minivess/adapters/sam3_topolora.py line ~126
+          BEFORE:
+          ```python
+          if isinstance(module, nn.Linear | nn.Conv2d):
+          ```
+          AFTER:
+          ```python
+          if isinstance(module, nn.Linear):
+          ```
+
+          Also update docstring from "Apply LoRA adapters to Conv2d layers"
+          to "Apply LoRA adapters to Linear layers in the encoder."
+        </task>
+
+        <task id="T2.2">
+          Create P2 GitHub issue for LoRAConv2d implementation:
+          Title: "P2: Implement LoRAConv2d for Conv2d layers in SAM3 encoder"
+        </task>
+      </tasks>
+      <gate>T0.1 test passes (LoRA targets only Linear layers).</gate>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="3" name="Fix Glitch #10 — mamba-ssm Docker Image">
+      <description>
+        Rebuild Docker base image with INSTALL_MAMBA=1 build-arg.
+        This compiles mamba-ssm CUDA extensions in the builder stage.
+      </description>
+      <tasks>
+        <task id="T3.1">
+          Rebuild Docker image with mamba-ssm:
+
+          ```bash
+          DOCKER_BUILDKIT=1 docker build \
+            --build-arg INSTALL_MAMBA=1 \
+            -t minivess-base:latest \
+            -f deployment/docker/Dockerfile.base .
+          ```
+          Expected: ~15-20 min build time (CUDA compilation).
+        </task>
+
+        <task id="T3.2">
+          Push to GAR:
+
+          ```bash
+          docker tag minivess-base:latest \
+            europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+          docker push europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+          ```
+        </task>
+
+        <task id="T3.3">
+          Verify mamba-ssm in the pushed image:
+
+          ```bash
+          docker run --rm minivess-base:latest \
+            python -c "import mamba_ssm; print(f'mamba-ssm {mamba_ssm.__version__}')"
+          ```
+        </task>
+      </tasks>
+      <gate>mamba-ssm importable in the Docker image. T0.2 test passes.</gate>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="4" name="Fix Glitch #12 — Zero-Shot max_epochs=0">
+      <description>
+        Allow max_epochs=0 in TrainingConfig for zero-shot evaluation.
+        Add zero-shot handling in train_flow.py.
+      </description>
+      <tasks>
+        <task id="T4.1">
+          Relax Pydantic constraint:
+
+          File: src/minivess/config/models.py line ~227
+          BEFORE: max_epochs: int = Field(default=100, ge=1)
+          AFTER:  max_epochs: int = Field(default=100, ge=0)
+        </task>
+
+        <task id="T4.2">
+          Add zero-shot path in training_flow:
+
+          File: src/minivess/orchestration/flows/train_flow.py
+          In the training_flow() function, add early return for zero-shot:
+
+          ```python
+          if zero_shot and max_epochs == 0:
+              logger.info("Zero-shot evaluation mode — skipping training loop")
+              # Load pretrained model, run evaluation only
+              # ... (needs implementation)
+          ```
+        </task>
+      </tasks>
+      <gate>T0.3 test passes (TrainingConfig accepts 0). Zero-shot probe works.</gate>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="5" name="Verify All Fixes Locally">
+      <description>
+        Run full staging test suite + model-specific tests.
+        Verify no regressions introduced.
+      </description>
+      <tasks>
+        <task id="T5.1">Run: make test-staging — must pass (target: &lt;3 min)</task>
+        <task id="T5.2">Run: uv run pytest tests/v2/unit/adapters/ -v — model construction tests</task>
+        <task id="T5.3">Run: uv run pytest tests/v2/unit/config/ -v — config validation tests</task>
+        <task id="T5.4">Run: uv run ruff check src/ tests/ — linting</task>
+        <task id="T5.5">Run: uv run mypy src/ — type checking</task>
+        <task id="T5.6">Verify Docker image:
+          docker manifest inspect europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest</task>
+        <task id="T5.7">Dry-run 2nd pass: ./scripts/run_factorial_2nd_pass.sh --dry-run</task>
+      </tasks>
+      <gate>ALL checks pass. Zero failures, zero new skips.</gate>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="6" name="Commit + Push">
+      <description>
+        Single commit with all fixes. Push branch for PR readiness.
+      </description>
+      <tasks>
+        <task id="T6.1">
+          Git add all changed files:
+          - pyproject.toml (if changed)
+          - deployment/skypilot/train_factorial.yaml
+          - scripts/run_factorial.sh
+          - scripts/run_factorial_2nd_pass.sh
+          - src/minivess/adapters/sam3_topolora.py
+          - src/minivess/config/models.py
+          - src/minivess/orchestration/flows/train_flow.py
+          - deployment/docker/Dockerfile.base (already committed)
+          - tests/v2/unit/adapters/test_sam3_topolora_construction.py
+          - tests/v2/unit/adapters/test_mambavesselnet_construction.py
+          - tests/v2/unit/config/test_training_config_zero_shot.py
+          - tests/v2/unit/observability/test_checkpoint_persistence.py
+          - docs/planning/run-debug-factorial-experiment-2nd-pass.md
+          - docs/planning/run-debug-factorial-experiment-report-2nd-pass-fix-plan.xml
+        </task>
+        <task id="T6.2">
+          Commit: "fix: resolve 4 open glitches from debug factorial 1st pass (#8 #9 #10 #12)"
+        </task>
+      </tasks>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="7" name="Launch 2nd Pass">
+      <description>
+        Execute the 15-condition 2nd pass re-run.
+      </description>
+      <tasks>
+        <task id="T7.1">Launch: ./scripts/run_factorial_2nd_pass.sh</task>
+        <task id="T7.2">Monitor with /factorial-monitor until all 15 terminal</task>
+        <task id="T7.3">Verify checkpoint persistence:
+          gsutil ls gs://minivess-mlops-checkpoints/ — must have probe checkpoint</task>
+        <task id="T7.4">If any failures → diagnose, fix (max 2 cycles), re-launch</task>
+      </tasks>
+      <gate>15/15 SUCCEEDED. Checkpoints on GCS verified.</gate>
+    </phase>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <phase id="8" name="Plan 3rd Pass (Full 26 Conditions)">
+      <description>
+        After 2nd pass succeeds, plan the 3rd pass as final validation.
+      </description>
+      <tasks>
+        <task id="T8.1">Update run-debug-factorial-experiment-report.md with 2nd pass results</task>
+        <task id="T8.2">Create 3rd pass cold-start prompt:
+          ./scripts/run_factorial.sh configs/experiment/debug_factorial.yaml
+          (all 26 conditions, with all fixes applied)</task>
+        <task id="T8.3">After 3rd pass 26/26 SUCCEEDED → authorize production run</task>
+      </tasks>
+    </phase>
+  </phases>
+
+  <skills-used>
+    <skill name="self-learning-iterative-coder" role="TDD loop for all code fixes (Phase 0-4)"/>
+    <skill name="factorial-monitor" role="Phase 7 monitoring"/>
+    <skill name="issue-creator" role="P2 LoRAConv2d issue (Phase 2)"/>
+  </skills-used>
+
+  <cross-reference>
+    <report file="docs/planning/run-debug-factorial-experiment-report.md" relation="1st pass results"/>
+    <report file="docs/planning/test-suite-improvement-report.md" relation="testing strategy"/>
+    <script file="scripts/run_factorial_2nd_pass.sh" relation="2nd pass launch"/>
+    <script file="scripts/run_factorial.sh" relation="main factorial launch"/>
+    <config file="deployment/skypilot/train_factorial.yaml" relation="SkyPilot per-condition"/>
+    <issue url="https://github.com/petteriTeikari/minivess-mlops/issues/878" relation="P0 checkpoint"/>
+  </cross-reference>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <appendix id="decision-record">
+    <title>Decision-Making Record (verbatim Q&amp;A from planning session)</title>
+
+    <user-prompt>
+      After that, create /home/petteri/Dropbox/github-personal/minivess-mlops/docs/planning/run-debug-factorial-experiment-2nd-pass that will only run those models/losses combinations that had model issues! As in which creates a temporary run-debug-factorial-experimenl-2nd-pass.sh just for this particular run to fix those failed "Results: 11 SUCCEEDED / 14 FAILED / 1 STUCK" which is A LOT then! and quite disappointing the level of issues that we still have :( And then after that let's create a plan how to address the issues found in run-debug-factorial-experiment-report.md with reviewer agents working on the model-specific issues and the general infrastructure glitches. Optimize with reviewer agents then how to run this fix-plan with our self-learning TDD Skill followed by code review for any glitches that we might have missed in the plan, and then run full PROD test suite, in preparation for the 2nd attempt of the debug run, so that we eventually can run the full production test run on GCP with zero failures.
+    </user-prompt>
+
+    <qa-session>
+      <question id="Q1">
+        For the 2nd-pass .sh script, should it ONLY re-run the 14 failed conditions, or also re-run the 11 succeeded conditions that lost checkpoints due to P0 #878?
+      </question>
+      <answer id="A1">
+        I don't need the checkpoint per se for anything as this is a debugging run and this is not the full production run to be reported in sci-llm-writer/manuscripts/vasculature-mlops! This debug training run must ensure that we get the artifacts needed through the pipeline mechanics that I eventually need for the manuscript, and make sure that the pipeline is saving all the checkpoints correctly. Is this clear? So only 14+1 to test that we fixed all models probably, and this subset tests the checkpoint mechanics properly as it failed with too large weights whereas the succeeded dynunet used the smallest .pth so it should work as well. And after this 2nd pass, I think we need to run another 3rd pass with all the 26 conditions for another double-check. Remember to save my answers and your questions verbatim, along with my initial prompt (As an appendix to .xml?) for this 2nd pass planning as we will repeating this debugging experiment!
+      </answer>
+
+      <question id="Q2">
+        For the fix-plan XML, should the LoRA Conv2d fix implement Conv2d LoRA support, or simply skip Conv2d layers?
+      </question>
+      <answer id="A2">
+        Skip Conv2d layers now, but create a P2 priority issue on the possible LoRAConv2d if desired at some later point, so that we remember that this is an option.
+      </answer>
+
+      <question id="Q3">
+        For the local GPU test suite, your RTX 2070 Super has 8 GB VRAM. What test depth do you want?
+      </question>
+      <answer id="A3">
+        Couldn't we use a distinct group of the model-specific tests that only get triggered when we have a change in models? or is manually triggered if the folder structure is so that we cannot easily have conditional test filter based on file changes in some folder? No need to run all the extensive tests everytime for model-specific changes if the models never change, right?
+      </answer>
+
+      <question id="Q4">
+        For the test-suite-improvement-report.md, how deep should the web research go?
+      </question>
+      <answer id="A4">
+        Comprehensive MLOps testing.
+      </answer>
+    </qa-session>
+  </appendix>
+</plan>
