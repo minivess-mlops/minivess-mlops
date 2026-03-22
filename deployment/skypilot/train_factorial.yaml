@@ -114,7 +114,8 @@ setup: |
     echo "Training data already present ($(ls data/raw/minivess/imagesTr | wc -l) files)"
   else
     echo "Pulling training data from GCS via DVC..."
-    dvc pull -r gcs || {
+    # Pull only raw data (data/processed may not exist in GCS yet)
+    dvc pull data/raw/minivess -r gcs || {
       echo "FATAL: DVC pull from GCS failed."
       echo "Ensure: gcloud auth application-default login"
       exit 1
