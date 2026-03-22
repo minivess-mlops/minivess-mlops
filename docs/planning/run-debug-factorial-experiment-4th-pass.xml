@@ -36,7 +36,7 @@
     <status>ready</status>
     <priority>P0 — validates full factorial on cloud GPU before production spend</priority>
     <skill>factorial-monitor</skill>
-    <estimated-cost>~$5-10 GCP L4 spot (24 GPU jobs, 2 epochs each)</estimated-cost>
+    <estimated-cost>~$7-13 GCP L4 spot (32 GPU jobs, 2 epochs each)</estimated-cost>
     <report-output>docs/planning/run-debug-factorial-experiment-report-4th-pass.md</report-output>
   </metadata>
 
@@ -46,9 +46,9 @@
     <!-- Debug factors are IDENTICAL to production (CLAUDE.md Rule 27) -->
 
     <layer id="A" name="Training">
-      <!-- 4 models × 3 losses × 2 aux_calib = 24 cells -->
+      <!-- 4 models × 4 losses × 2 aux_calib = 32 cells -->
       <factor name="model_family" levels="dynunet,mambavesselnet,sam3_topolora,sam3_hybrid"/>
-      <factor name="loss_name" levels="cbdice_cldice,dice_ce,dice_ce_cldice"/>
+      <factor name="loss_name" levels="cbdice_cldice,dice_ce,dice_ce_cldice,bce_dice_05cldice"/>
       <factor name="aux_calibration" levels="true,false"/>
     </layer>
 
@@ -68,9 +68,9 @@
     </layer>
 
     <summary>
-      Total conditions: 4×3×2 × 2×2 × 5 = 480 (IDENTICAL to production)
+      Total conditions: 4×4×2 × 2×2 × 5 = 640 (IDENTICAL to production)
       Debug scope reductions (ONLY 3): 1 fold, 2 epochs, half data
-      GPU jobs: 24 cells × 1 fold = 24 (each runs training + SWAG internally)
+      GPU jobs: 32 cells × 1 fold = 32 (each runs training + SWAG internally)
       Zero-shot baselines: 2 (SAM3 Vanilla on MiniVess, VesselFM on DeepVess)
       POST_TRAINING_METHODS env var: "none,swag" (comma-separated, parent flow iterates)
     </summary>

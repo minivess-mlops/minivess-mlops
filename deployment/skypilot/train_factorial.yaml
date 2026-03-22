@@ -14,6 +14,7 @@
 #   EXPERIMENT_NAME:   debug_factorial | paper_factorial
 #   ZERO_SHOT:         true | false (default: false)
 #   EVAL_DATASET:      minivess | deepvess (default: minivess)
+#   POST_TRAINING_METHODS: none,swag (comma-separated, parent flow iterates internally)
 #
 # Docker image: All deps pre-installed. Setup only pulls data + copies config.
 # BANNED: apt-get, uv sync, git clone in setup (CLAUDE.md Rule 17).
@@ -64,6 +65,9 @@ envs:
   EXPERIMENT_NAME: debug_factorial
   ZERO_SHOT: "false"
   EVAL_DATASET: minivess
+  # Comma-separated post-training methods. Parent flow iterates internally.
+  # "none" cell comes free from training sub-flow. SWAG runs in post-training sub-flow.
+  POST_TRAINING_METHODS: "none,swag"
 
   # MLflow: Cloud SQL PostgreSQL via Cloud Run (or file-based fallback)
   # Set MLFLOW_TRACKING_URI in .env for your environment.
@@ -119,8 +123,17 @@ setup: |
     }
   fi
 
-  # Use canonical 3-fold splits
-  cp configs/splits/3fold_seed42.json configs/splits/splits.json
+  # Use splits file based on experiment type:
+  # Debug: debug_half_1fold.json (23 train / 12 val, fold-0 only)
+  # Production: 3fold_seed42.json (47 train / 23 val, 3 folds)
+  if [ "${MAX_TRAIN_VOLUMES}" -gt 0 ] 2>/dev/null; then
+    # Debug mode: max_train_volumes > 0 means half-data splits
+    cp configs/splits/debug_half_1fold.json configs/splits/splits.json
+    echo "Using DEBUG splits (half data, 1 fold)"
+  else
+    cp configs/splits/3fold_seed42.json configs/splits/splits.json
+    echo "Using PRODUCTION splits (full data, 3 folds)"
+  fi
 
   # Create required directories
   mkdir -p /app/checkpoints /app/logs
@@ -177,4 +190,5 @@ run: |
     --max-val-volumes "${MAX_VAL_VOLUMES}" \
     --experiment "${EXPERIMENT_NAME}" \
     --zero-shot "${ZERO_SHOT}" \
-    --eval-dataset "${EVAL_DATASET}"
+    --eval-dataset "${EVAL_DATASET}" \
+    --post-training-method "${POST_TRAINING_METHODS}"
