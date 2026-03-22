@@ -35,7 +35,7 @@ doi: [10.1038/s41597-023-02048-8](https://doi.org/10.1038/s41597-023-02048-8)
 
 - **6 model families** behind a single `ModelAdapter` ABC: DynUNet (CNN baseline), MambaVesselNet++ (SSM hybrid), SAM3 Vanilla/TopoLoRA/Hybrid (foundation model variants), VesselFM (vessel-specific foundation model)
 - **18 loss functions** -- from standard (Dice+CE) to topology-aware (clDice, CAPE, Betti matching, skeleton recall) to graph-constrained (compound graph topology)
-- **12 Prefect flows** with Docker-per-flow isolation, spanning the full ML lifecycle from data engineering through biostatistics reporting
+- **15 Prefect flows** with Docker-per-flow isolation, spanning the full ML lifecycle from data engineering through biostatistics reporting
 - **SkyPilot intercloud broker** ([Yang et al., NSDI'23](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng)) -- one command to launch GPU jobs on RunPod or GCP
 - **OpenLineage (Marquez) data lineage** for IEC 62304 traceability -- automated audit trail for every pipeline execution
 - **Evidently drift detection** + whylogs profiling + Prometheus/Grafana monitoring stack
@@ -43,8 +43,8 @@ doi: [10.1038/s41597-023-02048-8](https://doi.org/10.1038/s41597-023-02048-8)
 - **MetricsReloaded evaluation** -- clDice (trusted), MASD (trusted), DSC (foil) per [Maier-Hein et al. (2024)](https://doi.org/10.1038/s41592-023-02151-z)
 - **3-fold cross-validation** (seed=42) with bootstrap confidence intervals and paired statistical tests
 - **Conformal uncertainty quantification** -- 5 methods (split conformal, morphological, distance transform, risk-controlling, MAPIE)
-- **Post-training plugins** -- 6 config-driven enhancements (SWA, Multi-SWA, model merging, calibration, CRC conformal, ConSeCo FP control)
-- **Knowledge graph** -- 69+ Bayesian decision nodes across 6 layers, driving spec-driven development
+- **Post-training plugins** -- 7 config-driven enhancements (checkpoint averaging, subsampled ensemble, SWAG ([Maddox et al. 2019](https://arxiv.org/abs/1902.02476)), model merging, calibration, CRC conformal, ConSeCo FP control)
+- **Knowledge graph** -- 75+ Bayesian decision nodes across 6 layers, driving spec-driven development
 - **FDA-ready audit infrastructure** -- AuditTrail, compliance module, PCCP-compatible factorial design, CycloneDX SBOM (planned)
 
 ---
@@ -81,7 +81,7 @@ increasingly autonomous actions while remaining within the Prefect flow boundary
 
 **Concrete example: the Data Acquisition Flow.** The platform already includes
 `acquisition_flow.py` (Flow 0) -- currently a deterministic downloader that checks
-dataset availability, fetches files (VesselNN via git clone; MiniVess/DeepVess/TubeNet
+dataset availability, fetches files (VesselNN via git clone; MiniVess/DeepVess
 via manual download), converts OME-TIFF to NIfTI, and logs provenance to MLflow.
 This is deliberately "dumb" -- it executes a fixed acquisition plan without
 intelligence. The architecture anticipates splitting this into two complementary
@@ -135,12 +135,13 @@ the interface itself adapts to the researcher's workflow.
                      Prefect Orchestration (Docker-per-flow)
                      =======================================
 
-Flow 1: Data Eng.        Flow 2: Training         Flow 2.5: Post-Training
-  DVC + NIfTI              Hydra-zen configs        6 post-hoc plugins
-  TorchIO augmentation     Mixed precision           SWA + Multi-SWA
-  Pandera validation       18 loss functions          Model merging (slerp)
-  whylogs profiling        6 model families           Calibration (temp/Platt)
-        |                        |                    CRC conformal + ConSeCo
+Flow 1: Data Eng.        Flow 2: Training (parent + 2 sub-flows)
+  DVC + NIfTI              Hydra-zen configs
+  TorchIO augmentation     Mixed precision           Sub-flow 1: Training
+  Pandera validation       18 loss functions            → "none" cell (free)
+  whylogs profiling        6 model families          Sub-flow 2: Post-Training
+        |                        |                     → SWAG (Maddox 2019)
+        |                        |                     → 7 plugins total
         v                        v                           |
       MLflow  <=============== MLflow ===================> MLflow
         |                        |                           |
@@ -192,12 +193,20 @@ The compliance infrastructure supports future FDA SaMD and EU MDR/IVDR pathways.
 
 ### PCCP-Compatible Factorial Design
 
-The platform's factorial experiment design (4 models x 3 losses x 2 aux_calib x
-3 post-training x 2 recalibration x 5 ensemble) is architecturally equivalent to
-an FDA **Predetermined Change Control Plan** (PCCP) -- it documents predetermined
-model variations with pre-specified acceptance criteria and sequestered test data
-validation. See [K252366 (a2z-Unified-Triage)](https://510k.innolitics.com/) for
-a cleared device using the same pattern.
+The platform's 4-layer factorial experiment design is architecturally equivalent to
+an FDA **Predetermined Change Control Plan** (PCCP):
+
+| Layer | Factors | Execution |
+|-------|---------|-----------|
+| **A: Training** | 4 models x 3 losses x 2 aux_calib = 24 cells | Cloud GPU (SkyPilot) |
+| **B: Post-Training** | {none, SWAG} = 2 methods | Same GPU job (parent flow) |
+| **C: Analysis** | 2 recalibration x 5 ensemble | Local CPU |
+| **D: Biostatistics** | Analytical choices | Local CPU |
+
+Each layer documents predetermined model variations with pre-specified acceptance
+criteria and sequestered test data validation. See
+[K252366 (a2z-Unified-Triage)](https://510k.innolitics.com/) for a cleared device
+using the same pattern.
 
 ### Regulatory Planning Documents
 
@@ -290,7 +299,7 @@ decision nodes across 11 domains for systematic architectural decision-making:
 L0: .claude/rules/ + CLAUDE.md            -- Constitution (invariant rules)
 L1: docs/planning/ + MEMORY.md            -- Hot Context (current work)
 L2: knowledge-graph/navigator.yaml        -- Navigator (domain routing)
-L3: knowledge-graph/decisions/*.yaml       -- Evidence (69+ decision nodes)
+L3: knowledge-graph/decisions/*.yaml       -- Evidence (75+ decision nodes)
     knowledge-graph/domains/*.yaml         -- Materialised winners
 L4: openspec/specs/                        -- Specifications (GIVEN/WHEN/THEN)
 L5: src/ + tests/                          -- Implementation
@@ -301,6 +310,22 @@ to OpenSpec specifications to code. Experimental results propagate upward throug
 posterior updates and belief propagation.
 
 Entry point: [`knowledge-graph/navigator.yaml`](knowledge-graph/navigator.yaml)
+
+### Context Management Tooling
+
+The knowledge graph is supplemented by automated context management infrastructure
+that prevents knowledge loss across Claude Code sessions:
+
+| Tool | Purpose | Scale |
+|------|---------|-------|
+| **[code-review-graph](https://github.com/tirth8205/code-review-graph)** MCP | Tree-sitter structural code graph with blast radius analysis | 12,729 nodes, 85,399 edges |
+| **Metalearning search** | DuckDB full-text search over failure pattern docs | 90 docs indexed |
+| **Config-to-code graph** | Maps Hydra YAML configs to Python consumers | 97 YAML files, 624 edges |
+| **Decision registry** | DO_NOT_RE_ASK lookup table for decided questions | 10 entries (100% coverage) |
+| **Planning SOP** | Mandatory 6-step pre-planning context load | `.claude/rules/planning-sop.md` |
+| **Analytics dashboards** | Violation frequency, memory churn, registry coverage | `scripts/context_analytics.py` |
+
+Skills: `/search-metalearning` (search failure patterns), `/plan-context-load` (pre-planning SOP).
 
 ---
 
@@ -370,7 +395,7 @@ minivess-mlops/
 |-- tests/                         Unit, integration, and E2E test suites
 |-- configs/                       Hydra experiment configs, model profiles, splits
 |-- deployment/                    Docker, SkyPilot, Pulumi, Grafana, Prometheus
-|-- knowledge-graph/               69+ Bayesian decision nodes across 11 domains
+|-- knowledge-graph/               75+ Bayesian decision nodes across 11 domains
 |-- docs/                          ADRs, planning documents, research reports
 +-- openspec/                      Spec-driven development (GIVEN/WHEN/THEN)
 ```
@@ -389,6 +414,10 @@ minivess-mlops/
 
 ### Recommended Developer Tools (not required to run the pipeline)
 
+- **[code-review-graph](https://github.com/tirth8205/code-review-graph)** -- MCP server for structural code analysis. Blast radius queries, test coverage mapping, complexity hotspots:
+  ```
+  pip install code-review-graph && code-review-graph install && code-review-graph build
+  ```
 - **[duckdb-skills](https://github.com/duckdb/duckdb-skills)** -- Claude Code plugin for interactive DuckDB queries on biostatistics output:
   ```
   /plugin marketplace add duckdb/duckdb-skills
@@ -430,14 +459,14 @@ If you use this platform, please cite the underlying dataset:
 - Ensembling (7 strategies) + conformal UQ (5 methods)
 - Serving (BentoML, ONNX Runtime, Gradio)
 - Observability (MLflow, DuckDB, Prometheus, Grafana, Evidently, whylogs)
-- Post-training plugin architecture (6 plugins, Flow 2.5)
+- Post-training plugin architecture (7 plugins including SWAG, Flow 2.5)
 - SAM3 integration (3 adapter variants)
 - Pydantic AI agent layer (experiment summariser, drift triage, figure narration)
 - FDA readiness planning (test set firewall, OpenLineage, PCCP alignment)
 
 ### In Progress
 
-- 6-factor factorial experiment on GCP L4 spot instances
+- 4-layer factorial experiment on GCP L4 spot instances (24 training cells x 2 post-training x analysis layers)
 - OpenLineage flow wiring (Issue [#799](https://github.com/petteriTeikari/minivess-mlops/issues/799))
 - CycloneDX SBOM generation (Issue [#821](https://github.com/petteriTeikari/minivess-mlops/issues/821))
 - Nature Protocols manuscript assembly (NEUROVEX)
@@ -447,7 +476,6 @@ If you use this platform, please cite the underlying dataset:
 - CopilotKit (AG-UI) + WebMCP for agentic dashboard/annotation
 - Multi-site opt-in telemetry (PostHog, Sentry)
 - Federated learning evaluation (NVIDIA FLARE vs MONAI FL)
-- VesselFM integration and external-data evaluation
 - QMSR production controls documentation
 
 ---
@@ -460,9 +488,11 @@ If you use this platform, please cite the underlying dataset:
 - [SAM3 Literature Report](docs/planning/sam3-literature-research-report.md) -- foundation model survey
 - [Loss Variation Results](docs/results/dynunet_loss_variation_v2_report.md) -- DynUNet baseline analysis
 - [GCP Setup Tutorial](docs/planning/gcp-setup-tutorial.md) -- step-by-step cloud setup
+- [Train + Post-Training Flow Merger](docs/planning/training-and-post-training-into-two-subflows-under-one-flow.md) -- parent flow with 2 sub-flows
+- [Context Management Upgrade Plan](.claude/context-management-upgrade-plan.md) -- Issue #906, 5-phase knowledge compounding fix
 
 ---
 
 ## License
 
-MIT
+Apache-2.0 (license review pending for non-commercial academic use)
