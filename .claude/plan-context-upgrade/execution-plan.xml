@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<execution-plan>
+  <meta>
+    <title>Plan Context Upgrade: 347-Doc Archive Index</title>
+    <created>2026-03-22</created>
+    <status>in-progress</status>
+    <issue>906</issue>
+  </meta>
+
+  <phase id="1" name="Classification Engine" status="done">
+    <task id="1.1" status="done">
+      <description>Create scripts/classify_plan_docs.py with 13 themes</description>
+      <deliverable>Script with THEME_RULES + MANUAL_OVERRIDES dicts</deliverable>
+    </task>
+    <task id="1.2" status="done">
+      <description>Verify classification covers all 347 docs</description>
+      <deliverable>--summary output showing all themes + unclassified count</deliverable>
+    </task>
+  </phase>
+
+  <phase id="2" name="DuckDB Index" status="done">
+    <task id="2.1" status="done">
+      <description>Create scripts/build_plan_archive.py</description>
+      <deliverable>DuckDB with full-text search over all plan docs</deliverable>
+    </task>
+    <task id="2.2" status="done">
+      <description>Create scripts/update_plan_archive.py</description>
+      <deliverable>Incremental upsert + stale detection</deliverable>
+    </task>
+  </phase>
+
+  <phase id="3" name="Navigator + Audit" status="done">
+    <task id="3.1" status="done">
+      <description>Create docs/planning/v0-2_archive/navigator.yaml</description>
+      <deliverable>13-theme navigator with code-verified health scores</deliverable>
+    </task>
+    <task id="3.2" status="done">
+      <description>Create scripts/generate_audit_report.py</description>
+      <deliverable>Health dashboard + phantom plan detection</deliverable>
+    </task>
+    <task id="3.3" status="done">
+      <description>Code-verify health scores (not superficial file-exists check)</description>
+      <deliverable>Scores based on actual content readability + implementation status</deliverable>
+    </task>
+  </phase>
+
+  <phase id="4" name="Integration" status="done">
+    <task id="4.1" status="done">
+      <description>Add plan archive step to plan-context-load skill</description>
+      <deliverable>Step 7 in SKILL.md</deliverable>
+    </task>
+    <task id="4.2" status="done">
+      <description>Add PostToolUse hook for plan archive updates</description>
+      <deliverable>.claude/settings.json hook entry</deliverable>
+    </task>
+    <task id="4.3" status="done">
+      <description>Add plan_archive section to KG navigator.yaml</description>
+      <deliverable>navigator.yaml routes to archive</deliverable>
+    </task>
+    <task id="4.4" status="done">
+      <description>Create plan-index skill</description>
+      <deliverable>.claude/skills/plan-index/SKILL.md</deliverable>
+    </task>
+  </phase>
+
+  <phase id="5" name="Documentation" status="done">
+    <task id="5.1" status="done">
+      <description>Create .claude/plan-graph.md tutorial</description>
+      <deliverable>Tutorial for navigating plan archive</deliverable>
+    </task>
+    <task id="5.2" status="done">
+      <description>Create metalearning docs for audit lessons</description>
+      <deliverable>2 metalearning docs on superficial audit anti-pattern</deliverable>
+    </task>
+  </phase>
+</execution-plan>

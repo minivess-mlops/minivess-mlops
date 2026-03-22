@@ -86,4 +86,8 @@ docs/manuscript/latent-methods-results/figures/generated/
 docs/MLOps - vesselops.md
 docs/figures/
 docs/planning/sdd.pptx
+docs/planning/v0-2_archive/original_docs/sdd.pptx
 outputs/
+
+# DuckDB generated indexes (rebuild with scripts/)
+*.duckdb

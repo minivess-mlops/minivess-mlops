@@ -35,6 +35,7 @@ decisions:
   lineage_tracking:
     status: config_only
     candidates: [openlineage_marquez, mlflow_lineage]
+    note: "Plan archive health score for data theme is 45 — lineage tracking is the biggest gap."
     prd_node: knowledge-graph/decisions/L3-technology/lineage_tracking.yaml
 
   data_quality_orchestration:
@@ -63,7 +64,7 @@ decisions:
       only (introducing known distribution shifts, data leakage to MiniVess from same PI).
     datasets:
       minivess: {role: train_val, n_volumes: 70, splits: 3fold_seed42}
-      deepvess: {role: external_test, n_volumes: 7, note: "1 training + 6 independent test volumes, ALL multiphoton mouse brain cortex. Verify exact count after download. Same organ as MiniVess."}
+      deepvess: {role: external_test, n_volumes: 7, note: "1 training + 6 independent test volumes, ALL multiphoton mouse brain cortex. Verify exact count after download. Same organ as MiniVess. Metric prefix: test/deepvess/{metric}."}
       # TubeNet REMOVED from repo (2026-03-19): Only 1 two-photon volume (mouse olfactory
       # bulb — different organ from MiniVess cortex). Other 7 volumes are HREM/CT/RSOM/OCT-A.
       # NEVER re-add. See CLAUDE.md Datasets section.

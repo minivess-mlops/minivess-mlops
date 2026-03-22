@@ -2,12 +2,12 @@
 name: plan-context-load
 version: 1.0.0
 description: >
-  Mandatory pre-planning context load. Executes the 6-step SOP before ANY plan creation:
+  Mandatory pre-planning context load. Executes the 7-step SOP before ANY plan creation:
   navigator routing, domain loading, metalearning search, decision registry check,
-  memory scan, source-of-truth reading. Prevents context amnesia and re-asking decided
-  questions. Use BEFORE any planning task, factorial design, or architectural decision.
-  Do NOT use for: code implementation (use self-learning-iterative-coder), literature
-  research (use create-literature-report).
+  memory scan, source-of-truth reading, plan archive check. Prevents context amnesia
+  and re-asking decided questions. Use BEFORE any planning task, factorial design, or
+  architectural decision. Do NOT use for: code implementation (use self-learning-iterative-coder),
+  literature research (use create-literature-report).
 last_updated: 2026-03-22
 activation: proactive
 invocation: /plan-context-load
@@ -100,9 +100,26 @@ Read the authoritative document for the specific task:
 | Cloud architecture | `CLAUDE.md` + `.claude/rules/` |
 | Model details | `knowledge-graph/domains/models.yaml` |
 
+### Step 7: Plan Archive Check
+
+Search the plan archive for existing plans related to the current task.
+Avoid duplicating work that has already been planned.
+
+```bash
+# Check navigator for theme health
+cat docs/planning/v0-2_archive/navigator.yaml
+
+# Search for existing plans on the topic
+uv run python scripts/build_plan_archive.py --search "<task keywords>"
+```
+
+If existing plans are found with `status: implemented`, read them before
+creating new plans. If found with `status: planned`, consider updating
+rather than creating new plans.
+
 ## Output Format
 
-After completing all 6 steps, present a summary:
+After completing all 7 steps, present a summary:
 
 ```
 === Pre-Planning Context Load Complete ===

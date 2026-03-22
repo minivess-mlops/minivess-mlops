@@ -20,9 +20,14 @@ decisions:
     prd_node: knowledge-graph/decisions/L3-technology/primary_metrics.yaml
 
   topology_metrics:
-    status: not_started
+    status: implemented  # Code-verified 2026-03-22: 10 real metric functions in topology_metrics.py
     candidates: [betti_gudhi, skeleton_precision_recall, cldice_as_metric]
-    evidence: [docs/planning/GRAPH-TOPOLOGY-METRICS-INDEX.md]
+    winner_candidate: betti_gudhi
+    rationale: "Gudhi for Betti numbers (persistence diagrams), skimage.morphology.skeletonize_3d for skeleton metrics. clDice already implemented as loss — also usable as metric."
+    implementation: src/minivess/pipeline/topology_metrics.py  # 10 functions: NSD, HD95, ccDice, Betti error, persistence distance, junction F1, APLS, skeleton recall, BDR, Murray's law
+    evidence:
+      - docs/planning/v0-2_archive/original_docs/GRAPH-TOPOLOGY-METRICS-INDEX.md
+      - docs/planning/v0-2_archive/original_docs/topology-loss-plan.md
     prd_node: knowledge-graph/decisions/L3-technology/topology_metrics.yaml
 
   hpo_engine:

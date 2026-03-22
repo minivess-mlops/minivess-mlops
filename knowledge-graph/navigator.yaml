@@ -115,6 +115,19 @@ domains:
       Narrative layer for paper writing. Claims + section stubs derived from KG decisions + experiments.
       TRIPOD+AI/LLM/Code compliance matrix at docs/planning/tripod-compliance-matrix.md.
 
+  plan_archive:
+    navigator: docs/planning/v0-2_archive/navigator.yaml
+    covers: [archived planning docs, 13 themes, health scores, full-text search]
+    note: >
+      347 planning documents classified into 13 themes with code-verified health
+      scores. DuckDB index for full-text search. Use scripts/build_plan_archive.py
+      --search "topic" for targeted lookup. Read navigator.yaml for theme overview.
+    scripts:
+      - scripts/classify_plan_docs.py
+      - scripts/build_plan_archive.py
+      - scripts/update_plan_archive.py
+      - scripts/generate_audit_report.py
+
 # Cross-layer references — how to navigate between layers
 layers:
   L0_constitution:
