@@ -12,13 +12,18 @@ from pathlib import Path
 ORCH_DIR = Path("src/minivess/orchestration")
 FLOWS_DIR = ORCH_DIR / "flows"
 
-# Map of file → expected flow_name tag value (must match @flow(name=...))
-EXPECTED_TAGS: dict[Path, str] = {
-    FLOWS_DIR / "train_flow.py": "training-flow",
-    FLOWS_DIR / "post_training_flow.py": "post-training-flow",
-    FLOWS_DIR / "analysis_flow.py": "analysis-flow",
-    FLOWS_DIR / "data_flow.py": "data-flow",
-    FLOWS_DIR / "deploy_flow.py": "deploy-flow",
+# Map of file → set of valid flow_name tag values.
+# Files with multiple @flow functions (e.g., train_flow.py with parent +
+# sub-flows) may have multiple valid tags.
+EXPECTED_TAGS: dict[Path, set[str]] = {
+    FLOWS_DIR / "train_flow.py": {
+        "training-flow",           # parent flow + training subflow MLflow run
+        "post-training-subflow",   # post-training subflow MLflow run
+    },
+    FLOWS_DIR / "post_training_flow.py": {"post-training-flow"},
+    FLOWS_DIR / "analysis_flow.py": {"analysis-flow"},
+    FLOWS_DIR / "data_flow.py": {"data-flow"},
+    FLOWS_DIR / "deploy_flow.py": {"deploy-flow"},
 }
 
 
@@ -85,14 +90,15 @@ class TestFlowNameTagConsistency:
     def test_start_run_flow_name_matches_flow_decorator(self) -> None:
         """flow_name tags in mlflow.start_run() must match @flow(name=...) decorator."""
         violations: list[str] = []
-        for fpath, expected in EXPECTED_TAGS.items():
+        for fpath, valid_tags in EXPECTED_TAGS.items():
             if not fpath.exists():
                 continue
             tags = _find_start_run_flow_name_tags(fpath)
             for tag in tags:
-                if tag != expected:
+                if tag not in valid_tags:
                     violations.append(
-                        f"{fpath.name}: flow_name tag={tag!r}, expected={expected!r}"
+                        f"{fpath.name}: flow_name tag={tag!r}, "
+                        f"expected one of {sorted(valid_tags)}"
                     )
         assert not violations, (
             "flow_name tags in start_run() do not match @flow decorator names:\n"
