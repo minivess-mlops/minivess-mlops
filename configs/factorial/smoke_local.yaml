@@ -23,7 +23,7 @@ factors:
   post_training:
     method:
       - none
-      - checkpoint_averaging
+      - swag
     recalibration:
       - none
 

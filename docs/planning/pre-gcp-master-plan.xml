@@ -13,7 +13,7 @@
       then full 72-run production experiment.
     </description>
     <source_doc>docs/planning/pre-full-gcp-training-qa-plan.md</source_doc>
-    <factorial_design>4 models × 3 losses × 2 aux_calib × 3 post-training × 2 recalibration × 5 ensemble</factorial_design>
+    <factorial_design>4 models × 3 losses × 2 aux_calib × 2 post-training × 2 recalibration × 5 ensemble = 480 conditions</factorial_design>
     <total_budget>$98 estimated ($150+ authorized)</total_budget>
   </metadata>
 

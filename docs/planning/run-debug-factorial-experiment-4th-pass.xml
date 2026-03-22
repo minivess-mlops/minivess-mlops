@@ -1,228 +1,257 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  source_of_truth: configs/factorial/debug.yaml
+  decisions_referenced:
+    - post_training_methods
+    - full_factorial_structure
+    - post_training_execution_model
+    - debug_scope
+    - execution_location_not_hardcoded
+    - artifact_persistence
+  contradictions_checked:
+    - configs/factorial/paper_full.yaml
+    - knowledge-graph/decisions/registry.yaml
+    - docs/planning/training-and-post-training-into-two-subflows-under-one-flow.md
+    - .claude/metalearning/2026-03-22-debug-equals-production-8th-violation.md
+    - .claude/metalearning/2026-03-22-hardcoded-execution-location-in-factorial-configs.md
+  context_loaded:
+    navigator: knowledge-graph/navigator.yaml
+    domains:
+      - knowledge-graph/domains/cloud.yaml
+      - knowledge-graph/domains/training.yaml
+      - knowledge-graph/domains/infrastructure.yaml
+    metalearning:
+      - 2026-03-20-full-factorial-is-not-24-cells.md
+      - 2026-03-22-debug-equals-production-8th-violation.md
+      - 2026-03-22-wrong-metalearning-doc-failure-mode.md
+      - 2026-03-22-hardcoded-execution-location-in-factorial-configs.md
+    registry: knowledge-graph/decisions/registry.yaml
+    memory: MEMORY.md
+-->
 <plan>
   <metadata>
     <title>4th Pass Debug Factorial — GCP SkyPilot with SWAG + Calibration</title>
     <branch>test/debug-factorial-4th-pass</branch>
-    <date>2026-03-21</date>
-    <status>designing</status>
+    <date>2026-03-22</date>
+    <status>ready</status>
     <priority>P0 — validates full factorial on cloud GPU before production spend</priority>
     <skill>factorial-monitor</skill>
-    <estimated-cost>~$6-10 GCP L4 spot (24 trainable + 2 zero-shot, 2 epochs)</estimated-cost>
+    <estimated-cost>~$5-10 GCP L4 spot (24 GPU jobs, 2 epochs each)</estimated-cost>
     <report-output>docs/planning/run-debug-factorial-experiment-report-4th-pass.md</report-output>
   </metadata>
 
-  <user-prompt-verbatim>
-    <!-- User's original prompt saved verbatim as requested -->
-    I think any further training after 2 epochs for 5 more epochs would improve the
-    results so would not make too much of the numbers, update the report accordingly
-    and commit and push, and then we can next create a 4th pass plan then finally for
-    the Debug run on Skypilot+GCP as we did in
-    /home/petteri/Dropbox/github-personal/minivess-mlops/docs/planning/run-debug-factorial-experiment.xml
-    and now create the xml plan to
-    /home/petteri/Dropbox/github-personal/minivess-mlops/docs/planning/run-debug-factorial-experiment-4th-pass.xml
-    and then plan how to run this /factorial-monitor Skill, and the .sh should actually
-    stay more or less the same? Obviously now SWAG is used before the old erroneously
-    named SWA that was used as name for checkpoint averaging. Ask A LOT OF QUESTIONS in
-    the interactive format when designing this plan so that we are 100% that we are
-    aligned before burning the GCP credits for this debug factorial! As in the full
-    factorial design, but only for 2 epochs (both training and SWAG), one fold and with
-    half of the subjects. Otherwise the run should be EXACTLY as the real
-    "publication-gate run" that we still have not completed. And that would obviously
-    come after this run if we have everything running ok! Remember that in the last
-    Skypilot+GCP run
-    (/home/petteri/Dropbox/github-personal/minivess-mlops/docs/planning/run-debug-factorial-experiment-report.md),
-    only Dynunet actually worked and we have no idea if SAM3, vesselfm and the mamba
-    network will work! So put extra work when planning this .XML so that we can get the
-    models running, and now we have the specific test suite also developed that should be
-    run on the machine that it responsible for all the heavy GPU tasks (L4 now) which we
-    should test once before running all the cells of the factorial design, and make sure
-    that it characterizes the instance, and then checks that all the models actually
-    train? We should have test suite at least implemented to catch all those issues
-    before
-    /home/petteri/Dropbox/github-personal/minivess-mlops/docs/planning/run-debug-factorial-experiment-report.md
-    without actually start running the real experiments. Should we even design a new
-    Prefect Flow for this? Flow that basically has sub-flows: 1) something that can
-    monitor the new configs where L4.yaml is now and if we add there a new .yaml, this
-    Prefect Flow is then triggered, 2) one sub-flow that would always run once without
-    much hard-coding, and it should adaptively as well figure from the .yaml used to
-    trigger Train Flow which models are being tested and which model tests should run!
-    E.g. if we run a factorial design with SAM3 and dynunet, no need to run the tests
-    for vesselfm or mamba this time. If you think that this new Prefect Flow design and
-    implementation is too massive, we can defer it? But either way create a P1 issue on
-    this Prefect Flow for Instance testing. Open a PR for current branch and automerge
-    it first after running the full prod suite first with no errors found, and then let's
-    designing these new tasks to test/debug-factorial-4th-pass!
-  </user-prompt-verbatim>
+  <factorial-design>
+    <!-- Source of truth: configs/factorial/debug.yaml -->
+    <!-- Execution location is NOT hardcoded — user's deployment choice -->
+    <!-- Debug factors are IDENTICAL to production (CLAUDE.md Rule 27) -->
 
-  <design-questions>
-    <!-- These questions MUST be answered before the plan is finalized -->
-    <!-- Status: PENDING — awaiting user answers -->
+    <layer id="A" name="Training">
+      <!-- 4 models × 3 losses × 2 aux_calib = 24 cells -->
+      <factor name="model_family" levels="dynunet,mambavesselnet,sam3_topolora,sam3_hybrid"/>
+      <factor name="loss_name" levels="cbdice_cldice,dice_ce,dice_ce_cldice"/>
+      <factor name="aux_calibration" levels="true,false"/>
+    </layer>
 
-    <question id="Q1" topic="SWAG in factorial design">
-      The 1st pass used "SWA" (which was actually checkpoint averaging). Now we have
-      real SWAG (Maddox 2019). In the 4th pass factorial:
+    <layer id="B" name="Post-training">
+      <!-- Runs in SAME flow as training (parent flow iterates internally) -->
+      <!-- Registry decision DO_NOT_RE_ASK: only {none, swag} -->
+      <factor name="method" levels="none,swag"/>
+      <factor name="recalibration" levels="none,temperature_scaling"/>
+    </layer>
 
-      (a) Should SWAG be a POST-TRAINING plugin that runs after each training job
-          completes (i.e., train 2 epochs → then SWAG 2 more epochs on same GPU)?
-      (b) Or should SWAG be a separate SkyPilot job that runs AFTER all training
-          jobs complete (like the post-training flow in the 1st pass plan)?
+    <layer id="C" name="Analysis">
+      <factor name="ensemble_strategy" levels="none,per_loss_single_best,all_loss_single_best,per_loss_all_best,all_loss_all_best"/>
+    </layer>
 
-      Option (a) means each job takes ~2× longer but no separate orchestration.
-      Option (b) keeps training jobs fast but adds a second wave of SkyPilot jobs.
+    <layer id="D" name="Biostatistics">
+      <description>Analytical choices (alpha, ROPE, ANOVA strategy) — not a sweep factor</description>
+    </layer>
 
-      My recommendation: (a) — integrate SWAG into the training job. The SWAG plugin
-      resumes training on the same checkpoint, same GPU, same data. Launching a separate
-      job wastes setup time (Docker pull, DVC pull, model load).
-    </question>
+    <summary>
+      Total conditions: 4×3×2 × 2×2 × 5 = 480 (IDENTICAL to production)
+      Debug scope reductions (ONLY 3): 1 fold, 2 epochs, half data
+      GPU jobs: 24 cells × 1 fold = 24 (each runs training + SWAG internally)
+      Zero-shot baselines: 2 (SAM3 Vanilla on MiniVess, VesselFM on DeepVess)
+      POST_TRAINING_METHODS env var: "none,swag" (comma-separated, parent flow iterates)
+    </summary>
+  </factorial-design>
 
-    <question id="Q2" topic="Post-training factor">
-      The factorial design currently has: model × loss × aux_calib.
-      With SWAG, we add a post_training factor: {none, swag, checkpoint_averaging}.
+  <zero-shot-baselines>
+    <baseline model="sam3_vanilla" strategy="frozen_encoder_eval" folds="1" dataset="minivess"/>
+    <baseline model="vesselfm" strategy="zero_shot_only" folds="1" dataset="deepvess"/>
+  </zero-shot-baselines>
 
-      Should the 4th pass factorial be:
-        4 models × 3 losses × 2 aux_calib × 3 post_training = 72 conditions (+ 2 zero-shot)?
-      Or keep it at:
-        4 models × 3 losses × 2 aux_calib × 2 post_training = 48 conditions (+ 2 zero-shot)?
-        (dropping checkpoint_averaging since 2nd pass showed it's negligible)
-      Or even simpler for debug:
-        4 models × 3 losses × 2 aux_calib = 24 training jobs, then apply SWAG to ALL?
-        (SWAG applied post-hoc to every checkpoint, no extra training jobs)
-
-      My recommendation: 24 training jobs + SWAG applied post-hoc to all. This matches
-      the 1st pass design (same number of training jobs) but replaces checkpoint averaging
-      with SWAG. Keeps debug cost at ~$6-10.
-    </question>
-
-    <question id="Q3" topic="Instance validation flow">
-      You mentioned a Prefect Flow for instance testing. The idea is:
-      1. When a new GPU instance starts, run model-specific tests BEFORE training
-      2. Adaptively select which tests to run based on the factorial design
-
-      This would have caught Glitches #9 (LoRA Conv2d), #10 (mamba-ssm), and #12
-      (zero-shot max_epochs=0) from the 1st pass before burning GPU time.
-
-      Design options:
-      (a) Full Prefect sub-flow with config-file monitoring — ambitious, reusable
-      (b) Simple Python script that runs in SkyPilot setup phase — pragmatic, fast
-      (c) Deferred to P1 issue — just run existing tests/gpu_instance/ manually first
-
-      Given this is blocking the 4th pass, I recommend (b) for now + (a) as P1 issue.
-      A simple script in the SkyPilot YAML setup phase that:
-      - Detects which models are in the factorial design (from env vars)
-      - Runs model-specific smoke tests (import, build, 1-batch forward pass)
-      - Fails fast if any model can't even load
-
-      This catches 90% of issues without a full Prefect flow.
-    </question>
-
-    <question id="Q4" topic="Known blockers from 1st pass">
-      The 1st pass had these unresolved model failures:
-
-      | Model | Glitch | Status | What needs fixing |
-      |-------|--------|--------|-------------------|
-      | sam3_topolora | #9: LoRA on Conv2d | OPEN | LoRA targeting must skip Conv2d |
-      | mambavesselnet | #10: mamba-ssm not compiled | OPEN | Docker image needs INSTALL_MAMBA=1 |
-      | sam3_vanilla (zero-shot) | #12: max_epochs=0 | OPEN | Pydantic ge=1 constraint |
-      | vesselfm (zero-shot) | #12: max_epochs=0 | OPEN | Same Pydantic constraint |
-
-      Should we:
-      (a) Fix ALL four before the 4th pass (adds 1-2 days of work)
-      (b) Fix sam3_topolora + zero-shot (likely quick), defer mamba-ssm (Docker rebuild)
-      (c) Run 4th pass with only dynunet + sam3_hybrid (known working), defer rest
-
-      My recommendation: (b) — fix LoRA targeting and zero-shot validation, but defer
-      mamba-ssm Docker compilation to a separate issue. That gives us 3/4 models working
-      (dynunet, sam3_hybrid, sam3_topolora) + 2 zero-shot baselines.
-    </question>
-
-    <question id="Q5" topic="Checkpoint persistence (P0 from 1st pass)">
-      Glitch #8 from the 1st pass: ALL 11 succeeded training jobs had LOST checkpoints
-      because MLflow Cloud Run was configured with --serve-artifacts (proxying), which
-      doesn't persist to GCS.
-
-      Is this fixed? The fix was:
-      - MLflow Cloud Run with --no-serve-artifacts
-      - Direct GCS artifact storage (gs://minivess-mlops-mlflow-artifacts)
-      - Or: SkyPilot file_mounts to sync checkpoints to GCS directly
-
-      If NOT fixed, this is still a P0 blocker for the 4th pass.
-    </question>
-
-    <question id="Q6" topic="Docker base image rebuild">
-      The 4th pass needs a Docker image with:
-      - All SWAG plugin code (from this branch)
-      - All calibration metrics code
-      - Fixed LoRA targeting (if Q4 answer includes sam3_topolora)
-      - Optionally: mamba-ssm compiled (if Q4 answer includes mambavesselnet)
-
-      This means we need to:
-      1. Merge this branch to main
-      2. Rebuild Docker base image from main
-      3. Push to GAR
-
-      Should we do this as part of the 4th pass prep, or is there a faster path?
-    </question>
-
-    <question id="Q7" topic="Calibration metrics in factorial YAML">
-      The debug_factorial.yaml doesn't currently reference calibration metrics.
-      Should we add calibration_metrics config to the factorial YAML, or are they
-      automatically computed by the training loop (SegmentationMetrics) and
-      analysis flow (UnifiedEvaluationRunner)?
-
-      From the 3rd pass: Tier 1 calibration metrics (ECE, Brier, NLL) are computed
-      in the training validation loop. Tier 2 (ACE, BA-ECE) are computed in the
-      analysis flow. No YAML changes needed for metrics.
-
-      But: should the BiostatisticsConfig be updated to include calibration metrics
-      as ANOVA response variables for the 4th pass?
-    </question>
-
-    <question id="Q8" topic="run_factorial.sh changes">
-      The .sh script should "stay more or less the same" as you said. The only
-      changes I see needed are:
-
-      (a) Add SWAG_EPOCHS env var to SkyPilot launch (if SWAG runs in-job per Q1)
-      (b) Add SWAG_LR, SWAG_MAX_RANK env vars
-      (c) Update job naming: include "swag" in condition name if applicable
-
-      Or should the .sh stay IDENTICAL and SWAG be handled entirely by the
-      post-training flow (downstream, not in training jobs)?
-    </question>
-  </design-questions>
-
-  <!-- Phases will be filled in after design questions are answered -->
   <phases>
-    <phase id="0" name="Pre-Flight: Fix Known Blockers">
-      <description>PLACEHOLDER — depends on Q4 answers</description>
+    <phase id="0" name="Pre-Flight: Docker Image Verification">
+      <description>
+        Verify Docker image in GAR includes all required code.
+        The flow merger (training_subflow + post_training_subflow) is fully implemented.
+        mamba-ssm v2.3.1 is confirmed installed in the image.
+      </description>
+      <tasks>
+        <task id="0.1">Verify GAR image freshness: docker manifest inspect</task>
+        <task id="0.2">Check if image needs rebuild (Phase 0 config committed 2026-03-21 23:33,
+              image built 2026-03-20 18:50 — config YAMLs are NOT in image but
+              run_factorial.sh reads them from the HOST repo, not from inside Docker)</task>
+        <task id="0.3">Verify: docker run minivess-base:latest python -c "import mamba_ssm; print(mamba_ssm.__version__)"</task>
+        <task id="0.4">Verify: docker run minivess-base:latest python -c "from minivess.ensemble.swag import SWAGModel"</task>
+        <task id="0.5">Verify SkyPilot GCP configured: sky check gcp</task>
+        <task id="0.6">Verify .env has HF_TOKEN, MLFLOW_TRACKING_URI</task>
+      </tasks>
+      <gate>ALL verifications pass before proceeding</gate>
     </phase>
-    <phase id="1" name="Instance Validation (GPU Smoke Tests)">
-      <description>PLACEHOLDER — depends on Q3 answers</description>
+
+    <phase id="1" name="Dry Run">
+      <description>
+        Execute run_factorial.sh with --dry-run flag.
+        Verify correct job count (24 trainable + 2 zero-shot = 26 total).
+        Verify POST_TRAINING_METHODS=none,swag is passed to each job.
+        Verify correct config parsing from configs/factorial/debug.yaml.
+      </description>
+      <tasks>
+        <task id="1.1">./scripts/run_factorial.sh --dry-run configs/factorial/debug.yaml</task>
+        <task id="1.2">Verify output shows: 24 GPU jobs, 4 models, 3 losses, 2 aux_calibs, 1 fold</task>
+        <task id="1.3">Verify POST_TRAINING_METHODS=none,swag in each job's env</task>
+        <task id="1.4">Verify 2 zero-shot baselines (sam3_vanilla fold-0, vesselfm fold-0)</task>
+      </tasks>
+      <gate>Dry run output matches expected 26 total launches</gate>
     </phase>
-    <phase id="2" name="Launch Training Conditions">
-      <description>PLACEHOLDER — depends on Q1, Q2, Q8 answers</description>
+
+    <phase id="2" name="Single-Condition Smoke Test">
+      <description>
+        Launch ONE condition (dynunet × cbdice_cldice × calib=false × fold-0) to verify
+        the full SkyPilot → Docker → train_flow → SWAG pipeline works end-to-end
+        before committing to 24+ GPU jobs.
+      </description>
+      <tasks>
+        <task id="2.1">
+          sky jobs launch deployment/skypilot/train_factorial.yaml \
+            --name smoke-dynunet-cbdice-f0 \
+            --env MODEL_FAMILY=dynunet \
+            --env LOSS_NAME=cbdice_cldice \
+            --env FOLD_ID=0 \
+            --env WITH_AUX_CALIB=false \
+            --env MAX_EPOCHS=2 \
+            --env MAX_TRAIN_VOLUMES=23 \
+            --env MAX_VAL_VOLUMES=12 \
+            --env EXPERIMENT_NAME=debug_factorial \
+            --env POST_TRAINING_METHODS=none,swag \
+            --env-file .env \
+            -y
+        </task>
+        <task id="2.2">Monitor: sky jobs logs smoke-dynunet-cbdice-f0</task>
+        <task id="2.3">Verify training sub-flow completes (2 epochs)</task>
+        <task id="2.4">Verify SWAG post-training sub-flow runs</task>
+        <task id="2.5">Verify MLflow run created with correct tags (flow_name, post_training_method)</task>
+        <task id="2.6">Verify checkpoint in GCS bucket (gs://minivess-mlops-checkpoints)</task>
+      </tasks>
+      <gate>Smoke test job SUCCEEDED with both training + SWAG completing</gate>
+      <estimated-time>~10-15 minutes</estimated-time>
+      <estimated-cost>~$0.15</estimated-cost>
     </phase>
-    <phase id="3" name="Post-Training (SWAG)">
-      <description>PLACEHOLDER — depends on Q1, Q2 answers</description>
+
+    <phase id="3" name="Launch All 24 Trainable Conditions">
+      <description>
+        Launch full debug factorial grid: 4 models × 3 losses × 2 aux_calib × 1 fold = 24 jobs.
+        Each job runs training (2 epochs) + SWAG post-training internally.
+        Use /factorial-monitor skill to track progress.
+      </description>
+      <tasks>
+        <task id="3.1">./scripts/run_factorial.sh configs/factorial/debug.yaml</task>
+        <task id="3.2">Monitor: sky jobs queue (all 24 should be PENDING/RUNNING)</task>
+        <task id="3.3">Monitor using /factorial-monitor skill</task>
+        <task id="3.4">Watch for known failure modes:
+          - mambavesselnet: CUDA kernel compilation (mamba-ssm)
+          - sam3_topolora: LoRA targeting (fixed in code, first cloud test)
+          - sam3_hybrid: VRAM pressure with SWAG (L4 = 24 GB, should be sufficient)
+        </task>
+      </tasks>
+      <gate>All 24 jobs reach SUCCEEDED or have clear actionable errors</gate>
+      <estimated-time>~30-60 minutes (jobs run in parallel on GCP)</estimated-time>
+      <estimated-cost>~$5-8</estimated-cost>
     </phase>
-    <phase id="4" name="Analysis Flow with Calibration Metrics">
-      <description>PLACEHOLDER — depends on Q7 answers</description>
+
+    <phase id="4" name="Launch Zero-Shot Baselines">
+      <description>
+        Launch 2 zero-shot evaluation jobs.
+        These are included in run_factorial.sh and launch automatically after trainable conditions.
+      </description>
+      <tasks>
+        <task id="4.1">SAM3 Vanilla on MiniVess (fold-0, MAX_EPOCHS=0, ZERO_SHOT=true)</task>
+        <task id="4.2">VesselFM on DeepVess (fold-0, MAX_EPOCHS=0, ZERO_SHOT=true, EVAL_DATASET=deepvess)</task>
+        <task id="4.3">Note: DeepVess data must be on GCS (DVC-tracked and pushed)</task>
+      </tasks>
+      <gate>Both zero-shot baselines complete or have clear errors</gate>
     </phase>
-    <phase id="5" name="Biostatistics Flow">
-      <description>PLACEHOLDER — depends on Q7 answers</description>
+
+    <phase id="5" name="Analysis + Biostatistics (Post-GPU)">
+      <description>
+        After all GPU jobs complete, run Layer C (analysis) and Layer D (biostatistics).
+        These flows read from MLflow and process all 480 conditions
+        (24 training × 2 post-training × 2 recalibration × 5 ensemble).
+      </description>
+      <tasks>
+        <task id="5.1">Run Analysis Flow: inference on served models, ensemble building</task>
+        <task id="5.2">Run Biostatistics Flow: 6-way layered ANOVA, interaction plots</task>
+        <task id="5.3">Collect metrics for all 480 conditions</task>
+      </tasks>
     </phase>
+
     <phase id="6" name="Report">
-      <description>Write 4th pass report</description>
+      <description>
+        Write 4th pass report documenting results, failures, and lessons.
+      </description>
+      <tasks>
+        <task id="6.1">Write docs/planning/run-debug-factorial-experiment-report-4th-pass.md</task>
+        <task id="6.2">Compare with 1st pass (dynunet-only) and 3rd pass (local SWAG)</task>
+        <task id="6.3">Document any model failures and root causes</task>
+        <task id="6.4">Decision: ready for production (72 GPU jobs) or need 5th pass?</task>
+      </tasks>
     </phase>
   </phases>
 
+  <known-blockers>
+    <!-- Status as of 2026-03-22 (verified programmatically) -->
+    <blocker id="B1" status="RESOLVED" description="Docker rebuild with INSTALL_MAMBA=1">
+      mamba-ssm v2.3.1 is installed in current GAR image. Verified via:
+      docker run minivess-base:latest python -c "import mamba_ssm; print(mamba_ssm.__version__)"
+      → 2.3.1
+    </blocker>
+    <blocker id="B2" status="RESOLVED" description="Flow merger (parent + 2 sub-flows)">
+      Fully implemented: training_subflow() at line 724, post_training_subflow() at line 977,
+      parent training_flow() wires both at lines 1319-1359. Handles comma-separated
+      POST_TRAINING_METHODS. Phase 0 config committed as c9a1030.
+    </blocker>
+    <blocker id="B3" status="OPEN" description="DeepVess data on GCS for VesselFM zero-shot">
+      DeepVess data needs to be DVC-tracked and pushed to GCS for the VesselFM baseline.
+      If not available, VesselFM zero-shot will fail (Phase 4). Not blocking Phase 3.
+    </blocker>
+    <blocker id="B4" status="RESOLVED" description="Factorial config inconsistencies">
+      Fixed in this session: consolidated to configs/factorial/, removed checkpoint_averaging,
+      removed hardcoded execution locations, updated registry and KG. All 44 tests pass.
+    </blocker>
+  </known-blockers>
+
+  <monitoring>
+    <skill>factorial-monitor</skill>
+    <commands>
+      <command>sky jobs queue</command>
+      <command>sky jobs logs JOB_ID</command>
+      <command>sky jobs queue --all</command>
+    </commands>
+    <job-log>outputs/YYYYMMDDTHHMMSSZ_factorial_job_ids.txt</job-log>
+  </monitoring>
+
   <cross-reference>
+    <config file="configs/factorial/debug.yaml" relation="authoritative-factorial-config"/>
+    <config file="configs/factorial/paper_full.yaml" relation="production-factorial-config"/>
     <report file="docs/planning/run-debug-factorial-experiment-report.md" relation="1st-pass-glitches"/>
     <report file="docs/planning/run-debug-factorial-experiment-report-2nd-pass-local.md" relation="2nd-pass-local"/>
     <report file="docs/planning/run-debug-factorial-experiment-report-3rd-pass-local.md" relation="3rd-pass-local"/>
+    <report file="docs/planning/run-debug-factorial-experiment-report-tofix-for-4th-pass.md" relation="tofix-report"/>
     <plan file="docs/planning/run-debug-factorial-experiment.xml" relation="1st-pass-plan"/>
-    <plan file="docs/planning/run-debug-factorial-experiment-report-3rd-pass-plan.xml" relation="3rd-pass-plan"/>
     <script file="scripts/run_factorial.sh" relation="primary-executable"/>
     <skypilot file="deployment/skypilot/train_factorial.yaml" relation="per-condition-task"/>
-    <config file="configs/experiment/debug_factorial.yaml" relation="debug-config"/>
+    <registry file="knowledge-graph/decisions/registry.yaml" relation="decided-questions"/>
   </cross-reference>
 </plan>

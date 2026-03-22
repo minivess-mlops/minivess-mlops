@@ -27,7 +27,7 @@ class TestFactorialYamlEnsembleStrategies:
         )
 
     def test_debug_yaml_ensemble_levels(self) -> None:
-        """Debug YAML has 4 ensemble strategies (none excluded)."""
+        """Debug YAML has 5 ensemble strategies (IDENTICAL to production, Rule 27)."""
         from minivess.config.factorial_config import parse_factorial_yaml
 
         yaml_path = Path("configs/factorial/debug.yaml")
@@ -35,11 +35,11 @@ class TestFactorialYamlEnsembleStrategies:
         levels = design.factor_levels()
         assert "ensemble_strategy" in levels
         debug_strategies = set(levels["ensemble_strategy"])
-        assert len(debug_strategies) == 4, (
-            f"Expected 4 debug strategies, got {len(debug_strategies)}: {debug_strategies}"
+        assert len(debug_strategies) == 5, (
+            f"Expected 5 debug strategies (same as production), got {len(debug_strategies)}: {debug_strategies}"
         )
-        # "none" is excluded from debug per XML plan
-        assert "none" not in debug_strategies
+        # Debug = production: all 5 strategies including "none" (CLAUDE.md Rule 27)
+        assert "none" in debug_strategies
 
     def test_paper_full_yaml_has_5_ensemble_strategies(self) -> None:
         """Production YAML has 5 ensemble strategies including none."""

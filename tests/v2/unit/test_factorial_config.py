@@ -21,24 +21,24 @@ class TestFactorialConfigParsing:
     """Factorial YAML parsing with zero hardcoded factor names."""
 
     def test_parse_paper_full_yaml(self) -> None:
-        """paper_full.yaml should parse to 720 conditions."""
+        """paper_full.yaml should parse to 480 conditions (4×3×2×2×2×5)."""
         yaml_path = Path("configs/factorial/paper_full.yaml")
         if not yaml_path.exists():
             pytest.skip("paper_full.yaml not found")
         design = parse_factorial_yaml(yaml_path)
         assert design.experiment_name == "paper_factorial"
-        assert design.n_conditions == 720  # 4×3×2×3×2×5
+        assert design.n_conditions == 480  # 4×3×2×2×2×5
         assert design.n_training_conditions == 24  # 4×3×2
         assert design.n_training_runs == 72  # 24×3 folds
 
     def test_parse_debug_yaml(self) -> None:
-        """debug.yaml should parse to 384 conditions."""
+        """debug.yaml should parse to 480 conditions (IDENTICAL factors to production, Rule 27)."""
         yaml_path = Path("configs/factorial/debug.yaml")
         if not yaml_path.exists():
             pytest.skip("debug.yaml not found")
         design = parse_factorial_yaml(yaml_path)
         assert design.experiment_name == "debug_factorial"
-        assert design.n_conditions == 384  # 4×3×2×2×2×4
+        assert design.n_conditions == 480  # 4×3×2×2×2×5 (same as production)
         assert design.n_training_conditions == 24  # 4×3×2
         assert design.n_training_runs == 24  # 24×1 fold
         assert design.debug is True

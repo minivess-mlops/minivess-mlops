@@ -1,19 +1,14 @@
+# DEPRECATED: Use configs/factorial/paper_full.yaml instead.
+# This flat-structure config defines ONLY the training grid (Layer A: 24 cells).
+# The authoritative full factorial config (480 conditions across 6 factors) is in
+# configs/factorial/paper_full.yaml (layered structure).
+#
 # Paper factorial study — 4 trainable models x 3 losses x 2 aux_calibration.
+# This is the TRAINING GRID ONLY (Layer A). Full factorial includes post-training,
+# recalibration, and ensemble factors — see configs/factorial/paper_full.yaml.
 #
-# SINGLE SOURCE OF TRUTH: knowledge-graph/domains/models.yaml::paper_model_comparison
-# 6-model lineup: DynUNet, MambaVesselNet++, SAM3 TopoLoRA, SAM3 Hybrid (trainable)
-#                 + SAM3 Vanilla, VesselFM (zero-shot baselines, NOT in factorial grid)
-#
-# Factorial grid: 4 trainable models x 3 losses x 2 aux_calib = 24 cells x 3 folds = 72 runs
+# Training grid: 4 models x 3 losses x 2 aux_calib = 24 cells x 3 folds = 72 GPU jobs
 # Zero-shot eval: SAM3 Vanilla (3 folds), VesselFM (DeepVess only)
-#
-# GUARDRAIL: 24 cells, NOT 128. LR and batch_size are NOT factors —
-# they are fixed at model-adaptive defaults. Adding them would 5x the cost
-# without scientific value (the paper's research question is about
-# model x loss x calibration interactions, not hyperparameter tuning).
-#
-# Estimated GCP cost: ~$65 on L4 spot (72 runs x ~$0.90/run)
-# Post-training (eval, biostatistics) runs locally on RTX 2070 Super (8 GB).
 #
 # GPU requirements:
 #   dynunet:          ~3.5 GB  → L4 (24 GB) or local RTX 2070 Super (8 GB)
@@ -70,5 +65,11 @@ fixed:
   compute: auto
   learning_rate: 1.0e-3
   batch_size: 2
+
+# DEPRECATED: This config defines ONLY training factors (Layer A).
+# Post-training (Layer B) runs in the SAME flow as training — parent flow iterates
+# over methods internally. See configs/factorial/paper_full.yaml for the full
+# 480-condition factorial: 4×3×2 (training) × 2 (post-training) × 2×5 (analysis).
+# See: knowledge-graph/decisions/registry.yaml (post_training_execution_model)
 
 mlflow_experiment: minivess_paper_factorial

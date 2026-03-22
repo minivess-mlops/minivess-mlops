@@ -1,0 +1,139 @@
+# Decision Registry — Single source of truth for ALREADY DECIDED questions.
+#
+# DO_NOT_RE_ASK: true means Claude Code MUST NEVER ask the user this question again.
+# If a decision needs revisiting, the USER will initiate it — not Claude.
+#
+# Before using AskUserQuestion, CHECK this registry. If the question is here, use the
+# recorded answer. Creating a metalearning doc is NOT sufficient — this registry is
+# the authoritative lookup.
+#
+# See: .claude/context-management-upgrade-plan.md (Pillar 2C)
+# See: .claude/rules/planning-sop.md
+
+decisions:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Factorial Design
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  post_training_methods:
+    question: "What are the factorial post-training method levels?"
+    answer: "Only 2: none, swag"
+    decided: "2026-03-21"
+    source: ".claude/metalearning/2026-03-22-wrong-metalearning-doc-failure-mode.md"
+    referenced_by:
+      - configs/post_training/none.yaml
+      - configs/post_training/swag.yaml
+      - docs/planning/training-and-post-training-into-two-subflows-under-one-flow.md
+    DO_NOT_RE_ASK: true
+
+  full_factorial_structure:
+    question: "What is the full factorial design?"
+    answer: >
+      4 layers (execution location is NOT hardcoded — user's deployment choice):
+      Layer A (training): 4 models x 3 losses x 2 aux_calib = 24 cells.
+      Layer B (post-training): {none, swag} — runs in same flow as training.
+      Layer C (analysis): 2 recalibration x 5 ensemble.
+      Layer D (biostatistics): analytical choices.
+      Total: 4x3x2 x 2 x 2 x 5 = 480 conditions across all layers.
+      Authoritative config: configs/factorial/paper_full.yaml (layered structure).
+    decided: "2026-03-20"
+    updated: "2026-03-22"
+    source: "configs/factorial/paper_full.yaml"
+    referenced_by:
+      - configs/factorial/debug.yaml
+      - configs/factorial/paper_full.yaml
+      - scripts/run_factorial.sh
+      - .claude/metalearning/2026-03-20-full-factorial-is-not-24-cells.md
+      - .claude/metalearning/2026-03-22-hardcoded-execution-location-in-factorial-configs.md
+    DO_NOT_RE_ASK: true
+
+  post_training_execution_model:
+    question: "Where does post-training run — separate flow or same flow?"
+    answer: >
+      Same flow as training. Parent flow iterates internally: sub-flow 1 (training = 'none' cell),
+      sub-flow 2 (SWAG = 'swag' cell). POST_TRAINING_METHODS env var passed as comma-separated
+      list. No extra jobs. Execution location is the user's deployment choice (not hardcoded).
+      See: .claude/metalearning/2026-03-22-hardcoded-execution-location-in-factorial-configs.md
+    decided: "2026-03-22"
+    source: "docs/planning/training-and-post-training-into-two-subflows-under-one-flow.md"
+    DO_NOT_RE_ASK: true
+
+  execution_location_not_hardcoded:
+    question: "Should factorial configs specify where flows execute (GPU, CPU, cloud, local)?"
+    answer: >
+      NO. Factorial configs define WHAT to sweep (factors x levels), not WHERE to execute.
+      Execution location is the user's deployment choice. A researcher can run Training Flow
+      on local CPU (slow but valid) or on cloud GPU. The Prefect flow design is location-agnostic.
+      NEVER label factorial layers with execution location (e.g., "Layer A (GPU, cloud)").
+    decided: "2026-03-22"
+    source: ".claude/metalearning/2026-03-22-hardcoded-execution-location-in-factorial-configs.md"
+    DO_NOT_RE_ASK: true
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Debug vs Production
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  debug_scope:
+    question: "What differs between debug and production runs?"
+    answer: >
+      ONLY 3 things: (1) 1 fold not 3, (2) 2 epochs not 50, (3) half data.
+      NOTHING else changes. All factorial factors, all flows, all post-training methods,
+      all zero-shot baselines, all logging, all compliance — IDENTICAL to production.
+    decided: "2026-03-19"
+    source: "CLAUDE.md Rule 27"
+    referenced_by:
+      - configs/experiment/debug_factorial.yaml
+      - .claude/metalearning/2026-03-19-debug-run-is-full-production-no-shortcuts.md
+      - .claude/metalearning/2026-03-22-debug-equals-production-8th-violation.md
+    DO_NOT_RE_ASK: true
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Cloud & Infrastructure
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  cloud_providers:
+    question: "Which cloud providers are used?"
+    answer: "Exactly 2: RunPod (env/dev) + GCP (staging/prod). No AWS, Azure, or others."
+    decided: "2026-03-15"
+    source: "CLAUDE.md + .claude/rules/two-providers-only.md"
+    DO_NOT_RE_ASK: true
+
+  data_storage:
+    question: "Where is production data stored?"
+    answer: "GCS (gs://minivess-mlops-dvc-data). RunPod uses Network Volume (local upload). Never UpCloud S3."
+    decided: "2026-03-15"
+    source: ".claude/rules/data-on-gcs.md"
+    DO_NOT_RE_ASK: true
+
+  docker_execution:
+    question: "Can training run without Docker?"
+    answer: "NO. Docker is the execution model. Only exception: uv run pytest for fast unit tests."
+    decided: "2026-03-14"
+    source: "CLAUDE.md Rule 17 + .claude/metalearning/2026-03-14-docker-resistance-anti-pattern.md"
+    DO_NOT_RE_ASK: true
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Models & Science
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  sam3_identity:
+    question: "What is SAM3?"
+    answer: "Meta's Segment Anything Model 3 (github.com/facebookresearch/sam3, Nov 2025). NOT SAM2."
+    decided: "2026-03-02"
+    source: ".claude/metalearning/2026-03-02-sam3-implementation-fuckup.md"
+    DO_NOT_RE_ASK: true
+
+  paper_framing:
+    question: "Is this a SOTA segmentation paper or a platform paper?"
+    answer: "Platform paper (Nature Protocols). The platform capability IS the contribution, not the numbers."
+    decided: "2026-03-19"
+    source: ".claude/metalearning/2026-03-19-platform-paper-not-sota-science-recurring.md"
+    DO_NOT_RE_ASK: true
+
+  artifact_persistence:
+    question: "How are artifacts (checkpoints, metrics) persisted?"
+    answer: "MLflow artifact store ONLY. No file_mounts hacks, no rsync, no custom sync."
+    decided: "2026-03-21"
+    source: ".claude/metalearning/2026-03-21-competing-artifact-persistence-mechanisms.md"
+    DO_NOT_RE_ASK: true

@@ -1,17 +1,15 @@
 # @package _global_
 #
+# DEPRECATED: Use configs/factorial/debug.yaml instead.
+# This flat-structure config is kept for backward compatibility with Hydra-zen
+# compose_experiment_config(). The authoritative factorial config is in
+# configs/factorial/debug.yaml (layered structure with all 6 factor dimensions).
+#
 # Debug factorial: FULL production experiment with reduced epochs/data/folds.
-# 4 models x 3 losses x 2 aux_calib = 24 conditions on fold-0, 2 epochs, half data.
-# Plus 2 zero-shot baselines (SAM3 Vanilla, VesselFM on DeepVess).
+# See configs/factorial/debug.yaml for the complete 480-condition design.
 #
-# This is NOT a "minimal test." It is the REAL EXPERIMENT with ONLY 3 differences:
-# 1. Epochs: 2 (not 50)
-# 2. Data: half (~23 train / ~12 val, not ~47 / ~23)
-# 3. Folds: 1 (fold-0, not 3)
-# EVERYTHING else is IDENTICAL to production (paper_factorial.yaml).
-#
-# Usage:
-#   ./scripts/run_factorial.sh configs/experiment/debug_factorial.yaml
+# Usage (PREFERRED):
+#   ./scripts/run_factorial.sh configs/factorial/debug.yaml
 #
 # Or single condition via Docker:
 #   docker compose -f deployment/docker-compose.flows.yml run --rm \
@@ -83,6 +81,8 @@ flows:
   - deploy
 
 post_training:
-  plugins:
-    - checkpoint_averaging
-    - calibration
+  # Post-training methods: ONLY {none, swag} (registry decision, DO_NOT_RE_ASK).
+  # "none" comes free from training sub-flow. "swag" runs in same flow session.
+  methods:
+    - none
+    - swag
