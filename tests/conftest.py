@@ -45,6 +45,28 @@ def _allow_host_env():
     os.environ.pop("MINIVESS_ALLOW_HOST", None)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _cleanup_spurious_file_dirs():
+    """Remove spurious ``file:`` directories created by MLflow relative URI bugs.
+
+    Some test interaction paths cause MLflow to interpret ``file:something`` as
+    a relative path, creating a ``file:`` directory in the repo root. Cleanup
+    runs BEFORE tests (from previous sessions) and AFTER (from current session).
+    """
+    import shutil
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parent.parent
+    spurious = repo_root / "file:"
+    if spurious.exists():
+        shutil.rmtree(spurious, ignore_errors=True)
+
+    yield
+
+    if spurious.exists():
+        shutil.rmtree(spurious, ignore_errors=True)
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Add custom CLI options for GPU test tiers."""
     parser.addoption(

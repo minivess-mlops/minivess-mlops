@@ -338,6 +338,10 @@ services:
       - minivess
     <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
 
+  # NOTE: QA flow is merged into dashboard flow (PR #567). No separate service.
+  # qa_flow.py exists for standalone testing but runs inside dashboard container.
+  # See: tests/v2/unit/deployment/test_qa_removed.py
+
   # Data Annotation App (reads BentoML models from Flow 4)
   annotation:
     build:

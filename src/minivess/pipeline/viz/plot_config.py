@@ -18,6 +18,7 @@ COLORS: dict[str, str] = {
     "cbdice": "#88CCEE",
     "dice_ce_cldice": "#44AA99",
     "cbdice_cldice": "#117733",
+    "bce_dice_05cldice": "#882255",
     "champion": "#DDCC77",
     "reference": "#CC6677",
 }
@@ -29,8 +30,9 @@ COLORS: dict[str, str] = {
 LOSS_LABELS: dict[str, str] = {
     "dice_ce": "Dice + CE",
     "cbdice": "cbDice",
-    "dice_ce_cldice": "Dice + CE + clDice",
+    "dice_ce_cldice": "Dice + CE + clDice (balanced)",
     "cbdice_cldice": "cbDice + clDice",
+    "bce_dice_05cldice": "BCE + Dice + 0.5×clDice (Khazem 2025)",
 }
 
 

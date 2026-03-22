@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  source_of_truth: .claude/metalearning/2026-03-22-dvc-pull-untested-setup-script-failure.md
+  decisions_referenced:
+    - docker_execution (Docker is the execution model)
+    - data_storage (GCS for production data)
+  context_loaded:
+    metalearning:
+      - 2026-03-22-dvc-pull-untested-setup-script-failure.md
+    registry: knowledge-graph/decisions/registry.yaml
+-->
+<plan>
+  <metadata>
+    <title>DVC + SkyPilot Setup Script Test Suite — Production-Grade Pre-Launch Validation</title>
+    <branch>test/debug-factorial-4th-pass</branch>
+    <date>2026-03-22</date>
+    <status>ready</status>
+    <priority>P0 — prevents burning cloud credits on FAILED_SETUP jobs</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <incident>8 FAILED_SETUP jobs on GCP = ~$5 wasted. dvc pull -r gcs failed on data/processed/minivess (tracked but never pushed)</incident>
+  </metadata>
+
+  <problem>
+    SkyPilot setup scripts are NEVER tested locally before cloud deployment.
+    The 4th pass debug factorial burned ~$5 on 8 FAILED_SETUP jobs because:
+    1. dvc pull -r gcs pulls ALL DVC-tracked outputs
+    2. data/processed/minivess is tracked but NOT pushed to GCS
+    3. DVC returns non-zero exit → set -e kills setup → job fails
+    4. Each failed job provisioned an L4 spot VM (~$0.60) before failing
+
+    Root cause: AI slop implementation — code that "looks right" but was
+    never validated against real infrastructure.
+  </problem>
+
+  <tasks>
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- MODULE 1: DVC Remote Sync Verification (staging tier) -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+
+    <task id="T1" phase="RED">
+      <title>Test: all unfrozen DVC stages have lock entries</title>
+      <file>tests/v2/unit/test_dvc_remote_sync.py</file>
+      <description>
+        Parse dvc.yaml for stages with outs:. Parse dvc.lock for committed stages.
+        Any unfrozen stage with outputs but no lock entry = tracked but never pushed.
+        This catches the exact $5 failure at make test-staging time.
+      </description>
+    </task>
+
+    <task id="T2" phase="RED">
+      <title>Test: SkyPilot dvc pull paths match dvc.lock outputs</title>
+      <file>tests/v2/unit/test_dvc_remote_sync.py</file>
+      <description>
+        Parse train_factorial.yaml setup section for dvc pull commands.
+        Extract the paths (e.g., data/raw/minivess). Verify each path appears
+        as an output in a stage that HAS a dvc.lock entry.
+        Catches "setup pulls path X but X was never pushed."
+      </description>
+    </task>
+
+    <task id="T3" phase="GREEN">
+      <title>Implement: DVC sync verification tests</title>
+      <file>tests/v2/unit/test_dvc_remote_sync.py</file>
+      <description>
+        Implement T1 and T2 using yaml.safe_load() on dvc.yaml and dvc.lock.
+        No cloud credentials needed — pure file parsing.
+      </description>
+    </task>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- MODULE 2: Setup Script Static Analysis (staging tier) -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+
+    <task id="T4" phase="RED">
+      <title>Test: setup script has no banned commands</title>
+      <file>tests/v2/unit/deployment/test_skypilot_setup_validation.py</file>
+      <description>
+        Parse setup section from train_factorial.yaml. Verify no apt-get,
+        pip install, uv sync, git clone. Already partially covered but
+        extend to check ALL SkyPilot YAMLs in deployment/skypilot/.
+      </description>
+    </task>
+
+    <task id="T5" phase="RED">
+      <title>Test: setup dvc pull has error handling</title>
+      <file>tests/v2/unit/deployment/test_skypilot_setup_validation.py</file>
+      <description>
+        The dvc pull command must be followed by || { ... exit 1; } or
+        wrapped in set -e. The error message must mention the actual
+        failure (data path), not just "check credentials."
+      </description>
+    </task>
+
+    <task id="T6" phase="RED">
+      <title>Test: run section guards against missing prerequisites</title>
+      <file>tests/v2/unit/deployment/test_skypilot_setup_validation.py</file>
+      <description>
+        The run section must check for splits.json existence before proceeding.
+        This catches "setup failed silently, run starts anyway."
+      </description>
+    </task>
+
+    <task id="T7" phase="GREEN">
+      <title>Implement: setup script validation tests</title>
+      <file>tests/v2/unit/deployment/test_skypilot_setup_validation.py</file>
+    </task>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- MODULE 3: Pre-Launch Preflight Script -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+
+    <task id="T8" phase="RED">
+      <title>Test: preflight script checks Docker image exists</title>
+      <file>tests/v2/unit/test_cloud_preflight.py</file>
+      <description>
+        The preflight script must run docker manifest inspect on the GAR image.
+        Test verifies the check function exists and returns bool.
+      </description>
+    </task>
+
+    <task id="T9" phase="RED">
+      <title>Test: preflight script checks required env vars</title>
+      <file>tests/v2/unit/test_cloud_preflight.py</file>
+      <description>
+        HF_TOKEN and MLFLOW_TRACKING_URI must be non-empty in .env.
+      </description>
+    </task>
+
+    <task id="T10" phase="GREEN">
+      <title>Implement: scripts/preflight_gcp.py</title>
+      <file>scripts/preflight_gcp.py</file>
+      <description>
+        Programmatic pre-launch validation:
+        1. Docker image exists on GAR (docker manifest inspect)
+        2. GCS bucket accessible (gsutil ls)
+        3. DVC data hashes present on GCS
+        4. Required env vars set (HF_TOKEN, MLFLOW_TRACKING_URI)
+        5. SkyPilot GCP backend configured (sky check gcp)
+        6. Checkpoint bucket writable
+        7. dvc.yaml/dvc.lock consistency (call Module 1 logic)
+      </description>
+    </task>
+
+    <task id="T11" phase="GREEN">
+      <title>Wire: run_factorial.sh calls preflight before launch</title>
+      <file>scripts/run_factorial.sh</file>
+      <description>
+        Add preflight check AFTER config parsing, BEFORE launch loop:
+        "${REPO_ROOT}/.venv/bin/python" "${REPO_ROOT}/scripts/preflight_gcp.py" || exit 1
+        Add SKIP_PREFLIGHT=1 escape hatch for testing.
+      </description>
+    </task>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- MODULE 4: Cloud Integration Tests -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+
+    <task id="T12" phase="RED">
+      <title>Test: DVC raw data hash exists on GCS</title>
+      <file>tests/v2/cloud/test_dvc_gcs_availability.py</file>
+      <description>
+        Parse dvc.lock for data/raw/minivess md5 hash. Verify it exists
+        on GCS via gsutil ls. Auto-skip without GCS credentials.
+      </description>
+    </task>
+
+    <task id="T13" phase="GREEN">
+      <title>Implement: GCS data availability tests</title>
+      <file>tests/v2/cloud/test_dvc_gcs_availability.py</file>
+    </task>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- MODULE 5: Verification -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+
+    <task id="T14" phase="VERIFY">
+      <title>Verify: make test-staging catches the original failure</title>
+      <description>
+        Temporarily revert dvc pull to the broken version (dvc pull -r gcs
+        without path filter). Verify that test_skypilot_dvc_pull_paths_match
+        catches it. Then revert.
+      </description>
+    </task>
+
+    <task id="T15" phase="VERIFY">
+      <title>Verify: preflight_gcp.py runs successfully locally</title>
+      <description>
+        uv run python scripts/preflight_gcp.py — should pass all checks
+        (Docker image on GAR, GCS accessible, DVC data present).
+      </description>
+    </task>
+
+    <task id="T16" phase="VERIFY">
+      <title>Verify: run_factorial.sh --dry-run includes preflight</title>
+      <description>
+        ./scripts/run_factorial.sh --dry-run configs/factorial/debug.yaml
+        must show preflight checks passing before listing jobs.
+      </description>
+    </task>
+  </tasks>
+
+  <test-tier-mapping>
+    <tier name="staging" files="test_dvc_remote_sync.py, test_skypilot_setup_validation.py, test_cloud_preflight.py">
+      No cloud credentials. Pure file parsing + static analysis.
+      Catches: tracked-but-not-pushed, banned commands, missing guards.
+    </tier>
+    <tier name="prod" files="test_skypilot_setup_validation.py (Docker execution)">
+      Requires Docker. Runs setup script in container locally.
+      Catches: setup script runtime failures.
+    </tier>
+    <tier name="cloud" files="test_dvc_gcs_availability.py">
+      Requires GCS ADC credentials. Auto-skips without them.
+      Catches: data not on GCS, permissions issues.
+    </tier>
+    <tier name="ad-hoc" files="scripts/preflight_gcp.py">
+      Run before sky jobs launch. Called by run_factorial.sh.
+      Catches: ALL of the above at launch time.
+    </tier>
+  </test-tier-mapping>
+
+  <what-this-would-have-caught>
+    <failure date="2026-03-22" cost="$5" jobs="8 FAILED_SETUP">
+      dvc pull -r gcs fails on data/processed/minivess (tracked but not pushed).
+      Caught by: T1 (staging), T2 (staging), T10 (preflight), T12 (cloud).
+    </failure>
+    <failure date="2026-03-20" cost="$3" jobs="Glitch #6">
+      DVC partial pull + cp same-file error in 1st pass.
+      Caught by: T2 (setup paths match lock), T5 (error handling).
+    </failure>
+  </what-this-would-have-caught>
+
+  <cross-reference>
+    <file path=".claude/metalearning/2026-03-22-dvc-pull-untested-setup-script-failure.md" relation="incident"/>
+    <file path="deployment/skypilot/train_factorial.yaml" relation="setup script"/>
+    <file path="dvc.yaml" relation="DVC pipeline definition"/>
+    <file path="dvc.lock" relation="DVC lock file"/>
+    <file path=".dvc/config" relation="DVC remote config"/>
+    <file path="scripts/run_factorial.sh" relation="launch script"/>
+    <url href="https://github.com/iterative/dvc-test" relation="DVC test infra (archived)"/>
+    <url href="https://dvc.org/blog/finetune-llm-pipeline-dvc-skypilot/" relation="DVC+SkyPilot patterns"/>
+  </cross-reference>
+</plan>

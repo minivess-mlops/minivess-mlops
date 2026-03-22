@@ -190,6 +190,120 @@ class TestSWAGModelPersistence:
             torch.testing.assert_close(weights_loaded[name], weights_original[name])
 
 
+class TestSWAGPluginSavesMeanModel:
+    """SWAGPlugin must save a standard-format mean model alongside the SWAG posterior."""
+
+    def test_swag_plugin_output_has_two_model_paths(self) -> None:
+        """SWAGPlugin.execute() must return 2 model paths: mean + posterior."""
+        from minivess.pipeline.post_training_plugin import PluginInput
+        from minivess.pipeline.post_training_plugins.swag import SWAGPlugin
+
+        net = _make_simple_net(seed=1)
+        # Create a fake checkpoint
+        ckpt_dir = Path("/tmp/test_swag_mean_model")
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        ckpt_path = ckpt_dir / "best_val_loss.pth"
+        torch.save({"model_state_dict": net.state_dict()}, ckpt_path)
+
+        # Build a simple train loader (1 batch)
+        dataset = torch.utils.data.TensorDataset(
+            torch.randn(2, 1, 4, 4, 4), torch.randint(0, 2, (2, 1, 4, 4, 4))
+        )
+        train_loader = torch.utils.data.DataLoader(dataset, batch_size=2)
+
+        # Wrap to yield dicts (MONAI convention)
+        class DictLoader:
+            def __init__(self, loader: torch.utils.data.DataLoader) -> None:
+                self.loader = loader
+
+            def __iter__(self):  # noqa: ANN204
+                for imgs, lbls in self.loader:
+                    yield {"image": imgs, "label": lbls}
+
+            def __len__(self) -> int:
+                return len(self.loader)
+
+        plugin = SWAGPlugin()
+        plugin_input = PluginInput(
+            checkpoint_paths=[ckpt_path],
+            config={
+                "swa_lr": 0.01,
+                "swa_epochs": 1,
+                "max_rank": 2,
+                "update_bn": False,
+                "output_dir": str(ckpt_dir / "swag_output"),
+            },
+            calibration_data={
+                "train_loader": DictLoader(train_loader),
+                "model": net,
+            },
+        )
+
+        output = plugin.execute(plugin_input)
+        assert len(output.model_paths) == 2, (
+            f"Expected 2 model paths (mean + posterior), got {len(output.model_paths)}: "
+            f"{output.model_paths}"
+        )
+
+    def test_swag_mean_model_is_standard_state_dict(self) -> None:
+        """The first model path from SWAGPlugin must be a standard state_dict checkpoint."""
+        from minivess.pipeline.post_training_plugin import PluginInput
+        from minivess.pipeline.post_training_plugins.swag import SWAGPlugin
+
+        net = _make_simple_net(seed=1)
+        ckpt_dir = Path("/tmp/test_swag_mean_model_format")
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        ckpt_path = ckpt_dir / "best_val_loss.pth"
+        torch.save({"model_state_dict": net.state_dict()}, ckpt_path)
+
+        dataset = torch.utils.data.TensorDataset(
+            torch.randn(2, 1, 4, 4, 4), torch.randint(0, 2, (2, 1, 4, 4, 4))
+        )
+
+        class DictLoader:
+            def __init__(self, loader: torch.utils.data.DataLoader) -> None:
+                self.loader = loader
+
+            def __iter__(self):  # noqa: ANN204
+                for imgs, lbls in self.loader:
+                    yield {"image": imgs, "label": lbls}
+
+            def __len__(self) -> int:
+                return len(self.loader)
+
+        plugin = SWAGPlugin()
+        plugin_input = PluginInput(
+            checkpoint_paths=[ckpt_path],
+            config={
+                "swa_lr": 0.01,
+                "swa_epochs": 1,
+                "max_rank": 2,
+                "update_bn": False,
+                "output_dir": str(ckpt_dir / "swag_output2"),
+            },
+            calibration_data={
+                "train_loader": DictLoader(
+                    torch.utils.data.DataLoader(dataset, batch_size=2)
+                ),
+                "model": net,
+            },
+        )
+
+        output = plugin.execute(plugin_input)
+        mean_path = output.model_paths[0]
+        assert mean_path.exists(), f"Mean model not found: {mean_path}"
+
+        # Must be loadable as standard state_dict
+        ckpt = torch.load(mean_path, weights_only=False)
+        assert "model_state_dict" in ckpt, (
+            f"Mean model must have 'model_state_dict' key, got: {list(ckpt.keys())}"
+        )
+
+        # Must be loadable into a fresh model
+        fresh_net = _make_simple_net(seed=99)
+        fresh_net.load_state_dict(ckpt["model_state_dict"])
+
+
 class TestSWAGModelForward:
     """Test forward pass through SWAG model."""
 

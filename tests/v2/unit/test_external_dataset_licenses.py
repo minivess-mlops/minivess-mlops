@@ -27,7 +27,10 @@ class TestLicenseVerification:
     def test_deepvess_has_license_verified_flag(self) -> None:
         cfg = EXTERNAL_DATASETS["deepvess"]
         assert hasattr(cfg, "license_verified")
-        assert cfg.license_verified is False, "DeepVess needs author confirmation"
+        # Verified 2026-03-22 from eCommons README: CC-BY 4.0
+        assert cfg.license_verified is True, (
+            "DeepVess license verified from eCommons README"
+        )
 
     def test_all_configs_have_cite_ref(self) -> None:
         for name, cfg in EXTERNAL_DATASETS.items():

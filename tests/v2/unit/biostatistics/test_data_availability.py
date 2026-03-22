@@ -150,10 +150,10 @@ class TestFactorialConfigParsing:
         n_cells = 1
         for levels in factors.values():
             n_cells *= len(levels)
-        assert n_cells == 24
+        assert n_cells == 32  # 4 models × 4 losses × 2 aux_calib
 
-    def test_production_factorial_72_runs(self) -> None:
-        """Production: 24 cells × 3 folds = 72 runs."""
+    def test_production_factorial_96_runs(self) -> None:
+        """Production: 32 cells × 3 folds = 96 runs."""
         import yaml
 
         config_path = Path("configs/hpo/paper_factorial.yaml")
@@ -165,7 +165,7 @@ class TestFactorialConfigParsing:
         for levels in factors.values():
             n_cells *= len(levels)
         n_folds = config.get("fixed", {}).get("num_folds", 3)
-        assert n_cells * n_folds == 72
+        assert n_cells * n_folds == 96  # 32 cells × 3 folds
 
     def test_co_primary_metrics_are_cldice_and_masd(self) -> None:
         """Co-primary metrics per MetricsReloaded: clDice + MASD (NOT Dice)."""

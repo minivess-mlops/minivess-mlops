@@ -50,6 +50,12 @@ EXPERIMENT_HPO: str = "minivess_hpo"
 FLOW_NAME_TRAIN: str = "training-flow"
 """Prefect flow name for the model training flow (Flow 2)."""
 
+FLOW_NAME_TRAINING_SUBFLOW: str = "training-subflow"
+"""Prefect sub-flow name for the training step within the parent flow."""
+
+FLOW_NAME_POST_TRAINING_SUBFLOW: str = "post-training-subflow"
+"""Prefect sub-flow name for the post-training step (SWAG, etc.) within the parent flow."""
+
 FLOW_NAME_DATA: str = "data-flow"
 """Prefect flow name for the data engineering flow (Flow 1)."""
 

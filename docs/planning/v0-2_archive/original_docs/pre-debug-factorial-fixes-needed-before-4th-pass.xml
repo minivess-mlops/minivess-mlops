@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan>
+  <meta>
+    <title>Pre-Debug Factorial Fixes Needed Before 4th Pass</title>
+    <created>2026-03-22</created>
+    <status>reference</status>
+    <context>
+      Captured from conversation context during plan archive recovery.
+      This document lists the fixes and verifications needed before launching
+      the 4th debug factorial pass on GCP.
+    </context>
+  </meta>
+
+  <section name="factorial-scope">
+    <description>
+      The debug factorial is the FULL production factorial with reduced
+      epochs (2), data (half), and folds (1). All other factors are
+      identical to production: all models, all losses, all calibration
+      methods, all post-training methods, all zero-shot baselines.
+    </description>
+  </section>
+
+  <section name="known-fixes-needed">
+    <item priority="critical">
+      LoRA adapter weight initialization must match SAM3 paper exactly.
+      Current implementation may have incorrect rank or target layers.
+    </item>
+    <item priority="critical">
+      Conditional model tests: SAM3 tests must skip gracefully when
+      GPU VRAM is insufficient (less than 16 GB).
+    </item>
+    <item priority="high">
+      Post-training config: only "none" and "swag" are valid options.
+      Config validation must reject other values.
+    </item>
+    <item priority="high">
+      SkyPilot YAML must use Docker image_id, never bare VM setup.
+    </item>
+    <item priority="medium">
+      DVC data pull must be verified in setup script before training starts.
+    </item>
+  </section>
+
+  <section name="verification-checklist">
+    <check>All factorial configs generate valid Hydra overrides</check>
+    <check>Docker base image builds successfully with all dependencies</check>
+    <check>SkyPilot dry-run succeeds for at least one factorial cell</check>
+    <check>MLflow tracking URI resolves from within Docker container</check>
+    <check>DVC remote is accessible from GCP compute instance</check>
+  </section>
+</plan>

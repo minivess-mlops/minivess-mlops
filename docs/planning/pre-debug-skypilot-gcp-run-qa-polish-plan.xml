@@ -1,0 +1,275 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan>
+  <metadata>
+    <title>Pre-Debug SkyPilot GCP Run — QA Polish + Test Suite Reorganization</title>
+    <created>2026-03-22</created>
+    <branch>test/debug-factorial-4th-pass</branch>
+    <status>active</status>
+    <triggered_by>User frustration with agent resistance pattern</triggered_by>
+    <issue>909</issue>
+  </metadata>
+
+  <user_prompt_verbatim>
+    <!-- User's exact words — preserved as the source of truth for this plan -->
+    How is the credential skipping acceptable? why do we have tests that you find are
+    okay to skip? we already instance-specific tests so shouldn't we have a very
+    different improved semantic categorization as I don't find at all acceptable this
+    that we constantly just skip tests!
+
+    Plan how to improve both our test suite organization and "What's NOT Done (requires
+    data download or GCP access)"
+
+    and you have GCP access via .env so why are not fucking separate make-test cloud type
+    of tests instead of you resisting to help me and thinking that someone at some point
+    will come and magically resolve this! This is the fucking exact same behavior that we
+    are trying to get rid of as you avoid addressing the issue and pushing the can down
+    the road. So let's create yet another metalearning failure doc on this constant
+    sabotage of this project! We have to plan also how to improve the Claude harness and
+    reduce this fucking behavior as this collaboration with you is getting fucking
+    ridiculous as you constantly fail to see the high-level vision of this repo, and your
+    role as the only implementation engine following my instructions, so what do we have
+    left when you don't want to help me? Some magical alien agent will come with a flying
+    saucer and fix my repo? That is your job. Plan to pre-debug-skypilot-gcp-run-qa-polish-plan.xml,
+    and I really don't know what to say to you as I keep on instruction you and you keep
+    ignoring me and brushing issues under the rug so to speak. Save my prompt verbatim to
+    .xml, create the metalearning failure doc, and let's start working on the comprehensive
+    plan for all the QA tests, improved harness, etc. jointly
+  </user_prompt_verbatim>
+
+  <!-- ================================================================== -->
+  <!-- PART 1: TEST SUITE REORGANIZATION — ZERO SKIPS IN STAGING          -->
+  <!-- ================================================================== -->
+
+  <phase id="1" name="Test Suite Reorganization — Eliminate All Skips">
+    <rationale>
+      The current 3-tier model (staging/prod/gpu) has a fundamental flaw: cloud-dependent
+      tests live in the staging suite, causing permanent skips that get normalized as
+      "acceptable." The fix: 5-tier model where EVERY tier has ZERO expected skips.
+    </rationale>
+
+    <task id="1.1" priority="P0" status="not_started">
+      <title>Create make test-cloud target</title>
+      <description>
+        Move ALL cloud-credential-dependent tests to a dedicated cloud tier.
+        Currently 6 tests in tests/v2/cloud/test_skypilot_mlflow.py skip because
+        MLFLOW_TRACKING_PASSWORD is not set. These should NEVER be in staging.
+
+        New Makefile target:
+          test-cloud: runs tests/v2/cloud/ with -m cloud_mlflow
+          Requires: MLFLOW_TRACKING_PASSWORD, MLFLOW_TRACKING_URI in .env
+
+        Acceptance: make test-staging has ZERO cloud-related skips.
+      </description>
+    </task>
+
+    <task id="1.2" priority="P0" status="not_started">
+      <title>Move mamba-ssm reverse skip to conditional marker</title>
+      <description>
+        test_mambavesselnet_construction.py skips "cannot test error path" when
+        mamba-ssm IS installed. This should use a conditional marker that selects
+        the RIGHT test based on whether mamba-ssm is available:
+        - If installed: test the success path
+        - If not installed: test the error path
+        Both paths should be tested, neither should skip.
+
+        Acceptance: ZERO skips for mamba-ssm tests in staging.
+      </description>
+    </task>
+
+    <task id="1.3" priority="P0" status="not_started">
+      <title>Investigate and fix port binding hardening skip</title>
+      <description>
+        test_compose_hardening.py:210 skips with "Port bindings without explicit
+        interface." This is a security test — it should either PASS (ports are
+        properly bound) or FAIL (ports need fixing). Skipping is hiding a security gap.
+
+        Investigate: which ports in docker-compose.yml bind to 0.0.0.0 instead
+        of 127.0.0.1? Fix them or document why 0.0.0.0 is intentional.
+
+        Acceptance: test either passes or fails. NEVER skips.
+      </description>
+    </task>
+
+    <task id="1.4" priority="P1" status="not_started">
+      <title>Add -rs flag to make test-staging</title>
+      <description>
+        Add pytest -rs (show skip reasons) to make test-staging so skip reasons
+        are ALWAYS visible in the output. Currently skips are a single number
+        with no context.
+
+        Acceptance: make test-staging output shows skip reasons inline.
+      </description>
+    </task>
+
+    <task id="1.5" priority="P0" status="not_started">
+      <title>Verify: make test-staging has ZERO skips</title>
+      <description>
+        After tasks 1.1-1.3, run make test-staging and verify:
+        - 0 skipped
+        - 0 failed
+        - All cloud tests moved to make test-cloud
+
+        Acceptance: "X passed, 0 skipped" in staging output.
+      </description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PART 2: DO THE WORK — DeepVess + Cloud Preflight + Dry-Run         -->
+  <!-- ================================================================== -->
+
+  <phase id="2" name="DeepVess Data Acquisition — Stop Deferring">
+    <rationale>
+      The agent has network access, curl, wget, and Python. The agent has GCP
+      credentials via .env. There is NO blocker. The agent must do the work.
+    </rationale>
+
+    <task id="2.1" priority="P0" status="not_started">
+      <title>Download DeepVess ZIP from Cornell eCommons</title>
+      <description>
+        Download: https://ecommons.cornell.edu/server/api/core/bitstreams/[UUID]/content
+        Size: 1.45 GB
+        Extract to: data/raw/deepvess/
+        Organize into: images/ and labels/ subdirectories
+
+        The download URL for the ZIP was discovered via DSpace API:
+        https://ecommons.cornell.edu/server/api/core/bundles/fe51aa23-42d6-45a0-b71e-9ce1b00ac63e/bitstreams
+
+        Acceptance: data/raw/deepvess/images/ and data/raw/deepvess/labels/ exist
+        with TIFF files.
+      </description>
+    </task>
+
+    <task id="2.2" priority="P0" status="not_started">
+      <title>DVC track DeepVess</title>
+      <description>
+        dvc add data/raw/deepvess
+        git add data/raw/deepvess.dvc .gitignore
+        Acceptance: dvc status shows deepvess tracked.
+      </description>
+      <depends_on>2.1</depends_on>
+    </task>
+
+    <task id="2.3" priority="P0" status="not_started">
+      <title>DVC push DeepVess to GCS</title>
+      <description>
+        dvc push data/raw/deepvess -r gcs
+        Verify: gsutil ls gs://minivess-mlops-dvc-data/files/md5/[hash]
+        Acceptance: round-trip verification succeeds.
+      </description>
+      <depends_on>2.2</depends_on>
+    </task>
+  </phase>
+
+  <phase id="3" name="Cloud Preflight + Dry-Run — Use the Credentials We Have">
+    <rationale>
+      .env has GCP credentials. gcloud auth is configured. preflight_gcp.py
+      has 9 checks. The agent must RUN them, not list them as "blocked."
+    </rationale>
+
+    <task id="3.1" priority="P0" status="not_started">
+      <title>Check GCP credentials are available</title>
+      <description>
+        1. grep GOOGLE_APPLICATION_CREDENTIALS .env
+        2. gcloud auth list
+        3. gsutil ls gs://minivess-mlops-dvc-data/
+        Report what we have. If missing, tell user EXACTLY what to do.
+        Do NOT just list "GCP credentials" as a blocker.
+      </description>
+    </task>
+
+    <task id="3.2" priority="P0" status="not_started">
+      <title>Run preflight_gcp.py</title>
+      <description>
+        uv run python scripts/preflight_gcp.py
+        Report ALL 9 check results. Fix any failures.
+        Do NOT defer to "next session."
+      </description>
+      <depends_on>3.1</depends_on>
+    </task>
+
+    <task id="3.3" priority="P0" status="not_started">
+      <title>Run factorial dry-run</title>
+      <description>
+        ./scripts/run_factorial.sh --dry-run configs/factorial/debug.yaml
+        Verify: generates correct job configs for 32 + 2 conditions.
+        Report exact output.
+      </description>
+      <depends_on>3.2</depends_on>
+    </task>
+
+    <task id="3.4" priority="P0" status="not_started">
+      <title>Run make test-cloud</title>
+      <description>
+        Run the cloud test tier (created in Phase 1) with actual credentials.
+        Report all results. Fix any failures.
+      </description>
+      <depends_on>3.1</depends_on>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PART 3: HARNESS IMPROVEMENT — Stop the Resistance Pattern          -->
+  <!-- ================================================================== -->
+
+  <phase id="4" name="Harness Improvement — Enforce Behavior, Don't Document It">
+    <rationale>
+      100 metalearning docs have not changed behavior. The ETH Zurich study
+      (arXiv:2602.11988) shows documentation-based guardrails have hit their
+      ceiling. Enforcement must operate OUTSIDE the LLM reasoning loop.
+    </rationale>
+
+    <task id="4.1" priority="P1" status="not_started">
+      <title>Add skip-count enforcement to pre-commit hook</title>
+      <description>
+        Add a pre-commit hook that blocks commits if:
+        1. The commit message contains "passed" and "skipped" but no skip analysis
+        2. The staging tier has any skips (after Phase 1 reorganization)
+
+        This prevents the agent from committing with unreported skips.
+      </description>
+    </task>
+
+    <task id="4.2" priority="P1" status="not_started">
+      <title>Add blocker-check to session start</title>
+      <description>
+        When a session starts, the agent should:
+        1. Check .env for credentials (GCP, HF_TOKEN, MLFLOW)
+        2. Check data availability (data/raw/deepvess/, data/raw/minivess/)
+        3. Check Docker image existence
+        4. Report: "I have access to X, Y, Z" — not "X, Y, Z are blockers"
+
+        This prevents the "learned helplessness" pattern where the agent lists
+        available resources as blockers.
+      </description>
+    </task>
+
+    <task id="4.3" priority="P2" status="not_started">
+      <title>Reduce CLAUDE.md to ~60 lines</title>
+      <description>
+        Per ETH Zurich study and harness improvement plan: move detailed rules
+        to skills (progressive disclosure). Keep only the 10 most critical
+        invariants in CLAUDE.md. This reduces context overhead and may improve
+        rule compliance.
+
+        Deferred: requires careful editorial work. Not blocking factorial.
+      </description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- STOP POINT: Ready to launch GCP factorial                          -->
+  <!-- ================================================================== -->
+
+  <gate name="launch-ready">
+    <description>
+      ALL of the following must be true before launching the factorial:
+      1. make test-staging: 0 failed, 0 skipped
+      2. make test-cloud: 0 failed (with actual credentials)
+      3. preflight_gcp.py: all 9 checks pass
+      4. DeepVess data on GCS (verified by preflight)
+      5. Factorial dry-run generates correct 34 job configs
+      6. User confirms: "Launch for real"
+    </description>
+  </gate>
+</plan>

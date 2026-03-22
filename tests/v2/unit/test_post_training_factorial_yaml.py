@@ -27,7 +27,11 @@ class TestFactorialYamlPostTrainingFactors:
         assert "recalibration" in post_training_names
 
     def test_debug_yaml_post_training_method_levels(self) -> None:
-        """Debug YAML must have {none, checkpoint_averaging} as post_training method levels."""
+        """Debug YAML must have {none, swag} as post_training method levels.
+
+        Registry decision (DO_NOT_RE_ASK): only "none" and "swag" are factorial levels.
+        Debug factors are IDENTICAL to production (CLAUDE.md Rule 27).
+        """
         from minivess.config.factorial_config import parse_factorial_yaml
 
         yaml_path = Path("configs/factorial/debug.yaml")
@@ -36,8 +40,8 @@ class TestFactorialYamlPostTrainingFactors:
         assert "method" in levels, (
             f"'method' not in factor levels: {list(levels.keys())}"
         )
-        assert set(levels["method"]) == {"none", "checkpoint_averaging"}, (
-            f"Expected {{none, checkpoint_averaging}} for debug, got {levels['method']}"
+        assert set(levels["method"]) == {"none", "swag"}, (
+            f"Expected {{none, swag}} for debug, got {levels['method']}"
         )
 
     def test_debug_yaml_recalibration_levels(self) -> None:
@@ -50,8 +54,12 @@ class TestFactorialYamlPostTrainingFactors:
         assert "recalibration" in levels
         assert set(levels["recalibration"]) == {"none", "temperature_scaling"}
 
-    def test_paper_full_yaml_has_more_post_training_levels(self) -> None:
-        """Production YAML must have 3 post-training method levels."""
+    def test_paper_full_yaml_has_same_post_training_levels(self) -> None:
+        """Production YAML must have {none, swag} as post_training method levels.
+
+        Registry decision (DO_NOT_RE_ASK): only "none" and "swag" are factorial levels.
+        Checkpoint averaging was removed — it was the old wrongly-named "SWA".
+        """
         from minivess.config.factorial_config import parse_factorial_yaml
 
         yaml_path = Path("configs/factorial/paper_full.yaml")
@@ -60,11 +68,8 @@ class TestFactorialYamlPostTrainingFactors:
         assert "method" in levels
         assert set(levels["method"]) == {
             "none",
-            "checkpoint_averaging",
             "swag",
-        }, (
-            f"Expected {{none, checkpoint_averaging, swag}} for production, got {levels['method']}"
-        )
+        }, f"Expected {{none, swag}} for production, got {levels['method']}"
 
     def test_factor_names_auto_derived_not_hardcoded(self) -> None:
         """Factor names must be auto-derived from YAML keys, not hardcoded."""
@@ -79,12 +84,16 @@ class TestFactorialYamlPostTrainingFactors:
         )
 
     def test_n_conditions_matches_factorial_product(self) -> None:
-        """Debug design must have 4×3×2×2×2×4 = 384 conditions."""
+        """Debug design must have 4×3×2×2×2×5 = 480 conditions.
+
+        Debug factors are IDENTICAL to production (CLAUDE.md Rule 27).
+        Only epochs, data, and folds differ.
+        """
         from minivess.config.factorial_config import parse_factorial_yaml
 
         yaml_path = Path("configs/factorial/debug.yaml")
         design = parse_factorial_yaml(yaml_path)
-        # 4 models × 3 losses × 2 aux_calib × 2 method × 2 recalib × 4 ensemble
-        assert design.n_conditions == 384, (
-            f"Expected 384 debug conditions, got {design.n_conditions}"
+        # 4 models × 4 losses × 2 aux_calib × 2 method × 2 recalib × 5 ensemble
+        assert design.n_conditions == 640, (
+            f"Expected 640 debug conditions, got {design.n_conditions}"
         )

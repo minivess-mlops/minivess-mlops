@@ -32,6 +32,17 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SKYPILOT_YAML="${REPO_ROOT}/deployment/skypilot/train_factorial.yaml"
 ENV_FILE="${REPO_ROOT}/.env"
 
+# ─── Find sky binary (venv or system) ───────────────────────────────────
+SKY_BIN=""
+if command -v sky &>/dev/null; then
+    SKY_BIN="sky"
+elif [ -x "${REPO_ROOT}/.venv/bin/sky" ]; then
+    SKY_BIN="${REPO_ROOT}/.venv/bin/sky"
+else
+    echo "ERROR: sky binary not found. Install: uv sync --extra infra"
+    exit 1
+fi
+
 # ─── Parse flags ─────────────────────────────────────────────────────────────
 DRY_RUN=false
 CONFIG_FILE=""
@@ -85,6 +96,22 @@ mkdir -p "${OUTPUT_DIR}"
 TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
 JOB_LOG="${OUTPUT_DIR}/${TIMESTAMP}_factorial_job_ids.txt"
 
+# ─── Preflight checks (skip for dry-run) ────────────────────────────────────
+if [ "${DRY_RUN}" = false ] && [ "${SKIP_PREFLIGHT:-0}" != "1" ]; then
+    echo "Running GCP preflight checks..."
+    if [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
+        "${REPO_ROOT}/.venv/bin/python" "${REPO_ROOT}/scripts/preflight_gcp.py" || {
+            echo ""
+            echo "FATAL: Preflight checks failed. Fix issues above before launching."
+            echo "To bypass (DANGEROUS): SKIP_PREFLIGHT=1 ./scripts/run_factorial.sh ..."
+            exit 1
+        }
+        echo ""
+    else
+        echo "WARNING: .venv/bin/python not found — skipping preflight checks"
+    fi
+fi
+
 # ─── Parse factorial config ──────────────────────────────────────────────────
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  MinIVess Factorial Experiment Launcher                     ║"
@@ -97,16 +124,24 @@ echo "╚═══════════════════════�
 echo ""
 
 # Extract factorial factors from YAML using Python (no regex — CLAUDE.md Rule 16)
-read -r MODELS LOSSES AUX_CALIBS MAX_EPOCHS NUM_FOLDS MAX_TRAIN MAX_VAL EXPERIMENT_NAME < <(
+read -r MODELS LOSSES AUX_CALIBS MAX_EPOCHS NUM_FOLDS MAX_TRAIN MAX_VAL EXPERIMENT_NAME PT_METHODS < <(
     python3 -c "
 import yaml, sys, pathlib
 cfg = yaml.safe_load(pathlib.Path('${REPO_ROOT}/${CONFIG_FILE}').read_text(encoding='utf-8'))
 
-# Handle both factorial config (paper_factorial.yaml) and experiment config (debug_factorial.yaml)
+# Parse training factors — supports two config layouts:
+#   Layered:  factors.training.model_family  (configs/factorial/*.yaml)
+#   Flat:     factors.model_family           (configs/experiment/*.yaml, legacy)
 if 'factors' in cfg:
-    models = cfg['factors']['model_family']
-    losses = cfg['factors']['loss_name']
-    aux_calibs = [str(x).lower() for x in cfg['factors'].get('aux_calibration', [False])]
+    factors = cfg['factors']
+    # Prefer layered structure (factors.training.*)
+    if 'training' in factors and isinstance(factors['training'], dict):
+        training = factors['training']
+    else:
+        training = factors
+    models = training['model_family']
+    losses = training['loss_name']
+    aux_calibs = [str(x).lower() for x in training.get('aux_calibration', [False])]
     fixed = cfg.get('fixed', {})
     max_epochs = fixed.get('max_epochs', 50)
     num_folds = fixed.get('num_folds', 3)
@@ -121,9 +156,20 @@ else:
     max_train = cfg.get('max_train_volumes', 0)
     max_val = cfg.get('max_val_volumes', 0)
 
+# Post-training methods run IN THE SAME SkyPilot job as training (not separate jobs).
+# The parent flow iterates over methods internally: sub-flow 1 (training = 'none' cell),
+# sub-flow 2 (SWAG or other methods). Decided: only 'none' and 'swag'.
+# See: docs/planning/training-and-post-training-into-two-subflows-under-one-flow.md
+# Check layered structure first (factors.post_training.method), then flat (post_training.methods)
+if 'factors' in cfg and 'post_training' in cfg['factors']:
+    pt_methods = cfg['factors']['post_training'].get('method', ['none', 'swag'])
+else:
+    pt_methods = cfg.get('post_training', {}).get('methods', ['none', 'swag'])
+
 experiment_name = cfg.get('experiment_name', 'factorial')
 print(','.join(models), ','.join(losses), ','.join(aux_calibs),
-      max_epochs, num_folds, max_train, max_val, experiment_name)
+      max_epochs, num_folds, max_train, max_val, experiment_name,
+      ','.join(pt_methods))
 "
 )
 
@@ -131,28 +177,38 @@ IFS=',' read -ra MODEL_ARRAY <<< "${MODELS}"
 IFS=',' read -ra LOSS_ARRAY <<< "${LOSSES}"
 IFS=',' read -ra AUX_CALIB_ARRAY <<< "${AUX_CALIBS}"
 
-TOTAL_TRAINABLE=$(( ${#MODEL_ARRAY[@]} * ${#LOSS_ARRAY[@]} * ${#AUX_CALIB_ARRAY[@]} * NUM_FOLDS ))
+# Layer A (training) determines GPU job count. Post-training runs in the SAME job
+# (parent flow iterates over methods internally — no extra jobs).
+# Full factorial: pre-gcp-master-plan.xml line 16. Only Layer A launches SkyPilot jobs.
+TOTAL_GPU_JOBS=$(( ${#MODEL_ARRAY[@]} * ${#LOSS_ARRAY[@]} * ${#AUX_CALIB_ARRAY[@]} * NUM_FOLDS ))
 
 echo "Factorial design:"
-echo "  Models:        ${MODEL_ARRAY[*]} (${#MODEL_ARRAY[@]})"
-echo "  Losses:        ${LOSS_ARRAY[*]} (${#LOSS_ARRAY[@]})"
-echo "  Aux calibs:    ${AUX_CALIB_ARRAY[*]} (${#AUX_CALIB_ARRAY[@]})"
-echo "  Epochs:        ${MAX_EPOCHS}"
-echo "  Folds:         ${NUM_FOLDS}"
-echo "  Max train vol: ${MAX_TRAIN} (0=full)"
-echo "  Max val vol:   ${MAX_VAL} (0=full)"
-echo "  Experiment:    ${EXPERIMENT_NAME}"
-echo "  Total runs:    ${TOTAL_TRAINABLE} trainable"
+echo "  Layer A (training, cloud GPU):"
+echo "    Models:        ${MODEL_ARRAY[*]} (${#MODEL_ARRAY[@]})"
+echo "    Losses:        ${LOSS_ARRAY[*]} (${#LOSS_ARRAY[@]})"
+echo "    Aux calibs:    ${AUX_CALIB_ARRAY[*]} (${#AUX_CALIB_ARRAY[@]})"
+echo "    Epochs:        ${MAX_EPOCHS}"
+echo "    Folds:         ${NUM_FOLDS}"
+echo "    Max train vol: ${MAX_TRAIN} (0=full)"
+echo "    Max val vol:   ${MAX_VAL} (0=full)"
+echo "  Layer B (post-training, same GPU job):"
+echo "    Methods:       ${PT_METHODS} (iterated internally by parent flow)"
+echo "  Experiment:      ${EXPERIMENT_NAME}"
+echo "  GPU jobs:        ${TOTAL_GPU_JOBS} (each runs training + post-training)"
 echo ""
 
 # Write header to job log
 echo "# MinIVess Factorial Experiment — ${TIMESTAMP}" > "${JOB_LOG}"
 echo "# Config: ${CONFIG_FILE}" >> "${JOB_LOG}"
-echo "# Total trainable conditions: ${TOTAL_TRAINABLE}" >> "${JOB_LOG}"
+echo "# GPU jobs: ${TOTAL_GPU_JOBS} (each runs training + post-training internally)" >> "${JOB_LOG}"
+echo "# Post-training methods: ${PT_METHODS} (iterated inside each job)" >> "${JOB_LOG}"
 echo "#" >> "${JOB_LOG}"
 echo "# FORMAT: condition_id | model | loss | aux_calib | fold | status" >> "${JOB_LOG}"
 
-# ─── Launch trainable conditions ──────────────────────────────────────────────
+# ─── Launch GPU jobs (each runs training + post-training in same session) ─────
+# Post-training methods (e.g., none,swag) are passed as POST_TRAINING_METHODS env var.
+# The parent flow iterates over methods internally — no extra SkyPilot jobs needed.
+# "none" cell comes for free from training sub-flow. SWAG runs in post-training sub-flow.
 CONDITION=0
 FAILED=0
 LAUNCHED=0
@@ -162,13 +218,13 @@ for model in "${MODEL_ARRAY[@]}"; do
             for fold in $(seq 0 $((NUM_FOLDS - 1))); do
                 CONDITION=$((CONDITION + 1))
                 CONDITION_NAME="${model}-${loss}-calib${aux_calib}-f${fold}"
-                echo "[${CONDITION}/${TOTAL_TRAINABLE}] ${model} × ${loss} × aux_calib=${aux_calib} × fold=${fold}"
+                echo "[${CONDITION}/${TOTAL_GPU_JOBS}] ${model} × ${loss} × aux_calib=${aux_calib} × fold=${fold} (pt: ${PT_METHODS})"
 
                 if [ "${DRY_RUN}" = true ]; then
                     echo "  [DRY RUN] sky jobs launch ${SKYPILOT_YAML} --name ${CONDITION_NAME} --env MODEL_FAMILY=${model} ..."
                     echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | DRY_RUN" >> "${JOB_LOG}"
                 else
-                    if sky jobs launch "${SKYPILOT_YAML}" \
+                    if "${SKY_BIN}" jobs launch "${SKYPILOT_YAML}" \
                         --name "${CONDITION_NAME}" \
                         --env MODEL_FAMILY="${model}" \
                         --env LOSS_NAME="${loss}" \
@@ -178,6 +234,7 @@ for model in "${MODEL_ARRAY[@]}"; do
                         --env MAX_TRAIN_VOLUMES="${MAX_TRAIN}" \
                         --env MAX_VAL_VOLUMES="${MAX_VAL}" \
                         --env EXPERIMENT_NAME="${EXPERIMENT_NAME}" \
+                        --env POST_TRAINING_METHODS="${PT_METHODS}" \
                         --env-file "${ENV_FILE}" \
                         -y; then
                         LAUNCHED=$((LAUNCHED + 1))
@@ -198,7 +255,7 @@ done
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════"
-echo "Trainable conditions: ${LAUNCHED} launched, ${FAILED} failed (of ${TOTAL_TRAINABLE})"
+echo "Trainable conditions: ${LAUNCHED} launched, ${FAILED} failed (of ${TOTAL_GPU_JOBS})"
 echo "Monitor: sky jobs queue"
 echo "═══════════════════════════════════════════════════════════════"
 
@@ -247,7 +304,7 @@ for b in baselines:
                 f.write(f'ZS | {model} | zero_shot | false | {fold} | DRY_RUN\n')
         else:
             result = subprocess.run([
-                'sky', 'jobs', 'launch',
+                '${SKY_BIN}', 'jobs', 'launch',
                 '${SKYPILOT_YAML}',
                 '--name', condition_name,
                 '--env', f'MODEL_FAMILY={model}',

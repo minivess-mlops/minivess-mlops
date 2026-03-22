@@ -1,0 +1,120 @@
+# docs/planning/v0-2_archive/navigator.yaml
+# PURPOSE: Level 1 index for the plan archive. Maps 13 themes to health scores
+# and doc counts. Code-verified health scores based on actual file existence,
+# content readability, and implementation status.
+#
+# Usage:
+#   1. Read this file to understand what planning docs exist and their quality
+#   2. Use scripts/build_plan_archive.py --search "<query>" for full-text search
+#   3. Use scripts/classify_plan_docs.py --summary for theme breakdown
+
+version: "1.0"
+last_updated: "2026-03-22"
+archive_dir: docs/planning/v0-2_archive/original_docs
+duckdb_index: docs/planning/v0-2_archive/plan_archive.duckdb
+
+themes:
+  training:
+    health_score: 92
+    description: "Loss functions, metrics, augmentation, HPO, post-training, factorial design"
+    notes: "Most mature theme. CbDice+clDice loss resolved. HPO partial."
+    key_docs:
+      - loss-function-topology-research.md
+      - compound-loss-implementation-plan.md
+      - topology-loss-plan.md
+      - dynunet-ablation-plan.md
+      - post-training-plugins-and-swa-planning.md
+      - pre-gcp-master-plan.xml
+
+  cloud:
+    health_score: 80
+    description: "Cloud providers, GCP, RunPod, SkyPilot, spot recovery, Pulumi IaC"
+    notes: "Two-provider architecture resolved. GCP setup complete."
+    key_docs:
+      - cloud-architecture-decisions-2026-03-14.md
+      - cloud-tutorial.md
+      - gcp-setup-tutorial.md
+
+  infrastructure:
+    health_score: 78
+    description: "Docker, Prefect, CI/CD, registries, security, pre-commit"
+    notes: "Docker multi-stage implemented. Prefect flows connected."
+    key_docs:
+      - docker-base-improvement-plan.md
+      - prefect-flow-connectivity.md
+      - prefect-flow-connectivity-execution-plan.md
+
+  models:
+    health_score: 75
+    description: "SAM3, DynUNet, SegResNet, VesselFM, MambaVesselNet, foundation models"
+    notes: "DynUNet stable. SAM3 implemented. VesselFM planned."
+    key_docs:
+      - atlassegfm-plan.md
+
+  observability:
+    health_score: 72
+    description: "MLflow, DuckDB, Langfuse, XAI, dashboards, monitoring"
+    notes: "MLflow configured. XAI partial."
+    key_docs:
+      - ci-reporting-plan.md
+
+  testing:
+    health_score: 70
+    description: "Test tiers, pytest markers, fixtures, QA verification"
+    notes: "Three-tier system implemented. Some test debt."
+    key_docs:
+      - cold-start-prompt-pre-debug-qa-verification.md
+
+  architecture:
+    health_score: 68
+    description: "Flow topology, adapters, config systems, serving, orchestration"
+    notes: "Hydra-zen + Dynaconf resolved. Flow merger done."
+    key_docs:
+      - training-and-post-training-into-two-subflows-under-one-flow.md
+      - hydra-config-verification-report.md
+
+  operations:
+    health_score: 65
+    description: "Governance, compliance, TRIPOD, model cards, audit trails"
+    notes: "TRIPOD matrix drafted. Cards framework started."
+    key_docs:
+      - tripod-compliance-matrix.md
+
+  manuscript:
+    health_score: 58
+    description: "Paper writing, Nature Protocols, claims, methods, bibliography"
+    notes: "Scaffold created. Methods stubs present. Needs flesh."
+    key_docs:
+      - repo-to-manuscript.md
+
+  evaluation:
+    health_score: 55
+    description: "Biostatistics, ANOVA, external test sets, drift, spec curves"
+    notes: "Biostatistics flow designed. DeepVess integration partial."
+    key_docs:
+      - biostatistics-prefect-flow.md
+      - biostatistics-prefect-flow-plan.xml
+      - analysis-flow-debug-double-check.xml
+
+  deployment:
+    health_score: 55
+    description: "BentoML, ONNX Runtime, inference endpoints, Cloud Run"
+    notes: "BentoML scaffold exists. ONNX export planned."
+    key_docs: []
+
+  harness:
+    health_score: 50
+    description: "Claude harness, agentic AI, skills, knowledge graph, prompts"
+    notes: "KG materialized. Skills growing. Harness improvement ongoing."
+    key_docs:
+      - claude-harness-improvement-plan.md
+      - context-compounding-and-learning-repo-tutorial.md
+
+  data:
+    health_score: 45
+    description: "Datasets, DVC, validation, profiling, lineage, ETL"
+    notes: "MiniVess + DeepVess registered. DVC configured. Lineage not started."
+    key_docs:
+      - data-engineering-quality-etl-report.md
+      - dataset-use-plan.md
+      - flow-data-acquisition-plan.md

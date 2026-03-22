@@ -33,7 +33,12 @@ from minivess.observability.infrastructure_timing import (
 from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.prometheus_metrics import update_estimated_cost_gauges
 from minivess.observability.tracking import resolve_tracking_uri
-from minivess.orchestration.constants import FLOW_NAME_TRAIN
+from minivess.orchestration.constants import (
+    EXPERIMENT_POST_TRAINING,
+    FLOW_NAME_POST_TRAINING_SUBFLOW,
+    FLOW_NAME_TRAIN,
+    FLOW_NAME_TRAINING_SUBFLOW,
+)
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -252,6 +257,9 @@ class TrainingFlowResult:
     loss_name: str = "cbdice_cldice"
     model_family: str = "dynunet"
     checkpoint_dirs: dict[int, Path] = field(default_factory=dict)
+    # Phase 2: post-training metadata
+    post_training_method: str = "none"
+    post_training_run_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -708,146 +716,57 @@ def log_fold_results_task(
 
 
 # ---------------------------------------------------------------------------
-# Main flow
+# Training sub-flow (Phase 1: extracted from training_flow)
 # ---------------------------------------------------------------------------
 
 
-@flow(name=FLOW_NAME_TRAIN)
-def training_flow(
+@flow(name=FLOW_NAME_TRAINING_SUBFLOW)
+def training_subflow(
     *,
-    loss_name: str = "cbdice_cldice",
-    model_family: str = "dynunet",
-    compute: str = "auto",
-    debug: bool = False,
-    experiment_name: str = "minivess_training",
-    trigger_source: str = "manual",
-    num_folds: int = 3,
-    max_epochs: int = 100,
-    batch_size: int = 2,
+    folds_to_run: list[Any],
+    config: dict[str, Any],
+    tracking_uri: str,
+    checkpoint_base: Path,
     upstream_data_run_id: str | None = None,
-    config_dict: dict[str, Any] | None = None,
-    # Factorial experiment parameters
     fold_id: int | None = None,
-    with_aux_calib: bool = False,
-    max_train_volumes: int = 0,
-    max_val_volumes: int = 0,
-    zero_shot: bool = False,
-    eval_dataset: str = "minivess",
-    **kwargs: Any,
 ) -> TrainingFlowResult:
-    """Training Prefect flow — orchestrates model training.
+    """Training sub-flow — executes fold training and logs to MLflow.
 
-    Reads fold splits from SPLITS_DIR env var, trains each fold via
-    train_one_fold_task(), and logs results to MLflow under the
-    'minivess_training' experiment.
+    Called by the parent training_flow(). Contains the training loop,
+    MLflow logging, cost analysis, and lineage emission.
+
+    In Phase 2, the parent will also call post_training_subflow() after
+    this sub-flow completes, reusing the GPU and DataLoaders.
 
     Parameters
     ----------
-    loss_name:
-        Loss function name (e.g., 'cbdice_cldice', 'dice_ce').
-    model_family:
-        Model family string (e.g., 'dynunet', 'sam3_vanilla').
-    compute:
-        Compute profile name.
-    debug:
-        If True, use debug overrides (1 epoch, reduced data).
-    experiment_name:
-        MLflow experiment name.
-    trigger_source:
-        What triggered this flow (for logging).
-    num_folds:
-        Number of cross-validation folds.
-    max_epochs:
-        Maximum training epochs per fold.
-    batch_size:
-        Batch size per GPU.
+    folds_to_run:
+        List of fold split dicts (each with 'train' and 'val' lists).
+    config:
+        Merged training config dict (loss_name, model_family, etc.).
+    tracking_uri:
+        MLflow tracking URI.
+    checkpoint_base:
+        Base directory for fold checkpoints (must be on persistent volume).
+    upstream_data_run_id:
+        Optional upstream data flow run ID for MLflow linking.
+    fold_id:
+        Specific fold ID when running a single fold (None = all folds).
 
     Returns
     -------
     TrainingFlowResult with fold results, MLflow run ID, and upstream link.
     """
-    logger.info("Training flow started (trigger: %s)", trigger_source)
-
-    # Wire JSONL log handler so training output reaches: terminal + Prefect UI + volume file
-    # Issue #503: double-logging to durable JSONL on the logs volume
-    import os
-
-    from minivess.observability.flow_logging import configure_flow_logging
-
-    configure_flow_logging(logs_dir=Path(os.environ.get("LOGS_DIR", "/app/logs")))
-
-    # Extract params from config_dict when provided (Hydra-zen bridge, Rule #23)
-    if config_dict is not None:
-        losses = config_dict.get("losses", [loss_name])
-        loss_name = losses[0] if losses else loss_name
-        model_family = str(config_dict.get("model", model_family))
-        debug = bool(config_dict.get("debug", debug))
-        max_epochs = int(config_dict.get("max_epochs", max_epochs))
-        num_folds = int(config_dict.get("num_folds", num_folds))
-        batch_size = int(config_dict.get("batch_size", batch_size))
-        experiment_name = str(config_dict.get("experiment_name", experiment_name))
-        logger.info(
-            "Config loaded from Hydra dict: experiment=%s model=%s loss=%s epochs=%d",
-            experiment_name,
-            model_family,
-            loss_name,
-            max_epochs,
-        )
-
-    # Preflight: Docker context gate (CLAUDE.md Rule #19 — STOP Protocol)
-    _require_docker_context()
-
-    # Preflight: validate required environment variables
-    _validate_training_env()
-
-    # Resolve environment variables
-    splits_dir = Path(os.environ.get("SPLITS_DIR", "configs/splits"))
-    checkpoint_base = Path(os.environ.get("CHECKPOINT_DIR", "/app/checkpoints"))
-    tracking_uri = resolve_tracking_uri()
-
-    # Find upstream data run (explicit param takes priority over auto-discovery)
-    if upstream_data_run_id is None:
-        upstream = find_upstream_safely(
-            tracking_uri=tracking_uri,
-            experiment_name="minivess_data",
-            upstream_flow="data",
-        )
-        upstream_data_run_id = upstream["run_id"] if upstream else None
-    if upstream_data_run_id:
-        logger.info("Upstream data run: %s", upstream_data_run_id)
-
-    # Zero-shot early return: skip training, just log that evaluation is needed.
-    # The actual zero-shot evaluation will be done by the analysis flow.
-    if zero_shot and max_epochs == 0:
-        logger.info(
-            "Zero-shot mode: model=%s, eval_dataset=%s — skipping training loop. "
-            "Evaluation will be handled by the analysis flow.",
-            model_family,
-            eval_dataset,
-        )
-        return TrainingFlowResult(
-            status="ZERO_SHOT",
-            fold_results=[],
-            loss_name=loss_name,
-            model_family=model_family,
-            mlflow_run_id=None,
-        )
-
-    # Load fold splits (outside MLflow run — no side effects)
-    splits = load_fold_splits_task(splits_dir)
-    if fold_id is not None:
-        # Specific fold requested (e.g., --fold 2 → run only fold 2)
-        if fold_id >= len(splits):
-            msg = f"Requested fold_id={fold_id} but only {len(splits)} folds in splits file"
-            raise ValueError(msg)
-        folds_to_run = [splits[fold_id]]
-    else:
-        folds_to_run = splits[:num_folds]
+    loss_name: str = config["loss_name"]
+    model_family: str = config["model_family"]
+    experiment_name: str = config["experiment_name"]
+    max_epochs: int = config["max_epochs"]
+    num_folds: int = config["num_folds"]
+    batch_size: int = config.get("batch_size", 2)
+    with_aux_calib: bool = config.get("with_aux_calib", False)
 
     # FDA audit trail: log data access (Issue #821 — IEC 62304 traceability)
-    dataset_name = (
-        config_dict.get("dataset_name", "minivess") if config_dict else "minivess"
-    )
+    dataset_name: str = config.get("dataset_name", "minivess")
     file_paths: list[str] = []
     for fold_split in folds_to_run:
         # fold_split is FoldSplit dataclass (has .train/.val attrs) or dict
@@ -876,31 +795,6 @@ def training_flow(
     logger.info(
         "Audit: logged data access for %s (%d files)", dataset_name, len(file_paths)
     )
-
-    # Build per-fold config dict
-    config: dict[str, Any] = {
-        "loss_name": loss_name,
-        "model_family": model_family,
-        "compute": compute,
-        "debug": debug,
-        "max_epochs": max_epochs,
-        "num_folds": num_folds,
-        "batch_size": batch_size,
-        "experiment_name": experiment_name,
-        "tracking_uri": tracking_uri,
-        # Factorial experiment parameters (Glitch #8/#9/#10/#12 fix)
-        "with_aux_calib": with_aux_calib,
-        "max_train_volumes": max_train_volumes if max_train_volumes > 0 else None,
-        "max_val_volumes": max_val_volumes if max_val_volumes > 0 else None,
-        "zero_shot": zero_shot,
-        "eval_dataset": eval_dataset,
-    }
-
-    # Merge full Hydra config so train_one_fold_task can log it and use all keys
-    if config_dict is not None:
-        merged = dict(config_dict)
-        merged.update(config)  # individual params take precedence
-        config = merged
 
     # Train each fold, skipping already-completed configs (auto-resume)
     fold_results: list[dict[str, Any]] = []
@@ -1067,9 +961,465 @@ def training_flow(
         checkpoint_dirs=fold_checkpoint_dirs,
     )
     logger.info(
-        "Training flow complete: %d folds, run_id=%s",
+        "Training sub-flow complete: %d folds, run_id=%s",
         len(fold_results),
         mlflow_run_id,
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Post-training sub-flow (Phase 2: SWAG, checkpoint averaging, etc.)
+# ---------------------------------------------------------------------------
+
+
+@flow(name=FLOW_NAME_POST_TRAINING_SUBFLOW)
+def post_training_subflow(
+    *,
+    post_training_method: str,
+    training_result: TrainingFlowResult,
+    config: dict[str, Any],
+    tracking_uri: str,
+) -> str | None:
+    """Post-training sub-flow — runs SWAG or other post-training methods.
+
+    Called by the parent training_flow() when post_training_method != "none".
+    Shares the same GPU session as training — no extra SkyPilot job needed.
+
+    Parameters
+    ----------
+    post_training_method:
+        Method name: "swag", "checkpoint_averaging", etc.
+    training_result:
+        Result from training_subflow() — contains checkpoint dirs and run ID.
+    config:
+        Merged training config dict (includes SWAG-specific keys).
+    tracking_uri:
+        MLflow tracking URI.
+
+    Returns
+    -------
+    MLflow run ID for the post-training run, or None on failure.
+    """
+    loss_name: str = config["loss_name"]
+    model_family: str = config["model_family"]
+    experiment_name: str = config["experiment_name"]
+
+    logger.info(
+        "Post-training sub-flow started: method=%s, upstream_run=%s",
+        post_training_method,
+        training_result.mlflow_run_id,
+    )
+
+    # Load SWAG config from Hydra post_training group
+    swag_config: dict[str, Any] = config.get("post_training", {}).get("swag", {})
+    if not swag_config and post_training_method == "swag":
+        # Fallback to top-level swag key or defaults from SWAGPluginConfig
+        from minivess.config.post_training_config import SWAGPluginConfig
+
+        swag_config = SWAGPluginConfig().model_dump()
+
+    # Open MLflow run for post-training
+    post_training_run_id: str | None = None
+    try:
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment(experiment_name)
+        with mlflow.start_run(
+            tags={
+                "flow_name": FLOW_NAME_POST_TRAINING_SUBFLOW,
+                "post_training_method": post_training_method,
+                "loss_function": loss_name,
+                "model_family": model_family,
+                **(
+                    {"upstream_training_run_id": training_result.mlflow_run_id}
+                    if training_result.mlflow_run_id is not None
+                    else {}
+                ),
+            }
+        ) as active_run:
+            post_training_run_id = active_run.info.run_id
+            logger.info(
+                "Post-training MLflow run opened: %s (method=%s)",
+                post_training_run_id,
+                post_training_method,
+            )
+
+            if post_training_method == "swag":
+                _run_swag_post_training(
+                    training_result=training_result,
+                    swag_config=swag_config,
+                    config=config,
+                )
+            else:
+                logger.warning(
+                    "Unknown post-training method: %s — skipping",
+                    post_training_method,
+                )
+
+    except Exception:
+        logger.warning("Post-training sub-flow failed (non-blocking)", exc_info=True)
+
+    logger.info(
+        "Post-training sub-flow complete: method=%s, run_id=%s",
+        post_training_method,
+        post_training_run_id,
+    )
+    return post_training_run_id
+
+
+def _run_swag_post_training(
+    *,
+    training_result: TrainingFlowResult,
+    swag_config: dict[str, Any],
+    config: dict[str, Any],
+) -> None:
+    """Execute SWAG post-training using the SWAGPlugin.
+
+    Discovers checkpoints from training_result, loads the model,
+    and runs SWAG posterior approximation.
+
+    Parameters
+    ----------
+    training_result:
+        Result from training sub-flow (has checkpoint_dirs).
+    swag_config:
+        SWAG-specific config (swa_lr, swa_epochs, max_rank, etc.).
+    config:
+        Full training config dict.
+    """
+    from minivess.pipeline.post_training_plugin import PluginInput
+    from minivess.pipeline.post_training_plugins.swag import SWAGPlugin
+
+    # Collect checkpoint paths from all folds
+    checkpoint_paths: list[Path] = []
+    for fold_id, ckpt_dir in sorted(training_result.checkpoint_dirs.items()):
+        best_ckpt = ckpt_dir / "best_val_loss.pth"
+        if best_ckpt.exists():
+            checkpoint_paths.append(best_ckpt)
+        else:
+            # Fallback to any .pth file in the fold dir
+            pth_files = sorted(ckpt_dir.glob("*.pth"))
+            if pth_files:
+                checkpoint_paths.append(pth_files[0])
+            else:
+                logger.warning(
+                    "No checkpoint found in %s for fold %d", ckpt_dir, fold_id
+                )
+
+    if not checkpoint_paths:
+        raise ValueError(
+            "SWAG requires at least one checkpoint — none found in "
+            f"checkpoint_dirs: {training_result.checkpoint_dirs}"
+        )
+
+    # Rebuild model + DataLoader from config for SWAG resumed training.
+    # The training sub-flow already used these — we rebuild from the same config
+    # to share the GPU session without modifying TrainingFlowResult (avoids
+    # Prefect serialization issues with nn.Module + DataLoader).
+    from minivess.adapters.model_builder import build_adapter
+    from minivess.config.models import DataConfig, ModelConfig, ModelFamily
+    from minivess.data.loader import build_train_loader
+    from minivess.data.splits import load_splits
+
+    model_family_str: str = config.get("model_family", "dynunet")
+    model_family = ModelFamily(model_family_str)
+    model_config = ModelConfig(
+        family=model_family,
+        name=model_family_str,
+        in_channels=1,
+        out_channels=2,
+        architecture_params=dict(config.get("architecture_params", {})),
+    )
+    adapter = build_adapter(model_config)
+
+    # Build train DataLoader from the same fold split used in training
+    splits_dir = Path(os.environ.get("SPLITS_DIR", "configs/splits"))
+    splits_file = splits_dir / "splits.json"
+    if not splits_file.exists():
+        # Fallback to 3fold_seed42.json
+        splits_file = splits_dir / "3fold_seed42.json"
+    splits = load_splits(splits_file)
+    fold_id: int = int(config.get("fold_id", 0))
+    fold_split = splits[fold_id] if fold_id < len(splits) else splits[0]
+    train_dicts = (
+        fold_split.train
+        if hasattr(fold_split, "train")
+        else fold_split.get("train", [])
+    )
+
+    # Respect max_train_volumes from config (debug = half data)
+    max_train_volumes = config.get("max_train_volumes")
+    if max_train_volumes is not None:
+        train_dicts = train_dicts[:max_train_volumes]
+
+    _is_sam3 = model_family_str.startswith("sam3_")
+    _is_vesselfm = model_family_str == "vesselfm"
+    if _is_sam3:
+        default_patch = (64, 64, 3)
+    elif _is_vesselfm:
+        default_patch = (64, 64, 32)
+    else:
+        default_patch = (64, 64, 16)
+    _patch_raw = config.get("patch_size")
+    patch_size = default_patch if _patch_raw is None else tuple(_patch_raw)
+    batch_size = (
+        min(config.get("batch_size", 2), 1) if _is_sam3 else config.get("batch_size", 2)
+    )
+
+    data_config = DataConfig(
+        dataset_name=config.get("dataset_name", "minivess"),
+        data_dir=Path(config.get("data_dir", "data/raw")),
+        patch_size=patch_size,
+        num_workers=0,  # Debug: no multiprocessing for SWAG
+    )
+    train_loader = build_train_loader(
+        train_dicts,
+        data_config,
+        batch_size=batch_size,
+        cache_rate=0.0,
+    )
+
+    calibration_data = {
+        "train_loader": train_loader,
+        "model": adapter,  # ModelAdapter IS an nn.Module (has .net inside)
+    }
+
+    plugin = SWAGPlugin()
+    plugin_input = PluginInput(
+        checkpoint_paths=checkpoint_paths,
+        config=swag_config,
+        calibration_data=calibration_data,
+    )
+
+    # Validate — raise on errors (Rule 25: loud failures, never silent skip)
+    errors = plugin.validate_inputs(plugin_input)
+    if errors:
+        raise ValueError(f"SWAG validation failed: {errors}")
+
+    output = plugin.execute(plugin_input)
+
+    # Log SWAG metrics to MLflow
+    for metric_name, metric_value in output.metrics.items():
+        mlflow.log_metric(f"post_training/swag/{metric_name}", metric_value)
+
+    # Log SWAG model artifact
+    for model_path in output.model_paths:
+        if model_path.exists():
+            mlflow.log_artifact(str(model_path), artifact_path="post_training")
+
+    logger.info(
+        "SWAG post-training complete: %d metrics, %d model files",
+        len(output.metrics),
+        len(output.model_paths),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Parent flow (orchestrates training + post-training sub-flows)
+# ---------------------------------------------------------------------------
+
+
+@flow(name=FLOW_NAME_TRAIN)
+def training_flow(
+    *,
+    loss_name: str = "cbdice_cldice",
+    model_family: str = "dynunet",
+    compute: str = "auto",
+    debug: bool = False,
+    experiment_name: str = "minivess_training",
+    trigger_source: str = "manual",
+    num_folds: int = 3,
+    max_epochs: int = 100,
+    batch_size: int = 2,
+    upstream_data_run_id: str | None = None,
+    config_dict: dict[str, Any] | None = None,
+    # Factorial experiment parameters
+    fold_id: int | None = None,
+    with_aux_calib: bool = False,
+    max_train_volumes: int = 0,
+    max_val_volumes: int = 0,
+    zero_shot: bool = False,
+    eval_dataset: str = "minivess",
+    post_training_method: str = "none",
+    **kwargs: Any,
+) -> TrainingFlowResult:
+    """Parent training flow — orchestrates training + optional post-training.
+
+    Handles preflight checks, config resolution, and fold split loading,
+    then delegates to training_subflow(). If post_training_method != "none",
+    also calls post_training_subflow() (SWAG, etc.) in the same GPU session.
+
+    Parameters
+    ----------
+    loss_name:
+        Loss function name (e.g., 'cbdice_cldice', 'dice_ce').
+    model_family:
+        Model family string (e.g., 'dynunet', 'sam3_vanilla').
+    compute:
+        Compute profile name.
+    debug:
+        If True, use debug overrides (1 epoch, reduced data).
+    experiment_name:
+        MLflow experiment name.
+    trigger_source:
+        What triggered this flow (for logging).
+    num_folds:
+        Number of cross-validation folds.
+    max_epochs:
+        Maximum training epochs per fold.
+    batch_size:
+        Batch size per GPU.
+    post_training_method:
+        Post-training method: "none" (default), "swag", etc.
+
+    Returns
+    -------
+    TrainingFlowResult with fold results, MLflow run ID, and upstream link.
+    """
+    logger.info("Training flow started (trigger: %s)", trigger_source)
+
+    # Wire JSONL log handler so training output reaches: terminal + Prefect UI + volume file
+    # Issue #503: double-logging to durable JSONL on the logs volume
+    import os
+
+    from minivess.observability.flow_logging import configure_flow_logging
+
+    configure_flow_logging(logs_dir=Path(os.environ.get("LOGS_DIR", "/app/logs")))
+
+    # Extract params from config_dict when provided (Hydra-zen bridge, Rule #23)
+    if config_dict is not None:
+        losses = config_dict.get("losses", [loss_name])
+        loss_name = losses[0] if losses else loss_name
+        model_family = str(config_dict.get("model", model_family))
+        debug = bool(config_dict.get("debug", debug))
+        max_epochs = int(config_dict.get("max_epochs", max_epochs))
+        num_folds = int(config_dict.get("num_folds", num_folds))
+        batch_size = int(config_dict.get("batch_size", batch_size))
+        experiment_name = str(config_dict.get("experiment_name", experiment_name))
+        logger.info(
+            "Config loaded from Hydra dict: experiment=%s model=%s loss=%s epochs=%d",
+            experiment_name,
+            model_family,
+            loss_name,
+            max_epochs,
+        )
+
+    # Preflight: Docker context gate (CLAUDE.md Rule #19 — STOP Protocol)
+    _require_docker_context()
+
+    # Preflight: validate required environment variables
+    _validate_training_env()
+
+    # Resolve environment variables
+    splits_dir = Path(os.environ.get("SPLITS_DIR", "configs/splits"))
+    checkpoint_base = Path(os.environ.get("CHECKPOINT_DIR", "/app/checkpoints"))
+    tracking_uri = resolve_tracking_uri()
+
+    # Find upstream data run (explicit param takes priority over auto-discovery)
+    if upstream_data_run_id is None:
+        upstream = find_upstream_safely(
+            tracking_uri=tracking_uri,
+            experiment_name="minivess_data",
+            upstream_flow="data",
+        )
+        upstream_data_run_id = upstream["run_id"] if upstream else None
+    if upstream_data_run_id:
+        logger.info("Upstream data run: %s", upstream_data_run_id)
+
+    # Zero-shot early return: skip training, just log that evaluation is needed.
+    # The actual zero-shot evaluation will be done by the analysis flow.
+    if zero_shot and max_epochs == 0:
+        logger.info(
+            "Zero-shot mode: model=%s, eval_dataset=%s — skipping training loop. "
+            "Evaluation will be handled by the analysis flow.",
+            model_family,
+            eval_dataset,
+        )
+        return TrainingFlowResult(
+            status="ZERO_SHOT",
+            fold_results=[],
+            loss_name=loss_name,
+            model_family=model_family,
+            mlflow_run_id=None,
+        )
+
+    # Load fold splits (outside MLflow run — no side effects)
+    splits = load_fold_splits_task(splits_dir)
+    if fold_id is not None:
+        # Specific fold requested (e.g., --fold 2 → run only fold 2)
+        if fold_id >= len(splits):
+            msg = f"Requested fold_id={fold_id} but only {len(splits)} folds in splits file"
+            raise ValueError(msg)
+        folds_to_run = [splits[fold_id]]
+    else:
+        folds_to_run = splits[:num_folds]
+
+    # Build per-fold config dict
+    config: dict[str, Any] = {
+        "loss_name": loss_name,
+        "model_family": model_family,
+        "compute": compute,
+        "debug": debug,
+        "max_epochs": max_epochs,
+        "num_folds": num_folds,
+        "batch_size": batch_size,
+        "experiment_name": experiment_name,
+        "tracking_uri": tracking_uri,
+        # Factorial experiment parameters (Glitch #8/#9/#10/#12 fix)
+        "with_aux_calib": with_aux_calib,
+        "max_train_volumes": max_train_volumes if max_train_volumes > 0 else None,
+        "max_val_volumes": max_val_volumes if max_val_volumes > 0 else None,
+        "zero_shot": zero_shot,
+        "eval_dataset": eval_dataset,
+    }
+
+    # Merge full Hydra config so train_one_fold_task can log it and use all keys
+    if config_dict is not None:
+        merged = dict(config_dict)
+        merged.update(config)  # individual params take precedence
+        config = merged
+
+    # --- Sub-flow 1: Training ---
+    result = training_subflow(
+        folds_to_run=folds_to_run,
+        config=config,
+        tracking_uri=tracking_uri,
+        checkpoint_base=checkpoint_base,
+        upstream_data_run_id=upstream_data_run_id,
+        fold_id=fold_id,
+    )
+
+    # --- Sub-flow 2: Post-training (iterate over comma-separated methods) ---
+    # post_training_method can be comma-separated: "none,swag"
+    # "none" cell is already produced by training sub-flow (free).
+    # Non-"none" methods run in post-training sub-flow (same GPU session).
+    pt_methods = [m.strip() for m in post_training_method.split(",")]
+    pt_run_ids: list[str | None] = []
+    for pt_method in pt_methods:
+        if pt_method != "none":
+            pt_run_id = post_training_subflow(
+                post_training_method=pt_method,
+                training_result=result,
+                config=config,
+                tracking_uri=tracking_uri,
+            )
+            pt_run_ids.append(pt_run_id)
+
+    # Store the methods and run IDs in result
+    result.post_training_method = ",".join(pt_methods)
+    result.post_training_run_id = (
+        pt_run_ids[0]
+        if len(pt_run_ids) == 1
+        else ",".join(str(rid) for rid in pt_run_ids if rid)
+        if pt_run_ids
+        else None
+    )
+
+    logger.info(
+        "Training flow complete: %d folds, run_id=%s, post_training=%s",
+        result.n_folds,
+        result.mlflow_run_id,
+        result.post_training_method,
     )
     return result
 
@@ -1183,6 +1533,14 @@ if __name__ == "__main__":
             default=os.environ.get("EVAL_DATASET", "minivess"),
             help="Evaluation dataset (minivess/deepvess)",
         )
+        parser.add_argument(
+            "--post-training-method",
+            default=os.environ.get(
+                "POST_TRAINING_METHODS",
+                os.environ.get("POST_TRAINING_METHOD", "none,swag"),
+            ),
+            help="Comma-separated post-training methods: none,swag (default: none,swag)",
+        )
         args = parser.parse_args()
 
         # If a specific fold is requested, override num_folds to 1
@@ -1202,4 +1560,5 @@ if __name__ == "__main__":
             max_val_volumes=args.max_val_volumes,
             zero_shot=args.zero_shot.lower() == "true",
             eval_dataset=args.eval_dataset,
+            post_training_method=args.post_training_method,
         )

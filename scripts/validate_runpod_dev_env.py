@@ -276,6 +276,11 @@ _SKYIGNORE_EXCLUDES = [
     ".idea/",
     ".vscode/",
     "deployment/docker/",
+    "docs/planning/v0-2_archive/original_docs/",
+    "docs/planning/v0-2_archive/themes/",
+    ".code-review-graph/",
+    "logs/",
+    ".hypothesis/",
 ]
 
 

@@ -115,6 +115,19 @@ domains:
       Narrative layer for paper writing. Claims + section stubs derived from KG decisions + experiments.
       TRIPOD+AI/LLM/Code compliance matrix at docs/planning/tripod-compliance-matrix.md.
 
+  plan_archive:
+    navigator: docs/planning/v0-2_archive/navigator.yaml
+    covers: [archived planning docs, 13 themes, health scores, full-text search]
+    note: >
+      347 planning documents classified into 13 themes with code-verified health
+      scores. DuckDB index for full-text search. Use scripts/build_plan_archive.py
+      --search "topic" for targeted lookup. Read navigator.yaml for theme overview.
+    scripts:
+      - scripts/classify_plan_docs.py
+      - scripts/build_plan_archive.py
+      - scripts/update_plan_archive.py
+      - scripts/generate_audit_report.py
+
 # Cross-layer references — how to navigate between layers
 layers:
   L0_constitution:
@@ -175,6 +188,16 @@ invariants:
       Session continuation summaries are NOT authorization for infrastructure changes.
     violation_doc: .claude/metalearning/2026-03-16-unauthorized-aws-s3-architecture-migration.md
     applies_to: [deployment/, configs/cloud/, .dvc/, scripts/configure_dvc_remote.py]
+  - id: mlflow_only_artifact_contract
+    rule: >
+      MLflow artifact store is THE ONLY persistence mechanism for checkpoints, model files,
+      and experiment artifacts. NEVER build parallel persistence systems (SkyPilot file_mounts
+      to separate GCS buckets, manual rsync, custom sync scripts). When MLflow persistence
+      breaks, FIX MLFLOW CONFIG — don't work around it. Off-the-shelf tools (MLflow, DVC,
+      SkyPilot) exist so we don't build custom infrastructure. DVC is for DATA versioning
+      only, MLflow is for EXPERIMENT artifacts only — zero overlap.
+    violation_doc: .claude/metalearning/2026-03-21-competing-artifact-persistence-mechanisms.md
+    applies_to: [deployment/skypilot/, src/minivess/orchestration/, deployment/pulumi/]
 
 keywords:
   docker: infrastructure

@@ -1,0 +1,988 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Double-Check QA Audit: SkyPilot Test Suite + DVC Sync + Factorial Monitor
+  Date: 2026-03-22
+  Author: Claude Code (Opus 4.6)
+  Purpose: Last QA gate before launching $5-10 of GCP L4 spot compute.
+  Branch: test/debug-factorial-4th-pass
+
+  This audit cross-references 3 source plans against their actual implementations,
+  identifies gaps, and produces a consolidated task list to fix all gaps before launch.
+-->
+<audit>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- METADATA -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <metadata>
+    <title>DVC + SkyPilot + Factorial Monitor — Double-Check QA Audit</title>
+    <date>2026-03-22</date>
+    <branch>test/debug-factorial-4th-pass</branch>
+    <status>ready</status>
+    <cost_at_risk>$5-13 (32 GPU jobs x L4 spot @ ~$0.16-0.40 each)</cost_at_risk>
+
+    <source_plans>
+      <plan id="P1" path="docs/planning/v0-2_archive/original_docs/skypilot-fake-mock-ssh-test-suite-plan.md">
+        SkyPilot Local Test Suite -- Mock SSH and YAML Validation Plan
+      </plan>
+      <plan id="P2" path="docs/planning/v0-2_archive/original_docs/skypilot-observability-for-factorial-monitor.md">
+        SkyPilot Observability for /factorial-monitor -- Upgrade Plan
+      </plan>
+      <plan id="P3" path="docs/planning/v0-2_archive/original_docs/dvc-test-suite-improvement.xml">
+        DVC + SkyPilot Setup Script Test Suite -- Production-Grade Pre-Launch Validation
+      </plan>
+    </source_plans>
+
+    <implementations>
+      <file path="tests/v2/unit/deployment/test_skypilot_yamls.py" role="SkyPilot YAML unit tests" />
+      <file path="tests/v2/unit/test_dvc_remote_sync.py" role="DVC sync verification tests" />
+      <file path="scripts/preflight_gcp.py" role="GCP pre-launch preflight script" />
+      <file path="scripts/run_factorial.sh" role="Factorial experiment launcher" />
+      <file path="deployment/skypilot/train_factorial.yaml" role="SkyPilot YAML for factorial" />
+      <file path=".claude/skills/factorial-monitor/SKILL.md" role="Factorial monitor skill definition" />
+      <file path="src/minivess/compute/ralph_monitor.py" role="Single-job log analysis" />
+    </implementations>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- PLAN 1 AUDIT: SkyPilot YAML Test Suite -->
+  <!-- Source: skypilot-fake-mock-ssh-test-suite-plan.md -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <plan_audit id="P1" title="SkyPilot YAML Test Suite">
+
+    <planned_vs_implemented>
+      <item planned="Tier 1: Task.from_yaml() structural validation" status="IMPLEMENTED">
+        test_factorial_yaml_parses() in TestSkyPilotYamlParsing uses sky.Task.from_yaml().
+        Falls back gracefully with pytest.skip() if skypilot not installed.
+      </item>
+      <item planned="T4 ban in accelerators" status="IMPLEMENTED">
+        TestNoT4.test_no_t4_in_accelerators() checks both dict and string formats.
+      </item>
+      <item planned="Spot enabled assertion" status="IMPLEMENTED">
+        TestSpotEnabled.test_spot_enabled() verifies use_spot is True.
+      </item>
+      <item planned="Required env vars declared" status="IMPLEMENTED">
+        TestRequiredEnvVars.test_required_envs_declared() checks 7 required vars.
+        TestRequiredEnvVars.test_hf_token_declared() checks HF_TOKEN separately.
+      </item>
+      <item planned="No apt-get in setup" status="IMPLEMENTED">
+        TestSetupBannedCommands covers apt-get, uv sync, pip install, git clone.
+      </item>
+      <item planned="Docker image_id set and uses docker: prefix" status="IMPLEMENTED">
+        TestDockerImage checks image_id exists, starts with docker:, and points to GAR.
+      </item>
+      <item planned="No bare dvc pull" status="IMPLEMENTED">
+        TestSetupDvcPull.test_no_bare_dvc_pull() verifies path argument exists.
+      </item>
+      <item planned="Tier 2: sky local up + KinD weekly validation" status="NOT_IMPLEMENTED">
+        Plan mentioned as a weekly manual check. Not implemented and not critical for
+        the immediate launch. Acceptable deferral.
+      </item>
+      <item planned="Test ALL SkyPilot YAMLs in deployment/skypilot/" status="PARTIAL">
+        Only train_factorial.yaml is tested. Plan said to validate ALL YAMLs. Currently
+        there is only one YAML, but the pattern is not parametrized for future YAMLs.
+      </item>
+    </planned_vs_implemented>
+
+    <gaps>
+      <gap id="P1-G1" severity="P0" title="No test for file_mounts referencing valid GCS paths">
+        train_factorial.yaml uses file_mounts with gs://minivess-mlops-checkpoints.
+        No test validates that the file_mounts section exists, references a valid GCS
+        bucket pattern, or uses MOUNT_CACHED mode. If someone changes the bucket name
+        or removes file_mounts, no test catches it.
+        <evidence>
+          train_factorial.yaml lines 49-52 define file_mounts with MOUNT_CACHED.
+          test_skypilot_yamls.py has no TestFileMounts class.
+        </evidence>
+      </gap>
+
+      <gap id="P1-G2" severity="P1" title="No test for job_recovery field absence">
+        The plan explicitly notes that job_recovery field caused a FAILED_SETUP in SkyPilot
+        v1.0 (it was removed). No test asserts that job_recovery is NOT present in the YAML.
+        If someone adds it back (copying from old docs), the test suite will not catch it.
+        <evidence>
+          train_factorial.yaml line 43 has comment: "job_recovery field was removed in SkyPilot v1.0."
+          No test for: assert "job_recovery" not in config
+        </evidence>
+      </gap>
+
+      <gap id="P1-G3" severity="P1" title="No test for setup script checking existing data before pull">
+        The actual setup script has an optimization: it checks if data already exists
+        before pulling (if [ -d "data/raw/minivess/imagesTr" ]). This is a correctness
+        feature for spot recovery. No test validates this guard exists.
+        <evidence>
+          train_factorial.yaml setup section lines 113-123.
+          No test asserts this skip-if-present logic exists.
+        </evidence>
+      </gap>
+
+      <gap id="P1-G4" severity="P1" title="No test for MLFLOW_TRACKING_URI env var reference">
+        MLFLOW_TRACKING_URI is set to ${MLFLOW_TRACKING_URI} (a shell variable reference).
+        No test validates this critical env var is declared. The required_envs set in the
+        test does not include MLFLOW_TRACKING_URI. If it gets removed from the YAML,
+        all jobs will have empty tracking URI and MLflow logging will fail silently.
+        <evidence>
+          train_factorial.yaml line 72: MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+          test_skypilot_yamls.py line 130-138: required set does not include MLFLOW_TRACKING_URI.
+        </evidence>
+      </gap>
+
+      <gap id="P1-G5" severity="P2" title="Tests not parametrized over all SkyPilot YAMLs">
+        Plan says "Add sky.Task.from_yaml() based validation for ALL SkyPilot YAMLs in
+        deployment/skypilot/". Currently only FACTORIAL_YAML is tested. Should use
+        pytest.mark.parametrize with glob("deployment/skypilot/*.yaml") for future-proofing.
+      </gap>
+
+      <gap id="P1-G6" severity="P1" title="No test for MINIVESS_ALLOW_HOST and PREFECT_DISABLED escape hatches">
+        The YAML sets MINIVESS_ALLOW_HOST=1 and PREFECT_DISABLED=1 as escape hatches
+        (approved for cloud VMs). No test validates these are present. If removed,
+        the train_flow.py Docker gate and Prefect connection will fail.
+        <evidence>
+          train_factorial.yaml lines 78-79.
+          These are critical for the flow to run outside Docker Compose.
+        </evidence>
+      </gap>
+
+      <gap id="P1-G7" severity="P0" title="No test for disk_size >= 100 GB">
+        The YAML sets disk_size: 100. DVC data is ~2.7 GB, Docker image is ~8-12 GB,
+        checkpoints can be ~5 GB per model. If disk_size is accidentally reduced,
+        DISK_FULL errors will occur mid-training (wasting the full job cost).
+        No test validates disk_size is sufficient.
+        <evidence>
+          train_factorial.yaml line 37: disk_size: 100
+          ralph_monitor.py has DISK_FULL failure pattern at line 67.
+        </evidence>
+      </gap>
+
+      <gap id="P1-G8" severity="P1" title="No test for setup dvc init --no-scm">
+        Setup script runs dvc init --no-scm -f (required because Docker container has
+        no git repo). No test validates this command is present. Without it, DVC commands
+        fail with "not a git repository" error (DVC_NO_GIT pattern in ralph_monitor.py).
+        <evidence>
+          train_factorial.yaml line 110: dvc init --no-scm -f
+          ralph_monitor.py line 41-45: DVC_NO_GIT failure pattern.
+        </evidence>
+      </gap>
+
+      <gap id="P1-G9" severity="P1" title="No test for nvidia-smi or PyTorch CUDA check in setup">
+        Setup script runs nvidia-smi and a PyTorch CUDA check at the end. These are
+        valuable preflight signals. No test validates their presence.
+        <evidence>
+          train_factorial.yaml lines 160-161.
+        </evidence>
+      </gap>
+    </gaps>
+
+    <undocumented_features>
+      <feature title="TestRunSectionGuards.test_run_checks_splits_file">
+        Validates that the run section checks for splits.json existence.
+        Not explicitly in the plan but matches the DVC plan's T6 (run section guards).
+        Good addition.
+      </feature>
+      <feature title="TestSetupDvcPull.test_setup_has_error_handling_for_dvc">
+        Checks that setup has "exit 1" for DVC pull failure. Matches DVC plan T5.
+        Good addition.
+      </feature>
+      <feature title="TestDockerImage.test_image_id_points_to_gar">
+        Validates GAR europe-north1 region in image_id. Not in the original plan
+        but critical for same-region pull performance. Good addition.
+      </feature>
+    </undocumented_features>
+
+    <quality_assessment score="7/10">
+      Core YAML structure validation is solid. The fundamental failure modes from the
+      plan (T4 ban, job_recovery, wrong splits, missing envs) are mostly covered.
+      However, the test suite does not cover file_mounts, disk_size, or several setup
+      script commands that have caused real failures. The biggest gap is the missing
+      MLFLOW_TRACKING_URI env var test (P1-G4) -- silent MLflow failure is expensive
+      because the job "succeeds" but produces no logged results.
+    </quality_assessment>
+  </plan_audit>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- PLAN 2 AUDIT: SkyPilot Observability / Factorial Monitor -->
+  <!-- Source: skypilot-observability-for-factorial-monitor.md -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <plan_audit id="P2" title="SkyPilot Observability / Factorial Monitor Skill">
+
+    <planned_vs_implemented>
+      <item planned="Replace table parsing with sky jobs queue -o json" status="NOT_IMPLEMENTED">
+        The plan recommends using structured JSON output. ralph_monitor.py still uses
+        text-based parsing of sky jobs queue output (parse_job_status() at line 209).
+        The factorial-monitor SKILL.md references "sky jobs queue" but the actual
+        monitor.md protocol says "Poll sky jobs queue every 60 seconds" without
+        specifying -o json. The existing ralph_monitor.parse_job_status() splits on
+        whitespace and searches for known status strings -- fragile.
+      </item>
+      <item planned="Batch monitoring (watch ALL 32 jobs in one loop)" status="IMPLEMENTED_AS_SKILL">
+        The factorial-monitor skill's MONITOR protocol (protocols/monitor.md) defines
+        a polling loop that tracks all jobs. However, this is a SKILL definition (Claude
+        instructions), not running code. There is no Python script that implements the
+        batch monitoring loop.
+      </item>
+      <item planned="Job-to-condition mapping via JSON manifest" status="IMPLEMENTED_AS_SKILL">
+        The skill defines factorial_manifest.json (templates/factorial-manifest.json)
+        with proper schema. run_factorial.sh writes job_log.txt (pipe-delimited text),
+        NOT JSON. The manifest JSON is a template, not actually generated by the launcher.
+      </item>
+      <item planned="Desktop notifications (notify-send)" status="NOT_IMPLEMENTED">
+        No notify-send integration anywhere. The plan says "immediate desktop notification
+        on FAILED_SETUP within 30s." Not implemented.
+      </item>
+      <item planned="Factorial progress matrix (visual grid)" status="IMPLEMENTED_AS_SKILL">
+        The REPORT protocol (protocols/report.md) shows a factorial grid visualization.
+        This is a skill template, not running code.
+      </item>
+      <item planned="sky dashboard integration" status="NOT_IMPLEMENTED">
+        Plan mentions launching "sky dashboard" alongside the monitor. Not mentioned
+        in the skill or in run_factorial.sh.
+      </item>
+      <item planned="run_factorial.sh writes JSON mapping file" status="NOT_IMPLEMENTED">
+        run_factorial.sh writes pipe-delimited text to JOB_LOG, not a JSON manifest.
+        The format is: "condition_id | model | loss | aux_calib | fold | status"
+        This is NOT parseable as JSON and does not contain job_id values from SkyPilot.
+      </item>
+    </planned_vs_implemented>
+
+    <gaps>
+      <gap id="P2-G1" severity="P0" title="run_factorial.sh does not capture SkyPilot job IDs">
+        The launcher script does not capture the job_id returned by "sky jobs launch".
+        Without job_ids, the factorial-monitor skill CANNOT map conditions to SkyPilot
+        jobs. The skill's entire Phase 2 (MONITOR) depends on knowing which job_id
+        corresponds to which model x loss x fold condition.
+
+        Current behavior: run_factorial.sh writes "LAUNCHED" to the log but does not
+        parse stdout of "sky jobs launch" for the assigned job ID.
+
+        The monitor skill would need to use "sky jobs queue" and match by job name
+        (e.g., "dynunet-cbdice_cldice-calibfalse-f0"), which IS available because
+        run_factorial.sh passes --name. This is a workable fallback but fragile.
+        <evidence>
+          run_factorial.sh lines 227-239: sky jobs launch output is not captured.
+          Line 241: Only writes "LAUNCHED" status, no job_id.
+        </evidence>
+      </gap>
+
+      <gap id="P2-G2" severity="P1" title="No JSON manifest generation -- only pipe-delimited text log">
+        The skill requires factorial_manifest.json (Rule F5). run_factorial.sh generates
+        pipe-delimited text. The gap between the launcher output format and the monitor's
+        expected input format means the MONITOR phase cannot start automatically.
+
+        The skill would need to: (1) parse the text log, (2) run sky jobs queue, (3)
+        match by name, (4) build the manifest. This is 4 steps of fragile plumbing
+        that should be a single well-tested function.
+        <evidence>
+          run_factorial.sh line 206: "# FORMAT: condition_id | model | loss | aux_calib | fold | status"
+          templates/factorial-manifest.json: expects JSON with job_id, status, etc.
+        </evidence>
+      </gap>
+
+      <gap id="P2-G3" severity="P1" title="ralph_monitor.py still uses text parsing, not -o json">
+        parse_job_status() at line 209 of ralph_monitor.py parses whitespace-separated
+        text from sky jobs queue. The plan explicitly says to replace this with
+        "sky jobs queue -o json" for structured, reliable parsing. The current text
+        parsing is fragile -- column positions can change across SkyPilot versions.
+        <evidence>
+          ralph_monitor.py lines 209-243: text-based parsing.
+          Plan line 1: "Replace table parsing with sky jobs queue -o json"
+        </evidence>
+      </gap>
+
+      <gap id="P2-G4" severity="P2" title="No cost estimation in monitor or launcher">
+        The plan mentions cost tracking. The skill's RELAUNCH protocol has cost estimates.
+        But neither run_factorial.sh nor ralph_monitor.py compute or log estimated costs.
+        This means the user has no cost visibility during a run.
+      </gap>
+
+      <gap id="P2-G5" severity="P1" title="Factorial monitor skill has no automated tests">
+        The factorial-monitor skill is defined entirely as markdown protocols and rules.
+        There are no tests verifying that:
+        - The manifest schema is valid JSON
+        - The manifest template matches the expected schema
+        - The eval checklist criteria can be mechanically verified
+        - The skill's phase transitions are logically consistent
+      </gap>
+
+      <gap id="P2-G6" severity="P0" title="Kill-switch logic not implementable with current ralph_monitor">
+        Rule F1 kill-switch: "If 3+ jobs fail with IDENTICAL error within 5 min, cancel
+        same-config jobs." ralph_monitor.py has no batch mode -- it only analyzes one log
+        at a time (analyze_logs() takes a single log string). There is no function to:
+        (1) aggregate failures across multiple jobs, (2) detect same-root-cause count,
+        (3) issue sky jobs cancel commands. The kill-switch is purely aspirational.
+      </gap>
+    </gaps>
+
+    <undocumented_features>
+      <feature title="run_factorial.sh rate limiting (sleep 5)">
+        5-second sleep between job launches prevents SkyPilot API quota issues.
+        Not in the plan but practical. Could cause issues with large factorials
+        (32 jobs x 5s = 160s of just sleeping).
+      </feature>
+      <feature title="run_factorial.sh SKIP_PREFLIGHT escape hatch">
+        Allows bypassing preflight checks for testing. Not in the plan but practical.
+      </feature>
+      <feature title="Zero-shot baseline launching in run_factorial.sh">
+        The launcher handles zero-shot baselines (SAM3 vanilla, VesselFM) with special
+        env vars (ZERO_SHOT=true, EVAL_DATASET=deepvess). Not covered by any plan.
+        This is a significant feature that has no dedicated test coverage.
+      </feature>
+      <feature title="POST_TRAINING_METHODS passed as comma-separated env var">
+        The parent flow iterates over post-training methods internally (none, swag).
+        This design decision (documented in train_factorial.yaml comments) means
+        fewer SkyPilot jobs but more complexity inside each job. Not in the monitor plan.
+      </feature>
+    </undocumented_features>
+
+    <quality_assessment score="4/10">
+      The factorial-monitor skill is well-designed as a SPECIFICATION but poorly
+      realized as IMPLEMENTATION. The skill markdown files define excellent protocols
+      (6 phases, 5 rules, aggregated diagnosis, selective relaunch). However:
+
+      1. The launcher (run_factorial.sh) does not produce the manifest the skill expects.
+      2. ralph_monitor.py is single-job only, not batch-capable.
+      3. No JSON output from sky jobs queue is used anywhere.
+      4. No automated tests for any monitoring behavior.
+      5. The kill-switch is purely aspirational.
+
+      For the immediate 4th pass launch, this means: monitoring will be MANUAL
+      (sky jobs queue + sky jobs logs). The skill provides good HUMAN instructions
+      for Claude to follow, but no tooling automation.
+    </quality_assessment>
+  </plan_audit>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- PLAN 3 AUDIT: DVC Test Suite Improvement -->
+  <!-- Source: dvc-test-suite-improvement.xml -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <plan_audit id="P3" title="DVC + SkyPilot Setup Script Test Suite">
+
+    <planned_vs_implemented>
+      <item planned="T1: All unfrozen DVC stages have lock entries" status="IMPLEMENTED">
+        TestDvcYamlLockConsistency.test_all_unfrozen_stages_have_lock_entries() in
+        test_dvc_remote_sync.py. Correctly skips frozen stages. Matches plan exactly.
+      </item>
+      <item planned="T2: SkyPilot dvc pull paths match dvc.lock outputs" status="IMPLEMENTED">
+        TestSkypilotDvcPullPaths.test_dvc_pull_paths_have_lock_entries() and
+        test_no_bare_dvc_pull_in_setup(). Both implemented correctly.
+      </item>
+      <item planned="T3: Implement DVC sync verification tests" status="IMPLEMENTED">
+        Both T1 and T2 are implemented with yaml.safe_load() as specified.
+      </item>
+      <item planned="T4: Setup script has no banned commands" status="IMPLEMENTED_IN_WRONG_FILE">
+        Implemented in test_skypilot_yamls.py (TestSetupBannedCommands), not in
+        tests/v2/unit/deployment/test_skypilot_setup_validation.py as planned.
+        The planned file does NOT exist. Functionally equivalent.
+      </item>
+      <item planned="T5: Setup dvc pull has error handling" status="IMPLEMENTED_IN_WRONG_FILE">
+        Implemented as TestSetupDvcPull.test_setup_has_error_handling_for_dvc() in
+        test_skypilot_yamls.py. The check is simplistic (just checks "exit 1" exists)
+        but catches the basic case.
+      </item>
+      <item planned="T6: Run section guards against missing prerequisites" status="IMPLEMENTED_IN_WRONG_FILE">
+        TestRunSectionGuards.test_run_checks_splits_file() in test_skypilot_yamls.py.
+      </item>
+      <item planned="T7: Implement setup script validation tests" status="N/A">
+        Plan had this as a separate GREEN phase for T4-T6. Since they were implemented
+        inline in test_skypilot_yamls.py, T7 is absorbed.
+      </item>
+      <item planned="T8: Test preflight checks Docker image exists" status="NOT_IMPLEMENTED">
+        Plan specified tests/v2/unit/test_cloud_preflight.py. This file does NOT exist.
+        The preflight logic IS in scripts/preflight_gcp.py, but there are no unit tests
+        for the preflight functions themselves.
+      </item>
+      <item planned="T9: Test preflight checks required env vars" status="NOT_IMPLEMENTED">
+        Same as T8 -- test_cloud_preflight.py does not exist. preflight_gcp.py has
+        check_env_vars() but no unit test exercises it.
+      </item>
+      <item planned="T10: Implement preflight_gcp.py" status="IMPLEMENTED">
+        scripts/preflight_gcp.py exists with 9 checks: Docker image, GCS bucket,
+        checkpoint bucket, DVC data hash, DVC consistency, setup DVC paths, env vars,
+        SkyPilot GCP backend, SkyPilot YAML validity. Exceeds plan scope (plan had 7).
+      </item>
+      <item planned="T11: Wire run_factorial.sh to call preflight" status="IMPLEMENTED">
+        run_factorial.sh lines 100-113 call preflight_gcp.py before launch.
+        SKIP_PREFLIGHT=1 escape hatch exists as planned.
+      </item>
+      <item planned="T12: Cloud test -- DVC raw data hash on GCS" status="NOT_IMPLEMENTED">
+        Plan specified tests/v2/cloud/test_dvc_gcs_availability.py. This file does
+        NOT exist. The check IS in preflight_gcp.py (check_dvc_data_on_gcs), but
+        there is no pytest-based cloud test with auto-skip.
+      </item>
+      <item planned="T13: Implement GCS data availability tests" status="NOT_IMPLEMENTED">
+        Same as T12.
+      </item>
+      <item planned="T14: Verify make test-staging catches original failure" status="NOT_VERIFIED">
+        Plan says to temporarily revert to broken dvc pull and verify tests catch it.
+        This regression test was not documented as having been run.
+      </item>
+      <item planned="T15: Verify preflight_gcp.py runs locally" status="NOT_VERIFIED">
+        Not documented as verified.
+      </item>
+      <item planned="T16: Verify run_factorial.sh --dry-run includes preflight" status="NOT_VERIFIED">
+        run_factorial.sh skips preflight on dry-run (line 100: if DRY_RUN=false).
+        This CONTRADICTS the plan which says dry-run should show preflight passing.
+        The dry-run path bypasses preflight entirely.
+      </item>
+    </planned_vs_implemented>
+
+    <gaps>
+      <gap id="P3-G1" severity="P0" title="No unit tests for preflight_gcp.py functions">
+        tests/v2/unit/test_cloud_preflight.py does not exist (planned as T8/T9).
+        preflight_gcp.py has 9 check functions, none tested. If any function has a bug
+        (e.g., wrong GCS hash path construction), it will not be caught until launch time.
+
+        The most critical untested function: check_dvc_data_on_gcs() constructs the GCS
+        path as "files/md5/{first2chars}/{remaining}". If DVC changes its storage layout,
+        this silently passes (gsutil ls returns 0 for listing a non-existent prefix).
+        <evidence>
+          preflight_gcp.py lines 81-109: check_dvc_data_on_gcs() has manual hash path
+          construction. No unit test validates the path format.
+        </evidence>
+      </gap>
+
+      <gap id="P3-G2" severity="P1" title="No cloud integration test for DVC GCS availability">
+        tests/v2/cloud/test_dvc_gcs_availability.py does not exist (planned as T12/T13).
+        The preflight script covers this at ad-hoc time, but there is no repeatable
+        test that can be run independently.
+      </gap>
+
+      <gap id="P3-G3" severity="P0" title="Dry-run bypasses preflight -- contradicts plan">
+        run_factorial.sh line 100: preflight only runs when DRY_RUN=false.
+        Plan T16 says: "run_factorial.sh --dry-run must show preflight checks passing."
+        This means a dry-run will NOT catch preflight failures. A user could do
+        --dry-run (looks fine), remove --dry-run, launch, and THEN hit preflight failure
+        after mental commitment.
+        <evidence>
+          run_factorial.sh line 100: if [ "${DRY_RUN}" = false ]
+          Plan T16: "Verify: run_factorial.sh --dry-run includes preflight"
+        </evidence>
+      </gap>
+
+      <gap id="P3-G4" severity="P1" title="validate_data stage has no lock entry and is not frozen">
+        dvc.yaml has 3 stages: download (frozen, has lock), preprocess (frozen, no lock),
+        validate_data (NOT frozen, no lock, no outs but has metrics).
+        The validate_data stage has metrics (data/validation_report.json with cache: false)
+        but no outs. The test only checks stages with "outs", so validate_data is silently
+        skipped. This is technically correct (metrics with cache:false are not stored in
+        DVC remote), but the test should document why validate_data is excluded.
+      </gap>
+
+      <gap id="P3-G5" severity="P1" title="preprocess stage frozen comment check may false-positive">
+        TestDvcYamlLockConsistency.test_frozen_stages_have_comments() searches for
+        "frozen: true" lines and checks if adjacent lines have "#". The download stage
+        ALSO has "frozen: true" with a comment. The test iterates ALL frozen stages
+        but only searches for the first "frozen: true" occurrence. If there are multiple
+        frozen stages, it may match the wrong one.
+        <evidence>
+          dvc.yaml has TWO frozen stages: download (line 8) and preprocess (line 20).
+          test_dvc_remote_sync.py lines 91-99: finds first "frozen: true" match per stage.
+          The loop breaks after first match, which works only because both have comments.
+        </evidence>
+      </gap>
+
+      <gap id="P3-G6" severity="P1" title="DVC nfiles check hardcodes 300, but actual is 350">
+        test_download_stage_has_nfiles() asserts nfiles >= 300. dvc.lock shows nfiles: 350.
+        The threshold is reasonable but not documented. If data is updated and files change,
+        the test may need updating. Should reference the expected count from a config source.
+        <evidence>
+          test_dvc_remote_sync.py line 116: assert nfiles >= 300
+          dvc.lock line 15: nfiles: 350
+        </evidence>
+      </gap>
+
+      <gap id="P3-G7" severity="P0" title="preflight_gcp.py check_dvc_data_on_gcs uses md5, but DVC .dir hashes need special handling">
+        The download stage output is a directory (data/raw/minivess/). DVC stores
+        directory manifests with .dir suffix: the hash is "e712f8b23f377a4990b91bef0b1aef76.dir".
+        preflight_gcp.py extracts the md5 field and constructs:
+          gs://minivess-mlops-dvc-data/files/md5/e7/12f8b23f377a4990b91bef0b1aef76.dir
+
+        This is CORRECT for DVC's GCS layout. However, the code does not handle the
+        .dir suffix explicitly -- it splits on first 2 chars and uses the rest as-is.
+        The ".dir" suffix is preserved because it is part of the hash string in dvc.lock.
+        This WORKS but is not tested. If DVC changes hash format, it will silently pass
+        (gsutil ls on a non-existent prefix returns 0 with empty output, but the check
+        tests returncode == 0 which is True even for empty listings).
+
+        CRITICAL: gsutil ls returns exit code 1 for non-existent objects, but exit code 0
+        for valid but empty paths. Need to verify gsutil ls behavior on exact file paths
+        vs prefix listings.
+        <evidence>
+          preflight_gcp.py lines 98-102: hash path construction.
+          dvc.lock line 13: md5: e712f8b23f377a4990b91bef0b1aef76.dir
+        </evidence>
+      </gap>
+
+      <gap id="P3-G8" severity="P1" title="DVC remote config default is minio, not gcs">
+        .dvc/config shows default remote is "minio" (localhost:9000). The GCS remote
+        is configured but not default. train_factorial.yaml setup uses "dvc pull ... -r gcs"
+        which is correct. But if someone runs bare "dvc pull" (without -r gcs) in a
+        different context, it will try minio. No test validates that the SkyPilot setup
+        always specifies "-r gcs" explicitly.
+        <evidence>
+          .dvc/config line 3: remote = minio
+          train_factorial.yaml line 118: dvc pull data/raw/minivess -r gcs
+          test_dvc_remote_sync.py: checks for -r in pull command but does not assert -r gcs specifically.
+        </evidence>
+      </gap>
+    </gaps>
+
+    <undocumented_features>
+      <feature title="test_frozen_stages_have_comments">
+        Validates that frozen stages explain WHY they are frozen. Not in the plan
+        but good documentation hygiene.
+      </feature>
+      <feature title="test_download_stage_has_lock and test_download_stage_has_nfiles">
+        Specific assertions for the download stage. Not in the plan as separate tests
+        but provide concrete data integrity checks.
+      </feature>
+      <feature title="test_setup_pulls_raw_data">
+        Asserts setup pulls data/raw/minivess specifically. Not in the plan but catches
+        wrong path in dvc pull command.
+      </feature>
+      <feature title="preflight_gcp.py checkpoint bucket check">
+        Plan only mentioned DVC data bucket. Implementation also checks the checkpoint
+        bucket (gs://minivess-mlops-checkpoints). Good addition -- checkpoint writes
+        failing mid-training would waste the entire job.
+      </feature>
+    </undocumented_features>
+
+    <quality_assessment score="6/10">
+      Module 1 (DVC yaml/lock consistency) is well-implemented with good coverage.
+      Module 2 (setup script validation) is implemented but in a different file than
+      planned. Module 3 (preflight script) is implemented but has ZERO unit tests.
+      Modules 4 and 5 (cloud tests and verification) are completely missing.
+
+      The biggest risk: preflight_gcp.py is the last line of defense before spending
+      money, and it has no unit tests. If check_dvc_data_on_gcs() has a bug in hash
+      path construction, it could false-positive (say data exists when it does not).
+    </quality_assessment>
+  </plan_audit>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- CROSS-CUTTING ANALYSIS: 4th Pass Failure Modes -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <cross_cutting_analysis>
+    <title>Would the current test suite have caught the 4th pass failures?</title>
+
+    <failure id="F1" description="dvc pull -r gcs fails on data/processed/minivess (tracked but not pushed)"
+             cost="$5" jobs="8 FAILED_SETUP">
+      <caught_by test="test_all_unfrozen_stages_have_lock_entries">
+        YES -- preprocess stage has outs but no lock and IS frozen. Wait: preprocess IS frozen.
+        So this test would NOT catch it. The test skips frozen stages. But the actual failure
+        was that bare "dvc pull -r gcs" (without path filter) tried to pull data/processed/minivess
+        which is tracked but not on GCS. The FIX was to use path-specific pull.
+        test_no_bare_dvc_pull catches this. VERDICT: YES, caught by test_no_bare_dvc_pull.
+      </caught_by>
+      <caught_by test="test_dvc_pull_paths_have_lock_entries">
+        YES -- would verify that dvc pull path has a lock entry.
+      </caught_by>
+      <caught_by test="preflight_gcp.py:check_setup_dvc_paths">
+        YES -- would detect bare dvc pull without path filter.
+      </caught_by>
+    </failure>
+
+    <failure id="F2" description="job_recovery field unsupported in SkyPilot v1.0"
+             cost="$0 (caught at launch)" jobs="N/A">
+      <caught_by test="test_factorial_yaml_parses (sky.Task.from_yaml)">
+        MAYBE -- depends on whether sky.Task.from_yaml raises on unknown fields.
+        SkyPilot may ignore unknown fields. No dedicated test for this.
+      </caught_by>
+      <caught_by test="MISSING: test_no_job_recovery_field">
+        NOT CAUGHT -- no test explicitly checks for absence of job_recovery.
+        Gap P1-G2 covers this.
+      </caught_by>
+    </failure>
+
+    <failure id="F3" description="sky binary not on PATH (shell scripting bug)"
+             cost="$0 (caught locally)" jobs="N/A">
+      <caught_by test="N/A">
+        NOT CATCHABLE by YAML tests. This is a shell scripting issue.
+        run_factorial.sh now has explicit sky binary detection (lines 36-44).
+        No test for this but the fix is robust (checks both PATH and .venv/bin/sky).
+      </caught_by>
+    </failure>
+
+    <failure id="F4" description="Wrong splits file hardcoded in setup"
+             cost="$0 (caught at launch)" jobs="N/A">
+      <caught_by test="test_run_checks_splits_file">
+        PARTIALLY -- checks that splits.json is referenced in the run section.
+        Does NOT verify that the CORRECT splits file is copied in setup.
+        The setup now uses conditional logic (MAX_TRAIN_VOLUMES > 0 -> debug splits).
+      </caught_by>
+    </failure>
+
+    <summary>
+      The current test suite would catch the $5 FAILED_SETUP incident (F1).
+      It would NOT definitively catch F2 (job_recovery field) -- needs a dedicated test.
+      F3 and F4 are shell scripting issues that YAML tests cannot fully cover.
+
+      Overall: the test suite prevents the MOST EXPENSIVE failure mode (F1) but has
+      gaps for lower-cost failure modes that still waste developer time.
+    </summary>
+  </cross_cutting_analysis>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- CONSOLIDATED TASK LIST -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <tasks>
+
+    <!-- P0: Factorial-blocking — must fix before launch -->
+
+    <task id="DC-1" priority="P0" source="P1-G1, P1-G7" phase="RED+GREEN">
+      <title>Add tests for file_mounts and disk_size in SkyPilot YAML</title>
+      <file>tests/v2/unit/deployment/test_skypilot_yamls.py</file>
+      <description>
+        Add TestFileMounts class:
+        - test_file_mounts_exist: config has file_mounts section
+        - test_checkpoint_mount_uses_gcs: /app/checkpoints maps to gs://minivess-mlops-checkpoints
+        - test_checkpoint_mount_uses_cached_mode: mode is MOUNT_CACHED (async, non-blocking)
+        Add TestDiskSize class:
+        - test_disk_size_sufficient: disk_size >= 100
+      </description>
+      <acceptance_criteria>
+        Tests pass on current YAML. Tests fail if file_mounts removed or disk_size reduced.
+      </acceptance_criteria>
+    </task>
+
+    <task id="DC-2" priority="P0" source="P1-G4" phase="RED+GREEN">
+      <title>Add MLFLOW_TRACKING_URI to required envs test</title>
+      <file>tests/v2/unit/deployment/test_skypilot_yamls.py</file>
+      <description>
+        Add MLFLOW_TRACKING_URI to the required env vars set in test_required_envs_declared.
+        Also add MINIVESS_ALLOW_HOST and PREFECT_DISABLED (from P1-G6).
+        Also add CHECKPOINT_DIR, LOGS_DIR, SPLITS_DIR (train_flow.py requirements).
+      </description>
+      <acceptance_criteria>
+        Test fails if any of these env vars are removed from the SkyPilot YAML.
+      </acceptance_criteria>
+    </task>
+
+    <task id="DC-3" priority="P0" source="P3-G3" phase="GREEN">
+      <title>Make dry-run include preflight checks</title>
+      <file>scripts/run_factorial.sh</file>
+      <description>
+        Change line 100: remove the DRY_RUN=false condition from the preflight gate.
+        Preflight should run in BOTH dry-run and real mode. In dry-run mode, preflight
+        failures should be reported but not block (warn, don't exit). This way users
+        get preflight feedback before committing to launch.
+
+        Alternative: add a separate --preflight-only flag that runs preflight and exits.
+      </description>
+      <acceptance_criteria>
+        ./scripts/run_factorial.sh --dry-run configs/factorial/debug.yaml shows
+        preflight check results before listing dry-run job commands.
+      </acceptance_criteria>
+    </task>
+
+    <task id="DC-4" priority="P0" source="P3-G1" phase="RED+GREEN">
+      <title>Add unit tests for preflight_gcp.py check functions</title>
+      <file>tests/v2/unit/test_cloud_preflight.py</file>
+      <description>
+        Create tests/v2/unit/test_cloud_preflight.py with:
+        - test_check_dvc_consistency_detects_unlocked_unfrozen_stage (mock dvc.yaml/dvc.lock)
+        - test_check_setup_dvc_paths_detects_bare_pull (mock SkyPilot YAML with bare dvc pull)
+        - test_check_setup_dvc_paths_passes_with_path_filter (mock correct YAML)
+        - test_check_env_vars_detects_missing (mock .env without HF_TOKEN)
+        - test_check_dvc_data_hash_path_construction (verify md5 hash -> GCS path format)
+
+        Use tmp_path to create mock files. Do NOT require cloud credentials.
+      </description>
+      <acceptance_criteria>
+        All tests pass without cloud credentials. Tests verify the hash path construction
+        for both regular md5 and .dir suffixed md5 hashes.
+      </acceptance_criteria>
+    </task>
+
+    <task id="DC-5" priority="P0" source="P3-G7" phase="GREEN">
+      <title>Validate gsutil ls behavior in check_dvc_data_on_gcs</title>
+      <file>scripts/preflight_gcp.py</file>
+      <description>
+        gsutil ls on a non-existent object returns exit code 1. gsutil ls on a prefix
+        returns exit code 0 even if empty. The current check uses "gsutil ls" on a
+        specific path. Verify this works correctly.
+
+        If the hash path format produces a prefix (not exact file), the check could
+        false-positive. Add a check for non-empty stdout:
+          if result.returncode == 0 and result.stdout.strip():
+
+        Also: add explicit ".dir" suffix handling comment to document the behavior.
+      </description>
+      <acceptance_criteria>
+        check_dvc_data_on_gcs returns False when the hash path does not exist on GCS
+        (verified by DC-4 unit test with mocked subprocess).
+      </acceptance_criteria>
+    </task>
+
+    <!-- P1: Quality — should fix before launch, not blocking -->
+
+    <task id="DC-6" priority="P1" source="P1-G2" phase="RED+GREEN">
+      <title>Add test for banned YAML fields (job_recovery, etc.)</title>
+      <file>tests/v2/unit/deployment/test_skypilot_yamls.py</file>
+      <description>
+        Add TestBannedFields class:
+        - test_no_job_recovery: assert "job_recovery" not in config
+        - test_no_spot_recovery: SkyPilot v1.0 uses use_spot, not spot_recovery
+        These fields caused real FAILED_SETUP incidents.
+      </description>
+      <acceptance_criteria>
+        Tests fail if job_recovery or spot_recovery keys are added to the YAML.
+      </acceptance_criteria>
+    </task>
+
+    <task id="DC-7" priority="P1" source="P1-G8" phase="RED+GREEN">
+      <title>Add test for setup script required commands</title>
+      <file>tests/v2/unit/deployment/test_skypilot_yamls.py</file>
+      <description>
+        Add TestSetupRequiredCommands class:
+        - test_setup_has_dvc_init: "dvc init" must be in setup (containers have no git)
+        - test_setup_has_no_scm_flag: "dvc init --no-scm" specifically
+        - test_setup_has_dvc_remote_add: "dvc remote add" must be in setup
+        - test_setup_has_gcs_remote: "gs://minivess-mlops-dvc-data" in setup
+        - test_setup_has_nvidia_smi: nvidia-smi check at end of setup
+      </description>
+      <acceptance_criteria>
+        Tests fail if dvc init or dvc remote add are removed from setup.
+      </acceptance_criteria>
+    </task>
+
+    <task id="DC-8" priority="P1" source="P1-G3" phase="RED+GREEN">
+      <title>Add test for data-exists-skip optimization in setup</title>
+      <file>tests/v2/unit/deployment/test_skypilot_yamls.py</file>
+      <description>
+        Verify that setup has a conditional check for existing data before dvc pull.
+        This is critical for spot recovery (preempted VM already has data cached).
+        Test: assert "imagesTr" in setup section (checking for existing data directory).
+      </description>
+      <acceptance_criteria>
+        Test fails if the data-exists check is removed from setup.
+      </acceptance_criteria>
+    </task>
+
+    <task id="DC-9" priority="P1" source="P2-G1, P2-G2" phase="GREEN">
+      <title>Capture job IDs in run_factorial.sh and write JSON manifest</title>
+      <file>scripts/run_factorial.sh</file>
+      <description>
+        After each sky jobs launch, capture stdout for the assigned job ID.
+        SkyPilot prints "Managed job ID: 123" or similar. Parse this and write to
+        a JSON manifest file alongside the existing text log.
+
+        Manifest format: outputs/{ts}_factorial_manifest.json matching the template
+        in .claude/skills/factorial-monitor/templates/factorial-manifest.json.
+
+        This enables the factorial-monitor skill to work as designed.
+      </description>
+      <acceptance_criteria>
+        --dry-run generates a manifest with null job_ids and PENDING status.
+        Real launch generates a manifest with actual job_ids.
+      </acceptance_criteria>
+    </task>
+
+    <task id="DC-10" priority="P1" source="P2-G3" phase="GREEN">
+      <title>Add JSON parsing mode to ralph_monitor.parse_job_status</title>
+      <file>src/minivess/compute/ralph_monitor.py</file>
+      <description>
+        Add parse_job_status_json(json_output: str) that parses sky jobs queue -o json
+        output. Keep the old text parser for backward compat but mark as deprecated.
+        The JSON parser is more reliable and version-independent.
+      </description>
+      <acceptance_criteria>
+        Unit test: parse_job_status_json(mock_json) correctly extracts job statuses.
+        Old text parser still works for non-JSON output.
+      </acceptance_criteria>
+    </task>
+
+    <task id="DC-11" priority="P1" source="P3-G8" phase="RED+GREEN">
+      <title>Add test asserting dvc pull uses -r gcs explicitly</title>
+      <file>tests/v2/unit/test_dvc_remote_sync.py</file>
+      <description>
+        Current test checks for "-r" flag but not "-r gcs" specifically.
+        .dvc/config default remote is minio (localhost). If someone writes
+        "dvc pull data/raw/minivess -r minio" in the SkyPilot setup, the current
+        test would pass but GCP deployment would fail.
+        Add: assert "-r gcs" in the dvc pull line.
+      </description>
+      <acceptance_criteria>
+        Test fails if setup uses "-r minio" or bare "-r" without "gcs".
+      </acceptance_criteria>
+    </task>
+
+    <task id="DC-12" priority="P1" source="P2-G5" phase="RED+GREEN">
+      <title>Add test for factorial manifest template schema validity</title>
+      <file>tests/v2/unit/test_factorial_monitor.py</file>
+      <description>
+        Validate the factorial-manifest.json template:
+        - Is valid JSON
+        - Has required fields: experiment_id, config_file, factors, jobs
+        - Jobs have required fields: condition, model_family, loss_name, fold, status
+        - Status values are in ALLOWED_STATUSES set
+      </description>
+      <acceptance_criteria>
+        Test catches invalid manifest templates.
+      </acceptance_criteria>
+    </task>
+
+    <!-- P2: Nice-to-have — can do after launch -->
+
+    <task id="DC-13" priority="P2" source="P1-G5" phase="GREEN">
+      <title>Parametrize YAML tests over all SkyPilot YAMLs</title>
+      <file>tests/v2/unit/deployment/test_skypilot_yamls.py</file>
+      <description>
+        Use pytest.mark.parametrize with Path("deployment/skypilot").glob("*.yaml")
+        for tests that apply to ALL SkyPilot YAMLs (parsing, Docker image, banned commands).
+        Keep factorial-specific tests (envs, file_mounts) separate.
+      </description>
+      <acceptance_criteria>
+        Adding a new YAML to deployment/skypilot/ automatically includes it in tests.
+      </acceptance_criteria>
+    </task>
+
+    <task id="DC-14" priority="P2" source="P2-G4" phase="GREEN">
+      <title>Add cost estimation to run_factorial.sh output</title>
+      <file>scripts/run_factorial.sh</file>
+      <description>
+        After computing TOTAL_GPU_JOBS, estimate cost:
+        cost = TOTAL_GPU_JOBS * estimated_hours * hourly_rate
+        For L4 spot: ~$0.16/hr. Debug run: ~0.5 hr/job.
+        Print: "Estimated cost: $X.XX (L4 spot, ~0.5 hr/job)"
+      </description>
+      <acceptance_criteria>
+        Dry-run output shows estimated cost before listing conditions.
+      </acceptance_criteria>
+    </task>
+
+    <task id="DC-15" priority="P2" source="P2-G6" phase="GREEN">
+      <title>Add batch failure aggregation to ralph_monitor.py</title>
+      <file>src/minivess/compute/ralph_monitor.py</file>
+      <description>
+        Add aggregate_failures(failures: list[FailureInfo]) -> dict[str, list[FailureInfo]]
+        that groups failures by category. This enables the factorial-monitor skill's
+        DIAGNOSE phase (Rule F2: aggregate before fix).
+
+        Also add: detect_kill_switch(failures: list[FailureInfo], time_window: int = 300)
+        that returns True if 3+ failures have identical category within time_window seconds.
+      </description>
+      <acceptance_criteria>
+        Unit tests for aggregation and kill-switch detection.
+      </acceptance_criteria>
+    </task>
+
+    <task id="DC-16" priority="P2" source="P3-G2" phase="RED+GREEN">
+      <title>Create cloud integration test for DVC GCS availability</title>
+      <file>tests/v2/cloud/test_dvc_gcs_availability.py</file>
+      <description>
+        Create tests/v2/cloud/test_dvc_gcs_availability.py:
+        - test_raw_data_hash_on_gcs: Parse dvc.lock, verify hash exists on GCS
+        - test_gcs_bucket_accessible: Verify gs://minivess-mlops-dvc-data listable
+        Auto-skip without GCS credentials (check for GOOGLE_APPLICATION_CREDENTIALS or ADC).
+      </description>
+      <acceptance_criteria>
+        Tests pass with GCS credentials, auto-skip without.
+      </acceptance_criteria>
+    </task>
+
+    <task id="DC-17" priority="P2" source="P1-G9" phase="RED+GREEN">
+      <title>Add test for pre-caching model weights in setup</title>
+      <file>tests/v2/unit/deployment/test_skypilot_yamls.py</file>
+      <description>
+        Verify setup has HuggingFace model pre-caching logic:
+        - test_setup_precaches_sam3_weights: "sam3" case in setup
+        - test_setup_precaches_vesselfm_weights: "vesselfm" case in setup
+        These prevent GPU time being wasted on weight downloads.
+      </description>
+      <acceptance_criteria>
+        Tests fail if model pre-caching logic is removed from setup.
+      </acceptance_criteria>
+    </task>
+
+  </tasks>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- LAUNCH READINESS ASSESSMENT -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <launch_readiness>
+    <title>Can we launch the 4th pass debug factorial NOW?</title>
+
+    <verdict>CONDITIONAL GO -- fix P0 items first</verdict>
+
+    <rationale>
+      The most expensive failure mode ($5 FAILED_SETUP from bare dvc pull) IS caught
+      by the current test suite. The SkyPilot YAML is correctly configured with:
+      - Path-specific dvc pull (not bare)
+      - Docker image_id pointing to GAR
+      - L4/A100 accelerators (no T4)
+      - Spot enabled
+      - Error handling on dvc pull failure
+      - splits.json guard in run section
+      - file_mounts for checkpoint persistence
+
+      However, 5 P0 gaps create non-trivial risk of another wasted run:
+      1. DC-1: No test for file_mounts/disk_size (if someone edits YAML before launch)
+      2. DC-2: MLFLOW_TRACKING_URI not in required envs (silent MLflow failure)
+      3. DC-3: Dry-run skips preflight (user gets false confidence)
+      4. DC-4: Preflight functions have no unit tests (false positive risk)
+      5. DC-5: gsutil ls false positive risk in hash check
+
+      Recommendation: Fix DC-2 (2 min), DC-3 (5 min), and DC-5 (5 min) before launch.
+      DC-1 and DC-4 can be done after launch if time-pressured.
+    </rationale>
+
+    <minimum_pre_launch_tasks>
+      <task ref="DC-2">Add MLFLOW_TRACKING_URI to required envs (2 min)</task>
+      <task ref="DC-3">Make dry-run include preflight (5 min)</task>
+      <task ref="DC-5">Fix gsutil ls false positive (5 min)</task>
+    </minimum_pre_launch_tasks>
+
+    <post_launch_tasks>
+      <task ref="DC-1">Add file_mounts and disk_size tests</task>
+      <task ref="DC-4">Add preflight unit tests</task>
+      <task ref="DC-6">Add banned YAML fields test</task>
+      <task ref="DC-7">Add setup required commands test</task>
+      <task ref="DC-8">Add data-exists-skip test</task>
+      <task ref="DC-9">Capture job IDs and write JSON manifest</task>
+      <task ref="DC-10">JSON parsing for ralph_monitor</task>
+      <task ref="DC-11">Assert -r gcs explicitly in dvc pull test</task>
+      <task ref="DC-12">Factorial manifest schema test</task>
+    </post_launch_tasks>
+  </launch_readiness>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- SUMMARY STATISTICS -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <summary>
+    <plans_audited>3</plans_audited>
+    <total_planned_items>16 (T1-T16 from DVC plan) + 8 (Tier 1 from SkyPilot plan) + 6 (from observability plan)</total_planned_items>
+    <items_fully_implemented>12</items_fully_implemented>
+    <items_partially_implemented>3</items_partially_implemented>
+    <items_not_implemented>7 (T8, T9, T12, T13, T14, T15, T16 + JSON monitor + sky dashboard)</items_not_implemented>
+    <total_gaps_found>18 (9 from P1 + 6 from P2 + 8 from P3, with some overlap)</total_gaps_found>
+    <p0_gaps>5</p0_gaps>
+    <p1_gaps>7</p1_gaps>
+    <p2_gaps>5</p2_gaps>
+    <tasks_to_fix>17 (DC-1 through DC-17)</tasks_to_fix>
+    <estimated_fix_time_p0>~20 min</estimated_fix_time_p0>
+    <estimated_fix_time_all>~3-4 hours</estimated_fix_time_all>
+
+    <quality_scores>
+      <plan name="SkyPilot YAML Tests" score="7/10">
+        Good core coverage. Missing file_mounts, disk_size, and some env vars.
+      </plan>
+      <plan name="Factorial Monitor" score="4/10">
+        Excellent specification, poor implementation. Skill is human-instruction-only.
+        No tooling automation, no JSON manifest, no batch monitoring code.
+      </plan>
+      <plan name="DVC Test Suite" score="6/10">
+        Modules 1-2 well implemented. Module 3 (preflight) implemented but untested.
+        Modules 4-5 (cloud tests, verification) completely missing.
+      </plan>
+    </quality_scores>
+  </summary>
+
+</audit>

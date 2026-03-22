@@ -6,8 +6,9 @@ Usage:
 Validates the full 3-flow pipeline locally using existing DynUNet checkpoints
 from dynunet_loss_variation_v2 experiment BEFORE spending on GCP.
 
-NOT a production run path — this is a one-off debug script (CLAUDE.md Rule #17
-does not apply to debug/test scripts).
+This is a flow orchestrator script — it chains Prefect flows together, not a
+bypass of Prefect. See CLAUDE.md Rule #17 distinction: scripts that CALL flows
+are orchestrators; scripts that BYPASS flows are banned.
 """
 
 from __future__ import annotations
@@ -55,11 +56,11 @@ BIOSTATS_CONFIG = REPO_ROOT / "configs" / "biostatistics" / "smoke_local.yaml"
 TRAINING_EXPERIMENT = "dynunet_loss_variation_v2"
 TRAINING_EXPERIMENT_ID = "843896622863223169"
 
-# Two losses to test (subset of the 4 available)
-LOSS_FUNCTIONS = ["cbdice_cldice", "dice_ce"]
+# All losses available in the training experiment
+LOSS_FUNCTIONS = ["cbdice_cldice", "dice_ce", "dice_ce_cldice", "cbdice"]
 
-# Post-training methods
-POST_TRAINING_METHODS = ["none", "swa"]
+# Post-training methods (registry decision: only "none" and "swag")
+POST_TRAINING_METHODS = ["none", "swag"]
 
 # New MLflow experiments for this debug run
 POST_TRAINING_EXPERIMENT = "smoke_local_post_training"
@@ -212,11 +213,15 @@ def phase_0_preflight() -> dict[str, Any]:
 
 
 def phase_1_post_training(preflight: dict[str, Any]) -> list[dict[str, Any]]:
-    """Run post-training: 2 losses × {none, swa} = 4 MLflow runs."""
+    """Run post-training: 4 losses × {none, swag} = 8 MLflow runs."""
     logger.info("=" * 70)
     logger.info("PHASE 1: Post-Training Flow")
     logger.info("=" * 70)
 
+    from minivess.adapters.model_builder import build_adapter
+    from minivess.config.models import DataConfig, ModelConfig, ModelFamily
+    from minivess.data.loader import build_train_loader
+    from minivess.data.splits import load_splits
     from minivess.orchestration.flows.post_training_flow import (
         run_factorial_post_training,
     )
@@ -225,11 +230,42 @@ def phase_1_post_training(preflight: dict[str, Any]) -> list[dict[str, Any]]:
     all_results: list[dict[str, Any]] = []
     phase_start = time.perf_counter()
 
+    # Build train DataLoader once for SWAG (shared across all losses)
+    splits = load_splits(SPLITS_FILE)
+    fold0_train = splits[0].train
+    data_config = DataConfig(
+        dataset_name="minivess",
+        data_dir=DATA_DIR,
+        patch_size=(64, 64, 16),
+        num_workers=0,
+    )
+    train_loader = build_train_loader(
+        fold0_train,
+        data_config,
+        batch_size=2,
+        cache_rate=0.0,
+    )
+    logger.info("Built train DataLoader for SWAG: %d volumes", len(fold0_train))
+
+    # Build model architecture for SWAG (DynUNet — all runs use the same arch)
+    model_config = ModelConfig(
+        family=ModelFamily.MONAI_DYNUNET,
+        name="dynunet",
+        in_channels=1,
+        out_channels=2,
+    )
+    adapter = build_adapter(model_config)
+    calibration_data: dict[str, Any] = {
+        "train_loader": train_loader,
+        "model": adapter,  # ModelAdapter IS an nn.Module (has .net inside)
+    }
+    logger.info("Built DynUNet model for SWAG calibration_data")
+
     for loss_fn in LOSS_FUNCTIONS:
         run_info = training_runs[loss_fn]
         ckpt_dir = run_info["checkpoint_dir"]
 
-        # Collect ALL checkpoints from this run (for SWA averaging)
+        # Collect ALL checkpoints from this run
         checkpoint_paths = sorted(ckpt_dir.glob("*.pth"))
         logger.info(
             "Loss %s: %d checkpoints found",
@@ -253,6 +289,7 @@ def phase_1_post_training(preflight: dict[str, Any]) -> list[dict[str, Any]]:
                 "fold_id": run_info["fold_id"],
                 "with_aux_calib": run_info["with_aux_calib"],
             },
+            calibration_data=calibration_data,
         )
 
         elapsed = time.perf_counter() - t0

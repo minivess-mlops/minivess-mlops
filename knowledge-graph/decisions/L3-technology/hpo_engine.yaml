@@ -16,8 +16,8 @@ resolution_evidence:
     source: "src/minivess/optimization/grid_partitioning.py"
     finding: "Grid partitioning via modular arithmetic for parallel factorial studies (Phase 1)"
   - type: implementation
-    source: "configs/hpo/paper_factorial.yaml"
-    finding: "24-cell factorial config (4 models x 3 losses x 2 aux_calibration)"
+    source: "configs/factorial/paper_full.yaml"
+    finding: "Full 480-condition factorial: 4 models x 3 losses x 2 aux_calib x 2 post-training x 2 recalib x 5 ensemble. Authoritative layered config. Legacy flat config at configs/hpo/paper_factorial.yaml (deprecated)."
   - type: implementation
     source: "deployment/skypilot/hpo_grid_worker.yaml"
     finding: "SkyPilot grid worker YAML for GCP L4 spot instances"

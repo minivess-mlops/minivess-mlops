@@ -1,30 +1,28 @@
-# Debug factorial: ALL 6 dimensions with fewer levels.
+# Debug factorial: FULL production experiment with reduced epochs/data/folds.
 #
-# 4 models × 3 losses × 2 aux_calib × 2 post-training × 2 recalib × 4 ensemble
-# = 384 conditions × 1 fold = 384 evaluations
+# 4 models × 4 losses × 2 aux_calib × 2 post-training × 2 recalib × 5 ensemble
+# = 640 conditions × 1 fold = 640 evaluations
 #
-# This is NOT a "minimal test." It exercises the FULL 6-factor pipeline topology
-# with reduced levels per factor and reduced epochs/data/folds.
-#
-# Debug scope reductions (ONLY these allowed — CLAUDE.md Rule #27):
+# This is NOT a "minimal test." Debug = production with ONLY 3 differences:
 #   1. Epochs: 2 (not 50)
 #   2. Data: half volumes (~23 train / ~12 val)
 #   3. Folds: 1 (fold-0 only)
-#   4. Post-training levels: 2 (not 3) — {none, checkpoint_averaging}
-#   5. Ensemble levels: 4 (not 5) — drop "none"
+# NOTHING else changes. All factors are IDENTICAL to paper_full.yaml.
+# See: CLAUDE.md Rule #27, .claude/metalearning/2026-03-22-debug-equals-production-8th-violation.md
 #
-# Cost:
-#   Layer A (training): 24 cells × 1 fold = 24 runs (~$5-10 on GCP L4 spot)
-#   Layer B+C+D: local CPU (FREE)
+# Cost estimate (OUR deployment: GCP L4 spot for training):
+#   Training: 32 cells × 1 fold = 32 GPU jobs (~$7-13)
+#   Post-training, analysis, biostatistics: depends on user's deployment choice
 #
 # Usage:
 #   ./scripts/run_factorial.sh configs/factorial/debug.yaml
 
 experiment_name: debug_factorial
-description: "Debug 384-condition factorial: all 6 dimensions, fewer levels, 1 fold"
+description: "Debug 640-condition factorial: IDENTICAL factors to production, reduced epochs/data/folds"
 debug: true
 
-# ── Layer A: Training factors (GPU, cloud) ───────────────────────────
+# ── Layer A: Training factors ─────────────────────────────────────────
+# IDENTICAL to paper_full.yaml (Rule 27: debug = production)
 factors:
   training:
     model_family:
@@ -36,22 +34,26 @@ factors:
       - cbdice_cldice
       - dice_ce
       - dice_ce_cldice
+      - bce_dice_05cldice
     aux_calibration:
       - true
       - false
 
-  # ── Layer B: Post-training factors (CPU, local) ──────────────────────
+  # ── Layer B: Post-training factors ─────────────────────────────────
+  # IDENTICAL to paper_full.yaml (Rule 27: debug = production)
   post_training:
     method:
       - none
-      - checkpoint_averaging
+      - swag
     recalibration:
       - none
       - temperature_scaling
 
-  # ── Layer C: Analysis factors (CPU/GPU, local) ───────────────────────
+  # ── Layer C: Analysis factors ──────────────────────────────────────
+  # IDENTICAL to paper_full.yaml (Rule 27: debug = production)
   analysis:
     ensemble_strategy:
+      - none
       - per_loss_single_best
       - all_loss_single_best
       - per_loss_all_best
@@ -97,11 +99,13 @@ biostatistics:
   foil_metrics:
     - dsc
 
-# ── Post-training plugins ───────────────────────────────────────────
+# ── Post-training config ────────────────────────────────────────────
+# Methods are defined in factors.post_training.method above.
+# "none" is free (training sub-flow result). "swag" = Maddox et al. 2019.
 post_training:
-  plugins:
-    - checkpoint_averaging
-    - calibration
+  methods:
+    - none
+    - swag
 
 # ── E2E flow chain ──────────────────────────────────────────────────
 flows:

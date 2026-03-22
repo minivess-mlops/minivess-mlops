@@ -444,6 +444,7 @@ def run_factorial_post_training(
     upstream_run_id: str | None = None,
     upstream_tags: dict[str, str] | None = None,
     recalibration: str = "none",
+    calibration_data: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Systematically apply post-training methods to checkpoints.
 
@@ -521,14 +522,37 @@ def run_factorial_post_training(
             result = _factorial_result(method, ensemble_paths[0])
 
         elif method == "swag":
-            # SWAG requires resumed training (DataLoaders + optimizer).
-            # It cannot be applied purely post-hoc in the factorial function.
-            # Use the SWAGPlugin via the plugin system instead.
-            logger.warning(
-                "SWAG method requires DataLoaders — use SWAGPlugin via "
-                "post_training_flow() instead of run_factorial_post_training()"
+            if calibration_data is None:
+                raise ValueError(
+                    "SWAG requires calibration_data with 'train_loader' and 'model'. "
+                    "Build DataLoaders from splits before calling "
+                    "run_factorial_post_training(methods=['swag'], calibration_data=...)."
+                )
+            from minivess.pipeline.post_training_plugin import PluginInput
+            from minivess.pipeline.post_training_plugins.swag import SWAGPlugin
+
+            swag_plugin = SWAGPlugin()
+            plugin_input = PluginInput(
+                checkpoint_paths=checkpoint_paths,
+                config={
+                    "swa_lr": 0.01,
+                    "swa_epochs": 2,
+                    "max_rank": 20,
+                    "update_bn": True,
+                    "output_dir": str(method_dir),
+                },
+                calibration_data=calibration_data,
             )
-            continue
+            validation_errors = swag_plugin.validate_inputs(plugin_input)
+            if validation_errors:
+                raise ValueError(f"SWAG validation failed: {validation_errors}")
+            swag_output = swag_plugin.execute(plugin_input)
+            dst = (
+                swag_output.model_paths[0]
+                if swag_output.model_paths
+                else method_dir / "swag_model.pt"
+            )
+            result = _factorial_result(method, dst)
 
         else:
             logger.warning("Unknown factorial method: %s — skipping", method)

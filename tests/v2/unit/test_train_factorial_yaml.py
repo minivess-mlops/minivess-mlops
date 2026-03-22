@@ -3,7 +3,7 @@
 Validates:
 - SkyPilot YAML structure, Docker mandate, T4 ban, required env vars
 - run_factorial.sh syntax, dry-run parsing, condition count generation
-- Factorial config parsing for both debug (26 conditions) and production (78 conditions)
+- Factorial config parsing for both debug (34 conditions) and production (102 conditions)
 
 Source of truth: knowledge-graph/decisions/L3-technology/paper_model_comparison.yaml
 """
@@ -208,8 +208,8 @@ class TestRunFactorialSh:
 class TestFactorialConfigParsing:
     """Verify factorial configs produce correct condition counts."""
 
-    def test_debug_factorial_has_24_trainable(self) -> None:
-        """Debug: 4 models x 3 losses x 2 aux_calib = 24 trainable on fold-0."""
+    def test_debug_factorial_has_32_trainable(self) -> None:
+        """Debug: 4 models x 4 losses x 2 aux_calib = 32 trainable on fold-0."""
         config = _load(_DEBUG_CONFIG)
         factors = config.get("factors", {})
         models = factors.get("model_family", [])
@@ -219,8 +219,8 @@ class TestFactorialConfigParsing:
         num_folds = fixed.get("num_folds", 1)
 
         total = len(models) * len(losses) * len(aux_calibs) * num_folds
-        assert total == 24, (
-            f"Debug factorial must have 24 trainable conditions, got {total} "
+        assert total == 32, (
+            f"Debug factorial must have 32 trainable conditions, got {total} "
             f"({len(models)} models x {len(losses)} losses x "
             f"{len(aux_calibs)} aux_calibs x {num_folds} folds)"
         )
@@ -234,8 +234,8 @@ class TestFactorialConfigParsing:
             f"Debug factorial must have 2 zero-shot baselines, got {total_zs}"
         )
 
-    def test_debug_factorial_total_26_conditions(self) -> None:
-        """Debug: 24 trainable + 2 zero-shot = 26 total conditions."""
+    def test_debug_factorial_total_34_conditions(self) -> None:
+        """Debug: 32 trainable + 2 zero-shot = 34 total conditions."""
         config = _load(_DEBUG_CONFIG)
         factors = config.get("factors", {})
         models = factors.get("model_family", [])
@@ -246,7 +246,7 @@ class TestFactorialConfigParsing:
         trainable = len(models) * len(losses) * len(aux_calibs) * num_folds
         baselines = config.get("zero_shot_baselines", [])
         zero_shot = sum(b.get("folds", 1) for b in baselines)
-        assert trainable + zero_shot == 26
+        assert trainable + zero_shot == 34
 
     def test_debug_uses_2_epochs(self) -> None:
         """Debug run uses 2 epochs (not 50)."""
@@ -267,8 +267,8 @@ class TestFactorialConfigParsing:
         assert fixed.get("max_train_volumes") == 23
         assert fixed.get("max_val_volumes") == 12
 
-    def test_production_factorial_has_72_trainable(self) -> None:
-        """Production: 4 models x 3 losses x 2 aux_calib x 3 folds = 72."""
+    def test_production_factorial_has_96_trainable(self) -> None:
+        """Production: 4 models x 4 losses x 2 aux_calib x 3 folds = 96."""
         if not _PAPER_CONFIG.exists():
             import pytest
 
@@ -281,7 +281,7 @@ class TestFactorialConfigParsing:
         fixed = config.get("fixed", {})
         num_folds = fixed.get("num_folds", 3)
         total = len(models) * len(losses) * len(aux_calibs) * num_folds
-        assert total == 72, f"Production factorial must have 72 trainable, got {total}"
+        assert total == 96, f"Production factorial must have 96 trainable, got {total}"
 
     def test_debug_models_match_kg(self) -> None:
         """Debug factorial models must match KG paper_model_comparison.yaml.

@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "command": "if echo \"$TOOL_INPUT\" | grep -q 'knowledge-graph/'; then uv run python -c \"from scripts.build_plan_archive import DB_PATH; print(f'Plan archive: {DB_PATH}')\" 2>/dev/null; fi",
+        "description": "Remind to update plan archive when KG files change"
+      }
+    ]
+  }
+}

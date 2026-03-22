@@ -23,9 +23,16 @@ class TestMambaAvailability:
 
     def test_require_mamba_raises_when_unavailable(self) -> None:
         """_require_mamba() raises RuntimeError when mamba-ssm not installed."""
-        if _mamba_available():
-            pytest.skip("mamba-ssm IS installed — cannot test error path")
-        with pytest.raises(RuntimeError, match="mamba-ssm not installed"):
+        from unittest.mock import patch
+
+        # Mock _mamba_available to return False so we can test the error path
+        # regardless of whether mamba-ssm is actually installed
+        with (
+            patch(
+                "minivess.adapters.model_builder._mamba_available", return_value=False
+            ),
+            pytest.raises(RuntimeError, match="mamba-ssm"),
+        ):
             _require_mamba()
 
     def test_require_mamba_passes_when_available(self) -> None:

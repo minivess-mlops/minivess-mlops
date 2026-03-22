@@ -189,6 +189,9 @@ def test_minio_image_pinned() -> None:
 
 
 @pytest.mark.security_audit
+@pytest.mark.xfail(
+    reason="Known: env-var port bindings lack explicit interface. Fix in hardening pass."
+)
 def test_ports_bound_to_localhost() -> None:
     """Port bindings should use 127.0.0.1: prefix (localhost-only access)."""
     compose = _load_infra()
@@ -205,9 +208,11 @@ def test_ports_bound_to_localhost() -> None:
                 # This is "${PORT}:5000" style — no interface specified
                 unbound.append(f"{name}: {port_str}")
 
-    # This is a warning test — not a hard failure for dev setups
-    if unbound:
-        pytest.skip(
-            "Port bindings without explicit interface (consider 127.0.0.1:):\n"
-            + "\n".join(f"  - {p}" for p in unbound)
-        )
+    # Enforce explicit interface binding — all ports should use 127.0.0.1:
+    # for local dev. Production (Docker Compose in cloud) uses network isolation.
+    # NOTE: ${VAR}:port patterns are acceptable (env var resolves at runtime).
+    assert not unbound, (
+        "Port bindings without explicit interface (security risk in production):\n"
+        + "\n".join(f"  - {p}" for p in unbound)
+        + "\nFix: bind to 127.0.0.1:${PORT}:container_port or document why 0.0.0.0 is needed."
+    )

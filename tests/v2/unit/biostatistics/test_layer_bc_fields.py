@@ -31,9 +31,9 @@ class TestSourceRunLayerBCFields:
             loss_function="dice_ce",
             fold_id=0,
             status="FINISHED",
-            post_training_method="checkpoint_averaging",
+            post_training_method="swag",
         )
-        assert run.post_training_method == "checkpoint_averaging"
+        assert run.post_training_method == "swag"
 
     def test_defaults_post_training_method_to_none(self) -> None:
         from minivess.pipeline.biostatistics_types import SourceRun
@@ -173,7 +173,7 @@ class TestDuckDBLayerBCColumns:
                 False,
                 "FINISHED",
                 "",
-                "checkpoint_averaging",
+                "swag",
                 "temperature_scaling",
                 "all_loss_all_best",
                 True,
@@ -187,7 +187,7 @@ class TestDuckDBLayerBCColumns:
         conn.close()
 
         assert result is not None
-        assert result[0] == "checkpoint_averaging"
+        assert result[0] == "swag"
         assert result[1] == "temperature_scaling"
         assert result[2] == "all_loss_all_best"
         assert result[3] is True
@@ -243,11 +243,11 @@ class TestDiscoveryLayerBCTags:
 
         run_dir = self._make_run_dir(
             tmp_path,
-            tags={"post_training_method": "checkpoint_averaging"},
+            tags={"post_training_method": "swag"},
         )
         run = _parse_run_dir(run_dir, "e1", "test")
         assert run is not None
-        assert run.post_training_method == "checkpoint_averaging"
+        assert run.post_training_method == "swag"
 
     def test_reads_recalibration_tag(self, tmp_path: Path) -> None:
         from minivess.pipeline.biostatistics_discovery import _parse_run_dir

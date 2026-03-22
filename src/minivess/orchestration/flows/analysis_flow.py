@@ -2115,11 +2115,32 @@ def _build_dataloaders_from_config(config_dict: dict[str, Any]) -> dict[str, Any
             )
             continue
 
-        # Build a simple dict-based "loader" structure
-        # The actual DataLoader construction requires DataConfig which may not
-        # be available in Docker entry point mode. We return the pairs dict
-        # so that the analysis flow can build DataLoaders when needed.
-        result[ds_name] = {"all": pairs}
+        # Build real DataLoaders from discovered pairs.
+        # Uses _build_loader_from_dicts which creates MONAI CacheDataset
+        # with validation transforms (no augmentation — test data only).
+        try:
+            from minivess.config.models import DataConfig
+            from minivess.data.test_datasets import _build_loader_from_dicts
+
+            # Build a minimal DataConfig for external test evaluation.
+            # External test data uses native resolution (no resampling) and
+            # the same patch/transform pipeline as MiniVess validation.
+            data_kwargs = config_dict.get("data", {})
+            data_kwargs.setdefault("dataset_name", ds_name)
+            data_config = DataConfig(**data_kwargs)
+            loader = _build_loader_from_dicts(pairs, data_config, cache_rate=0.0)
+            result[ds_name] = {"all": loader}
+        except Exception:
+            # Fallback: store raw pairs if DataLoader construction fails
+            # (e.g., TIFF files without proper headers for MONAI transforms).
+            # This preserves backward compat while logging the issue.
+            logger.warning(
+                "Could not build DataLoader for '%s' — storing raw pairs. "
+                "The evaluation runner may need to handle raw pairs.",
+                ds_name,
+                exc_info=True,
+            )
+            result[ds_name] = {"all": pairs}
         logger.info(
             "Discovered %d pairs for external test dataset '%s'",
             len(pairs),
