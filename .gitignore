@@ -39,8 +39,10 @@ build/
 # MLflow auth config — may contain hashed passwords, never commit
 deployment/mlflow/auth.ini
 
-# DVC
-/data/raw/
+# DVC — data contents ignored, .dvc tracking files committed
+/data/raw/*
+!/data/raw/*.dvc
+!/data/raw/.gitignore
 /data/processed/
 /data/synthetic_drift/
 
