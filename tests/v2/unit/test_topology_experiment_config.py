@@ -58,14 +58,18 @@ class TestDiscussionNotes:
 
     def test_discussion_notes_exists(self) -> None:
         """File exists and has content."""
-        path = Path("docs/planning/topology-approaches-discussion-notes.md")
+        path = Path(
+            "docs/planning/v0-2_archive/original_docs/topology-approaches-discussion-notes.md"
+        )
         assert path.exists()
         content = path.read_text(encoding="utf-8")
         assert len(content) > 100
 
     def test_discussion_notes_has_sections(self) -> None:
         """Implemented, deferred, and 3D rationale sections present."""
-        path = Path("docs/planning/topology-approaches-discussion-notes.md")
+        path = Path(
+            "docs/planning/v0-2_archive/original_docs/topology-approaches-discussion-notes.md"
+        )
         content = path.read_text(encoding="utf-8")
         assert "implemented" in content.lower() or "approach" in content.lower()
         assert "deferred" in content.lower() or "future" in content.lower()
@@ -73,7 +77,9 @@ class TestDiscussionNotes:
 
     def test_discussion_notes_no_sam_implementation(self) -> None:
         """No SAM implementation details."""
-        path = Path("docs/planning/topology-approaches-discussion-notes.md")
+        path = Path(
+            "docs/planning/v0-2_archive/original_docs/topology-approaches-discussion-notes.md"
+        )
         content = path.read_text(encoding="utf-8")
         # Should mention SAM3 as parallel/future, not as implemented
         assert (

@@ -54,6 +54,17 @@ deployment/docker/
 
 # Large docs/planning files
 docs/planning/*.pdf
+docs/planning/v0-2_archive/original_docs/
+docs/planning/v0-2_archive/themes/
+
+# Code review graph (65 MB SQLite)
+.code-review-graph/
+
+# Logs (23 MB)
+logs/
+
+# Hypothesis (test data)
+.hypothesis/
 
 # OS
 .DS_Store

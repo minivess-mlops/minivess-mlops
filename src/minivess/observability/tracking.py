@@ -144,7 +144,24 @@ def resolve_tracking_uri(
                 return _ensure_absolute_file_uri(str(dynaconf_uri))
         except Exception:
             logger.debug("Dynaconf unavailable, falling back to default")
-    return _ensure_absolute_file_uri(str(_DEFAULT_TRACKING_URI))
+
+    # Silent fallback to "mlruns" is allowed ONLY in test mode.
+    # In production (Docker), MLFLOW_TRACKING_URI MUST be set explicitly.
+    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
+        logger.warning(
+            "MLFLOW_TRACKING_URI not set — falling back to local '%s'. "
+            "This is only acceptable in test mode (MINIVESS_ALLOW_HOST=1).",
+            _DEFAULT_TRACKING_URI,
+        )
+        return _ensure_absolute_file_uri(str(_DEFAULT_TRACKING_URI))
+
+    raise RuntimeError(
+        "MLFLOW_TRACKING_URI is not set and no Dynaconf fallback available.\n"
+        "Set the environment variable:\n"
+        "  export MLFLOW_TRACKING_URI=http://localhost:5000  # local MLflow server\n"
+        "  export MLFLOW_TRACKING_URI=mlruns                 # file-based (dev only)\n"
+        "See: .env.example and src/minivess/observability/CLAUDE.md"
+    )
 
 
 class ExperimentTracker:

@@ -131,6 +131,43 @@ class TestBiostatisticsTestSplit:
             f"Default split should be 'trainval', got {default}"
         )
 
+    def test_flow_body_calls_test_split(self) -> None:
+        """The flow body must call _build_per_volume_data with split='test'.
+
+        This is the critical wiring gap: the function supports split='test'
+        but the flow body never calls it that way.
+        """
+        import ast
+        from pathlib import Path
+
+        flow_file = Path("src/minivess/orchestration/flows/biostatistics_flow.py")
+        tree = ast.parse(flow_file.read_text(encoding="utf-8"))
+
+        # Find all calls to _build_per_volume_data
+        calls_with_test_split: list[int] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                func_name = None
+                if isinstance(func, ast.Name):
+                    func_name = func.id
+                elif isinstance(func, ast.Attribute):
+                    func_name = func.attr
+                if func_name == "_build_per_volume_data":
+                    for kw in node.keywords:
+                        if (
+                            kw.arg == "split"
+                            and isinstance(kw.value, ast.Constant)
+                            and kw.value.value == "test"
+                        ):
+                            calls_with_test_split.append(node.lineno)
+
+        assert calls_with_test_split, (
+            "biostatistics_flow.py never calls _build_per_volume_data(split='test'). "
+            "DeepVess test metrics are excluded from all statistical analysis. "
+            "Add a second call with split='test' after line 436."
+        )
+
 
 class TestDeepVessDiscovery:
     """Test that discover_external_test_pairs works for DeepVess layout."""

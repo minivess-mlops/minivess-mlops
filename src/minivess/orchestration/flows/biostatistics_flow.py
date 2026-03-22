@@ -435,6 +435,21 @@ def run_biostatistics_flow(
     # Build per-volume data from manifest for statistics
     per_volume_data = _build_per_volume_data(manifest, Path(mlruns_dir_str))
 
+    # Build test split data (DeepVess external test evaluation).
+    # This is separate from trainval because test/ prefix metrics come from
+    # external test datasets, not from cross-validated MiniVess splits.
+    per_volume_data_test = _build_per_volume_data(
+        manifest, Path(mlruns_dir_str), split="test"
+    )
+    if per_volume_data_test:
+        # Merge test data into main dict with "test/" prefix to distinguish
+        for metric, conditions in per_volume_data_test.items():
+            per_volume_data[f"test/{metric}"] = conditions
+        logger.info(
+            "Added %d test-split metrics from external datasets",
+            len(per_volume_data_test),
+        )
+
     # Derive higher_is_better from metric names (lower is better for HD95, ASSD)
     higher_is_better: dict[str, bool] = {}
     for m in config.metrics:
