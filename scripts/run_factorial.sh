@@ -32,6 +32,17 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SKYPILOT_YAML="${REPO_ROOT}/deployment/skypilot/train_factorial.yaml"
 ENV_FILE="${REPO_ROOT}/.env"
 
+# ─── Find sky binary (venv or system) ───────────────────────────────────
+SKY_BIN=""
+if command -v sky &>/dev/null; then
+    SKY_BIN="sky"
+elif [ -x "${REPO_ROOT}/.venv/bin/sky" ]; then
+    SKY_BIN="${REPO_ROOT}/.venv/bin/sky"
+else
+    echo "ERROR: sky binary not found. Install: uv sync --extra infra"
+    exit 1
+fi
+
 # ─── Parse flags ─────────────────────────────────────────────────────────────
 DRY_RUN=false
 CONFIG_FILE=""
@@ -197,7 +208,7 @@ for model in "${MODEL_ARRAY[@]}"; do
                     echo "  [DRY RUN] sky jobs launch ${SKYPILOT_YAML} --name ${CONDITION_NAME} --env MODEL_FAMILY=${model} ..."
                     echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | DRY_RUN" >> "${JOB_LOG}"
                 else
-                    if sky jobs launch "${SKYPILOT_YAML}" \
+                    if "${SKY_BIN}" jobs launch "${SKYPILOT_YAML}" \
                         --name "${CONDITION_NAME}" \
                         --env MODEL_FAMILY="${model}" \
                         --env LOSS_NAME="${loss}" \
@@ -277,7 +288,7 @@ for b in baselines:
                 f.write(f'ZS | {model} | zero_shot | false | {fold} | DRY_RUN\n')
         else:
             result = subprocess.run([
-                'sky', 'jobs', 'launch',
+                '${SKY_BIN}', 'jobs', 'launch',
                 '${SKYPILOT_YAML}',
                 '--name', condition_name,
                 '--env', f'MODEL_FAMILY={model}',
