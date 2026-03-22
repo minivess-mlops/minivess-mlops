@@ -245,6 +245,11 @@ nodes:
     level: L5
     file: decisions/L5-operations/documentation_cards.yaml
 
+  # Utility — decision registry (DO_NOT_RE_ASK index)
+  - id: decision_registry
+    level: L0
+    file: decisions/registry.yaml
+
 edges:
   # L1 → L2 (strategy to architecture) — ~18 edges
   - from: project_purpose

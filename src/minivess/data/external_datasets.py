@@ -86,9 +86,9 @@ EXTERNAL_DATASETS: dict[str, ExternalDatasetConfig] = {
         species="mouse",
         resolution_um=(1.0, 1.0, 1.7),
         n_volumes=1,
-        license="eCommons-educational",
+        license="CC-BY-4.0",
         cite_ref="haft_javaherian_2019_deepvess",
-        license_verified=False,
+        license_verified=True,  # Verified 2026-03-22 from eCommons README
     ),
     # TubeNet EXCLUDED from test evaluation (2026-03-19):
     # Only 1 two-photon volume (mouse olfactory bulb — different organ from MiniVess cortex).
