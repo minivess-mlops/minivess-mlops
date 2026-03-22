@@ -96,6 +96,22 @@ mkdir -p "${OUTPUT_DIR}"
 TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
 JOB_LOG="${OUTPUT_DIR}/${TIMESTAMP}_factorial_job_ids.txt"
 
+# ─── Preflight checks (skip for dry-run) ────────────────────────────────────
+if [ "${DRY_RUN}" = false ] && [ "${SKIP_PREFLIGHT:-0}" != "1" ]; then
+    echo "Running GCP preflight checks..."
+    if [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
+        "${REPO_ROOT}/.venv/bin/python" "${REPO_ROOT}/scripts/preflight_gcp.py" || {
+            echo ""
+            echo "FATAL: Preflight checks failed. Fix issues above before launching."
+            echo "To bypass (DANGEROUS): SKIP_PREFLIGHT=1 ./scripts/run_factorial.sh ..."
+            exit 1
+        }
+        echo ""
+    else
+        echo "WARNING: .venv/bin/python not found — skipping preflight checks"
+    fi
+fi
+
 # ─── Parse factorial config ──────────────────────────────────────────────────
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  MinIVess Factorial Experiment Launcher                     ║"
