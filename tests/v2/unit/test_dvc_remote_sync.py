@@ -17,7 +17,6 @@ from pathlib import Path
 
 import yaml
 
-
 DVC_YAML = Path("dvc.yaml")
 DVC_LOCK = Path("dvc.lock")
 SKYPILOT_YAML = Path("deployment/skypilot/train_factorial.yaml")
@@ -90,7 +89,7 @@ class TestDvcYamlLockConsistency:
             # Look for "frozen" in the raw YAML near a comment
             lines = raw.splitlines()
             for i, line in enumerate(lines):
-                if f"frozen: true" in line:
+                if "frozen: true" in line:
                     # Check if this line or adjacent lines have a comment
                     context = "\n".join(lines[max(0, i - 1) : i + 2])
                     assert "#" in context, (
@@ -113,9 +112,7 @@ class TestDvcYamlLockConsistency:
         outs = download.get("outs", [])
         assert len(outs) > 0, "No outputs in download stage lock"
         nfiles = outs[0].get("nfiles", 0)
-        assert nfiles >= 300, (
-            f"Expected ≥300 files in raw MiniVess data, got {nfiles}"
-        )
+        assert nfiles >= 300, f"Expected ≥300 files in raw MiniVess data, got {nfiles}"
 
 
 # ---------------------------------------------------------------------------
@@ -146,11 +143,20 @@ class TestSkypilotDvcPullPaths:
         return paths
 
     def test_dvc_pull_paths_have_lock_entries(self) -> None:
-        """Every path in 'dvc pull <path>' must have a corresponding lock entry."""
+        """Every path in 'dvc pull <path>' must have a lock entry or be a .dvc file."""
         pull_paths = self._extract_dvc_pull_paths()
         locked_paths = _parse_dvc_lock_output_paths()
 
         for pull_path in pull_paths:
+            # Standalone .dvc files (e.g., data/raw/deepvess.dvc) are valid
+            # DVC tracking references — they don't need dvc.lock entries.
+            if pull_path.endswith(".dvc"):
+                dvc_file = Path(pull_path)
+                assert dvc_file.exists(), (
+                    f"Setup pulls '{pull_path}' but the .dvc file does not exist."
+                )
+                continue
+
             matched = any(
                 lo.startswith(pull_path) or pull_path.startswith(lo)
                 for lo in locked_paths

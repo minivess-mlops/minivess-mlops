@@ -146,6 +146,11 @@ WORKDIR /app
 COPY --from=builder --chown=minivess:minivess --chmod=755 /app/.venv /app/.venv
 COPY --from=builder --chown=minivess:minivess --chmod=755 /app/src /app/src
 COPY --from=builder --chown=minivess:minivess --chmod=755 /app/configs /app/configs
+# DVC pipeline files — needed by `dvc pull data/raw/minivess -r gcs` on cloud VMs.
+# Without these, DVC cannot resolve content hashes from dvc.lock.
+COPY --chown=minivess:minivess dvc.yaml dvc.lock /app/
+# DVC tracking files for standalone datasets (DeepVess zero-shot evaluation)
+COPY --chown=minivess:minivess data/raw/deepvess.dvc /app/data/raw/deepvess.dvc
 
 # NOTE: USER minivess is intentionally NOT set here.
 # SkyPilot/RunPod requires root: the setup_cmd installs packages and configures

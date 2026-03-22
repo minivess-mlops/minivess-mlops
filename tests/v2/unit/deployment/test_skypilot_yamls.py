@@ -243,6 +243,151 @@ class TestRunSectionGuards:
 
 
 # ---------------------------------------------------------------------------
+# CLI arg name consistency (CRITICAL — 4th pass root cause)
+# ---------------------------------------------------------------------------
+
+
+class TestCliArgConsistency:
+    """YAML run section CLI args MUST match train_flow.py argparse exactly."""
+
+    def test_uses_model_family_not_model(self) -> None:
+        """Must use --model-family, not --model (4th pass root cause)."""
+        config = _load_yaml(FACTORIAL_YAML)
+        run = config.get("run", "")
+        assert "--model-family" in run, (
+            "YAML uses --model but argparse expects --model-family. "
+            "This caused EVERY job to crash in 4th pass."
+        )
+
+    def test_uses_loss_name_not_loss(self) -> None:
+        """Must use --loss-name, not --loss."""
+        config = _load_yaml(FACTORIAL_YAML)
+        run = config.get("run", "")
+        assert "--loss-name" in run, (
+            "YAML uses --loss but argparse expects --loss-name."
+        )
+
+    def test_uses_experiment_name_not_experiment(self) -> None:
+        """Must use --experiment-name, not --experiment."""
+        config = _load_yaml(FACTORIAL_YAML)
+        run = config.get("run", "")
+        assert "--experiment-name" in run, (
+            "YAML uses --experiment but argparse expects --experiment-name."
+        )
+
+    def test_all_cli_args_match_argparse(self) -> None:
+        """Every CLI arg in the YAML run section must exist in train_flow.py argparse."""
+        import ast
+
+        config = _load_yaml(FACTORIAL_YAML)
+        run = config.get("run", "")
+
+        # Extract CLI args from YAML run section
+        yaml_args = set()
+        for line in run.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("--") and not stripped.startswith("# "):
+                arg_name = stripped.split()[0].rstrip('"')
+                yaml_args.add(arg_name)
+
+        # Extract argparse args from train_flow.py
+        train_flow_path = Path("src/minivess/orchestration/flows/train_flow.py")
+        source = train_flow_path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+        argparse_args = set()
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "add_argument"
+                and node.args
+            ):
+                first_arg = node.args[0]
+                if isinstance(first_arg, ast.Constant) and isinstance(
+                    first_arg.value, str
+                ):
+                    argparse_args.add(first_arg.value)
+
+        # Every YAML arg must be a valid argparse arg
+        missing = yaml_args - argparse_args
+        assert not missing, (
+            f"YAML run section uses CLI args not in train_flow.py argparse: {missing}. "
+            f"Valid args: {sorted(argparse_args)}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# MLflow credentials in envs (CRITICAL — silent data loss)
+# ---------------------------------------------------------------------------
+
+
+class TestMlflowCredentials:
+    """MLflow credentials must be declared in envs to prevent silent data loss."""
+
+    def test_mlflow_username_in_envs(self) -> None:
+        """MLFLOW_TRACKING_USERNAME must be in envs for Cloud Run auth."""
+        config = _load_yaml(FACTORIAL_YAML)
+        envs = config.get("envs", {})
+        assert "MLFLOW_TRACKING_USERNAME" in envs, (
+            "MLFLOW_TRACKING_USERNAME missing — Cloud Run MLflow will return 401. "
+            "Training 'succeeds' but ALL metrics are silently lost."
+        )
+
+    def test_mlflow_password_in_envs(self) -> None:
+        """MLFLOW_TRACKING_PASSWORD must be in envs for Cloud Run auth."""
+        config = _load_yaml(FACTORIAL_YAML)
+        envs = config.get("envs", {})
+        assert "MLFLOW_TRACKING_PASSWORD" in envs, (
+            "MLFLOW_TRACKING_PASSWORD missing — Cloud Run MLflow will return 401."
+        )
+
+    def test_mlflow_retry_configured(self) -> None:
+        """MLflow HTTP retries must be configured for cloud resilience."""
+        config = _load_yaml(FACTORIAL_YAML)
+        envs = config.get("envs", {})
+        assert "MLFLOW_HTTP_REQUEST_MAX_RETRIES" in envs, (
+            "MLFLOW_HTTP_REQUEST_MAX_RETRIES missing — transient failures will crash training."
+        )
+
+
+# ---------------------------------------------------------------------------
+# MLflow health check in setup (prevents silent data loss)
+# ---------------------------------------------------------------------------
+
+
+class TestMlflowHealthCheck:
+    """Setup must verify MLflow connectivity before training."""
+
+    def test_setup_has_mlflow_health_check(self) -> None:
+        """Setup must check MLflow server is reachable."""
+        config = _load_yaml(FACTORIAL_YAML)
+        setup = config.get("setup", "")
+        assert "MlflowClient" in setup or "mlflow" in setup.lower(), (
+            "Setup must verify MLflow connectivity — without this, "
+            "training runs for hours then silently loses all metrics."
+        )
+
+
+# ---------------------------------------------------------------------------
+# DeepVess data pull for zero-shot (prevents FAILED_SETUP)
+# ---------------------------------------------------------------------------
+
+
+class TestDeepVessDataPull:
+    """Setup must pull DeepVess data for zero-shot evaluation conditions."""
+
+    def test_setup_handles_deepvess(self) -> None:
+        """Setup must conditionally pull DeepVess data when EVAL_DATASET=deepvess."""
+        config = _load_yaml(FACTORIAL_YAML)
+        setup = config.get("setup", "")
+        assert "deepvess" in setup, (
+            "Setup must pull DeepVess data for zero-shot conditions. "
+            "Without this, VesselFM zero-shot evaluation crashes."
+        )
+
+
+# ---------------------------------------------------------------------------
 # File mounts validation (P1-G1 from double-check audit)
 # ---------------------------------------------------------------------------
 
