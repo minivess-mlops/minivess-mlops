@@ -240,3 +240,176 @@ class TestRunSectionGuards:
         config = _load_yaml(FACTORIAL_YAML)
         run = config.get("run", "")
         assert "splits.json" in run, "Run section must check for splits.json existence"
+
+
+# ---------------------------------------------------------------------------
+# File mounts validation (P1-G1 from double-check audit)
+# ---------------------------------------------------------------------------
+
+
+class TestFileMounts:
+    """file_mounts must reference valid GCS paths for checkpoint persistence."""
+
+    def test_file_mounts_exists(self) -> None:
+        """Must have file_mounts for checkpoint persistence on spot VMs."""
+        config = _load_yaml(FACTORIAL_YAML)
+        assert "file_mounts" in config, (
+            "Missing file_mounts — checkpoints lost on preemption"
+        )
+
+    def test_file_mounts_gcs_bucket(self) -> None:
+        """file_mounts must reference a gs:// bucket."""
+        config = _load_yaml(FACTORIAL_YAML)
+        file_mounts = config.get("file_mounts", {})
+        gcs_found = False
+        for _mount_path, mount_config in file_mounts.items():
+            source = ""
+            if isinstance(mount_config, dict):
+                source = mount_config.get("source", "")
+            elif isinstance(mount_config, str):
+                source = mount_config
+            if source.startswith("gs://"):
+                gcs_found = True
+        assert gcs_found, "file_mounts must reference a GCS bucket (gs://)"
+
+    def test_file_mounts_uses_mount_cached(self) -> None:
+        """file_mounts should use MOUNT_CACHED for async checkpoint upload."""
+        config = _load_yaml(FACTORIAL_YAML)
+        file_mounts = config.get("file_mounts", {})
+        for mount_path, mount_config in file_mounts.items():
+            if isinstance(mount_config, dict) and mount_config.get(
+                "source", ""
+            ).startswith("gs://"):
+                mode = mount_config.get("mode", "")
+                assert mode == "MOUNT_CACHED", (
+                    f"file_mount {mount_path} should use MOUNT_CACHED (async upload), not {mode}"
+                )
+
+
+# ---------------------------------------------------------------------------
+# Disk size validation (P1-G7 from double-check audit)
+# ---------------------------------------------------------------------------
+
+
+class TestDiskSize:
+    """Disk must be large enough for Docker image + DVC data + checkpoints."""
+
+    def test_disk_size_at_least_100gb(self) -> None:
+        """disk_size must be >= 100 GB to avoid DISK_FULL mid-training."""
+        config = _load_yaml(FACTORIAL_YAML)
+        disk_size = config.get("resources", {}).get("disk_size", 0)
+        assert disk_size >= 100, (
+            f"disk_size={disk_size} GB is too small. Need >= 100 GB "
+            "(Docker image ~9 GB, DVC data ~2.7 GB, checkpoints ~5 GB/model)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Setup script DVC init validation (P1-G8 from double-check audit)
+# ---------------------------------------------------------------------------
+
+
+class TestSetupDvcInit:
+    """Setup must initialize DVC without git (Docker container has no repo)."""
+
+    def test_dvc_init_no_scm(self) -> None:
+        """Setup must run 'dvc init --no-scm' for Docker containers without git."""
+        config = _load_yaml(FACTORIAL_YAML)
+        setup = config.get("setup", "")
+        assert "dvc init" in setup, "Setup must run dvc init"
+        assert "--no-scm" in setup, (
+            "DVC init must use --no-scm (Docker container has no git repo)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Escape hatch env vars (P1-G6 from double-check audit)
+# ---------------------------------------------------------------------------
+
+
+class TestEscapeHatchEnvVars:
+    """Cloud VMs need MINIVESS_ALLOW_HOST and PREFECT_DISABLED escape hatches."""
+
+    def test_minivess_allow_host_set(self) -> None:
+        """MINIVESS_ALLOW_HOST=1 must be set (bypass Docker context gate on cloud VM)."""
+        config = _load_yaml(FACTORIAL_YAML)
+        envs = config.get("envs", {})
+        assert "MINIVESS_ALLOW_HOST" in envs, (
+            "MINIVESS_ALLOW_HOST must be in envs — train_flow.py Docker gate blocks without it"
+        )
+
+    def test_prefect_disabled_set(self) -> None:
+        """PREFECT_DISABLED=1 must be set (no Prefect server on cloud VM)."""
+        config = _load_yaml(FACTORIAL_YAML)
+        envs = config.get("envs", {})
+        assert "PREFECT_DISABLED" in envs, (
+            "PREFECT_DISABLED must be in envs — no Prefect server available on cloud VM"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Setup GPU verification (P1-G9 from double-check audit)
+# ---------------------------------------------------------------------------
+
+
+class TestSetupGpuVerification:
+    """Setup should verify GPU availability as a preflight check."""
+
+    def test_nvidia_smi_in_setup(self) -> None:
+        """Setup should run nvidia-smi to verify GPU is available."""
+        config = _load_yaml(FACTORIAL_YAML)
+        setup = config.get("setup", "")
+        assert "nvidia-smi" in setup, (
+            "Setup should run nvidia-smi as GPU preflight check"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Parametrized validation for ALL SkyPilot YAMLs (P2-G5 from audit)
+# ---------------------------------------------------------------------------
+
+
+def _discover_skypilot_yamls() -> list[Path]:
+    """Find all SkyPilot YAML files in deployment/skypilot/."""
+    skypilot_dir = Path("deployment/skypilot")
+    if not skypilot_dir.exists():
+        return []
+    return sorted(skypilot_dir.glob("*.yaml"))
+
+
+class TestAllSkyPilotYamls:
+    """Every YAML in deployment/skypilot/ must pass basic structural checks."""
+
+    @pytest.mark.parametrize(
+        "yaml_path",
+        _discover_skypilot_yamls(),
+        ids=[p.name for p in _discover_skypilot_yamls()],
+    )
+    def test_yaml_parseable(self, yaml_path: Path) -> None:
+        """Every SkyPilot YAML must parse without YAML errors."""
+        config = _load_yaml(yaml_path)
+        assert isinstance(config, dict), f"{yaml_path.name} did not parse to a dict"
+
+    @pytest.mark.parametrize(
+        "yaml_path",
+        _discover_skypilot_yamls(),
+        ids=[p.name for p in _discover_skypilot_yamls()],
+    )
+    def test_no_t4_anywhere(self, yaml_path: Path) -> None:
+        """T4 must NOT appear in any SkyPilot YAML accelerators."""
+        config = _load_yaml(yaml_path)
+        accels = config.get("resources", {}).get("accelerators", {})
+        if isinstance(accels, dict | str):
+            assert "T4" not in accels, f"T4 banned in {yaml_path.name}"
+
+    @pytest.mark.parametrize(
+        "yaml_path",
+        _discover_skypilot_yamls(),
+        ids=[p.name for p in _discover_skypilot_yamls()],
+    )
+    def test_no_job_recovery_anywhere(self, yaml_path: Path) -> None:
+        """job_recovery must NOT appear in any SkyPilot YAML (removed in v1.0)."""
+        config = _load_yaml(yaml_path)
+        assert "job_recovery" not in config, (
+            f"job_recovery banned in {yaml_path.name} — removed in SkyPilot v1.0"
+        )

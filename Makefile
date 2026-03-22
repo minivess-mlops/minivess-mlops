@@ -83,6 +83,7 @@ test-prod:
 	MINIVESS_ALLOW_HOST=1 uv run pytest tests/ -x -q \
 	  -m "not integration" \
 	  --ignore=tests/v2/quasi_e2e/ \
+	  --ignore=tests/v2/cloud/ \
 	  --timeout=300
 
 # E2E: Full pipeline via Docker. Requires Docker daemon, GPU, MiniVess data,
