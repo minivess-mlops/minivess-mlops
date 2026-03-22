@@ -71,6 +71,67 @@ class TestDeepVessRegistryConfig:
         assert "ecommons.cornell.edu" in config.source_url
 
 
+class TestAnalysisFlowExternalDataLoaders:
+    """Test that _build_dataloaders_from_config returns actual DataLoaders, not raw pairs."""
+
+    def test_build_dataloaders_returns_dataloader_not_list(
+        self, tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The return value must be DataLoader objects, not list[dict]."""
+
+        # Create synthetic test data
+        data_dir = tmp_path / "external"  # type: ignore[operator]
+        deepvess_dir = data_dir / "deepvess" / "images"
+        labels_dir = data_dir / "deepvess" / "labels"
+        deepvess_dir.mkdir(parents=True)
+        labels_dir.mkdir(parents=True)
+        (deepvess_dir / "vol_001.tif").write_bytes(b"fake")
+        (labels_dir / "vol_001.tif").write_bytes(b"fake")
+
+        monkeypatch.setenv("EXTERNAL_DATA_DIR", str(data_dir))
+        monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
+
+        from minivess.orchestration.flows.analysis_flow import (
+            _build_dataloaders_from_config,
+        )
+
+        result = _build_dataloaders_from_config({})
+
+        # The result must have DataLoader objects, not raw pair dicts
+        assert "deepvess" in result
+        deepvess_data = result["deepvess"]
+        assert "all" in deepvess_data
+
+        # This is the critical check: "all" must be a DataLoader, not a list
+        all_value = deepvess_data["all"]
+        assert not isinstance(all_value, list), (
+            f"_build_dataloaders_from_config returns raw pairs (list), not DataLoader. "
+            f"Got type: {type(all_value)}. Fix analysis_flow.py line 2122."
+        )
+
+
+class TestBiostatisticsTestSplit:
+    """Test that biostatistics flow processes test split for DeepVess."""
+
+    def test_build_per_volume_data_supports_test_split(self) -> None:
+        """The function must accept split='test' and process test/ prefix metrics."""
+        import inspect
+
+        from minivess.orchestration.flows.biostatistics_flow import (
+            _build_per_volume_data,
+        )
+
+        sig = inspect.signature(_build_per_volume_data)
+        assert "split" in sig.parameters, (
+            "_build_per_volume_data must have a 'split' parameter"
+        )
+        # Default should be "trainval" for backward compat
+        default = sig.parameters["split"].default
+        assert default == "trainval", (
+            f"Default split should be 'trainval', got {default}"
+        )
+
+
 class TestDeepVessDiscovery:
     """Test that discover_external_test_pairs works for DeepVess layout."""
 
