@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  source_of_truth: src/minivess/pipeline/post_training_plugins/swag.py
+  decisions_referenced:
+    - post_training_methods (only {none, swag})
+    - post_training_execution_model (same flow, parent iterates)
+  context_loaded:
+    metalearning:
+      - 2026-03-22-hardcoded-execution-location-in-factorial-configs.md
+    registry: knowledge-graph/decisions/registry.yaml
+-->
+<plan>
+  <metadata>
+    <title>SWAG DataLoader Implementation — Wire calibration_data to SWAGPlugin</title>
+    <branch>test/debug-factorial-4th-pass</branch>
+    <date>2026-03-22</date>
+    <status>ready</status>
+    <priority>P0 — SWAG is a factorial level, must work before GCP launch</priority>
+    <skill>self-learning-iterative-coder</skill>
+  </metadata>
+
+  <problem>
+    SWAGPlugin requires calibration_data = {"train_loader": DataLoader, "model": nn.Module}
+    but BOTH execution paths skip SWAG because calibration_data is never populated:
+
+    1. Parent flow path (GCP): train_flow.py:_run_swag_post_training() passes
+       calibration_data=None → validate_inputs() fails → SWAG skipped
+    2. Standalone path (local): run_factorial_post_training() has no calibration_data
+       parameter → explicitly skips SWAG with warning
+
+    Result: SWAG never runs anywhere. The "3rd pass validation" only tested SWAG
+    in isolation (unit tests), never end-to-end through the flow.
+  </problem>
+
+  <architecture>
+    <!--
+      SWAGPlugin.execute() needs:
+        1. checkpoint_paths: list[Path] — best checkpoint from training
+        2. calibration_data["train_loader"]: DataLoader — for SWALR resumed training
+        3. calibration_data["model"]: nn.Module — architecture to load state_dict into
+        4. config: dict — swa_lr, swa_epochs, max_rank, n_samples, update_bn
+
+      Two fix paths:
+        A. Parent flow (train_flow.py) — shares GPU session with training sub-flow.
+           Training sub-flow already has model + DataLoaders. Just pass them.
+        B. Standalone (run_factorial_post_training) — needs to build DataLoaders
+           from splits + data config, and model from model_family tag.
+    -->
+
+    <path id="A" name="Parent Flow (GCP path)">
+      training_subflow() produces: model, train_loader, checkpoint_dirs
+      → _run_swag_post_training() receives training_result
+      → Build calibration_data from training_result fields
+      → Pass to SWAGPlugin via PluginInput
+    </path>
+
+    <path id="B" name="Standalone (local orchestrator path)">
+      run_factorial_post_training() receives: checkpoint_paths, methods
+      → NEW: also receives calibration_data (optional)
+      → When method=="swag" and calibration_data provided: call SWAGPlugin
+      → Script builds DataLoader from splits, model from model_family
+    </path>
+  </architecture>
+
+  <tasks>
+    <!-- TDD: RED → GREEN → VERIFY cycle per task -->
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- PHASE 1: Parent Flow Fix (Path A — GCP) -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+
+    <task id="T1" phase="RED">
+      <title>Test: _run_swag_post_training passes calibration_data to SWAGPlugin</title>
+      <file>tests/v2/unit/orchestration/test_train_post_training_subflow.py</file>
+      <description>
+        Write test that _run_swag_post_training() constructs a PluginInput with
+        calibration_data containing "train_loader" and "model" keys, extracted
+        from the TrainingFlowResult.
+
+        Test should mock SWAGPlugin and verify validate_inputs() receives
+        non-None calibration_data with the correct keys.
+      </description>
+      <assertion>
+        plugin_input.calibration_data is not None
+        "train_loader" in plugin_input.calibration_data
+        "model" in plugin_input.calibration_data
+      </assertion>
+    </task>
+
+    <task id="T2" phase="GREEN">
+      <title>Implement: training_subflow returns model + DataLoaders in result</title>
+      <file>src/minivess/orchestration/flows/train_flow.py</file>
+      <description>
+        Modify TrainingFlowResult to carry the trained model and train DataLoader
+        so post_training_subflow can reuse them. Add optional fields:
+          - trained_model: nn.Module | None
+          - train_loader: Any | None  (DataLoader type)
+
+        In training_subflow(), after train_one_fold_task() completes, store the
+        model and loader in the result.
+      </description>
+    </task>
+
+    <task id="T3" phase="GREEN">
+      <title>Implement: _run_swag_post_training builds calibration_data from result</title>
+      <file>src/minivess/orchestration/flows/train_flow.py</file>
+      <description>
+        In _run_swag_post_training(), replace calibration_data=None with:
+
+        calibration_data = {
+            "train_loader": training_result.train_loader,
+            "model": training_result.trained_model,
+        }
+
+        Remove the "Phase 2 enhancement" comment. Remove the early return on
+        validation errors (let it raise instead — loud failures per Rule 25).
+      </description>
+    </task>
+
+    <task id="T4" phase="VERIFY">
+      <title>Verify: parent flow SWAG path runs end-to-end (mock)</title>
+      <file>tests/v2/unit/orchestration/test_train_post_training_subflow.py</file>
+      <description>
+        Run existing + new tests for post_training_subflow. Verify SWAG is no
+        longer skipped. Mock the actual SWAG training (no GPU needed for unit test).
+      </description>
+      <gate>make test-staging passes</gate>
+    </task>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- PHASE 2: Standalone Flow Fix (Path B — local orchestrator) -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+
+    <task id="T5" phase="RED">
+      <title>Test: run_factorial_post_training accepts calibration_data parameter</title>
+      <file>tests/v2/unit/test_post_training_factorial_execution.py</file>
+      <description>
+        Write test that run_factorial_post_training() accepts an optional
+        calibration_data parameter. When provided with methods=["swag"],
+        it should NOT skip SWAG (currently it does).
+
+        Mock SWAGPlugin to avoid GPU. Verify the plugin is called with
+        the provided calibration_data.
+      </description>
+    </task>
+
+    <task id="T6" phase="GREEN">
+      <title>Implement: add calibration_data to run_factorial_post_training</title>
+      <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+      <description>
+        1. Add calibration_data: dict[str, Any] | None = None to signature
+        2. Replace the SWAG skip block (lines 523-531) with actual SWAGPlugin call:
+
+           elif method == "swag":
+               if calibration_data is None:
+                   raise ValueError(
+                       "SWAG requires calibration_data with 'train_loader' and 'model'. "
+                       "Build DataLoaders from splits before calling."
+                   )
+               plugin = SWAGPlugin()
+               plugin_input = PluginInput(
+                   checkpoint_paths=checkpoint_paths,
+                   config=plugin_cfg,
+                   calibration_data=calibration_data,
+               )
+               errors = plugin.validate_inputs(plugin_input)
+               if errors:
+                   raise ValueError(f"SWAG validation failed: {errors}")
+               output = plugin.execute(plugin_input)
+               # ... handle output
+
+        Note: raise ValueError, NOT logger.warning + skip. Rule 25: loud failures.
+      </description>
+    </task>
+
+    <task id="T7" phase="GREEN">
+      <title>Implement: local script builds DataLoaders for SWAG</title>
+      <file>scripts/run_local_debug_3flow.py</file>
+      <description>
+        In phase_1_post_training(), build train DataLoader from fold-0 splits:
+
+        from minivess.data.loader import build_train_loader
+        from minivess.data.splits import load_splits
+        from minivess.adapters.model_builder import build_adapter
+
+        splits = load_splits(SPLITS_FILE)
+        fold0_train = splits[0].train
+        train_loader = build_train_loader(fold0_train, data_config, batch_size=2, cache_rate=0.0)
+
+        For each loss:
+          model_config = ModelConfig(family=ModelFamily.MONAI_DYNUNET, ...)
+          adapter = build_adapter(model_config)
+          calibration_data = {"train_loader": train_loader, "model": adapter.model}
+
+          results = run_factorial_post_training(
+              ...,
+              calibration_data=calibration_data,
+          )
+      </description>
+    </task>
+
+    <task id="T8" phase="VERIFY">
+      <title>Verify: local 3-flow script runs SWAG successfully</title>
+      <description>
+        Run: MINIVESS_ALLOW_HOST=1 uv run python scripts/run_local_debug_3flow.py
+
+        Verify:
+        - Phase 1 produces 8 post-training variants (4 losses × {none, swag})
+        - No SWAG warnings
+        - MLflow runs have post_training_method="swag" tags
+        - SWAG model files exist in outputs/post_training/
+      </description>
+      <gate>All 3 phases complete with 0 issues</gate>
+    </task>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- PHASE 3: Integration Verification -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+
+    <task id="T9" phase="VERIFY">
+      <title>Verify: make test-staging passes with all changes</title>
+      <gate>5630+ tests pass, 0 failures</gate>
+    </task>
+
+    <task id="T10" phase="VERIFY">
+      <title>Verify: dry run of factorial script with new loss count</title>
+      <description>
+        ./scripts/run_factorial.sh --dry-run configs/factorial/debug.yaml
+        → 32 trainable + 2 zero-shot = 34 total
+        → POST_TRAINING_METHODS=none,swag in each job
+      </description>
+    </task>
+  </tasks>
+
+  <risk-analysis>
+    <risk id="R1" severity="medium">
+      TrainingFlowResult carrying model + DataLoader may cause serialization
+      issues if Prefect tries to serialize the result across process boundaries.
+      Mitigation: Use Prefect's `allow_failure()` or mark fields as non-serializable.
+    </risk>
+    <risk id="R2" severity="low">
+      SWAG training (swa_epochs=2 for debug) adds GPU time per job.
+      DynUNet SWAG on RTX 2070 Super: ~30s per epoch × 2 = ~1 min per condition.
+      Total: 4 losses × 1 min = ~4 min extra for Phase 1.
+    </risk>
+    <risk id="R3" severity="medium">
+      Memory: keeping model + train_loader in TrainingFlowResult while
+      post_training_subflow runs. DynUNet is small (~5.6M params, ~22MB).
+      SAM3 models are larger (~648M params). May need explicit cleanup.
+    </risk>
+  </risk-analysis>
+
+  <cross-reference>
+    <file path="src/minivess/pipeline/post_training_plugins/swag.py" relation="SWAGPlugin"/>
+    <file path="src/minivess/pipeline/post_training_plugin.py" relation="PluginInput/PluginOutput"/>
+    <file path="src/minivess/orchestration/flows/train_flow.py" relation="parent flow"/>
+    <file path="src/minivess/orchestration/flows/post_training_flow.py" relation="standalone flow"/>
+    <file path="src/minivess/data/loader.py" relation="DataLoader builders"/>
+    <file path="scripts/run_local_debug_3flow.py" relation="local orchestrator"/>
+  </cross-reference>
+</plan>
