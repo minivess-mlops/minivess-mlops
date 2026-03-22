@@ -34,7 +34,6 @@ from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.prometheus_metrics import update_estimated_cost_gauges
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
-    EXPERIMENT_POST_TRAINING,
     FLOW_NAME_POST_TRAINING_SUBFLOW,
     FLOW_NAME_TRAIN,
     FLOW_NAME_TRAINING_SUBFLOW,
@@ -826,7 +825,10 @@ def training_subflow(
             fold_results.append(fold_result)
             continue
 
-        checkpoint_dir = checkpoint_base / f"fold_{actual_fold_id}"
+        # Namespace checkpoints by condition (model+loss) to prevent collisions
+        # when concurrent factorial jobs share the same GCS-backed checkpoint mount.
+        condition_name = f"{model_family}_{loss_name}"
+        checkpoint_dir = checkpoint_base / condition_name / f"fold_{actual_fold_id}"
         fold_checkpoint_dirs[actual_fold_id] = checkpoint_dir
         fold_result = train_one_fold_task(
             actual_fold_id, fold_split, config, checkpoint_dir
@@ -1139,12 +1141,12 @@ def _run_swag_post_training(
         # Fallback to 3fold_seed42.json
         splits_file = splits_dir / "3fold_seed42.json"
     splits = load_splits(splits_file)
-    fold_id: int = int(config.get("fold_id", 0))
-    fold_split = splits[fold_id] if fold_id < len(splits) else splits[0]
-    train_dicts = (
-        fold_split.train
+    pt_fold_id: int = int(config.get("fold_id", 0))
+    fold_split = splits[pt_fold_id] if pt_fold_id < len(splits) else splits[0]
+    train_dicts: list[dict[str, str]] = (
+        fold_split.train  # type: ignore[union-attr]
         if hasattr(fold_split, "train")
-        else fold_split.get("train", [])
+        else fold_split["train"]  # type: ignore[index]
     )
 
     # Respect max_train_volumes from config (debug = half data)
