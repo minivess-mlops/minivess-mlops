@@ -100,7 +100,8 @@ def check_dvc_data_on_gcs() -> tuple[bool, str]:
     prefix, suffix = raw_hash[:2], raw_hash[2:]
     gcs_path = f"{GCS_BUCKET}/files/md5/{prefix}/{suffix}"
     result = _run(["gsutil", "ls", gcs_path])
-    if result.returncode == 0:
+    # DC-5: Check both exit code AND stdout — gsutil ls can return 0 with empty output
+    if result.returncode == 0 and result.stdout.strip():
         return True, f"DVC data hash found on GCS: {raw_hash}"
     return False, (
         f"DVC data hash NOT found on GCS: {raw_hash} "
@@ -162,14 +163,12 @@ def check_setup_dvc_paths() -> tuple[bool, str]:
                     if not next_part.startswith("-"):
                         dvc_pull_paths.append(next_part)
 
-    if not dvc_pull_paths:
-        # No path-specific pull found — might be bare "dvc pull -r gcs"
-        if "dvc pull" in setup and "dvc pull data/" not in setup:
-            return False, (
-                "Setup uses bare 'dvc pull -r gcs' without path filter. "
-                "This will fail if any DVC-tracked output is not on GCS. "
-                "Use: dvc pull data/raw/minivess -r gcs"
-            )
+    if not dvc_pull_paths and "dvc pull" in setup and "dvc pull data/" not in setup:
+        return False, (
+            "Setup uses bare 'dvc pull -r gcs' without path filter. "
+            "This will fail if any DVC-tracked output is not on GCS. "
+            "Use: dvc pull data/raw/minivess -r gcs"
+        )
 
     # Verify each pull path has a dvc.lock entry
     dvc_lock = yaml.safe_load(DVC_LOCK.read_text(encoding="utf-8"))
@@ -181,8 +180,7 @@ def check_setup_dvc_paths() -> tuple[bool, str]:
     for pull_path in dvc_pull_paths:
         # Check if pull_path matches or is a parent of any locked output
         matched = any(
-            lo.startswith(pull_path) or pull_path.startswith(lo)
-            for lo in locked_outs
+            lo.startswith(pull_path) or pull_path.startswith(lo) for lo in locked_outs
         )
         if not matched:
             return False, (
@@ -232,10 +230,13 @@ def check_skypilot_yaml() -> tuple[bool, str]:
     try:
         # Use sky.Task.from_yaml() for full validation
         sky_bin = REPO_ROOT / ".venv" / "bin" / "python"
-        result = _run([
-            str(sky_bin), "-c",
-            f"import sky; sky.Task.from_yaml('{SKYPILOT_YAML}')",
-        ])
+        result = _run(
+            [
+                str(sky_bin),
+                "-c",
+                f"import sky; sky.Task.from_yaml('{SKYPILOT_YAML}')",
+            ]
+        )
         if result.returncode == 0:
             return True, f"SkyPilot YAML valid: {SKYPILOT_YAML.name}"
         return False, f"SkyPilot YAML invalid: {result.stderr[:200]}"

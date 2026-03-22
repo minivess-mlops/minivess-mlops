@@ -70,9 +70,7 @@ class TestNoT4:
         config = _load_yaml(FACTORIAL_YAML)
         accels = config.get("resources", {}).get("accelerators", {})
         if isinstance(accels, dict):
-            assert "T4" not in accels, (
-                f"T4 banned (no BF16). Accelerators: {accels}"
-            )
+            assert "T4" not in accels, f"T4 banned (no BF16). Accelerators: {accels}"
         elif isinstance(accels, str):
             assert "T4" not in accels
 
@@ -80,6 +78,18 @@ class TestNoT4:
 # ---------------------------------------------------------------------------
 # Spot instances
 # ---------------------------------------------------------------------------
+
+
+class TestBannedFields:
+    """Fields removed or unsupported in SkyPilot v1.0+."""
+
+    def test_no_job_recovery_field(self) -> None:
+        """job_recovery was removed in SkyPilot v1.0 (caused YAML parse failure in 4th pass)."""
+        config = _load_yaml(FACTORIAL_YAML)
+        assert "job_recovery" not in config, (
+            "job_recovery field is banned — removed in SkyPilot v1.0. "
+            "See: run-debug-factorial-experiment-report-4th-pass-failure.md"
+        )
 
 
 class TestSpotEnabled:
@@ -135,6 +145,7 @@ class TestRequiredEnvVars:
             "MAX_EPOCHS",
             "EXPERIMENT_NAME",
             "POST_TRAINING_METHODS",
+            "MLFLOW_TRACKING_URI",  # DC-2: silent MLflow failure without this
         }
         declared = set(envs.keys())
         missing = required - declared
@@ -168,7 +179,9 @@ class TestSetupBannedCommands:
     def test_no_pip_install(self) -> None:
         config = _load_yaml(FACTORIAL_YAML)
         setup = config.get("setup", "")
-        assert "pip install" not in setup, "pip install banned in setup (use Docker image)"
+        assert "pip install" not in setup, (
+            "pip install banned in setup (use Docker image)"
+        )
 
     def test_no_git_clone(self) -> None:
         config = _load_yaml(FACTORIAL_YAML)
@@ -226,6 +239,4 @@ class TestRunSectionGuards:
         """Run must check splits.json exists before proceeding."""
         config = _load_yaml(FACTORIAL_YAML)
         run = config.get("run", "")
-        assert "splits.json" in run, (
-            "Run section must check for splits.json existence"
-        )
+        assert "splits.json" in run, "Run section must check for splits.json existence"
