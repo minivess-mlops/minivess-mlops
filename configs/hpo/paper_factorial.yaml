@@ -43,6 +43,7 @@ factors:
     - cbdice_cldice
     - dice_ce
     - dice_ce_cldice
+    - bce_dice_05cldice
   aux_calibration:
     - true
     - false

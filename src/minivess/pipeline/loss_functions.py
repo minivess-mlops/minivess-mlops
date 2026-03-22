@@ -40,6 +40,7 @@ _LIBRARY_COMPOUND_LOSSES: frozenset[str] = frozenset(
     {
         "dice_ce_cldice",
         "cbdice_cldice",
+        "bce_dice_05cldice",
     }
 )
 
@@ -381,6 +382,91 @@ class CbDiceClDiceLoss(nn.Module):
         return result
 
 
+class BceDiceClDiceLoss(nn.Module):
+    """Compound loss: BCE + Dice + clDice with independent weights.
+
+    Matches the loss function from TopoLoRA-SAM (Khazem et al. 2025):
+    L = lambda_bce * BCE + lambda_dice * Dice + lambda_cldice * clDice
+
+    Paper defaults: 1.0 * BCE + 1.0 * Dice + 0.5 * clDice.
+    This treats clDice as a supplementary topology regularizer (20% relative
+    weight), unlike VesselCompoundLoss which gives clDice equal weight (50%).
+
+    The paper ablated lambda_cldice over {0.0, 0.25, 0.5, 1.0, 2.0} and found
+    0.5 optimal — region-first with topology as regularizer.
+
+    Reference:
+      [Khazem et al. (2025). "Topology-Aware Low-Rank Adaptation for Retinal
+      Vessel Segmentation."](https://arxiv.org/abs/2601.02273)
+      Code: https://github.com/salimkhazem/Seglab
+
+    Parameters
+    ----------
+    lambda_bce:
+        Weight for binary cross-entropy component.
+    lambda_dice:
+        Weight for Dice loss component.
+    lambda_cldice:
+        Weight for soft clDice (topology) component.
+    softmax:
+        Apply softmax to logits for Dice (BCE uses logits directly).
+    to_onehot_y:
+        Convert labels to one-hot for Dice.
+    """
+
+    def __init__(
+        self,
+        lambda_bce: float = 1.0,
+        lambda_dice: float = 1.0,
+        lambda_cldice: float = 0.5,
+        *,
+        softmax: bool = True,
+        to_onehot_y: bool = True,
+    ) -> None:
+        super().__init__()
+        self.lambda_bce = lambda_bce
+        self.lambda_dice = lambda_dice
+        self.lambda_cldice = lambda_cldice
+
+        self.bce = nn.BCEWithLogitsLoss(reduction="mean")
+        self.dice = DiceLoss(softmax=softmax, to_onehot_y=to_onehot_y)
+        self.cldice = SoftclDiceLoss(
+            smooth=1e-5,
+            iter_=10,  # Match SegLab/paper default (MONAI defaults to 3)
+        )
+
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        """Compute compound BCE + Dice + clDice loss.
+
+        Parameters
+        ----------
+        logits:
+            Model output (B, C, D, H, W).
+        labels:
+            Ground truth (B, 1, D, H, W) integer labels.
+        """
+        # BCE operates on foreground channel with float labels
+        labels_float = labels.float()
+        bce_logits = logits[:, 1:2] if logits.shape[1] > 1 else logits
+        if labels_float.shape[1] != bce_logits.shape[1]:
+            labels_float = labels_float.expand_as(bce_logits)
+        bce_loss = self.bce(bce_logits, labels_float)
+
+        # Dice operates on full logits with integer labels
+        dice_loss = self.dice(logits, labels)
+
+        # clDice needs probabilities + one-hot labels
+        probs, labels_onehot = _labels_to_onehot(logits, labels)
+        cldice_loss = self.cldice(probs, labels_onehot)
+
+        result: torch.Tensor = (
+            self.lambda_bce * bce_loss
+            + self.lambda_dice * dice_loss
+            + self.lambda_cldice * cldice_loss
+        )
+        return result
+
+
 class GraphTopologyLoss(nn.Module):
     """Compound graph topology loss: cbdice_cldice + skeleton_recall + CAPE.
 
@@ -543,6 +629,8 @@ def build_loss_function(
         )
     elif loss_name == "cbdice_cldice":
         loss_fn = CbDiceClDiceLoss(softmax=softmax, to_onehot_y=to_onehot_y)
+    elif loss_name == "bce_dice_05cldice":
+        loss_fn = BceDiceClDiceLoss(softmax=softmax, to_onehot_y=to_onehot_y)
     # --- EXPERIMENTAL losses (custom implementations) ---
     elif loss_name == "cb_dice":
         loss_fn = ClassBalancedDiceLoss(

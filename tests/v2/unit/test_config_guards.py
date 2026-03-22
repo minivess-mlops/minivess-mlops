@@ -88,7 +88,7 @@ class TestFactorialMatchesKG:
         with factorial_path.open(encoding="utf-8") as f:
             factorial = yaml.safe_load(f)
 
-        expected_losses = {"cbdice_cldice", "dice_ce", "dice_ce_cldice"}
+        expected_losses = {"cbdice_cldice", "dice_ce", "dice_ce_cldice", "bce_dice_05cldice"}
         actual_losses = set(factorial["factors"]["loss_name"])
         assert actual_losses == expected_losses
 

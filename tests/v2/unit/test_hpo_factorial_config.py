@@ -1,9 +1,9 @@
-"""Tests for paper_factorial.yaml — 24-cell grid configuration.
+"""Tests for paper_factorial.yaml — 32-cell grid configuration.
 
-T1.3: Load configs/hpo/paper_factorial.yaml, assert 24 cells
-(4 models x 3 losses x 2 aux_calibration).
+T1.3: Load configs/hpo/paper_factorial.yaml, assert 32 cells
+(4 models x 4 losses x 2 aux_calibration).
 
-GUARDRAIL: 24 cells, NOT 128. LR/batch are NOT factors.
+GUARDRAIL: 32 cells, NOT 128. LR/batch are NOT factors.
 """
 
 from __future__ import annotations
@@ -18,14 +18,14 @@ HPO_DIR = PROJECT_ROOT / "configs" / "hpo"
 
 
 class TestPaperFactorialConfig:
-    """Validate the paper factorial YAML produces exactly 24 cells."""
+    """Validate the paper factorial YAML produces exactly 32 cells."""
 
     def test_paper_factorial_yaml_exists(self) -> None:
         """configs/hpo/paper_factorial.yaml must exist."""
         path = HPO_DIR / "paper_factorial.yaml"
         assert path.exists(), (
             f"paper_factorial.yaml not found at {path}. "
-            "Create the 24-cell factorial config for the paper study."
+            "Create the 32-cell factorial config for the paper study."
         )
 
     def test_paper_factorial_is_valid_yaml(self) -> None:
@@ -50,16 +50,16 @@ class TestPaperFactorialConfig:
         )
         assert "fixed" in data, "Missing 'fixed' key for non-swept parameters"
 
-    def test_paper_factorial_24_cells(self) -> None:
-        """Factorial must produce exactly 24 cells (4 x 3 x 2)."""
+    def test_paper_factorial_32_cells(self) -> None:
+        """Factorial must produce exactly 32 cells (4 x 4 x 2)."""
         path = HPO_DIR / "paper_factorial.yaml"
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
         factors = data["factors"]
         total_cells = math.prod(len(v) for v in factors.values())
-        assert total_cells == 24, (
-            f"Factorial must produce 24 cells (4 models x 3 losses x 2 aux_calib), "
+        assert total_cells == 32, (
+            f"Factorial must produce 32 cells (4 models x 4 losses x 2 aux_calib), "
             f"got {total_cells} from factors: "
             + ", ".join(f"{k}={len(v)}" for k, v in factors.items())
         )
@@ -78,10 +78,10 @@ class TestPaperFactorialConfig:
             f"Expected 4 model families, got {len(factors['model_family'])}"
         )
 
-        # 3 loss functions
+        # 4 loss functions
         assert "loss_name" in factors
-        assert len(factors["loss_name"]) == 3, (
-            f"Expected 3 losses, got {len(factors['loss_name'])}"
+        assert len(factors["loss_name"]) == 4, (
+            f"Expected 4 losses, got {len(factors['loss_name'])}"
         )
 
         # 2 aux_calibration values
@@ -98,10 +98,10 @@ class TestPaperFactorialConfig:
 
         factors = data["factors"]
         assert "learning_rate" not in factors, (
-            "learning_rate must NOT be a factor — guardrail: 24 cells, not 128"
+            "learning_rate must NOT be a factor — guardrail: 32 cells, not 128"
         )
         assert "batch_size" not in factors, (
-            "batch_size must NOT be a factor — guardrail: 24 cells, not 128"
+            "batch_size must NOT be a factor — guardrail: 32 cells, not 128"
         )
 
     def test_paper_factorial_fixed_params(self) -> None:
@@ -122,8 +122,8 @@ class TestPaperFactorialConfig:
 
         assert "mlflow_experiment" in data, "Missing mlflow_experiment key"
 
-    def test_paper_factorial_72_total_runs(self) -> None:
-        """24 cells x 3 folds = 72 total training runs."""
+    def test_paper_factorial_96_total_runs(self) -> None:
+        """32 cells x 3 folds = 96 total training runs."""
         path = HPO_DIR / "paper_factorial.yaml"
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
@@ -132,6 +132,6 @@ class TestPaperFactorialConfig:
         total_cells = math.prod(len(v) for v in factors.values())
         num_folds = data["fixed"]["num_folds"]
         total_runs = total_cells * num_folds
-        assert total_runs == 72, (
-            f"Expected 72 total runs (24 cells x 3 folds), got {total_runs}"
+        assert total_runs == 96, (
+            f"Expected 96 total runs (32 cells x 3 folds), got {total_runs}"
         )

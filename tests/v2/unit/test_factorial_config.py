@@ -21,26 +21,26 @@ class TestFactorialConfigParsing:
     """Factorial YAML parsing with zero hardcoded factor names."""
 
     def test_parse_paper_full_yaml(self) -> None:
-        """paper_full.yaml should parse to 480 conditions (4×3×2×2×2×5)."""
+        """paper_full.yaml should parse to 640 conditions (4×4×2×2×2×5)."""
         yaml_path = Path("configs/factorial/paper_full.yaml")
         if not yaml_path.exists():
             pytest.skip("paper_full.yaml not found")
         design = parse_factorial_yaml(yaml_path)
         assert design.experiment_name == "paper_factorial"
-        assert design.n_conditions == 480  # 4×3×2×2×2×5
-        assert design.n_training_conditions == 24  # 4×3×2
-        assert design.n_training_runs == 72  # 24×3 folds
+        assert design.n_conditions == 640  # 4×4×2×2×2×5
+        assert design.n_training_conditions == 32  # 4×4×2
+        assert design.n_training_runs == 96  # 32×3 folds
 
     def test_parse_debug_yaml(self) -> None:
-        """debug.yaml should parse to 480 conditions (IDENTICAL factors to production, Rule 27)."""
+        """debug.yaml should parse to 640 conditions (IDENTICAL factors to production, Rule 27)."""
         yaml_path = Path("configs/factorial/debug.yaml")
         if not yaml_path.exists():
             pytest.skip("debug.yaml not found")
         design = parse_factorial_yaml(yaml_path)
         assert design.experiment_name == "debug_factorial"
-        assert design.n_conditions == 480  # 4×3×2×2×2×5 (same as production)
-        assert design.n_training_conditions == 24  # 4×3×2
-        assert design.n_training_runs == 24  # 24×1 fold
+        assert design.n_conditions == 640  # 4×4×2×2×2×5 (same as production)
+        assert design.n_training_conditions == 32  # 4×4×2
+        assert design.n_training_runs == 32  # 32×1 fold
         assert design.debug is True
 
     def test_parse_smoke_test_yaml(self) -> None:
@@ -91,7 +91,7 @@ class TestFactorialConfigParsing:
             pytest.skip("debug.yaml not found")
         design = parse_factorial_yaml(yaml_path)
         conditions = design.training_conditions()
-        assert len(conditions) == 24  # 4×3×2
+        assert len(conditions) == 32  # 4×4×2
 
     def test_all_conditions_full_cartesian(self) -> None:
         """all_conditions() should return ALL-layer Cartesian product."""
@@ -110,7 +110,7 @@ class TestFactorialConfigParsing:
         design = parse_factorial_yaml(yaml_path)
         levels = design.factor_levels()
         assert len(levels["model_family"]) == 4
-        assert len(levels["loss_name"]) == 3
+        assert len(levels["loss_name"]) == 4
         assert len(levels["ensemble_strategy"]) == 5
 
 

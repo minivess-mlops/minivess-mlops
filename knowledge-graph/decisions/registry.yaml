@@ -31,11 +31,11 @@ decisions:
     question: "What is the full factorial design?"
     answer: >
       4 layers (execution location is NOT hardcoded — user's deployment choice):
-      Layer A (training): 4 models x 3 losses x 2 aux_calib = 24 cells.
+      Layer A (training): 4 models x 4 losses x 2 aux_calib = 32 cells.
       Layer B (post-training): {none, swag} — runs in same flow as training.
       Layer C (analysis): 2 recalibration x 5 ensemble.
       Layer D (biostatistics): analytical choices.
-      Total: 4x3x2 x 2 x 2 x 5 = 480 conditions across all layers.
+      Total: 4x4x2 x 2 x 2 x 5 = 640 conditions across all layers.
       Authoritative config: configs/factorial/paper_full.yaml (layered structure).
     decided: "2026-03-20"
     updated: "2026-03-22"

@@ -1,7 +1,7 @@
 # Debug factorial: FULL production experiment with reduced epochs/data/folds.
 #
-# 4 models × 3 losses × 2 aux_calib × 2 post-training × 2 recalib × 5 ensemble
-# = 480 conditions × 1 fold = 480 evaluations
+# 4 models × 4 losses × 2 aux_calib × 2 post-training × 2 recalib × 5 ensemble
+# = 640 conditions × 1 fold = 640 evaluations
 #
 # This is NOT a "minimal test." Debug = production with ONLY 3 differences:
 #   1. Epochs: 2 (not 50)
@@ -11,14 +11,14 @@
 # See: CLAUDE.md Rule #27, .claude/metalearning/2026-03-22-debug-equals-production-8th-violation.md
 #
 # Cost estimate (OUR deployment: GCP L4 spot for training):
-#   Training: 24 cells × 1 fold = 24 GPU jobs (~$5-10)
+#   Training: 32 cells × 1 fold = 32 GPU jobs (~$7-13)
 #   Post-training, analysis, biostatistics: depends on user's deployment choice
 #
 # Usage:
 #   ./scripts/run_factorial.sh configs/factorial/debug.yaml
 
 experiment_name: debug_factorial
-description: "Debug 480-condition factorial: IDENTICAL factors to production, reduced epochs/data/folds"
+description: "Debug 640-condition factorial: IDENTICAL factors to production, reduced epochs/data/folds"
 debug: true
 
 # ── Layer A: Training factors ─────────────────────────────────────────
@@ -34,6 +34,7 @@ factors:
       - cbdice_cldice
       - dice_ce
       - dice_ce_cldice
+      - bce_dice_05cldice
     aux_calibration:
       - true
       - false

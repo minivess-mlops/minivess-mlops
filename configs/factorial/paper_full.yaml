@@ -1,7 +1,7 @@
 # Full factorial design for Nature Protocols publication gate.
 #
-# 6-factor design: 4 models × 3 losses × 2 aux_calib × 2 post-training × 2 recalib × 5 ensemble
-# = 480 conditions × 3 folds = 1440 evaluations
+# 6-factor design: 4 models × 4 losses × 2 aux_calib × 2 post-training × 2 recalib × 5 ensemble
+# = 640 conditions × 3 folds = 1920 evaluations
 #
 # Source of truth: knowledge-graph/decisions/registry.yaml
 # Post-training methods: ONLY {none, swag} (decided 2026-03-21, DO_NOT_RE_ASK)
@@ -11,7 +11,7 @@
 # See: .claude/metalearning/2026-03-22-hardcoded-execution-location-in-factorial-configs.md
 #
 # Cost estimate (OUR deployment: GCP L4 spot for training):
-#   Training: 24 cells × 3 folds = 72 GPU jobs (~$65)
+#   Training: 32 cells × 3 folds = 96 GPU jobs (~$87)
 #   Post-training, analysis, biostatistics: depends on user's deployment choice
 #
 # Usage:
@@ -22,7 +22,7 @@
 #   vesselfm: zero-shot only, eval on DeepVess ONLY (data leakage on MiniVess)
 
 experiment_name: paper_factorial
-description: "Nature Protocols 480-condition full factorial: training × post-training × ensemble"
+description: "Nature Protocols 640-condition full factorial: training × post-training × ensemble"
 
 # ── Layer A: Training factors ─────────────────────────────────────────
 factors:
@@ -36,6 +36,7 @@ factors:
       - cbdice_cldice
       - dice_ce
       - dice_ce_cldice
+      - bce_dice_05cldice
     aux_calibration:
       - true
       - false

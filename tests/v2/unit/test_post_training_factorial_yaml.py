@@ -93,7 +93,7 @@ class TestFactorialYamlPostTrainingFactors:
 
         yaml_path = Path("configs/factorial/debug.yaml")
         design = parse_factorial_yaml(yaml_path)
-        # 4 models × 3 losses × 2 aux_calib × 2 method × 2 recalib × 5 ensemble
-        assert design.n_conditions == 480, (
-            f"Expected 480 debug conditions, got {design.n_conditions}"
+        # 4 models × 4 losses × 2 aux_calib × 2 method × 2 recalib × 5 ensemble
+        assert design.n_conditions == 640, (
+            f"Expected 640 debug conditions, got {design.n_conditions}"
         )
