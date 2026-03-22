@@ -127,8 +127,11 @@ class TestSWAGPlugin:
         result = plugin.execute(pi)
 
         assert isinstance(result, PluginOutput)
-        assert len(result.model_paths) == 1
-        assert result.model_paths[0].exists()
+        assert len(result.model_paths) == 2  # mean model + SWAG posterior
+        assert result.model_paths[0].exists()  # mean model (primary, standard format)
+        assert result.model_paths[
+            1
+        ].exists()  # SWAG posterior (uncertainty quantification)
         assert result.metrics["swag_epochs"] == 2.0
         assert result.metrics["swag_max_rank"] == 3.0
 

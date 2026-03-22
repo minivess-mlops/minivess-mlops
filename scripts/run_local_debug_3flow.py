@@ -257,7 +257,7 @@ def phase_1_post_training(preflight: dict[str, Any]) -> list[dict[str, Any]]:
     adapter = build_adapter(model_config)
     calibration_data: dict[str, Any] = {
         "train_loader": train_loader,
-        "model": adapter.model,
+        "model": adapter,  # ModelAdapter IS an nn.Module (has .net inside)
     }
     logger.info("Built DynUNet model for SWAG calibration_data")
 

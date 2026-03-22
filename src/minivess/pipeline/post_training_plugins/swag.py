@@ -218,7 +218,14 @@ class SWAGPlugin:
             _update_bn_with_dict_loader(train_loader, base_model, device=device)
             logger.info("SWAG: BatchNorm statistics updated")
 
-        # Save SWAG model
+        # Save mean model as standard checkpoint (primary inference artifact).
+        # adapter.load_checkpoint() can load this directly — no SWAG-specific handling.
+        swag._load_mean()
+        mean_path = output_dir / "swag_mean_model.pt"
+        torch.save({"model_state_dict": base_model.state_dict()}, mean_path)
+        logger.info("SWAG mean model saved to %s", mean_path)
+
+        # Save SWAG posterior model (full statistics for uncertainty quantification)
         swag_path = output_dir / "swag_model.pt"
         swag.save(swag_path)
 
@@ -233,5 +240,5 @@ class SWAGPlugin:
         return PluginOutput(
             artifacts={"method": "swag", "max_rank": max_rank},
             metrics=metrics,
-            model_paths=[swag_path],
+            model_paths=[mean_path, swag_path],  # mean first (primary for inference)
         )

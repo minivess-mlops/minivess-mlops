@@ -1181,7 +1181,7 @@ def _run_swag_post_training(
 
     calibration_data = {
         "train_loader": train_loader,
-        "model": adapter.model,
+        "model": adapter,  # ModelAdapter IS an nn.Module (has .net inside)
     }
 
     plugin = SWAGPlugin()
