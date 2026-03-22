@@ -38,11 +38,9 @@ resources:
   disk_tier: best  # SSD for faster checkpoint I/O
   # region removed — L4 not available in all regions. SkyPilot auto-selects.
 
-# Spot preemption recovery — SkyPilot controller reprovisiones in another zone.
-# FAILOVER: try other regions/clouds. Max 3 recovery attempts on errors.
-job_recovery:
-  strategy: FAILOVER
-  max_restarts_on_errors: 3
+# Spot preemption: SkyPilot auto-retries via use_spot: true above.
+# Note: job_recovery field was removed in SkyPilot v1.0.
+# SkyPilot controller handles zone/region failover automatically.
 
 # Checkpoint persistence via GCS bucket mount (#878).
 # MOUNT_CACHED: async upload (non-blocking writes). Previous checkpoint survives
