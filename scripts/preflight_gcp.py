@@ -178,6 +178,15 @@ def check_setup_dvc_paths() -> tuple[bool, str]:
             locked_outs.add(out.get("path", ""))
 
     for pull_path in dvc_pull_paths:
+        # Standalone .dvc files (e.g., data/raw/deepvess.dvc) are valid
+        # DVC tracking references — they don't need dvc.lock entries.
+        if pull_path.endswith(".dvc"):
+            if not Path(pull_path).exists():
+                return False, (
+                    f"Setup pulls '{pull_path}' but the .dvc file does not exist."
+                )
+            continue
+
         # Check if pull_path matches or is a parent of any locked output
         matched = any(
             lo.startswith(pull_path) or pull_path.startswith(lo) for lo in locked_outs
