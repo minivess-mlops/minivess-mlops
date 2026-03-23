@@ -1048,15 +1048,15 @@ def post_training_subflow(
             )
 
             if post_training_method == "swag":
-                import time as _time
+                import time
 
-                _swag_start = _time.monotonic()
+                _swag_start = time.monotonic()
                 _run_swag_post_training(
                     training_result=training_result,
                     swag_config=swag_config,
                     config=config,
                 )
-                _swag_elapsed = _time.monotonic() - _swag_start
+                _swag_elapsed = time.monotonic() - _swag_start
                 logger.info("SWAG post-training took %.1f seconds", _swag_elapsed)
                 # Log perf metrics if MLflow run is active
                 with contextlib.suppress(Exception):
@@ -1103,8 +1103,19 @@ def _run_swag_post_training(
 
     # Scale swa_epochs proportionally to training max_epochs (Issue #913, O1).
     # Without scaling, debug (2 epochs) runs 10 SWAG epochs = 25 min overhead.
-    max_epochs = config.get("max_epochs", 100)
-    configured_swa_epochs = swag_config.get("swa_epochs", 10)
+    max_epochs = config.get("max_epochs")
+    if max_epochs is None:
+        msg = "max_epochs missing from config — cannot scale SWAG epochs"
+        raise ValueError(msg)
+    if max_epochs <= 0:
+        logger.warning(
+            "max_epochs=%d — skipping SWAG (no training to average)", max_epochs
+        )
+        return
+    configured_swa_epochs = swag_config.get("swa_epochs")
+    if configured_swa_epochs is None:
+        msg = "swa_epochs missing from swag_config — cannot determine SWAG duration"
+        raise ValueError(msg)
     actual_swa_epochs = min(configured_swa_epochs, max(2, max_epochs // 5))
     if actual_swa_epochs != configured_swa_epochs:
         logger.info(

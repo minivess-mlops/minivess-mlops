@@ -204,12 +204,18 @@ class TestFactorialInfraReferences:
         ids=[p.stem for p in _factorial_configs()],
     )
     def test_skypilot_yaml_reference_valid(self, config_path: Path) -> None:
-        """infrastructure.skypilot_yaml must point to an existing file."""
+        """infrastructure.skypilot_yaml must point to an existing file (or be null for local)."""
         cfg = _load(config_path)
         infra = cfg.get("infrastructure", {})
         sky_yaml = infra.get("skypilot_yaml")
+        cloud_config_name = infra.get("cloud_config", "")
         if sky_yaml is None:
-            pytest.skip(f"No infrastructure.skypilot_yaml in {config_path.stem}")
+            # Local configs don't need SkyPilot YAML — verify it's actually local
+            assert cloud_config_name == "local", (
+                f"{config_path.stem}: skypilot_yaml is null but cloud_config "
+                f"is '{cloud_config_name}' (not 'local'). Cloud configs MUST have skypilot_yaml."
+            )
+            return
         assert Path(sky_yaml).exists(), (
             f"{config_path.stem} references {sky_yaml} but it does not exist"
         )

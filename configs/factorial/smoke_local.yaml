@@ -52,6 +52,6 @@ biostatistics:
     - masd
 
 # ── Infrastructure ─────────────────────────────────────────────────────
+# Local smoke test — no SkyPilot, no cloud controller.
 infrastructure:
-  cloud_config: gcp_spot
-  skypilot_yaml: deployment/skypilot/train_factorial.yaml
+  cloud_config: local
