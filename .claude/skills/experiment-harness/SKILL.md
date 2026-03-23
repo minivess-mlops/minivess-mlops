@@ -148,7 +148,9 @@ Pre-launch gates that MUST ALL pass:
 3. Enter `/factorial-monitor` Phase 2 (MONITOR)
 4. After EACH poll: Update report status matrix (H2)
 5. After EACH terminal job: Update cost table, check watchlist items (H2)
-6. After ALL terminal: Write observations section
+6. **During idle time** (spot queuing, long training): Run deep exploration
+   protocol → [protocols/deep-exploration.md](protocols/deep-exploration.md)
+7. After ALL terminal: Write observations section
 
 ### Phase 4: COMPOUND
 
