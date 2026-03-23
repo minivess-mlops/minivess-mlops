@@ -17,6 +17,8 @@ allowed_clouds:
 jobs:
   controller:
     resources:
-      infra: gcp/europe-north1
+      # europe-west1 (Netherlands): n4 quota available. europe-north1 has CPUS_PER_VM_FAMILY=0 for n4.
+      # TODO: Request n4 quota increase in europe-north1 to co-locate controller with data.
+      infra: gcp/europe-west1
       cpus: 4+
       disk_size: 50
