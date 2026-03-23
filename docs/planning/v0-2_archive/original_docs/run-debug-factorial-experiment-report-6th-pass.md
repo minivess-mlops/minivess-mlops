@@ -135,11 +135,50 @@ SkyPilot reads `.sky.yaml` from repo root and uses it as project-level config.
 `allowed_clouds` warning appears (server vs client mismatch) but doesn't block.
 **Compound learning**: Version-controlled SkyPilot config is the right architecture.
 
+### O5: L4 + A100 spot — 3+ hours PENDING (peak hours)
+Both L4 and A100-80GB spot VMs unavailable for 3+ hours during European daytime
+(~14:00-17:00 UTC). SkyPilot correctly queues and waits. The launch script blocks
+on the first job submission because `sky jobs launch` waits for the managed job to
+be accepted by the controller, not for the VM to provision.
+**Key insight**: Spot queuing is CORRECT behavior (saves 60-90% cost). The wait is
+the tradeoff for $0.22/hr vs $0.70/hr. Off-peak (evenings/weekends) should provision
+faster. This is standard GCP spot behavior, not a SkyPilot or MinIVess issue.
+**Test opportunity**: `test_spot_queue_timeout_configurable` — add a configurable
+maximum PENDING time after which the job auto-escalates to on-demand (Issue #914).
+
 ---
 
 ## New Test Opportunities (compound learning)
 
-*(Empty — will be filled from observations)*
+### From O1: Controller bootstrap timing
+```
+tests/v2/cloud/test_controller_bootstrap.py
+  test_gcp_controller_bootstraps_under_10_min
+  test_controller_region_matches_config
+```
+
+### From O2: GCP quota validation
+```
+tests/v2/cloud/test_gcp_quota_preflight.py
+  test_cpu_quota_sufficient_for_controller
+  test_gpu_quota_sufficient_for_l4_jobs
+  test_quota_check_runs_before_launch (preflight #11)
+```
+
+### From O3 + O5: Spot availability monitoring
+```
+tests/v2/cloud/test_spot_availability.py
+  test_pending_duration_logged_to_mlflow
+  test_spot_fallback_timeout_configurable (Issue #914)
+```
+
+### From O4: Project-level SkyPilot config
+```
+tests/v2/unit/deployment/test_sky_project_config.py
+  test_sky_yaml_exists_in_repo_root
+  test_sky_yaml_has_controller_region
+  test_sky_yaml_allowed_clouds_matches_claude_md
+```
 
 ---
 
