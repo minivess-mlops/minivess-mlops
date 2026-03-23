@@ -141,10 +141,14 @@ Both L4 and A100-80GB spot VMs unavailable for 3+ hours during European daytime
 on the first job submission because `sky jobs launch` waits for the managed job to
 be accepted by the controller, not for the VM to provision.
 **Key insight**: Spot queuing is CORRECT behavior (saves 60-90% cost). The wait is
-the tradeoff for $0.22/hr vs $0.70/hr. Off-peak (evenings/weekends) should provision
-faster. This is standard GCP spot behavior, not a SkyPilot or MinIVess issue.
-**Test opportunity**: `test_spot_queue_timeout_configurable` — add a configurable
-maximum PENDING time after which the job auto-escalates to on-demand (Issue #914).
+the tradeoff for $0.22/hr vs $0.70/hr.
+**UPDATE (8+ hours later)**: Jobs STILL PENDING after 8 hours. European daytime +
+evening, zero L4 OR A100 spot capacity. This suggests the GCP project may need:
+(a) quota increase request for L4/A100 spot in europe regions, or
+(b) on-demand fallback (Issue #914), or
+(c) try different regions (us-central1 had capacity in 5th pass with RunPod controller).
+**Test opportunity**: `test_spot_queue_timeout_configurable` — configurable max PENDING
+time + auto-escalation to on-demand or different region.
 
 ---
 
