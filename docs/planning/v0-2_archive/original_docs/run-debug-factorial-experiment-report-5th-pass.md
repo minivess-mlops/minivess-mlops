@@ -99,7 +99,9 @@ Fixes applied BEFORE any GCP spend:
 | sam3_vanilla | minivess | ⏳ PENDING |
 | vesselfm | deepvess | ⏳ PENDING |
 
-**Progress**: 4/34 SUCCEEDED | 0 FAILED | 1 STARTING | 29 PENDING
+**Progress**: 4/34 SUCCEEDED | 0 FAILED | 1 RUNNING | 29 PENDING
+**Submission rate**: 5 submitted in 3 hrs (~36 min/submission via RunPod controller)
+**ETA**: ~17-20 hours for all 34 (bottleneck: sequential launch through RunPod controller)
 
 ## Cost
 
@@ -111,8 +113,8 @@ Fixes applied BEFORE any GCP spend:
 | Job 72 (SUCCEEDED) | 46m total | ~$0.17 |
 | Job 73 (SUCCEEDED) | 46m total | ~$0.17 |
 | Job 74 (SUCCEEDED) | 45m total | ~$0.17 |
-| Job 75 (STARTING) | ~11m so far | ~$0.04 |
-| **Total so far** | | **~$0.81** |
+| Job 75 (RUNNING) | ~36m so far | ~$0.13 |
+| **Total so far** | | **~$0.90** |
 
 Estimated total for 34 conditions: ~$8-10 (at ~$0.17/job × 34 + setup overhead).
 
@@ -136,11 +138,20 @@ All 4 DynUNet jobs: 29m57s–30m43s (±1.5%). Excellent reproducibility.
 The loss function and aux_calib flags have negligible impact on DynUNet runtime.
 **Infrastructure test opportunity**: Assert per-job cost < $0.50 for debug runs.
 
-### O4: Sequential launch bottleneck
-~20 min between job submissions. The RunPod SkyPilot controller is the bottleneck.
-34 jobs × 20 min = ~11 hours just for submissions.
-**Infrastructure improvement**: Investigate parallel `sky jobs launch` or
-dedicated GCP controller (instead of RunPod).
+### O4: Sequential launch bottleneck (MAJOR — 17-20 hr total runtime)
+Measured: ~36 min between job submissions (worse than initial 20 min estimate).
+34 jobs × 36 min = ~20 hours just for submissions.
+
+**Root cause**: `run_factorial.sh` runs `sky jobs launch` sequentially. Each call
+SSHes to the RunPod-hosted SkyPilot controller VM (EU-CZ-1), which then provisions
+a GCP L4 spot VM. Cross-cloud SSH round-trip adds ~15-20 min overhead.
+
+**Three improvement paths**:
+1. **Move controller to GCP** — same-cloud = ~5 min/submission → 34×5 = 3 hrs (6x faster)
+2. **Parallel submissions** — `&` + `wait` with N=4 → 34/4×10 = 1.5 hrs (13x faster)
+3. **Pre-warm controller** — already happening, marginal improvement only
+
+**Recommendation**: Path 2 (parallel) lowest effort. Path 1 (GCP controller) for production.
 
 ### O5: GCP L4 spot provisioning time
 ~10-15 min from STARTING to RUNNING (includes Docker pull from same-region GAR).
