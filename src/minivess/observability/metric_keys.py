@@ -30,6 +30,11 @@ class MetricKeys:
     to prevent drift between logging and querying code.
     """
 
+    # --- Evaluation prefixes (used by tracking.py, builder.py, biostatistics) ---
+    EVAL_PREFIX = "eval"
+    EVAL_FOLD_PREFIX = "eval/fold"
+    EVAL_TEST_PREFIX = "test"
+
     # --- Training metrics (per-epoch) ---
     TRAIN_LOSS = "train/loss"
     TRAIN_DICE = "train/dice"

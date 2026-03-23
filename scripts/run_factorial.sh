@@ -112,6 +112,42 @@ if [ "${DRY_RUN}" = false ] && [ "${SKIP_PREFLIGHT:-0}" != "1" ]; then
     fi
 fi
 
+# ─── Load cloud infrastructure config ──────────────────────────────────────
+# Read infrastructure.cloud_config from factorial YAML → load cloud config → extract params.
+# NEVER hardcode parallel_submissions or rate_limit_seconds in this script.
+CLOUD_CONFIG_NAME=$(python3 -c "
+import yaml, pathlib
+cfg = yaml.safe_load(pathlib.Path('${REPO_ROOT}/${CONFIG_FILE}').read_text(encoding='utf-8'))
+infra = cfg.get('infrastructure', {})
+print(infra.get('cloud_config', 'local'))
+")
+
+CLOUD_CONFIG_PATH="${REPO_ROOT}/configs/cloud/${CLOUD_CONFIG_NAME}.yaml"
+if [ -f "${CLOUD_CONFIG_PATH}" ]; then
+    read -r PARALLEL_SUBMISSIONS RATE_LIMIT_SECONDS < <(
+        python3 -c "
+import yaml, pathlib
+cfg = yaml.safe_load(pathlib.Path('${CLOUD_CONFIG_PATH}').read_text(encoding='utf-8'))
+infra = cfg.get('infrastructure', {})
+print(infra.get('parallel_submissions', 1), infra.get('rate_limit_seconds', 5))
+"
+    )
+    echo "Cloud config: ${CLOUD_CONFIG_NAME} (parallel=${PARALLEL_SUBMISSIONS}, rate_limit=${RATE_LIMIT_SECONDS}s)"
+else
+    PARALLEL_SUBMISSIONS=1
+    RATE_LIMIT_SECONDS=5
+    echo "WARNING: Cloud config not found: ${CLOUD_CONFIG_PATH} — using defaults (parallel=1, rate_limit=5s)"
+fi
+
+# Sync SkyPilot controller placement to match job cloud
+if [ "${DRY_RUN}" = false ] && [ -f "${CLOUD_CONFIG_PATH}" ]; then
+    if [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
+        "${REPO_ROOT}/.venv/bin/python" "${REPO_ROOT}/scripts/sync_sky_config.py" "${CLOUD_CONFIG_PATH}" || {
+            echo "WARNING: sync_sky_config.py failed — controller may be on wrong cloud"
+        }
+    fi
+fi
+
 # ─── Parse factorial config ──────────────────────────────────────────────────
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  MinIVess Factorial Experiment Launcher                     ║"
@@ -224,34 +260,49 @@ for model in "${MODEL_ARRAY[@]}"; do
                     echo "  [DRY RUN] sky jobs launch ${SKYPILOT_YAML} --name ${CONDITION_NAME} --env MODEL_FAMILY=${model} ..."
                     echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | DRY_RUN" >> "${JOB_LOG}"
                 else
-                    if "${SKY_BIN}" jobs launch "${SKYPILOT_YAML}" \
-                        --name "${CONDITION_NAME}" \
-                        --env MODEL_FAMILY="${model}" \
-                        --env LOSS_NAME="${loss}" \
-                        --env FOLD_ID="${fold}" \
-                        --env WITH_AUX_CALIB="${aux_calib}" \
-                        --env MAX_EPOCHS="${MAX_EPOCHS}" \
-                        --env MAX_TRAIN_VOLUMES="${MAX_TRAIN}" \
-                        --env MAX_VAL_VOLUMES="${MAX_VAL}" \
-                        --env EXPERIMENT_NAME="${EXPERIMENT_NAME}" \
-                        --env POST_TRAINING_METHODS="${PT_METHODS}" \
-                        --env-file "${ENV_FILE}" \
-                        -y; then
-                        LAUNCHED=$((LAUNCHED + 1))
-                        echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | LAUNCHED" >> "${JOB_LOG}"
-                    else
-                        FAILED=$((FAILED + 1))
-                        echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | LAUNCH_FAILED" >> "${JOB_LOG}"
-                        echo "  WARNING: Launch failed for ${CONDITION_NAME} — continuing with remaining conditions"
-                    fi
+                    # Launch in background subshell for parallel submissions.
+                    # Each subshell logs its own result to JOB_LOG (atomic appends).
+                    (
+                        if "${SKY_BIN}" jobs launch "${SKYPILOT_YAML}" \
+                            --name "${CONDITION_NAME}" \
+                            --env MODEL_FAMILY="${model}" \
+                            --env LOSS_NAME="${loss}" \
+                            --env FOLD_ID="${fold}" \
+                            --env WITH_AUX_CALIB="${aux_calib}" \
+                            --env MAX_EPOCHS="${MAX_EPOCHS}" \
+                            --env MAX_TRAIN_VOLUMES="${MAX_TRAIN}" \
+                            --env MAX_VAL_VOLUMES="${MAX_VAL}" \
+                            --env EXPERIMENT_NAME="${EXPERIMENT_NAME}" \
+                            --env POST_TRAINING_METHODS="${PT_METHODS}" \
+                            --env-file "${ENV_FILE}" \
+                            -y; then
+                            echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | LAUNCHED" >> "${JOB_LOG}"
+                        else
+                            echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | LAUNCH_FAILED" >> "${JOB_LOG}"
+                            echo "  WARNING: Launch failed for ${CONDITION_NAME} — continuing with remaining conditions"
+                        fi
+                    ) &
 
-                    # Rate limiting: prevent SkyPilot API quota issues
-                    sleep 5
+                    # Rate limiting: prevent SkyPilot API quota issues (from cloud config)
+                    sleep "${RATE_LIMIT_SECONDS}"
+
+                    # Parallel launch: if we've hit the parallel_submissions limit, wait for a slot
+                    RUNNING_JOBS=$(jobs -rp | wc -l)
+                    if [ "${RUNNING_JOBS}" -ge "${PARALLEL_SUBMISSIONS}" ]; then
+                        wait -n 2>/dev/null || true
+                    fi
                 fi
             done
         done
     done
 done
+
+# Wait for all background launch subshells to complete
+wait
+
+# Count results from job log (background subshells wrote directly to log)
+LAUNCHED=$(grep -c "| LAUNCHED$" "${JOB_LOG}" 2>/dev/null || echo 0)
+FAILED=$(grep -c "| LAUNCH_FAILED$" "${JOB_LOG}" 2>/dev/null || echo 0)
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════"
@@ -331,8 +382,8 @@ for b in baselines:
                     f.write(f'ZS | {model} | zero_shot | false | {fold} | LAUNCH_FAILED\n')
                 print(f'  WARNING: Launch failed for {condition_name}')
 
-            # Rate limiting
-            time.sleep(5)
+            # Rate limiting (from cloud config)
+            time.sleep(${RATE_LIMIT_SECONDS})
 
 print(f'Zero-shot baselines: {zs_launched} launched, {zs_failed} failed')
 "

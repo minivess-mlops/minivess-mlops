@@ -131,7 +131,8 @@ Pre-launch gates that MUST ALL pass:
 |------|---------|----------|
 | Staging tests | `make test-staging` | 0 skipped, 0 failed |
 | Prod tests | `make test-prod` | 0 skipped, 0 failed |
-| Preflight GCP | `python scripts/preflight_gcp.py` | 9/9 passed |
+| Preflight GCP | `python scripts/preflight_gcp.py` | 11/11 passed (incl. YAML contract + cost) |
+| **YAML contract** | `python scripts/validate_yaml_contract.py` | 0 violations |
 | Docker image fresh | GAR timestamp > latest code commit | Image newer |
 | Docker image verified | `docker run ... python3 -c "import ..."` | All imports OK |
 | Factorial dry-run | `run_factorial.sh --dry-run` | Correct conditions |
@@ -140,6 +141,23 @@ Pre-launch gates that MUST ALL pass:
 | Security scan | No credentials in XML, paths valid | Clean |
 
 **If ANY gate fails → DO NOT LAUNCH. Fix first.**
+
+#### YAML Contract Validation (Gate Detail)
+
+The YAML contract gate (`configs/cloud/yaml_contract.yaml`) enforces:
+
+1. **GPU types**: Only GPUs listed in the contract's `allowed_accelerators`
+   per cloud provider. A100 was removed — 5.5x cost, never authorized.
+2. **Banned GPUs**: T4, V100, K80, P100, P4 are globally banned.
+3. **Cloud providers**: Only GCP and RunPod. No AWS, Lambda, UpCloud.
+4. **Schema drift**: No unauthorized top-level or resource keys in SkyPilot YAML.
+5. **Factorial strict**: `train_factorial.yaml` must have string-format
+   accelerators (not dict/priority list), GCP only, spot only, Docker only.
+6. **Cross-file**: SkyPilot YAML accelerators must match `configs/cloud/*.yaml`.
+7. **Cost estimate**: Preflight prints estimated cost based on GPU type x job count.
+
+The contract is the SINGLE SOURCE OF TRUTH. Claude Code must NEVER update it
+without explicit user instruction. See CLAUDE.md Rule 31.
 
 ### Phase 3: EXECUTE
 
@@ -190,6 +208,23 @@ Template is loaded on-demand (L3 progressive disclosure per Anthropic guide).
 ## Non-Negotiable Rules
 
 Inherits F1-F5 from `/factorial-monitor`, plus:
+
+| Rule | Name | Prevents | Detection |
+|------|------|----------|-----------|
+| H7 | YAML-IS-THE-CONTRACT | Unauthorized GPU types, cloud cost explosion | `validate_yaml_contract.py` + `check_yaml_contract()` in preflight |
+| H8 | ZERO-YAML-IMPROVISATION | AI adding "helpful" fallbacks to configs | Pre-commit hook + test suite + this rule text |
+| H9 | CONTRACT-BEFORE-LAUNCH | Launching with unauthorized resources | Preflight gate `check_yaml_contract()` MUST pass |
+
+**H7-H9 details**:
+- NEVER modify SkyPilot YAML accelerators, cloud, or resources without user instruction
+- The golden contract (`configs/cloud/yaml_contract.yaml`) defines EXACTLY what is allowed
+- If L4 is unavailable and the user wants A100 fallback, the user must SAY SO explicitly
+- Dict-format accelerators (`{L4: 1, A100: 1}`) are BANNED in factorial YAML — they
+  create non-deterministic GPU selection. Use string format (`L4:1`) for determinism.
+- Cost guard: preflight estimates max cost and prints it. If A100 appears, cost 5.5x.
+- See: `.claude/metalearning/2026-03-24-unauthorized-a100-in-skypilot-yaml.md`
+
+Additionally inherits:
 
 | Rule | Name | Prevents | Detection |
 |------|------|----------|-----------|

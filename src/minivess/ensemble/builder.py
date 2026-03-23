@@ -27,6 +27,7 @@ import torch
 from torch import nn
 
 from minivess.config.evaluation_config import EnsembleStrategyName
+from minivess.observability.metric_keys import MetricKeys
 from minivess.serving.mlflow_wrapper import _build_net_from_config
 
 if TYPE_CHECKING:
@@ -240,13 +241,15 @@ class EnsembleBuilder:
                 continue
 
             # Filter production runs: must have fold 2 eval metrics.
-            # Metric key uses slash format: eval/fold2/dsc (matches tracking.py).
-            # Previously used underscore format eval/fold2/dsc which NEVER matched.
-            if require_eval_metrics and "eval/fold2/dsc" not in metrics:
+            # Uses MetricKeys.EVAL_FOLD_PREFIX to construct the key dynamically,
+            # preventing format drift between tracking.py and this module.
+            _eval_gate_key = f"{MetricKeys.EVAL_FOLD_PREFIX}2/dsc"
+            if require_eval_metrics and _eval_gate_key not in metrics:
                 logger.debug(
-                    "Skipping run %s (%s): no eval/fold2/dsc (incomplete run)",
+                    "Skipping run %s (%s): no %s (incomplete run)",
                     run.info.run_id,
                     loss_type,
+                    _eval_gate_key,
                 )
                 continue
 

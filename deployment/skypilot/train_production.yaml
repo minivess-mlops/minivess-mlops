@@ -35,14 +35,13 @@ resources:
   cloud: runpod
   use_spot: true
   disk_size: 80  # Larger disk for full training (checkpoints + logs)
+  # L4 on GCP, RTX4090 on RunPod. A100 and AWS removed — unauthorized.
+  # Any GPU/cloud addition requires EXPLICIT user authorization.
   any_of:
     - cloud: runpod
       accelerators: RTX4090:1
-    - cloud: aws
-      accelerators: A100:1
     - cloud: gcp
-      accelerators: A100:1
-    # Lambda Labs archived 2026-03-16 (no EU availability — code in deployment/archived/lambda/)
+      accelerators: L4:1
 
 # Checkpoint persistence via cloud storage bucket mount.
 # Bucket must exist (created by Pulumi or manually).

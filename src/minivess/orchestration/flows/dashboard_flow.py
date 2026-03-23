@@ -18,7 +18,11 @@ from typing import TYPE_CHECKING, Any
 from prefect import flow, task
 
 from minivess.observability.tracking import resolve_tracking_uri
-from minivess.orchestration.constants import FLOW_NAME_DASHBOARD
+from minivess.orchestration.constants import (
+    EXPERIMENT_TRAINING,
+    FLOW_NAME_DASHBOARD,
+    resolve_experiment_name,
+)
 
 if TYPE_CHECKING:
     from minivess.orchestration.flows.dashboard_sections import (
@@ -467,7 +471,7 @@ def run_dashboard_flow(
         from minivess.orchestration.flow_contract import FlowContract
 
         mlflow.set_tracking_uri(_tracking_uri)
-        mlflow.set_experiment("minivess_training")
+        mlflow.set_experiment(resolve_experiment_name(EXPERIMENT_TRAINING))
         with mlflow.start_run(tags={"flow_name": "dashboard"}) as active_run:
             mlflow_run_id = active_run.info.run_id
 

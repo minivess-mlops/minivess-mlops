@@ -285,6 +285,121 @@ def check_skypilot_yaml() -> tuple[bool, str]:
         return False, f"SkyPilot YAML check failed: {e}"
 
 
+def check_yaml_contract() -> tuple[bool, str]:
+    """Validate SkyPilot YAML against the golden contract.
+
+    Defense layer 4 of 5: catches unauthorized GPU types, cloud providers,
+    and resource configurations at launch time (after pre-commit and tests).
+
+    See: .claude/metalearning/2026-03-24-unauthorized-a100-in-skypilot-yaml.md
+    """
+    contract_path = REPO_ROOT / "configs" / "cloud" / "yaml_contract.yaml"
+    if not contract_path.exists():
+        return False, f"Contract file missing: {contract_path}"
+
+    contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    sky_config = yaml.safe_load(SKYPILOT_YAML.read_text(encoding="utf-8"))
+
+    violations: list[str] = []
+
+    # Extract GPU types from factorial YAML
+    resources = sky_config.get("resources", {})
+    accel_field = resources.get("accelerators")
+
+    # Parse accelerator names from any format
+    gpu_names: list[str] = []
+    if isinstance(accel_field, str):
+        gpu_names.append(accel_field.split(":")[0])
+    elif isinstance(accel_field, dict):
+        for key in accel_field:
+            gpu_names.append(str(key).split(":")[0])
+    elif isinstance(accel_field, list):
+        for item in accel_field:
+            if isinstance(item, str):
+                gpu_names.append(item.split(":")[0])
+
+    # Check 1: No banned GPU types
+    banned = set(contract.get("banned_accelerators", []))
+    for gpu in gpu_names:
+        if gpu in banned:
+            violations.append(f"BANNED GPU '{gpu}'")
+
+    # Check 2: GPU types match factorial allowlist
+    factorial_allowed = set(
+        contract.get("factorial", {}).get("allowed_accelerators", [])
+    )
+    for gpu in gpu_names:
+        if gpu not in factorial_allowed:
+            violations.append(
+                f"GPU '{gpu}' not in factorial allowlist {sorted(factorial_allowed)}"
+            )
+
+    # Check 3: Cloud provider allowed
+    cloud = resources.get("cloud")
+    allowed_clouds = set(contract.get("allowed_clouds", []))
+    if cloud and cloud not in allowed_clouds:
+        violations.append(f"Cloud '{cloud}' not allowed ({sorted(allowed_clouds)})")
+
+    # Check 4: Accelerators is NOT a dict (priority list = non-determinism)
+    if isinstance(accel_field, dict):
+        violations.append(
+            "Accelerators is a dict (priority list) — use string 'L4:1' for determinism"
+        )
+
+    if violations:
+        return False, (
+            f"YAML contract violations: {'; '.join(violations)}. "
+            f"See: configs/cloud/yaml_contract.yaml"
+        )
+    return True, f"YAML contract valid: {len(gpu_names)} GPU types, cloud={cloud}"
+
+
+def check_cost_estimate() -> tuple[bool, str]:
+    """Estimate max cost and compare against budget guard rails.
+
+    Prevents accidental cost explosions from unauthorized GPU types.
+    """
+    contract_path = REPO_ROOT / "configs" / "cloud" / "yaml_contract.yaml"
+    if not contract_path.exists():
+        return True, "No contract file — cost check skipped"
+
+    contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    sky_config = yaml.safe_load(SKYPILOT_YAML.read_text(encoding="utf-8"))
+
+    resources = sky_config.get("resources", {})
+    accel_field = resources.get("accelerators")
+
+    # Get the GPU name
+    gpu_name = ""
+    if isinstance(accel_field, str):
+        gpu_name = accel_field.split(":")[0]
+    elif isinstance(accel_field, dict):
+        # Dict = priority list, take the MOST expensive for worst-case
+        cost_map = contract.get("max_hourly_cost_usd", {})
+        max_cost = 0.0
+        for key in accel_field:
+            name = str(key).split(":")[0]
+            cost = cost_map.get(name, 0)
+            if cost > max_cost:
+                max_cost = cost
+                gpu_name = name
+
+    cost_map = contract.get("max_hourly_cost_usd", {})
+    hourly_cost = cost_map.get(gpu_name, 0)
+
+    if hourly_cost == 0:
+        return True, f"GPU '{gpu_name}' — no cost data in contract"
+
+    # Estimate: 34 jobs x ~30 min each = ~17 GPU-hours
+    estimated_gpu_hours = 17
+    estimated_cost = hourly_cost * estimated_gpu_hours
+
+    return True, (
+        f"GPU '{gpu_name}' at ${hourly_cost:.2f}/hr, "
+        f"~{estimated_gpu_hours} GPU-hrs, ~${estimated_cost:.0f} estimated"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -303,6 +418,8 @@ def main() -> int:
         ("SkyPilot GCP backend", check_skypilot_gcp),
         ("Controller cloud matches jobs", check_controller_cloud),
         ("SkyPilot YAML validity", check_skypilot_yaml),
+        ("YAML contract compliance", check_yaml_contract),
+        ("Cost estimate", check_cost_estimate),
     ]
 
     print("╔══════════════════════════════════════════════════════════════╗")

@@ -67,6 +67,7 @@ def resolve_checkpoint_paths_from_contract(
     if parent_run_id is None:
         return []
 
+    from minivess.orchestration.constants import CHECKPOINT_BEST_FILENAME
     from minivess.orchestration.flow_contract import FlowContract
 
     fc = FlowContract(tracking_uri=tracking_uri)
@@ -82,18 +83,10 @@ def resolve_checkpoint_paths_from_contract(
                 ckpt_dir,
             )
             continue
-        # Prefer best checkpoint: try both naming conventions (.ckpt and .pth)
-        best_candidates = [
-            ckpt_dir / "best.ckpt",
-            ckpt_dir / "best_val_loss.pth",
-        ]
-        found_best = False
-        for best in best_candidates:
-            if best.exists():
-                checkpoint_paths.append(best)
-                found_best = True
-                break
-        if found_best:
+        # Use canonical checkpoint filename from constants.py (cross-flow contract)
+        best = ckpt_dir / CHECKPOINT_BEST_FILENAME
+        if best.exists():
+            checkpoint_paths.append(best)
             continue
         # Fall back to last.pth or lexicographically latest epoch_*.{ckpt,pth}
         last = ckpt_dir / "last.pth"

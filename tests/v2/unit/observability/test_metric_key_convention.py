@@ -13,12 +13,18 @@ def test_all_metric_keys_use_slash_separator() -> None:
     """Every key constant in MetricKeys must use slash separator."""
     from minivess.observability.metric_keys import MetricKeys
 
+    # PREFIX constants (e.g., EVAL_PREFIX="eval") are short prefixes that
+    # don't themselves contain "/" — they're used to BUILD slash-separated keys.
+    _PREFIX_ATTRS = {"GPU_PREFIX", "EVAL_PREFIX", "EVAL_TEST_PREFIX"}
+
     for attr_name in dir(MetricKeys):
         if attr_name.startswith("_"):
             continue
         value = getattr(MetricKeys, attr_name)
         if not isinstance(value, str):
             continue
+        if attr_name in _PREFIX_ATTRS:
+            continue  # Prefixes are building blocks, not full keys
         assert "/" in value, (
             f"MetricKeys.{attr_name} = {value!r} does not use slash separator"
         )

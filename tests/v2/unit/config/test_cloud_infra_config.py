@@ -32,7 +32,7 @@ def _cloud_configs() -> list[Path]:
     return [
         p
         for p in sorted(CLOUD_CONFIG_DIR.glob("*.yaml"))
-        if p.stem not in ("gcp_quotas",)
+        if p.stem not in ("gcp_quotas", "yaml_contract")
     ]
 
 

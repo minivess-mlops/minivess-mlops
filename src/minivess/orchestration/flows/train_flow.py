@@ -902,7 +902,10 @@ def training_subflow(
                 _setup_durations = parse_setup_timing(Path.cwd() / "timing_setup.txt")
                 _setup_seconds = _setup_durations.get("setup_total", 0.0)
             except Exception:
-                pass
+                logger.warning(
+                    "Failed to parse setup timing from timing_setup.txt",
+                    exc_info=True,
+                )
             if _total_training_seconds > 0 or _setup_seconds > 0:
                 log_cost_analysis(
                     setup_seconds=_setup_seconds,

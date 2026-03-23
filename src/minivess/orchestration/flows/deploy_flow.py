@@ -25,7 +25,11 @@ from prefect import flow, get_run_logger, task
 from minivess.config.deploy_config import DeployConfig
 from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.tracking import resolve_tracking_uri
-from minivess.orchestration.constants import FLOW_NAME_DEPLOY
+from minivess.orchestration.constants import (
+    EXPERIMENT_TRAINING,
+    FLOW_NAME_DEPLOY,
+    resolve_experiment_name,
+)
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -340,10 +344,11 @@ def deploy_flow(
     # --- FlowContract: tag run and log completion ---
     _tracking_uri = resolve_tracking_uri()
     # Use provided upstream ID or auto-discover from MLflow
+    _experiment = resolve_experiment_name(EXPERIMENT_TRAINING)
     if upstream_analysis_run_id is None:
         upstream = find_upstream_safely(
             tracking_uri=_tracking_uri,
-            experiment_name="minivess_training",
+            experiment_name=_experiment,
             upstream_flow="analyze",
         )
         upstream_analysis_run_id = upstream["run_id"] if upstream else None
@@ -352,7 +357,7 @@ def deploy_flow(
         import mlflow
 
         mlflow.set_tracking_uri(_tracking_uri)
-        mlflow.set_experiment("minivess_training")
+        mlflow.set_experiment(_experiment)
         with mlflow.start_run(
             tags={
                 "flow_name": "deploy-flow",

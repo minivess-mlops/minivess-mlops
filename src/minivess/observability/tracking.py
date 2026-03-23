@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from minivess.pipeline.evaluation import FoldResult
 
 from minivess.config.defaults import DEFAULT_TRACKING_URI as _DEFAULT_TRACKING_URI
+from minivess.observability.metric_keys import MetricKeys
 
 logger = logging.getLogger(__name__)
 
@@ -771,7 +772,7 @@ class ExperimentTracker:
         """
         flat_metrics: dict[str, float] = {}
         for metric_name, ci in fold_result.aggregated.items():
-            prefix = f"eval/fold{fold_id}/{metric_name}"
+            prefix = f"{MetricKeys.EVAL_FOLD_PREFIX}{fold_id}/{metric_name}"
             flat_metrics.update(ci.to_dict(prefix))
 
         mlflow.log_metrics(dict(sorted(flat_metrics.items())))
