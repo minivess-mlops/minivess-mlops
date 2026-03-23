@@ -179,7 +179,7 @@ setup: |
   # GPU verification — FAIL FAST if CUDA is not available.
   # Without this, training runs on CPU (100x slower, will OOM on system RAM).
   nvidia-smi
-  python -c "import torch, sys; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}'); sys.exit(1) if not torch.cuda.is_available() else print(f'GPU: {torch.cuda.get_device_name(0)}, VRAM: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB')"
+  python -c "import torch, sys; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}'); sys.exit(1) if not torch.cuda.is_available() else print(f'GPU: {torch.cuda.get_device_name(0)}, VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB')"
 
   # MLflow connectivity check — FAIL FAST if server is unreachable.
   # Without this, training runs for hours then silently loses all metrics.

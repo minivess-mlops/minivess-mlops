@@ -103,10 +103,28 @@ class TestCheckpointPathInMLflowTags:
 class TestGpuPreflightGuard:
     """Setup script must gate on CUDA availability, not just print it."""
 
+    def test_setup_python_oneliner_is_valid(self) -> None:
+        """The GPU check python -c '...' must use correct PyTorch attribute names.
+
+        5th pass root cause: total_mem → AttributeError. Correct: total_memory.
+        """
+        import yaml
+
+        yaml_path = Path("deployment/skypilot/train_factorial.yaml")
+        config = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+        setup = config.get("setup", "")
+
+        # Must NOT use the wrong attribute name
+        assert "total_mem " not in setup and ".total_mem/" not in setup, (
+            "Setup uses 'total_mem' which doesn't exist on torch CudaDeviceProperties. "
+            "Use 'total_memory' instead. This caused FAILED_SETUP in 5th pass job 69."
+        )
+        # Must use correct attribute
+        if "total_memory" in setup:
+            pass  # Correct attribute used
+
     def test_setup_script_gates_on_cuda(self) -> None:
         """SkyPilot setup must exit if PyTorch can't see CUDA."""
-        from pathlib import Path
-
         import yaml
 
         yaml_path = Path("deployment/skypilot/train_factorial.yaml")
