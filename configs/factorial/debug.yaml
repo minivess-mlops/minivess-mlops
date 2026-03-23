@@ -107,6 +107,13 @@ post_training:
     - none
     - swag
 
+# ── Infrastructure (read by run_factorial.sh, NOT by train_flow.py) ────
+# These control HOW the factorial launches, not WHAT it sweeps.
+# train_flow.py is location-agnostic — it runs anywhere.
+infrastructure:
+  cloud_config: gcp_spot
+  skypilot_yaml: deployment/skypilot/train_factorial.yaml
+
 # ── E2E flow chain ──────────────────────────────────────────────────
 flows:
   - train

@@ -29,3 +29,18 @@ mlflow_env_var: MLFLOW_TRACKING_URI
 # Overrides the OOM-sentinel (val_interval=max_epochs+1) used on 8 GB GPUs.
 # See: docs/planning/hydra-double-check.md
 val_interval: 1
+
+# ── SkyPilot controller placement (NON-NEGOTIABLE) ──────────────────────
+# Controller MUST match job cloud. Cross-cloud SSH adds ~30 min/submission
+# and creates single point of failure (RunPod outage killed 25/34 GCP jobs).
+# See: .claude/metalearning/2026-03-23-skypilot-controller-on-wrong-cloud.md
+controller:
+  cloud: gcp
+  disk_size: 50
+
+# ── Submission infrastructure ────────────────────────────────────────────
+# Parallel submissions: how many `sky jobs launch` calls run concurrently.
+# Default from config — NEVER hardcoded in scripts.
+infrastructure:
+  parallel_submissions: 4
+  rate_limit_seconds: 5

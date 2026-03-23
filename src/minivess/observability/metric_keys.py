@@ -66,6 +66,16 @@ class MetricKeys:
     PROF_VAL_SECONDS = "prof/val_seconds"
     PROF_TRAIN_SECONDS = "prof/train_seconds"
 
+    # --- Performance instrumentation (infrastructure timing) ---
+    # Logged per-job for data-driven optimization and regression detection.
+    # Issue #913, Plan: infrastructure-performance-audit.xml Phase 4.
+    PERF_SETUP_TOTAL_SECONDS = "perf/setup_total_seconds"
+    PERF_TRAINING_SECONDS = "perf/training_seconds"
+    PERF_SWAG_SECONDS = "perf/swag_seconds"
+    PERF_SWAG_OVERHEAD_RATIO = "perf/swag_overhead_ratio"
+    PERF_TOTAL_JOB_SECONDS = "perf/total_job_seconds"
+    PERF_GPU_UTILIZATION_FRACTION = "perf/gpu_utilization_fraction"
+
     # --- Fold-level metrics ---
     FOLD_N_COMPLETED = "fold/n_completed"
     VRAM_PEAK_MB = "vram/peak_mb"

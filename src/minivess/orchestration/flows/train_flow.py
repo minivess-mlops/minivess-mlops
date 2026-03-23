@@ -13,6 +13,7 @@ This enables:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import warnings
@@ -1047,11 +1048,19 @@ def post_training_subflow(
             )
 
             if post_training_method == "swag":
+                import time as _time
+
+                _swag_start = _time.monotonic()
                 _run_swag_post_training(
                     training_result=training_result,
                     swag_config=swag_config,
                     config=config,
                 )
+                _swag_elapsed = _time.monotonic() - _swag_start
+                logger.info("SWAG post-training took %.1f seconds", _swag_elapsed)
+                # Log perf metrics if MLflow run is active
+                with contextlib.suppress(Exception):
+                    mlflow.log_metric("perf/swag_seconds", _swag_elapsed)
             else:
                 logger.warning(
                     "Unknown post-training method: %s — skipping",
@@ -1091,6 +1100,20 @@ def _run_swag_post_training(
     """
     from minivess.pipeline.post_training_plugin import PluginInput
     from minivess.pipeline.post_training_plugins.swag import SWAGPlugin
+
+    # Scale swa_epochs proportionally to training max_epochs (Issue #913, O1).
+    # Without scaling, debug (2 epochs) runs 10 SWAG epochs = 25 min overhead.
+    max_epochs = config.get("max_epochs", 100)
+    configured_swa_epochs = swag_config.get("swa_epochs", 10)
+    actual_swa_epochs = min(configured_swa_epochs, max(2, max_epochs // 5))
+    if actual_swa_epochs != configured_swa_epochs:
+        logger.info(
+            "SWAG swa_epochs scaled: %d → %d (max_epochs=%d)",
+            configured_swa_epochs,
+            actual_swa_epochs,
+            max_epochs,
+        )
+        swag_config = {**swag_config, "swa_epochs": actual_swa_epochs}
 
     # Collect checkpoint paths from all folds
     checkpoint_paths: list[Path] = []

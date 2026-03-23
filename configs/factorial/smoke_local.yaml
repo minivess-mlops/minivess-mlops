@@ -50,3 +50,8 @@ biostatistics:
   co_primary_metrics:
     - cldice
     - masd
+
+# ── Infrastructure ─────────────────────────────────────────────────────
+infrastructure:
+  cloud_config: gcp_spot
+  skypilot_yaml: deployment/skypilot/train_factorial.yaml
