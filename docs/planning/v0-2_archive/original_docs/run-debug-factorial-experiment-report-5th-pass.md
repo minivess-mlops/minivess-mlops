@@ -213,12 +213,109 @@ tests/v2/cloud/test_setup_script_execution.py
   test_nvidia_smi_shows_gpu_after_setup
 ```
 
-## Issues to Create
+## CRITICAL FAILURE: RunPod Controller for GCP Jobs (O7)
 
-- [ ] Sequential launch bottleneck — investigate parallel sky jobs launch (#TBD)
-- [ ] SWAG overhead measurement — expected vs actual for each model family (#TBD)
-- [ ] Setup time baseline — measure and track across passes (#TBD)
+### O7: SkyPilot controller on WRONG CLOUD — destroyed the entire run
+
+**The single most damaging infrastructure failure in all 5 passes.**
+
+At ~12:27 UTC, after 7 DynUNet jobs were submitted and 4 SUCCEEDED, the RunPod
+network went down (`api.runpod.io` unreachable). This killed the SkyPilot jobs
+controller (which was running on RunPod EU-CZ-1). Result:
+
+- **25 of 34 trainable conditions** never submitted (LAUNCH_FAILED)
+- **2 zero-shot baselines** never submitted (LAUNCH_FAILED)
+- **Controller state lost** — `sky jobs queue` returns empty
+- **Job history gone** — cannot verify if jobs 75-77 completed
+- **~6 hours of wall-clock time wasted** (running on a broken topology)
+
+### Root Cause
+
+`~/.sky/config.yaml` had `cloud: runpod` for the jobs controller — a leftover
+from the RunPod development phase (March 2026, RunPod debug profiling sessions).
+Nobody checked this when switching to GCP for the factorial run.
+
+```yaml
+# ~/.sky/config.yaml (BEFORE fix)
+jobs:
+  controller:
+    resources:
+      disk_size: 40
+      cloud: runpod   # ← RunPod controller for GCP jobs. WHY?
+```
+
+This created a pathological architecture:
+```
+Local machine → SSH → RunPod controller (EU-CZ-1) → SSH → GCP L4 VM
+                       ↑ SINGLE POINT OF FAILURE ↑
+```
+
+### Why This Wasn't Caught by 6 Reviewer Agents
+
+1. **Reviewers audited the task YAML** (`train_factorial.yaml`) — not `~/.sky/config.yaml`
+2. **Reviewers audited train_flow.py** argparse — not the launch infrastructure
+3. **Reviewers audited the Docker image** — not the SkyPilot controller placement
+4. **Preflight checked `sky check gcp`** — which tests the GCP *backend*, not WHERE the controller runs
+5. **The 4th pass "worked" despite this** — DynUNet/SAM3 Hybrid succeeded, so the misconfiguration appeared harmless (just slow)
+6. **No test existed** for controller cloud vs. job cloud consistency
+
+**This is a systemic code review failure**: 6 specialized agents with detailed
+prompts, hundreds of lines of review output, and NONE checked the one config
+file (`~/.sky/config.yaml`) that controls WHERE the entire infrastructure runs.
+The agents reviewed the "what" (YAML, argparse, Docker) but not the "where"
+(controller placement, network topology, single points of failure).
+
+### Fix Applied
+
+1. Changed `~/.sky/config.yaml`: `cloud: runpod` → `cloud: gcp`
+2. Added preflight check #10: controller cloud must match job cloud
+3. Metalearning doc: `2026-03-23-skypilot-controller-on-wrong-cloud.md`
+
+### Impact on Launch Bottleneck (O4 revised)
+
+The 36 min/submission was NOT inherent to SkyPilot. It was caused by cross-cloud
+SSH through RunPod. With a GCP controller:
+- Expected submission latency: ~5 min (same-cloud, no cross-provider SSH)
+- Expected total for 34 jobs: ~3 hours (vs. 20 hours with RunPod controller)
+- This is a **6x improvement** without any code changes to `run_factorial.sh`
+
+Issue #913 Path 1 (GCP controller) is now implemented. Path 2 (parallel
+submissions) remains valuable for further optimization.
+
+## Issues Created
+
+- [x] #912 — Experiment harness meta-skill (P0)
+- [x] #913 — Factorial launch bottleneck — 36 min/submission (P1, root cause found: RunPod controller)
+
+## Issues To Create (next session)
+
+- [ ] SWAG overhead measurement — expected vs actual for each model family
+- [ ] Setup time baseline — measure and track across passes
+- [ ] Preflight: verify controller cloud matches job cloud (DONE in code, need test)
+
+## Compound Learning Summary
+
+| Pass | Jobs Attempted | Jobs Succeeded | Root Causes Found | New Tests | Cost |
+|------|---------------|----------------|-------------------|-----------|------|
+| 1st (local) | 24 | 0 | Docker, DVC, env vars | 0 | $0 |
+| 2nd (local) | 24 | ~12 | MONAI ROI, MLflow tags | 0 | $0 |
+| 3rd (GCP) | 32 | 14 | BF16, checkpoint, SWAG | 0 | ~$8 |
+| 4th (GCP) | 32 | 14 | DVC bare pull, job_recovery, missing arg | 0 | ~$6 |
+| **5th (GCP)** | **34** | **4** | **total_mem typo, RunPod controller, CLI args** | **57** | **~$1** |
+
+The 5th pass was the first to systematically add tests BEFORE and DURING the run.
+57 new tests. But the RunPod controller misconfiguration shows that infrastructure
+topology review (not just code review) is essential.
+
+## Next Pass (6th) Preparation
+
+1. **Use `/experiment-harness` skill** (not ad-hoc) — Issue #912
+2. **GCP controller verified** — `cloud: gcp` in config, preflight check #10
+3. **Relaunch all 34 conditions** — DynUNet should complete in ~3 hrs (vs. 20 hrs)
+4. **Focus watchlist**: MambaVesselNet (mamba-ssm import), SAM3 TopoLoRA (VRAM), zero-shot
+5. **Carry forward**: All 8 watchlist items from 5th pass (W2-W8 unresolved)
 
 ---
 
-*This report is updated live as jobs complete. Last update: 2026-03-23T03:25 UTC*
+*Report finalized: 2026-03-23T13:00 UTC*
+*Next update: 6th pass launch (after GCP controller relaunch)*
