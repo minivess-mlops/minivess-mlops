@@ -1,0 +1,22 @@
+# MinIVess MLOps — SkyPilot Project Configuration
+#
+# Project-level config: overrides ~/.sky/config.yaml
+# Precedence: CLI flag > task YAML > project (.sky.yaml) > user (~/.sky/config.yaml)
+# Docs: https://docs.skypilot.co/en/stable/reference/config-sources.html
+#
+# ROOT CAUSE FIX: Controller was zone-hopping across US (us-central1-b → us-east1-d
+# → us-east4-b → us-east1-c) with "[Errno 101] Network is unreachable" because
+# config only set cloud: gcp with NO region. Fix: pin to europe-north1.
+
+# Restrict to project's two cloud providers (CLAUDE.md: two providers only).
+allowed_clouds:
+  - gcp
+  - runpod
+
+# Managed Jobs Controller — MUST be same cloud + region as jobs.
+jobs:
+  controller:
+    resources:
+      infra: gcp/europe-north1
+      cpus: 4+
+      disk_size: 50
