@@ -182,4 +182,100 @@ tests/v2/unit/deployment/test_sky_project_config.py
 
 ---
 
-*Report created: 2026-03-23 pre-launch. Last update: pre-launch*
+## Deep Exploration: 3 Reviewer Agents (while jobs queue for spots)
+
+### Reviewer 1: Untested Cloud Execution Paths — 10 Critical Gaps
+
+| # | Component | Risk | Test File Needed |
+|---|-----------|------|-----------------|
+| 1 | DVC init --no-scm on fresh container | HIGH | tests/v2/unit/deployment/test_dvc_setup_commands.py |
+| 2 | DVC remote add -r gcs | HIGH | tests/v2/cloud/test_dvc_remote_setup.py |
+| 3 | DVC data pull from GCS | CRITICAL | tests/v2/cloud/test_dvc_pull_on_gcs.py |
+| 4 | HF_TOKEN → login → weight download chain | HIGH | tests/v2/cloud/test_hf_token_setup.py |
+| 5 | GPU verification (nvidia-smi + torch.cuda) on L4 | HIGH | tests/v2/cloud/test_gpu_preflight.py |
+| 6 | MLflow auth credential injection end-to-end | CRITICAL | tests/v2/cloud/test_mlflow_uri_credential_injection.py |
+| 7 | GCS MOUNT_CACHED checkpoint persistence | CRITICAL | tests/v2/cloud/test_gcs_mount_checkpoint.py |
+| 8 | SWAG checkpoint discovery on GCS mount | HIGH | tests/v2/cloud/test_swag_checkpoint_discovery.py |
+| 9 | Splits file copy on cloud VM | HIGH | tests/v2/cloud/test_splits_file_setup.py |
+| 10 | Spot preemption → checkpoint resume | CRITICAL | tests/v2/cloud/test_preemption_resume.py |
+
+**Key insight**: The YAML structure is validated (40+ tests), but the **runtime behavior
+of each setup command is completely untested** on cloud VMs. We test the WHAT, not the HOW.
+
+### Reviewer 2: Error Handling Audit — 11 Silent Failure Patterns
+
+**CRITICAL (production data loss):**
+1. Post-training plugin failures → empty model_paths (SWAG silently fails)
+2. External test DataLoader failure → falls back to raw pairs (metrics on wrong scale)
+3. Empty external test dataset → returns {} (DeepVess evaluation never runs)
+
+**HIGH (training waste):**
+4. Metadata collection (git hash, system info) logged as warning, continues
+5. MLflow run creation fails → `mlflow_run_id=None`, downstream blind
+6. Post-training MLflow logging fails → biostatistics has no data
+7. DataLoader fallback hides test dataset failures
+8. Post-training discovery returns [] → SWAG variants missing from ensemble
+
+**Systemic pattern**: `except Exception: logger.warning(...)` + continue.
+Caller gets empty dict/None and doesn't know if result is legitimately empty or failed.
+
+### Reviewer 3: Cross-Flow Integration — 6 Contract Gaps
+
+**GAP 1**: Checkpoint naming convention — train saves `best_val_loss.pth`,
+post_training looks for `best.ckpt` first. No formal spec. Format drift = silent fallback.
+
+**GAP 2 (SYSTEMIC)**: Metric key naming inconsistent across ALL flows:
+| Component | Pattern | Example |
+|-----------|---------|---------|
+| train_flow | `fold/{id}/{metric}` | `fold/0/val_loss` |
+| evaluation_runner | `{prefix}/{ds}/{subset}/{metric}` | `eval/minivess/fold_0/dsc` |
+| biostatistics | `eval/{fold}/{metric}` | `eval/0/dsc` |
+| builder | `eval_fold{id}_{metric}` | `eval_fold2_dsc` |
+
+**GAP 3**: SWAG/post-training checkpoint format undefined. Analysis doesn't know
+how to load SWAG models vs regular checkpoints.
+
+**GAP 4**: deploy_flow hardcodes `experiment_name="minivess_training"` (line 346)
+instead of using `resolve_experiment_name()`.
+
+**GAP 5**: No end-to-end test: train logs metrics → analysis queries → biostatistics parses.
+
+---
+
+## Expanded Test Opportunities (from deep exploration)
+
+### Cloud Tests (tests/v2/cloud/) — 10 new files
+```
+test_dvc_setup_commands.py           — DVC init + remote add on fresh container
+test_dvc_pull_on_gcs.py              — actual DVC pull from GCS bucket
+test_hf_token_setup.py               — HF_TOKEN → login → weight download
+test_gpu_preflight.py                — nvidia-smi + torch.cuda on L4
+test_mlflow_uri_credential_injection.py — URI + auth end-to-end
+test_gcs_mount_checkpoint.py         — MOUNT_CACHED write/read persistence
+test_swag_checkpoint_discovery.py    — SWAG finds checkpoints on GCS
+test_splits_file_setup.py            — splits.json copy in Docker container
+test_preemption_resume.py            — simulated preemption → checkpoint recovery
+test_gcp_quota_preflight.py          — CPU/GPU quota before provisioning
+```
+
+### Unit/Integration Tests — 6 new files
+```
+test_metric_key_consistency.py       — train keys match analysis/biostat queries
+test_checkpoint_format_consistency.py — naming convention across flows
+test_error_path_coverage.py          — exercise all except Exception: paths
+test_deploy_flow_experiment_name.py  — no hardcoded experiment names
+test_post_training_status_validation.py — check status != "error" before using
+test_docker_image_content.py         — splits, cache dirs, DVC files in image
+```
+
+### Issues to Create
+- [ ] Metric key naming standardization across all 5 flows
+- [ ] Checkpoint format spec (canonical naming + format)
+- [ ] deploy_flow hardcoded experiment name → resolve_experiment_name()
+- [ ] Post-training plugin error propagation (status="error" → raise)
+- [ ] External test DataLoader fallback → should raise, not degrade
+- [ ] GCP quota preflight check (#11 in preflight script)
+
+---
+
+*Report created: 2026-03-23 pre-launch. Last update: 2026-03-23T18:00 UTC (deep exploration while spot-queuing)*
