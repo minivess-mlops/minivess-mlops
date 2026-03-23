@@ -240,6 +240,21 @@ instead of using `resolve_experiment_name()`.
 
 **GAP 5**: No end-to-end test: train logs metrics → analysis queries → biostatistics parses.
 
+### Reviewer 4: Configuration Consistency — 5 ORPHAN, 3 PHANTOM, 2 DRIFT
+
+| Category | Count | Key Examples | Risk |
+|----------|-------|-------------|------|
+| **ORPHAN** (YAML defined, never read) | 5 | `infrastructure.parallel_submissions`, `splits_file`, `mlflow.*`, `MLFLOW_ARTIFACT_BUCKET`, `GCS_*` | MEDIUM |
+| **PHANTOM** (code hardcodes instead of reading config) | 3 | `sleep 5` instead of `rate_limit_seconds`, `infrastructure.cloud_config` never loaded, `MINIVESS_ALLOW_HOST` hardcoded | MEDIUM |
+| **DRIFT** (code default ≠ YAML value) | 2 | `tracking_uri` fallback to `"mlruns"` (Rule #22 violation), `PREFECT_DISABLED` hardcoded | MEDIUM |
+
+**Critical finding**: `infrastructure.parallel_submissions` and `rate_limit_seconds` are
+defined in configs/cloud/*.yaml, validated by tests, but **NEVER read by run_factorial.sh**.
+The script hardcodes `sleep 5`. The config-to-code chain is broken at the last mile.
+
+**Rule #22 violation**: `train_flow.py:534` uses `config.get("tracking_uri", "mlruns")` —
+hardcoded fallback. Should use `resolve_tracking_uri()` (fail loudly, no defaults).
+
 ---
 
 ## Expanded Test Opportunities (from deep exploration)
@@ -268,6 +283,14 @@ test_post_training_status_validation.py — check status != "error" before using
 test_docker_image_content.py         — splits, cache dirs, DVC files in image
 ```
 
+### Config Consistency Tests — 4 new files
+```
+tests/v2/unit/config/test_config_consumption.py  — ORPHAN keys have consumers or are documented
+tests/v2/unit/config/test_env_var_documented.py   — every os.environ.get() has .env.example entry
+tests/v2/unit/config/test_no_hardcoded_defaults.py — no config.get("key", HARDCODED) for Rule #22 vars
+tests/v2/unit/config/test_infra_params_wired.py   — run_factorial.sh reads parallel_submissions from config
+```
+
 ### Issues to Create
 - [ ] Metric key naming standardization across all 5 flows
 - [ ] Checkpoint format spec (canonical naming + format)
@@ -275,6 +298,9 @@ test_docker_image_content.py         — splits, cache dirs, DVC files in image
 - [ ] Post-training plugin error propagation (status="error" → raise)
 - [ ] External test DataLoader fallback → should raise, not degrade
 - [ ] GCP quota preflight check (#11 in preflight script)
+- [ ] Wire infrastructure.parallel_submissions into run_factorial.sh (currently ORPHAN)
+- [ ] Remove tracking_uri hardcoded fallback "mlruns" (Rule #22 violation)
+- [ ] Clean up ORPHAN .env.example vars (MLFLOW_ARTIFACT_BUCKET, GCS_*)
 
 ---
 
