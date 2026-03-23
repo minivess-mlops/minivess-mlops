@@ -160,7 +160,7 @@ class EnsembleBuilder:
             If ``True``, synthesize per-fold entries from per-loss runs.
             If ``False``, return raw per-loss entries (1 per loss).
         require_eval_metrics:
-            If ``True`` (default), skip runs without ``eval_fold2_dsc``.
+            If ``True`` (default), skip runs without ``eval/fold2/dsc``.
             Set to ``False`` for debug runs (#588).
         """
         raw_runs = self.discover_training_runs_raw(
@@ -178,7 +178,7 @@ class EnsembleBuilder:
         """Query MLflow for completed production training runs (raw).
 
         Returns one entry per loss function (not per fold).  Production
-        runs are identified by having ``eval_fold2_dsc`` metric (only
+        runs are identified by having ``eval/fold2/dsc`` metric (only
         fully-completed runs have fold 2 evaluation data).
 
         The ``loss_type`` field is read from the ``loss_function`` tag
@@ -187,7 +187,7 @@ class EnsembleBuilder:
         Parameters
         ----------
         require_eval_metrics:
-            If ``True`` (default), skip runs without ``eval_fold2_dsc``
+            If ``True`` (default), skip runs without ``eval/fold2/dsc``
             metric (incomplete runs). Set to ``False`` for debug runs
             that do not produce eval metrics.
 
@@ -239,10 +239,12 @@ class EnsembleBuilder:
                 )
                 continue
 
-            # Filter production runs: must have fold 2 eval metrics
-            if require_eval_metrics and "eval_fold2_dsc" not in metrics:
+            # Filter production runs: must have fold 2 eval metrics.
+            # Metric key uses slash format: eval/fold2/dsc (matches tracking.py).
+            # Previously used underscore format eval/fold2/dsc which NEVER matched.
+            if require_eval_metrics and "eval/fold2/dsc" not in metrics:
                 logger.debug(
-                    "Skipping run %s (%s): no eval_fold2_dsc (incomplete run)",
+                    "Skipping run %s (%s): no eval/fold2/dsc (incomplete run)",
                     run.info.run_id,
                     loss_type,
                 )

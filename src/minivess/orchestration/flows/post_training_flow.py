@@ -184,13 +184,9 @@ def run_plugin_task(
 
     errors = plugin.validate_inputs(plugin_input)
     if errors:
-        log.warning("Plugin %s validation failed: %s", plugin.name, errors)
-        return {
-            "status": "validation_failed",
-            "errors": errors,
-            "model_paths": [],
-            "metrics": {},
-        }
+        msg = f"Plugin {plugin.name} validation failed: {errors}"
+        log.error(msg)
+        raise ValueError(msg)
 
     output = plugin.execute(plugin_input)
     log.info(
@@ -333,11 +329,11 @@ def post_training_flow(
             plugin_results[plugin_name] = result
         except Exception:
             log.exception("Plugin %s failed", plugin_name)
-            plugin_results[plugin_name] = {
-                "status": "error",
-                "model_paths": [],
-                "metrics": {},
-            }
+            log.error(
+                "Plugin %s FAILED — re-raising (Rule #25: loud failures)",
+                plugin_name,
+            )
+            raise
 
     # --- Data-dependent plugins ---
     data_enabled = [name for name in enabled if name in _DATA_PLUGINS]
@@ -357,11 +353,11 @@ def post_training_flow(
             plugin_results[plugin_name] = result
         except Exception:
             log.exception("Plugin %s failed", plugin_name)
-            plugin_results[plugin_name] = {
-                "status": "error",
-                "model_paths": [],
-                "metrics": {},
-            }
+            log.error(
+                "Plugin %s FAILED — re-raising (Rule #25: loud failures)",
+                plugin_name,
+            )
+            raise
 
     n_run = len(plugin_results)
     log.info("Post-training flow complete: %d plugin(s) executed", n_run)

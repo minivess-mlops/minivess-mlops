@@ -531,7 +531,7 @@ def train_one_fold_task(
     from minivess.config.models import ExperimentConfig
     from minivess.observability.tracking import ExperimentTracker
 
-    tracking_uri: str = config.get("tracking_uri", "mlruns")
+    tracking_uri: str = config.get("tracking_uri") or resolve_tracking_uri()
     experiment_name: str = config.get("experiment_name", "minivess_training")
     exp_config = ExperimentConfig(
         experiment_name=experiment_name,

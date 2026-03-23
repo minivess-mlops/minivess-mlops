@@ -81,12 +81,14 @@ class TestPostTrainingFlow:
         assert result.status == "completed"
         assert result.checkpoint_averaging_completed
 
-    def test_plugin_failure_isolation(self, tmp_path: Path) -> None:
-        """A failing plugin should not block other plugins."""
+    def test_plugin_failure_raises_loudly(self, tmp_path: Path) -> None:
+        """A failing plugin must RAISE (Rule #25: loud failures, not silent swallow)."""
+        import pytest
+
         from minivess.config.post_training_config import PostTrainingConfig
         from minivess.orchestration.flows.post_training_flow import post_training_flow
 
-        # Checkpoint averaging will fail with empty checkpoints, but we still get a result
+        # Empty checkpoints → plugin validation fails → must raise ValueError
         config = PostTrainingConfig(
             subsampled_ensemble={"enabled": False},  # type: ignore[arg-type]
             model_merging={"enabled": False},  # type: ignore[arg-type]
@@ -94,13 +96,12 @@ class TestPostTrainingFlow:
             crc_conformal={"enabled": False},  # type: ignore[arg-type]
             conseco_fp_control={"enabled": False},  # type: ignore[arg-type]
         )
-        result = post_training_flow(
-            config=config,
-            checkpoint_paths=[],  # Empty → checkpoint averaging will handle gracefully
-            output_dir=tmp_path,
-        )
-        # Flow should still return success overall (best-effort per plugin)
-        assert result.status == "completed"
+        with pytest.raises((ValueError, RuntimeError)):
+            post_training_flow(
+                config=config,
+                checkpoint_paths=[],  # Empty → validation fails → raises
+                output_dir=tmp_path,
+            )
 
     def test_result_aggregation(self, tmp_path: Path) -> None:
         from minivess.config.post_training_config import PostTrainingConfig

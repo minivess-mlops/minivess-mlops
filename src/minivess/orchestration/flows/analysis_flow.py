@@ -2131,16 +2131,15 @@ def _build_dataloaders_from_config(config_dict: dict[str, Any]) -> dict[str, Any
             loader = _build_loader_from_dicts(pairs, data_config, cache_rate=0.0)
             result[ds_name] = {"all": loader}
         except Exception:
-            # Fallback: store raw pairs if DataLoader construction fails
-            # (e.g., TIFF files without proper headers for MONAI transforms).
-            # This preserves backward compat while logging the issue.
-            logger.warning(
-                "Could not build DataLoader for '%s' — storing raw pairs. "
-                "The evaluation runner may need to handle raw pairs.",
+            # Rule #25: Loud failures. Do NOT fall back to raw pairs —
+            # evaluation on unprocessed data produces invalid metrics.
+            logger.error(
+                "Failed to build DataLoader for '%s' — cannot evaluate. "
+                "Fix the data format or transforms before proceeding.",
                 ds_name,
                 exc_info=True,
             )
-            result[ds_name] = {"all": pairs}
+            raise
         logger.info(
             "Discovered %d pairs for external test dataset '%s'",
             len(pairs),
