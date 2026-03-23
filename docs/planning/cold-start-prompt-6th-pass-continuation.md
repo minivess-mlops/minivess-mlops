@@ -43,9 +43,12 @@ Branch: `test/run-debug-gcp-5th-pass`
 
 ### IN PROGRESS — GCP Jobs
 
-- Jobs 1-2 PENDING (L4+A100 spot unavailable, queuing ~8+ hours)
-- Launch script (`b7j1m7xlr`) running autonomously
-- Controller: GCP europe-west1-b (UP, n4-standard-4)
+- Jobs 1-2 CANCELLED (were requesting L4 OR A100 — A100 was unauthorized)
+- Launch script killed
+- **A100 REMOVED from accelerators** — was never authorized (5.5x cost)
+- YAML now: `accelerators: L4:1` only
+- Controller: GCP europe-west1-b (may need restart after cancel)
+- **MUST RELAUNCH** with L4-only YAML after Phases 2-5 complete
 - Check: `uv run sky jobs queue`
 
 ### REMAINING — Post-Run Fix Plan Phases 2-5
