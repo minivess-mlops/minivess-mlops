@@ -135,20 +135,49 @@ SkyPilot reads `.sky.yaml` from repo root and uses it as project-level config.
 `allowed_clouds` warning appears (server vs client mismatch) but doesn't block.
 **Compound learning**: Version-controlled SkyPilot config is the right architecture.
 
-### O5: L4 + A100 spot — 3+ hours PENDING (peak hours)
-Both L4 and A100-80GB spot VMs unavailable for 3+ hours during European daytime
-(~14:00-17:00 UTC). SkyPilot correctly queues and waits. The launch script blocks
-on the first job submission because `sky jobs launch` waits for the managed job to
-be accepted by the controller, not for the VM to provision.
-**Key insight**: Spot queuing is CORRECT behavior (saves 60-90% cost). The wait is
-the tradeoff for $0.22/hr vs $0.70/hr.
-**UPDATE (8+ hours later)**: Jobs STILL PENDING after 8 hours. European daytime +
-evening, zero L4 OR A100 spot capacity. This suggests the GCP project may need:
-(a) quota increase request for L4/A100 spot in europe regions, or
-(b) on-demand fallback (Issue #914), or
-(c) try different regions (us-central1 had capacity in 5th pass with RunPod controller).
-**Test opportunity**: `test_spot_queue_timeout_configurable` — configurable max PENDING
-time + auto-escalation to on-demand or different region.
+### O5: Unauthorized A100 in SkyPilot YAML (CRITICAL process failure)
+`train_factorial.yaml` had `accelerators: {L4: 1, A100-80GB: 1}` since its first
+commit — Claude Code added A100 as "helpful fallback" WITHOUT user authorization.
+A100 spot = $1.20/hr vs L4 = $0.22/hr (5.5x cost). If SkyPilot provisioned A100
+because L4 was unavailable, 34 jobs = ~$40 instead of ~$8.
+
+**This is NOT about money. It is about determinism.** The YAML is the contract.
+If the YAML says L4:1, ONLY L4 is provisioned. Claude Code does not improvise.
+
+**Fix applied**: Removed A100 from ALL SkyPilot YAMLs. Built 5-layer YAML contract
+enforcement system (golden contract, pre-commit hook, 70 tests, preflight, CLAUDE.md
+Rule 31). See: metalearning/2026-03-24-yaml-is-the-contract-zero-improvisation.md
+
+### O6: L4 spot — 8+ hours PENDING, zero capacity
+L4-only jobs PENDING 8+ hours (European daytime + evening). GCP spot capacity
+exhausted in europe-north1 region. This is normal spot behavior — the tradeoff
+for $0.22/hr vs $0.70/hr on-demand.
+**Key insight**: The system MUST be fire-and-forget. User runs one command, comes
+back in 1 hour or 1 week — results are there. Current script dies on network
+interruptions and needs manual restart. UNACCEPTABLE.
+
+### O7: No auto-resume, no auto-retry (CRITICAL architecture gap)
+The launch script (`run_factorial.sh`) has ZERO resilience:
+- Script killed → must manually restart
+- Network interruption → script dies, partial submission
+- All jobs fail to launch → no retry, just logs "32 failed"
+- No `--resume` flag to continue from partial state
+- No wrapper for fire-and-forget execution
+
+This is the MOST IMPORTANT infrastructure gap. Every other fix (controller,
+parallel, contract) is pointless if the script can't survive a network blip.
+
+**Plan**: `docs/planning/retries-for-skypilot-spots-and-autoresume-plan.md`
+**3 layers**: retry-with-backoff per launch, --resume for partials,
+resilient wrapper with 1-week max wait.
+
+### O8: sync_sky_config.py infra/cloud conflict killed 32 jobs
+`sync_sky_config.py` wrote `cloud: gcp` to `~/.sky/config.yaml` while
+`.sky.yaml` had `infra: gcp/europe-west1`. SkyPilot v1.0 rejects both.
+ALL 32 jobs LAUNCH_FAILED. Fix: sync script now skips when project
+`.sky.yaml` exists (project config takes precedence).
+
+**Test opportunity**: `test_sync_sky_config_no_conflict_with_project_config`
 
 ---
 
