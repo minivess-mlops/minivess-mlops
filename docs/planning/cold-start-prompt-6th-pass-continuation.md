@@ -94,6 +94,29 @@ Execute: `docs/planning/v0-2_archive/original_docs/run-debug-factorial-experimen
 - `.claude/skills/experiment-harness/protocols/deep-exploration.md` — deep exploration protocol
 - `.sky.yaml` — project-level SkyPilot config (GCP europe-west1 controller)
 
+### CRITICAL REVIEWER FINDINGS (from this session)
+
+**SkyPilot features we're NOT using but SHOULD:**
+1. `job_recovery.max_restarts_on_errors: 3` — auto-retry failed jobs (our ban test was WRONG)
+2. `any_of: [{use_spot: true}, {use_spot: false}]` — spot-to-on-demand fallback
+3. `ordered:` multi-region failover (europe-north1 → europe-west1 → europe-west4)
+4. `--async` flag for fire-and-forget submission (no background subshells needed)
+
+**10 resilience gaps in run_factorial.sh (with exact fixes):**
+1. No retry on launch failure → add retry loop with exponential backoff
+2. No idempotency → check sky jobs queue for existing conditions before submitting
+3. No resume → add --resume flag, track submission state in job log
+4. Lost subshell exit codes → track PIDs explicitly
+5. Log write race condition → use per-condition temp files, merge after
+6. No signal handling → trap SIGINT/SIGTERM, kill background jobs
+7. Permissive Python parsing → check exit codes, fail fast
+8. Zero-shot no exception handling → add try/except with traceback
+9. Insufficient preflight → add Docker image, quota, HF_TOKEN checks
+10. Ambiguous exit codes → return 0/1/2 for success/total-fail/partial-fail
+
+**Execution plan**: Create XML plan from reviewer findings → TDD implementation
+**Priority**: P0 — the system MUST be fire-and-forget (user's explicit instruction)
+
 ### HOW TO RESUME
 
 ```bash
