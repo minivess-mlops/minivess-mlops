@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Post-Run Fix Plan v2 — 6th Pass Findings (Reviewer-Optimized)
+  Source: 4 reviewer agents during spot queuing (deep-exploration protocol)
+  Optimization: 1 plan-reviewer agent applied 17 concrete changes to v1
+  Skill: self-learning-iterative-coder
+  Branch: test/run-debug-gcp-5th-pass (continuing)
+
+  v1 → v2 changes:
+    - PROMOTED metric key mismatch to Phase 1 (P0 — silently discards ALL runs in builder)
+    - SPLIT Task 3.1 into 3.1a (builder format fix) + 3.1b (flow-wide migration)
+    - MERGED Tasks 2.1+2.2 (same file, same YAML loading)
+    - MERGED Tasks 5.1+5.2+5.3 into one test file
+    - MERGED Tasks 4.1+4.2 test files into test_cross_flow_contracts.py
+    - DEFERRED Tasks 6.2 (orphan docs) + 6.3 (quota preflight) as over-engineered
+    - FIXED all vague RED/GREEN specs with exact files, lines, exception types
+    - Reduced: 16 tasks → 11 tasks, 6 phases → 5 phases, ~4-6h → ~3-4h
+-->
+<plan>
+  <metadata>
+    <title>6th Pass Post-Run Fix v2 — Silent Failures, Metric Keys, Config Wiring</title>
+    <branch>test/run-debug-gcp-5th-pass</branch>
+    <date>2026-03-23</date>
+    <version>2</version>
+    <status>planned</status>
+    <priority>P0 — fixes block scientific validity of factorial results</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <estimated-effort>~3-4 hours TDD across 5 phases, 11 tasks</estimated-effort>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 1: CRITICAL SILENT FAILURES (P0 — data loss prevention) -->
+  <!-- 4 tasks, ~1.5 hours. MUST complete before any other phase.    -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="1" name="Critical Silent Failures" priority="P0">
+    <description>
+      Fix 4 CRITICAL bugs that cause production data loss. Each hides
+      behind except Exception + continue, making training "succeed" with
+      garbage or missing results.
+    </description>
+
+    <task id="1.1">
+      <title>Post-training plugin failure must raise, not return empty model_paths</title>
+      <source>Agent 2, Finding #1 — post_training_flow.py:334</source>
+      <problem>
+        SWAG plugin fails → returns {status: "error", model_paths: []}.
+        Caller never checks status. Scientific claim of UQ is FALSE.
+      </problem>
+      <red>
+        test_post_training_plugin_error_raises — mock plugin.execute() to raise
+        RuntimeError. Assert post_training_subflow raises (not returns status=error).
+        File: tests/v2/unit/orchestration/test_critical_silent_failures.py
+      </red>
+      <green>
+        In post_training_flow.py:334, replace the dict return in except block with:
+        `raise PostTrainingPluginError(f"Plugin {plugin_name} failed") from exc`
+        Define PostTrainingPluginError in the same file or in exceptions.py.
+      </green>
+    </task>
+
+    <task id="1.2">
+      <title>External test DataLoader failure must raise, not fall back to raw pairs</title>
+      <source>Agent 2, Finding #2 — analysis_flow.py:2133</source>
+      <problem>
+        DeepVess DataLoader construction fails → falls back to raw dict pairs.
+        Paper reports test/deepvess/dice but metrics computed on unprocessed data.
+      </problem>
+      <red>
+        test_external_dataloader_failure_raises — mock _build_loader_from_dicts to
+        raise. Assert the exception propagates (not caught + fallback to pairs).
+        File: tests/v2/unit/orchestration/test_critical_silent_failures.py
+      </red>
+      <green>
+        In analysis_flow.py:2133, remove the except block that falls back to raw pairs.
+        Let the exception propagate. Caller handles it at the flow level.
+      </green>
+    </task>
+
+    <task id="1.3">
+      <title>Remove tracking_uri hardcoded "mlruns" fallback (Rule #22)</title>
+      <source>Agent 4, Finding #1 — train_flow.py:534</source>
+      <problem>
+        config.get("tracking_uri", "mlruns") silently falls back to file-based MLflow.
+        On cloud VMs, metrics go to ephemeral disk and are lost.
+      </problem>
+      <red>
+        test_no_hardcoded_tracking_uri_fallback — AST check that train_flow.py does
+        NOT contain any string literal "mlruns" as a default value.
+        File: tests/v2/unit/orchestration/test_critical_silent_failures.py
+      </red>
+      <green>
+        Replace config.get("tracking_uri", "mlruns") with resolve_tracking_uri()
+        (already imported in the file). No fallback — fail loudly.
+      </green>
+    </task>
+
+    <task id="1.4">
+      <title>Fix builder.py eval_fold2_dsc vs eval/fold2/dsc format mismatch</title>
+      <source>Agent 3, GAP 2 — PROMOTED from Phase 3 to P0</source>
+      <problem>
+        builder.py:243 checks for "eval_fold2_dsc" (underscore format).
+        tracking.py:774 logs "eval/fold{fold_id}/{metric}" (slash format).
+        The builder NEVER FINDS completed runs — silently returns empty ensemble.
+        This is production-blocking: ensemble comparison table has zero rows.
+      </problem>
+      <red>
+        test_builder_metric_format_matches_tracking — create MLflow run with
+        tracking.py's actual metric key format, then call builder's discovery.
+        Assert the run IS found (currently fails due to format mismatch).
+        File: tests/v2/unit/orchestration/test_critical_silent_failures.py
+      </red>
+      <green>
+        In builder.py:243, change the metric key check from underscore format
+        ("eval_fold2_dsc") to slash format ("eval/fold2/dsc") matching what
+        tracking.py actually logs. Use MetricKeys constants.
+      </green>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 2: CONFIG-TO-CODE WIRING (P1)                           -->
+  <!-- Merged Tasks 2.1+2.2. Parallelizable with Phase 3.           -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="2" name="Config-to-Code Wiring" priority="P1" parallel_with="3">
+    <description>
+      Wire ORPHAN cloud config values into run_factorial.sh. The config chain
+      is validated by tests but the last mile (script reads config) is broken.
+    </description>
+
+    <task id="2.1">
+      <title>Wire cloud config into run_factorial.sh (parallel_submissions + rate_limit + sync_sky_config)</title>
+      <source>Agent 4, Findings #3 + #5 — MERGED from v1 Tasks 2.1+2.2</source>
+      <problem>
+        configs/cloud/gcp_spot.yaml defines parallel_submissions:4 and
+        rate_limit_seconds:5 but run_factorial.sh hardcodes sleep 5 and
+        launches sequentially. infrastructure.cloud_config is validated
+        but never loaded.
+      </problem>
+      <red>
+        test_run_factorial_reads_parallel_from_config — verify script extracts
+        parallel_submissions from the config chain (factorial → cloud → fallback=1).
+        test_run_factorial_reads_rate_limit — verify sleep uses config value.
+        test_run_factorial_calls_sync_sky_config — verify controller sync happens.
+        File: tests/v2/unit/config/test_infra_params_wired.py
+      </red>
+      <green>
+        At start of run_factorial.sh (after CONFIG_FILE is set):
+        1. Extract cloud_config name from factorial YAML
+        2. Load configs/cloud/{name}.yaml
+        3. Extract PARALLEL_SUBMISSIONS and RATE_LIMIT_SECONDS
+        4. Call sync_sky_config.py with the cloud config path
+        5. Replace hardcoded sleep 5 with sleep ${RATE_LIMIT_SECONDS}
+        6. Replace sequential loop with background job pool (wait -n)
+        Insertion point: after line 148 (where CONFIG_FILE is parsed).
+      </green>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 3: METRIC KEY MIGRATION + CONTRACTS (P1)                -->
+  <!-- Split from v1 Task 3.1. Parallelizable with Phase 2.         -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="3" name="Metric Key Standardization" priority="P1" parallel_with="2">
+    <description>
+      Migrate all flows to use MetricKeys constants for eval metric keys.
+      Phase 1 Task 1.4 fixes the immediate builder mismatch; this phase
+      ensures ALL flows use the same constants (prevents future drift).
+    </description>
+
+    <task id="3.1">
+      <title>Add EVAL_FOLD_PREFIX and EVAL_TEST_PREFIX to MetricKeys</title>
+      <red>
+        test_metric_keys_has_eval_fold_prefix — verify MetricKeys has constants
+        for the eval fold key pattern used by tracking.py and builder.py.
+        File: tests/v2/unit/orchestration/test_metric_key_consistency.py
+      </red>
+      <green>
+        Add to metric_keys.py:
+        EVAL_FOLD_PREFIX = "eval/fold"  (e.g., eval/fold0/dsc)
+        EVAL_TEST_PREFIX = "test"       (e.g., test/deepvess/all/dsc)
+      </green>
+    </task>
+
+    <task id="3.2">
+      <title>Migrate all flows to MetricKeys constants (no raw eval/ strings)</title>
+      <red>
+        test_no_raw_eval_strings_in_flows — AST check that no flow file contains
+        raw string literals matching "eval/" or "eval_fold" — must use MetricKeys.
+        File: tests/v2/unit/orchestration/test_metric_key_consistency.py
+      </red>
+      <green>
+        Replace raw "eval/" and "eval_fold" strings in:
+        - builder.py:243 (already fixed in 1.4, ensure uses MetricKeys constant)
+        - evaluation_runner.py:289-312 (use EVAL_FOLD_PREFIX / EVAL_TEST_PREFIX)
+        - biostatistics_duckdb.py:394-431 (use MetricKeys constants in SQL queries)
+      </green>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 4: CROSS-FLOW CONTRACTS (P1)                            -->
+  <!-- Merged v1 Tasks 4.1+4.2 test files.                          -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="4" name="Cross-Flow Contracts" priority="P1">
+    <description>
+      Enforce checkpoint naming and experiment name contracts between flows.
+      All tests in one file: test_cross_flow_contracts.py.
+    </description>
+
+    <task id="4.1">
+      <title>Define canonical checkpoint filename in constants.py</title>
+      <red>
+        TestCheckpointNaming::test_train_and_post_training_use_same_filename —
+        verify train_flow and post_training_flow reference the SAME checkpoint
+        filename constant (no fallback chain to best.ckpt).
+        File: tests/v2/unit/orchestration/test_cross_flow_contracts.py
+      </red>
+      <green>
+        Add CHECKPOINT_BEST_FILENAME = "best_val_loss.pth" to constants.py.
+        In post_training_flow.py:87, remove "best.ckpt" from the fallback list.
+        Both flows use the constant.
+      </green>
+    </task>
+
+    <task id="4.2">
+      <title>Remove ALL hardcoded "minivess_training" experiment names</title>
+      <source>Agent 3, GAP 4 — expanded to cover all occurrences</source>
+      <red>
+        TestExperimentNaming::test_no_hardcoded_experiment_name_in_flows —
+        AST check that NO flow file contains the string literal "minivess_training"
+        outside of comments/docstrings. Must use resolve_experiment_name().
+        Cover: deploy_flow.py:346+355, dashboard_flow.py:470, any others found.
+        File: tests/v2/unit/orchestration/test_cross_flow_contracts.py
+      </red>
+      <green>
+        Replace every "minivess_training" with resolve_experiment_name(EXPERIMENT_TRAINING).
+        Import from constants.py (already available in all flow files).
+      </green>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 5: ERROR PATH COVERAGE (P2)                             -->
+  <!-- Merged v1 Tasks 5.1+5.2+5.3 into one test file.              -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="5" name="Error Path Coverage" priority="P2">
+    <description>
+      Write tests exercising the except Exception: paths identified by Agent 2.
+      All tests in ONE file to avoid tiny single-test files.
+    </description>
+
+    <task id="5.1">
+      <title>Test error paths: MLflow creation, metadata collection, setup timing</title>
+      <red>
+        test_mlflow_run_creation_failure_is_loud — mock mlflow.set_experiment
+        to raise MlflowException. Verify logged at ERROR (not WARNING).
+
+        test_git_hash_failure_is_logged — mock subprocess.run to raise
+        FileNotFoundError (git not found). Verify logged at WARNING with exc_info.
+
+        test_setup_timing_parse_failure_logged — verify train_flow.py:904-905
+        bare `except: pass` is replaced with `except Exception as exc: logger.warning(...)`.
+
+        File: tests/v2/unit/orchestration/test_error_path_coverage.py
+      </red>
+      <green>
+        1. train_flow.py:904-905: change bare `except:` to `except Exception: logger.warning("Setup timing parse failed", exc_info=True)`
+        2. Verify MLflow and metadata paths already log at appropriate levels (may already be correct)
+      </green>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- DEFERRED (from v1 Phase 6 — over-engineered per reviewer)     -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <deferred>
+    <item reason="ORPHAN keys are fixed by Phase 2 wiring, not by comment documentation">
+      Task 6.2: Config consumption tests (YAML comments not testable)
+    </item>
+    <item reason="One-time operational issue, cloud-specific, not data integrity">
+      Task 6.3: GCP quota preflight check (nice-to-have, separate PR)
+    </item>
+    <item reason="File existence in repo ≠ file existence in Docker image">
+      Task 6.1: Docker image content tests (should be integration test, not unit)
+    </item>
+  </deferred>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- EXECUTION ORDER                                                -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <execution-order>
+    <step>Phase 1 (4 CRITICAL bugs) — MUST complete first</step>
+    <step>Phase 2 + Phase 3 (parallel — config wiring + metric keys)</step>
+    <step>Phase 4 (contracts — depends on Phase 3 MetricKeys additions)</step>
+    <step>Phase 5 (error paths — independent, can run anytime after Phase 1)</step>
+    <step>Docker rebuild + GAR push (after all code changes)</step>
+    <step>make test-staging (0 skipped, 0 failed)</step>
+    <step>make test-prod (0 skipped, 0 failed)</step>
+  </execution-order>
+
+  <expected-outcomes>
+    <outcome>0 CRITICAL silent failures (SWAG, DataLoader, tracking_uri, metric format)</outcome>
+    <outcome>infrastructure.parallel_submissions wired into run_factorial.sh</outcome>
+    <outcome>All metric keys use MetricKeys constants (no raw strings)</outcome>
+    <outcome>Checkpoint filename enforced by constants.py</outcome>
+    <outcome>No hardcoded "minivess_training" in any flow file</outcome>
+    <outcome>~15 new tests (4 critical + 3 config + 4 metric + 2 contract + 3 error)</outcome>
+  </expected-outcomes>
+
+  <issues-to-create>
+    <issue title="Metric key eval_fold2_dsc vs eval/fold2/dsc format mismatch in builder.py" priority="P0" label="bug"/>
+    <issue title="Post-training plugin error silently returns empty model_paths" priority="P0" label="bug"/>
+    <issue title="External test DataLoader fallback masks evaluation failures" priority="P0" label="bug"/>
+    <issue title="Hardcoded experiment names in deploy_flow, dashboard_flow" priority="P1" label="bug"/>
+    <issue title="GCP CPU/GPU quota preflight check (deferred)" priority="P2" label="enhancement"/>
+  </issues-to-create>
+</plan>
