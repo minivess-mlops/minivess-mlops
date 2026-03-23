@@ -98,20 +98,42 @@ Total new tests since 5th pass: 32 (config chain validation + SWAG scaling + per
 
 | ID | Item | Severity | Source | Status |
 |----|------|----------|--------|--------|
-| W1 | GCP controller bootstrap time | HIGH | NEW (first GCP controller) | ⏳ |
-| W2 | SAM3 FP16 overflow → NaN | HIGH | Passes 1-5 (T4 banned, BF16 on L4) | ⏳ |
-| W3 | MambaVesselNet mamba-ssm import on L4 | HIGH | Passes 1-5 (never succeeded) | ⏳ |
-| W4 | SWAG scaling with 2 epochs | MEDIUM | NEW (formula first cloud run) | ⏳ |
-| W5 | Checkpoint namespace on shared GCS | MEDIUM | NEW (first cloud run with namespace) | ⏳ |
-| W6 | Submission latency with GCP controller | MEDIUM | NEW (was 36 min with RunPod) | ⏳ |
-| W7 | Spot preemption recovery | LOW | Passes 1-5 (never triggered) | ⏳ |
-| W8 | DeepVess data pull for zero-shot | MEDIUM | 5th pass (added conditional pull) | ⏳ |
+| W1 | GCP controller bootstrap time | HIGH | NEW | ✅ ~3 min (europe-west1-b). Failed in europe-north1 (n4 quota=0). |
+| W2 | SAM3 FP16 overflow → NaN | HIGH | Passes 1-5 | ⏳ Pending (SAM3 jobs not yet submitted) |
+| W3 | MambaVesselNet mamba-ssm import on L4 | HIGH | Passes 1-5 | ⏳ Pending |
+| W4 | SWAG scaling with 2 epochs | MEDIUM | NEW | ⏳ Pending (first job still PENDING) |
+| W5 | Checkpoint namespace on shared GCS | MEDIUM | NEW | ⏳ Pending |
+| W6 | Submission latency with GCP controller | MEDIUM | NEW | ✅ ~3 min/submission (was 36 min, 12x improvement) |
+| W7 | Spot preemption recovery | LOW | Passes 1-5 | ⏳ Not yet triggered |
+| W8 | DeepVess data pull for zero-shot | MEDIUM | 5th pass | ⏳ Pending |
+| W9 | L4 spot availability | NEW | 6th pass | ⚠️ 27+ min PENDING, queue for spots |
+| W10 | GCP n4 quota in europe-north1 | NEW | 6th pass | ❌ CPUS_PER_VM_FAMILY=0, switched to europe-west1 |
 
 ---
 
 ## Cloud Observations (compound learning — updated during execution)
 
-*(Empty — will be filled during monitoring)*
+### O1: GCP controller bootstrap — 3 min (12x improvement over RunPod)
+Controller on GCP europe-west1-b provisioned in ~3 min. First job submitted almost
+immediately after. Compare: RunPod controller was 36 min/submission.
+**Impact**: 34 jobs × 3 min = ~1.7 hours submission time (vs 20 hours with RunPod).
+
+### O2: europe-north1 has zero n4 CPU quota — NOT usable for controller
+`CPUS_PER_VM_FAMILY` quota for n4 is 0 in europe-north1. The controller tried
+europe-north1-a, failed, then the config was changed to europe-west1.
+**Test opportunity**: Preflight check for CPU/GPU quota before provisioning.
+**Issue**: Need to request n4 quota increase in europe-north1.
+
+### O3: L4 spot availability — extended PENDING times
+Jobs have been PENDING for 27+ min waiting for L4 spot VMs. This is a GCP capacity
+issue, not a SkyPilot issue. Spot is correct for cost savings but can have wait times.
+**Test opportunity**: Monitor PENDING duration, alert if > 30 min.
+**Issue #914**: Add on-demand fallback option.
+
+### O4: Project-level .sky.yaml works correctly
+SkyPilot reads `.sky.yaml` from repo root and uses it as project-level config.
+`allowed_clouds` warning appears (server vs client mismatch) but doesn't block.
+**Compound learning**: Version-controlled SkyPilot config is the right architecture.
 
 ---
 
