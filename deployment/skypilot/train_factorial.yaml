@@ -27,10 +27,11 @@ name: minivess-factorial
 resources:
   # GAR image — same-region as training VMs (europe-north1).
   image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
-  # L4 preferred (Ada Lovelace, BF16, 24 GB, cheapest).
-  # A100 fallback for SAM3 TopoLoRA / VesselFM if L4 OOM.
+  # L4 ONLY (Ada Lovelace, BF16, 24 GB, $0.22/hr spot).
+  # A100 REMOVED — was unauthorized (5.5x cost, never approved by user).
   # T4 BANNED (Turing, no BF16 → FP16 overflow → NaN).
-  accelerators: {L4: 1, A100-80GB: 1}
+  # Any GPU type addition requires EXPLICIT user authorization.
+  accelerators: L4:1
   cloud: gcp
   # Spot: 60-91% cheaper. SkyPilot handles preemption recovery.
   use_spot: true

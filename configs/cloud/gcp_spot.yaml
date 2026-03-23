@@ -15,7 +15,8 @@ disk_tier: best
 # See: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
 accelerators:
   - L4:1
-  - A100:1
+  # A100 REMOVED — was never authorized by user (5.5x cost).
+  # Add back ONLY with explicit user authorization.
 
 # Docker image from GAR (same-region, fast pulls, public).
 docker_registry: gar
