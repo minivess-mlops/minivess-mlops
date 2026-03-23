@@ -27,6 +27,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -234,6 +236,36 @@ def check_skypilot_gcp() -> tuple[bool, str]:
     return False, f"SkyPilot GCP not enabled. Run: {sky_bin} check gcp"
 
 
+def check_controller_cloud() -> tuple[bool, str]:
+    """Check that SkyPilot controller runs on the SAME cloud as jobs.
+
+    A GCP job with a RunPod controller causes 36 min/submission latency
+    and RunPod outages killing GCP jobs. 5th pass root cause.
+    """
+    sky_config = Path.home() / ".sky" / "config.yaml"
+    if not sky_config.exists():
+        return True, "No ~/.sky/config.yaml — SkyPilot will auto-place controller"
+
+    config = yaml.safe_load(sky_config.read_text(encoding="utf-8"))
+    controller_cloud = (
+        config.get("jobs", {}).get("controller", {}).get("resources", {}).get("cloud")
+    )
+    if controller_cloud is None:
+        return True, "Controller cloud not pinned — SkyPilot will auto-select"
+
+    # Job cloud from SkyPilot YAML
+    sky_yaml = yaml.safe_load(SKYPILOT_YAML.read_text(encoding="utf-8"))
+    job_cloud = sky_yaml.get("resources", {}).get("cloud", "gcp")
+
+    if controller_cloud.lower() != job_cloud.lower():
+        return False, (
+            f"Controller on '{controller_cloud}' but jobs on '{job_cloud}'. "
+            f"Cross-cloud SSH adds ~30 min/submission and creates single point of failure. "
+            f"Fix: set 'cloud: {job_cloud}' in ~/.sky/config.yaml jobs.controller.resources"
+        )
+    return True, f"Controller and jobs both on {job_cloud}"
+
+
 def check_skypilot_yaml() -> tuple[bool, str]:
     """Check if SkyPilot YAML parses without errors."""
     try:
@@ -269,6 +301,7 @@ def main() -> int:
         ("Setup script DVC paths", check_setup_dvc_paths),
         ("Required env vars", check_env_vars),
         ("SkyPilot GCP backend", check_skypilot_gcp),
+        ("Controller cloud matches jobs", check_controller_cloud),
         ("SkyPilot YAML validity", check_skypilot_yaml),
     ]
 
