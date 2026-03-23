@@ -34,20 +34,40 @@ def sync_sky_config(cloud_config_path: Path) -> None:
         return
 
     controller_cloud = controller["cloud"]
+    # Region: check controller block first, then top-level cloud config region
+    controller_region = controller.get("region") or cloud_cfg.get("region")
     disk_size = controller.get("disk_size", 50)
 
     sky_config_path = Path.home() / ".sky" / "config.yaml"
     sky_config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Read existing config to preserve non-controller settings
+    # Check if .sky.yaml (project config) exists — it takes precedence over
+    # ~/.sky/config.yaml. If it exists and has controller config, skip sync
+    # to avoid conflicts (SkyPilot rejects both 'infra' and 'cloud' simultaneously).
+    project_sky = cloud_config_path.parent.parent.parent / ".sky.yaml"
+    if project_sky.exists():
+        project_cfg = yaml.safe_load(project_sky.read_text(encoding="utf-8")) or {}
+        if project_cfg.get("jobs", {}).get("controller"):
+            print(
+                "Project .sky.yaml has controller config — "
+                "skipping ~/.sky/config.yaml sync (project config takes precedence)"
+            )
+            return
+
+    # No project config — write to user config
     existing: dict = {}
     if sky_config_path.exists():
         existing = yaml.safe_load(sky_config_path.read_text(encoding="utf-8")) or {}
 
-    # Update only the controller block
+    # Use 'infra' key (not 'cloud') — SkyPilot v1.0 format.
+    infra_value = (
+        f"{controller_cloud}/{controller_region}"
+        if controller_region
+        else controller_cloud
+    )
     existing.setdefault("jobs", {})["controller"] = {
         "resources": {
-            "cloud": controller_cloud,
+            "infra": infra_value,
             "disk_size": disk_size,
         },
     }
@@ -59,7 +79,7 @@ def sync_sky_config(cloud_config_path: Path) -> None:
         + yaml.dump(existing, default_flow_style=False),
         encoding="utf-8",
     )
-    print(f"Synced ~/.sky/config.yaml (controller: {controller_cloud})")
+    print(f"Synced ~/.sky/config.yaml (controller: {infra_value})")
 
 
 if __name__ == "__main__":
