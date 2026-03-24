@@ -331,23 +331,24 @@ class TestCliArgConsistency:
 
 
 class TestMlflowCredentials:
-    """MLflow credentials must be declared in envs to prevent silent data loss."""
+    """MLflow connectivity env vars for Cloud Run."""
 
-    def test_mlflow_username_in_envs(self) -> None:
-        """MLFLOW_TRACKING_USERNAME must be in envs for Cloud Run auth."""
+    def test_mlflow_no_basic_auth_in_envs(self) -> None:
+        """MLFLOW_TRACKING_USERNAME/PASSWORD must NOT be in envs.
+
+        Cloud Run MLflow uses IAM auth (service account), not HTTP basic auth.
+        The literal ${...} placeholders were appearing URL-encoded in artifact
+        URLs, causing confusion. Removed in #878 cleanup.
+        """
         config = _load_yaml(FACTORIAL_YAML)
         envs = config.get("envs", {})
-        assert "MLFLOW_TRACKING_USERNAME" in envs, (
-            "MLFLOW_TRACKING_USERNAME missing — Cloud Run MLflow will return 401. "
-            "Training 'succeeds' but ALL metrics are silently lost."
+        assert "MLFLOW_TRACKING_USERNAME" not in envs, (
+            "MLFLOW_TRACKING_USERNAME should be removed — Cloud Run MLflow uses "
+            "IAM auth, not HTTP basic auth. See #878."
         )
-
-    def test_mlflow_password_in_envs(self) -> None:
-        """MLFLOW_TRACKING_PASSWORD must be in envs for Cloud Run auth."""
-        config = _load_yaml(FACTORIAL_YAML)
-        envs = config.get("envs", {})
-        assert "MLFLOW_TRACKING_PASSWORD" in envs, (
-            "MLFLOW_TRACKING_PASSWORD missing — Cloud Run MLflow will return 401."
+        assert "MLFLOW_TRACKING_PASSWORD" not in envs, (
+            "MLFLOW_TRACKING_PASSWORD should be removed — Cloud Run MLflow uses "
+            "IAM auth, not HTTP basic auth. See #878."
         )
 
     def test_mlflow_retry_configured(self) -> None:

@@ -70,12 +70,12 @@ envs:
   POST_TRAINING_METHODS: "none,swag"
 
   # MLflow: Cloud SQL PostgreSQL via Cloud Run (or file-based fallback)
-  # All three vars loaded from .env via --env-file in run_factorial.sh.
-  # NOTE: SkyPilot does NOT expand ${VAR} in envs — these are overridden
-  # by --env-file .env at launch time. Placeholders here serve as documentation.
+  # Loaded from .env via --env-file in run_factorial.sh.
+  # NOTE: SkyPilot does NOT expand ${VAR} in envs — overridden by --env-file.
   MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
-  MLFLOW_TRACKING_USERNAME: ${MLFLOW_TRACKING_USERNAME}
-  MLFLOW_TRACKING_PASSWORD: ${MLFLOW_TRACKING_PASSWORD}
+  # MLFLOW_TRACKING_USERNAME/PASSWORD removed (#878 cleanup) — Cloud Run MLflow
+  # uses IAM auth (service account), not HTTP basic auth. The literal ${...}
+  # placeholders were appearing URL-encoded in artifact URLs.
   # MLflow client resilience — retry on transient network failures
   MLFLOW_HTTP_REQUEST_MAX_RETRIES: "10"
   MLFLOW_HTTP_REQUEST_TIMEOUT: "300"
@@ -189,7 +189,7 @@ setup: |
     echo "Checking MLflow server connectivity..."
     python -c "import os, sys; uri = os.environ['MLFLOW_TRACKING_URI']; from mlflow.tracking import MlflowClient; client = MlflowClient(tracking_uri=uri); exps = client.search_experiments(max_results=1); print(f'MLflow OK: {uri} ({len(exps)} experiments)')" || {
       echo "FATAL: MLflow server is not reachable. Training would lose all metrics."
-      echo "Check: MLFLOW_TRACKING_URI, MLFLOW_TRACKING_USERNAME, MLFLOW_TRACKING_PASSWORD"
+      echo "Check: MLFLOW_TRACKING_URI"
       exit 1
     }
   elif [ -n "${MLFLOW_TRACKING_URI}" ]; then
