@@ -96,8 +96,19 @@ nohup bash scripts/run_factorial_resilient.sh configs/factorial/debug.yaml &
 | ~17:30 | Job 18 SUCCEEDED | dynunet/cbdice_cldice/calib=false (1 recovery from preemption) |
 | ~17:30 | Job 19 SUCCEEDED | dynunet/dice_ce/calib=true |
 | 17:48 | Job 27 STARTING | **MambaVesselNet first cloud submission** |
-| 18:01 | Job 27 RUNNING | **MambaVesselNet mamba-ssm compiles on L4!** (8 min job duration) |
-| ongoing | 6/34 SUCCEEDED | Sequential execution, GPUS_ALL_REGIONS=1 |
+| 18:01 | Job 27 RUNNING | **MambaVesselNet mamba-ssm compiles on L4!** |
+| ~18:15 | Jobs 27-29 SUCCEEDED | MambaVesselNet cbdice_cldice + dice_ce conditions |
+| ~18:30 | Jobs 30-32 submitted | Remaining MambaVesselNet conditions |
+| ~19:10 | Jobs 26,31,32 SUCCEEDED | All MambaVesselNet cbdice/dice_ce done |
+| ~19:20 | 12 SUCCEEDED | 6 DynUNet + 6 MambaVesselNet complete |
+| ~19:40 | Job 33 SUCCEEDED | mambavesselnet-bce_dice_05cldice-calibtrue-f0 |
+| ~19:50 | Job 34 submitted | **SAM3 TopoLoRA first submission** |
+| ~20:00 | Job 25 RUNNING | dynunet-bce_dice_05cldice-calibfalse (1 recovery) |
+| ~20:20 | 14 SUCCEEDED | Job 25 completed with 1 preemption recovery |
+| ~20:25 | Job 36 FAILED | SAM3 TopoLoRA: 3 preemptions exhausted (12m 21s total) |
+| ~20:30 | Job 37 resubmitted | Resilient wrapper detected FAILED → re-launched |
+| 21:57 | 15 SUCCEEDED | Job 23 completed. SAM3 TopoLoRA jobs running with preemption pressure |
+| ongoing | 15/34 SUCCEEDED | SAM3 experiencing high preemption rate (2-3 per job) |
 
 ## Critical Infrastructure Findings
 
@@ -209,11 +220,40 @@ Key observations:
 - **Inference latency**: 1.9-2.8 seconds per volume
 - **GPU utilization**: 28-100% (varies by condition — clDice computation is CPU-bound)
 
+### SAM3 TopoLoRA — high preemption rate (CRITICAL FINDING)
+
+SAM3 TopoLoRA jobs experience significantly more spot preemptions than
+DynUNet/MambaVesselNet:
+
+| Model | Avg job time | Avg preemptions | Recovery behavior |
+|-------|-------------|-----------------|-------------------|
+| DynUNet | 9-10 min | 0-1 | Single run, rarely preempted |
+| MambaVesselNet | 8.5-8.8 min | 0 | No preemptions observed |
+| SAM3 TopoLoRA | 26-42 min (partial) | 2-3 | Frequently preempted, needs recovery |
+
+**Root cause**: SAM3 setup takes longer (weight download ~9 GB + DVC pull) and
+training per epoch is slower (larger ViT-32L encoder). Longer job = more exposure
+to preemption. With 2 debug epochs, SAM3 still runs 3-4x longer than DynUNet.
+
+**Job 36 FAILED** after exhausting `max_restarts_on_errors: 3` with only 12m 21s
+total job time across 3 recovery attempts. The resilient wrapper detected the FAILED
+status and resubmitted as job 37.
+
+**Impact on production runs**: With 50 epochs, SAM3 jobs will run 25-30x longer.
+Spot preemption is near-certain. The GCS `MOUNT_CACHED` checkpoint mount is critical
+— it persists partial checkpoints across preemptions so `check_resume_state_task()`
+can resume from the latest valid checkpoint.
+
+**Recommendation**: For SAM3 production runs, increase `max_restarts_on_errors`
+from 3 to 10 or higher. The cost overhead of re-provisioning is small compared to
+lost GPU time from a FAILED job that was 90% complete.
+
 ### GCS checkpoint persistence (CONFIRMED WORKING)
-- All 3 succeeded jobs have checkpoints in `gs://minivess-mlops-checkpoints/`
+- All 15 succeeded jobs have checkpoints in `gs://minivess-mlops-checkpoints/`
 - `MOUNT_CACHED` mode works correctly — async upload, non-blocking writes
 - SHA256 checksums present for integrity verification
 - `metric_history.json` logged per fold
+- Preemption recovery successfully resumes from latest checkpoint (job 18, 25)
 
 ### SkyPilot API server stale path (fixed)
 - After repo rename (`minivess-mlops` → `vascadia`), SkyPilot API server cached old venv path
@@ -224,8 +264,11 @@ Key observations:
 | Item | Estimate | Actual |
 |------|----------|--------|
 | L4 spot (per job, europe-west4) | ~$0.34/hr | $0.34/hr (g2-standard-4) |
-| Job duration (DynUNet, 2 epochs) | ~10 min | 9-10 min |
-| Cost per job | ~$0.06 | ~$0.06 |
+| DynUNet job duration (2 epochs) | ~10 min | 9-10 min |
+| MambaVesselNet job duration (2 epochs) | ~10 min | 8.5-8.8 min |
+| SAM3 TopoLoRA job duration (2 epochs) | ~15 min | 26-42 min (with preemption overhead) |
+| Cost per DynUNet/Mamba job | ~$0.06 | ~$0.06 |
+| Cost per SAM3 job (with recoveries) | ~$0.10 | ~$0.15-0.25 (preemption overhead) |
 | Total GPU jobs | 34 | 3 succeeded, 31 remaining |
 | Estimated total GPU cost | ~$2.04 | Ongoing |
 | Controller (n4-standard-4) | ~$0.15/hr | Running since 14:26 |
