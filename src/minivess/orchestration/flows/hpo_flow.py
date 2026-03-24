@@ -90,7 +90,7 @@ def run_trial_task(
         "num_folds": config.get("num_folds", 1),
         "max_epochs": config.get("max_epochs", 20),
         "batch_size": config.get("batch_size", 2),
-        "learning_rate": config.get("learning_rate", 1e-3),
+        "learning_rate": config.get("learning_rate", 1e-4),  # Match TrainingConfig default
     }
 
     # Trigger training in a separate Docker container via Prefect
