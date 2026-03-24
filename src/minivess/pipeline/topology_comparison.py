@@ -65,7 +65,8 @@ class TopologyComparisonEvaluator:
         condition_b: str,
         metric: str,
         n_bootstrap: int = 10000,
-        seed: int = 42,
+        *,
+        seed: int,
     ) -> dict[str, float]:
         """Paired bootstrap test between two conditions.
 

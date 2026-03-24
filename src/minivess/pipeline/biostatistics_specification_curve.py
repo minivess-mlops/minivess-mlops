@@ -79,9 +79,10 @@ def compute_specification_curve(
     metric_names: list[str],
     higher_is_better: dict[str, bool],
     aggregation_methods: list[str] | None = None,
-    alpha: float = 0.05,
+    *,
+    alpha: float,
     n_permutations: int = 0,
-    seed: int = 42,
+    seed: int,
 ) -> SpecificationCurveResult:
     """Compute specification curve across all researcher degrees of freedom.
 
@@ -269,7 +270,7 @@ def _pool_and_aggregate(
 
 def _bh_fdr_correction(
     p_values: list[float],
-    alpha: float = 0.05,
+    alpha: float,
 ) -> list[tuple[float, bool]]:
     """Benjamini-Hochberg FDR correction."""
     if not p_values:

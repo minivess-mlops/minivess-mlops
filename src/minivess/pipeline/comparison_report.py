@@ -361,7 +361,7 @@ def compute_significance_matrix(
     table: ExtendedComparisonTable,
     *,
     n_resamples: int = 10_000,
-    seed: int = 42,
+    seed: int,
 ) -> dict[tuple[str, str], float]:
     """Compute pairwise p-values between all model pairs.
 
@@ -445,7 +445,7 @@ def format_significance_markdown(
     pvalues: dict[tuple[str, str], float],
     model_names: list[str],
     *,
-    alpha: float = 0.05,
+    alpha: float,
 ) -> str:
     """Format significance matrix as markdown table.
 

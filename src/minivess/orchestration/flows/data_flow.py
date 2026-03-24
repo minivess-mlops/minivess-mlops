@@ -768,7 +768,8 @@ def _run_quality_gates(pairs: list[dict[str, str]]) -> bool:
 def run_data_flow(
     data_dir: Path,
     n_folds: int = 3,
-    seed: int = 42,
+    *,
+    seed: int,
     external_dirs: dict[str, Path] | None = None,
     dvc_rev: str | None = None,
     dvc_remote: str | None = None,
@@ -897,4 +898,5 @@ if __name__ == "__main__":
     from pathlib import Path
 
     data_dir = Path(os.environ.get("DATA_DIR", "/app/data/raw"))
-    run_data_flow(data_dir=data_dir)
+    # TODO: seed should come from Hydra config, not hardcoded here
+    run_data_flow(data_dir=data_dir, seed=42)

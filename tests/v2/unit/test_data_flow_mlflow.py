@@ -148,7 +148,7 @@ class TestDataFlowMlflowFunctional:
         mlflow.set_tracking_uri(tracking_uri)
 
         data_dir = self._make_data_dir(tmp_path)
-        result = run_data_flow(data_dir=data_dir, n_folds=2)
+        result = run_data_flow(data_dir=data_dir, n_folds=2, seed=42)
 
         assert result.mlflow_run_id is not None, (
             "DataFlowResult.mlflow_run_id must be set after run_data_flow(). "
@@ -172,7 +172,7 @@ class TestDataFlowMlflowFunctional:
         mlflow.set_tracking_uri(tracking_uri)
 
         data_dir = self._make_data_dir(tmp_path)
-        result = run_data_flow(data_dir=data_dir, n_folds=2)
+        result = run_data_flow(data_dir=data_dir, n_folds=2, seed=42)
 
         run = mlflow.get_run(result.mlflow_run_id)
         experiment = mlflow.get_experiment(run.info.experiment_id)
@@ -195,7 +195,7 @@ class TestDataFlowMlflowFunctional:
         mlflow.set_tracking_uri(tracking_uri)
 
         data_dir = self._make_data_dir(tmp_path)
-        result = run_data_flow(data_dir=data_dir, n_folds=2)
+        result = run_data_flow(data_dir=data_dir, n_folds=2, seed=42)
 
         run = mlflow.get_run(result.mlflow_run_id)
         assert "data_n_volumes" in run.data.params, (
@@ -218,7 +218,7 @@ class TestDataFlowMlflowFunctional:
         mlflow.set_tracking_uri(tracking_uri)
 
         data_dir = self._make_data_dir(tmp_path)
-        result = run_data_flow(data_dir=data_dir, n_folds=2)
+        result = run_data_flow(data_dir=data_dir, n_folds=2, seed=42)
 
         run = mlflow.get_run(result.mlflow_run_id)
         assert run.data.tags.get("flow_name") == "data-flow", (

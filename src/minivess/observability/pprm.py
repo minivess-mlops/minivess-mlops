@@ -83,7 +83,8 @@ class PPRMDetector:
     def __init__(
         self,
         threshold: float = 0.20,
-        alpha: float = 0.05,
+        *,
+        alpha: float,
     ) -> None:
         self.threshold = threshold
         self.alpha = alpha

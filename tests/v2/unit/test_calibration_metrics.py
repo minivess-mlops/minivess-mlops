@@ -34,7 +34,7 @@ class TestBrierScorePerfect:
         from minivess.pipeline.calibration_metrics import compute_calibration_metrics
 
         y_true, p_pred = _make_perfect_predictions()
-        result = compute_calibration_metrics(y_true, p_pred)
+        result = compute_calibration_metrics(y_true, p_pred, seed=42)
         assert result.brier_score < 0.01
 
 
@@ -43,7 +43,7 @@ class TestBrierScoreRandom:
         from minivess.pipeline.calibration_metrics import compute_calibration_metrics
 
         y_true, p_pred = _make_random_predictions()
-        result = compute_calibration_metrics(y_true, p_pred)
+        result = compute_calibration_metrics(y_true, p_pred, seed=42)
         assert result.brier_score > 0.1
 
 
@@ -52,7 +52,7 @@ class TestOERatioCalibrated:
         from minivess.pipeline.calibration_metrics import compute_calibration_metrics
 
         y_true, p_pred = _make_perfect_predictions()
-        result = compute_calibration_metrics(y_true, p_pred)
+        result = compute_calibration_metrics(y_true, p_pred, seed=42)
         assert 0.9 < result.oe_ratio < 1.1, f"O:E should be ~1.0, got {result.oe_ratio}"
 
 
@@ -65,7 +65,7 @@ class TestOERatioOverconfident:
         y_true = rng.integers(0, 2, size=n).astype(float)
         # Overconfident: predict high probabilities regardless of label
         p_pred = np.full(n, 0.9)
-        result = compute_calibration_metrics(y_true, p_pred)
+        result = compute_calibration_metrics(y_true, p_pred, seed=42)
         # O:E < 1 means model predicts too many positives
         assert result.oe_ratio < 0.7
 
@@ -75,7 +75,7 @@ class TestIPAPositive:
         from minivess.pipeline.calibration_metrics import compute_calibration_metrics
 
         y_true, p_pred = _make_perfect_predictions()
-        result = compute_calibration_metrics(y_true, p_pred)
+        result = compute_calibration_metrics(y_true, p_pred, seed=42)
         assert result.ipa > 0.5, (
             f"IPA should be positive for good model, got {result.ipa}"
         )
@@ -90,7 +90,7 @@ class TestIPAZero:
         y_true = rng.integers(0, 2, size=n).astype(float)
         prevalence = y_true.mean()
         p_pred = np.full(n, prevalence)  # Null model: predict prevalence
-        result = compute_calibration_metrics(y_true, p_pred)
+        result = compute_calibration_metrics(y_true, p_pred, seed=42)
         assert abs(result.ipa) < 0.05, (
             f"IPA should be ~0 for null model, got {result.ipa}"
         )
@@ -101,7 +101,7 @@ class TestCalibrationSlopePerfect:
         from minivess.pipeline.calibration_metrics import compute_calibration_metrics
 
         y_true, p_pred = _make_perfect_predictions()
-        result = compute_calibration_metrics(y_true, p_pred)
+        result = compute_calibration_metrics(y_true, p_pred, seed=42)
         # Near-perfect predictions: slope should be positive
         # (Exact slope depends on noise magnitude in near-perfect regime)
         assert result.calibration_slope > 0.5
@@ -116,5 +116,5 @@ class TestCalibrationMetricsSubsampling:
         y_true = rng.integers(0, 2, size=n).astype(float)
         p_pred = rng.uniform(0.001, 0.999, size=n)
 
-        result = compute_calibration_metrics(y_true, p_pred, max_voxels=100000)
+        result = compute_calibration_metrics(y_true, p_pred, max_voxels=100000, seed=42)
         assert 0.0 <= result.brier_score <= 1.0

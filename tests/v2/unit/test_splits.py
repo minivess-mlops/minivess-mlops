@@ -73,12 +73,12 @@ class TestGenerateKfoldSplits:
     def test_num_folds_less_than_2_raises(self) -> None:
         data = _make_data_dicts(5)
         with pytest.raises(ValueError, match="num_folds must be >= 2"):
-            generate_kfold_splits(data, num_folds=1)
+            generate_kfold_splits(data, num_folds=1, seed=42)
 
     def test_more_folds_than_samples_raises(self) -> None:
         data = _make_data_dicts(3)
         with pytest.raises(ValueError, match="exceeds sample count"):
-            generate_kfold_splits(data, num_folds=5)
+            generate_kfold_splits(data, num_folds=5, seed=42)
 
 
 class TestSplitsIO:

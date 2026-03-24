@@ -39,7 +39,7 @@ def compute_calibration_metrics(
     p_pred: np.ndarray,
     *,
     max_voxels: int = 100_000,
-    seed: int = 42,
+    seed: int,
 ) -> CalibrationMetricsResult:
     """Compute calibration metrics for binary segmentation predictions.
 

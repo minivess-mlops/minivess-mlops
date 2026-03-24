@@ -420,7 +420,7 @@ def run_factorial_post_training(
     output_dir: Path,
     n_subsampled_ensemble_models: int = 3,
     subsample_fraction: float = 0.7,
-    seed: int = 42,
+    seed: int,
     tracking_uri: str | None = None,
     experiment_name: str | None = None,
     upstream_run_id: str | None = None,

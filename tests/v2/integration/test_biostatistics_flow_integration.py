@@ -214,6 +214,7 @@ def synthetic_pipeline(tmp_path: Path) -> dict:
             vd = compute_variance_decomposition(
                 per_volume_data=per_volume_data[metric],
                 metric_name=metric,
+                friedman_alpha=config.alpha,
             )
             all_variance.extend(vd)
 

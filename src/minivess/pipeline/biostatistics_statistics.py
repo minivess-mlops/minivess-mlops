@@ -54,7 +54,8 @@ def compute_pairwise_comparisons(
     alpha: float,
     primary_metric: str = "val_dice",
     n_bootstrap: int = 10_000,
-    seed: int = 42,
+    *,
+    seed: int,
 ) -> list[PairwiseResult]:
     """Compute pairwise statistical comparisons between conditions.
 
@@ -225,7 +226,7 @@ def compute_bayesian_comparisons(
 def compute_variance_decomposition(
     per_volume_data: PerVolumeData,
     metric_name: str,
-    friedman_alpha: float = 0.05,
+    friedman_alpha: float,
 ) -> list[VarianceDecompositionResult]:
     """Compute Friedman test + Nemenyi post-hoc + ICC(2,1).
 
@@ -298,7 +299,7 @@ def _pool_scores(fold_data: dict[int, np.ndarray]) -> np.ndarray:
 
 def _bh_fdr_correction(
     p_values: list[float],
-    alpha: float = 0.05,
+    alpha: float,
 ) -> list[tuple[float, bool]]:
     """Benjamini-Hochberg FDR correction.
 

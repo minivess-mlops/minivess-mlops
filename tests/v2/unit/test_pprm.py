@@ -95,7 +95,7 @@ class TestPPRMDetector:
         """monitor should raise if not calibrated."""
         from minivess.observability.pprm import PPRMDetector
 
-        detector = PPRMDetector(threshold=0.20)
+        detector = PPRMDetector(threshold=0.20, alpha=0.05)
         with pytest.raises(RuntimeError, match="calibrat"):
             detector.monitor(np.random.default_rng(42).random((100,)))
 

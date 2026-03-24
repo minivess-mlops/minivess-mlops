@@ -129,7 +129,7 @@ class TestConfigurableMAPIESeed:
         """Default random_state should remain 42 for backward compat."""
         from minivess.ensemble.mapie_conformal import MapieConformalSegmentation
 
-        predictor = MapieConformalSegmentation()
+        predictor = MapieConformalSegmentation(alpha=0.05)
         assert predictor.random_state == 42
 
     def test_custom_random_state(self) -> None:

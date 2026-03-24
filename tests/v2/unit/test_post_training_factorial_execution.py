@@ -35,6 +35,7 @@ class TestFactorialExecutionNonePassthrough:
             checkpoint_paths=[ckpt],
             methods=["none"],
             output_dir=output_dir,
+            seed=42,
         )
 
         assert len(results) == 1
@@ -69,6 +70,7 @@ class TestFactorialExecutionCheckpointAveraging:
             checkpoint_paths=[ckpt1, ckpt2],
             methods=["checkpoint_averaging"],
             output_dir=output_dir,
+            seed=42,
         )
 
         assert len(results) == 1
@@ -94,6 +96,7 @@ class TestFactorialExecutionSubsampledEnsemble:
             methods=["subsampled_ensemble"],
             output_dir=output_dir,
             n_subsampled_ensemble_models=2,
+            seed=42,
         )
 
         assert len(results) == 1
@@ -118,6 +121,7 @@ class TestFactorialExecutionAllMethods:
             checkpoint_paths=ckpts,
             methods=["none", "checkpoint_averaging", "subsampled_ensemble"],
             output_dir=output_dir,
+            seed=42,
         )
 
         assert len(results) == 3
@@ -141,6 +145,7 @@ class TestFactorialExecutionMlflowTags:
             checkpoint_paths=[ckpt],
             methods=["none", "checkpoint_averaging"],
             output_dir=output_dir,
+            seed=42,
         )
 
         for result in results:
@@ -164,6 +169,7 @@ class TestFactorialExecutionCheckpointNaming:
             checkpoint_paths=[ckpt],
             methods=["none"],
             output_dir=output_dir,
+            seed=42,
         )
 
         output_path = Path(results[0]["output_path"])

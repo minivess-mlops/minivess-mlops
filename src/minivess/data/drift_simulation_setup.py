@@ -29,7 +29,8 @@ _BATCH_SIZE = 2
 
 def partition_vesselnn_batches(
     volume_ids: list[str],
-    seed: int = 42,
+    *,
+    seed: int,
 ) -> list[list[str]]:
     """Partition VesselNN volumes into 6 batches of 2.
 
@@ -65,7 +66,7 @@ def partition_vesselnn_batches(
     return batches
 
 
-def generate_drift_simulation_config(seed: int = 42) -> dict[str, Any]:
+def generate_drift_simulation_config(*, seed: int) -> dict[str, Any]:
     """Generate a drift simulation config for VesselNN.
 
     Parameters

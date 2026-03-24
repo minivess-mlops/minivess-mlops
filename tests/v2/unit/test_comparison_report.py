@@ -340,7 +340,7 @@ class TestFormatSignificanceMarkdown:
             ("model_b", "model_c"): 0.50,
         }
         model_names = ["model_a", "model_b", "model_c"]
-        md = format_significance_markdown(pvalues, model_names)
+        md = format_significance_markdown(pvalues, model_names, alpha=0.05)
         assert "**" in md  # p < 0.01
         assert "*" in md  # p < 0.05
         assert "ns" in md  # not significant

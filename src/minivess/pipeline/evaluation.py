@@ -231,7 +231,7 @@ class EvaluationRunner:
         *,
         confidence_level: float = 0.95,
         n_resamples: int = 10_000,
-        seed: int = 42,
+        seed: int | None = None,
     ) -> FoldResult:
         """Evaluate all volumes in a fold and aggregate with bootstrap CI.
 

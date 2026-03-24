@@ -11,6 +11,12 @@ from __future__ import annotations
 
 import numpy as np
 
+from minivess.config.biostatistics_config import BiostatisticsConfig
+
+# Single source of truth for statistical params — never hardcode
+# alpha, seed, etc. See CLAUDE.md Rule #29 and Issue #881.
+_CFG = BiostatisticsConfig()
+
 
 def _make_synthetic_spec_data(
     *,
@@ -79,6 +85,8 @@ class TestSpecificationCurveBasics:
             factor_names=["model", "loss", "calib"],
             metric_names=["cldice", "masd", "dsc"],
             higher_is_better={"cldice": True, "masd": False, "dsc": True},
+            alpha=_CFG.alpha,
+            seed=_CFG.seed,
         )
         assert isinstance(result, SpecificationCurveResult)
 
@@ -94,6 +102,8 @@ class TestSpecificationCurveBasics:
             factor_names=["model", "loss", "calib"],
             metric_names=["cldice", "masd", "dsc"],
             higher_is_better={"cldice": True, "masd": False, "dsc": True},
+            alpha=_CFG.alpha,
+            seed=_CFG.seed,
         )
         assert len(result.specifications) > 0
 
@@ -113,6 +123,8 @@ class TestSpecificationCurveBasics:
             factor_names=["model", "loss", "calib"],
             metric_names=["cldice", "dsc"],
             higher_is_better={"cldice": True, "dsc": True},
+            alpha=_CFG.alpha,
+            seed=_CFG.seed,
         )
         # With 2×2×2=8 conditions, C(8,2)=28 pairs × 2 metrics × 2 aggregations
         # = 112 specs. But the exact number depends on aggregation choices.
@@ -133,6 +145,8 @@ class TestSpecificationCurveFields:
             factor_names=["model", "loss", "calib"],
             metric_names=["cldice"],
             higher_is_better={"cldice": True},
+            alpha=_CFG.alpha,
+            seed=_CFG.seed,
         )
         for spec in result.specifications:
             assert spec.metric != ""
@@ -148,6 +162,8 @@ class TestSpecificationCurveFields:
             factor_names=["model", "loss", "calib"],
             metric_names=["cldice"],
             higher_is_better={"cldice": True},
+            alpha=_CFG.alpha,
+            seed=_CFG.seed,
         )
         for spec in result.specifications:
             assert isinstance(spec.effect_size, float)
@@ -163,6 +179,8 @@ class TestSpecificationCurveFields:
             factor_names=["model", "loss", "calib"],
             metric_names=["cldice"],
             higher_is_better={"cldice": True},
+            alpha=_CFG.alpha,
+            seed=_CFG.seed,
         )
         for spec in result.specifications:
             assert 0.0 <= spec.p_value <= 1.0
@@ -182,6 +200,8 @@ class TestSpecificationCurveSorting:
             factor_names=["model", "loss", "calib"],
             metric_names=["cldice"],
             higher_is_better={"cldice": True},
+            alpha=_CFG.alpha,
+            seed=_CFG.seed,
         )
         effects = [s.effect_size for s in result.specifications]
         assert effects == sorted(effects)
@@ -202,8 +222,9 @@ class TestSpecificationCurvePermutationTest:
             factor_names=["model", "loss", "calib"],
             metric_names=["cldice"],
             higher_is_better={"cldice": True},
+            alpha=_CFG.alpha,
             n_permutations=100,  # Small for speed in tests
-            seed=42,
+            seed=_CFG.seed,
         )
         assert result.permutation_p is not None
         assert 0.0 <= result.permutation_p <= 1.0
@@ -230,8 +251,9 @@ class TestSpecificationCurvePermutationTest:
             factor_names=["model", "loss", "calib"],
             metric_names=["cldice"],
             higher_is_better={"cldice": True},
+            alpha=_CFG.alpha,
             n_permutations=200,
-            seed=42,
+            seed=_CFG.seed,
         )
         # With a strong monotonic gradient and 4 conditions, permutation
         # p should be low (gradient is disrupted by most permutations)
@@ -252,6 +274,8 @@ class TestSpecificationCurveMedianEffect:
             factor_names=["model", "loss", "calib"],
             metric_names=["cldice"],
             higher_is_better={"cldice": True},
+            alpha=_CFG.alpha,
+            seed=_CFG.seed,
         )
         assert isinstance(result.median_effect, float)
 
@@ -266,5 +290,7 @@ class TestSpecificationCurveMedianEffect:
             factor_names=["model", "loss", "calib"],
             metric_names=["cldice"],
             higher_is_better={"cldice": True},
+            alpha=_CFG.alpha,
+            seed=_CFG.seed,
         )
         assert 0.0 <= result.fraction_significant <= 1.0

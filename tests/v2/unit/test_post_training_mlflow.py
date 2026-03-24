@@ -213,6 +213,7 @@ class TestPostTrainingTagSchema:
             checkpoint_paths=[ckpt],
             methods=["none", "checkpoint_averaging"],
             output_dir=output_dir,
+            seed=42,
         )
 
         for result in results:
@@ -268,6 +269,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=methods,
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",
@@ -306,6 +308,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=["none", "checkpoint_averaging"],
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",
@@ -337,6 +340,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=["checkpoint_averaging"],
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",
@@ -371,6 +375,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=["none", "checkpoint_averaging"],
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",
@@ -400,6 +405,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=["checkpoint_averaging"],
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",
@@ -429,6 +435,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=["none"],
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",
@@ -456,6 +463,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=["none", "checkpoint_averaging"],
             output_dir=tmp_path / "output",
+            seed=42,
         )
 
         # Should still return results, but without mlflow_run_id
@@ -476,6 +484,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=["none"],
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",
@@ -506,6 +515,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt1, ckpt2],
             methods=["none", "checkpoint_averaging", "subsampled_ensemble"],
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",

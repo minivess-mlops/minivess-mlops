@@ -149,11 +149,14 @@ def task_compute_bayesian(
 def task_compute_variance(
     per_volume_data: dict[str, dict[int, Any]],
     metric_name: str,
+    *,
+    alpha: float,
 ) -> list[Any]:
     """Compute variance decomposition (Friedman + ICC)."""
     return compute_variance_decomposition(
         per_volume_data=per_volume_data,
         metric_name=metric_name,
+        friedman_alpha=alpha,
     )
 
 
@@ -252,7 +255,9 @@ def task_compute_specification_curve(
     metric_names: list[str],
     higher_is_better: dict[str, bool],
     n_permutations: int = 500,
-    seed: int = 42,
+    *,
+    alpha: float,
+    seed: int,
 ) -> SpecificationCurveResult:
     """Compute specification curve across all researcher degrees of freedom."""
     return compute_specification_curve(
@@ -261,6 +266,7 @@ def task_compute_specification_curve(
         metric_names=metric_names,
         higher_is_better=higher_is_better,
         n_permutations=n_permutations,
+        alpha=alpha,
         seed=seed,
     )
 
@@ -473,6 +479,7 @@ def run_biostatistics_flow(
             variance = task_compute_variance(
                 per_volume_data=per_volume_data[metric],
                 metric_name=metric,
+                alpha=config.alpha,
             )
             all_variance.extend(variance)
 
@@ -485,6 +492,7 @@ def run_biostatistics_flow(
         metric_names=config.metrics,
         higher_is_better=higher_is_better,
         n_permutations=config.n_bootstrap // 20,  # Scale with bootstrap
+        alpha=config.alpha,
         seed=config.seed,
     )
     logger.info(
