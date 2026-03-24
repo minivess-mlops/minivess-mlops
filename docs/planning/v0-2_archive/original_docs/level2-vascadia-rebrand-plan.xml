@@ -1,0 +1,533 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  VASCADIA Level 2 Rebrand Plan
+  minivess → vascadia full package/infrastructure rename
+
+  Scope: ~11,000 occurrences across ~800 files
+  Estimated effort: 3-5 focused sessions
+
+  CRITICAL DECISIONS (must resolve before starting):
+  D1: Dataset filenames — minivess_00001_*.nii.gz are the UPSTREAM dataset convention.
+      Rename them or accept the mismatch?
+  D2: GCP project — cannot be renamed. Create new project or keep minivess-mlops?
+  D3: Archived planning docs (150+ files, ~1,200 occurrences) — rename or leave as historical?
+  D4: MINIVESS_ALLOW_HOST env var — rename to VASCADIA_ALLOW_HOST? Affects 115 occurrences.
+-->
+<plan name="vascadia-level2-rebrand" version="1.0">
+
+  <metadata>
+    <created>2026-03-24</created>
+    <branch>feat/vascadia-rebrand</branch>
+    <estimated_sessions>3-5</estimated_sessions>
+    <test_gate>make test-staging (6022 tests, 0 failures)</test_gate>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 0: Pre-flight decisions (BLOCKING — resolve before any code) -->
+  <!-- ================================================================== -->
+  <phase id="P0" name="Pre-flight Decisions">
+    <description>
+      Three architectural decisions that affect every subsequent phase.
+      Must be resolved with user before writing any code.
+    </description>
+
+    <task id="P0-D1" name="Dataset filename decision">
+      <description>
+        MiniVess NIfTI files are named minivess_00001_image.nii.gz — this is the
+        UPSTREAM dataset convention from s3://minivessdataset, not project naming.
+        498 references in split JSON files, 662 path references across 74 files.
+
+        Options:
+        A) Keep minivess_* filenames (dataset identity preserved, accept mismatch)
+        B) Rename files on disk + update splits + re-push to DVC (clean but risky)
+
+        RECOMMENDATION: Option A — dataset names are external identity, not branding.
+        The dataset IS called MiniVess. The platform is called VASCADIA.
+      </description>
+      <effort>Decision only</effort>
+      <risk>HIGH if Option B chosen — breaks DVC hashes, requires data re-push</risk>
+    </task>
+
+    <task id="P0-D2" name="GCP project decision">
+      <description>
+        GCP project minivess-mlops CANNOT be renamed. Affects:
+        - 3 GCS buckets (minivess-mlops-dvc-data, -mlflow-artifacts, -checkpoints)
+        - GAR registry (europe-north1-docker.pkg.dev/minivess-mlops/minivess/)
+        - Pulumi stack
+        - ~60 references across 34 files
+
+        Options:
+        A) Create new GCP project vascadia + new buckets + new registry (clean, ~$5 migration cost)
+        B) Keep minivess-mlops as GCP project, accept infra/branding mismatch
+        C) Keep GCP project but create new GAR repo (europe-north1-docker.pkg.dev/minivess-mlops/vascadia/)
+
+        RECOMMENDATION: Option C — least disruption. GCP project name is invisible to users.
+        New GAR repo under same project. Buckets can stay (they store data, not branding).
+      </description>
+      <effort>Decision + 1 hour if Option A, 15 min if Option C</effort>
+      <risk>HIGH if Option A — data migration, Pulumi re-provision</risk>
+    </task>
+
+    <task id="P0-D3" name="Archive docs decision">
+      <description>
+        150+ files in docs/planning/v0-2_archive/ contain ~1,200 "minivess" references.
+        These are historical planning documents.
+
+        Options:
+        A) Leave as-is (historical artifacts, "minivess" was the name at that time)
+        B) Bulk find-replace (mechanical but noisy git history)
+
+        RECOMMENDATION: Option A — these are historical. Adding a note to the archive
+        README that "MinIVess was renamed to VASCADIA in v0.2.0-beta" is sufficient.
+      </description>
+      <effort>Decision only</effort>
+    </task>
+
+    <task id="P0-D4" name="Environment variable naming decision">
+      <description>
+        MINIVESS_ALLOW_HOST (115 occurrences, 60+ files) and MINIVESS_DEBUG_SUFFIX
+        are the main env vars. Options:
+        A) Rename to VASCADIA_ALLOW_HOST etc. (clean but massive test churn)
+        B) Keep MINIVESS_* env vars (accept naming mismatch, zero test changes)
+        C) Support both with fallback: VASCADIA_ALLOW_HOST || MINIVESS_ALLOW_HOST
+
+        RECOMMENDATION: Option A with a single-commit bulk replace.
+      </description>
+      <effort>30 min mechanical replace</effort>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Python package rename (highest impact, most mechanical)   -->
+  <!-- ================================================================== -->
+  <phase id="P1" name="Python Package Rename" depends="P0">
+    <description>
+      Rename src/minivess/ → src/vascadia/ and update all imports.
+      ~3,100 import statements across ~477 files. Fully mechanical.
+    </description>
+
+    <task id="P1-T1" name="Rename source directory">
+      <description>
+        git mv src/minivess src/vascadia
+        Update pyproject.toml:
+        - name = "vascadia" (line 10)
+        - packages = ["src/vascadia"] (line 179)
+        - known-first-party = ["vascadia"] (line 209)
+        - mypy module overrides (lines 321-343)
+        - coverage source (line 411)
+      </description>
+      <files>
+        <file>pyproject.toml</file>
+        <file>src/minivess/ → src/vascadia/</file>
+      </files>
+      <effort>15 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P1-T2" name="Update all source imports">
+      <description>
+        Bulk replace in src/vascadia/:
+        - "from minivess." → "from vascadia."
+        - "import minivess" → "import vascadia"
+        - "minivess." in string literals (module paths in error messages)
+
+        619 occurrences across 177 files.
+      </description>
+      <effort>10 min (sed/ruff)</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P1-T3" name="Update all test imports">
+      <description>
+        Bulk replace in tests/:
+        - "from minivess." → "from vascadia."
+        - "import minivess" → "import vascadia"
+        - patch("minivess.xxx") → patch("vascadia.xxx") (176 mock paths in 32 files)
+
+        ~2,500 occurrences across 300 files.
+      </description>
+      <effort>15 min (sed/ruff)</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P1-T4" name="Update conftest.py files">
+      <description>
+        3 conftest.py files reference minivess module paths.
+        Also update MINIVESS_* env vars if P0-D4 decided to rename.
+      </description>
+      <files>
+        <file>tests/conftest.py</file>
+        <file>tests/gpu_instance/conftest.py</file>
+        <file>tests/v2/conftest.py</file>
+      </files>
+      <effort>10 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P1-T5" name="Rename test file">
+      <description>
+        git mv tests/v2/unit/test_minivess_downloader.py tests/v2/unit/test_vascadia_downloader.py
+      </description>
+      <effort>2 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P1-V" name="VERIFY: make test-staging">
+      <description>Run full staging test suite. Must pass 6000+ tests, 0 failures.</description>
+      <effort>5 min</effort>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: Docker and container infrastructure                       -->
+  <!-- ================================================================== -->
+  <phase id="P2" name="Docker Infrastructure" depends="P1">
+    <description>
+      Rename all Docker image names, container names, network names.
+      ~215 occurrences across 23 files. Requires rebuilding all images.
+    </description>
+
+    <task id="P2-T1" name="Update docker-compose.yml">
+      <description>
+        Rename in deployment/docker-compose.yml (40 occurrences):
+        - container_name: minivess-* → vascadia-*
+        - image: minivess-* → vascadia-*
+        - Network name: minivess → vascadia
+        - Postgres user: minivess → vascadia
+        - BentoML home: /home/minivess/ → /home/vascadia/
+      </description>
+      <effort>20 min (judgment needed for service interdependencies)</effort>
+      <mechanical>false</mechanical>
+    </task>
+
+    <task id="P2-T2" name="Update docker-compose.flows.yml">
+      <description>
+        Rename in deployment/docker-compose.flows.yml (62 occurrences):
+        - All flow image names (17 services)
+        - Network references
+        - Container name prefixes
+      </description>
+      <effort>15 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P2-T3" name="Update Dockerfiles">
+      <description>
+        21 Dockerfiles reference minivess image names (113 occurrences).
+        Key files:
+        - deployment/docker/Dockerfile.base (FROM, user creation)
+        - deployment/docker/Dockerfile.base-cpu
+        - deployment/docker/Dockerfile.base-light
+        - 14 flow-specific Dockerfiles (FROM minivess-base:latest)
+        - deployment/bento/Dockerfile (BentoML)
+        - deployment/docker/Dockerfile.mlflow-gcp
+        - deployment/docker/Dockerfile.benchmark
+      </description>
+      <effort>20 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P2-T4" name="Update SkyPilot YAML image references">
+      <description>
+        8 SkyPilot YAML files reference Docker image names.
+        Update image_id: docker:ghcr.io/.../minivess-* → vascadia-*
+        Update cluster name: minivess-dev → vascadia-dev
+      </description>
+      <effort>10 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P2-T5" name="Update Makefile and justfile">
+      <description>
+        Makefile: ~55 occurrences (image names, cluster names, paths)
+        justfile: 7 occurrences
+      </description>
+      <effort>15 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P2-T6" name="Update supporting deployment files">
+      <description>
+        - deployment/falco/minivess_rules.yaml → vascadia_rules.yaml (8 occurrences)
+        - deployment/bento/service.py: MODEL_NAME, service name (3 occurrences)
+        - deployment/bento/bentofile.yaml (2 occurrences)
+        - deployment/prometheus/alert_rules.yml (2 occurrences)
+        - deployment/grafana/*.json (24 occurrences across 7 files)
+        - frontend/package.json, observable/package.json (2 occurrences)
+      </description>
+      <effort>15 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P2-V" name="VERIFY: docker compose config --quiet">
+      <description>Validate all compose files parse correctly after rename.</description>
+      <effort>2 min</effort>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: MLflow, observability, and config                         -->
+  <!-- ================================================================== -->
+  <phase id="P3" name="MLflow and Observability" depends="P1">
+    <description>
+      Rename MLflow experiment names, Prometheus metrics, config files.
+    </description>
+
+    <task id="P3-T1" name="Update MLflow experiment constants">
+      <description>
+        src/minivess/orchestration/constants.py:
+        - EXPERIMENT_TRAINING: "minivess_training" → "vascadia_training"
+        - EXPERIMENT_DATA: "minivess_data" → "vascadia_data"
+        - EXPERIMENT_EVALUATION: "minivess_evaluation" → "vascadia_evaluation"
+        - EXPERIMENT_DEPLOYMENT, EXPERIMENT_DASHBOARD, EXPERIMENT_HPO
+
+        Also update ~50 consumer files that hardcode these strings instead
+        of using the constants (identified in code review).
+      </description>
+      <effort>15 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P3-T2" name="Update Prometheus metric names">
+      <description>
+        src/minivess/observability/prometheus_metrics.py: 13 metrics with minivess_ prefix
+        deployment/prometheus/alert_rules.yml: 2 metric references
+        deployment/grafana/*.json: 24 dashboard references
+      </description>
+      <effort>10 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P3-T3" name="Update .env.example">
+      <description>
+        21 occurrences of minivess in .env.example:
+        - POSTGRES_USER, container host names, Docker image names
+        - GCP references (keep or change per P0-D2 decision)
+        - Prefect logger name
+      </description>
+      <effort>10 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P3-T4" name="Update Hydra config files">
+      <description>
+        - configs/data/minivess.yaml → configs/data/minivess.yaml (KEEP — dataset name)
+        - configs/experiment/*.yaml — experiment_name references
+        - configs/cloud/*.yaml — cluster names, image names
+      </description>
+      <effort>15 min</effort>
+      <mechanical>false</mechanical>
+    </task>
+
+    <task id="P3-T5" name="Update DVC config">
+      <description>
+        .dvc/config: remote URL references
+        dvc.yaml: path references to data/raw/minivess/ (KEEP if P0-D1 = Option A)
+        data/minivess.dvc: DVC tracking file (KEEP — tracks the dataset)
+      </description>
+      <effort>5 min</effort>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: Documentation and knowledge graph                         -->
+  <!-- ================================================================== -->
+  <phase id="P4" name="Documentation" depends="P1">
+    <description>
+      Update user-facing documentation. Internal docs can be done gradually.
+    </description>
+
+    <task id="P4-T1" name="Update README.md">
+      <description>
+        Full rewrite of README header, badges, installation instructions.
+        Replace NEUROVEX/MinIVess with VASCADIA throughout.
+        Update GitHub URLs to new repo name.
+        Add paper title.
+      </description>
+      <effort>30 min (judgment — narrative rewrite)</effort>
+      <mechanical>false</mechanical>
+    </task>
+
+    <task id="P4-T2" name="Update root CLAUDE.md">
+      <description>
+        13 occurrences. Context-sensitive — some are architectural descriptions,
+        some are rule references. Must preserve meaning while updating name.
+        Update paper title from NEUROVEX to VASCADIA.
+      </description>
+      <effort>15 min</effort>
+      <mechanical>false</mechanical>
+    </task>
+
+    <task id="P4-T3" name="Update subdirectory CLAUDE.md files">
+      <description>
+        6 subdirectory CLAUDE.md files (~45 occurrences total):
+        - src/minivess/adapters/CLAUDE.md
+        - src/minivess/config/CLAUDE.md
+        - src/minivess/data/CLAUDE.md
+        - src/minivess/observability/CLAUDE.md
+        - src/minivess/orchestration/CLAUDE.md
+        - src/minivess/pipeline/CLAUDE.md
+        - deployment/CLAUDE.md
+        - tests/CLAUDE.md
+      </description>
+      <effort>20 min</effort>
+      <mechanical>false</mechanical>
+    </task>
+
+    <task id="P4-T4" name="Update knowledge graph YAML files">
+      <description>
+        ~200 occurrences across 40+ KG YAML files.
+        Most are prose descriptions. Bulk replace "MinIVess" → "VASCADIA"
+        and "minivess" → "vascadia" where it refers to the project (not dataset).
+      </description>
+      <effort>30 min</effort>
+      <mechanical>false</mechanical>
+    </task>
+
+    <task id="P4-T5" name="Update MEMORY.md and .claude/ files">
+      <description>
+        memory/MEMORY.md: update project name references
+        .claude/metalearning/: 50 files, 132 occurrences — bulk replace project name
+        .claude/skills/: skill descriptions referencing minivess
+        .claude/rules/: rule files referencing minivess
+      </description>
+      <effort>15 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P4-T6" name="Add archive README note">
+      <description>
+        Add note to docs/planning/v0-2_archive/README.md:
+        "Historical note: documents in this archive refer to the project as
+        'MinIVess MLOps' — the project was renamed to VASCADIA in v0.2.0-beta
+        (2026-03). The archive is preserved as-is for historical accuracy."
+      </description>
+      <effort>2 min</effort>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 5: Scripts, CI, and build                                    -->
+  <!-- ================================================================== -->
+  <phase id="P5" name="Scripts and CI" depends="P1">
+
+    <task id="P5-T1" name="Update scripts/*.py">
+      <description>
+        36 Python scripts, 171 occurrences. Mostly import paths.
+        Rename scripts/download_minivess.py → scripts/download_minivess.py (KEEP — downloads MiniVess dataset)
+      </description>
+      <effort>15 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P5-T2" name="Update scripts/*.sh">
+      <description>
+        24 shell scripts, 103 occurrences. Docker image names, cluster names,
+        data paths.
+      </description>
+      <effort>15 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P5-T3" name="Update GitHub Actions workflows">
+      <description>
+        7 workflow files, 23 occurrences. Image names, repo references.
+        NOTE: CI is disabled (workflow_dispatch only) so low risk.
+      </description>
+      <effort>10 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+
+    <task id="P5-T4" name="Update pre-commit config">
+      <description>.pre-commit-config.yaml: 1 occurrence</description>
+      <effort>2 min</effort>
+      <mechanical>true</mechanical>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 6: GCP infrastructure (conditional on P0-D2)                 -->
+  <!-- ================================================================== -->
+  <phase id="P6" name="GCP Infrastructure" depends="P0">
+    <description>
+      Conditional on P0-D2 decision. If Option C (new GAR repo only):
+      minimal changes. If Option A (new project): full re-provision.
+    </description>
+
+    <task id="P6-T1" name="Create new GAR repository (Option C)">
+      <description>
+        If P0-D2 = Option C:
+        gcloud artifacts repositories create vascadia \
+          --repository-format=docker \
+          --location=europe-north1 \
+          --project=minivess-mlops
+
+        New path: europe-north1-docker.pkg.dev/minivess-mlops/vascadia/
+        Update all image push/pull references.
+      </description>
+      <effort>15 min</effort>
+    </task>
+
+    <task id="P6-T2" name="Update Pulumi config (if needed)">
+      <description>
+        deployment/pulumi/gcp/__main__.py: update GAR repo name
+        deployment/pulumi/gcp/Pulumi.yaml: stack name
+      </description>
+      <effort>10 min</effort>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 7: Final verification                                        -->
+  <!-- ================================================================== -->
+  <phase id="P7" name="Final Verification" depends="P1,P2,P3,P4,P5">
+
+    <task id="P7-T1" name="Full test suite">
+      <description>make test-staging — must pass 6000+ tests, 0 failures, 0 skips</description>
+    </task>
+
+    <task id="P7-T2" name="Lint and type check">
+      <description>uv run ruff check src/ tests/ &amp;&amp; uv run mypy src/</description>
+    </task>
+
+    <task id="P7-T3" name="Docker compose validation">
+      <description>docker compose -f deployment/docker-compose.yml config --quiet</description>
+    </task>
+
+    <task id="P7-T4" name="Grep audit for remaining minivess references">
+      <description>
+        grep -r "minivess" src/ tests/ deployment/ configs/ scripts/ Makefile \
+          --include="*.py" --include="*.yaml" --include="*.yml" --include="*.toml" \
+          --include="*.sh" --include="*.json" \
+          | grep -v "data/raw/minivess" \
+          | grep -v "minivess.dvc" \
+          | grep -v "download_minivess" \
+          | grep -v "v0-2_archive"
+
+        Must return 0 results (excluding dataset paths and archive).
+      </description>
+    </task>
+
+    <task id="P7-T5" name="Update version to 0.2.0-beta">
+      <description>pyproject.toml version = "0.2.0-beta"</description>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- Summary                                                             -->
+  <!-- ================================================================== -->
+  <summary>
+    <total_files>~800</total_files>
+    <total_occurrences>~11,000</total_occurrences>
+    <mechanical_percentage>75%</mechanical_percentage>
+    <estimated_effort>3-5 focused sessions</estimated_effort>
+    <critical_decisions>4 (P0-D1 through P0-D4)</critical_decisions>
+    <key_risks>
+      <risk>GCP project cannot be renamed — accept mismatch or re-provision</risk>
+      <risk>Dataset filenames are upstream convention — do not rename</risk>
+      <risk>All Docker images must be rebuilt after rename</risk>
+      <risk>MLflow experiment history references old names</risk>
+    </key_risks>
+  </summary>
+
+</plan>

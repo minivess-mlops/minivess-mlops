@@ -1,4 +1,6 @@
-# NEUROVEX -> to de replaced with something more vascular like VascExFlow or something more elegant :P
+# VASCADIA
+
+> **VASCADIA: A MONAI-based MLOps scaffold for reproducible vasculature segmentation**
 
 ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
 ![uv](https://img.shields.io/badge/package%20manager-uv-blueviolet)
@@ -7,15 +9,16 @@
 ![tests](https://img.shields.io/badge/tests-pytest-brightgreen)
 ![ruff](https://img.shields.io/badge/linter-ruff-orange)
 ![mypy](https://img.shields.io/badge/type%20checker-mypy-blue)
+![version](https://img.shields.io/badge/version-0.2.0--beta-yellow)
 
 **A model-agnostic biomedical segmentation MLOps platform extending the MONAI ecosystem.**
 
-MinIVess MLOps v2 is a research-grade software platform designed to scaffold
+VASCADIA is a research-grade software platform designed to scaffold
 reproducible machine learning experimentation for preclinical biomedical imaging.
 It provides Docker-per-flow isolation, SkyPilot intercloud compute, Prefect
 orchestration, and a config-driven architecture where adding a new model, dataset,
 or pipeline flow requires editing one YAML file -- not code. The companion
-manuscript (working title: **NEUROVEX**) targets *Nature Protocols*.
+manuscript targets *Nature Protocols*.
 
 The platform architecture aligns with the four pillars of the **MedMLOps framework**
 ([de Almeida et al., 2025](https://link.springer.com/article/10.1007/s00330-025-11654-6)):
