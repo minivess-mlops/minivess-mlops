@@ -307,8 +307,11 @@ if [ "${RESUME}" = true ] && [ "${DRY_RUN}" = false ]; then
     EXISTING_ACTIVE_JOBS=$("${SKY_BIN}" jobs queue 2>/dev/null \
         | grep -E "PENDING|STARTING|RUNNING|SUCCEEDED|RECOVERING" \
         | awk '{print $3}' || echo "")
-    SKIP_COUNT=$(echo "${EXISTING_ACTIVE_JOBS}" | grep -c "." 2>/dev/null || echo 0)
-    SKIP_COUNT=$((SKIP_COUNT + 0))  # Force integer
+    if [ -n "${EXISTING_ACTIVE_JOBS}" ]; then
+        SKIP_COUNT=$(echo "${EXISTING_ACTIVE_JOBS}" | wc -l)
+    else
+        SKIP_COUNT=0
+    fi
     echo "Found ${SKIP_COUNT} active/succeeded jobs in queue (FAILED/CANCELLED will be retried)"
 fi
 
