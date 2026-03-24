@@ -26,6 +26,7 @@ import torch
 from torch import Tensor, nn
 
 from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
+from minivess.adapters.utils import get_output_channels
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -117,7 +118,7 @@ class CentrelineHeadAdapter(ModelAdapter):
             and len(upsamples) > 0
         ):
             last_up: nn.Module = upsamples[-1]
-            n_channels = _get_output_channels(last_up)
+            n_channels = get_output_channels(last_up)
             if n_channels > 0:
                 return last_up, n_channels
 
@@ -256,16 +257,3 @@ def compute_centreline_distance_map(mask: np.ndarray) -> np.ndarray:
     dist_map: np.ndarray = distance_transform_edt(~skeleton).astype(np.float32)
 
     return dist_map
-
-
-def _get_output_channels(module: nn.Module) -> int:
-    """Get output channels from a module by inspecting its Conv3d layers."""
-    last_channels = 0
-    for m in module.modules():
-        if isinstance(m, nn.Conv3d):
-            last_channels = m.out_channels
-    if last_channels == 0:
-        for m in module.modules():
-            if isinstance(m, nn.BatchNorm3d | nn.InstanceNorm3d):
-                last_channels = m.num_features
-    return last_channels

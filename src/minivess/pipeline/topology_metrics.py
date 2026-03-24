@@ -167,7 +167,6 @@ def compute_ccdice(
 
     # Compute per-component Dice for matched pairs
     total_dice = 0.0
-    n_matched = 0
     for gi, pi in zip(gt_indices, pred_indices, strict=True):
         if iou_matrix[gi, pi] > 0:
             gt_mask = target_labels == (gi + 1)
@@ -175,7 +174,6 @@ def compute_ccdice(
             intersection = np.sum(gt_mask & pred_mask)
             dice = 2 * intersection / (np.sum(gt_mask) + np.sum(pred_mask))
             total_dice += dice
-            n_matched += 1
 
     # Average over all GT components (unmatched GT components contribute 0)
     return float(total_dice / n_target)

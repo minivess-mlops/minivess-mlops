@@ -15,16 +15,16 @@ from unittest.mock import patch
 
 import pytest
 
-from minivess.orchestration.flows.train_flow import _require_docker_context
+from minivess.orchestration.docker_guard import require_docker_context
 
 
 class TestRequireDockerContext:
-    """Verify _require_docker_context() gate behavior."""
+    """Verify require_docker_context("train") gate behavior."""
 
     def test_raises_outside_docker(self) -> None:
         """No /.dockerenv, no env var → RuntimeError."""
         with (
-            patch("minivess.orchestration.flows.train_flow.Path") as mock_path,
+            patch("minivess.orchestration.docker_guard.Path") as mock_path,
             patch.dict(
                 "os.environ",
                 {"MINIVESS_ALLOW_HOST": "", "DOCKER_CONTAINER": ""},
@@ -32,42 +32,42 @@ class TestRequireDockerContext:
         ):
             mock_path.return_value.exists.return_value = False
             with pytest.raises(RuntimeError, match="Docker container"):
-                _require_docker_context()
+                require_docker_context("train")
 
     def test_runs_inside_docker(self) -> None:
         """/.dockerenv exists → no error."""
         with (
-            patch("minivess.orchestration.flows.train_flow.Path") as mock_path,
+            patch("minivess.orchestration.docker_guard.Path") as mock_path,
             patch.dict(
                 "os.environ",
                 {"MINIVESS_ALLOW_HOST": "", "DOCKER_CONTAINER": ""},
             ),
         ):
             mock_path.return_value.exists.return_value = True
-            _require_docker_context()  # Should not raise
+            require_docker_context("train")  # Should not raise
 
     def test_runs_with_allow_host(self) -> None:
         """MINIVESS_ALLOW_HOST=1 → no error even outside Docker."""
         with (
-            patch("minivess.orchestration.flows.train_flow.Path") as mock_path,
+            patch("minivess.orchestration.docker_guard.Path") as mock_path,
             patch.dict("os.environ", {"MINIVESS_ALLOW_HOST": "1"}),
         ):
             mock_path.return_value.exists.return_value = False
-            _require_docker_context()  # Should not raise
+            require_docker_context("train")  # Should not raise
 
     def test_runs_with_docker_container_env(self) -> None:
         """DOCKER_CONTAINER env var → no error."""
         with (
-            patch("minivess.orchestration.flows.train_flow.Path") as mock_path,
+            patch("minivess.orchestration.docker_guard.Path") as mock_path,
             patch.dict("os.environ", {"DOCKER_CONTAINER": "1"}),
         ):
             mock_path.return_value.exists.return_value = False
-            _require_docker_context()  # Should not raise
+            require_docker_context("train")  # Should not raise
 
     def test_error_message_has_docker_instructions(self) -> None:
         """RuntimeError message includes actionable Docker instructions."""
         with (
-            patch("minivess.orchestration.flows.train_flow.Path") as mock_path,
+            patch("minivess.orchestration.docker_guard.Path") as mock_path,
             patch.dict(
                 "os.environ",
                 {"MINIVESS_ALLOW_HOST": "", "DOCKER_CONTAINER": ""},
@@ -75,7 +75,7 @@ class TestRequireDockerContext:
         ):
             mock_path.return_value.exists.return_value = False
             with pytest.raises(RuntimeError, match="docker compose"):
-                _require_docker_context()
+                require_docker_context("train")
 
 
 class TestAllowHostNotInScripts:

@@ -44,6 +44,7 @@ from minivess.orchestration.constants import (
     FLOW_NAME_TRAIN,
     resolve_experiment_name,
 )
+from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -67,21 +68,6 @@ if TYPE_CHECKING:
     from minivess.pipeline.evaluation_runner import EvaluationResult
 
 logger = logging.getLogger(__name__)
-
-
-def _require_docker_context() -> None:
-    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
-    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
-        return
-    if os.environ.get("DOCKER_CONTAINER"):
-        return
-    if Path("/.dockerenv").exists():
-        return
-    raise RuntimeError(
-        "Analysis flow must run inside a Docker container.\n"
-        "Run: docker compose -f deployment/docker-compose.flows.yml run analyze\n"
-        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
-    )
 
 
 def _validate_analysis_env() -> None:
@@ -258,31 +244,6 @@ def _evaluate_single_model_on_all(
         output_dir=output_dir,
     )
     return eval_result
-
-
-def _extract_single_models_from_runs(
-    runs: list[dict[str, Any]],
-) -> dict[str, str]:
-    """Extract model identifiers from training runs.
-
-    Returns a mapping from descriptive name to run_id.  The actual
-    model loading happens inside the ensemble builder; here we just
-    track the names for evaluation.
-
-    Parameters
-    ----------
-    runs:
-        Run info dicts from MLflow discovery.
-
-    Returns
-    -------
-    ``{model_name: run_id}``
-    """
-    result: dict[str, str] = {}
-    for run in runs:
-        name = f"{run['loss_type']}_fold{run['fold_id']}"
-        result[name] = run["run_id"]
-    return result
 
 
 def _extract_single_models_as_modules(
@@ -1820,7 +1781,7 @@ def run_analysis_flow(
     -------
     Dict with keys: ``results``, ``comparison``, ``promotion``, ``report``.
     """
-    _require_docker_context()
+    require_docker_context("analysis")
 
     log = get_run_logger()
     log.info("Starting analysis flow...")

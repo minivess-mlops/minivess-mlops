@@ -73,7 +73,11 @@ class VascuSynthGenerator(SyntheticGeneratorAdapter):
         """
         cfg = config or {}
         patch_size = tuple(cfg.get("patch_size", _DEFAULT_PATCH_SIZE))
-        seed = cfg.get("seed", 42)
+        if "seed" not in cfg:
+            raise KeyError(
+                "seed must be provided in config — silent fallback to 42 is banned (Rule #25)"
+            )
+        seed = cfg["seed"]
         psf_sigma = cfg.get("psf_sigma", 1.5)
 
         if self.is_binary_available():

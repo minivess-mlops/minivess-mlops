@@ -23,6 +23,7 @@ from minivess.orchestration.constants import (
     FLOW_NAME_DATA,
     resolve_experiment_name,
 )
+from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.flow_contract import (
     FlowContract,  # noqa: F401  # used via log_completion_safe
 )
@@ -35,21 +36,6 @@ if TYPE_CHECKING:
     from minivess.validation.gates import GateResult
 
 logger = logging.getLogger(__name__)
-
-
-def _require_docker_context() -> None:
-    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
-    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
-        return
-    if os.environ.get("DOCKER_CONTAINER"):
-        return
-    if Path("/.dockerenv").exists():
-        return
-    raise RuntimeError(
-        "Data flow must run inside a Docker container.\n"
-        "Run: docker compose -f deployment/docker-compose.flows.yml run data\n"
-        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +283,7 @@ def extract_nifti_metadata_task(
         label_path = pair.get("label", "")
 
         try:
-            img = nib.load(image_path)
+            img = nib.load(image_path)  # type: ignore[attr-defined]
             img_data = np.asarray(img.dataobj)  # type: ignore[attr-defined]
             affine = img.affine  # type: ignore[attr-defined]
             shape = img_data.shape
@@ -314,7 +300,7 @@ def extract_nifti_metadata_task(
             num_foreground = 0
             if label_path:
                 try:
-                    lbl = nib.load(label_path)
+                    lbl = nib.load(label_path)  # type: ignore[attr-defined]
                     lbl_data = np.asarray(lbl.dataobj)  # type: ignore[attr-defined]
                     num_foreground = int(np.count_nonzero(lbl_data))
                 except Exception:
@@ -811,7 +797,7 @@ def run_data_flow(
     -------
     DataFlowResult with all flow outputs.
     """
-    _require_docker_context()
+    require_docker_context("data")
 
     import mlflow
 

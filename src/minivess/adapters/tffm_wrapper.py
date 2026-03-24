@@ -25,6 +25,7 @@ from torch import Tensor, nn
 
 from minivess.adapters.base import AdapterConfigInfo, ModelAdapter, SegmentationOutput
 from minivess.adapters.graph_modules import TFFMBlock3D
+from minivess.adapters.utils import get_output_channels
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -125,7 +126,7 @@ class TFFMWrapper(ModelAdapter):
         bottleneck_attr = getattr(net, "bottleneck", None)
         if bottleneck_attr is not None and isinstance(bottleneck_attr, nn.Module):
             bottleneck: nn.Module = bottleneck_attr
-            n_channels = _get_output_channels(bottleneck)
+            n_channels = get_output_channels(bottleneck)
             return bottleneck, n_channels
 
         # Strategy 2: MONAI models with down_layers — look for down_layers[-1]
@@ -136,7 +137,7 @@ class TFFMWrapper(ModelAdapter):
             and len(down_layers) > 0
         ):
             last_down: nn.Module = down_layers[-1]
-            n_channels = _get_output_channels(last_down)
+            n_channels = get_output_channels(last_down)
             return last_down, n_channels
 
         # Strategy 3: Generic fallback — find the deepest Conv3d
@@ -204,17 +205,3 @@ class TFFMWrapper(ModelAdapter):
         """Remove the forward hook on cleanup."""
         if hasattr(self, "_hook_handle"):
             self._hook_handle.remove()
-
-
-def _get_output_channels(module: nn.Module) -> int:
-    """Get output channels from a module by inspecting its Conv3d layers."""
-    last_channels = 0
-    for m in module.modules():
-        if isinstance(m, nn.Conv3d):
-            last_channels = m.out_channels
-    if last_channels == 0:
-        # Fallback: look for BatchNorm/InstanceNorm
-        for m in module.modules():
-            if isinstance(m, nn.BatchNorm3d | nn.InstanceNorm3d):
-                last_channels = m.num_features
-    return last_channels

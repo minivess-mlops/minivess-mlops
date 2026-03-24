@@ -51,7 +51,7 @@ PerVolumeData = dict[str, dict[int, np.ndarray]]
 def compute_pairwise_comparisons(
     per_volume_data: PerVolumeData,
     metric_name: str,
-    alpha: float = 0.05,
+    alpha: float,
     primary_metric: str = "val_dice",
     n_bootstrap: int = 10_000,
     seed: int = 42,
@@ -657,8 +657,8 @@ def compute_factorial_anova(
 def compute_riley_instability(
     per_volume_data: PerVolumeData,
     metric_name: str,
-    n_bootstrap: int = 1000,
-    seed: int = 42,
+    n_bootstrap: int,
+    seed: int,
 ) -> dict[str, Any]:
     """Compute bootstrap ranking instability analysis.
 

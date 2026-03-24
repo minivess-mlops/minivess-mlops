@@ -35,7 +35,7 @@ remotes:
   # GCS (Google Cloud Storage)
   # ---------------------------------------------------------------------------
   gcs:
-    url: gs://minivess-dvc/cache
+    url: gs://minivess-mlops-dvc-data
     description: "Google Cloud Storage bucket for GCP deployments"
     config:
       credentialspath: "${GOOGLE_APPLICATION_CREDENTIALS:-}"

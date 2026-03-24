@@ -81,14 +81,17 @@ def _get_imports(tree: ast.Module) -> list[tuple[str, str | None]]:
 
 
 class TestAllFlowsHaveDockerGate:
-    """Every *_flow.py must call _require_docker_context."""
+    """Every *_flow.py must call require_docker_context (shared or local)."""
 
     @pytest.mark.parametrize("flow_file", _get_flow_files(), ids=lambda p: p.stem)
     def test_all_flows_have_docker_gate(self, flow_file: Path) -> None:
         tree = _parse_flow(flow_file)
         names = _get_all_names_in_module(tree)
-        assert "_require_docker_context" in names, (
-            f"{flow_file.name} does not call _require_docker_context(). "
+        has_gate = (
+            "require_docker_context" in names or "_require_docker_context" in names
+        )
+        assert has_gate, (
+            f"{flow_file.name} does not call require_docker_context(). "
             "Every flow must hard-gate against execution outside Docker. "
             "See CLAUDE.md Rule #19 (STOP Protocol)."
         )

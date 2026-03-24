@@ -17,8 +17,10 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from prefect import flow, get_run_logger, task
 
@@ -30,6 +32,7 @@ from minivess.orchestration.constants import (
     FLOW_NAME_DEPLOY,
     resolve_experiment_name,
 )
+from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -39,21 +42,6 @@ if TYPE_CHECKING:
     from minivess.pipeline.deploy_champion_discovery import ChampionModel
 
 logger = logging.getLogger(__name__)
-
-
-def _require_docker_context() -> None:
-    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
-    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
-        return
-    if os.environ.get("DOCKER_CONTAINER"):
-        return
-    if Path("/.dockerenv").exists():
-        return
-    raise RuntimeError(
-        "Deploy flow must run inside a Docker container.\n"
-        "Run: docker compose -f deployment/docker-compose.flows.yml run deploy\n"
-        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -239,7 +227,7 @@ def deploy_flow(
     -------
     :class:`DeployResult` with all deployment artifacts and status.
     """
-    _require_docker_context()
+    require_docker_context("deploy")
 
     if config is None:
         config = DeployConfig.from_env()

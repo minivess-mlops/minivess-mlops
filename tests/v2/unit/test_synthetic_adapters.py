@@ -41,7 +41,7 @@ class TestVesselFMDrandAdapter:
         from minivess.data.synthetic.vesselfm_drand import VesselFMDrandGenerator
 
         gen = VesselFMDrandGenerator()
-        pairs = gen.generate_stack(n_volumes=2)
+        pairs = gen.generate_stack(n_volumes=2, config={"seed": 42})
         assert len(pairs) == 2
         for img, mask in pairs:
             assert isinstance(img, np.ndarray)
@@ -56,7 +56,7 @@ class TestVesselFMDrandAdapter:
         gen = VesselFMDrandGenerator()
         pairs = gen.generate_stack(
             n_volumes=1,
-            config={"patch_size": (64, 64, 64)},
+            config={"patch_size": (64, 64, 64), "seed": 42},
         )
         img, mask = pairs[0]
         assert img.shape == (64, 64, 64)
@@ -98,7 +98,7 @@ class TestMONAIVQVAEAdapter:
         from minivess.data.synthetic.monai_vqvae import MONAIVQVAEGenerator
 
         gen = MONAIVQVAEGenerator()
-        pairs = gen.generate_stack(n_volumes=2)
+        pairs = gen.generate_stack(n_volumes=2, config={"seed": 42})
         assert len(pairs) == 2
         for img, mask in pairs:
             assert img.ndim == 3
@@ -111,7 +111,7 @@ class TestMONAIVQVAEAdapter:
         gen = MONAIVQVAEGenerator()
         pairs = gen.generate_stack(
             n_volumes=1,
-            config={"codebook_size": 512, "patch_size": (32, 32, 32)},
+            config={"codebook_size": 512, "patch_size": (32, 32, 32), "seed": 42},
         )
         assert len(pairs) == 1
 
@@ -152,7 +152,7 @@ class TestVaMosAdapter:
         from minivess.data.synthetic.vamos import VaMosGenerator
 
         gen = VaMosGenerator()
-        pairs = gen.generate_stack(n_volumes=2)
+        pairs = gen.generate_stack(n_volumes=2, config={"seed": 42})
         assert len(pairs) == 2
         for img, mask in pairs:
             assert img.ndim == 3
@@ -172,7 +172,7 @@ class TestVaMosAdapter:
         gen = VaMosGenerator()
         pairs = gen.generate_stack(
             n_volumes=1,
-            config={"vessel_diameter": 3.0, "branching_angle": 45.0},
+            config={"vessel_diameter": 3.0, "branching_angle": 45.0, "seed": 42},
         )
         assert len(pairs) == 1
 
@@ -207,7 +207,7 @@ class TestVascuSynthAdapter:
         from minivess.data.synthetic.vascusynth import VascuSynthGenerator
 
         gen = VascuSynthGenerator()
-        pairs = gen.generate_stack(n_volumes=2)
+        pairs = gen.generate_stack(n_volumes=2, config={"seed": 42})
         assert len(pairs) == 2
         for img, mask in pairs:
             assert img.ndim == 3
@@ -247,7 +247,7 @@ class TestAllAdaptersRegistered:
         from minivess.data.synthetic import generate_stack, list_generators
 
         for method in list_generators():
-            pairs = generate_stack(method=method, n_volumes=1)
+            pairs = generate_stack(method=method, n_volumes=1, config={"seed": 42})
             assert len(pairs) == 1
             img, mask = pairs[0]
             assert img.ndim == 3

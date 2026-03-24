@@ -22,6 +22,7 @@ from prefect import flow, task
 from minivess.config.biostatistics_config import BiostatisticsConfig
 from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.orchestration.constants import FLOW_NAME_BIOSTATISTICS
+from minivess.orchestration.docker_guard import require_docker_context
 from minivess.pipeline.biostatistics_discovery import (
     discover_source_runs,
     validate_source_completeness,
@@ -52,33 +53,6 @@ from minivess.pipeline.biostatistics_tables import generate_tables
 from minivess.pipeline.biostatistics_types import BiostatisticsResult
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Docker context gate
-# ---------------------------------------------------------------------------
-
-
-def _require_docker_context() -> None:
-    """Require Docker container context or MINIVESS_ALLOW_HOST=1.
-
-    Raises
-    ------
-    RuntimeError
-        If not running inside Docker and MINIVESS_ALLOW_HOST is not set.
-    """
-    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
-        return
-    if os.environ.get("DOCKER_CONTAINER"):
-        return
-    if Path("/.dockerenv").exists():
-        return
-    raise RuntimeError(
-        "Biostatistics flow must run inside a Docker container.\n"
-        "Run: docker compose -f deployment/docker-compose.flows.yml "
-        "run biostatistics\n"
-        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -404,7 +378,7 @@ def run_biostatistics_flow(
     -------
     BiostatisticsResult with all analysis artifacts.
     """
-    _require_docker_context()
+    require_docker_context("biostatistics")
 
     logger.info("Starting biostatistics flow (source: %s)", trigger_source)
 

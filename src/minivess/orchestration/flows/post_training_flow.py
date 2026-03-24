@@ -32,6 +32,7 @@ from minivess.orchestration.constants import (
     FLOW_NAME_TRAIN,
     resolve_experiment_name,
 )
+from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -109,21 +110,6 @@ def resolve_checkpoint_paths_from_contract(
             )
 
     return checkpoint_paths
-
-
-def _require_docker_context() -> None:
-    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
-    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
-        return
-    if os.environ.get("DOCKER_CONTAINER"):
-        return
-    if Path("/.dockerenv").exists():
-        return
-    raise RuntimeError(
-        "Post-training flow must run inside a Docker container.\n"
-        "Run: docker compose -f deployment/docker-compose.flows.yml run post_training\n"
-        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
-    )
 
 
 # Weight-based plugins (no calibration data needed)
@@ -256,7 +242,7 @@ def post_training_flow(
     trigger_source:
         What triggered this flow.
     """
-    _require_docker_context()
+    require_docker_context("post-training")
 
     log = get_run_logger()
     log.info("Post-training flow started (trigger: %s)", trigger_source)

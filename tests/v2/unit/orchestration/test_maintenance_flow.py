@@ -113,7 +113,7 @@ class TestMaintenanceFlow:
                 "minivess.orchestration.flows.maintenance_flow.cleanup_stale_runs_task",
             ) as mock_task,
             patch(
-                "minivess.orchestration.flows.maintenance_flow._require_docker_context",
+                "minivess.orchestration.flows.maintenance_flow.require_docker_context",
             ),
         ):
             mock_task.fn = MagicMock(
