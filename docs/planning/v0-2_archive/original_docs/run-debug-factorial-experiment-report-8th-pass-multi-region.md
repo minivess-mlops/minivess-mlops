@@ -92,8 +92,12 @@ nohup bash scripts/run_factorial_resilient.sh configs/factorial/debug.yaml &
 | ~16:20 | Job 20 SUCCEEDED | dynunet/cbdice_cldice/calib=true — first SUCCEEDED job ever! |
 | ~16:30 | Job 21 SUCCEEDED | dynunet/dice_ce/calib=false |
 | ~16:40 | Job 22 SUCCEEDED | dynunet/dice_ce_cldice/calib=true |
-| 16:56 | Job 24 STARTING | 7th condition submitting, wrapper still running |
-| ongoing | Sequential execution | GPUS_ALL_REGIONS=1 forces serial GPU jobs |
+| ~17:00 | Job 24 SUCCEEDED | dynunet/bce_dice_05cldice/calib=true |
+| ~17:30 | Job 18 SUCCEEDED | dynunet/cbdice_cldice/calib=false (1 recovery from preemption) |
+| ~17:30 | Job 19 SUCCEEDED | dynunet/dice_ce/calib=true |
+| 17:48 | Job 27 STARTING | **MambaVesselNet first cloud submission** |
+| 18:01 | Job 27 RUNNING | **MambaVesselNet mamba-ssm compiles on L4!** (8 min job duration) |
+| ongoing | 6/34 SUCCEEDED | Sequential execution, GPUS_ALL_REGIONS=1 |
 
 ## Critical Infrastructure Findings
 
