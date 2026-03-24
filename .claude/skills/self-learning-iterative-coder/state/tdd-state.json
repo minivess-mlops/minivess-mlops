@@ -1,32 +1,34 @@
 {
-  "plan_file": "docs/planning/mambavesselnet-implementation-plan.xml",
-  "plan_version": "2.0",
+  "plan_file": "docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-6th-pass-post-run-fix-2.xml",
+  "plan_version": "1.0",
   "execution_mode": "autonomous",
   "current_task_id": null,
   "current_phase": null,
-  "inner_iteration": 0,
+  "inner_iteration": 6,
   "tasks": {
-    "T00": {"status": "DONE", "title": "Docker base image: mamba-ssm CUDA compilation strategy", "issue": 738, "commit": "399c24f"},
-    "T01": {"status": "DONE", "title": "ModelFamily enum + [mamba-ssm] optional group + availability gate", "issue": 739, "commit": "prev-session"},
-    "T02": {"status": "DONE", "title": "MlpChannel (channel MLP, CPU, no mamba dependency)", "issue": 740, "commit": "e3eaef4"},
-    "T03": {"status": "DONE", "title": "BidirectionalMambaLayer (CPU shape + GPU real)", "issue": 740, "commit": "e3eaef4"},
-    "T04": {"status": "DONE", "title": "MambaBlock (pre-norm + BidirMamba + MlpChannel)", "issue": 740, "commit": "e3eaef4"},
-    "T05": {"status": "DONE", "title": "MambaVesselNetBackbone (full mvnNet equivalent)", "issue": 740, "commit": "e3eaef4"},
-    "T06": {"status": "DONE", "title": "MambaVesselNetAdapter + model_builder registration", "issue": 741, "commit": "233412b"},
-    "T07": {"status": "DONE", "title": "Model profile YAML + experiment configs", "issue": 742, "commit": "a03b5a8"},
-    "T08": {"status": "DONE", "title": "KG update: adapters.yaml + bibliography.yaml", "issue": 743, "commit": "1d4ba39"},
-    "T09": {"status": "blocked", "title": "VRAM measurement on RTX 2070 Super + RTX 4090", "issue": 744, "blocked_reason": "requires GPU hardware with mamba-ssm CUDA compilation"},
-    "T10": {"status": "blocked", "title": "Cloud smoke test (RunPod / GCP)", "issue": 744, "blocked_reason": "requires GPU hardware with mamba-ssm CUDA compilation"}
+    "1.1": {"status": "DONE", "note": "Research doc exists"},
+    "1.2": {"status": "DONE", "note": "Design in cold-start prompt"},
+    "2.1": {"status": "DONE", "note": "Previous session: config wiring"},
+    "3.1": {"status": "DONE", "note": "Previous session: MetricKeys"},
+    "4.1": {"status": "DONE", "note": "Previous session: checkpoint naming"},
+    "4.2": {"status": "DONE", "note": "Previous session: experiment names"},
+    "5.1": {"status": "DONE", "note": "Previous session: error paths"},
+    "6.1": {"status": "DONE", "note": "Analysis flow discovery — 3 tests"},
+    "6.2": {"status": "DONE", "note": "Biostatistics metric parsing — 7 tests"},
+    "6.3": {"status": "DONE", "note": "Previous session: deploy flow"},
+    "7.1": {"status": "deferred", "note": "Config consumption — needs factorial YAML audit"},
+    "7.2": {"status": "DONE", "note": "Docker image content proxy — 6 tests"},
+    "7.3": {"status": "DONE", "note": "GCP quota preflight — 3 tests + function"},
+    "CP.1": {"status": "DONE", "note": "AsyncCheckpointUploader — 6 tests + implementation"}
   },
   "convergence": {
     "reached": true,
-    "tasks_done": 9,
-    "tasks_total": 11,
+    "tasks_done": 13,
+    "tasks_total": 14,
     "tasks_stuck": 0,
-    "tasks_blocked": 2,
-    "note": "T09+T10 require GPU with mamba-ssm CUDA build (INSTALL_MAMBA=1)"
+    "tasks_deferred": 1
   },
-  "session_task_count": 9,
-  "session_inner_iterations": 9,
-  "session_start": "2026-03-15T00:00:00Z"
+  "session_task_count": 6,
+  "session_inner_iterations": 6,
+  "session_start": "2026-03-24T22:00:00Z"
 }

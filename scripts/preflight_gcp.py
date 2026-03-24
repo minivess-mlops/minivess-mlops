@@ -354,6 +354,54 @@ def check_yaml_contract() -> tuple[bool, str]:
     return True, f"YAML contract valid: {len(gpu_names)} GPU types, cloud={cloud}"
 
 
+def check_gcp_cpu_quota() -> tuple[bool, str]:
+    """Check GCP CPU quota is sufficient for SkyPilot controller + jobs.
+
+    SkyPilot controller needs ~4 CPUs (n4-standard-4). L4 VMs need 4-12 CPUs.
+    A quota of 0 means launch will fail with cryptic "capacity" error.
+    Metalearning: 30 min wasted on n4 quota = 0.
+    """
+    result = subprocess.run(
+        [
+            "gcloud",
+            "compute",
+            "regions",
+            "describe",
+            "europe-north1",
+            "--format=json",
+            "--project=minivess-mlops",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return True, "gcloud not available — quota check skipped"
+
+    import json
+
+    region_info = json.loads(result.stdout)
+    quotas = region_info.get("quotas", [])
+    for q in quotas:
+        if q.get("metric") == "CPUS":
+            limit = q.get("limit", 0)
+            usage = q.get("usage", 0)
+            available = limit - usage
+            if limit == 0:
+                return False, "CPU quota is 0 in europe-north1 — request increase"
+            if available < 8:
+                return False, (
+                    f"CPU quota low: {available:.0f} available "
+                    f"({usage:.0f}/{limit:.0f} used) — need ≥8 for controller + job"
+                )
+            return (
+                True,
+                f"CPU quota OK: {available:.0f} available ({usage:.0f}/{limit:.0f})",
+            )
+
+    return True, "CPU quota metric not found — check manually"
+
+
 def check_cost_estimate() -> tuple[bool, str]:
     """Estimate max cost and compare against budget guard rails.
 
@@ -419,6 +467,7 @@ def main() -> int:
         ("Controller cloud matches jobs", check_controller_cloud),
         ("SkyPilot YAML validity", check_skypilot_yaml),
         ("YAML contract compliance", check_yaml_contract),
+        ("GCP CPU quota", check_gcp_cpu_quota),
         ("Cost estimate", check_cost_estimate),
     ]
 
