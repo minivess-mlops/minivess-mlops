@@ -41,10 +41,12 @@ class TestMlflowGcpDockerfile:
         content = dockerfile.read_text(encoding="utf-8")
         assert (
             "default-artifact-root" in content
-            or "MLFLOW_ARTIFACTS_DESTINATION" in content
+            or "MLFLOW_DEFAULT_ARTIFACT_ROOT" in content
         ), (
             "Dockerfile.mlflow-gcp must set --default-artifact-root or "
-            "reference MLFLOW_ARTIFACTS_DESTINATION for GCS artifact storage."
+            "reference MLFLOW_DEFAULT_ARTIFACT_ROOT for GCS artifact storage. "
+            "NOTE: MLFLOW_ARTIFACTS_DESTINATION is the WRONG env var — it maps "
+            "to --artifacts-destination (server-side proxy), not --default-artifact-root."
         )
 
     def test_dockerfile_has_gcs_storage_package(self) -> None:
@@ -56,6 +58,54 @@ class TestMlflowGcpDockerfile:
 
 class TestPulumiMlflowConfig:
     """Verify Pulumi MLflow Cloud Run config is correct."""
+
+    def test_pulumi_uses_default_artifact_root_env(self) -> None:
+        """Pulumi must set MLFLOW_DEFAULT_ARTIFACT_ROOT (NOT MLFLOW_ARTIFACTS_DESTINATION).
+
+        MLFLOW_DEFAULT_ARTIFACT_ROOT maps to --default-artifact-root and tells the
+        tracking server the DEFAULT artifact location for new experiments. Clients
+        then upload directly to GCS.
+
+        MLFLOW_ARTIFACTS_DESTINATION maps to --artifacts-destination which is the
+        SERVER-SIDE artifact proxy destination — irrelevant with --no-serve-artifacts.
+
+        Issue #878: 413 Too Large caused by clients uploading through Cloud Run HTTP
+        proxy instead of directly to GCS.
+        """
+        pulumi_main = Path("deployment/pulumi/gcp/__main__.py")
+        content = pulumi_main.read_text(encoding="utf-8")
+        assert "MLFLOW_DEFAULT_ARTIFACT_ROOT" in content, (
+            "Pulumi __main__.py must set MLFLOW_DEFAULT_ARTIFACT_ROOT env var "
+            "on the Cloud Run MLflow container. This tells MLflow to set the "
+            "default artifact root to gs://minivess-mlops-mlflow-artifacts so "
+            "clients upload directly to GCS (bypassing 32 MB Cloud Run limit). "
+            "See: GitHub issue #878."
+        )
+
+    def test_pulumi_no_artifacts_destination(self) -> None:
+        """Pulumi must NOT set MLFLOW_ARTIFACTS_DESTINATION.
+
+        MLFLOW_ARTIFACTS_DESTINATION maps to --artifacts-destination (server-side
+        proxy), which is irrelevant with --no-serve-artifacts and was the root
+        cause of #878 (clients routed through Cloud Run HTTP proxy instead of GCS).
+        """
+        pulumi_main = Path("deployment/pulumi/gcp/__main__.py")
+        content = pulumi_main.read_text(encoding="utf-8")
+        assert "MLFLOW_ARTIFACTS_DESTINATION" not in content, (
+            "Pulumi __main__.py must NOT set MLFLOW_ARTIFACTS_DESTINATION. "
+            "This env var maps to --artifacts-destination (server-side proxy), "
+            "not --default-artifact-root. With --no-serve-artifacts, only "
+            "MLFLOW_DEFAULT_ARTIFACT_ROOT is needed. See: GitHub issue #878."
+        )
+
+    def test_pulumi_artifact_root_points_to_gcs_bucket(self) -> None:
+        """The artifact root must point to the mlflow-artifacts GCS bucket."""
+        pulumi_main = Path("deployment/pulumi/gcp/__main__.py")
+        content = pulumi_main.read_text(encoding="utf-8")
+        assert "mlflow-artifacts" in content and "gs://" in content, (
+            "Pulumi must configure MLFLOW_DEFAULT_ARTIFACT_ROOT to "
+            "gs://minivess-mlops-mlflow-artifacts"
+        )
 
     def test_pulumi_no_proxy_multipart(self) -> None:
         """Pulumi should NOT set MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD.
