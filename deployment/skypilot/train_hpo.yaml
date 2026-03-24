@@ -1,4 +1,4 @@
-# MinIVess MLOps — HPO Training on Cloud GPU via SkyPilot
+# MinIVess MLOps — HPO Training on GCP via SkyPilot
 #
 # Hyperparameter optimization using Optuna + ASHA (HyperbandPruner).
 # Uses Docker image with all deps pre-installed.
@@ -8,40 +8,43 @@
 #     --env-file .env --env MODEL_FAMILY=dynunet \
 #     --env HPO_CONFIG=configs/hpo/dynunet_example.yaml -y
 #
-# Docker image: All deps (Python, PyTorch, MONAI, uv, project code) are baked
-# into the GHCR image. SkyPilot setup: only pulls data + copies config.
-# BANNED: apt-get, uv sync, git clone in setup (Docker mandate).
+# Docker image: All deps pre-installed. Setup only pulls data + copies config.
+# BANNED: apt-get, uv sync, git clone in setup (CLAUDE.md Rule 17).
+# T4 BANNED: Turing architecture, no BF16 (CLAUDE.md).
+#
+# Mirror of train_factorial.yaml infrastructure with HPO-specific overrides.
+# UpCloud sunset 2026-03-16 — all references removed. GCS is the only data backend.
 
 name: minivess-hpo
 
 resources:
-  image_id: docker:ghcr.io/petteriteikari/minivess-base:latest
-  accelerators: RTX4090:1
-  cloud: runpod
+  # GAR image — Docker registry in europe-north1.
+  image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+  cloud: gcp
   use_spot: true
-  disk_size: 80
+  disk_size: 100
+  disk_tier: best
+  accelerators: L4:1
   job_recovery:
     max_restarts_on_errors: 3
+
+# Checkpoint persistence via GCS bucket mount (#878).
+file_mounts:
+  /app/checkpoints:
+    source: gs://minivess-mlops-checkpoints
+    mode: MOUNT_CACHED
 
 envs:
   MODEL_FAMILY: dynunet
   HPO_CONFIG: configs/hpo/dynunet_example.yaml
 
-  # DVC data pull credentials (UpCloud S3)
-  DVC_S3_ENDPOINT_URL: ${DVC_S3_ENDPOINT_URL}
-  DVC_S3_ACCESS_KEY: ${DVC_S3_ACCESS_KEY}
-  DVC_S3_SECRET_KEY: ${DVC_S3_SECRET_KEY}
-  DVC_S3_BUCKET: ${DVC_S3_BUCKET:-minivess-dvc-data}
-  DVC_REMOTE: upcloud
-
-  # boto3 CRC32C checksum workaround for UpCloud S3 (H17)
-  AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
-  AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
-
-  # Remote MLflow tracking (single URI from .env)
+  # MLflow: Cloud Run (GCS artifact store, no basic auth)
   MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
-  MLFLOW_TRACKING_USERNAME: ${MLFLOW_TRACKING_USERNAME}
-  MLFLOW_TRACKING_PASSWORD: ${MLFLOW_TRACKING_PASSWORD}
+  MLFLOW_HTTP_REQUEST_MAX_RETRIES: "10"
+  MLFLOW_HTTP_REQUEST_TIMEOUT: "300"
+
+  # Suppress git warning (runner image has no git)
+  GIT_PYTHON_REFRESH: quiet
 
   # Cloud VM escape hatches
   MINIVESS_ALLOW_HOST: "1"
@@ -60,66 +63,54 @@ envs:
 
 setup: |
   set -ex
-  cd /app
 
   # All deps are in the Docker image — setup is DATA ONLY.
-  # NOTE: uv, git, scripts/ are NOT in the runner image.
-  # Use python/dvc directly (.venv/bin is on PATH).
+  cd /app
 
-  # Initialize DVC without git (container has no .git)
-  dvc init --no-scm -f
+  # HuggingFace login for gated models
+  if [ -n "${HF_TOKEN}" ]; then
+    huggingface-cli login --token "${HF_TOKEN}" --add-to-git-credential 2>/dev/null || true
+  fi
 
-  # Configure DVC upcloud remote with S3 credentials from env
-  dvc remote add upcloud s3://${DVC_S3_BUCKET}
-  dvc remote modify upcloud endpointurl ${DVC_S3_ENDPOINT_URL}
-  dvc remote modify --local upcloud access_key_id ${DVC_S3_ACCESS_KEY}
-  dvc remote modify --local upcloud secret_access_key ${DVC_S3_SECRET_KEY}
+  # Data: pull from GCS via DVC (GCP production path)
+  echo "Initializing DVC for GCS data pull..."
+  dvc init --no-scm -f 2>/dev/null || true
+  dvc remote add -f gcs gs://minivess-mlops-dvc-data
 
-  # Write minimal DVC pipeline for data pull.
-  cat > dvc.yaml << 'DVCEOF'
-  stages:
-    download:
-      cmd: "true"
-      outs:
-        - data/raw/minivess/
-      frozen: true
-  DVCEOF
-
-  cat > dvc.lock << 'LOCKEOF'
-  schema: '2.0'
-  stages:
-    download:
-      cmd: "true"
-      outs:
-      - path: data/raw/minivess/
-        hash: md5
-        md5: e712f8b23f377a4990b91bef0b1aef76.dir
-        size: 2749883382
-        nfiles: 350
-  LOCKEOF
-
-  # Pull full training data from UpCloud S3
-  dvc pull -r upcloud
+  if [ -d "data/raw/minivess/imagesTr" ] && [ "$(ls data/raw/minivess/imagesTr 2>/dev/null | wc -l)" -gt 10 ]; then
+    echo "Training data already present ($(ls data/raw/minivess/imagesTr | wc -l) files)"
+  else
+    echo "Pulling training data from GCS via DVC..."
+    dvc pull data/raw/minivess -r gcs || {
+      echo "FATAL: DVC pull from GCS failed."
+      exit 1
+    }
+  fi
 
   # Full splits for HPO
   cp configs/splits/3fold_seed42.json configs/splits/splits.json
-
   mkdir -p /app/checkpoints /app/logs
 
   # Pre-cache model weights
-  if [ "${MODEL_FAMILY}" = "vesselfm" ]; then
-    python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" || true
-  fi
+  case "${MODEL_FAMILY}" in
+    sam3_vanilla|sam3_topolora|sam3_hybrid)
+      python -c "from huggingface_hub import hf_hub_download; hf_hub_download('facebook/sam3-hiera-large', 'sam3_hiera_large.pt')" 2>/dev/null || true
+      ;;
+    vesselfm)
+      python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" 2>/dev/null || true
+      ;;
+  esac
 
+  # Pre-flight checks
   echo "=== Pre-flight Check ==="
   nvidia-smi
-  ls -la configs/splits/splits.json
+  python -c "import torch, sys; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}'); sys.exit(1) if not torch.cuda.is_available() else print(f'GPU: {torch.cuda.get_device_name(0)}')"
 
 run: |
   cd /app
 
   if [ ! -f configs/splits/splits.json ]; then
-    echo "FATAL: splits.json missing"
+    echo "FATAL: splits.json missing — setup did not complete."
     exit 1
   fi
 
@@ -128,5 +119,6 @@ run: |
   echo "HPO config: ${HPO_CONFIG}"
   echo "MLflow: ${MLFLOW_TRACKING_URI}"
 
-  # Run HPO engine via module path (scripts/ not in Docker image)
-  python -m minivess.optimization.hpo_engine --config "${HPO_CONFIG}" --model-family "${MODEL_FAMILY}"
+  python -m minivess.optimization.hpo_engine \
+    --config "${HPO_CONFIG}" \
+    --model-family "${MODEL_FAMILY}"
