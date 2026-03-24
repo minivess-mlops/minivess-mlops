@@ -183,15 +183,21 @@ def prepare_training_data(
     if data_dir is None:
         data_dir = Path(os.environ.get("DATA_DIR", "/app/data"))
 
-    remote = dvc_remote or os.environ.get("DVC_REMOTE", "minio")
-
     # Check if data already exists (volume-mounted in Docker)
     images_dir = data_dir / "raw" / "minivess" / "imagesTr"
     if images_dir.exists() and any(images_dir.iterdir()):
         logger.info("Training data found at %s — skipping DVC pull", images_dir)
-        return {"pulled": False, "remote": remote, "duration_s": 0.0}
+        return {"pulled": False, "remote": "local", "duration_s": 0.0}
 
-    # Data not found — pull from DVC
+    # Data not found — need DVC remote. Fail loudly if not configured.
+    remote = dvc_remote or os.environ.get("DVC_REMOTE")
+    if not remote:
+        raise ValueError(
+            "DVC_REMOTE env var is not set and dvc_remote parameter not provided. "
+            "Set DVC_REMOTE to the DVC remote name (e.g., 'gcs' for GCP, 'minio' "
+            "for local Docker). Silent 'minio' fallback removed per Rule #22/#25."
+        )
+
     logger.info("Training data not found. Pulling from DVC remote '%s'...", remote)
     t0 = time.monotonic()
     cmd = ["dvc", "pull", "-r", remote]

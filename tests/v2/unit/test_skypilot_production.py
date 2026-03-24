@@ -57,18 +57,18 @@ class TestProductionTrainingYaml:
             "Must use spot instances for cost savings"
         )
 
-    def test_production_yaml_has_dvc_remote(self) -> None:
-        """Envs must use remote_storage DVC remote (AWS S3 public — UpCloud archived 2026-03-16)."""
+    def test_production_yaml_no_stale_dvc_credentials(self) -> None:
+        """No stale UpCloud/AWS DVC credentials in production YAML.
+
+        GCS DVC pull is handled in the setup block (dvc remote add gcs gs://...).
+        DVC_REMOTE env var is not needed in the SkyPilot YAML.
+        """
         config = _load(_PRODUCTION_YAML)
         envs = config.get("envs", {})
-        assert "DVC_REMOTE" in envs, "Missing DVC_REMOTE in envs"
-        assert envs["DVC_REMOTE"] == "remote_storage", (
-            f"DVC_REMOTE should be 'remote_storage', got: {envs['DVC_REMOTE']}"
-        )
-        # Stale UpCloud credentials must be absent
-        for stale in ("DVC_S3_ENDPOINT_URL", "DVC_S3_ACCESS_KEY", "DVC_S3_SECRET_KEY"):
+        for stale in ("DVC_S3_ENDPOINT_URL", "DVC_S3_ACCESS_KEY", "DVC_S3_SECRET_KEY",
+                       "DVC_REMOTE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
             assert stale not in envs, (
-                f"Stale UpCloud var {stale} in production YAML — UpCloud archived 2026-03-16"
+                f"Stale var {stale} in production YAML — GCS is the only DVC backend"
             )
 
     def test_production_yaml_has_mlflow_tracking_uri(self) -> None:
