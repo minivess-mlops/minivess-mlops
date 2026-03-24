@@ -1,0 +1,14 @@
+# Asia-Pacific regions — for labs in Asia.
+# Higher GCS egress from europe-north1 but necessary for latency.
+
+description: "Asia-Pacific regions for L4 spot instances"
+
+regions:
+  gcp:
+    L4:
+      - region: asia-east1        # Taiwan — 3 zones
+        zones: 3
+      - region: asia-northeast1   # Tokyo — 3 zones
+        zones: 3
+      - region: asia-southeast1   # Singapore — 3 zones
+        zones: 3
