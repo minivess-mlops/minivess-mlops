@@ -79,27 +79,41 @@ nohup bash scripts/run_factorial_resilient.sh configs/factorial/debug.yaml &
 ```
 
 ### Job submission timeline
-*(Updated as jobs are submitted)*
 
 | Time (UTC) | Event | Details |
 |------------|-------|---------|
-| TBD | Launch started | Resilient wrapper running |
-| TBD | First batch submitted | 4 parallel, 5s rate limit |
-| TBD | All 34 submitted | Or retry on partial failure |
+| 14:20 | Launch started | Resilient wrapper PID 1187022 |
+| 14:20 | Controller INIT | Stale API server from repo rename, needed fresh start |
+| 14:26 | Controller UP | europe-west1-b, n4-standard-4 |
+| 14:28 | First batch submitted | Jobs 18-21 (4 parallel, 5s rate limit) |
+| 14:29 | Job 18 provisioning | europe-west4-a: `insufficientCapacity` → failover working |
+| ~14:35 | Job 18 RUNNING | Successfully provisioned via multi-region failover |
+| ~14:40 | Job 18 RECOVERING | Preempted after ~5 min, `job_recovery` handling it |
+| TBD | All 34 submitted | Wrapper continues submitting as slots open |
 
 ## Observations
 
-*(Updated during the run)*
+### Region provisioning (CONFIRMED WORKING)
+- **Multi-region failover works**: SkyPilot correctly loads all 6 regions from `ordered:` block
+- **europe-west4-a** had `insufficientCapacity` on first try → SkyPilot moved to next region
+- **Job 18 actually ran for ~5 min** before preemption → proves L4 spots ARE available
+- **RECOVERING state active** → `job_recovery.max_restarts_on_errors: 3` is working
+- Previous passes: 12+ hr stuck PENDING on europe-north1 (no L4). Now: provisioned in <10 min
 
-### Region provisioning
-- Which regions actually provision L4 spots?
-- How long does cross-region GAR pull take?
-- Does US fallback trigger, and what's the actual egress cost?
+### SkyPilot API server stale path (fixed)
+- After repo rename (`minivess-mlops` → `vascadia`), SkyPilot API server cached old venv path
+- Had to `rm -rf ~/.sky/api_server/` and restart fresh
+- Same root cause as the stale pycache skip issue — repo rename doesn't clear cached state
+
+### Controller re-provision
+- Controller (europe-west1-b) was UP from previous session but needed re-provisioning
+- Network unreachable errors during startup (transient, self-resolved)
+- Total controller re-provision time: ~6 minutes
 
 ### Training metrics
-- Do any conditions OOM on L4?
-- MLflow connectivity from non-EU regions?
-- Checkpoint persistence via GCS mount?
+- Do any conditions OOM on L4? → TBD (first job preempted before completion)
+- MLflow connectivity from non-EU regions? → TBD (waiting for US region provision)
+- Checkpoint persistence via GCS mount? → TBD
 
 ## Cost Tracking
 
@@ -108,11 +122,14 @@ nohup bash scripts/run_factorial_resilient.sh configs/factorial/debug.yaml &
 | L4 spot (per job) | ~$0.22/hr | TBD |
 | Total GPU hours | ~34 × 0.5 hr = 17 hr | TBD |
 | Total cost | ~$3.74 | TBD |
-| Controller (n4) | ~$0.15/hr × runtime | TBD |
+| Controller (n4) | ~$0.15/hr × runtime | Running since 14:26 |
 | GCS egress (US) | ~$0.36/job × US jobs | TBD |
 
 ## Optimization Opportunities
 
-*(Discovered during the run)*
-
-1. TBD
+1. **Stale state cleanup after repo rename**: Need a `make clean-rename` target that
+   clears `.venv`, `__pycache__`, `~/.sky/api_server/`, and any other cached paths.
+2. **SkyPilot `allowed_clouds` warning**: Server and client configs differ. Should sync
+   `.sky.yaml` `allowed_clouds` with server-side config to suppress warnings.
+3. **Parallel submission limit**: Currently 4. Could increase if controller handles it —
+   but 4 is conservative and prevents API quota issues.
