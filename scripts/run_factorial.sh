@@ -347,8 +347,11 @@ done
 wait
 
 # Count results from job log (background subshells wrote directly to log)
+# Sanitize counts to clean integers (grep -c can produce multiline output in edge cases)
 LAUNCHED=$(grep -c "| LAUNCHED$" "${JOB_LOG}" 2>/dev/null || echo 0)
+LAUNCHED=$((LAUNCHED + 0))  # Force integer
 FAILED=$(grep -c "| LAUNCH_FAILED$" "${JOB_LOG}" 2>/dev/null || echo 0)
+FAILED=$((FAILED + 0))  # Force integer
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════"

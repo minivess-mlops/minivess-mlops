@@ -113,6 +113,9 @@ post_training:
 infrastructure:
   cloud_config: gcp_spot
   skypilot_yaml: deployment/skypilot/train_factorial.yaml
+  # Fire-and-forget resilience (read by run_factorial_resilient.sh)
+  max_wait_hours: 168  # 1 week — keep retrying until spots are available
+  retry_interval_seconds: 300  # 5 minutes between --resume attempts
 
 # ── E2E flow chain ──────────────────────────────────────────────────
 flows:
