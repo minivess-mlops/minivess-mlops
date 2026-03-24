@@ -2,7 +2,7 @@
 # Convenience targets for Docker infrastructure management.
 # All training/evaluation goes through Prefect flows, not this Makefile.
 
-.PHONY: init-volumes scan sbom seccomp-audit-train install-trivy help \
+.PHONY: init-volumes scan sbom seccomp-audit-train install-trivy clean-stale help \
        test-staging test-prod test-gpu test-e2e \
        build-base-gpu build-base-cpu build-base-light build-bases requirements-tiers \
        build-mamba push-mamba \
@@ -383,3 +383,16 @@ install-trivy:
 	curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
 	  | sh -s -- -b /usr/local/bin
 	@echo "Trivy installed: $$(trivy --version)"
+
+# ---------------------------------------------------------------------------
+# Cleanup: stale bytecode and caches (#933)
+# ---------------------------------------------------------------------------
+clean-stale:
+	@echo "Cleaning stale __pycache__ and .pyc files..."
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	@echo "Cleaning pytest cache..."
+	rm -rf .pytest_cache .mypy_cache
+	@echo "Cleaning stale .egg-info..."
+	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+	@echo "Done. Run 'uv sync --all-extras --reinstall' to rebuild venv if needed."
