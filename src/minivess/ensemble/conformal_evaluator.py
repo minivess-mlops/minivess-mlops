@@ -50,7 +50,7 @@ class ConformalEvaluator:
 
     def __init__(
         self,
-        alpha: float = 0.1,
+        alpha: float,
         methods: list[str] | None = None,
         max_dilation_radius: int = 20,
     ) -> None:

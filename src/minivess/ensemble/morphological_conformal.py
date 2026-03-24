@@ -126,7 +126,7 @@ class MorphologicalConformalPredictor:
 
     def __init__(
         self,
-        alpha: float = 0.1,
+        alpha: float,
         max_radius: int = 20,
     ) -> None:
         self.alpha = alpha

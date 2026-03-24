@@ -39,7 +39,7 @@ class DistanceTransformConformalPredictor:
         Significance level (e.g., 0.1 for 90% FNR control).
     """
 
-    def __init__(self, alpha: float = 0.1) -> None:
+    def __init__(self, alpha: float) -> None:
         self.alpha = alpha
         self._threshold: float | None = None
 

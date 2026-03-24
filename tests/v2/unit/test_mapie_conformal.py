@@ -32,11 +32,11 @@ def _make_synthetic_probs(
 class TestMapieConformalSegmentation:
     """Test MAPIE-based conformal predictor for 3D segmentation."""
 
-    def test_creates_with_default_alpha(self) -> None:
-        """Should create with default 90% coverage (alpha=0.1)."""
+    def test_creates_with_explicit_alpha(self) -> None:
+        """Alpha must be explicitly provided (Rule #29 — no hardcoded defaults)."""
         from minivess.ensemble.mapie_conformal import MapieConformalSegmentation
 
-        predictor = MapieConformalSegmentation()
+        predictor = MapieConformalSegmentation(alpha=0.1)
         assert predictor.alpha == 0.1
 
     def test_creates_with_custom_alpha(self) -> None:
@@ -50,7 +50,7 @@ class TestMapieConformalSegmentation:
         """Should not be calibrated before calling calibrate()."""
         from minivess.ensemble.mapie_conformal import MapieConformalSegmentation
 
-        predictor = MapieConformalSegmentation()
+        predictor = MapieConformalSegmentation(alpha=0.1)
         assert predictor.is_calibrated is False
 
 
@@ -75,7 +75,7 @@ class TestCalibration:
         """Predicting without calibration should raise RuntimeError."""
         from minivess.ensemble.mapie_conformal import MapieConformalSegmentation
 
-        predictor = MapieConformalSegmentation()
+        predictor = MapieConformalSegmentation(alpha=0.1)
         probs, _ = _make_synthetic_probs(n_volumes=1)
         with pytest.raises(RuntimeError, match="calibrate"):
             predictor.predict(probs)
@@ -84,7 +84,7 @@ class TestCalibration:
         """Calibration should work with varying number of volumes."""
         from minivess.ensemble.mapie_conformal import MapieConformalSegmentation
 
-        predictor = MapieConformalSegmentation()
+        predictor = MapieConformalSegmentation(alpha=0.1)
         probs, labels = _make_synthetic_probs(n_volumes=5, spatial=(8, 8, 4))
         predictor.calibrate(probs, labels)
         assert predictor.is_calibrated is True

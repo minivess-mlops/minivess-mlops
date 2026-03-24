@@ -64,7 +64,7 @@ class MapieConformalSegmentation:
 
     def __init__(
         self,
-        alpha: float = 0.1,
+        alpha: float,
         random_state: int = 42,
     ) -> None:
         self.alpha = alpha
