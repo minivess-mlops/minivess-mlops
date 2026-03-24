@@ -165,12 +165,15 @@ def task_compute_rankings(
     per_volume_data: dict[str, dict[str, dict[int, Any]]],
     metric_names: list[str],
     higher_is_better: dict[str, bool],
+    *,
+    alpha: float,
 ) -> list[Any]:
     """Compute multi-metric rankings."""
     return compute_rankings(
         per_volume_data=per_volume_data,
         metric_names=metric_names,
         higher_is_better=higher_is_better,
+        alpha=alpha,
     )
 
 
@@ -521,6 +524,7 @@ def run_biostatistics_flow(
         per_volume_data=per_volume_data,
         metric_names=config.metrics,
         higher_is_better=higher_is_better,
+        alpha=config.alpha,
     )
 
     # Phase 5: Figures

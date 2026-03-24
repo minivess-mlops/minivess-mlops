@@ -223,6 +223,7 @@ def synthetic_pipeline(tmp_path: Path) -> dict:
         per_volume_data=per_volume_data,
         metric_names=config.metrics,
         higher_is_better=higher_is_better,
+        alpha=0.05,
     )
 
     # Phase 5: Figures
