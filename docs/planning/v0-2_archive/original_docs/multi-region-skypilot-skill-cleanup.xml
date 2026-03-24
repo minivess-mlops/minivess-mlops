@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Multi-Region Strategy + SkyPilot Skill Installation + Workflow Cleanup
+  Triggered by: 7th pass L4 spot unavailability (12+ hrs PENDING)
+  Root cause: europe-north1 does NOT have L4 GPUs
+  Skill: self-learning-iterative-coder
+-->
+<plan>
+  <metadata>
+    <title>Multi-Region L4 + SkyPilot Official Skill + Stale Workflow Archive</title>
+    <branch>test/run-debug-gcp-5th-pass</branch>
+    <date>2026-03-24</date>
+    <status>planned</status>
+    <priority>P0 — unblocks the 12+ hour PENDING factorial jobs</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <estimated-effort>~2 hours TDD across 3 phases</estimated-effort>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 1: MULTI-REGION L4 STRATEGY                             -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="1" name="Multi-Region L4 with ordered: failover" priority="P0">
+    <description>
+      europe-north1 has NO L4 GPUs. Switch to ordered: preference list
+      across 6 regions (3 EU + 3 US) for maximum spot availability.
+    </description>
+
+    <task id="1.1">
+      <title>Add ordered: region failover to train_factorial.yaml</title>
+      <red>
+        test_factorial_yaml_has_ordered_regions — verify train_factorial.yaml
+        has ordered: or any_of: with multiple regions (not just cloud: gcp).
+        test_factorial_yaml_prefers_eu — verify EU regions come before US.
+        File: tests/v2/unit/deployment/test_skypilot_yamls.py (add tests)
+      </red>
+      <green>
+        Replace the single `cloud: gcp` + `accelerators: L4:1` with:
+        ```yaml
+        ordered:
+          - accelerators: L4:1
+            region: europe-west4
+          - accelerators: L4:1
+            region: europe-west1
+          - accelerators: L4:1
+            region: europe-west3
+          - accelerators: L4:1
+            region: us-central1
+          - accelerators: L4:1
+            region: us-east1
+          - accelerators: L4:1
+            region: us-west1
+        cloud: gcp
+        use_spot: true
+        ```
+        IMPORTANT: Verify this parses with sky.Task.from_yaml() BEFORE committing.
+      </green>
+      <files>
+        deployment/skypilot/train_factorial.yaml
+        tests/v2/unit/deployment/test_skypilot_yamls.py
+      </files>
+    </task>
+
+    <task id="1.2">
+      <title>Update YAML contract to allow ordered: with multiple regions</title>
+      <red>
+        test_yaml_contract_allows_ordered — verify contract validation passes
+        with ordered: blocks (currently may reject as unauthorized keys).
+        File: tests/v2/unit/deployment/test_yaml_contract_enforcement.py
+      </red>
+      <green>
+        Update configs/cloud/yaml_contract.yaml to allow ordered: key and
+        the specific EU+US regions. Update validate_yaml_contract.py to
+        handle ordered: blocks correctly.
+      </green>
+      <files>
+        configs/cloud/yaml_contract.yaml
+        scripts/validate_yaml_contract.py
+        tests/v2/unit/deployment/test_yaml_contract_enforcement.py
+      </files>
+    </task>
+
+    <task id="1.3">
+      <title>Update .sky.yaml controller to not conflict with ordered:</title>
+      <red>
+        Verify sky.Task.from_yaml() parses the new YAML with the current
+        .sky.yaml controller config. No infra/cloud conflicts.
+      </red>
+      <green>
+        Ensure .sky.yaml controller region (europe-west1) doesn't conflict
+        with the job's ordered: regions.
+      </green>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 2: SKYPILOT OFFICIAL SKILL INSTALLATION                  -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="2" name="Install SkyPilot Official Agent Skill" priority="P1">
+
+    <task id="2.1">
+      <title>Fetch and follow SkyPilot skill install guide</title>
+      <action>
+        1. Fetch https://github.com/skypilot-org/skypilot/blob/HEAD/agent/INSTALL.md
+        2. Follow the installation steps for Claude Code
+        3. Verify skill is loaded: check available skills list
+        4. Run bootstrap: verify SkyPilot CLI + credentials detected
+      </action>
+    </task>
+
+    <task id="2.2">
+      <title>Update experiment-harness to reference SkyPilot skill</title>
+      <action>
+        Add to experiment-harness SKILL.md metadata:
+        ```yaml
+        depend_on:
+          - factorial-monitor
+          - ralph-loop
+          - skypilot  # Official SkyPilot skill (Layer 0)
+        ```
+        Update Phase 2 VALIDATE to note SkyPilot skill provides authoritative
+        YAML schema knowledge.
+      </action>
+      <files>.claude/skills/experiment-harness/SKILL.md</files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 3: ARCHIVE STALE v0.1 WORKFLOWS                         -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="3" name="Archive Stale v0.1 GitHub Workflows" priority="P2">
+
+    <task id="3.1">
+      <title>Move 5 stale workflows to .github/workflows/archived/</title>
+      <action>
+        ```bash
+        mkdir -p .github/workflows/archived
+        git mv .github/workflows/build-env_image.yml .github/workflows/archived/
+        git mv .github/workflows/build_train_image.yml .github/workflows/archived/
+        git mv .github/workflows/build-jupyter_image.yml .github/workflows/archived/
+        git mv .github/workflows/test_dataload.yml .github/workflows/archived/
+        git mv .github/workflows/test_train.yml .github/workflows/archived/
+        ```
+      </action>
+      <red>
+        test_no_stale_workflows_in_active_dir — verify only ci-v2.yml and
+        docker-build-gate.yml remain in .github/workflows/ (not archived/).
+      </red>
+    </task>
+  </phase>
+
+  <execution-order>
+    <step>Phase 1 (multi-region) — UNBLOCKS 12+ hr PENDING jobs</step>
+    <step>Phase 2 (SkyPilot skill) — installs authoritative knowledge</step>
+    <step>Phase 3 (workflow archive) — cleanup, low priority</step>
+    <step>Cancel existing PENDING jobs, relaunch with multi-region YAML</step>
+  </execution-order>
+</plan>

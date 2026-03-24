@@ -135,12 +135,16 @@ Note: PENDING jobs cost $0 — only RUNNING jobs consume GPU credits.
   may have selected US-based L4 zones. With europe-west1 controller, SkyPilot may
   be preferring European zones which have less L4 spot capacity.
 
-**Hypothesis**: L4 spot in European GCP regions (europe-north1, europe-west1, europe-west4)
-may have chronically low availability. The L4 GPU was launched in 2023 and may still have
-limited spot allocation in EU regions vs US regions.
+**ROOT CAUSE FOUND**: `europe-north1` (Finland, where our GCS bucket lives) does NOT have
+L4 GPUs AT ALL. It's not in GCP's L4 region/zone list. SkyPilot was searching zones that
+physically cannot have L4s. EU L4 regions: europe-west1 (Belgium, 2 zones), europe-west3
+(Frankfurt, 2 zones), europe-west4 (Netherlands, 3 zones), europe-west2 (London, 2 zones),
+europe-west6 (Zurich, 2 zones) = 12 EU zones total. US has 18 L4 zones across 6 regions.
 
-**Test needed**: Check if removing the `cloud: gcp` constraint (let SkyPilot try all regions
-globally) or adding US regions to the `ordered:` list would improve provisioning.
+**Decision**: EU-preferred + US-fallback. SkyPilot `ordered:` preference list:
+europe-west4 → europe-west1 → europe-west3 → us-central1 → us-east1 → us-west1.
+Cross-continent GCS egress: ~$0.12/GB × 3 GB = $0.36/job (negligible vs 12h PENDING).
+No GDPR concern (MiniVess = open-source mouse brain data from Cornell).
 
 **Academic relevance**: This is a real-world constraint for biomedical researchers using
 cloud GPUs. The spot market unpredictability should be documented in the Nature Protocols
