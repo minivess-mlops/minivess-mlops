@@ -65,6 +65,7 @@ allowed_resource_keys:
   - disk_tier
   - region
   - any_of
+  - ordered      # Multi-region failover (EU-preferred + US-fallback)
   - ports
   - cpus
   - memory

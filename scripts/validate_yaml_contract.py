@@ -131,24 +131,29 @@ def validate_yaml(yaml_path: Path, contract: dict) -> list[str]:
                     f"Adding a GPU type requires EXPLICIT user authorization."
                 )
 
-    # Also check any_of blocks
-    any_of = resources.get("any_of", [])
-    for i, option in enumerate(any_of):
-        if isinstance(option, dict):
-            opt_cloud = option.get("cloud", cloud)
-            opt_accel = option.get("accelerators")
-            opt_gpus = extract_accelerator_names(opt_accel)
-            for gpu in opt_gpus:
-                if gpu in banned:
-                    violations.append(f"{fname}: BANNED GPU '{gpu}' in any_of[{i}]")
-                if opt_cloud and opt_cloud in contract.get("allowed_accelerators", {}):
-                    allowed = set(contract["allowed_accelerators"][opt_cloud])
-                    if gpu not in allowed:
+    # Also check any_of and ordered blocks (multi-region failover)
+    for block_name in ("any_of", "ordered"):
+        block = resources.get(block_name, [])
+        for i, option in enumerate(block):
+            if isinstance(option, dict):
+                opt_cloud = option.get("cloud", cloud)
+                opt_accel = option.get("accelerators")
+                opt_gpus = extract_accelerator_names(opt_accel)
+                for gpu in opt_gpus:
+                    if gpu in banned:
                         violations.append(
-                            f"{fname}: GPU '{gpu}' NOT allowed for "
-                            f"{opt_cloud} in any_of[{i}]. "
-                            f"Allowed: {sorted(allowed)}"
+                            f"{fname}: BANNED GPU '{gpu}' in {block_name}[{i}]"
                         )
+                    if opt_cloud and opt_cloud in contract.get(
+                        "allowed_accelerators", {}
+                    ):
+                        allowed = set(contract["allowed_accelerators"][opt_cloud])
+                        if gpu not in allowed:
+                            violations.append(
+                                f"{fname}: GPU '{gpu}' NOT allowed for "
+                                f"{opt_cloud} in {block_name}[{i}]. "
+                                f"Allowed: {sorted(allowed)}"
+                            )
 
     # ── Check 3: Cloud provider allowed ─────────────────────────────────
     allowed_clouds = set(contract.get("allowed_clouds", []))
@@ -156,14 +161,16 @@ def validate_yaml(yaml_path: Path, contract: dict) -> list[str]:
         violations.append(
             f"{fname}: Cloud '{cloud}' not in allowed list: {sorted(allowed_clouds)}"
         )
-    for i, option in enumerate(any_of):
-        if isinstance(option, dict):
-            opt_cloud = option.get("cloud")
-            if opt_cloud and opt_cloud not in allowed_clouds:
-                violations.append(
-                    f"{fname}: Cloud '{opt_cloud}' in any_of[{i}] not allowed. "
-                    f"Allowed: {sorted(allowed_clouds)}"
-                )
+    for block_name in ("any_of", "ordered"):
+        block = resources.get(block_name, [])
+        for i, option in enumerate(block):
+            if isinstance(option, dict):
+                opt_cloud = option.get("cloud")
+                if opt_cloud and opt_cloud not in allowed_clouds:
+                    violations.append(
+                        f"{fname}: Cloud '{opt_cloud}' in {block_name}[{i}] "
+                        f"not allowed. Allowed: {sorted(allowed_clouds)}"
+                    )
 
     # ── Check 4: No unauthorized top-level keys ────────────────────────
     allowed_top = set(contract.get("allowed_top_level_keys", []))

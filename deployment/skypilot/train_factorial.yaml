@@ -25,22 +25,32 @@
 name: minivess-factorial
 
 resources:
-  # GAR image — same-region as training VMs (europe-north1).
+  # GAR image — Docker registry in europe-north1.
+  # Cross-region GAR pull adds ~5-10 min but is acceptable vs 12+ hr PENDING.
   image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
-  # L4 ONLY (Ada Lovelace, BF16, 24 GB, $0.22/hr spot).
-  # A100 REMOVED — was unauthorized (5.5x cost, never approved by user).
-  # T4 BANNED (Turing, no BF16 → FP16 overflow → NaN).
-  # Any GPU type addition requires EXPLICIT user authorization.
-  accelerators: L4:1
+  # L4 ONLY. T4 BANNED. A100 requires explicit user authorization.
+  # EU-preferred, US-fallback: europe-north1 has NO L4 GPUs (root cause of 12+ hr PENDING).
+  # Verified with sky.Task.from_yaml() — ordered: parses correctly.
   cloud: gcp
-  # Spot: 60-91% cheaper. SkyPilot handles preemption recovery.
   use_spot: true
   disk_size: 100
-  disk_tier: best  # SSD for faster checkpoint I/O
-  # region removed — L4 not available in all regions. SkyPilot auto-selects.
-  # Spot recovery: restart on user code errors (OOM, CUDA, transient failures).
-  # Verified with sky.Task.from_yaml() — field IS supported in SkyPilot v1.0.
-  # Previous ban was wrong. See: .claude/metalearning/2026-03-24-skypilot-implementation-trust-deficit.md
+  disk_tier: best
+  ordered:
+    # EU regions first (closest to GCS data in europe-north1)
+    - accelerators: L4:1
+      region: europe-west4    # Netherlands (3 zones, best EU L4 pool)
+    - accelerators: L4:1
+      region: europe-west1    # Belgium (2 zones)
+    - accelerators: L4:1
+      region: europe-west3    # Frankfurt (2 zones)
+    # US fallback (deeper L4 spot pool, $0.36 egress per 3GB job)
+    - accelerators: L4:1
+      region: us-central1     # Iowa (3 zones)
+    - accelerators: L4:1
+      region: us-east1        # South Carolina (3 zones)
+    - accelerators: L4:1
+      region: us-west1        # Oregon (3 zones)
+  # Spot recovery: auto-retry on user code errors (OOM, CUDA, transient).
   job_recovery:
     max_restarts_on_errors: 3
 

@@ -324,13 +324,22 @@ class TestFactorialYamlStrictContract:
     """The factorial YAML controls 34+ jobs. Strictest validation."""
 
     def test_factorial_uses_exactly_l4(self, factorial_config: dict) -> None:
-        """Factorial must use L4 and ONLY L4."""
-        accel_field = factorial_config.get("resources", {}).get("accelerators")
-        gpu_names = _extract_accelerator_names(accel_field)
-        assert gpu_names == ["L4"], (
-            f"Factorial YAML must have EXACTLY L4. Got: {gpu_names}. "
-            f"A100 was added without authorization (5.5x cost). "
-            f"34 jobs x A100 = ~$40 instead of ~$8."
+        """Factorial must use L4 and ONLY L4 (may be in ordered: blocks)."""
+        resources = factorial_config.get("resources", {})
+        gpu_names: list[str] = []
+        # Direct accelerators field
+        gpu_names.extend(_extract_accelerator_names(resources.get("accelerators")))
+        # ordered: and any_of: blocks (multi-region failover)
+        for block_name in ("ordered", "any_of"):
+            for option in resources.get(block_name, []):
+                if isinstance(option, dict):
+                    gpu_names.extend(
+                        _extract_accelerator_names(option.get("accelerators"))
+                    )
+        unique_gpus = sorted(set(gpu_names))
+        assert unique_gpus == ["L4"], (
+            f"Factorial YAML must use ONLY L4. Got: {unique_gpus}. "
+            f"A100 was added without authorization (5.5x cost)."
         )
 
     def test_factorial_uses_gcp(self, factorial_config: dict) -> None:
