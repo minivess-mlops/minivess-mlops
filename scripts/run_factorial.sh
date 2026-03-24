@@ -173,12 +173,40 @@ if [ "${DRY_RUN}" = false ] && [ -f "${CLOUD_CONFIG_PATH}" ]; then
     fi
 fi
 
+# ─── Dynamic region injection (Phase 2: composable regions) ──────────────────
+# Read infrastructure.region_config from factorial YAML → generate temp SkyPilot
+# YAML with ordered: block injected. If no region_config, use static YAML as-is.
+# See: docs/planning/cold-start-prompt-composable-regions-phase2.md
+REGION_CONFIG_NAME=$(python3 -c "
+import yaml, pathlib
+cfg = yaml.safe_load(pathlib.Path('${REPO_ROOT}/${CONFIG_FILE}').read_text(encoding='utf-8'))
+print(cfg.get('infrastructure', {}).get('region_config', ''))
+")
+
+LAUNCH_YAML="${SKYPILOT_YAML}"
+GENERATED_YAML=""
+if [ -n "${REGION_CONFIG_NAME}" ]; then
+    REGION_CONFIG_PATH="${REPO_ROOT}/configs/cloud/regions/${REGION_CONFIG_NAME}.yaml"
+    if [ -f "${REGION_CONFIG_PATH}" ]; then
+        GENERATED_YAML=$("${REPO_ROOT}/.venv/bin/python" -m minivess.cloud.region_injection \
+            --base "${SKYPILOT_YAML}" \
+            --region-config "${REGION_CONFIG_PATH}" \
+            --output-dir "${OUTPUT_DIR}")
+        LAUNCH_YAML="${GENERATED_YAML}"
+        echo "Region config: ${REGION_CONFIG_NAME} → generated ${LAUNCH_YAML}"
+    else
+        echo "WARNING: Region config not found: ${REGION_CONFIG_PATH} — using static YAML"
+    fi
+else
+    echo "No region_config set — using static SkyPilot YAML (no ordered: block)"
+fi
+
 # ─── Parse factorial config ──────────────────────────────────────────────────
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  MinIVess Factorial Experiment Launcher                     ║"
 echo "╠══════════════════════════════════════════════════════════════╣"
 echo "║  Config:   ${CONFIG_FILE}"
-echo "║  SkyPilot: ${SKYPILOT_YAML}"
+echo "║  SkyPilot: ${LAUNCH_YAML}"
 echo "║  Dry run:  ${DRY_RUN}"
 echo "║  Job log:  ${JOB_LOG}"
 echo "╚══════════════════════════════════════════════════════════════╝"
@@ -300,7 +328,7 @@ for model in "${MODEL_ARRAY[@]}"; do
                 echo "[${CONDITION}/${TOTAL_GPU_JOBS}] ${model} × ${loss} × aux_calib=${aux_calib} × fold=${fold} (pt: ${PT_METHODS})"
 
                 if [ "${DRY_RUN}" = true ]; then
-                    echo "  [DRY RUN] sky jobs launch ${SKYPILOT_YAML} --name ${CONDITION_NAME} --env MODEL_FAMILY=${model} ..."
+                    echo "  [DRY RUN] sky jobs launch ${LAUNCH_YAML} --name ${CONDITION_NAME} --env MODEL_FAMILY=${model} ..."
                     echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | DRY_RUN" >> "${JOB_LOG}"
                 else
                     # Resume: skip already-submitted conditions (Gap #3)
@@ -315,7 +343,7 @@ for model in "${MODEL_ARRAY[@]}"; do
                     (
                         BACKOFF=${RETRY_DELAY}
                         for attempt in $(seq 1 "${MAX_RETRIES}"); do
-                            if "${SKY_BIN}" jobs launch "${SKYPILOT_YAML}" \
+                            if "${SKY_BIN}" jobs launch "${LAUNCH_YAML}" \
                                 --name "${CONDITION_NAME}" \
                                 --env MODEL_FAMILY="${model}" \
                                 --env LOSS_NAME="${loss}" \
@@ -420,7 +448,7 @@ for b in baselines:
         else:
             result = subprocess.run([
                 '${SKY_BIN}', 'jobs', 'launch',
-                '${SKYPILOT_YAML}',
+                '${LAUNCH_YAML}',
                 '--name', condition_name,
                 '--env', f'MODEL_FAMILY={model}',
                 '--env', f'LOSS_NAME=none',
@@ -453,6 +481,12 @@ print(f'Zero-shot baselines: {zs_launched} launched, {zs_failed} failed')
 "
     echo ""
     echo "Zero-shot baselines launched."
+fi
+
+# ─── Clean up generated YAML (if any) ──────────────────────────────────────
+if [ -n "${GENERATED_YAML}" ] && [ -f "${GENERATED_YAML}" ]; then
+    rm -f "${GENERATED_YAML}"
+    echo "Cleaned up generated YAML: ${GENERATED_YAML}"
 fi
 
 echo ""
