@@ -129,7 +129,9 @@ if [ "${DRY_RUN}" = false ] && [ "${SKIP_PREFLIGHT:-0}" != "1" ]; then
         }
         echo ""
     else
-        echo "WARNING: .venv/bin/python not found — skipping preflight checks"
+        echo "FATAL: .venv/bin/python not found — cannot run preflight checks."
+        echo "Run: uv sync --all-extras"
+        exit 1
     fi
 fi
 
@@ -164,7 +166,9 @@ fi
 if [ "${DRY_RUN}" = false ] && [ -f "${CLOUD_CONFIG_PATH}" ]; then
     if [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
         "${REPO_ROOT}/.venv/bin/python" "${REPO_ROOT}/scripts/sync_sky_config.py" "${CLOUD_CONFIG_PATH}" || {
-            echo "WARNING: sync_sky_config.py failed — controller may be on wrong cloud"
+            echo "FATAL: sync_sky_config.py failed — controller placement failed."
+            echo "Cross-cloud SSH adds ~30 min/submission (5th pass root cause)."
+            exit 1
         }
     fi
 fi
@@ -264,12 +268,20 @@ echo "#" >> "${JOB_LOG}"
 echo "# FORMAT: condition_id | model | loss | aux_calib | fold | status" >> "${JOB_LOG}"
 
 # ─── Resume: check existing jobs (Gap #3) ─────────────────────────────────────
-EXISTING_JOBS=""
+# Extract NAME (column 3) and STATUS (column 9) from sky jobs queue.
+# Only skip jobs that are PENDING, STARTING, RUNNING, or SUCCEEDED.
+# FAILED and CANCELLED jobs should be RE-SUBMITTED (that's the point of resume).
+EXISTING_ACTIVE_JOBS=""
 if [ "${RESUME}" = true ] && [ "${DRY_RUN}" = false ]; then
     echo "Resume mode: checking for already-submitted conditions..."
-    EXISTING_JOBS=$("${SKY_BIN}" jobs queue 2>/dev/null | awk '{print $4}' || echo "")
-    SKIP_COUNT=$(echo "${EXISTING_JOBS}" | grep -c "." 2>/dev/null || echo 0)
-    echo "Found ${SKIP_COUNT} existing jobs in queue"
+    # Column 3 = NAME, Column 9 = STATUS (PENDING/STARTING/RUNNING/SUCCEEDED/FAILED/CANCELLED)
+    # Only skip active/succeeded jobs — FAILED/CANCELLED should be retried.
+    EXISTING_ACTIVE_JOBS=$("${SKY_BIN}" jobs queue 2>/dev/null \
+        | grep -E "PENDING|STARTING|RUNNING|SUCCEEDED|RECOVERING" \
+        | awk '{print $3}' || echo "")
+    SKIP_COUNT=$(echo "${EXISTING_ACTIVE_JOBS}" | grep -c "." 2>/dev/null || echo 0)
+    SKIP_COUNT=$((SKIP_COUNT + 0))  # Force integer
+    echo "Found ${SKIP_COUNT} active/succeeded jobs in queue (FAILED/CANCELLED will be retried)"
 fi
 
 # ─── Launch GPU jobs (each runs training + post-training in same session) ─────
@@ -292,7 +304,7 @@ for model in "${MODEL_ARRAY[@]}"; do
                     echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | DRY_RUN" >> "${JOB_LOG}"
                 else
                     # Resume: skip already-submitted conditions (Gap #3)
-                    if [ "${RESUME}" = true ] && echo "${EXISTING_JOBS}" | grep -qF "${CONDITION_NAME}"; then
+                    if [ "${RESUME}" = true ] && echo "${EXISTING_ACTIVE_JOBS}" | grep -qF "${CONDITION_NAME}"; then
                         echo "  [SKIP] ${CONDITION_NAME} already in queue"
                         echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | SKIPPED_RESUME" >> "${JOB_LOG}"
                         continue
@@ -347,11 +359,14 @@ done
 wait
 
 # Count results from job log (background subshells wrote directly to log)
-# Sanitize counts to clean integers (grep -c can produce multiline output in edge cases)
-LAUNCHED=$(grep -c "| LAUNCHED$" "${JOB_LOG}" 2>/dev/null || echo 0)
-LAUNCHED=$((LAUNCHED + 0))  # Force integer
-FAILED=$(grep -c "| LAUNCH_FAILED$" "${JOB_LOG}" 2>/dev/null || echo 0)
-FAILED=$((FAILED + 0))  # Force integer
+# Count results from job log. grep -c exits 1 when no matches, which triggers
+# || echo 0, producing "0\n0" (two zeros). Use { grep || true; } to suppress exit code.
+LAUNCHED=$(grep -c "| LAUNCHED$" "${JOB_LOG}" 2>/dev/null; true)
+LAUNCHED="${LAUNCHED%%[^0-9]*}"  # Strip non-digits (newlines, spaces)
+LAUNCHED="${LAUNCHED:-0}"
+FAILED=$(grep -c "| LAUNCH_FAILED$" "${JOB_LOG}" 2>/dev/null; true)
+FAILED="${FAILED%%[^0-9]*}"
+FAILED="${FAILED:-0}"
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════"
@@ -460,3 +475,5 @@ if [ "${FAILED}" -gt 0 ]; then
         exit 1  # Total failure: nothing launched
     fi
 fi
+
+exit 0  # All conditions launched successfully
