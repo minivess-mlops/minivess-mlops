@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan>
+  <metadata>
+    <title>GitHub Project Board Recreation — vascadia v0.2-beta</title>
+    <date>2026-03-24</date>
+    <target-project>petteriTeikari/projects/6 (vascadia)</target-project>
+    <reference-project>petteriTeikari/projects/4 (music-attribution-preprint-scaffold)</reference-project>
+    <project-id>PVT_kwHOABAuos4BSs3r</project-id>
+  </metadata>
+
+  <current-state>
+    <items-in-project>29</items-in-project>
+    <total-repo-issues>938</total-repo-issues>
+    <open-issues>29</open-issues>
+    <closed-issues>771</closed-issues>
+    <coverage>3%</coverage>
+    <milestones>1 (0.3-backlog — wrong name)</milestones>
+    <iterations>5 generic (Iteration 1-5, wrong dates/names)</iterations>
+    <fields>14 configured (Status, Priority, Size, Estimate, Iteration — GOOD)</fields>
+    <field-ids>
+      <status>PVTSSF_lAHOABAuos4BSs3rzhAKIHk</status>
+      <priority>PVTSSF_lAHOABAuos4BSs3rzhAKIIs</priority>
+      <size>PVTSSF_lAHOABAuos4BSs3rzhAKIIw</size>
+      <estimate>PVTF_lAHOABAuos4BSs3rzhAKII0</estimate>
+      <iteration>PVTIF_lAHOABAuos4BSs3rzhAKII4</iteration>
+      <start-date>NOT_CONFIGURED</start-date>
+      <target-date>NOT_CONFIGURED</target-date>
+    </field-ids>
+    <notes>
+      Start date and Target date fields do NOT exist yet on project #6.
+      Must be created via UI before roadmap sync can work.
+      The reference project #4 has them because they were added manually.
+    </notes>
+  </current-state>
+
+  <target-state>
+    <items-in-project>ALL (~800 v0.2 issues)</items-in-project>
+    <milestones>
+      <milestone name="v0.2-infrastructure" description="Docker, SkyPilot, Pulumi, CI, cloud setup" />
+      <milestone name="v0.2-training" description="Training flow, loss functions, model adapters, checkpointing" />
+      <milestone name="v0.2-data" description="Data loading, augmentation, DVC, external datasets" />
+      <milestone name="v0.2-evaluation" description="Analysis flow, ensemble builder, metrics, comparison" />
+      <milestone name="v0.2-biostatistics" description="Biostatistics flow, ANOVA, figures, tables, rankings" />
+      <milestone name="v0.2-observability" description="MLflow, lineage, profiling, drift detection" />
+      <milestone name="v0.2-post-training" description="Post-training flow, calibration, conformal, SWAG" />
+      <milestone name="v0.2-deployment" description="Deploy flow, ONNX, BentoML, model registry" />
+      <milestone name="v0.2-dashboard" description="Dashboard flow, Gradio, health checks, QA" />
+      <milestone name="v0.2-compliance" description="Audit trail, regulatory docs, TRIPOD, EU AI Act" />
+      <milestone name="v0.2-models" description="SAM3, VesselFM, MambaVesselNet, DynUNet adapters" />
+    </milestones>
+    <iterations>
+      <iteration name="Foundations for SkyPilot Train" start="2026-02-23" end="2026-03-22" status="completed" />
+      <iteration name="QA + Publication Gate" start="2026-03-23" end="2026-04-05" status="current" />
+    </iterations>
+    <date-fields>Start date (createdAt), Target date (closedAt for closed issues)</date-fields>
+  </target-state>
+
+  <!-- ============================================================ -->
+  <!-- PHASE 0: Manual UI Prerequisites (CANNOT be automated)       -->
+  <!-- ============================================================ -->
+  <phase id="0" name="Manual UI Prerequisites" effort="5 min" automated="false">
+    <description>Create date fields and fix iteration configuration in GitHub UI.
+    These CANNOT be done via API — GitHub Projects V2 has no mutations for
+    field creation or iteration configuration.</description>
+
+    <task id="0.1" name="Add Start date field">
+      <action>Project Settings → Custom field → Date → name "Start date"</action>
+      <notes>Must match name exactly for sync_roadmap.py to find it</notes>
+    </task>
+
+    <task id="0.2" name="Add Target date field">
+      <action>Project Settings → Custom field → Date → name "Target date"</action>
+    </task>
+
+    <task id="0.3" name="Reconfigure iterations">
+      <action>
+        Project Settings → Iteration field → Edit:
+        1. Delete all 5 generic iterations (Iteration 1-5)
+        2. Create "Foundations for SkyPilot Train" — start 2026-02-23, duration 27 days
+        3. Mark it as completed
+        4. Create "QA + Publication Gate" — start 2026-03-23, duration 14 days
+      </action>
+      <notes>Iteration names and dates cannot be set via API. Must be done in UI first.
+      After this, we can assign issues to iterations programmatically.</notes>
+    </task>
+
+    <task id="0.4" name="Create Roadmap view">
+      <action>Project → New view → Layout: Roadmap → name "Roadmap"</action>
+      <notes>View creation has no API support</notes>
+    </task>
+  </phase>
+
+  <!-- ============================================================ -->
+  <!-- PHASE 1: Create Milestones (automated via gh CLI)            -->
+  <!-- ============================================================ -->
+  <phase id="1" name="Create Milestones" effort="2 min" automated="true">
+    <description>Create semantic milestones for v0.2-beta release.
+    Uses gh api REST endpoint.</description>
+
+    <task id="1.1" name="Create 11 v0.2 milestones">
+      <command>
+        for ms in \
+          "v0.2-infrastructure:Docker, SkyPilot, Pulumi, CI, cloud setup" \
+          "v0.2-training:Training flow, loss functions, model adapters, checkpointing" \
+          "v0.2-data:Data loading, augmentation, DVC, external datasets" \
+          "v0.2-evaluation:Analysis flow, ensemble builder, metrics, comparison" \
+          "v0.2-biostatistics:Biostatistics flow, ANOVA, figures, tables, rankings" \
+          "v0.2-observability:MLflow, lineage, profiling, drift detection" \
+          "v0.2-post-training:Post-training flow, calibration, conformal, SWAG" \
+          "v0.2-deployment:Deploy flow, ONNX, BentoML, model registry" \
+          "v0.2-dashboard:Dashboard flow, Gradio, health checks, QA" \
+          "v0.2-compliance:Audit trail, regulatory docs, TRIPOD, EU AI Act" \
+          "v0.2-models:SAM3, VesselFM, MambaVesselNet, DynUNet adapters"; do
+          title="${ms%%:*}"; desc="${ms#*:}"
+          gh api repos/petteriTeikari/vascadia/milestones \
+            -f title="$title" -f description="$desc" -f state=open
+        done
+      </command>
+    </task>
+  </phase>
+
+  <!-- ============================================================ -->
+  <!-- PHASE 2: Add ALL Issues to Project (automated via GraphQL)   -->
+  <!-- ============================================================ -->
+  <phase id="2" name="Add All Issues to Project" effort="10 min" automated="true">
+    <description>Add all ~800 v0.2 issues to the project board.
+    Uses gh api graphql addProjectV2ItemById mutation in batches.</description>
+
+    <task id="2.1" name="Fetch all issue node IDs">
+      <command>gh issue list --state all --limit 1000 --json number,nodeId</command>
+    </task>
+
+    <task id="2.2" name="Add issues not yet in project">
+      <description>For each issue not already in the project, call addProjectV2ItemById.
+      Rate-limit to avoid GitHub API throttling (max ~5000 points/hour).</description>
+    </task>
+  </phase>
+
+  <!-- ============================================================ -->
+  <!-- PHASE 3: Assign Issues to Milestones (automated)             -->
+  <!-- ============================================================ -->
+  <phase id="3" name="Assign Milestones" effort="5 min" automated="true">
+    <description>Auto-assign issues to milestones based on label + title heuristics.</description>
+
+    <task id="3.1" name="Milestone assignment heuristics">
+      <rules>
+        infrastructure: labels contain "infrastructure" OR title matches "Docker|SkyPilot|Pulumi|CI|cloud|GCP|RunPod|quota"
+        training: labels contain "training" OR title matches "train|loss|checkpoint|epoch|fold|resume"
+        data: labels contain "data" OR title matches "data|DVC|loader|augment|dataset|NIfTI|split"
+        evaluation: title matches "analysis|ensemble|evaluat|comparison|champion|metrics reloaded"
+        biostatistics: title matches "biostat|ANOVA|ranking|pairwise|variance|figure|table|LaTeX"
+        observability: labels contain "observability" OR title matches "MLflow|lineage|drift|profil|metric.key|tracking"
+        post-training: title matches "post.training|calibrat|conformal|SWAG|checkpoint.averag"
+        deployment: title matches "deploy|ONNX|BentoML|serving|inference|model.registry"
+        dashboard: title matches "dashboard|Gradio|health.check|QA.flow"
+        compliance: labels contain "compliance" OR title matches "audit|regulatory|TRIPOD|EU.AI|IEC|FDA|SaMD"
+        models: labels contain "models" OR title matches "SAM3|VesselFM|Mamba|DynUNet|adapter|model.family"
+      </rules>
+    </task>
+  </phase>
+
+  <!-- ============================================================ -->
+  <!-- PHASE 4: Backfill Timeline Fields (automated via sync script) -->
+  <!-- ============================================================ -->
+  <phase id="4" name="Backfill Timeline Fields" effort="15 min" automated="true">
+    <description>Set Start date = createdAt, Target date = closedAt for all items.
+    Update sync_roadmap.py with new project field IDs first.</description>
+
+    <task id="4.1" name="Update sync_roadmap.py with project #6 field IDs">
+      <description>Replace old project IDs with new ones from project #6.</description>
+    </task>
+
+    <task id="4.2" name="Run backfill mode">
+      <command>python3 scripts/sync_roadmap.py --mode backfill</command>
+    </task>
+  </phase>
+
+  <!-- ============================================================ -->
+  <!-- PHASE 5: Set Priority + Size + Estimate (automated)          -->
+  <!-- ============================================================ -->
+  <phase id="5" name="Set Priority/Size/Estimate" effort="10 min" automated="true">
+    <description>Assign Priority, Size, Estimate based on labels and heuristics.
+    Priority: read from P0/P1/P2 labels. Size: heuristic from issue type/age.
+    Estimate: derived from Size (XS=1, S=2, M=3, L=5, XL=8).</description>
+
+    <task id="5.1" name="Set Priority from labels">
+      <description>P0-critical → P0, P1-high → P1, P2-medium → P2.
+      Issues without priority label get P2 by default.</description>
+    </task>
+
+    <task id="5.2" name="Set Size and Estimate">
+      <description>Bug/fix → S(2), enhancement → M(3), research/science → L(5),
+      infrastructure → M(3), refactor → S(2).</description>
+    </task>
+  </phase>
+
+  <!-- ============================================================ -->
+  <!-- PHASE 6: Assign Issues to Iterations (automated)             -->
+  <!-- ============================================================ -->
+  <phase id="6" name="Assign Iterations" effort="5 min" automated="true">
+    <description>Assign closed issues to iteration 1 (before Mar 22) or
+    iteration 2 (Mar 23+). Open issues go to current iteration.</description>
+
+    <task id="6.1" name="Iteration assignment rules">
+      <rules>
+        "Foundations for SkyPilot Train": closedAt before 2026-03-23 OR createdAt before 2026-03-23 AND state=closed
+        "QA + Publication Gate": closedAt >= 2026-03-23 OR state=open
+      </rules>
+    </task>
+  </phase>
+
+  <!-- ============================================================ -->
+  <!-- PHASE 7: Set Status Field (automated)                        -->
+  <!-- ============================================================ -->
+  <phase id="7" name="Set Status" effort="5 min" automated="true">
+    <description>Set Status based on issue state: closed → Done, open → Backlog/In progress.</description>
+
+    <task id="7.1" name="Status assignment rules">
+      <rules>
+        Done: state=closed
+        In progress: state=open AND labels contain "P0" or has recent activity
+        Backlog: state=open AND no P0 label
+      </rules>
+    </task>
+  </phase>
+
+  <!-- ============================================================ -->
+  <!-- EXECUTION NOTES                                               -->
+  <!-- ============================================================ -->
+  <execution-notes>
+    <note>Phase 0 MUST be done manually in the GitHub UI before any automated phase.</note>
+    <note>Phases 1-7 can run sequentially in one script (~30 min total API time).</note>
+    <note>Rate limiting: GitHub GraphQL has 5000 points/hour. Each mutation costs 1 point.
+    With ~800 issues × ~4 mutations each = ~3200 points. Should fit in one hour.</note>
+    <note>The sync_roadmap.py script needs field IDs updated for project #6.
+    Copy the field IDs from the current-state section above.</note>
+    <note>After all phases, manually verify the Roadmap view in GitHub UI.</note>
+  </execution-notes>
+</plan>
