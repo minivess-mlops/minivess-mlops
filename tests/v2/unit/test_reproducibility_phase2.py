@@ -125,12 +125,17 @@ class TestVesselFMWeightChecksum:
 class TestConfigurableMAPIESeed:
     """LogisticRegression random_state in MAPIE should be configurable."""
 
-    def test_default_random_state_is_42(self) -> None:
-        """Default random_state should remain 42 for backward compat."""
+    def test_random_state_must_be_explicit(self) -> None:
+        """random_state has no default — must be passed explicitly (Rule #29)."""
+        import inspect
+
         from minivess.ensemble.mapie_conformal import MapieConformalSegmentation
 
-        predictor = MapieConformalSegmentation(alpha=0.05)
-        assert predictor.random_state == 42
+        sig = inspect.signature(MapieConformalSegmentation.__init__)
+        param = sig.parameters["random_state"]
+        assert param.default is inspect.Parameter.empty, (
+            "random_state must not have a default value (Rule #29)"
+        )
 
     def test_custom_random_state(self) -> None:
         """Should accept a custom random_state parameter."""

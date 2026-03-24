@@ -59,6 +59,9 @@ def generate_figures(
     variance: list[VarianceDecompositionResult],
     rankings: list[RankingResult],
     output_dir: Path,
+    *,
+    anova_results: list[FactorialAnovaResult] | None = None,
+    instability_results: list[dict[str, Any]] | None = None,
 ) -> list[FigureArtifact]:
     """Generate all biostatistics figures.
 
@@ -74,6 +77,10 @@ def generate_figures(
         Ranking results.
     output_dir:
         Directory for figure outputs.
+    anova_results:
+        Factorial ANOVA results for interaction and variance figures.
+    instability_results:
+        Riley bootstrap instability results for instability figures.
 
     Returns
     -------
@@ -103,6 +110,25 @@ def generate_figures(
         fig = _generate_distribution_plot(metric, metric_data, output_dir)
         if fig is not None:
             figures.append(fig)
+
+    # F5: Factorial ANOVA interaction plots and variance lollipops (Task 2.13)
+    if anova_results:
+        for anova_result in anova_results:
+            fig = _generate_interaction_plot(
+                anova_result, per_volume_data, output_dir
+            )
+            if fig is not None:
+                figures.append(fig)
+            fig = _generate_variance_lollipop(anova_result, output_dir)
+            if fig is not None:
+                figures.append(fig)
+
+    # F6: Riley bootstrap instability plots (Task 2.13)
+    if instability_results:
+        for inst_result in instability_results:
+            fig = _generate_instability_plot(inst_result, output_dir)
+            if fig is not None:
+                figures.append(fig)
 
     logger.info("Generated %d figures in %s", len(figures), output_dir)
     return figures

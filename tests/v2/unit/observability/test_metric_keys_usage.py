@@ -105,12 +105,14 @@ class TestNoHardcodedMetricKeysInFlows:
                     continue
                 real_violations.append((lineno, val, line))
 
-        # Track violations for future enforcement.
-        # TODO: Change to pytest.fail() when MetricKeys adoption is complete (Task 2.1).
-        # For now, record count as xfail to avoid blocking CI while Task 2.1
-        # replaces all hardcoded strings across flows.
+        # Strict enforcement: all flows must use MetricKeys constants.
+        # Task 2.1 replaced all hardcoded strings; any new violations are regressions.
         if real_violations:
-            pytest.xfail(
+            msg = "\n".join(
+                f"  L{lineno}: {val!r} in {line}"
+                for lineno, val, line in real_violations
+            )
+            pytest.fail(
                 f"{flow_path.name} has {len(real_violations)} hardcoded metric keys "
-                f"(Task 2.1 will fix). First: {real_violations[0][1]}"
+                f"(use MetricKeys constants instead):\n{msg}"
             )

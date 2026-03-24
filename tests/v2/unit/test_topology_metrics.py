@@ -548,3 +548,49 @@ class TestBranchDetectionRate:
         empty = np.zeros((16, 16, 16), dtype=np.uint8)
         result = compute_bdr(empty, empty)
         assert result == pytest.approx(1.0, abs=0.01)
+
+
+class TestCcDiceDivisorCorrectness:
+    """Task 2.19: Verify ccDice divisor is n_target, not n_matched.
+
+    CbDice (Galazis et al. 2023) averages per-component Dice over ALL GT
+    components. Unmatched GT components contribute 0 — this penalizes
+    fragmentation. Dividing by n_matched would remove the fragmentation
+    penalty and overstate performance.
+    """
+
+    def test_unmatched_gt_components_penalize_score(self) -> None:
+        """If pred has fewer components than GT, ccDice < perfect.
+
+        With n_target=2 and only 1 matched, ccDice ≤ 0.5 (one component
+        contributes 0 to the average). If we incorrectly divided by
+        n_matched=1, the score would be ~1.0 — hiding the fragmentation.
+        """
+        from minivess.pipeline.topology_metrics import compute_ccdice
+
+        shape = (32, 32, 32)
+        # GT has 2 separate spheres
+        gt = _make_sphere(shape, (10, 16, 16), 5) | _make_sphere(
+            shape, (22, 16, 16), 5
+        )
+        # Pred only matches 1 sphere
+        pred = _make_sphere(shape, (10, 16, 16), 5)
+
+        score = compute_ccdice(pred, gt)
+        # With correct divisor (n_target=2): score ~ 0.5
+        # With wrong divisor (n_matched=1): score ~ 1.0
+        assert score < 0.7, (
+            f"ccDice={score:.3f} is too high — suggests dividing by n_matched "
+            f"instead of n_target. Missing GT components should penalize score."
+        )
+
+    def test_all_gt_matched_gives_high_score(self) -> None:
+        """When all GT components are matched, ccDice should be high."""
+        from minivess.pipeline.topology_metrics import compute_ccdice
+
+        shape = (32, 32, 32)
+        gt = _make_sphere(shape, (16, 16, 16), 8)
+        pred = _make_sphere(shape, (16, 16, 16), 8)
+
+        score = compute_ccdice(pred, gt)
+        assert score > 0.9

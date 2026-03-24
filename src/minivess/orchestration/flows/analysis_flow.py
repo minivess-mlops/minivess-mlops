@@ -1665,7 +1665,7 @@ def embedding_drift_task(
     *,
     reference_embeddings: NDArray[np.float32],
     current_embeddings: NDArray[np.float32],
-    p_val_threshold: float = 0.05,
+    p_val_threshold: float,
     n_permutations: int = 100,
     tmp_dir: Path | None = None,
 ) -> EmbeddingDriftResult:
@@ -1799,6 +1799,18 @@ def run_analysis_flow(
             log.info(
                 "Discovered %d post-training model(s) for evaluation",
                 len(post_training_models),
+            )
+
+    # Step 0b: Auto-derive ensemble strategies from factorial YAML (Task 2.13)
+    factorial_yaml_path = os.environ.get("FACTORIAL_YAML")
+    if factorial_yaml_path:
+        override_strategies = _resolve_ensemble_strategies(
+            factorial_yaml=Path(factorial_yaml_path),
+        )
+        if override_strategies:
+            log.info(
+                "Overriding ensemble strategies from factorial YAML: %s",
+                override_strategies,
             )
 
     # Step 1: Load training artifacts

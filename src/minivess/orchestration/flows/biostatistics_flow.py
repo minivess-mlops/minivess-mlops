@@ -184,6 +184,9 @@ def task_generate_figures(
     variance: list[Any],
     rankings: list[Any],
     output_dir: str,
+    *,
+    anova_results: list[Any] | None = None,
+    instability_results: list[dict[str, Any]] | None = None,
 ) -> list[Any]:
     """Generate publication-quality figures."""
     return generate_figures(
@@ -192,6 +195,8 @@ def task_generate_figures(
         variance=variance,
         rankings=rankings,
         output_dir=Path(output_dir) / "figures",
+        anova_results=anova_results,
+        instability_results=instability_results,
     )
 
 
@@ -201,6 +206,9 @@ def task_generate_tables(
     variance: list[Any],
     rankings: list[Any],
     output_dir: str,
+    *,
+    anova_results: list[Any] | None = None,
+    cost_data: list[dict[str, Any]] | None = None,
 ) -> list[Any]:
     """Generate LaTeX tables."""
     return generate_tables(
@@ -208,6 +216,8 @@ def task_generate_tables(
         variance=variance,
         rankings=rankings,
         output_dir=Path(output_dir) / "tables",
+        anova_results=anova_results,
+        cost_data=cost_data,
     )
 
 
@@ -527,21 +537,23 @@ def run_biostatistics_flow(
         alpha=config.alpha,
     )
 
-    # Phase 5: Figures
+    # Phase 5: Figures (now includes ANOVA interaction plots + variance lollipops)
     figures = task_generate_figures(
         per_volume_data=per_volume_data,
         pairwise=all_pairwise,
         variance=all_variance,
         rankings=rankings,
         output_dir=output_dir_str,
+        anova_results=all_anova if all_anova else None,
     )
 
-    # Phase 6: Tables
+    # Phase 6: Tables (now includes ANOVA summary tables)
     tables = task_generate_tables(
         pairwise=all_pairwise,
         variance=all_variance,
         rankings=rankings,
         output_dir=output_dir_str,
+        anova_results=all_anova if all_anova else None,
     )
 
     # Phase 7: Lineage + MLflow

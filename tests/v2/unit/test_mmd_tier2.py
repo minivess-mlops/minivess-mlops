@@ -61,7 +61,7 @@ class TestMMDTier2:
 
         ref = _make_embeddings()
         cur = _make_shifted_embeddings(ref, shift=5.0)
-        detector = EmbeddingDriftDetector(ref, n_permutations=200)
+        detector = EmbeddingDriftDetector(ref, p_val_threshold=0.05, n_permutations=200)
         result = detector.detect(cur)
         assert result.drift_detected is True
         assert result.dataset_drift_score < 0.05  # p-value
@@ -72,7 +72,7 @@ class TestMMDTier2:
 
         ref = _make_embeddings(seed=42)
         cur = _make_embeddings(seed=43)  # Same distribution, different seed
-        detector = EmbeddingDriftDetector(ref, n_permutations=200)
+        detector = EmbeddingDriftDetector(ref, p_val_threshold=0.05, n_permutations=200)
         result = detector.detect(cur)
         assert result.drift_detected is False
         assert result.dataset_drift_score > 0.05  # p-value
@@ -83,7 +83,7 @@ class TestMMDTier2:
 
         ref = _make_embeddings()
         cur = _make_shifted_embeddings(ref)
-        detector = EmbeddingDriftDetector(ref, n_permutations=100)
+        detector = EmbeddingDriftDetector(ref, p_val_threshold=0.05, n_permutations=100)
         result = detector.detect(cur)
         # p-value must be between 0 and 1
         assert 0.0 <= result.dataset_drift_score <= 1.0
@@ -98,12 +98,12 @@ class TestMMDTier2:
         cur = _make_shifted_embeddings(ref, shift=5.0)
 
         # RBF kernel (default)
-        det_rbf = EmbeddingDriftDetector(ref, kernel="rbf", n_permutations=100)
+        det_rbf = EmbeddingDriftDetector(ref, p_val_threshold=0.05, kernel="rbf", n_permutations=100)
         result_rbf = det_rbf.detect(cur)
         assert result_rbf.drift_detected is True
 
         # Linear kernel
-        det_linear = EmbeddingDriftDetector(ref, kernel="linear", n_permutations=100)
+        det_linear = EmbeddingDriftDetector(ref, p_val_threshold=0.05, kernel="linear", n_permutations=100)
         result_linear = det_linear.detect(cur)
         assert result_linear.drift_detected is True
 
@@ -115,7 +115,7 @@ class TestMMDTier2:
         cur_small = _make_shifted_embeddings(ref, shift=1.0)
         cur_large = _make_shifted_embeddings(ref, shift=10.0)
 
-        detector = EmbeddingDriftDetector(ref, n_permutations=50)
+        detector = EmbeddingDriftDetector(ref, p_val_threshold=0.05, n_permutations=50)
         result_small = detector.detect(cur_small)
         result_large = detector.detect(cur_large)
 

@@ -155,3 +155,34 @@ class TestMultiFoldDiscovery:
             )
 
         assert len(paths) == 1  # Only fold_0 found
+
+
+class TestPostTrainingUsesCheckpointConstant:
+    """Guard: post_training_flow must use CHECKPOINT_BEST_FILENAME, not hardcoded names."""
+
+    def test_no_hardcoded_checkpoint_names_in_flow(self) -> None:
+        """AST scan: no hardcoded 'best.ckpt' or 'best_val_loss.pth' strings."""
+        import ast
+
+        flow_path = (
+            Path(__file__).resolve().parents[3]
+            / "src"
+            / "minivess"
+            / "orchestration"
+            / "flows"
+            / "post_training_flow.py"
+        )
+        source = flow_path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+        banned = {"best.ckpt", "best_val_loss.pth", "best.pth"}
+        violations = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if node.value in banned:
+                    violations.append((node.lineno, node.value))
+
+        assert not violations, (
+            f"post_training_flow.py has hardcoded checkpoint names "
+            f"(use CHECKPOINT_BEST_FILENAME instead): {violations}"
+        )

@@ -1,0 +1,6 @@
+# Default intensity augmentation parameters.
+# Override via configs/augmentation/<variant>.yaml or Hydra CLI.
+noise_std: 0.01
+gamma_log_range: [-0.3, 0.3]
+bias_field_coefficients: 0.5
+probability: 0.2

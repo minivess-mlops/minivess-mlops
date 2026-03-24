@@ -32,6 +32,7 @@ from minivess.observability.infrastructure_timing import (
     get_hourly_rate_usd,
 )
 from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
+from minivess.observability.metric_keys import MetricKeys
 from minivess.observability.prometheus_metrics import update_estimated_cost_gauges
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
@@ -682,11 +683,11 @@ def log_fold_results_task(
         # Also log val/loss (without fold prefix) for cross-fold visibility
         if result.get("history", {}).get("val_loss"):
             for epoch, val_loss in enumerate(result["history"]["val_loss"], start=1):
-                client.log_metric(mlflow_run_id, "val/loss", val_loss, step=epoch)
+                client.log_metric(mlflow_run_id, MetricKeys.VAL_LOSS, val_loss, step=epoch)
         # T09: Log VRAM peak to MLflow (#744)
         _vram_mb = result.get("vram_peak_mb", 0)
         if _vram_mb > 0:
-            client.log_metric(mlflow_run_id, "vram/peak_mb", float(_vram_mb))
+            client.log_metric(mlflow_run_id, MetricKeys.VRAM_PEAK_MB, float(_vram_mb))
 
         # Tag checkpoint_dir so post-training flow can discover it via FlowContract
         if checkpoint_dir is not None:
@@ -868,7 +869,7 @@ def training_subflow(
                     checkpoint_dir=fold_checkpoint_dirs.get(log_fold_id),
                 )
 
-            mlflow.log_metric("fold/n_completed", float(len(fold_results)))
+            mlflow.log_metric(MetricKeys.FOLD_N_COMPLETED, float(len(fold_results)))
 
             # Log cost analysis after training (#683)
             _total_training_seconds = sum(

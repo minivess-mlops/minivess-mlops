@@ -54,9 +54,10 @@ def resolve_checkpoint_paths_from_contract(
     """Discover fold checkpoint files from an upstream training run via FlowContract.
 
     Reads ``checkpoint_dir_fold_N`` tags from *parent_run_id* and resolves them
-    to individual checkpoint files. Prefers ``best.ckpt`` over ``epoch_*.ckpt``;
-    when no ``best.ckpt`` exists, picks the lexicographically latest
-    ``epoch_*.ckpt``. Silently skips dirs that don't exist on the volume.
+    to individual checkpoint files. Prefers ``CHECKPOINT_BEST_FILENAME``
+    (``best_val_loss.pth``) over ``epoch_*.ckpt``; when no best checkpoint
+    exists, picks the lexicographically latest ``epoch_*.{ckpt,pth}``.
+    Silently skips dirs that don't exist on the volume.
 
     Parameters
     ----------

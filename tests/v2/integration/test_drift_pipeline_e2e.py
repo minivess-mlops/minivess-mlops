@@ -93,7 +93,7 @@ class TestDriftPipelineE2E:
         ref_emb = rng.standard_normal((30, 64)).astype(np.float32)
         cur_emb = ref_emb + 5.0
 
-        detector = EmbeddingDriftDetector(ref_emb, n_permutations=200)
+        detector = EmbeddingDriftDetector(ref_emb, p_val_threshold=0.05, n_permutations=200)
         result = detector.detect(cur_emb)
 
         assert result.drift_detected is True
@@ -181,7 +181,7 @@ class TestDriftPipelineE2E:
         rng2 = np.random.default_rng(43)
         ref_emb = rng1.standard_normal((30, 64)).astype(np.float32)
         cur_emb = rng2.standard_normal((30, 64)).astype(np.float32)
-        tier2_result = EmbeddingDriftDetector(ref_emb, n_permutations=200).detect(
+        tier2_result = EmbeddingDriftDetector(ref_emb, p_val_threshold=0.05, n_permutations=200).detect(
             cur_emb
         )
         assert tier2_result.drift_detected is False

@@ -59,13 +59,13 @@ class MapieConformalSegmentation:
         Significance level (e.g., 0.1 for 90% coverage).
     random_state:
         Random state for the internal LogisticRegression estimator.
-        Defaults to 42 for backward compatibility.
+        Must be passed explicitly (Rule #29 — no hardcoded defaults).
     """
 
     def __init__(
         self,
         alpha: float,
-        random_state: int = 42,
+        random_state: int,
     ) -> None:
         self.alpha = alpha
         self.random_state = random_state

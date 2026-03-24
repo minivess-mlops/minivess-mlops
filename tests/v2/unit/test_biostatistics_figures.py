@@ -12,6 +12,7 @@ from minivess.pipeline.biostatistics_figures import (
     write_sidecar,
 )
 from minivess.pipeline.biostatistics_types import (
+    FactorialAnovaResult,
     PairwiseResult,
     RankingResult,
     VarianceDecompositionResult,
@@ -160,3 +161,56 @@ class TestWriteSidecar:
 
         loaded = json.loads(path.read_text(encoding="utf-8"))
         assert loaded == sidecar_data
+
+
+def _make_anova_result() -> FactorialAnovaResult:
+    return FactorialAnovaResult(
+        metric="cldice",
+        n_models=2,
+        n_losses=2,
+        f_values={"Model": 5.2, "Loss": 3.8, "Model:Loss": 1.1},
+        p_values={"Model": 0.03, "Loss": 0.06, "Model:Loss": 0.35},
+        eta_squared_partial={"Model": 0.12, "Loss": 0.09, "Model:Loss": 0.02},
+        omega_squared={"Model": 0.10, "Loss": 0.07, "Model:Loss": 0.01},
+    )
+
+
+class TestAnovaFigureWiring:
+    """Task 2.13: verify generate_figures() produces ANOVA figures when given anova_results."""
+
+    def test_interaction_plot_generated_when_anova_provided(
+        self, tmp_path: Path
+    ) -> None:
+        per_volume = _make_per_volume_data()
+        # Add cldice data to match the ANOVA result metric
+        rng = np.random.default_rng(99)
+        per_volume["cldice"] = {
+            "dynunet__dice_ce": {0: rng.normal(0.85, 0.03, 10)},
+            "mambavesselnet__dice_ce": {0: rng.normal(0.80, 0.04, 10)},
+        }
+        figures = generate_figures(
+            per_volume_data=per_volume,
+            pairwise=_make_pairwise(),
+            variance=_make_variance(),
+            rankings=_make_rankings(),
+            output_dir=tmp_path / "figures",
+            anova_results=[_make_anova_result()],
+        )
+        # Should have more figures than without ANOVA results
+        fig_ids = [f.figure_id for f in figures]
+        assert "interaction_plot" in fig_ids
+        assert "variance_lollipop" in fig_ids
+
+    def test_no_anova_figures_when_anova_results_is_none(
+        self, tmp_path: Path
+    ) -> None:
+        figures_without = generate_figures(
+            per_volume_data=_make_per_volume_data(),
+            pairwise=_make_pairwise(),
+            variance=_make_variance(),
+            rankings=_make_rankings(),
+            output_dir=tmp_path / "figures",
+        )
+        fig_ids = [f.figure_id for f in figures_without]
+        assert "interaction_plot" not in fig_ids
+        assert "variance_lollipop" not in fig_ids

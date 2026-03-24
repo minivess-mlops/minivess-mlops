@@ -36,14 +36,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # The 6 tracked metrics from dynunet_losses.yaml checkpoint config.
-# Each generates a ``best_{name}.pth`` checkpoint file.
+# Each generates a ``best_{name}.pth`` checkpoint file (slash→underscore via
+# safe_name = metric_name.replace("/", "_")).  Use MetricKeys constants for
+# single source of truth (#790, Task 2.2).
 _DEFAULT_TRACKED_METRICS: list[str] = [
-    "val_loss",
-    "val_dice",
-    "val_f1_foreground",
-    "val_cldice",
-    "val_masd",
-    "val_compound_masd_cldice",
+    MetricKeys.VAL_LOSS,
+    MetricKeys.VAL_DICE,
+    MetricKeys.VAL_F1_FOREGROUND,
+    MetricKeys.VAL_CLDICE,
+    MetricKeys.VAL_MASD,
+    MetricKeys.VAL_COMPOUND_MASD_CLDICE,
 ]
 
 
@@ -149,7 +151,7 @@ class EnsembleBuilder:
                 "loss_type": str,
                 "fold_id": int,
                 "artifact_dir": str,
-                "metrics": {"val_dice": 0.81, ...},
+                "metrics": {"val/dice": 0.81, ...},
                 "num_folds": int,
             }
 
