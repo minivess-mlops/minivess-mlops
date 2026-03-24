@@ -396,6 +396,20 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
     See: `.claude/metalearning/2026-03-24-unauthorized-a100-in-skypilot-yaml.md`
     See: `.claude/metalearning/2026-03-24-yaml-is-the-contract-zero-improvisation.md`
 
+32. **Quality Over Speed — No Reactive Rushing (Non-Negotiable)** — On a codebase
+    with 6000+ tests, 5 Prefect flows, SkyPilot orchestration, and 75 KG decision
+    nodes, EVERY change requires:
+    (1) **PLAN** with reviewer agents optimizing the approach
+    (2) **IMPLEMENT** via `/self-learning-iterative-coder` (RED→GREEN→VERIFY)
+    (3) **REVIEW** via `/simplify` (catch quality issues)
+    (4) **VERIFY** with `make test-staging` + `make test-prod` (0 skips, 0 failures)
+    (5) **ASK** user before any cloud launch or infrastructure change
+    NEVER: rush to launch, commit untested "fixes," generate plans as substitute for
+    working code, launch without permission, or react to failures instead of preventing
+    them. "Standing by" > "launching broken code." "I need to verify first" > "let me
+    just try this real quick."
+    See: `.claude/metalearning/2026-03-24-reactive-rushing-instead-of-proactive-quality.md`
+
 ## What AI Must NEVER Do
 
 - Confabulate — web-search instead. Hardcode task names, cloud providers, GPU types.
