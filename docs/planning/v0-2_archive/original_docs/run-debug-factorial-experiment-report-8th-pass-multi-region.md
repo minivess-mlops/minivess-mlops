@@ -176,7 +176,7 @@ Since the MLflow Cloud Run instance doesn't require auth, the fix is to either:
 ### Region provisioning (CONFIRMED WORKING)
 - **Multi-region failover works**: SkyPilot correctly loads all 6 regions from `ordered:` block
 - **europe-west4-b** was the first successful provision (europe-west4-a had insufficientCapacity)
-- **3 jobs SUCCEEDED** — first successful training runs in 8 passes!
+- **10 jobs SUCCEEDED** (6 DynUNet + 4 MambaVesselNet) — first successful runs in 8 passes!
 - **quotaExceeded** errors when >1 job tries to provision simultaneously (GPUS_ALL_REGIONS=1)
 - SkyPilot correctly handles quota exhaustion by retrying after the running job finishes
 - All jobs so far ran in **europe-west4** (closest to GCS data in europe-north1)
@@ -184,15 +184,28 @@ Since the MLflow Cloud Run instance doesn't require auth, the fix is to either:
 ### Training performance (DynUNet, 2 epochs, L4 GPU)
 | Condition | train/loss | val/loss | val/dice | VRAM (MB) | Epoch time (s) |
 |-----------|-----------|----------|----------|-----------|----------------|
-| cbdice_cldice/calib=true | 1.127 | 1.112 | 0.486 | 4017 | 67 |
+| cbdice_cldice/calib=true | 0.615 | 0.576 | 0.554 | 4017 | 67 |
+| cbdice_cldice/calib=false | 1.127 | 1.112 | 0.486 | 4017 | 67 |
+| dice_ce/calib=true | 0.918 | 0.891 | 0.569 | 2895 | 56 |
 | dice_ce/calib=false | 0.823 | 0.903 | 0.304 | 2895 | 56 |
 | dice_ce_cldice/calib=true | 1.260 | 1.315 | 0.301 | 4013 | 66 |
 
+### Training performance (MambaVesselNet, 2 epochs, L4 GPU)
+| Condition | train/loss | val/loss | val/dice | VRAM (MB) | Job time (min) |
+|-----------|-----------|----------|----------|-----------|----------------|
+| cbdice_cldice/calib=true | 0.584 | 0.595 | 0.506 | 6693 | 8.7 |
+| cbdice_cldice/calib=false | 0.971 | 1.026 | 0.515 | 6695 | 8.8 |
+| dice_ce/calib=true | 1.192 | 1.220 | 0.408 | 5584 | 8.7 |
+| dice_ce/calib=false | 0.559 | 0.572 | 0.578 | 5579 | 8.5 |
+
 Key observations:
-- **No OOM** — DynUNet uses 2.9-4.0 GB on L4 (24 GB). Plenty of headroom.
-- **cbdice_cldice has best val/dice** (0.486 vs 0.30) after just 2 epochs
-- **Calibration adds ~1.1 GB VRAM** (4017 vs 2895 MB)
-- **Epoch time**: 56-67 seconds (includes validation)
+- **MambaVesselNet WORKS on L4!** First cloud execution ever across 8 passes.
+  mamba-ssm compiles correctly. Job duration ~8.5-8.8 min (similar to DynUNet).
+- **No OOM** — DynUNet 2.9-4.0 GB, MambaVesselNet 5.6-6.7 GB. L4 (24 GB) has headroom.
+- **MambaVesselNet uses ~2x VRAM** vs DynUNet (6.7 vs 4.0 GB with calibration)
+- **Calibration adds ~1.1 GB VRAM** consistently across both models
+- **Best val/dice**: MambaVesselNet dice_ce/calib=false (0.578) — competitive with DynUNet
+- **Epoch time**: 56-67 seconds DynUNet, similar for MambaVesselNet
 - **Inference latency**: 1.9-2.8 seconds per volume
 - **GPU utilization**: 28-100% (varies by condition — clDice computation is CPU-bound)
 
