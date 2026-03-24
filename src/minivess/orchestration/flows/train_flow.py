@@ -35,6 +35,7 @@ from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.prometheus_metrics import update_estimated_cost_gauges
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
+    CHECKPOINT_BEST_FILENAME,
     FLOW_NAME_POST_TRAINING_SUBFLOW,
     FLOW_NAME_TRAIN,
     FLOW_NAME_TRAINING_SUBFLOW,
@@ -1115,7 +1116,7 @@ def _run_swag_post_training(
     # Collect checkpoint paths from all folds
     checkpoint_paths: list[Path] = []
     for fold_id, ckpt_dir in sorted(training_result.checkpoint_dirs.items()):
-        best_ckpt = ckpt_dir / "best_val_loss.pth"
+        best_ckpt = ckpt_dir / CHECKPOINT_BEST_FILENAME
         if best_ckpt.exists():
             checkpoint_paths.append(best_ckpt)
         else:
