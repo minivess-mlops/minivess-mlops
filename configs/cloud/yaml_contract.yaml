@@ -68,6 +68,7 @@ allowed_resource_keys:
   - ports
   - cpus
   - memory
+  - job_recovery  # Spot resilience: restart on user code errors
 
 # ── Factorial YAML (train_factorial.yaml) — strictest contract ───────────
 # The factorial YAML is the MOST cost-sensitive (34+ jobs per pass).

@@ -38,6 +38,8 @@ resources:
   use_spot: true
   disk_size: 100
   disk_tier: best
+  job_recovery:
+    max_restarts_on_errors: 3
 
 # Checkpoint persistence via GCS bucket mount.
 # The bucket must exist (created by Pulumi). Use 'source' to reference

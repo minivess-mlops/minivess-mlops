@@ -108,3 +108,25 @@ class TestExperimentNaming:
             "dashboard_flow.py must import EXPERIMENT_TRAINING or "
             "resolve_experiment_name from constants.py."
         )
+
+    def test_no_hardcoded_experiment_name_in_maintenance_flow(self) -> None:
+        """maintenance_flow.py must use constants, not raw 'minivess_training'."""
+        source = MAINTENANCE_FLOW.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and node.value == "minivess_training":
+                raise AssertionError(
+                    "maintenance_flow.py contains hardcoded 'minivess_training'. "
+                    "Must use EXPERIMENT_TRAINING from constants.py."
+                )
+
+    def test_no_hardcoded_experiment_name_in_post_training_flow(self) -> None:
+        """post_training_flow.py must not have raw 'minivess_training' literals."""
+        source = POST_TRAINING_FLOW.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and node.value == "minivess_training":
+                raise AssertionError(
+                    "post_training_flow.py contains hardcoded 'minivess_training'. "
+                    "Must use resolve_experiment_name(EXPERIMENT_TRAINING)."
+                )

@@ -42,6 +42,8 @@ resources:
       accelerators: RTX4090:1
     - cloud: gcp
       accelerators: L4:1
+  job_recovery:
+    max_restarts_on_errors: 3
 
 # Checkpoint persistence via cloud storage bucket mount.
 # Bucket must exist (created by Pulumi or manually).

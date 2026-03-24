@@ -80,15 +80,23 @@ class TestNoT4:
 # ---------------------------------------------------------------------------
 
 
-class TestBannedFields:
-    """Fields removed or unsupported in SkyPilot v1.0+."""
+class TestJobRecovery:
+    """Spot instances MUST have job_recovery for resilience."""
 
-    def test_no_job_recovery_field(self) -> None:
-        """job_recovery was removed in SkyPilot v1.0 (caused YAML parse failure in 4th pass)."""
+    def test_factorial_has_job_recovery(self) -> None:
+        """train_factorial.yaml MUST have job_recovery under resources.
+
+        Previous ban was WRONG — job_recovery IS supported in SkyPilot v1.0.
+        Verified with sky.Task.from_yaml(). Without it, spot preemption + user
+        code errors kill the job permanently with no retry.
+        See: .claude/metalearning/2026-03-24-skypilot-implementation-trust-deficit.md
+        """
         config = _load_yaml(FACTORIAL_YAML)
-        assert "job_recovery" not in config, (
-            "job_recovery field is banned — removed in SkyPilot v1.0. "
-            "See: run-debug-factorial-experiment-report-4th-pass-failure.md"
+        resources = config.get("resources", {})
+        assert "job_recovery" in resources, (
+            "train_factorial.yaml resources MUST include job_recovery for "
+            "spot resilience (max_restarts_on_errors). Field is SUPPORTED in "
+            "SkyPilot v1.0 — the previous ban was a confabulation."
         )
 
 
@@ -552,9 +560,13 @@ class TestAllSkyPilotYamls:
         _discover_skypilot_yamls(),
         ids=[p.name for p in _discover_skypilot_yamls()],
     )
-    def test_no_job_recovery_anywhere(self, yaml_path: Path) -> None:
-        """job_recovery must NOT appear in any SkyPilot YAML (removed in v1.0)."""
+    def test_spot_yamls_have_job_recovery(self, yaml_path: Path) -> None:
+        """Spot YAMLs SHOULD have job_recovery for resilience (advisory)."""
         config = _load_yaml(yaml_path)
-        assert "job_recovery" not in config, (
-            f"job_recovery banned in {yaml_path.name} — removed in SkyPilot v1.0"
-        )
+        resources = config.get("resources", {})
+        use_spot = resources.get("use_spot", False)
+        if use_spot:
+            assert "job_recovery" in resources, (
+                f"{yaml_path.name}: spot YAML missing job_recovery — "
+                "spot preemption + errors will kill jobs permanently"
+            )

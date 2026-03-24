@@ -20,6 +20,8 @@ resources:
   cloud: runpod
   use_spot: true
   disk_size: 80
+  job_recovery:
+    max_restarts_on_errors: 3
 
 envs:
   MODEL_FAMILY: dynunet

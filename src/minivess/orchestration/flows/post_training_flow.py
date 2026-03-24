@@ -26,7 +26,12 @@ from prefect import flow, get_run_logger, task
 from minivess.config.post_training_config import PostTrainingConfig
 from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.tracking import resolve_tracking_uri
-from minivess.orchestration.constants import FLOW_NAME_POST_TRAINING, FLOW_NAME_TRAIN
+from minivess.orchestration.constants import (
+    EXPERIMENT_TRAINING,
+    FLOW_NAME_POST_TRAINING,
+    FLOW_NAME_TRAIN,
+    resolve_experiment_name,
+)
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -269,7 +274,9 @@ def post_training_flow(
 
     # Auto-discover upstream training run and checkpoints (#587).
     tracking_uri = resolve_tracking_uri()
-    upstream_exp = os.environ.get("UPSTREAM_EXPERIMENT", "minivess_training")
+    upstream_exp = os.environ.get(
+        "UPSTREAM_EXPERIMENT", resolve_experiment_name(EXPERIMENT_TRAINING)
+    )
 
     if upstream_training_run_id is None:
         upstream = find_upstream_safely(

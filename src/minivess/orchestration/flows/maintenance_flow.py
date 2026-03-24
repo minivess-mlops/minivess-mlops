@@ -19,7 +19,10 @@ from prefect import flow, task
 
 from minivess.observability.ghost_cleanup import cleanup_ghost_runs, find_ghost_runs
 from minivess.observability.tracking import resolve_tracking_uri
-from minivess.orchestration.constants import FLOW_NAME_MAINTENANCE
+from minivess.orchestration.constants import (
+    EXPERIMENT_TRAINING,
+    FLOW_NAME_MAINTENANCE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +47,7 @@ def _require_docker_context() -> None:
 @task(name="cleanup-stale-runs")
 def cleanup_stale_runs_task(
     *,
-    experiment_name: str = "minivess_training",
+    experiment_name: str = EXPERIMENT_TRAINING,
     max_age_hours: float = 24.0,
     dry_run: bool = True,
 ) -> dict[str, Any]:
@@ -99,7 +102,7 @@ def cleanup_stale_runs_task(
 @flow(name=FLOW_NAME_MAINTENANCE)
 def maintenance_flow(
     *,
-    experiment_name: str = "minivess_training",
+    experiment_name: str = EXPERIMENT_TRAINING,
     dry_run: bool = True,
 ) -> dict[str, Any]:
     """Maintenance flow — periodic MLflow cleanup.

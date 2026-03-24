@@ -33,6 +33,8 @@ resources:
   use_spot: true
   disk_size: 100
   region: europe-north1
+  job_recovery:
+    max_restarts_on_errors: 3
 
 envs:
   # Grid partitioning — override per worker

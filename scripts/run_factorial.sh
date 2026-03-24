@@ -32,6 +32,23 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SKYPILOT_YAML="${REPO_ROOT}/deployment/skypilot/train_factorial.yaml"
 ENV_FILE="${REPO_ROOT}/.env"
 
+# ─── Resilience parameters ────────────────────────────────────────────────
+MAX_RETRIES=3              # Retry failed launches up to 3 times
+RETRY_DELAY=2              # Initial backoff delay in seconds (doubles each retry)
+
+# ─── Signal handling (Gap #6) ─────────────────────────────────────────────
+# Kill background launch subshells on Ctrl+C or TERM signal.
+cleanup() {
+    echo ""
+    echo "Signal received — killing background launch jobs..."
+    # Kill all background children of this script
+    kill $(jobs -p) 2>/dev/null || true
+    wait 2>/dev/null || true
+    echo "Cleanup complete. Check job log for partial results."
+    exit 130  # Standard exit code for SIGINT
+}
+trap cleanup INT TERM
+
 # ─── Find sky binary (venv or system) ───────────────────────────────────
 SKY_BIN=""
 if command -v sky &>/dev/null; then
@@ -45,12 +62,16 @@ fi
 
 # ─── Parse flags ─────────────────────────────────────────────────────────────
 DRY_RUN=false
+RESUME=false
 CONFIG_FILE=""
 
 for arg in "$@"; do
     case "${arg}" in
         --dry-run)
             DRY_RUN=true
+            ;;
+        --resume)
+            RESUME=true
             ;;
         -*)
             echo "ERROR: Unknown flag: ${arg}"
@@ -160,52 +181,53 @@ echo "╚═══════════════════════�
 echo ""
 
 # Extract factorial factors from YAML using Python (no regex — CLAUDE.md Rule 16)
+# Gap #7: Python parsing wrapped in try/except for clear error diagnostics.
 read -r MODELS LOSSES AUX_CALIBS MAX_EPOCHS NUM_FOLDS MAX_TRAIN MAX_VAL EXPERIMENT_NAME PT_METHODS < <(
     python3 -c "
-import yaml, sys, pathlib
-cfg = yaml.safe_load(pathlib.Path('${REPO_ROOT}/${CONFIG_FILE}').read_text(encoding='utf-8'))
+import yaml, sys, pathlib, traceback
+try:
+    cfg = yaml.safe_load(pathlib.Path('${REPO_ROOT}/${CONFIG_FILE}').read_text(encoding='utf-8'))
 
-# Parse training factors — supports two config layouts:
-#   Layered:  factors.training.model_family  (configs/factorial/*.yaml)
-#   Flat:     factors.model_family           (configs/experiment/*.yaml, legacy)
-if 'factors' in cfg:
-    factors = cfg['factors']
-    # Prefer layered structure (factors.training.*)
-    if 'training' in factors and isinstance(factors['training'], dict):
-        training = factors['training']
+    # Parse training factors — supports two config layouts:
+    #   Layered:  factors.training.model_family  (configs/factorial/*.yaml)
+    #   Flat:     factors.model_family           (configs/experiment/*.yaml, legacy)
+    if 'factors' in cfg:
+        factors = cfg['factors']
+        if 'training' in factors and isinstance(factors['training'], dict):
+            training = factors['training']
+        else:
+            training = factors
+        models = training['model_family']
+        losses = training['loss_name']
+        aux_calibs = [str(x).lower() for x in training.get('aux_calibration', [False])]
+        fixed = cfg.get('fixed', {})
+        max_epochs = fixed.get('max_epochs', 50)
+        num_folds = fixed.get('num_folds', 3)
+        max_train = fixed.get('max_train_volumes', 0)
+        max_val = fixed.get('max_val_volumes', 0)
     else:
-        training = factors
-    models = training['model_family']
-    losses = training['loss_name']
-    aux_calibs = [str(x).lower() for x in training.get('aux_calibration', [False])]
-    fixed = cfg.get('fixed', {})
-    max_epochs = fixed.get('max_epochs', 50)
-    num_folds = fixed.get('num_folds', 3)
-    max_train = fixed.get('max_train_volumes', 0)  # 0 = full dataset
-    max_val = fixed.get('max_val_volumes', 0)
-else:
-    models = [cfg.get('model', 'dynunet')]
-    losses = cfg.get('losses', ['cbdice_cldice'])
-    aux_calibs = ['false', 'true'] if 'with_aux_calib' in cfg else ['false']
-    max_epochs = cfg.get('max_epochs', 50)
-    num_folds = cfg.get('num_folds', 3)
-    max_train = cfg.get('max_train_volumes', 0)
-    max_val = cfg.get('max_val_volumes', 0)
+        models = [cfg.get('model', 'dynunet')]
+        losses = cfg.get('losses', ['cbdice_cldice'])
+        aux_calibs = ['false', 'true'] if 'with_aux_calib' in cfg else ['false']
+        max_epochs = cfg.get('max_epochs', 50)
+        num_folds = cfg.get('num_folds', 3)
+        max_train = cfg.get('max_train_volumes', 0)
+        max_val = cfg.get('max_val_volumes', 0)
 
-# Post-training methods run IN THE SAME SkyPilot job as training (not separate jobs).
-# The parent flow iterates over methods internally: sub-flow 1 (training = 'none' cell),
-# sub-flow 2 (SWAG or other methods). Decided: only 'none' and 'swag'.
-# See: docs/planning/training-and-post-training-into-two-subflows-under-one-flow.md
-# Check layered structure first (factors.post_training.method), then flat (post_training.methods)
-if 'factors' in cfg and 'post_training' in cfg['factors']:
-    pt_methods = cfg['factors']['post_training'].get('method', ['none', 'swag'])
-else:
-    pt_methods = cfg.get('post_training', {}).get('methods', ['none', 'swag'])
+    # Post-training methods
+    if 'factors' in cfg and 'post_training' in cfg['factors']:
+        pt_methods = cfg['factors']['post_training'].get('method', ['none', 'swag'])
+    else:
+        pt_methods = cfg.get('post_training', {}).get('methods', ['none', 'swag'])
 
-experiment_name = cfg.get('experiment_name', 'factorial')
-print(','.join(models), ','.join(losses), ','.join(aux_calibs),
-      max_epochs, num_folds, max_train, max_val, experiment_name,
-      ','.join(pt_methods))
+    experiment_name = cfg.get('experiment_name', 'factorial')
+    print(','.join(models), ','.join(losses), ','.join(aux_calibs),
+          max_epochs, num_folds, max_train, max_val, experiment_name,
+          ','.join(pt_methods))
+except Exception:
+    traceback.print_exc()
+    print('FATAL: Failed to parse factorial config', file=sys.stderr)
+    sys.exit(1)
 "
 )
 
@@ -241,6 +263,15 @@ echo "# Post-training methods: ${PT_METHODS} (iterated inside each job)" >> "${J
 echo "#" >> "${JOB_LOG}"
 echo "# FORMAT: condition_id | model | loss | aux_calib | fold | status" >> "${JOB_LOG}"
 
+# ─── Resume: check existing jobs (Gap #3) ─────────────────────────────────────
+EXISTING_JOBS=""
+if [ "${RESUME}" = true ] && [ "${DRY_RUN}" = false ]; then
+    echo "Resume mode: checking for already-submitted conditions..."
+    EXISTING_JOBS=$("${SKY_BIN}" jobs queue 2>/dev/null | awk '{print $4}' || echo "")
+    SKIP_COUNT=$(echo "${EXISTING_JOBS}" | grep -c "." 2>/dev/null || echo 0)
+    echo "Found ${SKIP_COUNT} existing jobs in queue"
+fi
+
 # ─── Launch GPU jobs (each runs training + post-training in same session) ─────
 # Post-training methods (e.g., none,swag) are passed as POST_TRAINING_METHODS env var.
 # The parent flow iterates over methods internally — no extra SkyPilot jobs needed.
@@ -260,27 +291,42 @@ for model in "${MODEL_ARRAY[@]}"; do
                     echo "  [DRY RUN] sky jobs launch ${SKYPILOT_YAML} --name ${CONDITION_NAME} --env MODEL_FAMILY=${model} ..."
                     echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | DRY_RUN" >> "${JOB_LOG}"
                 else
-                    # Launch in background subshell for parallel submissions.
+                    # Resume: skip already-submitted conditions (Gap #3)
+                    if [ "${RESUME}" = true ] && echo "${EXISTING_JOBS}" | grep -qF "${CONDITION_NAME}"; then
+                        echo "  [SKIP] ${CONDITION_NAME} already in queue"
+                        echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | SKIPPED_RESUME" >> "${JOB_LOG}"
+                        continue
+                    fi
+
+                    # Launch in background subshell with retry + exponential backoff (Gap #1).
                     # Each subshell logs its own result to JOB_LOG (atomic appends).
                     (
-                        if "${SKY_BIN}" jobs launch "${SKYPILOT_YAML}" \
-                            --name "${CONDITION_NAME}" \
-                            --env MODEL_FAMILY="${model}" \
-                            --env LOSS_NAME="${loss}" \
-                            --env FOLD_ID="${fold}" \
-                            --env WITH_AUX_CALIB="${aux_calib}" \
-                            --env MAX_EPOCHS="${MAX_EPOCHS}" \
-                            --env MAX_TRAIN_VOLUMES="${MAX_TRAIN}" \
-                            --env MAX_VAL_VOLUMES="${MAX_VAL}" \
-                            --env EXPERIMENT_NAME="${EXPERIMENT_NAME}" \
-                            --env POST_TRAINING_METHODS="${PT_METHODS}" \
-                            --env-file "${ENV_FILE}" \
-                            -y; then
-                            echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | LAUNCHED" >> "${JOB_LOG}"
-                        else
-                            echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | LAUNCH_FAILED" >> "${JOB_LOG}"
-                            echo "  WARNING: Launch failed for ${CONDITION_NAME} — continuing with remaining conditions"
-                        fi
+                        BACKOFF=${RETRY_DELAY}
+                        for attempt in $(seq 1 "${MAX_RETRIES}"); do
+                            if "${SKY_BIN}" jobs launch "${SKYPILOT_YAML}" \
+                                --name "${CONDITION_NAME}" \
+                                --env MODEL_FAMILY="${model}" \
+                                --env LOSS_NAME="${loss}" \
+                                --env FOLD_ID="${fold}" \
+                                --env WITH_AUX_CALIB="${aux_calib}" \
+                                --env MAX_EPOCHS="${MAX_EPOCHS}" \
+                                --env MAX_TRAIN_VOLUMES="${MAX_TRAIN}" \
+                                --env MAX_VAL_VOLUMES="${MAX_VAL}" \
+                                --env EXPERIMENT_NAME="${EXPERIMENT_NAME}" \
+                                --env POST_TRAINING_METHODS="${PT_METHODS}" \
+                                --env-file "${ENV_FILE}" \
+                                -y; then
+                                echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | LAUNCHED" >> "${JOB_LOG}"
+                                exit 0
+                            fi
+                            if [ "${attempt}" -lt "${MAX_RETRIES}" ]; then
+                                echo "  Retry ${attempt}/${MAX_RETRIES} for ${CONDITION_NAME} (backoff ${BACKOFF}s)"
+                                sleep "${BACKOFF}"
+                                BACKOFF=$((BACKOFF * 2))
+                            fi
+                        done
+                        echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | LAUNCH_FAILED" >> "${JOB_LOG}"
+                        echo "  FAILED: ${CONDITION_NAME} after ${MAX_RETRIES} attempts"
                     ) &
 
                     # Rate limiting: prevent SkyPilot API quota issues (from cloud config)
@@ -399,9 +445,15 @@ echo "║  Monitor: sky jobs queue                                    ║"
 echo "║  Logs:    sky jobs logs <JOB_ID>                            ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 
+# Exit codes (Gap #10): 0=all launched, 1=all failed, 2=partial failure
 if [ "${FAILED}" -gt 0 ]; then
     echo ""
     echo "WARNING: ${FAILED} trainable condition(s) failed to launch."
-    echo "Review ${JOB_LOG} for details and re-launch failed conditions manually."
-    exit 1
+    echo "Review ${JOB_LOG} for details."
+    echo "Resume with: $0 --resume ${CONFIG_FILE}"
+    if [ "${LAUNCHED}" -gt 0 ]; then
+        exit 2  # Partial failure: some launched, some failed
+    else
+        exit 1  # Total failure: nothing launched
+    fi
 fi
