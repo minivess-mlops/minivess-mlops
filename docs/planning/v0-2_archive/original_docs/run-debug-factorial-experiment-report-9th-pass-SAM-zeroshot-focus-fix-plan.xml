@@ -180,6 +180,44 @@
   </task>
 
   <!-- ================================================================== -->
+  <!-- TASK 2B: Verify SAM3 HuggingFace weight URL (NEW P0 from agent)  -->
+  <!-- ================================================================== -->
+  <task id="2B" priority="P0" parallel-with="1,2">
+    <title>Verify SAM3 HuggingFace model repo/filename is correct</title>
+    <description>
+      Self-reflection agent found HTTP 404 for facebook/sam3-hiera-large in job
+      68 logs. The HF repo or filename may be wrong. SAM3 is beyond training
+      knowledge cutoff (Nov 2025) — must web-verify before any cloud launch.
+
+      CLAUDE.md Rule #10: "Verify Models Beyond Knowledge Cutoff."
+    </description>
+    <files>
+      <file action="read">src/minivess/adapters/sam3_backbone.py</file>
+      <file action="read">deployment/skypilot/train_factorial.yaml</file>
+      <file action="read">configs/model_profiles/sam3_vanilla.yaml</file>
+    </files>
+    <tdd-approach>
+      <red>
+        Web search: "facebook sam3 hiera large huggingface model" to verify repo name.
+        Check if the repo is "facebook/sam3" or "facebookresearch/sam3" or another name.
+        Read sam3_backbone.py to find the actual from_pretrained() call.
+        Read train_factorial.yaml setup block to find the hf_hub_download command.
+        Create test: test_sam3_hf_repo_name_valid — verify the repo string in
+        model profile YAML matches the actual HuggingFace repo.
+      </red>
+      <green>
+        Fix any wrong repo/filename references in:
+        - sam3_backbone.py from_pretrained() call
+        - train_factorial.yaml setup block HF download
+        - Model profile YAMLs weights.hf_repo field
+      </green>
+      <verify>
+        uv run pytest tests/v2/unit/adapters/test_model_weight_verification.py -v
+      </verify>
+    </tdd-approach>
+  </task>
+
+  <!-- ================================================================== -->
   <!-- TASK 3: Docker rebuild + push (verification gate, not TDD)        -->
   <!-- ================================================================== -->
   <task id="3" priority="P0" depends-on="1,2" type="verification-gate">
@@ -248,6 +286,7 @@
   <final-gate>
     <criterion>make test-staging: 0 failures</criterion>
     <criterion>make test-prod: 0 failures</criterion>
+    <criterion>SAM3 HuggingFace repo/filename verified (no 404)</criterion>
     <criterion>Docker image on GAR matches git HEAD (freshness gate)</criterion>
     <criterion>At least 1 SAM3 TopoLoRA SUCCEEDED with training logs verified</criterion>
     <criterion>At least 1 SAM3 Hybrid SUCCEEDED</criterion>
