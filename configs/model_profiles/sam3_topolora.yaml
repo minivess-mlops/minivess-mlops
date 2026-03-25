@@ -20,6 +20,9 @@ notes: >
   Code bugs fixed (dim order, FP16 cast, LoRA dtype) but VRAM remains the blocker.
   Verified 2026-03-15 on RunPod RTX 4090 (EU-RO-1) — OOM confirmed.
   See #680 for full context.
+weights:
+  hf_repo: "facebook/sam3"
+  hf_revision: "main"
 vram:
   inference_gb: null
   training_gb: 13.0

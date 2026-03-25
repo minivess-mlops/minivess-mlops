@@ -181,6 +181,8 @@ class SWAGModel:
     @classmethod
     def load(cls, path: Path, base_model: nn.Module) -> SWAGModel:
         """Load SWAG state from disk and attach to base_model."""
+        # SECURITY: weights_only=False -- self-produced SWAG state (mean, sq_mean,
+        # deviations, n_models_collected). See trivy-litellm-secops-double-checking.md
         state = torch.load(path, weights_only=False)
         swag = cls(base_model, max_rank=state["max_rank"])
         swag._mean = state["mean"]

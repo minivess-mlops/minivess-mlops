@@ -26,6 +26,9 @@ notes: >
   val_interval sentinel skips validation on 8 GB — should validate on cloud (#710).
   Verified 2026-03-15 on RunPod RTX 4090 (EU-RO-1).
   See src/minivess/adapters/CLAUDE.md for VRAM enforcement (sam3_vram_check.py).
+weights:
+  hf_repo: "facebook/sam3"
+  hf_revision: "main"
 vram:
   inference_gb: 7.2
   training_gb: 7.2

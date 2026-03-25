@@ -83,15 +83,19 @@ class TestVesselFMWeightChecksum:
     def test_sha256_constant_defined(self) -> None:
         """vesselfm module should define VESSELFM_WEIGHT_SHA256.
 
-        Currently None (pending verification from actual download).
-        When populated, should be a 64-char hex string.
+        Must be a non-None string: either a 64-char hex SHA-256 hash or
+        a placeholder like 'POPULATE_AFTER_FIRST_VERIFIED_DOWNLOAD'
+        (indicating the hash needs to be recorded after first trusted download).
+        None is BANNED — it disables verification entirely (security gap).
+        See: trivy-litellm-secops-double-checking.md
         """
         from minivess.adapters.vesselfm import VESSELFM_WEIGHT_SHA256
 
-        assert VESSELFM_WEIGHT_SHA256 is None or (
-            isinstance(VESSELFM_WEIGHT_SHA256, str)
-            and len(VESSELFM_WEIGHT_SHA256) == 64
+        assert VESSELFM_WEIGHT_SHA256 is not None, (
+            "VESSELFM_WEIGHT_SHA256 must not be None — disables verification"
         )
+        assert isinstance(VESSELFM_WEIGHT_SHA256, str)
+        assert len(VESSELFM_WEIGHT_SHA256) > 0
 
     def test_verify_checksum_passes_on_match(self) -> None:
         """verify_checksum should return True when hash matches."""

@@ -41,11 +41,11 @@ def test_claude_md_documents_nvidia_ctk() -> None:
     )
 
 
-def test_claude_md_documents_trivy() -> None:
-    """deployment/CLAUDE.md must document trivy image scanning."""
-    assert "trivy" in _content().lower(), (
-        "deployment/CLAUDE.md missing Trivy documentation. "
-        "Add 'make scan' or trivy usage instructions to the deployment runbook."
+def test_claude_md_documents_grype() -> None:
+    """deployment/CLAUDE.md must document Grype container vulnerability scanning."""
+    assert "grype" in _content().lower(), (
+        "deployment/CLAUDE.md missing Grype documentation. "
+        "Add 'make scan' or Grype usage instructions to the deployment runbook."
     )
 
 

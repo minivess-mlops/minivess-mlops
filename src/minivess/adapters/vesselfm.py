@@ -32,9 +32,9 @@ VESSELFM_HF_REPO = "bwittmann/vesselFM"
 VESSELFM_HF_FILENAME = "vesselFM_base.pt"
 
 # SHA256 checksum for the official vesselFM_base.pt weights.
-# Set to None until verified from an actual download. The adapter
-# skips checksum verification when this is None.
-VESSELFM_WEIGHT_SHA256: str | None = None
+# Placeholder — populate with the actual hash after first verified download
+# on a trusted network using: scripts/verify_model_weights.py --model vesselfm
+VESSELFM_WEIGHT_SHA256: str = "POPULATE_AFTER_FIRST_VERIFIED_DOWNLOAD"
 
 
 def verify_checksum(data: bytes, expected_sha256: str | None) -> bool:

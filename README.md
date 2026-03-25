@@ -472,13 +472,12 @@ If you use this platform, please cite the underlying dataset:
 - 4-layer factorial experiment on GCP L4 spot instances (24 training cells x 2 post-training x analysis layers)
 - OpenLineage flow wiring (Issue [#799](https://github.com/petteriTeikari/vascadia/issues/799))
 - [CycloneDX](https://cyclonedx.org/) SBOM generation (Issue [#821](https://github.com/petteriTeikari/vascadia/issues/821))
-- Nature Protocols manuscript assembly (NEUROVEX)
 
 ### Planned
 
 - [CopilotKit](https://www.copilotkit.ai/) (AG-UI) + WebMCP for agentic dashboard/annotation
 - Multi-site opt-in telemetry ([PostHog](https://posthog.com/), [Sentry](https://sentry.io/))
-- Federated learning evaluation ([NVIDIA FLARE](https://nvidia.github.io/NVFlare/) vs MONAI FL)
+- Federated learning evaluation ([NVIDIA FLARE](https://nvidia.github.io/NVFlare/) vs [MONAI FL](https://flower.ai/docs/examples/quickstart-monai.html))
 - QMSR production controls documentation
 - **Science backlog**: calibration-aware ensembles ([#896](https://github.com/petteriTeikari/vascadia/issues/896)), greedy ensemble selection ([#894](https://github.com/petteriTeikari/vascadia/issues/894)), snapshot ensembles ([#895](https://github.com/petteriTeikari/vascadia/issues/895)), spec curve analysis ([#898](https://github.com/petteriTeikari/vascadia/issues/898)), uncertainty-guided eval ([#897](https://github.com/petteriTeikari/vascadia/issues/897)), topology-critical calibration ([#899](https://github.com/petteriTeikari/vascadia/issues/899)), VLM calibration ([#798](https://github.com/petteriTeikari/vascadia/issues/798)), federated learning ([#842](https://github.com/petteriTeikari/vascadia/issues/842)), Syne Tune HPO ([#861](https://github.com/petteriTeikari/vascadia/issues/861)), AI card stack ([#864](https://github.com/petteriTeikari/vascadia/issues/864)), KG provenance ([#938](https://github.com/petteriTeikari/vascadia/issues/938))
 

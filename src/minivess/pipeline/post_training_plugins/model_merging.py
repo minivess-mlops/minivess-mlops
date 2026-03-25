@@ -77,6 +77,8 @@ class ModelMergingPlugin:
                     else {}
                 )
                 cat = meta.get("champion_category", f"unknown_{i}")
+                # SECURITY: weights_only=False -- self-produced checkpoint
+                # (model_state_dict, state_dict). See trivy-litellm-secops-double-checking.md
                 ckpt = torch.load(ckpt_path, weights_only=False)
                 category_to_sd[cat] = ckpt.get(
                     "model_state_dict", ckpt.get("state_dict", ckpt)
@@ -102,6 +104,8 @@ class ModelMergingPlugin:
                 logger.info("Merged %s + %s via %s (t=%.2f)", cat1, cat2, method, t)
         else:
             # Simple: merge first two checkpoints
+            # SECURITY: weights_only=False -- self-produced checkpoints
+            # (model_state_dict, state_dict). See trivy-litellm-secops-double-checking.md
             ckpt1 = torch.load(plugin_input.checkpoint_paths[0], weights_only=False)
             ckpt2 = torch.load(plugin_input.checkpoint_paths[1], weights_only=False)
             sd1 = ckpt1.get("model_state_dict", ckpt1.get("state_dict", ckpt1))

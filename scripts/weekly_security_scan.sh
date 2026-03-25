@@ -4,7 +4,8 @@
 # Usage:
 #   bash scripts/weekly_security_scan.sh
 #
-# Scans all 11 flow images for CRITICAL + HIGH CVEs using Trivy.
+# Scans all 11 flow images for CRITICAL CVEs using Grype (Anchore).
+# Trivy replaced after supply chain compromise (2026-03-19).
 # Images that are not built locally are skipped.
 # Exit code 1 if any built image has CRITICAL CVEs.
 #
@@ -47,12 +48,10 @@ for image in "${FLOW_IMAGES[@]}"; do
   fi
 
   echo -n "  SCAN   $image ... "
-  if trivy image \
-      --exit-code 1 \
-      --severity CRITICAL \
-      --ignore-unfixed \
-      --quiet \
-      "$image" 2>/dev/null; then
+  if grype docker:"$image" \
+      --only-fixed \
+      --fail-on critical \
+      -q 2>/dev/null; then
     SCANNED+=("$image")
     echo "OK"
   else

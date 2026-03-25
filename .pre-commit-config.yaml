@@ -93,6 +93,16 @@ repos:
         files: '(knowledge-graph/|MEMORY\.md|CLAUDE\.md|docs/planning/)'
         always_run: false
 
+  - repo: local
+    hooks:
+      - id: pip-audit
+        name: pip-audit CVE scan
+        entry: uvx pip-audit --strict --desc
+        language: system
+        pass_filenames: false
+        always_run: false
+        files: '(pyproject\.toml|uv\.lock)$'
+
   - repo: https://github.com/hadolint/hadolint
     rev: v2.12.0
     hooks:

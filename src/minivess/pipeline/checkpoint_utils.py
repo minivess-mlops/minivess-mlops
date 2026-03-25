@@ -84,6 +84,8 @@ def load_checkpoint_with_fallback(
         If both primary and fallback are corrupt (Rule #25: loud failure).
     """
     try:
+        # SECURITY: weights_only=False -- self-produced checkpoint (state_dict, epoch,
+        # optimizer_state_dict, scheduler). See trivy-litellm-secops-double-checking.md
         result: dict[str, Any] = torch.load(
             primary, weights_only=False, map_location="cpu"
         )
@@ -100,6 +102,8 @@ def load_checkpoint_with_fallback(
                 f"Primary corrupt and no fallback: {primary}"
             ) from exc
         try:
+            # SECURITY: weights_only=False -- self-produced checkpoint (fallback path,
+            # same format as primary). See trivy-litellm-secops-double-checking.md
             fallback_result: dict[str, Any] = torch.load(
                 fallback, weights_only=False, map_location="cpu"
             )

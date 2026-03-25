@@ -65,6 +65,8 @@ class SubsampledEnsemblePlugin:
         # Load all state dicts once
         all_sds = []
         for ckpt_path in plugin_input.checkpoint_paths:
+            # SECURITY: weights_only=False -- self-produced checkpoint
+            # (model_state_dict, state_dict). See trivy-litellm-secops-double-checking.md
             ckpt = torch.load(ckpt_path, weights_only=False)
             all_sds.append(ckpt.get("model_state_dict", ckpt.get("state_dict", ckpt)))
 
