@@ -61,6 +61,60 @@ def check_docker_image() -> tuple[bool, str]:
     return False, f"Docker image NOT found: {GAR_IMAGE}. Rebuild and push."
 
 
+def check_docker_image_freshness() -> tuple[bool, str]:
+    """Check if Docker image GIT_COMMIT label matches current git HEAD.
+
+    Uses 'docker buildx imagetools inspect' to read the
+    org.opencontainers.image.revision label from the registry.
+    Falls back gracefully if tools are unavailable.
+
+    See: .claude/metalearning/2026-03-25-stale-docker-image-launch.md
+    """
+    import json
+
+    # Step 1: Get git HEAD
+    git_result = _run(["git", "rev-parse", "HEAD"], timeout=10)
+    if git_result.returncode != 0:
+        return True, "Cannot determine HEAD commit — freshness check skipped"
+    head_commit = git_result.stdout.strip()
+
+    # Step 2: Get image label via docker buildx imagetools inspect
+    imagetools_result = _run(
+        [
+            "docker", "buildx", "imagetools", "inspect",
+            GAR_IMAGE, "--format", "{{json .}}",
+        ],
+        timeout=60,
+    )
+    if imagetools_result.returncode != 0:
+        return True, "Cannot verify image freshness (docker buildx not available) — skipped"
+
+    # Step 3: Parse JSON and extract the revision label (Rule 16: no regex)
+    try:
+        data = json.loads(imagetools_result.stdout)
+        labels = data.get("image", {}).get("config", {}).get("Labels", {})
+        image_commit = labels.get("org.opencontainers.image.revision", "")
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return True, "Cannot parse image metadata — freshness check skipped"
+
+    # Step 4: Compare commits
+    if not image_commit or image_commit == "unknown":
+        return False, (
+            f"Docker image built without GIT_COMMIT (label='unknown'). "
+            f"Rebuild: make build-base-gpu && docker tag minivess-base:latest "
+            f"{GAR_IMAGE} && docker push {GAR_IMAGE}"
+        )
+
+    if image_commit == head_commit:
+        return True, f"Docker image commit matches HEAD: {image_commit[:12]}"
+
+    return False, (
+        f"Docker image STALE: image={image_commit[:12]}, HEAD={head_commit[:12]}. "
+        f"Rebuild: make build-base-gpu && docker tag minivess-base:latest "
+        f"{GAR_IMAGE} && docker push {GAR_IMAGE}"
+    )
+
+
 def check_gcs_bucket() -> tuple[bool, str]:
     """Check if GCS DVC bucket is accessible."""
     result = _run(["gsutil", "ls", GCS_BUCKET + "/"])
@@ -457,6 +511,7 @@ def main() -> int:
     """Run all preflight checks. Returns 0 on success, 1 on failure."""
     checks = [
         ("Docker image on GAR", check_docker_image),
+        ("Docker image freshness", check_docker_image_freshness),
         ("GCS DVC bucket access", check_gcs_bucket),
         ("Checkpoint bucket access", check_checkpoint_bucket),
         ("DVC data on GCS", check_dvc_data_on_gcs),
