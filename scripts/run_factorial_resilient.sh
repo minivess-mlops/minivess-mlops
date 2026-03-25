@@ -80,6 +80,65 @@ START_EPOCH=$(date +%s)
 MAX_WAIT_SECONDS=$((MAX_WAIT_HOURS * 3600))
 ATTEMPT=0
 
+# ─── Permanent failure tracking (Issue #947) ─────────────────────────────────
+# Track per-condition failure counts. After MAX_CONDITION_FAILURES consecutive
+# failures for the same condition, mark it as PERMANENTLY_FAILED and stop retrying.
+MAX_CONDITION_FAILURES="${MAX_CONDITION_FAILURES:-3}"
+FAIL_COUNT_FILE="${LOG_DIR}/resilient_${TIMESTAMP}_fail_counts.txt"
+PERM_FAIL_FILE="${LOG_DIR}/resilient_${TIMESTAMP}_permanently_failed.txt"
+touch "${FAIL_COUNT_FILE}" "${PERM_FAIL_FILE}"
+
+# count_condition_failures: read the fail count for a given condition from the
+# tracking file. Returns 0 if no entry found.
+count_condition_failures() {
+    local condition="$1"
+    local count
+    count=$(awk -v cond="${condition}" '$1 == cond {print $2}' "${FAIL_COUNT_FILE}" 2>/dev/null)
+    echo "${count:-0}"
+}
+
+# increment_condition_failures: increment the fail count for a condition.
+# If count reaches MAX_CONDITION_FAILURES, append to permanently failed list.
+increment_condition_failures() {
+    local condition="$1"
+    local current_count
+    current_count=$(count_condition_failures "${condition}")
+    local new_count=$((current_count + 1))
+
+    # Update or append the count (rewrite file without the old entry, then append)
+    local tmp_file="${FAIL_COUNT_FILE}.tmp"
+    awk -v cond="${condition}" '$1 != cond' "${FAIL_COUNT_FILE}" > "${tmp_file}" 2>/dev/null || true
+    echo "${condition} ${new_count}" >> "${tmp_file}"
+    mv "${tmp_file}" "${FAIL_COUNT_FILE}"
+
+    if [ "${new_count}" -ge "${MAX_CONDITION_FAILURES}" ]; then
+        echo "${condition}" >> "${PERM_FAIL_FILE}"
+        echo "[$(date -u)] PERMANENTLY_FAILED: ${condition} (failed ${new_count} times)" | tee -a "${LOG_FILE}"
+    fi
+}
+
+# check_permanently_failed: scan job logs for LAUNCH_FAILED entries and update counts
+check_for_permanent_failures() {
+    local latest_log
+    latest_log=$(ls -t "${LOG_DIR}/"*_factorial_job_ids.txt 2>/dev/null | head -1)
+    if [ -z "${latest_log}" ]; then
+        return
+    fi
+
+    # Extract LAUNCH_FAILED conditions from the latest job log
+    while IFS='|' read -r _cond_id model loss aux_calib fold status; do
+        status=$(echo "${status}" | tr -d ' ')
+        if [ "${status}" = "LAUNCH_FAILED" ]; then
+            model=$(echo "${model}" | tr -d ' ')
+            loss=$(echo "${loss}" | tr -d ' ')
+            aux_calib=$(echo "${aux_calib}" | tr -d ' ')
+            fold=$(echo "${fold}" | tr -d ' ')
+            local condition_name="${model}-${loss}-calib${aux_calib}-f${fold}"
+            increment_condition_failures "${condition_name}"
+        fi
+    done < <(grep "LAUNCH_FAILED" "${latest_log}" 2>/dev/null || true)
+}
+
 while true; do
     ATTEMPT=$((ATTEMPT + 1))
     ELAPSED=$(( $(date +%s) - START_EPOCH ))
@@ -87,12 +146,24 @@ while true; do
     # Check timeout
     if [ "${ELAPSED}" -ge "${MAX_WAIT_SECONDS}" ]; then
         echo "[$(date -u)] MAX_WAIT_HOURS (${MAX_WAIT_HOURS}h) exceeded. Stopping." | tee -a "${LOG_FILE}"
+        # Report permanent failures
+        if [ -s "${PERM_FAIL_FILE}" ]; then
+            echo "[$(date -u)] Permanently failed conditions:" | tee -a "${LOG_FILE}"
+            cat "${PERM_FAIL_FILE}" | tee -a "${LOG_FILE}"
+        fi
         exit 1
     fi
 
     REMAINING_HOURS=$(( (MAX_WAIT_SECONDS - ELAPSED) / 3600 ))
     echo "" | tee -a "${LOG_FILE}"
     echo "[$(date -u)] Attempt ${ATTEMPT} (elapsed: $((ELAPSED / 3600))h, remaining: ${REMAINING_HOURS}h)" | tee -a "${LOG_FILE}"
+
+    # Report permanent failure count
+    PERM_FAIL_COUNT=0
+    if [ -s "${PERM_FAIL_FILE}" ]; then
+        PERM_FAIL_COUNT=$(wc -l < "${PERM_FAIL_FILE}")
+        echo "[$(date -u)] Permanently failed conditions: ${PERM_FAIL_COUNT}" | tee -a "${LOG_FILE}"
+    fi
 
     # Run factorial with --resume (idempotent — skips already-submitted conditions)
     EXIT_CODE=0
@@ -102,13 +173,21 @@ while true; do
         0)
             echo "[$(date -u)] All conditions submitted successfully!" | tee -a "${LOG_FILE}"
             echo "[$(date -u)] Monitor with: uv run sky jobs queue" | tee -a "${LOG_FILE}"
+            if [ -s "${PERM_FAIL_FILE}" ]; then
+                echo "[$(date -u)] WARNING: ${PERM_FAIL_COUNT} conditions were permanently failed:" | tee -a "${LOG_FILE}"
+                cat "${PERM_FAIL_FILE}" | tee -a "${LOG_FILE}"
+            fi
             exit 0
             ;;
         2)
-            echo "[$(date -u)] Partial failure — some conditions failed to launch. Retrying in ${RETRY_INTERVAL}s..." | tee -a "${LOG_FILE}"
+            echo "[$(date -u)] Partial failure — some conditions failed to launch." | tee -a "${LOG_FILE}"
+            check_for_permanent_failures
+            echo "[$(date -u)] Retrying in ${RETRY_INTERVAL}s..." | tee -a "${LOG_FILE}"
             ;;
         1)
-            echo "[$(date -u)] Total failure — no conditions launched. Retrying in ${RETRY_INTERVAL}s..." | tee -a "${LOG_FILE}"
+            echo "[$(date -u)] Total failure — no conditions launched." | tee -a "${LOG_FILE}"
+            check_for_permanent_failures
+            echo "[$(date -u)] Retrying in ${RETRY_INTERVAL}s..." | tee -a "${LOG_FILE}"
             ;;
         *)
             echo "[$(date -u)] Unexpected exit code ${EXIT_CODE}. Retrying in ${RETRY_INTERVAL}s..." | tee -a "${LOG_FILE}"

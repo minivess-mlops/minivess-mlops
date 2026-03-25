@@ -1,0 +1,408 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Security Hardening TDD Plan — Trivy/LiteLLM Incident Response
+  ==============================================================
+  Date: 2026-03-25
+  Branch: test/run-debug-9th-pass
+  Source: docs/planning/v0-2_archive/original_docs/trivy-litellm-secops-double-checking.md
+  Executor: /self-learning-iterative-coder (RED-GREEN-VERIFY)
+
+  REVIEWER CORRECTIONS APPLIED:
+  R1: Grype already exists for Python SBOM — only Docker image scanning needs replacement
+  R2: trivy-critical Makefile target does NOT exist (pre-existing bug) — create grype-critical
+  R3: pip-audit must be added to pyproject.toml FIRST, use language: system, gate on dep files
+  R4: SAM3 uses from_pretrained() (multi-shard safetensors) NOT single .pt — distinguish from VesselFM
+  R5: VesselFM has VESSELFM_WEIGHT_SHA256 = None — verification disabled, must fix
+  R6: 9 torch.load(weights_only=False) call sites across 6 files, not 6 calls
+  R7: Use file/function allowlist for weights_only guard, not bare count
+  R8: Also scan for pickle.load() in production code
+  R9: Makefile touched by T1 AND T2 — run sequentially (T1 first, T2 after)
+  R10: SkyPilot YAML hash verification = Rule #31 concern — put in adapter code, not setup block
+-->
+<plan
+  name="security-hardening-4-tasks"
+  version="2.0-reviewer-corrected"
+  branch="test/run-debug-9th-pass"
+  executor="/self-learning-iterative-coder"
+  total-tasks="4">
+
+  <invariants>
+    <invariant id="INV-1" rule="Rule #2">TDD: write failing test FIRST</invariant>
+    <invariant id="INV-2" rule="Rule #16">No regex — use ast.parse(), yaml.safe_load(), str.split()</invariant>
+    <invariant id="INV-3" rule="Rule #25">Loud failures — raise on mismatch, never silently pass</invariant>
+    <invariant id="INV-4" rule="Rule #29">No hardcoded params — hashes from config, thresholds from YAML</invariant>
+    <invariant id="INV-5" rule="Rule #31">Config changes authorized by security assessment doc</invariant>
+    <invariant id="INV-6">Zero xfails in test suite</invariant>
+  </invariants>
+
+  <!-- ================================================================== -->
+  <!-- EXECUTION ORDER: T1 then T2 (both touch Makefile), T3 and T4 parallel -->
+  <!-- ================================================================== -->
+  <execution-order>
+    <group id="A" parallel="true">T1, T3, T4</group>
+    <group id="B" after="T1">T2</group>
+    <note>T1 and T2 both modify Makefile — T2 runs after T1 to avoid conflicts.
+    T3 and T4 touch independent files, can run with T1.</note>
+  </execution-order>
+
+  <!-- ================================================================== -->
+  <!-- TASK 1: Replace Trivy with Grype for Docker image scanning         -->
+  <!-- ================================================================== -->
+  <task id="T1" priority="P1">
+    <title>Replace Trivy with Grype for Docker image vulnerability scanning</title>
+    <description>
+      Replace Trivy references with Grype for DOCKER IMAGE scanning only.
+      Grype already exists in Makefile for Python SBOM scanning (sbom-scan target).
+      This task extends Grype to cover Docker images and removes Trivy entirely.
+
+      REVIEWER CORRECTION R1: Grype already has sbom-scan target (line 360).
+      Only the Docker image scan targets (scan:, sbom:, install-trivy:) need replacing.
+
+      REVIEWER CORRECTION R2: trivy-critical Makefile target does NOT exist
+      but is called by pr_readiness_check.sh (line 39). This is a pre-existing
+      bug. Create grype-critical target to fix it.
+
+      REVIEWER CORRECTION R9: T2 also modifies Makefile — T2 runs after T1.
+    </description>
+    <files>
+      <file action="read-then-modify">Makefile</file>
+      <file action="read-then-modify">scripts/weekly_security_scan.sh</file>
+      <file action="read-then-modify">scripts/pr_readiness_check.sh</file>
+      <file action="read-then-modify">tests/v2/unit/deployment/test_security_tooling.py</file>
+      <file action="read-then-modify">deployment/CLAUDE.md</file>
+    </files>
+    <tdd-approach>
+      <red>
+        Read ALL 5 files first (Rule #11).
+        Update tests/v2/unit/deployment/test_security_tooling.py:
+        - Rename Trivy assertions to Grype equivalents
+        - Add test_makefile_has_install_grype_target
+        - Add test_makefile_has_grype_critical_target (fixes pre-existing bug)
+        - Add test_weekly_scan_uses_grype (no "trivy" in executable lines)
+        - Add test_grype_version_pinned (version string in install command)
+        - Add test_pr_readiness_calls_grype_critical
+        Keep test_makefile_has_scan_target (scan: target name unchanged)
+        Run: expect RED
+      </red>
+      <green>
+        Makefile:
+        - Replace install-trivy → install-grype (pinned v0.90.0)
+        - Replace scan: to use grype docker: instead of trivy image
+        - Add grype-critical: target (--fail-on critical)
+        - Keep sbom-scan: as-is (already uses Grype)
+        - Update .PHONY
+
+        scripts/weekly_security_scan.sh: trivy image → grype docker:
+        scripts/pr_readiness_check.sh: make trivy-critical → make grype-critical
+        deployment/CLAUDE.md: update scanner references
+      </green>
+      <verify>
+        uv run pytest tests/v2/unit/deployment/test_security_tooling.py -v
+        make test-staging
+      </verify>
+    </tdd-approach>
+    <verification>
+      <command>uv run pytest tests/v2/unit/deployment/test_security_tooling.py -v</command>
+      <command>make test-staging 2>&amp;1 | tail -3</command>
+    </verification>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- TASK 2: Add pip-audit to pre-commit (runs AFTER T1 — shared Makefile) -->
+  <!-- ================================================================== -->
+  <task id="T2" priority="P1" after="T1">
+    <title>Add pip-audit pre-commit hook for CVE scanning</title>
+    <description>
+      Add pip-audit as a local pre-commit hook. Scans installed packages
+      against the OSV database for known CVEs. Runs locally (no CI credits).
+
+      REVIEWER CORRECTION R3: pip-audit must be added to pyproject.toml
+      dev dependencies FIRST. Use language: system. Gate on dependency files
+      (pyproject.toml, uv.lock) to avoid running on every commit.
+
+      REVIEWER CORRECTION R9: Runs after T1 because both modify Makefile.
+    </description>
+    <files>
+      <file action="read-then-modify">pyproject.toml</file>
+      <file action="read-then-modify">.pre-commit-config.yaml</file>
+      <file action="read-then-modify">Makefile</file>
+      <file action="create">tests/v2/unit/deployment/test_pip_audit_hook.py</file>
+    </files>
+    <tdd-approach>
+      <red>
+        Read .pre-commit-config.yaml and pyproject.toml first.
+        Create tests/v2/unit/deployment/test_pip_audit_hook.py:
+        - test_pre_commit_has_pip_audit_hook (yaml.safe_load, find hook id)
+        - test_pip_audit_hook_is_local_system (language: system)
+        - test_pip_audit_hook_uses_uv_run ("uv run pip-audit" in entry)
+        - test_pip_audit_hook_uses_strict ("--strict" in entry)
+        - test_pip_audit_hook_gated_on_dep_files (files: pattern includes pyproject.toml)
+        - test_pip_audit_in_dev_dependencies (tomllib parse pyproject.toml)
+        - test_makefile_has_audit_target ("audit:" in Makefile)
+        Run: expect RED
+      </red>
+      <green>
+        1. Add "pip-audit&gt;=2.7" to pyproject.toml dev dependencies
+        2. Run: uv sync --all-extras
+        3. Add to .pre-commit-config.yaml (after existing local hooks):
+           - repo: local
+             hooks:
+               - id: pip-audit
+                 name: pip-audit CVE scan
+                 entry: uv run pip-audit --strict --desc
+                 language: system
+                 pass_filenames: false
+                 always_run: false
+                 files: '(pyproject\.toml|uv\.lock)$'
+        4. Add audit: target to Makefile
+      </green>
+      <verify>
+        uv run pytest tests/v2/unit/deployment/test_pip_audit_hook.py -v
+        uv run pip-audit --strict --desc 2>&amp;1 | tail -5
+        make test-staging
+      </verify>
+    </tdd-approach>
+    <verification>
+      <command>uv run pytest tests/v2/unit/deployment/test_pip_audit_hook.py -v</command>
+      <command>make test-staging 2>&amp;1 | tail -3</command>
+    </verification>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- TASK 3: SHA-256 hash pinning for HF model weights                  -->
+  <!-- ================================================================== -->
+  <task id="T3" priority="P2">
+    <title>SHA-256 hash pinning for HuggingFace model weight downloads</title>
+    <description>
+      Add hash verification for downloaded model weights. Two distinct mechanisms:
+
+      REVIEWER CORRECTION R4: SAM3 uses from_pretrained() which downloads
+      MULTIPLE sharded safetensors files via HuggingFace Transformers API.
+      Hash pinning a single file does NOT work for SAM3. Instead, pin the
+      HF model revision (commit SHA) which guarantees content integrity.
+
+      VesselFM uses hf_hub_download() for a SINGLE file — SHA-256 pinning
+      works directly here.
+
+      REVIEWER CORRECTION R5: VesselFM adapter has VESSELFM_WEIGHT_SHA256 = None
+      at src/minivess/adapters/vesselfm.py:37. This DISABLES verification.
+      The verify_checksum() call at line 56 always returns True when hash is None.
+      This is the most urgent fix.
+
+      REVIEWER CORRECTION R10: Hash verification belongs in adapter code
+      (already partially implemented), NOT in SkyPilot setup block (Rule #31).
+
+      Strategy:
+      - SAM3: Pin HF model revision (commit SHA) in model profile YAML
+      - VesselFM: Populate VESSELFM_WEIGHT_SHA256 with actual hash
+      - Reuse existing checkpoint_integrity.py compute_checkpoint_sha256()
+    </description>
+    <files>
+      <file action="read">src/minivess/pipeline/checkpoint_integrity.py</file>
+      <file action="read">src/minivess/adapters/vesselfm.py</file>
+      <file action="read">src/minivess/adapters/sam3_backbone.py</file>
+      <file action="read-then-modify">configs/model_profiles/sam3_vanilla.yaml</file>
+      <file action="read-then-modify">configs/model_profiles/sam3_topolora.yaml</file>
+      <file action="read-then-modify">configs/model_profiles/sam3_hybrid.yaml</file>
+      <file action="read-then-modify">src/minivess/adapters/vesselfm.py</file>
+      <file action="create">scripts/verify_model_weights.py</file>
+      <file action="create">tests/v2/unit/adapters/test_model_weight_verification.py</file>
+    </files>
+    <rule31-authorizations>
+      Adding weights.hf_revision to model profile YAMLs — authorized by security assessment.
+      Populating VESSELFM_WEIGHT_SHA256 — authorized (fixing a disabled security check).
+    </rule31-authorizations>
+    <tdd-approach>
+      <red>
+        Read checkpoint_integrity.py, vesselfm.py, sam3_backbone.py FIRST.
+        Create tests/v2/unit/adapters/test_model_weight_verification.py:
+
+        class TestWeightHashVerification:
+          - test_verify_sha256_matches (create file, compute hash, verify)
+          - test_verify_sha256_mismatch_raises (wrong hash → ValueError)
+          - test_verify_sha256_missing_file_raises (FileNotFoundError)
+          - test_verify_sha256_none_returns_computed (first-download path)
+
+        class TestVesselFMWeightHash:
+          - test_vesselfm_weight_sha256_is_not_none:
+            Import VESSELFM_WEIGHT_SHA256 from adapters.vesselfm.
+            Assert it is NOT None (the current None = disabled verification).
+
+        class TestSAM3ModelRevisionPinned:
+          - test_sam3_profiles_have_hf_revision:
+            Load all sam3_*.yaml, assert weights.hf_revision exists and
+            is a 40-char hex string (git commit SHA), not "main" or None.
+
+        class TestVerifyScriptExists:
+          - test_verify_model_weights_script_exists
+          - test_verify_script_imports_checkpoint_integrity (ast.parse)
+
+        Run: expect RED (VESSELFM_WEIGHT_SHA256 is None, hf_revision missing)
+      </red>
+      <green>
+        1. Create scripts/verify_model_weights.py:
+           - verify_model_weight_sha256(path, expected_hash) using
+             compute_checkpoint_sha256() from checkpoint_integrity
+           - CLI entry point for manual verification
+
+        2. Fix src/minivess/adapters/vesselfm.py:
+           - Download VesselFM weight once locally
+           - Compute: python -c "from minivess.pipeline.checkpoint_integrity import compute_checkpoint_sha256; from pathlib import Path; print(compute_checkpoint_sha256(Path('~/.cache/huggingface/.../vesselFM_base.pt').expanduser()))"
+           - Set VESSELFM_WEIGHT_SHA256 to the computed value
+           - If weight file not available locally, set to a placeholder string
+             "POPULATE_AFTER_FIRST_DOWNLOAD" and add test that flags this
+
+        3. Update model profile YAMLs — add weights section:
+           weights:
+             hf_repo: "facebook/sam3-hiera-large"
+             hf_revision: null  # Pin after first verified download
+           For SAM3: hf_revision pins the model commit SHA (not file hash)
+           For VesselFM: weights.sha256 pins the file hash
+
+        4. Do NOT modify SkyPilot YAML setup block (Rule #31, R10).
+           Hash verification happens in adapter load_checkpoint() code.
+      </green>
+      <verify>
+        uv run pytest tests/v2/unit/adapters/test_model_weight_verification.py -v
+        make test-staging
+      </verify>
+    </tdd-approach>
+    <verification>
+      <command>uv run pytest tests/v2/unit/adapters/test_model_weight_verification.py -v</command>
+      <command>make test-staging 2>&amp;1 | tail -3</command>
+    </verification>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- TASK 4: Audit torch.load(weights_only=False) + guard test          -->
+  <!-- ================================================================== -->
+  <task id="T4" priority="P2">
+    <title>Audit torch.load(weights_only=False) — convert where safe, guard the rest</title>
+    <description>
+      Audit all 9 occurrences of weights_only=False across 6 source files.
+      Convert to weights_only=True where safe. Add AST guard test with
+      file/function allowlist for justified exceptions.
+
+      REVIEWER CORRECTION R6: 9 call sites across 6 files, not 6:
+      - checkpoint_utils.py: 2 (load_checkpoint_with_fallback primary + fallback)
+      - checkpoint_averaging.py: 1
+      - model_merging.py: 3
+      - subsampled_ensemble.py: 1
+      - pipeline/post_training_plugins/swag.py: 1
+      - ensemble/swag.py: 1
+
+      REVIEWER CORRECTION R7: Use file:function allowlist, not bare count.
+      Each allowed exception must have a # SECURITY comment.
+
+      REVIEWER CORRECTION R8: Also scan for pickle.load() and pickle.loads()
+      in production code (equally dangerous).
+
+      NOTE: All 9 calls load SELF-PRODUCED checkpoints (not external weights).
+      The adapter files (src/minivess/adapters/) all already use weights_only=True.
+    </description>
+    <files>
+      <file action="read-then-modify">src/minivess/pipeline/checkpoint_utils.py</file>
+      <file action="read-then-modify">src/minivess/pipeline/post_training_plugins/checkpoint_averaging.py</file>
+      <file action="read-then-modify">src/minivess/pipeline/post_training_plugins/model_merging.py</file>
+      <file action="read-then-modify">src/minivess/pipeline/post_training_plugins/subsampled_ensemble.py</file>
+      <file action="read-then-modify">src/minivess/pipeline/post_training_plugins/swag.py</file>
+      <file action="read-then-modify">src/minivess/ensemble/swag.py</file>
+      <file action="create">tests/v2/unit/pipeline/test_torch_load_safety.py</file>
+    </files>
+    <tdd-approach>
+      <red>
+        Read ALL 6 source files first (Rule #11). Understand what each
+        torch.load call loads and what types are in the checkpoint dicts.
+
+        Create tests/v2/unit/pipeline/test_torch_load_safety.py:
+
+        ALLOWLIST = {
+            # file_stem: [function_names] — justified weights_only=False
+            # Each entry must have a # SECURITY comment in source
+        }
+
+        class TestTorchLoadWeightsOnlyAudit:
+          def test_weights_only_false_count_within_allowlist(self):
+            """AST scan src/minivess/ for weights_only=False calls.
+            Assert each is in the ALLOWLIST and has # SECURITY comment."""
+            Use ast.parse() + ast.walk() on all .py files under src/minivess/.
+            Find ast.keyword nodes with arg="weights_only" and
+            value=ast.Constant(value=False).
+            For each: check file + enclosing function is in ALLOWLIST.
+            Fail on any unallowlisted occurrence.
+
+          def test_no_weights_only_false_in_adapters(self):
+            """Adapters load external weights — must use weights_only=True."""
+            AST scan src/minivess/adapters/ only.
+            Assert ZERO weights_only=False calls.
+
+          def test_no_bare_pickle_load_in_production(self):
+            """pickle.load() and pickle.loads() banned in src/."""
+            AST scan for ast.Call where func matches pickle.load/loads.
+            Assert count == 0. (Currently clean — codify the invariant.)
+
+          def test_all_weights_only_false_have_security_comment(self):
+            """Each weights_only=False line must have # SECURITY on same
+            or preceding line."""
+            For each file with allowed exceptions, read source lines.
+            Find line numbers with weights_only=False.
+            Assert nearby line contains "SECURITY".
+
+        class TestCheckpointRoundTrip:
+          def test_standard_checkpoint_loads_with_weights_only_true(self):
+            """Self-produced checkpoint (state_dict + epoch + optimizer)
+            can be loaded with weights_only=True if we add safe_globals."""
+            Create a checkpoint dict with Tensor values, int epoch, float loss.
+            torch.save to tmp_path.
+            torch.load with weights_only=True.
+            Assert all values match.
+
+        Run: expect RED (no SECURITY comments yet, allowlist empty)
+      </red>
+      <green>
+        For each of the 9 call sites:
+
+        1. TRY converting to weights_only=True:
+           - If the checkpoint only contains standard types (Tensor, dict,
+             list, int, float, str): convert directly.
+           - If it contains OrderedDict: add torch.serialization.add_safe_globals()
+
+        2. If conversion FAILS (e.g., checkpoint contains nn.Module instances):
+           - Keep weights_only=False
+           - Add comment: # SECURITY: weights_only=False required — loads
+             [specific reason]. Self-produced checkpoints only.
+
+        3. Add each KEPT exception to ALLOWLIST in the test.
+
+        4. Expected outcome:
+           - checkpoint_utils.py: likely CONVERT (loads state_dicts)
+           - checkpoint_averaging.py: likely CONVERT
+           - model_merging.py: likely CONVERT (3 calls)
+           - subsampled_ensemble.py: likely CONVERT
+           - swag.py (plugin): KEEP (may load full model object)
+           - ensemble/swag.py: TRY CONVERT (nested dicts of tensors)
+      </green>
+      <verify>
+        uv run pytest tests/v2/unit/pipeline/test_torch_load_safety.py -v
+        uv run pytest tests/v2/unit/pipeline/ -v (all pipeline tests)
+        make test-staging
+      </verify>
+    </tdd-approach>
+    <verification>
+      <command>uv run pytest tests/v2/unit/pipeline/test_torch_load_safety.py -v</command>
+      <command>uv run pytest tests/v2/unit/pipeline/ -v 2>&amp;1 | tail -5</command>
+      <command>make test-staging 2>&amp;1 | tail -3</command>
+    </verification>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- FINAL GATE                                                          -->
+  <!-- ================================================================== -->
+  <final-gate>
+    <command>make test-staging</command>
+    <command>make test-prod</command>
+    <command>uv run ruff check src/ tests/</command>
+    <expected>All passed, 0 failed, 0 skipped, 0 xfailed</expected>
+  </final-gate>
+
+</plan>

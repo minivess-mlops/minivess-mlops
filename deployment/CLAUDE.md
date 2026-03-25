@@ -199,10 +199,11 @@ docker compose exec minio mc mb --ignore-existing minio/mlflow-artifacts
 
 ```bash
 make init-volumes        # Fix Docker named volume ownership (run once after first up)
-make scan                # Trivy vulnerability scan on all minivess-* images (CRITICAL+HIGH)
+make scan                # Grype vulnerability scan on all minivess-* images (CRITICAL, --only-fixed)
 make sbom                # Generate CycloneDX SBOM for minivess-base
+make grype-critical      # CRITICAL-only Grype scan (PR readiness gate)
 make seccomp-audit-train # Run train flow with seccomp audit profile (syscall discovery)
-make install-trivy       # Install Trivy scanner to /usr/local/bin
+make install-grype       # Install Grype scanner v0.90.0 to /usr/local/bin
 ```
 
 ## Running Flows
@@ -255,9 +256,10 @@ nvidia-ctk --version
 ## Image Scanning (MLSecOps)
 
 ```bash
-make scan          # CRITICAL+HIGH CVE scan on all built images (--ignore-unfixed)
-make sbom          # CycloneDX SBOM for minivess-base (supply-chain transparency)
-make install-trivy # Install Trivy scanner if not present
+make scan            # Grype CVE scan on all built images (--only-fixed, --fail-on critical)
+make sbom            # CycloneDX SBOM for minivess-base (supply-chain transparency)
+make grype-critical  # CRITICAL-only Grype scan (PR readiness gate)
+make install-grype   # Install Grype scanner v0.90.0 if not present
 ```
 
 ## Seccomp Profiles

@@ -61,6 +61,60 @@ def check_docker_image() -> tuple[bool, str]:
     return False, f"Docker image NOT found: {GAR_IMAGE}. Rebuild and push."
 
 
+def check_docker_image_freshness() -> tuple[bool, str]:
+    """Check if Docker image GIT_COMMIT label matches current git HEAD.
+
+    Uses 'docker buildx imagetools inspect' to read the
+    org.opencontainers.image.revision label from the registry.
+    Falls back gracefully if tools are unavailable.
+
+    See: .claude/metalearning/2026-03-25-stale-docker-image-launch.md
+    """
+    import json
+
+    # Step 1: Get git HEAD
+    git_result = _run(["git", "rev-parse", "HEAD"], timeout=10)
+    if git_result.returncode != 0:
+        return True, "Cannot determine HEAD commit — freshness check skipped"
+    head_commit = git_result.stdout.strip()
+
+    # Step 2: Get image label via docker buildx imagetools inspect
+    imagetools_result = _run(
+        [
+            "docker", "buildx", "imagetools", "inspect",
+            GAR_IMAGE, "--format", "{{json .}}",
+        ],
+        timeout=60,
+    )
+    if imagetools_result.returncode != 0:
+        return True, "Cannot verify image freshness (docker buildx not available) — skipped"
+
+    # Step 3: Parse JSON and extract the revision label (Rule 16: no regex)
+    try:
+        data = json.loads(imagetools_result.stdout)
+        labels = data.get("image", {}).get("config", {}).get("Labels", {})
+        image_commit = labels.get("org.opencontainers.image.revision", "")
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return True, "Cannot parse image metadata — freshness check skipped"
+
+    # Step 4: Compare commits
+    if not image_commit or image_commit == "unknown":
+        return False, (
+            f"Docker image built without GIT_COMMIT (label='unknown'). "
+            f"Rebuild: make build-base-gpu && docker tag minivess-base:latest "
+            f"{GAR_IMAGE} && docker push {GAR_IMAGE}"
+        )
+
+    if image_commit == head_commit:
+        return True, f"Docker image commit matches HEAD: {image_commit[:12]}"
+
+    return False, (
+        f"Docker image STALE: image={image_commit[:12]}, HEAD={head_commit[:12]}. "
+        f"Rebuild: make build-base-gpu && docker tag minivess-base:latest "
+        f"{GAR_IMAGE} && docker push {GAR_IMAGE}"
+    )
+
+
 def check_gcs_bucket() -> tuple[bool, str]:
     """Check if GCS DVC bucket is accessible."""
     result = _run(["gsutil", "ls", GCS_BUCKET + "/"])
@@ -202,25 +256,108 @@ def check_setup_dvc_paths() -> tuple[bool, str]:
     return True, f"Setup DVC paths verified: {dvc_pull_paths or ['path-specific pull']}"
 
 
+def _check_env_value(var: str, value: str) -> tuple[str | None, str | None]:
+    """Validate a single env var value. Returns (error, warning) — at most one set.
+
+    Rule #16: No regex — uses str methods only.
+
+    Returns:
+        (error_msg, None) for hard failures.
+        (None, warning_msg) for soft warnings.
+        (None, None) for valid values.
+    """
+    # Check 1: Unexpanded ${...} placeholder (shell variable not expanded)
+    if "${" in value:
+        return (
+            f"{var} contains unexpanded placeholder: '{value}' "
+            "— shell variable was not expanded",
+            None,
+        )
+
+    # Check 2: REPLACE_WITH_... template (copied from .env.example without editing)
+    if "REPLACE_WITH_" in value.upper():
+        return (
+            f"{var} contains template placeholder: '{value}' "
+            "— replace with actual value",
+            None,
+        )
+
+    # Check 3: Empty value after stripping whitespace
+    if value.strip() == "":
+        return f"{var} is empty — set a value in .env", None
+
+    # Check 4: localhost URI — soft warning for MLFLOW_TRACKING_URI
+    # (valid for local dev, but won't work on SkyPilot cloud VMs)
+    if var == "MLFLOW_TRACKING_URI" and "localhost" in value:
+        return None, (
+            f"{var} uses localhost ({value}) — "
+            "SkyPilot cloud VMs cannot reach localhost. "
+            "Set to Cloud Run URL for GCP launches"
+        )
+
+    return None, None
+
+
 def check_env_vars() -> tuple[bool, str]:
-    """Check required env vars in .env file."""
+    """Check required env vars in .env file — presence AND value quality.
+
+    Detects:
+    - Missing env vars (not set at all)
+    - Unexpanded ${...} placeholders
+    - REPLACE_WITH_... template values from .env.example
+    - Empty values
+    - localhost URIs (soft WARNING — valid for local dev)
+
+    Issue #945: MLflow URI placeholder detection in preflight.
+    Rule #16: No regex — uses str methods only.
+    """
     if not ENV_FILE.exists():
         return False, f".env file not found: {ENV_FILE}. Copy from .env.example"
 
     env_content = ENV_FILE.read_text(encoding="utf-8")
+
+    # Parse env file into a dict: {VAR_NAME: value}
+    env_vars: dict[str, str] = {}
+    for line in env_content.splitlines():
+        # Skip comments and empty lines
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        # Split on first '=' only
+        if "=" not in stripped:
+            continue
+        key, _, val = stripped.partition("=")
+        env_vars[key] = val
+
+    # Phase 1: Check all required vars are PRESENT
     missing: list[str] = []
     for var in REQUIRED_ENV_VARS:
-        # Check for VAR= with non-empty value
-        found = False
-        for line in env_content.splitlines():
-            if line.startswith(f"{var}=") and len(line) > len(f"{var}="):
-                found = True
-                break
-        if not found:
+        if var not in env_vars:
             missing.append(var)
 
     if missing:
         return False, f"Missing env vars in .env: {missing}"
+
+    # Phase 2: Validate VALUES of present vars
+    errors: list[str] = []
+    warnings: list[str] = []
+    for var in REQUIRED_ENV_VARS:
+        value = env_vars[var]
+        error, warning = _check_env_value(var, value)
+        if error is not None:
+            errors.append(error)
+        if warning is not None:
+            warnings.append(warning)
+
+    if errors:
+        return False, f"Env var issues: {'; '.join(errors)}"
+
+    if warnings:
+        return True, (
+            f"All required env vars set (with warnings): "
+            f"{'; '.join(warnings)}"
+        )
+
     return True, f"All required env vars set: {REQUIRED_ENV_VARS}"
 
 
@@ -264,6 +401,75 @@ def check_controller_cloud() -> tuple[bool, str]:
             f"Fix: set 'cloud: {job_cloud}' in ~/.sky/config.yaml jobs.controller.resources"
         )
     return True, f"Controller and jobs both on {job_cloud}"
+
+
+def check_controller_health() -> tuple[bool, str]:
+    """Check SkyPilot jobs controller state — detect INIT/STOPPED/ERROR.
+
+    Runs ``sky status`` and parses for controller cluster lines. Controller
+    clusters have names starting with ``sky-jobs-controller``.
+
+    State interpretation:
+    - UP: healthy, ready to accept jobs.
+    - INIT: initializing — may resolve, warn but do not block.
+    - STOPPED / ERROR: unhealthy — block launch, tell user to fix.
+    - No controller found: first launch — will be created automatically.
+    - sky not installed (returncode 127): skip gracefully.
+
+    Issue #957: Cloud robustness — controller health preflight check.
+    Rule #16: No regex — uses str.split() and str methods only.
+    """
+    sky_bin = REPO_ROOT / ".venv" / "bin" / "sky"
+    result = _run([str(sky_bin), "status"], timeout=30)
+
+    # sky not installed or not available
+    if result.returncode != 0:
+        return True, "sky status unavailable — controller health check skipped"
+
+    # Parse output line by line looking for controller cluster
+    stdout = result.stdout.strip()
+    if not stdout:
+        return True, "No SkyPilot clusters — controller will be created on first launch"
+
+    for line in stdout.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        cluster_name = parts[0]
+        if not cluster_name.startswith("sky-jobs-controller"):
+            continue
+
+        # Find the status field — look for known states in remaining parts
+        known_states = {"UP", "INIT", "STOPPED", "ERROR"}
+        controller_state = ""
+        for part in parts[1:]:
+            if part in known_states:
+                controller_state = part
+                break
+
+        if controller_state == "UP":
+            return True, f"Controller '{cluster_name}' is UP"
+
+        if controller_state == "INIT":
+            return True, (
+                f"Controller '{cluster_name}' is INIT — "
+                "may still be initializing; proceed with caution"
+            )
+
+        if controller_state in ("STOPPED", "ERROR"):
+            return False, (
+                f"Controller '{cluster_name}' is {controller_state}. "
+                f"Fix: sky start {cluster_name} (or sky down {cluster_name} to recreate)"
+            )
+
+        # Unknown state — warn but do not block
+        return True, (
+            f"Controller '{cluster_name}' has unknown state "
+            f"(parsed fields: {parts}) — check manually"
+        )
+
+    # No controller cluster found in output
+    return True, "No controller cluster in sky status — will be created on first launch"
 
 
 def check_skypilot_yaml() -> tuple[bool, str]:
@@ -402,6 +608,75 @@ def check_gcp_cpu_quota() -> tuple[bool, str]:
     return True, "CPU quota metric not found — check manually"
 
 
+def check_gcp_gpu_quota() -> tuple[bool, str]:
+    """Check GCP GPU quota is sufficient for L4 jobs.
+
+    Detects the GPUS_ALL_REGIONS=1 bottleneck before launch. Without GPU
+    quota, SkyPilot will fail with a cryptic "no available resources" error.
+
+    Reads min_gpu_quota from configs/cloud/yaml_contract.yaml (Rule #29).
+    Issue #943: GPU quota preflight check.
+    """
+    import json
+
+    # Read threshold from contract — not hardcoded (Rule #29)
+    contract_path = REPO_ROOT / "configs" / "cloud" / "yaml_contract.yaml"
+    contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    min_gpu_quota = contract.get("min_gpu_quota", 1)
+
+    # Query GPU quota in europe-west4 (L4 availability region)
+    result = _run(
+        [
+            "gcloud",
+            "compute",
+            "regions",
+            "describe",
+            "europe-west4",
+            "--format=json",
+            "--project=minivess-mlops",
+        ],
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return True, "gcloud not available — GPU quota check skipped"
+
+    region_info = json.loads(result.stdout)
+    quotas = region_info.get("quotas", [])
+
+    # Look for NVIDIA_L4_GPUS metric
+    for q in quotas:
+        if q.get("metric") == "NVIDIA_L4_GPUS":
+            limit = q.get("limit", 0)
+            usage = q.get("usage", 0)
+            available = limit - usage
+
+            if limit == 0:
+                return False, (
+                    "NVIDIA_L4_GPUS quota is 0 in europe-west4 — "
+                    "request GPU quota increase via GCP console"
+                )
+
+            if available < min_gpu_quota:
+                return False, (
+                    f"NVIDIA_L4_GPUS quota insufficient: {available:.0f} available "
+                    f"({usage:.0f}/{limit:.0f}), need >= {min_gpu_quota}"
+                )
+
+            # Warn if quota is low relative to factorial job count (~34 concurrent)
+            if limit < 4:
+                return True, (
+                    f"WARNING: NVIDIA_L4_GPUS quota low: {available:.0f} available "
+                    f"({usage:.0f}/{limit:.0f}) — factorial jobs will queue heavily"
+                )
+
+            return True, (
+                f"NVIDIA_L4_GPUS quota OK: {available:.0f} available "
+                f"({usage:.0f}/{limit:.0f})"
+            )
+
+    return True, "NVIDIA_L4_GPUS metric not found in europe-west4 — check manually"
+
+
 def check_cost_estimate() -> tuple[bool, str]:
     """Estimate max cost and compare against budget guard rails.
 
@@ -457,6 +732,7 @@ def main() -> int:
     """Run all preflight checks. Returns 0 on success, 1 on failure."""
     checks = [
         ("Docker image on GAR", check_docker_image),
+        ("Docker image freshness", check_docker_image_freshness),
         ("GCS DVC bucket access", check_gcs_bucket),
         ("Checkpoint bucket access", check_checkpoint_bucket),
         ("DVC data on GCS", check_dvc_data_on_gcs),
@@ -465,9 +741,11 @@ def main() -> int:
         ("Required env vars", check_env_vars),
         ("SkyPilot GCP backend", check_skypilot_gcp),
         ("Controller cloud matches jobs", check_controller_cloud),
+        ("Controller health", check_controller_health),
         ("SkyPilot YAML validity", check_skypilot_yaml),
         ("YAML contract compliance", check_yaml_contract),
         ("GCP CPU quota", check_gcp_cpu_quota),
+        ("GCP GPU quota", check_gcp_gpu_quota),
         ("Cost estimate", check_cost_estimate),
     ]
 

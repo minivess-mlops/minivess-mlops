@@ -34,9 +34,9 @@ fi
 echo "[4/4] Test collection gate (import check)..."
 uv run pytest --collect-only -q tests/unit/ tests/v2/unit/
 
-echo "[5/5] Trivy CRITICAL scan..."
+echo "[5/5] Grype CRITICAL scan..."
 if docker images --format "{{.Repository}}" 2>/dev/null | grep -q "^minivess-"; then
-  make trivy-critical
+  make grype-critical
 else
   echo "  SKIPPED — no minivess-* images built yet (run: docker compose build)"
 fi

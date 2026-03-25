@@ -160,6 +160,74 @@ class TestCheckSam3VramInference:
             check_sam3_vram(mode="inference")
 
 
+class TestCheckSam3VramBatchSize:
+    """check_sam3_vram with batch_size parameter (Task 2.4)."""
+
+    def test_vram_check_batch_size_1_passes_on_l4(self) -> None:
+        """L4 (24 GB) passes at batch_size=1 for SAM3 TopoLoRA."""
+        from minivess.adapters.sam3_vram_check import check_sam3_vram
+
+        hw = _make_hw(gpu_vram_mb=24576, gpu_name="NVIDIA L4")
+        with patch(
+            "minivess.adapters.sam3_vram_check.detect_hardware",
+            return_value=hw,
+        ):
+            # Should not raise — 24 GB > 16 GB base threshold, BS=1 fits
+            check_sam3_vram(variant="sam3_topolora", mode="training", batch_size=1)
+
+    def test_vram_check_batch_size_2_raises_on_limited_gpu(self) -> None:
+        """SAM3 TopoLoRA at BS=2 (~21.9 GB) raises on a 20 GB GPU."""
+        from minivess.adapters.sam3_vram_check import check_sam3_vram
+
+        # 20 GB GPU: passes base 16 GB threshold but fails batch-size check
+        hw = _make_hw(gpu_vram_mb=20480, gpu_name="Test 20GB GPU")
+        with (
+            patch(
+                "minivess.adapters.sam3_vram_check.detect_hardware",
+                return_value=hw,
+            ),
+            pytest.raises(RuntimeError, match="batch_size=2"),
+        ):
+            check_sam3_vram(variant="sam3_topolora", mode="training", batch_size=2)
+
+    def test_vram_check_backward_compatible(self) -> None:
+        """Calling check_sam3_vram() without batch_size still works (default=1)."""
+        from minivess.adapters.sam3_vram_check import check_sam3_vram
+
+        hw = _make_hw(gpu_vram_mb=24576, gpu_name="NVIDIA L4")
+        with patch(
+            "minivess.adapters.sam3_vram_check.detect_hardware",
+            return_value=hw,
+        ):
+            # Default batch_size=1 — should not raise on 24 GB GPU
+            check_sam3_vram(variant="sam3_topolora", mode="training")
+
+    def test_batch_size_ignored_for_inference_mode(self) -> None:
+        """batch_size parameter has no effect in inference mode."""
+        from minivess.adapters.sam3_vram_check import check_sam3_vram
+
+        hw = _make_hw(gpu_vram_mb=8192, gpu_name="RTX 2070 Super")
+        with patch(
+            "minivess.adapters.sam3_vram_check.detect_hardware",
+            return_value=hw,
+        ):
+            # Inference only needs 6 GB — 8 GB passes regardless of batch_size
+            check_sam3_vram(mode="inference", batch_size=4)
+
+    def test_batch_size_1_same_as_no_batch_size(self) -> None:
+        """batch_size=1 produces the same result as omitting batch_size."""
+        from minivess.adapters.sam3_vram_check import check_sam3_vram
+
+        hw = _make_hw(gpu_vram_mb=24576, gpu_name="NVIDIA L4")
+        with patch(
+            "minivess.adapters.sam3_vram_check.detect_hardware",
+            return_value=hw,
+        ):
+            # Both should pass without raising
+            check_sam3_vram(variant="sam3_topolora", mode="training")
+            check_sam3_vram(variant="sam3_topolora", mode="training", batch_size=1)
+
+
 class TestCheckSam3VramEdgeCases:
     """Edge cases and invalid inputs."""
 

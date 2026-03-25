@@ -139,6 +139,39 @@ def log_timing_jsonl_artifact(
     logger.info("Logged timing JSONL artifact (%d bytes)", len(timing_jsonl))
 
 
+def is_heartbeat_stale(
+    heartbeat: dict[str, str],
+    threshold_minutes: int = 30,
+) -> bool:
+    """Detect zombie training runs by checking heartbeat staleness.
+
+    A training run emits periodic heartbeat dicts with an ISO 8601 timestamp.
+    If the most recent heartbeat is older than *threshold_minutes*, the run
+    is considered a zombie (stale).
+
+    Parameters
+    ----------
+    heartbeat:
+        Dict with at least a ``"timestamp"`` key containing an ISO 8601 string
+        (UTC).
+    threshold_minutes:
+        Number of minutes after which a heartbeat is considered stale.
+
+    Returns
+    -------
+    bool
+        ``True`` when the heartbeat is stale (older than the threshold).
+    """
+    from datetime import datetime, timedelta, timezone
+
+    timestamp = datetime.fromisoformat(heartbeat["timestamp"])
+    # Ensure the parsed timestamp is timezone-aware (UTC)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
+    return timestamp < cutoff
+
+
 def _validate_training_env() -> None:
     """Validate required environment variables for training flow.
 
@@ -399,8 +432,10 @@ def train_one_fold_task(
     patch_size: tuple[int, int, int] = (  # type: ignore[assignment]
         default_patch if _patch_raw is None else tuple(_patch_raw)
     )
-    if _is_sam3:
-        batch_size = min(batch_size, 1)
+    # batch_size is now config-driven via model_overrides in factorial YAML
+    # (see configs/factorial/debug.yaml) and passed as BATCH_SIZE env var.
+    # No more hardcoded SAM3 override — the factorial launcher handles it.
+    gradient_accumulation_steps: int = config.get("gradient_accumulation_steps", 1)
     data_dir: Path = Path(config.get("data_dir", "data/raw"))
     num_workers: int = 0 if debug else config.get("num_workers", 4)
 
@@ -446,6 +481,7 @@ def train_one_fold_task(
         max_epochs=max_epochs,
         num_folds=num_folds,
         batch_size=batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
         warmup_epochs=0 if debug else 5,
         early_stopping_patience=1 if debug else 20,
         val_interval=val_interval,
@@ -1186,9 +1222,7 @@ def _run_swag_post_training(
         default_patch = (64, 64, 16)
     _patch_raw = config.get("patch_size")
     patch_size = default_patch if _patch_raw is None else tuple(_patch_raw)
-    batch_size = (
-        min(config.get("batch_size", 2), 1) if _is_sam3 else config.get("batch_size", 2)
-    )
+    batch_size = config.get("batch_size", 2)
 
     data_config = DataConfig(
         dataset_name=config.get("dataset_name", "minivess"),
@@ -1255,6 +1289,7 @@ def training_flow(
     num_folds: int = 3,
     max_epochs: int = 100,
     batch_size: int = 2,
+    gradient_accumulation_steps: int = 1,
     upstream_data_run_id: str | None = None,
     config_dict: dict[str, Any] | None = None,
     # Factorial experiment parameters
@@ -1387,6 +1422,7 @@ def training_flow(
         "max_epochs": max_epochs,
         "num_folds": num_folds,
         "batch_size": batch_size,
+        "gradient_accumulation_steps": gradient_accumulation_steps,
         "experiment_name": experiment_name,
         "tracking_uri": tracking_uri,
         # Factorial experiment parameters (Glitch #8/#9/#10/#12 fix)
@@ -1517,6 +1553,12 @@ if __name__ == "__main__":
             "--batch-size", type=int, default=int(os.environ.get("BATCH_SIZE", "2"))
         )
         parser.add_argument(
+            "--grad-accum-steps",
+            type=int,
+            default=int(os.environ.get("GRAD_ACCUM_STEPS", "1")),
+            help="Gradient accumulation steps (effective_bs = batch_size * grad_accum)",
+        )
+        parser.add_argument(
             "--experiment-name",
             default=os.environ.get("EXPERIMENT_NAME", "minivess_training"),
         )
@@ -1576,6 +1618,7 @@ if __name__ == "__main__":
             max_epochs=args.max_epochs,
             num_folds=1 if fold_id is not None else args.num_folds,
             batch_size=args.batch_size,
+            gradient_accumulation_steps=args.grad_accum_steps,
             experiment_name=args.experiment_name,
             debug=args.debug,
             fold_id=fold_id,

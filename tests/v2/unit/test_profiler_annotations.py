@@ -25,12 +25,14 @@ TRAINER_PY = (
 )
 
 # Expected region names per the execution plan (RC1, RC13)
+# Updated for gradient accumulation refactor: "backward_optimizer" split into
+# "backward" + "optimizer_step", "zero_grad" is now part of optimizer_step block.
 EXPECTED_TRAIN_REGIONS = {
-    "zero_grad",
     "data_to_device",
     "forward",
     "loss_compute",
-    "backward_optimizer",
+    "backward",
+    "optimizer_step",
     "metrics_update",
 }
 

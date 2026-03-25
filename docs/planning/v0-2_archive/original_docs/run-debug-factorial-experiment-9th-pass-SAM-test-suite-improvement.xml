@@ -1,0 +1,1141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Cloud Robustness TDD Plan — 23 Issues (#942–#964)
+  ====================================================
+  Date: 2026-03-25
+  Branch: test/run-debug-9th-pass
+  Executor: /self-learning-iterative-coder (RED→GREEN→VERIFY→FIX)
+  Source: 9th pass deep exploration + dual reviewer agent critique
+
+  REVIEWER CORRECTIONS APPLIED (see reviewer agent reports):
+  - Tasks 1.2 and 1.4 made sequential (both touch preflight_gcp.py)
+  - yaml_contract.yaml mlflow_artifact_bucket = Rule #31 STOP POINT
+  - Heartbeat tests use ast.parse(), marked @pytest.mark.model_loading
+  - SkyPilot version check BEFORE any YAML modification
+  - str.splitlines() not str.split() for YAML setup block parsing
+  - All xfail removed, replaced with pytest.skip (Rule #2 + metalearning)
+  - str.isidentifier() replaced with POSIX env var check
+  - test_design_docs.py → test_deployment_docs.py path fix
+  - model_overrides added to factor consistency comparison
+  - Condition name 63-char Kubernetes limit added
+  - Behavioral grep collision tests (not just source inspection)
+  - GPU quota threshold from yaml_contract.yaml, not hardcoded
+  - Localhost URI = True+warning, not fail
+-->
+<plan
+  name="cloud-robustness-23-issues"
+  version="2.0-reviewer-corrected"
+  branch="test/run-debug-9th-pass"
+  executor="/self-learning-iterative-coder"
+  total-issues="23"
+  phases="3">
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       DESIGN INVARIANTS — enforced in every task
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <invariants>
+    <invariant id="INV-1" rule="CLAUDE.md Rule #2">
+      TDD: Write failing test FIRST, then implement. For pure regression guards
+      (factor parity tests where configs are already correct), RED means the test
+      file does not yet exist. Document explicitly when RED→GREEN is immediate.
+    </invariant>
+    <invariant id="INV-2" rule="CLAUDE.md Rule #16">
+      BANNED: import re, regex patterns for structured data.
+      YAML → yaml.safe_load(). Python source → ast.parse()/ast.walk().
+      JSON → json.loads(). String splitting → str.split(), str.splitlines(),
+      str.partition(). YAML setup block → str.splitlines() then per-line str.split().
+    </invariant>
+    <invariant id="INV-3" rule="CLAUDE.md Rule #25">
+      Loud failures. NEVER return {}, [], None silently.
+      Always raise ValueError/RuntimeError or logger.error() on invalid input.
+    </invariant>
+    <invariant id="INV-4" rule="CLAUDE.md Rule #29">
+      ZERO hardcoded numeric parameters. Thresholds from yaml_contract.yaml
+      or config. Tests assert against config defaults, never magic numbers.
+    </invariant>
+    <invariant id="INV-5" rule="CLAUDE.md Rule #31">
+      STOP POINT: Never modify declarative configs (YAML, TOML) without
+      explicit user authorization. If a task requires a config change,
+      verify the issue number authorizes it, then note "Authorized by #NNN."
+    </invariant>
+    <invariant id="INV-6" rule="metalearning/2026-03-25-xfail-dismissal">
+      ZERO xfails. If a test cannot be implemented without user authorization,
+      use pytest.skip("Blocked: reason") not @pytest.mark.xfail.
+      An xfail that will never pass is not TDD — it is a disabled test.
+    </invariant>
+    <invariant id="INV-7" rule="CLAUDE.md Rule #8">
+      from __future__ import annotations at top of every Python file.
+    </invariant>
+  </invariants>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PRE-EXECUTION BASELINE CHECK
+       Run BEFORE any task. Save outputs for comparison.
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <pre-execution>
+    <command>make test-staging 2>&amp;1 | tail -3</command>
+    <command>make test-prod 2>&amp;1 | tail -3</command>
+    <expected>6514 passed, 0 failed, 0 skipped, 0 xfailed</expected>
+    <note>Do not begin Phase 1 unless baseline is clean.</note>
+  </pre-execution>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PHASE 1: P0 GUARD TESTS (sequential — two tasks touch preflight_gcp.py)
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <phase id="1" name="P0 Guard Tests" execution="sequential">
+    <description>
+      Four P0 tests that catch failures before launch. All must pass before
+      Phase 2 begins. Tasks 1.1 and 1.3 run first (independent files).
+      Tasks 1.2 and 1.4 MUST be sequential: both touch preflight_gcp.py.
+      Order: 1.1 parallel with 1.3 → then 1.2 → then 1.4.
+    </description>
+    <execution-order>
+      <group id="A" parallel="true">1.1, 1.3</group>
+      <group id="B" parallel="false" after="A">1.2</group>
+      <group id="C" parallel="false" after="B">1.4</group>
+    </execution-order>
+
+    <task id="1.1" issue="#942" priority="P0">
+      <title>Debug=Production factor consistency guard</title>
+      <description>
+        Guard test ensuring debug.yaml and paper_full.yaml have IDENTICAL
+        factors, model_overrides, and zero_shot_baselines. Only fixed.*
+        parameters may differ. This is a REGRESSION GUARD — configs are
+        currently in sync, so RED means "test file doesn't exist yet."
+        The test goes GREEN immediately because configs are already correct.
+        Document this explicitly in the test module docstring.
+
+        REVIEWER CORRECTION: model_overrides MUST be in the comparison
+        (not just training/post_training/analysis factors). A mismatch in
+        model_overrides means debug runs with different batch sizes than production.
+
+        REVIEWER CORRECTION: Use sorted() equality for list comparison, not
+        set() — ordering matters for deterministic condition-name generation.
+      </description>
+      <files>
+        <file action="create">tests/v2/unit/config/test_debug_production_factor_consistency.py</file>
+        <file action="read">configs/factorial/debug.yaml</file>
+        <file action="read">configs/factorial/paper_full.yaml</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Test file does not exist → collection error.
+          Run: uv run pytest tests/v2/unit/config/test_debug_production_factor_consistency.py
+          Expected: "no tests ran" or import error.
+        </red>
+        <green>
+          Create test file with 6 test classes:
+
+          COMPARED_PATHS = [
+            "factors.training.model_family",
+            "factors.training.loss_name",
+            "factors.training.aux_calibration",
+            "factors.post_training.method",
+            "factors.post_training.recalibration",
+            "factors.analysis.ensemble_strategy",
+            "model_overrides",           # REQUIRED: batch_size consistency
+            "zero_shot_baselines",       # REQUIRED: baseline consistency
+          ]
+
+          ALLOWED_TO_DIFFER = [
+            "fixed.max_epochs",
+            "fixed.num_folds",
+            "fixed.max_train_volumes",
+            "fixed.max_val_volumes",
+            "debug",                     # Only debug.yaml has debug: true
+            "experiment_name",           # Different names are expected
+            "description",
+            "splits_file",               # debug uses debug_half_1fold.json
+          ]
+
+          Tests:
+          - test_factors_identical_[param] — parametrized over COMPARED_PATHS
+            Use sorted() for list comparison (order matters for condition names)
+          - test_model_overrides_identical — compare full model_overrides dict
+          - test_zero_shot_baselines_identical — compare full list
+          - test_debug_flag_only_in_debug — debug.yaml has debug: true,
+            paper_full.yaml has no debug key or debug: false
+          - test_paper_has_no_data_limits — paper_full.yaml has no
+            max_train_volumes / max_val_volumes in fixed section
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/config/test_debug_production_factor_consistency.py -v
+          Expected: all PASS, 0 xfail, 0 skip
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/config/test_debug_production_factor_consistency.py -v 2>&amp;1 | tail -15</command>
+        <command>make test-staging 2>&amp;1 | tail -3</command>
+      </verification>
+    </task>
+
+    <task id="1.2" issue="#943" priority="P0" after="1.1,1.3">
+      <title>GPU quota preflight check (touches preflight_gcp.py — runs AFTER 1.4)</title>
+      <description>
+        Add check_gcp_gpu_quota() to scripts/preflight_gcp.py. Must run after
+        task 1.4 to avoid merge conflicts on the same file.
+
+        REVIEWER CORRECTION: GPU type string "NVIDIA_L4_GPUS" must appear
+        in the implementation — add a source-text assertion in the test.
+
+        REVIEWER CORRECTION: Minimum threshold must come from yaml_contract.yaml
+        (new field: min_gpu_quota: 1), not hardcoded. If field absent → raise
+        KeyError, not default to 1.
+
+        REVIEWER CORRECTION: Mocked tests must exercise quota-insufficient path
+        (quota=0 or quota &lt; job_count) returning (False, helpful_message).
+      </description>
+      <files>
+        <file action="modify">scripts/preflight_gcp.py</file>
+        <file action="modify">configs/cloud/yaml_contract.yaml</file>
+        <file action="modify">tests/v2/unit/config/test_preflight_quota.py</file>
+      </files>
+      <rule31-authorization>
+        Adding min_gpu_quota field to yaml_contract.yaml is authorized by issue #943.
+        This adds a new field — it does not change existing values.
+      </rule31-authorization>
+      <tdd-approach>
+        <red>
+          Add test class TestGpuQuotaPreflight to test_preflight_quota.py:
+          - test_gpu_quota_function_exists (ast.parse, checks function name)
+          - test_gpu_quota_wired_in_checks_list (linear scan of checks = [...])
+          - test_gpu_quota_checks_l4_string (assert "NVIDIA_L4_GPUS" in source)
+          - test_gpu_quota_passes_when_quota_sufficient (mock _run returns json
+            with L4 quota limit=8, usage=2 → (True, msg))
+          - test_gpu_quota_warns_when_quota_below_job_count (quota=1, 34 jobs
+            → (True, "WARNING" in msg))
+          - test_gpu_quota_fails_when_quota_zero (quota=0 → (False, msg))
+          - test_gpu_quota_graceful_when_gcloud_missing (_run returncode=127
+            → (True, "skipped" in msg))
+          Run: expect FAIL (function missing)
+        </red>
+        <green>
+          1. Add min_gpu_quota: 1 to yaml_contract.yaml (authorized by #943)
+          2. Implement check_gcp_gpu_quota() in preflight_gcp.py:
+             - Reads yaml_contract.yaml for min_gpu_quota (no hardcoded 1)
+             - Runs: gcloud compute regions describe europe-west4 --format=json
+             - Parses json.loads() response for "NVIDIA_L4_GPUS" quota
+             - Returns (True, warning_msg) if quota &lt; job_count (warn, not block)
+             - Returns (False, fail_msg) if quota == 0
+             - Returns (True, skip_msg) if gcloud unavailable
+          3. Wire into checks = [...] after check_docker_image_freshness
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/config/test_preflight_quota.py -v
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/config/test_preflight_quota.py -v 2>&amp;1 | tail -15</command>
+        <command>uv run python scripts/preflight_gcp.py 2>&amp;1 | grep -E "GPU quota"</command>
+        <command>make test-staging 2>&amp;1 | tail -3</command>
+      </verification>
+    </task>
+
+    <task id="1.3" issue="#944" priority="P0" parallel-with="1.1">
+      <title>Region injection YAML validity test</title>
+      <description>
+        Extend tests/v2/unit/cloud/test_region_injection.py with contract
+        enforcement tests. Read existing tests first to avoid duplication.
+
+        REVIEWER CORRECTION: test_generated_yaml_preserves_job_recovery must
+        check content["resources"]["job_recovery"], not top-level "job_recovery".
+
+        REVIEWER CORRECTION: test_no_t4_in_ordered must check T4 is not a
+        substring of any accelerator name (e.g., "nvidia-tesla-t4-ultra").
+
+        REVIEWER CORRECTION: test_ordered_block_gpus_in_contract_allowlist
+        must also verify that all allowlisted GPUs appear in ordered: block
+        (completeness, not just correctness).
+
+        REVIEWER NOTE: test_preserves_non_resource_keys already exists —
+        verify before writing test_generated_yaml_preserves_file_mounts.
+      </description>
+      <files>
+        <file action="read">tests/v2/unit/cloud/test_region_injection.py</file>
+        <file action="modify">tests/v2/unit/cloud/test_region_injection.py</file>
+        <file action="read">src/minivess/cloud/region_injection.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Add TestRegionInjectionContractEnforcement class with:
+          - test_generated_yaml_preserves_job_recovery — checks
+            result["resources"]["job_recovery"] key present
+          - test_no_t4_or_banned_in_ordered — no accelerator name contains
+            "T4", "V100", "K80", "P100", "P4", "A100" as substrings
+          - test_ordered_gpu_completeness — every GPU in contract allowlist
+            appears in ordered: block (reads yaml_contract.yaml)
+          - test_required_keys_in_generated_yaml — verify "name", "resources",
+            "file_mounts", "setup", "run" all present
+          Run: expect some FAIL (new assertions against current behavior)
+        </red>
+        <green>
+          Fix any region_injection.py gaps identified by RED failures.
+          If no gaps → tests go GREEN immediately (regression guards).
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/cloud/test_region_injection.py -v
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/cloud/test_region_injection.py -v 2>&amp;1 | tail -15</command>
+        <command>make test-staging 2>&amp;1 | tail -3</command>
+      </verification>
+    </task>
+
+    <task id="1.4" issue="#945" priority="P0" after="1.2">
+      <title>MLflow URI placeholder detection in preflight (touches preflight_gcp.py — runs AFTER 1.2)</title>
+      <description>
+        Extend check_env_vars() in preflight_gcp.py to detect:
+        1. Unexpanded ${...} placeholders — hard FAIL
+        2. REPLACE_WITH_... placeholders — hard FAIL
+        3. Empty string values for required vars — hard FAIL
+        4. localhost URIs for MLFLOW_TRACKING_URI — soft WARN (True + warning)
+
+        REVIEWER CORRECTION: localhost is a warning (True, warning_msg), not fail.
+        Cloud Run dev environments may legitimately tunnel via localhost.
+
+        REVIEWER CORRECTION: test_replace_with_placeholder_rejected must cover
+        MLFLOW_TRACKING_URI=REPLACE_WITH_YOUR_URI, not just HF_TOKEN.
+
+        REVIEWER CORRECTION: Add test for partial placeholder:
+        MLFLOW_TRACKING_URI=http://REPLACE_WITH_YOUR_HOST:5000
+      </description>
+      <files>
+        <file action="modify">scripts/preflight_gcp.py</file>
+        <file action="create">tests/v2/unit/deployment/test_preflight_env_vars.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Create test_preflight_env_vars.py with TestEnvVarValidation class:
+          - test_unexpanded_dollar_placeholder_fails (HF_TOKEN=${HF_TOKEN} → False)
+          - test_replace_with_placeholder_fails_for_mlflow
+            (MLFLOW_TRACKING_URI=REPLACE_WITH_YOUR_URI → False)
+          - test_replace_with_placeholder_fails_for_hf_token
+            (HF_TOKEN=REPLACE_WITH_YOUR_TOKEN → False)
+          - test_partial_placeholder_fails
+            (MLFLOW_TRACKING_URI=http://REPLACE_WITH_YOUR_HOST:5000 → False)
+          - test_localhost_uri_returns_warning_not_fail
+            (MLFLOW_TRACKING_URI=http://localhost:5000 → True with "localhost" in msg)
+          - test_valid_cloud_run_uri_passes
+            (MLFLOW_TRACKING_URI=https://mlflow-xxx.run.app → True)
+          - test_empty_required_var_fails (MLFLOW_TRACKING_URI= → False)
+          Run: expect FAIL (logic not yet extended)
+        </red>
+        <green>
+          Extend check_env_vars() in preflight_gcp.py:
+          Use str.startswith("${") and "REPLACE_WITH_" in value.upper()
+          for placeholder detection — no regex (Rule #16).
+          localhost: use str host comparison after urlsplit() or str.split("//")[1].split(":")[0].
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/deployment/test_preflight_env_vars.py -v
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/deployment/test_preflight_env_vars.py -v 2>&amp;1 | tail -15</command>
+        <command>uv run python scripts/preflight_gcp.py 2>&amp;1 | grep -E "env vars"</command>
+        <command>make test-staging 2>&amp;1 | tail -3</command>
+      </verification>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PHASE 1 GATE — must pass before Phase 2
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <phase-gate id="1-to-2">
+    <command>make test-staging 2>&amp;1 | tail -3</command>
+    <expected>all passed, 0 failed, 0 skipped, 0 xfailed</expected>
+    <command>make test-prod 2>&amp;1 | tail -3</command>
+    <expected>all passed, 0 failed, 0 skipped, 0 xfailed</expected>
+  </phase-gate>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PHASE 2: P1 HIGH-VALUE TASKS (grouped by file dependencies)
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <phase id="2" name="P1 High-Value Fixes" execution="grouped">
+    <description>
+      P1 tasks grouped by shared file dependencies. Groups with no shared
+      files can run in parallel. Groups sharing files must be sequential.
+      Execution order:
+        Step 4: Groups 2.A, 2.D, 2.E, 2.F in parallel
+        Step 5: Groups 2.B, 2.C in parallel (after Step 4 commits)
+    </description>
+
+    <!-- ── Group 2.A: train_factorial.yaml changes (#946, #948, #953, #955, #956) ─ -->
+    <task id="2.A" issues="#946,#948,#953,#955,#956" priority="P1">
+      <title>SkyPilot YAML hardening — all train_factorial.yaml changes batched</title>
+      <description>
+        Batch all train_factorial.yaml modifications into ONE task to prevent
+        merge conflicts. Changes authorized by issues #946, #948, #953, #955, #956:
+
+        1. (#946) Remove || true from HF downloads, add retry loops
+        2. (#948) Add retry logic for DVC pull and MLflow connectivity check
+        3. (#953) Wrap dvc pull, HF download, MLflow check with timeout
+        4. (#955) Add job_recovery.strategy: EAGER_NEXT_REGION explicitly
+        5. (#956) Add recover_on_exit_codes: [33, 34] to job_recovery
+
+        REVIEWER CORRECTION (critical): Before modifying YAML for #955/#956,
+        verify current SkyPilot version supports these fields:
+        uv run python -c "import sky; print(sky.__version__)"
+        Check SkyPilot changelog for job_recovery.strategy and recover_on_exit_codes.
+        If NOT supported → skip those two changes and report to user.
+
+        REVIEWER CORRECTION: str.splitlines() then per-line str.split() for
+        setup block parsing — NOT str.split() directly on the whole string.
+
+        REVIEWER CORRECTION: "timeout" check must verify the COMMAND token
+        is "timeout", not just that the word appears in the line.
+        Use: line_parts = line.strip().split() and line_parts[0] == "timeout"
+
+        REVIEWER CORRECTION: No xfail. If a change is blocked by Rule #31
+        and the issue does not authorize it, use pytest.skip() not xfail.
+
+        EXIT CODE CONVENTION (for #956):
+          33 = CUDA_INIT_FAILURE (transient, recover)
+          34 = NETWORK_TIMEOUT (transient, recover)
+          35 = CHECKPOINT_CORRUPT (not transient, do NOT recover)
+          137 = OOM/SIGKILL (NOT in recover_on_exit_codes)
+      </description>
+      <files>
+        <file action="modify">deployment/skypilot/train_factorial.yaml</file>
+        <file action="create">tests/v2/unit/deployment/test_skypilot_yaml_hardening.py</file>
+      </files>
+      <rule31-authorizations>
+        #946: Remove || true from HF commands — authorized
+        #948: Add DVC/HF retry loops — authorized
+        #953: Add timeout guards — authorized
+        #955: Add job_recovery.strategy — authorized (verify SkyPilot version first)
+        #956: Add recover_on_exit_codes — authorized (verify SkyPilot version first)
+      </rule31-authorizations>
+      <tdd-approach>
+        <red>
+          Create tests/v2/unit/deployment/test_skypilot_yaml_hardening.py:
+
+          def _load_setup_lines() -&gt; list[str]:
+              """Load setup block as list of lines via yaml.safe_load()."""
+              cfg = yaml.safe_load(FACTORIAL_YAML.read_text(encoding="utf-8"))
+              return cfg["setup"].splitlines()  # str.splitlines(), not str.split()
+
+          Tests:
+          - test_no_or_true_after_hf_commands — for each line containing
+            "hf_hub_download" or "huggingface-cli", the NEXT line must not
+            start with "||". Check via index lookup in lines list.
+          - test_hf_has_retry_loop — lines list contains a loop pattern
+            around hf commands: "for attempt in" or "retry" keyword within
+            5 lines of "hf_hub_download"
+          - test_dvc_pull_has_retry — similar check for "dvc pull"
+          - test_dvc_pull_has_timeout — within 2 lines of "dvc pull",
+            a line starts with ["timeout"] (line_parts[0] == "timeout")
+          - test_hf_download_has_timeout — similar for "hf_hub_download"
+          - test_mlflow_check_has_timeout — similar for MLflow connectivity
+          - test_job_recovery_strategy_explicit (conditional on SkyPilot version):
+            pytest.importorskip("sky") then:
+            cfg["resources"]["job_recovery"]["strategy"] == "EAGER_NEXT_REGION"
+          - test_recover_on_exit_codes_is_list (conditional on SkyPilot version):
+            isinstance(cfg["resources"]["job_recovery"]["recover_on_exit_codes"], list)
+          - test_oom_not_in_recover_on_exit_codes — 137 not in the list
+          - test_yaml_still_valid_after_changes — yaml.safe_load() succeeds
+          - test_yaml_passes_sky_task (conditional on sky installed):
+            sky.Task.from_yaml(str(FACTORIAL_YAML)) raises no exception
+          Run: expect FAIL (changes not yet applied)
+        </red>
+        <green>
+          STEP 0 (before any YAML change): Check SkyPilot version:
+          uv run python -c "import sky; print(sky.__version__)"
+          If version &lt; 0.7.0 (where strategy was added): skip #955/#956 changes,
+          add pytest.skip() to those tests, report to user.
+
+          STEP 1: Apply changes to train_factorial.yaml:
+          - Remove `|| true` from all HF commands
+          - Add retry loops (3 attempts, backoff) for HF downloads
+          - Add retry loops for DVC pull
+          - Add timeout NNN before each long-running command
+          - If SkyPilot supports it: add job_recovery.strategy and
+            recover_on_exit_codes
+
+          STEP 2: Verify YAML is still valid: yaml.safe_load() on the file.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/deployment/test_skypilot_yaml_hardening.py -v
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/deployment/test_skypilot_yaml_hardening.py -v 2>&amp;1 | tail -20</command>
+        <command>uv run python -c "import yaml,pathlib; yaml.safe_load(pathlib.Path('deployment/skypilot/train_factorial.yaml').read_text())" &amp;&amp; echo "YAML valid"</command>
+        <command>make test-staging 2>&amp;1 | tail -3</command>
+      </verification>
+    </task>
+
+    <!-- ── Group 2.B: run_factorial.sh changes (#947, #950, #951) ─── -->
+    <task id="2.B" issues="#947,#950,#951" priority="P1">
+      <title>run_factorial.sh robustness — lockfile, resume fix, permanent failure tracking</title>
+      <description>
+        Three changes to run_factorial.sh batched together to prevent conflicts.
+
+        1. (#950) Fix resume substring collision: change grep -qF to grep -xF
+           so "dynunet-dice_ce" does not match "dynunet-dice_ce_cldice"
+
+        2. (#951) Add lockfile mechanism: outputs/.factorial.lock with PID.
+           Check if lock PID is still running on startup. Remove on EXIT trap.
+
+        3. (#947) Permanent failure tracking in run_factorial_resilient.sh:
+           parse job log for per-condition FAILED count. Skip after 3 FAILs.
+
+        REVIEWER CORRECTION: Behavioral tests required for #950, not just
+        source inspection. Tests must construct mock sky jobs queue output
+        containing names where one is a substring of another, and verify
+        the grep behavior correctly identifies each independently.
+
+        REVIEWER CORRECTION: Lockfile test must verify lock appears BEFORE
+        the first sky jobs launch call by comparing line indices.
+      </description>
+      <files>
+        <file action="modify">scripts/run_factorial.sh</file>
+        <file action="modify">scripts/run_factorial_resilient.sh</file>
+        <file action="modify">tests/v2/unit/config/test_run_factorial_resilience.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Read current state of test_run_factorial_resilience.py FIRST.
+          Add to existing file (do not overwrite):
+
+          class TestResumeCollisionFix:
+            def test_resume_uses_exact_line_match(self):
+                """Source uses grep -xF, not grep -qF."""
+                src = Path("scripts/run_factorial.sh").read_text(encoding="utf-8")
+                lines = src.splitlines()
+                # Find the resume grep line and check it uses -xF
+                resume_lines = [l for l in lines if "grep" in l and "CONDITION_NAME" in l]
+                assert len(resume_lines) > 0, "No resume grep line found"
+                assert all("-xF" in l or "--line-regexp" in l for l in resume_lines), (
+                    "Resume grep must use -xF (exact line match), not -qF"
+                )
+            def test_substring_collision_prevented(self, tmp_path):
+                """Mock sky jobs queue output with substring collision."""
+                # Construct fake queue output where "dynunet-dice_ce" appears
+                # as a substring of "dynunet-dice_ce_cldice"
+                queue_output = "\n".join([
+                    "5 - dynunet-dice_ce_cldice-calibtrue-f0 ... SUCCEEDED",
+                    "4 - dynunet-dice_ce-calibtrue-f0 ... SUCCEEDED",
+                ])
+                # grep -xF "dynunet-dice_ce" should NOT match the cldice line
+                import subprocess
+                result = subprocess.run(
+                    ["grep", "-xF", "dynunet-dice_ce-calibtrue-f0"],
+                    input="\n".join(l.split()[2] for l in queue_output.splitlines()),
+                    capture_output=True, text=True,
+                )
+                # Should match exactly 1 line
+                assert result.stdout.count("\n") == 1
+
+          class TestLockfileGuard:
+            def test_lockfile_created(self):
+                src = Path("scripts/run_factorial.sh").read_text(encoding="utf-8")
+                assert "factorial.lock" in src or ".lock" in src
+            def test_lockfile_before_launch(self):
+                """Lock must appear before sky jobs launch in script."""
+                lines = Path("scripts/run_factorial.sh").read_text().splitlines()
+                lock_idx = next((i for i, l in enumerate(lines) if ".lock" in l), -1)
+                launch_idx = next((i for i, l in enumerate(lines) if "sky jobs launch" in l), -1)
+                assert lock_idx &lt; launch_idx, "Lockfile must precede sky jobs launch"
+            def test_lock_uses_pid(self):
+                src = Path("scripts/run_factorial.sh").read_text(encoding="utf-8")
+                assert "$$" in src or "$BASHPID" in src  # PID in lockfile
+
+          class TestPermanentFailureDetection:
+            def test_permanent_failure_threshold_from_config(self):
+                """Max failure count must come from factorial YAML, not hardcoded."""
+                src = Path("scripts/run_factorial_resilient.sh").read_text()
+                # Must not contain hardcoded integer like MAX_FAILS=3
+                # (unless it reads from config YAML)
+                assert "PERMANENTLY_FAILED" in src or "permanent_fail" in src.lower()
+            def test_permanent_failure_skips_condition(self, tmp_path):
+                """Condition with 3 FAILs in log must be skipped on resume."""
+                log = tmp_path / "job_ids.txt"
+                log.write_text(
+                    "1 | sam3_topolora-dice_ce-calibtrue-f0 | LAUNCH_FAILED\n"
+                    "2 | sam3_topolora-dice_ce-calibtrue-f0 | LAUNCH_FAILED\n"
+                    "3 | sam3_topolora-dice_ce-calibtrue-f0 | LAUNCH_FAILED\n",
+                    encoding="utf-8"
+                )
+                # Import the detection function (must exist after implementation)
+                import importlib.util
+                spec = importlib.util.spec_from_file_location(
+                    "resilient", "scripts/run_factorial_resilient.sh"
+                )
+                # For bash scripts, check via pattern analysis
+                src = Path("scripts/run_factorial_resilient.sh").read_text()
+                assert "PERMANENTLY_FAILED" in src
+
+          Run: expect FAIL (features not yet implemented)
+        </red>
+        <green>
+          1. run_factorial.sh: Change grep -qF to grep -xF in resume section
+          2. run_factorial.sh: Add lockfile at outputs/.factorial.lock
+             - Create: echo $$ > outputs/.factorial.lock
+             - Check: if [ -f lock ] &amp;&amp; kill -0 $(cat lock) 2>/dev/null; then exit 1; fi
+             - Remove: trap "rm -f outputs/.factorial.lock" EXIT
+          3. run_factorial_resilient.sh: Track per-condition FAILED count
+             - Parse all job log files for condition name + LAUNCH_FAILED entries
+             - After 3 failures for same condition: mark PERMANENTLY_FAILED in log
+             - On --resume: skip PERMANENTLY_FAILED conditions
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/config/test_run_factorial_resilience.py -v
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/config/test_run_factorial_resilience.py -v 2>&amp;1 | tail -20</command>
+        <command>SKIP_PREFLIGHT=1 bash scripts/run_factorial.sh --dry-run configs/factorial/debug.yaml 2>&amp;1 | head -5</command>
+        <command>make test-staging 2>&amp;1 | tail -3</command>
+      </verification>
+    </task>
+
+    <!-- ── Group 2.C: preflight_gcp.py controller health (#957) ─── -->
+    <task id="2.C" issue="#957" priority="P1" after="Phase-1">
+      <title>Controller health preflight check (#957)</title>
+      <description>
+        Add check_controller_health() to preflight_gcp.py. Detects INIT/STOPPED
+        controller state before launch.
+
+        REVIEWER CORRECTION: Mock for sky unavailability must use subprocess
+        returncode=127 (command not found), not just returncode=1.
+
+        REVIEWER CORRECTION: test for INIT state returns (True, warning) —
+        not (False, fail). INIT may resolve within seconds. STOPPED/ERROR → fail.
+      </description>
+      <files>
+        <file action="modify">scripts/preflight_gcp.py</file>
+        <file action="create">tests/v2/unit/config/test_preflight_controller_health.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Create test file with TestControllerHealthCheck class:
+          - test_controller_health_function_exists (ast.parse)
+          - test_controller_health_wired_in_checks (linear scan)
+          - test_controller_up_returns_pass (_run mock: "sky-controller UP")
+          - test_controller_init_returns_warning (_run mock: "sky-controller INIT"
+            → True, "INIT" in msg)
+          - test_controller_stopped_returns_fail (_run mock: "STOPPED" → False)
+          - test_controller_not_created_returns_pass (_run: empty output → True)
+          - test_controller_graceful_when_sky_missing (_run returncode=127 → True)
+          Run: expect FAIL
+        </red>
+        <green>
+          Implement check_controller_health() following existing check pattern.
+          Parse sky status output via str.split() on lines — no regex.
+          Wire into checks = [...] list.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/config/test_preflight_controller_health.py -v
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/config/test_preflight_controller_health.py -v 2>&amp;1 | tail -10</command>
+        <command>make test-staging 2>&amp;1 | tail -3</command>
+      </verification>
+    </task>
+
+    <!-- ── Group 2.D: checkpoint_utils.py (#949) — independent ─── -->
+    <task id="2.D" issue="#949" priority="P1">
+      <title>Atomic checkpoint save + corruption fallback (#949)</title>
+      <description>
+        Add atomic_torch_save() (write-to-tmp, fsync, rename) and
+        load_checkpoint_with_fallback() (try latest, fall back to previous epoch).
+
+        All five critical scenarios must be tested:
+        - Happy path (valid primary)
+        - Corruption fallback (truncated bytes)
+        - Double corruption (both fail → raise)
+        - Warning logging on fallback
+        - Missing fallback (FileNotFoundError)
+
+        REVIEWER CORRECTION: Add test for non-pickle file (JSON file saved as
+        .pth) → verify RuntimeError caught and fallback attempted.
+
+        REVIEWER CORRECTION: test_logs_warning_on_fallback must assert
+        str(fallback_path) in caplog.text, not just "fallback" in caplog.text.
+      </description>
+      <files>
+        <file action="modify">src/minivess/pipeline/checkpoint_utils.py</file>
+        <file action="create">tests/v2/unit/pipeline/test_atomic_checkpoint.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Create test_atomic_checkpoint.py with:
+          - test_atomic_save_produces_identical_file (tmp_path)
+          - test_atomic_save_no_partial_file_on_crash (mock rename to raise,
+            verify no partial .pth file remains)
+          - test_fallback_loads_previous_when_latest_truncated
+          - test_fallback_loads_previous_when_latest_not_pickle (write JSON as .pth)
+          - test_double_corruption_raises_value_error
+          - test_logs_warning_with_fallback_path (caplog, assert str(fallback) in msg)
+          - test_missing_fallback_raises_file_not_found
+          - test_all_checkpoint_saves_use_atomic (ast.parse of training_loop.py,
+            verify no direct torch.save() calls)
+          Run: expect FAIL
+        </red>
+        <green>
+          Add to checkpoint_utils.py:
+          - atomic_torch_save(obj, path: Path) — write to path.with_suffix(".tmp"),
+            fsync, os.rename() (atomic on POSIX)
+          - load_checkpoint_with_fallback(primary: Path, fallback: Path | None)
+          Update training_loop.py to use atomic_torch_save().
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/pipeline/test_atomic_checkpoint.py -v
+          uv run mypy src/minivess/pipeline/checkpoint_utils.py
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/pipeline/test_atomic_checkpoint.py -v 2>&amp;1 | tail -15</command>
+        <command>uv run mypy src/minivess/pipeline/checkpoint_utils.py 2>&amp;1 | tail -5</command>
+        <command>make test-staging 2>&amp;1 | tail -3</command>
+      </verification>
+    </task>
+
+    <!-- ── Group 2.E: MLflow artifact GCS store (#952) — STOP POINT ─── -->
+    <task id="2.E" issue="#952" priority="P1">
+      <title>MLflow artifact GCS store test (#952) — RULE #31 STOP POINT</title>
+      <description>
+        RULE #31 STOP POINT: yaml_contract.yaml does NOT currently have a
+        mlflow_artifact_bucket field. Adding it is a declarative config change
+        requiring explicit user authorization.
+
+        STOP AND ASK THE USER: "Issue #952 requires adding mlflow_artifact_bucket
+        to yaml_contract.yaml. This is a Rule #31 config change. Is this authorized?"
+
+        If NOT authorized: implement only the tests that do NOT require the
+        new contract field:
+        1. test_train_factorial_env_has_mlflow_artifact_root — verifies
+           train_factorial.yaml envs section has MLFLOW_ARTIFACT_BUCKET or
+           MLFLOW_DEFAULT_ARTIFACT_ROOT pointing to gs://
+        2. test_train_flow_uses_artifact_store — ast.parse of train_flow.py,
+           verify mlflow.log_artifact() is called (not mlflow.log_dict() for
+           large files)
+
+        If authorized: also add:
+        3. test_yaml_contract_has_mlflow_bucket_field
+        4. test_gcs_uri_no_trailing_slash (from yaml_contract.yaml field)
+
+        REVIEWER CORRECTION: The Dockerfile.mlflow-gcp uses ENV VAR
+        MLFLOW_DEFAULT_ARTIFACT_ROOT set by Pulumi, not hardcoded in the
+        Dockerfile. Do NOT test the Dockerfile for hardcoded bucket name.
+        Test the Pulumi output or the train_factorial.yaml envs section instead.
+      </description>
+      <files>
+        <file action="read">configs/cloud/yaml_contract.yaml</file>
+        <file action="read">deployment/skypilot/train_factorial.yaml</file>
+        <file action="create">tests/v2/unit/deployment/test_mlflow_artifact_store.py</file>
+        <file action="modify" if-authorized="true">configs/cloud/yaml_contract.yaml</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Create test file with the ALWAYS-SAFE tests (no config change needed):
+          - test_train_factorial_has_artifact_bucket_env — yaml.safe_load()
+            train_factorial.yaml, check envs section contains key that
+            starts with "MLFLOW" and value starts with "gs://"
+          - test_train_flow_uses_log_artifact — ast.parse train_flow.py,
+            verify at least one call to mlflow.log_artifact() exists
+          - test_artifact_bucket_is_gcs_uri — if bucket env var found,
+            assert value starts with "gs://" and does not end with "/"
+          Run: expect FAIL if envs section doesn't have GCS bucket var
+        </red>
+        <green>
+          Implement tests. If yaml_contract.yaml change is authorized, also add
+          mlflow_artifact_bucket field and corresponding tests.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/deployment/test_mlflow_artifact_store.py -v
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/deployment/test_mlflow_artifact_store.py -v 2>&amp;1 | tail -10</command>
+        <command>make test-staging 2>&amp;1 | tail -3</command>
+      </verification>
+    </task>
+
+    <!-- ── Group 2.F: .env format test (#954) — independent ─── -->
+    <task id="2.F" issue="#954" priority="P1">
+      <title>.env SkyPilot format compatibility test (#954)</title>
+      <description>
+        REVIEWER CORRECTION: str.isidentifier() is WRONG for POSIX env var names.
+        Use POSIX check instead:
+        - Valid key: starts with letter or underscore, contains only A-Z, 0-9, _
+        - Check: import string; all(c in string.ascii_letters + string.digits + "_" for c in key) and not key[0].isdigit()
+        - Do NOT use key.isupper() — lowercase is technically valid in env files.
+
+        REVIEWER CORRECTION: Handle multi-line values (KEY=value\\ continuation).
+        Detect and skip continuation lines (lines starting with spaces or ending with \\).
+
+        REVIEWER CORRECTION: Test that no key appears twice (duplicates
+        silently overwrite, causing non-deterministic behavior).
+
+        REVIEWER CORRECTION: Empty value for required var = hard FAIL,
+        not advisory warning. Required vars are defined by REQUIRED_ENV_VARS
+        in preflight_gcp.py.
+      </description>
+      <files>
+        <file action="read">.env.example</file>
+        <file action="create">tests/v2/unit/deployment/test_env_skypilot_format.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Create test file with:
+          - test_all_keys_valid_posix (import string, POSIX check)
+          - test_no_quoted_values_with_double_quotes (no KEY="value")
+          - test_no_quoted_values_with_single_quotes (no KEY='value')
+          - test_no_export_prefix (no "export KEY=value")
+          - test_no_inline_comments_after_value (no KEY=value # comment)
+          - test_no_duplicate_keys (keys counted, len == len(set))
+          - test_required_vars_have_non_empty_values
+            (REQUIRED_ENV_VARS from preflight_gcp.py, value != "")
+          - test_continuation_lines_handled (lines ending with \\ are skipped)
+          Run: expect some FAIL if .env.example has format issues
+        </red>
+        <green>
+          Fix any .env.example format violations found by RED phase.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/deployment/test_env_skypilot_format.py -v
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/deployment/test_env_skypilot_format.py -v 2>&amp;1 | tail -10</command>
+        <command>make test-staging 2>&amp;1 | tail -3</command>
+      </verification>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PHASE 2 GATE
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <phase-gate id="2-to-3">
+    <command>make test-staging 2>&amp;1 | tail -3</command>
+    <expected>all passed, 0 failed, 0 skipped, 0 xfailed</expected>
+    <command>make test-prod 2>&amp;1 | tail -3</command>
+    <expected>all passed, 0 failed, 0 skipped, 0 xfailed</expected>
+  </phase-gate>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PHASE 3: P2 ENHANCEMENTS (all independent — run in parallel)
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <phase id="3" name="P2 Enhancements" execution="parallel">
+
+    <task id="3.1" issue="#958" priority="P2">
+      <title>Condition name uniqueness test (#958)</title>
+      <description>
+        REVIEWER CORRECTION: Add 63-char Kubernetes label length limit check.
+        REVIEWER CORRECTION: Test names across model families for prefix collisions
+        (sam3 vs sam3_topolora vs sam3_hybrid).
+        REVIEWER CORRECTION: Verify Python name generator matches bash name format
+        (same separators, same calib prefix).
+      </description>
+      <files>
+        <file action="create">tests/v2/unit/config/test_condition_name_uniqueness.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Tests:
+          - test_all_condition_names_unique (Cartesian product, set check)
+          - test_no_name_is_substring_of_another (all pairs)
+          - test_no_cross_model_prefix_collision (sam3 vs sam3_topolora)
+          - test_names_within_k8s_label_limit (all len &lt;= 63)
+          - test_names_have_no_spaces, test_names_have_no_slashes
+          - test_python_format_matches_bash_format
+            (generate with python using same logic as bash, compare)
+        </red>
+        <green>Pure guard — configs should already pass. Fix if RED fails.</green>
+        <verify>
+          uv run pytest tests/v2/unit/config/test_condition_name_uniqueness.py -v
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/config/test_condition_name_uniqueness.py -v 2>&amp;1 | tail -10</command>
+      </verification>
+    </task>
+
+    <task id="3.2" issue="#959" priority="P2" after="2.B">
+      <title>Parallel backpressure test (#959)</title>
+      <description>
+        Read test_run_factorial_resilience.py AFTER 2.B's changes before adding tests.
+        REVIEWER CORRECTION: Test must verify PARALLEL_SUBMISSIONS read from YAML,
+        not hardcoded. Check no integer literal assigned to PARALLEL_SUBMISSIONS.
+      </description>
+      <files>
+        <file action="read">tests/v2/unit/config/test_run_factorial_resilience.py</file>
+        <file action="modify">tests/v2/unit/config/test_run_factorial_resilience.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Add TestParallelBackpressure class (after reading current file state):
+          - test_parallel_submissions_read_from_yaml (no integer literal in bash)
+          - test_parallel_submissions_matches_cloud_config
+            (value in script matches cloud config YAML value)
+          Behavioral test via mock sky binary is deferred (out of scope for staging tier).
+        </red>
+        <green>Regression guard — likely GREEN immediately.</green>
+        <verify>
+          uv run pytest tests/v2/unit/config/test_run_factorial_resilience.py -v
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/config/test_run_factorial_resilience.py -v 2>&amp;1 | tail -10</command>
+      </verification>
+    </task>
+
+    <task id="3.3" issue="#960" priority="P2">
+      <title>WeightWatcher 3D graceful handling (#960)</title>
+      <description>
+        run_weightwatcher() must not crash on Conv3d — return {} or partial metrics.
+      </description>
+      <files>
+        <file action="modify">src/minivess/diagnostics/weight_diagnostics.py</file>
+        <file action="modify">tests/v2/unit/test_weightwatcher_diagnostics.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Add to test_weightwatcher_diagnostics.py:
+          - test_weightwatcher_3d_only_model_returns_empty (Conv3d only → {})
+          - test_weightwatcher_mixed_3d_linear_returns_partial (Conv3d+Linear → metrics)
+          - test_weightwatcher_3d_no_exception_raised
+        </red>
+        <green>
+          Wrap Conv3d layer analysis in try/except in weight_diagnostics.py.
+          Log warning and skip Conv3d layers. Return partial metrics.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/test_weightwatcher_diagnostics.py -v
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/test_weightwatcher_diagnostics.py -v 2>&amp;1 | tail -10</command>
+      </verification>
+    </task>
+
+    <task id="3.4" issue="#961" priority="P2">
+      <title>Preflight checks mocked unit tests (#961)</title>
+      <description>
+        Add behavioral mocked tests for existing preflight checks that currently
+        only have structural tests. Follow test_docker_freshness_gate.py pattern.
+      </description>
+      <files>
+        <file action="create">tests/v2/unit/deployment/test_preflight_mocked.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Parametrized tests covering: check_gcs_bucket, check_checkpoint_bucket,
+          check_dvc_data_on_gcs, check_skypilot_gcp, check_yaml_contract,
+          check_gcp_cpu_quota. Each test: mock _run success + failure,
+          verify (bool, str) tuple with content-specific assertions.
+          Add: malformed JSON from gcloud → returns (True, "skipped") not exception.
+        </red>
+        <green>Fix any preflight checks that raise on malformed input.</green>
+        <verify>
+          uv run pytest tests/v2/unit/deployment/test_preflight_mocked.py -v
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/deployment/test_preflight_mocked.py -v 2>&amp;1 | tail -10</command>
+      </verification>
+    </task>
+
+    <task id="3.5" issue="#962" priority="P2">
+      <title>Preemption rate monitoring script (#962)</title>
+      <description>
+        Create scripts/analyze_factorial_run.py that parses job log files
+        and sky jobs queue JSON to compute preemption metrics per pass.
+        Appends to outputs/harness-state.jsonl.
+      </description>
+      <files>
+        <file action="create">scripts/analyze_factorial_run.py</file>
+        <file action="create">tests/v2/unit/config/test_analyze_factorial_run.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Test with synthetic job log data:
+          - test_preemption_count_correct (3 recoveries across jobs → count=3)
+          - test_preemption_rate_correct (3/10 jobs = 30%)
+          - test_cost_overhead_computed (wall_time - job_time = overhead)
+          - test_empty_log_raises_value_error (Rule #25)
+          - test_output_appended_to_harness_state (json.loads on each line)
+        </red>
+        <green>
+          Implement using json.loads() on sky jobs queue --format json output.
+          Rule #16: no regex. Rule #25: raise on empty input.
+          Rule #7: datetime.now(timezone.utc) for timestamps.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/config/test_analyze_factorial_run.py -v
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/config/test_analyze_factorial_run.py -v 2>&amp;1 | tail -10</command>
+      </verification>
+    </task>
+
+    <task id="3.6" issue="#963" priority="P2">
+      <title>Training heartbeat zombie detection (#963)</title>
+      <description>
+        REVIEWER CORRECTION (critical): Do NOT run actual training at staging tier.
+        Phase 1 (structural, staging-safe): Use ast.parse() to verify
+        heartbeat log call exists in train_flow.py source.
+        Phase 2 (behavioral, model_loading tier): Run 2 mock epochs,
+        verify heartbeat file written. Mark @pytest.mark.model_loading.
+
+        Heartbeat: train_flow.py writes {LOGS_DIR}/heartbeat.json with
+        {"epoch": N, "timestamp": "..."} after each epoch.
+      </description>
+      <files>
+        <file action="modify">src/minivess/orchestration/flows/train_flow.py</file>
+        <file action="create">tests/v2/unit/orchestration/test_training_heartbeat.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Create test_training_heartbeat.py with TWO test classes:
+
+          class TestHeartbeatStructural:  # staging-safe, no model loading
+            def test_heartbeat_write_in_train_flow_source(self):
+                """ast.parse() verifies heartbeat.json write in train_flow.py."""
+                src = Path("src/minivess/orchestration/flows/train_flow.py")
+                tree = ast.parse(src.read_text(encoding="utf-8"))
+                # Find any string constant "heartbeat" in the AST
+                constants = [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+                assert any("heartbeat" in c for c in constants), (
+                    "train_flow.py must write heartbeat.json per epoch"
+                )
+            def test_heartbeat_stale_detection_logic(self):
+                """Stale heartbeat detection returns True for &gt;30min old."""
+                from datetime import datetime, timedelta, timezone
+                old_ts = (datetime.now(timezone.utc) - timedelta(minutes=31)).isoformat()
+                # The detection function (to be created in train_flow.py)
+                from minivess.orchestration.flows.train_flow import is_heartbeat_stale
+                assert is_heartbeat_stale({"timestamp": old_ts}) is True
+            def test_fresh_heartbeat_not_stale(self):
+                from datetime import datetime, timezone
+                from minivess.orchestration.flows.train_flow import is_heartbeat_stale
+                fresh_ts = datetime.now(timezone.utc).isoformat()
+                assert is_heartbeat_stale({"timestamp": fresh_ts}) is False
+
+          @pytest.mark.model_loading
+          class TestHeartbeatBehavioral:
+            def test_heartbeat_file_written_after_epoch(self, tmp_path, monkeypatch):
+                """Behavioral: verify heartbeat.json written after each epoch."""
+                # This test is excluded from make test-staging via model_loading marker
+                pass  # Implementation deferred — requires mock training loop
+
+          Run structural tests: expect FAIL (is_heartbeat_stale not yet in train_flow.py)
+        </red>
+        <green>
+          Add to train_flow.py:
+          - is_heartbeat_stale(heartbeat: dict) → bool  (30 min threshold from config)
+          - Write {"epoch": N, "timestamp": utc_iso} to LOGS_DIR/heartbeat.json after each epoch
+          Rule #7: datetime.now(timezone.utc) — never datetime.now()
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/orchestration/test_training_heartbeat.py -k "not model_loading" -v
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/orchestration/test_training_heartbeat.py -k "Structural" -v 2>&amp;1 | tail -10</command>
+        <command>make test-staging 2>&amp;1 | tail -3</command>
+      </verification>
+    </task>
+
+    <task id="3.7" issue="#964" priority="P2">
+      <title>Spot/on-demand fallback design document (#964)</title>
+      <description>
+        REVIEWER CORRECTION: This is an explicitly requested document (issue #964
+        explicitly requests it), meeting the Rule #15 exception for documentation.
+        Per the issue acceptance criteria, this is a RESEARCH + DECISION task,
+        not an implementation task.
+
+        IMPORTANT: Use test_deployment_docs.py (NOT test_design_docs.py — wrong path).
+        Read the existing file first, then add a test class.
+
+        NO YAML CHANGES until user decision. Document research only.
+      </description>
+      <files>
+        <file action="create">docs/planning/spot-ondemand-fallback-design.md</file>
+        <file action="read">tests/v2/unit/deployment/test_deployment_docs.py</file>
+        <file action="modify">tests/v2/unit/deployment/test_deployment_docs.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Add to test_deployment_docs.py (read file first, add test class):
+          class TestSpotOnDemandFallbackDesign:
+            def test_design_doc_exists(self):
+                assert Path("docs/planning/spot-ondemand-fallback-design.md").exists()
+            def test_design_doc_has_decision_section(self):
+                content = Path("docs/planning/spot-ondemand-fallback-design.md")
+                    .read_text(encoding="utf-8")
+                assert "## Decision" in content or "## Recommendation" in content
+            def test_design_doc_has_cost_comparison(self):
+                content = Path("docs/planning/spot-ondemand-fallback-design.md")
+                    .read_text(encoding="utf-8")
+                assert "$" in content  # Has cost estimates
+          Run: expect FAIL (doc doesn't exist yet)
+        </red>
+        <green>
+          Create docs/planning/spot-ondemand-fallback-design.md with:
+          - Cost comparison: spot vs on-demand for debug ($2.50 vs $5.50) and production ($87 vs $220)
+          - SkyPilot any_of configuration syntax
+          - yaml_contract.yaml changes required (allow_ondemand_fallback field)
+          - Recommendation section (user fills in decision)
+          - References to SkyPilot auto-failover docs
+          Note: No YAML changes until user explicitly authorizes (Rule #31).
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/deployment/test_deployment_docs.py::TestSpotOnDemandFallbackDesign -v
+        </verify>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/deployment/test_deployment_docs.py -v 2>&amp;1 | tail -10</command>
+      </verification>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       FINAL GATE — after all phases complete
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <final-gate>
+    <command>make test-staging 2>&amp;1 | tail -3</command>
+    <expected>all passed, 0 failed, 0 skipped, 0 xfailed</expected>
+    <command>make test-prod 2>&amp;1 | tail -3</command>
+    <expected>all passed, 0 failed, 0 skipped, 0 xfailed</expected>
+    <command>uv run ruff check src/ tests/ 2>&amp;1 | tail -5</command>
+    <expected>All checks passed!</expected>
+    <command>uv run mypy src/ 2>&amp;1 | tail -5</command>
+    <expected>Success: no issues found</expected>
+  </final-gate>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       ISSUE CROSS-REFERENCE
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <issue-map>
+    <issue number="942" task="1.1" title="Debug=Production factor consistency"/>
+    <issue number="943" task="1.2" title="GPU quota preflight check"/>
+    <issue number="944" task="1.3" title="Region injection YAML validity"/>
+    <issue number="945" task="1.4" title="MLflow URI placeholder detection"/>
+    <issue number="946" task="2.A" title="Remove || true from HF downloads"/>
+    <issue number="947" task="2.B" title="Permanent failure detection"/>
+    <issue number="948" task="2.A" title="Setup block DVC/HF retries"/>
+    <issue number="949" task="2.D" title="Atomic checkpoint save"/>
+    <issue number="950" task="2.B" title="Resume substring collision fix"/>
+    <issue number="951" task="2.B" title="Lockfile for run_factorial.sh"/>
+    <issue number="952" task="2.E" title="MLflow artifact GCS store test"/>
+    <issue number="953" task="2.A" title="Setup script timeout guards"/>
+    <issue number="954" task="2.F" title=".env SkyPilot format test"/>
+    <issue number="955" task="2.A" title="Explicit job_recovery.strategy"/>
+    <issue number="956" task="2.A" title="recover_on_exit_codes"/>
+    <issue number="957" task="2.C" title="Controller health preflight"/>
+    <issue number="958" task="3.1" title="Condition name uniqueness"/>
+    <issue number="959" task="3.2" title="Parallel backpressure test"/>
+    <issue number="960" task="3.3" title="WeightWatcher 3D handling"/>
+    <issue number="961" task="3.4" title="Preflight mocked tests"/>
+    <issue number="962" task="3.5" title="Preemption rate monitoring"/>
+    <issue number="963" task="3.6" title="Training heartbeat"/>
+    <issue number="964" task="3.7" title="Spot/on-demand fallback design"/>
+  </issue-map>
+
+</plan>

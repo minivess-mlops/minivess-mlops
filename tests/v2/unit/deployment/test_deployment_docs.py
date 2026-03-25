@@ -41,11 +41,11 @@ def test_claude_md_documents_nvidia_ctk() -> None:
     )
 
 
-def test_claude_md_documents_trivy() -> None:
-    """deployment/CLAUDE.md must document trivy image scanning."""
-    assert "trivy" in _content().lower(), (
-        "deployment/CLAUDE.md missing Trivy documentation. "
-        "Add 'make scan' or trivy usage instructions to the deployment runbook."
+def test_claude_md_documents_grype() -> None:
+    """deployment/CLAUDE.md must document Grype container vulnerability scanning."""
+    assert "grype" in _content().lower(), (
+        "deployment/CLAUDE.md missing Grype documentation. "
+        "Add 'make scan' or Grype usage instructions to the deployment runbook."
     )
 
 
@@ -111,3 +111,33 @@ def test_claude_md_documents_rootless_docker_blocker() -> None:
         "deployment/CLAUDE.md missing rootless Docker blocker note. "
         "NVIDIA CTK Ubuntu 24.04 bug blocks rootless Docker — document it (#549)."
     )
+
+
+# ── T-3.7: Spot/on-demand fallback design document (#964) ────────────────────
+
+
+SPOT_FALLBACK_DOC = ROOT / "docs" / "planning" / "spot-ondemand-fallback-design.md"
+
+
+class TestSpotOnDemandFallbackDesign:
+    """Verify the spot/on-demand fallback design document exists and has required sections."""
+
+    def test_design_doc_exists(self) -> None:
+        assert SPOT_FALLBACK_DOC.exists(), (
+            "docs/planning/spot-ondemand-fallback-design.md does not exist. "
+            "Create the design document for spot-preferred/on-demand fallback strategy."
+        )
+
+    def test_design_doc_has_decision_section(self) -> None:
+        content = SPOT_FALLBACK_DOC.read_text(encoding="utf-8")
+        assert "## Decision" in content or "## Recommendation" in content, (
+            "Design doc missing '## Decision' or '## Recommendation' section. "
+            "The document must contain a clear recommendation for the user."
+        )
+
+    def test_design_doc_has_cost_comparison(self) -> None:
+        content = SPOT_FALLBACK_DOC.read_text(encoding="utf-8")
+        assert "$" in content, (
+            "Design doc missing cost comparison (no '$' found). "
+            "Must include spot vs on-demand cost estimates for debug and production runs."
+        )

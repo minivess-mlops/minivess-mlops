@@ -235,6 +235,7 @@ class SegmentationTrainer:
         self.optimizer = optimizer if optimizer is not None else self._build_optimizer()
         self.scheduler = scheduler if scheduler is not None else self._build_scheduler()
         self.scaler = GradScaler(enabled=config.mixed_precision)
+        self.gradient_accumulation_steps = config.gradient_accumulation_steps
 
         self._multi_tracker: MultiMetricTracker = _build_multi_tracker(config)
         self._metric_history: MetricHistory = MetricHistory()
@@ -293,6 +294,82 @@ class SegmentationTrainer:
         result2: torch.Tensor = self.criterion(output.logits, labels)
         return result2
 
+    def _get_model_family(self) -> str:
+        """Extract model family string for diagnostics.
+
+        Tries ``get_config().family`` (ModelAdapter ABC), falls back to class name.
+        """
+        try:
+            config_info = self.model.get_config()
+            family: str = str(config_info.family)
+            if family:
+                return family
+        except (AttributeError, TypeError):
+            pass
+        return type(self.model).__name__
+
+    @staticmethod
+    def _is_oom_error(exc: BaseException) -> bool:
+        """Check if an exception is a CUDA OOM error.
+
+        Detects both PyTorch 2.x ``torch.cuda.OutOfMemoryError`` and legacy
+        ``RuntimeError`` with ``"CUDA out of memory"`` in the message.
+        """
+        if isinstance(exc, torch.cuda.OutOfMemoryError):
+            return True
+        return isinstance(exc, RuntimeError) and "CUDA out of memory" in str(exc)
+
+    def _log_oom_diagnostics(self, exc: BaseException) -> None:
+        """Log structured OOM diagnostics before re-raising.
+
+        Includes model family, batch_size, gradient_accumulation_steps,
+        and VRAM usage (when CUDA is available). Per Rule #25, this logs
+        and then the caller re-raises — never silently discards.
+
+        Parameters
+        ----------
+        exc:
+            The OOM exception that was caught.
+        """
+        model_family = self._get_model_family()
+        batch_size = self.config.batch_size
+        grad_accum = self.gradient_accumulation_steps
+
+        # Collect VRAM info when CUDA is available
+        vram_info = "VRAM info unavailable (not on CUDA device)"
+        if torch.cuda.is_available() and self.device.type == "cuda":
+            try:
+                allocated_gb = torch.cuda.memory_allocated(self.device) / (1024**3)
+                reserved_gb = torch.cuda.memory_reserved(self.device) / (1024**3)
+                total_gb = torch.cuda.get_device_properties(
+                    self.device
+                ).total_mem / (1024**3)
+                vram_info = (
+                    f"VRAM allocated={allocated_gb:.2f} GB, "
+                    f"reserved={reserved_gb:.2f} GB, "
+                    f"total={total_gb:.2f} GB"
+                )
+            except Exception:  # noqa: BLE001
+                vram_info = "VRAM query failed after OOM"
+
+        logger.error(
+            "CUDA OOM detected during training. Diagnostics:\n"
+            "  model_family: %s\n"
+            "  batch_size: %d\n"
+            "  gradient_accumulation_steps: %d\n"
+            "  effective_batch_size: %d\n"
+            "  %s\n"
+            "  original_error: %s\n"
+            "  Suggestion: reduce batch_size or increase gradient_accumulation_steps "
+            "to lower peak VRAM usage.",
+            model_family,
+            batch_size,
+            grad_accum,
+            batch_size * grad_accum,
+            vram_info,
+            str(exc),
+        )
+
     def train_epoch(self, loader: Any) -> EpochResult:
         """Run one training epoch with mixed precision.
 
@@ -306,6 +383,13 @@ class SegmentationTrainer:
         -------
         EpochResult
             Average training loss for the epoch.
+
+        Raises
+        ------
+        torch.cuda.OutOfMemoryError
+            Re-raised after logging structured diagnostics (Rule #25).
+        RuntimeError
+            Re-raised when the message contains ``"CUDA out of memory"`` (legacy OOM).
         """
         self.model.train()
         running_loss = 0.0
@@ -313,58 +397,77 @@ class SegmentationTrainer:
         # T3: Gradient norm tracking (#790)
         grad_norms: list[float] = []
         grad_clip_count = 0
+        accum_steps = self.gradient_accumulation_steps
 
-        for batch in loader:
-            # Move all tensor values to device (supports multi-task GT keys)
-            with record_function("data_to_device"):
-                batch = {
-                    k: v.to(self.device) if isinstance(v, torch.Tensor) else v
-                    for k, v in batch.items()
-                }
-                images = batch["image"]
-                labels = batch["label"]
+        self.optimizer.zero_grad()
 
-            with record_function("zero_grad"):
-                self.optimizer.zero_grad()
+        try:
+            for batch_idx, batch in enumerate(loader):
+                # Move all tensor values to device (supports multi-task GT keys)
+                with record_function("data_to_device"):
+                    batch = {
+                        k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                        for k, v in batch.items()
+                    }
+                    images = batch["image"]
+                    labels = batch["label"]
 
-            with autocast(
-                device_type=self.device.type,
-                enabled=self.config.mixed_precision,
-            ):
-                with record_function("forward"):
-                    output = self.model(images)
-                with record_function("loss_compute"):
-                    loss = self._compute_loss(output, batch, labels)
+                with autocast(
+                    device_type=self.device.type,
+                    enabled=self.config.mixed_precision,
+                ):
+                    with record_function("forward"):
+                        output = self.model(images)
+                    with record_function("loss_compute"):
+                        loss = self._compute_loss(output, batch, labels)
 
-            if not torch.isfinite(loss):
-                msg = (
-                    f"Non-finite loss detected: {loss.item()}. "
-                    "This prevents gradient poisoning from corrupting optimizer state."
-                )
-                raise ValueError(msg)
-
-            with record_function("backward_optimizer"):
-                self.scaler.scale(loss).backward()  # type: ignore[no-untyped-call]
-                if self.config.gradient_clip_val > 0:
-                    self.scaler.unscale_(self.optimizer)
-                    # T3: Capture return of clip_grad_norm_ for gradient monitoring
-                    total_norm = torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(),
-                        self.config.gradient_clip_val,
+                if not torch.isfinite(loss):
+                    msg = (
+                        f"Non-finite loss detected: {loss.item()}. "
+                        "This prevents gradient poisoning from corrupting optimizer state."
                     )
-                    norm_val = float(total_norm)
-                    grad_norms.append(norm_val)
-                    if norm_val > self.config.gradient_clip_val:
-                        grad_clip_count += 1
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
+                    raise ValueError(msg)
 
-            running_loss += loss.item()
-            num_batches += 1
+                # Track unscaled loss for reporting
+                running_loss += loss.item()
+                num_batches += 1
 
-            if self.metrics is not None:
-                with record_function("metrics_update"), torch.no_grad():
-                    self.metrics.update(output.logits, labels)
+                # Scale loss by accumulation steps before backward
+                scaled_loss = loss / accum_steps
+
+                with record_function("backward"):
+                    self.scaler.scale(scaled_loss).backward()  # type: ignore[no-untyped-call]
+
+                # Step optimizer every accum_steps iterations or at last batch
+                is_accum_step = (batch_idx + 1) % accum_steps == 0
+                is_last_batch = batch_idx == len(loader) - 1 if hasattr(loader, '__len__') else False
+                if is_accum_step or is_last_batch:
+                    with record_function("optimizer_step"):
+                        if self.config.gradient_clip_val > 0:
+                            self.scaler.unscale_(self.optimizer)
+                            # T3: Capture return of clip_grad_norm_ for gradient monitoring
+                            total_norm = torch.nn.utils.clip_grad_norm_(
+                                self.model.parameters(),
+                                self.config.gradient_clip_val,
+                            )
+                            norm_val = float(total_norm)
+                            grad_norms.append(norm_val)
+                            if norm_val > self.config.gradient_clip_val:
+                                grad_clip_count += 1
+                        self.scaler.step(self.optimizer)
+                        self.scaler.update()
+                        self.optimizer.zero_grad()
+
+                if self.metrics is not None:
+                    with record_function("metrics_update"), torch.no_grad():
+                        self.metrics.update(output.logits, labels)
+
+        except (torch.cuda.OutOfMemoryError, RuntimeError) as exc:
+            if self._is_oom_error(exc):
+                self._log_oom_diagnostics(exc)
+                raise
+            # Non-OOM RuntimeError — re-raise without OOM diagnostics
+            raise
 
         avg_loss = running_loss / max(num_batches, 1)
         epoch_metrics: dict[str, float] = {}

@@ -53,6 +53,8 @@ class CheckpointAveragingPlugin:
         # Load all state dicts
         ckpt_data: list[tuple[dict[str, Any], dict[str, Any]]] = []
         for i, ckpt_path in enumerate(plugin_input.checkpoint_paths):
+            # SECURITY: weights_only=False -- self-produced checkpoint (model_state_dict,
+            # state_dict). See trivy-litellm-secops-double-checking.md
             ckpt = torch.load(ckpt_path, weights_only=False)
             meta = (
                 plugin_input.run_metadata[i]

@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  9th Pass Debug Factorial — SAM3 + Zero-Shot Focus
+  ==================================================
+  Focus: Relaunch 16 SAM3 conditions (BS=1, accum=4) + 2 zero-shot baselines
+  Prerequisite: 8th pass DynUNet (8/8) + MambaVesselNet (8/8) already SUCCEEDED
+  Plan: docs/planning/sam3-batch-size-1-and-robustification-plan.xml
+-->
+<plan>
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 1: METADATA                                            -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <metadata>
+    <title>9th Pass Debug Factorial — SAM3 BS=1 + Zero-Shot Focus</title>
+    <branch>test/run-debug-9th-pass</branch>
+    <date>2026-03-25</date>
+    <status>planned</status>
+    <priority>P0 — SAM3 OOM is the ONLY blocker for completing the factorial</priority>
+    <skill>factorial-monitor</skill>
+    <estimated-cost>~$3-5 GCP L4 spot (18 new jobs + controller)</estimated-cost>
+    <report-output>docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-9th-pass-SAM-zeroshot-focus.md</report-output>
+    <prior-pass>
+      <xml>docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-8th-pass-backlog-fix-plan.xml</xml>
+      <report>docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-8th-pass-multi-region.md</report>
+    </prior-pass>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 2: SESSION CONTEXT                                     -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <session-context>
+    <previous-pass id="8" outcome="16/34 SUCCEEDED (47%)">
+      <root-causes>
+        <cause id="P0">GPUS_ALL_REGIONS quota=1 — serial execution bottleneck</cause>
+        <cause id="P1">MLflow HTTP 413 — large artifacts rejected (32 MB limit)</cause>
+        <cause id="P2">SAM3 TopoLoRA/Hybrid OOM on L4 at batch_size=2 — 21.92/24 GB VRAM</cause>
+        <cause id="P3">Calibration metrics .numpy() crash on MONAI MetaTensor</cause>
+        <cause id="P4">MLflow auth env vars in SkyPilot YAML (cosmetic warnings)</cause>
+        <cause id="P5">WeightWatcher 3D conv crash (expected, non-blocking)</cause>
+      </root-causes>
+      <fixes-applied>
+        <fix ref="P2">SAM3 batch_size=1 + gradient_accumulation_steps=4 in model_overrides (commit 3d77c26)</fix>
+        <fix ref="P2">GRAD_ACCUM_STEPS env var wired through run_factorial.sh → train_flow.py → trainer</fix>
+        <fix ref="P2">Gradient accumulation in SegmentationTrainer.train_epoch() — loss scaling, optimizer step every N iters</fix>
+        <fix ref="P2">OOM detection with structured diagnostics (model_family, batch_size, VRAM, suggestion)</fix>
+        <fix ref="P2">Pre-training VRAM estimator (vram_estimator.py) + batch-size-aware sam3_vram_check</fix>
+        <fix ref="P2">Model profiles updated with measured VRAM data (sam3_topolora: 13 GB @ BS=1)</fix>
+        <fix ref="P3">Calibration MetaTensor .numpy() crash fixed (commit a6b7cc9, 8th pass)</fix>
+        <fix ref="P4">MLflow auth env vars removed from train_factorial.yaml (commit eab5604, 8th pass)</fix>
+      </fixes-applied>
+    </previous-pass>
+
+    <qa-improvements-since-prior-pass>
+      <improvement>18 factorial model_overrides config tests (SAM3 BS=1, accum=4 consistency)</improvement>
+      <improvement>8 gradient accumulation unit tests (step counting, loss scaling, incomplete groups)</improvement>
+      <improvement>4 MONAI integration tests for gradient accumulation</improvement>
+      <improvement>7 OOM detection tests (PyTorch 2.x + legacy, re-raise guarantee)</improvement>
+      <improvement>13 model profile VRAM data tests (measured values across 4 model families)</improvement>
+      <improvement>14 VRAM estimator tests (budget check, scaling, extrapolation)</improvement>
+      <improvement>5 batch-size-aware sam3_vram_check tests</improvement>
+      <improvement>Eliminated 2 xfails (ports localhost binding + GRAD_ACCUM_STEPS env fallback)</improvement>
+      <improvement>Prod test suite: 6514 passed, 0 failed, 0 skipped, 0 xfailed (TRUE ZERO)</improvement>
+    </qa-improvements-since-prior-pass>
+  </session-context>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 3: PRE-LAUNCH QA                                       -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <pre-launch-qa>
+    <gate name="staging-tests" status="pending">6514 passed target, 0 skipped, 0 failed</gate>
+    <gate name="prod-tests" status="PASSED">6514 passed, 0 skipped, 0 failed, 0 xfailed</gate>
+    <gate name="preflight-gcp" status="pending">Run scripts/preflight_gcp.py</gate>
+    <gate name="yaml-contract" status="pending">Run scripts/validate_yaml_contract.py</gate>
+    <gate name="docker-image-fresh" status="pending">Check GAR timestamp vs commit 3d77c26</gate>
+    <gate name="docker-image-verified" status="pending">Verify gradient_accumulation_steps import</gate>
+    <gate name="factorial-dry-run" status="PASSED">32 training + 2 zero-shot = 34 conditions, SAM3 shows BS=1/accum=4</gate>
+    <gate name="report-file-created" status="pending">Create report MD before launch</gate>
+    <gate name="prior-pass-referenced" status="PASSED">8th pass root causes + fixes documented above</gate>
+  </pre-launch-qa>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 4: FACTORIAL DESIGN                                    -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <factorial-design>
+    <config-yaml>configs/factorial/debug.yaml</config-yaml>
+    <layer id="A" name="Training">
+      <factor name="model_family" levels="dynunet, mambavesselnet, sam3_topolora, sam3_hybrid"/>
+      <factor name="loss_name" levels="cbdice_cldice, dice_ce, dice_ce_cldice, bce_dice_05cldice"/>
+      <factor name="aux_calibration" levels="true, false"/>
+    </layer>
+    <layer id="B" name="Post-training">
+      <factor name="method" levels="none, swag (iterated inside each GPU job)"/>
+    </layer>
+    <summary>
+      4 models x 4 losses x 2 aux_calib = 32 training GPU jobs x 1 fold
+      + 2 zero-shot baselines = 34 total conditions
+      Debug: 2 epochs, 23 train / 12 val volumes
+
+      9TH PASS FOCUS: --resume will skip 16 SUCCEEDED (DynUNet + MambaVesselNet).
+      New launches: 16 SAM3 (8 TopoLoRA + 8 Hybrid) at BS=1/accum=4 + 2 zero-shot.
+      Expected new jobs: 18.
+
+      Model overrides (VRAM safety):
+        sam3_topolora: BS=1, accum=4 (effective BS=4, ~13 GB VRAM)
+        sam3_hybrid:   BS=1, accum=4 (effective BS=4, ~7.2 GB VRAM)
+        sam3_vanilla:  BS=1, accum=1 (zero-shot, ~3.5 GB VRAM)
+    </summary>
+  </factorial-design>
+
+  <zero-shot-baselines>
+    <baseline model="sam3_vanilla" strategy="frozen_encoder_eval" folds="1" dataset="minivess"/>
+    <baseline model="vesselfm" strategy="zero_shot_only" folds="1" dataset="deepvess"/>
+  </zero-shot-baselines>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 5: MONITORING PROTOCOL                                  -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <monitoring>
+    <tool>/factorial-monitor skill</tool>
+    <polling-interval>60 seconds</polling-interval>
+    <phases>
+      <phase id="1" name="LAUNCH">./scripts/run_factorial.sh --resume configs/factorial/debug.yaml</phase>
+      <phase id="2" name="MONITOR">Poll sky jobs queue, update report every state change</phase>
+      <phase id="3" name="DIAGNOSE">If failures: aggregate by root cause (OOM? preemption? Docker?)</phase>
+      <phase id="4" name="FIX">Batch fix per root cause</phase>
+      <phase id="5" name="RELAUNCH">Selective --resume, max 2 cycles</phase>
+      <phase id="6" name="REPORT">Final summary + compound artifacts</phase>
+    </phases>
+  </monitoring>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 6: WATCHLIST                                            -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <watchlist>
+    <item id="W1" severity="CRITICAL" source="8th-pass">GPUS_ALL_REGIONS=1 forces serial execution — all 18 jobs queue sequentially</item>
+    <item id="W2" severity="HIGH" source="9th-pass-new">SAM3 TopoLoRA VRAM at BS=1 — expected ~13 GB on L4 (24 GB), first real test</item>
+    <item id="W3" severity="HIGH" source="9th-pass-new">Gradient accumulation correctness — first cloud run with accum=4, verify loss curves match BS=2 behavior</item>
+    <item id="W4" severity="MEDIUM" source="8th-pass">MLflow HTTP 413 for large artifacts — GCS mount_cached workaround in place, not root-fixed</item>
+    <item id="W5" severity="MEDIUM" source="8th-pass">SWAG post-training timing — untested for SAM3 models, may OOM separately</item>
+    <item id="W6" severity="MEDIUM" source="9th-pass-new">SAM3 Hybrid VRAM at BS=1 — expected ~7.2 GB, should be fine but first cloud test</item>
+    <item id="W7" severity="LOW" source="8th-pass">Spot preemption recovery — working in 8th pass, verify for longer SAM3 jobs</item>
+    <item id="W8" severity="LOW" source="9th-pass-new">Zero-shot baselines — sam3_vanilla + vesselfm, first launch from run_factorial.sh</item>
+    <item id="W9" severity="LOW" source="8th-pass">WeightWatcher 3D conv crash — expected, non-blocking</item>
+  </watchlist>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 7: DUAL MANDATE                                        -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <dual-mandate>
+    <mandate id="M1" name="Platform Validation">
+      <success-criteria>
+        <criterion>34/34 conditions SUCCEEDED (16 prior + 18 new)</criterion>
+        <criterion>SAM3 TopoLoRA VRAM stays below 16 GB at BS=1</criterion>
+        <criterion>Gradient accumulation produces comparable loss curves to BS=2</criterion>
+        <criterion>Zero-shot baselines complete without errors</criterion>
+      </success-criteria>
+    </mandate>
+    <mandate id="M2" name="Infrastructure Improvement">
+      <focus-areas>
+        <area>Verify gradient accumulation correctness on cloud GPU (AMP + GradScaler)</area>
+        <area>Collect measured VRAM for SAM3 at BS=1 (update model profiles)</area>
+        <area>Validate zero-shot launch path in run_factorial.sh</area>
+        <area>Document SAM3 training time per epoch on L4 (for paper cost table)</area>
+      </focus-areas>
+    </mandate>
+  </dual-mandate>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 8: CLOUD TEST UPGRADE PLAN                              -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <cloud-test-upgrade>
+    <current-state>80+ new tests added this session for gradient accumulation + VRAM + OOM</current-state>
+    <target-state>Add cloud-observation tests based on 9th pass results</target-state>
+    <new-tests-to-add>
+      <test-group name="gradient-accumulation-cloud">
+        <test>Verify effective_batch_size logged to MLflow params for SAM3 runs</test>
+        <test>Verify loss curve slope comparable between BS=1/accum=4 and BS=2/accum=1</test>
+      </test-group>
+      <test-group name="vram-measurement">
+        <test>Verify vram/peak_mb MLflow metric for SAM3 TopoLoRA &lt; 16 GB</test>
+        <test>Update model_profiles with real measured SAM3 BS=1 VRAM from cloud</test>
+      </test-group>
+      <test-group name="zero-shot-baselines">
+        <test>Verify sam3_vanilla frozen_encoder_eval produces non-zero metrics</test>
+        <test>Verify vesselfm zero_shot_only on DeepVess produces non-zero metrics</test>
+      </test-group>
+    </new-tests-to-add>
+  </cloud-test-upgrade>
+</plan>

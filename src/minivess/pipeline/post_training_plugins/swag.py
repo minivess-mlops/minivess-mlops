@@ -110,6 +110,8 @@ class SWAGPlugin:
 
         # Load base model from first checkpoint
         ckpt_path = plugin_input.checkpoint_paths[0]
+        # SECURITY: weights_only=False -- self-produced checkpoint (model,
+        # model_state_dict, state_dict). See trivy-litellm-secops-double-checking.md
         ckpt = torch.load(ckpt_path, weights_only=False)
 
         # Get the model - expect either a full model or state_dict

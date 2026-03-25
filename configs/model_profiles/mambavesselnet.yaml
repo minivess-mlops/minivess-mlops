@@ -19,11 +19,11 @@ notes: >
   VRAM not yet measured (T09 — requires GPU hardware with mamba-ssm compiled).
 vram:
   inference_gb: null
-  training_gb: null
-  measured: false
-  measured_gpu: null
-  measured_date: null
+  training_gb: 6.7
+  measured: true
+  measured_gpu: "L4"
+  measured_date: "2026-03-24"
   measured_config:
     patch_size: [64, 64, 64]
-    batch_size: 1
-  notes: "T09 in-process measurement ready (trainer.fit() return dict). Next smoke test captures real VRAM_PEAK_MB."
+    batch_size: 2
+  notes: "Measured 6.7 GB at BS=2 on L4 during 8th debug factorial pass."

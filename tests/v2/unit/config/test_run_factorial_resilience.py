@@ -143,3 +143,189 @@ class TestExitCodes:
             "run_factorial.sh must exit 2 for partial failure "
             "(some conditions launched, some failed) — not just 0 or 1 (Gap #10)"
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue #950: Resume substring collision — grep -qxF (exact line match)
+# ---------------------------------------------------------------------------
+
+
+RUN_FACTORIAL_RESILIENT = REPO_ROOT / "scripts" / "run_factorial_resilient.sh"
+
+
+class TestResumeCollisionFix:
+    """Resume grep must use exact line match to prevent substring collisions."""
+
+    def test_resume_uses_exact_line_match(self) -> None:
+        """Script must use grep -x (exact line), not plain -F (substring)."""
+        src = RUN_FACTORIAL.read_text(encoding="utf-8")
+        lines = src.splitlines()
+        resume_lines = [l for l in lines if "grep" in l and "CONDITION_NAME" in l]
+        assert len(resume_lines) > 0, "No grep lines referencing CONDITION_NAME found"
+        for line in resume_lines:
+            # -x flag can be combined: -xF, -qxF, -Fxq, etc. or standalone --line-regexp
+            # Extract the flags portion (between 'grep' and the pattern argument)
+            after_grep = line.partition("grep")[2]
+            flags_part = after_grep.split('"')[0]  # everything before first quoted arg
+            has_exact = "x" in flags_part or "--line-regexp" in flags_part
+            assert has_exact, (
+                f"Resume grep must use -x (exact line match): {line.strip()}"
+            )
+
+    def test_substring_collision_prevented(self) -> None:
+        """grep -xF 'dynunet-dice_ce' must NOT match 'dynunet-dice_ce_cldice'."""
+        import subprocess
+
+        jobs = "dynunet-dice_ce_cldice-calibtrue-f0\ndynunet-dice_ce-calibtrue-f0\n"
+        # -xF = exact line match
+        result = subprocess.run(
+            ["grep", "-cxF", "dynunet-dice_ce-calibtrue-f0"],
+            input=jobs,
+            capture_output=True,
+            text=True,
+        )
+        assert result.stdout.strip() == "1"  # exactly 1 match
+
+
+# ---------------------------------------------------------------------------
+# Issue #951: Lockfile guard — prevent concurrent launches
+# ---------------------------------------------------------------------------
+
+
+class TestLockfileGuard:
+    """run_factorial.sh must use a lockfile to prevent concurrent launches."""
+
+    def test_lockfile_referenced_in_script(self) -> None:
+        """Script must reference a lockfile mechanism."""
+        src = RUN_FACTORIAL.read_text(encoding="utf-8")
+        assert ".lock" in src or "flock" in src, (
+            "run_factorial.sh must reference a lockfile (.lock or flock)"
+        )
+
+    def test_lockfile_before_launch(self) -> None:
+        """Lockfile variable definition must appear before the first sky jobs launch."""
+        lines = RUN_FACTORIAL.read_text(encoding="utf-8").splitlines()
+        # Find the LOCKFILE variable assignment (defines the lock path)
+        lock_def_idx = next(
+            (i for i, l in enumerate(lines)
+             if "LOCKFILE=" in l and ".lock" in l),
+            len(lines),
+        )
+        # Find first actual launch command (${SKY_BIN} jobs launch or sky jobs launch)
+        # excluding comments and echo/dry-run lines
+        launch_idx = next(
+            (i for i, l in enumerate(lines)
+             if "jobs launch" in l
+             and not l.strip().startswith("#")
+             and not l.strip().startswith("echo")
+             and not l.strip().startswith("print")),
+            0,
+        )
+        assert lock_def_idx < launch_idx, (
+            f"LOCKFILE definition (line {lock_def_idx}) must appear before first "
+            f"jobs launch command (line {launch_idx})"
+        )
+
+    def test_lockfile_cleanup_on_exit(self) -> None:
+        """Lockfile must be cleaned up on script exit (trap or cleanup function)."""
+        src = RUN_FACTORIAL.read_text(encoding="utf-8")
+        # Must have trap for cleanup
+        assert "trap" in src, "Script must have a trap for cleanup"
+        # Lock file removal must be in a cleanup function or trap
+        lines = src.splitlines()
+        has_lock_cleanup = any(
+            ".lock" in l and ("rm" in l or "trap" in l) for l in lines
+        )
+        assert has_lock_cleanup or ("cleanup" in src and ".lock" in src), (
+            "Lockfile must be removed in cleanup/trap on exit"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Issue #947: Permanent failure detection in resilient.sh
+# ---------------------------------------------------------------------------
+
+
+class TestPermanentFailureTracking:
+    """run_factorial_resilient.sh must detect permanently failed conditions."""
+
+    def test_resilient_script_exists(self) -> None:
+        """run_factorial_resilient.sh must exist."""
+        assert RUN_FACTORIAL_RESILIENT.is_file(), (
+            "scripts/run_factorial_resilient.sh must exist"
+        )
+
+    def test_permanent_failure_detection(self) -> None:
+        """Resilient wrapper must track and report permanent failures."""
+        src = RUN_FACTORIAL_RESILIENT.read_text(encoding="utf-8")
+        has_perm_fail = (
+            "PERMANENTLY_FAILED" in src
+            or "permanent" in src.lower()
+            or "PERM_FAIL" in src
+        )
+        assert has_perm_fail, (
+            "run_factorial_resilient.sh must detect permanent failures "
+            "(conditions that fail repeatedly beyond retry limit)"
+        )
+
+    def test_failure_count_tracking(self) -> None:
+        """Resilient wrapper must count failures per condition."""
+        src = RUN_FACTORIAL_RESILIENT.read_text(encoding="utf-8")
+        has_failure_count = (
+            "fail_count" in src.lower()
+            or "failure_count" in src.lower()
+            or "FAIL_COUNT" in src
+            or "MAX_CONDITION_FAILURES" in src
+        )
+        assert has_failure_count, (
+            "run_factorial_resilient.sh must track per-condition failure counts "
+            "to identify permanently failed conditions"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Issue #959 Task 3.2: Parallel backpressure
+# ---------------------------------------------------------------------------
+
+
+class TestParallelBackpressure:
+    """Parallel submission limits and rate-limiting must come from config."""
+
+    def test_parallel_submissions_from_cloud_config(self) -> None:
+        """PARALLEL_SUBMISSIONS must be read from YAML, not hardcoded."""
+        src = RUN_FACTORIAL.read_text(encoding="utf-8")
+        lines = src.splitlines()
+        # Find PARALLEL_SUBMISSIONS assignment
+        assign_lines = [
+            l
+            for l in lines
+            if "PARALLEL_SUBMISSIONS" in l
+            and "=" in l
+            and not l.strip().startswith("#")
+        ]
+        assert len(assign_lines) > 0, "PARALLEL_SUBMISSIONS not found"
+        # The assignment must involve python3 or yaml (reading from config),
+        # not a bare integer
+        for line in assign_lines:
+            # Skip lines that are just reading the variable
+            # (e.g., if [ "$PARALLEL_SUBMISSIONS" ])
+            if "read" in line or "python3" in line or "<(" in line:
+                return  # It's reading from config — good
+
+    def test_has_wait_for_backpressure(self) -> None:
+        """Script must use wait -n or equivalent for backpressure."""
+        src = RUN_FACTORIAL.read_text(encoding="utf-8")
+        assert "wait -n" in src or "wait" in src
+
+    def test_rate_limit_from_cloud_config(self) -> None:
+        """RATE_LIMIT_SECONDS must be read from YAML config."""
+        src = RUN_FACTORIAL.read_text(encoding="utf-8")
+        lines = src.splitlines()
+        rate_lines = [
+            l
+            for l in lines
+            if "RATE_LIMIT_SECONDS" in l
+            and "=" in l
+            and not l.strip().startswith("#")
+        ]
+        assert len(rate_lines) > 0

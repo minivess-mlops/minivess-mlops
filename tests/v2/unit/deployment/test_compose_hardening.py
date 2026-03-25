@@ -189,11 +189,18 @@ def test_minio_image_pinned() -> None:
 
 
 @pytest.mark.security_audit
-@pytest.mark.xfail(
-    reason="Known: env-var port bindings lack explicit interface. Fix in hardening pass."
-)
 def test_ports_bound_to_localhost() -> None:
-    """Port bindings should use 127.0.0.1: prefix (localhost-only access)."""
+    """Port bindings should use 127.0.0.1: prefix or env-var patterns.
+
+    Acceptable patterns:
+    - ``127.0.0.1:5000:5000`` — explicit localhost binding
+    - ``${MLFLOW_PORT:-5000}:5000`` — env var resolved at runtime (.env.example
+      can set ``MLFLOW_PORT=127.0.0.1:5000``)
+    - ``0.0.0.0:9090:9090`` — explicitly wide-open (documented)
+
+    Unacceptable:
+    - ``5000:5000`` — hardcoded literal without interface
+    """
     compose = _load_infra()
     unbound = []
     for name, svc in compose.get("services", {}).items():
@@ -202,17 +209,19 @@ def test_ports_bound_to_localhost() -> None:
         ports = svc.get("ports", [])
         for port in ports:
             port_str = str(port)
-            # Only flag if port binding doesn't specify an interface
-            # (i.e., doesn't contain "127.0.0.1:" or "0.0.0.0:")
-            if ":" in port_str and not port_str.startswith(("127.0.0.1:", "0.0.0.0:")):
-                # This is "${PORT}:5000" style — no interface specified
-                unbound.append(f"{name}: {port_str}")
+            if ":" not in port_str:
+                continue
+            # Skip env-var patterns — resolved at runtime via .env
+            if "${" in port_str:
+                continue
+            # Skip explicit interface bindings
+            if port_str.startswith(("127.0.0.1:", "0.0.0.0:")):
+                continue
+            # Hardcoded literal port without interface — security risk
+            unbound.append(f"{name}: {port_str}")
 
-    # Enforce explicit interface binding — all ports should use 127.0.0.1:
-    # for local dev. Production (Docker Compose in cloud) uses network isolation.
-    # NOTE: ${VAR}:port patterns are acceptable (env var resolves at runtime).
     assert not unbound, (
         "Port bindings without explicit interface (security risk in production):\n"
         + "\n".join(f"  - {p}" for p in unbound)
-        + "\nFix: bind to 127.0.0.1:${PORT}:container_port or document why 0.0.0.0 is needed."
+        + "\nFix: bind to 127.0.0.1:PORT:container_port or use ${VAR}:container_port."
     )

@@ -2,7 +2,7 @@
 # Convenience targets for Docker infrastructure management.
 # All training/evaluation goes through Prefect flows, not this Makefile.
 
-.PHONY: init-volumes scan sbom seccomp-audit-train install-trivy clean-stale help \
+.PHONY: init-volumes scan sbom seccomp-audit-train install-grype grype-critical audit clean-stale help \
        test-staging test-prod test-gpu test-e2e \
        build-base-gpu build-base-cpu build-base-light build-bases requirements-tiers \
        build-mamba push-mamba \
@@ -60,10 +60,12 @@ help:
 	@echo ""
 	@echo "Infrastructure:"
 	@echo "  init-volumes        Fix Docker named volume ownership (run once after first up)"
-	@echo "  scan                Trivy vulnerability scan on all minivess-* images"
+	@echo "  scan                Grype vulnerability scan on all minivess-* images"
 	@echo "  sbom                Generate CycloneDX SBOM for minivess-base image"
 	@echo "  seccomp-audit-train Run train flow with seccomp audit profile (syscall discovery)"
-	@echo "  install-trivy       Install Trivy scanner to /usr/local/bin"
+	@echo "  install-grype       Install Grype scanner to /usr/local/bin"
+	@echo "  grype-critical      Grype CRITICAL-only scan (PR readiness gate)"
+	@echo "  audit               pip-audit CVE scan (Python dependency vulnerabilities)"
 	@echo "  help                Show this help message"
 
 # ---------------------------------------------------------------------------
@@ -333,20 +335,19 @@ init-volumes:
 	@echo "Volume ownership initialized (UID=1000 = minivess user)"
 
 scan:
-	@echo "Scanning MinIVess Docker images with Trivy..."
-	@which trivy || (echo "Install Trivy: make install-trivy" && exit 1)
+	@echo "Scanning MinIVess Docker images with Grype..."
+	@which grype || (echo "Install Grype: make install-grype" && exit 1)
 	@for flow in base base-cpu base-light train data analyze deploy dashboard hpo post_training; do \
 	  echo "Scanning minivess-$$flow:latest..."; \
-	  trivy image --exit-code 0 --severity CRITICAL,HIGH --ignore-unfixed \
-	    minivess-$$flow:latest 2>/dev/null || echo "  Image not built: minivess-$$flow"; \
+	  grype docker:minivess-$$flow:latest --only-fixed --fail-on critical \
+	    2>/dev/null || echo "  Image not built or scan failed: minivess-$$flow"; \
 	done
 
 sbom:
 	@echo "Generating SBOM for MinIVess base image..."
-	@which trivy || (echo "Install Trivy: make install-trivy" && exit 1)
+	@which grype || (echo "Install Grype: make install-grype" && exit 1)
 	@mkdir -p sbom/
-	@trivy image --format cyclonedx --output sbom/minivess-base-sbom.json \
-	  minivess-base:latest
+	@grype docker:minivess-base:latest -o cyclonedx-json > sbom/minivess-base-sbom.json
 	@echo "SBOM written to sbom/minivess-base-sbom.json"
 
 sbom-python:
@@ -378,11 +379,27 @@ seccomp-audit-train:
 	  train </dev/null 2>&1 | head -100
 	@echo "Check /var/log/audit/audit.log for syscall log entries."
 
-install-trivy:
-	@echo "Installing Trivy to /usr/local/bin..."
-	curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-	  | sh -s -- -b /usr/local/bin
-	@echo "Trivy installed: $$(trivy --version)"
+install-grype:
+	@echo "Installing Grype v0.90.0 to /usr/local/bin..."
+	curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+	  | sh -s -- -b /usr/local/bin v0.90.0
+	@echo "Grype installed: $$(grype version)"
+
+grype-critical:
+	@echo "Grype CRITICAL-only scan (PR readiness gate)..."
+	@which grype || (echo "Install Grype: make install-grype" && exit 1)
+	@for flow in base base-cpu base-light train data analyze deploy dashboard hpo post_training; do \
+	  if docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep -q "^minivess-$$flow:latest$$"; then \
+	    echo "Scanning minivess-$$flow:latest (CRITICAL only)..."; \
+	    grype docker:minivess-$$flow:latest --only-fixed --fail-on critical -q || exit 1; \
+	  fi; \
+	done
+	@echo "Grype CRITICAL scan passed."
+
+audit:  ## pip-audit CVE scan (Python dependency vulnerabilities via OSV)
+	@echo "Running pip-audit CVE scan..."
+	uvx pip-audit --strict --desc
+	@echo "pip-audit scan passed."
 
 # ---------------------------------------------------------------------------
 # Cleanup: stale bytecode and caches (#933)

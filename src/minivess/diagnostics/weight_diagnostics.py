@@ -45,23 +45,34 @@ def run_weightwatcher(
     """
     import weightwatcher as ww
 
+    # Detect Conv3d layers and warn — WeightWatcher silently skips them.
+    has_conv3d = _has_conv3d_layers(model)
+    if has_conv3d:
+        logger.warning(
+            "Model contains Conv3d layers which WeightWatcher cannot analyze. "
+            "Only Linear and Conv2d layers will produce spectral metrics."
+        )
+
     watcher = ww.WeightWatcher(model=model)
 
-    # WeightWatcher analyzes all linear/conv layers by default.
-    # Some 3D conv layers (e.g., MONAI DynUNet residual blocks) have
-    # weight=None attributes that crash WeightWatcher. Catch and log.
+    # WeightWatcher analyzes Linear/Conv2d layers by default.
+    # 3D conv layers are silently skipped (empty DataFrame).
+    # Some exotic architectures may crash WeightWatcher entirely.
+    # Catch broadly to ensure diagnostics never kill the pipeline.
+    _nan_result: dict[str, Any] = {
+        "diag_ww_alpha_mean": float("nan"),
+        "diag_ww_alpha_std": float("nan"),
+        "diag_ww_num_layers_analyzed": 0,
+    }
     try:
         details = watcher.analyze()
-    except AttributeError:
+    except Exception:
         logger.warning(
             "WeightWatcher crashed on model layers (likely 3D conv with "
-            "weight=None). Returning NaN metrics."
+            "weight=None or unsupported layer type). Returning NaN metrics.",
+            exc_info=True,
         )
-        return {
-            "diag_ww_alpha_mean": float("nan"),
-            "diag_ww_alpha_std": float("nan"),
-            "diag_ww_num_layers_analyzed": 0,
-        }
+        return _nan_result
 
     if filter_frozen and "layer_id" in details.columns:
         # Filter to trainable layers only
@@ -72,12 +83,11 @@ def run_weightwatcher(
     num_layers = len(details)
 
     if num_layers == 0:
-        logger.warning("WeightWatcher: no trainable layers to analyze")
-        return {
-            "diag_ww_alpha_mean": float("nan"),
-            "diag_ww_alpha_std": float("nan"),
-            "diag_ww_num_layers_analyzed": 0,
-        }
+        msg = "WeightWatcher: no analyzable layers found"
+        if has_conv3d:
+            msg += " (model has Conv3d layers which WeightWatcher cannot analyze)"
+        logger.warning(msg)
+        return _nan_result
 
     alpha_values = details["alpha"].dropna()
 
@@ -90,6 +100,15 @@ def run_weightwatcher(
         else 0.0,
         "diag_ww_num_layers_analyzed": num_layers,
     }
+
+
+def _has_conv3d_layers(model: nn.Module) -> bool:
+    """Check if model contains any Conv3d modules."""
+    import torch
+
+    return any(
+        isinstance(m, torch.nn.Conv3d) for m in model.modules()
+    )
 
 
 def _get_trainable_layer_ids(model: nn.Module) -> set[int]:

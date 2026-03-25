@@ -70,6 +70,21 @@ zero_shot_baselines:
     folds: 1
     dataset: deepvess
 
+# ── Model-specific overrides (VRAM safety) ────────────────────────
+# SAM3 variants OOM on L4 (24 GB) at batch_size=2. Use BS=1 + grad accum.
+# Models not listed use fixed.batch_size with gradient_accumulation_steps=1.
+# See: docs/planning/sam3-oom-training-double-check-report.md
+model_overrides:
+  sam3_topolora:
+    batch_size: 1
+    gradient_accumulation_steps: 4
+  sam3_hybrid:
+    batch_size: 1
+    gradient_accumulation_steps: 4
+  sam3_vanilla:
+    batch_size: 1
+    gradient_accumulation_steps: 1
+
 # ── Fixed parameters (debug reductions) ─────────────────────────────
 fixed:
   max_epochs: 2

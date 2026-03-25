@@ -16,6 +16,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[4]
 REGION_DIR = REPO_ROOT / "configs" / "cloud" / "regions"
 SKYPILOT_YAML = REPO_ROOT / "deployment" / "skypilot" / "train_factorial.yaml"
+YAML_CONTRACT = REPO_ROOT / "configs" / "cloud" / "yaml_contract.yaml"
 
 
 # ---------------------------------------------------------------------------
@@ -283,3 +284,87 @@ class TestAllRegionConfigs:
         assert "ordered" in content["resources"]
         assert "accelerators" not in content["resources"]
         assert len(content["resources"]["ordered"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# Test: contract enforcement — generated YAML obeys yaml_contract.yaml (#944)
+# ---------------------------------------------------------------------------
+
+
+class TestRegionInjectionContractEnforcement:
+    """Generated YAML must satisfy the golden contract (configs/cloud/yaml_contract.yaml).
+
+    Issue #944, Task 1.3: Region injection YAML validity tests.
+    """
+
+    @pytest.fixture()
+    def generated_yaml_content(
+        self, base_yaml_path: Path, europe_us_region_path: Path, tmp_path: Path
+    ) -> dict:
+        """Generate a SkyPilot YAML and return its parsed content."""
+        from minivess.cloud.region_injection import generate_skypilot_yaml
+
+        result_path = generate_skypilot_yaml(
+            base_yaml_path=base_yaml_path,
+            region_config_path=europe_us_region_path,
+            output_dir=tmp_path,
+        )
+        return yaml.safe_load(result_path.read_text(encoding="utf-8"))
+
+    @pytest.fixture()
+    def contract(self) -> dict:
+        """Parse the golden YAML contract."""
+        return yaml.safe_load(YAML_CONTRACT.read_text(encoding="utf-8"))
+
+    def test_generated_yaml_preserves_job_recovery(
+        self, generated_yaml_content: dict
+    ) -> None:
+        """job_recovery must be inside resources (not top-level) after injection."""
+        resources = generated_yaml_content["resources"]
+        assert "job_recovery" in resources, (
+            "job_recovery missing from resources after region injection — "
+            "generate_skypilot_yaml must preserve all existing resource keys"
+        )
+        # Verify it is NOT at the top level (SkyPilot expects it under resources)
+        assert "job_recovery" not in generated_yaml_content or "job_recovery" in resources, (
+            "job_recovery found at top level — must be nested under resources"
+        )
+
+    def test_no_banned_gpu_in_ordered(
+        self, generated_yaml_content: dict, contract: dict
+    ) -> None:
+        """No accelerator in the ordered: block may contain a banned GPU name."""
+        banned = contract["banned_accelerators"]
+        ordered = generated_yaml_content["resources"]["ordered"]
+        for entry in ordered:
+            accel = entry["accelerators"]
+            # Extract GPU name (e.g., "L4" from "L4:1")
+            gpu_name = accel.split(":")[0]
+            for banned_gpu in banned:
+                assert banned_gpu not in gpu_name, (
+                    f"Banned GPU '{banned_gpu}' found in ordered entry: {accel}"
+                )
+
+    def test_ordered_gpu_in_contract_allowlist(
+        self, generated_yaml_content: dict, contract: dict
+    ) -> None:
+        """Every GPU in ordered: must appear in the contract allowlist for its cloud."""
+        cloud = generated_yaml_content["resources"].get("cloud", "gcp")
+        allowed = contract["allowed_accelerators"].get(cloud, [])
+        ordered = generated_yaml_content["resources"]["ordered"]
+        for entry in ordered:
+            accel = entry["accelerators"]
+            gpu_name = accel.split(":")[0]
+            assert gpu_name in allowed, (
+                f"GPU '{gpu_name}' not in contract allowlist for {cloud}: {allowed}"
+            )
+
+    def test_required_keys_in_generated_yaml(
+        self, generated_yaml_content: dict
+    ) -> None:
+        """Generated YAML must contain all required top-level keys."""
+        required_keys = {"name", "resources", "setup", "run"}
+        missing = required_keys - set(generated_yaml_content.keys())
+        assert not missing, (
+            f"Generated YAML missing required top-level keys: {missing}"
+        )

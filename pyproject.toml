@@ -115,7 +115,7 @@ agents = [
     "langfuse>=2.56,<3.0",
     "braintrust>=0.0.180,<1.0",
     # langgraph removed — replaced by pydantic-ai (ADR-0007)
-    "litellm>=1.70,<2.0",
+    "litellm>=1.70,<=1.82.6",  # PINNED: 1.82.7-1.82.8 compromised by TeamPCP (2026-03-24)
 ]
 monitoring = [
     # Optional: error tracking + product analytics stubs.
