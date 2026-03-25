@@ -267,6 +267,35 @@ IFS=',' read -ra MODEL_ARRAY <<< "${MODELS}"
 IFS=',' read -ra LOSS_ARRAY <<< "${LOSSES}"
 IFS=',' read -ra AUX_CALIB_ARRAY <<< "${AUX_CALIBS}"
 
+# ─── Parse model_overrides for per-model batch_size / grad accum ────────────
+# Reads model_overrides section from factorial YAML. Models not listed use
+# fixed.batch_size with gradient_accumulation_steps=1 (default).
+# See: docs/planning/sam3-batch-size-1-and-robustification-plan.xml Task 1.2
+GLOBAL_BATCH_SIZE=$(python3 -c "
+import yaml, pathlib
+cfg = yaml.safe_load(pathlib.Path('${REPO_ROOT}/${CONFIG_FILE}').read_text(encoding='utf-8'))
+print(cfg.get('fixed', {}).get('batch_size', 2))
+")
+
+declare -A MODEL_BATCH_SIZE
+declare -A MODEL_GRAD_ACCUM
+
+# Populate per-model overrides from YAML (if model_overrides section exists)
+while IFS=' ' read -r m_name m_bs m_accum; do
+    MODEL_BATCH_SIZE["${m_name}"]="${m_bs}"
+    MODEL_GRAD_ACCUM["${m_name}"]="${m_accum}"
+done < <(
+    python3 -c "
+import yaml, pathlib
+cfg = yaml.safe_load(pathlib.Path('${REPO_ROOT}/${CONFIG_FILE}').read_text(encoding='utf-8'))
+overrides = cfg.get('model_overrides', {})
+for model_name, settings in overrides.items():
+    bs = settings.get('batch_size', cfg.get('fixed', {}).get('batch_size', 2))
+    accum = settings.get('gradient_accumulation_steps', 1)
+    print(f'{model_name} {bs} {accum}')
+"
+)
+
 # Layer A (training) determines GPU job count. Post-training runs in the SAME job
 # (parent flow iterates over methods internally — no extra jobs).
 # Full factorial: pre-gcp-master-plan.xml line 16. Only Layer A launches SkyPilot jobs.
@@ -328,11 +357,17 @@ for model in "${MODEL_ARRAY[@]}"; do
             for fold in $(seq 0 $((NUM_FOLDS - 1))); do
                 CONDITION=$((CONDITION + 1))
                 CONDITION_NAME="${model}-${loss}-calib${aux_calib}-f${fold}"
-                echo "[${CONDITION}/${TOTAL_GPU_JOBS}] ${model} × ${loss} × aux_calib=${aux_calib} × fold=${fold} (pt: ${PT_METHODS})"
+
+                # Resolve per-model batch_size and gradient_accumulation_steps
+                BATCH_SIZE="${MODEL_BATCH_SIZE[${model}]:-${GLOBAL_BATCH_SIZE}}"
+                GRAD_ACCUM="${MODEL_GRAD_ACCUM[${model}]:-1}"
+                EFFECTIVE_BS=$((BATCH_SIZE * GRAD_ACCUM))
+
+                echo "[${CONDITION}/${TOTAL_GPU_JOBS}] ${model} × ${loss} × aux_calib=${aux_calib} × fold=${fold} (bs=${BATCH_SIZE}, accum=${GRAD_ACCUM}, eff_bs=${EFFECTIVE_BS}, pt: ${PT_METHODS})"
 
                 if [ "${DRY_RUN}" = true ]; then
-                    echo "  [DRY RUN] sky jobs launch ${LAUNCH_YAML} --name ${CONDITION_NAME} --env MODEL_FAMILY=${model} ..."
-                    echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | DRY_RUN" >> "${JOB_LOG}"
+                    echo "  [DRY RUN] sky jobs launch ${LAUNCH_YAML} --name ${CONDITION_NAME} --env MODEL_FAMILY=${model} --env BATCH_SIZE=${BATCH_SIZE} --env GRAD_ACCUM_STEPS=${GRAD_ACCUM} ..."
+                    echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | bs=${BATCH_SIZE} | accum=${GRAD_ACCUM} | DRY_RUN" >> "${JOB_LOG}"
                 else
                     # Resume: skip already-submitted conditions (Gap #3)
                     if [ "${RESUME}" = true ] && echo "${EXISTING_ACTIVE_JOBS}" | grep -qF "${CONDITION_NAME}"; then
@@ -357,6 +392,8 @@ for model in "${MODEL_ARRAY[@]}"; do
                                 --env MAX_VAL_VOLUMES="${MAX_VAL}" \
                                 --env EXPERIMENT_NAME="${EXPERIMENT_NAME}" \
                                 --env POST_TRAINING_METHODS="${PT_METHODS}" \
+                                --env BATCH_SIZE="${BATCH_SIZE}" \
+                                --env GRAD_ACCUM_STEPS="${GRAD_ACCUM}" \
                                 --env-file "${ENV_FILE}" \
                                 -y; then
                                 echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | LAUNCHED" >> "${JOB_LOG}"
@@ -444,10 +481,16 @@ for b in baselines:
         condition_name = f'{model}-zeroshot-{dataset}-f{fold}'
         print(f'  [zero-shot] {model} x fold={fold} x dataset={dataset}')
 
+        # Resolve per-model overrides for zero-shot baselines
+        overrides = cfg.get('model_overrides', {})
+        model_cfg = overrides.get(model, {})
+        zs_batch_size = model_cfg.get('batch_size', fixed.get('batch_size', 2))
+        zs_grad_accum = model_cfg.get('gradient_accumulation_steps', 1)
+
         if dry_run:
-            print(f'  [DRY RUN] sky jobs launch --name {condition_name} ...')
+            print(f'  [DRY RUN] sky jobs launch --name {condition_name} --env MODEL_FAMILY={model} --env BATCH_SIZE={zs_batch_size} --env GRAD_ACCUM_STEPS={zs_grad_accum} ...')
             with open(job_log, 'a', encoding='utf-8') as f:
-                f.write(f'ZS | {model} | zero_shot | false | {fold} | DRY_RUN\n')
+                f.write(f'ZS | {model} | zero_shot | false | {fold} | bs={zs_batch_size} | accum={zs_grad_accum} | DRY_RUN\n')
         else:
             result = subprocess.run([
                 '${SKY_BIN}', 'jobs', 'launch',
@@ -464,6 +507,8 @@ for b in baselines:
                 '--env', f'EXPERIMENT_NAME={experiment}',
                 '--env', f'ZERO_SHOT=true',
                 '--env', f'EVAL_DATASET={dataset}',
+                '--env', f'BATCH_SIZE={zs_batch_size}',
+                '--env', f'GRAD_ACCUM_STEPS={zs_grad_accum}',
                 '--env-file', '${ENV_FILE}',
                 '-y',
             ])

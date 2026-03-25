@@ -22,11 +22,14 @@ notes: >
   See #680 for full context.
 vram:
   inference_gb: null
-  training_gb: 22.7
+  training_gb: 13.0
   measured: true
-  measured_gpu: "RTX 4090"
-  measured_date: "2026-03-15"
+  measured_gpu: "L4"
+  measured_date: "2026-03-24"
   measured_config:
     patch_size: [64, 64, 3]
     batch_size: 1
-  notes: "OOM on 24GB. Requires A100 (40GB+)."
+  per_batch_size:
+    1: 13.0
+    2: 21.9
+  notes: "BS=1 fits L4 (24GB). BS=2 OOMs on L4 (21.9 GB measured, OOM with framework overhead)."

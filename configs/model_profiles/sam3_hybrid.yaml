@@ -30,9 +30,12 @@ vram:
   inference_gb: 7.2
   training_gb: 7.2
   measured: true
-  measured_gpu: "RTX 2070 Super + RTX 4090"
-  measured_date: "2026-03-09"
+  measured_gpu: "L4"
+  measured_date: "2026-03-24"
   measured_config:
     patch_size: [64, 64, 3]
     batch_size: 1
-  notes: "OOMs on 8GB at patch=(64,64,3). Use patch=(32,32,3) on 8GB."
+  per_batch_size:
+    1: 7.2
+    2: 14.4
+  notes: "BS=1 measured 7.2 GB. BS=2 estimated 14.4 GB. OOMs on 8GB at patch=(64,64,3)."

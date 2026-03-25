@@ -35,6 +35,9 @@ class VramProfile:
         Config used for measurement (patch_size, batch_size).
     notes:
         Additional context about the measurement.
+    per_batch_size:
+        Mapping of batch_size (int) to measured/estimated training VRAM in GB.
+        E.g. ``{1: 13.0, 2: 21.9}``. Used by vram_estimator for batch-aware checks.
     """
 
     inference_gb: float | None = None
@@ -44,6 +47,7 @@ class VramProfile:
     measured_date: str | None = None
     measured_config: dict[str, Any] | None = None
     notes: str | None = None
+    per_batch_size: dict[int, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -122,7 +126,16 @@ def load_model_profile(
             filtered = {k: v for k, v in data.items() if k in known}
             # Parse vram dict into VramProfile dataclass
             if "vram" in filtered and isinstance(filtered["vram"], dict):
-                filtered["vram"] = VramProfile(**filtered["vram"])
+                vram_data = dict(filtered["vram"])
+                # Normalize per_batch_size keys to int (YAML may load them as int or str)
+                if "per_batch_size" in vram_data and isinstance(
+                    vram_data["per_batch_size"], dict
+                ):
+                    vram_data["per_batch_size"] = {
+                        int(k): float(v)
+                        for k, v in vram_data["per_batch_size"].items()
+                    }
+                filtered["vram"] = VramProfile(**vram_data)
             return ModelProfile(**filtered)
     raise FileNotFoundError(f"No profile found for model '{name}' in {dirs}")
 
