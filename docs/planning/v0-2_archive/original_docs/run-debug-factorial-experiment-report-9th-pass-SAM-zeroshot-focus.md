@@ -13,14 +13,20 @@
 **Solution**: batch_size=1 + gradient_accumulation_steps=4 via `model_overrides` in
 factorial config. Expected VRAM: ~13 GB (TopoLoRA), ~7.2 GB (Hybrid).
 
-**Result**: **SAM3 OOM FIXED.** SAM3 TopoLoRA confirmed training for 28+ minutes on
-L4 without OOM. The BS=1 fix eliminates the VRAM bottleneck. However, extreme spot
-preemption pressure in europe-west4 is preventing most SAM3 jobs from completing their
-full 2-epoch debug run — jobs are repeatedly preempted before training completes.
+**Result**: **SAM3 OOM eliminated** — zero VRAM errors across 35+ SAM3 TopoLoRA job
+attempts, with individual jobs training for 12-37 minutes on L4. The BS=1 fix works.
+**However, zero SAM3 jobs have reached SUCCEEDED status.** All were preempted before
+completing the full 2-epoch debug run. The blocker shifted from OOM → spot preemption
+exhaustion (`max_restarts_on_errors: 3`). SAM3 can train; it cannot yet finish on spot.
+
+**HONEST FRAMING**: "OOM eliminated" is not "problem solved." Until at least one SAM3
+condition reaches SUCCEEDED, end-to-end validation is incomplete. Production readiness
+requires: (a) at least 1 SAM3 TopoLoRA SUCCEEDED, (b) SAM3 Hybrid tested, (c) gradient
+accumulation tested on real GPU, (d) SWAG post-training exercised for SAM3.
 
 **Secondary objective**: Cloud robustness + security hardening.
-**Result**: 203 new tests, 24 issues implemented and closed, Trivy→Grype, pip-audit,
-SHA-256 weight pinning, torch.load audit. Test suite: 6687 passed, 0/0/0.
+**Result**: 173 net new prod tests (+6514→6687), 24 issues implemented and closed,
+Trivy→Grype, pip-audit, SHA-256 weight pinning, torch.load audit.
 
 ## 2. Status Matrix (Snapshot: 2026-03-25T11:00 UTC)
 
@@ -29,20 +35,26 @@ SHA-256 weight pinning, torch.load audit. Test suite: 6687 passed, 0/0/0.
 | # | Condition | Status | Job Duration | Recoveries | Notes |
 |---|-----------|--------|-------------|------------|-------|
 | **DynUNet — 4/4 SUCCEEDED** |
-| 53 | dynunet-cbdice_cldice-calibfalse-f0 | SUCCEEDED | 29s | 0 | Fast — cached setup |
-| 54 | dynunet-cbdice_cldice-calibtrue-f0 | SUCCEEDED | 2s | 0 | |
-| 55 | dynunet-dice_ce-calibtrue-f0 | SUCCEEDED | 9m | 0 | Full 2-epoch training |
-| 56 | dynunet-dice_ce-calibfalse-f0 | SUCCEEDED | 9m | 0 | Full 2-epoch training |
+| 53 | dynunet-cbdice_cldice-calibfalse-f0 | SUCCEEDED | 11m 38s | 1 | |
+| 54 | dynunet-cbdice_cldice-calibtrue-f0 | SUCCEEDED | 17m 9s | 1 | |
+| 55 | dynunet-dice_ce-calibtrue-f0 | SUCCEEDED | 9m 12s | 0 | |
+| 56 | dynunet-dice_ce-calibfalse-f0 | SUCCEEDED | 9m 14s | 0 | |
 | **DynUNet — 4/4 not yet submitted (remaining from full factorial)** |
 | — | dynunet-dice_ce_cldice-* | NOT SUBMITTED | — | — | Resilient wrapper will submit |
 | — | dynunet-bce_dice_05cldice-* | NOT SUBMITTED | — | — | |
 | **MambaVesselNet — NOT YET SUBMITTED (8/8 pending)** |
 | — | All 8 MambaVesselNet conditions | NOT SUBMITTED | — | — | Resilient wrapper will submit |
-| **SAM3 TopoLoRA — 0/8 SUCCEEDED, all spot preempted** |
-| 69 | sam3_topolora-cbdice_cldice-calibtrue-f0 | RECOVERING | 28m | 1 | **Longest SAM3 run — NO OOM** |
-| 66 | sam3_topolora-cbdice_cldice-calibtrue-f0 | FAILED | 28m | 3 | Ran 28 min, preempted 3x |
-| 57-68 | Various TopoLoRA conditions | FAILED | 5s-43s | 3 each | Preempted before training start |
+| **SAM3 TopoLoRA — 0/8 SUCCEEDED, all spot preempted (OOM eliminated)** |
+| 69 | sam3_topolora-cbdice_cldice-calibtrue-f0 | RECOVERING | 40m | 1 | **Longest SAM3 run — NO OOM** |
+| 66 | sam3_topolora-cbdice_cldice-calibtrue-f0 | FAILED | 28m | 3 | Trained 28 min, preempted 3x |
+| 57-68 | Various TopoLoRA conditions | FAILED | 12-37m | 3 each | Trained 12-37 min each, preempted before completion |
 | 70-72 | New TopoLoRA submissions | PENDING/STARTING | — | 0 | From resilient wrapper |
+
+**CORRECTION (reviewer agent)**: Earlier draft incorrectly stated jobs 57-68 ran "5s-43s"
+and were "preempted before training start." Actual sky jobs queue data shows 12-37 min
+of training per job. All SAM3 jobs DID train — they were preempted mid-training, not
+during provisioning. This is an important distinction: the code works, spot availability
+is the bottleneck.
 | **SAM3 Hybrid — NOT YET SUBMITTED (8/8 pending)** |
 | — | All 8 SAM3 Hybrid conditions | NOT SUBMITTED | — | — | Launch script hasn't reached these |
 | **Zero-shot baselines — NOT YET SUBMITTED (2/2 pending)** |
@@ -56,15 +68,26 @@ SHA-256 weight pinning, torch.load audit. Test suite: 6687 passed, 0/0/0.
 | 18-25 | DynUNet (8/8) | SUCCEEDED | 9-14 min per job, 0-1 preemptions |
 | 26-33 | MambaVesselNet (8/8) | SUCCEEDED | 8-9 min per job, 0 preemptions |
 
-### Aggregate Counts
+### Pre-Fix SAM3 Attempts (IDs 34-52, stale Docker image or stale launchers)
 
-| Status | 9th Pass | 8th Pass | Total |
-|--------|----------|----------|-------|
-| SUCCEEDED | 4 | 15 | 19 |
-| FAILED (preemption) | 16 | 0 | 16 |
-| ACTIVE | 4 | 0 | 4 |
-| NOT SUBMITTED | 22 | 0 | 22 |
-| CANCELLED | 11 | 5 | 16 |
+These 19 jobs were submitted during the 9th pass session but before the Docker
+image was rebuilt or after the stale image launch was aborted. They are NOT part
+of the validated 9th pass results but they consumed cloud credits.
+
+| IDs | Model | Status | Notable | Cost Impact |
+|-----|-------|--------|---------|-------------|
+| 34-48 | SAM3 TopoLoRA | 8 FAILED, 7 CANCELLED | Job 38: 3h 51m training, Job 41: 2h 9m | ~$3-5 wasted |
+| 49-52 | DynUNet | 4 CANCELLED | Stale image, cancelled immediately | ~$0.10 |
+
+### Aggregate Counts (All Passes Combined)
+
+| Status | 9th Pass (53+) | 8th Pass (18-33) | Pre-fix (34-52) | Total |
+|--------|---------------|-----------------|----------------|-------|
+| SUCCEEDED | 4 | 16 | 0 | 20 |
+| FAILED | 12 | 0 | 8 | 20 |
+| ACTIVE | 4 | 0 | 0 | 4 |
+| NOT SUBMITTED | 22 | 0 | 0 | 22 |
+| CANCELLED | 0 | 0 | 11 | 11 |
 
 ## 3. Timeline
 
@@ -95,25 +118,35 @@ SHA-256 weight pinning, torch.load audit. Test suite: 6687 passed, 0/0/0.
 
 ## 4. Key Findings
 
-### F1: SAM3 OOM IS FIXED — Zero VRAM Issues
+### F1: SAM3 OOM Eliminated — But Zero Jobs Completed
 
-The batch_size=1 fix completely eliminates the OOM that blocked all SAM3 conditions
-in the 8th pass. Evidence:
+The batch_size=1 fix eliminates the OOM that blocked all SAM3 conditions in the 8th
+pass. Zero VRAM errors across 35+ job attempts. Evidence:
 
-- Job 69: SAM3 TopoLoRA trained for **28 minutes** on L4 before spot preemption — no OOM
-- Job 66: SAM3 TopoLoRA trained for **28 minutes** across 3 recovery attempts — no OOM
-- Multiple jobs trained for 12+ minutes each before preemption — none hit VRAM limits
+- Job 69: SAM3 TopoLoRA trained for **40 minutes** on L4 — NO OOM, still recovering
+- Job 66: SAM3 TopoLoRA accumulated **28 minutes** of training across 3 recoveries — NO OOM
+- Jobs 57-68: Each trained 12-37 minutes before spot preemption — zero VRAM errors
 - The 8th pass SAM3 OOMed within the first minute at BS=2 (21.9 GB / 24 GB L4)
 
 **VRAM reduction**: 21.9 GB (BS=2) → estimated ~13 GB (BS=1) — well within L4's 24 GB.
 
+**CRITICAL CAVEAT**: Zero SAM3 jobs have reached SUCCEEDED status. Every job trained
+successfully but was preempted 3 times and exhausted `max_restarts_on_errors`. The
+training code works; the spot instance market does not cooperate. This means:
+- We have NOT validated the full training pipeline end-to-end for SAM3
+- We have NOT seen a SAM3 checkpoint saved successfully
+- We have NOT tested SWAG post-training on SAM3
+- We have NOT tested MLflow artifact upload for SAM3's ~650 MB checkpoint
+
 ### F2: Spot Preemption Is the Remaining Blocker (NOT Code)
 
-All 16 FAILED SAM3 TopoLoRA jobs failed due to **spot preemption exhaustion**
-(`max_restarts_on_errors: 3`), NOT training errors:
+All 20 FAILED SAM3 TopoLoRA jobs (IDs 34-68) failed due to **spot preemption
+exhaustion** (`max_restarts_on_errors: 3`), NOT training errors:
 
-- Most jobs ran 5-43 seconds before preemption (never started training)
-- Jobs that did start training (28 min duration) ran perfectly until preempted
+- Every SAM3 job that provisioned DID start training (12-37 min per attempt)
+- **CORRECTION**: Earlier draft claimed "5-43s" durations — this was wrong.
+  Actual `sky jobs queue` data shows 12-37 minute job durations. SAM3 jobs
+  trained substantially before preemption, they did NOT fail at provisioning.
 - L4 spot in europe-west4 is heavily contested during this time period
 
 **Root cause**: GPUS_ALL_REGIONS=1 forces serial execution, AND spot availability
@@ -143,10 +176,14 @@ new `gradient_accumulation_steps` parameter in `TrainingConfig`.
 
 **Action**: Rebuild Docker image before production runs (`paper_full.yaml`).
 
-### F5: DynUNet Runs Fast and Reliably
+### F5: DynUNet Runs Reliably (9-17 min per condition)
 
-All 4 new DynUNet conditions SUCCEEDED in 2-9 minutes. This matches the 8th pass
-pattern (8/8 SUCCEEDED). DynUNet at BS=2 on L4 is rock solid.
+All 4 new DynUNet conditions SUCCEEDED in 9-17 minutes (including 0-1 preemption
+recoveries each). This matches the 8th pass pattern (8/8 SUCCEEDED, 9-14 min).
+DynUNet at BS=2 on L4 is rock solid.
+
+**CORRECTION**: Earlier draft claimed "2-9 minutes." Actual durations from sky jobs
+queue: 53=11m38s, 54=17m9s, 55=9m12s, 56=9m14s.
 
 ## 5. Watchlist — Final Status
 
@@ -248,17 +285,23 @@ pattern (8/8 SUCCEEDED). DynUNet at BS=2 on L4 is rock solid.
 
 ## 8. Cost Analysis
 
-| Category | Estimated | Actual (approximate) |
-|----------|-----------|---------------------|
-| DynUNet (4 SUCCEEDED, L4 spot) | $0.28 | ~$0.30 |
-| SAM3 TopoLoRA (20 attempts, most preempted) | $0.80 | ~$2.00 (preemption overhead) |
-| Controller (n4-standard-4, ~8 hrs) | $0.60 | ~$1.50 |
-| Docker rebuild + push | $0 | $0 (local) |
-| **Total** | **$2.14** | **~$3.80** |
+| Category | Estimated | Actual (approximate) | Notes |
+|----------|-----------|---------------------|-------|
+| DynUNet (4 new SUCCEEDED, L4 spot) | $0.28 | ~$0.40 | 9-17 min each |
+| SAM3 TopoLoRA 9th pass (20 attempts) | $0.80 | ~$3.00 | 12-37 min training per attempt |
+| SAM3 TopoLoRA pre-fix (15 attempts, IDs 34-48) | — | ~$4.00 | Job 38: 3h51m, Job 41: 2h9m |
+| Controller (n4-standard-4, ~10 hrs) | $0.60 | ~$2.00 | Running for full session |
+| Docker rebuild + push | $0 | $0 | Local build |
+| **Total** | **$2.14** | **~$9.40** |
 
-Preemption overhead doubled the SAM3 cost — jobs provisioned, ran briefly, got
-preempted, provisioned again. The controller ran for the full session (~8 hrs)
-because jobs kept being re-submitted.
+**CORRECTION**: Original estimate of $3.80 excluded the 15 pre-fix SAM3 attempts
+(IDs 34-48) which accumulated significant GPU time. Job 38 alone had 3h51m of
+training. The actual cost is approximately 4.4x the original estimate.
+
+The majority of cost waste comes from spot preemption — jobs that trained for
+12-37 minutes only to be preempted and lose all progress. With checkpoint resumption
+(spot recovery), some of this training is preserved, but with `max_restarts_on_errors: 3`,
+each condition gets at most 4 attempts before permanently failing.
 
 ## 9. Recommendations for Next Session
 
