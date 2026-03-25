@@ -306,6 +306,127 @@ downloads) can be compromised. Our defense must assume any dependency could be t
   a known-good allowlist. Flag any new `.pth` files as potential supply chain attack.
 - [ ] **safetensors migration**: Track in PRD as long-term goal for model export format.
 
+### Implementation Status (2026-03-25)
+
+| Action | Status | Commit |
+|--------|--------|--------|
+| Pin litellm<=1.82.6 | **DONE** | `10706430` |
+| Replace Trivy with Grype | **DONE** | `10706430` — 21 tests, grype-critical target |
+| Add pip-audit pre-commit | **DONE** | `10706430` — 7 tests, uvx-based, gated on dep files |
+| SHA-256 weight pinning | **DONE** | `10706430` — VesselFM hash enabled, SAM3 revision pin |
+| torch.load audit | **DONE** | `10706430` — AST guard, 9 call sites documented |
+
+---
+
+## 10. Theoretical Background and Further Exploration
+
+### 10.1 The Fundamental Supply Chain Problem
+
+The LiteLLM/Trivy incident illustrates a cascading trust failure:
+`Trivy (scanner) → CI credentials → PyPI token → 97M monthly downloads poisoned`
+
+The HN discussion ([item 47501426](https://news.ycombinator.com/item?id=47501426))
+surfaced several structural observations:
+
+**Credential scope is the root cause** (tedivm, HN): The real fix is "not having a
+token at all" — use OIDC-based publishing workflows where only the publish job accesses
+OIDC endpoints. If the Trivy job cannot see the PyPI token, compromising Trivy steals
+nothing. LiteLLM's CI had `PYPI_PUBLISH` accessible to all CI jobs, not just the
+publishing step. This is the same anti-pattern as putting `HF_TOKEN` in the SkyPilot
+`envs:` block instead of `--env-file` (our `.env` approach is correct here).
+
+**Sandboxing must be per-tool, not per-environment** (ashishb, HN): "No linter/scanner/
+formatter (e.g., trivy) should need full disk access." The principle: each tool gets
+access only to the files it needs. Our Docker-per-flow architecture already implements
+this for training — each flow container sees only its mounted volumes. But our LOCAL
+development tools (ruff, mypy, pre-commit hooks) have unrestricted filesystem access.
+This is an open research area for development environments.
+
+**The "always update" treadmill creates attack surface** (1313ed01, HN): Locked-down
+systems that never change are secure but impractical — "breaking changes force everyone
+to always be on a recent release." This is why version pinning (our approach) is
+necessary but not sufficient. The pinned version itself could be compromised at the
+time of pinning. Defense-in-depth (multiple scanners, hash verification, SBOM auditing)
+is the only viable strategy.
+
+### 10.2 Sandboxing Approaches — Practical Taxonomy
+
+| Approach | Granularity | Overhead | Maturity | Example |
+|----------|------------|----------|----------|---------|
+| **OS capabilities** | Per-process | Minimal | Production | OpenBSD pledge/unveil, Linux seccomp |
+| **Container namespaces** | Per-container | Low | Production | Docker, podman (our current model) |
+| **User-space kernel** | Per-container | 10-30% I/O | Production | gVisor (Google) |
+| **MicroVM** | Per-workload | ~125ms boot | Production | Firecracker (AWS Lambda) |
+| **Capability-based FS** | Per-tool | Minimal | Emerging | Capsicum (FreeBSD), Landlock (Linux 5.13+) |
+| **WASM sandbox** | Per-function | Variable | Emerging | Wasmtime, WasmEdge |
+
+For this project, we use **container namespaces** (Docker-per-flow) which is appropriate.
+The gap is local development tools — ruff, mypy, pre-commit hooks run with full user
+permissions. Linux Landlock (kernel 5.13+, our kernel is 6.8) could restrict per-tool
+filesystem access without containers, but tooling is immature.
+
+**staticassertion (HN) caution**: "Entering a Linux namespace requires root in
+practice... eBPF is a very hard boundary to maintain... Sandboxing tooling is really
+bad." This matches our experience — Docker works because it's production-grade, but
+finer-grained sandboxing (per-hook, per-tool) is not yet practical for development
+workflows.
+
+### 10.3 CI/CD Credential Management — OIDC Best Practice
+
+The industry-standard defense against CI credential theft is **OIDC-based publishing**:
+
+```
+Traditional (vulnerable):     CI job → reads PYPI_TOKEN env var → publishes
+OIDC (secure):                CI job → requests OIDC token → PyPI verifies identity → publishes
+```
+
+With OIDC, no long-lived secret exists in CI. Even if a scanner job is compromised,
+it cannot forge an OIDC token for the publish job's identity. PyPI supports OIDC via
+"Trusted Publishers" (GitHub Actions OIDC).
+
+**Relevance to vascadia**: Our CI is disabled (Rule #21), so this is not an immediate
+concern. But if CI is ever re-enabled, publishing workflows (Docker push to GAR,
+Python package publishing) MUST use OIDC, not stored tokens.
+
+### 10.4 Seeds for Further Exploration
+
+1. **Landlock LSM for per-tool sandboxing**: Linux 5.13+ supports Landlock — a
+   user-space filesystem access control that doesn't require root. Could be used to
+   restrict pre-commit hooks to only read the repo directory. Research needed on
+   Python integration. See: [Landlock docs](https://landlock.io/)
+
+2. **Reproducible builds for Docker images**: If anyone can rebuild our Docker image
+   from source and get an identical binary, supply chain attacks on the image become
+   detectable. This is the strongest guarantee but requires deterministic builds
+   (fixed timestamps, sorted file lists, pinned compilers). Guix and Nix ecosystems
+   have proven this is feasible but not trivial.
+
+3. **Build provenance via SLSA**: SLSA (Supply-chain Levels for Software Artifacts)
+   provides a framework for attesting build provenance. Level 3 requires isolated
+   builds with provenance attestation. GitHub Actions supports SLSA provenance
+   generation. Relevant when CI is re-enabled.
+   See: [SLSA Framework](https://slsa.dev/)
+
+4. **Model weight transparency logs**: Analogous to Certificate Transparency for TLS,
+   model weights could be published to an append-only log. Any download can be verified
+   against the log entry. Sigstore's model transparency initiative is the closest
+   implementation. See: [Red Hat Model Authenticity](https://next.redhat.com/2025/04/10/model-authenticity-and-transparency-with-sigstore/)
+
+5. **Capability-based security for MCP servers**: The MCP protocol has no built-in
+   security model ("The S in MCP stands for security" — HN). Research on
+   capability-based security (object-capability model) could provide a principled
+   framework for granting MCP tools minimal, revocable permissions. This is the same
+   problem as Unix file permissions vs. capability-based OS design.
+
+6. **Prompt injection as a fundamental LLM limitation**: The HN thread and Reddit
+   discussion converge on a key insight — LLMs cannot distinguish between command layer
+   and content layer because it's all tokens. This is not a bug to be fixed but a
+   fundamental architectural property. Every "safety" boundary is probabilistic, not
+   deterministic. Implications: agent systems must use deterministic permission gates
+   (not LLM-mediated ones) for any security-critical operation. Claude Code's permission
+   prompt model is correct in principle (deterministic gate), but the sandbox escape CVEs
+   show the implementation surface is large.
+
 ### P3 — If Pursuing Compliance
 
 - [ ] **Runtime monitoring**: Falco for syscall monitoring in Docker containers
