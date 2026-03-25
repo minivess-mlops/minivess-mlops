@@ -11,7 +11,7 @@
 ![mypy](https://img.shields.io/badge/type%20checker-mypy-blue)
 ![version](https://img.shields.io/badge/version-0.2.0--beta-yellow)
 
-**A model-agnostic biomedical segmentation MLOps platform extending the MONAI ecosystem.**
+**A model-agnostic biomedical segmentation MLOps platform extending the [MONAI](https://monai.io/) ecosystem.**
 
 VASCADIA is a research-grade software platform designed to scaffold
 reproducible machine learning experimentation for preclinical biomedical imaging.
@@ -23,7 +23,7 @@ manuscript targets *Nature Protocols*.
 The platform architecture aligns with the four pillars of the **MedMLOps framework**
 ([de Almeida et al., 2025](https://link.springer.com/article/10.1007/s00330-025-11654-6)):
 (1) availability via containerised reproducible infrastructure,
-(2) continuous monitoring and validation via drift detection and OpenLineage lineage,
+(2) continuous monitoring and validation via drift detection and [OpenLineage](https://openlineage.io/) lineage,
 (3) data protection via DVC versioning and opt-in multi-site pooling, and
 (4) ease of use via zero-config defaults for PhD researchers.
 
@@ -36,19 +36,19 @@ doi: [10.1038/s41597-023-02048-8](https://doi.org/10.1038/s41597-023-02048-8)
 
 ## Key Features
 
-- **6 model families** behind a single `ModelAdapter` ABC: DynUNet (CNN baseline), MambaVesselNet++ (SSM hybrid), SAM3 Vanilla/TopoLoRA/Hybrid (foundation model variants), VesselFM (vessel-specific foundation model)
-- **18 loss functions** -- from standard (Dice+CE) to topology-aware (clDice, CAPE, Betti matching, skeleton recall) to graph-constrained (compound graph topology)
+- **6 model families** behind a single `ModelAdapter` ABC: [DynUNet](https://docs.monai.io/en/stable/networks.html) (CNN baseline), [MambaVesselNet++](https://doi.org/10.1145/3757324) (SSM hybrid), [SAM3](https://github.com/facebookresearch/sam3) Vanilla/TopoLoRA/Hybrid (foundation model variants), [VesselFM](https://arxiv.org/abs/2411.17386) (vessel-specific foundation model)
+- **18 loss functions** -- from standard (Dice+CE) to topology-aware ([clDice](https://arxiv.org/abs/2003.07311), [CAPE](https://arxiv.org/abs/2504.00753), [Betti matching](https://arxiv.org/abs/2211.15272), [skeleton recall](https://arxiv.org/abs/2404.03010)) to graph-constrained (compound graph topology)
 - **15 Prefect flows** with Docker-per-flow isolation, spanning the full ML lifecycle from data engineering through biostatistics reporting
 - **SkyPilot intercloud broker** ([Yang et al., NSDI'23](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng)) -- one command to launch GPU jobs on RunPod or GCP
-- **OpenLineage (Marquez) data lineage** for IEC 62304 traceability -- automated audit trail for every pipeline execution
-- **Evidently drift detection** + whylogs profiling + Prometheus/Grafana monitoring stack
-- **BentoML + ONNX Runtime serving** with champion model discovery and Gradio demo UI
+- **[OpenLineage](https://openlineage.io/) ([Marquez](https://marquezproject.ai/)) data lineage** for [IEC 62304](https://www.iso.org/standard/38421.html) traceability -- automated audit trail for every pipeline execution
+- **[Evidently](https://www.evidentlyai.com/) drift detection** + [whylogs](https://whylogs.readthedocs.io/) profiling + [Prometheus](https://prometheus.io/)/[Grafana](https://grafana.com/) monitoring stack
+- **[BentoML](https://www.bentoml.com/) + [ONNX Runtime](https://onnxruntime.ai/) serving** with champion model discovery and [Gradio](https://www.gradio.app/) demo UI
 - **MetricsReloaded evaluation** -- clDice (trusted), MASD (trusted), DSC (foil) per [Maier-Hein et al. (2024)](https://doi.org/10.1038/s41592-023-02151-z)
 - **3-fold cross-validation** (seed=42) with bootstrap confidence intervals and paired statistical tests
 - **Conformal uncertainty quantification** -- 5 methods (split conformal, morphological, distance transform, risk-controlling, MAPIE)
 - **Post-training plugins** -- 7 config-driven enhancements (checkpoint averaging, subsampled ensemble, SWAG ([Maddox et al. 2019](https://arxiv.org/abs/1902.02476)), model merging, calibration, CRC conformal, ConSeCo FP control)
 - **Knowledge graph** -- 75+ Bayesian decision nodes across 6 layers, driving spec-driven development
-- **FDA-ready audit infrastructure** -- AuditTrail, compliance module, PCCP-compatible factorial design, CycloneDX SBOM (planned)
+- **FDA-ready audit infrastructure** -- AuditTrail, compliance module, PCCP-compatible factorial design, [CycloneDX](https://cyclonedx.org/) SBOM (planned)
 
 ---
 
@@ -70,7 +70,7 @@ providing a natural extension point for agentic capabilities as the field mature
 pipeline: data engineering, training, post-training, evaluation, deployment,
 biostatistics. Every run produces identical outputs given identical inputs --
 the reproducibility guarantee essential for both scientific publication and
-regulatory compliance. Within individual flows, **Pydantic AI agents** provide
+regulatory compliance. Within individual flows, **[Pydantic AI](https://ai.pydantic.dev/) agents** provide
 LLM-assisted capabilities that are *additive, optional, and auditable* via
 Langfuse tracing. If the LLM is unavailable, the flow runs to completion; only
 the LLM-generated summaries are missing. See
@@ -128,7 +128,7 @@ the interface itself adapts to the researcher's workflow.
 
 | Environment | Docker | Compute | Data | Purpose |
 |-------------|--------|---------|------|---------|
-| **local** | Docker Compose | Local GPU (e.g., RTX 2070 Super 8 GB) | MinIO (local) | Fast iteration, `uv run pytest` |
+| **local** | Docker Compose | Local GPU (e.g., RTX 2070 Super 8 GB) | [MinIO](https://min.io/) (local) | Fast iteration, `uv run pytest` |
 | **env** (RunPod) | Docker image via SkyPilot | RunPod RTX 4090 (24 GB) | Network Volume (upload from local) | Quick GPU experiments |
 | **staging/prod** (GCP) | Docker image via SkyPilot | GCP L4/A100 spot | GCS buckets | Production runs, paper results |
 
@@ -180,7 +180,7 @@ are thin -- only `COPY`, `ENV`, `CMD` -- they never run `apt-get` or `uv`.
 
 While MinIVess is a **preclinical research platform** (rodent cerebrovasculature),
 its architecture is designed to scale to clinical MLOps without retrofitting.
-The compliance infrastructure supports future FDA SaMD and EU MDR/IVDR pathways.
+The compliance infrastructure supports future [FDA SaMD](https://www.fda.gov/medical-devices/digital-health-center-excellence/software-medical-device-samd) and EU MDR/IVDR pathways.
 
 ### Current Compliance Infrastructure
 
@@ -251,8 +251,8 @@ implementing this interface + one YAML config.
 
 ```bash
 # Clone and install (--all-extras is REQUIRED for development)
-git clone https://github.com/petteriTeikari/minivess_mlops.git
-cd minivess_mlops
+git clone https://github.com/petteriTeikari/vascadia.git
+cd vascadia
 uv sync --all-extras
 
 # Run the staging test suite (fast, no model loading, <3 min)
@@ -338,28 +338,28 @@ Skills: `/search-metalearning` (search failure patterns), `/plan-context-load` (
 |-------|------|------|
 | Language | Python 3.12+ | Runtime |
 | Package Manager | uv | Dependency management (exclusively) |
-| ML Framework | PyTorch + MONAI + TorchIO | Training, augmentation, inference |
+| ML Framework | [PyTorch](https://pytorch.org/) + [MONAI](https://monai.io/) + [TorchIO](https://torchio.readthedocs.io/) | Training, augmentation, inference |
 | Orchestration | Prefect 3.x | Deterministic pipeline orchestration (macro) |
-| Agent Framework | Pydantic AI | LLM-assisted micro-orchestration ([ADR-0007](docs/adr/0007-pydantic-ai-over-langgraph.md)) |
-| Config (train) | Hydra-zen | Experiment configs with Pydantic v2 validation |
-| Config (deploy) | Dynaconf | Environment-layered deployment settings |
-| Data Validation | Pydantic v2 + Pandera + Great Expectations | Schema, DataFrame, batch quality |
-| Experiment Tracking | MLflow + DuckDB | Run tracking, model registry, SQL analytics |
-| HPO | Optuna + ASHA | Multi-objective hyperparameter optimisation |
-| Serving | BentoML + ONNX Runtime + Gradio | Model serving and demo UI |
-| Data Lineage | OpenLineage (Marquez) | IEC 62304 traceability |
-| Drift Detection | Evidently AI | KS test, PSI, kernel MMD |
-| Data Profiling | whylogs | Lightweight statistical profiling |
-| Monitoring | Prometheus + Grafana + AlertManager | Dashboards, alerting |
+| Agent Framework | [Pydantic AI](https://ai.pydantic.dev/) | LLM-assisted micro-orchestration ([ADR-0007](docs/adr/0007-pydantic-ai-over-langgraph.md)) |
+| Config (train) | [Hydra-zen](https://mit-ll-responsible-ai.github.io/hydra-zen/) | Experiment configs with Pydantic v2 validation |
+| Config (deploy) | [Dynaconf](https://www.dynaconf.com/) | Environment-layered deployment settings |
+| Data Validation | [Pydantic](https://docs.pydantic.dev/) v2 + [Pandera](https://pandera.readthedocs.io/) + [Great Expectations](https://greatexpectations.io/) | Schema, DataFrame, batch quality |
+| Experiment Tracking | [MLflow](https://mlflow.org/) + [DuckDB](https://duckdb.org/) | Run tracking, model registry, SQL analytics |
+| HPO | [Optuna](https://optuna.org/) + ASHA | Multi-objective hyperparameter optimisation |
+| Serving | [BentoML](https://www.bentoml.com/) + [ONNX Runtime](https://onnxruntime.ai/) + [Gradio](https://www.gradio.app/) | Model serving and demo UI |
+| Data Lineage | [OpenLineage](https://openlineage.io/) ([Marquez](https://marquezproject.ai/)) | [IEC 62304](https://www.iso.org/standard/38421.html) traceability |
+| Drift Detection | [Evidently](https://www.evidentlyai.com/) AI | KS test, PSI, kernel MMD |
+| Data Profiling | [whylogs](https://whylogs.readthedocs.io/) | Lightweight statistical profiling |
+| Monitoring | [Prometheus](https://prometheus.io/) + [Grafana](https://grafana.com/) + AlertManager | Dashboards, alerting |
 | Compute | SkyPilot | Intercloud broker (RunPod + GCP) |
-| Infrastructure | Docker Compose + Pulumi | Local dev stack, GCP IaC |
+| Infrastructure | [Docker Compose](https://docs.docker.com/compose/) + [Pulumi](https://www.pulumi.com/) | Local dev stack, GCP IaC |
 | Linter/Formatter | ruff | Linting and formatting |
 | Type Checker | mypy | Static type analysis |
-| Tests | pytest + Hypothesis | Unit, integration, property-based |
-| Topology | gudhi + networkx + scipy | Persistent homology, graph analysis |
-| XAI | Captum + SHAP + Quantus | Explainability and meta-evaluation |
-| LLM Observability | Langfuse + Braintrust + LiteLLM | Agent tracing, evals, provider flexibility |
-| Compliance | AuditTrail + IEC 62304 framework + CycloneDX (planned) | FDA/MDR readiness |
+| Tests | pytest + [Hypothesis](https://hypothesis.readthedocs.io/) | Unit, integration, property-based |
+| Topology | [gudhi](https://gudhi.inria.fr/) + [networkx](https://networkx.org/) + [scipy](https://scipy.org/) | Persistent homology, graph analysis |
+| XAI | [Captum](https://captum.ai/) + [SHAP](https://shap.readthedocs.io/) + [Quantus](https://github.com/understandable-machine-intelligence-lab/Quantus) | Explainability and meta-evaluation |
+| LLM Observability | [Langfuse](https://langfuse.com/) + [Braintrust](https://www.braintrust.dev/) + [LiteLLM](https://docs.litellm.ai/) | Agent tracing, evals, provider flexibility |
+| Compliance | AuditTrail + [IEC 62304](https://www.iso.org/standard/38421.html) framework + [CycloneDX](https://cyclonedx.org/) (planned) | [FDA](https://www.fda.gov/medical-devices/digital-health-center-excellence/software-medical-device-samd)/MDR readiness |
 
 ---
 
@@ -381,7 +381,7 @@ knowledge graph link integrity, and bibliography citation integrity.
 ## Directory Structure
 
 ```
-minivess-mlops/
+vascadia/
 |-- src/minivess/                  Main package
 |   |-- adapters/                  ModelAdapter ABC + 6 model families
 |   |-- pipeline/                  Training, evaluation, metrics, losses
@@ -470,16 +470,17 @@ If you use this platform, please cite the underlying dataset:
 ### In Progress
 
 - 4-layer factorial experiment on GCP L4 spot instances (24 training cells x 2 post-training x analysis layers)
-- OpenLineage flow wiring (Issue [#799](https://github.com/petteriTeikari/minivess-mlops/issues/799))
-- CycloneDX SBOM generation (Issue [#821](https://github.com/petteriTeikari/minivess-mlops/issues/821))
+- OpenLineage flow wiring (Issue [#799](https://github.com/petteriTeikari/vascadia/issues/799))
+- [CycloneDX](https://cyclonedx.org/) SBOM generation (Issue [#821](https://github.com/petteriTeikari/vascadia/issues/821))
 - Nature Protocols manuscript assembly (NEUROVEX)
 
 ### Planned
 
-- CopilotKit (AG-UI) + WebMCP for agentic dashboard/annotation
-- Multi-site opt-in telemetry (PostHog, Sentry)
-- Federated learning evaluation (NVIDIA FLARE vs MONAI FL)
+- [CopilotKit](https://www.copilotkit.ai/) (AG-UI) + WebMCP for agentic dashboard/annotation
+- Multi-site opt-in telemetry ([PostHog](https://posthog.com/), [Sentry](https://sentry.io/))
+- Federated learning evaluation ([NVIDIA FLARE](https://nvidia.github.io/NVFlare/) vs MONAI FL)
 - QMSR production controls documentation
+- **Science backlog**: calibration-aware ensembles ([#896](https://github.com/petteriTeikari/vascadia/issues/896)), greedy ensemble selection ([#894](https://github.com/petteriTeikari/vascadia/issues/894)), snapshot ensembles ([#895](https://github.com/petteriTeikari/vascadia/issues/895)), spec curve analysis ([#898](https://github.com/petteriTeikari/vascadia/issues/898)), uncertainty-guided eval ([#897](https://github.com/petteriTeikari/vascadia/issues/897)), topology-critical calibration ([#899](https://github.com/petteriTeikari/vascadia/issues/899)), VLM calibration ([#798](https://github.com/petteriTeikari/vascadia/issues/798)), federated learning ([#842](https://github.com/petteriTeikari/vascadia/issues/842)), Syne Tune HPO ([#861](https://github.com/petteriTeikari/vascadia/issues/861)), AI card stack ([#864](https://github.com/petteriTeikari/vascadia/issues/864)), KG provenance ([#938](https://github.com/petteriTeikari/vascadia/issues/938))
 
 ---
 
