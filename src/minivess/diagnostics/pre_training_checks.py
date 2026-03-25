@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 import torch
+from torch.amp import autocast
 
 if TYPE_CHECKING:
     from torch import nn
@@ -44,11 +45,12 @@ def check_output_shape(
     sample_batch: dict[str, torch.Tensor],
     *,
     expected_channels: int,
+    mixed_precision: bool = True,
 ) -> CheckResult:
     """Check that model output has the expected number of channels."""
     model.eval()
-    with torch.no_grad():
-        images = sample_batch["image"]
+    images = sample_batch["image"]
+    with torch.no_grad(), autocast(device_type=images.device.type, enabled=mixed_precision):
         output = model(images)
         # Handle both Tensor and SegmentationOutput
         if hasattr(output, "logits"):
@@ -74,19 +76,30 @@ def check_output_shape(
 def check_gradient_flow(
     model: nn.Module,
     sample_batch: dict[str, torch.Tensor],
+    *,
+    mixed_precision: bool = True,
 ) -> CheckResult:
-    """Check that at least one parameter receives gradients."""
+    """Check that at least one parameter receives gradients.
+
+    Uses autocast for VRAM safety on large models (SAM3 648M params).
+    Loss is upcast to FP32 before backward to prevent FP16 underflow
+    which would produce zero gradients (false-negative).
+
+    See: .claude/metalearning/2026-03-25-overconfident-oom-fixed-claim.md
+    """
     model.train()
     model.zero_grad()
 
     images = sample_batch["image"]
-    output = model(images)
-    if hasattr(output, "logits"):
-        output = output.logits
+    with autocast(device_type=images.device.type, enabled=mixed_precision):
+        output = model(images)
+        if hasattr(output, "logits"):
+            output = output.logits
 
     # Use squared mean to avoid zero gradients for symmetric outputs.
     # VesselFM outputs cat([-x, x]): mean() cancels to 0, (x²).mean() does not.
-    loss = (output**2).mean()
+    # .float() upcast prevents FP16 underflow → zero gradients without GradScaler.
+    loss = (output.float() ** 2).mean()
     try:
         loss.backward()
     except RuntimeError:
@@ -121,12 +134,14 @@ def check_loss_sanity(
     model: nn.Module,
     sample_batch: dict[str, torch.Tensor],
     criterion: nn.Module,
+    *,
+    mixed_precision: bool = True,
 ) -> CheckResult:
     """Check that loss at random init is in reasonable range."""
     model.eval()
-    with torch.no_grad():
-        images = sample_batch["image"]
-        labels = sample_batch["label"]
+    images = sample_batch["image"]
+    labels = sample_batch["label"]
+    with torch.no_grad(), autocast(device_type=images.device.type, enabled=mixed_precision):
         output = model(images)
         if hasattr(output, "logits"):
             output = output.logits
@@ -163,11 +178,13 @@ def check_loss_sanity(
 def check_nan_inf(
     model: nn.Module,
     sample_batch: dict[str, torch.Tensor],
+    *,
+    mixed_precision: bool = True,
 ) -> CheckResult:
     """Check that model output has no NaN or Inf values."""
     model.eval()
-    with torch.no_grad():
-        images = sample_batch["image"]
+    images = sample_batch["image"]
+    with torch.no_grad(), autocast(device_type=images.device.type, enabled=mixed_precision):
         output = model(images)
         if hasattr(output, "logits"):
             output = output.logits
@@ -195,8 +212,16 @@ def run_pre_training_checks(
     sample_batch: dict[str, torch.Tensor],
     criterion: nn.Module,
     expected_channels: int = 2,
+    mixed_precision: bool = True,
 ) -> list[CheckResult]:
     """Run all pre-training sanity checks.
+
+    Parameters
+    ----------
+    mixed_precision:
+        If True, wraps forward passes in torch.amp.autocast(). Required for
+        SAM3 (648M params) which OOMs on L4 in FP32. Default True matches
+        TrainingConfig.mixed_precision default.
 
     Returns a list of CheckResult. Failures with severity='error'
     should abort training with a clear message.
@@ -204,11 +229,21 @@ def run_pre_training_checks(
     results: list[CheckResult] = []
 
     results.append(
-        check_output_shape(model, sample_batch, expected_channels=expected_channels)
+        check_output_shape(
+            model, sample_batch,
+            expected_channels=expected_channels,
+            mixed_precision=mixed_precision,
+        )
     )
-    results.append(check_gradient_flow(model, sample_batch))
-    results.append(check_loss_sanity(model, sample_batch, criterion))
-    results.append(check_nan_inf(model, sample_batch))
+    results.append(
+        check_gradient_flow(model, sample_batch, mixed_precision=mixed_precision)
+    )
+    results.append(
+        check_loss_sanity(model, sample_batch, criterion, mixed_precision=mixed_precision)
+    )
+    results.append(
+        check_nan_inf(model, sample_batch, mixed_precision=mixed_precision)
+    )
 
     # Log summary
     passed = sum(1 for r in results if r.passed)

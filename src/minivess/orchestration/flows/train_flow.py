@@ -625,6 +625,7 @@ def train_one_fold_task(
             sample_batch=sample_on_device,
             criterion=criterion,
             expected_channels=model_config.out_channels,
+            mixed_precision=training_config.mixed_precision,
         )
         errors = [
             r for r in pre_check_results if not r.passed and r.severity == "error"

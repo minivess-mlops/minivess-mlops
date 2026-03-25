@@ -148,3 +148,82 @@ class TestRunAllChecks:
         assert ARTIFACT_PATH == "diagnostics", (
             f"Artifact path must be 'diagnostics', got '{ARTIFACT_PATH}'"
         )
+
+
+class TestAutocastInPreTrainingChecks:
+    """Pre-training checks must use autocast for SAM3 VRAM safety.
+
+    Without autocast, check_gradient_flow() runs a full FP32 forward+backward
+    through SAM3's 648M-param encoder → OOM on L4 (24 GB). This was the root
+    cause of zero SAM3 training completions across 9 passes.
+
+    See: .claude/metalearning/2026-03-25-overconfident-oom-fixed-claim.md
+    """
+
+    def test_gradient_flow_accepts_mixed_precision(
+        self, sample_batch: dict[str, torch.Tensor]
+    ) -> None:
+        """check_gradient_flow must accept mixed_precision kwarg."""
+        from minivess.diagnostics.pre_training_checks import check_gradient_flow
+
+        model = _make_simple_model()
+        result = check_gradient_flow(model, sample_batch, mixed_precision=True)
+        assert result.passed is True
+
+    def test_gradient_flow_works_with_amp_disabled(
+        self, sample_batch: dict[str, torch.Tensor]
+    ) -> None:
+        """FP32 mode still works for small models (backward compat)."""
+        from minivess.diagnostics.pre_training_checks import check_gradient_flow
+
+        model = _make_simple_model()
+        result = check_gradient_flow(model, sample_batch, mixed_precision=False)
+        assert result.passed is True
+
+    def test_output_shape_accepts_mixed_precision(
+        self, sample_batch: dict[str, torch.Tensor]
+    ) -> None:
+        from minivess.diagnostics.pre_training_checks import check_output_shape
+
+        model = _make_simple_model(out_channels=2)
+        result = check_output_shape(
+            model, sample_batch, expected_channels=2, mixed_precision=True
+        )
+        assert result.passed is True
+
+    def test_loss_sanity_accepts_mixed_precision(
+        self, sample_batch: dict[str, torch.Tensor]
+    ) -> None:
+        from minivess.diagnostics.pre_training_checks import check_loss_sanity
+
+        model = _make_simple_model()
+        criterion = nn.CrossEntropyLoss()
+        result = check_loss_sanity(
+            model, sample_batch, criterion, mixed_precision=True
+        )
+        assert result.passed is True
+
+    def test_nan_inf_accepts_mixed_precision(
+        self, sample_batch: dict[str, torch.Tensor]
+    ) -> None:
+        from minivess.diagnostics.pre_training_checks import check_nan_inf
+
+        model = _make_simple_model()
+        result = check_nan_inf(model, sample_batch, mixed_precision=True)
+        assert result.passed is True
+
+    def test_run_all_checks_accepts_mixed_precision(
+        self, sample_batch: dict[str, torch.Tensor]
+    ) -> None:
+        from minivess.diagnostics.pre_training_checks import run_pre_training_checks
+
+        model = _make_simple_model()
+        criterion = nn.CrossEntropyLoss()
+        results = run_pre_training_checks(
+            model=model,
+            sample_batch=sample_batch,
+            criterion=criterion,
+            expected_channels=2,
+            mixed_precision=True,
+        )
+        assert all(r.passed for r in results)

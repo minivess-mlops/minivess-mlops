@@ -172,7 +172,7 @@ setup: |
     sam3_vanilla|sam3_topolora|sam3_hybrid)
       echo "Pre-caching SAM3 weights..."
       for attempt in 1 2 3; do
-        timeout 600 python -c "from huggingface_hub import hf_hub_download; hf_hub_download('facebook/sam3-hiera-large', 'sam3_hiera_large.pt')" && break || echo "SAM3 weight download attempt ${attempt} failed" && sleep $((30 * attempt))
+        timeout 600 python -c "from huggingface_hub import hf_hub_download; hf_hub_download('facebook/sam3', 'sam3.pt')" && break || echo "SAM3 weight download attempt ${attempt} failed" && sleep $((30 * attempt))
       done
       ;;
     vesselfm)
