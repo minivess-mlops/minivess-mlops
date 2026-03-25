@@ -28,6 +28,31 @@ decisions:
     implementation: [src/minivess/compute/skypilot_launcher.py, deployment/skypilot/]
     prd_node: knowledge-graph/decisions/L4-infrastructure/compute_orchestration.yaml
 
+  skypilot_controller_placement:
+    status: resolved
+    winner: match_job_cloud
+    rationale: >
+      Controller MUST run on the SAME cloud as the jobs. Cross-cloud SSH
+      (e.g., RunPod controller for GCP jobs) adds ~30 min/submission and creates
+      a single point of failure (RunPod outage destroys GCP job state).
+      5th pass root cause: ~/.sky/config.yaml had cloud:runpod for GCP jobs,
+      wasting $1 and 6 hours before RunPod network killed 25/34 submissions.
+    implementation: [configs/cloud/gcp_spot.yaml, configs/cloud/runpod_dev.yaml]
+    config_file: "~/.sky/config.yaml (symlinked from repo configs/skypilot/)"
+    rule: "controller.cloud == task.cloud. Preflight check #10 enforces this."
+    metalearning: ".claude/metalearning/2026-03-23-skypilot-controller-on-wrong-cloud.md"
+
+  parallel_submissions:
+    status: resolved
+    winner: configurable_parallelism
+    rationale: >
+      run_factorial.sh submits jobs sequentially by default. With --parallel N,
+      N concurrent sky jobs launch calls reduce wall-clock time linearly.
+      Default N=4 (from Hydra config, not hardcoded). Sequential fallback: N=1.
+    implementation: [scripts/run_factorial.sh]
+    config_source: "configs/experiment/*.yaml infrastructure.parallel_submissions field"
+    issue: "https://github.com/petteriTeikari/minivess-mlops/issues/913"
+
 # ─── HARD CONSTRAINT ──────────────────────────────────────────────────────────
 # The repo has EXACTLY two cloud compute providers. Adding a third (AWS, Azure,
 # Lambda Labs, etc.) requires EXPLICIT user authorization. This constraint exists
@@ -82,10 +107,12 @@ providers:
     data_flow: "Local disk → gsutil cp → GCS bucket, or DVC push to GCS"
     env_file_section: ".env.example lines 381-407"
     skypilot_yamls:
-      - deployment/skypilot/smoke_test_gcp.yaml
+      - deployment/skypilot/train_factorial.yaml
       - deployment/skypilot/train_production.yaml
       - deployment/skypilot/train_hpo.yaml
+      - deployment/skypilot/smoke_test_gcp.yaml
     hydra_config: configs/cloud/gcp_spot.yaml
+    controller: "SkyPilot self-managed (cloud: gcp, auto-stops after idle)"
 
     # GCS Buckets (created by Pulumi IaC)
     gcs_buckets:

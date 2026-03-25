@@ -211,7 +211,7 @@ class TestDataFlowNoTmpArtifacts:
             os.environ["SPLITS_OUTPUT_DIR"] = str(splits_dir)
             os.environ["MLFLOW_TRACKING_URI"] = f"file://{base}/mlruns"
             try:
-                run_data_flow(data_dir=data_dir, n_folds=2)
+                run_data_flow(data_dir=data_dir, n_folds=2, seed=42)
             finally:
                 del os.environ["SPLITS_OUTPUT_DIR"]
                 del os.environ["MLFLOW_TRACKING_URI"]

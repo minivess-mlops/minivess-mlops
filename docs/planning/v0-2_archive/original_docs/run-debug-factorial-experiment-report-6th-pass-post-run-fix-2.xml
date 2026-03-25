@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Post-Run Fix Plan v2 — Batch 2: Full 4-Flow Validation + MLflow Architecture
+  Prerequisite: Batch 1 complete (Phase 1: 4 CRITICAL bugs, resilience fixes)
+  Skill: self-learning-iterative-coder
+  Branch: test/run-debug-gcp-5th-pass
+
+  This plan covers:
+  - Remaining Phases 2-5 from Batch 1 (config wiring, metric keys, contracts, errors)
+  - NEW: MLflow async artifact research (checkpoint mount violation)
+  - NEW: Full 4-flow validation (analysis + biostatistics untested on cloud)
+  - Systematic fix of all 37 deep-exploration findings
+-->
+<plan>
+  <metadata>
+    <title>Batch 2: 4-Flow Validation + Checkpoint Architecture + Systematic Gap Fix</title>
+    <branch>test/run-debug-gcp-5th-pass</branch>
+    <date>2026-03-24</date>
+    <version>1</version>
+    <status>planned</status>
+    <priority>P0 — blocks scientific validity + violates KG invariant</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <estimated-effort>~6-8 hours TDD across 7 phases</estimated-effort>
+    <prerequisite>Batch 1 Phase 1 complete (4 CRITICAL bugs fixed)</prerequisite>
+    <prerequisite>Resilience fixes complete (job_recovery, retry, resume)</prerequisite>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 1: CHECKPOINT ARCHITECTURE RESEARCH (KG invariant)      -->
+  <!-- Must research BEFORE removing mount — don't break running jobs -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="1" name="MLflow Async Artifact Research" priority="P0-research">
+    <description>
+      The GCS checkpoint mount (file_mounts in train_factorial.yaml) violates
+      the KG invariant mlflow_only_artifact_contract. BUT removing it without
+      a replacement for async writes + spot recovery breaks training.
+      Research MLflow 3.x capabilities BEFORE implementing.
+    </description>
+
+    <task id="1.1" type="research">
+      <title>Research MLflow 3.x async artifact logging</title>
+      <action>
+        1. Web search: "MLflow async artifact logging" "mlflow 3.x"
+        2. Check MLflow changelog for async features
+        3. Check mlflow.log_artifact() source for async/threading options
+        4. Check if MlflowClient has async variants
+        5. Check if MLFLOW_ENABLE_ASYNC_LOGGING env var exists
+        6. Document findings in docs/planning/mlflow-async-artifact-research.md
+      </action>
+      <output>docs/planning/mlflow-async-artifact-research.md</output>
+    </task>
+
+    <task id="1.2" type="design">
+      <title>Design checkpoint-via-MLflow architecture</title>
+      <depends-on>1.1</depends-on>
+      <action>
+        Based on research, design the replacement for file_mounts:
+        - If MLflow has async: use it directly
+        - If not: background thread uploads to MLflow after each epoch
+        - Spot recovery: use MLflow artifact_uri for checkpoint discovery
+        - Document the design decision in the KG
+      </action>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 2: REMAINING BATCH 1 TASKS (Phases 2-5)                 -->
+  <!-- Config wiring, metric keys, contracts, error paths            -->
+  <!-- Tests already written (RED) in beac465                        -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="2" name="Config-to-Code Wiring (Batch 1 Phase 2)" priority="P1">
+    <task id="2.1">
+      <title>Verify run_factorial.sh reads parallel_submissions from config</title>
+      <note>Other session may have already implemented this in f2f2182.
+        Check tests/v2/unit/config/test_run_factorial_resilience.py first.</note>
+      <red>test_infra_params_wired.py (already written)</red>
+      <green>Verify or implement config chain reading in run_factorial.sh</green>
+    </task>
+  </phase>
+
+  <phase id="3" name="Metric Key Standardization (Batch 1 Phase 3)" priority="P1">
+    <task id="3.1">
+      <title>Verify MetricKeys EVAL_FOLD_PREFIX used by builder.py</title>
+      <note>Phase 1 already fixed builder.py to use eval/fold2/dsc.
+        Verify MetricKeys constant is used (not raw string).</note>
+      <red>test_metric_key_consistency.py (already written)</red>
+      <green>Run tests, fix if failing</green>
+    </task>
+  </phase>
+
+  <phase id="4" name="Cross-Flow Contracts (Batch 1 Phase 4)" priority="P1">
+    <task id="4.1">
+      <title>Verify checkpoint naming uses CHECKPOINT_BEST_FILENAME constant</title>
+      <note>Other session added constant to constants.py and updated
+        post_training_flow.py. Verify tests pass.</note>
+      <red>test_cross_flow_contracts.py (already written)</red>
+    </task>
+
+    <task id="4.2">
+      <title>Verify no hardcoded "minivess_training" in flow files</title>
+      <note>Other session may have fixed this. Check.</note>
+      <red>test_cross_flow_contracts.py::TestExperimentNaming</red>
+    </task>
+  </phase>
+
+  <phase id="5" name="Error Path Coverage (Batch 1 Phase 5)" priority="P2">
+    <task id="5.1">
+      <title>Test error paths: MLflow creation, metadata, setup timing</title>
+      <note>Check if bare `except: pass` at train_flow.py:904 was fixed.</note>
+      <red>test_error_path_coverage.py (already written)</red>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 6: FULL 4-FLOW CHAIN VALIDATION                         -->
+  <!-- analysis + biostatistics have NEVER been tested on cloud      -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="6" name="Analysis + Biostatistics Flow Validation" priority="P1">
+    <description>
+      The analysis and biostatistics flows have NEVER executed on cloud data.
+      When GCP training jobs complete, these flows need to discover upstream
+      training runs via FlowContract, evaluate on test datasets, and compute
+      statistical comparisons. Validate the full chain locally first.
+    </description>
+
+    <task id="6.1">
+      <title>Test analysis_flow discovers training runs via FlowContract</title>
+      <red>
+        test_analysis_discovers_training_runs — create MLflow runs with
+        train_flow's tag format, then call analysis_flow's discovery.
+        Verify it finds the runs (currently uses eval_fold2_dsc gate which
+        was fixed in Phase 1 to use slash format).
+      </red>
+      <files>tests/v2/unit/orchestration/test_analysis_flow_discovery.py</files>
+    </task>
+
+    <task id="6.2">
+      <title>Test biostatistics_flow reads metrics from training runs</title>
+      <red>
+        test_biostatistics_reads_training_metrics — create MLflow runs with
+        eval metrics in slash format, then verify biostatistics DuckDB query
+        can parse them.
+      </red>
+      <files>tests/v2/unit/orchestration/test_biostatistics_metric_parsing.py</files>
+    </task>
+
+    <task id="6.3">
+      <title>Test deploy_flow champion discovery uses resolve_experiment_name</title>
+      <red>
+        test_deploy_uses_resolve_experiment_name — AST check that deploy_flow
+        does NOT hardcode "minivess_training".
+      </red>
+      <files>tests/v2/unit/orchestration/test_cross_flow_contracts.py</files>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 7: SYSTEMATIC DEEP-EXPLORATION GAP FIX                   -->
+  <!-- Fix remaining HIGH findings from the 37-item list              -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="7" name="Systematic Gap Fix (Deep Exploration Findings)" priority="P2">
+    <description>
+      Work through remaining HIGH findings from the 4-agent deep exploration.
+      CRITICAL items were fixed in Batch 1 Phase 1. These are HIGH/MEDIUM.
+    </description>
+
+    <task id="7.1">
+      <title>Config consumption: wire orphan factorial config keys</title>
+      <source>Agent 4: splits_file, mlflow.*, biostatistics.* ORPHAN</source>
+      <action>Either wire into code or document as "read by downstream flows"</action>
+    </task>
+
+    <task id="7.2">
+      <title>Docker image content validation</title>
+      <source>Agent 1: splits files, DVC files, cache dirs in image</source>
+      <action>Add tests verifying required files exist in repo (proxy for Docker)</action>
+    </task>
+
+    <task id="7.3">
+      <title>GCP quota preflight check</title>
+      <source>Metalearning: 30 min wasted on n4 quota = 0</source>
+      <action>Add check_gcp_cpu_quota() to preflight_gcp.py</action>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- EXECUTION ORDER                                                -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <execution-order>
+    <step>Phase 1 (MLflow async research) — READ-ONLY, no code changes</step>
+    <step>Phases 2-5 (verify/complete Batch 1 remaining) — check what other session did</step>
+    <step>Phase 6 (4-flow validation) — new tests for analysis + biostatistics</step>
+    <step>Phase 7 (systematic gap fix) — remaining HIGH findings</step>
+    <step>When GCP jobs complete: run analysis + biostatistics on real data</step>
+    <step>Phase 1 continued: implement checkpoint-via-MLflow if research supports it</step>
+  </execution-order>
+
+  <gcp-job-status>
+    Jobs 3-7 PENDING (L4 spot unavailable, queuing since 2+ hours).
+    5 of 34 conditions submitted. Launch script may have submitted more.
+    When jobs complete, their MLflow data feeds into Phase 6 validation.
+  </gcp-job-status>
+</plan>

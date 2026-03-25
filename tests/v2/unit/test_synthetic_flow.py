@@ -55,6 +55,7 @@ class TestSyntheticGenerationFlow:
                 method=method,
                 n_volumes=1,
                 output_dir=str(tmp_path / method),
+                config={"seed": 42},
             )
             assert result["n_volumes"] == 1
 

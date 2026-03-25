@@ -13,6 +13,14 @@ find_upstream_safely:
 log_completion_safe:
     Wrapper around FlowContract.log_flow_completion() that catches all exceptions.
     Completion logging is observability — it must never block the flow.
+
+emit_lineage_safe:
+    Wrapper around OpenLineage emission that catches all exceptions.
+    Lineage emission is observability — it must never block the flow.
+
+start_mlflow_run_safe:
+    Unified MLflow run creation: set URI + set experiment + start run + log metrics.
+    Handles all exceptions so MLflow errors never block a flow.
 """
 
 from __future__ import annotations
@@ -101,3 +109,100 @@ def log_completion_safe(
             run_id,
             exc_info=True,
         )
+
+
+def emit_lineage_safe(
+    *,
+    job_name: str,
+    inputs: list[dict[str, str]] | None = None,
+    outputs: list[dict[str, str]] | None = None,
+    namespace: str = "minivess",
+) -> None:
+    """Emit OpenLineage flow lineage, ignoring all failures.
+
+    Wraps LineageEmitter + emit_flow_lineage() with exception isolation.
+    Lineage emission is observability — it must never block the flow.
+
+    Parameters
+    ----------
+    job_name:
+        OpenLineage job name (e.g., "biostatistics-flow").
+    inputs:
+        Input dataset facets.
+    outputs:
+        Output dataset facets.
+    namespace:
+        OpenLineage namespace (default "minivess").
+    """
+    try:
+        from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
+
+        _emitter = LineageEmitter(namespace=namespace)
+        emit_flow_lineage(
+            emitter=_emitter,
+            job_name=job_name,
+            inputs=inputs or [],
+            outputs=outputs or [],
+        )
+    except Exception:
+        logger.warning(
+            "OpenLineage emission failed for %r — non-blocking",
+            job_name,
+            exc_info=True,
+        )
+
+
+def start_mlflow_run_safe(
+    *,
+    experiment_name: str,
+    tracking_uri: str | None = None,
+    run_tags: dict[str, str] | None = None,
+    metrics: dict[str, float] | None = None,
+    artifacts: dict[str, str] | None = None,
+) -> str | None:
+    """Create an MLflow run, log metrics/artifacts, and return the run ID.
+
+    Unified MLflow run setup that replaces the 15-line boilerplate
+    duplicated across 4+ flow files. Returns None on any failure.
+
+    Parameters
+    ----------
+    experiment_name:
+        MLflow experiment name (use ``resolve_experiment_name()``).
+    tracking_uri:
+        MLflow tracking URI. If None, auto-resolved.
+    run_tags:
+        Tags to set on the MLflow run.
+    metrics:
+        Metrics to log (key → value).
+    artifacts:
+        Artifacts to log (artifact_path → local_path).
+
+    Returns
+    -------
+    MLflow run ID if successful, None otherwise.
+    """
+    try:
+        import mlflow
+
+        from minivess.observability.tracking import resolve_tracking_uri
+
+        uri = tracking_uri or resolve_tracking_uri()
+        mlflow.set_tracking_uri(uri)
+        mlflow.set_experiment(experiment_name)
+
+        with mlflow.start_run(tags=run_tags or {}) as active_run:
+            run_id = active_run.info.run_id
+            if metrics:
+                mlflow.log_metrics(metrics)
+            if artifacts:
+                for artifact_path, local_path in artifacts.items():
+                    mlflow.log_artifact(local_path, artifact_path)
+            return run_id
+    except Exception:
+        logger.warning(
+            "Failed to create MLflow run for experiment %r — non-fatal",
+            experiment_name,
+            exc_info=True,
+        )
+        return None

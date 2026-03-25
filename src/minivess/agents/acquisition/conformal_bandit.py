@@ -45,7 +45,7 @@ class ThompsonSampler:
         Random seed for reproducibility.
     """
 
-    def __init__(self, n_arms: int, seed: int = 42) -> None:
+    def __init__(self, n_arms: int, *, seed: int) -> None:
         self.n_arms = n_arms
         self._rng = np.random.default_rng(seed)
         # Beta priors: (alpha, beta) starting at (1, 1) = uniform

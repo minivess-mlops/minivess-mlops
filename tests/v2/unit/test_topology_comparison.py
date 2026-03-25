@@ -58,7 +58,7 @@ class TestTopologyComparison:
         """p-values computed for pairs."""
         results = _make_mock_results()
         evaluator = TopologyComparisonEvaluator(results)
-        result = evaluator.paired_bootstrap("d2c_only", "baseline", "cldice")
+        result = evaluator.paired_bootstrap("d2c_only", "baseline", "cldice", seed=42)
 
         assert "p_value" in result
         assert "mean_diff" in result

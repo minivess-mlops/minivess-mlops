@@ -153,7 +153,7 @@ class RiskControllingPredictor:
 
     def __init__(
         self,
-        alpha: float = 0.1,
+        alpha: float,
         risk_fn: RiskFunction | None = None,
         n_thresholds: int = 100,
     ) -> None:

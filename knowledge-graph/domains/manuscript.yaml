@@ -11,7 +11,7 @@ decisions:
   publication_target:
     status: resolved
     winner: nature_protocols
-    rationale: "Nature Protocols; working name: NEUROVEX"
+    rationale: "Nature Protocols; name: VASCADIA (was NEUROVEX)"
     prd_node: knowledge-graph/decisions/L1-research-goals/publication_target.yaml
 
   tripod_compliance:

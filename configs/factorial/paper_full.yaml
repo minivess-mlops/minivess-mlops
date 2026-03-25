@@ -97,3 +97,9 @@ biostatistics:
     - masd
   foil_metrics:
     - dsc
+
+# ── Infrastructure ─────────────────────────────────────────────────────
+infrastructure:
+  cloud_config: gcp_spot
+  skypilot_yaml: deployment/skypilot/train_production.yaml
+  region_config: europe_us

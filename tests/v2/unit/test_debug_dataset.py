@@ -21,7 +21,7 @@ class TestCreateDebugDataset:
         from minivess.data.debug_dataset import create_debug_dataset
 
         output_dir = tmp_path / "debug_ds"
-        result = create_debug_dataset(output_dir)
+        result = create_debug_dataset(output_dir, seed=42)
 
         raw_files = sorted((result / "raw").glob("*.nii.gz"))
         seg_files = sorted((result / "seg").glob("*.nii.gz"))
@@ -35,7 +35,7 @@ class TestCreateDebugDataset:
 
         shape = (48, 48, 12)
         output_dir = tmp_path / "debug_ds"
-        result = create_debug_dataset(output_dir, volume_shape=shape)
+        result = create_debug_dataset(output_dir, volume_shape=shape, seed=42)
 
         for nii_path in (result / "raw").glob("*.nii.gz"):
             img = nib.load(str(nii_path))
@@ -54,7 +54,7 @@ class TestCreateDebugDataset:
         from minivess.data.debug_dataset import create_debug_dataset
 
         output_dir = tmp_path / "debug_ds"
-        result = create_debug_dataset(output_dir)
+        result = create_debug_dataset(output_dir, seed=42)
 
         for nii_path in (result / "seg").glob("*.nii.gz"):
             lbl = nib.load(str(nii_path))
@@ -70,7 +70,7 @@ class TestCreateDebugDataset:
         from minivess.data.loader import discover_nifti_pairs
 
         output_dir = tmp_path / "debug_ds"
-        result = create_debug_dataset(output_dir, n_volumes=3)
+        result = create_debug_dataset(output_dir, n_volumes=3, seed=42)
 
         pairs = discover_nifti_pairs(result)
         assert len(pairs) == 3
@@ -111,7 +111,7 @@ class TestCreateDebugDataset:
         from minivess.data.debug_dataset import create_debug_dataset
 
         output_dir = tmp_path / "debug_ds"
-        result = create_debug_dataset(output_dir, n_volumes=2)
+        result = create_debug_dataset(output_dir, n_volumes=2, seed=42)
 
         assert result == output_dir
         assert (output_dir / "raw").is_dir()

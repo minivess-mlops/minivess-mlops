@@ -50,9 +50,9 @@ class TestFlowStructure:
         missing = []
         for flow_file in _get_flow_files():
             source = flow_file.read_text(encoding="utf-8")
-            # Check for either _require_docker_context() or inline gate pattern
+            # Check for shared require_docker_context or inline gate pattern
             has_gate = (
-                "_require_docker_context" in source or "MINIVESS_ALLOW_HOST" in source
+                "require_docker_context" in source or "MINIVESS_ALLOW_HOST" in source
             )
             if not has_gate:
                 missing.append(flow_file.name)

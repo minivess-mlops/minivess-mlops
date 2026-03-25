@@ -120,8 +120,11 @@ class SegmentationMetrics:
                     compute_all_calibration_metrics,
                 )
 
-                all_probs = torch.cat(self._cal_probs).numpy().ravel()
-                all_labels = torch.cat(self._cal_labels).numpy().ravel()
+                # .detach().cpu() required: MONAI MetaTensor doesn't support
+                # direct .numpy() after torch.cat() — causes RuntimeError.
+                # See: 8th pass report Finding 3 (val/nll=nan in all runs).
+                all_probs = torch.cat(self._cal_probs).detach().cpu().float().numpy().ravel()
+                all_labels = torch.cat(self._cal_labels).detach().cpu().float().numpy().ravel()
 
                 cal_metrics = compute_all_calibration_metrics(
                     all_probs, all_labels, tier="fast"

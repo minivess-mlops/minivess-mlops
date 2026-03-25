@@ -22,3 +22,14 @@ docker_image: petteriteikari/minivess-base:latest
 
 # MLflow: file-based on Network Volume (UpCloud dropped 2026-03-16).
 mlflow_env_var: MLFLOW_TRACKING_URI
+
+# ── SkyPilot controller placement ────────────────────────────────────────
+# Controller MUST match job cloud. RunPod jobs → RunPod controller.
+controller:
+  cloud: runpod
+  disk_size: 50
+
+# ── Submission infrastructure ────────────────────────────────────────────
+infrastructure:
+  parallel_submissions: 2
+  rate_limit_seconds: 5

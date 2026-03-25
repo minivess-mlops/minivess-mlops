@@ -25,6 +25,8 @@ def compute_rankings(
     per_volume_data: MultiMetricData,
     metric_names: list[str],
     higher_is_better: dict[str, bool],
+    *,
+    alpha: float,
 ) -> list[RankingResult]:
     """Compute per-metric rankings using mean scores.
 
@@ -76,7 +78,7 @@ def compute_rankings(
         mean_ranks = condition_ranks.copy()  # For single metric, mean_ranks == ranks
 
         # Critical difference (Demsar 2006)
-        cd_value = _critical_difference(len(conditions), len(values))
+        cd_value = _critical_difference(len(conditions), len(values), alpha=alpha)
 
         results.append(
             RankingResult(
@@ -90,28 +92,42 @@ def compute_rankings(
     return results
 
 
-def _critical_difference(k: int, n: int) -> float | None:
+def _critical_difference(k: int, n: int, *, alpha: float) -> float | None:
     """Compute Nemenyi critical difference for k treatments and n subjects.
 
     CD = q_alpha * sqrt(k*(k+1) / (6*n))
 
-    Uses q_alpha values from Demsar (2006) Table 5 for alpha=0.05.
-    """
-    # q_alpha values for alpha=0.05 (Nemenyi)
-    q_values = {
-        2: 1.960,
-        3: 2.343,
-        4: 2.569,
-        5: 2.728,
-        6: 2.850,
-        7: 2.949,
-        8: 3.031,
-        9: 3.102,
-        10: 3.164,
-    }
+    Uses scipy.stats.studentized_range for the q_alpha critical value,
+    parameterized by alpha (not hardcoded to 0.05). Falls back to
+    Demsar (2006) Table 5 lookup if scipy unavailable.
 
-    if k < 2 or k not in q_values:
+    Parameters
+    ----------
+    k : int
+        Number of treatments (conditions being compared).
+    n : int
+        Number of subjects (folds × datasets).
+    alpha : float
+        Significance level (e.g., 0.05). MUST be passed from config.
+    """
+    if k < 2:
         return None
 
-    q_alpha = q_values[k]
+    try:
+        from scipy.stats import studentized_range
+
+        # Nemenyi uses the Studentized Range distribution with df=inf
+        q_alpha = studentized_range.ppf(1 - alpha, k, float("inf"))
+    except (ImportError, ValueError):
+        # Fallback: Demsar (2006) Table 5 lookup for alpha=0.05 only
+        if alpha != 0.05:
+            return None
+        q_values_005 = {
+            2: 1.960, 3: 2.343, 4: 2.569, 5: 2.728, 6: 2.850,
+            7: 2.949, 8: 3.031, 9: 3.102, 10: 3.164,
+        }
+        if k not in q_values_005:
+            return None
+        q_alpha = q_values_005[k]
+
     return float(q_alpha * np.sqrt(k * (k + 1) / (6 * n)))

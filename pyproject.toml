@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "minivess-mlops"
-version = "2.0.0-alpha"
+version = "0.2.0-beta"
 description = "Model-agnostic biomedical segmentation MLOps platform"
 readme = "README.md"
 license = "Apache-2.0"

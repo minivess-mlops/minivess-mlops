@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from minivess.pipeline.biostatistics_tables import generate_tables
 from minivess.pipeline.biostatistics_types import (
+    FactorialAnovaResult,
     PairwiseResult,
     RankingResult,
     VarianceDecompositionResult,
@@ -135,3 +136,65 @@ class TestGenerateTables:
         for t in tables:
             assert t.format == "latex"
             assert t.path.suffix == ".tex"
+
+
+class TestAnovaTableWiring:
+    """Task 2.13: verify generate_tables() produces ANOVA tables when given anova_results."""
+
+    def test_anova_table_generated_when_anova_provided(
+        self, tmp_path: Path
+    ) -> None:
+        anova_result = FactorialAnovaResult(
+            metric="cldice",
+            n_models=2,
+            n_losses=2,
+            f_values={"Model": 5.2, "Loss": 3.8, "Model:Loss": 1.1},
+            p_values={"Model": 0.03, "Loss": 0.06, "Model:Loss": 0.35},
+            eta_squared_partial={"Model": 0.12, "Loss": 0.09, "Model:Loss": 0.02},
+            omega_squared={"Model": 0.10, "Loss": 0.07, "Model:Loss": 0.01},
+        )
+        tables = generate_tables(
+            pairwise=_make_pairwise(),
+            variance=_make_variance(),
+            rankings=_make_rankings(),
+            output_dir=tmp_path / "tables",
+            anova_results=[anova_result],
+        )
+        table_ids = [t.table_id for t in tables]
+        assert "anova_table_cldice" in table_ids
+
+    def test_cost_table_generated_when_cost_data_provided(
+        self, tmp_path: Path
+    ) -> None:
+        cost_data = [
+            {
+                "model": "dynunet",
+                "loss": "dice_ce",
+                "fold": 0,
+                "gpu_hours": 0.15,
+                "cost_usd": 0.12,
+                "spot_cost_usd": 0.04,
+            },
+        ]
+        tables = generate_tables(
+            pairwise=_make_pairwise(),
+            variance=_make_variance(),
+            rankings=_make_rankings(),
+            output_dir=tmp_path / "tables",
+            cost_data=cost_data,
+        )
+        table_ids = [t.table_id for t in tables]
+        assert "cost_appendix" in table_ids
+
+    def test_no_anova_tables_when_anova_results_is_none(
+        self, tmp_path: Path
+    ) -> None:
+        tables = generate_tables(
+            pairwise=_make_pairwise(),
+            variance=_make_variance(),
+            rankings=_make_rankings(),
+            output_dir=tmp_path / "tables",
+        )
+        table_ids = [t.table_id for t in tables]
+        assert all("anova" not in tid for tid in table_ids)
+        assert "cost_appendix" not in table_ids

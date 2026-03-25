@@ -397,6 +397,7 @@ class TestRunFactorialPostTrainingSwag:
                 checkpoint_paths=[Path("/fake/ckpt.pth")],
                 methods=["swag"],
                 output_dir=Path("/tmp/test_swag"),
+                seed=42,
             )
 
 

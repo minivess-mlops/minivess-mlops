@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
 
 class TestPrepareTrainingData:
@@ -45,6 +44,7 @@ class TestPrepareTrainingData:
 
         monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
         monkeypatch.setenv("PREFECT_DISABLED", "1")
+        monkeypatch.setenv("DVC_REMOTE", "gcs")
 
         _original_run = subprocess.run
 
@@ -67,42 +67,24 @@ class TestPrepareTrainingData:
         result = prepare_training_data(data_dir=data_dir)
         assert result["pulled"] is True
 
-    def test_dvc_remote_defaults_to_minio(
+    def test_dvc_remote_raises_when_not_set(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """DVC_REMOTE defaults to 'minio' when not set."""
+        """DVC_REMOTE must raise ValueError when not set (Rule #22/#25).
+
+        Silent 'minio' fallback removed — cloud runs with wrong DVC remote
+        would silently fail to pull data and train on empty directories.
+        """
         data_dir = tmp_path / "data"
         data_dir.mkdir(parents=True)
         monkeypatch.delenv("DVC_REMOTE", raising=False)
         monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
         monkeypatch.setenv("PREFECT_DISABLED", "1")
 
-        calls: list[list[str]] = []
-        _original_run = subprocess.run
-
-        def _mock_run(
-            cmd: list[str], **kwargs: Any
-        ) -> subprocess.CompletedProcess[str]:
-            if isinstance(cmd, list) and cmd and cmd[0] == "dvc":
-                calls.append(list(cmd))
-                if "pull" in cmd:
-                    img_dir = data_dir / "raw" / "minivess" / "imagesTr"
-                    img_dir.mkdir(parents=True, exist_ok=True)
-                    (img_dir / "mv01.nii.gz").touch()
-                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-            return _original_run(cmd, **kwargs)
-
-        monkeypatch.setattr(subprocess, "run", _mock_run)
-
         from minivess.orchestration.flows.train_flow import prepare_training_data
 
-        prepare_training_data(data_dir=data_dir)
-        pull_calls = [c for c in calls if "pull" in c]
-        assert pull_calls
-        # Default remote should be minio
-        for call in pull_calls:
-            r_idx = call.index("-r")
-            assert call[r_idx + 1] == "minio"
+        with pytest.raises(ValueError, match="DVC_REMOTE"):
+            prepare_training_data(data_dir=data_dir)
 
     def test_uses_remote_storage_when_env_set(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

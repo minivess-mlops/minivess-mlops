@@ -32,25 +32,25 @@ def _make_synthetic_probs(
 class TestMapieConformalSegmentation:
     """Test MAPIE-based conformal predictor for 3D segmentation."""
 
-    def test_creates_with_default_alpha(self) -> None:
-        """Should create with default 90% coverage (alpha=0.1)."""
+    def test_creates_with_explicit_alpha(self) -> None:
+        """Alpha must be explicitly provided (Rule #29 — no hardcoded defaults)."""
         from minivess.ensemble.mapie_conformal import MapieConformalSegmentation
 
-        predictor = MapieConformalSegmentation()
+        predictor = MapieConformalSegmentation(alpha=0.1, random_state=42)
         assert predictor.alpha == 0.1
 
     def test_creates_with_custom_alpha(self) -> None:
         """Should accept custom alpha values."""
         from minivess.ensemble.mapie_conformal import MapieConformalSegmentation
 
-        predictor = MapieConformalSegmentation(alpha=0.05)
+        predictor = MapieConformalSegmentation(alpha=0.05, random_state=42)
         assert predictor.alpha == 0.05
 
     def test_not_calibrated_initially(self) -> None:
         """Should not be calibrated before calling calibrate()."""
         from minivess.ensemble.mapie_conformal import MapieConformalSegmentation
 
-        predictor = MapieConformalSegmentation()
+        predictor = MapieConformalSegmentation(alpha=0.1, random_state=42)
         assert predictor.is_calibrated is False
 
 
@@ -66,7 +66,7 @@ class TestCalibration:
         """After calibration, is_calibrated should be True."""
         from minivess.ensemble.mapie_conformal import MapieConformalSegmentation
 
-        predictor = MapieConformalSegmentation(alpha=0.1)
+        predictor = MapieConformalSegmentation(alpha=0.1, random_state=42)
         probs, labels = _make_synthetic_probs(n_volumes=3)
         predictor.calibrate(probs, labels)
         assert predictor.is_calibrated is True
@@ -75,7 +75,7 @@ class TestCalibration:
         """Predicting without calibration should raise RuntimeError."""
         from minivess.ensemble.mapie_conformal import MapieConformalSegmentation
 
-        predictor = MapieConformalSegmentation()
+        predictor = MapieConformalSegmentation(alpha=0.1, random_state=42)
         probs, _ = _make_synthetic_probs(n_volumes=1)
         with pytest.raises(RuntimeError, match="calibrate"):
             predictor.predict(probs)
@@ -84,7 +84,7 @@ class TestCalibration:
         """Calibration should work with varying number of volumes."""
         from minivess.ensemble.mapie_conformal import MapieConformalSegmentation
 
-        predictor = MapieConformalSegmentation()
+        predictor = MapieConformalSegmentation(alpha=0.1, random_state=42)
         probs, labels = _make_synthetic_probs(n_volumes=5, spatial=(8, 8, 4))
         predictor.calibrate(probs, labels)
         assert predictor.is_calibrated is True
@@ -102,7 +102,7 @@ class TestPredictionSets:
         """Prediction sets should match input spatial dims."""
         from minivess.ensemble.mapie_conformal import MapieConformalSegmentation
 
-        predictor = MapieConformalSegmentation(alpha=0.1)
+        predictor = MapieConformalSegmentation(alpha=0.1, random_state=42)
         cal_probs, cal_labels = _make_synthetic_probs(n_volumes=3)
         predictor.calibrate(cal_probs, cal_labels)
 
@@ -115,7 +115,7 @@ class TestPredictionSets:
         """Prediction sets should be boolean arrays."""
         from minivess.ensemble.mapie_conformal import MapieConformalSegmentation
 
-        predictor = MapieConformalSegmentation(alpha=0.1)
+        predictor = MapieConformalSegmentation(alpha=0.1, random_state=42)
         cal_probs, cal_labels = _make_synthetic_probs(n_volumes=3)
         predictor.calibrate(cal_probs, cal_labels)
 
@@ -127,7 +127,7 @@ class TestPredictionSets:
         """Most voxels should have at least one class in their prediction set."""
         from minivess.ensemble.mapie_conformal import MapieConformalSegmentation
 
-        predictor = MapieConformalSegmentation(alpha=0.1)
+        predictor = MapieConformalSegmentation(alpha=0.1, random_state=42)
         cal_probs, cal_labels = _make_synthetic_probs(n_volumes=10, spatial=(8, 8, 4))
         predictor.calibrate(cal_probs, cal_labels)
 
@@ -144,11 +144,11 @@ class TestPredictionSets:
         cal_probs, cal_labels = _make_synthetic_probs(n_volumes=10, spatial=(8, 8, 4))
         test_probs, _ = _make_synthetic_probs(n_volumes=2, spatial=(8, 8, 4))
 
-        predictor_90 = MapieConformalSegmentation(alpha=0.1)
+        predictor_90 = MapieConformalSegmentation(alpha=0.1, random_state=42)
         predictor_90.calibrate(cal_probs, cal_labels)
         result_90 = predictor_90.predict(test_probs)
 
-        predictor_50 = MapieConformalSegmentation(alpha=0.5)
+        predictor_50 = MapieConformalSegmentation(alpha=0.5, random_state=42)
         predictor_50.calibrate(cal_probs, cal_labels)
         result_50 = predictor_50.predict(test_probs)
 
@@ -173,7 +173,7 @@ class TestCoverageMetrics:
             compute_coverage_metrics,
         )
 
-        predictor = MapieConformalSegmentation(alpha=0.1)
+        predictor = MapieConformalSegmentation(alpha=0.1, random_state=42)
         cal_probs, cal_labels = _make_synthetic_probs(n_volumes=5)
         predictor.calibrate(cal_probs, cal_labels)
 
@@ -198,7 +198,7 @@ class TestCoverageMetrics:
             n_volumes=10, n_classes=2, spatial=(8, 8, 4)
         )
 
-        predictor = MapieConformalSegmentation(alpha=0.1)
+        predictor = MapieConformalSegmentation(alpha=0.1, random_state=42)
         predictor.calibrate(cal_probs, cal_labels)
         result = predictor.predict(test_probs)
         metrics = compute_coverage_metrics(result.prediction_sets, test_labels)

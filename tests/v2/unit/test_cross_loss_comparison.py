@@ -209,7 +209,7 @@ class TestPairedBootstrap:
         scores_a = np.array([0.85, 0.83, 0.87])
         scores_b = np.array([0.90, 0.88])
         with pytest.raises(ValueError, match="same length"):
-            paired_bootstrap_test(scores_a, scores_b)
+            paired_bootstrap_test(scores_a, scores_b, seed=42)
 
 
 class TestFormatMarkdown:
@@ -381,7 +381,7 @@ class TestPairwiseComparison:
             ],
         }
         table = build_comparison_table(eval_results)
-        comparisons = compute_all_pairwise_comparisons(table, metric="dsc")
+        comparisons = compute_all_pairwise_comparisons(table, metric="dsc", seed=42, alpha=0.05)
         assert len(comparisons) == 6
 
     def test_adjusted_pvalues_present(self) -> None:
@@ -397,7 +397,7 @@ class TestPairwiseComparison:
             ],
         }
         table = build_comparison_table(eval_results)
-        comparisons = compute_all_pairwise_comparisons(table, metric="dsc")
+        comparisons = compute_all_pairwise_comparisons(table, metric="dsc", seed=42, alpha=0.05)
         for cmp in comparisons:
             assert 0.0 <= cmp.adjusted_p_value <= 1.0
 
@@ -414,7 +414,7 @@ class TestPairwiseComparison:
             ],
         }
         table = build_comparison_table(eval_results)
-        comparisons = compute_all_pairwise_comparisons(table, metric="dsc")
+        comparisons = compute_all_pairwise_comparisons(table, metric="dsc", seed=42, alpha=0.05)
         for cmp in comparisons:
             assert np.isfinite(cmp.effect_size)
 
@@ -431,7 +431,7 @@ class TestPairwiseComparison:
             ],
         }
         table = build_comparison_table(eval_results)
-        comparisons = compute_all_pairwise_comparisons(table, metric="dsc")
+        comparisons = compute_all_pairwise_comparisons(table, metric="dsc", seed=42, alpha=0.05)
         valid_directions = {"A > B", "A < B", "A \u2248 B"}
         for cmp in comparisons:
             assert cmp.direction in valid_directions
@@ -456,7 +456,7 @@ class TestSignificanceMatrixMarkdown:
     def test_format_produces_table(self) -> None:
         """format_significance_matrix_markdown returns a string with pipe chars."""
         table = self._make_table_with_two_losses()
-        comparisons = compute_all_pairwise_comparisons(table, metric="dsc")
+        comparisons = compute_all_pairwise_comparisons(table, metric="dsc", seed=42, alpha=0.05)
         md = format_significance_matrix_markdown(comparisons)
         assert isinstance(md, str)
         assert "|" in md
@@ -478,7 +478,7 @@ class TestSignificanceMatrixMarkdown:
         }
         table = build_comparison_table(eval_results)
         comparisons = compute_all_pairwise_comparisons(
-            table, metric="dsc", n_resamples=500, seed=42
+            table, metric="dsc", n_resamples=500, seed=42, alpha=0.05
         )
         md = format_significance_matrix_markdown(comparisons)
         # At least one comparison should be significant and marked with *

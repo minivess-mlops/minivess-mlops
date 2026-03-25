@@ -172,6 +172,59 @@ def pytest_collection_modifyitems(
                 item.add_marker(pytest.mark.skip(reason="MLflow server not reachable"))
 
 
+# ── Zero-Skip Enforcement (Rule 28) ──────────────────────────────────────────
+# Skips are bugs hiding as skips. This hook makes any skip a hard failure in
+# staging and prod tiers. Every skip must be investigated and resolved — either
+# by fixing the root cause, moving the test to the correct tier, or deleting it.
+#
+# The ONLY allowed skips are xfail (expected failures with documented reasons).
+# pytest.skip(), importorskip(), and mark.skipif() in staging/prod = ERROR.
+#
+# Opt-out: set ALLOW_SKIPS=1 for debugging (NEVER in CI/Makefile).
+
+
+def pytest_terminal_summary(
+    terminalreporter: pytest.TerminalReporter,
+    exitstatus: int,
+    config: pytest.Config,
+) -> None:
+    """Fail the test run if ANY tests were skipped (Rule 28: Zero Silent Skips).
+
+    This converts skips from invisible noise to hard errors. If a test cannot
+    run in this tier, it belongs in a different tier — not skipped silently.
+    """
+    if os.environ.get("ALLOW_SKIPS") == "1":
+        return
+
+    skipped = terminalreporter.stats.get("skipped", [])
+    if not skipped:
+        return
+
+    terminalreporter.section("ZERO-SKIP ENFORCEMENT (Rule 28)")
+    terminalreporter.write_line(
+        f"FATAL: {len(skipped)} test(s) were SKIPPED. Skips are not allowed."
+    )
+    terminalreporter.write_line("")
+    for report in skipped:
+        # report.longrepr is a tuple: (file, line, reason)
+        if hasattr(report, "longrepr") and isinstance(report.longrepr, tuple):
+            _file, _line, reason = report.longrepr
+            terminalreporter.write_line(f"  SKIP: {report.nodeid}")
+            terminalreporter.write_line(f"        Reason: {reason}")
+        else:
+            terminalreporter.write_line(f"  SKIP: {report.nodeid}")
+    terminalreporter.write_line("")
+    terminalreporter.write_line("Fix each skip by:")
+    terminalreporter.write_line("  1. Install the missing package (uv sync --all-extras)")
+    terminalreporter.write_line("  2. Move the test to the correct tier (cloud/gpu_instance/integration)")
+    terminalreporter.write_line("  3. Delete the test if the feature is deprecated")
+    terminalreporter.write_line("  4. Clear __pycache__ if stale bytecode (find . -name __pycache__ -exec rm -rf {} +)")
+    terminalreporter.write_line("")
+
+    # Override exit status to failure
+    terminalreporter._session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
 # Suppress warnings that occur during import of third-party libraries.
 # These must be set before the libraries are imported, so pytest's
 # filterwarnings config (which applies after collection) is too late.

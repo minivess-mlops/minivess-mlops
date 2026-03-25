@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -454,3 +456,53 @@ class TestValidationGates:
         assert hasattr(result, "passed")
         assert hasattr(result, "errors")
         assert hasattr(result, "warnings")
+
+
+class TestVramOverheadFromProfile:
+    """Task 2.21: VRAM overhead must come from model profile YAML, not hardcoded."""
+
+    def test_dynunet_overhead_matches_profile_yaml(self) -> None:
+        """Validate that dynunet overhead comes from the profile YAML."""
+        import yaml
+
+        from minivess.data.validation import _load_model_vram_overhead_mb
+
+        profile_path = (
+            Path(__file__).resolve().parents[3]
+            / "configs"
+            / "model_profiles"
+            / "dynunet.yaml"
+        )
+        raw = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+        expected = int(raw["model_overhead_mb"])
+
+        actual = _load_model_vram_overhead_mb("dynunet")
+        assert actual == expected
+
+    def test_unknown_model_falls_back(self) -> None:
+        """Unknown model names get the default 400 MB fallback."""
+        from minivess.data.validation import _load_model_vram_overhead_mb
+
+        overhead = _load_model_vram_overhead_mb("nonexistent_model_xyz")
+        assert overhead == 400
+
+    def test_no_hardcoded_overhead_dict(self) -> None:
+        """validation.py must NOT have a hardcoded _MODEL_VRAM_OVERHEAD_MB dict."""
+        import ast
+
+        src = (
+            Path(__file__).resolve().parents[3]
+            / "src"
+            / "minivess"
+            / "data"
+            / "validation.py"
+        )
+        tree = ast.parse(src.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        assert target.id != "_MODEL_VRAM_OVERHEAD_MB", (
+                            "Hardcoded _MODEL_VRAM_OVERHEAD_MB found — "
+                            "use _load_model_vram_overhead_mb() instead"
+                        )

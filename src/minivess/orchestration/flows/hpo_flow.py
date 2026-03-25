@@ -24,26 +24,12 @@ from prefect import flow, task
 from prefect.deployments import run_deployment
 
 from minivess.orchestration.constants import FLOW_NAME_HPO, FLOW_NAME_TRAIN
+from minivess.orchestration.docker_guard import require_docker_context
 
 if TYPE_CHECKING:
     from prefect.client.schemas.objects import FlowRun
 
 logger = logging.getLogger(__name__)
-
-
-def _require_docker_context() -> None:
-    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
-    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
-        return
-    if os.environ.get("DOCKER_CONTAINER"):
-        return
-    if Path("/.dockerenv").exists():
-        return
-    raise RuntimeError(
-        "HPO flow must run inside a Docker container.\n"
-        "Run: docker compose -f deployment/docker-compose.flows.yml run hpo\n"
-        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
-    )
 
 
 # Suppress Optuna's INFO logs unless debugging — they're verbose
@@ -104,7 +90,7 @@ def run_trial_task(
         "num_folds": config.get("num_folds", 1),
         "max_epochs": config.get("max_epochs", 20),
         "batch_size": config.get("batch_size", 2),
-        "learning_rate": config.get("learning_rate", 1e-3),
+        "learning_rate": config.get("learning_rate", 1e-4),  # Match TrainingConfig default
     }
 
     # Trigger training in a separate Docker container via Prefect
@@ -176,7 +162,7 @@ def hpo_flow(
     -------
     Dict with ``best_params``, ``best_value``, ``n_trials``, ``study_name``.
     """
-    _require_docker_context()
+    require_docker_context("hpo")
 
     from minivess.optimization.hpo_engine import AllocationStrategy, HPOEngine
 

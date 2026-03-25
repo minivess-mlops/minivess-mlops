@@ -26,22 +26,17 @@ from minivess.ensemble.builder import (
     EnsembleBuilder,
     EnsembleMember,
     EnsembleSpec,
+    _DEFAULT_TRACKED_METRICS,
     expand_runs_to_per_fold,
 )
+from minivess.observability.metric_keys import MetricKeys
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
-# The 6 tracked metrics from dynunet_losses.yaml checkpoint config
-TRACKED_METRICS: list[str] = [
-    "val_loss",
-    "val_dice",
-    "val_f1_foreground",
-    "val_cldice",
-    "val_masd",
-    "val_compound_masd_cldice",
-]
+# Use the canonical list from builder.py (which reads from MetricKeys).
+TRACKED_METRICS: list[str] = list(_DEFAULT_TRACKED_METRICS)
 
 LOSS_TYPES: list[str] = ["dice_ce", "cbdice", "dice_ce_cldice", "cbdice_cldice"]
 
@@ -919,3 +914,39 @@ class TestExpandRunsToPerFold:
             # Each loss has 3 fold entries all pointing to same dir
             # so 3 members loaded from the same checkpoint
             assert len(spec.members) == 3
+
+
+# ---------------------------------------------------------------------------
+# Guard: builder metric keys match MetricKeys constants (Task 2.2, #921)
+# ---------------------------------------------------------------------------
+
+
+class TestBuilderMetricKeysConsistency:
+    """Ensure builder uses MetricKeys constants, not hardcoded strings."""
+
+    def test_default_tracked_metrics_use_slash_format(self) -> None:
+        """_DEFAULT_TRACKED_METRICS must use slash-prefix MetricKeys format."""
+        for metric in _DEFAULT_TRACKED_METRICS:
+            assert "/" in metric, (
+                f"_DEFAULT_TRACKED_METRICS entry {metric!r} uses underscore format. "
+                f"Must use slash-prefix from MetricKeys (e.g. 'val/loss')."
+            )
+
+    def test_default_tracked_metrics_are_metric_keys_constants(self) -> None:
+        """Every entry in _DEFAULT_TRACKED_METRICS must be a MetricKeys constant."""
+        mk_values = {
+            v for k, v in vars(MetricKeys).items() if not k.startswith("_")
+        }
+        for metric in _DEFAULT_TRACKED_METRICS:
+            assert metric in mk_values, (
+                f"_DEFAULT_TRACKED_METRICS entry {metric!r} is not a MetricKeys constant. "
+                f"Add it to MetricKeys or use an existing constant."
+            )
+
+    def test_checkpoint_filename_slash_to_underscore(self) -> None:
+        """Verify slash→underscore conversion produces valid checkpoint filenames."""
+        for metric in _DEFAULT_TRACKED_METRICS:
+            safe_name = metric.replace("/", "_")
+            filename = f"best_{safe_name}.pth"
+            # No slashes in filename (would create subdirectory)
+            assert "/" not in filename, f"Checkpoint filename {filename!r} contains slash"

@@ -8,7 +8,6 @@ SAM3 TopoLoRA tests are skipped when GPU VRAM < 16 GB.
 from __future__ import annotations
 
 import pytest
-import torch
 
 from minivess.adapters.model_builder import _sam3_package_available
 from minivess.config.models import ModelConfig, ModelFamily
@@ -17,19 +16,6 @@ pytestmark = pytest.mark.model_loading
 
 _sam3_skip = pytest.mark.skipif(
     not _sam3_package_available(), reason="SAM3 not installed"
-)
-
-
-def _gpu_vram_gb() -> float:
-    """Return total VRAM of GPU 0 in GB, or 0.0 if no CUDA GPU."""
-    if not torch.cuda.is_available():
-        return 0.0
-    return torch.cuda.get_device_properties(0).total_memory / (1024**3)
-
-
-_vram_16gb_skip = pytest.mark.skipif(
-    _gpu_vram_gb() < 16.0,
-    reason=f"SAM3 TopoLoRA requires >= 16 GB VRAM (detected {_gpu_vram_gb():.1f} GB)",
 )
 
 
@@ -63,22 +49,8 @@ class TestBuildAdapter:
         cfg = adapter.get_config()
         assert cfg.family == "sam3_vanilla"
 
-    @_sam3_skip
-    @_vram_16gb_skip
-    @pytest.mark.gpu
-    def test_build_sam3_topolora(self) -> None:
-        from minivess.adapters.model_builder import build_adapter
-
-        config = ModelConfig(
-            family=ModelFamily.SAM3_TOPOLORA,
-            name="topolora-test",
-            in_channels=1,
-            out_channels=2,
-            lora_rank=2,
-        )
-        adapter = build_adapter(config)
-        cfg = adapter.get_config()
-        assert cfg.family == "sam3_topolora"
+    # test_build_sam3_topolora moved to tests/gpu_instance/test_sam3_topolora_build.py
+    # ZERO skips in staging/prod — VRAM-gated tests belong in GPU tier only.
 
     @_sam3_skip
     def test_build_sam3_hybrid(self) -> None:

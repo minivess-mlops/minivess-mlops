@@ -22,10 +22,8 @@ adapter (#342, PR #567).
 from __future__ import annotations
 
 import logging
-import os
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from prefect import flow, task
@@ -45,23 +43,9 @@ from minivess.orchestration.constants import (
     FLOW_NAME_POST_TRAINING,
     FLOW_NAME_TRAIN,
 )
+from minivess.orchestration.docker_guard import require_docker_context
 
 logger = logging.getLogger(__name__)
-
-
-def _require_docker_context() -> None:
-    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
-    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
-        return
-    if os.environ.get("DOCKER_CONTAINER"):
-        return
-    if Path("/.dockerenv").exists():
-        return
-    raise RuntimeError(
-        "Pipeline flow must run inside a Docker container.\n"
-        "Run: docker compose -f deployment/docker-compose.flows.yml run pipeline\n"
-        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
-    )
 
 
 @dataclass(frozen=True)
@@ -197,7 +181,7 @@ def pipeline_flow(
     -------
     Dict with pipeline results summary.
     """
-    _require_docker_context()
+    require_docker_context("pipeline")
 
     if skip_flows is None:
         skip_flows = []

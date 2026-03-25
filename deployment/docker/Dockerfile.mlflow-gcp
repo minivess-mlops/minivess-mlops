@@ -12,7 +12,9 @@ RUN pip install --no-cache-dir \
 EXPOSE 5000
 
 # --no-serve-artifacts: clients upload directly to GCS (bypasses Cloud Run 32 MB limit)
-# --default-artifact-root set via MLFLOW_ARTIFACTS_DESTINATION env var in Cloud Run
+# --default-artifact-root set via MLFLOW_DEFAULT_ARTIFACT_ROOT env var in Cloud Run
+# NOTE: MLFLOW_ARTIFACTS_DESTINATION is the WRONG var (maps to --artifacts-destination)
+# See: GitHub issue #878
 ENTRYPOINT ["mlflow", "server", \
     "--host", "0.0.0.0", \
     "--port", "5000", \

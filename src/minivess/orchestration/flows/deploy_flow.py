@@ -17,15 +17,22 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from prefect import flow, get_run_logger, task
 
 from minivess.config.deploy_config import DeployConfig
 from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.tracking import resolve_tracking_uri
-from minivess.orchestration.constants import FLOW_NAME_DEPLOY
+from minivess.orchestration.constants import (
+    EXPERIMENT_TRAINING,
+    FLOW_NAME_DEPLOY,
+    resolve_experiment_name,
+)
+from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -35,21 +42,6 @@ if TYPE_CHECKING:
     from minivess.pipeline.deploy_champion_discovery import ChampionModel
 
 logger = logging.getLogger(__name__)
-
-
-def _require_docker_context() -> None:
-    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
-    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
-        return
-    if os.environ.get("DOCKER_CONTAINER"):
-        return
-    if Path("/.dockerenv").exists():
-        return
-    raise RuntimeError(
-        "Deploy flow must run inside a Docker container.\n"
-        "Run: docker compose -f deployment/docker-compose.flows.yml run deploy\n"
-        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +227,7 @@ def deploy_flow(
     -------
     :class:`DeployResult` with all deployment artifacts and status.
     """
-    _require_docker_context()
+    require_docker_context("deploy")
 
     if config is None:
         config = DeployConfig.from_env()
@@ -340,10 +332,11 @@ def deploy_flow(
     # --- FlowContract: tag run and log completion ---
     _tracking_uri = resolve_tracking_uri()
     # Use provided upstream ID or auto-discover from MLflow
+    _experiment = resolve_experiment_name(EXPERIMENT_TRAINING)
     if upstream_analysis_run_id is None:
         upstream = find_upstream_safely(
             tracking_uri=_tracking_uri,
-            experiment_name="minivess_training",
+            experiment_name=_experiment,
             upstream_flow="analyze",
         )
         upstream_analysis_run_id = upstream["run_id"] if upstream else None
@@ -352,7 +345,7 @@ def deploy_flow(
         import mlflow
 
         mlflow.set_tracking_uri(_tracking_uri)
-        mlflow.set_experiment("minivess_training")
+        mlflow.set_experiment(_experiment)
         with mlflow.start_run(
             tags={
                 "flow_name": "deploy-flow",

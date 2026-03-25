@@ -9,14 +9,14 @@ Verifies that the capability schema check:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
 
 from minivess.testing.capability_discovery import check_consistency
 
-if TYPE_CHECKING:
-    from pathlib import Path
+REPO_ROOT = str(Path(__file__).resolve().parents[3])
 
 
 class TestCheckConsistency:
@@ -116,7 +116,7 @@ class TestCapabilityCheckCli:
             ],
             capture_output=True,
             text=True,
-            cwd="/home/petteri/Dropbox/github-personal/minivess-mlops",
+            cwd=REPO_ROOT,
         )
         assert result.returncode == 0
         assert "consistent" in result.stdout.lower()
@@ -150,6 +150,6 @@ class TestCapabilityCheckCli:
             ],
             capture_output=True,
             text=True,
-            cwd="/home/petteri/Dropbox/github-personal/minivess-mlops",
+            cwd=REPO_ROOT,
         )
         assert result.returncode == 1

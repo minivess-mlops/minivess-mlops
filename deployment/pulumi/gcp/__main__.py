@@ -244,7 +244,15 @@ if enable_cloud_run:
                             "value": db_connection_uri,
                         },
                         {
-                            "name": "MLFLOW_ARTIFACTS_DESTINATION",
+                            # MLFLOW_DEFAULT_ARTIFACT_ROOT tells the tracking server
+                            # the default artifact location for NEW experiments.
+                            # With --no-serve-artifacts (in Dockerfile), clients
+                            # upload directly to GCS — bypassing the 32 MB Cloud Run
+                            # HTTP body limit that caused #878 (413 Too Large).
+                            #
+                            # NOTE: The ARTIFACTS_DESTINATION variant is WRONG —
+                            # it maps to --artifacts-destination (server-side proxy).
+                            "name": "MLFLOW_DEFAULT_ARTIFACT_ROOT",
                             "value": mlflow_artifacts_bucket.name.apply(
                                 lambda n: f"gs://{n}"
                             ),

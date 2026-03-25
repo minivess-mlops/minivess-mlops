@@ -7,17 +7,19 @@ session, and optionally computes agreement with a reference segmentation.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray  # noqa: TC002
 from prefect import flow, task
 
 from minivess.orchestration.constants import FLOW_NAME_ANNOTATION
+from minivess.orchestration.docker_guard import require_docker_context
 from minivess.serving.api_models import SegmentationRequest
 
 if TYPE_CHECKING:
@@ -25,21 +27,6 @@ if TYPE_CHECKING:
     from minivess.serving.inference_client import InferenceClient
 
 logger = logging.getLogger(__name__)
-
-
-def _require_docker_context() -> None:
-    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
-    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
-        return
-    if os.environ.get("DOCKER_CONTAINER"):
-        return
-    if Path("/.dockerenv").exists():
-        return
-    raise RuntimeError(
-        "Annotation flow must run inside a Docker container.\n"
-        "Run: docker compose -f deployment/docker-compose.flows.yml run annotation\n"
-        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
-    )
 
 
 @dataclass
@@ -197,7 +184,7 @@ def run_annotation_flow(
     -------
     AnnotationFlowResult with response dict, session report, and agreement.
     """
-    _require_docker_context()
+    require_docker_context("annotation")
 
     if config is None:
         config = AnnotationFlowConfig()

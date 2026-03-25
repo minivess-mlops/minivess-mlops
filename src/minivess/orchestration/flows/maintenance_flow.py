@@ -10,8 +10,6 @@ Issue: #683
 from __future__ import annotations
 
 import logging
-import os
-from pathlib import Path
 from typing import Any
 
 from mlflow.tracking import MlflowClient
@@ -19,32 +17,19 @@ from prefect import flow, task
 
 from minivess.observability.ghost_cleanup import cleanup_ghost_runs, find_ghost_runs
 from minivess.observability.tracking import resolve_tracking_uri
-from minivess.orchestration.constants import FLOW_NAME_MAINTENANCE
+from minivess.orchestration.constants import (
+    EXPERIMENT_TRAINING,
+    FLOW_NAME_MAINTENANCE,
+)
+from minivess.orchestration.docker_guard import require_docker_context
 
 logger = logging.getLogger(__name__)
-
-
-def _require_docker_context() -> None:
-    """Raise RuntimeError if not running inside a Docker container.
-
-    Escape hatch: MINIVESS_ALLOW_HOST=1 for pytest only.
-    """
-    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
-        return
-    if os.environ.get("DOCKER_CONTAINER"):
-        return
-    if Path("/.dockerenv").exists():
-        return
-    raise RuntimeError(
-        "Maintenance flow must run inside a Docker container.\n"
-        "Escape hatch (pytest ONLY): export MINIVESS_ALLOW_HOST=1"
-    )
 
 
 @task(name="cleanup-stale-runs")
 def cleanup_stale_runs_task(
     *,
-    experiment_name: str = "minivess_training",
+    experiment_name: str = EXPERIMENT_TRAINING,
     max_age_hours: float = 24.0,
     dry_run: bool = True,
 ) -> dict[str, Any]:
@@ -99,14 +84,14 @@ def cleanup_stale_runs_task(
 @flow(name=FLOW_NAME_MAINTENANCE)
 def maintenance_flow(
     *,
-    experiment_name: str = "minivess_training",
+    experiment_name: str = EXPERIMENT_TRAINING,
     dry_run: bool = True,
 ) -> dict[str, Any]:
     """Maintenance flow — periodic MLflow cleanup.
 
     Designed for Prefect scheduling (e.g., daily at 03:00 UTC).
     """
-    _require_docker_context()
+    require_docker_context("maintenance")
     logger.info("Maintenance flow started (dry_run=%s)", dry_run)
 
     result = cleanup_stale_runs_task(

@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Infrastructure Performance Audit — Comprehensive Plan
+  Issue: #913 (factorial launch bottleneck)
+  Branch: test/run-debug-gcp-5th-pass
+  Date: 2026-03-23
+
+  Source: Two reviewer agents analyzed SkyPilot config architecture and
+  performance measurement. This XML synthesizes their recommendations
+  into an executable plan with TDD tasks.
+
+  Prerequisite: knowledge-graph/domains/cloud.yaml updated with:
+    - skypilot_controller_placement decision (match_job_cloud)
+    - parallel_submissions decision (configurable_parallelism)
+
+  Related:
+    - docs/planning/cloud-performance-measurement-optimization-plan.md (full analysis)
+    - .claude/metalearning/2026-03-23-skypilot-controller-on-wrong-cloud.md
+    - run-debug-factorial-experiment-report-5th-pass.md (observations O1-O7)
+-->
+<plan>
+  <metadata>
+    <title>Infrastructure Performance Audit — Config Architecture + Parallel Launch + SWAG Optimization</title>
+    <branch>test/run-debug-gcp-5th-pass</branch>
+    <date>2026-03-23</date>
+    <status>planned</status>
+    <priority>P0 — blocks 6th pass launch (won't launch until config architecture is right)</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <issue>https://github.com/petteriTeikari/minivess-mlops/issues/913</issue>
+    <report-output>docs/planning/cloud-performance-measurement-optimization-plan.md</report-output>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- ROOT CAUSES FROM 5th PASS                                      -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <root-causes>
+    <cause id="RC1" severity="CRITICAL" title="SkyPilot controller on wrong cloud">
+      ~/.sky/config.yaml had cloud:runpod for GCP jobs. Cross-cloud SSH added
+      ~30 min/submission. RunPod outage killed 25/34 submissions.
+      FIX: controller.cloud derived from task YAML cloud, not hardcoded.
+    </cause>
+    <cause id="RC2" severity="HIGH" title="Sequential job submission">
+      run_factorial.sh launches sky jobs one-at-a-time. With N=4 parallel,
+      34 jobs complete submissions in ~45 min instead of ~20 hours.
+      FIX: Configurable parallelism from Hydra config (not hardcoded).
+    </cause>
+    <cause id="RC3" severity="HIGH" title="SWAG runs 10 epochs regardless of training epochs">
+      Debug run: 2 training epochs + 10 SWAG epochs = 25 min SWAG on 5 min training.
+      SWAG swa_epochs should scale: min(config, max(2, max_epochs // 5)).
+      FIX: Scale SWAG proportionally to training epochs.
+    </cause>
+    <cause id="RC4" severity="MEDIUM" title="No performance instrumentation">
+      Zero perf/* metrics logged. Cannot measure Docker pull time, DVC pull time,
+      setup overhead, SWAG overhead, or submission latency programmatically.
+      FIX: Add perf/* metric keys to MLflow, queryable via DuckDB.
+    </cause>
+  </root-causes>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 1: CONFIG ARCHITECTURE (single-source YAML)              -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="1" name="Config Architecture">
+    <description>
+      Create repo-level Hydra config groups for cloud infrastructure.
+      Single source of truth: configs/cloud/{env}.yaml defines provider,
+      controller, accelerators, parallelism, and Docker registry.
+      No more ~/.sky/config.yaml drift.
+    </description>
+
+    <task id="1.1" type="config">
+      <title>Enhance configs/cloud/gcp_spot.yaml with controller + infrastructure blocks</title>
+      <spec>
+        Add controller: {cloud: gcp, disk_size: 50} and
+        infrastructure: {parallel_submissions: 4, rate_limit_seconds: 5}.
+        Provider field must be "gcp". Controller cloud must equal provider.
+      </spec>
+      <test>test_controller_cloud_matches_provider[gcp_spot]</test>
+    </task>
+
+    <task id="1.2" type="config">
+      <title>Enhance configs/cloud/runpod_dev.yaml with controller + infrastructure blocks</title>
+      <spec>
+        Add controller: {cloud: runpod, disk_size: 50} and
+        infrastructure: {parallel_submissions: 2, rate_limit_seconds: 5}.
+      </spec>
+      <test>test_controller_cloud_matches_provider[runpod_dev]</test>
+    </task>
+
+    <task id="1.3" type="config">
+      <title>Add infrastructure block to configs/experiment/debug_factorial.yaml</title>
+      <spec>
+        Add infrastructure: {cloud_config: gcp_spot, skypilot_yaml: deployment/skypilot/train_factorial.yaml}.
+        Parallel_submissions NOT set here (inherited from cloud config).
+      </spec>
+      <test>test_cloud_config_reference_valid[debug_factorial]</test>
+    </task>
+
+    <task id="1.4" type="script">
+      <title>Create scripts/sync_sky_config.py</title>
+      <spec>
+        Reads configs/cloud/*.yaml controller block, writes ~/.sky/config.yaml.
+        Preserves existing non-controller settings. Called by run_factorial.sh
+        before any sky jobs launch. Idempotent.
+      </spec>
+      <test>test_sync_sky_config_gcp, test_sync_sky_config_preserves_existing</test>
+    </task>
+
+    <task id="1.5" type="test">
+      <title>Config chain validation test suite</title>
+      <spec>
+        tests/v2/unit/config/test_controller_cloud_match.py — parametrized over all cloud configs
+        tests/v2/unit/config/test_factorial_infra_references.py — valid references
+        tests/v2/unit/config/test_cloud_config_schema.py — required keys present
+        tests/v2/unit/config/test_no_hardcoded_parallelism.py — no PARALLEL=4 in scripts
+      </spec>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 2: PARALLEL SUBMISSIONS                                  -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="2" name="Parallel Submissions">
+    <description>
+      Modify run_factorial.sh to read parallel_submissions from config chain
+      and launch N jobs concurrently using bash background jobs + wait.
+    </description>
+
+    <task id="2.1" type="code">
+      <title>Read parallel_submissions from config chain in run_factorial.sh</title>
+      <spec>
+        Resolution order: factorial.infrastructure.parallel_submissions >
+        cloud.infrastructure.parallel_submissions > fallback 1.
+        Use Python one-liner to extract (no hardcoded values).
+      </spec>
+      <test>test_no_hardcoded_parallelism</test>
+    </task>
+
+    <task id="2.2" type="code">
+      <title>Implement parallel launch loop in run_factorial.sh</title>
+      <spec>
+        Replace sequential loop with background job pool.
+        At most N concurrent sky jobs launch calls.
+        wait -n to detect completion. Rate limit between batches.
+        Capture all job IDs including from parallel processes.
+      </spec>
+      <test>Factorial dry-run with --parallel 4 produces same conditions as sequential</test>
+    </task>
+
+    <task id="2.3" type="code">
+      <title>Call sync_sky_config.py at start of run_factorial.sh</title>
+      <spec>
+        Before any sky jobs launch, derive cloud config from factorial YAML,
+        call sync_sky_config.py to ensure ~/.sky/config.yaml matches.
+        Print controller cloud in the launch banner.
+      </spec>
+      <test>Preflight check #10 passes after sync</test>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 3: SWAG SCALING                                          -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="3" name="SWAG Epoch Scaling">
+    <description>
+      Fix SWAG swa_epochs to scale proportionally to training epochs.
+      Current: always 10. Fix: min(config, max(2, max_epochs // 5)).
+      This reduces debug SWAG from 25 min to ~5 min.
+    </description>
+
+    <task id="3.1" type="test">
+      <title>RED: test SWAG epochs scale with training epochs</title>
+      <spec>
+        test_swag_epochs_scale_with_training: when max_epochs=2, swag should
+        use at most 2 swa_epochs (not 10). When max_epochs=50, can use up to 10.
+      </spec>
+    </task>
+
+    <task id="3.2" type="code">
+      <title>GREEN: Scale swa_epochs in post_training_subflow or SWAGPlugin</title>
+      <spec>
+        In the code path that determines swa_epochs, apply:
+        actual_swa_epochs = min(configured_swa_epochs, max(2, max_epochs // 5))
+        Read max_epochs from the config dict passed to post_training_subflow.
+      </spec>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 4: PERFORMANCE INSTRUMENTATION                           -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="4" name="Performance Instrumentation">
+    <description>
+      Add perf/* metric keys to MLflow for every job phase.
+      Enables data-driven optimization and regression detection.
+      See: docs/planning/cloud-performance-measurement-optimization-plan.md
+    </description>
+
+    <task id="4.1" type="code">
+      <title>Add perf/* metric keys to MetricKeys class</title>
+      <spec>
+        Add to src/minivess/observability/metric_keys.py:
+        perf/setup_total_seconds, perf/docker_pull_seconds,
+        perf/dvc_pull_seconds, perf/training_seconds,
+        perf/swag_seconds, perf/swag_overhead_ratio,
+        perf/gpu_utilization_fraction, perf/total_job_seconds
+      </spec>
+      <test>test_metric_keys_has_perf_prefix</test>
+    </task>
+
+    <task id="4.2" type="code">
+      <title>Instrument setup timing in train_factorial.yaml</title>
+      <spec>
+        Add timing markers to setup script sections (DVC pull, HF download,
+        GPU check). Write timing to a /tmp/setup_timing.json file that
+        train_flow.py reads and logs to MLflow.
+      </spec>
+    </task>
+
+    <task id="4.3" type="code">
+      <title>Instrument SWAG timing in train_flow.py</title>
+      <spec>
+        Wrap post_training_subflow call with time.monotonic() measurement.
+        Log perf/swag_seconds and perf/swag_overhead_ratio to MLflow.
+      </spec>
+    </task>
+
+    <task id="4.4" type="test">
+      <title>Performance budget regression tests</title>
+      <spec>
+        test_swag_overhead_ratio_under_2x: SWAG time / training time <= 2.0
+        test_setup_fraction_under_40_percent: setup / total <= 0.4
+        These read from MLflow after a real cloud run (cloud tier tests).
+      </spec>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- EXECUTION ORDER                                                -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <execution-order>
+    <step>Phase 1 (Config Architecture) — MUST complete before any launch</step>
+    <step>Phase 2 (Parallel Submissions) — requires Phase 1 config chain</step>
+    <step>Phase 3 (SWAG Scaling) — independent, can parallelize with Phase 2</step>
+    <step>Phase 4 (Performance Instrumentation) — can start after Phase 1</step>
+    <step>Docker rebuild + GAR push (after all code changes)</step>
+    <step>Preflight 10/10</step>
+    <step>6th pass launch via /experiment-harness</step>
+  </execution-order>
+
+  <expected-outcomes>
+    <outcome metric="submission_latency" before="36 min" after="~5 min" improvement="7x"/>
+    <outcome metric="total_34_jobs_wall_clock" before="~20 hrs" after="~2-3 hrs" improvement="8x"/>
+    <outcome metric="debug_swag_time" before="25 min" after="~5 min" improvement="5x"/>
+    <outcome metric="debug_job_total" before="30 min" after="~15 min" improvement="2x"/>
+  </expected-outcomes>
+</plan>

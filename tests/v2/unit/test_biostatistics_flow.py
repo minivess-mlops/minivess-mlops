@@ -209,9 +209,7 @@ class TestFlowRaisesOutsideDocker:
         monkeypatch.delenv("MINIVESS_ALLOW_HOST", raising=False)
         monkeypatch.delenv("DOCKER_CONTAINER", raising=False)
 
-        from minivess.orchestration.flows.biostatistics_flow import (
-            _require_docker_context,
-        )
+        from minivess.orchestration.docker_guard import require_docker_context
 
         with pytest.raises(RuntimeError, match="Docker"):
-            _require_docker_context()
+            require_docker_context("biostatistics")

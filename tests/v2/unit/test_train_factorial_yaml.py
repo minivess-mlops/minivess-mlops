@@ -58,11 +58,16 @@ class TestTrainFactorialYaml:
         )
 
     def test_uses_l4_gpu(self) -> None:
-        """Must include L4 (Ada Lovelace, BF16-capable)."""
+        """Must include L4 (Ada Lovelace, BF16-capable) — may be in ordered: blocks."""
         config = _load(_TRAIN_FACTORIAL)
         resources = config.get("resources", {})
+        # Check direct accelerators field
         accel = resources.get("accelerators", {})
-        assert "L4" in accel, f"train_factorial.yaml must include L4 GPU, got: {accel}"
+        full_str = str(accel) + str(resources.get("ordered", []))
+        assert "L4" in full_str, (
+            f"train_factorial.yaml must include L4 GPU (in accelerators or ordered:). "
+            f"Got resources: {resources}"
+        )
 
     def test_uses_spot_instances(self) -> None:
         """Must use spot instances (60-91% cheaper)."""

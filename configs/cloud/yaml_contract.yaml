@@ -1,0 +1,95 @@
+# YAML Contract — Golden reference for SkyPilot YAML validation.
+#
+# This file defines EXACTLY what is allowed in deployment/skypilot/*.yaml.
+# Any key, value, or GPU type not listed here is UNAUTHORIZED.
+#
+# This is the SINGLE SOURCE OF TRUTH for YAML validation. All defense layers
+# (pre-commit hook, test suite, preflight checks, experiment harness) read
+# from this file. Never hardcode allowed values elsewhere.
+#
+# When to update: ONLY when the user explicitly authorizes a new GPU type,
+# cloud provider, or resource configuration. Claude Code MUST NOT update
+# this file without explicit user instruction.
+#
+# See: .claude/metalearning/2026-03-24-yaml-is-the-contract-zero-improvisation.md
+# See: .claude/metalearning/2026-03-24-unauthorized-a100-in-skypilot-yaml.md
+
+# ── Allowed GPU types per cloud provider ─────────────────────────────────
+# T4 is BANNED globally (Turing, no BF16 → FP16 overflow → NaN).
+# A100/H100 require EXPLICIT user authorization before adding here.
+allowed_accelerators:
+  gcp:
+    - L4
+  runpod:
+    - RTX4090
+    - RTX5090
+    - RTX3090
+  local:
+    - null  # Whatever is available locally
+
+# ── Banned GPU types (global, all providers) ─────────────────────────────
+# These MUST NEVER appear in any SkyPilot YAML accelerator field.
+banned_accelerators:
+  - T4        # Turing: no BF16 → FP16 overflow → NaN in SAM3
+  - V100      # Volta: no BF16
+  - K80       # Kepler: ancient, no FP16 even
+  - P100      # Pascal: no BF16
+  - P4        # Pascal: no BF16
+
+# ── Allowed cloud providers ──────────────────────────────────────────────
+# EXACTLY two providers. Adding a third requires explicit user authorization.
+allowed_clouds:
+  - gcp
+  - runpod
+
+# ── Allowed top-level keys in SkyPilot YAML ──────────────────────────────
+# Any key not in this list is suspicious and should be flagged.
+allowed_top_level_keys:
+  - name
+  - resources
+  - file_mounts
+  - envs
+  - setup
+  - run
+  - workdir
+  - num_nodes
+  - volumes   # RunPod Network Volumes
+
+# ── Allowed keys inside resources ────────────────────────────────────────
+allowed_resource_keys:
+  - image_id
+  - accelerators
+  - cloud
+  - use_spot
+  - disk_size
+  - disk_tier
+  - region
+  - any_of
+  - ordered      # Multi-region failover (EU-preferred + US-fallback)
+  - ports
+  - cpus
+  - memory
+  - job_recovery  # Spot resilience: restart on user code errors
+
+# ── Factorial YAML (train_factorial.yaml) — strictest contract ───────────
+# The factorial YAML is the MOST cost-sensitive (34+ jobs per pass).
+# Only L4 is allowed. Period.
+factorial:
+  allowed_accelerators:
+    - L4
+  required_cloud: gcp
+  max_disk_size: 200  # GB, sanity check
+  require_spot: true
+  require_docker_image: true
+
+# ── Cost guard rails ─────────────────────────────────────────────────────
+# Max hourly cost per GPU type (spot prices, approximate).
+# If estimated total > budget, preflight REJECTS the launch.
+max_hourly_cost_usd:
+  L4: 0.30       # ~$0.22/hr spot, buffer for on-demand fallback
+  RTX4090: 0.50  # ~$0.44/hr spot
+  RTX5090: 0.80  # estimated
+  RTX3090: 0.45  # ~$0.40/hr spot
+  A100: 1.50     # NOT AUTHORIZED — listed only for detection
+  A100-80GB: 1.80  # NOT AUTHORIZED
+  H100: 3.00     # NOT AUTHORIZED

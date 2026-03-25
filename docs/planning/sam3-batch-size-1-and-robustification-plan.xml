@@ -1,0 +1,612 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SAM3 Batch Size 1 + Gradient Accumulation + OOM Robustification Plan
+  ====================================================================
+  Date: 2026-03-25
+  Context: 8th debug factorial pass — SAM3 TopoLoRA OOM on L4 (24 GB) at BS=2
+  Report: docs/planning/sam3-oom-training-double-check-report.md
+  Execution: /self-learning-iterative-coder (TDD: RED -> GREEN -> VERIFY)
+
+  IMPORTANT: This plan modifies declarative config files (factorial YAMLs).
+  Per CLAUDE.md Rule #31, these changes were EXPLICITLY authorized by the user
+  in the session that produced this plan. Do NOT modify any config key beyond
+  what is specified here.
+-->
+<plan>
+  <metadata>
+    <title>SAM3 Batch Size 1 + Gradient Accumulation + OOM Robustification</title>
+    <created>2026-03-25</created>
+    <author>Petteri Teikari + Claude Code</author>
+    <report>docs/planning/sam3-oom-training-double-check-report.md</report>
+    <status>ready-for-implementation</status>
+    <estimated-cost>Relaunch: ~$4-8 (16 SAM3 conditions on L4 spot + 2 zero-shot baselines)</estimated-cost>
+    <rule-compliance>
+      <rule id="27">Debug run = full production: only batch_size and grad_accum change, all factors identical</rule>
+      <rule id="29">Zero hardcoded parameters: batch_size and grad_accum come from config, not code defaults</rule>
+      <rule id="31">Zero improvisation on configs: changes explicitly authorized by user</rule>
+      <rule id="17">No standalone scripts: all training through Prefect flows in Docker</rule>
+      <rule id="18">Explicit Docker volume mounts: no /tmp for artifacts</rule>
+    </rule-compliance>
+  </metadata>
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 1: CONFIG CHANGES                                               -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="1" name="Config Changes">
+    <description>
+      Add model-specific batch_size and gradient_accumulation_steps overrides to
+      factorial configs. The global fixed.batch_size remains as the default for
+      models without an override. SAM3 variants get BS=1 + accum=4.
+    </description>
+
+    <task id="1.1">
+      <title>Add model_overrides section to factorial configs</title>
+      <description>
+        Add a new top-level `model_overrides` key to debug.yaml, paper_full.yaml,
+        and smoke_test.yaml. Each entry maps a model_family name to its specific
+        batch_size and gradient_accumulation_steps. Models not listed use the
+        global fixed.batch_size with gradient_accumulation_steps=1 (default).
+
+        Config structure:
+        ```yaml
+        model_overrides:
+          sam3_topolora:
+            batch_size: 1
+            gradient_accumulation_steps: 4
+          sam3_hybrid:
+            batch_size: 1
+            gradient_accumulation_steps: 4
+          sam3_vanilla:
+            batch_size: 1
+            gradient_accumulation_steps: 1
+        ```
+
+        DynUNet and MambaVesselNet are NOT listed because they use the global
+        fixed.batch_size=2 with no gradient accumulation. Explicit is better
+        than implicit, but listing them would be noise since they match defaults.
+      </description>
+      <files>
+        <file>configs/factorial/debug.yaml</file>
+        <file>configs/factorial/paper_full.yaml</file>
+        <file>configs/factorial/smoke_test.yaml</file>
+        <file>configs/factorial/smoke_local.yaml</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Write test: test_factorial_model_overrides_present() that loads each
+          factorial YAML via yaml.safe_load() and asserts model_overrides exists
+          with sam3_topolora.batch_size=1 and sam3_topolora.gradient_accumulation_steps=4.
+          Write test: test_model_overrides_consistent_across_configs() that verifies
+          all factorial YAMLs have identical model_overrides (Rule 27: debug = production).
+        </red>
+        <green>
+          Add the model_overrides section to each YAML file.
+        </green>
+        <test-file>tests/v2/unit/orchestration/test_factorial_model_overrides.py</test-file>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/orchestration/test_factorial_model_overrides.py -v</command>
+        <command>uv run python -c "import yaml, pathlib; cfg = yaml.safe_load(pathlib.Path('configs/factorial/debug.yaml').read_text(encoding='utf-8')); assert cfg['model_overrides']['sam3_topolora']['batch_size'] == 1"</command>
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="1.2">
+      <title>Wire model_overrides reading in run_factorial.sh</title>
+      <description>
+        Modify run_factorial.sh to read model_overrides from the factorial YAML
+        for the current model being launched. For each condition in the launch loop:
+
+        1. Look up model_overrides.{model}.batch_size (default: fixed.batch_size)
+        2. Look up model_overrides.{model}.gradient_accumulation_steps (default: 1)
+        3. Pass as --env BATCH_SIZE={value} --env GRAD_ACCUM_STEPS={value} to sky jobs launch
+
+        Implementation: Add a Python helper function call inside the launch loop
+        that reads the override for the current model. Use the existing Python YAML
+        parsing pattern already in the script (no new dependencies).
+
+        The BATCH_SIZE env var overrides the global fixed.batch_size.
+        The GRAD_ACCUM_STEPS env var is new (default 1 if not set).
+      </description>
+      <files>
+        <file>scripts/run_factorial.sh</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Write test: test_run_factorial_dry_run_model_overrides() that runs
+          run_factorial.sh --dry-run with a test config containing model_overrides
+          and verifies the dry-run output shows BATCH_SIZE=1 for SAM3 models
+          and BATCH_SIZE=2 for DynUNet.
+        </red>
+        <green>
+          Add Python inline to resolve per-model batch_size and grad_accum inside
+          the launch loop. Add --env BATCH_SIZE and --env GRAD_ACCUM_STEPS to the
+          sky jobs launch command.
+        </green>
+        <test-file>tests/v2/unit/orchestration/test_run_factorial_model_overrides.py</test-file>
+      </tdd-approach>
+      <verification>
+        <command>./scripts/run_factorial.sh --dry-run configs/factorial/debug.yaml 2>&amp;1 | grep -E "BATCH_SIZE|GRAD_ACCUM"</command>
+        <command>shellcheck scripts/run_factorial.sh</command>
+      </verification>
+      <depends-on>1.1</depends-on>
+    </task>
+
+    <task id="1.3">
+      <title>Wire gradient_accumulation_steps in train_flow.py training loop</title>
+      <description>
+        Modify the training loop in train_flow.py to support gradient accumulation:
+
+        1. Read GRAD_ACCUM_STEPS from environment (via resolve function, not os.environ.get with fallback)
+        2. In the training loop:
+           a. Divide loss by grad_accum_steps before backward()
+           b. Call optimizer.step() + optimizer.zero_grad() every grad_accum_steps iterations
+           c. Adjust epoch iteration count for learning rate schedulers
+        3. Log effective_batch_size = batch_size * grad_accum_steps to MLflow
+
+        IMPORTANT: This must work with MONAI SupervisedTrainer. If SupervisedTrainer
+        does not natively support gradient accumulation, implement it via the
+        iteration_update event handler or switch to a manual training loop with
+        MONAI transforms.
+
+        Meta's Issue #200 bug (collate_fn_api_with_chunking) does NOT apply to
+        standard PyTorch grad accum. Our MONAI loop uses standard DataLoader.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/train_flow.py</file>
+        <file>src/minivess/orchestration/training_loop.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Write test: test_gradient_accumulation_divides_loss() that mocks the
+          training loop with grad_accum_steps=4, verifies loss is divided by 4,
+          and optimizer.step() is called every 4th iteration.
+          Write test: test_gradient_accumulation_effective_batch_logged() that
+          verifies effective_batch_size is logged to MLflow params.
+          Write test: test_gradient_accumulation_steps_1_is_noop() that verifies
+          grad_accum_steps=1 produces identical behavior to the current loop.
+        </red>
+        <green>
+          Implement gradient accumulation in the training loop.
+        </green>
+        <test-file>tests/v2/unit/orchestration/test_gradient_accumulation.py</test-file>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/orchestration/test_gradient_accumulation.py -v</command>
+        <command>uv run mypy src/minivess/orchestration/train_flow.py</command>
+      </verification>
+      <depends-on>1.2</depends-on>
+    </task>
+
+    <task id="1.4">
+      <title>Verify gradient accumulation works with MONAI SupervisedTrainer</title>
+      <description>
+        MONAI's SupervisedTrainer may or may not natively support gradient accumulation.
+        This task verifies compatibility and documents the integration approach:
+
+        1. Check if SupervisedTrainer has a gradient_accumulation parameter
+        2. If yes: use it directly (library-first, Rule #3)
+        3. If no: implement via iteration_update event or manual loop
+        4. Write an integration test that runs 8 iterations with accum=4 and
+           verifies optimizer.step() was called exactly 2 times
+
+        Web-search MONAI docs if needed (Rule #10: verify beyond knowledge cutoff).
+      </description>
+      <files>
+        <file>src/minivess/orchestration/training_loop.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Write integration test: test_monai_trainer_gradient_accumulation() that
+          creates a tiny DynUNet, runs 8 training iterations with accum=4, and
+          asserts weight updates happened exactly twice (at iterations 4 and 8).
+        </red>
+        <green>
+          Wire gradient accumulation into the MONAI training loop, using the
+          library-native approach if available.
+        </green>
+        <test-file>tests/v2/integration/test_monai_gradient_accumulation.py</test-file>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/integration/test_monai_gradient_accumulation.py -v</command>
+      </verification>
+      <depends-on>1.3</depends-on>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 2: CODE ROBUSTIFICATION                                         -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="2" name="Code Robustification">
+    <description>
+      Add OOM detection, pre-training VRAM estimation, and model-specific VRAM
+      profiles so that future OOM failures are caught early with actionable
+      diagnostics rather than opaque CUDA errors.
+    </description>
+
+    <task id="2.1">
+      <title>Add OOM detection and diagnostics in train_flow.py</title>
+      <description>
+        Wrap the training loop in a try/except that catches torch.cuda.OutOfMemoryError
+        (PyTorch 2.x) and RuntimeError with "CUDA out of memory" (legacy). On OOM:
+
+        1. Log current VRAM usage via torch.cuda.memory_summary()
+        2. Log the model family, batch_size, gradient_accumulation_steps
+        3. Log a diagnostic message suggesting batch_size reduction
+        4. Log to MLflow as a FAILED run with OOM tag
+        5. Re-raise the exception (Rule #25: loud failures, never silent discard)
+
+        This ensures that OOM failures produce actionable logs rather than raw CUDA
+        stack traces, making the next debugging pass faster.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/train_flow.py</file>
+        <file>src/minivess/orchestration/training_loop.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Write test: test_oom_detection_logs_diagnostics() that mocks
+          torch.cuda.OutOfMemoryError during training, verifies the diagnostic
+          message includes model_family, batch_size, and VRAM usage.
+          Write test: test_oom_detection_reraises() that verifies OOM is re-raised
+          after logging (Rule #25).
+        </red>
+        <green>
+          Add try/except block around the training loop with structured OOM diagnostics.
+        </green>
+        <test-file>tests/v2/unit/orchestration/test_oom_detection.py</test-file>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/orchestration/test_oom_detection.py -v</command>
+      </verification>
+      <depends-on>1.3</depends-on>
+    </task>
+
+    <task id="2.2">
+      <title>Add pre-training VRAM estimate check</title>
+      <description>
+        Before starting training, compute an estimated VRAM requirement based on:
+        - Model profile VRAM data (configs/model_profiles/*.yaml)
+        - Current batch_size
+        - Available GPU VRAM (torch.cuda.get_device_properties)
+
+        If estimated VRAM exceeds 90% of available VRAM, log a WARNING with the
+        estimate and suggest reducing batch_size. If estimated VRAM exceeds 100%,
+        raise RuntimeError (fail loudly before wasting spot instance time).
+
+        This check complements sam3_vram_check.py (which only checks minimum VRAM
+        for the model family, not batch-size-specific estimates).
+      </description>
+      <files>
+        <file>src/minivess/adapters/vram_estimator.py</file>
+        <file>src/minivess/orchestration/train_flow.py</file>
+        <file>configs/model_profiles/sam3_topolora.yaml</file>
+        <file>configs/model_profiles/sam3_hybrid.yaml</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Write test: test_vram_estimate_sam3_topolora_bs2_exceeds_l4() that mocks
+          L4 GPU (24 GB) and verifies the estimator raises RuntimeError for
+          sam3_topolora at batch_size=2.
+          Write test: test_vram_estimate_sam3_topolora_bs1_fits_l4() that verifies
+          sam3_topolora at batch_size=1 passes the check.
+          Write test: test_vram_estimate_dynunet_bs2_fits_l4() that verifies
+          dynunet at batch_size=2 passes the check.
+        </red>
+        <green>
+          Implement VRAM estimator that reads model profiles and computes
+          batch-size-scaled estimates.
+        </green>
+        <test-file>tests/v2/unit/adapters/test_vram_estimator.py</test-file>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/adapters/test_vram_estimator.py -v</command>
+        <command>uv run mypy src/minivess/adapters/vram_estimator.py</command>
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.3">
+      <title>Update model profile YAMLs with batch-size-specific VRAM data</title>
+      <description>
+        Update configs/model_profiles/sam3_topolora.yaml and sam3_hybrid.yaml with
+        the measured VRAM data from the 8th pass and RunPod smoke tests:
+
+        sam3_topolora.yaml:
+          vram.training_gb: 21.9  (at BS=2, OOM on L4)
+          vram.measured_config.batch_size: 2
+          Add: vram.per_batch_size.1: 13.0  (estimated)
+          Add: vram.per_batch_size.2: 21.9  (measured, OOM)
+
+        sam3_hybrid.yaml:
+          vram.training_gb: 7.2   (at BS=1, OK)
+          Add: vram.per_batch_size.1: 7.2   (measured)
+          Add: vram.per_batch_size.2: 14.4  (estimated)
+
+        mambavesselnet.yaml:
+          vram.training_gb: 6.7   (at BS=2, measured from 8th pass)
+          vram.measured: true
+          vram.measured_gpu: "L4"
+          vram.measured_date: "2026-03-24"
+
+        IMPORTANT (Rule #31): These are data updates from measurements, not
+        structural schema changes. The vram.per_batch_size sub-key is new but
+        was explicitly authorized by the user in this planning session.
+      </description>
+      <files>
+        <file>configs/model_profiles/sam3_topolora.yaml</file>
+        <file>configs/model_profiles/sam3_hybrid.yaml</file>
+        <file>configs/model_profiles/mambavesselnet.yaml</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Write test: test_model_profiles_have_measured_vram() that loads all
+          model profiles and verifies sam3_topolora, sam3_hybrid, dynunet, and
+          mambavesselnet all have vram.measured=true with non-null training_gb.
+        </red>
+        <green>
+          Update the YAML files with measured VRAM data.
+        </green>
+        <test-file>tests/v2/unit/adapters/test_model_profile_vram_data.py</test-file>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/v2/unit/adapters/test_model_profile_vram_data.py -v</command>
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.4">
+      <title>Update sam3_vram_check.py to account for batch_size</title>
+      <description>
+        The current sam3_vram_check.py enforces a flat 16 GB minimum for training
+        mode, regardless of batch size. Update it to:
+
+        1. Accept an optional batch_size parameter (default 1)
+        2. For batch_size > 1, scale the minimum VRAM requirement:
+           estimated = base_vram + (batch_size - 1) * per_sample_activation_cost
+        3. Read per_sample_activation_cost from the model profile YAML if available
+        4. Log the batch-size-adjusted estimate in the error message
+
+        This makes the VRAM check actionable: instead of "needs >= 16 GB" it says
+        "sam3_topolora at batch_size=2 needs ~22 GB, you have 24 GB (margin: 2 GB,
+        DANGEROUS — reduce batch_size to 1)."
+      </description>
+      <files>
+        <file>src/minivess/adapters/sam3_vram_check.py</file>
+        <file>tests/unit/adapters/test_sam3_vram_check.py</file>
+      </files>
+      <tdd-approach>
+        <red>
+          Write test: test_vram_check_batch_size_2_warns_on_l4() that mocks L4 GPU
+          and verifies check_sam3_vram(variant="sam3_topolora", mode="training",
+          batch_size=2) raises RuntimeError.
+          Write test: test_vram_check_batch_size_1_passes_on_l4() that verifies
+          batch_size=1 passes on L4.
+          Write test: test_vram_check_backward_compatible() that verifies calling
+          check_sam3_vram() without batch_size still works (default=1).
+        </red>
+        <green>
+          Add batch_size parameter to check_sam3_vram() with scaling logic.
+        </green>
+        <test-file>tests/unit/adapters/test_sam3_vram_check.py</test-file>
+      </tdd-approach>
+      <verification>
+        <command>uv run pytest tests/unit/adapters/test_sam3_vram_check.py -v</command>
+        <command>uv run mypy src/minivess/adapters/sam3_vram_check.py</command>
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 3: RELAUNCH                                                     -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <phase id="3" name="Relaunch">
+    <description>
+      Relaunch failed SAM3 conditions with corrected batch_size=1 and
+      gradient_accumulation_steps=4. DynUNet and MambaVesselNet are NOT relaunched
+      (16/16 SUCCEEDED). Zero-shot baselines are launched for the first time.
+
+      IMPORTANT: Relaunch requires explicit user authorization (Rule: no-unauthorized-infra).
+      This plan documents WHAT to launch; the user decides WHEN.
+    </description>
+
+    <task id="3.1">
+      <title>Relaunch SAM3 TopoLoRA (8 conditions) at BS=1, accum=4</title>
+      <description>
+        Relaunch all 8 SAM3 TopoLoRA training conditions:
+          4 losses x 2 aux_calibration x 1 fold = 8 GPU jobs
+
+        Each job runs with:
+          --env BATCH_SIZE=1
+          --env GRAD_ACCUM_STEPS=4
+          --env MODEL_FAMILY=sam3_topolora
+
+        Expected VRAM: ~13 GB (well within L4's 24 GB)
+        Expected cost: ~$2-4 (8 jobs on L4 spot, 2 epochs each for debug)
+
+        Use: ./scripts/run_factorial.sh --resume configs/factorial/debug.yaml
+        The --resume flag will skip SUCCEEDED DynUNet/MambaVesselNet jobs and
+        re-submit FAILED SAM3 TopoLoRA jobs with the new config.
+      </description>
+      <files>
+        <file>configs/factorial/debug.yaml</file>
+        <file>scripts/run_factorial.sh</file>
+      </files>
+      <tdd-approach>
+        <red>Not applicable (cloud launch, not code)</red>
+        <green>Launch via run_factorial.sh --resume with updated config</green>
+      </tdd-approach>
+      <verification>
+        <command>sky jobs queue | grep sam3_topolora</command>
+        <command>sky jobs queue | grep -c SUCCEEDED</command>
+      </verification>
+      <depends-on>1.1, 1.2, 1.3</depends-on>
+    </task>
+
+    <task id="3.2">
+      <title>Relaunch SAM3 Hybrid (8 conditions) at BS=1, accum=4</title>
+      <description>
+        Relaunch all 8 SAM3 Hybrid training conditions:
+          4 losses x 2 aux_calibration x 1 fold = 8 GPU jobs
+
+        Each job runs with:
+          --env BATCH_SIZE=1
+          --env GRAD_ACCUM_STEPS=4
+          --env MODEL_FAMILY=sam3_hybrid
+
+        Expected VRAM: ~7.2 GB (well within L4's 24 GB)
+        Expected cost: ~$2-4 (8 jobs on L4 spot, 2 epochs each for debug)
+      </description>
+      <files>
+        <file>configs/factorial/debug.yaml</file>
+        <file>scripts/run_factorial.sh</file>
+      </files>
+      <tdd-approach>
+        <red>Not applicable (cloud launch, not code)</red>
+        <green>Launch via run_factorial.sh --resume with updated config</green>
+      </tdd-approach>
+      <verification>
+        <command>sky jobs queue | grep sam3_hybrid</command>
+        <command>sky jobs queue | grep -c SUCCEEDED</command>
+      </verification>
+      <depends-on>1.1, 1.2, 1.3</depends-on>
+    </task>
+
+    <task id="3.3">
+      <title>Verify SAM3 Vanilla at BS=1</title>
+      <description>
+        SAM3 Vanilla is a zero-shot baseline (frozen encoder evaluation), not part
+        of the training factorial grid. Verify it works at BS=1 by checking:
+
+        1. If sam3_vanilla already SUCCEEDED in the 8th pass zero-shot launches
+        2. If not, launch via the zero-shot baseline section of run_factorial.sh
+        3. Expected VRAM: ~3.5 GB (verified on RTX 4090 at BS=1)
+
+        Note: SAM3 Vanilla uses frozen encoder (no backward pass through ViT-32L),
+        so batch_size=1 is its natural operating point regardless of VRAM.
+      </description>
+      <files>
+        <file>configs/factorial/debug.yaml</file>
+      </files>
+      <tdd-approach>
+        <red>Not applicable (cloud launch, not code)</red>
+        <green>Verify via sky jobs queue or launch if needed</green>
+      </tdd-approach>
+      <verification>
+        <command>sky jobs queue | grep sam3_vanilla</command>
+      </verification>
+      <depends-on>3.1</depends-on>
+    </task>
+
+    <task id="3.4">
+      <title>Launch zero-shot baselines (sam3_vanilla + vesselfm)</title>
+      <description>
+        Launch zero-shot baselines as defined in debug.yaml:
+
+        1. sam3_vanilla: frozen_encoder_eval on MiniVess, 1 fold
+        2. vesselfm: zero_shot_only on DeepVess, 1 fold
+
+        These are NOT part of the factorial Cartesian product. They are separate
+        jobs launched after the trainable conditions complete.
+
+        The run_factorial.sh script handles these automatically via the
+        zero_shot_baselines section at the bottom of the launch loop.
+      </description>
+      <files>
+        <file>configs/factorial/debug.yaml</file>
+        <file>scripts/run_factorial.sh</file>
+      </files>
+      <tdd-approach>
+        <red>Not applicable (cloud launch, not code)</red>
+        <green>Launched automatically by run_factorial.sh</green>
+      </tdd-approach>
+      <verification>
+        <command>sky jobs queue | grep zeroshot</command>
+      </verification>
+      <depends-on>3.1, 3.2</depends-on>
+    </task>
+
+    <task id="3.5">
+      <title>Monitor and verify all conditions SUCCEEDED</title>
+      <description>
+        After all jobs are launched, monitor until completion:
+
+        1. sky jobs queue — check for RUNNING / SUCCEEDED / FAILED
+        2. For any FAILED jobs: sky jobs logs JOB_ID to diagnose
+        3. Target: 32/32 trainable conditions SUCCEEDED + 2/2 zero-shot SUCCEEDED
+        4. Verify MLflow has all 34 runs logged with correct parameters
+
+        Expected timeline:
+        - Debug (2 epochs): ~10-20 min per job on L4
+        - With spot preemption + queue time: ~1-3 hours total wall clock
+
+        Success criteria:
+        - 8/8 DynUNet SUCCEEDED (already done)
+        - 8/8 MambaVesselNet SUCCEEDED (already done)
+        - 8/8 SAM3 TopoLoRA SUCCEEDED (new, BS=1)
+        - 8/8 SAM3 Hybrid SUCCEEDED (new, BS=1)
+        - 1/1 SAM3 Vanilla zero-shot SUCCEEDED
+        - 1/1 VesselFM zero-shot SUCCEEDED
+        - Total: 34/34
+      </description>
+      <files>
+        <file>outputs/*_factorial_job_ids.txt</file>
+      </files>
+      <tdd-approach>
+        <red>Not applicable (monitoring, not code)</red>
+        <green>sky jobs queue monitoring</green>
+      </tdd-approach>
+      <verification>
+        <command>sky jobs queue | grep -c SUCCEEDED</command>
+        <command>sky jobs queue | grep -c FAILED</command>
+      </verification>
+      <depends-on>3.1, 3.2, 3.3, 3.4</depends-on>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- DEPENDENCY GRAPH                                                      -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <dependency-graph>
+    <!--
+      Phase 1 (sequential):
+        1.1 -> 1.2 -> 1.3 -> 1.4
+
+      Phase 2 (parallel, independent of Phase 1):
+        2.1 depends on 1.3 (needs training loop to wrap)
+        2.2 independent
+        2.3 independent
+        2.4 independent
+
+      Phase 3 (sequential, depends on Phase 1 completion):
+        3.1 depends on 1.1, 1.2, 1.3
+        3.2 depends on 1.1, 1.2, 1.3
+        3.3 depends on 3.1 (verify after TopoLoRA works)
+        3.4 depends on 3.1, 3.2 (launch after trainable conditions)
+        3.5 depends on 3.1, 3.2, 3.3, 3.4 (final verification)
+
+      Parallel work streams:
+        Stream A: 1.1 -> 1.2 -> 1.3 -> 1.4 -> 3.1/3.2 -> 3.3/3.4 -> 3.5
+        Stream B: 2.2, 2.3, 2.4 (can start immediately, parallel)
+        Stream C: 2.1 (starts after 1.3)
+    -->
+    <edge from="1.1" to="1.2"/>
+    <edge from="1.2" to="1.3"/>
+    <edge from="1.3" to="1.4"/>
+    <edge from="1.3" to="2.1"/>
+    <edge from="1.1" to="3.1"/>
+    <edge from="1.2" to="3.1"/>
+    <edge from="1.3" to="3.1"/>
+    <edge from="1.1" to="3.2"/>
+    <edge from="1.2" to="3.2"/>
+    <edge from="1.3" to="3.2"/>
+    <edge from="3.1" to="3.3"/>
+    <edge from="3.1" to="3.4"/>
+    <edge from="3.2" to="3.4"/>
+    <edge from="3.1" to="3.5"/>
+    <edge from="3.2" to="3.5"/>
+    <edge from="3.3" to="3.5"/>
+    <edge from="3.4" to="3.5"/>
+  </dependency-graph>
+</plan>

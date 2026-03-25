@@ -30,6 +30,9 @@ def generate_tables(
     variance: list[VarianceDecompositionResult],
     rankings: list[RankingResult],
     output_dir: Path,
+    *,
+    anova_results: list[FactorialAnovaResult] | None = None,
+    cost_data: list[dict[str, Any]] | None = None,
 ) -> list[TableArtifact]:
     """Generate all biostatistics LaTeX tables.
 
@@ -43,6 +46,10 @@ def generate_tables(
         Ranking results.
     output_dir:
         Directory for table outputs.
+    anova_results:
+        Factorial ANOVA results for ANOVA summary tables.
+    cost_data:
+        Training cost data for cost appendix table.
 
     Returns
     -------
@@ -69,6 +76,17 @@ def generate_tables(
     # T5: Ranking summary table
     if rankings:
         t = _generate_ranking_table(rankings, output_dir)
+        tables.append(t)
+
+    # T6: ANOVA summary tables (one per metric) — Task 2.13
+    if anova_results:
+        for anova_result in anova_results:
+            t = _generate_anova_table(anova_result, output_dir)
+            tables.append(t)
+
+    # T7: Cost appendix table — Task 2.13
+    if cost_data:
+        t = _generate_cost_appendix_table(cost_data, output_dir)
         tables.append(t)
 
     logger.info("Generated %d LaTeX tables in %s", len(tables), output_dir)

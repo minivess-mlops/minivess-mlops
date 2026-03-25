@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  source_of_truth: configs/experiment/debug_factorial.yaml
+  decisions_referenced:
+    - post_training_methods
+    - full_factorial_structure
+    - post_training_execution_model
+    - debug_scope
+    - execution_location_not_hardcoded
+    - artifact_persistence
+  contradictions_checked:
+    - configs/experiment/debug_factorial.yaml
+    - knowledge-graph/decisions/registry.yaml
+    - docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-4th-pass.xml
+    - docs/planning/v0-2_archive/original_docs/integration-test-double-check.md
+  context_loaded:
+    navigator: knowledge-graph/navigator.yaml
+    domains:
+      - knowledge-graph/domains/cloud.yaml
+      - knowledge-graph/domains/training.yaml
+      - knowledge-graph/domains/infrastructure.yaml
+    metalearning:
+      - 2026-03-20-full-factorial-is-not-24-cells.md
+      - 2026-03-22-debug-equals-production-8th-violation.md
+      - 2026-03-22-dvc-pull-untested-setup-script-failure.md
+    registry: knowledge-graph/decisions/registry.yaml
+    memory: MEMORY.md
+    4th_pass_failures:
+      - job_recovery field unsupported in SkyPilot v1.0 (YAML schema bug)
+      - sky binary not on PATH (shell scripting bug)
+      - Wrong splits file hardcoded in setup (logic bug)
+      - 8 FAILED_SETUP jobs undetected for 2+ hours
+-->
+<plan>
+  <metadata>
+    <title>5th Pass Debug Factorial — GCP SkyPilot Launch + Cloud Test Suite Hardening</title>
+    <branch>test/run-debug-gcp-5th-pass</branch>
+    <date>2026-03-22</date>
+    <status>launching</status>
+    <priority>P0 — first clean launch after comprehensive QA (49 new tests, ALL preflight passed)</priority>
+    <skill>factorial-monitor</skill>
+    <estimated-cost>~$5-10 GCP L4 spot (32 GPU jobs + 2 zero-shot, 2 epochs each)</estimated-cost>
+    <report-output>docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-5th-pass.md</report-output>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SESSION CONTEXT: What's different from 4th pass                -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <session-context>
+    <previous-pass id="4" outcome="FAILED_SETUP on 8/32 jobs">
+      <root-causes>
+        <cause id="4RC1">job_recovery field removed in SkyPilot v1.0 (YAML parse failure)</cause>
+        <cause id="4RC2">sky binary not found (PATH not including .venv/bin)</cause>
+        <cause id="4RC3">Wrong splits file hardcoded in setup script</cause>
+        <cause id="4RC4">No monitoring — 8 failures undetected for 2+ hours</cause>
+      </root-causes>
+      <fixes-applied>
+        <fix ref="4RC1">Removed job_recovery field + test (test_no_job_recovery_field)</fix>
+        <fix ref="4RC2">Fixed run_factorial.sh to find sky in .venv</fix>
+        <fix ref="4RC3">Fixed setup script splits file selection (debug vs production)</fix>
+        <fix ref="4RC4">Factorial monitor skill upgrade plan written</fix>
+      </fixes-applied>
+    </previous-pass>
+
+    <qa-improvements-since-4th-pass>
+      <improvement>SkyPilot YAML tests: 22 → 56 (file_mounts, disk_size, DVC init, escape hatches, ALL 10 YAMLs)</improvement>
+      <improvement>Cross-flow FlowContract tests: 11 new (log/find roundtrip — critical gap closed)</improvement>
+      <improvement>Prod gate: 34 skips → 1 (cloud tests excluded, only VRAM-gated SAM3 TopoLoRA)</improvement>
+      <improvement>Integration test decision matrix: 4 reviewer agents, 28 hypotheses analyzed</improvement>
+      <improvement>DeepVess data: 1.45 GB downloaded, DVC tracked, 27 files on GCS</improvement>
+      <improvement>Preflight GCP: ALL 9 CHECKS PASSED</improvement>
+      <improvement>Factorial dry-run: 34 conditions validated (32 trainable + 2 zero-shot)</improvement>
+      <improvement>Staging: 5801 passed, 0 skipped, 0 failed</improvement>
+      <improvement>Prod: 6106 passed, 1 skipped (acceptable), 0 failed</improvement>
+    </qa-improvements-since-4th-pass>
+  </session-context>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- DUAL MANDATE: Platform validation + Robustness improvement    -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <dual-mandate>
+    <mandate id="M1" name="Platform Validation (Primary)">
+      <description>
+        Validate that the FULL factorial pipeline works end-to-end on GCP:
+        Docker pull → DVC data → model training → SWAG → metrics → MLflow.
+        This is a PLATFORM paper (Nature Protocols), not SOTA. The contribution
+        is the pipeline capability, not the segmentation numbers.
+      </description>
+      <success-criteria>
+        <criterion>All 34 conditions reach SUCCEEDED state (32 trainable + 2 zero-shot)</criterion>
+        <criterion>MLflow has finite val/dice for every condition</criterion>
+        <criterion>SWAG uncertainty estimates are finite (not NaN)</criterion>
+        <criterion>Checkpoint files exist on GCS for every fold</criterion>
+        <criterion>Docker image pull completes in &lt;15 min</criterion>
+        <criterion>DVC data pull from GCS succeeds on every VM</criterion>
+        <criterion>Spot preemption recovery works (if triggered)</criterion>
+      </success-criteria>
+    </mandate>
+
+    <mandate id="M2" name="Cloud Test Suite Hardening (Secondary)">
+      <description>
+        Use observations from the GCP run to identify edge cases and
+        improve the cloud test suite (tests/v2/cloud/). Current state:
+        33 cloud tests that all skip locally. Goal: make them comprehensive
+        and actually useful when run with credentials.
+      </description>
+      <focus-areas>
+        <area id="M2.1">MLflow cloud CRUD — verify experiment creation, metric logging, artifact upload against real server</area>
+        <area id="M2.2">SkyPilot job lifecycle — test PENDING→RUNNING→SUCCEEDED transitions with real sky jobs queue</area>
+        <area id="M2.3">DVC remote sync — verify dvc pull from GCS works, checksums match</area>
+        <area id="M2.4">Docker GAR pull timing — measure and assert pull time is within budget</area>
+        <area id="M2.5">Spot preemption handling — verify checkpoint persistence across preemption events</area>
+        <area id="M2.6">Cross-cloud metric visibility — verify MLflow metrics logged from GCP VM are queryable locally</area>
+        <area id="M2.7">Cost estimation accuracy — compare actual vs estimated cost per job</area>
+        <area id="M2.8">FAILED_SETUP diagnosis — verify ralph_monitor patterns catch real failures</area>
+      </focus-areas>
+    </mandate>
+  </dual-mandate>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- FACTORIAL DESIGN (identical to 4th pass)                      -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <factorial-design>
+    <layer id="A" name="Training">
+      <factor name="model_family" levels="dynunet,mambavesselnet,sam3_topolora,sam3_hybrid"/>
+      <factor name="loss_name" levels="cbdice_cldice,dice_ce,dice_ce_cldice,bce_dice_05cldice"/>
+      <factor name="aux_calibration" levels="true,false"/>
+    </layer>
+
+    <layer id="B" name="Post-training">
+      <factor name="method" levels="none,swag"/>
+      <factor name="recalibration" levels="none,temperature_scaling"/>
+    </layer>
+
+    <layer id="C" name="Analysis">
+      <factor name="ensemble_strategy" levels="none,per_loss_single_best,all_loss_single_best,per_loss_all_best,all_loss_all_best"/>
+    </layer>
+
+    <summary>
+      Total conditions: 4×4×2 × 2×2 × 5 = 640 (IDENTICAL to production)
+      Debug scope reductions (ONLY 3): 1 fold, 2 epochs, half data
+      GPU jobs: 32 cells × 1 fold = 32 (each runs training + SWAG internally)
+      Zero-shot baselines: 2 (SAM3 Vanilla on MiniVess, VesselFM on DeepVess)
+    </summary>
+  </factorial-design>
+
+  <zero-shot-baselines>
+    <baseline model="sam3_vanilla" strategy="frozen_encoder_eval" folds="1" dataset="minivess"/>
+    <baseline model="vesselfm" strategy="zero_shot_only" folds="1" dataset="deepvess"/>
+  </zero-shot-baselines>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- MONITORING PROTOCOL                                            -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <monitoring>
+    <tool>/factorial-monitor skill</tool>
+    <polling-interval>60 seconds</polling-interval>
+    <phases>
+      <phase id="1" name="LAUNCH">Submit all 34 conditions via run_factorial.sh</phase>
+      <phase id="2" name="MONITOR">
+        Poll sky jobs queue every 60s.
+        Track state transitions: PENDING → INIT → SETTING_UP → RUNNING → SUCCEEDED/FAILED.
+        Kill-switch: if 3+ jobs fail with IDENTICAL error within 5 min, cancel same-config jobs.
+      </phase>
+      <phase id="3" name="DIAGNOSE">
+        On terminal state, aggregate failures by root cause.
+        Use ralph_monitor.py patterns for classification.
+        Create per-root-cause diagnosis with affected conditions.
+      </phase>
+      <phase id="4" name="FIX">
+        Batch fix per root cause (never serial whac-a-mole).
+        Use self-learning-iterative-coder for code fixes.
+        Write cloud test for each discovered failure pattern.
+      </phase>
+      <phase id="5" name="RELAUNCH">
+        Rebuild Docker image if code changed (Rule F3).
+        Relaunch ONLY failed conditions (max 2 cycles, Rule F4).
+      </phase>
+      <phase id="6" name="REPORT">
+        Write final report to docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-5th-pass.md
+        Include: success/failure matrix, cost breakdown, MLflow metrics summary,
+        cloud test improvements made, issues created.
+      </phase>
+    </phases>
+
+    <cloud-test-improvement-protocol>
+      <description>
+        For EVERY failure observed during monitoring, the FIX phase MUST include
+        a new cloud test that would catch the same failure locally or with credentials.
+        This is how we systematically upgrade tests/v2/cloud/ from 33 skip-only tests
+        to a comprehensive cloud validation suite.
+      </description>
+      <categories>
+        <category name="Setup failures">DVC pull, Docker pull, env var resolution</category>
+        <category name="Training failures">OOM, NaN, CUDA errors, model loading</category>
+        <category name="Artifact failures">MLflow upload, checkpoint persistence, metric logging</category>
+        <category name="Infrastructure failures">Spot preemption, network timeout, quota exhaustion</category>
+      </categories>
+    </cloud-test-improvement-protocol>
+  </monitoring>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- WHAT TO WATCH FOR (learnings from passes 1-4)                 -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <watchlist>
+    <item id="W1" severity="P0" source="4th pass">
+      FAILED_SETUP within first 5 minutes — indicates YAML/Docker/DVC issues.
+      Previously: 8 jobs failed silently for 2+ hours.
+      New: factorial-monitor polls every 60s with desktop notification.
+    </item>
+    <item id="W2" severity="P0" source="3rd pass">
+      SAM3 models FP16 overflow → NaN during validation.
+      Fix: BF16 enforced. T4 banned. Only L4/A100 (Ada+) allowed.
+      Verify: val/dice is finite for SAM3 conditions.
+    </item>
+    <item id="W3" severity="P1" source="new">
+      Docker pull time from GAR. 9 GB image.
+      Measure: actual pull time per job from sky jobs logs.
+      Target: &lt;10 min (currently ~15 min).
+    </item>
+    <item id="W4" severity="P1" source="new">
+      DVC pull from GCS to spot VM. ~2.7 GB MiniVess data.
+      Verify: data-exists check prevents redundant pulls on spot recovery.
+    </item>
+    <item id="W5" severity="P1" source="new">
+      SWAG uncertainty estimates. First time running SWAG on cloud.
+      Verify: swag_uncertainty metric is finite (not NaN/Inf).
+    </item>
+    <item id="W6" severity="P2" source="new">
+      Spot preemption recovery. May or may not trigger in debug run.
+      If triggered: verify checkpoint persistence via MOUNT_CACHED.
+    </item>
+    <item id="W7" severity="P1" source="new">
+      MambaVesselNet++ CUDA compilation. mamba-ssm requires CUDA toolkit.
+      Verify: mamba_ssm imports successfully on cloud VM.
+    </item>
+    <item id="W8" severity="P1" source="architecture">
+      Cross-flow FlowContract. First time the full
+      train→post_training→analysis chain runs on cloud.
+      Verify: find_upstream_run() discovers training runs on cloud MLflow.
+    </item>
+  </watchlist>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- CLOUD TEST SUITE UPGRADE PLAN                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <cloud-test-upgrade>
+    <current-state>
+      33 tests in tests/v2/cloud/ — all skip without MLFLOW_TRACKING_URI.
+      Files: test_cloud_mlflow.py (16), test_cloud_training_artifacts.py (3),
+             test_hf_accessibility.py (2), test_preflight_validation.py (3),
+             test_skypilot_mlflow.py (3), test_skypilot_runpod.py (3),
+             test_training_flow_cloud_mlflow.py (3).
+    </current-state>
+
+    <target-state>
+      60+ tests covering: MLflow CRUD on real server, SkyPilot job lifecycle,
+      DVC remote sync, Docker GAR pull validation, checkpoint persistence,
+      cross-cloud metric visibility, cost estimation accuracy, FAILED_SETUP
+      pattern matching. Parametrized for both RunPod and GCP backends.
+    </target-state>
+
+    <new-tests-to-add>
+      <test-group name="SkyPilot Job Lifecycle">
+        <test>test_job_reaches_running_state — verify PENDING→RUNNING transition</test>
+        <test>test_job_reaches_succeeded — verify RUNNING→SUCCEEDED</test>
+        <test>test_failed_setup_detected — verify FAILED_SETUP is caught by ralph_monitor patterns</test>
+        <test>test_job_logs_contain_training_output — verify sky jobs logs has epoch output</test>
+      </test-group>
+      <test-group name="MLflow Cloud Metrics">
+        <test>test_cloud_mlflow_experiment_creation — create experiment on remote server</test>
+        <test>test_cloud_mlflow_metric_logging — log val/dice metric and read back</test>
+        <test>test_cloud_mlflow_artifact_upload — upload and download small artifact</test>
+        <test>test_cloud_mlflow_search_runs — search by tags like flow_name</test>
+        <test>test_cloud_mlflow_concurrent_writes — two clients log simultaneously</test>
+      </test-group>
+      <test-group name="DVC Cloud Sync">
+        <test>test_dvc_gcs_pull_data_exists — verify data accessible on GCS</test>
+        <test>test_dvc_lock_consistency — dvc.yaml/dvc.lock checksums match GCS</test>
+        <test>test_dvc_partial_pull — pull only data/raw/minivess (not all)</test>
+      </test-group>
+      <test-group name="Docker GAR">
+        <test>test_gar_image_exists — docker manifest inspect succeeds</test>
+        <test>test_gar_image_has_required_packages — verify mamba_ssm, monai in image</test>
+        <test>test_gar_image_freshness — image built after latest src/ commit</test>
+      </test-group>
+      <test-group name="Cost Estimation">
+        <test>test_cost_estimate_within_budget — actual vs estimated within 2x</test>
+        <test>test_per_job_cost_reasonable — no single job exceeds $1 (debug run)</test>
+      </test-group>
+    </new-tests-to-add>
+  </cloud-test-upgrade>
+</plan>

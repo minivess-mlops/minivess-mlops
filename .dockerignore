@@ -41,6 +41,8 @@ outputs/checkpoints/
 # ── Raw data (fetched at runtime via DVC / download scripts) ─────────────────
 data/minivess/
 data/raw/
+# Exception: .dvc tracking files are tiny text files needed for `dvc pull` on cloud VMs
+!data/raw/*.dvc
 
 # ── Node and frontend ─────────────────────────────────────────────────────────
 node_modules/

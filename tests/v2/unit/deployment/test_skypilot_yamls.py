@@ -80,15 +80,23 @@ class TestNoT4:
 # ---------------------------------------------------------------------------
 
 
-class TestBannedFields:
-    """Fields removed or unsupported in SkyPilot v1.0+."""
+class TestJobRecovery:
+    """Spot instances MUST have job_recovery for resilience."""
 
-    def test_no_job_recovery_field(self) -> None:
-        """job_recovery was removed in SkyPilot v1.0 (caused YAML parse failure in 4th pass)."""
+    def test_factorial_has_job_recovery(self) -> None:
+        """train_factorial.yaml MUST have job_recovery under resources.
+
+        Previous ban was WRONG — job_recovery IS supported in SkyPilot v1.0.
+        Verified with sky.Task.from_yaml(). Without it, spot preemption + user
+        code errors kill the job permanently with no retry.
+        See: .claude/metalearning/2026-03-24-skypilot-implementation-trust-deficit.md
+        """
         config = _load_yaml(FACTORIAL_YAML)
-        assert "job_recovery" not in config, (
-            "job_recovery field is banned — removed in SkyPilot v1.0. "
-            "See: run-debug-factorial-experiment-report-4th-pass-failure.md"
+        resources = config.get("resources", {})
+        assert "job_recovery" in resources, (
+            "train_factorial.yaml resources MUST include job_recovery for "
+            "spot resilience (max_restarts_on_errors). Field is SUPPORTED in "
+            "SkyPilot v1.0 — the previous ban was a confabulation."
         )
 
 
@@ -240,6 +248,152 @@ class TestRunSectionGuards:
         config = _load_yaml(FACTORIAL_YAML)
         run = config.get("run", "")
         assert "splits.json" in run, "Run section must check for splits.json existence"
+
+
+# ---------------------------------------------------------------------------
+# CLI arg name consistency (CRITICAL — 4th pass root cause)
+# ---------------------------------------------------------------------------
+
+
+class TestCliArgConsistency:
+    """YAML run section CLI args MUST match train_flow.py argparse exactly."""
+
+    def test_uses_model_family_not_model(self) -> None:
+        """Must use --model-family, not --model (4th pass root cause)."""
+        config = _load_yaml(FACTORIAL_YAML)
+        run = config.get("run", "")
+        assert "--model-family" in run, (
+            "YAML uses --model but argparse expects --model-family. "
+            "This caused EVERY job to crash in 4th pass."
+        )
+
+    def test_uses_loss_name_not_loss(self) -> None:
+        """Must use --loss-name, not --loss."""
+        config = _load_yaml(FACTORIAL_YAML)
+        run = config.get("run", "")
+        assert "--loss-name" in run, (
+            "YAML uses --loss but argparse expects --loss-name."
+        )
+
+    def test_uses_experiment_name_not_experiment(self) -> None:
+        """Must use --experiment-name, not --experiment."""
+        config = _load_yaml(FACTORIAL_YAML)
+        run = config.get("run", "")
+        assert "--experiment-name" in run, (
+            "YAML uses --experiment but argparse expects --experiment-name."
+        )
+
+    def test_all_cli_args_match_argparse(self) -> None:
+        """Every CLI arg in the YAML run section must exist in train_flow.py argparse."""
+        import ast
+
+        config = _load_yaml(FACTORIAL_YAML)
+        run = config.get("run", "")
+
+        # Extract CLI args from YAML run section
+        yaml_args = set()
+        for line in run.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("--") and not stripped.startswith("# "):
+                arg_name = stripped.split()[0].rstrip('"')
+                yaml_args.add(arg_name)
+
+        # Extract argparse args from train_flow.py
+        train_flow_path = Path("src/minivess/orchestration/flows/train_flow.py")
+        source = train_flow_path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+        argparse_args = set()
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "add_argument"
+                and node.args
+            ):
+                first_arg = node.args[0]
+                if isinstance(first_arg, ast.Constant) and isinstance(
+                    first_arg.value, str
+                ):
+                    argparse_args.add(first_arg.value)
+
+        # Every YAML arg must be a valid argparse arg
+        missing = yaml_args - argparse_args
+        assert not missing, (
+            f"YAML run section uses CLI args not in train_flow.py argparse: {missing}. "
+            f"Valid args: {sorted(argparse_args)}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# MLflow credentials in envs (CRITICAL — silent data loss)
+# ---------------------------------------------------------------------------
+
+
+class TestMlflowCredentials:
+    """MLflow connectivity env vars for Cloud Run."""
+
+    def test_mlflow_no_basic_auth_in_envs(self) -> None:
+        """MLFLOW_TRACKING_USERNAME/PASSWORD must NOT be in envs.
+
+        Cloud Run MLflow uses IAM auth (service account), not HTTP basic auth.
+        The literal ${...} placeholders were appearing URL-encoded in artifact
+        URLs, causing confusion. Removed in #878 cleanup.
+        """
+        config = _load_yaml(FACTORIAL_YAML)
+        envs = config.get("envs", {})
+        assert "MLFLOW_TRACKING_USERNAME" not in envs, (
+            "MLFLOW_TRACKING_USERNAME should be removed — Cloud Run MLflow uses "
+            "IAM auth, not HTTP basic auth. See #878."
+        )
+        assert "MLFLOW_TRACKING_PASSWORD" not in envs, (
+            "MLFLOW_TRACKING_PASSWORD should be removed — Cloud Run MLflow uses "
+            "IAM auth, not HTTP basic auth. See #878."
+        )
+
+    def test_mlflow_retry_configured(self) -> None:
+        """MLflow HTTP retries must be configured for cloud resilience."""
+        config = _load_yaml(FACTORIAL_YAML)
+        envs = config.get("envs", {})
+        assert "MLFLOW_HTTP_REQUEST_MAX_RETRIES" in envs, (
+            "MLFLOW_HTTP_REQUEST_MAX_RETRIES missing — transient failures will crash training."
+        )
+
+
+# ---------------------------------------------------------------------------
+# MLflow health check in setup (prevents silent data loss)
+# ---------------------------------------------------------------------------
+
+
+class TestMlflowHealthCheck:
+    """Setup must verify MLflow connectivity before training."""
+
+    def test_setup_has_mlflow_health_check(self) -> None:
+        """Setup must check MLflow server is reachable."""
+        config = _load_yaml(FACTORIAL_YAML)
+        setup = config.get("setup", "")
+        assert "MlflowClient" in setup or "mlflow" in setup.lower(), (
+            "Setup must verify MLflow connectivity — without this, "
+            "training runs for hours then silently loses all metrics."
+        )
+
+
+# ---------------------------------------------------------------------------
+# DeepVess data pull for zero-shot (prevents FAILED_SETUP)
+# ---------------------------------------------------------------------------
+
+
+class TestDeepVessDataPull:
+    """Setup must pull DeepVess data for zero-shot evaluation conditions."""
+
+    def test_setup_handles_deepvess(self) -> None:
+        """Setup must conditionally pull DeepVess data when EVAL_DATASET=deepvess."""
+        config = _load_yaml(FACTORIAL_YAML)
+        setup = config.get("setup", "")
+        assert "deepvess" in setup, (
+            "Setup must pull DeepVess data for zero-shot conditions. "
+            "Without this, VesselFM zero-shot evaluation crashes."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -407,9 +561,13 @@ class TestAllSkyPilotYamls:
         _discover_skypilot_yamls(),
         ids=[p.name for p in _discover_skypilot_yamls()],
     )
-    def test_no_job_recovery_anywhere(self, yaml_path: Path) -> None:
-        """job_recovery must NOT appear in any SkyPilot YAML (removed in v1.0)."""
+    def test_spot_yamls_have_job_recovery(self, yaml_path: Path) -> None:
+        """Spot YAMLs SHOULD have job_recovery for resilience (advisory)."""
         config = _load_yaml(yaml_path)
-        assert "job_recovery" not in config, (
-            f"job_recovery banned in {yaml_path.name} — removed in SkyPilot v1.0"
-        )
+        resources = config.get("resources", {})
+        use_spot = resources.get("use_spot", False)
+        if use_spot:
+            assert "job_recovery" in resources, (
+                f"{yaml_path.name}: spot YAML missing job_recovery — "
+                "spot preemption + errors will kill jobs permanently"
+            )

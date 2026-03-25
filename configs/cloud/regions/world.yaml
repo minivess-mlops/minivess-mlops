@@ -1,0 +1,42 @@
+# Maximum availability — all known L4 regions worldwide.
+# EU first, then US, then Asia. Highest spot success probability.
+# Use when europe_us.yaml fails due to prolonged spot drought.
+
+description: "All L4 regions worldwide — maximum spot availability"
+
+regions:
+  gcp:
+    L4:
+      # EU (closest to GCS)
+      - region: europe-west4
+        zones: 3
+      - region: europe-west1
+        zones: 2
+      - region: europe-west3
+        zones: 2
+      - region: europe-west2     # London — 2 zones
+        zones: 2
+      - region: europe-west6     # Zurich — 2 zones
+        zones: 2
+      # US (deep spot pools)
+      - region: us-central1
+        zones: 3
+      - region: us-east1
+        zones: 3
+      - region: us-west1
+        zones: 3
+      - region: us-east4         # Virginia — 3 zones
+        zones: 3
+      - region: us-west4         # Nevada — 3 zones
+        zones: 3
+      - region: us-west2         # California — 2 zones
+        zones: 2
+      # Asia-Pacific
+      - region: asia-east1
+        zones: 3
+      - region: asia-northeast1
+        zones: 3
+      - region: asia-southeast1
+        zones: 3
+      - region: asia-south1      # Mumbai — 3 zones
+        zones: 3

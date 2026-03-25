@@ -21,6 +21,7 @@ from prefect import flow, task
 from minivess.observability.mlflow_backend import detect_backend_type
 from minivess.observability.mlflow_schema import check_required_params
 from minivess.observability.tracking import resolve_tracking_uri
+from minivess.orchestration.docker_guard import require_docker_context
 
 # QA was merged into the dashboard health adapter (#342, PR #567).
 # FLOW_NAME_QA removed from orchestration.constants; defined locally for
@@ -28,21 +29,6 @@ from minivess.observability.tracking import resolve_tracking_uri
 FLOW_NAME_QA: str = "qa-flow"
 
 logger = logging.getLogger(__name__)
-
-
-def _require_docker_context() -> None:
-    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
-    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
-        return
-    if os.environ.get("DOCKER_CONTAINER"):
-        return
-    if Path("/.dockerenv").exists():
-        return
-    raise RuntimeError(
-        "QA flow must run inside a Docker container.\n"
-        "Run: docker compose -f deployment/docker-compose.flows.yml run qa\n"
-        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
-    )
 
 
 @task(name="check-backend-consistency")
@@ -231,7 +217,7 @@ def qa_flow(
     -------
     Dict with ``checks`` list, ``summary``, ``report``, and ``report_path``.
     """
-    _require_docker_context()
+    require_docker_context("qa")
 
     if tracking_uri is None:
         tracking_uri = resolve_tracking_uri()

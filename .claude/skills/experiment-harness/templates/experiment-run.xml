@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  EXPERIMENT RUN TEMPLATE — Standardized by /experiment-harness skill
+  Issue #912: https://github.com/petteriTeikari/minivess-mlops/issues/912
+
+  Instructions:
+  1. Copy this template to docs/planning/v0-2_archive/original_docs/
+  2. Rename to: run-debug-factorial-experiment-{N}th-pass.xml
+  3. Fill ALL sections (the harness validates completeness before launch)
+  4. The <report-output> file MUST be created before launching
+
+  Required context to load BEFORE filling this template:
+    - knowledge-graph/navigator.yaml → route to relevant domains
+    - Prior pass XML + its report (for session-context)
+    - metalearning search for relevant failure patterns
+    - knowledge-graph/decisions/registry.yaml for decided constraints
+-->
+<plan>
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 1: METADATA (required)                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <metadata>
+    <title><!-- e.g., "6th Pass Debug Factorial — GCP SkyPilot" --></title>
+    <branch><!-- e.g., test/run-debug-gcp-6th-pass --></branch>
+    <date><!-- YYYY-MM-DD --></date>
+    <status>planned</status>
+    <priority><!-- e.g., P0 — validates full factorial on cloud GPU --></priority>
+    <skill>factorial-monitor</skill>
+    <estimated-cost><!-- e.g., ~$5-10 GCP L4 spot --></estimated-cost>
+    <report-output><!-- MUST be a real file path, created BEFORE launch --></report-output>
+    <prior-pass>
+      <xml><!-- path to prior pass XML --></xml>
+      <report><!-- path to prior pass report --></report>
+    </prior-pass>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 2: SESSION CONTEXT (required, must reference prior)    -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <session-context>
+    <previous-pass id="" outcome="">
+      <root-causes>
+        <!-- List ALL root causes from the prior pass report -->
+        <cause id=""><!-- description --></cause>
+      </root-causes>
+      <fixes-applied>
+        <!-- What was fixed BEFORE this pass -->
+        <fix ref=""><!-- description --></fix>
+      </fixes-applied>
+    </previous-pass>
+
+    <qa-improvements-since-prior-pass>
+      <!-- What tests/checks were added since the prior pass -->
+      <improvement><!-- description --></improvement>
+    </qa-improvements-since-prior-pass>
+  </session-context>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 3: PRE-LAUNCH QA (required, all gates must pass)      -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <pre-launch-qa>
+    <gate name="staging-tests" status=""><!-- X passed, 0 skipped, 0 failed --></gate>
+    <gate name="prod-tests" status=""><!-- X passed, 0 skipped, 0 failed --></gate>
+    <gate name="preflight-gcp" status=""><!-- 9/9 passed --></gate>
+    <gate name="docker-image-fresh" status=""><!-- built after commit X --></gate>
+    <gate name="docker-image-verified" status=""><!-- all imports OK --></gate>
+    <gate name="factorial-dry-run" status=""><!-- N conditions validated --></gate>
+    <gate name="report-file-created" status=""><!-- path exists --></gate>
+    <gate name="prior-pass-referenced" status=""><!-- session-context filled --></gate>
+  </pre-launch-qa>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 4: FACTORIAL DESIGN (required, must match config YAML) -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <factorial-design>
+    <config-yaml><!-- e.g., configs/experiment/debug_factorial.yaml --></config-yaml>
+    <layer id="A" name="Training">
+      <factor name="model_family" levels=""/>
+      <factor name="loss_name" levels=""/>
+      <factor name="aux_calibration" levels=""/>
+    </layer>
+    <layer id="B" name="Post-training">
+      <factor name="method" levels=""/>
+    </layer>
+    <summary>
+      <!-- Total conditions, debug reductions, GPU job count -->
+    </summary>
+  </factorial-design>
+
+  <zero-shot-baselines>
+    <!-- <baseline model="" strategy="" folds="" dataset=""/> -->
+  </zero-shot-baselines>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 5: MONITORING PROTOCOL (required)                      -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <monitoring>
+    <tool>/factorial-monitor skill</tool>
+    <polling-interval>60 seconds</polling-interval>
+    <phases>
+      <phase id="1" name="LAUNCH">Submit via run_factorial.sh</phase>
+      <phase id="2" name="MONITOR">Poll + update report every state change</phase>
+      <phase id="3" name="DIAGNOSE">Aggregate failures by root cause</phase>
+      <phase id="4" name="FIX">Batch fix per root cause</phase>
+      <phase id="5" name="RELAUNCH">Selective, max 2 cycles</phase>
+      <phase id="6" name="REPORT">Final summary + compound artifacts</phase>
+    </phases>
+  </monitoring>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 6: WATCHLIST (required, must carry forward from prior) -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <watchlist>
+    <!-- Items from prior pass failures + new concerns -->
+    <item id="" severity="" source=""><!-- description --></item>
+  </watchlist>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 7: DUAL MANDATE (required)                             -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <dual-mandate>
+    <mandate id="M1" name="Platform Validation">
+      <success-criteria>
+        <criterion><!-- e.g., All conditions reach SUCCEEDED --></criterion>
+      </success-criteria>
+    </mandate>
+    <mandate id="M2" name="Infrastructure Improvement">
+      <focus-areas>
+        <area><!-- e.g., Cloud test suite gaps to fill --></area>
+      </focus-areas>
+    </mandate>
+  </dual-mandate>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 8: CLOUD TEST UPGRADE PLAN (required for compounding)  -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <cloud-test-upgrade>
+    <current-state><!-- e.g., 33 tests in tests/v2/cloud/ --></current-state>
+    <target-state><!-- e.g., 60+ tests --></target-state>
+    <new-tests-to-add>
+      <test-group name="">
+        <test><!-- test description --></test>
+      </test-group>
+    </new-tests-to-add>
+  </cloud-test-upgrade>
+</plan>

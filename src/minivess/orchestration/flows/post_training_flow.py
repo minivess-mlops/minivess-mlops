@@ -26,7 +26,13 @@ from prefect import flow, get_run_logger, task
 from minivess.config.post_training_config import PostTrainingConfig
 from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.tracking import resolve_tracking_uri
-from minivess.orchestration.constants import FLOW_NAME_POST_TRAINING, FLOW_NAME_TRAIN
+from minivess.orchestration.constants import (
+    EXPERIMENT_TRAINING,
+    FLOW_NAME_POST_TRAINING,
+    FLOW_NAME_TRAIN,
+    resolve_experiment_name,
+)
+from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -48,9 +54,10 @@ def resolve_checkpoint_paths_from_contract(
     """Discover fold checkpoint files from an upstream training run via FlowContract.
 
     Reads ``checkpoint_dir_fold_N`` tags from *parent_run_id* and resolves them
-    to individual checkpoint files. Prefers ``best.ckpt`` over ``epoch_*.ckpt``;
-    when no ``best.ckpt`` exists, picks the lexicographically latest
-    ``epoch_*.ckpt``. Silently skips dirs that don't exist on the volume.
+    to individual checkpoint files. Prefers ``CHECKPOINT_BEST_FILENAME``
+    (``best_val_loss.pth``) over ``epoch_*.ckpt``; when no best checkpoint
+    exists, picks the lexicographically latest ``epoch_*.{ckpt,pth}``.
+    Silently skips dirs that don't exist on the volume.
 
     Parameters
     ----------
@@ -67,6 +74,7 @@ def resolve_checkpoint_paths_from_contract(
     if parent_run_id is None:
         return []
 
+    from minivess.orchestration.constants import CHECKPOINT_BEST_FILENAME
     from minivess.orchestration.flow_contract import FlowContract
 
     fc = FlowContract(tracking_uri=tracking_uri)
@@ -82,18 +90,10 @@ def resolve_checkpoint_paths_from_contract(
                 ckpt_dir,
             )
             continue
-        # Prefer best checkpoint: try both naming conventions (.ckpt and .pth)
-        best_candidates = [
-            ckpt_dir / "best.ckpt",
-            ckpt_dir / "best_val_loss.pth",
-        ]
-        found_best = False
-        for best in best_candidates:
-            if best.exists():
-                checkpoint_paths.append(best)
-                found_best = True
-                break
-        if found_best:
+        # Use canonical checkpoint filename from constants.py (cross-flow contract)
+        best = ckpt_dir / CHECKPOINT_BEST_FILENAME
+        if best.exists():
+            checkpoint_paths.append(best)
             continue
         # Fall back to last.pth or lexicographically latest epoch_*.{ckpt,pth}
         last = ckpt_dir / "last.pth"
@@ -111,21 +111,6 @@ def resolve_checkpoint_paths_from_contract(
             )
 
     return checkpoint_paths
-
-
-def _require_docker_context() -> None:
-    """Require Docker container context or MINIVESS_ALLOW_HOST=1."""
-    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
-        return
-    if os.environ.get("DOCKER_CONTAINER"):
-        return
-    if Path("/.dockerenv").exists():
-        return
-    raise RuntimeError(
-        "Post-training flow must run inside a Docker container.\n"
-        "Run: docker compose -f deployment/docker-compose.flows.yml run post_training\n"
-        "Escape hatch for tests: MINIVESS_ALLOW_HOST=1"
-    )
 
 
 # Weight-based plugins (no calibration data needed)
@@ -184,13 +169,9 @@ def run_plugin_task(
 
     errors = plugin.validate_inputs(plugin_input)
     if errors:
-        log.warning("Plugin %s validation failed: %s", plugin.name, errors)
-        return {
-            "status": "validation_failed",
-            "errors": errors,
-            "model_paths": [],
-            "metrics": {},
-        }
+        msg = f"Plugin {plugin.name} validation failed: {errors}"
+        log.error(msg)
+        raise ValueError(msg)
 
     output = plugin.execute(plugin_input)
     log.info(
@@ -262,7 +243,7 @@ def post_training_flow(
     trigger_source:
         What triggered this flow.
     """
-    _require_docker_context()
+    require_docker_context("post-training")
 
     log = get_run_logger()
     log.info("Post-training flow started (trigger: %s)", trigger_source)
@@ -280,7 +261,9 @@ def post_training_flow(
 
     # Auto-discover upstream training run and checkpoints (#587).
     tracking_uri = resolve_tracking_uri()
-    upstream_exp = os.environ.get("UPSTREAM_EXPERIMENT", "minivess_training")
+    upstream_exp = os.environ.get(
+        "UPSTREAM_EXPERIMENT", resolve_experiment_name(EXPERIMENT_TRAINING)
+    )
 
     if upstream_training_run_id is None:
         upstream = find_upstream_safely(
@@ -333,11 +316,11 @@ def post_training_flow(
             plugin_results[plugin_name] = result
         except Exception:
             log.exception("Plugin %s failed", plugin_name)
-            plugin_results[plugin_name] = {
-                "status": "error",
-                "model_paths": [],
-                "metrics": {},
-            }
+            log.error(
+                "Plugin %s FAILED — re-raising (Rule #25: loud failures)",
+                plugin_name,
+            )
+            raise
 
     # --- Data-dependent plugins ---
     data_enabled = [name for name in enabled if name in _DATA_PLUGINS]
@@ -357,11 +340,11 @@ def post_training_flow(
             plugin_results[plugin_name] = result
         except Exception:
             log.exception("Plugin %s failed", plugin_name)
-            plugin_results[plugin_name] = {
-                "status": "error",
-                "model_paths": [],
-                "metrics": {},
-            }
+            log.error(
+                "Plugin %s FAILED — re-raising (Rule #25: loud failures)",
+                plugin_name,
+            )
+            raise
 
     n_run = len(plugin_results)
     log.info("Post-training flow complete: %d plugin(s) executed", n_run)
@@ -438,7 +421,7 @@ def run_factorial_post_training(
     output_dir: Path,
     n_subsampled_ensemble_models: int = 3,
     subsample_fraction: float = 0.7,
-    seed: int = 42,
+    seed: int,
     tracking_uri: str | None = None,
     experiment_name: str | None = None,
     upstream_run_id: str | None = None,

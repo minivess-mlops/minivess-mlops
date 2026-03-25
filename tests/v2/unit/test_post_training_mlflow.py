@@ -36,20 +36,45 @@ _CONDITIONAL_TAG_KEYS = {"upstream_training_run_id"}
 
 class TestPostTrainingMlflow:
     def test_post_training_result_has_run_id(self, monkeypatch, tmp_path) -> None:
-        """post_training_flow() must return dict with 'mlflow_run_id' key."""
+        """post_training_flow() must return result with 'mlflow_run_id' attribute.
+
+        Uses a tiny checkpoint so plugin validation passes (Rule #25:
+        empty checkpoints now raise instead of silently returning status=error).
+        """
+        import torch
+
         monkeypatch.setenv("PREFECT_DISABLED", "1")
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(tmp_path / "mlruns"))
         monkeypatch.setenv("POST_TRAINING_OUTPUT_DIR", str(tmp_path / "pt_output"))
 
+        # Create 2 tiny checkpoints (model_merging needs >= 2)
+        ckpts = []
+        for i in range(2):
+            ckpt = tmp_path / f"ckpt{i}.pt"
+            torch.save({"model_state_dict": {}}, ckpt)
+            ckpts.append(ckpt)
+
+        from minivess.config.post_training_config import PostTrainingConfig
         from minivess.orchestration.flows.post_training_flow import post_training_flow
 
-        result = post_training_flow()
+        # Disable all plugins except checkpoint_averaging to avoid validation errors.
+        # Rule #25: plugins with missing inputs now RAISE instead of silently returning.
+        config = PostTrainingConfig(
+            subsampled_ensemble={"enabled": False},  # type: ignore[arg-type]
+            model_merging={"enabled": False},  # type: ignore[arg-type]
+            calibration={"enabled": False},  # type: ignore[arg-type]
+            crc_conformal={"enabled": False},  # type: ignore[arg-type]
+            conseco_fp_control={"enabled": False},  # type: ignore[arg-type]
+        )
+        result = post_training_flow(config=config, checkpoint_paths=ckpts)
         assert hasattr(result, "mlflow_run_id"), (
             f"post_training_flow() result missing 'mlflow_run_id' attribute. Got: {type(result)}"
         )
 
     def test_post_training_opens_mlflow_run(self, monkeypatch, tmp_path) -> None:
         """post_training_flow() must create an MLflow run with flow_name='post_training'."""
+        import torch
+
         mlflow_dir = tmp_path / "mlruns"
         monkeypatch.setenv("PREFECT_DISABLED", "1")
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(mlflow_dir))
@@ -57,9 +82,22 @@ class TestPostTrainingMlflow:
 
         mlflow.set_tracking_uri(str(mlflow_dir))
 
+        from minivess.config.post_training_config import PostTrainingConfig
         from minivess.orchestration.flows.post_training_flow import post_training_flow
 
-        post_training_flow()
+        ckpts = []
+        for i in range(2):
+            ckpt = tmp_path / f"ckpt{i}.pt"
+            torch.save({"model_state_dict": {}}, ckpt)
+            ckpts.append(ckpt)
+        config = PostTrainingConfig(
+            subsampled_ensemble={"enabled": False},  # type: ignore[arg-type]
+            model_merging={"enabled": False},  # type: ignore[arg-type]
+            calibration={"enabled": False},  # type: ignore[arg-type]
+            crc_conformal={"enabled": False},  # type: ignore[arg-type]
+            conseco_fp_control={"enabled": False},  # type: ignore[arg-type]
+        )
+        post_training_flow(config=config, checkpoint_paths=ckpts)
 
         client = mlflow.tracking.MlflowClient(tracking_uri=str(mlflow_dir))
         experiment = client.get_experiment_by_name("minivess_training")
@@ -79,6 +117,8 @@ class TestPostTrainingMlflow:
 
     def test_post_training_logs_upstream_run_id(self, monkeypatch, tmp_path) -> None:
         """post_training_flow() MLflow run must have upstream_training_run_id tag."""
+        import torch
+
         mlflow_dir = tmp_path / "mlruns"
         monkeypatch.setenv("PREFECT_DISABLED", "1")
         monkeypatch.setenv("MLFLOW_TRACKING_URI", str(mlflow_dir))
@@ -86,9 +126,22 @@ class TestPostTrainingMlflow:
 
         mlflow.set_tracking_uri(str(mlflow_dir))
 
+        from minivess.config.post_training_config import PostTrainingConfig
         from minivess.orchestration.flows.post_training_flow import post_training_flow
 
-        post_training_flow()
+        ckpts = []
+        for i in range(2):
+            ckpt = tmp_path / f"ckpt{i}.pt"
+            torch.save({"model_state_dict": {}}, ckpt)
+            ckpts.append(ckpt)
+        config = PostTrainingConfig(
+            subsampled_ensemble={"enabled": False},  # type: ignore[arg-type]
+            model_merging={"enabled": False},  # type: ignore[arg-type]
+            calibration={"enabled": False},  # type: ignore[arg-type]
+            crc_conformal={"enabled": False},  # type: ignore[arg-type]
+            conseco_fp_control={"enabled": False},  # type: ignore[arg-type]
+        )
+        post_training_flow(config=config, checkpoint_paths=ckpts)
 
         client = mlflow.tracking.MlflowClient(tracking_uri=str(mlflow_dir))
         experiment = client.get_experiment_by_name("minivess_training")
@@ -160,6 +213,7 @@ class TestPostTrainingTagSchema:
             checkpoint_paths=[ckpt],
             methods=["none", "checkpoint_averaging"],
             output_dir=output_dir,
+            seed=42,
         )
 
         for result in results:
@@ -215,6 +269,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=methods,
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",
@@ -253,6 +308,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=["none", "checkpoint_averaging"],
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",
@@ -284,6 +340,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=["checkpoint_averaging"],
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",
@@ -318,6 +375,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=["none", "checkpoint_averaging"],
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",
@@ -347,6 +405,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=["checkpoint_averaging"],
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",
@@ -376,6 +435,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=["none"],
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",
@@ -403,6 +463,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=["none", "checkpoint_averaging"],
             output_dir=tmp_path / "output",
+            seed=42,
         )
 
         # Should still return results, but without mlflow_run_id
@@ -423,6 +484,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt],
             methods=["none"],
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",
@@ -453,6 +515,7 @@ class TestFactorialPerMethodMlflowRuns:
             checkpoint_paths=[ckpt1, ckpt2],
             methods=["none", "checkpoint_averaging", "subsampled_ensemble"],
             output_dir=tmp_path / "output",
+            seed=42,
             tracking_uri=str(mlflow_dir),
             experiment_name="minivess_training",
             upstream_run_id="fake_upstream_123",

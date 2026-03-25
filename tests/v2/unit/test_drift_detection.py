@@ -250,7 +250,7 @@ class TestEmbeddingDriftDetector:
         reference = rng.standard_normal((50, 64)).astype(np.float32)
         current = rng.standard_normal((50, 64)).astype(np.float32)
 
-        detector = EmbeddingDriftDetector(reference)
+        detector = EmbeddingDriftDetector(reference, p_val_threshold=0.05)
         result = detector.detect(current)
         assert not result.drift_detected
 
@@ -263,7 +263,7 @@ class TestEmbeddingDriftDetector:
         # Large shift
         current = (rng.standard_normal((50, 64)) + 3.0).astype(np.float32)
 
-        detector = EmbeddingDriftDetector(reference)
+        detector = EmbeddingDriftDetector(reference, p_val_threshold=0.05)
         result = detector.detect(current)
         assert result.drift_detected
 
@@ -288,7 +288,7 @@ class TestEmbeddingDriftDetector:
         reference = rng.standard_normal((50, 64)).astype(np.float32)
         current = rng.standard_normal((50, 64)).astype(np.float32)
 
-        detector = EmbeddingDriftDetector(reference)
+        detector = EmbeddingDriftDetector(reference, p_val_threshold=0.05)
         result = detector.detect(current)
         assert result.dataset_drift_score >= 0.0
 

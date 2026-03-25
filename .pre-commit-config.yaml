@@ -55,6 +55,16 @@ repos:
 
   - repo: local
     hooks:
+      - id: yaml-contract-enforcement
+        name: YAML Contract Enforcement (GPU types, cloud providers)
+        entry: uv run python scripts/validate_yaml_contract.py
+        language: system
+        files: '(deployment/skypilot/.*\.yaml|configs/cloud/yaml_contract\.yaml)$'
+        pass_filenames: false
+        always_run: false
+
+  - repo: local
+    hooks:
       - id: no-prefect-disabled-in-scripts
         name: PREFECT_DISABLED banned in scripts
         entry: bash -c 'grep -rn PREFECT_DISABLED=1 scripts/*.sh && exit 1 || exit 0'

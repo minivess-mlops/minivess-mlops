@@ -181,6 +181,7 @@ class TestComputeVarianceDecomposition:
         results = compute_variance_decomposition(
             per_volume_data=data,
             metric_name="val_dice",
+            friedman_alpha=_CFG.alpha,
         )
         assert len(results) == 1
         r = results[0]
@@ -205,6 +206,7 @@ class TestComputeVarianceDecomposition:
         results = compute_variance_decomposition(
             per_volume_data=data,
             metric_name="val_dice",
+            friedman_alpha=_CFG.alpha,
         )
         r = results[0]
         assert -1.0 <= r.icc_value <= 1.0
@@ -215,6 +217,7 @@ class TestComputeVarianceDecomposition:
         results = compute_variance_decomposition(
             per_volume_data=data,
             metric_name="val_dice",
+            friedman_alpha=_CFG.alpha,
         )
         assert results[0].icc_type == "ICC2"
 
@@ -223,5 +226,6 @@ class TestComputeVarianceDecomposition:
         results = compute_variance_decomposition(
             per_volume_data=data,
             metric_name="val_dice",
+            friedman_alpha=_CFG.alpha,
         )
         assert results[0].power_caveat is True

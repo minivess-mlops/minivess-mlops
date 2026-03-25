@@ -36,6 +36,7 @@ class TestComputeRankings:
             per_volume_data={"val_dice": data},
             metric_names=["val_dice"],
             higher_is_better={"val_dice": True},
+            alpha=0.05,
         )
         assert len(results) == 1
         r = results[0]
@@ -56,6 +57,7 @@ class TestComputeRankings:
             per_volume_data={"m1": data1, "m2": data2},
             metric_names=["m1", "m2"],
             higher_is_better={"m1": True, "m2": True},
+            alpha=0.05,
         )
         # 2 per-metric rankings
         assert len(results) == 2
@@ -66,6 +68,7 @@ class TestComputeRankings:
             per_volume_data={"val_dice": data},
             metric_names=["val_dice"],
             higher_is_better={"val_dice": True},
+            alpha=0.05,
         )
         r = results[0]
         # CD value should be a positive number (critical difference)
@@ -82,6 +85,7 @@ class TestComputeRankings:
             per_volume_data={"val_dice": data},
             metric_names=["val_dice"],
             higher_is_better={"val_dice": True},
+            alpha=0.05,
         )
         r = results[0]
         assert r.condition_ranks["a"] == r.condition_ranks["b"]

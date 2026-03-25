@@ -44,6 +44,13 @@ EXPERIMENT_HPO: str = "minivess_hpo"
 """Hyperparameter optimization experiment (Optuna + ASHA)."""
 
 # ---------------------------------------------------------------------------
+# Checkpoint naming (cross-flow contract)
+# ---------------------------------------------------------------------------
+
+CHECKPOINT_BEST_FILENAME: str = "best_val_loss.pth"
+"""Canonical best checkpoint filename — used by train_flow and post_training_flow."""
+
+# ---------------------------------------------------------------------------
 # Prefect @flow decorator names  (lowercase-hyphen, Prefect convention)
 # ---------------------------------------------------------------------------
 

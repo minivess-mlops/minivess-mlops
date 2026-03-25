@@ -61,7 +61,11 @@ class VesselFMDrandGenerator(SyntheticGeneratorAdapter):
         """
         cfg = config or {}
         patch_size = tuple(cfg.get("patch_size", _DEFAULT_PATCH_SIZE))
-        seed = cfg.get("seed", 42)
+        if "seed" not in cfg:
+            raise KeyError(
+                "seed must be provided in config — silent fallback to 42 is banned (Rule #25)"
+            )
+        seed = cfg["seed"]
         noise_level = cfg.get("noise_level", 0.1)
 
         rng = np.random.default_rng(seed)

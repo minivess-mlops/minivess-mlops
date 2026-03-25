@@ -371,6 +371,45 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
       naming anything. Giving a well-known algorithm name to a different implementation
       is scientific fraud. See: `.claude/metalearning/2026-03-21-fake-swa-checkpoint-averaging-mislabeled.md`
 
+31. **Zero Improvisation on Declarative Configs (Non-Negotiable)** — Claude Code MUST
+    NEVER add, modify, or remove keys from declarative config files (YAML, JSON, TOML)
+    unless EXPLICITLY instructed by the user. Declarative configs are SPECIFICATIONS,
+    not code to optimize. "Helpful fallbacks", "safety nets", "smart defaults" are ALL
+    BANNED in config files. If a config is wrong, TELL THE USER — do not fix it silently.
+    This applies to: SkyPilot YAML, Docker Compose YAML, Hydra configs, DVC configs,
+    Pulumi configs, `.env.example`, `configs/cloud/*.yaml`, `configs/factorial/*.yaml`.
+    **Defense-in-depth (5 layers)**:
+    - **L1 (Pre-commit)**: `scripts/validate_yaml_contract.py` checks all SkyPilot YAMLs
+      against `configs/cloud/yaml_contract.yaml` golden reference
+    - **L2 (Test suite)**: `tests/v2/unit/deployment/test_yaml_contract_enforcement.py`
+      validates GPU allowlists, cloud providers, schema drift, cross-file consistency
+    - **L3 (Preflight)**: `scripts/preflight_gcp.py` → `check_yaml_contract()` blocks
+      launch if YAML violates the contract
+    - **L4 (Experiment harness)**: `/experiment-harness` Phase 2 VALIDATE gate reads
+      the contract and rejects launches with unauthorized resources
+    - **L5 (This rule)**: Claude Code reads this rule and refuses to modify configs
+    **Golden contract**: `configs/cloud/yaml_contract.yaml` — SINGLE SOURCE OF TRUTH
+    for allowed GPU types, cloud providers, and YAML schema. Update ONLY with explicit
+    user authorization.
+    **Root cause**: Claude added A100-80GB to `train_factorial.yaml` as a "fallback"
+    without user authorization. 34 jobs x A100 = ~$40 instead of ~$8 (5.5x cost).
+    See: `.claude/metalearning/2026-03-24-unauthorized-a100-in-skypilot-yaml.md`
+    See: `.claude/metalearning/2026-03-24-yaml-is-the-contract-zero-improvisation.md`
+
+32. **Quality Over Speed — No Reactive Rushing (Non-Negotiable)** — On a codebase
+    with 6000+ tests, 5 Prefect flows, SkyPilot orchestration, and 75 KG decision
+    nodes, EVERY change requires:
+    (1) **PLAN** with reviewer agents optimizing the approach
+    (2) **IMPLEMENT** via `/self-learning-iterative-coder` (RED→GREEN→VERIFY)
+    (3) **REVIEW** via `/simplify` (catch quality issues)
+    (4) **VERIFY** with `make test-staging` + `make test-prod` (0 skips, 0 failures)
+    (5) **ASK** user before any cloud launch or infrastructure change
+    NEVER: rush to launch, commit untested "fixes," generate plans as substitute for
+    working code, launch without permission, or react to failures instead of preventing
+    them. "Standing by" > "launching broken code." "I need to verify first" > "let me
+    just try this real quick."
+    See: `.claude/metalearning/2026-03-24-reactive-rushing-instead-of-proactive-quality.md`
+
 ## What AI Must NEVER Do
 
 - Confabulate — web-search instead. Hardcode task names, cloud providers, GPU types.
@@ -389,6 +428,9 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
 - Build parallel artifact persistence — MLflow artifact store is THE ONLY mechanism.
   When MLflow breaks, FIX MLflow — don't add file_mounts, rsync, or custom sync hacks.
   See: `.claude/metalearning/2026-03-21-competing-artifact-persistence-mechanisms.md`
+- Add, modify, or remove keys from declarative config files without explicit user instruction.
+  "Helpful fallbacks" in YAML are BANNED. YAML is the contract — execute AS-IS or report.
+  See: `.claude/metalearning/2026-03-24-yaml-is-the-contract-zero-improvisation.md`
 
 ## TDD Workflow (Non-Negotiable)
 

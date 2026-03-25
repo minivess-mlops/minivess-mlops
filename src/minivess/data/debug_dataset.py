@@ -23,7 +23,7 @@ def create_debug_dataset(
     *,
     n_volumes: int = 4,
     volume_shape: tuple[int, int, int] = (64, 64, 16),
-    seed: int = 42,
+    seed: int,
 ) -> Path:
     """Create a synthetic debug dataset with random volumes and binary labels.
 

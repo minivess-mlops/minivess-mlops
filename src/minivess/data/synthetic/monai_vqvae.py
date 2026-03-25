@@ -65,7 +65,11 @@ class MONAIVQVAEGenerator(SyntheticGeneratorAdapter):
         cfg = config or {}
         patch_size = tuple(cfg.get("patch_size", _DEFAULT_PATCH_SIZE))
         codebook_size = cfg.get("codebook_size", _DEFAULT_CODEBOOK_SIZE)
-        seed = cfg.get("seed", 42)
+        if "seed" not in cfg:
+            raise KeyError(
+                "seed must be provided in config — silent fallback to 42 is banned (Rule #25)"
+            )
+        seed = cfg["seed"]
 
         rng = np.random.default_rng(seed)
         pairs: list[tuple[np.ndarray, np.ndarray]] = []

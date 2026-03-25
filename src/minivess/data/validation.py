@@ -6,10 +6,18 @@ BEFORE training starts, rather than 30 minutes into epoch 5.
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+import yaml
 
 if TYPE_CHECKING:
     from minivess.data.profiler import DatasetProfile
+
+logger = logging.getLogger(__name__)
+
+_PROFILES_DIR = Path(__file__).resolve().parents[3] / "configs" / "model_profiles"
 
 
 class PatchValidationError(ValueError):
@@ -20,16 +28,23 @@ class MemoryBudgetError(ValueError):
     """Raised when memory budget is exceeded."""
 
 
-# VRAM overhead per model family in megabytes (model weights + framework overhead)
-_MODEL_VRAM_OVERHEAD_MB: dict[str, int] = {
-    "dynunet": 300,
-    "vesselfm": 400,
-    "sam3_vanilla": 400,
-    "sam3_topolora": 400,
-    "sam3_hybrid": 400,
-    "mambavesselnet": 400,
-}
-_DEFAULT_MODEL_VRAM_OVERHEAD_MB = 400
+def _load_model_vram_overhead_mb(model_name: str) -> int:
+    """Load VRAM overhead from model profile YAML (Task 2.21, #937).
+
+    Falls back to 400 MB if the profile YAML doesn't exist.
+    """
+    profile_path = _PROFILES_DIR / f"{model_name}.yaml"
+    if profile_path.exists():
+        raw = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+        overhead = raw.get("model_overhead_mb", 400)
+        return int(overhead)
+    logger.warning(
+        "No model profile YAML for '%s' at %s — using 400 MB default",
+        model_name,
+        profile_path,
+    )
+    return 400
+
 
 # Activation memory bytes per voxel for 3D UNets in AMP mode.
 # This accounts for the full forward + backward activation memory across all
@@ -175,9 +190,7 @@ def validate_vram_budget(
         and budget in the error message.
     """
     model_key = model_name.lower()
-    overhead_mb = _MODEL_VRAM_OVERHEAD_MB.get(
-        model_key, _DEFAULT_MODEL_VRAM_OVERHEAD_MB
-    )
+    overhead_mb = _load_model_vram_overhead_mb(model_key)
 
     patch_x, patch_y, patch_z = patch_size
     voxels = batch_size * patch_x * patch_y * patch_z

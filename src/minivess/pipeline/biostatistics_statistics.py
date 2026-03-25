@@ -51,10 +51,11 @@ PerVolumeData = dict[str, dict[int, np.ndarray]]
 def compute_pairwise_comparisons(
     per_volume_data: PerVolumeData,
     metric_name: str,
-    alpha: float = 0.05,
+    alpha: float,
     primary_metric: str = "val_dice",
     n_bootstrap: int = 10_000,
-    seed: int = 42,
+    *,
+    seed: int,
 ) -> list[PairwiseResult]:
     """Compute pairwise statistical comparisons between conditions.
 
@@ -225,7 +226,7 @@ def compute_bayesian_comparisons(
 def compute_variance_decomposition(
     per_volume_data: PerVolumeData,
     metric_name: str,
-    friedman_alpha: float = 0.05,
+    friedman_alpha: float,
 ) -> list[VarianceDecompositionResult]:
     """Compute Friedman test + Nemenyi post-hoc + ICC(2,1).
 
@@ -298,7 +299,7 @@ def _pool_scores(fold_data: dict[int, np.ndarray]) -> np.ndarray:
 
 def _bh_fdr_correction(
     p_values: list[float],
-    alpha: float = 0.05,
+    alpha: float,
 ) -> list[tuple[float, bool]]:
     """Benjamini-Hochberg FDR correction.
 
@@ -657,8 +658,8 @@ def compute_factorial_anova(
 def compute_riley_instability(
     per_volume_data: PerVolumeData,
     metric_name: str,
-    n_bootstrap: int = 1000,
-    seed: int = 42,
+    n_bootstrap: int,
+    seed: int,
 ) -> dict[str, Any]:
     """Compute bootstrap ranking instability analysis.
 

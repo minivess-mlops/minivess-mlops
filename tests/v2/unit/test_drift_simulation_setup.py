@@ -28,7 +28,7 @@ class TestBatchPartitioning:
         from minivess.data.drift_simulation_setup import partition_vesselnn_batches
 
         volume_ids = [f"vol_{i:03d}" for i in range(12)]
-        batches = partition_vesselnn_batches(volume_ids)
+        batches = partition_vesselnn_batches(volume_ids, seed=42)
 
         assert len(batches) == 6
         for batch in batches:
@@ -59,7 +59,7 @@ class TestBatchPartitioning:
         from minivess.data.drift_simulation_setup import partition_vesselnn_batches
 
         volume_ids = [f"vol_{i:03d}" for i in range(12)]
-        batches = partition_vesselnn_batches(volume_ids)
+        batches = partition_vesselnn_batches(volume_ids, seed=42)
 
         all_vols = [v for batch in batches for v in batch]
         assert sorted(all_vols) == sorted(volume_ids)
@@ -69,7 +69,7 @@ class TestBatchPartitioning:
         from minivess.data.drift_simulation_setup import partition_vesselnn_batches
 
         with pytest.raises(ValueError, match="12"):
-            partition_vesselnn_batches([f"vol_{i}" for i in range(10)])
+            partition_vesselnn_batches([f"vol_{i}" for i in range(10)], seed=42)
 
 
 # ---------------------------------------------------------------------------

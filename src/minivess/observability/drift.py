@@ -265,7 +265,7 @@ class EmbeddingDriftDetector:
         self,
         reference_embeddings: NDArray[np.float32],
         *,
-        p_val_threshold: float = 0.05,
+        p_val_threshold: float,
         n_permutations: int = 100,
         kernel: str = "rbf",
     ) -> None:

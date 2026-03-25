@@ -27,6 +27,7 @@ import torch
 from torch import nn
 
 from minivess.config.evaluation_config import EnsembleStrategyName
+from minivess.observability.metric_keys import MetricKeys
 from minivess.serving.mlflow_wrapper import _build_net_from_config
 
 if TYPE_CHECKING:
@@ -35,14 +36,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # The 6 tracked metrics from dynunet_losses.yaml checkpoint config.
-# Each generates a ``best_{name}.pth`` checkpoint file.
+# Each generates a ``best_{name}.pth`` checkpoint file (slash→underscore via
+# safe_name = metric_name.replace("/", "_")).  Use MetricKeys constants for
+# single source of truth (#790, Task 2.2).
 _DEFAULT_TRACKED_METRICS: list[str] = [
-    "val_loss",
-    "val_dice",
-    "val_f1_foreground",
-    "val_cldice",
-    "val_masd",
-    "val_compound_masd_cldice",
+    MetricKeys.VAL_LOSS,
+    MetricKeys.VAL_DICE,
+    MetricKeys.VAL_F1_FOREGROUND,
+    MetricKeys.VAL_CLDICE,
+    MetricKeys.VAL_MASD,
+    MetricKeys.VAL_COMPOUND_MASD_CLDICE,
 ]
 
 
@@ -148,7 +151,7 @@ class EnsembleBuilder:
                 "loss_type": str,
                 "fold_id": int,
                 "artifact_dir": str,
-                "metrics": {"val_dice": 0.81, ...},
+                "metrics": {"val/dice": 0.81, ...},
                 "num_folds": int,
             }
 
@@ -160,7 +163,7 @@ class EnsembleBuilder:
             If ``True``, synthesize per-fold entries from per-loss runs.
             If ``False``, return raw per-loss entries (1 per loss).
         require_eval_metrics:
-            If ``True`` (default), skip runs without ``eval_fold2_dsc``.
+            If ``True`` (default), skip runs without ``eval/fold2/dsc``.
             Set to ``False`` for debug runs (#588).
         """
         raw_runs = self.discover_training_runs_raw(
@@ -178,7 +181,7 @@ class EnsembleBuilder:
         """Query MLflow for completed production training runs (raw).
 
         Returns one entry per loss function (not per fold).  Production
-        runs are identified by having ``eval_fold2_dsc`` metric (only
+        runs are identified by having ``eval/fold2/dsc`` metric (only
         fully-completed runs have fold 2 evaluation data).
 
         The ``loss_type`` field is read from the ``loss_function`` tag
@@ -187,7 +190,7 @@ class EnsembleBuilder:
         Parameters
         ----------
         require_eval_metrics:
-            If ``True`` (default), skip runs without ``eval_fold2_dsc``
+            If ``True`` (default), skip runs without ``eval/fold2/dsc``
             metric (incomplete runs). Set to ``False`` for debug runs
             that do not produce eval metrics.
 
@@ -239,12 +242,16 @@ class EnsembleBuilder:
                 )
                 continue
 
-            # Filter production runs: must have fold 2 eval metrics
-            if require_eval_metrics and "eval_fold2_dsc" not in metrics:
+            # Filter production runs: must have fold 2 eval metrics.
+            # Uses MetricKeys.EVAL_FOLD_PREFIX to construct the key dynamically,
+            # preventing format drift between tracking.py and this module.
+            _eval_gate_key = f"{MetricKeys.EVAL_FOLD_PREFIX}2/dsc"
+            if require_eval_metrics and _eval_gate_key not in metrics:
                 logger.debug(
-                    "Skipping run %s (%s): no eval_fold2_dsc (incomplete run)",
+                    "Skipping run %s (%s): no %s (incomplete run)",
                     run.info.run_id,
                     loss_type,
+                    _eval_gate_key,
                 )
                 continue
 

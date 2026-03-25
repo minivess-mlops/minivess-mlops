@@ -236,7 +236,7 @@ class TrainingConfig(BaseModel):
     mixed_precision_val: bool = False  # AMP OFF for validation — MONAI #4243
     gradient_checkpointing: bool = False
     seed: int = Field(default=42)
-    num_folds: int = Field(default=5, ge=1)
+    num_folds: int = Field(default=3, ge=1)
     early_stopping_patience: int = Field(default=10, ge=0)
     val_interval: int = Field(default=1, ge=1)
     checkpoint: CheckpointConfig = Field(default_factory=CheckpointConfig)

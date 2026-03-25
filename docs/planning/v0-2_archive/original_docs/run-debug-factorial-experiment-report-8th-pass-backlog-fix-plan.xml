@@ -1,0 +1,2027 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>8th Pass Backlog Fix: All P0+P1 Issues from Debug Factorial Experiment</title>
+    <branch>fix/8th-pass-backlog-all-p0-p1</branch>
+    <date>2026-03-24</date>
+    <status>ready-for-execution</status>
+    <priority>P0+P1 — 37 issues accumulated across 8 debug factorial passes</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <approach>TDD: RED → GREEN → VERIFY → FIX → CHECKPOINT → CONVERGE</approach>
+    <estimated-time>6-8 hours across 3 phases</estimated-time>
+    <phasing>Phase 1 (infra) → Phase 2 (code) → Phase 3 (validation)</phasing>
+    <user-decisions>
+      <decision id="1">Scope: All P0+P1 (37 issues)</decision>
+      <decision id="2">#878 fix: GCS artifact store via Pulumi update</decision>
+      <decision id="3">GPU quota: Request increase to 4</decision>
+      <decision id="4">Silent failures: Raise exceptions (CLAUDE.md Rule #25)</decision>
+      <decision id="5">#881: Fix ALL 50+ hardcoded alpha/seed instances</decision>
+      <decision id="6">Metric keys: Central MetricKeys constants module</decision>
+      <decision id="7">MambaVesselNet: Include cloud smoke test</decision>
+      <decision id="8">Pulumi: Modify Pulumi code directly (not gcloud CLI)</decision>
+      <decision id="9">Env fallbacks: Fail loudly, no silent defaults</decision>
+      <decision id="10">Unwired functions: Wire all 7</decision>
+      <decision id="11">Stale YAMLs: Fix both production + HPO</decision>
+      <decision id="12">Calibration: Fix .numpy() + verification tests</decision>
+      <decision id="13">E2E chain: Local mock test + cloud E2E plan</decision>
+      <decision id="14">Checkpoints: Central constants in orchestration/constants.py</decision>
+      <decision id="15">Phasing: 3 phases (infra → code → validation)</decision>
+      <decision id="16">SWAG: Keep in debug (Rule 27)</decision>
+      <decision id="17">Tracker: GitHub issues + XML checklist with verification script</decision>
+      <decision id="18">MLflow auth: Remove USERNAME/PASSWORD from train_factorial.yaml</decision>
+      <decision id="19">Evidently: Pin versions</decision>
+      <decision id="20">Issues: Create GitHub issues for all 38 untracked findings</decision>
+    </user-decisions>
+  </metadata>
+
+  <context>
+    <summary>
+      Across 8 debug factorial experiment passes, 37 P0+P1 issues were identified.
+      These range from infrastructure blockers (GCS artifact store not configured,
+      stale SkyPilot YAMLs pointing to GHCR/UpCloud) to silent code failures
+      (hardcoded alpha/seed, swallowed exceptions, unwired functions) to validation
+      gaps (no E2E chain test, no MetricKeys guard tests).
+
+      This plan addresses ALL 37 issues in 3 phases:
+        Phase 1: Infrastructure (6 tasks) — unblocks the pipeline
+        Phase 2: Code Fixes (24 tasks) — silent failures, metrics, config
+        Phase 3: Validation (9 tasks) — tests, E2E, cloud verification
+
+      Every task follows TDD: write failing test FIRST, then implement the fix.
+      Every task maps to one or more GitHub issues for tracking.
+    </summary>
+
+    <key-files>
+      <file>deployment/pulumi/gcp/__main__.py</file>
+      <file>deployment/skypilot/train_factorial.yaml</file>
+      <file>deployment/skypilot/train_production.yaml</file>
+      <file>deployment/skypilot/train_hpo.yaml</file>
+      <file>src/minivess/orchestration/flows/train_flow.py</file>
+      <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+      <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+      <file>src/minivess/orchestration/flows/deploy_flow.py</file>
+      <file>src/minivess/orchestration/flows/dashboard_flow.py</file>
+      <file>src/minivess/orchestration/flows/biostatistics_flow.py</file>
+      <file>src/minivess/orchestration/constants.py</file>
+      <file>src/minivess/observability/metric_keys.py</file>
+      <file>src/minivess/observability/tracking.py</file>
+      <file>src/minivess/pipeline/metrics.py</file>
+      <file>src/minivess/pipeline/calibration_metrics.py</file>
+      <file>src/minivess/pipeline/builder.py</file>
+      <file>src/minivess/pipeline/comparison.py</file>
+      <file>src/minivess/pipeline/biostatistics_statistics.py</file>
+      <file>src/minivess/pipeline/biostatistics_rankings.py</file>
+      <file>src/minivess/pipeline/biostatistics_figures.py</file>
+      <file>src/minivess/pipeline/biostatistics_specification_curve.py</file>
+      <file>src/minivess/pipeline/topology_comparison.py</file>
+      <file>src/minivess/pipeline/comparison_report.py</file>
+      <file>src/minivess/pipeline/post_training_plugins/swag.py</file>
+      <file>src/minivess/config/defaults.py</file>
+      <file>configs/cloud/yaml_contract.yaml</file>
+    </key-files>
+  </context>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: INFRASTRUCTURE — Unblocks the Pipeline                    -->
+  <!-- ================================================================== -->
+
+  <phase id="1" name="Infrastructure" estimated-time="1.5-2 hours">
+    <description>
+      Fix infrastructure blockers that prevent the debug factorial from running
+      on GCP. These must be done first because Phase 2 code fixes cannot be
+      validated end-to-end without working cloud infrastructure.
+    </description>
+
+    <task id="1.1" priority="P0" issue="878">
+      <title>Pulumi MLflow GCS artifact store configuration</title>
+      <description>
+        MLflow on Cloud Run currently uses the default ./mlruns artifact store,
+        not the GCS bucket (gs://minivess-mlops-mlflow-artifacts). This means
+        all artifacts written during GCP training jobs are stored on ephemeral
+        Cloud Run disk and lost on redeploy. The Pulumi stack must configure
+        MLflow's --default-artifact-root to point to the GCS bucket.
+
+        Root cause: The Cloud Run service definition in __main__.py does not
+        pass --default-artifact-root gs://minivess-mlops-mlflow-artifacts
+        to the MLflow server command.
+
+        User decision #2: Fix via Pulumi code modification (not gcloud CLI).
+        User decision #8: Modify Pulumi code directly.
+      </description>
+      <files>
+        <file>deployment/pulumi/gcp/__main__.py</file>
+        <file>tests/v2/unit/deployment/test_pulumi_gcp_mlflow_artifact_root.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test that parses __main__.py AST and asserts the Cloud Run
+        MLflow container args include --default-artifact-root with the GCS
+        artifacts bucket URI. Test fails because the arg is missing.
+        GREEN: Add --default-artifact-root gs://minivess-mlops-mlflow-artifacts
+        to the Cloud Run service template in __main__.py. Also ensure the
+        MLflow service account has storage.objectAdmin on the artifacts bucket.
+      </tdd-approach>
+      <verification>
+        1. make test-staging passes with new test
+        2. pulumi preview shows the Cloud Run service update
+        3. After pulumi up: mlflow.get_artifact_uri() returns gs:// path
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="1.2" priority="P1" issue="new-1">
+      <title>GCP GPU quota increase request to 4 GPUs</title>
+      <description>
+        Current GPUS_ALL_REGIONS quota is 1. The factorial experiment has 34
+        conditions; running them sequentially takes ~34x longer than necessary.
+        A quota of 4 allows 4 parallel sky jobs launch invocations, reducing
+        wall-clock time by ~4x.
+
+        User decision #3: Request increase to 4.
+
+        This is a manual GCP Console action (IAM > Quotas) but must be
+        documented and tracked. The Pulumi config should also record the
+        expected quota for preflight checks.
+      </description>
+      <files>
+        <file>configs/cloud/gcp_quotas.yaml</file>
+        <file>scripts/preflight_gcp.py</file>
+        <file>docs/planning/gcp-setup-tutorial.md</file>
+      </files>
+      <tdd-approach>
+        RED: Write test that reads gcp_quotas.yaml and asserts gpus_all_regions >= 4.
+        Test fails because current value is 1.
+        GREEN: Update gcp_quotas.yaml to expected_gpus_all_regions: 4.
+        Update preflight_gcp.py to check actual quota via gcloud CLI.
+        Document the quota request process in gcp-setup-tutorial.md.
+      </tdd-approach>
+      <verification>
+        1. gcloud compute project-info describe --project=minivess-mlops shows quota >= 4
+        2. scripts/preflight_gcp.py passes quota check
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="1.3" priority="P0" issue="new-2">
+      <title>Fix train_production.yaml — GAR image + GCS data path</title>
+      <description>
+        train_production.yaml still references:
+        - GHCR image (ghcr.io/petteriteikari/minivess-base:latest) instead of
+          GAR (europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest)
+        - UpCloud/RunPod cloud config instead of GCP
+        - Old data strategy (S3 public bucket) instead of GCS DVC
+
+        This YAML is stale and will fail on any GCP production launch.
+        User decision #11: Fix both production + HPO YAMLs.
+      </description>
+      <files>
+        <file>deployment/skypilot/train_production.yaml</file>
+        <file>tests/v2/unit/deployment/test_yaml_contract_enforcement.py</file>
+      </files>
+      <tdd-approach>
+        RED: Existing yaml_contract_enforcement test should already catch GAR
+        mismatch. If not, add assertion that train_production.yaml uses GAR image.
+        GREEN: Rewrite train_production.yaml to mirror train_factorial.yaml's
+        infrastructure pattern: GAR image, GCP cloud, L4 GPU, GCS DVC pull,
+        GCS checkpoint mount. Keep the production-specific config (100 epochs,
+        3 folds, full dataset).
+      </tdd-approach>
+      <verification>
+        1. scripts/validate_yaml_contract.py passes for train_production.yaml
+        2. sky check --yaml deployment/skypilot/train_production.yaml validates
+        3. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="1.4" priority="P0" issue="new-3">
+      <title>Fix train_hpo.yaml — GAR image + GCS data, remove UpCloud</title>
+      <description>
+        train_hpo.yaml references:
+        - GHCR image instead of GAR
+        - RunPod cloud + RTX 4090 instead of GCP + L4
+        - UpCloud S3 DVC credentials (DVC_REMOTE_URL, AWS_ACCESS_KEY_ID)
+
+        UpCloud was sunset on 2026-03-16. All UpCloud references must be removed.
+        User decision #11: Fix both production + HPO YAMLs.
+      </description>
+      <files>
+        <file>deployment/skypilot/train_hpo.yaml</file>
+        <file>tests/v2/unit/deployment/test_yaml_contract_enforcement.py</file>
+      </files>
+      <tdd-approach>
+        RED: Add yaml contract test asserting train_hpo.yaml uses GAR image and
+        GCP cloud, and does NOT contain UpCloud/AWS_ACCESS_KEY references.
+        GREEN: Rewrite train_hpo.yaml to use GAR image, GCP cloud, L4 GPU,
+        GCS DVC pull. Remove all UpCloud S3 env vars. Keep HPO-specific
+        config (Optuna trial args, HPO_CONFIG env var).
+      </tdd-approach>
+      <verification>
+        1. grep -r "UpCloud\|upcloud\|AWS_ACCESS_KEY" deployment/skypilot/train_hpo.yaml returns 0 hits
+        2. scripts/validate_yaml_contract.py passes
+        3. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="1.5" priority="P0" issue="new-4">
+      <title>Remove MLflow auth env vars from train_factorial.yaml</title>
+      <description>
+        train_factorial.yaml lines 77-78 contain:
+          MLFLOW_TRACKING_USERNAME: ${MLFLOW_TRACKING_USERNAME}
+          MLFLOW_TRACKING_PASSWORD: ${MLFLOW_TRACKING_PASSWORD}
+
+        MLflow 3.x on Cloud Run uses IAM authentication (service account),
+        NOT HTTP basic auth. These env vars are vestigial from MLflow 2.x and
+        cause confusion. The setup diagnostic message on line 192 also
+        references them.
+
+        User decision #18: Remove USERNAME/PASSWORD from train_factorial.yaml.
+
+        IMPORTANT: This is a declarative config change explicitly authorized
+        by the user (Rule #31 satisfied).
+      </description>
+      <files>
+        <file>deployment/skypilot/train_factorial.yaml</file>
+        <file>tests/v2/unit/deployment/test_yaml_contract_enforcement.py</file>
+      </files>
+      <tdd-approach>
+        RED: Add test asserting train_factorial.yaml does NOT contain
+        MLFLOW_TRACKING_USERNAME or MLFLOW_TRACKING_PASSWORD.
+        GREEN: Remove the two env var lines and the diagnostic echo line
+        that references them. Keep MLFLOW_TRACKING_URI (still needed).
+      </tdd-approach>
+      <verification>
+        1. grep -c "MLFLOW_TRACKING_USERNAME\|MLFLOW_TRACKING_PASSWORD" \
+           deployment/skypilot/train_factorial.yaml → 0
+        2. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="1.6" priority="P1" issue="new-5">
+      <title>Pin evidently + beartype versions</title>
+      <description>
+        evidently and beartype have had breaking API changes across minor versions.
+        Unpinned versions cause import errors and test failures on fresh installs.
+        Pin to known-working versions in pyproject.toml extras.
+
+        User decision #19: Pin versions.
+      </description>
+      <files>
+        <file>pyproject.toml</file>
+        <file>tests/v2/unit/test_dependency_pins.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test that imports evidently and beartype, checks their __version__
+        against the pinned range in pyproject.toml.
+        GREEN: Pin evidently and beartype in pyproject.toml [project.optional-dependencies]
+        to their current known-working versions. Run uv sync --all-extras.
+      </tdd-approach>
+      <verification>
+        1. uv sync --all-extras succeeds
+        2. uv run python -c "import evidently; print(evidently.__version__)" → pinned version
+        3. uv run python -c "import beartype; print(beartype.__version__)" → pinned version
+        4. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: CODE FIXES — Silent Failures, Metrics, Config             -->
+  <!-- ================================================================== -->
+
+  <phase id="2" name="Code Fixes" estimated-time="3-4 hours">
+    <description>
+      Fix all silent failures, hardcoded parameters, metric key mismatches,
+      unwired functions, and duplicate code patterns. Each fix follows TDD
+      and addresses a specific CLAUDE.md rule violation.
+    </description>
+
+    <task id="2.1" priority="P0" issue="790">
+      <title>Central MetricKeys constants module — verify completeness</title>
+      <description>
+        MetricKeys in src/minivess/observability/metric_keys.py exists (#790)
+        but not all flow files use it consistently. Some flows still hardcode
+        metric key strings like "eval/fold0/dice" or "val/loss" instead of
+        importing from MetricKeys. Audit all flows and replace hardcoded
+        metric key strings with MetricKeys constants.
+
+        User decision #6: Central MetricKeys constants module.
+      </description>
+      <files>
+        <file>src/minivess/observability/metric_keys.py</file>
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+        <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+        <file>src/minivess/orchestration/flows/biostatistics_flow.py</file>
+        <file>src/minivess/pipeline/builder.py</file>
+        <file>src/minivess/pipeline/comparison.py</file>
+        <file>tests/v2/unit/observability/test_metric_keys_usage.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write AST-based test that scans all flow files for hardcoded
+        metric key strings (patterns like "train/loss", "val/dice",
+        "eval/fold" etc.) that are NOT imported from MetricKeys. Test fails
+        because hardcoded strings exist.
+        GREEN: Replace every hardcoded metric key string with the corresponding
+        MetricKeys constant. Add missing keys to MetricKeys if needed.
+      </tdd-approach>
+      <verification>
+        1. AST-based guard test passes (no hardcoded metric strings in flows)
+        2. make test-staging passes
+        3. grep -rn '"train/\|"val/\|"eval/' src/minivess/orchestration/flows/ → only imports
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.2" priority="P0" issue="new-6">
+      <title>Fix metric key mismatch in builder.py</title>
+      <description>
+        builder.py logs metrics with keys that don't match MetricKeys constants.
+        This causes downstream consumers (analysis_flow, biostatistics_flow) to
+        query for keys that were never logged, resulting in empty results that
+        are silently discarded. The mismatch is between the key used in
+        mlflow.log_metric() and the key used in MlflowClient.search_runs()
+        filter_string.
+      </description>
+      <files>
+        <file>src/minivess/pipeline/builder.py</file>
+        <file>src/minivess/observability/metric_keys.py</file>
+        <file>tests/v2/unit/pipeline/test_builder_metric_keys.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test that instantiates builder and verifies all logged
+        metric keys match MetricKeys constants exactly.
+        GREEN: Replace all hardcoded metric key strings in builder.py
+        with MetricKeys imports.
+      </tdd-approach>
+      <verification>
+        1. New test passes
+        2. make test-staging passes
+      </verification>
+      <depends-on>2.1</depends-on>
+    </task>
+
+    <task id="2.3" priority="P0" issue="new-7">
+      <title>SWAG plugin — raise PostTrainingPluginError instead of returning empty</title>
+      <description>
+        When SWAG fails (e.g., insufficient epochs, NaN divergence), the plugin
+        silently returns an empty dict {} instead of raising an exception.
+        This violates CLAUDE.md Rule #25 (Loud Failures, Never Silent Discards).
+        The post_training_flow receives empty results and logs nothing, making
+        the failure invisible in MLflow.
+
+        User decision #4: Raise exceptions for silent failures.
+        User decision #16: SWAG stays in debug (Rule 27).
+      </description>
+      <files>
+        <file>src/minivess/pipeline/post_training_plugins/swag.py</file>
+        <file>tests/v2/unit/pipeline/test_swag_loud_failure.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test that triggers SWAG failure conditions (empty model,
+        zero posterior samples) and asserts PostTrainingPluginError is raised.
+        Test fails because plugin returns {} silently.
+        GREEN: Replace all `return {}` paths in swag.py with
+        `raise PostTrainingPluginError("SWAG failed: {reason}")`.
+        Add PostTrainingPluginError to the plugin base module if not present.
+      </tdd-approach>
+      <verification>
+        1. Test verifies exceptions are raised for every failure mode
+        2. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.4" priority="P0" issue="new-8">
+      <title>DataLoader fallback — raise instead of falling back to raw pairs</title>
+      <description>
+        When DataLoader creation fails (e.g., transform error, shape mismatch),
+        the training loop silently falls back to raw image/label pairs without
+        transforms. This produces misleading training metrics (no augmentation,
+        no normalization) and violates Rule #25. The fallback was a debugging
+        convenience that should never have been committed.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <file>tests/v2/unit/orchestration/test_dataloader_no_silent_fallback.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test that mocks DataLoader creation to fail and asserts
+        that the training flow raises an exception (not falls back silently).
+        GREEN: Remove the raw-pairs fallback path. Replace with
+        raise ValueError("DataLoader creation failed: {original_error}").
+      </tdd-approach>
+      <verification>
+        1. Test verifies exception propagation
+        2. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.5" priority="P0" issue="new-9">
+      <title>Hardcoded tracking_uri "mlruns" fallback in train_flow.py → resolve_tracking_uri()</title>
+      <description>
+        train_flow.py line ~186 uses os.environ.get("DVC_REMOTE", "minio")
+        and similar fallback patterns throughout. The tracking URI resolution
+        must use resolve_tracking_uri() which fails loudly if MLFLOW_TRACKING_URI
+        is not set, as documented in observability/CLAUDE.md.
+
+        User decision #9: Fail loudly, no silent defaults.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <file>src/minivess/observability/tracking.py</file>
+        <file>tests/v2/unit/orchestration/test_no_tracking_uri_fallback.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test scanning train_flow.py for os.environ.get() calls
+        with tracking URI fallbacks. Test fails because fallbacks exist.
+        GREEN: Replace os.environ.get("MLFLOW_TRACKING_URI", "mlruns") with
+        resolve_tracking_uri(). Ensure resolve_tracking_uri() raises if env
+        var is unset (it should already, verify).
+      </tdd-approach>
+      <verification>
+        1. grep "mlruns" src/minivess/orchestration/flows/train_flow.py → 0 hits (except comments)
+        2. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.6" priority="P1" issue="new-10">
+      <title>Central CHECKPOINT_BEST_FILENAME constant — verify all usages</title>
+      <description>
+        CHECKPOINT_BEST_FILENAME = "best_val_loss.pth" exists in
+        orchestration/constants.py but some files may still hardcode the
+        string "best_val_loss.pth" or use variant names like "best_model.pth".
+        All checkpoint filename references must use the constant.
+
+        User decision #14: Central constants in orchestration/constants.py.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/constants.py</file>
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+        <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+        <file>src/minivess/orchestration/flows/deploy_flow.py</file>
+        <file>tests/v2/unit/orchestration/test_checkpoint_filename_constant.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write AST-based test scanning all flow files for hardcoded
+        "best_val_loss.pth" or "best_model.pth" strings not imported from
+        constants. Test fails if hardcoded strings found.
+        GREEN: Replace all hardcoded checkpoint filenames with
+        CHECKPOINT_BEST_FILENAME constant from orchestration/constants.py.
+      </tdd-approach>
+      <verification>
+        1. AST guard test passes
+        2. grep -rn "best_val_loss.pth\|best_model.pth" src/minivess/orchestration/flows/ → only imports
+        3. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.7" priority="P1" issue="new-11">
+      <title>Fix checkpoint naming in post_training_flow.py</title>
+      <description>
+        post_training_flow.py may save post-training checkpoints (SWAG, SWA)
+        with a different naming convention than what analysis_flow.py expects
+        when discovering checkpoints. Both must use constants from
+        orchestration/constants.py.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+        <file>src/minivess/orchestration/constants.py</file>
+        <file>tests/v2/unit/orchestration/test_post_training_checkpoint_naming.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test that verifies post_training_flow checkpoint save path
+        uses constants from orchestration/constants.py.
+        GREEN: Add post-training checkpoint constants to constants.py
+        (e.g., CHECKPOINT_SWAG_FILENAME = "swag_posterior.pth") and use them
+        in post_training_flow.py.
+      </tdd-approach>
+      <verification>
+        1. Test passes
+        2. make test-staging passes
+      </verification>
+      <depends-on>2.6</depends-on>
+    </task>
+
+    <task id="2.8" priority="P0" issue="new-12">
+      <title>Calibration metrics crash — MetaTensor .cpu().detach().numpy()</title>
+      <description>
+        Calibration metrics (ECE, Brier, etc.) call .numpy() on MONAI MetaTensor
+        objects that may still be on GPU or require gradient detach. This causes:
+        - RuntimeError: Can't call numpy() on Tensor that requires grad
+        - RuntimeError: Expected a torch.Tensor on CPU
+
+        Fix: Always chain .cpu().detach().numpy() before passing tensors to
+        numpy-based calibration functions.
+
+        User decision #12: Fix .numpy() + verification tests.
+      </description>
+      <files>
+        <file>src/minivess/pipeline/calibration_metrics.py</file>
+        <file>tests/v2/unit/pipeline/test_calibration_metrics_device_safety.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test that creates GPU tensors with requires_grad=True,
+        passes them to calibration metrics, and verifies no RuntimeError.
+        Test fails because .numpy() is called without .cpu().detach().
+        GREEN: Add defensive .cpu().detach().numpy() chain to all calibration
+        metric functions that convert tensors to numpy arrays. Use a helper
+        function _to_numpy(tensor) to centralize the pattern.
+      </tdd-approach>
+      <verification>
+        1. Test passes on GPU (if available) and CPU
+        2. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.9" priority="P1" issue="new-13">
+      <title>Calibration metrics verification tests</title>
+      <description>
+        Add comprehensive tests for all calibration metrics (ECE, MCE, Brier,
+        NLL, BUC, pECE, BA-ECE) with known-answer inputs. Verify that:
+        1. Perfect predictions → ECE ≈ 0
+        2. Random predictions → ECE ≈ 0.25-0.5
+        3. Deliberately miscalibrated → ECE > 0.1
+        4. Results are numerically stable (no NaN/Inf)
+      </description>
+      <files>
+        <file>src/minivess/pipeline/calibration_metrics.py</file>
+        <file>tests/v2/unit/pipeline/test_calibration_metrics_known_answers.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write known-answer tests. Tests pass if calibration module is correct.
+        GREEN: Fix any calibration metric bugs exposed by known-answer tests.
+      </tdd-approach>
+      <verification>
+        1. All known-answer tests pass
+        2. make test-staging passes
+      </verification>
+      <depends-on>2.8</depends-on>
+    </task>
+
+    <task id="2.10" priority="P0" issue="881">
+      <title>Remove all 50+ hardcoded alpha/seed/n_bootstrap defaults</title>
+      <description>
+        CLAUDE.md Rule #29: ZERO Hardcoded Parameters. Across 20+ files, there
+        are 38+ occurrences of hardcoded alpha=0.05, seed=42, n_bootstrap=1000,
+        n_permutations=9999 in function signatures. These must ALL be removed
+        and replaced with config-driven parameters.
+
+        Files with hardcoded defaults (from grep):
+        - biostatistics_statistics.py (5 occurrences)
+        - biostatistics_rankings.py (2)
+        - biostatistics_figures.py (2)
+        - biostatistics_specification_curve.py (3)
+        - comparison.py (4)
+        - comparison_report.py (2)
+        - topology_comparison.py (2)
+        - evaluation.py (1)
+        - calibration_metrics.py (1)
+        - data/splits.py (2 — seed=42)
+        - data/drift_simulation_setup.py (3)
+        - data/acquisition_simulator.py (1)
+        - data/debug_dataset.py (1 — seed=42)
+        - testing/debug_data_config.py (1 — seed=42)
+        - post_training_plugins/subsampled_ensemble.py (1)
+        - agents/acquisition/conformal_bandit.py (1)
+        - orchestration/flows/biostatistics_flow.py (3)
+        - orchestration/flows/data_flow.py (1)
+        - orchestration/flows/post_training_flow.py (1)
+        - observability/pprm.py (1)
+
+        User decision #5: Fix ALL 50+ instances.
+      </description>
+      <files>
+        <file>src/minivess/pipeline/biostatistics_statistics.py</file>
+        <file>src/minivess/pipeline/biostatistics_rankings.py</file>
+        <file>src/minivess/pipeline/biostatistics_figures.py</file>
+        <file>src/minivess/pipeline/biostatistics_specification_curve.py</file>
+        <file>src/minivess/pipeline/comparison.py</file>
+        <file>src/minivess/pipeline/comparison_report.py</file>
+        <file>src/minivess/pipeline/topology_comparison.py</file>
+        <file>src/minivess/pipeline/evaluation.py</file>
+        <file>src/minivess/pipeline/calibration_metrics.py</file>
+        <file>src/minivess/data/splits.py</file>
+        <file>src/minivess/data/drift_simulation_setup.py</file>
+        <file>src/minivess/data/acquisition_simulator.py</file>
+        <file>src/minivess/data/debug_dataset.py</file>
+        <file>src/minivess/testing/debug_data_config.py</file>
+        <file>src/minivess/pipeline/post_training_plugins/subsampled_ensemble.py</file>
+        <file>src/minivess/agents/acquisition/conformal_bandit.py</file>
+        <file>src/minivess/orchestration/flows/biostatistics_flow.py</file>
+        <file>src/minivess/orchestration/flows/data_flow.py</file>
+        <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+        <file>src/minivess/observability/pprm.py</file>
+        <file>src/minivess/config/models.py</file>
+        <file>tests/v2/unit/biostatistics/test_no_hardcoded_alpha.py</file>
+      </files>
+      <tdd-approach>
+        RED: tests/v2/unit/biostatistics/test_no_hardcoded_alpha.py already
+        exists (or create it). AST-based scan of ALL src/minivess/ files for
+        function signatures containing default values for alpha, seed,
+        n_bootstrap, n_permutations. Test fails for all 50+ occurrences.
+        GREEN: For each function:
+        1. Remove the default value from the signature
+        2. Make the parameter required (caller must pass it)
+        3. Update all callers to pass the value from their config object
+        4. Ensure config dataclasses (BiostatisticsConfig, TrainingConfig, etc.)
+           define the canonical defaults
+      </tdd-approach>
+      <verification>
+        1. AST guard test passes (zero hardcoded alpha/seed/n_bootstrap in signatures)
+        2. All existing tests still pass (they must read defaults from config)
+        3. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.11" priority="P1" issue="new-14">
+      <title>7 conformal alpha=0.1 hardcodes → parameterize</title>
+      <description>
+        Conformal prediction code uses alpha=0.1 (90% coverage) as a hardcoded
+        default in function signatures. This is a researcher-configurable
+        parameter that must come from config. Separate from #881 because
+        conformal alpha is a different parameter from statistical alpha=0.05.
+      </description>
+      <files>
+        <file>src/minivess/pipeline/conformal_prediction.py</file>
+        <file>src/minivess/agents/acquisition/conformal_bandit.py</file>
+        <file>src/minivess/config/models.py</file>
+        <file>tests/v2/unit/pipeline/test_conformal_no_hardcoded_alpha.py</file>
+      </files>
+      <tdd-approach>
+        RED: AST-based test scanning conformal modules for hardcoded alpha
+        defaults. Test fails for all 7 occurrences.
+        GREEN: Add conformal_alpha to relevant config class. Remove defaults
+        from function signatures. Update callers.
+      </tdd-approach>
+      <verification>
+        1. Guard test passes
+        2. make test-staging passes
+      </verification>
+      <depends-on>2.10</depends-on>
+    </task>
+
+    <task id="2.12" priority="P0" issue="new-15">
+      <title>13 os.environ.get() fallbacks in train_flow.py → fail loudly</title>
+      <description>
+        train_flow.py has ~20 os.environ.get() calls, 13 of which provide silent
+        fallback defaults (e.g., os.environ.get("DVC_REMOTE", "minio"),
+        os.environ.get("SPLITS_DIR", "configs/splits")). Per CLAUDE.md Rule #22
+        and observability/CLAUDE.md, flow files must NOT have silent fallbacks.
+        Either use a resolve_*() function or fail loudly with a clear message.
+
+        User decision #9: Fail loudly, no silent defaults.
+
+        Specific offenders (from grep of train_flow.py):
+        - Line 184: os.environ.get("DATA_DIR", "/app/data")
+        - Line 186: os.environ.get("DVC_REMOTE", "minio")
+        - Line 1152: os.environ.get("SPLITS_DIR", "configs/splits")
+        - Line 1303: os.environ.get("LOGS_DIR", "/app/logs")
+        - Line 1330: os.environ.get("SPLITS_DIR", "configs/splits")
+        - Line 1331: os.environ.get("CHECKPOINT_DIR", "/app/checkpoints")
+        - Line 1457-1539: Multiple argparse defaults with os.environ.get()
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <file>src/minivess/config/env_resolution.py</file>
+        <file>tests/v2/unit/orchestration/test_no_env_fallbacks_in_flows.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write AST-based test scanning all flow files for os.environ.get()
+        calls with two arguments (indicating a fallback default). Test fails
+        for all 13 occurrences.
+        GREEN: Create env_resolution.py with typed resolve_*() functions:
+        - resolve_data_dir() → Path (raises if DATA_DIR unset)
+        - resolve_splits_dir() → Path
+        - resolve_checkpoint_dir() → Path
+        - resolve_logs_dir() → Path
+        - resolve_dvc_remote() → str
+        Replace all os.environ.get() with fallbacks in train_flow.py with
+        these resolve functions. For argparse defaults, use env var without
+        fallback: os.environ["VAR"] (crashes if missing, which is correct).
+      </tdd-approach>
+      <verification>
+        1. AST guard test passes (zero os.environ.get with 2 args in flow files)
+        2. Tests with proper env vars set still pass
+        3. Tests without env vars → clear error messages
+        4. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.13" priority="P0" issue="new-16">
+      <title>Wire 7 unwired production functions to flow entry points</title>
+      <description>
+        7 production-grade functions exist in the codebase but are not called
+        from any Prefect flow entry point. They are dead code that was written
+        but never wired into the execution path. Each must be wired into the
+        appropriate flow.
+
+        User decision #10: Wire all 7.
+
+        The specific unwired functions need to be identified via a code audit:
+        likely candidates include embedding_drift, comparison_report,
+        topology_comparison, specification_curve, and similar analysis/
+        biostatistics functions.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+        <file>src/minivess/orchestration/flows/biostatistics_flow.py</file>
+        <file>src/minivess/orchestration/flows/dashboard_flow.py</file>
+        <file>src/minivess/pipeline/embedding_drift.py</file>
+        <file>src/minivess/pipeline/comparison_report.py</file>
+        <file>src/minivess/pipeline/topology_comparison.py</file>
+        <file>src/minivess/pipeline/biostatistics_specification_curve.py</file>
+        <file>tests/v2/unit/orchestration/test_all_functions_wired.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test that traces the call graph from each flow's @flow
+        function and asserts all production functions in src/minivess/pipeline/
+        are reachable. Test fails for the 7 unwired functions.
+        GREEN: Add @task wrappers and calls to each unwired function in the
+        appropriate flow. Use try/except with logger.error() for optional
+        analyses (e.g., embedding_drift), and direct calls for required
+        analyses (e.g., comparison_report).
+      </tdd-approach>
+      <verification>
+        1. All 7 functions are called from at least one flow
+        2. make test-staging passes
+      </verification>
+      <depends-on>2.1, 2.2</depends-on>
+    </task>
+
+    <task id="2.14" priority="P1" issue="new-17">
+      <title>Hardcoded experiment names in deploy_flow and dashboard_flow</title>
+      <description>
+        deploy_flow.py and dashboard_flow.py may hardcode MLflow experiment
+        name strings instead of importing from orchestration/constants.py
+        (EXPERIMENT_DEPLOYMENT, EXPERIMENT_DASHBOARD). This causes silent
+        cross-flow isolation failures when the experiment name convention
+        changes.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/deploy_flow.py</file>
+        <file>src/minivess/orchestration/flows/dashboard_flow.py</file>
+        <file>src/minivess/orchestration/constants.py</file>
+        <file>tests/v2/unit/orchestration/test_experiment_name_constants.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write AST-based test scanning flow files for hardcoded strings
+        matching "minivess_*" that should be EXPERIMENT_* constants.
+        GREEN: Replace all hardcoded experiment name strings with constants.
+      </tdd-approach>
+      <verification>
+        1. Guard test passes
+        2. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.15" priority="P1" issue="new-18">
+      <title>Nemenyi q_alpha table → parameterize with scipy.stats</title>
+      <description>
+        biostatistics_rankings.py contains a hardcoded q_alpha critical value
+        lookup table for the Nemenyi post-hoc test. This should use
+        scipy.stats.studentized_range for dynamic computation based on the
+        number of groups and significance level, rather than a static table
+        that only works for specific k values.
+
+        Rule #3 (Library-First): scipy.stats has this.
+      </description>
+      <files>
+        <file>src/minivess/pipeline/biostatistics_rankings.py</file>
+        <file>tests/v2/unit/pipeline/test_nemenyi_scipy.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test computing Nemenyi critical difference for known
+        k and alpha values, comparing against published table values.
+        GREEN: Replace hardcoded q_alpha table with scipy.stats.studentized_range
+        computation. Parameterize alpha from config.
+      </tdd-approach>
+      <verification>
+        1. Known-answer tests match published critical difference tables
+        2. make test-staging passes
+      </verification>
+      <depends-on>2.10</depends-on>
+    </task>
+
+    <task id="2.16" priority="P0" issue="new-19">
+      <title>Bare except:pass in train_flow.py → proper exception handling</title>
+      <description>
+        train_flow.py has multiple bare except: blocks (lines ~284, 689, 881,
+        910, 932, 1050) that silently swallow exceptions. These hide real
+        errors (OOM, CUDA errors, data corruption) and make debugging
+        impossible. Each must be replaced with specific exception types and
+        proper logging.
+
+        Rule #25: Loud Failures, Never Silent Discards.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <file>tests/v2/unit/orchestration/test_no_bare_except.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write AST-based test scanning train_flow.py for bare except:
+        or except Exception: blocks that contain only pass/continue/return.
+        Test fails for all 6 offending blocks.
+        GREEN: For each bare except:
+        1. Identify the specific exception types that can occur
+        2. Replace with specific except (RuntimeError, ValueError, etc.)
+        3. Add logger.error() with context information
+        4. Re-raise if the error is fatal (OOM, CUDA)
+        5. Log and continue only for truly optional operations (e.g., GPU temp query)
+      </tdd-approach>
+      <verification>
+        1. AST guard test passes (zero bare except: blocks)
+        2. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.17" priority="P1" issue="new-20">
+      <title>Duplicate code: flow epilogue pattern (175 lines x 5 flows)</title>
+      <description>
+        All 5 Prefect flows have near-identical epilogue code (~175 lines each):
+        MLflow run finalization, lineage emission, audit trail logging, error
+        handling, and status reporting. This is ~875 lines of duplicated code
+        that should be extracted into a shared utility.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flow_epilogue.py</file>
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+        <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+        <file>src/minivess/orchestration/flows/deploy_flow.py</file>
+        <file>src/minivess/orchestration/flows/dashboard_flow.py</file>
+        <file>tests/v2/unit/orchestration/test_flow_epilogue.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test for a flow_epilogue() utility function that handles
+        MLflow finalization, lineage emission, audit logging, and error
+        handling. Test fails because the utility doesn't exist.
+        GREEN: Create flow_epilogue.py with a shared FlowEpilogue context
+        manager or decorator. Refactor all 5 flows to use it.
+      </tdd-approach>
+      <verification>
+        1. flow_epilogue utility tests pass
+        2. All 5 flows use the shared utility
+        3. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.18" priority="P1" issue="new-21">
+      <title>Duplicate code: MLflow run setup boilerplate (120 lines x 8)</title>
+      <description>
+        MLflow run initialization (set experiment, start run, log params,
+        set tags, configure autolog) is repeated ~120 lines x 8 times across
+        flow files. Extract into a shared mlflow_run_context() utility.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/mlflow_helpers.py</file>
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+        <file>src/minivess/orchestration/flows/biostatistics_flow.py</file>
+        <file>tests/v2/unit/orchestration/test_mlflow_run_context.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test for an mlflow_run_context() context manager that
+        handles experiment setup, run creation, and param logging.
+        GREEN: Implement mlflow_run_context() in mlflow_helpers.py.
+        Refactor flows to use it (start with one flow, verify, then batch).
+      </tdd-approach>
+      <verification>
+        1. mlflow_run_context utility tests pass
+        2. At least 3 flows refactored to use it
+        3. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.19" priority="P1" issue="new-22">
+      <title>n_matched ambiguity in component_dice topology metrics</title>
+      <description>
+        topology_comparison.py has an n_matched variable used in component_dice
+        computation where it's ambiguous whether it counts matched components
+        from prediction→ground-truth or ground-truth→prediction. This can
+        silently produce incorrect topology metrics. Add explicit directional
+        naming and documentation.
+      </description>
+      <files>
+        <file>src/minivess/pipeline/topology_comparison.py</file>
+        <file>tests/v2/unit/pipeline/test_topology_n_matched_direction.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test with asymmetric topology (pred has 5 components, GT
+        has 3) verifying that pred→GT and GT→pred matching counts differ.
+        GREEN: Rename n_matched to n_matched_pred_to_gt and
+        n_matched_gt_to_pred. Add docstring clarifying the direction.
+      </tdd-approach>
+      <verification>
+        1. Directional test passes with correct counts
+        2. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.20" priority="P1" issue="new-23">
+      <title>Augmentation hyperparameters → config-driven</title>
+      <description>
+        Data augmentation transforms (random flip probability, rotation range,
+        intensity shift range, etc.) have hardcoded values in the transform
+        pipeline construction code. These should be config-driven via the
+        Hydra config chain so researchers can tune augmentation without
+        code changes.
+
+        Rule #29: ZERO Hardcoded Parameters.
+      </description>
+      <files>
+        <file>src/minivess/pipeline/transforms.py</file>
+        <file>src/minivess/config/models.py</file>
+        <file>configs/augmentation/default.yaml</file>
+        <file>tests/v2/unit/pipeline/test_augmentation_config_driven.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test that verifies augmentation parameters are read from
+        config, not hardcoded in transforms.py.
+        GREEN: Add AugmentationConfig dataclass to config/models.py.
+        Move all augmentation hyperparameters to configs/augmentation/default.yaml.
+        Update transforms.py to accept AugmentationConfig.
+      </tdd-approach>
+      <verification>
+        1. Config-driven test passes
+        2. Changing augmentation YAML changes the transforms
+        3. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.21" priority="P1" issue="new-24">
+      <title>VRAM overhead constants → profile YAML</title>
+      <description>
+        VRAM overhead estimates for model selection (e.g., "SAM3 needs 16GB",
+        "DynUNet needs 4GB") are hardcoded as constants in model adapter code
+        or VRAM check scripts. These should be in a profile YAML so they can
+        be updated as models evolve without code changes.
+      </description>
+      <files>
+        <file>src/minivess/adapters/sam3_vram_check.py</file>
+        <file>configs/hardware/vram_profiles.yaml</file>
+        <file>tests/v2/unit/adapters/test_vram_profiles_config.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test that reads VRAM requirements from YAML profile and
+        asserts they match the values used in sam3_vram_check.py.
+        GREEN: Create configs/hardware/vram_profiles.yaml with per-model
+        VRAM requirements. Update sam3_vram_check.py to read from YAML.
+      </tdd-approach>
+      <verification>
+        1. VRAM profile test passes
+        2. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.22" priority="P0" issue="new-25">
+      <title>HPO flow lr=1e-3 vs TrainingConfig lr=1e-4 shadow default</title>
+      <description>
+        The HPO flow search space may define learning rate range starting at
+        1e-3, while TrainingConfig has a default of 1e-4. When HPO suggests
+        a value, it's unclear whether the HPO suggestion or the config default
+        takes precedence. This is a shadow default bug: the researcher thinks
+        they're searching over lr ∈ [1e-5, 1e-2] but the config default silently
+        overrides the HPO suggestion if the override chain is broken.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/hpo_flow.py</file>
+        <file>src/minivess/config/models.py</file>
+        <file>tests/v2/unit/orchestration/test_hpo_no_shadow_defaults.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test that creates an HPO trial with lr=1e-3 and asserts
+        the actual training config used for that trial has lr=1e-3 (not the
+        config default of 1e-4).
+        GREEN: Ensure HPO override chain explicitly sets TrainingConfig.lr
+        from the Optuna suggestion. Remove any default that could shadow it.
+      </tdd-approach>
+      <verification>
+        1. Shadow default test passes
+        2. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+
+    <task id="2.23" priority="P0" issue="new-26">
+      <title>DVC_REMOTE="minio" default in train_flow → fail loudly</title>
+      <description>
+        train_flow.py line ~186: os.environ.get("DVC_REMOTE", "minio")
+        silently defaults to MinIO when DVC_REMOTE is unset. On GCP, this
+        causes training to attempt pulling data from a non-existent MinIO
+        instance instead of GCS, resulting in a silent data fetch failure
+        followed by training on empty data.
+
+        This is a specific instance of Task 2.12 but called out separately
+        because it caused actual data loss on the 5th factorial pass.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <file>tests/v2/unit/orchestration/test_dvc_remote_no_fallback.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test that unsets DVC_REMOTE env var and calls the DVC
+        remote resolution function. Test asserts ValueError is raised.
+        GREEN: Replace os.environ.get("DVC_REMOTE", "minio") with a
+        resolve_dvc_remote() function that raises if DVC_REMOTE is unset.
+      </tdd-approach>
+      <verification>
+        1. Test passes (ValueError raised when DVC_REMOTE unset)
+        2. grep "minio" train_flow.py → only in comments, not as default
+        3. make test-staging passes
+      </verification>
+      <depends-on>2.12</depends-on>
+    </task>
+
+    <task id="2.24" priority="P1" issue="new-27">
+      <title>Orphan YAML config keys (defined but never read)</title>
+      <description>
+        Audit all Hydra config YAML files for keys that are defined but never
+        read by any Python code. These orphan keys are confusing for researchers
+        (they think changing the key does something, but it doesn't) and indicate
+        wiring gaps. Remove orphan keys or wire them properly.
+      </description>
+      <files>
+        <file>configs/experiment/*.yaml</file>
+        <file>configs/model/*.yaml</file>
+        <file>configs/training/*.yaml</file>
+        <file>src/minivess/config/models.py</file>
+        <file>tests/v2/unit/config/test_no_orphan_yaml_keys.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write test that:
+        1. Collects all keys from Hydra YAML config files
+        2. Scans all Python source for references to those keys
+        3. Reports keys defined in YAML but never referenced in Python
+        Test fails if orphan keys exist.
+        GREEN: For each orphan key, either:
+        (a) Wire it to the appropriate Python code, or
+        (b) Remove it from the YAML config with a comment explaining why
+      </tdd-approach>
+      <verification>
+        1. Orphan key test passes (or has explicit allowed_orphans list)
+        2. make test-staging passes
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: VALIDATION — Tests, E2E, Cloud Verification               -->
+  <!-- ================================================================== -->
+
+  <phase id="3" name="Validation" estimated-time="1.5-2 hours">
+    <description>
+      Create comprehensive validation tests to ensure Phase 1+2 fixes work
+      end-to-end, and prevent regressions. Includes local mock E2E tests,
+      cloud verification plan, and guard tests for all CLAUDE.md rules.
+    </description>
+
+    <task id="3.1" priority="P0" issue="new-28">
+      <title>Local mock E2E test (train → analysis → biostatistics)</title>
+      <description>
+        Create a local mock E2E integration test that exercises the full
+        pipeline chain: train_flow → post_training_flow → analysis_flow →
+        biostatistics_flow → dashboard_flow. Uses mock data (tiny volumes),
+        mock MLflow (file-based), and skips actual GPU training (mock model
+        outputs). Verifies that:
+        1. Each flow writes expected MLflow artifacts
+        2. Downstream flows can discover upstream runs
+        3. Metric keys match between producer and consumer
+        4. No silent failures in the chain
+
+        User decision #13: Local mock test + cloud E2E plan.
+      </description>
+      <files>
+        <file>tests/v2/integration/test_e2e_mock_pipeline.py</file>
+        <file>tests/v2/integration/conftest.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write the E2E test with mock data. Test exercises each flow
+        sequentially and asserts artifacts + metrics at each stage.
+        GREEN: Fix any wiring issues exposed by the E2E test (likely
+        several, given that many functions are unwired per Task 2.13).
+      </tdd-approach>
+      <verification>
+        1. E2E mock test passes locally (no GPU needed)
+        2. make test-staging passes (test is included in staging tier)
+      </verification>
+      <depends-on>2.1, 2.2, 2.5, 2.12, 2.13</depends-on>
+    </task>
+
+    <task id="3.2" priority="P1" issue="new-29">
+      <title>Cloud E2E plan for after training completes</title>
+      <description>
+        Document the cloud E2E verification plan as a checklist:
+        1. sky jobs launch train_factorial.yaml (1 condition, 2 epochs)
+        2. Verify MLflow Cloud Run has the run with correct metrics
+        3. Verify GCS artifacts bucket has artifacts
+        4. Verify GCS checkpoints bucket has checkpoint
+        5. Run analysis_flow on the completed run
+        6. Run biostatistics_flow on analysis results
+        7. Run dashboard_flow to generate report
+
+        This is a PLAN (not automated test) because it requires GCP infra.
+      </description>
+      <files>
+        <file>docs/planning/cloud-e2e-verification-checklist.md</file>
+      </files>
+      <tdd-approach>
+        N/A — this is a documentation task. The checklist IS the verification.
+      </tdd-approach>
+      <verification>
+        1. Checklist document exists and covers all 7 steps
+        2. Each step has expected outcomes and failure troubleshooting
+      </verification>
+      <depends-on>1.1, 1.3, 1.4, 1.5</depends-on>
+    </task>
+
+    <task id="3.3" priority="P1" issue="new-30">
+      <title>MambaVesselNet cloud smoke test</title>
+      <description>
+        Add MambaVesselNet to the cloud smoke test suite. Verify that the
+        model loads, runs forward pass on 1 volume, and produces valid
+        segmentation output on a GCP L4 GPU. This catches import errors,
+        CUDA compatibility issues, and VRAM OOM before committing to a
+        full factorial run.
+
+        User decision #7: Include cloud smoke test for MambaVesselNet.
+      </description>
+      <files>
+        <file>deployment/skypilot/smoke_test_mamba.yaml</file>
+        <file>tests/gpu_instance/test_mamba_smoke.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write smoke test that imports MambaVesselNet adapter, creates
+        a tiny input tensor, runs forward pass, asserts output shape.
+        GREEN: Ensure MambaVesselNet adapter handles L4 GPU correctly
+        (BF16 support, VRAM bounds). Fix any import or compatibility issues.
+      </tdd-approach>
+      <verification>
+        1. sky jobs launch smoke_test_mamba.yaml succeeds on GCP L4
+        2. Test log shows valid forward pass output
+      </verification>
+      <depends-on>1.1, 1.3</depends-on>
+    </task>
+
+    <task id="3.4" priority="P0" issue="new-31">
+      <title>Guard test: all flows use MetricKeys constants</title>
+      <description>
+        AST-based guard test that scans ALL flow files (src/minivess/orchestration/flows/*.py)
+        and pipeline files (src/minivess/pipeline/*.py) for hardcoded metric
+        key strings. Any string matching the pattern "train/", "val/", "eval/",
+        "optim/", "grad/", "gpu/", "cost/", "sys/" that is not imported from
+        MetricKeys is a violation.
+
+        This is the permanent guard that prevents regression of Task 2.1.
+      </description>
+      <files>
+        <file>tests/v2/unit/observability/test_metric_keys_guard.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write the guard test. It should fail if ANY hardcoded metric
+        key string exists in flow or pipeline files.
+        GREEN: Already handled by Task 2.1 (this test ensures it stays fixed).
+      </tdd-approach>
+      <verification>
+        1. Guard test passes
+        2. Adding a hardcoded metric key to any flow makes the test fail
+        3. make test-staging passes
+      </verification>
+      <depends-on>2.1, 2.2</depends-on>
+    </task>
+
+    <task id="3.5" priority="P0" issue="881">
+      <title>Guard test: no hardcoded alpha/seed in function signatures</title>
+      <description>
+        AST-based guard test that scans ALL src/minivess/ files for function
+        definitions with default parameter values for alpha, seed, n_bootstrap,
+        n_permutations, conformal_alpha, or any statistical/random parameter.
+
+        This is the permanent guard for #881 (Rule #29).
+      </description>
+      <files>
+        <file>tests/v2/unit/biostatistics/test_no_hardcoded_alpha.py</file>
+      </files>
+      <tdd-approach>
+        RED: Test should already exist per #881. If not, create it.
+        GREEN: Already handled by Task 2.10.
+      </tdd-approach>
+      <verification>
+        1. Guard test passes
+        2. Adding alpha=0.05 to any function makes the test fail
+        3. make test-staging passes
+      </verification>
+      <depends-on>2.10, 2.11</depends-on>
+    </task>
+
+    <task id="3.6" priority="P0" issue="new-32">
+      <title>Guard test: no os.environ.get() with fallbacks in flow files</title>
+      <description>
+        AST-based guard test scanning all files in src/minivess/orchestration/flows/
+        for os.environ.get() calls with two arguments (indicating a fallback
+        default). Only os.environ.get() with one argument (returns None) or
+        os.environ["VAR"] (raises KeyError) are allowed.
+
+        This is the permanent guard for Task 2.12.
+      </description>
+      <files>
+        <file>tests/v2/unit/orchestration/test_no_env_fallbacks_guard.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write AST-based guard test. Fails if any flow file has
+        os.environ.get("VAR", "fallback") pattern.
+        GREEN: Already handled by Task 2.12.
+      </tdd-approach>
+      <verification>
+        1. Guard test passes
+        2. Adding os.environ.get("X", "y") to any flow makes test fail
+        3. make test-staging passes
+      </verification>
+      <depends-on>2.12</depends-on>
+    </task>
+
+    <task id="3.7" priority="P1" issue="new-33">
+      <title>Verification script: check all GitHub issues addressed</title>
+      <description>
+        Create a verification script (scripts/verify_8th_pass_backlog.py) that:
+        1. Reads this XML plan
+        2. For each task, runs the associated verification checks
+        3. Reports PASS/FAIL for each task
+        4. Cross-references GitHub issues to ensure all are created
+        5. Produces a summary table
+
+        User decision #17: GitHub issues + XML checklist with verification script.
+      </description>
+      <files>
+        <file>scripts/verify_8th_pass_backlog.py</file>
+      </files>
+      <tdd-approach>
+        N/A — this is a utility script. It IS the verification tool.
+      </tdd-approach>
+      <verification>
+        1. Script runs without errors
+        2. Produces clear PASS/FAIL report for each task
+        3. Exits with non-zero code if any task is FAIL
+      </verification>
+      <depends-on>All Phase 1 + Phase 2 tasks</depends-on>
+    </task>
+
+    <task id="3.8" priority="P0" issue="new-34">
+      <title>make test-prod with zero-skip enforcement</title>
+      <description>
+        Run make test-prod and enforce zero skips (Rule #28). Every skipped
+        test must be investigated:
+        - Module not installed → uv sync --all-extras
+        - Hardware-specific (GPU) → acceptable with documentation
+        - Deprecated library → delete the test
+        - Cloud credentials → acceptable for local dev
+
+        Report the full skip inventory with reasons.
+      </description>
+      <files>
+        <file>tests/conftest.py</file>
+      </files>
+      <tdd-approach>
+        N/A — this is an execution + investigation task.
+        For each skip, follow the Skip Investigation Protocol (Rule #28).
+      </tdd-approach>
+      <verification>
+        1. make test-prod passes with documented skip count
+        2. Each skip has a documented reason (hardware, cloud, or fixed)
+        3. Zero non-hardware, non-cloud skips
+      </verification>
+      <depends-on>All Phase 2 tasks</depends-on>
+    </task>
+
+    <task id="3.9" priority="P1" issue="880">
+      <title>Flaky Prefect SQLite tests (#880) investigation</title>
+      <description>
+        Issue #880 reports intermittent SQLite locking errors in Prefect tests.
+        Root cause investigation needed:
+        1. Is it WAL mode vs DELETE mode?
+        2. Is it parallel test execution (pytest-xdist)?
+        3. Is it tmp directory cleanup race?
+        4. Is it Prefect's own SQLite connection pool?
+
+        This is an investigation task, not necessarily a fix. The outcome
+        should be a root cause analysis and fix recommendation.
+      </description>
+      <files>
+        <file>tests/v2/unit/orchestration/test_prefect_sqlite_flaky.py</file>
+        <file>tests/conftest.py</file>
+      </files>
+      <tdd-approach>
+        RED: Write a stress test that reproduces the flaky behavior by
+        running multiple Prefect operations concurrently.
+        GREEN: Fix based on root cause (likely: set WAL mode, or use
+        tmpdir fixture instead of shared tmp, or disable xdist for
+        Prefect tests).
+      </tdd-approach>
+      <verification>
+        1. Stress test passes 100/100 runs
+        2. make test-staging shows no intermittent Prefect SQLite failures
+      </verification>
+      <depends-on>none</depends-on>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- GITHUB ISSUE CREATION BLOCK                                         -->
+  <!-- ================================================================== -->
+
+  <github-issues>
+    <description>
+      All 38 items that need GitHub issues. User decision #20: Create GitHub
+      issues for all untracked findings. Existing issues (#878, #880, #881)
+      already exist; the remaining 35 are new.
+
+      Labels: P0-critical, P1-important, infra, code-quality, silent-failure,
+      rule-violation, testing, config, metrics, documentation
+    </description>
+
+    <!-- Existing issues (update, don't recreate) -->
+    <issue id="878" action="update" task="1.1">
+      <title>#878: MLflow GCS artifact store via Pulumi</title>
+      <labels>P0-critical, infra</labels>
+      <body>
+        MLflow on Cloud Run missing --default-artifact-root gs://minivess-mlops-mlflow-artifacts.
+        Fix: Pulumi __main__.py Cloud Run service update.
+        Plan: run-debug-factorial-experiment-report-8th-pass-backlog-fix-plan.xml Task 1.1
+      </body>
+    </issue>
+
+    <issue id="880" action="update" task="3.9">
+      <title>#880: Flaky Prefect SQLite tests</title>
+      <labels>P1-important, testing</labels>
+      <body>
+        Intermittent SQLite locking errors in Prefect tests.
+        Plan: Task 3.9 — root cause investigation.
+      </body>
+    </issue>
+
+    <issue id="881" action="update" task="2.10,3.5">
+      <title>#881: Remove all hardcoded alpha/seed/n_bootstrap defaults</title>
+      <labels>P0-critical, rule-violation, config</labels>
+      <body>
+        50+ hardcoded defaults across 20 files. Rule #29 violation.
+        Plan: Task 2.10 (fix) + Task 3.5 (guard test).
+      </body>
+    </issue>
+
+    <!-- New issues -->
+    <issue id="new-1" action="create" task="1.2">
+      <title>GCP GPU quota increase to 4 for parallel factorial runs</title>
+      <labels>P1-important, infra</labels>
+      <body>
+        Current GPUS_ALL_REGIONS quota is 1. Request increase to 4 for parallel
+        factorial condition execution (~4x wall-clock reduction).
+        Update gcp_quotas.yaml and preflight_gcp.py.
+        Plan: Task 1.2
+      </body>
+    </issue>
+
+    <issue id="new-2" action="create" task="1.3">
+      <title>train_production.yaml stale — still uses GHCR + RunPod</title>
+      <labels>P0-critical, infra</labels>
+      <body>
+        train_production.yaml references GHCR image and RunPod cloud instead of
+        GAR and GCP. Must be updated to mirror train_factorial.yaml infrastructure.
+        Plan: Task 1.3
+      </body>
+    </issue>
+
+    <issue id="new-3" action="create" task="1.4">
+      <title>train_hpo.yaml stale — GHCR + UpCloud references</title>
+      <labels>P0-critical, infra</labels>
+      <body>
+        train_hpo.yaml references GHCR image, RunPod cloud, and UpCloud S3 credentials.
+        UpCloud was sunset 2026-03-16. Must use GAR + GCP + GCS.
+        Plan: Task 1.4
+      </body>
+    </issue>
+
+    <issue id="new-4" action="create" task="1.5">
+      <title>Remove vestigial MLFLOW_TRACKING_USERNAME/PASSWORD from train_factorial.yaml</title>
+      <labels>P0-critical, infra, config</labels>
+      <body>
+        MLflow 3.x uses IAM auth, not HTTP basic auth. USERNAME/PASSWORD env vars
+        in train_factorial.yaml lines 77-78 are vestigial and confusing.
+        Plan: Task 1.5
+      </body>
+    </issue>
+
+    <issue id="new-5" action="create" task="1.6">
+      <title>Pin evidently + beartype versions in pyproject.toml</title>
+      <labels>P1-important, infra</labels>
+      <body>
+        Unpinned evidently and beartype cause import errors on fresh installs.
+        Pin to known-working versions.
+        Plan: Task 1.6
+      </body>
+    </issue>
+
+    <issue id="new-6" action="create" task="2.2">
+      <title>builder.py metric key mismatch with MetricKeys constants</title>
+      <labels>P0-critical, metrics, silent-failure</labels>
+      <body>
+        builder.py logs metrics with keys that don't match MetricKeys constants.
+        Downstream consumers query wrong keys → empty results silently discarded.
+        Plan: Task 2.2
+      </body>
+    </issue>
+
+    <issue id="new-7" action="create" task="2.3">
+      <title>SWAG plugin silently returns empty dict on failure</title>
+      <labels>P0-critical, silent-failure, rule-violation</labels>
+      <body>
+        SWAG plugin returns {} on failure instead of raising PostTrainingPluginError.
+        Violates Rule #25 (Loud Failures). Post-training flow logs nothing, failure invisible.
+        Plan: Task 2.3
+      </body>
+    </issue>
+
+    <issue id="new-8" action="create" task="2.4">
+      <title>DataLoader silent fallback to raw pairs without transforms</title>
+      <labels>P0-critical, silent-failure, rule-violation</labels>
+      <body>
+        When DataLoader creation fails, training silently falls back to raw image/label
+        pairs without augmentation/normalization. Produces misleading metrics. Rule #25.
+        Plan: Task 2.4
+      </body>
+    </issue>
+
+    <issue id="new-9" action="create" task="2.5">
+      <title>Hardcoded "mlruns" tracking URI fallback in flow files</title>
+      <labels>P0-critical, silent-failure, rule-violation</labels>
+      <body>
+        Flow files use os.environ.get("MLFLOW_TRACKING_URI", "mlruns") instead of
+        resolve_tracking_uri(). On GCP, this silently logs to ephemeral local mlruns/.
+        Rules #22, #25. observability/CLAUDE.md says "use resolve_tracking_uri()".
+        Plan: Task 2.5
+      </body>
+    </issue>
+
+    <issue id="new-10" action="create" task="2.6">
+      <title>Hardcoded checkpoint filenames in flow files</title>
+      <labels>P1-important, code-quality</labels>
+      <body>
+        Some flow files hardcode "best_val_loss.pth" instead of importing
+        CHECKPOINT_BEST_FILENAME from orchestration/constants.py.
+        Plan: Task 2.6
+      </body>
+    </issue>
+
+    <issue id="new-11" action="create" task="2.7">
+      <title>Post-training checkpoint naming not using constants</title>
+      <labels>P1-important, code-quality</labels>
+      <body>
+        post_training_flow.py saves SWAG checkpoints with ad-hoc names.
+        Must use constants from orchestration/constants.py for cross-flow contract.
+        Plan: Task 2.7
+      </body>
+    </issue>
+
+    <issue id="new-12" action="create" task="2.8">
+      <title>Calibration metrics crash on GPU MetaTensor .numpy()</title>
+      <labels>P0-critical, silent-failure</labels>
+      <body>
+        Calibration metrics call .numpy() on MONAI MetaTensor that may be on GPU
+        or require gradient detach. Causes RuntimeError. Fix: .cpu().detach().numpy().
+        Plan: Task 2.8
+      </body>
+    </issue>
+
+    <issue id="new-13" action="create" task="2.9">
+      <title>Calibration metrics missing known-answer verification tests</title>
+      <labels>P1-important, testing</labels>
+      <body>
+        ECE, MCE, Brier, NLL, BUC, pECE, BA-ECE have no known-answer tests.
+        Need tests with perfect/random/miscalibrated inputs to verify correctness.
+        Plan: Task 2.9
+      </body>
+    </issue>
+
+    <issue id="new-14" action="create" task="2.11">
+      <title>7 conformal alpha=0.1 hardcodes need parameterization</title>
+      <labels>P1-important, config, rule-violation</labels>
+      <body>
+        Conformal prediction code hardcodes alpha=0.1 (90% coverage) in function
+        signatures. Must be config-driven per Rule #29.
+        Plan: Task 2.11
+      </body>
+    </issue>
+
+    <issue id="new-15" action="create" task="2.12">
+      <title>13 os.environ.get() with silent fallbacks in train_flow.py</title>
+      <labels>P0-critical, silent-failure, rule-violation</labels>
+      <body>
+        train_flow.py has 13 os.environ.get() calls with fallback defaults that mask
+        misconfiguration. Must fail loudly per Rules #22, #25.
+        Plan: Task 2.12
+      </body>
+    </issue>
+
+    <issue id="new-16" action="create" task="2.13">
+      <title>7 unwired production functions not called from any flow</title>
+      <labels>P0-critical, silent-failure</labels>
+      <body>
+        7 production-grade functions exist but are never called from Prefect flow
+        entry points. Dead code that should be wired into the appropriate flows.
+        Plan: Task 2.13
+      </body>
+    </issue>
+
+    <issue id="new-17" action="create" task="2.14">
+      <title>Hardcoded experiment names in deploy_flow and dashboard_flow</title>
+      <labels>P1-important, code-quality</labels>
+      <body>
+        deploy_flow.py and dashboard_flow.py hardcode MLflow experiment name strings
+        instead of importing EXPERIMENT_* constants from orchestration/constants.py.
+        Plan: Task 2.14
+      </body>
+    </issue>
+
+    <issue id="new-18" action="create" task="2.15">
+      <title>Nemenyi q_alpha table hardcoded — use scipy.stats</title>
+      <labels>P1-important, code-quality, rule-violation</labels>
+      <body>
+        biostatistics_rankings.py has a hardcoded q_alpha lookup table for Nemenyi test.
+        Replace with scipy.stats.studentized_range per Rule #3 (Library-First).
+        Plan: Task 2.15
+      </body>
+    </issue>
+
+    <issue id="new-19" action="create" task="2.16">
+      <title>6 bare except:pass blocks in train_flow.py swallow exceptions</title>
+      <labels>P0-critical, silent-failure, rule-violation</labels>
+      <body>
+        train_flow.py has 6 bare except: blocks (lines ~284, 689, 881, 910, 932, 1050)
+        that silently swallow exceptions including OOM and CUDA errors. Rule #25.
+        Plan: Task 2.16
+      </body>
+    </issue>
+
+    <issue id="new-20" action="create" task="2.17">
+      <title>Flow epilogue pattern duplicated 175 lines x 5 flows</title>
+      <labels>P1-important, code-quality</labels>
+      <body>
+        All 5 Prefect flows have near-identical ~175-line epilogue code for MLflow
+        finalization, lineage, audit, error handling. Extract shared utility.
+        Plan: Task 2.17
+      </body>
+    </issue>
+
+    <issue id="new-21" action="create" task="2.18">
+      <title>MLflow run setup boilerplate duplicated 120 lines x 8</title>
+      <labels>P1-important, code-quality</labels>
+      <body>
+        MLflow run initialization is repeated ~120 lines across 8 entry points.
+        Extract mlflow_run_context() context manager into mlflow_helpers.py.
+        Plan: Task 2.18
+      </body>
+    </issue>
+
+    <issue id="new-22" action="create" task="2.19">
+      <title>n_matched ambiguity in component_dice topology metrics</title>
+      <labels>P1-important, code-quality</labels>
+      <body>
+        topology_comparison.py n_matched is ambiguous — pred→GT or GT→pred direction?
+        Rename to directional names and add docstring.
+        Plan: Task 2.19
+      </body>
+    </issue>
+
+    <issue id="new-23" action="create" task="2.20">
+      <title>Augmentation hyperparameters hardcoded — make config-driven</title>
+      <labels>P1-important, config, rule-violation</labels>
+      <body>
+        Data augmentation transform parameters (flip prob, rotation range, etc.) are
+        hardcoded in transforms.py. Must be config-driven per Rule #29.
+        Plan: Task 2.20
+      </body>
+    </issue>
+
+    <issue id="new-24" action="create" task="2.21">
+      <title>VRAM overhead constants hardcoded — move to profile YAML</title>
+      <labels>P1-important, config</labels>
+      <body>
+        Per-model VRAM requirements hardcoded in sam3_vram_check.py. Move to
+        configs/hardware/vram_profiles.yaml.
+        Plan: Task 2.21
+      </body>
+    </issue>
+
+    <issue id="new-25" action="create" task="2.22">
+      <title>HPO flow lr=1e-3 shadow default over TrainingConfig lr=1e-4</title>
+      <labels>P0-critical, config, silent-failure</labels>
+      <body>
+        HPO flow search space and TrainingConfig have different lr defaults.
+        Unclear which takes precedence, potentially silently overriding HPO suggestions.
+        Plan: Task 2.22
+      </body>
+    </issue>
+
+    <issue id="new-26" action="create" task="2.23">
+      <title>DVC_REMOTE="minio" silent default in train_flow.py</title>
+      <labels>P0-critical, silent-failure, rule-violation</labels>
+      <body>
+        os.environ.get("DVC_REMOTE", "minio") silently defaults to MinIO on GCP,
+        causing data fetch failure. Caused actual data loss on 5th factorial pass.
+        Plan: Task 2.23
+      </body>
+    </issue>
+
+    <issue id="new-27" action="create" task="2.24">
+      <title>Orphan YAML config keys — defined but never read</title>
+      <labels>P1-important, config</labels>
+      <body>
+        Audit needed: some Hydra config YAML keys are defined but never read by
+        Python code. Confuses researchers. Remove or wire them.
+        Plan: Task 2.24
+      </body>
+    </issue>
+
+    <issue id="new-28" action="create" task="3.1">
+      <title>Local mock E2E test for full pipeline chain</title>
+      <labels>P0-critical, testing</labels>
+      <body>
+        Need local mock E2E integration test: train → post_training → analysis →
+        biostatistics → dashboard. Verifies inter-flow contracts, metric key
+        consistency, and no silent failures without requiring GPU.
+        Plan: Task 3.1
+      </body>
+    </issue>
+
+    <issue id="new-29" action="create" task="3.2">
+      <title>Cloud E2E verification checklist document</title>
+      <labels>P1-important, documentation</labels>
+      <body>
+        Document the cloud E2E verification steps for post-training validation
+        on GCP. 7-step checklist from SkyPilot launch to dashboard report.
+        Plan: Task 3.2
+      </body>
+    </issue>
+
+    <issue id="new-30" action="create" task="3.3">
+      <title>MambaVesselNet cloud smoke test on GCP L4</title>
+      <labels>P1-important, testing</labels>
+      <body>
+        Add MambaVesselNet to cloud smoke test suite. Verify model loads and runs
+        forward pass on GCP L4 before committing to full factorial.
+        Plan: Task 3.3
+      </body>
+    </issue>
+
+    <issue id="new-31" action="create" task="3.4">
+      <title>Guard test: all flows use MetricKeys constants (no hardcoded strings)</title>
+      <labels>P0-critical, testing, metrics</labels>
+      <body>
+        AST-based guard test preventing regression of hardcoded metric key strings
+        in flow and pipeline files. Permanent guard for MetricKeys adoption.
+        Plan: Task 3.4
+      </body>
+    </issue>
+
+    <issue id="new-32" action="create" task="3.6">
+      <title>Guard test: no os.environ.get() with fallbacks in flows</title>
+      <labels>P0-critical, testing, rule-violation</labels>
+      <body>
+        AST-based guard test preventing regression of silent env var fallbacks
+        in flow files. Permanent guard for Rule #22.
+        Plan: Task 3.6
+      </body>
+    </issue>
+
+    <issue id="new-33" action="create" task="3.7">
+      <title>Verification script for 8th pass backlog completion</title>
+      <labels>P1-important, testing</labels>
+      <body>
+        Script that reads the XML plan, runs verification checks for each task,
+        and reports PASS/FAIL summary. Ensures all 37 issues are addressed.
+        Plan: Task 3.7
+      </body>
+    </issue>
+
+    <issue id="new-34" action="create" task="3.8">
+      <title>make test-prod zero-skip enforcement audit</title>
+      <labels>P0-critical, testing</labels>
+      <body>
+        Run make test-prod and investigate every skip per Rule #28 Skip
+        Investigation Protocol. Zero non-hardware, non-cloud skips accepted.
+        Plan: Task 3.8
+      </body>
+    </issue>
+  </github-issues>
+
+  <!-- ================================================================== -->
+  <!-- CHECKLIST — Maps every issue to its task and status                 -->
+  <!-- ================================================================== -->
+
+  <checklist>
+    <description>
+      Master checklist mapping every issue to its task. Updated as tasks complete.
+      Status values: TODO, IN_PROGRESS, DONE, BLOCKED.
+    </description>
+
+    <!-- Phase 1: Infrastructure -->
+    <item task="1.1" issue="878"   priority="P0" status="TODO">Pulumi MLflow GCS artifact store</item>
+    <item task="1.2" issue="new-1" priority="P1" status="TODO">GCP GPU quota increase to 4</item>
+    <item task="1.3" issue="new-2" priority="P0" status="TODO">Fix train_production.yaml (GAR + GCS)</item>
+    <item task="1.4" issue="new-3" priority="P0" status="TODO">Fix train_hpo.yaml (GAR + GCS, remove UpCloud)</item>
+    <item task="1.5" issue="new-4" priority="P0" status="TODO">Remove MLflow auth env vars from train_factorial.yaml</item>
+    <item task="1.6" issue="new-5" priority="P1" status="TODO">Pin evidently + beartype versions</item>
+
+    <!-- Phase 2: Code Fixes -->
+    <item task="2.1"  issue="790"    priority="P0" status="TODO">MetricKeys constants — verify completeness + usage</item>
+    <item task="2.2"  issue="new-6"  priority="P0" status="TODO">Fix metric key mismatch in builder.py</item>
+    <item task="2.3"  issue="new-7"  priority="P0" status="TODO">SWAG plugin — raise instead of returning empty</item>
+    <item task="2.4"  issue="new-8"  priority="P0" status="TODO">DataLoader fallback — raise instead of raw pairs</item>
+    <item task="2.5"  issue="new-9"  priority="P0" status="TODO">Hardcoded "mlruns" fallback → resolve_tracking_uri()</item>
+    <item task="2.6"  issue="new-10" priority="P1" status="TODO">Central CHECKPOINT_BEST_FILENAME constant verification</item>
+    <item task="2.7"  issue="new-11" priority="P1" status="TODO">Post-training checkpoint naming constants</item>
+    <item task="2.8"  issue="new-12" priority="P0" status="TODO">Calibration MetaTensor .cpu().detach().numpy()</item>
+    <item task="2.9"  issue="new-13" priority="P1" status="TODO">Calibration known-answer verification tests</item>
+    <item task="2.10" issue="881"    priority="P0" status="TODO">Remove all 50+ hardcoded alpha/seed/n_bootstrap</item>
+    <item task="2.11" issue="new-14" priority="P1" status="TODO">7 conformal alpha=0.1 → parameterize</item>
+    <item task="2.12" issue="new-15" priority="P0" status="TODO">13 os.environ.get() fallbacks → fail loudly</item>
+    <item task="2.13" issue="new-16" priority="P0" status="TODO">Wire 7 unwired production functions</item>
+    <item task="2.14" issue="new-17" priority="P1" status="TODO">Hardcoded experiment names → constants</item>
+    <item task="2.15" issue="new-18" priority="P1" status="TODO">Nemenyi q_alpha → scipy.stats</item>
+    <item task="2.16" issue="new-19" priority="P0" status="TODO">6 bare except:pass → proper handling</item>
+    <item task="2.17" issue="new-20" priority="P1" status="TODO">Flow epilogue deduplication (175 lines × 5)</item>
+    <item task="2.18" issue="new-21" priority="P1" status="TODO">MLflow run setup deduplication (120 lines × 8)</item>
+    <item task="2.19" issue="new-22" priority="P1" status="TODO">n_matched topology direction ambiguity</item>
+    <item task="2.20" issue="new-23" priority="P1" status="TODO">Augmentation hyperparameters → config</item>
+    <item task="2.21" issue="new-24" priority="P1" status="TODO">VRAM overhead → profile YAML</item>
+    <item task="2.22" issue="new-25" priority="P0" status="TODO">HPO lr shadow default</item>
+    <item task="2.23" issue="new-26" priority="P0" status="TODO">DVC_REMOTE="minio" fallback → fail loudly</item>
+    <item task="2.24" issue="new-27" priority="P1" status="TODO">Orphan YAML config keys audit</item>
+
+    <!-- Phase 3: Validation -->
+    <item task="3.1" issue="new-28" priority="P0" status="TODO">Local mock E2E test</item>
+    <item task="3.2" issue="new-29" priority="P1" status="TODO">Cloud E2E verification checklist</item>
+    <item task="3.3" issue="new-30" priority="P1" status="TODO">MambaVesselNet cloud smoke test</item>
+    <item task="3.4" issue="new-31" priority="P0" status="TODO">Guard: MetricKeys constants usage</item>
+    <item task="3.5" issue="881"    priority="P0" status="TODO">Guard: no hardcoded alpha/seed</item>
+    <item task="3.6" issue="new-32" priority="P0" status="TODO">Guard: no os.environ.get() fallbacks</item>
+    <item task="3.7" issue="new-33" priority="P1" status="TODO">Verification script</item>
+    <item task="3.8" issue="new-34" priority="P0" status="TODO">make test-prod zero-skip</item>
+    <item task="3.9" issue="880"    priority="P1" status="TODO">Flaky Prefect SQLite investigation</item>
+
+    <!-- Summary -->
+    <summary>
+      <total-tasks>39</total-tasks>
+      <p0-tasks>20</p0-tasks>
+      <p1-tasks>19</p1-tasks>
+      <existing-issues>3 (#878, #880, #881)</existing-issues>
+      <new-issues>35</new-issues>
+      <total-issues>38</total-issues>
+    </summary>
+  </checklist>
+
+  <!-- ================================================================== -->
+  <!-- VERIFICATION SCRIPT SPECIFICATION                                   -->
+  <!-- ================================================================== -->
+
+  <verification-script>
+    <description>
+      Specification for scripts/verify_8th_pass_backlog.py — the automated
+      verification tool that checks all tasks are complete.
+    </description>
+
+    <checks>
+      <!-- Phase 1 checks -->
+      <check task="1.1" type="ast">
+        Parse deployment/pulumi/gcp/__main__.py. Assert Cloud Run container args
+        contain "--default-artifact-root" with "gs://minivess-mlops-mlflow-artifacts".
+      </check>
+      <check task="1.2" type="yaml">
+        Parse configs/cloud/gcp_quotas.yaml. Assert expected_gpus_all_regions >= 4.
+      </check>
+      <check task="1.3" type="yaml">
+        Parse deployment/skypilot/train_production.yaml. Assert image_id contains
+        "europe-north1-docker.pkg.dev" and cloud is "gcp".
+      </check>
+      <check task="1.4" type="yaml">
+        Parse deployment/skypilot/train_hpo.yaml. Assert image_id contains
+        "europe-north1-docker.pkg.dev" and no "UpCloud" or "AWS_ACCESS_KEY" strings.
+      </check>
+      <check task="1.5" type="grep">
+        Check deployment/skypilot/train_factorial.yaml for MLFLOW_TRACKING_USERNAME
+        and MLFLOW_TRACKING_PASSWORD. Assert zero matches.
+      </check>
+      <check task="1.6" type="toml">
+        Parse pyproject.toml. Assert evidently and beartype have pinned version ranges.
+      </check>
+
+      <!-- Phase 2 checks -->
+      <check task="2.1" type="ast">
+        Scan src/minivess/orchestration/flows/*.py for hardcoded metric key strings
+        matching slash-prefix patterns. Assert zero hardcoded strings.
+      </check>
+      <check task="2.2" type="ast">
+        Scan src/minivess/pipeline/builder.py for hardcoded metric key strings.
+        Assert all metric keys imported from MetricKeys.
+      </check>
+      <check task="2.3" type="ast">
+        Scan src/minivess/pipeline/post_training_plugins/swag.py for "return {}"
+        or "return dict()" in except blocks. Assert zero silent returns.
+      </check>
+      <check task="2.4" type="ast">
+        Scan train_flow.py for raw-pairs fallback pattern. Assert not present.
+      </check>
+      <check task="2.5" type="grep">
+        Check train_flow.py for 'os.environ.get.*mlruns' pattern. Assert zero matches.
+      </check>
+      <check task="2.6" type="ast">
+        Scan flow files for hardcoded "best_val_loss.pth" strings. Assert zero
+        (all must use CHECKPOINT_BEST_FILENAME constant).
+      </check>
+      <check task="2.7" type="ast">
+        Verify post_training_flow.py imports checkpoint constants from constants.py.
+      </check>
+      <check task="2.8" type="ast">
+        Scan calibration_metrics.py for bare .numpy() calls. Assert all use
+        .cpu().detach().numpy() or a _to_numpy() helper.
+      </check>
+      <check task="2.9" type="test">
+        Run pytest tests/v2/unit/pipeline/test_calibration_metrics_known_answers.py.
+        Assert all pass.
+      </check>
+      <check task="2.10" type="ast">
+        Scan ALL src/minivess/*.py function definitions for default values matching
+        alpha=0.05, seed=42, n_bootstrap=1000, n_permutations=9999. Assert zero.
+      </check>
+      <check task="2.11" type="ast">
+        Scan conformal modules for hardcoded alpha defaults. Assert zero.
+      </check>
+      <check task="2.12" type="ast">
+        Scan src/minivess/orchestration/flows/*.py for os.environ.get() with
+        two arguments. Assert zero.
+      </check>
+      <check task="2.13" type="call-graph">
+        Trace call graph from each @flow function. Assert all production functions
+        in src/minivess/pipeline/ are reachable.
+      </check>
+      <check task="2.14" type="ast">
+        Scan deploy_flow.py and dashboard_flow.py for hardcoded "minivess_*" strings.
+        Assert all use EXPERIMENT_* constants.
+      </check>
+      <check task="2.15" type="ast">
+        Scan biostatistics_rankings.py for hardcoded q_alpha table. Assert replaced
+        with scipy.stats computation.
+      </check>
+      <check task="2.16" type="ast">
+        Scan train_flow.py for bare "except:" or "except Exception:" with only
+        pass/continue/return body. Assert zero.
+      </check>
+      <check task="2.17" type="file">
+        Assert src/minivess/orchestration/flow_epilogue.py exists.
+      </check>
+      <check task="2.18" type="ast">
+        Assert mlflow_helpers.py contains mlflow_run_context function.
+      </check>
+      <check task="2.19" type="ast">
+        Scan topology_comparison.py for "n_matched" without directional suffix.
+        Assert zero (all must be n_matched_pred_to_gt or n_matched_gt_to_pred).
+      </check>
+      <check task="2.20" type="file">
+        Assert configs/augmentation/default.yaml exists.
+      </check>
+      <check task="2.21" type="file">
+        Assert configs/hardware/vram_profiles.yaml exists.
+      </check>
+      <check task="2.22" type="test">
+        Run pytest tests/v2/unit/orchestration/test_hpo_no_shadow_defaults.py.
+      </check>
+      <check task="2.23" type="grep">
+        Check train_flow.py for 'DVC_REMOTE.*minio' with default. Assert zero.
+      </check>
+      <check task="2.24" type="test">
+        Run pytest tests/v2/unit/config/test_no_orphan_yaml_keys.py.
+      </check>
+
+      <!-- Phase 3 checks -->
+      <check task="3.1" type="test">
+        Run pytest tests/v2/integration/test_e2e_mock_pipeline.py.
+      </check>
+      <check task="3.2" type="file">
+        Assert docs/planning/cloud-e2e-verification-checklist.md exists.
+      </check>
+      <check task="3.3" type="file">
+        Assert deployment/skypilot/smoke_test_mamba.yaml exists.
+      </check>
+      <check task="3.4" type="test">
+        Run pytest tests/v2/unit/observability/test_metric_keys_guard.py.
+      </check>
+      <check task="3.5" type="test">
+        Run pytest tests/v2/unit/biostatistics/test_no_hardcoded_alpha.py.
+      </check>
+      <check task="3.6" type="test">
+        Run pytest tests/v2/unit/orchestration/test_no_env_fallbacks_guard.py.
+      </check>
+      <check task="3.7" type="file">
+        Assert scripts/verify_8th_pass_backlog.py exists and runs without error.
+      </check>
+      <check task="3.8" type="command">
+        Run make test-prod. Assert zero non-hardware, non-cloud skips.
+      </check>
+      <check task="3.9" type="test">
+        Run pytest tests/v2/unit/orchestration/test_prefect_sqlite_flaky.py -x --count=10.
+        Assert 10/10 passes.
+      </check>
+    </checks>
+
+    <exit-criteria>
+      All 39 checks pass. Zero P0 tasks remain in TODO status.
+      make test-staging passes with zero failures.
+      make test-prod passes with documented skip inventory.
+      All 38 GitHub issues created or updated.
+    </exit-criteria>
+  </verification-script>
+
+  <!-- ================================================================== -->
+  <!-- EXECUTION ORDER (dependency-aware)                                  -->
+  <!-- ================================================================== -->
+
+  <execution-order>
+    <description>
+      Optimal execution order respecting task dependencies.
+      Tasks at the same level can be executed in parallel.
+    </description>
+
+    <level depth="0" name="Independent infrastructure + code fixes (parallelizable)">
+      <task-ref>1.1</task-ref>  <!-- Pulumi MLflow GCS -->
+      <task-ref>1.2</task-ref>  <!-- GPU quota -->
+      <task-ref>1.3</task-ref>  <!-- train_production.yaml -->
+      <task-ref>1.4</task-ref>  <!-- train_hpo.yaml -->
+      <task-ref>1.5</task-ref>  <!-- MLflow auth removal -->
+      <task-ref>1.6</task-ref>  <!-- Pin versions -->
+      <task-ref>2.3</task-ref>  <!-- SWAG loud failure -->
+      <task-ref>2.4</task-ref>  <!-- DataLoader loud failure -->
+      <task-ref>2.8</task-ref>  <!-- Calibration .numpy() -->
+      <task-ref>2.10</task-ref> <!-- Hardcoded alpha/seed -->
+      <task-ref>2.12</task-ref> <!-- os.environ.get fallbacks -->
+      <task-ref>2.14</task-ref> <!-- Experiment name constants -->
+      <task-ref>2.16</task-ref> <!-- Bare except:pass -->
+      <task-ref>2.17</task-ref> <!-- Flow epilogue dedup -->
+      <task-ref>2.18</task-ref> <!-- MLflow boilerplate dedup -->
+      <task-ref>2.19</task-ref> <!-- n_matched ambiguity -->
+      <task-ref>2.20</task-ref> <!-- Augmentation config -->
+      <task-ref>2.21</task-ref> <!-- VRAM profiles -->
+      <task-ref>2.22</task-ref> <!-- HPO lr shadow -->
+      <task-ref>2.24</task-ref> <!-- Orphan YAML keys -->
+      <task-ref>3.9</task-ref>  <!-- Prefect SQLite flaky -->
+    </level>
+
+    <level depth="1" name="Depends on MetricKeys + alpha/seed fixes">
+      <task-ref>2.1</task-ref>  <!-- MetricKeys completeness (independent but large) -->
+      <task-ref>2.5</task-ref>  <!-- resolve_tracking_uri -->
+      <task-ref>2.6</task-ref>  <!-- Checkpoint filename constant -->
+      <task-ref>2.9</task-ref>  <!-- Calibration known-answers (after 2.8) -->
+      <task-ref>2.11</task-ref> <!-- Conformal alpha (after 2.10) -->
+      <task-ref>2.15</task-ref> <!-- Nemenyi scipy (after 2.10) -->
+      <task-ref>2.23</task-ref> <!-- DVC_REMOTE fallback (after 2.12) -->
+    </level>
+
+    <level depth="2" name="Depends on MetricKeys + constants wiring">
+      <task-ref>2.2</task-ref>  <!-- builder.py metric keys (after 2.1) -->
+      <task-ref>2.7</task-ref>  <!-- Post-training checkpoint (after 2.6) -->
+      <task-ref>2.13</task-ref> <!-- Wire unwired functions (after 2.1, 2.2) -->
+    </level>
+
+    <level depth="3" name="Guard tests (after all code fixes)">
+      <task-ref>3.4</task-ref>  <!-- MetricKeys guard (after 2.1, 2.2) -->
+      <task-ref>3.5</task-ref>  <!-- alpha/seed guard (after 2.10, 2.11) -->
+      <task-ref>3.6</task-ref>  <!-- env fallbacks guard (after 2.12) -->
+    </level>
+
+    <level depth="4" name="Integration + E2E (after all code fixes)">
+      <task-ref>3.1</task-ref>  <!-- Local mock E2E (after 2.1-2.13) -->
+      <task-ref>3.2</task-ref>  <!-- Cloud E2E plan (after Phase 1) -->
+      <task-ref>3.3</task-ref>  <!-- MambaVesselNet smoke (after 1.1, 1.3) -->
+    </level>
+
+    <level depth="5" name="Final verification (after everything)">
+      <task-ref>3.7</task-ref>  <!-- Verification script -->
+      <task-ref>3.8</task-ref>  <!-- make test-prod zero-skip -->
+    </level>
+  </execution-order>
+</plan>

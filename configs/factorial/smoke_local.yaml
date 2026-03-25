@@ -50,3 +50,8 @@ biostatistics:
   co_primary_metrics:
     - cldice
     - masd
+
+# ── Infrastructure ─────────────────────────────────────────────────────
+# Local smoke test — no SkyPilot, no cloud controller.
+infrastructure:
+  cloud_config: local

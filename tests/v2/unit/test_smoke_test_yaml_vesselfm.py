@@ -294,7 +294,7 @@ class TestSmokeTestRootCauseRegressions:
         """Issue 1 (P0): ~/.sky/config.yaml must cap controller disk for RunPod."""
         sky_config = Path.home() / ".sky" / "config.yaml"
         assert sky_config.exists(), (
-            "~/.sky/config.yaml must exist to cap jobs controller disk_size ≤ 40 GB"
+            "~/.sky/config.yaml must exist for SkyPilot controller config"
         )
         config = yaml.safe_load(sky_config.read_text(encoding="utf-8"))
         controller_disk = (
@@ -303,6 +303,8 @@ class TestSmokeTestRootCauseRegressions:
             .get("resources", {})
             .get("disk_size", 999)
         )
-        assert controller_disk <= 40, (
-            f"Controller disk_size must be ≤ 40 (RunPod max), got {controller_disk}"
+        # Controller disk must be reasonable (≤100 GB). The 40 GB RunPod limit
+        # no longer applies — controller now runs on GCP (50 GB default).
+        assert controller_disk <= 100, (
+            f"Controller disk_size unreasonably large: {controller_disk} GB"
         )

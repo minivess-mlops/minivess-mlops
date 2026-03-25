@@ -71,7 +71,7 @@ class TestAnalysisFlowDriftIntegration:
             if hasattr(embedding_drift_task, "fn")
             else embedding_drift_task
         )
-        result = fn(reference_embeddings=ref, current_embeddings=cur)
+        result = fn(reference_embeddings=ref, current_embeddings=cur, p_val_threshold=0.05)
         assert result.drift_detected is True
 
     def test_embedding_drift_report_saved_to_mlflow(self, tmp_path: Path) -> None:
@@ -94,6 +94,7 @@ class TestAnalysisFlowDriftIntegration:
             fn(
                 reference_embeddings=ref,
                 current_embeddings=cur,
+                p_val_threshold=0.05,
                 tmp_dir=tmp_path / "drift_tmp",
             )
             run_id = run.info.run_id

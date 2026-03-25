@@ -240,7 +240,8 @@ def paired_bootstrap_test(
     scores_a: NDArray[np.floating],
     scores_b: NDArray[np.floating],
     n_resamples: int = 10_000,
-    seed: int = 42,
+    *,
+    seed: int,
 ) -> float:
     """Two-sided paired bootstrap significance test.
 
@@ -422,7 +423,7 @@ def format_comparison_latex(table: ComparisonTable) -> str:
 
 def holm_bonferroni_correction(
     p_values: list[float],
-    alpha: float = 0.05,
+    alpha: float,
 ) -> list[tuple[float, bool]]:
     """Apply Holm-Bonferroni step-down multiple comparison correction.
 
@@ -652,8 +653,8 @@ def compute_all_pairwise_comparisons(
     metric: str,
     *,
     n_resamples: int = 10_000,
-    seed: int = 42,
-    alpha: float = 0.05,
+    seed: int,
+    alpha: float,
     effect_threshold: float = 0.2,
 ) -> list[PairwiseComparison]:
     """Compute all C(n, 2) pairwise comparisons for *metric* across losses.

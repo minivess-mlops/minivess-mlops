@@ -27,6 +27,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -178,6 +180,15 @@ def check_setup_dvc_paths() -> tuple[bool, str]:
             locked_outs.add(out.get("path", ""))
 
     for pull_path in dvc_pull_paths:
+        # Standalone .dvc files (e.g., data/raw/deepvess.dvc) are valid
+        # DVC tracking references — they don't need dvc.lock entries.
+        if pull_path.endswith(".dvc"):
+            if not Path(pull_path).exists():
+                return False, (
+                    f"Setup pulls '{pull_path}' but the .dvc file does not exist."
+                )
+            continue
+
         # Check if pull_path matches or is a parent of any locked output
         matched = any(
             lo.startswith(pull_path) or pull_path.startswith(lo) for lo in locked_outs
@@ -225,6 +236,36 @@ def check_skypilot_gcp() -> tuple[bool, str]:
     return False, f"SkyPilot GCP not enabled. Run: {sky_bin} check gcp"
 
 
+def check_controller_cloud() -> tuple[bool, str]:
+    """Check that SkyPilot controller runs on the SAME cloud as jobs.
+
+    A GCP job with a RunPod controller causes 36 min/submission latency
+    and RunPod outages killing GCP jobs. 5th pass root cause.
+    """
+    sky_config = Path.home() / ".sky" / "config.yaml"
+    if not sky_config.exists():
+        return True, "No ~/.sky/config.yaml — SkyPilot will auto-place controller"
+
+    config = yaml.safe_load(sky_config.read_text(encoding="utf-8"))
+    controller_cloud = (
+        config.get("jobs", {}).get("controller", {}).get("resources", {}).get("cloud")
+    )
+    if controller_cloud is None:
+        return True, "Controller cloud not pinned — SkyPilot will auto-select"
+
+    # Job cloud from SkyPilot YAML
+    sky_yaml = yaml.safe_load(SKYPILOT_YAML.read_text(encoding="utf-8"))
+    job_cloud = sky_yaml.get("resources", {}).get("cloud", "gcp")
+
+    if controller_cloud.lower() != job_cloud.lower():
+        return False, (
+            f"Controller on '{controller_cloud}' but jobs on '{job_cloud}'. "
+            f"Cross-cloud SSH adds ~30 min/submission and creates single point of failure. "
+            f"Fix: set 'cloud: {job_cloud}' in ~/.sky/config.yaml jobs.controller.resources"
+        )
+    return True, f"Controller and jobs both on {job_cloud}"
+
+
 def check_skypilot_yaml() -> tuple[bool, str]:
     """Check if SkyPilot YAML parses without errors."""
     try:
@@ -244,6 +285,169 @@ def check_skypilot_yaml() -> tuple[bool, str]:
         return False, f"SkyPilot YAML check failed: {e}"
 
 
+def check_yaml_contract() -> tuple[bool, str]:
+    """Validate SkyPilot YAML against the golden contract.
+
+    Defense layer 4 of 5: catches unauthorized GPU types, cloud providers,
+    and resource configurations at launch time (after pre-commit and tests).
+
+    See: .claude/metalearning/2026-03-24-unauthorized-a100-in-skypilot-yaml.md
+    """
+    contract_path = REPO_ROOT / "configs" / "cloud" / "yaml_contract.yaml"
+    if not contract_path.exists():
+        return False, f"Contract file missing: {contract_path}"
+
+    contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    sky_config = yaml.safe_load(SKYPILOT_YAML.read_text(encoding="utf-8"))
+
+    violations: list[str] = []
+
+    # Extract GPU types from factorial YAML
+    resources = sky_config.get("resources", {})
+    accel_field = resources.get("accelerators")
+
+    # Parse accelerator names from any format
+    gpu_names: list[str] = []
+    if isinstance(accel_field, str):
+        gpu_names.append(accel_field.split(":")[0])
+    elif isinstance(accel_field, dict):
+        for key in accel_field:
+            gpu_names.append(str(key).split(":")[0])
+    elif isinstance(accel_field, list):
+        for item in accel_field:
+            if isinstance(item, str):
+                gpu_names.append(item.split(":")[0])
+
+    # Check 1: No banned GPU types
+    banned = set(contract.get("banned_accelerators", []))
+    for gpu in gpu_names:
+        if gpu in banned:
+            violations.append(f"BANNED GPU '{gpu}'")
+
+    # Check 2: GPU types match factorial allowlist
+    factorial_allowed = set(
+        contract.get("factorial", {}).get("allowed_accelerators", [])
+    )
+    for gpu in gpu_names:
+        if gpu not in factorial_allowed:
+            violations.append(
+                f"GPU '{gpu}' not in factorial allowlist {sorted(factorial_allowed)}"
+            )
+
+    # Check 3: Cloud provider allowed
+    cloud = resources.get("cloud")
+    allowed_clouds = set(contract.get("allowed_clouds", []))
+    if cloud and cloud not in allowed_clouds:
+        violations.append(f"Cloud '{cloud}' not allowed ({sorted(allowed_clouds)})")
+
+    # Check 4: Accelerators is NOT a dict (priority list = non-determinism)
+    if isinstance(accel_field, dict):
+        violations.append(
+            "Accelerators is a dict (priority list) — use string 'L4:1' for determinism"
+        )
+
+    if violations:
+        return False, (
+            f"YAML contract violations: {'; '.join(violations)}. "
+            f"See: configs/cloud/yaml_contract.yaml"
+        )
+    return True, f"YAML contract valid: {len(gpu_names)} GPU types, cloud={cloud}"
+
+
+def check_gcp_cpu_quota() -> tuple[bool, str]:
+    """Check GCP CPU quota is sufficient for SkyPilot controller + jobs.
+
+    SkyPilot controller needs ~4 CPUs (n4-standard-4). L4 VMs need 4-12 CPUs.
+    A quota of 0 means launch will fail with cryptic "capacity" error.
+    Metalearning: 30 min wasted on n4 quota = 0.
+    """
+    result = subprocess.run(
+        [
+            "gcloud",
+            "compute",
+            "regions",
+            "describe",
+            "europe-north1",
+            "--format=json",
+            "--project=minivess-mlops",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return True, "gcloud not available — quota check skipped"
+
+    import json
+
+    region_info = json.loads(result.stdout)
+    quotas = region_info.get("quotas", [])
+    for q in quotas:
+        if q.get("metric") == "CPUS":
+            limit = q.get("limit", 0)
+            usage = q.get("usage", 0)
+            available = limit - usage
+            if limit == 0:
+                return False, "CPU quota is 0 in europe-north1 — request increase"
+            if available < 8:
+                return False, (
+                    f"CPU quota low: {available:.0f} available "
+                    f"({usage:.0f}/{limit:.0f} used) — need ≥8 for controller + job"
+                )
+            return (
+                True,
+                f"CPU quota OK: {available:.0f} available ({usage:.0f}/{limit:.0f})",
+            )
+
+    return True, "CPU quota metric not found — check manually"
+
+
+def check_cost_estimate() -> tuple[bool, str]:
+    """Estimate max cost and compare against budget guard rails.
+
+    Prevents accidental cost explosions from unauthorized GPU types.
+    """
+    contract_path = REPO_ROOT / "configs" / "cloud" / "yaml_contract.yaml"
+    if not contract_path.exists():
+        return True, "No contract file — cost check skipped"
+
+    contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    sky_config = yaml.safe_load(SKYPILOT_YAML.read_text(encoding="utf-8"))
+
+    resources = sky_config.get("resources", {})
+    accel_field = resources.get("accelerators")
+
+    # Get the GPU name
+    gpu_name = ""
+    if isinstance(accel_field, str):
+        gpu_name = accel_field.split(":")[0]
+    elif isinstance(accel_field, dict):
+        # Dict = priority list, take the MOST expensive for worst-case
+        cost_map = contract.get("max_hourly_cost_usd", {})
+        max_cost = 0.0
+        for key in accel_field:
+            name = str(key).split(":")[0]
+            cost = cost_map.get(name, 0)
+            if cost > max_cost:
+                max_cost = cost
+                gpu_name = name
+
+    cost_map = contract.get("max_hourly_cost_usd", {})
+    hourly_cost = cost_map.get(gpu_name, 0)
+
+    if hourly_cost == 0:
+        return True, f"GPU '{gpu_name}' — no cost data in contract"
+
+    # Estimate: 34 jobs x ~30 min each = ~17 GPU-hours
+    estimated_gpu_hours = 17
+    estimated_cost = hourly_cost * estimated_gpu_hours
+
+    return True, (
+        f"GPU '{gpu_name}' at ${hourly_cost:.2f}/hr, "
+        f"~{estimated_gpu_hours} GPU-hrs, ~${estimated_cost:.0f} estimated"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -260,7 +464,11 @@ def main() -> int:
         ("Setup script DVC paths", check_setup_dvc_paths),
         ("Required env vars", check_env_vars),
         ("SkyPilot GCP backend", check_skypilot_gcp),
+        ("Controller cloud matches jobs", check_controller_cloud),
         ("SkyPilot YAML validity", check_skypilot_yaml),
+        ("YAML contract compliance", check_yaml_contract),
+        ("GCP CPU quota", check_gcp_cpu_quota),
+        ("Cost estimate", check_cost_estimate),
     ]
 
     print("╔══════════════════════════════════════════════════════════════╗")

@@ -4,7 +4,7 @@ Verifies:
 - resolve_checkpoint_paths_from_contract() exists as a public helper
 - Returns empty list when parent_run_id is None
 - Calls FlowContract.find_fold_checkpoints() with given parent_run_id
-- Prefers best.ckpt over epoch_*.ckpt
+- Prefers best_val_loss.pth over epoch_*.ckpt
 - Returns empty list when checkpoint_dir does not exist on volume
 
 Plan: docs/planning/prefect-flow-connectivity-execution-plan.xml Phase 0 (T0.4)
@@ -66,7 +66,7 @@ class TestResolveCheckpointPathsFromContract:
         ckpt_dir = tmp_path / "fold_0"
         ckpt_dir.mkdir(parents=True)
         (ckpt_dir / "epoch_010.ckpt").write_text("epoch", encoding="utf-8")
-        (ckpt_dir / "best.ckpt").write_text("best", encoding="utf-8")
+        (ckpt_dir / "best_val_loss.pth").write_text("best", encoding="utf-8")
 
         with patch(
             "minivess.orchestration.flow_contract.FlowContract.find_fold_checkpoints"
@@ -80,7 +80,7 @@ class TestResolveCheckpointPathsFromContract:
             )
 
         assert len(paths) == 1
-        assert paths[0].name == "best.ckpt"
+        assert paths[0].name == "best_val_loss.pth"
 
     def test_falls_back_to_latest_epoch_ckpt_when_no_best(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -145,7 +145,7 @@ class TestResolveCheckpointPathsFromContract:
         for i in range(3):
             ckpt_dir = tmp_path / f"fold_{i}"
             ckpt_dir.mkdir(parents=True)
-            (ckpt_dir / "best.ckpt").write_text(f"fold{i}", encoding="utf-8")
+            (ckpt_dir / "best_val_loss.pth").write_text(f"fold{i}", encoding="utf-8")
             folds.append({"fold_id": i, "run_id": f"r{i}", "checkpoint_dir": ckpt_dir})
 
         with patch(
@@ -158,4 +158,4 @@ class TestResolveCheckpointPathsFromContract:
             )
 
         assert len(paths) == 3
-        assert all(p.name == "best.ckpt" for p in paths)
+        assert all(p.name == "best_val_loss.pth" for p in paths)

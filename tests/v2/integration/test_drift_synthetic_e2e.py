@@ -27,7 +27,7 @@ class TestDriftSyntheticE2E:
         from minivess.data.synthetic import generate_stack, list_generators
 
         for method in list_generators():
-            pairs = generate_stack(method=method, n_volumes=1)
+            pairs = generate_stack(method=method, n_volumes=1, config={"seed": 42})
             assert len(pairs) == 1
             img, mask = pairs[0]
             assert img.ndim == 3
@@ -44,7 +44,7 @@ class TestDriftSyntheticE2E:
         from minivess.data.feature_extraction import extract_batch_features
         from minivess.data.synthetic import generate_stack
 
-        pairs = generate_stack(method="debug", n_volumes=5)
+        pairs = generate_stack(method="debug", n_volumes=5, config={"seed": 42})
         volumes = [img for img, _mask in pairs]
         features_df = extract_batch_features(volumes)
 
@@ -57,7 +57,7 @@ class TestDriftSyntheticE2E:
         from minivess.data.synthetic import generate_stack
         from minivess.observability.whylogs_service import WhylogsVolumeProfiler
 
-        pairs = generate_stack(method="vamos", n_volumes=3)
+        pairs = generate_stack(method="vamos", n_volumes=3, config={"seed": 42})
         volumes = [img for img, _mask in pairs]
 
         profiler = WhylogsVolumeProfiler()
@@ -171,7 +171,7 @@ class TestDriftSyntheticE2E:
             format_whylogs_prometheus,
         )
 
-        pairs = generate_stack(method="debug", n_volumes=2)
+        pairs = generate_stack(method="debug", n_volumes=2, config={"seed": 42})
         volumes = [img for img, _mask in pairs]
 
         profiler = WhylogsVolumeProfiler()

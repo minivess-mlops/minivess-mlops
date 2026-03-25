@@ -102,8 +102,8 @@ class TestDockerTrainingSmoke:
                 "-c",
                 (
                     "import os; os.environ.pop('DOCKER_CONTAINER', None); "
-                    "from minivess.orchestration.flows.train_flow import _require_docker_context; "
-                    "_require_docker_context(); print('GATE_PASSED')"
+                    "from minivess.orchestration.docker_guard import require_docker_context; "
+                    "require_docker_context('train'); print('GATE_PASSED')"
                 ),
             ],
             capture_output=True,

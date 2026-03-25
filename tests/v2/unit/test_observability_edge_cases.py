@@ -123,7 +123,7 @@ class TestPPRMEdgeCases:
         """monitor with a single deployment sample should not crash."""
         from minivess.observability.pprm import PPRMDetector, compute_prediction_risk
 
-        detector = PPRMDetector(threshold=0.20)
+        detector = PPRMDetector(threshold=0.20, alpha=0.05)
         rng = np.random.default_rng(99)
         cal = rng.random((50,))
         labels = rng.random((50,))
@@ -137,7 +137,7 @@ class TestPPRMEdgeCases:
         """Calling calibrate() twice should overwrite rectifier."""
         from minivess.observability.pprm import PPRMDetector, compute_prediction_risk
 
-        detector = PPRMDetector(threshold=0.20)
+        detector = PPRMDetector(threshold=0.20, alpha=0.05)
         rng = np.random.default_rng(42)
 
         # First calibration

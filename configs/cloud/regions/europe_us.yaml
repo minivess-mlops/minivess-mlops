@@ -1,0 +1,25 @@
+# EU-preferred, US-fallback — best L4 spot availability.
+# EU regions tried first (lowest GCS egress), US for deeper spot pools.
+# Cross-continent GCS egress: ~$0.12/GB × 3 GB = ~$0.36/job (negligible).
+#
+# DEFAULT region config for factorial experiments.
+
+description: "EU-preferred, US-fallback — best L4 spot availability"
+
+regions:
+  gcp:
+    L4:
+      # EU regions first (closest to GCS data in europe-north1)
+      - region: europe-west4     # Netherlands — 3 zones, best EU L4 pool
+        zones: 3
+      - region: europe-west1     # Belgium — 2 zones
+        zones: 2
+      - region: europe-west3     # Frankfurt — 2 zones
+        zones: 2
+      # US fallback (deeper L4 spot pool)
+      - region: us-central1      # Iowa — 3 zones
+        zones: 3
+      - region: us-east1         # South Carolina — 3 zones
+        zones: 3
+      - region: us-west1         # Oregon — 3 zones
+        zones: 3

@@ -24,7 +24,8 @@ class FoldSplit:
 def generate_kfold_splits(
     data_dicts: list[dict[str, str]],
     num_folds: int = 3,
-    seed: int = 42,
+    *,
+    seed: int,
 ) -> list[FoldSplit]:
     """Generate deterministic K-fold cross-validation splits.
 
@@ -123,7 +124,8 @@ def load_splits(path: Path) -> list[FoldSplit]:
 def generate_kfold_splits_from_dir(
     data_dir: Path,
     num_folds: int = 3,
-    seed: int = 42,
+    *,
+    seed: int,
 ) -> list[FoldSplit]:
     """Convenience wrapper: discover NIfTI pairs, then generate K-fold splits.
 

@@ -13,6 +13,7 @@ This enables:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import warnings
@@ -31,14 +32,16 @@ from minivess.observability.infrastructure_timing import (
     get_hourly_rate_usd,
 )
 from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
+from minivess.observability.metric_keys import MetricKeys
 from minivess.observability.prometheus_metrics import update_estimated_cost_gauges
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
-    EXPERIMENT_POST_TRAINING,
+    CHECKPOINT_BEST_FILENAME,
     FLOW_NAME_POST_TRAINING_SUBFLOW,
     FLOW_NAME_TRAIN,
     FLOW_NAME_TRAINING_SUBFLOW,
 )
+from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -136,30 +139,6 @@ def log_timing_jsonl_artifact(
     logger.info("Logged timing JSONL artifact (%d bytes)", len(timing_jsonl))
 
 
-def _require_docker_context() -> None:
-    """Raise RuntimeError if not running inside a Docker container.
-
-    Checks for /.dockerenv (standard Docker marker) or DOCKER_CONTAINER env var.
-    Escape hatch: MINIVESS_ALLOW_HOST=1 for pytest only — never in scripts.
-
-    See: docs/planning/minivess-vision-enforcement-plan.md (T-00)
-    """
-    if os.environ.get("MINIVESS_ALLOW_HOST") == "1":
-        return
-    if os.environ.get("DOCKER_CONTAINER"):
-        return
-    if Path("/.dockerenv").exists():
-        return
-    raise RuntimeError(
-        "Training flow must run inside a Docker container.\n"
-        "Run: docker compose -f deployment/docker-compose.flows.yml run train\n"
-        "Or for SAM3: docker compose -f deployment/docker-compose.flows.yml "
-        "run -e MODEL_FAMILY=sam3_vanilla train\n\n"
-        "Escape hatch (pytest ONLY): export MINIVESS_ALLOW_HOST=1\n"
-        "See: docs/planning/minivess-vision-enforcement-plan.md"
-    )
-
-
 def _validate_training_env() -> None:
     """Validate required environment variables for training flow.
 
@@ -206,15 +185,21 @@ def prepare_training_data(
     if data_dir is None:
         data_dir = Path(os.environ.get("DATA_DIR", "/app/data"))
 
-    remote = dvc_remote or os.environ.get("DVC_REMOTE", "minio")
-
     # Check if data already exists (volume-mounted in Docker)
     images_dir = data_dir / "raw" / "minivess" / "imagesTr"
     if images_dir.exists() and any(images_dir.iterdir()):
         logger.info("Training data found at %s — skipping DVC pull", images_dir)
-        return {"pulled": False, "remote": remote, "duration_s": 0.0}
+        return {"pulled": False, "remote": "local", "duration_s": 0.0}
 
-    # Data not found — pull from DVC
+    # Data not found — need DVC remote. Fail loudly if not configured.
+    remote = dvc_remote or os.environ.get("DVC_REMOTE")
+    if not remote:
+        raise ValueError(
+            "DVC_REMOTE env var is not set and dvc_remote parameter not provided. "
+            "Set DVC_REMOTE to the DVC remote name (e.g., 'gcs' for GCP, 'minio' "
+            "for local Docker). Silent 'minio' fallback removed per Rule #22/#25."
+        )
+
     logger.info("Training data not found. Pulling from DVC remote '%s'...", remote)
     t0 = time.monotonic()
     cmd = ["dvc", "pull", "-r", remote]
@@ -531,7 +516,7 @@ def train_one_fold_task(
     from minivess.config.models import ExperimentConfig
     from minivess.observability.tracking import ExperimentTracker
 
-    tracking_uri: str = config.get("tracking_uri", "mlruns")
+    tracking_uri: str = config.get("tracking_uri") or resolve_tracking_uri()
     experiment_name: str = config.get("experiment_name", "minivess_training")
     exp_config = ExperimentConfig(
         experiment_name=experiment_name,
@@ -698,11 +683,11 @@ def log_fold_results_task(
         # Also log val/loss (without fold prefix) for cross-fold visibility
         if result.get("history", {}).get("val_loss"):
             for epoch, val_loss in enumerate(result["history"]["val_loss"], start=1):
-                client.log_metric(mlflow_run_id, "val/loss", val_loss, step=epoch)
+                client.log_metric(mlflow_run_id, MetricKeys.VAL_LOSS, val_loss, step=epoch)
         # T09: Log VRAM peak to MLflow (#744)
         _vram_mb = result.get("vram_peak_mb", 0)
         if _vram_mb > 0:
-            client.log_metric(mlflow_run_id, "vram/peak_mb", float(_vram_mb))
+            client.log_metric(mlflow_run_id, MetricKeys.VRAM_PEAK_MB, float(_vram_mb))
 
         # Tag checkpoint_dir so post-training flow can discover it via FlowContract
         if checkpoint_dir is not None:
@@ -826,7 +811,10 @@ def training_subflow(
             fold_results.append(fold_result)
             continue
 
-        checkpoint_dir = checkpoint_base / f"fold_{actual_fold_id}"
+        # Namespace checkpoints by condition (model+loss) to prevent collisions
+        # when concurrent factorial jobs share the same GCS-backed checkpoint mount.
+        condition_name = f"{model_family}_{loss_name}"
+        checkpoint_dir = checkpoint_base / condition_name / f"fold_{actual_fold_id}"
         fold_checkpoint_dirs[actual_fold_id] = checkpoint_dir
         fold_result = train_one_fold_task(
             actual_fold_id, fold_split, config, checkpoint_dir
@@ -881,7 +869,7 @@ def training_subflow(
                     checkpoint_dir=fold_checkpoint_dirs.get(log_fold_id),
                 )
 
-            mlflow.log_metric("fold/n_completed", float(len(fold_results)))
+            mlflow.log_metric(MetricKeys.FOLD_N_COMPLETED, float(len(fold_results)))
 
             # Log cost analysis after training (#683)
             _total_training_seconds = sum(
@@ -899,7 +887,10 @@ def training_subflow(
                 _setup_durations = parse_setup_timing(Path.cwd() / "timing_setup.txt")
                 _setup_seconds = _setup_durations.get("setup_total", 0.0)
             except Exception:
-                pass
+                logger.warning(
+                    "Failed to parse setup timing from timing_setup.txt",
+                    exc_info=True,
+                )
             if _total_training_seconds > 0 or _setup_seconds > 0:
                 log_cost_analysis(
                     setup_seconds=_setup_seconds,
@@ -1045,11 +1036,19 @@ def post_training_subflow(
             )
 
             if post_training_method == "swag":
+                import time
+
+                _swag_start = time.monotonic()
                 _run_swag_post_training(
                     training_result=training_result,
                     swag_config=swag_config,
                     config=config,
                 )
+                _swag_elapsed = time.monotonic() - _swag_start
+                logger.info("SWAG post-training took %.1f seconds", _swag_elapsed)
+                # Log perf metrics if MLflow run is active
+                with contextlib.suppress(Exception):
+                    mlflow.log_metric("perf/swag_seconds", _swag_elapsed)
             else:
                 logger.warning(
                     "Unknown post-training method: %s — skipping",
@@ -1090,10 +1089,35 @@ def _run_swag_post_training(
     from minivess.pipeline.post_training_plugin import PluginInput
     from minivess.pipeline.post_training_plugins.swag import SWAGPlugin
 
+    # Scale swa_epochs proportionally to training max_epochs (Issue #913, O1).
+    # Without scaling, debug (2 epochs) runs 10 SWAG epochs = 25 min overhead.
+    max_epochs = config.get("max_epochs")
+    if max_epochs is None:
+        msg = "max_epochs missing from config — cannot scale SWAG epochs"
+        raise ValueError(msg)
+    if max_epochs <= 0:
+        logger.warning(
+            "max_epochs=%d — skipping SWAG (no training to average)", max_epochs
+        )
+        return
+    configured_swa_epochs = swag_config.get("swa_epochs")
+    if configured_swa_epochs is None:
+        msg = "swa_epochs missing from swag_config — cannot determine SWAG duration"
+        raise ValueError(msg)
+    actual_swa_epochs = min(configured_swa_epochs, max(2, max_epochs // 5))
+    if actual_swa_epochs != configured_swa_epochs:
+        logger.info(
+            "SWAG swa_epochs scaled: %d → %d (max_epochs=%d)",
+            configured_swa_epochs,
+            actual_swa_epochs,
+            max_epochs,
+        )
+        swag_config = {**swag_config, "swa_epochs": actual_swa_epochs}
+
     # Collect checkpoint paths from all folds
     checkpoint_paths: list[Path] = []
     for fold_id, ckpt_dir in sorted(training_result.checkpoint_dirs.items()):
-        best_ckpt = ckpt_dir / "best_val_loss.pth"
+        best_ckpt = ckpt_dir / CHECKPOINT_BEST_FILENAME
         if best_ckpt.exists():
             checkpoint_paths.append(best_ckpt)
         else:
@@ -1139,12 +1163,12 @@ def _run_swag_post_training(
         # Fallback to 3fold_seed42.json
         splits_file = splits_dir / "3fold_seed42.json"
     splits = load_splits(splits_file)
-    fold_id: int = int(config.get("fold_id", 0))
-    fold_split = splits[fold_id] if fold_id < len(splits) else splits[0]
-    train_dicts = (
-        fold_split.train
+    pt_fold_id: int = int(config.get("fold_id", 0))
+    fold_split = splits[pt_fold_id] if pt_fold_id < len(splits) else splits[0]
+    train_dicts: list[dict[str, str]] = (
+        fold_split.train  # type: ignore[union-attr]
         if hasattr(fold_split, "train")
-        else fold_split.get("train", [])
+        else fold_split["train"]  # type: ignore[index]
     )
 
     # Respect max_train_volumes from config (debug = half data)
@@ -1305,7 +1329,7 @@ def training_flow(
         )
 
     # Preflight: Docker context gate (CLAUDE.md Rule #19 — STOP Protocol)
-    _require_docker_context()
+    require_docker_context("train")
 
     # Preflight: validate required environment variables
     _validate_training_env()
