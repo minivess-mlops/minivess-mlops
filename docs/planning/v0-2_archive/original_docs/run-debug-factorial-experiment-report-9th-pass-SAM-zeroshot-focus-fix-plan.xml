@@ -98,8 +98,12 @@
            with autocast(device_type=images.device.type, enabled=mixed_precision):
                output = model(images)
 
-        4. For check_gradient_flow: keep loss.backward() OUTSIDE autocast
-           (standard AMP pattern — backward auto-handles mixed precision)
+        4. For check_gradient_flow: UPCAST loss to FP32 before backward:
+           loss = (output.float()**2).mean()  # .float() prevents FP16 underflow
+           REVIEWER CORRECTION: Without GradScaler, FP16 loss.backward() can
+           produce zero gradients due to underflow, causing a false-negative
+           ("no gradient flow" when model is fine). Upcasting to FP32 prevents this.
+           This is simpler than adding GradScaler for a diagnostic check.
 
         5. In train_flow.py: thread training_config.mixed_precision to
            run_pre_training_checks() call
@@ -119,64 +123,74 @@
   <!-- TASK 2: Fix MLflow 413 — move google-cloud-storage to main deps   -->
   <!-- ================================================================== -->
   <task id="2" priority="P0" parallel-with="1">
-    <title>Move google-cloud-storage to main dependencies (fixes HTTP 413)</title>
+    <title>Diagnose and fix MLflow HTTP 413 — investigate ACTUAL root cause</title>
     <description>
-      MLflow HTTP 413 has been "addressed" in 3 passes (#878) but NEVER fixed.
-      Root cause: google-cloud-storage is in the `sky` optional extra, not main
-      deps. Docker base image uses `uv sync --frozen --no-dev` (no extras), so
-      the container cannot import google.cloud.storage. MLflow falls back to
-      HTTP proxy upload → 32 MB body limit → HTTP 413 on 68 MB DynUNet checkpoint.
+      REVIEWER CORRECTION (CRITICAL): The original hypothesis was wrong.
+      google-cloud-storage IS ALREADY a transitive main dependency via dvc[s3,gs]
+      in pyproject.toml line 46. It should already be in the Docker image.
+
+      The HTTP 413 root cause is NOT a missing package. It must be one of:
+      1. MLflow artifact store misconfigured (not using gs:// URI at runtime)
+      2. GCS credentials not available in the container at training time
+      3. MLflow client using HTTP upload path despite gs:// being configured
+      4. MLFLOW_DEFAULT_ARTIFACT_ROOT env var not reaching the training container
+
+      This task is now a DIAGNOSTIC task, not a simple dependency move:
+      1. Verify google-cloud-storage IS importable in Docker container
+      2. Verify MLFLOW_TRACKING_URI and MLFLOW_DEFAULT_ARTIFACT_ROOT env vars
+         are set correctly inside the running container
+      3. Read sky jobs logs for the actual 413 error context — what code path
+         is calling HTTP upload instead of GCS upload?
+      4. Check if the Pulumi change (commit 893c414) was ever deployed
 
       See: .claude/metalearning/2026-03-25-mlflow-413-never-actually-fixed.md
-
-      RULE #31: Moving a dependency from optional to main in pyproject.toml is
-      authorized by issue #878 and the security assessment document.
     </description>
     <files>
-      <file action="read-then-modify">pyproject.toml</file>
+      <file action="read">pyproject.toml</file>
+      <file action="read">deployment/docker/Dockerfile.base</file>
+      <file action="read">deployment/pulumi/gcp/__main__.py</file>
+      <file action="read">deployment/skypilot/train_factorial.yaml</file>
+      <file action="read">src/minivess/observability/mlflow_helpers.py</file>
       <file action="create">tests/v2/unit/deployment/test_gcs_dependency.py</file>
     </files>
     <tdd-approach>
       <red>
-        Create tests/v2/unit/deployment/test_gcs_dependency.py:
+        STEP 1: INVESTIGATE before writing tests.
+        - Run: docker run --rm minivess-base:latest python -c "from google.cloud.storage import Client; print('GCS importable')"
+          If this PASSES → package is available, 413 is NOT caused by missing dep
+          If this FAILS → the dvc[gs] extra isn't pulling it through somehow
+        - Run: docker run --rm minivess-base:latest python -c "from mlflow.store.artifact.gcs_artifact_repo import GCSArtifactRepository; print('MLflow GCS OK')"
+        - Read sky jobs logs for a SUCCEEDED DynUNet job (e.g., job 56) to find
+          the actual 413 error traceback and determine which MLflow code path
+          triggered the HTTP upload
+
+        STEP 2: Write tests based on findings (not before investigation).
 
         class TestGCSDependency:
           def test_google_cloud_storage_importable(self):
-              import importlib
-              mod = importlib.import_module("google.cloud.storage")
-              assert hasattr(mod, "Client")
+              """Verify google-cloud-storage available (transitive via dvc[gs])."""
+              import google.cloud.storage
+              assert hasattr(google.cloud.storage, "Client")
 
           def test_mlflow_gcs_artifact_repo_importable(self):
               from mlflow.store.artifact.gcs_artifact_repo import GCSArtifactRepository
               assert GCSArtifactRepository is not None
 
-          def test_google_cloud_storage_in_main_deps(self):
-              import tomllib
-              with open("pyproject.toml", "rb") as f:
-                  cfg = tomllib.load(f)
-              main_deps = cfg["project"]["dependencies"]
-              assert any("google-cloud-storage" in d for d in main_deps), (
-                  "google-cloud-storage must be in main deps, not optional. "
-                  "Without it, MLflow falls back to HTTP upload → 413. Issue #878."
-              )
-
-        Run: test_google_cloud_storage_in_main_deps will FAIL (currently in sky extra)
+        Additional tests depend on investigation findings.
       </red>
       <green>
-        1. Move "google-cloud-storage>=3.9.0" from [project.optional-dependencies].sky
-           to [project.dependencies]
-        2. Run: uv lock
-        3. Verify: uv run python -c "from google.cloud.storage import Client; print('OK')"
+        Fix depends on root cause found in investigation:
+        - If MLflow server config wrong → fix Pulumi + deploy
+        - If env var not reaching container → fix SkyPilot YAML envs
+        - If MLflow client code uses wrong artifact path → fix mlflow_helpers.py
+        - If GCS credentials missing in container → fix auth setup
       </green>
       <verify>
         uv run pytest tests/v2/unit/deployment/test_gcs_dependency.py -v
-        make test-staging
+        CRITICAL: After Docker rebuild, run a REAL job and check sky jobs logs
+        for "logged artifact to gs://" — NOT just local tests.
       </verify>
     </tdd-approach>
-    <verification>
-      <command>uv run pytest tests/v2/unit/deployment/test_gcs_dependency.py -v</command>
-      <command>make test-staging 2>&amp;1 | tail -3</command>
-    </verification>
   </task>
 
   <!-- ================================================================== -->
