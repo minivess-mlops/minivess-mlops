@@ -1,14 +1,16 @@
-"""Tests for atomic checkpoint writes.
+"""Tests for atomic checkpoint writes and corruption fallback.
 
 T0.5: Verify torch.save uses tmp + os.replace pattern for atomicity.
 B1: Verify wiring — save_metric_checkpoint and trainer epoch_latest use atomic saves.
 B2: SHA256 checkpoint integrity verification.
+2.D: Atomic save + corruption fallback (Issue #949).
 """
 
 from __future__ import annotations
 
 import ast
 import hashlib
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -320,3 +322,168 @@ class TestCheckpointSHA256:
 
         sidecar = path.with_suffix(".pth.sha256")
         assert sidecar.exists(), "save_metric_checkpoint must write SHA256 sidecar"
+
+
+class TestAtomicSaveIdentity:
+    """2.D: atomic_torch_save produces file identical to what torch.load expects."""
+
+    def test_atomic_save_produces_identical_file(self, tmp_path: Path) -> None:
+        """Save with atomic_torch_save, load, compare state_dict tensors."""
+        from minivess.pipeline.checkpoint_utils import atomic_torch_save
+
+        original = {
+            "layer.weight": torch.randn(8, 8),
+            "layer.bias": torch.randn(8),
+            "epoch": 42,
+        }
+        path = tmp_path / "ckpt.pth"
+        atomic_torch_save(original, path)
+
+        loaded = torch.load(path, map_location="cpu", weights_only=False)
+        assert loaded["epoch"] == 42
+        assert torch.equal(loaded["layer.weight"], original["layer.weight"])
+        assert torch.equal(loaded["layer.bias"], original["layer.bias"])
+
+
+class TestAtomicSaveNoCrashPartial:
+    """2.D: on rename failure, no .pth file remains — only .tmp (or nothing)."""
+
+    def test_atomic_save_no_partial_on_crash(self, tmp_path: Path) -> None:
+        """Mock os.replace to raise after torch.save; verify no .pth file remains."""
+        from minivess.pipeline.checkpoint_utils import atomic_torch_save
+
+        path = tmp_path / "model.pth"
+
+        with (
+            patch(
+                "minivess.pipeline.checkpoint_utils.os.replace",
+                side_effect=OSError("rename failed"),
+            ),
+            pytest.raises(OSError, match="rename failed"),
+        ):
+            atomic_torch_save({"epoch": 1}, path)
+
+        # The final .pth must NOT exist (rename was never completed)
+        assert not path.exists(), "Final .pth must not exist when rename fails"
+        # The .tmp file should also be cleaned up by the except clause
+        tmp_file = path.with_suffix(".pth.tmp")
+        assert not tmp_file.exists(), ".tmp file should be cleaned up on failure"
+
+
+class TestFallbackLoadsPrevious:
+    """2.D: load_checkpoint_with_fallback tries primary then falls back."""
+
+    def _write_valid_checkpoint(self, path: Path, epoch: int) -> dict:
+        """Helper: write a valid checkpoint and return the state dict."""
+        state = {"epoch": epoch, "weight": torch.randn(4, 4)}
+        torch.save(state, path)
+        return state
+
+    def test_fallback_loads_previous_when_latest_truncated(
+        self, tmp_path: Path
+    ) -> None:
+        """Write truncated bytes as 'latest', valid as 'previous' -> fallback."""
+        from minivess.pipeline.checkpoint_utils import load_checkpoint_with_fallback
+
+        primary = tmp_path / "epoch_latest.pth"
+        fallback = tmp_path / "epoch_previous.pth"
+
+        # Write valid fallback
+        self._write_valid_checkpoint(fallback, epoch=5)
+        # Write truncated primary (not valid pickle/torch data)
+        primary.write_bytes(b"\x80\x02truncated_garbage")
+
+        result = load_checkpoint_with_fallback(primary, fallback=fallback)
+        assert result["epoch"] == 5
+
+    def test_fallback_loads_previous_when_latest_not_pickle(
+        self, tmp_path: Path
+    ) -> None:
+        """Write JSON bytes as 'latest.pth' -> torch.load fails -> fallback."""
+        from minivess.pipeline.checkpoint_utils import load_checkpoint_with_fallback
+
+        primary = tmp_path / "latest.pth"
+        fallback = tmp_path / "previous.pth"
+
+        # Write valid fallback
+        self._write_valid_checkpoint(fallback, epoch=10)
+        # Write non-pickle data as primary
+        primary.write_bytes(b'{"not": "a checkpoint"}')
+
+        result = load_checkpoint_with_fallback(primary, fallback=fallback)
+        assert result["epoch"] == 10
+
+
+class TestDoubleCorruption:
+    """2.D: both primary and fallback corrupt -> ValueError (Rule #25)."""
+
+    def test_double_corruption_raises_value_error(self, tmp_path: Path) -> None:
+        """Both latest and previous are truncated -> ValueError raised."""
+        from minivess.pipeline.checkpoint_utils import load_checkpoint_with_fallback
+
+        primary = tmp_path / "latest.pth"
+        fallback = tmp_path / "previous.pth"
+
+        # Write garbage to both
+        primary.write_bytes(b"corrupt_primary")
+        fallback.write_bytes(b"corrupt_fallback")
+
+        with pytest.raises(ValueError, match="Both primary.*and fallback.*corrupt"):
+            load_checkpoint_with_fallback(primary, fallback=fallback)
+
+
+class TestFallbackLogging:
+    """2.D: fallback emits a warning with the fallback path string."""
+
+    def test_logs_warning_with_fallback_path(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """caplog captures warning with fallback path string."""
+        from minivess.pipeline.checkpoint_utils import load_checkpoint_with_fallback
+
+        primary = tmp_path / "latest.pth"
+        fallback = tmp_path / "previous.pth"
+
+        # Corrupt primary, valid fallback
+        primary.write_bytes(b"corrupt")
+        state = {"epoch": 3, "w": torch.randn(2, 2)}
+        torch.save(state, fallback)
+
+        with caplog.at_level(logging.WARNING, logger="minivess.pipeline.checkpoint_utils"):
+            result = load_checkpoint_with_fallback(primary, fallback=fallback)
+
+        assert result["epoch"] == 3
+        # Check that a warning was logged mentioning the fallback path
+        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any(str(fallback) in msg for msg in warning_messages), (
+            f"Expected warning mentioning fallback path {fallback}, "
+            f"got: {warning_messages}"
+        )
+
+
+class TestMissingFallback:
+    """2.D: latest corrupt + no fallback file -> FileNotFoundError."""
+
+    def test_missing_fallback_raises_file_not_found(self, tmp_path: Path) -> None:
+        """Latest corrupt, no fallback file -> FileNotFoundError."""
+        from minivess.pipeline.checkpoint_utils import load_checkpoint_with_fallback
+
+        primary = tmp_path / "latest.pth"
+        primary.write_bytes(b"corrupt")
+
+        # No fallback provided
+        with pytest.raises(FileNotFoundError, match="Primary corrupt and no fallback"):
+            load_checkpoint_with_fallback(primary, fallback=None)
+
+    def test_missing_fallback_file_raises_file_not_found(
+        self, tmp_path: Path
+    ) -> None:
+        """Latest corrupt, fallback path specified but file doesn't exist."""
+        from minivess.pipeline.checkpoint_utils import load_checkpoint_with_fallback
+
+        primary = tmp_path / "latest.pth"
+        primary.write_bytes(b"corrupt")
+        fallback = tmp_path / "nonexistent.pth"
+
+        with pytest.raises(FileNotFoundError, match="Primary corrupt and no fallback"):
+            load_checkpoint_with_fallback(primary, fallback=fallback)

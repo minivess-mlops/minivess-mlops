@@ -41,8 +41,15 @@ resources:
   # NEVER add a static ordered: block here — it gets injected at launch time.
   accelerators: L4:1  # Default accelerator (used when no ordered: injected, e.g., dry-run)
   # Spot recovery: auto-retry on user code errors (OOM, CUDA, transient).
+  # strategy: EAGER_NEXT_REGION — on failure, try the next region in the ordered
+  # list instead of retrying the same capacity-constrained region (#955).
+  # recover_on_exit_codes: transient setup errors that warrant region failover (#956).
+  #   33 = DVC network error, 34 = HF download timeout.
+  #   137 (OOM) intentionally EXCLUDED — OOM needs a different GPU, not a retry.
   job_recovery:
     max_restarts_on_errors: 3
+    strategy: EAGER_NEXT_REGION
+    recover_on_exit_codes: [33, 34]
 
 # Checkpoint persistence via GCS bucket mount (#878).
 # MOUNT_CACHED: async upload (non-blocking writes). Previous checkpoint survives
@@ -105,8 +112,11 @@ setup: |
   cd /app
 
   # HuggingFace login for gated models (SAM3, VesselFM)
+  # Retry with timeout — transient HF API failures must not crash setup (#946, #948, #953).
   if [ -n "${HF_TOKEN}" ]; then
-    huggingface-cli login --token "${HF_TOKEN}" --add-to-git-credential 2>/dev/null || true
+    for attempt in 1 2 3; do
+      timeout 60 huggingface-cli login --token "${HF_TOKEN}" --add-to-git-credential 2>/dev/null && break || echo "HF login attempt ${attempt} failed" && sleep $((10 * attempt))
+    done
     echo "HF_TOKEN: logged in"
   else
     echo "WARNING: HF_TOKEN not set — gated models (SAM3) will fail"
@@ -124,11 +134,21 @@ setup: |
   else
     echo "Pulling training data from GCS via DVC..."
     # Pull only raw data (data/processed may not exist in GCS yet)
-    dvc pull data/raw/minivess -r gcs || {
-      echo "FATAL: DVC pull from GCS failed."
+    # Retry with timeout — transient GCS/DNS failures must not crash setup (#948, #953).
+    dvc_pull_ok=false
+    for attempt in 1 2 3; do
+      if timeout 600 dvc pull data/raw/minivess -r gcs; then
+        dvc_pull_ok=true
+        break
+      else
+        echo "DVC pull attempt ${attempt} failed" && sleep $((30 * attempt))
+      fi
+    done
+    if [ "${dvc_pull_ok}" = "false" ]; then
+      echo "FATAL: DVC pull from GCS failed after 3 attempts."
       echo "Ensure: gcloud auth application-default login"
       exit 1
-    }
+    fi
   fi
 
   # Use splits file based on experiment type:
@@ -147,24 +167,39 @@ setup: |
   mkdir -p /app/checkpoints /app/logs
 
   # Pre-cache model weights during setup (don't burn GPU time on download)
+  # Retry with timeout — transient HF rate limits must not crash setup (#946, #948, #953).
   case "${MODEL_FAMILY}" in
     sam3_vanilla|sam3_topolora|sam3_hybrid)
       echo "Pre-caching SAM3 weights..."
-      python -c "from huggingface_hub import hf_hub_download; hf_hub_download('facebook/sam3-hiera-large', 'sam3_hiera_large.pt')" 2>/dev/null || true
+      for attempt in 1 2 3; do
+        timeout 600 python -c "from huggingface_hub import hf_hub_download; hf_hub_download('facebook/sam3-hiera-large', 'sam3_hiera_large.pt')" && break || echo "SAM3 weight download attempt ${attempt} failed" && sleep $((30 * attempt))
+      done
       ;;
     vesselfm)
       echo "Pre-caching VesselFM weights..."
-      python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" 2>/dev/null || true
+      for attempt in 1 2 3; do
+        timeout 600 python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" && break || echo "VesselFM weight download attempt ${attempt} failed" && sleep $((30 * attempt))
+      done
       ;;
   esac
 
   # Pull DeepVess data for zero-shot evaluation conditions
+  # Retry with timeout — same resilience as MiniVess pull (#948, #953).
   if [ "${EVAL_DATASET}" = "deepvess" ] && [ ! -d "data/raw/deepvess/images" ]; then
     echo "Pulling DeepVess data from GCS for zero-shot evaluation..."
-    dvc pull data/raw/deepvess.dvc -r gcs || {
-      echo "FATAL: DeepVess DVC pull failed."
+    deepvess_pull_ok=false
+    for attempt in 1 2 3; do
+      if timeout 600 dvc pull data/raw/deepvess.dvc -r gcs; then
+        deepvess_pull_ok=true
+        break
+      else
+        echo "DeepVess DVC pull attempt ${attempt} failed" && sleep $((30 * attempt))
+      fi
+    done
+    if [ "${deepvess_pull_ok}" = "false" ]; then
+      echo "FATAL: DeepVess DVC pull failed after 3 attempts."
       exit 1
-    }
+    fi
   fi
 
   # === PRE-FLIGHT CHECKS ===
@@ -187,7 +222,8 @@ setup: |
   # Without this, training runs for hours then silently loses all metrics.
   if echo "${MLFLOW_TRACKING_URI}" | grep -qE "^https?://"; then
     echo "Checking MLflow server connectivity..."
-    python -c "import os, sys; uri = os.environ['MLFLOW_TRACKING_URI']; from mlflow.tracking import MlflowClient; client = MlflowClient(tracking_uri=uri); exps = client.search_experiments(max_results=1); print(f'MLflow OK: {uri} ({len(exps)} experiments)')" || {
+    # Timeout guard — hung MLflow check must not block setup indefinitely (#953).
+    timeout 30 python -c "import os, sys; uri = os.environ['MLFLOW_TRACKING_URI']; from mlflow.tracking import MlflowClient; client = MlflowClient(tracking_uri=uri); exps = client.search_experiments(max_results=1); print(f'MLflow OK: {uri} ({len(exps)} experiments)')" || {
       echo "FATAL: MLflow server is not reachable. Training would lose all metrics."
       echo "Check: MLFLOW_TRACKING_URI"
       exit 1

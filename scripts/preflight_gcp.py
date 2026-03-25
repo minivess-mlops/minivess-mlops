@@ -403,6 +403,75 @@ def check_controller_cloud() -> tuple[bool, str]:
     return True, f"Controller and jobs both on {job_cloud}"
 
 
+def check_controller_health() -> tuple[bool, str]:
+    """Check SkyPilot jobs controller state — detect INIT/STOPPED/ERROR.
+
+    Runs ``sky status`` and parses for controller cluster lines. Controller
+    clusters have names starting with ``sky-jobs-controller``.
+
+    State interpretation:
+    - UP: healthy, ready to accept jobs.
+    - INIT: initializing — may resolve, warn but do not block.
+    - STOPPED / ERROR: unhealthy — block launch, tell user to fix.
+    - No controller found: first launch — will be created automatically.
+    - sky not installed (returncode 127): skip gracefully.
+
+    Issue #957: Cloud robustness — controller health preflight check.
+    Rule #16: No regex — uses str.split() and str methods only.
+    """
+    sky_bin = REPO_ROOT / ".venv" / "bin" / "sky"
+    result = _run([str(sky_bin), "status"], timeout=30)
+
+    # sky not installed or not available
+    if result.returncode != 0:
+        return True, "sky status unavailable — controller health check skipped"
+
+    # Parse output line by line looking for controller cluster
+    stdout = result.stdout.strip()
+    if not stdout:
+        return True, "No SkyPilot clusters — controller will be created on first launch"
+
+    for line in stdout.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        cluster_name = parts[0]
+        if not cluster_name.startswith("sky-jobs-controller"):
+            continue
+
+        # Find the status field — look for known states in remaining parts
+        known_states = {"UP", "INIT", "STOPPED", "ERROR"}
+        controller_state = ""
+        for part in parts[1:]:
+            if part in known_states:
+                controller_state = part
+                break
+
+        if controller_state == "UP":
+            return True, f"Controller '{cluster_name}' is UP"
+
+        if controller_state == "INIT":
+            return True, (
+                f"Controller '{cluster_name}' is INIT — "
+                "may still be initializing; proceed with caution"
+            )
+
+        if controller_state in ("STOPPED", "ERROR"):
+            return False, (
+                f"Controller '{cluster_name}' is {controller_state}. "
+                f"Fix: sky start {cluster_name} (or sky down {cluster_name} to recreate)"
+            )
+
+        # Unknown state — warn but do not block
+        return True, (
+            f"Controller '{cluster_name}' has unknown state "
+            f"(parsed fields: {parts}) — check manually"
+        )
+
+    # No controller cluster found in output
+    return True, "No controller cluster in sky status — will be created on first launch"
+
+
 def check_skypilot_yaml() -> tuple[bool, str]:
     """Check if SkyPilot YAML parses without errors."""
     try:
@@ -672,6 +741,7 @@ def main() -> int:
         ("Required env vars", check_env_vars),
         ("SkyPilot GCP backend", check_skypilot_gcp),
         ("Controller cloud matches jobs", check_controller_cloud),
+        ("Controller health", check_controller_health),
         ("SkyPilot YAML validity", check_skypilot_yaml),
         ("YAML contract compliance", check_yaml_contract),
         ("GCP CPU quota", check_gcp_cpu_quota),

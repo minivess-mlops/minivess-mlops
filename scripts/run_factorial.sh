@@ -44,6 +44,8 @@ cleanup() {
     # Kill all background children of this script
     kill $(jobs -p) 2>/dev/null || true
     wait 2>/dev/null || true
+    # Remove lockfile (Issue #951)
+    rm -f "${REPO_ROOT}/outputs/.factorial.lock"
     echo "Cleanup complete. Check job log for partial results."
     exit 130  # Standard exit code for SIGINT
 }
@@ -116,6 +118,23 @@ OUTPUT_DIR="${REPO_ROOT}/outputs"
 mkdir -p "${OUTPUT_DIR}"
 TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
 JOB_LOG="${OUTPUT_DIR}/${TIMESTAMP}_factorial_job_ids.txt"
+
+# ─── Lockfile guard (Issue #951) ─────────────────────────────────────────────
+# Prevents concurrent factorial launches that would double-submit conditions.
+LOCKFILE="${OUTPUT_DIR}/.factorial.lock"
+
+if [ "${DRY_RUN}" = false ]; then
+    if [ -f "${LOCKFILE}" ]; then
+        LOCK_PID=$(cat "${LOCKFILE}" 2>/dev/null || echo "")
+        if [ -n "${LOCK_PID}" ] && kill -0 "${LOCK_PID}" 2>/dev/null; then
+            echo "ERROR: Another factorial launch is running (PID ${LOCK_PID})"
+            echo "If stale, remove: rm ${LOCKFILE}"
+            exit 1
+        fi
+        echo "WARNING: Stale lockfile found (PID ${LOCK_PID} dead). Overwriting."
+    fi
+    echo $$ > "${LOCKFILE}"
+fi
 
 # ─── Preflight checks (skip for dry-run) ────────────────────────────────────
 if [ "${DRY_RUN}" = false ] && [ "${SKIP_PREFLIGHT:-0}" != "1" ]; then
@@ -370,7 +389,7 @@ for model in "${MODEL_ARRAY[@]}"; do
                     echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | bs=${BATCH_SIZE} | accum=${GRAD_ACCUM} | DRY_RUN" >> "${JOB_LOG}"
                 else
                     # Resume: skip already-submitted conditions (Gap #3)
-                    if [ "${RESUME}" = true ] && echo "${EXISTING_ACTIVE_JOBS}" | grep -qF "${CONDITION_NAME}"; then
+                    if [ "${RESUME}" = true ] && echo "${EXISTING_ACTIVE_JOBS}" | grep -qxF "${CONDITION_NAME}"; then
                         echo "  [SKIP] ${CONDITION_NAME} already in queue"
                         echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | SKIPPED_RESUME" >> "${JOB_LOG}"
                         continue
@@ -551,11 +570,15 @@ if [ "${FAILED}" -gt 0 ]; then
     echo "WARNING: ${FAILED} trainable condition(s) failed to launch."
     echo "Review ${JOB_LOG} for details."
     echo "Resume with: $0 --resume ${CONFIG_FILE}"
+    rm -f "${LOCKFILE}"
     if [ "${LAUNCHED}" -gt 0 ]; then
         exit 2  # Partial failure: some launched, some failed
     else
         exit 1  # Total failure: nothing launched
     fi
 fi
+
+# Clean up lockfile on successful exit (Issue #951)
+rm -f "${LOCKFILE}"
 
 exit 0  # All conditions launched successfully
