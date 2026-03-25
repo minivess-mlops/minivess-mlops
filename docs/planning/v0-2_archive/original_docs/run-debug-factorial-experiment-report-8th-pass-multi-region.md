@@ -220,33 +220,41 @@ Key observations:
 - **Inference latency**: 1.9-2.8 seconds per volume
 - **GPU utilization**: 28-100% (varies by condition — clDice computation is CPU-bound)
 
-### SAM3 TopoLoRA — high preemption rate (CRITICAL FINDING)
+### FINDING 6: SAM3 TopoLoRA OOMs on L4 — NOT preemption (CRITICAL)
 
-SAM3 TopoLoRA jobs experience significantly more spot preemptions than
-DynUNet/MambaVesselNet:
+**CORRECTION**: Earlier analysis attributed SAM3 failures to spot preemptions.
+Actual root cause is **CUDA OOM** — SAM3 TopoLoRA uses 21.92 GiB on L4 (21.96 GiB total).
 
-| Model | Avg job time | Avg preemptions | Recovery behavior |
-|-------|-------------|-----------------|-------------------|
-| DynUNet | 9-10 min | 0-1 | Single run, rarely preempted |
-| MambaVesselNet | 8.5-8.8 min | 0 | No preemptions observed |
-| SAM3 TopoLoRA | 26-42 min (partial) | 2-3 | Frequently preempted, needs recovery |
+ALL 6 SAM3 TopoLoRA failures (jobs 35-42) show identical error:
+```
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 82.00 MiB.
+GPU 0 has a total capacity of 21.96 GiB of which 41.06 MiB is free.
+Process has 21.92 GiB memory in use (21.09 GiB PyTorch allocated).
+```
 
-**Root cause**: SAM3 setup takes longer (weight download ~9 GB + DVC pull) and
-training per epoch is slower (larger ViT-32L encoder). Longer job = more exposure
-to preemption. With 2 debug epochs, SAM3 still runs 3-4x longer than DynUNet.
+OOM location: `transformers/models/sam3/modeling_sam3.py:478` (`rotate_pairwise()`
+in rotary position embedding). This is deterministic — not a race condition.
 
-**Job 36 FAILED** after exhausting `max_restarts_on_errors: 3` with only 12m 21s
-total job time across 3 recovery attempts. The resilient wrapper detected the FAILED
-status and resubmitted as job 37.
+| Model | VRAM (batch=2) | L4 (24 GB) | Verdict |
+|-------|---------------|------------|---------|
+| DynUNet | 2.9-4.0 GB | Fits easily | OK |
+| MambaVesselNet | 5.6-6.7 GB | Fits easily | OK |
+| SAM3 TopoLoRA | **21.92 GB** | **OOM** | Needs batch_size=1 or A100 |
+| SAM3 Hybrid | ~22+ GB (est.) | **OOM** (untested) | Same issue expected |
+| SAM3 Vanilla | ~16 GB (est.) | May fit | Test needed |
 
-**Impact on production runs**: With 50 epochs, SAM3 jobs will run 25-30x longer.
-Spot preemption is near-certain. The GCS `MOUNT_CACHED` checkpoint mount is critical
-— it persists partial checkpoints across preemptions so `check_resume_state_task()`
-can resume from the latest valid checkpoint.
+**Fix options** (GitHub #939):
+1. **batch_size=1** for SAM3 conditions → halves VRAM (~11 GB), stays on L4
+2. **A100 (40 GB)** → requires explicit user authorization + quota request
+3. **Gradient checkpointing** → trades compute for memory
+4. **Model-specific batch_size** in factorial config (already supported by `fixed.compute: auto`)
 
-**Recommendation**: For SAM3 production runs, increase `max_restarts_on_errors`
-from 3 to 10 or higher. The cost overhead of re-provisioning is small compared to
-lost GPU time from a FAILED job that was 90% complete.
+**Impact**: The resilient wrapper will keep retrying SAM3 TopoLoRA conditions
+infinitely — they always OOM. The wrapper doesn't distinguish OOM from preemption.
+DynUNet + MambaVesselNet conditions (16/34) all succeeded.
+
+**Recommendation**: Stop retrying SAM3 TopoLoRA/Hybrid on L4 with batch_size=2.
+Either reduce to batch_size=1 or authorize A100 for SAM3 conditions only.
 
 ### GCS checkpoint persistence (CONFIRMED WORKING)
 - All 15 succeeded jobs have checkpoints in `gs://minivess-mlops-checkpoints/`
