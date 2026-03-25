@@ -99,6 +99,9 @@ envs:
   CHECKPOINT_DIR: /app/checkpoints
   LOGS_DIR: /app/logs
 
+  # Gradient checkpointing for SAM3 VRAM reduction (Issue #966)
+  GRADIENT_CHECKPOINTING: "false"
+
   # PyTorch CUDA memory optimization
   PYTORCH_ALLOC_CONF: "expandable_segments:True"
 
@@ -268,4 +271,5 @@ run: |
     --experiment-name "${EXPERIMENT_NAME}" \
     --zero-shot "${ZERO_SHOT}" \
     --eval-dataset "${EVAL_DATASET}" \
-    --post-training-method "${POST_TRAINING_METHODS}"
+    --post-training-method "${POST_TRAINING_METHODS}" \
+    --gradient-checkpointing "${GRADIENT_CHECKPOINTING}"

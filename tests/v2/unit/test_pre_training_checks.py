@@ -227,3 +227,72 @@ class TestAutocastInPreTrainingChecks:
             mixed_precision=True,
         )
         assert all(r.passed for r in results)
+
+
+class TestSkipGradientFlow:
+    """Tests for skip_gradient_flow parameter in run_pre_training_checks.
+
+    SAM3 gradient checkpointing causes OOM in the diagnostic forward+backward
+    (which does NOT use gradient checkpointing). When gradient checkpointing
+    is enabled, we skip check_gradient_flow() and report as passed with skip message.
+
+    Issue: #966, Plan: sam3-gradient-checkpointing-plan.xml Task 2
+    """
+
+    def test_skip_gradient_flow_returns_passed(
+        self, sample_batch: dict[str, torch.Tensor]
+    ) -> None:
+        """When skip_gradient_flow=True, gradient_flow check must pass with skip message."""
+        from minivess.diagnostics.pre_training_checks import run_pre_training_checks
+
+        model = _make_simple_model()
+        criterion = nn.CrossEntropyLoss()
+        results = run_pre_training_checks(
+            model=model,
+            sample_batch=sample_batch,
+            criterion=criterion,
+            expected_channels=2,
+            skip_gradient_flow=True,
+        )
+        grad_results = [r for r in results if r.name == "gradient_flow"]
+        assert len(grad_results) == 1
+        assert grad_results[0].passed is True
+        assert "skip" in grad_results[0].message.lower()
+
+    def test_skip_still_runs_other_checks(
+        self, sample_batch: dict[str, torch.Tensor]
+    ) -> None:
+        """All other pre-training checks must still run when gradient_flow is skipped."""
+        from minivess.diagnostics.pre_training_checks import run_pre_training_checks
+
+        model = _make_simple_model()
+        criterion = nn.CrossEntropyLoss()
+        results = run_pre_training_checks(
+            model=model,
+            sample_batch=sample_batch,
+            criterion=criterion,
+            expected_channels=2,
+            skip_gradient_flow=True,
+        )
+        names = [r.name for r in results]
+        assert "output_shape" in names
+        assert "loss_sanity" in names
+        assert "nan_inf" in names
+
+    def test_default_does_not_skip(
+        self, sample_batch: dict[str, torch.Tensor]
+    ) -> None:
+        """By default, gradient_flow check should NOT be skipped."""
+        from minivess.diagnostics.pre_training_checks import run_pre_training_checks
+
+        model = _make_simple_model()
+        criterion = nn.CrossEntropyLoss()
+        results = run_pre_training_checks(
+            model=model,
+            sample_batch=sample_batch,
+            criterion=criterion,
+            expected_channels=2,
+        )
+        grad_results = [r for r in results if r.name == "gradient_flow"]
+        assert len(grad_results) == 1
+        assert "skip" not in grad_results[0].message.lower()

@@ -247,8 +247,19 @@ class Sam3TopoLoraAdapter(ModelAdapter):
         self._lora_rank = config.lora_rank
         self._lora_alpha = config.lora_alpha
 
+        # Gradient checkpointing: read from architecture_params (set by factorial config).
+        # Reduces SAM3 TopoLoRA peak VRAM from ~22 GiB to ~10 GiB on L4.
+        # Issue: #966 (A100 option), #940 (SAM3 OOM).
+        _gradient_checkpointing = config.architecture_params.get(
+            "gradient_checkpointing", False
+        )
+
         # SAM3 backbone (NOT frozen yet — LoRA applied first)
-        self.backbone = Sam3Backbone(config=config, freeze=False)
+        self.backbone = Sam3Backbone(
+            config=config,
+            freeze=False,
+            gradient_checkpointing=_gradient_checkpointing,
+        )
 
         # Apply LoRA to encoder, then freeze base weights
         lora_targets = _apply_lora_to_encoder(

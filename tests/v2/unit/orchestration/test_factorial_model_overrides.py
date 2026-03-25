@@ -113,6 +113,54 @@ class TestNonSAM3ConfigsClean:
             assert "gradient_accumulation_steps" in settings
 
 
+class TestGradientCheckpointing:
+    """SAM3 trainable models must have gradient_checkpointing: true in model_overrides.
+
+    Gradient checkpointing reduces SAM3 TopoLoRA peak VRAM from ~22 GiB to ~10 GiB.
+    Issue: #966, Plan: sam3-gradient-checkpointing-plan.xml Task 3.
+    """
+
+    @pytest.mark.parametrize("config_name", SAM3_CONFIGS)
+    @pytest.mark.parametrize("model", SAM3_TRAINABLE_MODELS)
+    def test_sam3_trainable_gradient_checkpointing_enabled(
+        self, config_name: str, model: str
+    ) -> None:
+        """SAM3 trainable models must have gradient_checkpointing: true."""
+        cfg = _load_config(config_name)
+        overrides = cfg.get("model_overrides", {})
+        assert model in overrides, f"{config_name}: missing override for {model}"
+        assert overrides[model].get("gradient_checkpointing") is True, (
+            f"{config_name}: {model} must have gradient_checkpointing: true "
+            f"to reduce VRAM ~22 GiB → ~10 GiB on L4"
+        )
+
+    @pytest.mark.parametrize("config_name", SAM3_CONFIGS)
+    def test_sam3_vanilla_no_gradient_checkpointing(
+        self, config_name: str
+    ) -> None:
+        """SAM3 Vanilla (frozen encoder) should NOT have gradient checkpointing."""
+        cfg = _load_config(config_name)
+        overrides = cfg.get("model_overrides", {})
+        if "sam3_vanilla" in overrides:
+            # Vanilla uses frozen encoder — gradient checkpointing is irrelevant
+            assert not overrides["sam3_vanilla"].get("gradient_checkpointing", False), (
+                f"{config_name}: sam3_vanilla should not have gradient_checkpointing "
+                f"(frozen encoder uses no_grad, no activations stored)"
+            )
+
+    @pytest.mark.parametrize("config_name", SAM3_CONFIGS)
+    def test_gradient_checkpointing_consistent_across_configs(
+        self, config_name: str
+    ) -> None:
+        """Rule 27: debug = production — gradient_checkpointing must be identical."""
+        # Already implicitly covered by test_sam3_overrides_identical_across_configs,
+        # but this makes the gradient_checkpointing requirement explicit.
+        cfg = _load_config(config_name)
+        overrides = cfg.get("model_overrides", {})
+        for model in SAM3_TRAINABLE_MODELS:
+            assert overrides.get(model, {}).get("gradient_checkpointing") is True
+
+
 class TestEffectiveBatchSize:
     """Verify effective batch size is consistent across models."""
 

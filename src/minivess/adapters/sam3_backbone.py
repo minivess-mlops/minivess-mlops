@@ -85,6 +85,7 @@ class Sam3Backbone(nn.Module):
         *,
         freeze: bool = True,
         input_size: int | None = None,
+        gradient_checkpointing: bool = False,
     ) -> None:
         super().__init__()
         self._config = config
@@ -119,6 +120,30 @@ class Sam3Backbone(nn.Module):
         )
 
         self.encoder, self.fpn_neck = self._load_sam3_encoder()
+
+        # Gradient checkpointing: trade activation memory for recomputation.
+        # Reduces SAM3 TopoLoRA peak VRAM from ~22 GiB to ~10 GiB on L4.
+        # Only enable when training (freeze=False) — frozen encoder uses no_grad.
+        # Library-first (Rule #3): HuggingFace PreTrainedModel native feature.
+        if gradient_checkpointing and not freeze:
+            if hasattr(self.encoder, "gradient_checkpointing_enable"):
+                self.encoder.gradient_checkpointing_enable(
+                    gradient_checkpointing_kwargs={"use_reentrant": False}
+                )
+                logger.info(
+                    "SAM3 encoder gradient checkpointing ENABLED (non-reentrant)"
+                )
+            else:
+                logger.warning(
+                    "SAM3 encoder does not support gradient_checkpointing_enable() "
+                    "— gradient checkpointing NOT enabled. "
+                    "This may cause OOM on L4 for TopoLoRA training."
+                )
+        elif gradient_checkpointing and freeze:
+            logger.info(
+                "SAM3 gradient_checkpointing=True but freeze=True — "
+                "skipping (frozen encoder uses torch.no_grad, no activations stored)"
+            )
 
         # HF path: vision_encoder already includes FPN neck → output is 256-dim.
         # Native path: encoder outputs 1024-dim, FPN neck reduces to 256.

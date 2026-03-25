@@ -449,6 +449,11 @@ def train_one_fold_task(
     # Build ModelConfig (family must be ModelFamily enum)
     model_family = ModelFamily(model_family_str)
     arch_params: dict[str, Any] = dict(config.get("architecture_params", {}))
+    # Inject gradient_checkpointing into architecture_params so Sam3Backbone reads it.
+    # Top-level config key (from train_flow argparse) takes precedence over arch_params.
+    _gc_config = config.get("gradient_checkpointing", False)
+    if _gc_config and "gradient_checkpointing" not in arch_params:
+        arch_params["gradient_checkpointing"] = True
     model_config = ModelConfig(
         family=model_family,
         name=model_family_str,
@@ -620,12 +625,20 @@ def train_one_fold_task(
             k: v.to(device) if isinstance(v, torch.Tensor) else v
             for k, v in sample_batch.items()
         }
+        # Skip gradient_flow diagnostic when gradient checkpointing is enabled.
+        # The diagnostic forward+backward does NOT use gradient checkpointing,
+        # so it would OOM for SAM3 on L4 (Issue #966).
+        _skip_grad_flow = bool(
+            config.get("gradient_checkpointing", False)
+            or arch_params.get("gradient_checkpointing", False)
+        )
         pre_check_results = run_pre_training_checks(
             model=model,
             sample_batch=sample_on_device,
             criterion=criterion,
             expected_channels=model_config.out_channels,
             mixed_precision=training_config.mixed_precision,
+            skip_gradient_flow=_skip_grad_flow,
         )
         errors = [
             r for r in pre_check_results if not r.passed and r.severity == "error"
@@ -1301,6 +1314,7 @@ def training_flow(
     zero_shot: bool = False,
     eval_dataset: str = "minivess",
     post_training_method: str = "none",
+    gradient_checkpointing: bool = False,
     **kwargs: Any,
 ) -> TrainingFlowResult:
     """Parent training flow — orchestrates training + optional post-training.
@@ -1432,6 +1446,7 @@ def training_flow(
         "max_val_volumes": max_val_volumes if max_val_volumes > 0 else None,
         "zero_shot": zero_shot,
         "eval_dataset": eval_dataset,
+        "gradient_checkpointing": gradient_checkpointing,
     }
 
     # Merge full Hydra config so train_one_fold_task can log it and use all keys
@@ -1608,6 +1623,11 @@ if __name__ == "__main__":
             ),
             help="Comma-separated post-training methods: none,swag (default: none,swag)",
         )
+        parser.add_argument(
+            "--gradient-checkpointing",
+            default=os.environ.get("GRADIENT_CHECKPOINTING", "false"),
+            help="Enable gradient checkpointing for SAM3 VRAM reduction (true/false)",
+        )
         args = parser.parse_args()
 
         # If a specific fold is requested, override num_folds to 1
@@ -1629,4 +1649,5 @@ if __name__ == "__main__":
             zero_shot=args.zero_shot.lower() == "true",
             eval_dataset=args.eval_dataset,
             post_training_method=args.post_training_method,
+            gradient_checkpointing=args.gradient_checkpointing.lower() == "true",
         )

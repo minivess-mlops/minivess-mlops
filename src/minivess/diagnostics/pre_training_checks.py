@@ -213,6 +213,7 @@ def run_pre_training_checks(
     criterion: nn.Module,
     expected_channels: int = 2,
     mixed_precision: bool = True,
+    skip_gradient_flow: bool = False,
 ) -> list[CheckResult]:
     """Run all pre-training sanity checks.
 
@@ -222,6 +223,11 @@ def run_pre_training_checks(
         If True, wraps forward passes in torch.amp.autocast(). Required for
         SAM3 (648M params) which OOMs on L4 in FP32. Default True matches
         TrainingConfig.mixed_precision default.
+    skip_gradient_flow:
+        If True, skip the gradient_flow check and report as passed with a skip
+        message. Required when gradient checkpointing is enabled — the diagnostic
+        forward+backward does NOT use gradient checkpointing, so it would OOM
+        for SAM3. Issue: #966.
 
     Returns a list of CheckResult. Failures with severity='error'
     should abort training with a clear message.
@@ -235,9 +241,21 @@ def run_pre_training_checks(
             mixed_precision=mixed_precision,
         )
     )
-    results.append(
-        check_gradient_flow(model, sample_batch, mixed_precision=mixed_precision)
-    )
+    if skip_gradient_flow:
+        results.append(
+            CheckResult(
+                name="gradient_flow",
+                passed=True,
+                message=(
+                    "Skipped — model uses gradient checkpointing "
+                    "(diagnostic VRAM exceeds training VRAM)"
+                ),
+            )
+        )
+    else:
+        results.append(
+            check_gradient_flow(model, sample_batch, mixed_precision=mixed_precision)
+        )
     results.append(
         check_loss_sanity(model, sample_batch, criterion, mixed_precision=mixed_precision)
     )

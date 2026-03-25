@@ -107,8 +107,17 @@ class Sam3HybridAdapter(ModelAdapter):
         self.config = config
         arch = config.architecture_params
 
+        # Gradient checkpointing: read from architecture_params for consistency.
+        # Hybrid uses freeze=True so backbone will skip checkpointing (no activations
+        # stored in frozen no_grad mode), but we pass the param for transparency.
+        _gradient_checkpointing = arch.get("gradient_checkpointing", False)
+
         # Frozen SAM3 backbone (feature extractor)
-        self.sam_backbone = Sam3Backbone(config=config, freeze=True)
+        self.sam_backbone = Sam3Backbone(
+            config=config,
+            freeze=True,
+            gradient_checkpointing=_gradient_checkpointing,
+        )
 
         # Trainable DynUNet 3D encoder/decoder
         filters = arch.get("filters", [32, 64, 128, 256])
