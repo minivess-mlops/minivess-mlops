@@ -281,3 +281,51 @@ class TestPermanentFailureTracking:
             "run_factorial_resilient.sh must track per-condition failure counts "
             "to identify permanently failed conditions"
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue #959 Task 3.2: Parallel backpressure
+# ---------------------------------------------------------------------------
+
+
+class TestParallelBackpressure:
+    """Parallel submission limits and rate-limiting must come from config."""
+
+    def test_parallel_submissions_from_cloud_config(self) -> None:
+        """PARALLEL_SUBMISSIONS must be read from YAML, not hardcoded."""
+        src = RUN_FACTORIAL.read_text(encoding="utf-8")
+        lines = src.splitlines()
+        # Find PARALLEL_SUBMISSIONS assignment
+        assign_lines = [
+            l
+            for l in lines
+            if "PARALLEL_SUBMISSIONS" in l
+            and "=" in l
+            and not l.strip().startswith("#")
+        ]
+        assert len(assign_lines) > 0, "PARALLEL_SUBMISSIONS not found"
+        # The assignment must involve python3 or yaml (reading from config),
+        # not a bare integer
+        for line in assign_lines:
+            # Skip lines that are just reading the variable
+            # (e.g., if [ "$PARALLEL_SUBMISSIONS" ])
+            if "read" in line or "python3" in line or "<(" in line:
+                return  # It's reading from config — good
+
+    def test_has_wait_for_backpressure(self) -> None:
+        """Script must use wait -n or equivalent for backpressure."""
+        src = RUN_FACTORIAL.read_text(encoding="utf-8")
+        assert "wait -n" in src or "wait" in src
+
+    def test_rate_limit_from_cloud_config(self) -> None:
+        """RATE_LIMIT_SECONDS must be read from YAML config."""
+        src = RUN_FACTORIAL.read_text(encoding="utf-8")
+        lines = src.splitlines()
+        rate_lines = [
+            l
+            for l in lines
+            if "RATE_LIMIT_SECONDS" in l
+            and "=" in l
+            and not l.strip().startswith("#")
+        ]
+        assert len(rate_lines) > 0

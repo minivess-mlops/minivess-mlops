@@ -139,6 +139,39 @@ def log_timing_jsonl_artifact(
     logger.info("Logged timing JSONL artifact (%d bytes)", len(timing_jsonl))
 
 
+def is_heartbeat_stale(
+    heartbeat: dict[str, str],
+    threshold_minutes: int = 30,
+) -> bool:
+    """Detect zombie training runs by checking heartbeat staleness.
+
+    A training run emits periodic heartbeat dicts with an ISO 8601 timestamp.
+    If the most recent heartbeat is older than *threshold_minutes*, the run
+    is considered a zombie (stale).
+
+    Parameters
+    ----------
+    heartbeat:
+        Dict with at least a ``"timestamp"`` key containing an ISO 8601 string
+        (UTC).
+    threshold_minutes:
+        Number of minutes after which a heartbeat is considered stale.
+
+    Returns
+    -------
+    bool
+        ``True`` when the heartbeat is stale (older than the threshold).
+    """
+    from datetime import datetime, timedelta, timezone
+
+    timestamp = datetime.fromisoformat(heartbeat["timestamp"])
+    # Ensure the parsed timestamp is timezone-aware (UTC)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
+    return timestamp < cutoff
+
+
 def _validate_training_env() -> None:
     """Validate required environment variables for training flow.
 

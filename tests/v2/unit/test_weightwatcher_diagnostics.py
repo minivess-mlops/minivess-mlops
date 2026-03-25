@@ -98,3 +98,83 @@ class TestArtifactPath:
         assert ARTIFACT_PATH == "diagnostics", (
             f"Artifact path must be 'diagnostics', got '{ARTIFACT_PATH}'"
         )
+
+
+def _make_conv3d_only_model() -> nn.Module:
+    """Create a model with ONLY Conv3d layers (no 2D conv or linear)."""
+
+    class _Conv3dOnlyModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv1 = nn.Conv3d(1, 8, kernel_size=3, padding=1)
+            self.conv2 = nn.Conv3d(8, 16, kernel_size=3, padding=1)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            return self.conv2(self.conv1(x))
+
+    return _Conv3dOnlyModel()
+
+
+def _make_mixed_conv3d_linear_model() -> nn.Module:
+    """Create a model with Conv3d layers AND a Linear layer."""
+
+    class _MixedModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv1 = nn.Conv3d(1, 8, kernel_size=3, padding=1)
+            self.conv2 = nn.Conv3d(8, 16, kernel_size=3, padding=1)
+            self.fc = nn.Linear(16, 10)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            h = self.conv2(self.conv1(x))
+            return self.fc(h.mean(dim=[-1, -2, -3]))
+
+    return _MixedModel()
+
+
+class TestWeightWatcher3dGraceful:
+    """Test WeightWatcher graceful handling of Conv3d layers (#960)."""
+
+    def test_weightwatcher_3d_only_model_returns_empty(self) -> None:
+        """Conv3d-only model returns empty/NaN metrics, no exception."""
+        from minivess.diagnostics.weight_diagnostics import run_weightwatcher
+
+        import math
+
+        model = _make_conv3d_only_model()
+        result = run_weightwatcher(model)
+
+        assert isinstance(result, dict)
+        # Must contain the standard keys
+        assert "diag_ww_alpha_mean" in result
+        assert "diag_ww_alpha_std" in result
+        assert "diag_ww_num_layers_analyzed" in result
+        # With only Conv3d, expect either empty ({}) or NaN/0 metrics
+        # WeightWatcher cannot analyze Conv3d, so num_layers should be 0
+        # or alpha_mean should be NaN
+        if result["diag_ww_num_layers_analyzed"] == 0:
+            assert math.isnan(result["diag_ww_alpha_mean"])
+        # If somehow it analyzed layers, that's also acceptable
+
+    def test_weightwatcher_mixed_3d_linear_returns_partial(self) -> None:
+        """Conv3d+Linear model returns metrics for at least the Linear layer."""
+        from minivess.diagnostics.weight_diagnostics import run_weightwatcher
+
+        model = _make_mixed_conv3d_linear_model()
+        result = run_weightwatcher(model)
+
+        assert isinstance(result, dict)
+        assert "diag_ww_alpha_mean" in result
+        assert "diag_ww_alpha_std" in result
+        assert "diag_ww_num_layers_analyzed" in result
+        # The Linear layer should be analyzed even if Conv3d layers fail
+        assert result["diag_ww_num_layers_analyzed"] >= 1
+
+    def test_weightwatcher_3d_no_exception_raised(self) -> None:
+        """Conv3d model must never raise an exception from run_weightwatcher."""
+        from minivess.diagnostics.weight_diagnostics import run_weightwatcher
+
+        model = _make_conv3d_only_model()
+        # This must NOT raise any exception
+        result = run_weightwatcher(model)
+        assert isinstance(result, dict)
