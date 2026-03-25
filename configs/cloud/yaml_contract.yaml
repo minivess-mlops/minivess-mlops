@@ -93,3 +93,9 @@ max_hourly_cost_usd:
   A100: 1.50     # NOT AUTHORIZED — listed only for detection
   A100-80GB: 1.80  # NOT AUTHORIZED
   H100: 3.00     # NOT AUTHORIZED
+
+# ── GPU quota guard rails ──────────────────────────────────────────────
+# Minimum GPU quota (GPUS_ALL_REGIONS or per-GPU metric) required before launch.
+# A quota of 0 means no GPUs can be provisioned — launch will fail.
+# Issue #943: GPUS_ALL_REGIONS=1 bottleneck detection.
+min_gpu_quota: 1

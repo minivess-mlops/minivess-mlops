@@ -183,7 +183,7 @@
         KeyError, not default to 1.
 
         REVIEWER CORRECTION: Mocked tests must exercise quota-insufficient path
-        (quota=0 or quota < job_count) returning (False, helpful_message).
+        (quota=0 or quota &lt; job_count) returning (False, helpful_message).
       </description>
       <files>
         <file action="modify">scripts/preflight_gcp.py</file>
