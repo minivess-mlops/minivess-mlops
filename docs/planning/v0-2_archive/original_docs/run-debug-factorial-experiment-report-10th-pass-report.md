@@ -236,6 +236,70 @@ Security concern — token should not appear in setup script output.
 | TBD | First SAM3 training job SUCCEEDED |
 | TBD | All 18 target jobs terminal |
 
+## Deep-Dive Findings (Second Wave — 4 Reviewer Agents)
+
+### GC Propagation Chain — 11 Links, 4 Weak Points
+
+Full chain traced from YAML config through 11 transformations to PyTorch model.
+Key weak points identified:
+1. **Link 2**: `str(settings.get('gradient_checkpointing', False)).lower()` — Python
+   bool → string conversion in bash. If settings returns None → "none" → "none" ≠ "true" (safe, but confusing)
+2. **Link 6**: Double-default — `os.environ.get("GRADIENT_CHECKPOINTING", "false")` AND
+   argparse default. If both exist, argparse wins (correct, but undocumented)
+3. **Link 7**: `bool(config_dict.get(...))` — uses Python bool() which makes ANY
+   non-empty string truthy. Currently safe because upstream ensures True/False bool,
+   but fragile if a string "true" leaks through.
+4. **Link 9a**: Conditional injection `if _gc_config and "gradient_checkpointing" not in arch_params` —
+   arch_params is populated by model profile YAML. If a profile sets
+   `gradient_checkpointing: false`, the train_flow injection is skipped (correct
+   but surprising interaction).
+
+**New tests**: 26 tests in `test_gradient_checkpointing_chain.py` covering all 6 testable links.
+
+### Cross-File Drift Vulnerabilities — 6 Classes Found
+
+| Class | Files | Risk | Test Coverage |
+|-------|-------|------|---------------|
+| HF repo names | 12+ files | HIGH (broke this pass) | COVERED (18 tests) |
+| Docker image path | 8+ files | MEDIUM | NOT COVERED |
+| GCS bucket names | 5+ files | MEDIUM | NOT COVERED |
+| Port numbers | 6+ files | LOW | NOT COVERED |
+| Model family names | 10+ files | HIGH | PARTIALLY |
+| Loss function names | 8+ files | MEDIUM | PARTIALLY |
+
+**Action**: Write cross-file consistency tests for Docker image path and model family
+names — these are the highest-risk unprotected classes.
+
+### Setup Script Failure Modes — 5 Critical Gaps
+
+1. **HF login silent failure**: 2>/dev/null silences errors, no exit 34 on total failure
+2. **train_hpo.yaml + train_production.yaml NOT hardened**: Still use `|| true`, no retries
+3. **No error categorization**: Can't distinguish 404 (permanent) from timeout (transient)
+4. **Retries on permanent failures**: Wastes 90s retrying a 404 that will never succeed
+5. **MLflow check has no retry**: Unlike DVC/HF, fails on first transient error
+
+### Env Var Lifecycle Audit — Complete Table
+
+14 training-critical env vars traced from .env.example → YAML → shell → Python.
+Key findings:
+- BATCH_SIZE and GRAD_ACCUM_STEPS have no YAML defaults (intentional: per-model overrides)
+- 8 of 14 env vars have NO lifecycle test coverage (now covered by test_env_var_lifecycle.py)
+- POST_TRAINING_METHODS has a fallback chain: `POST_TRAINING_METHODS` → `POST_TRAINING_METHOD`
+  (backward compat, should be removed per Rule 26)
+- INSTANCE_HOURLY_USD consumed in Python but NOT passed by run_factorial.sh (uses VM default)
+
+**New tests**: 35 tests in `test_env_var_lifecycle.py` + 9 in `test_stale_process_detection.py`.
+
+## Tests Written This Session
+
+| Test File | Tests | Domain | Prevents |
+|-----------|-------|--------|----------|
+| `test_hf_repo_consistency.py` | 18 | Cross-file | Merge conflict regression (HF 404) |
+| `test_gradient_checkpointing_chain.py` | 26 | Config→Model | GC not propagated → OOM |
+| `test_env_var_lifecycle.py` | 35 | Env vars | Stale/missing env vars → wrong config |
+| `test_stale_process_detection.py` | 9 | Process mgmt | Stale loop relaunching with old vars |
+| **Total** | **88** | | |
+
 ## Go/No-Go Decision
 
 <!-- After all 18 cells: ready for full production run? -->
