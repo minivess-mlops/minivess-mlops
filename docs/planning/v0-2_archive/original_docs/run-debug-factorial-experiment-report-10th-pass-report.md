@@ -11,9 +11,11 @@
 - **Succeeded**: 0 (jobs queuing — 1 L4 GPU quota, sequential execution)
 - **Failed**: 0
 - **Cost**: TBD (estimated: ~$5 per preflight)
-- **Pre-launch issues found**: 4 (stale Docker, stale loop, network instability, duplicate submissions)
-- **Test gaps identified**: 32 across 3 domains (5 CRITICAL, 10 HIGH)
-- **Status**: MONITORING — jobs queuing on GCP L4 spot
+- **Pre-launch issues found**: 6 (stale Docker, stale loop, network instability, duplicate submissions, HF 404, HF login)
+- **Test gaps identified**: 63 across 6 domains (12 CRITICAL, 18 HIGH) — via 7 reviewer agents
+- **New tests written**: 88 (staging: 6558 passed, 0 failed, 0 skipped)
+- **Bugs fixed**: 3 (HF repo regression, stale loop, stale Docker image)
+- **Status**: MONITORING — 36 jobs queuing on GCP L4 spot (tight market)
 
 ## Pre-Launch Validation
 
@@ -238,57 +240,156 @@ Security concern — token should not appear in setup script output.
 
 ## Deep-Dive Findings (Second Wave — 4 Reviewer Agents)
 
-### GC Propagation Chain — 11 Links, 4 Weak Points
+### 1. GC Propagation Chain — 11 Links, 9 Weak Points
 
-Full chain traced from YAML config through 11 transformations to PyTorch model.
-Key weak points identified:
-1. **Link 2**: `str(settings.get('gradient_checkpointing', False)).lower()` — Python
-   bool → string conversion in bash. If settings returns None → "none" → "none" ≠ "true" (safe, but confusing)
-2. **Link 6**: Double-default — `os.environ.get("GRADIENT_CHECKPOINTING", "false")` AND
-   argparse default. If both exist, argparse wins (correct, but undocumented)
-3. **Link 7**: `bool(config_dict.get(...))` — uses Python bool() which makes ANY
-   non-empty string truthy. Currently safe because upstream ensures True/False bool,
-   but fragile if a string "true" leaks through.
-4. **Link 9a**: Conditional injection `if _gc_config and "gradient_checkpointing" not in arch_params` —
-   arch_params is populated by model profile YAML. If a profile sets
-   `gradient_checkpointing: false`, the train_flow injection is skipped (correct
-   but surprising interaction).
+Full chain traced end-to-end from YAML to PyTorch model activation:
 
-**New tests**: 26 tests in `test_gradient_checkpointing_chain.py` covering all 6 testable links.
+```
+[1] configs/factorial/debug.yaml (model_overrides.sam3_topolora.gradient_checkpointing: true)
+    ↓ YAML bool
+[2] scripts/run_factorial.sh (str(settings.get(..., False)).lower() → "true")
+    ↓ bash string
+[3] train_factorial.yaml envs (GRADIENT_CHECKPOINTING: "false" — STATIC DEFAULT)
+    ↓ overridden by --env
+[4] sky jobs launch --env GRADIENT_CHECKPOINTING="true"
+    ↓ frozen at submission (IMMUTABLE)
+[5] train_factorial.yaml run cmd → --gradient-checkpointing "${GRADIENT_CHECKPOINTING}"
+    ↓ CLI string
+[6] train_flow.py argparse (default=os.environ.get("GRADIENT_CHECKPOINTING", "false"))
+    ↓ .lower() == "true" → bool
+[7] train_flow.py config_dict branch (bool(config_dict.get(...)))
+    ↓ Python bool
+[8] train_flow.py config assembly (config["gradient_checkpointing"] = True)
+    ↓ dict key
+[9a] train_flow.py arch_params injection (conditional: only if key not already set)
+[9b] train_flow.py skip_gradient_flow (OR of config + arch_params)
+    ↓ both bool
+[10] sam3_topolora.py (config.architecture_params.get("gradient_checkpointing", False))
+    ↓ bool
+[11] sam3_backbone.py (hasattr check → gradient_checkpointing_enable())
+    ↓ PyTorch model state
+[12] pre_training_checks.py (skip_gradient_flow → skip diagnostic)
+```
 
-### Cross-File Drift Vulnerabilities — 6 Classes Found
+**9 weak points identified:**
 
-| Class | Files | Risk | Test Coverage |
-|-------|-------|------|---------------|
-| HF repo names | 12+ files | HIGH (broke this pass) | COVERED (18 tests) |
-| Docker image path | 8+ files | MEDIUM | NOT COVERED |
-| GCS bucket names | 5+ files | MEDIUM | NOT COVERED |
-| Port numbers | 6+ files | LOW | NOT COVERED |
-| Model family names | 10+ files | HIGH | PARTIALLY |
-| Loss function names | 8+ files | MEDIUM | PARTIALLY |
+| # | Link | Risk | Failure Mode |
+|---|------|------|--------------|
+| 1 | Link 2 | String case | `str(None).lower()` → "none" ≠ "true" (safe but confusing) |
+| 2 | Link 3 | Static default | YAML default "false" could override --env if SkyPilot order changes |
+| 3 | Link 6 | Double-default | `os.environ.get()` AND argparse default — argparse wins but undocumented |
+| 4 | Link 6 | Brittle conversion | `.lower() == "true"` makes "1", "yes", "True" all → False |
+| 5 | Link 7 | bool() footgun | `bool(config_dict.get(...))` — non-empty string = truthy |
+| 6 | Link 9a | Conditional skip | Won't inject if arch_params already has `gradient_checkpointing: false` |
+| 7 | Link 10 | Silent default | `.get("gradient_checkpointing", False)` — missing key = no GC = OOM |
+| 8 | Link 11 | Graceful degradation | `hasattr()` guard silently skips if encoder lacks method → OOM later |
+| 9 | Link 12 | Synchronization | skip_gradient_flow must match actual GC state or diagnostic OOMs |
 
-**Action**: Write cross-file consistency tests for Docker image path and model family
-names — these are the highest-risk unprotected classes.
+**New tests**: 26 in `test_gradient_checkpointing_chain.py` covering links 1-6 + integration.
 
-### Setup Script Failure Modes — 5 Critical Gaps
+### 2. Cross-File Drift Vulnerabilities — 6 Classes, 50+ Duplicates
 
-1. **HF login silent failure**: 2>/dev/null silences errors, no exit 34 on total failure
-2. **train_hpo.yaml + train_production.yaml NOT hardened**: Still use `|| true`, no retries
-3. **No error categorization**: Can't distinguish 404 (permanent) from timeout (transient)
-4. **Retries on permanent failures**: Wastes 90s retrying a 404 that will never succeed
-5. **MLflow check has no retry**: Unlike DVC/HF, fails on first transient error
+Systematic audit of ALL conceptual values duplicated across multiple files:
 
-### Env Var Lifecycle Audit — Complete Table
+| Class | Files | Examples | Test Coverage | Risk |
+|-------|-------|---------|---------------|------|
+| HF repo names | 12+ | `facebook/sam3` in 6 YAMLs + source + 3 profiles | **COVERED** (18 tests) | HIGH (broke this pass) |
+| Docker image path | 9+ | `europe-north1-docker.pkg.dev/...` in 6 YAMLs + preflight + config | **NONE** | HIGH |
+| GCS bucket names | 13+ | `minivess-mlops-dvc-data` in 5 YAMLs + .dvc/config + preflight + tests | **PARTIAL** | HIGH |
+| Port numbers | 7+ | MLflow:5000, Prefect:4200, BentoML:3000/3333 (COLLISION!) | **NONE** | MEDIUM |
+| Model family names | 10+ | `dynunet`, `sam3_topolora` in configs + method_capabilities + source | **PARTIAL** | MEDIUM |
+| Loss function names | 6+ | `cbdice_cldice` in factorial configs + method_capabilities | **GOOD** | LOW |
+| Metric prefixes | 3+ | `eval/fold`, `test/` in metric_keys.py + tracking + builder | **EXCELLENT** | LOW |
+| Python versions | 1 | pyproject.toml only (centralized) | **EXCELLENT** | LOW |
 
-14 training-critical env vars traced from .env.example → YAML → shell → Python.
-Key findings:
-- BATCH_SIZE and GRAD_ACCUM_STEPS have no YAML defaults (intentional: per-model overrides)
-- 8 of 14 env vars have NO lifecycle test coverage (now covered by test_env_var_lifecycle.py)
-- POST_TRAINING_METHODS has a fallback chain: `POST_TRAINING_METHODS` → `POST_TRAINING_METHOD`
-  (backward compat, should be removed per Rule 26)
-- INSTANCE_HOURLY_USD consumed in Python but NOT passed by run_factorial.sh (uses VM default)
+**Specific drift risks found:**
+- **BentoML port collision**: Docker Compose uses 3333, source code comments reference 3000, Grafana also uses 3000
+- **GCS bucket inconsistency**: KG says `minivess-mlops-checkpoints` is DEPRECATED but still mounted in SkyPilot YAMLs
+- **MLflow artifacts bucket**: `minivess-mlops-mlflow-artifacts` is "THE artifact store" per KG but NOT mounted in any YAML
 
-**New tests**: 35 tests in `test_env_var_lifecycle.py` + 9 in `test_stale_process_detection.py`.
+**Priority for new consistency tests:**
+1. Docker image GAR path (9+ files, 0 tests) — HIGH
+2. GCS bucket names (13+ files, partial) — HIGH
+3. Service port numbers (7+ files, 0 tests) — MEDIUM
+
+### 3. Setup Script Failure Modes — 9 Steps, 5 Critical Gaps
+
+Complete analysis of every command in the SkyPilot setup block:
+
+| Step | Failure | Current Handling | Gap | Severity |
+|------|---------|------------------|-----|----------|
+| HF login | Token invalid/expired | Retry 3x, `2>/dev/null` | **No exit 34 on total failure — silently continues** | CRITICAL |
+| DVC pull (MiniVess) | Network/Auth | Retry 3 + timeout 600 + exit 33 | Error message not specific (auth vs disk vs network) | MEDIUM |
+| SAM3 weight download | 404/Auth/Timeout | Retry 3 + timeout 600 + exit 34 | **Retries 404 (permanent) — wastes 90s** | HIGH |
+| VesselFM download | 404/Auth/Timeout | Retry 3 + timeout 600 + exit 34 | Same 404 retry waste | HIGH |
+| DeepVess pull | Network/Auth | Conditional + retry 3 + exit 33 | Conditional on EVAL_DATASET may mask typos | MEDIUM |
+| MLflow check | Network timeout | timeout 30 + exit 1 | **No retry (unlike DVC/HF)** | MEDIUM |
+| nvidia-smi | Missing GPU/driver | Fail hard | Correct (fail-fast) | LOW |
+| Python imports | Missing package | Fail hard | Correct (Docker mandate) | LOW |
+| train_flow.py | Runtime error | Exit non-zero | Correct | LOW |
+
+**Cross-YAML hardening inconsistency:**
+
+| Feature | train_factorial.yaml | train_hpo.yaml | train_production.yaml |
+|---------|---------------------|----------------|----------------------|
+| DVC retry loop | 3 retries + timeout | **Single attempt + `\|\| true`** | **Single attempt + `2>/dev/null`** |
+| HF download retry | 3 retries + exit 34 | **`\|\| true`** | **`2>/dev/null`** |
+| Exit code 33/34 | Yes | **No** | **No** |
+| EAGER_NEXT_REGION | Yes | **No** | **No** |
+
+**Only `train_factorial.yaml` is hardened.** The other two YAMLs still silently swallow errors.
+
+**HF token security issue:** `${HF_TOKEN}` appears in `set -x` output (bash trace).
+If logging is enabled, the token is visible in `sky jobs logs`. Fix: `set +x` around
+sensitive commands, or use `{ set +x; } 2>/dev/null` pattern.
+
+### 4. Env Var Lifecycle Audit — 20 Vars, Complete Table
+
+Full lifecycle traced for every training-critical env var:
+
+| Var | Origin | YAML Default | Shell Override | Python Consumption | Type Conv. | Tested? |
+|-----|--------|-------------|----------------|-------------------|------------|---------|
+| MODEL_FAMILY | YAML | `dynunet` | `--env MODEL_FAMILY="${model}"` | `os.environ.get(..., "dynunet")` | str | Partial |
+| LOSS_NAME | YAML | `cbdice_cldice` | `--env LOSS_NAME="${loss}"` | `os.environ.get(..., "cbdice_cldice")` | str | No |
+| FOLD_ID | Shell loop | `"0"` | `--env FOLD_ID="${fold}"` | `os.environ.get(..., "-1")` | str→int | No |
+| WITH_AUX_CALIB | YAML | `"false"` | `--env WITH_AUX_CALIB=...` | `.lower() == "true"` | str→bool | No |
+| MAX_EPOCHS | YAML | `"2"` (debug) | `--env MAX_EPOCHS=...` | `os.environ.get(..., "100")` | str→int | No |
+| MAX_TRAIN_VOLUMES | YAML | `"0"` | `--env MAX_TRAIN_VOLUMES=...` | `os.environ.get(..., "0")` | str→int | No |
+| MAX_VAL_VOLUMES | YAML | `"0"` | `--env MAX_VAL_VOLUMES=...` | `os.environ.get(..., "0")` | str→int | No |
+| EXPERIMENT_NAME | YAML | `debug_factorial` | `--env EXPERIMENT_NAME=...` | `os.environ.get(..., "minivess_training")` | str | No |
+| BATCH_SIZE | Shell only | None | `--env BATCH_SIZE=${BATCH_SIZE}` | `os.environ.get(..., "2")` | str→int | Yes |
+| GRAD_ACCUM_STEPS | Shell only | None | `--env GRAD_ACCUM_STEPS=...` | `os.environ.get(..., "1")` | str→int | Yes |
+| GRADIENT_CHECKPOINTING | YAML | `"false"` | `--env GRADIENT_CHECKPOINTING=...` | `.lower() == "true"` | str→bool | **Yes (26 tests)** |
+| ZERO_SHOT | YAML | `"false"` | ZS section only | `.lower() == "true"` | str→bool | No |
+| EVAL_DATASET | YAML | `minivess` | ZS section only | `os.environ.get(..., "minivess")` | str | No |
+| POST_TRAINING_METHODS | YAML | `"none,swag"` | `--env POST_TRAINING_METHODS=...` | Fallback chain (see below) | str | No |
+| MLFLOW_TRACKING_URI | .env | `${MLFLOW_TRACKING_URI}` (placeholder) | Via `--env-file` | `resolve_tracking_uri()` | URL str | Yes |
+| HF_TOKEN | .env | `${HF_TOKEN}` (placeholder) | Via `--env-file` | Setup phase only (not Python) | token str | Yes |
+| INSTANCE_HOURLY_USD | .env | None | **NOT passed by shell** | `os.environ.get(..., "0.0")` | str→float | Yes |
+
+**Key findings:**
+
+1. **Default mismatch**: EXPERIMENT_NAME YAML default is `debug_factorial` but Python default
+   is `minivess_training`. If run_factorial.sh doesn't pass `--env`, Python uses wrong default.
+
+2. **Immutability after submission**: ALL env vars are frozen at `sky jobs launch` time.
+   If code changes add new vars or change defaults, ALL pending jobs still use OLD values.
+   Only `--resume` (cancel + resubmit) picks up new values.
+
+3. **POST_TRAINING_METHODS legacy fallback**: train_flow.py checks `POST_TRAINING_METHODS`
+   first, then falls back to `POST_TRAINING_METHOD` (singular). Should be single canonical
+   var per Rule 26 (greenfield, no backward compat needed).
+
+4. **6 Rule 22 violations**: BATCH_SIZE, GRAD_ACCUM_STEPS, FOLD_ID, MAX_TRAIN_VOLUMES,
+   MAX_VAL_VOLUMES, WITH_AUX_CALIB are consumed in Python but NOT declared in `.env.example`.
+   These are intentionally per-condition overrides (not user-configurable secrets), but should
+   still be documented in `.env.example` with comments explaining their origin.
+
+5. **3 boolean vars** (GRADIENT_CHECKPOINTING, WITH_AUX_CALIB, ZERO_SHOT) all use
+   `.lower() == "true"` which silently treats "1", "yes", "True" as False. A centralized
+   `parse_bool_env()` helper would be safer.
+
+**New tests**: 35 in `test_env_var_lifecycle.py` + 9 in `test_stale_process_detection.py`.
 
 ## Tests Written This Session
 
