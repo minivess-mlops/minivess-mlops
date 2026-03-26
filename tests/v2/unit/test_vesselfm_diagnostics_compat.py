@@ -81,6 +81,7 @@ class TestVesselFMPreTrainingChecks:
         result = check_loss_sanity(model, batch, criterion)
         assert result.passed, f"Loss sanity failed: {result.message}"
 
+    @pytest.mark.timeout(600)
     def test_run_all_checks_pass(self) -> None:
         """run_pre_training_checks() returns all-pass for VesselFM."""
         from monai.losses import DiceCELoss
