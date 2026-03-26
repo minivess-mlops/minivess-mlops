@@ -270,6 +270,15 @@ class Sam3TopoLoraAdapter(ModelAdapter):
         )
         logger.info("LoRA applied to %d layers: %s", len(lora_targets), lora_targets)
 
+        # Freeze all encoder params EXCEPT LoRA A/B matrices.
+        # _apply_lora_to_encoder wraps FFN layers in LoRA (freezing the original
+        # Linear weights), but attention Q/K/V, LayerNorm, patch embeddings, and
+        # position embeddings remain trainable. LoRA's purpose is parameter-efficient
+        # fine-tuning — only LoRA A/B matrices should be trainable in the encoder.
+        for name, param in self.backbone.encoder.named_parameters():
+            if "lora_" not in name:
+                param.requires_grad = False
+
         # Freeze FPN neck (no LoRA there)
         for param in self.backbone.fpn_neck.parameters():
             param.requires_grad = False
@@ -334,6 +343,16 @@ class Sam3TopoLoraAdapter(ModelAdapter):
 
         logits_3d = torch.stack(slice_logits, dim=2)
         return self._build_output(logits_3d, "sam3_topolora")
+
+    def get_eval_roi_size(self) -> tuple[int, int, int]:
+        """Return the sliding-window ROI size for full-volume evaluation.
+
+        SAM3 ViT-32L resizes every input to 1008x1008 regardless of spatial
+        size, so larger ROI windows cost the same encoder FLOPS as small ones.
+        Using (512, 512, 3) reduces windows from ~3300 to ~27 per 512x512x61
+        volume, cutting evaluation time from ~6 hours to ~4 minutes.
+        """
+        return (512, 512, 3)
 
     def get_config(self) -> AdapterConfigInfo:
         """Return adapter configuration info."""

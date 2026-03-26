@@ -111,12 +111,15 @@ class Sam3Backbone(nn.Module):
         # T4 (Turing) lacks BF16 → falls back to FP16 with NaN guard.
         # See: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
         self._encoder_dtype = (
-            torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+            torch.bfloat16
+            if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+            else torch.float16
         )
+        _bf16_ok = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
         logger.info(
             "SAM3 encoder dtype: %s (BF16 supported: %s)",
             self._encoder_dtype,
-            torch.cuda.is_bf16_supported(),
+            _bf16_ok,
         )
 
         self.encoder, self.fpn_neck = self._load_sam3_encoder()
@@ -396,17 +399,17 @@ class Sam3Backbone(nn.Module):
         Parameters
         ----------
         volume:
-            3D volume of shape (B, C, D, H, W).
+            3D volume of shape (B, C, H, W, D) — MONAI depth-last convention.
 
         Returns
         -------
         Features of shape (B, embed_dim, D, H_feat, W_feat).
         """
-        b, c, d, h, w = volume.shape
+        b, c, h, w, d = volume.shape
         slice_features: list[Tensor] = []
 
         for z_idx in range(d):
-            slice_2d = volume[:, :, z_idx, :, :]  # (B, C, H, W)
+            slice_2d = volume[:, :, :, :, z_idx]  # (B, C, H, W)
             features = self.extract_features(slice_2d)  # (B, 1024, H_f, W_f)
             slice_features.append(features)
 

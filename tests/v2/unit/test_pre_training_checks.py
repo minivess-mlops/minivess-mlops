@@ -296,3 +296,120 @@ class TestSkipGradientFlow:
         grad_results = [r for r in results if r.name == "gradient_flow"]
         assert len(grad_results) == 1
         assert "skip" not in grad_results[0].message.lower()
+
+
+class TestGradientFlowCleanup:
+    """T6: check_gradient_flow must clean up gradients after check.
+
+    Bug: After forward+backward, check_gradient_flow() never calls
+    model.zero_grad(set_to_none=True). Residual .grad tensors on all
+    parameters consume VRAM that is never freed.
+    """
+
+    def test_check_gradient_flow_clears_gradients_after(
+        self, sample_batch: dict[str, torch.Tensor]
+    ) -> None:
+        """After check_gradient_flow, model params should have no residual gradients."""
+        from minivess.diagnostics.pre_training_checks import check_gradient_flow
+
+        model = _make_simple_model()
+        result = check_gradient_flow(model, sample_batch)
+        assert result.passed is True
+
+        # After the check, gradients should be cleared
+        for name, param in model.named_parameters():
+            assert param.grad is None, (
+                f"Param '{name}' still has .grad after check_gradient_flow — "
+                f"leaked ~{param.grad.numel() * 4 / 1e6:.1f} MB"
+            )
+
+    def test_check_gradient_flow_logs_runtime_error(
+        self, sample_batch: dict[str, torch.Tensor]
+    ) -> None:
+        """RuntimeError during backward should be caught and reported."""
+        from minivess.diagnostics.pre_training_checks import check_gradient_flow
+
+        class _FailBackwardModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = nn.Conv3d(1, 2, 3, padding=1)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                out = self.conv(x)
+                # Register a hook that raises during backward
+                out.register_hook(lambda g: (_ for _ in ()).throw(RuntimeError("OOM")))
+                return out
+
+        model = _FailBackwardModel()
+        result = check_gradient_flow(model, sample_batch)
+        assert result.passed is False
+        assert "backward" in result.message.lower() or "gradient" in result.message.lower()
+
+
+class TestChecksToDictSerialization:
+    """T14: checks_to_dict() serialization coverage."""
+
+    def test_checks_to_dict_all_passed(self) -> None:
+        """Serialize results where all checks passed."""
+        from minivess.diagnostics.pre_training_checks import CheckResult, checks_to_dict
+
+        results = [
+            CheckResult(name="output_shape", passed=True, message="OK"),
+            CheckResult(name="gradient_flow", passed=True, message="OK"),
+            CheckResult(name="loss_sanity", passed=True, message="Loss: 0.69"),
+            CheckResult(name="nan_inf", passed=True, message="No NaN"),
+        ]
+        d = checks_to_dict(results)
+        assert d["summary"]["total"] == 4
+        assert d["summary"]["passed"] == 4
+        assert d["summary"]["failed"] == 0
+        assert len(d["checks"]) == 4
+
+    def test_checks_to_dict_with_failure(self) -> None:
+        """Serialize results with some failures."""
+        from minivess.diagnostics.pre_training_checks import CheckResult, checks_to_dict
+
+        results = [
+            CheckResult(name="output_shape", passed=True, message="OK"),
+            CheckResult(name="gradient_flow", passed=False, message="No grad", severity="error"),
+        ]
+        d = checks_to_dict(results)
+        assert d["summary"]["total"] == 2
+        assert d["summary"]["passed"] == 1
+        assert d["summary"]["failed"] == 1
+
+    def test_checks_to_dict_with_skipped_gradient_flow(self) -> None:
+        """Serialize results with skipped gradient_flow (skip_gradient_flow=True path)."""
+        from minivess.diagnostics.pre_training_checks import CheckResult, checks_to_dict
+
+        results = [
+            CheckResult(name="output_shape", passed=True, message="OK"),
+            CheckResult(
+                name="gradient_flow",
+                passed=True,
+                message="Skipped — model uses gradient checkpointing",
+            ),
+            CheckResult(name="loss_sanity", passed=True, message="Loss: 0.69"),
+            CheckResult(name="nan_inf", passed=True, message="No NaN"),
+        ]
+        d = checks_to_dict(results)
+        assert d["summary"]["passed"] == 4
+        # The skipped check should still appear in the serialized list
+        grad_check = [c for c in d["checks"] if c["name"] == "gradient_flow"]
+        assert len(grad_check) == 1
+        assert "skipped" in grad_check[0]["message"].lower()
+
+    def test_checks_to_dict_summary_counts(self) -> None:
+        """Summary counts must be accurate."""
+        from minivess.diagnostics.pre_training_checks import CheckResult, checks_to_dict
+
+        results = [
+            CheckResult(name="a", passed=True, message="OK"),
+            CheckResult(name="b", passed=False, message="Fail", severity="error"),
+            CheckResult(name="c", passed=True, message="OK"),
+            CheckResult(name="d", passed=False, message="Fail", severity="warning"),
+        ]
+        d = checks_to_dict(results)
+        assert d["summary"]["total"] == 4
+        assert d["summary"]["passed"] == 2
+        assert d["summary"]["failed"] == 2

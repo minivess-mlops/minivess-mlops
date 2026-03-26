@@ -1,0 +1,1019 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Doughnut-Hole Test Improvement Plan & Bug Fix
+  ==============================================================================
+  Generated: 2026-03-26
+  Source: Deep code review of SAM3 adapters, train_flow, pre_training_checks,
+          factorial scripts, and SkyPilot YAML (5 parallel agent reviews)
+  Branch: fix/doughnut-hole-bugs-and-test-coverage
+
+  source_of_truth:
+    - docs/planning/cold-start-prompt-9th-pass-gradient-checkpointing-validation.md
+    - .claude/metalearning/2026-03-26-sam3-gc-two-root-causes-docker-push-and-env-var.md
+
+  decisions_referenced:
+    - knowledge-graph/decisions/L3-technology/paper_model_comparison.yaml
+    - knowledge-graph/domains/cloud.yaml
+    - knowledge-graph/domains/models.yaml
+
+  contradictions_checked:
+    - CLAUDE.md (Rules 3, 20, 23, 24, 25, 27, 29)
+    - src/minivess/adapters/CLAUDE.md
+    - src/minivess/orchestration/CLAUDE.md
+    - deployment/CLAUDE.md
+
+  metalearning_loaded:
+    - .claude/metalearning/2026-03-26-sam3-gc-two-root-causes-docker-push-and-env-var.md
+    - .claude/metalearning/2026-03-25-overconfident-oom-fixed-claim.md
+    - .claude/metalearning/2026-03-25-stale-docker-image-launch.md
+
+  context: This plan addresses the "doughnut hole" in test coverage:
+    individual endpoints (Sam3Backbone source, pre_training_checks behavior,
+    factorial YAML config values) are tested, but the MIDDLE of the chain
+    (train_flow.py injection logic, _skip_grad_flow wiring, env var propagation)
+    has ZERO test coverage. This exact gap caused the 9th pass failure.
+
+  execution_model:
+    skill: /self-learning-iterative-coder (RED -> GREEN -> VERIFY -> FIX)
+    post_each_phase: /simplify code review loop
+    test_gate: make test-staging (0 fail, 0 skip, 0 xfail)
+    autonomous: YES — zero user input required
+    estimated_tasks: 26
+    estimated_new_tests: ~60-80
+
+  progress_tracking:
+    Each task has status="NOT_STARTED|IN_PROGRESS|COMPLETED|BLOCKED"
+    Update status BEFORE starting (IN_PROGRESS) and AFTER finishing (COMPLETED)
+    Commit after each completed phase with descriptive message
+    Final commit: update all statuses to COMPLETED
+-->
+
+<plan>
+  <metadata>
+    <title>Doughnut-Hole Test Improvement Plan and Bug Fix</title>
+    <branch>fix/doughnut-hole-bugs-and-test-coverage</branch>
+    <base-branch>test/run-debug-9th-pass-report</base-branch>
+    <date>2026-03-26</date>
+    <status>NOT_STARTED</status>
+    <priority>P0-P2 (26 tasks across 5 phases)</priority>
+    <skill>/self-learning-iterative-coder</skill>
+    <review-skill>/simplify</review-skill>
+    <estimated-new-tests>60-80</estimated-new-tests>
+    <test-gate>make test-staging</test-gate>
+    <report-output>docs/planning/v0-2_archive/original_docs/doughnut-hole-execution-report.md</report-output>
+  </metadata>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       COLD-START CONTEXT — Read this first in a new session
+       ══════════════════════════════════════════════════════════════════════ -->
+
+  <cold-start-context>
+    <summary>
+      Deep code review (5 parallel agents, bottom-to-top) of the SAM3 gradient
+      checkpointing / factorial experiment code paths discovered 18 bugs (5 critical,
+      7 high, 6 medium) and a "doughnut hole" in test coverage where the middle of
+      the config → model → GC activation chain had ZERO test coverage.
+
+      This plan fixes all bugs and fills all test gaps in priority order:
+        Phase 1 (P0): 8 critical bug fixes + 6 tests — blocks cloud launches
+        Phase 2 (P0): 6 tests for the doughnut-hole chain — prevents regression
+        Phase 3 (P1): 7 high-priority fixes + 6 tests — correctness under conditions
+        Phase 4 (P2): 5 medium fixes + cleanup
+        Phase 5: Code review + /simplify + final verification
+    </summary>
+
+    <mandatory-reads>
+      <!-- Read these files BEFORE implementing ANY task -->
+      <file>CLAUDE.md</file>
+      <file>src/minivess/adapters/CLAUDE.md</file>
+      <file>src/minivess/orchestration/CLAUDE.md</file>
+      <file>.claude/metalearning/2026-03-26-sam3-gc-two-root-causes-docker-push-and-env-var.md</file>
+      <file>docs/planning/v0-2_archive/original_docs/doughnut-hole-test-improvement-plan-and-bug-fix.xml</file>
+    </mandatory-reads>
+
+    <execution-protocol>
+      For EACH task:
+        1. Set task status to IN_PROGRESS (update this XML file)
+        2. Read ALL impl_files and test files listed in tdd_spec
+        3. Execute via /self-learning-iterative-coder:
+           RED: Write failing test(s) first
+           GREEN: Implement the fix / new code
+           VERIFY: make test-staging
+           FIX: If failures, fix them
+        4. Set task status to COMPLETED (update this XML file)
+        5. After each PHASE completes: run /simplify on changed files
+        6. Commit with message: "fix: [phase] [description] (#doughnut-hole)"
+        7. Run make test-staging — MUST be 0 fail, 0 skip before next phase
+    </execution-protocol>
+
+    <git-protocol>
+      1. git checkout -b fix/doughnut-hole-bugs-and-test-coverage test/run-debug-9th-pass-report
+      2. Commit after each phase (5 commits total)
+      3. Final: PR → main with all phases
+    </git-protocol>
+  </cold-start-context>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 1: P0 CRITICAL BUG FIXES (blocks cloud launches)
+       These bugs cause WRONG training behavior or silent OOM.
+       ══════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="P1" name="P0 Critical Bug Fixes" priority="P0">
+    <description>
+      Fix the 5 critical bugs that cause incorrect training behavior,
+      silent OOM, or wrong scientific results. Each fix includes the
+      corresponding regression test.
+    </description>
+
+    <task id="T1" status="NOT_STARTED">
+      <name>Fix encoder non-LoRA params not frozen in Sam3TopoLoraAdapter</name>
+      <description>
+        BUG: _apply_lora_to_encoder wraps FFN layers in LoRA but NEVER freezes the
+        remaining encoder params (attention Q/K/V, LayerNorm, patch embeddings, position
+        embeddings). The backbone was created with freeze=False, and _freeze_encoder()
+        was never called. Result: the entire 648M encoder is trainable, defeating the
+        purpose of LoRA (parameter-efficient fine-tuning) and explaining excessive VRAM.
+
+        FIX: After applying LoRA, explicitly freeze all encoder parameters EXCEPT the
+        LoRA A/B matrices. The pattern: iterate encoder.named_parameters(), freeze all
+        that don't contain "lora_" in their name.
+
+        EVIDENCE: sam3_topolora.py lines 257-275. The docstring at line 6 says
+        "Frozen SAM3 ViT-32L encoder" but the code never freezes non-LoRA params.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_encoder_non_lora_params_frozen,
+          test_lora_params_trainable,
+          test_decoder_params_trainable,
+          test_spatial_adapter_params_trainable,
+          test_frozen_param_count_matches_expected
+        </tests>
+        <file>tests/v2/unit/adapters/test_sam3_topolora_param_freeze.py</file>
+        <impl_files>
+          src/minivess/adapters/sam3_topolora.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T2" status="NOT_STARTED">
+      <name>Fix gradient_checkpointing silently False on Hydra-zen config_dict path</name>
+      <description>
+        BUG: When training_flow() receives config_dict (the EXPERIMENT env var / Hydra
+        composition path), gradient_checkpointing is NOT extracted from config_dict at
+        lines 1363-1379. The function parameter defaults to False (line 1317). Then
+        merged.update(config) at line 1455 OVERWRITES any gradient_checkpointing from
+        config_dict with False.
+
+        The same bug affects: gradient_accumulation_steps, with_aux_calib,
+        max_train_volumes, max_val_volumes, zero_shot, eval_dataset.
+
+        FIX: Extract ALL factorial-relevant keys from config_dict at lines 1363-1379:
+          gradient_checkpointing = config_dict.get("gradient_checkpointing", gradient_checkpointing)
+          gradient_accumulation_steps = config_dict.get("gradient_accumulation_steps", gradient_accumulation_steps)
+          with_aux_calib = config_dict.get("with_aux_calib", with_aux_calib)
+          ... (all missing keys)
+
+        EVIDENCE: train_flow.py lines 1363-1379 (extraction), 1453-1456 (merge).
+      </description>
+      <tdd_spec>
+        <tests>
+          test_hydra_path_preserves_gradient_checkpointing,
+          test_hydra_path_preserves_gradient_accumulation_steps,
+          test_hydra_path_preserves_with_aux_calib,
+          test_hydra_path_preserves_max_train_volumes,
+          test_merged_config_individual_params_take_precedence,
+          test_merged_config_unextracted_keys_survive
+        </tests>
+        <file>tests/v2/unit/orchestration/test_train_flow_config_merge.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/train_flow.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T3" status="NOT_STARTED">
+      <name>Fix SWAG always using fold 0 data</name>
+      <description>
+        BUG: The config dict built at lines 1432-1450 never includes "fold_id".
+        When _run_swag_post_training reads config.get("fold_id", 0) at line 1216,
+        it always gets 0. If the job was launched with --fold 2, SWAG rebuilds
+        training data from fold 0 instead of fold 2.
+
+        FIX: Add "fold_id": fold_id to the config dict at line 1432-1450.
+        Also pass the current fold's split data to _run_swag_post_training
+        instead of having it re-derive from config.
+
+        EVIDENCE: train_flow.py lines 1432-1450 (config dict), 1216 (SWAG read).
+      </description>
+      <tdd_spec>
+        <tests>
+          test_config_dict_includes_fold_id,
+          test_swag_uses_correct_fold_data
+        </tests>
+        <file>tests/v2/unit/orchestration/test_train_flow_swag_fold.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/train_flow.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T4" status="NOT_STARTED">
+      <name>Fix get_volume_embeddings wrong dimension order</name>
+      <description>
+        BUG: Sam3Backbone.get_volume_embeddings() at line 405 unpacks as
+        b, c, d, h, w = volume.shape — depth at dim 2. But MONAI outputs
+        (B, C, H, W, D) — depth last. The CLAUDE.md for this directory
+        explicitly warns about this. sam3_feature_cache.py calls this method,
+        meaning cached features have incorrect spatial dimensions.
+
+        FIX: Change to b, c, h, w, d = volume.shape and iterate with
+        for z_idx in range(d): slice_2d = volume[:, :, :, :, z_idx]
+
+        EVIDENCE: sam3_backbone.py line 405, sam3_feature_cache.py line 66.
+        Cross-ref: src/minivess/adapters/CLAUDE.md "MONAI Dimension Order" section.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_get_volume_embeddings_monai_dim_order,
+          test_get_volume_embeddings_output_shape
+        </tests>
+        <file>tests/v2/unit/adapters/test_sam3_backbone_dim_order.py</file>
+        <impl_files>
+          src/minivess/adapters/sam3_backbone.py
+          src/minivess/adapters/sam3_feature_cache.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T5" status="NOT_STARTED">
+      <name>Fix SkyPilot recover_on_exit_codes never emitted</name>
+      <description>
+        BUG: train_factorial.yaml declares recover_on_exit_codes: [33, 34] with
+        comments saying "33 = DVC network error, 34 = HF download timeout." But the
+        setup script uses exit 1 everywhere. The EAGER_NEXT_REGION strategy is dead
+        for setup failures.
+
+        FIX: Add explicit exit codes to the setup script:
+          - DVC pull failure: exit 33
+          - HF download timeout: exit 34
+        And add a test that validates the exit codes match the recovery config.
+
+        EVIDENCE: train_factorial.yaml line 52 (config), lines 153, 204 (exit 1).
+      </description>
+      <tdd_spec>
+        <tests>
+          test_setup_script_dvc_exit_code_matches_recovery,
+          test_setup_script_hf_exit_code_matches_recovery,
+          test_recover_on_exit_codes_declared
+        </tests>
+        <file>tests/v2/unit/deployment/test_skypilot_exit_codes.py</file>
+        <impl_files>
+          deployment/skypilot/train_factorial.yaml
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T6" status="NOT_STARTED">
+      <name>Fix check_gradient_flow cleanup — leaked gradients waste ~2.5 GB</name>
+      <description>
+        BUG: After forward+backward, check_gradient_flow() never calls
+        model.zero_grad(set_to_none=True). Residual .grad tensors on all
+        648M SAM3 parameters consume ~2.5 GB that are never freed. The model
+        is also left in .train() mode without restoring original mode.
+
+        FIX: Add cleanup at the end of check_gradient_flow():
+          model.zero_grad(set_to_none=True)
+          # Restore original mode would be ideal but not critical since
+          # the next check (check_loss_sanity) calls model.eval()
+
+        Also fix: the except RuntimeError swallows OOM without logging.
+        Change to log the exception before returning the CheckResult.
+
+        EVIDENCE: pre_training_checks.py lines 90-130.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_check_gradient_flow_clears_gradients_after,
+          test_check_gradient_flow_logs_runtime_error
+        </tests>
+        <file>tests/v2/unit/test_pre_training_checks.py</file>
+        <impl_files>
+          src/minivess/diagnostics/pre_training_checks.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T7" status="NOT_STARTED">
+      <name>Fix config fingerprint mismatch between training_subflow and train_one_fold_task</name>
+      <description>
+        BUG: In training_subflow (line 841), compute_config_fingerprint is called
+        with with_aux_calib but WITHOUT patch_size. In train_one_fold_task (line 603),
+        the same function is called with patch_size but WITHOUT with_aux_calib. These
+        produce different fingerprints for the same configuration, breaking auto-resume
+        cross-referencing.
+
+        FIX: Both call sites should pass identical keyword arguments. Extract the
+        fingerprint inputs to a helper function that both call sites use.
+
+        EVIDENCE: train_flow.py lines 603 vs 841.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_fingerprint_consistency_between_subflow_and_fold_task
+        </tests>
+        <file>tests/v2/unit/orchestration/test_config_fingerprint.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/train_flow.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T8" status="NOT_STARTED">
+      <name>Add missing get_eval_roi_size() to Sam3TopoLoraAdapter and Sam3HybridAdapter</name>
+      <description>
+        BUG: Sam3VanillaAdapter overrides get_eval_roi_size() to return (512, 512, 3),
+        which is critical because the ViT encoder costs the same regardless of spatial
+        size. Sam3TopoLoraAdapter and Sam3HybridAdapter do NOT override it, falling back
+        to the base class default (128, 128, 16). This creates ~3300 validation windows
+        instead of ~27, making validation take ~6 hours instead of ~4 minutes.
+
+        FIX: Add get_eval_roi_size() override to both adapters returning (512, 512, 3).
+
+        EVIDENCE: sam3_topolora.py (missing override), sam3_hybrid.py (missing override),
+        sam3_vanilla.py (has override — use as reference).
+      </description>
+      <tdd_spec>
+        <tests>
+          test_topolora_eval_roi_size_is_512_512_3,
+          test_hybrid_eval_roi_size_is_512_512_3,
+          test_all_sam3_variants_have_eval_roi_override
+        </tests>
+        <file>tests/v2/unit/adapters/test_sam3_eval_roi_size.py</file>
+        <impl_files>
+          src/minivess/adapters/sam3_topolora.py
+          src/minivess/adapters/sam3_hybrid.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 2: DOUGHNUT-HOLE TEST COVERAGE (the gap that caused 9th pass failure)
+       Fill the middle of the config → model → GC activation chain with tests.
+       ══════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="P2" name="Doughnut-Hole Chain Tests" priority="P0">
+    <description>
+      The test coverage has excellent endpoints but ZERO coverage in the middle:
+        [TESTED] factorial config (GC: true)
+          → [UNTESTED] run_factorial.sh parsing
+            → [UNTESTED] train_flow.py injection
+              → [UNTESTED] _skip_grad_flow wiring
+                → [TESTED] pre_training_checks.py
+                  → [TESTED (AST only)] Sam3Backbone GC
+
+      This phase fills the gap with 6 targeted tests.
+    </description>
+
+    <task id="T9" status="NOT_STARTED">
+      <name>Runtime test: Sam3Backbone gradient_checkpointing_enable() called</name>
+      <description>
+        GAP: All 5 existing GC tests are AST/string-search. NONE actually instantiate
+        Sam3Backbone with gradient_checkpointing=True and verify the HuggingFace
+        gradient_checkpointing_enable() method was called.
+
+        APPROACH: Mock _load_sam3_encoder to return a mock encoder with a
+        gradient_checkpointing_enable method. Instantiate Sam3Backbone with
+        gradient_checkpointing=True, freeze=False. Assert the method was called
+        with gradient_checkpointing_kwargs={"use_reentrant": False}.
+
+        REFERENCE: The mock pattern exists in test_sam3_nan_guard.py lines 50-73.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_backbone_gc_enable_called_with_mock_encoder,
+          test_backbone_gc_not_called_when_false,
+          test_backbone_gc_skipped_when_frozen,
+          test_backbone_gc_warns_when_encoder_lacks_method
+        </tests>
+        <file>tests/v2/unit/adapters/test_sam3_gradient_checkpointing.py</file>
+        <impl_files>
+          src/minivess/adapters/sam3_backbone.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T10" status="NOT_STARTED">
+      <name>Test: train_flow.py injects gradient_checkpointing into architecture_params</name>
+      <description>
+        GAP: ZERO tests for the injection logic at train_flow.py lines 452-456:
+          _gc_config = config.get("gradient_checkpointing", False)
+          if _gc_config and "gradient_checkpointing" not in arch_params:
+              arch_params["gradient_checkpointing"] = True
+
+        APPROACH: Unit test the injection logic directly. Extract the relevant
+        code block into a testable helper function if needed, or test via the
+        config dict that train_one_fold_task builds.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_gc_injected_into_arch_params_when_config_true,
+          test_gc_not_injected_when_config_false,
+          test_gc_not_overwritten_when_arch_params_already_has_it
+        </tests>
+        <file>tests/v2/unit/orchestration/test_train_flow_gradient_checkpointing.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/train_flow.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>T2</dependencies>
+    </task>
+
+    <task id="T11" status="NOT_STARTED">
+      <name>Test: _skip_grad_flow wiring when gradient_checkpointing is enabled</name>
+      <description>
+        GAP: ZERO tests for train_flow.py lines 631-641:
+          _skip_grad_flow = bool(
+              config.get("gradient_checkpointing", False)
+              or arch_params.get("gradient_checkpointing", False)
+          )
+          ... skip_gradient_flow=_skip_grad_flow ...
+
+        This was one of the two root causes of the 9th pass failure.
+
+        APPROACH: Test the boolean logic directly and verify it's passed to
+        run_pre_training_checks(). May need to extract to a helper function
+        for testability.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_skip_grad_flow_true_when_config_gc_true,
+          test_skip_grad_flow_true_when_arch_params_gc_true,
+          test_skip_grad_flow_false_by_default,
+          test_skip_grad_flow_passed_to_pre_training_checks
+        </tests>
+        <file>tests/v2/unit/orchestration/test_train_flow_gradient_checkpointing.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/train_flow.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>T2</dependencies>
+    </task>
+
+    <task id="T12" status="NOT_STARTED">
+      <name>Test: SkyPilot YAML has GRADIENT_CHECKPOINTING env var</name>
+      <description>
+        GAP: The test_has_required_env_vars test checks 13 env vars but does NOT
+        include GRADIENT_CHECKPOINTING. The YAML defines it at line 103.
+
+        APPROACH: Add GRADIENT_CHECKPOINTING to the required env vars list.
+        Also add BATCH_SIZE and GRAD_ACCUM_STEPS which are also missing from
+        the envs: section (they're passed via --env but should have defaults).
+      </description>
+      <tdd_spec>
+        <tests>
+          test_has_gradient_checkpointing_env_var,
+          test_gradient_checkpointing_default_is_false
+        </tests>
+        <file>tests/v2/unit/test_train_factorial_yaml.py</file>
+        <impl_files>
+          deployment/skypilot/train_factorial.yaml
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T13" status="NOT_STARTED">
+      <name>Test: run_factorial.sh dry-run shows grad_ckpt=true for SAM3</name>
+      <description>
+        GAP: The @slow dry-run tests check for bs= and accum= but NOT grad_ckpt=.
+
+        APPROACH: Parse dry-run output and verify:
+          - SAM3 TopoLoRA conditions show grad_ckpt=true
+          - SAM3 Hybrid conditions show grad_ckpt=true
+          - DynUNet conditions show grad_ckpt=false
+          - MambaVesselNet conditions show grad_ckpt=false
+      </description>
+      <tdd_spec>
+        <tests>
+          test_dry_run_sam3_topolora_grad_ckpt_true,
+          test_dry_run_sam3_hybrid_grad_ckpt_true,
+          test_dry_run_dynunet_grad_ckpt_false
+        </tests>
+        <file>tests/v2/unit/orchestration/test_run_factorial_model_overrides.py</file>
+        <impl_files>
+          scripts/run_factorial.sh
+          configs/factorial/debug.yaml
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T14" status="NOT_STARTED">
+      <name>Test: checks_to_dict serialization including skipped gradient_flow</name>
+      <description>
+        GAP: checks_to_dict() has ZERO test coverage. It serializes CheckResult
+        lists for MLflow artifact logging.
+
+        APPROACH: Test with various result sets including:
+          - Normal results (all passed)
+          - Mixed results (some passed, some failed)
+          - Skipped gradient_flow (the skip_gradient_flow=True path)
+      </description>
+      <tdd_spec>
+        <tests>
+          test_checks_to_dict_all_passed,
+          test_checks_to_dict_with_failure,
+          test_checks_to_dict_with_skipped_gradient_flow,
+          test_checks_to_dict_summary_counts
+        </tests>
+        <file>tests/v2/unit/test_pre_training_checks.py</file>
+        <impl_files>
+          src/minivess/diagnostics/pre_training_checks.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 3: P1 HIGH-PRIORITY FIXES
+       Correctness issues under specific conditions.
+       ══════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="P3" name="P1 High-Priority Fixes" priority="P1">
+    <description>
+      Fix bugs that cause correctness issues under specific but realistic conditions.
+      Each fix includes a regression test.
+    </description>
+
+    <task id="T15" status="NOT_STARTED">
+      <name>Consolidate 3 redundant no_grad forward passes in pre_training_checks</name>
+      <description>
+        BUG: check_output_shape, check_loss_sanity, and check_nan_inf each run a
+        separate torch.no_grad() forward pass. For SAM3 with slice-by-slice processing,
+        each pass iterates all Z slices. Three passes = 3x wall-clock time.
+
+        FIX: Run a single no_grad forward pass and reuse the output for all three
+        checks. Extract a _run_inference_once() helper that returns the output tensor.
+        Pass it to check_output_shape, check_loss_sanity, check_nan_inf as an arg.
+
+        CONSTRAINT: check_gradient_flow must remain a separate pass (needs gradients).
+        The skip_gradient_flow logic is unaffected.
+
+        EVIDENCE: pre_training_checks.py lines 43-73, 133-175, 178-206.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_single_forward_pass_for_inference_checks,
+          test_all_checks_still_produce_correct_results,
+          test_forward_called_once_not_thrice
+        </tests>
+        <file>tests/v2/unit/test_pre_training_checks.py</file>
+        <impl_files>
+          src/minivess/diagnostics/pre_training_checks.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>T6</dependencies>
+    </task>
+
+    <task id="T16" status="NOT_STARTED">
+      <name>Fix signal handling — kill sky jobs launch children on Ctrl+C</name>
+      <description>
+        BUG: The cleanup() function kills background shell subshells (jobs -p) but
+        NOT the sky jobs launch child processes within them. Ctrl+C leaks submissions.
+
+        FIX: Add signal propagation to the subshells:
+          ( trap 'kill 0' EXIT; ... sky jobs launch ... )
+        Or use process group kill in cleanup:
+          kill -- -$$ 2>/dev/null || true
+
+        EVIDENCE: run_factorial.sh lines 41-51 (cleanup), 404-434 (subshells).
+      </description>
+      <tdd_spec>
+        <tests>
+          test_cleanup_function_exists,
+          test_subshell_has_trap_or_process_group_kill
+        </tests>
+        <file>tests/v2/unit/deployment/test_run_factorial_signal_handling.py</file>
+        <impl_files>
+          scripts/run_factorial.sh
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T17" status="NOT_STARTED">
+      <name>Fix zero-shot baselines ignoring --resume flag</name>
+      <description>
+        BUG: The resume logic (lines 349-367) only checks training conditions.
+        The zero-shot Python block (lines 482-553) does not check whether a
+        zero-shot condition is already in the queue. Resume re-submits duplicates.
+
+        FIX: Pass EXISTING_ACTIVE_JOBS to the Python block and check before
+        launching each zero-shot condition.
+
+        EVIDENCE: run_factorial.sh lines 470-556.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_zero_shot_block_checks_existing_jobs,
+          test_zero_shot_not_duplicated_on_resume
+        </tests>
+        <file>tests/v2/unit/deployment/test_run_factorial_zero_shot.py</file>
+        <impl_files>
+          scripts/run_factorial.sh
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T18" status="NOT_STARTED">
+      <name>Fix sam3_hybrid GatedFeatureFusion.forward() never called</name>
+      <description>
+        BUG: Sam3HybridAdapter.forward() at lines 241-261 manually reimplements the
+        fusion logic instead of calling self.fusion(logits, sam_features). The class's
+        forward() method is dead code. Also: sam_features.detach() is redundant because
+        the features already came from a torch.no_grad() context.
+
+        FIX: Refactor to call self.fusion(logits, sam_features) directly.
+        Remove the redundant detach() and the inline reimplementation.
+
+        EVIDENCE: sam3_hybrid.py lines 241-261 (inline), line 78 (fusion forward).
+      </description>
+      <tdd_spec>
+        <tests>
+          test_gated_fusion_forward_called,
+          test_fusion_output_shape_correct
+        </tests>
+        <file>tests/v2/unit/adapters/test_sam3_hybrid_fusion.py</file>
+        <impl_files>
+          src/minivess/adapters/sam3_hybrid.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T19" status="NOT_STARTED">
+      <name>Fix post_training_run_id empty string instead of None</name>
+      <description>
+        BUG: The ternary chain at lines 1486-1492 can produce "" (empty string)
+        instead of None when all pt_run_ids entries are None with len > 1.
+        "" is truthy, misleading downstream checks.
+
+        FIX: Add explicit None check:
+          result = ",".join(...) or None
+
+        EVIDENCE: train_flow.py lines 1486-1492.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_post_training_run_id_none_when_all_none,
+          test_post_training_run_id_single_value,
+          test_post_training_run_id_multi_value,
+          test_post_training_run_id_mixed_none
+        </tests>
+        <file>tests/v2/unit/orchestration/test_train_flow_post_training_result.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/train_flow.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T20" status="NOT_STARTED">
+      <name>Extract duplicate patch_size resolution logic</name>
+      <description>
+        DUP: The _is_sam3 -> (64,64,3) / _is_vesselfm -> (64,64,32) / else -> (64,64,16)
+        logic appears at train_flow.py lines 424-434 AND lines 1229-1238.
+
+        FIX: Extract to a shared function resolve_patch_size(model_family: str) -> tuple[int,int,int]
+        and call from both locations.
+
+        EVIDENCE: train_flow.py lines 424-434 and 1229-1238.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_resolve_patch_size_sam3,
+          test_resolve_patch_size_vesselfm,
+          test_resolve_patch_size_default,
+          test_resolve_patch_size_called_in_both_locations
+        </tests>
+        <file>tests/v2/unit/orchestration/test_patch_size_resolution.py</file>
+        <impl_files>
+          src/minivess/orchestration/flows/train_flow.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T21" status="NOT_STARTED">
+      <name>Fix lockfile not cleaned on early exit paths</name>
+      <description>
+        BUG: If preflight fails (line 147), run_factorial.sh exits via exit 1 but the
+        lockfile written at line 136 is never removed. The cleanup trap only handles
+        INT/TERM (line 52), not EXIT or regular exit paths.
+
+        FIX: Add EXIT to the trap, or add explicit rm -f "${LOCKFILE}" before each
+        early exit. The simplest fix: trap cleanup EXIT INT TERM (remove lockfile on
+        any exit).
+
+        EVIDENCE: run_factorial.sh lines 52 (trap), 136 (lockfile write), 147 (early exit).
+      </description>
+      <tdd_spec>
+        <tests>
+          test_lockfile_cleaned_on_preflight_failure,
+          test_lockfile_cleaned_on_success
+        </tests>
+        <file>tests/v2/unit/deployment/test_run_factorial_lockfile.py</file>
+        <impl_files>
+          scripts/run_factorial.sh
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 4: P2 MEDIUM FIXES + DEAD CODE CLEANUP
+       ══════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="P4" name="P2 Medium Fixes and Cleanup" priority="P2">
+    <description>
+      Fix medium-priority issues, remove dead code, and improve documentation.
+    </description>
+
+    <task id="T22" status="NOT_STARTED">
+      <name>Fix torch.cuda.is_bf16_supported() crash on CPU-only machines</name>
+      <description>
+        BUG: Sam3Backbone.__init__ calls torch.cuda.is_bf16_supported() at line 113-114
+        without guarding for the no-CUDA case. This crashes on CPU-only machines.
+
+        FIX: Guard with torch.cuda.is_available() first:
+          if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+              ...
+          else:
+              self._encoder_dtype = torch.float16
+
+        EVIDENCE: sam3_backbone.py lines 113-114.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_backbone_init_on_cpu_only_machine
+        </tests>
+        <file>tests/v2/unit/adapters/test_sam3_backbone_cpu_fallback.py</file>
+        <impl_files>
+          src/minivess/adapters/sam3_backbone.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+
+    <task id="T23" status="NOT_STARTED">
+      <name>Add cache invalidation metadata to sam3_feature_cache</name>
+      <description>
+        BUG: Sam3FeatureCache saves .pt files without model version metadata.
+        If the model changes (different weights, different preprocessing),
+        cached features become stale. No mechanism to detect this.
+
+        FIX: Save a metadata JSON alongside each .pt cache file containing:
+          - Model checkpoint hash (or weight file path)
+          - Input preprocessing config hash
+          - Cache creation timestamp
+        On load, verify metadata matches current model config.
+
+        EVIDENCE: sam3_feature_cache.py line 60.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_cache_creates_metadata_file,
+          test_cache_invalidated_when_config_changes,
+          test_cache_valid_when_config_matches
+        </tests>
+        <file>tests/v2/unit/adapters/test_sam3_feature_cache_invalidation.py</file>
+        <impl_files>
+          src/minivess/adapters/sam3_feature_cache.py
+        </impl_files>
+      </tdd_spec>
+      <dependencies>T4</dependencies>
+    </task>
+
+    <task id="T24" status="NOT_STARTED">
+      <name>Remove dead code across all reviewed files</name>
+      <description>
+        Dead code identified across the codebase:
+          1. pre_training_checks.py docstring: claims 6 checks, only 4 exist — update docstring
+          2. sam3_topolora.py line 119: LORA_FFN_KEYWORDS "fc1", "fc2" never match SAM3
+          3. model_builder.py lines 37-44: _register decorator never used
+          4. sam3_backbone.py lines 171-178: _auto_input_size() always returns constant
+          5. run_factorial.sh lines 374-375: FAILED=0/LAUNCHED=0 overwritten before read
+          6. run_factorial_resilient.sh line 33: MAX_OUTER_RETRIES=2016 never used
+          7. sam3_hybrid.py: GatedFeatureFusion.forward() dead (T18 refactors this)
+
+        FIX: Remove each dead item. For docstrings, update to match reality.
+        For "fc1"/"fc2", remove if confirmed not needed for any supported model.
+        For _auto_input_size(), inline the constant.
+
+        NOTE: Only delete what is CLEARLY dead. If in doubt, leave it.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_no_fc1_fc2_in_lora_keywords_if_only_sam3,
+          test_pre_training_checks_docstring_matches_reality
+        </tests>
+        <file>tests/v2/unit/test_dead_code_cleanup.py</file>
+        <impl_files>
+          src/minivess/diagnostics/pre_training_checks.py
+          src/minivess/adapters/sam3_topolora.py
+          src/minivess/adapters/sam3_backbone.py
+          src/minivess/adapters/model_builder.py
+          scripts/run_factorial.sh
+          scripts/run_factorial_resilient.sh
+        </impl_files>
+      </tdd_spec>
+      <dependencies>T1, T18</dependencies>
+    </task>
+
+    <task id="T25" status="NOT_STARTED">
+      <name>Fix zero-shot baselines missing retry logic and GRADIENT_CHECKPOINTING</name>
+      <description>
+        BUG: Training conditions get retry + exponential backoff (lines 404-434).
+        Zero-shot baselines use single subprocess.run() with no retry (line 519).
+        Also: zero-shot block omits GRADIENT_CHECKPOINTING env var.
+
+        FIX: Add retry loop to zero-shot Python block matching training retries.
+        Add GRADIENT_CHECKPOINTING env var (using model_overrides lookup, default false).
+
+        EVIDENCE: run_factorial.sh lines 518-547.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_zero_shot_has_retry_logic,
+          test_zero_shot_has_gradient_checkpointing_env
+        </tests>
+        <file>tests/v2/unit/deployment/test_run_factorial_zero_shot.py</file>
+        <impl_files>
+          scripts/run_factorial.sh
+        </impl_files>
+      </tdd_spec>
+      <dependencies>T17</dependencies>
+    </task>
+
+    <task id="T26" status="NOT_STARTED">
+      <name>Fix resilient script permanent failure tracking across log files</name>
+      <description>
+        BUG: Each run_factorial.sh --resume invocation creates a NEW job log file.
+        The resilient wrapper's check_for_permanent_failures reads only the LATEST
+        log, so failure counts never accumulate across iterations. A condition that
+        fails once per iteration never reaches MAX_CONDITION_FAILURES=3.
+
+        FIX: grep across ALL log files (not just latest) when counting failures:
+          grep -h "LAUNCH_FAILED" outputs/*factorial_job_ids.txt | ...
+
+        Also fix: no deduplication in permanent failure file.
+
+        EVIDENCE: run_factorial_resilient.sh line 123.
+      </description>
+      <tdd_spec>
+        <tests>
+          test_failure_count_accumulates_across_logs,
+          test_permanent_failure_deduplication
+        </tests>
+        <file>tests/v2/unit/deployment/test_resilient_script_failure_tracking.py</file>
+        <impl_files>
+          scripts/run_factorial_resilient.sh
+        </impl_files>
+      </tdd_spec>
+      <dependencies>none</dependencies>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PHASE 5: CODE REVIEW + SIMPLIFY + FINAL VERIFICATION
+       ══════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="P5" name="Final Review and Verification" priority="P0">
+    <description>
+      After all tasks complete:
+      1. Run /simplify on all changed files
+      2. Run make test-staging — MUST be 0 fail, 0 skip
+      3. Run ruff check + mypy
+      4. Update this plan with final status
+      5. Write execution report
+      6. Create PR → main
+    </description>
+
+    <task id="T27" status="NOT_STARTED">
+      <name>Run /simplify code review on all changed files</name>
+      <description>
+        Review all files modified in phases 1-4 using /simplify skill.
+        Focus on: code quality, reuse opportunities, naming consistency,
+        unnecessary complexity introduced by fixes.
+
+        Files to review (all impl_files from T1-T26):
+          - src/minivess/adapters/sam3_topolora.py
+          - src/minivess/adapters/sam3_backbone.py
+          - src/minivess/adapters/sam3_hybrid.py
+          - src/minivess/adapters/sam3_feature_cache.py
+          - src/minivess/adapters/model_builder.py
+          - src/minivess/diagnostics/pre_training_checks.py
+          - src/minivess/orchestration/flows/train_flow.py
+          - deployment/skypilot/train_factorial.yaml
+          - scripts/run_factorial.sh
+          - scripts/run_factorial_resilient.sh
+      </description>
+      <tdd_spec>
+        <tests>none — review only</tests>
+        <file>none</file>
+        <impl_files>all changed files</impl_files>
+      </tdd_spec>
+      <dependencies>T1-T26</dependencies>
+    </task>
+
+    <task id="T28" status="NOT_STARTED">
+      <name>Final verification gate and PR creation</name>
+      <description>
+        1. make test-staging — MUST be 0 fail, 0 skip, 0 xfail
+        2. uv run ruff check src/ tests/ — 0 errors
+        3. uv run mypy src/ — 0 errors (or pre-existing only)
+        4. Update all task statuses in this XML to COMPLETED
+        5. Write execution report to:
+           docs/planning/v0-2_archive/original_docs/doughnut-hole-execution-report.md
+        6. Commit: "fix: doughnut-hole bug fixes + test coverage (#doughnut-hole)"
+        7. Create PR: fix/doughnut-hole-bugs-and-test-coverage → main
+      </description>
+      <tdd_spec>
+        <tests>make test-staging</tests>
+        <file>docs/planning/v0-2_archive/original_docs/doughnut-hole-execution-report.md</file>
+        <impl_files>this plan file</impl_files>
+      </tdd_spec>
+      <dependencies>T27</dependencies>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PROGRESS TRACKING SUMMARY
+       ══════════════════════════════════════════════════════════════════════ -->
+
+  <progress-summary>
+    <total-tasks>28</total-tasks>
+    <completed>0</completed>
+    <in-progress>0</in-progress>
+    <not-started>28</not-started>
+    <blocked>0</blocked>
+    <phase-status>
+      <phase ref="P1">NOT_STARTED (8 tasks: T1-T8)</phase>
+      <phase ref="P2">NOT_STARTED (6 tasks: T9-T14)</phase>
+      <phase ref="P3">NOT_STARTED (7 tasks: T15-T21)</phase>
+      <phase ref="P4">NOT_STARTED (5 tasks: T22-T26)</phase>
+      <phase ref="P5">NOT_STARTED (2 tasks: T27-T28)</phase>
+    </phase-status>
+    <estimated-new-tests>~70</estimated-new-tests>
+    <last-updated>2026-03-26T06:00:00Z</last-updated>
+  </progress-summary>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       DEPENDENCY GRAPH
+       ══════════════════════════════════════════════════════════════════════
+
+       T1 ──────────────────────┐
+       T2 ──── T10, T11        │
+       T3                      │
+       T4 ──── T23             ├── T24 (dead code cleanup)
+       T5                      │
+       T6 ──── T15             │
+       T7                      │
+       T8 ─────────────────────┘
+       T9
+       T12
+       T13
+       T14
+       T16
+       T17 ──── T25
+       T18 ──── T24
+       T19
+       T20
+       T21
+       T22
+       T26
+
+       All T1-T26 ──── T27 (simplify) ──── T28 (final gate)
+
+       Parallelizable within each phase:
+         Phase 1: T1, T2, T3, T4, T5, T6, T7, T8 (all independent)
+         Phase 2: T9, T12, T13, T14 independent; T10, T11 depend on T2
+         Phase 3: T15 depends on T6; T17 independent; rest independent
+         Phase 4: T23 depends on T4; T24 depends on T1+T18; T25 depends on T17
+       ══════════════════════════════════════════════════════════════════════ -->
+
+</plan>

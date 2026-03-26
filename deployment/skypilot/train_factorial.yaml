@@ -150,7 +150,7 @@ setup: |
     if [ "${dvc_pull_ok}" = "false" ]; then
       echo "FATAL: DVC pull from GCS failed after 3 attempts."
       echo "Ensure: gcloud auth application-default login"
-      exit 1
+      exit 33  # DVC network error — triggers EAGER_NEXT_REGION recovery
     fi
   fi
 
@@ -174,15 +174,35 @@ setup: |
   case "${MODEL_FAMILY}" in
     sam3_vanilla|sam3_topolora|sam3_hybrid)
       echo "Pre-caching SAM3 weights..."
+      hf_dl_ok=false
       for attempt in 1 2 3; do
-        timeout 600 python -c "from huggingface_hub import hf_hub_download; hf_hub_download('facebook/sam3', 'sam3.pt')" && break || echo "SAM3 weight download attempt ${attempt} failed" && sleep $((30 * attempt))
+        if timeout 600 python -c "from huggingface_hub import hf_hub_download; hf_hub_download('facebook/sam3', 'sam3.pt')"; then
+          hf_dl_ok=true
+          break
+        else
+          echo "SAM3 weight download attempt ${attempt} failed" && sleep $((30 * attempt))
+        fi
       done
+      if [ "${hf_dl_ok}" = "false" ]; then
+        echo "FATAL: SAM3 weight download failed after 3 attempts."
+        exit 34  # HF download timeout — triggers EAGER_NEXT_REGION recovery
+      fi
       ;;
     vesselfm)
       echo "Pre-caching VesselFM weights..."
+      hf_dl_ok=false
       for attempt in 1 2 3; do
-        timeout 600 python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" && break || echo "VesselFM weight download attempt ${attempt} failed" && sleep $((30 * attempt))
+        if timeout 600 python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')"; then
+          hf_dl_ok=true
+          break
+        else
+          echo "VesselFM weight download attempt ${attempt} failed" && sleep $((30 * attempt))
+        fi
       done
+      if [ "${hf_dl_ok}" = "false" ]; then
+        echo "FATAL: VesselFM weight download failed after 3 attempts."
+        exit 34  # HF download timeout — triggers EAGER_NEXT_REGION recovery
+      fi
       ;;
   esac
 
@@ -201,7 +221,7 @@ setup: |
     done
     if [ "${deepvess_pull_ok}" = "false" ]; then
       echo "FATAL: DeepVess DVC pull failed after 3 attempts."
-      exit 1
+      exit 33  # DVC network error — triggers EAGER_NEXT_REGION recovery
     fi
   fi
 

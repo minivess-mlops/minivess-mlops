@@ -49,7 +49,7 @@ cleanup() {
     echo "Cleanup complete. Check job log for partial results."
     exit 130  # Standard exit code for SIGINT
 }
-trap cleanup INT TERM
+trap cleanup EXIT INT TERM
 
 # ─── Find sky binary (venv or system) ───────────────────────────────────
 SKY_BIN=""
