@@ -66,7 +66,7 @@ Key fixes being validated:
 
 | Condition | Status | VRAM | Wall Time | DSC | Notes |
 |-----------|--------|------|-----------|-----|-------|
-| sam3_hybrid-cbdice_cldice-calibtrue-f0 | PENDING | | | | |
+| sam3_hybrid-cbdice_cldice-calibtrue-f0 | **RUNNING** (job 154) | loading | 2h+ | TBD | HF download OK, weights loading |
 | sam3_hybrid-cbdice_cldice-calibfalse-f0 | PENDING | | | | |
 | sam3_hybrid-dice_ce-calibtrue-f0 | PENDING | | | | |
 | sam3_hybrid-dice_ce-calibfalse-f0 | PENDING | | | | |
@@ -235,6 +235,14 @@ Security concern — token should not appear in setup script output.
 | 09:42 | Jobs 119-136 cancelled (wrong YAML), 18 cells resubmitted (138-157) |
 | 09:45 | HF repo consistency test written (18 tests, all passing) |
 | 09:50 | Job 138 (sam3_vanilla zero-shot) RUNNING — setup phase succeeded |
+| 10:15 | Wave 2 agents completed (GC chain, cross-file drift, setup failures, env vars) |
+| 10:30 | GC chain tests (26) + env var lifecycle tests (35) + stale process tests (9) written |
+| 10:45 | Commit 145331cc: 70 new robustness tests (staging 6558 passed) |
+| 11:00 | Commit 56ab1e7c: comprehensive report with all 7-agent findings |
+| 11:05 | Wave 3 agents launched (bottom-up: train_flow, post-training, test infra, data/losses) |
+| 11:15 | **Job 154 (sam3_hybrid-cbdice_cldice-calibtrue-f0) RUNNING** — 2h job time |
+| 11:15 | Setup validated: HF download OK, DVC OK, MLflow OK, L4 23.6 GB, PyTorch 2.10 |
+| 11:15 | SAM3 weights loading (1468/1468 params) — training imminent |
 | TBD | First SAM3 training job SUCCEEDED |
 | TBD | All 18 target jobs terminal |
 
@@ -400,6 +408,100 @@ Full lifecycle traced for every training-critical env var:
 | `test_env_var_lifecycle.py` | 35 | Env vars | Stale/missing env vars → wrong config |
 | `test_stale_process_detection.py` | 9 | Process mgmt | Stale loop relaunching with old vars |
 | **Total** | **88** | | |
+
+## Deep-Dive Findings (Third Wave — 4 Bottom-Up Agents)
+
+Reading files bottom-to-top to counter positional bias, targeting untouched domains.
+
+### 1. train_flow.py Bottom-Up — 15 Edge Cases Found
+
+| # | Location | Issue | Severity |
+|---|----------|-------|----------|
+| 1 | L87 `log_epoch0_cost_estimate` | Division by zero if `max_epochs=0` leaks through guards | LOW |
+| 2 | L1179 `_run_swag_post_training` | `max_epochs // 5 = 0` silently clamps to `max(2, 0) = 2` | MEDIUM |
+| 3 | L1001 OpenLineage emission | Broad `except Exception` swallows lineage failures | LOW |
+| 4 | L954 timing parse | Empty `_setup_durations={}` on exception silently skips cost logging | MEDIUM |
+| 5 | L1087 post-training subflow | All exceptions swallowed — `post_training_run_id` stays None | MEDIUM |
+| 6 | L1507 post-training methods | `"none,swag".split(",")` → iterates including "none" → 2 subflow calls | LOW |
+| 7 | L842 `_build_model_and_trainer` | Returned `model` and `trainer` not validated as non-None | MEDIUM |
+| 8 | L725 fold iteration | `folds_to_run = []` → `for fold_id in []:` → skips all training silently | **HIGH** |
+| 9 | L1378 config_dict branch | `bool(config_dict.get(...))` — any non-empty string is truthy | MEDIUM |
+| 10 | L688 `_build_dataloaders` | Empty dataloader dict accepted silently (Rule 25 violation candidate) | **HIGH** |
+| 11 | L1438 zero-shot early return | Missing test for `zero_shot=True, max_epochs=1` (shouldn't early return) | MEDIUM |
+| 12 | L1507 pt_run_ids join | IndexError if `pt_run_ids=[]` and single-element branch executes | LOW |
+| 13 | L1465 config assembly | 20+ keys assembled in dict literal — any typo silently drops a key | LOW |
+| 14 | L87 cost estimate | `hourly_rate * estimated_total_hours` with rate=0.0 is misleading $0 | LOW |
+| 15 | L688 sliding window | ROI size > volume size in sliding window inference → single-patch (slow) | MEDIUM |
+
+**Top 3 test priorities:**
+- Empty `folds_to_run` silently skipping training (#8)
+- Empty dataloader dict passing without raise (#10)
+- Zero-shot with `max_epochs=1` not returning early (#11)
+
+### 2. Post-Training + Analysis Flows — 12 Edge Cases Found
+
+**Post-training flow (`post_training_flow.py`):**
+
+| # | Issue | Tested? |
+|---|-------|---------|
+| 1 | Empty checkpoint list → plugins receive `[]` and fail | No |
+| 2 | Missing upstream training run → `None` propagated | No |
+| 3 | Both weight and data plugins fail → which error reported? | No |
+| 4 | Checkpoint count vs metadata count mismatch | No |
+| 5 | `_average_checkpoints([])` silently returns without error | No |
+| 6 | Mismatched state_dict keys across folds → corrupted average | No |
+
+**Analysis flow (`analysis_flow.py`):**
+
+| # | Issue | Tested? |
+|---|-------|---------|
+| 7 | `build_ensembles([])` → empty dict or error? | No |
+| 8 | Zero ensemble members after build → division by zero in metrics? | No |
+| 9 | `_build_dataloaders_from_config()` with wrong dataset name | No |
+| 10 | Ensemble strategies from factorial YAML not validated | No |
+| 11 | Train/test comparison with 0 test subjects → empty stats | No |
+| 12 | Subgroup analysis with single-element groups → p-value undefined | No |
+
+### 3. Test Infrastructure Audit — ROBUST (No Critical Issues)
+
+The test infrastructure passed all robustness checks:
+
+- **Zero-Skip Enforcement (Rule 28)**: Active and enforced via `pytest_terminal_summary` hook
+- **Fixture cleanup**: All autouse fixtures properly clean up (save/restore pattern)
+- **No vacuous assertions**: Zero `assert True` / `assert 1` statements
+- **No execution order dependencies**: No module-level global state mutations
+- **Proper tier separation**: staging/prod/gpu/cloud/e2e all correctly filtered
+
+**One low-severity finding**: `RLIMIT_AS` resource limit only enforced on Linux (not macOS/Windows).
+
+### 4. Data Pipeline + Losses — 10 Numerical Edge Cases Found
+
+| # | Component | Edge Case | Impact |
+|---|-----------|-----------|--------|
+| 1 | `discover_nifti_pairs()` | Empty dir with no `.nii.gz` → `FileNotFoundError` not caught by caller | Crash |
+| 2 | `RandCropByPosNegLabeld` | All-background volume → MONAI falls back to random sampling silently | Wrong gradient |
+| 3 | `LoadAuxiliaryTargetsd` | `compute_fn` returns wrong shape → no validation → downstream crash | Crash |
+| 4 | `ClassBalancedDiceLoss` | Class with 0 voxels → extreme weight → skewed average (not NaN) | Wrong loss |
+| 5 | `BettiLoss` | All-zero or all-one predictions → `torch.diff()` = 0 everywhere | Silent zero loss |
+| 6 | `GraphTopologyLoss` | All 3 weights = 0 → returns `tensor(0.0)` without warning | Silent zero loss |
+| 7 | `SkeletonRecallLoss` | Structures too thin to skeletonize → empty skeleton → division by zero | NaN/Crash |
+| 8 | `CenterlineDiceLoss` | Centerline extraction on empty mask → empty topology → 0/0 | NaN |
+| 9 | `clDice` topology | Disconnect between `soft_skel` differentiable and `skimage` non-diff paths | Gradient mismatch |
+| 10 | Calibration metrics | `calibration_curve` with <2 unique predictions → degenerate bins | Wrong ECE |
+
+**Top 3 test priorities:**
+- `ClassBalancedDiceLoss` with empty foreground class (#4)
+- `SkeletonRecallLoss` with non-skeletonizable thin structures (#7)
+- `GraphTopologyLoss` with all zero weights (#6)
+
+## Combined Test Gap Summary (All 3 Waves, 11 Agents)
+
+| Wave | Agents | Domain | Gaps Found | Tests Written |
+|------|--------|--------|------------|---------------|
+| Wave 1 | 3 | SAM3, Train Flow, Cloud | 32 | 18 (HF consistency) |
+| Wave 2 | 4 | GC Chain, Drift, Setup, Env Vars | 31 | 70 (GC + env + stale) |
+| Wave 3 | 4 | train_flow bottom-up, post-training, test infra, data/losses | 37+ | 0 (research only) |
+| **Total** | **11** | **6 domains** | **100+** | **88** |
 
 ## Go/No-Go Decision
 
