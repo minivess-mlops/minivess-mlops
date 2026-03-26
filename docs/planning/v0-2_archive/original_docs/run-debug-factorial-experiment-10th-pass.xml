@@ -1,0 +1,450 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  10th Pass Debug Factorial Experiment — GLITCH-ONLY Rerun
+  ==============================================================================
+  Generated: 2026-03-26
+  Branch: test/10th-pass-debug-run-qa
+  Base branch: main (post-PR #967 merge)
+
+  Purpose: Re-run ONLY the 18 factorial cells that failed or were never submitted
+  in the 9th pass. DynUNet (8/8 OK) and MambaVesselNet (8/8 OK) are EXCLUDED.
+
+  source_of_truth:
+    - docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-9th-pass-SAM-zeroshot-focus.md
+    - .claude/metalearning/2026-03-26-sam3-gc-two-root-causes-docker-push-and-env-var.md
+    - PR #967: fix: doughnut-hole bug fixes + 39 new tests (18 bugs, 5 phases)
+
+  fixes_being_validated:
+    - T1: Non-LoRA encoder params now frozen (LoRA actually efficient)
+    - T2: gradient_checkpointing propagates from config_dict
+    - T4: get_volume_embeddings uses correct MONAI dim order
+    - T5: SkyPilot exit codes 33/34 trigger EAGER_NEXT_REGION
+    - T6: check_gradient_flow cleans up ~2.5 GB leaked gradients
+    - T7: Config fingerprint consistent across call sites
+    - T8: get_eval_roi_size (512,512,3) on TopoLoRA + Hybrid
+    - T15: Single forward pass for inference checks (3x faster)
+    - T18: sam3_hybrid uses self.fusion() (was dead code)
+    - T22: CPU-safe bf16 detection
+
+  cost_estimate:
+    SAM3 TopoLoRA: 8 cells × ~$0.25/cell = ~$2.00
+    SAM3 Hybrid: 8 cells × ~$0.25/cell = ~$2.00
+    Zero-shot baselines: 2 cells × ~$0.10/cell = ~$0.20
+    Total: ~$4.20 (vs ~$7-13 for full 34-cell debug)
+
+  execution_model:
+    skill: /experiment-harness
+    report_output: docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-10th-pass-report.md
+    autonomous: YES — zero user input after launch authorization
+-->
+
+<plan>
+  <metadata>
+    <title>10th Pass Debug Factorial — Glitch-Only Rerun</title>
+    <branch>test/10th-pass-debug-run-qa</branch>
+    <base-branch>main</base-branch>
+    <date>2026-03-26</date>
+    <status>NOT_STARTED</status>
+    <skill>/experiment-harness</skill>
+    <report-output>docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-10th-pass-report.md</report-output>
+    <config-file>configs/factorial/debug.yaml</config-file>
+  </metadata>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       COLD-START CONTEXT — Read this FIRST in a new session
+       ══════════════════════════════════════════════════════════════════════ -->
+
+  <cold-start-context>
+    <summary>
+      The 9th pass of the debug factorial experiment (34 cells) failed on ALL
+      SAM3 conditions due to OOM in pre-training checks. DynUNet (8/8) and
+      MambaVesselNet (not submitted) were unaffected. PR #967 fixed 18 bugs
+      including the root causes (autocast, gradient checkpointing, LoRA freeze,
+      exit codes, dimension order, eval ROI size).
+
+      This 10th pass re-runs ONLY the 18 cells that failed or were never tested:
+        - 8 SAM3 TopoLoRA training conditions (OOM → now fixed by GC + autocast)
+        - 8 SAM3 Hybrid training conditions (never submitted → now fixed)
+        - 2 zero-shot baselines (never submitted → sam3_vanilla + vesselfm)
+
+      DynUNet and MambaVesselNet are EXCLUDED (already validated in 8th/9th pass).
+    </summary>
+
+    <what-changed-since-9th-pass>
+      PR #967 (merged 2026-03-26): "fix: doughnut-hole bug fixes + 39 new tests"
+      Key fixes that affect this run:
+        1. Gradient checkpointing: VRAM ~22 GiB → ~10 GiB for SAM3 TopoLoRA on L4
+        2. LoRA freeze: Non-LoRA encoder params now frozen (648M → ~2M trainable)
+        3. Autocast in check_gradient_flow: prevents OOM in pre-training diagnostics
+        4. skip_gradient_flow when GC=true: skips diagnostic that would OOM
+        5. get_eval_roi_size (512,512,3): validation ~4 min instead of ~6 hours
+        6. Exit codes 33/34: SkyPilot EAGER_NEXT_REGION actually triggers
+        7. config_dict extraction: gradient_checkpointing propagates from Hydra
+        8. sam3_hybrid self.fusion(): GatedFeatureFusion actually used (was dead code)
+        9. Dimension order fix: get_volume_embeddings uses (B,C,H,W,D)
+       10. CPU bf16 guard: no crash on CPU-only machines
+    </what-changed-since-9th-pass>
+
+    <mandatory-reads>
+      <!-- Read these files BEFORE executing -->
+      <file>CLAUDE.md</file>
+      <file>src/minivess/adapters/CLAUDE.md</file>
+      <file>deployment/CLAUDE.md</file>
+      <file>.claude/metalearning/2026-03-26-sam3-gc-two-root-causes-docker-push-and-env-var.md</file>
+      <file>configs/factorial/debug.yaml</file>
+      <file>docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-9th-pass-SAM-zeroshot-focus.md</file>
+    </mandatory-reads>
+
+    <infrastructure-state>
+      <!-- Verify these BEFORE launching -->
+      <check name="Docker image">
+        docker manifest inspect europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+        Must contain PR #967 code (gradient checkpointing, LoRA freeze, etc.)
+        If stale: docker build + docker push FIRST
+      </check>
+      <check name="GCS data">
+        gsutil ls gs://minivess-mlops-dvc-data/files/md5/ | head -5
+        MiniVess + DeepVess data must be on GCS
+      </check>
+      <check name="SkyPilot">
+        sky check gcp
+        sky gpus --cloud gcp | grep L4
+      </check>
+      <check name="DVC remote">
+        dvc remote list
+        Must show 'gcs' pointing to gs://minivess-mlops-dvc-data
+      </check>
+    </infrastructure-state>
+  </cold-start-context>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       CELLS TO RUN — 18 cells (NOT the full 34)
+       ══════════════════════════════════════════════════════════════════════ -->
+
+  <cells-to-run>
+    <description>
+      18 cells that failed or were never submitted in the 9th pass.
+      Using configs/factorial/debug.yaml parameters:
+        - max_epochs: 2
+        - num_folds: 1 (fold-0 only)
+        - max_train_volumes: 23
+        - max_val_volumes: 12
+        - batch_size: per model_overrides (SAM3=1, default=2)
+    </description>
+
+    <!-- SAM3 TopoLoRA: 4 losses × 2 aux_calib × 1 fold = 8 cells -->
+    <cell-group name="SAM3 TopoLoRA" count="8" reason="OOM in 9th pass pre-training checks">
+      <model>sam3_topolora</model>
+      <overrides>batch_size=1, gradient_accumulation_steps=4, gradient_checkpointing=true</overrides>
+      <cells>
+        <cell>sam3_topolora-cbdice_cldice-calibtrue-f0</cell>
+        <cell>sam3_topolora-cbdice_cldice-calibfalse-f0</cell>
+        <cell>sam3_topolora-dice_ce-calibtrue-f0</cell>
+        <cell>sam3_topolora-dice_ce-calibfalse-f0</cell>
+        <cell>sam3_topolora-dice_ce_cldice-calibtrue-f0</cell>
+        <cell>sam3_topolora-dice_ce_cldice-calibfalse-f0</cell>
+        <cell>sam3_topolora-bce_dice_05cldice-calibtrue-f0</cell>
+        <cell>sam3_topolora-bce_dice_05cldice-calibfalse-f0</cell>
+      </cells>
+      <expected-vram>~10 GiB with GC (was ~22 GiB without)</expected-vram>
+      <key-validation>
+        - Pre-training checks pass (no OOM)
+        - gradient_checkpointing=true propagated to Sam3Backbone
+        - Only LoRA params are trainable (not 648M encoder)
+        - Training completes 2 epochs without OOM
+        - Validation uses (512,512,3) ROI (not default 128³)
+      </key-validation>
+    </cell-group>
+
+    <!-- SAM3 Hybrid: 4 losses × 2 aux_calib × 1 fold = 8 cells -->
+    <cell-group name="SAM3 Hybrid" count="8" reason="Never submitted in 9th pass">
+      <model>sam3_hybrid</model>
+      <overrides>batch_size=1, gradient_accumulation_steps=4, gradient_checkpointing=true</overrides>
+      <cells>
+        <cell>sam3_hybrid-cbdice_cldice-calibtrue-f0</cell>
+        <cell>sam3_hybrid-cbdice_cldice-calibfalse-f0</cell>
+        <cell>sam3_hybrid-dice_ce-calibtrue-f0</cell>
+        <cell>sam3_hybrid-dice_ce-calibfalse-f0</cell>
+        <cell>sam3_hybrid-dice_ce_cldice-calibtrue-f0</cell>
+        <cell>sam3_hybrid-dice_ce_cldice-calibfalse-f0</cell>
+        <cell>sam3_hybrid-bce_dice_05cldice-calibtrue-f0</cell>
+        <cell>sam3_hybrid-bce_dice_05cldice-calibfalse-f0</cell>
+      </cells>
+      <expected-vram>~7.5 GiB (frozen encoder, DynUNet trainable)</expected-vram>
+      <key-validation>
+        - self.fusion() called in forward pass (not dead code)
+        - SAM features fused via gated residual
+        - Validation uses (512,512,3) ROI
+        - Training completes 2 epochs
+      </key-validation>
+    </cell-group>
+
+    <!-- Zero-shot baselines: 2 cells -->
+    <cell-group name="Zero-Shot Baselines" count="2" reason="Never submitted in 9th pass">
+      <cells>
+        <cell>sam3_vanilla-none-calibfalse-f0 (zero_shot=true, max_epochs=0, eval_dataset=minivess)</cell>
+        <cell>vesselfm-none-calibfalse-f0 (zero_shot=true, max_epochs=0, eval_dataset=deepvess)</cell>
+      </cells>
+      <key-validation>
+        - Zero-shot early return in training_flow (no training loop)
+        - Correct eval_dataset propagated
+        - MLflow run logged with ZERO_SHOT status
+      </key-validation>
+    </cell-group>
+  </cells-to-run>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       EXECUTION PHASES
+       ══════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="P0" name="Pre-Launch Validation" status="NOT_STARTED">
+    <description>
+      Verify infrastructure is ready before spending cloud credits.
+      ALL checks must pass before proceeding to Phase 1.
+    </description>
+
+    <task id="T1" status="NOT_STARTED">
+      <name>Verify Docker image contains PR #967 code</name>
+      <description>
+        The 9th pass failed partly because docker push silently failed to upload
+        the code layer. Before launching, verify the GAR image contains the
+        gradient checkpointing code.
+
+        Commands:
+          docker manifest inspect europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+          # Check org.opencontainers.image.revision matches current HEAD
+
+        If stale: rebuild and push
+          DOCKER_BUILDKIT=1 docker build -t minivess-base:latest -f deployment/docker/Dockerfile.base .
+          docker tag minivess-base:latest europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+          docker push europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+      </description>
+    </task>
+
+    <task id="T2" status="NOT_STARTED">
+      <name>Verify GCS data availability</name>
+      <description>
+        Check MiniVess and DeepVess data are on GCS:
+          gsutil ls gs://minivess-mlops-dvc-data/files/md5/ | wc -l
+          dvc status -r gcs
+      </description>
+    </task>
+
+    <task id="T3" status="NOT_STARTED">
+      <name>Verify SkyPilot GCP credentials and L4 availability</name>
+      <description>
+        sky check gcp
+        sky gpus --cloud gcp | grep L4
+        # Verify at least 1 region has L4 spot availability
+      </description>
+    </task>
+
+    <task id="T4" status="NOT_STARTED">
+      <name>Run make test-staging to confirm code is green</name>
+      <description>
+        make test-staging
+        # Must be 6470+ passed, 0 failed
+      </description>
+    </task>
+  </phase>
+
+  <phase id="P1" name="Launch SAM3 Cells" status="NOT_STARTED">
+    <description>
+      Launch the 16 SAM3 training cells + 2 zero-shot baselines via run_factorial.sh.
+      Use --models flag (if available) to restrict to SAM3 only, OR create a
+      temporary factorial config that only includes the target models.
+
+      Strategy: Use run_factorial.sh with the full debug.yaml config but
+      launch only the SAM3 conditions manually using sky jobs launch with
+      per-condition env vars. This avoids modifying the config file.
+    </description>
+
+    <task id="T5" status="NOT_STARTED">
+      <name>Launch 8 SAM3 TopoLoRA cells</name>
+      <description>
+        Launch all 8 SAM3 TopoLoRA conditions via run_factorial.sh:
+          ./scripts/run_factorial.sh --dry-run configs/factorial/debug.yaml
+          # Verify grad_ckpt=true appears for sam3_topolora conditions
+          # Then launch for real (remove --dry-run)
+
+        OR: Launch individually with sky jobs launch if run_factorial.sh
+        doesn't support model filtering:
+          for loss in cbdice_cldice dice_ce dice_ce_cldice bce_dice_05cldice; do
+            for calib in true false; do
+              sky jobs launch deployment/skypilot/train_factorial.yaml \
+                --name sam3_topolora-${loss}-calib${calib}-f0 \
+                --env MODEL_FAMILY=sam3_topolora \
+                --env LOSS_NAME=${loss} \
+                --env FOLD_ID=0 \
+                --env WITH_AUX_CALIB=${calib} \
+                --env BATCH_SIZE=1 \
+                --env GRAD_ACCUM_STEPS=4 \
+                --env GRADIENT_CHECKPOINTING=true \
+                --env MAX_EPOCHS=2 \
+                --env MAX_TRAIN_VOLUMES=23 \
+                --env MAX_VAL_VOLUMES=12 \
+                --env EXPERIMENT_NAME=debug_factorial \
+                --env POST_TRAINING_METHODS=none,swag \
+                --env-file .env \
+                -y
+              sleep 10  # Rate limit
+            done
+          done
+
+        Monitor: sky jobs queue | grep sam3_topolora
+      </description>
+    </task>
+
+    <task id="T6" status="NOT_STARTED">
+      <name>Launch 8 SAM3 Hybrid cells</name>
+      <description>
+        Same pattern as T5 but with MODEL_FAMILY=sam3_hybrid.
+        Can launch in parallel with T5 (different model).
+      </description>
+    </task>
+
+    <task id="T7" status="NOT_STARTED">
+      <name>Launch 2 zero-shot baselines</name>
+      <description>
+        Zero-shot conditions:
+          1. sam3_vanilla on minivess (frozen encoder eval)
+          2. vesselfm on deepvess (zero-shot only)
+
+        sky jobs launch deployment/skypilot/train_factorial.yaml \
+          --name sam3_vanilla-none-calibfalse-f0 \
+          --env MODEL_FAMILY=sam3_vanilla \
+          --env LOSS_NAME=none \
+          --env FOLD_ID=0 \
+          --env ZERO_SHOT=true \
+          --env MAX_EPOCHS=0 \
+          --env EVAL_DATASET=minivess \
+          --env BATCH_SIZE=1 \
+          --env EXPERIMENT_NAME=debug_factorial \
+          --env-file .env \
+          -y
+
+        sky jobs launch deployment/skypilot/train_factorial.yaml \
+          --name vesselfm-none-calibfalse-f0 \
+          --env MODEL_FAMILY=vesselfm \
+          --env LOSS_NAME=none \
+          --env FOLD_ID=0 \
+          --env ZERO_SHOT=true \
+          --env MAX_EPOCHS=0 \
+          --env EVAL_DATASET=deepvess \
+          --env BATCH_SIZE=2 \
+          --env EXPERIMENT_NAME=debug_factorial \
+          --env-file .env \
+          -y
+      </description>
+    </task>
+  </phase>
+
+  <phase id="P2" name="Monitor and Diagnose" status="NOT_STARTED">
+    <description>
+      Use /ralph-loop or /factorial-monitor to track all 18 jobs.
+      Key signals to watch for:
+        - Pre-training checks pass (no OOM) → PRIMARY validation
+        - gradient_checkpointing=true in MLflow config artifact
+        - Training epochs complete (epoch 0, epoch 1)
+        - Validation DSC reported (even if low at 2 epochs)
+        - SWAG post-training runs after training
+    </description>
+
+    <task id="T8" status="NOT_STARTED">
+      <name>Monitor all 18 jobs via factorial-monitor</name>
+      <description>
+        Use /factorial-monitor to track:
+          sky jobs queue
+          # All 18 should show RUNNING or SUCCEEDED
+
+        For each FAILED job:
+          sky jobs logs JOB_ID
+          # Diagnose: OOM? Setup error? Config issue?
+
+        Expected failure modes (that would indicate unfixed bugs):
+          - "OOM" in pre_training_checks → GC not propagated (T2 fix failed)
+          - "no gradient flow" → LoRA params not trainable (T1 fix failed)
+          - "NaN" in encoder output → dimension order wrong (T4 fix failed)
+          - "exit 1" in setup → exit codes not updated (T5 fix failed)
+      </description>
+    </task>
+
+    <task id="T9" status="NOT_STARTED">
+      <name>Validate fix-specific signals in MLflow</name>
+      <description>
+        For each completed SAM3 TopoLoRA run, verify:
+          1. config/resolved_config.yaml has gradient_checkpointing: true
+          2. diagnostics/pre_training_checks.json shows gradient_flow: SKIPPED
+          3. Trainable param count is ~2M (not ~648M)
+          4. Peak VRAM ~10 GiB (not ~22 GiB) — check from job logs
+          5. Validation took ~4 min (not ~6 hours) — check from timing artifact
+
+        For SAM3 Hybrid:
+          1. Forward pass includes gated fusion (check model output shape)
+          2. gate_alpha logged in MLflow params
+
+        For zero-shot:
+          1. Status: ZERO_SHOT in flow result
+          2. No training epochs logged
+      </description>
+    </task>
+  </phase>
+
+  <phase id="P3" name="Report Generation" status="NOT_STARTED">
+    <description>
+      Generate the 10th pass report with per-cell results and fix validation.
+    </description>
+
+    <task id="T10" status="NOT_STARTED">
+      <name>Write 10th pass experiment report</name>
+      <description>
+        Output: docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-10th-pass-report.md
+
+        Report must include:
+          1. Executive summary (18 cells, which passed, which failed)
+          2. Per-cell results table (condition, status, VRAM, wall-time, DSC)
+          3. Fix validation matrix (which PR #967 fixes were confirmed)
+          4. Remaining issues (if any cells still fail)
+          5. Go/no-go decision for full production run
+          6. Cost accounting (actual vs estimated)
+      </description>
+    </task>
+  </phase>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       EXCLUDED CELLS (already validated)
+       ══════════════════════════════════════════════════════════════════════ -->
+
+  <excluded-cells reason="Already validated in 8th/9th pass">
+    <cell-group name="DynUNet" count="8" status="VALIDATED">
+      All 8 DynUNet conditions passed in 8th pass at batch_size=2.
+      No bugs in PR #967 affect DynUNet.
+    </cell-group>
+    <cell-group name="MambaVesselNet" count="8" status="NOT_YET_RUN_BUT_LOW_RISK">
+      MambaVesselNet was not submitted in 9th pass but is a low-VRAM model.
+      No bugs in PR #967 affect MambaVesselNet.
+      Will be run in the full production pass.
+    </cell-group>
+  </excluded-cells>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PROGRESS TRACKING
+       ══════════════════════════════════════════════════════════════════════ -->
+
+  <progress-summary>
+    <total-cells>18</total-cells>
+    <sam3-topolora>8 (NOT_STARTED)</sam3-topolora>
+    <sam3-hybrid>8 (NOT_STARTED)</sam3-hybrid>
+    <zero-shot>2 (NOT_STARTED)</zero-shot>
+    <phases>
+      <phase ref="P0">NOT_STARTED (4 pre-launch checks)</phase>
+      <phase ref="P1">NOT_STARTED (3 launch tasks)</phase>
+      <phase ref="P2">NOT_STARTED (2 monitoring tasks)</phase>
+      <phase ref="P3">NOT_STARTED (1 report task)</phase>
+    </phases>
+    <estimated-cost>~$4.20</estimated-cost>
+    <estimated-wall-time>~2-4 hours (spot availability dependent)</estimated-wall-time>
+    <last-updated>2026-03-26T07:00:00Z</last-updated>
+  </progress-summary>
+
+</plan>
