@@ -433,34 +433,44 @@ Reading files bottom-to-top to counter positional bias, targeting untouched doma
 | 14 | L87 cost estimate | `hourly_rate * estimated_total_hours` with rate=0.0 is misleading $0 | LOW |
 | 15 | L688 sliding window | ROI size > volume size in sliding window inference → single-patch (slow) | MEDIUM |
 
-**Top 3 test priorities:**
-- Empty `folds_to_run` silently skipping training (#8)
-- Empty dataloader dict passing without raise (#10)
-- Zero-shot with `max_epochs=1` not returning early (#11)
+**Top 5 test priorities with file:line references:**
+- `train_flow.py:725` — Empty `folds_to_run=[]` silently skips all training (#8)
+- `train_flow.py:688` — Empty dataloader dict accepted silently, violates Rule 25 (#10)
+- `train_flow.py:1438` — `zero_shot=True, max_epochs=1` should train, not early-return (#11)
+- `train_flow.py:490` — `val_interval=0` from config silently disables validation (#14)
+- `train_flow.py:307` — Malformed `epoch_latest.yaml` → `yaml.YAMLError` not caught (#10)
 
-### 2. Post-Training + Analysis Flows — 12 Edge Cases Found
+### 2. Post-Training + Analysis Flows — 17 Edge Cases Found
+
+**CRITICAL: `builder.py:502` — `load_checkpoint()` returns random weights if state_dict
+doesn't match. No guard test. Can produce plausible but meaningless predictions.**
 
 **Post-training flow (`post_training_flow.py`):**
 
-| # | Issue | Tested? |
-|---|-------|---------|
-| 1 | Empty checkpoint list → plugins receive `[]` and fail | No |
-| 2 | Missing upstream training run → `None` propagated | No |
-| 3 | Both weight and data plugins fail → which error reported? | No |
-| 4 | Checkpoint count vs metadata count mismatch | No |
-| 5 | `_average_checkpoints([])` silently returns without error | No |
-| 6 | Mismatched state_dict keys across folds → corrupted average | No |
+| # | Location | Issue | Tested? |
+|---|----------|-------|---------|
+| 1 | L276 | Empty checkpoint list → plugins receive `[]` and fail | No |
+| 2 | L268 | Missing upstream training run → `None` propagated | No |
+| 3 | L317-347 | Both weight and data plugins fail → which error reported? | No |
+| 4 | L253 | Checkpoint count vs metadata count mismatch | No |
+| 5 | L658 | `_average_checkpoints([])` silently returns without error (Rule 25) | No |
+| 6 | L669 | Mismatched state_dict keys across folds → **corrupted averaged model** | No |
+| 7 | L495 | Single checkpoint with subsample → `_average_checkpoints([1])` | No |
 
-**Analysis flow (`analysis_flow.py`):**
+**Analysis flow (`analysis_flow.py`) + Ensemble builder (`builder.py`):**
 
-| # | Issue | Tested? |
-|---|-------|---------|
-| 7 | `build_ensembles([])` → empty dict or error? | No |
-| 8 | Zero ensemble members after build → division by zero in metrics? | No |
-| 9 | `_build_dataloaders_from_config()` with wrong dataset name | No |
-| 10 | Ensemble strategies from factorial YAML not validated | No |
-| 11 | Train/test comparison with 0 test subjects → empty stats | No |
-| 12 | Subgroup analysis with single-element groups → p-value undefined | No |
+| # | Location | Issue | Tested? |
+|---|----------|-------|---------|
+| 8 | builder L502 | **CRITICAL**: Random weights on state_dict mismatch (silent) | No |
+| 9 | L613-651 | `build_ensembles([])` → empty dict or error? | No |
+| 10 | L757 | Zero ensemble members → skipped with warning, no signal upstream | No |
+| 11 | L744-754 | Single evaluation failure blocks entire flow (no try/except) | No |
+| 12 | L1141 | NaN metrics silently omitted from report (not flagged) | No |
+| 13 | L827-950 | Comparison with N=1 model → meaningless results produced | No |
+| 14 | L233-243 | Missing `loss_function` tag → run silently skipped | No |
+| 15 | L245 | Hard gate on `eval_fold2_dsc` → debug runs filtered out | No |
+| 16 | L344 | Single-fold ensemble → 1-member "ensemble" produced | No |
+| 17 | L594 | All checkpoint files missing → 0-member ensemble spec | No |
 
 ### 3. Test Infrastructure Audit — ROBUST (No Critical Issues)
 
@@ -474,25 +484,49 @@ The test infrastructure passed all robustness checks:
 
 **One low-severity finding**: `RLIMIT_AS` resource limit only enforced on Linux (not macOS/Windows).
 
-### 4. Data Pipeline + Losses — 10 Numerical Edge Cases Found
+### 4. Data Pipeline + Losses + Metrics — 20 Numerical Edge Cases Found
 
-| # | Component | Edge Case | Impact |
+**Data loading:**
+
+| # | File:Line | Edge Case | Impact |
 |---|-----------|-----------|--------|
-| 1 | `discover_nifti_pairs()` | Empty dir with no `.nii.gz` → `FileNotFoundError` not caught by caller | Crash |
-| 2 | `RandCropByPosNegLabeld` | All-background volume → MONAI falls back to random sampling silently | Wrong gradient |
-| 3 | `LoadAuxiliaryTargetsd` | `compute_fn` returns wrong shape → no validation → downstream crash | Crash |
-| 4 | `ClassBalancedDiceLoss` | Class with 0 voxels → extreme weight → skewed average (not NaN) | Wrong loss |
-| 5 | `BettiLoss` | All-zero or all-one predictions → `torch.diff()` = 0 everywhere | Silent zero loss |
-| 6 | `GraphTopologyLoss` | All 3 weights = 0 → returns `tensor(0.0)` without warning | Silent zero loss |
-| 7 | `SkeletonRecallLoss` | Structures too thin to skeletonize → empty skeleton → division by zero | NaN/Crash |
-| 8 | `CenterlineDiceLoss` | Centerline extraction on empty mask → empty topology → 0/0 | NaN |
-| 9 | `clDice` topology | Disconnect between `soft_skel` differentiable and `skimage` non-diff paths | Gradient mismatch |
-| 10 | Calibration metrics | `calibration_curve` with <2 unique predictions → degenerate bins | Wrong ECE |
+| 1 | `loader.py:77` | Empty imagesTr/ with no `.nii.gz` → FileNotFoundError not caught | Crash |
+| 2 | `transforms.py:124` | All-background volume → MONAI random sampling fallback | Wrong gradient |
+| 3 | `multitask_targets.py:98` | `compute_fn` returns wrong shape → no validation | Crash |
 
-**Top 3 test priorities:**
-- `ClassBalancedDiceLoss` with empty foreground class (#4)
-- `SkeletonRecallLoss` with non-skeletonizable thin structures (#7)
-- `GraphTopologyLoss` with all zero weights (#6)
+**Loss functions:**
+
+| # | File:Line | Edge Case | Impact |
+|---|-----------|-----------|--------|
+| 4 | `loss_functions.py:207` | ClassBalancedDice: class with 0 voxels → extreme weight | Wrong loss |
+| 5 | `loss_functions.py:268` | BettiLoss: all-zero predictions → gradient=0 everywhere | Silent zero |
+| 6 | `loss_functions.py:512` | GraphTopologyLoss: all 3 weights=0 → `tensor(0.0)` no warning | Silent zero |
+| 7 | `skeleton_recall.py:100` | Thin structure → empty skeleton → **fallback uses full mask** (semantics change) | Wrong loss |
+| 8 | `cape.py:148` | Empty skeleton after thinning → `tensor(0.0)` with `requires_grad=True` | Silent zero |
+| 9 | `calibration_losses.py:159` | HL1ACELoss: zero spatial size → `scatter_reduce()` → NaN | NaN propagation |
+
+**Metrics:**
+
+| # | File:Line | Edge Case | Impact |
+|---|-----------|-----------|--------|
+| 10 | `calibration_metrics.py:82` | All-0 labels → LogisticRegression.fit() single-class ValueError | Crash |
+| 11 | `topology_metrics.py:163` | ccDice: unmatched components → `0/0` → NaN | NaN |
+| 12 | `topology_metrics.py:53` | NSD: single-voxel volume → MONAI SurfaceDice undefined | NaN/Crash |
+| 13 | `topology_metrics.py:355` | Junction F1: linear vessel (no junctions) → vacuous 0/0 metrics | Wrong metric |
+| 14 | `metrics.py:75` | SegmentationMetrics: target `(B,D,H,W,1)` → squeeze wrong dim | Wrong metric |
+| 15 | `calibration_metrics.py:415` | BA-ECE: flat 1D vs 3D input → silently discards spatial info | Wrong ECE |
+| 16 | `multitask_metrics.py:52` | Missing GT key → head skipped, downstream expects key → KeyError | Crash |
+| 17 | `calibration_metrics.py:266` | NLL: exact 0/1 predictions → never tested at boundaries | Untested |
+| 18 | `loss_functions.py:252` | BettiLoss: all-one predictions → `torch.diff()=0` | Silent zero |
+| 19 | `validation.py:76` | `zip(patch, min_shape, strict=False)` → mismatched ndim silently truncated | Wrong validation |
+| 20 | `transforms.py` | RandCrop → empty crop if patch > padded size → DiceLoss=1.0 | Wrong loss |
+
+**Top 5 test priorities:**
+1. `calibration_metrics.py:82` — LogisticRegression with all-0 labels (CRASH) (#10)
+2. `skeleton_recall.py:100` — Thin structure skeleton fallback changes loss semantics (#7)
+3. `loss_functions.py:207` — ClassBalancedDice empty foreground class → extreme weight (#4)
+4. `builder.py:502` — **CRITICAL**: `load_checkpoint` returns random weights on mismatch (#8 from post-training)
+5. `topology_metrics.py:163` — ccDice unmatched components → NaN propagation (#11)
 
 ## Combined Test Gap Summary (All 3 Waves, 11 Agents)
 
@@ -500,8 +534,23 @@ The test infrastructure passed all robustness checks:
 |------|--------|--------|------------|---------------|
 | Wave 1 | 3 | SAM3, Train Flow, Cloud | 32 | 18 (HF consistency) |
 | Wave 2 | 4 | GC Chain, Drift, Setup, Env Vars | 31 | 70 (GC + env + stale) |
-| Wave 3 | 4 | train_flow bottom-up, post-training, test infra, data/losses | 37+ | 0 (research only) |
-| **Total** | **11** | **6 domains** | **100+** | **88** |
+| Wave 3 | 4 | train_flow bottom-up, post-training, test infra, data/losses | 52+ | 0 (research only) |
+| **Total** | **11** | **8 domains** | **115+** | **88** |
+
+### Priority Matrix — Next Tests to Write
+
+| Priority | Gap | File:Line | Impact | Effort |
+|----------|-----|-----------|--------|--------|
+| P0 | `load_checkpoint` random weights on mismatch | builder.py:502 | Corrupted predictions | LOW |
+| P0 | LogisticRegression on all-0 labels | calibration_metrics.py:82 | Crash | LOW |
+| P0 | Empty `folds_to_run` skips training silently | train_flow.py:725 | Lost experiment | LOW |
+| P1 | ClassBalancedDice empty foreground | loss_functions.py:207 | Wrong loss value | LOW |
+| P1 | SkeletonRecall thin structures | skeleton_recall.py:100 | Semantics change | MEDIUM |
+| P1 | Docker image GAR path consistency | 9 files | Wrong image pulled | LOW |
+| P1 | ccDice NaN on unmatched components | topology_metrics.py:163 | NaN propagation | LOW |
+| P1 | `_average_checkpoints` mismatched keys | post_training_flow.py:669 | Corrupted model | MEDIUM |
+| P2 | GraphTopologyLoss all zero weights | loss_functions.py:512 | Silent zero loss | LOW |
+| P2 | GCS bucket consistency | 13 files | Wrong data source | LOW |
 
 ## Go/No-Go Decision
 
