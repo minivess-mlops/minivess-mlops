@@ -247,8 +247,19 @@ class Sam3TopoLoraAdapter(ModelAdapter):
         self._lora_rank = config.lora_rank
         self._lora_alpha = config.lora_alpha
 
+        # Gradient checkpointing: read from architecture_params (set by factorial config).
+        # Reduces SAM3 TopoLoRA peak VRAM from ~22 GiB to ~10 GiB on L4.
+        # Issue: #966 (A100 option), #940 (SAM3 OOM).
+        _gradient_checkpointing = config.architecture_params.get(
+            "gradient_checkpointing", False
+        )
+
         # SAM3 backbone (NOT frozen yet — LoRA applied first)
-        self.backbone = Sam3Backbone(config=config, freeze=False)
+        self.backbone = Sam3Backbone(
+            config=config,
+            freeze=False,
+            gradient_checkpointing=_gradient_checkpointing,
+        )
 
         # Apply LoRA to encoder, then freeze base weights
         lora_targets = _apply_lora_to_encoder(
@@ -258,6 +269,15 @@ class Sam3TopoLoraAdapter(ModelAdapter):
             dropout=config.lora_dropout,
         )
         logger.info("LoRA applied to %d layers: %s", len(lora_targets), lora_targets)
+
+        # Freeze all encoder params EXCEPT LoRA A/B matrices.
+        # _apply_lora_to_encoder wraps FFN layers in LoRA (freezing the original
+        # Linear weights), but attention Q/K/V, LayerNorm, patch embeddings, and
+        # position embeddings remain trainable. LoRA's purpose is parameter-efficient
+        # fine-tuning — only LoRA A/B matrices should be trainable in the encoder.
+        for name, param in self.backbone.encoder.named_parameters():
+            if "lora_" not in name:
+                param.requires_grad = False
 
         # Freeze FPN neck (no LoRA there)
         for param in self.backbone.fpn_neck.parameters():
@@ -323,6 +343,16 @@ class Sam3TopoLoraAdapter(ModelAdapter):
 
         logits_3d = torch.stack(slice_logits, dim=2)
         return self._build_output(logits_3d, "sam3_topolora")
+
+    def get_eval_roi_size(self) -> tuple[int, int, int]:
+        """Return the sliding-window ROI size for full-volume evaluation.
+
+        SAM3 ViT-32L resizes every input to 1008x1008 regardless of spatial
+        size, so larger ROI windows cost the same encoder FLOPS as small ones.
+        Using (512, 512, 3) reduces windows from ~3300 to ~27 per 512x512x61
+        volume, cutting evaluation time from ~6 hours to ~4 minutes.
+        """
+        return (512, 512, 3)
 
     def get_config(self) -> AdapterConfigInfo:
         """Return adapter configuration info."""

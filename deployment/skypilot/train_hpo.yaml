@@ -94,7 +94,7 @@ setup: |
   # Pre-cache model weights
   case "${MODEL_FAMILY}" in
     sam3_vanilla|sam3_topolora|sam3_hybrid)
-      python -c "from huggingface_hub import hf_hub_download; hf_hub_download('facebook/sam3-hiera-large', 'sam3_hiera_large.pt')" 2>/dev/null || true
+      python -c "from huggingface_hub import hf_hub_download; hf_hub_download('facebook/sam3', 'sam3.pt')" 2>/dev/null || true
       ;;
     vesselfm)
       python -c "from huggingface_hub import hf_hub_download; hf_hub_download('bwittmann/vesselFM', 'vesselFM_base.pt')" 2>/dev/null || true

@@ -107,8 +107,17 @@ class Sam3HybridAdapter(ModelAdapter):
         self.config = config
         arch = config.architecture_params
 
+        # Gradient checkpointing: read from architecture_params for consistency.
+        # Hybrid uses freeze=True so backbone will skip checkpointing (no activations
+        # stored in frozen no_grad mode), but we pass the param for transparency.
+        _gradient_checkpointing = arch.get("gradient_checkpointing", False)
+
         # Frozen SAM3 backbone (feature extractor)
-        self.sam_backbone = Sam3Backbone(config=config, freeze=True)
+        self.sam_backbone = Sam3Backbone(
+            config=config,
+            freeze=True,
+            gradient_checkpointing=_gradient_checkpointing,
+        )
 
         # Trainable DynUNet 3D encoder/decoder
         filters = arch.get("filters", [32, 64, 128, 256])
@@ -227,29 +236,9 @@ class Sam3HybridAdapter(ModelAdapter):
                 torch.isinf(logits).sum().item(),
             )
 
-        # Fuse SAM features at the output level
-        # Resize SAM features to match logits spatial dims
-        if sam_features.shape[2:] != logits.shape[2:]:
-            sam_features = F.interpolate(
-                sam_features,
-                size=logits.shape[2:],
-                mode="trilinear",
-                align_corners=False,
-            )
-
-        # Project SAM features to match logits channels for residual add
-        # (fusion operates at bottleneck conceptually, but applied at output for simplicity)
-        sam_projected = self.fusion.proj(sam_features.detach())
-        if sam_projected.shape[2:] != logits.shape[2:]:
-            sam_projected = F.interpolate(
-                sam_projected,
-                size=logits.shape[2:],
-                mode="trilinear",
-                align_corners=False,
-            )
-
-        gate = torch.sigmoid(self.fusion.gate_alpha)
-        logits = logits + gate * sam_projected
+        # T18 fix: Use GatedFeatureFusion.forward() instead of inline reimplementation.
+        # The fusion module handles projection, spatial resize, and gated addition.
+        logits = self.fusion(logits, sam_features)
 
         # Final NaN guard on fused logits
         if not torch.isfinite(logits).all():
@@ -262,6 +251,16 @@ class Sam3HybridAdapter(ModelAdapter):
             logits = torch.nan_to_num(logits, nan=0.0, posinf=0.0, neginf=0.0)
 
         return self._build_output(logits, "sam3_hybrid")
+
+    def get_eval_roi_size(self) -> tuple[int, int, int]:
+        """Return the sliding-window ROI size for full-volume evaluation.
+
+        SAM3 ViT-32L resizes every input to 1008x1008 regardless of spatial
+        size, so larger ROI windows cost the same encoder FLOPS as small ones.
+        Using (512, 512, 3) reduces windows from ~3300 to ~27 per 512x512x61
+        volume, cutting evaluation time from ~6 hours to ~4 minutes.
+        """
+        return (512, 512, 3)
 
     def get_config(self) -> AdapterConfigInfo:
         """Return adapter configuration info."""

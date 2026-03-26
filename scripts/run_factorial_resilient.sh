@@ -117,15 +117,17 @@ increment_condition_failures() {
     fi
 }
 
-# check_permanently_failed: scan job logs for LAUNCH_FAILED entries and update counts
+# check_permanently_failed: scan ALL job logs for LAUNCH_FAILED entries and update counts
+# T26 fix: grep across ALL log files (not just latest) so failure counts accumulate
+# across --resume iterations. Each iteration creates a new log file.
 check_for_permanent_failures() {
-    local latest_log
-    latest_log=$(ls -t "${LOG_DIR}/"*_factorial_job_ids.txt 2>/dev/null | head -1)
-    if [ -z "${latest_log}" ]; then
+    local all_logs
+    all_logs=$(ls "${LOG_DIR}/"*_factorial_job_ids.txt 2>/dev/null)
+    if [ -z "${all_logs}" ]; then
         return
     fi
 
-    # Extract LAUNCH_FAILED conditions from the latest job log
+    # Extract LAUNCH_FAILED conditions from ALL job logs (-h = no filename prefix)
     while IFS='|' read -r _cond_id model loss aux_calib fold status; do
         status=$(echo "${status}" | tr -d ' ')
         if [ "${status}" = "LAUNCH_FAILED" ]; then
@@ -136,7 +138,7 @@ check_for_permanent_failures() {
             local condition_name="${model}-${loss}-calib${aux_calib}-f${fold}"
             increment_condition_failures "${condition_name}"
         fi
-    done < <(grep "LAUNCH_FAILED" "${latest_log}" 2>/dev/null || true)
+    done < <(grep -h "LAUNCH_FAILED" ${all_logs} 2>/dev/null || true)
 }
 
 while true; do

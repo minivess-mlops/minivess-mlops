@@ -18,8 +18,11 @@ Usage::
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 import torch
 from torch import Tensor
@@ -33,6 +36,49 @@ if TYPE_CHECKING:
     from minivess.config.models import ModelConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _compute_config_hash(config: ModelConfig) -> str:
+    """Compute a hash of model config for cache invalidation.
+
+    T23: If the model config changes (different architecture_params, different
+    weights), cached features become stale.
+    """
+    key_parts = [
+        str(config.family),
+        str(config.architecture_params),
+    ]
+    return hashlib.sha256("|".join(key_parts).encode()).hexdigest()[:16]
+
+
+def _save_cache_metadata(
+    cache_path: Path,
+    config_hash: str,
+    feature_shape: tuple[int, ...],
+) -> None:
+    """Save metadata JSON alongside a cached .pt file."""
+    meta_path = cache_path.with_suffix(".meta.json")
+    metadata: dict[str, Any] = {
+        "config_hash": config_hash,
+        "feature_shape": list(feature_shape),
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+
+def _validate_cache_metadata(cache_path: Path, config_hash: str) -> bool:
+    """Check if cached features match current model config.
+
+    Returns True if cache is valid, False if stale or missing metadata.
+    """
+    meta_path = cache_path.with_suffix(".meta.json")
+    if not meta_path.exists():
+        return False
+    try:
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        return metadata.get("config_hash") == config_hash
+    except (json.JSONDecodeError, KeyError):
+        return False
 
 
 def extract_and_cache_features(
@@ -54,18 +100,22 @@ def extract_and_cache_features(
     cache_dir.mkdir(parents=True, exist_ok=True)
     backbone = Sam3Backbone(config=config, freeze=True)
     backbone.eval()
+    config_hash = _compute_config_hash(config)
 
     for vol_id, volume in volumes.items():
         cache_path = cache_dir / f"{vol_id}.pt"
-        if cache_path.exists():
-            logger.info("Skipping %s — already cached", vol_id)
+        if cache_path.exists() and _validate_cache_metadata(cache_path, config_hash):
+            logger.info("Skipping %s — already cached (config hash matches)", vol_id)
             continue
+        if cache_path.exists():
+            logger.info("Re-extracting %s — config hash mismatch (stale cache)", vol_id)
 
         logger.info("Extracting features for %s (shape=%s)", vol_id, volume.shape)
         with torch.no_grad():
             features = backbone.get_volume_embeddings(volume)
 
         torch.save(features, cache_path)
+        _save_cache_metadata(cache_path, config_hash, tuple(features.shape))
         size_mb = cache_path.stat().st_size / 1e6
         logger.info("Cached %s → %s (%.1f MB)", vol_id, cache_path, size_mb)
 

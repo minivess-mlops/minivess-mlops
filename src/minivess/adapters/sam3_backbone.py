@@ -85,6 +85,7 @@ class Sam3Backbone(nn.Module):
         *,
         freeze: bool = True,
         input_size: int | None = None,
+        gradient_checkpointing: bool = False,
     ) -> None:
         super().__init__()
         self._config = config
@@ -110,15 +111,42 @@ class Sam3Backbone(nn.Module):
         # T4 (Turing) lacks BF16 → falls back to FP16 with NaN guard.
         # See: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
         self._encoder_dtype = (
-            torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+            torch.bfloat16
+            if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+            else torch.float16
         )
+        _bf16_ok = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
         logger.info(
             "SAM3 encoder dtype: %s (BF16 supported: %s)",
             self._encoder_dtype,
-            torch.cuda.is_bf16_supported(),
+            _bf16_ok,
         )
 
         self.encoder, self.fpn_neck = self._load_sam3_encoder()
+
+        # Gradient checkpointing: trade activation memory for recomputation.
+        # Reduces SAM3 TopoLoRA peak VRAM from ~22 GiB to ~10 GiB on L4.
+        # Only enable when training (freeze=False) — frozen encoder uses no_grad.
+        # Library-first (Rule #3): HuggingFace PreTrainedModel native feature.
+        if gradient_checkpointing and not freeze:
+            if hasattr(self.encoder, "gradient_checkpointing_enable"):
+                self.encoder.gradient_checkpointing_enable(
+                    gradient_checkpointing_kwargs={"use_reentrant": False}
+                )
+                logger.info(
+                    "SAM3 encoder gradient checkpointing ENABLED (non-reentrant)"
+                )
+            else:
+                logger.warning(
+                    "SAM3 encoder does not support gradient_checkpointing_enable() "
+                    "— gradient checkpointing NOT enabled. "
+                    "This may cause OOM on L4 for TopoLoRA training."
+                )
+        elif gradient_checkpointing and freeze:
+            logger.info(
+                "SAM3 gradient_checkpointing=True but freeze=True — "
+                "skipping (frozen encoder uses torch.no_grad, no activations stored)"
+            )
 
         # HF path: vision_encoder already includes FPN neck → output is 256-dim.
         # Native path: encoder outputs 1024-dim, FPN neck reduces to 256.
@@ -371,17 +399,17 @@ class Sam3Backbone(nn.Module):
         Parameters
         ----------
         volume:
-            3D volume of shape (B, C, D, H, W).
+            3D volume of shape (B, C, H, W, D) — MONAI depth-last convention.
 
         Returns
         -------
         Features of shape (B, embed_dim, D, H_feat, W_feat).
         """
-        b, c, d, h, w = volume.shape
+        b, c, h, w, d = volume.shape
         slice_features: list[Tensor] = []
 
         for z_idx in range(d):
-            slice_2d = volume[:, :, z_idx, :, :]  # (B, C, H, W)
+            slice_2d = volume[:, :, :, :, z_idx]  # (B, C, H, W)
             features = self.extract_features(slice_2d)  # (B, 1024, H_f, W_f)
             slice_features.append(features)
 

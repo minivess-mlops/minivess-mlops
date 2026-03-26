@@ -358,6 +358,32 @@ def load_fold_splits_task(splits_dir: Path) -> list[dict[str, Any]]:
     return load_splits(splits_file)  # type: ignore[return-value]
 
 
+def resolve_patch_size(model_family: str, config: dict[str, Any] | None = None) -> tuple[int, int, int]:
+    """Resolve patch_size based on model family with config override.
+
+    T20: Extracted from duplicate logic in train_one_fold_task and post_training_subflow.
+
+    - SAM3 variants: (64, 64, 3) — limit depth to 3 slices for encoder
+    - VesselFM: (64, 64, 32) — needs Z >= 2^5 = 32 for 6-level DynUNet
+    - Default (DynUNet, MambaVesselNet): (64, 64, 16)
+    """
+    _is_sam3 = model_family.startswith("sam3_")
+    _is_vesselfm = model_family == "vesselfm"
+    if _is_sam3:
+        default_patch: tuple[int, int, int] = (64, 64, 3)
+    elif _is_vesselfm:
+        default_patch = (64, 64, 32)
+    else:
+        default_patch = (64, 64, 16)
+
+    if config is not None:
+        _patch_raw = config.get("patch_size")
+        if _patch_raw is not None:
+            return tuple(_patch_raw)  # type: ignore[return-value]
+
+    return default_patch
+
+
 @task(name="train-one-fold")
 def train_one_fold_task(
     fold_id: int,
@@ -421,17 +447,8 @@ def train_one_fold_task(
     # with small patch depth.
     # VesselFM: 6-level DynUNet with 5 stride-2 downsamplings needs Z >= 2^5 = 32.
     # Z=16 causes skip connection shape mismatch at level 4 (#711).
-    if _is_sam3:
-        default_patch = (64, 64, 3)
-    elif _is_vesselfm:
-        default_patch = (64, 64, 32)
-    else:
-        default_patch = (64, 64, 16)
-    # patch_size=null in config means "use model-adaptive default" (set above).
-    _patch_raw = config.get("patch_size")
-    patch_size: tuple[int, int, int] = (  # type: ignore[assignment]
-        default_patch if _patch_raw is None else tuple(_patch_raw)
-    )
+    # T20: Shared patch_size resolution (previously duplicated in post_training_subflow)
+    patch_size: tuple[int, int, int] = resolve_patch_size(model_family_str, config)
     # batch_size is now config-driven via model_overrides in factorial YAML
     # (see configs/factorial/debug.yaml) and passed as BATCH_SIZE env var.
     # No more hardcoded SAM3 override — the factorial launcher handles it.
@@ -449,6 +466,11 @@ def train_one_fold_task(
     # Build ModelConfig (family must be ModelFamily enum)
     model_family = ModelFamily(model_family_str)
     arch_params: dict[str, Any] = dict(config.get("architecture_params", {}))
+    # Inject gradient_checkpointing into architecture_params so Sam3Backbone reads it.
+    # Top-level config key (from train_flow argparse) takes precedence over arch_params.
+    _gc_config = config.get("gradient_checkpointing", False)
+    if _gc_config and "gradient_checkpointing" not in arch_params:
+        arch_params["gradient_checkpointing"] = True
     model_config = ModelConfig(
         family=model_family,
         name=model_family_str,
@@ -602,6 +624,7 @@ def train_one_fold_task(
         max_epochs=max_epochs,
         batch_size=batch_size,
         patch_size=patch_size,
+        with_aux_calib=with_aux_calib,
     )
 
     with tracker.start_run(
@@ -620,11 +643,20 @@ def train_one_fold_task(
             k: v.to(device) if isinstance(v, torch.Tensor) else v
             for k, v in sample_batch.items()
         }
+        # Skip gradient_flow diagnostic when gradient checkpointing is enabled.
+        # The diagnostic forward+backward does NOT use gradient checkpointing,
+        # so it would OOM for SAM3 on L4 (Issue #966).
+        _skip_grad_flow = bool(
+            config.get("gradient_checkpointing", False)
+            or arch_params.get("gradient_checkpointing", False)
+        )
         pre_check_results = run_pre_training_checks(
             model=model,
             sample_batch=sample_on_device,
             criterion=criterion,
             expected_channels=model_config.out_channels,
+            mixed_precision=training_config.mixed_precision,
+            skip_gradient_flow=_skip_grad_flow,
         )
         errors = [
             r for r in pre_check_results if not r.passed and r.severity == "error"
@@ -824,12 +856,16 @@ def training_subflow(
         # Actual fold ID: if a specific fold was requested, use it; otherwise enumerate
         actual_fold_id = fold_id if fold_id is not None else fold_idx
         # Check for already-completed run with matching config fingerprint
+        # T7 fix: both call sites (here and train_one_fold_task) must pass
+        # identical kwargs — patch_size AND with_aux_calib.
+        _resume_patch = config.get("patch_size")
         fingerprint = compute_config_fingerprint(
             loss_name=loss_name,
             model_family=model_family,
             fold_id=actual_fold_id,
             max_epochs=max_epochs,
             batch_size=batch_size,
+            patch_size=tuple(_resume_patch) if _resume_patch else None,
             with_aux_calib=with_aux_calib,
         )
         existing_run_id = find_completed_config(
@@ -1212,16 +1248,8 @@ def _run_swag_post_training(
     if max_train_volumes is not None:
         train_dicts = train_dicts[:max_train_volumes]
 
-    _is_sam3 = model_family_str.startswith("sam3_")
-    _is_vesselfm = model_family_str == "vesselfm"
-    if _is_sam3:
-        default_patch = (64, 64, 3)
-    elif _is_vesselfm:
-        default_patch = (64, 64, 32)
-    else:
-        default_patch = (64, 64, 16)
-    _patch_raw = config.get("patch_size")
-    patch_size = default_patch if _patch_raw is None else tuple(_patch_raw)
+    # T20: Shared patch_size resolution (same function as train_one_fold_task)
+    patch_size = resolve_patch_size(model_family_str, config)
     batch_size = config.get("batch_size", 2)
 
     data_config = DataConfig(
@@ -1300,6 +1328,7 @@ def training_flow(
     zero_shot: bool = False,
     eval_dataset: str = "minivess",
     post_training_method: str = "none",
+    gradient_checkpointing: bool = False,
     **kwargs: Any,
 ) -> TrainingFlowResult:
     """Parent training flow — orchestrates training + optional post-training.
@@ -1355,6 +1384,25 @@ def training_flow(
         num_folds = int(config_dict.get("num_folds", num_folds))
         batch_size = int(config_dict.get("batch_size", batch_size))
         experiment_name = str(config_dict.get("experiment_name", experiment_name))
+        # Factorial-relevant keys (T2 fix: these were missing, causing silent False)
+        gradient_accumulation_steps = int(
+            config_dict.get("gradient_accumulation_steps", gradient_accumulation_steps)
+        )
+        gradient_checkpointing = bool(
+            config_dict.get("gradient_checkpointing", gradient_checkpointing)
+        )
+        with_aux_calib = bool(config_dict.get("with_aux_calib", with_aux_calib))
+        max_train_volumes = int(
+            config_dict.get("max_train_volumes", max_train_volumes)
+        )
+        max_val_volumes = int(config_dict.get("max_val_volumes", max_val_volumes))
+        zero_shot = bool(config_dict.get("zero_shot", zero_shot))
+        eval_dataset = str(config_dict.get("eval_dataset", eval_dataset))
+        post_training_method = str(
+            config_dict.get("post_training_method", post_training_method)
+        )
+        if "fold_id" in config_dict:
+            fold_id = int(config_dict["fold_id"])
         logger.info(
             "Config loaded from Hydra dict: experiment=%s model=%s loss=%s epochs=%d",
             experiment_name,
@@ -1431,6 +1479,9 @@ def training_flow(
         "max_val_volumes": max_val_volumes if max_val_volumes > 0 else None,
         "zero_shot": zero_shot,
         "eval_dataset": eval_dataset,
+        "gradient_checkpointing": gradient_checkpointing,
+        "fold_id": fold_id,
+        "post_training_method": post_training_method,
     }
 
     # Merge full Hydra config so train_one_fold_task can log it and use all keys
@@ -1467,10 +1518,12 @@ def training_flow(
 
     # Store the methods and run IDs in result
     result.post_training_method = ",".join(pt_methods)
+    # T19 fix: ",".join(... if rid) can produce "" when all entries are None,
+    # and "" is truthy, misleading downstream checks. Use `or None` to normalize.
     result.post_training_run_id = (
         pt_run_ids[0]
         if len(pt_run_ids) == 1
-        else ",".join(str(rid) for rid in pt_run_ids if rid)
+        else (",".join(str(rid) for rid in pt_run_ids if rid) or None)
         if pt_run_ids
         else None
     )
@@ -1607,6 +1660,11 @@ if __name__ == "__main__":
             ),
             help="Comma-separated post-training methods: none,swag (default: none,swag)",
         )
+        parser.add_argument(
+            "--gradient-checkpointing",
+            default=os.environ.get("GRADIENT_CHECKPOINTING", "false"),
+            help="Enable gradient checkpointing for SAM3 VRAM reduction (true/false)",
+        )
         args = parser.parse_args()
 
         # If a specific fold is requested, override num_folds to 1
@@ -1628,4 +1686,5 @@ if __name__ == "__main__":
             zero_shot=args.zero_shot.lower() == "true",
             eval_dataset=args.eval_dataset,
             post_training_method=args.post_training_method,
+            gradient_checkpointing=args.gradient_checkpointing.lower() == "true",
         )

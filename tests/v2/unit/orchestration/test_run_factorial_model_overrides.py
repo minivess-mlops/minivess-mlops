@@ -100,3 +100,45 @@ class TestRunFactorialDryRunModelOverrides:
         assert len(lines) > 0, "No sam3_topolora conditions found"
         for line in lines:
             assert "eff_bs=4" in line, f"Expected eff_bs=4 for sam3_topolora: {line}"
+
+    def test_dry_run_sam3_topolora_grad_ckpt_true(self, dry_run_output: str) -> None:
+        """T13: SAM3 TopoLoRA dry-run must show grad_ckpt=true."""
+        lines = [
+            line for line in dry_run_output.splitlines()
+            if "sam3_topolora" in line and "grad_ckpt=" in line
+        ]
+        assert len(lines) > 0, (
+            "No sam3_topolora conditions with grad_ckpt= found in dry-run output"
+        )
+        for line in lines:
+            assert "grad_ckpt=true" in line, (
+                f"Expected grad_ckpt=true for sam3_topolora: {line}"
+            )
+
+    def test_dry_run_sam3_hybrid_grad_ckpt_true(self, dry_run_output: str) -> None:
+        """T13: SAM3 Hybrid dry-run must show grad_ckpt=true."""
+        lines = [
+            line for line in dry_run_output.splitlines()
+            if "sam3_hybrid" in line and "grad_ckpt=" in line
+        ]
+        assert len(lines) > 0, (
+            "No sam3_hybrid conditions with grad_ckpt= found in dry-run output"
+        )
+        for line in lines:
+            assert "grad_ckpt=true" in line, (
+                f"Expected grad_ckpt=true for sam3_hybrid: {line}"
+            )
+
+    def test_dry_run_dynunet_grad_ckpt_false(self, dry_run_output: str) -> None:
+        """T13: DynUNet dry-run must show grad_ckpt=false (no GC needed)."""
+        lines = [
+            line for line in dry_run_output.splitlines()
+            if "dynunet" in line and "grad_ckpt=" in line
+        ]
+        assert len(lines) > 0, (
+            "No dynunet conditions with grad_ckpt= found in dry-run output"
+        )
+        for line in lines:
+            assert "grad_ckpt=false" in line, (
+                f"Expected grad_ckpt=false for dynunet: {line}"
+            )

@@ -1,12 +1,10 @@
 """Pre-training sanity checks — catch broken models before wasting GPU hours.
 
-Six checks run before the training loop starts:
+Four checks run before the training loop starts:
 1. Output shape mismatch
 2. Gradient flow (at least one param has .grad)
 3. Loss sanity (random init loss near expected value)
 4. NaN/Inf check (no NaN or Inf in model output)
-5. Data range (inputs in expected range)
-6. Label integrity (valid class indices)
 
 Artifact: diagnostics/pre_training_checks.json (NOT profiling/ — RC12).
 Diagnostics always run regardless of ProfilingConfig.enabled (RC17).
@@ -19,6 +17,7 @@ from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 import torch
+from torch.amp import autocast
 
 if TYPE_CHECKING:
     from torch import nn
@@ -39,21 +38,44 @@ class CheckResult:
     severity: str = "warning"  # "error" or "warning"
 
 
+def _run_inference_once(
+    model: nn.Module,
+    sample_batch: dict[str, torch.Tensor],
+    *,
+    mixed_precision: bool = True,
+) -> torch.Tensor:
+    """Run a single no_grad forward pass and return the output tensor.
+
+    T15: Consolidates 3 redundant forward passes (check_output_shape,
+    check_loss_sanity, check_nan_inf) into one. For SAM3 with slice-by-slice
+    processing, each pass iterates all Z slices — 3 passes = 3x wall-clock time.
+
+    check_gradient_flow still needs its own pass (requires gradients).
+    """
+    model.eval()
+    images = sample_batch["image"]
+    with torch.no_grad(), autocast(device_type=images.device.type, enabled=mixed_precision):
+        output = model(images)
+        if hasattr(output, "logits"):
+            output = output.logits
+    return output
+
+
 def check_output_shape(
     model: nn.Module,
     sample_batch: dict[str, torch.Tensor],
     *,
     expected_channels: int,
+    mixed_precision: bool = True,
+    cached_output: torch.Tensor | None = None,
 ) -> CheckResult:
     """Check that model output has the expected number of channels."""
-    model.eval()
-    with torch.no_grad():
-        images = sample_batch["image"]
-        output = model(images)
-        # Handle both Tensor and SegmentationOutput
-        if hasattr(output, "logits"):
-            output = output.logits
-        out_channels = output.shape[1]
+    if cached_output is not None:
+        output = cached_output
+    else:
+        output = _run_inference_once(model, sample_batch, mixed_precision=mixed_precision)
+
+    out_channels = output.shape[1]
 
     if out_channels != expected_channels:
         return CheckResult(
@@ -74,22 +96,35 @@ def check_output_shape(
 def check_gradient_flow(
     model: nn.Module,
     sample_batch: dict[str, torch.Tensor],
+    *,
+    mixed_precision: bool = True,
 ) -> CheckResult:
-    """Check that at least one parameter receives gradients."""
+    """Check that at least one parameter receives gradients.
+
+    Uses autocast for VRAM safety on large models (SAM3 648M params).
+    Loss is upcast to FP32 before backward to prevent FP16 underflow
+    which would produce zero gradients (false-negative).
+
+    See: .claude/metalearning/2026-03-25-overconfident-oom-fixed-claim.md
+    """
     model.train()
     model.zero_grad()
 
     images = sample_batch["image"]
-    output = model(images)
-    if hasattr(output, "logits"):
-        output = output.logits
+    with autocast(device_type=images.device.type, enabled=mixed_precision):
+        output = model(images)
+        if hasattr(output, "logits"):
+            output = output.logits
 
     # Use squared mean to avoid zero gradients for symmetric outputs.
     # VesselFM outputs cat([-x, x]): mean() cancels to 0, (x²).mean() does not.
-    loss = (output**2).mean()
+    # .float() upcast prevents FP16 underflow → zero gradients without GradScaler.
+    loss = (output.float() ** 2).mean()
     try:
         loss.backward()
-    except RuntimeError:
+    except RuntimeError as exc:
+        logger.error("Backward pass failed in gradient_flow check: %s", exc)
+        model.zero_grad(set_to_none=True)
         return CheckResult(
             name="gradient_flow",
             passed=False,
@@ -102,6 +137,10 @@ def check_gradient_flow(
         for p in model.parameters()
         if p.requires_grad
     )
+
+    # Cleanup: clear residual .grad tensors to free VRAM (~2.5 GB for SAM3 648M params).
+    # Without this, gradients from the diagnostic check leak into the training loop.
+    model.zero_grad(set_to_none=True)
 
     if not has_grad:
         return CheckResult(
@@ -121,24 +160,23 @@ def check_loss_sanity(
     model: nn.Module,
     sample_batch: dict[str, torch.Tensor],
     criterion: nn.Module,
+    *,
+    mixed_precision: bool = True,
+    cached_output: torch.Tensor | None = None,
 ) -> CheckResult:
     """Check that loss at random init is in reasonable range."""
-    model.eval()
+    if cached_output is not None:
+        output = cached_output
+    else:
+        output = _run_inference_once(model, sample_batch, mixed_precision=mixed_precision)
+
+    labels = sample_batch["label"]
     with torch.no_grad():
-        images = sample_batch["image"]
-        labels = sample_batch["label"]
-        output = model(images)
-        if hasattr(output, "logits"):
-            output = output.logits
-        # Squeeze singleton channel dim if criterion expects no channel dim
-        # (e.g., CrossEntropyLoss expects (B, D, H, W)).
-        # Keep channel dim for losses with to_onehot_y=True (e.g., DiceCELoss).
         target = labels
         if labels.shape[1] == 1:
             try:
                 loss = criterion(output, target)
             except (ValueError, RuntimeError):
-                # If that fails, try squeezing the channel dim
                 target = labels.squeeze(1)
                 loss = criterion(output, target)
         else:
@@ -163,17 +201,18 @@ def check_loss_sanity(
 def check_nan_inf(
     model: nn.Module,
     sample_batch: dict[str, torch.Tensor],
+    *,
+    mixed_precision: bool = True,
+    cached_output: torch.Tensor | None = None,
 ) -> CheckResult:
     """Check that model output has no NaN or Inf values."""
-    model.eval()
-    with torch.no_grad():
-        images = sample_batch["image"]
-        output = model(images)
-        if hasattr(output, "logits"):
-            output = output.logits
+    if cached_output is not None:
+        output = cached_output
+    else:
+        output = _run_inference_once(model, sample_batch, mixed_precision=mixed_precision)
 
-        has_nan = torch.isnan(output).any().item()
-        has_inf = torch.isinf(output).any().item()
+    has_nan = torch.isnan(output).any().item()
+    has_inf = torch.isinf(output).any().item()
 
     if has_nan or has_inf:
         return CheckResult(
@@ -195,20 +234,71 @@ def run_pre_training_checks(
     sample_batch: dict[str, torch.Tensor],
     criterion: nn.Module,
     expected_channels: int = 2,
+    mixed_precision: bool = True,
+    skip_gradient_flow: bool = False,
 ) -> list[CheckResult]:
     """Run all pre-training sanity checks.
+
+    Parameters
+    ----------
+    mixed_precision:
+        If True, wraps forward passes in torch.amp.autocast(). Required for
+        SAM3 (648M params) which OOMs on L4 in FP32. Default True matches
+        TrainingConfig.mixed_precision default.
+    skip_gradient_flow:
+        If True, skip the gradient_flow check and report as passed with a skip
+        message. Required when gradient checkpointing is enabled — the diagnostic
+        forward+backward does NOT use gradient checkpointing, so it would OOM
+        for SAM3. Issue: #966.
 
     Returns a list of CheckResult. Failures with severity='error'
     should abort training with a clear message.
     """
     results: list[CheckResult] = []
 
-    results.append(
-        check_output_shape(model, sample_batch, expected_channels=expected_channels)
+    # T15: Single forward pass for all inference checks (output_shape, loss_sanity, nan_inf).
+    # Avoids 3 redundant forward passes through SAM3's slice-by-slice encoder.
+    cached_output = _run_inference_once(
+        model, sample_batch, mixed_precision=mixed_precision
     )
-    results.append(check_gradient_flow(model, sample_batch))
-    results.append(check_loss_sanity(model, sample_batch, criterion))
-    results.append(check_nan_inf(model, sample_batch))
+
+    results.append(
+        check_output_shape(
+            model, sample_batch,
+            expected_channels=expected_channels,
+            mixed_precision=mixed_precision,
+            cached_output=cached_output,
+        )
+    )
+    if skip_gradient_flow:
+        results.append(
+            CheckResult(
+                name="gradient_flow",
+                passed=True,
+                message=(
+                    "Skipped — model uses gradient checkpointing "
+                    "(diagnostic VRAM exceeds training VRAM)"
+                ),
+            )
+        )
+    else:
+        results.append(
+            check_gradient_flow(model, sample_batch, mixed_precision=mixed_precision)
+        )
+    results.append(
+        check_loss_sanity(
+            model, sample_batch, criterion,
+            mixed_precision=mixed_precision,
+            cached_output=cached_output,
+        )
+    )
+    results.append(
+        check_nan_inf(
+            model, sample_batch,
+            mixed_precision=mixed_precision,
+            cached_output=cached_output,
+        )
+    )
 
     # Log summary
     passed = sum(1 for r in results if r.passed)

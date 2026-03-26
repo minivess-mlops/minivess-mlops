@@ -147,6 +147,24 @@ class TestTrainFactorialYaml:
             "Run must NOT use standalone scripts (Rule #17)"
         )
 
+    def test_has_gradient_checkpointing_env_var(self) -> None:
+        """T12: GRADIENT_CHECKPOINTING must be in envs section."""
+        config = _load(_TRAIN_FACTORIAL)
+        envs = config.get("envs", {})
+        assert "GRADIENT_CHECKPOINTING" in envs, (
+            "train_factorial.yaml missing GRADIENT_CHECKPOINTING env var — "
+            "SAM3 TopoLoRA/Hybrid need GC=true to fit in L4 24 GB VRAM"
+        )
+
+    def test_gradient_checkpointing_default_is_false(self) -> None:
+        """T12: GRADIENT_CHECKPOINTING default must be 'false'."""
+        config = _load(_TRAIN_FACTORIAL)
+        envs = config.get("envs", {})
+        gc_val = str(envs.get("GRADIENT_CHECKPOINTING", "")).lower()
+        assert gc_val == "false", (
+            f"GRADIENT_CHECKPOINTING default should be 'false', got '{gc_val}'"
+        )
+
 
 # ---------------------------------------------------------------------------
 # run_factorial.sh — script validation

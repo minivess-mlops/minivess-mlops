@@ -49,7 +49,7 @@ cleanup() {
     echo "Cleanup complete. Check job log for partial results."
     exit 130  # Standard exit code for SIGINT
 }
-trap cleanup INT TERM
+trap cleanup EXIT INT TERM
 
 # ─── Find sky binary (venv or system) ───────────────────────────────────
 SKY_BIN=""
@@ -298,11 +298,13 @@ print(cfg.get('fixed', {}).get('batch_size', 2))
 
 declare -A MODEL_BATCH_SIZE
 declare -A MODEL_GRAD_ACCUM
+declare -A MODEL_GRAD_CKPT
 
 # Populate per-model overrides from YAML (if model_overrides section exists)
-while IFS=' ' read -r m_name m_bs m_accum; do
+while IFS=' ' read -r m_name m_bs m_accum m_gc; do
     MODEL_BATCH_SIZE["${m_name}"]="${m_bs}"
     MODEL_GRAD_ACCUM["${m_name}"]="${m_accum}"
+    MODEL_GRAD_CKPT["${m_name}"]="${m_gc}"
 done < <(
     python3 -c "
 import yaml, pathlib
@@ -311,7 +313,8 @@ overrides = cfg.get('model_overrides', {})
 for model_name, settings in overrides.items():
     bs = settings.get('batch_size', cfg.get('fixed', {}).get('batch_size', 2))
     accum = settings.get('gradient_accumulation_steps', 1)
-    print(f'{model_name} {bs} {accum}')
+    gc = str(settings.get('gradient_checkpointing', False)).lower()
+    print(f'{model_name} {bs} {accum} {gc}')
 "
 )
 
@@ -377,16 +380,17 @@ for model in "${MODEL_ARRAY[@]}"; do
                 CONDITION=$((CONDITION + 1))
                 CONDITION_NAME="${model}-${loss}-calib${aux_calib}-f${fold}"
 
-                # Resolve per-model batch_size and gradient_accumulation_steps
+                # Resolve per-model batch_size, gradient_accumulation_steps, gradient_checkpointing
                 BATCH_SIZE="${MODEL_BATCH_SIZE[${model}]:-${GLOBAL_BATCH_SIZE}}"
                 GRAD_ACCUM="${MODEL_GRAD_ACCUM[${model}]:-1}"
+                GRAD_CKPT="${MODEL_GRAD_CKPT[${model}]:-false}"
                 EFFECTIVE_BS=$((BATCH_SIZE * GRAD_ACCUM))
 
-                echo "[${CONDITION}/${TOTAL_GPU_JOBS}] ${model} × ${loss} × aux_calib=${aux_calib} × fold=${fold} (bs=${BATCH_SIZE}, accum=${GRAD_ACCUM}, eff_bs=${EFFECTIVE_BS}, pt: ${PT_METHODS})"
+                echo "[${CONDITION}/${TOTAL_GPU_JOBS}] ${model} × ${loss} × aux_calib=${aux_calib} × fold=${fold} (bs=${BATCH_SIZE}, accum=${GRAD_ACCUM}, eff_bs=${EFFECTIVE_BS}, grad_ckpt=${GRAD_CKPT}, pt: ${PT_METHODS})"
 
                 if [ "${DRY_RUN}" = true ]; then
-                    echo "  [DRY RUN] sky jobs launch ${LAUNCH_YAML} --name ${CONDITION_NAME} --env MODEL_FAMILY=${model} --env BATCH_SIZE=${BATCH_SIZE} --env GRAD_ACCUM_STEPS=${GRAD_ACCUM} ..."
-                    echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | bs=${BATCH_SIZE} | accum=${GRAD_ACCUM} | DRY_RUN" >> "${JOB_LOG}"
+                    echo "  [DRY RUN] sky jobs launch ${LAUNCH_YAML} --name ${CONDITION_NAME} --env MODEL_FAMILY=${model} --env BATCH_SIZE=${BATCH_SIZE} --env GRAD_ACCUM_STEPS=${GRAD_ACCUM} --env GRADIENT_CHECKPOINTING=${GRAD_CKPT} ..."
+                    echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | bs=${BATCH_SIZE} | accum=${GRAD_ACCUM} | grad_ckpt=${GRAD_CKPT} | DRY_RUN" >> "${JOB_LOG}"
                 else
                     # Resume: skip already-submitted conditions (Gap #3)
                     if [ "${RESUME}" = true ] && echo "${EXISTING_ACTIVE_JOBS}" | grep -qxF "${CONDITION_NAME}"; then
@@ -413,6 +417,7 @@ for model in "${MODEL_ARRAY[@]}"; do
                                 --env POST_TRAINING_METHODS="${PT_METHODS}" \
                                 --env BATCH_SIZE="${BATCH_SIZE}" \
                                 --env GRAD_ACCUM_STEPS="${GRAD_ACCUM}" \
+                                --env GRADIENT_CHECKPOINTING="${GRAD_CKPT}" \
                                 --env-file "${ENV_FILE}" \
                                 -y; then
                                 echo "${CONDITION} | ${model} | ${loss} | ${aux_calib} | ${fold} | LAUNCHED" >> "${JOB_LOG}"

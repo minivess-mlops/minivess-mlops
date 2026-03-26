@@ -1,0 +1,312 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SAM3 P0 Blockers Fix Plan — Pre-Production Gate
+  =================================================
+  Date: 2026-03-25
+  Branch: test/run-debug-9th-pass-report
+  Source: 9th pass self-reflection agent findings
+  Executor: /self-learning-iterative-coder (RED→GREEN→VERIFY)
+
+  CRITICAL CONTEXT:
+  - Zero SAM3 training iterations have EVER completed across 9 passes
+  - The OOM is in pre_training_checks.py:83 (FP32 forward, no autocast), NOT training loop
+  - MLflow HTTP 413 has been "addressed" in 3 passes but never DEPLOYED
+  - google-cloud-storage missing from Docker image (in sky extra, not main deps)
+
+  METALEARNING:
+  - .claude/metalearning/2026-03-25-overconfident-oom-fixed-claim.md
+  - .claude/metalearning/2026-03-25-mlflow-413-never-actually-fixed.md
+
+  RULES:
+  - "Code change committed" is NOT "fix deployed and verified"
+  - NEVER claim fixed without checking sky jobs logs for actual training output
+  - ALL layers (code, Docker, infra) verified in SAME session
+-->
+<plan name="sam3-p0-blockers" version="1.0" branch="test/run-debug-9th-pass-report">
+
+  <metadata>
+    <title>Fix SAM3 Pre-Training OOM + MLflow 413 — Production Gate</title>
+    <critical-path>Task 1 + Task 2 (parallel) → Task 3 (Docker rebuild) → Tasks 4-7 (cloud validation)</critical-path>
+    <estimated-cost>Code: 1-2 hrs. Cloud validation: ~$3-5 (4 single-condition jobs)</estimated-cost>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- TASK 1: Fix pre-training checks OOM (CRITICAL PATH)               -->
+  <!-- ================================================================== -->
+  <task id="1" priority="P0-CRITICAL">
+    <title>Add autocast() to ALL pre-training check functions</title>
+    <description>
+      ALL FOUR check functions in pre_training_checks.py call model(images) in
+      FP32 without autocast. SAM3's ViT-32L encoder (648M params) OOMs on L4
+      at BS=1 in FP32. The training loop correctly uses autocast (trainer.py:417)
+      but the diagnostics do not.
+
+      Functions to fix:
+      - check_output_shape() line 52
+      - check_gradient_flow() line 83 (worst — has backward too)
+      - check_loss_sanity() line 130
+      - check_nan_inf() line 171
+
+      All called from run_pre_training_checks() line 207-211.
+    </description>
+    <files>
+      <file action="read-then-modify">src/minivess/diagnostics/pre_training_checks.py</file>
+      <file action="read">src/minivess/pipeline/trainer.py</file>
+      <file action="read-then-modify">src/minivess/orchestration/flows/train_flow.py</file>
+      <file action="read-then-modify">tests/v2/unit/test_pre_training_checks.py</file>
+    </files>
+    <tdd-approach>
+      <red>
+        Read ALL files first. Then add to tests/v2/unit/test_pre_training_checks.py:
+
+        class TestAutocastInChecks:
+          def test_gradient_flow_accepts_mixed_precision(self):
+              result = check_gradient_flow(model, batch, mixed_precision=True)
+              assert result.passed
+
+          def test_output_shape_accepts_mixed_precision(self):
+              result = check_output_shape(model, batch, expected_channels=2, mixed_precision=True)
+              assert result.passed
+
+          def test_loss_sanity_accepts_mixed_precision(self):
+              result = check_loss_sanity(model, batch, criterion, mixed_precision=True)
+              assert result.passed
+
+          def test_nan_inf_accepts_mixed_precision(self):
+              result = check_nan_inf(model, batch, mixed_precision=True)
+              assert result.passed
+
+          def test_run_all_checks_accepts_mixed_precision(self):
+              results = run_pre_training_checks(..., mixed_precision=True)
+              assert all(r.passed for r in results)
+
+          def test_gradient_flow_with_amp_disabled(self):
+              """FP32 mode still works for small models."""
+              result = check_gradient_flow(model, batch, mixed_precision=False)
+              assert result.passed
+
+        Run: expect FAIL (functions don't accept mixed_precision kwarg)
+      </red>
+      <green>
+        1. Add `from torch.amp import autocast` to pre_training_checks.py
+
+        2. Add `*, mixed_precision: bool = True` to ALL 5 functions:
+           - check_output_shape, check_gradient_flow, check_loss_sanity,
+             check_nan_inf, run_pre_training_checks
+
+        3. In each function, wrap model(images) in:
+           with autocast(device_type=images.device.type, enabled=mixed_precision):
+               output = model(images)
+
+        4. For check_gradient_flow: UPCAST loss to FP32 before backward:
+           loss = (output.float()**2).mean()  # .float() prevents FP16 underflow
+           REVIEWER CORRECTION: Without GradScaler, FP16 loss.backward() can
+           produce zero gradients due to underflow, causing a false-negative
+           ("no gradient flow" when model is fine). Upcasting to FP32 prevents this.
+           This is simpler than adding GradScaler for a diagnostic check.
+
+        5. In train_flow.py: thread training_config.mixed_precision to
+           run_pre_training_checks() call
+      </green>
+      <verify>
+        uv run pytest tests/v2/unit/test_pre_training_checks.py -v
+        make test-staging
+      </verify>
+    </tdd-approach>
+    <verification>
+      <command>uv run pytest tests/v2/unit/test_pre_training_checks.py -v</command>
+      <command>make test-staging 2>&amp;1 | tail -3</command>
+    </verification>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- TASK 2: Fix MLflow 413 — move google-cloud-storage to main deps   -->
+  <!-- ================================================================== -->
+  <task id="2" priority="P0" parallel-with="1">
+    <title>Diagnose and fix MLflow HTTP 413 — investigate ACTUAL root cause</title>
+    <description>
+      REVIEWER CORRECTION (CRITICAL): The original hypothesis was wrong.
+      google-cloud-storage IS ALREADY a transitive main dependency via dvc[s3,gs]
+      in pyproject.toml line 46. It should already be in the Docker image.
+
+      The HTTP 413 root cause is NOT a missing package. It must be one of:
+      1. MLflow artifact store misconfigured (not using gs:// URI at runtime)
+      2. GCS credentials not available in the container at training time
+      3. MLflow client using HTTP upload path despite gs:// being configured
+      4. MLFLOW_DEFAULT_ARTIFACT_ROOT env var not reaching the training container
+
+      This task is now a DIAGNOSTIC task, not a simple dependency move:
+      1. Verify google-cloud-storage IS importable in Docker container
+      2. Verify MLFLOW_TRACKING_URI and MLFLOW_DEFAULT_ARTIFACT_ROOT env vars
+         are set correctly inside the running container
+      3. Read sky jobs logs for the actual 413 error context — what code path
+         is calling HTTP upload instead of GCS upload?
+      4. Check if the Pulumi change (commit 893c414) was ever deployed
+
+      See: .claude/metalearning/2026-03-25-mlflow-413-never-actually-fixed.md
+    </description>
+    <files>
+      <file action="read">pyproject.toml</file>
+      <file action="read">deployment/docker/Dockerfile.base</file>
+      <file action="read">deployment/pulumi/gcp/__main__.py</file>
+      <file action="read">deployment/skypilot/train_factorial.yaml</file>
+      <file action="read">src/minivess/observability/mlflow_helpers.py</file>
+      <file action="create">tests/v2/unit/deployment/test_gcs_dependency.py</file>
+    </files>
+    <tdd-approach>
+      <red>
+        STEP 1: INVESTIGATE before writing tests.
+        - Run: docker run --rm minivess-base:latest python -c "from google.cloud.storage import Client; print('GCS importable')"
+          If this PASSES → package is available, 413 is NOT caused by missing dep
+          If this FAILS → the dvc[gs] extra isn't pulling it through somehow
+        - Run: docker run --rm minivess-base:latest python -c "from mlflow.store.artifact.gcs_artifact_repo import GCSArtifactRepository; print('MLflow GCS OK')"
+        - Read sky jobs logs for a SUCCEEDED DynUNet job (e.g., job 56) to find
+          the actual 413 error traceback and determine which MLflow code path
+          triggered the HTTP upload
+
+        STEP 2: Write tests based on findings (not before investigation).
+
+        class TestGCSDependency:
+          def test_google_cloud_storage_importable(self):
+              """Verify google-cloud-storage available (transitive via dvc[gs])."""
+              import google.cloud.storage
+              assert hasattr(google.cloud.storage, "Client")
+
+          def test_mlflow_gcs_artifact_repo_importable(self):
+              from mlflow.store.artifact.gcs_artifact_repo import GCSArtifactRepository
+              assert GCSArtifactRepository is not None
+
+        Additional tests depend on investigation findings.
+      </red>
+      <green>
+        Fix depends on root cause found in investigation:
+        - If MLflow server config wrong → fix Pulumi + deploy
+        - If env var not reaching container → fix SkyPilot YAML envs
+        - If MLflow client code uses wrong artifact path → fix mlflow_helpers.py
+        - If GCS credentials missing in container → fix auth setup
+      </green>
+      <verify>
+        uv run pytest tests/v2/unit/deployment/test_gcs_dependency.py -v
+        CRITICAL: After Docker rebuild, run a REAL job and check sky jobs logs
+        for "logged artifact to gs://" — NOT just local tests.
+      </verify>
+    </tdd-approach>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- TASK 2B: Verify SAM3 HuggingFace weight URL (NEW P0 from agent)  -->
+  <!-- ================================================================== -->
+  <task id="2B" priority="P0" parallel-with="1,2">
+    <title>Verify SAM3 HuggingFace model repo/filename is correct</title>
+    <description>
+      Self-reflection agent found HTTP 404 for facebook/sam3-hiera-large in job
+      68 logs. The HF repo or filename may be wrong. SAM3 is beyond training
+      knowledge cutoff (Nov 2025) — must web-verify before any cloud launch.
+
+      CLAUDE.md Rule #10: "Verify Models Beyond Knowledge Cutoff."
+    </description>
+    <files>
+      <file action="read">src/minivess/adapters/sam3_backbone.py</file>
+      <file action="read">deployment/skypilot/train_factorial.yaml</file>
+      <file action="read">configs/model_profiles/sam3_vanilla.yaml</file>
+    </files>
+    <tdd-approach>
+      <red>
+        Web search: "facebook sam3 hiera large huggingface model" to verify repo name.
+        Check if the repo is "facebook/sam3" or "facebookresearch/sam3" or another name.
+        Read sam3_backbone.py to find the actual from_pretrained() call.
+        Read train_factorial.yaml setup block to find the hf_hub_download command.
+        Create test: test_sam3_hf_repo_name_valid — verify the repo string in
+        model profile YAML matches the actual HuggingFace repo.
+      </red>
+      <green>
+        Fix any wrong repo/filename references in:
+        - sam3_backbone.py from_pretrained() call
+        - train_factorial.yaml setup block HF download
+        - Model profile YAMLs weights.hf_repo field
+      </green>
+      <verify>
+        uv run pytest tests/v2/unit/adapters/test_model_weight_verification.py -v
+      </verify>
+    </tdd-approach>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- TASK 3: Docker rebuild + push (verification gate, not TDD)        -->
+  <!-- ================================================================== -->
+  <task id="3" priority="P0" depends-on="1,2" type="verification-gate">
+    <title>Rebuild Docker, push to GAR, verify fixes baked in</title>
+    <description>
+      MANDATORY: ALL layers verified in same session per metalearning rule.
+      "Code change committed" is NOT "fix deployed and verified."
+    </description>
+    <steps>
+      <step>make test-staging — verify all tests pass locally</step>
+      <step>make build-base-gpu — rebuild Docker with fixes</step>
+      <step>docker run --rm minivess-base:latest python -c "from google.cloud.storage import Client; print('GCS OK')"</step>
+      <step>docker run --rm minivess-base:latest python -c "from minivess.diagnostics.pre_training_checks import check_gradient_flow; print('Checks OK')"</step>
+      <step>docker tag + docker push to GAR</step>
+      <step>uv run python scripts/preflight_gcp.py — all gates pass including freshness</step>
+    </steps>
+    <note>Steps 5-6 require user authorization for GAR push.</note>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- TASKS 4-7: Cloud validation (require user auth for each launch)   -->
+  <!-- ================================================================== -->
+  <task id="4" priority="P0" depends-on="3" type="cloud-validation">
+    <title>SAM3 TopoLoRA → SUCCEEDED (end-to-end validation)</title>
+    <description>
+      Launch 1 SAM3 TopoLoRA condition. Check sky jobs logs for ACTUAL training
+      output (epoch progress, loss values). "28 min job duration" is NOT evidence
+      of training — must see training loop output in logs.
+
+      AFTER job reaches SUCCEEDED: verify MLflow has metrics AND artifacts
+      (checkpoint uploaded via GCS, not HTTP 413).
+    </description>
+    <success-criteria>
+      sky jobs logs JOB_ID shows "Epoch 1/2" and "Epoch 2/2" with loss values.
+      MLflow run has train/loss, val/loss metrics.
+      MLflow artifact store has checkpoint file (&gt;50 MB).
+    </success-criteria>
+  </task>
+
+  <task id="5" priority="P0" depends-on="3" type="cloud-validation" parallel-with="4">
+    <title>SAM3 Hybrid → SUCCEEDED (never tested, different architecture)</title>
+    <success-criteria>Same as Task 4 but for sam3_hybrid model family.</success-criteria>
+  </task>
+
+  <task id="6" priority="P0" depends-on="3" type="cloud-validation" parallel-with="4,5">
+    <title>Zero-shot baselines → SUCCEEDED (sam3_vanilla + vesselfm)</title>
+    <success-criteria>Both zero-shot jobs reach SUCCEEDED. MLflow has evaluation metrics.</success-criteria>
+  </task>
+
+  <task id="7" priority="P0" depends-on="3" type="cloud-validation" parallel-with="4">
+    <title>SWAG post-training artifact uploaded (no HTTP 413)</title>
+    <description>
+      Run DynUNet with SWAG enabled. After SUCCEEDED, check sky jobs logs for
+      "logged artifact" message. Check MLflow for post_training/ artifacts.
+      If 413 still occurs → the google-cloud-storage fix didn't work in Docker.
+    </description>
+    <success-criteria>
+      sky jobs logs shows "logged artifact to gs://" (not HTTP upload).
+      MLflow post_training/ directory has swag_model artifact.
+    </success-criteria>
+  </task>
+
+  <!-- ================================================================== -->
+  <!-- FINAL GATE                                                          -->
+  <!-- ================================================================== -->
+  <final-gate>
+    <criterion>make test-staging: 0 failures</criterion>
+    <criterion>make test-prod: 0 failures</criterion>
+    <criterion>SAM3 HuggingFace repo/filename verified (no 404)</criterion>
+    <criterion>Docker image on GAR matches git HEAD (freshness gate)</criterion>
+    <criterion>At least 1 SAM3 TopoLoRA SUCCEEDED with training logs verified</criterion>
+    <criterion>At least 1 SAM3 Hybrid SUCCEEDED</criterion>
+    <criterion>Both zero-shot baselines SUCCEEDED</criterion>
+    <criterion>SWAG artifact uploaded via GCS (no 413)</criterion>
+    <criterion>ONLY THEN: report "production ready"</criterion>
+  </final-gate>
+
+</plan>

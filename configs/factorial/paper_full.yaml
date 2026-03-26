@@ -82,9 +82,11 @@ model_overrides:
   sam3_topolora:
     batch_size: 1
     gradient_accumulation_steps: 4
+    gradient_checkpointing: true
   sam3_hybrid:
     batch_size: 1
     gradient_accumulation_steps: 4
+    gradient_checkpointing: true
   sam3_vanilla:
     batch_size: 1
     gradient_accumulation_steps: 1
