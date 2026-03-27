@@ -117,6 +117,13 @@ class VesselCompoundLoss(nn.Module):
         probs, labels_onehot = _labels_to_onehot(logits, labels)
         cldice_loss = self.cldice(probs, labels_onehot)
 
+        if torch.isnan(cldice_loss) or torch.isinf(cldice_loss):
+            logger.warning(
+                "clDice produced %s — falling back to 0.0 (no centerline to match)",
+                cldice_loss.item(),
+            )
+            cldice_loss = torch.tensor(0.0, device=logits.device, requires_grad=True)
+
         result: torch.Tensor = (
             self.lambda_dice_ce * dice_ce_loss + self.lambda_cldice * cldice_loss
         )
@@ -155,6 +162,12 @@ class _WrappedSoftclDiceLoss(nn.Module):
         """Apply softmax + one-hot, then delegate to SoftclDiceLoss."""
         probs, labels_onehot = _labels_to_onehot(logits, labels)
         result: torch.Tensor = self.cldice(probs, labels_onehot)
+        if torch.isnan(result) or torch.isinf(result):
+            logger.warning(
+                "clDice produced %s — falling back to 0.0 (no centerline to match)",
+                result.item(),
+            )
+            result = torch.tensor(0.0, device=logits.device, requires_grad=True)
         return result
 
 
@@ -324,6 +337,14 @@ class TopologyCompoundLoss(nn.Module):
         dice_ce_loss = self.dice_ce(logits, labels)
         probs, labels_onehot = _labels_to_onehot(logits, labels)
         cldice_loss = self.cldice(probs, labels_onehot)
+
+        if torch.isnan(cldice_loss) or torch.isinf(cldice_loss):
+            logger.warning(
+                "clDice produced %s — falling back to 0.0 (no centerline to match)",
+                cldice_loss.item(),
+            )
+            cldice_loss = torch.tensor(0.0, device=logits.device, requires_grad=True)
+
         betti_loss = self.betti(logits, labels)
         result: torch.Tensor = (
             self.lambda_dice_ce * dice_ce_loss
@@ -458,6 +479,13 @@ class BceDiceClDiceLoss(nn.Module):
         # clDice needs probabilities + one-hot labels
         probs, labels_onehot = _labels_to_onehot(logits, labels)
         cldice_loss = self.cldice(probs, labels_onehot)
+
+        if torch.isnan(cldice_loss) or torch.isinf(cldice_loss):
+            logger.warning(
+                "clDice produced %s — falling back to 0.0 (no centerline to match)",
+                cldice_loss.item(),
+            )
+            cldice_loss = torch.tensor(0.0, device=logits.device, requires_grad=True)
 
         result: torch.Tensor = (
             self.lambda_bce * bce_loss
