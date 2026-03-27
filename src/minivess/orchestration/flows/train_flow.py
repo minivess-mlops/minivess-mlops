@@ -564,6 +564,13 @@ def train_one_fold_task(
 
         val_dicts = val_dicts[: max(2, DEBUG_MAX_VOLUMES // 3)]
 
+    if not train_dicts:
+        msg = (
+            "train_dicts is empty — no training volumes found. "
+            "Check DVC pull, data directory, and split configuration."
+        )
+        raise ValueError(msg)
+
     logger.info(
         "Fold %d: loss=%s, device=%s, train=%d, val=%d",
         fold_id,
@@ -840,6 +847,13 @@ def training_subflow(
     -------
     TrainingFlowResult with fold results, MLflow run ID, and upstream link.
     """
+    if not folds_to_run:
+        msg = (
+            "folds_to_run is empty — no folds to train. "
+            "Check factorial config: num_folds, fold_id, and splits file."
+        )
+        raise ValueError(msg)
+
     loss_name: str = config["loss_name"]
     model_family: str = config["model_family"]
     experiment_name: str = config["experiment_name"]
