@@ -78,3 +78,28 @@ class TestAverageCheckpoints:
 
         loaded = torch.load(output, weights_only=True)
         assert torch.allclose(loaded["model_state_dict"]["w"], expected)
+
+    def test_corrupt_file_raises_clear_error(self, tmp_path: Path) -> None:
+        """Corrupt checkpoint must raise RuntimeError with file path in message."""
+        from minivess.orchestration.flows.post_training_flow import _average_checkpoints
+
+        corrupt = tmp_path / "corrupt.pth"
+        corrupt.write_bytes(b"not a valid pytorch checkpoint file")
+        output = tmp_path / "averaged.pth"
+
+        with pytest.raises(RuntimeError, match="corrupt"):
+            _average_checkpoints([corrupt], output)
+
+    def test_one_corrupt_one_valid_identifies_corrupt(self, tmp_path: Path) -> None:
+        """When one checkpoint is corrupt, error must identify which file."""
+        from minivess.orchestration.flows.post_training_flow import _average_checkpoints
+
+        valid = tmp_path / "valid.pth"
+        torch.save({"model_state_dict": {"w": torch.ones(4)}}, valid)
+
+        corrupt = tmp_path / "corrupt.pth"
+        corrupt.write_bytes(b"not valid")
+
+        output = tmp_path / "averaged.pth"
+        with pytest.raises(RuntimeError, match="corrupt"):
+            _average_checkpoints([valid, corrupt], output)

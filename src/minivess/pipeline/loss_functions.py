@@ -537,7 +537,7 @@ class GraphTopologyLoss(nn.Module):
 
     def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         """Compute compound graph topology loss."""
-        loss = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
+        loss = torch.tensor(0.0, device=logits.device, dtype=torch.float32)
         if self.w_cbdice_cldice > 0:
             loss = loss + self.w_cbdice_cldice * self.cbdice_cldice(logits, labels)
         if self.w_skeleton_recall > 0:
@@ -577,9 +577,25 @@ class AuxCalibCompoundLoss(nn.Module):
         self.aux_calib = HL1ACELoss(n_bins=n_bins)
 
     def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-        """Compute seg_loss + weighted hL1-ACE."""
+        """Compute seg_loss + weighted hL1-ACE with NaN isolation."""
         seg_val = self.seg_loss(logits, labels)
         calib_val = self.aux_calib(logits, labels)
+
+        seg_nan = not torch.isfinite(seg_val)
+        calib_nan = not torch.isfinite(calib_val)
+
+        if seg_nan and calib_nan:
+            msg = "Both seg_loss and aux_calib produced NaN — cannot recover"
+            raise ValueError(msg)
+
+        if seg_nan:
+            logger.warning("seg_loss produced %s — using calib_val only", seg_val.item())
+            seg_val = torch.tensor(0.0, device=logits.device, requires_grad=True)
+
+        if calib_nan:
+            logger.warning("aux_calib produced %s — using seg_val only", calib_val.item())
+            calib_val = torch.tensor(0.0, device=logits.device, requires_grad=True)
+
         result: torch.Tensor = seg_val + self.aux_calib_weight * calib_val
         return result
 

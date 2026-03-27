@@ -110,6 +110,21 @@ def resolve_checkpoint_paths_from_contract(
                 "No checkpoint files found in %s for fold %d", ckpt_dir, info["fold_id"]
             )
 
+    if parent_run_id is not None and not checkpoint_paths:
+        logger.error(
+            "No checkpoint files found for parent run %s. "
+            "Check that training completed and checkpoints are volume-mounted. "
+            "Fold dirs checked: %s",
+            parent_run_id,
+            [info["checkpoint_dir"] for info in fold_infos],
+        )
+        msg = (
+            f"resolve_checkpoint_paths_from_contract found 0 checkpoints "
+            f"for parent_run_id={parent_run_id}. "
+            "Post-training cannot proceed without checkpoints."
+        )
+        raise ValueError(msg)
+
     return checkpoint_paths
 
 
@@ -660,7 +675,14 @@ def _average_checkpoints(checkpoint_paths: list[Path], output_path: Path) -> Non
         raise ValueError(msg)
 
     # Load first checkpoint as base
-    avg_state = torch.load(checkpoint_paths[0], weights_only=True)
+    try:
+        avg_state = torch.load(checkpoint_paths[0], weights_only=True)
+    except (RuntimeError, EOFError, Exception) as exc:
+        msg = (
+            f"Failed to load checkpoint {checkpoint_paths[0]}: {exc}. "
+            "The file may be corrupt (truncated write during preemption)."
+        )
+        raise RuntimeError(msg) from exc
     state_dict = avg_state.get("model_state_dict", avg_state)
 
     # Key mismatch detection across all checkpoints
@@ -668,7 +690,14 @@ def _average_checkpoints(checkpoint_paths: list[Path], output_path: Path) -> Non
 
     # Accumulate remaining checkpoints
     for ckpt_path in checkpoint_paths[1:]:
-        loaded = torch.load(ckpt_path, weights_only=True)
+        try:
+            loaded = torch.load(ckpt_path, weights_only=True)
+        except (RuntimeError, EOFError, Exception) as exc:
+            msg = (
+                f"Failed to load checkpoint {ckpt_path}: {exc}. "
+                "The file may be corrupt."
+            )
+            raise RuntimeError(msg) from exc
         other_state = loaded.get("model_state_dict", loaded)
         all_keys.append(set(other_state.keys()))
         for key in state_dict:

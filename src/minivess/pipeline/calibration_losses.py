@@ -91,6 +91,14 @@ class HL1ACELoss(nn.Module):
             torch.abs(mean_p_per_bin - mean_gt_per_bin), dim=-1
         )  # (B, C)
 
+        # Guard: if all bins were empty for a (batch, channel) pair, nanmean returns NaN.
+        # Replace NaN with 0.0 — if all bins are empty, calibration is undefined.
+        ace_per_bc = torch.where(
+            torch.isnan(ace_per_bc),
+            torch.zeros_like(ace_per_bc),
+            ace_per_bc,
+        )
+
         # Mask empty classes (no voxels of that class in the volume)
         spatial_dims = list(range(2, target.ndim))
         non_empty = target.sum(dim=spatial_dims) > 0  # (B, C)
