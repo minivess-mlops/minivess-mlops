@@ -80,12 +80,21 @@ def compute_calibration_metrics(
     ipa = 1.0 - (brier / brier_null) if brier_null > 0 else 0.0
 
     # Calibration slope via logistic regression of outcome on log-odds
-    log_odds = np.log(
-        np.clip(p_pred, 1e-7, 1 - 1e-7) / (1 - np.clip(p_pred, 1e-7, 1 - 1e-7))
-    )
-    lr = LogisticRegression(penalty=None, solver="lbfgs", max_iter=1000)
-    lr.fit(log_odds.reshape(-1, 1), y_true)
-    calibration_slope = float(lr.coef_[0, 0])
+    unique_labels = np.unique(y_true)
+    if len(unique_labels) < 2:
+        logger.warning(
+            "Calibration: single-class labels (all %d) — "
+            "LogisticRegression not applicable, returning NaN for slope",
+            unique_labels[0],
+        )
+        calibration_slope = float("nan")
+    else:
+        log_odds = np.log(
+            np.clip(p_pred, 1e-7, 1 - 1e-7) / (1 - np.clip(p_pred, 1e-7, 1 - 1e-7))
+        )
+        lr = LogisticRegression(penalty=None, solver="lbfgs", max_iter=1000)
+        lr.fit(log_odds.reshape(-1, 1), y_true)
+        calibration_slope = float(lr.coef_[0, 0])
 
     return CalibrationMetricsResult(
         brier_score=brier,
