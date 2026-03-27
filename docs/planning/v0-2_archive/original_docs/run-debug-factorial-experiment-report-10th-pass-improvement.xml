@@ -1,0 +1,745 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>10th Pass Production Readiness: 12 Fixes from 14-Agent Deep Exploration</title>
+    <branch>fix/10th-pass-production-readiness</branch>
+    <date>2026-03-27</date>
+    <status>ready-for-execution</status>
+    <priority>P0+P1 — blocks production factorial launch</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <approach>TDD: RED → GREEN → VERIFY → FIX → CHECKPOINT → CONVERGE</approach>
+    <estimated-time>4-6 hours across 3 phases</estimated-time>
+    <phasing>Phase 1 (P0 blockers) → Phase 2 (P1 resilience) → Phase 3 (P1 observability+consistency)</phasing>
+    <verification>make test-staging (must pass 6558+ tests, 0 skips, 0 failures)</verification>
+  </metadata>
+
+  <context>
+    <summary>
+      The 10th debug factorial pass (18 glitch-only cells targeting SAM3 TopoLoRA,
+      SAM3 Hybrid, and zero-shot baselines) discovered 7 bugs and 127+ test gaps
+      via 14 reviewer agents across 4 waves. 88 new tests were written, 3 bugs
+      fixed, but 3 critical blockers remain for production launch.
+
+      This plan addresses the top 12 production-readiness fixes in priority order.
+      Each task follows TDD: write failing test FIRST, then implement.
+
+      Source report: docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-10th-pass-report.md
+    </summary>
+
+    <prior-pass-root-causes>
+      <root-cause id="RC1">NaN loss at init for cbdice_cldice — SoftclDiceLoss degenerates with random weights on 98% background data</root-cause>
+      <root-cause id="RC2">MLflow resume has no retry — unreachable server causes silent fresh-start (50 epochs lost)</root-cause>
+      <root-cause id="RC3">Training logs not observable — sky jobs logs is slow/blocking/unstructured for LLM monitoring</root-cause>
+      <root-cause id="RC4">Docker image GAR path duplicated in 9+ files with zero consistency tests</root-cause>
+      <root-cause id="RC5">GCS bucket names duplicated in 13+ files with partial tests only</root-cause>
+      <root-cause id="RC6">Empty folds_to_run silently skips all training (Rule 25 violation)</root-cause>
+      <root-cause id="RC7">Empty dataloader dict silently returns (Rule 25 violation)</root-cause>
+      <root-cause id="RC8">load_checkpoint returns random weights on state_dict mismatch (silent corruption)</root-cause>
+      <root-cause id="RC9">LogisticRegression crashes on all-0 labels in calibration metrics</root-cause>
+      <root-cause id="RC10">SkeletonRecallLoss silently changes semantics when skeleton degenerates</root-cause>
+      <root-cause id="RC11">Setup script YAMLs inconsistently hardened (only factorial has retries)</root-cause>
+      <root-cause id="RC12">POST_TRAINING_METHODS has legacy two-var fallback (Rule 26 violation)</root-cause>
+    </prior-pass-root-causes>
+
+    <key-files>
+      <!-- Loss functions -->
+      <file>src/minivess/pipeline/loss_functions.py</file>
+      <file>src/minivess/pipeline/vendored_losses/skeleton_recall.py</file>
+      <file>src/minivess/pipeline/calibration_metrics.py</file>
+      <!-- Training flow -->
+      <file>src/minivess/orchestration/flows/train_flow.py</file>
+      <file>src/minivess/pipeline/trainer.py</file>
+      <!-- Ensemble/post-training -->
+      <file>src/minivess/ensemble/builder.py</file>
+      <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+      <!-- Observability -->
+      <file>src/minivess/observability/tracking.py</file>
+      <file>src/minivess/observability/structured_logging.py</file>
+      <!-- Diagnostics -->
+      <file>src/minivess/diagnostics/pre_training_checks.py</file>
+      <!-- Deployment -->
+      <file>deployment/skypilot/train_factorial.yaml</file>
+      <file>deployment/skypilot/train_hpo.yaml</file>
+      <file>deployment/skypilot/train_production.yaml</file>
+      <file>scripts/preflight_gcp.py</file>
+      <file>configs/cloud/gcp_spot.yaml</file>
+      <!-- Existing test patterns to follow -->
+      <file>tests/v2/unit/deployment/test_hf_repo_consistency.py</file>
+      <file>tests/v2/unit/test_loss_nan_check.py</file>
+      <file>tests/v2/unit/orchestration/test_spot_resume.py</file>
+    </key-files>
+
+    <constraints>
+      <constraint>CLAUDE.md Rule 3: Library-first — use MONAI/PyTorch, never rewrite</constraint>
+      <constraint>CLAUDE.md Rule 16: No regex for structured data — use ast/yaml/json parsers</constraint>
+      <constraint>CLAUDE.md Rule 25: Loud failures, never silent discards</constraint>
+      <constraint>CLAUDE.md Rule 26: Greenfield — delete old conventions, no backward compat</constraint>
+      <constraint>CLAUDE.md Rule 29: Zero hardcoded parameters — read from config</constraint>
+      <constraint>CLAUDE.md Rule 31: Zero improvisation on declarative configs</constraint>
+      <constraint>Do NOT modify SkyPilot YAML env vars or accelerators without explicit instruction</constraint>
+      <constraint>All tests must pass: make test-staging (6558+ passed, 0 skipped, 0 failed)</constraint>
+    </constraints>
+
+    <cold-start-instructions>
+      To execute this plan from a fresh session with zero context:
+
+      1. Read THIS file completely
+      2. Read the source report: docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-10th-pass-report.md
+      3. Read CLAUDE.md (project rules)
+      4. Invoke /self-learning-iterative-coder
+      5. The skill will execute tasks in order, TDD style
+
+      Key context: The 10th debug factorial pass found that cbdice_cldice loss produces
+      NaN at model initialization due to degenerate soft skeleton computation in MONAI's
+      SoftclDiceLoss. This blocks 25% of factorial cells. The MLflow resume check has no
+      retry, meaning spot preemption + MLflow outage = training restarts from epoch 0.
+      Training logs are unstructured text, making 60+ job monitoring infeasible.
+    </cold-start-instructions>
+  </context>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: P0 BLOCKERS (must fix before any production launch)       -->
+  <!-- ================================================================== -->
+  <phase id="1" name="P0 Blockers">
+    <description>Fix the 3 issues that block any production factorial launch</description>
+
+    <task id="T1" status="NOT_STARTED" priority="P0">
+      <title>Fix NaN loss at init for cbdice_cldice</title>
+      <description>
+        SoftclDiceLoss produces NaN when soft skeleton degenerates with random model
+        weights on 98% background vessel data. Root cause: 10 iterations of morphological
+        erosion on uniform ~0.5 probabilities → near-zero skeleton → FP32 rounding in
+        cl_dice = 1.0 - 2*(tprec*tsens)/(tprec+tsens).
+
+        Fix: Add NaN guard in VesselCompoundLoss.forward() that clamps the unstable
+        division, AND add a degenerate-input test for the loss_sanity pre-training check.
+
+        IMPORTANT: SoftclDiceLoss is from MONAI (imported at loss_functions.py:18 as
+        `from monai.losses.cldice import SoftclDiceLoss`). Do NOT modify MONAI code.
+        The fix must be in OUR wrapper (VesselCompoundLoss or CbDiceClDiceLoss).
+      </description>
+      <root-cause>RC1</root-cause>
+      <files>
+        <file action="modify">src/minivess/pipeline/loss_functions.py</file>
+        <file action="modify">tests/v2/unit/test_loss_nan_check.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Add test_cbdice_cldice_nan_at_init_all_background() to test_loss_nan_check.py:
+          - Create random logits (torch.randn(1, 2, 8, 16, 16))
+          - Create ALL-BACKGROUND labels (torch.zeros(1, 1, 8, 16, 16))
+          - Build cbdice_cldice loss via build_loss_function("cbdice_cldice")
+          - Assert loss is finite (not NaN, not Inf)
+          - This test WILL FAIL with current code (NaN from SoftclDiceLoss)
+
+          Also add test_cbdice_cldice_gradient_at_init_all_background():
+          - Same setup but verify backward() produces finite gradients
+        </red>
+        <green>
+          In VesselCompoundLoss.forward() (loss_functions.py:106-123):
+          After line 118: `cldice_loss = self.cldice(probs, labels_onehot)`
+          Insert NaN guard at line 119 (before the weighted sum at line 120):
+            if torch.isnan(cldice_loss) or torch.isinf(cldice_loss):
+                logger.warning("clDice produced %s — falling back to 0.0", cldice_loss.item())
+                cldice_loss = torch.tensor(0.0, device=logits.device, requires_grad=True)
+
+          This is the MINIMAL fix. The clDice component returns 0 on degenerate input
+          (which is semantically correct — there is no centerline to match).
+          The DiceCE component still provides gradient signal.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/test_loss_nan_check.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>cbdice_cldice loss is finite with all-background labels</criterion>
+        <criterion>cbdice_cldice gradient is finite with all-background labels</criterion>
+        <criterion>All existing loss tests still pass</criterion>
+        <criterion>NaN guard logs a warning (not silent)</criterion>
+      </acceptance-criteria>
+    </task>
+
+    <task id="T2" status="NOT_STARTED" priority="P0">
+      <title>Add MLflow resume retry with checkpoint fallback</title>
+      <description>
+        check_resume_state_task() (train_flow.py:288-328) catches ALL exceptions from
+        mlflow.get_run() and returns None (treating run as stale). If MLflow Cloud Run
+        is temporarily unreachable during spot recovery, training silently restarts from
+        epoch 0 instead of resuming from the checkpoint.
+
+        Fix: Add retry logic (3 attempts, 10s backoff) for MLflow get_run().
+        If ALL retries fail, fall back to checkpoint-file-based resume
+        (if epoch_latest.pth exists, assume the run is valid and resume).
+      </description>
+      <root-cause>RC2</root-cause>
+      <files>
+        <file action="modify">src/minivess/orchestration/flows/train_flow.py</file>
+        <file action="modify">tests/v2/unit/orchestration/test_spot_resume.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Add to test_spot_resume.py:
+          test_resume_mlflow_unreachable_with_checkpoint():
+          - Mock mlflow.get_run to raise ConnectionError on all 3 attempts
+          - Create a valid epoch_latest.yaml + epoch_latest.pth in checkpoint_dir
+          - Call check_resume_state_task()
+          - Assert it returns the resume state (not None) — checkpoint-based fallback
+          - Assert a warning is logged about MLflow unreachability
+
+          test_resume_mlflow_unreachable_no_checkpoint():
+          - Mock mlflow.get_run to raise ConnectionError
+          - Do NOT create epoch_latest.pth
+          - Call check_resume_state_task()
+          - Assert returns None (no checkpoint to fall back on)
+        </red>
+        <green>
+          In check_resume_state_task() (train_flow.py:319-327, inside the function at 288-328):
+          Replace the single try/except with retry loop.
+          NOTE: Verify `import time` exists in train_flow.py (add if missing):
+
+          mlflow_reachable = False
+          for attempt in range(3):
+              try:
+                  run = mlflow.get_run(run_id)
+                  if run.info.status == "RUNNING":
+                      mlflow_reachable = True
+                      return state
+                  else:
+                      return None  # Run ended, don't resume
+              except Exception:
+                  if attempt &lt; 2:
+                      time.sleep(10 * (attempt + 1))
+                  else:
+                      logger.warning("MLflow unreachable after 3 attempts for run %s", run_id)
+
+          # Checkpoint-based fallback when MLflow is down
+          if not mlflow_reachable:
+              epoch_pth = Path(state.get("checkpoint_dir", "")) / "epoch_latest.pth"
+              if epoch_pth.exists():
+                  logger.warning("MLflow unreachable but checkpoint exists — resuming from file")
+                  return state
+              else:
+                  logger.warning("MLflow unreachable and no checkpoint — starting fresh")
+                  return None
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/orchestration/test_spot_resume.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>Resume works when MLflow is unreachable but checkpoint exists</criterion>
+        <criterion>Fresh start when MLflow unreachable AND no checkpoint</criterion>
+        <criterion>Warning logged on MLflow unreachability</criterion>
+        <criterion>3 retry attempts with backoff before fallback</criterion>
+      </acceptance-criteria>
+    </task>
+
+    <task id="T3" status="NOT_STARTED" priority="P0">
+      <title>Guard empty folds_to_run and empty dataloaders</title>
+      <description>
+        train_flow.py:1462 — if folds_to_run=[] (e.g., num_folds=0 or splits[:0]),
+        the training loop at line 855 silently skips ALL folds. No error, no warning.
+        train_flow.py:546-556 — if build_train_loader/build_val_loader return loaders
+        with zero samples (empty data dirs), training proceeds with no data.
+        Both violate Rule 25 (loud failures).
+      </description>
+      <root-cause>RC6, RC7</root-cause>
+      <files>
+        <file action="modify">src/minivess/orchestration/flows/train_flow.py</file>
+        <file action="create">tests/v2/unit/orchestration/test_train_flow_empty_guards.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Create tests/v2/unit/orchestration/test_train_flow_empty_guards.py:
+
+          test_empty_folds_to_run_raises():
+          - Read train_flow.py source with AST
+          - Find the folds_to_run assignment and the for-loop
+          - Verify there is a guard: `if not folds_to_run: raise ValueError(...)`
+          - OR: mock training_subflow and call with num_folds=0
+          - Assert ValueError is raised with message containing "folds_to_run"
+
+          test_empty_train_dicts_raises():
+          - Mock build_train_loader to be called with train_dicts=[]
+          - Verify there is a guard at train_flow.py:546 that checks len(train_dicts) > 0
+          - Assert ValueError is raised with message about empty training data
+        </red>
+        <green>
+          In train_flow.py training_subflow():
+          After folds_to_run is computed at line 1462 (splits[:num_folds]):
+            if not folds_to_run:
+                raise ValueError(
+                    f"folds_to_run is empty (num_folds={num_folds}, fold_id={fold_id}). "
+                    "Check factorial config splits and NUM_FOLDS."
+                )
+
+          Before build_train_loader at line 546, add guard on train_dicts:
+            if not train_dicts:
+                raise ValueError(
+                    "train_dicts is empty — no training volumes found. "
+                    "Check DVC pull, data directory, and split configuration."
+                )
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/orchestration/test_train_flow_empty_guards.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>Empty folds_to_run raises ValueError (not silent skip)</criterion>
+        <criterion>Empty dataloaders raises ValueError (not silent return)</criterion>
+        <criterion>Error messages are actionable (mention config/data)</criterion>
+      </acceptance-criteria>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: P1 RESILIENCE (prevent $$ waste in production)            -->
+  <!-- ================================================================== -->
+  <phase id="2" name="P1 Resilience">
+    <description>Fix silent failures that waste cloud credits at production scale</description>
+
+    <task id="T4" status="NOT_STARTED" priority="P1">
+      <title>Guard load_checkpoint against state_dict mismatch</title>
+      <description>
+        builder.py:474-512 — load_checkpoint() has partial error handling (lines 499-509
+        catch RuntimeError and try inner_net fallback). But if 45% of keys are missing,
+        load_state_dict(strict=False) silently ignores them, producing a corrupted model.
+        Add a pre-check for &gt;50% missing keys BEFORE the existing try/except at line 498.
+        The existing fallback logic (inner_net at line 500) should remain for legitimate
+        DDP/wrapper key prefix mismatches.
+      </description>
+      <root-cause>RC8</root-cause>
+      <files>
+        <file action="modify">src/minivess/ensemble/builder.py</file>
+        <file action="create">tests/v2/unit/ensemble/test_checkpoint_load_safety.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          test_load_checkpoint_mismatched_keys_raises():
+          - Create a checkpoint with keys {"conv1.weight", "conv1.bias"}
+          - Create a model expecting {"encoder.weight", "encoder.bias"}
+          - Call load_checkpoint(model, checkpoint_path)
+          - Assert it raises RuntimeError or logs error (not silently returns)
+
+          test_load_checkpoint_valid_keys_succeeds():
+          - Create checkpoint matching model state_dict exactly
+          - Assert load succeeds and model weights are updated
+        </red>
+        <green>
+          In builder.py load_checkpoint():
+          After loading state_dict, check key overlap:
+            missing = set(model.state_dict().keys()) - set(loaded_state.keys())
+            unexpected = set(loaded_state.keys()) - set(model.state_dict().keys())
+            if len(missing) > len(model.state_dict()) * 0.5:
+                raise RuntimeError(
+                    f"Checkpoint has >50% missing keys ({len(missing)}/{len(model.state_dict())}). "
+                    f"This likely means a model architecture mismatch. "
+                    f"Missing: {list(missing)[:5]}..."
+                )
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/ensemble/test_checkpoint_load_safety.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+    </task>
+
+    <task id="T5" status="NOT_STARTED" priority="P1">
+      <title>Fix calibration metrics crash on all-zero labels</title>
+      <description>
+        calibration_metrics.py:82 — compute_calibration_metrics() calls
+        LogisticRegression.fit(X, y) where y can be all-zeros (all-background batch).
+        sklearn raises ValueError on single-class targets. This crashes the
+        analysis flow instead of returning a graceful "not applicable" result.
+      </description>
+      <root-cause>RC9</root-cause>
+      <files>
+        <file action="modify">src/minivess/pipeline/calibration_metrics.py</file>
+        <file action="create">tests/v2/unit/test_calibration_edge_cases.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          test_calibration_all_zero_labels_no_crash():
+          - probs = np.random.uniform(0.01, 0.99, size=1000)
+          - labels = np.zeros(1000, dtype=np.int32)  # ALL background
+          - result = compute_calibration_metrics(probs, labels)
+          - Assert result is a dict (not crash), with NaN or "N/A" for IPA/slope
+
+          test_calibration_all_one_labels_no_crash():
+          - Same but labels = np.ones(1000)
+
+          test_calibration_normal_case_unchanged():
+          - Mixed labels, verify existing behavior preserved
+        </red>
+        <green>
+          In compute_calibration_metrics():
+          Before LogisticRegression.fit(), check class count:
+            unique_labels = np.unique(y_binary)
+            if len(unique_labels) &lt; 2:
+                logger.warning("Calibration: single-class labels (all %d) — LR not applicable", unique_labels[0])
+                ipa = float("nan")
+                cal_slope = float("nan")
+            else:
+                # existing LR code
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/test_calibration_edge_cases.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+    </task>
+
+    <task id="T6" status="NOT_STARTED" priority="P1">
+      <title>Fix SkeletonRecallLoss silent semantics change</title>
+      <description>
+        skeleton_recall.py:100 — when skeletonize() returns empty (structure too thin),
+        the fallback uses the FULL foreground mask as "skeleton". This silently changes
+        the loss from skeleton-recall to plain-recall without any warning. Must log a
+        warning when falling back.
+      </description>
+      <root-cause>RC10</root-cause>
+      <files>
+        <file action="modify">src/minivess/pipeline/vendored_losses/skeleton_recall.py</file>
+        <file action="create">tests/v2/unit/losses/test_skeleton_recall_edge_cases.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          test_skeleton_recall_thin_structure_warns():
+          - Create a 1-voxel-wide line in 3D (minimal structure)
+          - Compute SkeletonRecallLoss
+          - Assert a WARNING is logged about empty skeleton fallback
+          - Assert loss is still finite (graceful degradation, but LOUD)
+
+          test_skeleton_recall_normal_structure_no_warning():
+          - Create a thick tube structure (skeletonizable)
+          - Assert no warning logged
+        </red>
+        <green>
+          In skeleton_recall.py _skeletonize_gt() (around line 100):
+          After the `if skel_np.sum() == 0:` branch:
+            logger.warning(
+                "SkeletonRecallLoss: skeleton is empty after skeletonize() — "
+                "falling back to full foreground mask. This changes loss semantics "
+                "from skeleton-recall to plain-recall. Structure may be too thin."
+            )
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/losses/test_skeleton_recall_edge_cases.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+    </task>
+
+    <task id="T7" status="NOT_STARTED" priority="P1">
+      <title>Fix _average_checkpoints with mismatched state_dict keys</title>
+      <description>
+        post_training_flow.py:669 — _average_checkpoints() silently skips missing keys
+        when averaging across folds. If fold 0 has "conv.weight" but fold 1 doesn't,
+        the averaged model has conv.weight from fold 0 only (not averaged). This produces
+        a corrupted model. Must warn or raise on key mismatch.
+      </description>
+      <root-cause>RC8</root-cause>
+      <files>
+        <file action="modify">src/minivess/orchestration/flows/post_training_flow.py</file>
+        <file action="create">tests/v2/unit/orchestration/test_checkpoint_averaging.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          test_average_checkpoints_mismatched_keys_warns():
+          - Create 2 checkpoint state_dicts with different keys
+          - Call _average_checkpoints([ckpt1, ckpt2])
+          - Assert WARNING logged about mismatched keys
+
+          test_average_checkpoints_empty_list_raises():
+          - Call _average_checkpoints([])
+          - Assert raises ValueError (not silent return per Rule 25)
+
+          test_average_checkpoints_single_ckpt_returns_copy():
+          - Call _average_checkpoints([ckpt1])
+          - Assert output equals input (identity for N=1)
+        </red>
+        <green>
+          In _average_checkpoints():
+          1. Empty list guard: raise ValueError("Cannot average 0 checkpoints")
+          2. Key mismatch detection:
+             all_keys = [set(s.keys()) for s in state_dicts]
+             if len(set.union(*all_keys)) != len(set.intersection(*all_keys)):
+                 missing = set.union(*all_keys) - set.intersection(*all_keys)
+                 logger.warning("Checkpoint key mismatch: %d keys not in all folds: %s",
+                                len(missing), list(missing)[:5])
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/orchestration/test_checkpoint_averaging.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: P1 OBSERVABILITY + CROSS-FILE CONSISTENCY                 -->
+  <!-- ================================================================== -->
+  <phase id="3" name="P1 Observability and Consistency">
+    <description>Production observability and cross-file drift prevention</description>
+
+    <task id="T8" status="NOT_STARTED" priority="P1">
+      <title>Add JSONL structured training event logging</title>
+      <description>
+        Training logs are unstructured text — sky jobs logs is slow, blocking, and
+        not LLM-parseable. At 60+ jobs, manual log inspection is infeasible.
+
+        Add a structured JSONL event log written to the GCS-mounted checkpoint dir.
+        Key events: epoch_start, epoch_end (with metrics), checkpoint_saved, training_complete.
+        Also write a heartbeat.json file every 60s for quick status checks.
+
+        Claude Code can then `gsutil cat gs://minivess-mlops-checkpoints/{job}/events.jsonl`
+        instead of streaming unstructured logs.
+      </description>
+      <root-cause>RC3</root-cause>
+      <files>
+        <file action="create">src/minivess/observability/structured_logging.py</file>
+        <file action="modify">src/minivess/pipeline/trainer.py</file>
+        <file action="create">tests/v2/unit/observability/test_structured_logging.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          test_event_logger_writes_jsonl():
+          - Create StructuredEventLogger(output_dir=tmp_path)
+          - Call log_event("epoch_end", {"epoch": 5, "val_dice": 0.82, "vram_gb": 9.1})
+          - Read events.jsonl, parse each line as JSON
+          - Assert event has timestamp, event_type, and payload keys
+
+          test_heartbeat_writes_json():
+          - Create StructuredEventLogger(output_dir=tmp_path)
+          - Call update_heartbeat(epoch=5, loss=0.45, vram_gb=9.2)
+          - Read heartbeat.json, parse as JSON
+          - Assert it has epoch, loss, vram_gb, timestamp, status="training"
+
+          test_event_logger_is_noop_without_dir():
+          - Create StructuredEventLogger(output_dir=None)
+          - Call log_event(...) — should not crash (graceful no-op)
+        </red>
+        <green>
+          Create src/minivess/observability/structured_logging.py:
+
+          class StructuredEventLogger:
+              def __init__(self, output_dir: Path | None):
+                  self._output_dir = output_dir
+                  self._events_path = output_dir / "events.jsonl" if output_dir else None
+                  self._heartbeat_path = output_dir / "heartbeat.json" if output_dir else None
+
+              def log_event(self, event_type: str, payload: dict) -&gt; None:
+                  if not self._events_path: return
+                  entry = {"timestamp": datetime.now(timezone.utc).isoformat(),
+                           "event_type": event_type, **payload}
+                  with self._events_path.open("a", encoding="utf-8") as f:
+                      f.write(json.dumps(entry) + "\n")
+
+              def update_heartbeat(self, **kwargs) -&gt; None:
+                  if not self._heartbeat_path: return
+                  data = {"timestamp": datetime.now(timezone.utc).isoformat(),
+                          "status": "training", **kwargs}
+                  self._heartbeat_path.write_text(json.dumps(data), encoding="utf-8")
+
+          Wire into trainer.py fit() loop (SUPPLEMENTS MLflow, does NOT replace):
+          - trainer.py:751 (epoch loop start): log_event("epoch_start", {"epoch": epoch})
+          - trainer.py:901 (after MLflow logging): log_event("epoch_end", {**epoch_log})
+          - trainer.py:901 (same location): update_heartbeat(epoch=epoch, loss=train_loss)
+          Note: trainer.py already logs extensively via self.tracker (MLflow).
+          StructuredEventLogger adds a SECOND output channel (JSONL on GCS mount)
+          for LLM-parseable monitoring. This is intentional redundancy.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/observability/test_structured_logging.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+    </task>
+
+    <task id="T9" status="NOT_STARTED" priority="P1">
+      <title>Cross-file consistency: Docker image GAR path</title>
+      <description>
+        The GAR image path is duplicated in 9+ files with zero consistency tests.
+        If any file drifts (e.g., during a merge conflict), SkyPilot pulls the
+        wrong Docker image and all cloud jobs fail silently.
+
+        Source of truth: preflight_gcp.py:37 GAR_IMAGE constant.
+        Must match: 5 SkyPilot YAMLs, gcp_spot.yaml.
+      </description>
+      <root-cause>RC4</root-cause>
+      <files>
+        <file action="create">tests/v2/unit/deployment/test_docker_image_consistency.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Follow the pattern in test_hf_repo_consistency.py:
+
+          test_gar_image_source_constant_exists():
+          - Read preflight_gcp.py with AST, extract GAR_IMAGE constant
+          - Assert it matches "europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest"
+
+          test_skypilot_yamls_use_correct_image(yaml_path):
+          - Parametrize over all SkyPilot YAMLs with image_id
+          - Parse YAML, extract image_id (strip "docker:" prefix)
+          - Assert it matches GAR_IMAGE (strip "docker:" if present)
+
+          test_cloud_config_matches_gar_image():
+          - Read configs/cloud/gcp_spot.yaml
+          - Extract docker_image key
+          - Assert matches GAR_IMAGE
+        </red>
+        <green>
+          Pure test file — no implementation changes needed.
+          Use yaml.safe_load for YAML, ast.parse for Python constants.
+          Follow exact pattern from test_hf_repo_consistency.py.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/deployment/test_docker_image_consistency.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+    </task>
+
+    <task id="T10" status="NOT_STARTED" priority="P1">
+      <title>Cross-file consistency: GCS bucket names</title>
+      <description>
+        GCS bucket names are duplicated in 13+ files. The DVC data bucket and
+        checkpoint bucket must be consistent across .dvc/config, SkyPilot YAMLs,
+        preflight_gcp.py, and configs/dvc/remotes.yaml.
+      </description>
+      <root-cause>RC5</root-cause>
+      <files>
+        <file action="create">tests/v2/unit/deployment/test_gcs_bucket_consistency.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          test_dvc_bucket_source_constant():
+          - Read preflight_gcp.py, extract GCS_BUCKET constant
+          - Assert contains "minivess-mlops-dvc-data" (constant may include gs:// prefix)
+          - Strip "gs://" prefix for cross-file comparisons
+
+          test_dvc_config_matches_preflight(dvc_config_path):
+          - Read .dvc/config, extract GCS remote URL
+          - Assert bucket name matches GCS_BUCKET
+
+          test_skypilot_dvc_pull_uses_correct_bucket(yaml_path):
+          - Parametrize over SkyPilot YAMLs that have DVC pull in setup
+          - Parse setup block for "dvc pull" commands
+          - If bucket is referenced, assert it matches GCS_BUCKET
+
+          test_checkpoint_bucket_source_constant():
+          - Read preflight_gcp.py, extract CHECKPOINT_BUCKET
+          - Assert "minivess-mlops-checkpoints"
+
+          test_skypilot_checkpoint_mount_matches(yaml_path):
+          - Parametrize over SkyPilot YAMLs with file_mounts
+          - Find GCS checkpoint mount
+          - Assert bucket matches CHECKPOINT_BUCKET
+        </red>
+        <green>
+          Pure test file — no implementation changes needed.
+          Parse YAML with yaml.safe_load, Python with ast.parse.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/deployment/test_gcs_bucket_consistency.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+    </task>
+
+    <task id="T11" status="NOT_STARTED" priority="P1">
+      <title>Remove POST_TRAINING_METHOD legacy fallback</title>
+      <description>
+        train_flow.py:1657-1659 has a two-stage env var fallback:
+        POST_TRAINING_METHODS → POST_TRAINING_METHOD (singular).
+        Per Rule 26 (greenfield, no backward compat), the legacy singular form
+        should be replaced with a hardcoded default "none,swag" so the safety
+        net is preserved but the legacy var name is removed.
+      </description>
+      <root-cause>RC12</root-cause>
+      <files>
+        <file action="modify">src/minivess/orchestration/flows/train_flow.py</file>
+        <file action="create">tests/v2/unit/orchestration/test_post_training_method_canonical.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          test_no_legacy_post_training_method_singular():
+          - Read train_flow.py source
+          - Assert "POST_TRAINING_METHOD" (singular, without trailing S) does NOT appear
+            as an os.environ.get key or argparse destination
+          - Only "POST_TRAINING_METHODS" (plural) should exist
+
+          test_post_training_methods_env_var_parsed():
+          - Set POST_TRAINING_METHODS="none,swag"
+          - Verify it's parsed as ["none", "swag"] in the training flow
+        </red>
+        <green>
+          In train_flow.py:
+          Remove the fallback line that checks POST_TRAINING_METHOD (singular).
+          Keep only POST_TRAINING_METHODS (plural).
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/orchestration/test_post_training_method_canonical.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+    </task>
+
+    <task id="T12" status="NOT_STARTED" priority="P1">
+      <title>Add loss edge case tests for topology losses</title>
+      <description>
+        Multiple topology losses have untested edge cases that produce silent zeros
+        or NaN. Add parametrized tests for the top 3 risks identified by reviewers:
+        - GraphTopologyLoss with all zero weights → silent zero loss
+        - ccDice with unmatched components → NaN from 0/0
+        - BettiLoss with all-zero predictions → silent zero gradient
+      </description>
+      <root-cause>RC1 (related)</root-cause>
+      <files>
+        <file action="create">tests/v2/unit/losses/test_topology_loss_edge_cases.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          test_graph_topology_all_zero_weights_warns():
+          - GraphTopologyLoss(w_cbdice_cldice=0, w_skeleton_recall=0, w_cape=0)
+          - Compute loss — assert it IS tensor(0.0) (correct) but ALSO
+            verify a warning is logged about all-zero weights
+
+          test_ccdice_unmatched_components_finite():
+          - ccDice is a METRIC (topology_metrics.py:124 compute_ccdice), not a loss
+          - Create pred with 3 connected components, GT with 0 overlap
+          - Compute compute_ccdice(pred, target)
+          - Assert result is finite (not NaN) — should be 0.0
+          - Guard the 0/0 division in IoU matrix (line 163)
+
+          test_betti_loss_all_zero_predictions_finite():
+          - logits = torch.full((1, 2, 8, 16, 16), -10.0) → softmax ≈ 0 foreground
+          - Compute BettiLoss
+          - Assert loss is finite and gradient exists
+        </red>
+        <green>
+          Pure test file — verifying existing behavior is correct or exposing bugs.
+          If bugs found, add guards in the loss implementations:
+          - GraphTopologyLoss: warn if all weights are 0
+          - ccDice: clamp union to avoid 0/0
+          - BettiLoss: verify gradient flow on extreme inputs
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/losses/test_topology_loss_edge_cases.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+    </task>
+  </phase>
+
+  <verification>
+    <gate name="staging">make test-staging</gate>
+    <gate name="lint">uv run ruff check src/ tests/</gate>
+    <gate name="types">uv run mypy src/</gate>
+    <expected-new-tests>~30-40 new tests across 8 test files</expected-new-tests>
+    <expected-staging-total>6590+ (current 6558 + new tests)</expected-staging-total>
+  </verification>
+</plan>
