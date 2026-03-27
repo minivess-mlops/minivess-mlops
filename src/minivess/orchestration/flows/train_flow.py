@@ -1698,10 +1698,7 @@ if __name__ == "__main__":
         )
         parser.add_argument(
             "--post-training-method",
-            default=os.environ.get(
-                "POST_TRAINING_METHODS",
-                os.environ.get("POST_TRAINING_METHOD", "none,swag"),
-            ),
+            default=os.environ.get("POST_TRAINING_METHODS", "none,swag"),
             help="Comma-separated post-training methods: none,swag (default: none,swag)",
         )
         parser.add_argument(
