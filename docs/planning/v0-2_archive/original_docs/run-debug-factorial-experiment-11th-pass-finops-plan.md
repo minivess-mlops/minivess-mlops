@@ -17,13 +17,29 @@
 | Networking | 1.62 | 0.14 | Cross-region egress |
 | **Total** | **180.71** | **15.06** | |
 
-## Root Cause: No Lifecycle Policies, No Governance
+## Root Cause: CORRECTION — Original Analysis Was Wrong
 
-**Artifact Registry (50% of total cost):**
-- 73 GB stored across 13 images, only 2 tagged (base:latest + mlflow:v3.10.0)
-- 11 untagged stale images from 11 days of development (Mar 15-26)
-- **Zero cleanup policy** — Pulumi creates the repo but defines no retention rules
-- After cleanup: 6.7 GB → $0.62/mo (91% reduction)
+**IMPORTANT: The original analysis underestimated GAR costs by ~30x.**
+
+Storage alone explains only ~€3 of the €89.59 GAR bill (73 GB × $0.10/GB/mo × 13 days).
+The remaining ~€86 must come from **network egress** — every SkyPilot job pull is a
+6.4 GB download billed under Artifact Registry, not under "Networking."
+
+**Egress cost breakdown (hypothesis — needs billing SKU export to confirm):**
+- Same-region pulls (europe-north1 VM ← europe-north1 GAR): **FREE**
+- Cross-region pulls (europe-west4 VM ← europe-north1 GAR): $0.01/GB = $0.064/pull
+- Internet pulls (RunPod/local ← GAR): $0.12/GB = **$0.77/pull**
+
+**Estimated pulls in 2 weeks:**
+- ~120 SkyPilot job launches (10 passes, some with 20-50 jobs)
+- ~20 local dev pulls (docker pull during development)
+- Some RunPod pulls
+
+**At ~117 internet-rate pulls × $0.77 = ~$90 — this matches the €89.59 bill.**
+
+This means the GAR cost is **dominated by EGRESS, not storage.** Cleaning up stale
+images (my original recommendation) would save only ~€3/yr, not €82/yr. The real fix
+is reducing image pulls and/or image size.
 
 **Cloud SQL (6% of total, but 100% waste when Cloud Run disabled):**
 - db-g1-small runs 24/7 ($0.88/mo) even when Cloud Run MLflow is disabled
@@ -32,6 +48,11 @@
 **Cloud Run (4% of total):**
 - Charged despite being disabled in Pulumi — likely orphaned from a previous `pulumi up`
 - `min_instance_count: 1` means it never scales to zero even if re-enabled
+
+**ACTION NEEDED: Enable billing export to BigQuery to get SKU-level cost breakdown.**
+Without this, we're guessing at the split between storage vs egress.
+Go to: https://console.cloud.google.com/billing/01DCCF-E3B6B4-0616FE/reports
+and filter by Artifact Registry → group by SKU to see the actual breakdown.
 
 ---
 
@@ -49,9 +70,24 @@
 | Academic suitability (10%) | **4** Needs GCP billing | **4** Universal | **5** Academic standard | **4** Complex | **5** Academic + perf |
 | **Weighted Total** | **4.30** | **3.55** | **3.45** | **4.10** | **4.10** |
 
-**Winner: H1 (GAR + cleanup policy).** The cost problem is entirely stale images, not the registry choice. Same-region pulls are free — switching to Docker Hub would waste GPU spot time on cross-Atlantic downloads (~$0.85-1.70 per factorial pass in wasted GPU time waiting for pulls).
+**REVISED: If egress dominates (not storage), the decision changes.**
 
-**Decision**: Keep GAR for GCP. Keep Docker Hub for RunPod (existing resolved decision). Add cleanup policy.
+Storage alone explains only ~€3 of the €89.59. The rest is likely **network egress**
+from internet pulls (local dev + RunPod pulling 6.4 GB images from GAR at $0.12/GB).
+
+**Contingent decision (needs billing SKU confirmation):**
+- If >80% is egress → **H4 wins** (Docker Hub primary + GAR pull-through cache)
+  - Store on Docker Hub (free), cache in GAR for GCP same-region pulls
+  - Eliminates all internet egress from GAR
+  - GCP SkyPilot still gets fast same-region pulls via cache
+- If >80% is storage → **H1 wins** (cleanup policy saves ~€80/yr)
+- **Either way**: Add GAR cleanup policy AND reduce image size
+
+**Action**: Check GCP Console → Billing → Reports → Artifact Registry → group by SKU
+to see the actual storage vs egress split before committing to a strategy.
+
+**Decision**: Keep dual-registry (Docker Hub for RunPod/local, GAR for GCP). Add cleanup
+policy regardless. Investigate egress before any registry migration.
 
 ---
 
