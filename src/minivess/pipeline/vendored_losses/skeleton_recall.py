@@ -13,11 +13,15 @@ Reference:
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from skimage.morphology import skeletonize
+
+logger = logging.getLogger(__name__)
 
 
 class SkeletonRecallLoss(nn.Module):
@@ -99,6 +103,12 @@ class SkeletonRecallLoss(nn.Module):
                 skel_np = skeletonize(mask_np).astype(np.float32)  # type: ignore[no-untyped-call]
                 if skel_np.sum() == 0:
                     # Fallback for thin structures: use the mask itself
+                    logger.warning(
+                        "SkeletonRecallLoss: skeleton is empty after skeletonize() — "
+                        "falling back to full foreground mask. This changes loss "
+                        "semantics from skeleton-recall to plain-recall. "
+                        "Structure may be too thin."
+                    )
                     skel_np = mask_np.astype(np.float32)
             else:
                 skel_np = np.zeros_like(mask_np, dtype=np.float32)
