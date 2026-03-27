@@ -494,6 +494,18 @@ class EnsembleBuilder:
         else:
             state_dict = payload
 
+        # Pre-check: detect gross key mismatch before loading
+        model_keys = set(net.state_dict().keys())
+        loaded_keys = set(state_dict.keys())
+        missing = model_keys - loaded_keys
+        if len(missing) > len(model_keys) * 0.5:
+            msg = (
+                f"Checkpoint has >50% missing keys ({len(missing)}/{len(model_keys)}). "
+                f"This likely means a model architecture mismatch. "
+                f"Missing: {list(missing)[:5]}..."
+            )
+            raise RuntimeError(msg)
+
         try:
             net.load_state_dict(state_dict)
         except RuntimeError:
