@@ -1,0 +1,475 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>11th Pass FinOps Execution — Migrate to europe-west4, Zero Egress</title>
+    <branch>fix/finops-region-migration-europe-west4</branch>
+    <date>2026-03-28</date>
+    <status>ready-for-execution</status>
+    <priority>P0 — saves €89/month (83% of GCP bill)</priority>
+    <approach>Blue-green migration: create new stack in europe-west4, verify, cutover, destroy old</approach>
+    <estimated-time>3-4 hours (includes data copy, Docker push, Pulumi deploy)</estimated-time>
+    <key-constraint>
+      MUST use blue-green migration. Pulumi will DELETE old GCS buckets (force_destroy=True)
+      and Cloud SQL (deletion_protection=False) when region changes. Data loss is guaranteed
+      if we do a naive `pulumi up` with region change.
+    </key-constraint>
+  </metadata>
+
+  <context>
+    <problem>
+      GAR is in europe-north1 (Finland) which has ZERO L4 GPUs. Every Docker pull (6.4 GB)
+      is cross-region or intercontinental egress. March 2026 bill: €89.58 in egress alone.
+      Same-region pulls are FREE. Moving to europe-west4 (Netherlands, 3 L4 zones) = €0 egress.
+    </problem>
+
+    <billing-data>
+      Intercontinental egress (Excl Oceania): €57.71 (850 GB)
+      Europe-to-Europe cross-region egress: €31.87 (1,879 GB)
+      Storage: €1.23 (15 GB-months)
+      N4 Controller (Belgium, 380h): €16.08
+      L4 GPU Spot (Seoul, 69h): €9.10
+      L4 GPU Spot (Netherlands, 38.65h): €8.63
+    </billing-data>
+
+    <target-region>
+      europe-west4 (Netherlands):
+      - 3 L4 zones (best EU availability)
+      - L4 spot: $0.340/hr | L4 on-demand: $0.742/hr
+      - GAR, Cloud SQL, Cloud Run, GCS all supported
+      - Already #1 priority in our europe.yaml region config
+    </target-region>
+
+    <reviewer-warnings>
+      CRITICAL: Pulumi will DELETE old buckets (force_destroy=True) when region changes.
+      CRITICAL: GCS bucket location is IMMUTABLE — Pulumi does delete-then-create replacement.
+      CRITICAL: Cloud SQL region is IMMUTABLE — same delete-then-create behavior.
+      CRITICAL: hpo_grid_worker.yaml has HARDCODED region: europe-north1 (line 35).
+      30+ files reference europe-north1 across deployment, configs, tests, scripts, KG, docs.
+    </reviewer-warnings>
+  </context>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 0: PRE-MIGRATION VERIFICATION (no changes, no risk)          -->
+  <!-- ================================================================== -->
+  <phase id="0" name="Pre-Migration Verification">
+    <description>Verify europe-west4 has all required quotas before touching anything.</description>
+
+    <task id="T0.1" status="NOT_STARTED" priority="P0">
+      <title>Verify europe-west4 GPU + CPU quotas</title>
+      <commands>
+        # Check L4 GPU quota in europe-west4
+        gcloud compute regions describe europe-west4 --project=minivess-mlops \
+          --format="table(quotas.filter('metric:NVIDIA_L4_GPUS').extract(limit,usage))"
+
+        # Check N4/E2 CPU quota (for controller)
+        gcloud compute regions describe europe-west4 --project=minivess-mlops \
+          --format="table(quotas.filter('metric:CPUS').extract(limit,usage))"
+
+        # Verify SkyPilot can see L4 in europe-west4
+        uv run sky show-gpus L4 --cloud gcp 2>&amp;1 | grep europe-west4
+      </commands>
+      <verification>L4 quota > 0, CPU quota >= 8 (controller + 1 training VM)</verification>
+      <failure-action>If quota is 0, request increase via GCP Console before proceeding.</failure-action>
+    </task>
+
+    <task id="T0.2" status="NOT_STARTED" priority="P0">
+      <title>Inventory current data sizes for copy estimation</title>
+      <commands>
+        gsutil du -s gs://minivess-mlops-dvc-data/
+        gsutil du -s gs://minivess-mlops-mlflow-artifacts/
+        gsutil du -s gs://minivess-mlops-checkpoints/
+      </commands>
+      <note>Estimate copy time. DVC data is ~3 GB. MLflow artifacts may be larger.</note>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: DATA BACKUP (before any Pulumi changes)                   -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Data Backup — Before Any Infrastructure Changes">
+    <description>
+      Copy ALL GCS data to new region-specific buckets. This MUST complete before
+      any Pulumi changes because Pulumi will delete the old buckets.
+    </description>
+
+    <task id="T1.1" status="NOT_STARTED" priority="P0">
+      <title>Create new GCS buckets in europe-west4 and copy data</title>
+      <description>
+        Create new buckets with -ew4 suffix, copy data. Keep old buckets untouched.
+        The -ew4 suffix is temporary — after migration, Pulumi will create the
+        canonical bucket names in europe-west4.
+
+        NOTE: We may be able to KEEP the same bucket names if we use a separate
+        Pulumi stack (blue-green). GCS buckets are globally unique but region is
+        set at creation. If we create the new stack BEFORE destroying the old,
+        we need different names. After old stack is destroyed, we could re-create
+        with the original names — but that risks a race condition.
+
+        DECISION: Use the same bucket names. Do NOT create new buckets manually.
+        Instead, use the blue-green Pulumi stack approach:
+        1. Old stack (dev) keeps europe-north1 buckets alive
+        2. New stack (dev-ew4) creates europe-west4 buckets with -ew4 suffix
+        3. Copy data from old to new
+        4. Update all configs to point to -ew4 buckets
+        5. Destroy old stack → original names become available
+        6. (Optional later) Rename -ew4 buckets back to original names
+
+        SIMPLER ALTERNATIVE: Since this is a greenfield project with 2 weeks of data,
+        and DVC data comes from a public S3 bucket, we can just:
+        1. Create new GAR repo in europe-west4 (manually or via new Pulumi stack)
+        2. Push Docker images
+        3. Let SkyPilot re-pull DVC data from S3 origin on first job
+        4. Destroy old europe-north1 Pulumi stack
+        5. Create fresh europe-west4 stack with original bucket names
+      </description>
+      <decision>
+        For a greenfield academic project with 2 weeks of data:
+        - DVC data: re-pull from S3 origin (automatic in SkyPilot setup)
+        - MLflow artifacts: all checkpoints were LOST due to 413 anyway (zero useful data)
+        - Cloud SQL: disabled (enable_cloud_run=false, no useful experiment data)
+        - GAR images: re-push from local Docker cache
+
+        VERDICT: Clean slate. No data migration needed. Destroy old, create new.
+      </decision>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: PULUMI INFRASTRUCTURE (the actual region change)           -->
+  <!-- ================================================================== -->
+  <phase id="2" name="Pulumi Infrastructure Migration">
+    <description>
+      Destroy old europe-north1 stack, create fresh europe-west4 stack.
+      Clean slate — no data migration needed (greenfield project).
+    </description>
+
+    <task id="T2.1" status="NOT_STARTED" priority="P0">
+      <title>Make region a Pulumi config variable (reproducible region changes)</title>
+      <description>
+        The Pulumi code ALREADY uses `region = config.get("region") or "europe-north1"` (line 30).
+        All resources use this variable. The only hardcoded references are:
+        - Comments/docstrings (cosmetic)
+        - Pulumi.yaml default value
+        - Pulumi.dev.yaml stack config
+
+        To change region, we ONLY need to update Pulumi.dev.yaml and Pulumi.yaml.
+        The code is already parameterized. This is the "easy to change region" design.
+      </description>
+      <files>
+        <file action="modify">deployment/pulumi/gcp/Pulumi.yaml</file>
+        <file action="modify">deployment/pulumi/gcp/Pulumi.dev.yaml</file>
+        <file action="modify">deployment/pulumi/gcp/__main__.py</file>
+      </files>
+      <changes>
+        Pulumi.yaml: Change default region to europe-west4, update description
+        Pulumi.dev.yaml: Change gcp:region to europe-west4
+        __main__.py: Update default fallback in line 30, update docstring/comments
+      </changes>
+    </task>
+
+    <task id="T2.2" status="NOT_STARTED" priority="P0">
+      <title>Downsize controller: n4-standard-4 → e2-medium, move to europe-west4</title>
+      <files>
+        <file action="modify">.sky.yaml</file>
+      </files>
+      <changes>
+        .sky.yaml:
+          infra: gcp/europe-west1 → gcp/europe-west4
+          cpus: 4+ → 2+
+          Add: memory: 4+
+          (This targets e2-medium: 2 vCPU, 4 GB, ~$0.034/hr vs $0.169/hr)
+      </changes>
+      <verification>
+        uv run sky jobs launch --dryrun ... to verify controller config resolves correctly
+      </verification>
+    </task>
+
+    <task id="T2.3" status="NOT_STARTED" priority="P0">
+      <title>Destroy old Pulumi stack (europe-north1 resources)</title>
+      <description>
+        This destroys ALL europe-north1 resources: GCS buckets, GAR repo, Cloud SQL.
+        Safe because: greenfield project, all checkpoints already lost to 413,
+        DVC data re-pullable from S3 origin, Cloud SQL was disabled.
+      </description>
+      <commands>
+        cd deployment/pulumi/gcp
+        pulumi destroy --yes
+        # Verify: no resources remain
+        pulumi stack export | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('deployment',{}).get('resources',[])),'resources remaining')"
+      </commands>
+      <prerequisite>T2.1 (config updated), user confirmation</prerequisite>
+      <warning>This deletes ALL GCS data. Confirm no useful data exists.</warning>
+    </task>
+
+    <task id="T2.4" status="NOT_STARTED" priority="P0">
+      <title>Deploy new Pulumi stack (europe-west4 resources)</title>
+      <commands>
+        cd deployment/pulumi/gcp
+        pulumi up --yes
+        # This creates: GCS buckets, GAR repo, Cloud SQL (if enabled), Cloud Run (if enabled)
+        # All in europe-west4
+      </commands>
+      <verification>
+        pulumi stack output docker_registry
+        # Must show: europe-west4-docker.pkg.dev/minivess-mlops/minivess
+        gsutil ls gs://minivess-mlops-dvc-data/
+        # Must succeed (empty bucket in europe-west4)
+      </verification>
+      <depends-on>T2.3</depends-on>
+    </task>
+
+    <task id="T2.5" status="NOT_STARTED" priority="P0">
+      <title>Push Docker images to new GAR in europe-west4</title>
+      <commands>
+        # Authenticate to new GAR
+        gcloud auth configure-docker europe-west4-docker.pkg.dev
+
+        # Tag and push base image
+        docker tag minivess-base:latest \
+          europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest
+        docker push europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest
+
+        # Tag and push MLflow image (if needed for Cloud Run later)
+        docker tag minivess-mlflow:latest \
+          europe-west4-docker.pkg.dev/minivess-mlops/minivess/mlflow:v3.10.0
+        docker push europe-west4-docker.pkg.dev/minivess-mlops/minivess/mlflow:v3.10.0
+      </commands>
+      <verification>
+        gcloud artifacts docker images list \
+          europe-west4-docker.pkg.dev/minivess-mlops/minivess \
+          --include-tags
+        # Must show base:latest and mlflow:v3.10.0
+      </verification>
+      <depends-on>T2.4</depends-on>
+      <note>~30-60 min for 6.4 GB upload on residential internet</note>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: CODE CHANGES (all files referencing europe-north1)         -->
+  <!-- ================================================================== -->
+  <phase id="3" name="Code Changes — Update All Region References">
+    <description>
+      Update all 30+ files referencing europe-north1. Single atomic commit.
+      Uses /self-learning-iterative-coder for the test file updates.
+    </description>
+
+    <task id="T3.1" status="NOT_STARTED" priority="P0">
+      <title>Create europe_strict.yaml region config (co-located, zero egress)</title>
+      <description>
+        New region config that pins ALL jobs to europe-west4 only.
+        Zero egress. Spot by default, on-demand fallback available.
+      </description>
+      <files>
+        <file action="create">configs/cloud/regions/europe_strict.yaml</file>
+      </files>
+      <content>
+        # Strict same-region config — ALL jobs in europe-west4 (co-located with GAR + GCS).
+        # Zero cross-region egress. Use for debug runs and cost-sensitive experiments.
+        # For broader availability, use europe.yaml (allows cross-EU) or europe_us.yaml.
+        description: "Single-region europe-west4 — zero egress, co-located with all GCP services"
+        regions:
+          gcp:
+            L4:
+              - region: europe-west4
+                zones: 3
+      </content>
+    </task>
+
+    <task id="T3.2" status="NOT_STARTED" priority="P0">
+      <title>Update SkyPilot YAMLs (5 files) — GAR image_id to europe-west4</title>
+      <files>
+        <file action="modify">deployment/skypilot/train_factorial.yaml</file>
+        <file action="modify">deployment/skypilot/train_production.yaml</file>
+        <file action="modify">deployment/skypilot/train_hpo.yaml</file>
+        <file action="modify">deployment/skypilot/hpo_grid_worker.yaml</file>
+        <file action="modify">deployment/skypilot/smoke_test_gcp.yaml</file>
+      </files>
+      <changes>
+        ALL: image_id: docker:europe-north1-docker.pkg.dev/... → docker:europe-west4-docker.pkg.dev/...
+        hpo_grid_worker.yaml ALSO: region: europe-north1 → europe-west4 (line 35)
+        ALL: update comments referencing europe-north1
+      </changes>
+    </task>
+
+    <task id="T3.3" status="NOT_STARTED" priority="P0">
+      <title>Update config files (3 files)</title>
+      <files>
+        <file action="modify">configs/registry/gar.yaml</file>
+        <file action="modify">configs/cloud/gcp_spot.yaml</file>
+        <file action="modify">configs/factorial/debug.yaml</file>
+      </files>
+      <changes>
+        gar.yaml: server + image_prefix → europe-west4-docker.pkg.dev
+        gcp_spot.yaml: region → europe-west4, docker_image → europe-west4-docker.pkg.dev/...
+        debug.yaml: region_config: europe_us → europe_strict (zero egress for debug)
+      </changes>
+    </task>
+
+    <task id="T3.4" status="NOT_STARTED" priority="P0">
+      <title>Update region comments in europe.yaml and europe_us.yaml</title>
+      <files>
+        <file action="modify">configs/cloud/regions/europe.yaml</file>
+        <file action="modify">configs/cloud/regions/europe_us.yaml</file>
+      </files>
+      <changes>
+        Update comments: "closest to GCS europe-north1" → "closest to GCS europe-west4"
+        Update descriptions referencing europe-north1
+      </changes>
+    </task>
+
+    <task id="T3.5" status="NOT_STARTED" priority="P0">
+      <title>Update scripts (2 files)</title>
+      <files>
+        <file action="modify">scripts/preflight_gcp.py</file>
+        <file action="modify">scripts/run_factorial.sh</file>
+      </files>
+      <changes>
+        preflight_gcp.py line 37: GAR_IMAGE → europe-west4-docker.pkg.dev/...
+        preflight_gcp.py: CPU quota check region → europe-west4
+        run_factorial.sh: comment with GAR path
+      </changes>
+    </task>
+
+    <task id="T3.6" status="NOT_STARTED" priority="P0">
+      <title>Update tests (4+ files) — TDD via /self-learning-iterative-coder</title>
+      <files>
+        <file action="modify">tests/v2/unit/deployment/test_skypilot_yamls.py</file>
+        <file action="modify">tests/v2/unit/deployment/test_docker_image_consistency.py</file>
+        <file action="modify">tests/v2/unit/deployment/test_preflight_mocked.py</file>
+        <file action="modify">tests/v2/unit/test_docker_pull_optimization.py</file>
+      </files>
+      <changes>
+        All: assert "europe-north1-docker.pkg.dev" → assert "europe-west4-docker.pkg.dev"
+        BETTER: Read region from configs/registry/gar.yaml (single source of truth)
+        instead of hardcoding ANY region in test assertions.
+      </changes>
+      <design-improvement>
+        Tests should NOT hardcode the region. Instead:
+        1. Read configs/registry/gar.yaml to get canonical GAR server
+        2. Assert SkyPilot YAMLs match the canonical config
+        3. This way, changing region = changing ONE file, tests auto-adapt
+      </design-improvement>
+    </task>
+
+    <task id="T3.7" status="NOT_STARTED" priority="P1">
+      <title>Update governance and knowledge graph files</title>
+      <files>
+        <file action="modify">.claude/rules/two-providers-only.md</file>
+        <file action="modify">CLAUDE.md</file>
+        <file action="modify">deployment/pulumi/gcp/CLAUDE.md</file>
+        <file action="modify">knowledge-graph/domains/cloud.yaml</file>
+        <file action="modify">knowledge-graph/domains/infrastructure.yaml</file>
+        <file action="modify">knowledge-graph/decisions/L2-architecture/docker_architecture.yaml</file>
+      </files>
+      <changes>All: europe-north1 → europe-west4 where referring to current infrastructure</changes>
+    </task>
+
+    <task id="T3.8" status="NOT_STARTED" priority="P0">
+      <title>Run make test-staging — verify all tests pass</title>
+      <commands>make test-staging</commands>
+      <verification>6678+ passed, 0 failures, 0 skips</verification>
+      <depends-on>T3.1 through T3.7</depends-on>
+    </task>
+
+    <task id="T3.9" status="NOT_STARTED" priority="P0">
+      <title>Create FinOps shift-left test suite</title>
+      <description>
+        New test file: tests/v2/unit/finops/test_cost_governance.py
+        Deterministic pytest checks that prevent cost regressions.
+        Key tests:
+        - GAR region matches primary GPU region (would have prevented €89 bill)
+        - Debug experiments use europe_strict region config
+        - Controller instance type is cost-bounded
+        - Experiment XML declares max duration and cost budget
+        - No intercontinental fallback in debug region config
+      </description>
+      <files>
+        <file action="create">tests/v2/unit/finops/__init__.py</file>
+        <file action="create">tests/v2/unit/finops/test_cost_governance.py</file>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: RUNTIME VERIFICATION                                       -->
+  <!-- ================================================================== -->
+  <phase id="4" name="Runtime Verification — Smoke Test in europe-west4">
+
+    <task id="T4.1" status="NOT_STARTED" priority="P0">
+      <title>Launch DynUNet smoke test in europe-west4</title>
+      <commands>
+        cd deployment/skypilot
+        uv run sky jobs launch train_factorial.yaml \
+          --env MODEL_FAMILY=dynunet \
+          --env LOSS_NAME=dice_ce \
+          --env WITH_AUX_CALIB=false \
+          --env FOLD_ID=0 \
+          --env MAX_EPOCHS=2 \
+          --env EXPERIMENT_NAME=test_europe_west4 \
+          -y
+      </commands>
+      <verification>
+        <criterion>Job runs in europe-west4 (check sky jobs queue region)</criterion>
+        <criterion>Docker pull is same-region (check logs for pull time &lt; 60s)</criterion>
+        <criterion>Job completes in &lt; 15 min</criterion>
+        <criterion>No GAR egress charges (check billing next day)</criterion>
+      </verification>
+    </task>
+
+    <task id="T4.2" status="NOT_STARTED" priority="P0">
+      <title>Verify controller launched in europe-west4 as e2-medium</title>
+      <commands>
+        uv run sky status
+        gcloud compute instances list --project=minivess-mlops \
+          --filter="zone:europe-west4-*" --format="table(name,machineType,zone,status)"
+      </commands>
+      <verification>
+        <criterion>Controller in europe-west4 (not europe-west1)</criterion>
+        <criterion>Machine type is e2-medium or smaller (not n4-standard-4)</criterion>
+      </verification>
+    </task>
+
+    <task id="T4.3" status="NOT_STARTED" priority="P1">
+      <title>Delete old stale GAR images from europe-north1 (if any remain)</title>
+      <commands>
+        # After old Pulumi stack is destroyed, the GAR repo should be gone.
+        # Verify:
+        gcloud artifacts repositories list --project=minivess-mlops
+        # Should only show europe-west4 repo, no europe-north1
+      </commands>
+    </task>
+  </phase>
+
+  <verification>
+    <gate name="staging">make test-staging — all tests pass with europe-west4 references</gate>
+    <gate name="runtime">Smoke test completes in europe-west4 with same-region pull</gate>
+    <gate name="no-egress">Next billing cycle shows €0 GAR egress (or near-zero)</gate>
+    <gate name="controller">Controller runs as e2-medium in europe-west4</gate>
+  </verification>
+
+  <design-principle name="Reproducible Region Changes">
+    After this migration, changing region again requires:
+    1. Edit Pulumi.dev.yaml: gcp:region → new_region
+    2. Edit configs/registry/gar.yaml: server + image_prefix → new_region
+    3. Run: pulumi up (creates new resources, potentially destroys old)
+    4. Push Docker images to new GAR
+    5. Tests auto-adapt (they read from gar.yaml, not hardcoded region)
+
+    Total effort for future region change: ~30 min (Pulumi + Docker push).
+    No SkyPilot YAML changes needed if they read from the registry config.
+  </design-principle>
+
+  <cost-projection>
+    Current monthly: €15.06 (€89 egress + €16 controller + rest)
+    After migration:
+      GAR egress: €0 (same-region, free)
+      GAR storage: ~€1 (with cleanup policy)
+      Controller: ~€4 (e2-medium, 4h/day with autostop)
+      GPU compute: ~€18 (same spot usage, just in europe-west4)
+      Cloud Storage: ~€1.50 (GCS buckets, productive)
+      Cloud SQL: €0 (disabled, gated on enable_cloud_run)
+      Cloud Run: €0 (disabled)
+      Total: ~€3.57/month (76% reduction)
+  </cost-projection>
+</plan>
