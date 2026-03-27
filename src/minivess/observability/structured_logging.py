@@ -20,6 +20,7 @@ import logging
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("minivess.structured")
@@ -117,11 +118,9 @@ class StructuredEventLogger:
     """
 
     def __init__(self, output_dir: Path | None) -> None:
-        from pathlib import Path as _Path
-
         self._output_dir = output_dir
-        self._events_path = _Path(output_dir) / "events.jsonl" if output_dir else None
-        self._heartbeat_path = _Path(output_dir) / "heartbeat.json" if output_dir else None
+        self._events_path = Path(output_dir) / "events.jsonl" if output_dir else None
+        self._heartbeat_path = Path(output_dir) / "heartbeat.json" if output_dir else None
 
     def log_event(self, event_type: str, payload: dict[str, Any]) -> None:
         """Append a structured event to events.jsonl."""

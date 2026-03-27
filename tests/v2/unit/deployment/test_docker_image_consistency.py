@@ -36,9 +36,12 @@ def _extract_gar_image() -> str:
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "GAR_IMAGE":
-                    if isinstance(node.value, ast.Constant):
-                        return str(node.value.value)
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id == "GAR_IMAGE"
+                    and isinstance(node.value, ast.Constant)
+                ):
+                    return str(node.value.value)
     msg = "GAR_IMAGE constant not found in preflight_gcp.py"
     raise ValueError(msg)
 

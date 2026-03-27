@@ -9,7 +9,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 TRAIN_FLOW_PATH = Path("src/minivess/orchestration/flows/train_flow.py")
 
 
@@ -30,12 +29,12 @@ class TestPostTrainingMethodCanonical:
                 and node.func.attr == "get"
                 and isinstance(node.func.value, ast.Attribute)
                 and node.func.value.attr == "environ"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
             ):
-                # First argument is the env var name
-                if node.args and isinstance(node.args[0], ast.Constant):
-                    var_name = node.args[0].value
-                    if var_name == "POST_TRAINING_METHOD":
-                        singular_refs.append(var_name)
+                var_name = node.args[0].value
+                if var_name == "POST_TRAINING_METHOD":
+                    singular_refs.append(var_name)
 
         assert len(singular_refs) == 0, (
             f"Found {len(singular_refs)} reference(s) to legacy "

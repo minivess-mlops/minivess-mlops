@@ -28,9 +28,12 @@ def _extract_constant(name: str) -> str:
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == name:
-                    if isinstance(node.value, ast.Constant):
-                        return str(node.value.value)
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id == name
+                    and isinstance(node.value, ast.Constant)
+                ):
+                    return str(node.value.value)
     msg = f"{name} constant not found in preflight_gcp.py"
     raise ValueError(msg)
 
