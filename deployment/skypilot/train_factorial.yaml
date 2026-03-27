@@ -51,14 +51,10 @@ resources:
     strategy: EAGER_NEXT_REGION
     recover_on_exit_codes: [33, 34]
 
-# Checkpoint persistence via GCS bucket mount (#878).
-# MOUNT_CACHED: async upload (non-blocking writes). Previous checkpoint survives
-# preemption even if last write is interrupted. Our check_resume_state_task()
-# detects the latest valid checkpoint on recovery.
-file_mounts:
-  /app/checkpoints:
-    source: gs://minivess-mlops-checkpoints
-    mode: MOUNT_CACHED
+# Checkpoint persistence: MLflow GCS artifact store (gs://minivess-mlops-mlflow-artifacts).
+# file_mounts to gs://minivess-mlops-checkpoints REMOVED — was a competing persistence
+# mechanism that violated the mlflow_only_artifact_contract KG invariant.
+# See: .claude/metalearning/2026-03-27-mlflow-413-10-passes-never-fixed-self-reflection.md
 
 envs:
   # Per-condition parameters — set by run_factorial.sh

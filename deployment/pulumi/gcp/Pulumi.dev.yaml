@@ -1,7 +1,7 @@
 config:
   gcp:project: minivess-mlops
   gcp:region: europe-west4
-  minivess-gcp:enable_cloud_run: "false"
+  minivess-gcp:enable_cloud_run: "true"
   minivess-gcp:mlflow_admin_password:
     secure: v1:Y+wn3W6VZbWPXHjA:qWnW2SN+h+G080YSwFaKWGL8xmOptCgWLE3RzguxIihaCT3IudPyZg==
   minivess-gcp:db_password:
